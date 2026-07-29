@@ -6,6 +6,7 @@ import { requireOrgRole } from '@/lib/auth'
 import { inngest } from '@/lib/inngest/client'
 import { normalizePhoneToE164 } from '@/lib/sms/telnyx'
 import { logAuditEvent } from '@/lib/audit'
+import { MAX_FEATURED_AMENITIES } from '@/lib/guidebook/featured-amenities'
 import type { GuidebookSlotType, GuidebookOfferType } from '@/types/database'
 
 import { reportError } from '@/lib/observability/report-error'
@@ -173,6 +174,8 @@ export interface UpsertPropertyGuidebookConfigInput {
   houseRules:           string | null
   isPublished:          boolean
   heroPhotoStoragePath: string | null
+  featuredAmenities:    string[]
+  featuredAmenityNotes: string | null
 }
 
 /**
@@ -194,6 +197,10 @@ export async function upsertPropertyGuidebookConfig(
 
     if (!property) return { error: 'Property not found.' }
 
+    if (input.featuredAmenities.length > MAX_FEATURED_AMENITIES) {
+      return { error: `Choose up to ${MAX_FEATURED_AMENITIES} featured amenities.` }
+    }
+
     const { error } = await supabase
       .from('guidebook_property_configs')
       .upsert(
@@ -208,6 +215,8 @@ export async function upsertPropertyGuidebookConfig(
           house_rules:            input.houseRules,
           is_published:           input.isPublished,
           hero_photo_storage_path: input.heroPhotoStoragePath,
+          featured_amenities:      input.featuredAmenities,
+          featured_amenity_notes:  input.featuredAmenityNotes,
           updated_at:             new Date().toISOString(),
         },
         { onConflict: 'org_id,property_id' }

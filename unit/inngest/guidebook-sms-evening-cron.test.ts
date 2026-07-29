@@ -94,7 +94,7 @@ const sponsorRow = (overrides: Record<string, unknown> = {}) => ({
 const clearWeather = { temperature: 78, temperatureApparent: 78, precipitationProbability: 5, weatherCode: 1000, weatherLabel: 'Clear', isRainy: false, isSnowy: false, isHot: false, isCold: false, fetchedAt: '2026-07-22T22:00:00.000Z' }
 const rainyWeather  = { ...clearWeather, precipitationProbability: 85, isRainy: true, weatherCode: 4001, weatherLabel: 'Rain' }
 
-const sendEvent = { data: { optin_id: 'optin_1', org_id: 'org_1', property_id: 'prop_1', today_date: '2026-07-22' } }
+const sendEvent = { data: { optin_id: 'optin_1', org_id: 'org_1', property_id: 'prop_1', today_date: '2026-07-22', checkin_date: '2026-07-20' } }
 
 describe('guidebookSmsEveningCron (dispatcher)', () => {
   beforeEach(() => {
@@ -120,7 +120,7 @@ describe('guidebookSmsEveningCron (dispatcher)', () => {
     expect(step.sendEvent).toHaveBeenCalledWith('fan-out-evening-sms', [
       {
         name: 'guidebook/sms_evening.requested',
-        data: { optin_id: 'optin_1', org_id: 'org_1', property_id: 'prop_1', today_date: '2026-07-22' },
+        data: { optin_id: 'optin_1', org_id: 'org_1', property_id: 'prop_1', today_date: '2026-07-22', checkin_date: '2026-07-20' },
       },
     ])
     expect(sendSMS).not.toHaveBeenCalled()
@@ -191,6 +191,66 @@ describe('guidebookSmsEveningSend (per-guest handler)', () => {
     })
     expect(sendSMS).toHaveBeenCalledWith('+15551234567', 'rendered sms body', { category: 'nudge', orgId: 'org_1' })
     expect(releaseDailySmsSlot).not.toHaveBeenCalled()
+  })
+
+  it('sends using only the featured amenity note when the property has no active sponsor', async () => {
+    const supabase = makeSupabase({
+      guidebook_guest_sms_optins: [{ data: optinDetailRow(), error: null }],
+      properties:                 [{ data: { ...propertyRow, amenities: { 'Fire Pit': true } }, error: null }],
+      guidebook_property_configs: [{
+        data: { featured_amenities: ['Fire Pit'], featured_amenity_notes: 'Starter logs on back porch.' },
+        error: null,
+      }],
+      guidebook_sponsors: [{ data: [], error: null }],
+    })
+    ;(createServiceClient as ReturnType<typeof vi.fn>).mockReturnValue(supabase)
+    ;(getWeatherForLocation as ReturnType<typeof vi.fn>).mockResolvedValue(clearWeather)
+
+    const result = await invokeHandler(guidebookSmsEveningSend, { event: sendEvent, step: makeStep() })
+
+    expect(result).toEqual({ optinId: 'optin_1', sent: true })
+    expect(renderSmsBody).toHaveBeenCalledWith('org_1', 'evening_nudge', {
+      property_name: 'Lake House',
+      offer_line:    'Starter logs on back porch.',
+    })
+  })
+
+  it('combines the featured amenity line and the sponsor line when both exist', async () => {
+    const supabase = makeSupabase({
+      guidebook_guest_sms_optins: [{ data: optinDetailRow(), error: null }],
+      properties:                 [{ data: { ...propertyRow, amenities: { 'Fire Pit': true } }, error: null }],
+      guidebook_property_configs: [{
+        data: { featured_amenities: ['Fire Pit'], featured_amenity_notes: 'Starter logs on back porch.' },
+        error: null,
+      }],
+      guidebook_sponsors: [{ data: [sponsorRow()], error: null }],
+    })
+    ;(createServiceClient as ReturnType<typeof vi.fn>).mockReturnValue(supabase)
+    ;(getWeatherForLocation as ReturnType<typeof vi.fn>).mockResolvedValue(clearWeather)
+
+    const result = await invokeHandler(guidebookSmsEveningSend, { event: sendEvent, step: makeStep() })
+
+    expect(result).toEqual({ optinId: 'optin_1', sent: true })
+    expect(renderSmsBody).toHaveBeenCalledWith('org_1', 'evening_nudge', {
+      property_name: 'Lake House',
+      offer_line:    "Starter logs on back porch. Try The Grill House — a local favorite.",
+    })
+  })
+
+  it('does not send when there is neither a sponsor nor a featured amenity', async () => {
+    const supabase = makeSupabase({
+      guidebook_guest_sms_optins: [{ data: optinDetailRow(), error: null }],
+      properties:                 [{ data: propertyRow, error: null }],
+      guidebook_sponsors:         [{ data: [], error: null }],
+    })
+    ;(createServiceClient as ReturnType<typeof vi.fn>).mockReturnValue(supabase)
+    ;(getWeatherForLocation as ReturnType<typeof vi.fn>).mockResolvedValue(clearWeather)
+
+    const result = await invokeHandler(guidebookSmsEveningSend, { event: sendEvent, step: makeStep() })
+
+    expect(result).toEqual({ optinId: 'optin_1', sent: false })
+    expect(sendSMS).not.toHaveBeenCalled()
+    expect(claimDailySmsSlot).not.toHaveBeenCalled()
   })
 
   it('never texts a guest who opted out (STOP) between dispatch and send', async () => {

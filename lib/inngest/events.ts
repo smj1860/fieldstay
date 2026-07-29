@@ -824,18 +824,20 @@ export type FieldStayEvents = {
   // and re-checks is_active so a STOP between dispatch and send is honored.
   'guidebook/sms_morning.requested': {
     data: {
-      optin_id:    string
-      org_id:      string
-      property_id: string
-      today_date:  string   // YYYY-MM-DD in the send timezone — the daily-slot claim key
+      optin_id:     string
+      org_id:       string
+      property_id:  string
+      today_date:   string   // YYYY-MM-DD in the send timezone — the daily-slot claim key
+      checkin_date: string   // YYYY-MM-DD — rotates which featured amenity gets mentioned
     }
   }
   'guidebook/sms_evening.requested': {
     data: {
-      optin_id:    string
-      org_id:      string
-      property_id: string
-      today_date:  string
+      optin_id:     string
+      org_id:       string
+      property_id:  string
+      today_date:   string
+      checkin_date: string
     }
   }
 

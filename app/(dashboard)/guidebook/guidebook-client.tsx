@@ -8,9 +8,17 @@ import { Sun, Wine, CloudRain, Tent, MapPin, Pencil, Check, type LucideIcon } fr
 import { SponsorFormModal } from './sponsor-form-modal'
 import { CelebrationModal } from './celebration-modal'
 import { upsertPropertyGuidebookConfig, updateStayExtensionSettings } from '@/app/actions/guidebook'
+import { MAX_FEATURED_AMENITIES, prettifyAmenityKey } from '@/lib/guidebook/featured-amenities'
 import type { GuidebookSponsor, GuidebookConfiguration, GuidebookSlotType, GuidebookSponsorStatus } from '@/types/database'
 
-type Property = { id: string; name: string; address: string | null; lat: number | null; lng: number | null }
+type Property = {
+  id:         string
+  name:       string
+  address:    string | null
+  lat:        number | null
+  lng:        number | null
+  amenities:  Record<string, boolean> | null
+}
 
 const SLOT_TYPE_CONFIG: Record<GuidebookSlotType, { icon: LucideIcon; label: string }> = {
   morning_brew:      { icon: Sun,       label: 'Morning Brew' },
@@ -514,6 +522,8 @@ function PropertyGuidebookForm({
     houseRules: string
     isPublished: boolean
     heroPhotoStoragePath: string | null
+    featuredAmenities: string[]
+    featuredAmenityNotes: string
   } | null>(null)
   const [heroPhotoUploading, setHeroPhotoUploading] = useState(false)
   const [heroPhotoError, setHeroPhotoError]         = useState<string | null>(null)
@@ -560,6 +570,8 @@ function PropertyGuidebookForm({
           houseRules:           data.house_rules ?? '',
           isPublished:          data.is_published,
           heroPhotoStoragePath: data.hero_photo_storage_path ?? null,
+          featuredAmenities:    data.featured_amenities ?? [],
+          featuredAmenityNotes: data.featured_amenity_notes ?? '',
         })
       } else {
         const slug = property.name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '')
@@ -569,6 +581,7 @@ function PropertyGuidebookForm({
           wifiNetwork: '', wifiPassword: '', houseRules: '',
           isPublished: false,
           heroPhotoStoragePath: null,
+          featuredAmenities: [], featuredAmenityNotes: '',
         })
       }
     }
@@ -604,6 +617,10 @@ function PropertyGuidebookForm({
   const heroPhotoUrl = config.heroPhotoStoragePath
     ? supabase.storage.from(HERO_PHOTO_BUCKET).getPublicUrl(config.heroPhotoStoragePath).data.publicUrl
     : null
+
+  const syncedAmenityKeys = Object.entries(property.amenities ?? {})
+    .filter(([, present]) => present)
+    .map(([key]) => key)
 
   async function handleHeroPhotoUpload(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0]
@@ -653,6 +670,8 @@ function PropertyGuidebookForm({
       houseRules:           config.houseRules || null,
       isPublished:          config.isPublished,
       heroPhotoStoragePath: config.heroPhotoStoragePath,
+      featuredAmenities:    config.featuredAmenities,
+      featuredAmenityNotes: config.featuredAmenityNotes || null,
     })
     setSaving(false)
     if (result.error) {
@@ -780,6 +799,64 @@ function PropertyGuidebookForm({
             onChange={(e) => setConfig((c) => c && ({ ...c, houseRules: e.target.value }))}
             placeholder="No smoking indoors. Pets welcome on the deck."
           />
+        </div>
+
+        <div style={{ gridColumn: '1 / -1' }}>
+          {/* fieldset/legend, not label — this heading describes a group of
+              amenity checkboxes rather than a single control. */}
+          <fieldset style={{ border: 'none', margin: 0, padding: 0 }}>
+            <legend style={{ ...labelStyle, padding: 0 }}>Guidebook Featured Amenities (up to {MAX_FEATURED_AMENITIES})</legend>
+            {syncedAmenityKeys.length === 0 ? (
+              <p style={{ fontSize: '13px', color: 'var(--text-muted)', margin: '0 0 10px' }}>
+                No amenities synced for this property yet — nothing to feature until your PMS syncs some.
+              </p>
+            ) : (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '6px', marginBottom: '10px' }}>
+                {syncedAmenityKeys.map((key) => {
+                  const checked = config.featuredAmenities.includes(key)
+                  const atMax   = !checked && config.featuredAmenities.length >= MAX_FEATURED_AMENITIES
+                  return (
+                    <label
+                      key={key}
+                      style={{ display: 'flex', alignItems: 'center', gap: '8px', cursor: atMax ? 'not-allowed' : 'pointer', opacity: atMax ? 0.5 : 1 }}
+                      htmlFor={`guidebook-amenity-${property.id}-${key}`}
+                    >
+                      <input
+                        id={`guidebook-amenity-${property.id}-${key}`}
+                        type="checkbox"
+                        checked={checked}
+                        disabled={atMax}
+                        onChange={() => setConfig((c) => {
+                          if (!c) return c
+                          const next = checked
+                            ? c.featuredAmenities.filter((k) => k !== key)
+                            : [...c.featuredAmenities, key].slice(0, MAX_FEATURED_AMENITIES)
+                          return { ...c, featuredAmenities: next }
+                        })}
+                        style={{ width: 14, height: 14 }}
+                      />
+                      <span style={{ fontSize: '14px', color: 'var(--text-primary)' }}>{prettifyAmenityKey(key)}</span>
+                    </label>
+                  )
+                })}
+              </div>
+            )}
+            <label style={labelStyle} htmlFor={`guidebook-amenity-notes-${property.id}`}>
+              Amenity notes for guests (optional)
+            </label>
+            <textarea
+              id={`guidebook-amenity-notes-${property.id}`}
+              style={{ ...inputStyle, minHeight: '60px', resize: 'vertical', fontFamily: 'inherit' }}
+              value={config.featuredAmenityNotes}
+              onChange={(e) => setConfig((c) => c && ({ ...c, featuredAmenityNotes: e.target.value }))}
+              placeholder="Takes 45 min to heat., Starter logs on back porch., Life jackets in the shed."
+            />
+            <p style={{ fontSize: '11px', color: 'var(--text-muted)', margin: '4px 0 0' }}>
+              One note per checked amenity, in the same order, separated by commas — avoid commas inside
+              a single note or it&apos;ll shift the rest. Leave blank and we&apos;ll mention the amenity generically instead.
+              If you don&apos;t check any amenities, we&apos;ll feature the first {MAX_FEATURED_AMENITIES} your PMS synced.
+            </p>
+          </fieldset>
         </div>
 
         <div style={{ gridColumn: '1 / -1', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
