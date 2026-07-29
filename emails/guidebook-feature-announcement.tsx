@@ -113,12 +113,12 @@ export function GuidebookFeatureAnnouncementEmail({
             </Section>
 
             <Text style={styles.body1}>
-              These aren&apos;t canned messages — they&apos;re your own words. Set them
-              once in Guidebook settings and every guest who opts in hears about
-              the amenities you chose to feature, in your voice, for as long as
-              they&apos;re staying. Don&apos;t set anything and FieldStay features
-              whichever amenities synced in from your PMS first, so there&apos;s
-              still something to say on day one.
+              Write your own note for each featured amenity in Guidebook settings
+              and guests hear it in your words — the timing tip, the exact spot
+              the logs are stashed, whatever you&apos;d actually tell someone in
+              person. Don&apos;t write anything and FieldStay still sends a message
+              on your behalf, featuring whichever amenities synced in from your
+              PMS first, so there&apos;s never nothing to say.
             </Text>
 
             <Text style={styles.body1}>
