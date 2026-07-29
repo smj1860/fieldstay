@@ -219,14 +219,14 @@ describe('actions/guidebook', () => {
         propertyId: 'prop_1', slug: 'lakeview-cabin', checkInInstructions: null,
         checkOutInstructions: null, wifiNetwork: null, wifiPassword: null,
         houseRules: null, isPublished: true, heroPhotoStoragePath: null,
-        featuredAmenities: ['Hot Tub', 'Fire Pit'], featuredAmenityNotes: 'Takes 45 min to heat., Logs on the porch.',
+        featuredAmenities: ['Hot Tub', 'Fire Pit'], featuredAmenityNotes: 'Takes 45 min to heat.; Logs on the porch.',
       })
 
       expect(result).toEqual({})
       const upsertCall = supabase.calls.find((c) => c.table === 'guidebook_property_configs' && c.method === 'upsert')
       expect(upsertCall?.args[0]).toMatchObject({
         featured_amenities:     ['Hot Tub', 'Fire Pit'],
-        featured_amenity_notes: 'Takes 45 min to heat., Logs on the porch.',
+        featured_amenity_notes: 'Takes 45 min to heat.; Logs on the porch.',
       })
     })
 

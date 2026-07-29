@@ -78,7 +78,16 @@ describe('buildFeaturedAmenityLine', () => {
   it('uses the PM\'s own note at the matching rotation position', () => {
     const line = buildFeaturedAmenityLine(
       ['Hot Tub', 'Fire Pit', 'Kayaks'],
-      'Takes 45 min to heat., Starter logs on back porch., Life jackets in the shed.',
+      'Takes 45 min to heat.; Starter logs on back porch.; Life jackets in the shed.',
+      1,
+    )
+    expect(line).toBe('Starter logs on back porch.')
+  })
+
+  it('tolerates a comma inside a single note without shifting the others out of position', () => {
+    const line = buildFeaturedAmenityLine(
+      ['Hot Tub', 'Fire Pit'],
+      'Takes 45 min to heat, so start it early.; Starter logs on back porch.',
       1,
     )
     expect(line).toBe('Starter logs on back porch.')

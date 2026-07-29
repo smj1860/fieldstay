@@ -849,11 +849,11 @@ function PropertyGuidebookForm({
               style={{ ...inputStyle, minHeight: '60px', resize: 'vertical', fontFamily: 'inherit' }}
               value={config.featuredAmenityNotes}
               onChange={(e) => setConfig((c) => c && ({ ...c, featuredAmenityNotes: e.target.value }))}
-              placeholder="Takes 45 min to heat., Starter logs on back porch., Life jackets in the shed."
+              placeholder="Takes 45 min to heat.; Starter logs on back porch.; Life jackets in the shed."
             />
             <p style={{ fontSize: '11px', color: 'var(--text-muted)', margin: '4px 0 0' }}>
-              One note per checked amenity, in the same order, separated by commas — avoid commas inside
-              a single note or it&apos;ll shift the rest. Leave blank and we&apos;ll mention the amenity generically instead.
+              One note per checked amenity, in the same order, separated by semicolons (commas are fine
+              within a note itself). Leave blank and we&apos;ll mention the amenity generically instead.
               If you don&apos;t check any amenities, we&apos;ll feature the first {MAX_FEATURED_AMENITIES} your PMS synced.
             </p>
           </fieldset>

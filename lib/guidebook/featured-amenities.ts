@@ -4,7 +4,7 @@
  * crons already handle. A PM picks up to MAX_FEATURED_AMENITIES amenities on
  * a property (or leaves it blank, in which case the first ones the PMS
  * actually synced are used) and can write a short guest-facing line for each,
- * comma-separated, positionally matched to the selected amenities.
+ * semicolon-separated, positionally matched to the selected amenities.
  */
 
 export const MAX_FEATURED_AMENITIES = 3
@@ -52,10 +52,10 @@ export function daysSinceCheckin(checkinDate: string, todayDate: string): number
 
 /**
  * Picks one featured amenity by rotation and returns the guest-facing line
- * for it — the PM's own comma-separated note at that position if they wrote
- * one, otherwise a generic mention. Returns null when there's nothing to
- * feature at all (no PM selection and nothing synced), so callers can treat
- * this exactly like "no content" from the sponsor side.
+ * for it — the PM's own semicolon-separated note at that position if they
+ * wrote one, otherwise a generic mention. Returns null when there's nothing
+ * to feature at all (no PM selection and nothing synced), so callers can
+ * treat this exactly like "no content" from the sponsor side.
  */
 export function buildFeaturedAmenityLine(
   amenityKeys:   string[],
@@ -64,12 +64,13 @@ export function buildFeaturedAmenityLine(
 ): string | null {
   if (amenityKeys.length === 0) return null
 
-  // Positional split on commas, matching the PM-facing UI's "separate your
-  // three notes with commas" instruction. A note that itself contains a
-  // comma will shift every note after it — the UI's helper text calls this
-  // out, and periods/semicolons are the recommended way to punctuate within
-  // a single note instead.
-  const notes = (notesRaw ?? '').split(',').map((n) => n.trim()).filter(Boolean)
+  // Positional split on semicolons, matching the PM-facing UI's "separate
+  // your three notes with semicolons" instruction. Semicolons were chosen
+  // over commas specifically because a short guest-facing note is far more
+  // likely to contain a comma ("takes 45 min to heat, so start it early")
+  // than a semicolon — a note with an internal comma would otherwise shift
+  // every note after it out of position.
+  const notes = (notesRaw ?? '').split(';').map((n) => n.trim()).filter(Boolean)
   const idx   = ((rotationIndex % amenityKeys.length) + amenityKeys.length) % amenityKeys.length
   const note  = notes[idx]
 

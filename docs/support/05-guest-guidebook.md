@@ -41,11 +41,13 @@ enough to trigger a send:
 
 - **Featured amenities** — go to Guidebook → [Property Name] and pick up to 3
   amenities to feature (checkboxes pulled from what your PMS synced for that
-  property), then write a short guest-facing note for each, comma-separated in
-  the order you checked them — e.g. "Takes 45 min to heat., Starter logs on the
-  back porch." Messages rotate through your featured amenities across a guest's
-  stay so they don't see the same one every day. If you don't pick any, FieldStay
-  features the first 3 amenities your PMS synced automatically.
+  property), then write a short guest-facing note for each, semicolon-separated
+  in the order you checked them — e.g. "Takes 45 min to heat.; Starter logs on
+  the back porch." Semicolons (not commas) separate the notes, since a note
+  itself can reasonably contain a comma. Messages rotate through your featured
+  amenities across a guest's stay so they don't see the same one every day. If
+  you don't pick any, FieldStay features the first 3 amenities your PMS synced
+  automatically.
 - **Sponsor recommendations** — driven by live weather (a rainy-day sponsor when
   it's raining, a morning coffee or dinner sponsor otherwise) and proximity, as
   described in **Setting Up Sponsors for Your Guidebook**.
