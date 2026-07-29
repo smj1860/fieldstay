@@ -1,11 +1,29 @@
-import { describe, it, expect } from 'vitest'
+import { describe, it, expect, vi } from 'vitest'
 import {
   MAX_FEATURED_AMENITIES,
   prettifyAmenityKey,
   resolveFeaturedAmenities,
   daysSinceCheckin,
   buildFeaturedAmenityLine,
+  getFeaturedAmenityLine,
 } from '@/lib/guidebook/featured-amenities'
+
+// Minimal single-call Supabase mock — getFeaturedAmenityLine makes exactly
+// one .from(...).select(...).eq(...).eq(...).maybeSingle() call.
+function makeSupabase(result: { data?: unknown; error?: unknown }) {
+  const calls: { method: string; args: unknown[] }[] = []
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const chain: any = {}
+  for (const m of ['select', 'eq']) {
+    chain[m] = vi.fn((...args: unknown[]) => {
+      calls.push({ method: m, args })
+      return chain
+    })
+  }
+  chain.maybeSingle = vi.fn(() => Promise.resolve(result))
+  const from = vi.fn(() => chain)
+  return { from, calls }
+}
 
 describe('prettifyAmenityKey', () => {
   it('title-cases a raw Hospitable-style slug', () => {
@@ -118,5 +136,68 @@ describe('buildFeaturedAmenityLine', () => {
     expect(buildFeaturedAmenityLine(keys, null, 1)).toBe('This property has a Fire Pit.')
     expect(buildFeaturedAmenityLine(keys, null, 2)).toBe('This property has a Kayaks.')
     expect(buildFeaturedAmenityLine(keys, null, 3)).toBe('This property has a Hot Tub.')
+  })
+})
+
+describe('getFeaturedAmenityLine', () => {
+  it('scopes the config lookup to both org_id and property_id', async () => {
+    const supabase = makeSupabase({ data: { featured_amenities: ['Hot Tub'], featured_amenity_notes: 'Takes 45 min to heat.' } })
+
+    const line = await getFeaturedAmenityLine(supabase as never, {
+      orgId: 'org_1', propertyId: 'prop_1', propertyAmenities: null,
+      checkinDate: '2026-07-20', todayDate: '2026-07-20',
+    })
+
+    expect(line).toBe('Takes 45 min to heat.')
+    expect(supabase.calls).toEqual(expect.arrayContaining([
+      { method: 'eq', args: ['org_id', 'org_1'] },
+      { method: 'eq', args: ['property_id', 'prop_1'] },
+    ]))
+  })
+
+  it('falls back to synced property amenities when the config row has none configured', async () => {
+    const supabase = makeSupabase({ data: { featured_amenities: null, featured_amenity_notes: null } })
+
+    const line = await getFeaturedAmenityLine(supabase as never, {
+      orgId: 'org_1', propertyId: 'prop_1', propertyAmenities: { 'Fire Pit': true },
+      checkinDate: '2026-07-20', todayDate: '2026-07-20',
+    })
+
+    expect(line).toBe('This property has a Fire Pit.')
+  })
+
+  it('falls back to synced property amenities when there is no config row at all', async () => {
+    const supabase = makeSupabase({ data: null, error: null })
+
+    const line = await getFeaturedAmenityLine(supabase as never, {
+      orgId: 'org_1', propertyId: 'prop_1', propertyAmenities: { Kayaks: true },
+      checkinDate: '2026-07-20', todayDate: '2026-07-20',
+    })
+
+    expect(line).toBe('This property has a Kayaks.')
+  })
+
+  it('applies rotationOffset on top of days-since-checkin', async () => {
+    const supabase = makeSupabase({ data: { featured_amenities: null, featured_amenity_notes: null } })
+
+    const line = await getFeaturedAmenityLine(supabase as never, {
+      orgId: 'org_1', propertyId: 'prop_1',
+      propertyAmenities: { 'Hot Tub': true, 'Fire Pit': true },
+      checkinDate: '2026-07-20', todayDate: '2026-07-20', // 0 days elapsed
+      rotationOffset: 1,
+    })
+
+    expect(line).toBe('This property has a Fire Pit.')
+  })
+
+  it('returns null when nothing is configured or synced', async () => {
+    const supabase = makeSupabase({ data: { featured_amenities: null, featured_amenity_notes: null } })
+
+    const line = await getFeaturedAmenityLine(supabase as never, {
+      orgId: 'org_1', propertyId: 'prop_1', propertyAmenities: null,
+      checkinDate: '2026-07-20', todayDate: '2026-07-20',
+    })
+
+    expect(line).toBeNull()
   })
 })

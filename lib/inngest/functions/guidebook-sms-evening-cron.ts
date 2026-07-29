@@ -6,7 +6,7 @@ import { renderSmsBody } from '@/lib/sms/templates'
 import { claimDailySmsSlot, releaseDailySmsSlot } from '@/lib/sms/optin-claim'
 import { pickNearestSponsor } from '@/lib/sms/pick-nearest-sponsor'
 import { unwrapJoin } from '@/lib/utils/supabase-joins'
-import { resolveFeaturedAmenities, buildFeaturedAmenityLine, daysSinceCheckin } from '@/lib/guidebook/featured-amenities'
+import { getFeaturedAmenityLine } from '@/lib/guidebook/featured-amenities'
 import type { GuidebookSponsor } from '@/types/database'
 
 const FALLBACK_TIMEZONE = 'America/New_York'
@@ -114,22 +114,12 @@ export const guidebookSmsEveningSend = inngest.createFunction(
       // guidebook-sms-morning-cron.ts for the full rationale. Offset the
       // rotation by 1 from the morning message so a guest getting both
       // doesn't see the same amenity twice in one day.
-      const { data: guidebookConfig } = await supabase
-        .from('guidebook_property_configs')
-        .select('featured_amenities, featured_amenity_notes')
-        .eq('org_id', orgId)
-        .eq('property_id', propertyId)
-        .maybeSingle()
-
-      const featuredAmenities = resolveFeaturedAmenities(
-        guidebookConfig?.featured_amenities ?? null,
-        property.amenities ?? null
-      )
-      const amenityLine = buildFeaturedAmenityLine(
-        featuredAmenities,
-        guidebookConfig?.featured_amenity_notes ?? null,
-        daysSinceCheckin(checkinDate, todayDate) + 1
-      )
+      const amenityLine = await getFeaturedAmenityLine(supabase, {
+        orgId, propertyId,
+        propertyAmenities: property.amenities ?? null,
+        checkinDate, todayDate,
+        rotationOffset: 1,
+      })
 
       const { data: sponsorsData } = await supabase
         .from('guidebook_sponsors')

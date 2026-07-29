@@ -7,6 +7,8 @@
  * semicolon-separated, positionally matched to the selected amenities.
  */
 
+import type { DBClient } from '@/lib/supabase/server'
+
 export const MAX_FEATURED_AMENITIES = 3
 
 /**
@@ -84,4 +86,44 @@ export function buildFeaturedAmenityLine(
   const note  = notes[idx]
 
   return note || `This property has a ${prettifyAmenityKey(amenityKeys[idx]!)}.`
+}
+
+/**
+ * Composed lookup used identically by both guidebook-sms-morning-cron.ts and
+ * guidebook-sms-evening-cron.ts — fetches the property's guidebook config,
+ * resolves which amenities to feature, and picks the rotation-appropriate
+ * line. Pulled out here (rather than duplicated in each cron) after
+ * SonarCloud flagged the two nearly-identical inline blocks as duplicated
+ * new code. `rotationOffset` lets the evening cron shift by 1 relative to
+ * the morning cron so a guest getting both messages in the same day doesn't
+ * see the same amenity mentioned twice.
+ */
+export async function getFeaturedAmenityLine(
+  supabase: DBClient,
+  params: {
+    orgId:             string
+    propertyId:        string
+    propertyAmenities: Record<string, boolean> | null
+    checkinDate:       string
+    todayDate:         string
+    rotationOffset?:   number
+  },
+): Promise<string | null> {
+  const { data: guidebookConfig } = await supabase
+    .from('guidebook_property_configs')
+    .select('featured_amenities, featured_amenity_notes')
+    .eq('org_id', params.orgId)
+    .eq('property_id', params.propertyId)
+    .maybeSingle()
+
+  const featuredAmenities = resolveFeaturedAmenities(
+    guidebookConfig?.featured_amenities ?? null,
+    params.propertyAmenities
+  )
+
+  return buildFeaturedAmenityLine(
+    featuredAmenities,
+    guidebookConfig?.featured_amenity_notes ?? null,
+    daysSinceCheckin(params.checkinDate, params.todayDate) + (params.rotationOffset ?? 0)
+  )
 }
