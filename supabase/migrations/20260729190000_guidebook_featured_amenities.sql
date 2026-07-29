@@ -1,6 +1,6 @@
 -- Featured amenities for guest SMS messaging — a PM can pick up to 3
 -- amenities per property (falling back to the first synced ones if they
--- don't) plus a short guest-facing note for each, comma-separated. Wired
+-- don't) plus a short guest-facing note for each, semicolon-separated. Wired
 -- into the morning/evening SMS nudge crons as a message source independent
 -- of the sponsor-recommendation system.
 
