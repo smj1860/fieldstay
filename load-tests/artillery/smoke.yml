@@ -1,0 +1,30 @@
+# Smoke test — a handful of arrivals/sec against the unauthenticated health
+# check (app/api/health/route.ts). Confirms the app and its DB connection
+# are up before running anything heavier. Not rate-limited (health isn't a
+# TOKEN_ROUTE in proxy.ts), so this is safe to point at any environment.
+#
+# LOAD_BASE_URL must be exported in the shell (defaults to localhost:3000
+# via load-tests/README.md's run instructions) — Artillery's config.target
+# doesn't support a literal default value inline the way k6's __ENV does.
+#
+# Run: LOAD_BASE_URL=http://localhost:3000 npx artillery run load-tests/artillery/smoke.yml
+config:
+  target: "{{ $processEnvironment.LOAD_BASE_URL }}"
+  http:
+    timeout: 10
+  phases:
+    - duration: 30
+      arrivalRate: 3
+      name: "Smoke"
+  plugins:
+    expect: {}
+
+scenarios:
+  - name: "Health check"
+    flow:
+      - get:
+          url: "/api/health"
+          expect:
+            - statusCode: 200
+            - hasProperty: "status"
+            - jmespath: "status == 'ok'"

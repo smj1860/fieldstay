@@ -44,3 +44,7 @@ e2e/.env.e2e
 playwright-report/
 test-results/
 blob-report/
+
+# Load testing (k6 + Artillery)
+load-tests/.env.load
+load-tests/results/
