@@ -9,7 +9,7 @@
 The owner portal is a separate, tokenized link that shows only data for the owner's specific property or properties. Owners do not have FieldStay accounts — they access the portal through a secure link you share with them.
 
 The portal shows:
-- **Revenue** — booking income posted automatically from OwnerRez
+- **Revenue** — booking income posted automatically from your connected PMS (OwnerRez or Hospitable)
 - **Expenses** — cleaning fees, maintenance costs, inventory purchases
 - **Net income** — revenue minus expenses for any date range they select
 - **Individual line items** — each transaction with a description and date
@@ -47,7 +47,7 @@ Most expenses post to the owner ledger automatically:
 - **Work order costs** — posted the moment a vendor signs off on a work order, using the actual cost they submitted — there's no separate PM approval step in between
 - **Same-day premium** — added to the cleaning fee automatically when checkout and check-in are on the same day
 
-Revenue from OwnerRez bookings posts automatically when a booking is confirmed.
+Revenue from bookings posts automatically when a booking is confirmed in your connected PMS.
 
 ---
 

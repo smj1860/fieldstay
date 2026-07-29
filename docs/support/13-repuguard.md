@@ -6,9 +6,9 @@
 
 ## How It Works
 
-When a guest leaves a review in OwnerRez, FieldStay syncs it automatically and queues a response draft. RepuGuard uses Claude AI to generate a response tailored to the review content, your property, and the guest's name.
+When a guest leaves a review in your connected PMS — OwnerRez or Hospitable — FieldStay syncs it automatically and queues a response draft. RepuGuard uses Claude AI to generate a response tailored to the review content, your property, and the guest's name.
 
-You review the draft, edit it if needed, and post it back to OwnerRez in one click.
+You review the draft and edit it if needed. Posting the response is not an automatic API round-trip today — see **Editing and Approving a Draft** below for exactly what that step looks like.
 
 ---
 
@@ -33,7 +33,12 @@ The draft appears in an editable text field. Read it carefully and:
 - Check the **word count** indicator — aim to stay under 150 words
 - Look for any **flag icons** — these appear when the AI detected content that may need review (legal language, billing disputes, safety concerns)
 
-When you're happy with the response, click **Mark as Ready** to save it, then **Post to OwnerRez** to submit it directly from FieldStay.
+When you're happy with the response, click **Mark as Ready** to save it. What comes next depends on where the review came from:
+
+- **OwnerRez reviews** — click **Post to OwnerRez**. This opens the review directly on OwnerRez's site in a new tab so you can paste in your response there (FieldStay does not post it via API on your behalf). Once you've posted it, come back and confirm **Yes, mark as posted** so FieldStay's status reflects reality.
+- **Hospitable and manually-added reviews** — there's no direct link back to the original platform yet, so click **Mark as Posted**, post your response wherever the review actually lives (Hospitable, Google, Booking.com, etc.), and confirm once you've done so.
+
+Either way, the response text itself only ever lives in FieldStay until you paste or type it into the review platform — nothing is sent automatically.
 
 ---
 
