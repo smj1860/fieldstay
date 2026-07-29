@@ -32,6 +32,15 @@ LEVELS="${STEP_LEVELS:-2 5 10 20 40 80 150 250}"
 DURATION="${STEP_DURATION:-15}"
 SLEEP_BETWEEN="${STEP_SLEEP:-2}"
 
+# DURATION is interpolated unquoted into --overrides JSON below (as a bare
+# number, e.g. "duration":15) — a k6-style unit suffix like "20s" (valid for
+# step-load.sh's k6 --duration flag) would produce invalid JSON here instead
+# of a clear error. Numeric seconds only.
+if ! [[ "$DURATION" =~ ^[0-9]+$ ]]; then
+  echo "STEP_DURATION must be a plain number of seconds (got \"$DURATION\") — this script's phases are seconds, not a k6-style duration string like \"20s\"" >&2
+  exit 1
+fi
+
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 OUT_DIR="$SCRIPT_DIR/results/step-load-artillery-$(date +%Y%m%d-%H%M%S)"
 mkdir -p "$OUT_DIR"
@@ -45,6 +54,12 @@ echo
 
 echo "rate,requests,mean_ms,p95_ms,p99_ms,max_ms,pct_200,vusers_failed_rate" > "$CSV"
 
+# Continue through every level even if one fails (a single bad level
+# shouldn't abort the whole breakpoint scan), but still exit non-zero at the
+# end if any level failed — otherwise a missing dependency, bad config, or
+# genuinely failed run silently reports success.
+RUN_FAILED=0
+
 for RATE in $LEVELS; do
   echo "=== ${RATE} arrivals/sec ===" >&2
   JSON="$OUT_DIR/level_${RATE}.json"
@@ -55,6 +70,7 @@ for RATE in $LEVELS; do
       --output "$JSON" \
       "$SCRIPT_DIR/artillery/step-load.yml" > "$LOG" 2>&1; then
     echo "  artillery exited non-zero at ${RATE} arrivals/sec — see $LOG" >&2
+    RUN_FAILED=1
   fi
 
   if [[ -f "$JSON" ]]; then
@@ -89,3 +105,5 @@ done
 echo
 echo "=== Results ($CSV) ==="
 column -s, -t "$CSV" 2>/dev/null || cat "$CSV"
+
+exit "$RUN_FAILED"

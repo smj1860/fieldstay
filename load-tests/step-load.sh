@@ -45,6 +45,12 @@ echo
 
 echo "vus,requests,avg_ms,p95_ms,p99_ms,max_ms,error_rate,check_pass_rate" > "$CSV"
 
+# Continue through every level even if one fails (a single bad level
+# shouldn't abort the whole breakpoint scan), but still exit non-zero at the
+# end if any level failed — otherwise a missing dependency, bad config, or
+# genuinely failed run silently reports success.
+RUN_FAILED=0
+
 for VUS in $LEVELS; do
   echo "=== ${VUS} VUs ===" >&2
   JSON="$OUT_DIR/level_${VUS}.json"
@@ -56,6 +62,7 @@ for VUS in $LEVELS; do
       --summary-export="$JSON" \
       "$SCRIPT_DIR/k6/step-load.js" > "$LOG" 2>&1; then
     echo "  k6 exited non-zero at ${VUS} VUs — see $LOG" >&2
+    RUN_FAILED=1
   fi
 
   if [[ -f "$JSON" ]]; then
@@ -80,3 +87,5 @@ done
 echo
 echo "=== Results ($CSV) ==="
 column -s, -t "$CSV" 2>/dev/null || cat "$CSV"
+
+exit "$RUN_FAILED"
