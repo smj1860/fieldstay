@@ -265,7 +265,7 @@ export async function updateStayExtensionSettings(
       return { error: 'Message timing must be at least 1 day before checkout.' }
     }
     if (input.contactMethod === 'ownerrez_url' && !input.ownerRezUrl?.trim()) {
-      return { error: 'Please enter your OwnerRez booking page URL.' }
+      return { error: 'Please enter your booking page URL.' }
     }
 
     const { error } = await supabase

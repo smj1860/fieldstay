@@ -1,6 +1,6 @@
 # Setting Up Your First Property
 
-After OwnerRez sync completes, a few quick settings ensure turnovers generate
+After your PMS sync completes, a few quick settings ensure turnovers generate
 correctly and your crew has everything they need.
 
 ## What the Sync Handles Automatically
