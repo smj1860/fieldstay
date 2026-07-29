@@ -58,7 +58,7 @@ for VUS in $LEVELS; do
     echo "  k6 exited non-zero at ${VUS} VUs — see $LOG" >&2
   fi
 
-  if [ -f "$JSON" ]; then
+  if [[ -f "$JSON" ]]; then
     # Round to whole ms / whole counts so the printed table stays readable;
     # each field falls back to "NA" independently rather than letting one
     # missing metric (e.g. no requests completed at all) blank the row.
