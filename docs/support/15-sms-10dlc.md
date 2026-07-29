@@ -49,6 +49,18 @@ Guests who opt out can re-subscribe by texting **START**.
 
 ---
 
+## Does a Repeat Guest Have to Opt In Every Time?
+
+Yes. Consent is recorded per booking, not per phone number — so a returning guest who opted in on a previous stay will still see the opt-in prompt on their next booking's pre-arrival email. This isn't a bug: it keeps consent tied to the specific stay it applies to (the same TCPA-compliant record described above) rather than assuming a guest wants texts for every future booking indefinitely. If a returning guest asks why they're being prompted again, that's the reason.
+
+---
+
+## Can I Turn Off SMS for My Account or a Specific Property?
+
+There is no account-level or property-level toggle to disable the SMS program today — self-serve or otherwise. Guest texting is controlled entirely guest-by-guest: nobody is texted unless they complete the opt-in form for that specific booking, and any guest can stop it instantly by replying STOP. If you don't want a particular property's guests prompted at all, the honest answer right now is that there's no switch for that — flag it to support@fieldstay.app so it can be tracked as a feature request.
+
+---
+
 ## What You Can Tell Concerned Guests or Property Owners
 
 If a guest or property owner asks about the SMS program:

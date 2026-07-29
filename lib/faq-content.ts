@@ -99,7 +99,7 @@ export const FAQ_CATEGORIES: FaqCategory[] = [
         id:       'or-historical',
         question: 'Will historical bookings sync over, or only future ones?',
         answer:
-          'FieldStay syncs your full booking history from your PMS on initial connection, not just upcoming stays — so past bookings are already there for reporting from day one. All future booking changes sync in real time as your PMS sends webhook events.',
+          'On your initial connection, FieldStay syncs your full booking history from your PMS, not just upcoming stays — so past bookings are already there for reporting from day one. All future booking changes sync in real time as your PMS sends webhook events. Note this only applies to the first connection: if you disconnect and reconnect later, that re-sync only pulls in active and future bookings, not your full history again.',
       },
       {
         id:       'or-not-updating',
@@ -229,6 +229,156 @@ export const FAQ_CATEGORIES: FaqCategory[] = [
         question: 'How do I reset my password?',
         answer:
           'On the login page, click "Forgot password" and enter your email. You\'ll receive a reset link within a few minutes. Check your spam folder if it doesn\'t arrive — emails come from noreply@fieldstay.app.',
+      },
+    ],
+  },
+  {
+    id:    'inventory',
+    label: 'Inventory & Restocking',
+    items: [
+      {
+        id:       'inv-par-level',
+        question: 'What is a par level and how do I set one?',
+        answer:
+          'A par level is the minimum quantity of a supply item you want on hand before it needs restocking — e.g. 4 rolls of paper towels. Set them at Inventory → Templates, or per property at Inventory → [Property Name] if one property needs different levels than the rest.',
+      },
+      {
+        id:       'inv-kroger',
+        question: 'How does the Kroger cart work?',
+        answer:
+          'When crew inventory counts come in below par, FieldStay creates a purchase order automatically. If you\'ve connected Kroger, go to Inventory → Portfolio and click "Build Cart" to add every below-par item to your Kroger cart in the right quantities. You still review and check out yourself — building the cart never places the order on its own.',
+      },
+      {
+        id:       'inv-not-near-kroger',
+        question: 'There\'s no store called "Kroger" near my property — can I still use this?',
+        answer:
+          'Almost certainly yes. Kroger owns dozens of regional grocery chains under different names — Ralphs, Fred Meyer, King Soopers, Smith\'s, Fry\'s, QFC, Harris Teeter, Mariano\'s, and more. FieldStay automatically connects to whichever Kroger-owned store is closest to your property, whatever it\'s branded locally.',
+      },
+      {
+        id:       'inv-template-change',
+        question: 'If I edit an inventory template, does it update properties that already use it?',
+        answer:
+          'No. Templates are a starting point, not a live link — once applied to a property, that property\'s items and par levels are independent. Editing the template later only affects properties you apply it to afterward.',
+      },
+    ],
+  },
+  {
+    id:    'guidebook',
+    label: 'Guest Guidebook & SMS',
+    items: [
+      {
+        id:       'gb-what-is',
+        question: 'What is the Guest Guidebook?',
+        answer:
+          'A personalized, mobile-friendly page delivered to each guest with their door code, WiFi password, check-in instructions, house rules, and local recommendations. It requires no app download and is pre-populated from your PMS connection — review it at Guidebook → [Property Name] and toggle Published when ready.',
+      },
+      {
+        id:       'gb-sms-optin',
+        question: 'How does the SMS door-code text work?',
+        answer:
+          'Guests get a pre-arrival email with a prompt to receive their door code by text. They enter their number and explicitly consent before anything is sent — no guest is ever texted without opting in first. They can reply STOP at any time to stop all messages instantly.',
+      },
+      {
+        id:       'gb-repeat-guest',
+        question: 'Why is a repeat guest being asked to opt in to texts again?',
+        answer:
+          'SMS consent is recorded per booking, not per phone number, so a guest who opted in on a previous stay will still see the prompt on their next booking. This keeps consent tied to the specific stay it covers rather than assuming indefinite consent from one opt-in.',
+      },
+      {
+        id:       'gb-sponsors',
+        question: 'How do guidebook sponsors work?',
+        answer:
+          'Local businesses pay $15/month to be featured in your guidebook and in SMS recommendation messages. At 3 active sponsors the Guidebook itself unlocks permanently (it\'s otherwise free only during your trial); 5 sponsors add a $10/month plan credit, 6 sponsors bumps that to $25/month. Add one at Guidebook → Sponsors → Add Sponsor.',
+      },
+    ],
+  },
+  {
+    id:    'reviews',
+    label: 'Reviews & RepuGuard',
+    items: [
+      {
+        id:       'rg-how',
+        question: 'How does RepuGuard work?',
+        answer:
+          'When a guest review syncs in from OwnerRez or Hospitable, RepuGuard generates a draft response using AI, tailored to the review and your property. Go to Reviews to read, edit, and approve any draft before it goes anywhere.',
+      },
+      {
+        id:       'rg-post',
+        question: 'Does RepuGuard post my response automatically?',
+        answer:
+          'No — approving a draft doesn\'t submit it anywhere by itself. For OwnerRez reviews, clicking "Post to OwnerRez" opens the review on OwnerRez\'s site so you can paste your response there. For Hospitable and manually-added reviews, you post the response wherever the review actually lives, then click "Mark as Posted" in FieldStay so the status reflects reality.',
+      },
+      {
+        id:       'rg-manual',
+        question: 'Can I get a draft response for a review that didn\'t sync automatically?',
+        answer:
+          'Yes. Reviews on Google, Booking.com, or other platforms that don\'t sync through your PMS can be added at Reviews → Add Review Manually, up to 2 per week per organization (resets every Monday). Manually-added reviews get one draft and can\'t be regenerated.',
+      },
+    ],
+  },
+  {
+    id:    'work-orders',
+    label: 'Work Orders & Vendors',
+    items: [
+      {
+        id:       'wo-create',
+        question: 'How do I create and assign a work order?',
+        answer:
+          'Go to Maintenance → New Work Order, fill in the property, description, priority, and an optional Not-To-Exceed amount, then choose Assign Vendor (dispatches an email with a secure portal link) or Assign Crew (appears in their crew app alongside turnovers).',
+      },
+      {
+        id:       'wo-compliance',
+        question: 'What happens if a vendor\'s insurance has expired?',
+        answer:
+          'FieldStay checks compliance before every dispatch. A document expired 1–45 days puts the vendor in a Grace Period — you can acknowledge the risk and proceed, and it\'s logged. Expired 46+ days hard-blocks the vendor from being assigned until they update their documents.',
+      },
+      {
+        id:       'wo-payment',
+        question: 'How do vendors get paid for completed work orders?',
+        answer:
+          'Vendors connect a bank account through Stripe Connect (a one-time, 3–5 minute setup) — FieldStay sends this setup link when they\'re first assigned a work order. Once a vendor signs off on completed work, payment can be released directly to their account. Vendors who haven\'t finished Stripe setup can still be assigned and complete work, but payment is held until they do, or you can settle with them outside FieldStay.',
+      },
+    ],
+  },
+  {
+    id:    'owner-portal',
+    label: 'Owner Portal',
+    items: [
+      {
+        id:       'owner-what-they-see',
+        question: 'What do property owners see in the Owner Portal?',
+        answer:
+          'A read-only view of their property\'s revenue, expenses, and net income for any date range, accessed through a secure tokenized link — no FieldStay account required. They never see crew assignments, work order details, inventory, or any other operational data.',
+      },
+      {
+        id:       'owner-visibility',
+        question: 'Can I control which expenses owners see?',
+        answer:
+          'Yes. Every transaction has a Visible to Owner toggle. By default, booking revenue, cleaning fees, and work order costs are visible; inventory purchases are hidden as an internal operational cost. Change any transaction\'s visibility from the Owner Portal page.',
+      },
+      {
+        id:       'owner-share-revoke',
+        question: 'How do I share or revoke an owner\'s portal access?',
+        answer:
+          'Go to Owner Portal and click Copy Link next to the owner to share it. To cut off access, click Revoke Access on the same page — this is a separate, deliberate action from generating the link, so revoking and re-sharing are two distinct steps rather than one "regenerate" button.',
+      },
+    ],
+  },
+  {
+    id:    'assets',
+    label: 'Asset Health',
+    items: [
+      {
+        id:       'asset-what-is',
+        question: 'What is asset health tracking?',
+        answer:
+          'Go to Assets to track big-ticket items per property — HVAC, water heaters, roofs, appliances — each with a 0–100 health score based on age and repair history. Scores update automatically as time passes and as work orders get logged against an asset. It\'s included on every plan at no extra cost.',
+      },
+      {
+        id:       'asset-depreciation',
+        question: 'Does FieldStay handle tax depreciation for assets?',
+        answer:
+          'If you enter a purchase price and installation date on an asset, FieldStay generates an annual MACRS depreciation schedule using standard IRS tables, and flags Section 179-eligible assets. This is a planning aid, not tax advice — confirm your actual filing with your accountant.',
       },
     ],
   },

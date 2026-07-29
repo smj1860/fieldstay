@@ -6,17 +6,26 @@ This document covers the most common issues reported by property managers and ho
 
 ## Turnovers Not Generating After a Booking Syncs
 
-**Symptom:** A new booking appeared in OwnerRez but no turnover was created in FieldStay.
+**Symptom:** A new booking appeared in OwnerRez or Hospitable but no turnover was created in FieldStay.
 
 **Check first:**
-- Is the booking status "Confirmed" in OwnerRez? Tentative or unconfirmed bookings do not generate turnovers.
-- Is the booking marked as a block or owner hold? Block bookings are filtered out.
-- Was the booking created before you connected OwnerRez? Only bookings created or modified after the connection date sync automatically.
+- Is the booking status "Confirmed" (OwnerRez) or otherwise a real reservation, not a block/owner hold? Tentative, unconfirmed, and block bookings are filtered out and do not generate turnovers.
+- Was the booking created before you connected your PMS? Only bookings created or modified after the connection date sync automatically on an initial connection; a reconnect only pulls active/future bookings, not full history (see **Disconnecting or Reconnecting OwnerRez**).
 
 **Fix:**
 Go to your Turnovers dashboard and click **Sync** to trigger a manual re-sync. If the booking is confirmed and not a block, the turnover should appear within 1–2 minutes.
 
-If it still doesn't appear, disconnect and reconnect OwnerRez from Settings → Integrations.
+If it still doesn't appear, use **Trigger Resync** next to your PMS in Settings → Integrations, or disconnect and reconnect if that doesn't help.
+
+---
+
+## A Guest Changed Their Dates — Will the Turnover Update?
+
+**Symptom:** A guest extended or shortened their stay in OwnerRez or Hospitable, and you're not sure whether FieldStay's turnover reflects the new dates.
+
+**What happens:** FieldStay refreshes the turnover's checkout/check-in window automatically the next time the booking change syncs in — usually within a minute or two via webhook, or immediately if you click **Sync** on the Turnovers dashboard. You don't need to delete and recreate anything.
+
+**What to double check:** If a crew member was already assigned to that turnover, the assignment carries over automatically, but it's worth having them glance at the crew app to confirm the updated time — especially if the date change turned what was a normal turnover into a same-day flip, or vice versa.
 
 ---
 

@@ -68,9 +68,9 @@ When a booking is cancelled in OwnerRez, the webhook fires and FieldStay automat
 
 ## Does RepuGuard work with Google or Airbnb reviews?
 
-RepuGuard automatically syncs reviews from OwnerRez. Since OwnerRez aggregates reviews from multiple channels, most Airbnb and Vrbo reviews appear automatically.
+RepuGuard automatically syncs reviews from your connected PMS — OwnerRez or Hospitable. Both aggregate reviews from multiple channels, so most Airbnb and Vrbo reviews appear automatically.
 
-For reviews on Google, Booking.com, or platforms that don't sync through OwnerRez, you can add them manually using the **Add Review Manually** feature (2 per week per organization). RepuGuard generates a response draft immediately after you paste the review text.
+For reviews on Google, Booking.com, or platforms that don't sync through your PMS, you can add them manually using the **Add Review Manually** feature (2 per week per organization). RepuGuard generates a response draft immediately after you paste the review text. Note that posting the response back isn't a one-click API submission — for OwnerRez reviews FieldStay links you to the review on OwnerRez's site to paste your response there; for Hospitable and manually-added reviews you post it wherever the review lives and then mark it posted in FieldStay.
 
 ---
 

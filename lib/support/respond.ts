@@ -23,7 +23,7 @@ const ESCALATION_TOOL = {
       },
       needs_escalation: {
         type: 'boolean' as const,
-        description: 'True if this conversation needs a human to follow up — billing disputes, safety incidents, explicit requests to speak with a person, legal threats, or account deletion/export execution requests.',
+        description: 'True if this conversation needs a human to follow up — billing disputes, vendor payment disputes, unsolicited-SMS/consent complaints, safety incidents, explicit requests to speak with a person, legal threats, or account deletion/export execution requests.',
       },
       escalation_reason: {
         type: 'string' as const,
@@ -183,6 +183,8 @@ Answer only from the reference material below. If it doesn't cover the question,
 
 Always escalate to a human rather than attempting to answer when the message involves:
 - A guest being charged or billed incorrectly, or any payment dispute
+- A vendor who was not paid for completed work, or any other vendor payment dispute
+- A complaint about unwanted or unsolicited SMS messages, or a guest disputing that they consented to receive texts
 - A safety incident, injury, or property damage claim
 - An explicit request to speak with a person or a human
 - Threats of legal action or mentions of an attorney

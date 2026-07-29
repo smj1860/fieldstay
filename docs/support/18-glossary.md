@@ -6,7 +6,7 @@ Quick definitions of FieldStay-specific terminology.
 
 ## Turnover
 
-A turnover is the preparation period between a guest checking out and the next guest checking in at a property. FieldStay creates a turnover automatically when a booking is confirmed in OwnerRez, using the checkout and check-in dates to define the available prep window.
+A turnover is the preparation period between a guest checking out and the next guest checking in at a property. FieldStay creates a turnover automatically when a booking is confirmed in your connected PMS (OwnerRez or Hospitable), using the checkout and check-in dates to define the available prep window.
 
 Turnovers contain the cleaning checklist, inventory count, and any assigned crew. They are distinct from the bookings themselves — a booking is a reservation, a turnover is the operational task triggered by that reservation.
 
@@ -14,9 +14,9 @@ Turnovers contain the cleaning checklist, inventory count, and any assigned crew
 
 ## Booking
 
-A booking is a confirmed reservation at a property, synced from OwnerRez. Bookings contain guest information (name, email, arrival and departure dates, booking source) and are the trigger for turnover creation and guest guidebook delivery.
+A booking is a confirmed reservation at a property, synced from your connected PMS (OwnerRez or Hospitable). Bookings contain guest information (name, email, arrival and departure dates, booking source) and are the trigger for turnover creation and guest guidebook delivery.
 
-FieldStay does not create bookings — they always originate in OwnerRez and sync into FieldStay automatically.
+FieldStay does not create bookings — they always originate in your PMS and sync into FieldStay automatically.
 
 ---
 
@@ -56,7 +56,7 @@ The owner portal is a secure, tokenized web page shared with property owners. It
 
 ## RepuGuard
 
-RepuGuard is FieldStay's AI-powered review response tool. It automatically generates professional draft responses to guest reviews synced from OwnerRez, flags sensitive content before you post, and lets you post the approved response back to OwnerRez in one click. RepuGuard is bundled into every FieldStay plan at no extra cost.
+RepuGuard is FieldStay's AI-powered review response tool. It automatically generates professional draft responses to guest reviews synced from your connected PMS (OwnerRez or Hospitable), and flags sensitive content before you post. Posting the approved response is a manual step on the review's original platform — see **RepuGuard — Responding to Reviews** for exactly how that works for each source. RepuGuard is bundled into every FieldStay plan at no extra cost.
 
 ---
 
