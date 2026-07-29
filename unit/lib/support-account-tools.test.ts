@@ -304,7 +304,9 @@ describe('getWorkOrderStatus', () => {
     if ('error' in result) throw new Error('expected a work orders result')
     expect(result.workOrders[0]?.assignedTo).toBe('Alex Rivera')
     expect(result.workOrders[0]?.dispatchedToVendor).toBe(false)
-    expect(supabase.calls.some((c) => c.table === 'crew_members' && c.method === 'in' && c.args[1]?.[0] === 'crew_1')).toBe(true)
+    expect(supabase.calls.some((c) =>
+      c.table === 'crew_members' && c.method === 'in' && Array.isArray(c.args[1]) && c.args[1][0] === 'crew_1'
+    )).toBe(true)
   })
 
   it('reports Unassigned when neither a vendor nor a crew member is on the work order', async () => {
