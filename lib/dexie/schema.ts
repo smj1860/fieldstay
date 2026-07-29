@@ -325,6 +325,31 @@ export class FieldStayDexie extends Dexie {
   }
 }
 
+// ── Crew Sync v2 coverage (docs/CREW_SYNC_V2_PHASES.md section 5e) ─────────
+// Every Supabase-backed table declared on FieldStayDexie above must appear
+// here, mapped to the Supabase table it caches (identical to the Dexie name
+// except crew_work_orders, which caches `work_orders`). Checked by
+// unit/guardrails/crew-sync-coverage.test.ts against every `Table<...>`
+// field on the class above — a newly added cached table fails CI until it's
+// placed here (or in LOCAL_ONLY_TABLES below) AND covered by a broadcast
+// trigger or the SAFETY_POLL_ONLY allowlist in that same test file.
+export const CREW_SYNCED_TABLES: Readonly<Record<string, string>> = {
+  turnovers:                'turnovers',
+  checklist_instances:      'checklist_instances',
+  checklist_instance_items: 'checklist_instance_items',
+  inventory_items:          'inventory_items',
+  properties:                'properties',
+  crew_availability:        'crew_availability',
+  messages:                 'messages',
+  crew_work_orders:         'work_orders',
+  property_assets:          'property_assets',
+}
+
+// Dexie tables with no Supabase counterpart — pure local state (the
+// mutation outbox, sync cursors/watermarks, the local photo-upload queue).
+// Never subject to the crew-sync trigger/safety-poll coverage check above.
+export const LOCAL_ONLY_TABLES = ['pending_photo_uploads', 'mutations', 'sync_meta'] as const
+
 let db: FieldStayDexie | null = null
 let dbUserId: string | null = null
 

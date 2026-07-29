@@ -426,6 +426,20 @@ and is **fully gone** — no dependency, no `lib/powersync/` directory, no
   stopping the drain on first error so later mutations against the same
   record aren't applied out of order.
 
+**Crew Sync v2 coverage convention** (`docs/CREW_SYNC_V2_PHASES.md` section 5e):
+every Supabase-backed table the crew PWA caches in Dexie is covered by the
+safety poll (the full `resync()`/`resyncV2()` covers all of them); every such
+table must ALSO either have a broadcast trigger in the crew-sync trigger
+migration (`supabase/migrations/*crew_sync_broadcast_triggers.sql` — low-
+latency entities) or be explicitly listed in the `SAFETY_POLL_ONLY` allowlist
+in `unit/guardrails/crew-sync-coverage.test.ts`. This is a union check, not
+exclusive-or — a broadcast-triggered table is deliberately covered by both
+mechanisms, the poll being the correctness backstop. A new cached table must
+be added to `CREW_SYNCED_TABLES` or `LOCAL_ONLY_TABLES` in
+`lib/dexie/schema.ts` in the same PR that adds it, and (if synced) placed in
+either `TRIGGERED_TABLES` or `SAFETY_POLL_ONLY` in the guardrail test —
+`crew-sync-coverage` fails CI otherwise.
+
 ```typescript
 // Client components read from the local Dexie cache, not Supabase directly
 import { getDexieDb } from '@/lib/dexie/schema'
