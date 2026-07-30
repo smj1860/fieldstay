@@ -39,68 +39,78 @@ export function parseIcalFeed(raw: string): ParsedBooking[] {
   let   firstSkipReason: string | null = null
 
   for (const vevent of vevents) {
-    try {
-      const event = new ICAL.Event(vevent)
-
-      // A VEVENT with no uid or no dates is just as dropped as one that
-      // throws — count it the same way rather than letting it vanish.
-      const uid = event.uid
-      if (!uid) {
-        skipped++
-        firstSkipReason ??= 'missing uid'
-        continue
-      }
-
-      const start = event.startDate?.toJSDate()
-      const end   = event.endDate?.toJSDate()
-      if (!start || !end) {
-        skipped++
-        firstSkipReason ??= 'missing start or end date'
-        continue
-      }
-
-      // Normalise status
-      const rawStatus = (vevent.getFirstPropertyValue('status') as string | null)?.toUpperCase()
-      let status: ParsedBooking['status'] = 'confirmed'
-      if (rawStatus === 'CANCELLED') status = 'cancelled'
-      else if (rawStatus === 'TENTATIVE') status = 'tentative'
-
-      // Airbnb marks blocked-off dates with "Not available" or "Airbnb (Not available)"
-      const summary = event.summary ?? ''
-      if (
-        summary.toLowerCase().includes('not available') ||
-        summary.toLowerCase().includes('reserved') ||
-        summary.toLowerCase() === 'blocked'
-      ) {
-        status = 'blocked'
-      }
-
-      // Extract guest name from summary — platforms vary
-      // Airbnb: "RESERVED" or guest name
-      // VRBO:   "Reservation - [name]"
-      let guestName: string | null = null
-      if (status === 'confirmed') {
-        const cleaned = summary
-          .replace(/^reservation\s*-?\s*/i, '')
-          .replace(/\s*\(confirmed\)/i, '')
-          .trim()
-        if (cleaned && cleaned.toLowerCase() !== 'reserved') {
-          guestName = cleaned || null
-        }
-      }
-
-      results.push({ uid, guestName, start, end, status })
-    } catch (err) {
-      // Skip malformed events — don't blow up the whole sync — but keep a
-      // tally so the skip is visible after the loop.
+    const parsed = parseVevent(vevent)
+    if ('skipReason' in parsed) {
       skipped++
-      firstSkipReason ??= err instanceof Error ? err.message : String(err)
+      firstSkipReason ??= parsed.skipReason
+      continue
     }
+    results.push(parsed)
   }
 
   reportSkippedEvents(vevents.length, skipped, firstSkipReason)
 
   return results
+}
+
+/**
+ * One VEVENT → one booking, or a reason it could not be read. Returning the
+ * reason (rather than swallowing it) is what lets the caller tally skips.
+ */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any -- ical.js ships no exported Component type for a subcomponent
+function parseVevent(vevent: any): ParsedBooking | { skipReason: string } {
+  try {
+    const event = new ICAL.Event(vevent)
+
+    // A VEVENT with no uid or no dates is just as dropped as one that
+    // throws — report it the same way rather than letting it vanish.
+    const uid = event.uid
+    if (!uid) return { skipReason: 'missing uid' }
+
+    const start = event.startDate?.toJSDate()
+    const end   = event.endDate?.toJSDate()
+    if (!start || !end) return { skipReason: 'missing start or end date' }
+
+    const summary = event.summary ?? ''
+    const status  = resolveStatus(vevent, summary)
+
+    return { uid, guestName: extractGuestName(summary, status), start, end, status }
+  } catch (err) {
+    return { skipReason: err instanceof Error ? err.message : String(err) }
+  }
+}
+
+// eslint-disable-next-line @typescript-eslint/no-explicit-any -- see parseVevent
+function resolveStatus(vevent: any, summary: string): ParsedBooking['status'] {
+  // Airbnb marks blocked-off dates with "Not available" or
+  // "Airbnb (Not available)" — this wins over the STATUS property.
+  const lower = summary.toLowerCase()
+  if (lower.includes('not available') || lower.includes('reserved') || lower === 'blocked') {
+    return 'blocked'
+  }
+
+  const rawStatus = (vevent.getFirstPropertyValue('status') as string | null)?.toUpperCase()
+  if (rawStatus === 'CANCELLED')  return 'cancelled'
+  if (rawStatus === 'TENTATIVE')  return 'tentative'
+  return 'confirmed'
+}
+
+/**
+ * Guest name out of the summary — platforms vary.
+ *   Airbnb: "RESERVED" (no name) or the guest's name
+ *   VRBO:   "Reservation - [name]"
+ * Only confirmed stays carry a name worth keeping.
+ */
+function extractGuestName(summary: string, status: ParsedBooking['status']): string | null {
+  if (status !== 'confirmed') return null
+
+  const cleaned = summary
+    .replace(/^reservation\s*-?\s*/i, '')
+    .replace(/\s*\(confirmed\)/i, '')
+    .trim()
+
+  if (!cleaned || cleaned.toLowerCase() === 'reserved') return null
+  return cleaned
 }
 
 function reportSkippedEvents(

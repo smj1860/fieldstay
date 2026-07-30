@@ -22,6 +22,9 @@ import {
  */
 const REPAIR_HISTORY_WINDOW_DAYS = 1095
 
+/** asset_type_standards is a fixed platform reference table (21 rows today). */
+const ASSET_TYPE_STANDARDS_LIMIT = 200
+
 /**
  * SCHEDULED: 12:30 UTC daily (staggered off the 13:00 UTC batch — see the
  * stagger note in maintenance-schedules.ts).
@@ -125,6 +128,9 @@ export const dailyAssetHealth = inngest.createFunction(
       const { data: currentStandards } = await supabase
         .from('asset_type_standards')
         .select('asset_type, age_weight, condition_weight, lifespan_min_years, lifespan_max_years')
+        // Fixed platform reference table (21 asset types today); the explicit
+        // bound documents that and keeps it out of the unbounded-select class.
+        .limit(ASSET_TYPE_STANDARDS_LIMIT)
 
       const updates: Array<{
         asset_type:        string
@@ -225,6 +231,7 @@ export const assetHealthOrg = inngest.createFunction(
       const { data: standards } = await supabase
         .from('asset_type_standards')
         .select('asset_type, lifespan_min_years, lifespan_max_years, avg_replacement_cost_high, age_weight, condition_weight')
+        .limit(ASSET_TYPE_STANDARDS_LIMIT)
 
       const windowStart = new Date(Date.now() - REPAIR_HISTORY_WINDOW_DAYS * 86_400_000)
         .toISOString().split('T')[0]!

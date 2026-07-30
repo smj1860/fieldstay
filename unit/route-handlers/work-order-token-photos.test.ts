@@ -4,9 +4,17 @@ import { NextRequest, type NextResponse } from 'next/server'
 vi.mock('@/lib/supabase/server', () => ({
   createServiceClient: vi.fn(),
 }))
-vi.mock('@/lib/rate-limit', () => ({
-  workOrderRatelimit: { limit: vi.fn(async () => ({ success: true })) },
-}))
+vi.mock('@/lib/rate-limit', async () => {
+  // checkLimit() is now the only sanctioned way to consult a limiter
+  // (lib/rate-limit.ts). The stub delegates to the limiter doubles below
+  // so existing `.limit` assertions and fail-policy tests still apply.
+  const { checkLimitStub, retryAfterSecondsStub } = await import('@/unit/stubs/rate-limit')
+  return {
+    workOrderRatelimit: { limit: vi.fn(async () => ({ success: true })) },
+    checkLimit:         checkLimitStub(),
+    retryAfterSeconds:  retryAfterSecondsStub,
+  }
+})
 vi.mock('@/lib/integrations/webhook-verification', () => ({
   extractClientIp: vi.fn(() => '203.0.113.5'),
 }))

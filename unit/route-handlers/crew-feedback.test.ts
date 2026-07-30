@@ -45,6 +45,8 @@ function makeServiceClient(opts: {
   insertResult?: { error: unknown }
   crewNameResult?: { data: unknown; error?: unknown }
   orgNameResult?: { data: unknown; error?: unknown }
+  /** properties row returned by the propertyId ownership check (null = not in caller's org) */
+  propertyResult?: { data: unknown; error?: unknown }
 } = {}) {
   const insertMock = vi.fn(() => Promise.resolve(opts.insertResult ?? { error: null }))
 
@@ -64,8 +66,15 @@ function makeServiceClient(opts: {
       chain.single = vi.fn(() =>
         Promise.resolve(opts.orgNameResult ?? { data: { name: 'Lake Martin Delivery' }, error: null }),
       )
+    } else if (table === 'properties') {
+      // Ownership check for a client-supplied propertyId — org-scoped.
+      chain.maybeSingle = vi.fn(() =>
+        Promise.resolve(opts.propertyResult ?? { data: { id: 'prop_1' }, error: null }),
+      )
+      chain.single = chain.maybeSingle
     } else {
-      chain.single = vi.fn(() => Promise.resolve({ data: null, error: null }))
+      chain.single      = vi.fn(() => Promise.resolve({ data: null, error: null }))
+      chain.maybeSingle = chain.single
     }
     return chain
   })

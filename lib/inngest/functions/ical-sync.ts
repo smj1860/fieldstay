@@ -219,13 +219,22 @@ export const syncIcalFeed = inngest.createFunction(
 
         type ExistingRow = { id: string; ical_uid: string; status: string; guest_email: string | null }
 
-        const { data: existingBookings } = await supabase
-          .from('bookings')
-          .select('id, ical_uid, status, guest_email')
-          .eq('ical_feed_id', feed_id)
+        // Paginated: a long-lived feed accumulates more than PostgREST's
+        // 1000-row cap, and a truncated "existing" map would make every
+        // unseen booking look brand new (re-firing booking/detected) while
+        // the cancel-absent pass below silently stopped covering older rows.
+        const existingBookings = await fetchAllRows<ExistingRow>(
+          (from, to) => supabase
+            .from('bookings')
+            .select('id, ical_uid, status, guest_email')
+            .eq('ical_feed_id', feed_id)
+            .order('id', { ascending: true })
+            .range(from, to),
+          { label: `bookings[feed=${feed_id}]` }
+        )
 
         const existingByUid = new Map<string, ExistingRow>(
-          (existingBookings as ExistingRow[] ?? []).map((b) => [b.ical_uid, b])
+          existingBookings.map((b) => [b.ical_uid, b])
         )
         // Inngest serializes step.run() results as JSON, so Date objects become
         // strings. toDateString/toTimeString/isAllDay all accept Date | string.
@@ -404,15 +413,19 @@ export const syncIcalFeed = inngest.createFunction(
 
       // Fetch full booking data — filter to confirmed only in case a booking
       // was cancelled between the upsert step and this step
-      const { data: bookingDetails, error: detailsError } = await supabase
-        .from('bookings')
-        .select('id, guest_name, guest_email, checkin_date, checkout_date')
-        .in('id', (newBookings as Array<{ id: string }>).map((b) => b.id))
-        .eq('status', 'confirmed')
+      const newBookingIds = (newBookings as Array<{ id: string }>).map((b) => b.id)
+      const bookingDetails = await fetchAllRows<BookingDetail>(
+        (from, to) => supabase
+          .from('bookings')
+          .select('id, guest_name, guest_email, checkin_date, checkout_date')
+          .in('id', newBookingIds)
+          .eq('status', 'confirmed')
+          .order('id', { ascending: true })
+          .range(from, to),
+        { label: 'bookings(new-detail)' }
+      )
 
-      if (detailsError) throw new Error(`Failed to fetch booking details: ${detailsError.message}`)
-
-      for (const booking of (bookingDetails as BookingDetail[] ?? [])) {
+      for (const booking of bookingDetails) {
         events.push({
           name: 'booking/detected' as const,
           data: {

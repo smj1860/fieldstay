@@ -41,7 +41,8 @@ export class SupabaseQueryError extends Error {
   readonly code: string | null
 
   constructor(site: string, code: string | null) {
-    super(`Supabase query failed at ${site}${code ? ` (${code})` : ''}`)
+    const codeSuffix = code ? ` (${code})` : ''
+    super(`Supabase query failed at ${site}${codeSuffix}`)
     this.name = 'SupabaseQueryError'
     this.site = site
     this.code = code

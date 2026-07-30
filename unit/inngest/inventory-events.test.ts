@@ -111,6 +111,31 @@ describe('handleInventoryCountSubmitted', () => {
     expect(supabase.calls.some((c) => c.table === 'purchase_orders')).toBe(false)
   })
 
+  // Audit 2026-07-30: the bulk current_quantity upsert discarded its error,
+  // then below-par was computed from the IN-MEMORY counts — producing a
+  // correct-looking purchase order against quantities the database never
+  // recorded. The step must abort so Inngest retries the (idempotent) write.
+  it('aborts instead of building a purchase order when the quantity write fails', async () => {
+    const supabase = makeSupabase({
+      inventory_counts:      [{ data: { id: 'count_1', property_id: 'prop_1' }, error: null }],
+      inventory_count_items: [{ data: [{ inventory_item_id: 'item_1', quantity_counted: 1 }], error: null }],
+      inventory_items: [
+        { data: [{ id: 'item_1', name: 'Toilet Paper', category: 'paper_goods', unit: 'roll', par_level: 10, low_stock_threshold_pct: 50 }], error: null },
+        { data: null, error: { message: 'deadlock detected' } },   // bulk upsert FAILS
+      ],
+    })
+    ;(createServiceClient as ReturnType<typeof vi.fn>).mockReturnValue(supabase)
+
+    await expect(
+      invokeHandler(handleInventoryCountSubmitted, {
+        event: { data: { count_id: 'count_1', property_id: 'prop_1', org_id: 'org_1' } },
+        step:  runAllStep(),
+      }),
+    ).rejects.toThrow(/quantity upsert failed/)
+
+    expect(supabase.calls.some((c) => c.table === 'purchase_orders')).toBe(false)
+  })
+
   it('creates a purchase order for below-par items when it is not a same-day flip', async () => {
     const supabase = makeSupabase({
       inventory_counts:      [{ data: { id: 'count_1' }, error: null }],

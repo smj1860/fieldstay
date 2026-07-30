@@ -75,12 +75,14 @@ function base64ToBase64Url(b64: string): string {
  * it hashes identically and is rejected here regardless of what the branches
  * do.
  */
+function telnyxWebhookId(signedPayload: string): string {
+  return `telnyx:${createHash('sha256').update(signedPayload).digest('hex')}`
+}
+
 async function claimTelnyxDelivery(
   supabase: ReturnType<typeof createServiceClient>,
-  signedPayload: string,
+  webhookId: string,
 ): Promise<boolean> {
-  const webhookId = `telnyx:${createHash('sha256').update(signedPayload).digest('hex')}`
-
   const { error } = await supabase.from('processed_webhooks').insert({ webhook_id: webhookId })
 
   if (!error) return true
@@ -143,17 +145,58 @@ export async function POST(req: NextRequest) {
   const supabase = createServiceClient({ publicSurface: 'api-webhooks-telnyx' })
 
   // Replay guard — see claimTelnyxDelivery's contract note above.
-  if (!(await claimTelnyxDelivery(supabase, `${timestamp}|${rawBody}`))) {
+  const webhookId = telnyxWebhookId(`${timestamp}|${rawBody}`)
+  if (!(await claimTelnyxDelivery(supabase, webhookId))) {
     return NextResponse.json({ received: true, duplicate: true })
   }
 
-  if (text === 'STOP' || text === 'STOPALL' || text === 'UNSUBSCRIBE' || text === 'CANCEL' || text === 'END' || text === 'QUIT') {
-    const { data: updated } = await supabase
+  try {
+    await applyConsentChange(supabase, phoneE164, text)
+  } catch (err) {
+    // The claim above was written BEFORE this ran, so leaving it in place
+    // would make Telnyx's retry hash-collide and be discarded as a duplicate
+    // — permanently losing a STOP, which is a TCPA compliance obligation.
+    // Release it and 500 so Telnyx retries. Same pattern as the Stripe,
+    // Stripe Connect and generic-provider webhook routes.
+    console.error('[Telnyx webhook] consent update failed:', err)
+    reportError(err, { site: 'webhook.telnyx.handler' })
+
+    const { error: releaseErr } = await supabase
+      .from('processed_webhooks')
+      .delete()
+      .eq('webhook_id', webhookId)
+
+    if (releaseErr) {
+      console.error('[Telnyx webhook] failed to release dedup claim:', releaseErr.message)
+      reportError(new Error(releaseErr.message), { site: 'webhook.telnyx.dedup_release' })
+    }
+
+    return NextResponse.json({ error: 'Handler failed' }, { status: 500 })
+  }
+
+  return NextResponse.json({ received: true })
+}
+
+const STOP_KEYWORDS  = new Set(['STOP', 'STOPALL', 'UNSUBSCRIBE', 'CANCEL', 'END', 'QUIT'])
+const START_KEYWORDS = new Set(['START', 'YES', 'UNSTOP'])
+
+async function applyConsentChange(
+  supabase:  ReturnType<typeof createServiceClient>,
+  phoneE164: string,
+  text:      string,
+): Promise<void> {
+  if (STOP_KEYWORDS.has(text)) {
+    const { data: updated, error } = await supabase
       .from('guidebook_guest_sms_optins')
       .update({ is_active: false, opted_out_at: new Date().toISOString(), updated_at: new Date().toISOString() })
       .eq('phone_e164', phoneE164)
       .eq('is_active', true)
       .select('org_id')
+
+    // Throwing (rather than swallowing) is what routes this into the
+    // caller's release-the-claim + 500 path. A dropped STOP is a TCPA
+    // violation — it must become a Telnyx retry, never a silent 200.
+    if (error) throw new Error(`STOP consent revoke failed: ${error.message}`)
 
     // logAuditEvents batches the whole set into one insert and never
     // rejects (swallows and logs internally) — no per-row catch needed.
@@ -165,13 +208,15 @@ export async function POST(req: NextRequest) {
         metadata:   { reason: text },
       }))
     )
-  } else if (text === 'START' || text === 'YES' || text === 'UNSTOP') {
-    const { data: updated } = await supabase
+  } else if (START_KEYWORDS.has(text)) {
+    const { data: updated, error } = await supabase
       .from('guidebook_guest_sms_optins')
       .update({ is_active: true, opted_out_at: null, updated_at: new Date().toISOString() })
       .eq('phone_e164', phoneE164)
       .eq('is_active', false)
       .select('org_id')
+
+    if (error) throw new Error(`START consent restore failed: ${error.message}`)
 
     // logAuditEvents batches the whole set into one insert and never
     // rejects (swallows and logs internally) — no per-row catch needed.
@@ -184,6 +229,4 @@ export async function POST(req: NextRequest) {
       }))
     )
   }
-
-  return NextResponse.json({ received: true })
 }

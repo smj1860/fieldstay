@@ -255,64 +255,85 @@ export async function sendSMS(
   const isNudge = (opts?.category ?? 'transactional') === 'nudge'
 
   if (isNudge) {
-    let claimed = false
-    try {
-      claimed = await claimNudgeBudgetSlot()
-    } catch (err) {
-      // Fail closed: without Redis there is no spend ceiling, and a skipped
-      // nudge is a non-event for the guest. Never applies to transactional.
-      console.error('[sms:nudge-budget] Redis unavailable — skipping nudge send', {
-        error: err instanceof Error ? err.message : String(err),
-      })
-      reportError(err, { site: 'sms.telnyx.nudge_budget_unavailable' })
-      return { sent: false, reason: 'nudge budget check unavailable' }
-    }
-    if (!claimed) {
-      console.warn('[sms:nudge-budget] daily nudge budget exhausted — skipping send')
-      return { sent: false, reason: 'daily nudge budget exhausted' }
-    }
+    const budget = await claimNudgeSlotOrExplain()
+    if (budget) return budget
   }
 
   // Everything from here on can throw, and every throw reaches an Inngest
   // retry that re-enters sendSMS and claims a fresh slot — so a claimed
-  // slot must be released on the way out (see releaseNudgeBudgetSlot).
+  // slot must be released on the way out.
   try {
-    let response: Response
-    try {
-      response = await fetch(TELNYX_API_URL, {
-        method: 'POST',
-        headers: {
-          Authorization: `Bearer ${apiKey}`,
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          from:                 fromNumber,
-          to:                   toE164,
-          text:                 body,
-          messaging_profile_id: messagingProfileId,
-        }),
-        signal: AbortSignal.timeout(SMS_TIMEOUT_MS),
-      })
-    } catch (err) {
-      // A timeout is genuinely ambiguous — Telnyx may or may not have
-      // accepted the message — so it is reported as its own distinct
-      // failure rather than as a generic send error, and rethrown so
-      // Inngest retries it.
-      if (isTimeoutError(err)) {
-        throw new Error(`Telnyx send timed out after ${SMS_TIMEOUT_MS}ms`)
-      }
-      throw err
-    }
-
-    if (!response.ok) {
-      const errText = await response.text()
-      throw new Error(`Telnyx send failed: ${response.status} ${errText}`)
-    }
-
+    await dispatchToTelnyx({ apiKey, messagingProfileId, fromNumber, toE164, body })
     return { sent: true }
   } catch (err) {
     if (isNudge) await releaseNudgeBudgetSlot()
     throw err
+  }
+}
+
+/**
+ * Claims a nudge budget slot. Returns null when the send may proceed, or the
+ * SendSmsResult to return to the caller when it may not.
+ */
+async function claimNudgeSlotOrExplain(): Promise<SendSmsResult | null> {
+  let claimed = false
+  try {
+    claimed = await claimNudgeBudgetSlot()
+  } catch (err) {
+    // Fail closed: without Redis there is no spend ceiling, and a skipped
+    // nudge is a non-event for the guest. Never applies to transactional.
+    console.error('[sms:nudge-budget] Redis unavailable — skipping nudge send', {
+      error: err instanceof Error ? err.message : String(err),
+    })
+    reportError(err, { site: 'sms.telnyx.nudge_budget_unavailable' })
+    return { sent: false, reason: 'nudge budget check unavailable' }
+  }
+
+  if (!claimed) {
+    console.warn('[sms:nudge-budget] daily nudge budget exhausted — skipping send')
+    return { sent: false, reason: 'daily nudge budget exhausted' }
+  }
+
+  return null
+}
+
+/** Issues the Telnyx call. Throws on timeout or any non-2xx response. */
+async function dispatchToTelnyx(params: {
+  apiKey:              string
+  messagingProfileId:  string
+  fromNumber:          string
+  toE164:              string
+  body:                string
+}): Promise<void> {
+  let response: Response
+  try {
+    response = await fetch(TELNYX_API_URL, {
+      method: 'POST',
+      headers: {
+        Authorization:  `Bearer ${params.apiKey}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        from:                 params.fromNumber,
+        to:                   params.toE164,
+        text:                 params.body,
+        messaging_profile_id: params.messagingProfileId,
+      }),
+      signal: AbortSignal.timeout(SMS_TIMEOUT_MS),
+    })
+  } catch (err) {
+    // A timeout is genuinely ambiguous — Telnyx may or may not have accepted
+    // the message — so it surfaces as its own distinct failure rather than a
+    // generic send error, and is rethrown so Inngest retries it.
+    if (isTimeoutError(err)) {
+      throw new Error(`Telnyx send timed out after ${SMS_TIMEOUT_MS}ms`)
+    }
+    throw err
+  }
+
+  if (!response.ok) {
+    const errText = await response.text()
+    throw new Error(`Telnyx send failed: ${response.status} ${errText}`)
   }
 }
 

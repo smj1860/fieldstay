@@ -10,9 +10,17 @@ vi.mock('@supabase/ssr', () => ({
 vi.mock('@/lib/supabase/server', () => ({
   createServiceClient: vi.fn(),
 }))
-vi.mock('@/lib/rate-limit', () => ({
-  repuguardLimiter: { limit: vi.fn(async () => ({ success: true, reset: Date.now() + 1000 })) },
-}))
+vi.mock('@/lib/rate-limit', async () => {
+  // checkLimit() is now the only sanctioned way to consult a limiter
+  // (lib/rate-limit.ts). The stub delegates to the limiter doubles below
+  // so existing `.limit` assertions and fail-policy tests still apply.
+  const { checkLimitStub, retryAfterSecondsStub } = await import('@/unit/stubs/rate-limit')
+  return {
+    repuguardLimiter: { limit: vi.fn(async () => ({ success: true, reset: Date.now() + 1000 })) },
+    checkLimit:         checkLimitStub(),
+    retryAfterSeconds:  retryAfterSecondsStub,
+  }
+})
 vi.mock('@/lib/audit', () => ({
   logAuditEvent: vi.fn(),
 }))

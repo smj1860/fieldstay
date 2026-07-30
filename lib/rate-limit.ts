@@ -82,10 +82,16 @@ export async function checkLimit(
     const { success, limit, remaining, reset } = await limiter.limit(identifier)
     return { allowed: success, skipped: false, errored: false, limit, remaining, reset }
   } catch (err) {
-    // Deliberately console-only: this module is imported by proxy.ts, which
-    // runs in the middleware runtime where the Sentry/Node reporter isn't
-    // available. The `site` string is what makes the log actionable.
     console.error(`[rate-limit] check failed at ${site(options.site)} — failing ${options.onError === 'allow' ? 'OPEN' : 'CLOSED'}`, err)
+
+    // Imported lazily, not at module scope: this module is pulled into the
+    // middleware bundle by proxy.ts, and a static @sentry/nextjs import there
+    // would load the whole SDK on every request just to be available for a
+    // path that only runs when Redis is actually down.
+    void import('@/lib/observability/report-error')
+      .then(({ reportError }) => reportError(err, { site: `rate-limit.${options.site}` }))
+      .catch(() => { /* reporter unavailable (edge/test) — the console.error above stands */ })
+
     return {
       allowed:   options.onError === 'allow',
       skipped:   false,

@@ -156,15 +156,14 @@ export async function GET(
   //    exists to provide. DELETE ... RETURNING is serialised by Postgres:
   //    exactly one caller gets the row back, everyone else gets zero rows and
   //    is rejected as invalid.
-  const { data: consumedStates, error: stateError } = await admin
+  const { data: stateRecord, error: stateError } = await admin
     .from('oauth_states')
     .delete()
     .eq('state',       returnedState)
     .eq('provider_id', providerId)
     .gt('expires_at',  new Date().toISOString())  // reject expired codes
     .select('*')
-
-  const stateRecord = consumedStates?.[0]
+    .maybeSingle()
 
   if (stateError || !stateRecord) {
     console.error(

@@ -124,37 +124,51 @@ export const notificationDigest = inngest.createFunction(
       // notifications.dedupe_key is backed by a PARTIAL unique index
       // (WHERE dedupe_key IS NOT NULL), which Postgres cannot use as an
       // ON CONFLICT arbiter through PostgREST — so dedupe is a pre-filter
-      // (one query for all keys) plus a 23505 swallow for the narrow race
-      // where a concurrent rerun inserts between the read and the write.
-      const keys = rows.map((r) => r.dedupe_key)
-      const { data: existing, error: existingError } = await supabase
-        .from('notifications')
-        .select('dedupe_key')
-        .in('dedupe_key', keys)
+      // (one query per chunk) plus a 23505 swallow for the narrow race where
+      // a concurrent rerun inserts between the read and the write.
+      //
+      // Chunked at CHUNK rows so neither the pre-check nor the insert can be
+      // truncated by PostgREST's 1000-row cap: a truncated pre-check would
+      // report keys as absent that already exist, and the resulting 23505
+      // would abort the whole batch insert, dropping every org's digest.
+      const CHUNK = 400
+      let inserted = 0
 
-      if (existingError) throw new Error(`Failed to check digest dedupe keys: ${existingError.message}`)
+      for (let offset = 0; offset < rows.length; offset += CHUNK) {
+        const chunk = rows.slice(offset, offset + CHUNK)
 
-      const seen = new Set((existing ?? []).map((r) => r.dedupe_key))
-      const toInsert = rows.filter((r) => !seen.has(r.dedupe_key))
-      if (!toInsert.length) return 0
+        const { data: existing, error: existingError } = await supabase
+          .from('notifications')
+          .select('dedupe_key')
+          .in('dedupe_key', chunk.map((r) => r.dedupe_key))
+          .limit(CHUNK)
 
-      const { data, error } = await supabase
-        .from('notifications')
-        .insert(toInsert)
-        .select('id')
+        if (existingError) throw new Error(`Failed to check digest dedupe keys: ${existingError.message}`)
 
-      // 23505 = the dedupe race above; 23503 = FK violation on org_id, an org
-      // deleted out of band between the count scan and this write. Neither is
-      // retriable and neither leaves anyone to notify.
-      if (error && error.code !== '23505' && error.code !== '23503') {
-        throw new Error(`Failed to write digest notifications: ${error.message}`)
+        const seen = new Set((existing ?? []).map((r) => r.dedupe_key))
+        const toInsert = chunk.filter((r) => !seen.has(r.dedupe_key))
+        if (!toInsert.length) continue
+
+        const { data, error } = await supabase
+          .from('notifications')
+          .insert(toInsert)
+          .select('id')
+
+        // 23505 = the dedupe race above; 23503 = FK violation on org_id, an
+        // org deleted out of band between the count scan and this write.
+        // Neither is retriable and neither leaves anyone to notify.
+        if (error && error.code !== '23505' && error.code !== '23503') {
+          throw new Error(`Failed to write digest notifications: ${error.message}`)
+        }
+        if (error) {
+          console.warn('[notification-digest] digest insert chunk skipped', { code: error.code })
+          continue
+        }
+
+        inserted += data?.length ?? 0
       }
-      if (error) {
-        console.warn('[notification-digest] digest insert skipped', { code: error.code })
-        return 0
-      }
 
-      return data?.length ?? 0
+      return inserted
     })
 
     logger.info(`Notification digest: ${created} notification(s) written`)

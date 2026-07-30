@@ -10,9 +10,17 @@ vi.mock('@/lib/stripe/client', () => ({
     accountLinks: { create: vi.fn() },
   },
 }))
-vi.mock('@/lib/rate-limit', () => ({
-  vendorConnectRatelimit: { limit: vi.fn(async () => ({ success: true })) },
-}))
+vi.mock('@/lib/rate-limit', async () => {
+  // checkLimit() is now the only sanctioned way to consult a limiter
+  // (lib/rate-limit.ts). The stub delegates to the limiter doubles below
+  // so existing `.limit` assertions and fail-policy tests still apply.
+  const { checkLimitStub, retryAfterSecondsStub } = await import('@/unit/stubs/rate-limit')
+  return {
+    vendorConnectRatelimit: { limit: vi.fn(async () => ({ success: true })) },
+    checkLimit:         checkLimitStub(),
+    retryAfterSeconds:  retryAfterSecondsStub,
+  }
+})
 vi.mock('@/lib/integrations/webhook-verification', () => ({
   extractClientIp: vi.fn(() => '203.0.113.5'),
 }))
@@ -66,6 +74,11 @@ function baseVendor(overrides: Partial<Record<string, unknown>> = {}) {
     name:   'Ace Plumbing',
     stripe_connect_account_id:       null,
     stripe_connect_charges_enabled:  false,
+    // M-5: the onboarding token now expires (set/refreshed by
+    // trg_vendors_stripe_connect_token_expiry when an invite is sent). NULL
+    // means "never emailed" and is treated as expired, so the default
+    // fixture carries a live expiry.
+    stripe_connect_token_expires_at: new Date(Date.now() + 7 * 86_400_000).toISOString(),
     ...overrides,
   }
 }

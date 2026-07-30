@@ -279,6 +279,31 @@ describe('ownerRezIncrementalSync (dispatcher)', () => {
     expect(result).toEqual({ dispatched: 0, circuit_open: true })
     expect(step.sendEvent).not.toHaveBeenCalled()
   })
+
+  // Audit 2026-07-30: every breaker Redis call sat in `catch { /* non-fatal */ }`,
+  // so during a Redis outage the counter never moved, the breaker never
+  // opened, and each tick kept dispatching syncs into a failing API. Same
+  // reasoning as CLAUDE.md's SMS spend ceiling: a protective limit must not
+  // disappear during an outage.
+  it('falls back to the in-memory failure count (and reports) when Redis cannot be read', async () => {
+    baseMocks()
+    ;(getRedis as ReturnType<typeof vi.fn>).mockReturnValue({
+      get: vi.fn().mockRejectedValue(new Error('redis unreachable')),
+    })
+    const supabase = makeSupabase({ integration_connections: [{ data: [] }] })
+    ;(createServiceClient as ReturnType<typeof vi.fn>).mockReturnValue(supabase)
+
+    const logger = makeLogger()
+    const step   = makeAllowlistStep(['check-circuit-breaker', 'fetch-connections'])
+    await invokeHandler(ownerRezIncrementalSync, { event: {}, step, logger })
+
+    // Never swallowed: the operator can see the breaker is running degraded.
+    expect(logger.warn).toHaveBeenCalledWith(expect.stringContaining('Circuit-breaker state unreadable'))
+    expect(reportError).toHaveBeenCalledWith(
+      expect.any(Error),
+      expect.objectContaining({ site: 'inngest.ownerrez-incremental-sync.circuit_breaker_read' }),
+    )
+  })
 })
 
 describe('ownerRezConnectionSync (per-connection handler)', () => {

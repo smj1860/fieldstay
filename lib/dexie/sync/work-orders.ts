@@ -23,6 +23,53 @@ const WO_COLUMNS =
   'id, org_id, property_id, assigned_crew_member_id, title, description, ' +
   'status, priority, scheduled_date, wo_number, created_at, updated_at'
 
+
+interface WoPull { fetched: Record<string, unknown>[]; currentIds: Set<string> }
+type ScopedQuery = () => PromiseLike<{ data: unknown; error: unknown }>
+
+/** Full pull: the data fetch doubles as the membership snapshot. */
+async function fullPull(scoped: ScopedQuery): Promise<WoPull | null> {
+  const { data, error } = await scoped()
+  if (error) {
+    console.error('[work-orders sync] work_orders fetch failed:', error)
+    return null
+  }
+  const fetched = (data ?? []) as Record<string, unknown>[]
+  return { fetched, currentIds: new Set(fetched.map((w) => w.id as string)) }
+}
+
+/**
+ * Delta pull: an id-only membership snapshot (the reconciliation mechanism —
+ * cursors are a bandwidth optimization and must never decide membership)
+ * plus only the rows that changed since the cursor.
+ */
+async function deltaPull(
+  supabase: DexieSupabaseClient,
+  scoped: () => { gt: (col: string, v: string) => PromiseLike<{ data: unknown; error: unknown }> },
+  crewMemberId: string,
+  twoWeeksAgo: string,
+  cursor: string,
+): Promise<WoPull | null> {
+  const { data: idRows, error: idError } = await supabase
+    .from('work_orders')
+    .select('id')
+    .eq('assigned_crew_member_id', crewMemberId)
+    .not('status', 'in', '("completed","cancelled")')
+    .or(`scheduled_date.is.null,scheduled_date.gte.${twoWeeksAgo}`)
+  if (idError) {
+    console.error('[work-orders sync] work_orders id snapshot failed:', idError)
+    return null
+  }
+  const currentIds = new Set(((idRows ?? []) as { id: string }[]).map((w) => w.id))
+
+  const { data, error } = await scoped().gt('updated_at', cursor)
+  if (error) {
+    console.error('[work-orders sync] work_orders delta fetch failed:', error)
+    return null
+  }
+  return { fetched: (data ?? []) as Record<string, unknown>[], currentIds }
+}
+
 export async function syncWorkOrders(
   supabase: DexieSupabaseClient,
   userId: string,
@@ -43,39 +90,11 @@ export async function syncWorkOrders(
 
   const cursor = force ? null : await getCursor(userId, 'cursor:work_orders')
 
-  let fetched: Record<string, unknown>[]
-  let currentIds: Set<string>
-
-  if (cursor === null) {
-    // Full pull: the data fetch doubles as the membership snapshot
-    const { data, error } = await scoped()
-    if (error) {
-      console.error('[work-orders sync] work_orders fetch failed:', error)
-      return
-    }
-    fetched = (data ?? []) as unknown as Record<string, unknown>[]
-    currentIds = new Set(fetched.map((w) => w.id as string))
-  } else {
-    // Delta pull: id-only membership snapshot + changed rows
-    const { data: idRows, error: idError } = await supabase
-      .from('work_orders')
-      .select('id')
-      .eq('assigned_crew_member_id', crewMemberId)
-      .not('status', 'in', '("completed","cancelled")')
-      .or(`scheduled_date.is.null,scheduled_date.gte.${twoWeeksAgo}`)
-    if (idError) {
-      console.error('[work-orders sync] work_orders id snapshot failed:', idError)
-      return
-    }
-    currentIds = new Set((idRows ?? []).map((w: { id: string }) => w.id))
-
-    const { data, error } = await scoped().gt('updated_at', cursor)
-    if (error) {
-      console.error('[work-orders sync] work_orders delta fetch failed:', error)
-      return
-    }
-    fetched = (data ?? []) as unknown as Record<string, unknown>[]
-  }
+  const pulled = cursor === null
+    ? await fullPull(scoped)
+    : await deltaPull(supabase, scoped, crewMemberId, twoWeeksAgo, cursor)
+  if (pulled === null) return
+  const { fetched, currentIds } = pulled
 
   // Reconcile: anything cached locally that's no longer in the crew
   // member's open set (completed, cancelled, or reassigned away) is removed.

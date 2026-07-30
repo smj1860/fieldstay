@@ -117,7 +117,10 @@ describe('outbox durability — offline attempts', () => {
     // navigator reports online (captive portal / dropped socket): fetch-level
     // failure, not a server rejection.
     holder.supabase = makeFakeSupabase({
-      inventory_items: Array.from({ length: 40 }, () => ({ error: { message: 'TypeError: Failed to fetch' } })),
+      // Generous: each loop iteration below drains twice (the direct call
+      // plus the backoff timer it scheduled), and an exhausted queue would
+      // fall back to a success-shaped empty response.
+      inventory_items: Array.from({ length: 400 }, () => ({ error: { message: 'TypeError: Failed to fetch' } })),
     })
 
     const engine = new SyncEngine('u1')
@@ -227,7 +230,7 @@ describe('outbox durability — ordering', () => {
 
     // A 4xx will never succeed on replay — dead-lettered on the first
     // attempt rather than burning five retries, and the queue moves on.
-    const rows = await db().mutations.toArray() as MutationRow[]
+    const rows = await db().mutations.toArray() as unknown as MutationRow[]
     expect(rows).toHaveLength(1)
     expect(rows[0]).toMatchObject({ targetId: 't-bad', failed: true })
     expect(pushed.some((u) => u.includes('t-good'))).toBe(true)

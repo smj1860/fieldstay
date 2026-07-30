@@ -25,12 +25,34 @@ import { collectSourceFiles, read, rel, ROOT } from './scan'
 // invite-link BYPASS_ROUTES entries are in scope).
 // ============================================================================
 
+// Scans line-by-line to the array's closing `]` (a line that is just `]`),
+// skipping comment lines. An earlier version sliced to the first `]` in the
+// source, which a bracket inside a comment — e.g. a path like
+// `app/g/kit/[media_kit_token]/media-kit-client.tsx` — silently truncated,
+// making entries after that comment invisible to every check in this file.
 function extractStringLiteralPrefixes(src: string, arrayVarName: string): string[] {
   const start = src.indexOf(`const ${arrayVarName} = [`)
   if (start === -1) return []
-  const end = src.indexOf(']', start)
-  const body = src.slice(start, end)
-  return [...body.matchAll(/'([^']+)'/g)].map((m) => m[1]!)
+
+  const lines = src.slice(start).split('\n')
+  const out: string[] = []
+
+  for (let i = 1; i < lines.length; i++) {
+    const line = lines[i]!
+    if (line.trim() === ']') break
+    const stripped = line.trim()
+    if (stripped.startsWith('//') || stripped.startsWith('*') || stripped.startsWith('/*')) continue
+    for (const m of line.matchAll(/'([^']+)'/g)) out.push(m[1]!)
+  }
+
+  return out
+}
+
+/** Removes // and /* *\/ comments so prose can't match a source-pattern check. */
+function stripComments(src: string): string {
+  return src
+    .replace(/\/\*[\s\S]*?\*\//g, '')
+    .replace(/^[ \t]*\/\/.*$/gm, '')
 }
 
 function extractRateLimiterFunctionBody(src: string): string {
@@ -287,14 +309,24 @@ describe('guardrail: every limiter call goes through checkLimit()', () => {
   // limiter consultation. Deliberately does NOT match `.limit(50)` (Supabase
   // row limits) or `limiter.limit(identifier)` inside lib/rate-limit.ts, which
   // is checkLimit's own single implementation.
-  const RAW_LIMIT_RE = /\b\w*(?:Limiter|Ratelimit)\s*\n?\s*\.limit\(/
+  function hasRawLimiterCall(src: string): boolean {
+    const code = stripComments(src)
+    // Only files that actually pull in a limiter can be consulting one, which
+    // keeps Supabase's own numeric `.limit(50)` / `.limit(PAGE_SIZE)` row caps
+    // out of scope everywhere else.
+    // Static `from '@/lib/rate-limit'` OR a dynamic `await import('@/lib/rate-limit')`.
+    if (!code.includes("'@/lib/rate-limit'") && !code.includes("'../rate-limit'")) return false
+    // `<x>Limiter.limit(` / `<x>Ratelimit.limit(`, or a limiter received as a
+    // parameter and called as `limiter.limit(identifier)`.
+    return /\b\w*(?:Limiter|Ratelimit|limiter)\s*\n?\s*\.limit\(\s*[^0-9)]/.test(code)
+  }
 
   it('no raw <limiter>.limit(...) outside lib/rate-limit.ts', () => {
     const offenders = collectSourceFiles(['app', 'lib', 'components'])
       .map((f) => ({ file: f, path: rel(f) }))
       .filter(({ path }) => path !== 'lib/rate-limit.ts')
       .filter(({ path }) => !PENDING_MIGRATION.has(path))
-      .filter(({ file }) => RAW_LIMIT_RE.test(read(file)))
+      .filter(({ file }) => hasRawLimiterCall(read(file)))
       .map(({ path }) => path)
 
     expect(
@@ -323,7 +355,7 @@ describe('guardrail: every limiter call goes through checkLimit()', () => {
   it('every checkLimit() call names an explicit fail policy', () => {
     const offenders: string[] = []
 
-    for (const file of collectSourceFiles(['app', 'lib', 'components', ''], ['.ts', '.tsx'])) {
+    for (const file of collectSourceFiles(['app', 'lib', 'components'])) {
       const path = rel(file)
       if (path === 'lib/rate-limit.ts') continue
       const src = read(file)
@@ -348,7 +380,7 @@ describe('guardrail: every limiter call goes through checkLimit()', () => {
     // stale and must be deleted — that is what makes this ratchet one-way.
     const stale = [...PENDING_MIGRATION.keys()].filter((p) => {
       try {
-        return !RAW_LIMIT_RE.test(read(join(ROOT, p)))
+        return !hasRawLimiterCall(read(join(ROOT, p)))
       } catch {
         return true   // file gone → entry is stale
       }
@@ -381,7 +413,7 @@ describe('guardrail: webhook dedup claims are released when the handler throws',
     const offenders: string[] = []
 
     for (const file of collectSourceFiles(['app/api/webhooks'])) {
-      const src  = read(file)
+      const src  = stripComments(read(file))
       const path = rel(file)
 
       const claimed = DEDUP_TABLES.filter((t) =>
@@ -432,7 +464,7 @@ describe('guardrail: no `void` applied to a Supabase/PostgREST builder', () => {
     const RE = /\bvoid\s+\w+\s*(?:\n\s*)?\.\s*(?:from|rpc|storage)\b/
 
     const offenders = collectSourceFiles(['app', 'lib', 'components'])
-      .filter((f) => RE.test(read(f)))
+      .filter((f) => RE.test(stripComments(read(f))))
       .map((f) => rel(f))
 
     expect(

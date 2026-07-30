@@ -134,10 +134,6 @@ export function expandIPv6(host: string): number[] | null {
   if (isIP(host) !== 6) return null
 
   const [headText = '', tailText] = host.split('::') as [string, string?]
-  const toGroups = (text: string): number[] => {
-    if (!text) return []
-    return text.split(':').map((g) => parseInt(g, 16))
-  }
 
   // A trailing IPv4 form (::ffff:127.0.0.1, 64:ff9b::203.0.113.1) becomes two groups.
   const embedV4 = (segments: string[]): number[] | null => {

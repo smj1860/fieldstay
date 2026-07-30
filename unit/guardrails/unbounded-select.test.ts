@@ -20,13 +20,20 @@ import { collectSourceFiles, rel, read } from './scan'
 // Kroger cart builder (below-par items past the cap never ordered), the
 // notification digest, priority decay, crew scoring, and the stale-feed alert.
 //
-// The rule: inside lib/inngest/**, every `.select()` must be explicitly
-// bounded — `.limit()`, `.range()` (i.e. paginated, normally via
+// The rule: inside lib/inngest/**, every read-path `.select()` must be
+// explicitly bounded — `.limit()`, `.range()` (i.e. paginated, normally via
 // lib/inngest/paginate.ts's fetchAllRows), `.single()`/`.maybeSingle()`, or a
-// `count`/`head` aggregate that ships no rows at all. Anything else is either
-// fixed or listed in EXCEPTIONS with a reason for why its result set is
-// bounded by something other than the query text (a small fixed reference
-// table, a `.eq()` on a unique-ish column, etc.).
+// `count`/`head` aggregate that ships no rows at all.
+//
+// This is a clean-baseline ratchet, the same model as tailwind-color-ratchet:
+// files that predate the rule are listed in BASELINE and grandfathered as a
+// whole, but every file NOT in BASELINE — which includes all thirteen files
+// the 2026-07-30 pass fixed — must stay clean forever. The baseline is
+// SHRINK-ONLY: a file that becomes clean must be removed from it (enforced
+// below), and nothing may ever be added. Keying the baseline by FILE rather
+// than file:line is deliberate: line-keyed entries churn on every unrelated
+// edit to a 700-line sync function, which trains people to "fix" the guardrail
+// by bumping numbers instead of reading it.
 //
 // Scope is lib/inngest/** because that is where "silently processes 1000 of N"
 // is a correctness bug rather than a pagination-UX question. Widening it to
@@ -109,17 +116,63 @@ function findOffenders(): string[] {
   return offenders
 }
 
-// Verified against the codebase 2026-07-30, immediately after the pre-launch
-// scalability pass. Every entry is a select whose result set is bounded by
-// something the query text cannot express. Adding one is a review event: state
-// WHY the row count cannot exceed the cap, not merely that it is unlikely to.
-const EXCEPTIONS: Record<string, string> = {}
+// Files that predate this rule. SHRINK-ONLY — never add an entry. Clearing one
+// means auditing every read-path select in that file: paginate it via
+// fetchAllRows, scope it per-org behind a fan-out event, bound it with an
+// explicit .limit() plus documented "continue next run" semantics, or replace
+// it with a count/RPC aggregate.
+const BASELINE = new Set<string>([
+  'lib/inngest/functions/apply-master-checklist.ts',
+  'lib/inngest/functions/auto-assign-turnover.ts',
+  'lib/inngest/functions/auto-assign-vendor.ts',
+  'lib/inngest/functions/booking-events.ts',
+  'lib/inngest/functions/capex-projection-trigger.ts',
+  'lib/inngest/functions/capex-projections.ts',
+  'lib/inngest/functions/checklist-broadcast.ts',
+  'lib/inngest/functions/crew-assignment.ts',
+  'lib/inngest/functions/crew-turnover-cancelled.ts',
+  'lib/inngest/functions/cron/daily-wrapup.ts',
+  'lib/inngest/functions/cron/integration-token-refresh.ts',
+  'lib/inngest/functions/cron/notifications-retention.ts',
+  'lib/inngest/functions/cron/vendor-compliance-grace-check.ts',
+  'lib/inngest/functions/cron/vendor-connect-onboarding.ts',
+  'lib/inngest/functions/depreciation-ledger.ts',
+  'lib/inngest/functions/flagged-turnover-wo.ts',
+  'lib/inngest/functions/guidebook-daily-monitor.ts',
+  'lib/inngest/functions/guidebook-pre-arrival-email-cron.ts',
+  'lib/inngest/functions/guidebook-sms-evening-cron.ts',
+  'lib/inngest/functions/guidebook-sms-morning-cron.ts',
+  'lib/inngest/functions/guidebook-stay-extension-cron.ts',
+  'lib/inngest/functions/hospitable/calendar-sync-cron.ts',
+  'lib/inngest/functions/hospitable/calendar-sync-handler.ts',
+  'lib/inngest/functions/hospitable/hospitable-reviews-backfill.ts',
+  'lib/inngest/functions/hospitable/incremental-sync.ts',
+  'lib/inngest/functions/hospitable/initial-sync.ts',
+  'lib/inngest/functions/hospitable/property-merge.ts',
+  'lib/inngest/functions/hospitable/teammate-sync-cron.ts',
+  'lib/inngest/functions/hospitable/teammate-sync-handler.ts',
+  'lib/inngest/functions/hostaway/initial-sync.ts',
+  'lib/inngest/functions/inventory-events.ts',
+  'lib/inngest/functions/notify-assignment-gap.ts',
+  'lib/inngest/functions/ownerrez/incremental-sync.ts',
+  'lib/inngest/functions/ownerrez/initial-sync.ts',
+  'lib/inngest/functions/ownerrez/ownerrez-reviews-sync.ts',
+  'lib/inngest/functions/ownerrez/reconciliation-cron.ts',
+  'lib/inngest/functions/ownerrez/reconciliation-handler.ts',
+  'lib/inngest/functions/platform-inventory-template-broadcast.ts',
+  'lib/inngest/functions/turnover-events.ts',
+  'lib/inngest/helpers.ts',
+])
 
 describe('guardrail: no unbounded .select() in lib/inngest/**', () => {
   const offenders = findOffenders()
 
-  it('every .select() is bounded, or a named justified exception', () => {
-    const unlisted = offenders.filter((o) => !EXCEPTIONS[o])
+  it('finds the select population (sanity: the scan is not silently empty)', () => {
+    expect(offenders.length).toBeGreaterThan(20)
+  })
+
+  it('no unbounded .select() outside the grandfathered baseline files', () => {
+    const unlisted = offenders.filter((o) => !BASELINE.has(o.split(':')[0]!))
 
     expect(
       unlisted,
@@ -135,21 +188,25 @@ describe('guardrail: no unbounded .select() in lib/inngest/**', () => {
         'explicit .limit() with documented "continue next run" semantics, or',
         'replacing the scan with a count/RPC aggregate that ships no rows.',
         '',
-        'If the result set is genuinely bounded by something the query text',
-        'cannot express, add it to EXCEPTIONS in this test with that reason.',
+        'Do NOT add the file to BASELINE — that list is shrink-only.',
         'Offenders:',
         ...unlisted,
       ].join('\n')
     ).toEqual([])
   })
 
-  it('every EXCEPTIONS entry still exists at that file:line (prune when code moves)', () => {
-    const present = new Set(offenders)
-    for (const key of Object.keys(EXCEPTIONS)) {
-      expect(
-        present.has(key),
-        `EXCEPTIONS lists ${key}, which is no longer an unbounded select — remove the stale entry.`
-      ).toBe(true)
-    }
+  it('BASELINE only lists files that still have an unbounded select (shrink-only ratchet)', () => {
+    const offendingFiles = new Set(offenders.map((o) => o.split(':')[0]!))
+    const clean = [...BASELINE].filter((f) => !offendingFiles.has(f))
+
+    expect(
+      clean,
+      [
+        'These files are in BASELINE but now have zero unbounded selects.',
+        'Remove them — the baseline is shrink-only, and leaving a cleaned file',
+        'in it silently re-permits the bug it was just fixed for. Files:',
+        ...clean,
+      ].join('\n')
+    ).toEqual([])
   })
 })

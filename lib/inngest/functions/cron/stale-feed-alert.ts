@@ -104,26 +104,33 @@ export const staleFeedAlert = inngest.createFunction(
       return result
     })
 
-    let alerted = 0
-    for (const [orgId, feeds] of byOrg) {
+    // ONE batched sendEvent instead of one step per org. The per-org step
+    // version put the whole platform's org count into a single run's step
+    // budget (and re-sent accumulated memoized state on every one of them);
+    // Inngest accepts an event array in a single step, and the downstream
+    // notify-integration-error function still runs once per event.
+    const events = [...byOrg.entries()].flatMap(([orgId, feeds]) => {
       const userId = pmUserIdByOrg[orgId]
-      if (!userId) continue
+      if (!userId) return []
 
       const feedCount = feeds.length
       const feedWord  = feedCount !== 1 ? 'feeds' : 'feed'
 
-      await step.sendEvent(`notify-stale-feed-${orgId}`, {
-        name: 'integration/connection.error',
+      return [{
+        name: 'integration/connection.error' as const,
         data: {
           user_id:     userId,
           org_id:      orgId,
           provider_id: 'ical',
           reason:      `${feedCount} ${feedWord} haven't synced in ${STALE_HOURS}+ hours`,
         },
-      })
-      alerted++
+      }]
+    })
+
+    if (events.length) {
+      await step.sendEvent('notify-stale-feeds', events)
     }
 
-    return { alerted }
+    return { alerted: events.length }
   }
 )

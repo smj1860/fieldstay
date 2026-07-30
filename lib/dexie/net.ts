@@ -72,10 +72,30 @@ const NETWORK_MESSAGE_PATTERN =
 // errors incl. RLS denials (42xxx), and PostgREST's own request-shape codes.
 const TERMINAL_CODE_PATTERN = /^(22|23|42)\d{3}$/
 
+// Client-side codes this codebase raises for a mutation that is structurally
+// unsendable — replaying it byte-for-byte can only fail the same way.
+const TERMINAL_CODES = new Set(['NO_FIELDS'])
+
 function messageOf(err: unknown): string {
   if (err instanceof Error) return err.message
   if (typeof err === 'string') return err
   return ''
+}
+
+// 408 Request Timeout / 425 Too Early / 429 Too Many Requests are explicitly
+// retryable; so is every 5xx. Any other 4xx is the server saying "this
+// request is wrong", which replaying byte-for-byte cannot change.
+const RETRYABLE_STATUSES = new Set([408, 425, 429])
+
+function classifyHttpStatus(status: number): UploadFailureKind {
+  if (RETRYABLE_STATUSES.has(status)) return 'transient'
+  if (status >= 500) return 'transient'
+  if (status >= 400) return 'terminal'
+  return 'transient'
+}
+
+function isTerminalDataCode(code: string): boolean {
+  return TERMINAL_CODES.has(code) || TERMINAL_CODE_PATTERN.test(code) || code.startsWith('PGRST')
 }
 
 /**
@@ -89,25 +109,10 @@ function messageOf(err: unknown): string {
  */
 export function classifyUploadFailure(err: unknown): UploadFailureKind {
   if (!isOnline()) return 'network'
-
-  if (err instanceof UploadHttpError) {
-    // 408 Request Timeout / 425 Too Early / 429 Too Many Requests are
-    // explicitly retryable; so is every 5xx. Any other 4xx is the server
-    // saying "this request is wrong", which replaying cannot change.
-    if (err.status === 408 || err.status === 425 || err.status === 429) return 'transient'
-    if (err.status >= 500) return 'transient'
-    if (err.status >= 400) return 'terminal'
-    return 'transient'
-  }
-
-  if (err instanceof UploadDataError && err.code) {
-    if (TERMINAL_CODE_PATTERN.test(err.code)) return 'terminal'
-    if (err.code.startsWith('PGRST')) return 'terminal'
-  }
-
+  if (err instanceof UploadHttpError) return classifyHttpStatus(err.status)
+  if (err instanceof UploadDataError && err.code && isTerminalDataCode(err.code)) return 'terminal'
   if (err instanceof TypeError) return 'network'
   if (NETWORK_MESSAGE_PATTERN.test(messageOf(err))) return 'network'
-
   return 'transient'
 }
 

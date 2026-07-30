@@ -9,7 +9,7 @@ import type { VendorComplianceDocument, ComplianceDocType } from '@/types/databa
 import { Dialog } from '@/components/ui/Dialog'
 import { Card } from '@/components/ui/Card'
 import { Badge } from '@/components/ui/Badge'
-import { Button, buttonVariantClass } from '@/components/ui/Button'
+import { Button } from '@/components/ui/Button'
 import { Input } from '@/components/ui/Input'
 import { RequiredMark } from '@/components/ui/RequiredMark'
 

@@ -89,37 +89,41 @@ export async function getPmMembersByOrgIds(
   }
   if (!members?.length) return new Map()
 
-  // Group → sort by role preference → apply the per-org limit, so each org's
-  // slice is exactly what getPmMembers would have returned for it alone.
-  const rowsByOrg = new Map<string, MemberRow[]>()
-  for (const m of members as MemberRow[]) {
-    const bucket = rowsByOrg.get(m.org_id)
-    if (bucket) bucket.push(m)
-    else rowsByOrg.set(m.org_id, [m])
-  }
-
-  const selected: MemberRow[] = []
-  for (const [, rows] of rowsByOrg) {
-    rows.sort((a, b) => ROLE_PREFERENCE.indexOf(a.role) - ROLE_PREFERENCE.indexOf(b.role))
-    selected.push(...(typeof limit === 'number' ? rows.slice(0, limit) : rows))
-  }
-
-  const emailByUserId = await resolveUserEmails(
-    supabase,
-    selected.map((m) => m.user_id)
-  )
+  const selected      = selectMembersPerOrg(members as MemberRow[], limit)
+  const emailByUserId = await resolveUserEmails(supabase, selected.map((m) => m.user_id))
 
   const result = new Map<string, PmMember[]>()
   for (const m of selected) {
     const email = emailByUserId.get(m.user_id)
-    if (!email) continue
-    const bucket = result.get(m.org_id)
-    const entry: PmMember = { userId: m.user_id, email, role: m.role }
-    if (bucket) bucket.push(entry)
-    else result.set(m.org_id, [entry])
+    if (!email) continue   // a member with no resolvable email is not reachable
+    push(result, m.org_id, { userId: m.user_id, email, role: m.role })
   }
 
   return result
+}
+
+/**
+ * Groups rows by org, sorts each group owner → admin → manager, and applies
+ * the per-org limit — so each org's slice is exactly what getPmMembers would
+ * have returned for it on its own.
+ */
+function selectMembersPerOrg(members: MemberRow[], limit: number | undefined): MemberRow[] {
+  const rowsByOrg = new Map<string, MemberRow[]>()
+  for (const m of members) push(rowsByOrg, m.org_id, m)
+
+  const selected: MemberRow[] = []
+  for (const rows of rowsByOrg.values()) {
+    rows.sort((a, b) => ROLE_PREFERENCE.indexOf(a.role) - ROLE_PREFERENCE.indexOf(b.role))
+    selected.push(...(typeof limit === 'number' ? rows.slice(0, limit) : rows))
+  }
+  return selected
+}
+
+/** Append to a Map-of-arrays, creating the bucket on first use. */
+function push<T>(map: Map<string, T[]>, key: string, value: T): void {
+  const bucket = map.get(key)
+  if (bucket) bucket.push(value)
+  else map.set(key, [value])
 }
 
 // Above this many distinct users, one paged sweep of the Admin users list is

@@ -193,8 +193,11 @@ export class SyncEngine {
       // it, so a write that never reached the server leaves a durable,
       // queryable trace instead of vanishing — the crew shell's failed-sync
       // surface reads these via useLiveQuery and offers a retry.
+      const reason = kind === 'terminal'
+        ? 'permanently rejected'
+        : `exceeded ${MAX_RETRIES} retries`
       console.error(
-        `[SyncEngine] mutation ${id} (${mutation.table}) ${kind === 'terminal' ? 'permanently rejected' : `exceeded ${MAX_RETRIES} retries`}` +
+        `[SyncEngine] mutation ${id} (${mutation.table}) ${reason}` +
         ` — marking failed. Payload:`,
         JSON.stringify({ table: mutation.table, op: mutation.op, targetId: mutation.targetId })
       )
@@ -281,6 +284,24 @@ async function uploadChecklistInstanceItem(
   if (!data || data.length === 0) throw new Error(`checklist_instance_items upload matched zero rows for id ${targetId}`)
 }
 
+/**
+ * Inventory confirmation bookkeeping (markInventoryStarted /
+ * confirmInventoryComplete) plus the acknowledge/notes fields — plain field
+ * updates, not a status transition, so no Route Handler / side effects are
+ * needed for them. The client-side effect that watches for "both checklist
+ * and inventory confirmed" is what calls completeTurnover() (routed through
+ * the complete handler) to actually finish the turnover.
+ */
+function turnoverFieldUpdate(payload: MutationPayload): MutationPayload {
+  const fieldUpdate: MutationPayload = {}
+  if ('inventory_started_at' in payload) fieldUpdate.inventory_started_at = payload.inventory_started_at
+  if ('inventory_confirmed_complete_at' in payload) fieldUpdate.inventory_confirmed_complete_at = payload.inventory_confirmed_complete_at
+  if ('inventory_confirmed_by_crew_id' in payload) fieldUpdate.inventory_confirmed_by_crew_id = payload.inventory_confirmed_by_crew_id || null
+  if ('completion_notes' in payload) fieldUpdate.completion_notes = payload.completion_notes
+  if ('dates_change_acknowledged_at' in payload) fieldUpdate.dates_change_acknowledged_at = payload.dates_change_acknowledged_at
+  return fieldUpdate
+}
+
 async function uploadTurnoverChange(
   supabase: DexieSupabaseClient,
   targetId: string,
@@ -302,19 +323,7 @@ async function uploadTurnoverChange(
     return
   }
 
-  // Inventory confirmation bookkeeping (markInventoryStarted /
-  // confirmInventoryComplete) — plain field updates, not a status
-  // transition, so no Route Handler / side effects needed here. The
-  // client-side effect that watches for "both checklist and inventory
-  // confirmed" is what calls completeTurnover() (routed above) to actually
-  // finish the turnover.
-  const fieldUpdate: MutationPayload = {}
-  if ('inventory_started_at' in payload) fieldUpdate.inventory_started_at = payload.inventory_started_at
-  if ('inventory_confirmed_complete_at' in payload) fieldUpdate.inventory_confirmed_complete_at = payload.inventory_confirmed_complete_at
-  if ('inventory_confirmed_by_crew_id' in payload) fieldUpdate.inventory_confirmed_by_crew_id = payload.inventory_confirmed_by_crew_id || null
-  if ('completion_notes' in payload) fieldUpdate.completion_notes = payload.completion_notes
-  if ('dates_change_acknowledged_at' in payload) fieldUpdate.dates_change_acknowledged_at = payload.dates_change_acknowledged_at
-
+  const fieldUpdate = turnoverFieldUpdate(payload)
   if (Object.keys(fieldUpdate).length > 0) {
     const { data, error } = await supabase
       .from('turnovers')
@@ -326,6 +335,13 @@ async function uploadTurnoverChange(
     return
   }
 
+  // Reached only for a status transition other than the two routed above.
+  // Guarded like every other field: a turnovers PATCH carrying neither a
+  // status nor any known field would otherwise issue an empty UPDATE that
+  // matches the row and "succeeds", silently discarding the mutation.
+  if (!('status' in payload)) {
+    throw new UploadDataError(`turnovers upload had no recognized fields for id ${targetId}`, 'NO_FIELDS')
+  }
   const { data, error } = await supabase
     .from('turnovers')
     .update({ status: payload.status })
@@ -433,6 +449,9 @@ async function uploadInventoryItemCount(
   targetId: string,
   payload: MutationPayload,
 ): Promise<void> {
+  if (!('current_quantity' in payload)) {
+    throw new UploadDataError(`inventory_items upload had no quantity for id ${targetId}`, 'NO_FIELDS')
+  }
   const { data, error } = await supabase
     .from('inventory_items')
     .update({ current_quantity: payload.current_quantity })
