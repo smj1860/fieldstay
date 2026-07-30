@@ -335,8 +335,8 @@ function AddEntryModal({
 
           {/* Channel */}
           <div>
-            <label className="label">Channel</label>
-            <select name="channel" className="input" defaultValue="email">
+            <label htmlFor="comms-log-client-channel" className="label">Channel</label>
+            <select id="comms-log-client-channel" name="channel" className="input" defaultValue="email">
               {(Object.keys(CHANNEL_LABELS) as CommChannel[]).map((ch) => (
                 <option key={ch} value={ch}>{CHANNEL_LABELS[ch]}</option>
               ))}
@@ -345,8 +345,8 @@ function AddEntryModal({
 
           {/* Date */}
           <div>
-            <label className="label">Date &amp; Time</label>
-            <Input
+            <label htmlFor="comms-log-client-date-and-time" className="label">Date &amp; Time</label>
+            <Input id="comms-log-client-date-and-time"
               name="communicated_at"
               type="datetime-local"
               defaultValue={nowLocalDatetime}
@@ -358,8 +358,8 @@ function AddEntryModal({
 
           {/* Subject */}
           <div>
-            <label className="label">Subject</label>
-            <Input
+            <label htmlFor="comms-log-client-subject" className="label">Subject</label>
+            <Input id="comms-log-client-subject"
               name="subject"
               type="text"
               placeholder="e.g. HVAC repair instructions, Written warning"
@@ -368,8 +368,8 @@ function AddEntryModal({
 
           {/* Body */}
           <div>
-            <label className="label">Message / Notes</label>
-            <textarea
+            <label htmlFor="comms-log-client-message-notes" className="label">Message / Notes</label>
+            <textarea id="comms-log-client-message-notes"
               name="body"
               rows={4}
               className="input resize-none"
@@ -380,8 +380,8 @@ function AddEntryModal({
           {/* Context links */}
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <div>
-              <label className="label">Property (optional)</label>
-              <select name="property_id" className="input">
+              <label htmlFor="comms-log-client-property-optional" className="label">Property (optional)</label>
+              <select id="comms-log-client-property-optional" name="property_id" className="input">
                 <option value="">—</option>
                 {properties.map((p) => (
                   <option key={p.id} value={p.id}>{p.name}</option>
@@ -389,8 +389,8 @@ function AddEntryModal({
               </select>
             </div>
             <div>
-              <label className="label">Work Order (optional)</label>
-              <select name="work_order_id" className="input">
+              <label htmlFor="comms-log-client-work-order-optional" className="label">Work Order (optional)</label>
+              <select id="comms-log-client-work-order-optional" name="work_order_id" className="input">
                 <option value="">—</option>
                 {workOrders.map((w) => (
                   <option key={w.id} value={w.id}>{w.title}</option>

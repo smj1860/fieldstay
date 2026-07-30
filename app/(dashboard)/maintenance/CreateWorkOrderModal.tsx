@@ -470,8 +470,8 @@ export function CreateWorkOrderModal({
 
           {/* Photo attachments */}
           <div>
-            <label className="label">Photos (optional)</label>
-            <input
+            <label htmlFor="createworkordermodal-photos-optional" className="label">Photos (optional)</label>
+            <input id="createworkordermodal-photos-optional"
               ref={photoInputRef}
               type="file"
               accept="image/*"

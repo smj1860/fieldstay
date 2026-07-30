@@ -452,8 +452,8 @@ function AddBookingModal({
 
         <form id="add-booking-form" action={action} className="space-y-4">
           <div>
-            <label className="label">Property <RequiredMark /></label>
-            <select name="property_id" required className="input" defaultValue={initialPropertyId ?? ''}>
+            <label htmlFor="bookings-client-property" className="label">Property <RequiredMark /></label>
+            <select id="bookings-client-property" name="property_id" required className="input" defaultValue={initialPropertyId ?? ''}>
               <option value="">Select property…</option>
               {properties.map((p) => (
                 <option key={p.id} value={p.id}>{p.name}</option>
@@ -463,8 +463,8 @@ function AddBookingModal({
 
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <div>
-              <label className="label">Check-in <RequiredMark /></label>
-              <Input
+              <label htmlFor="bookings-client-check-in" className="label">Check-in <RequiredMark /></label>
+              <Input id="bookings-client-check-in"
                 name="checkin_date"
                 type="date"
                 required
@@ -474,19 +474,19 @@ function AddBookingModal({
               />
             </div>
             <div>
-              <label className="label">Check-out <RequiredMark /></label>
-              <Input name="checkout_date" type="date" required min={checkinVal || todayStr} />
+              <label htmlFor="bookings-client-check-out" className="label">Check-out <RequiredMark /></label>
+              <Input id="bookings-client-check-out" name="checkout_date" type="date" required min={checkinVal || todayStr} />
             </div>
           </div>
 
           <div>
-            <label className="label">Guest Name</label>
-            <Input name="guest_name" type="text" placeholder="Optional" />
+            <label htmlFor="bookings-client-guest-name" className="label">Guest Name</label>
+            <Input id="bookings-client-guest-name" name="guest_name" type="text" placeholder="Optional" />
           </div>
 
           <div>
-            <label className="label">Source</label>
-            <select name="source" className="input" defaultValue="direct">
+            <label htmlFor="bookings-client-source" className="label">Source</label>
+            <select id="bookings-client-source" name="source" className="input" defaultValue="direct">
               <option value="direct">Direct Booking</option>
               <option value="airbnb">Airbnb</option>
               <option value="vrbo">VRBO</option>
@@ -497,8 +497,8 @@ function AddBookingModal({
           </div>
 
           <div>
-            <label className="label">Notes</label>
-            <textarea
+            <label htmlFor="bookings-client-notes" className="label">Notes</label>
+            <textarea id="bookings-client-notes"
               name="notes"
               rows={2}
               className="input resize-none"

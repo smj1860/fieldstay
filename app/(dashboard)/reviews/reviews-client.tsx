@@ -678,8 +678,8 @@ export function ReviewsClient({ reviews: initialReviews, manualUsedThisWeek }: P
 
           {/* Platform */}
           <div>
-            <label className="label">Platform</label>
-            <select
+            <label htmlFor="reviews-client-platform" className="label">Platform</label>
+            <select id="reviews-client-platform"
               value={manualForm.platform}
               onChange={(e) => setManualForm(f => ({ ...f, platform: e.target.value }))}
               className="input"
@@ -711,8 +711,8 @@ export function ReviewsClient({ reviews: initialReviews, manualUsedThisWeek }: P
 
           {/* Guest name */}
           <div>
-            <label className="label">Guest Name (optional)</label>
-            <Input
+            <label htmlFor="reviews-client-guest-name-optional" className="label">Guest Name (optional)</label>
+            <Input id="reviews-client-guest-name-optional"
               type="text"
               value={manualForm.guestName}
               onChange={(e) => setManualForm(f => ({ ...f, guestName: e.target.value }))}
@@ -722,8 +722,8 @@ export function ReviewsClient({ reviews: initialReviews, manualUsedThisWeek }: P
 
           {/* Review text */}
           <div>
-            <label className="label">Review Text</label>
-            <textarea
+            <label htmlFor="reviews-client-review-text" className="label">Review Text</label>
+            <textarea id="reviews-client-review-text"
               value={manualForm.reviewText}
               onChange={(e) => setManualForm(f => ({ ...f, reviewText: e.target.value }))}
               rows={5}
