@@ -233,7 +233,12 @@ inventory_items             — property-level. Has preferred_brand (overrides t
 inventory_counts            — periodic count sessions
 purchase_orders             — Has po_status: draft|sent|acknowledged|ordered|received|cancelled
 purchase_order_items
+inventory_consumption_stats — per (property,item) rolling consumption rate;
+                              service-role-write-only, org-member read.
+                              Feeds lib/inventory/par-engine.ts.
 ```
+
+par_mode/smart_group/base_qty exist on inventory_catalog, org_inventory_catalog, platform_inventory_template_items, inventory_template_items, inventory_items. par_mode='smart' ⇒ inventory_items.par_level is a server-maintained cache — see lib/inventory/par-engine.ts.
 
 ### Vendors & Compliance
 ```

@@ -27,6 +27,8 @@ export type PriorityLevel       = 'low' | 'medium' | 'high' | 'urgent'
 export type ContactPref         = 'email' | 'sms' | 'both'
 export type ChecklistStatus     = 'not_started' | 'in_progress' | 'completed'
 export type InventoryCategory   = 'paper_goods' | 'cleaning' | 'kitchen' | 'bath' | 'laundry' | 'bedroom' | 'bedroom_linens' | 'outdoor' | 'maintenance_safety' | 'guest_experience' | 'technology' | 'other'
+import type { ParMode, ParSmartGroup } from '@/lib/inventory/par-engine'
+export type { ParMode, ParSmartGroup }
 export type PoStatus            = 'draft' | 'sent' | 'acknowledged' | 'ordered' | 'received' | 'cancelled'
 export type VendorSpecialty     = 'plumbing' | 'electrical' | 'hvac' | 'landscaping' | 'cleaning' | 'pest_control' | 'pool' | 'roofing' | 'general' | 'other'
 export type WoStatus            = 'pending' | 'quote_requested' | 'assigned' | 'in_progress' | 'completed' | 'cancelled'
@@ -435,6 +437,9 @@ export interface OrgInventoryCatalogItem {
   category:                  InventoryCategory
   default_unit:              string
   default_par_level:         number
+  par_mode:                  ParMode
+  smart_group:               ParSmartGroup | null
+  base_qty:                  number
   description:               string | null
   is_active:                 boolean
   created_at:                string
@@ -613,6 +618,9 @@ export interface InventoryCatalogItem {
   category:          InventoryCategory
   default_unit:      string
   default_par_level: number
+  par_mode:          ParMode
+  smart_group:       ParSmartGroup | null
+  base_qty:          number
   description:       string | null
   is_active:         boolean
   created_at:        string
@@ -628,6 +636,11 @@ export interface InventoryItem {
   category:                InventoryCategory
   unit:                    string
   par_level:               number
+  par_mode:                ParMode
+  smart_group:             ParSmartGroup | null
+  base_qty:                number
+  auto_adjust:             boolean
+  par_resolved_at:         string | null
   current_quantity:        number
   low_stock_threshold_pct: number
   is_active:               boolean
@@ -1206,6 +1219,9 @@ export interface PlatformInventoryTemplateItem {
   platform_inventory_template_id: string
   catalog_item_id:                string
   par_level:                      number
+  par_mode:                       ParMode
+  smart_group:                    ParSmartGroup | null
+  base_qty:                       number
   preferred_brand:                string | null
   sort_order:                     number
   created_at:                     string
@@ -1224,6 +1240,9 @@ export interface InventoryTemplateItem {
   category:        InventoryCategory | null
   unit:            string | null
   par_level:       number
+  par_mode:        ParMode
+  smart_group:     ParSmartGroup | null
+  base_qty:        number
   // Legacy column from the original 20260604223335_add_inventory_templates.sql
   // schema, superseded by par_level (added later) — never read or written
   // by current app code (see actions.ts's "par_qty (unused, see Pass 1/3
