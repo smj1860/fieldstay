@@ -562,7 +562,7 @@ const FAQ_ITEMS = [
   },
   {
     q: 'How do I know if something hasn’t synced yet?',
-    a: 'An "Offline" pill appears at the top of the screen whenever your phone has no connection — that’s expected and nothing to worry about. If you see a red "Confirmation didn’t sync — check your connection" message with a Retry button, that means the app already tried several times on its own and needs you to tap Retry once you’re back in range.',
+    a: 'An "Offline" pill appears at the top of the screen whenever your phone has no connection — that’s expected and nothing to worry about, and nothing is lost while it’s showing. If something genuinely couldn’t be saved to FieldStay, a red "didn’t sync" panel appears at the top of every screen listing exactly what’s stuck, with a Retry all button. Tap it once you’re back in range.',
   },
   {
     q: 'Do I need to keep the app open for things to sync, or does it happen in the background?',

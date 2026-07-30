@@ -99,6 +99,16 @@ function makeSupabase(queue: Record<string, Resp[]>, userId: string | null = 'us
   }
 }
 
+// isVendorHardBlocked() fails CLOSED: a missing vendor_compliance_status row
+// (the harness default) now BLOCKS assignment, because a vendor with no row is
+// a vendor not in the caller's org. Tests that expect an assignment to succeed
+// must therefore stub a compliant row explicitly — the previous implicit pass
+// was the fail-open bug.
+// A factory, not a shared constant: makeSupabase's queue shift() mutates the
+// array it is handed, so a module-level array would be drained by the first
+// test that used it.
+const compliant = () => [{ data: { compliance_status: 'compliant' } }]
+
 const membership = {
   org_id: 'org_1',
   role:   'admin' as const,
@@ -252,6 +262,7 @@ describe('maintenance/actions', () => {
     it('fires a vendor-assigned event when the vendor changes, scoped to the caller org', async () => {
       const supabase = makeSupabase({
         work_orders: [{ data: { vendor_id: 'vendor_1' } }, { error: null }],
+        vendor_compliance_status: compliant(),
       })
       vi.mocked(requireOrgRole).mockResolvedValue({
         supabase, membership, user: { id: 'user_1' },
@@ -670,6 +681,7 @@ describe('maintenance/actions', () => {
           },
         ],
         work_orders: [{ data: null }, { data: { id: 'wo_1' } }],
+        vendor_compliance_status: compliant(),
       })
       vi.mocked(requireOrgRole).mockResolvedValue({ supabase, membership } as never)
 
@@ -721,6 +733,7 @@ describe('maintenance/actions', () => {
       const supabase = makeSupabase({
         vendors:      [{ data: { id: 'vendor_1', name: 'Acme Cleaning' } }],
         work_orders:  [{ data: [{ id: 'wo_1', suggestion_status: null, suggested_vendor_ids: null }] }, { error: null }],
+        vendor_compliance_status: compliant(),
       })
       vi.mocked(requireOrgRole).mockResolvedValue({
         supabase, membership, user: { id: 'user_1' },
@@ -763,6 +776,7 @@ describe('maintenance/actions', () => {
     it('accepts a suggested vendor for a work order verified to belong to the caller org', async () => {
       const supabase = makeSupabase({
         work_orders: [{ data: { id: 'wo_1', suggested_vendor_ids: ['vendor_1'] } }, { error: null }],
+        vendor_compliance_status: compliant(),
       })
       vi.mocked(requireOrgRole).mockResolvedValue({
         supabase, membership, user: { id: 'user_1' },
@@ -783,6 +797,42 @@ describe('maintenance/actions', () => {
       const result = await acceptVendorSuggestion('other-orgs-wo')
 
       expect(result).toEqual({ error: 'Work order not found' })
+    })
+
+    // Fail-closed regression: the compliance gate is the enforcement boundary
+    // for every assignment path. It previously discarded its error, so an RLS
+    // denial or a transient failure returned "not blocked" and dispatched an
+    // uninsured vendor to a customer's property.
+    it('blocks the assignment when the compliance read itself errors', async () => {
+      const supabase = makeSupabase({
+        work_orders: [{ data: { id: 'wo_1', suggested_vendor_ids: ['vendor_1'] } }],
+        vendor_compliance_status: [{ data: null, error: { message: 'permission denied', code: '42501' } }],
+      })
+      vi.mocked(requireOrgRole).mockResolvedValue({
+        supabase, membership, user: { id: 'user_1' },
+      } as never)
+
+      const result = await acceptVendorSuggestion('wo_1')
+
+      expect(result.error).toBeTruthy()
+      expect(inngest.send).not.toHaveBeenCalled()
+    })
+
+    // Allowlist, not denylist: the vendor_compliance_status view is being
+    // corrected and may gain a new state. An unrecognized status must block.
+    it('blocks the assignment on an unrecognized compliance status', async () => {
+      const supabase = makeSupabase({
+        work_orders: [{ data: { id: 'wo_1', suggested_vendor_ids: ['vendor_1'] } }],
+        vendor_compliance_status: [{ data: { compliance_status: 'documents_invalid' } }],
+      })
+      vi.mocked(requireOrgRole).mockResolvedValue({
+        supabase, membership, user: { id: 'user_1' },
+      } as never)
+
+      const result = await acceptVendorSuggestion('wo_1')
+
+      expect(result.error).toBeTruthy()
+      expect(inngest.send).not.toHaveBeenCalled()
     })
 
     it('errors when there is no suggestion to accept', async () => {

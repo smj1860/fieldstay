@@ -1,4 +1,5 @@
 import { getDexieDb } from './schema'
+import { reportError } from '@/lib/observability/report-error'
 import { enqueueMutation, getSyncEngine } from './syncService'
 
 export interface UpdateChecklistItemInput {
@@ -313,6 +314,7 @@ export async function loadInventoryCountDraft(
     return { ...EMPTY_DRAFT, ...(JSON.parse(row.value) as Partial<InventoryCountDraft>) }
   } catch (err) {
     console.error('[inventory draft] corrupt local draft — starting fresh:', err)
+    reportError(err, { site: 'lib.dexie.helpers.loadInventoryCountDraft' })
     return EMPTY_DRAFT
   }
 }

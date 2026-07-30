@@ -57,6 +57,17 @@ export async function GET(
     return NextResponse.json({ error: 'Invalid or expired link' }, { status: 404 })
   }
 
+  // Already fully onboarded — show confirmation page
+  if (vendor.stripe_connect_charges_enabled) {
+    return NextResponse.redirect(
+      `${process.env.NEXT_PUBLIC_APP_URL}/api/vendor-connect/${token}/return?already_onboarded=true`
+    )
+  }
+
+  // Checked AFTER the already-onboarded branch above so a vendor who has
+  // finished onboarding still gets the friendly confirmation page rather than
+  // a 410 — that branch only redirects to an informational page and starts no
+  // Stripe session.
   // M-5: this token used to have NO lifetime at all — a forwarded onboarding
   // email was a permanent capability. The expiry is written/refreshed by
   // trg_vendors_stripe_connect_token_expiry whenever an invite is (re-)sent
@@ -67,13 +78,6 @@ export async function GET(
     return NextResponse.json(
       { error: 'This onboarding link has expired. Ask your property manager to re-send it.' },
       { status: 410 }
-    )
-  }
-
-  // Already fully onboarded — show confirmation page
-  if (vendor.stripe_connect_charges_enabled) {
-    return NextResponse.redirect(
-      `${process.env.NEXT_PUBLIC_APP_URL}/api/vendor-connect/${token}/return?already_onboarded=true`
     )
   }
 
