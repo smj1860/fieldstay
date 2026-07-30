@@ -48,10 +48,14 @@ function makeSupabase(queue: Record<string, Resp[]>) {
     const result: Resp = q?.length ? q.shift()! : { data: null, error: null }
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const chain: any = {}
-    for (const m of ['select', 'insert', 'update', 'eq']) {
+    // `.is(...)` is the sign-off UPDATE's TOCTOU precondition
+    // (.is('public_signed_off_at', null)); `.maybeSingle()` is how it reads
+    // back whether it actually matched a row.
+    for (const m of ['select', 'insert', 'update', 'eq', 'is']) {
       chain[m] = vi.fn(() => chain)
     }
-    chain.single = vi.fn(() => Promise.resolve(result))
+    chain.single      = vi.fn(() => Promise.resolve(result))
+    chain.maybeSingle = vi.fn(() => Promise.resolve(result))
     chain.then   = (resolve: (v: unknown) => unknown) => Promise.resolve(result).then(resolve)
     return chain
   })
