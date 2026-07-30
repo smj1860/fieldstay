@@ -54,44 +54,48 @@ export async function handleCoreSubscriptionUpdate(
                     : subscription.status === 'past_due' ? 'past_due'
                     : 'cancelled'
 
-  // Find the org by Stripe customer ID — `plan` is read here, before the
-  // update below overwrites it, so a genuine tier change (starter -> pro)
-  // can be told apart from the initial trial signup (where the org's
-  // just-created default plan happens not to match whatever tier they
-  // signed up for, which is not a "plan changed" event from the PM's
-  // perspective — see the eventType gate below).
-  const { data: org } = await supabase
-    .from('organizations')
-    .select('id, name, plan')
-    .eq('stripe_customer_id', customerId)
-    .single()
-  if (!org) return
-
-  const previousPlan = (org as { plan?: string }).plan as PlanKey | undefined
-
-  await supabase
-    .from('organizations')
-    .update({
-      stripe_subscription_id: subscription.id,
-      plan,
-      plan_status:     planStatus,
-      max_properties:  PLANS[plan].maxProperties,
-      trial_ends_at:   subscription.trial_end
+  // Read-then-write via two separate calls would race: two concurrent
+  // webhook deliveries for the same org (a rapid double plan-change, or
+  // Stripe's own retry racing a fresh delivery) could both read the same
+  // stale "previous" plan before either update committed. This RPC does
+  // the lookup, row lock, and update atomically in one server-side
+  // transaction (see supabase/migrations/20260730140000_atomic_subscription_plan_update.sql) —
+  // a concurrent call for the same org blocks on the lock until the first
+  // commits, then reads the now-committed value as "previous", never a
+  // stale pre-lock read.
+  const { data: rpcResult, error: updateError } = await supabase
+    .rpc('update_organization_subscription_from_stripe', {
+      p_customer_id:            customerId,
+      p_stripe_subscription_id: subscription.id,
+      p_plan:                   plan,
+      p_plan_status:            planStatus,
+      p_max_properties:         PLANS[plan].maxProperties,
+      p_trial_ends_at:          subscription.trial_end
         ? new Date(subscription.trial_end * 1000).toISOString()
         : null,
     })
-    .eq('id', org.id)
+    .maybeSingle()
+
+  if (updateError) {
+    throw new Error(`update_organization_subscription_from_stripe failed for customer ${customerId}: ${updateError.message}`)
+  }
+
+  // StripeSupabaseClient carries no <Database> generic (see the note in
+  // types/database.ts), so .rpc() infers `{}` rather than the real shape —
+  // cast to the RETURNS TABLE columns from the migration.
+  const org = rpcResult as { org_id: string; org_name: string | null; previous_plan: PlanKey } | null
+  if (!org) return
 
   // previous_plan is only meaningful on an update to an existing
   // subscription — never on creation, where the org's pre-signup default
   // plan isn't a real "previous" tier the PM ever knowingly held.
   const genuinePreviousPlan =
-    eventType === 'customer.subscription.updated' ? (previousPlan ?? null) : null
+    eventType === 'customer.subscription.updated' ? (org.previous_plan as PlanKey) : null
 
   await inngest.send({
     name: 'billing/subscription-updated',
     data: {
-      org_id:                 org.id,
+      org_id:                 org.org_id,
       stripe_subscription_id: subscription.id,
       plan,
       plan_status:            planStatus,
@@ -100,21 +104,21 @@ export async function handleCoreSubscriptionUpdate(
   })
 
   await logAuditEvent({
-    orgId:    org.id,
+    orgId:    org.org_id,
     action:   'billing.subscription.updated',
     metadata: { plan, planStatus, subscriptionId: subscription.id },
   })
 
-  const orgName = (org as { id: string; name?: string | null }).name ?? ''
+  const orgName = org.org_name ?? ''
 
   // ── Trial lifecycle start (subscription.created while trialing) ───
   if (eventType === 'customer.subscription.created' && planStatus === 'trialing' && subscription.trial_end) {
     const trialEndsAt = subscription.trial_end
-    await notifyOrgAdmin(supabase, org.id, async (userEmail, firstName) => {
+    await notifyOrgAdmin(supabase, org.org_id, async (userEmail, firstName) => {
       await inngest.send({
         name: 'billing/trial-lifecycle-start',
         data: {
-          org_id:        org.id,
+          org_id:        org.org_id,
           user_email:    userEmail,
           first_name:    firstName,
           org_name:      orgName,
@@ -126,11 +130,11 @@ export async function handleCoreSubscriptionUpdate(
 
   // ── First payment confirmed (trialing → active transition) ────────
   if (eventType === 'customer.subscription.updated' && previousStatus === 'trialing' && planStatus === 'active') {
-    await notifyOrgAdmin(supabase, org.id, async (userEmail, firstName) => {
+    await notifyOrgAdmin(supabase, org.org_id, async (userEmail, firstName) => {
       await inngest.send({
         name: 'billing/first-payment-confirmed',
         data: {
-          org_id:     org.id,
+          org_id:     org.org_id,
           user_email: userEmail,
           first_name: firstName,
           org_name:   orgName,

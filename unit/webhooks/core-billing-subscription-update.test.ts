@@ -35,21 +35,23 @@ function makeSubscription(overrides: Partial<{
   } as never
 }
 
-function makeSupabase(orgResult: { data: unknown; error?: unknown } = { data: { id: 'org_1', name: 'Lake Martin Delivery', plan: 'starter' }, error: null }) {
-  const updateEq = vi.fn(() => Promise.resolve({ error: null }))
+// Mocks the RPC-based lookup+update (update_organization_subscription_from_stripe)
+// that replaced the old separate select()+update() pair — see the TOCTOU race
+// fix in core-billing.ts. rpcResult is what the DB function's RETURNS TABLE
+// row would look like: { org_id, org_name, previous_plan }, or null/error to
+// simulate "no matching org" / an RPC failure.
+function makeSupabase(rpcResult: { data: unknown; error?: unknown } = {
+  data: { org_id: 'org_1', org_name: 'Lake Martin Delivery', previous_plan: 'starter' },
+  error: null,
+}) {
+  const rpc = vi.fn(() => ({ maybeSingle: vi.fn(() => Promise.resolve(rpcResult)) }))
   const from = vi.fn((table: string) => {
-    if (table === 'organizations') {
-      return {
-        select: vi.fn(() => ({ eq: vi.fn(() => ({ single: vi.fn(() => Promise.resolve(orgResult)) })) })),
-        update: vi.fn(() => ({ eq: updateEq })),
-      }
-    }
     if (table === 'organization_members') {
       return { select: vi.fn(() => ({ eq: vi.fn(() => ({ eq: vi.fn(() => ({ single: vi.fn(() => Promise.resolve({ data: null, error: null })) })) })) })) }
     }
     throw new Error(`Unexpected table in test: ${table}`)
   })
-  return { from } as never
+  return { rpc, from } as never
 }
 
 describe('handleCoreSubscriptionUpdate — previous_plan enrichment', () => {
@@ -57,8 +59,34 @@ describe('handleCoreSubscriptionUpdate — previous_plan enrichment', () => {
     vi.clearAllMocks()
   })
 
+  it('calls the atomic RPC with the mapped plan/status/max_properties/trial_ends_at', async () => {
+    const supabase = makeSupabase()
+
+    await handleCoreSubscriptionUpdate(
+      supabase,
+      makeSubscription({ status: 'active', priceId: 'price_growth', trialEnd: null }),
+      'customer.subscription.updated',
+      'active',
+    )
+
+    expect((supabase as { rpc: ReturnType<typeof vi.fn> }).rpc).toHaveBeenCalledWith(
+      'update_organization_subscription_from_stripe',
+      {
+        p_customer_id:            'cus_1',
+        p_stripe_subscription_id: 'sub_1',
+        p_plan:                   'growth',
+        p_plan_status:            'active',
+        p_max_properties:         50,
+        p_trial_ends_at:          null,
+      },
+    )
+  })
+
   it('includes the org\'s pre-update plan as previous_plan on a genuine tier change (update event)', async () => {
-    const supabase = makeSupabase({ data: { id: 'org_1', name: 'Lake Martin Delivery', plan: 'starter' }, error: null })
+    const supabase = makeSupabase({
+      data: { org_id: 'org_1', org_name: 'Lake Martin Delivery', previous_plan: 'starter' },
+      error: null,
+    })
 
     await handleCoreSubscriptionUpdate(
       supabase,
@@ -82,7 +110,10 @@ describe('handleCoreSubscriptionUpdate — previous_plan enrichment', () => {
   it('always sends previous_plan: null on the initial subscription.created event, regardless of the org\'s stored plan', async () => {
     // Simulates an org whose DB default happens to differ from the tier
     // they signed up for — this must NOT be reported as a "plan change".
-    const supabase = makeSupabase({ data: { id: 'org_1', name: 'Lake Martin Delivery', plan: 'starter' }, error: null })
+    const supabase = makeSupabase({
+      data: { org_id: 'org_1', org_name: 'Lake Martin Delivery', previous_plan: 'starter' },
+      error: null,
+    })
 
     await handleCoreSubscriptionUpdate(
       supabase,
@@ -100,7 +131,10 @@ describe('handleCoreSubscriptionUpdate — previous_plan enrichment', () => {
   })
 
   it('reports previous_plan equal to the new plan when nothing actually changed tier (e.g. a status-only update)', async () => {
-    const supabase = makeSupabase({ data: { id: 'org_1', name: 'Lake Martin Delivery', plan: 'growth' }, error: null })
+    const supabase = makeSupabase({
+      data: { org_id: 'org_1', org_name: 'Lake Martin Delivery', previous_plan: 'growth' },
+      error: null,
+    })
 
     await handleCoreSubscriptionUpdate(
       supabase,
@@ -114,5 +148,28 @@ describe('handleCoreSubscriptionUpdate — previous_plan enrichment', () => {
         data: expect.objectContaining({ plan: 'growth', previous_plan: 'growth' }),
       }),
     )
+  })
+
+  it('is a no-op (no event sent) when the RPC finds no matching org', async () => {
+    const supabase = makeSupabase({ data: null, error: null })
+
+    await handleCoreSubscriptionUpdate(
+      supabase,
+      makeSubscription(),
+      'customer.subscription.updated',
+      'active',
+    )
+
+    expect(inngest.send).not.toHaveBeenCalled()
+  })
+
+  it('throws when the RPC itself errors, instead of silently proceeding with no org', async () => {
+    const supabase = makeSupabase({ data: null, error: { message: 'row lock timeout' } })
+
+    await expect(
+      handleCoreSubscriptionUpdate(supabase, makeSubscription(), 'customer.subscription.updated', 'active'),
+    ).rejects.toThrow('row lock timeout')
+
+    expect(inngest.send).not.toHaveBeenCalled()
   })
 })
