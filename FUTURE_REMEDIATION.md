@@ -318,7 +318,49 @@ matching the pattern used everywhere else in this codebase.
 
 ---
 
-## 13. Migration filename timestamps vs. recorded applied versions have drifted
+## 13. ~~Migration filename timestamps vs. recorded applied versions have drifted~~ — RESOLVED 2026-07-30
+
+**Resolution:** took a third path neither (a) nor (b) below anticipated:
+updated the **remote ledger** to match the local filenames, rather than
+renaming ~250 local files (which would have broken the exact-filename
+references throughout CLAUDE.md, docs/, code comments, and guardrail tests).
+In production (`vpmznjktllhmmbfnxuvk`), rewrote the 67 discrepant
+`supabase_migrations.schema_migrations` rows so `version` equals the local
+filename's timestamp prefix and `name` equals its description (this also
+normalized 9 rows whose `name` had a second timestamp embedded in it). Done
+as a two-phase update (temp-prefixed versions, then stripped) inside one
+transaction so the primary key never saw a transient collision. Verified by
+digest: `md5` over the sorted `version_name` set now matches `md5` over the
+sorted local filename set exactly (276 = 276).
+
+One local file was the odd one out: `20260617000003_add_missing_fk_indexes.sql`,
+an applied-under-another-timestamp draft (it already carried a 2026-07-08
+"NOT RECORDED IN LIVE MIGRATION HISTORY" header) that the 2026-07-28
+`_unshipped/` sweep missed — moved to `supabase/migrations/_unshipped/` with
+the standard SUPERSEDED header.
+
+**Deliberately out of scope:** the E2E project's (`syhthijeqlnltufdawyb`)
+ledger, which contains genuine duplicate applies and E2E-only entries from
+its independently-migrated era. Nothing reads it — the `db-invariants` and
+type-drift CI gates verify E2E via RPCs against the live schema, not the
+ledger — so reconciling it would be churn without benefit. Schema parity is
+what matters there, and those gates enforce it.
+
+**Go-forward convention:** when applying a migration via the MCP
+`apply_migration` tool, it stamps the row with its own execution-time
+version regardless of the `name` passed — so after each apply, fix the new
+row to match the local filename:
+```sql
+UPDATE supabase_migrations.schema_migrations
+SET version = '<local file timestamp>', name = '<local file description>'
+WHERE version = (SELECT max(version) FROM supabase_migrations.schema_migrations);
+```
+(or keep passing the full filename as `name` and batch-fix later — either
+way, don't let the drift re-accumulate silently.)
+
+Original item kept below for context:
+
+### ~~Migration filename timestamps vs. recorded applied versions have drifted~~
 
 **Files:** `supabase/migrations/*.sql` (local) vs. Supabase's migration
 history table for project `vpmznjktllhmmbfnxuvk` (remote)

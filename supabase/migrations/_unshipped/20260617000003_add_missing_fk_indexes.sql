@@ -1,3 +1,12 @@
+-- SUPERSEDED — moved to _unshipped/ during the 2026-07-30 migration-ledger
+-- reconciliation (FUTURE_REMEDIATION.md item 13). This file already carried a
+-- 2026-07-08 "NOT RECORDED IN LIVE MIGRATION HISTORY" note (below) confirming
+-- its objects exist live but its version was never recorded in
+-- supabase_migrations.schema_migrations — the same applied-under-another-
+-- timestamp drift pattern as the 68 files moved here on 2026-07-28; this one
+-- was simply left behind by that pass. Kept for historical reference only;
+-- do not run.
+-- ---------------------------------------------------------------------------
 -- ─────────────────────────────────────────────────────────────────────────
 -- NOT RECORDED IN LIVE MIGRATION HISTORY: verified via Supabase MCP
 -- list_migrations against project vpmznjktllhmmbfnxuvk on 2026-07-08 that

@@ -32,6 +32,18 @@ pass this came from — that pass also found and flagged one **genuine** gap
 (`hospitable_launch_promo`, NOT moved here — see the task notes) where the
 live database was actually missing schema that application code depends on,
 underscoring that "local-only" is not automatically "safe to file away."
+(That gap was closed 2026-07-30: the promo migration is now applied to
+production and E2E.)
+
+**1 additional file** (2026-07-30) —
+`20260617000003_add_missing_fk_indexes.sql`, the same applied-under-another-
+timestamp drift pattern (it already carried a 2026-07-08 "NOT RECORDED IN
+LIVE MIGRATION HISTORY" header), left behind by the 2026-07-28 pass. Moved
+during the migration-ledger reconciliation that also rewrote the production
+ledger's 67 execution-time-stamped versions to match the local filenames —
+production's `supabase_migrations.schema_migrations` is now 1:1 with
+`supabase/migrations/*.sql` (verified by digest). See FUTURE_REMEDIATION.md
+item 13 (resolved) for the full pass.
 
 ## Will it ever ship?
 
