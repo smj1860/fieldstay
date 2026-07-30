@@ -4,6 +4,7 @@ import { useRef, useState, useTransition } from 'react'
 import { AlertTriangle, CheckCircle2, Upload } from 'lucide-react'
 import { cn, INVENTORY_CATEGORY_LABELS } from '@/lib/utils'
 import { Button } from '@/components/ui/Button'
+import { Badge } from '@/components/ui/Badge'
 import { Checkbox } from '@/components/ui/Checkbox'
 import { Dialog } from '@/components/ui/Dialog'
 import { Input } from '@/components/ui/Input'
@@ -11,16 +12,73 @@ import { InlineAlert } from '@/components/ui/InlineAlert'
 import { Tabs } from '@/components/ui/Tabs'
 import { createInventoryTemplate, createInventoryTemplateFromCSV } from '../actions'
 import { applyTemplateToProperties } from '@/app/(dashboard)/inventory/actions'
-import type { InventoryCategory } from '@/types/database'
+import type { InventoryCategory, ParMode, ParSmartGroup } from '@/types/database'
+import { PAR_SMART_GROUPS, type ParConfigInput } from '@/lib/inventory/par-engine'
 
 interface CatalogItem {
   id:           string
   name:         string
   category:     InventoryCategory
   default_unit: string
+  par_mode:     ParMode
+  smart_group:  ParSmartGroup | null
+  base_qty:     number
 }
 
 interface Property { id: string; name: string }
+
+function ParModeBadge({ par_mode, smart_group }: Readonly<{ par_mode: ParMode; smart_group: ParSmartGroup | null }>) {
+  if (par_mode === 'static') return <Badge tone="slate">Static</Badge>
+  return <Badge tone="gold">Smart{smart_group ? ` · ${PAR_SMART_GROUPS[smart_group].label.split(' (')[0]}` : ''}</Badge>
+}
+
+function ItemParConfigControls({
+  value,
+  onChange,
+}: Readonly<{
+  value:    ParConfigInput
+  onChange: (patch: Partial<ParConfigInput>) => void
+}>) {
+  return (
+    <div className="flex items-center gap-1.5">
+      <select
+        value={value.par_mode}
+        onChange={(e) => {
+          const par_mode = e.target.value as ParMode
+          onChange(par_mode === 'smart' ? { par_mode, smart_group: value.smart_group ?? 'guest_consumable' } : { par_mode, smart_group: null })
+        }}
+        className="text-xs border border-themed rounded px-1.5 py-1 bg-transparent text-secondary-themed focus:outline-none focus:ring-1 focus:ring-[var(--accent-gold)]"
+        aria-label="Par mode"
+      >
+        <option value="static">Static</option>
+        <option value="smart">Smart</option>
+      </select>
+      {value.par_mode === 'smart' && (
+        <>
+          <select
+            value={value.smart_group ?? ''}
+            onChange={(e) => onChange({ smart_group: e.target.value as ParSmartGroup })}
+            className="text-xs border border-themed rounded px-1.5 py-1 bg-transparent text-secondary-themed focus:outline-none focus:ring-1 focus:ring-[var(--accent-gold)]"
+            aria-label="Smart group"
+          >
+            {Object.entries(PAR_SMART_GROUPS).map(([key, spec]) => (
+              <option key={key} value={key}>{spec.label}</option>
+            ))}
+          </select>
+          <input
+            type="number"
+            min={0}
+            step="any"
+            value={value.base_qty}
+            onChange={(e) => onChange({ base_qty: Number.isFinite(e.target.valueAsNumber) ? e.target.valueAsNumber : 1 })}
+            className="w-16 text-xs border border-themed rounded px-1.5 py-1 bg-transparent text-secondary-themed focus:outline-none focus:ring-1 focus:ring-[var(--accent-gold)]"
+            aria-label="Base quantity"
+          />
+        </>
+      )}
+    </div>
+  )
+}
 
 function groupByCategory(items: CatalogItem[]): Array<[InventoryCategory, CatalogItem[]]> {
   const groups = new Map<InventoryCategory, CatalogItem[]>()
@@ -111,6 +169,7 @@ export function CreateTemplateBuilder({
   // Checkbox-select mode
   const [selected, setSelected] = useState<Set<string>>(new Set())
   const [brandByItemId, setBrandByItemId] = useState<Record<string, string>>({})
+  const [parConfigByItemId, setParConfigByItemId] = useState<Record<string, ParConfigInput>>({})
 
   // CSV mode
   const [csvInputMode, setCsvInputMode] = useState<'file' | 'paste'>('file')
@@ -133,13 +192,18 @@ export function CreateTemplateBuilder({
 
   const groups = groupByCategory(catalogItems)
 
-  const toggleItem = (id: string) => {
+  const toggleItem = (item: CatalogItem) => {
     setSelected((prev) => {
       const next = new Set(prev)
-      if (next.has(id)) next.delete(id)
-      else next.add(id)
+      if (next.has(item.id)) next.delete(item.id)
+      else next.add(item.id)
       return next
     })
+    // Seed the override with the catalog row's own config the first time an
+    // item is checked — the admin can then adjust it before save.
+    setParConfigByItemId((prev) =>
+      prev[item.id] ? prev : { ...prev, [item.id]: { par_mode: item.par_mode, smart_group: item.smart_group, base_qty: item.base_qty } }
+    )
   }
 
   const toggleCategory = (categoryItems: CatalogItem[]) => {
@@ -152,6 +216,19 @@ export function CreateTemplateBuilder({
       })
       return next
     })
+    setParConfigByItemId((prev) => {
+      const next = { ...prev }
+      for (const item of categoryItems) {
+        if (!allSelected && !next[item.id]) {
+          next[item.id] = { par_mode: item.par_mode, smart_group: item.smart_group, base_qty: item.base_qty }
+        }
+      }
+      return next
+    })
+  }
+
+  const updateItemParConfig = (itemId: string, patch: Partial<ParConfigInput>) => {
+    setParConfigByItemId((prev) => ({ ...prev, [itemId]: { ...prev[itemId]!, ...patch } }))
   }
 
   const handleCsvFile = (file: File) => {
@@ -207,7 +284,8 @@ export function CreateTemplateBuilder({
         : await createInventoryTemplate(
             templateName.trim(),
             Array.from(selected),
-            brandByItemId
+            brandByItemId,
+            parConfigByItemId
           )
       if (result.error || !result.templateId) {
         setCreateError(result.error ?? 'Failed to create template.')
@@ -217,6 +295,7 @@ export function CreateTemplateBuilder({
       setCreatedTemplateName(templateName.trim())
       setSelected(new Set())
       setBrandByItemId({})
+      setParConfigByItemId({})
       clearCsv()
     })
   }
@@ -266,20 +345,30 @@ export function CreateTemplateBuilder({
                 <div className="divide-y divide-themed">
                   {categoryItems.map((item) => {
                     const isChecked = selected.has(item.id)
+                    const itemParConfig = parConfigByItemId[item.id]
                     return (
-                      <div key={item.id} className="flex items-center gap-2 px-4 py-2">
-                        <label className="flex items-center gap-2 cursor-pointer flex-1 min-w-0">
-                          <Checkbox checked={isChecked} onChange={() => toggleItem(item.id)} />
-                          <span className="text-sm text-primary-themed truncate">{item.name}</span>
-                          <span className="text-xs text-muted-themed flex-shrink-0">{item.default_unit}</span>
-                        </label>
-                        {isChecked && (
-                          <input
-                            value={brandByItemId[item.id] ?? ''}
-                            onChange={(e) => setBrandByItemId((prev) => ({ ...prev, [item.id]: e.target.value }))}
-                            placeholder="Brand (optional)"
-                            aria-label={`Preferred brand for ${item.name}`}
-                            className="text-xs border border-themed rounded px-2 py-1 bg-transparent text-primary-themed placeholder:text-[var(--text-muted)] focus:outline-none focus:ring-1 focus:ring-[var(--accent-gold)] w-36 flex-shrink-0"
+                      <div key={item.id} className="flex flex-col gap-1.5 px-4 py-2">
+                        <div className="flex items-center gap-2">
+                          <label className="flex items-center gap-2 cursor-pointer flex-1 min-w-0">
+                            <Checkbox checked={isChecked} onChange={() => toggleItem(item)} />
+                            <span className="text-sm text-primary-themed truncate">{item.name}</span>
+                            <span className="text-xs text-muted-themed flex-shrink-0">{item.default_unit}</span>
+                          </label>
+                          <ParModeBadge par_mode={item.par_mode} smart_group={item.smart_group} />
+                          {isChecked && (
+                            <input
+                              value={brandByItemId[item.id] ?? ''}
+                              onChange={(e) => setBrandByItemId((prev) => ({ ...prev, [item.id]: e.target.value }))}
+                              placeholder="Brand (optional)"
+                              aria-label={`Preferred brand for ${item.name}`}
+                              className="text-xs border border-themed rounded px-2 py-1 bg-transparent text-primary-themed placeholder:text-[var(--text-muted)] focus:outline-none focus:ring-1 focus:ring-[var(--accent-gold)] w-36 flex-shrink-0"
+                            />
+                          )}
+                        </div>
+                        {isChecked && itemParConfig && (
+                          <ItemParConfigControls
+                            value={itemParConfig}
+                            onChange={(patch) => updateItemParConfig(item.id, patch)}
                           />
                         )}
                       </div>

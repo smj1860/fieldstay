@@ -4,6 +4,7 @@ import { useState, useTransition } from 'react'
 import { Plus, Trash2 } from 'lucide-react'
 import { INVENTORY_CATEGORY_LABELS } from '@/lib/utils'
 import { Button } from '@/components/ui/Button'
+import { Badge } from '@/components/ui/Badge'
 import { Checkbox } from '@/components/ui/Checkbox'
 import { Dialog } from '@/components/ui/Dialog'
 import { Card } from '@/components/ui/Card'
@@ -11,7 +12,8 @@ import { InlineAlert } from '@/components/ui/InlineAlert'
 import {
   addTemplateItem, removeTemplateItem, updateTemplateItemBrand, applyTemplateToProperties,
 } from '@/app/(dashboard)/inventory/actions'
-import type { InventoryCategory } from '@/types/database'
+import type { InventoryCategory, ParMode, ParSmartGroup } from '@/types/database'
+import { PAR_SMART_GROUPS } from '@/lib/inventory/par-engine'
 
 interface TemplateItemRow {
   id:              string
@@ -19,8 +21,16 @@ interface TemplateItemRow {
   category:        InventoryCategory
   unit:            string
   par_level:       number
+  par_mode:        ParMode
+  smart_group:     ParSmartGroup | null
+  base_qty:        number
   notes:           string | null
   preferred_brand: string | null
+}
+
+function ParModeBadge({ par_mode, smart_group }: Readonly<{ par_mode: ParMode; smart_group: ParSmartGroup | null }>) {
+  if (par_mode === 'static') return <Badge tone="slate">Static</Badge>
+  return <Badge tone="gold">Smart{smart_group ? ` · ${PAR_SMART_GROUPS[smart_group].label.split(' (')[0]}` : ''}</Badge>
 }
 
 interface TemplateRow {
@@ -178,6 +188,7 @@ function TemplateDetail({
           <div key={item.id} className="flex items-center gap-2 px-3 py-2">
             <span className="text-sm text-primary-themed flex-1">{item.name}</span>
             <span className="text-xs text-muted-themed">{INVENTORY_CATEGORY_LABELS[item.category] ?? item.category}</span>
+            <ParModeBadge par_mode={item.par_mode} smart_group={item.smart_group} />
             {canManage ? (
               <input
                 value={item.preferred_brand ?? ''}

@@ -6,7 +6,8 @@ import { inngest } from '@/lib/inngest/client'
 import { logAuditEvent } from '@/lib/audit'
 import { reportError } from '@/lib/observability/report-error'
 import { unwrapJoin } from '@/lib/utils/supabase-joins'
-import type { InventoryCategory } from '@/types/database'
+import type { InventoryCategory, ParMode, ParSmartGroup } from '@/types/database'
+import { normalizeParConfig } from '@/lib/inventory/par-engine'
 
 export type InventoryActionState = { error?: string; success?: boolean }
 
@@ -228,8 +229,8 @@ export async function submitInventoryCount(
 
 export async function addTemplateItem(
   templateId: string,
-  item: { name: string; category: string; unit: string; par_level: number; preferred_brand?: string | null }
-): Promise<{ item?: { id: string; name: string; category: string; unit: string; par_level: number; notes: null; preferred_brand: string | null }; error?: string }> {
+  item: { name: string; category: string; unit: string; par_level: number; preferred_brand?: string | null; catalog_item_id?: string | null }
+): Promise<{ item?: { id: string; name: string; category: string; unit: string; par_level: number; par_mode: ParMode; smart_group: ParSmartGroup | null; base_qty: number; notes: null; preferred_brand: string | null }; error?: string }> {
   try {
     const { supabase, membership } = await requireOrgMember()
 
@@ -241,6 +242,21 @@ export async function addTemplateItem(
       .maybeSingle()
     if (!template) return { error: 'Template not found.' }
 
+    // Inherit par config from the org catalog row when this item was added
+    // via the catalog picker; a freeform-typed item has no catalog row to
+    // inherit from, so it lands static explicitly (same convention as
+    // CSV-imported template items in createInventoryTemplateFromCSV).
+    let parConfig = { par_mode: 'static' as ParMode, smart_group: null as ParSmartGroup | null, base_qty: 1 }
+    if (item.catalog_item_id) {
+      const { data: catalogItem } = await supabase
+        .from('org_inventory_catalog')
+        .select('par_mode, smart_group, base_qty')
+        .eq('id', item.catalog_item_id)
+        .eq('org_id', membership.org_id)
+        .maybeSingle()
+      if (catalogItem) parConfig = normalizeParConfig(catalogItem)
+    }
+
     const { data, error } = await supabase
       .from('inventory_template_items')
       .insert({
@@ -249,9 +265,10 @@ export async function addTemplateItem(
         category:        item.category,
         unit:            item.unit,
         par_level:       item.par_level,
+        ...parConfig,
         preferred_brand: item.preferred_brand ?? null,
       })
-      .select('id, name, category, unit, par_level, notes, preferred_brand')
+      .select('id, name, category, unit, par_level, par_mode, smart_group, base_qty, notes, preferred_brand')
       .single()
 
     if (error) {
@@ -260,7 +277,7 @@ export async function addTemplateItem(
       return { error: 'Operation failed. Please try again.' }
     }
     revalidatePath('/inventory')
-    return { item: data! as { id: string; name: string; category: string; unit: string; par_level: number; notes: null; preferred_brand: string | null } }
+    return { item: data! as { id: string; name: string; category: string; unit: string; par_level: number; par_mode: ParMode; smart_group: ParSmartGroup | null; base_qty: number; notes: null; preferred_brand: string | null } }
   } catch (err) {
     console.error('[addTemplateItem]', err)
     reportError(err, { site: 'serverAction.inventory.addTemplateItem' })

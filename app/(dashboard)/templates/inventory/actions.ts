@@ -4,14 +4,16 @@ import { revalidatePath } from 'next/cache'
 import { requireOrgRole } from '@/lib/auth'
 import { logAuditEvent } from '@/lib/audit'
 import { reportError } from '@/lib/observability/report-error'
-import type { InventoryCategory } from '@/types/database'
+import type { InventoryCategory, ParMode, ParSmartGroup } from '@/types/database'
+import { normalizeParConfig, type ParConfigInput } from '@/lib/inventory/par-engine'
 
 // ── Master List (org_inventory_catalog) ─────────────────────────────────────
 
 export async function createCatalogItem(
   name: string,
   category: InventoryCategory,
-  defaultUnit: string
+  defaultUnit: string,
+  parConfig: ParConfigInput = { par_mode: 'static', smart_group: null, base_qty: 1 }
 ): Promise<{ id?: string; error?: string }> {
   try {
     const { user, supabase, membership } = await requireOrgRole(['admin', 'manager'])
@@ -20,10 +22,11 @@ export async function createCatalogItem(
     const trimmedUnit = defaultUnit.trim()
     if (!trimmedName) return { error: 'Item name is required.' }
     if (!trimmedUnit) return { error: 'Unit is required.' }
+    const normalizedParConfig = normalizeParConfig(parConfig)
 
     const { data, error } = await supabase
       .from('org_inventory_catalog')
-      .insert({ org_id: membership.org_id, name: trimmedName, category, default_unit: trimmedUnit })
+      .insert({ org_id: membership.org_id, name: trimmedName, category, default_unit: trimmedUnit, ...normalizedParConfig })
       .select('id')
       .single()
 
@@ -39,7 +42,7 @@ export async function createCatalogItem(
       action:     'org_inventory_catalog_item.created',
       targetType: 'org_inventory_catalog',
       targetId:   data.id,
-      metadata:   { name: trimmedName, category },
+      metadata:   { name: trimmedName, category, par_mode: normalizedParConfig.par_mode },
     })
 
     revalidatePath('/templates/inventory/master-list')
@@ -53,12 +56,12 @@ export async function createCatalogItem(
 
 export async function updateCatalogItem(
   itemId: string,
-  updates: { name?: string; category?: InventoryCategory; default_unit?: string }
+  updates: { name?: string; category?: InventoryCategory; default_unit?: string; par_mode?: ParMode; smart_group?: ParSmartGroup | null; base_qty?: number }
 ): Promise<{ error?: string }> {
   try {
     const { user, supabase, membership } = await requireOrgRole(['admin', 'manager'])
 
-    const patch: Record<string, string> = {}
+    const patch: Record<string, unknown> = {}
     if (updates.name !== undefined) {
       const trimmed = updates.name.trim()
       if (!trimmed) return { error: 'Item name is required.' }
@@ -69,6 +72,13 @@ export async function updateCatalogItem(
       const trimmed = updates.default_unit.trim()
       if (!trimmed) return { error: 'Unit is required.' }
       patch.default_unit = trimmed
+    }
+    if (updates.par_mode !== undefined) {
+      Object.assign(patch, normalizeParConfig({
+        par_mode:    updates.par_mode,
+        smart_group: updates.smart_group ?? null,
+        base_qty:    updates.base_qty ?? 1,
+      }))
     }
     if (Object.keys(patch).length === 0) return {}
 
@@ -166,7 +176,8 @@ export async function deleteCatalogItem(itemId: string): Promise<{ error?: strin
 export async function createInventoryTemplate(
   name: string,
   selectedCatalogItemIds: string[],
-  brandByItemId: Record<string, string | null> = {}
+  brandByItemId: Record<string, string | null> = {},
+  parConfigByItemId: Record<string, ParConfigInput> = {}
 ): Promise<{ templateId?: string; error?: string }> {
   try {
     const { user, supabase, membership } = await requireOrgRole(['admin', 'manager'])
@@ -177,7 +188,7 @@ export async function createInventoryTemplate(
 
     const { data: catalogItems, error: catalogError } = await supabase
       .from('org_inventory_catalog')
-      .select('id, name, category, default_unit, default_par_level, platform_catalog_item_id')
+      .select('id, name, category, default_unit, default_par_level, par_mode, smart_group, base_qty, platform_catalog_item_id')
       .eq('org_id', membership.org_id)
       .in('id', selectedCatalogItemIds)
 
@@ -209,6 +220,9 @@ export async function createInventoryTemplate(
         category:        item.category,
         unit:            item.default_unit,
         par_level:       item.default_par_level,
+        // Inherited from the catalog row unless the admin overrode it in the
+        // builder before save.
+        ...normalizeParConfig(parConfigByItemId[item.id] ?? { par_mode: item.par_mode, smart_group: item.smart_group, base_qty: item.base_qty }),
         preferred_brand: brandByItemId[item.id]?.trim() || null,
       }))
     )
@@ -311,6 +325,12 @@ export async function createInventoryTemplateFromCSV(
         // (20260618000002_baseline_schema_snapshot.sql). Using the real
         // column default here, not the addendum's mixed-up one.
         par_level:       row.par_level ?? 1,
+        // CSV rows carry no par config column — every CSV-imported item
+        // lands static explicitly rather than inheriting anything, since
+        // there's no catalog row in this path to inherit from.
+        par_mode:        'static' as const,
+        smart_group:     null,
+        base_qty:        1,
         preferred_brand: row.preferred_brand?.trim() || null,
       }))
     )

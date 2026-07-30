@@ -13,7 +13,7 @@ export default async function MasterListPage() {
 
   const { data: catalogItems, error } = await supabase
     .from('org_inventory_catalog')
-    .select('id, name, category, default_unit')
+    .select('id, name, category, default_unit, par_mode, smart_group, base_qty')
     .eq('org_id', membership.org_id)
     .order('category')
     .order('name')
@@ -48,6 +48,9 @@ export default async function MasterListPage() {
           name:         item.name,
           category:     item.category,
           default_unit: item.default_unit,
+          par_mode:     item.par_mode,
+          smart_group:  item.smart_group,
+          base_qty:     item.base_qty,
         }))}
         canManage={canManage}
       />

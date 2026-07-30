@@ -15,7 +15,7 @@ export default async function SavedInventoryTemplatesPage() {
   ] = await Promise.all([
     supabase
       .from('inventory_templates')
-      .select('id, name, description, inventory_template_items(id, name, category, unit, par_level, notes, preferred_brand, sort_order)')
+      .select('id, name, description, inventory_template_items(id, name, category, unit, par_level, par_mode, smart_group, base_qty, notes, preferred_brand, sort_order)')
       .eq('org_id', membership.org_id)
       .order('name'),
     supabase
@@ -80,6 +80,9 @@ export default async function SavedInventoryTemplatesPage() {
               category:        item.category,
               unit:            item.unit,
               par_level:       item.par_level,
+              par_mode:        item.par_mode,
+              smart_group:     item.smart_group,
+              base_qty:        item.base_qty,
               notes:           item.notes,
               preferred_brand: item.preferred_brand,
             })),

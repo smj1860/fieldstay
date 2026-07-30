@@ -14,7 +14,7 @@ export default async function CreateInventoryTemplatePage() {
   const [{ data: catalogItems, error: catalogError }, { data: properties, error: propertiesError }] = await Promise.all([
     supabase
       .from('org_inventory_catalog')
-      .select('id, name, category, default_unit')
+      .select('id, name, category, default_unit, par_mode, smart_group, base_qty')
       .eq('org_id', membership.org_id)
       .order('category')
       .order('name'),
