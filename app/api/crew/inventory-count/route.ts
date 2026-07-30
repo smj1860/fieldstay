@@ -8,12 +8,22 @@ export async function POST(request: NextRequest) {
   if (!auth.ok) return auth.response
   const { user, supabase, crew } = auth
 
-  const { propertyId, counts, notes, itemNotes, submitAsDraft } = await request.json() as {
+  const { draftId, propertyId, counts, notes, itemNotes, submitAsDraft } = await request.json() as {
+    // Client-generated (crypto.randomUUID) draft id from the crew PWA's
+    // offline outbox. Used as the row's primary key so an outbox replay —
+    // which can arrive hours later, well outside the 5-minute window check
+    // below — collides on the PK instead of creating a duplicate draft.
+    draftId?: string
     propertyId: string
     counts: Record<string, number>
     notes: string
     itemNotes?: Record<string, string>
     submitAsDraft?: boolean
+  }
+
+  const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
+  if (draftId !== undefined && !UUID_RE.test(draftId)) {
+    return NextResponse.json({ error: 'Invalid draft id' }, { status: 400 })
   }
 
   // Verify the property belongs to this crew member's org — never trust a client-supplied propertyId
@@ -29,8 +39,23 @@ export async function POST(request: NextRequest) {
   }
 
   if (submitAsDraft) {
-    // Idempotency — same as the legacy commit path below: a double-tap submit or a
-    // Dexie outbox retry after a connectivity blip must not create a second draft.
+    // Primary idempotency: the client-supplied draft id. An offline outbox
+    // replay can land arbitrarily long after the original attempt, so the
+    // 5-minute window below is not sufficient on its own for that path.
+    if (draftId) {
+      const { data: existing } = await supabase
+        .from('inventory_count_drafts')
+        .select('id')
+        .eq('id', draftId)
+        .eq('org_id', crew.org_id)
+        .maybeSingle()
+      if (existing) {
+        return NextResponse.json({ success: true, draftId: existing.id })
+      }
+    }
+
+    // Secondary idempotency — same as the legacy commit path below: a
+    // double-tap submit from a client that didn't supply a draft id.
     const draftWindowStart = new Date(Date.now() - 5 * 60 * 1000).toISOString()
     const { data: recentDraft } = await supabase
       .from('inventory_count_drafts')
@@ -40,7 +65,7 @@ export async function POST(request: NextRequest) {
       .gte('created_at', draftWindowStart)
       .maybeSingle()
 
-    if (recentDraft) {
+    if (recentDraft && !draftId) {
       return NextResponse.json({ success: true, draftId: recentDraft.id })
     }
 
@@ -53,9 +78,10 @@ export async function POST(request: NextRequest) {
 
     const prevMap = Object.fromEntries((currentItems ?? []).map(i => [i.id, i.current_quantity]))
 
-    const { data: draft } = await supabase
+    const { data: draft, error: draftError } = await supabase
       .from('inventory_count_drafts')
       .insert({
+        ...(draftId ? { id: draftId } : {}),
         org_id:      crew.org_id,
         property_id: propertyId,
         submitted_by: crew.id,
@@ -65,6 +91,15 @@ export async function POST(request: NextRequest) {
       .select('id')
       .single()
 
+    if (draftError) {
+      // 23505 — two replays of the same queued draft raced each other. The
+      // winner already created it, so this is a success, not a failure.
+      if (draftError.code === '23505' && draftId) {
+        return NextResponse.json({ success: true, draftId })
+      }
+      console.error('[crew/inventory-count] draft insert failed:', draftError.message)
+      return NextResponse.json({ error: 'Failed to create draft' }, { status: 500 })
+    }
     if (!draft) return NextResponse.json({ error: 'Failed to create draft' }, { status: 500 })
 
     // Column names match the live schema (item_id / counted_qty), not the
@@ -78,7 +113,16 @@ export async function POST(request: NextRequest) {
     }))
 
     if (draftItems.length > 0) {
-      await supabase.from('inventory_count_draft_items').insert(draftItems)
+      const { error: itemsError } = await supabase
+        .from('inventory_count_draft_items')
+        .insert(draftItems)
+      if (itemsError) {
+        // A draft header with no items is worse than no draft at all — the
+        // PM would review an empty count. Surface it so the crew outbox
+        // retries instead of reporting success.
+        console.error('[crew/inventory-count] draft items insert failed:', itemsError.message)
+        return NextResponse.json({ error: 'Failed to save counted items' }, { status: 500 })
+      }
     }
 
     return NextResponse.json({ success: true, draftId: draft.id })

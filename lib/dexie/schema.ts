@@ -180,6 +180,7 @@ export type MutationTable =
   | 'crew_availability'
   | 'property_assets'
   | 'crew_work_orders'
+  | 'inventory_count_drafts'
 
 export interface MutationRow {
   id?:        number
@@ -410,12 +411,32 @@ export async function closeDexieDb(): Promise<void> {
   }
 }
 
+// The ONLY database-name prefixes this cleanup may touch: the crew cache
+// and the crew photo blob store, both namespaced by auth user id.
+//
+// Deliberately NOT `fieldstay-` — that broader prefix also matches
+// `fieldstay-vendor-wo-{token}` (lib/dexie/vendorWoSchema.ts), a completely
+// unrelated principal's outbox. A crew member logging in on a shared device
+// (an office tablet, a borrowed phone) used to destroy a vendor's queued,
+// never-uploaded work-order completion, because a link token is not a user
+// id and so never "contains" it.
+const CLEANABLE_DB_PREFIXES = ['fieldstay-crew-', 'fieldstay-photo-queue-'] as const
+
+/** True only for a crew-owned database belonging to some OTHER user. */
+export function isStaleCrewDbName(name: string, currentUserId: string): boolean {
+  const prefix = CLEANABLE_DB_PREFIXES.find((p) => name.startsWith(p))
+  if (!prefix) return false
+  // Exact suffix match, not `includes` — the remainder after the prefix is
+  // the owning user's id and nothing else.
+  return name.slice(prefix.length) !== currentUserId
+}
+
 /**
- * Deletes IndexedDB databases belonging to users OTHER than the current one.
- * Called on Dexie context mount when a userId is known.
+ * Deletes the crew IndexedDB databases belonging to users OTHER than the
+ * current one. Called on Dexie context mount when a userId is known.
  *
- * Safety: only deletes databases matching the 'fieldstay-' prefix pattern.
- * Never deletes the active user's database.
+ * Safety: only ever touches CLEANABLE_DB_PREFIXES databases (see above) —
+ * never the active user's, and never another principal's (vendor) storage.
  * Non-fatal: failures are logged and ignored.
  */
 export async function cleanupStaleDexieDbs(currentUserId: string): Promise<void> {
@@ -423,12 +444,7 @@ export async function cleanupStaleDexieDbs(currentUserId: string): Promise<void>
     if (typeof indexedDB === 'undefined' || !indexedDB.databases) return
 
     const dbs = await indexedDB.databases()
-    const stale = dbs.filter((info) => {
-      if (!info.name) return false
-      if (!info.name.startsWith('fieldstay-')) return false
-      // Keep the active user's database
-      return !info.name.includes(currentUserId)
-    })
+    const stale = dbs.filter((info) => !!info.name && isStaleCrewDbName(info.name, currentUserId))
 
     await Promise.allSettled(
       stale.map((info) =>

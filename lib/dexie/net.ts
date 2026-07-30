@@ -58,8 +58,14 @@ export type UploadFailureKind =
 // resource.", Safari "Load failed"/"The network connection was lost.",
 // undici "fetch failed". supabase-js surfaces the same text through
 // PostgrestError.message when the underlying fetch rejects.
+//
+// Every alternative is \b-anchored deliberately: an unanchored `load failed`
+// also matches "…upLOAD FAILED: …", which is the prefix of half the
+// PostgREST error messages this file's own callers construct — that would
+// have classified ordinary server rejections as transport failures and
+// retried them forever.
 const NETWORK_MESSAGE_PATTERN =
-  /failed to fetch|fetch failed|networkerror|network request failed|network connection was lost|load failed|err_internet_disconnected|connection (refused|reset|closed)|timed? ?out|socket hang up|offline/i
+  /\bfailed to fetch\b|\bfetch failed\b|\bnetworkerror\b|\bnetwork request failed\b|\bnetwork connection was lost\b|\bload failed\b|\berr_internet_disconnected\b|\bconnection (?:refused|reset|closed)\b|\btimed out\b|\btimeout\b|\bsocket hang up\b|\boffline\b/i
 
 // PostgREST/Postgres error codes that a replay can never fix: integrity
 // constraint violations (23xxx), data exceptions (22xxx), syntax/access-rule

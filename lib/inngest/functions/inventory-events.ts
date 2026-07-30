@@ -120,12 +120,23 @@ export const handleInventoryCountSubmitted = inngest.createFunction(
       const orgScopedCount = typedCount.filter((c) => orgItemIds.has(c.inventory_item_id))
 
       // 1 query: bulk upsert current quantities (replaces N sequential UPDATEs)
-      await supabase
+      const { error: quantityWriteError } = await supabase
         .from('inventory_items')
         .upsert(
           orgScopedCount.map((c) => ({ id: c.inventory_item_id, current_quantity: c.quantity_counted })),
           { onConflict: 'id' }
         )
+
+      // Abort rather than continue: everything below computes below-par from
+      // the in-memory counts, so proceeding past a failed write would build a
+      // correct-looking purchase order against quantities the database never
+      // recorded — real money spent off numbers nobody can reconcile later.
+      // Throwing lets the Inngest step retry the whole (idempotent) upsert.
+      if (quantityWriteError) {
+        throw new Error(
+          `inventory_items quantity upsert failed for count ${count_id}: ${quantityWriteError.message}`
+        )
+      }
 
       // Compute below-par entirely in memory — no further DB round trips
       const countMap = new Map<string, number>(typedCount.map((c) => [c.inventory_item_id, c.quantity_counted]))

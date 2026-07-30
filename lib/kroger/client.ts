@@ -18,6 +18,8 @@ import type {
 } from './types'
 
 import { reportError } from '@/lib/observability/report-error'
+import { KROGER_TIMEOUT_MS, isTimeoutError } from '@/lib/http/timeout'
+
 const KROGER_API_BASE  = 'https://api.kroger.com/v1'
 const KROGER_AUTH_BASE = 'https://api.kroger.com/v1/connect/oauth2'
 
@@ -62,7 +64,23 @@ async function krogerFetch(
     reportError(err, { site: 'lib.kroger.client.Kroger' })
   }
 
-  const res = await fetch(input, init)
+  // Every Kroger call funnels through here, so the timeout budget is applied
+  // once, at the chokepoint — same reasoning as the rate limiter above.
+  // A caller-supplied signal wins (nothing sets one today).
+  let res: Response
+  try {
+    res = await fetch(input, { signal: AbortSignal.timeout(KROGER_TIMEOUT_MS), ...init })
+  } catch (err) {
+    if (isTimeoutError(err)) {
+      // Distinct from a Kroger-returned failure: rethrown (so the Inngest
+      // step retries) but named so a slow-API incident is legible in logs
+      // instead of looking like a generic network blip.
+      console.error('[Kroger] request timed out', { timeoutMs: KROGER_TIMEOUT_MS })
+      reportError(err, { site: 'lib.kroger.client.krogerFetch', extra: { timedOut: true } })
+      throw new Error(`Kroger request timed out after ${KROGER_TIMEOUT_MS}ms`)
+    }
+    throw err
+  }
 
   if (res.status === 429) {
     const retryAfter = Number.parseInt(res.headers.get('Retry-After') ?? '60', 10)

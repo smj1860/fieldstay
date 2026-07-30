@@ -281,12 +281,24 @@ export function useTurnoverActions(id: string) {
   // is already idempotent server-side, so both devices racing to notice at
   // once is harmless. The manual "Mark Complete" button still exists
   // alongside this for crew who'd find its absence confusing.
+  // Guards against enqueueing a second (or third) identical turnovers PATCH:
+  // the effect re-runs on every `turnover` identity change, and the local
+  // Dexie write completeTurnover() performs is itself one of those changes,
+  // so without a latch a burst of re-renders between the enqueue and the
+  // status landing at 'completed' queued duplicate outbox rows.
+  const autoCompletedRef = useRef(false)
   useEffect(() => {
     if (!turnover || turnover.status === 'completed') return
+    if (autoCompletedRef.current) return
     const checklistConfirmed = !!instance?.completed_at
     const inventoryConfirmed = !!turnover.inventory_confirmed_complete_at
     if (checklistConfirmed && inventoryConfirmed) {
-      void completeTurnover(userId, id)
+      autoCompletedRef.current = true
+      void completeTurnover(userId, id).catch((err) => {
+        autoCompletedRef.current = false
+        console.error('[Crew] auto-complete failed:', err)
+        reportError(err, { site: 'serverAction.crew.turnovers.autoComplete' })
+      })
     }
   }, [turnover, instance?.completed_at, userId, id])
 

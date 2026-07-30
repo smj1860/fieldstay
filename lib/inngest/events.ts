@@ -909,4 +909,54 @@ export type FieldStayEvents = {
     }
   }
 
+
+  // ── Per-org cron fan-out ──────────────────────────────────────────────────
+  // Platform-wide cron passes were converted to dispatcher + per-org handler
+  // (same shape as 'org/daily_wrapup.requested'). Each dispatcher resolves the
+  // candidate org set and emits one of these per tenant, so step counts and
+  // query result sets scale with a single tenant rather than the platform —
+  // and no scan can be silently truncated by PostgREST's max_rows cap.
+  // `now_ms` is captured once in the dispatcher so every date derived in the
+  // handler stays stable across retries.
+
+  'ical/sync.org.requested': {
+    data: {
+      org_id: string
+    }
+  }
+
+  'org/asset_health.requested': {
+    data: {
+      org_id: string
+    }
+  }
+
+  'org/work_order_ops.requested': {
+    data: {
+      org_id: string
+      now_ms: number
+    }
+  }
+
+  'org/maintenance_schedules.requested': {
+    data: {
+      org_id: string
+      now_ms: number
+    }
+  }
+
+  'org/comms_retention.requested': {
+    data: {
+      org_id: string
+      now_ms: number
+    }
+  }
+
+  'org/guest_pii_retention.requested': {
+    data: {
+      org_id: string
+      now_ms: number
+    }
+  }
+
 }

@@ -5,6 +5,7 @@ import { AlertTriangle, Camera, Info, ShieldOff, X } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { createWorkOrder } from './actions'
 import { distanceMiles } from '@/lib/geocoding'
+import { isBlockingComplianceStatus } from '@/lib/vendors/compliance-status'
 import { createClient } from '@/lib/supabase/client'
 import { Dialog } from '@/components/ui/Dialog'
 import { Button } from '@/components/ui/Button'
@@ -65,6 +66,10 @@ export function CreateWorkOrderModal({
   }
 
   const selectedCompliance = selectedVendor ? complianceFor(selectedVendor) : null
+  // Mirrors the server-side allowlist in lib/vendors/compliance.ts exactly, so
+  // the disabled option and the server gate can never disagree about a status
+  // neither of them recognizes.
+  const selectedBlocked = isBlockingComplianceStatus(selectedCompliance)
 
   const handlePhotoSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = Array.from(e.target.files ?? [])
@@ -147,7 +152,7 @@ export function CreateWorkOrderModal({
           <Button
             type="submit"
             form="create-work-order-form"
-            disabled={pending || selectedCompliance === 'hard_blocked'}
+            disabled={pending || selectedBlocked}
             className="flex-1"
           >
             {pending
@@ -377,7 +382,7 @@ export function CreateWorkOrderModal({
                     {vendors.map((v) => {
                       const status = complianceFor(v.id)
                       const dist   = vendorDistance(v.id)
-                      const blocked = status === 'hard_blocked'
+                      const blocked = isBlockingComplianceStatus(status)
                       const label  = [
                         v.name,
                         dist != null ? `${dist.toFixed(1)} mi` : null,
@@ -421,7 +426,7 @@ export function CreateWorkOrderModal({
                     </div>
                   )}
 
-                  {selectedVendor && selectedCompliance !== 'hard_blocked' && (
+                  {selectedVendor && !selectedBlocked && (
                     <label className="flex items-center gap-2 text-sm text-secondary-themed cursor-pointer mt-2">
                       <input
                         type="checkbox"

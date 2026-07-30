@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { verify as verifyEd25519, createPublicKey } from 'crypto'
+import { verify as verifyEd25519, createPublicKey, createHash } from 'crypto'
 import { createServiceClient } from '@/lib/supabase/server'
 import { normalizePhoneToE164 } from '@/lib/sms/telnyx'
 import { logAuditEvents } from '@/lib/audit'
@@ -52,6 +52,48 @@ function base64ToBase64Url(b64: string): string {
   return b64.replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '')
 }
 
+/**
+ * Claims this exact signed delivery, returning false if it was already
+ * processed.
+ *
+ * ⚠️ REPLAY-PROTECTION CONTRACT FOR THIS HANDLER (audit 2026-07-30, L-3)
+ *
+ * Ed25519 verification proves authenticity, not freshness — a captured
+ * request stays cryptographically valid forever. Until now the ONLY thing
+ * bounding replay here was verifyTelnyxSignature's 300-second freshness
+ * window, which means an attacker who captured a request could replay it
+ * freely for five minutes. That was harmless purely because every branch
+ * below is idempotent: the STOP/START handlers are conditional UPDATEs
+ * (`.eq('is_active', true)` / `.eq('is_active', false)`) that match zero rows
+ * on a second run, so a replay writes nothing and logs no audit event.
+ *
+ * That is a property of the current branches, not of the route. A future
+ * branch that inserts a row, sends a message, or charges anything would
+ * silently become replayable inside that 5-minute window with nothing
+ * failing. The claim below removes the dependency on that reasoning: a
+ * replay is byte-identical over the SIGNED payload (`timestamp|rawBody`), so
+ * it hashes identically and is rejected here regardless of what the branches
+ * do.
+ */
+async function claimTelnyxDelivery(
+  supabase: ReturnType<typeof createServiceClient>,
+  signedPayload: string,
+): Promise<boolean> {
+  const webhookId = `telnyx:${createHash('sha256').update(signedPayload).digest('hex')}`
+
+  const { error } = await supabase.from('processed_webhooks').insert({ webhook_id: webhookId })
+
+  if (!error) return true
+  if (error.code === '23505') return false
+
+  // Non-fatal: a dedup-table outage must not drop real inbound STOP messages,
+  // which carry a TCPA compliance obligation. Log loudly and continue — the
+  // branches below are individually idempotent (see contract above).
+  console.error(`[Telnyx webhook] dedup insert failed (non-fatal): ${error.code} ${error.message}`)
+  reportError(new Error(error.message), { site: 'webhook.telnyx.dedup_insert' })
+  return true
+}
+
 export async function POST(req: NextRequest) {
   // Read raw body FIRST — signature is computed over the exact bytes
   const rawBody   = await req.text()
@@ -99,6 +141,11 @@ export async function POST(req: NextRequest) {
   }
 
   const supabase = createServiceClient({ publicSurface: 'api-webhooks-telnyx' })
+
+  // Replay guard — see claimTelnyxDelivery's contract note above.
+  if (!(await claimTelnyxDelivery(supabase, `${timestamp}|${rawBody}`))) {
+    return NextResponse.json({ received: true, duplicate: true })
+  }
 
   if (text === 'STOP' || text === 'STOPALL' || text === 'UNSUBSCRIBE' || text === 'CANCEL' || text === 'END' || text === 'QUIT') {
     const { data: updated } = await supabase

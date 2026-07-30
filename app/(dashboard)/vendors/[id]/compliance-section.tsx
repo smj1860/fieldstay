@@ -3,7 +3,7 @@
 import { useState, useTransition, useActionState } from 'react'
 import { Plus, X, CheckCircle2, Loader2, ExternalLink, Shield, ShieldOff, ShieldCheck, AlertTriangle } from 'lucide-react'
 import { createClient } from '@/lib/supabase/client'
-import { createComplianceDocument, deleteComplianceDocument, verifyComplianceDocument } from '../actions'
+import { createComplianceDocument, deleteComplianceDocument, verifyComplianceDocument, getComplianceDocumentUrl } from '../actions'
 import type { ComplianceDocActionState } from '../actions'
 import type { VendorComplianceDocument, ComplianceDocType } from '@/types/database'
 import { Dialog } from '@/components/ui/Dialog'
@@ -70,11 +70,10 @@ function AddDocumentForm({
       return
     }
 
-    const { data: { publicUrl } } = supabase.storage
-      .from('compliance-documents')
-      .getPublicUrl(path)
-
-    setUploadedUrl(publicUrl)
+    // `compliance-documents` is a PRIVATE bucket, so getPublicUrl() here
+    // produced a link that 400s for everyone. Persist the object path instead;
+    // getComplianceDocumentUrl() mints a short-lived signed URL at view time.
+    setUploadedUrl(path)
     setUploading(false)
   }
 
@@ -179,6 +178,50 @@ function AddDocumentForm({
           </div>
         </form>
     </Dialog>
+  )
+}
+
+// ── View document (signed URL) ────────────────────────────────────────────────
+
+/**
+ * Opens a compliance document via a short-lived signed URL minted server-side.
+ * The old markup was a plain <a href={doc.document_url}> pointing at a
+ * getPublicUrl() result for a PRIVATE bucket — every one of those links 400s.
+ */
+function ViewDocumentButton({ docId }: Readonly<{ docId: string }>) {
+  const [loading, setLoading] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+
+  const open = async () => {
+    setLoading(true)
+    setError(null)
+    const res = await getComplianceDocumentUrl(docId)
+    setLoading(false)
+    if (res.error ?? !res.url) {
+      setError(res.error ?? 'Could not open the document.')
+      return
+    }
+    globalThis.open(res.url, '_blank', 'noopener,noreferrer')
+  }
+
+  return (
+    <>
+      <Button
+        variant="ghost"
+        className="p-1.5"
+        onClick={open}
+        disabled={loading}
+        title="View document"
+        aria-label="View document"
+      >
+        {loading
+          ? <Loader2 className="w-3.5 h-3.5 animate-spin" />
+          : <ExternalLink className="w-3.5 h-3.5" />}
+      </Button>
+      {error && (
+        <span className="text-xs" role="alert" style={{ color: 'var(--accent-red)' }}>{error}</span>
+      )}
+    </>
   )
 }
 
@@ -303,17 +346,7 @@ export function ComplianceSection({
                     </div>
                   </div>
                   <div className="flex items-center gap-1 flex-shrink-0">
-                    {doc.document_url && (
-                      <a
-                        href={doc.document_url}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className={buttonVariantClass('ghost') + ' p-1.5'}
-                        title="View document"
-                      >
-                        <ExternalLink className="w-3.5 h-3.5" />
-                      </a>
-                    )}
+                    {doc.document_url && <ViewDocumentButton docId={doc.id} />}
                     {!doc.is_verified && (
                       <Button
                         variant="ghost"

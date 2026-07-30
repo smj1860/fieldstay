@@ -7,6 +7,7 @@ import { logAuditEvent } from '@/lib/audit'
 import type { ComplianceDocType } from '@/types/database'
 
 import { reportError } from '@/lib/observability/report-error'
+import { reportQueryError } from '@/lib/supabase/unwrap'
 export type ComplianceDocActionState = { error?: string; success?: boolean }
 
 export async function createComplianceDocument(
@@ -80,6 +81,71 @@ export async function createComplianceDocument(
     console.error('[createComplianceDocument]', err)
     reportError(err, { site: 'serverAction.vendors.createComplianceDocument' })
     return { error: 'Failed to save document' }
+  }
+}
+
+// ── Compliance document viewing ──────────────────────────────────────────────
+//
+// `compliance-documents` is a PRIVATE bucket. The upload flow used to call
+// getPublicUrl() on it and persist the result as document_url, which produced
+// a URL that 400s for everyone — every "View document" link in the compliance
+// vault was dead. document_url now holds the storage OBJECT PATH
+// (`${orgId}/${vendorId}/…`), and a short-lived signed URL is minted here, at
+// view time, only after the caller's org ownership of the row is re-checked.
+const SIGNED_URL_TTL_SECONDS = 300
+
+/** Legacy rows stored a full (broken) public URL; recover the object path from it. */
+function toStoragePath(documentUrl: string): string {
+  const marker = '/compliance-documents/'
+  const idx = documentUrl.indexOf(marker)
+  if (idx === -1) return documentUrl
+  return documentUrl.slice(idx + marker.length)
+}
+
+export async function getComplianceDocumentUrl(
+  docId: string
+): Promise<{ url?: string; error?: string }> {
+  try {
+    const { supabase, membership } = await requireOrgRole(['admin', 'manager'])
+
+    // IDOR guard: org membership alone doesn't prove this document is theirs.
+    const { data: doc, error } = await supabase
+      .from('vendor_compliance_documents')
+      .select('id, document_url')
+      .eq('id', docId)
+      .eq('org_id', membership.org_id)
+      .maybeSingle()
+
+    if (reportQueryError(error, {
+      site: 'serverAction.vendors.getComplianceDocumentUrl',
+      orgId: membership.org_id,
+      extra: { document_id: docId },
+    })) {
+      return { error: 'Could not open the document. Please try again.' }
+    }
+    if (!doc?.document_url) return { error: 'Document file not found' }
+
+    const path = toStoragePath(doc.document_url)
+
+    const { data: signed, error: signError } = await supabase.storage
+      .from('compliance-documents')
+      .createSignedUrl(path, SIGNED_URL_TTL_SECONDS)
+
+    if (signError || !signed?.signedUrl) {
+      console.error('[getComplianceDocumentUrl]', signError)
+      reportError(signError ?? new Error('No signed URL returned'), {
+        site: 'serverAction.vendors.getComplianceDocumentUrl.sign',
+        orgId: membership.org_id,
+        extra: { document_id: docId },
+      })
+      return { error: 'Could not open the document. Please try again.' }
+    }
+
+    return { url: signed.signedUrl }
+  } catch (err) {
+    console.error('[getComplianceDocumentUrl]', err)
+    reportError(err, { site: 'serverAction.vendors.getComplianceDocumentUrl' })
+    return { error: 'Could not open the document. Please try again.' }
   }
 }
 

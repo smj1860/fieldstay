@@ -1,5 +1,6 @@
 import type { SupabaseClient } from '@supabase/supabase-js'
 import { reportError } from '@/lib/observability/report-error'
+import { NON_BLOCKING_COMPLIANCE_STATUSES } from '@/lib/vendors/compliance-status'
 
 // vendor_compliance_status (migration 20260606051120, grace period widened to
 // 45 days by 20260720170645) computes compliance_status live off
@@ -22,15 +23,9 @@ import { reportError } from '@/lib/observability/report-error'
 //     view is being corrected separately (a vendor whose only COI is expired
 //     and deactivated, or has a NULL expiry_date, currently reports
 //     'compliant'), and a fix there may introduce a new status; a consumer
-//     that defaulted to "allowed" would silently un-enforce it.
-const NON_BLOCKING_STATUSES = new Set([
-  'compliant',
-  'expiring_soon',
-  'grace_period',
-  // Orgs that have not adopted the compliance vault have zero documents on
-  // file. That has never blocked assignment and must not start now.
-  'no_documents',
-])
+//     that defaulted to "allowed" would silently un-enforce it. The allowlist
+//     itself lives in lib/vendors/compliance-status.ts so the client-side
+//     courtesy disable in CreateWorkOrderModal shares it verbatim.
 
 /** Thrown when the compliance state cannot be established. Never means "allowed". */
 export class VendorComplianceCheckError extends Error {
@@ -73,7 +68,7 @@ export async function isVendorHardBlocked(
   }
 
   const status = data.compliance_status as string | null
-  if (status !== null && NON_BLOCKING_STATUSES.has(status)) return false
+  if (status !== null && NON_BLOCKING_COMPLIANCE_STATUSES.has(status)) return false
 
   // Unrecognized (or null) status: block, and report so the allowlist above
   // gets updated deliberately rather than discovered by an uninsured dispatch.

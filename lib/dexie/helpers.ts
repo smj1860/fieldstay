@@ -142,10 +142,53 @@ export async function retryFailedMutation(
     .toArray()
 
   for (const mutation of failed) {
-    await db.mutations.update(mutation.id!, { failed: false, retryCount: 0 })
+    await db.mutations.update(mutation.id!, {
+      failed:            false,
+      retryCount:        0,
+      networkRetryCount: 0,
+      // 0 is unconditionally in the past, so the row is immediately due —
+      // `undefined` would leave the previous backoff window in place under
+      // Dexie's update semantics.
+      nextAttemptAt:     0,
+      lastError:         '',
+    })
   }
 
   void getSyncEngine(userId).processOutbox()
+}
+
+/**
+ * Re-queues EVERY dead-lettered mutation on this device. Backs the crew
+ * shell's failed-sync surface, which is deliberately table-agnostic — every
+ * mutation type dead-letters, not just the three that once had their own
+ * bespoke retry banner.
+ */
+export async function retryAllFailedMutations(userId: string): Promise<void> {
+  const db = getDexieDb(userId)
+  const failed = (await db.mutations.toArray()).filter((m) => !!m.failed)
+
+  for (const mutation of failed) {
+    await db.mutations.update(mutation.id!, {
+      failed:            false,
+      retryCount:        0,
+      networkRetryCount: 0,
+      nextAttemptAt:     0,
+      lastError:         '',
+    })
+  }
+
+  void getSyncEngine(userId).processOutbox()
+}
+
+/**
+ * Permanently drops a dead-lettered mutation the crew member has decided
+ * not to retry. The only way a failed row leaves the device before
+ * lib/dexie/prune.ts's retention window — deliberately an explicit user
+ * action, since it discards work that never reached the server.
+ */
+export async function discardFailedMutation(userId: string, mutationId: number): Promise<void> {
+  const db = getDexieDb(userId)
+  await db.mutations.delete(mutationId)
 }
 
 /**
@@ -233,6 +276,78 @@ export async function updateInventoryQuantity(
   await enqueueMutation(userId, 'inventory_items', itemId, 'PATCH', {
     current_quantity: currentQuantity,
   })
+}
+
+// ── Crew inventory count (PM-reviewed draft) ──────────────────────────────
+//
+// A count is submitted for PM review, so it must NOT be written through
+// updateInventoryQuantity() (which pushes straight to
+// inventory_items.current_quantity and would bypass review). The in-progress
+// count therefore lives in the local-only `sync_meta` store until submit,
+// and submit itself goes through the outbox like every other crew write —
+// previously the whole page held counts in React state and posted with a
+// live fetch(), so a count entered with no signal was lost both on submit
+// failure AND on navigation.
+
+export interface InventoryCountDraft {
+  counts:    Record<string, number>
+  itemNotes: Record<string, string>
+  notes:     string
+}
+
+const EMPTY_DRAFT: InventoryCountDraft = { counts: {}, itemNotes: {}, notes: '' }
+
+function inventoryDraftKey(propertyId: string): string {
+  return `inventory_count_draft:${propertyId}`
+}
+
+/** Reads the locally-staged (unsubmitted) count for a property. */
+export async function loadInventoryCountDraft(
+  userId: string,
+  propertyId: string,
+): Promise<InventoryCountDraft> {
+  const db = getDexieDb(userId)
+  const row = await db.sync_meta.get(inventoryDraftKey(propertyId))
+  if (!row?.value) return EMPTY_DRAFT
+  try {
+    return { ...EMPTY_DRAFT, ...(JSON.parse(row.value) as Partial<InventoryCountDraft>) }
+  } catch (err) {
+    console.error('[inventory draft] corrupt local draft — starting fresh:', err)
+    return EMPTY_DRAFT
+  }
+}
+
+/** Persists the in-progress count locally so it survives navigation and app restarts. */
+export async function saveInventoryCountDraft(
+  userId: string,
+  propertyId: string,
+  draft: InventoryCountDraft,
+): Promise<void> {
+  const db = getDexieDb(userId)
+  await db.sync_meta.put({ key: inventoryDraftKey(propertyId), value: JSON.stringify(draft) })
+}
+
+/**
+ * Queues the count for submission and clears the local staging row. The
+ * draft id is generated here and used by the Route Handler as the
+ * `inventory_count_drafts` primary key, so an outbox replay collides
+ * harmlessly rather than creating a second draft.
+ */
+export async function submitInventoryCountDraft(
+  userId: string,
+  propertyId: string,
+  draft: InventoryCountDraft,
+): Promise<void> {
+  const db = getDexieDb(userId)
+  const draftId = crypto.randomUUID()
+
+  await enqueueMutation(userId, 'inventory_count_drafts', draftId, 'PUT', {
+    property_id: propertyId,
+    counts:      draft.counts,
+    item_notes:  draft.itemNotes,
+    notes:       draft.notes,
+  })
+  await db.sync_meta.delete(inventoryDraftKey(propertyId))
 }
 
 /**

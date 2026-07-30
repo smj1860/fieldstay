@@ -16,6 +16,7 @@ import type { DexieSupabaseClient } from './types'
 import { getDexieDb, type CrewWorkOrderRow, type PropertyRow } from '../schema'
 import { getCursor, advanceCursor } from './cursors'
 import { fetchInChunks } from './chunked'
+import { bulkPutShadowed } from './shadow'
 import { reportError } from '@/lib/observability/report-error'
 
 const WO_COLUMNS =
@@ -91,7 +92,9 @@ export async function syncWorkOrders(
       const { updated_at: _updatedAt, ...row } = w
       return row
     })
-    await db.crew_work_orders.bulkPut(rows as unknown as CrewWorkOrderRow[])
+    // Shadowed: a queued-but-unpushed local completion must not be reverted
+    // by a routine pull that still sees the WO as open server-side.
+    await bulkPutShadowed(db.crew_work_orders, userId, 'crew_work_orders', rows as unknown as CrewWorkOrderRow[])
 
     // Ensure the properties referenced by these WOs are cached too, so the
     // crew home page and detail view can render names/addresses. Only ids

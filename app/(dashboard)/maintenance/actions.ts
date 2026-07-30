@@ -47,9 +47,19 @@ async function trackVendorAssignmentAgainstSuggestions(
     )
 
     if (overridden.length > 0) {
-      await service.from('work_orders')
+      // .eq('org_id') is mandatory, not redundant: this is a service-role
+      // client, so RLS is not a backstop and an id list that ever reached
+      // here from another org would be written unchecked. Its twin
+      // trackAssignmentAgainstSuggestions in turnovers/actions.ts got this
+      // filter from the CodeRabbit PR #512 review; this copy was missed.
+      const { error: overrideError } = await service.from('work_orders')
         .update({ suggestion_status: 'overridden' })
+        .eq('org_id', orgId)
         .in('id', overridden.map(wo => wo.id))
+      if (overrideError) {
+        console.error('[trackVendorAssignmentAgainstSuggestions] override update failed', overrideError)
+        reportError(overrideError, { site: 'serverAction.maintenance.trackVendorAssignmentAgainstSuggestions.override', orgId })
+      }
 
       const priorSuggestionRows = overridden.flatMap(wo =>
         (wo.suggested_vendor_ids ?? []).map(suggestedVendorId => ({
@@ -61,10 +71,14 @@ async function trackVendorAssignmentAgainstSuggestions(
         }))
       )
       if (priorSuggestionRows.length > 0) {
-        await service.from('vendor_assignment_outcomes').upsert(priorSuggestionRows, {
+        const { error: priorError } = await service.from('vendor_assignment_outcomes').upsert(priorSuggestionRows, {
           onConflict:       'work_order_id,vendor_id',
           ignoreDuplicates: false,
         })
+        if (priorError) {
+          console.error('[trackVendorAssignmentAgainstSuggestions] prior-suggestion upsert failed', priorError)
+          reportError(priorError, { site: 'serverAction.maintenance.trackVendorAssignmentAgainstSuggestions.prior', orgId })
+        }
       }
     }
 
@@ -76,10 +90,14 @@ async function trackVendorAssignmentAgainstSuggestions(
       vendor_id:      vendorId,
       was_suggestion: (wo.suggested_vendor_ids ?? []).includes(vendorId),
     }))
-    await service.from('vendor_assignment_outcomes').upsert(ensureRows, {
+    const { error: ensureError } = await service.from('vendor_assignment_outcomes').upsert(ensureRows, {
       onConflict:       'work_order_id,vendor_id',
       ignoreDuplicates: true,  // don't clobber a row the suggestion algorithm already scored
     })
+    if (ensureError) {
+      console.error('[trackVendorAssignmentAgainstSuggestions] ensure upsert failed', ensureError)
+      reportError(ensureError, { site: 'serverAction.maintenance.trackVendorAssignmentAgainstSuggestions.ensure', orgId })
+    }
   } catch (err) {
     // Suggestion-state/outcome tracking must never break the actual assignment
     console.error('[trackVendorAssignmentAgainstSuggestions]', err)

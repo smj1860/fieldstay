@@ -12,7 +12,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
 import { inngest } from '@/lib/inngest/client'
-import { scanLimiter } from '@/lib/rate-limit'
+import { scanLimiter, checkLimit } from '@/lib/rate-limit'
 
 const PHOTO_BUCKET = 'turnover-photos'
 
@@ -47,8 +47,14 @@ export async function POST(request: NextRequest) {
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) return NextResponse.json({ error: 'Not authenticated' }, { status: 401 })
 
-  const { success } = await scanLimiter.limit(user.id)
-  if (!success) {
+  // Spend ceiling → fails CLOSED, same reasoning as
+  // app/api/assets/scan-data-plate/route.ts: this hands off to an Inngest
+  // function that makes the billed Claude vision call.
+  const rl = await checkLimit(scanLimiter, user.id, {
+    onError: 'deny',
+    site:    'route.assets.request-scan.POST',
+  })
+  if (!rl.allowed) {
     return NextResponse.json({ error: 'Daily scan limit reached. Try again tomorrow.' }, { status: 429 })
   }
 

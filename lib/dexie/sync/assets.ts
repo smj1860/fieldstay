@@ -7,6 +7,7 @@
 import type { DexieSupabaseClient } from './types'
 import { getDexieDb, type PropertyAssetRow } from '../schema'
 import { fetchInChunks } from './chunked'
+import { bulkPutShadowed } from './shadow'
 import { reportError } from '@/lib/observability/report-error'
 
 // Properties this crew member currently has a stake in — same derivation as
@@ -55,6 +56,6 @@ export async function syncPropertyAssets(
       is_na:     a.is_na ? 1 : 0,
       photo_url: a.photo_url ?? '',
     }))
-    await db.property_assets.bulkPut(normalized as PropertyAssetRow[])
+    await bulkPutShadowed(db.property_assets, userId, 'property_assets', normalized as PropertyAssetRow[])
   }
 }

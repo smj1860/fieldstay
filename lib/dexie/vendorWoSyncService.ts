@@ -43,6 +43,9 @@ function getVendorSyncEngine(token: string): OutboxEngine<VendorWoMutationRow> {
   if (!engine) {
     const db = getVendorWoDb(token)
     engine = new OutboxEngine<VendorWoMutationRow>(db.mutations, {
+      // Per-token lock: two tabs open on the same vendor link share one
+      // IndexedDB and would otherwise drain it concurrently.
+      lockName:   `fieldstay-vendor-wo-outbox-${token}`,
       uploadOne:  uploadVendorCompletion,
       isTerminal: (err) => err instanceof WorkOrderClosedError || err instanceof LinkExpiredError,
     })

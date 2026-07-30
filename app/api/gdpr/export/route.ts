@@ -2,6 +2,7 @@ import { NextResponse }        from 'next/server'
 import { createClient }        from '@/lib/supabase/server'
 import { createServiceClient } from '@/lib/supabase/server'
 import { logAuditEvents }      from '@/lib/audit'
+import { dataExportLimiter, checkLimit } from '@/lib/rate-limit'
 
 /**
  * GET /api/gdpr/export
@@ -14,6 +15,21 @@ export async function GET() {
   const supabase = await createClient()
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+
+  // L-2: authenticated but expensive — five service-role cross-org queries
+  // returning ~700 rows per call, with nothing but the session between a
+  // held-down refresh key and all of it. Abuse limiter → fails OPEN: a Redis
+  // outage must not block a user exercising a GDPR Article 15 right.
+  const rl = await checkLimit(dataExportLimiter, `gdpr-export:${user.id}`, {
+    onError: 'allow',
+    site:    'route.gdpr.export.GET',
+  })
+  if (!rl.allowed) {
+    return NextResponse.json(
+      { error: 'Export limit reached. Please try again later.' },
+      { status: 429 }
+    )
+  }
 
   // Service client — fetches across org boundaries for a complete personal data picture
   const admin = createServiceClient({ authenticatedUser: user })

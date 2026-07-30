@@ -7,8 +7,11 @@ import { useLiveQuery }             from 'dexie-react-hooks'
 import { DexieProvider, useDexieDb } from '@/lib/dexie/context'
 import { CrewContext }              from '@/lib/crew/crew-context'
 import { closeDexieDb, getDexieDb } from '@/lib/dexie/schema'
-import { getSyncEngine }            from '@/lib/dexie/syncService'
+import { getSyncEngine, disposeSyncEngine } from '@/lib/dexie/syncService'
 import { processPendingPhotoUploads } from '@/lib/dexie/photo-sync'
+import { countPendingSyncWork }      from '@/lib/dexie/prune'
+import { isOnline }                  from '@/lib/dexie/net'
+import { FailedSyncBanner }          from './_components/failed-sync-banner'
 import { createClient }             from '@/lib/supabase/client'
 import { cn }                       from '@/lib/utils'
 import { InstallBanner }            from '@/components/pwa/install-banner'
@@ -97,17 +100,14 @@ export function CrewShell({
         ])
       }
 
-      const db = getDexieDb(userId)
-      const [mutationCount, photoCount] = await Promise.all([
-        db.mutations.count(),
-        db.pending_photo_uploads.count(),
-      ])
-      // Deliberately counts ALL rows, not just ones still under the retry
-      // budget — a dead-lettered (failed: true) mutation is exactly the
-      // case this guard exists for: it will never drain on its own, so
-      // it's just as much at risk of being silently lost on logout as one
-      // still actively retrying.
-      const pending = mutationCount + photoCount
+      // Counts work that is genuinely still on its way to the server.
+      // Dead-lettered rows are deliberately EXCLUDED: they'll never drain on
+      // their own, so counting them meant one ancient permanently-failed row
+      // fired this warning on every logout forever — training crew to click
+      // through the one dialog that exists to stop them destroying real work.
+      // They get their own actionable surface instead (FailedSyncBanner),
+      // which the user must retry or explicitly discard.
+      const { pending } = await countPendingSyncWork(userId)
 
       if (pending > 0) {
         setUnsyncedCount(pending)
@@ -122,6 +122,10 @@ export function CrewShell({
   }
 
   async function performLogout() {
+    // Stop the outbox retry timer BEFORE the database is deleted — a timer
+    // that fires afterwards calls getDexieDb() and silently re-creates the
+    // IndexedDB that was just wiped for this signed-out user.
+    disposeSyncEngine()
     await closeDexieDb()
     // Also clear the service worker's cached app shell — same "no residual
     // data on a shared device after sign-out" principle as the Dexie
@@ -202,7 +206,11 @@ export function CrewShell({
     if (!userId) return
     const supabase = createClient()
 
+    // Both drains no-op internally while offline (lib/dexie/net.ts), so an
+    // offline tick can never charge a retry for an attempt that never left
+    // the device. Gating here as well just avoids the pointless work.
     const run = async () => {
+      if (!isOnline()) return
       await getSyncEngine(userId).processOutbox()
       await processPendingPhotoUploads(supabase, userId)
     }
@@ -299,6 +307,8 @@ export function CrewShell({
             </p>
           </Dialog>
         )}
+
+        <FailedSyncBanner userId={userId} />
 
         <InstallBanner />
 
@@ -415,10 +425,10 @@ function SyncStatus() {
   // paint — reading navigator.onLine during SSR would diverge from the
   // client, causing a hydration mismatch. getServerSnapshot below covers
   // that; the real value is synced in as soon as the client mounts.
-  const isOnline = useSyncExternalStore(subscribeToOnlineStatus, () => navigator.onLine, () => true)
+  const online = useSyncExternalStore(subscribeToOnlineStatus, () => navigator.onLine, () => true)
   const [showInfo, setShowInfo] = useState(false)
 
-  if (isOnline) return null
+  if (online) return null
   return (
     <>
       <button

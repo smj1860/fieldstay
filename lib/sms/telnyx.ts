@@ -2,6 +2,7 @@ import { Redis } from '@upstash/redis'
 import { reportError } from '@/lib/observability/report-error'
 import type { GuidebookOfferType } from '@/types/database'
 import { formatOffer } from '@/lib/guidebook/offer'
+import { SMS_TIMEOUT_MS, isTimeoutError } from '@/lib/http/timeout'
 
 export { formatOffer } from '@/lib/guidebook/offer'
 
@@ -21,6 +22,12 @@ const TELNYX_API_URL = 'https://api.telnyx.com/v2/messages'
 // senders can't race past the ceiling. If Redis is unreachable, nudges FAIL
 // CLOSED (skipped) — a cache outage must not disable the spend ceiling —
 // while transactional sends are unaffected (they never consult Redis).
+//
+// A claimed slot is RELEASED when the send definitively fails, so an Inngest
+// retry of a flaky send doesn't burn one slot per attempt for messages that
+// never reached a guest. The claim still happens before dispatch (that's
+// what makes it atomic under concurrency); the release only ever gives a
+// slot back, so it cannot let more messages out than the budget allows.
 
 export type SmsCategory = 'transactional' | 'nudge'
 
@@ -44,13 +51,20 @@ function dailyNudgeBudget(): number {
   return Number.isFinite(raw) && raw > 0 ? raw : DEFAULT_DAILY_NUDGE_BUDGET
 }
 
+function nudgeBudgetKey(): string {
+  const day = new Date().toISOString().split('T')[0]
+  return `sms:nudge:sent:${day}`
+}
+
 /**
  * Atomically claims one slot of today's platform-wide nudge budget.
  * Returns true when this send may proceed.
+ *
+ * Throws on a Redis error — sendSMS turns that into a skipped nudge
+ * (fail CLOSED), because a cache outage must never remove the spend ceiling.
  */
 async function claimNudgeBudgetSlot(): Promise<boolean> {
-  const day = new Date().toISOString().split('T')[0]
-  const key = `sms:nudge:sent:${day}`
+  const key   = nudgeBudgetKey()
   const redis = getRedis()
 
   const count = await redis.incr(key)
@@ -59,6 +73,32 @@ async function claimNudgeBudgetSlot(): Promise<boolean> {
     await redis.expire(key, 48 * 60 * 60)
   }
   return count <= dailyNudgeBudget()
+}
+
+/**
+ * Returns a claimed slot to today's budget after a send definitively failed.
+ *
+ * The claim has to happen BEFORE the Telnyx call — it is the atomic INCR
+ * that makes concurrent senders unable to race past the ceiling, and a
+ * claim-after-dispatch would lose that. But sendSMS throws on a non-2xx,
+ * and Inngest re-enters it on retry, so without a release one flaky send
+ * consumed up to `retries + 1` slots of a budget that exists to bound spend
+ * on messages that were never actually delivered.
+ *
+ * A failed release is deliberately swallowed after logging: the failure
+ * mode is "the budget stays slightly over-consumed", which errs toward
+ * sending fewer nudges — the same direction the fail-closed claim errs in.
+ * Never increases the number of messages that can go out.
+ */
+async function releaseNudgeBudgetSlot(): Promise<void> {
+  try {
+    await getRedis().decr(nudgeBudgetKey())
+  } catch (err) {
+    console.warn('[sms:nudge-budget] failed to release slot after a failed send', {
+      error: err instanceof Error ? err.message : String(err),
+    })
+    reportError(err, { site: 'sms.telnyx.nudge_budget_release_failed' })
+  }
 }
 
 /**
@@ -202,7 +242,19 @@ export async function sendSMS(
     return { sent: false, reason: 'SMS_ENABLED is not true' }
   }
 
-  if ((opts?.category ?? 'transactional') === 'nudge') {
+  // Env validation runs BEFORE the budget claim: a misconfigured deploy
+  // must not consume budget slots on sends that can never dispatch.
+  const apiKey            = process.env.TELNYX_API_KEY
+  const messagingProfileId = process.env.TELNYX_MESSAGING_PROFILE_ID
+  const fromNumber         = process.env.TELNYX_FROM_NUMBER
+
+  if (!apiKey || !messagingProfileId || !fromNumber) {
+    throw new Error('Telnyx SMS env vars are not configured')
+  }
+
+  const isNudge = (opts?.category ?? 'transactional') === 'nudge'
+
+  if (isNudge) {
     let claimed = false
     try {
       claimed = await claimNudgeBudgetSlot()
@@ -221,34 +273,47 @@ export async function sendSMS(
     }
   }
 
-  const apiKey            = process.env.TELNYX_API_KEY
-  const messagingProfileId = process.env.TELNYX_MESSAGING_PROFILE_ID
-  const fromNumber         = process.env.TELNYX_FROM_NUMBER
+  // Everything from here on can throw, and every throw reaches an Inngest
+  // retry that re-enters sendSMS and claims a fresh slot — so a claimed
+  // slot must be released on the way out (see releaseNudgeBudgetSlot).
+  try {
+    let response: Response
+    try {
+      response = await fetch(TELNYX_API_URL, {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${apiKey}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          from:                 fromNumber,
+          to:                   toE164,
+          text:                 body,
+          messaging_profile_id: messagingProfileId,
+        }),
+        signal: AbortSignal.timeout(SMS_TIMEOUT_MS),
+      })
+    } catch (err) {
+      // A timeout is genuinely ambiguous — Telnyx may or may not have
+      // accepted the message — so it is reported as its own distinct
+      // failure rather than as a generic send error, and rethrown so
+      // Inngest retries it.
+      if (isTimeoutError(err)) {
+        throw new Error(`Telnyx send timed out after ${SMS_TIMEOUT_MS}ms`)
+      }
+      throw err
+    }
 
-  if (!apiKey || !messagingProfileId || !fromNumber) {
-    throw new Error('Telnyx SMS env vars are not configured')
+    if (!response.ok) {
+      const errText = await response.text()
+      throw new Error(`Telnyx send failed: ${response.status} ${errText}`)
+    }
+
+    return { sent: true }
+  } catch (err) {
+    if (isNudge) await releaseNudgeBudgetSlot()
+    throw err
   }
-
-  const response = await fetch(TELNYX_API_URL, {
-    method: 'POST',
-    headers: {
-      Authorization: `Bearer ${apiKey}`,
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify({
-      from:                 fromNumber,
-      to:                   toE164,
-      text:                 body,
-      messaging_profile_id: messagingProfileId,
-    }),
-  })
-
-  if (!response.ok) {
-    const errText = await response.text()
-    throw new Error(`Telnyx send failed: ${response.status} ${errText}`)
-  }
-
-  return { sent: true }
 }
 
 export function buildDoorCodeSMS(

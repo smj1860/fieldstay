@@ -28,6 +28,22 @@ type Admin = ReturnType<typeof createServiceClient>
  * child tables (e.g. inventory_template_items, inventory_count_draft_items)
  * cascade from the parent rows removed here.
  */
+/**
+ * Tables that must be cleared BEFORE the organizations row, because they hold
+ * a non-cascading FK to another table that IS in the cascade tree. Postgres
+ * does not order cascade actions, so leaving these to the cascade can abort
+ * the whole DELETE with a foreign-key violation. Verified 2026-07-30:
+ *   work_order_invoices.property_id -> properties   ON DELETE RESTRICT
+ *   work_order_invoices.vendor_id   -> vendors      ON DELETE RESTRICT
+ *   work_orders.reported_by_crew_member_id -> crew_members  ON DELETE NO ACTION
+ * Deleting invoices then work orders clears all three edges; every other FK
+ * inside the organizations cascade tree is CASCADE or SET NULL.
+ */
+const ORG_TABLES_BLOCKING_CASCADE = [
+  'work_order_invoices',
+  'work_orders',
+] as const
+
 const ORG_TABLES_WITHOUT_CASCADE = [
   'asset_depreciation_entries',
   'assignment_outcomes',
@@ -230,7 +246,7 @@ async function cancelOrgSubscriptions(
  * partial failure is a no-op for whatever already went.
  */
 async function purgeOrganization(admin: Admin, orgId: string): Promise<NextResponse | null> {
-  for (const table of ORG_TABLES_WITHOUT_CASCADE) {
+  for (const table of [...ORG_TABLES_BLOCKING_CASCADE, ...ORG_TABLES_WITHOUT_CASCADE]) {
     const { error } = await admin.from(table).delete().eq('org_id', orgId)
     if (error) {
       console.error(`[account/delete] failed to purge ${table} for org ${orgId}`, error)
@@ -294,7 +310,16 @@ async function revokeIntegrationTokens(
   return null
 }
 
-export async function DELETE(request: NextRequest) {
+interface AuthedCaller { id: string; email: string }
+
+/**
+ * Everything that must hold before a single byte is destroyed: a real
+ * session, the literal DELETE confirmation, a throttle, and a genuine
+ * password re-entry. Returns a NextResponse to send, or the caller to act on.
+ */
+async function authorizeDeletion(
+  request: NextRequest
+): Promise<{ caller: AuthedCaller } | { response: NextResponse }> {
   const cookieStore = await cookies()
   const supabase = createServerClient(
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -304,80 +329,108 @@ export async function DELETE(request: NextRequest) {
 
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) {
-    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+    return { response: NextResponse.json({ error: 'Unauthorized' }, { status: 401 }) }
   }
 
   const body = await request.json().catch(() => null) as
     { confirm?: unknown; password?: unknown } | null
 
   if (body?.confirm !== 'DELETE') {
-    return NextResponse.json({ error: 'Confirmation required' }, { status: 400 })
+    return { response: NextResponse.json({ error: 'Confirmation required' }, { status: 400 }) }
   }
 
   const password = typeof body.password === 'string' ? body.password : ''
   if (!password) {
-    return NextResponse.json({ error: 'Password confirmation required' }, { status: 400 })
+    return { response: NextResponse.json({ error: 'Password confirmation required' }, { status: 400 }) }
   }
 
   if (await isRateLimited(user.id)) {
-    return NextResponse.json(
-      { error: 'Too many attempts. Please try again in a few minutes.' },
-      { status: 429 }
-    )
+    return {
+      response: NextResponse.json(
+        { error: 'Too many attempts. Please try again in a few minutes.' },
+        { status: 429 }
+      ),
+    }
   }
 
   if (!user.email || !(await passwordIsValid(user.email, password))) {
-    return NextResponse.json({ error: 'Password is incorrect' }, { status: 401 })
+    return { response: NextResponse.json({ error: 'Password is incorrect' }, { status: 401 }) }
   }
 
-  const admin = createServiceClient({ authenticatedUser: user })
+  return { caller: { id: user.id, email: user.email } }
+}
 
-  // Every org membership — the user may belong to more than one.
-  const { data: memberships, error: memberErr } = await admin
+/**
+ * Stage 1: validate every organization the caller OWNS and cancel its
+ * billing. Nothing is destroyed here, so an early return leaves the account
+ * entirely intact and retryable.
+ */
+async function prepareOrgsForDeletion(
+  admin: Admin,
+  userId: string
+): Promise<{ auditOrgIds: string[]; ownedOrgIds: string[] } | { response: NextResponse }> {
+  const { data: memberships, error } = await admin
     .from('organization_members')
     .select('org_id, role')
-    .eq('user_id', user.id)
+    .eq('user_id', userId)
 
-  if (memberErr) {
-    console.error('[account/delete] membership lookup', memberErr)
-    return NextResponse.json({ error: 'Delete failed' }, { status: 500 })
+  if (error) {
+    console.error('[account/delete] membership lookup', error)
+    return { response: NextResponse.json({ error: 'Delete failed' }, { status: 500 }) }
   }
 
   const auditOrgIds: string[] = []
   const ownedOrgIds: string[] = []
 
-  // Stage 1 — validate every owned org and cancel its billing. Nothing is
-  // destroyed yet, so bailing out here leaves the account fully intact.
   for (const membership of memberships ?? []) {
     const orgId = membership.org_id as string
     auditOrgIds.push(orgId)
 
     if (membership.role !== 'owner') continue
 
-    const blocked = await assertSoleMember(admin, orgId, user.id)
-    if (blocked) return blocked
+    const blocked = await assertSoleMember(admin, orgId, userId)
+    if (blocked) return { response: blocked }
 
-    const billingFailure = await cancelOrgSubscriptions(admin, orgId, user.id)
-    if (billingFailure) return billingFailure
+    const billingFailure = await cancelOrgSubscriptions(admin, orgId, userId)
+    if (billingFailure) return { response: billingFailure }
 
     ownedOrgIds.push(orgId)
   }
 
-  // Stage 2 — audit BEFORE the data is gone. org_id in metadata as well as
-  // the column, because audit_events.org_id is ON DELETE SET NULL and the
-  // organizations row is about to disappear. An org id is not PII.
+  return { auditOrgIds, ownedOrgIds }
+}
+
+export async function DELETE(request: NextRequest) {
+  const authorized = await authorizeDeletion(request)
+  if ('response' in authorized) return authorized.response
+  const { caller } = authorized
+
+  const admin = createServiceClient({ authenticatedUser: { id: caller.id } })
+
+  const prepared = await prepareOrgsForDeletion(admin, caller.id)
+  if ('response' in prepared) return prepared.response
+  const { auditOrgIds, ownedOrgIds } = prepared
+
+  // Stage 2 — revoke external tokens while the connection rows still exist.
+  const revokeFailure = await revokeIntegrationTokens(admin, caller.id)
+  if (revokeFailure) return revokeFailure
+
+  // Stage 3 — audit. Last stage that can still abort has passed, so this is
+  // the first point where "account.deleted" is true enough to record; and it
+  // must precede stage 4, since audit_events.org_id is a real FK.
+  //
+  // org_id goes in metadata as well as the column: that FK is ON DELETE SET
+  // NULL, so the column is nulled the moment the organization is deleted
+  // below, and the metadata copy is what preserves the attribution. An org id
+  // is not PII.
   await logAuditEvents(
     auditOrgIds.map((orgId) => ({
       orgId,
-      actorId:  user.id,
+      actorId:  caller.id,
       action:   'account.deleted' as const,
       metadata: { org_id: orgId },
     }))
   )
-
-  // Stage 3 — revoke external tokens while the connection rows still exist.
-  const revokeFailure = await revokeIntegrationTokens(admin, user.id)
-  if (revokeFailure) return revokeFailure
 
   // Stage 4 — destroy the org data. Ordered before deleteUser so a failure
   // here leaves a still-usable account that can retry, rather than an
@@ -389,9 +442,9 @@ export async function DELETE(request: NextRequest) {
 
   // Stage 5 — finally the auth user (cascades to profiles and any remaining
   // organization_members rows for orgs the user did not own).
-  const { error: deleteError } = await admin.auth.admin.deleteUser(user.id)
+  const { error: deleteError } = await admin.auth.admin.deleteUser(caller.id)
   if (deleteError) {
-    console.error(`[Account:${user.id}] deleteUser failed:`, deleteError.message)
+    console.error(`[Account:${caller.id}] deleteUser failed:`, deleteError.message)
     return NextResponse.json({ error: 'Failed to delete account. Please try again.' }, { status: 500 })
   }
 

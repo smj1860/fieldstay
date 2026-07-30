@@ -1,5 +1,6 @@
 import { createClient } from '@/lib/supabase/server'
 import { unwrapJoin } from '@/lib/utils/supabase-joins'
+import { tryUnwrapList } from '@/lib/supabase/unwrap'
 
 export interface NotificationItem {
   id:       string
@@ -9,6 +10,20 @@ export interface NotificationItem {
   severity: 'amber' | 'red' | 'green' | 'blue'
   /** Only meaningful for persisted (event-log) notifications. */
   read?:    boolean
+}
+
+/**
+ * The bell's feed, with an explicit failure flag.
+ *
+ * An empty `items` array used to mean two very different things — "you're all
+ * caught up" and "every query behind this panel failed" — and the UI rendered
+ * the reassuring one. Combined with the missing authenticated GRANT on
+ * `notifications`, that is precisely how the bell went dark in production with
+ * no console output and nothing in Sentry. `failed` keeps the two apart.
+ */
+export interface NotificationFeed {
+  items:  NotificationItem[]
+  failed: boolean
 }
 
 interface PersistedNotificationRow {
@@ -26,16 +41,19 @@ interface PersistedNotificationRow {
 // Distinct from the derived "currently true" alerts below: those resolve
 // themselves (e.g. an unassigned turnover disappears once assigned), these
 // are a persisted event log that needs explicit read state.
-async function getPersistedNotifications(orgId: string): Promise<NotificationItem[]> {
+async function getPersistedNotifications(orgId: string): Promise<NotificationFeed> {
   const supabase = await createClient()
-  const { data } = await supabase
+  const res = await supabase
     .from('notifications')
     .select('id, title, subtitle, href, severity, read_at, created_at')
     .eq('org_id', orgId)
     .order('created_at', { ascending: false })
     .limit(20)
 
-  return ((data ?? []) as PersistedNotificationRow[]).map((n) => ({
+  const outcome = tryUnwrapList(res, { site: 'lib.notifications.getPersistedNotifications', orgId })
+  if (!outcome.ok) return { items: [], failed: true }
+
+  const items = (outcome.data as unknown as PersistedNotificationRow[]).map((n) => ({
     id:       n.id,
     title:    n.title,
     subtitle: n.subtitle ?? '',
@@ -43,6 +61,7 @@ async function getPersistedNotifications(orgId: string): Promise<NotificationIte
     severity: n.severity as NotificationItem['severity'],
     read:     n.read_at !== null,
   }))
+  return { items, failed: false }
 }
 
 interface TurnoverAlertRow {
@@ -80,7 +99,7 @@ function propertyName(p: { name: string } | { name: string }[] | null): string {
 // Surfaces the operational alerts a PM needs to act on right now —
 // unassigned/flagged turnovers, urgent work orders, below-par inventory,
 // and vendor compliance issues — for the dashboard notification bell.
-export async function getNotifications(orgId: string): Promise<NotificationItem[]> {
+export async function getNotifications(orgId: string): Promise<NotificationFeed> {
   const supabase = await createClient()
   const todayIso = new Date().toISOString().split('T')[0]!
 
@@ -116,9 +135,16 @@ export async function getNotifications(orgId: string): Promise<NotificationItem[
       .in('compliance_status', ['hard_blocked', 'expiring_soon', 'grace_period']),
   ])
 
+  // Each source degrades independently: one failing query must not blank the
+  // whole bell, but it must never be silently rendered as "nothing to do".
+  const turnovers  = tryUnwrapList(turnoversRes,  { site: 'lib.notifications.turnovers',  orgId })
+  const workOrders = tryUnwrapList(workOrdersRes, { site: 'lib.notifications.workOrders', orgId })
+  const inventory  = tryUnwrapList(inventoryRes,  { site: 'lib.notifications.inventory',  orgId })
+  const compliance = tryUnwrapList(complianceRes, { site: 'lib.notifications.compliance', orgId })
+
   const items: NotificationItem[] = []
 
-  for (const t of (turnoversRes.data ?? []) as unknown as TurnoverAlertRow[]) {
+  for (const t of ((turnovers.ok ? turnovers.data : []) as unknown as TurnoverAlertRow[])) {
     items.push({
       id:       `turnover-${t.id}`,
       title:    t.status === 'flagged' ? 'Flagged turnover' : 'Unassigned turnover',
@@ -130,7 +156,7 @@ export async function getNotifications(orgId: string): Promise<NotificationItem[
     })
   }
 
-  for (const wo of (workOrdersRes.data ?? []) as unknown as WorkOrderAlertRow[]) {
+  for (const wo of ((workOrders.ok ? workOrders.data : []) as unknown as WorkOrderAlertRow[])) {
     items.push({
       id:       `wo-${wo.id}`,
       title:    `Urgent: ${wo.title}`,
@@ -140,7 +166,7 @@ export async function getNotifications(orgId: string): Promise<NotificationItem[
     })
   }
 
-  const belowPar = ((inventoryRes.data ?? []) as unknown as InventoryAlertRow[])
+  const belowPar = ((inventory.ok ? inventory.data : []) as unknown as InventoryAlertRow[])
     .filter((i) => i.first_count_recorded_at && i.current_quantity < i.par_level)
     .slice(0, 5)
 
@@ -154,7 +180,7 @@ export async function getNotifications(orgId: string): Promise<NotificationItem[
     })
   }
 
-  for (const v of (complianceRes.data ?? []) as unknown as VendorComplianceAlertRow[]) {
+  for (const v of ((compliance.ok ? compliance.data : []) as unknown as VendorComplianceAlertRow[])) {
     items.push({
       id:       `vendor-${v.vendor_id}`,
       title:    v.compliance_status === 'hard_blocked'
@@ -168,5 +194,8 @@ export async function getNotifications(orgId: string): Promise<NotificationItem[
 
   // Live "currently true" alerts first, then the recent event-log feed.
   const persisted = await getPersistedNotifications(orgId)
-  return [...items, ...persisted]
+  const failed =
+    !turnovers.ok || !workOrders.ok || !inventory.ok || !compliance.ok || persisted.failed
+
+  return { items: [...items, ...persisted.items], failed }
 }

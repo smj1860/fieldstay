@@ -56,7 +56,7 @@ describe('getNotifications', () => {
     const supabase = makeSupabase(EMPTY)
     vi.mocked(createClient).mockResolvedValue(supabase as never)
 
-    const result = await getNotifications('org_1')
+    const { items: result } = await getNotifications('org_1')
 
     expect(result).toEqual([])
   })
@@ -79,7 +79,7 @@ describe('getNotifications', () => {
     })
     vi.mocked(createClient).mockResolvedValue(supabase as never)
 
-    const result = await getNotifications('org_1')
+    const { items: result } = await getNotifications('org_1')
 
     expect(result).toEqual([
       expect.objectContaining({ id: 'turnover-t1', title: 'Flagged turnover', severity: 'red', href: '/turnovers/t1' }),
@@ -98,7 +98,7 @@ describe('getNotifications', () => {
     })
     vi.mocked(createClient).mockResolvedValue(supabase as never)
 
-    const result = await getNotifications('org_1')
+    const { items: result } = await getNotifications('org_1')
 
     expect(result).toEqual([
       expect.objectContaining({
@@ -115,7 +115,7 @@ describe('getNotifications', () => {
     })
     vi.mocked(createClient).mockResolvedValue(supabase as never)
 
-    const result = await getNotifications('org_1')
+    const { items: result } = await getNotifications('org_1')
 
     expect(result[0]!.subtitle).toBe('Property')
   })
@@ -136,7 +136,7 @@ describe('getNotifications', () => {
     })
     vi.mocked(createClient).mockResolvedValue(supabase as never)
 
-    const result = await getNotifications('org_1')
+    const { items: result } = await getNotifications('org_1')
 
     expect(result).toHaveLength(1)
     expect(result[0]).toEqual(expect.objectContaining({
@@ -154,7 +154,7 @@ describe('getNotifications', () => {
     const supabase = makeSupabase({ ...EMPTY, inventory_items: { data: items } })
     vi.mocked(createClient).mockResolvedValue(supabase as never)
 
-    const result = await getNotifications('org_1')
+    const { items: result } = await getNotifications('org_1')
 
     expect(result).toHaveLength(5)
   })
@@ -172,7 +172,7 @@ describe('getNotifications', () => {
     })
     vi.mocked(createClient).mockResolvedValue(supabase as never)
 
-    const result = await getNotifications('org_1')
+    const { items: result } = await getNotifications('org_1')
 
     expect(result).toEqual([
       expect.objectContaining({ id: 'vendor-v1', title: 'Acme Plumbing — compliance blocked', severity: 'red' }),
@@ -193,7 +193,7 @@ describe('getNotifications', () => {
     })
     vi.mocked(createClient).mockResolvedValue(supabase as never)
 
-    const result = await getNotifications('org_1')
+    const { items: result } = await getNotifications('org_1')
 
     expect(result).toEqual([
       { id: 'n1', title: 'WO completed', subtitle: '', href: '/wo/1', severity: 'green', read: false },
@@ -211,7 +211,7 @@ describe('getNotifications', () => {
     })
     vi.mocked(createClient).mockResolvedValue(supabase as never)
 
-    const result = await getNotifications('org_1')
+    const { items: result } = await getNotifications('org_1')
 
     expect(result.map((r) => r.id)).toEqual(['wo-wo1', 'n1'])
   })
@@ -223,7 +223,7 @@ describe('getNotifications', () => {
     })
     vi.mocked(createClient).mockResolvedValue(supabase as never)
 
-    const result = await getNotifications('org_1')
+    const { items: result } = await getNotifications('org_1')
 
     expect(result).toEqual([])
   })

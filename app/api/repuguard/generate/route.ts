@@ -1,13 +1,19 @@
 import { NextRequest, NextResponse } from 'next/server'
+import type { User } from '@supabase/supabase-js'
 import { cookies } from 'next/headers'
 import { createServerClient } from '@supabase/ssr'
 import { createServiceClient } from '@/lib/supabase/server'
-import { repuguardLimiter } from '@/lib/rate-limit'
+import { repuguardLimiter, checkLimit, retryAfterSeconds } from '@/lib/rate-limit'
 import { logAuditEvent } from '@/lib/audit'
 import { generateReviewResponse } from '@/lib/repuguard/generate-response'
 
 import { reportError } from '@/lib/observability/report-error'
-export async function POST(request: NextRequest) {
+type AdminClient = ReturnType<typeof createServiceClient>
+
+/** Session + daily spend ceiling. Returns the caller, or the response to send. */
+async function authorizeCaller(): Promise<
+  { user: User } | { response: NextResponse }
+> {
   const cookieStore = await cookies()
   const supabase = createServerClient(
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -17,17 +23,120 @@ export async function POST(request: NextRequest) {
 
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) {
-    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+    return { response: NextResponse.json({ error: 'Unauthorized' }, { status: 401 }) }
   }
 
-  // H-1: Rate limit — 50 generations per user per day (sliding window)
-  const { success, reset } = await repuguardLimiter.limit(user.id)
-  if (!success) {
+  // H-1: Rate limit — 50 generations per user per day (sliding window).
+  // Spend ceiling → fails CLOSED: each generation is a billed LLM call.
+  // Previously this had no catch at all.
+  const rl = await checkLimit(repuguardLimiter, user.id, {
+    onError: 'deny',
+    site:    'route.repuguard.generate.POST',
+  })
+  if (!rl.allowed) {
+    return {
+      response: NextResponse.json(
+        { error: 'Daily generation limit reached. Try again tomorrow.' },
+        { status: 429, headers: { 'Retry-After': String(retryAfterSeconds(rl)) } }
+      ),
+    }
+  }
+
+  return { user }
+}
+
+/** Resolves the caller's org and confirms RepuGuard is enabled for it. */
+async function resolveEntitledOrg(
+  admin:  AdminClient,
+  userId: string,
+): Promise<{ orgId: string } | { response: NextResponse }> {
+  const { data: membership } = await admin
+    .from('organization_members')
+    .select('org_id')
+    .eq('user_id', userId)
+    .not('invite_accepted_at', 'is', null)
+    .single()
+
+  if (!membership) {
+    return { response: NextResponse.json({ error: 'No organization found' }, { status: 403 }) }
+  }
+
+  const orgId = membership.org_id as string
+
+  const { data: org } = await admin
+    .from('organizations')
+    .select('repuguard_status')
+    .eq('id', orgId)
+    .single()
+
+  if (!org || org.repuguard_status !== 'active') {
+    return {
+      response: NextResponse.json(
+        { error: 'RepuGuard is not enabled for this account.' },
+        { status: 403 }
+      ),
+    }
+  }
+
+  return { orgId }
+}
+
+const MAX_REGENERATIONS = 2
+
+/**
+ * Regeneration policy. Manually-pasted reviews are edit-only; synced reviews
+ * get MAX_REGENERATIONS re-rolls after the first draft.
+ */
+function regenerationRefusal(
+  isRegeneration: boolean,
+  isManual:       boolean,
+  regenCount:     number,
+): NextResponse | null {
+  if (!isRegeneration) return null
+
+  if (isManual) {
     return NextResponse.json(
-      { error: 'Daily generation limit reached. Try again tomorrow.' },
-      { status: 429, headers: { 'Retry-After': String(Math.ceil((reset - Date.now()) / 1000)) } }
+      { error: 'Manually added reviews cannot be regenerated. Edit the response directly.' },
+      { status: 403 }
     )
   }
+
+  if (regenCount >= MAX_REGENERATIONS) {
+    return NextResponse.json(
+      { error: 'Maximum regenerations reached. Edit the response directly.' },
+      { status: 429 }
+    )
+  }
+
+  return null
+}
+
+type GenerateInput = Parameters<typeof generateReviewResponse>[0]
+type GeneratedResponse = Awaited<ReturnType<typeof generateReviewResponse>>
+
+/** Wraps the LLM call so its failure mapping lives outside the request flow. */
+async function generateOrFail(
+  input: GenerateInput,
+): Promise<{ parsed: GeneratedResponse } | { response: NextResponse }> {
+  try {
+    return { parsed: await generateReviewResponse(input) }
+  } catch (err) {
+    // Log the REAL error server-side — this is what let the June 15 model
+    // retirement run undiagnosed for a month behind a generic message.
+    // Never collapse this back to a bare `catch {}`.
+    console.error('[RepuGuard] Response generation failed:', err instanceof Error ? err.message : err)
+    reportError(err, { site: 'route.repuguard.generate.RepuGuard' })
+    const message = err instanceof Error && err.message.toLowerCase().includes('json')
+      ? 'The AI response could not be parsed. Try regenerating.'
+      : 'Response generation failed. Please try again in a moment.'
+    return { response: NextResponse.json({ error: message }, { status: 500 }) }
+  }
+}
+
+export async function POST(request: NextRequest) {
+  const authorized = await authorizeCaller()
+  if ('response' in authorized) return authorized.response
+  const { user } = authorized
 
   const body = await request.json().catch(() => null)
   const reviewId = typeof body?.review_id === 'string' ? body.review_id : null
@@ -37,30 +146,9 @@ export async function POST(request: NextRequest) {
 
   const admin = createServiceClient({ authenticatedUser: user })
 
-  // Get org membership
-  const { data: membership } = await admin
-    .from('organization_members')
-    .select('org_id')
-    .eq('user_id', user.id)
-    .not('invite_accepted_at', 'is', null)
-    .single()
-
-  if (!membership) {
-    return NextResponse.json({ error: 'No organization found' }, { status: 403 })
-  }
-
-  const orgId = membership.org_id as string
-
-  // Check repuguard_status
-  const { data: org } = await admin
-    .from('organizations')
-    .select('repuguard_status')
-    .eq('id', orgId)
-    .single()
-
-  if (!org || org.repuguard_status !== 'active') {
-    return NextResponse.json({ error: 'RepuGuard is not enabled for this account.' }, { status: 403 })
-  }
+  const entitled = await resolveEntitledOrg(admin, user.id)
+  if ('response' in entitled) return entitled.response
+  const { orgId } = entitled
 
   // Fetch review with property name
   const { data: review } = await admin
@@ -85,25 +173,12 @@ export async function POST(request: NextRequest) {
 
   const isRegeneration = !!existingResponse?.generated_response
 
-  // Manually-pasted reviews are edit-only — never regenerate them
-  if (isRegeneration && isManual) {
-    return NextResponse.json(
-      { error: 'Manually added reviews cannot be regenerated. Edit the response directly.' },
-      { status: 403 }
-    )
-  }
-
-  // Synced reviews: cap regeneration at MAX_REGENERATIONS after the first draft
-  const MAX_REGENERATIONS = 2
-  if (isRegeneration && !isManual) {
-    const regenCount = existingResponse?.regeneration_count ?? 0
-    if (regenCount >= MAX_REGENERATIONS) {
-      return NextResponse.json(
-        { error: 'Maximum regenerations reached. Edit the response directly.' },
-        { status: 429 }
-      )
-    }
-  }
+  const refusal = regenerationRefusal(
+    isRegeneration,
+    isManual,
+    existingResponse?.regeneration_count ?? 0,
+  )
+  if (refusal) return refusal
 
   const propertyData  = review.properties as { name?: string } | null
   const propertyName  = propertyData?.name ?? 'the property'
@@ -112,26 +187,11 @@ export async function POST(request: NextRequest) {
   const starRating    = review.rating as number
   const internalNotes = (review.internal_notes as string | null) ?? null
 
-  let parsed
-  try {
-    parsed = await generateReviewResponse({
-      reviewText:    reviewText,
-      starRating:    starRating,
-      propertyName:  propertyName,
-      guestName:     guestName,
-      internalNotes: internalNotes,
-    })
-  } catch (err) {
-    // Log the REAL error server-side — this is what let the June 15 model
-    // retirement run undiagnosed for a month behind a generic message.
-    // Never collapse this back to a bare `catch {}`.
-    console.error('[RepuGuard] Response generation failed:', err instanceof Error ? err.message : err)
-    reportError(err, { site: 'route.repuguard.generate.RepuGuard' })
-    const message = err instanceof Error && err.message.toLowerCase().includes('json')
-      ? 'The AI response could not be parsed. Try regenerating.'
-      : 'Response generation failed. Please try again in a moment.'
-    return NextResponse.json({ error: message }, { status: 500 })
-  }
+  const generated = await generateOrFail({
+    reviewText, starRating, propertyName, guestName, internalNotes,
+  })
+  if ('response' in generated) return generated.response
+  const { parsed } = generated
 
   const hasFlags     = Array.isArray(parsed.flags) && parsed.flags.length > 0
   const responseStatus = hasFlags ? 'draft' : 'ready'

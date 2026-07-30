@@ -104,7 +104,7 @@ export default async function DashboardLayout({
     { data: pendingMilestone },
     { data: newPropertyMilestones },
     { data: staffRow },
-    notifications,
+    notificationFeed,
     { count: unreadMessages },
   ] = await Promise.all([
     supabase
@@ -180,7 +180,8 @@ export default async function DashboardLayout({
         repuguardActive={repuguardActive}
         onboardingComplete={onboardingComplete}
         onboardingPct={onboardingPct}
-        notifications={notifications}
+        notifications={notificationFeed.items}
+        notificationsFailed={notificationFeed.failed}
         unreadMessages={unreadMessages ?? 0}
         isStaff={isStaff}
       >

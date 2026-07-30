@@ -53,10 +53,24 @@ BEGIN
   RAISE NOTICE 'purge_orphaned_organizations: purging % member-less organization(s): %',
     cardinality(orphan_ids), orphan_ids;
 
-  -- Step 1 — org-scoped tables with no FK to organizations (verified against
-  -- the live schema 2026-07-30). Guarded with to_regclass so this migration
-  -- does not fail on an environment where one of them does not exist.
+  -- Step 1 — ordered explicit deletes, then the organizations row.
+  --
+  -- The first two entries are NOT "missing a cascade": they hold a
+  -- non-cascading FK to another table that IS inside the organizations
+  -- cascade tree, and Postgres does not order cascade actions, so leaving
+  -- them to the cascade can abort the whole DELETE with an FK violation.
+  -- Verified 2026-07-30:
+  --   work_order_invoices.property_id -> properties  ON DELETE RESTRICT
+  --   work_order_invoices.vendor_id   -> vendors     ON DELETE RESTRICT
+  --   work_orders.reported_by_crew_member_id -> crew_members  ON DELETE NO ACTION
+  -- Clearing invoices then work orders removes all three edges.
+  --
+  -- The remainder are the org-scoped tables with NO foreign key to
+  -- organizations at all. Guarded with to_regclass so this migration does not
+  -- fail on an environment where one of them does not exist.
   FOREACH tbl IN ARRAY ARRAY[
+    'work_order_invoices',
+    'work_orders',
     'asset_depreciation_entries',
     'assignment_outcomes',
     'vendor_assignment_outcomes',

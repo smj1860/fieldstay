@@ -4,6 +4,7 @@ import type { Metadata } from 'next'
 import { createServiceClient } from '@/lib/supabase/server'
 import { getWeatherForLocation } from '@/lib/weather/tomorrow'
 import { GuestGuidebookView } from '@/components/guidebook/guest-guidebook-view'
+import { GuidebookUnavailable } from '@/components/guidebook/guidebook-unavailable'
 import type { GuidebookSponsorView } from '@/components/guidebook/guest-guidebook-view'
 import type { GuidebookSponsor, GuidebookPropertyConfig, Property } from '@/types/database'
 
@@ -117,7 +118,11 @@ export default async function GuestBookingGuidebookPage({
     .eq('org_id', booking.org_id)
     .maybeSingle()
 
+  // Same server-side gate as app/g/[slug]/page.tsx — see M1 note there. Lower
+  // risk here (a booking token is required to reach this route at all) but the
+  // leak shape is identical, so the fix is identical.
   const isActive = Boolean(config.is_published) && Boolean(orgConfig?.is_active)
+  if (!isActive) return <GuidebookUnavailable />
 
   // Stay-extension ("Gap Night") offer — only surfaces when the cron has
   // created a pending request for this booking.
@@ -166,7 +171,6 @@ export default async function GuestBookingGuidebookPage({
       property={property}
       config={config as unknown as GuidebookPropertyConfig}
       sponsors={sponsorViews}
-      isActive={isActive}
       hourOfDay={hourOfDay}
       weather={weather}
       heroPhotoUrl={heroPhotoUrl(config.hero_photo_storage_path)}

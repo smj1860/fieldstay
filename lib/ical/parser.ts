@@ -1,4 +1,15 @@
 import ICAL from 'ical.js'
+import { reportError } from '@/lib/observability/report-error'
+
+// A malformed VEVENT is skipped rather than allowed to abort the whole feed —
+// one bad row must not cost a PM every other booking on the calendar. But a
+// silent skip is how a platform quietly changing its iCal format drops
+// revenue-bearing bookings with nothing in the logs to show for it. So skips
+// are counted, reported once per parse, and escalated to Sentry when the
+// skip rate crosses the level that means "this is a format problem, not one
+// odd event".
+const ANOMALOUS_SKIP_RATIO = 0.2   // >20% of events unparseable
+const ANOMALOUS_SKIP_FLOOR = 3     // ...and at least this many, so a 1-of-2 feed isn't noise
 
 export interface ParsedBooking {
   uid:        string
@@ -24,17 +35,29 @@ export function parseIcalFeed(raw: string): ParsedBooking[] {
   const vevents   = component.getAllSubcomponents('vevent')
 
   const results: ParsedBooking[] = []
+  let   skipped = 0
+  let   firstSkipReason: string | null = null
 
   for (const vevent of vevents) {
     try {
       const event = new ICAL.Event(vevent)
 
-      const uid     = event.uid
-      if (!uid) continue
+      // A VEVENT with no uid or no dates is just as dropped as one that
+      // throws — count it the same way rather than letting it vanish.
+      const uid = event.uid
+      if (!uid) {
+        skipped++
+        firstSkipReason ??= 'missing uid'
+        continue
+      }
 
-      const start   = event.startDate?.toJSDate()
-      const end     = event.endDate?.toJSDate()
-      if (!start || !end) continue
+      const start = event.startDate?.toJSDate()
+      const end   = event.endDate?.toJSDate()
+      if (!start || !end) {
+        skipped++
+        firstSkipReason ??= 'missing start or end date'
+        continue
+      }
 
       // Normalise status
       const rawStatus = (vevent.getFirstPropertyValue('status') as string | null)?.toUpperCase()
@@ -67,13 +90,51 @@ export function parseIcalFeed(raw: string): ParsedBooking[] {
       }
 
       results.push({ uid, guestName, start, end, status })
-    } catch {
-      // Skip malformed events — don't blow up the whole sync
-      continue
+    } catch (err) {
+      // Skip malformed events — don't blow up the whole sync — but keep a
+      // tally so the skip is visible after the loop.
+      skipped++
+      firstSkipReason ??= err instanceof Error ? err.message : String(err)
     }
   }
 
+  reportSkippedEvents(vevents.length, skipped, firstSkipReason)
+
   return results
+}
+
+function reportSkippedEvents(
+  total: number,
+  skipped: number,
+  firstSkipReason: string | null
+): void {
+  if (skipped === 0) return
+
+  // One line per parse, not one per event: a feed with 400 broken events
+  // should be one legible signal, not 400 log entries.
+  const ratio = total > 0 ? skipped / total : 1
+  const context = {
+    totalEvents: total,
+    skipped,
+    skipRatio:   Number(ratio.toFixed(3)),
+    // The reason string is iCal structure ("missing uid", a parser message),
+    // never guest data — safe to log.
+    firstSkipReason,
+  }
+
+  if (skipped >= ANOMALOUS_SKIP_FLOOR && ratio > ANOMALOUS_SKIP_RATIO) {
+    // This is the "a platform changed its format" shape: enough of the feed
+    // is unparseable that real bookings are being lost. Escalate, don't just
+    // log — nobody reads a warn line on a background sync.
+    console.error('[parseIcalFeed] anomalous share of calendar events unparseable', context)
+    reportError(
+      new Error(`iCal feed: ${skipped}/${total} events unparseable (${firstSkipReason})`),
+      { site: 'lib.ical.parser.parseIcalFeed', extra: context }
+    )
+    return
+  }
+
+  console.warn('[parseIcalFeed] skipped unparseable calendar events', context)
 }
 
 function asDate(d: Date | string): Date {

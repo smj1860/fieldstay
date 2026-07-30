@@ -400,6 +400,34 @@ async function uploadWorkOrderReport(
   if (!res.ok) throw new UploadHttpError(`Failed to place work order ${targetId}`, res.status)
 }
 
+/**
+ * Crew inventory count submitted for PM review. Routed through the Route
+ * Handler (not a direct table write) because a draft is a two-table insert
+ * plus a previous-quantity diff the client can't compute authoritatively.
+ * `targetId` is a client-generated draft id: the route uses it as the row's
+ * primary key, so an outbox replay after a connectivity blip collides
+ * harmlessly instead of creating a second draft.
+ */
+async function uploadInventoryCountDraft(
+  _supabase: DexieSupabaseClient,
+  targetId: string,
+  payload: MutationPayload,
+): Promise<void> {
+  const res = await fetch('/api/crew/inventory-count', {
+    method:  'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      draftId:       targetId,
+      propertyId:    payload.property_id,
+      counts:        payload.counts,
+      notes:         payload.notes,
+      itemNotes:     payload.item_notes,
+      submitAsDraft: true,
+    }),
+  })
+  if (!res.ok) throw new UploadHttpError(`Failed to submit inventory count ${targetId}`, res.status)
+}
+
 async function uploadInventoryItemCount(
   supabase: DexieSupabaseClient,
   targetId: string,
@@ -539,6 +567,7 @@ const UPLOAD_HANDLERS: Record<string, UploadHandler> = {
   'crew_availability:PUT':          uploadCrewAvailability,
   'crew_availability:PATCH':        uploadCrewAvailability,
   'crew_work_orders:PATCH':         uploadCrewWorkOrderChange,
+  'inventory_count_drafts:PUT':     uploadInventoryCountDraft,
 }
 
 async function uploadOne(supabase: DexieSupabaseClient, mutation: MutationRow): Promise<void> {
@@ -565,6 +594,17 @@ export function getSyncEngine(userId: string): SyncEngine {
     engine = new SyncEngine(userId)
   }
   return engine
+}
+
+/**
+ * Tears down the module-level engine. Call on logout BEFORE deleting the
+ * IndexedDB database: a still-armed retry timer would otherwise fire after
+ * the delete, call getDexieDb(), and re-create the database it just wiped.
+ */
+export function disposeSyncEngine(): void {
+  engine?.dispose()
+  engine = null
+  engineUserId = null
 }
 
 /** Queues a mutation in the outbox and fires processOutbox() in the background. */
