@@ -10,6 +10,7 @@ import { Card }                                from '@/components/ui/Card'
 import { Badge }                               from '@/components/ui/Badge'
 import { Button, buttonVariantClass }           from '@/components/ui/Button'
 import { Input }                               from '@/components/ui/Input'
+import { reportError }                         from '@/lib/observability/report-error'
 
 // ── Provider credential definitions ──────────────────────────────────────────
 // Each api_key provider declares what fields the PM needs to fill in.
@@ -313,84 +314,81 @@ function getSyncCopy(propertiesFound: number | null, bookingsFound: number | nul
   return 'Connecting…'
 }
 
-function IntegrationCard({
-  provider,
-  connection,
-  onConnectClick,
-  canDisconnect,
-}: {
-  provider:       Provider
-  connection:     Connection | null
-  onConnectClick: () => void
-  canDisconnect:  boolean
-}) {
-  const [disconnecting, startDisconnect] = useTransition()
-  const [confirming, setConfirming]      = useState(false)
-  const [error, setError]                = useState<string | null>(null)
-  const [resyncing, startResync]         = useTransition()
-  const [resyncMessage, setResyncMessage] = useState<string | null>(null)
+// ── Sync progress polling ────────────────────────────────────────────────────
 
-  // --- Sync progress polling ---
-  const initialMeta        = (connection?.metadata ?? {}) as Record<string, unknown>
-  const initialSyncStatus  = typeof initialMeta.last_sync_status === 'string'
+interface SyncState {
+  status:         string | null
+  propertiesFound: number | null
+  bookingsFound:   number | null
+  isTerminal:      boolean
+  timedOut:        boolean
+  pollError:       string | null
+}
+
+const POLL_INTERVAL_MS = 2500
+// 10 minutes. The old 3-minute ceiling assumed a 30-90s sync, which only
+// holds when hospitableApiLimiter's shared platform budget is uncontended.
+// Two orgs connecting in the same window push a 50-property initial sync
+// well past three minutes, and the timeout was firing on a sync that was
+// still running perfectly well — showing an error to a customer on their
+// very first screen.
+const SYNC_TIMEOUT_MS = 10 * 60 * 1000
+
+/**
+ * Polls sync progress while a connection is active but has no terminal result
+ * yet. Starts immediately after the OAuth redirect (metadata has no
+ * last_sync_status yet) and also picks up if the user navigates here mid-sync.
+ */
+function useSyncProgress(providerId: string, connection: Connection | null): SyncState {
+  const initialMeta       = (connection?.metadata ?? {}) as Record<string, unknown>
+  const initialSyncStatus = typeof initialMeta.last_sync_status === 'string'
     ? initialMeta.last_sync_status
     : null
-  const initiallyTerminal  = initialSyncStatus === 'success' || initialSyncStatus === 'error'
+  const initiallyTerminal = initialSyncStatus === 'success' || initialSyncStatus === 'error'
 
   const [syncProgress, setSyncProgress] = useState<SyncProgress | null>(null)
-  const [syncTimedOut, setSyncTimedOut] = useState(false)
+  const [syncTimedOut,  setSyncTimedOut] = useState(false)
+  const [pollError,     setPollError]    = useState<string | null>(null)
 
-  const effectiveSyncStatus   = syncProgress?.lastSyncStatus ?? initialSyncStatus
-  const effectivePropsFound   = syncProgress?.propertiesFound
+  const status = syncProgress?.lastSyncStatus ?? initialSyncStatus
+  const propertiesFound = syncProgress?.propertiesFound
     ?? (typeof initialMeta.properties_found === 'number' ? initialMeta.properties_found : null)
-  const effectiveBookingsFound = syncProgress?.bookingsFound
+  const bookingsFound = syncProgress?.bookingsFound
     ?? (typeof initialMeta.bookings_found === 'number' ? initialMeta.bookings_found : null)
 
-  const isTerminal = effectiveSyncStatus === 'success' || effectiveSyncStatus === 'error'
-
-  // Poll while the connection is active but the sync has no terminal result yet.
-  // Starts immediately after OAuth redirect (metadata has no last_sync_status yet)
-  // and also picks up if the user navigates to the page mid-sync.
+  const isTerminal = status === 'success' || status === 'error'
   const shouldPoll = connection?.status === 'active' && !initiallyTerminal && !isTerminal && !syncTimedOut
 
   useEffect(() => {
     if (!shouldPoll) return
 
-    const POLL_INTERVAL_MS = 2500
-    // 10 minutes. The old 3-minute ceiling assumed a 30-90s sync, which only
-    // holds when hospitableApiLimiter's shared platform budget is uncontended.
-    // Two orgs connecting in the same window push a 50-property initial sync
-    // well past three minutes, and the timeout was firing on a sync that was
-    // still running perfectly well — showing an error to a customer on their
-    // very first screen.
-    const TIMEOUT_MS       = 10 * 60 * 1000
-    const startedAt        = Date.now()
+    const startedAt = Date.now()
 
     const poll = async () => {
-      if (Date.now() - startedAt > TIMEOUT_MS) {
+      if (Date.now() - startedAt > SYNC_TIMEOUT_MS) {
         setSyncTimedOut(true)
         clearInterval(intervalId)
         return
       }
       try {
-        const progress = await getSyncProgress(provider.id)
-        if (progress) {
-          setSyncProgress(progress)
-          if (progress.lastSyncStatus === 'success' || progress.lastSyncStatus === 'error') {
-            clearInterval(intervalId)
-          }
+        const progress = await getSyncProgress(providerId)
+        if (!progress) return
+        setPollError(null)
+        setSyncProgress(progress)
+        if (progress.lastSyncStatus === 'success' || progress.lastSyncStatus === 'error') {
+          clearInterval(intervalId)
         }
       } catch (err) {
         // Keep polling — a single failed poll is usually transient — but the
         // error must not vanish. Swallowing it silently meant the user only
-        // ever saw the TIMEOUT_MS message, never the actual cause (a revoked
+        // ever saw the timeout message, never the actual cause (a revoked
         // token, a 500 from the provider), and neither did Sentry.
         console.error('[IntegrationCard] sync progress poll failed', err)
         reportError(err, {
           site: 'client.integrations.syncProgressPoll',
-          extra: { provider_id: provider.id },
+          extra: { provider_id: providerId },
         })
-        setPollError('We\u2019re having trouble checking sync progress. Still retrying\u2026')
+        setPollError('We’re having trouble checking sync progress. Still retrying…')
       }
     }
 
@@ -399,26 +397,232 @@ function IntegrationCard({
 
     return () => clearInterval(intervalId)
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [connection?.status, initiallyTerminal, provider.id])
+  }, [connection?.status, initiallyTerminal, providerId])
 
-  // Derived display state
-  const isConnected     = connection?.status === 'active' && effectiveSyncStatus === 'success'
-  const isError          = connection?.status === 'error'
-                       || connection?.status === 'revoked'
-                       || effectiveSyncStatus === 'error'
+  return { status, propertiesFound, bookingsFound, isTerminal, timedOut: syncTimedOut, pollError }
+}
+
+// ── Card sub-views ───────────────────────────────────────────────────────────
+
+function ConnectButton({
+  provider,
+  label,
+  onConnectClick,
+}: Readonly<{ provider: Provider; label: string; onConnectClick: () => void }>) {
+  if (provider.auth_type === 'api_key') {
+    return (
+      <Button variant="secondary" onClick={onConnectClick} className="text-sm flex items-center gap-1.5">
+        <PlugZap className="w-3.5 h-3.5" />
+        {label}
+      </Button>
+    )
+  }
+
+  const href = provider.id === 'ownerrez'
+    ? `/api/integrations/${provider.id}/connect?return_to=${encodeURIComponent('/ops')}`
+    : `/api/integrations/${provider.id}/connect`
+
+  return (
+    <a href={href} className={buttonVariantClass('secondary') + ' text-sm flex items-center gap-1.5'}>
+      <PlugZap className="w-3.5 h-3.5" />
+      {label}
+    </a>
+  )
+}
+
+function SyncInProgress({ sync }: Readonly<{ sync: SyncState }>) {
+  const message = sync.timedOut
+    // Reassurance, not an error — a large portfolio can genuinely still be
+    // syncing well past 10 minutes when the shared Hospitable rate-limit
+    // budget is contended by other orgs connecting at the same time. No
+    // promise of a completion email here: the only Hospitable-connected
+    // notification fires at OAuth-callback time (in parallel with the sync
+    // starting), not on sync completion — see email-hospitable-connected.tsx.
+    ? 'Still working. Large portfolios can take several minutes — check back here shortly.'
+    : getSyncCopy(sync.propertiesFound, sync.bookingsFound)
+
+  return (
+    <div className="flex items-center gap-2 py-1">
+      {!sync.timedOut && (
+        <Loader2 className="w-3.5 h-3.5 animate-spin flex-shrink-0" style={{ color: 'var(--text-muted)' }} />
+      )}
+      <span className="text-xs max-w-[220px] text-right" style={{ color: 'var(--text-muted)' }}>
+        {message}
+      </span>
+    </div>
+  )
+}
+
+function DisconnectConfirm({
+  disconnecting,
+  onConfirm,
+  onCancel,
+}: Readonly<{ disconnecting: boolean; onConfirm: () => void; onCancel: () => void }>) {
+  return (
+    <div className="flex items-center gap-2">
+      <span className="text-xs" style={{ color: 'var(--text-muted)' }}>Disconnect?</span>
+      <Button variant="danger" onClick={onConfirm} disabled={disconnecting} className="text-xs py-1.5 px-2.5">
+        {disconnecting ? <Loader2 className="w-3 h-3 animate-spin" /> : 'Yes, disconnect'}
+      </Button>
+      <Button variant="ghost" onClick={onCancel} className="text-xs py-1.5">Cancel</Button>
+    </div>
+  )
+}
+
+function ConnectedActions({
+  resyncing,
+  canDisconnect,
+  onResync,
+  onDisconnectClick,
+}: Readonly<{
+  resyncing: boolean
+  canDisconnect: boolean
+  onResync: () => void
+  onDisconnectClick: () => void
+}>) {
+  return (
+    <div className="flex items-center gap-2">
+      <Button
+        variant="ghost"
+        onClick={onResync}
+        disabled={resyncing}
+        className="text-sm flex items-center gap-1.5"
+        style={{ color: 'var(--text-muted)' }}
+        title="Manually re-run this integration's sync"
+      >
+        {resyncing
+          ? <Loader2 className="w-3.5 h-3.5 animate-spin" />
+          : <RefreshCw className="w-3.5 h-3.5" />}
+        Trigger Resync
+      </Button>
+      {canDisconnect && (
+        <Button
+          variant="ghost"
+          onClick={onDisconnectClick}
+          className="text-sm flex items-center gap-1.5"
+          style={{ color: 'var(--text-muted)' }}
+        >
+          <Unplug className="w-3.5 h-3.5" />
+          Disconnect
+        </Button>
+      )}
+    </div>
+  )
+}
+
+interface CardStatus {
+  isConnected:      boolean
+  isError:          boolean
+  isDisconnected:   boolean
+  isSyncInProgress: boolean
+}
+
+function deriveCardStatus(connection: Connection | null, syncStatus: string | null): CardStatus {
+  const isConnected = connection?.status === 'active' && syncStatus === 'success'
+  const isError =
+    connection?.status === 'error' ||
+    connection?.status === 'revoked' ||
+    syncStatus === 'error'
   // Deliberate disconnect — NOT an error. Show a plain Connect button with
   // no red badge and no "token revoked" messaging.
-  const isDisconnected  = connection?.status === 'disconnected'
-  const isSyncInProgress = connection?.status === 'active' && !isConnected && !isError
+  const isDisconnected = connection?.status === 'disconnected'
+  return {
+    isConnected,
+    isError,
+    isDisconnected,
+    isSyncInProgress: connection?.status === 'active' && !isConnected && !isError,
+  }
+}
+
+function IntegrationDetails({
+  provider,
+  connection,
+  status,
+  error,
+  resyncMessage,
+  pollError,
+}: Readonly<{
+  provider: Provider
+  connection: Connection | null
+  status: CardStatus
+  error: string | null
+  resyncMessage: string | null
+  pollError: string | null
+}>) {
+  return (
+    <div className="flex-1 min-w-0">
+      <div className="flex items-center gap-2 mb-1">
+        <h3 className="font-semibold text-base" style={{ color: 'var(--text-primary)' }}>
+          {provider.display_name}
+        </h3>
+        {status.isConnected && <Badge tone="green" className="text-xs">Connected</Badge>}
+        {status.isError     && <Badge tone="red"   className="text-xs">Error</Badge>}
+      </div>
+
+      <p className="text-xs mt-0.5" style={{ color: 'var(--text-muted)' }}>
+        {PROVIDER_DESCRIPTIONS[provider.id] ?? ''}
+      </p>
+
+      {status.isConnected && connection && (
+        <div className="text-xs space-y-0.5 mt-1.5" style={{ color: 'var(--text-muted)' }}>
+          {connection.external_user_id && <p>Account ID: {connection.external_user_id}</p>}
+          <p>Connected {formatDate(connection.created_at)}</p>
+        </div>
+      )}
+
+      {status.isError && (
+        <p className="text-xs mt-1" style={{ color: 'var(--accent-red)' }}>
+          Token revoked or expired. Reconnect to restore sync.
+        </p>
+      )}
+
+      {status.isDisconnected && (
+        <p className="text-xs mt-1" style={{ color: 'var(--text-muted)' }}>Disconnected.</p>
+      )}
+
+      {error && <p className="text-xs mt-2" style={{ color: 'var(--accent-red)' }}>{error}</p>}
+
+      {pollError && (
+        <p className="text-xs mt-2" role="alert" style={{ color: 'var(--accent-amber)' }}>{pollError}</p>
+      )}
+
+      {resyncMessage && (
+        <p
+          className="text-xs mt-2"
+          style={{ color: resyncMessage === 'Resync started.' ? 'var(--accent-green)' : 'var(--accent-red)' }}
+        >
+          {resyncMessage}
+        </p>
+      )}
+    </div>
+  )
+}
+
+function IntegrationCard({
+  provider,
+  connection,
+  onConnectClick,
+  canDisconnect,
+}: Readonly<{
+  provider:       Provider
+  connection:     Connection | null
+  onConnectClick: () => void
+  canDisconnect:  boolean
+}>) {
+  const [disconnecting, startDisconnect] = useTransition()
+  const [confirming, setConfirming]      = useState(false)
+  const [error, setError]                = useState<string | null>(null)
+  const [resyncing, startResync]         = useTransition()
+  const [resyncMessage, setResyncMessage] = useState<string | null>(null)
+
+  const sync   = useSyncProgress(provider.id, connection)
+  const status = deriveCardStatus(connection, sync.status)
 
   const handleDisconnect = () => {
     startDisconnect(async () => {
       const result = await disconnectIntegration(provider.id)
-      if (result.error) {
-        setError(result.error)
-      } else {
-        setConfirming(false)
-      }
+      if (result.error) setError(result.error)
+      else setConfirming(false)
     })
   }
 
@@ -430,154 +634,50 @@ function IntegrationCard({
     })
   }
 
+  const needsConnect = !connection || status.isError || status.isDisconnected
+
+  const renderActions = () => {
+    if (status.isSyncInProgress) return <SyncInProgress sync={sync} />
+    if (needsConnect) {
+      return (
+        <ConnectButton
+          provider={provider}
+          label={status.isError || status.isDisconnected ? 'Reconnect' : 'Connect'}
+          onConnectClick={onConnectClick}
+        />
+      )
+    }
+    if (confirming) {
+      return (
+        <DisconnectConfirm
+          disconnecting={disconnecting}
+          onConfirm={handleDisconnect}
+          onCancel={() => setConfirming(false)}
+        />
+      )
+    }
+    return (
+      <ConnectedActions
+        resyncing={resyncing}
+        canDisconnect={canDisconnect}
+        onResync={handleResync}
+        onDisconnectClick={() => setConfirming(true)}
+      />
+    )
+  }
+
   return (
     <Card>
       <div className="flex items-start justify-between gap-4">
-        <div className="flex-1 min-w-0">
-          <div className="flex items-center gap-2 mb-1">
-            <h3 className="font-semibold text-base" style={{ color: 'var(--text-primary)' }}>
-              {provider.display_name}
-            </h3>
-            {isConnected && (
-              <Badge tone="green" className="text-xs">Connected</Badge>
-            )}
-            {isError && (
-              <Badge tone="red" className="text-xs">Error</Badge>
-            )}
-          </div>
-
-          <p className="text-xs mt-0.5" style={{ color: 'var(--text-muted)' }}>
-            {PROVIDER_DESCRIPTIONS[provider.id] ?? ''}
-          </p>
-
-          {isConnected && connection && (
-            <div className="text-xs space-y-0.5 mt-1.5" style={{ color: 'var(--text-muted)' }}>
-              {connection.external_user_id && (
-                <p>Account ID: {connection.external_user_id}</p>
-              )}
-              <p>Connected {formatDate(connection.created_at)}</p>
-            </div>
-          )}
-
-          {isError && (
-            <p className="text-xs mt-1" style={{ color: 'var(--accent-red)' }}>
-              Token revoked or expired. Reconnect to restore sync.
-            </p>
-          )}
-
-          {isDisconnected && (
-            <p className="text-xs mt-1" style={{ color: 'var(--text-muted)' }}>
-              Disconnected.
-            </p>
-          )}
-
-          {error && (
-            <p className="text-xs mt-2" style={{ color: 'var(--accent-red)' }}>{error}</p>
-          )}
-
-          {resyncMessage && (
-            <p
-              className="text-xs mt-2"
-              style={{ color: resyncMessage === 'Resync started.' ? 'var(--accent-green)' : 'var(--accent-red)' }}
-            >
-              {resyncMessage}
-            </p>
-          )}
-        </div>
-
-        <div className="flex-shrink-0">
-          {isSyncInProgress ? (
-            <div className="flex items-center gap-2 py-1">
-              {!syncTimedOut && (
-                <Loader2 className="w-3.5 h-3.5 animate-spin flex-shrink-0" style={{ color: 'var(--text-muted)' }} />
-              )}
-              <span className="text-xs max-w-[220px] text-right" style={{ color: 'var(--text-muted)' }}>
-                {syncTimedOut
-                  // Reassurance, not an error — a large portfolio can
-                  // genuinely still be syncing well past 10 minutes when the
-                  // shared Hospitable rate-limit budget is contended by other
-                  // orgs connecting at the same time. No promise of a
-                  // completion email here: the only Hospitable-connected
-                  // notification fires at OAuth-callback time (in parallel
-                  // with the sync starting), not on sync completion — see
-                  // email-hospitable-connected.tsx.
-                  ? 'Still working. Large portfolios can take several minutes — check back here shortly.'
-                  : getSyncCopy(effectivePropsFound, effectiveBookingsFound)}
-              </span>
-            </div>
-          ) : !connection || isError || isDisconnected ? (
-            provider.auth_type === 'api_key' ? (
-              <Button
-                variant="secondary"
-                onClick={onConnectClick}
-                className="text-sm flex items-center gap-1.5"
-              >
-                <PlugZap className="w-3.5 h-3.5" />
-                {isError || isDisconnected ? 'Reconnect' : 'Connect'}
-              </Button>
-            ) : (
-              <a
-                href={
-                  provider.id === 'ownerrez'
-                    ? `/api/integrations/${provider.id}/connect?return_to=${encodeURIComponent('/ops')}`
-                    : `/api/integrations/${provider.id}/connect`
-                }
-                className={buttonVariantClass('secondary') + ' text-sm flex items-center gap-1.5'}
-              >
-                <PlugZap className="w-3.5 h-3.5" />
-                {isError || isDisconnected ? 'Reconnect' : 'Connect'}
-              </a>
-            )
-          ) : confirming ? (
-            <div className="flex items-center gap-2">
-              <span className="text-xs" style={{ color: 'var(--text-muted)' }}>Disconnect?</span>
-              <Button
-                variant="danger"
-                onClick={handleDisconnect}
-                disabled={disconnecting}
-                className="text-xs py-1.5 px-2.5"
-              >
-                {disconnecting ? <Loader2 className="w-3 h-3 animate-spin" /> : 'Yes, disconnect'}
-              </Button>
-              <Button
-                variant="ghost"
-                onClick={() => setConfirming(false)}
-                className="text-xs py-1.5"
-              >
-                Cancel
-              </Button>
-            </div>
-          ) : (
-            <div className="flex items-center gap-2">
-              <Button
-                variant="ghost"
-                onClick={handleResync}
-                disabled={resyncing}
-                className="text-sm flex items-center gap-1.5"
-                style={{ color: 'var(--text-muted)' }}
-                title="Manually re-run this integration's sync"
-              >
-                {resyncing ? (
-                  <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                ) : (
-                  <RefreshCw className="w-3.5 h-3.5" />
-                )}
-                Trigger Resync
-              </Button>
-              {canDisconnect && (
-                <Button
-                  variant="ghost"
-                  onClick={() => setConfirming(true)}
-                  className="text-sm flex items-center gap-1.5"
-                  style={{ color: 'var(--text-muted)' }}
-                >
-                  <Unplug className="w-3.5 h-3.5" />
-                  Disconnect
-                </Button>
-              )}
-            </div>
-          )}
-        </div>
+        <IntegrationDetails
+          provider={provider}
+          connection={connection}
+          status={status}
+          error={error}
+          resyncMessage={resyncMessage}
+          pollError={sync.pollError}
+        />
+        <div className="flex-shrink-0">{renderActions()}</div>
       </div>
     </Card>
   )

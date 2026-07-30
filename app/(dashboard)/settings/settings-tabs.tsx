@@ -13,6 +13,7 @@ import { InlineAlert } from '@/components/ui/InlineAlert'
 import { RequiredMark } from '@/components/ui/RequiredMark'
 import type { Organization } from '@/types/database'
 import type { HospitablePromoStatus } from '@/lib/queries/hospitable-promo'
+import { reportError } from '@/lib/observability/report-error'
 import { PriceLockBadge } from '@/components/settings/price-lock-badge'
 import {
   updateOrgSettings,
