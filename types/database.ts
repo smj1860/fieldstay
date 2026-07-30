@@ -1454,6 +1454,8 @@ export interface GuidebookPropertyConfig {
   house_rules:               string | null
   is_published:              boolean
   hero_photo_storage_path:   string | null
+  featured_amenities:        string[] | null
+  featured_amenity_notes:    string | null
   created_at:                string
   updated_at:                string
 }
