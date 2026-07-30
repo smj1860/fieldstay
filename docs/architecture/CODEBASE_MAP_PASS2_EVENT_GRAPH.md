@@ -500,9 +500,15 @@ finally realizes what the `first_warned_at` column comment always said it
 was for ("trigger the Inngest ... escalation reminder") — before this,
 the column was written nowhere and the reminder never existed.
 
-`repuguard/activated` — left alone for now. No producer or consumer;
-`organizations.repuguard_status` is still set directly by the Stripe
-webhook with no automation firing on activation.
+`repuguard/activated` — **deleted 2026-07-30** (FUTURE_REMEDIATION.md item 8,
+resolved). RepuGuard is bundled into every plan tier (see
+`docs/support/16-pricing-and-plans.md`) — the standalone Stripe
+`feature: 'repuguard'` subscription branch this event would have paired
+with has no live producer of its own either (`repuguard_status` is instead
+auto-activated on first integration connect, e.g.
+`lib/inngest/functions/ownerrez/initial-sync.ts`'s `auto-activate-repuguard`
+step), so there was never going to be a meaningful "activation" moment for
+this event to fire on.
 
 ---
 
@@ -577,7 +583,7 @@ across the repo) resolved all 7:
 
 **Confirmed dead — defined in `events.ts`, never sent, never consumed anywhere in `.ts`/`.tsx`:**
 - `maintenance/daily-check` — no trace outside its own type definition.
-- `repuguard/activated` — `organizations.repuguard_status` is written directly by the Stripe webhook (`app/api/webhooks/stripe/route.ts`); nothing ever emits or listens for this event.
+- `repuguard/activated` — `organizations.repuguard_status` is written directly by the Stripe webhook (`app/api/webhooks/stripe/route.ts`); nothing ever emits or listens for this event. **Deleted 2026-07-30** — see the note above.
 - `inventory/below-par` — the automation this name implies is real, it just doesn't go through this event: `inventory-events.ts`'s `inventory/count-submitted` handler computes below-par items in-memory and creates the draft PO directly in the same step. This event type was superseded, not wired to anything.
 - `vendor-compliance/expiry-warning` — compliance expiry is surfaced instead via a pull-based in-app notification bell (`lib/notifications.ts` queries the `vendor_compliance_status` view on page load for `hard_blocked`/`expiring_soon`/`grace_period` rows). No proactive email/SMS push exists for this — a PM only sees it if they open the dashboard.
 

@@ -202,7 +202,35 @@ existing `cleanup_webhook_dedup()` pattern.
 
 ---
 
-## 8. `repuguard/activated` event is defined but never wired to anything
+## 8. ~~`repuguard/activated` event is defined but never wired to anything~~ — RESOLVED 2026-07-30, deleted
+
+**Resolution:** deleted the unused event type from `lib/inngest/events.ts`
+rather than wiring it up. RepuGuard is bundled into every plan tier —
+`docs/support/16-pricing-and-plans.md`'s "What Every Plan Includes" lists
+"RepuGuard AI review response drafting" alongside turnovers, work orders,
+etc. with no separate charge or opt-in. There is no live path anywhere in
+the app that creates a standalone `feature: 'repuguard'` Stripe
+subscription for this event to have paired with — the webhook handlers in
+`app/api/webhooks/stripe/handlers/repuguard-subscription.ts` that listen
+for `subscription.metadata?.feature === 'repuguard'` have no producer
+either. `repuguard_status` instead gets auto-activated directly (no Stripe
+subscription, no event) on first PMS connect —
+`lib/inngest/functions/ownerrez/initial-sync.ts`'s `auto-activate-repuguard`
+step flips inactive/cancelled orgs to `'active'` on OwnerRez connect. So
+there was never going to be a meaningful "activation" moment for this event
+to represent.
+
+**Note for a future pass, not done here:** since `repuguard/activated` was
+scoped to the standalone-subscription path and that path has no live
+producer, the `repuguard-subscription.ts` webhook handlers themselves (and
+the `feature: 'repuguard'` branches in `app/api/webhooks/stripe/route.ts`
+that call them) may also be dead code from before bundling — worth its own
+audit pass to confirm before removing, since deleting a webhook branch has
+more blast radius than deleting an unused event type.
+
+Original item kept below for context:
+
+### ~~`repuguard/activated` event is defined but never wired to anything~~
 
 **File:** `lib/inngest/events.ts`
 
@@ -250,7 +278,26 @@ notification was ever actually wanted here.
 
 ---
 
-## 10. Dashboard layout and `requireOrgMember()` are two independent implementations of the same lookup
+## 10. ~~Dashboard layout and `requireOrgMember()` are two independent implementations of the same lookup~~ — RESOLVED, already fixed prior to this note
+
+**Resolution:** already fixed by commit `97a5553` ("Memoize
+requireOrgMember() per request and fix dashboard layout waterfall"),
+merged before this remediation pass caught up to it — this item was simply
+never marked resolved in this file. `app/(dashboard)/layout.tsx` now calls
+`requireOrgMember()` directly instead of inlining its own
+`organization_members` query, and `OrgMembership` in `lib/auth.ts` was
+extended to carry `repuguard_status` and `onboarding_steps_completed` — the
+exact fields the layout needed that the original `OrgMembership` type
+didn't carry. That's the first of the two suggested fixes below (extend
+`OrgMembership`/`requireOrgMember()`), not the second (a separate shared
+helper). Verified current `layout.tsx` has no independent
+`organization_members`/`organizations` query left — `requireOrgMember()` is
+the sole lookup, and it's `cache()`-memoized per request so the page
+rendered inside the layout shares the same query rather than re-running it.
+
+Original item kept below for context:
+
+### ~~Dashboard layout and `requireOrgMember()` are two independent implementations of the same lookup~~
 
 **Files:** `app/(dashboard)/layout.tsx`, `lib/auth.ts`
 
@@ -275,11 +322,6 @@ instead of two.
 
 ## 11. Login/signup/password-reset have no FieldStay-side rate limiting
 
-**Status: undecided** — open question is whether Supabase Auth's built-in
-limiting is sufficient as-is, or whether FieldStay should add its own
-app-level throttling on top. Not yet resolved either way; no code change
-made pending that decision.
-
 **Files:** `app/(auth)/login/login-form.tsx`, `app/(auth)/signup/signup-form.tsx`,
 `app/(auth)/forgot-password/forgot-password-form.tsx`,
 `app/(auth)/reset-password/reset-password-form.tsx`
@@ -294,14 +336,56 @@ invisible to and unmanaged by this repo. This corrects an earlier assumption
 in this project's history that rate limiting had been "added" to these
 routes — that isn't true of the current code.
 
-**Suggested fix (pending the decision above):** if Supabase's built-in
-limits are judged insufficient, add an app-level pre-check — e.g. a Server
-Action wrapper that rate-limits by IP/email before calling the Supabase
-client — for tighter, FieldStay-controlled throttling.
+**Status: decided 2026-07-30 — mixed.** Supabase Auth's built-in limiting is
+sufficient for signup/password-reset; login is the one gap worth a
+follow-up. Concrete limits (from Supabase's documented defaults, matching
+`[auth.rate_limit]`/`[auth.email]` in `supabase/config.toml`):
+
+| Endpoint | Limit |
+|---|---|
+| Sign up (`/auth/v1/signup`) | 60s cooldown before a repeat request for the same email |
+| Password reset (`/auth/v1/recover`) | 60s cooldown before a repeat request for the same email |
+| Login / token refresh (`/auth/v1/token`) | 1,800 requests/hour per IP, token-bucket bursts up to 30 |
+| Default built-in email provider | 2 emails/hour **project-wide** (signup confirmations + password resets combined) |
+| Custom SMTP | Limits depend on the external provider instead — Supabase recommends this to lift the default's testing-grade limits |
+
+**Two separate findings here, not one:**
+
+1. **Signup/password-reset: the 60s per-email cooldown is adequate as-is.**
+   It rate-limits the thing that matters (repeat delivery to one target
+   address); no FieldStay-side duplication needed.
+
+2. **Login is the real gap, and it's operational risk, not just theory:**
+   the limit is 1,800 req/hour **per IP**, with bursts up to 30 — that's
+   IP-scoped only, not per-account. A single IP can throw 30 password
+   guesses at one specific target account instantly, then continue at
+   ~30/minute indefinitely, all within Supabase's own limit. That's
+   materially weaker than a per-account lockout/backoff for a targeted
+   credential-stuffing attempt against one user. **Suggested fix (not yet
+   implemented — scoping only):** add a per-account (email-keyed, not just
+   IP-keyed) attempt counter in `lib/rate-limit.ts` ahead of
+   `supabase.auth.signInWithPassword()` in `login-form.tsx`, failing open
+   the same way the existing abuse-rate limiters do per CLAUDE.md's SMS
+   section (never lock a real user out on a Redis outage).
+
+3. **Unrelated to security, but more urgent: verify production custom
+   SMTP is actually configured.** The 2-emails/hour project-wide cap on
+   Supabase's default mailer is a real operational ceiling, not a
+   theoretical one — at real usage volume it would silently start
+   dropping signup confirmations and password-reset emails platform-wide,
+   independent of anything in this codebase. This can't be verified from
+   the repo: `supabase/config.toml`'s `[auth.email.smtp]` block is
+   commented out (that file also documents the local `email_sent = 2`
+   default, which matches the number above), and production SMTP is
+   dashboard-only state this repo has no record of. **Action:** check the
+   Supabase Dashboard → Project Settings → Auth → SMTP Settings for the
+   `vpmznjktllhmmbfnxuvk` project directly; if custom SMTP isn't already
+   configured there, that's a higher-priority fix than the login-throttle
+   item above.
 
 ---
 
-## 12. `crew/feedback` sends its notification email outside Inngest, un-awaited
+## 12. ~~`crew/feedback` sends its notification email outside Inngest, un-awaited~~ — RESOLVED 2026-07-30
 
 **File:** `app/api/crew/feedback/route.ts`
 
@@ -315,6 +399,22 @@ notification is silently lost with no retry.
 **Suggested fix:** fire an Inngest event instead (e.g.
 `crew/feedback.submitted`) and send the notification email from a handler,
 matching the pattern used everywhere else in this codebase.
+
+**Resolution:** implemented as suggested. Added `crew/feedback.submitted`
+to `lib/inngest/events.ts`, moved the `notifyPlatformStaff()` email logic
+into a new `notifyCrewFeedback` function
+(`lib/inngest/functions/notify-crew-feedback.ts`, registered in
+`app/api/inngest/route.ts`), and `app/api/crew/feedback/route.ts` now
+`await`s `inngest.send()` (confirming Inngest accepted the job) instead of
+firing the email itself with `void ... .catch()`. A send failure is still
+logged without failing the crew member's 200 response, since the
+`crew_feedback` row is already durably written by that point — only the
+*mechanism* for the notification changed, not the accepted-loss tier for
+notification delivery. Test coverage moved with it:
+`unit/route-handlers/crew-feedback.test.ts` now asserts the route enqueues
+the event (and that a send failure doesn't affect the response), and the
+email-sending behavior itself is covered by the new
+`unit/inngest/notify-crew-feedback.test.ts`.
 
 ---
 
@@ -452,3 +552,63 @@ validates UUID/date shape before interpolating) at these call sites, or at
 minimum a comment noting the constraint, so a future contributor doesn't
 accidentally pass a free-text field (a search query, an external booking
 ID) into this pattern without realizing it needs escaping/validation first.
+
+---
+
+## 16. `types/database.ts` is hand-written; migrate to CLI-generated types once Supabase CLI auth is available
+
+**File:** `types/database.ts`
+
+Found while discussing the Hospitable promo migration/type-drift gate. The
+file already carries its own note flagging this:
+
+```
+// NOTE: Hand-written interfaces lack the index signatures required
+// by postgrest-js v2's GenericSchema constraint. The <Database>
+// type arg is omitted in lib/supabase/server.ts so .from() queries
+// default to `any`. Replace with CLI-generated types once connected:
+//   npx supabase gen types typescript --linked > types/database.ts
+```
+
+Checked what "once connected" actually requires: `npx supabase` fetches
+the CLI binary fine in any environment with npm registry access — that was
+never the blocker. What's missing is credentials: `SUPABASE_ACCESS_TOKEN`
+(a personal access token, for `supabase login`/`link` against the
+Management API) and the project's database password (for `db push`'s
+direct Postgres connection; `gen types` needs the access token + link,
+not the DB password). Neither is set in any environment this repo has run
+in so far — only the app-facing `NEXT_PUBLIC_SUPABASE_URL`, anon key, and
+service role key are present. Whether a future environment gets these
+depends on deliberately adding them to that environment's env var
+configuration.
+
+**Not a drop-in swap once creds exist.** Checked how the current hand-written
+types are actually consumed: **103 files** across `app/`, `lib/`, and
+`components/` import named interfaces from this file (`Property`,
+`Turnover`, `WorkOrder`, etc.) — zero files import via the
+`Database['public']['Tables']['x']['Row']` shape that `supabase gen types`
+produces. Running the generator and overwriting `types/database.ts` as-is
+would break every one of those 103 import sites, since the generated
+output has no per-table named types, only the nested `Database` interface.
+
+**Suggested fix, once CLI auth is available (its own PR, not a quick
+follow-up):**
+1. Generate the raw CLI output to a separate file, e.g.
+   `types/database.generated.ts` — never hand-edit this one; regenerate on
+   every migration instead.
+2. Reduce `types/database.ts` to a thin layer of named type aliases over
+   it: `export type Property = Database['public']['Tables']['properties']['Row']`,
+   etc. — this removes the tedious "hand-copy every column from the
+   migration" step (the biggest cost of the current approach — see the
+   "types/database.ts — Keep in Sync With Every Migration" rule in
+   CLAUDE.md) while keeping all 103 existing import sites working
+   unchanged, since `Property` etc. keep existing as names, just aliased
+   instead of hand-typed.
+3. Wire the `Database` type argument into `createClient()`/
+   `createServiceClient()` in `lib/supabase/server.ts` (currently omitted
+   — see the comment already in `types/database.ts` above — so every
+   `.from()` call returns `any` today regardless of what's in this file).
+   Expect this step to surface a real wave of new type errors across the
+   ~103 call sites once genuine typing kicks in on queries that have been
+   running loose; budget time for that cleanup as part of the same PR
+   rather than treating it as a surprise scope increase partway through.

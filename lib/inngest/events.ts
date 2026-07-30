@@ -335,12 +335,6 @@ export type FieldStayEvents = {
   // RepuGuard
   // ----------------------------------------------------------
 
-  'repuguard/activated': {
-    data: {
-      org_id: string
-    }
-  },
-
   'repuguard/batch_generate.requested': {
     data: { org_id: string; requested_by: string }
   }
@@ -365,6 +359,18 @@ export type FieldStayEvents = {
       turnover_date: string
       crew_needed:   number
       crew_found:    number
+    }
+  }
+
+  // crew/feedback submitted via app/crew "Send Feedback" — routes the staff
+  // notification email through Inngest for retry/durability instead of a
+  // fire-and-forget send from the route handler (see FUTURE_REMEDIATION.md
+  // item 12, resolved 2026-07-30).
+  'crew/feedback.submitted': {
+    data: {
+      org_id:         string
+      crew_member_id: string
+      feedback_text:  string
     }
   }
 
