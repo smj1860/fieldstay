@@ -1455,8 +1455,8 @@ export interface GuidebookPropertyConfig {
   is_published:              boolean
   hero_photo_storage_path:   string | null
   // PM-selected amenities (up to 3) to feature in guest SMS nudges, plus a
-  // guest-facing note per amenity, comma-separated and positionally matched
-  // to featured_amenities. Falls back to the property's first synced
+  // guest-facing note per amenity, semicolon-separated and positionally
+  // matched to featured_amenities. Falls back to the property's first synced
   // amenities when null/empty — see lib/guidebook/featured-amenities.ts.
   featured_amenities:        string[] | null
   featured_amenity_notes:    string | null

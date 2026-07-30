@@ -36,7 +36,7 @@ anything missed.
 | 2 | Broadcast infrastructure (DB triggers + RLS on `realtime.messages`) | ✅ Done — migration `20260725191358_crew_sync_broadcast_triggers.sql`, merged via PR #508 (2026-07-26), applied to prod **and** e2e project. Deploys dark per design — no client subscribes yet |
 | 3 | Client cutover (single private broadcast channel, behind a flag) | ✅ Done — merged via PR #508 (2026-07-26), `lib/dexie/context.tsx`. Ships dormant: `NEXT_PUBLIC_CREW_SYNC_V2` defaults off (unset in `.env.example`) |
 | 4 | Outbox retry backoff | ✅ Done — merged via PR #508 (2026-07-26), `lib/dexie/syncService.ts`'s `computeNextAttemptAt()` |
-| 5 | Rollout, acceptance test, old-code deletion, convention + guardrail | ⬜ **The only phase still open** — see section 5 below |
+| 5 | Rollout, acceptance test, old-code deletion, convention + guardrail | 🟡 **In progress** — 5e (convention + `unit/guardrails/crew-sync-coverage.test.ts`) done 2026-07-29, `CREW_SYNCED_TABLES`/`LOCAL_ONLY_TABLES` added to `lib/dexie/schema.ts`. 5a-5d (Realtime quota check, flag flip, acceptance test, soak, deletion) still open — see section 5 below |
 
 ### Phase 1 artifacts you will build on (read these before touching code)
 
@@ -677,7 +677,10 @@ tests cover the four behaviors above.
 
 - Supabase dashboard → Realtime settings: confirm the concurrent-clients
   quota comfortably covers the crew fleet (~1,500 was the discussed
-  target).
+  target). ✅ Checked 2026-07-29 (production project): Max concurrent
+  clients = 10,000, well above target. Database connection pool size (used
+  for private-channel RLS authorization on every join/reconnect — relevant
+  here since Phase 3 is all-private-channel) was 2, bumped to 15.
 - Set `NEXT_PUBLIC_CREW_SYNC_V2=true` in Vercel — **Preview environment
   first**, production only after the acceptance test passes.
 
