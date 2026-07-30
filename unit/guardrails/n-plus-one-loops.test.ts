@@ -93,6 +93,8 @@ function findOffenders(): string[] {
 const EXCEPTIONS: Record<string, string> = {
   'app/api/account/delete/route.ts:44':
     'Per-org-membership loop (owner-only checks + Stripe subscription cancel) — bounded by the deleting user\'s own org count (almost always 1), and each iteration does genuinely different work (a distinct Stripe API call per subscription) that cannot be batched.',
+  'lib/inngest/functions/inventory-consumption-recorded.ts:85':
+    'Per-item "most recent 20 samples" window — each touched inventory item needs its own independently-ordered top-N slice (order by recorded_at desc limit 20), which the Supabase query builder cannot express as a single batched call without a window-function RPC. touchedItemIds is bounded by one count submission\'s item list (single digits to low tens), and this is pass 2 of 3 of the dynamic PAR engine — a future pass could introduce a dedicated RPC (ROW_NUMBER() OVER (PARTITION BY inventory_item_id ...)) to batch this, but that is a schema addition, not a lint fix.',
   'app/(dashboard)/maintenance/actions.ts:729':
     'Per-vendor quote_requests insert — each row needs its own randomly generated quote_token before its own Inngest event fires; the insert could theoretically be batched with the token generated client-side, but that\'s a sync-logic change, not a lint fix.',
   'app/(dashboard)/maintenance/create-work-order-helpers.ts:32':

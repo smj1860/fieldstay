@@ -138,6 +138,26 @@ export type FieldStayEvents = {
     }
   }
 
+  'inventory/par-recompute-requested': {
+    data: {
+      org_id: string
+      /** Omit to recompute every property in the org (used after global default changes / broadcasts). */
+      property_id?: string
+      /** Omit to recompute all smart items in scope. */
+      inventory_item_ids?: string[]
+    }
+  }
+
+  'inventory/consumption-recorded': {
+    data: {
+      org_id:      string
+      property_id: string
+      source_type: 'count' | 'count_draft'
+      source_id:   string
+      samples: Array<{ inventory_item_id: string; consumed_qty: number }>
+    }
+  }
+
   'inventory/cart_requested': {
     data: {
       org_id:        string

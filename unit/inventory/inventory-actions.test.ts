@@ -314,6 +314,49 @@ describe('inventory/actions', () => {
       expect(result).toEqual({})
     })
 
+    it('filters out restock deltas (negative) and does not send a consumption event', async () => {
+      const supabase = makeSupabase({
+        inventory_count_drafts:      [{ data: { id: 'draft_1', property_id: 'prop_1' } }, { data: { id: 'draft_1' } }],
+        inventory_count_draft_items: [{ data: [{ item_id: 'item_1', counted_qty: 10, previous_quantity: 5 }] }],
+        inventory_items:             [{ data: [] }, { error: null }],
+      })
+      vi.mocked(requireOrgRole).mockResolvedValue({
+        supabase, user: { id: 'user_1' }, membership,
+      } as never)
+
+      const result = await approveInventoryCount('draft_1')
+
+      expect(result).toEqual({})
+      expect(inngest.send).not.toHaveBeenCalledWith(
+        expect.objectContaining({ name: 'inventory/consumption-recorded' })
+      )
+    })
+
+    it('sends a consumption-recorded event carrying source_type count_draft and the draft id', async () => {
+      const supabase = makeSupabase({
+        inventory_count_drafts:      [{ data: { id: 'draft_1', property_id: 'prop_1' } }, { data: { id: 'draft_1' } }],
+        inventory_count_draft_items: [{ data: [{ item_id: 'item_1', counted_qty: 2, previous_quantity: 5 }] }],
+        inventory_items:             [{ data: [] }, { error: null }],
+      })
+      vi.mocked(requireOrgRole).mockResolvedValue({
+        supabase, user: { id: 'user_1' }, membership,
+      } as never)
+
+      const result = await approveInventoryCount('draft_1')
+
+      expect(result).toEqual({})
+      expect(inngest.send).toHaveBeenCalledWith({
+        name: 'inventory/consumption-recorded',
+        data: {
+          org_id:      'org_1',
+          property_id: 'prop_1',
+          source_type: 'count_draft',
+          source_id:   'draft_1',
+          samples:     [{ inventory_item_id: 'item_1', consumed_qty: 3 }],
+        },
+      })
+    })
+
     it('rejects a draft id that does not belong to the caller org (IDOR check)', async () => {
       const supabase = makeSupabase({ inventory_count_drafts: [{ data: null }] })
       vi.mocked(requireOrgRole).mockResolvedValue({

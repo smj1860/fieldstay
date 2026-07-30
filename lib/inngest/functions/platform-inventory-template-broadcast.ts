@@ -24,6 +24,9 @@ interface MasterItem {
   name:            string
   category:        string
   unit:            string
+  par_mode:        string
+  smart_group:     string | null
+  base_qty:        number
 }
 
 export const broadcastPlatformInventoryTemplate = inngest.createFunction(
@@ -55,7 +58,7 @@ export const broadcastPlatformInventoryTemplate = inngest.createFunction(
       const supabase = createServiceClient({ system: 'inngest:platform-inventory-template-broadcast' })
       const { data: items } = await supabase
         .from('platform_inventory_template_items')
-        .select('catalog_item_id, par_level, preferred_brand, sort_order')
+        .select('catalog_item_id, par_level, preferred_brand, sort_order, par_mode, smart_group, base_qty')
         .eq('platform_inventory_template_id', templateId)
       if (!items?.length) return []
 
@@ -77,6 +80,9 @@ export const broadcastPlatformInventoryTemplate = inngest.createFunction(
           name:            catalog.name,
           category:        catalog.category,
           unit:            catalog.default_unit,
+          par_mode:        item.par_mode,
+          smart_group:     item.smart_group,
+          base_qty:        item.base_qty,
         })
       }
       return merged
@@ -158,6 +164,9 @@ export const broadcastPlatformInventoryTemplate = inngest.createFunction(
               par_level:       item.par_level,
               preferred_brand: item.preferred_brand,
               sort_order:      item.sort_order,
+              par_mode:        item.par_mode,
+              smart_group:     item.smart_group,
+              base_qty:        item.base_qty,
             }))
           )
         if (insertError) {

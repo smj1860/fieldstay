@@ -103,7 +103,7 @@ function scanInsertSites(): InsertSite[] {
 
 // Verified against the codebase 2026-07-26.
 const EXCEPTIONS: Record<string, string> = {
-  'lib/inngest/functions/inventory-events.ts:196':
+  'lib/inngest/functions/inventory-events.ts:215':
     'purchase_order_items insert is transitively protected by the purchase_orders existence pre-check just above it in the same step — the items batch-insert is only reached at all when the parent PO did not already exist (source_count_id-keyed, backed by po_source_count_unique). A same-table check on purchase_order_items itself would be redundant.',
   'lib/inngest/functions/cron/work-order-ops.ts:92':
     'REAL GAP, not fixed: work_order_updates insert (escalate aging WO to urgent + log a note) has no dedup guard — a step retry after partial failure logs a duplicate note. Left open rather than mechanically copying the pre-check pattern used elsewhere, because work_order_updates is a free-form append log with no natural key today; closing this needs a product decision about what makes two escalation events "the same" (e.g. one-per-work-order-per-day), not a copy-paste fix. Cosmetic impact only (a duplicate note, not a duplicate financial/state record) — see the identical gap at cron/maintenance-schedules.ts:206.',

@@ -74,7 +74,7 @@ export const handleInventoryCountSubmitted = inngest.createFunction(
 
     // ── Apply the count to inventory_items ──────────────────────────────────
 
-    const { belowParItems } = await step.run('apply-count-and-check-par', async () => {
+    const { belowParItems, consumptionSamples } = await step.run('apply-count-and-check-par', async () => {
       const supabase = createServiceClient({ system: 'inngest:inventory-events' })
 
       // Validate the count session itself belongs to this org before trusting
@@ -87,7 +87,7 @@ export const handleInventoryCountSubmitted = inngest.createFunction(
         .eq('org_id', org_id)
         .maybeSingle()
 
-      if (!countSession) return { belowParItems: [] }
+      if (!countSession) return { belowParItems: [], consumptionSamples: [] }
 
       // 1 query: fetch all count items for this session
       const { data: countItems } = await supabase
@@ -95,10 +95,10 @@ export const handleInventoryCountSubmitted = inngest.createFunction(
         .select('inventory_item_id, quantity_counted')
         .eq('count_id', count_id)
 
-      if (!countItems?.length) return { belowParItems: [] }
+      if (!countItems?.length) return { belowParItems: [], consumptionSamples: [] }
 
       type CountRow = { inventory_item_id: string; quantity_counted: number }
-      type InvRow   = { id: string; name: string; category: string; unit: string; par_level: number; low_stock_threshold_pct: number }
+      type InvRow   = { id: string; name: string; category: string; unit: string; par_level: number; low_stock_threshold_pct: number; current_quantity: number }
 
       const typedCount = countItems as CountRow[]
       const itemIds    = typedCount.map((c) => c.inventory_item_id)
@@ -108,16 +108,28 @@ export const handleInventoryCountSubmitted = inngest.createFunction(
       // already belong to org_id.
       const { data: inventoryItems } = await supabase
         .from('inventory_items')
-        .select('id, name, category, unit, par_level, low_stock_threshold_pct')
+        .select('id, name, category, unit, par_level, low_stock_threshold_pct, current_quantity')
         .eq('org_id', org_id)
         .in('id', itemIds)
 
-      if (!inventoryItems?.length) return { belowParItems: [] }
+      if (!inventoryItems?.length) return { belowParItems: [], consumptionSamples: [] }
 
       const typedInv    = inventoryItems as InvRow[]
       const orgItemIds  = new Set(typedInv.map((inv) => inv.id))
       // Only ever write quantities for items confirmed to belong to this org.
       const orgScopedCount = typedCount.filter((c) => orgItemIds.has(c.inventory_item_id))
+
+      // Consumption = previous stock minus what's counted now. A negative
+      // delta means stock went UP since the last count (a restock happened
+      // in between) — that's not consumption, so it's skipped rather than
+      // recorded as a negative sample.
+      const invById = new Map(typedInv.map((inv) => [inv.id, inv]))
+      const consumptionSamples = orgScopedCount
+        .map((c) => {
+          const inv = invById.get(c.inventory_item_id)!
+          return { inventory_item_id: c.inventory_item_id, consumed_qty: inv.current_quantity - c.quantity_counted }
+        })
+        .filter((s) => s.consumed_qty > 0)
 
       // 1 query: bulk upsert current quantities (replaces N sequential UPDATEs)
       await supabase
@@ -155,8 +167,15 @@ export const handleInventoryCountSubmitted = inngest.createFunction(
         }
       }
 
-      return { belowParItems: below }
+      return { belowParItems: below, consumptionSamples }
     })
+
+    if (consumptionSamples.length > 0) {
+      await step.sendEvent('record-consumption', {
+        name: 'inventory/consumption-recorded',
+        data: { org_id, property_id, source_type: 'count', source_id: count_id, samples: consumptionSamples },
+      })
+    }
 
     if (belowParItems.length === 0) {
       logger.info(`Count ${count_id}: all items at or above par`)

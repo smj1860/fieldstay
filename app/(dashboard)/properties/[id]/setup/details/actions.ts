@@ -50,7 +50,7 @@ export async function saveDetails(
 
     const { data: existing } = await supabase
       .from('properties')
-      .select('wifi_password, door_code_secret_id, internal_notes')
+      .select('wifi_password, door_code_secret_id, internal_notes, bedrooms, bathrooms, max_guests')
       .eq('id', propertyId)
       .eq('org_id', membership.org_id)
       .single()
@@ -77,6 +77,14 @@ export async function saveDetails(
       p_org_id:      membership.org_id,
       p_door_code:   door_code,
     })
+
+    if (existing?.bedrooms !== bedrooms || existing?.bathrooms !== bathrooms || existing?.max_guests !== max_guests) {
+      const { inngest } = await import('@/lib/inngest/client')
+      await inngest.send({
+        name: 'inventory/par-recompute-requested',
+        data: { org_id: membership.org_id, property_id: propertyId },
+      })
+    }
 
     // Simplification: logs on every details save (not just when rates actually
     // changed) — fetching before/after values would require an extra query.

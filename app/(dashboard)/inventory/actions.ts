@@ -409,6 +409,9 @@ export async function applyTemplateToProperties(
       low_stock_threshold_pct: number
       is_active:               boolean
       preferred_brand:         string | null
+      par_mode:                string
+      smart_group:             string | null
+      base_qty:                number
     }> = []
 
     for (const propertyId of targetPropertyIds) {
@@ -433,6 +436,9 @@ export async function applyTemplateToProperties(
           low_stock_threshold_pct: 20,
           is_active:               true,
           preferred_brand:         (item as { preferred_brand?: string | null }).preferred_brand ?? null,
+          par_mode:                item.par_mode,
+          smart_group:             item.smart_group,
+          base_qty:                item.base_qty,
         }))
 
       allToInsert.push(...toInsert)
@@ -446,6 +452,18 @@ export async function applyTemplateToProperties(
         reportError(insertErr, { site: 'serverAction.inventory.applyTemplateToProperties', orgId: membership.org_id })
         return { error: 'Operation failed. Please try again.', applied: 0 }
       }
+
+      // Smart items land with their template placeholder par_level — resolve
+      // them against each target property's real metadata right away rather
+      // than waiting for the next unrelated recompute trigger.
+      await Promise.all(
+        targetPropertyIds.map((propertyId) =>
+          inngest.send({
+            name: 'inventory/par-recompute-requested',
+            data: { org_id: membership.org_id, property_id: propertyId },
+          })
+        )
+      )
     }
 
     revalidatePath('/inventory')
@@ -465,7 +483,7 @@ export async function approveInventoryCount(draftId: string): Promise<{ error?: 
 
     const { data: draft } = await supabase
       .from('inventory_count_drafts')
-      .select('id')
+      .select('id, property_id')
       .eq('id', draftId)
       .eq('org_id', membership.org_id)
       .maybeSingle()
@@ -474,7 +492,7 @@ export async function approveInventoryCount(draftId: string): Promise<{ error?: 
 
     const { data: draftItems } = await supabase
       .from('inventory_count_draft_items')
-      .select('item_id, counted_qty')
+      .select('item_id, counted_qty, previous_quantity')
       .eq('draft_id', draftId)
 
     if (!draftItems) return { error: 'Draft not found' }
@@ -513,6 +531,23 @@ export async function approveInventoryCount(draftId: string): Promise<{ error?: 
       console.error('[approveInventoryCount]', approveError)
       reportError(approveError, { site: 'serverAction.inventory.approveInventoryCount', orgId: membership.org_id })
       return { error: 'Draft not found' }
+    }
+
+    const samples = draftItems
+      .map((item) => ({ inventory_item_id: item.item_id, consumed_qty: item.previous_quantity - item.counted_qty }))
+      .filter((s) => s.consumed_qty > 0)   // negative delta = restock between counts, not consumption
+
+    if (samples.length > 0) {
+      await inngest.send({
+        name: 'inventory/consumption-recorded',
+        data: {
+          org_id:      membership.org_id,
+          property_id: draft.property_id,
+          source_type: 'count_draft',
+          source_id:   draftId,
+          samples,
+        },
+      })
     }
 
     revalidatePath('/inventory')

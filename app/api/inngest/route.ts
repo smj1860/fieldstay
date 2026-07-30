@@ -28,6 +28,8 @@ import { webhookDedupCleanup }          from '@/lib/inngest/functions/cron/webho
 
 // Inventory
 import { handleInventoryCountSubmitted, handlePurchaseOrderApproved } from '@/lib/inngest/functions/inventory-events'
+import { recomputeInventoryParLevels } from '@/lib/inngest/functions/inventory-par-recompute'
+import { recordInventoryConsumption }  from '@/lib/inngest/functions/inventory-consumption-recorded'
 
 // OwnerRez integration
 import { ownerRezInitialSync }     from '@/lib/inngest/functions/ownerrez/initial-sync'
@@ -207,6 +209,8 @@ export const { GET, POST, PUT } = serve({
     // Inventory → PO
     handleInventoryCountSubmitted,
     handlePurchaseOrderApproved,
+    recomputeInventoryParLevels,
+    recordInventoryConsumption,
 
     // OwnerRez sync
     ownerRezInitialSync,

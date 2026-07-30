@@ -161,7 +161,7 @@ export async function updateProperty(
 
     const { data: existing } = await supabase
       .from('properties')
-      .select('zip')
+      .select('zip, bedrooms, bathrooms, max_guests')
       .eq('id', propertyId)
       .eq('org_id', membership.org_id)
       .single()
@@ -196,6 +196,14 @@ export async function updateProperty(
       } else {
         console.warn('[updateProperty] geocodeZip returned null for zip:', zip)
       }
+    }
+
+    if (existing?.bedrooms !== bedrooms || existing?.bathrooms !== bathrooms || existing?.max_guests !== max_guests) {
+      const { inngest } = await import('@/lib/inngest/client')
+      await inngest.send({
+        name: 'inventory/par-recompute-requested',
+        data: { org_id: membership.org_id, property_id: propertyId },
+      })
     }
 
     await logAuditEvent({

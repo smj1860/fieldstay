@@ -27,6 +27,7 @@ vi.mock('@/lib/checklists/apply-master-template', () => ({
 }))
 vi.mock('@/lib/geocoding', () => ({ geocodeZip: vi.fn() }))
 vi.mock('@/lib/observability/report-error', () => ({ reportError: vi.fn() }))
+vi.mock('@/lib/inngest/client', () => ({ inngest: { send: vi.fn() } }))
 
 import { requireOrgMember } from '@/lib/auth'
 import { logAuditEvent } from '@/lib/audit'
