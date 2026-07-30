@@ -42,7 +42,8 @@ import {
 type Resp = { data?: unknown; error?: unknown }
 
 function makeSupabase(queue: Record<string, Resp[]>) {
-  const uploadMock = vi.fn(async () => ({ error: null }))
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars -- args captured for path assertions
+  const uploadMock = vi.fn(async (_path: string, _file: unknown, _opts?: unknown) => ({ error: null }))
   const from = vi.fn((table: string) => {
     const q = queue[table]
     const result: Resp = q?.length ? q.shift()! : { data: null, error: null }
@@ -390,7 +391,7 @@ describe('actions/work-order-public', () => {
       // M4: the object path must start with the owning org's id — the
       // work-order-photos bucket moves to private + org-scoped storage RLS
       // keyed on (storage.foldername(name))[1].
-      const uploadedPath = supabase.uploadMock.mock.calls[0]![0] as string
+      const uploadedPath = String((supabase.uploadMock.mock.calls as unknown as unknown[][])[0]![0])
       expect(uploadedPath.startsWith('org_1/')).toBe(true)
     })
   })

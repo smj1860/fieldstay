@@ -380,8 +380,17 @@ function IntegrationCard({
             clearInterval(intervalId)
           }
         }
-      } catch {
-        // Ignore transient poll errors — keep polling
+      } catch (err) {
+        // Keep polling — a single failed poll is usually transient — but the
+        // error must not vanish. Swallowing it silently meant the user only
+        // ever saw the TIMEOUT_MS message, never the actual cause (a revoked
+        // token, a 500 from the provider), and neither did Sentry.
+        console.error('[IntegrationCard] sync progress poll failed', err)
+        reportError(err, {
+          site: 'client.integrations.syncProgressPoll',
+          extra: { provider_id: provider.id },
+        })
+        setPollError('We\u2019re having trouble checking sync progress. Still retrying\u2026')
       }
     }
 

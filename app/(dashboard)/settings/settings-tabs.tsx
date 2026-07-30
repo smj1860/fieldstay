@@ -774,12 +774,21 @@ function SmsTemplatesCard() {
 
   // Load existing custom templates once on mount
   useEffect(() => {
-    getOrgSmsTemplates().then((rows) => {
-      const map: Record<string, string> = {}
-      rows.forEach((r) => { map[r.key] = r.body })
-      setCustomTemplates(map)
-      setLoaded(true)
-    })
+    getOrgSmsTemplates()
+      .then((rows) => {
+        const map: Record<string, string> = {}
+        rows.forEach((r) => { map[r.key] = r.body })
+        setCustomTemplates(map)
+        setLoaded(true)
+      })
+      // Without a .catch() this rejects unhandled — Sentry never groups it as
+      // an Issue, and `loaded` stays false forever so the panel renders its
+      // loading state indefinitely with no explanation.
+      .catch((err: unknown) => {
+        console.error('[settings-tabs] failed to load org SMS templates', err)
+        reportError(err, { site: 'client.settings.getOrgSmsTemplates' })
+        setLoaded(true)
+      })
   }, [])
 
   const getBodyForKey = (key: string) =>

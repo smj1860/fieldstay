@@ -113,10 +113,18 @@ export function useWorkOrderActions(wo: WorkOrderDetailData) {
 
   function handleCopyUrl() {
     if (!dispatchedUrl) return
-    navigator.clipboard.writeText(dispatchedUrl).then(() => {
-      setCopied(true)
-      setTimeout(() => setCopied(false), 2000)
-    })
+    navigator.clipboard.writeText(dispatchedUrl)
+      .then(() => {
+        setCopied(true)
+        setTimeout(() => setCopied(false), 2000)
+      })
+      // Clipboard writes reject on a denied permission or a non-secure
+      // context. Without a .catch() that is an unhandled rejection Sentry
+      // won't group, and the button just silently does nothing.
+      .catch((err: unknown) => {
+        console.error('[use-work-order-actions] clipboard write failed', err)
+        setActionError('Could not copy the link. Copy it from the address bar instead.')
+      })
   }
 
   return {
