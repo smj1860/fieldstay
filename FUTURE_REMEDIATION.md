@@ -407,20 +407,15 @@ follow-up. Concrete limits (from Supabase's documented defaults, matching
    the same way the existing abuse-rate limiters do per CLAUDE.md's SMS
    section (never lock a real user out on a Redis outage).
 
-3. **Unrelated to security, but more urgent: verify production custom
-   SMTP is actually configured.** The 2-emails/hour project-wide cap on
-   Supabase's default mailer is a real operational ceiling, not a
-   theoretical one — at real usage volume it would silently start
-   dropping signup confirmations and password-reset emails platform-wide,
-   independent of anything in this codebase. This can't be verified from
-   the repo: `supabase/config.toml`'s `[auth.email.smtp]` block is
-   commented out (that file also documents the local `email_sent = 2`
-   default, which matches the number above), and production SMTP is
-   dashboard-only state this repo has no record of. **Action:** check the
-   Supabase Dashboard → Project Settings → Auth → SMTP Settings for the
-   `vpmznjktllhmmbfnxuvk` project directly; if custom SMTP isn't already
-   configured there, that's a higher-priority fix than the login-throttle
-   item above.
+3. ~~Unrelated to security, but more urgent: verify production custom SMTP
+   is actually configured.~~ **Confirmed by repo owner 2026-07-30: a non-
+   issue.** Production Supabase Auth is configured to send through Resend's
+   SMTP relay, not Supabase's default built-in mailer — the 2-emails/hour
+   project-wide cap only applies to that default mailer and doesn't apply
+   here. (Still can't be independently verified from this repo —
+   `supabase/config.toml`'s `[auth.email.smtp]` block is commented out and
+   production SMTP is dashboard-only state with no record in code — this
+   line reflects the repo owner's confirmation, not a repo-side check.)
 
 ---
 
