@@ -4,6 +4,7 @@ import { revalidatePath } from 'next/cache'
 import { requireOrgRole } from '@/lib/auth'
 import { logAuditEvent } from '@/lib/audit'
 import { reportError } from '@/lib/observability/report-error'
+import { inngest } from '@/lib/inngest/client'
 import type { InventoryCategory, ParMode, ParSmartGroup } from '@/types/database'
 import { normalizeParConfig, type ParConfigInput } from '@/lib/inventory/par-engine'
 
@@ -373,6 +374,10 @@ interface ParLevelItemInput {
   category: InventoryCategory
   unit: string
   par_level: number
+  par_mode?: ParMode
+  smart_group?: ParSmartGroup | null
+  base_qty?: number
+  auto_adjust?: boolean
   preferred_brand?: string | null
 }
 
@@ -385,6 +390,11 @@ interface ParLevelItemRow {
   category:           InventoryCategory
   unit:               string
   par_level:          number
+  par_mode:           ParMode
+  smart_group:        ParSmartGroup | null
+  base_qty:           number
+  auto_adjust:        boolean
+  par_resolved_at:    string | null
   preferred_brand:    string | null
 }
 
@@ -446,11 +456,13 @@ export async function upsertParLevelItems(
             category:        item.category,
             unit:            item.unit,
             par_level:       item.par_level,
+            ...normalizeParConfig({ par_mode: item.par_mode ?? 'static', smart_group: item.smart_group ?? null, base_qty: item.base_qty ?? 1 }),
+            auto_adjust:     item.auto_adjust ?? true,
             preferred_brand: item.preferred_brand ?? null,
           })),
           { onConflict: 'id' }
         )
-          .select('id, property_id, catalog_item_id, source_template_id, name, category, unit, par_level, preferred_brand')
+          .select('id, property_id, catalog_item_id, source_template_id, name, category, unit, par_level, par_mode, smart_group, base_qty, auto_adjust, par_resolved_at, preferred_brand')
         if (error) {
           console.error('[upsertParLevelItems] update', error)
           reportError(error, { site: 'serverAction.templatesInventory.upsertParLevelItems', orgId: membership.org_id })
@@ -470,18 +482,30 @@ export async function upsertParLevelItems(
           category:          item.category,
           unit:              item.unit,
           par_level:         item.par_level,
+          ...normalizeParConfig({ par_mode: item.par_mode ?? 'static', smart_group: item.smart_group ?? null, base_qty: item.base_qty ?? 1 }),
+          auto_adjust:       item.auto_adjust ?? true,
           current_quantity:  0,
           preferred_brand:   item.preferred_brand ?? null,
           is_active:         true,
         }))
       )
-        .select('id, property_id, catalog_item_id, source_template_id, name, category, unit, par_level, preferred_brand')
+        .select('id, property_id, catalog_item_id, source_template_id, name, category, unit, par_level, par_mode, smart_group, base_qty, auto_adjust, par_resolved_at, preferred_brand')
       if (error) {
         console.error('[upsertParLevelItems] insert', error)
         reportError(error, { site: 'serverAction.templatesInventory.upsertParLevelItems', orgId: membership.org_id })
         return { error: 'Operation failed. Please try again.' }
       }
       savedItems.push(...(data ?? []))
+    }
+
+    // A pin-to-static save's typed value is authoritative — only fire the
+    // recompute when this batch actually touched a smart item, so a plain
+    // static edit never triggers a needless Inngest run.
+    if (savedItems.some((item) => item.par_mode === 'smart')) {
+      await inngest.send({
+        name: 'inventory/par-recompute-requested',
+        data: { org_id: membership.org_id, property_id: propertyId },
+      })
     }
 
     revalidatePath('/templates/inventory/par-levels')

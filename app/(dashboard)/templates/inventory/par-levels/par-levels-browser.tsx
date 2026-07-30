@@ -6,12 +6,24 @@ import { INVENTORY_CATEGORY_LABELS } from '@/lib/utils'
 import { Card } from '@/components/ui/Card'
 import { Badge } from '@/components/ui/Badge'
 import { Button } from '@/components/ui/Button'
+import { Checkbox } from '@/components/ui/Checkbox'
 import { Dialog } from '@/components/ui/Dialog'
 import { InlineAlert } from '@/components/ui/InlineAlert'
 import { upsertParLevelItems, deleteParLevelItem, cloneInventoryFromProperty } from '../actions'
-import type { InventoryCategory } from '@/types/database'
+import type { InventoryCategory, ParMode, ParSmartGroup } from '@/types/database'
+import {
+  resolvePar, PAR_SMART_GROUPS,
+  type ParItemConfig, type ParPropertyContext, type ParConsumptionStats, type ParSource,
+} from '@/lib/inventory/par-engine'
 
-interface Property { id: string; name: string }
+interface Property {
+  id:              string
+  name:            string
+  bathrooms:       number | null
+  bedrooms:        number
+  max_guests:      number
+  avg_stay_length: number | null
+}
 
 interface ItemRow {
   id:                 string
@@ -22,14 +34,65 @@ interface ItemRow {
   category:           InventoryCategory
   unit:               string
   par_level:          number
+  par_mode:           ParMode
+  smart_group:        ParSmartGroup | null
+  base_qty:           number
+  auto_adjust:        boolean
+  par_resolved_at:    string | null
   preferred_brand:    string | null
 }
 
 interface CatalogItem {
-  id:           string
-  name:         string
-  category:     InventoryCategory
-  default_unit: string
+  id:                 string
+  name:               string
+  category:           InventoryCategory
+  default_unit:       string
+  default_par_level:  number
+  par_mode:           ParMode
+  smart_group:        ParSmartGroup | null
+  base_qty:           number
+}
+
+interface ConsumptionStatsRow {
+  property_id:              string
+  inventory_item_id:        string
+  avg_rate_per_guest_night: number
+  sample_count:             number
+}
+
+function propertyContext(property: Property): ParPropertyContext {
+  return { bathrooms: property.bathrooms, bedrooms: property.bedrooms, max_guests: property.max_guests, avg_stay_length: property.avg_stay_length }
+}
+
+function multiplierLabel(key: 'bathrooms' | 'bedrooms' | 'max_guests'): string {
+  return key === 'max_guests' ? 'guests' : key
+}
+
+interface Explained {
+  par:         number
+  source:      ParSource
+  explanation: string
+}
+
+// The one-line "why" behind a resolved smart par — shown wherever a smart
+// par renders in this editor, per the explainability requirement. Muted
+// single line, never a modal.
+function explainSmartPar(config: ParItemConfig, property: ParPropertyContext, stats: ParConsumptionStats | null): Explained {
+  const resolved = resolvePar(config, property, stats)
+  if (resolved.source === 'historical' && stats) {
+    return { ...resolved, explanation: `~${stats.avg_rate_per_guest_night.toFixed(2)}/guest-night over ${stats.sample_count} counts + 20% buffer` }
+  }
+  if (resolved.source === 'smart_formula' && config.smart_group) {
+    const spec = PAR_SMART_GROUPS[config.smart_group]
+    return { ...resolved, explanation: `${config.base_qty} × ${multiplierLabel(spec.multiplierKey)} + ${Math.round(spec.buffer * 100)}% buffer` }
+  }
+  return { ...resolved, explanation: '' }
+}
+
+function SourceBadge({ source }: Readonly<{ source: ParSource }>) {
+  if (source === 'historical') return <Badge tone="blue">Auto (usage)</Badge>
+  if (source === 'smart_formula') return <Badge tone="gold">Auto (formula)</Badge>
+  return null
 }
 
 function labelForProperty(items: ItemRow[], templateNameById: Record<string, string>): { label: string; tone: 'green' | 'amber' | 'slate' } {
@@ -47,12 +110,14 @@ export function ParLevelsBrowser({
   items,
   templateNameById,
   catalogItems,
+  consumptionStats,
   canManage,
 }: Readonly<{
   properties:       Property[]
   items:            ItemRow[]
   templateNameById: Record<string, string>
   catalogItems:     CatalogItem[]
+  consumptionStats: ConsumptionStatsRow[]
   canManage:        boolean
 }>) {
   const [editingPropertyId, setEditingPropertyId] = useState<string | null>(null)
@@ -102,6 +167,7 @@ export function ParLevelsBrowser({
           property={editingProperty}
           items={itemsByProperty[editingProperty.id] ?? []}
           catalogItems={catalogItems}
+          consumptionStats={consumptionStats.filter((s) => s.property_id === editingProperty.id)}
           otherProperties={properties.filter((p) => p.id !== editingProperty.id)}
           canManage={canManage}
           onClose={() => setEditingPropertyId(null)}
@@ -126,17 +192,19 @@ function PropertyParLevelEditor({
   property,
   items,
   catalogItems,
+  consumptionStats,
   otherProperties,
   canManage,
   onClose,
   onItemsChange,
 }: Readonly<{
-  property:        Property
-  items:           ItemRow[]
-  catalogItems:    CatalogItem[]
-  otherProperties: Property[]
-  canManage:       boolean
-  onClose:         () => void
+  property:         Property
+  items:            ItemRow[]
+  catalogItems:     CatalogItem[]
+  consumptionStats: ConsumptionStatsRow[]
+  otherProperties:  Property[]
+  canManage:        boolean
+  onClose:          () => void
   onItemsChange:   (items: ItemRow[]) => void
 }>) {
   const [rows, setRows] = useState<EditableRow[]>(items.map((i) => ({ ...i })))
@@ -152,6 +220,11 @@ function PropertyParLevelEditor({
   const [cloning, startClone] = useTransition()
 
   const addedCatalogIds = new Set(rows.map((r) => r.catalog_item_id).filter(Boolean))
+  const catalogById = useMemo(() => new Map(catalogItems.map((c) => [c.id, c])), [catalogItems])
+  const statsByItemId = useMemo(
+    () => new Map(consumptionStats.map((s) => [s.inventory_item_id, { avg_rate_per_guest_night: s.avg_rate_per_guest_night, sample_count: s.sample_count }])),
+    [consumptionStats]
+  )
 
   const updateRow = (id: string, patch: Partial<EditableRow>) => {
     setRows((prev) => prev.map((r) => (r.id === id ? { ...r, ...patch, isDirty: true } : r)))
@@ -178,7 +251,14 @@ function PropertyParLevelEditor({
       name:               catalogItem.name,
       category:           catalogItem.category,
       unit:               catalogItem.default_unit,
-      par_level:          1,
+      par_level:          catalogItem.default_par_level,
+      // Inherited from the catalog row — the formula preview against this
+      // property's real metadata renders immediately below.
+      par_mode:           catalogItem.par_mode,
+      smart_group:        catalogItem.smart_group,
+      base_qty:           catalogItem.base_qty,
+      auto_adjust:        true,
+      par_resolved_at:    null,
       preferred_brand:    null,
       isNew:              true,
       isDirty:            true,
@@ -197,6 +277,13 @@ function PropertyParLevelEditor({
       category:           customCategory,
       unit:               customUnit.trim() || 'units',
       par_level:          1,
+      // No catalog row to inherit from — a freeform custom item always
+      // starts static.
+      par_mode:           'static',
+      smart_group:        null,
+      base_qty:           1,
+      auto_adjust:        true,
+      par_resolved_at:    null,
       preferred_brand:    null,
       isNew:              true,
       isDirty:            true,
@@ -228,6 +315,10 @@ function PropertyParLevelEditor({
           category:        r.category,
           unit:            r.unit,
           par_level:       r.par_level,
+          par_mode:        r.par_mode,
+          smart_group:     r.smart_group,
+          base_qty:        r.base_qty,
+          auto_adjust:     r.auto_adjust,
           preferred_brand: r.preferred_brand,
         }))
       )
@@ -296,43 +387,17 @@ function PropertyParLevelEditor({
 
         <div className="border border-themed rounded-lg divide-y divide-themed max-h-80 overflow-y-auto">
           {rows.map((row) => (
-            <div key={row.id} className="flex items-center gap-2 px-3 py-2 flex-wrap">
-              <span className="text-sm text-primary-themed flex-1 min-w-[80px] truncate">{row.name}</span>
-              <span className="text-xs text-muted-themed">{INVENTORY_CATEGORY_LABELS[row.category] ?? row.category}</span>
-              {canManage ? (
-                <>
-                  <div className="flex items-center gap-1">
-                    <span className="text-xs text-muted-themed">Par:</span>
-                    <input
-                      type="number" min="0" step="0.5" value={row.par_level}
-                      onChange={(e) => updateRow(row.id, { par_level: Math.max(0, parseFloat(e.target.value) || 0) })}
-                      aria-label={`Par level for ${row.name}`}
-                      className="w-14 text-center text-sm border border-themed rounded px-1 py-0.5 bg-transparent text-primary-themed focus:outline-none focus:ring-1 focus:ring-[var(--accent-gold)]"
-                    />
-                  </div>
-                  <input
-                    value={row.unit}
-                    onChange={(e) => updateRow(row.id, { unit: e.target.value })}
-                    aria-label={`Unit for ${row.name}`}
-                    className="w-16 text-xs border border-themed rounded px-1 py-0.5 bg-transparent text-secondary-themed focus:outline-none focus:ring-1 focus:ring-[var(--accent-gold)]"
-                  />
-                  <input
-                    value={row.preferred_brand ?? ''}
-                    onChange={(e) => updateRow(row.id, { preferred_brand: e.target.value || null })}
-                    placeholder="Brand"
-                    aria-label={`Preferred brand for ${row.name}`}
-                    className="w-24 text-xs border border-themed rounded px-1.5 py-0.5 bg-transparent text-secondary-themed placeholder:text-[var(--text-muted)] focus:outline-none focus:ring-1 focus:ring-[var(--accent-gold)]"
-                  />
-                  <button type="button" onClick={() => removeRow(row)} disabled={saving} className="text-muted-themed hover:text-[var(--accent-red)] transition-colors p-1">
-                    <Trash2 className="w-3.5 h-3.5" />
-                  </button>
-                </>
-              ) : (
-                <span className="text-xs text-muted-themed">
-                  Par {row.par_level} {row.unit}{row.preferred_brand && <> · {row.preferred_brand}</>}
-                </span>
-              )}
-            </div>
+            <ParLevelRow
+              key={row.id}
+              row={row}
+              property={property}
+              stats={statsByItemId.get(row.id) ?? null}
+              catalogItem={row.catalog_item_id ? catalogById.get(row.catalog_item_id) : undefined}
+              canManage={canManage}
+              saving={saving}
+              onUpdate={(patch) => updateRow(row.id, patch)}
+              onRemove={() => removeRow(row)}
+            />
           ))}
           {rows.length === 0 && (
             <p className="text-sm text-muted-themed px-3 py-3">No items on this property yet.</p>
@@ -387,5 +452,107 @@ function PropertyParLevelEditor({
         )}
       </div>
     </Dialog>
+  )
+}
+
+function ParLevelRow({
+  row,
+  property,
+  stats,
+  catalogItem,
+  canManage,
+  saving,
+  onUpdate,
+  onRemove,
+}: Readonly<{
+  row:         EditableRow
+  property:    Property
+  stats:       ParConsumptionStats | null
+  catalogItem: CatalogItem | undefined
+  canManage:   boolean
+  saving:      boolean
+  onUpdate:    (patch: Partial<EditableRow>) => void
+  onRemove:    () => void
+}>) {
+  const config: ParItemConfig = {
+    par_mode:    row.par_mode,
+    smart_group: row.smart_group,
+    base_qty:    row.base_qty,
+    par_level:   row.par_level,
+    auto_adjust: row.auto_adjust,
+  }
+  const explained = row.par_mode === 'smart' ? explainSmartPar(config, propertyContext(property), stats) : null
+  const canRevertToSmart = row.par_mode === 'static' && catalogItem?.par_mode === 'smart'
+
+  const handleOverride = () => {
+    onUpdate({ par_mode: 'static', smart_group: null, par_level: explained?.par ?? row.par_level })
+  }
+
+  const handleRevertToSmart = () => {
+    if (!catalogItem) return
+    onUpdate({ par_mode: 'smart', smart_group: catalogItem.smart_group, base_qty: catalogItem.base_qty })
+  }
+
+  return (
+    <div className="flex flex-col gap-1 px-3 py-2">
+      <div className="flex items-center gap-2 flex-wrap">
+        <span className="text-sm text-primary-themed flex-1 min-w-[80px] truncate">{row.name}</span>
+        <span className="text-xs text-muted-themed">{INVENTORY_CATEGORY_LABELS[row.category] ?? row.category}</span>
+        {canManage ? (
+          <>
+            {row.par_mode === 'smart' ? (
+              <div className="flex items-center gap-1.5">
+                <span className="text-xs text-muted-themed">Par:</span>
+                <span className="text-sm text-primary-themed font-medium">{explained?.par}</span>
+                {explained && <SourceBadge source={explained.source} />}
+                <Button variant="ghost" onClick={handleOverride} className="text-xs px-1.5 py-0.5 whitespace-nowrap">Override</Button>
+              </div>
+            ) : (
+              <div className="flex items-center gap-1">
+                <span className="text-xs text-muted-themed">Par:</span>
+                <input
+                  type="number" min="0" step="0.5" value={row.par_level}
+                  onChange={(e) => onUpdate({ par_level: Math.max(0, parseFloat(e.target.value) || 0) })}
+                  aria-label={`Par level for ${row.name}`}
+                  className="w-14 text-center text-sm border border-themed rounded px-1 py-0.5 bg-transparent text-primary-themed focus:outline-none focus:ring-1 focus:ring-[var(--accent-gold)]"
+                />
+                {canRevertToSmart && (
+                  <Button variant="ghost" onClick={handleRevertToSmart} className="text-xs px-1.5 py-0.5 whitespace-nowrap">Revert to smart</Button>
+                )}
+              </div>
+            )}
+            <input
+              value={row.unit}
+              onChange={(e) => onUpdate({ unit: e.target.value })}
+              aria-label={`Unit for ${row.name}`}
+              className="w-16 text-xs border border-themed rounded px-1 py-0.5 bg-transparent text-secondary-themed focus:outline-none focus:ring-1 focus:ring-[var(--accent-gold)]"
+            />
+            <input
+              value={row.preferred_brand ?? ''}
+              onChange={(e) => onUpdate({ preferred_brand: e.target.value || null })}
+              placeholder="Brand"
+              aria-label={`Preferred brand for ${row.name}`}
+              className="w-24 text-xs border border-themed rounded px-1.5 py-0.5 bg-transparent text-secondary-themed placeholder:text-[var(--text-muted)] focus:outline-none focus:ring-1 focus:ring-[var(--accent-gold)]"
+            />
+            <button type="button" onClick={onRemove} disabled={saving} className="text-muted-themed hover:text-[var(--accent-red)] transition-colors p-1">
+              <Trash2 className="w-3.5 h-3.5" />
+            </button>
+          </>
+        ) : (
+          <span className="text-xs text-muted-themed">
+            Par {row.par_mode === 'smart' ? explained?.par : row.par_level} {row.unit}{row.preferred_brand && <> · {row.preferred_brand}</>}
+          </span>
+        )}
+      </div>
+      {row.par_mode === 'smart' && canManage && (
+        <label className="flex items-center gap-1.5 text-xs text-muted-themed cursor-pointer w-fit">
+          <Checkbox checked={row.auto_adjust} onChange={() => onUpdate({ auto_adjust: !row.auto_adjust })} />
+          Auto-adjust from usage
+        </label>
+      )}
+      {row.par_mode === 'smart' && explained?.explanation && (
+        <p className="text-xs text-muted-themed">{explained.explanation}</p>
+      )}
+    </div>
   )
 }
