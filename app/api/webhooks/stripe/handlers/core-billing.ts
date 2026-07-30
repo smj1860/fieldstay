@@ -54,13 +54,20 @@ export async function handleCoreSubscriptionUpdate(
                     : subscription.status === 'past_due' ? 'past_due'
                     : 'cancelled'
 
-  // Find the org by Stripe customer ID
+  // Find the org by Stripe customer ID — `plan` is read here, before the
+  // update below overwrites it, so a genuine tier change (starter -> pro)
+  // can be told apart from the initial trial signup (where the org's
+  // just-created default plan happens not to match whatever tier they
+  // signed up for, which is not a "plan changed" event from the PM's
+  // perspective — see the eventType gate below).
   const { data: org } = await supabase
     .from('organizations')
-    .select('id, name')
+    .select('id, name, plan')
     .eq('stripe_customer_id', customerId)
     .single()
   if (!org) return
+
+  const previousPlan = (org as { plan?: string }).plan as PlanKey | undefined
 
   await supabase
     .from('organizations')
@@ -75,6 +82,12 @@ export async function handleCoreSubscriptionUpdate(
     })
     .eq('id', org.id)
 
+  // previous_plan is only meaningful on an update to an existing
+  // subscription — never on creation, where the org's pre-signup default
+  // plan isn't a real "previous" tier the PM ever knowingly held.
+  const genuinePreviousPlan =
+    eventType === 'customer.subscription.updated' ? (previousPlan ?? null) : null
+
   await inngest.send({
     name: 'billing/subscription-updated',
     data: {
@@ -82,6 +95,7 @@ export async function handleCoreSubscriptionUpdate(
       stripe_subscription_id: subscription.id,
       plan,
       plan_status:            planStatus,
+      previous_plan:          genuinePreviousPlan,
     },
   })
 

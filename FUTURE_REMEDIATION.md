@@ -255,7 +255,7 @@ onboarding step RepuGuard activation should kick off).
 
 ---
 
-## 9. `billing/subscription-updated` is sent but has zero consumers
+## 9. ~~`billing/subscription-updated` is sent but has zero consumers~~ — RESOLVED 2026-07-30
 
 **File:** `app/api/webhooks/stripe/route.ts` (send site), `lib/inngest/events.ts`
 
@@ -275,6 +275,45 @@ the `.tsx` function files were included in the search).
 notification consumer (mirroring `notifyIntegrationError`'s shape), or
 remove the dead `inngest.send()` call and the event type if no
 notification was ever actually wanted here.
+
+**Resolution:** built the consumer. Before doing so, checked whether a
+plan change already surfaces anything else (the working assumption going
+in) — it doesn't: the Stripe Checkout `success_url` sets
+`?checkout=success` on `/settings`, but nothing in the app reads that
+query param (no toast, no confirmation banner), and the only billing
+emails that exist are for trial-start and trial→active first-payment —
+neither fires again for a plan-tier change on an already-active org. So
+this event was the only hook ever positioned for it, and it was genuinely
+dead, not redundant.
+
+Implementation:
+- `handleCoreSubscriptionUpdate` (`core-billing.ts`) now selects the org's
+  `plan` *before* the update overwrites it, and includes a
+  `previous_plan: string | null` field on the `billing/subscription-updated`
+  event — non-null only on a genuine tier change on an existing
+  subscription. Deliberately always `null` on `customer.subscription.created`
+  (initial signup), even if the org's pre-signup default plan happens to
+  differ from the tier they signed up for — that's not a "plan changed"
+  event from the PM's perspective, and the trial-lifecycle-start email
+  already covers signup.
+- New `notifyPlanChanged` function
+  (`lib/inngest/functions/notify-plan-changed.ts`, registered in
+  `app/api/inngest/route.ts`) consumes the event, no-ops when
+  `previous_plan` is null or equals the new `plan` (nothing to report), and
+  otherwise creates a PM-facing in-app notification via
+  `createPmNotification()` (`type: 'billing_plan_changed'`, e.g. "Your plan
+  changed to Growth" / "Previously Starter") — this mirrors
+  `notifyIntegrationError`'s shape as suggested, using the in-app
+  notifications bell rather than a new email template, consistent with
+  CLAUDE.md's note that the bell "superseded 7 PM email categories."
+  Dedupe key is day-scoped (`plan-changed-{org}-{from}-{to}-{date}`,
+  matching `notify-integration-error.ts`'s convention) so a same-day retry
+  doesn't double-insert but a later repeat of the same transition
+  (upgrade → downgrade → upgrade again) still notifies.
+- New tests: `unit/webhooks/core-billing-subscription-update.test.ts`
+  (the `previous_plan` enrichment logic) and
+  `unit/inngest/notify-plan-changed.test.ts` (the consumer). Full
+  verification pass green.
 
 ---
 

@@ -109,6 +109,7 @@ import { broadcastPlatformInventoryTemplate } from '@/lib/inngest/functions/plat
 // Integration error notifications
 import { notifyIntegrationError }  from '@/lib/inngest/functions/notify-integration-error'
 import { notifyCrewFeedback }      from '@/lib/inngest/functions/notify-crew-feedback'
+import { notifyPlanChanged }       from '@/lib/inngest/functions/notify-plan-changed'
 import { notifyAssignmentGap }     from '@/lib/inngest/functions/notify-assignment-gap'
 
 // Vendor compliance expiry warnings
@@ -289,6 +290,9 @@ export const { GET, POST, PUT } = serve({
 
     // Crew feedback staff notification
     notifyCrewFeedback,
+
+    // Plan change notification
+    notifyPlanChanged,
 
     // Vendor compliance expiry warnings
     vendorComplianceExpiryCheck,

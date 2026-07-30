@@ -397,9 +397,11 @@ whole time.
 Stripe webhook (subscription.created/updated)
   └─ updates organizations.plan/plan_status/max_properties INLINE,
      synchronously, in the same webhook handler (not event-driven)
-  └─ ALSO emits billing/subscription-updated — genuinely orphaned, see
-     "Confirmed Dead / Orphaned" below. The org-state write already
-     happened above; this send reaches no listener.
+  └─ ALSO emits billing/subscription-updated ─► notify-plan-changed.ts
+     (added 2026-07-30, FUTURE_REMEDIATION.md item 9 resolved — no longer
+     orphaned; carries previous_plan, and the consumer creates a PM-facing
+     in-app notification only on a genuine tier change, no-op otherwise).
+     The org-state write already happened above.
 
 Stripe webhook (subscription.created while trialing)
   └─ emits billing/trial-lifecycle-start ─► email-trial-lifecycle.tsx
@@ -568,7 +570,7 @@ cron/daily-wrapup.ts               23:00 UTC daily — PM 6pm-local wrap-up dige
 | Work Orders | Up to 5 hops (created → dispatch → invoice → paid) | One route (`work-orders/[token]/complete`) fires 3 separate event chains at once |
 | Integrations | 2-3 hops per provider | 3 independent trigger paths (cron + webhook + manual) converge on one incremental-sync handler for OwnerRez |
 | Guidebook | 2 hops | Stripe is the origin for 5 of its 7 events |
-| Billing | 1 hop | All 3 billing events fully wired — `billing/subscription-updated` is the one exception, see below |
+| Billing | 1 hop | All 4 billing events fully wired (`billing/subscription-updated` wired 2026-07-30, see below) |
 | Standalone crons | 0 hops | 17 crons never touch the event graph — pure scheduled sweeps |
 
 ### Resolved: the 7 originally-unmatched events
@@ -588,4 +590,4 @@ across the repo) resolved all 7:
 - `vendor-compliance/expiry-warning` — compliance expiry is surfaced instead via a pull-based in-app notification bell (`lib/notifications.ts` queries the `vendor_compliance_status` view on page load for `hard_blocked`/`expiring_soon`/`grace_period` rows). No proactive email/SMS push exists for this — a PM only sees it if they open the dashboard.
 
 **Sent but genuinely orphaned — real gap, not a false positive:**
-- `billing/subscription-updated` — `app/api/webhooks/stripe/route.ts` sends this on every `customer.subscription.created/updated`, but no function anywhere subscribes to it. Not a functional break: `organizations.plan`/`plan_status`/`max_properties` are updated synchronously in the same webhook handler, before the send. But the event itself reaches no listener — it looks like a hook for a planned "notify PM their plan changed" email that was never built.
+- `billing/subscription-updated` — **wired 2026-07-30** (FUTURE_REMEDIATION.md item 9, resolved). `app/api/webhooks/stripe/route.ts` sends this on every `customer.subscription.created/updated`; `notify-plan-changed.ts` now consumes it, creating a PM-facing in-app notification (`billing_plan_changed`) only when the event's `previous_plan` field indicates a genuine tier change on an existing subscription — never on initial signup, and never when nothing about the tier actually changed.
