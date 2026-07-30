@@ -1,6 +1,8 @@
 import { inngest }             from '@/lib/inngest/client'
 import { createServiceClient } from '@/lib/supabase/server'
 import { logAuditEvent }       from '@/lib/audit'
+import { getPmMembers }        from '@/lib/inngest/helpers'
+import { reportError }         from '@/lib/observability/report-error'
 
 export const flaggedTurnoverToWO = inngest.createFunction(
   {
@@ -62,37 +64,48 @@ export const flaggedTurnoverToWO = inngest.createFunction(
       return wo
     })
 
+    // getPmMembers is the single source of truth for "who is a PM" — it
+    // applies the invite_accepted_at filter this step used to omit (a member
+    // with a pending invite is not yet a real recipient) and the owner →
+    // admin → manager ordering.
     const managers = await step.run('load-managers', async () => {
       const supabase = createServiceClient({ system: 'inngest:flagged-turnover-wo' })
-
-      const { data } = await supabase
-        .from('organization_members')
-        .select('user_id')
-        .eq('org_id', org_id)
-        .in('role', ['admin', 'owner', 'manager'])
-
-      return data ?? []
+      return getPmMembers(supabase, org_id, { roles: ['owner', 'admin', 'manager'] })
     })
 
     for (const mgr of managers) {
-      if (!mgr.user_id) continue
-
-      await step.run(`notify-manager-${mgr.user_id}`, async () => {
+      await step.run(`notify-manager-${mgr.userId}`, async () => {
         const supabase = createServiceClient({ system: 'inngest:flagged-turnover-wo' })
 
         const { data: subs } = await supabase
           .from('push_subscriptions')
           .select('endpoint, p256dh, auth')
-          .eq('user_id', mgr.user_id)
+          .eq('user_id', mgr.userId)
 
         if (!subs?.length) return
 
         const { sendPushToCrewMember } = await import('@/lib/push/client')
-        await sendPushToCrewMember(subs, {
-          title: 'Flagged Issue → Draft WO Created',
-          body:  flag_notes.slice(0, 80),
-          url:   '/maintenance',
-        }).catch(() => { /* silently skip failed pushes */ })
+        try {
+          await sendPushToCrewMember(subs, {
+            title: 'Flagged Issue → Draft WO Created',
+            body:  flag_notes.slice(0, 80),
+            url:   '/maintenance',
+          })
+        } catch (err) {
+          // Non-fatal — a failed push must not fail the step and re-create
+          // the work order — but never silent: a push backend that has been
+          // rejecting every send is otherwise invisible.
+          console.error('[flagged-turnover-wo] push notification failed', {
+            orgId:            org_id,
+            turnoverId:       turnover_id,
+            subscriptionCount: subs.length,
+            error:            err instanceof Error ? err.message : String(err),
+          })
+          reportError(err, {
+            site:  'inngest.flagged-turnover-wo.notify-manager',
+            orgId: org_id,
+          })
+        }
       })
     }
 

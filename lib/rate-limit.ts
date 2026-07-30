@@ -13,6 +13,99 @@ const redis = new Redis({
  */
 export { redis }
 
+// ─── The one way to consult a limiter ───────────────────────────────────────
+//
+// Every call site in the app goes through checkLimit(). Calling
+// `someLimiter.limit(...)` directly anywhere outside this file is banned by
+// unit/guardrails/public-route-rate-limiting.test.ts, because doing so is how
+// four *different* accidental failure behaviours ended up shipping across 12
+// hand-rolled call sites (audit 2026-07-30, M-1/M-2):
+//
+//   - try/catch → continue          (fail open, deliberate, documented)
+//   - outer try → return {ok:true}  (fail open AND silently skip the write)
+//   - outer try → 500               (fail closed by accident)
+//   - no catch at all               (fail closed by accident, as a 500)
+//
+// and because none of them replicated proxy.ts's `upstashConfigured` guard, so
+// every one of them paid @upstash/redis's internal retry/backoff against an
+// undefined URL — measured at ~4.3s per request — in CI, preview deploys, and
+// any environment without the KV addon.
+//
+// checkLimit() makes both explicit:
+//   (a) unconfigured Upstash short-circuits to `allowed` with `skipped: true`,
+//       never touching the network;
+//   (b) `onError` names the fail policy at the call site, per limiter class:
+//         'allow' — abuse/enumeration limiters. A Redis outage must not take
+//                   down a public route or block legitimate work. Matches
+//                   lib/rate-limit.ts's own historical behaviour and the
+//                   fail-open note on proxy.ts's token-route limiter.
+//         'deny'  — spend/quota ceilings (paid API calls, LLM tokens, real
+//                   money). A ceiling that disappears during an outage is not
+//                   a ceiling. Matches claimNudgeBudgetSlot's fail-CLOSED
+//                   convention documented in CLAUDE.md.
+export type LimitFailPolicy = 'allow' | 'deny'
+
+export interface LimitDecision {
+  /** True when the caller may proceed. */
+  allowed:   boolean
+  /** True when Upstash is unconfigured and no check was performed. */
+  skipped:   boolean
+  /** True when the limiter threw and `onError` decided the outcome. */
+  errored:   boolean
+  limit:     number
+  remaining: number
+  /** Epoch ms at which the window resets. `Date.now()` when skipped/errored. */
+  reset:     number
+}
+
+/**
+ * True when both Upstash env vars are present. Exported so a caller that
+ * needs to skip surrounding work (not just the limiter call) can ask.
+ */
+export function upstashConfigured(): boolean {
+  return (
+    !!process.env.upstash_fieldstay_KV_REST_API_URL &&
+    !!process.env.upstash_fieldstay_KV_REST_API_TOKEN
+  )
+}
+
+export async function checkLimit(
+  limiter:    Ratelimit,
+  identifier: string,
+  options:    { onError: LimitFailPolicy; site: string },
+): Promise<LimitDecision> {
+  if (!upstashConfigured()) {
+    return { allowed: true, skipped: true, errored: false, limit: 0, remaining: 0, reset: Date.now() }
+  }
+
+  try {
+    const { success, limit, remaining, reset } = await limiter.limit(identifier)
+    return { allowed: success, skipped: false, errored: false, limit, remaining, reset }
+  } catch (err) {
+    // Deliberately console-only: this module is imported by proxy.ts, which
+    // runs in the middleware runtime where the Sentry/Node reporter isn't
+    // available. The `site` string is what makes the log actionable.
+    console.error(`[rate-limit] check failed at ${site(options.site)} — failing ${options.onError === 'allow' ? 'OPEN' : 'CLOSED'}`, err)
+    return {
+      allowed:   options.onError === 'allow',
+      skipped:   false,
+      errored:   true,
+      limit:     0,
+      remaining: 0,
+      reset:     Date.now(),
+    }
+  }
+}
+
+function site(value: string): string {
+  return value.slice(0, 120)
+}
+
+/** Seconds until the window resets, floored at 1 — for a Retry-After header. */
+export function retryAfterSeconds(decision: LimitDecision): number {
+  return Math.max(1, Math.ceil((decision.reset - Date.now()) / 1000))
+}
+
 export const repuguardLimiter = new Ratelimit({
   redis,
   limiter:   Ratelimit.slidingWindow(50, '24 h'),
@@ -229,6 +322,20 @@ export const demoRatelimit = new Ratelimit({
   limiter:   Ratelimit.slidingWindow(10, '1 m'),
   analytics: false,
   prefix:    'rl:demo',
+})
+
+// Authenticated-but-expensive export routes (/api/gdpr/export,
+// /api/assets/cpa-export, /api/assets/capex-csv). An auth gate proves WHO is
+// calling, not HOW OFTEN — each of these runs several service-role
+// cross-org queries and/or renders a multi-page PDF, so a logged-in user
+// holding down refresh is a real self-inflicted load and cost vector. 5/hour
+// per user is far above any legitimate export cadence (these produce a file
+// the user downloads once).
+export const dataExportLimiter = new Ratelimit({
+  redis,
+  limiter:   Ratelimit.slidingWindow(5, '1 h'),
+  analytics: false,
+  prefix:    'rl:data-export',
 })
 
 // Support chat — 20 messages per minute per user, plus a 100/day cap

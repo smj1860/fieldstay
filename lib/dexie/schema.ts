@@ -134,6 +134,14 @@ export interface PendingPhotoUploadRow {
   mime_type:      string
   retry_count:    number
   created_at:     string
+  // Mirrors MutationRow's backoff/dead-letter fields — a queued photo used
+  // to have neither, so five failed ticks (~2.5 min offline) silently
+  // dropped it out of the drain query forever with the blob orphaned and no
+  // UI anywhere saying so.
+  next_attempt_at?:     number
+  network_retry_count?: number
+  failed?:              boolean
+  last_error?:          string
 }
 
 // Tracks incremental-sync watermarks (e.g. the last `turnover_assignments.created_at`
@@ -192,6 +200,16 @@ export interface MutationRow {
   // cleared by the row's deletion on successful push. Not indexed — the
   // drain scans in insertion order and checks this in memory.
   nextAttemptAt?: number
+  // Transport-failure counter, deliberately SEPARATE from retryCount: a push
+  // that never reached the server (offline, dropped connection) must not
+  // consume the retry budget that leads to dead-lettering, but must still
+  // drive the backoff curve so a dead connection isn't hammered. See
+  // lib/dexie/net.ts's classifyUploadFailure.
+  networkRetryCount?: number
+  // Short, user-safe reason a dead-lettered mutation failed, for the crew
+  // failed-sync surface. Never contains the payload (crew notes, quantities,
+  // completion data) — see describeFailure() in syncService.ts.
+  lastError?: string
 }
 
 export class FieldStayDexie extends Dexie {

@@ -91,8 +91,12 @@ function findOffenders(): string[] {
 // logAuditEvents batching above); everything below was a deliberate,
 // reasoned "leave as-is."
 const EXCEPTIONS: Record<string, string> = {
-  'app/api/account/delete/route.ts:44':
-    'Per-org-membership loop (owner-only checks + Stripe subscription cancel) — bounded by the deleting user\'s own org count (almost always 1), and each iteration does genuinely different work (a distinct Stripe API call per subscription) that cannot be batched.',
+  // app/api/account/delete/route.ts no longer needs an entry: the per-org
+  // loop bodies now call named helpers (assertSoleMember /
+  // cancelOrgSubscriptions / purgeOrganization) rather than inlining queries,
+  // and the Stripe-id clear was collapsed from one update per subscription
+  // into a single batched patch. Pruned 2026-07-30 with the account-deletion
+  // org-orphaning fix.
   'app/(dashboard)/maintenance/actions.ts:729':
     'Per-vendor quote_requests insert — each row needs its own randomly generated quote_token before its own Inngest event fires; the insert could theoretically be batched with the token generated client-side, but that\'s a sync-logic change, not a lint fix.',
   'app/(dashboard)/maintenance/create-work-order-helpers.ts:32':

@@ -1,5 +1,6 @@
 import { NonRetriableError } from 'inngest'
-import type { SupabaseClient } from '@supabase/supabase-js'
+import type { createServiceClient } from '@/lib/supabase/server'
+import { getOrgDispatcher } from '@/lib/inngest/helpers'
 import { render } from '@react-email/render'
 import WorkOrderDispatchEmail from '@/emails/WorkOrderDispatch'
 import { resend, FROM } from '@/lib/resend/client'
@@ -19,6 +20,11 @@ import { randomBytes } from 'crypto'
  * so splitting email and SMS into separate steps means a retry of one can
  * never re-trigger the other.
  */
+
+// Both exported helpers below run inside Inngest steps, which always hand
+// them the service-role client — typing it precisely (rather than the loose
+// `SupabaseClient`) is what lets getOrgDispatcher() be called from here.
+type ServiceClient = ReturnType<typeof createServiceClient>
 
 export type DispatchContext =
   | {
@@ -50,7 +56,7 @@ export type DispatchContext =
     }
 
 export async function loadDispatchContext(
-  supabase:    SupabaseClient,
+  supabase:    ServiceClient,
   workOrderId: string,
   orgId:       string,
 ): Promise<DispatchContext> {
@@ -133,27 +139,12 @@ export async function loadDispatchContext(
       .eq('id', workOrderId)
   }
 
-  // Dispatcher info — use org owner/admin since work_orders has no created_by column
-  let dispatcherName  = 'Your Property Manager'
-  let dispatcherPhone: string | null = null
-
-  const { data: dispatchMembers } = await supabase
-    .from('organization_members')
-    .select('user_id')
-    .eq('org_id', orgId)
-    .in('role', ['owner', 'admin'])
-    .not('invite_accepted_at', 'is', null)
-    .limit(1)
-
-  if (dispatchMembers?.[0]?.user_id) {
-    const { data: profile } = await supabase
-      .from('profiles')
-      .select('full_name, phone')
-      .eq('id', dispatchMembers[0].user_id)
-      .single()
-    if (profile?.full_name) dispatcherName = profile.full_name
-    if (profile?.phone)     dispatcherPhone = profile.phone
-  }
+  // Dispatcher info — use org owner/admin since work_orders has no created_by
+  // column. Selection goes through getOrgDispatcher so the person named here
+  // is the same one work-order-vendor-assigned.ts names on the SMS for this
+  // work order (see that helper's note on determinism).
+  const { name: dispatcherName, phone: dispatcherPhone } =
+    await getOrgDispatcher(supabase, orgId, 'Your Property Manager')
 
   const appUrl    = process.env.NEXT_PUBLIC_APP_URL ?? 'https://app.fieldstay.app'
   const publicUrl = `${appUrl}/work-orders/${token}`
@@ -194,7 +185,7 @@ export async function loadDispatchContext(
 export async function sendVendorDispatchEmail(
   workOrderId: string,
   context:     Extract<DispatchContext, { dispatched: true }>,
-  supabase:    SupabaseClient,
+  supabase:    ServiceClient,
   orgId:       string,
 ): Promise<void> {
   const manualUrl = await getManualUrlForAsset(supabase, orgId, context.assetId)

@@ -60,7 +60,7 @@ export async function activateCrewAccount(formData: FormData): Promise<{ error?:
 
   const { data: crew, error: crewError } = await supabase
     .from('crew_members')
-    .select('id, name, email, org_id, user_id, invite_accepted_at, invite_token, invite_sent_at')
+    .select('id, name, email, org_id, user_id, invite_accepted_at, invite_token, invite_sent_at, created_at')
     .eq('id', crewId)
     .eq('invite_token', token)
     .single()
@@ -82,10 +82,24 @@ export async function activateCrewAccount(formData: FormData): Promise<{ error?:
   const activationEmail = crew.email ?? submittedEmail
   if (!activationEmail) return { error: 'Enter an email address to finish setting up your account' }
 
-  if (crew.invite_sent_at) {
-    const expired = new Date(crew.invite_sent_at).getTime() + 7 * 86_400_000 < Date.now()
-    if (expired) return { error: 'This invite link has expired. Ask your manager to send a new one.' }
+  // Fail CLOSED on expiry. This check used to be nested inside
+  // `if (crew.invite_sent_at)`, so a crew row with a NULL invite_sent_at had a
+  // permanently-valid activation token that mints a real auth account — and
+  // ~40% of live crew_members rows have that column NULL (invited by SMS, or
+  // created before the column existed).
+  //
+  // The fallback is created_at, NOT a hard reject: rejecting outright would be
+  // the same class of mistake as filtering crew on invite_accepted_at, which
+  // has silently locked out real crew three times (see lib/crew-auth.ts). Note
+  // this branch is only reachable for genuinely PENDING invites — rows with a
+  // user_id or invite_accepted_at already returned "already used" above — so
+  // no activated crew member can be affected by it either way.
+  const inviteIssuedAt = crew.invite_sent_at ?? crew.created_at
+  if (!inviteIssuedAt) {
+    return { error: 'This invite link has expired. Ask your manager to send a new one.' }
   }
+  const expired = new Date(inviteIssuedAt).getTime() + 7 * 86_400_000 < Date.now()
+  if (expired) return { error: 'This invite link has expired. Ask your manager to send a new one.' }
 
   const { data: authData, error: createError } = await supabase.auth.admin.createUser({
     email:         activationEmail,

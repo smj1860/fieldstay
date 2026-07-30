@@ -1,0 +1,32 @@
+-- BLOCKER B1 (pre-launch audit 2026-07-30) — privilege escalation via
+-- organization_members INSERT.
+--
+-- `org_members_insert_self` (added by 20260617060719_fix_auth_rls_initplan.sql
+-- lines 181-185) is:
+--
+--   FOR INSERT WITH CHECK (user_id = (select auth.uid()))
+--
+-- which constrains ONLY user_id. org_id, role and invite_accepted_at are all
+-- client-supplied and all INSERT-grantable to `authenticated`, with no
+-- BEFORE INSERT trigger and no overriding default. Any authenticated user who
+-- knows (or holds) an org UUID — a crew member reading their own crew_members
+-- row is enough — can POST to /rest/v1/organization_members with
+-- { org_id, user_id: <self>, role: 'owner', invite_accepted_at: now() } and
+-- become owner of that tenant. get_user_org_ids() and is_org_member() both
+-- gate on invite_accepted_at IS NOT NULL, which the same INSERT sets.
+--
+-- The policy is dead code. Verified 2026-07-30 by grepping every write path:
+--   * lib/auth/invites.ts:46 — the only organization_members INSERT in the
+--     repo, and it uses createServiceClient() (BYPASSRLS), so it never
+--     depended on this policy.
+--   * app/onboarding/actions.ts:39 — org creation goes through the
+--     create_organization_with_owner() SECURITY DEFINER RPC, which likewise
+--     does not evaluate this policy.
+-- No other .insert()/.upsert() against organization_members exists anywhere in
+-- app/ or lib/.
+--
+-- Dropping it leaves organization_members with SELECT (org-scoped),
+-- UPDATE/ALL and DELETE (both admin-gated) — i.e. membership can only be
+-- created by the service role, which is the intended design.
+
+DROP POLICY IF EXISTS "org_members_insert_self" ON public.organization_members;
