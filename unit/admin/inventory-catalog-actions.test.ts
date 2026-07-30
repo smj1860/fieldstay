@@ -38,7 +38,8 @@ function makeSupabase(queue: Record<string, Resp[]>) {
 function itemInput(overrides: Partial<CatalogItemInput> = {}): CatalogItemInput {
   return {
     name: 'Paper towels', category: 'paper_goods', default_unit: 'roll',
-    default_par_level: 2, description: 'Standard 2-ply roll', is_active: true,
+    default_par_level: 2, par_mode: 'static', smart_group: null, base_qty: 1,
+    description: 'Standard 2-ply roll', is_active: true,
     ...overrides,
   }
 }
@@ -81,6 +82,48 @@ describe('admin/inventory-catalog/actions', () => {
 
       expect(result).toEqual({ error: 'Operation failed. Please try again.' })
       expect(supabase.from).not.toHaveBeenCalled()
+    })
+
+    it('round-trips valid smart config through normalizeParConfig', async () => {
+      const supabase = makeSupabase({
+        inventory_catalog: [{ data: { id: 'item_1' }, error: null }],
+      })
+      vi.mocked(requirePlatformAdmin).mockResolvedValue({ supabase, user: { id: 'admin_1' } } as never)
+
+      await createCatalogItem(itemInput({ par_mode: 'smart', smart_group: 'guest_consumable', base_qty: 2 }))
+
+      const chain = supabase.from.mock.results[0]!.value
+      expect(chain.insert).toHaveBeenCalledWith(
+        expect.objectContaining({ par_mode: 'smart', smart_group: 'guest_consumable', base_qty: 2 })
+      )
+    })
+
+    it('never writes a group for a static item, even if one was submitted', async () => {
+      const supabase = makeSupabase({
+        inventory_catalog: [{ data: { id: 'item_1' }, error: null }],
+      })
+      vi.mocked(requirePlatformAdmin).mockResolvedValue({ supabase, user: { id: 'admin_1' } } as never)
+
+      await createCatalogItem(itemInput({ par_mode: 'static', smart_group: 'bedroom_essential', base_qty: 2 }))
+
+      const chain = supabase.from.mock.results[0]!.value
+      expect(chain.insert).toHaveBeenCalledWith(
+        expect.objectContaining({ par_mode: 'static', smart_group: null })
+      )
+    })
+
+    it('degrades smart mode with a null group to static', async () => {
+      const supabase = makeSupabase({
+        inventory_catalog: [{ data: { id: 'item_1' }, error: null }],
+      })
+      vi.mocked(requirePlatformAdmin).mockResolvedValue({ supabase, user: { id: 'admin_1' } } as never)
+
+      await createCatalogItem(itemInput({ par_mode: 'smart', smart_group: null, base_qty: 2 }))
+
+      const chain = supabase.from.mock.results[0]!.value
+      expect(chain.insert).toHaveBeenCalledWith(
+        expect.objectContaining({ par_mode: 'static', smart_group: null })
+      )
     })
   })
 
@@ -173,7 +216,7 @@ describe('admin/inventory-catalog/actions', () => {
   describe('bulkImportCatalogItems', () => {
     it('inserts every valid row and returns the created items', async () => {
       const inserted = [
-        { id: 'item_1', name: 'Paper Towels', category: 'paper_goods', default_unit: 'roll', default_par_level: 2, description: null, is_active: true },
+        { id: 'item_1', name: 'Paper Towels', category: 'paper_goods', default_unit: 'roll', default_par_level: 2, par_mode: 'static', smart_group: null, base_qty: 1, description: null, is_active: true },
       ]
       const supabase = makeSupabase({
         inventory_catalog: [{ data: inserted, error: null }],
@@ -185,7 +228,7 @@ describe('admin/inventory-catalog/actions', () => {
       ])
 
       expect(result.items).toEqual([
-        { id: 'item_1', name: 'Paper Towels', category: 'paper_goods', default_unit: 'roll', default_par_level: 2, description: '', is_active: true },
+        { id: 'item_1', name: 'Paper Towels', category: 'paper_goods', default_unit: 'roll', default_par_level: 2, par_mode: 'static', smart_group: null, base_qty: 1, description: '', is_active: true },
       ])
       expect(logAuditEvent).toHaveBeenCalledWith(expect.objectContaining({
         action: 'platform_admin.inventory_catalog_item.bulk_imported', metadata: { count: 1 },
@@ -194,7 +237,7 @@ describe('admin/inventory-catalog/actions', () => {
 
     it('drops rows with a blank name and normalizes a non-positive par level to 1', async () => {
       const inserted = [
-        { id: 'item_1', name: 'Trash Bags', category: 'cleaning', default_unit: 'box', default_par_level: 1, description: null, is_active: true },
+        { id: 'item_1', name: 'Trash Bags', category: 'cleaning', default_unit: 'box', default_par_level: 1, par_mode: 'static', smart_group: null, base_qty: 1, description: null, is_active: true },
       ]
       const supabase = makeSupabase({
         inventory_catalog: [{ data: inserted, error: null }],

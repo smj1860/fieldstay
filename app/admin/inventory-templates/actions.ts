@@ -5,11 +5,16 @@ import { requirePlatformAdmin } from '@/lib/auth'
 import { createServiceClient } from '@/lib/supabase/server'
 import { logAuditEvent } from '@/lib/audit'
 import { inngest } from '@/lib/inngest/client'
+import { normalizeParConfig } from '@/lib/inventory/par-engine'
+import type { ParMode, ParSmartGroup } from '@/types/database'
 
 import { reportError } from '@/lib/observability/report-error'
 export interface PlatformTemplateItemInput {
   catalog_item_id: string
   par_level:       number
+  par_mode:        ParMode
+  smart_group:     ParSmartGroup | null
+  base_qty:        number
   preferred_brand: string
   sort_order:      number
 }
@@ -152,6 +157,7 @@ export async function savePlatformInventoryTemplateItems(
         par_level:       Number.isFinite(item.par_level) && item.par_level > 0 ? item.par_level : 1,
         preferred_brand: item.preferred_brand,
         sort_order:      item.sort_order,
+        ...normalizeParConfig(item),
       })),
     })
     if (replaceError) {

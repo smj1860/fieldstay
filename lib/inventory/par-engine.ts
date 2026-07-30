@@ -103,3 +103,21 @@ export function resolvePar(
   }
   return { par: smartFormulaPar(config, property), source: 'smart_formula' }
 }
+
+export interface ParConfigInput {
+  par_mode:    ParMode
+  smart_group: ParSmartGroup | null
+  base_qty:    number
+}
+
+/** Coerces client-submitted par config into a DB-valid shape: static rows
+ *  never carry a group; smart rows must name a valid group or degrade to
+ *  static; base_qty is clamped positive. Server actions call this so the
+ *  smart_group_matches_mode CHECK can never reject a write. */
+export function normalizeParConfig(input: ParConfigInput): ParConfigInput {
+  const base_qty = Number.isFinite(input.base_qty) && input.base_qty > 0 ? input.base_qty : 1
+  if (input.par_mode === 'smart' && input.smart_group && input.smart_group in PAR_SMART_GROUPS) {
+    return { par_mode: 'smart', smart_group: input.smart_group, base_qty }
+  }
+  return { par_mode: 'static', smart_group: null, base_qty }
+}

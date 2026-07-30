@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest'
 import {
   resolvePar,
+  normalizeParConfig,
   HISTORICAL_FLOOR,
   type ParItemConfig,
   type ParPropertyContext,
@@ -98,5 +99,28 @@ describe('resolvePar', () => {
     expect(() => resolvePar(config, baseProperty, null)).not.toThrow()
     const result = resolvePar(config, baseProperty, null)
     expect(result.par).toBeGreaterThanOrEqual(1)
+  })
+})
+
+describe('normalizeParConfig', () => {
+  it('passes through smart mode with a valid group', () => {
+    const result = normalizeParConfig({ par_mode: 'smart', smart_group: 'guest_consumable', base_qty: 2 })
+    expect(result).toEqual({ par_mode: 'smart', smart_group: 'guest_consumable', base_qty: 2 })
+  })
+
+  it('degrades smart with a null group to static', () => {
+    const result = normalizeParConfig({ par_mode: 'smart', smart_group: null, base_qty: 2 })
+    expect(result).toEqual({ par_mode: 'static', smart_group: null, base_qty: 2 })
+  })
+
+  it('strips the group when static (even if one was submitted)', () => {
+    const result = normalizeParConfig({ par_mode: 'static', smart_group: 'bedroom_essential', base_qty: 3 })
+    expect(result).toEqual({ par_mode: 'static', smart_group: null, base_qty: 3 })
+  })
+
+  it('clamps NaN/0/-3 base_qty to 1', () => {
+    expect(normalizeParConfig({ par_mode: 'static', smart_group: null, base_qty: NaN }).base_qty).toBe(1)
+    expect(normalizeParConfig({ par_mode: 'static', smart_group: null, base_qty: 0 }).base_qty).toBe(1)
+    expect(normalizeParConfig({ par_mode: 'static', smart_group: null, base_qty: -3 }).base_qty).toBe(1)
   })
 })

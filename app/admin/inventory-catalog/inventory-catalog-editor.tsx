@@ -10,9 +10,21 @@ import {
   createCatalogItem, updateCatalogItem, deleteCatalogItem, bulkImportCatalogItems,
   type CatalogItemInput,
 } from './actions'
-import type { InventoryCategory } from '@/types/database'
+import type { InventoryCategory, ParMode, ParSmartGroup } from '@/types/database'
+import { PAR_SMART_GROUPS, resolvePar } from '@/lib/inventory/par-engine'
 
 const CATEGORIES = Object.keys(INVENTORY_CATEGORY_LABELS) as InventoryCategory[]
+
+// Sample property used to preview a smart-config formula in the admin UI —
+// not a real property, just fixed inputs so the admin can see roughly what
+// the formula produces before it ever reaches a real org.
+const PREVIEW_PROPERTY = { bathrooms: 2, bedrooms: 3, max_guests: 6, avg_stay_length: 3 }
+
+const MULTIPLIER_UNIT_LABEL: Record<ParSmartGroup, string> = {
+  bathroom_essential: 'per bathroom',
+  bedroom_essential:  'per bedroom',
+  guest_consumable:   'per guest',
+}
 
 interface RowState {
   id:                string
@@ -20,9 +32,99 @@ interface RowState {
   category:          InventoryCategory
   default_unit:      string
   default_par_level: number
+  par_mode:          ParMode
+  smart_group:       ParSmartGroup | null
+  base_qty:          number
   description:       string
   is_active:         boolean
   dirty:             boolean
+}
+
+interface ParConfigValue {
+  par_mode:          ParMode
+  smart_group:       ParSmartGroup | null
+  base_qty:          number
+  default_par_level: number
+}
+
+function ParConfigFields({
+  value,
+  onChange,
+}: Readonly<{
+  value:    ParConfigValue
+  onChange: (patch: Partial<ParConfigValue>) => void
+}>) {
+  const preview = value.smart_group
+    ? resolvePar(
+        { par_mode: 'smart', smart_group: value.smart_group, base_qty: value.base_qty, par_level: value.default_par_level, auto_adjust: false },
+        PREVIEW_PROPERTY,
+        null
+      ).par
+    : null
+
+  return (
+    <div className="flex flex-col gap-1.5">
+      <div className="flex items-center gap-1.5">
+        <select
+          value={value.par_mode}
+          onChange={(e) => {
+            const par_mode = e.target.value as ParMode
+            onChange(par_mode === 'smart' ? { par_mode, smart_group: value.smart_group ?? 'guest_consumable' } : { par_mode, smart_group: null })
+          }}
+          className="input text-sm"
+          aria-label="Par mode"
+        >
+          <option value="static">Static</option>
+          <option value="smart">Smart</option>
+        </select>
+        {value.par_mode === 'static' && (
+          <input
+            type="number"
+            min={0}
+            step="any"
+            value={value.default_par_level}
+            onChange={(e) => onChange({ default_par_level: Number.isFinite(e.target.valueAsNumber) ? e.target.valueAsNumber : 1 })}
+            className="input text-sm w-20"
+            aria-label="Par level"
+          />
+        )}
+      </div>
+      {value.par_mode === 'smart' && (
+        <div className="flex flex-col gap-1.5">
+          <div className="flex items-center gap-1.5">
+            <select
+              value={value.smart_group ?? ''}
+              onChange={(e) => onChange({ smart_group: e.target.value as ParSmartGroup })}
+              className="input text-sm"
+              aria-label="Smart group"
+            >
+              {Object.entries(PAR_SMART_GROUPS).map(([key, spec]) => (
+                <option key={key} value={key}>{spec.label}</option>
+              ))}
+            </select>
+            <input
+              type="number"
+              min={0}
+              step="any"
+              value={value.base_qty}
+              onChange={(e) => onChange({ base_qty: Number.isFinite(e.target.valueAsNumber) ? e.target.valueAsNumber : 1 })}
+              className="input text-sm w-20"
+              aria-label="Base quantity"
+              placeholder={value.smart_group ? MULTIPLIER_UNIT_LABEL[value.smart_group] : undefined}
+            />
+            <span className="text-xs text-muted-themed whitespace-nowrap">
+              {value.smart_group ? MULTIPLIER_UNIT_LABEL[value.smart_group] : ''}
+            </span>
+          </div>
+          {preview !== null && (
+            <p className="text-xs text-muted-themed">
+              Preview (2 ba / 3 br / 6 guests): <strong>{preview}</strong>
+            </p>
+          )}
+        </div>
+      )}
+    </div>
+  )
 }
 
 // ── CSV parsing ──────────────────────────────────────────────────────────────
@@ -97,6 +199,10 @@ function updateRowField(rows: RowState[], id: string, field: keyof RowState, val
   return rows.map((r) => (r.id === id ? { ...r, [field]: value, dirty: true } : r))
 }
 
+function updateRowPatch(rows: RowState[], id: string, patch: Partial<RowState>): RowState[] {
+  return rows.map((r) => (r.id === id ? { ...r, ...patch, dirty: true } : r))
+}
+
 function matchesFilter(row: RowState, search: string, categoryFilter: string): boolean {
   if (categoryFilter !== 'all' && row.category !== categoryFilter) return false
   if (!search) return true
@@ -106,7 +212,7 @@ function matchesFilter(row: RowState, search: string, categoryFilter: string): b
 export function InventoryCatalogEditor({
   initialItems,
 }: Readonly<{
-  initialItems: Array<{ id: string; name: string; category: InventoryCategory; default_unit: string; default_par_level: number; description: string; is_active: boolean }>
+  initialItems: Array<{ id: string; name: string; category: InventoryCategory; default_unit: string; default_par_level: number; par_mode: ParMode; smart_group: ParSmartGroup | null; base_qty: number; description: string; is_active: boolean }>
 }>) {
   const [rows, setRows] = useState<RowState[]>(() => initialItems.map(toRowState))
   const [search, setSearch] = useState('')
@@ -116,7 +222,9 @@ export function InventoryCatalogEditor({
   const [savedRowId, setSavedRowId] = useState<string | null>(null)
 
   const [newItem, setNewItem] = useState<CatalogItemInput>({
-    name: '', category: 'other', default_unit: 'units', default_par_level: 1, description: '', is_active: true,
+    name: '', category: 'other', default_unit: 'units', default_par_level: 1,
+    par_mode: 'static', smart_group: null, base_qty: 1,
+    description: '', is_active: true,
   })
 
   const [csvOpen, setCsvOpen] = useState(false)
@@ -133,6 +241,10 @@ export function InventoryCatalogEditor({
     setRows((prev) => updateRowField(prev, id, field, value))
   }
 
+  function handleParConfigChange(id: string, patch: Partial<ParConfigValue>) {
+    setRows((prev) => updateRowPatch(prev, id, patch))
+  }
+
   function handleSaveRow(row: RowState) {
     startSave(async () => {
       setError(null)
@@ -141,6 +253,9 @@ export function InventoryCatalogEditor({
         category:          row.category,
         default_unit:      row.default_unit,
         default_par_level: row.default_par_level,
+        par_mode:          row.par_mode,
+        smart_group:       row.smart_group,
+        base_qty:          row.base_qty,
         description:       row.description,
         is_active:         row.is_active,
       })
@@ -170,7 +285,11 @@ export function InventoryCatalogEditor({
         return
       }
       setRows((prev) => [...prev, toRowState({ id: result.id!, ...newItem })])
-      setNewItem({ name: '', category: 'other', default_unit: 'units', default_par_level: 1, description: '', is_active: true })
+      setNewItem({
+        name: '', category: 'other', default_unit: 'units', default_par_level: 1,
+        par_mode: 'static', smart_group: null, base_qty: 1,
+        description: '', is_active: true,
+      })
     })
   }
 
@@ -236,7 +355,7 @@ export function InventoryCatalogEditor({
               <th className="px-3 py-2 font-medium text-muted-themed">Name</th>
               <th className="px-3 py-2 font-medium text-muted-themed">Category</th>
               <th className="px-3 py-2 font-medium text-muted-themed">Unit</th>
-              <th className="px-3 py-2 font-medium text-muted-themed">Par Level</th>
+              <th className="px-3 py-2 font-medium text-muted-themed">Par Config</th>
               <th className="px-3 py-2 font-medium text-muted-themed">Description</th>
               <th className="px-3 py-2 font-medium text-muted-themed">Active</th>
               <th className="px-3 py-2" />
@@ -272,14 +391,9 @@ export function InventoryCatalogEditor({
                   />
                 </td>
                 <td className="px-3 py-2">
-                  <input
-                    type="number"
-                    min={0}
-                    step="any"
-                    value={row.default_par_level}
-                    onChange={(e) => handleFieldChange(row.id, 'default_par_level', Number.isFinite(e.target.valueAsNumber) ? e.target.valueAsNumber : 1)}
-                    className="input text-sm w-20"
-                    aria-label="Par level"
+                  <ParConfigFields
+                    value={{ par_mode: row.par_mode, smart_group: row.smart_group, base_qty: row.base_qty, default_par_level: row.default_par_level }}
+                    onChange={(patch) => handleParConfigChange(row.id, patch)}
                   />
                 </td>
                 <td className="px-3 py-2">
@@ -333,7 +447,7 @@ export function InventoryCatalogEditor({
 
       <div className="border border-themed rounded-xl p-4">
         <h3 className="text-sm font-semibold mb-3" style={{ color: 'var(--text-primary)' }}>Add New Item</h3>
-        <div className="grid gap-2 sm:grid-cols-6">
+        <div className="grid gap-2 sm:grid-cols-5">
           <input
             value={newItem.name}
             onChange={(e) => setNewItem((prev) => ({ ...prev, name: e.target.value }))}
@@ -354,20 +468,16 @@ export function InventoryCatalogEditor({
             className="input text-sm"
           />
           <input
-            type="number"
-            min={0}
-            step="any"
-            value={newItem.default_par_level}
-            onChange={(e) => setNewItem((prev) => ({ ...prev, default_par_level: Number.isFinite(e.target.valueAsNumber) ? e.target.valueAsNumber : 1 }))}
-            placeholder="Par level"
-            aria-label="Par level"
-            className="input text-sm"
-          />
-          <input
             value={newItem.description}
             onChange={(e) => setNewItem((prev) => ({ ...prev, description: e.target.value }))}
             placeholder="Description (optional)"
             className="input text-sm"
+          />
+        </div>
+        <div className="mt-2">
+          <ParConfigFields
+            value={{ par_mode: newItem.par_mode, smart_group: newItem.smart_group, base_qty: newItem.base_qty, default_par_level: newItem.default_par_level }}
+            onChange={(patch) => setNewItem((prev) => ({ ...prev, ...patch }))}
           />
         </div>
         <Button

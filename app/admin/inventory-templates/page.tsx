@@ -10,12 +10,12 @@ export default async function InventoryTemplatesPage() {
       .from('platform_inventory_templates')
       .select(`
         id, name, description,
-        platform_inventory_template_items ( id, catalog_item_id, par_level, preferred_brand, sort_order )
+        platform_inventory_template_items ( id, catalog_item_id, par_level, par_mode, smart_group, base_qty, preferred_brand, sort_order )
       `)
       .order('name'),
     supabase
       .from('inventory_catalog')
-      .select('id, name, category, default_unit')
+      .select('id, name, category, default_unit, par_mode, smart_group, base_qty')
       .eq('is_active', true)
       .order('category')
       .order('name'),
@@ -45,6 +45,9 @@ export default async function InventoryTemplatesPage() {
               id:              item.id,
               catalog_item_id: item.catalog_item_id,
               par_level:       item.par_level,
+              par_mode:        item.par_mode,
+              smart_group:     item.smart_group,
+              base_qty:        item.base_qty,
               preferred_brand: item.preferred_brand ?? '',
             })),
         }))}
@@ -53,6 +56,9 @@ export default async function InventoryTemplatesPage() {
           name:         c.name,
           category:     c.category,
           default_unit: c.default_unit,
+          par_mode:     c.par_mode,
+          smart_group:  c.smart_group,
+          base_qty:     c.base_qty,
         }))}
       />
     </Card>

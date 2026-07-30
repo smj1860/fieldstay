@@ -3,7 +3,8 @@
 import { revalidatePath } from 'next/cache'
 import { requirePlatformAdmin } from '@/lib/auth'
 import { logAuditEvent } from '@/lib/audit'
-import type { InventoryCategory } from '@/types/database'
+import type { InventoryCategory, ParMode, ParSmartGroup } from '@/types/database'
+import { normalizeParConfig } from '@/lib/inventory/par-engine'
 
 import { reportError } from '@/lib/observability/report-error'
 export interface CatalogItemInput {
@@ -11,6 +12,9 @@ export interface CatalogItemInput {
   category:          InventoryCategory
   default_unit:      string
   default_par_level: number
+  par_mode:          ParMode
+  smart_group:       ParSmartGroup | null
+  base_qty:          number
   description:       string
   is_active:         boolean
 }
@@ -33,6 +37,7 @@ export async function createCatalogItem(
     if (!name) return { error: 'Item name is required.' }
     const defaultUnit = input.default_unit.trim() || 'units'
     const defaultParLevel = normalizeParLevel(input.default_par_level)
+    const parConfig = normalizeParConfig(input)
 
     const { data, error } = await supabase
       .from('inventory_catalog')
@@ -41,6 +46,7 @@ export async function createCatalogItem(
         category:          input.category,
         default_unit:      defaultUnit,
         default_par_level: defaultParLevel,
+        ...parConfig,
         description:       input.description.trim() || null,
         is_active:         input.is_active,
       })
@@ -57,7 +63,7 @@ export async function createCatalogItem(
       action:     'platform_admin.inventory_catalog_item.created',
       targetType: 'inventory_catalog',
       targetId:   data.id,
-      metadata:   { name, category: input.category },
+      metadata:   { name, category: input.category, par_mode: parConfig.par_mode },
     })
 
     revalidatePath('/admin/inventory-catalog')
@@ -80,6 +86,7 @@ export async function updateCatalogItem(
     if (!name) return { error: 'Item name is required.' }
     const defaultUnit = input.default_unit.trim() || 'units'
     const defaultParLevel = normalizeParLevel(input.default_par_level)
+    const parConfig = normalizeParConfig(input)
 
     const { data, error } = await supabase
       .from('inventory_catalog')
@@ -88,6 +95,7 @@ export async function updateCatalogItem(
         category:          input.category,
         default_unit:      defaultUnit,
         default_par_level: defaultParLevel,
+        ...parConfig,
         description:       input.description.trim() || null,
         is_active:         input.is_active,
       })
@@ -106,7 +114,7 @@ export async function updateCatalogItem(
       action:     'platform_admin.inventory_catalog_item.updated',
       targetType: 'inventory_catalog',
       targetId:   itemId,
-      metadata:   { name, category: input.category, is_active: input.is_active },
+      metadata:   { name, category: input.category, is_active: input.is_active, par_mode: parConfig.par_mode },
     })
 
     revalidatePath('/admin/inventory-catalog')
@@ -152,7 +160,7 @@ export async function bulkImportCatalogItems(
     const { data, error } = await supabase
       .from('inventory_catalog')
       .insert(cleaned)
-      .select('id, name, category, default_unit, default_par_level, description, is_active')
+      .select('id, name, category, default_unit, default_par_level, par_mode, smart_group, base_qty, description, is_active')
 
     if (error) {
       console.error('[bulkImportCatalogItems]', error)
@@ -174,6 +182,11 @@ export async function bulkImportCatalogItems(
         category:          item.category,
         default_unit:      item.default_unit,
         default_par_level: item.default_par_level,
+        // CSV rows carry no par config — every bulk-imported row lands
+        // static via the DB column default, never smart.
+        par_mode:          item.par_mode,
+        smart_group:       item.smart_group,
+        base_qty:          item.base_qty,
         description:       item.description ?? '',
         is_active:         item.is_active,
       })),

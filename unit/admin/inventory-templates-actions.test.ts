@@ -126,7 +126,7 @@ describe('admin/inventory-templates/actions', () => {
       vi.mocked(requirePlatformAdmin).mockResolvedValue({ supabase, user: { id: 'admin_1' } } as never)
 
       const result = await savePlatformInventoryTemplateItems('tmpl_1', [
-        { catalog_item_id: 'cat_1', par_level: 2, preferred_brand: 'Bounty', sort_order: 0 },
+        { catalog_item_id: 'cat_1', par_level: 2, par_mode: 'static', smart_group: null, base_qty: 1, preferred_brand: 'Bounty', sort_order: 0 },
       ])
 
       expect(result).toEqual({ saved: 1 })
@@ -143,12 +143,63 @@ describe('admin/inventory-templates/actions', () => {
       vi.mocked(requirePlatformAdmin).mockResolvedValue({ supabase, user: { id: 'admin_1' } } as never)
 
       await savePlatformInventoryTemplateItems('tmpl_1', [
-        { catalog_item_id: 'cat_1', par_level: -5, preferred_brand: '', sort_order: 0 },
+        { catalog_item_id: 'cat_1', par_level: -5, par_mode: 'static', smart_group: null, base_qty: 1, preferred_brand: '', sort_order: 0 },
       ])
 
       expect(supabase.rpc).toHaveBeenCalledWith('replace_platform_inventory_template_items', {
         p_template_id: 'tmpl_1',
         p_items: [expect.objectContaining({ par_level: 1 })],
+      })
+    })
+
+    it('round-trips valid smart config through normalizeParConfig', async () => {
+      const supabase = makeSupabase({
+        platform_inventory_templates: [{ data: { id: 'tmpl_1' }, error: null }],
+        __rpc__: [{ data: 1, error: null }],
+      })
+      vi.mocked(requirePlatformAdmin).mockResolvedValue({ supabase, user: { id: 'admin_1' } } as never)
+
+      await savePlatformInventoryTemplateItems('tmpl_1', [
+        { catalog_item_id: 'cat_1', par_level: 1, par_mode: 'smart', smart_group: 'bedroom_essential', base_qty: 3, preferred_brand: '', sort_order: 0 },
+      ])
+
+      expect(supabase.rpc).toHaveBeenCalledWith('replace_platform_inventory_template_items', {
+        p_template_id: 'tmpl_1',
+        p_items: [expect.objectContaining({ par_mode: 'smart', smart_group: 'bedroom_essential', base_qty: 3 })],
+      })
+    })
+
+    it('never writes a group for a static item, even if one was submitted', async () => {
+      const supabase = makeSupabase({
+        platform_inventory_templates: [{ data: { id: 'tmpl_1' }, error: null }],
+        __rpc__: [{ data: 1, error: null }],
+      })
+      vi.mocked(requirePlatformAdmin).mockResolvedValue({ supabase, user: { id: 'admin_1' } } as never)
+
+      await savePlatformInventoryTemplateItems('tmpl_1', [
+        { catalog_item_id: 'cat_1', par_level: 1, par_mode: 'static', smart_group: 'bathroom_essential', base_qty: 3, preferred_brand: '', sort_order: 0 },
+      ])
+
+      expect(supabase.rpc).toHaveBeenCalledWith('replace_platform_inventory_template_items', {
+        p_template_id: 'tmpl_1',
+        p_items: [expect.objectContaining({ par_mode: 'static', smart_group: null })],
+      })
+    })
+
+    it('degrades smart mode with a null group to static', async () => {
+      const supabase = makeSupabase({
+        platform_inventory_templates: [{ data: { id: 'tmpl_1' }, error: null }],
+        __rpc__: [{ data: 1, error: null }],
+      })
+      vi.mocked(requirePlatformAdmin).mockResolvedValue({ supabase, user: { id: 'admin_1' } } as never)
+
+      await savePlatformInventoryTemplateItems('tmpl_1', [
+        { catalog_item_id: 'cat_1', par_level: 1, par_mode: 'smart', smart_group: null, base_qty: 3, preferred_brand: '', sort_order: 0 },
+      ])
+
+      expect(supabase.rpc).toHaveBeenCalledWith('replace_platform_inventory_template_items', {
+        p_template_id: 'tmpl_1',
+        p_items: [expect.objectContaining({ par_mode: 'static', smart_group: null })],
       })
     })
   })

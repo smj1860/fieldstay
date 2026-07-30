@@ -7,7 +7,7 @@ export default async function InventoryCatalogPage() {
 
   const { data: items } = await supabase
     .from('inventory_catalog')
-    .select('id, name, category, default_unit, default_par_level, description, is_active')
+    .select('id, name, category, default_unit, default_par_level, par_mode, smart_group, base_qty, description, is_active')
     .order('category')
     .order('name')
 
@@ -29,6 +29,9 @@ export default async function InventoryCatalogPage() {
           category:          i.category,
           default_unit:      i.default_unit,
           default_par_level: i.default_par_level,
+          par_mode:          i.par_mode,
+          smart_group:       i.smart_group,
+          base_qty:          i.base_qty,
           description:       i.description ?? '',
           is_active:         i.is_active,
         }))}

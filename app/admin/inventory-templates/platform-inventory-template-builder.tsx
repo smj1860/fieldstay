@@ -6,7 +6,8 @@ import { Button } from '@/components/ui/Button'
 import { Checkbox } from '@/components/ui/Checkbox'
 import { InlineAlert } from '@/components/ui/InlineAlert'
 import { INVENTORY_CATEGORY_LABELS } from '@/lib/utils'
-import type { InventoryCategory } from '@/types/database'
+import type { InventoryCategory, ParMode, ParSmartGroup } from '@/types/database'
+import { PAR_SMART_GROUPS, resolvePar } from '@/lib/inventory/par-engine'
 import {
   createPlatformInventoryTemplate,
   renamePlatformInventoryTemplate,
@@ -18,17 +19,33 @@ import {
   type BroadcastTarget,
 } from './actions'
 
+// Sample property used to preview a smart-config formula — see the matching
+// constant in inventory-catalog-editor.tsx.
+const PREVIEW_PROPERTY = { bathrooms: 2, bedrooms: 3, max_guests: 6, avg_stay_length: 3 }
+
+const MULTIPLIER_UNIT_LABEL: Record<ParSmartGroup, string> = {
+  bathroom_essential: 'per bathroom',
+  bedroom_essential:  'per bedroom',
+  guest_consumable:   'per guest',
+}
+
 interface CatalogItem {
   id:           string
   name:         string
   category:     InventoryCategory
   default_unit: string
+  par_mode:     ParMode
+  smart_group:  ParSmartGroup | null
+  base_qty:     number
 }
 
 interface ItemState {
   tempId:          string
   catalog_item_id: string
   par_level:       number
+  par_mode:        ParMode
+  smart_group:     ParSmartGroup | null
+  base_qty:        number
   preferred_brand: string
 }
 
@@ -44,18 +61,42 @@ function makeId() {
   return crypto.randomUUID()
 }
 
-function toItemState(item: { catalog_item_id: string; par_level: number; preferred_brand: string }): ItemState {
-  return { tempId: makeId(), catalog_item_id: item.catalog_item_id, par_level: item.par_level, preferred_brand: item.preferred_brand }
+function toItemState(item: { catalog_item_id: string; par_level: number; par_mode: ParMode; smart_group: ParSmartGroup | null; base_qty: number; preferred_brand: string }): ItemState {
+  return {
+    tempId:          makeId(),
+    catalog_item_id: item.catalog_item_id,
+    par_level:       item.par_level,
+    par_mode:        item.par_mode,
+    smart_group:     item.smart_group,
+    base_qty:        item.base_qty,
+    preferred_brand: item.preferred_brand,
+  }
 }
 
 function renameTemplateInList(templates: TemplateState[], id: string, field: 'name' | 'description', value: string): TemplateState[] {
   return templates.map((t) => (t.id === id ? { ...t, [field]: value } : t))
 }
 
-function addItemToTemplate(templates: TemplateState[], id: string, catalogItemId: string): TemplateState[] {
+// Pre-fills mode/group/base_qty from the catalog row — the admin can then
+// override per template.
+function addItemToTemplate(templates: TemplateState[], id: string, catalogItem: CatalogItem): TemplateState[] {
   return templates.map((t) =>
     t.id === id
-      ? { ...t, items: [...t.items, { tempId: makeId(), catalog_item_id: catalogItemId, par_level: 1, preferred_brand: '' }] }
+      ? {
+          ...t,
+          items: [
+            ...t.items,
+            {
+              tempId:          makeId(),
+              catalog_item_id: catalogItem.id,
+              par_level:       1,
+              par_mode:        catalogItem.par_mode,
+              smart_group:     catalogItem.smart_group,
+              base_qty:        catalogItem.base_qty,
+              preferred_brand: '',
+            },
+          ],
+        }
       : t
   )
 }
@@ -72,6 +113,14 @@ function updateItemInTemplate(templates: TemplateState[], id: string, itemTempId
   )
 }
 
+function patchItemInTemplate(templates: TemplateState[], id: string, itemTempId: string, patch: Partial<ItemState>): TemplateState[] {
+  return templates.map((t) =>
+    t.id === id
+      ? { ...t, items: t.items.map((i) => (i.tempId === itemTempId ? { ...i, ...patch } : i)) }
+      : t
+  )
+}
+
 function removeTemplateFromList(templates: TemplateState[], id: string): TemplateState[] {
   return templates.filter((t) => t.id !== id)
 }
@@ -80,6 +129,9 @@ function buildItemsPayload(items: ItemState[]): PlatformTemplateItemInput[] {
   return items.map((item, i) => ({
     catalog_item_id: item.catalog_item_id,
     par_level:       item.par_level,
+    par_mode:        item.par_mode,
+    smart_group:     item.smart_group,
+    base_qty:        item.base_qty,
     preferred_brand: item.preferred_brand,
     sort_order:      i,
   }))
@@ -91,11 +143,87 @@ function saveButtonLabel(saving: boolean, saved: boolean) {
   return 'Save Items'
 }
 
+function TemplateItemParFields({
+  item,
+  onChange,
+}: Readonly<{
+  item:     ItemState
+  onChange: (patch: Partial<ItemState>) => void
+}>) {
+  const preview = item.smart_group
+    ? resolvePar(
+        { par_mode: 'smart', smart_group: item.smart_group, base_qty: item.base_qty, par_level: item.par_level, auto_adjust: false },
+        PREVIEW_PROPERTY,
+        null
+      ).par
+    : null
+
+  return (
+    <div className="flex flex-col gap-1 pl-0">
+      <div className="flex items-center gap-1.5">
+        <select
+          value={item.par_mode}
+          onChange={(e) => {
+            const par_mode = e.target.value as ParMode
+            onChange(par_mode === 'smart' ? { par_mode, smart_group: item.smart_group ?? 'guest_consumable' } : { par_mode, smart_group: null })
+          }}
+          className="input text-sm"
+          aria-label="Par mode"
+        >
+          <option value="static">Static</option>
+          <option value="smart">Smart</option>
+        </select>
+        {item.par_mode === 'smart' && (
+          <select
+            value={item.smart_group ?? ''}
+            onChange={(e) => onChange({ smart_group: e.target.value as ParSmartGroup })}
+            className="input text-sm"
+            aria-label="Smart group"
+          >
+            {Object.entries(PAR_SMART_GROUPS).map(([key, spec]) => (
+              <option key={key} value={key}>{spec.label}</option>
+            ))}
+          </select>
+        )}
+        {item.par_mode === 'smart' && (
+          <input
+            type="number"
+            min={0}
+            step="any"
+            value={item.base_qty}
+            onChange={(e) => onChange({ base_qty: Number.isFinite(e.target.valueAsNumber) ? e.target.valueAsNumber : 1 })}
+            className="input text-sm w-20"
+            aria-label="Base quantity"
+            placeholder={item.smart_group ? MULTIPLIER_UNIT_LABEL[item.smart_group] : undefined}
+          />
+        )}
+        <input
+          type="number"
+          min={0}
+          step="any"
+          value={item.par_mode === 'static' ? item.par_level : ''}
+          disabled={item.par_mode === 'smart'}
+          onChange={(e) => onChange({ par_level: Number.isFinite(e.target.valueAsNumber) ? e.target.valueAsNumber : 1 })}
+          placeholder={item.par_mode === 'smart' ? 'Resolved per property on apply.' : undefined}
+          className="input text-sm w-40 disabled:opacity-50"
+          aria-label="Par level"
+          title="Par level"
+        />
+      </div>
+      {item.par_mode === 'smart' && preview !== null && (
+        <p className="text-xs text-muted-themed">
+          Preview (2 ba / 3 br / 6 guests): <strong>{preview}</strong>
+        </p>
+      )}
+    </div>
+  )
+}
+
 export function PlatformInventoryTemplateBuilder({
   initialTemplates,
   catalogItems,
 }: Readonly<{
-  initialTemplates: Array<{ id: string; name: string; description: string; items: Array<{ id: string; catalog_item_id: string; par_level: number; preferred_brand: string }> }>
+  initialTemplates: Array<{ id: string; name: string; description: string; items: Array<{ id: string; catalog_item_id: string; par_level: number; par_mode: ParMode; smart_group: ParSmartGroup | null; base_qty: number; preferred_brand: string }> }>
   catalogItems: CatalogItem[]
 }>) {
   const [templates, setTemplates] = useState<TemplateState[]>(() =>
@@ -140,7 +268,9 @@ export function PlatformInventoryTemplateBuilder({
 
   const addItem = (id: string, catalogItemId: string) => {
     if (!catalogItemId) return
-    setTemplates((prev) => addItemToTemplate(prev, id, catalogItemId))
+    const catalogItem = catalogById.get(catalogItemId)
+    if (!catalogItem) return
+    setTemplates((prev) => addItemToTemplate(prev, id, catalogItem))
   }
 
   const removeItem = (id: string, itemTempId: string) => {
@@ -149,6 +279,10 @@ export function PlatformInventoryTemplateBuilder({
 
   const updateItem = (id: string, itemTempId: string, field: keyof ItemState, value: unknown) => {
     setTemplates((prev) => updateItemInTemplate(prev, id, itemTempId, field, value))
+  }
+
+  const updateItemPatch = (id: string, itemTempId: string, patch: Partial<ItemState>) => {
+    setTemplates((prev) => patchItemInTemplate(prev, id, itemTempId, patch))
   }
 
   const handleSaveTemplate = (template: TemplateState, fieldsChanged: boolean) => {
@@ -202,6 +336,7 @@ export function PlatformInventoryTemplateBuilder({
           onAddItem={(catalogItemId) => addItem(template.id, catalogItemId)}
           onRemoveItem={(itemTempId) => removeItem(template.id, itemTempId)}
           onUpdateItem={(itemTempId, field, value) => updateItem(template.id, itemTempId, field, value)}
+          onUpdateItemPatch={(itemTempId, patch) => updateItemPatch(template.id, itemTempId, patch)}
           onSave={(fieldsChanged) => handleSaveTemplate(template, fieldsChanged)}
           onDelete={() => handleDeleteTemplate(template.id)}
           setError={setError}
@@ -241,6 +376,7 @@ function TemplateCard({
   onAddItem,
   onRemoveItem,
   onUpdateItem,
+  onUpdateItemPatch,
   onSave,
   onDelete,
   setError,
@@ -256,6 +392,7 @@ function TemplateCard({
   onAddItem: (catalogItemId: string) => void
   onRemoveItem: (itemTempId: string) => void
   onUpdateItem: (itemTempId: string, field: keyof ItemState, value: unknown) => void
+  onUpdateItemPatch: (itemTempId: string, patch: Partial<ItemState>) => void
   onSave: (fieldsChanged: boolean) => void
   onDelete: () => void
   setError: (msg: string | null) => void
@@ -304,33 +441,29 @@ function TemplateCard({
             {template.items.map((item) => {
               const catalog = catalogById.get(item.catalog_item_id)
               return (
-                <div key={item.tempId} className="flex items-center gap-2 px-3 py-2 group hover:bg-raised-themed">
-                  <span className="flex-1 text-sm text-primary-themed truncate">
-                    {catalog?.name ?? 'Unknown item'}
-                    <span className="text-xs text-muted-themed ml-1">
-                      ({catalog ? INVENTORY_CATEGORY_LABELS[catalog.category] : '—'})
+                <div key={item.tempId} className="flex flex-col gap-1.5 px-3 py-2 group hover:bg-raised-themed">
+                  <div className="flex items-center gap-2">
+                    <span className="flex-1 text-sm text-primary-themed truncate">
+                      {catalog?.name ?? 'Unknown item'}
+                      <span className="text-xs text-muted-themed ml-1">
+                        ({catalog ? INVENTORY_CATEGORY_LABELS[catalog.category] : '—'})
+                      </span>
                     </span>
-                  </span>
-                  <input
-                    type="number"
-                    min={0}
-                    step="any"
-                    value={item.par_level}
-                    onChange={(e) => onUpdateItem(item.tempId, 'par_level', Number.isFinite(e.target.valueAsNumber) ? e.target.valueAsNumber : 1)}
-                    className="input text-sm w-20"
-                    aria-label="Par level"
-                    title="Par level"
+                    <input
+                      value={item.preferred_brand}
+                      onChange={(e) => onUpdateItem(item.tempId, 'preferred_brand', e.target.value)}
+                      placeholder="Preferred brand"
+                      className="input text-sm w-36"
+                      aria-label="Preferred brand"
+                    />
+                    <Button variant="ghost" onClick={() => onRemoveItem(item.tempId)} className="p-1 text-muted-themed hover:text-[var(--accent-red)]">
+                      <Trash2 className="w-3.5 h-3.5" />
+                    </Button>
+                  </div>
+                  <TemplateItemParFields
+                    item={item}
+                    onChange={(patch) => onUpdateItemPatch(item.tempId, patch)}
                   />
-                  <input
-                    value={item.preferred_brand}
-                    onChange={(e) => onUpdateItem(item.tempId, 'preferred_brand', e.target.value)}
-                    placeholder="Preferred brand"
-                    className="input text-sm w-36"
-                    aria-label="Preferred brand"
-                  />
-                  <Button variant="ghost" onClick={() => onRemoveItem(item.tempId)} className="p-1 text-muted-themed hover:text-[var(--accent-red)]">
-                    <Trash2 className="w-3.5 h-3.5" />
-                  </Button>
                 </div>
               )
             })}
