@@ -6,6 +6,7 @@ import { renderSmsBody } from '@/lib/sms/templates'
 import { claimDailySmsSlot, releaseDailySmsSlot } from '@/lib/sms/optin-claim'
 import { pickNearestSponsor } from '@/lib/sms/pick-nearest-sponsor'
 import { unwrapJoin } from '@/lib/utils/supabase-joins'
+import { getFeaturedAmenityLine } from '@/lib/guidebook/featured-amenities'
 import type { GuidebookSponsor } from '@/types/database'
 
 const FALLBACK_TIMEZONE = 'America/New_York'
@@ -51,12 +52,9 @@ export const guidebookSmsMorningCron = inngest.createFunction(
 
       // Filter to guests currently in their stay
       return (data ?? [])
-        .filter((o) => {
-          const booking = unwrapJoin(o.bookings)
-          if (!booking) return false
-          return booking.checkin_date <= todayDate && booking.checkout_date >= todayDate
-        })
-        .map((o) => ({ id: o.id, org_id: o.org_id, property_id: o.property_id }))
+        .map((o) => ({ ...o, booking: unwrapJoin(o.bookings) }))
+        .filter((o) => o.booking && o.booking.checkin_date <= todayDate && o.booking.checkout_date >= todayDate)
+        .map((o) => ({ id: o.id, org_id: o.org_id, property_id: o.property_id, checkin_date: o.booking!.checkin_date }))
     })
 
     if (optins.length === 0) return { dispatched: 0 }
@@ -66,10 +64,11 @@ export const guidebookSmsMorningCron = inngest.createFunction(
       optins.map((o) => ({
         name: 'guidebook/sms_morning.requested' as const,
         data: {
-          optin_id:    o.id,
-          org_id:      o.org_id,
-          property_id: o.property_id,
-          today_date:  todayDate,
+          optin_id:     o.id,
+          org_id:       o.org_id,
+          property_id:  o.property_id,
+          today_date:   todayDate,
+          checkin_date: o.checkin_date,
         },
       }))
     )
@@ -95,7 +94,10 @@ export const guidebookSmsMorningSend = inngest.createFunction(
   },
   { event: 'guidebook/sms_morning.requested' },
   async ({ event, step }) => {
-    const { optin_id: optinId, org_id: orgId, property_id: propertyId, today_date: todayDate } = event.data
+    const {
+      optin_id: optinId, org_id: orgId, property_id: propertyId,
+      today_date: todayDate, checkin_date: checkinDate,
+    } = event.data
 
     const sent = await step.run('send-morning-sms', async () => {
       const supabase = createServiceClient({ system: 'inngest:guidebook-sms-morning-cron' })
@@ -111,10 +113,19 @@ export const guidebookSmsMorningSend = inngest.createFunction(
 
       const { data: property } = await supabase
         .from('properties')
-        .select('id, name, lat, lng')
+        .select('id, name, lat, lng, amenities')
         .eq('id', propertyId)
         .maybeSingle()
       if (!property?.lat || !property?.lng) return false
+
+      // Featured-amenity content is independent of sponsors — a property
+      // with no active sponsors can still get a message if it has featured
+      // amenities. See lib/guidebook/featured-amenities.ts.
+      const amenityLine = await getFeaturedAmenityLine(supabase, {
+        orgId, propertyId,
+        propertyAmenities: property.amenities ?? null,
+        checkinDate, todayDate,
+      })
 
       const weather = await getWeatherForLocation(property.lat, property.lng).catch(() => null)
       if (!weather) return false
@@ -173,17 +184,21 @@ export const guidebookSmsMorningSend = inngest.createFunction(
       const pool         = morningBrews.length > 0 ? morningBrews : orgSponsors.filter((s) => s.slot_type === 'general')
       const picked       = pickNearestSponsor(pool, property.lat, property.lng)
 
-      if (!picked) return false
-      const { sponsor, distanceMiles: sponsorDistanceMi } = picked
+      const sponsorLine = picked
+        ? buildSponsorLine(
+            picked.sponsor.business_name,
+            picked.sponsor.offer_type,
+            picked.sponsor.offer_value,
+            picked.sponsor.offer_item,
+            picked.sponsor.custom_offer_text,
+            picked.distanceMiles
+          )
+        : null
 
-      const offerLine = buildSponsorLine(
-        sponsor.business_name,
-        sponsor.offer_type,
-        sponsor.offer_value,
-        sponsor.offer_item,
-        sponsor.custom_offer_text,
-        sponsorDistanceMi
-      )
+      // A property with a featured amenity but no active sponsor still has
+      // something worth texting about — only bail when there's neither.
+      const offerLine = [amenityLine, sponsorLine].filter(Boolean).join(' ') || null
+      if (!offerLine) return false
 
       // Claim the slot atomically before sending — see rain-alert branch above.
       const claimed = await claimDailySmsSlot(supabase, optinId, 'last_morning_sms_date', todayDate)
@@ -192,7 +207,7 @@ export const guidebookSmsMorningSend = inngest.createFunction(
       const morningBody = await renderSmsBody(orgId, 'morning_nudge', {
         property_name: property.name,
         temperature:   Math.round(weather.temperature),
-        offer_line:    offerLine ?? '',
+        offer_line:    offerLine,
       })
       const res = await sendSMS(optin.phone_e164, morningBody, { category: 'nudge', orgId })
 

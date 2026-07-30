@@ -32,20 +32,24 @@ import {
 type Resp = { data?: unknown; error?: unknown }
 
 function makeSupabase(queue: Record<string, Resp[]>) {
+  const calls: { table: string; method: string; args: unknown[] }[] = []
   const from = vi.fn((table: string) => {
     const q = queue[table]
     const result: Resp = q?.length ? q.shift()! : { data: null, error: null }
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const chain: any = {}
     for (const m of ['select', 'insert', 'update', 'upsert', 'eq', 'order', 'limit']) {
-      chain[m] = vi.fn(() => chain)
+      chain[m] = vi.fn((...args: unknown[]) => {
+        calls.push({ table, method: m, args })
+        return chain
+      })
     }
     chain.single      = vi.fn(() => Promise.resolve(result))
     chain.maybeSingle = vi.fn(() => Promise.resolve(result))
     chain.then        = (resolve: (v: unknown) => unknown) => Promise.resolve(result).then(resolve)
     return chain
   })
-  return { from }
+  return { from, calls }
 }
 
 const membership = {
@@ -192,12 +196,58 @@ describe('actions/guidebook', () => {
         propertyId: 'prop_1', slug: 'lakeview-cabin', checkInInstructions: null,
         checkOutInstructions: null, wifiNetwork: null, wifiPassword: null,
         houseRules: null, isPublished: true, heroPhotoStoragePath: null,
+        featuredAmenities: [], featuredAmenityNotes: null,
       })
 
       expect(result).toEqual({})
       expect(logAuditEvent).toHaveBeenCalledWith(expect.objectContaining({
         orgId: 'org_1', action: 'guidebook.configuration.updated', targetId: 'prop_1',
       }))
+    })
+
+    it('persists featured amenities and notes on the config row', async () => {
+      const supabase = makeSupabase({
+        properties:                 [{ data: { id: 'prop_1' } }],
+        guidebook_property_configs: [{ error: null }],
+      })
+      vi.mocked(requireOrgRole).mockResolvedValue({
+        supabase, membership, user: { id: 'user_1' },
+      } as never)
+      vi.mocked(createServiceClient).mockReturnValue(supabase as never)
+
+      const result = await upsertPropertyGuidebookConfig({
+        propertyId: 'prop_1', slug: 'lakeview-cabin', checkInInstructions: null,
+        checkOutInstructions: null, wifiNetwork: null, wifiPassword: null,
+        houseRules: null, isPublished: true, heroPhotoStoragePath: null,
+        featuredAmenities: ['Hot Tub', 'Fire Pit'], featuredAmenityNotes: 'Takes 45 min to heat.; Logs on the porch.',
+      })
+
+      expect(result).toEqual({})
+      const upsertCall = supabase.calls.find((c) => c.table === 'guidebook_property_configs' && c.method === 'upsert')
+      expect(upsertCall?.args[0]).toMatchObject({
+        featured_amenities:     ['Hot Tub', 'Fire Pit'],
+        featured_amenity_notes: 'Takes 45 min to heat.; Logs on the porch.',
+      })
+    })
+
+    it('rejects more than the maximum number of featured amenities', async () => {
+      const supabase = makeSupabase({
+        properties: [{ data: { id: 'prop_1' } }],
+      })
+      vi.mocked(requireOrgRole).mockResolvedValue({
+        supabase, membership, user: { id: 'user_1' },
+      } as never)
+      vi.mocked(createServiceClient).mockReturnValue(supabase as never)
+
+      const result = await upsertPropertyGuidebookConfig({
+        propertyId: 'prop_1', slug: 'lakeview-cabin', checkInInstructions: null,
+        checkOutInstructions: null, wifiNetwork: null, wifiPassword: null,
+        houseRules: null, isPublished: true, heroPhotoStoragePath: null,
+        featuredAmenities: ['Hot Tub', 'Fire Pit', 'Kayaks', 'Pool'], featuredAmenityNotes: null,
+      })
+
+      expect(result).toEqual({ error: 'Choose up to 3 featured amenities.' })
+      expect(supabase.calls.some((c) => c.table === 'guidebook_property_configs')).toBe(false)
     })
 
     it('rejects a property id that does not belong to the caller org (IDOR check)', async () => {
@@ -211,6 +261,7 @@ describe('actions/guidebook', () => {
         propertyId: 'other-orgs-property', slug: 'lakeview-cabin', checkInInstructions: null,
         checkOutInstructions: null, wifiNetwork: null, wifiPassword: null,
         houseRules: null, isPublished: true, heroPhotoStoragePath: null,
+        featuredAmenities: [], featuredAmenityNotes: null,
       })
 
       expect(result).toEqual({ error: 'Property not found.' })
@@ -224,6 +275,7 @@ describe('actions/guidebook', () => {
         propertyId: 'prop_1', slug: 'lakeview-cabin', checkInInstructions: null,
         checkOutInstructions: null, wifiNetwork: null, wifiPassword: null,
         houseRules: null, isPublished: true, heroPhotoStoragePath: null,
+        featuredAmenities: [], featuredAmenityNotes: null,
       })
 
       expect(result).toEqual({ error: 'Operation failed. Please try again.' })

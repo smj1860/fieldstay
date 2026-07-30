@@ -6,6 +6,7 @@ import { renderSmsBody } from '@/lib/sms/templates'
 import { claimDailySmsSlot, releaseDailySmsSlot } from '@/lib/sms/optin-claim'
 import { pickNearestSponsor } from '@/lib/sms/pick-nearest-sponsor'
 import { unwrapJoin } from '@/lib/utils/supabase-joins'
+import { getFeaturedAmenityLine } from '@/lib/guidebook/featured-amenities'
 import type { GuidebookSponsor } from '@/types/database'
 
 const FALLBACK_TIMEZONE = 'America/New_York'
@@ -43,12 +44,9 @@ export const guidebookSmsEveningCron = inngest.createFunction(
 
       // Filter to guests currently in their stay; exclude checkout day (no dinner nudge)
       return (data ?? [])
-        .filter((o) => {
-          const booking = unwrapJoin(o.bookings)
-          if (!booking) return false
-          return booking.checkin_date <= todayDate && booking.checkout_date > todayDate
-        })
-        .map((o) => ({ id: o.id, org_id: o.org_id, property_id: o.property_id }))
+        .map((o) => ({ ...o, booking: unwrapJoin(o.bookings) }))
+        .filter((o) => o.booking && o.booking.checkin_date <= todayDate && o.booking.checkout_date > todayDate)
+        .map((o) => ({ id: o.id, org_id: o.org_id, property_id: o.property_id, checkin_date: o.booking!.checkin_date }))
     })
 
     if (optins.length === 0) return { dispatched: 0 }
@@ -58,10 +56,11 @@ export const guidebookSmsEveningCron = inngest.createFunction(
       optins.map((o) => ({
         name: 'guidebook/sms_evening.requested' as const,
         data: {
-          optin_id:    o.id,
-          org_id:      o.org_id,
-          property_id: o.property_id,
-          today_date:  todayDate,
+          optin_id:     o.id,
+          org_id:       o.org_id,
+          property_id:  o.property_id,
+          today_date:   todayDate,
+          checkin_date: o.checkin_date,
         },
       }))
     )
@@ -84,7 +83,10 @@ export const guidebookSmsEveningSend = inngest.createFunction(
   },
   { event: 'guidebook/sms_evening.requested' },
   async ({ event, step }) => {
-    const { optin_id: optinId, org_id: orgId, property_id: propertyId, today_date: todayDate } = event.data
+    const {
+      optin_id: optinId, org_id: orgId, property_id: propertyId,
+      today_date: todayDate, checkin_date: checkinDate,
+    } = event.data
 
     const sent = await step.run('send-evening-sms', async () => {
       const supabase = createServiceClient({ system: 'inngest:guidebook-sms-evening-cron' })
@@ -100,13 +102,24 @@ export const guidebookSmsEveningSend = inngest.createFunction(
 
       const { data: property } = await supabase
         .from('properties')
-        .select('id, name, lat, lng')
+        .select('id, name, lat, lng, amenities')
         .eq('id', propertyId)
         .maybeSingle()
       if (!property?.lat || !property?.lng) return false
 
       const weather = await getWeatherForLocation(property.lat, property.lng).catch(() => null)
       const isRainy = Boolean(weather?.isRainy || weather?.isSnowy)
+
+      // Featured-amenity content is independent of sponsors — see
+      // guidebook-sms-morning-cron.ts for the full rationale. Offset the
+      // rotation by 1 from the morning message so a guest getting both
+      // doesn't see the same amenity twice in one day.
+      const amenityLine = await getFeaturedAmenityLine(supabase, {
+        orgId, propertyId,
+        propertyAmenities: property.amenities ?? null,
+        checkinDate, todayDate,
+        rotationOffset: 1,
+      })
 
       const { data: sponsorsData } = await supabase
         .from('guidebook_sponsors')
@@ -124,17 +137,22 @@ export const guidebookSmsEveningSend = inngest.createFunction(
       const pool         = primaryPool.length > 0 ? primaryPool : generalPool
       const picked       = pickNearestSponsor(pool, property.lat, property.lng)
 
-      if (!picked) return false
-      const { sponsor, distanceMiles: sponsorDistanceMi } = picked
+      const sponsorLine = picked
+        ? buildSponsorLine(
+            picked.sponsor.business_name,
+            picked.sponsor.offer_type,
+            picked.sponsor.offer_value,
+            picked.sponsor.offer_item,
+            picked.sponsor.custom_offer_text,
+            picked.distanceMiles
+          )
+        : null
 
-      const offerLine = buildSponsorLine(
-        sponsor.business_name,
-        sponsor.offer_type,
-        sponsor.offer_value,
-        sponsor.offer_item,
-        sponsor.custom_offer_text,
-        sponsorDistanceMi
-      )
+      // A property with a featured amenity but no active sponsor still has
+      // something worth texting about — only bail when there's neither.
+      const offerLine = [amenityLine, sponsorLine].filter(Boolean).join(' ') || null
+      if (!offerLine) return false
+
       // Claim the slot atomically before sending — a retry of this step
       // after a successful send now finds the slot already claimed and
       // skips re-sending, instead of double-texting the guest.
@@ -144,7 +162,7 @@ export const guidebookSmsEveningSend = inngest.createFunction(
       const templateKey = isRainy && primaryPool.length > 0 ? 'rain_alert' as const : 'evening_nudge' as const
       const eveningBody = await renderSmsBody(orgId, templateKey, {
         property_name: property.name,
-        offer_line:    offerLine ?? '',
+        offer_line:    offerLine,
       })
       const res = await sendSMS(optin.phone_e164, eveningBody, { category: 'nudge', orgId })
 

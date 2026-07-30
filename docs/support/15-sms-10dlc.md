@@ -32,10 +32,10 @@ No messages are sent until step 4 is completed. Consent records are stored with 
 Sent when the guest's stay begins. Contains their door code, WiFi password, and a link to their personalized guidebook.
 
 **Morning message (once per day, during stay):**
-A contextual recommendation based on property amenities and weather — a coffee shop suggestion, a hot tub timing reminder, or a weather alert. Only sent if you have active sponsors configured.
+A weather-driven sponsor recommendation (coffee shop, or a rainy-day suggestion when it's raining), a featured-amenity note (e.g. a hot tub timing reminder — the PM's own written note if they wrote one, otherwise a generic mention of the amenity), or both — see **How the Guest Guidebook Works** for how PMs configure featured amenities. Sent if either a sponsor or a featured amenity is configured; not sent if neither is.
 
 **Evening message (once per day, during stay, not on checkout day):**
-A dinner or activity recommendation. Same sponsor-driven logic as the morning message.
+A dinner or activity recommendation, a featured-amenity note, or both — same logic as the morning message, rotated to a different featured amenity so it doesn't repeat.
 
 No messages are sent after checkout.
 

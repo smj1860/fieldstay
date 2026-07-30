@@ -31,7 +31,7 @@ export default async function GuidebookPage() {
 
     supabase
       .from('properties')
-      .select('id, name, address, lat, lng')
+      .select('id, name, address, lat, lng, amenities')
       .eq('org_id', membership.org_id)
       .eq('is_active', true)
       .order('name'),

@@ -81,10 +81,12 @@ export function GuidebookFeatureAnnouncementEmail({
               It knows your property, too.
             </Heading>
             <Text style={styles.body1}>
-              When a guest checks in, FieldStay reads their property — not just the
-              time and weather, but what&apos;s actually there. A hot tub. A fire pit.
-              Kayaks on the dock. Then it sends the right message at exactly the
-              right moment.
+              Pick up to 3 amenities to feature per property — a hot tub, a fire
+              pit, kayaks on the dock — and write a quick note for each. FieldStay
+              rotates them into the morning and evening messages alongside live
+              weather and your sponsor recommendations, so guests hear about the
+              right thing at the right moment without you lifting a finger after
+              the first setup.
             </Text>
 
             {/* Example SMS bubbles */}
@@ -111,11 +113,12 @@ export function GuidebookFeatureAnnouncementEmail({
             </Section>
 
             <Text style={styles.body1}>
-              These aren&apos;t canned messages. They&apos;re generated from what
-              your property actually has — pulled from your OwnerRez listings
-              and updated every sync. A guest at a property with no fire pit
-              never sees a fire pit message. A guest at a lakefront cabin sees
-              kayak timing instead.
+              Write your own note for each featured amenity in Guidebook settings
+              and guests hear it in your words — the timing tip, the exact spot
+              the logs are stashed, whatever you&apos;d actually tell someone in
+              person. Don&apos;t write anything and FieldStay still sends a message
+              on your behalf, featuring whichever amenities synced in from your
+              PMS first, so there&apos;s never nothing to say.
             </Text>
 
             <Text style={styles.body1}>
