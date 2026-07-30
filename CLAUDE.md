@@ -754,10 +754,15 @@ is always authoritative over the snapshot file.
 
 ### Adding new schema
 
+Migration discipline: every schema change is a local .sql file in
+supabase/migrations/, applied via `supabase db push`. MCP apply_migration
+is for verification/introspection only — it records live history without
+a local file, which is exactly the drift closed on 2026-07-30
+(CLAUDE_MIGRATION_RECONCILE_1). Local files and live history were
+verified identical on that date (276/276).
+
 Write a new file in `supabase/migrations/` named `YYYYMMDDHHMMSS_description.sql`
-and apply it via:
-- Supabase CLI: `supabase db push`
-- Supabase MCP: `apply_migration` tool against project `vpmznjktllhmmbfnxuvk`
+and apply it via `supabase db push` against project `vpmznjktllhmmbfnxuvk`.
 
 Always update `types/database.ts` in the same commit as the migration.
 
