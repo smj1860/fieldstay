@@ -9,7 +9,15 @@ import { inviteAcceptRatelimit, checkLimit } from '@/lib/rate-limit'
 import { extractClientIp }     from '@/lib/integrations/webhook-verification'
 
 const AcceptSchema = z.object({
-  token:    z.string().uuid('Invite link is invalid or expired'),
+  // org_invites.token is `encode(gen_random_bytes(32), 'hex')` — a 64-char
+  // hex string, NOT a uuid. This was `.uuid()`, which rejected every real
+  // token, so the page rendered fine and every submit failed with the message
+  // below. Production had 0 org_invites rows, so it was never exercised.
+  //
+  // NOTE: crew_members.invite_token IS `gen_random_uuid()`, so the sibling
+  // check in app/crew-invite/[token]/actions.ts is correct as `.uuid()` —
+  // the two invite flows use genuinely different token shapes.
+  token:    z.string().regex(/^[0-9a-f]{64}$/, 'Invite link is invalid or expired'),
   fullName: z.string().min(1, 'Full name is required').max(200),
   password: z.string().min(8, 'Password must be at least 8 characters').max(72),
   confirm:  z.string(),

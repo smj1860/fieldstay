@@ -3,7 +3,7 @@
 import { revalidatePath } from 'next/cache'
 import { redirect } from 'next/navigation'
 import { cookies } from 'next/headers'
-import { requireOrgMember } from '@/lib/auth'
+import { requireOrgMember, requireOrgRole } from '@/lib/auth'
 import { createClient } from '@/lib/supabase/server'
 import { stripe, PLANS } from '@/lib/stripe/client'
 import { inngest } from '@/lib/inngest/client'
@@ -667,7 +667,12 @@ export async function openBillingPortal(): Promise<void> {
   let portalUrl: string | null = null
 
   try {
-    const { supabase, membership } = await requireOrgMember()
+    // Billing is admin/owner only. The Stripe portal lets the holder cancel or
+    // downgrade the subscription, replace the payment card, and read invoice
+    // history (which carries billing-address PII) — requireOrgMember() would
+    // hand all of that to a `viewer`. requireOrgRole always passes `owner`,
+    // matching is_org_member()'s semantics in the DB.
+    const { supabase, membership } = await requireOrgRole(['admin'])
 
     const { data: org } = await supabase
       .from('organizations')
@@ -1058,7 +1063,8 @@ export async function createCheckoutSession(
   interval: 'monthly' | 'annual'
 ): Promise<SettingsActionState> {
   try {
-    const { supabase, membership } = await requireOrgMember()
+    // Admin/owner only — starting a checkout commits the org to a charge.
+    const { supabase, membership } = await requireOrgRole(['admin'])
 
     const planDef = PLANS[planKey]
     if (!planDef) return { error: 'Invalid plan' }

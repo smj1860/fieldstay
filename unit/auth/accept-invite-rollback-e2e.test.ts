@@ -52,7 +52,9 @@ vi.mock('@/lib/audit', () => ({
 import { acceptTeamInvite } from '@/app/accept-invite/[token]/actions'
 import { createServiceClient, createClient, adminFetch } from '@/lib/supabase/server'
 
-const VALID_TOKEN = '11111111-1111-1111-1111-111111111111'
+// org_invites.token is `encode(gen_random_bytes(32), 'hex')` — 64 hex chars,
+// NOT a uuid. A uuid fixture here is what let the .uuid() validation bug ship.
+const VALID_TOKEN = 'a'.repeat(64)
 const EMAIL       = 'jamie@example.com'
 const NEW_USER_ID = 'new_user_1'
 
