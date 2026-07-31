@@ -9,11 +9,15 @@ vi.mock('@/lib/audit', () => ({
 vi.mock('@/lib/push/client', () => ({
   sendPushToCrewMember: vi.fn().mockResolvedValue(undefined),
 }))
+vi.mock('@/lib/observability/report-error', () => ({
+  reportError: vi.fn(),
+}))
 
 import { flaggedTurnoverToWO } from '@/lib/inngest/functions/flagged-turnover-wo'
 import { createServiceClient } from '@/lib/supabase/server'
 import { logAuditEvent } from '@/lib/audit'
 import { sendPushToCrewMember } from '@/lib/push/client'
+import { reportError } from '@/lib/observability/report-error'
 import { invokeHandler } from './test-helpers'
 
 // Queue-based mock: each `.from(table)` call consumes the next queued
@@ -35,6 +39,7 @@ function makeSupabase(queued: Record<string, { data?: unknown; error?: unknown }
     chain.select = (...a: unknown[]) => record('select', a)
     chain.eq     = (...a: unknown[]) => record('eq', a)
     chain.in     = (...a: unknown[]) => record('in', a)
+    chain.not    = (...a: unknown[]) => record('not', a)
     chain.insert = (...a: unknown[]) => record('insert', a)
 
     const resolveNext = () => {
@@ -49,7 +54,17 @@ function makeSupabase(queued: Record<string, { data?: unknown; error?: unknown }
     return chain
   })
 
-  return { from, calls }
+  // getPmMembers() resolves each member's email through the Admin API.
+  // Emails are irrelevant to what these tests assert, but a member whose
+  // email can't be resolved is dropped, so every id must resolve.
+  const auth = {
+    admin: {
+      getUserById: vi.fn((id: string) =>
+        Promise.resolve({ data: { user: { id, email: `${id}@example.com` } }, error: null })),
+    },
+  }
+
+  return { from, calls, auth }
 }
 
 function runAllStep() {
@@ -79,7 +94,7 @@ describe('flaggedTurnoverToWO', () => {
       ],
       properties: [{ data: { name: 'The Lakehouse' } }],
       organization_members: [
-        { data: [{ user_id: 'u1' }, { user_id: null }, { user_id: 'u2' }] },
+        { data: [{ org_id: 'org_1', user_id: 'u1', role: 'owner' }, { org_id: 'org_1', user_id: 'u2', role: 'manager' }] },
       ],
       push_subscriptions: [
         { data: [{ endpoint: 'https://push.example/u1', p256dh: 'p1', auth: 'a1' }] }, // u1 has a subscription
@@ -118,8 +133,7 @@ describe('flaggedTurnoverToWO', () => {
       }),
     )
 
-    // The null-user_id manager row is skipped entirely (no push_subscriptions
-    // lookup for it); u1 has a subscription and gets pushed, u2 does not.
+    // u1 has a subscription and gets pushed, u2 does not.
     expect(sendPushToCrewMember).toHaveBeenCalledTimes(1)
     expect(sendPushToCrewMember).toHaveBeenCalledWith(
       [{ endpoint: 'https://push.example/u1', p256dh: 'p1', auth: 'a1' }],
@@ -131,6 +145,57 @@ describe('flaggedTurnoverToWO', () => {
     )
 
     expect(result).toEqual({ work_order_id: 'wo_1', wo_number: 'WO-1001' })
+  })
+
+  it('only notifies invite-accepted PMs — the member lookup goes through getPmMembers', async () => {
+    const supabase = makeSupabase({
+      work_orders: [
+        { data: null },
+        { data: { id: 'wo_3', wo_number: 'WO-1003' } },
+      ],
+      properties: [{ data: { name: 'The Lakehouse' } }],
+      organization_members: [{ data: [] }],
+    })
+    ;(createServiceClient as ReturnType<typeof vi.fn>).mockReturnValue(supabase)
+
+    await invokeHandler(flaggedTurnoverToWO, { event: FLAG_EVENT, step: runAllStep() })
+
+    // Regression guard: this step used to query organization_members inline
+    // without the invite_accepted_at filter, so members with a pending
+    // invite were treated as notifiable PMs.
+    const memberCalls = supabase.calls.filter((c) => c.table === 'organization_members')
+    expect(memberCalls.some((c) => c.method === 'not' && c.args[0] === 'invite_accepted_at')).toBe(true)
+    expect(memberCalls.some((c) => c.method === 'in' && c.args[0] === 'role')).toBe(true)
+  })
+
+  it('logs and reports a failed push instead of swallowing it, and still completes the run', async () => {
+    const supabase = makeSupabase({
+      work_orders: [
+        { data: null },
+        { data: { id: 'wo_4', wo_number: 'WO-1004' } },
+      ],
+      properties: [{ data: { name: 'The Lakehouse' } }],
+      organization_members: [{ data: [{ org_id: 'org_1', user_id: 'u1', role: 'admin' }] }],
+      push_subscriptions: [
+        { data: [{ endpoint: 'https://push.example/u1', p256dh: 'p1', auth: 'a1' }] },
+      ],
+    })
+    ;(createServiceClient as ReturnType<typeof vi.fn>).mockReturnValue(supabase)
+    ;(sendPushToCrewMember as ReturnType<typeof vi.fn>).mockRejectedValueOnce(new Error('push endpoint gone'))
+    const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {})
+
+    const result = await invokeHandler(flaggedTurnoverToWO, { event: FLAG_EVENT, step: runAllStep() })
+
+    expect(consoleError).toHaveBeenCalledWith(
+      '[flagged-turnover-wo] push notification failed',
+      expect.objectContaining({ orgId: 'org_1', error: 'push endpoint gone' }),
+    )
+    expect(reportError).toHaveBeenCalledWith(
+      expect.any(Error),
+      expect.objectContaining({ site: 'inngest.flagged-turnover-wo.notify-manager' }),
+    )
+    expect(result).toEqual({ work_order_id: 'wo_4', wo_number: 'WO-1004' })
+    consoleError.mockRestore()
   })
 
   it('is idempotent: a duplicate flag event for the same turnover does not create a second WO', async () => {

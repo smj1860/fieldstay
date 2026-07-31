@@ -1,6 +1,6 @@
 import { inngest }              from '@/lib/inngest/client'
 import { createServiceClient }  from '@/lib/supabase/server'
-import { createPmNotification } from '@/lib/inngest/helpers'
+import { fetchAllRows }         from '@/lib/inngest/paginate'
 
 /**
  * SCHEDULED: 12pm UTC daily (7am CT) — ahead of the 8am CT cron batch
@@ -41,19 +41,25 @@ export const notificationDigest = inngest.createFunction(
       }
     })
 
+    // Both scans are paginated: unbounded, they were capped at PostgREST's
+    // 1000-row limit with no error, so once platform-wide 24h volume crossed
+    // that line every org sorted late simply received no digest at all.
     const woCreatedByOrg = await step.run('count-work-orders-created', async () => {
       const supabase = createServiceClient({ system: 'inngest:notification-digest' })
-      const { data, error } = await supabase
-        .from('work_orders')
-        .select('org_id, vendor_id, status')
-        .gte('created_at', since)
-
-      if (error) throw new Error(`Failed to count work orders created: ${error.message}`)
+      const rows = await fetchAllRows<{ org_id: string; vendor_id: string | null; status: string }>(
+        (from, to) => supabase
+          .from('work_orders')
+          .select('org_id, vendor_id, status')
+          .gte('created_at', since)
+          .order('id', { ascending: true })
+          .range(from, to),
+        { label: 'work_orders(digest)' }
+      )
 
       // Exclude WOs that cron-daily-wrapup's unassigned-WO section will name
       // individually this evening — see the doc comment above.
       const counts = new Map<string, number>()
-      for (const row of data ?? []) {
+      for (const row of rows) {
         const stillUnassigned = row.vendor_id === null && ['pending', 'quote_requested'].includes(row.status)
         if (stillUnassigned) continue
         counts.set(row.org_id, (counts.get(row.org_id) ?? 0) + 1)
@@ -63,54 +69,106 @@ export const notificationDigest = inngest.createFunction(
 
     const repuguardByOrg = await step.run('count-repuguard-drafts', async () => {
       const supabase = createServiceClient({ system: 'inngest:notification-digest' })
-      const { data, error } = await supabase
-        .from('review_responses')
-        .select('org_id')
-        .gte('generated_at', since)
-
-      if (error) throw new Error(`Failed to count RepuGuard drafts: ${error.message}`)
+      const rows = await fetchAllRows<{ org_id: string }>(
+        (from, to) => supabase
+          .from('review_responses')
+          .select('org_id')
+          .gte('generated_at', since)
+          .order('id', { ascending: true })
+          .range(from, to),
+        { label: 'review_responses(digest)' }
+      )
 
       const counts = new Map<string, number>()
-      for (const row of data ?? []) {
+      for (const row of rows) {
         counts.set(row.org_id, (counts.get(row.org_id) ?? 0) + 1)
       }
       return Array.from(counts.entries())
     })
 
-    let created = 0
-
-    await step.run('write-work-order-digest', async () => {
+    // ONE insert for every org instead of 150 sequential createPmNotification
+    // round-trips inside a single step. `notifications.dedupe_key` has a
+    // partial UNIQUE index, so ignoreDuplicates gives exactly the same
+    // retry/duplicate-cron protection createPmNotification's 23505 swallow
+    // provided, in a single statement.
+    const created = await step.run('write-digest-notifications', async () => {
       const supabase = createServiceClient({ system: 'inngest:notification-digest' })
-      for (const [orgId, count] of woCreatedByOrg) {
-        if (count === 0) continue
-        await createPmNotification(supabase, {
-          orgId,
-          type:      'work_order_created_digest',
-          title:     `${count} work order${count !== 1 ? 's' : ''} created today`,
-          subtitle:  'Already assigned — tonight\'s wrap-up covers any still needing a vendor',
-          href:      '/maintenance',
-          severity:  'blue',
-          dedupeKey: `wo-created-digest-${orgId}-${today}`,
-        })
-        created++
-      }
-    })
 
-    await step.run('write-repuguard-digest', async () => {
-      const supabase = createServiceClient({ system: 'inngest:notification-digest' })
-      for (const [orgId, count] of repuguardByOrg) {
-        if (count === 0) continue
-        await createPmNotification(supabase, {
-          orgId,
-          type:      'repuguard_digest',
-          title:     `${count} review draft${count !== 1 ? 's' : ''} ready`,
-          subtitle:  'RepuGuard generated new drafts for your review',
-          href:      '/reviews',
-          severity:  'blue',
-          dedupeKey: `repuguard-digest-${orgId}-${today}`,
-        })
-        created++
+      const rows = [
+        ...woCreatedByOrg
+          .filter(([, count]) => count > 0)
+          .map(([orgId, count]) => ({
+            org_id:     orgId,
+            type:       'work_order_created_digest',
+            title:      `${count} work order${count !== 1 ? 's' : ''} created today`,
+            subtitle:   'Already assigned — tonight\'s wrap-up covers any still needing a vendor',
+            href:       '/maintenance',
+            severity:   'blue',
+            dedupe_key: `wo-created-digest-${orgId}-${today}`,
+          })),
+        ...repuguardByOrg
+          .filter(([, count]) => count > 0)
+          .map(([orgId, count]) => ({
+            org_id:     orgId,
+            type:       'repuguard_digest',
+            title:      `${count} review draft${count !== 1 ? 's' : ''} ready`,
+            subtitle:   'RepuGuard generated new drafts for your review',
+            href:       '/reviews',
+            severity:   'blue',
+            dedupe_key: `repuguard-digest-${orgId}-${today}`,
+          })),
+      ]
+
+      if (!rows.length) return 0
+
+      // notifications.dedupe_key is backed by a PARTIAL unique index
+      // (WHERE dedupe_key IS NOT NULL), which Postgres cannot use as an
+      // ON CONFLICT arbiter through PostgREST — so dedupe is a pre-filter
+      // (one query per chunk) plus a 23505 swallow for the narrow race where
+      // a concurrent rerun inserts between the read and the write.
+      //
+      // Chunked at CHUNK rows so neither the pre-check nor the insert can be
+      // truncated by PostgREST's 1000-row cap: a truncated pre-check would
+      // report keys as absent that already exist, and the resulting 23505
+      // would abort the whole batch insert, dropping every org's digest.
+      const CHUNK = 400
+      let inserted = 0
+
+      for (let offset = 0; offset < rows.length; offset += CHUNK) {
+        const chunk = rows.slice(offset, offset + CHUNK)
+
+        const { data: existing, error: existingError } = await supabase
+          .from('notifications')
+          .select('dedupe_key')
+          .in('dedupe_key', chunk.map((r) => r.dedupe_key))
+          .limit(CHUNK)
+
+        if (existingError) throw new Error(`Failed to check digest dedupe keys: ${existingError.message}`)
+
+        const seen = new Set((existing ?? []).map((r) => r.dedupe_key))
+        const toInsert = chunk.filter((r) => !seen.has(r.dedupe_key))
+        if (!toInsert.length) continue
+
+        const { data, error } = await supabase
+          .from('notifications')
+          .insert(toInsert)
+          .select('id')
+
+        // 23505 = the dedupe race above; 23503 = FK violation on org_id, an
+        // org deleted out of band between the count scan and this write.
+        // Neither is retriable and neither leaves anyone to notify.
+        if (error && error.code !== '23505' && error.code !== '23503') {
+          throw new Error(`Failed to write digest notifications: ${error.message}`)
+        }
+        if (error) {
+          console.warn('[notification-digest] digest insert chunk skipped', { code: error.code })
+          continue
+        }
+
+        inserted += data?.length ?? 0
       }
+
+      return inserted
     })
 
     logger.info(`Notification digest: ${created} notification(s) written`)

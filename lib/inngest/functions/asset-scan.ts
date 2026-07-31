@@ -22,7 +22,15 @@
 import { inngest } from '@/lib/inngest/client'
 import { createServiceClient } from '@/lib/supabase/server'
 import { scanDataPlateImage, isValidScanMediaType } from '@/lib/assets/scan-data-plate'
+import { toStorageObjectPath } from '@/lib/storage/object-path'
 
+// PRIVATE bucket — downloads here go through the service-role client, which
+// bypasses both the bucket's public flag and its RLS policies, so this works
+// unchanged either way. What did change is the shape of `storage_path`: the
+// route now sends a bare `${org_id}/…` object key, while an event queued
+// before that change (or replayed from history) can still carry a full
+// `/object/public/turnover-photos/<key>` URL. toStorageObjectPath() accepts
+// both, so nothing here depends on a public-URL marker that no longer exists.
 const PHOTO_BUCKET = 'turnover-photos'
 
 export const assetDataPlateScan = inngest.createFunction(
@@ -50,8 +58,11 @@ export const assetDataPlateScan = inngest.createFunction(
         throw new Error(`Unsupported media type: ${media_type}`)
       }
 
+      const objectPath = toStorageObjectPath(PHOTO_BUCKET, storage_path)
+      if (!objectPath) throw new Error('Photo path is not a turnover-photos object')
+
       const supabase = createServiceClient({ system: 'inngest:asset-scan' })
-      const { data: blob, error } = await supabase.storage.from(PHOTO_BUCKET).download(storage_path)
+      const { data: blob, error } = await supabase.storage.from(PHOTO_BUCKET).download(objectPath)
       if (error || !blob) throw new Error(`Could not download photo: ${error?.message ?? 'not found'}`)
 
       const arrayBuffer = await blob.arrayBuffer()

@@ -2,14 +2,16 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 
 // Controllable Redis mock for the nudge-budget tests below. hoisted() so the
 // vi.mock factory (which vitest hoists above imports) can close over them.
-const { mockIncr, mockExpire } = vi.hoisted(() => ({
+const { mockIncr, mockExpire, mockDecr } = vi.hoisted(() => ({
   mockIncr:   vi.fn(async () => 1),
   mockExpire: vi.fn(async () => undefined),
+  mockDecr:   vi.fn(async () => 0),
 }))
 vi.mock('@upstash/redis', () => ({
   Redis: class {
     incr   = mockIncr
     expire = mockExpire
+    decr   = mockDecr
   },
 }))
 vi.mock('@/lib/observability/report-error', () => ({
@@ -146,6 +148,7 @@ describe('sendSMS — daily nudge budget', () => {
     vi.restoreAllMocks()
     mockIncr.mockReset().mockResolvedValue(1)
     mockExpire.mockReset().mockResolvedValue(undefined)
+    mockDecr.mockReset().mockResolvedValue(0)
     process.env.SMS_ENABLED                 = 'true'
     process.env.TELNYX_API_KEY              = 'test-api-key'
     process.env.TELNYX_MESSAGING_PROFILE_ID = 'test-profile-id'
@@ -181,6 +184,64 @@ describe('sendSMS — daily nudge budget', () => {
     expect(result).toEqual({ sent: false, reason: 'daily nudge budget exhausted' })
     expect(fetchSpy).not.toHaveBeenCalled()
     expect(warnSpy).toHaveBeenCalled()
+  })
+
+  // L2 (2026-07-30 audit): the budget slot is claimed BEFORE the Telnyx call
+  // and sendSMS throws on a non-2xx, so an Inngest retry re-entered sendSMS
+  // and claimed a FRESH slot every attempt — one flaky send burned up to 3x
+  // the budget for a message no guest ever received.
+  it('releases the claimed budget slot when Telnyx rejects the send', async () => {
+    vi.spyOn(global, 'fetch').mockResolvedValue(
+      new Response('bad request', { status: 422 })
+    )
+    mockIncr.mockResolvedValue(10)
+
+    await expect(sendSMS('+15551234567', 'Good morning!', { category: 'nudge' }))
+      .rejects.toThrow(/Telnyx send failed/)
+
+    expect(mockIncr).toHaveBeenCalledTimes(1)
+    expect(mockDecr).toHaveBeenCalledTimes(1)
+  })
+
+  it('releases the claimed budget slot when the Telnyx call itself throws', async () => {
+    vi.spyOn(global, 'fetch').mockRejectedValue(new Error('socket hang up'))
+    mockIncr.mockResolvedValue(10)
+
+    await expect(sendSMS('+15551234567', 'Good morning!', { category: 'nudge' }))
+      .rejects.toThrow('socket hang up')
+
+    expect(mockDecr).toHaveBeenCalledTimes(1)
+  })
+
+  it('does NOT release a slot on a successful send', async () => {
+    vi.spyOn(global, 'fetch').mockResolvedValue(
+      new Response(JSON.stringify({ data: { id: 'msg_1' } }), { status: 200 })
+    )
+    mockIncr.mockResolvedValue(10)
+
+    await sendSMS('+15551234567', 'Good morning!', { category: 'nudge' })
+
+    expect(mockDecr).not.toHaveBeenCalled()
+  })
+
+  it('never claims — or releases — a slot for a transactional send that fails', async () => {
+    vi.spyOn(global, 'fetch').mockResolvedValue(new Response('nope', { status: 500 }))
+
+    await expect(sendSMS('+15551234567', 'Door code: 1234')).rejects.toThrow(/Telnyx send failed/)
+
+    expect(mockIncr).not.toHaveBeenCalled()
+    expect(mockDecr).not.toHaveBeenCalled()
+  })
+
+  it('bounds the Telnyx call with an AbortSignal timeout', async () => {
+    const fetchSpy = vi.spyOn(global, 'fetch').mockResolvedValue(
+      new Response(JSON.stringify({ data: { id: 'msg_1' } }), { status: 200 })
+    )
+
+    await sendSMS('+15551234567', 'Door code: 1234')
+
+    const init = fetchSpy.mock.calls[0][1] as RequestInit
+    expect(init.signal).toBeInstanceOf(AbortSignal)
   })
 
   it('fails CLOSED when Redis is unreachable — a cache outage must not disable the spend ceiling', async () => {

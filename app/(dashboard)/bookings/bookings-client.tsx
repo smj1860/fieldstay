@@ -452,8 +452,8 @@ function AddBookingModal({
 
         <form id="add-booking-form" action={action} className="space-y-4">
           <div>
-            <label className="label">Property <RequiredMark /></label>
-            <select name="property_id" required className="input" defaultValue={initialPropertyId ?? ''}>
+            <label htmlFor="bookings-client-property" className="label">Property <RequiredMark /></label>
+            <select id="bookings-client-property" name="property_id" required className="input" defaultValue={initialPropertyId ?? ''}>
               <option value="">Select property…</option>
               {properties.map((p) => (
                 <option key={p.id} value={p.id}>{p.name}</option>
@@ -463,8 +463,8 @@ function AddBookingModal({
 
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <div>
-              <label className="label">Check-in <RequiredMark /></label>
-              <Input
+              <label htmlFor="bookings-client-check-in" className="label">Check-in <RequiredMark /></label>
+              <Input id="bookings-client-check-in"
                 name="checkin_date"
                 type="date"
                 required
@@ -474,19 +474,19 @@ function AddBookingModal({
               />
             </div>
             <div>
-              <label className="label">Check-out <RequiredMark /></label>
-              <Input name="checkout_date" type="date" required min={checkinVal || todayStr} />
+              <label htmlFor="bookings-client-check-out" className="label">Check-out <RequiredMark /></label>
+              <Input id="bookings-client-check-out" name="checkout_date" type="date" required min={checkinVal || todayStr} />
             </div>
           </div>
 
           <div>
-            <label className="label">Guest Name</label>
-            <Input name="guest_name" type="text" placeholder="Optional" />
+            <label htmlFor="bookings-client-guest-name" className="label">Guest Name</label>
+            <Input id="bookings-client-guest-name" name="guest_name" type="text" placeholder="Optional" />
           </div>
 
           <div>
-            <label className="label">Source</label>
-            <select name="source" className="input" defaultValue="direct">
+            <label htmlFor="bookings-client-source" className="label">Source</label>
+            <select id="bookings-client-source" name="source" className="input" defaultValue="direct">
               <option value="direct">Direct Booking</option>
               <option value="airbnb">Airbnb</option>
               <option value="vrbo">VRBO</option>
@@ -497,8 +497,8 @@ function AddBookingModal({
           </div>
 
           <div>
-            <label className="label">Notes</label>
-            <textarea
+            <label htmlFor="bookings-client-notes" className="label">Notes</label>
+            <textarea id="bookings-client-notes"
               name="notes"
               rows={2}
               className="input resize-none"
@@ -516,6 +516,252 @@ function AddBookingModal({
 
 // ── Main component ────────────────────────────────────────────────────────────
 
+// ── Extracted sub-views & state ──────────────────────────────────────────────
+
+interface BookingFilters {
+  filterProperty: string
+  setFilterProperty: (v: string) => void
+  filterStatus: 'all' | 'active' | BookingStatus
+  setFilterStatus: (v: 'all' | 'active' | BookingStatus) => void
+  filterSource: 'all' | BookingSource
+  setFilterSource: (v: 'all' | BookingSource) => void
+  searchQuery: string
+  setSearchQuery: (v: string) => void
+  showPast: boolean
+  setShowPast: (v: boolean) => void
+  hasFilters: boolean
+  reset: () => void
+}
+
+/** All six filter inputs plus the derived `hasFilters` flag and a reset. */
+function useBookingFilters(): BookingFilters {
+  const [filterProperty, setFilterProperty] = useState('all')
+  const [filterStatus,   setFilterStatus]   = useState<'all' | 'active' | BookingStatus>('active')
+  const [filterSource,   setFilterSource]   = useState<'all' | BookingSource>('all')
+  const [searchQuery,    setSearchQuery]    = useState('')
+  const [showPast,       setShowPast]       = useState(false)
+
+  return {
+    filterProperty, setFilterProperty,
+    filterStatus,   setFilterStatus,
+    filterSource,   setFilterSource,
+    searchQuery,    setSearchQuery,
+    showPast,       setShowPast,
+    hasFilters:
+      filterProperty !== 'all' ||
+      filterStatus   !== 'all' ||
+      filterSource   !== 'all' ||
+      searchQuery.trim() !== '',
+    reset: () => {
+      setFilterProperty('all')
+      setFilterStatus('all')
+      setFilterSource('all')
+      setSearchQuery('')
+    },
+  }
+}
+
+/** Health pill for one connected PMS provider. */
+function ConnectionPill({ connection }: Readonly<{ connection: ConnectionRow }>) {
+  const isHealthy = connection.status === 'active'
+  const lastSynced = connection.last_used_at
+    ? ` — last synced ${new Date(connection.last_used_at).toLocaleString()}`
+    : ''
+  const syncError = (connection.metadata?.last_sync_error as string) ?? 'connection needs attention'
+  const title = isHealthy
+    ? `${connection.provider_id} connected${lastSynced}`
+    : `${connection.provider_id}: ${syncError}`
+
+  return (
+    <span
+      title={title}
+      className="flex items-center gap-1 text-xs px-2 py-0.5 rounded-full"
+      style={{
+        background: isHealthy ? 'var(--accent-green-dim)' : 'var(--accent-red-dim)',
+        color:      isHealthy ? 'var(--accent-green)'     : 'var(--accent-red)',
+      }}
+    >
+      <span className="w-1.5 h-1.5 rounded-full" style={{ background: 'currentColor' }} />
+      {connection.provider_id}
+    </span>
+  )
+}
+
+function BookingsEmptyState({
+  hasAnyBookings,
+  syncing,
+  onAdd,
+  onSync,
+}: Readonly<{ hasAnyBookings: boolean; syncing: boolean; onAdd: () => void; onSync: () => void }>) {
+  return (
+    <Card className="text-center py-16 max-w-md mx-auto mt-4">
+      <Calendar className="w-10 h-10 mx-auto mb-3" style={{ color: 'var(--text-muted)' }} />
+      <h3 className="font-semibold mb-1" style={{ color: 'var(--text-secondary)' }}>
+        {hasAnyBookings ? 'No bookings match your filters' : 'No bookings yet'}
+      </h3>
+      <p className="text-sm mb-4" style={{ color: 'var(--text-muted)' }}>
+        {hasAnyBookings
+          ? 'Try adjusting your filters or showing past bookings.'
+          : 'Add iCal feeds to your properties to automatically sync bookings, or add one manually.'}
+      </p>
+      {!hasAnyBookings && (
+        <div className="flex gap-2 justify-center">
+          <Button onClick={onAdd} className="text-sm">
+            <Plus className="w-3.5 h-3.5" /> Add Booking
+          </Button>
+          <Button onClick={onSync} disabled={syncing} variant="secondary" className="text-sm">
+            <RefreshCw className={cn('w-3.5 h-3.5', syncing && 'animate-spin')} />
+            {syncing ? 'Syncing…' : 'Sync iCal'}
+          </Button>
+        </div>
+      )}
+    </Card>
+  )
+}
+
+function BookingsList({
+  bookings,
+  hasAnyBookings,
+  syncing,
+  onAdd,
+  onSync,
+  onCancel,
+}: Readonly<{
+  bookings: BookingRow[]
+  hasAnyBookings: boolean
+  syncing: boolean
+  onAdd: () => void
+  onSync: () => void
+  onCancel: (id: string) => void
+}>) {
+  if (bookings.length === 0) {
+    return (
+      <BookingsEmptyState
+        hasAnyBookings={hasAnyBookings}
+        syncing={syncing}
+        onAdd={onAdd}
+        onSync={onSync}
+      />
+    )
+  }
+  return (
+    <div className="space-y-2">
+      {bookings.map((booking) => (
+        <BookingCard key={booking.id} booking={booking} onCancel={onCancel} />
+      ))}
+    </div>
+  )
+}
+
+function TodayStatsStrip({
+  checkinsToday,
+  checkoutsToday,
+}: Readonly<{ checkinsToday: BookingRow[]; checkoutsToday: BookingRow[] }>) {
+  if (checkinsToday.length === 0 && checkoutsToday.length === 0) return null
+
+  return (
+    <div
+      className="flex items-center gap-6 px-4 py-3 rounded-xl mb-5"
+      style={{ background: 'var(--accent-gold-dim)', border: '1px solid rgba(252,209,22,0.25)' }}
+    >
+      {checkinsToday.length > 0 && (
+        <div className="flex items-center gap-2">
+          <CheckCircle2 className="w-4 h-4" style={{ color: 'var(--accent-gold)' }} />
+          <span className="text-sm font-semibold" style={{ color: 'var(--accent-gold)' }}>
+            {checkinsToday.length} check-in{checkinsToday.length !== 1 ? 's' : ''} today
+          </span>
+          <span className="text-xs" style={{ color: 'var(--text-muted)' }}>
+            {checkinsToday.map((b) => unwrapJoin(b.properties)?.name ?? '—').join(', ')}
+          </span>
+        </div>
+      )}
+      {checkoutsToday.length > 0 && (
+        <div className="flex items-center gap-2">
+          <Clock className="w-4 h-4" style={{ color: 'var(--text-muted)' }} />
+          <span className="text-sm" style={{ color: 'var(--text-secondary)' }}>
+            {checkoutsToday.length} check-out{checkoutsToday.length !== 1 ? 's' : ''} today
+          </span>
+        </div>
+      )}
+    </div>
+  )
+}
+
+interface FilterCriteria {
+  todayStr:       string
+  showPast:       boolean
+  filterProperty: string
+  filterStatus:   'all' | 'active' | BookingStatus
+  filterSource:   'all' | BookingSource
+  searchQuery:    string
+}
+
+/** The list's filter predicate, named and pulled out of the component so the
+ *  rules are readable (and testable) on their own. */
+function matchesBookingFilters(b: BookingRow, c: FilterCriteria): boolean {
+  if (!c.showPast && b.checkout_date < c.todayStr) return false
+  if (c.filterProperty !== 'all' && b.property_id !== c.filterProperty) return false
+  if (c.filterStatus === 'active' && b.status === 'cancelled') return false
+  if (c.filterStatus !== 'all' && c.filterStatus !== 'active' && b.status !== c.filterStatus) return false
+  if (c.filterSource !== 'all' && b.source !== c.filterSource) return false
+  const q = c.searchQuery.trim().toLowerCase()
+  if (q && !(b.guest_name ?? '').toLowerCase().includes(q)) return false
+  return true
+}
+
+function BookingsHeader({
+  connections,
+  syncing,
+  onSync,
+  onAdd,
+}: Readonly<{ connections: ConnectionRow[]; syncing: boolean; onSync: () => void; onAdd: () => void }>) {
+  return (
+    <div className="page-header flex flex-wrap items-start justify-between gap-3">
+      <div className="min-w-0 flex-1">
+        <div className="flex items-center gap-2.5">
+          <h1 className="page-title">Bookings</h1>
+          {connections.length > 0 && (
+            <div className="flex items-center gap-1.5">
+              {connections.map((c) => <ConnectionPill key={c.provider_id} connection={c} />)}
+            </div>
+          )}
+        </div>
+        <p className="page-subtitle">
+          Log bookings not synced automatically — direct, social media, or phone.
+          Connected accounts sync in real time via webhook, with a backup sync
+          every 30 minutes.
+        </p>
+      </div>
+      <div className="flex items-center gap-2 flex-shrink-0">
+        <Button onClick={onSync} disabled={syncing} variant="secondary" title="Sync iCal feeds now">
+          <RefreshCw className={cn('w-4 h-4', syncing && 'animate-spin')} />
+          {syncing ? 'Syncing…' : 'Sync'}
+        </Button>
+        <Button onClick={onAdd}>
+          <Plus className="w-4 h-4" />
+          Add Booking
+        </Button>
+      </div>
+    </div>
+  )
+}
+
+/** CSV export of whatever the current filters produced. */
+function exportBookingsCsv(rows: BookingRow[]): void {
+  const lines = ['Guest,Property,Check-in,Check-out,Status,Source']
+  for (const b of rows) {
+    const propertyName = b.properties?.name ?? ''
+    lines.push(`"${b.guest_name ?? ''}","${propertyName}",${b.checkin_date},${b.checkout_date},${b.status},${b.source}`)
+  }
+  const blob = new Blob([lines.join('\n')], { type: 'text/csv' })
+  const url  = URL.createObjectURL(blob)
+  const a    = document.createElement('a')
+  a.href     = url
+  a.download = `bookings-${new Date().toISOString().split('T')[0]}.csv`
+  a.click()
+  URL.revokeObjectURL(url)
+}
+
 export function BookingsClient({
   bookings,
   properties,
@@ -532,11 +778,14 @@ export function BookingsClient({
   const [showAdd,          setShowAdd]         = useState(false)
   const [syncing,          startSync]          = useTransition()
   const [viewMode,         setViewMode]        = useState<'list' | 'calendar'>('list')
-  const [filterProperty,   setFilterProperty]  = useState('all')
-  const [filterStatus,     setFilterStatus]    = useState<'all' | 'active' | BookingStatus>('active')
-  const [filterSource,     setFilterSource]    = useState<'all' | BookingSource>('all')
-  const [searchQuery,      setSearchQuery]     = useState('')
-  const [showPast,         setShowPast]        = useState(false)
+  const {
+    filterProperty, setFilterProperty,
+    filterStatus,   setFilterStatus,
+    filterSource,   setFilterSource,
+    searchQuery,    setSearchQuery,
+    showPast,       setShowPast,
+    hasFilters,
+  } = useBookingFilters()
   const [localBookings,    setLocalBookings]   = useState(bookings)
   const [justAdded,        setJustAdded]       = useState(false)
   const [calendarPrefill,  setCalendarPrefill] = useState<{ propertyId: string; checkinDate: string } | null>(null)
@@ -558,23 +807,18 @@ export function BookingsClient({
 
   const todayStr = new Date().toISOString().split('T')[0]!  // 'YYYY-MM-DD'
 
-  const filtered = useMemo(() => {
-    return localBookings.filter((b) => {
-      if (!showPast && b.checkout_date < todayStr) return false
-      if (filterProperty !== 'all' && b.property_id !== filterProperty) return false
-      if (filterStatus   === 'active' && b.status     === 'cancelled') return false
-      if (filterStatus   !== 'all' && filterStatus !== 'active' && b.status !== filterStatus) return false
-      if (filterSource   !== 'all' && b.source     !== filterSource)    return false
-      if (searchQuery.trim() && !(b.guest_name ?? '').toLowerCase().includes(searchQuery.trim().toLowerCase())) return false
-      return true
-    })
-  }, [localBookings, showPast, filterProperty, filterStatus, filterSource, searchQuery, todayStr])
+  const filtered = useMemo(
+    () => localBookings.filter((b) =>
+      matchesBookingFilters(b, {
+        todayStr, showPast, filterProperty, filterStatus, filterSource, searchQuery,
+      })
+    ),
+    [localBookings, showPast, filterProperty, filterStatus, filterSource, searchQuery, todayStr],
+  )
 
   // Stats
   const checkinsToday = localBookings.filter((b) => isToday(b.checkin_date) && b.status === 'confirmed')
   const checkoutsToday = localBookings.filter((b) => isToday(b.checkout_date) && b.status === 'confirmed')
-
-  const hasFilters = filterProperty !== 'all' || filterStatus !== 'all' || filterSource !== 'all' || searchQuery.trim() !== ''
 
   const handleCancel = (id: string) => {
     setLocalBookings((prev) =>
@@ -586,76 +830,16 @@ export function BookingsClient({
     startSync(async () => { await triggerSync() })
   }
 
-  const handleExportCsv = () => {
-    const rows = ['Guest,Property,Check-in,Check-out,Status,Source']
-    for (const b of filtered) {
-      const propertyName = b.properties?.name ?? ''
-      rows.push(`"${b.guest_name ?? ''}","${propertyName}",${b.checkin_date},${b.checkout_date},${b.status},${b.source}`)
-    }
-    const blob = new Blob([rows.join('\n')], { type: 'text/csv' })
-    const url  = URL.createObjectURL(blob)
-    const a    = document.createElement('a')
-    a.href     = url
-    a.download = `bookings-${new Date().toISOString().split('T')[0]}.csv`
-    a.click()
-    URL.revokeObjectURL(url)
-  }
+  const handleExportCsv = () => exportBookingsCsv(filtered)
 
   return (
     <div>
-      {/* Header */}
-      <div className="page-header flex flex-wrap items-start justify-between gap-3">
-        <div className="min-w-0 flex-1">
-          <div className="flex items-center gap-2.5">
-            <h1 className="page-title">Bookings</h1>
-            {connections.length > 0 && (
-              <div className="flex items-center gap-1.5">
-                {connections.map((c) => {
-                  const isHealthy = c.status === 'active'
-                  return (
-                    <span
-                      key={c.provider_id}
-                      title={
-                        isHealthy
-                          ? `${c.provider_id} connected${c.last_used_at ? ` — last synced ${new Date(c.last_used_at).toLocaleString()}` : ''}`
-                          : `${c.provider_id}: ${(c.metadata?.last_sync_error as string) ?? 'connection needs attention'}`
-                      }
-                      className="flex items-center gap-1 text-xs px-2 py-0.5 rounded-full"
-                      style={{
-                        background: isHealthy ? 'var(--accent-green-dim)' : 'var(--accent-red-dim)',
-                        color:      isHealthy ? 'var(--accent-green)'     : 'var(--accent-red)',
-                      }}
-                    >
-                      <span className="w-1.5 h-1.5 rounded-full" style={{ background: 'currentColor' }} />
-                      {c.provider_id}
-                    </span>
-                  )
-                })}
-              </div>
-            )}
-          </div>
-          <p className="page-subtitle">
-            Log bookings not synced automatically — direct, social media, or phone.
-            Connected accounts sync in real time via webhook, with a backup sync
-            every 30 minutes.
-          </p>
-        </div>
-        <div className="flex items-center gap-2 flex-shrink-0">
-          <Button
-            onClick={handleSync}
-            disabled={syncing}
-            variant="secondary"
-            title="Sync iCal feeds now"
-          >
-            <RefreshCw className={cn('w-4 h-4', syncing && 'animate-spin')} />
-            {syncing ? 'Syncing…' : 'Sync'}
-          </Button>
-          <Button onClick={() => setShowAdd(true)}>
-            <Plus className="w-4 h-4" />
-            Add Booking
-          </Button>
-        </div>
-      </div>
+      <BookingsHeader
+        connections={connections}
+        syncing={syncing}
+        onSync={handleSync}
+        onAdd={() => setShowAdd(true)}
+      />
 
       {/* Success banner */}
       {justAdded && (
@@ -672,36 +856,7 @@ export function BookingsClient({
         </div>
       )}
 
-      {/* Today's stats strip */}
-      {(checkinsToday.length > 0 || checkoutsToday.length > 0) && (
-        <div
-          className="flex items-center gap-6 px-4 py-3 rounded-xl mb-5"
-          style={{
-            background: 'var(--accent-gold-dim)',
-            border: '1px solid rgba(252,209,22,0.25)',
-          }}
-        >
-          {checkinsToday.length > 0 && (
-            <div className="flex items-center gap-2">
-              <CheckCircle2 className="w-4 h-4" style={{ color: 'var(--accent-gold)' }} />
-              <span className="text-sm font-semibold" style={{ color: 'var(--accent-gold)' }}>
-                {checkinsToday.length} check-in{checkinsToday.length !== 1 ? 's' : ''} today
-              </span>
-              <span className="text-xs" style={{ color: 'var(--text-muted)' }}>
-                {checkinsToday.map((b) => unwrapJoin(b.properties)?.name ?? '—').join(', ')}
-              </span>
-            </div>
-          )}
-          {checkoutsToday.length > 0 && (
-            <div className="flex items-center gap-2">
-              <Clock className="w-4 h-4" style={{ color: 'var(--text-muted)' }} />
-              <span className="text-sm" style={{ color: 'var(--text-secondary)' }}>
-                {checkoutsToday.length} check-out{checkoutsToday.length !== 1 ? 's' : ''} today
-              </span>
-            </div>
-          )}
-        </div>
-      )}
+      <TodayStatsStrip checkinsToday={checkinsToday} checkoutsToday={checkoutsToday} />
 
       {/* Filters */}
       <div className="flex items-center gap-2 mb-5 flex-wrap">
@@ -754,7 +909,7 @@ export function BookingsClient({
         </select>
 
         <Button
-          onClick={() => setShowPast((v) => !v)}
+          onClick={() => setShowPast(!showPast)}
           variant="ghost"
           className={cn('text-sm py-1.5', showPast && 'text-primary-themed')}
           style={showPast ? { color: 'var(--accent-gold)' } : { color: 'var(--text-muted)' }}
@@ -833,39 +988,15 @@ export function BookingsClient({
           }}
           onCanvasClick={(propertyId, checkinDate) => setCalendarPrefill({ propertyId, checkinDate })}
         />
-      ) : filtered.length === 0 ? (
-        <Card className="text-center py-16 max-w-md mx-auto mt-4">
-          <Calendar className="w-10 h-10 mx-auto mb-3" style={{ color: 'var(--text-muted)' }} />
-          <h3 className="font-semibold mb-1" style={{ color: 'var(--text-secondary)' }}>
-            {localBookings.length === 0 ? 'No bookings yet' : 'No bookings match your filters'}
-          </h3>
-          <p className="text-sm mb-4" style={{ color: 'var(--text-muted)' }}>
-            {localBookings.length === 0
-              ? 'Add iCal feeds to your properties to automatically sync bookings, or add one manually.'
-              : 'Try adjusting your filters or showing past bookings.'}
-          </p>
-          {localBookings.length === 0 && (
-            <div className="flex gap-2 justify-center">
-              <Button onClick={() => setShowAdd(true)} className="text-sm">
-                <Plus className="w-3.5 h-3.5" /> Add Booking
-              </Button>
-              <Button onClick={handleSync} disabled={syncing} variant="secondary" className="text-sm">
-                <RefreshCw className={cn('w-3.5 h-3.5', syncing && 'animate-spin')} />
-                {syncing ? 'Syncing…' : 'Sync iCal'}
-              </Button>
-            </div>
-          )}
-        </Card>
       ) : (
-        <div className="space-y-2">
-          {filtered.map((booking) => (
-            <BookingCard
-              key={booking.id}
-              booking={booking}
-              onCancel={handleCancel}
-            />
-          ))}
-        </div>
+        <BookingsList
+          bookings={filtered}
+          hasAnyBookings={localBookings.length > 0}
+          syncing={syncing}
+          onAdd={() => setShowAdd(true)}
+          onSync={handleSync}
+          onCancel={handleCancel}
+        />
       )}
 
       {(showAdd || calendarPrefill) && (

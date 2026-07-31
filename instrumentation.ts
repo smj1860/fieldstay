@@ -1,4 +1,5 @@
 import * as Sentry from '@sentry/nextjs'
+import { assertServerEnv } from './lib/env'
 
 /**
  * Trace sampling: 100% is right for pre-launch and for preview/staging, where
@@ -46,6 +47,14 @@ function isNextControlFlow(err: unknown): boolean {
 // The only thing this removes is Vercel's own native trace tab, which
 // nothing else in this codebase reads from or depends on.
 export async function register() {
+  // Boot-time env validation (pre-launch audit 2026-07-30, "No boot-time env
+  // validation"). Runs FIRST — before Sentry.init — so a misconfigured deploy
+  // fails on the config, loudly and completely, rather than surfacing days
+  // later as an opaque Stripe error at checkout or as every webhook returning
+  // 400 like a signature mismatch. See lib/env.ts for the tiering rules and
+  // for why `next build` prints instead of throwing.
+  assertServerEnv()
+
   const options = {
     dsn:         process.env.NEXT_PUBLIC_SENTRY_DSN,
     environment: process.env.VERCEL_ENV ?? process.env.NODE_ENV,

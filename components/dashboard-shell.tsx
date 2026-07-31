@@ -54,6 +54,8 @@ interface Props {
   onboardingComplete?:        boolean
   onboardingPct?:             number
   notifications?:             NotificationItem[]
+  /** True when the notification queries errored — distinct from an empty feed. */
+  notificationsFailed?:       boolean
   unreadMessages?:            number
   isStaff?:                   boolean
   children:                   React.ReactNode
@@ -319,7 +321,7 @@ function DashboardSidebar({
   )
 }
 
-export function DashboardShell({ role, orgName, userName, userEmail, repuguardActive = false, onboardingComplete = true, onboardingPct = 0, notifications = [], unreadMessages = 0, isStaff = false, children }: Readonly<Props>) {
+export function DashboardShell({ role, orgName, userName, userEmail, repuguardActive = false, onboardingComplete = true, onboardingPct = 0, notifications = [], notificationsFailed = false, unreadMessages = 0, isStaff = false, children }: Readonly<Props>) {
   const pathname   = usePathname()
   const [collapsed,  setCollapsed]  = useState(false)
   const [mobileOpen, setMobileOpen] = useState(false)
@@ -496,7 +498,7 @@ export function DashboardShell({ role, orgName, userName, userEmail, repuguardAc
               </button>
             )}
 
-            <NotificationBell items={notifications} />
+            <NotificationBell items={notifications} failed={notificationsFailed} />
           </div>
         </header>
 

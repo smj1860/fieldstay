@@ -5,6 +5,7 @@ import { markStepComplete }    from '../actions'
 import { Card }                from '@/components/ui/Card'
 import { Badge }                from '@/components/ui/Badge'
 import { Button, buttonVariantClass } from '@/components/ui/Button'
+import { throwIfAnyQueryFailed } from '@/lib/supabase/unwrap'
 
 // All PMS provider IDs — excludes non-PMS integrations (e.g. kroger, repuguard)
 // 'guesty' is commented out: it's registered as oauth2 in integration_providers but
@@ -20,19 +21,27 @@ export default async function OnboardingPmsPage() {
   const { membership } = await requireOrgMember()
   const admin = createServiceClient({ authorizedBy: membership })
 
-  const { data: providers } = await admin
+  const { data: providers, error: providersError } = await admin
     .from('integration_providers')
     .select('id, display_name, auth_type')
     .in('id', PMS_PROVIDER_IDS)
     .eq('is_active', true)
     .order('display_name')
 
-  const { data: connections } = await admin
+
+  // Logs + reports, then throws so the segment's error.tsx renders a real
+  // error state — a failed read must not render as an empty page.
+  throwIfAnyQueryFailed({ site: 'page.setup.pms', orgId: membership.org_id }, providersError)
+  const { data: connections, error: connectionsError } = await admin
     .from('integration_connections')
     .select('id, provider_id, status, external_user_id')
     .eq('org_id', membership.org_id)
     .in('provider_id', PMS_PROVIDER_IDS)
 
+
+  // Logs + reports, then throws so the segment's error.tsx renders a real
+  // error state — a failed read must not render as an empty page.
+  throwIfAnyQueryFailed({ site: 'page.setup.pms', orgId: membership.org_id }, connectionsError)
   const connectionsByProvider = Object.fromEntries(
     (connections ?? []).map((c) => [c.provider_id, c])
   )

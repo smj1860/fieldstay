@@ -14,8 +14,9 @@ vi.mock('@/emails/work-order', () => ({
   renderWorkOrderEmail: vi.fn(async () => '<html>quote-request</html>'),
 }))
 vi.mock('@/lib/inngest/helpers', () => ({
-  getPmEmails:        vi.fn(),
+  getPmEmails:          vi.fn(),
   createPmNotification: vi.fn(),
+  getOrgDispatcher:     vi.fn(async () => ({ userId: 'u_pm', name: 'Dana PM', phone: null })),
 }))
 vi.mock('@/lib/resend/emails/pm-alert', () => ({
   renderPmAlert: vi.fn(async () => '<html>pm-alert</html>'),

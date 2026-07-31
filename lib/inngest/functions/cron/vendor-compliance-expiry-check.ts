@@ -10,6 +10,19 @@ import { unwrapJoin }          from '@/lib/utils/supabase-joins'
 const EXPIRING_SOON_WINDOW_DAYS = 30
 
 /**
+ * Per-run ceiling on documents warned. Each document costs 2 Inngest steps
+ * (mark-warned + emit-event), so an unbounded platform-wide query — e.g. right
+ * after a bulk COI import — would produce a step explosion in a single run.
+ *
+ * "Continue tomorrow" semantics: the first_warned_at gate is what selects
+ * candidates, and this cron only ever flips it forward, so anything past the
+ * cap is still un-warned tomorrow and gets picked up then. Ordering by
+ * expiry_date ascending means the most urgent documents are always warned
+ * first, so a backlog delays the least time-critical warnings, never the most.
+ */
+const MAX_DOCS_PER_RUN = 200
+
+/**
  * SCHEDULED: runs every morning at 6am CT.
  *
  * Finds active compliance documents entering the 30-day expiring-soon
@@ -40,11 +53,19 @@ export const vendorComplianceExpiryCheck = inngest.createFunction(
         .is('first_warned_at', null)
         .gte('expiry_date', todayStr)
         .lte('expiry_date', windowEnd)
+        .order('expiry_date', { ascending: true })
+        .limit(MAX_DOCS_PER_RUN)
 
       return data ?? []
     })
 
     logger.info(`Found ${documents.length} compliance document(s) entering the expiring-soon window`)
+    if (documents.length === MAX_DOCS_PER_RUN) {
+      logger.warn(
+        `[vendor-compliance-expiry] hit the ${MAX_DOCS_PER_RUN}/run cap — remaining documents ` +
+        `stay un-warned (first_warned_at IS NULL) and will be picked up by tomorrow's run.`
+      )
+    }
 
     for (const doc of documents) {
       const warned = await step.run(`mark-warned-${doc.id}`, async () => {

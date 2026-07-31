@@ -4,6 +4,7 @@ import { InventoryManager } from './inventory-manager'
 import { unwrapJoin } from '@/lib/utils/supabase-joins'
 import type { Metadata } from 'next'
 import type { CartBuildResult } from '@/lib/kroger/types'
+import { throwIfAnyQueryFailed } from '@/lib/supabase/unwrap'
 
 export const metadata: Metadata = { title: 'Inventory' }
 
@@ -11,12 +12,12 @@ export default async function InventoryPage() {
   const { supabase, membership } = await requireOrgMember()
 
   const [
-    { data: properties },
-    { data: allInventoryItemsRaw },
-    { data: purchaseOrders },
-    { data: catalogItems },
-    { data: recentCounts },
-    { data: pendingDrafts },
+    { data: properties, error: propertiesError },
+    { data: allInventoryItemsRaw, error: allInventoryItemsRawError },
+    { data: purchaseOrders, error: purchaseOrdersError },
+    { data: catalogItems, error: catalogItemsError },
+    { data: recentCounts, error: recentCountsError },
+    { data: pendingDrafts, error: pendingDraftsError },
   ] = await Promise.all([
     supabase
       .from('properties')
@@ -73,13 +74,21 @@ export default async function InventoryPage() {
       .order('created_at', { ascending: false }),
   ])
 
-  const { data: cartMilestone } = await supabase
+  // Logs + reports every failure, then throws so the segment's error.tsx
+  // renders a real error state — an outage must not look like empty data.
+  throwIfAnyQueryFailed({ site: 'page.inventory', orgId: membership.org_id }, propertiesError, allInventoryItemsRawError, purchaseOrdersError, catalogItemsError, recentCountsError, pendingDraftsError)
+
+  const { data: cartMilestone, error: cartMilestoneError } = await supabase
     .from('org_milestones')
     .select('value')
     .eq('org_id', membership.org_id)
     .eq('milestone', 'last_cart_build')
     .maybeSingle()
 
+
+  // Logs + reports, then throws so the segment's error.tsx renders a real
+  // error state — a failed read must not render as an empty page.
+  throwIfAnyQueryFailed({ site: 'page.inventory', orgId: membership.org_id }, cartMilestoneError)
   const cartData  = (cartMilestone?.value ?? null) as (CartBuildResult & { built_at: string; location_name: string }) | null
 
   const normalizedAllInventoryItems = (allInventoryItemsRaw ?? []).map((item) => ({
@@ -92,7 +101,7 @@ export default async function InventoryPage() {
     .sort((a, b) => a.name.localeCompare(b.name))
 
   const admin = createServiceClient({ authorizedBy: membership })
-  const { data: krogerConnection } = await admin
+  const { data: krogerConnection, error: krogerConnectionError } = await admin
     .from('integration_connections')
     .select('id')
     .eq('org_id', membership.org_id)
@@ -100,6 +109,10 @@ export default async function InventoryPage() {
     .eq('status', 'active')
     .maybeSingle()
 
+
+  // Logs + reports, then throws so the segment's error.tsx renders a real
+  // error state — a failed read must not render as an empty page.
+  throwIfAnyQueryFailed({ site: 'page.inventory', orgId: membership.org_id }, krogerConnectionError)
   const showKrogerNudge = !krogerConnection
 
   return (

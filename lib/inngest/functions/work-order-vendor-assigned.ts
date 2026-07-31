@@ -4,7 +4,7 @@ import { NonRetriableError }    from 'inngest'
 import { render }               from '@react-email/render'
 import WorkOrderDispatchEmail   from '@/emails/WorkOrderDispatch'
 import { resend, FROM }         from '@/lib/resend/client'
-import { createPmNotification } from '@/lib/inngest/helpers'
+import { createPmNotification, getOrgDispatcher } from '@/lib/inngest/helpers'
 import { renderSmsBody }        from '@/lib/sms/templates'
 import { getManualUrlForAsset } from '@/lib/assets/manual-lookup'
 import { reportError }          from '@/lib/observability/report-error'
@@ -105,28 +105,12 @@ export const handleWorkOrderVendorAssigned = inngest.createFunction(
     // ── Step 3: Fetch dispatcher ───────────────────────────────────────────
     const dispatcher = await step.run('fetch-dispatcher', async () => {
       const supabase = createServiceClient({ system: 'inngest:work-order-vendor-assigned' })
-      const { data: members } = await supabase
-        .from('organization_members')
-        .select('user_id')
-        .eq('org_id', orgId)
-        .in('role', ['owner', 'admin'])
-        .not('invite_accepted_at', 'is', null)
-        .limit(1)
-
-      if (!members?.[0]?.user_id) {
-        return { name: org?.name ?? 'Property Management', phone: null }
-      }
-
-      const { data: profile } = await supabase
-        .from('profiles')
-        .select('full_name, phone')
-        .eq('id', members[0].user_id)
-        .single()
-
-      return {
-        name:  profile?.full_name ?? org?.name ?? 'Property Management',
-        phone: profile?.phone     ?? null,
-      }
+      const { name, phone } = await getOrgDispatcher(
+        supabase,
+        orgId,
+        org?.name ?? 'Property Management'
+      )
+      return { name, phone }
     })
 
     // ── Step 4: Send vendor email directly (no secondary event hop) ────────

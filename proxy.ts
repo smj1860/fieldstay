@@ -3,7 +3,10 @@ import { updateSession } from '@/lib/supabase/middleware'
 import {
   workOrderRatelimit, vendorConnectRatelimit, ownerPortalRatelimit, guidebookRatelimit,
   oauthCallbackRatelimit, demoRatelimit,
+  checkLimit, retryAfterSeconds,
 } from '@/lib/rate-limit'
+import { extractClientIp } from '@/lib/integrations/webhook-verification'
+import type { Ratelimit } from '@upstash/ratelimit'
 
 // ── Content Security Policy ────────────────────────────────────────────────
 // Generated fresh per request so script-src can carry a per-request nonce
@@ -91,6 +94,19 @@ const TOKEN_ROUTES = [
   '/vendor-connect/',
   '/api/vendor-connect',
   '/g/',
+
+  // Guest/sponsor-facing guidebook API. These are POSTed to by people who by
+  // definition have no FieldStay session — a sponsor arriving from a media-kit
+  // email (/api/guidebook/sponsor-checkout, called from
+  // app/g/kit/[media_kit_token]/media-kit-client.tsx) and a guest tapping an
+  // offer (/api/guidebook/redeem, called from
+  // components/guidebook/guest-guidebook-view.tsx). Listing only '/g/' here
+  // covered the PAGES but not the API they call, so every such POST fell
+  // through to the unauthenticated-user branch below and got a 307 to /login:
+  // both flows were dead, and the inline limiters on those routes were
+  // guarding endpoints no guest could reach. TOKEN_ROUTES (not BYPASS_ROUTES)
+  // so the per-IP throttle below still applies.
+  '/api/guidebook',
 ]
 
 // ── Bypass routes ──────────────────────────────────────────────────────────
@@ -195,6 +211,7 @@ function rateLimiterForPathname(pathname: string) {
   if (pathname.startsWith('/api/vendor-connect')) return vendorConnectRatelimit
   if (pathname.startsWith('/owner/'))             return ownerPortalRatelimit
   if (pathname.startsWith('/g/'))                 return guidebookRatelimit
+  if (pathname.startsWith('/api/guidebook'))      return guidebookRatelimit
   if (pathname.startsWith('/demo/'))              return demoRatelimit
   // OAuth callbacks are BYPASS_ROUTES (no session to check) but must still be
   // throttled — the oneclick route stores unvalidated authorization codes in
@@ -202,6 +219,107 @@ function rateLimiterForPathname(pathname: string) {
   if (pathname.startsWith('/api/integrations/') && pathname.includes('/callback'))
     return oauthCallbackRatelimit
   return null
+}
+
+// ── Middleware classification ──────────────────────────────────────────────
+// Named so both the middleware itself and
+// unit/guardrails/public-route-rate-limiting.test.ts can ask the SAME question
+// ("what does the middleware do with this path?") instead of the guardrail
+// re-deriving the answer from the route tables. That re-derivation is what let
+// H-1 through: /api/guidebook was in no table at all, and a guardrail that
+// only compares two tables to each other can't see a route missing from both.
+export type RouteClassification = 'bypass' | 'token' | 'public' | 'protected'
+
+export function classifyRoute(pathname: string): RouteClassification {
+  if (BYPASS_ROUTES.some((r) => pathname.startsWith(r))) return 'bypass'
+  if (TOKEN_ROUTES.some((r)  => pathname.startsWith(r))) return 'token'
+  if (PUBLIC_ROUTES.some((r) => pathname === r || pathname.startsWith(r + '/'))) return 'public'
+  return 'protected'
+}
+
+/** True when a session-less request reaches the route instead of a 307 to /login. */
+export function isReachableUnauthenticated(pathname: string): boolean {
+  return classifyRoute(pathname) !== 'protected'
+}
+
+// Applies the per-IP throttle for token-guessable surfaces. Returns a 429
+// response to short-circuit with, or null to continue. Runs BEFORE the bypass
+// check so routes that skip auth entirely (the OAuth callbacks under
+// /api/integrations/) are still throttled; bypass routes without a limiter
+// entry are unaffected (rateLimiterForPathname returns null for them).
+//
+// Fail policy: 'allow'. These are abuse/enumeration limiters — a Redis outage
+// must not take down the public work-order, owner-portal, and guidebook
+// surfaces. checkLimit() also short-circuits entirely when Upstash is
+// unconfigured (CI, previews, local dev without the KV addon), which is what
+// keeps @upstash/redis from retrying against an undefined URL — measured at
+// ~4.3s added to EVERY request on a rate-limited route, tight enough to blow
+// several e2e tests' short post-mutation assertion timeouts.
+async function enforceTokenRouteRateLimit(
+  request:  NextRequest,
+  limiter:  Ratelimit,
+  nonce:    string,
+): Promise<NextResponse | null> {
+  const ip = extractClientIp(request) ?? request.headers.get('x-real-ip') ?? '127.0.0.1'
+
+  const decision = await checkLimit(limiter, ip, {
+    onError: 'allow',
+    site:    `proxy:${request.nextUrl.pathname}`,
+  })
+
+  if (decision.allowed) return null
+
+  return withCsp(new NextResponse(
+    JSON.stringify({ error: 'Too many requests. Please try again shortly.' }),
+    {
+      status:  429,
+      headers: {
+        'Content-Type':          'application/json',
+        'X-RateLimit-Limit':     String(decision.limit),
+        'X-RateLimit-Remaining': String(decision.remaining),
+        'X-RateLimit-Reset':     String(decision.reset),
+        'Retry-After':           String(retryAfterSeconds(decision)),
+      },
+    }
+  ), nonce)
+}
+
+function bypassResponse(request: NextRequest, pathname: string, nonce: string): NextResponse {
+  const response = withCsp(NextResponse.next({ request }), nonce)
+
+  // Hospitable launch promo attribution — set on every /hospitable visit so
+  // createCheckoutSession() can later tell a landing-page-driven signup
+  // apart from a marketplace one-click connect or a manual connect. See
+  // lib/inngest/functions/promo-hospitable-tag-trial.ts.
+  if (pathname.startsWith('/hospitable')) {
+    response.cookies.set('fs_promo_attribution', 'hospitable_landing_page', {
+      maxAge:   60 * 60 * 24 * 30, // 30-day attribution window
+      httpOnly: true,
+      secure:   process.env.NODE_ENV === 'production',
+      sameSite: 'lax',
+      path:     '/',
+    })
+  }
+
+  return response
+}
+
+// Authenticated user hitting a public route → redirect into the app.
+// If the original destination was a crew route (carried in ?next=), honour it.
+// Otherwise default to /ops (PM dashboard).
+function redirectAuthenticatedAwayFromPublic(request: NextRequest, nonce: string): NextResponse {
+  const url  = request.nextUrl.clone()
+  const next = request.nextUrl.searchParams.get('next') ?? ''
+  url.pathname = next.startsWith('/crew') ? '/crew' : '/ops'
+  url.search   = ''
+  return withCsp(NextResponse.redirect(url), nonce)
+}
+
+function redirectToLogin(request: NextRequest, pathname: string, nonce: string): NextResponse {
+  const url = request.nextUrl.clone()
+  url.pathname = '/login'
+  url.searchParams.set('next', pathname)
+  return withCsp(NextResponse.redirect(url), nonce)
 }
 
 export async function proxy(request: NextRequest) {
@@ -212,102 +330,24 @@ export async function proxy(request: NextRequest) {
   // (and any Server Component that wants it) can read it via headers().
   request.headers.set('x-nonce', nonce)
 
-  // Rate limit unauthenticated token-guessable routes — guards against
-  // token enumeration and request flooding. Runs BEFORE the bypass check so
-  // routes that skip auth entirely (the OAuth callbacks under
-  // /api/integrations/) are still throttled; bypass routes without a limiter
-  // entry are unaffected (rateLimiterForPathname returns null for them).
   const tokenRouteLimiter = rateLimiterForPathname(pathname)
-
-  // Skip the network round trip entirely when Upstash isn't configured
-  // (e.g. CI, or a local dev env without the KV addon) instead of letting
-  // the underlying @upstash/redis client attempt — and internally retry —
-  // a fetch against an undefined URL before the catch below fails open.
-  // That retry/backoff was measured adding ~4.3s to EVERY request on a
-  // rate-limited route, which was tight enough to blow several e2e tests'
-  // short (5-10s) post-mutation assertion timeouts on /work-orders/[token]
-  // and /owner/[token].
-  const upstashConfigured =
-    !!process.env.upstash_fieldstay_KV_REST_API_URL && !!process.env.upstash_fieldstay_KV_REST_API_TOKEN
-
-  if (tokenRouteLimiter && upstashConfigured) {
-    const ip =
-      request.headers.get('x-forwarded-for')?.split(',')[0]?.trim() ??
-      request.headers.get('x-real-ip') ??
-      '127.0.0.1'
-
-    try {
-      const { success, limit, remaining, reset } =
-        await tokenRouteLimiter.limit(ip)
-
-      if (!success) {
-        return withCsp(new NextResponse(
-          JSON.stringify({ error: 'Too many requests. Please try again shortly.' }),
-          {
-            status:  429,
-            headers: {
-              'Content-Type':  'application/json',
-              'X-RateLimit-Limit':     String(limit),
-              'X-RateLimit-Remaining': String(remaining),
-              'X-RateLimit-Reset':     String(reset),
-              'Retry-After':           String(Math.ceil((reset - Date.now()) / 1000)),
-            },
-          }
-        ), nonce)
-      }
-    } catch (err) {
-      // If Redis is unavailable, fail open — don't take down these public
-      // routes over an infrastructure issue
-      console.error('[proxy] rate limit check failed', err)
-    }
+  if (tokenRouteLimiter) {
+    const throttled = await enforceTokenRouteRateLimit(request, tokenRouteLimiter, nonce)
+    if (throttled) return throttled
   }
 
-  if (BYPASS_ROUTES.some((r) => pathname.startsWith(r))) {
-    const response = withCsp(NextResponse.next({ request }), nonce)
+  const classification = classifyRoute(pathname)
 
-    // Hospitable launch promo attribution — set on every /hospitable visit so
-    // createCheckoutSession() can later tell a landing-page-driven signup
-    // apart from a marketplace one-click connect or a manual connect. See
-    // lib/inngest/functions/promo-hospitable-tag-trial.ts.
-    if (pathname.startsWith('/hospitable')) {
-      response.cookies.set('fs_promo_attribution', 'hospitable_landing_page', {
-        maxAge:   60 * 60 * 24 * 30, // 30-day attribution window
-        httpOnly: true,
-        secure:   process.env.NODE_ENV === 'production',
-        sameSite: 'lax',
-        path:     '/',
-      })
-    }
-
-    return response
-  }
-
-  if (TOKEN_ROUTES.some((r)  => pathname.startsWith(r)))  return withCsp(NextResponse.next({ request }), nonce)
+  if (classification === 'bypass') return bypassResponse(request, pathname, nonce)
+  if (classification === 'token')  return withCsp(NextResponse.next({ request }), nonce)
 
   const { supabaseResponse, user } = await updateSession(request)
-
-  const isPublic = PUBLIC_ROUTES.some(
-    (r) => pathname === r || pathname.startsWith(r + '/')
-  )
+  const isPublic = classification === 'public'
 
   // Unauthenticated user hitting a protected route → redirect to login
-  if (!user && !isPublic) {
-    const url = request.nextUrl.clone()
-    url.pathname = '/login'
-    url.searchParams.set('next', pathname)
-    return withCsp(NextResponse.redirect(url), nonce)
-  }
+  if (!user && !isPublic) return redirectToLogin(request, pathname, nonce)
 
-  // Authenticated user hitting a public route → redirect into the app.
-  // If the original destination was a crew route (carried in ?next=), honour it.
-  // Otherwise default to /ops (PM dashboard).
-  if (user && isPublic && pathname !== '/') {
-    const url = request.nextUrl.clone()
-    const next = request.nextUrl.searchParams.get('next') ?? ''
-    url.pathname = next.startsWith('/crew') ? '/crew' : '/ops'
-    url.search   = ''
-    return withCsp(NextResponse.redirect(url), nonce)
-  }
+  if (user && isPublic && pathname !== '/') return redirectAuthenticatedAwayFromPublic(request, nonce)
 
   supabaseResponse.headers.set('x-pathname', pathname)
 

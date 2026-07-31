@@ -11,19 +11,10 @@ import { staleFeedAlert } from '@/lib/inngest/functions/cron/stale-feed-alert'
 import { createServiceClient } from '@/lib/supabase/server'
 import { getPmMembers } from '@/lib/inngest/helpers'
 import { invokeHandler } from './test-helpers'
+import { createSupabaseDouble, type TableSpec } from '../stubs/supabase-query-double'
 
-function makeSupabase(responses: Record<string, { data?: unknown; error?: unknown }>) {
-  const from = vi.fn((table: string) => {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const chain: any = {}
-    chain.select = () => chain
-    chain.eq     = () => chain
-    chain.or     = () => chain
-    chain.then   = (resolve: (v: unknown) => unknown, reject?: (e: unknown) => unknown) =>
-      Promise.resolve(responses[table] ?? { data: null, error: null }).then(resolve, reject)
-    return chain
-  })
-  return { from }
+function makeSupabase(responses: Record<string, TableSpec>) {
+  return createSupabaseDouble(responses)
 }
 
 function makeStep() {
@@ -49,7 +40,7 @@ describe('staleFeedAlert', () => {
     expect(getPmMembers).not.toHaveBeenCalled()
   })
 
-  it('groups stale feeds by org and fires one integration/connection.error event per org with a PM', async () => {
+  it('groups stale feeds by org and batches one integration/connection.error event per org with a PM into a single sendEvent', async () => {
     const supabase = makeSupabase({
       ical_feeds: {
         data: [
@@ -59,12 +50,19 @@ describe('staleFeedAlert', () => {
         ],
         error: null,
       },
+      // The PM per org is now resolved from ONE organization_members query for
+      // every org at once (owner ranked before admin), instead of a
+      // getPmMembers() call per org that also did a GoTrue round-trip per
+      // member. org_2 deliberately has no PM row — it must be skipped, not crash.
+      organization_members: {
+        data: [
+          { org_id: 'org_1', user_id: 'user_admin', role: 'admin' },
+          { org_id: 'org_1', user_id: 'user_1', role: 'owner' },
+        ],
+        error: null,
+      },
     })
     ;(createServiceClient as ReturnType<typeof vi.fn>).mockReturnValue(supabase)
-    ;(getPmMembers as ReturnType<typeof vi.fn>).mockImplementation(async (_client: unknown, orgId: string) => {
-      if (orgId === 'org_1') return [{ userId: 'user_1', email: 'pm1@example.com', role: 'owner' }]
-      return [] // org_2 has no PM — should be skipped, not crash
-    })
 
     const step = makeStep()
     const result = await invokeHandler(staleFeedAlert, {
@@ -74,19 +72,26 @@ describe('staleFeedAlert', () => {
     })
 
     expect(result).toEqual({ alerted: 1 })
+    // ONE batched sendEvent carrying an event array — not one step.sendEvent
+    // per org, which put the whole platform's org count into a single run's
+    // step budget.
     expect(step.sendEvent).toHaveBeenCalledTimes(1)
     expect(step.sendEvent).toHaveBeenCalledWith(
-      'notify-stale-feed-org_1',
-      expect.objectContaining({
-        name: 'integration/connection.error',
-        data: expect.objectContaining({
-          user_id:     'user_1',
-          org_id:      'org_1',
-          provider_id: 'ical',
-          reason:      "2 feeds haven't synced in 6+ hours",
+      'notify-stale-feeds',
+      [
+        expect.objectContaining({
+          name: 'integration/connection.error',
+          data: expect.objectContaining({
+            user_id:     'user_1',
+            org_id:      'org_1',
+            provider_id: 'ical',
+            reason:      "2 feeds haven't synced in 6+ hours",
+          }),
         }),
-      }),
+      ],
     )
+    // The per-org GoTrue-hitting helper is no longer on this path at all.
+    expect(getPmMembers).not.toHaveBeenCalled()
   })
 
   it('uses singular "feed" wording when only one feed is stale for an org', async () => {
@@ -97,11 +102,12 @@ describe('staleFeedAlert', () => {
         ],
         error: null,
       },
+      organization_members: {
+        data: [{ org_id: 'org_1', user_id: 'user_1', role: 'owner' }],
+        error: null,
+      },
     })
     ;(createServiceClient as ReturnType<typeof vi.fn>).mockReturnValue(supabase)
-    ;(getPmMembers as ReturnType<typeof vi.fn>).mockResolvedValue([
-      { userId: 'user_1', email: 'pm1@example.com', role: 'owner' },
-    ])
 
     const step = makeStep()
     await invokeHandler(staleFeedAlert, {
@@ -111,13 +117,15 @@ describe('staleFeedAlert', () => {
     })
 
     expect(step.sendEvent).toHaveBeenCalledWith(
-      'notify-stale-feed-org_1',
-      expect.objectContaining({
-        // NOTE: the source hardcodes "haven't" regardless of feedCount (only
-        // "feed"/"feeds" is pluralized) — grammatically "1 feed haven't
-        // synced" is off, but this asserts actual current behavior.
-        data: expect.objectContaining({ reason: "1 feed haven't synced in 6+ hours" }),
-      }),
+      'notify-stale-feeds',
+      [
+        expect.objectContaining({
+          // NOTE: the source hardcodes "haven't" regardless of feedCount (only
+          // "feed"/"feeds" is pluralized) — grammatically "1 feed haven't
+          // synced" is off, but this asserts actual current behavior.
+          data: expect.objectContaining({ reason: "1 feed haven't synced in 6+ hours" }),
+        }),
+      ],
     )
   })
 })

@@ -5,6 +5,7 @@
 
 import type { DexieSupabaseClient } from './types'
 import { getDexieDb, type CrewAvailabilityRow } from '../schema'
+import { bulkPutShadowed } from './shadow'
 
 export async function syncCrewAvailability(
   supabase: DexieSupabaseClient,
@@ -36,6 +37,6 @@ export async function syncCrewAvailability(
       is_available: row.is_available ? 1 : 0,
       notes:        row.notes ?? '',
     }))
-    await db.crew_availability.bulkPut(normalized as CrewAvailabilityRow[])
+    await bulkPutShadowed(db.crew_availability, userId, 'crew_availability', normalized as CrewAvailabilityRow[])
   }
 }

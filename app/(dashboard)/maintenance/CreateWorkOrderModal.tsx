@@ -5,7 +5,9 @@ import { AlertTriangle, Camera, Info, ShieldOff, X } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { createWorkOrder } from './actions'
 import { distanceMiles } from '@/lib/geocoding'
+import { isBlockingComplianceStatus } from '@/lib/vendors/compliance-status'
 import { createClient } from '@/lib/supabase/client'
+import { orgScopedStoragePath } from '@/lib/storage/object-path'
 import { Dialog } from '@/components/ui/Dialog'
 import { Button } from '@/components/ui/Button'
 import { Input } from '@/components/ui/Input'
@@ -65,6 +67,10 @@ export function CreateWorkOrderModal({
   }
 
   const selectedCompliance = selectedVendor ? complianceFor(selectedVendor) : null
+  // Mirrors the server-side allowlist in lib/vendors/compliance.ts exactly, so
+  // the disabled option and the server gate can never disagree about a status
+  // neither of them recognizes.
+  const selectedBlocked = isBlockingComplianceStatus(selectedCompliance)
 
   const handlePhotoSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = Array.from(e.target.files ?? [])
@@ -94,14 +100,27 @@ export function CreateWorkOrderModal({
       return
     }
 
-    // Photos to upload — upload then close
+    // Photos to upload — upload then close.
+    // orgId is optional on this component's props, but every photo path is
+    // org-prefixed (storage RLS keys off that first segment), so without it
+    // there is nowhere valid to put the file. Say so rather than uploading
+    // to a path that will be denied.
+    if (!orgId) {
+      onWarning?.('Work order created, but photos could not be attached. You can add them from the work order detail page.')
+      onClose()
+      return
+    }
+
     const workOrderId = state.workOrderId
     ;(async () => {
       const supabase = createClient()
       let photoFailures = 0
       for (const file of photoFiles) {
         const ext  = file.name.split('.').pop() ?? 'jpg'
-        const path = `wo-${workOrderId}/${Date.now()}-${crypto.randomUUID()}.${ext}`
+        // The leading `${orgId}/` segment is what the work-order-photos
+        // storage RLS policies match on — a path without it is denied on
+        // upload and can never be signed for reading.
+        const path = orgScopedStoragePath(orgId, workOrderId, `${Date.now()}-${crypto.randomUUID()}.${ext}`)
         const { error: uploadErr } = await supabase.storage
           .from('work-order-photos')
           .upload(path, file, { contentType: file.type })
@@ -147,7 +166,7 @@ export function CreateWorkOrderModal({
           <Button
             type="submit"
             form="create-work-order-form"
-            disabled={pending || selectedCompliance === 'hard_blocked'}
+            disabled={pending || selectedBlocked}
             className="flex-1"
           >
             {pending
@@ -311,8 +330,9 @@ export function CreateWorkOrderModal({
 
               {/* Assignment mode */}
               <div>
-                <label className="label">Assign To</label>
-            <div className="flex gap-1 rounded-lg border border-themed p-1 mb-3">
+                {/* Labels a group of mode buttons, not a single control. */}
+                <span className="label" id="wo-assign-mode-label">Assign To</span>
+            <div className="flex gap-1 rounded-lg border border-themed p-1 mb-3" role="group" aria-labelledby="wo-assign-mode-label">
               {vendors.length > 0 && (
                 <button
                   type="button"
@@ -377,7 +397,7 @@ export function CreateWorkOrderModal({
                     {vendors.map((v) => {
                       const status = complianceFor(v.id)
                       const dist   = vendorDistance(v.id)
-                      const blocked = status === 'hard_blocked'
+                      const blocked = isBlockingComplianceStatus(status)
                       const label  = [
                         v.name,
                         dist != null ? `${dist.toFixed(1)} mi` : null,
@@ -421,7 +441,7 @@ export function CreateWorkOrderModal({
                     </div>
                   )}
 
-                  {selectedVendor && selectedCompliance !== 'hard_blocked' && (
+                  {selectedVendor && !selectedBlocked && (
                     <label className="flex items-center gap-2 text-sm text-secondary-themed cursor-pointer mt-2">
                       <input
                         type="checkbox"
@@ -465,8 +485,8 @@ export function CreateWorkOrderModal({
 
           {/* Photo attachments */}
           <div>
-            <label className="label">Photos (optional)</label>
-            <input
+            <label htmlFor="createworkordermodal-photos-optional" className="label">Photos (optional)</label>
+            <input id="createworkordermodal-photos-optional"
               ref={photoInputRef}
               type="file"
               accept="image/*"

@@ -43,19 +43,25 @@ import {
 type Resp = { data?: unknown; error?: unknown }
 
 function makeSupabase(queue: Record<string, Resp[]>) {
+  // Every chained call is recorded so tests can assert on filters — notably
+  // the .neq('status', 'completed') guard that makes turnover completion
+  // race-safe (the WHERE clause, not an earlier read, is the guard).
+  const calls: { table: string; method: string; args: unknown[] }[] = []
+
   const from = vi.fn((table: string) => {
     const q = queue[table]
     const result: Resp = q?.length ? q.shift()! : { data: null, error: null }
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const chain: any = {}
     for (const m of ['select', 'insert', 'update', 'delete', 'upsert', 'eq', 'neq', 'in', 'not', 'is']) {
-      chain[m] = vi.fn(() => chain)
+      chain[m] = vi.fn((...args: unknown[]) => { calls.push({ table, method: m, args }); return chain })
     }
-    chain.single = vi.fn(() => Promise.resolve(result))
+    chain.single      = vi.fn(() => Promise.resolve(result))
+    chain.maybeSingle = vi.fn(() => Promise.resolve(result))
     chain.then   = (resolve: (v: unknown) => unknown) => Promise.resolve(result).then(resolve)
     return chain
   })
-  return { from }
+  return { from, calls }
 }
 
 const membership = {
@@ -197,12 +203,9 @@ describe('turnovers/actions', () => {
 
   describe('updateTurnoverStatus', () => {
     it('marks a turnover completed and fires the completion event', async () => {
+      // The conditional UPDATE returns the row it actually matched.
       const supabase = makeSupabase({
-        turnovers: [
-          { data: { status: 'in_progress' } },
-          { error: null },
-          { data: { property_id: 'prop_1', org_id: 'org_1' } },
-        ],
+        turnovers: [{ data: { id: 't_1', property_id: 'prop_1', org_id: 'org_1' }, error: null }],
       })
       vi.mocked(requireOrgMember).mockResolvedValue({
         supabase, membership, user: { id: 'user_1' },
@@ -214,12 +217,45 @@ describe('turnovers/actions', () => {
       expect(inngest.send).toHaveBeenCalledWith(expect.objectContaining({ name: 'turnover/completed' }))
     })
 
-    it('does not re-fire the completion event for an already-completed turnover', async () => {
+    // The race the crew route explicitly rejects: two concurrent completions
+    // must not both fire turnover/completed (double-counted metrics) or both
+    // stamp completed_at (corrupted durations). The .neq guard in the WHERE
+    // clause is what makes exactly one UPDATE match a row.
+    it('guards completion with .neq(status, completed) rather than an earlier read', async () => {
       const supabase = makeSupabase({
-        turnovers: [
-          { data: { status: 'completed' } },
-          { error: null },
-        ],
+        turnovers: [{ data: { id: 't_1', property_id: 'prop_1', org_id: 'org_1' }, error: null }],
+      })
+      vi.mocked(requireOrgMember).mockResolvedValue({
+        supabase, membership, user: { id: 'user_1' },
+      } as never)
+
+      await updateTurnoverStatus('t_1', 'completed')
+
+      expect(supabase.calls).toContainEqual(
+        expect.objectContaining({ table: 'turnovers', method: 'neq', args: ['status', 'completed'] })
+      )
+    })
+
+    it('does not apply the completion guard to non-completion status changes', async () => {
+      const supabase = makeSupabase({
+        turnovers: [{ data: { id: 't_1', property_id: 'prop_1', org_id: 'org_1' }, error: null }],
+      })
+      vi.mocked(requireOrgMember).mockResolvedValue({
+        supabase, membership, user: { id: 'user_1' },
+      } as never)
+
+      await updateTurnoverStatus('t_1', 'in_progress')
+
+      expect(supabase.calls).not.toContainEqual(
+        expect.objectContaining({ method: 'neq', args: ['status', 'completed'] })
+      )
+    })
+
+    it('does not re-fire the completion event when a concurrent request won the race', async () => {
+      // No row matched: the turnover was already completed, so the request
+      // that DID match it owns the downstream automations.
+      const supabase = makeSupabase({
+        turnovers: [{ data: null, error: null }],
       })
       vi.mocked(requireOrgMember).mockResolvedValue({
         supabase, membership, user: { id: 'user_1' },
@@ -233,7 +269,7 @@ describe('turnovers/actions', () => {
 
     it('scopes the status update to the caller org', async () => {
       const supabase = makeSupabase({
-        turnovers: [{ data: { status: 'pending_assignment' } }, { error: null }],
+        turnovers: [{ data: { id: 't_1', property_id: 'prop_1', org_id: 'org_1' }, error: null }],
       })
       vi.mocked(requireOrgMember).mockResolvedValue({
         supabase, membership, user: { id: 'user_1' },
@@ -242,6 +278,9 @@ describe('turnovers/actions', () => {
       await updateTurnoverStatus('t_1', 'in_progress')
 
       expect(supabase.from).toHaveBeenCalledWith('turnovers')
+      expect(supabase.calls).toContainEqual(
+        expect.objectContaining({ table: 'turnovers', method: 'eq', args: ['org_id', 'org_1'] })
+      )
     })
 
     it('returns a generic error and never touches the DB when the caller is unauthenticated', async () => {

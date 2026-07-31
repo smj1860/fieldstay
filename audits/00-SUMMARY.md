@@ -1,5 +1,11 @@
 # FieldStay Comprehensive Codebase Audit — Summary
 
+> **Superseded for launch-readiness purposes by
+> [06 — Pre-Launch Audit (2026-07-30)](./06-pre-launch-audit-2026-07-30.md)**,
+> a six-dimension audit covering multi-tenant security, data-layer correctness,
+> and scalability to 150+ tenants. Verdict: NOT LAUNCH-READY — 4 blockers,
+> including two confirmed cross-tenant data exposures.
+
 **As of 2026-07-23: nearly every finding across audits/01, 02, 04, 05 has since been
 fixed; audits/03 covers a fully-removed subsystem (see its own banner).**
 

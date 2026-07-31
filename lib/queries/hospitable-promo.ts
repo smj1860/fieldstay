@@ -1,4 +1,5 @@
 import { createClient } from '@/lib/supabase/server'
+import { reportQueryError } from '@/lib/supabase/unwrap'
 
 export interface HospitablePromoStatus {
   priceLockActive:    boolean
@@ -17,8 +18,10 @@ export async function getHospitablePromoStatus(orgId: string): Promise<Hospitabl
     .eq('org_id', orgId)
     .maybeSingle()
 
-  if (error) {
-    console.error(`Failed to load Hospitable promo status for org ${orgId}:`, error.message)
+  // Degrading to "no promo" is the right UX for a marketing banner, but the
+  // failure previously only reached the console — never Sentry — so a broken
+  // read here was indistinguishable from an org that simply has no promo row.
+  if (reportQueryError(error, { site: 'lib.queries.getHospitablePromoStatus', orgId })) {
     return null
   }
 

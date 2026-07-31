@@ -219,17 +219,17 @@ function VendorCardModal({ vendor, onClose }: { vendor: Vendor; onClose: () => v
         {editing ? (
           <form id="vendor-edit-form" action={formAction} className="space-y-3">
             <div>
-              <label className="label">Vendor Name</label>
-              <Input name="name" type="text" required defaultValue={vendor.name} />
+              <label htmlFor="vendors-client-vendor-name-2" className="label">Vendor Name</label>
+              <Input id="vendors-client-vendor-name-2" name="name" type="text" required defaultValue={vendor.name} />
             </div>
             <div className="grid grid-cols-2 gap-3">
               <div>
-                <label className="label">Contact Name</label>
-                <Input name="contact_name" type="text" defaultValue={vendor.contact_name ?? ''} />
+                <label htmlFor="vendors-client-contact-name" className="label">Contact Name</label>
+                <Input id="vendors-client-contact-name" name="contact_name" type="text" defaultValue={vendor.contact_name ?? ''} />
               </div>
               <div>
-                <label className="label">Specialty</label>
-                <select name="specialty" defaultValue={vendor.specialty} className="input">
+                <label htmlFor="vendors-client-specialty" className="label">Specialty</label>
+                <select id="vendors-client-specialty" name="specialty" defaultValue={vendor.specialty} className="input">
                   {VENDOR_SPECIALTIES.map((s) => (
                     <option key={s} value={s}>{VENDOR_SPECIALTY_LABELS[s]}</option>
                   ))}
@@ -238,35 +238,35 @@ function VendorCardModal({ vendor, onClose }: { vendor: Vendor; onClose: () => v
             </div>
             <div className="grid grid-cols-2 gap-3">
               <div>
-                <label className="label">Email</label>
-                <Input name="email" type="email" defaultValue={vendor.email ?? ''} />
+                <label htmlFor="vendors-client-email" className="label">Email</label>
+                <Input id="vendors-client-email" name="email" type="email" defaultValue={vendor.email ?? ''} />
               </div>
               <div>
-                <label className="label">Phone</label>
-                <Input name="phone" type="tel" defaultValue={vendor.phone ?? ''} />
+                <label htmlFor="vendors-client-phone" className="label">Phone</label>
+                <Input id="vendors-client-phone" name="phone" type="tel" defaultValue={vendor.phone ?? ''} />
               </div>
             </div>
             <div>
-              <label className="label">Street Address</label>
-              <Input name="address" type="text" defaultValue={vendor.address ?? ''} placeholder="123 Main St" />
+              <label htmlFor="vendors-client-street-address" className="label">Street Address</label>
+              <Input id="vendors-client-street-address" name="address" type="text" defaultValue={vendor.address ?? ''} placeholder="123 Main St" />
             </div>
             <div className="grid grid-cols-2 gap-3">
               <div>
-                <label className="label">City</label>
-                <Input name="city" type="text" defaultValue={vendor.city ?? ''} placeholder="Atlanta" />
+                <label htmlFor="vendors-client-city" className="label">City</label>
+                <Input id="vendors-client-city" name="city" type="text" defaultValue={vendor.city ?? ''} placeholder="Atlanta" />
               </div>
               <div>
-                <label className="label">State</label>
-                <Input name="state" type="text" defaultValue={vendor.state ?? ''} placeholder="GA" maxLength={2} />
+                <label htmlFor="vendors-client-state" className="label">State</label>
+                <Input id="vendors-client-state" name="state" type="text" defaultValue={vendor.state ?? ''} placeholder="GA" maxLength={2} />
               </div>
             </div>
             <div>
-              <label className="label">Service ZIP</label>
-              <Input name="service_zip" type="text" defaultValue={vendor.service_zip ?? ''} placeholder="e.g. 30301" maxLength={10} />
+              <label htmlFor="vendors-client-service-zip" className="label">Service ZIP</label>
+              <Input id="vendors-client-service-zip" name="service_zip" type="text" defaultValue={vendor.service_zip ?? ''} placeholder="e.g. 30301" maxLength={10} />
             </div>
             <div>
-              <label className="label">Notes</label>
-              <textarea name="notes" rows={2} defaultValue={vendor.notes ?? ''} className="input resize-none" />
+              <label htmlFor="vendors-client-notes" className="label">Notes</label>
+              <textarea id="vendors-client-notes" name="notes" rows={2} defaultValue={vendor.notes ?? ''} className="input resize-none" />
             </div>
           </form>
         ) : (
@@ -873,7 +873,11 @@ function VendorCard({ vendor, onSelect }: { vendor: VendorWithStats; onSelect?: 
 
       <div
         className="mt-3 pt-3 flex items-center justify-between border-t border-themed"
+        // Propagation guard, not a control: keeps a click/keypress on the nested
+        // toggle and links from also firing the parent card's onClick.
+        role="presentation"
         onClick={e => e.stopPropagation()}
+        onKeyDown={e => e.stopPropagation()}
       >
         <PortalToggle enabled={portalEnabled} disabled={togglingPortal} onToggle={handleTogglePortal} />
         <div className="flex items-center gap-1">

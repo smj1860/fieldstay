@@ -7,6 +7,7 @@ vi.mock('@/lib/supabase/server', () => ({
 import { crewScoreRecompute } from '@/lib/inngest/functions/cron/crew-score-recompute'
 import { createServiceClient } from '@/lib/supabase/server'
 import { invokeHandler } from './test-helpers'
+import { createSupabaseDouble } from '../stubs/supabase-query-double'
 
 interface TurnoverRow {
   id:                    string
@@ -19,31 +20,13 @@ function makeSupabase(opts: {
   upsert?:          { error: { message: string } | null }
   rpc?:             { data: unknown; error: { message: string } | null }
 }) {
-  const calls: { table: string; method: string; args: unknown[] }[] = []
-
-  const from = vi.fn((table: string) => {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const chain: any = {}
-    const record = (method: string, args: unknown[]) => {
-      calls.push({ table, method, args })
-      return chain
-    }
-    chain.select = (...a: unknown[]) => record('select', a)
-    chain.in     = (...a: unknown[]) => record('in', a)
-    chain.lt     = (...a: unknown[]) => record('lt', a)
-    chain.upsert = (...a: unknown[]) => record('upsert', a)
-
-    chain.then = (resolve: (v: unknown) => unknown, reject?: (e: unknown) => unknown) => {
-      if (table === 'turnovers')            return Promise.resolve(opts.turnovers).then(resolve, reject)
-      if (table === 'assignment_outcomes')   return Promise.resolve(opts.upsert ?? { error: null }).then(resolve, reject)
-      return Promise.resolve({ data: null, error: null }).then(resolve, reject)
-    }
-    return chain
-  })
-
-  const rpc = vi.fn(async (_fn: string) => opts.rpc ?? { data: { scored: 0, crewUpdated: 0, capacityUpdated: 0 }, error: null })
-
-  return { from, rpc, calls }
+  return createSupabaseDouble(
+    {
+      turnovers:           opts.turnovers,
+      assignment_outcomes: opts.upsert ?? { error: null },
+    },
+    { rpc: opts.rpc ?? { data: { scored: 0, crewUpdated: 0, capacityUpdated: 0 }, error: null } },
+  )
 }
 
 function makeStep() {

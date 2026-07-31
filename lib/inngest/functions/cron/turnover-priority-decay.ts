@@ -1,5 +1,6 @@
 import { inngest } from '@/lib/inngest/client'
 import { createServiceClient } from '@/lib/supabase/server'
+import { fetchAllRows } from '@/lib/inngest/paginate'
 
 const NO_BOOKING_WINDOW_DAYS = 14
 
@@ -26,14 +27,20 @@ export const turnoverPriorityDecay = inngest.createFunction(
   async ({ step, logger }) => {
     const candidates = await step.run('find-standalone-medium-turnovers', async () => {
       const supabase = createServiceClient({ system: 'inngest:turnover-priority-decay' })
-      const { data } = await supabase
-        .from('turnovers')
-        .select('id, property_id, checkout_datetime')
-        .is('prev_booking_id', null)
-        .eq('priority', 'medium')
-        .not('status', 'in', '("completed","cancelled")')
-
-      return data ?? []
+      // Paginated — unbounded, this was capped at PostgREST's 1000-row limit
+      // with no error, so priority decay silently stopped covering the
+      // platform past 1000 matching standalone turnovers.
+      return fetchAllRows<{ id: string; property_id: string; checkout_datetime: string }>(
+        (from, to) => supabase
+          .from('turnovers')
+          .select('id, property_id, checkout_datetime')
+          .is('prev_booking_id', null)
+          .eq('priority', 'medium')
+          .not('status', 'in', '("completed","cancelled")')
+          .order('id', { ascending: true })
+          .range(from, to),
+        { label: 'turnovers(priority-decay)' }
+      )
     })
 
     logger.info(`Checking ${candidates.length} standalone turnovers for priority decay`)
@@ -63,16 +70,21 @@ export const turnoverPriorityDecay = inngest.createFunction(
       const minFrom = windows.reduce((min, w) => (w.fromDate < min ? w.fromDate : min), windows[0]!.fromDate)
       const maxTo   = windows.reduce((max, w) => (w.toDate   > max ? w.toDate   : max), windows[0]!.toDate)
 
-      const { data: bookings } = await supabase
-        .from('bookings')
-        .select('property_id, checkin_date')
-        .in('property_id', uniquePropertyIds)
-        .in('status', ['confirmed', 'tentative'])
-        .gte('checkin_date', minFrom)
-        .lte('checkin_date', maxTo)
+      const bookings = await fetchAllRows<{ property_id: string; checkin_date: string }>(
+        (from, to) => supabase
+          .from('bookings')
+          .select('property_id, checkin_date')
+          .in('property_id', uniquePropertyIds)
+          .in('status', ['confirmed', 'tentative'])
+          .gte('checkin_date', minFrom)
+          .lte('checkin_date', maxTo)
+          .order('property_id', { ascending: true })
+          .range(from, to),
+        { label: 'bookings(priority-decay-windows)' }
+      )
 
       const checkinsByProperty = new Map<string, string[]>()
-      for (const b of bookings ?? []) {
+      for (const b of bookings) {
         const list = checkinsByProperty.get(b.property_id) ?? []
         list.push(b.checkin_date)
         checkinsByProperty.set(b.property_id, list)

@@ -34,6 +34,7 @@ import {
 } from '../schema'
 import { getCursor, advanceCursor, partitionByKnown } from './cursors'
 import { fetchInChunks } from './chunked'
+import { bulkPutShadowed } from './shadow'
 import { reportError } from '@/lib/observability/report-error'
 
 const TURNOVER_COLUMNS =
@@ -53,52 +54,63 @@ function normalizeTurnovers(rows: Record<string, unknown>[]): TurnoverRow[] {
   })
 }
 
-export async function syncAssignedTurnovers(
+/** Full pull of this crew member's assignment scope. Null on query failure. */
+async function fetchAssignedTurnoverIds(
   supabase: DexieSupabaseClient,
-  userId: string,
   crewMemberId: string,
-  force = false,
-): Promise<void> {
-  const db = getDexieDb(userId)
-
-  // ── 1. Assignment scope: always a full pull ────────────────────────────
-  const { data: assignments, error: assignError } = await supabase
+): Promise<string[] | null> {
+  const { data, error } = await supabase
     .from('turnover_assignments')
     .select('turnover_id')
     .eq('crew_member_id', crewMemberId)
-  if (assignError) {
-    console.error('[turnoverSync] turnover_assignments fetch failed:', assignError)
-    return
+  if (error) {
+    console.error('[turnoverSync] turnover_assignments fetch failed:', error)
+    reportError(new Error(`turnover_assignments fetch failed: ${error.message}`), {
+      site: 'dexie.sync.turnovers.assignments',
+    })
+    return null
   }
+  return [...new Set<string>((data ?? []).map((a: { turnover_id: string }) => a.turnover_id))]
+}
 
-  const assignedIds: string[] = [
-    ...new Set<string>((assignments ?? []).map((a: { turnover_id: string }) => a.turnover_id)),
-  ]
-
-  // ── 2. Reconcile deletions: unassigned turnovers leave the device ──────
-  const localIds = new Set<string>(
-    (await db.turnovers.toArray()).map((t) => t.id)
-  )
+/**
+ * Deletion/scope reconciliation: a turnover no longer in the assigned set
+ * leaves the device together with its cached checklists. This — not the
+ * cursor — is what makes unassignment correct (cursor invariant #1).
+ */
+async function reconcileRemovedTurnovers(
+  userId: string,
+  localIds: Set<string>,
+  assignedIds: string[],
+): Promise<void> {
+  const db = getDexieDb(userId)
   const assignedIdSet = new Set(assignedIds)
   const removedIds = [...localIds].filter((id) => !assignedIdSet.has(id))
-  if (removedIds.length) {
-    const instanceKeys = await db.checklist_instances
-      .where('turnover_id').anyOf(removedIds).primaryKeys()
-    const itemKeys = await db.checklist_instance_items
-      .where('turnover_id').anyOf(removedIds).primaryKeys()
-    await Promise.all([
-      db.turnovers.bulkDelete(removedIds),
-      db.checklist_instances.bulkDelete(instanceKeys),
-      db.checklist_instance_items.bulkDelete(itemKeys),
-    ])
-  }
+  if (!removedIds.length) return
 
-  if (!assignedIds.length) return
+  const instanceKeys = await db.checklist_instances
+    .where('turnover_id').anyOf(removedIds).primaryKeys()
+  const itemKeys = await db.checklist_instance_items
+    .where('turnover_id').anyOf(removedIds).primaryKeys()
+  await Promise.all([
+    db.turnovers.bulkDelete(removedIds),
+    db.checklist_instances.bulkDelete(instanceKeys),
+    db.checklist_instance_items.bulkDelete(itemKeys),
+  ])
+}
 
-  // ── 3. Turnover rows: delta for known ids, full for ids new to device ──
-  const { known, fresh } = partitionByKnown(assignedIds, localIds)
-  const cursor = force ? null : await getCursor(userId, 'cursor:turnovers')
-
+/**
+ * Turnover rows for the assigned scope: full pull for ids new to the device
+ * (or when no cursor exists yet), delta pull for known ids. Null on failure
+ * so the caller bails without advancing the cursor.
+ */
+async function fetchTurnoverRows(
+  supabase: DexieSupabaseClient,
+  assignedIds: string[],
+  known: string[],
+  fresh: string[],
+  cursor: string | null,
+): Promise<Record<string, unknown>[] | null> {
   const fetched: Record<string, unknown>[] = []
 
   if (fresh.length || cursor === null) {
@@ -110,7 +122,7 @@ export async function syncAssignedTurnovers(
     if (data === null) {
       console.error('[turnoverSync] turnovers fetch failed')
       reportError(new Error('turnovers fetch failed'), { site: 'dexie.sync.turnovers.full' })
-      return
+      return null
     }
     fetched.push(...data)
   }
@@ -122,59 +134,100 @@ export async function syncAssignedTurnovers(
     if (data === null) {
       console.error('[turnoverSync] turnovers delta fetch failed')
       reportError(new Error('turnovers delta fetch failed'), { site: 'dexie.sync.turnovers.delta' })
-      return
+      return null
     }
     fetched.push(...data)
   }
 
+  return fetched
+}
+
+/**
+ * Reference data for the assigned property scope: properties (only ids the
+ * device lacks — names/coords rarely change) and the full inventory set for
+ * those properties. Returns false on a query failure so the caller stops.
+ */
+async function syncScopeReferenceData(
+  supabase: DexieSupabaseClient,
+  userId: string,
+  force: boolean,
+): Promise<boolean> {
+  const db = getDexieDb(userId)
+  const scopeTurnovers = await db.turnovers.toArray()
+  const propertyIds = [...new Set(scopeTurnovers.map((t) => t.property_id))]
+  if (!propertyIds.length) return true
+
+  const cachedPropertyIds = new Set((await db.properties.toArray()).map((p) => p.id))
+  const missingPropertyIds = force
+    ? propertyIds
+    : propertyIds.filter((id) => !cachedPropertyIds.has(id))
+
+  if (missingPropertyIds.length) {
+    const properties = await fetchInChunks(missingPropertyIds, (chunk) =>
+      supabase
+        .from('properties')
+        .select('id, org_id, name, address, city, state, lat, lng, timezone')
+        .in('id', chunk),
+    )
+    if (properties === null) {
+      console.error('[turnoverSync] properties fetch failed')
+      reportError(new Error('properties fetch failed'), { site: 'dexie.sync.turnovers.properties' })
+      return false
+    }
+    if (properties.length) await db.properties.bulkPut(properties as PropertyRow[])
+  }
+
+  const inventory = await fetchInChunks(propertyIds, (chunk) =>
+    supabase
+      .from('inventory_items')
+      .select('id, property_id, org_id, name, category, unit, par_level, current_quantity')
+      .in('property_id', chunk)
+      .eq('is_active', true),
+  )
+  if (inventory === null) {
+    console.error('[turnoverSync] inventory fetch failed')
+    reportError(new Error('inventory fetch failed'), { site: 'dexie.sync.turnovers.inventory' })
+    return false
+  }
+  // Shadowed: a crew member's queued-but-unpushed count must not be reverted
+  // in front of them by a routine pull.
+  if (inventory.length) {
+    await bulkPutShadowed(db.inventory_items, userId, 'inventory_items', inventory as InventoryItemRow[])
+  }
+  return true
+}
+
+export async function syncAssignedTurnovers(
+  supabase: DexieSupabaseClient,
+  userId: string,
+  crewMemberId: string,
+  force = false,
+): Promise<void> {
+  const db = getDexieDb(userId)
+
+  // ── 1. Assignment scope: always a full pull ────────────────────────────
+  const assignedIds = await fetchAssignedTurnoverIds(supabase, crewMemberId)
+  if (assignedIds === null) return
+
+  // ── 2. Reconcile deletions: unassigned turnovers leave the device ──────
+  const localIds = new Set<string>((await db.turnovers.toArray()).map((t) => t.id))
+  await reconcileRemovedTurnovers(userId, localIds, assignedIds)
+
+  if (!assignedIds.length) return
+
+  // ── 3. Turnover rows: delta for known ids, full for ids new to device ──
+  const { known, fresh } = partitionByKnown(assignedIds, localIds)
+  const cursor = force ? null : await getCursor(userId, 'cursor:turnovers')
+  const fetched = await fetchTurnoverRows(supabase, assignedIds, known, fresh, cursor)
+  if (fetched === null) return
+
   if (fetched.length) {
-    await db.turnovers.bulkPut(normalizeTurnovers(fetched))
+    await bulkPutShadowed(db.turnovers, userId, 'turnovers', normalizeTurnovers(fetched))
   }
   await advanceCursor(userId, 'cursor:turnovers', fetched as { updated_at?: string | null }[])
 
   // ── 4. Reference data for the assigned scope ───────────────────────────
-  // Properties: only fetch ids the device doesn't have yet (names/coords
-  // rarely change; a full resync or reassignment refreshes them). Inventory
-  // stays a full pull of the property scope — one bounded query.
-  const scopeTurnovers = await db.turnovers.toArray()
-  const propertyIds = [...new Set(scopeTurnovers.map((t) => t.property_id))]
-  if (propertyIds.length) {
-    const cachedPropertyIds = new Set(
-      (await db.properties.toArray()).map((p) => p.id)
-    )
-    const missingPropertyIds = force
-      ? propertyIds
-      : propertyIds.filter((id) => !cachedPropertyIds.has(id))
-
-    if (missingPropertyIds.length) {
-      const properties = await fetchInChunks(missingPropertyIds, (chunk) =>
-        supabase
-          .from('properties')
-          .select('id, org_id, name, address, city, state, lat, lng, timezone')
-          .in('id', chunk),
-      )
-      if (properties === null) {
-        console.error('[turnoverSync] properties fetch failed')
-        reportError(new Error('properties fetch failed'), { site: 'dexie.sync.turnovers.properties' })
-        return
-      }
-      if (properties.length) await db.properties.bulkPut(properties as PropertyRow[])
-    }
-
-    const inventory = await fetchInChunks(propertyIds, (chunk) =>
-      supabase
-        .from('inventory_items')
-        .select('id, property_id, org_id, name, category, unit, par_level, current_quantity')
-        .in('property_id', chunk)
-        .eq('is_active', true),
-    )
-    if (inventory === null) {
-      console.error('[turnoverSync] inventory fetch failed')
-      reportError(new Error('inventory fetch failed'), { site: 'dexie.sync.turnovers.inventory' })
-      return
-    }
-    if (inventory.length) await db.inventory_items.bulkPut(inventory as InventoryItemRow[])
-  }
+  if (!(await syncScopeReferenceData(supabase, userId, force))) return
 
   // ── 5. Checklists ride along; fresh turnover ids skip the cursor ───────
   await pullChecklistsForTurnovers(supabase, userId, assignedIds, crewMemberId, {
@@ -230,7 +283,7 @@ export async function pullChecklistsForTurnovers(
       const { updated_at: _updatedAt, ...row } = i
       return { ...row, completed_by_crew_id: row.completed_by_crew_id ?? '' }
     })
-    await db.checklist_instances.bulkPut(normalizedInstances as ChecklistInstanceRow[])
+    await bulkPutShadowed(db.checklist_instances, userId, 'checklist_instances', normalizedInstances as ChecklistInstanceRow[])
   }
   if (opts.advanceCursors) {
     await advanceCursor(userId, 'cursor:checklist_instances', instances as { updated_at?: string | null }[])
@@ -247,6 +300,22 @@ export async function pullChecklistsForTurnovers(
   )
   if (items === null) return
   if (items.length) {
+    // Crew-note isolation needs the LOCAL row, not just the remote one:
+    // checklist_instance_items has no note-author column, only
+    // completed_by_crew_id. Keying isolation off that column alone leaked
+    // another crew member's note text the moment this device completed the
+    // item (completed_by_crew_id then equals this crew member, so their
+    // note was adopted wholesale). A note is authored on-device and written
+    // to Dexie first, so an already-cached item's local note is the
+    // authoritative one for this device; a remote note is only ever adopted
+    // for an item this device has never seen AND whose recorded crew member
+    // is this one. Cost: a note this crew member wrote on a different device
+    // won't back-fill onto an item already cached here — a freshness gap
+    // within one crew member's own data, not a cross-crew leak.
+    const localItems = await db.checklist_instance_items
+      .where('id').anyOf(items.map((i) => i.id as string)).toArray()
+    const localById = new Map(localItems.map((i) => [i.id, i]))
+
     const normalized = items.map((item) => {
       const { updated_at: _updatedAt, ...row } = item
       return {
@@ -255,18 +324,27 @@ export async function pullChecklistsForTurnovers(
         requires_photo:        Number(row.requires_photo ?? 0),
         is_section_final_item: row.is_section_final_item !== null ? Number(row.is_section_final_item) : 0,
         completed_by_crew_id:  row.completed_by_crew_id ?? '',
-        // Only retain crew_notes if this crew member authored them — nullify
-        // notes from other crew members on multi-crew turnovers before they
-        // land in this device's local cache.
-        crew_notes:            row.completed_by_crew_id === thisCrewMemberId ? (row.crew_notes ?? '') : '',
+        crew_notes:            resolveCrewNotes(row, localById.get(row.id as string), thisCrewMemberId),
         photo_reason:          row.photo_reason ?? '',
       }
     })
-    await db.checklist_instance_items.bulkPut(normalized as ChecklistInstanceItemRow[])
+    await bulkPutShadowed(db.checklist_instance_items, userId, 'checklist_instance_items', normalized as ChecklistInstanceItemRow[])
   }
   if (opts.advanceCursors) {
     await advanceCursor(userId, 'cursor:checklist_items', items as { updated_at?: string | null }[])
   }
+}
+
+// See the isolation comment at the call site: local note wins for an
+// already-cached item; a remote note is adopted only for an item this device
+// has never seen and only when this crew member is the recorded actor.
+function resolveCrewNotes(
+  remote: Record<string, unknown>,
+  local: ChecklistInstanceItemRow | undefined,
+  thisCrewMemberId: string,
+): string {
+  if (local !== undefined) return local.crew_notes ?? ''
+  return remote.completed_by_crew_id === thisCrewMemberId ? ((remote.crew_notes as string | null) ?? '') : ''
 }
 
 // Shared fetch shape for the two checklist pulls: full pull for ids new to
@@ -336,6 +414,6 @@ export async function pullTurnoversOnly(
     return
   }
   if (turnovers.length) {
-    await db.turnovers.bulkPut(normalizeTurnovers(turnovers as Record<string, unknown>[]))
+    await bulkPutShadowed(db.turnovers, userId, 'turnovers', normalizeTurnovers(turnovers as Record<string, unknown>[]))
   }
 }

@@ -410,3 +410,122 @@ validates UUID/date shape before interpolating) at these call sites, or at
 minimum a comment noting the constraint, so a future contributor doesn't
 accidentally pass a free-text field (a search query, an external booking
 ID) into this pattern without realizing it needs escaping/validation first.
+
+---
+
+## 16. Vendor work-order completion is ordered-but-not-atomic (no transaction)
+
+**Files:** `app/api/work-orders/[token]/complete/route.ts`,
+`app/api/work-orders/[token]/complete/helpers.ts`
+
+Found via e2e `21-work-order-offline.spec.ts:103` failing with
+`invoices.length` `Expected: 1, Received: 0` — the work order reached
+`completed` with **zero** invoice rows.
+
+The route performs one logical action across several non-transactional
+writes: create the invoice (line-item insert → `next_work_order_invoice_seq`
+RPC → `work_order_invoices` upsert), atomically claim
+`work_orders.status = 'completed'`, then insert line items, audit, and
+dispatch events. Originally the claim came *first*, which made a failure
+anywhere after it unrecoverable: the WO was already irreversibly
+`completed`, so every vendor retry could only get the already-closed
+`409 → terminal dead-letter`, and the invoice was lost forever while the
+work order looked done. That affects the entire vendor-gets-paid flow.
+
+**Already fixed (2026-07-31):** invoice creation now runs *before* the
+claim, with `rollbackUnclaimedInvoice()` compensating when the claim is
+lost, and line items deliberately kept *after* the claim (the claim is the
+mutex that keeps them exactly-once; they have no unique key to dedupe a
+replay against). `status = 'completed'` is now the last irreversible thing
+to become true, so a pre-claim failure leaves the WO claimable and the
+vendor's retry succeeds. Covered by `unit/route-handlers/
+work-order-token-complete{,-helpers}.test.ts`, four of which were confirmed
+to fail against the old ordering.
+
+**Still outstanding — the proper fix.** Ordering plus a compensating
+delete is a saga, not a transaction. Residual holes:
+
+- The compensating `rollbackUnclaimedInvoice()` can itself fail (it logs,
+  it cannot guarantee). A crash between insert and rollback leaves an
+  orphan invoice on a work order that was never completed by this request.
+- Between the invoice upsert and the claim, an invoice exists for a WO that
+  is not yet `completed` — the inverse of the original window, and readers
+  (PM invoice list, owner P&L) can observe it.
+- Sequence allocation via `next_work_order_invoice_seq` is a separate
+  round trip; a failure after it burns a number and leaves a gap.
+
+**Suggested fix:** move the whole completion into a single
+`SECURITY DEFINER` plpgsql RPC that claims the work order, allocates the
+invoice number, inserts the invoice and line items, and returns the result
+— one transaction, so either all of it happens or none of it does. The
+route keeps token validation, payload validation and event dispatch;
+everything touching the database becomes one call. Existing tests should
+largely port over, since the externally-observable invariant is unchanged.
+
+**Why it was not done at the time:** CI does not apply migrations to the
+E2E project (`docs/E2E_SETUP.md` is a manual process — confirmed again on
+2026-07-31 when the `db-invariants` job failed for exactly this reason), so
+adding a new DB function would red the entire e2e suite until someone
+applied it by hand. The route-level reordering achieves the same
+externally-observable invariant with no schema change, which is why it went
+first. Doing this properly means sequencing the migration and the code
+change together, and applying to **both** the production and E2E projects.
+
+**Related, same class:** `lib/stripe/vendor-connect-invite.ts`'s
+orphan-on-email-failure path and `lib/integrations/vault.ts`'s pending-link
+claim are the two existing examples in the repo of this "multi-step write
+with an explicit cleanup path" pattern — worth reading before designing the
+RPC, and worth revisiting once a transactional idiom exists here.
+
+---
+
+## 17. Smaller items deferred from the 2026-07-30 pre-launch remediation
+
+Each was found during that pass, judged deliberately rather than missed,
+and left with a reason. Recorded here so they don't only exist in a
+transcript.
+
+- **Crew outbox reconnect waits out its backoff.** `SyncEngine`'s `online`
+  handler has no `ignoreBackoff`, unlike the vendor path
+  (`lib/dexie/vendorWoSyncService.ts`), so a crew member regaining signal
+  can wait up to the full ~5-minute backoff before their queued work
+  drains. Same class as the vendor bug fixed on 2026-07-31; not fixed
+  because no spec exercises it and it would touch the crew backoff tests.
+
+- **~149 Server Action reads still collapse "query errored" into "zero
+  rows".** Baselined in `unit/guardrails/supabase-error-handling.test.ts`
+  (481 sites / 169 files, shrink-only). Every dashboard *read* path was
+  fixed; the Server Actions were not, because each needs its own
+  user-facing message and fail-vs-degrade decision, and a mechanical
+  rewrite of 149 write paths would have been worse than the known gap.
+
+- **The E2E project cannot catch the missing-GRANT class.** It carries a
+  blanket `GRANT ALL` to `authenticated` on 91 of 93 public tables, so the
+  new policy↔GRANT invariant in `scripts/check-db-invariants.mjs` passes
+  vacuously there. That check found nine ungranted tables in production —
+  but only because it was run against production by hand. As CI is wired
+  (E2E only), it would not have caught them. Either point the job at
+  production read-only as well, or make E2E's grants mirror production.
+
+- **E2E has no storage buckets** except the two guidebook ones — no
+  `compliance-documents`, `work-order-photos` or `turnover-photos`. So no
+  e2e test exercises photo upload or compliance documents, which is exactly
+  the surface the B2 cross-tenant blocker was about.
+
+- **Migration history has drifted between projects.** Production has
+  `20260730123000` and `20260730213349`; E2E has `20260730122734`,
+  `20260730122817`, `20260730213400`. Different sets on each, and at least
+  one on each side has no local file — the same untracked-drift class as
+  the B2 blocker itself. See also entry 13 above.
+
+- **`compareCodeUnits` exists twice** (`lib/inngest/functions/
+  build-shopping-cart.ts` exported, `app/(dashboard)/inventory/actions.ts`
+  local) because the latter is `'use server'`, where every export must be
+  an async action, so sharing it needs a third module. Fine at two copies;
+  factor it out if a third canonicalisation sort appears.
+
+- **`cron/maintenance-schedules.ts:326`** remains a named `REAL GAP` in
+  `unit/guardrails/inngest-insert-idempotency.test.ts` — a step retry can
+  append a duplicate escalation note. Cosmetic (a duplicate note, not a
+  duplicate financial record); closing it needs a product decision about
+  what makes two escalation events "the same".

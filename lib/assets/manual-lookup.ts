@@ -29,7 +29,9 @@ import type { DBClient } from '@/lib/supabase/server'
 import type { AssetType } from '@/types/database'
 
 import { reportError } from '@/lib/observability/report-error'
-const MODEL = 'claude-haiku-4-5-20251001'
+import { safeFetch } from '@/lib/security/url-guard'
+
+const MODEL ='claude-haiku-4-5-20251001'
 
 export interface ManualLookupResult {
   sourceUrl: string | null
@@ -94,14 +96,28 @@ function extractUrlFromResponse(message: Anthropic.Message): string | null {
 
 // Some manufacturer sites don't support HEAD — falls back to GET before
 // giving up, so a real live page isn't discarded on a technicality.
+//
+// SSRF: the URL here comes out of an LLM response whose prompt is seeded
+// with a user-supplied asset make/model, so it is fully attacker-influenced
+// — prompt injection straight into an outbound request. It must never be
+// handed to a bare fetch(). safeFetch() (lib/security/url-guard.ts) enforces
+// the scheme/host rules and rejects private, loopback, and link-local
+// targets, including across redirects.
 async function validateUrl(url: string): Promise<boolean> {
   try {
-    const headRes = await fetch(url, { method: 'HEAD', signal: AbortSignal.timeout(8000) })
+    const headRes = await safeFetch(url, { method: 'HEAD', signal: AbortSignal.timeout(8000) })
     if (headRes.ok) return true
 
-    const getRes = await fetch(url, { method: 'GET', signal: AbortSignal.timeout(8000) })
+    const getRes = await safeFetch(url, { method: 'GET', signal: AbortSignal.timeout(8000) })
     return getRes.ok
-  } catch {
+  } catch (err) {
+    // Covers both "the page isn't reachable" and "the URL was rejected as
+    // unsafe" — either way there's no manual to store. Logged (not silent)
+    // so a blocked-target pattern is visible rather than looking like a
+    // stream of ordinary dead links.
+    console.warn('[findManualUrl] candidate URL rejected or unreachable', {
+      error: err instanceof Error ? err.message : String(err),
+    })
     return false
   }
 }

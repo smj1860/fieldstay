@@ -678,8 +678,8 @@ export function ReviewsClient({ reviews: initialReviews, manualUsedThisWeek }: P
 
           {/* Platform */}
           <div>
-            <label className="label">Platform</label>
-            <select
+            <label htmlFor="reviews-client-platform" className="label">Platform</label>
+            <select id="reviews-client-platform"
               value={manualForm.platform}
               onChange={(e) => setManualForm(f => ({ ...f, platform: e.target.value }))}
               className="input"
@@ -694,8 +694,9 @@ export function ReviewsClient({ reviews: initialReviews, manualUsedThisWeek }: P
 
           {/* Star rating */}
           <div>
-            <label className="label">Star Rating</label>
-            <div className="flex gap-2">
+            {/* Labels a group of star buttons, not a single control. */}
+            <span className="label" id="manual-review-rating-label">Star Rating</span>
+            <div className="flex gap-2" role="group" aria-labelledby="manual-review-rating-label">
               {[1, 2, 3, 4, 5].map((n) => (
                 <button
                   key={n}
@@ -711,8 +712,8 @@ export function ReviewsClient({ reviews: initialReviews, manualUsedThisWeek }: P
 
           {/* Guest name */}
           <div>
-            <label className="label">Guest Name (optional)</label>
-            <Input
+            <label htmlFor="reviews-client-guest-name-optional" className="label">Guest Name (optional)</label>
+            <Input id="reviews-client-guest-name-optional"
               type="text"
               value={manualForm.guestName}
               onChange={(e) => setManualForm(f => ({ ...f, guestName: e.target.value }))}
@@ -722,8 +723,8 @@ export function ReviewsClient({ reviews: initialReviews, manualUsedThisWeek }: P
 
           {/* Review text */}
           <div>
-            <label className="label">Review Text</label>
-            <textarea
+            <label htmlFor="reviews-client-review-text" className="label">Review Text</label>
+            <textarea id="reviews-client-review-text"
               value={manualForm.reviewText}
               onChange={(e) => setManualForm(f => ({ ...f, reviewText: e.target.value }))}
               rows={5}

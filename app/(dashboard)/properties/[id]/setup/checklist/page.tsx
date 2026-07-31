@@ -3,6 +3,7 @@ import { ChecklistBuilder } from './checklist-builder'
 import { Card } from '@/components/ui/Card'
 import { unwrapJoin } from '@/lib/utils/supabase-joins'
 import type { Metadata } from 'next'
+import { throwIfAnyQueryFailed } from '@/lib/supabase/unwrap'
 
 export const metadata: Metadata = { title: 'Turnover Checklist' }
 interface Props { params: Promise<{ id: string }> }
@@ -12,7 +13,7 @@ export default async function ChecklistPage({ params }: Props) {
   const { property, supabase } = await requireProperty(id)
   const { membership } = await requireOrgMember()
 
-  const [{ data: template }, { data: otherProperties }, { data: siblingChecklistSections }, { data: roomTemplates }] = await Promise.all([
+  const [{ data: template, error: templateError }, { data: otherProperties, error: otherPropertiesError }, { data: siblingChecklistSections, error: siblingChecklistSectionsError }, { data: roomTemplates, error: roomTemplatesError }] = await Promise.all([
     supabase
       .from('checklist_templates')
       .select(`id, name, checklist_template_sections ( id, name, sort_order, room_template_id, checklist_template_items ( id, task, requires_photo, notes, sort_order ) )`)
@@ -37,6 +38,10 @@ export default async function ChecklistPage({ params }: Props) {
       .eq('org_id', membership.org_id)
       .order('name'),
   ])
+
+  // Logs + reports every failure, then throws so the segment's error.tsx
+  // renders a real error state — an outage must not look like empty data.
+  throwIfAnyQueryFailed({ site: 'page.properties.id.setup.checklist', orgId: membership.org_id }, templateError, otherPropertiesError, siblingChecklistSectionsError, roomTemplatesError)
 
   const sectionCountByProperty: Record<string, number> = {}
   const propNameByProperty: Record<string, string> = {}

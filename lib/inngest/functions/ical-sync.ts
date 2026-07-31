@@ -9,35 +9,26 @@ import { renderPmAlert } from '@/lib/resend/emails/pm-alert'
 import type { BookingSource } from '@/types/database'
 
 import { reportError } from '@/lib/observability/report-error'
-// H-2: Reject non-HTTPS URLs and private/loopback IP ranges to prevent SSRF
-function assertSafeIcalUrl(url: string): void {
-  let parsed: URL
-  try {
-    parsed = new URL(url)
-  } catch {
-    throw new Error('Invalid iCal URL format')
-  }
-  if (parsed.protocol !== 'https:') {
-    throw new Error('iCal feeds must use HTTPS')
-  }
-  const h = parsed.hostname.toLowerCase()
-  if (h === 'localhost' || h === '127.0.0.1' || h === '::1' || h === '0.0.0.0') {
-    throw new Error('SSRF: loopback address not permitted')
-  }
-  if (/^10\./.test(h) || /^172\.(1[6-9]|2\d|3[01])\./.test(h) || /^192\.168\./.test(h)) {
-    throw new Error('SSRF: private IP range not permitted')
-  }
-  // Block AWS metadata endpoint and link-local
-  if (/^169\.254\./.test(h)) {
-    throw new Error('SSRF: link-local address not permitted')
-  }
-}
+import { fetchAllRows, fetchDistinctOrgIds } from '@/lib/inngest/paginate'
+import { safeFetch } from '@/lib/security/url-guard'
+
+// Feed fetches are spread across this window to avoid a thundering herd at the
+// top of the hour. Applied per-org now that fan-out is two-stage.
+const JITTER_WINDOW_MS = 55 * 60 * 1000
 
 /**
- * SCHEDULED: runs every 4 hours.
+ * SCHEDULED: runs hourly.
  * Also triggered manually via `ical/sync.all.requested`.
  *
- * Fetches all active iCal feeds and fans out one sync event per feed.
+ * DISPATCHER ONLY. It resolves the set of orgs that have at least one active
+ * feed and fans out one `ical/sync.org.requested` per org; syncOrgIcalFeeds
+ * below reads that org's own feeds and fans out the per-feed events.
+ *
+ * The previous shape read every active feed platform-wide in one unbounded
+ * `.select()`. PostgREST caps responses at max_rows (1000), with no error and
+ * no truncation signal — so at ~150 tenants x 30 properties x 2 feeds (~9,000
+ * feeds) only the first 1,000 ever fanned out and every other feed silently
+ * stopped receiving booking updates. That breaks at roughly 17 tenants.
  */
 export const syncAllIcalFeeds = inngest.createFunction(
   {
@@ -52,36 +43,78 @@ export const syncAllIcalFeeds = inngest.createFunction(
   async ({ event, step, logger }) => {
     const orgId = 'org_id' in event.data ? event.data.org_id : undefined
 
-    const feeds = await step.run('fetch-active-feeds', async () => {
+    const orgIds = await step.run('find-orgs-with-active-feeds', async () => {
+      if (orgId) return [orgId]
       const supabase = createServiceClient({ system: 'inngest:ical-sync' })
-      let query = supabase
-        .from('ical_feeds')
-        .select('id, property_id, org_id')
-        .eq('is_active', true)
-
-      if (orgId) query = query.eq('org_id', orgId)
-
-      const { data, error } = await query
-      if (error) throw new Error(`Failed to fetch feeds: ${error.message}`)
-      return data ?? []
+      return fetchDistinctOrgIds(
+        (from, to) => supabase
+          .from('ical_feeds')
+          .select('org_id')
+          .eq('is_active', true)
+          .order('org_id', { ascending: true })
+          .range(from, to),
+        { label: 'ical_feeds.org_id' }
+      )
     })
 
-    logger.info(`Syncing ${feeds.length} iCal feeds${orgId ? ' for org ' + orgId : ' (all orgs)'}`)
+    logger.info(`iCal sync dispatch: ${orgIds.length} org(s)`)
+
+    if (orgIds.length === 0) return { dispatched: 0 }
+
+    await step.sendEvent(
+      'fan-out-org-syncs',
+      orgIds.map((id) => ({
+        name: 'ical/sync.org.requested' as const,
+        data: { org_id: id },
+      }))
+    )
+
+    return { dispatched: orgIds.length }
+  }
+)
+
+/**
+ * Per-org iCal fan-out. One invocation = one tenant, so the feed list read
+ * here is naturally bounded by that tenant's property count (and paginated
+ * anyway), and a single slow/failing tenant retries only itself.
+ */
+export const syncOrgIcalFeeds = inngest.createFunction(
+  {
+    id:          'ical-sync-org',
+    name:        'Sync iCal Feeds — per org',
+    retries:     2,
+    concurrency: { limit: 10 },
+  },
+  { event: 'ical/sync.org.requested' as const },
+  async ({ event, step, logger }) => {
+    const { org_id } = event.data
+
+    const feeds = await step.run('fetch-active-feeds', async () => {
+      const supabase = createServiceClient({ system: 'inngest:ical-sync' })
+      return fetchAllRows<{ id: string; property_id: string; org_id: string }>(
+        (from, to) => supabase
+          .from('ical_feeds')
+          .select('id, property_id, org_id')
+          .eq('is_active', true)
+          .eq('org_id', org_id)
+          .order('id', { ascending: true })
+          .range(from, to),
+        { label: `ical_feeds[org=${org_id}]` }
+      )
+    })
+
+    logger.info(`Syncing ${feeds.length} iCal feeds for org ${org_id}`)
 
     if (feeds.length === 0) return { synced: 0 }
-
-    // Fan out — one event per feed, spread across 55-minute window to prevent thundering herd
-    const JITTER_WINDOW_MS = 55 * 60 * 1000
 
     await step.sendEvent(
       'fan-out-feed-syncs',
       feeds.map((feed, index) => {
-        const baseDelay    = feeds.length > 1
+        const baseDelay = feeds.length > 1
           ? Math.floor((index / (feeds.length - 1)) * JITTER_WINDOW_MS)
           : 0
         // eslint-disable-next-line no-restricted-properties -- schedule jitter to spread feed fetches, not id/token generation
         const randomJitter = Math.floor(Math.random() * 30_000)
-        const scheduledTs  = Date.now() + baseDelay + randomJitter
 
         return {
           name: 'ical/sync.requested' as const,
@@ -90,7 +123,7 @@ export const syncAllIcalFeeds = inngest.createFunction(
             property_id: feed.property_id,
             org_id:      feed.org_id,
           },
-          ts: scheduledTs,
+          ts: Date.now() + baseDelay + randomJitter,
         }
       })
     )
@@ -141,10 +174,14 @@ export const syncIcalFeed = inngest.createFunction(
     let rawIcal: string
     try {
       rawIcal = await step.run('download-ical', async () => {
-        assertSafeIcalUrl(feedUrl)
-        const response = await fetch(feedUrl, {
+        // safeFetch (lib/security/url-guard.ts) validates the URL AND every
+        // redirect hop. The previous guard string-matched the hostname once
+        // and then called fetch(), which follows redirects by default — so a
+        // feed URL on an attacker-controlled HTTPS host passed the check and
+        // then 302'd to http://169.254.169.254/latest/meta-data/, whose body
+        // this function parses and persists (readable SSRF, not blind).
+        const response = await safeFetch(feedUrl, {
           headers: { 'User-Agent': 'FieldStay/1.0 iCal Sync' },
-          signal:  AbortSignal.timeout(15_000),
         })
         if (!response.ok) {
           throw new Error(`HTTP ${response.status} fetching iCal feed`)
@@ -182,13 +219,22 @@ export const syncIcalFeed = inngest.createFunction(
 
         type ExistingRow = { id: string; ical_uid: string; status: string; guest_email: string | null }
 
-        const { data: existingBookings } = await supabase
-          .from('bookings')
-          .select('id, ical_uid, status, guest_email')
-          .eq('ical_feed_id', feed_id)
+        // Paginated: a long-lived feed accumulates more than PostgREST's
+        // 1000-row cap, and a truncated "existing" map would make every
+        // unseen booking look brand new (re-firing booking/detected) while
+        // the cancel-absent pass below silently stopped covering older rows.
+        const existingBookings = await fetchAllRows<ExistingRow>(
+          (from, to) => supabase
+            .from('bookings')
+            .select('id, ical_uid, status, guest_email')
+            .eq('ical_feed_id', feed_id)
+            .order('id', { ascending: true })
+            .range(from, to),
+          { label: `bookings[feed=${feed_id}]` }
+        )
 
         const existingByUid = new Map<string, ExistingRow>(
-          (existingBookings as ExistingRow[] ?? []).map((b) => [b.ical_uid, b])
+          existingBookings.map((b) => [b.ical_uid, b])
         )
         // Inngest serializes step.run() results as JSON, so Date objects become
         // strings. toDateString/toTimeString/isAllDay all accept Date | string.
@@ -367,15 +413,19 @@ export const syncIcalFeed = inngest.createFunction(
 
       // Fetch full booking data — filter to confirmed only in case a booking
       // was cancelled between the upsert step and this step
-      const { data: bookingDetails, error: detailsError } = await supabase
-        .from('bookings')
-        .select('id, guest_name, guest_email, checkin_date, checkout_date')
-        .in('id', (newBookings as Array<{ id: string }>).map((b) => b.id))
-        .eq('status', 'confirmed')
+      const newBookingIds = (newBookings as Array<{ id: string }>).map((b) => b.id)
+      const bookingDetails = await fetchAllRows<BookingDetail>(
+        (from, to) => supabase
+          .from('bookings')
+          .select('id, guest_name, guest_email, checkin_date, checkout_date')
+          .in('id', newBookingIds)
+          .eq('status', 'confirmed')
+          .order('id', { ascending: true })
+          .range(from, to),
+        { label: 'bookings(new-detail)' }
+      )
 
-      if (detailsError) throw new Error(`Failed to fetch booking details: ${detailsError.message}`)
-
-      for (const booking of (bookingDetails as BookingDetail[] ?? [])) {
+      for (const booking of bookingDetails) {
         events.push({
           name: 'booking/detected' as const,
           data: {

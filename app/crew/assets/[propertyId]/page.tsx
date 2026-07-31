@@ -5,6 +5,7 @@ import { useParams, useRouter } from 'next/navigation'
 import { useState } from 'react'
 import { ArrowLeft, Camera, CheckCircle2, Loader2, Wrench, ClipboardCheck } from 'lucide-react'
 import { createClient } from '@/lib/supabase/client'
+import { orgScopedStoragePath } from '@/lib/storage/object-path'
 import { submitWorkOrderReport } from '@/lib/dexie/helpers'
 import { enqueueMutation } from '@/lib/dexie/syncService'
 import { savePendingPhotoBlob, compressPhotoForQueue } from '@/lib/dexie/photo-queue'
@@ -164,7 +165,7 @@ function DiscoveryCaptureModal({
     fields: {
       make:       string | null
       model:      string | null
-      photoUrl:   string | null
+      photoPath:  string | null
       isNa:       boolean
       scanStatus: 'pending' | null
     },
@@ -177,7 +178,7 @@ function DiscoveryCaptureModal({
       make:        fields.make ?? '',
       model:       fields.model ?? '',
       is_na:       fields.isNa ? 1 : 0,
-      photo_url:   fields.photoUrl ?? '',
+      photo_url:   fields.photoPath ?? '',
     })
 
     await enqueueMutation(userId, 'property_assets', assetId, 'PUT', {
@@ -187,7 +188,7 @@ function DiscoveryCaptureModal({
       asset_type:  assetType,
       make:        fields.make,
       model:       fields.model,
-      photo_url:   fields.photoUrl,
+      photo_url:   fields.photoPath,
       is_na:       fields.isNa,
       scan_status: fields.scanStatus,
     })
@@ -197,7 +198,7 @@ function DiscoveryCaptureModal({
     setSubmitting(true)
     setError(null)
     try {
-      await saveAsset(crypto.randomUUID(), { make: null, model: null, photoUrl: null, isNa: true, scanStatus: null })
+      await saveAsset(crypto.randomUUID(), { make: null, model: null, photoPath: null, isNa: true, scanStatus: null })
       setSuccess(true)
     } catch (err: unknown) {
       setError((err as Error).message || 'Could not save. Check your connection and try again.')
@@ -217,20 +218,21 @@ function DiscoveryCaptureModal({
 
     try {
       const assetId = crypto.randomUUID()
-      let photoUrl: string | null = null
+      let photoPath: string | null = null
 
       if (photoFile) {
-        const supabase = createClient()
         const ext     = photoFile.name.split('.').pop() || 'jpg'
-        const path    = `asset-discovery/${propertyId}/${assetType}-${crypto.randomUUID()}.${ext}`
+        const path    = orgScopedStoragePath(orgId, 'asset-discovery', propertyId, `${assetType}-${crypto.randomUUID()}.${ext}`)
         const blobKey = `photo-asset-${assetId}`
 
-        // getPublicUrl() is pure string templating against the configured
-        // project URL — no network call — so the final URL is known before
-        // the blob actually reaches Storage. The upload itself is queued
-        // below via pending_photo_uploads and may finish well after this
-        // handler returns, or after the device comes back online.
-        photoUrl = supabase.storage.from('turnover-photos').getPublicUrl(path).data.publicUrl
+        // property_assets.photo_url stores the BARE object key, not a URL.
+        // turnover-photos is a private bucket, so a public URL would 400 and
+        // a signed one would expire; the key is stable and can be signed on
+        // demand by whoever needs to read it. Known before the blob actually
+        // reaches Storage — the upload is queued below via
+        // pending_photo_uploads and may finish well after this handler
+        // returns, or after the device comes back online.
+        photoPath = path
 
         const compressed = await compressPhotoForQueue(photoFile)
         await savePendingPhotoBlob(userId, blobKey, compressed)
@@ -250,7 +252,7 @@ function DiscoveryCaptureModal({
       await saveAsset(assetId, {
         make:       make.trim() || null,
         model:      model.trim() || null,
-        photoUrl,
+        photoPath,
         isNa:       false,
         scanStatus: photoFile ? 'pending' : null,
       })

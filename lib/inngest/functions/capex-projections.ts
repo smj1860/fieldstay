@@ -1,40 +1,39 @@
 /**
  * Monthly CapEx Projection Generator (8.16)
  *
- * Cron: 1st of each month at midnight UTC
- * For each org, buckets active assets into replacement-year projections
- * using installation_date + expected lifespan. Stores result in
- * org_milestones (key: capex_projection_{year}).
+ * Cron: 1st of each month at midnight UTC.
+ *
+ * DISPATCHER ONLY. This used to run `for (const org of orgs) { await
+ * step.run(...) }` over a platform-wide `organizations` scan, i.e. one Inngest
+ * step per tenant inside a single run — the same shape the 2026-07-30
+ * scalability pass converted in six other crons, and the one that hits the
+ * per-run step ceiling as tenant count grows (150 tenants = 151 steps in one
+ * run, with the whole memoized-state payload re-sent on every one of them, and
+ * a single failing tenant retrying the entire tail).
+ *
+ * Now: one `org/capex_projection.requested` per org, handled by
+ * capexProjectionOrg below under its own concurrency cap, so step count per run
+ * is 2 regardless of tenant count and a failing tenant retries only itself.
+ *
+ * The projection math and the org_milestones write live in
+ * capex-projection-core.ts, shared with the on-demand button path
+ * (capex-projection-trigger.ts) so the two cannot drift.
  */
 
 import { inngest }             from '@/lib/inngest/client'
 import { createServiceClient } from '@/lib/supabase/server'
 import { logAuditEvent }       from '@/lib/audit'
+import { fetchAllRows }        from '@/lib/inngest/paginate'
+import { runCapexProjectionForOrg } from '@/lib/inngest/functions/capex-projection-core'
 
-export interface CapExProjectionItem {
-  asset_id:         string
-  asset_name:       string
-  property_id:      string   // required for owner portal property-scoped filtering
-  property_name:    string
-  asset_type:       string
-  replacement_year: number
-  cost_low:         number
-  cost_high:        number
-  health_score:     number | null
-  age_years:        number
-  pct_of_lifespan:  number
-}
-
-export interface CapExProjectionYear {
-  total_low:  number
-  total_high: number
-  items:      CapExProjectionItem[]
-}
-
-export interface CapExProjectionPayload {
-  generated_at: string
-  projections:  Record<number, CapExProjectionYear>
-}
+// The payload types are consumed by the capital-planning page, the owner
+// portal and the CPA CSV export, which have always imported them from this
+// module — re-exported so those import paths keep working unchanged.
+export type {
+  CapExProjectionItem,
+  CapExProjectionYear,
+  CapExProjectionPayload,
+} from '@/lib/inngest/functions/capex-projection-core'
 
 export const generateCapexProjections = inngest.createFunction(
   {
@@ -44,115 +43,74 @@ export const generateCapexProjections = inngest.createFunction(
   },
   { cron: '0 0 1 * *' },
   async ({ step, logger }) => {
+    // Resolved once here and carried on the event so every org in one run is
+    // projected against the same year, even if the fan-out straddles midnight
+    // on Dec 31.
     const currentYear = new Date().getFullYear()
 
-    const orgs = await step.run('fetch-orgs', async () => {
+    const orgIds = await step.run('fetch-orgs', async () => {
       const supabase = createServiceClient({ system: 'inngest:capex-projections' })
-      const pageSize = 1000
-      const all: { id: string }[] = []
-      for (let from = 0; ; from += pageSize) {
-        const { data } = await supabase
+      const rows = await fetchAllRows<{ id: string }>(
+        (from, to) => supabase
           .from('organizations')
           .select('id')
-          .range(from, from + pageSize - 1)
-        if (!data?.length) break
-        all.push(...data)
-        if (data.length < pageSize) break
-      }
-      return all
+          .order('id', { ascending: true })
+          .range(from, to),
+        { label: 'organizations(capex)' },
+      )
+      return rows.map((r) => r.id)
     })
 
-    let processedOrgs = 0
+    logger.info(`[CapEx] dispatching ${orgIds.length} org(s) for ${currentYear}`)
 
-    for (const org of orgs) {
-      await step.run(`project-org-${org.id}`, async () => {
-        const supabase = createServiceClient({ system: 'inngest:capex-projections' })
-        const [{ data: assets }, { data: standards }, { data: properties }] =
-          await Promise.all([
-            supabase
-              .from('property_assets')
-              .select('id, name, asset_type, property_id, installation_date, expected_lifespan_years, estimated_replacement_cost, health_score')
-              .eq('org_id', org.id)
-              .eq('is_active', true)
-              .not('installation_date', 'is', null),
-            supabase
-              .from('asset_type_standards')
-              .select('asset_type, lifespan_min_years, lifespan_max_years, avg_replacement_cost_low, avg_replacement_cost_high'),
-            supabase
-              .from('properties')
-              .select('id, name')
-              .eq('org_id', org.id)
-              .eq('is_active', true),
-          ])
-
-        const propertyMap  = Object.fromEntries((properties ?? []).map((p) => [p.id, p.name]))
-        const standardsMap = Object.fromEntries((standards ?? []).map((s) => [s.asset_type, s]))
-
-        const projections: Record<number, CapExProjectionYear> = {}
-
-        for (const asset of assets ?? []) {
-          if (!asset.installation_date) continue
-
-          const std      = standardsMap[asset.asset_type as string]
-          const ageYears = currentYear - new Date(asset.installation_date).getFullYear()
-          const lifespan = asset.expected_lifespan_years
-            ?? (std ? Math.round((std.lifespan_min_years + std.lifespan_max_years) / 2) : 15)
-          const yearsLeft = lifespan - ageYears
-
-          if (yearsLeft > 10) continue
-
-          const costLow  = (asset.estimated_replacement_cost ?? std?.avg_replacement_cost_low  ?? 0) as number
-          const costHigh = (asset.estimated_replacement_cost ?? std?.avg_replacement_cost_high ?? costLow) as number
-
-          const replacementYear = currentYear + Math.max(0, Math.ceil(yearsLeft))
-          const pctOfLifespan   = Math.min(100, Math.round((ageYears / lifespan) * 100))
-
-          if (!projections[replacementYear]) {
-            projections[replacementYear] = { total_low: 0, total_high: 0, items: [] }
-          }
-
-          projections[replacementYear].total_low  += costLow
-          projections[replacementYear].total_high += costHigh
-          projections[replacementYear].items.push({
-            asset_id:         asset.id,
-            asset_name:       asset.name,
-            property_id:      asset.property_id,
-            property_name:    (propertyMap[asset.property_id] as string) ?? 'Unknown',
-            asset_type:       asset.asset_type as string,
-            replacement_year: replacementYear,
-            cost_low:         costLow,
-            cost_high:        costHigh,
-            health_score:     asset.health_score as number | null,
-            age_years:        ageYears,
-            pct_of_lifespan:  pctOfLifespan,
-          })
-        }
-
-        const payload: CapExProjectionPayload = {
-          generated_at: new Date().toISOString(),
-          projections,
-        }
-
-        await supabase
-          .from('org_milestones')
-          .upsert(
-            { org_id: org.id, milestone: `capex_projection_${currentYear}`, value: payload },
-            { onConflict: 'org_id,milestone' }
-          )
-
-        await logAuditEvent({
-          orgId:      org.id,
-          action:     'asset.capex_projection.triggered',
-          targetType: 'org',
-          targetId:   org.id,
-          metadata:   { source: 'monthly_cron' },
-        })
-
-        logger.info(`[CapEx] Org ${org.id}: ${Object.keys(projections).length} replacement years`)
-        processedOrgs++
-      })
+    if (orgIds.length) {
+      await step.sendEvent(
+        'fan-out-capex-projections',
+        orgIds.map((orgId) => ({
+          name: 'org/capex_projection.requested' as const,
+          data: { org_id: orgId, year: currentYear },
+        })),
+      )
     }
 
-    return { processed_orgs: processedOrgs, tax_year: currentYear }
+    return { dispatched: orgIds.length, tax_year: currentYear }
+  }
+)
+
+/**
+ * Per-org CapEx projection. One invocation = one tenant, so the asset and
+ * property scans are bounded by that tenant (and paginated regardless — a large
+ * org's assets used to run off the end of PostgREST's 1000-row cap and vanish
+ * from the projection with no error), and `asset_type_standards` is read once
+ * per invocation instead of once per org inside a platform-wide loop.
+ */
+export const capexProjectionOrg = inngest.createFunction(
+  {
+    id:          'capex-projection-org',
+    name:        'CapEx Projection — per org',
+    retries:     2,
+    concurrency: { limit: 10 },
+  },
+  { event: 'org/capex_projection.requested' },
+  async ({ event, step, logger }) => {
+    const { org_id: orgId, year } = event.data
+
+    const result = await step.run('project-org', async () => {
+      const supabase = createServiceClient({ system: 'inngest:capex-projections' })
+      return runCapexProjectionForOrg(supabase, orgId, year)
+    })
+
+    await step.run('log-projection-audit', async () => {
+      await logAuditEvent({
+        orgId,
+        action:     'asset.capex_projection.triggered',
+        targetType: 'org',
+        targetId:   orgId,
+        metadata:   { source: 'monthly_cron' },
+      })
+    })
+
+    logger.info(`[CapEx] Org ${orgId}: ${result.years_with_items} replacement years`)
+    return { org_id: orgId, tax_year: year, ...result }
   }
 )

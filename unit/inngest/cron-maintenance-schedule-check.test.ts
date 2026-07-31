@@ -10,69 +10,148 @@ vi.mock('@/lib/observability/report-error', () => ({
   reportError: vi.fn(),
 }))
 
-import { dailyMaintenanceScheduleCheck } from '@/lib/inngest/functions/cron/maintenance-schedules'
+import {
+  dailyMaintenanceScheduleCheck,
+  maintenanceSchedulesOrg,
+} from '@/lib/inngest/functions/cron/maintenance-schedules'
 import { createServiceClient } from '@/lib/supabase/server'
 import { logAuditEvent } from '@/lib/audit'
 import { reportError } from '@/lib/observability/report-error'
 import { invokeHandler } from './test-helpers'
+import { createSupabaseDouble, type TableSpec } from '../stubs/supabase-query-double'
 
-// Queue-based `.from(table)` mock — same convention as checklist-broadcast.
+// Queue-based `.from(table)` mock — see unit/stubs/supabase-query-double.ts.
 // `work_orders` and `maintenance_schedules` are each queried multiple times
 // per run (due-soon pass, overdue pass, per-schedule idempotency checks,
-// vacancy-gap batch query, 30-day milestone), so a fixed per-table response
-// isn't enough — order matters.
-function makeSupabase(queued: Record<string, { data?: unknown; error?: unknown }[]>) {
-  const counters: Record<string, number> = {}
-  const calls: { table: string; method: string; args: unknown[] }[] = []
-
-  const from = vi.fn((table: string) => {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const chain: any = {}
-    const record = (method: string, args: unknown[]) => {
-      calls.push({ table, method, args })
-      return chain
-    }
-    for (const m of ['select', 'eq', 'in', 'not', 'gte', 'lte', 'lt', 'neq', 'order', 'limit', 'is']) {
-      chain[m] = (...a: unknown[]) => record(m, a)
-    }
-    for (const m of ['insert', 'update', 'upsert', 'delete']) {
-      chain[m] = (...a: unknown[]) => record(m, a)
-    }
-
-    const resolveNext = () => {
-      const idx = counters[table] ?? 0
-      counters[table] = idx + 1
-      return Promise.resolve(queued[table]?.[idx] ?? { data: null, error: null })
-    }
-
-    chain.single      = () => resolveNext()
-    chain.maybeSingle = () => resolveNext()
-    chain.then = (resolve: (v: unknown) => unknown, reject?: (e: unknown) => unknown) =>
-      resolveNext().then(resolve, reject)
-    return chain
-  })
-
-  return { from, calls }
+// vacancy-gap batch query), so a fixed per-table response isn't enough —
+// order matters.
+function makeSupabase(queued: Record<string, TableSpec>) {
+  return createSupabaseDouble(queued)
 }
 
 function makeStep() {
   return { run: vi.fn((_name: string, cb: () => unknown) => cb()), sendEvent: vi.fn() }
 }
 
-// Every pass this function runs unconditionally, even when there's nothing
-// to do for the passes under test — these are the empty defaults for the
-// no-op / most-passes-quiet cases.
+const NOW_MS = new Date('2026-07-22T13:00:00.000Z').getTime()
+
+function orgEvent(orgId = 'org_1') {
+  return { data: { org_id: orgId, now_ms: NOW_MS } }
+}
+
+// Every pass the per-org handler runs unconditionally, even when there's
+// nothing to do for the passes under test — these are the empty defaults for
+// the no-op / most-passes-quiet cases.
 function baseTables() {
   return {
-    properties:            [{ data: [], error: null }],  // vacancy-gap pass — no properties, short-circuits
-    organizations:         [{ data: [], error: null }],  // 30-day milestone
+    properties: [{ data: [], error: null }],  // vacancy-gap pass — no properties, short-circuits
   }
 }
 
-describe('dailyMaintenanceScheduleCheck', () => {
+describe('dailyMaintenanceScheduleCheck (dispatcher)', () => {
   beforeEach(() => {
     vi.useFakeTimers()
-    vi.setSystemTime(new Date('2026-07-22T13:00:00.000Z'))
+    vi.setSystemTime(new Date(NOW_MS))
+  })
+  afterEach(() => {
+    vi.useRealTimers()
+    vi.clearAllMocks()
+  })
+
+  it('dispatches nothing when no org has an active schedule or an active property', async () => {
+    const supabase = makeSupabase({
+      maintenance_schedules: [{ data: [], error: null }],  // org discovery
+      properties:            [{ data: [], error: null }],  // org discovery
+      organizations:         [{ data: [], error: null }],  // 30-day milestone
+    })
+    ;(createServiceClient as ReturnType<typeof vi.fn>).mockReturnValue(supabase)
+
+    const step = makeStep()
+    const result = await invokeHandler(dailyMaintenanceScheduleCheck, {
+      event:  {},
+      step,
+      logger: { info: vi.fn(), error: vi.fn() },
+    })
+
+    expect(result).toEqual({ dispatched: 0 })
+    expect(step.sendEvent).not.toHaveBeenCalled()
+  })
+
+  it('fans out one org/maintenance_schedules.requested per org, unioning schedule-owning and property-owning orgs', async () => {
+    const supabase = makeSupabase({
+      // org_1 appears in both source queries — it must be dispatched once.
+      maintenance_schedules: [{ data: [{ org_id: 'org_1' }, { org_id: 'org_2' }, { org_id: 'org_1' }], error: null }],
+      properties:            [{ data: [{ org_id: 'org_1' }, { org_id: 'org_3' }], error: null }],
+      organizations:         [{ data: [], error: null }],
+    })
+    ;(createServiceClient as ReturnType<typeof vi.fn>).mockReturnValue(supabase)
+
+    const step = makeStep()
+    const result = await invokeHandler(dailyMaintenanceScheduleCheck, {
+      event:  {},
+      step,
+      logger: { info: vi.fn(), error: vi.fn() },
+    })
+
+    expect(result).toEqual({ dispatched: 3 })
+    expect(step.sendEvent).toHaveBeenCalledWith('fan-out-maintenance-schedules', [
+      { name: 'org/maintenance_schedules.requested', data: { org_id: 'org_1', now_ms: NOW_MS } },
+      { name: 'org/maintenance_schedules.requested', data: { org_id: 'org_2', now_ms: NOW_MS } },
+      { name: 'org/maintenance_schedules.requested', data: { org_id: 'org_3', now_ms: NOW_MS } },
+    ])
+  })
+
+  it('discovers orgs through paginated scans, so a >1000-row schedule table still dispatches every tenant', async () => {
+    // The dispatcher's org discovery is the exact place PostgREST's 1000-row
+    // cap used to silently drop tenants: rows 1000+ were never read, so those
+    // orgs never got a per-org event and simply stopped being processed.
+    const schedules = Array.from({ length: 2_400 }, (_, i) => ({ org_id: `org_${i}` }))
+    const supabase = makeSupabase({
+      maintenance_schedules: [{ data: schedules, error: null }],
+      properties:            [{ data: [], error: null }],
+      organizations:         [{ data: [], error: null }],
+    })
+    ;(createServiceClient as ReturnType<typeof vi.fn>).mockReturnValue(supabase)
+
+    const step = makeStep()
+    const result = await invokeHandler(dailyMaintenanceScheduleCheck, {
+      event:  {},
+      step,
+      logger: { info: vi.fn(), error: vi.fn() },
+    })
+
+    expect(result).toEqual({ dispatched: 2_400 })
+    const fanOut = step.sendEvent.mock.calls.find((c) => c[0] === 'fan-out-maintenance-schedules')!
+    const dispatchedOrgIds = (fanOut[1] as { data: { org_id: string } }[]).map((e) => e.data.org_id)
+    expect(dispatchedOrgIds).toContain('org_0')
+    expect(dispatchedOrgIds).toContain('org_2399')   // past the cap — the tenant truncation used to eat
+  })
+
+  it('upserts the thirty-day milestone for orgs created in the 30–32 day window', async () => {
+    const supabase = makeSupabase({
+      maintenance_schedules: [{ data: [], error: null }],
+      properties:            [{ data: [], error: null }],
+      organizations:         [{ data: [{ id: 'org_new' }], error: null }],
+      org_milestones:        [{ data: null, error: null }],
+    })
+    ;(createServiceClient as ReturnType<typeof vi.fn>).mockReturnValue(supabase)
+
+    await invokeHandler(dailyMaintenanceScheduleCheck, {
+      event:  {},
+      step:   makeStep(),
+      logger: { info: vi.fn(), error: vi.fn() },
+    })
+
+    const upsert = supabase.calls.find((c) => c.table === 'org_milestones' && c.method === 'upsert')
+    expect(upsert?.args[0]).toEqual([{ org_id: 'org_new', milestone: 'thirty_days' }])
+    expect(upsert?.args[1]).toEqual({ onConflict: 'org_id,milestone', ignoreDuplicates: true })
+  })
+})
+
+describe('maintenanceSchedulesOrg (per-org handler)', () => {
+  beforeEach(() => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date(NOW_MS))
   })
   afterEach(() => {
     vi.useRealTimers()
@@ -90,15 +169,36 @@ describe('dailyMaintenanceScheduleCheck', () => {
     ;(createServiceClient as ReturnType<typeof vi.fn>).mockReturnValue(supabase)
 
     const step = makeStep()
-    const result = await invokeHandler(dailyMaintenanceScheduleCheck, {
-      event:  {},
+    const result = await invokeHandler(maintenanceSchedulesOrg, {
+      event:  orgEvent(),
       step,
       logger: { info: vi.fn(), error: vi.fn() },
     })
 
-    expect(result).toEqual({ checked: 0, escalated: 0, gapSuggestions: 0 })
+    expect(result).toEqual({ org_id: 'org_1', checked: 0, escalated: 0, gapSuggestions: 0 })
     expect(step.sendEvent).not.toHaveBeenCalled()
     expect(logAuditEvent).not.toHaveBeenCalled()
+  })
+
+  it('scopes every pass to the event org_id', async () => {
+    const supabase = makeSupabase({
+      maintenance_schedules: [
+        { data: [], error: null },
+        { data: [], error: null },
+      ],
+      ...baseTables(),
+    })
+    ;(createServiceClient as ReturnType<typeof vi.fn>).mockReturnValue(supabase)
+
+    await invokeHandler(maintenanceSchedulesOrg, {
+      event:  orgEvent('org_scoped'),
+      step:   makeStep(),
+      logger: { info: vi.fn(), error: vi.fn() },
+    })
+
+    const orgFilters = supabase.calls.filter((c) => c.method === 'eq' && c.args[0] === 'org_id')
+    expect(orgFilters.length).toBeGreaterThan(0)
+    expect(orgFilters.every((c) => c.args[1] === 'org_scoped')).toBe(true)
   })
 
   it('creates a WO for a due auto_create_wo schedule, advances next_due_date, and fires a vendor-portal event', async () => {
@@ -116,6 +216,7 @@ describe('dailyMaintenanceScheduleCheck', () => {
           error: null,
         }, // find-due-schedules
         { data: [], error: null }, // find-overdue-schedules
+        { data: null, error: null }, // next_due_date advance update
       ],
       work_orders: [
         { data: null, error: null },             // existing-WO idempotency check — none
@@ -126,13 +227,13 @@ describe('dailyMaintenanceScheduleCheck', () => {
     ;(createServiceClient as ReturnType<typeof vi.fn>).mockReturnValue(supabase)
 
     const step = makeStep()
-    const result = await invokeHandler(dailyMaintenanceScheduleCheck, {
-      event:  {},
+    const result = await invokeHandler(maintenanceSchedulesOrg, {
+      event:  orgEvent(),
       step,
       logger: { info: vi.fn(), error: vi.fn() },
     })
 
-    expect(result).toEqual({ checked: 1, escalated: 0, gapSuggestions: 0 })
+    expect(result).toEqual({ org_id: 'org_1', checked: 1, escalated: 0, gapSuggestions: 0 })
 
     const insertCall = supabase.calls.find((c) => c.table === 'work_orders' && c.method === 'insert')
     expect(insertCall?.args[0]).toMatchObject({
@@ -182,13 +283,13 @@ describe('dailyMaintenanceScheduleCheck', () => {
     ;(createServiceClient as ReturnType<typeof vi.fn>).mockReturnValue(supabase)
 
     const step = makeStep()
-    const result = await invokeHandler(dailyMaintenanceScheduleCheck, {
-      event:  {},
+    const result = await invokeHandler(maintenanceSchedulesOrg, {
+      event:  orgEvent(),
       step,
       logger: { info: vi.fn(), error: vi.fn() },
     })
 
-    expect(result).toEqual({ checked: 0, escalated: 1, gapSuggestions: 0 })
+    expect(result).toEqual({ org_id: 'org_1', checked: 0, escalated: 1, gapSuggestions: 0 })
 
     const updateCall = supabase.calls.find((c) => c.table === 'work_orders' && c.method === 'update')
     expect(updateCall?.args[0]).toEqual({ priority: 'urgent' })
@@ -223,13 +324,13 @@ describe('dailyMaintenanceScheduleCheck', () => {
     ;(createServiceClient as ReturnType<typeof vi.fn>).mockReturnValue(supabase)
 
     const step = makeStep()
-    const result = await invokeHandler(dailyMaintenanceScheduleCheck, {
-      event:  {},
+    const result = await invokeHandler(maintenanceSchedulesOrg, {
+      event:  orgEvent(),
       step,
       logger: { info: vi.fn(), error: vi.fn() },
     })
 
-    expect(result).toEqual({ checked: 1, escalated: 0, gapSuggestions: 0 })
+    expect(result).toEqual({ org_id: 'org_1', checked: 1, escalated: 0, gapSuggestions: 0 })
     expect(reportError).toHaveBeenCalledWith(
       expect.any(Error),
       expect.objectContaining({ site: 'inngest.maintenance-cron.invalid_due_date', orgId: 'org_1' }),
@@ -237,5 +338,38 @@ describe('dailyMaintenanceScheduleCheck', () => {
     // No WO was ever attempted for the malformed-date schedule.
     expect(supabase.calls.some((c) => c.table === 'work_orders')).toBe(false)
     expect(step.sendEvent).not.toHaveBeenCalled()
+  })
+
+  it('walks every page of a >1000-schedule org rather than stopping at PostgREST max_rows', async () => {
+    // Reminder-only schedules (auto_create_wo=false, outside no seasonal
+    // window) do no writes, so this isolates the read: `checked` must equal
+    // the whole seeded set, not the first 1000 rows.
+    const dueSchedules = Array.from({ length: 2_100 }, (_, i) => ({
+      id: `sched_${i}`, name: `Filter change ${i}`, schedule_type: 'routine', frequency: 'monthly',
+      estimated_cost: null, instructions: null, auto_create_wo: false,
+      next_due_date: '2026-07-27', active_from_month: null, active_to_month: null,
+      assigned_vendor_id: null, property_id: 'prop_1', org_id: 'org_1',
+      properties: { name: 'Lakeview Cabin' }, vendors: null,
+    }))
+
+    const supabase = makeSupabase({
+      maintenance_schedules: [
+        { data: dueSchedules, error: null }, // find-due-schedules
+        { data: [], error: null },           // find-overdue-schedules
+      ],
+      ...baseTables(),
+    })
+    ;(createServiceClient as ReturnType<typeof vi.fn>).mockReturnValue(supabase)
+
+    const result = await invokeHandler(maintenanceSchedulesOrg, {
+      event:  orgEvent(),
+      step:   makeStep(),
+      logger: { info: vi.fn(), error: vi.fn() },
+    })
+
+    expect(result).toMatchObject({ checked: 2_100 })
+    // Three pages requested for the due-schedule scan.
+    const dueRanges = supabase.calls.filter((c) => c.table === 'maintenance_schedules' && c.method === 'range')
+    expect(dueRanges.slice(0, 3).map((c) => c.args)).toEqual([[0, 999], [1000, 1999], [2000, 2999]])
   })
 })

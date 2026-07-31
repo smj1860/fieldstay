@@ -8,6 +8,7 @@
 
 import { createServiceClient } from '@/lib/supabase/server'
 import { requireOrgMember }   from '@/lib/auth'
+import { dataExportLimiter, checkLimit } from '@/lib/rate-limit'
 import { PDFDocument, PDFFont, StandardFonts, rgb } from 'pdf-lib'
 import { MACRS_LABELS } from '@/lib/assets/depreciation'
 import { unwrapJoin } from '@/lib/utils/supabase-joins'
@@ -76,7 +77,22 @@ function drawTableHeader(page: ReturnType<PDFDocument['addPage']>, y: number, bo
 
 export async function GET(req: Request) {
   // Auth
-  const { membership } = await requireOrgMember()
+  const { user, membership } = await requireOrgMember()
+
+  // L-2: an auth gate proves WHO, not HOW OFTEN. This renders a multi-page
+  // PDF from a full depreciation-schedule query on every hit. Abuse limiter
+  // → fails OPEN: a Redis outage must not block a PM's tax export.
+  const rl = await checkLimit(dataExportLimiter, `cpa-export:${user.id}`, {
+    onError: 'allow',
+    site:    'route.assets.cpa-export.GET',
+  })
+  if (!rl.allowed) {
+    return Response.json(
+      { error: 'Export limit reached. Please try again later.' },
+      { status: 429 }
+    )
+  }
+
   const supabase = createServiceClient({ authorizedBy: membership })
 
   const url     = new URL(req.url)

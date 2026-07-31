@@ -1,6 +1,7 @@
 import type { Metadata } from 'next'
 import { requireOrgMember } from '@/lib/auth'
 import { CommsLogClient } from './comms-log-client'
+import { throwIfAnyQueryFailed } from '@/lib/supabase/unwrap'
 
 export const metadata: Metadata = { title: 'Comms Log' }
 
@@ -17,11 +18,11 @@ export default async function CommsLogPage({
   const offset = (page - 1) * PAGE_SIZE
 
   const [
-    { data: logs },
-    { data: vendors },
-    { data: crew },
-    { data: properties },
-    { data: workOrders },
+    { data: logs, error: logsError },
+    { data: vendors, error: vendorsError },
+    { data: crew, error: crewError },
+    { data: properties, error: propertiesError },
+    { data: workOrders, error: workOrdersError },
   ] = await Promise.all([
     supabase
       .from('communication_logs')
@@ -68,6 +69,10 @@ export default async function CommsLogPage({
       .order('created_at', { ascending: false })
       .limit(100),
   ])
+
+  // Logs + reports every failure, then throws so the segment's error.tsx
+  // renders a real error state — an outage must not look like empty data.
+  throwIfAnyQueryFailed({ site: 'page.comms-log', orgId: membership.org_id }, logsError, vendorsError, crewError, propertiesError, workOrdersError)
 
   const toPersonOption = (rows: { id: string; name: string; specialty: string | null }[] | null) =>
     (rows ?? []).map((r) => ({ id: r.id, name: r.name, specialty: r.specialty ?? undefined }))

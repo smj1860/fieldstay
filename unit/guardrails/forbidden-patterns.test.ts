@@ -19,8 +19,15 @@ describe('guardrail: single-chokepoint invariants', () => {
   })
 
   it('the service-role key string appears ONLY in lib/supabase/server.ts (belt to the ESLint AST rule\'s suspenders)', () => {
+    // lib/env.ts DECLARES the variable as a key in ENV_SPEC so boot-time
+    // validation can assert it is present; it never reads
+    // process.env.SUPABASE_SERVICE_ROLE_KEY and never exports the value (the
+    // ESLint AST rule, which is the real enforcement, passes on the file).
+    // Allowlisted rather than obfuscated — the name must stay greppable.
+    const ALLOWED = new Set(['lib/supabase/server.ts', 'lib/env.ts'])
+
     const offenders = collectSourceFiles(['app', 'lib', 'components'])
-      .filter((f) => rel(f) !== 'lib/supabase/server.ts')
+      .filter((f) => !ALLOWED.has(rel(f)))
       .filter((f) => {
         // Comments mentioning the key by name are fine — only flag code-like use
         const lines = read(f).split('\n').filter((l) => l.includes('SUPABASE_SERVICE_ROLE_KEY'))

@@ -84,10 +84,10 @@ export function VendorDispatchDialog({
             {/* Vendor selector */}
             {vendors.filter(v => v.email).length > 0 && (
               <div className="space-y-1.5">
-                <label className="text-xs font-medium" style={{ color: 'var(--text-muted)' }}>
+                <label htmlFor="vendordispatchdialog-select-vendor" className="text-xs font-medium" style={{ color: 'var(--text-muted)' }}>
                   Select Vendor
                 </label>
-                <select
+                <select id="vendordispatchdialog-select-vendor"
                   className="input text-sm w-full"
                   value={dispatchEmail}
                   onChange={(e) => {
@@ -127,10 +127,10 @@ export function VendorDispatchDialog({
 
             {/* Vendor name */}
             <div className="space-y-1.5">
-              <label className="text-xs font-medium" style={{ color: 'var(--text-muted)' }}>
+              <label htmlFor="vendordispatchdialog-vendor-name" className="text-xs font-medium" style={{ color: 'var(--text-muted)' }}>
                 Vendor Name
               </label>
-              <Input
+              <Input id="vendordispatchdialog-vendor-name"
                 type="text"
                 value={dispatchName}
                 onChange={e => setDispatchName(e.target.value)}

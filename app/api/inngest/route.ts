@@ -2,7 +2,7 @@ import { serve } from 'inngest/next'
 import { inngest } from '@/lib/inngest/client'
 
 // iCal sync
-import { syncAllIcalFeeds, syncIcalFeed } from '@/lib/inngest/functions/ical-sync'
+import { syncAllIcalFeeds, syncOrgIcalFeeds, syncIcalFeed } from '@/lib/inngest/functions/ical-sync'
 
 // Booking events
 import { handleBookingDetected, handleBookingConfirmed } from '@/lib/inngest/functions/booking-events'
@@ -13,11 +13,11 @@ import { handleCrewAssigned } from '@/lib/inngest/functions/crew-assignment'
 import { handleCrewTurnoverCancelled } from '@/lib/inngest/functions/crew-turnover-cancelled'
 
 // Maintenance — split from the old dailyMaintenanceCheck god function into 4 focused crons
-import { dailyMaintenanceScheduleCheck } from '@/lib/inngest/functions/cron/maintenance-schedules'
-import { dailyWorkOrderOps }             from '@/lib/inngest/functions/cron/work-order-ops'
-import { dailyAssetHealth }              from '@/lib/inngest/functions/cron/asset-health'
-import { dailyCommsRetention }           from '@/lib/inngest/functions/cron/comms-retention'
-import { dailyGuestPiiRetention }        from '@/lib/inngest/functions/cron/guest-pii-retention'
+import { dailyMaintenanceScheduleCheck, maintenanceSchedulesOrg } from '@/lib/inngest/functions/cron/maintenance-schedules'
+import { dailyWorkOrderOps, workOrderOpsOrg } from '@/lib/inngest/functions/cron/work-order-ops'
+import { dailyAssetHealth, assetHealthOrg }   from '@/lib/inngest/functions/cron/asset-health'
+import { dailyCommsRetention, commsRetentionOrg } from '@/lib/inngest/functions/cron/comms-retention'
+import { dailyGuestPiiRetention, guestPiiRetentionOrg } from '@/lib/inngest/functions/cron/guest-pii-retention'
 import { auditRetentionCron }            from '@/lib/inngest/functions/cron/audit-retention'
 import { notificationsRetentionCron }    from '@/lib/inngest/functions/cron/notifications-retention'
 import { staleFeedAlert }               from '@/lib/inngest/functions/cron/stale-feed-alert'
@@ -90,9 +90,9 @@ import { autoAssignVendor } from '@/lib/inngest/functions/auto-assign-vendor'
 import { vendorScoreRecompute } from '@/lib/inngest/functions/cron/vendor-score-recompute'
 
 // Asset Health — CapEx & Depreciation
-import { generateCapexProjections }      from '@/lib/inngest/functions/capex-projections'
+import { generateCapexProjections, capexProjectionOrg } from '@/lib/inngest/functions/capex-projections'
 import { triggerCapexProjectionForOrg }  from '@/lib/inngest/functions/capex-projection-trigger'
-import { generateDepreciationLedger }    from '@/lib/inngest/functions/depreciation-ledger'
+import { generateDepreciationLedger, depreciationLedgerOrg } from '@/lib/inngest/functions/depreciation-ledger'
 import { assetManualLookup }             from '@/lib/inngest/functions/asset-manual-lookup'
 import { assetDataPlateScan }            from '@/lib/inngest/functions/asset-scan'
 
@@ -176,6 +176,7 @@ export const { GET, POST, PUT } = serve({
   functions: [
     // iCal sync pipeline
     syncAllIcalFeeds,
+    syncOrgIcalFeeds,
     syncIcalFeed,
 
     // Booking downstream
@@ -190,10 +191,15 @@ export const { GET, POST, PUT } = serve({
 
     // Maintenance crons (replaces dailyMaintenanceCheck)
     dailyMaintenanceScheduleCheck,
+    maintenanceSchedulesOrg,
     dailyWorkOrderOps,
+    workOrderOpsOrg,
     dailyAssetHealth,
+    assetHealthOrg,
     dailyCommsRetention,
+    commsRetentionOrg,
     dailyGuestPiiRetention,
+    guestPiiRetentionOrg,
     auditRetentionCron,
     notificationsRetentionCron,
     staleFeedAlert,
@@ -267,8 +273,10 @@ export const { GET, POST, PUT } = serve({
 
     // Asset Health — CapEx projections + depreciation ledger
     generateCapexProjections,
+    capexProjectionOrg,
     triggerCapexProjectionForOrg,
     generateDepreciationLedger,
+    depreciationLedgerOrg,
     assetManualLookup,
     assetDataPlateScan,
 

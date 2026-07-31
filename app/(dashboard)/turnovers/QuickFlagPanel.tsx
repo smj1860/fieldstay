@@ -1,11 +1,30 @@
 'use client'
 
-import { useRef, useState } from 'react'
+import { createContext, useContext, useRef, useState } from 'react'
 import { Camera, Flag, X } from 'lucide-react'
 import { Dialog } from '@/components/ui/Dialog'
 import { Button } from '@/components/ui/Button'
+import { InlineAlert } from '@/components/ui/InlineAlert'
 import { flagPhotoUpload } from '@/lib/turnovers/flag-photo-upload'
 import { updateTurnoverStatus } from './actions'
+
+/**
+ * The authenticated PM's org id, needed only so the quick-flag photo lands on
+ * an `${org_id}/…` storage path (the turnover-photos bucket is private and its
+ * RLS policies match on that first segment).
+ *
+ * Supplied via context rather than threaded as a prop because QuickFlagPanel
+ * renders four levels below TurnoverBoard — every intermediate component would
+ * otherwise have to carry a prop it has no use for.
+ */
+const TurnoverOrgContext = createContext<string>('')
+
+export function TurnoverOrgProvider({
+  orgId,
+  children,
+}: Readonly<{ orgId: string; children: React.ReactNode }>) {
+  return <TurnoverOrgContext.Provider value={orgId}>{children}</TurnoverOrgContext.Provider>
+}
 
 /**
  * Self-contained quick-flag widget — owns its own open state, notes text,
@@ -25,7 +44,9 @@ export function QuickFlagPanel({
   const [flagPhotoFile, setFlagPhotoFile]     = useState<File | null>(null)
   const [flagPhotoPreview, setFlagPhotoPreview] = useState<string | null>(null)
   const [quickFlagging, setQuickFlagging]     = useState(false)
+  const [flagError,     setFlagError]         = useState<string | null>(null)
   const flagPhotoRef = useRef<HTMLInputElement | null>(null)
+  const orgId = useContext(TurnoverOrgContext)
 
   const handleFlagPhotoSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0] ?? null
@@ -37,9 +58,23 @@ export function QuickFlagPanel({
   const handleQuickFlag = async () => {
     if (!quickFlagNotes.trim()) return
     setQuickFlagging(true)
+    setFlagError(null)
     try {
+      // A failed photo upload used to be swallowed here: the flag went
+      // through, the photo silently didn't, and the PM had no way to know the
+      // evidence they attached never existed. Stop before flagging so the
+      // photo can actually be retried — the flag itself is still one tap away
+      // once they remove the photo.
       if (flagPhotoFile) {
-        await flagPhotoUpload(turnoverId, flagPhotoFile)
+        if (!orgId) {
+          setFlagError('Could not attach the photo (missing organization context). Remove the photo to flag without it.')
+          return
+        }
+        const upload = await flagPhotoUpload(orgId, turnoverId, flagPhotoFile)
+        if (!upload.ok) {
+          setFlagError('Photo could not be uploaded, so this issue was not flagged. Try again, or remove the photo to flag without it.')
+          return
+        }
       }
       await updateTurnoverStatus(turnoverId, 'flagged', quickFlagNotes)
       setShowQuickFlag(false)
@@ -110,6 +145,12 @@ export function QuickFlagPanel({
             </button>
           )}
         </div>
+
+        {flagError && (
+          <div className="mt-3">
+            <InlineAlert tone="error">{flagError}</InlineAlert>
+          </div>
+        )}
 
         <div className="flex gap-2 mt-4">
           <Button

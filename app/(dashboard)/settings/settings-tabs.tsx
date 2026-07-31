@@ -13,6 +13,7 @@ import { InlineAlert } from '@/components/ui/InlineAlert'
 import { RequiredMark } from '@/components/ui/RequiredMark'
 import type { Organization } from '@/types/database'
 import type { HospitablePromoStatus } from '@/lib/queries/hospitable-promo'
+import { reportError } from '@/lib/observability/report-error'
 import { PriceLockBadge } from '@/components/settings/price-lock-badge'
 import {
   updateOrgSettings,
@@ -628,6 +629,7 @@ function NotificationsTab({ org }: { org: Organization }) {
           {PUSH_PREFS.map((pref) => (
             <label
               key={pref.key}
+              htmlFor={`push-pref-${pref.key}`}
               className="flex items-start gap-3 p-3 rounded-lg cursor-pointer transition-colors"
               style={{ background: 'transparent' }}
               onMouseOver={(e) => (e.currentTarget.style.background = 'var(--bg-raised)')}
@@ -636,9 +638,11 @@ function NotificationsTab({ org }: { org: Organization }) {
               onBlur={(e)      => (e.currentTarget.style.background = 'transparent')}
             >
               <input
+                id={`push-pref-${pref.key}`}
                 type="checkbox"
                 name={pref.key}
                 defaultChecked
+                aria-label={pref.label}
                 className="mt-0.5 w-4 h-4 rounded"
                 style={{ accentColor: 'var(--accent-gold)' }}
               />
@@ -660,6 +664,7 @@ function NotificationsTab({ org }: { org: Organization }) {
             {EMAIL_PREFS.map((pref) => (
               <label
                 key={pref.key}
+                htmlFor={`email-pref-${pref.key}`}
                 className="flex items-start gap-3 p-3 rounded-lg cursor-pointer transition-colors"
                 style={{ background: 'transparent' }}
                 onMouseOver={(e) => (e.currentTarget.style.background = 'var(--bg-raised)')}
@@ -668,9 +673,11 @@ function NotificationsTab({ org }: { org: Organization }) {
                 onBlur={(e)      => (e.currentTarget.style.background = 'transparent')}
               >
                 <input
+                  id={`email-pref-${pref.key}`}
                   type="checkbox"
                   name={pref.key}
                   defaultChecked
+                  aria-label={pref.label}
                   className="mt-0.5 w-4 h-4 rounded"
                   style={{ accentColor: 'var(--accent-gold)' }}
                 />
@@ -774,12 +781,21 @@ function SmsTemplatesCard() {
 
   // Load existing custom templates once on mount
   useEffect(() => {
-    getOrgSmsTemplates().then((rows) => {
-      const map: Record<string, string> = {}
-      rows.forEach((r) => { map[r.key] = r.body })
-      setCustomTemplates(map)
-      setLoaded(true)
-    })
+    getOrgSmsTemplates()
+      .then((rows) => {
+        const map: Record<string, string> = {}
+        rows.forEach((r) => { map[r.key] = r.body })
+        setCustomTemplates(map)
+        setLoaded(true)
+      })
+      // Without a .catch() this rejects unhandled — Sentry never groups it as
+      // an Issue, and `loaded` stays false forever so the panel renders its
+      // loading state indefinitely with no explanation.
+      .catch((err: unknown) => {
+        console.error('[settings-tabs] failed to load org SMS templates', err)
+        reportError(err, { site: 'client.settings.getOrgSmsTemplates' })
+        setLoaded(true)
+      })
   }, [])
 
   const getBodyForKey = (key: string) =>
@@ -938,8 +954,9 @@ function SmsTemplatesCard() {
 
                   {/* Body editor */}
                   <div>
-                    <label className="label">Message Body</label>
+                    <label htmlFor={`sms-template-body-${config.key}`} className="label">Message Body</label>
                     <textarea
+                      id={`sms-template-body-${config.key}`}
                       value={body}
                       onChange={(e) => setEdits(prev => ({ ...prev, [config.key]: e.target.value }))}
                       rows={Math.min(10, body.split('\n').length + 2)}

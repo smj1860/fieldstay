@@ -6,9 +6,9 @@ import { logAuditEvent }       from '@/lib/audit'
 import { redirect }            from 'next/navigation'
 import { headers }             from 'next/headers'
 import { z }                   from 'zod'
-import { inviteAcceptRatelimit } from '@/lib/rate-limit'
+import { inviteAcceptRatelimit, checkLimit } from '@/lib/rate-limit'
+import { extractClientIp }     from '@/lib/integrations/webhook-verification'
 
-import { reportError } from '@/lib/observability/report-error'
 const ActivateSchema = z.object({
   token:    z.string().uuid('Invite link is invalid or expired'),
   crewId:   z.string().uuid(),
@@ -23,6 +23,28 @@ const ActivateSchema = z.object({
   message: 'Passwords do not match',
   path:    ['confirm'],
 })
+
+const INVITE_TTL_MS = 7 * 86_400_000
+
+/**
+ * Fails CLOSED. This check used to be nested inside `if (crew.invite_sent_at)`,
+ * so a crew row with a NULL invite_sent_at had a PERMANENTLY valid activation
+ * token that mints a real auth account — and ~40% of live crew_members rows
+ * have that column NULL (11 of 28 on 2026-07-30: invited by SMS, or created
+ * before the column existed).
+ *
+ * The fallback is created_at, NOT a hard reject. Rejecting outright would be
+ * the same class of mistake as filtering crew on invite_accepted_at, which has
+ * silently locked out real crew three times (see lib/crew-auth.ts). This is
+ * only reached for genuinely PENDING invites anyway — a row with a user_id or
+ * an invite_accepted_at already returned "already used" before this point — so
+ * no activated crew member can be affected either way.
+ */
+function inviteIsExpired(sentAt: string | null, createdAt: string | null): boolean {
+  const issuedAt = sentAt ?? createdAt
+  if (!issuedAt) return true
+  return new Date(issuedAt).getTime() + INVITE_TTL_MS < Date.now()
+}
 
 export async function activateCrewAccount(formData: FormData): Promise<{ error?: string }> {
   const raw = {
@@ -39,19 +61,24 @@ export async function activateCrewAccount(formData: FormData): Promise<{ error?:
   }
 
   // Real account creation (supabase.auth.admin.createUser below) from a
-  // public route gated only by a UUID token — rate limit by IP. Fails open
-  // on a Redis outage; a degraded limiter must never block a legitimate
-  // crew member finishing setup.
-  try {
-    const hdrs = await headers()
-    const ip   = hdrs.get('x-forwarded-for')?.split(',')[0]?.trim() ?? 'unknown'
-    const { success } = await inviteAcceptRatelimit.limit(`crew-invite:${ip}`)
-    if (!success) {
-      return { error: 'Too many attempts. Please try again in a few minutes.' }
-    }
-  } catch (rlErr) {
-    console.error('[activateCrewAccount] rate limit check failed', rlErr)
-    reportError(rlErr, { site: 'serverAction.crew-invite.activateCrewAccount' })
+  // public route gated only by a UUID token — rate limit by IP.
+  // onError: 'allow' — fails open on a Redis outage; a degraded limiter must
+  // never block a legitimate crew member finishing setup.
+  //
+  // A Server Action has no Request object, so the incoming headers are
+  // wrapped in one rather than re-implementing the x-forwarded-for parse
+  // inline — extractClientIp() is the single place that encodes "Vercel
+  // prepends the trusted client IP as the first entry".
+  const ip = extractClientIp(
+    new Request('https://fieldstay.local', { headers: await headers() })
+  ) ?? 'unknown'
+
+  const rateLimit = await checkLimit(inviteAcceptRatelimit, `crew-invite:${ip}`, {
+    onError: 'allow',
+    site:    'action.crew-invite',
+  })
+  if (!rateLimit.allowed) {
+    return { error: 'Too many attempts. Please try again in a few minutes.' }
   }
 
   const { token, crewId, password } = parsed.data
@@ -60,7 +87,7 @@ export async function activateCrewAccount(formData: FormData): Promise<{ error?:
 
   const { data: crew, error: crewError } = await supabase
     .from('crew_members')
-    .select('id, name, email, org_id, user_id, invite_accepted_at, invite_token, invite_sent_at')
+    .select('id, name, email, org_id, user_id, invite_accepted_at, invite_token, invite_sent_at, created_at')
     .eq('id', crewId)
     .eq('invite_token', token)
     .single()
@@ -82,9 +109,8 @@ export async function activateCrewAccount(formData: FormData): Promise<{ error?:
   const activationEmail = crew.email ?? submittedEmail
   if (!activationEmail) return { error: 'Enter an email address to finish setting up your account' }
 
-  if (crew.invite_sent_at) {
-    const expired = new Date(crew.invite_sent_at).getTime() + 7 * 86_400_000 < Date.now()
-    if (expired) return { error: 'This invite link has expired. Ask your manager to send a new one.' }
+  if (inviteIsExpired(crew.invite_sent_at, crew.created_at)) {
+    return { error: 'This invite link has expired. Ask your manager to send a new one.' }
   }
 
   const { data: authData, error: createError } = await supabase.auth.admin.createUser({

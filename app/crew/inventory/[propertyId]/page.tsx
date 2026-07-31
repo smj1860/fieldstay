@@ -1,33 +1,82 @@
 'use client'
 import { useLiveQuery } from 'dexie-react-hooks'
-import { useDexieDb } from '@/lib/dexie/context'
+import { useDexieDb, useDexieUserId } from '@/lib/dexie/context'
 import { useParams, useRouter } from 'next/navigation'
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { ArrowLeft, Package } from 'lucide-react'
 import { INVENTORY_CATEGORY_LABELS } from '@/lib/utils'
 import { InventoryItemCard } from '@/components/inventory/inventory-item-card'
 import { Button } from '@/components/ui/Button'
 import { CrewLoading } from '@/components/crew/CrewLoading'
+import {
+  loadInventoryCountDraft,
+  saveInventoryCountDraft,
+  submitInventoryCountDraft,
+} from '@/lib/dexie/helpers'
 import type { InventoryCategory } from '@/types/database'
 
 import { reportError } from '@/lib/observability/report-error'
+
+type InvRow = {
+  id: string
+  name: string
+  category: InventoryCategory
+  unit: string
+  par_level: number
+  current_quantity: number
+}
+
+/**
+ * Local-first, like every other crew write. Counts and per-item notes are
+ * staged in the local-only `sync_meta` draft (lib/dexie/helpers.ts) on every
+ * edit, and submission goes through the mutation outbox rather than a live
+ * fetch — so a count entered in a dead zone survives navigation, an app
+ * restart, and a failed submit, and reaches the PM the moment signal returns.
+ * (The in-app FAQ has promised exactly this all along.)
+ *
+ * Counts are deliberately NOT written to inventory_items: this flow submits a
+ * draft for PM review, so pushing quantities straight through would bypass it.
+ */
 export default function CrewInventoryPage() {
   const { propertyId } = useParams<{ propertyId: string }>()
   const db             = useDexieDb()
+  const userId         = useDexieUserId()
   const router         = useRouter()
-  const [counts, setCounts]       = useState<Record<string, number>>({})
-  const [itemNotes, setItemNotes] = useState<Record<string, string>>({})
-  const [submitting, setSubmitting] = useState(false)
-  const [notes, setNotes]         = useState('')
+
+  const [counts, setCounts]           = useState<Record<string, number>>({})
+  const [itemNotes, setItemNotes]     = useState<Record<string, string>>({})
+  const [notes, setNotes]             = useState('')
+  const [draftLoaded, setDraftLoaded] = useState(false)
+  const [submitting, setSubmitting]   = useState(false)
   const [submitError, setSubmitError] = useState<string | null>(null)
 
-  type InvRow = { id: string; name: string; category: InventoryCategory; unit: string; par_level: number; current_quantity: number }
   const items = useLiveQuery(
     () => db.inventory_items.where('property_id').equals(propertyId).sortBy('name') as unknown as Promise<InvRow[]>,
     [propertyId]
   )
 
-  if (items === undefined) {
+  // Rehydrate whatever was staged locally before — possibly in an earlier
+  // session, on a device that has had no signal since.
+  useEffect(() => {
+    let cancelled = false
+    void loadInventoryCountDraft(userId, propertyId).then((draft) => {
+      if (cancelled) return
+      setCounts(draft.counts)
+      setItemNotes(draft.itemNotes)
+      setNotes(draft.notes)
+      setDraftLoaded(true)
+    })
+    return () => { cancelled = true }
+  }, [userId, propertyId])
+
+  // Persist every edit locally. Guarded on draftLoaded so the initial empty
+  // state can't overwrite a staged draft before it has been read back.
+  useEffect(() => {
+    if (!draftLoaded) return
+    void saveInventoryCountDraft(userId, propertyId, { counts, itemNotes, notes })
+  }, [draftLoaded, userId, propertyId, counts, itemNotes, notes])
+
+  if (items === undefined || !draftLoaded) {
     return <CrewLoading />
   }
 
@@ -42,24 +91,14 @@ export default function CrewInventoryPage() {
     setSubmitting(true)
     setSubmitError(null)
     try {
-      // Submit as draft for manager review instead of immediately committing
-      const res = await fetch('/api/crew/inventory-count', {
-        method:  'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body:    JSON.stringify({ propertyId, counts, notes, itemNotes, submitAsDraft: true }),
-      })
-
-      if (!res.ok) {
-        const body = await res.json().catch(() => ({}))
-        throw new Error((body as { error?: string }).error ?? `Server error ${res.status}`)
-      }
-
+      // Queued, not posted: the outbox owns delivery and retry from here.
+      await submitInventoryCountDraft(userId, propertyId, { counts, itemNotes, notes })
       router.push('/crew')
     } catch (err) {
       console.error('[Crew] inventory submit failed:', err)
       reportError(err, { site: 'page.crew.inventory.page.Crew' })
       setSubmitting(false)
-      setSubmitError('Could not submit inventory count. Please check your connection and try again.')
+      setSubmitError('Could not save this inventory count on your device. Please try again.')
     }
   }
 
@@ -99,7 +138,7 @@ export default function CrewInventoryPage() {
                 currentQuantity={counts[item.id] ?? item.current_quantity ?? 0}
                 variant="crew"
                 onQuantityChange={(itemId, newQty) =>
-                  setCounts((prev) => ({ ...prev, [itemId]: newQty }))
+                  setCounts((prev) => ({ ...prev, [itemId]: Math.max(0, newQty) }))
                 }
                 note={itemNotes[item.id]}
                 onNoteChange={(itemId, note) =>
@@ -125,7 +164,7 @@ export default function CrewInventoryPage() {
             />
           </div>
           <p className="text-xs text-center text-muted-themed">
-            Each count saves automatically as you enter it.
+            Each count saves to your phone as you enter it &mdash; signal or not.
             Tap below when you&apos;re done.
           </p>
           {submitError && (
@@ -134,7 +173,7 @@ export default function CrewInventoryPage() {
               style={{
                 backgroundColor: 'var(--accent-red-dim)',
                 color:           'var(--accent-red)',
-                border:          '1px solid rgba(240,84,84,0.2)',
+                border:          '1px solid var(--accent-red-dim)',
               }}
             >
               {submitError}

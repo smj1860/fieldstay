@@ -9,6 +9,8 @@ const holder = vi.hoisted(() => ({
 
 vi.mock('@/lib/dexie/schema', () => ({
   getDexieDb: () => holder.db,
+  // Logout shutdown latch (lib/dexie/schema.ts) — never latched in these tests.
+  isDexieShutdown: () => false,
 }))
 
 // SyncEngine captures createClient() at construction — delegate through the

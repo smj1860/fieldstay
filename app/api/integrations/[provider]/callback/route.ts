@@ -148,24 +148,30 @@ export async function GET(
   //    RLS policy for reads — it is a server-side-only table.
   const admin = createServiceClient({ publicSurface: 'integrations-oauth-callback' })
 
+  //    Validation and consumption are ONE atomic statement. This used to be a
+  //    SELECT, then a separate DELETE — a check-then-delete that two
+  //    concurrent callbacks replaying the same `state` both passed, because
+  //    nothing stopped the second SELECT from running before the first
+  //    DELETE landed. That defeats the one-time-use property the state token
+  //    exists to provide. DELETE ... RETURNING is serialised by Postgres:
+  //    exactly one caller gets the row back, everyone else gets zero rows and
+  //    is rejected as invalid.
   const { data: stateRecord, error: stateError } = await admin
     .from('oauth_states')
-    .select('*')
+    .delete()
     .eq('state',       returnedState)
     .eq('provider_id', providerId)
     .gt('expires_at',  new Date().toISOString())  // reject expired codes
-    .single()
+    .select('*')
+    .maybeSingle()
 
   if (stateError || !stateRecord) {
     console.error(
       `[OAuth:${providerId}] State validation failed — ` +
-      `possible CSRF attempt or expired flow (state: ${returnedState?.slice(0, 8)}...)`
+      `possible CSRF attempt, replayed callback, or expired flow (state: ${returnedState?.slice(0, 8)}...)`
     )
     return errorRedirect('invalid_state')
   }
-
-  // Immediately consume the state record — one-time use prevents replay attacks
-  await admin.from('oauth_states').delete().eq('state', returnedState)
 
   // ── 3. Load the provider adapter ──────────────────────────
   let providerAdapter

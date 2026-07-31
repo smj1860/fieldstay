@@ -4,6 +4,7 @@ import type { Metadata }       from 'next'
 import { PayInvoiceButton }    from './pay-button'
 import { Check } from 'lucide-react'
 import { unwrapJoin }          from '@/lib/utils/supabase-joins'
+import { throwIfAnyQueryFailed } from '@/lib/supabase/unwrap'
 
 export const metadata: Metadata = { title: 'Invoice — FieldStay' }
 
@@ -30,7 +31,7 @@ export default async function InvoicePage({
   const { supabase, membership }  = await requireOrgMember()
 
   // Fetch invoice — scoped to this org (RLS enforces, plus explicit eq)
-  const { data: invoice } = await supabase
+  const { data: invoice, error: invoiceError } = await supabase
     .from('work_order_invoices')
     .select(`
       id,
@@ -56,16 +57,24 @@ export default async function InvoicePage({
     .eq('org_id', membership.org_id)
     .single()
 
+
+  // Logs + reports, then throws so the segment's error.tsx renders a real
+  // error state — a failed read must not render as an empty page.
+  throwIfAnyQueryFailed({ site: 'page.invoices.invoiceId', orgId: membership.org_id }, invoiceError)
   if (!invoice) notFound()
 
   // Fetch vendor-submitted line items
-  const { data: lineItems } = await supabase
+  const { data: lineItems, error: lineItemsError } = await supabase
     .from('work_order_line_items')
     .select('id, line_type, description, quantity, unit_cost, line_total, sort_order')
     .eq('work_order_id', invoice.work_order_id)
     .eq('vendor_submitted', true)
     .order('sort_order', { ascending: true })
 
+
+  // Logs + reports, then throws so the segment's error.tsx renders a real
+  // error state — a failed read must not render as an empty page.
+  throwIfAnyQueryFailed({ site: 'page.invoices.invoiceId', orgId: membership.org_id }, lineItemsError)
   const wo       = unwrapJoin(invoice.work_orders)
   const vendor   = unwrapJoin(invoice.vendors)
   const property = unwrapJoin(invoice.properties)

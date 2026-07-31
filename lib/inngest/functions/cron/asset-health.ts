@@ -2,24 +2,47 @@ import { inngest } from '@/lib/inngest/client'
 import { createServiceClient } from '@/lib/supabase/server'
 import { logAuditEvents } from '@/lib/audit'
 import { unwrapJoin } from '@/lib/utils/supabase-joins'
+import { fetchAllRows, fetchDistinctOrgIds } from '@/lib/inngest/paginate'
 import {
   scoreAssets,
   persistScores,
   computeWeightNudge,
+  type AssetRow,
+  type AssetStandardRow,
+  type RepairSummary,
   type RepairRecord,
 } from './asset-health-helpers'
 
 /**
- * SCHEDULED: runs every morning at 8am CT (independent of other maintenance crons).
+ * Repair history older than this contributes nothing meaningful to a current
+ * health score, but the query that fed it had no date bound at all — so it
+ * grew with ALL work-order history forever, on top of being silently capped
+ * at PostgREST's 1000-row limit. Three years covers the useful signal
+ * (repeat-repair frequency and last-serviced date) with a bounded working set.
+ */
+const REPAIR_HISTORY_WINDOW_DAYS = 1095
+
+/** asset_type_standards is a fixed platform reference table (21 rows today). */
+const ASSET_TYPE_STANDARDS_LIMIT = 200
+
+/**
+ * SCHEDULED: 12:30 UTC daily (staggered off the 13:00 UTC batch — see the
+ * stagger note in maintenance-schedules.ts).
  *
  *  • 8.4 — daily asset health score recalculation
  *
- * This keeps running daily, unchanged — cron-daily-wrapup's Friday-only
- * asset-health digest section reads property_assets.health_score, so it
- * needs fresh data every day even though it only surfaces to the PM
- * weekly. The PM-facing threshold-crossing alert email that used to live
- * here (and the COI/license expiry escalation, 8.13) were removed — both
- * are now covered by the daily wrap-up digest instead (sections 3 and 4).
+ * DISPATCHER ONLY. Previously this one invocation selected every active
+ * property_asset platform-wide (~45,000 rows at 150 tenants) in a single
+ * unbounded `.select()`, which PostgREST caps at 1000 with no error — so ~98%
+ * of assets simply stopped being rescored, and daily-wrapup / capital-planning
+ * went on reading a frozen health_score. The same array was also returned as a
+ * step output and therefore re-sent on every subsequent step, which would blow
+ * Inngest's step-output size limit long before the truncation was noticed.
+ *
+ * Now: one `org/asset_health.requested` per org, handled by assetHealthOrg
+ * below under its own concurrency cap. The Bayesian weight nudge stays here
+ * because it is genuinely platform-level (it tunes asset_type_standards, which
+ * are global), but is now both date-windowed and paginated.
  */
 export const dailyAssetHealth = inngest.createFunction(
   {
@@ -27,58 +50,211 @@ export const dailyAssetHealth = inngest.createFunction(
     name:    'Cron: Asset Health Scoring',
     retries: 2,
   },
-  { cron: '0 13 * * *' },
+  { cron: '30 12 * * *' },
   async ({ step, logger }) => {
-    // ── 8.4: Daily Asset Health Score Recalculation ──────────────────────────
-    const activeAssets = await step.run('find-assets-for-scoring', async (): Promise<Array<{
-      id: string
-      org_id: string
-      property_id: string
-      asset_type: string
-      installation_date: string | null
-      expected_lifespan_years: number | null
-      estimated_replacement_cost: number | null
-      health_score: number | null
-    }>> => {
+    const orgIds = await step.run('find-orgs-with-active-assets', async () => {
       const supabase = createServiceClient({ system: 'inngest:asset-health' })
-      const { data } = await supabase
-        .from('property_assets')
-        .select(`
-          id, org_id, property_id, asset_type,
-          installation_date, expected_lifespan_years,
-          estimated_replacement_cost, health_score
-        `)
-        .eq('is_active', true)
-      return data ?? []
+      return fetchDistinctOrgIds(
+        (from, to) => supabase
+          .from('property_assets')
+          .select('org_id')
+          .eq('is_active', true)
+          .order('org_id', { ascending: true })
+          .range(from, to),
+        { label: 'property_assets.org_id' }
+      )
     })
 
-    logger.info(`Found ${activeAssets.length} active assets to score`)
+    logger.info(`Asset health: dispatching ${orgIds.length} org(s)`)
 
-    if (activeAssets.length > 0) {
-      const standards = await step.run('fetch-asset-standards', async () => {
-        const supabase = createServiceClient({ system: 'inngest:asset-health' })
-        const { data } = await supabase
-          .from('asset_type_standards')
-          .select('asset_type, lifespan_min_years, lifespan_max_years, avg_replacement_cost_high, age_weight, condition_weight')
-        return data ?? []
-      })
+    if (orgIds.length) {
+      await step.sendEvent(
+        'fan-out-asset-health',
+        orgIds.map((orgId) => ({
+          name: 'org/asset_health.requested' as const,
+          data: { org_id: orgId },
+        }))
+      )
+    }
 
-      const repairWOs = await step.run('fetch-asset-repair-history', async () => {
-        const supabase = createServiceClient({ system: 'inngest:asset-health' })
-        const { data } = await supabase
+    // ── Bayesian weight nudge: per-asset-type age vs. condition weight drift ──
+    // Platform-level (asset_type_standards is global), so it stays in the
+    // dispatcher rather than running redundantly once per org.
+    await step.run('bayesian-weight-nudge', async () => {
+      const supabase = createServiceClient({ system: 'inngest:asset-health' })
+      const windowStart = new Date(Date.now() - REPAIR_HISTORY_WINDOW_DAYS * 86_400_000)
+        .toISOString().split('T')[0]!
+
+      type NudgeRow = {
+        asset_id: string | null
+        actual_cost: number | null
+        estimated_cost: number | null
+        completed_date: string | null
+        assets: { asset_type: string; installation_date: string | null; expected_lifespan_years: number | null }
+              | { asset_type: string; installation_date: string | null; expected_lifespan_years: number | null }[]
+              | null
+      }
+
+      const assetRepairs = await fetchAllRows<NudgeRow>(
+        (from, to) => supabase
           .from('work_orders')
-          .select('asset_id, actual_cost, estimated_cost, completed_date')
+          .select('asset_id, actual_cost, estimated_cost, completed_date, assets:property_assets!asset_id(asset_type, installation_date, expected_lifespan_years)')
           .not('asset_id', 'is', null)
           .eq('status', 'completed')
-        return data ?? []
-      })
+          .gte('completed_date', windowStart)
+          .order('id', { ascending: true })
+          .range(from, to),
+        { label: 'work_orders(weight-nudge)' }
+      )
 
-      // Aggregate repair history per asset
-      const repairByAsset: Record<string, {
-        total_repairs: number
-        total_repair_cost: number
-        last_serviced_at: string | null
-      }> = {}
+      if (!assetRepairs.length) return { nudged: 0 }
+
+      const byType: Record<string, RepairRecord[]> = {}
+
+      for (const wo of assetRepairs) {
+        const assetInfo = unwrapJoin(wo.assets)
+        if (!assetInfo?.asset_type || !assetInfo.installation_date || !wo.completed_date) continue
+
+        const installYear = new Date(assetInfo.installation_date).getFullYear()
+        const repairYear  = new Date(wo.completed_date).getFullYear()
+        const ageAtRepair = Math.max(0, repairYear - installYear)
+        const repairCost  = wo.actual_cost ?? wo.estimated_cost ?? 0
+
+        ;(byType[assetInfo.asset_type] ??= []).push({
+          ageAtRepair, repairCost, assetType: assetInfo.asset_type,
+        })
+      }
+
+      const { data: currentStandards } = await supabase
+        .from('asset_type_standards')
+        .select('asset_type, age_weight, condition_weight, lifespan_min_years, lifespan_max_years')
+        // Fixed platform reference table (21 asset types today); the explicit
+        // bound documents that and keeps it out of the unbounded-select class.
+        .limit(ASSET_TYPE_STANDARDS_LIMIT)
+
+      const updates: Array<{
+        asset_type:        string
+        age_weight:        number
+        condition_weight:  number
+        weight_updated_at: string
+      }> = []
+      const oldWeightsByType: Record<string, { age_weight: number; condition_weight: number }> = {}
+
+      for (const [assetType, repairs] of Object.entries(byType)) {
+        const std = currentStandards?.find((s) => s.asset_type === assetType)
+        if (!std) continue
+
+        const nudge = computeWeightNudge(repairs, std)
+        if (!nudge) continue
+
+        updates.push({
+          asset_type:        assetType,
+          ...nudge,
+          weight_updated_at: new Date().toISOString(),
+        })
+        oldWeightsByType[assetType] = {
+          age_weight:       std.age_weight,
+          condition_weight: std.condition_weight,
+        }
+      }
+
+      if (updates.length) {
+        await supabase
+          .from('asset_type_standards')
+          .upsert(updates, { onConflict: 'asset_type' })
+
+        // Platform-level event — no org_id, orgId intentionally omitted
+        await logAuditEvents(
+          updates.map((u) => ({
+            action:     'asset.scoring_weights.auto_adjusted' as const,
+            targetType: 'asset_type_standard',
+            targetId:   u.asset_type,
+            metadata:   {
+              old_age_weight:       oldWeightsByType[u.asset_type]?.age_weight,
+              new_age_weight:       u.age_weight,
+              old_condition_weight: oldWeightsByType[u.asset_type]?.condition_weight,
+              new_condition_weight: u.condition_weight,
+            },
+          }))
+        )
+      }
+
+      return { nudged: updates.length, asset_types_with_data: Object.keys(byType).length }
+    })
+
+    // COI & license expiry escalation (formerly 8.13) was removed — fully
+    // superseded by cron-daily-wrapup's compliance digest section, which
+    // re-queries vendor_compliance_documents independently with its own
+    // 30-day lookahead window.
+
+    return { dispatched: orgIds.length }
+  }
+)
+
+/**
+ * Per-org asset health scoring. One invocation = one tenant, so the asset list
+ * is bounded by that tenant's asset count (and paginated regardless), the
+ * repair-history query is scoped to that tenant's assets AND a 3-year window,
+ * and a failing tenant retries only itself.
+ */
+export const assetHealthOrg = inngest.createFunction(
+  {
+    id:          'asset-health-org',
+    name:        'Asset Health Scoring — per org',
+    retries:     2,
+    concurrency: { limit: 10 },
+  },
+  { event: 'org/asset_health.requested' },
+  async ({ event, step, logger }) => {
+    const orgId = event.data.org_id
+
+    const scored = await step.run('score-and-persist-org-assets', async () => {
+      const supabase = createServiceClient({ system: 'inngest:asset-health' })
+
+      const activeAssets = await fetchAllRows<AssetRow>(
+        (from, to) => supabase
+          .from('property_assets')
+          .select(`
+            id, org_id, property_id, asset_type,
+            installation_date, expected_lifespan_years,
+            estimated_replacement_cost, health_score
+          `)
+          .eq('org_id', orgId)
+          .eq('is_active', true)
+          .order('id', { ascending: true })
+          .range(from, to),
+        { label: `property_assets[org=${orgId}]` }
+      )
+
+      if (!activeAssets.length) return 0
+
+      const { data: standards } = await supabase
+        .from('asset_type_standards')
+        .select('asset_type, lifespan_min_years, lifespan_max_years, avg_replacement_cost_high, age_weight, condition_weight')
+        .limit(ASSET_TYPE_STANDARDS_LIMIT)
+
+      const windowStart = new Date(Date.now() - REPAIR_HISTORY_WINDOW_DAYS * 86_400_000)
+        .toISOString().split('T')[0]!
+
+      const repairWOs = await fetchAllRows<{
+        asset_id: string | null
+        actual_cost: number | null
+        estimated_cost: number | null
+        completed_date: string | null
+      }>(
+        (from, to) => supabase
+          .from('work_orders')
+          .select('asset_id, actual_cost, estimated_cost, completed_date')
+          .eq('org_id', orgId)
+          .not('asset_id', 'is', null)
+          .eq('status', 'completed')
+          .gte('completed_date', windowStart)
+          .order('id', { ascending: true })
+          .range(from, to),
+        { label: `work_orders(repair-history)[org=${orgId}]` }
+      )
+
+      const repairByAsset: Record<string, RepairSummary> = {}
       for (const wo of repairWOs) {
         if (!wo.asset_id) continue
         const r = repairByAsset[wo.asset_id]
@@ -97,118 +273,20 @@ export const dailyAssetHealth = inngest.createFunction(
         }
       }
 
-      // Group assets by org for batched updates
-      const assetsByOrg = activeAssets.reduce<Record<string, typeof activeAssets>>((acc, a) => {
-        ;(acc[a.org_id] ??= []).push(a)
-        return acc
-      }, {})
+      const { updates } = scoreAssets(
+        activeAssets,
+        (standards ?? []) as AssetStandardRow[],
+        repairByAsset,
+        new Date().toISOString(),
+      )
 
-      for (const [orgId, orgAssets] of Object.entries(assetsByOrg)) {
-        // Scoring is pure — its own step so a retry of persist below
-        // never re-runs the (cheap, deterministic) computation.
-        const { updates } = await step.run(`score-org-assets-${orgId}`, async () => {
-          const now = new Date().toISOString()
-          return scoreAssets(orgAssets, standards, repairByAsset, now)
-        })
+      // persistScores is an upsert keyed on id — safe to re-run on a retry.
+      await persistScores(supabase, updates)
 
-        if (updates.length > 0) {
-          await step.run(`persist-scores-${orgId}`, async () => {
-            const supabase = createServiceClient({ system: 'inngest:asset-health' })
-            await persistScores(supabase, updates)
-          })
-        }
-      }
+      return updates.length
+    })
 
-      // ── Bayesian weight nudge: per-asset-type age vs. condition weight drift ──
-      await step.run('bayesian-weight-nudge', async () => {
-        const supabase = createServiceClient({ system: 'inngest:asset-health' })
-
-        const { data: assetRepairs } = await supabase
-          .from('work_orders')
-          .select('asset_id, actual_cost, estimated_cost, completed_date, assets:property_assets!asset_id(asset_type, installation_date, expected_lifespan_years)')
-          .not('asset_id', 'is', null)
-          .eq('status', 'completed')
-
-        if (!assetRepairs?.length) return { nudged: 0 }
-
-        const byType: Record<string, RepairRecord[]> = {}
-
-        for (const wo of assetRepairs) {
-          const assetInfo = unwrapJoin(wo.assets)
-          if (!assetInfo?.asset_type || !assetInfo.installation_date || !wo.completed_date) continue
-
-          const installYear = new Date(assetInfo.installation_date).getFullYear()
-          const repairYear   = new Date(wo.completed_date).getFullYear()
-          const ageAtRepair  = Math.max(0, repairYear - installYear)
-          const repairCost   = wo.actual_cost ?? wo.estimated_cost ?? 0
-
-          ;(byType[assetInfo.asset_type] ??= []).push({
-            ageAtRepair, repairCost, assetType: assetInfo.asset_type,
-          })
-        }
-
-        const { data: currentStandards } = await supabase
-          .from('asset_type_standards')
-          .select('asset_type, age_weight, condition_weight, lifespan_min_years, lifespan_max_years')
-
-        const updates: Array<{
-          asset_type:        string
-          age_weight:        number
-          condition_weight:  number
-          weight_updated_at: string
-        }> = []
-        const oldWeightsByType: Record<string, { age_weight: number; condition_weight: number }> = {}
-
-        for (const [assetType, repairs] of Object.entries(byType)) {
-          const std = currentStandards?.find((s) => s.asset_type === assetType)
-          if (!std) continue
-
-          const nudge = computeWeightNudge(repairs, std)
-          if (!nudge) continue
-
-          updates.push({
-            asset_type:        assetType,
-            ...nudge,
-            weight_updated_at: new Date().toISOString(),
-          })
-          oldWeightsByType[assetType] = {
-            age_weight:       std.age_weight,
-            condition_weight: std.condition_weight,
-          }
-        }
-
-        if (updates.length) {
-          await supabase
-            .from('asset_type_standards')
-            .upsert(updates, { onConflict: 'asset_type' })
-
-          // Platform-level event — no org_id, orgId intentionally omitted
-          await logAuditEvents(
-            updates.map((u) => ({
-              action:     'asset.scoring_weights.auto_adjusted' as const,
-              targetType: 'asset_type_standard',
-              targetId:   u.asset_type,
-              metadata:   {
-                old_age_weight:       oldWeightsByType[u.asset_type]?.age_weight,
-                new_age_weight:       u.age_weight,
-                old_condition_weight: oldWeightsByType[u.asset_type]?.condition_weight,
-                new_condition_weight: u.condition_weight,
-              },
-            }))
-          )
-        }
-
-        return { nudged: updates.length, asset_types_with_data: Object.keys(byType).length }
-      })
-    }
-
-    // COI & license expiry escalation (formerly 8.13) was removed — fully
-    // superseded by cron-daily-wrapup's compliance digest section, which
-    // re-queries vendor_compliance_documents independently with its own
-    // 30-day lookahead window.
-
-    return {
-      assets_scored: activeAssets.length,
-    }
+    logger.info(`Asset health: scored ${scored} asset(s) for org ${orgId}`)
+    return { org_id: orgId, assets_scored: scored }
   }
 )

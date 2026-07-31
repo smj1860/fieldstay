@@ -18,7 +18,7 @@
 // ============================================================
 
 import { RateLimitError, IntegrationMisconfiguredError, type IntegrationProvider, type TokenResponse } from '@/lib/integrations/types'
-import { hospitableApiLimiter } from '@/lib/rate-limit'
+import { hospitableApiLimiter, checkLimit } from '@/lib/rate-limit'
 import { ok, fail, timingSafeEqual, extractClientIp, isIpInCidr } from '@/lib/integrations/webhook-verification'
 import { unwrapJoin } from '@/lib/utils/supabase-joins'
 import { reportError } from '@/lib/observability/report-error'
@@ -460,8 +460,16 @@ export const hospitableProvider: IntegrationProvider = {
  * re-attempting — see translateSyncError() for the PM-facing message.
  */
 export async function hospitableFetch(url: string, token: string): Promise<Response> {
-  const { success, reset } = await hospitableApiLimiter.limit('hospitable-api')
-  if (!success) {
+  // Outbound quota against Hospitable's own 60/min ceiling → fails CLOSED:
+  // this exists so we throw RateLimitError before Hospitable 429s us. If the
+  // budget check itself is unavailable we must not blow through their limit;
+  // Inngest's step retry handles backing off.
+  const budget = await checkLimit(hospitableApiLimiter, 'hospitable-api', {
+    onError: 'deny',
+    site:    'lib.integrations.hospitable.hospitableFetch',
+  })
+  const reset = budget.reset
+  if (!budget.allowed) {
     // Jitter (1.0-1.5x) on top of the exact window reset. Without it, every
     // caller blocked by the same sliding window computes an IDENTICAL
     // retry-after and they all re-enter the budget on the same tick — a

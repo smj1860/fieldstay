@@ -1,4 +1,6 @@
 import type { createServiceClient } from '@/lib/supabase/server'
+import { adminFetch } from '@/lib/supabase/server'
+import { reportError } from '@/lib/observability/report-error'
 
 type ServiceClient = ReturnType<typeof createServiceClient>
 
@@ -40,31 +42,165 @@ export async function getPmMembers(
   orgId: string,
   options: GetPmMembersOptions = {}
 ): Promise<PmMember[]> {
-  const { roles = ['owner', 'admin'], limit } = options
+  const byOrg = await getPmMembersByOrgIds(supabase, [orgId], options)
+  return byOrg.get(orgId) ?? []
+}
 
-  const { data: members } = await supabase
+interface MemberRow {
+  org_id:  string
+  user_id: string
+  role:    PmRole
+}
+
+/**
+ * BATCHED form of getPmMembers — resolves many orgs in ONE
+ * organization_members query plus a bounded number of Admin-API calls
+ * shared across every org, instead of (1 query + 1 GoTrue round-trip per
+ * member) per org. A cron that fans out across every tenant must use this:
+ * at 150 orgs the per-org form costs ~300 sequential external round-trips,
+ * which is minutes of wall clock and close to GoTrue's admin rate limits.
+ *
+ * Identical semantics to getPmMembers for each org — same invite_accepted_at
+ * filter, same owner → admin → manager ordering, same per-org `limit` — so
+ * "who counts as the PM" can never drift between the two paths (they share
+ * this implementation; the single-org form is a thin wrapper).
+ *
+ * Returns Map<orgId, PmMember[]>. Orgs with no eligible member are absent
+ * from the map rather than mapped to an empty array.
+ */
+export async function getPmMembersByOrgIds(
+  supabase: ServiceClient,
+  orgIds: string[],
+  options: GetPmMembersOptions = {}
+): Promise<Map<string, PmMember[]>> {
+  const { roles = ['owner', 'admin'], limit } = options
+  const uniqueOrgIds = [...new Set(orgIds)]
+  if (!uniqueOrgIds.length) return new Map()
+
+  const { data: members, error } = await supabase
     .from('organization_members')
-    .select('user_id, role')
-    .eq('org_id', orgId)
+    .select('org_id, user_id, role')
+    .in('org_id', uniqueOrgIds)
     .in('role', roles)
     .not('invite_accepted_at', 'is', null)
 
-  if (!members?.length) return []
+  if (error) {
+    throw new Error(`getPmMembersByOrgIds: organization_members query failed: ${error.message}`)
+  }
+  if (!members?.length) return new Map()
 
-  const sorted = [...members].sort(
-    (a, b) => ROLE_PREFERENCE.indexOf(a.role as PmRole) - ROLE_PREFERENCE.indexOf(b.role as PmRole)
-  )
-  const limited = typeof limit === 'number' ? sorted.slice(0, limit) : sorted
+  const selected      = selectMembersPerOrg(members as MemberRow[], limit)
+  const emailByUserId = await resolveUserEmails(supabase, selected.map((m) => m.user_id))
 
-  const resolved = await Promise.all(
-    limited.map(async (m) => {
-      const { data: { user } } = await supabase.auth.admin.getUserById(m.user_id as string)
-      if (!user?.email) return null
-      return { userId: m.user_id as string, email: user.email, role: m.role as PmRole }
-    })
-  )
+  const result = new Map<string, PmMember[]>()
+  for (const m of selected) {
+    const email = emailByUserId.get(m.user_id)
+    if (!email) continue   // a member with no resolvable email is not reachable
+    push(result, m.org_id, { userId: m.user_id, email, role: m.role })
+  }
 
-  return resolved.filter((m): m is PmMember => m !== null)
+  return result
+}
+
+/**
+ * Groups rows by org, sorts each group owner → admin → manager, and applies
+ * the per-org limit — so each org's slice is exactly what getPmMembers would
+ * have returned for it on its own.
+ */
+function selectMembersPerOrg(members: MemberRow[], limit: number | undefined): MemberRow[] {
+  const rowsByOrg = new Map<string, MemberRow[]>()
+  for (const m of members) push(rowsByOrg, m.org_id, m)
+
+  const selected: MemberRow[] = []
+  for (const rows of rowsByOrg.values()) {
+    rows.sort((a, b) => ROLE_PREFERENCE.indexOf(a.role) - ROLE_PREFERENCE.indexOf(b.role))
+    selected.push(...(typeof limit === 'number' ? rows.slice(0, limit) : rows))
+  }
+  return selected
+}
+
+/** Append to a Map-of-arrays, creating the bucket on first use. */
+function push<T>(map: Map<string, T[]>, key: string, value: T): void {
+  const bucket = map.get(key)
+  if (bucket) bucket.push(value)
+  else map.set(key, [value])
+}
+
+// Above this many distinct users, one paged sweep of the Admin users list is
+// strictly cheaper than a getUserById per user (the sweep is ~1 request per
+// 1000 users, and every cron-scale caller is well past this line). At or
+// below it — the overwhelmingly common single-org case — the targeted
+// lookups are cheaper than pulling the whole directory.
+const ADMIN_LIST_SWEEP_THRESHOLD = 5
+const ADMIN_LIST_PAGE_SIZE       = 1000
+// Hard stop so a directory that keeps returning full pages (or an API shape
+// change) can never turn this into an unbounded loop inside an Inngest step.
+const ADMIN_LIST_MAX_PAGES       = 50
+
+interface AdminUsersPage {
+  users?: Array<{ id?: string; email?: string | null }>
+}
+
+/**
+ * Resolves user_id → email for many users at once.
+ *
+ * Uses adminFetch() (CLAUDE.md: raw Admin REST calls go through it, never a
+ * one-off fetch with the service key inline) to page /auth/v1/admin/users
+ * once for the whole batch, rather than one gotrue getUserById per user.
+ */
+async function resolveUserEmails(
+  supabase: ServiceClient,
+  userIds: string[]
+): Promise<Map<string, string>> {
+  const wanted = new Set(userIds)
+  const out    = new Map<string, string>()
+  if (!wanted.size) return out
+
+  if (wanted.size <= ADMIN_LIST_SWEEP_THRESHOLD) {
+    await Promise.all(
+      [...wanted].map(async (id) => {
+        const { data, error } = await supabase.auth.admin.getUserById(id)
+        if (error) {
+          console.error('[resolveUserEmails] getUserById failed', { userId: id, error: error.message })
+          reportError(error, { site: 'lib.inngest.helpers.resolveUserEmails' })
+          return
+        }
+        if (data?.user?.email) out.set(id, data.user.email)
+      })
+    )
+    return out
+  }
+
+  for (let page = 1; page <= ADMIN_LIST_MAX_PAGES; page++) {
+    const res = await adminFetch(
+      `/auth/v1/admin/users?page=${page}&per_page=${ADMIN_LIST_PAGE_SIZE}`,
+      { signal: AbortSignal.timeout(15_000) }
+    )
+
+    if (!res.ok) {
+      // Surfaced, not swallowed: a partially-resolved batch would silently
+      // drop notifications for every user past the failing page.
+      throw new Error(
+        `resolveUserEmails: GET /auth/v1/admin/users page ${page} failed: HTTP ${res.status}`
+      )
+    }
+
+    const body  = await res.json() as AdminUsersPage
+    const users = body.users ?? []
+
+    for (const u of users) {
+      if (u.id && u.email && wanted.has(u.id)) out.set(u.id, u.email)
+    }
+
+    if (out.size === wanted.size) return out
+    if (users.length < ADMIN_LIST_PAGE_SIZE) return out
+  }
+
+  console.warn('[resolveUserEmails] hit ADMIN_LIST_MAX_PAGES before resolving every user', {
+    requested: wanted.size,
+    resolved:  out.size,
+  })
+  return out
 }
 
 /**
@@ -89,48 +225,73 @@ export async function getPmEmails(
 
 /**
  * Batch-resolve a single PM email per org — avoids N×2 round-trips inside
- * cron functions that loop across all orgs. Kept as a separate function
- * (rather than folded into getPmEmails) because the batch SQL shape is
- * fundamentally different from the per-org lookups above; internally it
- * shares the same role-preference order so "who counts as the PM" never
- * drifts between the single-org and batch paths.
+ * cron functions that loop across all orgs. Thin wrapper over
+ * getPmMembersByOrgIds({ limit: 1 }), so the role-preference order (and
+ * therefore "who counts as the PM") is literally the same code as the
+ * single-org path, not a parallel reimplementation.
  * Returns Map<orgId, email>.
  */
 export async function getPmEmailsByOrgIds(
   supabase: ServiceClient,
   orgIds: string[]
 ): Promise<Map<string, string>> {
-  if (!orgIds.length) return new Map()
-
-  const { data: members } = await supabase
-    .from('organization_members')
-    .select('org_id, user_id, role')
-    .in('org_id', orgIds)
-    .in('role', ['owner', 'admin'])
-    .not('invite_accepted_at', 'is', null)
-
-  if (!members?.length) return new Map()
-
-  const bestByOrg = new Map<string, string>()
-  for (const m of members) {
-    const existing = bestByOrg.get(m.org_id)
-    if (!existing) {
-      bestByOrg.set(m.org_id, m.user_id)
-    } else if (m.role === 'owner') {
-      // owner always wins, matching ROLE_PREFERENCE order used elsewhere
-      bestByOrg.set(m.org_id, m.user_id)
-    }
-  }
+  const byOrg = await getPmMembersByOrgIds(supabase, orgIds, { limit: 1 })
 
   const result = new Map<string, string>()
-  await Promise.all(
-    Array.from(bestByOrg.entries()).map(async ([org_id, user_id]) => {
-      const { data: { user } } = await supabase.auth.admin.getUserById(user_id)
-      if (user?.email) result.set(org_id, user.email)
-    })
-  )
-
+  for (const [orgId, members] of byOrg) {
+    const primary = members[0]
+    if (primary) result.set(orgId, primary.email)
+  }
   return result
+}
+
+/**
+ * The human a vendor is told to contact about a work order ("dispatcher").
+ *
+ * Vendor-facing email and SMS both name this person, so it MUST be
+ * deterministic: two messages about the same work order naming two
+ * different people is a support call. Selection therefore goes through
+ * getPmMembers — which applies the owner → admin → manager preference and
+ * the invite_accepted_at filter — rather than an ad-hoc
+ * `.in('role', [...]).limit(1)` query, which returns whatever Postgres
+ * happens to hand back and can differ between two runs on the same org.
+ *
+ * `fallbackName` is used when the org has no eligible PM or that PM has no
+ * profile name (e.g. the org name, or "Your Property Manager").
+ */
+export interface OrgDispatcher {
+  userId: string | null
+  name:   string
+  phone:  string | null
+}
+
+export async function getOrgDispatcher(
+  supabase: ServiceClient,
+  orgId: string,
+  fallbackName: string
+): Promise<OrgDispatcher> {
+  const [primary] = await getPmMembers(supabase, orgId, { roles: ['owner', 'admin'], limit: 1 })
+  if (!primary) return { userId: null, name: fallbackName, phone: null }
+
+  const { data: profile, error } = await supabase
+    .from('profiles')
+    .select('full_name, phone')
+    .eq('id', primary.userId)
+    .maybeSingle()
+
+  if (error) {
+    // Not fatal — the message still goes out under the fallback name — but
+    // never silent: a vendor being told to call "Your Property Manager"
+    // instead of a real person is a visible support problem.
+    console.error('[getOrgDispatcher] profile lookup failed', { orgId, error: error.message })
+    reportError(error, { site: 'lib.inngest.helpers.getOrgDispatcher', orgId })
+  }
+
+  return {
+    userId: primary.userId,
+    name:   profile?.full_name ?? fallbackName,
+    phone:  profile?.phone     ?? null,
+  }
 }
 
 /**

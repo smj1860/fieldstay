@@ -82,10 +82,10 @@ export function ClonePropertyModal({ targetProperty, otherProperties, onClose }:
               </p>
             ) : (
               <div className="space-y-2">
-                <label className="text-xs font-medium" style={{ color: 'var(--text-muted)' }}>
+                <label htmlFor="clone-property-modal-copy-from" className="text-xs font-medium" style={{ color: 'var(--text-muted)' }}>
                   Copy from
                 </label>
-                <select
+                <select id="clone-property-modal-copy-from"
                   value={selectedId}
                   onChange={(e) => setSelectedId(e.target.value)}
                   className="w-full rounded-lg border px-3 py-2 text-sm"

@@ -6,34 +6,49 @@ import { parseLocalDate } from '@/lib/utils/date-validation'
 import { logAuditEvent } from '@/lib/audit'
 import { reportError } from '@/lib/observability/report-error'
 import { unwrapJoin } from '@/lib/utils/supabase-joins'
+import { fetchAllRows, fetchDistinctOrgIds } from '@/lib/inngest/paginate'
 import {
   createMaintenanceWorkOrder,
   computeVacancyGaps,
+  type DueSoonScheduleRow,
+  type DueSoonVendor,
   type GapBooking,
   type GapScheduleRow,
   type VendorPortalEvent,
 } from './maintenance-schedules-helpers'
 
-const ALERT_WINDOW_DAYS  = 7   // alert PM when schedule due within 7 days
-const ESCALATE_DAYS_PAST = 3   // escalate when schedule is 3+ days overdue
+const ALERT_WINDOW_DAYS = 7   // alert PM when schedule due within 7 days
 
 /**
- * SCHEDULED: runs every morning at 8am CT.
+ * Pass 1's row shape: DueSoonScheduleRow (what createMaintenanceWorkOrder
+ * consumes) plus the seasonal-window / recurrence columns this file needs to
+ * decide whether to act and how to roll next_due_date forward.
+ */
+interface DueScheduleRow extends DueSoonScheduleRow {
+  schedule_type:     string | null
+  frequency:         string | null
+  active_from_month: number | null
+  active_to_month:   number | null
+  vendors:           DueSoonVendor | DueSoonVendor[] | null
+}
+
+/**
+ * SCHEDULED: 13:00 UTC daily (8am CT).
  *
- * Pass 1 — due-soon: schedules due within ALERT_WINDOW_DAYS
- *   • auto_create_wo = true  → create WO
- *   • auto_create_wo = false → no-op (surfaced by cron-daily-wrapup instead)
+ * Cron stagger: asset-health runs at 12:30, this at 13:00, work-order-ops at
+ * 13:30. All three previously fired at 13:00 and hit Supabase simultaneously.
  *
- * Pass 2 — overdue escalation: schedules past their due date
- *   • If an open WO exists for the schedule → bump priority to urgent
- *   • If no WO exists → create one (regardless of auto_create_wo)
+ * DISPATCHER ONLY. Every pass below used to run platform-wide inside this one
+ * invocation: two serial `for (schedule of allSchedules) { await step.run() }`
+ * loops (one step per schedule, unbounded step count), and a vacancy-gap pass
+ * that pulled ALL active properties + ALL their bookings + ALL their schedules
+ * into memory in a single step through three unbounded `.select()`s. Each of
+ * those selects is silently capped at PostgREST's 1000-row limit, so the
+ * truncation was simultaneously producing wrong results AND masking the step
+ * explosion underneath.
  *
- * Also handles the thirty-day org milestone check.
- *
- * The PM-facing alert emails that used to fire from every pass here (due
- * soon, escalated, vacancy-gap suggestions) were removed — all covered by
- * cron-daily-wrapup's daily digest instead. This cron's non-email side
- * effects (WO auto-creation, priority escalation, audit logs) are unchanged.
+ * Now: one `org/maintenance_schedules.requested` per org, handled by
+ * maintenanceSchedulesOrg under its own concurrency cap.
  */
 export const dailyMaintenanceScheduleCheck = inngest.createFunction(
   {
@@ -43,8 +58,108 @@ export const dailyMaintenanceScheduleCheck = inngest.createFunction(
   },
   { cron: '0 13 * * *' },  // 8am CT (UTC-5)
   async ({ step, logger }) => {
-    const today    = new Date()
-    const todayStr = today.toISOString().split('T')[0]
+    const nowMs = await step.run('capture-now', async () => Date.now())
+
+    const orgIds = await step.run('find-orgs-with-schedules-or-properties', async () => {
+      const supabase = createServiceClient({ system: 'inngest:maintenance-schedules' })
+
+      // Union of orgs with any active schedule (passes 1 & 2) and orgs with
+      // any active property (pass 3's vacancy gaps, which is schedule-driven
+      // but starts from properties).
+      const [scheduleOrgs, propertyOrgs] = await Promise.all([
+        fetchDistinctOrgIds(
+          (from, to) => supabase
+            .from('maintenance_schedules')
+            .select('org_id')
+            .eq('is_active', true)
+            .order('org_id', { ascending: true })
+            .range(from, to),
+          { label: 'maintenance_schedules.org_id' }
+        ),
+        fetchDistinctOrgIds(
+          (from, to) => supabase
+            .from('properties')
+            .select('org_id')
+            .eq('is_active', true)
+            .order('org_id', { ascending: true })
+            .range(from, to),
+          { label: 'properties.org_id' }
+        ),
+      ])
+
+      return Array.from(new Set([...scheduleOrgs, ...propertyOrgs]))
+    })
+
+    logger.info(`Maintenance schedules: dispatching ${orgIds.length} org(s)`)
+
+    if (orgIds.length) {
+      await step.sendEvent(
+        'fan-out-maintenance-schedules',
+        orgIds.map((orgId) => ({
+          name: 'org/maintenance_schedules.requested' as const,
+          data: { org_id: orgId, now_ms: nowMs },
+        }))
+      )
+    }
+
+    // ── Thirty-day milestone ────────────────────────────────────────────────
+    // Platform-level and already bounded to a 2-day creation window — stays in
+    // the dispatcher rather than fanning out.
+    await step.run('check-thirty-day-milestone', async () => {
+      const supabase = createServiceClient({ system: 'inngest:maintenance-schedules' })
+      const windowStart = new Date(nowMs - 32 * 86_400_000).toISOString()
+      const windowEnd   = new Date(nowMs - 30 * 86_400_000).toISOString()
+      const orgs = await fetchAllRows<{ id: string }>(
+        (from, to) => supabase
+          .from('organizations')
+          .select('id')
+          .gte('created_at', windowStart)
+          .lte('created_at', windowEnd)
+          .order('id', { ascending: true })
+          .range(from, to),
+        { label: 'organizations(thirty-day)' }
+      )
+
+      if (orgs.length) {
+        await supabase.from('org_milestones').upsert(
+          orgs.map(org => ({ org_id: org.id, milestone: 'thirty_days' })),
+          { onConflict: 'org_id,milestone', ignoreDuplicates: true }
+        )
+      }
+    })
+
+    return { dispatched: orgIds.length }
+  }
+)
+
+/**
+ * Per-org maintenance schedule processing. One invocation = one tenant.
+ *
+ * Pass 1 — due-soon: schedules due within ALERT_WINDOW_DAYS
+ *   • auto_create_wo = true  → create WO
+ *   • auto_create_wo = false → no-op (surfaced by cron-daily-wrapup instead)
+ *
+ * Pass 2 — overdue escalation: schedules past their due date
+ *   • If an open WO exists for the schedule → bump priority to urgent
+ *   • If no WO exists → create one (regardless of auto_create_wo)
+ *
+ * Pass 3 — vacancy-gap maintenance suggestions, scoped to this org.
+ *
+ * Step counts now scale with one tenant's schedule backlog rather than the
+ * whole platform's, and a failing tenant retries only itself.
+ */
+export const maintenanceSchedulesOrg = inngest.createFunction(
+  {
+    id:          'maintenance-schedules-org',
+    name:        'Maintenance Schedules — per org',
+    retries:     2,
+    concurrency: { limit: 10 },
+  },
+  { event: 'org/maintenance_schedules.requested' },
+  async ({ event, step, logger }) => {
+    const orgId = event.data.org_id
+    const today = new Date(event.data.now_ms)
+    const todayStr = today.toISOString().split('T')[0]!
 
     const alertDate = new Date(today)
     alertDate.setDate(alertDate.getDate() + ALERT_WINDOW_DAYS)
@@ -52,43 +167,56 @@ export const dailyMaintenanceScheduleCheck = inngest.createFunction(
     // ── Pass 1: Due-soon schedules ─────────────────────────────────────────
     const dueSchedules = await step.run('find-due-schedules', async () => {
       const supabase = createServiceClient({ system: 'inngest:maintenance-schedules' })
-      const { data } = await supabase
-        .from('maintenance_schedules')
-        .select(`
-          id, name, schedule_type, frequency, estimated_cost,
-          instructions, auto_create_wo, next_due_date,
-          active_from_month, active_to_month,
-          assigned_vendor_id, property_id, org_id,
-          properties ( name, city, state ),
-          vendors ( id, name, email, portal_enabled )
-        `)
-        .eq('is_active', true)
-        .lte('next_due_date', alertDate.toISOString().split('T')[0])
-        .gte('next_due_date', todayStr)
-
-      return data ?? []
+      return fetchAllRows<DueScheduleRow>(
+        (from, to) => supabase
+          .from('maintenance_schedules')
+          .select(`
+            id, name, schedule_type, frequency, estimated_cost,
+            instructions, auto_create_wo, next_due_date,
+            active_from_month, active_to_month,
+            assigned_vendor_id, property_id, org_id,
+            properties ( name, city, state ),
+            vendors ( id, name, email, portal_enabled )
+          `)
+          .eq('org_id', orgId)
+          .eq('is_active', true)
+          .lte('next_due_date', alertDate.toISOString().split('T')[0]!)
+          .gte('next_due_date', todayStr)
+          .order('id', { ascending: true })
+          .range(from, to),
+        { label: `maintenance_schedules(due)[org=${orgId}]` }
+      )
     })
 
-    logger.info(`Found ${dueSchedules.length} schedules due within ${ALERT_WINDOW_DAYS} days`)
-
-    // ── Pass 2 lookup: Overdue schedules (fetched early to batch PM emails) ──
+    // ── Pass 2 lookup: Overdue schedules ───────────────────────────────────
     const overdueSchedules = await step.run('find-overdue-schedules', async () => {
       const supabase = createServiceClient({ system: 'inngest:maintenance-schedules' })
-      const { data } = await supabase
-        .from('maintenance_schedules')
-        .select(`
-          id, name, estimated_cost, next_due_date,
-          assigned_vendor_id, property_id, org_id,
-          properties ( name ),
-          vendors ( name )
-        `)
-        .eq('is_active', true)
-        .lt('next_due_date', todayStr)  // past due date
-
-      return data ?? []
+      return fetchAllRows<{
+        id: string; name: string; estimated_cost: number | null
+        next_due_date: string | null; assigned_vendor_id: string | null
+        property_id: string; org_id: string
+      }>(
+        (from, to) => supabase
+          .from('maintenance_schedules')
+          .select(`
+            id, name, estimated_cost, next_due_date,
+            assigned_vendor_id, property_id, org_id,
+            properties ( name ),
+            vendors ( name )
+          `)
+          .eq('org_id', orgId)
+          .eq('is_active', true)
+          .lt('next_due_date', todayStr)  // past due date
+          .order('id', { ascending: true })
+          .range(from, to),
+        { label: `maintenance_schedules(overdue)[org=${orgId}]` }
+      )
     })
 
-    logger.info(`Found ${overdueSchedules.length} overdue schedules`)
+    logger.info(
+      `Org ${orgId}: ${dueSchedules.length} schedule(s) due within ${ALERT_WINDOW_DAYS} days, ` +
+      `${overdueSchedules.length} overdue`
+    )
 
     for (const schedule of dueSchedules) {
       const processResult = await step.run(`process-schedule-${schedule.id}`, async () => {
@@ -130,12 +258,7 @@ export const dailyMaintenanceScheduleCheck = inngest.createFunction(
           // schedules must NOT roll forward here: nothing acted on them yet,
           // and cron-daily-wrapup's due-schedule section reads next_due_date
           // at 6pm — if this 8am pass had already advanced it past today,
-          // the schedule would get no PM-facing surface at all (no email,
-          // since that was removed; not the digest either, since it's no
-          // longer "due"). Reminder-only schedules stay due until the PM acts
-          // on them manually (advanceScheduleAfterCompletion in
-          // app/(dashboard)/maintenance/actions.ts advances next_due_date at
-          // that point), so they keep showing up in the digest daily until then.
+          // the schedule would get no PM-facing surface at all.
           if (schedule.schedule_type === 'routine' && schedule.frequency) {
             const nextDue = calcNextDueDate(schedule.frequency, dueDate)
             await supabase
@@ -158,9 +281,6 @@ export const dailyMaintenanceScheduleCheck = inngest.createFunction(
     }
 
     // ── Pass 2: Overdue escalation ─────────────────────────────────────────
-    const escalateBefore = new Date(today)
-    escalateBefore.setDate(escalateBefore.getDate() - ESCALATE_DAYS_PAST)
-
     for (const schedule of overdueSchedules) {
       await step.run(`escalate-overdue-${schedule.id}`, async () => {
         const supabase = createServiceClient({ system: 'inngest:maintenance-schedules' })
@@ -186,15 +306,15 @@ export const dailyMaintenanceScheduleCheck = inngest.createFunction(
         const { data: openWO } = await supabase
           .from('work_orders')
           .select('id, priority, status')
+          .eq('org_id', orgId)
           .eq('source_schedule_id', schedule.id)
           .not('status', 'in', '("completed","cancelled")')
           .order('created_at', { ascending: false })
           .limit(1)
           .maybeSingle()
 
-        // The PM-facing escalation alerts that used to fire here (both the
-        // existing-WO-escalated and new-WO-created cases) are now covered
-        // by cron-daily-wrapup's maintenance digest section instead.
+        // The PM-facing escalation alerts that used to fire here are now
+        // covered by cron-daily-wrapup's maintenance digest section instead.
         if (openWO) {
           // Escalate existing WO priority to urgent if not already
           if (openWO.priority !== 'urgent') {
@@ -226,6 +346,7 @@ export const dailyMaintenanceScheduleCheck = inngest.createFunction(
           const { data: existingWO } = await supabase
             .from('work_orders')
             .select('id')
+            .eq('org_id', orgId)
             .eq('source_schedule_id', schedule.id)
             .eq('scheduled_date', schedule.next_due_date!)
             .eq('source', 'maintenance_schedule')
@@ -265,86 +386,78 @@ export const dailyMaintenanceScheduleCheck = inngest.createFunction(
       })
     }
 
-    // ── Pass 3: Vacancy-gap maintenance suggestions ─────────────────────────
+    // ── Pass 3: Vacancy-gap maintenance suggestions (this org only) ─────────
     const gapSuggestions = await step.run('find-vacancy-gaps', async () => {
       const supabase = createServiceClient({ system: 'inngest:maintenance-schedules' })
 
-      // ── 1. All active properties ───────────────────────────────────────────
-      const { data: properties } = await supabase
-        .from('properties')
-        .select('id, org_id, name')
-        .eq('is_active', true)
+      const properties = await fetchAllRows<{ id: string; org_id: string; name: string }>(
+        (from, to) => supabase
+          .from('properties')
+          .select('id, org_id, name')
+          .eq('org_id', orgId)
+          .eq('is_active', true)
+          .order('id', { ascending: true })
+          .range(from, to),
+        { label: `properties[org=${orgId}]` }
+      )
 
-      if (!properties?.length) return []
+      if (!properties.length) return []
 
       const propertyIds = properties.map((p) => p.id)
 
-      // ── 2. ONE batch bookings query for all properties ─────────────────────
-      //    Replaces the previous per-property query (N round trips → 1).
-      const { data: allBookings } = await supabase
-        .from('bookings')
-        .select('property_id, checkin_date, checkout_date')
-        .in('property_id', propertyIds)
-        .in('status', ['confirmed', 'tentative'])
-        .gte('checkout_date', todayStr)
-        .order('property_id',  { ascending: true })
-        .order('checkin_date', { ascending: true })
+      // ONE batch bookings query for all of this org's properties.
+      const allBookings = await fetchAllRows<{
+        property_id: string; checkin_date: string; checkout_date: string
+      }>(
+        (from, to) => supabase
+          .from('bookings')
+          .select('property_id, checkin_date, checkout_date')
+          .eq('org_id', orgId)
+          .in('property_id', propertyIds)
+          .in('status', ['confirmed', 'tentative'])
+          .gte('checkout_date', todayStr)
+          .order('property_id',  { ascending: true })
+          .order('checkin_date', { ascending: true })
+          .range(from, to),
+        { label: `bookings(vacancy-gaps)[org=${orgId}]` }
+      )
 
       const bookingsByProperty = new Map<string, GapBooking[]>()
-      for (const booking of allBookings ?? []) {
+      for (const booking of allBookings) {
         const existing = bookingsByProperty.get(booking.property_id) ?? []
         existing.push({ checkin_date: booking.checkin_date, checkout_date: booking.checkout_date })
         bookingsByProperty.set(booking.property_id, existing)
       }
 
-      // ── 3. ONE batch maintenance_schedules query for all properties ────────
-      //    Replaces the per-gap query inside findMaintenanceCandidatesForWindow.
-      //    The window/seasonal filtering it did is reproduced in memory by
-      //    computeVacancyGaps() below.
-      const { data: allSchedules } = await supabase
-        .from('maintenance_schedules')
-        .select('id, property_id, name, next_due_date, estimated_cost, assigned_vendor_id, active_from_month, active_to_month')
-        .in('property_id', propertyIds)
-        .eq('is_active', true)
+      // ONE batch maintenance_schedules query for all of this org's properties.
+      const allSchedules = await fetchAllRows<GapScheduleRow>(
+        (from, to) => supabase
+          .from('maintenance_schedules')
+          .select('id, property_id, name, next_due_date, estimated_cost, assigned_vendor_id, active_from_month, active_to_month')
+          .eq('org_id', orgId)
+          .in('property_id', propertyIds)
+          .eq('is_active', true)
+          .order('id', { ascending: true })
+          .range(from, to),
+        { label: `maintenance_schedules(vacancy-gaps)[org=${orgId}]` }
+      )
 
       const schedulesByProperty = new Map<string, GapScheduleRow[]>()
-      for (const schedule of (allSchedules ?? []) as GapScheduleRow[]) {
+      for (const schedule of allSchedules) {
         const existing = schedulesByProperty.get(schedule.property_id) ?? []
         existing.push(schedule)
         schedulesByProperty.set(schedule.property_id, existing)
       }
 
-      // ── 4. Compute gaps + candidates entirely in memory — zero DB round trips ─
+      // Compute gaps + candidates entirely in memory — zero DB round trips.
       return computeVacancyGaps(properties, bookingsByProperty, schedulesByProperty)
     })
 
-    // gapSuggestions used to be emailed to the PM here — superseded by
-    // cron-daily-wrapup's Monday-only vacancy section (a simpler gap-detection
-    // query, not a port of this file's fuller candidate-scoring logic).
-
-    // ── Thirty-day milestone ────────────────────────────────────────────────
-    // Only look at orgs that just crossed the 30-day mark since roughly the last run
-    // (2-day lookback window for safety) instead of re-scanning every org that has
-    // ever existed — the upsert's ignoreDuplicates guards against overlap/reruns.
-    await step.run('check-thirty-day-milestone', async () => {
-      const supabase = createServiceClient({ system: 'inngest:maintenance-schedules' })
-      const windowStart = new Date(Date.now() - 32 * 86_400_000).toISOString()
-      const windowEnd   = new Date(Date.now() - 30 * 86_400_000).toISOString()
-      const { data: orgs } = await supabase
-        .from('organizations')
-        .select('id')
-        .gte('created_at', windowStart)
-        .lte('created_at', windowEnd)
-
-      if (orgs?.length) {
-        await supabase.from('org_milestones').upsert(
-          orgs.map(org => ({ org_id: org.id, milestone: 'thirty_days' })),
-          { onConflict: 'org_id,milestone', ignoreDuplicates: true }
-        )
-      }
-    })
+    // gapSuggestions used to be emailed to the PM — superseded by
+    // cron-daily-wrapup's Monday-only vacancy section.
 
     return {
+      org_id:         orgId,
       checked:        dueSchedules.length,
       escalated:      overdueSchedules.length,
       gapSuggestions: gapSuggestions.length,

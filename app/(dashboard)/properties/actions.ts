@@ -8,6 +8,7 @@ import { calculateHealthScore } from '@/lib/assets/health-score'
 import { logAuditEvent } from '@/lib/audit'
 import { applyMasterChecklistToProperty } from '@/lib/checklists/apply-master-template'
 import { reportError } from '@/lib/observability/report-error'
+import { reportQueryError } from '@/lib/supabase/unwrap'
 import type { AssetType } from '@/types/database'
 
 export type PropertyActionState = {
@@ -46,12 +47,26 @@ export async function createProperty(
 
     if (!name) return { error: 'Property name is required' }
 
-    // Check plan property limit
-    const { count } = await supabase
+    // Plan property limit — UX only. The real enforcement is the
+    // enforce_property_plan_limit trigger (migration 20260730600000), which
+    // takes a FOR UPDATE lock on the org row so two concurrent creations at
+    // the limit can't both pass. This check just gives a friendlier message
+    // before the round trip.
+    //
+    // It fails CLOSED: `count ?? 0` used to coerce a FAILED count to zero,
+    // which disabled the plan limit entirely for that request.
+    const { count, error: countError } = await supabase
       .from('properties')
       .select('id', { count: 'exact', head: true })
       .eq('org_id', membership.org_id)
       .eq('is_active', true)
+
+    if (reportQueryError(countError, {
+      site: 'serverAction.properties.createProperty.limitCount',
+      orgId: membership.org_id,
+    })) {
+      return { error: 'We could not verify your plan limit. Please try again.' }
+    }
 
     if ((count ?? 0) >= membership.org.max_properties) {
       return {
@@ -85,6 +100,14 @@ export async function createProperty(
 
     if (error) {
       console.error('[createProperty]', error)
+      reportError(error, { site: 'serverAction.properties.createProperty.insert', orgId: membership.org_id })
+      // 23514 is the check_violation the plan-limit trigger raises — the
+      // enforcement path the count above only approximates.
+      if (error.code === '23514' && error.message.includes('Property limit reached')) {
+        return {
+          error: `Your plan allows up to ${membership.org.max_properties} properties. Upgrade to add more.`,
+        }
+      }
       return { error: 'Operation failed. Please try again.' }
     }
 

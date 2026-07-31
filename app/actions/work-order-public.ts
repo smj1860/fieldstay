@@ -223,6 +223,70 @@ const MAX_PHOTOS      = 5
 const MAX_PHOTO_BYTES = 10 * 1024 * 1024  // 10 MB
 const ALLOWED_MIME    = new Set(['image/jpeg', 'image/png', 'image/webp', 'image/heic'])
 
+type ServiceClient = ReturnType<typeof createServiceClient>
+
+/** Returns an error message, or null when the batch is acceptable. */
+function validateSignOffPhotos(photos: File[] | undefined): string | null {
+  if (!photos || photos.length === 0) return null
+  if (photos.length > MAX_PHOTOS) return `Maximum ${MAX_PHOTOS} photos allowed`
+  for (const photo of photos) {
+    if (photo.size > MAX_PHOTO_BYTES) return 'Each photo must be under 10 MB'
+    if (!ALLOWED_MIME.has(photo.type)) return 'Only JPEG, PNG, WebP, or HEIC photos are accepted'
+  }
+  return null
+}
+
+/**
+ * Per-work-order submission throttle.
+ *
+ * ⚠️ The key is deliberately derived from the TOKEN, so the budget is per
+ * work order rather than per contractor — a contractor legitimately submits
+ * once, so 5 attempts in 5 minutes against the same WO is already generous.
+ * This provides NO enumeration protection whatsoever: an attacker guessing
+ * tokens uses a DIFFERENT key on every attempt and never collides with
+ * itself here. Token-enumeration throttling for this surface comes solely
+ * from proxy.ts's per-IP workOrderRatelimit on the '/work-orders/' prefix.
+ *
+ * Abuse limiter → fails OPEN: a degraded Redis must never block a
+ * legitimate contractor's sign-off.
+ */
+async function signOffThrottled(token: string): Promise<boolean> {
+  const { signOffRatelimit, checkLimit } = await import('@/lib/rate-limit')
+  const decision = await checkLimit(signOffRatelimit, `signoff:${token.slice(0, 16)}`, {
+    onError: 'allow',
+    site:    'serverAction.work-order-public.submitWorkOrderSignOff',
+  })
+  return !decision.allowed
+}
+
+async function uploadSignOffPhotos(
+  supabase:    ServiceClient,
+  orgId:       string,
+  workOrderId: string,
+  photos:      File[],
+): Promise<void> {
+  for (const photo of photos) {
+    // Path MUST start with the owning org's id — see the identical note in
+    // app/api/work-orders/[token]/photos/route.ts: the work-order-photos
+    // bucket becomes private with org-scoped storage RLS keyed on
+    // (storage.foldername(name))[1].
+    const ext  = photoFileExtension(photo.type)
+    const path = `${orgId}/work-orders/${workOrderId}/signoff/${crypto.randomUUID()}.${ext}`
+    const { error: uploadErr } = await supabase.storage
+      .from('work-order-photos')
+      .upload(path, photo, { contentType: photo.type, upsert: false })
+    if (uploadErr) {
+      console.error('[submitWorkOrderSignOff] photo upload', uploadErr)
+      continue
+    }
+    await supabase.from('work_order_photos').insert({
+      work_order_id: workOrderId,
+      storage_path:  path,
+      uploaded_at:   new Date().toISOString(),
+    })
+  }
+}
+
 export async function submitWorkOrderSignOff(
   token:       string,
   notes:       string,
@@ -231,37 +295,15 @@ export async function submitWorkOrderSignOff(
 ): Promise<{ success?: boolean; error?: string }> {
   if (!token || token.length !== 64) return { error: 'Invalid link' }
 
-  if (photos && photos.length > 0) {
-    if (photos.length > MAX_PHOTOS) {
-      return { error: `Maximum ${MAX_PHOTOS} photos allowed` }
-    }
-    for (const photo of photos) {
-      if (photo.size > MAX_PHOTO_BYTES) {
-        return { error: 'Each photo must be under 10 MB' }
-      }
-      if (!ALLOWED_MIME.has(photo.type)) {
-        return { error: 'Only JPEG, PNG, WebP, or HEIC photos are accepted' }
-      }
-    }
-  }
+  const photoError = validateSignOffPhotos(photos)
+  if (photoError) return { error: photoError }
 
   if (actualCost !== undefined && (actualCost < 0 || actualCost > 1_000_000)) {
     return { error: 'Cost must be a valid amount' }
   }
 
-  // Rate limit by token — prevents spam sign-offs on the same work order
-  // Uses the token (not IP) so the limit is per work order, not per contractor
-  try {
-    const { signOffRatelimit } = await import('@/lib/rate-limit')
-    const { success } = await signOffRatelimit.limit(`signoff:${token.slice(0, 16)}`)
-    if (!success) {
-      return { error: 'Too many requests. Please try again in a few minutes.' }
-    }
-  } catch (rlErr) {
-    // If Redis is unavailable, log and continue — a degraded rate limiting
-    // service must never block legitimate contractor sign-offs
-    console.error('[submitWorkOrderSignOff] rate limit check failed', rlErr)
-    reportError(rlErr, { site: 'serverAction.work-order-public.submitWorkOrderSignOff' })
+  if (await signOffThrottled(token)) {
+    return { error: 'Too many requests. Please try again in a few minutes.' }
   }
 
   const supabase = createServiceClient({ publicSurface: 'work-order-public-token' })
@@ -280,6 +322,9 @@ export async function submitWorkOrderSignOff(
 
   if (fetchErr || !wo) return { error: 'Work order not found' }
 
+  // Cheap pre-checks — these only produce a friendlier message sooner. The
+  // authoritative already-signed-off check is the UPDATE's own
+  // .is('public_signed_off_at', null) precondition below.
   if (wo.public_signed_off_at) {
     return { error: 'This work order has already been signed off' }
   }
@@ -294,7 +339,15 @@ export async function submitWorkOrderSignOff(
 
   const now = new Date().toISOString()
 
-  const { error: signOffErr } = await supabase
+  // TOCTOU guard: the precondition lives IN the UPDATE, not in an `if` before
+  // it. Two concurrent submits (double-tap, retried form post) both passed the
+  // read-then-write check above and both wrote — duplicating the photo
+  // uploads, the audit event and the downstream Inngest notification, and
+  // letting whichever landed last decide actual_cost. Postgres serialises the
+  // conditional UPDATE, so exactly one request matches a row; the loser gets
+  // zero rows back and is treated as "already signed off". Same pattern as
+  // app/api/work-orders/[token]/quote/route.ts's .eq('status','pending').
+  const { data: signedOff, error: signOffErr } = await supabase
     .from('work_orders')
     .update({
       public_signed_off_at:   now,
@@ -304,10 +357,18 @@ export async function submitWorkOrderSignOff(
       actual_cost:            actualCost ?? null,
     })
     .eq('id', wo.id)
+    .is('public_signed_off_at', null)
+    .select('id')
+    .maybeSingle()
 
   if (signOffErr) {
     console.error('[submitWorkOrderSignOff]', signOffErr)
     return { error: 'Failed to record sign-off. Please try again.' }
+  }
+
+  if (!signedOff) {
+    // Zero rows matched — a concurrent request won the race.
+    return { error: 'This work order has already been signed off' }
   }
 
   const property = unwrapJoin(wo.properties)
@@ -324,24 +385,8 @@ export async function submitWorkOrderSignOff(
     },
   })
 
-  // Upload sign-off photos to storage and record in work_order_photos
   if (photos && photos.length > 0) {
-    for (const photo of photos) {
-      const ext  = photoFileExtension(photo.type)
-      const path = `work-orders/${wo.id}/signoff/${crypto.randomUUID()}.${ext}`
-      const { error: uploadErr } = await supabase.storage
-        .from('work-order-photos')
-        .upload(path, photo, { contentType: photo.type, upsert: false })
-      if (uploadErr) {
-        console.error('[submitWorkOrderSignOff] photo upload', uploadErr)
-        continue
-      }
-      await supabase.from('work_order_photos').insert({
-        work_order_id: wo.id,
-        storage_path:  path,
-        uploaded_at:   new Date().toISOString(),
-      })
-    }
+    await uploadSignOffPhotos(supabase, wo.org_id, wo.id, photos)
   }
 
   await inngest.send({

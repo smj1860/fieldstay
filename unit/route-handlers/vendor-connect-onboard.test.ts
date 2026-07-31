@@ -10,9 +10,17 @@ vi.mock('@/lib/stripe/client', () => ({
     accountLinks: { create: vi.fn() },
   },
 }))
-vi.mock('@/lib/rate-limit', () => ({
-  vendorConnectRatelimit: { limit: vi.fn(async () => ({ success: true })) },
-}))
+vi.mock('@/lib/rate-limit', async () => {
+  // checkLimit() is now the only sanctioned way to consult a limiter
+  // (lib/rate-limit.ts). The stub delegates to the limiter doubles below
+  // so existing `.limit` assertions and fail-policy tests still apply.
+  const { checkLimitStub, retryAfterSecondsStub } = await import('@/unit/stubs/rate-limit')
+  return {
+    vendorConnectRatelimit: { limit: vi.fn(async () => ({ success: true })) },
+    checkLimit:         checkLimitStub(),
+    retryAfterSeconds:  retryAfterSecondsStub,
+  }
+})
 vi.mock('@/lib/integrations/webhook-verification', () => ({
   extractClientIp: vi.fn(() => '203.0.113.5'),
 }))
@@ -41,8 +49,18 @@ function makeSupabase(queue: Record<string, Resp[]>) {
         return chain
       })
     }
-    chain.single = vi.fn(() => Promise.resolve(result))
-    chain.then   = (resolve: (v: unknown) => unknown) => Promise.resolve(result).then(resolve)
+    chain.single = vi.fn(() => {
+      calls.push({ table, method: 'AWAITED', args: [] })
+      return Promise.resolve(result)
+    })
+    // Records that the builder was actually AWAITED. A PostgREST builder only
+    // issues its request from inside then(), so `void <builder>` never gets
+    // here — which is precisely how the pending-mutex rollback silently did
+    // nothing. Assertions on `.update(...)` alone cannot see that.
+    chain.then = (resolve: (v: unknown) => unknown) => {
+      calls.push({ table, method: 'AWAITED', args: [] })
+      return Promise.resolve(result).then(resolve)
+    }
     return chain
   })
   return { from, calls }
@@ -66,6 +84,11 @@ function baseVendor(overrides: Partial<Record<string, unknown>> = {}) {
     name:   'Ace Plumbing',
     stripe_connect_account_id:       null,
     stripe_connect_charges_enabled:  false,
+    // M-5: the onboarding token now expires (set/refreshed by
+    // trg_vendors_stripe_connect_token_expiry when an invite is sent). NULL
+    // means "never emailed" and is treated as expired, so the default
+    // fixture carries a live expiry.
+    stripe_connect_token_expires_at: new Date(Date.now() + 7 * 86_400_000).toISOString(),
     ...overrides,
   }
 }
@@ -112,6 +135,41 @@ describe('GET /api/vendor-connect/[token]/onboard', () => {
     const res = await call(VALID_TOKEN)
 
     expect(res.status).toBe(404)
+    expect(stripe.accounts.create).not.toHaveBeenCalled()
+  })
+
+  it('M-5: returns 410 for an expired onboarding token, without starting any Stripe session', async () => {
+    // Before 20260730500000, stripe_connect_token had NO expiry at all —
+    // a forwarded onboarding email was a permanent capability.
+    const supabase = makeSupabase({
+      vendors: [{
+        data: baseVendor({
+          stripe_connect_token_expires_at: new Date(Date.now() - 86_400_000).toISOString(),
+        }),
+        error: null,
+      }],
+    })
+    vi.mocked(createServiceClient).mockReturnValue(supabase as never)
+
+    const res = await call(VALID_TOKEN)
+
+    expect(res.status).toBe(410)
+    expect(stripe.accounts.create).not.toHaveBeenCalled()
+    expect(stripe.accountLinks.create).not.toHaveBeenCalled()
+  })
+
+  it('M-5: treats a NULL expiry as expired — a token that was never emailed is not usable', async () => {
+    // The BEFORE-UPDATE trigger nulls the expiry whenever the token itself
+    // rotates (e.g. on the charges_enabled transition), so NULL means
+    // "this token has not been sent to anyone", not "no bound".
+    const supabase = makeSupabase({
+      vendors: [{ data: baseVendor({ stripe_connect_token_expires_at: null }), error: null }],
+    })
+    vi.mocked(createServiceClient).mockReturnValue(supabase as never)
+
+    const res = await call(VALID_TOKEN)
+
+    expect(res.status).toBe(410)
     expect(stripe.accounts.create).not.toHaveBeenCalled()
   })
 
@@ -185,6 +243,10 @@ describe('GET /api/vendor-connect/[token]/onboard', () => {
     expect(res.headers.get('location')).toBe('https://connect.stripe.com/setup/xyz')
   })
 
+  // The rollback used to be `void supabase.from('vendors').update(...)`. A
+  // PostgREST builder is a lazy thenable — `void` discards it without ever
+  // calling then(), so the request was never sent and the 'pending' mutex was
+  // never released, leaving the vendor permanently stuck.
   it('returns 500 and clears the pending sentinel when Stripe errors after claiming', async () => {
     const supabase = makeSupabase({
       vendors: [
@@ -198,9 +260,13 @@ describe('GET /api/vendor-connect/[token]/onboard', () => {
     const res = await call(VALID_TOKEN)
 
     expect(res.status).toBe(500)
-    const cleanupCall = supabase.calls.find(
+    const cleanupIdx = supabase.calls.findIndex(
       (c) => c.table === 'vendors' && c.method === 'update' && (c.args[0] as Record<string, unknown>)?.stripe_connect_account_id === null
     )
-    expect(cleanupCall).toBeDefined()
+    expect(cleanupIdx).toBeGreaterThanOrEqual(0)
+
+    // …and it must actually have been sent, not just built. `void <builder>`
+    // records the .update() call but never awaits it.
+    expect(supabase.calls.slice(cleanupIdx).some((c) => c.method === 'AWAITED')).toBe(true)
   })
 })

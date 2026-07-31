@@ -11,6 +11,7 @@ import { ReviewPrompt } from '@/components/review-prompt'
 import { NewPropertySetupPrompt } from '@/components/new-property-setup-prompt'
 import { calcOnboardingProgress, ONBOARDING_STEPS } from '@/lib/onboarding-wizard'
 import { getNotifications } from '@/lib/notifications'
+import { throwIfAnyQueryFailed } from '@/lib/supabase/unwrap'
 
 export const metadata: Metadata = {
   manifest:   '/dashboard-manifest.json',
@@ -101,10 +102,10 @@ export default async function DashboardLayout({
   // instead of as a serial waterfall (this layout renders on every dashboard
   // navigation, so each serial round-trip here is paid app-wide).
   const [
-    { data: pendingMilestone },
-    { data: newPropertyMilestones },
-    { data: staffRow },
-    notifications,
+    { data: pendingMilestone, error: pendingMilestoneError },
+    { data: newPropertyMilestones, error: newPropertyMilestonesError },
+    { data: staffRow, error: staffRowError },
+    notificationFeed,
     { count: unreadMessages },
   ] = await Promise.all([
     supabase
@@ -137,6 +138,10 @@ export default async function DashboardLayout({
       .eq('recipient_id', user.id)
       .is('read_at', null),
   ])
+
+  // Logs + reports every failure, then throws so the segment's error.tsx
+  // renders a real error state — an outage must not look like empty data.
+  throwIfAnyQueryFailed({ site: 'page.layout.tsx', orgId: membership.org_id }, pendingMilestoneError, newPropertyMilestonesError, staffRowError)
 
   if (pendingMilestone) {
     // Mark the milestone as prompted AFTER the response streams — a write
@@ -180,7 +185,8 @@ export default async function DashboardLayout({
         repuguardActive={repuguardActive}
         onboardingComplete={onboardingComplete}
         onboardingPct={onboardingPct}
-        notifications={notifications}
+        notifications={notificationFeed.items}
+        notificationsFailed={notificationFeed.failed}
         unreadMessages={unreadMessages ?? 0}
         isStaff={isStaff}
       >

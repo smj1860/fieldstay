@@ -5,6 +5,7 @@ import { requireOrgMember }    from '@/lib/auth'
 import { createServiceClient } from '@/lib/supabase/server'
 import { IntegrationsClient }  from './integrations-client'
 import { ChannelHealthTable }  from './channel-health-table'
+import { throwIfAnyQueryFailed } from '@/lib/supabase/unwrap'
 
 export const metadata: Metadata = { title: 'Integrations — FieldStay' }
 
@@ -13,23 +14,35 @@ export default async function IntegrationsPage() {
 
   const admin = createServiceClient({ authorizedBy: membership })
 
-  const { data: providers } = await admin
+  const { data: providers, error: providersError } = await admin
     .from('integration_providers')
     .select('id, display_name, auth_type, is_active')
     .eq('is_active', true)
     .order('display_name')
 
-  const { data: connections } = await admin
+
+  // Logs + reports, then throws so the segment's error.tsx renders a real
+  // error state — a failed read must not render as an empty page.
+  throwIfAnyQueryFailed({ site: 'page.settings.integrations', orgId: membership.org_id }, providersError)
+  const { data: connections, error: connectionsError } = await admin
     .from('integration_connections')
     .select('id, provider_id, status, external_user_id, created_at, metadata')
     .eq('org_id', membership.org_id)
 
-  const { data: icalFeeds } = await admin
+
+  // Logs + reports, then throws so the segment's error.tsx renders a real
+  // error state — a failed read must not render as an empty page.
+  throwIfAnyQueryFailed({ site: 'page.settings.integrations', orgId: membership.org_id }, connectionsError)
+  const { data: icalFeeds, error: icalFeedsError } = await admin
     .from('ical_feeds')
     .select('id, property_id, name, source, last_synced_at, last_sync_status, last_sync_error, properties ( name )')
     .eq('org_id', membership.org_id)
     .eq('is_active', true)
 
+
+  // Logs + reports, then throws so the segment's error.tsx renders a real
+  // error state — a failed read must not render as an empty page.
+  throwIfAnyQueryFailed({ site: 'page.settings.integrations', orgId: membership.org_id }, icalFeedsError)
   const connectionsByProvider = Object.fromEntries(
     (connections ?? []).map((c) => [c.provider_id, c])
   )

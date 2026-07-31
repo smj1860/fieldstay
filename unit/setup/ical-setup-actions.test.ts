@@ -27,9 +27,22 @@ vi.mock('@/lib/checklists/apply-master-template', () => ({
   applyMasterChecklistToProperty: vi.fn(),
 }))
 vi.mock('@/lib/geocoding', () => ({ geocodeZip: vi.fn() }))
+// addIcalFeed now SSRF-validates the PM-supplied URL through
+// assertSafeExternalUrl instead of the old `url.startsWith('http')` check.
+// Stubbed rather than exercised for real: the genuine implementation does a
+// live DNS resolution of the hostname, which would make this suite depend on
+// network reachability. url-guard's own behaviour is covered by its dedicated
+// tests; what matters here is that addIcalFeed CALLS it and surfaces
+// UnsafeUrlError as a form error. The real UnsafeUrlError class is kept so
+// the `instanceof` narrowing in validateFeedUrl is genuinely exercised.
+vi.mock('@/lib/security/url-guard', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@/lib/security/url-guard')>()
+  return { ...actual, assertSafeExternalUrl: vi.fn(async () => undefined) }
+})
 vi.mock('@/lib/observability/report-error', () => ({ reportError: vi.fn() }))
 
 import { requireOrgMember } from '@/lib/auth'
+import { assertSafeExternalUrl, UnsafeUrlError } from '@/lib/security/url-guard'
 import { logAuditEvent } from '@/lib/audit'
 import { inngest } from '@/lib/inngest/client'
 import {
@@ -126,15 +139,58 @@ describe('properties/[id]/setup/ical/actions', () => {
       expect(supabase.from).not.toHaveBeenCalled()
     })
 
-    it('rejects an invalid calendar URL', async () => {
+    // Was: asserted the old hand-rolled `url.startsWith('http')` check's
+    // generic 'Please enter a valid URL'. That check passed `httpfoo`,
+    // `http://127.0.0.1`, and every alternate-encoding loopback spelling. The
+    // URL is now validated by assertSafeExternalUrl, whose specific rejection
+    // reason is surfaced verbatim so the PM can act on it.
+    it('surfaces the SSRF guard\'s rejection as a form error, without touching the DB', async () => {
       const supabase = makeSupabase({})
       vi.mocked(requireOrgMember).mockResolvedValue({
         supabase, membership, user: { id: 'user_1' },
       } as never)
+      vi.mocked(assertSafeExternalUrl).mockRejectedValueOnce(
+        new UnsafeUrlError('Invalid URL format'),
+      )
 
       const result = await addIcalFeed('prop_1', null, icalFd({ url: 'not-a-url' }))
 
-      expect(result).toEqual({ error: 'Please enter a valid URL' })
+      expect(assertSafeExternalUrl).toHaveBeenCalledWith('not-a-url')
+      expect(result).toEqual({ error: 'Invalid URL format' })
+      expect(supabase.from).not.toHaveBeenCalled()
+    })
+
+    // The private/loopback case the old startsWith('http') check waved through
+    // outright — the whole reason the guard was added here rather than being
+    // left to the hourly sync cron to discover.
+    it('rejects a loopback calendar URL before any row is written', async () => {
+      const supabase = makeSupabase({})
+      vi.mocked(requireOrgMember).mockResolvedValue({
+        supabase, membership, user: { id: 'user_1' },
+      } as never)
+      vi.mocked(assertSafeExternalUrl).mockRejectedValueOnce(
+        new UnsafeUrlError('Blocked private/loopback IPv4 address (initial)'),
+      )
+
+      const result = await addIcalFeed('prop_1', null, icalFd({ url: 'http://127.0.0.1/cal.ics' }))
+
+      expect(result).toEqual({ error: 'Blocked private/loopback IPv4 address (initial)' })
+      expect(supabase.from).not.toHaveBeenCalled()
+    })
+
+    // A non-UnsafeUrlError escaping the guard must NOT be reported to the PM
+    // as a bad URL — it rethrows into addIcalFeed's outer catch, which returns
+    // the generic message rather than misattributing an infra fault to input.
+    it('does not misreport an unexpected guard failure as an invalid URL', async () => {
+      const supabase = makeSupabase({})
+      vi.mocked(requireOrgMember).mockResolvedValue({
+        supabase, membership, user: { id: 'user_1' },
+      } as never)
+      vi.mocked(assertSafeExternalUrl).mockRejectedValueOnce(new Error('resolver exploded'))
+
+      const result = await addIcalFeed('prop_1', null, icalFd())
+
+      expect(result).toEqual({ error: 'Operation failed. Please try again.' })
       expect(supabase.from).not.toHaveBeenCalled()
     })
 

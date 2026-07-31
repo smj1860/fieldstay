@@ -4,6 +4,13 @@ import { requireCrewMember }   from '@/lib/crew-auth'
 import { resend, FROM }              from '@/lib/resend/client'
 import { renderPmAlert }             from '@/lib/resend/emails/pm-alert'
 
+// Input validation at the boundary (CLAUDE.md standing audit checklist →
+// Sanitization). Unbounded, this text went straight into both a DB insert and
+// a Resend email body, so a crew member could push an arbitrarily large
+// payload through our transactional email provider. 5,000 characters is far
+// more than any real piece of app feedback.
+const MAX_FEEDBACK_CHARS = 5_000
+
 export async function POST(req: NextRequest): Promise<NextResponse> {
   const body = await req.json().catch(() => null)
 
@@ -12,6 +19,13 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
 
   if (!feedbackText) {
     return NextResponse.json({ error: 'Feedback text is required' }, { status: 400 })
+  }
+
+  if (feedbackText.length > MAX_FEEDBACK_CHARS) {
+    return NextResponse.json(
+      { error: `Feedback must be ${MAX_FEEDBACK_CHARS.toLocaleString()} characters or fewer` },
+      { status: 400 }
+    )
   }
 
   // Canonical crew gate (lib/crew-auth.ts) — a previous inline copy here
@@ -25,6 +39,25 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   // session above; the insert goes through the service client so it isn't
   // blocked by the admin/manager-only manage policy on crew_feedback.
   const service = createServiceClient({ system: 'route:crew-feedback-notify-staff' })
+
+  // IDOR guard: propertyId is caller-supplied. org_id is derived from the
+  // session, so without this check a crew member could file feedback in their
+  // own org against ANOTHER org's property id — the row would carry a
+  // property_id its org_id has no relationship to. Same shape as the
+  // verification in app/api/crew/inventory-count/route.ts.
+  if (propertyId !== null) {
+    const { data: property } = await service
+      .from('properties')
+      .select('id')
+      .eq('id', propertyId)
+      .eq('org_id', crew.org_id)
+      .maybeSingle()
+
+    if (!property) {
+      return NextResponse.json({ error: 'Property not found' }, { status: 404 })
+    }
+  }
+
   const { error } = await service.from('crew_feedback').insert({
     org_id:         crew.org_id,
     crew_member_id: crew.id,

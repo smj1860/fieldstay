@@ -11,7 +11,7 @@
 
 import 'server-only'
 import { requireOrgMember } from '@/lib/auth'
-import { scanLimiter } from '@/lib/rate-limit'
+import { scanLimiter, checkLimit } from '@/lib/rate-limit'
 import { scanDataPlateImage, isValidScanMediaType } from '@/lib/assets/scan-data-plate'
 
 export const maxDuration = 60  // vision calls can run longer than text-only LLM calls
@@ -20,9 +20,16 @@ export async function POST(req: Request): Promise<Response> {
   // Verify auth — any org member may scan
   const { user } = await requireOrgMember()
 
-  // Rate limit — 20 scans per user per day
-  const { success } = await scanLimiter.limit(user.id)
-  if (!success) {
+  // Rate limit — 20 scans per user per day. Spend ceiling → fails CLOSED:
+  // each scan is a billed Claude vision call, so an unavailable limiter must
+  // not silently remove the daily cap. Previously this had NO catch at all,
+  // which happened to fail closed as an unhandled 500 — same outcome, but by
+  // accident and with a worse error surface.
+  const rl = await checkLimit(scanLimiter, user.id, {
+    onError: 'deny',
+    site:    'route.assets.scan-data-plate.POST',
+  })
+  if (!rl.allowed) {
     return Response.json({ error: 'Daily scan limit reached. Try again tomorrow.' }, { status: 429 })
   }
 

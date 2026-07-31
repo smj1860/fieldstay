@@ -22,7 +22,41 @@ import type {
 import { IntegrationMisconfiguredError } from '../types'
 import type { NormalizedBooking } from '@/lib/bookings/normalize'
 import { unmappedBookingStatus } from '@/lib/bookings/normalize'
-import { ok, fail, timingSafeEqual } from '../webhook-verification'
+import { ok, fail, timingSafeEqual, extractClientIp, isIpInCidr } from '../webhook-verification'
+
+// ── OwnerRez webhook source-IP allowlist (audit 2026-07-30, L-4) ────────────
+//
+// ACCEPTED RISK, EXPLICITLY. OwnerRez authenticates its webhooks with HTTP
+// Basic Auth, which carries no timestamp and no nonce, so — unlike Telnyx
+// (Ed25519 over `timestamp|body`) and Stripe (constructEvent's own tolerance
+// window) — nothing in the request itself expires. Replay protection is
+// therefore ENTIRELY the processed_webhooks content hash in
+// app/api/webhooks/[provider]/route.ts, and that table is pruned on a TTL by
+// lib/inngest/functions/cron/webhook-dedup-cleanup.ts. A captured request
+// replays successfully once its dedup row has aged out.
+//
+// Hospitable closes the equivalent gap with a published IP range
+// (HOSPITABLE_WEBHOOK_IP_CIDR, 38.80.170.0/24). OwnerRez publishes no
+// egress ranges for webhook delivery — nothing in their webhooks
+// documentation or developer portal commits to a set of source addresses, so
+// there is no constant to hardcode here and inventing one would break
+// deliveries the first time they moved infrastructure.
+//
+// What we do instead: honour an OPERATOR-SUPPLIED allowlist. Set
+// OWNERREZ_WEBHOOK_IP_CIDRS to a comma-separated list of CIDRs (e.g.
+// "1.2.3.0/24,5.6.7.8/32") once the real ranges are confirmed with OwnerRez
+// support, and this check engages with no code change. Unset (the default),
+// the check is skipped and the residual risk above stands: an attacker who
+// captured a valid delivery can replay it after the dedup TTL. That is
+// bounded by what an OwnerRez webhook can actually do — it carries no
+// authority of its own, it only tells us an entity changed, and every
+// downstream handler re-reads the entity from OwnerRez's API before acting.
+function ownerrezAllowedCidrs(): string[] {
+  return (process.env.OWNERREZ_WEBHOOK_IP_CIDRS ?? '')
+    .split(',')
+    .map((c) => c.trim())
+    .filter((c) => c.length > 0)
+}
 
 // ── Constants ────────────────────────────────────────────────────────────────
 
@@ -150,9 +184,20 @@ export const ownerRezProvider: IntegrationProvider = {
   // Validates incoming webhook requests from OwnerRez using HTTP Basic Auth.
   // Credentials (user + password) are ones YOU defined in the app registration.
   // Basic Auth has no timestamp concept, so replay protection for OwnerRez
-  // webhooks comes entirely from the processed_webhooks dedup table, not
-  // from anything checked here.
+  // webhooks comes from the processed_webhooks dedup table plus — when
+  // configured — the optional source-IP allowlist above. See the
+  // ownerrezAllowedCidrs() comment for the accepted residual risk.
   async validateWebhook(request: Request) {
+    // Cheap rejection before spending a base64 decode + two constant-time
+    // comparisons, same ordering rationale as Hospitable's IP check.
+    const allowedCidrs = ownerrezAllowedCidrs()
+    if (allowedCidrs.length > 0) {
+      const clientIp = extractClientIp(request)
+      if (!clientIp || !allowedCidrs.some((cidr) => isIpInCidr(clientIp, cidr))) {
+        return fail(`source IP not in OWNERREZ_WEBHOOK_IP_CIDRS: ${clientIp ?? 'unknown'}`)
+      }
+    }
+
     const authHeader = request.headers.get('Authorization')
 
     if (!authHeader?.startsWith('Basic ')) return fail('missing or malformed Authorization header')

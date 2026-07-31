@@ -146,7 +146,13 @@ describe('GET /api/integrations/[provider]/callback (OAuth CSRF state validation
 
     expect(locationOf(res)).toContain('error=invalid_state')
     expect(getProvider).not.toHaveBeenCalled()
-    expect(admin.calls.some((c) => c.table === 'oauth_states' && c.method === 'delete')).toBe(false)
+
+    // Validation IS the consumption now: one atomic
+    // DELETE ... WHERE state/provider_id/expires_at ... RETURNING *, so zero
+    // rows back means "invalid". (It used to be SELECT-then-DELETE, which two
+    // concurrent callbacks replaying the same state both passed.)
+    expect(admin.calls.some((c) => c.table === 'oauth_states' && c.method === 'delete')).toBe(true)
+    expect(admin.calls.some((c) => c.table === 'oauth_states' && c.method === 'select')).toBe(true)
 
     const eqCalls = admin.calls.filter((c) => c.table === 'oauth_states' && c.method === 'eq')
     expect(eqCalls.some((c) => c.args[0] === 'state' && c.args[1] === 'forged-or-unknown-state')).toBe(true)
@@ -176,7 +182,7 @@ describe('GET /api/integrations/[provider]/callback (OAuth CSRF state validation
     expect(eqCalls.some((c) => c.args[0] === 'provider_id' && c.args[1] === 'ownerrez')).toBe(true)
   })
 
-  it('consumes (deletes) a valid state exactly once, before doing anything else, preventing replay', async () => {
+  it('consumes (deletes) a valid state atomically in the same statement that validates it, preventing replay', async () => {
     const admin = makeAdmin({
       oauth_states: [{ data: { state: 'good-state', provider_id: 'ownerrez', user_id: null, return_to: null }, error: null }],
     })

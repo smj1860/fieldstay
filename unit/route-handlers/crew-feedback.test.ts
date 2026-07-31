@@ -45,6 +45,8 @@ function makeServiceClient(opts: {
   insertResult?: { error: unknown }
   crewNameResult?: { data: unknown; error?: unknown }
   orgNameResult?: { data: unknown; error?: unknown }
+  /** properties row returned by the propertyId ownership check (null = not in caller's org) */
+  propertyResult?: { data: unknown; error?: unknown }
 } = {}) {
   const insertMock = vi.fn(() => Promise.resolve(opts.insertResult ?? { error: null }))
 
@@ -64,8 +66,15 @@ function makeServiceClient(opts: {
       chain.single = vi.fn(() =>
         Promise.resolve(opts.orgNameResult ?? { data: { name: 'Lake Martin Delivery' }, error: null }),
       )
+    } else if (table === 'properties') {
+      // Ownership check for a client-supplied propertyId — org-scoped.
+      chain.maybeSingle = vi.fn(() =>
+        Promise.resolve(opts.propertyResult ?? { data: { id: 'prop_1' }, error: null }),
+      )
+      chain.single = chain.maybeSingle
     } else {
-      chain.single = vi.fn(() => Promise.resolve({ data: null, error: null }))
+      chain.single      = vi.fn(() => Promise.resolve({ data: null, error: null }))
+      chain.maybeSingle = chain.single
     }
     return chain
   })
@@ -91,6 +100,62 @@ describe('POST /api/crew/feedback', () => {
 
     expect(res.status).toBe(400)
     expect(createClient).not.toHaveBeenCalled()
+  })
+
+  it('rejects feedback text over the 5,000-character cap before touching auth or the DB', async () => {
+    // M-7(a): unbounded, this text went into both a DB insert and a Resend
+    // email body, so a crew member could push an arbitrarily large payload
+    // through our transactional email provider.
+    const res = await POST(postRequest({ feedbackText: 'x'.repeat(5_001) }))
+
+    expect(res.status).toBe(400)
+    expect(createClient).not.toHaveBeenCalled()
+  })
+
+  it('accepts feedback text exactly at the cap', async () => {
+    vi.mocked(createClient).mockResolvedValue(
+      makeAuthClient({ id: USER_ID }, { data: { id: CREW_ID, org_id: ORG_ID }, error: null }) as never,
+    )
+    vi.mocked(createServiceClient).mockReturnValue(makeServiceClient() as never)
+
+    const res = await POST(postRequest({ feedbackText: 'x'.repeat(5_000) }))
+
+    expect(res.status).toBe(200)
+  })
+
+  it('IDOR: rejects a propertyId that does not belong to the crew member\'s own org', async () => {
+    // M-7(b): org_id is server-derived but propertyId was client-supplied and
+    // written straight through, so one org's feedback could be attached to
+    // another org's property.
+    vi.mocked(createClient).mockResolvedValue(
+      makeAuthClient({ id: USER_ID }, { data: { id: CREW_ID, org_id: ORG_ID }, error: null }) as never,
+    )
+    const service = makeServiceClient({ propertyResult: { data: null, error: null } })
+    vi.mocked(createServiceClient).mockReturnValue(service as never)
+
+    const res = await POST(postRequest({
+      feedbackText: 'The vacuum is broken',
+      propertyId:   'another_orgs_property',
+    }))
+
+    expect(res.status).toBe(404)
+    expect(service.insertMock).not.toHaveBeenCalled()
+  })
+
+  it('skips the property ownership lookup entirely when no propertyId is supplied', async () => {
+    vi.mocked(createClient).mockResolvedValue(
+      makeAuthClient({ id: USER_ID }, { data: { id: CREW_ID, org_id: ORG_ID }, error: null }) as never,
+    )
+    const service = makeServiceClient()
+    vi.mocked(createServiceClient).mockReturnValue(service as never)
+
+    const res = await POST(postRequest({ feedbackText: 'The vacuum is broken' }))
+
+    expect(res.status).toBe(200)
+    expect(service.from).not.toHaveBeenCalledWith('properties')
+    expect(service.insertMock).toHaveBeenCalledWith(
+      expect.objectContaining({ org_id: ORG_ID, crew_member_id: CREW_ID, property_id: null }),
+    )
   })
 
   it('rejects an unauthenticated request', async () => {

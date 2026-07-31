@@ -27,6 +27,18 @@ import { collectSourceFiles, rel, read } from './scan'
 // body — that shape (`step.run(async () => { for (...) { query } })`) has no
 // per-item retry boundary and IS flagged.
 //
+// That exemption is deliberately narrow, and it is NOT a blanket blessing of
+// the shape: a per-item step boundary is only safe when the collection being
+// iterated is bounded. `for (const row of everyRowOnThePlatform) { step.run }`
+// is a step explosion, not an N+1, and this test says nothing about it — which
+// is exactly why findings 4, 5, 11 and 12 of the 2026-07-30 pre-launch audit
+// were invisible to CI. `unbounded-fanout-loops.test.ts` is the other half of
+// this pair and covers precisely what this exemption lets through: it requires
+// the iterated collection to carry an explicit bound (an org scope, a .limit(),
+// a .range() page). The two checks are complementary, not contradictory —
+// this one governs round-trips per row, that one governs how many rows there
+// can be.
+//
 // Everything else that legitimately needs a query per iteration (a distinct
 // external API/resource per item, a parent row whose generated id the next
 // insert depends on, etc.) is named in EXCEPTIONS below with a reason —
@@ -91,19 +103,23 @@ function findOffenders(): string[] {
 // logAuditEvents batching above); everything below was a deliberate,
 // reasoned "leave as-is."
 const EXCEPTIONS: Record<string, string> = {
-  'app/api/account/delete/route.ts:44':
-    'Per-org-membership loop (owner-only checks + Stripe subscription cancel) — bounded by the deleting user\'s own org count (almost always 1), and each iteration does genuinely different work (a distinct Stripe API call per subscription) that cannot be batched.',
-  'app/(dashboard)/maintenance/actions.ts:729':
+  // app/api/account/delete/route.ts no longer needs an entry: the per-org
+  // loop bodies now call named helpers (assertSoleMember /
+  // cancelOrgSubscriptions / purgeOrganization) rather than inlining queries,
+  // and the Stripe-id clear was collapsed from one update per subscription
+  // into a single batched patch. Pruned 2026-07-30 with the account-deletion
+  // org-orphaning fix.
+  'app/(dashboard)/maintenance/actions.ts:847':
     'Per-vendor quote_requests insert — each row needs its own randomly generated quote_token before its own Inngest event fires; the insert could theoretically be batched with the token generated client-side, but that\'s a sync-logic change, not a lint fix.',
   'app/(dashboard)/maintenance/create-work-order-helpers.ts:32':
-    'Extracted-helper twin of app/(dashboard)/maintenance/actions.ts:729 — same reasoning.',
+    'Extracted-helper twin of app/(dashboard)/maintenance/actions.ts:847 — same reasoning.',
   'app/(dashboard)/properties/clone-actions.ts:114':
     'Per-section checklist_template_sections insert — each section needs its own DB-generated id before the child checklist_template_items insert can reference it as section_id. Parent-before-child dependency, not a batchable read.',
-  'app/actions/work-order-public.ts:329':
+  'app/actions/work-order-public.ts:268':
     'Per-photo storage upload + work_order_photos row — each photo is a distinct uploaded file with its own generated storage path; there is no batched form of a storage upload.',
-  'app/api/work-orders/[token]/photos/route.ts:107':
-    'Same per-photo storage-upload + row pattern as app/actions/work-order-public.ts:329.',
-  'app/(dashboard)/maintenance/CreateWorkOrderModal.tsx:102':
+  'app/api/work-orders/[token]/photos/route.ts:105':
+    'Same per-photo storage-upload + row pattern as app/actions/work-order-public.ts:268.',
+  'app/(dashboard)/maintenance/CreateWorkOrderModal.tsx:118':
     'Same per-photo storage-upload + row pattern, client-side.',
   'lib/asset-discovery/seed-from-amenities.ts:62':
     'Real N+1 (existence-check select + insert per property) left as a known, bounded cost — deferred rather than fixed blind in the same PR that added this guardrail, since it touches live PMS-sync logic. Bounded by properties-per-org (10-50 per CLAUDE.md\'s target user).',
@@ -115,8 +131,8 @@ const EXCEPTIONS: Record<string, string> = {
     'Real N+1 (cancel booking + cancel its turnovers, per stale booking) left as a known, bounded cost — deferred rather than fixed blind. Contrast lib/inngest/functions/ical-sync.ts, which batches the equivalent booking-cancel via .update().in(\'id\', ids) — a good template for fixing this one later.',
   'lib/inngest/functions/checklist-broadcast.ts:103':
     'Per-section insert (parent-before-child, same reasoning as clone-actions.ts:114) — additionally guarded by a template-signature equality check just above that skips the whole delete-then-recreate rebuild when nothing changed.',
-  'lib/inngest/functions/cron/guest-pii-retention.ts:57':
-    'Per-booking delete_vault_secret RPC call — each is a distinct external Vault secret; structurally cannot be batched into one call any more than "one API call per distinct external resource" ever can.',
+  'lib/inngest/functions/cron/guest-pii-retention.ts:132':
+    'Per-secret delete_vault_secret RPC call — each is a distinct external Vault secret; structurally cannot be batched into one call any more than "one API call per distinct external resource" ever can. Bounded since the 2026-07-30 scalability pass: the loop now iterates one BOOKING_BATCH_SIZE page inside a per-batch step, not an org\'s entire un-anonymized booking history.',
   'lib/inngest/functions/ownerrez/initial-sync.ts:170':
     'Per-property conditional field patch (bedrooms/bathrooms/square_footage) — each property\'s patch object contains different values, so it is not a uniform batched update. Pre-fetch of existing rows just above IS already batched via .in(\'external_id\', ids).',
   'lib/guidebook/sync.ts:135':

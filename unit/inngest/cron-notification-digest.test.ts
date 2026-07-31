@@ -3,32 +3,24 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 vi.mock('@/lib/supabase/server', () => ({
   createServiceClient: vi.fn(),
 }))
-vi.mock('@/lib/inngest/helpers', () => ({
-  createPmNotification: vi.fn(async () => undefined),
-}))
 
 import { notificationDigest } from '@/lib/inngest/functions/cron/notification-digest'
 import { createServiceClient } from '@/lib/supabase/server'
-import { createPmNotification } from '@/lib/inngest/helpers'
 import { invokeHandler } from './test-helpers'
+import { createSupabaseDouble, type TableSpec } from '../stubs/supabase-query-double'
 
 // This function does NOT use notification_digest_state/diffDigestSnapshot —
 // it rolls up raw counts (work orders created, RepuGuard drafts generated)
-// per org and writes one dedupe_key-guarded notification per org per
-// category per day via createPmNotification, which is mocked here (same
-// convention as work-order-dispatch.test.ts) rather than simulated at the
-// `notifications` table level.
-function makeSupabase(responses: Record<string, { data?: unknown; error?: unknown }>) {
-  const from = vi.fn((table: string) => {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const chain: any = {}
-    chain.select = () => chain
-    chain.gte    = () => chain
-    chain.then   = (resolve: (v: unknown) => unknown, reject?: (e: unknown) => unknown) =>
-      Promise.resolve(responses[table] ?? { data: null, error: null }).then(resolve, reject)
-    return chain
-  })
-  return { from }
+// per org and writes one dedupe_key-guarded notification row per org per
+// category per day.
+//
+// It no longer calls createPmNotification once per org: that was one insert
+// round-trip per tenant inside a single step (150 sequential inserts at 150
+// orgs). The write is now a chunked dedupe pre-check + ONE batch insert into
+// `notifications`, so the double seeds that table as a queue: the pre-check
+// select first, then the insert().select('id') result.
+function makeSupabase(responses: Record<string, TableSpec>) {
+  return createSupabaseDouble(responses)
 }
 
 function makeStep() {
@@ -59,10 +51,11 @@ describe('notificationDigest', () => {
     })
 
     expect(result).toEqual({ notifications_created: 0 })
-    expect(createPmNotification).not.toHaveBeenCalled()
+    // Nothing to digest means the notifications table is never touched at all.
+    expect(supabase.calls.some((c) => c.table === 'notifications')).toBe(false)
   })
 
-  it('writes one digest notification per org per category with the correct counts and dedupe keys', async () => {
+  it('writes one digest notification per org per category with the correct counts and dedupe keys, in a single batch insert', async () => {
     const supabase = makeSupabase({
       work_orders: {
         data: [
@@ -82,6 +75,10 @@ describe('notificationDigest', () => {
         ],
         error: null,
       },
+      notifications: [
+        { data: [], error: null },                              // dedupe pre-check — neither key exists yet
+        { data: [{ id: 'n_1' }, { id: 'n_2' }], error: null },  // batch insert
+      ],
     })
     ;(createServiceClient as ReturnType<typeof vi.fn>).mockReturnValue(supabase)
 
@@ -93,28 +90,60 @@ describe('notificationDigest', () => {
 
     expect(result).toEqual({ notifications_created: 2 })
 
-    expect(createPmNotification).toHaveBeenCalledWith(
-      supabase,
+    // ONE insert carrying every org's row — not one round-trip per org.
+    const inserts = supabase.calls.filter((c) => c.table === 'notifications' && c.method === 'insert')
+    expect(inserts).toHaveLength(1)
+    expect(inserts[0]!.args[0]).toEqual([
       expect.objectContaining({
-        orgId:     'org_1',
-        type:      'work_order_created_digest',
-        title:     '2 work orders created today',
-        href:      '/maintenance',
-        severity:  'blue',
-        dedupeKey: 'wo-created-digest-org_1-2026-07-22',
+        org_id:     'org_1',
+        type:       'work_order_created_digest',
+        title:      '2 work orders created today',
+        href:       '/maintenance',
+        severity:   'blue',
+        dedupe_key: 'wo-created-digest-org_1-2026-07-22',
       }),
-    )
-    expect(createPmNotification).toHaveBeenCalledWith(
-      supabase,
       expect.objectContaining({
-        orgId:     'org_2',
-        type:      'repuguard_digest',
-        title:     '3 review drafts ready',
-        href:      '/reviews',
-        severity:  'blue',
-        dedupeKey: 'repuguard-digest-org_2-2026-07-22',
+        org_id:     'org_2',
+        type:       'repuguard_digest',
+        title:      '3 review drafts ready',
+        href:       '/reviews',
+        severity:   'blue',
+        dedupe_key: 'repuguard-digest-org_2-2026-07-22',
       }),
-    )
+    ])
+
+    // The dedupe pre-check runs before the insert, keyed on the same keys —
+    // notifications.dedupe_key is a PARTIAL unique index, which Postgres
+    // cannot use as an ON CONFLICT arbiter through PostgREST.
+    const precheck = supabase.calls.find((c) => c.table === 'notifications' && c.method === 'in')
+    expect(precheck?.args).toEqual([
+      'dedupe_key',
+      ['wo-created-digest-org_1-2026-07-22', 'repuguard-digest-org_2-2026-07-22'],
+    ])
+  })
+
+  it('skips a digest whose dedupe key the pre-check already found (cron rerun / retry)', async () => {
+    const supabase = makeSupabase({
+      work_orders: {
+        data: [{ org_id: 'org_1', vendor_id: 'v1', status: 'assigned' }],
+        error: null,
+      },
+      review_responses: { data: [], error: null },
+      notifications: [
+        // Today's key already present — an earlier run of this cron wrote it.
+        { data: [{ dedupe_key: 'wo-created-digest-org_1-2026-07-22' }], error: null },
+      ],
+    })
+    ;(createServiceClient as ReturnType<typeof vi.fn>).mockReturnValue(supabase)
+
+    const result = await invokeHandler(notificationDigest, {
+      event:  {},
+      step:   makeStep(),
+      logger: { info: vi.fn(), error: vi.fn() },
+    })
+
+    expect(result).toEqual({ notifications_created: 0 })
+    expect(supabase.calls.some((c) => c.table === 'notifications' && c.method === 'insert')).toBe(false)
   })
 
   it('excludes a work order still awaiting a vendor from the count, even as the org\'s only WO', async () => {
@@ -136,6 +165,6 @@ describe('notificationDigest', () => {
     })
 
     expect(result).toEqual({ notifications_created: 0 })
-    expect(createPmNotification).not.toHaveBeenCalled()
+    expect(supabase.calls.some((c) => c.table === 'notifications')).toBe(false)
   })
 })
