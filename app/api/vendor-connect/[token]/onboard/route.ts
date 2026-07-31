@@ -21,6 +21,109 @@ function isConnectTokenExpired(expiresAt: string | null): boolean {
   return Number.isNaN(expiry.getTime()) || expiry < new Date()
 }
 
+type ServiceClient = ReturnType<typeof createServiceClient>
+
+interface ConnectVendor {
+  id:     string
+  org_id: string
+  email:  string | null
+  stripe_connect_account_id: string | null
+}
+
+/**
+ * Atomic claim: sets the 'pending' sentinel before any Stripe call, so two
+ * concurrent tab opens can't create two Connect accounts. 'pending' is not a
+ * real Stripe account ID — it acts as a mutex. Returns whether this request
+ * won the claim; the loser must not proceed to account creation.
+ */
+async function claimAccountCreationSlot(supabase: ServiceClient, token: string): Promise<boolean> {
+  const { data: claimed } = await supabase
+    .from('vendors')
+    .update({ stripe_connect_account_id: 'pending' })
+    .eq('stripe_connect_token', token)
+    .is('stripe_connect_account_id', null)   // only updates if still null
+    .select('id')
+    .single()
+
+  return Boolean(claimed)
+}
+
+/**
+ * Releases the 'pending' mutex after a failed Stripe call so the vendor can
+ * retry rather than being permanently stuck on the sentinel.
+ *
+ * ⚠️ This was `void supabase.from(...).update(...)`. A PostgREST query builder
+ * is a LAZY THENABLE — it issues its HTTP request only from inside then()
+ * (postgrest-js PostgrestBuilder.then). `void <builder>` discards the object
+ * WITHOUT ever awaiting it, so the request was never sent: the claim was never
+ * released and the vendor was left permanently stuck in exactly the state this
+ * function promises to prevent. It must be awaited.
+ */
+async function releasePendingClaim(
+  supabase: ServiceClient,
+  token:    string,
+  vendorId: string,
+): Promise<void> {
+  const { error: rollbackErr } = await supabase
+    .from('vendors')
+    .update({ stripe_connect_account_id: null })
+    .eq('stripe_connect_token', token)
+    .eq('stripe_connect_account_id', 'pending')
+
+  if (rollbackErr) {
+    console.error('[vendor-connect/onboard] failed to release pending claim:', rollbackErr.message)
+    reportError(new Error(rollbackErr.message), {
+      site:  'route.vendor-connect.onboard.rollback',
+      extra: { vendor_id: vendorId },
+    })
+  }
+}
+
+/**
+ * Returns the vendor's real Stripe Connect account id, creating the account
+ * first when there isn't one yet (e.g. vendor received a WO before the cron
+ * ran, or this request just claimed the 'pending' sentinel).
+ */
+async function ensureConnectAccount(
+  supabase: ServiceClient,
+  vendor:   ConnectVendor,
+): Promise<string> {
+  const existing = vendor.stripe_connect_account_id
+  if (existing && existing !== 'pending') return existing
+
+  const account = await stripe.accounts.create({
+    type:  'express',
+    ...(vendor.email ? { email: vendor.email } : {}),
+    metadata: {
+      vendor_id: vendor.id,
+      org_id:    vendor.org_id,
+    },
+    capabilities: {
+      card_payments: { requested: true },
+      transfers:     { requested: true },
+    },
+  })
+
+  await supabase
+    .from('vendors')
+    .update({
+      stripe_connect_account_id:     account.id,
+      stripe_connect_invite_sent_at: new Date().toISOString(),
+    })
+    .eq('id', vendor.id)
+    .eq('org_id', vendor.org_id)
+
+  await logAuditEvent({
+    orgId:      vendor.org_id,
+    action:     'vendor.stripe_connect.account_created',
+    targetType: 'vendor',
+    targetId:   vendor.id,
+    // No actorId — unauthenticated vendor-token route
+  })
+
+  return account.id
+}
+
 export async function GET(
   request: NextRequest,
   { params }: { params: Promise<{ token: string }> }
@@ -82,64 +185,15 @@ export async function GET(
   }
 
   try {
-    // ── Atomic claim: set sentinel before calling Stripe ──────────────────────
-    // Prevents two concurrent tab opens from creating two Connect accounts.
-    // Only the request that wins the UPDATE proceeds to create the account.
-    // 'pending' is not a real Stripe account ID — it acts as a mutex.
-    if (vendor.stripe_connect_account_id === null) {
-      const { data: claimed } = await supabase
-        .from('vendors')
-        .update({ stripe_connect_account_id: 'pending' })
-        .eq('stripe_connect_token', token)
-        .is('stripe_connect_account_id', null)   // only updates if still null
-        .select('id')
-        .single()
-
-      if (!claimed) {
-        // Another request already claimed it — redirect to status page
-        // The other request will finish creating the real account
-        return NextResponse.redirect(
-          `${process.env.NEXT_PUBLIC_APP_URL}/vendor-connect/${token}/status`
-        )
-      }
+    if (vendor.stripe_connect_account_id === null && !(await claimAccountCreationSlot(supabase, token))) {
+      // Another request already claimed it — redirect to status page.
+      // The other request will finish creating the real account.
+      return NextResponse.redirect(
+        `${process.env.NEXT_PUBLIC_APP_URL}/vendor-connect/${token}/status`
+      )
     }
 
-    let accountId = vendor.stripe_connect_account_id
-
-    // Create account if it doesn't exist yet (e.g. vendor received WO before cron ran)
-    if (!accountId || accountId === 'pending') {
-      const account = await stripe.accounts.create({
-        type:  'express',
-        ...(vendor.email ? { email: vendor.email } : {}),
-        metadata: {
-          vendor_id: vendor.id,
-          org_id:    vendor.org_id,
-        },
-        capabilities: {
-          card_payments: { requested: true },
-          transfers:     { requested: true },
-        },
-      })
-
-      accountId = account.id
-
-      await supabase
-        .from('vendors')
-        .update({
-          stripe_connect_account_id:    accountId,
-          stripe_connect_invite_sent_at: new Date().toISOString(),
-        })
-        .eq('id', vendor.id)
-        .eq('org_id', vendor.org_id)
-
-      await logAuditEvent({
-        orgId:      vendor.org_id,
-        action:     'vendor.stripe_connect.account_created',
-        targetType: 'vendor',
-        targetId:   vendor.id,
-        // No actorId — unauthenticated vendor-token route
-      })
-    }
+    const accountId = await ensureConnectAccount(supabase, vendor)
 
     const baseUrl = process.env.NEXT_PUBLIC_APP_URL!
 
@@ -156,32 +210,12 @@ export async function GET(
     // If Stripe create failed after we set the sentinel, clear it so the
     // vendor can try again rather than being permanently stuck on 'pending'.
     //
-    // ⚠️ This was `void supabase.from(...).update(...)`. A PostgREST query
-    // builder is a LAZY THENABLE — it issues its HTTP request only from
-    // inside then() (postgrest-js PostgrestBuilder.then). `void <builder>`
-    // discards the object WITHOUT ever awaiting it, so the request was never
-    // sent: the 'pending' mutex claimed above was never released and the
-    // vendor was left permanently stuck in exactly the state this block's
-    // comment promises to prevent. It must be awaited.
-    //
-    // The condition also had to match the claim above: that one used a falsy
+    // The condition must match the claim above: that one used to use a falsy
     // check (`!vendor.stripe_connect_account_id`) while this used strict
     // `=== null`, so a vendor whose account id was an empty string took the
     // claim path but not the rollback path. Both are `=== null` now.
     if (vendor.stripe_connect_account_id === null) {
-      const { error: rollbackErr } = await supabase
-        .from('vendors')
-        .update({ stripe_connect_account_id: null })
-        .eq('stripe_connect_token', token)
-        .eq('stripe_connect_account_id', 'pending')
-
-      if (rollbackErr) {
-        console.error('[vendor-connect/onboard] failed to release pending claim:', rollbackErr.message)
-        reportError(new Error(rollbackErr.message), {
-          site:  'route.vendor-connect.onboard.rollback',
-          extra: { vendor_id: vendor.id },
-        })
-      }
+      await releasePendingClaim(supabase, token, vendor.id)
     }
     console.error('[vendor-connect/onboard] Stripe error:', err)
     reportError(err, { site: 'route.vendor-connect.onboard.GET' })

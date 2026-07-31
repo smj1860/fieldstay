@@ -10,6 +10,98 @@ import { reportError } from '@/lib/observability/report-error'
 
 const AGING_DAYS = 7
 
+interface AutoWoSchedule {
+  id: string; name: string; org_id: string; property_id: string
+  next_due_date: string | null; frequency: string | null; schedule_type: string | null
+  assigned_vendor_id: string | null; vendor_specialty_hint: string | null
+  estimated_cost: number | null; instructions: string | null
+  properties: { name: string } | { name: string }[] | null
+}
+
+type ServiceClient = ReturnType<typeof createServiceClient>
+
+/** Minimal shape of the Inngest step logger this module uses. */
+interface StepLogger {
+  warn: (message: string, context?: Record<string, unknown>) => void
+}
+
+/**
+ * Vendor selection chain for an auto-created WO: explicitly assigned vendor →
+ * best-rated active vendor matching the specialty hint → nobody.
+ *
+ * A hard-blocked vendor is not a valid resolution — it falls through as if the
+ * chain found nobody, so this unattended cron never silently assigns someone
+ * 31+ days out of compliance (see lib/vendors/compliance.ts).
+ *
+ * isVendorHardBlocked() THROWS (VendorComplianceCheckError) when the compliance
+ * state cannot be established. Letting that propagate would be fail-closed and
+ * safe but aborts the whole step.run — an unrelated compliance-view blip would
+ * burn both Inngest retries and end with NO work order for a schedule that is
+ * genuinely due. So an unverifiable vendor is treated exactly like a
+ * hard-blocked one: unresolved. The WO is still created, just unassigned, and
+ * the vendor-suggestion flow picks it up (the PM notification says
+ * "no vendor assigned yet").
+ */
+async function resolveScheduleVendor(
+  supabase: ServiceClient,
+  schedule: AutoWoSchedule,
+  logger:   StepLogger,
+): Promise<string | null> {
+  let vendorId: string | null = schedule.assigned_vendor_id ?? null
+
+  if (!vendorId && schedule.vendor_specialty_hint) {
+    const { data: hintVendor } = await supabase
+      .from('vendors')
+      .select('id')
+      .eq('org_id', schedule.org_id)
+      .eq('specialty', schedule.vendor_specialty_hint)
+      .eq('is_active', true)
+      .order('avg_rating', { ascending: false })
+      .limit(1)
+      .maybeSingle()
+
+    vendorId = hintVendor?.id ?? null
+  }
+
+  if (!vendorId) return null
+
+  try {
+    return (await isVendorHardBlocked(supabase, vendorId, schedule.org_id)) ? null : vendorId
+  } catch (err) {
+    logger.warn(
+      `Org ${schedule.org_id}: compliance check failed for vendor ${vendorId} on schedule ${schedule.id} — creating the WO unassigned`,
+      { error: err instanceof Error ? err.message : String(err) }
+    )
+    reportError(err, {
+      site:  'inngest.work-order-ops-org.auto-create-wo.compliance-check',
+      orgId: schedule.org_id,
+      extra: { vendor_id: vendorId, schedule_id: schedule.id },
+    })
+    return null
+  }
+}
+
+/**
+ * Advances next_due_date for routine schedules. Optimistic-locked on the
+ * current next_due_date, same guard dailyMaintenanceScheduleCheck's Pass 1
+ * uses — prevents this cron from double-advancing a date the other cron
+ * already rolled forward for the same schedule.
+ */
+async function advanceRoutineSchedule(
+  supabase: ServiceClient,
+  schedule: AutoWoSchedule,
+): Promise<void> {
+  if (schedule.schedule_type !== 'routine' || !schedule.frequency) return
+
+  const dueDate = new Date(schedule.next_due_date! + 'T00:00:00')
+  const nextDue = calcNextDueDate(schedule.frequency, dueDate)
+  await supabase
+    .from('maintenance_schedules')
+    .update({ next_due_date: nextDue.toISOString().split('T')[0] })
+    .eq('id', schedule.id)
+    .eq('next_due_date', schedule.next_due_date!)
+}
+
 /**
  * SCHEDULED: 13:30 UTC daily. Staggered off asset-health (12:30) and
  * maintenance-schedules (13:00) — all three used to fire at 13:00 and
@@ -212,13 +304,7 @@ export const workOrderOpsOrg = inngest.createFunction(
     // ── 7.4: Auto-create WOs for due maintenance schedules ───────────────────
     const autoWOSchedules = await step.run('find-auto-wo-schedules', async () => {
       const supabase = createServiceClient({ system: 'inngest:work-order-ops' })
-      return fetchAllRows<{
-        id: string; name: string; org_id: string; property_id: string
-        next_due_date: string | null; frequency: string | null; schedule_type: string | null
-        assigned_vendor_id: string | null; vendor_specialty_hint: string | null
-        estimated_cost: number | null; instructions: string | null
-        properties: { name: string } | { name: string }[] | null
-      }>(
+      return fetchAllRows<AutoWoSchedule>(
         (from, to) => supabase
           .from('maintenance_schedules')
           .select(`
@@ -256,55 +342,8 @@ export const workOrderOpsOrg = inngest.createFunction(
 
         if (existingWO) return null
 
-        // Vendor selection chain: assigned → specialty hint → null
-        let vendorId: string | null = schedule.assigned_vendor_id ?? null
-
-        if (!vendorId && schedule.vendor_specialty_hint) {
-          const { data: hintVendor } = await supabase
-            .from('vendors')
-            .select('id')
-            .eq('org_id', schedule.org_id)
-            .eq('specialty', schedule.vendor_specialty_hint)
-            .eq('is_active', true)
-            .order('avg_rating', { ascending: false })
-            .limit(1)
-            .maybeSingle()
-
-          vendorId = hintVendor?.id ?? null
-        }
-
-        // A hard-blocked assigned/specialty-hint vendor is not a valid
-        // resolution — fall through as if the chain found no vendor so this
-        // unattended cron never silently assigns someone 31+ days out of
-        // compliance (see lib/vendors/compliance.ts).
-        //
-        // isVendorHardBlocked() now THROWS (VendorComplianceCheckError) when
-        // the compliance state cannot be established, rather than reporting
-        // "not blocked". Letting that propagate is fail-closed and safe, but
-        // it aborts this whole step.run — so an unrelated compliance-view blip
-        // would burn both Inngest retries and end with NO work order created
-        // for a schedule that is genuinely due. An unverifiable vendor is
-        // treated exactly like a hard-blocked one: unresolved. The WO is still
-        // created, just unassigned, and the vendor-suggestion flow picks it up
-        // (the PM notification below already says "no vendor assigned yet").
-        if (vendorId) {
-          try {
-            if (await isVendorHardBlocked(supabase, vendorId, schedule.org_id)) {
-              vendorId = null
-            }
-          } catch (err) {
-            logger.warn(
-              `Org ${orgId}: compliance check failed for vendor ${vendorId} on schedule ${schedule.id} — creating the WO unassigned`,
-              { error: err instanceof Error ? err.message : String(err) }
-            )
-            reportError(err, {
-              site:  'inngest.work-order-ops-org.auto-create-wo.compliance-check',
-              orgId: schedule.org_id,
-              extra: { vendor_id: vendorId, schedule_id: schedule.id },
-            })
-            vendorId = null
-          }
-        }
+        // Assigned → specialty hint → nobody, with the compliance gate applied.
+        const vendorId = await resolveScheduleVendor(supabase, schedule, logger)
 
         // vendor_specialty_hint values are a subset of WoCategory — the
         // closest thing a maintenance schedule has to a WO category, and
@@ -343,19 +382,7 @@ export const workOrderOpsOrg = inngest.createFunction(
           return null
         }
 
-        // Advance next_due_date for routine schedules. Optimistic-locked on the
-        // current next_due_date, same guard dailyMaintenanceScheduleCheck's Pass 1
-        // uses — prevents this cron from double-advancing a date the other cron
-        // already rolled forward for the same schedule.
-        if (schedule.schedule_type === 'routine' && schedule.frequency) {
-          const dueDate = new Date(schedule.next_due_date! + 'T00:00:00')
-          const nextDue = calcNextDueDate(schedule.frequency, dueDate)
-          await supabase
-            .from('maintenance_schedules')
-            .update({ next_due_date: nextDue.toISOString().split('T')[0] })
-            .eq('id', schedule.id)
-            .eq('next_due_date', schedule.next_due_date!)
-        }
+        await advanceRoutineSchedule(supabase, schedule)
 
         if (!wo) return null
 
