@@ -42,7 +42,7 @@ BEGIN
   FOR UPDATE;   -- serializes concurrent creations for this org
 
   IF v_max IS NULL THEN
-    RAISE EXCEPTION 'Organization % not found' USING ERRCODE = 'foreign_key_violation';
+    RAISE EXCEPTION 'Organization % not found', NEW.org_id USING ERRCODE = 'foreign_key_violation';
   END IF;
 
   SELECT COUNT(*) INTO v_count
