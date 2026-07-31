@@ -273,10 +273,22 @@ export interface EnvValidationResult {
 }
 
 export function resolveDeployTarget(env: EnvRecord = process.env): DeployTarget {
+  // A real Vercel deploy always wins, and is checked FIRST so the escape
+  // hatch below can never downgrade production or preview.
   if (env.VERCEL_ENV === 'production') return 'production'
   if (env.VERCEL_ENV === 'preview')    return 'preview'
-  if (env.NODE_ENV === 'test')         return 'test'
-  if (env.NODE_ENV === 'production')   return 'production'
+
+  // The e2e suite runs `next build && next start`, which sets
+  // NODE_ENV=production — so without this, a CI e2e run is classified as a
+  // production deploy and refuses to boot over the ~16 production-tier vars
+  // that job has no reason to hold (Stripe price ids, Resend From, VAPID,
+  // Upstash). That is exactly what happened on PR #541: the web server never
+  // started and Playwright timed out. Honoured only when VERCEL_ENV is unset,
+  // so it cannot be used to skip validation on a deployed environment.
+  if (env.FIELDSTAY_ENV_TARGET === 'test') return 'test'
+
+  if (env.NODE_ENV === 'test')       return 'test'
+  if (env.NODE_ENV === 'production') return 'production'
   return 'development'
 }
 

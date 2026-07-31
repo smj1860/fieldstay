@@ -66,6 +66,12 @@ jobs:
   e2e:
     runs-on: ubuntu-latest
     env:
+      # `pnpm run e2e` builds and starts Next, which sets NODE_ENV=production.
+      # Without this marker lib/env.ts classifies the run as a production
+      # deploy and aborts boot over production-tier vars this job has no
+      # reason to hold. resolveDeployTarget() only honours it when VERCEL_ENV
+      # is unset, so a real deploy still gets full validation.
+      FIELDSTAY_ENV_TARGET:          test
       NEXT_PUBLIC_APP_URL:           http://localhost:3000
       NEXT_PUBLIC_SUPABASE_URL:      ${{ secrets.NEXT_PUBLIC_SUPABASE_URL }}
       NEXT_PUBLIC_SUPABASE_ANON_KEY: ${{ secrets.NEXT_PUBLIC_SUPABASE_ANON_KEY }}
