@@ -1152,9 +1152,9 @@ item below" as part of the definition of done for any non-trivial change.
 ## Structural Enforcement — Guardrails
 
 Conventions in this file are enforced in code wherever they can be, so
-following them stops being a memory test. Four layers, checked in CI via
+following them stops being a memory test. Five layers, checked in CI via
 `npm run lint` and `vitest run` (plus the `db-invariants` CI job for layer
-4, which runs two scripts):
+4, which runs two scripts, and the `semgrep` job for layer 5):
 
 1. **ESLint rules** (`eslint.config.mjs`, the "Structural enforcement"
    config block) — AST-level bans scoped to `app/`, `lib/`, `components/`:
@@ -1264,6 +1264,46 @@ following them stops being a memory test. Four layers, checked in CI via
    `20260725043000_add_quote_requested_to_wo_status.sql`. Both allowlists
    are shrink-only, same ratchet as `SERVICE_ROLE_ONLY_TABLES`. Self-disarms
    the same way as the other two checks.
+
+5. **Semgrep rules** (`.semgrep/`, CI `semgrep` job) — real TypeScript AST
+   matching, so a rule survives reformatting, renamed intermediates, and
+   multi-line call chains that defeat the text-scanning guardrail tests. Two
+   families, gated differently; read `.semgrep/README.md` before adding one.
+   - `.semgrep/chokepoints.yml` — a capability with exactly ONE legitimate
+     owner, named in that rule's `paths.exclude`. At **0 findings**, which is
+     what lets it gate at `--error` across the whole tree. Covers: the service
+     role key outside `lib/supabase/server.ts`, Telnyx outside
+     `lib/sms/telnyx.ts`, a raw `<limiter>.limit(` outside `lib/rate-limit.ts`,
+     `void` on a lazy PostgREST builder (the request is never sent),
+     `getPublicUrl()` on the three private buckets, and the
+     `memberships`/`work_order_notes`/`assigned_crew_id` names that do not
+     exist.
+   - `.semgrep/ratchet.yml` — a defect class with many legitimate owners and
+     hundreds of live sites (unbounded `.select()`, discarded write results,
+     `data` destructured without `error`, untimed outbound fetch,
+     role-filtered `organization_members` reads). Gated on
+     `--baseline-commit` (only findings NEW vs. the PR base fail) plus
+     `.semgrep/baseline-counts.json`, a committed per-rule count that
+     `scripts/check-semgrep-ratchet.mjs` allows to move only DOWN. Lock in a
+     burn-down with `node scripts/check-semgrep-ratchet.mjs --update`.
+   - **`paths.exclude` expresses ownership; `pattern-not-inside` expresses
+     handling.** They are not interchangeable. What makes `lib/sms/telnyx.ts`
+     allowed to call Telnyx is its path — its identity as the SMS_ENABLED +
+     nudge-budget chokepoint — not anything about the enclosing expression.
+     What makes a `.select()` acceptable is that it sits inside a `.limit()`
+     call. Using the wrong one gives either a rule that suppresses the same
+     construct everywhere it appears in a similar shape, or a permanently
+     blind file.
+   - **Never** silence a ratchet with `nosemgrep` or a new `paths.exclude`.
+     Fix the site or leave it counted. Prefer narrow-and-precise over
+     broad-and-suppressed: the naive table-wide ban on
+     `.from('organization_members')` gives 17 noisy hits, the role-filtered
+     narrowing gives 3 genuine ones.
+   - Deliberately overlapping with several `unit/guardrails/` tests, and NOT
+     replacing them — those tests carry cross-file invariants (every
+     `MutationTable` has a retry affordance, every `TOKEN_ROUTES` prefix has a
+     limiter branch, the CI-gating meta-checks) that are not patterns and have
+     no semgrep expression.
 
 **The meta-rule: a new convention ships WITH its guardrail.** If a rule is
 worth adding to this file, add its ESLint rule or `unit/guardrails/` test in

@@ -29,8 +29,8 @@ rules:
       what forces every RLS bypass to name its justification.
     paths:
       exclude:
-        - lib/supabase/server.ts
-        - lib/env.ts
+        - /lib/supabase/server.ts
+        - /lib/env.ts
     pattern-either:
       - pattern: process.env.SUPABASE_SERVICE_ROLE_KEY
       - pattern: process.env["SUPABASE_SERVICE_ROLE_KEY"]
@@ -46,10 +46,10 @@ rules:
       budget. Route the send through that module.
     paths:
       exclude:
-        - lib/sms/telnyx.ts
+        - /lib/sms/telnyx.ts
         # Declares TELNYX_* in ENV_SPEC (name only, no API call) — env-schema
         # coverage requires every read var be declared here.
-        - lib/env.ts
+        - /lib/env.ts
     pattern-either:
       - pattern-regex: api\.telnyx\.com
       - pattern-regex: TELNYX_API_KEY
@@ -65,7 +65,7 @@ rules:
       explicit fail policy and distinguishes "skipped" from "errored".
     paths:
       exclude:
-        - lib/rate-limit.ts
+        - /lib/rate-limit.ts
     patterns:
       - pattern: $L.limit($ID)
       - metavariable-regex:

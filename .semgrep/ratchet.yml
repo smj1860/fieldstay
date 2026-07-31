@@ -139,8 +139,8 @@ rules:
       any part of the URL is tenant-supplied.
     paths:
       exclude:
-        - lib/http/timeout.ts
-        - lib/security/url-guard.ts
+        - /lib/http/timeout.ts
+        - /lib/security/url-guard.ts
     patterns:
       - pattern: fetch($U, ...)
       - metavariable-regex:
@@ -166,7 +166,7 @@ rules:
       passing) that have already drifted into live bugs three times.
     paths:
       exclude:
-        - lib/auth.ts
-        - lib/crew-auth.ts
-        - lib/inngest/helpers.ts
+        - /lib/auth.ts
+        - /lib/crew-auth.ts
+        - /lib/inngest/helpers.ts
     pattern-regex: from\(\s*['"]organization_members['"]\s*\)[\s\S]{0,400}?\.(in|eq)\(\s*['"]role['"]
