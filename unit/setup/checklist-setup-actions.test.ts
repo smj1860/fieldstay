@@ -179,7 +179,7 @@ describe('properties/[id]/setup/checklist/actions', () => {
   describe('completeChecklistStep', () => {
     it('marks the checklist step complete and redirects to the maintenance step', async () => {
       const supabase = makeSupabase({
-        properties: [{ data: { setup_steps_completed: {} } }, { error: null }],
+        properties: [{ data: { setup_steps_completed: {} } }, { data: { id: 'prop_1' }, error: null }],
       })
       vi.mocked(requireOrgMember).mockResolvedValue({
         supabase, membership, user: { id: 'user_1' },

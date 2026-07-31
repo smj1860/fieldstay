@@ -43,8 +43,11 @@ function makeSupabase(queue: Record<string, Resp[]>) {
     for (const m of ['select', 'insert', 'update', 'delete', 'eq']) {
       chain[m] = vi.fn(() => chain)
     }
-    chain.single = vi.fn(() => Promise.resolve(result))
-    chain.then   = (resolve: (v: unknown) => unknown) => Promise.resolve(result).then(resolve)
+    chain.single      = vi.fn(() => Promise.resolve(result))
+    // markStepComplete (pulled in transitively) now reads its UPDATE back with
+    // .select('id').maybeSingle() so a 0-row RLS denial can't look like success.
+    chain.maybeSingle = vi.fn(() => Promise.resolve(result))
+    chain.then        = (resolve: (v: unknown) => unknown) => Promise.resolve(result).then(resolve)
     return chain
   })
   return { from }
@@ -122,7 +125,7 @@ describe('properties/[id]/setup/crew/actions', () => {
   describe('completeCrewStep', () => {
     it('marks the crew step complete and redirects to the property page', async () => {
       const supabase = makeSupabase({
-        properties: [{ data: { setup_steps_completed: {} } }, { error: null }],
+        properties: [{ data: { setup_steps_completed: {} } }, { data: { id: 'prop_1' }, error: null }],
       })
       vi.mocked(requireOrgMember).mockResolvedValue({
         supabase, membership, user: { id: 'user_1' },

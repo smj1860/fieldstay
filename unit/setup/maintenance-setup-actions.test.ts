@@ -158,7 +158,7 @@ describe('properties/[id]/setup/maintenance/actions', () => {
   describe('completeMaintenanceStep', () => {
     it('marks the maintenance step complete and redirects to the crew step', async () => {
       const supabase = makeSupabase({
-        properties: [{ data: { setup_steps_completed: {} } }, { error: null }],
+        properties: [{ data: { setup_steps_completed: {} } }, { data: { id: 'prop_1' }, error: null }],
       })
       vi.mocked(requireOrgMember).mockResolvedValue({
         supabase, membership, user: { id: 'user_1' },

@@ -2,12 +2,18 @@
 
 import { revalidatePath } from 'next/cache'
 import { redirect, unstable_rethrow } from 'next/navigation'
-import { requireOrgMember } from '@/lib/auth'
+import { requireOrgRole } from '@/lib/auth'
 import { markStepComplete } from '@/app/(dashboard)/properties/actions'
 import { logAuditEvent } from '@/lib/audit'
 
 import { reportError } from '@/lib/observability/report-error'
+import type { MemberRole } from '@/types/database'
+
 export type DetailsState = { error?: string; success?: boolean }
+
+// Same role set as the properties_update RLS policy and the door-code RPCs
+// (migration 20260731201000). `owner` passes automatically via requireOrgRole.
+const PROPERTY_WRITE_ROLES: MemberRole[] = ['admin', 'manager']
 
 export async function saveDetails(
   propertyId: string,
@@ -15,7 +21,7 @@ export async function saveDetails(
   formData: FormData
 ): Promise<DetailsState> {
   try {
-    const { user, supabase, membership } = await requireOrgMember()
+    const { user, supabase, membership } = await requireOrgRole(PROPERTY_WRITE_ROLES)
 
     const name          = (formData.get('name') as string)?.trim()
     const address       = (formData.get('address') as string)?.trim() || null
@@ -55,7 +61,7 @@ export async function saveDetails(
       .eq('org_id', membership.org_id)
       .single()
 
-    const { error } = await supabase
+    const { data: updated, error } = await supabase
       .from('properties')
       .update({
         name, address, city, state, zip, property_type,
@@ -66,17 +72,39 @@ export async function saveDetails(
       })
       .eq('id', propertyId)
       .eq('org_id', membership.org_id)
+      .select('id')
+      .maybeSingle()
 
     if (error) {
       console.error('[saveDetails]', error)
+      reportError(error, { site: 'serverAction.properties.setup.details.saveDetails.update', orgId: membership.org_id })
       return { error: 'Operation failed. Please try again.' }
     }
 
-    await supabase.rpc('store_property_door_code', {
+    // A write RLS denies affects 0 rows and returns NO error — this used to
+    // report success (and then still call the door-code RPC) for an edit that
+    // never happened.
+    if (!updated) {
+      console.warn('[saveDetails] update matched 0 rows', { propertyId })
+      return {
+        error: 'You do not have permission to make this change, or the property no longer exists.',
+      }
+    }
+
+    const { error: doorCodeError } = await supabase.rpc('store_property_door_code', {
       p_property_id: propertyId,
       p_org_id:      membership.org_id,
       p_door_code:   door_code,
     })
+
+    if (doorCodeError) {
+      console.error('[saveDetails] door code write failed', doorCodeError)
+      reportError(doorCodeError, {
+        site:  'serverAction.properties.setup.details.saveDetails.storeDoorCode',
+        orgId: membership.org_id,
+      })
+      return { error: 'Operation failed. Please try again.' }
+    }
 
     // Simplification: logs on every details save (not just when rates actually
     // changed) — fetching before/after values would require an extra query.
