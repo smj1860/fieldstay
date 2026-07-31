@@ -825,3 +825,48 @@ one-line change — 11 files' worth of JSX to individually verify (which
 control each label is meant to pair with, and whether that control is
 inside a list needing a per-row id) is enough surface area to warrant its
 own pass rather than folding it into an unrelated PR.
+
+---
+
+## 20. Turnover card header nests interactive elements (`role="button"` div containing real buttons/inputs)
+
+**File:** `app/(dashboard)/turnovers/turnover-board.tsx`, `TurnoverCard`'s
+card header (`<div role="button" tabIndex={0} onClick={...expand/collapse...}>`,
+around line 370)
+
+Flagged by CodeRabbit on PR #542: the header div that toggles the card's
+expanded state is a `role="button"` container, but it wraps several real
+interactive descendants — a bulk-select `<input type="checkbox">`, a
+`<button>` on the pending-assignment status badge, and (further down the
+same header) the `CrewAssignment` component's own buttons and the
+`QuickFlagPanel`/archive buttons. Each of those descendants calls
+`e.stopPropagation()` on its own click to keep it from *also* toggling the
+card, which works functionally, but nesting real interactive controls
+inside a `role="button"` ancestor is a known ARIA/WCAG anti-pattern —
+assistive tech has no well-defined behavior for "interactive element
+inside an interactive element," and a screen reader user tabbing through
+the card can get an inconsistent read on what's actually clickable.
+
+This predates this PR — the pattern already existed before any of the
+turnover-events/duration-tracking/FAQ work landed; this PR only touched a
+couple of the *nested* propagation-guard divs inside it (fixing their own,
+separate keyboard-listener gaps), not the outer header itself.
+
+**Suggested fix:** per CodeRabbit's own recommendation, either (a) make the
+expand/collapse trigger a real `<button>` that wraps only non-interactive
+content (property name, status badges, times — move the checkbox, crew
+controls, and action buttons outside it), or (b) keep the header as a
+plain non-interactive `<div>` and add a small dedicated expand/collapse
+`<button>` (e.g. wrapping just the chevron icon) as the actual toggle
+control, with the rest of the header's content living alongside it rather
+than inside a click target.
+
+**Why not fixed here:** this is a real layout restructuring, not a
+markup-only tweak — CodeRabbit itself tagged it "Heavy lift." Getting it
+right means deciding where the click-to-expand hit target should actually
+live once it's no longer "the whole header," verifying every existing
+propagation-stopping button still works with the new structure, and a live
+browser check (this pattern is used across the whole card, so a visual
+regression here would be immediately obvious to every PM using the
+Turnovers board) — not something to attempt as a drive-by fix while
+resolving an unrelated merge conflict.
