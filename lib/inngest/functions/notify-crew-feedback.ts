@@ -12,12 +12,24 @@ export const notifyCrewFeedback = inngest.createFunction(
     await step.run('send-staff-notification', async () => {
       const supabase = createServiceClient({ system: 'inngest:notify-crew-feedback' })
 
-      const [{ data: cm }, { data: org }] = await Promise.all([
+      const [cmResult, orgResult] = await Promise.all([
         supabase.from('crew_members').select('name').eq('id', crew_member_id).single(),
         supabase.from('organizations').select('name').eq('id', org_id).single(),
       ])
 
-      await resend.emails.send({
+      // PGRST116 = no matching row, a genuine "not found" — anything else is
+      // a real query failure and should be retried, not silently swallowed.
+      if (cmResult.error && cmResult.error.code !== 'PGRST116') {
+        throw new Error(`crew_members query failed: ${cmResult.error.message}`)
+      }
+      if (orgResult.error && orgResult.error.code !== 'PGRST116') {
+        throw new Error(`organizations query failed: ${orgResult.error.message}`)
+      }
+
+      const cm  = cmResult.data
+      const org = orgResult.data
+
+      const { error } = await resend.emails.send({
         from:    FROM,
         to:      'stephen@fieldstay.app',
         subject: `New crew feedback from ${cm?.name ?? 'a crew member'}`,
@@ -32,6 +44,7 @@ export const notifyCrewFeedback = inngest.createFunction(
           ctaUrl:   `${process.env.NEXT_PUBLIC_APP_URL}/support-inbox`,
         }),
       })
+      if (error) throw new Error(`Resend error: ${JSON.stringify(error)}`)
     })
 
     return { notified: true, org_id, crew_member_id }

@@ -22,8 +22,8 @@ function makeStep() {
 }
 
 function makeSupabase(opts: {
-  crewNameResult?: { data: unknown; error?: unknown }
-  orgNameResult?: { data: unknown; error?: unknown }
+  crewNameResult?: { data: unknown; error?: { code: string; message: string } | null }
+  orgNameResult?: { data: unknown; error?: { code: string; message: string } | null }
 } = {}) {
   const from = vi.fn((table: string) => {
     const chain: any = {} // eslint-disable-line @typescript-eslint/no-explicit-any
@@ -89,10 +89,10 @@ describe('notifyCrewFeedback', () => {
     )
   })
 
-  it('falls back to generic labels when the crew member or org lookup misses', async () => {
+  it('falls back to generic labels when the crew member or org lookup misses (PGRST116, no matching row)', async () => {
     const supabase = makeSupabase({
-      crewNameResult: { data: null, error: null },
-      orgNameResult:  { data: null, error: null },
+      crewNameResult: { data: null, error: { code: 'PGRST116', message: 'no rows' } },
+      orgNameResult:  { data: null, error: { code: 'PGRST116', message: 'no rows' } },
     })
     ;(createServiceClient as ReturnType<typeof vi.fn>).mockReturnValue(supabase)
 
@@ -112,5 +112,44 @@ describe('notifyCrewFeedback', () => {
         ],
       }),
     )
+  })
+
+  it('propagates a genuine crew_members-query failure instead of swallowing it', async () => {
+    const supabase = makeSupabase({
+      crewNameResult: { data: null, error: { code: '500', message: 'connection reset' } },
+    })
+    ;(createServiceClient as ReturnType<typeof vi.fn>).mockReturnValue(supabase)
+
+    await expect(
+      invokeHandler(notifyCrewFeedback, { event: feedbackEvent(), step: makeStep() }),
+    ).rejects.toThrow(/crew_members query failed/)
+
+    expect(resend.emails.send).not.toHaveBeenCalled()
+  })
+
+  it('propagates a genuine organizations-query failure instead of swallowing it', async () => {
+    const supabase = makeSupabase({
+      orgNameResult: { data: null, error: { code: '500', message: 'connection reset' } },
+    })
+    ;(createServiceClient as ReturnType<typeof vi.fn>).mockReturnValue(supabase)
+
+    await expect(
+      invokeHandler(notifyCrewFeedback, { event: feedbackEvent(), step: makeStep() }),
+    ).rejects.toThrow(/organizations query failed/)
+
+    expect(resend.emails.send).not.toHaveBeenCalled()
+  })
+
+  it('throws when Resend rejects the staff notification email, so Inngest retries', async () => {
+    const supabase = makeSupabase()
+    ;(createServiceClient as ReturnType<typeof vi.fn>).mockReturnValue(supabase)
+    ;(resend.emails.send as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
+      data:  null,
+      error: { name: 'validation_error', message: 'Invalid `to` field' },
+    })
+
+    await expect(
+      invokeHandler(notifyCrewFeedback, { event: feedbackEvent(), step: makeStep() }),
+    ).rejects.toThrow(/Resend error/)
   })
 })

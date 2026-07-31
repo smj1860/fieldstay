@@ -596,7 +596,7 @@ ID) into this pattern without realizing it needs escaping/validation first.
 Found while discussing the Hospitable promo migration/type-drift gate. The
 file already carries its own note flagging this:
 
-```
+```text
 // NOTE: Hand-written interfaces lack the index signatures required
 // by postgrest-js v2's GenericSchema constraint. The <Database>
 // type arg is omitted in lib/supabase/server.ts so .from() queries

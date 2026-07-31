@@ -316,7 +316,7 @@ export const handleTurnoverCompleted = inngest.createFunction(
 
       if (timestamps.length === 0) return { skipped: 'no_completion_signals' }
 
-      timestamps.sort()
+      timestamps.sort((a, b) => new Date(a).getTime() - new Date(b).getTime())
       const startedAt   = timestamps[0]!
       const completedAt = timestamps[timestamps.length - 1]!
 
@@ -332,7 +332,7 @@ export const handleTurnoverCompleted = inngest.createFunction(
       // Single shared calculation feeds both consumers — assignment_outcomes
       // (the crew-scoring learning loop) and turnovers.crew_duration_minutes
       // (the PM-facing board display) — so the two numbers can't drift apart.
-      const [{ data: updatedRows }] = await Promise.all([
+      const [assignmentResult, turnoverResult] = await Promise.all([
         supabase
           .from('assignment_outcomes')
           .update({ started_at: startedAt, completed_at: completedAt, duration_minutes: roundedMinutes })
@@ -346,7 +346,10 @@ export const handleTurnoverCompleted = inngest.createFunction(
           .eq('org_id', org_id),
       ])
 
-      return { updated_rows: updatedRows?.length ?? 0, duration_minutes: roundedMinutes }
+      if (assignmentResult.error) throw assignmentResult.error
+      if (turnoverResult.error) throw turnoverResult.error
+
+      return { updated_rows: assignmentResult.data?.length ?? 0, duration_minutes: roundedMinutes }
     })
 
     logger.info('turnover-completed done', { workflowId, turnover_id })
