@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest'
 import { readFileSync, readdirSync } from 'fs'
 import { join } from 'path'
 import { CREW_SYNCED_TABLES, LOCAL_ONLY_TABLES } from '../../lib/dexie/schema'
+import { CREW_RESYNC_COVERAGE } from '../../lib/dexie/sync/full-resync'
 
 // Structural backstop for the Crew Sync v2 convention (CLAUDE.md, Dexie/crew
 // section; docs/CREW_SYNC_V2_PHASES.md section 5e): every Supabase-backed
@@ -99,5 +100,82 @@ describe('crew-sync-coverage guardrail', () => {
       'PR that adds it:',
       ...unclassified,
     ].join('\n')).toEqual([])
+  })
+})
+
+// ── The safety poll must exist on the path that actually ships ────────────
+//
+// The checks above assert the *union* (trigger OR safety poll). That is only
+// meaningful if the safety poll is genuinely running. It wasn't: the poll
+// lived exclusively on the Crew Sync v2 code path, `NEXT_PUBLIC_CREW_SYNC_V2`
+// defaults off, and the v1 path ran resync() only on mount and on `online` —
+// so in the shipping configuration messages, crew_availability,
+// inventory_items and properties refreshed on page load and nothing else,
+// and the union check above was vacuously true for every SAFETY_POLL_ONLY
+// table.
+//
+// Resolution taken (2026-07-30): the flag was NOT flipped — Phase 5's
+// two-device acceptance test and soak week (docs/CREW_SYNC_V2_PHASES.md
+// §5b-5c) have not been run, and flipping an unvalidated realtime cutover to
+// close a guardrail gap would be backwards. Instead both paths now run the
+// same full resync (lib/dexie/sync/full-resync.ts) on the same safety-poll
+// interval, and these tests assert that against the source rather than
+// trusting the flag.
+
+const CONTEXT_SRC = readFileSync(join(ROOT, 'lib', 'dexie', 'context.tsx'), 'utf8')
+const RESYNC_SRC = readFileSync(join(ROOT, 'lib', 'dexie', 'sync', 'full-resync.ts'), 'utf8')
+
+describe('crew-sync-coverage guardrail — the safety poll runs on the shipping path', () => {
+  it('CREW_RESYNC_COVERAGE matches CREW_SYNCED_TABLES exactly', () => {
+    expect(Object.keys(CREW_RESYNC_COVERAGE).sort()).toEqual(Object.keys(CREW_SYNCED_TABLES).sort())
+  })
+
+  it('every table CREW_RESYNC_COVERAGE claims is actually pulled by fullCrewResync', () => {
+    const missing = [...new Set(Object.values(CREW_RESYNC_COVERAGE))]
+      .filter((fn) => !new RegExp(`${fn}\\(`).test(RESYNC_SRC))
+
+    expect(missing, [
+      'CREW_RESYNC_COVERAGE names these sync functions, but',
+      'lib/dexie/sync/full-resync.ts never calls them — the full resync does',
+      'not actually cover the tables they are claimed to cover:',
+      ...missing,
+    ].join('\n')).toEqual([])
+  })
+
+  it('the safety poll is installed unconditionally, not only under the v2 flag', () => {
+    const flagBranch = CONTEXT_SRC.indexOf('if (CREW_SYNC_V2)')
+    expect(flagBranch, 'could not find the CREW_SYNC_V2 branch in context.tsx').toBeGreaterThan(-1)
+
+    const installCalls = [...CONTEXT_SRC.matchAll(/installSafetyPoll\(/g)].map((m) => m.index!)
+    // One call site per path. Both must exist; a single one inside the v2
+    // branch is exactly the regression this test exists to catch.
+    expect(
+      installCalls.length,
+      'expected installSafetyPoll() to be called on both the v1 and v2 sync ' +
+      'paths in lib/dexie/context.tsx',
+    ).toBeGreaterThanOrEqual(2)
+    expect(
+      installCalls.some((i) => i > flagBranch),
+      'no installSafetyPoll() call appears after the CREW_SYNC_V2 branch — ' +
+      'the v1 (shipping) path has no safety poll',
+    ).toBe(true)
+
+    expect(CONTEXT_SRC).toContain('setInterval(run, SAFETY_POLL_INTERVAL_MS)')
+  })
+
+  it('both sync paths resync through the same full-scope pull', () => {
+    // Two call sites: v1's resync() and v2's resyncV2(). If one path grows
+    // its own bespoke resync body again, the coverage map above stops
+    // describing it.
+    const calls = [...CONTEXT_SRC.matchAll(/fullCrewResync\(/g)]
+    expect(
+      calls.length,
+      'expected both resync() and resyncV2() in lib/dexie/context.tsx to call fullCrewResync()',
+    ).toBeGreaterThanOrEqual(2)
+  })
+
+  it('a reconnect resync exists on both paths', () => {
+    expect(CONTEXT_SRC).toContain("globalThis.addEventListener('online', onlineHandler)")
+    expect([...CONTEXT_SRC.matchAll(/visibilitychange/g)].length).toBeGreaterThanOrEqual(2)
   })
 })

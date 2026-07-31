@@ -5,6 +5,7 @@ import { ChevronLeft }                    from 'lucide-react'
 import { WorkOrderDetail }                from '@/components/work-orders/work-order-detail'
 import type { WorkOrderDetailData }       from '@/components/work-orders/work-order-detail'
 import { unwrapJoin }                     from '@/lib/utils/supabase-joins'
+import { throwIfAnyQueryFailed } from '@/lib/supabase/unwrap'
 
 interface Props { params: Promise<{ id: string }> }
 
@@ -13,11 +14,11 @@ export default async function WorkOrderPage({ params }: Props) {
   const { supabase, membership } = await requireOrgMember()
 
   const [
-    { data: wo },
-    { data: lineItems },
-    { data: photos },
-    { data: orgVendors },
-    { data: invoice },
+    { data: wo, error: woError },
+    { data: lineItems, error: lineItemsError },
+    { data: photos, error: photosError },
+    { data: orgVendors, error: orgVendorsError },
+    { data: invoice, error: invoiceError },
   ] = await Promise.all([
     supabase
       .from('work_orders')
@@ -67,6 +68,10 @@ export default async function WorkOrderPage({ params }: Props) {
       .eq('org_id', membership.org_id)
       .maybeSingle(),
   ])
+
+  // Logs + reports every failure, then throws so the segment's error.tsx
+  // renders a real error state — an outage must not look like empty data.
+  throwIfAnyQueryFailed({ site: 'page.maintenance.id', orgId: membership.org_id }, woError, lineItemsError, photosError, orgVendorsError, invoiceError)
 
   if (!wo) notFound()
 

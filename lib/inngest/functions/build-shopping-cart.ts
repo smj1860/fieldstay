@@ -1,3 +1,4 @@
+import { createHash }          from 'node:crypto'
 import { inngest }             from '@/lib/inngest/client'
 import { createServiceClient } from '@/lib/supabase/server'
 import { logAuditEvent }       from '@/lib/audit'
@@ -15,6 +16,22 @@ import { NonRetriableError }               from 'inngest'
 import { resend, FROM }                    from '@/lib/resend/client'
 import { renderShoppingCartReadyEmail }    from '@/lib/resend/emails/shopping-cart-ready'
 import type { MatchedItem, CartBuildResult } from '@/lib/kroger/types'
+
+/**
+ * Deterministic, locale-independent string ordering for CANONICALISATION.
+ *
+ * Sorting a list before hashing it is about producing one stable
+ * representation of an unordered set — it is never shown to a user. Comparing
+ * by UTF-16 code unit (what `<`/`>` do) gives the same answer on every
+ * machine, in every locale, under every ICU version. `String.localeCompare`
+ * does not, which is why it must not be used here even though it is the
+ * conventional answer for an alphabetical *display* sort.
+ */
+export function compareCodeUnits(a: string, b: string): number {
+  if (a < b) return -1
+  if (a > b) return 1
+  return 0
+}
 
 // Bounded-concurrency map — runs `limit` items at a time instead of fully
 // serial, while still letting each item apply its own rate-limit pacing.
@@ -43,14 +60,33 @@ export type ShoppingCartRequestedEvent = {
   }
 }
 
+/** Row shape returned by the inventory_below_par_items() RPC. */
+type BelowParItem = {
+  id:                      string
+  name:                    string
+  current_quantity:        number | null
+  par_level:               number | null
+  unit:                    string | null
+  preferred_brand:         string | null
+  property_id:             string
+  first_count_recorded_at: string | null
+  property_name:           string | null
+  property_zip:            string | null
+}
+
 export const buildShoppingCart = inngest.createFunction(
   {
     id:      'build-shopping-cart',
     name:    'Build Kroger Shopping Cart from Below-Par Inventory',
     retries: 2,
+    // A PM double-clicking "Build Cart" produced two concurrent runs, each of
+    // which added the same items to the REAL Kroger cart — real duplicate
+    // grocery spend. One run per org at a time, plus the content-keyed
+    // milestone claim in step 6, makes that impossible rather than unlikely.
+    concurrency: { limit: 1, key: 'event.data.org_id' },
   },
   { event: 'inventory/cart_requested' as const },
-  async ({ event, step, runId }) => {
+  async ({ event, step }) => {
     const { org_id, requested_by, property_ids, modality } = event.data
 
     const persistCartStatus = async (status: string, extra: Record<string, unknown> = {}) => {
@@ -65,31 +101,26 @@ export const buildShoppingCart = inngest.createFunction(
     // ── Step 1: Load org settings + below-par items + Kroger connection ──
     const { orgSettings, belowParItems, connection } = await step.run('load-inventory-data', async () => {
       const supabase = createServiceClient({ system: 'inngest:build-shopping-cart' })
-      const [{ data: org }, { data: allItems }, { data: conn }] = await Promise.all([
+
+      // Below-par filtering happens in SQL (inventory_below_par_items RPC).
+      // It cannot be expressed through the Supabase JS builder — there is no
+      // column-to-column comparison and supabase.raw() does not exist — so
+      // this previously fetched EVERY inventory_items row for the org and
+      // filtered in JS. PostgREST caps that response at 1000 rows with no
+      // error, so a 50-property org (50 x 115 catalog items = 5,750 rows) had
+      // every below-par item past the cap silently dropped from the cart, with
+      // no signal to the PM. Now only below-par rows cross the wire at all.
+      const [{ data: org }, { data: items, error: itemsError }, { data: conn }] = await Promise.all([
         supabase
           .from('organizations')
           .select('id, preferred_retailer')
           .eq('id', org_id)
           .single(),
 
-        (async () => {
-          let query = supabase
-            .from('inventory_items')
-            .select(`
-              id, name, current_quantity, par_level, unit,
-              preferred_brand,
-              property_id,
-              first_count_recorded_at,
-              properties!inner ( id, name, zip )
-            `)
-            .eq('org_id', org_id)
-
-          if (property_ids?.length) {
-            query = query.in('property_id', property_ids)
-          }
-
-          return query
-        })(),
+        supabase.rpc('inventory_below_par_items', {
+          p_org_id:       org_id,
+          p_property_ids: property_ids?.length ? property_ids : null,
+        }),
 
         supabase
           .from('integration_connections')
@@ -101,17 +132,13 @@ export const buildShoppingCart = inngest.createFunction(
       ])
 
       if (!org) throw new Error(`Org ${org_id} not found`)
+      if (itemsError) throw new Error(`inventory_below_par_items failed: ${itemsError.message}`)
 
-      // Items that have never had a real count recorded default to
-      // current_quantity = 0, which would otherwise look "below par" on
-      // every freshly-added item — exclude those from auto-cart building.
-      const items = (allItems ?? []).filter(
-        item => item.first_count_recorded_at && (item.current_quantity ?? 0) < (item.par_level ?? 1)
-      )
-
-      if (!items.length) return { orgSettings: org, belowParItems: [], connection: conn }
-
-      return { orgSettings: org, belowParItems: items, connection: conn }
+      return {
+        orgSettings:   org,
+        belowParItems: (items ?? []) as unknown as BelowParItem[],
+        connection:    conn,
+      }
     })
 
     if (!belowParItems.length) {
@@ -351,24 +378,58 @@ ${JSON.stringify(itemsForNormalization, null, 2)}`,
       const supabase = createServiceClient({ system: 'inngest:build-shopping-cart' })
       if (!customerToken || matchResult.cartItems.length === 0) return false
 
-      const milestoneKey = `kroger_cart_added:${runId}`
-      const { data: existing } = await supabase
+      // Idempotency key = org + day + exact cart contents. The old key was
+      // `kroger_cart_added:${runId}`: runId is stable across STEP retries but
+      // NOT across events, so two runs from a double-clicked "Build Cart"
+      // minted two different keys and both added to the real Kroger cart. A
+      // content hash means "we already added exactly this cart today" — while
+      // still letting a PM legitimately rebuild after changing par levels.
+      const cartFingerprint = createHash('sha256')
+        .update(JSON.stringify(
+          [...matchResult.cartItems]
+            .map((i) => `${i.upc}:${i.quantity}:${i.modality}`)
+            // Canonicalisation, not display ordering: this sort exists only so
+            // the same set of cart lines hashes identically regardless of the
+            // order product matching produced them. It must therefore be
+            // locale-INDEPENDENT — String.localeCompare (what Sonar's
+            // S2871/"provide a compare function" advice suggests) varies with
+            // locale and ICU version, so the same cart could fingerprint
+            // differently across environments and defeat the duplicate-charge
+            // claim below. Plain code-unit comparison is stable everywhere.
+            .sort(compareCodeUnits)
+        ))
+        .digest('hex')
+        .slice(0, 32)
+      const today = new Date().toISOString().split('T')[0]
+      const milestoneKey = `kroger_cart_added:${today}:${cartFingerprint}`
+
+      // CLAIM FIRST, then call Kroger. The previous order was
+      // check → external call → mark, so a crash between the (irreversible)
+      // cart addition and the mark re-added every item on retry. Inserting
+      // with ignoreDuplicates makes the claim atomic: zero rows back means
+      // some other run already owns this exact cart.
+      const { data: claimed, error: claimError } = await supabase
         .from('org_milestones')
-        .select('id')
-        .eq('org_id', org_id)
-        .eq('milestone', milestoneKey)
-        .maybeSingle()
-
-      if (existing) return true
-
-      const added = await addItemsToKrogerCart(matchResult.cartItems, customerToken)
-      if (added) {
-        await supabase.from('org_milestones').upsert(
+        .upsert(
           { org_id, milestone: milestoneKey },
           { onConflict: 'org_id,milestone', ignoreDuplicates: true }
         )
+        .select('id')
+
+      if (claimError) throw new Error(`Failed to claim Kroger cart addition: ${claimError.message}`)
+      if (!claimed?.length) {
+        console.warn(`[build-shopping-cart] cart already claimed for org ${org_id} (${milestoneKey}) — skipping Kroger add`)
+        return true
       }
-      return added
+
+      // The claim is deliberately NOT released if this throws. Kroger's cart
+      // API is not transactional — a failure can land after some items were
+      // already added — so retrying would risk real duplicate spend. Same
+      // fail-closed stance as claimNudgeBudgetSlot's SMS spend ceiling
+      // (CLAUDE.md): a skipped cart is recoverable, a double-ordered one is
+      // the PM's money. The Inngest step still fails loudly, and the PM can
+      // rebuild once par levels or contents change (different fingerprint).
+      return await addItemsToKrogerCart(matchResult.cartItems, customerToken)
     })
 
     if (cartAdded) {

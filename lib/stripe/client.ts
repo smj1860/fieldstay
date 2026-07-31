@@ -26,11 +26,33 @@ export const stripe = new Proxy({} as Stripe, {
   },
 })
 
+/**
+ * Price ids were previously read as `process.env.STRIPE_PRICE_*!`. The `!` was
+ * a lie: a missing variable produced `undefined` typed as `string`, which then
+ * travelled all the way into a Stripe API call and came back as an opaque
+ * "No such price" at checkout — a config failure disguised as a payment bug
+ * (pre-launch audit 2026-07-30, "No boot-time env validation").
+ *
+ * These now read honestly as `string | null`. The real prevention is
+ * lib/env.ts, which fails the boot on a production deploy missing any of them;
+ * this just stops the type system from claiming a guarantee it never had. The
+ * one consumer (createCheckoutSession in app/(dashboard)/settings/actions.ts)
+ * already branches on a falsy price id, so nothing downstream changes.
+ *
+ * Deliberately still evaluated at module load, NOT behind the lazy Proxy
+ * above: reading process.env is free and cannot throw, unlike constructing a
+ * Stripe client, which is what broke `next build` and put that Proxy there.
+ */
+function priceId(name: string): string | null {
+  const value = process.env[name]
+  return value && value.trim().length > 0 ? value : null
+}
+
 export const PLANS = {
   starter: {
     name:           'Starter',
-    monthlyPriceId: process.env.STRIPE_PRICE_STARTER_MONTHLY!,
-    annualPriceId:  process.env.STRIPE_PRICE_STARTER_ANNUAL!,
+    monthlyPriceId: priceId('STRIPE_PRICE_STARTER_MONTHLY'),
+    annualPriceId:  priceId('STRIPE_PRICE_STARTER_ANNUAL'),
     maxProperties:  15,
     monthlyPrice:   199,
     annualPrice:    1990,
@@ -38,8 +60,8 @@ export const PLANS = {
   },
   growth: {
     name:           'Growth',
-    monthlyPriceId: process.env.STRIPE_PRICE_GROWTH_MONTHLY!,
-    annualPriceId:  process.env.STRIPE_PRICE_GROWTH_ANNUAL!,
+    monthlyPriceId: priceId('STRIPE_PRICE_GROWTH_MONTHLY'),
+    annualPriceId:  priceId('STRIPE_PRICE_GROWTH_ANNUAL'),
     maxProperties:  50,
     monthlyPrice:   479,
     annualPrice:    4790,
@@ -47,8 +69,8 @@ export const PLANS = {
   },
   portfolio: {
     name:           'Portfolio',
-    monthlyPriceId: process.env.STRIPE_PRICE_PORTFOLIO_MONTHLY!,
-    annualPriceId:  process.env.STRIPE_PRICE_PORTFOLIO_ANNUAL!,
+    monthlyPriceId: priceId('STRIPE_PRICE_PORTFOLIO_MONTHLY'),
+    annualPriceId:  priceId('STRIPE_PRICE_PORTFOLIO_ANNUAL'),
     maxProperties:  100,
     monthlyPrice:   799,
     annualPrice:    7990,

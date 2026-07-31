@@ -1,3 +1,4 @@
+import { readFileSync } from 'node:fs'
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 
 vi.mock('@/lib/supabase/server', () => ({
@@ -28,7 +29,7 @@ vi.mock('@/lib/resend/emails/shopping-cart-ready', () => ({
 }))
 
 import { NonRetriableError } from 'inngest'
-import { buildShoppingCart } from '@/lib/inngest/functions/build-shopping-cart'
+import { buildShoppingCart, compareCodeUnits } from '@/lib/inngest/functions/build-shopping-cart'
 import { createServiceClient } from '@/lib/supabase/server'
 import { logAuditEvent } from '@/lib/audit'
 import {
@@ -40,47 +41,22 @@ import { RateLimitError } from '@/lib/integrations/types'
 import { resend } from '@/lib/resend/client'
 import { renderShoppingCartReadyEmail } from '@/lib/resend/emails/shopping-cart-ready'
 import { invokeHandler } from './test-helpers'
+import { createSupabaseDouble, type TableSpec, type QueryResponse } from '../stubs/supabase-query-double'
 
 // Queue-based `.from(table)` mock — see checklist-broadcast.test.ts for the
 // reference pattern — plus a stub for `supabase.auth.admin.getUserById`,
 // which this function calls directly (not via `.from()`) to resolve the
 // requesting PM's email for the summary email.
 function makeSupabase(
-  queued: Record<string, { data?: unknown; error?: unknown }[]>,
+  queued: Record<string, TableSpec>,
   authUserResult: { data: { user: { email?: string; user_metadata?: Record<string, unknown> } | null } } =
     { data: { user: { email: 'pm@test.com', user_metadata: { full_name: 'PM Name' } } } },
+  rpcResults: Record<string, QueryResponse> = {},
 ) {
-  const counters: Record<string, number> = {}
-  const calls: { table: string; method: string; args: unknown[] }[] = []
-
-  const from = vi.fn((table: string) => {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const chain: any = {}
-    const record = (method: string, args: unknown[]) => {
-      calls.push({ table, method, args })
-      return chain
-    }
-    chain.select = (...a: unknown[]) => record('select', a)
-    chain.eq     = (...a: unknown[]) => record('eq', a)
-    chain.in     = (...a: unknown[]) => record('in', a)
-    chain.update = (...a: unknown[]) => record('update', a)
-    chain.upsert = (...a: unknown[]) => record('upsert', a)
-
-    const resolveNext = () => {
-      const idx = counters[table] ?? 0
-      counters[table] = idx + 1
-      return Promise.resolve(queued[table]?.[idx] ?? { data: null, error: null })
-    }
-
-    chain.single      = () => resolveNext()
-    chain.maybeSingle = () => resolveNext()
-    chain.then        = (resolve: (v: unknown) => unknown) => resolveNext().then(resolve)
-    return chain
+  return createSupabaseDouble(queued, {
+    authUser: authUserResult,
+    rpc:      (fn: string) => rpcResults[fn] ?? { data: [], error: null },
   })
-
-  const getUserById = vi.fn().mockResolvedValue(authUserResult)
-
-  return { from, calls, auth: { admin: { getUserById } } }
 }
 
 function runAllStep() {
@@ -116,7 +92,19 @@ const belowParInventoryItem = {
   preferred_brand:         'Bounty',
   property_id:             'prop_1',
   first_count_recorded_at: '2026-01-01T00:00:00Z',
-  properties:              { id: 'prop_1', name: 'Lake House', zip: '35007' },
+  // Flat property columns — the inventory_below_par_items() RPC returns them
+  // joined, not as a nested `properties` object like the old .select() did.
+  property_name:           'Lake House',
+  property_zip:            '35007',
+}
+
+/** Seeds the inventory_below_par_items() RPC, which now does the below-par
+ *  filtering in SQL. The previous version fetched EVERY inventory_items row
+ *  for the org and filtered `current_quantity < par_level` in JS — PostgREST
+ *  capped that at 1000 rows with no error, so a 50-property org (5,750 rows)
+ *  had every below-par item past the cap silently dropped from the cart. */
+function belowPar(rows: unknown[]) {
+  return { inventory_below_par_items: { data: rows, error: null } }
 }
 
 const activeKrogerConnection = {
@@ -152,14 +140,14 @@ describe('buildShoppingCart', () => {
   it('matches a below-par item to a Kroger product, adds it to the cart, and emails the requesting PM', async () => {
     const supabase = makeSupabase({
       organizations:            [{ data: { id: 'org_1', preferred_retailer: 'kroger' }, error: null }],
-      inventory_items:          [{ data: [belowParInventoryItem], error: null }],
       integration_connections:  [{ data: activeKrogerConnection, error: null }],
       org_milestones: [
-        { data: null, error: null }, // no existing "added" milestone for this run
-        { error: null },             // upsert cart-added flag
+        // Claim-first: the atomic upsert returns a row, meaning THIS run owns
+        // this exact cart and may call Kroger.
+        { data: [{ id: 'milestone_claim' }], error: null },
         { error: null },             // persist-result last_cart_build
       ],
-    })
+    }, undefined, belowPar([belowParInventoryItem]))
     ;(createServiceClient as ReturnType<typeof vi.fn>).mockReturnValue(supabase)
     vi.stubGlobal('fetch', mockAnthropicFetch({ 'paper towels': 'Bounty paper towels' }))
     ;(getValidKrogerToken as ReturnType<typeof vi.fn>).mockResolvedValue('customer_token_y')
@@ -192,12 +180,14 @@ describe('buildShoppingCart', () => {
   })
 
   it('is a no-op when nothing is below par (items never counted default to 0 and are excluded)', async () => {
-    const neverCountedItem = { ...belowParInventoryItem, id: 'item_2', first_count_recorded_at: null, current_quantity: 0 }
+    // Items never counted default current_quantity to 0; the RPC's SQL
+    // excludes them (first_count_recorded_at IS NOT NULL), so they never
+    // reach this function at all — asserted directly against the RPC body in
+    // the last test in this file.
     const supabase = makeSupabase({
       organizations:   [{ data: { id: 'org_1', preferred_retailer: 'kroger' }, error: null }],
-      inventory_items: [{ data: [neverCountedItem], error: null }],
       org_milestones:  [{ error: null }], // persistCartStatus('nothing_below_par')
-    })
+    }, undefined, belowPar([]))
     ;(createServiceClient as ReturnType<typeof vi.fn>).mockReturnValue(supabase)
 
     const result = await invokeHandler(buildShoppingCart, baseCtx())
@@ -213,9 +203,8 @@ describe('buildShoppingCart', () => {
   it('stops before touching Kroger when the org has below-par items but has not set Kroger as preferred retailer', async () => {
     const supabase = makeSupabase({
       organizations:   [{ data: { id: 'org_1', preferred_retailer: 'walmart' }, error: null }],
-      inventory_items: [{ data: [belowParInventoryItem], error: null }],
       org_milestones:  [{ error: null }],
-    })
+    }, undefined, belowPar([belowParInventoryItem]))
     ;(createServiceClient as ReturnType<typeof vi.fn>).mockReturnValue(supabase)
 
     const result = await invokeHandler(buildShoppingCart, baseCtx())
@@ -227,13 +216,12 @@ describe('buildShoppingCart', () => {
   it('flags kroger_store_needed and stops when the org has no connected Kroger account', async () => {
     const supabase = makeSupabase({
       organizations:            [{ data: { id: 'org_1', preferred_retailer: 'kroger' }, error: null }],
-      inventory_items:          [{ data: [belowParInventoryItem], error: null }],
       integration_connections:  [{ data: null, error: null }],
       org_milestones: [
         { error: null }, // kroger_store_needed flag upsert
         { error: null }, // persistCartStatus('no_store_configured')
       ],
-    })
+    }, undefined, belowPar([belowParInventoryItem]))
     ;(createServiceClient as ReturnType<typeof vi.fn>).mockReturnValue(supabase)
 
     const result = await invokeHandler(buildShoppingCart, baseCtx())
@@ -251,12 +239,11 @@ describe('buildShoppingCart', () => {
   it('edge case: an item with no matching Kroger product is reported unmatched and never added to the cart', async () => {
     const supabase = makeSupabase({
       organizations:           [{ data: { id: 'org_1', preferred_retailer: 'kroger' }, error: null }],
-      inventory_items:         [{ data: [belowParInventoryItem], error: null }],
       integration_connections: [{ data: activeKrogerConnection, error: null }],
       org_milestones: [
         { error: null }, // persist-result last_cart_build (add-items step short-circuits before any org_milestones read)
       ],
-    })
+    }, undefined, belowPar([belowParInventoryItem]))
     ;(createServiceClient as ReturnType<typeof vi.fn>).mockReturnValue(supabase)
     vi.stubGlobal('fetch', mockAnthropicFetch({ 'paper towels': 'Bounty paper towels' }))
     ;(getValidKrogerToken as ReturnType<typeof vi.fn>).mockResolvedValue('customer_token_y')
@@ -275,13 +262,14 @@ describe('buildShoppingCart', () => {
   it('idempotency: a cart already added for this run id is not re-added to Kroger', async () => {
     const supabase = makeSupabase({
       organizations:            [{ data: { id: 'org_1', preferred_retailer: 'kroger' }, error: null }],
-      inventory_items:          [{ data: [belowParInventoryItem], error: null }],
       integration_connections:  [{ data: activeKrogerConnection, error: null }],
       org_milestones: [
-        { data: { id: 'milestone_existing' }, error: null }, // milestone already exists for this runId
+        // Claim returns ZERO rows — another run already owns this exact cart
+        // for today (ignoreDuplicates upsert), so Kroger must not be called.
+        { data: [], error: null },
         { error: null }, // persist-result
       ],
-    })
+    }, undefined, belowPar([belowParInventoryItem]))
     ;(createServiceClient as ReturnType<typeof vi.fn>).mockReturnValue(supabase)
     vi.stubGlobal('fetch', mockAnthropicFetch({ 'paper towels': 'Bounty paper towels' }))
     ;(getValidKrogerToken as ReturnType<typeof vi.fn>).mockResolvedValue('customer_token_y')
@@ -297,20 +285,31 @@ describe('buildShoppingCart', () => {
     // Kroger cart-add API must never be called a second time.
     expect(addItemsToKrogerCart).not.toHaveBeenCalled()
 
-    const milestoneCheck = supabase.calls.find((c) => c.table === 'org_milestones' && c.method === 'eq' && c.args[0] === 'milestone')
-    expect(milestoneCheck?.args[1]).toBe('kroger_cart_added:run_dup')
+    // The idempotency key is org + day + a hash of the exact cart contents.
+    // It used to be keyed on runId, which is stable across STEP retries but
+    // NOT across events — so a double-clicked "Build Cart" minted two keys
+    // and both added to the real Kroger cart (real duplicate grocery spend).
+    const claim = supabase.calls.find(
+      (c) => c.table === 'org_milestones' && c.method === 'upsert'
+        && String((c.args[0] as { milestone?: string })?.milestone).startsWith('kroger_cart_added:'),
+    )
+    expect((claim!.args[0] as { milestone: string }).milestone).toMatch(
+      /^kroger_cart_added:\d{4}-\d{2}-\d{2}:[0-9a-f]{32}$/,
+    )
+    // ignoreDuplicates is what makes the claim atomic — zero rows back means
+    // another run owns it.
+    expect(claim!.args[1]).toEqual({ onConflict: 'org_id,milestone', ignoreDuplicates: true })
   })
 
   it('error handling: a revoked Kroger refresh token falls back to list-only, reports the error, and marks the connection revoked', async () => {
     const supabase = makeSupabase({
       organizations:            [{ data: { id: 'org_1', preferred_retailer: 'kroger' }, error: null }],
-      inventory_items:          [{ data: [belowParInventoryItem], error: null }],
       integration_connections:  [
         { data: activeKrogerConnection, error: null }, // load-inventory-data
         { error: null },                               // status: 'revoked' update
       ],
       org_milestones: [{ error: null }], // persist-result
-    })
+    }, undefined, belowPar([belowParInventoryItem]))
     ;(createServiceClient as ReturnType<typeof vi.fn>).mockReturnValue(supabase)
     vi.stubGlobal('fetch', mockAnthropicFetch({ 'paper towels': 'Bounty paper towels' }))
     ;(getValidKrogerToken as ReturnType<typeof vi.fn>).mockRejectedValue(
@@ -336,9 +335,8 @@ describe('buildShoppingCart', () => {
   it('rethrows a Kroger rate limit from token refresh so Inngest retries the step, instead of degrading to list-only', async () => {
     const supabase = makeSupabase({
       organizations:            [{ data: { id: 'org_1', preferred_retailer: 'kroger' }, error: null }],
-      inventory_items:          [{ data: [belowParInventoryItem], error: null }],
       integration_connections:  [{ data: activeKrogerConnection, error: null }],
-    })
+    }, undefined, belowPar([belowParInventoryItem]))
     ;(createServiceClient as ReturnType<typeof vi.fn>).mockReturnValue(supabase)
     ;(getValidKrogerToken as ReturnType<typeof vi.fn>).mockRejectedValue(new RateLimitError(30))
 
@@ -359,15 +357,153 @@ describe('buildShoppingCart', () => {
   it('only scopes the inventory query to the requested properties when property_ids is provided', async () => {
     const supabase = makeSupabase({
       organizations:   [{ data: { id: 'org_1', preferred_retailer: 'kroger' }, error: null }],
-      inventory_items: [{ data: [], error: null }],
       org_milestones:  [{ error: null }],
-    })
+    }, undefined, belowPar([]))
     ;(createServiceClient as ReturnType<typeof vi.fn>).mockReturnValue(supabase)
 
     const event = { data: { ...BASE_EVENT.data, property_ids: ['prop_1', 'prop_2'] } }
     await invokeHandler(buildShoppingCart, baseCtx({ event }))
 
-    const inCall = supabase.calls.find((c) => c.table === 'inventory_items' && c.method === 'in')
-    expect(inCall?.args).toEqual(['property_id', ['prop_1', 'prop_2']])
+    // Property scoping is now an RPC argument, not a `.in()` on the builder.
+    expect(supabase.rpc).toHaveBeenCalledWith('inventory_below_par_items', {
+      p_org_id:       'org_1',
+      p_property_ids: ['prop_1', 'prop_2'],
+    })
+  })
+
+  it('passes p_property_ids null (all properties) when the event carries no property_ids', async () => {
+    const supabase = makeSupabase({
+      organizations:   [{ data: { id: 'org_1', preferred_retailer: 'kroger' }, error: null }],
+      org_milestones:  [{ error: null }],
+    }, undefined, belowPar([]))
+    ;(createServiceClient as ReturnType<typeof vi.fn>).mockReturnValue(supabase)
+
+    await invokeHandler(buildShoppingCart, baseCtx())
+
+    expect(supabase.rpc).toHaveBeenCalledWith('inventory_below_par_items', {
+      p_org_id:       'org_1',
+      p_property_ids: null,
+    })
+  })
+
+  it('throws instead of building a partial cart when the below-par RPC errors', async () => {
+    const supabase = makeSupabase(
+      { organizations: [{ data: { id: 'org_1', preferred_retailer: 'kroger' }, error: null }] },
+      undefined,
+      { inventory_below_par_items: { data: null, error: { message: 'permission denied' } } },
+    )
+    ;(createServiceClient as ReturnType<typeof vi.fn>).mockReturnValue(supabase)
+
+    await expect(invokeHandler(buildShoppingCart, baseCtx())).rejects.toThrow(
+      'inventory_below_par_items failed: permission denied',
+    )
+  })
+
+  // The cart fingerprint is the idempotency claim that stops a second run
+  // from adding the same groceries to the real Kroger cart twice. It hashes a
+  // SORTED list of cart lines, so the sort has to be a canonicalisation — the
+  // same set of lines must produce the same digest no matter what order
+  // product matching emitted them in, on every machine and in every locale.
+  describe('cart fingerprint canonicalisation', () => {
+    function fingerprintRun(rows: unknown[]) {
+      const supabase = makeSupabase({
+        organizations:           [{ data: { id: 'org_1', preferred_retailer: 'kroger' }, error: null }],
+        integration_connections: [{ data: activeKrogerConnection, error: null }],
+        org_milestones: [
+          { data: [], error: null }, // claim: already owned — Kroger is not called
+          { error: null },           // persist-result
+        ],
+      }, undefined, belowPar(rows))
+      ;(createServiceClient as ReturnType<typeof vi.fn>).mockReturnValue(supabase)
+      vi.stubGlobal('fetch', mockAnthropicFetch({
+        'paper towels': 'Bounty paper towels',
+        'trash bags':   'Glad trash bags',
+      }))
+      ;(getValidKrogerToken as ReturnType<typeof vi.fn>).mockResolvedValue('customer_token_y')
+      ;(getClientToken as ReturnType<typeof vi.fn>).mockResolvedValue('client_token_x')
+      ;(searchProducts as ReturnType<typeof vi.fn>).mockImplementation(async (term: string) =>
+        term.includes('towel')
+          ? [krogerProduct({ upc: '0001111041700', productId: 'prod_towels' })]
+          : [krogerProduct({ upc: '0009999088800', productId: 'prod_bags' })],
+      )
+      ;(getBestPrice as ReturnType<typeof vi.fn>).mockReturnValue(9.99)
+      ;(getBestProductImage as ReturnType<typeof vi.fn>).mockReturnValue('https://img/x.jpg')
+
+      return { supabase, run: invokeHandler(buildShoppingCart, baseCtx()) }
+    }
+
+    function claimedMilestone(supabase: { calls: { table: string; method: string; args: unknown[] }[] }) {
+      const claim = supabase.calls.find(
+        (c) => c.table === 'org_milestones' && c.method === 'upsert'
+          && String((c.args[0] as { milestone?: string })?.milestone).startsWith('kroger_cart_added:'),
+      )
+      return (claim!.args[0] as { milestone: string }).milestone
+    }
+
+    const trashBags = {
+      ...belowParInventoryItem,
+      id:               'item_2',
+      name:             'Trash Bags',
+      preferred_brand:  'Glad',
+      current_quantity: 1,
+      par_level:        4,
+    }
+
+    it('produces the same idempotency key for the same cart contents in a different order', async () => {
+      const forward = fingerprintRun([belowParInventoryItem, trashBags])
+      await forward.run
+      const forwardKey = claimedMilestone(forward.supabase)
+
+      vi.clearAllMocks()
+
+      const reversed = fingerprintRun([trashBags, belowParInventoryItem])
+      await reversed.run
+      const reversedKey = claimedMilestone(reversed.supabase)
+
+      expect(forwardKey).toMatch(/^kroger_cart_added:\d{4}-\d{2}-\d{2}:[0-9a-f]{32}$/)
+      expect(reversedKey).toBe(forwardKey)
+    })
+  })
+
+  // Sonar flags the pre-sort as "provide a compare function that depends on
+  // String.localeCompare". Taking that literally would be a real bug here:
+  // locale-aware collation is locale- and ICU-version-dependent, so the same
+  // cart could fingerprint differently across environments and break the
+  // duplicate-charge guarantee. compareCodeUnits is the explicit, deterministic
+  // comparator that satisfies the rule without that dependency.
+  describe('compareCodeUnits', () => {
+    it('orders by UTF-16 code unit, NOT by locale collation', () => {
+      // en-US collation sorts 'a' before 'B'; code-unit order does not.
+      expect('a'.localeCompare('B')).toBeLessThan(0)
+      expect(compareCodeUnits('a', 'B')).toBeGreaterThan(0)
+      expect(compareCodeUnits('B', 'a')).toBeLessThan(0)
+      expect(compareCodeUnits('a', 'a')).toBe(0)
+    })
+
+    it('sorts a set into one canonical order regardless of input order', () => {
+      const canonical = ['0001111041700:8:PICKUP', '0009999088800:3:PICKUP', 'B:1:PICKUP', 'a:1:PICKUP']
+      const shuffled  = ['a:1:PICKUP', '0009999088800:3:PICKUP', 'B:1:PICKUP', '0001111041700:8:PICKUP']
+
+      expect([...shuffled].sort(compareCodeUnits)).toEqual(canonical)
+      expect([...canonical].sort(compareCodeUnits)).toEqual(canonical)
+    })
+  })
+
+  it('excludes never-counted items in SQL, so they can never reach the cart', () => {
+    // This exclusion used to be a JS-side filter in this function and now
+    // lives in the RPC body — an item never counted has current_quantity 0,
+    // which would look "below par" on every freshly-added item.
+    const sql = readFileSync(
+      new URL('../../supabase/migrations/20260730400000_scalability_aggregate_rpcs.sql', import.meta.url),
+      'utf8',
+    )
+    const body = sql.slice(
+      sql.indexOf('FUNCTION public.inventory_below_par_items'),
+      sql.indexOf('COMMENT ON FUNCTION public.inventory_below_par_items'),
+    )
+    expect(body).toContain('i.first_count_recorded_at IS NOT NULL')
+    expect(body).toContain('COALESCE(i.current_quantity, 0) < COALESCE(i.par_level, 1)')
+    // Tenant scoping is inside the SECURITY DEFINER function itself.
+    expect(body).toContain('i.org_id = p_org_id')
   })
 })

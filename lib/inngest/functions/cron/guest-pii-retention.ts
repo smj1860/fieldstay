@@ -1,6 +1,7 @@
 import { inngest } from '@/lib/inngest/client'
 import { createServiceClient } from '@/lib/supabase/server'
 import { logAuditEvents } from '@/lib/audit'
+import { fetchAllRows } from '@/lib/inngest/paginate'
 
 /**
  * SCHEDULED: runs daily at 9:15am CT — 15 min after dailyCommsRetention to
@@ -19,6 +20,12 @@ import { logAuditEvents } from '@/lib/audit'
  *    is never re-texted. Only never-opted-out rows past the retention
  *    window are deleted (phone_e164 is NOT NULL, so these are deleted
  *    outright rather than nulled).
+ *
+ * DISPATCHER ONLY. This previously ran one `step.run` per org inside a single
+ * invocation (150 steps at 150 tenants), each of which additionally issued one
+ * serial delete_vault_secret RPC per stale booking with no bound on booking
+ * count. Now it fans out one `org/guest_pii_retention.requested` per org, and
+ * the handler chunks the Vault deletions.
  */
 export const dailyGuestPiiRetention = inngest.createFunction(
   {
@@ -28,91 +35,174 @@ export const dailyGuestPiiRetention = inngest.createFunction(
   },
   { cron: '15 14 * * *' },  // 15 min after dailyCommsRetention
   async ({ step, logger }) => {
-    const retentionOrgs = await step.run('find-retention-orgs', async () => {
+    const nowMs = await step.run('capture-now', async () => Date.now())
+
+    const orgIds = await step.run('find-retention-orgs', async () => {
+      const supabase = createServiceClient({ system: 'inngest:guest-pii-retention' })
+      const orgs = await fetchAllRows<{ id: string }>(
+        (from, to) => supabase
+          .from('organizations')
+          .select('id')
+          .order('id', { ascending: true })
+          .range(from, to),
+        { label: 'organizations(guest-pii-retention)' }
+      )
+      return orgs.map((o) => o.id)
+    })
+
+    if (orgIds.length) {
+      await step.sendEvent(
+        'fan-out-guest-pii-retention',
+        orgIds.map((orgId) => ({
+          name: 'org/guest_pii_retention.requested' as const,
+          data: { org_id: orgId, now_ms: nowMs },
+        }))
+      )
+    }
+
+    logger.info(`Guest PII retention: dispatched ${orgIds.length} org(s)`)
+    return { dispatched: orgIds.length }
+  }
+)
+
+/**
+ * Per-org guest PII purge.
+ *
+ * Bookings are processed in bounded batches with their own step per batch, so
+ * an org with a large un-anonymized backlog neither blows the step-payload
+ * budget nor runs an unbounded serial RPC loop inside one step. Each batch is
+ * idempotent: the selection filter is `guest_pii_anonymized_at IS NULL`, which
+ * the same batch's UPDATE clears, so a retry re-selects nothing already done.
+ */
+const BOOKING_BATCH_SIZE = 200
+const MAX_BOOKING_BATCHES_PER_RUN = 25   // 5,000 bookings/org/day; the rest continue tomorrow
+
+export const guestPiiRetentionOrg = inngest.createFunction(
+  {
+    id:          'guest-pii-retention-org',
+    name:        'Guest PII Retention — per org',
+    retries:     1,
+    concurrency: { limit: 10 },
+  },
+  { event: 'org/guest_pii_retention.requested' },
+  async ({ event, step, logger }) => {
+    const orgId = event.data.org_id
+    const nowMs = event.data.now_ms
+
+    const retentionDays = await step.run('load-org-retention-days', async () => {
       const supabase = createServiceClient({ system: 'inngest:guest-pii-retention' })
       const { data } = await supabase
         .from('organizations')
-        .select('id, guest_pii_retention_days')
-
-      return data ?? []
+        .select('guest_pii_retention_days')
+        .eq('id', orgId)
+        .maybeSingle()
+      return data?.guest_pii_retention_days ?? null
     })
 
+    if (retentionDays === null) return { org_id: orgId, skipped: 'org_missing' }
+
+    const cutoffIso  = new Date(nowMs - retentionDays * 86_400_000).toISOString()
+    const cutoffDay  = cutoffIso.slice(0, 10)
+
     let bookingsAnonymized = 0
-    let optinsDeleted      = 0
 
-    for (const org of retentionOrgs) {
-      await step.run(`guest-pii-retention-${org.id}`, async () => {
+    for (let batch = 0; batch < MAX_BOOKING_BATCHES_PER_RUN; batch++) {
+      const processed = await step.run(`anonymize-bookings-batch-${batch}`, async () => {
         const supabase = createServiceClient({ system: 'inngest:guest-pii-retention' })
-        const cutoff = new Date(Date.now() - org.guest_pii_retention_days * 86_400_000)
-          .toISOString()
-          .slice(0, 10)
 
-        const { data: staleBookings } = await supabase
+        const { data: staleBookings, error } = await supabase
           .from('bookings')
           .select('id, door_code_secret_id')
-          .eq('org_id', org.id)
+          .eq('org_id', orgId)
           .is('guest_pii_anonymized_at', null)
-          .lt('checkout_date', cutoff)
+          .lt('checkout_date', cutoffDay)
+          .order('id', { ascending: true })
+          .limit(BOOKING_BATCH_SIZE)
 
-        for (const booking of staleBookings ?? []) {
-          if (booking.door_code_secret_id) {
-            await supabase.rpc('delete_vault_secret', { p_secret_id: booking.door_code_secret_id })
+        if (error) throw new Error(`Failed to select stale bookings for org ${orgId}: ${error.message}`)
+        if (!staleBookings?.length) return 0
+
+        // One Vault RPC per secret is unavoidable — each secret is a distinct
+        // external resource — but the batch bound above keeps the count per
+        // step fixed instead of scaling with an org's entire booking history.
+        const secretIds = staleBookings
+          .map((b) => b.door_code_secret_id)
+          .filter((id): id is string => id !== null && id !== undefined)
+
+        for (const secretId of secretIds) {
+          const { error: vaultError } = await supabase.rpc('delete_vault_secret', { p_secret_id: secretId })
+          if (vaultError) {
+            // A secret that is already gone must not block the anonymization
+            // of the row that references it — log and continue.
+            console.warn(`[guest-pii-retention] vault secret delete failed for org ${orgId}`, {
+              code: vaultError.code, message: vaultError.message,
+            })
           }
         }
 
-        const bookingIds = (staleBookings ?? []).map((b) => b.id)
-        if (bookingIds.length > 0) {
-          await supabase
-            .from('bookings')
-            .update({
-              guest_name:               null,
-              guest_email:              null,
-              raw_ical_data:            null,
-              door_code_secret_id:      null,
-              guest_pii_anonymized_at:  new Date().toISOString(),
-            })
-            .in('id', bookingIds)
-        }
+        const bookingIds = staleBookings.map((b) => b.id)
+        const { error: updateError } = await supabase
+          .from('bookings')
+          .update({
+            guest_name:              null,
+            guest_email:             null,
+            raw_ical_data:           null,
+            door_code_secret_id:     null,
+            guest_pii_anonymized_at: new Date().toISOString(),
+          })
+          .in('id', bookingIds)
 
-        const { data: deletedOptins } = await supabase
-          .from('guidebook_guest_sms_optins')
-          .delete()
-          .eq('org_id', org.id)
-          .is('opted_out_at', null)
-          .lt('opted_in_at', new Date(Date.now() - org.guest_pii_retention_days * 86_400_000).toISOString())
-          .select('id')
+        if (updateError) throw new Error(`Failed to anonymize bookings for org ${orgId}: ${updateError.message}`)
 
-        bookingsAnonymized += bookingIds.length
-        optinsDeleted      += deletedOptins?.length ?? 0
+        return bookingIds.length
+      })
 
+      bookingsAnonymized += processed
+      if (processed < BOOKING_BATCH_SIZE) break
+    }
+
+    const optinsDeleted = await step.run('delete-stale-optins', async () => {
+      const supabase = createServiceClient({ system: 'inngest:guest-pii-retention' })
+      const { data, error } = await supabase
+        .from('guidebook_guest_sms_optins')
+        .delete()
+        .eq('org_id', orgId)
+        .is('opted_out_at', null)
+        .lt('opted_in_at', cutoffIso)
+        .select('id')
+
+      if (error) throw new Error(`Failed to delete stale opt-ins for org ${orgId}: ${error.message}`)
+      return data?.length ?? 0
+    })
+
+    if (bookingsAnonymized || optinsDeleted) {
+      await step.run('log-retention-audit', async () => {
         const auditEntries = []
-        if (bookingIds.length) {
+        if (bookingsAnonymized) {
           auditEntries.push({
-            orgId:      org.id,
+            orgId,
             action:     'booking.guest_pii_anonymized' as const,
             targetType: 'booking',
-            metadata:   { source: 'retention_cron', count: bookingIds.length },
+            metadata:   { source: 'retention_cron', count: bookingsAnonymized },
           })
         }
-        if (deletedOptins?.length) {
+        if (optinsDeleted) {
           auditEntries.push({
-            orgId:      org.id,
+            orgId,
             action:     'sms.optin_phone_anonymized' as const,
             targetType: 'guidebook_guest_sms_optin',
-            metadata:   { source: 'retention_cron', count: deletedOptins.length },
+            metadata:   { source: 'retention_cron', count: optinsDeleted },
           })
         }
-        if (auditEntries.length) await logAuditEvents(auditEntries)
-
-        return { bookings_anonymized: bookingIds.length, optins_deleted: deletedOptins?.length ?? 0 }
+        await logAuditEvents(auditEntries)
       })
     }
 
-    logger.info(`Guest PII retention — anonymized ${bookingsAnonymized} bookings, deleted ${optinsDeleted} stale optins`)
+    logger.info(
+      `Guest PII retention (org ${orgId}) — anonymized ${bookingsAnonymized} bookings, ` +
+      `deleted ${optinsDeleted} stale optins`
+    )
 
-    return {
-      bookings_anonymized: bookingsAnonymized,
-      optins_deleted:      optinsDeleted,
-    }
+    return { org_id: orgId, bookings_anonymized: bookingsAnonymized, optins_deleted: optinsDeleted }
   }
 )

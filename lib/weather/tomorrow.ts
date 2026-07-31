@@ -1,4 +1,5 @@
 import { Redis } from '@upstash/redis'
+import { WEATHER_TIMEOUT_MS, isTimeoutError } from '@/lib/http/timeout'
 
 // Redis.fromEnv() reads the standard UPSTASH_REDIS_REST_URL/_TOKEN names,
 // which this project doesn't use — see lib/rate-limit.ts's matching
@@ -90,13 +91,27 @@ export async function getWeatherForLocation(
     `&units=imperial` +
     `&apikey=${apiKey}`
 
-  const response = await fetch(url, {
-    headers: {
-      // Required per Tomorrow.io OpenAPI spec (accept-encoding: required: true)
-      'Accept-Encoding': 'deflate, gzip, br',
-    },
-    next: { revalidate: 0 }, // never Next.js cache — Redis handles it
-  })
+  // This call sits inside the per-guest nudge SMS send, so an unbounded
+  // fetch would hold that send (and its Inngest step) open indefinitely.
+  // The timeout is surfaced as its own error message rather than folded
+  // into the generic API-error branch — "Tomorrow.io is slow" and
+  // "Tomorrow.io said no" are different operational problems.
+  let response: Response
+  try {
+    response = await fetch(url, {
+      headers: {
+        // Required per Tomorrow.io OpenAPI spec (accept-encoding: required: true)
+        'Accept-Encoding': 'deflate, gzip, br',
+      },
+      signal: AbortSignal.timeout(WEATHER_TIMEOUT_MS),
+      next: { revalidate: 0 }, // never Next.js cache — Redis handles it
+    })
+  } catch (err) {
+    if (isTimeoutError(err)) {
+      throw new Error(`Tomorrow.io request timed out after ${WEATHER_TIMEOUT_MS}ms`)
+    }
+    throw err
+  }
 
   if (response.status === 429) {
     throw new Error('Tomorrow.io rate limit exceeded. Check daily/hourly limits.')

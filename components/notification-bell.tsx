@@ -13,7 +13,10 @@ const SEVERITY_COLOR: Record<NotificationItem['severity'], string> = {
   blue:  'var(--accent-blue)',
 }
 
-export function NotificationBell({ items }: Readonly<{ items: NotificationItem[] }>) {
+export function NotificationBell({
+  items,
+  failed = false,
+}: Readonly<{ items: NotificationItem[]; failed?: boolean }>) {
   const [open, setOpen] = useState(false)
   // Local optimistic read-tracking so clicking doesn't wait on revalidation
   // to clear the badge dot.
@@ -39,9 +42,24 @@ export function NotificationBell({ items }: Readonly<{ items: NotificationItem[]
     setOpen(false)
     if (item.read === false) {
       setReadIds((prev) => new Set(prev).add(item.id))
-      markNotificationRead(item.id).catch(() => {
-        // Non-fatal — worst case the dot reappears on next server fetch.
-      })
+      markNotificationRead(item.id)
+        .then((res) => {
+          // The server logs and reports the real cause; here we just undo the
+          // optimistic read so the UI stops claiming something it didn't do.
+          if (!res.success) setReadIds((prev) => {
+            const next = new Set(prev)
+            next.delete(item.id)
+            return next
+          })
+        })
+        .catch((err: unknown) => {
+          console.error('[notification-bell] markNotificationRead failed', err)
+          setReadIds((prev) => {
+            const next = new Set(prev)
+            next.delete(item.id)
+            return next
+          })
+        })
     }
   }
 
@@ -73,7 +91,16 @@ export function NotificationBell({ items }: Readonly<{ items: NotificationItem[]
               Notifications
             </span>
           </div>
-          {items.length === 0 ? (
+          {failed && (
+            <div
+              className="px-4 py-3 text-xs"
+              role="alert"
+              style={{ color: 'var(--accent-red)', borderBottom: '1px solid var(--border)' }}
+            >
+              Some notifications couldn&apos;t be loaded. This list may be incomplete.
+            </div>
+          )}
+          {items.length === 0 && !failed ? (
             <div className="px-4 py-8 text-center text-sm" style={{ color: 'var(--text-muted)' }}>
               You&apos;re all caught up.
             </div>

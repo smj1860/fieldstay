@@ -1,6 +1,7 @@
 import type { Metadata } from 'next'
 import { requireOrgMember } from '@/lib/auth'
 import { MessagesClient } from './messages-client'
+import { throwIfAnyQueryFailed } from '@/lib/supabase/unwrap'
 
 export const metadata: Metadata = { title: 'Messages' }
 
@@ -26,7 +27,7 @@ export default async function MessagesPage({
     query.lt('created_at', before)
   }
 
-  const [{ data: crew }, { data: messages }] = await Promise.all([
+  const [{ data: crew, error: crewError }, { data: messages, error: messagesError }] = await Promise.all([
     supabase
       .from('crew_members')
       .select('id, name, specialty, user_id')
@@ -37,6 +38,10 @@ export default async function MessagesPage({
 
     query,
   ])
+
+  // Logs + reports every failure, then throws so the segment's error.tsx
+  // renders a real error state — an outage must not look like empty data.
+  throwIfAnyQueryFailed({ site: 'page.messages', orgId: membership.org_id }, crewError, messagesError)
 
   const hasMore   = (messages?.length ?? 0) > PAGE_SIZE
   const pageItems = hasMore ? (messages ?? []).slice(0, PAGE_SIZE) : (messages ?? [])

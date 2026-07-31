@@ -369,7 +369,13 @@ function WorkOrderCard({
             <div
               className="mt-2 flex items-center gap-2 flex-wrap px-3 py-2 rounded-lg"
               style={{ background: 'var(--accent-blue-dim)', border: '1px solid var(--accent-blue)' }}
+              // Propagation guard, not a control: this wrapper exists only so a click
+              // (or keypress) on the nested buttons doesn't also fire the parent card's
+              // onClick. role="presentation" says exactly that — role="button"/tabIndex
+              // here would announce a container as an interactive element it isn't.
+              role="presentation"
               onClick={(e) => e.stopPropagation()}
+              onKeyDown={(e) => e.stopPropagation()}
             >
               <span className="text-xs inline-flex items-center gap-1" style={{ color: 'var(--text-secondary)' }}>
                 <Sparkles className="w-3.5 h-3.5 flex-shrink-0" />
@@ -424,14 +430,14 @@ function ScheduleFormFields({
   return (
     <>
       <div>
-        <label className="label">Name <RequiredMark /></label>
-        <Input name="name" type="text" required defaultValue={defaults?.name ?? ''} placeholder="e.g. HVAC Filter Change" />
+        <label htmlFor="maintenance-board-name" className="label">Name <RequiredMark /></label>
+        <Input id="maintenance-board-name" name="name" type="text" required defaultValue={defaults?.name ?? ''} placeholder="e.g. HVAC Filter Change" />
       </div>
 
       {!defaults && (
         <div>
-          <label className="label">Property <RequiredMark /></label>
-          <select name="property_id" required className="input">
+          <label htmlFor="maintenance-board-property" className="label">Property <RequiredMark /></label>
+          <select id="maintenance-board-property" name="property_id" required className="input">
             <option value="">Select property…</option>
             {properties.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
           </select>
@@ -439,8 +445,8 @@ function ScheduleFormFields({
       )}
 
       <div>
-        <label className="label">Type</label>
-        <select
+        <label htmlFor="maintenance-board-type" className="label">Type</label>
+        <select id="maintenance-board-type"
           name="schedule_type"
           className="input"
           value={schedType}
@@ -454,8 +460,8 @@ function ScheduleFormFields({
 
       {schedType === 'routine' && (
         <div>
-          <label className="label">Frequency</label>
-          <select name="frequency" className="input" defaultValue={defaults?.frequency ?? 'quarterly'}>
+          <label htmlFor="maintenance-board-frequency" className="label">Frequency</label>
+          <select id="maintenance-board-frequency" name="frequency" className="input" defaultValue={defaults?.frequency ?? 'quarterly'}>
             {FREQUENCIES.map((f) => <option key={f.value} value={f.value}>{f.label}</option>)}
           </select>
         </div>
@@ -463,8 +469,8 @@ function ScheduleFormFields({
 
       {schedType === 'seasonal' && (
         <div>
-          <label className="label">Month Due</label>
-          <select name="month_due" className="input" defaultValue={defaults?.month_due ?? ''}>
+          <label htmlFor="maintenance-board-month-due" className="label">Month Due</label>
+          <select id="maintenance-board-month-due" name="month_due" className="input" defaultValue={defaults?.month_due ?? ''}>
             <option value="">Select month…</option>
             {MONTHS.map((m, i) => <option key={i + 1} value={i + 1}>{m}</option>)}
           </select>
@@ -473,35 +479,35 @@ function ScheduleFormFields({
 
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
         <div>
-          <label className="label">Next Due Date</label>
-          <Input name="next_due_date" type="date" defaultValue={defaults?.next_due_date ?? ''} />
+          <label htmlFor="maintenance-board-next-due-date" className="label">Next Due Date</label>
+          <Input id="maintenance-board-next-due-date" name="next_due_date" type="date" defaultValue={defaults?.next_due_date ?? ''} />
         </div>
         <div>
-          <label className="label">Est. Cost ($)</label>
-          <Input name="estimated_cost" type="number" min="0" step="0.01" defaultValue={defaults?.estimated_cost ?? ''} placeholder="0.00" />
+          <label htmlFor="maintenance-board-est-cost" className="label">Est. Cost ($)</label>
+          <Input id="maintenance-board-est-cost" name="estimated_cost" type="number" min="0" step="0.01" defaultValue={defaults?.estimated_cost ?? ''} placeholder="0.00" />
         </div>
       </div>
 
       <div>
-        <label className="label">Assigned Vendor</label>
-        <select name="assigned_vendor_id" className="input" defaultValue={defaults?.assigned_vendor_id ?? ''}>
+        <label htmlFor="maintenance-board-assigned-vendor" className="label">Assigned Vendor</label>
+        <select id="maintenance-board-assigned-vendor" name="assigned_vendor_id" className="input" defaultValue={defaults?.assigned_vendor_id ?? ''}>
           <option value="">None</option>
           {vendors.map((v) => <option key={v.id} value={v.id}>{v.name}</option>)}
         </select>
       </div>
 
       <div>
-        <label className="label">Description</label>
-        <textarea name="description" rows={2} className="input resize-none" defaultValue={defaults?.description ?? ''} placeholder="Brief description…" />
+        <label htmlFor="maintenance-board-description" className="label">Description</label>
+        <textarea id="maintenance-board-description" name="description" rows={2} className="input resize-none" defaultValue={defaults?.description ?? ''} placeholder="Brief description…" />
       </div>
 
       <div>
-        <label className="label">Instructions</label>
-        <textarea name="instructions" rows={2} className="input resize-none" defaultValue={defaults?.instructions ?? ''} placeholder="Step-by-step instructions for vendor or crew…" />
+        <label htmlFor="maintenance-board-instructions" className="label">Instructions</label>
+        <textarea id="maintenance-board-instructions" name="instructions" rows={2} className="input resize-none" defaultValue={defaults?.instructions ?? ''} placeholder="Step-by-step instructions for vendor or crew…" />
       </div>
 
-      <label className="flex items-center gap-2 text-sm text-secondary-themed cursor-pointer">
-        <Checkbox name="auto_create_wo" defaultChecked={defaults?.auto_create_wo ?? true} />
+      <label htmlFor="maintenance-board-field" className="flex items-center gap-2 text-sm text-secondary-themed cursor-pointer">
+        <Checkbox id="maintenance-board-field" name="auto_create_wo" defaultChecked={defaults?.auto_create_wo ?? true} />
         Auto-create work order when due
       </label>
     </>

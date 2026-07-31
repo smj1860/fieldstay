@@ -9,9 +9,18 @@ vi.mock('next/navigation', () => ({
 vi.mock('next/headers', () => ({
   headers: vi.fn(async () => new Headers()),
 }))
-vi.mock('@/lib/rate-limit', () => ({
-  inviteAcceptRatelimit: { limit: vi.fn(async () => ({ success: true })) },
-}))
+vi.mock('@/lib/rate-limit', async () => {
+  // The action consults the limiter through checkLimit() (the single
+  // chokepoint in lib/rate-limit.ts). The stub delegates to the limiter double
+  // below, so `expect(inviteAcceptRatelimit.limit).toHaveBeenCalledWith(...)`
+  // and the fail-open-on-throw assertions keep working unchanged.
+  const { checkLimitStub, retryAfterSecondsStub } = await import('@/unit/stubs/rate-limit')
+  return {
+    inviteAcceptRatelimit: { limit: vi.fn(async () => ({ success: true })) },
+    checkLimit:            checkLimitStub(),
+    retryAfterSeconds:     retryAfterSecondsStub,
+  }
+})
 vi.mock('@/lib/supabase/server', () => ({
   createServiceClient: vi.fn(),
   createClient:         vi.fn(),
@@ -164,6 +173,7 @@ describe('crew-invite/[token]/actions — activateCrewAccount', () => {
         data: {
           id: CREW_ID, name: 'Jamie', email: 'jamie@example.com', org_id: 'org_1',
           user_id: null, invite_accepted_at: null, invite_token: VALID_TOKEN, invite_sent_at: null,
+          created_at: new Date().toISOString(),
         },
       },
       { error: null }
@@ -192,6 +202,7 @@ describe('crew-invite/[token]/actions — activateCrewAccount', () => {
         data: {
           id: CREW_ID, name: 'Jamie', email: 'jamie@example.com', org_id: 'org_1',
           user_id: null, invite_accepted_at: null, invite_token: VALID_TOKEN, invite_sent_at: null,
+          created_at: new Date().toISOString(),
         },
       },
       { error: { message: 'update failed' } }
@@ -202,5 +213,80 @@ describe('crew-invite/[token]/actions — activateCrewAccount', () => {
 
     expect(result).toEqual({ error: 'Failed to activate account. Please try again.' })
     expect(supabase.auth.admin.deleteUser).toHaveBeenCalledWith('new_user_1')
+  })
+
+  // ── M-6 (2026-07-30 pre-launch audit) ────────────────────────────────────
+  // The 7-day expiry check used to be nested inside `if (crew.invite_sent_at)`,
+  // so a crew row with a NULL invite_sent_at had a PERMANENTLY valid
+  // activation token that mints a real auth account. ~40% of live
+  // crew_members rows have that column NULL (11 of 28 on 2026-07-30 — invited
+  // by SMS, or created before the column existed), so this was not a
+  // theoretical hole.
+  //
+  // The fix falls back to created_at rather than rejecting outright: a hard
+  // reject would be the same class of mistake as filtering crew on
+  // invite_accepted_at, which has silently locked out real crew three times
+  // (see lib/crew-auth.ts). Rows with a user_id or invite_accepted_at already
+  // return "already used" before this check, so no ACTIVATED crew member can
+  // be reached by it either way.
+
+  it('rejects a stale invite whose invite_sent_at is NULL, falling back to created_at — no permanently-valid activation token', async () => {
+    const eightDaysAgo = new Date(Date.now() - 8 * 86_400_000).toISOString()
+    const supabase = makeSupabase({
+      data: {
+        id: CREW_ID, name: 'Jamie', email: 'jamie@example.com', org_id: 'org_1',
+        user_id: null, invite_accepted_at: null, invite_token: VALID_TOKEN,
+        invite_sent_at: null, created_at: eightDaysAgo,
+      },
+    })
+    vi.mocked(createServiceClient).mockReturnValue(supabase as never)
+
+    const result = await activateCrewAccount(validFormData())
+
+    expect(result).toEqual({ error: 'This invite link has expired. Ask your manager to send a new one.' })
+    expect(supabase.auth.admin.createUser).not.toHaveBeenCalled()
+  })
+
+  it('still activates a RECENT invite whose invite_sent_at is NULL — the created_at fallback must not lock out legitimately-onboarded crew', async () => {
+    const supabase = makeSupabase(
+      {
+        data: {
+          id: CREW_ID, name: 'Jamie', email: 'jamie@example.com', org_id: 'org_1',
+          user_id: null, invite_accepted_at: null, invite_token: VALID_TOKEN,
+          invite_sent_at: null, created_at: new Date(Date.now() - 86_400_000).toISOString(),
+        },
+      },
+      { error: null }
+    )
+    vi.mocked(createServiceClient).mockReturnValue(supabase as never)
+    vi.mocked(createClient).mockResolvedValue(
+      { auth: { signInWithPassword: vi.fn(async () => ({ error: null })) } } as never,
+    )
+
+    await expect(activateCrewAccount(validFormData())).rejects.toThrow('REDIRECT:/crew/install')
+
+    expect(supabase.auth.admin.createUser).toHaveBeenCalled()
+  })
+
+  it('prefers invite_sent_at over created_at when both are present — a resent invite on an old crew row still activates', async () => {
+    const supabase = makeSupabase(
+      {
+        data: {
+          id: CREW_ID, name: 'Jamie', email: 'jamie@example.com', org_id: 'org_1',
+          user_id: null, invite_accepted_at: null, invite_token: VALID_TOKEN,
+          invite_sent_at: new Date(Date.now() - 86_400_000).toISOString(),
+          created_at:     new Date(Date.now() - 400 * 86_400_000).toISOString(),
+        },
+      },
+      { error: null }
+    )
+    vi.mocked(createServiceClient).mockReturnValue(supabase as never)
+    vi.mocked(createClient).mockResolvedValue(
+      { auth: { signInWithPassword: vi.fn(async () => ({ error: null })) } } as never,
+    )
+
+    await expect(activateCrewAccount(validFormData())).rejects.toThrow('REDIRECT:/crew/install')
+
+    expect(supabase.auth.admin.createUser).toHaveBeenCalled()
   })
 })

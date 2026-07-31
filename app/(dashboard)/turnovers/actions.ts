@@ -298,32 +298,41 @@ export async function updateTurnoverStatus(
   try {
     const { supabase, membership, user } = await requireOrgMember()
 
-    const { data: existing } = await supabase
-      .from('turnovers')
-      .select('status')
-      .eq('id', turnover_id)
-      .eq('org_id', membership.org_id)
-      .single()
-
-    const wasAlreadyCompleted = existing?.status === 'completed'
-
     const update: Record<string, unknown> = { status }
+    const completedAt = new Date().toISOString()
     if (status === 'in_progress') {
-      update.started_at = new Date().toISOString()
+      update.started_at = completedAt
     }
     if (status === 'completed') {
-      update.completed_at     = new Date().toISOString()
+      update.completed_at     = completedAt
       update.completion_notes = notes ?? null
     }
     if (notes && status === 'flagged') {
       update.completion_notes = notes
     }
 
-    const { error } = await supabase
+    // Completing is guarded by the WHERE clause, not by an earlier read.
+    // This previously selected the current status, computed
+    // `wasAlreadyCompleted`, then updated unconditionally — so two concurrent
+    // completions both saw a non-completed status and both fired
+    // turnover/completed. The money side was contained (the cleaning-fee
+    // expense upserts on (source_reference_id, source) and the PM
+    // notification has a dedupeKey), but emit-completion-metric
+    // double-counted and the second write overwrote completed_at with a fresh
+    // wall clock, corrupting the durations assignment_outcomes and crew
+    // scoring are derived from. .neq('status', 'completed') makes exactly one
+    // racing UPDATE match a row; the loser gets `updated === null`.
+    // Same pattern as app/api/crew/turnovers/[id]/complete/route.ts.
+    let query = supabase
       .from('turnovers')
       .update(update)
       .eq('id', turnover_id)
       .eq('org_id', membership.org_id)
+    if (status === 'completed') {
+      query = query.neq('status', 'completed')
+    }
+
+    const { data: updated, error } = await query.select('id, property_id, org_id').maybeSingle()
 
     if (error) {
       console.error('[updateTurnoverStatus]', error)
@@ -331,49 +340,37 @@ export async function updateTurnoverStatus(
       return { error: 'Operation failed. Please try again.' }
     }
 
-    // Fire completion event for PM notification (skip if already completed —
-    // re-saving completion notes shouldn't re-trigger downstream automations)
-    if (status === 'completed' && !wasAlreadyCompleted) {
-      const { data: t } = await supabase
-        .from('turnovers')
-        .select('property_id, org_id')
-        .eq('id', turnover_id)
-        .single()
-
-      if (t) {
-        await inngest.send({
-          name: 'turnover/completed',
-          data: {
-            turnover_id,
-            property_id:        t.property_id,
-            org_id:             t.org_id,
-            completed_by_crew_id: '',
-            completed_at:       new Date().toISOString(),
-          },
-        })
-      }
+    // Fire completion event for PM notification. `updated === null` when
+    // completing means the row was already completed — either by a concurrent
+    // request that will fire the event itself, or by an earlier save whose
+    // downstream automations already ran. Either way, don't re-fire.
+    if (status === 'completed' && updated) {
+      await inngest.send({
+        name: 'turnover/completed',
+        data: {
+          turnover_id,
+          property_id:        updated.property_id,
+          org_id:             updated.org_id,
+          completed_by_crew_id: '',
+          completed_at:       completedAt,
+        },
+      })
     }
 
-    // Fire flagged event to auto-create draft work order
-    if (status === 'flagged' && notes) {
-      const { data: t } = await supabase
-        .from('turnovers')
-        .select('property_id')
-        .eq('id', turnover_id)
-        .single()
-
-      if (t) {
-        await inngest.send({
-          name: 'turnover/flagged',
-          data: {
-            turnover_id,
-            property_id: t.property_id,
-            org_id:      membership.org_id,
-            flag_notes:  notes,
-            flagged_by:  user.id,
-          },
-        })
-      }
+    // Fire flagged event to auto-create draft work order. The UPDATE above
+    // already returned the row (org-scoped), so this no longer needs a second
+    // — and previously un-org-filtered — read to find property_id.
+    if (status === 'flagged' && notes && updated) {
+      await inngest.send({
+        name: 'turnover/flagged',
+        data: {
+          turnover_id,
+          property_id: updated.property_id,
+          org_id:      membership.org_id,
+          flag_notes:  notes,
+          flagged_by:  user.id,
+        },
+      })
     }
 
     revalidatePath('/turnovers')
@@ -865,7 +862,7 @@ export async function acceptSuggestion(turnoverId: string): Promise<TurnoverActi
 
       const { createServiceClient } = await import('@/lib/supabase/server')
       const service = createServiceClient({ system: 'action:turnover-suggestion-tracking' })
-      await service.from('assignment_outcomes').upsert(
+      const { error: outcomeError } = await service.from('assignment_outcomes').upsert(
         crewIds.map(crewId => ({
           turnover_id:        turnoverId,
           org_id:             membership.org_id,
@@ -876,8 +873,18 @@ export async function acceptSuggestion(turnoverId: string): Promise<TurnoverActi
         })),
         { onConflict: 'turnover_id,crew_member_id', ignoreDuplicates: false }
       )
-    } catch {
-      // Outcome recording must not break the acceptance flow
+      if (outcomeError) throw outcomeError
+    } catch (err) {
+      // Non-blocking is correct — outcome recording must not break the
+      // acceptance flow — but invisible is not. Without this, assignment_outcomes
+      // writes can start failing and crew-suggestion quality degrades with zero
+      // operator signal.
+      console.error('[acceptSuggestion] outcome recording failed', err)
+      reportError(err, {
+        site: 'serverAction.turnovers.acceptSuggestion.outcome',
+        orgId: membership.org_id,
+        extra: { turnover_id: turnoverId, crew_count: crewIds.length },
+      })
     }
 
     await logAuditEvent({
@@ -932,7 +939,7 @@ export async function dismissSuggestion(turnoverId: string): Promise<TurnoverAct
 
         const { createServiceClient } = await import('@/lib/supabase/server')
         const service = createServiceClient({ system: 'action:turnover-suggestion-tracking' })
-        await service.from('assignment_outcomes').upsert(
+        const { error: outcomeError } = await service.from('assignment_outcomes').upsert(
           crewIds.map(crewId => ({
             turnover_id:        turnoverId,
             org_id:             membership.org_id,
@@ -943,8 +950,16 @@ export async function dismissSuggestion(turnoverId: string): Promise<TurnoverAct
           })),
           { onConflict: 'turnover_id,crew_member_id', ignoreDuplicates: false }
         )
-      } catch {
-        // Outcome recording must not break the dismissal flow
+        if (outcomeError) throw outcomeError
+      } catch (err) {
+        // Non-blocking is correct — outcome recording must not break the
+        // dismissal flow — but invisible is not. See acceptSuggestion above.
+        console.error('[dismissSuggestion] outcome recording failed', err)
+        reportError(err, {
+          site: 'serverAction.turnovers.dismissSuggestion.outcome',
+          orgId: membership.org_id,
+          extra: { turnover_id: turnoverId, crew_count: crewIds.length },
+        })
       }
     }
 

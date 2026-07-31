@@ -4,10 +4,18 @@ import { NextRequest } from 'next/server'
 vi.mock('@/lib/auth', () => ({
   requireOrgMember: vi.fn(),
 }))
-vi.mock('@/lib/rate-limit', () => ({
-  supportChatLimiter:      { limit: vi.fn(async () => ({ success: true })) },
-  supportChatDailyLimiter: { limit: vi.fn(async () => ({ success: true })) },
-}))
+vi.mock('@/lib/rate-limit', async () => {
+  // checkLimit() is now the only sanctioned way to consult a limiter
+  // (lib/rate-limit.ts). The stub delegates to the limiter doubles below
+  // so existing `.limit` assertions and fail-policy tests still apply.
+  const { checkLimitStub, retryAfterSecondsStub } = await import('@/unit/stubs/rate-limit')
+  return {
+    supportChatLimiter:      { limit: vi.fn(async () => ({ success: true })) },
+    supportChatDailyLimiter: { limit: vi.fn(async () => ({ success: true })) },
+    checkLimit:         checkLimitStub(),
+    retryAfterSeconds:  retryAfterSecondsStub,
+  }
+})
 vi.mock('@/lib/support/classify', () => ({
   classifyIntent: vi.fn(),
 }))

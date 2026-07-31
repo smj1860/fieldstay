@@ -4,9 +4,17 @@ import { NextRequest } from 'next/server'
 vi.mock('@/app/actions/guidebook', () => ({
   createSponsorCheckoutSession: vi.fn(),
 }))
-vi.mock('@/lib/rate-limit', () => ({
-  guidebookSponsorCheckoutLimiter: { limit: vi.fn(async () => ({ success: true })) },
-}))
+vi.mock('@/lib/rate-limit', async () => {
+  // checkLimit() is now the only sanctioned way to consult a limiter
+  // (lib/rate-limit.ts). The stub delegates to the limiter doubles below
+  // so existing `.limit` assertions and fail-policy tests still apply.
+  const { checkLimitStub, retryAfterSecondsStub } = await import('@/unit/stubs/rate-limit')
+  return {
+    guidebookSponsorCheckoutLimiter: { limit: vi.fn(async () => ({ success: true })) },
+    checkLimit:         checkLimitStub(),
+    retryAfterSeconds:  retryAfterSecondsStub,
+  }
+})
 
 import { POST } from '@/app/api/guidebook/sponsor-checkout/route'
 import { createSponsorCheckoutSession } from '@/app/actions/guidebook'

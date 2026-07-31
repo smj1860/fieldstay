@@ -13,9 +13,18 @@ vi.mock('next/navigation', () => ({
 vi.mock('next/headers', () => ({
   headers: vi.fn(async () => new Headers()),
 }))
-vi.mock('@/lib/rate-limit', () => ({
-  inviteAcceptRatelimit: { limit: vi.fn(async () => ({ success: true })) },
-}))
+vi.mock('@/lib/rate-limit', async () => {
+  // The action consults the limiter through checkLimit() (the single
+  // chokepoint in lib/rate-limit.ts). The stub delegates to the limiter double
+  // below, so `expect(inviteAcceptRatelimit.limit).toHaveBeenCalledWith(...)`
+  // and the fail-open-on-throw assertions keep working unchanged.
+  const { checkLimitStub, retryAfterSecondsStub } = await import('@/unit/stubs/rate-limit')
+  return {
+    inviteAcceptRatelimit: { limit: vi.fn(async () => ({ success: true })) },
+    checkLimit:            checkLimitStub(),
+    retryAfterSeconds:     retryAfterSecondsStub,
+  }
+})
 vi.mock('@/lib/supabase/server', () => ({
   createServiceClient: vi.fn(),
   createClient:         vi.fn(),

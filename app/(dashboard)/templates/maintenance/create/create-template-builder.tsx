@@ -274,7 +274,7 @@ export function CreateTemplateBuilder({
 
         <div>
           <div className="flex items-center justify-between mb-2">
-            <label className="label mb-0">Items <RequiredMark /></label>
+            <label htmlFor="create-template-builder-items" className="label mb-0">Items <RequiredMark /></label>
             <Button variant="secondary" type="button" onClick={addItem} className="text-xs py-1 px-2 flex items-center gap-1">
               <Plus className="w-3 h-3" /> Add Item
             </Button>

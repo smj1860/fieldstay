@@ -2,6 +2,7 @@ import type { Metadata } from 'next'
 import { headers } from 'next/headers'
 import { requireOrgMember } from '@/lib/auth'
 import { OwnersManager } from './owners-manager'
+import { throwIfAnyQueryFailed } from '@/lib/supabase/unwrap'
 
 export const metadata: Metadata = { title: 'Owner Portal' }
 
@@ -9,7 +10,7 @@ export default async function OwnersPage() {
   const { supabase, membership } = await requireOrgMember()
 
   // Fetch owners with property name + portal tokens
-  const { data: owners } = await supabase
+  const { data: owners, error: ownersError } = await supabase
     .from('property_owners')
     .select(`
       id,
@@ -33,14 +34,22 @@ export default async function OwnersPage() {
     .eq('org_id', membership.org_id)
     .order('name')
 
+
+  // Logs + reports, then throws so the segment's error.tsx renders a real
+  // error state — a failed read must not render as an empty page.
+  throwIfAnyQueryFailed({ site: 'page.owners', orgId: membership.org_id }, ownersError)
   // Fetch properties for the add-owner form
-  const { data: properties } = await supabase
+  const { data: properties, error: propertiesError } = await supabase
     .from('properties')
     .select('id, name')
     .eq('org_id', membership.org_id)
     .eq('is_active', true)
     .order('name')
 
+
+  // Logs + reports, then throws so the segment's error.tsx renders a real
+  // error state — a failed read must not render as an empty page.
+  throwIfAnyQueryFailed({ site: 'page.owners', orgId: membership.org_id }, propertiesError)
   // Fetch transactions for the P&L panels — bounded to a rolling 13 months
   // (matching the occupancy report's window) so this doesn't grow unboundedly
   // with org history.
@@ -50,7 +59,7 @@ export default async function OwnersPage() {
   // Hard cap on top of the window: a busy org can still put thousands of
   // rows in 13 months, and every one of them ships to the client component.
   // Newest-first means the cap sheds the oldest rows if it ever bites.
-  const { data: transactions } = await supabase
+  const { data: transactions, error: transactionsError } = await supabase
     .from('owner_transactions')
     .select('id, property_id, transaction_type, category, amount, description, transaction_date, notes, work_order_id, booking_id, visible_to_owner, source')
     .eq('org_id', membership.org_id)
@@ -58,6 +67,10 @@ export default async function OwnersPage() {
     .order('transaction_date', { ascending: false })
     .limit(5000)
 
+
+  // Logs + reports, then throws so the segment's error.tsx renders a real
+  // error state — a failed read must not render as an empty page.
+  throwIfAnyQueryFailed({ site: 'page.owners', orgId: membership.org_id }, transactionsError)
   // Derive base URL for portal links
   const headersList = await headers()
   const host        = headersList.get('host') ?? 'localhost:3000'

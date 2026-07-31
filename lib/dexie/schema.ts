@@ -134,6 +134,14 @@ export interface PendingPhotoUploadRow {
   mime_type:      string
   retry_count:    number
   created_at:     string
+  // Mirrors MutationRow's backoff/dead-letter fields — a queued photo used
+  // to have neither, so five failed ticks (~2.5 min offline) silently
+  // dropped it out of the drain query forever with the blob orphaned and no
+  // UI anywhere saying so.
+  next_attempt_at?:     number
+  network_retry_count?: number
+  failed?:              boolean
+  last_error?:          string
 }
 
 // Tracks incremental-sync watermarks (e.g. the last `turnover_assignments.created_at`
@@ -172,6 +180,7 @@ export type MutationTable =
   | 'crew_availability'
   | 'property_assets'
   | 'crew_work_orders'
+  | 'inventory_count_drafts'
 
 export interface MutationRow {
   id?:        number
@@ -192,6 +201,16 @@ export interface MutationRow {
   // cleared by the row's deletion on successful push. Not indexed — the
   // drain scans in insertion order and checks this in memory.
   nextAttemptAt?: number
+  // Transport-failure counter, deliberately SEPARATE from retryCount: a push
+  // that never reached the server (offline, dropped connection) must not
+  // consume the retry budget that leads to dead-lettering, but must still
+  // drive the backoff curve so a dead connection isn't hammered. See
+  // lib/dexie/net.ts's classifyUploadFailure.
+  networkRetryCount?: number
+  // Short, user-safe reason a dead-lettered mutation failed, for the crew
+  // failed-sync surface. Never contains the payload (crew notes, quantities,
+  // completion data) — see describeFailure() in syncService.ts.
+  lastError?: string
 }
 
 export class FieldStayDexie extends Dexie {
@@ -353,7 +372,72 @@ export const LOCAL_ONLY_TABLES = ['pending_photo_uploads', 'mutations', 'sync_me
 let db: FieldStayDexie | null = null
 let dbUserId: string | null = null
 
+// ── Post-logout shutdown latch ────────────────────────────────────────────
+//
+// closeDexieDb() deletes the signed-out user's IndexedDB, but deleting it is
+// not the same as keeping it deleted. Logout races every drain and sync path
+// in the crew PWA: an `online` event (which the logout flow itself provokes —
+// crew members confirm "Log Out Anyway" the moment connectivity returns), the
+// 30 s outbox interval, the DexieProvider safety poll, and any drain already
+// mid-await when the delete landed. Every one of those ends at
+// getDexieDb(userId), which used to construct a fresh FieldStayDexie and let
+// Dexie auto-open it — silently RE-CREATING the database that was just wiped
+// and leaving the signed-out user's data on a shared device. That is exactly
+// what e2e/specs/22-crew-logout-guard.spec.ts asserts against.
+//
+// The latch makes re-opening structurally impossible rather than a matter of
+// stopping every caller in time: once a user id is marked shut down,
+// getDexieDb() hands back a permanently CLOSED Dexie handle (below). Dexie
+// clears autoOpen on close(), so a handle closed before it was ever opened
+// never touches IndexedDB at all — every operation on it rejects with
+// DatabaseClosedError, which is the same failure the existing callers already
+// handle after a plain close(), and no storage is created.
+//
+// It is a latch, not a permanent kill: resumeDexieDb() clears it when a
+// session for that user starts again in the same document (see DexieProvider),
+// so logging back in on the same tab works normally.
+const shutdownUserIds = new Set<string>()
+
+let tombstone: FieldStayDexie | null = null
+let tombstoneUserId: string | null = null
+
+/** True once this user's local database has been torn down by logout. */
+export function isDexieShutdown(userId: string): boolean {
+  return shutdownUserIds.has(userId)
+}
+
+/**
+ * Marks the user's local database as shutting down. MUST be called before
+ * closeDexieDb() — anything that reaches getDexieDb() after this point gets a
+ * closed handle instead of a freshly re-created database.
+ */
+export function markDexieShutdown(userId: string): void {
+  shutdownUserIds.add(userId)
+}
+
+/** Clears the latch so a new session for this user in the same document works. */
+export function resumeDexieDb(userId: string): void {
+  shutdownUserIds.delete(userId)
+  if (tombstoneUserId === userId) {
+    tombstone = null
+    tombstoneUserId = null
+  }
+}
+
+function shutdownHandle(userId: string): FieldStayDexie {
+  if (!tombstone || tombstoneUserId !== userId) {
+    tombstoneUserId = userId
+    const handle = new FieldStayDexie(userId)
+    // Closed before it is ever opened: Dexie sets autoOpen = false here, so no
+    // subsequent operation can open (and therefore create) the IndexedDB.
+    handle.close()
+    tombstone = handle
+  }
+  return tombstone
+}
+
 export function getDexieDb(userId: string): FieldStayDexie {
+  if (shutdownUserIds.has(userId)) return shutdownHandle(userId)
   if (!db || dbUserId !== userId) {
     if (db) db.close()
     dbUserId = userId
@@ -366,6 +450,10 @@ export async function closeDexieDb(): Promise<void> {
   if (db) {
     const dbName = db.name
     const formerUserId = dbUserId
+    // Latch first, synchronously, before the first await: a drain resumed by
+    // the microtask queue between here and the delete below must not be able
+    // to re-open what we are about to delete.
+    if (formerUserId) markDexieShutdown(formerUserId)
     db.close()
     db = null
     dbUserId = null
@@ -392,12 +480,32 @@ export async function closeDexieDb(): Promise<void> {
   }
 }
 
+// The ONLY database-name prefixes this cleanup may touch: the crew cache
+// and the crew photo blob store, both namespaced by auth user id.
+//
+// Deliberately NOT `fieldstay-` — that broader prefix also matches
+// `fieldstay-vendor-wo-{token}` (lib/dexie/vendorWoSchema.ts), a completely
+// unrelated principal's outbox. A crew member logging in on a shared device
+// (an office tablet, a borrowed phone) used to destroy a vendor's queued,
+// never-uploaded work-order completion, because a link token is not a user
+// id and so never "contains" it.
+const CLEANABLE_DB_PREFIXES = ['fieldstay-crew-', 'fieldstay-photo-queue-'] as const
+
+/** True only for a crew-owned database belonging to some OTHER user. */
+export function isStaleCrewDbName(name: string, currentUserId: string): boolean {
+  const prefix = CLEANABLE_DB_PREFIXES.find((p) => name.startsWith(p))
+  if (!prefix) return false
+  // Exact suffix match, not `includes` — the remainder after the prefix is
+  // the owning user's id and nothing else.
+  return name.slice(prefix.length) !== currentUserId
+}
+
 /**
- * Deletes IndexedDB databases belonging to users OTHER than the current one.
- * Called on Dexie context mount when a userId is known.
+ * Deletes the crew IndexedDB databases belonging to users OTHER than the
+ * current one. Called on Dexie context mount when a userId is known.
  *
- * Safety: only deletes databases matching the 'fieldstay-' prefix pattern.
- * Never deletes the active user's database.
+ * Safety: only ever touches CLEANABLE_DB_PREFIXES databases (see above) —
+ * never the active user's, and never another principal's (vendor) storage.
  * Non-fatal: failures are logged and ignored.
  */
 export async function cleanupStaleDexieDbs(currentUserId: string): Promise<void> {
@@ -405,12 +513,7 @@ export async function cleanupStaleDexieDbs(currentUserId: string): Promise<void>
     if (typeof indexedDB === 'undefined' || !indexedDB.databases) return
 
     const dbs = await indexedDB.databases()
-    const stale = dbs.filter((info) => {
-      if (!info.name) return false
-      if (!info.name.startsWith('fieldstay-')) return false
-      // Keep the active user's database
-      return !info.name.includes(currentUserId)
-    })
+    const stale = dbs.filter((info) => !!info.name && isStaleCrewDbName(info.name, currentUserId))
 
     await Promise.allSettled(
       stale.map((info) =>

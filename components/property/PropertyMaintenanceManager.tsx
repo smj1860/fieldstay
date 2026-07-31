@@ -180,8 +180,8 @@ function EditModal({
         </div>
 
         <div>
-          <label className="flex items-center gap-2 cursor-pointer">
-            <Checkbox checked={seasonal} onChange={(e) => setSeasonal(e.target.checked)} />
+          <label htmlFor="propertymaintenancemanager-field" className="flex items-center gap-2 cursor-pointer">
+            <Checkbox id="propertymaintenancemanager-field" checked={seasonal} onChange={(e) => setSeasonal(e.target.checked)} />
             <span className="text-sm text-primary-themed">Seasonal item (restrict to specific months)</span>
           </label>
         </div>
@@ -482,8 +482,8 @@ function CustomItemModal({
           </div>
         </div>
 
-        <label className="flex items-center gap-2 cursor-pointer">
-          <Checkbox checked={seasonal} onChange={(e) => setSeasonal(e.target.checked)} />
+        <label htmlFor="propertymaintenancemanager-field-2" className="flex items-center gap-2 cursor-pointer">
+          <Checkbox id="propertymaintenancemanager-field-2" checked={seasonal} onChange={(e) => setSeasonal(e.target.checked)} />
           <span className="text-sm text-primary-themed">Seasonal (restrict to specific months)</span>
         </label>
 

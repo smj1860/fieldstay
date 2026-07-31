@@ -13,6 +13,217 @@ export interface GeneratedTurnover {
   isNew:             boolean
 }
 
+interface GeneratorContext {
+  propertyCheckinTime:  string | null
+  propertyCheckoutTime: string | null
+  timezone:             string
+  checklistTemplateId:  string | null
+  existingPairs:        Set<string>
+  existingStandalones:  Set<string>
+  /** Booking ids that already have a turnover with a prev_booking_id set. */
+  alreadyPaired:        Set<string>
+}
+
+type BookingRow = {
+  id:            string
+  checkin_date:  string
+  checkout_date: string
+  checkin_time:  string | null
+  checkout_time: string | null
+}
+
+/**
+ * Loads everything Pass 1 and Pass 2 need in one place: the property's
+ * default times/timezone, its default checklist template, and the set of
+ * turnovers that already exist for it. Extracted so generateTurnoversForProperty
+ * reads as "load context, run pass 1, run pass 2".
+ */
+async function loadGeneratorContext(
+  supabase:   DBClient,
+  propertyId: string,
+): Promise<GeneratorContext> {
+  const [propertyRes, templateRes, existingRes] = await Promise.all([
+    // maybeSingle() — .single() errors when 0 rows, causing the step to throw
+    supabase
+      .from('properties')
+      .select('checkin_time, checkout_time, timezone')
+      .eq('id', propertyId)
+      .maybeSingle(),
+    supabase
+      .from('checklist_templates')
+      .select('id')
+      .eq('property_id', propertyId)
+      .eq('is_default', true)
+      .maybeSingle(),
+    supabase
+      .from('turnovers')
+      .select('booking_id, prev_booking_id')
+      .eq('property_id', propertyId),
+  ])
+
+  if (propertyRes.error) {
+    console.error('[generator] property fetch failed', { propertyId, error: propertyRes.error.message })
+  }
+
+  const existingTurnovers = existingRes.data ?? []
+
+  return {
+    propertyCheckinTime:  propertyRes.data?.checkin_time  ?? null,
+    propertyCheckoutTime: propertyRes.data?.checkout_time ?? null,
+    timezone:             propertyRes.data?.timezone ?? 'America/New_York',
+    checklistTemplateId:  templateRes.data?.id ?? null,
+    existingPairs: new Set(
+      existingTurnovers
+        .filter(t => t.prev_booking_id !== null)
+        .map(t => `${t.prev_booking_id}:${t.booking_id}`)
+    ),
+    existingStandalones: new Set(
+      existingTurnovers
+        .filter(t => t.prev_booking_id === null && t.booking_id !== null)
+        .map(t => t.booking_id as string)
+    ),
+    alreadyPaired: new Set(
+      existingTurnovers
+        .filter(t => t.prev_booking_id !== null && t.booking_id !== null)
+        .map(t => t.booking_id as string)
+    ),
+  }
+}
+
+function priorityForWindow(windowMinutes: number): PriorityLevel {
+  if (windowMinutes < 120) return 'urgent'
+  if (windowMinutes < 240) return 'high'
+  if (windowMinutes < 480) return 'medium'
+  return 'low'
+}
+
+/**
+ * PASS 1 — a standalone turnover for every checkout, so every booking gets a
+ * clean regardless of whether a next booking exists. Pass 2 upgrades these to
+ * precise pairs. Mutates ctx.existingStandalones as it goes.
+ */
+async function runStandalonePass(
+  supabase:   DBClient,
+  orgId:      string,
+  propertyId: string,
+  bookings:   BookingRow[],
+  ctx:        GeneratorContext,
+): Promise<string[]> {
+  const created: string[] = []
+
+  for (const booking of bookings) {
+    if (ctx.existingStandalones.has(booking.id)) continue
+    if (ctx.alreadyPaired.has(booking.id)) continue
+
+    const newTurnoverId = await insertStandaloneTurnover(supabase, {
+      orgId, propertyId, booking,
+      propertyCheckoutTime: ctx.propertyCheckoutTime,
+      propertyTimezone:     ctx.timezone,
+      checklistTemplateId:  ctx.checklistTemplateId,
+    })
+    if (!newTurnoverId) continue
+
+    created.push(newTurnoverId)
+    ctx.existingStandalones.add(booking.id)
+    await snapshotChecklist(supabase, newTurnoverId, orgId, propertyId, ctx.checklistTemplateId)
+  }
+
+  return created
+}
+
+interface BookingPairWindow {
+  checkoutDT:    Date
+  checkinDT:     Date
+  windowMinutes: number
+  priority:      PriorityLevel
+}
+
+/**
+ * Resolves the real UTC checkout/checkin window between two consecutive
+ * bookings, or null when the pair doesn't produce a valid turnover window
+ * (unparseable dates, or a check-in at or before the check-out).
+ */
+function resolvePairWindow(
+  propertyId: string,
+  outgoing:   BookingRow,
+  incoming:   BookingRow,
+  ctx:        GeneratorContext,
+): BookingPairWindow | null {
+  // Slice to 5 chars ('HH:MM') to handle both 'HH:MM' and 'HH:MM:SS' storage formats
+  const checkoutTimeStr = (outgoing.checkout_time ?? ctx.propertyCheckoutTime ?? '11:00').slice(0, 5)
+  const checkinTimeStr  = (incoming.checkin_time  ?? ctx.propertyCheckinTime  ?? '15:00').slice(0, 5)
+  // Both datetimes converted from local wall-clock to true UTC.
+  const checkoutDT = propertyLocalToUtc(outgoing.checkout_date, checkoutTimeStr, ctx.timezone)
+  const checkinDT  = propertyLocalToUtc(incoming.checkin_date,  checkinTimeStr,  ctx.timezone)
+
+  if (isNaN(checkoutDT.getTime()) || isNaN(checkinDT.getTime())) {
+    console.error('[generator] invalid date constructed', {
+      propertyId, checkout_date: outgoing.checkout_date, checkoutTimeStr,
+      checkin_date: incoming.checkin_date, checkinTimeStr,
+    })
+    return null
+  }
+  if (checkinDT <= checkoutDT) return null
+
+  const windowMinutes = Math.round((checkinDT.getTime() - checkoutDT.getTime()) / 60_000)
+  return { checkoutDT, checkinDT, windowMinutes, priority: priorityForWindow(windowMinutes) }
+}
+
+/**
+ * PASS 2 — upgrade a standalone to a precise pair once a next booking exists,
+ * or refresh an existing pair whose dates have since drifted (guest extended/
+ * shortened their stay, PM corrected a time). See
+ * CLAUDE_HOSPITABLE_DEXIE_AUDIT_FIXES_1.md Task 3.
+ */
+async function runPairPass(
+  supabase:   DBClient,
+  orgId:      string,
+  propertyId: string,
+  bookings:   BookingRow[],
+  ctx:        GeneratorContext,
+): Promise<string[]> {
+  const created: string[] = []
+
+  for (let i = 0; i < bookings.length - 1; i++) {
+    const outgoing = bookings[i]!
+    const incoming = bookings[i + 1]!
+    const pairKey  = `${outgoing.id}:${incoming.id}`
+
+    const window = resolvePairWindow(propertyId, outgoing, incoming, ctx)
+    if (!window) continue
+
+    const pairParams = {
+      propertyId,
+      outgoingBookingId: outgoing.id,
+      incomingBookingId: incoming.id,
+      ...window,
+    }
+
+    if (ctx.existingPairs.has(pairKey)) {
+      await refreshExistingPairDates(supabase, pairParams)
+      continue
+    }
+
+    if (ctx.existingStandalones.has(outgoing.id)) {
+      await upgradeStandaloneToPair(supabase, pairParams)
+      ctx.existingPairs.add(pairKey)
+      continue
+    }
+
+    const newTurnoverId = await insertPairTurnover(supabase, {
+      orgId,
+      ...pairParams,
+      checklistTemplateId: ctx.checklistTemplateId,
+    })
+    if (!newTurnoverId) continue
+
+    created.push(newTurnoverId)
+    await snapshotChecklist(supabase, newTurnoverId, orgId, propertyId, ctx.checklistTemplateId)
+  }
+
+  return created
+}
+
 export async function generateTurnoversForProperty(
   propertyId: string,
   orgId:       string,
@@ -26,119 +237,13 @@ export async function generateTurnoversForProperty(
     .in('status', ['confirmed', 'tentative'])
     .order('checkin_date', { ascending: true })
   if (!bookings?.length) return []
-  // Use maybeSingle() — .single() errors when 0 rows, causing the step to throw
-  const { data: property, error: propertyError } = await supabase
-    .from('properties')
-    .select('checkin_time, checkout_time, timezone')
-    .eq('id', propertyId)
-    .maybeSingle()
-  if (propertyError) {
-    console.error('[generator] property fetch failed', { propertyId, error: propertyError.message })
-  }
-  const tz = property?.timezone ?? 'America/New_York'
-  const { data: defaultTemplate } = await supabase
-    .from('checklist_templates')
-    .select('id')
-    .eq('property_id', propertyId)
-    .eq('is_default', true)
-    .maybeSingle()
-  const { data: existingTurnovers } = await supabase
-    .from('turnovers')
-    .select('booking_id, prev_booking_id')
-    .eq('property_id', propertyId)
-  const existingPairs = new Set(
-    (existingTurnovers ?? [])
-      .filter(t => t.prev_booking_id !== null)
-      .map(t => `${t.prev_booking_id}:${t.booking_id}`)
-  )
-  const existingStandalones = new Set(
-    (existingTurnovers ?? [])
-      .filter(t => t.prev_booking_id === null && t.booking_id !== null)
-      .map(t => t.booking_id as string)
-  )
-  const newTurnoverIds: string[] = []
-  // ── PASS 1: Standalone turnover for every checkout ──────────────
-  // Ensures every booking gets a clean regardless of whether a next
-  // booking exists. Pass 2 upgrades these to precise pairs.
-  for (const booking of bookings) {
-    if (existingStandalones.has(booking.id)) continue
-    const alreadyPaired = (existingTurnovers ?? []).some(
-      t => t.booking_id === booking.id && t.prev_booking_id !== null
-    )
-    if (alreadyPaired) continue
 
-    const newTurnoverId = await insertStandaloneTurnover(supabase, {
-      orgId, propertyId, booking,
-      propertyCheckoutTime: property?.checkout_time ?? null,
-      propertyTimezone:     tz,
-      checklistTemplateId:  defaultTemplate?.id ?? null,
-    })
-    if (!newTurnoverId) continue
+  const ctx = await loadGeneratorContext(supabase, propertyId)
 
-    newTurnoverIds.push(newTurnoverId)
-    existingStandalones.add(booking.id)
-    await snapshotChecklist(supabase, newTurnoverId, orgId, propertyId, defaultTemplate?.id ?? null)
-  }
-  // ── PASS 2: Upgrade standalone → precise pair, or refresh an existing pair ──
-  // When a next booking exists, update the standalone with real times. If a
-  // precise pair already exists, its dates may be stale relative to the
-  // bookings that produced it (guest extended/shortened their stay, PM
-  // corrected a time) — refresh rather than silently ignore. See
-  // CLAUDE_HOSPITABLE_DEXIE_AUDIT_FIXES_1.md Task 3.
-  for (let i = 0; i < bookings.length - 1; i++) {
-    const outgoing = bookings[i]!
-    const incoming = bookings[i + 1]!
-    const pairKey  = `${outgoing.id}:${incoming.id}`
-    // Slice to 5 chars ('HH:MM') to handle both 'HH:MM' and 'HH:MM:SS' storage formats
-    const checkoutTimeStr = (outgoing.checkout_time ?? property?.checkout_time ?? '11:00').slice(0, 5)
-    const checkinTimeStr  = (incoming.checkin_time  ?? property?.checkin_time  ?? '15:00').slice(0, 5)
-    // Both datetimes converted from local wall-clock to true UTC.
-    const checkoutDT = propertyLocalToUtc(outgoing.checkout_date, checkoutTimeStr, tz)
-    const checkinDT  = propertyLocalToUtc(incoming.checkin_date,  checkinTimeStr,  tz)
-    if (isNaN(checkoutDT.getTime()) || isNaN(checkinDT.getTime())) {
-      console.error('[generator] invalid date constructed', {
-        propertyId, checkout_date: outgoing.checkout_date, checkoutTimeStr,
-        checkin_date: incoming.checkin_date, checkinTimeStr,
-      })
-      continue
-    }
-    if (checkinDT <= checkoutDT) continue
-    const windowMinutes = Math.round(
-      (checkinDT.getTime() - checkoutDT.getTime()) / 60_000
-    )
-    const priority: PriorityLevel =
-      windowMinutes < 120  ? 'urgent' :
-      windowMinutes < 240  ? 'high'   :
-      windowMinutes < 480  ? 'medium' : 'low'
+  const standaloneIds = await runStandalonePass(supabase, orgId, propertyId, bookings, ctx)
+  const pairIds       = await runPairPass(supabase, orgId, propertyId, bookings, ctx)
 
-    if (existingPairs.has(pairKey)) {
-      await refreshExistingPairDates(supabase, {
-        propertyId, outgoingBookingId: outgoing.id, incomingBookingId: incoming.id,
-        checkoutDT, checkinDT, windowMinutes, priority,
-      })
-      continue
-    }
-
-    if (existingStandalones.has(outgoing.id)) {
-      await upgradeStandaloneToPair(supabase, {
-        propertyId, outgoingBookingId: outgoing.id, incomingBookingId: incoming.id,
-        checkoutDT, checkinDT, windowMinutes, priority,
-      })
-      existingPairs.add(pairKey)
-      continue
-    }
-
-    const newTurnoverId = await insertPairTurnover(supabase, {
-      orgId, propertyId, outgoingBookingId: outgoing.id, incomingBookingId: incoming.id,
-      checkoutDT, checkinDT, windowMinutes, priority,
-      checklistTemplateId: defaultTemplate?.id ?? null,
-    })
-    if (!newTurnoverId) continue
-
-    newTurnoverIds.push(newTurnoverId)
-    await snapshotChecklist(supabase, newTurnoverId, orgId, propertyId, defaultTemplate?.id ?? null)
-  }
-  return newTurnoverIds
+  return [...standaloneIds, ...pairIds]
 }
 
 const DEFAULT_STANDALONE_WINDOW_HOURS = 4

@@ -5,13 +5,47 @@
 // local Dexie row and queues a mutation so it reaches Supabase too — Dexie
 // does not track local writes automatically, so every local write that needs
 // to reach the server has to be queued explicitly.
+//
+// Durability rules mirror the mutation outbox (lib/dexie/syncService.ts)
+// exactly, because a queued photo is just as much crew work as a checklist
+// tick:
+//  - Offline is not a failure. The drain no-ops while offline and a
+//    transport failure never consumes the retry budget.
+//  - Failures back off exponentially (computeNextAttemptAt) instead of
+//    re-attempting on every 30 s tick.
+//  - A permanently-failed row is KEPT and marked `failed`, surfaced by the
+//    crew shell's failed-sync banner with a retry, rather than dropping out
+//    of the query with its blob orphaned and no signal anywhere.
+//  - The blob is only garbage-collected once the row is genuinely finished
+//    with (uploaded, discarded, or pruned by lib/dexie/prune.ts) — never
+//    while a retry affordance still points at it.
 
 import type { SupabaseClient } from '@supabase/supabase-js'
-import { getDexieDb } from './schema'
-import { enqueueMutation } from './syncService'
+import { getDexieDb, isDexieShutdown, type PendingPhotoUploadRow } from './schema'
+import { computeNextAttemptAt, enqueueMutation } from './syncService'
 import { getPendingPhotoBlob, deletePendingPhotoBlob } from './photo-queue'
+import { isOnline, withTabLock, classifyUploadFailure, UploadDataError } from './net'
+import { hasAnyOrgPrefix, orgScopedStoragePath } from '../storage/object-path'
 
 const MAX_RETRIES = 5
+
+/**
+ * Raised when a queued photo's owning org id cannot be resolved from the local
+ * cache, so no path the storage policies can see is constructible for it.
+ *
+ * Deliberately a plain Error subclass: classifyUploadFailure() sorts it as
+ * `transient`, which is the behaviour this case needs — back off, charge the
+ * retry budget, and DEAD-LETTER once the budget is spent, so the row lands on
+ * the crew shell's failed-sync surface with its blob intact. Silently skipping
+ * it instead (the shape this code shipped with) left the photo invisible
+ * forever: never attempted, never surfaced, never collected.
+ */
+class PhotoTargetUnresolvedError extends Error {
+  constructor(message: string) {
+    super(message)
+    this.name = 'PhotoTargetUnresolvedError'
+  }
+}
 
 // Closed allowlist of valid (table, column) targets — target_table/column
 // are never user input (only ever written by this codebase's own queueing
@@ -24,37 +58,237 @@ const ALLOWED_TARGETS: Record<string, string> = {
 
 let processing = false
 
+/**
+ * Removes a queued photo and its underlying blob. Only call once the row is
+ * genuinely finished with — a row still offering a retry in the UI must keep
+ * its blob, or "Retry" would have nothing left to upload.
+ */
+export async function discardPendingPhoto(userId: string, row: Pick<PendingPhotoUploadRow, 'id' | 'local_blob_key'>): Promise<void> {
+  const db = getDexieDb(userId)
+  await db.pending_photo_uploads.delete(row.id)
+  try {
+    await deletePendingPhotoBlob(userId, row.local_blob_key)
+  } catch (blobErr) {
+    console.warn('[photo-sync] Failed to delete photo blob:', blobErr)
+  }
+}
+
+/**
+ * Re-queues photos that exhausted their retries (marked `failed` rather
+ * than dropped — see the module doc above). Mirrors
+ * retryFailedMutation() in helpers.ts.
+ */
+export async function retryFailedPhotoUploads(
+  supabase: SupabaseClient,
+  userId: string,
+  targetId?: string,
+): Promise<void> {
+  const db = getDexieDb(userId)
+  const failed = (await db.pending_photo_uploads.toArray())
+    .filter((row) => row.failed && (targetId === undefined || row.target_id === targetId))
+
+  for (const row of failed) {
+    await db.pending_photo_uploads.update(row.id, {
+      failed:              false,
+      retry_count:         0,
+      network_retry_count: 0,
+      next_attempt_at:     0,
+      last_error:          '',
+    })
+  }
+
+  void processPendingPhotoUploads(supabase, userId)
+}
+
+async function applyUploadedPath(
+  userId: string,
+  row: PendingPhotoUploadRow,
+): Promise<void> {
+  const db = getDexieDb(userId)
+
+  if (row.target_table === 'checklist_instance_items') {
+    await db.checklist_instance_items.update(row.target_id, { photo_storage_path: row.storage_path })
+    await enqueueMutation(userId, 'checklist_instance_items', row.target_id, 'PATCH', {
+      photo_storage_path: row.storage_path,
+    })
+    return
+  }
+
+  if (row.target_table === 'checklist_instances') {
+    await db.checklist_instances.update(row.target_id, { section_photo_path: row.storage_path ?? '' })
+    await enqueueMutation(userId, 'checklist_instances', row.target_id, 'PATCH', {
+      section_photo_path: row.storage_path,
+    })
+    return
+  }
+
+  // property_assets.photo_url stores the BARE object key, same as the two
+  // targets above. It used to hold a getPublicUrl() result, but turnover-photos
+  // is a private bucket now: a public URL 400s and a signed one expires, so the
+  // stable key is what gets persisted and readers sign it on demand.
+  await db.property_assets.update(row.target_id, { photo_url: row.storage_path! })
+  await enqueueMutation(userId, 'property_assets', row.target_id, 'PATCH', {
+    photo_url:   row.storage_path,
+    scanRequest: { storagePath: row.storage_path, mediaType: 'image/jpeg' },
+  })
+}
+
+/**
+ * Reads the owning org id out of the local cache, via the row this photo is
+ * attached to. `crew_members` is not a Dexie store (dropped in a later schema
+ * version), so the target row is the only local source.
+ */
+async function resolveTargetOrgId(userId: string, row: PendingPhotoUploadRow): Promise<string | null> {
+  const db = getDexieDb(userId)
+
+  if (row.target_table === 'property_assets') {
+    return (await db.property_assets.get(row.target_id))?.org_id ?? null
+  }
+  if (row.target_table === 'checklist_instances') {
+    return (await db.checklist_instances.get(row.target_id))?.org_id ?? null
+  }
+
+  const item = await db.checklist_instance_items.get(row.target_id)
+  if (!item) return null
+  return (await db.checklist_instances.get(item.instance_id))?.org_id ?? null
+}
+
+/**
+ * Repairs a queued photo whose path predates the `${org_id}/` prefix
+ * contract (queued on this device before the app updated).
+ *
+ * turnover-photos is private and its RLS policies match on the first path
+ * segment, so a legacy path can never upload successfully — it would burn
+ * five retries and dead-letter with the blob still sitting in IndexedDB.
+ * The org id is recoverable locally from the crew member's own synced row,
+ * so re-prefix the path instead of losing the evidence.
+ *
+ * Returns the path to upload to, or null when the org id isn't available
+ * locally yet (rare, and usually transient — the next safety poll fixes it).
+ * The caller turns a null into a BOUNDED, backed-off failure rather than an
+ * unconditional skip: "usually transient" is not "always transient", and a
+ * photo that can never resolve its org has to end up somewhere a human can
+ * see it.
+ */
+async function orgPrefixedUploadPath(
+  userId: string,
+  row:    PendingPhotoUploadRow,
+): Promise<string | null> {
+  const path = row.storage_path!
+  if (hasAnyOrgPrefix(path)) return path
+
+  const db = getDexieDb(userId)
+  const orgId = await resolveTargetOrgId(userId, row)
+  if (!orgId) return null
+
+  const repaired = orgScopedStoragePath(orgId, path)
+  await db.pending_photo_uploads.update(row.id, { storage_path: repaired })
+  row.storage_path = repaired
+  console.warn(`[photo-sync] photo ${row.id} had a legacy (pre-org-prefix) path — re-targeted to ${repaired}`)
+  return repaired
+}
+
+/**
+ * Records one failed photo upload. Transport failures cost no retry budget
+ * and can never dead-letter; server rejections do, exactly as in the
+ * mutation outbox.
+ */
+async function recordPhotoFailure(userId: string, row: PendingPhotoUploadRow, err: unknown): Promise<void> {
+  const db = getDexieDb(userId)
+  const kind = classifyUploadFailure(err)
+
+  if (kind === 'network') {
+    const level = (row.network_retry_count ?? 0) + 1
+    console.warn(
+      `[photo-sync] photo ${row.id} could not reach storage ` +
+      `(transport attempt ${level}) — retrying, retry budget untouched`
+    )
+    await db.pending_photo_uploads.update(row.id, {
+      network_retry_count: level,
+      next_attempt_at:     computeNextAttemptAt(level, Date.now()),
+    })
+    return
+  }
+
+  const retryCount = row.retry_count + 1
+  const message = err instanceof Error ? err.message.slice(0, 200) : 'Unknown error'
+  console.error(`[photo-sync] photo ${row.id} upload failed (attempt ${retryCount}, ${kind}):`, err)
+
+  if (kind === 'terminal' || retryCount >= MAX_RETRIES) {
+    // Dead-letter: keep BOTH the row and its blob so the crew shell's
+    // failed-sync surface can offer a real retry. lib/dexie/prune.ts is what
+    // eventually collects one the crew never acts on.
+    await db.pending_photo_uploads.update(row.id, {
+      retry_count: retryCount,
+      failed:      true,
+      last_error:  message,
+    })
+    return
+  }
+
+  await db.pending_photo_uploads.update(row.id, {
+    retry_count:     retryCount,
+    next_attempt_at: computeNextAttemptAt(retryCount, Date.now()),
+  })
+}
+
 export async function processPendingPhotoUploads(
   supabase: SupabaseClient,
   userId: string,
 ): Promise<void> {
   if (processing) return  // avoid overlapping runs (interval + 'online' event firing close together)
+  // This user signed out and their local database was deleted — an 'online'
+  // event or the 30 s interval must not drain (and thereby re-create) it.
+  if (isDexieShutdown(userId)) return
   processing = true
-
   try {
-    const db = getDexieDb(userId)
-    const pending = await db.pending_photo_uploads
-      .where('retry_count').below(MAX_RETRIES)
-      .sortBy('created_at')
+    await withTabLock(`fieldstay-crew-photos-${userId}`, () => drainPhotoQueue(supabase, userId))
+  } finally {
+    processing = false
+  }
+}
 
-    for (const row of pending) {
-      if (ALLOWED_TARGETS[row.target_table] !== row.target_column) {
-        console.error(`[photo-sync] Unexpected target ${row.target_table}.${row.target_column} — dropping`)
-        await db.pending_photo_uploads.delete(row.id)
-        // Remove the underlying blob so it doesn't accumulate as dead storage
-        try {
-          await deletePendingPhotoBlob(userId, row.local_blob_key)
-        } catch (blobErr) {
-          console.warn('[photo-sync] Failed to delete orphaned blob:', blobErr)
-        }
-        continue
-      }
+async function drainPhotoQueue(supabase: SupabaseClient, userId: string): Promise<void> {
+  // Offline: attempting is pointless and, worse, used to burn the retry
+  // budget for an attempt that never left the device.
+  if (!isOnline() || isDexieShutdown(userId)) return
 
-      const blob = await getPendingPhotoBlob(userId, row.local_blob_key)
-      if (!blob) {
-        // Blob missing (cleared browser storage, etc.) — nothing to upload
-        await db.pending_photo_uploads.delete(row.id)
-        continue
+  const db = getDexieDb(userId)
+  const now = Date.now()
+  const pending = (await db.pending_photo_uploads.toArray())
+    .filter((row) => !row.failed && (row.next_attempt_at ?? 0) <= now)
+    .sort((a, b) => (a.created_at < b.created_at ? -1 : 1))
+
+  for (const row of pending) {
+    // Re-checked per iteration: logout can land while this loop is awaiting
+    // an upload (the in-flight case).
+    if (!isOnline() || isDexieShutdown(userId)) return
+
+    if (ALLOWED_TARGETS[row.target_table] !== row.target_column) {
+      console.error(`[photo-sync] Unexpected target ${row.target_table}.${row.target_column} — dropping`)
+      await discardPendingPhoto(userId, row)
+      continue
+    }
+
+    const blob = await getPendingPhotoBlob(userId, row.local_blob_key)
+    if (!blob) {
+      // Blob missing (cleared browser storage, etc.) — nothing to upload
+      await db.pending_photo_uploads.delete(row.id)
+      continue
+    }
+
+    try {
+      // A legacy (pre-org-prefix) path is repaired here from the local cache.
+      // When the org id isn't resolvable this is usually transient — the
+      // target row simply hasn't synced yet — so it backs off and retries.
+      // But it is BOUNDED: routed through recordPhotoFailure() so it spends
+      // the retry budget and eventually dead-letters into the failed-sync UI
+      // rather than deferring silently on every tick forever.
+      const uploadPath = await orgPrefixedUploadPath(userId, row)
+      if (!uploadPath) {
+        throw new PhotoTargetUnresolvedError(
+          `photo ${row.id}: owning org id is not in the local cache, so no path the storage policies can see is constructible`,
+        )
       }
 
       // Compression in photo-queue.ts always re-encodes to JPEG regardless
@@ -63,41 +297,13 @@ export async function processPendingPhotoUploads(
       // image/heic or similar and no longer match the actual bytes.
       const { error } = await supabase.storage
         .from('turnover-photos')
-        .upload(row.storage_path!, blob, { contentType: 'image/jpeg', upsert: true })
+        .upload(uploadPath, blob, { contentType: 'image/jpeg', upsert: true })
+      if (error) throw new UploadDataError(`photo upload failed: ${error.message}`)
 
-      if (error) {
-        await db.pending_photo_uploads.update(row.id, { retry_count: row.retry_count + 1 })
-        continue
-      }
-
-      if (row.target_table === 'checklist_instance_items') {
-        await db.checklist_instance_items.update(row.target_id, { photo_storage_path: row.storage_path })
-        await enqueueMutation(userId, 'checklist_instance_items', row.target_id, 'PATCH', {
-          photo_storage_path: row.storage_path,
-        })
-      } else if (row.target_table === 'checklist_instances') {
-        await db.checklist_instances.update(row.target_id, { section_photo_path: row.storage_path ?? '' })
-        await enqueueMutation(userId, 'checklist_instances', row.target_id, 'PATCH', {
-          section_photo_path: row.storage_path,
-        })
-      } else if (row.target_table === 'property_assets') {
-        // property_assets.photo_url stores the full public URL (not a bare
-        // storage path, unlike the two targets above) — getPublicUrl() is
-        // pure string templating against the configured project URL, so
-        // this doesn't require the object to exist yet, only that the
-        // upload just above this block already succeeded.
-        const publicUrl = supabase.storage.from('turnover-photos').getPublicUrl(row.storage_path!).data.publicUrl
-        await db.property_assets.update(row.target_id, { photo_url: publicUrl })
-        await enqueueMutation(userId, 'property_assets', row.target_id, 'PATCH', {
-          photo_url:   publicUrl,
-          scanRequest: { storagePath: row.storage_path, mediaType: 'image/jpeg' },
-        })
-      }
-
-      await db.pending_photo_uploads.delete(row.id)
-      await deletePendingPhotoBlob(userId, row.local_blob_key)
+      await applyUploadedPath(userId, row)
+      await discardPendingPhoto(userId, row)
+    } catch (err) {
+      await recordPhotoFailure(userId, row, err)
     }
-  } finally {
-    processing = false
   }
 }

@@ -370,6 +370,9 @@ export interface Vendor {
   stripe_connect_onboarded_at:    string | null
   stripe_connect_invite_sent_at:  string | null
   stripe_connect_invite_claimed_at: string | null
+  // 20260730500000_vendor_stripe_connect_token_expiry.sql. NULL = the current
+  // token has never been emailed → not usable (treated as expired).
+  stripe_connect_token_expires_at:  string | null
 }
 
 export interface ChecklistTemplate {

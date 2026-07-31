@@ -1,5 +1,15 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 
+vi.mock('@/lib/rate-limit', async () => {
+  // Routes under test now consult a limiter via checkLimit(). Mocked so the
+  // suite never attempts a real Upstash round trip.
+  const { checkLimitStub, retryAfterSecondsStub } = await import('@/unit/stubs/rate-limit')
+  return {
+    dataExportLimiter: { limit: vi.fn(async () => ({ success: true })) },
+    checkLimit:        checkLimitStub(),
+    retryAfterSeconds: retryAfterSecondsStub,
+  }
+})
 vi.mock('@/lib/supabase/server', () => ({
   createClient:        vi.fn(),
   createServiceClient: vi.fn(),

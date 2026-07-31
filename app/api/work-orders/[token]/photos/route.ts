@@ -1,9 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createServiceClient } from '@/lib/supabase/server'
-import { workOrderRatelimit } from '@/lib/rate-limit'
+import { workOrderRatelimit, checkLimit } from '@/lib/rate-limit'
 import { extractClientIp } from '@/lib/integrations/webhook-verification'
 
-import { reportError } from '@/lib/observability/report-error'
 /**
  * POST /api/work-orders/[token]/photos — upload completion photos, one call
  * per file. Uploaded eagerly as the vendor selects each photo (not bundled
@@ -26,16 +25,15 @@ const EXT_BY_MIME: Record<string, string> = {
   'image/heic': 'heic',
 }
 
+// Abuse/enumeration limiter → fails OPEN: a degraded Redis must never block
+// a legitimate contractor's photo upload on a public token route.
 async function checkPhotoRateLimit(request: NextRequest): Promise<NextResponse | null> {
-  try {
-    const ip = extractClientIp(request) ?? 'unknown'
-    const { success } = await workOrderRatelimit.limit(`wo-photo:${ip}`)
-    if (!success) {
-      return NextResponse.json({ error: 'Too many requests. Please try again in a minute.' }, { status: 429 })
-    }
-  } catch (rlErr) {
-    console.error('[work-orders/photos] rate limit check failed', rlErr)
-    reportError(rlErr, { site: 'route.work-orders.photos.checkPhotoRateLimit' })
+  const decision = await checkLimit(workOrderRatelimit, `wo-photo:${extractClientIp(request) ?? 'unknown'}`, {
+    onError: 'allow',
+    site:    'route.work-orders.photos.checkPhotoRateLimit',
+  })
+  if (!decision.allowed) {
+    return NextResponse.json({ error: 'Too many requests. Please try again in a minute.' }, { status: 429 })
   }
   return null
 }
@@ -45,7 +43,7 @@ async function loadOpenWorkOrder(token: string) {
 
   const { data: workOrder } = await supabase
     .from('work_orders')
-    .select('id, status, portal_enabled, completion_token_expires_at')
+    .select('id, org_id, status, portal_enabled, completion_token_expires_at')
     .eq('completion_token', token)
     .single()
 
@@ -115,8 +113,13 @@ export async function POST(
     // Client-generated UUID path — work_order_photos.storage_path has a
     // global unique index (not scoped per WO), so a naive scheme risks a
     // real collision across concurrently-uploaded photos.
+    // Path MUST start with the owning org's id: the work-order-photos bucket
+    // moves from public=true to private + org-scoped storage RLS policies,
+    // which key off `(storage.foldername(name))[1] = org_id`. A path without
+    // that leading segment is unreachable by every policy and by every signed
+    // URL request.
     const ext  = EXT_BY_MIME[file.type] ?? 'jpg'
-    const path = `work-orders/${workOrder.id}/completion/${crypto.randomUUID()}.${ext}`
+    const path = `${workOrder.org_id}/work-orders/${workOrder.id}/completion/${crypto.randomUUID()}.${ext}`
 
     const { error: uploadErr } = await supabase.storage
       .from('work-order-photos')

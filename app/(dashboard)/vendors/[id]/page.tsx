@@ -7,22 +7,79 @@ import type { InvoiceHistoryRow } from '@/components/work-orders/vendor-invoice-
 import { formatDate } from '@/lib/utils'
 import type { Metadata } from 'next'
 import { CheckCircle2, AlertTriangle, Ban, Star } from 'lucide-react'
+import type { LucideIcon } from 'lucide-react'
+import type { InvoiceStatus } from '@/types/database'
 import { Card } from '@/components/ui/Card'
 import { unwrapJoin } from '@/lib/utils/supabase-joins'
+import { throwIfAnyQueryFailed } from '@/lib/supabase/unwrap'
 
 export const metadata: Metadata = { title: 'Vendor' }
 
 interface Props { params: Promise<{ id: string }> }
+
+// One lookup table instead of three parallel chained ternaries. CLAUDE.md bans
+// chained ternaries, and three of them keyed on the same variable is also a
+// correctness hazard — they drifted apart trivially, since nothing tied the
+// colour, the label, and the icon for a given status together.
+//
+// Keys are the raw compliance_status values from the vendor_compliance_status
+// view; anything unrecognized (including a state the view gains later) falls
+// back to the neutral "No Documents" presentation rather than rendering blank.
+const COMPLIANCE_PRESENTATION: Record<string, { color: string; label: string; Icon: LucideIcon | null }> = {
+  compliant:     { color: 'var(--accent-green)', label: 'Compliant',     Icon: CheckCircle2 },
+  expiring_soon: { color: 'var(--accent-amber)', label: 'Expiring Soon', Icon: AlertTriangle },
+  grace_period:  { color: 'var(--accent-red)',   label: 'Grace Period',  Icon: AlertTriangle },
+  hard_blocked:  { color: 'var(--text-muted)',   label: 'Blocked',       Icon: Ban },
+}
+
+const COMPLIANCE_FALLBACK = { color: 'var(--text-muted)', label: 'No Documents', Icon: null }
+
+function compliancePresentation(status: string | null | undefined) {
+  if (status === null || status === undefined) return COMPLIANCE_FALLBACK
+  return COMPLIANCE_PRESENTATION[status] ?? COMPLIANCE_FALLBACK
+}
+
+interface VendorInvoiceRow {
+  id:              string
+  work_order_id:   string
+  invoice_number:  string
+  status:          InvoiceStatus
+  total:           number
+  submitted_at:    string
+  paid_at:         string | null
+  work_orders:     unknown
+}
+
+/** Flattens the nested work_orders → properties join into the row shape the
+ *  VendorInvoiceHistory component renders. */
+function toInvoiceHistory(rows: VendorInvoiceRow[]): InvoiceHistoryRow[] {
+  return rows.map((inv) => {
+    const wo       = unwrapJoin(inv.work_orders as never) as { title?: string; wo_number?: string | null; properties?: unknown } | null
+    const property = wo ? unwrapJoin(wo.properties as never) as { name?: string } | null : null
+    return {
+      id:            inv.id,
+      workOrderId:   inv.work_order_id,
+      woTitle:       wo?.title ?? 'Work Order',
+      woNumber:      wo?.wo_number ?? null,
+      invoiceNumber: inv.invoice_number,
+      status:        inv.status,
+      total:         inv.total,
+      submittedAt:   inv.submitted_at,
+      paidAt:        inv.paid_at,
+      contextLabel:  property?.name ?? null,
+    }
+  })
+}
 
 export default async function VendorDetailPage({ params }: Props) {
   const { id } = await params
   const { supabase, membership } = await requireOrgMember()
 
   const [
-    { data: vendor },
-    { data: docs },
-    { data: complianceStatus },
-    { data: recentWOs },
+    { data: vendor, error: vendorError },
+    { data: docs, error: docsError },
+    { data: complianceStatus, error: complianceStatusError },
+    { data: recentWOs, error: recentWOsError },
     { data: invoiceRows, error: invoiceError },
   ] = await Promise.all([
     supabase
@@ -64,6 +121,10 @@ export default async function VendorDetailPage({ params }: Props) {
       .limit(25),
   ])
 
+  // Logs + reports every failure, then throws so the segment's error.tsx
+  // renders a real error state — an outage must not look like empty data.
+  throwIfAnyQueryFailed({ site: 'page.vendors.id', orgId: membership.org_id }, vendorError, docsError, complianceStatusError, recentWOsError)
+
   if (invoiceError) {
     console.error('[VendorDetailPage] invoice history fetch failed:', invoiceError.message)
   }
@@ -79,47 +140,14 @@ export default async function VendorDetailPage({ params }: Props) {
     )
   }
 
-  const status = complianceStatus?.compliance_status
-  const statusColor =
-    status === 'compliant'      ? 'var(--accent-green)'  :
-    status === 'expiring_soon'  ? 'var(--accent-amber)'  :
-    status === 'grace_period'   ? 'var(--accent-red)'    :
-    status === 'hard_blocked'   ? 'var(--text-muted)'      :
-    'var(--text-muted)'
+  const { color: statusColor, label: statusLabel, Icon: StatusIcon } =
+    compliancePresentation(complianceStatus?.compliance_status)
 
-  const statusLabel =
-    status === 'compliant'      ? 'Compliant'      :
-    status === 'expiring_soon'  ? 'Expiring Soon'  :
-    status === 'grace_period'   ? 'Grace Period'   :
-    status === 'hard_blocked'   ? 'Blocked'        :
-    'No Documents'
-
-  const StatusIcon =
-    status === 'compliant'      ? CheckCircle2 :
-    status === 'expiring_soon'  ? AlertTriangle :
-    status === 'grace_period'   ? AlertTriangle :
-    status === 'hard_blocked'   ? Ban :
-    null
-
-  const completedWOs = (recentWOs ?? []).filter((w) => w.status === 'completed')
+  const workOrders   = recentWOs ?? []
+  const completedWOs = workOrders.filter((w) => w.status === 'completed')
   const totalSpend   = completedWOs.reduce((s, w) => s + (w.actual_cost ?? 0), 0)
 
-  const invoiceHistory: InvoiceHistoryRow[] = (invoiceRows ?? []).map((inv) => {
-    const wo       = unwrapJoin(inv.work_orders)
-    const property = wo ? unwrapJoin(wo.properties) : null
-    return {
-      id:            inv.id,
-      workOrderId:   inv.work_order_id,
-      woTitle:       wo?.title ?? 'Work Order',
-      woNumber:      wo?.wo_number ?? null,
-      invoiceNumber: inv.invoice_number,
-      status:        inv.status,
-      total:         inv.total,
-      submittedAt:   inv.submitted_at,
-      paidAt:        inv.paid_at,
-      contextLabel:  property?.name ?? null,
-    }
-  })
+  const invoiceHistory = toInvoiceHistory((invoiceRows ?? []) as unknown as VendorInvoiceRow[])
 
   return (
     <div className="max-w-3xl">
@@ -214,7 +242,7 @@ export default async function VendorDetailPage({ params }: Props) {
       </Card>
 
       {/* Work order stats */}
-      {(recentWOs ?? []).length > 0 && (
+      {workOrders.length > 0 && (
         <Card className="mb-4">
           <div className="flex items-center justify-between mb-4">
             <h3 className="font-semibold text-primary-themed">Work Orders</h3>
@@ -229,7 +257,7 @@ export default async function VendorDetailPage({ params }: Props) {
           <div className="flex gap-6 mb-4 pb-4 border-b border-themed text-sm">
             <div>
               <p className="text-xs text-muted-themed uppercase tracking-wide">Total WOs</p>
-              <p className="text-2xl font-bold text-primary-themed">{(recentWOs ?? []).length}</p>
+              <p className="text-2xl font-bold text-primary-themed">{workOrders.length}</p>
             </div>
             <div>
               <p className="text-xs text-muted-themed uppercase tracking-wide">Total Spend</p>
@@ -239,7 +267,7 @@ export default async function VendorDetailPage({ params }: Props) {
             </div>
           </div>
           <div className="space-y-1">
-            {(recentWOs ?? []).slice(0, 5).map((wo) => (
+            {workOrders.slice(0, 5).map((wo) => (
               <Link
                 key={wo.id}
                 href={`/maintenance/${wo.id}`}

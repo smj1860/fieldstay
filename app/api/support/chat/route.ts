@@ -3,21 +3,33 @@ import { requireOrgMember } from '@/lib/auth'
 import { classifyIntent } from '@/lib/support/classify'
 import { generateResponse } from '@/lib/support/respond'
 import { inngest } from '@/lib/inngest/client'
-import { supportChatLimiter, supportChatDailyLimiter } from '@/lib/rate-limit'
+import { supportChatLimiter, supportChatDailyLimiter, checkLimit } from '@/lib/rate-limit'
 
 export async function POST(req: NextRequest) {
   const { supabase, user, membership } = await requireOrgMember()
 
-  const { success: minuteOk } = await supportChatLimiter.limit(user.id)
-  if (!minuteOk) {
+  // Burst limiter (20/min) → fails OPEN: this is anti-spam, not a spend
+  // ceiling, and a Redis outage must not take down support entirely.
+  const minute = await checkLimit(supportChatLimiter, user.id, {
+    onError: 'allow',
+    site:    'route.support.chat.minute',
+  })
+  if (!minute.allowed) {
     return NextResponse.json(
       { error: 'Too many messages. Please wait a moment before sending another.' },
       { status: 429 }
     )
   }
 
-  const { success: dailyOk } = await supportChatDailyLimiter.limit(user.id)
-  if (!dailyOk) {
+  // Daily cap (100/day) → fails CLOSED: this one IS a spend ceiling — every
+  // message downstream is a billed LLM call — and a ceiling that disappears
+  // during an outage is not a ceiling. Same convention as
+  // claimNudgeBudgetSlot (CLAUDE.md, SMS section).
+  const daily = await checkLimit(supportChatDailyLimiter, user.id, {
+    onError: 'deny',
+    site:    'route.support.chat.daily',
+  })
+  if (!daily.allowed) {
     return NextResponse.json(
       { error: 'Daily message limit reached. Please try again tomorrow or email support@fieldstay.app.' },
       { status: 429 }

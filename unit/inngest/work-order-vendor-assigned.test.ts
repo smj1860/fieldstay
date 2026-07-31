@@ -16,6 +16,10 @@ vi.mock('@/lib/resend/client', () => ({
 }))
 vi.mock('@/lib/inngest/helpers', () => ({
   createPmNotification: vi.fn(async () => undefined),
+  // Dispatcher selection is getPmMembers-backed (owner → admin → manager,
+  // invite-accepted only) — see lib/inngest/helpers.ts. Mocked here so this
+  // suite asserts what the vendor is TOLD, not how the PM is picked.
+  getOrgDispatcher: vi.fn(async () => ({ userId: 'u_pm', name: 'Dana PM', phone: '+15550001111' })),
 }))
 vi.mock('@/lib/sms/templates', () => ({
   renderSmsBody: vi.fn(async () => 'rendered sms body'),

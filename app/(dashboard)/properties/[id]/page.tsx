@@ -14,6 +14,7 @@ import { DoorCodeReveal } from './door-code-reveal'
 import { unwrapJoin } from '@/lib/utils/supabase-joins'
 import type { MaintenanceSchedule, MaintenanceCatalogItem } from '@/types/database'
 import type { Metadata } from 'next'
+import { throwIfAnyQueryFailed } from '@/lib/supabase/unwrap'
 
 function feedStatusTone(status: string): 'green' | 'red' | 'slate' {
   if (status === 'success') return 'green'
@@ -36,12 +37,12 @@ export default async function PropertyDetailPage({ params }: Props) {
   const [
     { count: turnovers },
     { count: openWO },
-    { data: feeds },
-    { data: recentWOs },
-    { data: ytdCompletedWOs },
-    { data: upcomingSchedules },
-    { data: allSchedules },
-    { data: catalogItems },
+    { data: feeds, error: feedsError },
+    { data: recentWOs, error: recentWOsError },
+    { data: ytdCompletedWOs, error: ytdCompletedWOsError },
+    { data: upcomingSchedules, error: upcomingSchedulesError },
+    { data: allSchedules, error: allSchedulesError },
+    { data: catalogItems, error: catalogItemsError },
     { data: invoiceRows, error: invoiceError },
   ] = await Promise.all([
     supabase
@@ -112,6 +113,10 @@ export default async function PropertyDetailPage({ params }: Props) {
       .order('submitted_at', { ascending: false })
       .limit(25),
   ])
+
+  // Logs + reports every failure, then throws so the segment's error.tsx
+  // renders a real error state — an outage must not look like empty data.
+  throwIfAnyQueryFailed({ site: 'page.properties.id', orgId: property.org_id }, feedsError, recentWOsError, ytdCompletedWOsError, upcomingSchedulesError, allSchedulesError, catalogItemsError)
 
   if (invoiceError) {
     console.error('[PropertyDetailPage] invoice history fetch failed:', invoiceError.message)

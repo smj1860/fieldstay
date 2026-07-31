@@ -15,7 +15,8 @@ It exists to make the schema of those tables readable from the repo. It was
 never meant to run: the tables it describes already exist in the live project,
 which is exactly why the snapshot was needed in the first place.
 
-**68 additional files** (2026-07-28) — round-number-timestamped draft
+**69 additional files** (68 on 2026-07-28; `20260617000003_add_missing_fk_indexes.sql`
+added 2026-07-30 — same pattern, missed by the original pass) — round-number-timestamped draft
 migrations (e.g. `20260609000002_idempotency_hardening.sql`,
 `20260714160500_property_assets_replaced_by_on_delete.sql`) that were never
 recorded in `supabase_migrations.schema_migrations` under their own filename

@@ -3,6 +3,7 @@ import { Check } from 'lucide-react'
 import { requireOrgMember } from '@/lib/auth'
 import { ONBOARDING_STEPS, calcOnboardingProgress } from '@/lib/onboarding-wizard'
 import { cn } from '@/lib/utils'
+import { throwIfAnyQueryFailed } from '@/lib/supabase/unwrap'
 
 export default async function OnboardingLayout({
   children,
@@ -11,12 +12,16 @@ export default async function OnboardingLayout({
 }>) {
   const { supabase, membership } = await requireOrgMember()
 
-  const { data: org } = await supabase
+  const { data: org, error: orgError } = await supabase
     .from('organizations')
     .select('onboarding_steps_completed')
     .eq('id', membership.org_id)
     .single()
 
+
+  // Logs + reports, then throws so the segment's error.tsx renders a real
+  // error state — a failed read must not render as an empty page.
+  throwIfAnyQueryFailed({ site: 'page.setup.layout', orgId: membership.org_id }, orgError)
   const completed = (org?.onboarding_steps_completed ?? {}) as Record<string, boolean>
   const pct       = calcOnboardingProgress(completed)
 

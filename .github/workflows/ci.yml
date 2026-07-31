@@ -66,6 +66,12 @@ jobs:
   e2e:
     runs-on: ubuntu-latest
     env:
+      # `pnpm run e2e` builds and starts Next, which sets NODE_ENV=production.
+      # Without this marker lib/env.ts classifies the run as a production
+      # deploy and aborts boot over production-tier vars this job has no
+      # reason to hold. resolveDeployTarget() only honours it when VERCEL_ENV
+      # is unset, so a real deploy still gets full validation.
+      FIELDSTAY_ENV_TARGET:          test
       NEXT_PUBLIC_APP_URL:           http://localhost:3000
       NEXT_PUBLIC_SUPABASE_URL:      ${{ secrets.NEXT_PUBLIC_SUPABASE_URL }}
       NEXT_PUBLIC_SUPABASE_ANON_KEY: ${{ secrets.NEXT_PUBLIC_SUPABASE_ANON_KEY }}
@@ -126,9 +132,24 @@ jobs:
   # Runs against the DEDICATED E2E project (same secrets as the e2e job —
   # CI never holds production credentials); both projects receive every
   # migration, so invariants verified there hold for production by
-  # construction. Self-disarming like the e2e job: secrets absent ->
-  # warning annotation, job passes. See scripts/check-db-invariants.mjs and
-  # scripts/check-type-drift.mjs for the check details.
+  # construction.
+  #
+  # Self-disarming like the e2e job, but at the SCRIPT level rather than via a
+  # separate gate-detection step: both scripts print a `::warning …UNARMED`
+  # annotation and exit 0 when NEXT_PUBLIC_SUPABASE_URL /
+  # SUPABASE_SERVICE_ROLE_KEY are absent, so a fork PR or an unconfigured repo
+  # gets the same loud-but-green outcome without repeating an `if:` guard on
+  # every step. Verified by unit/guardrails/ci-gating.test.ts.
+  #
+  # NO `pnpm install` STEP, deliberately: both scripts use only Node builtins
+  # and global fetch (Node 22), so this job skips the install entirely. That is
+  # safe only while it stays true — unit/guardrails/ci-gating.test.ts fails
+  # LOCALLY if either script grows a bare-specifier import, which would
+  # otherwise break this job in CI and nowhere else. Add an install step here
+  # if such a dependency is ever genuinely needed.
+  #
+  # See scripts/check-db-invariants.mjs and scripts/check-type-drift.mjs for
+  # the check details.
   db-invariants:
     runs-on: ubuntu-latest
     env:
@@ -137,7 +158,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          # This job only reads the repo and runs one script — no reason to
+          # This job only reads the repo and runs two scripts — no reason to
           # leave the checkout token on disk.
           persist-credentials: false
       - uses: actions/setup-node@v4

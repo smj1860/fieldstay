@@ -290,9 +290,14 @@ notification_digest_state    — per-org/category snapshot for the daily 6pm PM
                               wrap-up digest (added 2026-07-16). PK
                               (org_id, category), snapshot jsonb. Used by
                               diffDigestSnapshot() to show new/unchanged/
-                              removed items vs. yesterday. Read-only via RLS
-                              for org members; writes are service-role only
-                              from lib/inngest/functions/cron/notification-digest.ts.
+                              removed items vs. yesterday. SERVICE-ROLE ONLY —
+                              org members have no RLS policy at all (the
+                              read policy was dropped by
+                              20260730104000_grant_authenticated_and_drop_dead_policies.sql;
+                              nothing but lib/inngest/helpers.ts ever read it).
+                              Listed in check-db-invariants.mjs's
+                              SERVICE_ROLE_ONLY_TABLES, so the policy-less
+                              state is deliberate rather than a missed table.
 ```
 
 `powersync_crew_*` tables from the original PowerSync sync layer (replaced by
@@ -425,6 +430,28 @@ and is **fully gone** — no dependency, no `lib/powersync/` directory, no
   completion that need server-side side effects), retrying on failure and
   stopping the drain on first error so later mutations against the same
   record aren't applied out of order.
+
+**Two conventions every crew-side write and cached table must satisfy**
+(both added after the 2026-07-30 pre-launch audit found them violated across
+almost the whole crew surface):
+
+- **An upload builder may only write a column the mutation actually carried.**
+  Inside a Supabase update payload built from an outbox mutation, a field is
+  assigned from `payload.<x>` only behind an explicit `'<x>' in payload`
+  presence check. `completed_at: payload.completed_at ?? null` writes a real
+  NULL when the mutation never mentioned the field — photo-sync's
+  photo-only PATCH wiped the completion timestamp off items that were still
+  `is_completed = true`, and it failed silently because the write succeeded.
+  (`undefined` is harmless — JSON drops it; `?? null` is the bug.) Enforced by
+  `unit/guardrails/upload-payload-null-fields.test.ts`.
+- **Every cached table is bounded, and every dead-letterable mutation is
+  visible.** A Dexie-cached Supabase table is either reconciled at pull time
+  (the sync function bulkDeletes ids no longer present) or pruned by
+  `lib/dexie/prune.ts` — `messages` grew forever at 500 rows a pull. And every
+  member of the `MutationTable` union must have a retry affordance in
+  `app/crew/_components/failed-sync-banner.tsx`: a mutation that dead-letters
+  where no crew member can see it is work silently thrown away. Enforced by
+  `unit/guardrails/crew-dead-letter-coverage.test.ts`.
 
 **Crew Sync v2 coverage convention** (`docs/CREW_SYNC_V2_PHASES.md` section 5e):
 every Supabase-backed table the crew PWA caches in Dexie is covered by the
@@ -699,6 +726,8 @@ async function geocodeZip(zip: string): Promise<{ lat: number; lng: number } | n
 | `supabase.raw('column_name')` | Does not exist on Supabase JS client. For column-to-column comparisons (e.g. `current_quantity < par_level`), fetch the rows and filter in JavaScript |
 | Adding a DB column via migration without updating `types/database.ts` | Every migration that adds a column must also add that column to the matching interface in `types/database.ts` in the same commit. Supabase's TS client infers return types from this file, not from the live DB. Missing columns here cause build failures even when the query and select string are correct |
 | Adding a new event to `events.ts` outside the closing `}` of `FieldStayEvents` | The final `}` in `events.ts` closes the `FieldStayEvents` type. Every new event entry must be placed before it, with a comma after the preceding entry's closing brace |
+| An unbounded `.select()` in a platform-wide cron | PostgREST's `max_rows = 1000` truncates it silently — 200, no error, no signal. Paginate via `fetchAllRows()` (`lib/inngest/paginate.ts`) or use a `count`/`head` aggregate |
+| Reading a new `process.env.X` without declaring it in `lib/env.ts` | Add it to `ENV_SPEC` with a tier and a one-line `why`. Undeclared means the deploy will NOT fail on it when it is missing — it becomes `undefined` and surfaces later as an unrelated-looking error. `unit/guardrails/env-schema-coverage.test.ts` fails on drift in either direction |
 | `.modify(q => ...)` on a Supabase query | Not a real method. Build the query conditionally with `if` blocks before awaiting it |
 | Direct Supabase reads in crew PWA client components (`app/crew/*`) | Dexie (`getDexieDb` / `useLiveQuery`) reading the local IndexedDB cache |
 | Service role key in client code | Server Actions and Inngest steps only |
@@ -754,10 +783,15 @@ is always authoritative over the snapshot file.
 
 ### Adding new schema
 
+Migration discipline: every schema change is a local .sql file in
+supabase/migrations/, applied via `supabase db push`. MCP apply_migration
+is for verification/introspection only — it records live history without
+a local file, which is exactly the drift closed on 2026-07-30
+(CLAUDE_MIGRATION_RECONCILE_1). Local files and live history were
+verified identical on that date (276/276).
+
 Write a new file in `supabase/migrations/` named `YYYYMMDDHHMMSS_description.sql`
-and apply it via:
-- Supabase CLI: `supabase db push`
-- Supabase MCP: `apply_migration` tool against project `vpmznjktllhmmbfnxuvk`
+and apply it via `supabase db push` against project `vpmznjktllhmmbfnxuvk`.
 
 Always update `types/database.ts` in the same commit as the migration.
 
@@ -803,6 +837,21 @@ renderPmAlert({ heading, body, ctaLabel, ctaUrl, details?, table?, sections?, no
 // heading, body, ctaLabel, ctaUrl are REQUIRED. details/table/sections/note are optional.
 // NOT: actionLabel, actionUrl, pmName — those never existed on this component.
 ```
+
+### Shared helpers — use these, don't re-roll them
+
+Each of these exists because the same defect was found open-coded in many
+places at once during the 2026-07-30 pre-launch audit. Reaching for the raw
+primitive instead is how that drift comes back.
+
+| Helper | Module | Use it for |
+|---|---|---|
+| `checkLimit(limiter, id, { onError, site })` | `lib/rate-limit.ts` | Every rate-limit check. Returns a `LimitDecision` with an EXPLICIT `onError` fail policy (`'allow'` \| `'deny'`) rather than each call site quietly deciding what a Redis outage means, and distinguishes `skipped` (Upstash unconfigured) from `errored` |
+| `unwrap` / `unwrapList` / `unwrapCount` / `tryUnwrap*` | `lib/supabase/unwrap.ts` | Every read. `const { data } = await …` collapses "the query errored" and "zero rows" into the same `null`, so an RLS regression renders as a friendly empty state with nothing logged. These log with context, `reportError()` to Sentry, then throw (`unwrap*`) or return a discriminated result the caller must branch on (`tryUnwrap*`) |
+| `fetchAllRows` / `fetchDistinctOrgIds` | `lib/inngest/paginate.ts` | Any platform-wide scan — see the `max_rows = 1000` rule under Supabase patterns |
+| `assertSafeExternalUrl` / `safeFetch` | `lib/security/url-guard.ts` | Every outbound fetch to a URL that is even partly tenant-supplied (iCal feeds, webhook targets, image URLs). Hostname string-matching is defeated by redirects, DNS, IPv6, and alternate IPv4 encodings; `safeFetch` re-validates every redirect hop |
+| `getPmMembersByOrgIds` / `getOrgDispatcher` | `lib/inngest/helpers.ts` | Resolving an org's PM recipients. The `ByOrgIds` form takes MANY org ids and returns a `Map` — the per-org `getPmMembers` inside a tenant loop is the N+1 that `unit/guardrails/n-plus-one-loops.test.ts` exists to catch |
+| Timeout budgets (`GEOCODE_TIMEOUT_MS`, …) + `isTimeoutError()` | `lib/http/timeout.ts` | Every outbound `fetch()`. A `fetch()` with no `AbortSignal` has no timeout at all — it hangs until the platform kills the function. Enforced by `unit/guardrails/external-fetch-timeout.test.ts` |
 
 ### Auth patterns
 
@@ -858,6 +907,21 @@ const { supabase, crew, user } = auth
 - Nested joins always return arrays, not single objects
 - RLS policies need both `USING` and `WITH CHECK` on UPDATE — `USING` alone is not enough
 - `supabase.raw()` and `.modify()` are not used in this codebase
+- **`max_rows = 1000` — an unbounded `.select()` truncates SILENTLY.**
+  PostgREST caps every response at `max_rows` (`supabase/config.toml`, also
+  the Supabase cloud default) and returns the first 1000 rows with a 200, no
+  error, and no truncation signal. It is not an exception a retry surfaces —
+  it is a quietly wrong result set, and it was the single highest-impact
+  systemic finding of the 2026-07-30 pre-launch audit: eight platform-wide
+  crons had each stopped covering every tenant past row 1000 (iCal fan-out,
+  asset health scoring, metrics snapshot, Kroger cart, notification digest,
+  priority decay, crew scoring, stale-feed alert), all with CI green.
+  Fine for a request handler rendering one org's page; never acceptable for a
+  platform-wide scan. Every such read must be explicitly bounded —
+  `fetchAllRows()` from `lib/inngest/paginate.ts` (`.range()` pagination),
+  `.limit()`, `.single()`/`.maybeSingle()`, or a `count: 'exact', head: true`
+  aggregate that ships no rows at all. Enforced for `lib/inngest/**` by
+  `unit/guardrails/unbounded-select.test.ts`.
 
 ---
 
@@ -1146,6 +1210,24 @@ following them stops being a memory test. Four layers, checked in CI via
      call's own query chain, not the whole file, since both tables' column
      names are individually valid TypeScript, just wrong for the table in
      scope. Also a clean-baseline ratchet.
+   - Added by the 2026-07-30 pre-launch remediation, one line each — read the
+     header comment in each file for the defect it encodes:
+     `unbounded-select` (the `max_rows = 1000` rule, `lib/inngest/**`),
+     `unbounded-fanout-loops` (a per-tenant fan-out must be bounded/batched),
+     `upload-payload-null-fields` (`'x' in payload` in Dexie upload builders),
+     `crew-dead-letter-coverage` (cached-table pruning + a retry affordance for
+     every `MutationTable`), `external-fetch-timeout` (no `fetch()` without a
+     timeout budget), `supabase-error-handling` + `error-reporting-coverage`
+     (reads go through `lib/supabase/unwrap.ts`; catches report),
+     `org-scoped-storage-paths` (every write to an org-scoped photo bucket goes
+     through `orgScopedStoragePath()`), `service-role-org-scope` and
+     `organization-members-access` (tenant scoping on service-role reads),
+     `auth-user-deletion-org-orphaning`, `webhook-dedup-claim-release`,
+     `env-schema-coverage` (`lib/env.ts` stays complete in both directions),
+     and `ci-gating` — the enforcement layer's own enforcement: the `checks`
+     job still runs every step, no step is `continue-on-error`, `lint` keeps
+     its `--max-warnings` ratchet, and the two install-free `db-invariants`
+     scripts stay dependency-free and self-disarming.
    - `public-route-rate-limiting` — every prefix in `proxy.ts`'s
      `TOKEN_ROUTES` has a matching branch in `rateLimiterForPathname()`,
      and the two guessable-invite-token `BYPASS_ROUTES` entries

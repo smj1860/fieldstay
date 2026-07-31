@@ -1,5 +1,6 @@
 import type { Metadata } from 'next'
 import { requireOrgMember } from '@/lib/auth'
+import { unwrapList, unwrapCount } from '@/lib/supabase/unwrap'
 import { VendorsClient } from './vendors-client'
 import type { Vendor } from '@/types/database'
 
@@ -7,14 +8,18 @@ export const metadata: Metadata = { title: 'Vendors' }
 
 export default async function VendorsPage() {
   const { supabase, membership } = await requireOrgMember()
+  const ctx = { site: 'page.vendors', orgId: membership.org_id }
 
-  const { data: rawVendors } = await supabase
-    .from('vendors')
-    .select('id, name, contact_name, email, phone, specialty, portal_enabled, is_active, notes')
-    .eq('org_id', membership.org_id)
-    .eq('is_active', true)
-    .order('specialty')
-    .order('name')
+  const rawVendors = unwrapList(
+    await supabase
+      .from('vendors')
+      .select('id, name, contact_name, email, phone, specialty, portal_enabled, is_active, notes')
+      .eq('org_id', membership.org_id)
+      .eq('is_active', true)
+      .order('specialty')
+      .order('name'),
+    ctx,
+  )
 
   // Scorecard inputs, bounded to the trailing 12 months. The previous shape
   // embedded work_orders(...) directly on the vendors query with no bound —
@@ -24,13 +29,16 @@ export default async function VendorsPage() {
   const oneYearAgo = new Date()
   oneYearAgo.setFullYear(oneYearAgo.getFullYear() - 1)
 
-  const { data: scorecardWOs } = await supabase
-    .from('work_orders')
-    .select('vendor_id, vendor_rating, scheduled_date, completed_date, status')
-    .eq('org_id', membership.org_id)
-    .not('vendor_id', 'is', null)
-    .gte('created_at', oneYearAgo.toISOString())
-    .limit(5000)
+  const scorecardWOs = unwrapList(
+    await supabase
+      .from('work_orders')
+      .select('vendor_id, vendor_rating, scheduled_date, completed_date, status')
+      .eq('org_id', membership.org_id)
+      .not('vendor_id', 'is', null)
+      .gte('created_at', oneYearAgo.toISOString())
+      .limit(5000),
+    ctx,
+  )
 
   type ScorecardWO = {
     vendor_id: string | null
@@ -74,12 +82,15 @@ export default async function VendorsPage() {
     }
   })
 
-  const { count: complianceDocCount } = await supabase
-    .from('vendor_compliance_documents')
-    .select('id', { count: 'exact', head: true })
-    .eq('org_id', membership.org_id)
+  const complianceDocCount = unwrapCount(
+    await supabase
+      .from('vendor_compliance_documents')
+      .select('id', { count: 'exact', head: true })
+      .eq('org_id', membership.org_id),
+    ctx,
+  )
 
-  const showComplianceNudge = (complianceDocCount ?? 0) === 0
+  const showComplianceNudge = complianceDocCount === 0
 
   return (
     <div>

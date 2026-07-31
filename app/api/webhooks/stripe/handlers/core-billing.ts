@@ -2,6 +2,7 @@ import type Stripe from 'stripe'
 import { inngest } from '@/lib/inngest/client'
 import { PLANS, getPlanByPriceId, type PlanKey } from '@/lib/stripe/client'
 import { logAuditEvent } from '@/lib/audit'
+import { getPmMembers } from '@/lib/inngest/helpers'
 import type { StripeSupabaseClient } from './types'
 
 /** Core billing checkout completed — links the Stripe customer id to the org. */
@@ -17,24 +18,39 @@ export async function handleCheckoutSessionBilling(
     .is('stripe_customer_id', null)
 }
 
+/**
+ * Picks the human who receives a billing-lifecycle email for an org.
+ *
+ * Goes through getPmMembers() (lib/inngest/helpers.ts, the single source of
+ * truth for "who is the PM") rather than querying organization_members here.
+ * The inline query this replaced was `.eq('role','admin').single()`, which was
+ * wrong twice over: it EXCLUDED owners — the role most solo PMs actually hold,
+ * and the one CLAUDE.md records as always passing a role check — so a
+ * single-owner org got no trial-start or first-payment email at all; and
+ * `.single()` THROWS on more than one row, so an org with two admins failed
+ * the whole webhook handler. getPmMembers defaults to ['owner','admin'],
+ * applies the invite_accepted_at filter, and orders owner → admin → manager,
+ * so `limit: 1` is a deterministic "the owner if there is one, else the first
+ * admin" rather than whatever Postgres felt like returning.
+ *
+ * StripeSupabaseClient is the service-role client, which is what getPmMembers
+ * requires — it resolves emails through the Admin API (auth.admin), so an
+ * RLS-scoped client would not work here.
+ */
 async function notifyOrgAdmin(
   supabase: StripeSupabaseClient,
   orgId: string,
   send: (adminEmail: string, firstName: string) => Promise<void>,
 ): Promise<void> {
-  const { data: member } = await supabase
-    .from('organization_members')
-    .select('user_id')
-    .eq('org_id', orgId)
-    .eq('role', 'admin')
-    .single()
-  if (!member?.user_id) return
+  const [primaryPm] = await getPmMembers(supabase, orgId, { limit: 1 })
+  if (!primaryPm) return
 
-  const { data: { user: adminUser } } = await supabase.auth.admin.getUserById(member.user_id)
-  if (!adminUser?.email) return
+  // getPmMembers resolves the email; the display name still needs the user
+  // record, and a lookup failure must not block the billing email.
+  const { data } = await supabase.auth.admin.getUserById(primaryPm.userId)
+  const fullName = data?.user?.user_metadata?.full_name as string | undefined
 
-  const fullName = adminUser.user_metadata?.full_name as string | undefined
-  await send(adminUser.email, fullName?.split(' ')[0] ?? 'there')
+  await send(primaryPm.email, fullName?.split(' ')[0] ?? 'there')
 }
 
 /** Core billing subscription created or updated (plan/status sync + trial-lifecycle emails). */

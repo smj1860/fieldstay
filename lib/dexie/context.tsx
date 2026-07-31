@@ -13,9 +13,8 @@ import {
 } from './schema'
 import { syncAssignedTurnovers, pullChecklistsForTurnovers, pullTurnoversOnly } from './sync/turnovers'
 import { syncWorkOrders } from './sync/work-orders'
-import { syncMessages } from './sync/messages'
-import { syncCrewAvailability } from './sync/availability'
 import { computeAssignedPropertyIds, syncPropertyAssets } from './sync/assets'
+import { fullCrewResync } from './sync/full-resync'
 import {
   createSyncSignalHandler,
   reconnectDelayWithJitterMs,
@@ -29,9 +28,15 @@ import {
 // constant, not a runtime toggle.
 const CREW_SYNC_V2 = process.env.NEXT_PUBLIC_CREW_SYNC_V2 === 'true'
 
-/** How often the v2 safety poll runs a full resync — the correctness
- * backstop for missed broadcasts and the only freshness path for
- * property_assets, which deliberately has no broadcast trigger. */
+/** How often the safety poll runs a full resync — the correctness backstop
+ * for missed Realtime events/broadcasts and the only freshness path for
+ * property_assets, which deliberately has no broadcast trigger.
+ *
+ * Runs on BOTH sync paths. It used to be v2-only, which meant the shipping
+ * (flag-off) configuration had no safety poll at all: messages,
+ * crew_availability, inventory_items and properties refreshed only on mount
+ * and on `online`, and the crew-sync-coverage guardrail asserted a mechanism
+ * that wasn't running. */
 const SAFETY_POLL_INTERVAL_MS = 5 * 60_000
 
 interface DexieContextValue {
@@ -237,6 +242,8 @@ export function DexieProvider({ userId: userIdProp, children }: { userId?: strin
     let checklistChannel: ReturnType<typeof supabase.channel> | null = null
     let assetsChannel: ReturnType<typeof supabase.channel> | null = null
     let onlineHandler: (() => void) | null = null
+    // Shared by both sync paths — see installSafetyPoll below.
+    let safetyPollTimer: ReturnType<typeof setInterval> | null = null
     let subscribedTurnoverIds: string[] = []
     let subscribedAssetPropertyIds: string[] = []
     let checklistRefreshGeneration = 0
@@ -245,8 +252,8 @@ export function DexieProvider({ userId: userIdProp, children }: { userId?: strin
     // ── Crew Sync v2 state (all stays null/untouched when the flag is off) ─
     let v2Channel: ReturnType<typeof supabase.channel> | null = null
     let v2ReconnectTimer: ReturnType<typeof setTimeout> | null = null
-    let v2SafetyPollTimer: ReturnType<typeof setInterval> | null = null
-    let v2VisibilityHandler: (() => void) | null = null
+
+    let visibilityHandler: (() => void) | null = null
     let v2AuthSubscription: { unsubscribe: () => void } | null = null
     let v2SignalHandler: SyncSignalHandler | null = null
 
@@ -266,16 +273,24 @@ export function DexieProvider({ userId: userIdProp, children }: { userId?: strin
     // checklist. Cursors are a bandwidth optimization only; correctness
     // never depends on them (see lib/dexie/sync/cursors.ts).
     async function resync(crewMemberId: string): Promise<void> {
-      await Promise.all([
-        syncAssignedTurnovers(supabase, userId!, crewMemberId),
-        syncWorkOrders(supabase, userId!, crewMemberId),
-        syncMessages(supabase, userId!),
-        syncCrewAvailability(supabase, userId!, crewMemberId),
-      ])
+      await fullCrewResync(supabase, userId!, crewMemberId)
       if (cancelled) return
 
       await refreshChecklistSubscription(crewMemberId)
       await refreshAssetsSubscription()
+    }
+
+    function resyncSafe(crewMemberId: string): void {
+      if (cancelled) return
+      void resync(crewMemberId).catch((err) =>
+        console.error('[DexieProvider] resync failed:', err)
+      )
+    }
+
+    // Installed on BOTH paths (see SAFETY_POLL_INTERVAL_MS above) — the
+    // correctness backstop is not allowed to depend on a feature flag.
+    function installSafetyPoll(run: () => void): void {
+      safetyPollTimer = setInterval(run, SAFETY_POLL_INTERVAL_MS)
     }
 
     // ── Crew Sync v2 (flag on): broadcast signal + delta pull ──────────────
@@ -291,16 +306,7 @@ export function DexieProvider({ userId: userIdProp, children }: { userId?: strin
     // it also covers property_assets (no broadcast trigger; see the doc's
     // section 1) directly instead of via refreshAssetsSubscription.
     async function resyncV2(crewMemberId: string): Promise<void> {
-      await Promise.all([
-        syncAssignedTurnovers(supabase, userId!, crewMemberId),
-        syncWorkOrders(supabase, userId!, crewMemberId),
-        syncMessages(supabase, userId!),
-        syncCrewAvailability(supabase, userId!, crewMemberId),
-      ])
-      if (cancelled) return
-      const propertyIds = await computeAssignedPropertyIds(userId!)
-      if (cancelled) return
-      await syncPropertyAssets(supabase, userId!, propertyIds)
+      await fullCrewResync(supabase, userId!, crewMemberId)
     }
 
     function resyncV2Safe(crewMemberId: string): void {
@@ -418,14 +424,14 @@ export function DexieProvider({ userId: userIdProp, children }: { userId?: strin
       globalThis.addEventListener('online', onlineHandler)
 
       // PWA returning from background has likely missed broadcasts.
-      v2VisibilityHandler = () => {
+      visibilityHandler = () => {
         if (globalThis.document?.visibilityState === 'visible') resyncV2Safe(crewMemberId)
       }
-      globalThis.document?.addEventListener('visibilitychange', v2VisibilityHandler)
+      globalThis.document?.addEventListener('visibilitychange', visibilityHandler)
 
       // Safety poll: correctness backstop for missed broadcasts and the
       // freshness path for property_assets.
-      v2SafetyPollTimer = setInterval(() => resyncV2Safe(crewMemberId), SAFETY_POLL_INTERVAL_MS)
+      installSafetyPoll(() => resyncV2Safe(crewMemberId))
 
       await subscribeV2(crewMemberId)
     }
@@ -475,13 +481,19 @@ export function DexieProvider({ userId: userIdProp, children }: { userId?: strin
         )
         .subscribe()
 
-      onlineHandler = () => {
-        if (cancelled) return
-        void resync(crewMember.id).catch((err) =>
-          console.error('[DexieProvider] reconnect resync failed:', err)
-        )
-      }
+      onlineHandler = () => resyncSafe(crewMember.id)
       globalThis.addEventListener('online', onlineHandler)
+
+      // PWA returning from background has likely missed postgres_changes
+      // events — Realtime never replays what happened while disconnected.
+      visibilityHandler = () => {
+        if (globalThis.document?.visibilityState === 'visible') resyncSafe(crewMember.id)
+      }
+      globalThis.document?.addEventListener('visibilitychange', visibilityHandler)
+
+      // Safety poll: same correctness backstop v2 has, on the path that
+      // actually ships today.
+      installSafetyPoll(() => resyncSafe(crewMember.id))
     }
 
     run().catch((err) => console.error('[DexieProvider] sync failed:', err))
@@ -499,8 +511,8 @@ export function DexieProvider({ userId: userIdProp, children }: { userId?: strin
         supabase.removeChannel(ch)
       }
       if (v2ReconnectTimer !== null) clearTimeout(v2ReconnectTimer)
-      if (v2SafetyPollTimer !== null) clearInterval(v2SafetyPollTimer)
-      if (v2VisibilityHandler) globalThis.document?.removeEventListener('visibilitychange', v2VisibilityHandler)
+      if (safetyPollTimer !== null) clearInterval(safetyPollTimer)
+      if (visibilityHandler) globalThis.document?.removeEventListener('visibilitychange', visibilityHandler)
       v2AuthSubscription?.unsubscribe()
       v2SignalHandler?.dispose()
     }

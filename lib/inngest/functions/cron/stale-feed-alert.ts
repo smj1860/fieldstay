@@ -1,8 +1,11 @@
 import { inngest }              from '@/lib/inngest/client'
 import { createServiceClient }  from '@/lib/supabase/server'
-import { getPmMembers }         from '@/lib/inngest/helpers'
+import { fetchAllRows }         from '@/lib/inngest/paginate'
 
 const STALE_HOURS = 6
+
+// Same preference order getPmMembers() applies — owner before admin.
+const ROLE_PREFERENCE = ['owner', 'admin'] as const
 
 type StaleRow = {
   id:             string
@@ -29,22 +32,24 @@ export const staleFeedAlert = inngest.createFunction(
   },
   { cron: '0 15 * * *' },
   async ({ step, logger }) => {
+    // Paginated — an unbounded select here is silently capped at PostgREST's
+    // 1000-row limit, so past ~1000 stale feeds every org sorted later simply
+    // stopped being alerted, with no error anywhere.
     const staleFeeds = await step.run('find-stale-feeds', async () => {
       const supabase = createServiceClient({ system: 'inngest:stale-feed-alert' })
       const cutoff   = new Date()
       cutoff.setHours(cutoff.getHours() - STALE_HOURS)
 
-      const { data, error } = await supabase
-        .from('ical_feeds')
-        .select('id, name, org_id, last_synced_at, properties ( name )')
-        .eq('is_active', true)
-        .or(`last_synced_at.is.null,last_synced_at.lt.${cutoff.toISOString()}`)
-
-      if (error) {
-        throw new Error(`Failed to query stale iCal feeds: ${error.message}`)
-      }
-
-      return (data ?? []) as StaleRow[]
+      return fetchAllRows<StaleRow>(
+        (from, to) => supabase
+          .from('ical_feeds')
+          .select('id, name, org_id, last_synced_at, properties ( name )')
+          .eq('is_active', true)
+          .or(`last_synced_at.is.null,last_synced_at.lt.${cutoff.toISOString()}`)
+          .order('id', { ascending: true })
+          .range(from, to),
+        { label: 'ical_feeds(stale)' }
+      )
     })
 
     if (staleFeeds.length === 0) {
@@ -62,38 +67,70 @@ export const staleFeedAlert = inngest.createFunction(
       byOrg.set(feed.org_id, group)
     }
 
-    // One PM per org, resolved up front — step.sendEvent must run at the
-    // top level of the function, not nested inside another step's callback.
+    // One PM user id per org, resolved in ONE query for every org at once.
+    //
+    // This used to call getPmMembers() once per org inside a single step. That
+    // helper does a DB query PLUS one auth.admin.getUserById() GoTrue
+    // round-trip per member — ~300 sequential external calls at 150 orgs,
+    // inside one step, near GoTrue's admin rate limits. None of that work was
+    // needed: the only field consumed below is userId, so the email lookup
+    // (the entire reason getPmMembers touches GoTrue) was pure waste here.
     const pmUserIdByOrg = await step.run('resolve-pm-members', async () => {
       const supabase = createServiceClient({ system: 'inngest:stale-feed-alert' })
+      const orgIds = [...byOrg.keys()]
+
+      const members = await fetchAllRows<{ org_id: string; user_id: string; role: string }>(
+        (from, to) => supabase
+          .from('organization_members')
+          .select('org_id, user_id, role')
+          .in('org_id', orgIds)
+          .in('role', ROLE_PREFERENCE as unknown as string[])
+          .not('invite_accepted_at', 'is', null)
+          .order('user_id', { ascending: true })
+          .range(from, to),
+        { label: 'organization_members(pm-for-stale-feeds)' }
+      )
+
+      // Sort owner-before-admin once, then the first row seen per org wins —
+      // same "primary PM" selection getPmMembers({ limit: 1 }) makes.
+      const rank = (role: string) => {
+        const i = ROLE_PREFERENCE.indexOf(role as typeof ROLE_PREFERENCE[number])
+        return i === -1 ? ROLE_PREFERENCE.length : i
+      }
       const result: Record<string, string> = {}
-      for (const orgId of byOrg.keys()) {
-        const [pmMember] = await getPmMembers(supabase, orgId, { limit: 1 })
-        if (pmMember) result[orgId] = pmMember.userId
+      for (const member of [...members].sort((a, b) => rank(a.role) - rank(b.role))) {
+        result[member.org_id] ??= member.user_id
       }
       return result
     })
 
-    let alerted = 0
-    for (const [orgId, feeds] of byOrg) {
+    // ONE batched sendEvent instead of one step per org. The per-org step
+    // version put the whole platform's org count into a single run's step
+    // budget (and re-sent accumulated memoized state on every one of them);
+    // Inngest accepts an event array in a single step, and the downstream
+    // notify-integration-error function still runs once per event.
+    const events = [...byOrg.entries()].flatMap(([orgId, feeds]) => {
       const userId = pmUserIdByOrg[orgId]
-      if (!userId) continue
+      if (!userId) return []
 
       const feedCount = feeds.length
       const feedWord  = feedCount !== 1 ? 'feeds' : 'feed'
 
-      await step.sendEvent(`notify-stale-feed-${orgId}`, {
-        name: 'integration/connection.error',
+      return [{
+        name: 'integration/connection.error' as const,
         data: {
           user_id:     userId,
           org_id:      orgId,
           provider_id: 'ical',
           reason:      `${feedCount} ${feedWord} haven't synced in ${STALE_HOURS}+ hours`,
         },
-      })
-      alerted++
+      }]
+    })
+
+    if (events.length) {
+      await step.sendEvent('notify-stale-feeds', events)
     }
 
-    return { alerted }
+    return { alerted: events.length }
   }
 )

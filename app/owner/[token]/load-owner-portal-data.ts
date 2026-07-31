@@ -4,6 +4,7 @@ import { computeOccupancy } from '@/lib/owner-portal/occupancy'
 import type { TxnType } from '@/types/database'
 import type { CapExProjectionPayload } from '@/lib/inngest/functions/capex-projections'
 import { unwrapJoin } from '@/lib/utils/supabase-joins'
+import { unwrap, unwrapList, type PostgrestResult } from '@/lib/supabase/unwrap'
 
 /**
  * Data loading for the owner portal page — extracted out of
@@ -87,81 +88,110 @@ function getLastSixMonths(): string[] {
   return months
 }
 
-export async function loadOwnerPortalData(
-  token:        string,
-  monthParam:   string | undefined,
-  propertyParam: string | undefined,
-): Promise<OwnerPortalPageState | null> {
-  const supabase = createServiceClient({ publicSurface: 'owner--token--load-owner-portal-data' })
+// ── Token validation ─────────────────────────────────────────────────────────
 
-  // Validate token + fetch owner + property
-  const { data: portalToken } = await supabase
-    .from('owner_portal_tokens')
-    .select(`
+type PortalTokenRow = {
+  id:               string
+  expires_at:       string | null
+  revoked_at:       string | null
+  last_accessed_at: string | null
+  is_multi:         boolean | null
+  property_ids:     string[] | null
+  // Supabase returns nested joins as object-or-array; unwrapJoin normalizes.
+  property_owners:  unknown
+}
+
+const PORTAL_TOKEN_SELECT = `
+  id,
+  expires_at,
+  revoked_at,
+  last_accessed_at,
+  is_multi,
+  property_ids,
+  property_owners (
+    id,
+    org_id,
+    name,
+    revenue_share_pct,
+    share_capital_plan,
+    property_id,
+    properties (
       id,
-      expires_at,
-      revoked_at,
-      last_accessed_at,
-      is_multi,
-      property_ids,
-      property_owners (
-        id,
-        org_id,
-        name,
-        revenue_share_pct,
-        share_capital_plan,
-        property_id,
-        properties (
-          id,
-          name,
-          address,
-          city,
-          state,
-          zip
-        )
-      )
-    `)
-    .eq('token', token)
-    .single()
+      name,
+      address,
+      city,
+      state,
+      zip
+    )
+  )
+`
 
-  if (!portalToken) return null
+type SupabaseLike = ReturnType<typeof createServiceClient>
 
-  if (portalToken.revoked_at) return { status: 'revoked' }
-
-  if (portalToken.expires_at && new Date(portalToken.expires_at) < new Date()) {
-    return { status: 'expired' }
-  }
-
-  // Record access
-  await supabase
+/**
+ * Resolves the opaque portal token. Returns a terminal page state for a
+ * revoked/expired/unknown token, or the validated row for the caller to scope
+ * every subsequent query against. This IS the only auth this route has.
+ */
+async function validatePortalToken(
+  supabase: SupabaseLike,
+  token:    string,
+): Promise<{ terminal: OwnerPortalPageState | null; row: PortalTokenRow | null }> {
+  const res = await supabase
     .from('owner_portal_tokens')
-    .update({ last_accessed_at: new Date().toISOString() })
-    .eq('id', portalToken.id)
+    .select(PORTAL_TOKEN_SELECT)
+    .eq('token', token)
+    .maybeSingle()
 
-  const ownerRaw = unwrapJoin(portalToken.property_owners)
+  // A failed read must not be mistaken for "no such token" — a 404 for a
+  // paying owner during an outage is indistinguishable from a revoked link.
+  const portalToken = unwrap(res as PostgrestResult<PortalTokenRow>, {
+    site: 'owner-portal.validatePortalToken',
+  })
 
-  if (!ownerRaw) return null
-
-  if (ownerRaw.org_id) {
-    await Promise.all([
-      logAuditEvent({
-        orgId:      ownerRaw.org_id,
-        action:     'owner_portal.accessed',
-        targetType: 'owner_portal_token',
-        targetId:   portalToken.id,
-      }),
-      supabase.from('org_milestones').upsert(
-        { org_id: ownerRaw.org_id, milestone: 'first_owner_portal_view' },
-        { onConflict: 'org_id,milestone', ignoreDuplicates: true }
-      ),
-    ])
+  if (!portalToken) return { terminal: null, row: null }
+  if (portalToken.revoked_at) return { terminal: { status: 'revoked' }, row: null }
+  if (portalToken.expires_at && new Date(portalToken.expires_at) < new Date()) {
+    return { terminal: { status: 'expired' }, row: null }
   }
+  return { terminal: null, row: portalToken }
+}
 
-  const property = unwrapJoin(ownerRaw.properties)
+// ── Portfolio scoping (the tenant-isolation boundary) ────────────────────────
 
-  if (!property) return null
+interface PortfolioScope {
+  isMulti:             boolean
+  portfolioProperties: OwnerPortalProperty[]
+  selectedProperty:    string
+  viewProperty:        OwnerPortalProperty | null
+  /** Property IDs every downstream query is restricted to. Token-derived only. */
+  txnPropertyIds:      string[]
+}
 
-  // ── Multi-property portfolio setup ──────────────────────────────────────────
+function resolveSelectedProperty(
+  isMulti:       boolean,
+  propertyIds:   string[],
+  propertyParam: string | undefined,
+  fallbackId:    string,
+): string {
+  if (!isMulti) return fallbackId
+  if (propertyParam === 'all') return 'all'
+  if (propertyParam !== undefined && propertyIds.includes(propertyParam)) return propertyParam
+  return 'all'
+}
+
+/**
+ * Builds the property scope for this token. `propertyParam` is a URL query
+ * value and is therefore untrusted: it can only ever SELECT among the IDs the
+ * token already authorizes, never widen them.
+ */
+async function resolvePortfolioScope(
+  supabase:      SupabaseLike,
+  portalToken:   PortalTokenRow,
+  orgId:         string,
+  property:      OwnerPortalProperty,
+  propertyParam: string | undefined,
+): Promise<PortfolioScope> {
   const isMulti = !!portalToken.is_multi
     && Array.isArray(portalToken.property_ids)
     && portalToken.property_ids.length > 1
@@ -169,41 +199,215 @@ export async function loadOwnerPortalData(
   let portfolioProperties: OwnerPortalProperty[] = [property]
 
   if (isMulti) {
-    const { data: props } = await supabase
-      .from('properties')
-      .select('id, name, address, city, state, zip')
-      .in('id', portalToken.property_ids!)
-      .eq('org_id', ownerRaw.org_id)   // scope to token's org
-      .order('name')
-
-    if (props && props.length > 0) portfolioProperties = props
+    const props = unwrapList<OwnerPortalProperty>(
+      await supabase
+        .from('properties')
+        .select('id, name, address, city, state, zip')
+        .in('id', portalToken.property_ids!)
+        .eq('org_id', orgId)   // scope to token's org
+        .order('name') as PostgrestResult<OwnerPortalProperty[]>,
+      { site: 'owner-portal.portfolioProperties', orgId },
+    )
+    if (props.length > 0) portfolioProperties = props
   }
 
   const propertyIds      = portfolioProperties.map((p) => p.id)
-  const selectedProperty = isMulti
-    ? ((propertyParam === 'all' || propertyIds.includes(propertyParam ?? '')) ? (propertyParam ?? 'all') : 'all')
-    : property.id
+  const selectedProperty = resolveSelectedProperty(isMulti, propertyIds, propertyParam, property.id)
 
   const viewProperty = isMulti
     ? (portfolioProperties.find((p) => p.id === selectedProperty) ?? null)
     : property
+
+  const txnPropertyIds = selectedProperty === 'all'
+    ? propertyIds
+    : [(viewProperty ?? property).id]
+
+  return { isMulti, portfolioProperties, selectedProperty, viewProperty, txnPropertyIds }
+}
+
+// ── Capital plan ─────────────────────────────────────────────────────────────
+
+/**
+ * Re-applies tenant isolation to the org-wide capex projection cache. Pure and
+ * separately testable precisely because it is the step that, if skipped, leaks
+ * a sibling owner's properties into this owner's portal. Mutates in place —
+ * the payload is a freshly-parsed jsonb value owned by this request.
+ */
+function filterCapexToOwnedProperties(
+  payload:            CapExProjectionPayload,
+  allowedPropertyIds: Set<string>,
+): void {
+  for (const year of Object.keys(payload.projections)) {
+    const proj = payload.projections[Number(year)]!
+    proj.items = proj.items.filter((i) => allowedPropertyIds.has(i.property_id))
+    proj.total_low  = proj.items.reduce((s, i) => s + i.cost_low, 0)
+    proj.total_high = proj.items.reduce((s, i) => s + i.cost_high, 0)
+    if (proj.items.length === 0) delete payload.projections[Number(year)]
+  }
+}
+
+async function loadCapexPayload(
+  supabase:       SupabaseLike,
+  orgId:          string,
+  txnPropertyIds: string[],
+  portalTokenId:  string,
+): Promise<CapExProjectionPayload | null> {
+  const currentYear = new Date().getFullYear()
+
+  const capexMilestone = unwrap(
+    await supabase
+      .from('org_milestones')
+      .select('value')
+      .eq('org_id', orgId)
+      .eq('milestone', `capex_projection_${currentYear}`)
+      .maybeSingle() as PostgrestResult<{ value: unknown }>,
+    { site: 'owner-portal.capexMilestone', orgId },
+  )
+
+  const payload = (capexMilestone?.value as CapExProjectionPayload | undefined) ?? null
+  if (!payload) return null
+
+  filterCapexToOwnedProperties(payload, new Set(txnPropertyIds))
+
+  // Audit: log capital plan view (non-blocking — never throws)
+  void logAuditEvent({
+    orgId,
+    action:     'owner_portal.capital_plan.accessed',
+    targetType: 'owner_portal_token',
+    targetId:   portalTokenId,
+    // No owner name or email in metadata — the token ID is sufficient
+    // for investigation without logging PII.
+    metadata:   { property_ids: txnPropertyIds },
+  })
+
+  return payload
+}
+
+// ── Derivations ──────────────────────────────────────────────────────────────
+
+function summarize(txns: OwnerPortalTxn[]): {
+  totalRevenue: number; totalExpenses: number; netIncome: number
+} {
+  let totalRevenue = 0
+  let totalExpenses = 0
+  for (const t of txns) {
+    if ((t.transaction_type as TxnType) === 'revenue') totalRevenue += t.amount
+    else if ((t.transaction_type as TxnType) === 'expense') totalExpenses += t.amount
+  }
+  return { totalRevenue, totalExpenses, netIncome: totalRevenue - totalExpenses }
+}
+
+function groupByProperty(txns: OwnerPortalTxn[]): Map<string, OwnerPortalTxn[]> {
+  const byProperty = new Map<string, OwnerPortalTxn[]>()
+  for (const t of txns) {
+    const list = byProperty.get(t.property_id) ?? []
+    list.push(t)
+    byProperty.set(t.property_id, list)
+  }
+  return byProperty
+}
+
+function formatAddress(p: OwnerPortalProperty | null): string | null {
+  if (!p) return null
+  const parts = [p.address, p.city, p.state, p.zip].filter(Boolean)
+  return parts.length ? parts.join(', ') : null
+}
+
+async function recordAccess(
+  supabase:      SupabaseLike,
+  portalTokenId: string,
+  orgId:         string | null,
+): Promise<void> {
+  await supabase
+    .from('owner_portal_tokens')
+    .update({ last_accessed_at: new Date().toISOString() })
+    .eq('id', portalTokenId)
+
+  if (!orgId) return
+
+  await Promise.all([
+    logAuditEvent({
+      orgId,
+      action:     'owner_portal.accessed',
+      targetType: 'owner_portal_token',
+      targetId:   portalTokenId,
+    }),
+    supabase.from('org_milestones').upsert(
+      { org_id: orgId, milestone: 'first_owner_portal_view' },
+      { onConflict: 'org_id,milestone', ignoreDuplicates: true }
+    ),
+  ])
+}
+
+// ── Entry point ──────────────────────────────────────────────────────────────
+
+export async function loadOwnerPortalData(
+  token:        string,
+  monthParam:   string | undefined,
+  propertyParam: string | undefined,
+): Promise<OwnerPortalPageState | null> {
+  const supabase = createServiceClient({ publicSurface: 'owner--token--load-owner-portal-data' })
+
+  const { terminal, row: portalToken } = await validatePortalToken(supabase, token)
+  if (terminal) return terminal
+  if (!portalToken) return null
+
+  const ownerRaw = unwrapJoin(portalToken.property_owners) as {
+    org_id: string | null
+    name: string
+    revenue_share_pct: number | null
+    share_capital_plan?: boolean
+    properties: unknown
+  } | null
+  if (!ownerRaw) return null
+
+  await recordAccess(supabase, portalToken.id, ownerRaw.org_id)
+
+  const property = unwrapJoin(ownerRaw.properties) as OwnerPortalProperty | null
+  if (!property) return null
+
+  const scope = await resolvePortfolioScope(
+    supabase, portalToken, ownerRaw.org_id ?? '', property, propertyParam,
+  )
+  const { txnPropertyIds, selectedProperty, viewProperty } = scope
 
   // Fetch all visible transactions (last 12 months to cover 6-month picker)
   const since = new Date()
   since.setMonth(since.getMonth() - 11)
   since.setDate(1)
 
-  const txnPropertyIds = selectedProperty === 'all' ? propertyIds : [(viewProperty ?? property).id]
+  // Occupancy — a rolling 13-month booking window in one query; current month /
+  // same-month-last-year / rolling-12mo are all derived from it.
+  const thirteenMonthsAgo = new Date()
+  thirteenMonthsAgo.setMonth(thirteenMonthsAgo.getMonth() - 13)
 
-  const { data: transactions } = await supabase
-    .from('owner_transactions')
-    .select('id, property_id, transaction_type, category, source, amount, description, transaction_date, notes')
-    .in('property_id', txnPropertyIds)
-    .eq('visible_to_owner', true)
-    .gte('transaction_date', since.toISOString().split('T')[0]!)
-    .order('transaction_date', { ascending: false })
+  const [transactionsRes, bookingsRes] = await Promise.all([
+    supabase
+      .from('owner_transactions')
+      .select('id, property_id, transaction_type, category, source, amount, description, transaction_date, notes')
+      .in('property_id', txnPropertyIds)
+      .eq('visible_to_owner', true)
+      .gte('transaction_date', since.toISOString().split('T')[0]!)
+      .order('transaction_date', { ascending: false }),
 
-  const allTxns = transactions ?? []
+    supabase
+      .from('bookings')
+      .select('id, property_id, checkin_date, checkout_date, status')
+      .in('property_id', txnPropertyIds)
+      .eq('is_block', false)
+      .in('status', ['confirmed', 'tentative'])
+      .gte('checkout_date', thirteenMonthsAgo.toISOString().split('T')[0]!)
+      .order('checkin_date', { ascending: true }),
+  ])
+
+  const allTxns = unwrapList<OwnerPortalTxn>(
+    transactionsRes as PostgrestResult<OwnerPortalTxn[]>,
+    { site: 'owner-portal.transactions', orgId: ownerRaw.org_id ?? undefined },
+  )
+  const bookingsRaw = unwrapList(
+    bookingsRes as PostgrestResult<Parameters<typeof computeOccupancy>[0]>,
+    { site: 'owner-portal.bookings', orgId: ownerRaw.org_id ?? undefined },
+  )
 
   // Month filter
   const availableMonths  = getLastSixMonths()
@@ -214,22 +418,8 @@ export async function loadOwnerPortalData(
     (t) => toMonthParam(t.transaction_date) === selectedMonth
   )
 
-  // Occupancy — fetch a rolling 13-month booking window in one query and
-  // derive current month / same-month-last-year / rolling-12mo from it.
-  const thirteenMonthsAgo = new Date()
-  thirteenMonthsAgo.setMonth(thirteenMonthsAgo.getMonth() - 13)
-
-  const { data: bookingsRaw } = await supabase
-    .from('bookings')
-    .select('id, property_id, checkin_date, checkout_date, status')
-    .in('property_id', txnPropertyIds)
-    .eq('is_block', false)
-    .in('status', ['confirmed', 'tentative'])
-    .gte('checkout_date', thirteenMonthsAgo.toISOString().split('T')[0]!)
-    .order('checkin_date', { ascending: true })
-
   const occupancy = computeOccupancy(
-    bookingsRaw ?? [],
+    bookingsRaw,
     selectedMonth,
     selectedProperty === 'all' ? txnPropertyIds.length : 1
   )
@@ -238,70 +428,13 @@ export async function loadOwnerPortalData(
     `${Number(selectedMonth.split('-')[0]) - 1}-${selectedMonth.split('-')[1]}`
   )
 
-  // Capital plan — only if PM has opted in for this owner
-  const shareCapitalPlan = (ownerRaw as { share_capital_plan?: boolean }).share_capital_plan ?? false
+  // Capital plan — only if the PM has opted in for this owner
+  const shareCapitalPlan = ownerRaw.share_capital_plan ?? false
+  const capexPayload = shareCapitalPlan && ownerRaw.org_id
+    ? await loadCapexPayload(supabase, ownerRaw.org_id, txnPropertyIds, portalToken.id)
+    : null
 
-  let capexPayload: CapExProjectionPayload | null = null
-
-  if (shareCapitalPlan && ownerRaw.org_id) {
-    const currentYear = new Date().getFullYear()
-
-    const { data: capexMilestone } = await supabase
-      .from('org_milestones')
-      .select('value')
-      .eq('org_id', ownerRaw.org_id)
-      .eq('milestone', `capex_projection_${currentYear}`)
-      .maybeSingle()
-
-    capexPayload = (capexMilestone?.value as CapExProjectionPayload) ?? null
-
-    if (capexPayload) {
-      // Strict tenant isolation: filter to only this owner's properties.
-      // property_ids comes from the token (server-validated), never from
-      // a user-supplied query parameter.
-      const allowedPropertyIds = new Set(txnPropertyIds)
-
-      for (const year of Object.keys(capexPayload.projections)) {
-        const proj = capexPayload.projections[Number(year)]!
-        proj.items = proj.items.filter((i) => allowedPropertyIds.has(i.property_id))
-        proj.total_low  = proj.items.reduce((s, i) => s + i.cost_low, 0)
-        proj.total_high = proj.items.reduce((s, i) => s + i.cost_high, 0)
-        if (proj.items.length === 0) delete capexPayload.projections[Number(year)]
-      }
-
-      // Audit: log capital plan view (non-blocking — never throws)
-      void logAuditEvent({
-        orgId:      ownerRaw.org_id,
-        action:     'owner_portal.capital_plan.accessed',
-        targetType: 'owner_portal_token',
-        targetId:   portalToken.id,
-        // No owner name or email in metadata — the token ID is sufficient
-        // for investigation without logging PII.
-        metadata:   { property_ids: txnPropertyIds },
-      })
-    }
-  }
-
-  // Summary from filtered transactions
-  const totalRevenue  = filteredTxns
-    .filter((t) => (t.transaction_type as TxnType) === 'revenue')
-    .reduce((s, t) => s + t.amount, 0)
-  const totalExpenses = filteredTxns
-    .filter((t) => (t.transaction_type as TxnType) === 'expense')
-    .reduce((s, t) => s + t.amount, 0)
-  const netIncome = totalRevenue - totalExpenses
-
-  const txnsByProperty = new Map<string, OwnerPortalTxn[]>()
-  for (const t of filteredTxns) {
-    const list = txnsByProperty.get(t.property_id) ?? []
-    list.push(t)
-    txnsByProperty.set(t.property_id, list)
-  }
-
-  const addressParts = viewProperty
-    ? [viewProperty.address, viewProperty.city, viewProperty.state, viewProperty.zip].filter(Boolean)
-    : []
-  const addressDisplay = addressParts.length ? addressParts.join(', ') : null
+  const { totalRevenue, totalExpenses, netIncome } = summarize(filteredTxns)
 
   return {
     status: 'ok',
@@ -310,15 +443,15 @@ export async function loadOwnerPortalData(
       portalTokenId:       portalToken.id,
       ownerName:           ownerRaw.name,
       revenueSharePct:     ownerRaw.revenue_share_pct,
-      isMulti,
-      portfolioProperties,
+      isMulti:             scope.isMulti,
+      portfolioProperties: scope.portfolioProperties,
       selectedProperty,
       viewProperty,
-      addressDisplay,
+      addressDisplay:      formatAddress(viewProperty),
       availableMonths,
       selectedMonth,
       filteredTxns,
-      txnsByProperty,
+      txnsByProperty:      groupByProperty(filteredTxns),
       totalRevenue,
       totalExpenses,
       netIncome,

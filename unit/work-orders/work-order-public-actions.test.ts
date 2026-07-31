@@ -15,9 +15,17 @@ vi.mock('@/lib/sms/telnyx', () => ({
   normalizePhoneToE164: vi.fn(),
   sendSMS:              vi.fn(async () => undefined),
 }))
-vi.mock('@/lib/rate-limit', () => ({
-  signOffRatelimit: { limit: vi.fn(async () => ({ success: true })) },
-}))
+vi.mock('@/lib/rate-limit', async () => {
+  // checkLimit() is now the only sanctioned way to consult a limiter
+  // (lib/rate-limit.ts). The stub delegates to the limiter doubles below
+  // so existing `.limit` assertions and fail-policy tests still apply.
+  const { checkLimitStub, retryAfterSecondsStub } = await import('@/unit/stubs/rate-limit')
+  return {
+    signOffRatelimit: { limit: vi.fn(async () => ({ success: true })) },
+    checkLimit:         checkLimitStub(),
+    retryAfterSeconds:  retryAfterSecondsStub,
+  }
+})
 
 import { requireOrgMember } from '@/lib/auth'
 import { createServiceClient } from '@/lib/supabase/server'
@@ -34,16 +42,21 @@ import {
 type Resp = { data?: unknown; error?: unknown }
 
 function makeSupabase(queue: Record<string, Resp[]>) {
-  const uploadMock = vi.fn(async () => ({ error: null }))
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars -- args captured for path assertions
+  const uploadMock = vi.fn(async (_path: string, _file: unknown, _opts?: unknown) => ({ error: null }))
   const from = vi.fn((table: string) => {
     const q = queue[table]
     const result: Resp = q?.length ? q.shift()! : { data: null, error: null }
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const chain: any = {}
-    for (const m of ['select', 'insert', 'update', 'eq']) {
+    // `.is(...)` is the sign-off UPDATE's TOCTOU precondition
+    // (.is('public_signed_off_at', null)); `.maybeSingle()` is how it reads
+    // back whether it actually matched a row.
+    for (const m of ['select', 'insert', 'update', 'eq', 'is']) {
       chain[m] = vi.fn(() => chain)
     }
-    chain.single = vi.fn(() => Promise.resolve(result))
+    chain.single      = vi.fn(() => Promise.resolve(result))
+    chain.maybeSingle = vi.fn(() => Promise.resolve(result))
     chain.then   = (resolve: (v: unknown) => unknown) => Promise.resolve(result).then(resolve)
     return chain
   })
@@ -234,7 +247,10 @@ describe('actions/work-order-public', () => {
 
     it('records a sign-off for a valid, unexpired token', async () => {
       const supabase = makeSupabase({
-        work_orders: [{ data: baseWo(), error: null }, { error: null }],
+        // 2nd entry = the conditional UPDATE's own
+        // .select('id').maybeSingle() readback: a row means this request won
+        // the .is('public_signed_off_at', null) claim.
+        work_orders: [{ data: baseWo(), error: null }, { data: { id: 'wo_1' }, error: null }],
       })
       vi.mocked(createServiceClient).mockReturnValue(supabase as never)
 
@@ -279,6 +295,28 @@ describe('actions/work-order-public', () => {
       const result = await submitWorkOrderSignOff(VALID_TOKEN, 'All done')
 
       expect(result).toEqual({ error: 'This work order has already been signed off' })
+    })
+
+    // M-3: the read above is only a nicer error message. The real guard is the
+    // precondition inside the UPDATE — two concurrent submits both pass the
+    // read, and exactly one matches the .is('public_signed_off_at', null)
+    // clause. The loser must NOT go on to upload photos, log an audit event,
+    // or fire the downstream notification.
+    it('TOCTOU: the concurrent loser is rejected even though its pre-read saw an unsigned work order', async () => {
+      const supabase = makeSupabase({
+        work_orders: [
+          { data: baseWo(), error: null },        // pre-read: not signed off yet
+          { data: null, error: null },            // conditional UPDATE matched ZERO rows
+        ],
+      })
+      vi.mocked(createServiceClient).mockReturnValue(supabase as never)
+
+      const result = await submitWorkOrderSignOff(VALID_TOKEN, 'All done', undefined, 150)
+
+      expect(result).toEqual({ error: 'This work order has already been signed off' })
+      expect(logAuditEvent).not.toHaveBeenCalled()
+      expect(inngest.send).not.toHaveBeenCalled()
+      expect(supabase.uploadMock).not.toHaveBeenCalled()
     })
 
     it('rejects sign-off on a cancelled work order', async () => {
@@ -338,7 +376,7 @@ describe('actions/work-order-public', () => {
 
     it('uploads sign-off photos and inserts work_order_photos rows', async () => {
       const supabase = makeSupabase({
-        work_orders:        [{ data: baseWo(), error: null }, { error: null }],
+        work_orders:        [{ data: baseWo(), error: null }, { data: { id: 'wo_1' }, error: null }],
         work_order_photos:  [{ error: null }],
       })
       vi.mocked(createServiceClient).mockReturnValue(supabase as never)
@@ -349,6 +387,12 @@ describe('actions/work-order-public', () => {
       expect(result).toEqual({ success: true })
       expect(supabase.storage.from).toHaveBeenCalledWith('work-order-photos')
       expect(supabase.uploadMock).toHaveBeenCalled()
+
+      // M4: the object path must start with the owning org's id — the
+      // work-order-photos bucket moves to private + org-scoped storage RLS
+      // keyed on (storage.foldername(name))[1].
+      const uploadedPath = String((supabase.uploadMock.mock.calls as unknown as unknown[][])[0]![0])
+      expect(uploadedPath.startsWith('org_1/')).toBe(true)
     })
   })
 })

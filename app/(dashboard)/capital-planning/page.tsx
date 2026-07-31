@@ -1,4 +1,5 @@
 import { requireOrgMember }          from '@/lib/auth'
+import { unwrap, unwrapList }        from '@/lib/supabase/unwrap'
 import Link                          from 'next/link'
 import { TriggerLedgerButton }       from './trigger-ledger-button'
 import { TriggerProjectionsButton }  from './trigger-projections-button'
@@ -39,41 +40,54 @@ export default async function CapitalPlanningPage({
   const currentYear = new Date().getFullYear()
   const { property: selectedPropertyId } = await searchParams
 
-  // Load CapEx projection
-  const { data: milestone } = await supabase
-    .from('org_milestones')
-    .select('value, achieved_at')
-    .eq('org_id', membership.org_id)
-    .eq('milestone', `capex_projection_${currentYear}`)
-    .maybeSingle()
-
-  // Load depreciation ledger
   const priorYear = currentYear - 1
-  const { data: deprMilestone } = await supabase
-    .from('org_milestones')
-    .select('value, achieved_at')
-    .eq('org_id', membership.org_id)
-    .eq('milestone', `depreciation_ledger_${priorYear}`)
-    .maybeSingle()
 
-  // Load properties for filter
-  const { data: properties } = await supabase
-    .from('properties')
-    .select('id, name')
-    .eq('org_id', membership.org_id)
-    .eq('is_active', true)
-    .order('name')
+  // Four independent reads that were awaited one after another — four serial
+  // round trips on a page that renders nothing until the last one lands.
+  const [milestoneRes, deprMilestoneRes, propertiesRes, assetStatusesRes] = await Promise.all([
+    // CapEx projection
+    supabase
+      .from('org_milestones')
+      .select('value, achieved_at')
+      .eq('org_id', membership.org_id)
+      .eq('milestone', `capex_projection_${currentYear}`)
+      .maybeSingle(),
 
-  // Load replacement statuses for all assets — used to enrich projection items
-  const { data: assetStatuses } = await supabase
-    .from('property_assets')
-    .select('id, replacement_status')
-    .eq('org_id', membership.org_id)
-    .eq('is_active', true)
-    .neq('replacement_status', 'projected')  // only load non-default statuses
+    // Depreciation ledger
+    supabase
+      .from('org_milestones')
+      .select('value, achieved_at')
+      .eq('org_id', membership.org_id)
+      .eq('milestone', `depreciation_ledger_${priorYear}`)
+      .maybeSingle(),
+
+    // Properties for the filter
+    supabase
+      .from('properties')
+      .select('id, name')
+      .eq('org_id', membership.org_id)
+      .eq('is_active', true)
+      .order('name'),
+
+    // Replacement statuses — used to enrich projection items
+    supabase
+      .from('property_assets')
+      .select('id, replacement_status')
+      .eq('org_id', membership.org_id)
+      .eq('is_active', true)
+      .neq('replacement_status', 'projected'),  // only load non-default statuses
+  ])
+
+  // Throws to app/(dashboard)/capital-planning/error.tsx on a failed read, so
+  // an outage isn't rendered as "No projection data yet."
+  const ctx = { site: 'page.capital-planning', orgId: membership.org_id }
+  const milestone     = unwrap(milestoneRes,          { ...ctx, extra: { query: 'capex_milestone' } })
+  const deprMilestone = unwrap(deprMilestoneRes,      { ...ctx, extra: { query: 'depreciation_milestone' } })
+  const properties    = unwrapList(propertiesRes,     { ...ctx, extra: { query: 'properties' } })
+  const assetStatuses = unwrapList(assetStatusesRes,  { ...ctx, extra: { query: 'property_assets' } })
 
   const statusByAsset = Object.fromEntries(
-    (assetStatuses ?? []).map((a) => [a.id, a.replacement_status as string])
+    assetStatuses.map((a) => [a.id, a.replacement_status as string])
   )
 
   const payload     = milestone?.value as CapExProjectionPayload | null
@@ -110,7 +124,7 @@ export default async function CapitalPlanningPage({
   const monthlyLow  = Math.round(totalLow10  / 120)
   const monthlyHigh = Math.round(totalHigh10 / 120)
 
-  const selectedProperty = properties?.find((p) => p.id === selectedPropertyId) ?? null
+  const selectedProperty = properties.find((p) => p.id === selectedPropertyId) ?? null
 
   return (
     <div className="max-w-4xl">
@@ -129,10 +143,10 @@ export default async function CapitalPlanningPage({
       </div>
 
       {/* Property filter */}
-      {(properties?.length ?? 0) > 1 && (
+      {properties.length > 1 && (
         <div className="mb-6">
           <PropertyFilterSelect
-            properties={properties ?? []}
+            properties={properties}
             selectedPropertyId={selectedPropertyId}
           />
         </div>

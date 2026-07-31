@@ -1,20 +1,36 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createServiceClient } from '@/lib/supabase/server'
-import { guidebookRedeemLimiter } from '@/lib/rate-limit'
+import { guidebookRedeemLimiter, checkLimit } from '@/lib/rate-limit'
+import { extractClientIp } from '@/lib/integrations/webhook-verification'
+import { reportError } from '@/lib/observability/report-error'
 
+/**
+ * POST /api/guidebook/redeem
+ *
+ * Called by a guest tapping a sponsor offer on their guidebook page. No
+ * session by definition — reachability comes from proxy.ts's '/api/guidebook'
+ * TOKEN_ROUTES entry (before that entry existed, every call here 307'd to
+ * /login and this endpoint was dead).
+ */
 export async function POST(req: NextRequest): Promise<NextResponse> {
+  // Abuse limiter → fails OPEN: a Redis outage must not stop guests
+  // redeeming offers. The broader per-IP enumeration ceiling for this surface
+  // is proxy.ts's guidebookRatelimit; this one bounds redemption spam
+  // specifically.
+  const decision = await checkLimit(guidebookRedeemLimiter, extractClientIp(req) ?? 'unknown', {
+    onError: 'allow',
+    site:    'route.guidebook.redeem.POST',
+  })
+  if (!decision.allowed) {
+    return NextResponse.json({ error: 'Too many requests' }, { status: 429 })
+  }
+
+  const body = await req.json().catch(() => null) as { sponsorId?: string; bookingToken?: string | null } | null
+  if (!body?.sponsorId || typeof body.sponsorId !== 'string') {
+    return NextResponse.json({ error: 'sponsorId is required' }, { status: 400 })
+  }
+
   try {
-    const ip = req.headers.get('x-forwarded-for')?.split(',')[0]?.trim() ?? 'unknown'
-    const { success } = await guidebookRedeemLimiter.limit(ip)
-    if (!success) {
-      return NextResponse.json({ error: 'Too many requests' }, { status: 429 })
-    }
-
-    const body = await req.json() as { sponsorId?: string; bookingToken?: string | null }
-    if (!body.sponsorId || typeof body.sponsorId !== 'string') {
-      return NextResponse.json({ error: 'sponsorId is required' }, { status: 400 })
-    }
-
     const supabase = createServiceClient({ publicSurface: 'api-guidebook-redeem' })
 
     const { data: sponsor } = await supabase
@@ -47,13 +63,20 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     })
 
     if (error) {
-      // Table may not exist until the local migration is applied post-reconcile.
-      // Redemption logging is best-effort — never fail the guest UX.
-      console.error('[guidebook-redeem] insert failed (non-fatal)')
+      // Redemption logging is best-effort — never fail the guest UX over it —
+      // but it must not be SILENT either: without the code/message here, a
+      // sustained failure on this table is indistinguishable from "no guest
+      // redeemed anything" in the sponsor's reporting.
+      console.error(`[guidebook-redeem] insert failed (non-fatal): ${error.code} ${error.message}`)
+      reportError(new Error(error.message), { site: 'route.guidebook.redeem.insert' })
     }
 
     return NextResponse.json({ ok: true })
-  } catch {
+  } catch (err) {
+    // Same reasoning: the guest still gets their offer, but the failure is
+    // reported rather than dissolved into a bare success response.
+    console.error('[guidebook-redeem] unexpected error:', err)
+    reportError(err, { site: 'route.guidebook.redeem.POST' })
     return NextResponse.json({ ok: true })
   }
 }

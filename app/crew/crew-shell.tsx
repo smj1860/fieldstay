@@ -1,14 +1,17 @@
 'use client'
-import { useEffect, useState, useTransition, useSyncExternalStore } from 'react'
+import { useEffect, useRef, useState, useTransition, useSyncExternalStore } from 'react'
 import Link                         from 'next/link'
 import { usePathname, useRouter }   from 'next/navigation'
 import { CalendarCheck, CalendarDays, MessageSquare, LogOut, Bell, X, HelpCircle, WifiOff, Wrench } from 'lucide-react'
 import { useLiveQuery }             from 'dexie-react-hooks'
 import { DexieProvider, useDexieDb } from '@/lib/dexie/context'
 import { CrewContext }              from '@/lib/crew/crew-context'
-import { closeDexieDb, getDexieDb } from '@/lib/dexie/schema'
-import { getSyncEngine }            from '@/lib/dexie/syncService'
+import { closeDexieDb, markDexieShutdown, resumeDexieDb } from '@/lib/dexie/schema'
+import { getSyncEngine, disposeSyncEngine } from '@/lib/dexie/syncService'
 import { processPendingPhotoUploads } from '@/lib/dexie/photo-sync'
+import { countPendingSyncWork }      from '@/lib/dexie/prune'
+import { isOnline }                  from '@/lib/dexie/net'
+import { FailedSyncBanner }          from './_components/failed-sync-banner'
 import { createClient }             from '@/lib/supabase/client'
 import { cn }                       from '@/lib/utils'
 import { InstallBanner }            from '@/components/pwa/install-banner'
@@ -59,6 +62,29 @@ export function CrewShell({
   const [loggingOut, setLoggingOut]             = useState(false)
   const [unsyncedCount, setUnsyncedCount]       = useState(0)
   const [showUnsyncedWarning, setShowUnsyncedWarning] = useState(false)
+  // Flips the moment logout starts tearing down local storage. Depended on by
+  // the background-drain effect below so React runs that effect's cleanup —
+  // removing the 'online' listener and clearing the 30 s interval — AT LOGOUT
+  // rather than whenever this component eventually unmounts. Restoring
+  // connectivity is part of the logout flow itself ("Log Out Anyway" is
+  // clicked once the device is back online), so those two entry points fire
+  // during the teardown, not safely after it.
+  const [signedOut, setSignedOut] = useState(false)
+
+  // A logout latches this user's local database as deleted (markDexieShutdown,
+  // see performLogout) and that latch is module state, so it outlives the
+  // client-side navigation to /login. Mounting CrewShell again means the crew
+  // layout re-authenticated a session for this user, which is exactly when the
+  // latch must be lifted. Done on the FIRST render rather than in an effect
+  // because DexieProvider — a child, rendered before any effect runs — asks
+  // for the database handle during render, and would otherwise hold a dead
+  // one for the whole new session. Deliberately once per mount: re-running it
+  // on every render would clear the latch the logout re-render just set.
+  const resumedRef = useRef<string | null>(null)
+  if (resumedRef.current === null) {
+    resumedRef.current = userId
+    resumeDexieDb(userId)
+  }
 
   /**
    * performLogout() deletes all local Dexie/photo-queue storage for this
@@ -98,17 +124,14 @@ export function CrewShell({
         ])
       }
 
-      const db = getDexieDb(userId)
-      const [mutationCount, photoCount] = await Promise.all([
-        db.mutations.count(),
-        db.pending_photo_uploads.count(),
-      ])
-      // Deliberately counts ALL rows, not just ones still under the retry
-      // budget — a dead-lettered (failed: true) mutation is exactly the
-      // case this guard exists for: it will never drain on its own, so
-      // it's just as much at risk of being silently lost on logout as one
-      // still actively retrying.
-      const pending = mutationCount + photoCount
+      // Counts work that is genuinely still on its way to the server.
+      // Dead-lettered rows are deliberately EXCLUDED: they'll never drain on
+      // their own, so counting them meant one ancient permanently-failed row
+      // fired this warning on every logout forever — training crew to click
+      // through the one dialog that exists to stop them destroying real work.
+      // They get their own actionable surface instead (FailedSyncBanner),
+      // which the user must retry or explicitly discard.
+      const { pending } = await countPendingSyncWork(userId)
 
       if (pending > 0) {
         setUnsyncedCount(pending)
@@ -123,6 +146,21 @@ export function CrewShell({
   }
 
   async function performLogout() {
+    // Order matters, and none of these three steps is redundant:
+    //
+    //  1. markDexieShutdown() latches the user's local database as gone. Every
+    //     drain/sync entry point checks it and refuses to open storage, so a
+    //     drain that is ALREADY mid-await, or one started afterwards by the
+    //     'online' event / 30 s interval / safety poll, cannot re-create the
+    //     database. Must precede the delete, not follow it.
+    //  2. setSignedOut(true) tears down this component's own 'online' listener
+    //     and interval via the effect cleanup below, instead of leaving them
+    //     armed until unmount.
+    //  3. disposeSyncEngine() stops the outbox retry timer and drops the
+    //     module-level engine.
+    markDexieShutdown(userId)
+    setSignedOut(true)
+    disposeSyncEngine()
     await closeDexieDb()
     // Also clear the service worker's cached app shell — same "no residual
     // data on a shared device after sign-out" principle as the Dexie
@@ -200,10 +238,14 @@ export function CrewShell({
   }
 
   useEffect(() => {
-    if (!userId) return
+    if (!userId || signedOut) return
     const supabase = createClient()
 
+    // Both drains no-op internally while offline (lib/dexie/net.ts), so an
+    // offline tick can never charge a retry for an attempt that never left
+    // the device. Gating here as well just avoids the pointless work.
     const run = async () => {
+      if (!isOnline() || signedOut) return
       await getSyncEngine(userId).processOutbox()
       await processPendingPhotoUploads(supabase, userId)
     }
@@ -216,7 +258,7 @@ export function CrewShell({
       globalThis.removeEventListener('online', run)
       clearInterval(interval)
     }
-  }, [userId])
+  }, [userId, signedOut])
 
   return (
     <CrewContext.Provider value={{ crewName, userId }}>
@@ -300,6 +342,8 @@ export function CrewShell({
             </p>
           </Dialog>
         )}
+
+        <FailedSyncBanner userId={userId} />
 
         <InstallBanner />
 
@@ -416,10 +460,10 @@ function SyncStatus() {
   // paint — reading navigator.onLine during SSR would diverge from the
   // client, causing a hydration mismatch. getServerSnapshot below covers
   // that; the real value is synced in as soon as the client mounts.
-  const isOnline = useSyncExternalStore(subscribeToOnlineStatus, () => navigator.onLine, () => true)
+  const online = useSyncExternalStore(subscribeToOnlineStatus, () => navigator.onLine, () => true)
   const [showInfo, setShowInfo] = useState(false)
 
-  if (isOnline) return null
+  if (online) return null
   return (
     <>
       <button
@@ -553,7 +597,7 @@ const FAQ_ITEMS = [
   },
   {
     q: 'How do I know if something hasn’t synced yet?',
-    a: 'An "Offline" pill appears at the top of the screen whenever your phone has no connection — that’s expected and nothing to worry about. If you see a red "Confirmation didn’t sync — check your connection" message with a Retry button, that means the app already tried several times on its own and needs you to tap Retry once you’re back in range.',
+    a: 'An "Offline" pill appears at the top of the screen whenever your phone has no connection — that’s expected and nothing to worry about, and nothing is lost while it’s showing. If something genuinely couldn’t be saved to FieldStay, a red "didn’t sync" panel appears at the top of every screen listing exactly what’s stuck, with a Retry all button. Tap it once you’re back in range.',
   },
   {
     q: 'Do I need to keep the app open for things to sync, or does it happen in the background?',

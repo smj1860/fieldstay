@@ -1,5 +1,6 @@
 import { inngest } from '@/lib/inngest/client'
 import { createServiceClient } from '@/lib/supabase/server'
+import { fetchAllRows } from '@/lib/inngest/paginate'
 
 const MISSED_ASSIGNMENT_HOURS = 48
 
@@ -30,13 +31,24 @@ export const crewScoreRecompute = inngest.createFunction(
       const supabase = createServiceClient({ system: 'inngest:crew-score-recompute' })
       const cutoff = new Date(Date.now() - MISSED_ASSIGNMENT_HOURS * 60 * 60 * 1000).toISOString()
 
-      const { data: missedTurnovers } = await supabase
-        .from('turnovers')
-        .select('id, org_id, turnover_assignments(crew_member_id)')
-        .in('status', ['assigned', 'in_progress'])
-        .lt('checkout_datetime', cutoff)
+      // Paginated — unbounded, this was capped at PostgREST's 1000-row limit
+      // with no error, so past 1000 matching turnovers platform-wide the
+      // missed-assignment flagging silently stopped covering the platform.
+      const missedTurnovers = await fetchAllRows<{
+        id: string; org_id: string
+        turnover_assignments: Array<{ crew_member_id: string }> | null
+      }>(
+        (from, to) => supabase
+          .from('turnovers')
+          .select('id, org_id, turnover_assignments(crew_member_id)')
+          .in('status', ['assigned', 'in_progress'])
+          .lt('checkout_datetime', cutoff)
+          .order('id', { ascending: true })
+          .range(from, to),
+        { label: 'turnovers(missed-assignments)' }
+      )
 
-      const rows = (missedTurnovers ?? []).flatMap((t) =>
+      const rows = missedTurnovers.flatMap((t) =>
         (t.turnover_assignments ?? []).map((a) => ({
           turnover_id:    t.id,
           org_id:         t.org_id,

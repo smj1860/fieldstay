@@ -1,11 +1,10 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createServiceClient } from '@/lib/supabase/server'
-import { workOrderRatelimit } from '@/lib/rate-limit'
+import { workOrderRatelimit, checkLimit } from '@/lib/rate-limit'
 import { extractClientIp } from '@/lib/integrations/webhook-verification'
 import type { WoStatus } from '@/types/database'
-import { createVendorInvoice, dispatchCompletionEvents } from './helpers'
+import { createVendorInvoice, finalizeVendorCompletion, rollbackUnclaimedInvoice } from './helpers'
 
-import { reportError } from '@/lib/observability/report-error'
 /**
  * POST /api/work-orders/[token]/complete
  *
@@ -20,18 +19,15 @@ export async function POST(
 ) {
   const { token } = await params
 
-  // Public, unauthenticated route — rate limit by IP before touching the
-  // DB. Fails open on a Redis outage; a degraded limiter must never block
-  // a legitimate contractor's submission.
-  try {
-    const ip = extractClientIp(request) ?? 'unknown'
-    const { success } = await workOrderRatelimit.limit(`wo-complete:${ip}`)
-    if (!success) {
-      return NextResponse.json({ error: 'Too many requests. Please try again in a minute.' }, { status: 429 })
-    }
-  } catch (rlErr) {
-    console.error('[work-orders/complete] rate limit check failed', rlErr)
-    reportError(rlErr, { site: 'route.work-orders.complete.POST' })
+  // Public, unauthenticated route — rate limit by IP before touching the DB.
+  // Abuse/enumeration limiter → fails OPEN: a degraded limiter must never
+  // block a legitimate contractor's submission.
+  const rl = await checkLimit(workOrderRatelimit, `wo-complete:${extractClientIp(request) ?? 'unknown'}`, {
+    onError: 'allow',
+    site:    'route.work-orders.complete.POST',
+  })
+  if (!rl.allowed) {
+    return NextResponse.json({ error: 'Too many requests. Please try again in a minute.' }, { status: 429 })
   }
 
   const supabase = createServiceClient({ publicSurface: 'api-work-orders--token--complete' })
@@ -121,6 +117,18 @@ export async function POST(
     typeof item.quantity === 'number' && item.quantity > 0
   )
 
+  // Create the invoice BEFORE claiming the completion, and see the ordering
+  // note on createVendorInvoice() before reversing this: flipping the work
+  // order to 'completed' is the last irreversible step, so it must also be
+  // the last one. Claiming first published a completed work order whose
+  // invoice did not exist yet — briefly to any concurrent reader, and
+  // PERMANENTLY if this step then failed, since the vendor's retry could
+  // then only ever get the already-closed 409 and the invoice was lost.
+  const invoiceResult = await createVendorInvoice(supabase, workOrder, safeLineItems, subtotal)
+  if (!invoiceResult.ok) {
+    return NextResponse.json({ error: invoiceResult.error }, { status: 500 })
+  }
+
   // Atomically claim the completion — only succeeds once
   const { data: claimed } = await supabase
     .from('work_orders')
@@ -137,26 +145,22 @@ export async function POST(
     .single()
 
   if (!claimed) {
+    // Another path closed this work order between the lookup above and the
+    // claim. Take back the invoice this request just created rather than
+    // leaving it orphaned against a completion that never happened.
+    await rollbackUnclaimedInvoice(supabase, invoiceResult)
     return NextResponse.json({ error: 'Work order already closed' }, { status: 409 })
   }
 
-  const invoiceResult = await createVendorInvoice(supabase, claimed, safeLineItems, subtotal)
-  if (!invoiceResult.ok) {
-    return NextResponse.json({ error: invoiceResult.error }, { status: 500 })
-  }
-  const invoiceId = invoiceResult.invoiceId
-
-  // Record status update
-  await supabase.from('work_order_updates').insert({
-    work_order_id:             claimed.id,
-    org_id:                    claimed.org_id,
-    updated_via_vendor_portal: true,
-    status_from:               workOrder.status as WoStatus,
-    status_to:                 'completed',
+  await finalizeVendorCompletion(supabase, {
+    claimed,
+    invoiceResult,
+    safeLineItems,
+    subtotal,
     notes,
+    token,
+    previousStatus: workOrder.status as WoStatus,
   })
-
-  await dispatchCompletionEvents(supabase, claimed, invoiceId, token, notes, subtotal)
 
   return NextResponse.json({ success: true })
 }

@@ -4,6 +4,7 @@ import type { Metadata } from 'next'
 import { createServiceClient } from '@/lib/supabase/server'
 import { getWeatherForLocation } from '@/lib/weather/tomorrow'
 import { GuestGuidebookView } from '@/components/guidebook/guest-guidebook-view'
+import { GuidebookUnavailable } from '@/components/guidebook/guidebook-unavailable'
 import type { GuidebookSponsorView } from '@/components/guidebook/guest-guidebook-view'
 import type { GuidebookSponsor, GuidebookPropertyConfig, Property } from '@/types/database'
 
@@ -88,7 +89,13 @@ export default async function GuestGuidebookPage({
     .eq('org_id', config.org_id)
     .maybeSingle()
 
+  // M1 (isolation): decide this BEFORE constructing any client-component
+  // props. The config row holds wifi_password, check_in_instructions and
+  // house_rules; passing it to a 'use client' component puts it in the RSC
+  // flight payload (readable in page source) regardless of what that
+  // component chooses to render. The gate has to be here, on the server.
   const isActive = Boolean(config.is_published) && Boolean(orgConfig?.is_active)
+  if (!isActive) return <GuidebookUnavailable />
 
   const { data: sponsors } = await supabase
     .from('guidebook_sponsors')
@@ -128,7 +135,6 @@ export default async function GuestGuidebookPage({
       property={property}
       config={config as unknown as GuidebookPropertyConfig}
       sponsors={sponsorViews}
-      isActive={isActive}
       hourOfDay={hourOfDay}
       weather={weather}
       heroPhotoUrl={heroPhotoUrl(config.hero_photo_storage_path)}

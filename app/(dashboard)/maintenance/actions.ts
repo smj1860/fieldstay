@@ -17,6 +17,12 @@ import {
   dispatchWorkOrderEvents,
 } from './create-work-order-helpers'
 import { isVendorHardBlocked, VENDOR_HARD_BLOCKED_ERROR } from '@/lib/vendors/compliance'
+import { toStorageObjectPath } from '@/lib/storage/object-path'
+
+// work-order-photos is a PRIVATE bucket — reads go through short-lived
+// signed URLs, never a `/object/public/...` link.
+const WORK_ORDER_PHOTO_BUCKET      = 'work-order-photos'
+const PHOTO_SIGNED_URL_TTL_SECONDS = 300  // 5 minutes
 
 export type MaintenanceActionState = { error?: string; success?: boolean; workOrderId?: string; templateId?: string; warning?: string }
 
@@ -47,9 +53,19 @@ async function trackVendorAssignmentAgainstSuggestions(
     )
 
     if (overridden.length > 0) {
-      await service.from('work_orders')
+      // .eq('org_id') is mandatory, not redundant: this is a service-role
+      // client, so RLS is not a backstop and an id list that ever reached
+      // here from another org would be written unchecked. Its twin
+      // trackAssignmentAgainstSuggestions in turnovers/actions.ts got this
+      // filter from the CodeRabbit PR #512 review; this copy was missed.
+      const { error: overrideError } = await service.from('work_orders')
         .update({ suggestion_status: 'overridden' })
+        .eq('org_id', orgId)
         .in('id', overridden.map(wo => wo.id))
+      if (overrideError) {
+        console.error('[trackVendorAssignmentAgainstSuggestions] override update failed', overrideError)
+        reportError(overrideError, { site: 'serverAction.maintenance.trackVendorAssignmentAgainstSuggestions.override', orgId })
+      }
 
       const priorSuggestionRows = overridden.flatMap(wo =>
         (wo.suggested_vendor_ids ?? []).map(suggestedVendorId => ({
@@ -61,10 +77,14 @@ async function trackVendorAssignmentAgainstSuggestions(
         }))
       )
       if (priorSuggestionRows.length > 0) {
-        await service.from('vendor_assignment_outcomes').upsert(priorSuggestionRows, {
+        const { error: priorError } = await service.from('vendor_assignment_outcomes').upsert(priorSuggestionRows, {
           onConflict:       'work_order_id,vendor_id',
           ignoreDuplicates: false,
         })
+        if (priorError) {
+          console.error('[trackVendorAssignmentAgainstSuggestions] prior-suggestion upsert failed', priorError)
+          reportError(priorError, { site: 'serverAction.maintenance.trackVendorAssignmentAgainstSuggestions.prior', orgId })
+        }
       }
     }
 
@@ -76,10 +96,14 @@ async function trackVendorAssignmentAgainstSuggestions(
       vendor_id:      vendorId,
       was_suggestion: (wo.suggested_vendor_ids ?? []).includes(vendorId),
     }))
-    await service.from('vendor_assignment_outcomes').upsert(ensureRows, {
+    const { error: ensureError } = await service.from('vendor_assignment_outcomes').upsert(ensureRows, {
       onConflict:       'work_order_id,vendor_id',
       ignoreDuplicates: true,  // don't clobber a row the suggestion algorithm already scored
     })
+    if (ensureError) {
+      console.error('[trackVendorAssignmentAgainstSuggestions] ensure upsert failed', ensureError)
+      reportError(ensureError, { site: 'serverAction.maintenance.trackVendorAssignmentAgainstSuggestions.ensure', orgId })
+    }
   } catch (err) {
     // Suggestion-state/outcome tracking must never break the actual assignment
     console.error('[trackVendorAssignmentAgainstSuggestions]', err)
@@ -651,6 +675,89 @@ export async function recordWorkOrderPhoto(
   }
 }
 
+/**
+ * Mints short-lived signed URLs for a work order's photos.
+ *
+ * `work-order-photos` is a PRIVATE bucket: there is no public URL to build,
+ * and the RLS SELECT policy only sees objects whose first path segment is the
+ * caller's org — which legacy `wo-<id>/…` objects predate. Both problems are
+ * solved the same way: authorize here (org membership + the work order really
+ * belongs to that org), then sign with the service client so a legacy path
+ * resolves too instead of 404-ing on the PM.
+ */
+export async function getWorkOrderPhotoUrls(
+  workOrderId: string
+): Promise<{ urls?: Record<string, string>; error?: string }> {
+  try {
+    const { supabase, membership } = await requireOrgMember()
+
+    // IDOR gate — membership proves an org, not THIS work order.
+    //
+    // The error is read, not just the data: collapsing "the query failed" into
+    // the same 'Work order not found' the zero-rows case returns would show a
+    // PM a confident denial for a work order that exists, and hide a real
+    // outage behind what reads as a normal empty state. PGRST116 IS the
+    // zero-rows case for .single(), so it stays on the not-found path.
+    const { data: wo, error: woErr } = await supabase
+      .from('work_orders')
+      .select('id')
+      .eq('id', workOrderId)
+      .eq('org_id', membership.org_id)
+      .single()
+
+    if (woErr && woErr.code !== 'PGRST116') {
+      console.error('[getWorkOrderPhotoUrls] work order lookup', woErr)
+      return { error: 'Could not load photos. Please try again.' }
+    }
+    if (!wo) return { error: 'Work order not found' }
+
+    const { data: photos, error: photosErr } = await supabase
+      .from('work_order_photos')
+      .select('id, storage_path')
+      .eq('work_order_id', workOrderId)
+
+    if (photosErr) {
+      console.error('[getWorkOrderPhotoUrls]', photosErr)
+      return { error: 'Could not load photos. Please try again.' }
+    }
+    if (!photos?.length) return { urls: {} }
+
+    const { createServiceClient } = await import('@/lib/supabase/server')
+    const service = createServiceClient({ authorizedBy: membership })
+
+    // Drop unresolvable rows BEFORE signing so the response array still lines
+    // up index-for-index with `signable` (createSignedUrls preserves order).
+    const signable = photos.flatMap((photo) => {
+      const path = toStorageObjectPath(WORK_ORDER_PHOTO_BUCKET, photo.storage_path)
+      return path ? [{ id: photo.id, path }] : []
+    })
+    if (!signable.length) return { urls: {} }
+
+    const { data: signed, error: signErr } = await service.storage
+      .from(WORK_ORDER_PHOTO_BUCKET)
+      .createSignedUrls(signable.map((p) => p.path), PHOTO_SIGNED_URL_TTL_SECONDS)
+
+    if (signErr) {
+      console.error('[getWorkOrderPhotoUrls]', signErr)
+      return { error: 'Could not load photos. Please try again.' }
+    }
+
+    // createSignedUrls() reports per-object errors inline, so a single missing
+    // object degrades to one broken thumbnail rather than an empty gallery.
+    const urls: Record<string, string> = {}
+    signable.forEach((photo, i) => {
+      const signedUrl = signed?.[i]?.signedUrl
+      if (signedUrl) urls[photo.id] = signedUrl
+    })
+
+    return { urls }
+  } catch (err) {
+    console.error('[getWorkOrderPhotoUrls]', err)
+    reportError(err, { site: 'serverAction.maintenance.getWorkOrderPhotoUrls' })
+    return { error: 'Could not load photos. Please try again.' }
+  }
+}
+
 export async function deleteWorkOrderPhoto(photoId: string): Promise<{ error?: string }> {
   try {
     const { supabase, membership } = await requireOrgRole(['admin', 'manager'])
@@ -673,8 +780,19 @@ export async function deleteWorkOrderPhoto(photoId: string): Promise<{ error?: s
 
     if (!wo) return { error: 'Photo not found' }
 
-    // Delete from storage
-    await supabase.storage.from('work-order-photos').remove([photo.storage_path])
+    // Delete from storage with the SERVICE client, not the caller's.
+    // The storage DELETE policy only matches objects whose first path segment
+    // is the caller's org id; legacy `wo-<id>/…` objects predate that
+    // contract, so an RLS-scoped remove() would silently no-op on them and
+    // leave the file behind after its row was deleted. The org ownership
+    // check above is what authorizes this.
+    const { createServiceClient } = await import('@/lib/supabase/server')
+    const service = createServiceClient({ authorizedBy: membership })
+    const objectPath = toStorageObjectPath(WORK_ORDER_PHOTO_BUCKET, photo.storage_path)
+    if (objectPath) {
+      const { error: removeErr } = await service.storage.from(WORK_ORDER_PHOTO_BUCKET).remove([objectPath])
+      if (removeErr) console.error('[deleteWorkOrderPhoto] storage remove failed', removeErr)
+    }
 
     // Delete record
     await supabase.from('work_order_photos').delete().eq('id', photoId)

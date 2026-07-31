@@ -35,6 +35,102 @@ function asIdString(value: unknown): string | undefined {
   return typeof value === 'string' || typeof value === 'number' ? String(value) : undefined
 }
 
+
+// ── Revocation handling ────────────────────────────────────────────────────
+// Extracted from POST: inlined, its three nesting levels of user-lookup →
+// connection-lookup → already-revoked/notify branching accounted for most of
+// the handler's cognitive complexity and both of its >4-deep nesting sites.
+
+/** Notifies the PM that the provider revoked our access, if we know their org. */
+async function notifyRevokedConnection(
+  providerId: string,
+  appUserId:  string,
+  orgId:      string | null,
+): Promise<void> {
+  if (!orgId) {
+    console.warn(
+      `[Webhook:${providerId}] Revoked connection has no org_id — cannot notify PM for user ${appUserId}`
+    )
+    reportError(new Error('Revoked integration connection has no org_id'), {
+      site:  'webhook.provider.revocation_missing_org_id',
+      extra: { provider: providerId, app_user_id: appUserId },
+    })
+    return
+  }
+
+  // Reuses the same email + template already used for proactive-refresh-triggered
+  // revocations (lib/inngest/functions/notify-integration-error.ts)
+  await inngest.send({
+    name: 'integration/connection.error',
+    data: {
+      user_id:     appUserId,
+      org_id:      orgId,
+      provider_id: providerId,
+      reason:      'This connection was disconnected from the provider\'s side (someone revoked FieldStay\'s access). Reconnect to resume syncing.',
+    },
+  })
+}
+
+async function processRevocation(args: {
+  providerId:     string
+  externalUserId: string
+  correlationId:  string
+}): Promise<void> {
+  const { providerId, externalUserId, correlationId } = args
+
+  if (!externalUserId) {
+    console.error(`[Webhook:${providerId}] Revocation event missing user_id`)
+    reportError(new Error('Revocation webhook missing user_id'), {
+      site:  'webhook.provider.revocation_missing_user_id',
+      extra: { provider: providerId },
+    })
+    return
+  }
+
+  const appUserId = await findUserByExternalId(providerId, externalUserId)
+
+  if (!appUserId) {
+    console.warn(
+      `[Webhook:${providerId}] Revocation for unknown external user ${externalUserId} — ` +
+      `may have already been disconnected`
+    )
+    return
+  }
+
+  const supabase = createServiceClient({ publicSurface: 'api-webhooks--provider-' })
+  const { data: existingConn } = await supabase
+    .from('integration_connections')
+    .select('status, org_id')
+    .eq('provider_id', providerId)
+    .eq('external_user_id', externalUserId)
+    .maybeSingle()
+
+  if (!existingConn || existingConn.status === 'revoked' || existingConn.status === 'disconnected') {
+    console.log(
+      `[Webhook:${providerId}] Revocation already processed or connection ` +
+      `not found for external user ${externalUserId} — skipping`
+    )
+    return
+  }
+
+  await revokeIntegrationToken(appUserId, providerId)
+  console.log(
+    `[Webhook:${providerId}] Token revoked — FieldStay user ${appUserId} ` +
+    `(external user ${externalUserId})`
+  )
+  await logAuditEvent({
+    orgId:      existingConn.org_id ?? undefined,
+    actorId:    appUserId,
+    action:     'integration.revoked',
+    targetType: 'integration_provider',
+    targetId:   providerId,
+    metadata:   { externalUserId, trigger: 'webhook' },
+    correlationId,
+  })
+
+  await notifyRevokedConnection(providerId, appUserId, existingConn.org_id ?? null)
+}
+
 export async function POST(
   request: NextRequest,
   { params }: { params: Promise<{ provider: string }> }
@@ -120,72 +216,7 @@ export async function POST(
 
   if (REVOCATION_ACTIONS.has(action)) {
     try {
-      if (!externalUserId) {
-        console.error(`[Webhook:${providerId}] Revocation event missing user_id`)
-        reportError(new Error('Revocation webhook missing user_id'), { site: 'webhook.provider.revocation_missing_user_id', extra: { provider: providerId } })
-      } else {
-        const appUserId = await findUserByExternalId(providerId, externalUserId)
-
-        if (appUserId) {
-          const supabase = createServiceClient({ publicSurface: 'api-webhooks--provider-' })
-          const { data: existingConn } = await supabase
-            .from('integration_connections')
-            .select('status, org_id')
-            .eq('provider_id', providerId)
-            .eq('external_user_id', externalUserId)
-            .maybeSingle()
-
-          if (!existingConn || existingConn.status === 'revoked' || existingConn.status === 'disconnected') {
-            console.log(
-              `[Webhook:${providerId}] Revocation already processed or connection ` +
-              `not found for external user ${externalUserId} — skipping`
-            )
-            return NextResponse.json({ received: true }, { status: 200 })
-          }
-
-          await revokeIntegrationToken(appUserId, providerId)
-          console.log(
-            `[Webhook:${providerId}] Token revoked — FieldStay user ${appUserId} ` +
-            `(external user ${externalUserId})`
-          )
-          await logAuditEvent({
-            orgId:      existingConn.org_id ?? undefined,
-            actorId:    appUserId,
-            action:     'integration.revoked',
-            targetType: 'integration_provider',
-            targetId:   providerId,
-            metadata:   { externalUserId, trigger: 'webhook' },
-            correlationId,
-          })
-
-          // Notify the PM — reuses the same email + template already used for
-          // proactive-refresh-triggered revocations (lib/inngest/functions/notify-integration-error.ts)
-          if (existingConn.org_id) {
-            await inngest.send({
-              name: 'integration/connection.error',
-              data: {
-                user_id:     appUserId,
-                org_id:      existingConn.org_id,
-                provider_id: providerId,
-                reason:      'This connection was disconnected from the provider\'s side (someone revoked FieldStay\'s access). Reconnect to resume syncing.',
-              },
-            })
-          } else {
-            console.warn(
-              `[Webhook:${providerId}] Revoked connection has no org_id — cannot notify PM for user ${appUserId}`
-            )
-            reportError(new Error('Revoked integration connection has no org_id'), {
-              site:  'webhook.provider.revocation_missing_org_id',
-              extra: { provider: providerId, app_user_id: appUserId },
-            })
-          }
-        } else {
-          console.warn(
-            `[Webhook:${providerId}] Revocation for unknown external user ${externalUserId} — ` +
-            `may have already been disconnected`
-          )
-        }
-      }
+      await processRevocation({ providerId, externalUserId, correlationId })
     } catch (err) {
       // Log but don't return 500 — OwnerRez must get a 200 or it will retry infinitely
       console.error(`[Webhook:${providerId}] Failed to process revocation:`, err)

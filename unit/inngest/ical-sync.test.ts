@@ -2,10 +2,37 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 
 // See ownerrez-incremental-sync.test.ts for the canonical explanation of the
 // queue-based-supabase mock pattern used throughout this file. ical-sync.ts
-// has two functions in one source file (syncAllIcalFeeds fans out,
-// syncIcalFeed does per-feed work) — same cron+handler split covered
-// together here as work-order-dispatch.test.ts covers workOrderDispatch and
-// workOrderSignedOff in one file.
+// has three functions in one source file (syncAllIcalFeeds fans out to orgs,
+// syncOrgIcalFeeds fans out that org's feeds, syncIcalFeed does the per-feed
+// work) — the whole dispatcher chain is covered together here, the same way
+// work-order-dispatch.test.ts covers workOrderDispatch and workOrderSignedOff
+// in one file.
+
+// ── DNS boundary ────────────────────────────────────────────────────────────
+// syncIcalFeed downloads through safeFetch (lib/security/url-guard.ts), which
+// really resolves the hostname before connecting so a public-looking name with
+// a private A record can't be used for SSRF. `feeds.example.com` doesn't
+// resolve from CI, so the *resolver* is what gets stubbed — NOT the guard.
+// Scheme checks, literal-IP normalization, private-range blocking and
+// per-redirect-hop re-validation all still execute for real against these
+// answers, and the "still rejects" tests at the bottom of this file prove it.
+const dnsAnswers: Record<string, string[]> = {
+  'feeds.example.com':          ['93.184.216.34'],   // public
+  'internal.attacker.example':  ['10.0.0.5'],        // public name, RFC1918 answer
+  'split.attacker.example':     ['93.184.216.34', '169.254.169.254'], // one good, one metadata
+}
+
+const lookupMock = vi.fn(async (hostname: string) => {
+  const addresses = dnsAnswers[hostname]
+  if (!addresses) {
+    const err = new Error(`getaddrinfo ENOTFOUND ${hostname}`)
+    throw err
+  }
+  return addresses.map((address) => ({ address, family: address.includes(':') ? 6 : 4 }))
+})
+
+vi.mock('node:dns/promises', () => ({ lookup: (...args: [string]) => lookupMock(...args) }))
+
 vi.mock('@/lib/supabase/server', () => ({
   createServiceClient: vi.fn(),
 }))
@@ -32,8 +59,11 @@ vi.mock('@/lib/resend/client', () => ({
 vi.mock('@/lib/resend/emails/pm-alert', () => ({
   renderPmAlert: vi.fn(async () => '<html></html>'),
 }))
+vi.mock('@/lib/observability/report-error', () => ({
+  reportError: vi.fn(),
+}))
 
-import { syncAllIcalFeeds, syncIcalFeed } from '@/lib/inngest/functions/ical-sync'
+import { syncAllIcalFeeds, syncOrgIcalFeeds, syncIcalFeed } from '@/lib/inngest/functions/ical-sync'
 import { createServiceClient } from '@/lib/supabase/server'
 import { parseIcalFeed } from '@/lib/ical/parser'
 import { cancelTurnoversForBooking, notifyCrewOfCancelledTurnovers } from '@/lib/turnovers/generator'
@@ -41,6 +71,7 @@ import { detectAndFlagOverlaps } from '@/lib/ical/conflict-detection'
 import { getPmEmails } from '@/lib/inngest/helpers'
 import { resend } from '@/lib/resend/client'
 import { invokeHandler } from './test-helpers'
+import { createSupabaseDouble, type TableSpec } from '../stubs/supabase-query-double'
 
 function makeLogger() {
   return { info: vi.fn(), warn: vi.fn(), error: vi.fn() }
@@ -53,42 +84,123 @@ function makeStep() {
   }
 }
 
-interface QueuedByTable { [table: string]: { data?: unknown; error?: unknown }[] }
+function makeSupabase(queued: Record<string, TableSpec>) {
+  return createSupabaseDouble(queued)
+}
 
-function makeSupabase(queued: QueuedByTable) {
-  const counters: Record<string, number> = {}
-  const upsertSpy = vi.fn()
-  const updateSpy = vi.fn()
-  const eqSpy     = vi.fn()
+/** The (name, payload) pair a `step.sendEvent` spy recorded for call `index`. */
+function sentEvent<T>(step: { sendEvent: { mock: { calls: unknown[] } } }, index = 0): [string, T] {
+  return step.sendEvent.mock.calls[index] as unknown as [string, T]
+}
 
-  const from = vi.fn((table: string) => {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const chain: any = {}
-    chain.select = vi.fn(() => chain)
-    chain.eq     = vi.fn((column: string, value: unknown) => { eqSpy(table, column, value); return chain })
-    chain.in     = vi.fn(() => chain)
-    chain.update = vi.fn((payload: unknown) => { updateSpy(table, payload); return chain })
-    chain.upsert = vi.fn((payload: unknown, opts: unknown) => { upsertSpy(table, payload, opts); return chain })
-
-    const resolveNext = () => {
-      const idx = counters[table] ?? 0
-      counters[table] = idx + 1
-      return Promise.resolve(queued[table]?.[idx] ?? { data: null, error: null })
-    }
-
-    chain.single      = vi.fn(() => resolveNext())
-    chain.maybeSingle = vi.fn(() => resolveNext())
-    chain.then = (resolve: (v: unknown) => unknown, reject?: (e: unknown) => unknown) =>
-      resolveNext().then(resolve, reject)
-    return chain
-  })
-
-  return { from, upsertSpy, updateSpy, eqSpy }
+/** A fetch Response shaped enough for safeFetch (status + headers + text). */
+function makeResponse(init: {
+  status?:   number
+  body?:     string
+  location?: string
+} = {}) {
+  const status = init.status ?? 200
+  return {
+    ok:      status >= 200 && status < 300,
+    status,
+    headers: { get: (name: string) => (name.toLowerCase() === 'location' ? init.location ?? null : null) },
+    text:    async () => init.body ?? 'BEGIN:VCALENDAR\nEND:VCALENDAR',
+  }
 }
 
 const originalFetch = globalThis.fetch
 
-describe('syncAllIcalFeeds', () => {
+describe('syncAllIcalFeeds (dispatcher)', () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+  })
+
+  it('fans out one ical/sync.org.requested per org holding an active feed', async () => {
+    const supabase = makeSupabase({
+      ical_feeds: [
+        { data: [{ org_id: 'org_1' }, { org_id: 'org_2' }, { org_id: 'org_1' }], error: null },
+      ],
+    })
+    ;(createServiceClient as ReturnType<typeof vi.fn>).mockReturnValue(supabase)
+
+    const step = makeStep()
+
+    const result = await invokeHandler(syncAllIcalFeeds, {
+      event:  { data: {} },
+      step,
+      logger: makeLogger(),
+    })
+
+    expect(step.sendEvent).toHaveBeenCalledWith('fan-out-org-syncs', [
+      { name: 'ical/sync.org.requested', data: { org_id: 'org_1' } },
+      { name: 'ical/sync.org.requested', data: { org_id: 'org_2' } },
+    ])
+    expect(result).toEqual({ dispatched: 2 })
+  })
+
+  it('is a no-op when no org has an active iCal feed', async () => {
+    const supabase = makeSupabase({ ical_feeds: [{ data: [], error: null }] })
+    ;(createServiceClient as ReturnType<typeof vi.fn>).mockReturnValue(supabase)
+
+    const step = makeStep()
+
+    const result = await invokeHandler(syncAllIcalFeeds, {
+      event:  { data: {} },
+      step,
+      logger: makeLogger(),
+    })
+
+    expect(step.sendEvent).not.toHaveBeenCalled()
+    expect(result).toEqual({ dispatched: 0 })
+  })
+
+  it('dispatches only the requested org, without a discovery query, on the manual/UI-triggered path', async () => {
+    const supabase = makeSupabase({})
+    ;(createServiceClient as ReturnType<typeof vi.fn>).mockReturnValue(supabase)
+
+    const step = makeStep()
+
+    const result = await invokeHandler(syncAllIcalFeeds, {
+      event:  { data: { org_id: 'org_1' } },
+      step,
+      logger: makeLogger(),
+    })
+
+    // The org is known already — the platform-wide discovery scan is skipped
+    // entirely rather than run and then filtered.
+    expect(supabase.from).not.toHaveBeenCalled()
+    expect(step.sendEvent).toHaveBeenCalledWith('fan-out-org-syncs', [
+      { name: 'ical/sync.org.requested', data: { org_id: 'org_1' } },
+    ])
+    expect(result).toEqual({ dispatched: 1 })
+  })
+
+  it('pages through org discovery, so a platform with >1000 feed rows still dispatches every tenant', async () => {
+    // This is the original bug: one unbounded `.select()` returned PostgREST's
+    // first 1000 rows with no error, and every feed past it silently stopped
+    // syncing. 2,400 single-feed orgs is ~17 tenants' worth past the cap.
+    const rows = Array.from({ length: 2_400 }, (_, i) => ({ org_id: `org_${i}` }))
+    const supabase = makeSupabase({ ical_feeds: [{ data: rows, error: null }] })
+    ;(createServiceClient as ReturnType<typeof vi.fn>).mockReturnValue(supabase)
+
+    const step = makeStep()
+
+    const result = await invokeHandler(syncAllIcalFeeds, {
+      event:  { data: {} },
+      step,
+      logger: makeLogger(),
+    })
+
+    expect(result).toEqual({ dispatched: 2_400 })
+    const [, dispatched] = sentEvent<{ data: { org_id: string } }[]>(step)
+    expect(dispatched.at(-1)!.data.org_id).toBe('org_2399')
+    expect(supabase.calls.filter((c) => c.method === 'range').map((c) => c.args)).toEqual([
+      [0, 999], [1000, 1999], [2000, 2999],
+    ])
+  })
+})
+
+describe('syncOrgIcalFeeds (per-org fan-out)', () => {
   beforeEach(() => {
     vi.clearAllMocks()
   })
@@ -109,8 +221,8 @@ describe('syncAllIcalFeeds', () => {
 
     const step = makeStep()
 
-    const result = await invokeHandler(syncAllIcalFeeds, {
-      event:  { data: {} },
+    const result = await invokeHandler(syncOrgIcalFeeds, {
+      event:  { data: { org_id: 'org_1' } },
       step,
       logger: makeLogger(),
     })
@@ -133,31 +245,13 @@ describe('syncAllIcalFeeds', () => {
     expect(result).toEqual({ synced: 2 })
   })
 
-  it('is a no-op when there are no active iCal feeds', async () => {
-    const supabase = makeSupabase({
-      ical_feeds: [{ data: [], error: null }],
-    })
-    ;(createServiceClient as ReturnType<typeof vi.fn>).mockReturnValue(supabase)
-
-    const step = makeStep()
-
-    const result = await invokeHandler(syncAllIcalFeeds, {
-      event:  { data: {} },
-      step,
-      logger: makeLogger(),
-    })
-
-    expect(step.sendEvent).not.toHaveBeenCalled()
-    expect(result).toEqual({ synced: 0 })
-  })
-
-  it('scopes the feed query to a single org when the triggering event carries an org_id (manual/UI-triggered path)', async () => {
+  it('scopes the feed query to the event org', async () => {
     const supabase = makeSupabase({
       ical_feeds: [{ data: [{ id: 'feed_1', property_id: 'prop_1', org_id: 'org_1' }], error: null }],
     })
     ;(createServiceClient as ReturnType<typeof vi.fn>).mockReturnValue(supabase)
 
-    await invokeHandler(syncAllIcalFeeds, {
+    await invokeHandler(syncOrgIcalFeeds, {
       event:  { data: { org_id: 'org_1' } },
       step:   makeStep(),
       logger: makeLogger(),
@@ -166,15 +260,47 @@ describe('syncAllIcalFeeds', () => {
     expect(supabase.eqSpy).toHaveBeenCalledWith('ical_feeds', 'is_active', true)
     expect(supabase.eqSpy).toHaveBeenCalledWith('ical_feeds', 'org_id', 'org_1')
   })
+
+  it('is a no-op when the org has no active feeds', async () => {
+    const supabase = makeSupabase({ ical_feeds: [{ data: [], error: null }] })
+    ;(createServiceClient as ReturnType<typeof vi.fn>).mockReturnValue(supabase)
+
+    const step = makeStep()
+    const result = await invokeHandler(syncOrgIcalFeeds, {
+      event:  { data: { org_id: 'org_1' } },
+      step,
+      logger: makeLogger(),
+    })
+
+    expect(step.sendEvent).not.toHaveBeenCalled()
+    expect(result).toEqual({ synced: 0 })
+  })
+
+  it('pages through a >1000-feed org rather than syncing only the first page', async () => {
+    const feeds = Array.from({ length: 1_300 }, (_, i) => ({
+      id: `feed_${i}`, property_id: `prop_${i}`, org_id: 'org_1',
+    }))
+    const supabase = makeSupabase({ ical_feeds: [{ data: feeds, error: null }] })
+    ;(createServiceClient as ReturnType<typeof vi.fn>).mockReturnValue(supabase)
+
+    const step = makeStep()
+    const result = await invokeHandler(syncOrgIcalFeeds, {
+      event:  { data: { org_id: 'org_1' } },
+      step,
+      logger: makeLogger(),
+    })
+
+    expect(result).toEqual({ synced: 1_300 })
+    const [, dispatched] = sentEvent<{ data: { feed_id: string } }[]>(step)
+    expect(dispatched).toHaveLength(1_300)
+    expect(dispatched.at(-1)!.data.feed_id).toBe('feed_1299')
+  })
 })
 
 describe('syncIcalFeed', () => {
   beforeEach(() => {
     vi.clearAllMocks()
-    globalThis.fetch = vi.fn(async () => ({
-      ok:   true,
-      text: async () => 'BEGIN:VCALENDAR\nEND:VCALENDAR',
-    })) as unknown as typeof fetch
+    globalThis.fetch = vi.fn(async () => makeResponse()) as unknown as typeof fetch
   })
 
   afterEach(() => {
@@ -275,6 +401,45 @@ describe('syncIcalFeed', () => {
     expect(result).toEqual({ feed_id: 'feed_1', newBookings: 0, cancelled: 0 })
   })
 
+  it('pages through a feed with more than 1000 stored bookings when building the existing-UID map', async () => {
+    // A truncated "existing" map is not a quiet no-op: every unread booking
+    // looks brand new (re-firing booking/detected) and simultaneously drops
+    // out of the cancel-absent pass. 1,400 stored UIDs, all still present in
+    // the feed → correct behaviour is zero new bookings and zero cancels.
+    const stored = Array.from({ length: 1_400 }, (_, i) => ({
+      id: `booking_${i}`, ical_uid: `uid_${i}`, status: 'confirmed', guest_email: null,
+    }))
+    ;(parseIcalFeed as ReturnType<typeof vi.fn>).mockReturnValue(
+      stored.map((b) => ({
+        uid: b.ical_uid, guestName: 'Guest', start: '2026-08-01', end: '2026-08-05', status: 'confirmed',
+      })),
+    )
+    ;(detectAndFlagOverlaps as ReturnType<typeof vi.fn>).mockResolvedValue([])
+
+    const supabase = makeSupabase({
+      ical_feeds: [
+        { data: { url: 'https://feeds.example.com/foo.ics', source: 'airbnb', org_id: 'org_1' }, error: null },
+        { data: null, error: null },
+      ],
+      bookings: [
+        { data: stored, error: null },                                              // paginated existing scan
+        { data: stored.map(({ id, ical_uid, status }) => ({ id, ical_uid, status })), error: null }, // upsert().select()
+      ],
+      org_milestones: [{ data: null, error: null }],
+    })
+    ;(createServiceClient as ReturnType<typeof vi.fn>).mockReturnValue(supabase)
+
+    const result = await invokeHandler(syncIcalFeed, {
+      event:  baseEvent(),
+      step:   makeStep(),
+      logger: makeLogger(),
+    })
+
+    expect(result).toEqual({ feed_id: 'feed_1', newBookings: 0, cancelled: 0 })
+    const bookingRanges = supabase.calls.filter((c) => c.table === 'bookings' && c.method === 'range')
+    expect(bookingRanges.map((c) => c.args)).toEqual([[0, 999], [1000, 1999]])
+  })
+
   it('does not re-fire booking/detected for a UID already seen in a prior sync, and cancels (+ cancels turnovers for) a confirmed booking that dropped out of the feed', async () => {
     // Feed still contains uid_existing (already-known, still confirmed —
     // must not be treated as new) but no longer contains uid_gone.
@@ -363,7 +528,7 @@ describe('syncIcalFeed', () => {
   })
 
   it('marks the feed errored and re-throws when the feed URL is unreachable (non-2xx response)', async () => {
-    globalThis.fetch = vi.fn(async () => ({ ok: false, status: 404, text: async () => '' })) as unknown as typeof fetch
+    globalThis.fetch = vi.fn(async () => makeResponse({ status: 404, body: '' })) as unknown as typeof fetch
 
     const supabase = makeSupabase({
       ical_feeds: [
@@ -431,5 +596,96 @@ describe('syncIcalFeed', () => {
       expect.objectContaining({ to: 'pm@fieldstay.app', subject: expect.stringContaining('Lake House') }),
       expect.objectContaining({ idempotencyKey: expect.stringContaining('overlap-conflict-prop_1-') }),
     )
+  })
+
+  // ── SSRF guard is still live ──────────────────────────────────────────────
+  // The DNS resolver above is stubbed so a test hostname resolves at all; the
+  // guard itself is not. These four cases each take a different route through
+  // lib/security/url-guard.ts and must all still be rejected before any
+  // request leaves the process.
+
+  function ssrfSupabase(url: string) {
+    return makeSupabase({
+      ical_feeds: [
+        { data: { url, source: 'airbnb', org_id: 'org_1' }, error: null }, // fetch-feed-url
+        { data: null, error: null },                                       // error-marking update
+      ],
+    })
+  }
+
+  it('still rejects a feed URL pointing straight at the cloud metadata address (169.254.169.254)', async () => {
+    const supabase = ssrfSupabase('https://169.254.169.254/latest/meta-data/')
+    ;(createServiceClient as ReturnType<typeof vi.fn>).mockReturnValue(supabase)
+    const fetchSpy = globalThis.fetch as ReturnType<typeof vi.fn>
+
+    await expect(
+      invokeHandler(syncIcalFeed, { event: baseEvent(), step: makeStep(), logger: makeLogger() }),
+    ).rejects.toThrow(/Blocked private\/loopback IPv4 address/)
+
+    expect(fetchSpy).not.toHaveBeenCalled()
+    // A literal IP is checked directly and never handed to a resolver.
+    expect(lookupMock).not.toHaveBeenCalled()
+    expect(parseIcalFeed).not.toHaveBeenCalled()
+    expect(supabase.updateSpy).toHaveBeenCalledWith(
+      'ical_feeds',
+      expect.objectContaining({ last_sync_status: 'error' }),
+    )
+  })
+
+  it('still rejects a public-looking hostname whose DNS answer is an RFC1918 address', async () => {
+    const supabase = ssrfSupabase('https://internal.attacker.example/evil.ics')
+    ;(createServiceClient as ReturnType<typeof vi.fn>).mockReturnValue(supabase)
+    const fetchSpy = globalThis.fetch as ReturnType<typeof vi.fn>
+
+    await expect(
+      invokeHandler(syncIcalFeed, { event: baseEvent(), step: makeStep(), logger: makeLogger() }),
+    ).rejects.toThrow(/Blocked private\/loopback IPv4 address .*10\.0\.0\.5/)
+
+    // The DNS path really ran — this is the branch the resolver stub feeds.
+    expect(lookupMock).toHaveBeenCalledWith('internal.attacker.example', { all: true, verbatim: true })
+    expect(fetchSpy).not.toHaveBeenCalled()
+  })
+
+  it('still rejects a hostname that mixes one public and one private DNS answer', async () => {
+    const supabase = ssrfSupabase('https://split.attacker.example/evil.ics')
+    ;(createServiceClient as ReturnType<typeof vi.fn>).mockReturnValue(supabase)
+    const fetchSpy = globalThis.fetch as ReturnType<typeof vi.fn>
+
+    await expect(
+      invokeHandler(syncIcalFeed, { event: baseEvent(), step: makeStep(), logger: makeLogger() }),
+    ).rejects.toThrow(/Blocked private\/loopback IPv4 address .*169\.254\.169\.254/)
+
+    expect(fetchSpy).not.toHaveBeenCalled()
+  })
+
+  it('still rejects a plaintext http feed URL on the scheme check alone', async () => {
+    const supabase = ssrfSupabase('http://feeds.example.com/foo.ics')
+    ;(createServiceClient as ReturnType<typeof vi.fn>).mockReturnValue(supabase)
+    const fetchSpy = globalThis.fetch as ReturnType<typeof vi.fn>
+
+    await expect(
+      invokeHandler(syncIcalFeed, { event: baseEvent(), step: makeStep(), logger: makeLogger() }),
+    ).rejects.toThrow(/URL scheme http: not permitted/)
+
+    expect(lookupMock).not.toHaveBeenCalled()
+    expect(fetchSpy).not.toHaveBeenCalled()
+  })
+
+  it('still re-validates redirect hops — a 302 from a public feed host to the metadata address is blocked', async () => {
+    globalThis.fetch = vi.fn(async () =>
+      makeResponse({ status: 302, location: 'https://169.254.169.254/latest/meta-data/' }),
+    ) as unknown as typeof fetch
+
+    const supabase = ssrfSupabase('https://feeds.example.com/foo.ics')
+    ;(createServiceClient as ReturnType<typeof vi.fn>).mockReturnValue(supabase)
+
+    await expect(
+      invokeHandler(syncIcalFeed, { event: baseEvent(), step: makeStep(), logger: makeLogger() }),
+    ).rejects.toThrow(/Blocked private\/loopback IPv4 address/)
+
+    // The first hop was fetched (it was legitimately public); the redirect
+    // target never was.
+    expect((globalThis.fetch as ReturnType<typeof vi.fn>)).toHaveBeenCalledTimes(1)
+    expect(parseIcalFeed).not.toHaveBeenCalled()
   })
 })

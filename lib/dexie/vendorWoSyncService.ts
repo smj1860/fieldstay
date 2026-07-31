@@ -43,6 +43,9 @@ function getVendorSyncEngine(token: string): OutboxEngine<VendorWoMutationRow> {
   if (!engine) {
     const db = getVendorWoDb(token)
     engine = new OutboxEngine<VendorWoMutationRow>(db.mutations, {
+      // Per-token lock: two tabs open on the same vendor link share one
+      // IndexedDB and would otherwise drain it concurrently.
+      lockName:   `fieldstay-vendor-wo-outbox-${token}`,
       uploadOne:  uploadVendorCompletion,
       isTerminal: (err) => err instanceof WorkOrderClosedError || err instanceof LinkExpiredError,
     })
@@ -128,10 +131,21 @@ export async function submitVendorWoCompletion(
   return { synced: stillPending === 0 }
 }
 
-/** Auto-retry on reconnect — drains anything still pending, but does not
- * revive a dead-lettered mutation (see retryFailedVendorWoSubmission for that). */
+/**
+ * Auto-retry on reconnect — drains anything still pending, but does not
+ * revive a dead-lettered mutation (see retryFailedVendorWoSubmission for that).
+ *
+ * `ignoreBackoff` because this is called from the vendor portal's `online`
+ * handler: the pending submission is sitting on a transport-failure backoff
+ * precisely BECAUSE the network was down, and the network coming back is the
+ * event that invalidates it. Without this the reconnect drain returns having
+ * done nothing (the backoff window is still open), so the portal reads the
+ * mutation as "still queued" and a submission the server terminally rejects —
+ * e.g. 409, the work order was closed through another path while this vendor
+ * was offline — never surfaces as "Not Submitted" to the vendor at all.
+ */
 export function retryVendorWoSubmission(token: string): Promise<void> {
-  return getVendorSyncEngine(token).processOutbox()
+  return getVendorSyncEngine(token).processOutbox({ ignoreBackoff: true })
 }
 
 /**
@@ -149,5 +163,9 @@ export async function retryFailedVendorWoSubmission(token: string): Promise<void
     await db.mutations.update(mutation.id!, { failed: false, retryCount: 0, terminalReason: undefined })
   }
 
-  await getVendorSyncEngine(token).processOutbox()
+  // Same reasoning as retryVendorWoSubmission: an explicit "Retry Now" tap is
+  // a deliberate request to attempt now. resetting failed/retryCount above
+  // without clearing the backoff window would leave the drain stopping at the
+  // gate, so the tap would silently do nothing.
+  await getVendorSyncEngine(token).processOutbox({ ignoreBackoff: true })
 }

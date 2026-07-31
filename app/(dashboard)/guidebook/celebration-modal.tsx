@@ -41,7 +41,11 @@ export function CelebrationModal({ tier, onClose }: Readonly<CelebrationModalPro
           borderRadius: 'var(--radius-lg)', padding: '32px',
           maxWidth: '420px', width: '100%', textAlign: 'center',
         }}
+        // Propagation guard, not a control: stops a click inside the dialog
+        // body from reaching the backdrop's dismiss handler.
+        role="presentation"
         onClick={(e) => e.stopPropagation()}
+        onKeyDown={(e) => e.stopPropagation()}
       >
         <h2 style={{ fontSize: '20px', fontWeight: '700', color: 'var(--accent-gold)', margin: '0 0 12px' }}>
           {copy.title}

@@ -225,7 +225,14 @@ interface GuestGuidebookViewProps {
   property:          Property
   config:            GuidebookPropertyConfig
   sponsors:          GuidebookSponsorView[]
-  isActive:          boolean
+  // NOTE: there is deliberately no `isActive` prop. The published/active gate
+  // is enforced on the SERVER (app/g/[slug]/page.tsx, app/g/b/[token]/page.tsx
+  // return <GuidebookUnavailable /> instead of rendering this component). It
+  // used to be an early return in here, which meant the config — wifi_password,
+  // check_in_instructions, house_rules — had already been serialized across the
+  // client boundary into the page's flight payload before the check ran. Do not
+  // reintroduce a client-side visibility gate: by the time this component can
+  // evaluate one, the data has already shipped.
   hourOfDay:         number
   weather:           WeatherContext | null
   heroPhotoUrl:      string | null
@@ -239,7 +246,6 @@ export function GuestGuidebookView({
   property,
   config,
   sponsors,
-  isActive,
   hourOfDay,
   weather,
   heroPhotoUrl,
@@ -250,20 +256,6 @@ export function GuestGuidebookView({
 }: Readonly<GuestGuidebookViewProps>) {
   const [wifiOpen, setWifiOpen] = useState(false)
   const [pass, setPass] = useState<{ sponsorId: string; businessName: string; offerLine: string } | null>(null)
-
-  if (!isActive) {
-    return (
-      <div style={{ minHeight: '100vh', background: '#0E0E0E', color: '#F4F4F5', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '24px' }}>
-        <div style={{ textAlign: 'center', maxWidth: '420px' }}>
-          <h1 style={{ fontSize: '20px', fontWeight: 700, margin: '0 0 8px' }}>Guidebook Coming Soon</h1>
-          <p style={{ fontSize: '14px', color: '#9A9AA2', lineHeight: 1.6 }}>
-            This property&apos;s digital guidebook isn&apos;t quite ready yet. Please check back soon,
-            or contact your host directly for check-in details.
-          </p>
-        </div>
-      </div>
-    )
-  }
 
   const activeSlots = weather ? getActiveSlotTypes(hourOfDay, weather) : new Set(['general', 'other'])
   const visibleSponsors = sponsors.filter((s) => activeSlots.has(s.slot_type))

@@ -4,7 +4,12 @@ vi.mock('@/lib/supabase/server', () => ({
   createClient: vi.fn(),
 }))
 
+vi.mock('@/lib/observability/report-error', () => ({
+  reportError: vi.fn(),
+}))
+
 import { createClient } from '@/lib/supabase/server'
+import { reportError } from '@/lib/observability/report-error'
 import { getHospitablePromoStatus } from '@/lib/queries/hospitable-promo'
 
 // `.from(table)` mock — mirrors unit/lib/notifications.test.ts, the other
@@ -84,17 +89,29 @@ describe('getHospitablePromoStatus', () => {
     })
   })
 
-  it('returns null and logs an error when the query itself fails, instead of throwing', async () => {
+  // Degrading to "no promo" is right for a marketing banner, but the failure
+  // must reach Sentry — a console-only log is invisible in production, which
+  // makes a broken read indistinguishable from an org with no promo row.
+  it('returns null, logs, AND reports to Sentry when the query itself fails', async () => {
     const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {})
-    const supabase = makeSupabase({ data: null, error: { message: 'connection reset' } })
+    const supabase = makeSupabase({ data: null, error: { message: 'connection reset', code: '42501' } })
     vi.mocked(createClient).mockResolvedValue(supabase as never)
 
     const result = await getHospitablePromoStatus('org_1')
 
     expect(result).toBeNull()
     expect(consoleError).toHaveBeenCalledWith(
-      expect.stringContaining('Failed to load Hospitable promo status for org org_1'),
+      expect.stringContaining('lib.queries.getHospitablePromoStatus'),
+      '42501',
       'connection reset',
+      expect.anything(),
+    )
+    expect(reportError).toHaveBeenCalledWith(
+      expect.objectContaining({ message: 'connection reset' }),
+      expect.objectContaining({
+        site:  'lib.queries.getHospitablePromoStatus',
+        orgId: 'org_1',
+      }),
     )
   })
 })

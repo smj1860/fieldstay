@@ -3,6 +3,7 @@ import { createClient, type SupabaseClient } from '@supabase/supabase-js'
 import * as fs                               from 'fs'
 import * as path                             from 'path'
 import type { Database } from '../types/database.generated'
+import { cleanE2EData } from './helpers/clean-e2e-data'
 
 export default async function globalSetup(_config: FullConfig) {
   const baseUrl = process.env.E2E_BASE_URL ?? 'http://localhost:3000'
@@ -99,7 +100,7 @@ export default async function globalSetup(_config: FullConfig) {
   )
 
   // Clean up any stale [E2E] data from previous incomplete runs
-  await cleanE2EData(supabase, orgId)
+  await cleanE2EDataAndOrphanedUsers(supabase, orgId)
 
   // Seed one property that most tests depend on
   const { data: seedProperty } = await supabase
@@ -297,21 +298,14 @@ async function seedCrewLoginAndAssignment(
   await browser.close()
 }
 
-async function cleanE2EData(supabase: SupabaseClient<Database>, orgId: string): Promise<void> {
-  // Delete in FK-safe order. Properties cascade to bookings and turnovers.
-  // communication_logs was missing here entirely — 16-comms-log.spec.ts's
-  // hardcoded '[E2E] Confirmed service window' entry persisted across a CI
-  // retry (or a prior run) and collided with itself: the empty-state test
-  // found a stale row instead of nothing, and the create-entry test hit a
-  // strict-mode violation with two identical rows. Deleted before vendors
-  // since it FKs to vendors.id.
-  await supabase.from('communication_logs').delete().eq('org_id', orgId).like('subject', '[E2E]%')
-  await supabase.from('work_orders')  .delete().eq('org_id', orgId).like('title',      '[E2E]%')
-  await supabase.from('bookings')     .delete().eq('org_id', orgId).like('guest_name', '[E2E]%')
-  await supabase.from('crew_members') .delete().eq('org_id', orgId).like('name',       '[E2E]%')
-  await supabase.from('vendors')      .delete().eq('org_id', orgId).like('name',       '[E2E]%')
-  await supabase.from('properties')   .delete().eq('org_id', orgId).like('name',       '[E2E]%')
-
+// The [E2E] row cleanup itself lives in e2e/helpers/clean-e2e-data.ts so
+// setup and teardown share one list (see the header comment there for why
+// the money-bearing tables must be deleted first and why errors throw).
+async function cleanE2EDataAndOrphanedUsers(
+  supabase: SupabaseClient<Database>,
+  orgId:    string,
+): Promise<void> {
+  await cleanE2EData(supabase, orgId)
   await cleanOrphanedDisposableAuthUsers(supabase)
 }
 

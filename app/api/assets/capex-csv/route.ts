@@ -2,10 +2,24 @@
  * CapEx CSV Export — GET /api/assets/capex-csv?year=2025
  */
 import { requireOrgMember } from '@/lib/auth'
+import { dataExportLimiter, checkLimit } from '@/lib/rate-limit'
 import type { CapExProjectionPayload, CapExProjectionItem } from '@/lib/inngest/functions/capex-projections'
 
 export async function GET(req: Request) {
-  const { supabase, membership } = await requireOrgMember()
+  const { supabase, user, membership } = await requireOrgMember()
+
+  // L-2 — see the note in app/api/assets/cpa-export/route.ts. Abuse limiter
+  // → fails OPEN.
+  const rl = await checkLimit(dataExportLimiter, `capex-csv:${user.id}`, {
+    onError: 'allow',
+    site:    'route.assets.capex-csv.GET',
+  })
+  if (!rl.allowed) {
+    return Response.json(
+      { error: 'Export limit reached. Please try again later.' },
+      { status: 429 }
+    )
+  }
 
   const url  = new URL(req.url)
   const year = parseInt(url.searchParams.get('year') ?? String(new Date().getFullYear()), 10)

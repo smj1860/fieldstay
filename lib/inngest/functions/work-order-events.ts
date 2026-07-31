@@ -2,7 +2,7 @@ import { inngest } from '@/lib/inngest/client'
 import { createServiceClient } from '@/lib/supabase/server'
 import { resend, FROM } from '@/lib/resend/client'
 import { renderWorkOrderEmail } from '@/emails/work-order'
-import { getPmEmails, createPmNotification } from '@/lib/inngest/helpers'
+import { getPmEmails, createPmNotification, getOrgDispatcher } from '@/lib/inngest/helpers'
 import { renderPmAlert } from '@/lib/resend/emails/pm-alert'
 import { stripe } from '@/lib/stripe/client'
 import { renderVendorConnectInviteEmail } from '@/lib/resend/emails/vendor-connect-invite'
@@ -112,18 +112,14 @@ export const handleWorkOrderCreated = inngest.createFunction(
             return { skipped: true, reason: 'vendor_missing_connect_token' }
           }
 
-          // Get PM name and org name for contextual email copy
-          let pmName:  string | null = null
-          let orgName: string        = 'Your property manager'
+          // Get PM name and org name for contextual email copy. The PM is
+          // resolved via getOrgDispatcher (owner → admin → manager, invite
+          // -accepted only) so the vendor sees the same name here as on the
+          // dispatch email/SMS for the same work order.
+          let orgName: string = 'Your property manager'
 
-          const [membersResult, orgResult] = await Promise.all([
-            supabase
-              .from('organization_members')
-              .select('user_id')
-              .eq('org_id', org_id)
-              .in('role', ['owner', 'admin'])
-              .not('invite_accepted_at', 'is', null)
-              .limit(1),
+          const [dispatcher, orgResult] = await Promise.all([
+            getOrgDispatcher(supabase, org_id, ''),
             supabase
               .from('organizations')
               .select('name')
@@ -133,14 +129,9 @@ export const handleWorkOrderCreated = inngest.createFunction(
 
           if (orgResult.data?.name) orgName = orgResult.data.name
 
-          if (membersResult.data?.[0]?.user_id) {
-            const { data: profile } = await supabase
-              .from('profiles')
-              .select('full_name')
-              .eq('id', membersResult.data[0].user_id)
-              .single()
-            if (profile?.full_name) pmName = profile.full_name
-          }
+          // '' is the "no name available" sentinel passed as the fallback
+          // above — this email's copy branches on null, not on empty string.
+          const pmName: string | null = dispatcher.name || null
 
           // Create a Stripe Express account if the vendor doesn't have one yet.
           // Idempotency key prevents duplicate accounts on step retry.

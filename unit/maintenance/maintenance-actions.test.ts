@@ -99,6 +99,16 @@ function makeSupabase(queue: Record<string, Resp[]>, userId: string | null = 'us
   }
 }
 
+// isVendorHardBlocked() fails CLOSED: a missing vendor_compliance_status row
+// (the harness default) now BLOCKS assignment, because a vendor with no row is
+// a vendor not in the caller's org. Tests that expect an assignment to succeed
+// must therefore stub a compliant row explicitly — the previous implicit pass
+// was the fail-open bug.
+// A factory, not a shared constant: makeSupabase's queue shift() mutates the
+// array it is handed, so a module-level array would be drained by the first
+// test that used it.
+const compliant = () => [{ data: { compliance_status: 'compliant' } }]
+
 const membership = {
   org_id: 'org_1',
   role:   'admin' as const,
@@ -252,6 +262,7 @@ describe('maintenance/actions', () => {
     it('fires a vendor-assigned event when the vendor changes, scoped to the caller org', async () => {
       const supabase = makeSupabase({
         work_orders: [{ data: { vendor_id: 'vendor_1' } }, { error: null }],
+        vendor_compliance_status: compliant(),
       })
       vi.mocked(requireOrgRole).mockResolvedValue({
         supabase, membership, user: { id: 'user_1' },
@@ -473,17 +484,31 @@ describe('maintenance/actions', () => {
   })
 
   describe('deleteWorkOrderPhoto', () => {
-    it('deletes a photo once the work order is verified to belong to the caller org', async () => {
+    // Was: asserted the removal went through the CALLER's RLS-scoped client.
+    // The storage DELETE policy now only matches objects whose first path
+    // segment is the caller's org id, so legacy `wo-<id>/…` objects would
+    // silently no-op under RLS and be orphaned after their row was deleted.
+    // The removal therefore goes through the SERVICE client, authorized by the
+    // org-ownership check on the work order immediately above it.
+    it('deletes a photo — via the service client — once the work order is verified to belong to the caller org', async () => {
       const supabase = makeSupabase({
         work_order_photos: [{ data: { id: 'photo_1', storage_path: 'wo_1/photo.jpg', work_order_id: 'wo_1' } }],
         work_orders:        [{ data: { id: 'wo_1' } }],
       })
+      const service = makeSupabase({})
       vi.mocked(requireOrgRole).mockResolvedValue({ supabase, membership } as never)
+      vi.mocked(createServiceClient).mockReturnValue(service as never)
 
       const result = await deleteWorkOrderPhoto('photo_1')
 
       expect(result).toEqual({})
-      expect(supabase.storage.from).toHaveBeenCalledWith('work-order-photos')
+      // Service role is justified by the ownership check, and named as such.
+      expect(createServiceClient).toHaveBeenCalledWith({ authorizedBy: membership })
+      expect(service.storage.from).toHaveBeenCalledWith('work-order-photos')
+      // The caller's RLS-scoped client must NOT be the one removing the object.
+      expect(supabase.storage.from).not.toHaveBeenCalled()
+      // The row is still deleted through the caller's client.
+      expect(supabase.from).toHaveBeenCalledWith('work_order_photos')
     })
 
     it('rejects a photo whose work order does not belong to the caller org (IDOR check)', async () => {
@@ -491,12 +516,18 @@ describe('maintenance/actions', () => {
         work_order_photos: [{ data: { id: 'photo_1', storage_path: 'x.jpg', work_order_id: 'other-orgs-wo' } }],
         work_orders:        [{ data: null }],
       })
+      const service = makeSupabase({})
       vi.mocked(requireOrgRole).mockResolvedValue({ supabase, membership } as never)
+      vi.mocked(createServiceClient).mockReturnValue(service as never)
 
       const result = await deleteWorkOrderPhoto('photo_1')
 
       expect(result).toEqual({ error: 'Photo not found' })
       expect(supabase.storage.from).not.toHaveBeenCalled()
+      // The ownership check is what authorizes the RLS bypass, so a failed
+      // check must stop short of ever minting the service client.
+      expect(createServiceClient).not.toHaveBeenCalled()
+      expect(service.storage.from).not.toHaveBeenCalled()
     })
 
     it('does not touch the DB when the caller lacks the required role', async () => {
@@ -670,6 +701,7 @@ describe('maintenance/actions', () => {
           },
         ],
         work_orders: [{ data: null }, { data: { id: 'wo_1' } }],
+        vendor_compliance_status: compliant(),
       })
       vi.mocked(requireOrgRole).mockResolvedValue({ supabase, membership } as never)
 
@@ -721,6 +753,7 @@ describe('maintenance/actions', () => {
       const supabase = makeSupabase({
         vendors:      [{ data: { id: 'vendor_1', name: 'Acme Cleaning' } }],
         work_orders:  [{ data: [{ id: 'wo_1', suggestion_status: null, suggested_vendor_ids: null }] }, { error: null }],
+        vendor_compliance_status: compliant(),
       })
       vi.mocked(requireOrgRole).mockResolvedValue({
         supabase, membership, user: { id: 'user_1' },
@@ -763,6 +796,7 @@ describe('maintenance/actions', () => {
     it('accepts a suggested vendor for a work order verified to belong to the caller org', async () => {
       const supabase = makeSupabase({
         work_orders: [{ data: { id: 'wo_1', suggested_vendor_ids: ['vendor_1'] } }, { error: null }],
+        vendor_compliance_status: compliant(),
       })
       vi.mocked(requireOrgRole).mockResolvedValue({
         supabase, membership, user: { id: 'user_1' },
@@ -783,6 +817,42 @@ describe('maintenance/actions', () => {
       const result = await acceptVendorSuggestion('other-orgs-wo')
 
       expect(result).toEqual({ error: 'Work order not found' })
+    })
+
+    // Fail-closed regression: the compliance gate is the enforcement boundary
+    // for every assignment path. It previously discarded its error, so an RLS
+    // denial or a transient failure returned "not blocked" and dispatched an
+    // uninsured vendor to a customer's property.
+    it('blocks the assignment when the compliance read itself errors', async () => {
+      const supabase = makeSupabase({
+        work_orders: [{ data: { id: 'wo_1', suggested_vendor_ids: ['vendor_1'] } }],
+        vendor_compliance_status: [{ data: null, error: { message: 'permission denied', code: '42501' } }],
+      })
+      vi.mocked(requireOrgRole).mockResolvedValue({
+        supabase, membership, user: { id: 'user_1' },
+      } as never)
+
+      const result = await acceptVendorSuggestion('wo_1')
+
+      expect(result.error).toBeTruthy()
+      expect(inngest.send).not.toHaveBeenCalled()
+    })
+
+    // Allowlist, not denylist: the vendor_compliance_status view is being
+    // corrected and may gain a new state. An unrecognized status must block.
+    it('blocks the assignment on an unrecognized compliance status', async () => {
+      const supabase = makeSupabase({
+        work_orders: [{ data: { id: 'wo_1', suggested_vendor_ids: ['vendor_1'] } }],
+        vendor_compliance_status: [{ data: { compliance_status: 'documents_invalid' } }],
+      })
+      vi.mocked(requireOrgRole).mockResolvedValue({
+        supabase, membership, user: { id: 'user_1' },
+      } as never)
+
+      const result = await acceptVendorSuggestion('wo_1')
+
+      expect(result.error).toBeTruthy()
+      expect(inngest.send).not.toHaveBeenCalled()
     })
 
     it('errors when there is no suggestion to accept', async () => {

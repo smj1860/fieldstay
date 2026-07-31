@@ -1,26 +1,39 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createServiceClient }       from '@/lib/supabase/server'
 import { inngest }                   from '@/lib/inngest/client'
-import { workOrderRatelimit }        from '@/lib/rate-limit'
+import { workOrderRatelimit, checkLimit } from '@/lib/rate-limit'
 import { extractClientIp }           from '@/lib/integrations/webhook-verification'
 import { unwrapJoin }                from '@/lib/utils/supabase-joins'
 
-import { reportError } from '@/lib/observability/report-error'
 // Public, unauthenticated, token-gated route — rate limit by IP so a
 // leaked/enumerated token can't drive unbounded repeated lookups or
-// submissions. Fails open on a Redis outage.
+// submissions. Abuse/enumeration limiter → fails OPEN.
 async function checkRateLimit(request: NextRequest, key: string): Promise<NextResponse | null> {
-  try {
-    const ip = extractClientIp(request) ?? 'unknown'
-    const { success } = await workOrderRatelimit.limit(`${key}:${ip}`)
-    if (!success) {
-      return NextResponse.json({ error: 'Too many requests. Please try again in a minute.' }, { status: 429 })
-    }
-  } catch (rlErr) {
-    console.error(`[work-orders/quote] rate limit check failed (${key})`, rlErr)
-    reportError(rlErr, { site: 'route.work-orders.quote.checkRateLimit' })
+  const decision = await checkLimit(workOrderRatelimit, `${key}:${extractClientIp(request) ?? 'unknown'}`, {
+    onError: 'allow',
+    site:    `route.work-orders.quote.${key}`,
+  })
+  if (!decision.allowed) {
+    return NextResponse.json({ error: 'Too many requests. Please try again in a minute.' }, { status: 429 })
   }
   return null
+}
+
+// L-5: the previous inline `new Date(qr.quote_token_expires_at) < new Date()`
+// silently mis-reads a missing expiry. `new Date(undefined)` is Invalid Date,
+// and EVERY relational comparison against Invalid Date is false — so an
+// absent value read as "not expired", i.e. an unbounded token. (A literal
+// null happens to coerce to 1970 and read as expired, so the two absent-value
+// shapes disagree with each other, which is worse than either alone.)
+// types/database.ts types this column non-null and the schema declares it
+// NOT NULL, but this route is the unauthenticated token gate — it must not
+// depend on that invariant holding to stay safe. Absent or unparseable ⇒
+// expired: a quote request with no usable expiry is malformed, not eternal.
+function isQuoteTokenExpired(expiresAt: string | null | undefined): boolean {
+  if (expiresAt === null || expiresAt === undefined) return true
+  const expiry = new Date(expiresAt)
+  if (Number.isNaN(expiry.getTime())) return true
+  return expiry < new Date()
 }
 
 export async function GET(
@@ -47,7 +60,7 @@ export async function GET(
 
   if (!qr) return NextResponse.json({ error: 'Not found' }, { status: 404 })
 
-  if (new Date(qr.quote_token_expires_at) < new Date()) {
+  if (isQuoteTokenExpired(qr.quote_token_expires_at)) {
     return NextResponse.json({ error: 'This quote link has expired' }, { status: 410 })
   }
 
@@ -85,7 +98,7 @@ export async function POST(
     return NextResponse.json({ error: 'This quote request is no longer active' }, { status: 409 })
   }
 
-  if (new Date(qr.quote_token_expires_at) < new Date()) {
+  if (isQuoteTokenExpired(qr.quote_token_expires_at)) {
     await supabase.from('quote_requests').update({ status: 'expired' }).eq('id', qr.id)
     return NextResponse.json({ error: 'This quote link has expired' }, { status: 410 })
   }

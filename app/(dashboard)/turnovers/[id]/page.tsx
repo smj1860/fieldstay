@@ -8,6 +8,7 @@ import { Card } from '@/components/ui/Card'
 import { TurnoverRating } from './turnover-rating'
 import { unwrapJoin } from '@/lib/utils/supabase-joins'
 import type { Metadata } from 'next'
+import { throwIfAnyQueryFailed } from '@/lib/supabase/unwrap'
 
 export const metadata: Metadata = { title: 'Turnover Detail' }
 
@@ -17,7 +18,7 @@ export default async function TurnoverDetailPage({ params }: Props) {
   const { id } = await params
   const { supabase, membership } = await requireOrgMember()
 
-  const { data: turnover } = await supabase
+  const { data: turnover, error: turnoverError } = await supabase
     .from('turnovers')
     .select(`
       id, property_id, checkout_datetime, checkin_datetime,
@@ -37,24 +38,36 @@ export default async function TurnoverDetailPage({ params }: Props) {
     .eq('org_id', membership.org_id)
     .single()
 
+
+  // Logs + reports, then throws so the segment's error.tsx renders a real
+  // error state — a failed read must not render as an empty page.
+  throwIfAnyQueryFailed({ site: 'page.turnovers.id', orgId: membership.org_id }, turnoverError)
   if (!turnover) redirect('/turnovers')
 
-  const { data: property } = await supabase
+  const { data: property, error: propertyError } = await supabase
     .from('properties')
     .select('id, name, city, state, address, checkin_time, checkout_time')
     .eq('id', turnover.property_id)
     .single()
 
+
+  // Logs + reports, then throws so the segment's error.tsx renders a real
+  // error state — a failed read must not render as an empty page.
+  throwIfAnyQueryFailed({ site: 'page.turnovers.id', orgId: membership.org_id }, propertyError)
   const assignments = turnover.turnover_assignments ?? []
 
   let existingRating: number | null = null
   if (turnover.status === 'completed') {
-    const { data: outcomes } = await supabase
+    const { data: outcomes, error: outcomesError } = await supabase
       .from('assignment_outcomes')
       .select('pm_rating')
       .eq('turnover_id', id)
       .not('pm_rating', 'is', null)
       .limit(1)
+
+    // Logs + reports, then throws so the segment's error.tsx renders a real
+    // error state — a failed read must not render as an empty page.
+    throwIfAnyQueryFailed({ site: 'page.turnovers.id', orgId: membership.org_id }, outcomesError)
     existingRating = outcomes?.[0]?.pm_rating ?? null
   }
 

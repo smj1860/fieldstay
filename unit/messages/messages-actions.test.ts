@@ -11,12 +11,19 @@ vi.mock('next/cache', () => ({ revalidatePath: vi.fn() }))
 vi.mock('@/lib/inngest/client', () => ({ inngest: { send: vi.fn() } }))
 vi.mock('@/lib/push/send-push', () => ({ sendPushToUser: vi.fn() }))
 vi.mock('@/lib/observability/report-error', () => ({ reportError: vi.fn() }))
+// sendMessageToPM resolves "who is the PM" through getPmMembers (the single
+// source of truth in lib/inngest/helpers.ts) rather than the inline
+// `.in('role',[...]).limit(1)` query it used to run. Mocked here so this
+// suite tests the ROUTING decision; getPmMembers' own ordering and
+// invite_accepted_at filtering are covered by its dedicated tests.
+vi.mock('@/lib/inngest/helpers', () => ({ getPmMembers: vi.fn() }))
 
 import { requireOrgMember } from '@/lib/auth'
 import { createClient, createServiceClient } from '@/lib/supabase/server'
 import { inngest } from '@/lib/inngest/client'
 import { sendPushToUser } from '@/lib/push/send-push'
 import { reportError } from '@/lib/observability/report-error'
+import { getPmMembers } from '@/lib/inngest/helpers'
 import {
   sendMessageToCrew,
   sendMessageToPM,
@@ -128,15 +135,26 @@ describe('messages/actions', () => {
         organizations: [{ data: { slack_webhook_url: null } }],
         messages: [{ data: { id: 'msg_1', created_at: '2026-07-22T00:00:00.000Z' } }],
       })
-      const admin = makeSupabase({
-        organization_members: [{ data: { user_id: 'pm-user-1' } }],
-      })
+      const admin = makeSupabase({})
       vi.mocked(createClient).mockResolvedValue(supabase as never)
       vi.mocked(createServiceClient).mockReturnValue(admin as never)
+      vi.mocked(getPmMembers).mockResolvedValue([
+        { userId: 'pm-user-1', email: 'pm@example.com', role: 'owner' },
+      ])
 
       const result = await sendMessageToPM('Need more towels')
 
       expect(result).toEqual({ success: true })
+      // Delegates to getPmMembers scoped to the CREW MEMBER's org (never an
+      // org id the caller could influence), asking for the single highest-
+      // precedence contact. The inline query this replaced had no ORDER BY,
+      // so two crew messages minutes apart could land in two different
+      // inboxes with nothing tying them together.
+      expect(getPmMembers).toHaveBeenCalledWith(
+        admin,
+        'org_1',
+        { roles: ['owner', 'admin', 'manager'], limit: 1 },
+      )
       expect(inngest.send).toHaveBeenCalledWith({
         name: 'message/sent',
         data: expect.objectContaining({ recipient_id: 'pm-user-1', is_crew_to_pm: true }),
@@ -166,9 +184,10 @@ describe('messages/actions', () => {
       const supabase = makeSupabase({
         crew_members: [{ data: { id: 'crew_1', org_id: 'org_1', name: 'Jamie Crew' } }],
       })
-      const admin = makeSupabase({ organization_members: [{ data: null }] })
+      const admin = makeSupabase({})
       vi.mocked(createClient).mockResolvedValue(supabase as never)
       vi.mocked(createServiceClient).mockReturnValue(admin as never)
+      vi.mocked(getPmMembers).mockResolvedValue([])
 
       const result = await sendMessageToPM('hi')
 
