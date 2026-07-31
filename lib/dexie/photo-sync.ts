@@ -29,6 +29,24 @@ import { hasAnyOrgPrefix, orgScopedStoragePath } from '../storage/object-path'
 
 const MAX_RETRIES = 5
 
+/**
+ * Raised when a queued photo's owning org id cannot be resolved from the local
+ * cache, so no path the storage policies can see is constructible for it.
+ *
+ * Deliberately a plain Error subclass: classifyUploadFailure() sorts it as
+ * `transient`, which is the behaviour this case needs — back off, charge the
+ * retry budget, and DEAD-LETTER once the budget is spent, so the row lands on
+ * the crew shell's failed-sync surface with its blob intact. Silently skipping
+ * it instead (the shape this code shipped with) left the photo invisible
+ * forever: never attempted, never surfaced, never collected.
+ */
+class PhotoTargetUnresolvedError extends Error {
+  constructor(message: string) {
+    super(message)
+    this.name = 'PhotoTargetUnresolvedError'
+  }
+}
+
 // Closed allowlist of valid (table, column) targets — target_table/column
 // are never user input (only ever written by this codebase's own queueing
 // code), but validated here anyway before being used.
@@ -250,17 +268,21 @@ async function drainPhotoQueue(supabase: SupabaseClient, userId: string): Promis
       continue
     }
 
-    const uploadPath = await orgPrefixedUploadPath(userId, row)
-    if (!uploadPath) {
-      // Not a failure of this attempt — the crew member's own row hasn't
-      // synced yet, so there's no org id to build a policy-visible path
-      // from. Leave the row untouched (retry budget included) and let the
-      // next tick, once the sync has landed, deal with it.
-      console.warn(`[photo-sync] photo ${row.id}: org id not available locally yet — deferring`)
-      continue
-    }
-
     try {
+      // A legacy (pre-org-prefix) path is repaired here from the local cache.
+      // When the org id isn't resolvable this is usually transient — the
+      // target row simply hasn't synced yet — so it backs off and retries.
+      // But it is BOUNDED: routed through recordPhotoFailure() so it spends
+      // the retry budget and eventually dead-letters into the failed-sync UI
+      // rather than deferring silently on every tick forever.
+      const uploadPath = await orgPrefixedUploadPath(userId, row)
+      if (!uploadPath) {
+        throw new PhotoTargetUnresolvedError(
+          `photo ${row.id}: owning org id is not in the local cache, so no path the storage policies can see is constructible`,
+        )
+      }
+
+
       // Compression in photo-queue.ts always re-encodes to JPEG regardless
       // of the original capture format — upload with that content type
       // rather than the original file's row.mime_type, which may say

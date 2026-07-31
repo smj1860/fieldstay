@@ -50,6 +50,17 @@ export type EnvTier = 'always' | 'production' | 'recommended' | 'optional'
 
 export type DeployTarget = 'production' | 'preview' | 'development' | 'test'
 
+/**
+ * The environment as this module reads it: a bag of optional string values.
+ *
+ * Deliberately NOT `NodeJS.ProcessEnv`. Next.js augments that type so
+ * `NODE_ENV` is a REQUIRED property, which means no caller can pass a literal
+ * describing only the variables under test without either restating NODE_ENV
+ * or casting — and a cast is exactly what would let a real drift slip through.
+ * `process.env` is assignable to this, so nothing at the call sites changes.
+ */
+export type EnvRecord = Record<string, string | undefined>
+
 interface VarSpec {
   tier:   EnvTier
   /** Applied only when the variable is present and non-empty. */
@@ -60,7 +71,7 @@ interface VarSpec {
    * Promotes an 'optional' var to required when another var switches its
    * feature on (e.g. Telnyx credentials once SMS_ENABLED === 'true').
    */
-  requiredWhen?: (env: NodeJS.ProcessEnv) => boolean
+  requiredWhen?: (env: EnvRecord) => boolean
   /** Read only by the browser bundle — see the NEXT_PUBLIC_* note above. */
   clientInlinedOnly?: boolean
   /** Read by the build toolchain (next.config.ts), not by the running server. */
@@ -76,8 +87,8 @@ const rate01     = z.coerce.number().min(0).max(1)
 const percent    = z.coerce.number().min(0).max(100)
 const posInt     = z.coerce.number().int().positive()
 
-const smsOn = (env: NodeJS.ProcessEnv) => env.SMS_ENABLED === 'true'
-const demoOn = (env: NodeJS.ProcessEnv) => Boolean(env.DEMO_ENTRY_SECRET)
+const smsOn = (env: EnvRecord) => env.SMS_ENABLED === 'true'
+const demoOn = (env: EnvRecord) => Boolean(env.DEMO_ENTRY_SECRET)
 
 /**
  * Every server-read environment variable in this repo, enumerated from
@@ -253,7 +264,7 @@ export interface EnvValidationResult {
   ok:       boolean
 }
 
-export function resolveDeployTarget(env: NodeJS.ProcessEnv = process.env): DeployTarget {
+export function resolveDeployTarget(env: EnvRecord = process.env): DeployTarget {
   if (env.VERCEL_ENV === 'production') return 'production'
   if (env.VERCEL_ENV === 'preview')    return 'preview'
   if (env.NODE_ENV === 'test')         return 'test'
@@ -269,7 +280,7 @@ function isSet(raw: string | undefined): raw is string {
 function requirednessOf(
   spec: VarSpec,
   target: DeployTarget,
-  env: NodeJS.ProcessEnv,
+  env: EnvRecord,
 ): 'error' | 'warning' | 'ignore' {
   if (target === 'test') return 'ignore'
   if (spec.requiredWhen?.(env)) return 'error'
@@ -294,7 +305,7 @@ function requirednessOf(
  * `check:env` script without side effects.
  */
 export function validateServerEnv(
-  env: NodeJS.ProcessEnv = process.env,
+  env: EnvRecord = process.env,
   target: DeployTarget = resolveDeployTarget(env),
 ): EnvValidationResult {
   const errors:   EnvIssue[] = []
@@ -366,7 +377,7 @@ export function formatEnvReport(result: EnvValidationResult): string {
  * a genuinely misconfigured build is visible in the log — it just doesn't turn
  * an unconfigured CI runner permanently red.
  */
-export function assertServerEnv(env: NodeJS.ProcessEnv = process.env): EnvValidationResult {
+export function assertServerEnv(env: EnvRecord = process.env): EnvValidationResult {
   const result = validateServerEnv(env)
   const isBuildPhase = env.NEXT_PHASE === 'phase-production-build'
 

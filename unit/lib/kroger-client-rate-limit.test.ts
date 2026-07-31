@@ -13,20 +13,37 @@
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 
+// krogerFetch consults the limiters through checkLimit() rather than calling
+// `.limit()` on them directly, so checkLimit is the seam these tests control.
+// The limiter objects themselves are opaque tokens here — what matters is
+// WHICH one krogerFetch hands to checkLimit for a given endpoint class.
+const checkLimitMock = vi.fn()
 vi.mock('@/lib/rate-limit', () => ({
-  krogerAuthApiLimiter:      { limit: vi.fn() },
-  krogerProductsApiLimiter:  { limit: vi.fn() },
-  krogerLocationsApiLimiter: { limit: vi.fn() },
-  krogerCartApiLimiter:      { limit: vi.fn() },
+  krogerAuthApiLimiter:      { __limiter: 'kroger-auth' },
+  krogerProductsApiLimiter:  { __limiter: 'kroger-products' },
+  krogerLocationsApiLimiter: { __limiter: 'kroger-locations' },
+  krogerCartApiLimiter:      { __limiter: 'kroger-cart' },
+  checkLimit:                (...args: unknown[]) => checkLimitMock(...args),
+  retryAfterSeconds:         (d: { reset: number }) =>
+    Math.max(1, Math.ceil((d.reset - Date.now()) / 1000)),
 }))
 
 import { searchProducts, addItemsToKrogerCart, findNearestKrogerStore } from '@/lib/kroger/client'
 import { RateLimitError } from '@/lib/integrations/types'
-import {
-  krogerProductsApiLimiter,
-  krogerCartApiLimiter,
-  krogerLocationsApiLimiter,
-} from '@/lib/rate-limit'
+import { krogerProductsApiLimiter } from '@/lib/rate-limit'
+
+/** A checkLimit() decision, with the fields krogerFetch actually reads. */
+function decision(over: Partial<{ allowed: boolean; errored: boolean; reset: number }> = {}) {
+  return {
+    allowed:   true,
+    skipped:   false,
+    errored:   false,
+    limit:     9_000,
+    remaining: 8_999,
+    reset:     Date.now() + 1_000,
+    ...over,
+  }
+}
 
 function okJson(body: unknown) {
   return {
@@ -59,9 +76,9 @@ describe('lib/kroger/client — krogerFetch rate limiting', () => {
 
   it('consults the endpoint-class limiter BEFORE making the outbound request', async () => {
     const callOrder: string[] = []
-    ;(krogerProductsApiLimiter.limit as ReturnType<typeof vi.fn>).mockImplementation(async () => {
+    checkLimitMock.mockImplementation(async () => {
       callOrder.push('limiter')
-      return { success: true, reset: Date.now() + 1_000 }
+      return decision()
     })
     const fetchMock = vi.fn().mockImplementation(async () => {
       callOrder.push('fetch')
@@ -71,7 +88,16 @@ describe('lib/kroger/client — krogerFetch rate limiting', () => {
 
     await searchProducts('paper towels', 'loc_1', 'token_x')
 
-    expect(krogerProductsApiLimiter.limit).toHaveBeenCalledWith('kroger-products')
+    // The Products endpoint class gets its own limiter and its own fixed,
+    // platform-wide identifier — not a per-org key.
+    expect(checkLimitMock).toHaveBeenCalledWith(
+      krogerProductsApiLimiter,
+      'kroger-products',
+      // 'deny' — these are Kroger's published DAILY quotas, an external spend
+      // ceiling. A ceiling that disappears during a Redis outage is not a
+      // ceiling (same stance as claimNudgeBudgetSlot in CLAUDE.md).
+      { onError: 'deny', site: 'lib.kroger.client.krogerFetch.kroger-products' },
+    )
     expect(fetchMock).toHaveBeenCalledTimes(1)
     expect(callOrder).toEqual(['limiter', 'fetch'])
   })

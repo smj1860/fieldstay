@@ -33,7 +33,7 @@
  *     entry, so paging never eats a later query's queued response.
  */
 
-import { vi } from 'vitest'
+import { vi, type Mock } from 'vitest'
 
 export interface QueryResponse {
   data?:  unknown
@@ -50,12 +50,23 @@ export interface RecordedCall {
   args:   unknown[]
 }
 
-type Spy = ReturnType<typeof vi.fn>
+/**
+ * `ReturnType<typeof vi.fn>` widens to `Mock<Procedure | Constructable>`, which
+ * TypeScript refuses to call (TS2348 — "did you mean to include 'new'?").
+ * Naming the call signature explicitly keeps `spy(...)` callable while still
+ * exposing the full `Mock` assertion surface (`toHaveBeenCalledWith`, …).
+ */
+type Spy = Mock<(...args: unknown[]) => unknown>
+
+/** `Mock` is invariant in its call signature, so these keep their own shapes. */
+type FromSpy = Mock<(table: string) => Record<string, unknown>>
+type RpcSpy  = Mock<(fn: string, args?: unknown) => Promise<unknown>>
+type AuthSpy = Mock<() => Promise<unknown>>
 
 export interface SupabaseDouble {
-  from: Spy
-  rpc:  Spy
-  auth: { admin: { getUserById: Spy } }
+  from: FromSpy
+  rpc:  RpcSpy
+  auth: { admin: { getUserById: AuthSpy } }
   /** Every builder method call, in order, tagged with its table. */
   calls: RecordedCall[]
   /** Convenience spies, called as (table, ...args) — used by ical-sync et al. */

@@ -10,8 +10,21 @@ vi.mock('@supabase/ssr', () => ({
 vi.mock('@/lib/supabase/server', () => ({
   createServiceClient: vi.fn(),
 }))
+// The route consults its inline accountDeleteRatelimit through checkLimit()
+// (lib/rate-limit.ts) rather than calling `.limit()` on the limiter directly,
+// so that is the seam the tests control. Default: allowed, so every existing
+// case exercises the flow past the throttle; the 429 case below overrides it.
+const checkLimitMock = vi.fn(async () => ({
+  allowed:   true,
+  skipped:   false,
+  errored:   false,
+  limit:     5,
+  remaining: 4,
+  reset:     Date.now() + 60_000,
+}))
 vi.mock('@/lib/rate-limit', () => ({
-  redis: {},
+  redis:      {},
+  checkLimit: (...args: unknown[]) => checkLimitMock(...(args as [])),
 }))
 vi.mock('@upstash/ratelimit', () => ({
   Ratelimit: class {
@@ -155,6 +168,37 @@ describe('DELETE /api/account/delete', () => {
     const res = await DELETE(deleteRequest({ confirm: 'DELETE' }))
 
     expect(res.status).toBe(400)
+    expect(createServiceClient).not.toHaveBeenCalled()
+  })
+
+  // ── Throttle ─────────────────────────────────────────────────────────────
+  // The throttle sits BETWEEN the confirmation check and the password check,
+  // so a stolen session cannot be used to brute-force the re-auth password.
+
+  it('returns 429 without ever attempting the password re-auth when throttled', async () => {
+    const authClient = makeAuthClient({ id: USER_ID, email: EMAIL })
+    vi.mocked(createServerClient).mockReturnValue(authClient as never)
+    checkLimitMock.mockResolvedValueOnce({
+      allowed:   false,
+      skipped:   false,
+      errored:   false,
+      limit:     5,
+      remaining: 0,
+      reset:     Date.now() + 60_000,
+    })
+
+    const res = await DELETE(deleteRequest(validBody))
+
+    expect(res.status).toBe(429)
+    expect(checkLimitMock).toHaveBeenCalledWith(
+      expect.anything(),
+      `account-delete:${USER_ID}`,
+      // Fails OPEN: a Redis blip must not strand a user exercising a GDPR
+      // deletion right — the password re-auth is the real gate.
+      { onError: 'allow', site: 'route.account.delete.DELETE' },
+    )
+    // Only the session client was built — no isolated re-auth client, no admin.
+    expect(vi.mocked(createServerClient).mock.calls).toHaveLength(1)
     expect(createServiceClient).not.toHaveBeenCalled()
   })
 

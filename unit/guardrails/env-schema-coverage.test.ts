@@ -7,6 +7,7 @@ import {
   validateServerEnv,
   resolveDeployTarget,
   assertServerEnv,
+  type EnvRecord,
 } from '../../lib/env'
 
 // ============================================================================
@@ -129,7 +130,7 @@ describe('guardrail: env schema coverage', () => {
 // ── Behaviour ───────────────────────────────────────────────────────────────
 
 /** A minimal environment that satisfies every tier, for mutation in tests. */
-function fullEnv(): NodeJS.ProcessEnv {
+function fullEnv(): EnvRecord {
   return {
     NEXT_PUBLIC_SUPABASE_URL:      'https://example.supabase.co',
     NEXT_PUBLIC_SUPABASE_ANON_KEY: 'anon-key',
@@ -243,7 +244,7 @@ describe('guardrail: env validation behaviour', () => {
   })
 
   it('assertServerEnv reports but never throws during `next build` (CI builds have no secrets)', () => {
-    const env: NodeJS.ProcessEnv = { NEXT_PHASE: 'phase-production-build', VERCEL_ENV: 'production' }
+    const env: EnvRecord = { NEXT_PHASE: 'phase-production-build', VERCEL_ENV: 'production' }
     expect(() => assertServerEnv(env)).not.toThrow()
   })
 

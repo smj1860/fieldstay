@@ -21,8 +21,19 @@ vi.mock('@/lib/integrations/registry', () => ({
 }))
 // Dynamically imported inside triggerResync — must still be mocked at
 // module level since vi.mock hoists above the dynamic import call site.
+// triggerResync consults the limiter through checkLimit() rather than calling
+// integrationResyncLimiter.limit() directly, so checkLimit is the seam here.
+const checkLimitMock = vi.fn(async () => ({
+  allowed:   true,
+  skipped:   false,
+  errored:   false,
+  limit:     1,
+  remaining: 0,
+  reset:     Date.now() + 60_000,
+}))
 vi.mock('@/lib/rate-limit', () => ({
-  integrationResyncLimiter: { limit: vi.fn(async () => ({ success: true })) },
+  integrationResyncLimiter: { __limiter: 'integration-resync' },
+  checkLimit:               (...args: unknown[]) => checkLimitMock(...(args as [])),
 }))
 vi.mock('@/lib/inngest/client', () => ({
   inngest: { send: vi.fn() },
@@ -39,7 +50,7 @@ import { createServiceClient } from '@/lib/supabase/server'
 import { logAuditEvent } from '@/lib/audit'
 import { readIntegrationToken, disconnectIntegrationToken } from '@/lib/integrations/vault'
 import { getProvider } from '@/lib/integrations/registry'
-import { integrationResyncLimiter } from '@/lib/rate-limit'
+
 import { inngest } from '@/lib/inngest/client'
 
 interface QueuedByTable {
@@ -104,7 +115,14 @@ describe('settings/integrations/actions', () => {
     // vi.clearAllMocks() clears call history but not a prior
     // mockResolvedValue() override — reset explicitly so a rate-limit-denied
     // test earlier in the suite can't leak into a later happy-path test.
-    vi.mocked(integrationResyncLimiter.limit).mockResolvedValue({ success: true } as never)
+    checkLimitMock.mockResolvedValue({
+      allowed:   true,
+      skipped:   false,
+      errored:   false,
+      limit:     1,
+      remaining: 0,
+      reset:     Date.now() + 60_000,
+    })
     // Same hazard: the "local disconnect fails" test sets a rejected
     // implementation on disconnectIntegrationToken — reset it so tests that
     // run after it get the default resolved behavior back.
@@ -179,12 +197,39 @@ describe('settings/integrations/actions', () => {
         integration_connections: [{ data: { user_id: USER_ID, org_id: ORG_ID, external_user_id: 'ext_1', status: 'connected' }, error: null }],
       })
       vi.mocked(createServiceClient).mockReturnValue(supabase as never)
-      vi.mocked(integrationResyncLimiter.limit).mockResolvedValue({ success: false } as never)
+      checkLimitMock.mockResolvedValue({
+        allowed:   false,
+        skipped:   false,
+        errored:   false,
+        limit:     1,
+        remaining: 0,
+        reset:     Date.now() + 60_000,
+      })
 
       const result = await triggerResync('ownerrez')
 
       expect(result).toEqual({ error: 'Sync already in progress — please wait 60 seconds before trying again' })
       expect(inngest.send).not.toHaveBeenCalled()
+    })
+
+    // This limiter is a provider-quota ceiling, not an abuse throttle, so it
+    // fails CLOSED: onError 'deny' means a Redis outage defers the manual
+    // resync rather than letting a panicking PM burn the provider's quota
+    // unbounded (same stance as claimNudgeBudgetSlot in CLAUDE.md).
+    it('consults the limiter keyed per provider+org and declares a fail-CLOSED policy', async () => {
+      mockAuthed('admin')
+      const supabase = makeSupabase({
+        integration_connections: [{ data: { user_id: USER_ID, org_id: ORG_ID, external_user_id: 'ext_1', status: 'connected' }, error: null }],
+      })
+      vi.mocked(createServiceClient).mockReturnValue(supabase as never)
+
+      await triggerResync('ownerrez')
+
+      expect(checkLimitMock).toHaveBeenCalledWith(
+        expect.anything(),
+        `ownerrez:${ORG_ID}`,
+        { onError: 'deny', site: 'action.settings.integrations.triggerResync' },
+      )
     })
 
     it('fires the ownerrez resync event scoped to the caller org on the happy path', async () => {
