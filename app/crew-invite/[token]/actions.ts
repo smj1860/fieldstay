@@ -6,9 +6,9 @@ import { logAuditEvent }       from '@/lib/audit'
 import { redirect }            from 'next/navigation'
 import { headers }             from 'next/headers'
 import { z }                   from 'zod'
-import { inviteAcceptRatelimit } from '@/lib/rate-limit'
+import { inviteAcceptRatelimit, checkLimit } from '@/lib/rate-limit'
+import { extractClientIp }     from '@/lib/integrations/webhook-verification'
 
-import { reportError } from '@/lib/observability/report-error'
 const ActivateSchema = z.object({
   token:    z.string().uuid('Invite link is invalid or expired'),
   crewId:   z.string().uuid(),
@@ -61,19 +61,24 @@ export async function activateCrewAccount(formData: FormData): Promise<{ error?:
   }
 
   // Real account creation (supabase.auth.admin.createUser below) from a
-  // public route gated only by a UUID token — rate limit by IP. Fails open
-  // on a Redis outage; a degraded limiter must never block a legitimate
-  // crew member finishing setup.
-  try {
-    const hdrs = await headers()
-    const ip   = hdrs.get('x-forwarded-for')?.split(',')[0]?.trim() ?? 'unknown'
-    const { success } = await inviteAcceptRatelimit.limit(`crew-invite:${ip}`)
-    if (!success) {
-      return { error: 'Too many attempts. Please try again in a few minutes.' }
-    }
-  } catch (rlErr) {
-    console.error('[activateCrewAccount] rate limit check failed', rlErr)
-    reportError(rlErr, { site: 'serverAction.crew-invite.activateCrewAccount' })
+  // public route gated only by a UUID token — rate limit by IP.
+  // onError: 'allow' — fails open on a Redis outage; a degraded limiter must
+  // never block a legitimate crew member finishing setup.
+  //
+  // A Server Action has no Request object, so the incoming headers are
+  // wrapped in one rather than re-implementing the x-forwarded-for parse
+  // inline — extractClientIp() is the single place that encodes "Vercel
+  // prepends the trusted client IP as the first entry".
+  const ip = extractClientIp(
+    new Request('https://fieldstay.local', { headers: await headers() })
+  ) ?? 'unknown'
+
+  const rateLimit = await checkLimit(inviteAcceptRatelimit, `crew-invite:${ip}`, {
+    onError: 'allow',
+    site:    'action.crew-invite',
+  })
+  if (!rateLimit.allowed) {
+    return { error: 'Too many attempts. Please try again in a few minutes.' }
   }
 
   const { token, crewId, password } = parsed.data

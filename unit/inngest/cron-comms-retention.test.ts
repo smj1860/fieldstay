@@ -11,6 +11,7 @@ import { dailyCommsRetention } from '@/lib/inngest/functions/cron/comms-retentio
 import { createServiceClient } from '@/lib/supabase/server'
 import { logAuditEvents } from '@/lib/audit'
 import { invokeHandler } from './test-helpers'
+import { createSupabaseDouble, type TableSpec } from '../stubs/supabase-query-double'
 
 // Cron function — no meaningful `data` on the real event (only wall-clock
 // date driven), so `event` is `{}`, mirroring cron-vendor-compliance-grace-check.
@@ -18,37 +19,8 @@ import { invokeHandler } from './test-helpers'
 // Queue-based `.from(table)` mock, same convention as the other retention
 // crons in this batch. `communication_logs` is queried twice per org (soft
 // -delete update, then hard-purge delete) so order matters.
-function makeSupabase(queued: Record<string, { data?: unknown; error?: unknown }[]>) {
-  const counters: Record<string, number> = {}
-  const calls: { table: string; method: string; args: unknown[] }[] = []
-
-  const from = vi.fn((table: string) => {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const chain: any = {}
-    const record = (method: string, args: unknown[]) => {
-      calls.push({ table, method, args })
-      return chain
-    }
-    chain.select = (...a: unknown[]) => record('select', a)
-    chain.eq     = (...a: unknown[]) => record('eq', a)
-    chain.is     = (...a: unknown[]) => record('is', a)
-    chain.not    = (...a: unknown[]) => record('not', a)
-    chain.lt     = (...a: unknown[]) => record('lt', a)
-    chain.update = (...a: unknown[]) => record('update', a)
-    chain.delete = (...a: unknown[]) => record('delete', a)
-
-    const resolveNext = () => {
-      const idx = counters[table] ?? 0
-      counters[table] = idx + 1
-      return Promise.resolve(queued[table]?.[idx] ?? { data: null, error: null })
-    }
-
-    chain.then = (resolve: (v: unknown) => unknown, reject?: (e: unknown) => unknown) =>
-      resolveNext().then(resolve, reject)
-    return chain
-  })
-
-  return { from, calls }
+function makeSupabase(queued: Record<string, TableSpec>) {
+  return createSupabaseDouble(queued)
 }
 
 function makeStep() {

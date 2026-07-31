@@ -71,9 +71,19 @@ export async function triggerResync(
     return { error: 'This integration isn’t connected — connect it first.' }
   }
 
-  const { integrationResyncLimiter } = await import('@/lib/rate-limit')
-  const { success: withinLimit } = await integrationResyncLimiter.limit(`${providerId}:${membership.org_id}`)
-  if (!withinLimit) {
+  // onError: 'deny' — this limiter exists to stop a panicking PM from
+  // hammering "Trigger Resync" and burning the provider's API quota, so it is
+  // a quota ceiling, not an abuse throttle: a ceiling that disappears during a
+  // Redis outage is not a ceiling (same fail-CLOSED stance as
+  // claimNudgeBudgetSlot in CLAUDE.md). The cost of failing closed is one
+  // manual resync deferred until Redis recovers.
+  const { integrationResyncLimiter, checkLimit } = await import('@/lib/rate-limit')
+  const resyncLimit = await checkLimit(
+    integrationResyncLimiter,
+    `${providerId}:${membership.org_id}`,
+    { onError: 'deny', site: 'action.settings.integrations.triggerResync' },
+  )
+  if (!resyncLimit.allowed) {
     return { error: 'Sync already in progress — please wait 60 seconds before trying again' }
   }
 

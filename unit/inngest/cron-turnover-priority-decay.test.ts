@@ -7,45 +7,14 @@ vi.mock('@/lib/supabase/server', () => ({
 import { turnoverPriorityDecay } from '@/lib/inngest/functions/cron/turnover-priority-decay'
 import { createServiceClient } from '@/lib/supabase/server'
 import { invokeHandler } from './test-helpers'
+import { createSupabaseDouble, type TableSpec } from '../stubs/supabase-query-double'
 
 // Queue-based `.from(table)` mock — same convention as checklist-broadcast
 // and vendor-compliance-grace-check. `turnovers` is queried once up front
 // (candidates) and then again per-candidate for the update, so a fixed
 // per-table response isn't enough.
-function makeSupabase(queued: Record<string, { data?: unknown; error?: unknown }[]>) {
-  const counters: Record<string, number> = {}
-  const calls: { table: string; method: string; args: unknown[] }[] = []
-
-  const from = vi.fn((table: string) => {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const chain: any = {}
-    const record = (method: string, args: unknown[]) => {
-      calls.push({ table, method, args })
-      return chain
-    }
-    chain.select = (...a: unknown[]) => record('select', a)
-    chain.eq     = (...a: unknown[]) => record('eq', a)
-    chain.is     = (...a: unknown[]) => record('is', a)
-    chain.not    = (...a: unknown[]) => record('not', a)
-    chain.gte    = (...a: unknown[]) => record('gte', a)
-    chain.lte    = (...a: unknown[]) => record('lte', a)
-    chain.in     = (...a: unknown[]) => record('in', a)
-    chain.limit  = (...a: unknown[]) => record('limit', a)
-    chain.update = (...a: unknown[]) => record('update', a)
-
-    const resolveNext = () => {
-      const idx = counters[table] ?? 0
-      counters[table] = idx + 1
-      return Promise.resolve(queued[table]?.[idx] ?? { data: null, error: null })
-    }
-
-    chain.maybeSingle = () => resolveNext()
-    chain.then = (resolve: (v: unknown) => unknown, reject?: (e: unknown) => unknown) =>
-      resolveNext().then(resolve, reject)
-    return chain
-  })
-
-  return { from, calls }
+function makeSupabase(queued: Record<string, TableSpec>) {
+  return createSupabaseDouble(queued)
 }
 
 function makeStep() {

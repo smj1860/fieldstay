@@ -15,43 +15,14 @@ import { createServiceClient } from '@/lib/supabase/server'
 import { logAuditEvent } from '@/lib/audit'
 import { createPmNotification } from '@/lib/inngest/helpers'
 import { invokeHandler } from './test-helpers'
+import { createSupabaseDouble, type TableSpec } from '../stubs/supabase-query-double'
 
 // Queue-based `.from(table)` mock — same convention as checklist-broadcast.
 // `work_orders` is queried both for the aging pass and (per auto-created
 // schedule) for the idempotency check + insert, so a fixed per-table
 // response isn't enough.
-function makeSupabase(queued: Record<string, { data?: unknown; error?: unknown }[]>) {
-  const counters: Record<string, number> = {}
-  const calls: { table: string; method: string; args: unknown[] }[] = []
-
-  const from = vi.fn((table: string) => {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const chain: any = {}
-    const record = (method: string, args: unknown[]) => {
-      calls.push({ table, method, args })
-      return chain
-    }
-    for (const m of ['select', 'eq', 'in', 'not', 'gte', 'lte', 'lt', 'neq', 'like', 'order', 'limit', 'is']) {
-      chain[m] = (...a: unknown[]) => record(m, a)
-    }
-    for (const m of ['insert', 'update', 'upsert', 'delete']) {
-      chain[m] = (...a: unknown[]) => record(m, a)
-    }
-
-    const resolveNext = () => {
-      const idx = counters[table] ?? 0
-      counters[table] = idx + 1
-      return Promise.resolve(queued[table]?.[idx] ?? { data: null, error: null })
-    }
-
-    chain.single      = () => resolveNext()
-    chain.maybeSingle = () => resolveNext()
-    chain.then = (resolve: (v: unknown) => unknown, reject?: (e: unknown) => unknown) =>
-      resolveNext().then(resolve, reject)
-    return chain
-  })
-
-  return { from, calls }
+function makeSupabase(queued: Record<string, TableSpec>) {
+  return createSupabaseDouble(queued)
 }
 
 function makeStep() {

@@ -11,6 +11,7 @@ import { dailyGuestPiiRetention } from '@/lib/inngest/functions/cron/guest-pii-r
 import { createServiceClient } from '@/lib/supabase/server'
 import { logAuditEvents } from '@/lib/audit'
 import { invokeHandler } from './test-helpers'
+import { createSupabaseDouble, type TableSpec } from '../stubs/supabase-query-double'
 
 // Cron function — the real event has no meaningful `data` the handler reads
 // (it only queries by wall-clock date), so `event` is passed as `{}` below,
@@ -22,43 +23,13 @@ import { invokeHandler } from './test-helpers'
 // queried twice per org with a stale-booking candidate present (the stale
 // select, then the anonymizing update), so a fixed per-table response isn't
 // enough — order matters.
-function makeSupabase(queued: Record<string, { data?: unknown; error?: unknown }[]>) {
-  const counters: Record<string, number> = {}
-  const calls: { table: string; method: string; args: unknown[] }[] = []
-
-  const from = vi.fn((table: string) => {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const chain: any = {}
-    const record = (method: string, args: unknown[]) => {
-      calls.push({ table, method, args })
-      return chain
-    }
-    chain.select = (...a: unknown[]) => record('select', a)
-    chain.eq     = (...a: unknown[]) => record('eq', a)
-    chain.is     = (...a: unknown[]) => record('is', a)
-    chain.lt     = (...a: unknown[]) => record('lt', a)
-    chain.in     = (...a: unknown[]) => record('in', a)
-    chain.update = (...a: unknown[]) => record('update', a)
-    chain.delete = (...a: unknown[]) => record('delete', a)
-
-    const resolveNext = () => {
-      const idx = counters[table] ?? 0
-      counters[table] = idx + 1
-      return Promise.resolve(queued[table]?.[idx] ?? { data: null, error: null })
-    }
-
-    chain.then = (resolve: (v: unknown) => unknown, reject?: (e: unknown) => unknown) =>
-      resolveNext().then(resolve, reject)
-    return chain
-  })
-
+function makeSupabase(queued: Record<string, TableSpec>) {
   // supabase.rpc('delete_vault_secret', ...) is called directly, not through
-  // the .from() chain — its return value is ignored by the source, so a
-  // plain resolved stub is enough. Real vault-secret ids are never used —
-  // fixture ids here are placeholders, never actual guest data.
-  const rpc = vi.fn(async () => ({ data: null, error: null }))
-
-  return { from, rpc, calls }
+  // the .from() chain — its return value is ignored by the source, so the
+  // shared double's default resolved rpc stub is enough. Real vault-secret
+  // ids are never used — fixture ids here are placeholders, never actual
+  // guest data.
+  return createSupabaseDouble(queued)
 }
 
 function makeStep() {

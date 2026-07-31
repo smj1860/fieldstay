@@ -11,21 +11,13 @@ import { metricsSnapshot } from '@/lib/inngest/functions/cron/metrics-snapshot'
 import { createServiceClient } from '@/lib/supabase/server'
 import { recordGauge } from '@/lib/observability/metrics'
 import { invokeHandler } from './test-helpers'
+import { createSupabaseDouble, type TableSpec } from '../stubs/supabase-query-double'
 
 // Simple fixed-per-table mock — this cron issues exactly one query per
 // table (no re-querying the same table), so a queue isn't needed here
 // unlike the checklist-broadcast/vendor-compliance-grace-check precedents.
-function makeSupabase(responses: Record<string, { data?: unknown; error?: unknown }>) {
-  const from = vi.fn((table: string) => {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const chain: any = {}
-    chain.select = () => chain
-    chain.in     = () => chain
-    chain.then   = (resolve: (v: unknown) => unknown) =>
-      Promise.resolve(responses[table] ?? { data: null, error: null }).then(resolve)
-    return chain
-  })
-  return { from }
+function makeSupabase(responses: Record<string, TableSpec>) {
+  return createSupabaseDouble(responses)
 }
 
 function makeStep() {

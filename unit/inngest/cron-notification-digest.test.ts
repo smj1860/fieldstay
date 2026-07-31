@@ -11,6 +11,7 @@ import { notificationDigest } from '@/lib/inngest/functions/cron/notification-di
 import { createServiceClient } from '@/lib/supabase/server'
 import { createPmNotification } from '@/lib/inngest/helpers'
 import { invokeHandler } from './test-helpers'
+import { createSupabaseDouble, type TableSpec } from '../stubs/supabase-query-double'
 
 // This function does NOT use notification_digest_state/diffDigestSnapshot —
 // it rolls up raw counts (work orders created, RepuGuard drafts generated)
@@ -18,17 +19,8 @@ import { invokeHandler } from './test-helpers'
 // category per day via createPmNotification, which is mocked here (same
 // convention as work-order-dispatch.test.ts) rather than simulated at the
 // `notifications` table level.
-function makeSupabase(responses: Record<string, { data?: unknown; error?: unknown }>) {
-  const from = vi.fn((table: string) => {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const chain: any = {}
-    chain.select = () => chain
-    chain.gte    = () => chain
-    chain.then   = (resolve: (v: unknown) => unknown, reject?: (e: unknown) => unknown) =>
-      Promise.resolve(responses[table] ?? { data: null, error: null }).then(resolve, reject)
-    return chain
-  })
-  return { from }
+function makeSupabase(responses: Record<string, TableSpec>) {
+  return createSupabaseDouble(responses)
 }
 
 function makeStep() {
