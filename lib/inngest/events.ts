@@ -959,4 +959,25 @@ export type FieldStayEvents = {
     }
   }
 
+  // Monthly CapEx projection, fanned out one per org by
+  // generateCapexProjections. `year` is resolved once in the dispatcher so
+  // every org in a run projects against the same year even if the fan-out
+  // straddles midnight on Dec 31.
+  'org/capex_projection.requested': {
+    data: {
+      org_id: string
+      year:   number
+    }
+  }
+
+  // Annual (or on-demand) depreciation ledger, fanned out one per org by
+  // generateDepreciationLedger. The handler loads its own org's assets — the
+  // platform-wide asset list is deliberately NOT carried on the event.
+  'org/depreciation_ledger.requested': {
+    data: {
+      org_id:   string
+      tax_year: number
+    }
+  }
+
 }

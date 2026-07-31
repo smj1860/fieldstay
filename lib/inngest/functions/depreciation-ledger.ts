@@ -5,18 +5,52 @@
  *  - Manual: 'asset/depreciation-ledger-requested' event (button click from dashboard)
  *  - Automatic: January 1st each year for the prior tax year ('0 0 1 1 *')
  *
- * Steps:
- *  1. Load all active assets with placed_in_service_date + purchase_price
- *  2. Fetch prior cumulative depreciation per asset from existing entries
- *  3. Calculate each asset's entry for the requested tax year
- *  4. Upsert into asset_depreciation_entries (UNIQUE on asset_id + tax_year)
- *  5. Store summary in org_milestones with key depreciation_ledger_{tax_year}
+ * DISPATCHER ONLY. The previous single-invocation version had two distinct
+ * scalability defects:
+ *
+ *  1. `for (const [orgId, orgAssets] of Object.entries(orgMap)) { await
+ *     step.run(...) }` — one Inngest step per tenant in a single run, the same
+ *     shape converted in the six crons of the 2026-07-30 scalability pass.
+ *  2. Worse: it loaded EVERY asset platform-wide and returned that array as a
+ *     STEP OUTPUT, so Inngest re-sent it on every subsequent step. At 150
+ *     tenants x 30 properties x 10 assets that is ~45,000 rows of memoized
+ *     state per step — exactly the step-output size problem that forced
+ *     cron/asset-health.ts to stop returning `activeAssets`. The platform-wide
+ *     `asset_depreciation_entries` prior-year read had the same shape.
+ *
+ * Now the dispatcher resolves DISTINCT org ids only (one small string array)
+ * and each per-org handler loads its own org's assets and its own org's prior
+ * entries. Nothing platform-wide is ever held in memory or in step state.
+ *
+ * The math is unchanged: prior cumulative depreciation is still the sum of
+ * `current_year_depreciation` across every entry for that asset with
+ * `tax_year < taxYear`. Scoping that read by `org_id` instead of by an
+ * `.in(assetIds)` list is equivalent, because an entry and its asset always
+ * share an org — the map is only ever read by asset id.
+ *
+ * Idempotency is unchanged: the entries upsert still targets
+ * UNIQUE (asset_id, tax_year) via `onConflict: 'asset_id,tax_year'`, so a
+ * retry (or a re-run of the same tax year) recomputes and overwrites the same
+ * rows rather than accumulating duplicates.
  */
 
-import { inngest }                    from '@/lib/inngest/client'
-import { createServiceClient }         from '@/lib/supabase/server'
-import { calculateAnnualDepreciation } from '@/lib/assets/depreciation'
-import { logAuditEvent }               from '@/lib/audit'
+import { inngest }                     from '@/lib/inngest/client'
+import { createServiceClient }          from '@/lib/supabase/server'
+import { calculateAnnualDepreciation }  from '@/lib/assets/depreciation'
+import { logAuditEvent }                from '@/lib/audit'
+import { fetchAllRows, fetchDistinctOrgIds } from '@/lib/inngest/paginate'
+
+interface LedgerAssetRow {
+  id:                     string
+  org_id:                 string
+  property_id:            string
+  name:                   string
+  asset_type:             string
+  placed_in_service_date: string
+  purchase_price:         number
+  salvage_value:          number | null
+  macrs_class:            string
+}
 
 export const generateDepreciationLedger = inngest.createFunction(
   {
@@ -38,127 +72,145 @@ export const generateDepreciationLedger = inngest.createFunction(
     const triggerOrgId: string | null =
       (event as { data?: { org_id?: string } })?.data?.org_id ?? null
 
-    // ── Step 1: Load active assets ──────────────────────────────────────────
+    const orgIds = await step.run('resolve-orgs', async () => {
+      // Manual trigger from the PM dashboard names its org — no scan needed.
+      if (triggerOrgId) return [triggerOrgId]
 
-    const assets = await step.run('load-assets', async () => {
       const supabase = createServiceClient({ system: 'inngest:depreciation-ledger' })
-      const pageSize = 1000
-      const all: Array<{
-        id: string; org_id: string; property_id: string; name: string; asset_type: string
-        placed_in_service_date: string; purchase_price: number; salvage_value: number | null; macrs_class: string
-      }> = []
-
-      for (let from = 0; ; from += pageSize) {
-        const query = supabase
+      return fetchDistinctOrgIds(
+        (from, to) => supabase
           .from('property_assets')
-          .select('id, org_id, property_id, name, asset_type, placed_in_service_date, purchase_price, salvage_value, macrs_class')
+          .select('org_id')
           .eq('is_active', true)
           .not('placed_in_service_date', 'is', null)
           .not('purchase_price', 'is', null)
-          .range(from, from + pageSize - 1)
+          .order('org_id', { ascending: true })
+          .range(from, to),
+        { label: 'property_assets.org_id(depreciation)' },
+      )
+    })
 
-        // Cron has no event data — runs for all orgs.
-        // Manual trigger from the PM dashboard provides org_id — scope to that org.
-        if (triggerOrgId) {
-          query.eq('org_id', triggerOrgId)
-        }
+    logger.info(`[Depreciation] dispatching ${orgIds.length} org(s) for ${taxYear}`)
 
-        const { data } = await query
-        if (!data?.length) break
-        all.push(...data)
-        if (data.length < pageSize) break
+    if (orgIds.length) {
+      await step.sendEvent(
+        'fan-out-depreciation-ledger',
+        orgIds.map((orgId) => ({
+          name: 'org/depreciation_ledger.requested' as const,
+          data: { org_id: orgId, tax_year: taxYear },
+        })),
+      )
+    }
+
+    return { tax_year: taxYear, dispatched: orgIds.length }
+  }
+)
+
+/**
+ * Per-org depreciation ledger. One invocation = one tenant: it loads its own
+ * assets and its own prior-year entries (both paginated), computes, upserts,
+ * and writes the org_milestones summary the capital-planning page polls.
+ */
+export const depreciationLedgerOrg = inngest.createFunction(
+  {
+    id:          'depreciation-ledger-org',
+    name:        'Depreciation Ledger — per org',
+    retries:     3,
+    concurrency: { limit: 10 },
+  },
+  { event: 'org/depreciation_ledger.requested' },
+  async ({ event, step, logger }) => {
+    const { org_id: orgId, tax_year: taxYear } = event.data
+
+    const written = await step.run('upsert-org-entries', async () => {
+      const supabase = createServiceClient({ system: 'inngest:depreciation-ledger' })
+
+      const assets = await fetchAllRows<LedgerAssetRow>(
+        (from, to) => supabase
+          .from('property_assets')
+          .select('id, org_id, property_id, name, asset_type, placed_in_service_date, purchase_price, salvage_value, macrs_class')
+          .eq('org_id', orgId)
+          .eq('is_active', true)
+          .not('placed_in_service_date', 'is', null)
+          .not('purchase_price', 'is', null)
+          .order('id', { ascending: true })
+          .range(from, to),
+        { label: `property_assets(depreciation)[org=${orgId}]` },
+      )
+
+      if (!assets.length) return 0
+
+      // Prior cumulative depreciation: every entry for this org's assets in a
+      // tax year before the one being generated. Paginated — an org with a few
+      // years of history and a large asset ledger runs past 1000 rows, and
+      // truncating it here would understate `prior_cumulative_depreciation`
+      // and overstate the ending adjusted basis on the CPA export.
+      const priorEntries = await fetchAllRows<{ asset_id: string; current_year_depreciation: number }>(
+        (from, to) => supabase
+          .from('asset_depreciation_entries')
+          .select('asset_id, current_year_depreciation')
+          .eq('org_id', orgId)
+          .lt('tax_year', taxYear)
+          .order('id', { ascending: true })
+          .range(from, to),
+        { label: `asset_depreciation_entries(prior)[org=${orgId}]` },
+      )
+
+      const priorCumulativeMap: Record<string, number> = {}
+      for (const entry of priorEntries) {
+        priorCumulativeMap[entry.asset_id] =
+          (priorCumulativeMap[entry.asset_id] ?? 0) + entry.current_year_depreciation
       }
 
-      return all
-    })
+      const entries = []
+      for (const asset of assets) {
+        const prior = priorCumulativeMap[asset.id] ?? 0
+        const entry = calculateAnnualDepreciation(
+          asset as Parameters<typeof calculateAnnualDepreciation>[0],
+          taxYear,
+          prior,
+        )
+        if (entry) entries.push(entry)
+      }
 
-    if (!assets.length) {
-      logger.info('[Depreciation] No eligible assets found')
-      return { tax_year: taxYear, entries_written: 0 }
-    }
+      if (!entries.length) return 0
 
-    // ── Step 2: Fetch prior cumulative depreciation per asset ───────────────
-
-    const priorEntries = await step.run('fetch-prior-cumulative', async () => {
-      const supabase = createServiceClient({ system: 'inngest:depreciation-ledger' })
-      const assetIds = assets.map((a) => a.id)
-      const { data } = await supabase
+      // UNIQUE (asset_id, tax_year) — a retry overwrites, never duplicates.
+      const { error } = await supabase
         .from('asset_depreciation_entries')
-        .select('asset_id, current_year_depreciation')
-        .in('asset_id', assetIds)
-        .lt('tax_year', taxYear)
-      return data ?? []
-    })
+        .upsert(entries, { onConflict: 'asset_id,tax_year' })
 
-    // Sum prior depreciation per asset
-    const priorCumulativeMap: Record<string, number> = {}
-    for (const entry of priorEntries) {
-      priorCumulativeMap[entry.asset_id] =
-        (priorCumulativeMap[entry.asset_id] ?? 0) + (entry.current_year_depreciation as number)
-    }
+      if (error) throw new Error(`[Depreciation] Upsert failed for org ${orgId}: ${error.message}`)
 
-    // ── Step 3 & 4: Calculate + upsert entries per org ─────────────────────
-
-    // Group assets by org for per-org milestone steps
-    const orgMap: Record<string, typeof assets> = {}
-    for (const asset of assets) {
-      if (!orgMap[asset.org_id]) orgMap[asset.org_id] = []
-      orgMap[asset.org_id].push(asset)
-    }
-
-    let totalWritten = 0
-
-    for (const [orgId, orgAssets] of Object.entries(orgMap)) {
-      const written = await step.run(`upsert-entries-${orgId}`, async () => {
-        const supabase = createServiceClient({ system: 'inngest:depreciation-ledger' })
-        const entries = []
-
-        for (const asset of orgAssets) {
-          const prior = priorCumulativeMap[asset.id] ?? 0
-          const entry = calculateAnnualDepreciation(asset as Parameters<typeof calculateAnnualDepreciation>[0], taxYear, prior)
-          if (entry) entries.push(entry)
-        }
-
-        if (!entries.length) return 0
-
-        const { error } = await supabase
-          .from('asset_depreciation_entries')
-          .upsert(entries, { onConflict: 'asset_id,tax_year' })
-
-        if (error) throw new Error(`[Depreciation] Upsert failed for org ${orgId}: ${error.message}`)
-
-        // Store summary milestone
-        const totalCurrentDepr = entries.reduce((s, e) => s + e.current_year_depreciation, 0)
-        await supabase
-          .from('org_milestones')
-          .upsert(
-            {
-              org_id:    orgId,
-              milestone: `depreciation_ledger_${taxYear}`,
-              value: {
-                generated_at:   new Date().toISOString(),
-                tax_year:       taxYear,
-                entry_count:    entries.length,
-                total_depr:     Math.round(totalCurrentDepr * 100) / 100,
-              },
+      // Store summary milestone
+      const totalCurrentDepr = entries.reduce((s, e) => s + e.current_year_depreciation, 0)
+      await supabase
+        .from('org_milestones')
+        .upsert(
+          {
+            org_id:    orgId,
+            milestone: `depreciation_ledger_${taxYear}`,
+            value: {
+              generated_at:   new Date().toISOString(),
+              tax_year:       taxYear,
+              entry_count:    entries.length,
+              total_depr:     Math.round(totalCurrentDepr * 100) / 100,
             },
-            { onConflict: 'org_id,milestone' }
-          )
+          },
+          { onConflict: 'org_id,milestone' }
+        )
 
-        await logAuditEvent({
-          orgId,
-          action:     'asset.depreciation_ledger.generated',
-          targetType: 'organization',
-          metadata:   { tax_year: taxYear, entries_count: entries.length },
-        })
-
-        logger.info(`[Depreciation] Org ${orgId}: ${entries.length} entries for ${taxYear}`)
-        return entries.length
+      await logAuditEvent({
+        orgId,
+        action:     'asset.depreciation_ledger.generated',
+        targetType: 'organization',
+        metadata:   { tax_year: taxYear, entries_count: entries.length },
       })
 
-      totalWritten += written
-    }
+      logger.info(`[Depreciation] Org ${orgId}: ${entries.length} entries for ${taxYear}`)
+      return entries.length
+    })
 
-    return { tax_year: taxYear, entries_written: totalWritten }
+    return { org_id: orgId, tax_year: taxYear, entries_written: written }
   }
 )

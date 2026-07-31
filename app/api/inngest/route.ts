@@ -90,9 +90,9 @@ import { autoAssignVendor } from '@/lib/inngest/functions/auto-assign-vendor'
 import { vendorScoreRecompute } from '@/lib/inngest/functions/cron/vendor-score-recompute'
 
 // Asset Health — CapEx & Depreciation
-import { generateCapexProjections }      from '@/lib/inngest/functions/capex-projections'
+import { generateCapexProjections, capexProjectionOrg } from '@/lib/inngest/functions/capex-projections'
 import { triggerCapexProjectionForOrg }  from '@/lib/inngest/functions/capex-projection-trigger'
-import { generateDepreciationLedger }    from '@/lib/inngest/functions/depreciation-ledger'
+import { generateDepreciationLedger, depreciationLedgerOrg } from '@/lib/inngest/functions/depreciation-ledger'
 import { assetManualLookup }             from '@/lib/inngest/functions/asset-manual-lookup'
 import { assetDataPlateScan }            from '@/lib/inngest/functions/asset-scan'
 
@@ -273,8 +273,10 @@ export const { GET, POST, PUT } = serve({
 
     // Asset Health — CapEx projections + depreciation ledger
     generateCapexProjections,
+    capexProjectionOrg,
     triggerCapexProjectionForOrg,
     generateDepreciationLedger,
+    depreciationLedgerOrg,
     assetManualLookup,
     assetDataPlateScan,
 

@@ -130,10 +130,13 @@ const EXCEPTIONS: Record<string, string> = {
     'Bounded by one org\'s property count — this whole function is already per-org (`event.data.org_id`), and `propertyIds` comes from that org\'s just-synced properties (10-50 per CLAUDE.md\'s target user). The org scope lives on the function trigger rather than in the collection\'s defining expression, which is why the scan cannot see it.',
   'lib/inngest/functions/hospitable/initial-sync.ts:215':
     'Bounded by INITIAL_SYNC_LOOKAHEAD_MONTHS — `windows` is a fixed-length list of reservation date windows computed from a constant, not a query result. One step per window is the intended per-window retry boundary.',
-  'lib/inngest/functions/capex-projections.ts:67':
-    'REAL GAP, not fixed in the 2026-07-30 scalability pass: one step.run per org over a platform-wide (paginated) organizations scan — the same shape converted to dispatcher + per-org handler in the six crons listed above, and it will hit the same per-run step ceiling at the same tenant count. Left for a follow-up because this cron runs monthly (0 0 1 * *) rather than daily, so it is the least urgent instance, and converting it needs its own review of the projection write path.',
-  'lib/inngest/functions/depreciation-ledger.ts:111':
-    'REAL GAP, not fixed — same one-step-per-org shape as capex-projections.ts:67, and the same annual/low-frequency reasoning for deferring it. Both should be converted together.',
+  // The two REAL GAP entries that used to sit here (capex-projections.ts and
+  // depreciation-ledger.ts, both one step.run per org over a platform-wide
+  // scan) were deleted because the code was fixed, not because the check was
+  // relaxed: both crons are now dispatcher + per-org handler pairs
+  // (`org/capex_projection.requested`, `org/depreciation_ledger.requested`)
+  // with `concurrency: { limit: 10 }`, matching the six converted in the
+  // 2026-07-30 pass.
 }
 
 describe('guardrail: no step.run/step.sendEvent loop over an unbounded collection', () => {
