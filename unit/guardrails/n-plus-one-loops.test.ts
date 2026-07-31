@@ -109,17 +109,17 @@ const EXCEPTIONS: Record<string, string> = {
   // and the Stripe-id clear was collapsed from one update per subscription
   // into a single batched patch. Pruned 2026-07-30 with the account-deletion
   // org-orphaning fix.
-  'app/(dashboard)/maintenance/actions.ts:747':
+  'app/(dashboard)/maintenance/actions.ts:847':
     'Per-vendor quote_requests insert — each row needs its own randomly generated quote_token before its own Inngest event fires; the insert could theoretically be batched with the token generated client-side, but that\'s a sync-logic change, not a lint fix.',
   'app/(dashboard)/maintenance/create-work-order-helpers.ts:32':
-    'Extracted-helper twin of app/(dashboard)/maintenance/actions.ts:747 — same reasoning.',
+    'Extracted-helper twin of app/(dashboard)/maintenance/actions.ts:847 — same reasoning.',
   'app/(dashboard)/properties/clone-actions.ts:114':
     'Per-section checklist_template_sections insert — each section needs its own DB-generated id before the child checklist_template_items insert can reference it as section_id. Parent-before-child dependency, not a batchable read.',
   'app/actions/work-order-public.ts:268':
     'Per-photo storage upload + work_order_photos row — each photo is a distinct uploaded file with its own generated storage path; there is no batched form of a storage upload.',
   'app/api/work-orders/[token]/photos/route.ts:105':
     'Same per-photo storage-upload + row pattern as app/actions/work-order-public.ts:268.',
-  'app/(dashboard)/maintenance/CreateWorkOrderModal.tsx:107':
+  'app/(dashboard)/maintenance/CreateWorkOrderModal.tsx:118':
     'Same per-photo storage-upload + row pattern, client-side.',
   'lib/asset-discovery/seed-from-amenities.ts:62':
     'Real N+1 (existence-check select + insert per property) left as a known, bounded cost — deferred rather than fixed blind in the same PR that added this guardrail, since it touches live PMS-sync logic. Bounded by properties-per-org (10-50 per CLAUDE.md\'s target user).',

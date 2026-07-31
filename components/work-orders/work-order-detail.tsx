@@ -138,6 +138,12 @@ function fmtDate(iso: string | null) {
 
 // ── Component ─────────────────────────────────────────────────
 
+interface SettledPhotoUrls {
+  workOrderId: string
+  urls:  Record<string, string> | null
+  error: string | null
+}
+
 /**
  * work-order-photos is a PRIVATE bucket — there is no public URL to build, so
  * the thumbnails come from short-lived (5 min) signed URLs minted server-side
@@ -148,20 +154,27 @@ function WorkOrderPhotos({
   workOrderId,
   photos,
 }: Readonly<{ workOrderId: string; photos: Array<{ id: string; storage_path: string }> }>) {
-  const [urls,  setUrls]  = useState<Record<string, string> | null>(null)
-  const [error, setError] = useState<string | null>(null)
+  // Keyed by the work order the result belongs to, so a response that arrives
+  // after workOrderId changed is discarded during render instead of being
+  // cleared by a synchronous setState in the effect body.
+  const [settled, setSettled] = useState<SettledPhotoUrls | null>(null)
 
   useEffect(() => {
     let cancelled = false
-    setUrls(null)
-    setError(null)
     void getWorkOrderPhotoUrls(workOrderId).then((res) => {
       if (cancelled) return
-      if (res.error) setError(res.error)
-      else setUrls(res.urls ?? {})
+      setSettled({
+        workOrderId,
+        urls:  res.error ? null : (res.urls ?? {}),
+        error: res.error ?? null,
+      })
     })
     return () => { cancelled = true }
   }, [workOrderId])
+
+  const current = settled?.workOrderId === workOrderId ? settled : null
+  const urls    = current?.urls  ?? null
+  const error   = current?.error ?? null
 
   if (error) {
     return <p className="text-xs" style={{ color: 'var(--accent-red)' }}>{error}</p>
@@ -201,7 +214,7 @@ function WorkOrderPhotos({
             {/* eslint-disable-next-line @next/next/no-img-element */}
             <img
               src={url}
-              alt={`Work order photo ${index + 1} of ${photos.length}`}
+              alt={`Work order attachment ${index + 1} of ${photos.length}`}
               className="w-full h-full object-cover"
             />
           </a>
