@@ -10,7 +10,7 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "eslint . --max-warnings 207",
+    "lint": "eslint . --max-warnings 202",
     "check:ui-classes": "bash scripts/check-raw-ui-classes.sh",
     "inngest:dev": "npx inngest-cli@latest dev",
     "types:supabase": "supabase gen types typescript --project-id vpmznjktllhmmbfnxuvk > types/database.generated.ts",

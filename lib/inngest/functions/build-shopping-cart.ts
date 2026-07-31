@@ -17,6 +17,22 @@ import { resend, FROM }                    from '@/lib/resend/client'
 import { renderShoppingCartReadyEmail }    from '@/lib/resend/emails/shopping-cart-ready'
 import type { MatchedItem, CartBuildResult } from '@/lib/kroger/types'
 
+/**
+ * Deterministic, locale-independent string ordering for CANONICALISATION.
+ *
+ * Sorting a list before hashing it is about producing one stable
+ * representation of an unordered set — it is never shown to a user. Comparing
+ * by UTF-16 code unit (what `<`/`>` do) gives the same answer on every
+ * machine, in every locale, under every ICU version. `String.localeCompare`
+ * does not, which is why it must not be used here even though it is the
+ * conventional answer for an alphabetical *display* sort.
+ */
+export function compareCodeUnits(a: string, b: string): number {
+  if (a < b) return -1
+  if (a > b) return 1
+  return 0
+}
+
 // Bounded-concurrency map — runs `limit` items at a time instead of fully
 // serial, while still letting each item apply its own rate-limit pacing.
 async function mapWithConcurrency<T>(
@@ -372,7 +388,15 @@ ${JSON.stringify(itemsForNormalization, null, 2)}`,
         .update(JSON.stringify(
           [...matchResult.cartItems]
             .map((i) => `${i.upc}:${i.quantity}:${i.modality}`)
-            .sort()
+            // Canonicalisation, not display ordering: this sort exists only so
+            // the same set of cart lines hashes identically regardless of the
+            // order product matching produced them. It must therefore be
+            // locale-INDEPENDENT — String.localeCompare (what Sonar's
+            // S2871/"provide a compare function" advice suggests) varies with
+            // locale and ICU version, so the same cart could fingerprint
+            // differently across environments and defeat the duplicate-charge
+            // claim below. Plain code-unit comparison is stable everywhere.
+            .sort(compareCodeUnits)
         ))
         .digest('hex')
         .slice(0, 32)

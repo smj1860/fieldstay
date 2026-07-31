@@ -484,6 +484,32 @@ describe('inventory/actions', () => {
       expect(ids[2]).toContain(':PICKUP:all:')
     })
 
+    // The property scope is canonicalised with an explicit code-unit
+    // comparator, not String.localeCompare (what Sonar's "provide a compare
+    // function" rule suggests). Locale-aware collation is locale- and
+    // ICU-version-dependent, so two environments could derive different
+    // idempotency keys for the same request — exactly what this key exists to
+    // prevent. en-US collation would order ['B','a'] as 'a,B'; code-unit
+    // ordering gives 'B,a', so this assertion pins the deterministic choice.
+    it('canonicalises the property scope deterministically, independent of locale collation', async () => {
+      vi.mocked(requireOrgMember).mockResolvedValue({
+        user: { id: 'user_1' }, membership,
+      } as never)
+
+      vi.useFakeTimers()
+      vi.setSystemTime(new Date('2026-07-31T12:00:30Z'))
+      try {
+        await triggerShoppingCart(['a', 'B'], 'PICKUP')
+        await triggerShoppingCart(['B', 'a'], 'PICKUP')
+      } finally {
+        vi.useRealTimers()
+      }
+
+      const ids = vi.mocked(inngest.send).mock.calls.map((c) => (c[0] as { id: string }).id)
+      expect(ids[0]).toBe(ids[1])
+      expect(ids[0]).toContain(':PICKUP:B,a:')
+    })
+
     it('throws when the caller is not an authenticated org member', async () => {
       vi.mocked(requireOrgMember).mockRejectedValue(new Error('REDIRECT:/login'))
 

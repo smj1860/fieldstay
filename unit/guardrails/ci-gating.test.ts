@@ -59,9 +59,12 @@ describe('guardrail: lint warning ratchet', () => {
   })
 
   it('the --max-warnings budget is a ratchet that only moves down', () => {
-    // Measured 2026-07-30 after the pre-launch remediation pass (240 before it).
+    // Measured 2026-07-30 after the pre-launch remediation pass (240 before it);
+    // lowered to 202 on 2026-07-31 when the four SonarCloud cognitive-complexity
+    // violations (crew inventory-count route, work-order-ops cron, vendor-connect
+    // onboard route, notifications bell) were refactored out.
     // LOWER this when warnings are cleared; never raise it.
-    const CEILING = 207
+    const CEILING = 202
     const budget = Number(/--max-warnings\s+(\d+)/.exec(pkg.scripts.lint ?? '')?.[1])
     expect(budget).toBeLessThanOrEqual(CEILING)
   })

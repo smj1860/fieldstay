@@ -8,6 +8,23 @@ import { reportError } from '@/lib/observability/report-error'
 import { unwrapJoin } from '@/lib/utils/supabase-joins'
 import type { InventoryCategory } from '@/types/database'
 
+/**
+ * Deterministic, locale-independent string ordering for CANONICALISATION.
+ *
+ * Used to normalise a set of property ids into one stable representation for
+ * an idempotency key — never for anything a user reads. Comparing by UTF-16
+ * code unit (what `<`/`>` do) gives the same answer on every machine, in every
+ * locale, under every ICU version; `String.localeCompare` does not, so two
+ * environments could derive different keys for the same request and defeat the
+ * dedup this key exists to provide. (Kept local rather than imported: this is
+ * a `'use server'` module, where every export must be an async action.)
+ */
+function compareCodeUnits(a: string, b: string): number {
+  if (a < b) return -1
+  if (a > b) return 1
+  return 0
+}
+
 export type InventoryActionState = { error?: string; success?: boolean }
 
 // ── Update par level ─────────────────────────────────────────────────────────
@@ -694,7 +711,10 @@ export async function triggerShoppingCart(
   // to the fingerprint claim, which is the correctness guarantee — this is
   // purely about not sending the same email twice.
   const minuteBucket = Math.floor(Date.now() / 60_000)
-  const propertyScope = propertyIds?.length ? [...propertyIds].sort().join(',') : 'all'
+  // Canonicalisation sort — see compareCodeUnits above: the key must not
+  // depend on the order the caller listed the properties in, and must not
+  // depend on the runtime's locale either.
+  const propertyScope = propertyIds?.length ? [...propertyIds].sort(compareCodeUnits).join(',') : 'all'
   const eventId = `cart-requested:${membership.org_id}:${user.id}:${modality}:${propertyScope}:${minuteBucket}`
 
   try {

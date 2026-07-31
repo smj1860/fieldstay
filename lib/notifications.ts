@@ -1,6 +1,6 @@
 import { createClient } from '@/lib/supabase/server'
 import { unwrapJoin } from '@/lib/utils/supabase-joins'
-import { tryUnwrapList } from '@/lib/supabase/unwrap'
+import { tryUnwrapList, type QueryOutcome } from '@/lib/supabase/unwrap'
 
 export interface NotificationItem {
   id:       string
@@ -96,6 +96,75 @@ function propertyName(p: { name: string } | { name: string }[] | null): string {
   return unwrapJoin(p)?.name ?? 'Property'
 }
 
+/**
+ * Rows from a source that may have failed. Each source degrades independently:
+ * one failing query contributes nothing rather than blanking the whole bell —
+ * the caller still reports the failure through `NotificationFeed.failed`, so a
+ * degraded source is never silently rendered as "nothing to do".
+ */
+function rowsOf<T>(outcome: QueryOutcome<unknown>): T[] {
+  return (outcome.ok ? outcome.data : []) as unknown as T[]
+}
+
+function turnoverItems(rows: TurnoverAlertRow[]): NotificationItem[] {
+  return rows.map((t) => {
+    const flagged = t.status === 'flagged'
+    const when = new Date(t.checkout_datetime).toLocaleString('en-US', {
+      month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit',
+    })
+    return {
+      id:       `turnover-${t.id}`,
+      title:    flagged ? 'Flagged turnover' : 'Unassigned turnover',
+      subtitle: `${propertyName(t.properties)} · ${when}`,
+      href:     `/turnovers/${t.id}`,
+      severity: flagged ? 'red' : 'amber',
+    }
+  })
+}
+
+function workOrderItems(rows: WorkOrderAlertRow[]): NotificationItem[] {
+  return rows.map((wo) => ({
+    id:       `wo-${wo.id}`,
+    title:    `Urgent: ${wo.title}`,
+    subtitle: propertyName(wo.properties),
+    href:     `/maintenance/${wo.id}`,
+    severity: 'red',
+  }))
+}
+
+/**
+ * Below-par stock, limited to the first five. Items that have never been
+ * counted are excluded — a par level with no count behind it is a setup
+ * artefact, not a restock signal.
+ */
+function belowParItems(rows: InventoryAlertRow[]): NotificationItem[] {
+  return rows
+    .filter((i) => i.first_count_recorded_at && i.current_quantity < i.par_level)
+    .slice(0, 5)
+    .map((item) => ({
+      id:       `inventory-${item.id}`,
+      title:    `Low stock: ${item.name}`,
+      subtitle: `${propertyName(item.properties)} · ${item.current_quantity}/${item.par_level}`,
+      href:     '/inventory?filter=below_par',
+      severity: 'amber',
+    }))
+}
+
+function complianceItems(rows: VendorComplianceAlertRow[]): NotificationItem[] {
+  return rows.map((v) => {
+    const blocked = v.compliance_status === 'hard_blocked'
+    return {
+      id:       `vendor-${v.vendor_id}`,
+      title:    blocked
+        ? `${v.vendor_name} — compliance blocked`
+        : `${v.vendor_name} — compliance expiring`,
+      subtitle: 'Vendor compliance',
+      href:     '/vendors',
+      severity: blocked ? 'red' : 'amber',
+    }
+  })
+}
+
 // Surfaces the operational alerts a PM needs to act on right now —
 // unassigned/flagged turnovers, urgent work orders, below-par inventory,
 // and vendor compliance issues — for the dashboard notification bell.
@@ -142,55 +211,12 @@ export async function getNotifications(orgId: string): Promise<NotificationFeed>
   const inventory  = tryUnwrapList(inventoryRes,  { site: 'lib.notifications.inventory',  orgId })
   const compliance = tryUnwrapList(complianceRes, { site: 'lib.notifications.compliance', orgId })
 
-  const items: NotificationItem[] = []
-
-  for (const t of ((turnovers.ok ? turnovers.data : []) as unknown as TurnoverAlertRow[])) {
-    items.push({
-      id:       `turnover-${t.id}`,
-      title:    t.status === 'flagged' ? 'Flagged turnover' : 'Unassigned turnover',
-      subtitle: `${propertyName(t.properties)} · ${new Date(t.checkout_datetime).toLocaleString('en-US', {
-        month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit',
-      })}`,
-      href:     `/turnovers/${t.id}`,
-      severity: t.status === 'flagged' ? 'red' : 'amber',
-    })
-  }
-
-  for (const wo of ((workOrders.ok ? workOrders.data : []) as unknown as WorkOrderAlertRow[])) {
-    items.push({
-      id:       `wo-${wo.id}`,
-      title:    `Urgent: ${wo.title}`,
-      subtitle: propertyName(wo.properties),
-      href:     `/maintenance/${wo.id}`,
-      severity: 'red',
-    })
-  }
-
-  const belowPar = ((inventory.ok ? inventory.data : []) as unknown as InventoryAlertRow[])
-    .filter((i) => i.first_count_recorded_at && i.current_quantity < i.par_level)
-    .slice(0, 5)
-
-  for (const item of belowPar) {
-    items.push({
-      id:       `inventory-${item.id}`,
-      title:    `Low stock: ${item.name}`,
-      subtitle: `${propertyName(item.properties)} · ${item.current_quantity}/${item.par_level}`,
-      href:     '/inventory?filter=below_par',
-      severity: 'amber',
-    })
-  }
-
-  for (const v of ((compliance.ok ? compliance.data : []) as unknown as VendorComplianceAlertRow[])) {
-    items.push({
-      id:       `vendor-${v.vendor_id}`,
-      title:    v.compliance_status === 'hard_blocked'
-        ? `${v.vendor_name} — compliance blocked`
-        : `${v.vendor_name} — compliance expiring`,
-      subtitle: 'Vendor compliance',
-      href:     '/vendors',
-      severity: v.compliance_status === 'hard_blocked' ? 'red' : 'amber',
-    })
-  }
+  const items: NotificationItem[] = [
+    ...turnoverItems(rowsOf<TurnoverAlertRow>(turnovers)),
+    ...workOrderItems(rowsOf<WorkOrderAlertRow>(workOrders)),
+    ...belowParItems(rowsOf<InventoryAlertRow>(inventory)),
+    ...complianceItems(rowsOf<VendorComplianceAlertRow>(compliance)),
+  ]
 
   // Live "currently true" alerts first, then the recent event-log feed.
   const persisted = await getPersistedNotifications(orgId)

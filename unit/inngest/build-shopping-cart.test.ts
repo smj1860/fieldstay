@@ -29,7 +29,7 @@ vi.mock('@/lib/resend/emails/shopping-cart-ready', () => ({
 }))
 
 import { NonRetriableError } from 'inngest'
-import { buildShoppingCart } from '@/lib/inngest/functions/build-shopping-cart'
+import { buildShoppingCart, compareCodeUnits } from '@/lib/inngest/functions/build-shopping-cart'
 import { createServiceClient } from '@/lib/supabase/server'
 import { logAuditEvent } from '@/lib/audit'
 import {
@@ -397,6 +397,96 @@ describe('buildShoppingCart', () => {
     await expect(invokeHandler(buildShoppingCart, baseCtx())).rejects.toThrow(
       'inventory_below_par_items failed: permission denied',
     )
+  })
+
+  // The cart fingerprint is the idempotency claim that stops a second run
+  // from adding the same groceries to the real Kroger cart twice. It hashes a
+  // SORTED list of cart lines, so the sort has to be a canonicalisation — the
+  // same set of lines must produce the same digest no matter what order
+  // product matching emitted them in, on every machine and in every locale.
+  describe('cart fingerprint canonicalisation', () => {
+    function fingerprintRun(rows: unknown[]) {
+      const supabase = makeSupabase({
+        organizations:           [{ data: { id: 'org_1', preferred_retailer: 'kroger' }, error: null }],
+        integration_connections: [{ data: activeKrogerConnection, error: null }],
+        org_milestones: [
+          { data: [], error: null }, // claim: already owned — Kroger is not called
+          { error: null },           // persist-result
+        ],
+      }, undefined, belowPar(rows))
+      ;(createServiceClient as ReturnType<typeof vi.fn>).mockReturnValue(supabase)
+      vi.stubGlobal('fetch', mockAnthropicFetch({
+        'paper towels': 'Bounty paper towels',
+        'trash bags':   'Glad trash bags',
+      }))
+      ;(getValidKrogerToken as ReturnType<typeof vi.fn>).mockResolvedValue('customer_token_y')
+      ;(getClientToken as ReturnType<typeof vi.fn>).mockResolvedValue('client_token_x')
+      ;(searchProducts as ReturnType<typeof vi.fn>).mockImplementation(async (term: string) =>
+        term.includes('towel')
+          ? [krogerProduct({ upc: '0001111041700', productId: 'prod_towels' })]
+          : [krogerProduct({ upc: '0009999088800', productId: 'prod_bags' })],
+      )
+      ;(getBestPrice as ReturnType<typeof vi.fn>).mockReturnValue(9.99)
+      ;(getBestProductImage as ReturnType<typeof vi.fn>).mockReturnValue('https://img/x.jpg')
+
+      return { supabase, run: invokeHandler(buildShoppingCart, baseCtx()) }
+    }
+
+    function claimedMilestone(supabase: { calls: { table: string; method: string; args: unknown[] }[] }) {
+      const claim = supabase.calls.find(
+        (c) => c.table === 'org_milestones' && c.method === 'upsert'
+          && String((c.args[0] as { milestone?: string })?.milestone).startsWith('kroger_cart_added:'),
+      )
+      return (claim!.args[0] as { milestone: string }).milestone
+    }
+
+    const trashBags = {
+      ...belowParInventoryItem,
+      id:               'item_2',
+      name:             'Trash Bags',
+      preferred_brand:  'Glad',
+      current_quantity: 1,
+      par_level:        4,
+    }
+
+    it('produces the same idempotency key for the same cart contents in a different order', async () => {
+      const forward = fingerprintRun([belowParInventoryItem, trashBags])
+      await forward.run
+      const forwardKey = claimedMilestone(forward.supabase)
+
+      vi.clearAllMocks()
+
+      const reversed = fingerprintRun([trashBags, belowParInventoryItem])
+      await reversed.run
+      const reversedKey = claimedMilestone(reversed.supabase)
+
+      expect(forwardKey).toMatch(/^kroger_cart_added:\d{4}-\d{2}-\d{2}:[0-9a-f]{32}$/)
+      expect(reversedKey).toBe(forwardKey)
+    })
+  })
+
+  // Sonar flags the pre-sort as "provide a compare function that depends on
+  // String.localeCompare". Taking that literally would be a real bug here:
+  // locale-aware collation is locale- and ICU-version-dependent, so the same
+  // cart could fingerprint differently across environments and break the
+  // duplicate-charge guarantee. compareCodeUnits is the explicit, deterministic
+  // comparator that satisfies the rule without that dependency.
+  describe('compareCodeUnits', () => {
+    it('orders by UTF-16 code unit, NOT by locale collation', () => {
+      // en-US collation sorts 'a' before 'B'; code-unit order does not.
+      expect('a'.localeCompare('B')).toBeLessThan(0)
+      expect(compareCodeUnits('a', 'B')).toBeGreaterThan(0)
+      expect(compareCodeUnits('B', 'a')).toBeLessThan(0)
+      expect(compareCodeUnits('a', 'a')).toBe(0)
+    })
+
+    it('sorts a set into one canonical order regardless of input order', () => {
+      const canonical = ['0001111041700:8:PICKUP', '0009999088800:3:PICKUP', 'B:1:PICKUP', 'a:1:PICKUP']
+      const shuffled  = ['a:1:PICKUP', '0009999088800:3:PICKUP', 'B:1:PICKUP', '0001111041700:8:PICKUP']
+
+      expect([...shuffled].sort(compareCodeUnits)).toEqual(canonical)
+      expect([...canonical].sort(compareCodeUnits)).toEqual(canonical)
+    })
   })
 
   it('excludes never-counted items in SQL, so they can never reach the cart', () => {
