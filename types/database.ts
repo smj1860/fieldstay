@@ -509,6 +509,13 @@ export interface Turnover {
   completion_notes:      string | null
   started_at:            string | null
   completed_at:          string | null
+  // Actual crew work-time metric: MAX - MIN across every completion-type
+  // timestamp (checklist item completions + inventory's completion signal)
+  // — distinct from started_at/completed_at above, which just reflect the
+  // Start Turnover / status="completed" button presses. Computed once by
+  // turnover-events.ts's record-crew-duration step; null until the
+  // turnover completes and a plausible duration is found.
+  crew_duration_minutes: number | null
   // Inventory has no per-turnover scoping of its own (inventory_items is
   // persistent, property-level state edited across many turnovers), so
   // "inventory started/confirmed for THIS turnover" lives here instead —

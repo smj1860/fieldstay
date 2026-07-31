@@ -266,6 +266,8 @@ export const handleTurnoverCompleted = inngest.createFunction(
     await step.run('record-crew-duration', async () => {
       const supabase = createServiceClient({ system: 'inngest:turnover-events' })
 
+      const timestamps: string[] = []
+
       const { data: instance } = await supabase
         .from('checklist_instances')
         .select('id')
@@ -273,19 +275,50 @@ export const handleTurnoverCompleted = inngest.createFunction(
         .eq('org_id', org_id)
         .maybeSingle()
 
-      if (!instance) return { skipped: 'no_checklist_instance' }
+      if (instance) {
+        const { data: items } = await supabase
+          .from('checklist_instance_items')
+          .select('completed_at')
+          .eq('instance_id', instance.id)
+          .not('completed_at', 'is', null)
 
-      const { data: items } = await supabase
-        .from('checklist_instance_items')
-        .select('completed_at')
-        .eq('instance_id', instance.id)
-        .not('completed_at', 'is', null)
-        .order('completed_at', { ascending: true })
+        for (const item of items ?? []) timestamps.push(item.completed_at!)
+      }
 
-      if (!items?.length) return { skipped: 'no_completed_items' }
+      // Inventory contributes at most one completion-type signal (unlike
+      // checklist, it has no per-item timestamps — see the crew-facing
+      // InventoryView flow) — the explicit "Confirm Inventory Complete"
+      // press if it happened, else the last inventory quantity edit after
+      // this turnover's inventory work began, as a fallback for crew who
+      // forgot to press it. inventory_started_at itself is NOT a signal
+      // here — it marks when work began, not when something was completed.
+      const { data: turnover } = await supabase
+        .from('turnovers')
+        .select('property_id, inventory_started_at, inventory_confirmed_complete_at')
+        .eq('id', turnover_id)
+        .eq('org_id', org_id)
+        .maybeSingle()
 
-      const startedAt   = items[0]!.completed_at!
-      const completedAt = items[items.length - 1]!.completed_at!
+      if (turnover?.inventory_confirmed_complete_at) {
+        timestamps.push(turnover.inventory_confirmed_complete_at)
+      } else if (turnover?.inventory_started_at) {
+        const { data: lastEdited } = await supabase
+          .from('inventory_items')
+          .select('updated_at')
+          .eq('property_id', turnover.property_id)
+          .gt('updated_at', turnover.inventory_started_at)
+          .order('updated_at', { ascending: false })
+          .limit(1)
+          .maybeSingle()
+
+        if (lastEdited) timestamps.push(lastEdited.updated_at)
+      }
+
+      if (timestamps.length === 0) return { skipped: 'no_completion_signals' }
+
+      timestamps.sort()
+      const startedAt   = timestamps[0]!
+      const completedAt = timestamps[timestamps.length - 1]!
 
       const durationMinutes = (new Date(completedAt).getTime() - new Date(startedAt).getTime()) / 60_000
 
@@ -294,14 +327,26 @@ export const handleTurnoverCompleted = inngest.createFunction(
         return { skipped: 'anomalous_duration', duration_minutes: durationMinutes }
       }
 
-      const { data: updatedRows } = await supabase
-        .from('assignment_outcomes')
-        .update({ started_at: startedAt, completed_at: completedAt, duration_minutes: Math.round(durationMinutes) })
-        .eq('turnover_id', turnover_id)
-        .eq('org_id', org_id)
-        .select('id')
+      const roundedMinutes = Math.round(durationMinutes)
 
-      return { updated_rows: updatedRows?.length ?? 0, duration_minutes: Math.round(durationMinutes) }
+      // Single shared calculation feeds both consumers — assignment_outcomes
+      // (the crew-scoring learning loop) and turnovers.crew_duration_minutes
+      // (the PM-facing board display) — so the two numbers can't drift apart.
+      const [{ data: updatedRows }] = await Promise.all([
+        supabase
+          .from('assignment_outcomes')
+          .update({ started_at: startedAt, completed_at: completedAt, duration_minutes: roundedMinutes })
+          .eq('turnover_id', turnover_id)
+          .eq('org_id', org_id)
+          .select('id'),
+        supabase
+          .from('turnovers')
+          .update({ crew_duration_minutes: roundedMinutes })
+          .eq('id', turnover_id)
+          .eq('org_id', org_id),
+      ])
+
+      return { updated_rows: updatedRows?.length ?? 0, duration_minutes: roundedMinutes }
     })
 
     logger.info('turnover-completed done', { workflowId, turnover_id })

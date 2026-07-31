@@ -1,0 +1,21 @@
+-- Adds a stored, computed-once "how long did the crew actually take" metric,
+-- replacing the Start-Turnover-press-to-Confirm-Complete-press span
+-- currently shown on the turnover board (turnovers.started_at/completed_at)
+-- — those two buttons stay as status-transition controls, but their
+-- timestamps don't reflect actual work time (a turnover can sit "in
+-- progress" for hours before crew starts, or after they finish, without
+-- pressing Complete).
+--
+-- Computed by lib/inngest/functions/turnover-events.ts's record-crew-duration
+-- step (extended in the same commit as this migration) as
+-- MAX(completion timestamps) - MIN(completion timestamps) across every
+-- checklist_instance_item.completed_at plus inventory's own single
+-- completion signal (inventory_confirmed_complete_at, or a last-edit
+-- fallback if that was never pressed) — written here AND to the existing
+-- assignment_outcomes.duration_minutes so both consumers share one
+-- calculation instead of two that can silently drift apart.
+--
+-- Nullable, no default — stays null until a turnover completes and the
+-- step successfully computes a plausible duration.
+ALTER TABLE turnovers
+  ADD COLUMN IF NOT EXISTS crew_duration_minutes integer;
