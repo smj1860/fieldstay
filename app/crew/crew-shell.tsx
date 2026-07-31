@@ -575,6 +575,10 @@ const FAQ_ITEMS = [
     a: 'Not in real time — you’ll each only see what’s on your own phone until the offline one reconnects. The moment it does, it automatically pulls the latest state, so nothing gets lost, it just catches up rather than updating live.',
   },
   {
+    q: 'My coworker and I are both assigned to the same turnover and both tapped Start Turnover — why did only one of us see it work?',
+    a: 'A turnover has one shared status, not a separate one for each of you — whoever taps Start Turnover first moves it to In Progress for both of you, and the button disappears from the other person’s screen right after. That’s expected, not a glitch. You don’t need to do anything differently — go straight to checking off checklist items or counting inventory, since you both already have full access to everything on that turnover no matter who tapped Start.',
+  },
+  {
     q: 'Will I get notified if I’m assigned a new job while I’m offline?',
     a: 'No, notifications need a connection to arrive. You’ll see any new assignment the moment your phone reconnects — it’s not lost, just delayed until then.',
   },
