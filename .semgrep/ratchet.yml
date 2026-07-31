@@ -1,0 +1,140 @@
+# ============================================================================
+# FieldStay — RATCHET rules (structural enforcement, semgrep layer).
+#
+# A ratchet rule encodes a defect class with MANY legitimate owners spread
+# across the tree. There is no single file to put in `paths.exclude`, and the
+# current count is far above zero, so these cannot gate at `--error` on the
+# whole tree without turning CI permanently red.
+#
+# They gate two ways instead:
+#   1. `--baseline-commit` in CI — only findings NEW relative to the PR base
+#      fail the build. Existing sites stay visible without blocking.
+#   2. `.semgrep/baseline-counts.json` + `scripts/check-semgrep-ratchet.mjs` —
+#      a committed per-rule count that may only go DOWN. This is what makes a
+#      burn-down PR demonstrate progress instead of asserting it.
+#
+# Do NOT add `nosemgrep` comments or per-file excludes to shrink a ratchet
+# count. Fix the site, or leave it counted. A suppressed rule is worse than no
+# rule: it reports zero and means nothing.
+# ============================================================================
+rules:
+  # ── max_rows = 1000 silently truncates every unbounded select ────────────
+  # The single highest-impact systemic finding of the 2026-07-30 audit. This
+  # is broader than unit/guardrails/unbounded-select.test.ts, which only scans
+  # lib/inngest/**; a request handler paginating a 3,000-row property list is
+  # equally wrong, just less catastrophic.
+  - id: fieldstay-supabase-unbounded-select
+    languages: [typescript]
+    severity: WARNING
+    message: >-
+      Unbounded .select() — PostgREST caps the response at max_rows = 1000 and
+      returns a 200 with no truncation signal. Bound it: fetchAllRows()
+      (lib/inngest/paginate.ts), .limit(), .single()/.maybeSingle(), or a
+      { count: 'exact', head: true } aggregate.
+    patterns:
+      - pattern: $S.from($T).select(...)
+      - pattern-not-inside: $S.from($T).select(...).limit(...)
+      - pattern-not-inside: $S.from($T).select(...).range(...)
+      - pattern-not-inside: $S.from($T).select(...).single(...)
+      - pattern-not-inside: $S.from($T).select(...).maybeSingle(...)
+      - pattern-not-inside: $S.from($T).insert(...)
+      - pattern-not-inside: $S.from($T).update(...)
+      - pattern-not-inside: $S.from($T).upsert(...)
+      - pattern-not-inside: $S.from($T).delete(...)
+      - pattern-not: "$S.from($T).select($SEL, {..., head: true, ...})"
+
+  # ── A discarded PostgREST result discards the ERROR ──────────────────────
+  # `await supabase.from(x).update(y)` resolves with { error } instead of
+  # throwing, so a surrounding try/catch cannot see the failure and neither
+  # can Sentry. Highest-precision rule in this file.
+  - id: fieldstay-supabase-discarded-result
+    languages: [typescript]
+    severity: WARNING
+    message: >-
+      This write's result is discarded. PostgREST RESOLVES with { error } — it
+      does not throw — so a surrounding try/catch cannot catch it and nothing
+      reaches Sentry. Destructure { error } and branch, or use the
+      lib/supabase/unwrap.ts helpers.
+    patterns:
+      - pattern: await <... $S.from($T).$OP(...) ...>;
+      - metavariable-regex:
+          metavariable: $OP
+          regex: ^(insert|update|upsert|delete|select|rpc)$
+      - pattern-not-inside: $X = await ...
+      - pattern-not-inside: return await ...
+      - pattern-not-inside: const $X = await ...
+      - pattern-not-inside: let $X = await ...
+      - pattern-not-inside: var $X = await ...
+      - pattern-not-inside: $F(await ...)
+      - pattern-not-inside: await Promise.$M(...)
+
+  # ── A read destructured without its error ────────────────────────────────
+  # `const { data } = await …` collapses "the query errored" and "zero rows"
+  # into the same null, so an RLS/GRANT regression renders a friendly empty
+  # state with nothing logged. This is the ~481-site class that
+  # unit/guardrails/supabase-error-handling.test.ts baselines.
+  - id: fieldstay-supabase-read-without-error
+    languages: [typescript]
+    severity: WARNING
+    message: >-
+      `data` destructured without `error`. A failed query and an empty table
+      are now indistinguishable. Use unwrap/unwrapList/tryUnwrap from
+      lib/supabase/unwrap.ts, or destructure { data, error } and branch.
+    patterns:
+      - pattern-either:
+          - pattern: "const { data } = await $Q"
+          - pattern: "const { data: $D } = await $Q"
+          - pattern: "const { data, count: $C } = await $Q"
+          - pattern: "const { data: $D, count: $C } = await $Q"
+      - metavariable-pattern:
+          metavariable: $Q
+          pattern: <... $S.from($T) ...>
+
+  # ── An outbound fetch with no timeout budget ─────────────────────────────
+  # NARROWED DELIBERATELY. A bare `fetch(...)` ban produces 43 hits of which
+  # the majority are client components calling same-origin API routes with a
+  # relative path — no SSRF surface and no hanging-serverless-function risk,
+  # so counting them would make the rule mostly noise. Restricted to an
+  # absolute http(s) URL, which is exactly the outbound/external case
+  # lib/http/timeout.ts's budgets exist for.
+  - id: fieldstay-untimed-external-fetch
+    languages: [typescript]
+    severity: WARNING
+    message: >-
+      Outbound fetch() with no AbortSignal — it has no timeout at all and hangs
+      until the platform kills the function. Pass a budget from
+      lib/http/timeout.ts, or use safeFetch() (lib/security/url-guard.ts) when
+      any part of the URL is tenant-supplied.
+    paths:
+      exclude:
+        - lib/http/timeout.ts
+        - lib/security/url-guard.ts
+    patterns:
+      - pattern: fetch($U, ...)
+      - metavariable-regex:
+          metavariable: $U
+          regex: ^['"`]https?://
+      - pattern-not-regex: signal
+
+  # ── Role-filtered organization_members selection ─────────────────────────
+  # Started life as a chokepoint candidate (the naive table-wide ban gives 17
+  # noisy hits; this narrowing gives 3). All 3 are genuine drift — each
+  # re-derives getPmMembersByOrgIds()'s owner/admin + invite_accepted_at
+  # semantics inline — but 3 > 0, so it cannot gate at --error today. It
+  # belongs here until the burn-down lands, then promote it to
+  # chokepoints.yml.
+  - id: fieldstay-role-filtered-membership-read
+    languages: [typescript]
+    severity: WARNING
+    message: >-
+      Role-filtered organization_members selection belongs in the auth helpers
+      (lib/auth.ts, lib/crew-auth.ts) or getPmMembersByOrgIds/getOrgDispatcher
+      in lib/inngest/helpers.ts. Open-coding `.in('role', …)` / `.eq('role', …)`
+      re-derives the membership semantics (invite_accepted_at, owner always
+      passing) that have already drifted into live bugs three times.
+    paths:
+      exclude:
+        - lib/auth.ts
+        - lib/crew-auth.ts
+        - lib/inngest/helpers.ts
+    pattern-regex: from\(\s*['"]organization_members['"]\s*\)[\s\S]{0,400}?\.(in|eq)\(\s*['"]role['"]
