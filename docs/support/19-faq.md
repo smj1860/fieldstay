@@ -96,6 +96,16 @@ FieldStay uses a Progressive Web App (PWA) for the crew mobile experience. A PWA
 
 ---
 
+## Two crew members are assigned to the same turnover — why did only one of them see the Start Turnover button work?
+
+This is expected, not a bug. A turnover has a single shared status (Assigned → In Progress → Complete) — it isn't tracked separately per crew member. Whichever assigned crew member taps **Start Turnover** first moves it to In Progress for everyone; the button then disappears from every other assigned crew member's screen, because as far as the turnover is concerned, it's already started.
+
+This comes up most often when two crew members are working different parts of the same property (e.g. one on the kitchen, one on bedrooms) and both reach for the Start button around the same time. Only one tap is needed — whoever gets there first starts it for the whole team. The other crew member doesn't need to do anything differently: they can go straight to checking off checklist items or logging inventory, since every assigned crew member has full access to the checklist and inventory regardless of who tapped Start.
+
+If a crew member's Start Turnover button seems to have "done nothing," it almost always means a teammate already started it a moment earlier — check the turnover's status at the top of the screen to confirm it's already In Progress.
+
+---
+
 ## How often does OwnerRez sync?
 
 Bookings sync in real time via webhooks — when a booking is confirmed, modified, or cancelled in OwnerRez, FieldStay processes the change within seconds.
