@@ -42,6 +42,61 @@ jobs:
       - run: pnpm test
       - run: pnpm run build
 
+  # ── Semgrep (structural enforcement, AST layer) ──────────────────────────
+  # Two rule families, gated differently on purpose — see .semgrep/README.md.
+  #
+  #   .semgrep/chokepoints.yml — capabilities with exactly ONE legitimate owner
+  #     (service role key, Telnyx, raw limiter, private-bucket getPublicUrl,
+  #     `void` on a lazy PostgREST builder, tables/columns that do not exist).
+  #     Currently ZERO findings, so this gates at --error across the WHOLE tree,
+  #     not just the diff: a violation anywhere fails the build immediately.
+  #
+  #   .semgrep/ratchet.yml — defect classes with hundreds of pre-existing sites
+  #     (unbounded selects, discarded write results, reads destructured without
+  #     `error`). Gated on --baseline-commit so only findings NEW relative to
+  #     the PR base fail, plus the committed per-rule counts in
+  #     .semgrep/baseline-counts.json which may only go down.
+  #
+  # NOTE ON fetch-depth: --baseline-commit needs the base commit's objects in
+  # the local clone. actions/checkout defaults to fetch-depth: 1, which fetches
+  # only the merge commit — semgrep then cannot resolve the baseline and the
+  # gate silently degrades. `fetch-depth: 0` is load-bearing, not tidiness.
+  #
+  # No `pnpm install`: semgrep comes from pip and
+  # scripts/check-semgrep-ratchet.mjs uses Node builtins plus the semgrep
+  # binary only. Verified by unit/guardrails/semgrep-enforcement.test.ts.
+  semgrep:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      # Pinned. An unpinned semgrep turns a rule-engine release into an
+      # unexplained CI failure on an unrelated PR.
+      - run: pip install semgrep==1.172.0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Chokepoint rules (whole tree, must stay at zero)
+        run: semgrep --config .semgrep/chokepoints.yml --error --metrics off
+      - name: Ratchet rules (fail only on findings NEW vs. the PR base)
+        if: github.event_name == 'pull_request'
+        env:
+          BASELINE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: |
+          # Fail loudly rather than silently scanning the whole tree if the
+          # base commit is somehow absent — that is the exact fetch-depth
+          # failure mode this job is written to avoid.
+          git cat-file -e "$BASELINE_SHA^{commit}"
+          semgrep --config .semgrep/ratchet.yml --error --metrics off \
+            --baseline-commit "$BASELINE_SHA"
+      - name: Ratchet counts may not increase
+        run: node scripts/check-semgrep-ratchet.mjs
+
   # ── End-to-end (Playwright) ──────────────────────────────────────────────
   # STATUS: self-arming merge gate (launch-readiness audit B2 / 2026-07-22
   # audit recommendation #2). The first step detects whether the E2E secrets

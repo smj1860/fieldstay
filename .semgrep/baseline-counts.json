@@ -1,0 +1,19 @@
+{
+  "_comment": [
+    "Per-rule finding counts for .semgrep/ratchet.yml, frozen at the commit that",
+    "introduced the semgrep enforcement layer (2026-07-31, tree at b2decc6 + audit docs).",
+    "scripts/check-semgrep-ratchet.mjs re-runs the ratchet rules and FAILS if any",
+    "count is higher than the number here. Numbers may only go DOWN: fix sites,",
+    "then run `node scripts/check-semgrep-ratchet.mjs --update` to lock the",
+    "progress in. Never raise a number, never add a nosemgrep comment to lower one."
+  ],
+  "measured_at": "2026-07-31",
+  "counts": {
+    "fieldstay-role-filtered-membership-read": 3,
+    "fieldstay-supabase-discarded-result": 158,
+    "fieldstay-supabase-read-without-error": 421,
+    "fieldstay-supabase-read-without-error-fan-in": 19,
+    "fieldstay-supabase-unbounded-select": 284,
+    "fieldstay-untimed-external-fetch": 1
+  }
+}

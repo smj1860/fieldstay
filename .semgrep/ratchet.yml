@@ -31,16 +31,21 @@ rules:
       returns a 200 with no truncation signal. Bound it: fetchAllRows()
       (lib/inngest/paginate.ts), .limit(), .single()/.maybeSingle(), or a
       { count: 'exact', head: true } aggregate.
+    # NOTE on the exclusions: `$S.from($T).select(...)` only matches a select
+    # whose receiver is the `.from()` call itself, i.e. a READ. A write's
+    # returning-clause (`.from(t).insert(y).select()`) has `.insert(y)` as the
+    # receiver and never matches, so no insert/update/upsert/delete exclusion
+    # is needed. The bounding calls must be `pattern-not-inside: $X.limit(...)`
+    # (not `$S.from($T).select(...).limit(...)`): in a real chain the two are
+    # separated by .eq()/.order()/.in() etc., so the adjacent form matches
+    # almost nothing while the enclosing-call form correctly treats the select
+    # as a syntactic descendant of the terminator.
     patterns:
       - pattern: $S.from($T).select(...)
-      - pattern-not-inside: $S.from($T).select(...).limit(...)
-      - pattern-not-inside: $S.from($T).select(...).range(...)
-      - pattern-not-inside: $S.from($T).select(...).single(...)
-      - pattern-not-inside: $S.from($T).select(...).maybeSingle(...)
-      - pattern-not-inside: $S.from($T).insert(...)
-      - pattern-not-inside: $S.from($T).update(...)
-      - pattern-not-inside: $S.from($T).upsert(...)
-      - pattern-not-inside: $S.from($T).delete(...)
+      - pattern-not-inside: $X.limit(...)
+      - pattern-not-inside: $X.range(...)
+      - pattern-not-inside: $X.single(...)
+      - pattern-not-inside: $X.maybeSingle(...)
       - pattern-not: "$S.from($T).select($SEL, {..., head: true, ...})"
 
   # ── A discarded PostgREST result discards the ERROR ──────────────────────
@@ -86,9 +91,36 @@ rules:
           - pattern: "const { data: $D } = await $Q"
           - pattern: "const { data, count: $C } = await $Q"
           - pattern: "const { data: $D, count: $C } = await $Q"
+      # Semgrep's JS object patterns match PARTIALLY — `const { data } = …`
+      # also matches `const { data, error } = …`. Without these two negations
+      # the rule reports every read in the repo, half of them already correct.
+      - pattern-not: "const {..., error, ...} = await $Q"
+      - pattern-not: "const {..., error: $E, ...} = await $Q"
       - metavariable-pattern:
           metavariable: $Q
           pattern: <... $S.from($T) ...>
+
+  # ── The same class, in a Promise.all fan-in ──────────────────────────────
+  # A separate rule because the metavariable-pattern that constrains the
+  # single-read form to a `.from()` chain cannot bind through an array
+  # destructure. Reported once per STATEMENT, not per element, and suppressed
+  # entirely when any element in the statement binds `error` — both are
+  # undercounts, never overcounts. unit/guardrails/supabase-error-handling.
+  # test.ts counts these PER ELEMENT, which is one concrete reason that test
+  # is not redundant with this ruleset.
+  - id: fieldstay-supabase-read-without-error-fan-in
+    languages: [typescript]
+    severity: WARNING
+    message: >-
+      `data` destructured without `error` in a Promise.all fan-in. Every query
+      in this batch that errors is indistinguishable from one that returned no
+      rows. Use unwrap/unwrapList from lib/supabase/unwrap.ts.
+    patterns:
+      - pattern-either:
+          - pattern: "const [..., { data: $D }, ...] = await Promise.all(...)"
+          - pattern: "const [..., { data }, ...] = await Promise.all(...)"
+      - pattern-not: "const [..., {..., error, ...}, ...] = await Promise.all(...)"
+      - pattern-not: "const [..., {..., error: $E, ...}, ...] = await Promise.all(...)"
 
   # ── An outbound fetch with no timeout budget ─────────────────────────────
   # NARROWED DELIBERATELY. A bare `fetch(...)` ban produces 43 hits of which
