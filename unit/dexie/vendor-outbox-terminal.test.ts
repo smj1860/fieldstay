@@ -125,6 +125,49 @@ describe('vendor completion outbox — terminal vs. transport failures', () => {
     expect(await getVendorWoSubmissionState(token)).toBeUndefined()
   })
 
+  // A vendor completion is a MONEY write: the server creates an invoice from
+  // it. `ignoreBackoff` made the reconnect drain fire immediately instead of
+  // waiting out its backoff, which puts it in genuine contention with the
+  // manual "Retry Now" tap and with the drain the initial submit kicks off.
+  // Two drains that both push the same row would submit the same completion
+  // twice. The drain must therefore be single-flight regardless of how many
+  // callers ask for one at once.
+  it('pushes only once when two reconnect drains run concurrently', async () => {
+    await queueOfflineSubmission()
+
+    let release: () => void = () => {}
+    const inFlight = new Promise<void>((resolve) => { release = resolve })
+    fetchMock.mockImplementation(async () => {
+      await inFlight
+      return jsonResponse(200, { ok: true })
+    })
+
+    const attemptsBefore = fetchMock.mock.calls.length
+    const drains = Promise.all([retryVendorWoSubmission(token), retryVendorWoSubmission(token)])
+    release()
+    await drains
+
+    expect(fetchMock.mock.calls.length - attemptsBefore).toBe(1)
+    expect(await getVendorWoSubmissionState(token)).toBeUndefined()
+  })
+
+  it('pushes only once when a reconnect lands while the submit drain is still in flight', async () => {
+    let release: () => void = () => {}
+    const inFlight = new Promise<void>((resolve) => { release = resolve })
+    fetchMock.mockImplementation(async () => {
+      await inFlight
+      return jsonResponse(200, { ok: true })
+    })
+
+    const submit = submitVendorWoCompletion(token, 'notes', 'Tech', LINE_ITEMS, 125)
+    const reconnect = retryVendorWoSubmission(token)
+    release()
+    await Promise.all([submit, reconnect])
+
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+    expect(await getVendorWoSubmissionState(token)).toBeUndefined()
+  })
+
   it('a reconnect drains despite the outage backoff instead of waiting it out', async () => {
     await queueOfflineSubmission()
 
