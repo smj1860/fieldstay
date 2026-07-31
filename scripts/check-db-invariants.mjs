@@ -110,6 +110,8 @@ const SERVICE_ROLE_ONLY_TABLES = new Set([
 // upload path must gain org-scoped policies and leave this list.
 const SERVICE_ROLE_ONLY_BUCKETS = new Set([
   // No reference anywhere in app/ or lib/ — nothing uploads to it.
+  // Exists in production only; never created in the E2E project, which is
+  // why the staleness filter below tests bucket existence separately.
   'crew-uploads',
   // Read only, and only via the public URL endpoint
   // (app/g/[slug]/page.tsx:17, app/g/b/[token]/page.tsx:17). No client upload.
@@ -163,6 +165,7 @@ const REQUIRED_SECTIONS = [
   'policies_without_grant',
   'orgs_without_members',
   'storage_policies_not_org_scoped',
+  'storage_bucket_ids',
   'storage_buckets_without_policies',
   'org_id_columns_without_fk',
 ]
@@ -171,7 +174,8 @@ if (missingSections.length > 0) {
   console.error(
     `db_invariant_report() is missing section(s): ${missingSections.join(', ')}\n` +
       'The target project is running an older version of the function. Apply ' +
-      'supabase/migrations/20260730110000_db_invariant_report_security_sections.sql.'
+      'supabase/migrations/20260730110000_db_invariant_report_security_sections.sql ' +
+      'and 20260731100000_db_invariant_report_storage_bucket_ids.sql.'
   )
   process.exit(1)
 }
@@ -292,8 +296,14 @@ if (report.storage_policies_not_org_scoped.length > 0) {
 const unpolicedBuckets = report.storage_buckets_without_policies.filter(
   (b) => !SERVICE_ROLE_ONLY_BUCKETS.has(b)
 )
+// An allowlist entry is stale only when the bucket EXISTS in this project and
+// is no longer policy-less. A bucket that does not exist here at all is not
+// stale: this check runs against the E2E project, but the allowlist describes
+// production too, and `crew-uploads` (production-only, no policies, no upload
+// call site) was being reported as stale purely for being absent.
+const existingBuckets = new Set(report.storage_bucket_ids)
 const staleBucketAllowlist = [...SERVICE_ROLE_ONLY_BUCKETS].filter(
-  (b) => !report.storage_buckets_without_policies.includes(b)
+  (b) => existingBuckets.has(b) && !report.storage_buckets_without_policies.includes(b)
 )
 if (unpolicedBuckets.length > 0) {
   failures.push(
@@ -306,7 +316,7 @@ if (unpolicedBuckets.length > 0) {
 }
 if (staleBucketAllowlist.length > 0) {
   failures.push(
-    `Stale SERVICE_ROLE_ONLY_BUCKETS entries (bucket now has policies, or was dropped): ${staleBucketAllowlist.join(', ')}\n` +
+    `Stale SERVICE_ROLE_ONLY_BUCKETS entries (bucket now has storage.objects policies): ${staleBucketAllowlist.join(', ')}\n` +
       '  Remove them from scripts/check-db-invariants.mjs — the allowlist only shrinks.'
   )
 }
