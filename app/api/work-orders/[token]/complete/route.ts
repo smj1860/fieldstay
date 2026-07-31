@@ -128,7 +128,6 @@ export async function POST(
   if (!invoiceResult.ok) {
     return NextResponse.json({ error: invoiceResult.error }, { status: 500 })
   }
-  const invoiceId = invoiceResult.invoiceId
 
   // Atomically claim the completion — only succeeds once
   const { data: claimed } = await supabase
