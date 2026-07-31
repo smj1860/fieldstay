@@ -47,7 +47,17 @@ function makeSupabase(rpcResult: { data: unknown; error?: unknown } = {
   const rpc = vi.fn(() => ({ maybeSingle: vi.fn(() => Promise.resolve(rpcResult)) }))
   const from = vi.fn((table: string) => {
     if (table === 'organization_members') {
-      return { select: vi.fn(() => ({ eq: vi.fn(() => ({ eq: vi.fn(() => ({ single: vi.fn(() => Promise.resolve({ data: null, error: null })) })) })) })) }
+      // getPmMembers()/getPmMembersByOrgIds() (lib/inngest/helpers.ts) query
+      // shape: .select().in('org_id',...).in('role',...).not('invite_accepted_at',...).
+      // No PM members needed for these tests — notifyOrgAdmin's trial-start/
+      // first-payment emails are a no-op path here, only previous_plan
+      // enrichment via the RPC result is under test.
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const chain: any = {}
+      chain.select = vi.fn(() => chain)
+      chain.in     = vi.fn(() => chain)
+      chain.not    = vi.fn(() => Promise.resolve({ data: [], error: null }))
+      return chain
     }
     throw new Error(`Unexpected table in test: ${table}`)
   })

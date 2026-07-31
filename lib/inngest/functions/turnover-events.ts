@@ -268,19 +268,21 @@ export const handleTurnoverCompleted = inngest.createFunction(
 
       const timestamps: string[] = []
 
-      const { data: instance } = await supabase
+      const { data: instance, error: instanceError } = await supabase
         .from('checklist_instances')
         .select('id')
         .eq('turnover_id', turnover_id)
         .eq('org_id', org_id)
         .maybeSingle()
+      if (instanceError) throw instanceError
 
       if (instance) {
-        const { data: items } = await supabase
+        const { data: items, error: itemsError } = await supabase
           .from('checklist_instance_items')
           .select('completed_at')
           .eq('instance_id', instance.id)
           .not('completed_at', 'is', null)
+        if (itemsError) throw itemsError
 
         for (const item of items ?? []) timestamps.push(item.completed_at!)
       }
@@ -292,17 +294,18 @@ export const handleTurnoverCompleted = inngest.createFunction(
       // this turnover's inventory work began, as a fallback for crew who
       // forgot to press it. inventory_started_at itself is NOT a signal
       // here — it marks when work began, not when something was completed.
-      const { data: turnover } = await supabase
+      const { data: turnover, error: turnoverError } = await supabase
         .from('turnovers')
         .select('property_id, inventory_started_at, inventory_confirmed_complete_at')
         .eq('id', turnover_id)
         .eq('org_id', org_id)
         .maybeSingle()
+      if (turnoverError) throw turnoverError
 
       if (turnover?.inventory_confirmed_complete_at) {
         timestamps.push(turnover.inventory_confirmed_complete_at)
       } else if (turnover?.inventory_started_at) {
-        const { data: lastEdited } = await supabase
+        const { data: lastEdited, error: lastEditedError } = await supabase
           .from('inventory_items')
           .select('updated_at')
           .eq('property_id', turnover.property_id)
@@ -310,6 +313,7 @@ export const handleTurnoverCompleted = inngest.createFunction(
           .order('updated_at', { ascending: false })
           .limit(1)
           .maybeSingle()
+        if (lastEditedError) throw lastEditedError
 
         if (lastEdited) timestamps.push(lastEdited.updated_at)
       }
