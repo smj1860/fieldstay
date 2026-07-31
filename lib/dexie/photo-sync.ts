@@ -164,7 +164,11 @@ async function resolveTargetOrgId(userId: string, row: PendingPhotoUploadRow): P
  * so re-prefix the path instead of losing the evidence.
  *
  * Returns the path to upload to, or null when the org id isn't available
- * locally yet (rare, and transient — the next safety poll fixes it).
+ * locally yet (rare, and usually transient — the next safety poll fixes it).
+ * The caller turns a null into a BOUNDED, backed-off failure rather than an
+ * unconditional skip: "usually transient" is not "always transient", and a
+ * photo that can never resolve its org has to end up somewhere a human can
+ * see it.
  */
 async function orgPrefixedUploadPath(
   userId: string,
@@ -281,7 +285,6 @@ async function drainPhotoQueue(supabase: SupabaseClient, userId: string): Promis
           `photo ${row.id}: owning org id is not in the local cache, so no path the storage policies can see is constructible`,
         )
       }
-
 
       // Compression in photo-queue.ts always re-encodes to JPEG regardless
       // of the original capture format — upload with that content type

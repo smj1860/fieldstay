@@ -8,7 +8,7 @@
 // unit/inngest/build-shopping-cart.test.ts (which mock '@/lib/kroger/client'
 // wholesale to isolate the Inngest function under test), this file mocks
 // '@/lib/rate-limit' instead and exercises the REAL lib/kroger/client.ts
-// implementation, so the limiter-consultation / 429 / fail-open behavior
+// implementation, so the limiter-consultation / 429 / fail-CLOSED behavior
 // itself is what's under test.
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
@@ -103,8 +103,7 @@ describe('lib/kroger/client — krogerFetch rate limiting', () => {
   })
 
   it('throws RateLimitError proactively — without ever calling fetch — once the shared budget reports exhausted', async () => {
-    const resetAt = Date.now() + 5_000
-    ;(krogerProductsApiLimiter.limit as ReturnType<typeof vi.fn>).mockResolvedValue({ success: false, reset: resetAt })
+    checkLimitMock.mockResolvedValue(decision({ allowed: false, reset: Date.now() + 5_000 }))
     const fetchMock = vi.fn()
     vi.stubGlobal('fetch', fetchMock)
 
@@ -113,7 +112,7 @@ describe('lib/kroger/client — krogerFetch rate limiting', () => {
   })
 
   it('reacts to a genuine 429 from Kroger by throwing RateLimitError with the exact Retry-After wait time', async () => {
-    ;(krogerCartApiLimiter.limit as ReturnType<typeof vi.fn>).mockResolvedValue({ success: true, reset: Date.now() + 1_000 })
+    checkLimitMock.mockResolvedValue(decision())
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue(rateLimited('42')))
 
     let caught: unknown
@@ -128,7 +127,7 @@ describe('lib/kroger/client — krogerFetch rate limiting', () => {
   })
 
   it('falls back to a 60s default Retry-After when Kroger 429s without the header', async () => {
-    ;(krogerLocationsApiLimiter.limit as ReturnType<typeof vi.fn>).mockResolvedValue({ success: true, reset: Date.now() + 1_000 })
+    checkLimitMock.mockResolvedValue(decision())
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
       ok: false, status: 429, headers: new Headers(), text: async () => '',
     }))
@@ -144,30 +143,50 @@ describe('lib/kroger/client — krogerFetch rate limiting', () => {
     expect((caught as RateLimitError).retryAfter).toBe(60)
   })
 
-  it('fails OPEN — still makes the real request — when the limiter check itself errors (Redis unavailable)', async () => {
-    ;(krogerProductsApiLimiter.limit as ReturnType<typeof vi.fn>).mockRejectedValue(new Error('ECONNREFUSED'))
+  // Behaviour change (was: "fails OPEN — still makes the real request").
+  // Kroger's limiters are external DAILY quota ceilings, so krogerFetch now
+  // declares onError: 'deny' and checkLimit returns an errored, DISALLOWED
+  // decision when Redis is down. Failing open here would let cart automation
+  // burn Kroger's 10,000/day Products budget during an outage and take the
+  // feature out for every tenant until the next daily reset.
+  it('fails CLOSED — never reaches the network — when the limiter check itself errors (Redis unavailable)', async () => {
+    checkLimitMock.mockResolvedValue(decision({ allowed: false, errored: true, reset: Date.now() }))
     const fetchMock = vi.fn().mockResolvedValue(okJson({ data: [] }))
     vi.stubGlobal('fetch', fetchMock)
 
-    const result = await searchProducts('paper towels', 'loc_1', 'token_x')
+    let caught: unknown
+    try {
+      await searchProducts('paper towels', 'loc_1', 'token_x')
+    } catch (err) {
+      caught = err
+    }
 
-    // Proceeded to the real call instead of throwing — an abuse/quota
-    // limiter fails open on infra errors, unlike a spend-budget limiter.
-    expect(result).toEqual([])
-    expect(fetchMock).toHaveBeenCalledTimes(1)
+    expect(caught).toBeInstanceOf(RateLimitError)
+    // An errored decision has no real window to wait for (reset is Date.now(),
+    // which retryAfterSeconds would floor to 1s), so it backs off a full
+    // minute instead of hammering a Redis outage with immediate retries.
+    expect((caught as RateLimitError).retryAfter).toBe(60)
+    expect(fetchMock).not.toHaveBeenCalled()
   })
 
-  it('does not fail open for a genuine RateLimitError — only for the limiter check erroring', async () => {
-    // Guards against a regression that would swallow the proactive
-    // RateLimitError itself into the fail-open branch.
-    ;(krogerProductsApiLimiter.limit as ReturnType<typeof vi.fn>).mockResolvedValue({
-      success: false,
-      reset:   Date.now() + 2_000,
-    })
+  // A genuinely-exhausted budget and an errored decision both deny, but they
+  // must not collapse into the same backoff: a real window has a real reset to
+  // wait for, so the caller is told to retry when it actually reopens rather
+  // than being handed the errored path's blanket 60s.
+  it('derives Retry-After from the real reset window when the budget is exhausted but Redis is healthy', async () => {
+    checkLimitMock.mockResolvedValue(decision({ allowed: false, reset: Date.now() + 2_000 }))
     const fetchMock = vi.fn()
     vi.stubGlobal('fetch', fetchMock)
 
-    await expect(searchProducts('paper towels', 'loc_1', 'token_x')).rejects.toBeInstanceOf(RateLimitError)
+    let caught: unknown
+    try {
+      await searchProducts('paper towels', 'loc_1', 'token_x')
+    } catch (err) {
+      caught = err
+    }
+
+    expect(caught).toBeInstanceOf(RateLimitError)
+    expect((caught as RateLimitError).retryAfter).toBe(2)
     expect(fetchMock).not.toHaveBeenCalled()
   })
 })

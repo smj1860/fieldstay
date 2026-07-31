@@ -692,13 +692,23 @@ export async function getWorkOrderPhotoUrls(
     const { supabase, membership } = await requireOrgMember()
 
     // IDOR gate — membership proves an org, not THIS work order.
-    const { data: wo } = await supabase
+    //
+    // The error is read, not just the data: collapsing "the query failed" into
+    // the same 'Work order not found' the zero-rows case returns would show a
+    // PM a confident denial for a work order that exists, and hide a real
+    // outage behind what reads as a normal empty state. PGRST116 IS the
+    // zero-rows case for .single(), so it stays on the not-found path.
+    const { data: wo, error: woErr } = await supabase
       .from('work_orders')
       .select('id')
       .eq('id', workOrderId)
       .eq('org_id', membership.org_id)
       .single()
 
+    if (woErr && woErr.code !== 'PGRST116') {
+      console.error('[getWorkOrderPhotoUrls] work order lookup', woErr)
+      return { error: 'Could not load photos. Please try again.' }
+    }
     if (!wo) return { error: 'Work order not found' }
 
     const { data: photos, error: photosErr } = await supabase

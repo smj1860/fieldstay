@@ -11,6 +11,13 @@ import type { PendingPhotoUploadRow } from '@/lib/dexie/schema'
 // marked complete, so the PM saw a photo-required item with no photo and no
 // error.
 
+// turnover-photos is a PRIVATE bucket whose storage RLS policies match on the
+// FIRST path segment (lib/storage/object-path.ts), so every queued path is
+// `${org_id}/…`. The fixtures below use that shape deliberately — a path
+// without it is the LEGACY shape, exercised on its own further down.
+const ORG_ID = '11111111-1111-4111-8111-111111111111'
+const PHOTO_PATH = `${ORG_ID}/turnover-1/item1.jpg`
+
 const holder = vi.hoisted(() => ({ db: null as unknown, blob: null as unknown }))
 
 vi.mock('@/lib/dexie/schema', () => ({ getDexieDb: () => holder.db }))
@@ -72,7 +79,7 @@ beforeEach(async () => {
     target_table: 'checklist_instance_items',
     target_id: 'item1',
     target_column: 'photo_storage_path',
-    storage_path: 'turnover-1/item1.jpg',
+    storage_path: PHOTO_PATH,
     local_blob_key: 'blob1',
     mime_type: 'image/jpeg',
     retry_count: 0,
@@ -179,7 +186,7 @@ describe('photo queue durability', () => {
     expect(deletedBlobs, 'and collects the blob').toEqual(['blob1'])
     // The uploaded path reached the local row and the outbox.
     expect(await db().checklist_instance_items.get('item1')).toMatchObject({
-      photo_storage_path: 'turnover-1/item1.jpg',
+      photo_storage_path: PHOTO_PATH,
     })
     expect(await db().mutations.toArray()).toHaveLength(1)
   })
@@ -191,5 +198,81 @@ describe('photo queue durability', () => {
 
     const [mutation] = await db().mutations.toArray()
     expect(Object.keys((mutation as { payload: object }).payload)).toEqual(['photo_storage_path'])
+  })
+
+  // ── Legacy (pre-org-prefix) paths ────────────────────────────────────────
+  // turnover-photos became private mid-flight and its policies key off the
+  // first path segment. A photo queued on-device BEFORE that change carries a
+  // path no policy can see, so it can never upload as-queued.
+
+  it('repairs a legacy non-org-prefixed path from the local cache and uploads it', async () => {
+    await db().pending_photo_uploads.update('ph1', { storage_path: 'turnover-1/item1.jpg' })
+    await db().checklist_instance_items.put({ id: 'item1', is_completed: 1, instance_id: 'inst1' })
+    await db().checklist_instances.put({ id: 'inst1', org_id: ORG_ID })
+
+    const ok = makeStorage([{ error: null }])
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any -- narrow storage stub
+    await processPendingPhotoUploads(ok.client as any, 'u1')
+
+    expect(ok.attempts, 'uploaded under the org-scoped key the policies can see').toEqual([PHOTO_PATH])
+    expect(await photoRow()).toBeUndefined()
+    expect(await db().checklist_instance_items.get('item1')).toMatchObject({
+      photo_storage_path: PHOTO_PATH,
+    })
+  })
+
+  it('an unresolvable org id backs off and eventually dead-letters — never a silent forever-skip', async () => {
+    // Legacy path AND no local row to recover the org id from: the drain can
+    // build no policy-visible path at all. This used to `continue` on every
+    // tick, so the photo was never attempted, never marked failed, and never
+    // shown anywhere — invisible forever with its blob still on the device.
+    await db().pending_photo_uploads.update('ph1', { storage_path: 'turnover-1/item1.jpg' })
+
+    const storage = makeStorage([])
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any -- narrow storage stub
+    const client = storage.client as any
+
+    await processPendingPhotoUploads(client, 'u1')
+    const afterFirst = await photoRow()
+    expect(storage.attempts, 'no upload is possible, so none is attempted').toEqual([])
+    expect(afterFirst!.retry_count, 'the attempt is counted, not skipped').toBe(1)
+    expect(afterFirst!.next_attempt_at!, 'and it backs off rather than spinning every tick')
+      .toBeGreaterThan(Date.now())
+
+    for (let i = 0; i < 6; i++) {
+      await processPendingPhotoUploads(client, 'u1')
+      vi.setSystemTime(Date.now() + 600_000)
+    }
+
+    const row = await photoRow()
+    expect(row, 'the row survives — it is the only record of the photo').toBeDefined()
+    expect(row).toMatchObject({ retry_count: 5, failed: true })
+    expect(row!.last_error, 'and says why, on the failed-sync surface').toBeTruthy()
+    expect(deletedBlobs, 'the blob is kept so "Retry" has something to upload').toEqual([])
+  })
+
+  it('a dead-lettered unresolvable photo succeeds once its org row finally syncs', async () => {
+    await db().pending_photo_uploads.update('ph1', { storage_path: 'turnover-1/item1.jpg' })
+
+    const stuck = makeStorage([])
+    for (let i = 0; i < 7; i++) {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any -- narrow storage stub
+      await processPendingPhotoUploads(stuck.client as any, 'u1')
+      vi.setSystemTime(Date.now() + 600_000)
+    }
+    expect((await photoRow())!.failed).toBe(true)
+
+    // The safety poll lands the missing rows.
+    await db().checklist_instance_items.put({ id: 'item1', is_completed: 1, instance_id: 'inst1' })
+    await db().checklist_instances.put({ id: 'inst1', org_id: ORG_ID })
+
+    const ok = makeStorage([{ error: null }])
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any -- narrow storage stub
+    await retryFailedPhotoUploads(ok.client as any, 'u1')
+    await vi.advanceTimersByTimeAsync(0)
+
+    expect(ok.attempts).toEqual([PHOTO_PATH])
+    expect(await photoRow()).toBeUndefined()
+    expect(deletedBlobs).toEqual(['blob1'])
   })
 })

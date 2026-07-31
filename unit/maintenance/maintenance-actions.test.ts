@@ -484,17 +484,31 @@ describe('maintenance/actions', () => {
   })
 
   describe('deleteWorkOrderPhoto', () => {
-    it('deletes a photo once the work order is verified to belong to the caller org', async () => {
+    // Was: asserted the removal went through the CALLER's RLS-scoped client.
+    // The storage DELETE policy now only matches objects whose first path
+    // segment is the caller's org id, so legacy `wo-<id>/…` objects would
+    // silently no-op under RLS and be orphaned after their row was deleted.
+    // The removal therefore goes through the SERVICE client, authorized by the
+    // org-ownership check on the work order immediately above it.
+    it('deletes a photo — via the service client — once the work order is verified to belong to the caller org', async () => {
       const supabase = makeSupabase({
         work_order_photos: [{ data: { id: 'photo_1', storage_path: 'wo_1/photo.jpg', work_order_id: 'wo_1' } }],
         work_orders:        [{ data: { id: 'wo_1' } }],
       })
+      const service = makeSupabase({})
       vi.mocked(requireOrgRole).mockResolvedValue({ supabase, membership } as never)
+      vi.mocked(createServiceClient).mockReturnValue(service as never)
 
       const result = await deleteWorkOrderPhoto('photo_1')
 
       expect(result).toEqual({})
-      expect(supabase.storage.from).toHaveBeenCalledWith('work-order-photos')
+      // Service role is justified by the ownership check, and named as such.
+      expect(createServiceClient).toHaveBeenCalledWith({ authorizedBy: membership })
+      expect(service.storage.from).toHaveBeenCalledWith('work-order-photos')
+      // The caller's RLS-scoped client must NOT be the one removing the object.
+      expect(supabase.storage.from).not.toHaveBeenCalled()
+      // The row is still deleted through the caller's client.
+      expect(supabase.from).toHaveBeenCalledWith('work_order_photos')
     })
 
     it('rejects a photo whose work order does not belong to the caller org (IDOR check)', async () => {
@@ -502,12 +516,18 @@ describe('maintenance/actions', () => {
         work_order_photos: [{ data: { id: 'photo_1', storage_path: 'x.jpg', work_order_id: 'other-orgs-wo' } }],
         work_orders:        [{ data: null }],
       })
+      const service = makeSupabase({})
       vi.mocked(requireOrgRole).mockResolvedValue({ supabase, membership } as never)
+      vi.mocked(createServiceClient).mockReturnValue(service as never)
 
       const result = await deleteWorkOrderPhoto('photo_1')
 
       expect(result).toEqual({ error: 'Photo not found' })
       expect(supabase.storage.from).not.toHaveBeenCalled()
+      // The ownership check is what authorizes the RLS bypass, so a failed
+      // check must stop short of ever minting the service client.
+      expect(createServiceClient).not.toHaveBeenCalled()
+      expect(service.storage.from).not.toHaveBeenCalled()
     })
 
     it('does not touch the DB when the caller lacks the required role', async () => {

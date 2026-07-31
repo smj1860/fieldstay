@@ -117,8 +117,16 @@ export const ENV_SPEC: Readonly<Record<string, VarSpec>> = {
   },
 
   // ── App ───────────────────────────────────────────────────────────────────
+  // 'production', not 'always', deliberately. Unlike the three Supabase vars —
+  // without which no page renders at all, so a boot error merely replaces an
+  // inevitable crash with a better message — ~6 call sites already fall back
+  // (app/actions/guidebook.ts, signup-form.tsx, owners/actions.ts …), so the
+  // app does boot and mostly work locally without it. Refusing to start a dev
+  // server over it would be a NEW failure this validation invented. Production
+  // is unchanged: still fatal there, which is where the disagreeing fallbacks
+  // (`app.fieldstay.com` vs `app.fieldstay.app`) actually do damage.
   NEXT_PUBLIC_APP_URL: {
-    tier: 'always', schema: httpUrl,
+    tier: 'production', schema: httpUrl,
     why: 'absolute URLs in every email, Stripe redirect, owner-portal link and OAuth callback',
   },
 
@@ -299,6 +307,41 @@ function requirednessOf(
   }
 }
 
+/** The issue a single variable raises, or null when it is fine. */
+function inspectVar(
+  name:   string,
+  spec:   VarSpec,
+  env:    EnvRecord,
+  target: DeployTarget,
+): EnvIssue | null {
+  const raw = env[name]
+
+  if (!isSet(raw)) {
+    const requiredness = requirednessOf(spec, target, env)
+    if (requiredness === 'ignore') return null
+
+    // A build-time-only or browser-inlined var can't be repaired by the
+    // running server, so never let it be the thing that blocks a boot.
+    const severity =
+      spec.buildTimeOnly || spec.clientInlinedOnly ? 'warning' : requiredness
+
+    return { name, kind: 'missing', severity, detail: spec.why }
+  }
+
+  // Present but malformed is an error in EVERY tier — a typo is a bug
+  // whether or not the variable was strictly required.
+  const parsed = spec.schema.safeParse(raw)
+  if (parsed.success) return null
+
+  const reason = parsed.error.issues[0]?.message ?? 'failed validation'
+  return {
+    name,
+    kind:     'malformed',
+    severity: target === 'test' ? 'warning' : 'error',
+    detail:   `${reason} — ${spec.why}`,
+  }
+}
+
 /**
  * Pure — takes the environment as an argument and returns issues rather than
  * throwing, so it is directly unit-testable and can be reused by a
@@ -312,37 +355,10 @@ export function validateServerEnv(
   const warnings: EnvIssue[] = []
 
   for (const [name, spec] of Object.entries(ENV_SPEC)) {
-    const raw = env[name]
-
-    if (!isSet(raw)) {
-      const requiredness = requirednessOf(spec, target, env)
-      if (requiredness === 'ignore') continue
-
-      // A build-time-only or browser-inlined var can't be repaired by the
-      // running server, so never let it be the thing that blocks a boot.
-      const severity =
-        spec.buildTimeOnly || spec.clientInlinedOnly ? 'warning' : requiredness
-
-      const issue: EnvIssue = { name, kind: 'missing', severity, detail: spec.why }
-      if (severity === 'error') errors.push(issue)
-      else warnings.push(issue)
-      continue
-    }
-
-    // Present but malformed is an error in EVERY tier — a typo is a bug
-    // whether or not the variable was strictly required.
-    const parsed = spec.schema.safeParse(raw)
-    if (!parsed.success) {
-      const reason = parsed.error.issues[0]?.message ?? 'failed validation'
-      const issue: EnvIssue = {
-        name,
-        kind:     'malformed',
-        severity: target === 'test' ? 'warning' : 'error',
-        detail:   `${reason} — ${spec.why}`,
-      }
-      if (issue.severity === 'error') errors.push(issue)
-      else warnings.push(issue)
-    }
+    const issue = inspectVar(name, spec, env, target)
+    if (!issue) continue
+    if (issue.severity === 'error') errors.push(issue)
+    else warnings.push(issue)
   }
 
   return { target, errors, warnings, ok: errors.length === 0 }

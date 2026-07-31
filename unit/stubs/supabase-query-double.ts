@@ -58,8 +58,23 @@ export interface RecordedCall {
  */
 type Spy = Mock<(...args: unknown[]) => unknown>
 
+/**
+ * The builder chain, typed so a test can write the same
+ * `.select().eq().order().range()` a product call site writes and still get
+ * completions/type-checking instead of `unknown`. Awaitable at any point.
+ */
+type ChainMethod = (...args: unknown[]) => QueryChain
+export type QueryChain =
+  & PromiseLike<QueryResponse>
+  & Record<(typeof CHAINABLE)[number], ChainMethod>
+  & {
+      range:       (from: number, to: number) => QueryChain
+      single:      () => Promise<QueryResponse>
+      maybeSingle: () => Promise<QueryResponse>
+    }
+
 /** `Mock` is invariant in its call signature, so these keep their own shapes. */
-type FromSpy = Mock<(table: string) => Record<string, unknown>>
+type FromSpy = Mock<(table: string) => QueryChain>
 type RpcSpy  = Mock<(fn: string, args?: unknown) => Promise<unknown>>
 type AuthSpy = Mock<() => Promise<unknown>>
 
@@ -79,6 +94,18 @@ export interface SupabaseDouble {
   deleteSpy: Spy
   rangeSpy:  Spy
   orderSpy:  Spy
+}
+
+/**
+ * The double is intentionally untyped per table — it stands in for any of
+ * them. This narrows one built chain to the page shape `fetchAllRows()`
+ * consumes, so a paginated call site can be written without a bare cast at
+ * every use.
+ */
+export function asPage<T>(
+  chain: unknown,
+): PromiseLike<{ data: T[] | null; error: { message: string } | null }> {
+  return chain as PromiseLike<{ data: T[] | null; error: { message: string } | null }>
 }
 
 export interface SupabaseDoubleOptions {
@@ -195,7 +222,7 @@ export function createSupabaseDouble(
       onRejected?:  (reason: unknown) => unknown,
     ) => Promise.resolve(resolve()).then(onFulfilled, onRejected)
 
-    return chain
+    return chain as unknown as QueryChain
   })
 
   const rpcImpl = options.rpc

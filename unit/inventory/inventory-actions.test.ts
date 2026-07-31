@@ -430,9 +430,58 @@ describe('inventory/actions', () => {
 
       expect(result).toEqual({ success: true })
       expect(inngest.send).toHaveBeenCalledWith({
+        // Event `id` added in this session. buildShoppingCart's
+        // concurrency { limit: 1, key: 'event.data.org_id' } plus its
+        // content-fingerprint claim already made duplicate Kroger cart
+        // additions impossible, but neither stopped a second RUN existing:
+        // a double-clicked "Build Cart" no-opped on the cart and then still
+        // emailed the PM a second "your cart is ready". Inngest dedups on
+        // this id, collapsing the duplicate at the source.
+        // Trailing segment is a minute bucket — matched loosely so the
+        // assertion can't fail purely by straddling a minute boundary. The
+        // bucket's actual collapsing behaviour is asserted in the next test.
+        id:   expect.stringMatching(/^cart-requested:org_1:user_1:DELIVERY:prop_1:\d+$/),
         name: 'inventory/cart_requested',
         data: { org_id: 'org_1', requested_by: 'user_1', property_ids: ['prop_1'], modality: 'DELIVERY' },
       })
+    })
+
+    it('gives two rapid double-clicks the SAME idempotency key, so only one cart-ready email is sent', async () => {
+      vi.mocked(requireOrgMember).mockResolvedValue({
+        user: { id: 'user_1' }, membership,
+      } as never)
+
+      // Frozen so the two clicks can't land either side of a minute boundary
+      // and make this assertion time-dependent.
+      vi.useFakeTimers()
+      vi.setSystemTime(new Date('2026-07-31T12:00:30Z'))
+      try {
+        await triggerShoppingCart(['prop_b', 'prop_a'], 'PICKUP')
+        await triggerShoppingCart(['prop_a', 'prop_b'], 'PICKUP')
+      } finally {
+        vi.useRealTimers()
+      }
+
+      const ids = vi.mocked(inngest.send).mock.calls.map((c) => (c[0] as { id: string }).id)
+      expect(ids).toHaveLength(2)
+      // Property order is normalised, so the same selection reached from a
+      // differently-ordered array is still one logical request.
+      expect(ids[0]).toBe(ids[1])
+    })
+
+    it('keys the request by org, user, modality and property scope so unrelated builds are never collapsed', async () => {
+      vi.mocked(requireOrgMember).mockResolvedValue({
+        user: { id: 'user_1' }, membership,
+      } as never)
+
+      await triggerShoppingCart(['prop_1'], 'PICKUP')
+      await triggerShoppingCart(['prop_1'], 'DELIVERY')
+      await triggerShoppingCart(undefined, 'PICKUP')
+
+      const ids = vi.mocked(inngest.send).mock.calls.map((c) => (c[0] as { id: string }).id)
+      expect(new Set(ids).size).toBe(3)
+      // An all-properties build is a distinct scope, not an empty one.
+      expect(ids[2]).toContain(':PICKUP:all:')
     })
 
     it('throws when the caller is not an authenticated org member', async () => {
