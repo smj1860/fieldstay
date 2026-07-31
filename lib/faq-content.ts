@@ -72,6 +72,48 @@ export const TEAM_ACCESS_FAQ = {
     'Anyone you invite to your team joins as an Admin with full access to the app — properties, turnovers, work orders, crew scheduling, inventory, owner reporting, and billing. Two things stay with the account Owner: only the Owner can invite or remove team members, and only the Owner can delete the account. Everything a team member sees is scoped to your organization, so they never have access to another company\'s data.',
 } as const
 
+/**
+ * Multi-crew Start Turnover behavior — shared between the in-app help page
+ * and the crew app's own FAQ panel (app/crew/crew-shell.tsx) so the two
+ * audiences never end up with an explanation that's quietly drifted apart.
+ *
+ * A turnover has one shared status column, not one per assignee — see
+ * turnovers.status and the status === 'assigned' gate on the Start
+ * Turnover button. Confirmed against live production data 2026-07-31.
+ */
+export const MULTI_CREW_START_FAQ = {
+  question: 'Two crew members are assigned to the same turnover — why did only one of them see Start Turnover work?',
+  answer:
+    'This is expected. A turnover has a single shared status (Assigned → In Progress → Complete) — it isn\'t tracked separately per crew member. Whichever assigned crew member taps Start Turnover first moves it to In Progress for everyone, and the button then disappears from every other assigned crew member\'s screen. This comes up most often when crew split up and work different parts of the same property at the same time. Only one tap is needed — the other crew member doesn\'t need to do anything differently, since every assigned crew member already has full access to the checklist and inventory regardless of who tapped Start.',
+} as const
+
+/**
+ * Marketing-only pair — shared between the OwnerRez and Hospitable landing
+ * pages ONLY (components/ownerrez/faq-section.tsx, components/hospitable/
+ * faq-section.tsx). Found already near-verbatim duplicated between the two
+ * (one word apart on MARKETING_OFFLINE_FAQ, byte-for-byte identical on
+ * MARKETING_TRIAL_FAQ) — extracted 2026-07-31 to stop that drift.
+ *
+ * Deliberately NOT wired into FAQ_CATEGORIES or the crew app's FAQ_ITEMS —
+ * those have their own separately-worded answers to the same underlying
+ * facts, written for a different audience (an existing customer's crew
+ * asking "why doesn't this sync" reads differently than a prospect asking
+ * "will this work for my rural properties"). Only merge those in too if a
+ * future edit makes the wording accidentally identical, the same test this
+ * pair failed.
+ */
+export const MARKETING_OFFLINE_FAQ = {
+  question: 'Does it work without cell service?',
+  answer:
+    'Yes. The crew app stores checklists and task details on the device. Crew can complete an entire turnover offline and the work syncs to the cloud the moment they\'re back in range. Built specifically for properties in rural and low-signal areas.',
+} as const
+
+export const MARKETING_TRIAL_FAQ = {
+  question: 'What happens when my trial ends?',
+  answer:
+    'After 14 days you\'ll be prompted to choose a plan. If you don\'t subscribe, your account is paused and your data is retained for 30 days so you can pick back up without losing anything. No credit card is required to start.',
+} as const
+
 export const FAQ_CATEGORIES: FaqCategory[] = [
   {
     id:    'pms-sync',
@@ -149,9 +191,8 @@ export const FAQ_CATEGORIES: FaqCategory[] = [
       },
       {
         id:       'crew-multi-assign-start',
-        question: 'Two crew members are assigned to the same turnover — why did only one of them see Start Turnover work?',
-        answer:
-          'This is expected. A turnover has a single shared status (Assigned → In Progress → Complete) — it isn\'t tracked separately per crew member. Whichever assigned crew member taps Start Turnover first moves it to In Progress for everyone, and the button then disappears from every other assigned crew member\'s screen. This comes up most often when crew split up and work different parts of the same property at the same time. Only one tap is needed — the other crew member doesn\'t need to do anything differently, since every assigned crew member already has full access to the checklist and inventory regardless of who tapped Start.',
+        question: MULTI_CREW_START_FAQ.question,
+        answer:   MULTI_CREW_START_FAQ.answer,
       },
     ],
   },
