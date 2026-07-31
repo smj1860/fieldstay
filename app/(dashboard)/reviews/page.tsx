@@ -2,6 +2,7 @@ import { requireOrgMember } from '@/lib/auth'
 import { createServiceClient } from '@/lib/supabase/server'
 import { ReviewsClient } from './reviews-client'
 import { getManualReviewsUsedThisWeek } from './actions'
+import { throwIfAnyQueryFailed } from '@/lib/supabase/unwrap'
 
 // Plain helper, not a component — keeps the Date.now() call out of the
 // page component's own body (react-hooks/purity flags impure calls inside
@@ -57,7 +58,7 @@ export default async function ReviewsPage() {
   // response window is 14 days, so anything actionable is always in the
   // newest slice — older reviews are a read-only archive that previously
   // made this query grow without bound as the org aged.
-  const { data: reviews } = await admin
+  const { data: reviews, error: reviewsError } = await admin
     .from('reviews')
     .select(`
       *,
@@ -68,6 +69,10 @@ export default async function ReviewsPage() {
     .order('review_date', { ascending: false })
     .limit(200)
 
+
+  // Logs + reports, then throws so the segment's error.tsx renders a real
+  // error state — a failed read must not render as an empty page.
+  throwIfAnyQueryFailed({ site: 'page.reviews', orgId: membership.org_id }, reviewsError)
   const RESPONSE_WINDOW_DAYS = 14
 
   const reviewsWithDeadline = (reviews ?? []).map(r => {

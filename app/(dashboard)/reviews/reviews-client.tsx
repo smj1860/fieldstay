@@ -694,8 +694,9 @@ export function ReviewsClient({ reviews: initialReviews, manualUsedThisWeek }: P
 
           {/* Star rating */}
           <div>
-            <label className="label">Star Rating</label>
-            <div className="flex gap-2">
+            {/* Labels a group of star buttons, not a single control. */}
+            <span className="label" id="manual-review-rating-label">Star Rating</span>
+            <div className="flex gap-2" role="group" aria-labelledby="manual-review-rating-label">
               {[1, 2, 3, 4, 5].map((n) => (
                 <button
                   key={n}

@@ -102,6 +102,392 @@ function parseInventoryCSV(text: string): ParsedCSVRow[] {
     .filter((r) => r.name)
 }
 
+// ── Master-list picker ───────────────────────────────────────────────────────
+
+function MasterListPicker({
+  groups,
+  selected,
+  brandByItemId,
+  onToggleItem,
+  onToggleCategory,
+  onBrandChange,
+}: Readonly<{
+  groups: [InventoryCategory, CatalogItem[]][]
+  selected: Set<string>
+  brandByItemId: Record<string, string>
+  onToggleItem: (id: string) => void
+  onToggleCategory: (items: CatalogItem[]) => void
+  onBrandChange: (id: string, value: string) => void
+}>) {
+  if (groups.length === 0) {
+    return (
+      <p className="text-sm text-muted-themed">
+        No items in your Master List yet — add some on the Master List tab first.
+      </p>
+    )
+  }
+
+  return (
+    <>
+      {groups.map(([category, categoryItems]) => {
+        const allSelected = categoryItems.every((item) => selected.has(item.id))
+        return (
+          <div key={category} className="border border-themed rounded-xl overflow-hidden">
+            <label className="flex items-center gap-2 px-4 py-2.5 cursor-pointer" style={{ background: 'var(--bg-raised)' }}>
+              <Checkbox checked={allSelected} onChange={() => onToggleCategory(categoryItems)} />
+              <span className="text-sm font-semibold text-primary-themed">{INVENTORY_CATEGORY_LABELS[category]}</span>
+            </label>
+            <div className="divide-y divide-themed">
+              {categoryItems.map((item) => (
+                <CatalogItemRow
+                  key={item.id}
+                  item={item}
+                  checked={selected.has(item.id)}
+                  brand={brandByItemId[item.id] ?? ''}
+                  onToggle={() => onToggleItem(item.id)}
+                  onBrandChange={(v) => onBrandChange(item.id, v)}
+                />
+              ))}
+            </div>
+          </div>
+        )
+      })}
+    </>
+  )
+}
+
+function CatalogItemRow({
+  item,
+  checked,
+  brand,
+  onToggle,
+  onBrandChange,
+}: Readonly<{
+  item: CatalogItem
+  checked: boolean
+  brand: string
+  onToggle: () => void
+  onBrandChange: (value: string) => void
+}>) {
+  return (
+    <div className="flex items-center gap-2 px-4 py-2">
+      <label className="flex items-center gap-2 cursor-pointer flex-1 min-w-0">
+        <Checkbox checked={checked} onChange={onToggle} />
+        <span className="text-sm text-primary-themed truncate">{item.name}</span>
+        <span className="text-xs text-muted-themed flex-shrink-0">{item.default_unit}</span>
+      </label>
+      {checked && (
+        <input
+          value={brand}
+          onChange={(e) => onBrandChange(e.target.value)}
+          placeholder="Brand (optional)"
+          aria-label={`Preferred brand for ${item.name}`}
+          className="text-xs border border-themed rounded px-2 py-1 bg-transparent text-primary-themed placeholder:text-[var(--text-muted)] focus:outline-none focus:ring-1 focus:ring-[var(--accent-gold)] w-36 flex-shrink-0"
+        />
+      )}
+    </div>
+  )
+}
+
+// ── CSV import ───────────────────────────────────────────────────────────────
+
+interface CsvImport {
+  inputMode:   'file' | 'paste'
+  setInputMode:(m: 'file' | 'paste') => void
+  pasteText:   string
+  setPasteText:(v: string) => void
+  rows:        ParsedCSVRow[]
+  parseError:  string | null
+  fileInputRef: React.RefObject<HTMLInputElement | null>
+  handleFile:  (file: File) => void
+  parsePaste:  () => void
+  clear:       () => void
+}
+
+function useCsvImport(): CsvImport {
+  const [inputMode, setInputMode]   = useState<'file' | 'paste'>('file')
+  const [pasteText, setPasteText]   = useState('')
+  const [rows, setRows]             = useState<ParsedCSVRow[]>([])
+  const [parseError, setParseError] = useState<string | null>(null)
+  const fileInputRef = useRef<HTMLInputElement | null>(null)
+
+  const handleFile = (file: File) => {
+    setParseError(null)
+    const reader = new FileReader()
+    reader.onload = (ev) => {
+      const parsed = parseInventoryCSV((ev.target?.result as string) ?? '')
+      if (!parsed.length) { setParseError('No valid rows found in that file.'); return }
+      setRows(parsed)
+    }
+    reader.onerror = () => setParseError('That file could not be read. Try again or paste the CSV instead.')
+    reader.readAsText(file)
+  }
+
+  const parsePaste = () => {
+    setParseError(null)
+    const parsed = parseInventoryCSV(pasteText)
+    if (!parsed.length) { setParseError('No valid rows found in that text.'); return }
+    setRows(parsed)
+  }
+
+  const clear = () => {
+    setRows([])
+    setParseError(null)
+    setPasteText('')
+    if (fileInputRef.current) fileInputRef.current.value = ''
+  }
+
+  return { inputMode, setInputMode, pasteText, setPasteText, rows, parseError, fileInputRef, handleFile, parsePaste, clear }
+}
+
+function CsvSourceToggle({ csv }: Readonly<{ csv: CsvImport }>) {
+  const options: Array<{ id: 'file' | 'paste'; label: string }> = [
+    { id: 'file',  label: 'CSV File' },
+    { id: 'paste', label: 'Paste CSV' },
+  ]
+  return (
+    <div className="flex gap-2">
+      {options.map(({ id, label }) => {
+        const active = csv.inputMode === id
+        return (
+          <button
+            key={id}
+            type="button"
+            onClick={() => { csv.setInputMode(id); csv.clear() }}
+            className={cn('flex-1 text-sm rounded-lg px-3 py-2 border text-center', active ? 'font-medium' : 'border-themed text-secondary-themed')}
+            style={active ? { background: 'var(--accent-gold-dim)', borderColor: 'var(--accent-gold)', color: 'var(--accent-gold)' } : undefined}
+          >
+            {label}
+          </button>
+        )
+      })}
+    </div>
+  )
+}
+
+function CsvPreviewTable({ rows }: Readonly<{ rows: ParsedCSVRow[] }>) {
+  return (
+    <div className="border border-themed rounded-xl overflow-hidden max-h-72 overflow-y-auto">
+      <table className="w-full text-xs">
+        <thead>
+          <tr style={{ background: 'var(--bg-raised)' }}>
+            <th className="text-left px-3 py-2 text-muted-themed">Name</th>
+            <th className="text-left px-3 py-2 text-muted-themed">Category</th>
+            <th className="text-left px-3 py-2 text-muted-themed">Unit</th>
+            <th className="text-right px-3 py-2 text-muted-themed">Par</th>
+            <th className="text-left px-3 py-2 text-muted-themed">Brand</th>
+          </tr>
+        </thead>
+        <tbody>
+          {rows.map((row) => (
+            <tr key={`${row.name}-${row.unit}-${row.par_level}`} className="border-t border-themed">
+              <td className="px-3 py-1.5 text-primary-themed">{row.name}</td>
+              <td className="px-3 py-1.5">
+                {row.categoryInvalid ? (
+                  <span className="inline-flex items-center gap-1" style={{ color: 'var(--accent-amber)' }} title={`"${row.categoryRaw}" isn't a known category — will save as Other`}>
+                    <AlertTriangle className="w-3 h-3" /> {row.categoryRaw} → Other
+                  </span>
+                ) : (
+                  <span className="text-secondary-themed">{INVENTORY_CATEGORY_LABELS[row.category]}</span>
+                )}
+              </td>
+              <td className="px-3 py-1.5 text-secondary-themed">{row.unit}</td>
+              <td className="px-3 py-1.5 text-right text-secondary-themed">{row.par_level}</td>
+              <td className="px-3 py-1.5 text-secondary-themed">{row.preferred_brand ?? '—'}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  )
+}
+
+function CsvImportPanel({ csv }: Readonly<{ csv: CsvImport }>) {
+  const renderSource = () => {
+    if (csv.inputMode === 'file') {
+      return (
+        <>
+          <input
+            ref={csv.fileInputRef}
+            type="file"
+            accept=".csv"
+            className="hidden"
+            aria-label="Upload inventory CSV"
+            onChange={(e) => { const f = e.target.files?.[0]; if (f) csv.handleFile(f) }}
+          />
+          <button
+            type="button"
+            onClick={() => csv.fileInputRef.current?.click()}
+            className="w-full border-2 border-dashed border-themed rounded-xl py-6 text-sm flex flex-col items-center gap-2 transition-colors hover:border-strong-themed"
+            style={{ color: 'var(--text-muted)' }}
+          >
+            <Upload className="w-5 h-5" />
+            Click to upload CSV
+          </button>
+        </>
+      )
+    }
+    return (
+      <div className="space-y-2">
+        <textarea
+          value={csv.pasteText}
+          onChange={(e) => csv.setPasteText(e.target.value)}
+          rows={6}
+          aria-label="Paste inventory CSV"
+          className="input w-full text-xs font-mono"
+          placeholder={'name,category,unit,par_level,preferred_brand\nDish Soap,kitchen,bottles,2,Dawn'}
+        />
+        <Button variant="secondary" onClick={csv.parsePaste} disabled={!csv.pasteText.trim()} className="text-sm">
+          Parse
+        </Button>
+      </div>
+    )
+  }
+
+  return (
+    <div className="space-y-3">
+      <CsvSourceToggle csv={csv} />
+
+      <p className="text-xs text-muted-themed">
+        Columns: <code>name</code> (required), <code>category</code>, <code>unit</code>, <code>par_level</code>, <code>preferred_brand</code> — header row optional.
+      </p>
+
+      {csv.parseError && <InlineAlert tone="error">{csv.parseError}</InlineAlert>}
+
+      {csv.rows.length === 0 && renderSource()}
+
+      {csv.rows.length > 0 && (
+        <>
+          <CsvPreviewTable rows={csv.rows} />
+          <Button variant="ghost" onClick={csv.clear} className="text-sm">Clear and start over</Button>
+        </>
+      )}
+    </div>
+  )
+}
+
+// ── Save / apply dialog ──────────────────────────────────────────────────────
+
+interface SaveDialogState {
+  open:                boolean
+  templateName:        string
+  setTemplateName:     (v: string) => void
+  creating:            boolean
+  createError:         string | null
+  createdTemplateId:   string | null
+  createdTemplateName: string
+  selectedPropertyIds: string[]
+  toggleProperty:      (id: string) => void
+  applying:            boolean
+  applyError:          string | null
+  applyResult:         { applied: number } | null
+  onCreate:            () => void
+  onApply:             () => void
+  onClose:             () => void
+}
+
+function SaveTemplateDialogFooter({
+  state,
+  propertyCount,
+}: Readonly<{ state: SaveDialogState; propertyCount: number }>) {
+  if (!state.createdTemplateId) {
+    return (
+      <Button onClick={state.onCreate} disabled={state.creating || !state.templateName.trim()} className="w-full">
+        {state.creating ? 'Creating…' : 'Create Template'}
+      </Button>
+    )
+  }
+  if (state.applyResult || propertyCount === 0) {
+    return <Button onClick={state.onClose} className="w-full">Done</Button>
+  }
+  const count = state.selectedPropertyIds.length
+  const noun  = count === 1 ? 'property' : 'properties'
+  const applyLabel = `Apply to ${count || ''} ${noun}`.replace('  ', ' ')
+  return (
+    <>
+      <Button onClick={state.onApply} disabled={state.applying || count === 0} className="flex-1">
+        {state.applying ? 'Applying…' : applyLabel}
+      </Button>
+      <Button variant="ghost" onClick={state.onClose}>Skip</Button>
+    </>
+  )
+}
+
+function ApplyToPropertiesBody({
+  state,
+  properties,
+}: Readonly<{ state: SaveDialogState; properties: Property[] }>) {
+  if (state.applyResult) {
+    return (
+      <InlineAlert tone="success" className="flex items-start gap-2">
+        <CheckCircle2 className="w-4 h-4 flex-shrink-0 mt-0.5" />
+        <span>Applied — {state.applyResult.applied} item{state.applyResult.applied !== 1 ? 's' : ''} added across selected properties.</span>
+      </InlineAlert>
+    )
+  }
+  if (properties.length === 0) {
+    return (
+      <p className="text-sm text-muted-themed">
+        No properties to apply this template to yet. You can apply it later from Saved Templates.
+      </p>
+    )
+  }
+  return (
+    <>
+      <p className="text-sm text-secondary-themed">Apply this template to any properties now?</p>
+      <div className="max-h-48 overflow-y-auto border border-themed rounded-lg divide-y divide-themed">
+        {properties.map((property) => (
+          <label key={property.id} className="flex items-center gap-2 px-3 py-2 cursor-pointer hover:bg-raised-themed transition-colors">
+            <Checkbox
+              checked={state.selectedPropertyIds.includes(property.id)}
+              onChange={() => state.toggleProperty(property.id)}
+            />
+            <span className="text-sm text-primary-themed">{property.name}</span>
+          </label>
+        ))}
+      </div>
+    </>
+  )
+}
+
+function SaveTemplateDialog({
+  state,
+  properties,
+}: Readonly<{ state: SaveDialogState; properties: Property[] }>) {
+  return (
+    <Dialog
+      open={state.open}
+      onClose={state.onClose}
+      title={state.createdTemplateId ? 'Apply Template' : 'Name This Template'}
+      maxWidthClassName="max-w-sm"
+      footer={<SaveTemplateDialogFooter state={state} propertyCount={properties.length} />}
+    >
+      {!state.createdTemplateId ? (
+        <div className="space-y-4">
+          {state.createError && <InlineAlert tone="error">{state.createError}</InlineAlert>}
+          <div>
+            <label htmlFor="new-template-name" className="label">Template name</label>
+            <Input
+              id="new-template-name"
+              value={state.templateName}
+              onChange={(e) => state.setTemplateName(e.target.value)}
+              placeholder="e.g. Beachfront Standard"
+            />
+          </div>
+        </div>
+      ) : (
+        <div className="space-y-4">
+          <p className="text-xs text-muted-themed -mt-2">&quot;{state.createdTemplateName}&quot; was created</p>
+          {state.applyError && <InlineAlert tone="error">{state.applyError}</InlineAlert>}
+          <ApplyToPropertiesBody state={state} properties={properties} />
+        </div>
+      )}
+    </Dialog>
+  )
+}
+
+// ── Builder ──────────────────────────────────────────────────────────────────
+
 export function CreateTemplateBuilder({
   catalogItems,
   properties,
@@ -112,12 +498,7 @@ export function CreateTemplateBuilder({
   const [selected, setSelected] = useState<Set<string>>(new Set())
   const [brandByItemId, setBrandByItemId] = useState<Record<string, string>>({})
 
-  // CSV mode
-  const [csvInputMode, setCsvInputMode] = useState<'file' | 'paste'>('file')
-  const [pasteText, setPasteText] = useState('')
-  const [csvRows, setCsvRows] = useState<ParsedCSVRow[]>([])
-  const [csvParseError, setCsvParseError] = useState<string | null>(null)
-  const fileInputRef = useRef<HTMLInputElement | null>(null)
+  const csv = useCsvImport()
 
   const [showNameDialog, setShowNameDialog] = useState(false)
   const [templateName, setTemplateName] = useState('')
@@ -154,31 +535,6 @@ export function CreateTemplateBuilder({
     })
   }
 
-  const handleCsvFile = (file: File) => {
-    setCsvParseError(null)
-    const reader = new FileReader()
-    reader.onload = (ev) => {
-      const rows = parseInventoryCSV((ev.target?.result as string) ?? '')
-      if (!rows.length) { setCsvParseError('No valid rows found in that file.'); return }
-      setCsvRows(rows)
-    }
-    reader.readAsText(file)
-  }
-
-  const handleParsePaste = () => {
-    setCsvParseError(null)
-    const rows = parseInventoryCSV(pasteText)
-    if (!rows.length) { setCsvParseError('No valid rows found in that text.'); return }
-    setCsvRows(rows)
-  }
-
-  const clearCsv = () => {
-    setCsvRows([])
-    setCsvParseError(null)
-    setPasteText('')
-    if (fileInputRef.current) fileInputRef.current.value = ''
-  }
-
   const closeDialog = () => {
     setShowNameDialog(false)
     setTemplateName('')
@@ -196,7 +552,7 @@ export function CreateTemplateBuilder({
       const result = mode === 'csv'
         ? await createInventoryTemplateFromCSV(
             templateName.trim(),
-            csvRows.map((r) => ({
+            csv.rows.map((r) => ({
               name:             r.name,
               category:         r.category,
               unit:             r.unit,
@@ -217,7 +573,7 @@ export function CreateTemplateBuilder({
       setCreatedTemplateName(templateName.trim())
       setSelected(new Set())
       setBrandByItemId({})
-      clearCsv()
+      csv.clear()
     })
   }
 
@@ -234,7 +590,19 @@ export function CreateTemplateBuilder({
     })
   }
 
-  const readyCount = mode === 'csv' ? csvRows.length : selected.size
+  const readyCount = mode === 'csv' ? csv.rows.length : selected.size
+
+  const dialogState: SaveDialogState = {
+    open: showNameDialog,
+    templateName, setTemplateName,
+    creating, createError,
+    createdTemplateId, createdTemplateName,
+    selectedPropertyIds, toggleProperty,
+    applying, applyError, applyResult,
+    onCreate: handleCreate,
+    onApply:  handleApply,
+    onClose:  closeDialog,
+  }
 
   return (
     <div className="space-y-4">
@@ -248,149 +616,16 @@ export function CreateTemplateBuilder({
       />
 
       {mode === 'select' ? (
-        <>
-          {groups.length === 0 && (
-            <p className="text-sm text-muted-themed">
-              No items in your Master List yet — add some on the Master List tab first.
-            </p>
-          )}
-
-          {groups.map(([category, categoryItems]) => {
-            const allSelected = categoryItems.every((item) => selected.has(item.id))
-            return (
-              <div key={category} className="border border-themed rounded-xl overflow-hidden">
-                <label className="flex items-center gap-2 px-4 py-2.5 cursor-pointer" style={{ background: 'var(--bg-raised)' }}>
-                  <Checkbox checked={allSelected} onChange={() => toggleCategory(categoryItems)} />
-                  <span className="text-sm font-semibold text-primary-themed">{INVENTORY_CATEGORY_LABELS[category]}</span>
-                </label>
-                <div className="divide-y divide-themed">
-                  {categoryItems.map((item) => {
-                    const isChecked = selected.has(item.id)
-                    return (
-                      <div key={item.id} className="flex items-center gap-2 px-4 py-2">
-                        <label className="flex items-center gap-2 cursor-pointer flex-1 min-w-0">
-                          <Checkbox checked={isChecked} onChange={() => toggleItem(item.id)} />
-                          <span className="text-sm text-primary-themed truncate">{item.name}</span>
-                          <span className="text-xs text-muted-themed flex-shrink-0">{item.default_unit}</span>
-                        </label>
-                        {isChecked && (
-                          <input
-                            value={brandByItemId[item.id] ?? ''}
-                            onChange={(e) => setBrandByItemId((prev) => ({ ...prev, [item.id]: e.target.value }))}
-                            placeholder="Brand (optional)"
-                            aria-label={`Preferred brand for ${item.name}`}
-                            className="text-xs border border-themed rounded px-2 py-1 bg-transparent text-primary-themed placeholder:text-[var(--text-muted)] focus:outline-none focus:ring-1 focus:ring-[var(--accent-gold)] w-36 flex-shrink-0"
-                          />
-                        )}
-                      </div>
-                    )
-                  })}
-                </div>
-              </div>
-            )
-          })}
-        </>
+        <MasterListPicker
+          groups={groups}
+          selected={selected}
+          brandByItemId={brandByItemId}
+          onToggleItem={toggleItem}
+          onToggleCategory={toggleCategory}
+          onBrandChange={(id, value) => setBrandByItemId((prev) => ({ ...prev, [id]: value }))}
+        />
       ) : (
-        <div className="space-y-3">
-          <div className="flex gap-2">
-            <button
-              type="button"
-              onClick={() => { setCsvInputMode('file'); clearCsv() }}
-              className={cn('flex-1 text-sm rounded-lg px-3 py-2 border text-center', csvInputMode === 'file' ? 'font-medium' : 'border-themed text-secondary-themed')}
-              style={csvInputMode === 'file' ? { background: 'var(--accent-gold-dim)', borderColor: 'var(--accent-gold)', color: 'var(--accent-gold)' } : undefined}
-            >
-              CSV File
-            </button>
-            <button
-              type="button"
-              onClick={() => { setCsvInputMode('paste'); clearCsv() }}
-              className={cn('flex-1 text-sm rounded-lg px-3 py-2 border text-center', csvInputMode === 'paste' ? 'font-medium' : 'border-themed text-secondary-themed')}
-              style={csvInputMode === 'paste' ? { background: 'var(--accent-gold-dim)', borderColor: 'var(--accent-gold)', color: 'var(--accent-gold)' } : undefined}
-            >
-              Paste CSV
-            </button>
-          </div>
-
-          <p className="text-xs text-muted-themed">
-            Columns: <code>name</code> (required), <code>category</code>, <code>unit</code>, <code>par_level</code>, <code>preferred_brand</code> — header row optional.
-          </p>
-
-          {csvParseError && <InlineAlert tone="error">{csvParseError}</InlineAlert>}
-
-          {csvRows.length === 0 && (
-            csvInputMode === 'file' ? (
-              <>
-                <input
-                  ref={fileInputRef}
-                  type="file"
-                  accept=".csv"
-                  className="hidden"
-                  onChange={(e) => { const f = e.target.files?.[0]; if (f) handleCsvFile(f) }}
-                />
-                <button
-                  type="button"
-                  onClick={() => fileInputRef.current?.click()}
-                  className="w-full border-2 border-dashed border-themed rounded-xl py-6 text-sm flex flex-col items-center gap-2 transition-colors hover:border-strong-themed"
-                  style={{ color: 'var(--text-muted)' }}
-                >
-                  <Upload className="w-5 h-5" />
-                  Click to upload CSV
-                </button>
-              </>
-            ) : (
-              <div className="space-y-2">
-                <textarea
-                  value={pasteText}
-                  onChange={(e) => setPasteText(e.target.value)}
-                  rows={6}
-                  className="input w-full text-xs font-mono"
-                  placeholder={'name,category,unit,par_level,preferred_brand\nDish Soap,kitchen,bottles,2,Dawn'}
-                />
-                <Button variant="secondary" onClick={handleParsePaste} disabled={!pasteText.trim()} className="text-sm">
-                  Parse
-                </Button>
-              </div>
-            )
-          )}
-
-          {csvRows.length > 0 && (
-            <>
-              <div className="border border-themed rounded-xl overflow-hidden max-h-72 overflow-y-auto">
-                <table className="w-full text-xs">
-                  <thead>
-                    <tr style={{ background: 'var(--bg-raised)' }}>
-                      <th className="text-left px-3 py-2 text-muted-themed">Name</th>
-                      <th className="text-left px-3 py-2 text-muted-themed">Category</th>
-                      <th className="text-left px-3 py-2 text-muted-themed">Unit</th>
-                      <th className="text-right px-3 py-2 text-muted-themed">Par</th>
-                      <th className="text-left px-3 py-2 text-muted-themed">Brand</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {csvRows.map((row, i) => (
-                      <tr key={i} className="border-t border-themed">
-                        <td className="px-3 py-1.5 text-primary-themed">{row.name}</td>
-                        <td className="px-3 py-1.5">
-                          {row.categoryInvalid ? (
-                            <span className="inline-flex items-center gap-1" style={{ color: 'var(--accent-amber)' }} title={`"${row.categoryRaw}" isn't a known category — will save as Other`}>
-                              <AlertTriangle className="w-3 h-3" /> {row.categoryRaw} → Other
-                            </span>
-                          ) : (
-                            <span className="text-secondary-themed">{INVENTORY_CATEGORY_LABELS[row.category]}</span>
-                          )}
-                        </td>
-                        <td className="px-3 py-1.5 text-secondary-themed">{row.unit}</td>
-                        <td className="px-3 py-1.5 text-right text-secondary-themed">{row.par_level}</td>
-                        <td className="px-3 py-1.5 text-secondary-themed">{row.preferred_brand ?? '—'}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-              <Button variant="ghost" onClick={clearCsv} className="text-sm">Clear and start over</Button>
-            </>
-          )}
-        </div>
+        <CsvImportPanel csv={csv} />
       )}
 
       {readyCount > 0 && (
@@ -401,75 +636,7 @@ export function CreateTemplateBuilder({
         </div>
       )}
 
-      <Dialog
-        open={showNameDialog}
-        onClose={closeDialog}
-        title={createdTemplateId ? 'Apply Template' : 'Name This Template'}
-        maxWidthClassName="max-w-sm"
-        footer={
-          !createdTemplateId ? (
-            <Button onClick={handleCreate} disabled={creating || !templateName.trim()} className="w-full">
-              {creating ? 'Creating…' : 'Create Template'}
-            </Button>
-          ) : applyResult || properties.length === 0 ? (
-            <Button onClick={closeDialog} className="w-full">Done</Button>
-          ) : (
-            <>
-              <Button onClick={handleApply} disabled={applying || selectedPropertyIds.length === 0} className="flex-1">
-                {applying ? 'Applying…' : `Apply to ${selectedPropertyIds.length || ''} propert${selectedPropertyIds.length === 1 ? 'y' : 'ies'}`}
-              </Button>
-              <Button variant="ghost" onClick={closeDialog}>Skip</Button>
-            </>
-          )
-        }
-      >
-        {!createdTemplateId ? (
-          <div className="space-y-4">
-            {createError && <InlineAlert tone="error">{createError}</InlineAlert>}
-            <div>
-              <label htmlFor="new-template-name" className="label">Template name</label>
-              <Input
-                id="new-template-name"
-                value={templateName}
-                onChange={(e) => setTemplateName(e.target.value)}
-                placeholder="e.g. Beachfront Standard"
-              />
-            </div>
-          </div>
-        ) : (
-          <div className="space-y-4">
-            <p className="text-xs text-muted-themed -mt-2">&quot;{createdTemplateName}&quot; was created</p>
-
-            {applyError && <InlineAlert tone="error">{applyError}</InlineAlert>}
-
-            {applyResult ? (
-              <InlineAlert tone="success" className="flex items-start gap-2">
-                <CheckCircle2 className="w-4 h-4 flex-shrink-0 mt-0.5" />
-                <span>Applied — {applyResult.applied} item{applyResult.applied !== 1 ? 's' : ''} added across selected properties.</span>
-              </InlineAlert>
-            ) : properties.length === 0 ? (
-              <p className="text-sm text-muted-themed">
-                No properties to apply this template to yet. You can apply it later from Saved Templates.
-              </p>
-            ) : (
-              <>
-                <p className="text-sm text-secondary-themed">Apply this template to any properties now?</p>
-                <div className="max-h-48 overflow-y-auto border border-themed rounded-lg divide-y divide-themed">
-                  {properties.map((property) => (
-                    <label key={property.id} className="flex items-center gap-2 px-3 py-2 cursor-pointer hover:bg-raised-themed transition-colors">
-                      <Checkbox
-                        checked={selectedPropertyIds.includes(property.id)}
-                        onChange={() => toggleProperty(property.id)}
-                      />
-                      <span className="text-sm text-primary-themed">{property.name}</span>
-                    </label>
-                  ))}
-                </div>
-              </>
-            )}
-          </div>
-        )}
-      </Dialog>
+      <SaveTemplateDialog state={dialogState} properties={properties} />
     </div>
   )
 }

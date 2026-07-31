@@ -7,6 +7,7 @@ import { createWorkOrder } from './actions'
 import { distanceMiles } from '@/lib/geocoding'
 import { isBlockingComplianceStatus } from '@/lib/vendors/compliance-status'
 import { createClient } from '@/lib/supabase/client'
+import { orgScopedStoragePath } from '@/lib/storage/object-path'
 import { Dialog } from '@/components/ui/Dialog'
 import { Button } from '@/components/ui/Button'
 import { Input } from '@/components/ui/Input'
@@ -99,14 +100,27 @@ export function CreateWorkOrderModal({
       return
     }
 
-    // Photos to upload — upload then close
+    // Photos to upload — upload then close.
+    // orgId is optional on this component's props, but every photo path is
+    // org-prefixed (storage RLS keys off that first segment), so without it
+    // there is nowhere valid to put the file. Say so rather than uploading
+    // to a path that will be denied.
+    if (!orgId) {
+      onWarning?.('Work order created, but photos could not be attached. You can add them from the work order detail page.')
+      onClose()
+      return
+    }
+
     const workOrderId = state.workOrderId
     ;(async () => {
       const supabase = createClient()
       let photoFailures = 0
       for (const file of photoFiles) {
         const ext  = file.name.split('.').pop() ?? 'jpg'
-        const path = `wo-${workOrderId}/${Date.now()}-${crypto.randomUUID()}.${ext}`
+        // The leading `${orgId}/` segment is what the work-order-photos
+        // storage RLS policies match on — a path without it is denied on
+        // upload and can never be signed for reading.
+        const path = orgScopedStoragePath(orgId, workOrderId, `${Date.now()}-${crypto.randomUUID()}.${ext}`)
         const { error: uploadErr } = await supabase.storage
           .from('work-order-photos')
           .upload(path, file, { contentType: file.type })
@@ -316,8 +330,9 @@ export function CreateWorkOrderModal({
 
               {/* Assignment mode */}
               <div>
-                <label className="label">Assign To</label>
-            <div className="flex gap-1 rounded-lg border border-themed p-1 mb-3">
+                {/* Labels a group of mode buttons, not a single control. */}
+                <span className="label" id="wo-assign-mode-label">Assign To</span>
+            <div className="flex gap-1 rounded-lg border border-themed p-1 mb-3" role="group" aria-labelledby="wo-assign-mode-label">
               {vendors.length > 0 && (
                 <button
                   type="button"

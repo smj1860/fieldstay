@@ -4,6 +4,7 @@ import { requireOrgMember }    from '@/lib/auth'
 import { createServiceClient } from '@/lib/supabase/server'
 import { TeamClient }          from './team-client'
 import { buttonVariantClass }  from '@/components/ui/Button'
+import { throwIfAnyQueryFailed } from '@/lib/supabase/unwrap'
 
 export const metadata: Metadata = { title: 'Team — FieldStay' }
 
@@ -12,23 +13,31 @@ export default async function TeamPage() {
   const admin = createServiceClient({ authorizedBy: membership })
 
   // Fetch all members with their auth emails
-  const { data: members } = await admin
+  const { data: members, error: membersError } = await admin
     .from('organization_members')
     .select('id, user_id, role, created_at')
     .eq('org_id', membership.org_id)
     .order('created_at', { ascending: true })
 
+
+  // Logs + reports, then throws so the segment's error.tsx renders a real
+  // error state — a failed read must not render as an empty page.
+  throwIfAnyQueryFailed({ site: 'page.settings.team', orgId: membership.org_id }, membersError)
   // Fetch auth user emails for all members
   const memberEmails: Record<string, string> = {}
   if (members?.length) {
-    const { data: authUsers } = await admin.auth.admin.listUsers()
+    const { data: authUsers, error: authUsersError } = await admin.auth.admin.listUsers()
+
+    // Logs + reports, then throws so the segment's error.tsx renders a real
+    // error state — a failed read must not render as an empty page.
+    throwIfAnyQueryFailed({ site: 'page.settings.team', orgId: membership.org_id }, authUsersError)
     for (const u of authUsers?.users ?? []) {
       memberEmails[u.id] = u.email ?? ''
     }
   }
 
   // Fetch pending invites
-  const { data: invites } = await admin
+  const { data: invites, error: invitesError } = await admin
     .from('org_invites')
     .select('id, email, role, created_at, expires_at')
     .eq('org_id', membership.org_id)
@@ -36,6 +45,10 @@ export default async function TeamPage() {
     .gt('expires_at', new Date().toISOString())
     .order('created_at', { ascending: false })
 
+
+  // Logs + reports, then throws so the segment's error.tsx renders a real
+  // error state — a failed read must not render as an empty page.
+  throwIfAnyQueryFailed({ site: 'page.settings.team', orgId: membership.org_id }, invitesError)
   const memberRows = (members ?? []).map((m) => ({
     id:        m.id as string,
     userId:    m.user_id as string,

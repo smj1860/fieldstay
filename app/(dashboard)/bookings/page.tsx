@@ -3,6 +3,7 @@ import { requireOrgMember } from '@/lib/auth'
 import { isMaintenanceItemActiveThisMonth } from '@/lib/utils/maintenance'
 import type { MaintenanceCandidate } from '@/lib/maintenance/vacancy-suggestions'
 import { BookingsClient } from './bookings-client'
+import { throwIfAnyQueryFailed } from '@/lib/supabase/unwrap'
 
 export const metadata: Metadata = { title: 'Bookings' }
 
@@ -91,8 +92,8 @@ export default async function BookingsPage() {
 
   const [
     { data: bookings, error: bookingsError },
-    { data: properties },
-    { data: connections },
+    { data: properties, error: propertiesError },
+    { data: connections, error: connectionsError },
   ] = await Promise.all([
     supabase
       .from('bookings')
@@ -121,6 +122,10 @@ export default async function BookingsPage() {
       .select('provider_id, status, last_used_at, metadata')
       .eq('org_id', membership.org_id),
   ])
+
+  // Logs + reports every failure, then throws so the segment's error.tsx
+  // renders a real error state — an outage must not look like empty data.
+  throwIfAnyQueryFailed({ site: 'page.bookings', orgId: membership.org_id }, propertiesError, connectionsError)
 
   if (bookingsError) {
     console.error('[BookingsPage] Failed to fetch bookings:', bookingsError.message)

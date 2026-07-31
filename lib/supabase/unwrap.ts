@@ -65,9 +65,21 @@ export type QueryOutcome<T> =
   | { ok: true;  data: T }
   | { ok: false; error: SupabaseQueryError }
 
-function record(error: PostgrestError, ctx: QueryContext): SupabaseQueryError {
+/**
+ * The subset of a Postgrest error the logger uses. Widened from PostgrestError
+ * so the same guard covers Supabase Auth admin calls (AuthError), which carry
+ * a message and a code but no details/hint.
+ */
+export interface QueryFailure {
+  message:  string
+  code?:    string | null
+  details?: string | null
+  hint?:    string | null
+}
+
+function record(error: QueryFailure, ctx: QueryContext): SupabaseQueryError {
   // Postgres error fields are diagnostic, never user data — safe to log.
-  console.error(`[supabase:${ctx.site}]`, error.code, error.message, error.details ?? '')
+  console.error(`[supabase:${ctx.site}]`, error.code ?? '', error.message, error.details ?? '')
   reportError(error, {
     site: ctx.site,
     orgId: ctx.orgId,
@@ -118,6 +130,30 @@ export function tryUnwrap<T>(res: PostgrestResult<T>, ctx: QueryContext): QueryO
 export function tryUnwrapList<T>(res: PostgrestResult<T[]>, ctx: QueryContext): QueryOutcome<T[]> {
   if (res.error) return { ok: false, error: record(res.error, ctx) }
   return { ok: true, data: res.data ?? [] }
+}
+
+/**
+ * Guard for a batch of parallel reads — the shape almost every list page uses:
+ *
+ *   const [{ data: a, error: aError }, { data: b, error: bError }] =
+ *     await Promise.all([...])
+ *   throwIfAnyQueryFailed({ site: 'page.turnovers', orgId }, aError, bError)
+ *
+ * Every failure is logged and reported (not just the first), then the batch
+ * throws so the segment's error.tsx renders a real error state instead of the
+ * page treating an outage as "you have nothing here yet".
+ */
+export function throwIfAnyQueryFailed(
+  ctx: QueryContext,
+  ...errors: (QueryFailure | null | undefined)[]
+): void {
+  let first: SupabaseQueryError | null = null
+  for (const error of errors) {
+    if (!error) continue
+    const recorded = record(error, ctx)
+    first ??= recorded
+  }
+  if (first) throw first
 }
 
 /**

@@ -11,19 +11,10 @@ import { staleFeedAlert } from '@/lib/inngest/functions/cron/stale-feed-alert'
 import { createServiceClient } from '@/lib/supabase/server'
 import { getPmMembers } from '@/lib/inngest/helpers'
 import { invokeHandler } from './test-helpers'
+import { createSupabaseDouble, type TableSpec } from '../stubs/supabase-query-double'
 
-function makeSupabase(responses: Record<string, { data?: unknown; error?: unknown }>) {
-  const from = vi.fn((table: string) => {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const chain: any = {}
-    chain.select = () => chain
-    chain.eq     = () => chain
-    chain.or     = () => chain
-    chain.then   = (resolve: (v: unknown) => unknown, reject?: (e: unknown) => unknown) =>
-      Promise.resolve(responses[table] ?? { data: null, error: null }).then(resolve, reject)
-    return chain
-  })
-  return { from }
+function makeSupabase(responses: Record<string, TableSpec>) {
+  return createSupabaseDouble(responses)
 }
 
 function makeStep() {

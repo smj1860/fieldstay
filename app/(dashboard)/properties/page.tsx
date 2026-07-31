@@ -6,6 +6,7 @@ import { PropertiesGrid } from './properties-grid'
 import { Card } from '@/components/ui/Card'
 import { buttonVariantClass } from '@/components/ui/Button'
 import type { Metadata } from 'next'
+import { throwIfAnyQueryFailed } from '@/lib/supabase/unwrap'
 
 export const metadata: Metadata = { title: 'Properties' }
 
@@ -13,10 +14,10 @@ export default async function PropertiesPage() {
   const { supabase, membership } = await requireOrgMember()
 
   const [
-    { data: properties },
+    { data: properties, error: propertiesError },
     { count: ownerPortalTokenCount },
-    { data: openWOs },
-    { data: unassignedTOs },
+    { data: openWOs, error: openWOsError },
+    { data: unassignedTOs, error: unassignedTOsError },
     { data: erroredFeeds },
   ] = await Promise.all([
     supabase
@@ -49,6 +50,10 @@ export default async function PropertiesPage() {
       .eq('org_id', membership.org_id)
       .eq('last_sync_status', 'error'),
   ])
+
+  // Logs + reports every failure, then throws so the segment's error.tsx
+  // renders a real error state — an outage must not look like empty data.
+  throwIfAnyQueryFailed({ site: 'page.properties', orgId: membership.org_id }, propertiesError, openWOsError, unassignedTOsError)
 
   const opsCountsByProperty: Record<string, { openWorkOrders: number; unassignedTurnovers: number; syncErrors: number }> = {}
   const bump = (propertyId: string, key: 'openWorkOrders' | 'unassignedTurnovers' | 'syncErrors') => {

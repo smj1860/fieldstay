@@ -5,6 +5,7 @@ import { Shield, Download } from 'lucide-react'
 import { Card } from '@/components/ui/Card'
 import { buttonVariantClass } from '@/components/ui/Button'
 import type { AuditEvent } from '@/types/database'
+import { throwIfAnyQueryFailed } from '@/lib/supabase/unwrap'
 
 const PAGE_SIZE = 50
 
@@ -23,13 +24,17 @@ export default async function AuditLogPage({
   const supabase = createServiceClient({ authorizedBy: membership })
 
   // Fetch one extra row to detect a next page without a separate count query.
-  const { data: events } = await supabase
+  const { data: events, error: eventsError } = await supabase
     .from('audit_events')
     .select('id, action, actor_id, target_type, target_id, metadata, created_at')
     .eq('org_id', membership.org_id)
     .order('created_at', { ascending: false })
     .range(offset, offset + PAGE_SIZE)
 
+
+  // Logs + reports, then throws so the segment's error.tsx renders a real
+  // error state — a failed read must not render as an empty page.
+  throwIfAnyQueryFailed({ site: 'page.settings.audit', orgId: membership.org_id }, eventsError)
   const fetched = (events ?? []) as Pick<AuditEvent, 'id' | 'action' | 'actor_id' | 'target_type' | 'target_id' | 'metadata' | 'created_at'>[]
   const hasMore = fetched.length > PAGE_SIZE
   const rows    = hasMore ? fetched.slice(0, PAGE_SIZE) : fetched

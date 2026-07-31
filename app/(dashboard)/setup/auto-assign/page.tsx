@@ -2,18 +2,23 @@ import { requireOrgMember } from '@/lib/auth'
 import { logAuditEvent } from '@/lib/audit'
 import { markStepComplete } from '../actions'
 import { AutoAssignWizardStep } from './auto-assign-step'
+import { throwIfAnyQueryFailed } from '@/lib/supabase/unwrap'
 
 type AutoAssignMode = 'disabled' | 'suggest' | 'autopilot'
 
 export default async function AutoAssignPage() {
   const { supabase, membership } = await requireOrgMember()
 
-  const { data: org } = await supabase
+  const { data: org, error: orgError } = await supabase
     .from('organizations')
     .select('auto_assign_mode')
     .eq('id', membership.org_id)
     .single()
 
+
+  // Logs + reports, then throws so the segment's error.tsx renders a real
+  // error state — a failed read must not render as an empty page.
+  throwIfAnyQueryFailed({ site: 'page.setup.auto-assign', orgId: membership.org_id }, orgError)
   const currentMode: AutoAssignMode =
     (org?.auto_assign_mode as AutoAssignMode | null) ?? 'suggest'
 

@@ -5,9 +5,9 @@ import { createServiceClient, createClient, adminFetch } from '@/lib/supabase/se
 import { acceptOrgInvite }     from '@/lib/auth/invites'
 import { redirect }            from 'next/navigation'
 import { headers }             from 'next/headers'
-import { inviteAcceptRatelimit } from '@/lib/rate-limit'
+import { inviteAcceptRatelimit, checkLimit } from '@/lib/rate-limit'
+import { extractClientIp }     from '@/lib/integrations/webhook-verification'
 
-import { reportError } from '@/lib/observability/report-error'
 const AcceptSchema = z.object({
   token:    z.string().uuid('Invite link is invalid or expired'),
   fullName: z.string().min(1, 'Full name is required').max(200),
@@ -30,19 +30,24 @@ export async function acceptTeamInvite(formData: FormData): Promise<{ error?: st
   }
 
   // Real account creation (admin.auth.admin.createUser below) from a
-  // public route gated only by a UUID token — rate limit by IP. Fails open
-  // on a Redis outage; a degraded limiter must never block a legitimate
-  // new team member finishing setup.
-  try {
-    const hdrs = await headers()
-    const ip   = hdrs.get('x-forwarded-for')?.split(',')[0]?.trim() ?? 'unknown'
-    const { success } = await inviteAcceptRatelimit.limit(`accept-invite:${ip}`)
-    if (!success) {
-      return { error: 'Too many attempts. Please try again in a few minutes.' }
-    }
-  } catch (rlErr) {
-    console.error('[acceptTeamInvite] rate limit check failed', rlErr)
-    reportError(rlErr, { site: 'serverAction.accept-invite.acceptTeamInvite' })
+  // public route gated only by a UUID token — rate limit by IP.
+  // onError: 'allow' — fails open on a Redis outage; a degraded limiter must
+  // never block a legitimate new team member finishing setup.
+  //
+  // A Server Action has no Request object, so the incoming headers are
+  // wrapped in one rather than re-implementing the x-forwarded-for parse
+  // inline — extractClientIp() is the single place that encodes "Vercel
+  // prepends the trusted client IP as the first entry".
+  const ip = extractClientIp(
+    new Request('https://fieldstay.local', { headers: await headers() })
+  ) ?? 'unknown'
+
+  const rateLimit = await checkLimit(inviteAcceptRatelimit, `accept-invite:${ip}`, {
+    onError: 'allow',
+    site:    'action.accept-invite',
+  })
+  if (!rateLimit.allowed) {
+    return { error: 'Too many attempts. Please try again in a few minutes.' }
   }
 
   const { token, fullName, password } = parsed.data

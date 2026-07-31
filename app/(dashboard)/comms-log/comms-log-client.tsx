@@ -294,8 +294,12 @@ function AddEntryModal({
 
           {/* Vendor / Crew toggle */}
           <div>
-            <label className="label">Recipient</label>
-            <div className="flex gap-2 mb-2">
+            {/* Labels a group of toggle buttons, not one control — a <label> with
+                htmlFor would have to point at whichever branch of the ternary
+                below happens to be rendered. role="group" + aria-labelledby is
+                the accurate construct. */}
+            <span className="label" id="comms-log-recipient-label">Recipient</span>
+            <div className="flex gap-2 mb-2" role="group" aria-labelledby="comms-log-recipient-label">
               {(['vendor', 'crew'] as const).map((t) => (
                 <button
                   key={t}

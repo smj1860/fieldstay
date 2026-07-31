@@ -2,19 +2,24 @@ import type { Metadata } from 'next'
 import { requireOrgMember } from '@/lib/auth'
 import { CrewManageClient } from './crew-manage-client'
 import type { CrewMember, CrewAvailabilityEntry } from '@/types/database'
+import { throwIfAnyQueryFailed } from '@/lib/supabase/unwrap'
 
 export const metadata: Metadata = { title: 'Crew' }
 
 export default async function CrewManagePage() {
   const { supabase, membership } = await requireOrgMember()
 
-  const { data: crew } = await supabase
+  const { data: crew, error: crewError } = await supabase
     .from('crew_members')
     .select('id, name, email, phone, preferred_contact, specialty, role, is_active, notes, user_id, invite_sent_at, invite_accepted_at')
     .eq('org_id', membership.org_id)
     .eq('is_active', true)
     .order('name')
 
+
+  // Logs + reports, then throws so the segment's error.tsx renders a real
+  // error state — a failed read must not render as an empty page.
+  throwIfAnyQueryFailed({ site: 'page.crew-manage', orgId: membership.org_id }, crewError)
   // Cover current month + next month for the calendar overview
   const now        = new Date()
   const calStart   = new Date(now.getFullYear(), now.getMonth(), 1)
@@ -22,7 +27,7 @@ export default async function CrewManagePage() {
   const rangeStart = calStart.toISOString().split('T')[0]!
   const rangeEnd   = calEnd.toISOString().split('T')[0]!
 
-  const { data: availabilityRows } = await supabase
+  const { data: availabilityRows, error: availabilityRowsError } = await supabase
     .from('crew_availability')
     .select('crew_member_id, available_date, is_available, notes')
     .eq('org_id', membership.org_id)
@@ -30,6 +35,10 @@ export default async function CrewManagePage() {
     .lte('available_date', rangeEnd)
     .order('available_date', { ascending: true })
 
+
+  // Logs + reports, then throws so the segment's error.tsx renders a real
+  // error state — a failed read must not render as an empty page.
+  throwIfAnyQueryFailed({ site: 'page.crew-manage', orgId: membership.org_id }, availabilityRowsError)
   // Build a lookup map: crew_member_id → sorted list of availability entries
   const availabilityMap: Record<string, CrewAvailabilityEntry[]> = {}
   for (const row of availabilityRows ?? []) {

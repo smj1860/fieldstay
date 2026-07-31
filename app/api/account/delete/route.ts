@@ -3,7 +3,7 @@ import { cookies }                   from 'next/headers'
 import { createServerClient }        from '@supabase/ssr'
 import { Ratelimit }                 from '@upstash/ratelimit'
 import { createServiceClient }       from '@/lib/supabase/server'
-import { redis }                     from '@/lib/rate-limit'
+import { redis, checkLimit }         from '@/lib/rate-limit'
 import { logAuditEvents }            from '@/lib/audit'
 import { revokeIntegrationToken }    from '@/lib/integrations/vault'
 import { stripe }                    from '@/lib/stripe/client'
@@ -68,23 +68,17 @@ const accountDeleteRatelimit = new Ratelimit({
   prefix:    'rl:account-delete',
 })
 
-const upstashConfigured = () =>
-  !!process.env.upstash_fieldstay_KV_REST_API_URL &&
-  !!process.env.upstash_fieldstay_KV_REST_API_TOKEN
-
-/** Fails OPEN on a Redis outage — an infra blip must not strand a user who
- *  is legitimately trying to delete their account (a GDPR obligation). The
- *  password re-auth below is the real gate; this is defence in depth. */
+/** Fails OPEN on a Redis outage (onError: 'allow') — an infra blip must not
+ *  strand a user who is legitimately trying to delete their account (a GDPR
+ *  obligation). The password re-auth below is the real gate; this is defence
+ *  in depth. checkLimit() also short-circuits when Upstash is unconfigured,
+ *  so no environment pays @upstash/redis's internal retry here. */
 async function isRateLimited(userId: string): Promise<boolean> {
-  if (!upstashConfigured()) return false
-  try {
-    const { success } = await accountDeleteRatelimit.limit(`account-delete:${userId}`)
-    return !success
-  } catch (err) {
-    console.error('[account/delete] rate limit check failed', err)
-    reportError(err, { site: 'route.account.delete.rate_limit' })
-    return false
-  }
+  const decision = await checkLimit(accountDeleteRatelimit, `account-delete:${userId}`, {
+    onError: 'allow',
+    site:    'route.account.delete.DELETE',
+  })
+  return !decision.allowed
 }
 
 /**

@@ -2,6 +2,7 @@ import { requireOrgMember } from '@/lib/auth'
 import { TurnoverBoard } from './turnover-board'
 import { unwrapJoin } from '@/lib/utils/supabase-joins'
 import type { Metadata } from 'next'
+import { throwIfAnyQueryFailed } from '@/lib/supabase/unwrap'
 
 export const metadata: Metadata = { title: 'Turnovers' }
 
@@ -18,12 +19,12 @@ export default async function TurnoversPage() {
   const rangeEnd   = until.toISOString().split('T')[0]!
 
   const [
-    { data: turnovers },
-    { data: properties },
-    { data: bookings },
-    { data: crew },
-    { data: crewAvailability },
-    { data: org },
+    { data: turnovers, error: turnoversError },
+    { data: properties, error: propertiesError },
+    { data: bookings, error: bookingsError },
+    { data: crew, error: crewError },
+    { data: crewAvailability, error: crewAvailabilityError },
+    { data: org, error: orgError },
   ] = await Promise.all([
     supabase
       .from('turnovers')
@@ -74,6 +75,10 @@ export default async function TurnoversPage() {
       .eq('id', membership.org_id)
       .single(),
   ])
+
+  // Logs + reports every failure, then throws so the segment's error.tsx
+  // renders a real error state — an outage must not look like empty data.
+  throwIfAnyQueryFailed({ site: 'page.turnovers', orgId: membership.org_id }, turnoversError, propertiesError, bookingsError, crewError, crewAvailabilityError, orgError)
 
   const propertyMap = Object.fromEntries(
     (properties ?? []).map((p) => [p.id, p])

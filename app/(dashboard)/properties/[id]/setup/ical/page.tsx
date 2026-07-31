@@ -2,6 +2,7 @@ import { requireProperty } from '@/lib/auth'
 import { IcalManager } from './ical-form'
 import { Card } from '@/components/ui/Card'
 import type { Metadata } from 'next'
+import { throwIfAnyQueryFailed } from '@/lib/supabase/unwrap'
 
 export const metadata: Metadata = { title: 'Calendar Feeds' }
 
@@ -11,12 +12,16 @@ export default async function IcalPage({ params }: Props) {
   const { id } = await params
   const { property, supabase } = await requireProperty(id)
 
-  const { data: feeds } = await supabase
+  const { data: feeds, error: feedsError } = await supabase
     .from('ical_feeds')
     .select('*')
     .eq('property_id', property.id)
     .order('created_at')
 
+
+  // Logs + reports, then throws so the segment's error.tsx renders a real
+  // error state — a failed read must not render as an empty page.
+  throwIfAnyQueryFailed({ site: 'page.properties.id.setup.ical' }, feedsError)
   return (
     <Card>
       <h2 className="text-lg font-semibold text-primary-themed mb-1">Calendar Feeds</h2>

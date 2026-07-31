@@ -2,12 +2,13 @@ import { requireOrgMember } from '@/lib/auth'
 import { createServiceClient } from '@/lib/supabase/server'
 import { markStepComplete } from '../actions'
 import { PowerUpsStep } from './power-ups-step'
+import { throwIfAnyQueryFailed } from '@/lib/supabase/unwrap'
 
 export default async function PowerUpsPage() {
   const { membership } = await requireOrgMember()
 
   const admin = createServiceClient({ authorizedBy: membership })
-  const { data: krogerConnection } = await admin
+  const { data: krogerConnection, error: krogerConnectionError } = await admin
     .from('integration_connections')
     .select('id')
     .eq('org_id', membership.org_id)
@@ -15,6 +16,10 @@ export default async function PowerUpsPage() {
     .eq('status', 'active')
     .maybeSingle()
 
+
+  // Logs + reports, then throws so the segment's error.tsx renders a real
+  // error state — a failed read must not render as an empty page.
+  throwIfAnyQueryFailed({ site: 'page.setup.power-ups', orgId: membership.org_id }, krogerConnectionError)
   async function finishAction() {
     'use server'
     await markStepComplete('power_ups', '/ops')
