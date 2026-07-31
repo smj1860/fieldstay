@@ -42,7 +42,6 @@ import {
 type Resp = { data?: unknown; error?: unknown }
 
 function makeSupabase(queue: Record<string, Resp[]>) {
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars -- args captured for path assertions
   const uploadMock = vi.fn(async (_path: string, _file: unknown, _opts?: unknown) => ({ error: null }))
   const from = vi.fn((table: string) => {
     const q = queue[table]
