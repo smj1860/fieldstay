@@ -469,3 +469,133 @@ these findings are mechanically checkable and would have been caught:
 Also worth adding: no direct `organization_members` query outside `lib/auth*`
 and `lib/inngest/helpers.ts`, and every webhook route that inserts a dedup row
 must delete it in a catch.
+
+---
+
+# Remediation status — 2026-07-31
+
+Appended after the remediation pass on branch
+`claude/saas-pre-launch-audit-5bo59d` (14 commits, 272 files, +21.6k/-5.3k).
+Written to be accurate rather than reassuring: the section below distinguishes
+*written* from *applied*, and *fixed* from *deferred*.
+
+## Updated verdict: **still NOT launch-ready — B1 and B2 remain OPEN in production**
+
+Every launch blocker now has a fix in the repository. **Two of them are SQL
+migrations that have not been applied to `vpmznjktllhmmbfnxuvk`.** Until
+`supabase db push` runs against that project, the live database is byte-for-byte
+what the audit described, and:
+
+- **B1 (privilege escalation) is OPEN in production.** Any authenticated user
+  holding any org UUID can still make themselves `owner` of that org.
+- **B2 (compliance-document exposure) is OPEN in production.** Every tenant's
+  vendor COIs, W-9s, licenses and bonding certificates are still readable,
+  overwritable, and deletable by any authenticated user of any tenant.
+
+A merged PR does not close either one. Applying the migrations does. Treat this
+section's verdict as unchanged until that has happened and
+`scripts/check-db-invariants.mjs` has been re-run against the live project.
+
+### Migrations written, NOT yet applied
+
+Seventeen new files in `supabase/migrations/` (`20260730100000` …
+`20260730700000`), including the two blocker fixes:
+
+| Migration | Closes |
+|---|---|
+| `20260730100000_drop_org_members_insert_self_privilege_escalation.sql` | **B1** |
+| `20260730101000_compliance_docs_storage_policies_org_scoped.sql` | **B2** |
+| `20260730103000_work_order_turnover_photo_storage_policies.sql` | H2 (client uploads denied) |
+| `20260730104000_grant_authenticated_and_drop_dead_policies.sql` | H1 (nine tables dark, incl. the notification bell) |
+| `20260730300000_purge_orphaned_organizations.sql` | the 2 live orphan orgs / 20 retained guest PII records from B3 |
+
+The remaining twelve cover FK `ON DELETE` corrections, `org_id` FKs, index
+hygiene, the `vendor_compliance_status` active-doc filter, viewer-writable
+policy tightening, aggregate RPCs, Connect token expiry, the property plan
+limit, and the private-photo-bucket conversion.
+
+**Two consequences of the not-yet-applied state, both easy to mistake for a
+pass:**
+
+1. `types/database.ts` and the code now describe post-migration schema. Any
+   code path depending on a new column, RPC, or policy will fail against the
+   live DB until the push lands.
+2. The `db-invariants` CI job checks the **E2E** project. Green there says
+   nothing about production; the same migrations must be applied to both.
+
+## Fixed in code (verified against source, not assumed)
+
+- **B3 — account deletion orphaning.** `app/api/account/delete/route.ts` now
+  deletes the `organizations` row explicitly, with an enumerated list of
+  org-scoped tables that lack a cascading FK cleared first, and the three
+  previously-discarded errors on the destructive path checked. The two existing
+  orphan orgs are purged by `20260730300000` (**not yet applied** — the 20 guest
+  PII records are still retained today).
+- **B4 — crew offline durability.** `SyncEngine` and `photo-sync` both gate on
+  `isOnline()`; a transport failure increments a separate `networkRetryCount`
+  and can never dead-letter; failures back off; a permanently-failed row is kept
+  with its blob and surfaced in `app/crew/_components/failed-sync-banner.tsx`
+  with a retry. Covered by `unit/dexie/photo-sync-durability.test.ts` and
+  `sync-outbox-durability.test.ts`.
+- **B4c — `completed_at` NULLing.** Every field in the Dexie upload builders is
+  now gated on `'x' in payload`; enforced by
+  `unit/guardrails/upload-payload-null-fields.test.ts`.
+- **The `max_rows = 1000` systemic finding.** `lib/inngest/paginate.ts`
+  (`fetchAllRows`, `fetchDistinctOrgIds`) plus aggregate RPCs replaced the
+  unbounded platform-wide scans; `unit/guardrails/unbounded-select.test.ts` is a
+  shrink-only clean-baseline ratchet over `lib/inngest/**`.
+- **Silent failures.** `lib/supabase/unwrap.ts` separates "query errored" from
+  "zero rows"; retrofitted across the dashboard read paths and backstopped by
+  `supabase-error-handling` / `error-reporting-coverage`.
+- **Shared helpers replacing open-coded drift.** `checkLimit` (fail policy is
+  now explicit per call site), `assertSafeExternalUrl`/`safeFetch` (SSRF,
+  including redirect re-validation), `lib/http/timeout.ts` budgets on every
+  outbound fetch, `getPmMembersByOrgIds` for the N+1.
+- **Boot-time env validation.** `lib/env.ts` tiers every server-read variable
+  and `instrumentation.ts#register()` refuses to boot a misconfigured
+  production deploy, naming every offending variable at once. This is what turns
+  a missing `STRIPE_PRICE_*` back into a deploy failure instead of an opaque
+  Stripe error at checkout. `next build` prints instead of throwing (CI builds
+  hold no secrets), and preview/dev warn rather than erroring so a fresh
+  checkout still runs.
+- **The enforcement layer's own gate.** `pnpm run lint` carries
+  `--max-warnings`, and `unit/guardrails/ci-gating.test.ts` fails locally if the
+  flag is dropped, if a `checks` step disappears, if any step becomes
+  `continue-on-error`, or if either install-free `db-invariants` script grows a
+  bare-specifier import.
+
+All five "suggested new guardrails" from the original report now exist, plus ten
+more — see CLAUDE.md → Structural Enforcement.
+
+## Deliberately deferred (and why)
+
+- **Applying the migrations.** Out of scope for a code branch: it is a
+  production DB operation that must be sequenced with the deploy, not with a
+  merge. This is the single remaining blocker-class item.
+- **`NEXT_PUBLIC_CREW_SYNC_V2` still defaults off.** The audit noted the
+  `crew-sync-coverage` guardrail's premise holds only under v2, and that the v1
+  path has no safety poll. Flipping a rollout flag is a launch decision with its
+  own verification, not a remediation edit.
+- **Login/signup rate limiting.** Those four endpoints call GoTrue directly from
+  the browser; there is no server-side path in this repo for our limiter to
+  attach to. Documented in CLAUDE.md's manual-audit checklist rather than
+  papered over.
+- **FK `ON DELETE` beyond the corrections in `20260730107000`.** "Was the
+  default deliberate?" is not answerable from SQL; the remaining review stays
+  manual.
+- **The `--max-warnings` ratchet is a freeze, not a cleanup.** 240 → ~208
+  warnings; the sonarjs rules stay `warn` until the backlog clears. The ratchet
+  stops it growing, which was the actual finding.
+- **`docs/` narrative updates** beyond CLAUDE.md — deferred as documentation
+  churn with no correctness impact.
+
+## What to verify before calling this closed
+
+1. `supabase db push` against `vpmznjktllhmmbfnxuvk`; confirm all seventeen
+   migrations land.
+2. Re-run `node scripts/check-db-invariants.mjs` and
+   `node scripts/check-type-drift.mjs` against the live project — not just E2E.
+3. Confirm `org_members_insert_self` is gone and the three `compliance_docs_*`
+   policies are org-scoped, by querying `pg_policies` directly. Both were
+   untracked dashboard drift; only a live query proves they changed.
+4. Confirm the orphan-org purge ran (zero `organizations` rows with no members).

@@ -80,12 +80,17 @@ function makeLogger() {
 function makeStep() {
   return {
     run:       vi.fn((_name: string, cb: () => unknown) => cb()),
-    sendEvent: vi.fn(async (_name: string, _payload?: unknown) => undefined),
+    sendEvent: vi.fn(async () => undefined),
   }
 }
 
 function makeSupabase(queued: Record<string, TableSpec>) {
   return createSupabaseDouble(queued)
+}
+
+/** The (name, payload) pair a `step.sendEvent` spy recorded for call `index`. */
+function sentEvent<T>(step: { sendEvent: { mock: { calls: unknown[] } } }, index = 0): [string, T] {
+  return step.sendEvent.mock.calls[index] as unknown as [string, T]
 }
 
 /** A fetch Response shaped enough for safeFetch (status + headers + text). */
@@ -187,7 +192,7 @@ describe('syncAllIcalFeeds (dispatcher)', () => {
     })
 
     expect(result).toEqual({ dispatched: 2_400 })
-    const dispatched = step.sendEvent.mock.calls[0]![1] as { data: { org_id: string } }[]
+    const [, dispatched] = sentEvent<{ data: { org_id: string } }[]>(step)
     expect(dispatched.at(-1)!.data.org_id).toBe('org_2399')
     expect(supabase.calls.filter((c) => c.method === 'range').map((c) => c.args)).toEqual([
       [0, 999], [1000, 1999], [2000, 2999],
@@ -286,7 +291,7 @@ describe('syncOrgIcalFeeds (per-org fan-out)', () => {
     })
 
     expect(result).toEqual({ synced: 1_300 })
-    const dispatched = step.sendEvent.mock.calls[0]![1] as { data: { feed_id: string } }[]
+    const [, dispatched] = sentEvent<{ data: { feed_id: string } }[]>(step)
     expect(dispatched).toHaveLength(1_300)
     expect(dispatched.at(-1)!.data.feed_id).toBe('feed_1299')
   })
