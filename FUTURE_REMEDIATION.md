@@ -646,3 +646,63 @@ follow-up):**
    ~103 call sites once genuine typing kicks in on queries that have been
    running loose; budget time for that cleanup as part of the same PR
    rather than treating it as a surprise scope increase partway through.
+
+---
+
+## 17. 49 more `jsx-a11y/label-has-associated-control` violations across 11 files
+
+Found while fixing the 7 in `turnovers/turnover-board.tsx` (now resolved —
+each `<label>` there was a sibling of its control with no `htmlFor`/`id`
+link, so screen readers announced the field with no name, and clicking the
+label text didn't focus the control). Same rule already runs repo-wide on
+every `npm run lint` (`eslint .`) at `warn` severity as part of the jsx-a11y
+rollout described in CLAUDE.md's Code Quality Standards — this is the full
+list of what it's still catching, pulled via:
+
+```bash
+npx eslint . --format json 2>/dev/null | node -e "
+const data = JSON.parse(require('fs').readFileSync(0, 'utf8'));
+for (const f of data) {
+  const n = f.messages.filter(m => m.ruleId === 'jsx-a11y/label-has-associated-control').length;
+  if (n) console.log(n, f.filePath);
+}
+"
+```
+
+**File-by-file breakdown (56 total found 2026-07-31, 7 already fixed in
+`turnover-board.tsx`, 49 remaining):**
+
+| Count | File |
+|---|---|
+| 11 | `app/(dashboard)/maintenance/maintenance-board.tsx` |
+| 10 | `app/(dashboard)/vendors/vendors-client.tsx` |
+| 7  | `app/(dashboard)/comms-log/comms-log-client.tsx` |
+| 6  | `app/(dashboard)/bookings/bookings-client.tsx` |
+| 4  | `app/(dashboard)/reviews/reviews-client.tsx` |
+| 3  | `app/(dashboard)/settings/settings-tabs.tsx` |
+| 2  | `app/(dashboard)/maintenance/CreateWorkOrderModal.tsx` |
+| 2  | `components/property/PropertyMaintenanceManager.tsx` |
+| 2  | `components/work-orders/VendorDispatchDialog.tsx` |
+| 1  | `app/(dashboard)/properties/clone-property-modal.tsx` |
+| 1  | `app/(dashboard)/templates/maintenance/create/create-template-builder.tsx` |
+
+Note `settings-tabs.tsx` includes 2 flagged as "A form label must have
+accessible text" (lines 629, 661) rather than the more common "must be
+associated with a control" message — same underlying rule, worth checking
+those two aren't a genuinely empty `<label>` rather than just a missing
+`htmlFor`/`id` pair before applying the same mechanical fix.
+
+**Suggested fix:** same mechanical pattern as `turnover-board.tsx` — add a
+matching `id`/`htmlFor` pair to each label/control. Watch for the same
+uniqueness trap that came up there: any label/control pair that renders
+inside a list item (a row per turnover, vendor, work order, etc.) needs an
+id keyed off that row's own id (e.g. `` `field-name-${row.id}` ``), not a
+static string, or multiple simultaneously-rendered rows collide on the
+same DOM id. A static id is only safe for a form that has at most one
+mounted instance at a time (a modal, a single settings panel).
+
+Not done in this pass because it's real, multi-file work rather than a
+one-line change — 11 files' worth of JSX to individually verify (which
+control each label is meant to pair with, and whether that control is
+inside a list needing a per-row id) is enough surface area to warrant its
+own pass rather than folding it into an unrelated PR.

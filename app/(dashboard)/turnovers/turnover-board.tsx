@@ -510,8 +510,9 @@ function TurnoverCard({
           {/* Flag notes input */}
           {showFlagInput && (
             <div className="space-y-2">
-              <label className="text-xs font-medium text-secondary-themed">What needs attention?</label>
+              <label htmlFor={`flag-notes-${turnover.id}`} className="text-xs font-medium text-secondary-themed">What needs attention?</label>
               <textarea
+                id={`flag-notes-${turnover.id}`}
                 value={flagNotes}
                 onChange={(e) => setFlagNotes(e.target.value)}
                 rows={2}
@@ -737,8 +738,8 @@ function AddTurnoverModal({
 
       <form id="add-turnover-form" action={async (fd) => { await action(fd); if (!state?.error) onClose() }} className="space-y-4">
         <div>
-          <label className="label">Property</label>
-          <select name="property_id" required className="input">
+          <label htmlFor="add-turnover-property" className="label">Property</label>
+          <select id="add-turnover-property" name="property_id" required className="input">
             <option value="">Select property…</option>
             {properties.map((p) => (
               <option key={p.id} value={p.id}>{p.name}</option>
@@ -747,27 +748,27 @@ function AddTurnoverModal({
         </div>
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
           <div>
-            <label className="label">Checkout Date</label>
-            <Input name="checkout_date" type="date" required />
+            <label htmlFor="add-turnover-checkout-date" className="label">Checkout Date</label>
+            <Input id="add-turnover-checkout-date" name="checkout_date" type="date" required />
           </div>
           <div>
-            <label className="label">Checkout Time</label>
-            <Input name="checkout_time" type="time" defaultValue="11:00" />
+            <label htmlFor="add-turnover-checkout-time" className="label">Checkout Time</label>
+            <Input id="add-turnover-checkout-time" name="checkout_time" type="time" defaultValue="11:00" />
           </div>
         </div>
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
           <div>
-            <label className="label">Next Check-in Date</label>
-            <Input name="checkin_date" type="date" required />
+            <label htmlFor="add-turnover-checkin-date" className="label">Next Check-in Date</label>
+            <Input id="add-turnover-checkin-date" name="checkin_date" type="date" required />
           </div>
           <div>
-            <label className="label">Check-in Time</label>
-            <Input name="checkin_time" type="time" defaultValue="15:00" />
+            <label htmlFor="add-turnover-checkin-time" className="label">Check-in Time</label>
+            <Input id="add-turnover-checkin-time" name="checkin_time" type="time" defaultValue="15:00" />
           </div>
         </div>
         <div>
-          <label className="label">Notes (optional)</label>
-          <textarea name="notes" rows={2} className="input resize-none" placeholder="Any special instructions…" />
+          <label htmlFor="add-turnover-notes" className="label">Notes (optional)</label>
+          <textarea id="add-turnover-notes" name="notes" rows={2} className="input resize-none" placeholder="Any special instructions…" />
         </div>
       </form>
     </Dialog>
