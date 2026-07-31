@@ -215,6 +215,7 @@ function CrewAssignment({
     <div
       className="flex items-center gap-1.5 flex-wrap"
       onClick={e => e.stopPropagation()}
+      onKeyDown={e => e.stopPropagation()}
     >
       {assignedCrew.map(c => (
         <span
@@ -448,7 +449,6 @@ function TurnoverCard({
             <div
               className="mt-2 flex items-center gap-2 flex-wrap px-3 py-2 rounded-lg"
               style={{ background: 'rgba(59,130,246,0.08)', border: '1px solid rgba(59,130,246,0.2)' }}
-              onClick={(e) => e.stopPropagation()}
             >
               <span className="text-xs inline-flex items-center gap-1" style={{ color: 'var(--text-secondary)' }}>
                 <Sparkles className="w-3.5 h-3.5 flex-shrink-0" />
