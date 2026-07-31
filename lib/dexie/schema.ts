@@ -372,7 +372,72 @@ export const LOCAL_ONLY_TABLES = ['pending_photo_uploads', 'mutations', 'sync_me
 let db: FieldStayDexie | null = null
 let dbUserId: string | null = null
 
+// ── Post-logout shutdown latch ────────────────────────────────────────────
+//
+// closeDexieDb() deletes the signed-out user's IndexedDB, but deleting it is
+// not the same as keeping it deleted. Logout races every drain and sync path
+// in the crew PWA: an `online` event (which the logout flow itself provokes —
+// crew members confirm "Log Out Anyway" the moment connectivity returns), the
+// 30 s outbox interval, the DexieProvider safety poll, and any drain already
+// mid-await when the delete landed. Every one of those ends at
+// getDexieDb(userId), which used to construct a fresh FieldStayDexie and let
+// Dexie auto-open it — silently RE-CREATING the database that was just wiped
+// and leaving the signed-out user's data on a shared device. That is exactly
+// what e2e/specs/22-crew-logout-guard.spec.ts asserts against.
+//
+// The latch makes re-opening structurally impossible rather than a matter of
+// stopping every caller in time: once a user id is marked shut down,
+// getDexieDb() hands back a permanently CLOSED Dexie handle (below). Dexie
+// clears autoOpen on close(), so a handle closed before it was ever opened
+// never touches IndexedDB at all — every operation on it rejects with
+// DatabaseClosedError, which is the same failure the existing callers already
+// handle after a plain close(), and no storage is created.
+//
+// It is a latch, not a permanent kill: resumeDexieDb() clears it when a
+// session for that user starts again in the same document (see DexieProvider),
+// so logging back in on the same tab works normally.
+const shutdownUserIds = new Set<string>()
+
+let tombstone: FieldStayDexie | null = null
+let tombstoneUserId: string | null = null
+
+/** True once this user's local database has been torn down by logout. */
+export function isDexieShutdown(userId: string): boolean {
+  return shutdownUserIds.has(userId)
+}
+
+/**
+ * Marks the user's local database as shutting down. MUST be called before
+ * closeDexieDb() — anything that reaches getDexieDb() after this point gets a
+ * closed handle instead of a freshly re-created database.
+ */
+export function markDexieShutdown(userId: string): void {
+  shutdownUserIds.add(userId)
+}
+
+/** Clears the latch so a new session for this user in the same document works. */
+export function resumeDexieDb(userId: string): void {
+  shutdownUserIds.delete(userId)
+  if (tombstoneUserId === userId) {
+    tombstone = null
+    tombstoneUserId = null
+  }
+}
+
+function shutdownHandle(userId: string): FieldStayDexie {
+  if (!tombstone || tombstoneUserId !== userId) {
+    tombstoneUserId = userId
+    const handle = new FieldStayDexie(userId)
+    // Closed before it is ever opened: Dexie sets autoOpen = false here, so no
+    // subsequent operation can open (and therefore create) the IndexedDB.
+    handle.close()
+    tombstone = handle
+  }
+  return tombstone
+}
+
 export function getDexieDb(userId: string): FieldStayDexie {
+  if (shutdownUserIds.has(userId)) return shutdownHandle(userId)
   if (!db || dbUserId !== userId) {
     if (db) db.close()
     dbUserId = userId
@@ -385,6 +450,10 @@ export async function closeDexieDb(): Promise<void> {
   if (db) {
     const dbName = db.name
     const formerUserId = dbUserId
+    // Latch first, synchronously, before the first await: a drain resumed by
+    // the microtask queue between here and the delete below must not be able
+    // to re-open what we are about to delete.
+    if (formerUserId) markDexieShutdown(formerUserId)
     db.close()
     db = null
     dbUserId = null

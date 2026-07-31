@@ -77,6 +77,7 @@
     "eslint": "^9.16.0",
     "eslint-config-next": "^16.2.9",
     "eslint-plugin-sonarjs": "^4.2.0",
+    "fake-indexeddb": "^6.2.5",
     "jsdom": "^29.1.1",
     "postcss": "^8.5.10",
     "supabase": "^2.108.0",

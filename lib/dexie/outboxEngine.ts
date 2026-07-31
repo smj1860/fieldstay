@@ -47,6 +47,7 @@ export interface OutboxConfig<TMutation extends BaseMutationRow> {
  */
 export class OutboxEngine<TMutation extends BaseMutationRow> {
   private isProcessing = false
+  private disposed = false
   private retryTimer: ReturnType<typeof setTimeout> | null = null
 
   constructor(
@@ -56,14 +57,22 @@ export class OutboxEngine<TMutation extends BaseMutationRow> {
 
   private scheduleRetry(nextAttemptAt: number): void {
     if (this.retryTimer !== null) clearTimeout(this.retryTimer)
+    if (this.disposed) return
     this.retryTimer = setTimeout(() => {
       this.retryTimer = null
+      if (this.disposed) return
       void this.processOutbox()
     }, Math.max(0, nextAttemptAt - Date.now()))
   }
 
-  /** Stops any pending retry timer — call before deleting the database. */
+  /**
+   * Permanently stops this engine — call BEFORE deleting the database it
+   * drains. Disposal is a latch, not just a timer cancel: a drain already
+   * mid-await, or a retry scheduled by one, would otherwise re-open the
+   * storage that was just deleted.
+   */
   dispose(): void {
+    this.disposed = true
     if (this.retryTimer !== null) {
       clearTimeout(this.retryTimer)
       this.retryTimer = null
@@ -81,31 +90,50 @@ export class OutboxEngine<TMutation extends BaseMutationRow> {
     return this.table.update(id, changes as unknown as UpdateSpec<TMutation>)
   }
 
-  async processOutbox(): Promise<void> {
-    if (this.isProcessing) return
+  /**
+   * `ignoreBackoff` is for a drain triggered by a signal that INVALIDATES the
+   * reason the backoff exists: connectivity returning, or the user explicitly
+   * asking to retry now. The backoff spaces out attempts made into a network
+   * that just failed; once the device is demonstrably back on the network,
+   * continuing to wait it out is not caution, it's latency.
+   *
+   * It is also load-bearing for correctness of the UI, not just speed: the
+   * caller of a reconnect drain reads the mutation's state as soon as the
+   * returned promise resolves, to show "queued" vs. "dead-lettered". A drain
+   * that stops at the backoff gate resolves having done nothing, so a
+   * submission the server would have terminally rejected reports as still
+   * queued, and the eventual timer-driven dead-letter — happening in the
+   * background with no one listening — never reaches the screen at all.
+   */
+  async processOutbox(options: { ignoreBackoff?: boolean } = {}): Promise<void> {
+    if (this.isProcessing || this.disposed) return
     this.isProcessing = true
     try {
-      await withTabLock(this.config.lockName ?? 'fieldstay-outbox', () => this.drain())
+      await withTabLock(
+        this.config.lockName ?? 'fieldstay-outbox',
+        () => this.drain(options.ignoreBackoff ?? false),
+      )
     } finally {
       this.isProcessing = false
     }
   }
 
-  private async drain(): Promise<void> {
+  private async drain(ignoreBackoff: boolean): Promise<void> {
     // Offline: an attempt that can't physically be made is not a failed
     // attempt and must never consume the retry budget.
-    if (!isOnline()) return
+    if (!isOnline() || this.disposed) return
 
     const pending = (await this.table.orderBy('id').toArray()).filter((m) => !m.failed)
 
     for (const mutation of pending) {
       const id = mutation.id as number
 
-      if (mutation.nextAttemptAt !== undefined && mutation.nextAttemptAt > Date.now()) {
-        this.scheduleRetry(mutation.nextAttemptAt)
+      const notDueYet = mutation.nextAttemptAt !== undefined && mutation.nextAttemptAt > Date.now()
+      if (notDueYet && !ignoreBackoff) {
+        this.scheduleRetry(mutation.nextAttemptAt as number)
         return
       }
-      if (!isOnline()) return
+      if (!isOnline() || this.disposed) return
 
       try {
         await this.config.uploadOne(mutation)

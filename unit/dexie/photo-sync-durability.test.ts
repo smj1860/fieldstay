@@ -20,8 +20,9 @@ const PHOTO_PATH = `${ORG_ID}/turnover-1/item1.jpg`
 
 const holder = vi.hoisted(() => ({ db: null as unknown, blob: null as unknown }))
 
-vi.mock('@/lib/dexie/schema', () => ({ getDexieDb: () => holder.db }))
-vi.mock('./schema', () => ({ getDexieDb: () => holder.db }))
+// isDexieShutdown: the logout latch (lib/dexie/schema.ts) — never latched here.
+vi.mock('@/lib/dexie/schema', () => ({ getDexieDb: () => holder.db, isDexieShutdown: () => false }))
+vi.mock('./schema', () => ({ getDexieDb: () => holder.db, isDexieShutdown: () => false }))
 
 const deletedBlobs: string[] = []
 vi.mock('@/lib/dexie/photo-queue', () => ({

@@ -21,7 +21,7 @@
 //    while a retry affordance still points at it.
 
 import type { SupabaseClient } from '@supabase/supabase-js'
-import { getDexieDb, type PendingPhotoUploadRow } from './schema'
+import { getDexieDb, isDexieShutdown, type PendingPhotoUploadRow } from './schema'
 import { computeNextAttemptAt, enqueueMutation } from './syncService'
 import { getPendingPhotoBlob, deletePendingPhotoBlob } from './photo-queue'
 import { isOnline, withTabLock, classifyUploadFailure, UploadDataError } from './net'
@@ -237,6 +237,9 @@ export async function processPendingPhotoUploads(
   userId: string,
 ): Promise<void> {
   if (processing) return  // avoid overlapping runs (interval + 'online' event firing close together)
+  // This user signed out and their local database was deleted — an 'online'
+  // event or the 30 s interval must not drain (and thereby re-create) it.
+  if (isDexieShutdown(userId)) return
   processing = true
   try {
     await withTabLock(`fieldstay-crew-photos-${userId}`, () => drainPhotoQueue(supabase, userId))
@@ -248,7 +251,7 @@ export async function processPendingPhotoUploads(
 async function drainPhotoQueue(supabase: SupabaseClient, userId: string): Promise<void> {
   // Offline: attempting is pointless and, worse, used to burn the retry
   // budget for an attempt that never left the device.
-  if (!isOnline()) return
+  if (!isOnline() || isDexieShutdown(userId)) return
 
   const db = getDexieDb(userId)
   const now = Date.now()
@@ -257,7 +260,9 @@ async function drainPhotoQueue(supabase: SupabaseClient, userId: string): Promis
     .sort((a, b) => (a.created_at < b.created_at ? -1 : 1))
 
   for (const row of pending) {
-    if (!isOnline()) return
+    // Re-checked per iteration: logout can land while this loop is awaiting
+    // an upload (the in-flight case).
+    if (!isOnline() || isDexieShutdown(userId)) return
 
     if (ALLOWED_TARGETS[row.target_table] !== row.target_column) {
       console.error(`[photo-sync] Unexpected target ${row.target_table}.${row.target_column} — dropping`)

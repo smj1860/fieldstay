@@ -4,6 +4,8 @@ import { makeFakeDexieDb, makeFakeSupabase, type FakeDexieDb } from './fake-dexi
 const holder = vi.hoisted(() => ({ db: null as unknown }))
 vi.mock('@/lib/dexie/schema', () => ({
   getDexieDb: () => holder.db,
+  // Logout shutdown latch (lib/dexie/schema.ts) — never latched in these tests.
+  isDexieShutdown: () => false,
 }))
 
 import { syncWorkOrders } from '@/lib/dexie/sync/work-orders'

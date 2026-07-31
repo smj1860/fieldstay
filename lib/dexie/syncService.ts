@@ -1,5 +1,5 @@
 import { createClient } from '@/lib/supabase/client'
-import { getDexieDb, type MutationRow } from './schema'
+import { getDexieDb, isDexieShutdown, type FieldStayDexie, type MutationRow } from './schema'
 import {
   isOnline,
   withTabLock,
@@ -111,8 +111,21 @@ export class SyncEngine {
    * The drain is additionally a no-op while offline: an attempt that cannot
    * physically be made is not a failed attempt.
    */
+  /**
+   * True when this engine must not touch storage at all: it was disposed, or
+   * this user signed out and their local database was deleted. The second
+   * check is NOT redundant with `disposed` — disposeSyncEngine() drops the
+   * module-level engine, so any later getSyncEngine(userId) hands out a
+   * BRAND-NEW, undisposed engine. Without the shutdown latch, an `online`
+   * event or the 30 s interval firing after logout would drain through that
+   * fresh engine and re-create the database that was just wiped.
+   */
+  private stopped(): boolean {
+    return this.disposed || isDexieShutdown(this.userId)
+  }
+
   async processOutbox(): Promise<void> {
-    if (this.isProcessing || this.disposed) return
+    if (this.isProcessing || this.stopped()) return
     this.isProcessing = true
     try {
       await withTabLock(`fieldstay-crew-outbox-${this.userId}`, () => this.drain())
@@ -124,7 +137,7 @@ export class SyncEngine {
   private async drain(): Promise<void> {
     // Offline: do not attempt, and above all do not charge a retry for an
     // attempt that never left the device.
-    if (!isOnline() || this.disposed) return
+    if (!isOnline() || this.stopped()) return
 
     const db = getDexieDb(this.userId)
     const pending = (await db.mutations.orderBy('id').toArray()).filter((m) => !m.failed)
@@ -143,16 +156,34 @@ export class SyncEngine {
 
       // Connectivity can drop mid-drain — re-check before every push so the
       // remaining mutations aren't charged retries for a dead connection.
-      if (!isOnline() || this.disposed) return
+      // Also re-checked here for the in-flight case: logout can land while
+      // this loop is awaiting an upload, and the remaining iterations must
+      // not write to (or re-open) a database that no longer exists.
+      if (!isOnline() || this.stopped()) return
 
-      try {
-        await uploadOne(this.supabase, mutation)
-        // Successful push clears the whole row — nextAttemptAt with it.
-        await db.mutations.delete(id)
-      } catch (err) {
-        const stop = await this.handleFailure(mutation, id, err)
-        if (stop) return
-      }
+      if (await this.pushOne(db, mutation, id) === 'stop') return
+    }
+  }
+
+  /**
+   * Pushes one mutation and records the outcome. Returns 'stop' when the drain
+   * must not continue — either to preserve per-record ordering, or because
+   * this user signed out mid-push and their local database is gone.
+   */
+  private async pushOne(db: FieldStayDexie, mutation: MutationRow, id: number): Promise<'continue' | 'stop'> {
+    try {
+      await uploadOne(this.supabase, mutation)
+      // Signing out while this push was in flight deletes the outbox
+      // underneath us. Bail before touching storage: bookkeeping for a
+      // signed-out user has nothing to write to, and going ahead would ask
+      // getDexieDb() for a database that no longer exists.
+      if (this.stopped()) return 'stop'
+      // Successful push clears the whole row — nextAttemptAt with it.
+      await db.mutations.delete(id)
+      return 'continue'
+    } catch (err) {
+      if (this.stopped()) return 'stop'
+      return await this.handleFailure(mutation, id, err) ? 'stop' : 'continue'
     }
   }
 
@@ -634,6 +665,10 @@ export async function enqueueMutation(
   op: MutationRow['op'],
   payload: Record<string, unknown>,
 ): Promise<void> {
+  // Signed out: there is no longer a local database for this user, and
+  // queueing here would re-create one holding a signed-out user's work.
+  if (isDexieShutdown(userId)) return
+
   const db = getDexieDb(userId)
   await db.mutations.add({
     table,
