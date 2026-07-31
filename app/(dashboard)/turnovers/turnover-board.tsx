@@ -25,7 +25,7 @@ import {
 } from './actions'
 import { TurnoverGantt } from './turnover-gantt'
 import { NudgeBanner } from '@/components/nudge-banner'
-import { QuickFlagPanel } from './QuickFlagPanel'
+import { QuickFlagPanel, TurnoverOrgProvider } from './QuickFlagPanel'
 import { turnoverUrgencyTone, CARD_BORDER_CLASS, PRIORITY_INDICATOR_CLASS, windowUrgencyColor } from './turnover-urgency'
 import type { AssignedCrewMember } from '@/types/database'
 
@@ -910,6 +910,7 @@ export function TurnoverBoard({
   propertyMap,
   crewMembers,
   properties,
+  orgId,
   bookings = [],
   crewAvailability = [],
   showAutoAssignNudge = false,
@@ -918,6 +919,9 @@ export function TurnoverBoard({
   propertyMap: Record<string, Property>
   crewMembers: CrewMember[]
   properties: Property[]
+  // Only consumers today are the quick-flag photo paths, which must be
+  // `${org_id}/…` for the private turnover-photos bucket's RLS policies.
+  orgId: string
   bookings?: BookingRow[]
   crewAvailability?: CrewAvailabilityRow[]
   showAutoAssignNudge?: boolean
@@ -1019,6 +1023,7 @@ export function TurnoverBoard({
 
   return (
     <CrewAvailabilityContext.Provider value={availabilityMap}>
+      <TurnoverOrgProvider orgId={orgId}>
       {/* Conflict warning toast */}
       {assignmentWarning && (
         <div
@@ -1379,6 +1384,7 @@ export function TurnoverBoard({
           }}
         />
       )}
+      </TurnoverOrgProvider>
     </CrewAvailabilityContext.Provider>
   )
 }

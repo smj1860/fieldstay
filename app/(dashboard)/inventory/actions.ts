@@ -676,8 +676,30 @@ export async function triggerShoppingCart(
 ): Promise<{ success: boolean; error?: string }> {
   const { user, membership } = await requireOrgMember()
 
+  // Idempotency key for the SEND, not the cart contents.
+  //
+  // buildShoppingCart already makes duplicate Kroger cart additions
+  // impossible — concurrency { limit: 1, key: 'event.data.org_id' } serialises
+  // runs per org, and its step-6 claim is keyed on a content fingerprint of
+  // the exact cart. What neither of those stops is a second RUN existing at
+  // all: a double-clicked "Build Cart" produced two runs, the second of which
+  // no-ops on the cart and then still emails the PM a second "your cart is
+  // ready". This collapses the duplicate at the source.
+  //
+  // Bucketed to the minute rather than the day: Inngest's own event `id`
+  // dedup window is 24h, and a PM who fixes a par level and rebuilds five
+  // minutes later is doing something legitimate that must not be swallowed.
+  // A minute is far longer than any double-click and far shorter than any
+  // deliberate rebuild. Two clicks straddling a bucket boundary fall through
+  // to the fingerprint claim, which is the correctness guarantee — this is
+  // purely about not sending the same email twice.
+  const minuteBucket = Math.floor(Date.now() / 60_000)
+  const propertyScope = propertyIds?.length ? [...propertyIds].sort().join(',') : 'all'
+  const eventId = `cart-requested:${membership.org_id}:${user.id}:${modality}:${propertyScope}:${minuteBucket}`
+
   try {
     await inngest.send({
+      id:   eventId,
       name: 'inventory/cart_requested',
       data: {
         org_id:       membership.org_id,

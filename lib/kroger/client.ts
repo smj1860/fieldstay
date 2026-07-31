@@ -39,31 +39,35 @@ const KROGER_AUTH_BASE = 'https://api.kroger.com/v1/connect/oauth2'
 //   2. If Kroger 429s anyway, parse Retry-After and throw RateLimitError
 //      with that exact wait time.
 //
-// Fails OPEN if the limiter check itself errors (Redis unavailable) —
-// this is an abuse/external-quota limiter guarding Kroger's own rate
-// limit, not a spend-budget limiter (see
-// docs/SCALABILITY_TIERS_REMAINING.md item 4, which reserves fail-closed
-// behavior for money-spending paths only). Matches proxy.ts's
-// rateLimiterForPathname() convention: log and proceed rather than
-// blocking every Kroger call over an infrastructure outage.
+// Fails CLOSED if the limiter check itself errors (checkLimit's
+// onError: 'deny'). These are Kroger's own published DAILY quotas, i.e. an
+// external spend/quota ceiling rather than an inbound abuse throttle — and a
+// ceiling that disappears during a Redis outage is not a ceiling. Burning
+// through Kroger's 10,000/day Products budget while Redis is down would take
+// cart automation out for every tenant until the next daily reset, which is a
+// far worse outcome than deferring cart builds for the length of the outage.
+// Same fail-CLOSED stance as claimNudgeBudgetSlot's SMS spend ceiling
+// (CLAUDE.md), and the opposite of the abuse limiters in lib/rate-limit.ts /
+// proxy.ts, which deliberately fail open.
+//
+// checkLimit() also short-circuits entirely when Upstash is unconfigured, so
+// CI and preview deploys no longer pay @upstash/redis's ~4.3s internal retry
+// on every outbound Kroger call.
 async function krogerFetch(
   limiter:    Ratelimit,
   identifier: string,
   input:      string,
   init:       RequestInit,
 ): Promise<Response> {
-  try {
-    const { success, reset } = await limiter.limit(identifier)
-    if (!success) {
-      const retryAfterSeconds = Math.max(1, Math.ceil((reset - Date.now()) / 1000))
-      throw new RateLimitError(retryAfterSeconds)
-    }
-  } catch (err) {
-    if (err instanceof RateLimitError) throw err
-    // Redis unavailable or otherwise erroring — fail open. Don't block
-    // every Kroger call over an infrastructure issue on our side.
-    console.error('[Kroger] rate limit check failed — proceeding without it', err)
-    reportError(err, { site: 'lib.kroger.client.Kroger' })
+  const decision = await checkLimit(limiter, identifier, {
+    onError: 'deny',
+    site:    `lib.kroger.client.krogerFetch.${identifier}`,
+  })
+  if (!decision.allowed) {
+    // On an errored decision there is no real window to wait for (reset is
+    // Date.now()), and retryAfterSeconds would floor to 1s — back off a full
+    // minute instead so a Redis outage isn't hammered by immediate retries.
+    throw new RateLimitError(decision.errored ? 60 : retryAfterSeconds(decision))
   }
 
   // Every Kroger call funnels through here, so the timeout budget is applied

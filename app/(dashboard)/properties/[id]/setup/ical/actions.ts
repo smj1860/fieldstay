@@ -6,9 +6,39 @@ import { requireOrgMember } from '@/lib/auth'
 import { markStepComplete } from '@/app/(dashboard)/properties/actions'
 import { logAuditEvent } from '@/lib/audit'
 import { inngest } from '@/lib/inngest/client'
+import { assertSafeExternalUrl, UnsafeUrlError } from '@/lib/security/url-guard'
 
 import { reportError } from '@/lib/observability/report-error'
 export type IcalState = { error?: string; success?: boolean }
+
+/**
+ * Save-time SSRF validation for a PM-supplied calendar URL.
+ *
+ * lib/inngest/functions/ical-sync.ts already fetches through safeFetch(), so
+ * an unsafe feed can never actually be dereferenced — but that check only runs
+ * when the hourly cron next fires. Until then the PM sees a feed that looks
+ * saved and simply never syncs, with the reason buried in Inngest logs. Doing
+ * the same validation here turns that into an immediate, actionable form
+ * error.
+ *
+ * Deliberately uses assertSafeExternalUrl's DEFAULT protocol allowlist
+ * (https: only) — exactly what safeFetch enforces on every hop at sync time.
+ * Accepting http:// here would just move the rejection back to the cron, which
+ * is the failure mode this closes. It also replaces the old
+ * `url.startsWith('http')` check, which passed `httpfoo`, `http://127.0.0.1`,
+ * and every alternate-encoding loopback spelling.
+ *
+ * Returns an error string, or null when the URL is safe.
+ */
+async function validateFeedUrl(url: string): Promise<string | null> {
+  try {
+    await assertSafeExternalUrl(url)
+    return null
+  } catch (err) {
+    if (err instanceof UnsafeUrlError) return err.message
+    throw err
+  }
+}
 
 export async function addIcalFeed(
   propertyId: string,
@@ -24,7 +54,9 @@ export async function addIcalFeed(
 
     if (!name) return { error: 'Feed name is required' }
     if (!url)  return { error: 'Calendar URL is required' }
-    if (!url.startsWith('http')) return { error: 'Please enter a valid URL' }
+
+    const urlError = await validateFeedUrl(url)
+    if (urlError) return { error: urlError }
 
     const { data: property } = await supabase
       .from('properties')

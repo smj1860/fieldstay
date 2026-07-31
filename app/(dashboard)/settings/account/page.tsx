@@ -11,17 +11,30 @@ export default function AccountSettingsPage() {
   const router = useRouter()
   const [showModal, setShowModal]   = useState(false)
   const [confirm, setConfirm]       = useState('')
+  // Password re-authentication. /api/account/delete rejects the request with a
+  // 400 unless the body carries BOTH `confirm: 'DELETE'` and a non-empty
+  // `password` — a full account + organization wipe must not be reachable from
+  // a session cookie alone. This field is that second factor; without it every
+  // deletion attempt 400s before anything is checked.
+  const [password, setPassword]     = useState('')
   const [error, setError]           = useState<string | null>(null)
   const [pending, startTransition]  = useTransition()
 
+  const closeModal = () => {
+    setShowModal(false)
+    setConfirm('')
+    setPassword('')
+    setError(null)
+  }
+
   const handleDelete = () => {
-    if (confirm !== 'DELETE') return
+    if (confirm !== 'DELETE' || !password) return
     setError(null)
     startTransition(async () => {
       const res = await fetch('/api/account/delete', {
         method: 'DELETE',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ confirm: 'DELETE' }),
+        body: JSON.stringify({ confirm: 'DELETE', password }),
       })
       const data = await res.json()
       if (!res.ok) {
@@ -51,7 +64,7 @@ export default function AccountSettingsPage() {
 
       <Dialog
         open={showModal}
-        onClose={() => { setShowModal(false); setConfirm(''); setError(null) }}
+        onClose={closeModal}
         title="Delete Account"
         maxWidthClassName="max-w-md"
         footer={
@@ -59,14 +72,14 @@ export default function AccountSettingsPage() {
             <Button
               variant="danger"
               onClick={handleDelete}
-              disabled={confirm !== 'DELETE' || pending}
+              disabled={confirm !== 'DELETE' || !password || pending}
               className="flex-1"
             >
               {pending ? 'Deleting…' : 'Permanently Delete Account'}
             </Button>
             <Button
               variant="secondary"
-              onClick={() => { setShowModal(false); setConfirm(''); setError(null) }}
+              onClick={closeModal}
               className="flex-1"
             >
               Cancel
@@ -76,7 +89,8 @@ export default function AccountSettingsPage() {
       >
         <p className="text-sm text-muted-themed mb-4">
           This will permanently delete your account, cancel any active subscriptions, revoke all
-          integration tokens, and erase all your data. Type <strong>DELETE</strong> to confirm.
+          integration tokens, and erase all your data. Type <strong>DELETE</strong> and re-enter
+          your password to confirm.
         </p>
 
         {error && (
@@ -85,13 +99,30 @@ export default function AccountSettingsPage() {
           </InlineAlert>
         )}
 
+        <label htmlFor="delete-confirm" className="block text-sm mb-1" style={{ color: 'var(--text-primary)' }}>
+          Confirmation
+        </label>
         <Input
+          id="delete-confirm"
           type="text"
           value={confirm}
           onChange={(e) => setConfirm(e.target.value)}
           placeholder="Type DELETE to confirm"
           className="mb-4 w-full"
           autoComplete="off"
+        />
+
+        <label htmlFor="delete-password" className="block text-sm mb-1" style={{ color: 'var(--text-primary)' }}>
+          Password
+        </label>
+        <Input
+          id="delete-password"
+          type="password"
+          value={password}
+          onChange={(e) => setPassword(e.target.value)}
+          placeholder="Enter your password"
+          className="mb-4 w-full"
+          autoComplete="current-password"
         />
       </Dialog>
     </div>

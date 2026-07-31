@@ -105,6 +105,7 @@ export default async function TurnoversPage() {
         turnovers={normalizedTurnovers}
         propertyMap={propertyMap}
         crewMembers={crew ?? []}
+        orgId={membership.org_id}
         properties={properties ?? []}
         bookings={bookings ?? []}
         crewAvailability={crewAvailability ?? []}

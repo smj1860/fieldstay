@@ -6,6 +6,7 @@ import { createPmNotification } from '@/lib/inngest/helpers'
 import { isVendorHardBlocked } from '@/lib/vendors/compliance'
 import { unwrapJoin } from '@/lib/utils/supabase-joins'
 import { fetchAllRows, fetchDistinctOrgIds } from '@/lib/inngest/paginate'
+import { reportError } from '@/lib/observability/report-error'
 
 const AGING_DAYS = 7
 
@@ -276,8 +277,33 @@ export const workOrderOpsOrg = inngest.createFunction(
         // resolution — fall through as if the chain found no vendor so this
         // unattended cron never silently assigns someone 31+ days out of
         // compliance (see lib/vendors/compliance.ts).
-        if (vendorId && await isVendorHardBlocked(supabase, vendorId, schedule.org_id)) {
-          vendorId = null
+        //
+        // isVendorHardBlocked() now THROWS (VendorComplianceCheckError) when
+        // the compliance state cannot be established, rather than reporting
+        // "not blocked". Letting that propagate is fail-closed and safe, but
+        // it aborts this whole step.run — so an unrelated compliance-view blip
+        // would burn both Inngest retries and end with NO work order created
+        // for a schedule that is genuinely due. An unverifiable vendor is
+        // treated exactly like a hard-blocked one: unresolved. The WO is still
+        // created, just unassigned, and the vendor-suggestion flow picks it up
+        // (the PM notification below already says "no vendor assigned yet").
+        if (vendorId) {
+          try {
+            if (await isVendorHardBlocked(supabase, vendorId, schedule.org_id)) {
+              vendorId = null
+            }
+          } catch (err) {
+            logger.warn(
+              `Org ${orgId}: compliance check failed for vendor ${vendorId} on schedule ${schedule.id} — creating the WO unassigned`,
+              { error: err instanceof Error ? err.message : String(err) }
+            )
+            reportError(err, {
+              site:  'inngest.work-order-ops-org.auto-create-wo.compliance-check',
+              orgId: schedule.org_id,
+              extra: { vendor_id: vendorId, schedule_id: schedule.id },
+            })
+            vendorId = null
+          }
         }
 
         // vendor_specialty_hint values are a subset of WoCategory — the

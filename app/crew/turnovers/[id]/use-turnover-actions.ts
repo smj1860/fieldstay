@@ -12,6 +12,7 @@ import {
 import type { ChecklistInstanceItemRow as ChecklistItem, InventoryItemRow as InvRow, PropertyAssetRow } from '@/lib/dexie/schema'
 import { assetTypeDisplayName, missingAssetTypesFromDiscoveredSet } from '@/lib/asset-discovery/config'
 import type { AssetType } from '@/types/database'
+import { orgScopedStoragePath } from '@/lib/storage/object-path'
 
 import { reportError } from '@/lib/observability/report-error'
 function isAssetDiscovered(asset: Pick<PropertyAssetRow, 'make' | 'model' | 'is_na' | 'photo_url'>): boolean {
@@ -178,8 +179,20 @@ export function useTurnoverActions(id: string) {
     const file = e.target.files?.[0]
     if (!file) return
 
+    // The turnover-photos bucket is private and its RLS policies match on the
+    // FIRST path segment, so the org id has to be known before the photo can
+    // be queued at all — the crew's own turnover row carries it.
+    const orgId = turnover?.org_id
+    if (!orgId) {
+      setUploadError('Could not save section photo yet — this turnover is still loading. Please try again.')
+      setSectionPhotoPrompt(null)
+      e.target.value = ''
+      return
+    }
+
     const ext     = file.name.split('.').pop() ?? 'jpg'
-    const path    = `turnover-${id}/section-${sectionName.replace(/\s+/g, '-').toLowerCase()}-${Date.now()}.${ext}`
+    const slug    = sectionName.replace(/\s+/g, '-').toLowerCase()
+    const path    = orgScopedStoragePath(orgId, `turnover-${id}`, `section-${slug}-${Date.now()}.${ext}`)
     const blobKey = `photo-section-${sectionName}-${Date.now()}`
 
     try {
@@ -214,9 +227,16 @@ export function useTurnoverActions(id: string) {
   const handlePhotoCapture = async (itemId: string, file: File) => {
     setUploadingItemId(itemId)
     setUploadError(null)
+    // Same org-prefix requirement as handleSectionPhoto above.
+    const orgId = turnover?.org_id
+    if (!orgId) {
+      setUploadError('Could not save photo yet — this turnover is still loading. Please try again.')
+      setUploadingItemId(null)
+      return
+    }
     try {
       const ext     = file.name.split('.').pop() ?? 'jpg'
-      const path    = `turnover-${id}/${itemId}-${Date.now()}.${ext}`
+      const path    = orgScopedStoragePath(orgId, `turnover-${id}`, `${itemId}-${Date.now()}.${ext}`)
       const blobKey = `photo-${itemId}-${Date.now()}`
 
       const compressed = await compressPhotoForQueue(file)

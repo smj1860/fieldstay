@@ -25,6 +25,7 @@ import { getDexieDb, type PendingPhotoUploadRow } from './schema'
 import { computeNextAttemptAt, enqueueMutation } from './syncService'
 import { getPendingPhotoBlob, deletePendingPhotoBlob } from './photo-queue'
 import { isOnline, withTabLock, classifyUploadFailure, UploadDataError } from './net'
+import { hasAnyOrgPrefix, orgScopedStoragePath } from '../storage/object-path'
 
 const MAX_RETRIES = 5
 
@@ -82,7 +83,6 @@ export async function retryFailedPhotoUploads(
 }
 
 async function applyUploadedPath(
-  supabase: SupabaseClient,
   userId: string,
   row: PendingPhotoUploadRow,
 ): Promise<void> {
@@ -104,16 +104,66 @@ async function applyUploadedPath(
     return
   }
 
-  // property_assets.photo_url stores the full public URL (not a bare storage
-  // path, unlike the two targets above) — getPublicUrl() is pure string
-  // templating against the configured project URL, so this doesn't require
-  // the object to exist yet, only that the upload already succeeded.
-  const publicUrl = supabase.storage.from('turnover-photos').getPublicUrl(row.storage_path!).data.publicUrl
-  await db.property_assets.update(row.target_id, { photo_url: publicUrl })
+  // property_assets.photo_url stores the BARE object key, same as the two
+  // targets above. It used to hold a getPublicUrl() result, but turnover-photos
+  // is a private bucket now: a public URL 400s and a signed one expires, so the
+  // stable key is what gets persisted and readers sign it on demand.
+  await db.property_assets.update(row.target_id, { photo_url: row.storage_path! })
   await enqueueMutation(userId, 'property_assets', row.target_id, 'PATCH', {
-    photo_url:   publicUrl,
+    photo_url:   row.storage_path,
     scanRequest: { storagePath: row.storage_path, mediaType: 'image/jpeg' },
   })
+}
+
+/**
+ * Reads the owning org id out of the local cache, via the row this photo is
+ * attached to. `crew_members` is not a Dexie store (dropped in a later schema
+ * version), so the target row is the only local source.
+ */
+async function resolveTargetOrgId(userId: string, row: PendingPhotoUploadRow): Promise<string | null> {
+  const db = getDexieDb(userId)
+
+  if (row.target_table === 'property_assets') {
+    return (await db.property_assets.get(row.target_id))?.org_id ?? null
+  }
+  if (row.target_table === 'checklist_instances') {
+    return (await db.checklist_instances.get(row.target_id))?.org_id ?? null
+  }
+
+  const item = await db.checklist_instance_items.get(row.target_id)
+  if (!item) return null
+  return (await db.checklist_instances.get(item.instance_id))?.org_id ?? null
+}
+
+/**
+ * Repairs a queued photo whose path predates the `${org_id}/` prefix
+ * contract (queued on this device before the app updated).
+ *
+ * turnover-photos is private and its RLS policies match on the first path
+ * segment, so a legacy path can never upload successfully — it would burn
+ * five retries and dead-letter with the blob still sitting in IndexedDB.
+ * The org id is recoverable locally from the crew member's own synced row,
+ * so re-prefix the path instead of losing the evidence.
+ *
+ * Returns the path to upload to, or null when the org id isn't available
+ * locally yet (rare, and transient — the next safety poll fixes it).
+ */
+async function orgPrefixedUploadPath(
+  userId: string,
+  row:    PendingPhotoUploadRow,
+): Promise<string | null> {
+  const path = row.storage_path!
+  if (hasAnyOrgPrefix(path)) return path
+
+  const db = getDexieDb(userId)
+  const orgId = await resolveTargetOrgId(userId, row)
+  if (!orgId) return null
+
+  const repaired = orgScopedStoragePath(orgId, path)
+  await db.pending_photo_uploads.update(row.id, { storage_path: repaired })
+  row.storage_path = repaired
+  console.warn(`[photo-sync] photo ${row.id} had a legacy (pre-org-prefix) path — re-targeted to ${repaired}`)
+  return repaired
 }
 
 /**
@@ -200,6 +250,16 @@ async function drainPhotoQueue(supabase: SupabaseClient, userId: string): Promis
       continue
     }
 
+    const uploadPath = await orgPrefixedUploadPath(userId, row)
+    if (!uploadPath) {
+      // Not a failure of this attempt — the crew member's own row hasn't
+      // synced yet, so there's no org id to build a policy-visible path
+      // from. Leave the row untouched (retry budget included) and let the
+      // next tick, once the sync has landed, deal with it.
+      console.warn(`[photo-sync] photo ${row.id}: org id not available locally yet — deferring`)
+      continue
+    }
+
     try {
       // Compression in photo-queue.ts always re-encodes to JPEG regardless
       // of the original capture format — upload with that content type
@@ -207,10 +267,10 @@ async function drainPhotoQueue(supabase: SupabaseClient, userId: string): Promis
       // image/heic or similar and no longer match the actual bytes.
       const { error } = await supabase.storage
         .from('turnover-photos')
-        .upload(row.storage_path!, blob, { contentType: 'image/jpeg', upsert: true })
+        .upload(uploadPath, blob, { contentType: 'image/jpeg', upsert: true })
       if (error) throw new UploadDataError(`photo upload failed: ${error.message}`)
 
-      await applyUploadedPath(supabase, userId, row)
+      await applyUploadedPath(userId, row)
       await discardPendingPhoto(userId, row)
     } catch (err) {
       await recordPhotoFailure(userId, row, err)

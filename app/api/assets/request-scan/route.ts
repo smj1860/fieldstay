@@ -13,6 +13,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
 import { inngest } from '@/lib/inngest/client'
 import { scanLimiter, checkLimit } from '@/lib/rate-limit'
+import { toStorageObjectPath } from '@/lib/storage/object-path'
 
 const PHOTO_BUCKET = 'turnover-photos'
 
@@ -24,13 +25,12 @@ const PHOTO_BUCKET = 'turnover-photos'
 // own already-org-verified photo_url and requiring an exact match closes
 // that off — the caller can only ever trigger a scan of the photo actually
 // attached to the asset they're authorized to see.
-function expectedStoragePath(photoUrl: string | null): string | null {
-  if (!photoUrl) return null
-  const marker = `/object/public/${PHOTO_BUCKET}/`
-  const idx = photoUrl.indexOf(marker)
-  if (idx === -1) return null
-  return decodeURIComponent(photoUrl.slice(idx + marker.length))
-}
+//
+// photo_url now holds a bare object key (turnover-photos went private, so a
+// public URL is meaningless), but historical rows hold a full
+// `/object/public/turnover-photos/<key>` URL — toStorageObjectPath()
+// normalizes both, so this check does NOT depend on a public-URL marker
+// that no longer appears in newly-written rows.
 
 export async function POST(request: NextRequest) {
   const body = await request.json().catch(() => null)
@@ -77,7 +77,7 @@ export async function POST(request: NextRequest) {
 
   if (!asset) return NextResponse.json({ error: 'Asset not found' }, { status: 404 })
 
-  if (storage_path !== expectedStoragePath(asset.photo_url)) {
+  if (storage_path !== toStorageObjectPath(PHOTO_BUCKET, asset.photo_url)) {
     return NextResponse.json({ error: 'Storage path does not match this asset\'s photo' }, { status: 400 })
   }
 

@@ -87,12 +87,10 @@ const ALLOWED: Record<string, string> = {
   'app/api/health/route.ts':
     'Liveness probe — a minimal SELECT 1-shaped round-trip that returns no member data.',
 
-  // ── KNOWN DRIFT, NOT YET FIXED (owned by the entry-points area, not the
-  //    Inngest/helpers area this guardrail shipped with).
-  'app/api/webhooks/stripe/handlers/core-billing.ts':
-    "KNOWN DRIFT: picks a billing-notification recipient with .eq('role','admin').single(), which both excludes owners (CLAUDE.md: 'owner' always passes role checks) and throws when an org has two admins. Should move to getPmMembers(supabase, orgId, { limit: 1 }).",
-  'app/(dashboard)/messages/actions.ts':
-    "KNOWN DRIFT: picks the PM recipient for a crew message with .in('role',[...]).limit(1) and NO ORDER BY — the same nondeterminism this guardrail was created for, in a non-Inngest file. Should move to getPmMembers(supabase, orgId, { roles: ['owner','admin','manager'], limit: 1 }).",
+  // The two KNOWN DRIFT entries that shipped with this guardrail
+  // (app/api/webhooks/stripe/handlers/core-billing.ts and
+  // app/(dashboard)/messages/actions.ts) were fixed on 2026-07-31 — both now
+  // pick their recipient via getPmMembers() and no longer touch the table.
 }
 
 function findQuerySites(): string[] {

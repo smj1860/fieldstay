@@ -5,6 +5,7 @@ import { requireOrgMember } from '@/lib/auth'
 import { createClient, createServiceClient } from '@/lib/supabase/server'
 import { inngest } from '@/lib/inngest/client'
 import { sendPushToUser } from '@/lib/push/send-push'
+import { getPmMembers } from '@/lib/inngest/helpers'
 import { reportError } from '@/lib/observability/report-error'
 import type { Message } from '@/types/database'
 
@@ -103,24 +104,28 @@ export async function sendMessageToPM(content: string): Promise<MessageActionRes
     // Crew members have no RLS visibility into organization_members (they're
     // not members of the org themselves), so this lookup intentionally
     // bypasses RLS via the service client to find a contact to route to.
+    //
+    // Routed through getPmMembers() rather than an inline query: it is the one
+    // place that applies the invite_accepted_at filter AND the owner → admin →
+    // manager ordering. The inline `.in('role', [...]).limit(1)` this replaced
+    // had no ORDER BY, so Postgres was free to hand back a different human on
+    // every call — two crew messages minutes apart could land in two different
+    // inboxes with nothing tying them together.
     const admin = createServiceClient({ crew: crewMember })
-    const { data: recipient } = await admin
-      .from('organization_members')
-      .select('user_id')
-      .eq('org_id', crewMember.org_id)
-      .in('role', ['owner', 'admin', 'manager'])
-      .not('invite_accepted_at', 'is', null)
-      .limit(1)
-      .maybeSingle()
+    const [primaryPm] = await getPmMembers(admin, crewMember.org_id, {
+      roles: ['owner', 'admin', 'manager'],
+      limit: 1,
+    })
 
-    if (!recipient) return { success: false, error: 'No operations contact found' }
+    if (!primaryPm) return { success: false, error: 'No operations contact found' }
+    const recipientId = primaryPm.userId
 
     const { data: message, error } = await supabase
       .from('messages')
       .insert({
         org_id:       crewMember.org_id,
         sender_id:    user.id,
-        recipient_id: recipient.user_id,
+        recipient_id: recipientId,
         content:      trimmed,
       })
       .select('id, created_at')
@@ -137,7 +142,7 @@ export async function sendMessageToPM(content: string): Promise<MessageActionRes
         message_id:    message.id,
         org_id:        crewMember.org_id,
         sender_id:     user.id,
-        recipient_id:  recipient.user_id,
+        recipient_id:  recipientId,
         is_crew_to_pm: true,
       },
     })

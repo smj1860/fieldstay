@@ -1,0 +1,114 @@
+import { describe, it, expect } from 'vitest'
+import { readFileSync } from 'fs'
+import { join } from 'path'
+import { ROOT } from './scan'
+
+// ============================================================================
+// CI gating guardrail — the enforcement layer's own enforcement.
+//
+// Every other guardrail in this directory assumes CI actually runs it. Nothing
+// checked that assumption, and the 2026-07-30 pre-launch audit found two ways
+// it had already drifted:
+//
+//   1. `pnpm run lint` was plain `eslint .`. The sonarjs rules are `warn`
+//      pending a cleanup pass, so eslint exits 0 no matter how many warnings
+//      exist — the complexity total drifted 236 → 240 with CI green the whole
+//      time. The fix is `--max-warnings <current>`, a ratchet that can only be
+//      lowered. Dropping the flag would restore the blind spot invisibly,
+//      because nothing would go red.
+//
+//   2. The `db-invariants` job has no `pnpm install` step — it runs
+//      `node scripts/check-*.mjs` straight after setup-node. That is FINE, and
+//      deliberately so: both scripts use only Node builtins and global fetch,
+//      so skipping an install keeps the job fast. But it is fine only for
+//      exactly as long as that stays true. The day someone adds
+//      `import { createClient } from '@supabase/supabase-js'` to one of them,
+//      the job fails at runtime in CI and nowhere else. The last check below
+//      is what makes that a local test failure instead.
+//
+// These are cheap string assertions on ci.yml and package.json rather than a
+// YAML parse — the point is to notice a step disappearing, not to model
+// GitHub Actions.
+// ============================================================================
+
+const pkg = JSON.parse(readFileSync(join(ROOT, 'package.json'), 'utf8')) as {
+  scripts: Record<string, string>
+}
+const ci = readFileSync(join(ROOT, '.github', 'workflows', 'ci.yml'), 'utf8')
+
+/**
+ * ci.yml is heavily commented, and those comments discuss the very strings
+ * checked below ("No continue-on-error", the step names). Assertions about
+ * what CI actually DOES have to read the directives only.
+ */
+const ciDirectives = ci
+  .split('\n')
+  .filter((l) => !l.trimStart().startsWith('#'))
+  .join('\n')
+
+/** Scripts run by `node` in CI with no dependency install ahead of them. */
+const INSTALL_FREE_SCRIPTS = ['scripts/check-db-invariants.mjs', 'scripts/check-type-drift.mjs']
+
+describe('guardrail: lint warning ratchet', () => {
+  it('the lint script carries --max-warnings so warning drift fails CI', () => {
+    const lint = pkg.scripts.lint ?? ''
+    expect(
+      /--max-warnings\s+\d+/.test(lint),
+      'pnpm run lint must pass --max-warnings <current total>. Without it eslint exits 0 on any number of warnings and the sonarjs complexity budget is unenforceable.',
+    ).toBe(true)
+  })
+
+  it('the --max-warnings budget is a ratchet that only moves down', () => {
+    // Measured 2026-07-30 after the pre-launch remediation pass (240 before it).
+    // LOWER this when warnings are cleared; never raise it.
+    const CEILING = 207
+    const budget = Number(/--max-warnings\s+(\d+)/.exec(pkg.scripts.lint ?? '')?.[1])
+    expect(budget).toBeLessThanOrEqual(CEILING)
+  })
+})
+
+describe('guardrail: CI runs every gate', () => {
+  it('the checks job runs the full verification pass', () => {
+    for (const step of [
+      'pnpm run check:ui-classes',
+      'pnpm exec tsc --noEmit',
+      'pnpm run lint',
+      'pnpm test',
+      'pnpm run build',
+    ]) {
+      expect(ciDirectives, `ci.yml lost the "${step}" step`).toContain(step)
+    }
+  })
+
+  it('no CI step is marked continue-on-error (a green X is not a gate)', () => {
+    expect(ciDirectives).not.toMatch(/continue-on-error/)
+  })
+
+  it('the db-invariants job runs both live-schema checks', () => {
+    for (const script of INSTALL_FREE_SCRIPTS) {
+      expect(ciDirectives, `ci.yml no longer runs ${script}`).toContain(`node ${script}`)
+    }
+  })
+})
+
+describe('guardrail: install-free CI scripts stay install-free', () => {
+  it.each(INSTALL_FREE_SCRIPTS)('%s imports only Node builtins', (script) => {
+    const src = readFileSync(join(ROOT, script), 'utf8')
+    const specifiers = [...src.matchAll(/^\s*import\s[^'"]*from\s*['"]([^'"]+)['"]/gm)].map((m) => m[1]!)
+    const external = specifiers.filter((s) => !s.startsWith('node:') && !s.startsWith('.'))
+
+    expect(
+      external,
+      `${script} runs in the db-invariants CI job, which has NO pnpm install step. Either drop the dependency or add an install step to that job.`,
+    ).toEqual([])
+  })
+
+  it.each(INSTALL_FREE_SCRIPTS)('%s self-disarms when the E2E secrets are absent', (script) => {
+    const src = readFileSync(join(ROOT, script), 'utf8')
+    // Fork PRs and unconfigured repos have no secrets. The job must warn and
+    // pass, mirroring the e2e job's gate — a permanently red required check is
+    // one nobody looks at.
+    expect(src).toMatch(/::warning title=.*UNARMED/)
+    expect(src).toMatch(/process\.exit\(0\)/)
+  })
+})

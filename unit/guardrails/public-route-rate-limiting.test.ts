@@ -98,8 +98,13 @@ describe('guardrail: public token-guessable routes stay rate-limited', () => {
     const acceptInviteFiles = collectSourceFiles(['app/accept-invite'])
     const crewInviteFiles   = collectSourceFiles(['app/crew-invite'])
 
-    const acceptInviteLimited = acceptInviteFiles.some((f) => read(f).includes('.limit('))
-    const crewInviteLimited   = crewInviteFiles.some((f) => read(f).includes('.limit('))
+    // Either spelling counts as "limited": checkLimit() is the sanctioned way
+    // to consult a limiter (see the FAIL POLICY block below), and a raw
+    // `<limiter>.limit(` is what it replaced — both mean a limiter is applied.
+    const LIMITED = /checkLimit\(|\.limit\(/
+
+    const acceptInviteLimited = acceptInviteFiles.some((f) => LIMITED.test(read(f)))
+    const crewInviteLimited   = crewInviteFiles.some((f) => LIMITED.test(read(f)))
 
     expect(
       { acceptInviteLimited, crewInviteLimited },
@@ -297,13 +302,12 @@ describe('guardrail: every limiter call goes through checkLimit()', () => {
   // Files owned by other concurrent workstreams at the time this guardrail
   // landed. SHRINK-ONLY — never add an entry. Each is a plain raw `.limit()`
   // that must be migrated to checkLimit(), not a justified exception.
-  const PENDING_MIGRATION = new Map<string, string>([
-    ['app/api/account/delete/route.ts',                'accountDeleteRatelimit — migrate to checkLimit(onError: "allow")'],
-    ['app/accept-invite/[token]/actions.ts',           'inviteAcceptRatelimit — migrate to checkLimit(onError: "allow")'],
-    ['app/crew-invite/[token]/actions.ts',             'inviteAcceptRatelimit — migrate to checkLimit(onError: "allow")'],
-    ['app/(dashboard)/settings/integrations/actions.ts', 'integrationResyncLimiter — migrate to checkLimit(onError: "deny", it is an API-quota ceiling)'],
-    ['lib/kroger/client.ts',                           'kroger*ApiLimiter — migrate to checkLimit(onError: "deny", it is an external quota ceiling)'],
-  ])
+  //
+  // Now EMPTY: all five original entries were migrated on 2026-07-31. Kept
+  // (rather than deleted along with its staleness test) so the ratchet stays
+  // in place — if a future workstream genuinely cannot migrate a call site in
+  // the same PR, it has somewhere to go that CI will keep pressure on.
+  const PENDING_MIGRATION = new Map<string, string>([])
 
   // `<something>Limiter.limit(` / `<something>Ratelimit.limit(` — a raw
   // limiter consultation. Deliberately does NOT match `.limit(50)` (Supabase
@@ -358,14 +362,25 @@ describe('guardrail: every limiter call goes through checkLimit()', () => {
     for (const file of collectSourceFiles(['app', 'lib', 'components'])) {
       const path = rel(file)
       if (path === 'lib/rate-limit.ts') continue
-      const src = read(file)
-      if (!src.includes('checkLimit(')) continue
+      // Calls are counted with BOTH comments and string-literal contents
+      // removed: prose about checkLimit() is not a call site, and it appears
+      // in both forms — as a comment on several migrated call sites
+      // ("checkLimit() also short-circuits when Upstash is unconfigured") and
+      // inside a string, in lib/env.ts's `why:` note on the Upstash env vars.
+      // Either one otherwise reads as an extra call with no policy and fails a
+      // file whose real call sites are all correct.
+      const code       = stripComments(read(file))
+      const codeOnly   = code
+        .replace(/'(?:[^'\\]|\\.)*'/g, "''")
+        .replace(/"(?:[^"\\]|\\.)*"/g, '""')
+      if (!codeOnly.includes('checkLimit(')) continue
 
       // Every call site's options object must carry onError. checkLimit's
       // signature requires it, so this is a belt-and-braces check that also
-      // fails loudly if the option is ever made optional.
-      const calls = src.split('checkLimit(').length - 1
-      const policies = (src.match(/onError:\s*'(allow|deny)'/g) ?? []).length
+      // fails loudly if the option is ever made optional. Counted against
+      // `code` (strings intact) since the policy IS a string literal.
+      const calls = codeOnly.split('checkLimit(').length - 1
+      const policies = (code.match(/onError:\s*'(allow|deny)'/g) ?? []).length
       if (policies < calls) offenders.push(`${path} (${calls} call(s), ${policies} explicit policy/policies)`)
     }
 

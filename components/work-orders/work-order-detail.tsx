@@ -1,6 +1,6 @@
 'use client'
 
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import {
   MapPin, Wrench, Calendar, AlertTriangle, CheckCircle2,
   Circle, Key, Printer, Loader2, Hash, Tag, ChevronRight, ChevronDown,
@@ -13,6 +13,7 @@ import { useWorkOrderActions } from './use-work-order-actions'
 import { CancelConfirmDialog } from './CancelConfirmDialog'
 import { VendorDispatchDialog } from './VendorDispatchDialog'
 import { VendorRatingPanel } from './VendorRatingPanel'
+import { getWorkOrderPhotoUrls } from '@/app/(dashboard)/maintenance/actions'
 
 // ── Types ─────────────────────────────────────────────────────
 
@@ -136,6 +137,79 @@ function fmtDate(iso: string | null) {
 }
 
 // ── Component ─────────────────────────────────────────────────
+
+/**
+ * work-order-photos is a PRIVATE bucket — there is no public URL to build, so
+ * the thumbnails come from short-lived (5 min) signed URLs minted server-side
+ * by getWorkOrderPhotoUrls(), which also re-checks that this work order
+ * belongs to the caller's org.
+ */
+function WorkOrderPhotos({
+  workOrderId,
+  photos,
+}: Readonly<{ workOrderId: string; photos: Array<{ id: string; storage_path: string }> }>) {
+  const [urls,  setUrls]  = useState<Record<string, string> | null>(null)
+  const [error, setError] = useState<string | null>(null)
+
+  useEffect(() => {
+    let cancelled = false
+    setUrls(null)
+    setError(null)
+    void getWorkOrderPhotoUrls(workOrderId).then((res) => {
+      if (cancelled) return
+      if (res.error) setError(res.error)
+      else setUrls(res.urls ?? {})
+    })
+    return () => { cancelled = true }
+  }, [workOrderId])
+
+  if (error) {
+    return <p className="text-xs" style={{ color: 'var(--accent-red)' }}>{error}</p>
+  }
+  if (!urls) {
+    return (
+      <p className="text-xs flex items-center gap-2" style={{ color: 'var(--text-muted)' }}>
+        <Loader2 className="w-3 h-3 animate-spin" /> Loading photos…
+      </p>
+    )
+  }
+
+  return (
+    <div className="flex flex-wrap gap-2">
+      {photos.map((photo, index) => {
+        const url = urls[photo.id]
+        if (!url) {
+          return (
+            <div
+              key={photo.id}
+              className="w-20 h-20 rounded-lg flex items-center justify-center text-center text-[10px] px-1 flex-shrink-0"
+              style={{ border: '1px solid var(--border)', color: 'var(--text-muted)' }}
+            >
+              Unavailable
+            </div>
+          )
+        }
+        return (
+          <a
+            key={photo.id}
+            href={url}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="block w-20 h-20 rounded-lg overflow-hidden flex-shrink-0"
+            style={{ border: '1px solid var(--border)' }}
+          >
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img
+              src={url}
+              alt={`Work order photo ${index + 1} of ${photos.length}`}
+              className="w-full h-full object-cover"
+            />
+          </a>
+        )
+      })}
+    </div>
+  )
+}
 
 export function WorkOrderDetail({ workOrder: wo, userRole, vendors = [] }: Readonly<Props>) {
   const actions = useWorkOrderActions(wo)
@@ -584,28 +658,7 @@ export function WorkOrderDetail({ workOrder: wo, userRole, vendors = [] }: Reado
         {/* ── Photos ────────────────────────────────────────────── */}
         {(wo.work_order_photos ?? []).length > 0 && (
           <Section icon={<Camera className="w-4 h-4" />} title="Photos" mobileCollapse defaultOpen={false}>
-            <div className="flex flex-wrap gap-2">
-              {wo.work_order_photos!.map((photo, index) => {
-                const url = `${process.env.NEXT_PUBLIC_SUPABASE_URL}/storage/v1/object/public/work-order-photos/${photo.storage_path}`
-                return (
-                  <a
-                    key={photo.id}
-                    href={url}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="block w-20 h-20 rounded-lg overflow-hidden flex-shrink-0"
-                    style={{ border: '1px solid var(--border)' }}
-                  >
-                    {/* eslint-disable-next-line @next/next/no-img-element */}
-                    <img
-                      src={url}
-                      alt={`Work order photo ${index + 1} of ${wo.work_order_photos!.length}`}
-                      className="w-full h-full object-cover"
-                    />
-                  </a>
-                )
-              })}
-            </div>
+            <WorkOrderPhotos workOrderId={wo.id} photos={wo.work_order_photos!} />
           </Section>
         )}
 
