@@ -900,6 +900,11 @@ export async function sendQuoteRequests(
 
 // ── Approve one quote — assign WO, decline all others ────────────────────────
 
+/** Return shape of the `approve_quote_request(uuid, uuid, text, timestamptz)` RPC. */
+type ApproveQuoteResult =
+  | { ok: true;  work_order_id: string; vendor_id: string; quoted_amount: number | null; declined: number }
+  | { ok: false; reason: 'quote_not_found' | 'not_submitted' | 'work_order_not_found' }
+
 export async function approveQuoteRequest(
   quoteRequestId: string
 ): Promise<{ error?: string }> {
@@ -933,67 +938,55 @@ export async function approveQuoteRequest(
       throw complianceErr
     }
 
-    // Atomic status guard — prevents double-approval from concurrent requests
-    const { data: claimed } = await supabase
-      .from('quote_requests')
-      .update({ status: 'approved' })
-      .eq('id', quoteRequestId)
-      .eq('status', 'submitted')
-      .select('id')
-      .single()
-
-    if (!claimed) return { error: 'Can only approve a quote that has been submitted by the vendor' }
-
-    // Decline all other pending/submitted quotes for this WO
-    await supabase
-      .from('quote_requests')
-      .update({ status: 'declined' })
-      .eq('work_order_id', qr.work_order_id)
-      .neq('id', quoteRequestId)
-      .in('status', ['pending', 'submitted'])
-
+    // ONE transaction: claim the quote, decline its siblings, assign the
+    // vendor, log the change. Previously these were four sequential writes
+    // with no way back — a failure on the work-order UPDATE left the winning
+    // quote 'approved', every competing quote 'declined', and the work order
+    // still UNASSIGNED with no live RFQ left to approve. Nothing in the UI
+    // explained it and the PM's only option was to re-request quotes from
+    // scratch. The function locks both parent rows before its first write, so
+    // the cases that cannot proceed are refused while nothing has changed.
     const completion_token            = crypto.randomUUID()
     const completion_token_expires_at = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString()
 
-    const { error } = await supabase
-      .from('work_orders')
-      .update({
-        vendor_id:                  qr.vendor_id,
-        status:                     'assigned',
-        estimated_cost:             qr.quoted_amount ?? undefined,
-        portal_enabled:             true,
-        completion_token,
-        completion_token_expires_at,
-      })
-      .eq('id', qr.work_order_id)
-      .eq('org_id', membership.org_id)
+    const { data: rpcResult, error: rpcError } = await supabase.rpc('approve_quote_request', {
+      p_quote_request_id: quoteRequestId,
+      p_org_id:           membership.org_id,
+      p_completion_token: completion_token,
+      p_token_expires_at: completion_token_expires_at,
+    })
 
-    if (error) {
-      console.error('[approveQuoteRequest]', error)
+    if (rpcError || !rpcResult) {
+      console.error('[approveQuoteRequest]', rpcError)
+      reportError(rpcError ?? new Error('approve_quote_request returned no result'), {
+        site: 'serverAction.maintenance.approveQuoteRequest.rpc', orgId: membership.org_id,
+      })
       return { error: 'Operation failed. Please try again.' }
     }
 
-    await supabase.from('work_order_updates').insert({
-      work_order_id:             qr.work_order_id,
-      org_id:                    membership.org_id,
-      updated_via_vendor_portal: false,
-      status_from:               'pending',
-      status_to:                 'assigned',
-      notes:                     `Quote approved — $${qr.quoted_amount?.toFixed(2) ?? '?'}. Vendor assigned and notified.`,
-    })
+    const result = rpcResult as ApproveQuoteResult
 
+    if (!result.ok) {
+      if (result.reason === 'work_order_not_found') {
+        return { error: 'The work order for this quote no longer exists.' }
+      }
+      return { error: 'Can only approve a quote that has been submitted by the vendor' }
+    }
+
+    // From the RPC's return, not the pre-read: these are the ids the
+    // transaction actually committed against.
     await inngest.send({
       name: 'work-order/created',
       data: {
-        work_order_id:  qr.work_order_id,
+        work_order_id:  result.work_order_id,
         property_id:    '',
         org_id:         membership.org_id,
-        vendor_id:      qr.vendor_id,
+        vendor_id:      result.vendor_id,
         portal_enabled: true,
       },
     })
 
-    revalidatePath(`/maintenance/${qr.work_order_id}`)
+    revalidatePath(`/maintenance/${result.work_order_id}`)
     revalidatePath('/maintenance')
     return {}
   } catch (err) {

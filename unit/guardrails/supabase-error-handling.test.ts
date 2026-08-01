@@ -100,7 +100,7 @@ const BASELINE: Record<string, number> = {
   'app/(dashboard)/capital-planning/trigger-ledger-button.tsx': 1,
   'app/(dashboard)/capital-planning/trigger-projections-button.tsx': 1,
   'app/(dashboard)/inventory/actions.ts': 8,
-  'app/(dashboard)/maintenance/actions.ts': 27,
+  'app/(dashboard)/maintenance/actions.ts': 26,
   'app/(dashboard)/maintenance/create-work-order-helpers.ts': 1,
   'app/(dashboard)/maintenance/work-order-actions.ts': 1,
   'app/(dashboard)/messages/actions.ts': 4,

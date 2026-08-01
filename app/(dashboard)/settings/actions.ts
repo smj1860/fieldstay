@@ -1111,6 +1111,17 @@ export async function updateCommsRetention(days: number): Promise<SettingsAction
   }
 }
 
+/**
+ * Stripe subscription statuses that mean "this customer is already on a
+ * subscription" for the purposes of refusing a second Checkout.
+ *
+ * 'incomplete' and 'incomplete_expired' are excluded on purpose — those are a
+ * failed first payment, and the customer must be able to retry checkout.
+ */
+const LIVE_SUBSCRIPTION_STATUSES = new Set<string>([
+  'active', 'trialing', 'past_due', 'unpaid', 'paused',
+])
+
 export async function createCheckoutSession(
   planKey: 'starter' | 'growth' | 'portfolio',
   interval: 'monthly' | 'annual'
@@ -1133,6 +1144,43 @@ export async function createCheckoutSession(
       .select('stripe_customer_id, billing_email')
       .eq('id', membership.org_id)
       .single()
+
+    // An org that ALREADY has a live subscription must never be handed a
+    // second Checkout. mode:'subscription' creates a NEW subscription every
+    // time it completes, so an existing subscriber clicking a plan card —
+    // to upgrade, or just re-clicking after a slow redirect — ended up with
+    // two concurrent subscriptions on the same customer and was billed for
+    // both, with nothing in the app showing the second one (the webhook
+    // handler overwrites the single stripe_subscription_id column, so the
+    // older subscription became invisible while still charging).
+    //
+    // Changing plans is what they actually want, and that is the billing
+    // portal's job, so send them there rather than failing.
+    //
+    // Stripe is queried directly rather than reading organizations.plan_status
+    // because that column is webhook-derived and can lag in both directions —
+    // stale-active would block a legitimate re-subscribe, stale-cancelled
+    // would let the double-charge through, which is the bug being fixed.
+    if (org?.stripe_customer_id) {
+      const existing = await stripe.subscriptions.list({
+        customer: org.stripe_customer_id,
+        status:   'all',
+        limit:    100,
+      })
+
+      // 'incomplete' is deliberately NOT live: it means the first payment
+      // attempt failed and Stripe is waiting (it auto-expires in 23h). Those
+      // customers need to be able to retry checkout, not be locked out of it.
+      const hasLive = existing.data.some((s) => LIVE_SUBSCRIPTION_STATUSES.has(s.status))
+
+      if (hasLive) {
+        const portal = await stripe.billingPortal.sessions.create({
+          customer:   org.stripe_customer_id,
+          return_url: `${process.env.NEXT_PUBLIC_APP_URL}/settings`,
+        })
+        return { redirectUrl: portal.url }
+      }
+    }
 
     // Hospitable launch promo — fire-and-forget tagging event, but only for
     // orgs that actually have Hospitable connected. Every other checkout
@@ -1174,6 +1222,15 @@ export async function createCheckoutSession(
       success_url:          `${process.env.NEXT_PUBLIC_APP_URL}/settings?checkout=success`,
       cancel_url:           `${process.env.NEXT_PUBLIC_APP_URL}/settings`,
       metadata:             { org_id: membership.org_id, plan: planKey },
+    }, {
+      // Collapses the double-click the guard above cannot see: two clicks a
+      // second apart both pass the live-subscription check (neither has
+      // completed yet), and without this each would mint its own session, so
+      // completing both would create two subscriptions. Keyed on what the
+      // request actually is, so the same org asking for the same plan gets
+      // the same session back. Stripe expires idempotency keys after 24h,
+      // which is the right window — beyond that a fresh session is correct.
+      idempotencyKey: `checkout:${membership.org_id}:${planKey}:${interval}`,
     })
 
     if (!session.url) return { error: 'Could not create checkout session' }

@@ -46,6 +46,39 @@ function inviteIsExpired(sentAt: string | null, createdAt: string | null): boole
   return new Date(issuedAt).getTime() + INVITE_TTL_MS < Date.now()
 }
 
+type ActivationSupabase = ReturnType<typeof createServiceClient>
+
+/**
+ * Mints the auth account for a crew activation.
+ *
+ * Extracted so activateCrewAccount stays under the cognitive-complexity
+ * threshold; the caller is responsible for deleting the returned user if the
+ * subsequent claim on the crew_members row does not land.
+ */
+async function createActivationUser(
+  supabase: ActivationSupabase,
+  { email, password, name }: { email: string; password: string; name: string | null },
+): Promise<{ userId: string } | { error: string }> {
+  const { data, error } = await supabase.auth.admin.createUser({
+    email,
+    password,
+    email_confirm: true,
+    user_metadata: { full_name: name, role: 'crew' },
+  })
+
+  if (error) {
+    if (error.message.includes('already registered')) {
+      return { error: 'An account with this email already exists. Try logging in instead.' }
+    }
+    console.error('[activateCrewAccount]', error)
+    return { error: 'Account creation failed — please try again' }
+  }
+
+  if (!data.user) return { error: 'Account creation failed — please try again' }
+
+  return { userId: data.user.id }
+}
+
 export async function activateCrewAccount(formData: FormData): Promise<{ error?: string }> {
   const raw = {
     token:    formData.get('token'),
@@ -113,24 +146,27 @@ export async function activateCrewAccount(formData: FormData): Promise<{ error?:
     return { error: 'This invite link has expired. Ask your manager to send a new one.' }
   }
 
-  const { data: authData, error: createError } = await supabase.auth.admin.createUser({
-    email:         activationEmail,
+  const created = await createActivationUser(supabase, {
+    email: activationEmail,
     password,
-    email_confirm: true,
-    user_metadata: { full_name: crew.name, role: 'crew' },
+    name:  crew.name,
   })
+  if ('error' in created) return { error: created.error }
+  const authData = { user: { id: created.userId } }
 
-  if (createError) {
-    if (createError.message.includes('already registered')) {
-      return { error: 'An account with this email already exists. Try logging in instead.' }
-    }
-    console.error('[activateCrewAccount]', createError)
-    return { error: 'Account creation failed — please try again' }
-  }
-
-  if (!authData.user) return { error: 'Account creation failed — please try again' }
-
-  const { error: linkError } = await supabase
+  // The .is() predicates are the atomic claim: exactly one concurrent
+  // activation can match a still-unclaimed row.
+  //
+  // `.select()` is what makes the claim mean anything. Without it only
+  // `linkError` was checked — and a claim that matched ZERO rows is not an
+  // error in PostgREST, it is a successful UPDATE of nothing. So the loser of
+  // the race (or anyone hitting a row claimed between the read above and this
+  // write) fell straight through: it logged an activation audit event, signed
+  // the user in, and left the auth.users row it had just created ORPHANED,
+  // with no crew_members row pointing at it. That account can log in and then
+  // fails every requireCrewMember() check with nothing explaining why, and
+  // nothing on the PM side shows the crew member as un-activated.
+  const { data: linked, error: linkError } = await supabase
     .from('crew_members')
     .update({
       user_id:            authData.user.id,
@@ -143,10 +179,20 @@ export async function activateCrewAccount(formData: FormData): Promise<{ error?:
     .eq('invite_token', token)
     .is('user_id', null)
     .is('invite_accepted_at', null)
+    .select('id')
 
   if (linkError) {
     await supabase.auth.admin.deleteUser(authData.user.id)
+    console.error('[activateCrewAccount] link failed', { code: linkError.code, message: linkError.message })
     return { error: 'Failed to activate account. Please try again.' }
+  }
+
+  if (!linked?.length) {
+    // Claimed by someone else while this request was creating the auth user.
+    // The account just minted belongs to nothing, so it is removed rather
+    // than left behind as a login that can never reach the crew app.
+    await supabase.auth.admin.deleteUser(authData.user.id)
+    return { error: 'This invite has already been used' }
   }
 
   await logAuditEvent({
