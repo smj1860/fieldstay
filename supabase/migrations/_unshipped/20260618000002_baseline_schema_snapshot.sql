@@ -2215,14 +2215,27 @@ BEGIN
   END IF;
 END $do$;
 
-DO $do$
-BEGIN
-  IF NOT EXISTS (
-    SELECT 1 FROM pg_constraint WHERE conname = 'uq_integration_connections_org_provider' AND conrelid = 'public.integration_connections'::regclass
-  ) THEN
-    ALTER TABLE public.integration_connections ADD CONSTRAINT uq_integration_connections_org_provider UNIQUE (org_id, provider_id);
-  END IF;
-END $do$;
+-- AMENDED 2026-08-01: this block used to recreate
+--   uq_integration_connections_org_provider  UNIQUE (org_id, provider_id)
+-- because that constraint was live when this snapshot was generated on
+-- 2026-06-18. It has since been dropped from both projects by
+-- 20260731200000_drop_unconditional_integration_connections_org_provider_uniq.sql:
+-- unconditional, it locks an entire org out of a provider forever once any one
+-- member disconnects, because revoke/disconnect keep the row and keep org_id.
+--
+-- The snapshot is only replayed to bootstrap a FRESH project, where it runs
+-- without the later drop migration alongside it — so leaving the original
+-- statement here would hand every new project (a rebuilt E2E project, a
+-- disaster-recovery restore) the very lockout bug just removed from
+-- production. Superseded here by the partial index that expresses the
+-- invariant actually intended — at most one ACTIVE connection per
+-- org+provider — matching post-drop live state on both projects.
+-- No DO-block guard needed: CREATE UNIQUE INDEX IF NOT EXISTS is already
+-- idempotent on its own, and the old guard tested for a constraint name that
+-- is now intentionally never created.
+CREATE UNIQUE INDEX IF NOT EXISTS integration_connections_org_provider_active_uniq
+  ON public.integration_connections (org_id, provider_id)
+  WHERE status = 'active' AND org_id IS NOT NULL;
 
 DO $do$
 BEGIN

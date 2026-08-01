@@ -37,6 +37,13 @@ export async function saveDetails(
     const wifi_name     = (formData.get('wifi_name') as string)?.trim() || null
     const wifi_password = (formData.get('wifi_password') as string)?.trim() || null
     const door_code     = (formData.get('door_code') as string)?.trim() || null
+    // Set by details-form when the page could not decrypt the stored code for
+    // this render. Without it, that render's empty input reads as "clear the
+    // door code" and store_property_door_code DELETEs the vault secret. Client
+    // -supplied and therefore untrusted, but the only thing it can cause is
+    // SKIPPING the write — it can never read or overwrite a code — so honouring
+    // it outright is safe.
+    const door_code_unchanged = formData.get('door_code_unchanged') === '1'
     const internal_notes    = (formData.get('internal_notes') as string)?.trim() || null
     const avg_nightly_rate   = formData.get('avg_nightly_rate')
       ? parseFloat(formData.get('avg_nightly_rate') as string)
@@ -91,19 +98,21 @@ export async function saveDetails(
       }
     }
 
-    const { error: doorCodeError } = await supabase.rpc('store_property_door_code', {
-      p_property_id: propertyId,
-      p_org_id:      membership.org_id,
-      p_door_code:   door_code,
-    })
-
-    if (doorCodeError) {
-      console.error('[saveDetails] door code write failed', doorCodeError)
-      reportError(doorCodeError, {
-        site:  'serverAction.properties.setup.details.saveDetails.storeDoorCode',
-        orgId: membership.org_id,
+    if (!door_code_unchanged) {
+      const { error: doorCodeError } = await supabase.rpc('store_property_door_code', {
+        p_property_id: propertyId,
+        p_org_id:      membership.org_id,
+        p_door_code:   door_code,
       })
-      return { error: 'Operation failed. Please try again.' }
+
+      if (doorCodeError) {
+        console.error('[saveDetails] door code write failed', doorCodeError)
+        reportError(doorCodeError, {
+          site:  'serverAction.properties.setup.details.saveDetails.storeDoorCode',
+          orgId: membership.org_id,
+        })
+        return { error: 'Operation failed. Please try again.' }
+      }
     }
 
     // Simplification: logs on every details save (not just when rates actually
@@ -127,11 +136,18 @@ export async function saveDetails(
     // a change happened. door_code is now Vault-encrypted (no plaintext
     // column to diff against), so treat any submitted/cleared door code as
     // a reportable change rather than comparing decrypted values.
+    // When door_code_unchanged is set the door-code write was skipped above, so
+    // neither door-code clause may count as a change — otherwise the submitted
+    // (empty) value would be read as "cleared" and audit-log a credential
+    // change that never happened.
+    const doorCodeChanged = !door_code_unchanged && (
+      Boolean(door_code) ||
+      (door_code === null && Boolean(existing?.door_code_secret_id))
+    )
     const guestAccessChanged =
       wifi_password    !== (existing?.wifi_password    ?? null) ||
       internal_notes   !== (existing?.internal_notes   ?? null) ||
-      Boolean(door_code) ||
-      (door_code === null && Boolean(existing?.door_code_secret_id))
+      doorCodeChanged
 
     if (guestAccessChanged) {
       await logAuditEvent({

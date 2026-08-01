@@ -220,6 +220,80 @@ describe('properties/[id]/setup/details/actions — saveDetails', () => {
     expect(result).toEqual({ error: 'Operation failed. Please try again.' })
   })
 
+  // The page used to DISCARD read_property_door_code's error, so a failed
+  // decrypt rendered the door-code input blank. Submitting that render sent an
+  // empty door_code, which coerces to null, which drives
+  // store_property_door_code's NULL branch — DELETE the vault secret and null
+  // door_code_secret_id. A transient read failure plus any later save (even one
+  // only renaming the property) permanently destroyed a physical-access
+  // credential, silently. details-form now disables the field and sends
+  // door_code_unchanged=1 on that render; these pin both halves.
+  describe('door_code_unchanged (failed-decrypt render must not clear the code)', () => {
+    it('skips the door-code write entirely rather than clearing it', async () => {
+      const supabase = makeSupabase({ properties: happyPropertiesQueue() })
+      mockAuthed(supabase)
+
+      await expect(saveDetails('prop_1', null, fd({ door_code_unchanged: '1' })))
+        .rejects.toThrow('REDIRECT:')
+
+      expect(supabase.rpc).not.toHaveBeenCalledWith('store_property_door_code', expect.anything())
+    })
+
+    it('still writes the door code on a normal render (guard is not always-on)', async () => {
+      const supabase = makeSupabase({ properties: happyPropertiesQueue() })
+      mockAuthed(supabase)
+
+      await expect(saveDetails('prop_1', null, fd({ door_code: '4821' })))
+        .rejects.toThrow('REDIRECT:')
+
+      expect(supabase.rpc).toHaveBeenCalledWith(
+        'store_property_door_code',
+        expect.objectContaining({ p_door_code: '4821' }),
+      )
+    })
+
+    it('clears the code when the field is genuinely submitted empty', async () => {
+      const supabase = makeSupabase({
+        properties: [
+          { data: { ...pristineExisting(), door_code_secret_id: 'sec_1' } },
+          { data: { id: 'prop_1' }, error: null },
+          { data: { setup_steps_completed: {} } },
+          { data: { id: 'prop_1' }, error: null },
+        ],
+      })
+      mockAuthed(supabase)
+
+      await expect(saveDetails('prop_1', null, fd({ door_code: '' })))
+        .rejects.toThrow('REDIRECT:')
+
+      expect(supabase.rpc).toHaveBeenCalledWith(
+        'store_property_door_code',
+        expect.objectContaining({ p_door_code: null }),
+      )
+    })
+
+    it('does not audit-log a door-code change that never happened', async () => {
+      const supabase = makeSupabase({
+        properties: [
+          // An existing code IS set — the old guestAccessChanged clause read
+          // the skipped render's empty submission as "cleared" and logged it.
+          { data: { ...pristineExisting(), door_code_secret_id: 'sec_1' } },
+          { data: { id: 'prop_1' }, error: null },
+          { data: { setup_steps_completed: {} } },
+          { data: { id: 'prop_1' }, error: null },
+        ],
+      })
+      mockAuthed(supabase)
+
+      await expect(saveDetails('prop_1', null, fd({ door_code_unchanged: '1' })))
+        .rejects.toThrow('REDIRECT:')
+
+      expect(logAuditEvent).not.toHaveBeenCalledWith(
+        expect.objectContaining({ action: 'property.updated' }),
+      )
+    })
+  })
+
   it('rejects and never touches the DB when the caller is unauthenticated', async () => {
     const supabase = makeSupabase({})
     vi.mocked(requireOrgMember).mockRejectedValue(new Error('REDIRECT:/login'))
