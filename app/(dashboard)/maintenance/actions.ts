@@ -1445,7 +1445,9 @@ export async function bulkUpdateWorkOrderStatus(
   try {
     const { supabase, membership, user } = await requireOrgRole(['admin', 'manager'])
 
-    const { targetIds, skippedCount, statusFromById } = status === 'completed'
+    const isCompleting = status === 'completed'
+
+    const { targetIds, skippedCount, statusFromById } = isCompleting
       ? await splitVendorAssignedWorkOrders(supabase, membership.org_id, workOrderIds)
       : { targetIds: workOrderIds, skippedCount: 0, statusFromById: new Map<string, WoStatus | null>() }
 
@@ -1457,7 +1459,7 @@ export async function bulkUpdateWorkOrderStatus(
 
     // Same completion payload the single-WO path writes — bulk previously set
     // `status` alone, leaving completed_date NULL on every bulk-completed WO.
-    const update = status === 'completed' ? workOrderCompletionFields() : { status }
+    const update = isCompleting ? workOrderCompletionFields() : { status }
 
     // `.neq('status', 'completed')` + selecting the claimed rows back is what
     // makes the fan-out below fire exactly once per work order even if two
@@ -1467,7 +1469,7 @@ export async function bulkUpdateWorkOrderStatus(
       .update(update)
       .in('id', targetIds)
       .eq('org_id', membership.org_id)
-    if (status === 'completed') query = query.neq('status', 'completed')
+    if (isCompleting) query = query.neq('status', 'completed')
 
     const { data: updatedRows, error } = await query.select(COMPLETED_WORK_ORDER_SELECT)
 
@@ -1481,7 +1483,7 @@ export async function bulkUpdateWorkOrderStatus(
     // bulk-completes ten recurring WOs at month end gets an owner P&L short
     // ten maintenance expenses, and ten source schedules stuck on their old
     // next_due_date so the cron re-creates the same work orders.
-    if (status === 'completed' && updatedRows?.length) {
+    if (isCompleting && updatedRows?.length) {
       await finalizeWorkOrderCompletion(
         supabase,
         membership.org_id,

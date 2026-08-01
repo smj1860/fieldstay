@@ -741,6 +741,7 @@ async function geocodeZip(zip: string): Promise<{ lat: number; lng: number } | n
 | Checking `role = 'admin'` manually | Use `is_org_member()` — it handles `owner` automatically |
 | Skipping Stripe webhook signature verification | Always `constructEvent()` first |
 | Using a new event name in `inngest.send()` without registering it | Add to `FieldStayEvents` in `lib/inngest/events.ts` first — build fails with type error if missing |
+| Completing a work order by writing `status: 'completed'` yourself | Write `workOrderCompletionFields()` and then call `finalizeWorkOrderCompletion()` with the rows the UPDATE returned (`app/(dashboard)/maintenance/complete-work-order-helpers.ts`) — the status write alone skips the `work-order/completed` event (so no `owner_transactions` maintenance expense), `completed_date`, the `work_order_updates` row, and the source-schedule advance. Enforced by `unit/guardrails/work-order-completion-side-effects.test.ts` |
 | Creating Inngest functions at `inngest/functions/` | All functions live at `lib/inngest/functions/` |
 | Adding a second `export const { GET, POST, PUT } = serve({...})` to the Inngest route | There is exactly ONE serve() call in `app/api/inngest/route.ts` — add functions to its array |
 

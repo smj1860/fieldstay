@@ -46,16 +46,19 @@ jobs:
   # Two rule families, gated differently on purpose — see .semgrep/README.md.
   #
   #   .semgrep/chokepoints.yml — capabilities with exactly ONE legitimate owner
-  #     (service role key, Telnyx, raw limiter, private-bucket getPublicUrl,
-  #     `void` on a lazy PostgREST builder, tables/columns that do not exist).
-  #     Currently ZERO findings, so this gates at --error across the WHOLE tree,
-  #     not just the diff: a violation anywhere fails the build immediately.
+  #     (service role key, Telnyx, raw limiter, role-filtered
+  #     organization_members reads, untimed outbound fetch, private-bucket
+  #     getPublicUrl, `void` on a lazy PostgREST builder, tables/columns that do
+  #     not exist). Currently ZERO findings, so this gates at --error across the
+  #     WHOLE tree, not just the diff: a violation anywhere fails the build
+  #     immediately. The last two were promoted out of ratchet.yml once their
+  #     counts reached 0 — that promotion is what the ratchet is for.
   #
   #   .semgrep/ratchet.yml — defect classes with hundreds of pre-existing sites
-  #     (unbounded selects, discarded write results, reads destructured without
-  #     `error`). Gated on --baseline-commit so only findings NEW relative to
-  #     the PR base fail, plus the committed per-rule counts in
-  #     .semgrep/baseline-counts.json which may only go down.
+  #     (the four-tier unbounded-select ladder, discarded write results, reads
+  #     destructured without `error`). Gated on --baseline-commit so only
+  #     findings NEW relative to the PR base fail, plus the committed per-rule
+  #     counts in .semgrep/baseline-counts.json which may only go down.
   #
   # NOTE ON fetch-depth: --baseline-commit needs the base commit's objects in
   # the local clone. actions/checkout defaults to fetch-depth: 1, which fetches
