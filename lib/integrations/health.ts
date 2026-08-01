@@ -19,6 +19,7 @@
 // ============================================================
 
 import { createServiceClient } from '@/lib/supabase/server'
+import { fetchAllRows } from '@/lib/inngest/paginate'
 import { unwrapJoin } from '@/lib/utils/supabase-joins'
 
 export type HealthStatus = 'healthy' | 'never_synced' | 'needs_attention' | 'needs_reconnect'
@@ -70,14 +71,21 @@ function feedStatus(lastSyncStatus: string | null, lastSyncedAt: string | null):
 export async function getIntegrationHealth(orgId: string): Promise<IntegrationHealthItem[]> {
   const admin = createServiceClient({ system: 'lib/integrations/health' })
 
-  const [{ data: connections }, { data: providers }, { data: feeds }] = await Promise.all([
+  const [{ data: connections }, providers, { data: feeds }] = await Promise.all([
     admin
       .from('integration_connections')
       .select('id, provider_id, status, metadata, updated_at')
       .eq('org_id', orgId),
-    admin
-      .from('integration_providers')
-      .select('id, display_name'),
+    // Small platform registry, but paginated so it cannot truncate: a missing
+    // provider row here renders as a blank integration NAME in the health UI.
+    fetchAllRows<{ id: string; display_name: string }>(
+      (from, to) => admin
+        .from('integration_providers')
+        .select('id, display_name')
+        .order('id')
+        .range(from, to),
+      { label: 'integrations.health.providers' },
+    ),
     admin
       .from('ical_feeds')
       .select('id, property_id, name, source, last_synced_at, last_sync_status, last_sync_error, properties ( name )')
@@ -85,7 +93,7 @@ export async function getIntegrationHealth(orgId: string): Promise<IntegrationHe
       .eq('is_active', true),
   ])
 
-  const providerNames = Object.fromEntries((providers ?? []).map((p) => [p.id, p.display_name]))
+  const providerNames = Object.fromEntries(providers.map((p) => [p.id, p.display_name]))
 
   const connectionItems: IntegrationHealthItem[] = (connections ?? []).map((c) => {
     const metadata      = (c.metadata ?? {}) as Record<string, unknown>

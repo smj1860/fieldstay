@@ -66,29 +66,6 @@ rules:
   # coverage — and the ladder already promotes half of lib/inngest's findings
   # into the top two tiers on merit rather than by path.
 
-  # ── Tier 1: nothing bounds this read but the table ───────────────────────
-  # No equality filter of any kind anywhere in the chain. Whatever this
-  # returns is the whole table (or an arbitrarily long `.in()` list over it),
-  # truncated at 1000. This is the exact shape of all eight cron defects the
-  # 2026-07-30 audit found, and it is the tier to burn down to zero first: at
-  # zero it can move to chokepoints.yml and gate at --error.
-  - id: fieldstay-supabase-unbounded-select-table-scan
-    languages: [typescript]
-    severity: ERROR
-    message: >-
-      Unbounded .select() with NO equality filter at all — this reads the whole
-      table and PostgREST truncates it at max_rows = 1000 with a 200 and no
-      truncation signal. Bound it: fetchAllRows() (lib/inngest/paginate.ts),
-      .limit(), .single()/.maybeSingle(), or a { count: 'exact', head: true }
-      aggregate.
-    patterns:
-      - pattern: $S.from($T).select(...)
-      - pattern-not-inside: $X.limit(...)
-      - pattern-not-inside: $X.range(...)
-      - pattern-not-inside: $X.single(...)
-      - pattern-not-inside: $X.maybeSingle(...)
-      - pattern-not: "$S.from($T).select($SEL, {..., head: true, ...})"
-      - pattern-not-inside: $X.eq($COL, ...)
 
   # ── Tier 2: bounded by something, but not by tenant ──────────────────────
   # Has an equality filter, so it is not a bare table scan, but nothing pins

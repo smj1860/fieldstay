@@ -1,6 +1,7 @@
 'use server'
 
 import { revalidatePath } from 'next/cache'
+import { fetchAllRows } from '@/lib/inngest/paginate'
 import { requirePlatformAdmin } from '@/lib/auth'
 import { createServiceClient } from '@/lib/supabase/server'
 import { logAuditEvent } from '@/lib/audit'
@@ -227,17 +228,20 @@ export async function listOrgsForBroadcast(): Promise<{ orgs?: { id: string; nam
     const { user } = await requirePlatformAdmin()
 
     const supabase = createServiceClient({ platformAdmin: { id: user.id } })
-    const { data, error } = await supabase
-      .from('organizations')
-      .select('id, name')
-      .order('name')
+    // Grows with the PLATFORM, not with one tenant — precisely the case the
+    // 1000-row cap exists to bite. fetchAllRows throws on a query error, which
+    // the enclosing catch already turns into the same user-facing message the
+    // inline `if (error)` produced.
+    const data = await fetchAllRows<{ id: string; name: string }>(
+      (from, to) => supabase
+        .from('organizations')
+        .select('id, name')
+        .order('name')
+        .range(from, to),
+      { label: 'admin.inventoryTemplates.organizations' },
+    )
 
-    if (error) {
-      console.error('[listOrgsForBroadcast]', error)
-      return { error: 'Failed to load accounts.' }
-    }
-
-    return { orgs: data ?? [] }
+    return { orgs: data }
   } catch (err) {
     console.error('[listOrgsForBroadcast]', err)
     reportError(err, { site: 'serverAction.admin.inventory-templates.listOrgsForBroadcast' })

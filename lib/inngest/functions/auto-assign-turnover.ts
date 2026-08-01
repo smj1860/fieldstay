@@ -84,14 +84,23 @@ export const autoAssignTurnover = inngest.createFunction(
       const windowEnd = new Date()
       windowEnd.setDate(windowEnd.getDate() + 14)
 
-      const { data: upcoming } = await supabase
-        .from('turnover_assignments')
-        .select('crew_member_id, turnovers!inner(checkout_datetime)')
-        .in('crew_member_id', availableCrew.map((c) => c.id))
-        .gte('turnovers.checkout_datetime', new Date().toISOString())
-        .lte('turnovers.checkout_datetime', windowEnd.toISOString())
+      // Paginated: bounded by a 14-day window, but a large crew across a large
+      // portfolio still fans out to more assignment rows than the cap. A
+      // truncated read UNDERSTATES workload, which biases the suggestion toward
+      // the crew members who are already the busiest.
+      const upcoming = await fetchAllRows<{ crew_member_id: string }>(
+        (from, to) => supabase
+          .from('turnover_assignments')
+          .select('crew_member_id, turnovers!inner(checkout_datetime)')
+          .in('crew_member_id', availableCrew.map((c) => c.id))
+          .gte('turnovers.checkout_datetime', new Date().toISOString())
+          .lte('turnovers.checkout_datetime', windowEnd.toISOString())
+          .order('crew_member_id')
+          .range(from, to),
+        { label: 'auto-assign-turnover.workload' },
+      )
 
-      const workloadMap = computeWorkloadMap(upcoming ?? [], (a) => a.crew_member_id)
+      const workloadMap = computeWorkloadMap(upcoming, (a) => a.crew_member_id)
 
       return {
         mode,

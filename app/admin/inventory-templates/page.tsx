@@ -1,18 +1,38 @@
 import { requirePlatformAdmin } from '@/lib/auth'
+import { fetchAllRows } from '@/lib/inngest/paginate'
 import { Card } from '@/components/ui/Card'
 import { PlatformInventoryTemplateBuilder } from './platform-inventory-template-builder'
+
+interface PlatformTemplateRow {
+  id:          string
+  name:        string
+  description: string | null
+  platform_inventory_template_items: {
+    id:              string
+    catalog_item_id: string
+    par_level:       number
+    preferred_brand: string | null
+    sort_order:      number
+  }[] | null
+}
 
 export default async function InventoryTemplatesPage() {
   const { supabase } = await requirePlatformAdmin()
 
-  const [{ data: templates }, { data: catalogItems }] = await Promise.all([
-    supabase
-      .from('platform_inventory_templates')
-      .select(`
-        id, name, description,
-        platform_inventory_template_items ( id, catalog_item_id, par_level, preferred_brand, sort_order )
-      `)
-      .order('name'),
+  const [templates, { data: catalogItems }] = await Promise.all([
+    // Paginated: this is the editor for the templates broadcast to every org,
+    // so a truncated list would let an admin edit a partial set unknowingly.
+    fetchAllRows<PlatformTemplateRow>(
+      (from, to) => supabase
+        .from('platform_inventory_templates')
+        .select(`
+          id, name, description,
+          platform_inventory_template_items ( id, catalog_item_id, par_level, preferred_brand, sort_order )
+        `)
+        .order('name')
+        .range(from, to),
+      { label: 'admin.platformInventoryTemplates' },
+    ),
     supabase
       .from('inventory_catalog')
       .select('id, name, category, default_unit')
@@ -35,7 +55,7 @@ export default async function InventoryTemplatesPage() {
         removes an item just because it was later removed from this template.
       </p>
       <PlatformInventoryTemplateBuilder
-        initialTemplates={(templates ?? []).map((t) => ({
+        initialTemplates={templates.map((t) => ({
           id:          t.id,
           name:        t.name,
           description: t.description ?? '',

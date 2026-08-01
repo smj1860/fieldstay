@@ -1296,12 +1296,16 @@ following them stops being a memory test. Five layers, checked in CI via
      every one pattern-correct and most of them the case this file explicitly
      permits (one org's page). It is now four mutually exclusive, exhaustive
      tiers ranked by what actually bounds the result set —
-     `-table-scan` (nothing but the table, ERROR, 38),
+     `-table-scan` (nothing but the table, ERROR, 38 → **0, PROMOTED to
+     `chokepoints.yml` 2026-08-01**),
      `-cross-tenant` (no `.eq('org_id', …)` anywhere, ERROR, 81),
      `-in-list` (one org but sized by an `.in()` array, WARNING, 50),
      `-org-scoped` (one org, one parent — hygiene only, INFO, 112).
-     Tier 1 is the burn-down target; at 0 it gets promoted like any other
-     rule. `lib/inngest/**` gets no tier of its own because
+     Tier 1 WAS the burn-down target and reached 0, so it now gates at
+     `--error` across the whole tree rather than only on findings new vs. the
+     PR base — a single unbounded table read anywhere fails the build. Its
+     `baseline-counts.json` key was deleted in the same change, per the
+     promotion rule. `-cross-tenant` is the next burn-down target. `lib/inngest/**` gets no tier of its own because
      `unit/guardrails/unbounded-select.test.ts` already gates it at file
      granularity. See `.semgrep/README.md` for the two semgrep mechanics
      these tiers depend on (a positive `pattern-inside` must not be wrapped

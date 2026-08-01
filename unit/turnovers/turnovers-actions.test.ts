@@ -53,7 +53,7 @@ function makeSupabase(queue: Record<string, Resp[]>) {
     const result: Resp = q?.length ? q.shift()! : { data: null, error: null }
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const chain: any = {}
-    for (const m of ['select', 'insert', 'update', 'delete', 'upsert', 'eq', 'neq', 'in', 'not', 'is']) {
+    for (const m of ['select', 'insert', 'update', 'delete', 'upsert', 'eq', 'neq', 'in', 'not', 'is', 'order', 'range']) {
       chain[m] = vi.fn((...args: unknown[]) => { calls.push({ table, method: m, args }); return chain })
     }
     chain.single      = vi.fn(() => Promise.resolve(result))

@@ -47,6 +47,7 @@
  */
 
 import { inngest }                      from '@/lib/inngest/client'
+import { fetchAllRows } from '@/lib/inngest/paginate'
 import { NonRetriableError }            from 'inngest'
 import type { GetStepTools }            from 'inngest'
 import { createServiceClient }          from '@/lib/supabase/server'
@@ -389,13 +390,18 @@ async function notifyOwnerBlockOpportunities(
 
   // Batch-fetch property names for every owner-block property in one query
   // instead of a per-booking SELECT inside the loop.
-  const { data: blockProperties } = await supabase
-    .from('properties')
-    .select('id, name')
-    .in('id', [...new Set(ownerBlocks.map((b) => b.property_id))])
+  const blockProperties = await fetchAllRows<{ id: string; name: string | null }>(
+    (from, to) => supabase
+      .from('properties')
+      .select('id, name')
+      .in('id', [...new Set(ownerBlocks.map((b) => b.property_id))])
+      .order('id')
+      .range(from, to),
+    { label: 'ownerrez-incremental.blockProperties' },
+  )
 
   const propertyNameById = Object.fromEntries(
-    (blockProperties ?? []).map((p) => [p.id, p.name as string | null])
+    blockProperties.map((p) => [p.id, p.name as string | null])
   ) as Record<string, string | null>
 
   await Promise.all(

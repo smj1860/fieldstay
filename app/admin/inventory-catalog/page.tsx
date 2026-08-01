@@ -1,15 +1,33 @@
 import { requirePlatformAdmin } from '@/lib/auth'
+import type { InventoryCategory } from '@/types/database'
+import { fetchAllRows } from '@/lib/inngest/paginate'
 import { Card } from '@/components/ui/Card'
 import { InventoryCatalogEditor } from './inventory-catalog-editor'
 
 export default async function InventoryCatalogPage() {
   const { supabase } = await requirePlatformAdmin()
 
-  const { data: items } = await supabase
-    .from('inventory_catalog')
-    .select('id, name, category, default_unit, default_par_level, description, is_active')
-    .order('category')
-    .order('name')
+  // 115 rows today; paginated so the platform catalog editor cannot silently
+  // hide items past the cap as the catalog grows.
+  interface CatalogRow {
+    id:                string
+    name:              string
+    category:          InventoryCategory
+    default_unit:      string
+    default_par_level: number
+    description:       string | null
+    is_active:         boolean
+  }
+
+  const items = await fetchAllRows<CatalogRow>(
+    (from, to) => supabase
+      .from('inventory_catalog')
+      .select('id, name, category, default_unit, default_par_level, description, is_active')
+      .order('category')
+      .order('name')
+      .range(from, to),
+    { label: 'admin.inventoryCatalog' },
+  )
 
   return (
     <Card>
@@ -23,7 +41,7 @@ export default async function InventoryCatalogPage() {
         items.
       </p>
       <InventoryCatalogEditor
-        initialItems={(items ?? []).map((i) => ({
+        initialItems={items.map((i) => ({
           id:                i.id,
           name:              i.name,
           category:          i.category,

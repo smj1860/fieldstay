@@ -46,15 +46,22 @@ bounds the result set:
 
 | Tier | Rule suffix | Bound | Sev | Count |
 |---|---|---|---|---|
-| 1 | `-table-scan` | nothing but the table | ERROR | 38 |
+| 1 | `-table-scan` | nothing but the table | ERROR | 38 → **0, promoted** |
 | 2 | `-cross-tenant` | some entity, but not one org | ERROR | 81 |
 | 3 | `-in-list` | one org, sized by an `.in()` array | WARNING | 50 |
 | 4 | `-org-scoped` | one org, one parent — the permitted case | INFO | 112 |
 
 The four are **mutually exclusive and exhaustive**: every finding of the
 original rule lands in exactly one tier, so the counts still sum to the whole
-class and no site is lost between tiers. Tier 1 is the burn-down target — at 0
-it moves to `chokepoints.yml` like any other promoted rule.
+class and no site is lost between tiers. Tier 1 WAS the burn-down target and
+reached 0 on 2026-08-01, so it now lives in `chokepoints.yml` and gates at
+`--error` across the whole tree; its `baseline-counts.json` key was deleted in
+the same change. `-cross-tenant` is the next target.
+
+Tier 1 is the one promoted rule with no `paths.exclude`: no file legitimately
+owns "read an entire table unbounded", so the exemption is expressed purely as
+the bounding constructs (`.limit` / `.range` / `.single` / `.maybeSingle` / a
+head-count aggregate) in `pattern-not-inside`.
 
 Two mechanics worth knowing before editing these:
 

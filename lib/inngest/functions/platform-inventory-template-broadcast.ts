@@ -60,11 +60,21 @@ export const broadcastPlatformInventoryTemplate = inngest.createFunction(
         .eq('platform_inventory_template_id', templateId)
       if (!items?.length) return []
 
-      const { data: catalogRows } = await supabase
-        .from('inventory_catalog')
-        .select('id, name, category, default_unit')
-        .in('id', items.map((i) => i.catalog_item_id))
-      const catalogById = new Map((catalogRows ?? []).map((c) => [c.id, c]))
+      // Nullability matches the live schema: name, category and default_unit
+      // are all NOT NULL on inventory_catalog (default_unit NOT NULL DEFAULT
+      // 'units').
+      const catalogRows = await fetchAllRows<{
+        id: string; name: string; category: string; default_unit: string
+      }>(
+        (from, to) => supabase
+          .from('inventory_catalog')
+          .select('id, name, category, default_unit')
+          .in('id', items.map((i) => i.catalog_item_id))
+          .order('id')
+          .range(from, to),
+        { label: 'platform-inventory-broadcast.catalog' },
+      )
+      const catalogById = new Map(catalogRows.map((c) => [c.id, c]))
 
       const merged: MasterItem[] = []
       for (const item of items) {

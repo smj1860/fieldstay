@@ -55,7 +55,8 @@ jobs:
   #     counts reached 0 — that promotion is what the ratchet is for.
   #
   #   .semgrep/ratchet.yml — defect classes with hundreds of pre-existing sites
-  #     (the four-tier unbounded-select ladder, discarded write results, reads
+  #     (the unbounded-select ladder's remaining three tiers — tier 1 reached 0
+  #     and was promoted to chokepoints.yml — discarded write results, reads
   #     destructured without `error`). Gated on --baseline-commit so only
   #     findings NEW relative to the PR base fail, plus the committed per-rule
   #     counts in .semgrep/baseline-counts.json which may only go down.

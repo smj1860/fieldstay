@@ -1,4 +1,6 @@
 import 'server-only'
+import { reportError } from '@/lib/observability/report-error'
+import { fetchAllRows } from '@/lib/inngest/paginate'
 import { createServiceClient } from '@/lib/supabase/server'
 import { logAuditEvent } from '@/lib/audit'
 
@@ -22,20 +24,44 @@ interface SeedTemplate {
 // deploy — not sourced from CLEANING_CATALOG/org_master_checklist_items,
 // which this feature replaces rather than reads from.
 async function fetchPlatformSeedTemplates(supabase: ServiceClient): Promise<SeedTemplate[]> {
-  const { data, error } = await supabase
-    .from('platform_seed_room_templates')
-    .select(`
-      name, auto_include, sort_order,
-      platform_seed_room_template_items ( task, requires_photo, notes, sort_order )
-    `)
-    .order('sort_order')
+  // Platform seed catalog — small today, but this is the read that defines a
+  // new org's entire default room library, so a truncated result silently
+  // onboards that org with an incomplete set of rooms.
+  interface SeedTemplateRow {
+    name:         string
+    auto_include: boolean
+    sort_order:   number
+    platform_seed_room_template_items: {
+      task:           string
+      requires_photo: boolean
+      notes:          string | null
+      sort_order:     number
+    }[] | null
+  }
 
-  if (error) {
+  let data: SeedTemplateRow[]
+  try {
+    data = await fetchAllRows<SeedTemplateRow>(
+      (from, to) => supabase
+        .from('platform_seed_room_templates')
+        .select(`
+          name, auto_include, sort_order,
+          platform_seed_room_template_items ( task, requires_photo, notes, sort_order )
+        `)
+        .order('sort_order')
+        .range(from, to),
+      { label: 'seedDefaultRoomTemplates.platformSeedTemplates' },
+    )
+  } catch (error) {
+    // Reported, not just logged: returning [] here silently onboards a brand-new
+    // org with NO default room templates at all, which looks like a product
+    // decision rather than an outage to everyone downstream.
     console.error('[seedDefaultRoomTemplatesIfNeeded] failed to fetch platform seed templates:', error)
+    reportError(error, { site: 'lib.checklists.seedDefaultRoomTemplates.fetchPlatformSeedTemplates' })
     return []
   }
 
-  return (data ?? []).map((t) => ({
+  return data.map((t) => ({
     name:        t.name,
     autoInclude: t.auto_include,
     tasks: [...(t.platform_seed_room_template_items ?? [])]

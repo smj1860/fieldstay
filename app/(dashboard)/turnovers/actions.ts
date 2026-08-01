@@ -1,6 +1,7 @@
 'use server'
 
 import { revalidatePath } from 'next/cache'
+import { fetchAllRows } from '@/lib/inngest/paginate'
 import { requireOrgMember, requireOrgRole } from '@/lib/auth'
 import { inngest, sendEventAsync } from '@/lib/inngest/client'
 import { logAuditEvent } from '@/lib/audit'
@@ -174,12 +175,19 @@ export async function assignCrew(
       .eq('status', 'pending_assignment')
 
     const propertyIds = [...new Set(turnovers.map(t => t.property_id))]
-    const { data: propertyRows } = await supabase
-      .from('properties')
-      .select('id, bedrooms')
-      .in('id', propertyIds)
+    // Paginated: propertyIds is derived from a bulk turnover selection, and a
+    // large portfolio's bulk action can list more properties than the cap.
+    const propertyRows = await fetchAllRows<{ id: string; bedrooms: number | null }>(
+      (from, to) => supabase
+        .from('properties')
+        .select('id, bedrooms')
+        .in('id', propertyIds)
+        .order('id')
+        .range(from, to),
+      { label: 'turnovers.actions.propertyBedrooms' },
+    )
     const propertyBedrooms = Object.fromEntries(
-      (propertyRows ?? []).map(p => [p.id, p.bedrooms as number | null])
+      propertyRows.map(p => [p.id, p.bedrooms as number | null])
     )
     await trackAssignmentAgainstSuggestions(membership.org_id, crewMemberId, crew.name, turnovers, propertyBedrooms)
 
@@ -545,12 +553,19 @@ export async function addCrewToTurnover(
     }
 
     const propertyIds = [...new Set(turnovers.map(t => t.property_id))]
-    const { data: propertyRows } = await supabase
-      .from('properties')
-      .select('id, bedrooms')
-      .in('id', propertyIds)
+    // Paginated: propertyIds is derived from a bulk turnover selection, and a
+    // large portfolio's bulk action can list more properties than the cap.
+    const propertyRows = await fetchAllRows<{ id: string; bedrooms: number | null }>(
+      (from, to) => supabase
+        .from('properties')
+        .select('id, bedrooms')
+        .in('id', propertyIds)
+        .order('id')
+        .range(from, to),
+      { label: 'turnovers.actions.propertyBedrooms' },
+    )
     const propertyBedrooms = Object.fromEntries(
-      (propertyRows ?? []).map(p => [p.id, p.bedrooms as number | null])
+      propertyRows.map(p => [p.id, p.bedrooms as number | null])
     )
     await trackAssignmentAgainstSuggestions(membership.org_id, crewMemberId, crew.name, turnovers, propertyBedrooms)
 

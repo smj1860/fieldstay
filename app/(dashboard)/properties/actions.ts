@@ -1,6 +1,7 @@
 'use server'
 
 import { revalidatePath } from 'next/cache'
+import { fetchAllRows } from '@/lib/inngest/paginate'
 import { redirect, unstable_rethrow } from 'next/navigation'
 import { requireOrgMember, requireOrgRole } from '@/lib/auth'
 import { geocodeZip } from '@/lib/geocoding'
@@ -743,11 +744,26 @@ export async function bulkImportAssets(
 
     if (!property) return { imported: 0, error: 'Property not found' }
 
-    const { data: standards } = await supabase
-      .from('asset_type_standards')
-      .select('asset_type, macrs_class_default, lifespan_min_years, lifespan_max_years')
+    // Platform catalog (21 rows today). fetchAllRows costs exactly one request
+    // at this size and cannot silently truncate if the catalog ever grows.
+    // Nullability matches the live schema: all three are NOT NULL on
+    // asset_type_standards (lifespan_min_years / lifespan_max_years smallint
+    // NOT NULL, macrs_class_default NOT NULL DEFAULT '5_year').
+    const standards = await fetchAllRows<{
+      asset_type:          string
+      macrs_class_default: string
+      lifespan_min_years:  number
+      lifespan_max_years:  number
+    }>(
+      (from, to) => supabase
+        .from('asset_type_standards')
+        .select('asset_type, macrs_class_default, lifespan_min_years, lifespan_max_years')
+        .order('asset_type')
+        .range(from, to),
+      { label: 'properties.actions.assetTypeStandards' },
+    )
 
-    const stdMap = Object.fromEntries((standards ?? []).map((s) => [s.asset_type, s]))
+    const stdMap = Object.fromEntries(standards.map((s) => [s.asset_type, s]))
 
     const insertRows = rows.map((row) => {
       const std = stdMap[row.asset_type]

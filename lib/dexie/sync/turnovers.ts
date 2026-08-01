@@ -413,7 +413,7 @@ export async function pullTurnoversOnly(
   const db = getDexieDb(userId)
 
   const turnovers = await fetchInChunks(turnoverIds, (chunk) =>
-    supabase.from('turnovers').select(TURNOVER_COLUMNS).in('id', chunk),
+    supabase.from('turnovers').select(TURNOVER_COLUMNS).in('id', chunk).limit(IN_CHUNK_SIZE),
   )
   if (turnovers === null) {
     console.error('[turnoverSync] turnovers re-fetch failed')

@@ -173,3 +173,45 @@ rules:
       - metavariable-regex:
           metavariable: $B
           regex: ^['"](work-order-photos|turnover-photos|compliance-documents)['"]$
+
+  # ── PROMOTED from ratchet.yml 2026-08-01, at 0 findings ──────────────────
+  # An unbounded .select() with NO equality filter anywhere in the chain: the
+  # read is the whole table, and PostgREST truncates it at max_rows = 1000 with
+  # a 200, no error, and no truncation signal. This was the highest-impact
+  # systemic finding of the 2026-07-30 audit (eight platform-wide crons had each
+  # silently stopped covering every tenant past row 1000, with CI green).
+  #
+  # It started at 38 and was burned to 0 across four passes, which is what the
+  # ratchet exists to enable. Promotion means it now gates at --error across the
+  # WHOLE tree instead of only on new findings vs. the PR base — a single
+  # unbounded table read anywhere fails the build immediately.
+  #
+  # Unlike the other rules here, this one is not scoped by paths.exclude: there
+  # is no file that legitimately owns "read an entire table unbounded". The
+  # bounding constructs (.limit / .range / .single / .maybeSingle / a head-count
+  # aggregate) are the exemption, and they are expressed as pattern-not-inside.
+  #
+  # Its baseline-counts.json key was deleted in the same change, per the
+  # promotion rule in .semgrep/README.md.
+  # No equality filter of any kind anywhere in the chain. Whatever this
+  # returns is the whole table (or an arbitrarily long `.in()` list over it),
+  # truncated at 1000. This is the exact shape of all eight cron defects the
+  # 2026-07-30 audit found, and it is the tier to burn down to zero first: at
+  # zero it can move to chokepoints.yml and gate at --error.
+  - id: fieldstay-supabase-unbounded-select-table-scan
+    languages: [typescript]
+    severity: ERROR
+    message: >-
+      Unbounded .select() with NO equality filter at all — this reads the whole
+      table and PostgREST truncates it at max_rows = 1000 with a 200 and no
+      truncation signal. Bound it: fetchAllRows() (lib/inngest/paginate.ts),
+      .limit(), .single()/.maybeSingle(), or a { count: 'exact', head: true }
+      aggregate.
+    patterns:
+      - pattern: $S.from($T).select(...)
+      - pattern-not-inside: $X.limit(...)
+      - pattern-not-inside: $X.range(...)
+      - pattern-not-inside: $X.single(...)
+      - pattern-not-inside: $X.maybeSingle(...)
+      - pattern-not: "$S.from($T).select($SEL, {..., head: true, ...})"
+      - pattern-not-inside: $X.eq($COL, ...)
