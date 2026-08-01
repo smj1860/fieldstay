@@ -33,7 +33,7 @@ import {
   type InventoryItemRow,
 } from '../schema'
 import { getCursor, advanceCursor, partitionByKnown } from './cursors'
-import { fetchInChunks } from './chunked'
+import { fetchInChunks, fetchInChunksPaginated, IN_CHUNK_SIZE } from './chunked'
 import { bulkPutShadowed } from './shadow'
 import { reportError } from '@/lib/observability/report-error'
 
@@ -117,7 +117,7 @@ async function fetchTurnoverRows(
     // No cursor yet (or forced): one full pull of the whole scope
     const fullIds = cursor === null ? assignedIds : fresh
     const data = await fetchInChunks<string, Record<string, unknown>>(fullIds, (chunk) =>
-      supabase.from('turnovers').select(TURNOVER_COLUMNS).in('id', chunk),
+      supabase.from('turnovers').select(TURNOVER_COLUMNS).in('id', chunk).limit(IN_CHUNK_SIZE),
     )
     if (data === null) {
       console.error('[turnoverSync] turnovers fetch failed')
@@ -129,7 +129,7 @@ async function fetchTurnoverRows(
 
   if (cursor !== null && known.length) {
     const data = await fetchInChunks<string, Record<string, unknown>>(known, (chunk) =>
-      supabase.from('turnovers').select(TURNOVER_COLUMNS).in('id', chunk).gt('updated_at', cursor),
+      supabase.from('turnovers').select(TURNOVER_COLUMNS).in('id', chunk).gt('updated_at', cursor).limit(IN_CHUNK_SIZE),
     )
     if (data === null) {
       console.error('[turnoverSync] turnovers delta fetch failed')
@@ -167,7 +167,8 @@ async function syncScopeReferenceData(
       supabase
         .from('properties')
         .select('id, org_id, name, address, city, state, lat, lng, timezone')
-        .in('id', chunk),
+        .in('id', chunk)
+        .limit(IN_CHUNK_SIZE),
     )
     if (properties === null) {
       console.error('[turnoverSync] properties fetch failed')
@@ -364,8 +365,13 @@ async function fetchWithCursorSplit(
 
   const fullIds = cursor === null ? [...knownIds, ...freshIds] : freshIds
   if (fullIds.length) {
-    const data = await fetchInChunks(fullIds, (chunk) =>
-      supabase.from(table).select(columns).in(scopeColumn, chunk),
+    // Paginated per chunk: scopeColumn is turnover_id, a ONE-TO-MANY scope, so
+    // chunking the id list does not bound the row count (see
+    // fetchInChunksPaginated). 100 turnovers x 30-60 checklist items is well
+    // past PostgREST's 1000-row cap.
+    const data = await fetchInChunksPaginated(fullIds, (chunk, from, to) =>
+      supabase.from(table).select(columns).in(scopeColumn, chunk)
+        .order('id').range(from, to),
     )
     if (data === null) {
       console.error(`[turnoverSync] ${table} fetch failed`)
@@ -376,8 +382,9 @@ async function fetchWithCursorSplit(
   }
 
   if (cursor !== null && knownIds.length) {
-    const data = await fetchInChunks(knownIds, (chunk) =>
-      supabase.from(table).select(columns).in(scopeColumn, chunk).gt('updated_at', cursor),
+    const data = await fetchInChunksPaginated(knownIds, (chunk, from, to) =>
+      supabase.from(table).select(columns).in(scopeColumn, chunk).gt('updated_at', cursor)
+        .order('id').range(from, to),
     )
     if (data === null) {
       console.error(`[turnoverSync] ${table} delta fetch failed`)

@@ -35,3 +35,40 @@ export async function fetchInChunks<TId, TRow>(
   }
   return rows
 }
+
+/** PostgREST's max_rows cap (supabase/config.toml). See fetchInChunksPaginated. */
+const SUPABASE_MAX_ROWS = 1000
+
+/**
+ * fetchInChunks for a ONE-TO-MANY scope, where chunking the id list does NOT
+ * bound the row count.
+ *
+ * fetchInChunks is safe when the scope column is the row's own id: 100 ids in,
+ * at most 100 rows out. It is NOT safe when one scoped id maps to many rows.
+ * checklist_instance_items is queried by `turnover_id`, and a turnover's
+ * checklist runs 30–60 items — so a 100-turnover chunk asks for 3,000–6,000
+ * rows and PostgREST returns the first 1,000 with a 200 and no truncation
+ * signal. The crew PWA then wrote that truncated page into Dexie as if it were
+ * the whole checklist: tasks silently missing from a crew member's device,
+ * with nothing logged and no error to retry.
+ *
+ * Each chunk is drained by `.range()` until a short page arrives, so the row
+ * count no longer has a ceiling — only the id list is chunked, and only to
+ * keep the query string under the gateway's URL limit.
+ */
+export async function fetchInChunksPaginated<TId, TRow>(
+  ids:       readonly TId[],
+  fetchPage: (chunk: TId[], from: number, to: number) => Promise<{ data: TRow[] | null; error: unknown }>,
+): Promise<TRow[] | null> {
+  const rows: TRow[] = []
+  for (const chunk of chunkIds(ids)) {
+    for (let from = 0; ; from += SUPABASE_MAX_ROWS) {
+      const { data, error } = await fetchPage(chunk, from, from + SUPABASE_MAX_ROWS - 1)
+      if (error) return null
+      const page = data ?? []
+      rows.push(...page)
+      if (page.length < SUPABASE_MAX_ROWS) break
+    }
+  }
+  return rows
+}

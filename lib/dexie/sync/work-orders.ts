@@ -15,7 +15,7 @@
 import type { DexieSupabaseClient } from './types'
 import { getDexieDb, type CrewWorkOrderRow, type PropertyRow } from '../schema'
 import { getCursor, advanceCursor } from './cursors'
-import { fetchInChunks } from './chunked'
+import { fetchInChunks, IN_CHUNK_SIZE } from './chunked'
 import { bulkPutShadowed } from './shadow'
 import { reportError } from '@/lib/observability/report-error'
 
@@ -127,7 +127,8 @@ export async function syncWorkOrders(
         supabase
           .from('properties')
           .select('id, org_id, name, address, city, state, lat, lng, timezone')
-          .in('id', chunk),
+          .in('id', chunk)
+          .limit(IN_CHUNK_SIZE),
       )
       if (properties === null) {
         console.error('[work-orders sync] properties fetch failed')

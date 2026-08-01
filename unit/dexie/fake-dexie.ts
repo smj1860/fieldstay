@@ -83,7 +83,13 @@ export function makeFakeSupabase(queued: Record<string, { data?: unknown; error?
       calls.push({ table, method, args })
       return chain
     }
-    for (const m of ['select', 'eq', 'in', 'gt', 'not', 'or', 'update']) {
+    // 'limit'  — id-scoped chunk reads now assert their own ceiling
+    //            (.limit(IN_CHUNK_SIZE)); the limit never binds, it documents
+    //            that N ids in can only yield N rows out.
+    // 'order'/'range' — the one-to-many checklist reads drain each chunk via
+    //            fetchInChunksPaginated, because chunking turnover_ids does
+    //            NOT bound the item rows those ids fan out to.
+    for (const m of ['select', 'eq', 'in', 'gt', 'not', 'or', 'update', 'limit', 'order', 'range']) {
       chain[m] = (...a: unknown[]) => record(m, a)
     }
     const resolveNext = () => {
