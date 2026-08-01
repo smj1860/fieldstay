@@ -903,7 +903,7 @@ export async function sendQuoteRequests(
 /** Return shape of the `approve_quote_request(uuid, uuid, text, timestamptz)` RPC. */
 type ApproveQuoteResult =
   | { ok: true;  work_order_id: string; vendor_id: string; quoted_amount: number | null; declined: number }
-  | { ok: false; reason: 'quote_not_found' | 'not_submitted' | 'work_order_not_found' }
+  | { ok: false; reason: 'quote_not_found' | 'not_submitted' | 'work_order_not_found' | 'work_order_not_assignable' }
 
 export async function approveQuoteRequest(
   quoteRequestId: string
@@ -969,6 +969,12 @@ export async function approveQuoteRequest(
     if (!result.ok) {
       if (result.reason === 'work_order_not_found') {
         return { error: 'The work order for this quote no longer exists.' }
+      }
+      // The RPC refuses to resurrect a cancelled or completed work order. Say
+      // so — falling through to the "not submitted by the vendor" message
+      // below would describe the wrong thing entirely.
+      if (result.reason === 'work_order_not_assignable') {
+        return { error: 'That work order is already completed or cancelled, so a quote can no longer be approved against it.' }
       }
       return { error: 'Can only approve a quote that has been submitted by the vendor' }
     }

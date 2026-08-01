@@ -932,6 +932,29 @@ describe('maintenance/actions', () => {
       expect(inngest.send).not.toHaveBeenCalled()
     })
 
+    it('reports a cancelled or completed work order distinctly, not as "not submitted"', async () => {
+      // Greptile caught this: the RPC gained a work_order_not_assignable reason
+      // (it refuses to resurrect a cancelled/completed WO) and the action's
+      // union did not, so the case fell through to the vendor-submission
+      // message — describing entirely the wrong problem.
+      const supabase = makeSupabase({
+        quote_requests: [
+          { data: { id: 'qr_1', work_order_id: 'wo_1', vendor_id: 'vendor_1', quoted_amount: 250, status: 'submitted', org_id: 'org_1' } },
+        ],
+        vendor_compliance_status: compliant(),
+      }, 'user_1', {
+        approve_quote_request: { data: { ok: false, reason: 'work_order_not_assignable' } },
+      })
+      vi.mocked(requireOrgRole).mockResolvedValue({ supabase, membership } as never)
+
+      const result = await approveQuoteRequest('qr_1')
+
+      expect(result).toEqual({
+        error: 'That work order is already completed or cancelled, so a quote can no longer be approved against it.',
+      })
+      expect(inngest.send).not.toHaveBeenCalled()
+    })
+
     it('surfaces an RPC error rather than reporting the approval as done', async () => {
       const supabase = makeSupabase({
         quote_requests: [
