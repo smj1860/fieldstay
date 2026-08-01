@@ -71,12 +71,6 @@ export async function generatePortalToken(ownerId: string): Promise<OwnersAction
   try {
     const { supabase, membership, user } = await requireOrgMember()
 
-    const rl = await checkLimit(emailSendActionLimiter, `portal-token:${user.id}`, {
-      onError: 'allow',
-      site:    'serverAction.owners.generatePortalToken',
-    })
-    if (!rl.allowed) return { error: 'Too many portal links generated. Please try again in a little while.' }
-
     // Verify owner belongs to this org
     const { data: owner } = await supabase
       .from('property_owners')
@@ -86,6 +80,16 @@ export async function generatePortalToken(ownerId: string): Promise<OwnersAction
       .single()
 
     if (!owner) return { error: 'Owner not found' }
+
+    // Rate limit AFTER the ownership check: an unauthorized or nonexistent
+    // target must not consume budget, and must get its own error rather than a
+    // throttling one. An auth gate proves WHO is sending, not HOW OFTEN.
+    // Fails OPEN — an abuse limiter must not block real work during an outage.
+    const rl = await checkLimit(emailSendActionLimiter, `portal-token:${user.id}`, {
+      onError: 'allow',
+      site:    'serverAction.owners.generatePortalToken',
+    })
+    if (!rl.allowed) return { error: 'Too many portal links generated. Please try again in a little while.' }
 
     // Generate a secure token
     const token     = crypto.randomUUID()

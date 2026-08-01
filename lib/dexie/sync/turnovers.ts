@@ -178,12 +178,21 @@ async function syncScopeReferenceData(
     if (properties.length) await db.properties.bulkPut(properties as PropertyRow[])
   }
 
-  const inventory = await fetchInChunks(propertyIds, (chunk) =>
-    supabase
-      .from('inventory_items')
-      .select('id, property_id, org_id, name, category, unit, par_level, current_quantity')
-      .in('property_id', chunk)
-      .eq('is_active', true),
+  // Paginated per chunk — ONE-TO-MANY, and the worst instance of it in the
+  // codebase: CLAUDE.md states outright that one org's inventory_items across
+  // 50 properties is ~5,750 rows. Chunking property_ids never bounded that, so
+  // a crew member's device silently received the first 1000 items and treated
+  // that as the complete par list.
+  const inventory = await fetchInChunksPaginated(
+    propertyIds,
+    (chunk, from, to) =>
+      supabase
+        .from('inventory_items')
+        .select('id, property_id, org_id, name, category, unit, par_level, current_quantity')
+        .in('property_id', chunk)
+        .eq('is_active', true)
+        .order('id')
+        .range(from, to),
   )
   if (inventory === null) {
     console.error('[turnoverSync] inventory fetch failed')

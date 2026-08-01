@@ -34,6 +34,9 @@ function makeSupabase(queued: QueuedByTable) {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const chain: any = {}
     chain.select = () => chain
+    // These reads paginate via fetchAllRows(), which drains .order().range().
+    chain.order  = vi.fn(() => chain)
+    chain.range  = vi.fn(() => chain)
     chain.eq     = () => chain
     chain.in     = () => chain
     chain.not    = () => chain

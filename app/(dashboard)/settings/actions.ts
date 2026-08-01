@@ -856,15 +856,22 @@ export async function inviteAllUninvitedCrew(): Promise<{ sent: number; error?: 
   try {
     const { user, supabase, membership } = await requireOrgMember()
 
+    if (!['owner', 'admin', 'manager'].includes(membership.role)) {
+      return { sent: 0, error: 'Permission denied' }
+    }
+
+    // Rate limit AFTER the authorization check: an unauthorized caller must not
+    // consume another user's budget, and must get the authorization error rather
+    // than a throttling one. An auth gate proves WHO is sending, not HOW OFTEN —
+    // without this one member can drive unlimited outbound mail from our sending
+    // domain, which risks the domain's reputation using someone else's address
+    // as the target. Fails OPEN: an abuse limiter must not block real invites
+    // during a Redis outage.
     const rl = await checkLimit(emailSendActionLimiter, `crew-bulk-invite:${user.id}`, {
       onError: 'allow',
       site:    'serverAction.settings.inviteAllUninvitedCrew',
     })
     if (!rl.allowed) return { sent: 0, error: 'Too many invites sent. Please try again in a little while.' }
-
-    if (!['owner', 'admin', 'manager'].includes(membership.role)) {
-      return { sent: 0, error: 'Permission denied' }
-    }
 
     const { data: uninvited, error: queryError } = await supabase
       .from('crew_members')

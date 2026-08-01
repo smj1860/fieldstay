@@ -1,5 +1,20 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 
+vi.mock('@/lib/rate-limit', async () => {
+  // Stubbed because the email-send actions here now go through checkLimit().
+  // Without this the unit run consults the REAL Upstash instance configured in
+  // the environment, which makes these tests share (and exhaust) a live
+  // 20/hour budget keyed on the fixture user id — a test that fails only
+  // because an earlier run of itself used up the quota.
+  const { checkLimitStub, retryAfterSecondsStub } = await import('@/unit/stubs/rate-limit')
+  return {
+    emailSendActionLimiter: { limit: vi.fn(async () => ({ success: true })) },
+    checkLimit:             checkLimitStub(),
+    retryAfterSeconds:      retryAfterSecondsStub,
+    upstashConfigured:      () => false,
+  }
+})
+
 vi.mock('@/lib/auth', () => ({
   requireOrgMember: vi.fn(),
   requireOrgRole:   vi.fn(),

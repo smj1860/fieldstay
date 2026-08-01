@@ -216,12 +216,6 @@ export async function resendVendorConnectInvite(
   try {
     const { supabase, membership } = await requireOrgRole(['admin', 'manager'])
 
-    const rl = await checkLimit(emailSendActionLimiter, `vendor-invite:${membership.org_id}`, {
-      onError: 'allow',
-      site:    'serverAction.vendors.resendVendorConnectInvite',
-    })
-    if (!rl.allowed) return { error: 'Too many invites sent. Please try again in a little while.' }
-
     const { data: vendor } = await supabase
       .from('vendors')
       .select('id, name, email, stripe_connect_charges_enabled, stripe_connect_token')
@@ -234,6 +228,16 @@ export async function resendVendorConnectInvite(
     if (vendor.stripe_connect_charges_enabled) {
       return { error: 'This vendor is already connected — no need to resend.' }
     }
+
+    // Rate limit AFTER the ownership check: an unauthorized or nonexistent
+    // target must not consume budget, and must get its own error rather than a
+    // throttling one. An auth gate proves WHO is sending, not HOW OFTEN.
+    // Fails OPEN — an abuse limiter must not block real work during an outage.
+    const rl = await checkLimit(emailSendActionLimiter, `vendor-invite:${membership.org_id}`, {
+      onError: 'allow',
+      site:    'serverAction.vendors.resendVendorConnectInvite',
+    })
+    if (!rl.allowed) return { error: 'Too many invites sent. Please try again in a little while.' }
 
     const { data: org } = await supabase
       .from('organizations')

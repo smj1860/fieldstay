@@ -1,4 +1,5 @@
 import type { Metadata } from 'next'
+import { fetchAllRows } from '@/lib/inngest/paginate'
 import { requireOrgMember } from '@/lib/auth'
 import { isMaintenanceItemActiveThisMonth } from '@/lib/utils/maintenance'
 import type { MaintenanceCandidate } from '@/lib/maintenance/vacancy-suggestions'
@@ -133,16 +134,25 @@ export default async function BookingsPage() {
 
   const propertyIds = (properties ?? []).map((p) => p.id)
 
-  const { data: allSchedules } = propertyIds.length
-    ? await supabase
-        .from('maintenance_schedules')
-        .select('id, property_id, name, next_due_date, estimated_cost, assigned_vendor_id, active_from_month, active_to_month')
-        .in('property_id', propertyIds)
-        .eq('is_active', true)
-    : { data: [] }
+  // Paginated: ONE-TO-MANY over this org's properties, so the row count scales
+  // with properties x schedules-per-property rather than with a single parent.
+  // A truncated read silently drops maintenance off the later properties'
+  // booking calendar — the page renders as though they have none scheduled.
+  const allSchedules = propertyIds.length
+    ? await fetchAllRows<ScheduleRow>(
+        (from, to) => supabase
+          .from('maintenance_schedules')
+          .select('id, property_id, name, next_due_date, estimated_cost, assigned_vendor_id, active_from_month, active_to_month')
+          .in('property_id', propertyIds)
+          .eq('is_active', true)
+          .order('id')
+          .range(from, to),
+        { label: 'page.bookings.maintenanceSchedules' },
+      )
+    : []
 
   const schedulesByProperty = new Map<string, ScheduleRow[]>()
-  for (const schedule of (allSchedules ?? []) as ScheduleRow[]) {
+  for (const schedule of allSchedules) {
     const existing = schedulesByProperty.get(schedule.property_id) ?? []
     existing.push(schedule)
     schedulesByProperty.set(schedule.property_id, existing)
