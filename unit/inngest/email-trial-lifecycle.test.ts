@@ -58,11 +58,12 @@ function makeStep() {
 }
 
 function trialEvent(overrides: Partial<{
-  org_id: string; user_email: string; first_name: string; org_name: string; trial_ends_at: string
+  org_id: string; user_id: string; user_email: string; first_name: string; org_name: string; trial_ends_at: string
 }> = {}) {
   return {
     data: {
       org_id:        'org_1',
+      user_id:       'user_1',
       user_email:    'pm@example.com',
       first_name:    'Jamie',
       org_name:      'Lakeview Rentals',
@@ -75,6 +76,15 @@ function trialEvent(overrides: Partial<{
 const trialingOrg = { data: { plan_status: 'trialing' }, error: null }
 const activeOrg    = { data: { plan_status: 'active' }, error: null }
 
+// The churn/win-back email is COMMERCIAL (its P.S. links to /billing-wall), so
+// it resolves the recipient's CAN-SPAM opt-out state first. resolveEmailAudience
+// fails closed, so the profile must be readable AND carry a token or the send is
+// correctly suppressed.
+const churnOptedIn = {
+  data:  { email_unsubscribed_at: null, unsubscribe_token: 'f'.repeat(64) },
+  error: null,
+}
+
 beforeEach(() => {
   vi.clearAllMocks()
   process.env.NEXT_PUBLIC_APP_URL = 'https://app.fieldstay.test'
@@ -86,6 +96,7 @@ describe('handleTrialLifecycle', () => {
       organizations: [trialingOrg, trialingOrg, trialingOrg],
       integration_connections: [{ data: { id: 'conn_1' }, error: null }],
       properties: [{ data: null, error: null, count: 4 } as unknown as { data: unknown; error: unknown }],
+      profiles: [churnOptedIn],
     })
     ;(createServiceClient as ReturnType<typeof vi.fn>).mockReturnValue(supabase)
 
@@ -184,6 +195,7 @@ describe('handleTrialLifecycle idempotency keys', () => {
       organizations: [trialingOrg, trialingOrg, trialingOrg],
       integration_connections: [{ data: null, error: null }],
       properties: [{ data: null, error: null, count: 0 } as unknown as { data: unknown; error: unknown }],
+      profiles: [churnOptedIn],
     })
     ;(createServiceClient as ReturnType<typeof vi.fn>).mockReturnValue(supabase)
 

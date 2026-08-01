@@ -223,7 +223,9 @@ const BASELINE: Record<string, number> = {
   'lib/inngest/functions/kroger-connected.ts': 2,
   'lib/inngest/functions/log-message-comm.ts': 2,
   'lib/inngest/functions/notify-assignment-gap.ts': 2,
-  'lib/inngest/functions/onboarding-drip.tsx': 3,
+  // 3 -> 1: the two hand-rolled email_unsubscribed_at reads were replaced by
+  // resolveEmailAudience(), which goes through tryUnwrap and fails closed.
+  'lib/inngest/functions/onboarding-drip.tsx': 1,
   'lib/inngest/functions/ownerrez/incremental-sync.ts': 6,
   'lib/inngest/functions/ownerrez/initial-sync.ts': 7,
   'lib/inngest/functions/ownerrez/ownerrez-reviews-sync.ts': 3,

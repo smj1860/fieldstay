@@ -88,6 +88,8 @@ export interface Profile {
   phone:                  string | null
   avatar_url:             string | null
   email_unsubscribed_at:  string | null
+  // NOT NULL with a DEFAULT in the DB (20260801100000), so every row has one.
+  unsubscribe_token:      string
   created_at:             string
   updated_at:             string
 }

@@ -608,6 +608,10 @@ export type FieldStayEvents = {
   'billing/trial-lifecycle-start': {
     data: {
       org_id:        string
+      // Optional: events already in flight when this was added carry no
+      // user_id, and the churn-feedback email degrades to not sending rather
+      // than sending a commercial message with no opt-out link.
+      user_id?:      string
       user_email:    string
       first_name:    string
       org_name:      string

@@ -199,6 +199,23 @@ export const ENV_SPEC: Readonly<Record<string, VarSpec>> = {
     why: 'errors and traces; unset means production runs blind, but nothing breaks',
   },
   SENTRY_TRACES_SAMPLE_RATE:             { tier: 'optional', schema: rate01, why: 'server trace sampling override' },
+
+  // ── Email compliance ──────────────────────────────────────────────────────
+  // CAN-SPAM requires a valid physical postal address in every COMMERCIAL
+  // email (the drip, re-engagement, and win-back messages — not transactional
+  // mail like work orders or invites).
+  //
+  // 'optional' rather than 'production' deliberately: this value is a fact
+  // about the business that no code can supply, and making it fatal at boot
+  // would take the whole app down over a marketing-footer field. When it is
+  // unset the footer simply omits the address — so the compliance gap is
+  // narrowed to this one field rather than the entire opt-out mechanism being
+  // absent, which is the state this replaced. IT MUST BE SET BEFORE ANY
+  // COMMERCIAL EMAIL IS SENT.
+  COMPANY_POSTAL_ADDRESS: {
+    tier: 'optional', schema: nonEmpty,
+    why:  'CAN-SPAM physical-address line in the footer of commercial email',
+  },
   NEXT_PUBLIC_SENTRY_TRACES_SAMPLE_RATE: { tier: 'optional', schema: rate01, why: 'browser trace sampling override', clientInlinedOnly: true },
   SENTRY_ORG:        { tier: 'optional', schema: nonEmpty, buildTimeOnly: true, why: 'source-map upload in next.config.ts' },
   SENTRY_PROJECT:    { tier: 'optional', schema: nonEmpty, buildTimeOnly: true, why: 'source-map upload in next.config.ts' },

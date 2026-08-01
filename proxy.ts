@@ -2,7 +2,7 @@ import { NextResponse, type NextRequest } from 'next/server'
 import { updateSession } from '@/lib/supabase/middleware'
 import {
   workOrderRatelimit, vendorConnectRatelimit, ownerPortalRatelimit, guidebookRatelimit,
-  oauthCallbackRatelimit, demoRatelimit,
+  oauthCallbackRatelimit, demoRatelimit, unsubscribeRatelimit,
   checkLimit, retryAfterSeconds,
 } from '@/lib/rate-limit'
 import { extractClientIp } from '@/lib/integrations/webhook-verification'
@@ -107,6 +107,15 @@ const TOKEN_ROUTES = [
   // guarding endpoints no guest could reach. TOKEN_ROUTES (not BYPASS_ROUTES)
   // so the per-IP throttle below still applies.
   '/api/guidebook',
+
+  // CAN-SPAM opt-out. Reachable without a session by legal requirement — the
+  // recipient must be able to unsubscribe without logging in — so the 64-char
+  // token is the only credential and this belongs in TOKEN_ROUTES (throttled),
+  // not BYPASS_ROUTES. Both the human page and the RFC 8058 one-click POST
+  // target are listed; a page-only entry would have left the API a 307 to
+  // /login, which is exactly how /api/guidebook was silently dead.
+  '/unsubscribe/',
+  '/api/email/unsubscribe',
 ]
 
 // ── Bypass routes ──────────────────────────────────────────────────────────
@@ -213,6 +222,8 @@ function rateLimiterForPathname(pathname: string) {
   if (pathname.startsWith('/g/'))                 return guidebookRatelimit
   if (pathname.startsWith('/api/guidebook'))      return guidebookRatelimit
   if (pathname.startsWith('/demo/'))              return demoRatelimit
+  if (pathname.startsWith('/unsubscribe/'))          return unsubscribeRatelimit
+  if (pathname.startsWith('/api/email/unsubscribe')) return unsubscribeRatelimit
   // OAuth callbacks are BYPASS_ROUTES (no session to check) but must still be
   // throttled — the oneclick route stores unvalidated authorization codes in
   // Vault, so the limiter check below runs BEFORE the bypass early-return.

@@ -9,6 +9,7 @@ import {
   Hr,
   Html,
   Preview,
+  Link,
   Row,
   Section,
   Text,
@@ -18,12 +19,19 @@ interface GuidebookFeatureAnnouncementEmailProps {
   pmFirstName:  string
   dashboardUrl: string
   launchDate:   string // e.g. "[LAUNCH_DATE]" until confirmed
+  // Commercial email — CAN-SPAM opt-out artifacts. This template predates
+  // EmailLayout and hand-rolls its own footer, so the link and postal address
+  // are rendered inline below rather than inherited.
+  unsubscribeUrl?: string
+  postalAddress?:  string | null
 }
 
 export function GuidebookFeatureAnnouncementEmail({
   pmFirstName,
   dashboardUrl,
   launchDate,
+  unsubscribeUrl,
+  postalAddress,
 }: GuidebookFeatureAnnouncementEmailProps) {
   return (
     <Html>
@@ -319,6 +327,14 @@ export function GuidebookFeatureAnnouncementEmail({
             <Text style={styles.footerText}>
               You&apos;re receiving this because you have an active FieldStay account.
             </Text>
+            {unsubscribeUrl && (
+              <Text style={styles.footerText}>
+                <Link href={unsubscribeUrl} style={styles.footerText}>Unsubscribe</Link>
+              </Text>
+            )}
+            {unsubscribeUrl && postalAddress && (
+              <Text style={styles.footerText}>{postalAddress}</Text>
+            )}
           </Section>
         </Container>
       </Body>
