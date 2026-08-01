@@ -25,17 +25,41 @@ concurrency:
   group: ${{ github.workflow }}
   cancel-in-progress: true
 
+# ── Two supply-chain conventions used by every job below ────────────────────
+#
+# 1. pnpm/action-setup is pinned to a full commit SHA, not the `v4` tag. A tag
+#    is mutable: whoever controls the repo can repoint `v4` at new code, which
+#    then runs here with the job's secrets. The SHA below is what `v4` resolved
+#    to when it was pinned (2026-03-11, "Revert feat!: run the action on
+#    Node.js 24"), so this changed nothing about what CI executes — it only
+#    removed the ability for it to change without a commit here.
+#    actions/* are GitHub-owned and left on tags deliberately.
+#    To bump: resolve the tag to a commit SHA and update every occurrence.
+#
+# 2. `pnpm install` passes --ignore-scripts so a compromised transitive
+#    dependency cannot execute arbitrary code during install. Verified safe
+#    against the current dependency set: exactly four packages have install
+#    hooks (@playwright/browser-chromium, @sentry/cli, protobufjs,
+#    unrs-resolver), and with all four skipped, check:ui-classes, tsc, lint,
+#    the full vitest suite, and next build all pass. The one hook that
+#    matters — the Chromium download — is redundant here because the e2e job
+#    runs `playwright install --with-deps chromium` as its own explicit step.
+#    If a future dependency genuinely needs its postinstall, this flag is
+#    where to look: the failure will not name it.
+#
+# Both are enforced by SonarCloud rules githubactions:S7637 and S6505.
+# ────────────────────────────────────────────────────────────────────────────
 jobs:
   checks:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: pnpm/action-setup@v4
+      - uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4
       - uses: actions/setup-node@v4
         with:
           node-version: 22
           cache: pnpm
-      - run: pnpm install --frozen-lockfile
+      - run: pnpm install --frozen-lockfile --ignore-scripts
       - run: pnpm run check:ui-classes
       - run: pnpm exec tsc --noEmit
       - run: pnpm run lint
@@ -173,15 +197,20 @@ jobs:
           fi
       - uses: actions/checkout@v4
         if: steps.gate.outputs.armed == 'true'
-      - uses: pnpm/action-setup@v4
+      - uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4
         if: steps.gate.outputs.armed == 'true'
       - uses: actions/setup-node@v4
         if: steps.gate.outputs.armed == 'true'
         with:
           node-version: 22
           cache: pnpm
-      - run: pnpm install --frozen-lockfile
+      - run: pnpm install --frozen-lockfile --ignore-scripts
         if: steps.gate.outputs.armed == 'true'
+      # This is the step that makes --ignore-scripts safe above: the browser
+      # arrives here explicitly rather than via @playwright/browser-chromium's
+      # skipped install hook. `playwright install` downloads a browser — it is
+      # not a package install and has no --ignore-scripts flag, so SonarCloud
+      # S6505 flags it as a false positive.
       - run: pnpm exec playwright install --with-deps chromium
         if: steps.gate.outputs.armed == 'true'
       - run: pnpm run e2e
