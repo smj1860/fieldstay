@@ -29,7 +29,7 @@ export default async function AuditLogPage({
   // rendered "Next →" link did nothing. Every other page in the repo already
   // has the awaited form.
   const { page: pageParam } = await searchParams
-  const page   = Math.max(1, parseInt(pageParam ?? '1', 10) || 1)
+  const page   = Math.max(1, Number.parseInt(pageParam ?? '1', 10) || 1)
   const offset = (page - 1) * PAGE_SIZE
 
   const supabase = createServiceClient({ authorizedBy: membership })
