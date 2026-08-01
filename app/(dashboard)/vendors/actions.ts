@@ -1,6 +1,7 @@
 'use server'
 
 import { revalidatePath } from 'next/cache'
+import { checkLimit, emailSendActionLimiter } from '@/lib/rate-limit'
 import { requireOrgRole } from '@/lib/auth'
 import { resendVendorConnectInvite as sendResendConnectInvite } from '@/lib/stripe/vendor-connect-invite'
 import { logAuditEvent } from '@/lib/audit'
@@ -214,6 +215,12 @@ export async function resendVendorConnectInvite(
 ): Promise<{ error?: string; success?: boolean }> {
   try {
     const { supabase, membership } = await requireOrgRole(['admin', 'manager'])
+
+    const rl = await checkLimit(emailSendActionLimiter, `vendor-invite:${membership.org_id}`, {
+      onError: 'allow',
+      site:    'serverAction.vendors.resendVendorConnectInvite',
+    })
+    if (!rl.allowed) return { error: 'Too many invites sent. Please try again in a little while.' }
 
     const { data: vendor } = await supabase
       .from('vendors')

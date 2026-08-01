@@ -1,6 +1,7 @@
 'use server'
 
 import { z }                        from 'zod'
+import { checkLimit, emailSendActionLimiter } from '@/lib/rate-limit'
 import { requireOrgMember }         from '@/lib/auth'
 import { createServiceClient, adminFetch } from '@/lib/supabase/server'
 import { sendTeamInviteEmail }       from '@/lib/resend/client'
@@ -15,6 +16,12 @@ export async function inviteTeamMember(
 ): Promise<{ ok?: true; error?: string }> {
   try {
     const { user, membership } = await requireOrgMember()
+
+    const rl = await checkLimit(emailSendActionLimiter, `invite-team:${user.id}`, {
+      onError: 'allow',
+      site:    'serverAction.team.inviteTeamMember',
+    })
+    if (!rl.allowed) return { error: 'Too many invites sent. Please try again in a little while.' }
 
     if (membership.role !== 'owner') {
       return { error: 'Only the account owner can invite team members.' }

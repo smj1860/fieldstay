@@ -13,6 +13,7 @@ import { PriorityLevelSchema, WoStatusSchema, WoCategorySchema } from '@/lib/sch
 import {
   resolveWorkOrderStatus,
   sendQuoteRequestEmails,
+  checkCrewMemberAssignable,
   checkQuoteVendorsAssignable,
   checkCrewTimeOffWarning,
   dispatchWorkOrderEvents,
@@ -181,6 +182,15 @@ export async function createWorkOrder(
       : null
     if (quoteVendorProblem) return quoteVendorProblem
 
+    // TENANT ISOLATION: assigned_crew_member_id arrives from the client and was
+    // written unverified. work_orders_select grants read on an OR'd branch
+    // keyed by that column, so a foreign org's crew id here handed the other
+    // tenant's crew user read access to this work order.
+    const crewProblem = await checkCrewMemberAssignable(
+      supabase, membership.org_id, assigned_crew_member_id,
+    )
+    if (crewProblem) return crewProblem
+
     // In quote-request mode, WO starts as quote_requested with no vendor assigned yet
     const woStatus            = resolveWorkOrderStatus(request_quotes, vendor_id)
     const usePortal           = portal_enabled && !request_quotes
@@ -307,6 +317,13 @@ export async function assignCrewToWorkOrder(
 ): Promise<{ error?: string }> {
   try {
     const { supabase, membership } = await requireOrgRole(['admin', 'manager'])
+
+    // Same tenant-isolation check as createWorkOrder: the .eq('org_id') below
+    // scopes the WORK ORDER to this org, but nothing scoped the CREW ID being
+    // written into it, and that column is what the RLS read policy keys its
+    // second branch on.
+    const crewProblem = await checkCrewMemberAssignable(supabase, membership.org_id, crewMemberId)
+    if (crewProblem) return crewProblem
 
     const { error } = await supabase
       .from('work_orders')
@@ -2145,6 +2162,12 @@ export async function addCustomMaintenanceItem(
 
     const { error } = await supabase
       .from('maintenance_schedules')
+      // Explicit field list, NOT `...item`. The spread came LAST, so a client
+      // sending extra keys could override the very fields above it that scope
+      // this row — including property_id, which the check immediately above
+      // had just verified belongs to this org. Verifying a value and then
+      // letting the same request overwrite it is the check doing nothing.
+      // TypeScript's parameter type is compile-time only and stops none of it.
       .insert({
         property_id:               propertyId,
         org_id:                    membership.org_id,
@@ -2152,7 +2175,14 @@ export async function addCustomMaintenanceItem(
         auto_create_wo:            false,
         is_from_standard_template: false,
         is_active:                 true,
-        ...item,
+        name:                      item.name,
+        frequency:                 item.frequency,
+        next_due_date:             item.next_due_date,
+        active_from_month:         item.active_from_month ?? null,
+        active_to_month:           item.active_to_month ?? null,
+        asset_category:            item.asset_category ?? null,
+        instructions:              item.instructions ?? null,
+        estimated_cost:            item.estimated_cost ?? null,
       })
 
     if (error) {

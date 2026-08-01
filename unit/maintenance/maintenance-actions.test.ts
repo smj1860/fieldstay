@@ -159,6 +159,77 @@ describe('maintenance/actions', () => {
       expect(logAuditEvent).toHaveBeenCalledWith(expect.objectContaining({ action: 'work_order.created' }))
     })
 
+    // ── TENANT ISOLATION: assigned_crew_member_id ────────────────────────
+    // work_orders_select grants read on an OR'd branch keyed by this column:
+    // "any work order whose assigned_crew_member_id is one of YOUR
+    // crew_members rows". Writing a FOREIGN org's crew id therefore handed
+    // that other tenant's crew user read access to this work order. The id
+    // came straight from the client and was never checked.
+    it('rejects a crew member id belonging to another org', async () => {
+      const supabase = makeSupabase({
+        properties:   [{ data: { id: 'prop_1' } }],
+        // The in-org lookup finds nothing: this crew id is not in org_1.
+        crew_members: [{ data: null }],
+      })
+      vi.mocked(requireOrgRole).mockResolvedValue({
+        supabase, membership, user: { id: 'user_1' },
+      } as never)
+
+      const result = await createWorkOrder(null, woFd({ assigned_crew_member_id: 'crew_other_org' }))
+
+      expect(result.error).toBe('That crew member is not part of your organization.')
+      // And critically: no work order was written at all.
+      expect(supabase.calls.some((c) => c.table === 'work_orders' && c.method === 'insert')).toBe(false)
+    })
+
+    it('scopes the crew lookup to the caller org, not just the crew id', async () => {
+      const supabase = makeSupabase({
+        properties:   [{ data: { id: 'prop_1' } }],
+        crew_members: [{ data: { id: 'crew_1' } }],
+        work_orders:  [{ data: { id: 'wo_1' } }],
+      })
+      vi.mocked(requireOrgRole).mockResolvedValue({
+        supabase, membership, user: { id: 'user_1' },
+      } as never)
+
+      await createWorkOrder(null, woFd({ assigned_crew_member_id: 'crew_1' }))
+
+      const crewEqs = supabase.calls.filter((c) => c.table === 'crew_members' && c.method === 'eq')
+      expect(crewEqs.map((c) => c.args)).toEqual([['id', 'crew_1'], ['org_id', 'org_1']])
+    })
+
+    it('FAILS CLOSED when the crew lookup itself errors', async () => {
+      // "We could not confirm this crew member is yours" must never resolve to
+      // "assign them" — that is the direction that leaks a work order.
+      const supabase = makeSupabase({
+        properties:   [{ data: { id: 'prop_1' } }],
+        crew_members: [{ data: null, error: { message: 'db unavailable' } }],
+      })
+      vi.mocked(requireOrgRole).mockResolvedValue({
+        supabase, membership, user: { id: 'user_1' },
+      } as never)
+
+      const result = await createWorkOrder(null, woFd({ assigned_crew_member_id: 'crew_1' }))
+
+      expect(result.error).toBe('Could not verify the selected crew member. Please try again.')
+      expect(supabase.calls.some((c) => c.table === 'work_orders' && c.method === 'insert')).toBe(false)
+    })
+
+    it('does not query crew_members at all when no crew member was supplied', async () => {
+      const supabase = makeSupabase({
+        properties:  [{ data: { id: 'prop_1' } }],
+        work_orders: [{ data: { id: 'wo_1' } }],
+      })
+      vi.mocked(requireOrgRole).mockResolvedValue({
+        supabase, membership, user: { id: 'user_1' },
+      } as never)
+
+      const result = await createWorkOrder(null, woFd())
+
+      expect(result.success).toBe(true)
+      expect(supabase.calls.some((c) => c.table === 'crew_members')).toBe(false)
+    })
+
     it('rejects a property id that does not belong to the caller org (IDOR check)', async () => {
       const supabase = makeSupabase({ properties: [{ data: null }] })
       vi.mocked(requireOrgRole).mockResolvedValue({
@@ -285,13 +356,52 @@ describe('maintenance/actions', () => {
 
   describe('assignCrewToWorkOrder', () => {
     it('assigns a crew member scoped to the caller org', async () => {
-      const supabase = makeSupabase({})
+      // crew_members is stubbed now because assignCrewToWorkOrder verifies the
+      // crew member is in-org BEFORE writing the column — see the isolation
+      // tests below. An unstubbed lookup returns null, which correctly blocks.
+      const supabase = makeSupabase({ crew_members: [{ data: { id: 'crew_1' } }] })
       vi.mocked(requireOrgRole).mockResolvedValue({ supabase, membership } as never)
 
       const result = await assignCrewToWorkOrder('wo_1', 'crew_1')
 
       expect(result).toEqual({})
       expect(supabase.from).toHaveBeenCalledWith('work_orders')
+    })
+
+    // Same tenant-isolation hole as createWorkOrder: .eq('org_id') below scopes
+    // the WORK ORDER to this org, but nothing scoped the CREW ID written into
+    // it — and that column is what the RLS read policy keys its second branch on.
+    it('rejects a crew member id belonging to another org, and writes nothing', async () => {
+      const supabase = makeSupabase({ crew_members: [{ data: null }] })
+      vi.mocked(requireOrgRole).mockResolvedValue({ supabase, membership } as never)
+
+      const result = await assignCrewToWorkOrder('wo_1', 'crew_other_org')
+
+      expect(result).toEqual({ error: 'That crew member is not part of your organization.' })
+      expect(supabase.calls.some((c) => c.table === 'work_orders' && c.method === 'update')).toBe(false)
+    })
+
+    it('FAILS CLOSED when the crew lookup errors', async () => {
+      const supabase = makeSupabase({
+        crew_members: [{ data: null, error: { message: 'db unavailable' } }],
+      })
+      vi.mocked(requireOrgRole).mockResolvedValue({ supabase, membership } as never)
+
+      const result = await assignCrewToWorkOrder('wo_1', 'crew_1')
+
+      expect(result).toEqual({ error: 'Could not verify the selected crew member. Please try again.' })
+      expect(supabase.calls.some((c) => c.table === 'work_orders' && c.method === 'update')).toBe(false)
+    })
+
+    it('still allows UNASSIGNING (null crew) without a crew lookup', async () => {
+      const supabase = makeSupabase({})
+      vi.mocked(requireOrgRole).mockResolvedValue({ supabase, membership } as never)
+
+      const result = await assignCrewToWorkOrder('wo_1', null)
+
+      expect(result).toEqual({})
+      expect(supabase.calls.some((c) => c.table === 'crew_members')).toBe(false)
+      expect(supabase.calls.some((c) => c.table === 'work_orders' && c.method === 'update')).toBe(true)
     })
 
     it('does not touch the DB when the caller lacks the required role', async () => {

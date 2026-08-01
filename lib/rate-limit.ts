@@ -331,6 +331,24 @@ export const unsubscribeRatelimit = new Ratelimit({
   prefix:    'rl:unsubscribe',
 })
 
+// Authenticated actions that SEND EMAIL to a third party — team invites, owner
+// portal links, vendor Connect invites, bulk crew invites. An auth gate proves
+// WHO is sending, not HOW OFTEN: without a limiter a single authenticated member
+// can drive unlimited outbound mail from our sending domain, which is both a
+// spend vector and, more importantly, a way to get that domain onto blocklists
+// using someone else's address as the target. Keyed per USER, since the org is
+// not the thing being abused.
+//
+// 20/hour is far above any real invite cadence (a PM onboarding a whole team
+// does it once) while making a mail-bomb loop useless. Fails OPEN like the other
+// abuse limiters here: a Redis outage must not stop a PM inviting their staff.
+export const emailSendActionLimiter = new Ratelimit({
+  redis,
+  limiter:   Ratelimit.slidingWindow(20, '1 h'),
+  analytics: false,
+  prefix:    'rl:email-send-action',
+})
+
 // Roadshow demo surface (/demo/*) — unauthenticated and gated only by a
 // shared secret in a query string that will be printed on a QR code sitting
 // on a trade-show table. /demo/enter MINTS an authenticated session and

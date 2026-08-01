@@ -1,6 +1,7 @@
 'use server'
 
 import { revalidatePath } from 'next/cache'
+import { checkLimit, emailSendActionLimiter } from '@/lib/rate-limit'
 import { requireOrgMember } from '@/lib/auth'
 import { logAuditEvent } from '@/lib/audit'
 import { reportError } from '@/lib/observability/report-error'
@@ -69,6 +70,12 @@ export async function addPropertyOwner(
 export async function generatePortalToken(ownerId: string): Promise<OwnersActionState> {
   try {
     const { supabase, membership, user } = await requireOrgMember()
+
+    const rl = await checkLimit(emailSendActionLimiter, `portal-token:${user.id}`, {
+      onError: 'allow',
+      site:    'serverAction.owners.generatePortalToken',
+    })
+    if (!rl.allowed) return { error: 'Too many portal links generated. Please try again in a little while.' }
 
     // Verify owner belongs to this org
     const { data: owner } = await supabase

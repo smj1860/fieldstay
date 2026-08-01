@@ -1,6 +1,7 @@
 'use server'
 
 import { revalidatePath } from 'next/cache'
+import { checkLimit, emailSendActionLimiter } from '@/lib/rate-limit'
 import { redirect } from 'next/navigation'
 import { cookies } from 'next/headers'
 import { requireOrgMember, requireOrgRole } from '@/lib/auth'
@@ -854,6 +855,12 @@ export async function inviteCrewMember(
 export async function inviteAllUninvitedCrew(): Promise<{ sent: number; error?: string }> {
   try {
     const { user, supabase, membership } = await requireOrgMember()
+
+    const rl = await checkLimit(emailSendActionLimiter, `crew-bulk-invite:${user.id}`, {
+      onError: 'allow',
+      site:    'serverAction.settings.inviteAllUninvitedCrew',
+    })
+    if (!rl.allowed) return { sent: 0, error: 'Too many invites sent. Please try again in a little while.' }
 
     if (!['owner', 'admin', 'manager'].includes(membership.role)) {
       return { sent: 0, error: 'Permission denied' }
