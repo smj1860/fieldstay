@@ -42,7 +42,7 @@ import {
 
 type Resp = { data?: unknown; error?: unknown }
 
-function makeSupabase(queue: Record<string, Resp[]>) {
+function makeSupabase(queue: Record<string, Resp[]>, rpcs: Record<string, Resp> = {}) {
   // Every chained call is recorded so tests can assert on filters — notably
   // the .neq('status', 'completed') guard that makes turnover completion
   // race-safe (the WHERE clause, not an earlier read, is the guard).
@@ -61,7 +61,14 @@ function makeSupabase(queue: Record<string, Resp[]>) {
     chain.then   = (resolve: (v: unknown) => unknown) => Promise.resolve(result).then(resolve)
     return chain
   })
-  return { from, calls }
+  // `.rpc()` calls are recorded into the SAME `calls` array as `.from()` chains
+  // so a test can assert on ordering — e.g. that no inventory/turnover write
+  // happened outside the transactional RPC.
+  const rpc = vi.fn((name: string, args: unknown) => {
+    calls.push({ table: `rpc:${name}`, method: 'rpc', args: [args] })
+    return Promise.resolve(rpcs[name] ?? { data: null, error: null })
+  })
+  return { from, rpc, calls }
 }
 
 const membership = {
@@ -408,10 +415,9 @@ describe('turnovers/actions', () => {
   })
 
   describe('removeCrewFromTurnover', () => {
-    it('removes crew from a turnover verified to belong to the caller org', async () => {
-      const supabase = makeSupabase({
-        turnovers:            [{ data: { id: 't_1', status: 'assigned' } }],
-        turnover_assignments: [{ error: null }, { data: [] }],
+    it('removes crew through the transactional RPC, scoped to the caller org', async () => {
+      const supabase = makeSupabase({}, {
+        remove_crew_from_turnover: { data: { ok: true, remaining: 0, reverted: true } },
       })
       vi.mocked(requireOrgMember).mockResolvedValue({
         supabase, membership, user: { id: 'user_1' },
@@ -420,13 +426,40 @@ describe('turnovers/actions', () => {
       const result = await removeCrewFromTurnover('t_1', 'crew_1')
 
       expect(result).toEqual({ success: true })
+      expect(supabase.rpc).toHaveBeenCalledWith('remove_crew_from_turnover', {
+        p_turnover_id:    't_1',
+        p_crew_member_id: 'crew_1',
+        // The org scope is what makes SECURITY DEFINER safe — it must come
+        // from the membership, never from the caller's arguments.
+        p_org_id:         'org_1',
+      })
       expect(logAuditEvent).toHaveBeenCalledWith(expect.objectContaining({
         action: 'turnover.crew.removed',
       }))
     })
 
+    it('does the delete, the count and the status revert in ONE statement, never as separate writes', async () => {
+      // The regression this encodes: as separate reads and writes, two
+      // concurrent removals could each COUNT before the other's DELETE
+      // committed, both skip the revert, and strand the turnover `assigned`
+      // with zero crew — invisible on the needs-assignment board.
+      const supabase = makeSupabase({}, {
+        remove_crew_from_turnover: { data: { ok: true, remaining: 0, reverted: true } },
+      })
+      vi.mocked(requireOrgMember).mockResolvedValue({
+        supabase, membership, user: { id: 'user_1' },
+      } as never)
+
+      await removeCrewFromTurnover('t_1', 'crew_1')
+
+      expect(supabase.from).not.toHaveBeenCalledWith('turnover_assignments')
+      expect(supabase.from).not.toHaveBeenCalledWith('turnovers')
+    })
+
     it('rejects a turnover id that does not belong to the caller org (IDOR check)', async () => {
-      const supabase = makeSupabase({ turnovers: [{ data: null }] })
+      const supabase = makeSupabase({}, {
+        remove_crew_from_turnover: { data: { ok: false, reason: 'turnover_not_found' } },
+      })
       vi.mocked(requireOrgMember).mockResolvedValue({
         supabase, membership, user: { id: 'user_1' },
       } as never)
@@ -434,6 +467,38 @@ describe('turnovers/actions', () => {
       const result = await removeCrewFromTurnover('other-orgs-turnover', 'crew_1')
 
       expect(result).toEqual({ error: 'Turnover not found' })
+      expect(logAuditEvent).not.toHaveBeenCalled()
+    })
+
+    it('reports a crew member who was not assigned, instead of claiming success', async () => {
+      // Previously the DELETE's result was discarded, so "nothing was
+      // assigned" and "the delete failed" both fell through to a success the
+      // PM had no reason to doubt.
+      const supabase = makeSupabase({}, {
+        remove_crew_from_turnover: { data: { ok: false, reason: 'assignment_not_found' } },
+      })
+      vi.mocked(requireOrgMember).mockResolvedValue({
+        supabase, membership, user: { id: 'user_1' },
+      } as never)
+
+      const result = await removeCrewFromTurnover('t_1', 'crew_1')
+
+      expect(result).toEqual({ error: 'That crew member is not assigned to this turnover.' })
+      expect(logAuditEvent).not.toHaveBeenCalled()
+    })
+
+    it('surfaces an RPC error rather than reporting the removal as done', async () => {
+      const supabase = makeSupabase({}, {
+        remove_crew_from_turnover: { data: null, error: { message: 'deadlock detected' } },
+      })
+      vi.mocked(requireOrgMember).mockResolvedValue({
+        supabase, membership, user: { id: 'user_1' },
+      } as never)
+
+      const result = await removeCrewFromTurnover('t_1', 'crew_1')
+
+      expect(result).toEqual({ error: 'Failed to remove crew member. Please try again.' })
+      expect(reportError).toHaveBeenCalled()
       expect(logAuditEvent).not.toHaveBeenCalled()
     })
   })

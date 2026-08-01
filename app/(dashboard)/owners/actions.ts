@@ -101,6 +101,12 @@ export async function generatePortalToken(ownerId: string): Promise<OwnersAction
       token,
       expires_at: expiresAt,
       is_multi:   false,
+      // revoked_at MUST be cleared. The upsert conflicts on
+      // (property_owner_id, is_multi) and only overwrites the columns it
+      // names, so a row revoked earlier kept its revoked_at — regenerating
+      // after a revoke emailed the owner a brand-new token that the portal
+      // rejects on arrival, with no indication why.
+      revoked_at: null,
     }, { onConflict: 'property_owner_id,is_multi' })
 
     if (error) {
@@ -197,6 +203,12 @@ export async function generateCombinedPortalToken(ownerIds: string[]): Promise<O
       expires_at:   expiresAt,
       property_ids: propertyIds,
       is_multi:     true,
+      // revoked_at MUST be cleared. The upsert conflicts on
+      // (property_owner_id, is_multi) and only overwrites the columns it
+      // names, so a row revoked earlier kept its revoked_at — regenerating
+      // after a revoke emailed the owner a brand-new token that the portal
+      // rejects on arrival, with no indication why.
+      revoked_at: null,
     }, { onConflict: 'property_owner_id,is_multi' })
 
     if (error) {

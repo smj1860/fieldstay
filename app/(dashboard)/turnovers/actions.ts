@@ -629,6 +629,11 @@ export async function addCrewToTurnover(
 
 // ── Remove one crew member from a turnover ───────────────────────────────────
 
+/** Return shape of the `remove_crew_from_turnover(uuid, uuid, uuid)` RPC. */
+type RemoveCrewResult =
+  | { ok: true;  remaining: number; reverted: boolean }
+  | { ok: false; reason: 'turnover_not_found' | 'assignment_not_found' }
+
 export async function removeCrewFromTurnover(
   turnoverId: string,
   crewMemberId: string
@@ -636,31 +641,39 @@ export async function removeCrewFromTurnover(
   try {
     const { supabase, membership, user } = await requireOrgMember()
 
-    const { data: turnover } = await supabase
-      .from('turnovers')
-      .select('id, status')
-      .eq('id', turnoverId)
-      .eq('org_id', membership.org_id)
-      .single()
+    // One RPC, not read-then-delete-then-count-then-update. Two concurrent
+    // removals could each run their COUNT before the other's DELETE committed,
+    // both see a non-zero remaining count, both skip the revert, and leave the
+    // turnover `assigned` with zero crew — off the needs-assignment board, so
+    // nobody is prompted to staff it. The function takes FOR UPDATE on the
+    // turnover, making the whole decision atomic. The org scope is passed
+    // explicitly because SECURITY DEFINER skips RLS inside the body.
+    const { data: rpcResult, error: rpcError } = await supabase.rpc('remove_crew_from_turnover', {
+      p_turnover_id:    turnoverId,
+      p_crew_member_id: crewMemberId,
+      p_org_id:         membership.org_id,
+    })
 
-    if (!turnover) return { error: 'Turnover not found' }
+    if (rpcError || !rpcResult) {
+      console.error('[removeCrewFromTurnover] rpc', rpcError)
+      reportError(rpcError ?? new Error('remove_crew_from_turnover returned no result'), {
+        site: 'serverAction.turnovers.removeCrewFromTurnover.rpc',
+      })
+      return { error: 'Failed to remove crew member. Please try again.' }
+    }
 
-    await supabase
-      .from('turnover_assignments')
-      .delete()
-      .eq('turnover_id', turnoverId)
-      .eq('crew_member_id', crewMemberId)
+    const result = rpcResult as RemoveCrewResult
 
-    const { data: remaining } = await supabase
-      .from('turnover_assignments')
-      .select('id')
-      .eq('turnover_id', turnoverId)
-
-    if (!remaining?.length && turnover.status === 'assigned') {
-      await supabase
-        .from('turnovers')
-        .update({ status: 'pending_assignment' })
-        .eq('id', turnoverId)
+    // Previously a failed DELETE fell through to the count, saw the crew member
+    // still present, skipped the revert, and returned success — telling the PM
+    // someone was removed who was not. Now the two "nothing happened" cases are
+    // distinguishable and both reported.
+    if (!result.ok) {
+      return {
+        error: result.reason === 'turnover_not_found'
+          ? 'Turnover not found'
+          : 'That crew member is not assigned to this turnover.',
+      }
     }
 
     await logAuditEvent({
