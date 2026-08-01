@@ -1,4 +1,5 @@
 import { inngest } from '@/lib/inngest/client'
+import { fetchAllRows } from '@/lib/inngest/paginate'
 import { createServiceClient } from '@/lib/supabase/server'
 import { sendGuestPreArrivalEmail } from '@/lib/resend/client'
 
@@ -57,14 +58,21 @@ export const guidebookPreArrivalEmailCron = inngest.createFunction(
       const supabase = createServiceClient({ system: 'inngest:guidebook-pre-arrival-email-cron' })
       const uniquePropertyIds = [...new Set(eligibleBookings.map((b) => b.property_id))]
 
-      const { data, error } = await supabase
-        .from('properties')
-        .select('id, name')
-        .in('id', uniquePropertyIds)
+      // Paginated: this cron scans EVERY org's eligible bookings, so the
+      // property id set is platform-wide and grows with tenant count. A
+      // truncated map silently yields an undefined property name for the
+      // bookings past the cap, on a guest-facing email.
+      const data = await fetchAllRows<{ id: string; name: string }>(
+        (from, to) => supabase
+          .from('properties')
+          .select('id, name')
+          .in('id', uniquePropertyIds)
+          .order('id')
+          .range(from, to),
+        { label: 'guidebook-pre-arrival.properties' },
+      )
 
-      if (error) throw new Error(`Failed to batch fetch properties: ${error.message}`)
-
-      return Object.fromEntries((data ?? []).map((p) => [p.id, p.name]))
+      return Object.fromEntries(data.map((p) => [p.id, p.name]))
     })
 
     let sentCount = 0

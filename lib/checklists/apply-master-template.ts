@@ -1,4 +1,5 @@
 import 'server-only'
+import { fetchAllRows } from '@/lib/inngest/paginate'
 import type { SupabaseClient } from '@supabase/supabase-js'
 import type { RoomTemplateItem } from '@/types/database'
 import { logAuditEvent } from '@/lib/audit'
@@ -112,14 +113,22 @@ export async function fetchOrgRoomTemplateData(
   const itemsByTemplate: Record<string, RoomTemplateItem[]> = {}
 
   if (templateIds.size > 0) {
-    const { data: items, error: itemsErr } = await supabase
-      .from('room_template_items')
-      .select('room_template_id, task, requires_photo, notes, sort_order')
-      .in('room_template_id', [...templateIds])
-      .order('sort_order')
-    if (itemsErr) console.error('[fetchOrgRoomTemplateData] room_template_items fetch failed:', itemsErr)
+    // Paginated: this is a ONE-TO-MANY scope — the id list is templates, but
+    // the rows are their items, and a full room library fans out well past
+    // max_rows = 1000. A truncated read silently applies an INCOMPLETE
+    // checklist to a property, which then looks finished to the crew.
+    const items = await fetchAllRows(
+      (from, to) => supabase
+        .from('room_template_items')
+        .select('room_template_id, task, requires_photo, notes, sort_order')
+        .in('room_template_id', [...templateIds])
+        .order('sort_order')
+        .order('room_template_id')
+        .range(from, to),
+      { label: 'apply-master-template.room_template_items' },
+    )
 
-    for (const item of (items ?? []) as RoomTemplateItem[]) {
+    for (const item of items as unknown as RoomTemplateItem[]) {
       const list = itemsByTemplate[item.room_template_id] ?? []
       list.push(item)
       itemsByTemplate[item.room_template_id] = list

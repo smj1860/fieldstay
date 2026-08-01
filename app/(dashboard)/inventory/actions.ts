@@ -200,12 +200,23 @@ export async function submitInventoryCount(
       // Items that have never had a real count recorded get first_count_recorded_at
       // stamped now, so the "0 means uncounted, not critical" distinction holds going
       // forward. Supabase JS can't compare columns in an UPDATE, so check first.
-      const { data: neverCountedRows } = await supabase
-        .from('inventory_items')
-        .select('id')
-        .in('id', updates.map((u) => u.id))
-        .is('first_count_recorded_at', null)
-      const neverCountedIds = new Set((neverCountedRows ?? []).map((r) => r.id))
+      // Paginated: `updates` is a whole count session, and one org's
+      // inventory_items across 50 properties runs to thousands. Truncating at
+      // max_rows = 1000 would leave neverCountedIds incomplete, so the items
+      // past the cap never get first_count_recorded_at stamped and the
+      // "0 means uncounted, not critical" distinction silently breaks for them
+      // — permanently, since the stamp only ever happens on a first count.
+      const neverCountedRows = await fetchAllRows<{ id: string }>(
+        (from, to) => supabase
+          .from('inventory_items')
+          .select('id')
+          .in('id', updates.map((u) => u.id))
+          .is('first_count_recorded_at', null)
+          .order('id')
+          .range(from, to),
+        { label: 'submitInventoryCount.neverCounted' },
+      )
+      const neverCountedIds = new Set(neverCountedRows.map((r) => r.id))
 
       // Update current_quantity on each item (org_id guard) — parallel to avoid serial timeout
       const now = new Date().toISOString()

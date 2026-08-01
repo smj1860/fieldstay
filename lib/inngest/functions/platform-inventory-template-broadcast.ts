@@ -13,6 +13,7 @@
  */
 
 import { inngest }             from '@/lib/inngest/client'
+import { fetchAllRows } from '@/lib/inngest/paginate'
 import { createServiceClient } from '@/lib/supabase/server'
 import { logAuditEvents }      from '@/lib/audit'
 
@@ -90,8 +91,15 @@ export const broadcastPlatformInventoryTemplate = inngest.createFunction(
     const orgIds = await step.run('fetch-target-orgs', async () => {
       const supabase = createServiceClient({ system: 'inngest:platform-inventory-template-broadcast' })
       if (targetOrgIds) {
-        const { data } = await supabase.from('organizations').select('id').in('id', targetOrgIds)
-        return (data ?? []).map((o) => o.id)
+        // Paginated like the untargeted branch below: targetOrgIds is
+        // caller-supplied and a broadcast to every tenant is exactly the case
+        // that reaches the cap.
+        const data = await fetchAllRows<{ id: string }>(
+          (from, to) => supabase.from('organizations').select('id')
+            .in('id', targetOrgIds).order('id').range(from, to),
+          { label: 'platform-inventory-broadcast.targetOrgs' },
+        )
+        return data.map((o) => o.id)
       }
       const pageSize = 1000
       const all: string[] = []

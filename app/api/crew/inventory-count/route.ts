@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
+import { fetchAllRows } from '@/lib/inngest/paginate'
 import { requireCrewMember, type CrewAuthContext } from '@/lib/crew-auth'
 import { inngest } from '@/lib/inngest/client'
 import { logAuditEvents } from '@/lib/audit'
@@ -68,12 +69,21 @@ async function loadPreviousQuantities(
   supabase: CrewSupabase,
   itemIds:  string[],
 ): Promise<Record<string, number>> {
-  const { data: currentItems } = await supabase
-    .from('inventory_items')
-    .select('id, current_quantity')
-    .in('id', itemIds)
+  // Paginated: itemIds comes from the crew's submitted count, and one org's
+  // inventory_items across 50 properties runs to thousands. A truncated read
+  // leaves the PM reviewing a diff whose "previous quantity" is missing for
+  // every item past the cap.
+  const currentItems = await fetchAllRows<{ id: string; current_quantity: number }>(
+    (from, to) => supabase
+      .from('inventory_items')
+      .select('id, current_quantity')
+      .in('id', itemIds)
+      .order('id')
+      .range(from, to),
+    { label: 'crew.inventory-count.previousQuantities' },
+  )
 
-  return Object.fromEntries((currentItems ?? []).map((i) => [i.id, i.current_quantity]))
+  return Object.fromEntries(currentItems.map((i) => [i.id, i.current_quantity]))
 }
 
 // Column names match the live schema (item_id / counted_qty), not the

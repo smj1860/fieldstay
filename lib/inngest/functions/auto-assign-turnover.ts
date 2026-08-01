@@ -1,4 +1,5 @@
 import { inngest } from '@/lib/inngest/client'
+import { fetchAllRows } from '@/lib/inngest/paginate'
 import { createServiceClient } from '@/lib/supabase/server'
 import { haversineKm, proximityScore } from '@/lib/scoring/geo'
 import { computeWorkloadMap, computeFamiliarIds } from '@/lib/scoring/pools'
@@ -60,13 +61,23 @@ export const autoAssignTurnover = inngest.createFunction(
       let familiarCrewIds: string[] = []
 
       if (pastTurnoverIds.length > 0) {
-        const { data: history } = await supabase
-          .from('turnover_assignments')
-          .select('crew_member_id')
-          .in('turnover_id', pastTurnoverIds)
-          .in('crew_member_id', availableCrew.map((c) => c.id))
+        // Paginated: pastTurnoverIds is EVERY prior turnover for this
+        // property, which grows without bound over the property's lifetime,
+        // and assignments fan out further (several crew per turnover). A
+        // truncated history silently narrows "who has worked here before",
+        // which is a direct input to the assignment suggestion.
+        const history = await fetchAllRows<{ crew_member_id: string }>(
+          (from, to) => supabase
+            .from('turnover_assignments')
+            .select('crew_member_id')
+            .in('turnover_id', pastTurnoverIds)
+            .in('crew_member_id', availableCrew.map((c) => c.id))
+            .order('crew_member_id')
+            .range(from, to),
+          { label: 'auto-assign-turnover.history' },
+        )
 
-        familiarCrewIds = computeFamiliarIds(history ?? [], (h) => h.crew_member_id)
+        familiarCrewIds = computeFamiliarIds(history, (h) => h.crew_member_id)
       }
 
       // Workload: assignments in next 14 days only (not all-time history)
