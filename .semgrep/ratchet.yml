@@ -25,18 +25,29 @@ rules:
   # explicitly permitted by CLAUDE.md ("Fine for a request handler rendering
   # one org's page; never acceptable for a platform-wide scan"). A rule whose
   # majority is permitted-by-policy noise is one people learn to ignore, so it
-  # is split into a four-step SEVERITY LADDER along the only axis that
-  # actually predicts whether the 1000-row cap can be reached: what bounds the
-  # result set.
+  # is split into a SEVERITY LADDER along the only axis that actually predicts
+  # whether the 1000-row cap can be reached: what bounds the result set.
   #
-  #   1  -table-scan    nothing bounds it but the table itself           ERROR
-  #   2  -cross-tenant  bounded by some entity, but not by org           ERROR
-  #   3  -in-list       one org, but sized by a caller-supplied .in()  WARNING
-  #   4  -org-scoped    one org, one parent entity — the permitted case   INFO
+  #   1   -table-scan     nothing bounds it but the table itself         ERROR
+  #   2   -cross-tenant   no org scope AND no parent row                 ERROR
+  #   2b  -single-parent  one non-org parent row, no org scope         WARNING
+  #   2c  -global-table   a table with no org_id column to scope to       INFO
+  #   3   -in-list        one org, but sized by a caller-supplied .in() WARNING
+  #   4   -org-scoped     one org, one parent entity — the permitted case  INFO
   #
-  # The four are mutually exclusive and partition the original rule exactly:
+  # The tiers are mutually exclusive and partition the original rule exactly:
   # every finding lands in exactly one tier, so the ratchet counts still sum
-  # to the whole class and no site can be lost between tiers.
+  # to the whole class and no site can be lost between tiers. Mutual exclusion
+  # is ENFORCED by scripts/check-semgrep-ratchet.mjs, not asserted here — the
+  # 2c/2b overlap this split introduced (one site matching both, inflating the
+  # ladder total by one) is exactly what a comment cannot catch.
+  #
+  # Tier 1 reached 0 and was PROMOTED to chokepoints.yml on 2026-08-01. Tier 2
+  # reached 0 on 2026-08-02 by the 2b/2c split — the 53 findings it held were
+  # 47 parent-scoped reads and 5 reads of tables with no org_id, plus one
+  # correctly org-scoped read the rule could not see (below). NONE was a real
+  # cross-tenant scan. It stays here at a baseline of 0, which already fails
+  # any new finding, until it is promoted in its own change.
   #
   # NOTE on the shared exclusions, which every tier repeats:
   # `$S.from($T).select(...)` only matches a select whose receiver is the
@@ -67,16 +78,39 @@ rules:
   # into the top two tiers on merit rather than by path.
 
 
-  # ── Tier 2: bounded by something, but not by tenant ──────────────────────
-  # Has an equality filter, so it is not a bare table scan, but nothing pins
-  # it to one org — the result set grows with the PLATFORM, not with a tenant.
-  # Every one of these is a genuine truncation risk the moment tenant count
-  # rises; CLAUDE.md's "fine for one org's page" exemption does not apply.
+  # ── What counts as org scope, and why the regex is not just "org_id" ─────
+  # The org-scope negative below matches BOTH `.eq('org_id', …)` and an
+  # embedded-resource filter like `.eq('checklist_templates.org_id', …)`, which
+  # PostgREST uses to filter a parent through an `!inner` join. The literal
+  # `pattern-not-inside: $X.eq("org_id", ...)` this replaced saw only the
+  # undotted form, so
+  #
+  #   .from('checklist_template_sections')
+  #   .select('template_id, checklist_templates!inner(...)')
+  #   .eq('checklist_templates.org_id', membership.org_id)
+  #
+  # — a correctly single-tenant read — was counted as a cross-tenant scan.
+  # A dotted org filter IS org scope; the tenant boundary does not care which
+  # side of the join carries the column.
+  #
+  # ── Tier 2: no tenant scope AND no parent entity ─────────────────────────
+  # Has an equality filter, so it is not a bare table scan (that is tier 1, now
+  # promoted to chokepoints.yml at zero), but nothing pins it to one org and
+  # nothing pins it to one parent row either — the result set grows with the
+  # PLATFORM. This is the genuine cross-tenant class and the burn-down target:
+  # every finding here is expected to be a real defect, so the tier is meant to
+  # reach 0 and be promoted to chokepoints.yml.
+  #
+  # Two populations were split out of this tier because neither is a tenant
+  # boundary problem, and together they were 52 of its 53 findings — enough
+  # noise to make the tier unactionable:
+  #   • scoped by a non-org parent id  → -single-parent (tier 2b)
+  #   • a table with no org_id at all  → -global-table  (tier 2c)
   - id: fieldstay-supabase-unbounded-select-cross-tenant
     languages: [typescript]
     severity: ERROR
     message: >-
-      Unbounded .select() with no .eq('org_id', …) anywhere in the chain — this
+      Unbounded .select() with no org scope and no single parent row — this
       read spans tenants, so it grows with the platform and silently truncates
       at max_rows = 1000. Scope it to one org, or bound it with fetchAllRows()
       / .limit() / .single() / a head-count aggregate.
@@ -88,7 +122,113 @@ rules:
       - pattern-not-inside: $X.single(...)
       - pattern-not-inside: $X.maybeSingle(...)
       - pattern-not: "$S.from($T).select($SEL, {..., head: true, ...})"
-      - pattern-not-inside: $X.eq("org_id", ...)
+      # org scope, dotted or not — see the note above
+      - pattern-not-inside:
+          patterns:
+            - pattern: $X.eq($OCOL, ...)
+            - metavariable-regex:
+                metavariable: $OCOL
+                regex: ^["'](?:[A-Za-z_]+\.)?org_id["']$
+      # scoped by one non-org parent row → tier 2b
+      - pattern-not-inside:
+          patterns:
+            - pattern: $X.eq($PCOL, ...)
+            - metavariable-regex:
+                metavariable: $PCOL
+                regex: ^["'](?:[A-Za-z_]+\.)?(?!org_id)[A-Za-z_]*_id["']$
+      # a table with no org_id column → tier 2c
+      - metavariable-regex:
+          metavariable: $T
+          regex: ^(?!["'](?:asset_type_standards|integration_providers|inventory_catalog|maintenance_catalog_items|oauth_states|pending_integration_links|pending_oauth_authorizations|platform_admins|platform_inventory_template_items|platform_inventory_templates|platform_seed_room_template_items|platform_seed_room_templates|platform_staff|processed_webhooks|profiles|promo_hospitable_launch_counter|stripe_processed_events|support_kb_chunks)["']$)
+
+  # ── Tier 2b: one parent entity, but no org filter ────────────────────────
+  # `.eq('property_id', …)` / `.eq('work_order_id', …)` / `.eq('user_id', …)`
+  # with no org scope. The row count is bounded by ONE parent row's children,
+  # not by the platform, so this is a materially different risk class from a
+  # genuinely unscoped scan — a work order's line items or a crew member's
+  # availability does not approach max_rows.
+  #
+  # It is NOT zero-risk, which is why it stays counted rather than excluded:
+  # the parent id arrives from somewhere, and if that somewhere is not itself
+  # org-checked the read is an IDOR regardless of how few rows it returns.
+  # That is an authorization question this rule cannot answer — see the
+  # Manual Audit Checklist's IDOR entry in CLAUDE.md.
+  - id: fieldstay-supabase-unbounded-select-single-parent
+    languages: [typescript]
+    severity: WARNING
+    message: >-
+      Unbounded .select() scoped to a single parent row (property_id,
+      work_order_id, user_id, …) but with no .eq('org_id', …). Bounded by one
+      parent's children rather than by the platform, so truncation is unlikely
+      — but verify the parent id was itself org-checked before it got here,
+      and add org scope if this table carries one.
+    patterns:
+      - pattern: $S.from($T).select(...)
+      - pattern-inside:
+          patterns:
+            - pattern: $Y.eq($PCOL, ...)
+            - metavariable-regex:
+                metavariable: $PCOL
+                regex: ^["'](?:[A-Za-z_]+\.)?(?!org_id)[A-Za-z_]*_id["']$
+      - pattern-not-inside: $X.limit(...)
+      - pattern-not-inside: $X.range(...)
+      - pattern-not-inside: $X.single(...)
+      - pattern-not-inside: $X.maybeSingle(...)
+      - pattern-not: "$S.from($T).select($SEL, {..., head: true, ...})"
+      - pattern-not-inside:
+          patterns:
+            - pattern: $X.eq($OCOL, ...)
+            - metavariable-regex:
+                metavariable: $OCOL
+                regex: ^["'](?:[A-Za-z_]+\.)?org_id["']$
+      # A global table wins over parent scope — tier 2c. Without this,
+      # platform_inventory_template_items filtered by
+      # platform_inventory_template_id matched BOTH tiers and inflated the
+      # ladder's total by one. The tiers are mutually exclusive by design.
+      - metavariable-regex:
+          metavariable: $T
+          regex: ^(?!["'](?:asset_type_standards|integration_providers|inventory_catalog|maintenance_catalog_items|oauth_states|pending_integration_links|pending_oauth_authorizations|platform_admins|platform_inventory_template_items|platform_inventory_templates|platform_seed_room_template_items|platform_seed_room_templates|platform_staff|processed_webhooks|profiles|promo_hospitable_launch_counter|stripe_processed_events|support_kb_chunks)["']$)
+
+  # ── Tier 2c (HYGIENE): a table that has no org_id column ─────────────────
+  # Platform-global tables: fixed catalogs (inventory_catalog,
+  # maintenance_catalog_items, asset_type_standards, integration_providers,
+  # platform_*) and cross-tenant infrastructure (profiles, processed_webhooks,
+  # oauth_states, support_kb_chunks). Demanding `.eq('org_id', …)` on these is
+  # incoherent — the column does not exist, so the "scope it to one org" advice
+  # of tier 2 can never be followed and the finding can never be closed.
+  #
+  # The list is derived from the live schema, not curated by hand: every public
+  # table with no org_id column AND no foreign key to a table that has one.
+  # A table with no org_id but a tenant-linked parent (checklist_template_items,
+  # work_order_photos, purchase_order_items, …) is deliberately NOT here — those
+  # are ordinary child tables and belong in the tiers above. Re-derive with the
+  # query in the commit that added this rule if the schema changes.
+  #
+  # Counted rather than excluded because unboundedness is still real here: a
+  # bare scan of one of these is caught by tier 1 in chokepoints.yml, but a
+  # filtered read of `profiles` or `support_kb_chunks` still grows with the
+  # platform and still truncates at 1000. What this tier drops is only the
+  # TENANT framing, not the truncation coverage.
+  - id: fieldstay-supabase-unbounded-select-global-table
+    languages: [typescript]
+    severity: INFO
+    message: >-
+      Unbounded .select() on a table with no org_id column (a platform-global
+      catalog or shared infrastructure table). Not a tenant-scope problem —
+      there is no tenant column to scope to — but still subject to max_rows =
+      1000. Bound it with .limit() / fetchAllRows() if this table can grow past
+      a fixed catalog's size.
+    patterns:
+      - pattern: $S.from($T).select(...)
+      - pattern-inside: $Y.eq($COL, ...)
+      - pattern-not-inside: $X.limit(...)
+      - pattern-not-inside: $X.range(...)
+      - pattern-not-inside: $X.single(...)
+      - pattern-not-inside: $X.maybeSingle(...)
+      - pattern-not: "$S.from($T).select($SEL, {..., head: true, ...})"
+      - metavariable-regex:
+          metavariable: $T
+          regex: ^["'](?:asset_type_standards|integration_providers|inventory_catalog|maintenance_catalog_items|oauth_states|pending_integration_links|pending_oauth_authorizations|platform_admins|platform_inventory_template_items|platform_inventory_templates|platform_seed_room_template_items|platform_seed_room_templates|platform_staff|processed_webhooks|profiles|promo_hospitable_launch_counter|stripe_processed_events|support_kb_chunks)["']$
 
   # ── Tier 3: one org, but sized by a caller-supplied list ─────────────────
   # `.eq('org_id', …)` plus `.in(col, array)`. Single-tenant, so it is not a
@@ -109,7 +249,15 @@ rules:
       does). Chunk the list, or bound the read with fetchAllRows() / .limit().
     patterns:
       - pattern: $S.from($T).select(...)
-      - pattern-inside: $Y.eq("org_id", ...)
+      # dotted-aware, same as tier 2 — an embedded `rel.org_id` filter is org
+      # scope. A nested `patterns:` block is safe here; it is `pattern-either`
+      # that inflates the count, per the note above.
+      - pattern-inside:
+          patterns:
+            - pattern: $Y.eq($OCOL, ...)
+            - metavariable-regex:
+                metavariable: $OCOL
+                regex: ^["'](?:[A-Za-z_]+\.)?org_id["']$
       - pattern-inside: $Z.in($COL, $ARR)
       - pattern-not-inside: $X.limit(...)
       - pattern-not-inside: $X.range(...)
@@ -133,7 +281,13 @@ rules:
       org, or if this code can ever run platform-wide.
     patterns:
       - pattern: $S.from($T).select(...)
-      - pattern-inside: $Y.eq("org_id", ...)
+      # dotted-aware, same as tiers 2 and 3
+      - pattern-inside:
+          patterns:
+            - pattern: $Y.eq($OCOL, ...)
+            - metavariable-regex:
+                metavariable: $OCOL
+                regex: ^["'](?:[A-Za-z_]+\.)?org_id["']$
       - pattern-not-inside: $Z.in($COL, $ARR)
       - pattern-not-inside: $X.limit(...)
       - pattern-not-inside: $X.range(...)

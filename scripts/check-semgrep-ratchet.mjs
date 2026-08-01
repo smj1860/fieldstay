@@ -79,6 +79,45 @@ for (const result of report.results) {
 const declared = [...readFileSync(RULES, 'utf8').matchAll(/^[ \t]*-[ \t]*id:[ \t]*(\S+)/gm)].map((m) => m[1])
 for (const id of declared) actual[id] ??= 0
 
+// ── The unbounded-select ladder must stay a PARTITION ───────────────────────
+// Its tiers claim to be mutually exclusive, which is what lets the per-tier
+// counts sum to the whole defect class. A site matching two tiers is counted
+// twice: the class looks bigger than it is, and burning one tier to zero no
+// longer proves those sites are gone — they are still counted under the other.
+//
+// Not hypothetical. Splitting -global-table out of -cross-tenant introduced
+// exactly this: platform_inventory_template_items filtered by
+// platform_inventory_template_id satisfied both -single-parent (a non-org
+// parent id) and -global-table (a table with no org_id), and the ladder total
+// read 212 against an unchanged population of 211. A comment saying "mutually
+// exclusive" cannot catch that; this can.
+const LADDER_PREFIX = 'fieldstay-supabase-unbounded-select-'
+const siteToTiers = new Map()
+for (const result of report.results) {
+  const id = ruleIdOf(result.check_id)
+  if (!id.startsWith(LADDER_PREFIX)) continue
+  const site = `${result.path}:${result.start.line}`
+  if (!siteToTiers.has(site)) siteToTiers.set(site, new Set())
+  siteToTiers.get(site).add(id.slice(LADDER_PREFIX.length))
+}
+const overlaps = [...siteToTiers.entries()].filter(([, tiers]) => tiers.size > 1)
+
+if (overlaps.length) {
+  console.error(
+    '\n::error title=Semgrep ladder is not a partition::' +
+      `${overlaps.length} site(s) match more than one unbounded-select tier, so the ` +
+      'per-tier counts double-count them and no tier can be burned to a meaningful zero.'
+  )
+  for (const [site, tiers] of overlaps) {
+    console.error(`  ✗ ${site}  →  ${[...tiers].sort().join(' + ')}`)
+  }
+  console.error(
+    '\nMake the tiers exclusive again: give the tier that should NOT win a negative ' +
+      'for the other tier\'s discriminator (see the tier 2b/2c note in .semgrep/ratchet.yml).'
+  )
+  process.exit(1)
+}
+
 // ── Compare ─────────────────────────────────────────────────────────────────
 const baselineDoc = JSON.parse(readFileSync(BASELINE_FILE, 'utf8'))
 const baseline = baselineDoc.counts
