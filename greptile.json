@@ -1,0 +1,86 @@
+{
+  "commentTypes": ["logic", "syntax"],
+  "strictness": 2,
+  "instructions": "FieldStay is a multi-tenant property-operations SaaS. CLAUDE.md at the repo root is the authoritative convention document — read it before reviewing. Weight findings by blast radius in this order: cross-tenant data exposure, money correctness (owner P&L, Stripe, vendor invoicing), silent data loss, then everything else. This repo already gates mechanically-checkable rules via ESLint, unit/guardrails/*.test.ts, .semgrep/*.yml and scripts/check-db-invariants.mjs — do NOT spend review budget re-flagging those. Your value is the judgment calls those layers structurally cannot express, listed in CLAUDE.md's 'Manual Audit Checklist — Items With No Guardrail Yet'. Prefer one well-evidenced finding over five speculative ones, and say plainly when a diff looks correct.",
+  "ignorePatterns": "greptile.json\npnpm-lock.yaml\n*.md\naudits/**\ndocs/**\nsupabase/schema_reference.sql\npublic/**\n*.png\n*.svg",
+  "triggerOnUpdates": true,
+  "triggerOnDrafts": false,
+  "statusCheck": true,
+  "customContext": {
+    "files": [
+      {
+        "scope": ["**/*.ts", "**/*.tsx", "**/*.sql"],
+        "path": "CLAUDE.md",
+        "description": "Authoritative conventions: schema, enums, real helper signatures, tenant-isolation rules, the Standing Audit Checklist, and the Manual Audit Checklist of defect classes with no automated guardrail."
+      }
+    ],
+    "rules": [
+      {
+        "scope": ["supabase/migrations/**/*.sql"],
+        "rule": "A SECURITY DEFINER function bypasses RLS, so its own body is the ONLY authorization boundary. If it takes an org id (or any tenant scope) as a PARAMETER and is granted EXECUTE to `authenticated`, it is reachable directly at /rest/v1/rpc/<name> where that argument is attacker-controlled — a server action being the only intended caller is NOT a boundary. Require an explicit gate (`auth.role() <> 'service_role' AND NOT is_org_member(p_org_id, ARRAY[...])` raising 42501), or EXECUTE revoked from authenticated. Also require a pinned search_path. This exact defect shipped on 2026-08-01 across four RPCs."
+      },
+      {
+        "scope": ["supabase/migrations/**/*.sql", "app/**/*.ts", "lib/**/*.ts"],
+        "rule": "When a Postgres function's return contract changes (a new `reason` value, a new key, a renamed field), every TypeScript caller's result union and its branching must change with it. A new reason that falls through to an existing else-branch produces a confidently wrong user-facing message. Check the caller whenever a migration touches an RPC's RETURN."
+      },
+      {
+        "scope": ["app/**/*.ts", "app/**/*.tsx", "lib/**/*.ts"],
+        "rule": "PostgREST caps every response at max_rows = 1000 and returns HTTP 200 with no truncation signal. A `.limit(5000)` is NOT a bound — the cap applies on top of it. Flag any read whose result set can realistically exceed 1000 AND is then aggregated, summed, counted, deduped, or used as a completeness check (financial totals, dedupe sets, fan-out lists, permission maps). One org's paginated page render is fine; a rollup is not. The fix is fetchAllRows() from lib/inngest/paginate.ts, with a sort key that is TOTAL — range() over a non-unique ORDER BY can skip or duplicate rows across page boundaries."
+      },
+      {
+        "scope": ["app/**/*.ts", "lib/**/*.ts"],
+        "rule": "IDOR: requireOrgMember()/requireOrgRole() prove the caller belongs to an org — they do NOT prove that an object requested BY ID belongs to that org, or to that user. Any lookup keyed by an id from params, searchParams, form data, or a JSON body needs its own ownership predicate. Scrutinise service-client reads especially: they have no RLS backstop, so a missing .eq('org_id', ...) fails open silently."
+      },
+      {
+        "scope": ["app/**/*.ts", "lib/**/*.ts"],
+        "rule": "Check that the role gate matches the sensitivity of what the code does, not just that some gate exists. requireOrgMember() admits `viewer` and `crew`. Anything touching billing, door codes, financial data, team/role administration, audit logs, owner-portal tokens, or PII needs requireOrgRole([...]). Note `owner` always passes is_org_member(), and lib/navigation.ts hiding a link is NOT access control — no dashboard route is role-gated by middleware."
+      },
+      {
+        "scope": ["app/**/*.ts", "lib/**/*.ts"],
+        "rule": "TOCTOU: a read-then-decide-then-write sequence is a race whenever two requests can run it concurrently. The precondition belongs in the WHERE clause of the write (a conditional UPDATE whose row count is then CHECKED), or in a transactional RPC — not in an `if` before it. Critically, a zero-row UPDATE is NOT an error in PostgREST: it returns 200. Code that only checks `error` treats a lost race, an RLS denial, and a successful write identically. Require .select() plus a row-count check on any claiming write."
+      },
+      {
+        "scope": ["app/**/*.ts", "lib/**/*.ts"],
+        "rule": "Multi-step writes: when one logical action touches several tables, or a table plus an external system, ask what state a failure partway through leaves behind and whether the user can recover from it in the UI. Flag any sequence where an early step commits and a later one can fail, leaving a state with no path forward. Related: a helper that THROWS must not be called after its caller's own write has already committed — the throw invalidates a write that already landed, and the user is told it failed."
+      },
+      {
+        "scope": ["app/**/*.ts", "app/**/*.tsx", "lib/**/*.ts"],
+        "rule": "Silent failure: distinguish 'the query returned zero rows' from 'the query errored'. `const { data } = await supabase...` collapses both into null, so an outage renders as a friendly empty state with nothing logged. Reads should go through lib/supabase/unwrap.ts (unwrap/unwrapList/throwIfAnyQueryFailed/tryUnwrap). A caught error must do something visible — log with real context AND reportError() — not just console.error('failed')."
+      },
+      {
+        "scope": ["app/api/**/*.ts", "app/**/actions.ts"],
+        "rule": "Validate and normalise input at the boundary rather than trusting it downstream: format-check phone/email, enforce length limits, reject unexpected enum values, and never spread a client-supplied object into a DB payload (use an explicit allowlist). Also check dedup on non-Inngest write paths — a retried webhook or a double-submitted form needs an explicit dedup key or a unique constraint it can safely collide against."
+      },
+      {
+        "scope": ["app/**/*.tsx", "components/**/*.tsx"],
+        "rule": "Reuse components/ui/* primitives (Button, Card, Badge, Dialog, Input, Checkbox, StatusDot, Tabs) instead of hand-rolling an equivalent from raw Tailwind — a hand-rolled modal or tab bar built with utility classes passes the check:ui-classes grep entirely while missing the focus trap, Escape handling, scroll lock, role/aria-selected, and focus ring the primitive supplies. Colour must come from CSS variables; Tailwind colour utilities (text-red-500, hover:text-blue-600) and raw hex in a style prop both count as hardcoded."
+      },
+      {
+        "scope": ["app/**/*.tsx", "components/**/*.tsx", "lib/hooks/**/*.ts"],
+        "rule": "React correctness: a callback prop in a useEffect dep array that callers pass as an inline arrow re-runs that effect on EVERY parent render — if the effect moves focus, scrolls, or fires a request, this is a real user-visible bug. Also flag setState on a parent during a child's render, hooks called conditionally or after an early return, and overlapping async refreshes that can land out of order without a generation guard."
+      },
+      {
+        "scope": ["app/crew/**", "lib/dexie/**"],
+        "rule": "The crew PWA is local-first: client components read the Dexie cache (getDexieDb/useLiveQuery), never Supabase directly, and writes go through enqueueMutation() into the outbox. In an upload builder, only assign a column the mutation actually carried — guard with an explicit `'field' in payload` check, because `field: payload.field ?? null` writes a real NULL when the mutation never mentioned it, and the write succeeds so the loss is silent."
+      },
+      {
+        "scope": ["lib/inngest/**/*.ts"],
+        "rule": "Inngest steps are retried independently, so any step that creates a record must be idempotent — check for an existing row first, use ON CONFLICT, or a dedup key. owner_transactions specifically must check source_reference_id. Inside a step.run() body, `return` in a for...of aborts the whole step and silently skips every remaining iteration; use continue."
+      },
+      {
+        "scope": ["**/*.test.ts", "**/*.spec.ts"],
+        "rule": "Judge whether a test would actually FAIL if the behaviour it names regressed. Flag assertions that were already true before the action under test (the current URL, a always-rendered container, the button that was just clicked, list text the detail view repeats), bodies wrapped in `if (await x.isVisible())` that silently no-op when the element is absent, and mocks/doubles permissive enough that the defect the test exists to catch would still pass. A test that cannot fail is worse than no test — it reads as coverage."
+      }
+    ],
+    "other": [
+      {
+        "scope": ["**/*.ts", "**/*.tsx"],
+        "content": "Names that do not exist in this schema and are always bugs: the table `memberships` (it is `organization_members`), `work_order_notes` (it is `work_order_updates`), the column `assigned_crew_id` (it is `assigned_crew_member_id`), and `membership.user_id` (OrgMembership has no user_id — use `user.id` from requireOrgMember()). Two inventory tables have deliberately different column names and must not be mixed: inventory_count_draft_items uses item_id/counted_qty; inventory_count_items uses inventory_item_id/quantity_counted. These GENERATED ALWAYS columns must never appear in an insert/update payload, because Postgres rejects the entire statement with 428C9: work_order_line_items.line_total, assignment_outcomes.duration_minutes, checklist_item_signals.flag_probability and .dynamic_photo_required."
+      },
+      {
+        "scope": ["**/*.ts", "**/*.tsx"],
+        "content": "Never log or place in audit_events.metadata: guest phone numbers, SMS body content, actual_cost or other financial specifics, email addresses, Stripe tokens, or any secret. All SMS sends must be gated on `process.env.SMS_ENABLED !== 'true'` and confined to lib/sms/telnyx.ts. Every outbound fetch needs an AbortSignal timeout budget from lib/http/timeout.ts, and any URL that is even partly tenant-supplied must go through assertSafeExternalUrl/safeFetch in lib/security/url-guard.ts, which re-validates each redirect hop."
+      }
+    ]
+  }
+}
