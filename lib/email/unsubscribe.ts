@@ -67,6 +67,25 @@ export async function resolveEmailAudience(
 ): Promise<EmailAudience> {
   const suppressedResult: EmailAudience = { suppressed: true, unsubscribeUrl: null, headers: {} }
 
+  // FAILS CLOSED on a missing postal address, for the same reason as a missing
+  // token below. CAN-SPAM requires a physical address in commercial email, and
+  // emails/components/email-layout.tsx renders the opt-out block only when
+  // BOTH the unsubscribe URL and the address are present — so with
+  // COMPANY_POSTAL_ADDRESS unset the footer loses the address AND the
+  // unsubscribe link, producing mail that is non-compliant on both counts
+  // while every send still reports success.
+  //
+  // Suppressing instead means an unset env var delays marketing email rather
+  // than shipping a violation. Set COMPANY_POSTAL_ADDRESS to turn commercial
+  // sending on.
+  if (!commercialPostalAddress()) {
+    console.error(
+      '[resolveEmailAudience] COMPANY_POSTAL_ADDRESS is unset — suppressing commercial email. ' +
+      'CAN-SPAM requires a physical postal address; set it to enable these sends.'
+    )
+    return suppressedResult
+  }
+
   const res = await supabase
     .from('profiles')
     .select('email_unsubscribed_at, unsubscribe_token')
