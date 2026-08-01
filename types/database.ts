@@ -514,6 +514,11 @@ export interface Turnover {
   completion_notes:      string | null
   started_at:            string | null
   completed_at:          string | null
+  // integer NULL in the live schema (migration
+  // 20260731000000_turnover_crew_duration_minutes). Not written by any code
+  // path yet — modelled here because the type-drift gate compares the LIVE
+  // schema to this interface, not to what the code currently touches.
+  crew_duration_minutes: number | null
   // Inventory has no per-turnover scoping of its own (inventory_items is
   // persistent, property-level state edited across many turnovers), so
   // "inventory started/confirmed for THIS turnover" lives here instead —
