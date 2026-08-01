@@ -1,4 +1,5 @@
 import { inngest } from '@/lib/inngest/client'
+import { fetchAllRows } from '@/lib/inngest/paginate'
 import { createServiceClient } from '@/lib/supabase/server'
 import { haversineKm, proximityScore } from '@/lib/scoring/geo'
 import { computeWorkloadMap, computeFamiliarIds } from '@/lib/scoring/pools'
@@ -60,27 +61,46 @@ export const autoAssignTurnover = inngest.createFunction(
       let familiarCrewIds: string[] = []
 
       if (pastTurnoverIds.length > 0) {
-        const { data: history } = await supabase
-          .from('turnover_assignments')
-          .select('crew_member_id')
-          .in('turnover_id', pastTurnoverIds)
-          .in('crew_member_id', availableCrew.map((c) => c.id))
+        // Paginated: pastTurnoverIds is EVERY prior turnover for this
+        // property, which grows without bound over the property's lifetime,
+        // and assignments fan out further (several crew per turnover). A
+        // truncated history silently narrows "who has worked here before",
+        // which is a direct input to the assignment suggestion.
+        const history = await fetchAllRows<{ crew_member_id: string }>(
+          (from, to) => supabase
+            .from('turnover_assignments')
+            .select('crew_member_id')
+            .in('turnover_id', pastTurnoverIds)
+            .in('crew_member_id', availableCrew.map((c) => c.id))
+            .order('crew_member_id')
+            .range(from, to),
+          { label: 'auto-assign-turnover.history' },
+        )
 
-        familiarCrewIds = computeFamiliarIds(history ?? [], (h) => h.crew_member_id)
+        familiarCrewIds = computeFamiliarIds(history, (h) => h.crew_member_id)
       }
 
       // Workload: assignments in next 14 days only (not all-time history)
       const windowEnd = new Date()
       windowEnd.setDate(windowEnd.getDate() + 14)
 
-      const { data: upcoming } = await supabase
-        .from('turnover_assignments')
-        .select('crew_member_id, turnovers!inner(checkout_datetime)')
-        .in('crew_member_id', availableCrew.map((c) => c.id))
-        .gte('turnovers.checkout_datetime', new Date().toISOString())
-        .lte('turnovers.checkout_datetime', windowEnd.toISOString())
+      // Paginated: bounded by a 14-day window, but a large crew across a large
+      // portfolio still fans out to more assignment rows than the cap. A
+      // truncated read UNDERSTATES workload, which biases the suggestion toward
+      // the crew members who are already the busiest.
+      const upcoming = await fetchAllRows<{ crew_member_id: string }>(
+        (from, to) => supabase
+          .from('turnover_assignments')
+          .select('crew_member_id, turnovers!inner(checkout_datetime)')
+          .in('crew_member_id', availableCrew.map((c) => c.id))
+          .gte('turnovers.checkout_datetime', new Date().toISOString())
+          .lte('turnovers.checkout_datetime', windowEnd.toISOString())
+          .order('crew_member_id')
+          .range(from, to),
+        { label: 'auto-assign-turnover.workload' },
+      )
 
-      const workloadMap = computeWorkloadMap(upcoming ?? [], (a) => a.crew_member_id)
+      const workloadMap = computeWorkloadMap(upcoming, (a) => a.crew_member_id)
 
       return {
         mode,

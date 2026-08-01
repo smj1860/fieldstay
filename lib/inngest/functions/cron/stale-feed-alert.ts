@@ -1,11 +1,9 @@
-import { inngest }              from '@/lib/inngest/client'
-import { createServiceClient }  from '@/lib/supabase/server'
-import { fetchAllRows }         from '@/lib/inngest/paginate'
+import { inngest }                from '@/lib/inngest/client'
+import { createServiceClient }    from '@/lib/supabase/server'
+import { fetchAllRows }           from '@/lib/inngest/paginate'
+import { getPmMembersByOrgIds }   from '@/lib/inngest/helpers'
 
 const STALE_HOURS = 6
-
-// Same preference order getPmMembers() applies — owner before admin.
-const ROLE_PREFERENCE = ['owner', 'admin'] as const
 
 type StaleRow = {
   id:             string
@@ -67,39 +65,28 @@ export const staleFeedAlert = inngest.createFunction(
       byOrg.set(feed.org_id, group)
     }
 
-    // One PM user id per org, resolved in ONE query for every org at once.
+    // One PM user id per org, resolved in ONE batched call for every org.
     //
-    // This used to call getPmMembers() once per org inside a single step. That
-    // helper does a DB query PLUS one auth.admin.getUserById() GoTrue
-    // round-trip per member — ~300 sequential external calls at 150 orgs,
-    // inside one step, near GoTrue's admin rate limits. None of that work was
-    // needed: the only field consumed below is userId, so the email lookup
-    // (the entire reason getPmMembers touches GoTrue) was pure waste here.
+    // This used to open-code the membership query here: `.in('role', ['owner',
+    // 'admin'])` + `.not('invite_accepted_at', 'is', null)` + a local
+    // owner-before-admin sort. That is exactly getPmMembersByOrgIds()'s
+    // contract re-derived by hand, and re-deriving it is how the
+    // invite_accepted_at filter has drifted into a live lockout bug three
+    // times. The helper is the single source of truth (CLAUDE.md) and is
+    // already the batched, many-orgs-one-query form — `limit: 1` reproduces
+    // the "first owner, else first admin" selection this loop was making.
     const pmUserIdByOrg = await step.run('resolve-pm-members', async () => {
       const supabase = createServiceClient({ system: 'inngest:stale-feed-alert' })
-      const orgIds = [...byOrg.keys()]
 
-      const members = await fetchAllRows<{ org_id: string; user_id: string; role: string }>(
-        (from, to) => supabase
-          .from('organization_members')
-          .select('org_id, user_id, role')
-          .in('org_id', orgIds)
-          .in('role', ROLE_PREFERENCE as unknown as string[])
-          .not('invite_accepted_at', 'is', null)
-          .order('user_id', { ascending: true })
-          .range(from, to),
-        { label: 'organization_members(pm-for-stale-feeds)' }
-      )
+      const pmByOrg = await getPmMembersByOrgIds(supabase, [...byOrg.keys()], {
+        roles: ['owner', 'admin'],
+        limit: 1,
+      })
 
-      // Sort owner-before-admin once, then the first row seen per org wins —
-      // same "primary PM" selection getPmMembers({ limit: 1 }) makes.
-      const rank = (role: string) => {
-        const i = ROLE_PREFERENCE.indexOf(role as typeof ROLE_PREFERENCE[number])
-        return i === -1 ? ROLE_PREFERENCE.length : i
-      }
       const result: Record<string, string> = {}
-      for (const member of [...members].sort((a, b) => rank(a.role) - rank(b.role))) {
-        result[member.org_id] ??= member.user_id
+      for (const [orgId, members] of pmByOrg) {
+        const primary = members[0]
+        if (primary) result[orgId] = primary.userId
       }
       return result
     })

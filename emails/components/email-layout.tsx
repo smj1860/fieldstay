@@ -10,6 +10,16 @@ interface EmailLayoutProps {
   ctaLabel?:   string
   ctaUrl?:     string
   footerNote?: string
+  /**
+   * Set on COMMERCIAL email only (product marketing, drip, re-engagement).
+   * Renders the CAN-SPAM opt-out link and postal address. Transactional mail
+   * — work orders, invites, password resets, owner-portal links — is exempt
+   * from the opt-out requirement and must NOT pass this, so that someone who
+   * opted out of marketing still receives the mail their job depends on.
+   */
+  unsubscribeUrl?: string
+  /** Postal address, required by CAN-SPAM alongside the opt-out link. */
+  postalAddress?:  string | null
 }
 
 export function EmailLayout({
@@ -19,6 +29,8 @@ export function EmailLayout({
   ctaLabel,
   ctaUrl,
   footerNote,
+  unsubscribeUrl,
+  postalAddress,
 }: Readonly<EmailLayoutProps>) {
   return (
     <Html lang="en">
@@ -80,8 +92,23 @@ export function EmailLayout({
               <Link href="mailto:support@fieldstay.app" style={footerLink}>
                 Support
               </Link>
+              {unsubscribeUrl && (
+                <>
+                  {' · '}
+                  <Link href={unsubscribeUrl} style={footerLink}>
+                    Unsubscribe
+                  </Link>
+                </>
+              )}
             </Column>
           </Row>
+          {unsubscribeUrl && postalAddress && (
+            <Row>
+              <Column>
+                <Text style={footerSmall}>{postalAddress}</Text>
+              </Column>
+            </Row>
+          )}
         </Container>
 
       </Body>

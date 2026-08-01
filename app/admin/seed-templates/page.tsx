@@ -1,17 +1,38 @@
 import { requirePlatformAdmin } from '@/lib/auth'
+import { fetchAllRows } from '@/lib/inngest/paginate'
 import { Card } from '@/components/ui/Card'
 import { SeedTemplateBuilder } from './seed-template-builder'
 
 export default async function SeedTemplatesPage() {
   const { supabase } = await requirePlatformAdmin()
 
-  const { data: templates } = await supabase
-    .from('platform_seed_room_templates')
-    .select(`
-      id, name, auto_include, sort_order,
-      platform_seed_room_template_items ( id, task, requires_photo, notes, sort_order )
-    `)
-    .order('sort_order')
+  // Paginated so a growing seed library can never be silently half-rendered
+  // in the editor that defines what every new org is seeded with.
+  interface SeedRoomTemplateRow {
+    id:           string
+    name:         string
+    auto_include: boolean
+    sort_order:   number
+    platform_seed_room_template_items: {
+      id:             string
+      task:           string
+      requires_photo: boolean
+      notes:          string | null
+      sort_order:     number
+    }[] | null
+  }
+
+  const templates = await fetchAllRows<SeedRoomTemplateRow>(
+    (from, to) => supabase
+      .from('platform_seed_room_templates')
+      .select(`
+        id, name, auto_include, sort_order,
+        platform_seed_room_template_items ( id, task, requires_photo, notes, sort_order )
+      `)
+      .order('sort_order')
+      .range(from, to),
+    { label: 'admin.seedTemplates' },
+  )
 
   return (
     <Card>
@@ -25,7 +46,7 @@ export default async function SeedTemplatesPage() {
         retroactively change any org&apos;s already-saved room templates.
       </p>
       <SeedTemplateBuilder
-        initialTemplates={(templates ?? []).map((t) => ({
+        initialTemplates={templates.map((t) => ({
           id:          t.id,
           name:        t.name,
           autoInclude: t.auto_include,

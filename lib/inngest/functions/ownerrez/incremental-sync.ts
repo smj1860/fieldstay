@@ -47,9 +47,11 @@
  */
 
 import { inngest }                      from '@/lib/inngest/client'
+import { fetchAllRows } from '@/lib/inngest/paginate'
 import { NonRetriableError }            from 'inngest'
 import type { GetStepTools }            from 'inngest'
 import { createServiceClient }          from '@/lib/supabase/server'
+import { fetchTurnoverCreatedEvents } from '@/lib/inngest/turnover-created-events'
 import { OwnerRezApiClient, getRedis }  from '@/lib/integrations/providers/ownerrez-api'
 import { RateLimitError, TokenRevokedError, translateSyncError } from '@/lib/integrations/types'
 import { logAuditEvent }                from '@/lib/audit'
@@ -388,13 +390,18 @@ async function notifyOwnerBlockOpportunities(
 
   // Batch-fetch property names for every owner-block property in one query
   // instead of a per-booking SELECT inside the loop.
-  const { data: blockProperties } = await supabase
-    .from('properties')
-    .select('id, name')
-    .in('id', [...new Set(ownerBlocks.map((b) => b.property_id))])
+  const blockProperties = await fetchAllRows<{ id: string; name: string | null }>(
+    (from, to) => supabase
+      .from('properties')
+      .select('id, name')
+      .in('id', [...new Set(ownerBlocks.map((b) => b.property_id))])
+      .order('id')
+      .range(from, to),
+    { label: 'ownerrez-incremental.blockProperties' },
+  )
 
   const propertyNameById = Object.fromEntries(
-    (blockProperties ?? []).map((p) => [p.id, p.name as string | null])
+    blockProperties.map((p) => [p.id, p.name as string | null])
   ) as Record<string, string | null>
 
   await Promise.all(
@@ -575,25 +582,9 @@ async function runPostSyncFanOut(
 
   if (allNewTurnoverIds.length > 0) {
     const turnoverEvents = await step.run('fetch-new-turnover-data', async () => {
-      const supabase = createServiceClient({ system: 'inngest:incremental-sync' })
-      type TurnoverRow = { id: string; property_id: string; checkout_datetime: string; checkin_datetime: string; window_minutes: number | null }
-      const { data: turnovers } = await supabase
-        .from('turnovers')
-        .select('id, property_id, checkout_datetime, checkin_datetime, window_minutes')
-        .in('id', allNewTurnoverIds)
-
-      return (turnovers as TurnoverRow[] ?? []).map((t) => ({
-        name: 'turnover/created' as const,
-        data: {
-          turnover_id:       t.id,
-          property_id:       t.property_id,
-          org_id:            orgId,
-          checkout_datetime: t.checkout_datetime,
-          checkin_datetime:  t.checkin_datetime,
-          window_minutes:    t.window_minutes ?? 0,
-        },
-      }))
-    })
+        const supabase = createServiceClient({ system: 'inngest:incremental-sync' })
+        return fetchTurnoverCreatedEvents(supabase, allNewTurnoverIds, orgId)
+      })
 
     if (turnoverEvents.length > 0) {
       await step.sendEvent('fire-turnover-created-events', turnoverEvents)

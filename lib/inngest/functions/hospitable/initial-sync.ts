@@ -18,6 +18,7 @@
 
 import { inngest }             from '@/lib/inngest/client'
 import { NonRetriableError }   from 'inngest'
+import { fetchTurnoverCreatedEvents } from '@/lib/inngest/turnover-created-events'
 import { createServiceClient } from '@/lib/supabase/server'
 import { readIntegrationToken } from '@/lib/integrations/vault'
 import { translateSyncError } from '@/lib/integrations/types'
@@ -341,25 +342,9 @@ export const hospInitialSync = inngest.createFunction(
 
       if (newTurnoverIds.length > 0) {
         const turnoverEvents = await step.run('fetch-new-turnover-data', async () => {
-          const supabase = createServiceClient({ system: 'inngest:initial-sync' })
-          type TRow = { id: string; property_id: string; checkout_datetime: string; checkin_datetime: string; window_minutes: number | null }
-          const { data: turnovers } = await supabase
-            .from('turnovers')
-            .select('id, property_id, checkout_datetime, checkin_datetime, window_minutes')
-            .in('id', newTurnoverIds)
-
-          return ((turnovers as TRow[]) ?? []).map((t) => ({
-            name: 'turnover/created' as const,
-            data: {
-              turnover_id:       t.id,
-              property_id:       t.property_id,
-              org_id,
-              checkout_datetime: t.checkout_datetime,
-              checkin_datetime:  t.checkin_datetime,
-              window_minutes:    t.window_minutes ?? 0,
-            },
-          }))
-        })
+        const supabase = createServiceClient({ system: 'inngest:initial-sync' })
+        return fetchTurnoverCreatedEvents(supabase, newTurnoverIds, org_id)
+      })
 
         if (turnoverEvents.length > 0) {
           await step.sendEvent('fire-turnover-events', turnoverEvents)

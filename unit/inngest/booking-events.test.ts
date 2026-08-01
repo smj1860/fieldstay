@@ -33,6 +33,11 @@ function makeSupabase(queued: Record<string, { data?: unknown; error?: unknown }
     }
     chain.select = (...a: unknown[]) => record('select', a)
     chain.eq     = (...a: unknown[]) => record('eq', a)
+    // fetchTurnoverCreatedEvents drains via fetchAllRows(), which calls
+    // .order().range(). The chain is already thenable, so returning it
+    // resolves one page and terminates the pagination loop.
+    chain.order  = (...a: unknown[]) => record('order', a)
+    chain.range  = (...a: unknown[]) => record('range', a)
     chain.in     = (...a: unknown[]) => record('in', a)
     chain.upsert = (...a: unknown[]) => record('upsert', a)
 
@@ -151,8 +156,11 @@ describe('handleBookingDetected', () => {
       properties: [{ data: { avg_nightly_rate: null }, error: null }], // revenue step skips: 'no_rate', before ever querying bookings
       turnovers: [{
         data: [
-          { id: 'to_1', checkout_datetime: '2026-08-03T10:00:00Z', checkin_datetime: '2026-08-03T15:00:00Z', window_minutes: 300 },
-          { id: 'to_2', checkout_datetime: '2026-08-05T10:00:00Z', checkin_datetime: '2026-08-05T15:00:00Z', window_minutes: 300 },
+          // property_id is part of the row now: fetchTurnoverCreatedEvents reads it
+          // FROM the turnover rather than from the enclosing scope, so the event
+          // can never disagree with the turnover it describes.
+          { id: 'to_1', property_id: 'prop_1', checkout_datetime: '2026-08-03T10:00:00Z', checkin_datetime: '2026-08-03T15:00:00Z', window_minutes: 300 },
+          { id: 'to_2', property_id: 'prop_1', checkout_datetime: '2026-08-05T10:00:00Z', checkin_datetime: '2026-08-05T15:00:00Z', window_minutes: 300 },
         ],
         error: null,
       }],

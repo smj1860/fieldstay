@@ -1,0 +1,31 @@
+# Semgrep scan scope (see .semgrep/README.md).
+#
+# The semgrep layer polices PRODUCTION SOURCE only: app/, lib/, components/,
+# proxy.ts, instrumentation*.ts. Everything below is either not shipped code or
+# is the enforcement layer itself — a guardrail test that quotes a banned string
+# as a literal is not a violation of it.
+
+node_modules/
+.next/
+out/
+coverage/
+playwright-report/
+test-results/
+
+# Enforcement layer + tests (they quote the patterns they ban)
+unit/
+component/
+e2e/
+scripts/
+load-tests/
+
+# Not application source
+docs/
+audits/
+audit/
+supabase/
+public/
+emails/preview/
+
+# Generated/derived type declarations — no logic
+types/

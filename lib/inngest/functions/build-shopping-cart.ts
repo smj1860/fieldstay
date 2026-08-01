@@ -11,6 +11,7 @@ import {
 } from '@/lib/kroger/client'
 import { getValidKrogerToken }             from '@/lib/integrations/providers/kroger-token'
 import { reportError }                     from '@/lib/observability/report-error'
+import { ANTHROPIC_TIMEOUT_MS, isTimeoutError } from '@/lib/http/timeout'
 import { RateLimitError }                  from '@/lib/integrations/types'
 import { NonRetriableError }               from 'inngest'
 import { resend, FROM }                    from '@/lib/resend/client'
@@ -219,7 +220,24 @@ export const buildShoppingCart = inngest.createFunction(
         brand: itemBrandMap.get(name) ?? null,
       }))
 
-      const res = await fetch('https://api.anthropic.com/v1/messages', {
+      // Deterministic fallback used for every failure mode below — a bad
+      // response, unparseable JSON, or (now) giving up waiting. Normalization
+      // is a search-quality optimisation, not a correctness requirement, so
+      // degrading to "brand + name" is always better than failing the build.
+      const fallbackNames = () => Object.fromEntries(
+        uniqueNames.map(name => {
+          const brand = itemBrandMap.get(name)
+          return [name, brand ? `${brand} ${name}` : name]
+        })
+      )
+
+      // A fetch() with no AbortSignal has no timeout at all: a hung Anthropic
+      // request would burn this step's entire execution budget and take the
+      // cart build down with it, three retries in a row.
+      let res: Response
+      try {
+        res = await fetch('https://api.anthropic.com/v1/messages', {
+        signal:  AbortSignal.timeout(ANTHROPIC_TIMEOUT_MS),
         method:  'POST',
         headers: {
           'Content-Type':      'application/json',
@@ -247,16 +265,17 @@ Items:
 ${JSON.stringify(itemsForNormalization, null, 2)}`,
           }],
         }),
-      })
-
-      if (!res.ok) {
-        return Object.fromEntries(
-          uniqueNames.map(name => {
-            const brand = itemBrandMap.get(name)
-            return [name, brand ? `${brand} ${name}` : name]
-          })
-        )
+        })
+      } catch (err) {
+        if (!isTimeoutError(err)) throw err
+        reportError(err, {
+          site:  'inngest.build-shopping-cart.normalize_item_names_timeout',
+          orgId: org_id,
+        })
+        return fallbackNames()
       }
+
+      if (!res.ok) return fallbackNames()
 
       const data = await res.json()
       const text = (data.content as { type: string; text: string }[])
@@ -265,12 +284,7 @@ ${JSON.stringify(itemsForNormalization, null, 2)}`,
       try {
         return JSON.parse(text) as Record<string, string>
       } catch {
-        return Object.fromEntries(
-          uniqueNames.map(name => {
-            const brand = itemBrandMap.get(name)
-            return [name, brand ? `${brand} ${name}` : name]
-          })
-        )
+        return fallbackNames()
       }
     })
 

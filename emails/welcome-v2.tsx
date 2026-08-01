@@ -8,6 +8,10 @@ interface Props {
   integrationsUrl: string
   onboardingUrl:   string
   dashboardUrl:    string
+  // Commercial email — CAN-SPAM opt-out artifacts. Optional so the template
+  // still renders in previews/tests without them.
+  unsubscribeUrl?: string
+  postalAddress?:  string | null
 }
 
 export function WelcomeEmailV2({
@@ -16,6 +20,8 @@ export function WelcomeEmailV2({
   integrationsUrl,
   onboardingUrl,
   dashboardUrl,
+  unsubscribeUrl,
+  postalAddress,
 }: Props) {
   return (
     <EmailLayout
@@ -23,6 +29,8 @@ export function WelcomeEmailV2({
       ctaLabel="Finish setup →"
       ctaUrl={onboardingUrl}
       footerNote={`You're receiving this because you created a FieldStay account for ${orgName}.`}
+      unsubscribeUrl={unsubscribeUrl}
+      postalAddress={postalAddress}
     >
       <Text style={heading}>You made the right call, {firstName}.</Text>
       <Text style={subheading}>Here&apos;s where to start.</Text>

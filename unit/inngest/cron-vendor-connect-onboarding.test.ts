@@ -48,6 +48,9 @@ function makeSupabase(vendorsResult: { data: Vendor[] | null; error: { message: 
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const chain: any = {}
     chain.select = vi.fn(() => chain)
+    // These reads paginate via fetchAllRows(), which drains .order().range().
+    chain.order  = vi.fn(() => chain)
+    chain.range  = vi.fn(() => chain)
     chain.eq     = vi.fn(() => chain)
     chain.not    = vi.fn(() => chain)
     chain.is     = vi.fn(() => chain)

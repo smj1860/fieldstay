@@ -724,6 +724,7 @@ async function geocodeZip(zip: string): Promise<{ lat: number; lng: number } | n
 | `assigned_crew_id` on work_orders | `assigned_crew_member_id` (old column deprecated) |
 | `membership.user_id` in server actions | `user.id` — OrgMembership has no user_id field. Destructure `user` from `requireOrgMember()` |
 | `supabase.raw('column_name')` | Does not exist on Supabase JS client. For column-to-column comparisons (e.g. `current_quantity < par_level`), fetch the rows and filter in JavaScript |
+| Naming a `GENERATED ALWAYS` column in an `.insert()`/`.update()` payload (`work_order_line_items.line_total`, `assignment_outcomes.duration_minutes`, `checklist_item_signals.flag_probability`/`.dynamic_photo_required`) | Omit it and let the database compute it. Postgres rejects the WHOLE statement with `428C9`, not just that column — and where the error is only logged, the entire write vanishes silently. This shipped twice: every vendor completion stored zero line items, and the crew-scoring learning loop recorded nothing. `supabase/schema_reference.sql` renders these as plain `DEFAULT`s, which is what made both inserts look correct — the LIVE DB is authoritative. Enforced by `unit/guardrails/generated-column-writes.test.ts` |
 | Adding a DB column via migration without updating `types/database.ts` | Every migration that adds a column must also add that column to the matching interface in `types/database.ts` in the same commit. Supabase's TS client infers return types from this file, not from the live DB. Missing columns here cause build failures even when the query and select string are correct |
 | Adding a new event to `events.ts` outside the closing `}` of `FieldStayEvents` | The final `}` in `events.ts` closes the `FieldStayEvents` type. Every new event entry must be placed before it, with a comma after the preceding entry's closing brace |
 | An unbounded `.select()` in a platform-wide cron | PostgREST's `max_rows = 1000` truncates it silently — 200, no error, no signal. Paginate via `fetchAllRows()` (`lib/inngest/paginate.ts`) or use a `count`/`head` aggregate |
@@ -741,6 +742,7 @@ async function geocodeZip(zip: string): Promise<{ lat: number; lng: number } | n
 | Checking `role = 'admin'` manually | Use `is_org_member()` — it handles `owner` automatically |
 | Skipping Stripe webhook signature verification | Always `constructEvent()` first |
 | Using a new event name in `inngest.send()` without registering it | Add to `FieldStayEvents` in `lib/inngest/events.ts` first — build fails with type error if missing |
+| Completing a work order by writing `status: 'completed'` yourself | Write `workOrderCompletionFields()` and then call `finalizeWorkOrderCompletion()` with the rows the UPDATE returned (`app/(dashboard)/maintenance/complete-work-order-helpers.ts`) — the status write alone skips the `work-order/completed` event (so no `owner_transactions` maintenance expense), `completed_date`, the `work_order_updates` row, and the source-schedule advance. Enforced by `unit/guardrails/work-order-completion-side-effects.test.ts` |
 | Creating Inngest functions at `inngest/functions/` | All functions live at `lib/inngest/functions/` |
 | Adding a second `export const { GET, POST, PUT } = serve({...})` to the Inngest route | There is exactly ONE serve() call in `app/api/inngest/route.ts` — add functions to its array |
 
@@ -1152,9 +1154,9 @@ item below" as part of the definition of done for any non-trivial change.
 ## Structural Enforcement — Guardrails
 
 Conventions in this file are enforced in code wherever they can be, so
-following them stops being a memory test. Four layers, checked in CI via
+following them stops being a memory test. Five layers, checked in CI via
 `npm run lint` and `vitest run` (plus the `db-invariants` CI job for layer
-4, which runs two scripts):
+4, which runs two scripts, and the `semgrep` job for layer 5):
 
 1. **ESLint rules** (`eslint.config.mjs`, the "Structural enforcement"
    config block) — AST-level bans scoped to `app/`, `lib/`, `components/`:
@@ -1228,6 +1230,11 @@ following them stops being a memory test. Four layers, checked in CI via
      job still runs every step, no step is `continue-on-error`, `lint` keeps
      its `--max-warnings` ratchet, and the two install-free `db-invariants`
      scripts stay dependency-free and self-disarming.
+   - `generated-column-writes` — no `.insert()`/`.update()` payload may name a
+     `GENERATED ALWAYS` column. The column list is verified against the live
+     `information_schema.columns.is_generated`, NOT against
+     `supabase/schema_reference.sql`, which renders generated columns as plain
+     `DEFAULT`s and is exactly why this class shipped twice.
    - `public-route-rate-limiting` — every prefix in `proxy.ts`'s
      `TOKEN_ROUTES` has a matching branch in `rateLimiterForPathname()`,
      and the two guessable-invite-token `BYPASS_ROUTES` entries
@@ -1264,6 +1271,69 @@ following them stops being a memory test. Four layers, checked in CI via
    `20260725043000_add_quote_requested_to_wo_status.sql`. Both allowlists
    are shrink-only, same ratchet as `SERVICE_ROLE_ONLY_TABLES`. Self-disarms
    the same way as the other two checks.
+
+5. **Semgrep rules** (`.semgrep/`, CI `semgrep` job) — real TypeScript AST
+   matching, so a rule survives reformatting, renamed intermediates, and
+   multi-line call chains that defeat the text-scanning guardrail tests. Two
+   families, gated differently; read `.semgrep/README.md` before adding one.
+   - `.semgrep/chokepoints.yml` — a capability with exactly ONE legitimate
+     owner, named in that rule's `paths.exclude`. At **0 findings**, which is
+     what lets it gate at `--error` across the whole tree. Covers: the service
+     role key outside `lib/supabase/server.ts`, Telnyx outside
+     `lib/sms/telnyx.ts`, a raw `<limiter>.limit(` outside `lib/rate-limit.ts`,
+     a role-filtered `organization_members` read outside the auth helpers /
+     `getPmMembersByOrgIds`, an outbound `fetch()` to a literal `https://` URL
+     with no `AbortSignal`, `void` on a lazy PostgREST builder (the request is
+     never sent), `getPublicUrl()` on the three private buckets, and the
+     `memberships`/`work_order_notes`/`assigned_crew_id` names that do not
+     exist. The last two were PROMOTED from `ratchet.yml` on 2026-08-01 once
+     their counts hit 0 — that promotion is the ratchet's purpose, and it
+     requires deleting the rule's `baseline-counts.json` key in the same
+     change.
+   - `.semgrep/ratchet.yml` — a defect class with many legitimate owners and
+     hundreds of live sites (discarded write results, `data` destructured
+     without `error`, and the unbounded-`.select()` ladder below). Gated on
+     `--baseline-commit` (only findings NEW vs. the PR base fail) plus
+     `.semgrep/baseline-counts.json`, a committed per-rule count that
+     `scripts/check-semgrep-ratchet.mjs` allows to move only DOWN. Lock in a
+     burn-down with `node scripts/check-semgrep-ratchet.mjs --update`.
+   - **Severity inside a ratchet family matters as much as the pattern.** The
+     single `fieldstay-supabase-unbounded-select` rule reported 284 findings,
+     every one pattern-correct and most of them the case this file explicitly
+     permits (one org's page). It is now four mutually exclusive, exhaustive
+     tiers ranked by what actually bounds the result set —
+     `-table-scan` (nothing but the table, ERROR, 38 → **0, PROMOTED to
+     `chokepoints.yml` 2026-08-01**),
+     `-cross-tenant` (no `.eq('org_id', …)` anywhere, ERROR, 81),
+     `-in-list` (one org but sized by an `.in()` array, WARNING, 50),
+     `-org-scoped` (one org, one parent — hygiene only, INFO, 112).
+     Tier 1 WAS the burn-down target and reached 0, so it now gates at
+     `--error` across the whole tree rather than only on findings new vs. the
+     PR base — a single unbounded table read anywhere fails the build. Its
+     `baseline-counts.json` key was deleted in the same change, per the
+     promotion rule. `-cross-tenant` is the next burn-down target. `lib/inngest/**` gets no tier of its own because
+     `unit/guardrails/unbounded-select.test.ts` already gates it at file
+     granularity. See `.semgrep/README.md` for the two semgrep mechanics
+     these tiers depend on (a positive `pattern-inside` must not be wrapped
+     in `pattern-either`; `.in('org_id', …)` is not org scope).
+   - **`paths.exclude` expresses ownership; `pattern-not-inside` expresses
+     handling.** They are not interchangeable. What makes `lib/sms/telnyx.ts`
+     allowed to call Telnyx is its path — its identity as the SMS_ENABLED +
+     nudge-budget chokepoint — not anything about the enclosing expression.
+     What makes a `.select()` acceptable is that it sits inside a `.limit()`
+     call. Using the wrong one gives either a rule that suppresses the same
+     construct everywhere it appears in a similar shape, or a permanently
+     blind file.
+   - **Never** silence a ratchet with `nosemgrep` or a new `paths.exclude`.
+     Fix the site or leave it counted. Prefer narrow-and-precise over
+     broad-and-suppressed: the naive table-wide ban on
+     `.from('organization_members')` gives 17 noisy hits, the role-filtered
+     narrowing gives 3 genuine ones.
+   - Deliberately overlapping with several `unit/guardrails/` tests, and NOT
+     replacing them — those tests carry cross-file invariants (every
+     `MutationTable` has a retry affordance, every `TOKEN_ROUTES` prefix has a
+     limiter branch, the CI-gating meta-checks) that are not patterns and have
+     no semgrep expression.
 
 **The meta-rule: a new convention ships WITH its guardrail.** If a rule is
 worth adding to this file, add its ESLint rule or `unit/guardrails/` test in

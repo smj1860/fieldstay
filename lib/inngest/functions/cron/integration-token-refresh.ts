@@ -4,6 +4,7 @@
 // and Kroger (30min). OwnerRez tokens never expire and are excluded.
 
 import { inngest }             from '@/lib/inngest/client'
+import { fetchAllRows }        from '@/lib/inngest/paginate'
 import { createServiceClient } from '@/lib/supabase/server'
 
 const OAUTH_PROVIDERS = ['hospitable', 'kroger'] as const
@@ -31,17 +32,33 @@ export const integrationTokenRefreshCron = inngest.createFunction(
       // way — it refreshes reactively at call time regardless of this cron.
       const windowEdge = new Date(Date.now() + 90 * 60 * 1_000).toISOString()
 
-      const { data, error } = await supabase
-        .from('integration_connections')
-        .select('user_id, org_id, provider_id, external_user_id, expires_at')
-        .in('provider_id', OAUTH_PROVIDERS)
-        .eq('status', 'active')
-        .not('expires_at', 'is', null)
-        .lte('expires_at', windowEdge)
-        .not('refresh_token_vault_secret_id', 'is', null)
-
-      if (error) throw new Error(`Token refresh cron: DB query failed: ${error.message}`)
-      return data ?? []
+      // Paginated: this scan is platform-wide — every org's Hospitable and
+      // Kroger connection whose access token expires inside the window, not
+      // one tenant's. Truncating at max_rows would leave the connections
+      // sorted past row 1000 unrefreshed, and Hospitable has no reactive
+      // refresh fallback in readIntegrationToken(), so those orgs' syncs
+      // simply start failing with an expired token and nothing logs why.
+      // org_id is NULLABLE on integration_connections (a connection made
+      // before an org existed), which is why the send below coalesces it.
+      return await fetchAllRows<{
+        user_id:          string
+        org_id:           string | null
+        provider_id:      string
+        external_user_id: string | null
+        expires_at:       string | null
+      }>(
+        (from, to) => supabase
+          .from('integration_connections')
+          .select('user_id, org_id, provider_id, external_user_id, expires_at')
+          .in('provider_id', OAUTH_PROVIDERS)
+          .eq('status', 'active')
+          .not('expires_at', 'is', null)
+          .lte('expires_at', windowEdge)
+          .not('refresh_token_vault_secret_id', 'is', null)
+          .order('id')
+          .range(from, to),
+        { label: 'integration-token-refresh.expiring-connections' },
+      )
     })
 
     logger.info(

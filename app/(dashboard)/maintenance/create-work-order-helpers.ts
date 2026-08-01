@@ -1,9 +1,17 @@
 import 'server-only'
+import { fetchAllRows } from '@/lib/inngest/paginate'
 
 import { inngest, sendEventAsync } from '@/lib/inngest/client'
 import type { WoStatus, WoCategory } from '@/types/database'
 import { WoStatusSchema } from '@/lib/schemas/work-order'
 import type { SupabaseClient } from '@supabase/supabase-js'
+import { reportError } from '@/lib/observability/report-error'
+import {
+  isVendorHardBlocked,
+  VendorComplianceCheckError,
+  VENDOR_HARD_BLOCKED_ERROR,
+  VENDOR_COMPLIANCE_UNVERIFIABLE_ERROR,
+} from '@/lib/vendors/compliance'
 
 /**
  * Helpers extracted out of createWorkOrder() (./actions.ts) — status
@@ -18,6 +26,69 @@ export function resolveWorkOrderStatus(requestQuotes: boolean, vendorId: string 
   return WoStatusSchema.parse(
     requestQuotes ? 'quote_requested' : (vendorId ? 'assigned' : 'pending')
   )
+}
+
+/**
+ * Gate every RFQ recipient the same way a direct assignment is gated.
+ *
+ * The quote-request flow used to route around both checks: `quote_vendor_ids`
+ * went straight from the form to sendQuoteRequestEmails with no org check and
+ * no compliance check, and `sendQuoteRequests` validated only the work order.
+ * So a vendor whose COI expired 46+ days ago could be RFQ'd, quote, be
+ * approved, and be dispatched — the exact outcome lib/vendors/compliance.ts's
+ * header says every assignment path must prevent.
+ *
+ * Returns an error object to surface to the PM, or null when every vendor is
+ * in-org and assignable. `isVendorHardBlocked` FAILS CLOSED (it throws
+ * VendorComplianceCheckError when the compliance state can't be read), so that
+ * throw is caught here and turned into a block, never into a pass.
+ */
+export async function checkQuoteVendorsAssignable(
+  supabase:  SupabaseClient,
+  orgId:     string,
+  vendorIds: string[],
+): Promise<{ error: string } | null> {
+  const ids = Array.from(new Set(vendorIds.filter(Boolean)))
+  if (ids.length === 0) return { error: 'Select at least one vendor' }
+
+  // One query for the whole list — org membership of each vendor id, which
+  // nothing in this flow previously verified at all.
+  // Paginated: this is the in-org membership check for the selected vendors, so
+  // a truncated result would read as "these vendors are not in your org" for
+  // everything past the cap. fetchAllRows throws rather than returning a short
+  // list, which is the safe direction for an authorization check.
+  let vendors
+  try {
+    vendors = await fetchAllRows<{ id: string }>(
+      (from, to) => supabase
+        .from('vendors')
+        .select('id')
+        .eq('org_id', orgId)
+        .in('id', ids)
+        .order('id')
+        .range(from, to),
+      { label: 'maintenance.checkQuoteVendorsAssignable' },
+    )
+  } catch (error) {
+    console.error('[checkQuoteVendorsAssignable] vendor lookup failed', error)
+    reportError(error, { site: 'maintenance.checkQuoteVendorsAssignable', orgId })
+    return { error: 'Could not verify the selected vendors. Please try again.' }
+  }
+
+  const owned = new Set((vendors ?? []).map((v: { id: string }) => v.id))
+  if (ids.some((id) => !owned.has(id))) return { error: 'Vendor not found' }
+
+  try {
+    const blocked = await Promise.all(ids.map((id) => isVendorHardBlocked(supabase, id, orgId)))
+    if (blocked.some(Boolean)) return { error: VENDOR_HARD_BLOCKED_ERROR }
+  } catch (err) {
+    if (err instanceof VendorComplianceCheckError) {
+      return { error: VENDOR_COMPLIANCE_UNVERIFIABLE_ERROR }
+    }
+    throw err
+  }
+
+  return null
 }
 
 /** Sends one RFQ (quote_requests row + Inngest notify event) per selected vendor. */

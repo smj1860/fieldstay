@@ -53,7 +53,7 @@ function makeSupabase(queue: Record<string, Resp[]>) {
     const result: Resp = q?.length ? q.shift()! : { data: null, error: null }
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const chain: any = {}
-    for (const m of ['select', 'insert', 'update', 'delete', 'upsert', 'eq', 'neq', 'in', 'not', 'is']) {
+    for (const m of ['select', 'insert', 'update', 'delete', 'upsert', 'eq', 'neq', 'in', 'not', 'is', 'order', 'range']) {
       chain[m] = vi.fn((...args: unknown[]) => { calls.push({ table, method: m, args }); return chain })
     }
     chain.single      = vi.fn(() => Promise.resolve(result))
@@ -449,6 +449,48 @@ describe('turnovers/actions', () => {
 
       expect(result).toEqual({ success: true })
       expect(inngest.send).toHaveBeenCalledWith(expect.objectContaining({ name: 'turnover/completed' }))
+    })
+
+    // ── Regression: the race updateTurnoverStatus already fixed ──────────
+    // This read `eligible`, then updated unconditionally with a fresh
+    // completed_at, then fanned out per row. Two concurrent bulk completions
+    // both matched, both re-stamped completed_at and both fired
+    // turnover/completed — emit-completion-metric double-counted and the
+    // durations assignment_outcomes/crew scoring derive were corrupted.
+    // Pre-fix there are TWO from('turnovers') calls (a pre-read plus an
+    // unguarded update) and the status filter sits on the read, so both
+    // assertions below fail.
+    it('guards eligibility in the UPDATE WHERE clause, not in an earlier read', async () => {
+      const supabase = makeSupabase({
+        turnovers: [{ data: [{ id: 't_1', property_id: 'prop_1', org_id: 'org_1' }] }],
+      })
+      vi.mocked(requireOrgMember).mockResolvedValue({ supabase, membership } as never)
+
+      await bulkUpdateTurnoverStatus(['t_1'], 'completed')
+
+      // One statement: UPDATE ... WHERE org/status ... RETURNING. No pre-read.
+      expect(supabase.from.mock.calls.filter(([t]: [string]) => t === 'turnovers')).toHaveLength(1)
+      expect(supabase.calls).toContainEqual(
+        expect.objectContaining({ table: 'turnovers', method: 'update' })
+      )
+      expect(supabase.calls).toContainEqual(
+        expect.objectContaining({
+          table: 'turnovers', method: 'in',
+          args: ['status', ['pending_assignment', 'assigned', 'in_progress', 'flagged']],
+        })
+      )
+    })
+
+    // Only rows the UPDATE actually claimed emit — the loser of a race gets
+    // an empty RETURNING set and fires nothing.
+    it('emits nothing when the guarded UPDATE claims no rows', async () => {
+      const supabase = makeSupabase({ turnovers: [{ data: [] }] })
+      vi.mocked(requireOrgMember).mockResolvedValue({ supabase, membership } as never)
+
+      const result = await bulkUpdateTurnoverStatus(['t_1'], 'completed')
+
+      expect(result).toEqual({ success: true })
+      expect(inngest.send).not.toHaveBeenCalled()
     })
 
     it('no-ops when none of the ids are eligible (e.g. belong to another org)', async () => {

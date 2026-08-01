@@ -72,16 +72,13 @@ const ALLOWED: Record<string, string> = {
   'app/api/gdpr/export/route.ts':
     "GDPR export of the requesting user's own membership rows, verbatim.",
 
-  // ── Batched cron reads that intentionally query the table once for MANY
-  //    orgs. These apply the same role + invite_accepted_at filters as
-  //    getPmMembers; folding them into it is a live refactor of cron
-  //    fan-out logic, tracked separately rather than done blind here.
-  'lib/inngest/functions/cron/daily-wrapup.ts':
-    'Batched "which orgs have at least one active owner/admin" sweep across every tenant. Applies the same role + invite_accepted_at filters.',
-  'lib/inngest/functions/cron/stale-feed-alert.ts':
-    'Batched paginated member fetch across many orgs, with its own ROLE_PREFERENCE ordering. Same filters as getPmMembers.',
-  'lib/inngest/functions/hospitable/calendar-sync-cron.ts':
-    'Batched per-org PM lookup across every Hospitable connection. Same filters as getPmMembers.',
+  // NOTE: the three batched cron reads that used to be allowlisted here
+  // (cron/daily-wrapup.ts, cron/stale-feed-alert.ts,
+  // hospitable/calendar-sync-cron.ts) were migrated onto
+  // getPmMembersByOrgIds() on 2026-08-01 and no longer touch the table. Each
+  // had re-derived the helper's role ordering and invite_accepted_at filter by
+  // hand — the drift class semgrep's fieldstay-role-filtered-membership-read
+  // now gates at --error, having reached 0 with that migration.
 
   // ── Infrastructure.
   'app/api/health/route.ts':

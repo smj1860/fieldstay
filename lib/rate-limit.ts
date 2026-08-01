@@ -316,6 +316,21 @@ export const inviteAcceptRatelimit = new Ratelimit({
   prefix:    'rl:invite-accept',
 })
 
+// CAN-SPAM opt-out surface (/unsubscribe/*, /api/email/unsubscribe).
+// Unauthenticated by law — the opt-out must work without a login — so a
+// 64-char hex token is the only credential, and this bounds guessing it. The
+// write is a single UPDATE and mail clients doing RFC 8058 one-click may
+// retry, so the window is generous: this is anti-enumeration, not a usage cap.
+// Fails OPEN on a Redis outage (the default for the abuse limiters here): a
+// degraded limiter must never be the reason someone cannot opt out, which
+// would itself be the compliance failure.
+export const unsubscribeRatelimit = new Ratelimit({
+  redis,
+  limiter:   Ratelimit.slidingWindow(20, '1 m'),
+  analytics: false,
+  prefix:    'rl:unsubscribe',
+})
+
 // Roadshow demo surface (/demo/*) — unauthenticated and gated only by a
 // shared secret in a query string that will be printed on a QR code sitting
 // on a trade-show table. /demo/enter MINTS an authenticated session and

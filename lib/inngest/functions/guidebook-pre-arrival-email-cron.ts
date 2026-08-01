@@ -1,4 +1,5 @@
 import { inngest } from '@/lib/inngest/client'
+import { fetchAllRows } from '@/lib/inngest/paginate'
 import { createServiceClient } from '@/lib/supabase/server'
 import { sendGuestPreArrivalEmail } from '@/lib/resend/client'
 
@@ -6,6 +7,20 @@ import { sendGuestPreArrivalEmail } from '@/lib/resend/client'
 // "Tomorrow" is computed in America/New_York as a fixed approximation until
 // a timezone cache column is reintroduced.
 const FALLBACK_TIMEZONE = 'America/New_York'
+
+/** Nullability matches the live schema: guest_email, guest_name and
+ *  guidebook_token are nullable columns (the query filters the first and
+ *  third to NOT NULL, but the row type stays honest about the schema). */
+interface PreArrivalBookingRow {
+  id:              string
+  org_id:          string
+  property_id:     string
+  guest_email:     string | null
+  guest_name:      string | null
+  checkin_date:    string
+  guidebook_token: string | null
+  status:          string
+}
 
 export const guidebookPreArrivalEmailCron = inngest.createFunction(
   { id: 'guidebook-pre-arrival-email-cron', name: 'Guidebook: Pre-Arrival Email Cron' },
@@ -20,18 +35,25 @@ export const guidebookPreArrivalEmailCron = inngest.createFunction(
     // active guidebook, and filter in JavaScript.
     const bookings = await step.run('fetch-tomorrow-bookings', async () => {
       const supabase = createServiceClient({ system: 'inngest:guidebook-pre-arrival-email-cron' })
-      const { data, error } = await supabase
-        .from('bookings')
-        .select('id, org_id, property_id, guest_email, guest_name, checkin_date, guidebook_token, status')
-        .eq('checkin_date', tomorrow)
-        .eq('status', 'confirmed')
-        .eq('is_block', false)
-        .not('guest_email', 'is', null)
-        .not('guidebook_token', 'is', null)
-        .is('guidebook_pre_arrival_email_sent_at', null)
-
-      if (error) throw new Error(`Failed to fetch bookings: ${error.message}`)
-      return data ?? []
+      // Paginated: every tenant's check-ins for tomorrow, not one org's. The
+      // send is gated on guidebook_pre_arrival_email_sent_at IS NULL and the
+      // window is a single date, so a booking dropped by a max_rows
+      // truncation is never retried — tomorrow's run looks at the day after.
+      // The guest simply never receives their pre-arrival guidebook email.
+      return await fetchAllRows<PreArrivalBookingRow>(
+        (from, to) => supabase
+          .from('bookings')
+          .select('id, org_id, property_id, guest_email, guest_name, checkin_date, guidebook_token, status')
+          .eq('checkin_date', tomorrow)
+          .eq('status', 'confirmed')
+          .eq('is_block', false)
+          .not('guest_email', 'is', null)
+          .not('guidebook_token', 'is', null)
+          .is('guidebook_pre_arrival_email_sent_at', null)
+          .order('id')
+          .range(from, to),
+        { label: 'guidebook-pre-arrival.tomorrow-bookings' },
+      )
     })
 
     if (bookings.length === 0) return { sent: 0 }
@@ -40,14 +62,21 @@ export const guidebookPreArrivalEmailCron = inngest.createFunction(
       const supabase = createServiceClient({ system: 'inngest:guidebook-pre-arrival-email-cron' })
       const uniqueOrgIds = Array.from(new Set(bookings.map((b) => b.org_id)))
 
-      const { data, error } = await supabase
-        .from('guidebook_configurations')
-        .select('org_id')
-        .in('org_id', uniqueOrgIds)
-        .eq('is_active', true)
-
-      if (error) throw new Error(`Failed to fetch guidebook configs: ${error.message}`)
-      return (data ?? []).map((c): string => c.org_id)
+      // Paginated: the id list is the set of orgs with a check-in tomorrow —
+      // platform-wide, not one tenant. This result decides ELIGIBILITY, so a
+      // truncated org list silently reclassifies real active guidebook orgs
+      // as inactive and drops all of their bookings from the send.
+      const rows = await fetchAllRows<{ org_id: string }>(
+        (from, to) => supabase
+          .from('guidebook_configurations')
+          .select('org_id')
+          .in('org_id', uniqueOrgIds)
+          .eq('is_active', true)
+          .order('org_id')
+          .range(from, to),
+        { label: 'guidebook-pre-arrival.active-orgs' },
+      )
+      return rows.map((c): string => c.org_id)
     })
 
     const activeOrgIdSet = new Set<string>(activeOrgIds)
@@ -57,14 +86,21 @@ export const guidebookPreArrivalEmailCron = inngest.createFunction(
       const supabase = createServiceClient({ system: 'inngest:guidebook-pre-arrival-email-cron' })
       const uniquePropertyIds = [...new Set(eligibleBookings.map((b) => b.property_id))]
 
-      const { data, error } = await supabase
-        .from('properties')
-        .select('id, name')
-        .in('id', uniquePropertyIds)
+      // Paginated: this cron scans EVERY org's eligible bookings, so the
+      // property id set is platform-wide and grows with tenant count. A
+      // truncated map silently yields an undefined property name for the
+      // bookings past the cap, on a guest-facing email.
+      const data = await fetchAllRows<{ id: string; name: string }>(
+        (from, to) => supabase
+          .from('properties')
+          .select('id, name')
+          .in('id', uniquePropertyIds)
+          .order('id')
+          .range(from, to),
+        { label: 'guidebook-pre-arrival.properties' },
+      )
 
-      if (error) throw new Error(`Failed to batch fetch properties: ${error.message}`)
-
-      return Object.fromEntries((data ?? []).map((p) => [p.id, p.name]))
+      return Object.fromEntries(data.map((p) => [p.id, p.name]))
     })
 
     let sentCount = 0

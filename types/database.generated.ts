@@ -2961,6 +2961,7 @@ export type Database = {
           full_name: string | null
           id: string
           phone: string | null
+          unsubscribe_token: string
           updated_at: string
         }
         Insert: {
@@ -2970,6 +2971,7 @@ export type Database = {
           full_name?: string | null
           id: string
           phone?: string | null
+          unsubscribe_token?: string
           updated_at?: string
         }
         Update: {
@@ -2979,6 +2981,7 @@ export type Database = {
           full_name?: string | null
           id?: string
           phone?: string | null
+          unsubscribe_token?: string
           updated_at?: string
         }
         Relationships: []
@@ -4101,6 +4104,7 @@ export type Database = {
           checklist_template_id: string | null
           checkout_datetime: string
           completed_at: string | null
+          crew_duration_minutes: number | null
           completion_notes: string | null
           created_at: string
           dates_change_acknowledged_at: string | null
@@ -4133,6 +4137,7 @@ export type Database = {
           checklist_template_id?: string | null
           checkout_datetime: string
           completed_at?: string | null
+          crew_duration_minutes?: number | null
           completion_notes?: string | null
           created_at?: string
           dates_change_acknowledged_at?: string | null
@@ -4165,6 +4170,7 @@ export type Database = {
           checklist_template_id?: string | null
           checkout_datetime?: string
           completed_at?: string | null
+          crew_duration_minutes?: number | null
           completion_notes?: string | null
           created_at?: string
           dates_change_acknowledged_at?: string | null

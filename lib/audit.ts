@@ -45,6 +45,7 @@ export type AuditAction =
   | 'asset.updated'
   | 'asset.bulk_imported'
   | 'account.password_changed'
+  | 'account.password_change_denied'
   | 'integration.sync_triggered'
   | 'integration.sync_failed'
   | 'property.inventory.cloned'

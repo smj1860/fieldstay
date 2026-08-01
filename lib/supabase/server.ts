@@ -43,6 +43,41 @@ export async function createClient() {
 }
 
 /**
+ * Anon-key client that reads NO cookies and writes NO cookies, so nothing it
+ * does touches the caller's live session.
+ *
+ * The one use for this is re-authentication: proving the person holding the
+ * session also knows the current password before a sensitive change (password
+ * rotation). `createClient()` cannot do that job — a successful
+ * signInWithPassword() on the cookie-bound client would silently rotate the
+ * caller's session cookies as a side effect of the check, and a failed one on
+ * some GoTrue error paths can clear them. This client makes the verification a
+ * pure question with a yes/no answer.
+ *
+ * It holds no elevated privilege at all (anon key, RLS enforced, no session),
+ * so it is not a service-role bypass and needs no ServiceRoleContext.
+ */
+export function createReauthClient() {
+  return createServerClient(
+    process.env.NEXT_PUBLIC_SUPABASE_URL!,
+    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
+    {
+      cookies: {
+        getAll: () => [],
+        setAll: () => {},
+      },
+      auth: {
+        autoRefreshToken: false,
+        persistSession:   false,
+      },
+      realtime: {
+        params: { eventsPerSecond: -1 },
+      },
+    }
+  )
+}
+
+/**
  * The typed justification every service-role call site must present.
  * Structural types only (no imports from lib/auth — that would be a cycle);
  * each variant matches what the corresponding auth helper already returns:

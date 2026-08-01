@@ -21,7 +21,8 @@ const PROPERTY_TYPES = [
 export function DetailsForm({
   property,
   doorCode,
-}: Readonly<{ property: Property; doorCode: string | null }>) {
+  doorCodeReadFailed = false,
+}: Readonly<{ property: Property; doorCode: string | null; doorCodeReadFailed?: boolean }>) {
   const action = saveDetails.bind(null, property.id)
   const [state, formAction, pending] = useActionState(action, null)
 
@@ -123,7 +124,24 @@ export function DetailsForm({
 
       <div>
         <label htmlFor="door_code" className="label">Door Code / Lockbox</label>
-        <Input id="door_code" name="door_code" type="text" defaultValue={doorCode ?? ''} />
+        {doorCodeReadFailed ? (
+          <>
+            {/* The stored code could not be decrypted for this render. Showing
+                an empty input here and submitting it would delete the vault
+                secret, so the field is disabled (a disabled input submits no
+                value) and this flag tells saveDetails to skip the door-code
+                write entirely rather than treat "absent" as "clear it". */}
+            <Input id="door_code" name="door_code" type="text" defaultValue="" disabled
+                   placeholder="Unavailable — existing code left unchanged" />
+            <input type="hidden" name="door_code_unchanged" value="1" />
+            <p className="text-xs mt-1" style={{ color: 'var(--accent-amber)' }}>
+              The saved door code could not be loaded right now. Saving this form will
+              leave it unchanged. Reload to try again.
+            </p>
+          </>
+        ) : (
+          <Input id="door_code" name="door_code" type="text" defaultValue={doorCode ?? ''} />
+        )}
       </div>
 
       <div>

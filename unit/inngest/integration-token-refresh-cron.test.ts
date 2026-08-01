@@ -23,6 +23,9 @@ function makeSupabase(queued: Record<string, { data?: unknown; error?: unknown }
       return chain
     }
     chain.select = (...a: unknown[]) => record('select', a)
+    // These reads paginate via fetchAllRows(), which drains .order().range().
+    chain.order  = (...a: unknown[]) => record('order', a)
+    chain.range  = (...a: unknown[]) => record('range', a)
     chain.in     = (...a: unknown[]) => record('in', a)
     chain.eq     = (...a: unknown[]) => record('eq', a)
     chain.not    = (...a: unknown[]) => record('not', a)
@@ -130,7 +133,13 @@ describe('integrationTokenRefreshCron', () => {
         step:   makeStep(),
         logger: { info: vi.fn(), error: vi.fn() },
       }),
-    ).rejects.toThrow('Token refresh cron: DB query failed: db unavailable')
+      // The scan is paginated (fetchAllRows), so the throw now carries that
+      // helper's site-labelled wrapper rather than the old hand-written
+      // prefix. What this test is actually for is unchanged and still
+      // asserted: the cron FAILS LOUDLY on a query error instead of treating
+      // it as "no connections to refresh", and the underlying DB message
+      // still propagates so the cause is diagnosable.
+    ).rejects.toThrow(/db unavailable/)
   })
 
   describe('90-minute expiry window boundary', () => {

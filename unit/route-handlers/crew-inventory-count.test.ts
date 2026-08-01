@@ -41,6 +41,9 @@ function makeSupabase(queued: QueuedByTable = {}) {
     chain.insert = (...a: unknown[]) => record('insert', a)
     chain.update = (...a: unknown[]) => record('update', a)
     chain.eq     = (...a: unknown[]) => record('eq', a)
+    // This read paginates via fetchAllRows(), which drains .order().range().
+    chain.order  = (...a: unknown[]) => record('order', a)
+    chain.range  = (...a: unknown[]) => record('range', a)
     chain.in     = (...a: unknown[]) => record('in', a)
     chain.gte    = (...a: unknown[]) => record('gte', a)
 

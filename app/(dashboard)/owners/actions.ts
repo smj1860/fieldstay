@@ -138,7 +138,10 @@ export async function generatePortalToken(ownerId: string): Promise<OwnersAction
       action:     'owner_portal.token.generated',
       targetType: 'property_owner',
       targetId:   ownerId,
-      metadata:   { owner_email: ownerEmail, property_name: propertyName, email_sent: !!ownerEmail },
+      // Intentionally omit the owner's address — no PII in audit metadata
+      // (same rule as toggleCapitalPlanSharing below). `email_sent` records
+      // whether mail went out; targetId already identifies WHICH owner.
+      metadata:   { property_name: propertyName, email_sent: !!ownerEmail },
     })
 
     revalidatePath('/owners')
@@ -265,7 +268,10 @@ export async function addOwnerTransaction(
       action:     'owner.transaction.created',
       targetType: 'owner_transaction',
       targetId:   txn?.id,
-      metadata:   { transaction_type, amount, property_id },
+      // Intentionally omit the amount — no financial specifics in audit
+      // metadata (CLAUDE.md's sensitive-data rule). targetId points at the
+      // owner_transactions row, which carries the figure itself.
+      metadata:   { transaction_type, category, property_id },
     })
 
     revalidatePath('/owners')

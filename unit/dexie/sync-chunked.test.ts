@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from 'vitest'
-import { chunkIds, fetchInChunks, IN_CHUNK_SIZE } from '@/lib/dexie/sync/chunked'
+import { chunkIds, fetchInChunks, fetchInChunksPaginated, IN_CHUNK_SIZE } from '@/lib/dexie/sync/chunked'
 
 describe('chunkIds', () => {
   it('returns an empty array for zero ids', () => {
@@ -85,5 +85,77 @@ describe('fetchInChunks', () => {
     const fetchChunk = vi.fn(async () => ({ data: null, error: null }))
     const result = await fetchInChunks(['a'], fetchChunk)
     expect(result).toEqual([])
+  })
+})
+
+describe('fetchInChunksPaginated', () => {
+  // The defect this exists for: fetchInChunks bounds the ID LIST, not the ROW
+  // COUNT. That is fine when the scope column is the row's own id (100 ids in,
+  // <=100 rows out) but checklist_instance_items is scoped by turnover_id, and
+  // a turnover's checklist runs 30-60 items. A 100-turnover chunk therefore
+  // asks for 3,000-6,000 rows, PostgREST returns the first 1,000 with a 200 and
+  // NO truncation signal, and the crew PWA wrote that truncated page into Dexie
+  // as though it were the complete checklist — tasks silently missing from a
+  // crew member's device, nothing logged, nothing to retry.
+  const rows = (n: number, tag: string) =>
+    Array.from({ length: n }, (_, i) => ({ id: `${tag}_${i}` }))
+
+  it('drains a chunk across pages instead of stopping at the 1000-row cap', async () => {
+    // One chunk whose scope fans out to 2,300 rows: 1000 + 1000 + 300.
+    const pages = [rows(1000, 'a'), rows(1000, 'b'), rows(300, 'c')]
+    let call = 0
+    const fetchPage = vi.fn(async () => ({ data: pages[call++] ?? [], error: null }))
+
+    const out = await fetchInChunksPaginated(['t1'], fetchPage)
+
+    expect(out).toHaveLength(2300)
+    // Three requests: it kept going while pages came back full, and stopped on
+    // the first short page rather than looping forever.
+    expect(fetchPage).toHaveBeenCalledTimes(3)
+  })
+
+  it('passes the right range window for each page', async () => {
+    const seen: [number, number][] = []
+    let call = 0
+    const pages = [rows(1000, 'a'), rows(5, 'b')]
+    await fetchInChunksPaginated(['t1'], async (_chunk, from, to) => {
+      seen.push([from, to])
+      return { data: pages[call++] ?? [], error: null }
+    })
+    expect(seen).toEqual([[0, 999], [1000, 1999]])
+  })
+
+  it('stops immediately on a short first page', async () => {
+    const fetchPage = vi.fn(async () => ({ data: rows(3, 'a'), error: null }))
+    const out = await fetchInChunksPaginated(['t1'], fetchPage)
+    expect(out).toHaveLength(3)
+    expect(fetchPage).toHaveBeenCalledTimes(1)
+  })
+
+  it('paginates each chunk independently when the id list spans chunks', async () => {
+    const ids = Array.from({ length: 150 }, (_, i) => `t_${i}`)   // 2 chunks
+    const chunksSeen: number[] = []
+    const out = await fetchInChunksPaginated(ids, async (chunk) => {
+      chunksSeen.push(chunk.length)
+      return { data: rows(10, 'x'), error: null }
+    })
+    expect(chunksSeen).toEqual([100, 50])
+    expect(out).toHaveLength(20)
+  })
+
+  it('returns null if any page errors — a partial cache write is the bug', async () => {
+    let call = 0
+    const out = await fetchInChunksPaginated(['t1'], async () => {
+      call++
+      if (call === 2) return { data: null, error: { message: 'boom' } }
+      return { data: rows(1000, 'a'), error: null }
+    })
+    expect(out).toBeNull()
+  })
+
+  it('returns an empty array for no ids without issuing a request', async () => {
+    const fetchPage = vi.fn()
+    expect(await fetchInChunksPaginated([], fetchPage)).toEqual([])
+    expect(fetchPage).not.toHaveBeenCalled()
   })
 })

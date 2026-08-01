@@ -1,0 +1,217 @@
+# ============================================================================
+# FieldStay — CHOKEPOINT rules (structural enforcement, semgrep layer).
+#
+# A chokepoint rule encodes a capability that has exactly ONE legitimate owner
+# in this repo. The owning file is named in `paths.exclude`; every other file
+# is a violation. These are expected to sit at ~0 findings, which is what lets
+# the CI job gate them at `--error` across the WHOLE tree rather than only on
+# the diff.
+#
+# `paths.exclude` — not `pattern-not-inside` — is the mechanism for "allowed
+# only in the owning file". `pattern-not-inside` suppresses by surrounding
+# syntax, which is the wrong axis: the thing that makes `lib/sms/telnyx.ts`
+# allowed to call Telnyx is its PATH (it is the SMS_ENABLED + nudge-budget
+# chokepoint), not anything about the enclosing expression.
+#
+# Adding a file to a `paths.exclude` list means "this file is now also an owner
+# of this capability" — that is a design decision, not a suppression. If a rule
+# needs more than a couple of owners it is not a chokepoint; narrow the pattern
+# or move it to ratchet.yml.
+# ============================================================================
+rules:
+  # ── Critical Security Rule #1 — service role key ─────────────────────────
+  - id: fieldstay-service-role-key-outside-owner
+    languages: [typescript]
+    severity: ERROR
+    message: >-
+      SUPABASE_SERVICE_ROLE_KEY may only be read in lib/supabase/server.ts.
+      Use createServiceClient(context) — the ServiceRoleContext argument is
+      what forces every RLS bypass to name its justification.
+    paths:
+      exclude:
+        - /lib/supabase/server.ts
+        - /lib/env.ts
+    pattern-either:
+      - pattern: process.env.SUPABASE_SERVICE_ROLE_KEY
+      - pattern: process.env["SUPABASE_SERVICE_ROLE_KEY"]
+      - pattern: process.env['SUPABASE_SERVICE_ROLE_KEY']
+
+  # ── Critical Security Rule #5 — SMS gated on SMS_ENABLED ─────────────────
+  - id: fieldstay-telnyx-outside-owner
+    languages: [typescript]
+    severity: ERROR
+    message: >-
+      The Telnyx API is confined to lib/sms/telnyx.ts, which is the single
+      chokepoint holding the SMS_ENABLED gate and the fail-closed daily nudge
+      budget. Route the send through that module.
+    paths:
+      exclude:
+        - /lib/sms/telnyx.ts
+        # Declares TELNYX_* in ENV_SPEC (name only, no API call) — env-schema
+        # coverage requires every read var be declared here.
+        - /lib/env.ts
+    pattern-either:
+      - pattern-regex: api\.telnyx\.com
+      - pattern-regex: TELNYX_API_KEY
+
+  # ── Shared helper: checkLimit ────────────────────────────────────────────
+  - id: fieldstay-raw-limiter-limit
+    languages: [typescript]
+    severity: ERROR
+    message: >-
+      Call checkLimit(limiter, id, { onError, site }) from lib/rate-limit.ts
+      instead of <limiter>.limit(...) directly. The raw call leaves each site
+      silently deciding what a Redis outage means; checkLimit forces an
+      explicit fail policy and distinguishes "skipped" from "errored".
+    paths:
+      exclude:
+        - /lib/rate-limit.ts
+    patterns:
+      - pattern: $L.limit($ID)
+      - metavariable-regex:
+          metavariable: $L
+          regex: (?i)^[A-Za-z_$][\w$]*(ratelimit|limiter)$
+
+  # ── `void` on a PostgREST builder — the request is never sent ────────────
+  - id: fieldstay-void-postgrest-builder
+    languages: [typescript]
+    severity: ERROR
+    message: >-
+      A PostgREST builder is a LAZY thenable — the HTTP request is issued only
+      inside then(). `void <builder>` never calls then(), so this statement is
+      dead code that silently does nothing (this shipped as the never-sent
+      Stripe Connect onboarding rollback). Await it, or .then(() => {}) it
+      deliberately.
+    pattern: void <... $S.from($T) ...>
+
+  # ── Table/column names that do not exist ─────────────────────────────────
+  - id: fieldstay-memberships-table
+    languages: [typescript]
+    severity: ERROR
+    message: "There is no `memberships` table. Use organization_members."
+    pattern-regex: \.from\(\s*['"]memberships['"]\s*\)
+
+  - id: fieldstay-work-order-notes-table
+    languages: [typescript]
+    severity: ERROR
+    message: "There is no `work_order_notes` table. Use work_order_updates."
+    pattern-regex: \.from\(\s*['"]work_order_notes['"]\s*\)
+
+  - id: fieldstay-assigned-crew-id-column
+    languages: [typescript]
+    severity: ERROR
+    message: >-
+      work_orders.assigned_crew_id is the deprecated column. Use
+      assigned_crew_member_id.
+    pattern-regex: \bassigned_crew_id\b
+
+  # ── Shared helper: getPmMembersByOrgIds ──────────────────────────────────
+  # PROMOTED from ratchet.yml (2026-07-31) once its last 3 sites were migrated
+  # — cron/daily-wrapup.ts, cron/stale-feed-alert.ts and
+  # hospitable/calendar-sync-cron.ts each re-derived the helper's contract by
+  # hand. NARROWED DELIBERATELY: the naive table-wide ban on
+  # .from('organization_members') gives 17 hits, most of them legitimate
+  # non-role reads; requiring a role filter gives exactly the drift class.
+  - id: fieldstay-role-filtered-membership-read
+    languages: [typescript]
+    severity: ERROR
+    message: >-
+      Role-filtered organization_members selection belongs in the auth helpers
+      (lib/auth.ts, lib/crew-auth.ts) or getPmMembersByOrgIds/getOrgDispatcher
+      in lib/inngest/helpers.ts. Open-coding `.in('role', …)` / `.eq('role', …)`
+      re-derives the membership semantics (invite_accepted_at, owner always
+      passing) that have already drifted into live bugs three times.
+    paths:
+      exclude:
+        - /lib/auth.ts
+        - /lib/crew-auth.ts
+        - /lib/inngest/helpers.ts
+    pattern-regex: from\(\s*['"]organization_members['"]\s*\)[\s\S]{0,400}?\.(in|eq)\(\s*['"]role['"]
+
+  # ── Shared helper: lib/http/timeout.ts budgets ───────────────────────────
+  # PROMOTED from ratchet.yml (2026-07-31) once its last site — the Anthropic
+  # normalization call in build-shopping-cart.ts — got ANTHROPIC_TIMEOUT_MS.
+  # NARROWED DELIBERATELY: a bare `fetch(...)` ban produces 43 hits, most of
+  # them client components calling same-origin API routes with a relative path
+  # (no SSRF surface, no hanging-serverless-function risk). Restricted to a
+  # LITERAL absolute http(s) URL, which is the outbound case the budgets exist
+  # for and the only one that can be recognised with certainty.
+  #
+  # This is strictly WEAKER than unit/guardrails/external-fetch-timeout.test.ts
+  # inside lib/** (5 baselined files there vs. 0 here, because those build
+  # their URL from a variable and this rule cannot see that). It is not a
+  # replacement for that test — it EXTENDS the coverage to app/ and
+  # components/, which the vitest test does not scan at all.
+  - id: fieldstay-untimed-external-fetch
+    languages: [typescript]
+    severity: ERROR
+    message: >-
+      Outbound fetch() with no AbortSignal — it has no timeout at all and hangs
+      until the platform kills the function. Pass a budget from
+      lib/http/timeout.ts, or use safeFetch() (lib/security/url-guard.ts) when
+      any part of the URL is tenant-supplied.
+    paths:
+      exclude:
+        - /lib/http/timeout.ts
+        - /lib/security/url-guard.ts
+    patterns:
+      - pattern: fetch($U, ...)
+      - metavariable-regex:
+          metavariable: $U
+          regex: ^['"`]https?://
+      - pattern-not-regex: signal
+
+  # ── Private storage buckets ──────────────────────────────────────────────
+  - id: fieldstay-get-public-url-on-private-bucket
+    languages: [typescript]
+    severity: ERROR
+    message: >-
+      This bucket is PRIVATE — getPublicUrl() returns a well-formed URL that
+      400s, with no error to notice. Use createSignedUrl()/createSignedUrls().
+    patterns:
+      - pattern: $S.storage.from($B).getPublicUrl(...)
+      - metavariable-regex:
+          metavariable: $B
+          regex: ^['"](work-order-photos|turnover-photos|compliance-documents)['"]$
+
+  # ── PROMOTED from ratchet.yml 2026-08-01, at 0 findings ──────────────────
+  # An unbounded .select() with NO equality filter anywhere in the chain: the
+  # read is the whole table, and PostgREST truncates it at max_rows = 1000 with
+  # a 200, no error, and no truncation signal. This was the highest-impact
+  # systemic finding of the 2026-07-30 audit (eight platform-wide crons had each
+  # silently stopped covering every tenant past row 1000, with CI green).
+  #
+  # It started at 38 and was burned to 0 across four passes, which is what the
+  # ratchet exists to enable. Promotion means it now gates at --error across the
+  # WHOLE tree instead of only on new findings vs. the PR base — a single
+  # unbounded table read anywhere fails the build immediately.
+  #
+  # Unlike the other rules here, this one is not scoped by paths.exclude: there
+  # is no file that legitimately owns "read an entire table unbounded". The
+  # bounding constructs (.limit / .range / .single / .maybeSingle / a head-count
+  # aggregate) are the exemption, and they are expressed as pattern-not-inside.
+  #
+  # Its baseline-counts.json key was deleted in the same change, per the
+  # promotion rule in .semgrep/README.md.
+  # No equality filter of any kind anywhere in the chain. Whatever this
+  # returns is the whole table (or an arbitrarily long `.in()` list over it),
+  # truncated at 1000. This is the exact shape of all eight cron defects the
+  # 2026-07-30 audit found, and it is the tier to burn down to zero first: at
+  # zero it can move to chokepoints.yml and gate at --error.
+  - id: fieldstay-supabase-unbounded-select-table-scan
+    languages: [typescript]
+    severity: ERROR
+    message: >-
+      Unbounded .select() with NO equality filter at all — this reads the whole
+      table and PostgREST truncates it at max_rows = 1000 with a 200 and no
+      truncation signal. Bound it: fetchAllRows() (lib/inngest/paginate.ts),
+      .limit(), .single()/.maybeSingle(), or a { count: 'exact', head: true }
+      aggregate.
+    patterns:
+      - pattern: $S.from($T).select(...)
+      - pattern-not-inside: $X.limit(...)
+      - pattern-not-inside: $X.range(...)
+      - pattern-not-inside: $X.single(...)
+      - pattern-not-inside: $X.maybeSingle(...)
+      - pattern-not: "$S.from($T).select($SEL, {..., head: true, ...})"
+      - pattern-not-inside: $X.eq($COL, ...)

@@ -76,7 +76,9 @@ export async function handleWorkOrderInvoicePaid(
     action:     'work_order.invoice.paid',
     targetType: 'work_order_invoice',
     targetId:   inv.id,
-    metadata:   { amount: inv.total },
-    // No Stripe session ID or payment intent ID — financial PII rule
+    // No Stripe session ID or payment intent ID, and no figure either — the
+    // financial-specifics rule covers the amount too. targetId points at the
+    // work_order_invoices row, which carries the total.
+    metadata:   { currency: 'usd' },
   })
 }

@@ -1,20 +1,90 @@
 'use server'
 
 import { revalidatePath } from 'next/cache'
+import { fetchAllRows } from '@/lib/inngest/paginate'
 import { redirect, unstable_rethrow } from 'next/navigation'
-import { requireOrgMember } from '@/lib/auth'
+import { requireOrgMember, requireOrgRole } from '@/lib/auth'
 import { geocodeZip } from '@/lib/geocoding'
 import { calculateHealthScore } from '@/lib/assets/health-score'
 import { logAuditEvent } from '@/lib/audit'
 import { applyMasterChecklistToProperty } from '@/lib/checklists/apply-master-template'
 import { reportError } from '@/lib/observability/report-error'
 import { reportQueryError } from '@/lib/supabase/unwrap'
-import type { AssetType } from '@/types/database'
+import type { AssetType, MemberRole } from '@/types/database'
+
+// properties/property_assets both gate writes on
+// is_org_member(org_id, ARRAY['admin','manager']) at the RLS layer, and
+// store_property_door_code/read_property_door_code now gate on the same set
+// (migration 20260731201000). Gating the Server Actions on the same roles
+// means a `viewer` gets a real permission error instead of a write that
+// silently matches 0 rows. is_org_member()/requireOrgRole() both pass `owner`
+// automatically, so it need not be listed.
+const PROPERTY_WRITE_ROLES: MemberRole[] = ['admin', 'manager']
+
+// A write denied by RLS affects 0 rows and returns NO error, so `if (error)`
+// alone reports success for a change that never happened. Every UPDATE in this
+// file selects the touched row back and treats a null result as denial.
+const NOTHING_UPDATED =
+  'You do not have permission to make this change, or the record no longer exists.'
 
 export type PropertyActionState = {
   error?: string
   fieldErrors?: Record<string, string>
   success?: boolean
+}
+
+type ActionSupabase = Awaited<ReturnType<typeof requireOrgRole>>['supabase']
+
+/**
+ * Best-effort lat/lng write after a successful geocode. Reported, never fatal —
+ * a property that otherwise saved must not fail over its map pin. It still
+ * distinguishes "the write errored" from "the write matched 0 rows" instead of
+ * discarding both, which is the silent-failure class this pass closed.
+ */
+async function writeCoords(
+  supabase:   ActionSupabase,
+  propertyId: string,
+  coords:     { lat: number; lng: number },
+  site:       string,
+): Promise<void> {
+  const { data, error } = await supabase
+    .from('properties')
+    .update({ lat: coords.lat, lng: coords.lng })
+    .eq('id', propertyId)
+    .select('id')
+    .maybeSingle()
+
+  if (error) {
+    console.error(`[${site}] geocode coordinate write failed`, error)
+    reportError(error, { site: `serverAction.properties.${site}.writeCoords` })
+    return
+  }
+  if (!data) {
+    console.warn(`[${site}] geocode coordinate write matched 0 rows`, { propertyId })
+  }
+}
+
+/**
+ * store_property_door_code, with its error reported rather than discarded and
+ * WITHOUT surfacing a user-facing failure — used only where the surrounding
+ * write has already committed. Never logs the door code itself.
+ */
+async function reportDoorCodeWrite(
+  supabase:   ActionSupabase,
+  propertyId: string,
+  orgId:      string,
+  doorCode:   string | null,
+  site:       string,
+): Promise<void> {
+  const { error } = await supabase.rpc('store_property_door_code', {
+    p_property_id: propertyId,
+    p_org_id:      orgId,
+    p_door_code:   doorCode,
+  })
+  if (error) {
+    console.error(`[${site}] door code write failed`, error)
+    reportError(error, { site: `serverAction.properties.${site}.storeDoorCode`, orgId })
+  }
 }
 
 // ── Create ──────────────────────────────────────────────────
@@ -24,7 +94,7 @@ export async function createProperty(
   formData: FormData
 ): Promise<PropertyActionState> {
   try {
-    const { supabase, membership, user } = await requireOrgMember()
+    const { supabase, membership, user } = await requireOrgRole(PROPERTY_WRITE_ROLES)
 
     const name          = (formData.get('name') as string)?.trim()
     const address       = (formData.get('address') as string)?.trim()
@@ -111,18 +181,18 @@ export async function createProperty(
       return { error: 'Operation failed. Please try again.' }
     }
 
+    // The property row is already committed, so a Vault failure here must not
+    // roll the whole create back into an error the PM would retry (creating a
+    // duplicate). reportDoorCodeWrite() logs and reports without throwing —
+    // the door code can be re-saved from the property edit form.
     if (door_code) {
-      await supabase.rpc('store_property_door_code', {
-        p_property_id: property.id,
-        p_org_id:      membership.org_id,
-        p_door_code:   door_code,
-      })
+      await reportDoorCodeWrite(supabase, property.id, membership.org_id, door_code, 'createProperty')
     }
 
     if (zip) {
       const coords = await geocodeZip(zip)
       if (coords) {
-        await supabase.from('properties').update({ lat: coords.lat, lng: coords.lng }).eq('id', property.id)
+        await writeCoords(supabase, property.id, coords, 'createProperty')
       } else {
         console.warn('[createProperty] geocodeZip returned null for zip:', zip)
       }
@@ -162,7 +232,7 @@ export async function updateProperty(
   formData: FormData
 ): Promise<PropertyActionState> {
   try {
-    const { supabase, membership, user } = await requireOrgMember()
+    const { supabase, membership, user } = await requireOrgRole(PROPERTY_WRITE_ROLES)
 
     const name          = (formData.get('name') as string)?.trim()
     const address       = (formData.get('address') as string)?.trim()
@@ -189,7 +259,7 @@ export async function updateProperty(
       .eq('org_id', membership.org_id)
       .single()
 
-    const { error } = await supabase
+    const { data: updated, error } = await supabase
       .from('properties')
       .update({
         name, address: address || null, city: city || null,
@@ -200,22 +270,41 @@ export async function updateProperty(
       })
       .eq('id', propertyId)
       .eq('org_id', membership.org_id)
+      .select('id')
+      .maybeSingle()
 
     if (error) {
       console.error('[updateProperty]', error)
+      reportError(error, { site: 'serverAction.properties.updateProperty.update', orgId: membership.org_id })
       return { error: 'Operation failed. Please try again.' }
     }
 
-    await supabase.rpc('store_property_door_code', {
+    // 0 rows with no error = RLS denied the write (or the property is gone).
+    // Returning success here is how a viewer's edit used to look like it saved.
+    if (!updated) {
+      console.warn('[updateProperty] update matched 0 rows', { propertyId })
+      return { error: NOTHING_UPDATED }
+    }
+
+    const { error: doorCodeError } = await supabase.rpc('store_property_door_code', {
       p_property_id: propertyId,
       p_org_id:      membership.org_id,
       p_door_code:   door_code,
     })
 
+    if (doorCodeError) {
+      console.error('[updateProperty] door code write failed', doorCodeError)
+      reportError(doorCodeError, {
+        site:  'serverAction.properties.updateProperty.storeDoorCode',
+        orgId: membership.org_id,
+      })
+      return { error: 'Operation failed. Please try again.' }
+    }
+
     if (zip && zip !== (existing?.zip ?? '')) {
       const coords = await geocodeZip(zip)
       if (coords) {
-        await supabase.from('properties').update({ lat: coords.lat, lng: coords.lng }).eq('id', propertyId)
+        await writeCoords(supabase, propertyId, coords, 'updateProperty')
       } else {
         console.warn('[updateProperty] geocodeZip returned null for zip:', zip)
       }
@@ -250,14 +339,23 @@ export async function revealPropertyDoorCode(
   propertyId: string
 ): Promise<{ doorCode: string | null } | { error: string }> {
   try {
-    const { user, supabase, membership } = await requireOrgMember()
+    const { user, supabase, membership } = await requireOrgRole(PROPERTY_WRITE_ROLES)
 
-    const { data: property } = await supabase
+    const { data: property, error: lookupError } = await supabase
       .from('properties')
       .select('id, door_code_secret_id')
       .eq('id', propertyId)
       .eq('org_id', membership.org_id)
-      .single()
+      .maybeSingle()
+
+    if (lookupError) {
+      console.error('[revealPropertyDoorCode] lookup failed', lookupError)
+      reportError(lookupError, {
+        site:  'serverAction.properties.revealPropertyDoorCode.lookup',
+        orgId: membership.org_id,
+      })
+      return { error: 'Operation failed. Please try again.' }
+    }
 
     if (!property) return { error: 'Property not found' }
     if (!property.door_code_secret_id) return { doorCode: null }
@@ -295,6 +393,11 @@ export async function markStepComplete(
   step: string
 ): Promise<void> {
   try {
+    // Deliberately requireOrgMember, not requireOrgRole: this is a helper the
+    // per-step setup actions call AFTER their own gated write succeeds, and it
+    // is imported by five of them. The authorization that matters is the
+    // properties UPDATE below, which now fails closed on the 0-row case rather
+    // than silently marking a step complete for a caller RLS denied.
     const { supabase, membership } = await requireOrgMember()
 
     // Fetch current steps
@@ -308,11 +411,24 @@ export async function markStepComplete(
     const current = (data?.setup_steps_completed as Record<string, boolean>) ?? {}
     const updated  = { ...current, [step]: true }
 
-    await supabase
+    const { data: stepRow, error: stepError } = await supabase
       .from('properties')
       .update({ setup_steps_completed: updated })
       .eq('id', propertyId)
       .eq('org_id', membership.org_id)
+      .select('id')
+      .maybeSingle()
+
+    if (stepError) {
+      console.error('[markStepComplete]', stepError)
+      reportError(stepError, { site: 'serverAction.properties.markStepComplete.update', orgId: membership.org_id })
+      throw new Error('Failed to record setup progress. Please try again.')
+    }
+
+    // 0 rows, no error: RLS denied it. Callers (the setup step actions) already
+    // treat a throw as a failed save, so this surfaces instead of leaving the
+    // step marked complete in the UI while nothing was written.
+    if (!stepRow) throw new Error(NOTHING_UPDATED)
 
     const allSteps = ['details', 'ical', 'inventory', 'messages', 'checklist', 'maintenance', 'crew']
     const isFullySetup = allSteps.every((s) => updated[s] === true)
@@ -382,7 +498,7 @@ export async function createAsset(
   formData: FormData
 ): Promise<AssetActionState> {
   try {
-    const { supabase, membership, user } = await requireOrgMember()
+    const { supabase, membership, user } = await requireOrgRole(PROPERTY_WRITE_ROLES)
 
     const name              = (formData.get('name') as string)?.trim()
     const asset_type        = formData.get('asset_type') as AssetType
@@ -492,7 +608,7 @@ export async function updateAsset(
   formData: FormData
 ): Promise<AssetActionState> {
   try {
-    const { supabase, membership, user } = await requireOrgMember()
+    const { supabase, membership, user } = await requireOrgRole(PROPERTY_WRITE_ROLES)
 
     const name              = (formData.get('name') as string)?.trim()
     const make              = (formData.get('make') as string)?.trim() || null
@@ -522,11 +638,18 @@ export async function updateAsset(
       .eq('id', assetId)
       .eq('org_id', membership.org_id)
       .select('asset_type')
-      .single()
+      .maybeSingle()
 
     if (error) {
       console.error('[updateAsset]', error)
+      reportError(error, { site: 'serverAction.properties.updateAsset.update', orgId: membership.org_id })
       return { error: 'Operation failed. Please try again.' }
+    }
+
+    // 0 rows with no error = RLS denied the write (or the asset is gone).
+    if (!updated) {
+      console.warn('[updateAsset] update matched 0 rows', { assetId })
+      return { error: NOTHING_UPDATED }
     }
 
     await logAuditEvent({
@@ -551,12 +674,26 @@ export async function updateAsset(
 
 export async function deactivateAsset(assetId: string): Promise<{ error?: string }> {
   try {
-    const { user, supabase, membership } = await requireOrgMember()
-    await supabase
+    const { user, supabase, membership } = await requireOrgRole(PROPERTY_WRITE_ROLES)
+    const { data: deactivated, error } = await supabase
       .from('property_assets')
       .update({ is_active: false })
       .eq('id', assetId)
       .eq('org_id', membership.org_id)
+      .select('id')
+      .maybeSingle()
+
+    if (error) {
+      console.error('[deactivateAsset]', error)
+      reportError(error, { site: 'serverAction.properties.deactivateAsset.update', orgId: membership.org_id })
+      return { error: 'Operation failed. Please try again.' }
+    }
+
+    // 0 rows with no error = RLS denied the write (or the asset is gone).
+    if (!deactivated) {
+      console.warn('[deactivateAsset] update matched 0 rows', { assetId })
+      return { error: NOTHING_UPDATED }
+    }
 
     await logAuditEvent({
       orgId:      membership.org_id,
@@ -596,7 +733,7 @@ export async function bulkImportAssets(
   rows:       CsvAssetRow[],
 ): Promise<{ imported: number; error?: string }> {
   try {
-    const { supabase, membership, user } = await requireOrgMember()
+    const { supabase, membership, user } = await requireOrgRole(PROPERTY_WRITE_ROLES)
 
     const { data: property } = await supabase
       .from('properties')
@@ -607,11 +744,26 @@ export async function bulkImportAssets(
 
     if (!property) return { imported: 0, error: 'Property not found' }
 
-    const { data: standards } = await supabase
-      .from('asset_type_standards')
-      .select('asset_type, macrs_class_default, lifespan_min_years, lifespan_max_years')
+    // Platform catalog (21 rows today). fetchAllRows costs exactly one request
+    // at this size and cannot silently truncate if the catalog ever grows.
+    // Nullability matches the live schema: all three are NOT NULL on
+    // asset_type_standards (lifespan_min_years / lifespan_max_years smallint
+    // NOT NULL, macrs_class_default NOT NULL DEFAULT '5_year').
+    const standards = await fetchAllRows<{
+      asset_type:          string
+      macrs_class_default: string
+      lifespan_min_years:  number
+      lifespan_max_years:  number
+    }>(
+      (from, to) => supabase
+        .from('asset_type_standards')
+        .select('asset_type, macrs_class_default, lifespan_min_years, lifespan_max_years')
+        .order('asset_type')
+        .range(from, to),
+      { label: 'properties.actions.assetTypeStandards' },
+    )
 
-    const stdMap = Object.fromEntries((standards ?? []).map((s) => [s.asset_type, s]))
+    const stdMap = Object.fromEntries(standards.map((s) => [s.asset_type, s]))
 
     const insertRows = rows.map((row) => {
       const std = stdMap[row.asset_type]
@@ -686,13 +838,28 @@ export async function bulkImportAssets(
 
 export async function archiveProperty(propertyId: string): Promise<void> {
   try {
-    const { supabase, membership, user } = await requireOrgMember()
+    const { supabase, membership, user } = await requireOrgRole(PROPERTY_WRITE_ROLES)
 
-    await supabase
+    const { data: archived, error } = await supabase
       .from('properties')
       .update({ is_active: false })
       .eq('id', propertyId)
       .eq('org_id', membership.org_id)
+      .select('id')
+      .maybeSingle()
+
+    if (error) {
+      console.error('[archiveProperty]', error)
+      reportError(error, { site: 'serverAction.properties.archiveProperty.update', orgId: membership.org_id })
+      throw new Error('Failed to archive property. Please try again.')
+    }
+
+    // 0 rows with no error = RLS denied it. Without this the action redirected
+    // to /properties as if the archive had happened.
+    if (!archived) {
+      console.warn('[archiveProperty] update matched 0 rows', { propertyId })
+      throw new Error(NOTHING_UPDATED)
+    }
 
     await logAuditEvent({
       orgId:      membership.org_id,

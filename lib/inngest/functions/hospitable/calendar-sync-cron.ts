@@ -13,8 +13,9 @@
 // 13:00/14:00 UTC cron cluster.
 // ============================================================
 
-import { inngest }             from '@/lib/inngest/client'
-import { createServiceClient } from '@/lib/supabase/server'
+import { inngest }               from '@/lib/inngest/client'
+import { createServiceClient }   from '@/lib/supabase/server'
+import { getPmMembersByOrgIds }  from '@/lib/inngest/helpers'
 
 export const hospCalendarSyncCron = inngest.createFunction(
   {
@@ -75,19 +76,22 @@ export const hospCalendarSyncCron = inngest.createFunction(
       const supabase = createServiceClient({ system: 'inngest:calendar-sync-cron' })
       const orgIds   = Array.from(new Set(properties.map((p) => p.org_id)))
 
-      // One batched query for all orgs instead of one sequential query per org.
-      const { data: members } = await supabase
-        .from('organization_members')
-        .select('org_id, user_id, role')
-        .in('org_id', orgIds)
-        .in('role', ['owner', 'admin'])
-        .not('invite_accepted_at', 'is', null)
+      // getPmMembersByOrgIds is the single source of truth for "who is the PM"
+      // (CLAUDE.md): it owns the invite_accepted_at filter and the
+      // owner → admin → manager ordering. The open-coded query that used to
+      // live here re-derived both, which is the drift that shipped as a live
+      // crew/PM lockout three times. It is already the batched many-orgs form,
+      // so this stays one query for every org; `limit: 1` reproduces the
+      // owner-preferred single pick the manual loop made.
+      const pmByOrg = await getPmMembersByOrgIds(supabase, orgIds, {
+        roles: ['owner', 'admin'],
+        limit: 1,
+      })
 
       const result: Record<string, string> = {}
-      for (const member of members ?? []) {
-        if (!result[member.org_id] || member.role === 'owner') {
-          result[member.org_id] = member.user_id
-        }
+      for (const [orgId, members] of pmByOrg) {
+        const primary = members[0]
+        if (primary) result[orgId] = primary.userId
       }
 
       return result

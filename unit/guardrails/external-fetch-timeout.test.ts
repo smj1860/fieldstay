@@ -81,8 +81,6 @@ function findOffenders(): string[] {
 // (geocoding, weather/tomorrow, sms/telnyx, kroger/client) were fixed.
 // SHRINK-ONLY: fixing a file means deleting its line here.
 const BASELINE: Record<string, string> = {
-  'lib/inngest/functions/build-shopping-cart.ts':
-    'Anthropic messages call for product matching, issued outside any client module. Owned by the inventory/cart area.',
   'lib/integrations/providers/hospitable-token.ts':
     'Hospitable OAuth token exchange — needs a provider timeout budget; owned by the integrations area.',
   'lib/integrations/providers/hospitable.ts':

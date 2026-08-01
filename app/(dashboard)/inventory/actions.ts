@@ -6,6 +6,7 @@ import { inngest } from '@/lib/inngest/client'
 import { logAuditEvent } from '@/lib/audit'
 import { reportError } from '@/lib/observability/report-error'
 import { unwrapJoin } from '@/lib/utils/supabase-joins'
+import { fetchAllRows } from '@/lib/inngest/paginate'
 import type { InventoryCategory } from '@/types/database'
 
 /**
@@ -199,12 +200,23 @@ export async function submitInventoryCount(
       // Items that have never had a real count recorded get first_count_recorded_at
       // stamped now, so the "0 means uncounted, not critical" distinction holds going
       // forward. Supabase JS can't compare columns in an UPDATE, so check first.
-      const { data: neverCountedRows } = await supabase
-        .from('inventory_items')
-        .select('id')
-        .in('id', updates.map((u) => u.id))
-        .is('first_count_recorded_at', null)
-      const neverCountedIds = new Set((neverCountedRows ?? []).map((r) => r.id))
+      // Paginated: `updates` is a whole count session, and one org's
+      // inventory_items across 50 properties runs to thousands. Truncating at
+      // max_rows = 1000 would leave neverCountedIds incomplete, so the items
+      // past the cap never get first_count_recorded_at stamped and the
+      // "0 means uncounted, not critical" distinction silently breaks for them
+      // — permanently, since the stamp only ever happens on a first count.
+      const neverCountedRows = await fetchAllRows<{ id: string }>(
+        (from, to) => supabase
+          .from('inventory_items')
+          .select('id')
+          .in('id', updates.map((u) => u.id))
+          .is('first_count_recorded_at', null)
+          .order('id')
+          .range(from, to),
+        { label: 'submitInventoryCount.neverCounted' },
+      )
+      const neverCountedIds = new Set(neverCountedRows.map((r) => r.id))
 
       // Update current_quantity on each item (org_id guard) — parallel to avoid serial timeout
       const now = new Date().toISOString()
@@ -396,15 +408,30 @@ export async function applyTemplateToProperties(
     const targetPropertyIds = propertyIds.filter((id) => verifiedPropertyIds.has(id))
     if (targetPropertyIds.length === 0) return { error: 'No valid properties selected', applied: 0 }
 
-    // Fetch all existing items for ALL target properties in a single query, then group by property
-    const { data: allExisting } = await supabase
-      .from('inventory_items')
-      .select('property_id, catalog_item_id, name')
-      .eq('org_id', membership.org_id)
-      .in('property_id', targetPropertyIds)
+    // Fetch all existing items for ALL target properties, then group by property.
+    //
+    // Paginated, not a single unbounded select: PostgREST caps a response at
+    // max_rows = 1000 with a 200 and no truncation signal, and this set IS the
+    // duplicate guard below. At CLAUDE.md's own target scale (50 properties ×
+    // a 115-item catalog = 5,750 rows) a truncated read meant every property
+    // past the first ~8 got a full duplicate set of inventory items inserted,
+    // silently. A unique index is not the fix here: the dedupe key is
+    // two-pronged (catalog_item_id OR case-insensitive name) and live data
+    // already contains duplicates this very bug created, so the index would
+    // fail to build.
+    const allExisting = await fetchAllRows<{ property_id: string; catalog_item_id: string | null; name: string }>(
+      (from, to) => supabase
+        .from('inventory_items')
+        .select('property_id, catalog_item_id, name')
+        .eq('org_id', membership.org_id)
+        .in('property_id', targetPropertyIds)
+        .order('id', { ascending: true })
+        .range(from, to),
+      { label: 'applyTemplateToProperties.existing_items' },
+    )
 
     const existingByProperty: Record<string, { catalogIds: Set<string>; names: Set<string> }> = {}
-    for (const row of allExisting ?? []) {
+    for (const row of allExisting) {
       if (!existingByProperty[row.property_id]) {
         existingByProperty[row.property_id] = { catalogIds: new Set(), names: new Set() }
       }
@@ -577,27 +604,41 @@ export interface AggregatedItem {
   properties: Array<{ name: string; needed: number }>
 }
 
+interface AggregatedItemRow {
+  name:                    string
+  unit:                    string
+  current_quantity:        number | null
+  par_level:               number | null
+  first_count_recorded_at: string | null
+  property_id:             string
+  property:                { name: string } | { name: string }[] | null
+}
+
 export async function generateAggregatedPurchaseList(): Promise<{ items: AggregatedItem[]; error?: string }> {
   try {
     const { supabase, membership } = await requireOrgMember()
 
-    // Supabase JS client can't compare two columns directly; fetch active items and filter in JS.
-    // Limit to 2000 rows (well above any real org's inventory) to prevent unbounded scans.
-    const { data: allItems, error } = await supabase
-      .from('inventory_items')
-      .select('name, unit, current_quantity, par_level, first_count_recorded_at, property_id, property:properties(name)')
-      .eq('org_id', membership.org_id)
-      .eq('is_active', true)
-      .limit(2000)
-
-    if (error) {
-      console.error('[generateAggregatedPurchaseList]', error)
-      reportError(error, { site: 'serverAction.inventory.generateAggregatedPurchaseList', orgId: membership.org_id })
-      return { items: [], error: 'Operation failed. Please try again.' }
-    }
+    // Supabase JS client can't compare two columns directly; fetch active items
+    // and filter in JS.
+    //
+    // Was `.limit(2000)` with a comment claiming that was "well above any real
+    // org's inventory" — CLAUDE.md's own target user (50 properties × a
+    // 115-item catalog = 5,750 rows) exceeds it, and everything past row 2,000
+    // was silently missing from the purchase list. Paginated instead, so the
+    // bound is "all of them" rather than a guess.
+    const allItems = await fetchAllRows<AggregatedItemRow>(
+      (from, to) => supabase
+        .from('inventory_items')
+        .select('name, unit, current_quantity, par_level, first_count_recorded_at, property_id, property:properties(name)')
+        .eq('org_id', membership.org_id)
+        .eq('is_active', true)
+        .order('id', { ascending: true })
+        .range(from, to),
+      { label: 'generateAggregatedPurchaseList.inventory_items' },
+    )
 
     const grouped: Record<string, AggregatedItem> = {}
-    for (const item of allItems ?? []) {
+    for (const item of allItems) {
       if (!item.first_count_recorded_at) continue
       if ((item.current_quantity ?? 0) > (item.par_level ?? 0)) continue
 

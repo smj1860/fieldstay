@@ -29,6 +29,9 @@ function makeSupabase(queued: Record<string, { data?: unknown; error?: unknown }
     }
     chain.select = (...a: unknown[]) => record('select', a)
     chain.eq     = (...a: unknown[]) => record('eq', a)
+    // This read paginates via fetchAllRows(), which drains .order().range().
+    chain.order  = (...a: unknown[]) => record('order', a)
+    chain.range  = (...a: unknown[]) => record('range', a)
     chain.in     = (...a: unknown[]) => record('in', a)
     chain.not    = (...a: unknown[]) => record('not', a)
     chain.is     = (...a: unknown[]) => record('is', a)

@@ -1,4 +1,5 @@
 import { inngest } from '@/lib/inngest/client'
+import { reportError } from '@/lib/observability/report-error'
 import { createServiceClient } from '@/lib/supabase/server'
 import { resend, FROM } from '@/lib/resend/client'
 import { getPmEmails, createPmNotification } from '@/lib/inngest/helpers'
@@ -294,12 +295,28 @@ export const handleTurnoverCompleted = inngest.createFunction(
         return { skipped: 'anomalous_duration', duration_minutes: durationMinutes }
       }
 
-      const { data: updatedRows } = await supabase
+      // duration_minutes is DELIBERATELY not written: it is GENERATED ALWAYS on
+      // assignment_outcomes, derived from started_at/completed_at with its own
+      // 480-minute plausibility cap (the same bound as
+      // MAX_PLAUSIBLE_DURATION_MINUTES above). Naming it here raised 428C9
+      // "cannot insert a non-DEFAULT value into column", which failed the WHOLE
+      // update — so started_at and completed_at were never written either, and
+      // the assignment-outcomes learning loop that feeds crew scoring recorded
+      // nothing at all. The error was then discarded by destructuring `data`
+      // without `error`, so it surfaced as `updated_rows: 0` and looked like
+      // "no matching rows" rather than a failed write.
+      const { data: updatedRows, error: outcomeError } = await supabase
         .from('assignment_outcomes')
-        .update({ started_at: startedAt, completed_at: completedAt, duration_minutes: Math.round(durationMinutes) })
+        .update({ started_at: startedAt, completed_at: completedAt })
         .eq('turnover_id', turnover_id)
         .eq('org_id', org_id)
         .select('id')
+
+      if (outcomeError) {
+        logger.error('assignment_outcomes duration update failed', { error: outcomeError.message })
+        reportError(outcomeError, { site: 'inngest.turnover-events.assignmentOutcomeDuration', orgId: org_id })
+        return { updated_rows: 0, duration_minutes: Math.round(durationMinutes), error: true }
+      }
 
       return { updated_rows: updatedRows?.length ?? 0, duration_minutes: Math.round(durationMinutes) }
     })

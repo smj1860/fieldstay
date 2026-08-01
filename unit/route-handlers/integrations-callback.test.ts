@@ -399,7 +399,9 @@ describe('GET /api/integrations/[provider]/callback (OAuth CSRF state validation
     const admin = makeAdmin({
       oauth_states: [{ data: { state: 's1', provider_id: 'ownerrez', user_id: null, return_to: null }, error: null }],
       organization_members: [{ data: { org_id: 'org_1' }, error: null }],
-      integration_connections: [{ data: null, error: null }],
+      // The org-link UPDATE now reads its row back: 0 rows means the
+      // connection belongs to another org, and no initial sync is fired.
+      integration_connections: [{ data: { id: 'conn_1' }, error: null }],
     })
     vi.mocked(createServiceClient).mockReturnValue(admin as never)
     vi.mocked(getProvider).mockReturnValue(oauthProvider())
@@ -504,7 +506,9 @@ describe('GET /api/integrations/[provider]/callback (OAuth CSRF state validation
     const admin = makeAdmin({
       oauth_states: [{ data: { state: 's1', provider_id: 'ownerrez', user_id: null, return_to: '/inventory' }, error: null }],
       organization_members: [{ data: { org_id: 'org_1' }, error: null }],
-      integration_connections: [{ data: null, error: null }],
+      // The org-link UPDATE now reads its row back: 0 rows means the
+      // connection belongs to another org, and no initial sync is fired.
+      integration_connections: [{ data: { id: 'conn_1' }, error: null }],
     })
     vi.mocked(createServiceClient).mockReturnValue(admin as never)
     vi.mocked(getProvider).mockReturnValue(oauthProvider())

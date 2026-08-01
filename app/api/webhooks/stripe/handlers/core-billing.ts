@@ -40,7 +40,10 @@ export async function handleCheckoutSessionBilling(
 async function notifyOrgAdmin(
   supabase: StripeSupabaseClient,
   orgId: string,
-  send: (adminEmail: string, firstName: string) => Promise<void>,
+  // userId is passed through so a downstream commercial email can resolve the
+  // recipient's CAN-SPAM opt-out state and unsubscribe token — the email alone
+  // cannot, since profiles is keyed by auth user id and holds no email column.
+  send: (adminEmail: string, firstName: string, userId: string) => Promise<void>,
 ): Promise<void> {
   const [primaryPm] = await getPmMembers(supabase, orgId, { limit: 1 })
   if (!primaryPm) return
@@ -50,7 +53,7 @@ async function notifyOrgAdmin(
   const { data } = await supabase.auth.admin.getUserById(primaryPm.userId)
   const fullName = data?.user?.user_metadata?.full_name as string | undefined
 
-  await send(primaryPm.email, fullName?.split(' ')[0] ?? 'there')
+  await send(primaryPm.email, fullName?.split(' ')[0] ?? 'there', primaryPm.userId)
 }
 
 /** Core billing subscription created or updated (plan/status sync + trial-lifecycle emails). */
@@ -112,11 +115,12 @@ export async function handleCoreSubscriptionUpdate(
   // ── Trial lifecycle start (subscription.created while trialing) ───
   if (eventType === 'customer.subscription.created' && planStatus === 'trialing' && subscription.trial_end) {
     const trialEndsAt = subscription.trial_end
-    await notifyOrgAdmin(supabase, org.id, async (userEmail, firstName) => {
+    await notifyOrgAdmin(supabase, org.id, async (userEmail, firstName, userId) => {
       await inngest.send({
         name: 'billing/trial-lifecycle-start',
         data: {
           org_id:        org.id,
+          user_id:       userId,
           user_email:    userEmail,
           first_name:    firstName,
           org_name:      orgName,

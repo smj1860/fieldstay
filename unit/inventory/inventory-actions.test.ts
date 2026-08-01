@@ -41,7 +41,9 @@ function makeSupabase(queue: Record<string, Resp[]>) {
     const result: Resp = q?.length ? q.shift()! : { data: null, error: null }
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const chain: any = {}
-    for (const m of ['select', 'insert', 'update', 'delete', 'upsert', 'eq', 'in', 'is', 'limit', 'maybeSingle']) {
+    // `order`/`range` are needed by the fetchAllRows() pagination the
+    // truncation fixes introduced (a single short page ends the drain).
+    for (const m of ['select', 'insert', 'update', 'delete', 'upsert', 'eq', 'in', 'is', 'limit', 'order', 'range', 'maybeSingle']) {
       chain[m] = vi.fn(() => chain)
     }
     // maybeSingle overridden below to actually resolve
@@ -274,6 +276,32 @@ describe('inventory/actions', () => {
       expect(result).toEqual({ applied: 1 })
     })
 
+    // ── Regression: max_rows = 1000 silently truncated the dedupe set ────
+    // The existing-items read IS the duplicate guard, and it was a single
+    // unbounded select. At CLAUDE.md's own target scale (50 properties × a
+    // 115-item catalog = 5,750 rows) every property past the first ~8 had its
+    // existing items invisible and got a full duplicate set inserted, with a
+    // 200 and no error anywhere. Pre-fix this asserts applied: 0 but gets 1.
+    it('sees an existing item that lands on the SECOND page of the dedupe read', async () => {
+      const filler = Array.from({ length: 1000 }, (_, i) => ({
+        property_id: 'prop_other', catalog_item_id: null, name: `filler ${i}`,
+      }))
+      const supabase = makeSupabase({
+        inventory_templates:      [{ data: { id: 'tmpl_1' } }],
+        inventory_template_items: [{ data: [{ id: 'ti_1', name: 'Towels', category: 'bath', unit: 'each', par_level: 6, catalog_item_id: null }] }],
+        properties:               [{ data: [{ id: 'prop_1' }] }],
+        inventory_items: [
+          { data: filler },                                                                    // page 1 — full page
+          { data: [{ property_id: 'prop_1', catalog_item_id: null, name: 'Towels' }] },        // page 2 — the row that must dedupe
+        ],
+      })
+      vi.mocked(requireOrgMember).mockResolvedValue({ supabase, membership } as never)
+
+      const result = await applyTemplateToProperties('tmpl_1', ['prop_1'])
+
+      expect(result).toEqual({ applied: 0 })
+    })
+
     it('rejects a template id that does not belong to the caller org (IDOR check)', async () => {
       const supabase = makeSupabase({ inventory_templates: [{ data: null }] })
       vi.mocked(requireOrgMember).mockResolvedValue({ supabase, membership } as never)
@@ -353,6 +381,31 @@ describe('inventory/actions', () => {
 
       expect(result.items).toEqual([
         { name: 'Towels', unit: 'each', totalNeeded: 5, properties: [{ name: 'Lakehouse', needed: 5 }] },
+      ])
+    })
+
+    // ── Regression: the `.limit(2000)` "well above any real org's inventory"
+    // comment was wrong about CLAUDE.md's own target user (50 properties ×
+    // 115 catalog items = 5,750 rows). Everything past row 2,000 was silently
+    // missing from the purchase list — the PM under-orders and stock runs out.
+    // Pre-fix, the second page is never fetched and this returns [].
+    it('includes below-par items past the first page of a paginated read', async () => {
+      const filler = Array.from({ length: 1000 }, (_, i) => ({
+        name: `Stocked ${i}`, unit: 'each', current_quantity: 10, par_level: 1,
+        first_count_recorded_at: '2026-01-01', property_id: 'prop_1', property: { name: 'Lakehouse' },
+      }))
+      const supabase = makeSupabase({
+        inventory_items: [
+          { data: filler },
+          { data: [{ name: 'Towels', unit: 'each', current_quantity: 1, par_level: 6, first_count_recorded_at: '2026-01-01', property_id: 'prop_2', property: { name: 'Cabin' } }] },
+        ],
+      })
+      vi.mocked(requireOrgMember).mockResolvedValue({ supabase, membership } as never)
+
+      const result = await generateAggregatedPurchaseList()
+
+      expect(result.items).toEqual([
+        { name: 'Towels', unit: 'each', totalNeeded: 5, properties: [{ name: 'Cabin', needed: 5 }] },
       ])
     })
 

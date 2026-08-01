@@ -1,4 +1,5 @@
 import type { Metadata } from 'next'
+import { fetchAllRows } from '@/lib/inngest/paginate'
 import { requireOrgMember } from '@/lib/auth'
 import { MaintenanceSubnav } from '@/components/templates/maintenance-subnav'
 import { unwrapJoin } from '@/lib/utils/supabase-joins'
@@ -12,7 +13,7 @@ export default async function MaintenanceSchedulesPage() {
   const [
     { data: properties, error: propertiesError },
     { data: schedules, error: schedulesError },
-    { data: templates, error: templatesError },
+    templates,
     { data: vendors, error: vendorsError },
   ] = await Promise.all([
     supabase
@@ -32,9 +33,17 @@ export default async function MaintenanceSchedulesPage() {
       .eq('org_id', membership.org_id)
       .eq('is_active', true)
       .order('next_due_date', { ascending: true, nullsFirst: false }),
-    supabase
-      .from('maintenance_schedule_templates')
-      .select('id, name'),
+    // Paginated: RLS-scoped to this org plus is_system, small today, but this
+    // list drives a picker — a truncated one silently offers fewer templates
+    // than exist rather than erroring.
+    fetchAllRows<{ id: string; name: string }>(
+      (from, to) => supabase
+        .from('maintenance_schedule_templates')
+        .select('id, name')
+        .order('id')
+        .range(from, to),
+      { label: 'page.maintenanceSchedules.templates' },
+    ),
     supabase
       .from('vendors')
       .select('id, name, specialty')
@@ -45,7 +54,6 @@ export default async function MaintenanceSchedulesPage() {
 
   if (propertiesError) console.error('[MaintenanceSchedulesPage] properties query failed', propertiesError)
   if (schedulesError)  console.error('[MaintenanceSchedulesPage] schedules query failed', schedulesError)
-  if (templatesError)  console.error('[MaintenanceSchedulesPage] templates query failed', templatesError)
   if (vendorsError)    console.error('[MaintenanceSchedulesPage] vendors query failed', vendorsError)
 
   const templateNameById: Record<string, string> = {}

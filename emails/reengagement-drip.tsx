@@ -10,6 +10,9 @@ interface Props {
   integrationsUrl: string
   onboardingUrl:   string
   reviewCount:     number
+  // Commercial email — CAN-SPAM opt-out artifacts.
+  unsubscribeUrl?: string
+  postalAddress?:  string | null
 }
 
 export function ReengagementEmail({
@@ -20,6 +23,8 @@ export function ReengagementEmail({
   integrationsUrl,
   onboardingUrl,
   reviewCount,
+  unsubscribeUrl,
+  postalAddress,
 }: Props) {
   if (isConnected) {
     return (
@@ -28,6 +33,8 @@ export function ReengagementEmail({
         ctaLabel="Review responses →"
         ctaUrl={dashboardUrl}
         footerNote={`You're receiving this as part of your FieldStay onboarding for ${orgName}.`}
+        unsubscribeUrl={unsubscribeUrl}
+        postalAddress={postalAddress}
       >
         <Text style={heading}>One week in, {firstName}.</Text>
         <Text style={subheading}>Your guests left reviews this week. Did you respond?</Text>
@@ -62,6 +69,8 @@ export function ReengagementEmail({
       ctaLabel="Connect your PMS →"
       ctaUrl={integrationsUrl}
       footerNote={`You're receiving this as part of your FieldStay onboarding for ${orgName}.`}
+      unsubscribeUrl={unsubscribeUrl}
+      postalAddress={postalAddress}
     >
       <Text style={heading}>7 days in, {firstName}.</Text>
       <Text style={subheading}>Here&apos;s what you&apos;re missing.</Text>
