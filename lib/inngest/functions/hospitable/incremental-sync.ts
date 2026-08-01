@@ -20,6 +20,7 @@
 import { inngest }                 from '@/lib/inngest/client'
 import type { GetStepTools }       from 'inngest'
 import { NonRetriableError }       from 'inngest'
+import { fetchTurnoverCreatedEvents } from '@/lib/inngest/turnover-created-events'
 import { createServiceClient }     from '@/lib/supabase/server'
 import { resolveHospitableOwner }  from '@/lib/integrations/providers/hospitable-owner'
 import { createHash } from 'crypto'
@@ -357,29 +358,7 @@ async function syncReservation(
     if (newTurnoverIds.length > 0) {
       const turnoverEvents = await step.run('fetch-new-turnover-data', async () => {
         const supabase = createServiceClient({ system: 'inngest:incremental-sync' })
-        type TRow = {
-          id:                string
-          property_id:       string
-          checkout_datetime: string
-          checkin_datetime:  string
-          window_minutes:    number | null
-        }
-        const { data: turnovers } = await supabase
-          .from('turnovers')
-          .select('id, property_id, checkout_datetime, checkin_datetime, window_minutes')
-          .in('id', newTurnoverIds)
-
-        return ((turnovers as TRow[]) ?? []).map((t) => ({
-          name: 'turnover/created' as const,
-          data: {
-            turnover_id:       t.id,
-            property_id:       t.property_id,
-            org_id:            orgId,
-            checkout_datetime: t.checkout_datetime,
-            checkin_datetime:  t.checkin_datetime,
-            window_minutes:    t.window_minutes ?? 0,
-          },
-        }))
+        return fetchTurnoverCreatedEvents(supabase, newTurnoverIds, orgId)
       })
 
       if (turnoverEvents.length > 0) {

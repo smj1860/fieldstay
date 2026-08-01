@@ -28,6 +28,10 @@ function makeSupabase(rows: MemberRow[], userEmails: Record<string, string | nul
   chain.select = (...a: unknown[]) => record('select', a)
   chain.in     = (...a: unknown[]) => record('in', a)
   chain.not    = (...a: unknown[]) => record('not', a)
+  // The organization_members read is paginated (fetchAllRows) — it is the
+  // platform-wide PM fan-in, so it can cross max_rows = 1000 at ~150 orgs.
+  chain.order  = (...a: unknown[]) => record('order', a)
+  chain.range  = (...a: unknown[]) => record('range', a)
   chain.then   = (resolve: (v: unknown) => unknown) =>
     Promise.resolve({ data: rows, error: null }).then(resolve)
 

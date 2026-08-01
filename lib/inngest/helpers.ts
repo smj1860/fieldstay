@@ -1,6 +1,7 @@
 import type { createServiceClient } from '@/lib/supabase/server'
 import { adminFetch } from '@/lib/supabase/server'
 import { reportError } from '@/lib/observability/report-error'
+import { fetchAllRows } from '@/lib/inngest/paginate'
 
 type ServiceClient = ReturnType<typeof createServiceClient>
 
@@ -77,19 +78,29 @@ export async function getPmMembersByOrgIds(
   const uniqueOrgIds = [...new Set(orgIds)]
   if (!uniqueOrgIds.length) return new Map()
 
-  const { data: members, error } = await supabase
-    .from('organization_members')
-    .select('org_id, user_id, role')
-    .in('org_id', uniqueOrgIds)
-    .in('role', roles)
-    .not('invite_accepted_at', 'is', null)
+  // Paginated, not a bare select: this is the platform-wide fan-in — one row
+  // per eligible PM across EVERY org in the batch. The daily crons pass every
+  // tenant, so at ~150 orgs with a handful of owners/admins each this crosses
+  // PostgREST's max_rows = 1000 cap, which returns 200 with no truncation
+  // signal. Truncation here does not error, it silently drops whole tenants
+  // from the map — and every caller reads a missing org as "no PM to notify",
+  // so the alert simply never goes out. `.order('org_id')` is required by
+  // fetchAllRows for stable page boundaries.
+  const members = await fetchAllRows<MemberRow>(
+    (from, to) => supabase
+      .from('organization_members')
+      .select('org_id, user_id, role')
+      .in('org_id', uniqueOrgIds)
+      .in('role', roles)
+      .not('invite_accepted_at', 'is', null)
+      .order('org_id')
+      .range(from, to),
+    { label: 'getPmMembersByOrgIds.organization_members' },
+  )
 
-  if (error) {
-    throw new Error(`getPmMembersByOrgIds: organization_members query failed: ${error.message}`)
-  }
-  if (!members?.length) return new Map()
+  if (!members.length) return new Map()
 
-  const selected      = selectMembersPerOrg(members as MemberRow[], limit)
+  const selected      = selectMembersPerOrg(members, limit)
   const emailByUserId = await resolveUserEmails(supabase, selected.map((m) => m.user_id))
 
   const result = new Map<string, PmMember[]>()

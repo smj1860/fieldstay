@@ -1,4 +1,5 @@
 import { createServiceClient } from '@/lib/supabase/server'
+import { fetchAllRows } from '@/lib/inngest/paginate'
 
 /**
  * Generates a URL-safe slug from a property name.
@@ -26,13 +27,23 @@ export async function generateUniqueSlug(propertyName: string): Promise<string> 
   const supabase  = createServiceClient({ system: 'lib/guidebook/slug' })
   const baseSlug  = generateBaseSlug(propertyName)
 
-  // Fetch all existing slugs that start with the base slug in one query
-  const { data: existing } = await supabase
-    .from('guidebook_property_configs')
-    .select('slug')
-    .like('slug', `${baseSlug}%`)
+  // Paginated: `slug` is GLOBALLY unique (guidebook_property_configs_slug_key),
+  // so this prefix scan spans every tenant. Truncating it at PostgREST's
+  // max_rows = 1000 yields an INCOMPLETE `taken` set, which hands back a slug
+  // that is already in use — the insert then fails on the unique constraint
+  // (23505) rather than doing anything silently wrong, but the caller sees an
+  // unexplained error instead of a working guidebook.
+  const existing = await fetchAllRows<{ slug: string }>(
+    (from, to) => supabase
+      .from('guidebook_property_configs')
+      .select('slug')
+      .like('slug', `${baseSlug}%`)
+      .order('slug')
+      .range(from, to),
+    { label: 'guidebook.slug.generateUniqueSlug' },
+  )
 
-  const taken = new Set((existing ?? []).map((r) => r.slug))
+  const taken = new Set(existing.map((r) => r.slug))
 
   if (!taken.has(baseSlug)) return baseSlug
 
@@ -62,13 +73,20 @@ export async function generateUniqueSlugsForProperties(
 
   const allBases = baseSlugs.map((b) => b.baseSlug)
 
-  // Fetch all existing slugs that could conflict in one query
-  const { data: existing } = await supabase
-    .from('guidebook_property_configs')
-    .select('slug')
-    .or(allBases.map((s) => `slug.like.${s}%`).join(','))
+  // Paginated for the same reason as the single-property form above, and more
+  // acutely: this ORs one prefix per property in the batch, so a full-portfolio
+  // sync scans a correspondingly larger slice of a globally-unique column.
+  const existing = await fetchAllRows<{ slug: string }>(
+    (from, to) => supabase
+      .from('guidebook_property_configs')
+      .select('slug')
+      .or(allBases.map((s) => `slug.like.${s}%`).join(','))
+      .order('slug')
+      .range(from, to),
+    { label: 'guidebook.slug.generateUniqueSlugsForProperties' },
+  )
 
-  const taken = new Set((existing ?? []).map((r) => r.slug))
+  const taken = new Set(existing.map((r) => r.slug))
   const result = new Map<string, string>()
 
   // Assign unique slugs, tracking within-batch assignments too

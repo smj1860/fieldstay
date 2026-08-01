@@ -1,5 +1,6 @@
 import { inngest } from '@/lib/inngest/client'
 import { createServiceClient } from '@/lib/supabase/server'
+import { fetchTurnoverCreatedEvents } from '@/lib/inngest/turnover-created-events'
 import { generateTurnoversForProperty } from '@/lib/turnovers/generator'
 import { parseLocalDate } from '@/lib/utils/date-validation'
 import { reportError } from '@/lib/observability/report-error'
@@ -202,23 +203,7 @@ export const handleBookingDetected = inngest.createFunction(
     if (newTurnoverIds.length > 0) {
       const turnoverEvents = await step.run('fetch-new-turnover-data', async () => {
         const supabase = createServiceClient({ system: 'inngest:booking-events' })
-        type TurnoverRow = { id: string; checkout_datetime: string; checkin_datetime: string; window_minutes: number | null }
-        const { data: turnovers } = await supabase
-          .from('turnovers')
-          .select('id, checkout_datetime, checkin_datetime, window_minutes')
-          .in('id', newTurnoverIds)
-
-        return (turnovers as TurnoverRow[] ?? []).map((t) => ({
-          name: 'turnover/created' as const,
-          data: {
-            turnover_id:       t.id,
-            property_id,
-            org_id,
-            checkout_datetime: t.checkout_datetime,
-            checkin_datetime:  t.checkin_datetime,
-            window_minutes:    t.window_minutes ?? 0,
-          },
-        }))
+        return fetchTurnoverCreatedEvents(supabase, newTurnoverIds, org_id)
       })
 
       if (turnoverEvents.length > 0) {

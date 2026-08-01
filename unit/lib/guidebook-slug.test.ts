@@ -20,7 +20,10 @@ function makeSupabase(existingSlugs: string[]) {
   const from = vi.fn(() => {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const chain: any = {}
-    for (const m of ['select', 'like', 'or']) {
+    // 'order'/'range': the slug scans paginate via fetchAllRows() now, because
+    // guidebook_property_configs.slug is GLOBALLY unique and the prefix scan
+    // therefore spans every tenant.
+    for (const m of ['select', 'like', 'or', 'order', 'range']) {
       chain[m] = vi.fn((...args: unknown[]) => {
         calls.push({ method: m, args })
         return chain
