@@ -16,15 +16,20 @@ vi.mock('@/lib/resend/emails/daily-wrapup', () => ({
 // table level — this function's own direct queries (turnovers, properties,
 // work_orders, etc.) are what's under test here.
 vi.mock('@/lib/inngest/helpers', () => ({
-  getPmEmails:        vi.fn(async () => []),
-  diffDigestSnapshot:  vi.fn(async () => ({ newIds: [], unchangedIds: [], removedIds: [] })),
+  getPmEmails:          vi.fn(async () => []),
+  // The cron fan-out now asks getPmMembersByOrgIds() which of the enumerated
+  // tenants actually has a reachable PM, instead of open-coding the role +
+  // invite_accepted_at filter against organization_members itself. Mocked at
+  // the helper boundary for the same reason as the other two.
+  getPmMembersByOrgIds: vi.fn(async () => new Map()),
+  diffDigestSnapshot:   vi.fn(async () => ({ newIds: [], unchangedIds: [], removedIds: [] })),
 }))
 
 import { dailyWrapUp, dailyWrapUpOrg } from '@/lib/inngest/functions/cron/daily-wrapup'
 import { createServiceClient } from '@/lib/supabase/server'
 import { resend } from '@/lib/resend/client'
 import { renderDailyWrapUpEmail } from '@/lib/resend/emails/daily-wrapup'
-import { getPmEmails } from '@/lib/inngest/helpers'
+import { getPmEmails, getPmMembersByOrgIds } from '@/lib/inngest/helpers'
 import { invokeHandler } from './test-helpers'
 
 // Queue-based `.from(table)` mock — same convention as checklist-broadcast
@@ -43,7 +48,7 @@ function makeSupabase(queued: Record<string, { data?: unknown; error?: unknown }
       calls.push({ table, method, args })
       return chain
     }
-    for (const m of ['select', 'eq', 'in', 'not', 'gte', 'lte', 'lt', 'neq', 'like', 'order', 'limit', 'is']) {
+    for (const m of ['select', 'eq', 'in', 'not', 'gte', 'lte', 'lt', 'neq', 'like', 'order', 'limit', 'range', 'is']) {
       chain[m] = (...a: unknown[]) => record(m, a)
     }
     for (const m of ['insert', 'update', 'upsert', 'delete']) {
@@ -113,8 +118,9 @@ describe('dailyWrapUp (cron fan-out)', () => {
 
   it('dispatches no events when there are no active orgs with an invite-accepted PM', async () => {
     const supabase = makeSupabase({
-      organization_members: [{ data: [], error: null }],
+      organizations: [{ data: [{ id: 'org_1' }], error: null }],
     })
+    ;(getPmMembersByOrgIds as ReturnType<typeof vi.fn>).mockResolvedValue(new Map())
     ;(createServiceClient as ReturnType<typeof vi.fn>).mockReturnValue(supabase)
 
     const step = makeStep()
@@ -131,12 +137,21 @@ describe('dailyWrapUp (cron fan-out)', () => {
 
   it('fans out one org/daily_wrapup.requested event per distinct org, with a stable now_ms', async () => {
     const supabase = makeSupabase({
-      organization_members: [{
-        // org_1 appears twice (owner + admin) — must be deduped to one event
-        data: [{ org_id: 'org_1' }, { org_id: 'org_1' }, { org_id: 'org_2' }],
+      // Every tenant is enumerated; the helper decides which of them has a
+      // reachable PM. org_3 has none, so it must not be dispatched — and the
+      // helper's Map is keyed by org, so the owner+admin duplication that used
+      // to need deduping here cannot reach this code at all any more.
+      organizations: [{
+        data: [{ id: 'org_1' }, { id: 'org_2' }, { id: 'org_3' }],
         error: null,
       }],
     })
+    ;(getPmMembersByOrgIds as ReturnType<typeof vi.fn>).mockResolvedValue(
+      new Map([
+        ['org_1', [{ userId: 'u1', email: 'a@x.com', role: 'owner' }]],
+        ['org_2', [{ userId: 'u2', email: 'b@x.com', role: 'admin' }]],
+      ]),
+    )
     ;(createServiceClient as ReturnType<typeof vi.fn>).mockReturnValue(supabase)
 
     const step = makeStep()

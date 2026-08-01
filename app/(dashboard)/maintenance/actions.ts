@@ -1407,6 +1407,37 @@ export async function dismissVendorSuggestion(workOrderId: string): Promise<{ er
   }
 }
 
+/**
+ * Vendor-assigned work orders must be completed through the vendor's own
+ * portal (line items → invoice → Stripe Connect payout) — bulk-completing them
+ * here would leave no invoice and no payment path. Split the target set
+ * instead of failing the whole batch, so any crew/unassigned WOs in the same
+ * selection still go through. Also carries each WO's prior status out for the
+ * work_order_updates row the completion helper writes.
+ */
+async function splitVendorAssignedWorkOrders(
+  supabase:     Awaited<ReturnType<typeof requireOrgRole>>['supabase'],
+  orgId:        string,
+  workOrderIds: string[],
+): Promise<{ targetIds: string[]; skippedCount: number; statusFromById: Map<string, WoStatus | null> }> {
+  const { data: rows } = await supabase
+    .from('work_orders')
+    .select('id, vendor_id, status')
+    .in('id', workOrderIds)
+    .eq('org_id', orgId)
+
+  const vendorAssignedIds = new Set((rows ?? []).filter((r) => r.vendor_id).map((r) => r.id))
+  const statusFromById    = new Map<string, WoStatus | null>(
+    (rows ?? []).map((r) => [r.id, (r.status ?? null) as WoStatus | null])
+  )
+
+  return {
+    targetIds:    workOrderIds.filter((id) => !vendorAssignedIds.has(id)),
+    skippedCount: vendorAssignedIds.size,
+    statusFromById,
+  }
+}
+
 export async function bulkUpdateWorkOrderStatus(
   workOrderIds: string[],
   status: WoStatus
@@ -1414,26 +1445,9 @@ export async function bulkUpdateWorkOrderStatus(
   try {
     const { supabase, membership, user } = await requireOrgRole(['admin', 'manager'])
 
-    // Vendor-assigned work orders must be completed through the vendor's own
-    // portal (line items → invoice → Stripe Connect payout) — bulk-completing
-    // them here would leave no invoice and no payment path. Split the target
-    // set instead of failing the whole batch, so any crew/unassigned WOs in
-    // the same selection still go through.
-    let targetIds = workOrderIds
-    let skippedCount = 0
-    const statusFromById = new Map<string, WoStatus | null>()
-    if (status === 'completed') {
-      const { data: rows } = await supabase
-        .from('work_orders')
-        .select('id, vendor_id, status')
-        .in('id', workOrderIds)
-        .eq('org_id', membership.org_id)
-
-      const vendorAssignedIds = new Set((rows ?? []).filter((r) => r.vendor_id).map((r) => r.id))
-      targetIds    = workOrderIds.filter((id) => !vendorAssignedIds.has(id))
-      skippedCount = vendorAssignedIds.size
-      for (const row of rows ?? []) statusFromById.set(row.id, (row.status ?? null) as WoStatus | null)
-    }
+    const { targetIds, skippedCount, statusFromById } = status === 'completed'
+      ? await splitVendorAssignedWorkOrders(supabase, membership.org_id, workOrderIds)
+      : { targetIds: workOrderIds, skippedCount: 0, statusFromById: new Map<string, WoStatus | null>() }
 
     if (targetIds.length === 0) {
       return skippedCount > 0
