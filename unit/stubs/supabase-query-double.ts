@@ -122,6 +122,13 @@ export interface SupabaseDoubleOptions {
  * is already the intended result set) — except `.range()`, which really
  * slices, because pagination correctness is a thing these tests must catch.
  */
+/**
+ * PostgREST's `max_rows` (supabase/config.toml, and the Supabase cloud
+ * default). An unpaginated `.select()` is silently capped here in production;
+ * the double reproduces that so truncation tests are real.
+ */
+const SUPABASE_MAX_ROWS = 1000
+
 const CHAINABLE = [
   'select', 'eq', 'neq', 'in', 'gt', 'gte', 'lt', 'lte', 'is', 'not', 'or',
   'like', 'ilike', 'filter', 'match', 'contains', 'overlaps', 'order',
@@ -194,7 +201,21 @@ export function createSupabaseDouble(
     }
 
     const resolve = (): QueryResponse => {
-      if (!range) return consumeNext(table)
+      // An UNPAGINATED read is capped at max_rows, exactly as PostgREST does:
+      // the first 1000 rows, HTTP 200, no error, no truncation signal.
+      //
+      // Without this the double returned the whole fixture for a query with no
+      // .range(), which made every truncation test in the suite INERT — the
+      // 1450-connection regression test for hospitable-teammate-sync-cron
+      // asserted `dispatched: 1450` and passed just as happily against the
+      // un-paginated code it exists to catch. A test that cannot fail is worse
+      // than no test, because it reads as coverage.
+      if (!range) {
+        const whole = consumeNext(table)
+        return Array.isArray(whole.data) && whole.data.length > SUPABASE_MAX_ROWS
+          ? { ...whole, data: whole.data.slice(0, SUPABASE_MAX_ROWS) }
+          : whole
+      }
       // Page 1 of a paginated query consumes a queued entry; later pages
       // slice that same entry so paging doesn't eat the next query's fixture.
       if (range.from === 0) pageSource[table] = consumeNext(table)

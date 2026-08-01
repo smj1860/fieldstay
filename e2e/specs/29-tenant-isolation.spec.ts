@@ -172,6 +172,12 @@ test.describe('Tenant isolation (org A vs org B)', () => {
         .from('properties')
         .insert({ org_id: ctx.orgId, name: injectedName })
       expect(insert.error).not.toBeNull()
+      // Assert on the REASON, not just that it failed. `properties` only
+      // requires name + org_id, so a bare "it errored" check would also pass
+      // if the insert had been rejected for a schema reason that has nothing
+      // to do with tenant isolation. Postgres's own wording is
+      // "new row violates row-level security policy for table ...".
+      expect(insert.error?.message).toMatch(/row-level security|permission denied/i)
 
       const { data: injected } = await service
         .from('properties').select('id').eq('org_id', ctx.orgId).eq('name', injectedName)

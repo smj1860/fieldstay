@@ -12,12 +12,12 @@ vi.mock('@/lib/inngest/client', () => {
   }
 })
 vi.mock('@/lib/audit', () => ({ logAuditEvent: vi.fn() }))
-vi.mock('@/lib/ical/conflict-detection', () => ({ detectAndFlagOverlaps: vi.fn() }))
+vi.mock('@/lib/ical/conflict-detection', () => ({ detectAndFlagOverlaps: vi.fn(), detectAndFlagOverlapsBestEffort: vi.fn() }))
 
 import { requireOrgMember } from '@/lib/auth'
 import { inngest } from '@/lib/inngest/client'
 import { logAuditEvent } from '@/lib/audit'
-import { detectAndFlagOverlaps } from '@/lib/ical/conflict-detection'
+import { detectAndFlagOverlapsBestEffort as detectAndFlagOverlaps } from '@/lib/ical/conflict-detection'
 import { createBooking, cancelBooking, triggerSync } from '@/app/(dashboard)/bookings/actions'
 
 type Resp = { data?: unknown; error?: unknown; count?: number }

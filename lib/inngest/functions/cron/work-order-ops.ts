@@ -242,16 +242,30 @@ export const workOrderOpsOrg = inngest.createFunction(
       // Optimistic-locked bulk update: `.neq('priority', 'urgent')` means a
       // retry of this step matches zero rows (they are already urgent), so the
       // work_order_updates notes below are never written twice.
-      const { data: updatedRows, error: updateError } = await supabase
-        .from('work_orders')
-        .update({ priority: 'urgent' })
-        .in('id', agingWOs.map((wo) => wo.id))
-        .neq('priority', 'urgent')
-        .select('id')
+      // CHUNKED because the RETURNING clause is capped too. `.select('id')` on
+      // an UPDATE is a PostgREST response like any other, so max_rows = 1000
+      // truncates it — silently, with a 200. With a >1000-row backlog the
+      // UPDATE correctly escalated every row, but only the first 1000 came
+      // back, so `changed` was short and the work_order_updates notes (and the
+      // count this step reports, which the daily wrap-up digest reads) covered
+      // a fraction of what actually changed. The write was right and the
+      // record of it was wrong, which is the harder version to notice.
+      const UPDATE_RETURNING_CHUNK = 500
+      const updatedIds = new Set<string>()
 
-      if (updateError) throw new Error(`Failed to escalate aging WOs: ${updateError.message}`)
+      for (let i = 0; i < agingWOs.length; i += UPDATE_RETURNING_CHUNK) {
+        const chunk = agingWOs.slice(i, i + UPDATE_RETURNING_CHUNK)
+        const { data: updatedRows, error: updateError } = await supabase
+          .from('work_orders')
+          .update({ priority: 'urgent' })
+          .in('id', chunk.map((wo) => wo.id))
+          .neq('priority', 'urgent')
+          .select('id')
 
-      const updatedIds = new Set((updatedRows ?? []).map((r) => r.id))
+        if (updateError) throw new Error(`Failed to escalate aging WOs: ${updateError.message}`)
+
+        for (const r of updatedRows ?? []) updatedIds.add(r.id)
+      }
       const changed    = agingWOs.filter((wo) => updatedIds.has(wo.id))
       if (!changed.length) return []
 

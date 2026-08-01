@@ -3,7 +3,7 @@
 import { revalidatePath } from 'next/cache'
 import { requireOrgMember } from '@/lib/auth'
 import { logAuditEvent } from '@/lib/audit'
-import { detectAndFlagOverlaps } from '@/lib/ical/conflict-detection'
+import { detectAndFlagOverlapsBestEffort } from '@/lib/ical/conflict-detection'
 
 export async function updateBookingDates(
   bookingId: string,
@@ -60,7 +60,7 @@ export async function updateBookingDates(
 
   // Authoritative server-side conflict re-check, regardless of the
   // client-side pre-check already done in moveResizeValidator
-  await detectAndFlagOverlaps(supabase, booking.property_id)
+  await detectAndFlagOverlapsBestEffort(supabase, booking.property_id)
 
   revalidatePath('/bookings')
   return { success: true }

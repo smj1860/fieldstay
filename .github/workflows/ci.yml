@@ -85,7 +85,14 @@ jobs:
       # and never executes a package's setup.py during install. semgrep ships
       # wheels for this platform, so this costs nothing and closes the
       # arbitrary-code-execution-at-install-time path SonarQube flags.
-      - run: pip install --only-binary :all: semgrep==1.172.0
+      # Quoted: `:all:` is followed by a space, and an unquoted `: ` inside a
+      # plain YAML scalar terminates the key. Unquoted, this single line makes
+      # the WHOLE workflow file unparseable — GitHub then fails the run at
+      # startup with zero jobs created, which renders as a generic red X that
+      # looks like a normal test failure. CI was silently dead from c8e067f
+      # until this was found, and a merge to main went through with no checks,
+      # no semgrep, no db-invariants and no e2e having run at all.
+      - run: "pip install --only-binary :all: semgrep==1.172.0"
       - uses: actions/setup-node@v4
         with:
           node-version: 22

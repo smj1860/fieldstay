@@ -1,5 +1,6 @@
 import type { createServiceClient } from '@/lib/supabase/server'
 import { fetchAllRows } from '@/lib/inngest/paginate'
+import { reportError } from '@/lib/observability/report-error'
 
 // Tied to the real factory's return type rather than a literal `any` —
 // createClient()/createServiceClient({ system: 'lib/ical/conflict-detection' }) both omit the <Database> generic
@@ -98,4 +99,34 @@ export async function detectAndFlagOverlaps(
     checkinDate:  b.checkin_date,
     checkoutDate: b.checkout_date,
   }))
+}
+
+/**
+ * Best-effort wrapper for call sites that run AFTER their own write has
+ * already committed.
+ *
+ * detectAndFlagOverlaps now throws on a failed read (previously it returned []
+ * and hid the outage). That is correct inside the iCal sync Inngest step,
+ * where a throw means "retry". It is wrong in a Server Action that has already
+ * inserted, cancelled or re-dated a booking: the throw lands in the action's
+ * catch — or, in updateBookingDates, in Next's error boundary, since that
+ * action has no catch at all — and the PM is told the operation failed while
+ * the row is committed. In createBooking that also skipped the
+ * `booking/detected` event, so no turnover was generated for a booking the PM
+ * was told had failed, and retrying hit the duplicate constraint. A dead end.
+ *
+ * The conflict scan is advisory: it flags overlaps for a later warning. Its
+ * failure must never invalidate a write that already landed. Reported, not
+ * thrown.
+ */
+export async function detectAndFlagOverlapsBestEffort(
+  supabase: DBClient,
+  propertyId: string,
+): Promise<void> {
+  try {
+    await detectAndFlagOverlaps(supabase, propertyId)
+  } catch (err) {
+    console.error('[detectAndFlagOverlaps] post-commit conflict scan failed', { propertyId, err })
+    reportError(err, { site: 'lib.ical.conflict-detection.bestEffort' })
+  }
 }
