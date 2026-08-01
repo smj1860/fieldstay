@@ -48,7 +48,10 @@ describe('guardrail: semgrep CI wiring', () => {
 
   it('the semgrep version is pinned', () => {
     expect(
-      /pip install semgrep==\d+\.\d+\.\d+/.test(ciDirectives),
+      // `[^\n]*` allows install FLAGS between the verb and the package
+      // (--only-binary :all: hardens against setup.py execution at install
+      // time). The pin itself — semgrep==X.Y.Z — is still required exactly.
+      /pip install [^\n]*semgrep==\d+\.\d+\.\d+/.test(ciDirectives),
       'An unpinned semgrep turns a rule-engine release into an unexplained CI failure on an unrelated PR.',
     ).toBe(true)
   })

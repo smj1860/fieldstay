@@ -14,10 +14,10 @@
   "measured_at": "2026-08-01",
   "counts": {
     "fieldstay-supabase-discarded-result": 149,
-    "fieldstay-supabase-read-without-error": 386,
-    "fieldstay-supabase-read-without-error-fan-in": 19,
-    "fieldstay-supabase-unbounded-select-cross-tenant": 72,
-    "fieldstay-supabase-unbounded-select-in-list": 50,
+    "fieldstay-supabase-read-without-error": 384,
+    "fieldstay-supabase-read-without-error-fan-in": 17,
+    "fieldstay-supabase-unbounded-select-cross-tenant": 71,
+    "fieldstay-supabase-unbounded-select-in-list": 47,
     "fieldstay-supabase-unbounded-select-org-scoped": 112
   }
 }

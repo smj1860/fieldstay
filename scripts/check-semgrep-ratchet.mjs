@@ -76,7 +76,7 @@ for (const result of report.results) {
 
 // Every rule declared in ratchet.yml must appear, including at zero — a rule
 // that stops matching anything should show 0, not vanish from the report.
-const declared = [...readFileSync(RULES, 'utf8').matchAll(/^\s*-\s*id:\s*(\S+)/gm)].map((m) => m[1])
+const declared = [...readFileSync(RULES, 'utf8').matchAll(/^[ \t]*-[ \t]*id:[ \t]*(\S+)/gm)].map((m) => m[1])
 for (const id of declared) actual[id] ??= 0
 
 // ── Compare ─────────────────────────────────────────────────────────────────
@@ -90,7 +90,10 @@ if (UPDATE) {
   console.log('Updated .semgrep/baseline-counts.json:')
   for (const [id, n] of Object.entries(baselineDoc.counts)) {
     const was = baseline[id]
-    console.log(`  ${id}: ${was === undefined ? 'new ' : `${was} -> `}${n}`)
+    // Extracted rather than nested: CLAUDE.md bans nested template literals,
+    // and SonarQube flags them as brain-overload.
+    const transition = was === undefined ? 'new ' : `${was} -> `
+    console.log(`  ${id}: ${transition}${n}`)
   }
   process.exit(0)
 }
@@ -124,7 +127,12 @@ for (const id of new Set([...Object.keys(actual), ...Object.keys(baseline)])) {
 }
 
 console.log('semgrep ratchet — per-rule counts')
-for (const id of Object.keys(actual).sort()) {
+// Explicit ASCII comparator, NOT localeCompare: these are rule ids in CI log
+// output, so the order must be byte-stable across machines and locales rather
+// than locale-correct. localeCompare would make the diff depend on the runner.
+const byRuleId = (a, b) => (a < b ? -1 : (a > b ? 1 : 0))
+
+for (const id of Object.keys(actual).sort(byRuleId)) {
   console.log(`  ${String(actual[id]).padStart(5)}  ${id}   (baseline ${baseline[id] ?? '—'})`)
 }
 

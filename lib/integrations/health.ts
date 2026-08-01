@@ -19,6 +19,7 @@
 // ============================================================
 
 import { createServiceClient } from '@/lib/supabase/server'
+import { throwIfAnyQueryFailed } from '@/lib/supabase/unwrap'
 import { fetchAllRows } from '@/lib/inngest/paginate'
 import { unwrapJoin } from '@/lib/utils/supabase-joins'
 
@@ -71,7 +72,7 @@ function feedStatus(lastSyncStatus: string | null, lastSyncedAt: string | null):
 export async function getIntegrationHealth(orgId: string): Promise<IntegrationHealthItem[]> {
   const admin = createServiceClient({ system: 'lib/integrations/health' })
 
-  const [{ data: connections }, providers, { data: feeds }] = await Promise.all([
+  const [connectionsRes, providers, feedsRes] = await Promise.all([
     admin
       .from('integration_connections')
       .select('id, provider_id, status, metadata, updated_at')
@@ -92,6 +93,19 @@ export async function getIntegrationHealth(orgId: string): Promise<IntegrationHe
       .eq('org_id', orgId)
       .eq('is_active', true),
   ])
+
+  // Both siblings' errors are surfaced rather than dropped. This function backs
+  // the integration HEALTH panel — the one surface whose entire job is to tell
+  // a PM when a sync is broken — so rendering a failed query as "no
+  // connections, no feeds" is the worst possible failure mode here: it reports
+  // perfect health precisely when the database cannot be reached.
+  throwIfAnyQueryFailed(
+    { site: 'lib.integrations.health', orgId },
+    connectionsRes.error,
+    feedsRes.error,
+  )
+  const connections = connectionsRes.data
+  const feeds       = feedsRes.data
 
   const providerNames = Object.fromEntries(providers.map((p) => [p.id, p.display_name]))
 

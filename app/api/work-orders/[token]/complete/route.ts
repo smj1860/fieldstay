@@ -136,7 +136,7 @@ export async function POST(
   // What stays HERE is everything that must not be rolled back by a later DB
   // failure, and must not fire from inside a transaction that might abort:
   // token validation, payload validation, the audit log, and event dispatch.
-  const platformFeePct = parseFloat(process.env.STRIPE_PLATFORM_FEE_PCT ?? '0') / 100
+  const platformFeePct = Number.parseFloat(process.env.STRIPE_PLATFORM_FEE_PCT ?? '0') / 100
 
   const { data: rpcResult, error: rpcError } = await supabase.rpc('complete_work_order_via_token', {
     p_work_order_id:     workOrder.id,

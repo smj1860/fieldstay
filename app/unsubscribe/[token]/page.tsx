@@ -8,7 +8,7 @@ export const metadata: Metadata = { title: 'Unsubscribe' }
 // reflects the action just taken.
 export const dynamic = 'force-dynamic'
 
-interface Props { params: Promise<{ token: string }> }
+type Props = Readonly<{ params: Promise<{ token: string }> }>
 
 /**
  * Public CAN-SPAM opt-out landing page.

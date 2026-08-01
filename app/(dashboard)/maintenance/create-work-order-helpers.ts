@@ -1,4 +1,5 @@
 import 'server-only'
+import { fetchAllRows } from '@/lib/inngest/paginate'
 
 import { inngest, sendEventAsync } from '@/lib/inngest/client'
 import type { WoStatus, WoCategory } from '@/types/database'
@@ -52,13 +53,23 @@ export async function checkQuoteVendorsAssignable(
 
   // One query for the whole list — org membership of each vendor id, which
   // nothing in this flow previously verified at all.
-  const { data: vendors, error } = await supabase
-    .from('vendors')
-    .select('id')
-    .eq('org_id', orgId)
-    .in('id', ids)
-
-  if (error) {
+  // Paginated: this is the in-org membership check for the selected vendors, so
+  // a truncated result would read as "these vendors are not in your org" for
+  // everything past the cap. fetchAllRows throws rather than returning a short
+  // list, which is the safe direction for an authorization check.
+  let vendors
+  try {
+    vendors = await fetchAllRows<{ id: string }>(
+      (from, to) => supabase
+        .from('vendors')
+        .select('id')
+        .eq('org_id', orgId)
+        .in('id', ids)
+        .order('id')
+        .range(from, to),
+      { label: 'maintenance.checkQuoteVendorsAssignable' },
+    )
+  } catch (error) {
     console.error('[checkQuoteVendorsAssignable] vendor lookup failed', error)
     reportError(error, { site: 'maintenance.checkQuoteVendorsAssignable', orgId })
     return { error: 'Could not verify the selected vendors. Please try again.' }

@@ -1,4 +1,5 @@
 import 'server-only'
+import { fetchAllRows } from '@/lib/inngest/paginate'
 
 import type { SupabaseClient } from '@supabase/supabase-js'
 import { inngest } from '@/lib/inngest/client'
@@ -90,13 +91,27 @@ async function advanceSchedulesAfterCompletion(
   const sourceByScheduleId = new Map(entries.map((e) => [e.scheduleId, e.workOrderSource]))
   const scheduleIds        = Array.from(sourceByScheduleId.keys())
 
-  const { data: schedules, error } = await supabase
-    .from('maintenance_schedules')
-    .select('id, schedule_type, frequency, next_due_date, auto_create_wo')
-    .in('id', scheduleIds)
-    .eq('org_id', orgId)
-
-  if (error) {
+  // Paginated: scheduleIds comes from a bulk completion, so the list is sized
+  // by the selection rather than by one parent row. fetchAllRows throws on a
+  // query error, which the caller's try/catch turns into the same outcome the
+  // inline `if (error)` produced — a schedule that silently never advances is
+  // a maintenance task that stops recurring.
+  let schedules
+  try {
+    schedules = await fetchAllRows<{
+      id: string; schedule_type: string | null; frequency: string | null
+      next_due_date: string | null; auto_create_wo: boolean | null
+    }>(
+      (from, to) => supabase
+        .from('maintenance_schedules')
+        .select('id, schedule_type, frequency, next_due_date, auto_create_wo')
+        .in('id', scheduleIds)
+        .eq('org_id', orgId)
+        .order('id')
+        .range(from, to),
+      { label: 'maintenance.advanceSchedulesAfterCompletion.read' },
+    )
+  } catch (error) {
     console.error('[advanceSchedulesAfterCompletion] schedule read failed', error)
     reportError(error, { site: 'maintenance.advanceSchedulesAfterCompletion.read', orgId })
     return

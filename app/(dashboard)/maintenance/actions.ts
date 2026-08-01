@@ -1420,15 +1420,34 @@ async function splitVendorAssignedWorkOrders(
   orgId:        string,
   workOrderIds: string[],
 ): Promise<{ targetIds: string[]; skippedCount: number; statusFromById: Map<string, WoStatus | null> }> {
-  const { data: rows } = await supabase
-    .from('work_orders')
-    .select('id, vendor_id, status')
-    .in('id', workOrderIds)
-    .eq('org_id', orgId)
+  // Paginated AND throwing, both deliberately. This read is what decides which
+  // work orders are vendor-assigned and must therefore NOT be completed here —
+  // vendor work has to go through the vendor portal, which is what generates
+  // the invoice and the Stripe Connect payout.
+  //
+  // Discarding the error made that decision FAIL OPEN: a failed read left
+  // `rows` null, so vendorAssignedIds came back empty, every selected work
+  // order looked unassigned, and the bulk action completed the vendor ones too
+  // — marking vendor work done with no invoice and no way to pay for it. And a
+  // truncated read (the .in() list is a bulk selection, which can exceed
+  // max_rows) fails open the same way for everything past row 1000.
+  //
+  // fetchAllRows throws on a query error, so the caller aborts instead of
+  // silently completing the wrong set.
+  const rows = await fetchAllRows<{ id: string; vendor_id: string | null; status: string | null }>(
+    (from, to) => supabase
+      .from('work_orders')
+      .select('id, vendor_id, status')
+      .in('id', workOrderIds)
+      .eq('org_id', orgId)
+      .order('id')
+      .range(from, to),
+    { label: 'maintenance.splitVendorAssignedWorkOrders' },
+  )
 
-  const vendorAssignedIds = new Set((rows ?? []).filter((r) => r.vendor_id).map((r) => r.id))
+  const vendorAssignedIds = new Set(rows.filter((r) => r.vendor_id).map((r) => r.id))
   const statusFromById    = new Map<string, WoStatus | null>(
-    (rows ?? []).map((r) => [r.id, (r.status ?? null) as WoStatus | null])
+    rows.map((r) => [r.id, (r.status ?? null) as WoStatus | null])
   )
 
   return {

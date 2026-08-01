@@ -1,6 +1,7 @@
 'use server'
 
 import { requireOrgRole } from '@/lib/auth'
+import { reportError } from '@/lib/observability/report-error'
 import { revalidatePath } from 'next/cache'
 import { logAuditEvent } from '@/lib/audit'
 import type { WoStatus } from '@/types/database'
@@ -124,12 +125,22 @@ export async function markVendorAcknowledged(workOrderId: string) {
 export async function markWorkVerified(workOrderId: string) {
   const { user, supabase, membership } = await requireOrgRole(['admin', 'manager'])
 
-  const { data: wo } = await supabase
+  const { data: wo, error: woError } = await supabase
     .from('work_orders')
     .select('vendor_id, status')
     .eq('id', workOrderId)
     .eq('org_id', membership.org_id)
     .single()
+
+  // A query error is NOT "not found". Collapsing the two told the PM the work
+  // order does not exist when the database was simply unreachable — and the
+  // vendor-assignment guard immediately below depends on this row, so failing
+  // to distinguish them risks reasoning from an absent record.
+  if (woError) {
+    console.error('[markWorkVerified] work order lookup failed', woError)
+    reportError(woError, { site: 'maintenance.markWorkVerified.lookup', orgId: membership.org_id })
+    throw new Error('Could not load the work order. Please try again.')
+  }
 
   if (!wo) throw new Error('Work order not found')
 

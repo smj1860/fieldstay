@@ -1,7 +1,15 @@
 import { requirePlatformAdmin } from '@/lib/auth'
+import type { InventoryCategory } from '@/types/database'
 import { fetchAllRows } from '@/lib/inngest/paginate'
 import { Card } from '@/components/ui/Card'
 import { PlatformInventoryTemplateBuilder } from './platform-inventory-template-builder'
+
+interface CatalogItemRow {
+  id:           string
+  name:         string
+  category:     InventoryCategory
+  default_unit: string
+}
 
 interface PlatformTemplateRow {
   id:          string
@@ -19,7 +27,7 @@ interface PlatformTemplateRow {
 export default async function InventoryTemplatesPage() {
   const { supabase } = await requirePlatformAdmin()
 
-  const [templates, { data: catalogItems }] = await Promise.all([
+  const [templates, catalogItems] = await Promise.all([
     // Paginated: this is the editor for the templates broadcast to every org,
     // so a truncated list would let an admin edit a partial set unknowingly.
     fetchAllRows<PlatformTemplateRow>(
@@ -33,12 +41,19 @@ export default async function InventoryTemplatesPage() {
         .range(from, to),
       { label: 'admin.platformInventoryTemplates' },
     ),
-    supabase
-      .from('inventory_catalog')
-      .select('id, name, category, default_unit')
-      .eq('is_active', true)
-      .order('category')
-      .order('name'),
+    // Same treatment as the templates above rather than a bare read: leaving
+    // this one as `{ data }` dropped its error, so a failed catalog query
+    // rendered the picker as an empty catalog instead of an error.
+    fetchAllRows<CatalogItemRow>(
+      (from, to) => supabase
+        .from('inventory_catalog')
+        .select('id, name, category, default_unit')
+        .eq('is_active', true)
+        .order('category')
+        .order('name')
+        .range(from, to),
+      { label: 'admin.platformInventoryTemplates.catalog' },
+    ),
   ])
 
   return (

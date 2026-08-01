@@ -100,9 +100,9 @@ const BASELINE: Record<string, number> = {
   'app/(dashboard)/capital-planning/trigger-ledger-button.tsx': 1,
   'app/(dashboard)/capital-planning/trigger-projections-button.tsx': 1,
   'app/(dashboard)/inventory/actions.ts': 11,
-  'app/(dashboard)/maintenance/actions.ts': 28,
+  'app/(dashboard)/maintenance/actions.ts': 27,
   'app/(dashboard)/maintenance/create-work-order-helpers.ts': 1,
-  'app/(dashboard)/maintenance/work-order-actions.ts': 2,
+  'app/(dashboard)/maintenance/work-order-actions.ts': 1,
   'app/(dashboard)/messages/actions.ts': 4,
   'app/(dashboard)/owners/actions.ts': 8,
   'app/(dashboard)/properties/[id]/setup/checklist/actions.ts': 3,
@@ -127,7 +127,7 @@ const BASELINE: Record<string, number> = {
   'app/actions/work-order-public.ts': 2,
 
   'app/admin/inventory-templates/actions.ts': 1,
-  'app/admin/inventory-templates/page.tsx': 1,
+
   'app/admin/seed-templates/actions.ts': 2,
 
   'app/api/assets/capex-csv/route.ts': 1,
@@ -243,7 +243,7 @@ const BASELINE: Record<string, number> = {
   'lib/inngest/functions/work-order-invoice.ts': 2,
   'lib/inngest/helpers.ts': 1,
   'lib/integrations/finalize-connection.ts': 1,
-  'lib/integrations/health.ts': 2,
+
   'lib/integrations/providers/hospitable-owner.ts': 1,
   'lib/integrations/providers/hospitable-token.ts': 1,
   'lib/integrations/providers/kroger-token.ts': 2,

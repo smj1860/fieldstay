@@ -81,7 +81,11 @@ jobs:
           python-version: '3.12'
       # Pinned. An unpinned semgrep turns a rule-engine release into an
       # unexplained CI failure on an unrelated PR.
-      - run: pip install semgrep==1.172.0
+      # --only-binary :all: refuses any sdist, so pip never builds from source
+      # and never executes a package's setup.py during install. semgrep ships
+      # wheels for this platform, so this costs nothing and closes the
+      # arbitrary-code-execution-at-install-time path SonarQube flags.
+      - run: pip install --only-binary :all: semgrep==1.172.0
       - uses: actions/setup-node@v4
         with:
           node-version: 22
