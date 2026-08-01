@@ -123,18 +123,29 @@ test.describe('Role separation', () => {
       // A crew_members row is NOT an organization_members row, so
       // requireOrgMember() (which every (dashboard) page and the dashboard
       // layout call) finds no accepted membership and redirects to
-      // /onboarding rather than rendering PM data.
-      await page.goto('/ops')
-      await page.waitForURL('**/onboarding', { timeout: 15_000 })
-      await expect(page).toHaveURL(/\/onboarding/)
+      // /onboarding — which is NOT where the crew user comes to rest.
+      // app/onboarding/page.tsx runs its own crew-member guard first: it
+      // finds the crew_members row, writes a 'security.route.mismatch' audit
+      // event, and redirects on to /crew. So the real terminus of every PM
+      // route for a crew identity is /crew, reached via a server-side 307
+      // chain the browser follows without ever settling on /onboarding.
+      // Asserting on the intermediate hop is what made this spec fail: the
+      // final URL is /crew, and the ERR_ABORTED on the next goto() was the
+      // in-flight navigation being superseded by that chain.
+      //
+      // waitUntil: 'commit' for the same reason — 'load' (the default) races
+      // the redirect chain and aborts. What actually matters is asserted
+      // below: the crew identity never comes to rest on a PM route, and no
+      // PM data renders.
+      for (const pmRoute of ['/ops', '/owners', '/settings/team']) {
+        await page.goto(pmRoute, { waitUntil: 'commit' })
+        await page.waitForURL('**/crew', { timeout: 15_000 })
+        await expect(page).toHaveURL(/\/crew$/)
+      }
 
-      // Same for the money-bearing surfaces specifically.
-      await page.goto('/owners')
-      await page.waitForURL('**/onboarding', { timeout: 15_000 })
+      // Nothing from the PM surface leaked through the redirect — neither the
+      // money-bearing property data nor the team-management chrome.
       await expect(page.getByText('[E2E] The Lakehouse')).toHaveCount(0)
-
-      await page.goto('/settings/team')
-      await page.waitForURL('**/onboarding', { timeout: 15_000 })
       await expect(page.getByRole('heading', { name: 'Team', exact: true })).toHaveCount(0)
     } finally {
       await crew.cleanup()
