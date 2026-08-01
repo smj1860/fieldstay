@@ -18,28 +18,20 @@ vi.mock('@/lib/rate-limit', async () => {
 vi.mock('@/lib/integrations/webhook-verification', () => ({
   extractClientIp: vi.fn(() => '203.0.113.5'),
 }))
-// Route delegates invoice-creation and event-dispatch to sibling helpers —
-// tested in isolation here so this file can focus on the route's own
-// concerns: token validation, ownership checks, and the completion claim.
+// Every DB write is now one transactional RPC (complete_work_order_via_token),
+// so the helper surface is just the non-transactional tail. This file covers
+// the route's own concerns — token validation, ownership, payload validation,
+// and how it reacts to each RPC outcome.
 vi.mock('@/app/api/work-orders/[token]/complete/helpers', () => ({
-  createVendorInvoice:       vi.fn(async () => ({ ok: true, invoiceId: null, invoiceNumber: null, insertedByThisRequest: false })),
-  finalizeVendorCompletion:  vi.fn(async () => undefined),
-  rollbackUnclaimedInvoice:  vi.fn(async () => undefined),
-  // Still exported and still called — but from inside finalizeVendorCompletion
-  // now, so this file asserts on that boundary and
-  // work-order-token-complete-helpers.test.ts covers what it does.
-  dispatchCompletionEvents:  vi.fn(async () => undefined),
+  finalizeVendorCompletion: vi.fn(async () => undefined),
+  dispatchCompletionEvents: vi.fn(async () => undefined),
 }))
+vi.mock('@/lib/observability/report-error', () => ({ reportError: vi.fn() }))
 
 import { POST, GET } from '@/app/api/work-orders/[token]/complete/route'
 import { createServiceClient } from '@/lib/supabase/server'
 import { workOrderRatelimit } from '@/lib/rate-limit'
-import {
-  createVendorInvoice,
-  dispatchCompletionEvents,
-  finalizeVendorCompletion,
-  rollbackUnclaimedInvoice,
-} from '@/app/api/work-orders/[token]/complete/helpers'
+import { finalizeVendorCompletion } from '@/app/api/work-orders/[token]/complete/helpers'
 
 type Resp = { data?: unknown; error?: unknown }
 
@@ -60,7 +52,26 @@ function makeSupabase(queue: Record<string, Resp[]>) {
     chain.then   = (resolve: (v: unknown) => unknown) => Promise.resolve(result).then(resolve)
     return chain
   })
-  return { from, calls }
+  // The completion transaction. Defaults to a successful claim with no
+  // invoice; individual tests override it to model each RPC outcome.
+  const rpc = vi.fn(async (fn: string, args: unknown) => {
+    calls.push({ table: `rpc:${fn}`, method: 'rpc', args: [args] })
+    return {
+      data: {
+        claimed:          true,
+        previous_status:  'assigned',
+        work_order: {
+          id: 'wo_1', org_id: 'org_1', vendor_id: 'vendor_1',
+          property_id: 'prop_1', wo_number: 'WO-1', source_turnover_id: null,
+        },
+        invoice_id:       null,
+        invoice_number:   null,
+        invoice_inserted: false,
+      },
+      error: null,
+    }
+  })
+  return { from, calls, rpc }
 }
 
 function postRequest(token: string, body: unknown) {
@@ -102,9 +113,6 @@ describe('POST /api/work-orders/[token]/complete', () => {
   beforeEach(() => {
     vi.clearAllMocks()
     vi.mocked(workOrderRatelimit.limit).mockResolvedValue({ success: true } as never)
-    vi.mocked(createVendorInvoice).mockResolvedValue({
-      ok: true, invoiceId: null, invoiceNumber: null, insertedByThisRequest: false,
-    })
   })
 
   it('returns 429 and never touches the DB when the IP rate limit is exceeded', async () => {
@@ -123,7 +131,7 @@ describe('POST /api/work-orders/[token]/complete', () => {
     const res = await callPost(VALID_TOKEN, { completedByName: 'Joe' })
 
     expect(res.status).toBe(404)
-    expect(dispatchCompletionEvents).not.toHaveBeenCalled()
+    expect(finalizeVendorCompletion).not.toHaveBeenCalled()
   })
 
   it('rejects when the vendor portal is not enabled for this work order', async () => {
@@ -169,7 +177,7 @@ describe('POST /api/work-orders/[token]/complete', () => {
     const res = await callPost(VALID_TOKEN, { completedByName: 'Joe' })
 
     expect(res.status).toBe(403)
-    expect(dispatchCompletionEvents).not.toHaveBeenCalled()
+    expect(finalizeVendorCompletion).not.toHaveBeenCalled()
   })
 
   it('requires a technician name', async () => {
@@ -196,177 +204,124 @@ describe('POST /api/work-orders/[token]/complete', () => {
     expect(res.status).toBe(400)
   })
 
-  it('returns 409 (already closed) when a concurrent request wins the completion claim first', async () => {
+  it('returns 409 when the transaction reports the claim was already taken', async () => {
     const supabase = makeSupabase({
-      work_orders: [
-        { data: baseWo(), error: null },       // token lookup
-        { data: null, error: null },           // claim update — lost the race
-      ],
-      vendors: [{ data: { org_id: 'org_1' }, error: null }],
+      work_orders: [{ data: baseWo(), error: null }],
+      vendors:     [{ data: { org_id: 'org_1' }, error: null }],
     })
+    supabase.rpc.mockResolvedValue({
+      data: { claimed: false, reason: 'already_closed' }, error: null,
+    } as never)
     vi.mocked(createServiceClient).mockReturnValue(supabase as never)
 
     const res = await callPost(VALID_TOKEN, { completedByName: 'Joe' })
 
     expect(res.status).toBe(409)
-    expect(dispatchCompletionEvents).not.toHaveBeenCalled()
-  })
-
-  it('completes a work order with a valid token, creates the invoice, and dispatches completion events', async () => {
-    const claimed = { id: 'wo_1', org_id: 'org_1', vendor_id: 'vendor_1', property_id: 'prop_1', wo_number: 'WO-1', source_turnover_id: null }
-    const supabase = makeSupabase({
-      work_orders: [
-        { data: baseWo(), error: null },
-        { data: claimed, error: null },
-      ],
-      vendors:             [{ data: { org_id: 'org_1' }, error: null }],
-      work_order_updates:  [{ data: null, error: null }],
-    })
-    vi.mocked(createServiceClient).mockReturnValue(supabase as never)
-    vi.mocked(createVendorInvoice).mockResolvedValue({
-      ok: true, invoiceId: 'inv_1', invoiceNumber: 'INV-2026-00001', insertedByThisRequest: true,
-    })
-
-    const res = await callPost(VALID_TOKEN, {
-      completedByName: 'Joe',
-      notes:           'All done',
-      subtotal:        150,
-      lineItems: [
-        { line_type: 'labor', description: 'Fix sink', quantity: 1, unit_cost: 150, line_total: 150 },
-      ],
-    })
-    const json = await res.json()
-
-    expect(json).toEqual({ success: true })
-    // Called with the work order read from the completion token, not the
-    // claim result — the invoice is created before the claim exists.
-    expect(createVendorInvoice).toHaveBeenCalledWith(
-      expect.anything(),
-      expect.objectContaining({ id: 'wo_1', org_id: 'org_1', vendor_id: 'vendor_1', property_id: 'prop_1' }),
-      expect.arrayContaining([expect.objectContaining({ line_type: 'labor' })]),
-      150,
-    )
-    expect(rollbackUnclaimedInvoice).not.toHaveBeenCalled()
-    expect(finalizeVendorCompletion).toHaveBeenCalledWith(
-      expect.anything(),
-      expect.objectContaining({
-        claimed,
-        subtotal:       150,
-        notes:          'All done',
-        token:          VALID_TOKEN,
-        previousStatus: 'assigned',
-        safeLineItems:  expect.arrayContaining([expect.objectContaining({ line_type: 'labor' })]),
-      }),
-    )
-  })
-
-  // REGRESSION: the work order must not be observable as 'completed' until
-  // its invoice row exists. With the claim first, a reader that polled
-  // between the two statements saw a completed work order with no invoice
-  // (this is exactly what e2e/specs/21-work-order-offline.spec.ts:161 caught
-  // once the reconnect drain stopped waiting out its backoff), and an
-  // invoice step that FAILED after the claim left that state permanent —
-  // every vendor retry from then on could only get the already-closed 409.
-  it('creates the invoice before it flips the work order to completed', async () => {
-    const claimed = { id: 'wo_1', org_id: 'org_1', vendor_id: 'vendor_1', property_id: 'prop_1', wo_number: 'WO-1', source_turnover_id: null }
-    const supabase = makeSupabase({
-      work_orders: [
-        { data: baseWo(), error: null },
-        { data: claimed, error: null },
-      ],
-      vendors:            [{ data: { org_id: 'org_1' }, error: null }],
-      work_order_updates: [{ data: null, error: null }],
-    })
-    vi.mocked(createServiceClient).mockReturnValue(supabase as never)
-
-    // The helper is mocked, so it records its own position in the same
-    // ordered call log the supabase double writes to.
-    vi.mocked(createVendorInvoice).mockImplementation(async () => {
-      supabase.calls.push({ table: 'work_order_invoices', method: 'upsert', args: [] })
-      return { ok: true, invoiceId: 'inv_1', invoiceNumber: 'INV-2026-00001', insertedByThisRequest: true }
-    })
-
-    await callPost(VALID_TOKEN, {
-      completedByName: 'Joe',
-      subtotal:        150,
-      lineItems: [{ line_type: 'labor', description: 'Fix sink', quantity: 1, unit_cost: 150, line_total: 150 }],
-    })
-
-    const invoiceAt = supabase.calls.findIndex((c) => c.table === 'work_order_invoices' && c.method === 'upsert')
-    const claimAt   = supabase.calls.findIndex((c) => c.table === 'work_orders' && c.method === 'update')
-
-    expect(invoiceAt).toBeGreaterThanOrEqual(0)
-    expect(claimAt).toBeGreaterThanOrEqual(0)
-    expect(invoiceAt).toBeLessThan(claimAt)
-  })
-
-  it('rolls back the invoice it created when it loses the completion claim', async () => {
-    const supabase = makeSupabase({
-      work_orders: [
-        { data: baseWo(), error: null },       // token lookup
-        { data: null, error: null },           // claim update — lost the race
-      ],
-      vendors: [{ data: { org_id: 'org_1' }, error: null }],
-    })
-    vi.mocked(createServiceClient).mockReturnValue(supabase as never)
-    vi.mocked(createVendorInvoice).mockResolvedValue({
-      ok: true, invoiceId: 'inv_1', invoiceNumber: 'INV-2026-00001', insertedByThisRequest: true,
-    })
-
-    const res = await callPost(VALID_TOKEN, {
-      completedByName: 'Joe',
-      subtotal:        150,
-      lineItems: [{ line_type: 'labor', description: 'Fix sink', quantity: 1, unit_cost: 150, line_total: 150 }],
-    })
-
-    expect(res.status).toBe(409)
-    expect(rollbackUnclaimedInvoice).toHaveBeenCalledWith(
-      expect.anything(),
-      expect.objectContaining({ invoiceId: 'inv_1', insertedByThisRequest: true }),
-    )
-    // Never invent line items, an audit trail, or events for a lost claim.
+    // Nothing to finalize, and — unlike the previous saga — nothing to roll
+    // back either: the transaction wrote nothing at all.
     expect(finalizeVendorCompletion).not.toHaveBeenCalled()
   })
 
-  it('hands the lost claim an invoice it did not insert, so the rollback can decline it', async () => {
-    const supabase = makeSupabase({
-      work_orders: [
-        { data: baseWo(), error: null },
-        { data: null, error: null },
-      ],
-      vendors: [{ data: { org_id: 'org_1' }, error: null }],
-    })
-    vi.mocked(createServiceClient).mockReturnValue(supabase as never)
-    // The upsert conflicted: this invoice belongs to an earlier attempt, so
-    // deleting it here would destroy a row this request does not own.
-    vi.mocked(createVendorInvoice).mockResolvedValue({
-      ok: true, invoiceId: 'inv_existing', invoiceNumber: null, insertedByThisRequest: false,
-    })
-
-    const res = await callPost(VALID_TOKEN, { completedByName: 'Joe' })
-
-    expect(res.status).toBe(409)
-    expect(rollbackUnclaimedInvoice).toHaveBeenCalledWith(
-      expect.anything(),
-      expect.objectContaining({ invoiceId: 'inv_existing', insertedByThisRequest: false }),
-    )
-  })
-
-  it('returns 500 and leaves the work order claimable when invoice creation fails', async () => {
+  it('performs EVERY database write in a single transactional RPC', async () => {
+    // The whole point of migration 20260801200000. If the route ever writes
+    // outside this call again, part of a completion can be half-applied: an
+    // invoice with no completed work order, or the reverse.
     const supabase = makeSupabase({
       work_orders: [{ data: baseWo(), error: null }],
       vendors:     [{ data: { org_id: 'org_1' }, error: null }],
     })
     vi.mocked(createServiceClient).mockReturnValue(supabase as never)
-    vi.mocked(createVendorInvoice).mockResolvedValue({ ok: false, error: 'Invoice numbering failed. Please try again.' })
+
+    await callPost(VALID_TOKEN, {
+      completedByName: 'Joe',
+      lineItems: [{ line_type: 'labor', description: 'Fix sink', quantity: 1, unit_cost: 150 }],
+      subtotal: 150,
+    })
+
+    const writes = supabase.calls.filter((c) =>
+      ['insert', 'update', 'upsert', 'delete'].includes(c.method))
+    expect(writes).toEqual([])
+    expect(supabase.rpc).toHaveBeenCalledWith(
+      'complete_work_order_via_token',
+      expect.objectContaining({ p_work_order_id: 'wo_1', p_subtotal: 150 }),
+    )
+  })
+
+  it('passes only validated line items to the transaction', async () => {
+    const supabase = makeSupabase({
+      work_orders: [{ data: baseWo(), error: null }],
+      vendors:     [{ data: { org_id: 'org_1' }, error: null }],
+    })
+    vi.mocked(createServiceClient).mockReturnValue(supabase as never)
+
+    await callPost(VALID_TOKEN, {
+      completedByName: 'Joe',
+      lineItems: [
+        { line_type: 'labor',   description: 'Fix sink', quantity: 1, unit_cost: 150 },
+        { line_type: 'bogus',   description: 'Nope',     quantity: 1, unit_cost: 10 },   // bad type
+        { line_type: 'labor',   description: '',         quantity: 1, unit_cost: 10 },   // empty desc
+        { line_type: 'labor',   description: 'Free',     quantity: 1, unit_cost: 0 },    // zero cost
+      ],
+      subtotal: 150,
+    })
+
+    const args = supabase.rpc.mock.calls[0]![1] as { p_line_items: unknown[] }
+    expect(args.p_line_items).toHaveLength(1)
+  })
+
+  it('completes with a valid token and hands the RPC result to finalize', async () => {
+    const supabase = makeSupabase({
+      work_orders: [{ data: baseWo(), error: null }],
+      vendors:     [{ data: { org_id: 'org_1' }, error: null }],
+    })
+    supabase.rpc.mockResolvedValue({
+      data: {
+        claimed:         true,
+        previous_status: 'assigned',
+        work_order: {
+          id: 'wo_1', org_id: 'org_1', vendor_id: 'vendor_1',
+          property_id: 'prop_1', wo_number: 'WO-1', source_turnover_id: null,
+        },
+        invoice_id:       'inv_1',
+        invoice_number:   'INV-2026-00001',
+        invoice_inserted: true,
+      },
+      error: null,
+    } as never)
+    vi.mocked(createServiceClient).mockReturnValue(supabase as never)
+
+    const res = await callPost(VALID_TOKEN, {
+      completedByName: 'Joe',
+      notes:           'All done',
+      lineItems: [{ line_type: 'labor', description: 'Fix sink', quantity: 1, unit_cost: 150 }],
+      subtotal: 150,
+    })
+
+    expect(res.status).toBe(200)
+    expect(finalizeVendorCompletion).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({
+        invoiceId:       'inv_1',
+        invoiceNumber:   'INV-2026-00001',
+        invoiceInserted: true,
+      }),
+    )
+  })
+
+  it('returns 500 and does not finalize when the transaction itself errors', async () => {
+    // A failed transaction wrote nothing, so the work order stays claimable and
+    // the vendor's retry can still succeed.
+    const supabase = makeSupabase({
+      work_orders: [{ data: baseWo(), error: null }],
+      vendors:     [{ data: { org_id: 'org_1' }, error: null }],
+    })
+    supabase.rpc.mockResolvedValue({ data: null, error: { message: 'deadlock detected' } } as never)
+    vi.mocked(createServiceClient).mockReturnValue(supabase as never)
 
     const res = await callPost(VALID_TOKEN, { completedByName: 'Joe' })
 
     expect(res.status).toBe(500)
-    expect(dispatchCompletionEvents).not.toHaveBeenCalled()
-    // The whole point of the reorder: a failed invoice step must leave the
-    // work order still completable, so the vendor's retry can succeed.
-    expect(supabase.calls.some((c) => c.table === 'work_orders' && c.method === 'update')).toBe(false)
+    expect(finalizeVendorCompletion).not.toHaveBeenCalled()
   })
 
   it('accepts a legacy FormData submission (notes-only, no line items)', async () => {

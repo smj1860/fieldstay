@@ -413,71 +413,43 @@ ID) into this pattern without realizing it needs escaping/validation first.
 
 ---
 
-## 16. Vendor work-order completion is ordered-but-not-atomic (no transaction)
+## 16. Vendor work-order completion — RESOLVED 2026-08-01
 
 **Files:** `app/api/work-orders/[token]/complete/route.ts`,
-`app/api/work-orders/[token]/complete/helpers.ts`
+`app/api/work-orders/[token]/complete/helpers.ts`,
+`supabase/migrations/20260801200000_complete_work_order_via_token_rpc.sql`
 
-Found via e2e `21-work-order-offline.spec.ts:103` failing with
-`invoices.length` `Expected: 1, Received: 0` — the work order reached
-`completed` with **zero** invoice rows.
+The completion is now ONE TRANSACTION: `complete_work_order_via_token()` claims
+the work order, allocates the invoice number, inserts the invoice, the line
+items and the status-change row, and returns the result. Either all of it
+lands or none does, which closes all three residual holes the 2026-07-31
+reordering left open — the compensating delete that could itself fail, the
+window where an invoice existed against a not-yet-completed work order, and
+the burnt invoice number on a post-sequence failure. `rollbackUnclaimedInvoice`
+and `createVendorInvoice` are deleted rather than kept: a rolled-back
+transaction leaves nothing to compensate for.
 
-The route performs one logical action across several non-transactional
-writes: create the invoice (line-item insert → `next_work_order_invoice_seq`
-RPC → `work_order_invoices` upsert), atomically claim
-`work_orders.status = 'completed'`, then insert line items, audit, and
-dispatch events. Originally the claim came *first*, which made a failure
-anywhere after it unrecoverable: the WO was already irreversibly
-`completed`, so every vendor retry could only get the already-closed
-`409 → terminal dead-letter`, and the invoice was lost forever while the
-work order looked done. That affects the entire vendor-gets-paid flow.
+The route keeps token validation, payload validation, the audit log and Inngest
+dispatch — the last two deliberately OUTSIDE the transaction, since an event
+fired from one that later aborts cannot be unfired.
 
-**Already fixed (2026-07-31):** invoice creation now runs *before* the
-claim, with `rollbackUnclaimedInvoice()` compensating when the claim is
-lost, and line items deliberately kept *after* the claim (the claim is the
-mutex that keeps them exactly-once; they have no unique key to dedupe a
-replay against). `status = 'completed'` is now the last irreversible thing
-to become true, so a pre-claim failure leaves the WO claimable and the
-vendor's retry succeeds. Covered by `unit/route-handlers/
-work-order-token-complete{,-helpers}.test.ts`, four of which were confirmed
-to fail against the old ordering.
+Verified against the live E2E project inside a rolled-back `DO` block: claim +
+invoice + 2 line items + 1 status row in a single call; a replay returning
+`already_closed` and writing nothing further; an unpriced completion writing no
+invoice and leaving `actual_cost` untouched. Applied to BOTH projects.
 
-**Still outstanding — the proper fix.** Ordering plus a compensating
-delete is a saga, not a transaction. Residual holes:
+**It also surfaced a live silent-data-loss bug** — see the note in
+`unit/guardrails/generated-column-writes.test.ts`. `work_order_line_items.line_total`
+is `GENERATED ALWAYS`, so the old `insertVendorLineItems()` insert failed with
+428C9 on EVERY vendor completion and only `console.error`'d, discarding the
+vendor's itemisation entirely. A second instance of the same class
+(`assignment_outcomes.duration_minutes` in `turnover-events.ts`) was found by
+the new guardrail and fixed in the same change.
 
-- The compensating `rollbackUnclaimedInvoice()` can itself fail (it logs,
-  it cannot guarantee). A crash between insert and rollback leaves an
-  orphan invoice on a work order that was never completed by this request.
-- Between the invoice upsert and the claim, an invoice exists for a WO that
-  is not yet `completed` — the inverse of the original window, and readers
-  (PM invoice list, owner P&L) can observe it.
-- Sequence allocation via `next_work_order_invoice_seq` is a separate
-  round trip; a failure after it burns a number and leaves a gap.
+**The earlier blocking concern is resolved:** migrations are now applied to
+both the production and E2E projects via MCP as part of the change, so a new DB
+function no longer reds the e2e suite until someone applies it by hand.
 
-**Suggested fix:** move the whole completion into a single
-`SECURITY DEFINER` plpgsql RPC that claims the work order, allocates the
-invoice number, inserts the invoice and line items, and returns the result
-— one transaction, so either all of it happens or none of it does. The
-route keeps token validation, payload validation and event dispatch;
-everything touching the database becomes one call. Existing tests should
-largely port over, since the externally-observable invariant is unchanged.
-
-**Why it was not done at the time:** CI does not apply migrations to the
-E2E project (`docs/E2E_SETUP.md` is a manual process — confirmed again on
-2026-07-31 when the `db-invariants` job failed for exactly this reason), so
-adding a new DB function would red the entire e2e suite until someone
-applied it by hand. The route-level reordering achieves the same
-externally-observable invariant with no schema change, which is why it went
-first. Doing this properly means sequencing the migration and the code
-change together, and applying to **both** the production and E2E projects.
-
-**Related, same class:** `lib/stripe/vendor-connect-invite.ts`'s
-orphan-on-email-failure path and `lib/integrations/vault.ts`'s pending-link
-claim are the two existing examples in the repo of this "multi-step write
-with an explicit cleanup path" pattern — worth reading before designing the
-RPC, and worth revisiting once a transactional idiom exists here.
-
----
 
 ## 17. Smaller items deferred from the 2026-07-30 pre-launch remediation
 
