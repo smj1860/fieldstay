@@ -1,6 +1,7 @@
 'use server'
 
 import { revalidatePath } from 'next/cache'
+import { checkLimit, emailSendActionLimiter } from '@/lib/rate-limit'
 import { requireOrgMember } from '@/lib/auth'
 import { logAuditEvent } from '@/lib/audit'
 import { reportError } from '@/lib/observability/report-error'
@@ -80,6 +81,16 @@ export async function generatePortalToken(ownerId: string): Promise<OwnersAction
 
     if (!owner) return { error: 'Owner not found' }
 
+    // Rate limit AFTER the ownership check: an unauthorized or nonexistent
+    // target must not consume budget, and must get its own error rather than a
+    // throttling one. An auth gate proves WHO is sending, not HOW OFTEN.
+    // Fails OPEN — an abuse limiter must not block real work during an outage.
+    const rl = await checkLimit(emailSendActionLimiter, `portal-token:${user.id}`, {
+      onError: 'allow',
+      site:    'serverAction.owners.generatePortalToken',
+    })
+    if (!rl.allowed) return { error: 'Too many portal links generated. Please try again in a little while.' }
+
     // Generate a secure token
     const token     = crypto.randomUUID()
     const expiresAt = new Date(Date.now() + 90 * 24 * 60 * 60 * 1000).toISOString() // 90 days
@@ -90,6 +101,12 @@ export async function generatePortalToken(ownerId: string): Promise<OwnersAction
       token,
       expires_at: expiresAt,
       is_multi:   false,
+      // revoked_at MUST be cleared. The upsert conflicts on
+      // (property_owner_id, is_multi) and only overwrites the columns it
+      // names, so a row revoked earlier kept its revoked_at — regenerating
+      // after a revoke emailed the owner a brand-new token that the portal
+      // rejects on arrival, with no indication why.
+      revoked_at: null,
     }, { onConflict: 'property_owner_id,is_multi' })
 
     if (error) {
@@ -186,6 +203,12 @@ export async function generateCombinedPortalToken(ownerIds: string[]): Promise<O
       expires_at:   expiresAt,
       property_ids: propertyIds,
       is_multi:     true,
+      // revoked_at MUST be cleared. The upsert conflicts on
+      // (property_owner_id, is_multi) and only overwrites the columns it
+      // names, so a row revoked earlier kept its revoked_at — regenerating
+      // after a revoke emailed the owner a brand-new token that the portal
+      // rejects on arrival, with no indication why.
+      revoked_at: null,
     }, { onConflict: 'property_owner_id,is_multi' })
 
     if (error) {

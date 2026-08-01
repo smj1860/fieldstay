@@ -128,6 +128,61 @@ export async function addInventoryItems(
 
 // ── Submit inventory count ────────────────────────────────────────────────────
 
+type CountItemRow = { count_id: string; inventory_item_id: string; quantity_counted: number }
+type CountUpdate  = { id: string; current_quantity: number }
+
+/**
+ * Persists the count rows, then applies the counted quantities to live stock.
+ *
+ * Returns a user-facing message on failure, or `null` on success.
+ *
+ * The apply step is ONE set-based UPDATE, not one round-trip per item. The
+ * previous per-item Promise.all discarded every result, so an RLS denial or a
+ * bad item id applied a partial count and still reported success — stock
+ * numbers that look freshly counted but are a mix of new and stale values,
+ * which nobody re-counts because nothing looked wrong.
+ *
+ * first_count_recorded_at (the "0 means uncounted, not critical" distinction)
+ * is COALESCE'd inside the same statement, which also removes the paginated
+ * pre-read it used to need.
+ */
+async function recordAndApplyCount(
+  supabase:   Awaited<ReturnType<typeof requireOrgMember>>['supabase'],
+  orgId:      string,
+  countItems: CountItemRow[],
+  updates:    CountUpdate[],
+): Promise<string | null> {
+  const { error: itemsError } = await supabase
+    .from('inventory_count_items')
+    .insert(countItems)
+
+  if (itemsError) {
+    console.error('[submitInventoryCount] items insert', itemsError)
+    reportError(itemsError, { site: 'serverAction.inventory.submitInventoryCount.items', orgId })
+    return 'Failed to record inventory count items. Please try again.'
+  }
+
+  const { data: applied, error: applyError } = await supabase.rpc('apply_inventory_counts', {
+    p_org_id: orgId,
+    p_counts: updates.map((u) => ({ item_id: u.id, qty: u.current_quantity })),
+  })
+
+  if (applyError) {
+    console.error('[submitInventoryCount] apply', applyError)
+    reportError(applyError, { site: 'serverAction.inventory.submitInventoryCount.apply', orgId })
+    return 'Failed to apply the counted quantities. Please try again.'
+  }
+
+  // A short count means some ids were not this org's items (or no longer
+  // exist). The count rows are already recorded, so this is reported rather
+  // than failed — but it is reported, not swallowed.
+  if ((applied ?? 0) < updates.length) {
+    console.warn('[submitInventoryCount] applied %d of %d counted items', applied ?? 0, updates.length)
+  }
+
+  return null
+}
+
 export async function submitInventoryCount(
   _prev: InventoryActionState | null,
   formData: FormData
@@ -187,51 +242,8 @@ export async function submitInventoryCount(
     }
 
     if (countItems.length > 0) {
-      const { error: itemsError } = await supabase
-        .from('inventory_count_items')
-        .insert(countItems)
-
-      if (itemsError) {
-        console.error('[submitInventoryCount] items insert', itemsError)
-        reportError(itemsError, { site: 'serverAction.inventory.submitInventoryCount.items', orgId: membership.org_id })
-        return { error: 'Failed to record inventory count items. Please try again.' }
-      }
-
-      // Items that have never had a real count recorded get first_count_recorded_at
-      // stamped now, so the "0 means uncounted, not critical" distinction holds going
-      // forward. Supabase JS can't compare columns in an UPDATE, so check first.
-      // Paginated: `updates` is a whole count session, and one org's
-      // inventory_items across 50 properties runs to thousands. Truncating at
-      // max_rows = 1000 would leave neverCountedIds incomplete, so the items
-      // past the cap never get first_count_recorded_at stamped and the
-      // "0 means uncounted, not critical" distinction silently breaks for them
-      // — permanently, since the stamp only ever happens on a first count.
-      const neverCountedRows = await fetchAllRows<{ id: string }>(
-        (from, to) => supabase
-          .from('inventory_items')
-          .select('id')
-          .in('id', updates.map((u) => u.id))
-          .is('first_count_recorded_at', null)
-          .order('id')
-          .range(from, to),
-        { label: 'submitInventoryCount.neverCounted' },
-      )
-      const neverCountedIds = new Set(neverCountedRows.map((r) => r.id))
-
-      // Update current_quantity on each item (org_id guard) — parallel to avoid serial timeout
-      const now = new Date().toISOString()
-      await Promise.all(
-        updates.map((u) =>
-          supabase
-            .from('inventory_items')
-            .update({
-              current_quantity: u.current_quantity,
-              ...(neverCountedIds.has(u.id) ? { first_count_recorded_at: now } : {}),
-            })
-            .eq('id', u.id)
-            .eq('org_id', membership.org_id)
-        )
-      )
+      const recordError = await recordAndApplyCount(supabase, membership.org_id, countItems, updates)
+      if (recordError) return { error: recordError }
     }
 
     // Fire Inngest event
@@ -503,60 +515,45 @@ export async function applyTemplateToProperties(
 
 // ── Count approval actions ────────────────────────────────────────────────────
 
+/** Return shape of the `approve_inventory_count_draft(uuid, uuid, uuid)` RPC. */
+type ApproveCountResult =
+  | { ok: true;  applied: number }
+  | { ok: false; reason: 'not_claimable' }
+
 export async function approveInventoryCount(draftId: string): Promise<{ error?: string }> {
   try {
     const { supabase, user, membership } = await requireOrgRole(['admin', 'manager'])
 
-    const { data: draft } = await supabase
-      .from('inventory_count_drafts')
-      .select('id')
-      .eq('id', draftId)
-      .eq('org_id', membership.org_id)
-      .maybeSingle()
+    // ONE transaction, and it claims the draft BEFORE it writes any stock
+    // count. Previously the quantities were applied first and the status write
+    // came last with no `status = 'pending_review'` precondition, so an
+    // already-approved (or already-REJECTED) draft could be re-applied over
+    // live counts, and a failed claim still left the quantities written while
+    // the PM was told 'Draft not found'. The claim inside
+    // approve_inventory_count_draft() is now the concurrency token: if it
+    // matches no row, nothing at all is written.
+    //
+    // It also replaces the per-item UPDATE loop — N round-trips whose results
+    // were all discarded, so an RLS denial applied nothing and reported
+    // success — with a single set-based UPDATE ... FROM.
+    const { data: rpcResult, error: rpcError } = await supabase.rpc('approve_inventory_count_draft', {
+      p_draft_id: draftId,
+      p_org_id:   membership.org_id,
+      p_reviewer: user.id,
+    })
 
-    if (!draft) return { error: 'Draft not found' }
+    if (rpcError || !rpcResult) {
+      console.error('[approveInventoryCount]', rpcError)
+      reportError(rpcError ?? new Error('approve_inventory_count_draft returned no result'), {
+        site: 'serverAction.inventory.approveInventoryCount', orgId: membership.org_id,
+      })
+      return { error: 'Operation failed. Please try again.' }
+    }
 
-    const { data: draftItems } = await supabase
-      .from('inventory_count_draft_items')
-      .select('item_id, counted_qty')
-      .eq('draft_id', draftId)
+    const result = rpcResult as ApproveCountResult
 
-    if (!draftItems) return { error: 'Draft not found' }
-
-    const { data: neverCountedRows } = await supabase
-      .from('inventory_items')
-      .select('id')
-      .eq('org_id', membership.org_id)
-      .in('id', draftItems.map((item) => item.item_id))
-      .is('first_count_recorded_at', null)
-    const neverCountedIds = new Set((neverCountedRows ?? []).map((r) => r.id))
-
-    const now = new Date().toISOString()
-    await Promise.all(
-      draftItems.map(item =>
-        supabase
-          .from('inventory_items')
-          .update({
-            current_quantity: item.counted_qty,
-            ...(neverCountedIds.has(item.item_id) ? { first_count_recorded_at: now } : {}),
-          })
-          .eq('id', item.item_id)
-          .eq('org_id', membership.org_id)
-      )
-    )
-
-    const { data: approved, error: approveError } = await supabase
-      .from('inventory_count_drafts')
-      .update({ status: 'approved', reviewed_at: new Date().toISOString(), reviewed_by: user.id })
-      .eq('id', draftId)
-      .eq('org_id', membership.org_id)
-      .select('id')
-      .maybeSingle()
-
-    if (approveError || !approved) {
-      console.error('[approveInventoryCount]', approveError)
-      reportError(approveError, { site: 'serverAction.inventory.approveInventoryCount', orgId: membership.org_id })
-      return { error: 'Draft not found' }
+    if (!result.ok) {
+      return { error: 'This count is no longer awaiting review — it may have already been approved or rejected.' }
     }
 
     revalidatePath('/inventory')
@@ -572,18 +569,27 @@ export async function rejectInventoryCount(draftId: string): Promise<{ error?: s
   try {
     const { supabase, user, membership } = await requireOrgRole(['admin', 'manager'])
 
+    // Same precondition as the approve path: only a draft still awaiting
+    // review may be rejected. Without it a reject racing an approve could land
+    // second and mark the draft rejected AFTER its quantities had already been
+    // applied to live stock — a rejected count whose numbers are in the books.
     const { data: rejected, error } = await supabase
       .from('inventory_count_drafts')
       .update({ status: 'rejected', reviewed_at: new Date().toISOString(), reviewed_by: user.id })
       .eq('id', draftId)
       .eq('org_id', membership.org_id)
+      .eq('status', 'pending_review')
       .select('id')
       .maybeSingle()
 
-    if (error || !rejected) {
+    if (error) {
       console.error('[rejectInventoryCount]', error)
       reportError(error, { site: 'serverAction.inventory.rejectInventoryCount', orgId: membership.org_id })
-      return { error: 'Draft not found' }
+      return { error: 'Operation failed. Please try again.' }
+    }
+
+    if (!rejected) {
+      return { error: 'This count is no longer awaiting review — it may have already been approved or rejected.' }
     }
 
     revalidatePath('/inventory')

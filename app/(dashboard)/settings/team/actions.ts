@@ -1,6 +1,7 @@
 'use server'
 
 import { z }                        from 'zod'
+import { checkLimit, emailSendActionLimiter } from '@/lib/rate-limit'
 import { requireOrgMember }         from '@/lib/auth'
 import { createServiceClient, adminFetch } from '@/lib/supabase/server'
 import { sendTeamInviteEmail }       from '@/lib/resend/client'
@@ -19,6 +20,19 @@ export async function inviteTeamMember(
     if (membership.role !== 'owner') {
       return { error: 'Only the account owner can invite team members.' }
     }
+
+    // Rate limit AFTER the authorization check: an unauthorized caller must not
+    // consume another user's budget, and must get the authorization error rather
+    // than a throttling one. An auth gate proves WHO is sending, not HOW OFTEN —
+    // without this one member can drive unlimited outbound mail from our sending
+    // domain, which risks the domain's reputation using someone else's address
+    // as the target. Fails OPEN: an abuse limiter must not block real invites
+    // during a Redis outage.
+    const rl = await checkLimit(emailSendActionLimiter, `invite-team:${user.id}`, {
+      onError: 'allow',
+      site:    'serverAction.team.inviteTeamMember',
+    })
+    if (!rl.allowed) return { error: 'Too many invites sent. Please try again in a little while.' }
 
     // M-6: Zod email validation
     const parsed = EmailSchema.safeParse(email.trim().toLowerCase())

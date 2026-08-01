@@ -75,7 +75,11 @@ import {
 
 type Resp = { data?: unknown; error?: unknown }
 
-function makeSupabase(queue: Record<string, Resp[]>, userId: string | null = 'user_1') {
+function makeSupabase(
+  queue: Record<string, Resp[]>,
+  userId: string | null = 'user_1',
+  rpcs: Record<string, Resp> = {},
+) {
   // Every chained call is recorded so tests can assert on the payload/filters —
   // notably that the completing UPDATE carries completed_date and the
   // .neq('status', 'completed') claim.
@@ -100,8 +104,16 @@ function makeSupabase(queue: Record<string, Resp[]>, userId: string | null = 'us
     chain.then        = (resolve: (v: unknown) => unknown) => Promise.resolve(result).then(resolve)
     return chain
   })
+  // Recorded into the SAME `calls` array as `.from()` chains, so a test can
+  // assert that a multi-table action did NOT also write outside its
+  // transactional RPC.
+  const rpc = vi.fn((name: string, args: unknown) => {
+    calls.push({ table: `rpc:${name}`, method: 'rpc', args: [args] })
+    return Promise.resolve(rpcs[name] ?? { data: null, error: null })
+  })
   return {
     from,
+    rpc,
     calls,
     auth: { getUser: vi.fn(() => Promise.resolve({ data: { user: userId ? { id: userId } : null } })) },
     storage: { from: vi.fn(() => ({ remove: vi.fn(() => Promise.resolve({ data: null, error: null })) })) },
@@ -157,6 +169,77 @@ describe('maintenance/actions', () => {
       expect(result.success).toBe(true)
       expect(result.workOrderId).toBe('wo_1')
       expect(logAuditEvent).toHaveBeenCalledWith(expect.objectContaining({ action: 'work_order.created' }))
+    })
+
+    // ── TENANT ISOLATION: assigned_crew_member_id ────────────────────────
+    // work_orders_select grants read on an OR'd branch keyed by this column:
+    // "any work order whose assigned_crew_member_id is one of YOUR
+    // crew_members rows". Writing a FOREIGN org's crew id therefore handed
+    // that other tenant's crew user read access to this work order. The id
+    // came straight from the client and was never checked.
+    it('rejects a crew member id belonging to another org', async () => {
+      const supabase = makeSupabase({
+        properties:   [{ data: { id: 'prop_1' } }],
+        // The in-org lookup finds nothing: this crew id is not in org_1.
+        crew_members: [{ data: null }],
+      })
+      vi.mocked(requireOrgRole).mockResolvedValue({
+        supabase, membership, user: { id: 'user_1' },
+      } as never)
+
+      const result = await createWorkOrder(null, woFd({ assigned_crew_member_id: 'crew_other_org' }))
+
+      expect(result.error).toBe('That crew member is not part of your organization.')
+      // And critically: no work order was written at all.
+      expect(supabase.calls.some((c) => c.table === 'work_orders' && c.method === 'insert')).toBe(false)
+    })
+
+    it('scopes the crew lookup to the caller org, not just the crew id', async () => {
+      const supabase = makeSupabase({
+        properties:   [{ data: { id: 'prop_1' } }],
+        crew_members: [{ data: { id: 'crew_1' } }],
+        work_orders:  [{ data: { id: 'wo_1' } }],
+      })
+      vi.mocked(requireOrgRole).mockResolvedValue({
+        supabase, membership, user: { id: 'user_1' },
+      } as never)
+
+      await createWorkOrder(null, woFd({ assigned_crew_member_id: 'crew_1' }))
+
+      const crewEqs = supabase.calls.filter((c) => c.table === 'crew_members' && c.method === 'eq')
+      expect(crewEqs.map((c) => c.args)).toEqual([['id', 'crew_1'], ['org_id', 'org_1']])
+    })
+
+    it('FAILS CLOSED when the crew lookup itself errors', async () => {
+      // "We could not confirm this crew member is yours" must never resolve to
+      // "assign them" — that is the direction that leaks a work order.
+      const supabase = makeSupabase({
+        properties:   [{ data: { id: 'prop_1' } }],
+        crew_members: [{ data: null, error: { message: 'db unavailable' } }],
+      })
+      vi.mocked(requireOrgRole).mockResolvedValue({
+        supabase, membership, user: { id: 'user_1' },
+      } as never)
+
+      const result = await createWorkOrder(null, woFd({ assigned_crew_member_id: 'crew_1' }))
+
+      expect(result.error).toBe('Could not verify the selected crew member. Please try again.')
+      expect(supabase.calls.some((c) => c.table === 'work_orders' && c.method === 'insert')).toBe(false)
+    })
+
+    it('does not query crew_members at all when no crew member was supplied', async () => {
+      const supabase = makeSupabase({
+        properties:  [{ data: { id: 'prop_1' } }],
+        work_orders: [{ data: { id: 'wo_1' } }],
+      })
+      vi.mocked(requireOrgRole).mockResolvedValue({
+        supabase, membership, user: { id: 'user_1' },
+      } as never)
+
+      const result = await createWorkOrder(null, woFd())
+
+      expect(result.success).toBe(true)
+      expect(supabase.calls.some((c) => c.table === 'crew_members')).toBe(false)
     })
 
     it('rejects a property id that does not belong to the caller org (IDOR check)', async () => {
@@ -285,13 +368,52 @@ describe('maintenance/actions', () => {
 
   describe('assignCrewToWorkOrder', () => {
     it('assigns a crew member scoped to the caller org', async () => {
-      const supabase = makeSupabase({})
+      // crew_members is stubbed now because assignCrewToWorkOrder verifies the
+      // crew member is in-org BEFORE writing the column — see the isolation
+      // tests below. An unstubbed lookup returns null, which correctly blocks.
+      const supabase = makeSupabase({ crew_members: [{ data: { id: 'crew_1' } }] })
       vi.mocked(requireOrgRole).mockResolvedValue({ supabase, membership } as never)
 
       const result = await assignCrewToWorkOrder('wo_1', 'crew_1')
 
       expect(result).toEqual({})
       expect(supabase.from).toHaveBeenCalledWith('work_orders')
+    })
+
+    // Same tenant-isolation hole as createWorkOrder: .eq('org_id') below scopes
+    // the WORK ORDER to this org, but nothing scoped the CREW ID written into
+    // it — and that column is what the RLS read policy keys its second branch on.
+    it('rejects a crew member id belonging to another org, and writes nothing', async () => {
+      const supabase = makeSupabase({ crew_members: [{ data: null }] })
+      vi.mocked(requireOrgRole).mockResolvedValue({ supabase, membership } as never)
+
+      const result = await assignCrewToWorkOrder('wo_1', 'crew_other_org')
+
+      expect(result).toEqual({ error: 'That crew member is not part of your organization.' })
+      expect(supabase.calls.some((c) => c.table === 'work_orders' && c.method === 'update')).toBe(false)
+    })
+
+    it('FAILS CLOSED when the crew lookup errors', async () => {
+      const supabase = makeSupabase({
+        crew_members: [{ data: null, error: { message: 'db unavailable' } }],
+      })
+      vi.mocked(requireOrgRole).mockResolvedValue({ supabase, membership } as never)
+
+      const result = await assignCrewToWorkOrder('wo_1', 'crew_1')
+
+      expect(result).toEqual({ error: 'Could not verify the selected crew member. Please try again.' })
+      expect(supabase.calls.some((c) => c.table === 'work_orders' && c.method === 'update')).toBe(false)
+    })
+
+    it('still allows UNASSIGNING (null crew) without a crew lookup', async () => {
+      const supabase = makeSupabase({})
+      vi.mocked(requireOrgRole).mockResolvedValue({ supabase, membership } as never)
+
+      const result = await assignCrewToWorkOrder('wo_1', null)
+
+      expect(result).toEqual({})
+      expect(supabase.calls.some((c) => c.table === 'crew_members')).toBe(false)
+      expect(supabase.calls.some((c) => c.table === 'work_orders' && c.method === 'update')).toBe(true)
     })
 
     it('does not touch the DB when the caller lacks the required role', async () => {
@@ -724,34 +846,129 @@ describe('maintenance/actions', () => {
       const supabase = makeSupabase({
         quote_requests: [
           { data: { id: 'qr_1', work_order_id: 'wo_1', vendor_id: 'vendor_1', quoted_amount: 250, status: 'submitted', org_id: 'org_1' } },
-          { data: { id: 'qr_1' } }, // atomic claim succeeds
-          { error: null },          // decline others
         ],
         vendor_compliance_status: compliant(),
-        work_orders:         [{ error: null }],
-        work_order_updates:  [{ error: null }],
+      }, 'user_1', {
+        approve_quote_request: {
+          data: { ok: true, work_order_id: 'wo_1', vendor_id: 'vendor_1', quoted_amount: 250, declined: 2 },
+        },
       })
       vi.mocked(requireOrgRole).mockResolvedValue({ supabase, membership } as never)
 
       const result = await approveQuoteRequest('qr_1')
 
       expect(result).toEqual({})
-      expect(inngest.send).toHaveBeenCalledWith(expect.objectContaining({ name: 'work-order/created' }))
+      expect(supabase.rpc).toHaveBeenCalledWith('approve_quote_request', expect.objectContaining({
+        p_quote_request_id: 'qr_1',
+        p_org_id:           'org_1',
+      }))
+      // The ids the event carries come from what the transaction actually
+      // committed, not from the pre-read.
+      expect(inngest.send).toHaveBeenCalledWith(expect.objectContaining({
+        name: 'work-order/created',
+        data: expect.objectContaining({ work_order_id: 'wo_1', vendor_id: 'vendor_1' }),
+      }))
+    })
+
+    it('never writes the claim, the declines or the assignment outside the transaction', async () => {
+      // The regression this encodes: as four sequential writes, a failure on
+      // the work-order UPDATE left the winning quote 'approved', every rival
+      // 'declined', and the work order UNASSIGNED with no live RFQ left —
+      // unrecoverable from the UI.
+      const supabase = makeSupabase({
+        quote_requests: [
+          { data: { id: 'qr_1', work_order_id: 'wo_1', vendor_id: 'vendor_1', quoted_amount: 250, status: 'submitted', org_id: 'org_1' } },
+        ],
+        vendor_compliance_status: compliant(),
+      }, 'user_1', {
+        approve_quote_request: {
+          data: { ok: true, work_order_id: 'wo_1', vendor_id: 'vendor_1', quoted_amount: 250, declined: 2 },
+        },
+      })
+      vi.mocked(requireOrgRole).mockResolvedValue({ supabase, membership } as never)
+
+      await approveQuoteRequest('qr_1')
+
+      const writes = supabase.calls.filter(
+        (c) => ['update', 'insert'].includes(c.method) &&
+               ['quote_requests', 'work_orders', 'work_order_updates'].includes(c.table),
+      )
+      expect(writes).toEqual([])
     })
 
     it('refuses a double-approval (concurrent request already claimed it)', async () => {
       const supabase = makeSupabase({
         quote_requests: [
           { data: { id: 'qr_1', work_order_id: 'wo_1', vendor_id: 'vendor_1', quoted_amount: 250, status: 'submitted', org_id: 'org_1' } },
-          { data: null }, // the atomic UPDATE ... WHERE status = 'submitted' claimed nothing
         ],
         vendor_compliance_status: compliant(),
+      }, 'user_1', {
+        // The claim inside the function matched nothing — another request had
+        // already moved it off 'submitted'.
+        approve_quote_request: { data: { ok: false, reason: 'not_submitted' } },
       })
       vi.mocked(requireOrgRole).mockResolvedValue({ supabase, membership } as never)
 
       const result = await approveQuoteRequest('qr_1')
 
       expect(result).toEqual({ error: 'Can only approve a quote that has been submitted by the vendor' })
+      expect(inngest.send).not.toHaveBeenCalled()
+    })
+
+    it('refuses when the work order behind the quote is gone, leaving the quotes untouched', async () => {
+      const supabase = makeSupabase({
+        quote_requests: [
+          { data: { id: 'qr_1', work_order_id: 'wo_1', vendor_id: 'vendor_1', quoted_amount: 250, status: 'submitted', org_id: 'org_1' } },
+        ],
+        vendor_compliance_status: compliant(),
+      }, 'user_1', {
+        approve_quote_request: { data: { ok: false, reason: 'work_order_not_found' } },
+      })
+      vi.mocked(requireOrgRole).mockResolvedValue({ supabase, membership } as never)
+
+      const result = await approveQuoteRequest('qr_1')
+
+      expect(result).toEqual({ error: 'The work order for this quote no longer exists.' })
+      expect(inngest.send).not.toHaveBeenCalled()
+    })
+
+    it('reports a cancelled or completed work order distinctly, not as "not submitted"', async () => {
+      // Greptile caught this: the RPC gained a work_order_not_assignable reason
+      // (it refuses to resurrect a cancelled/completed WO) and the action's
+      // union did not, so the case fell through to the vendor-submission
+      // message — describing entirely the wrong problem.
+      const supabase = makeSupabase({
+        quote_requests: [
+          { data: { id: 'qr_1', work_order_id: 'wo_1', vendor_id: 'vendor_1', quoted_amount: 250, status: 'submitted', org_id: 'org_1' } },
+        ],
+        vendor_compliance_status: compliant(),
+      }, 'user_1', {
+        approve_quote_request: { data: { ok: false, reason: 'work_order_not_assignable' } },
+      })
+      vi.mocked(requireOrgRole).mockResolvedValue({ supabase, membership } as never)
+
+      const result = await approveQuoteRequest('qr_1')
+
+      expect(result).toEqual({
+        error: 'That work order is already completed or cancelled, so a quote can no longer be approved against it.',
+      })
+      expect(inngest.send).not.toHaveBeenCalled()
+    })
+
+    it('surfaces an RPC error rather than reporting the approval as done', async () => {
+      const supabase = makeSupabase({
+        quote_requests: [
+          { data: { id: 'qr_1', work_order_id: 'wo_1', vendor_id: 'vendor_1', quoted_amount: 250, status: 'submitted', org_id: 'org_1' } },
+        ],
+        vendor_compliance_status: compliant(),
+      }, 'user_1', {
+        approve_quote_request: { data: null, error: { message: 'deadlock detected' } },
+      })
+      vi.mocked(requireOrgRole).mockResolvedValue({ supabase, membership } as never)
+
+      const result = await approveQuoteRequest('qr_1')
+
+      expect(result).toEqual({ error: 'Operation failed. Please try again.' })
       expect(inngest.send).not.toHaveBeenCalled()
     })
 

@@ -15,6 +15,7 @@
 // ============================================================
 
 import { inngest }             from '@/lib/inngest/client'
+import { fetchAllRows }        from '@/lib/inngest/paginate'
 import { createServiceClient } from '@/lib/supabase/server'
 
 export const hospTeammateSyncCron = inngest.createFunction(
@@ -31,16 +32,21 @@ export const hospTeammateSyncCron = inngest.createFunction(
     const connections = await step.run('fetch-active-connections', async () => {
       const supabase = createServiceClient({ system: 'inngest:teammate-sync-cron' })
 
-      const { data, error } = await supabase
-        .from('integration_connections')
-        .select('user_id, org_id, external_user_id')
-        .eq('provider_id', 'hospitable')
-        .eq('status',      'active')
-        .not('org_id',     'is', null)
-
-      if (error) throw new Error(`Failed to fetch connections: ${error.message}`)
-
-      return data ?? []
+      // PLATFORM-WIDE scan — every org with a live Hospitable connection, not
+      // one tenant's. At max_rows = 1000 PostgREST returns the first 1000 with
+      // a 200 and no truncation signal, so every connection past that stops
+      // being resynced entirely while the cron still reports success.
+      return await fetchAllRows<{ user_id: string; org_id: string | null; external_user_id: string | null }>(
+        (from, to) => supabase
+          .from('integration_connections')
+          .select('user_id, org_id, external_user_id')
+          .eq('provider_id', 'hospitable')
+          .eq('status',      'active')
+          .not('org_id',     'is', null)
+          .order('user_id')
+          .range(from, to),
+        { label: 'hospitable-teammate-sync-cron.connections' },
+      )
     })
 
     logger.info(`[Hospitable teammate-sync cron] Dispatching resync for ${connections.length} connections`)

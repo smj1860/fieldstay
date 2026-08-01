@@ -4,7 +4,7 @@ import { revalidatePath } from 'next/cache'
 import { requireOrgMember } from '@/lib/auth'
 import { inngest, sendEventAsync } from '@/lib/inngest/client'
 import { logAuditEvent } from '@/lib/audit'
-import { detectAndFlagOverlaps } from '@/lib/ical/conflict-detection'
+import { detectAndFlagOverlapsBestEffort } from '@/lib/ical/conflict-detection'
 import type { BookingSource } from '@/types/database'
 
 import { reportError } from '@/lib/observability/report-error'
@@ -82,7 +82,7 @@ export async function createBooking(
         targetId:   booking.id,
         metadata:   { property_id, checkin_date, checkout_date, source, guest_name },
       }),
-      detectAndFlagOverlaps(supabase, property_id),
+      detectAndFlagOverlapsBestEffort(supabase, property_id),
     ])
 
     // Fire booking/detected so Inngest auto-generates a turnover. Fire-and-
@@ -190,7 +190,7 @@ export async function cancelBooking(
     }
 
     if (cancelled?.property_id) {
-      await detectAndFlagOverlaps(supabase, cancelled.property_id)
+      await detectAndFlagOverlapsBestEffort(supabase, cancelled.property_id)
     }
 
     revalidatePath('/bookings')

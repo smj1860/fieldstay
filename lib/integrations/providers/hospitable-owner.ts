@@ -28,6 +28,7 @@
 // exists to eliminate.
 // ============================================================================
 
+import { fetchAllRows }           from '@/lib/inngest/paginate'
 import { createServiceClient }     from '@/lib/supabase/server'
 import { getValidHospitableToken } from './hospitable-token'
 import { hospitableFetch }         from './hospitable'
@@ -78,17 +79,33 @@ async function listActiveConnections(supabase: Supabase): Promise<ActiveConnecti
   // handful of consistently-busy orgs could end up probed first on every
   // cold resolution even when they're rarely the actual owner; revisit this
   // ordering if probe call volume becomes worth optimizing further.
-  const { data, error } = await supabase
-    .from('integration_connections')
-    .select('user_id, org_id, external_user_id, updated_at')
-    .eq('provider_id', PROVIDER)
-    .eq('status',      'active')
-    .not('org_id', 'is', null)
-    .order('updated_at', { ascending: false })
+  //
+  // Paginated. The ORDERING above is a heuristic, but the SET is not: this is
+  // a platform-wide read of every active Hospitable connection, and at
+  // max_rows = 1000 PostgREST would return the first 1000 with a 200 and no
+  // truncation signal — so an entity whose real owner sits past the cap could
+  // never be resolved to any connection at all, and the resolution would fail
+  // as "unknown owner" rather than probing it.
+  //
+  // The secondary sort on user_id is required by the pagination, not the
+  // heuristic: updated_at is not unique, and range() over a non-unique sort
+  // key can skip or repeat rows across page boundaries.
+  const data = await fetchAllRows<{
+    user_id: string; org_id: string | null; external_user_id: string | null
+  }>(
+    (from, to) => supabase
+      .from('integration_connections')
+      .select('user_id, org_id, external_user_id, updated_at')
+      .eq('provider_id', PROVIDER)
+      .eq('status',      'active')
+      .not('org_id', 'is', null)
+      .order('updated_at', { ascending: false })
+      .order('user_id')
+      .range(from, to),
+    { label: 'hospitable-owner.listActiveConnections' },
+  )
 
-  if (error) throw new Error(`listActiveConnections failed: ${error.message}`)
-
-  return (data ?? []).map((row) => ({
+  return data.map((row) => ({
     user_id:          row.user_id as string,
     org_id:           row.org_id  as string,
     external_user_id: (row.external_user_id as string | null) ?? null,

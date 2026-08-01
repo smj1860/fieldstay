@@ -3,6 +3,7 @@ import type { PriorityLevel } from '@/types/database'
 import { getMissingAssetDiscoveryTypes, buildAssetDiscoveryItems } from '@/lib/asset-discovery/engine'
 import { propertyLocalToUtc } from '@/lib/utils/timezone'
 import { unwrapJoinArray } from '@/lib/utils/supabase-joins'
+import { fetchAllRows } from '@/lib/inngest/paginate'
 
 export interface GeneratedTurnover {
   id:                string
@@ -42,7 +43,7 @@ async function loadGeneratorContext(
   supabase:   DBClient,
   propertyId: string,
 ): Promise<GeneratorContext> {
-  const [propertyRes, templateRes, existingRes] = await Promise.all([
+  const [propertyRes, templateRes, existingTurnovers] = await Promise.all([
     // maybeSingle() — .single() errors when 0 rows, causing the step to throw
     supabase
       .from('properties')
@@ -55,17 +56,31 @@ async function loadGeneratorContext(
       .eq('property_id', propertyId)
       .eq('is_default', true)
       .maybeSingle(),
-    supabase
-      .from('turnovers')
-      .select('booking_id, prev_booking_id')
-      .eq('property_id', propertyId),
+    // This is the DEDUPE set — every turnover already generated for this
+    // property, over its whole history. Two failure modes were open here:
+    //
+    //   - Truncation. A property accumulates turnovers indefinitely, and at
+    //     max_rows = 1000 PostgREST returns the first 1000 with a 200 and no
+    //     signal. Every turnover past the cap looks absent, so the generator
+    //     re-creates it — silently duplicating turnovers on an established
+    //     property, which is exactly the property that can least afford it.
+    //   - The error was never checked. `existingRes.data ?? []` turned a
+    //     FAILED read into an EMPTY dedupe set, which regenerates the
+    //     property's entire turnover history at once. fetchAllRows throws.
+    fetchAllRows<{ booking_id: string | null; prev_booking_id: string | null }>(
+      (from, to) => supabase
+        .from('turnovers')
+        .select('booking_id, prev_booking_id')
+        .eq('property_id', propertyId)
+        .order('id')
+        .range(from, to),
+      { label: 'generator.existingTurnovers' },
+    ),
   ])
 
   if (propertyRes.error) {
     console.error('[generator] property fetch failed', { propertyId, error: propertyRes.error.message })
   }
-
-  const existingTurnovers = existingRes.data ?? []
 
   return {
     propertyCheckinTime:  propertyRes.data?.checkin_time  ?? null,
@@ -229,14 +244,33 @@ export async function generateTurnoversForProperty(
   orgId:       string,
   supabase:    DBClient
 ): Promise<string[]> {
-  const { data: bookings } = await supabase
-    .from('bookings')
-    .select('id, checkin_date, checkout_date, checkin_time, checkout_time')
-    .eq('property_id', propertyId)
-    .eq('is_block', false)
-    .in('status', ['confirmed', 'tentative'])
-    .order('checkin_date', { ascending: true })
-  if (!bookings?.length) return []
+  // Every booking for this property, over its whole history — the input the
+  // pair pass walks to find consecutive stays. Truncation at max_rows = 1000
+  // would silently drop the tail, so no turnover is generated for any booking
+  // past the cap and the pair straddling the boundary is missed too. The
+  // discarded error was the worse half: a failed read returned [] and this
+  // function reported "nothing to generate" rather than failing.
+  //
+  // The secondary sort on id is required by the pagination: checkin_date is
+  // not unique (two bookings can start the same day across a property's
+  // history), and range() over a non-unique sort key can skip or repeat rows
+  // across page boundaries.
+  const bookings = await fetchAllRows<{
+    id: string; checkin_date: string; checkout_date: string
+    checkin_time: string | null; checkout_time: string | null
+  }>(
+    (from, to) => supabase
+      .from('bookings')
+      .select('id, checkin_date, checkout_date, checkin_time, checkout_time')
+      .eq('property_id', propertyId)
+      .eq('is_block', false)
+      .in('status', ['confirmed', 'tentative'])
+      .order('checkin_date', { ascending: true })
+      .order('id')
+      .range(from, to),
+    { label: 'generator.bookings' },
+  )
+  if (!bookings.length) return []
 
   const ctx = await loadGeneratorContext(supabase, propertyId)
 

@@ -13,6 +13,7 @@ import { PriorityLevelSchema, WoStatusSchema, WoCategorySchema } from '@/lib/sch
 import {
   resolveWorkOrderStatus,
   sendQuoteRequestEmails,
+  checkCrewMemberAssignable,
   checkQuoteVendorsAssignable,
   checkCrewTimeOffWarning,
   dispatchWorkOrderEvents,
@@ -181,6 +182,15 @@ export async function createWorkOrder(
       : null
     if (quoteVendorProblem) return quoteVendorProblem
 
+    // TENANT ISOLATION: assigned_crew_member_id arrives from the client and was
+    // written unverified. work_orders_select grants read on an OR'd branch
+    // keyed by that column, so a foreign org's crew id here handed the other
+    // tenant's crew user read access to this work order.
+    const crewProblem = await checkCrewMemberAssignable(
+      supabase, membership.org_id, assigned_crew_member_id,
+    )
+    if (crewProblem) return crewProblem
+
     // In quote-request mode, WO starts as quote_requested with no vendor assigned yet
     const woStatus            = resolveWorkOrderStatus(request_quotes, vendor_id)
     const usePortal           = portal_enabled && !request_quotes
@@ -307,6 +317,13 @@ export async function assignCrewToWorkOrder(
 ): Promise<{ error?: string }> {
   try {
     const { supabase, membership } = await requireOrgRole(['admin', 'manager'])
+
+    // Same tenant-isolation check as createWorkOrder: the .eq('org_id') below
+    // scopes the WORK ORDER to this org, but nothing scoped the CREW ID being
+    // written into it, and that column is what the RLS read policy keys its
+    // second branch on.
+    const crewProblem = await checkCrewMemberAssignable(supabase, membership.org_id, crewMemberId)
+    if (crewProblem) return crewProblem
 
     const { error } = await supabase
       .from('work_orders')
@@ -883,6 +900,11 @@ export async function sendQuoteRequests(
 
 // ── Approve one quote — assign WO, decline all others ────────────────────────
 
+/** Return shape of the `approve_quote_request(uuid, uuid, text, timestamptz)` RPC. */
+type ApproveQuoteResult =
+  | { ok: true;  work_order_id: string; vendor_id: string; quoted_amount: number | null; declined: number }
+  | { ok: false; reason: 'quote_not_found' | 'not_submitted' | 'work_order_not_found' | 'work_order_not_assignable' }
+
 export async function approveQuoteRequest(
   quoteRequestId: string
 ): Promise<{ error?: string }> {
@@ -916,67 +938,61 @@ export async function approveQuoteRequest(
       throw complianceErr
     }
 
-    // Atomic status guard — prevents double-approval from concurrent requests
-    const { data: claimed } = await supabase
-      .from('quote_requests')
-      .update({ status: 'approved' })
-      .eq('id', quoteRequestId)
-      .eq('status', 'submitted')
-      .select('id')
-      .single()
-
-    if (!claimed) return { error: 'Can only approve a quote that has been submitted by the vendor' }
-
-    // Decline all other pending/submitted quotes for this WO
-    await supabase
-      .from('quote_requests')
-      .update({ status: 'declined' })
-      .eq('work_order_id', qr.work_order_id)
-      .neq('id', quoteRequestId)
-      .in('status', ['pending', 'submitted'])
-
+    // ONE transaction: claim the quote, decline its siblings, assign the
+    // vendor, log the change. Previously these were four sequential writes
+    // with no way back — a failure on the work-order UPDATE left the winning
+    // quote 'approved', every competing quote 'declined', and the work order
+    // still UNASSIGNED with no live RFQ left to approve. Nothing in the UI
+    // explained it and the PM's only option was to re-request quotes from
+    // scratch. The function locks both parent rows before its first write, so
+    // the cases that cannot proceed are refused while nothing has changed.
     const completion_token            = crypto.randomUUID()
     const completion_token_expires_at = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString()
 
-    const { error } = await supabase
-      .from('work_orders')
-      .update({
-        vendor_id:                  qr.vendor_id,
-        status:                     'assigned',
-        estimated_cost:             qr.quoted_amount ?? undefined,
-        portal_enabled:             true,
-        completion_token,
-        completion_token_expires_at,
-      })
-      .eq('id', qr.work_order_id)
-      .eq('org_id', membership.org_id)
+    const { data: rpcResult, error: rpcError } = await supabase.rpc('approve_quote_request', {
+      p_quote_request_id: quoteRequestId,
+      p_org_id:           membership.org_id,
+      p_completion_token: completion_token,
+      p_token_expires_at: completion_token_expires_at,
+    })
 
-    if (error) {
-      console.error('[approveQuoteRequest]', error)
+    if (rpcError || !rpcResult) {
+      console.error('[approveQuoteRequest]', rpcError)
+      reportError(rpcError ?? new Error('approve_quote_request returned no result'), {
+        site: 'serverAction.maintenance.approveQuoteRequest.rpc', orgId: membership.org_id,
+      })
       return { error: 'Operation failed. Please try again.' }
     }
 
-    await supabase.from('work_order_updates').insert({
-      work_order_id:             qr.work_order_id,
-      org_id:                    membership.org_id,
-      updated_via_vendor_portal: false,
-      status_from:               'pending',
-      status_to:                 'assigned',
-      notes:                     `Quote approved — $${qr.quoted_amount?.toFixed(2) ?? '?'}. Vendor assigned and notified.`,
-    })
+    const result = rpcResult as ApproveQuoteResult
 
+    if (!result.ok) {
+      if (result.reason === 'work_order_not_found') {
+        return { error: 'The work order for this quote no longer exists.' }
+      }
+      // The RPC refuses to resurrect a cancelled or completed work order. Say
+      // so — falling through to the "not submitted by the vendor" message
+      // below would describe the wrong thing entirely.
+      if (result.reason === 'work_order_not_assignable') {
+        return { error: 'That work order is already completed or cancelled, so a quote can no longer be approved against it.' }
+      }
+      return { error: 'Can only approve a quote that has been submitted by the vendor' }
+    }
+
+    // From the RPC's return, not the pre-read: these are the ids the
+    // transaction actually committed against.
     await inngest.send({
       name: 'work-order/created',
       data: {
-        work_order_id:  qr.work_order_id,
+        work_order_id:  result.work_order_id,
         property_id:    '',
         org_id:         membership.org_id,
-        vendor_id:      qr.vendor_id,
+        vendor_id:      result.vendor_id,
         portal_enabled: true,
       },
     })
 
-    revalidatePath(`/maintenance/${qr.work_order_id}`)
+    revalidatePath(`/maintenance/${result.work_order_id}`)
     revalidatePath('/maintenance')
     return {}
   } catch (err) {
@@ -2145,6 +2161,12 @@ export async function addCustomMaintenanceItem(
 
     const { error } = await supabase
       .from('maintenance_schedules')
+      // Explicit field list, NOT `...item`. The spread came LAST, so a client
+      // sending extra keys could override the very fields above it that scope
+      // this row — including property_id, which the check immediately above
+      // had just verified belongs to this org. Verifying a value and then
+      // letting the same request overwrite it is the check doing nothing.
+      // TypeScript's parameter type is compile-time only and stops none of it.
       .insert({
         property_id:               propertyId,
         org_id:                    membership.org_id,
@@ -2152,7 +2174,14 @@ export async function addCustomMaintenanceItem(
         auto_create_wo:            false,
         is_from_standard_template: false,
         is_active:                 true,
-        ...item,
+        name:                      item.name,
+        frequency:                 item.frequency,
+        next_due_date:             item.next_due_date,
+        active_from_month:         item.active_from_month ?? null,
+        active_to_month:           item.active_to_month ?? null,
+        asset_category:            item.asset_category ?? null,
+        instructions:              item.instructions ?? null,
+        estimated_cost:            item.estimated_cost ?? null,
       })
 
     if (error) {

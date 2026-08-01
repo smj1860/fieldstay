@@ -14,6 +14,7 @@
 // ============================================================
 
 import { inngest }               from '@/lib/inngest/client'
+import { fetchAllRows, fetchDistinctOrgIds } from '@/lib/inngest/paginate'
 import { createServiceClient }   from '@/lib/supabase/server'
 import { getPmMembersByOrgIds }  from '@/lib/inngest/helpers'
 
@@ -39,18 +40,25 @@ export const hospCalendarSyncCron = inngest.createFunction(
     const activeOrgIds = await step.run('fetch-active-hospitable-org-ids', async () => {
       const supabase = createServiceClient({ system: 'inngest:calendar-sync-cron' })
 
-      const { data, error } = await supabase
-        .from('integration_connections')
-        .select('org_id')
-        .eq('provider_id', 'hospitable')
-        .eq('status', 'active')
-        .not('org_id', 'is', null)
-
-      if (error) throw new Error(`Failed to fetch active Hospitable connections: ${error.message}`)
-      // step.run's return value is JSON-serialized by Inngest — return a
-      // plain array (matches the Record pattern used by resolve-admins-by-org
-      // below), not a Set.
-      return Array.from(new Set((data ?? []).map((c) => c.org_id as string)))
+      // Paginated for the same reason the property read below is: this is a
+      // PLATFORM-WIDE scan of every active Hospitable connection, not one
+      // tenant's. At max_rows = 1000 it would return the first 1000 with a
+      // 200 and no truncation signal, and every org past that simply stops
+      // having its calendar synced — with the cron still reporting success.
+      //
+      // Returns a plain array: step.run's return value is JSON-serialized by
+      // Inngest, so a Set would come back empty.
+      return await fetchDistinctOrgIds(
+        (from, to) => supabase
+          .from('integration_connections')
+          .select('org_id')
+          .eq('provider_id', 'hospitable')
+          .eq('status', 'active')
+          .not('org_id', 'is', null)
+          .order('org_id')
+          .range(from, to),
+        { label: 'hospitable-calendar-sync-cron.connections' },
+      )
     })
 
     if (activeOrgIds.length === 0) return { dispatched: 0, skipped_reason: 'no_active_connections' }
@@ -58,16 +66,22 @@ export const hospCalendarSyncCron = inngest.createFunction(
     const properties = await step.run('fetch-active-hospitable-properties', async () => {
       const supabase = createServiceClient({ system: 'inngest:calendar-sync-cron' })
 
-      const { data, error } = await supabase
-        .from('properties')
-        .select('id, org_id, external_id')
-        .eq('external_source', 'hospitable')
-        .eq('is_active', true)
-        .not('external_id', 'is', null)
-        .in('org_id', activeOrgIds)
-
-      if (error) throw new Error(`Failed to fetch properties: ${error.message}`)
-      return data ?? []
+      // Paginated: a multi-tenant fan-in (.in('org_id', activeOrgIds) is every
+      // org with a live Hospitable connection, not one tenant), so the property
+      // count grows with the platform. Truncation silently drops whole
+      // properties out of calendar sync.
+      return await fetchAllRows<{ id: string; org_id: string; external_id: string | null }>(
+        (from, to) => supabase
+          .from('properties')
+          .select('id, org_id, external_id')
+          .eq('external_source', 'hospitable')
+          .eq('is_active', true)
+          .not('external_id', 'is', null)
+          .in('org_id', activeOrgIds)
+          .order('id')
+          .range(from, to),
+        { label: 'hospitable-calendar-sync-cron.properties' },
+      )
     })
 
     if (properties.length === 0) return { dispatched: 0 }

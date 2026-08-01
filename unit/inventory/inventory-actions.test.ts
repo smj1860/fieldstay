@@ -35,7 +35,8 @@ import {
 
 type Resp = { data?: unknown; error?: unknown }
 
-function makeSupabase(queue: Record<string, Resp[]>) {
+function makeSupabase(queue: Record<string, Resp[]>, rpcs: Record<string, Resp> = {}) {
+  const rpcCalls: { name: string; args: unknown }[] = []
   const from = vi.fn((table: string) => {
     const q = queue[table]
     const result: Resp = q?.length ? q.shift()! : { data: null, error: null }
@@ -52,7 +53,11 @@ function makeSupabase(queue: Record<string, Resp[]>) {
     chain.then        = (resolve: (v: unknown) => unknown) => Promise.resolve(result).then(resolve)
     return chain
   })
-  return { from }
+  const rpc = vi.fn((name: string, args: unknown) => {
+    rpcCalls.push({ name, args })
+    return Promise.resolve(rpcs[name] ?? { data: null, error: null })
+  })
+  return { from, rpc, rpcCalls }
 }
 
 const membership = {
@@ -144,7 +149,8 @@ describe('inventory/actions', () => {
         properties:            [{ data: { id: 'prop_1' } }],
         inventory_counts:      [{ data: { id: 'count_1' } }],
         inventory_count_items: [{ error: null }],
-        inventory_items:       [{ data: [] }],
+      }, {
+        apply_inventory_counts: { data: 1 },
       })
       vi.mocked(requireOrgMember).mockResolvedValue({ supabase, membership } as never)
 
@@ -154,10 +160,38 @@ describe('inventory/actions', () => {
       const result = await submitInventoryCount(null, form)
 
       expect(result).toEqual({ success: true })
+      // One set-based statement, org-scoped — not a per-item UPDATE loop whose
+      // results were discarded, which applied a partial count and still
+      // reported success.
+      expect(supabase.rpc).toHaveBeenCalledWith('apply_inventory_counts', {
+        p_org_id: 'org_1',
+        p_counts: [{ item_id: 'item-a', qty: 3 }],
+      })
+      expect(supabase.from).not.toHaveBeenCalledWith('inventory_items')
       expect(inngest.send).toHaveBeenCalledWith({
         name: 'inventory/count-submitted',
         data: { count_id: 'count_1', property_id: 'prop_1', org_id: 'org_1' },
       })
+    })
+
+    it('surfaces a failure to apply the counted quantities instead of reporting success', async () => {
+      const supabase = makeSupabase({
+        properties:            [{ data: { id: 'prop_1' } }],
+        inventory_counts:      [{ data: { id: 'count_1' } }],
+        inventory_count_items: [{ error: null }],
+      }, {
+        apply_inventory_counts: { data: null, error: { message: 'permission denied' } },
+      })
+      vi.mocked(requireOrgMember).mockResolvedValue({ supabase, membership } as never)
+
+      const form = fd({ property_id: 'prop_1' })
+      form.append('item_item-a', '3')
+
+      const result = await submitInventoryCount(null, form)
+
+      expect(result).toEqual({ error: 'Failed to apply the counted quantities. Please try again.' })
+      expect(reportError).toHaveBeenCalled()
+      expect(inngest.send).not.toHaveBeenCalled()
     })
 
     it('rejects a property id that does not belong to the caller org (IDOR check)', async () => {
@@ -328,10 +362,8 @@ describe('inventory/actions', () => {
 
   describe('approveInventoryCount / rejectInventoryCount', () => {
     it('approves a draft belonging to the caller org and applies counted quantities', async () => {
-      const supabase = makeSupabase({
-        inventory_count_drafts:      [{ data: { id: 'draft_1' } }, { data: { id: 'draft_1' } }],
-        inventory_count_draft_items: [{ data: [{ item_id: 'item_1', counted_qty: 3 }] }],
-        inventory_items:             [{ data: [] }, { error: null }],
+      const supabase = makeSupabase({}, {
+        approve_inventory_count_draft: { data: { ok: true, applied: 1 } },
       })
       vi.mocked(requireOrgRole).mockResolvedValue({
         supabase, user: { id: 'user_1' }, membership,
@@ -340,17 +372,84 @@ describe('inventory/actions', () => {
       const result = await approveInventoryCount('draft_1')
 
       expect(result).toEqual({})
+      expect(supabase.rpc).toHaveBeenCalledWith('approve_inventory_count_draft', {
+        p_draft_id: 'draft_1',
+        p_org_id:   'org_1',
+        p_reviewer: 'user_1',
+      })
+    })
+
+    it('never writes stock quantities outside the claiming transaction', async () => {
+      // The regression this encodes: quantities used to be applied BEFORE the
+      // draft was claimed, and the claim had no status precondition — so an
+      // already-approved or already-REJECTED draft could be re-applied over
+      // live counts, and a failed claim still left the quantities written.
+      const supabase = makeSupabase({}, {
+        approve_inventory_count_draft: { data: { ok: true, applied: 1 } },
+      })
+      vi.mocked(requireOrgRole).mockResolvedValue({
+        supabase, user: { id: 'user_1' }, membership,
+      } as never)
+
+      await approveInventoryCount('draft_1')
+
+      expect(supabase.from).not.toHaveBeenCalledWith('inventory_items')
+      expect(supabase.from).not.toHaveBeenCalledWith('inventory_count_drafts')
+      expect(supabase.from).not.toHaveBeenCalledWith('inventory_count_draft_items')
     })
 
     it('rejects a draft id that does not belong to the caller org (IDOR check)', async () => {
-      const supabase = makeSupabase({ inventory_count_drafts: [{ data: null }] })
+      // The RPC's org predicate makes a foreign draft unclaimable, which is
+      // reported the same way as an already-reviewed one — deliberately, so
+      // the response does not confirm the draft exists.
+      const supabase = makeSupabase({}, {
+        approve_inventory_count_draft: { data: { ok: false, reason: 'not_claimable' } },
+      })
       vi.mocked(requireOrgRole).mockResolvedValue({
         supabase, user: { id: 'user_1' }, membership,
       } as never)
 
       const result = await approveInventoryCount('other-orgs-draft')
 
-      expect(result).toEqual({ error: 'Draft not found' })
+      expect(result).toEqual({
+        error: 'This count is no longer awaiting review — it may have already been approved or rejected.',
+      })
+    })
+
+    it('rejectInventoryCount only claims a draft still awaiting review', async () => {
+      // Without the status precondition a reject racing an approve could land
+      // second and mark the draft rejected AFTER its numbers were already in
+      // the books.
+      const eqArgs: unknown[][] = []
+      const supabase = makeSupabase({ inventory_count_drafts: [{ data: { id: 'draft_1' } }] })
+      const originalFrom = supabase.from
+      supabase.from = vi.fn((table: string) => {
+        const chain = originalFrom(table)
+        const eq = chain.eq
+        chain.eq = vi.fn((...args: unknown[]) => { eqArgs.push(args); return eq(...args) })
+        return chain
+      }) as typeof supabase.from
+      vi.mocked(requireOrgRole).mockResolvedValue({
+        supabase, user: { id: 'user_1' }, membership,
+      } as never)
+
+      const result = await rejectInventoryCount('draft_1')
+
+      expect(result).toEqual({})
+      expect(eqArgs).toContainEqual(['status', 'pending_review'])
+    })
+
+    it('rejectInventoryCount reports a draft that is no longer awaiting review', async () => {
+      const supabase = makeSupabase({ inventory_count_drafts: [{ data: null }] })
+      vi.mocked(requireOrgRole).mockResolvedValue({
+        supabase, user: { id: 'user_1' }, membership,
+      } as never)
+
+      const result = await rejectInventoryCount('draft_1')
+
+      expect(result).toEqual({
+        error: 'This count is no longer awaiting review — it may have already been approved or rejected.',
+      })
     })
 
     it('rejectInventoryCount does not touch the DB when the caller lacks the required role', async () => {

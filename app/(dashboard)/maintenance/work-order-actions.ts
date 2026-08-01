@@ -29,10 +29,20 @@ export async function addWorkOrderLineItem(
 
   const { error } = await supabase
     .from('work_order_line_items')
+    // Explicit field list, NOT `...item`. The spread came last, so a client
+    // could override org_id and work_order_id — the two fields that scope this
+    // row — and could also inject `line_total`, which is GENERATED ALWAYS and
+    // makes Postgres reject the entire statement with 428C9. The parameter type
+    // is compile-time only; it validates nothing at runtime.
     .insert({
       work_order_id: workOrderId,
       org_id:        membership.org_id,
-      ...item,
+      line_type:     item.line_type,
+      description:   item.description,
+      quantity:      item.quantity,
+      unit:          item.unit,
+      unit_cost:     item.unit_cost,
+      sort_order:    item.sort_order ?? 0,
     })
 
   if (error) {

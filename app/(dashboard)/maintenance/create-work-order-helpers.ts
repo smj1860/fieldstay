@@ -29,6 +29,55 @@ export function resolveWorkOrderStatus(requestQuotes: boolean, vendorId: string 
 }
 
 /**
+ * Verifies a crew member belongs to the caller's org before it can be written
+ * to work_orders.assigned_crew_member_id.
+ *
+ * This is a TENANT ISOLATION check, not a data-hygiene one. The
+ * `work_orders_select` RLS policy grants read access on a second, OR'd branch:
+ * "any work order whose assigned_crew_member_id is one of YOUR crew_members
+ * rows". Until migration 20260801210000 that branch was not scoped to the work
+ * order's org at all, so writing a FOREIGN org's crew id onto a work order made
+ * that work order readable by the other tenant's crew user — title,
+ * description, notes, costs, property linkage.
+ *
+ * Both server actions that set this column took the id straight from the client
+ * and never checked it. The migration closes the read path; this closes the
+ * write path, so the bad row is never created in the first place.
+ *
+ * Returns an error object to surface to the PM, or null when the crew member is
+ * in-org (or none was supplied). FAILS CLOSED: a query error blocks rather than
+ * passes, because "we could not confirm this crew member is yours" must never
+ * resolve to "assign them".
+ */
+export async function checkCrewMemberAssignable(
+  supabase:     SupabaseClient,
+  orgId:        string,
+  crewMemberId: string | null | undefined,
+): Promise<{ error: string } | null> {
+  if (!crewMemberId) return null
+
+  const { data, error } = await supabase
+    .from('crew_members')
+    .select('id')
+    .eq('id', crewMemberId)
+    .eq('org_id', orgId)
+    .maybeSingle()
+
+  if (error) {
+    console.error('[checkCrewMemberAssignable] crew lookup failed', error)
+    reportError(error, { site: 'maintenance.checkCrewMemberAssignable', orgId })
+    return { error: 'Could not verify the selected crew member. Please try again.' }
+  }
+
+  // Not found means either no such crew member or one in a different org. Both
+  // are the same answer to the caller, and deliberately so — distinguishing
+  // them would confirm the existence of another tenant's crew id.
+  if (!data) return { error: 'That crew member is not part of your organization.' }
+
+  return null
+}
+
+/**
  * Gate every RFQ recipient the same way a direct assignment is gated.
  *
  * The quote-request flow used to route around both checks: `quote_vendor_ids`

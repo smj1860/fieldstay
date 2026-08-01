@@ -19,6 +19,7 @@ import { logAuditEvent } from '@/lib/audit'
 import { RateLimitError, TokenRevokedError } from '@/lib/integrations/types'
 import type { OwnerRezReview } from '@/lib/integrations/types'
 import { invokeHandler } from './test-helpers'
+import { createSupabaseDouble, type TableSpec } from '../stubs/supabase-query-double'
 
 function makeLogger() {
   return { info: vi.fn(), warn: vi.fn(), error: vi.fn() }
@@ -35,52 +36,18 @@ function makeStep() {
   }
 }
 
-interface QueuedByTable { [table: string]: { data?: unknown; error?: unknown }[] }
 
 // Queue-based .from(table) mock (see checklist-broadcast.test.ts / financial-
 // ledger-idempotency.test.ts): each call to the same table consumes the next
 // queued response for that table, in call order.
-function makeSupabase(queued: QueuedByTable) {
-  const counters: Record<string, number> = {}
-  const upsertSpy = vi.fn()
-  const updateSpy = vi.fn()
-  const eqSpy     = vi.fn()
-  // integration_connections.metadata is now merged atomically via the
-  // merge_integration_connection_metadata RPC (see
-  // lib/integrations/connection-metadata.ts) instead of a
-  // select-then-update round trip.
-  const rpcSpy = vi.fn()
-  const rpc = vi.fn((fnName: string, args: unknown) => {
-    rpcSpy(fnName, args)
-    return Promise.resolve({ data: {}, error: null })
-  })
-
-  const from = vi.fn((table: string) => {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const chain: any = {}
-    chain.select = vi.fn(() => chain)
-    chain.eq     = vi.fn((column: string, value: unknown) => { eqSpy(table, column, value); return chain })
-    chain.in     = vi.fn(() => chain)
-    chain.order  = vi.fn(() => chain)
-    chain.limit  = vi.fn(() => chain)
-    chain.update = vi.fn((payload: unknown) => { updateSpy(table, payload); return chain })
-    chain.upsert = vi.fn((payload: unknown, opts: unknown) => { upsertSpy(table, payload, opts); return chain })
-
-    const resolveNext = () => {
-      const idx = counters[table] ?? 0
-      counters[table] = idx + 1
-      return Promise.resolve(queued[table]?.[idx] ?? { data: null, error: null })
-    }
-
-    chain.single      = vi.fn(() => resolveNext())
-    chain.maybeSingle = vi.fn(() => resolveNext())
-    chain.then = (resolve: (v: unknown) => unknown, reject?: (e: unknown) => unknown) =>
-      resolveNext().then(resolve, reject)
-    return chain
-  })
-
-  return { from, upsertSpy, updateSpy, eqSpy, rpc, rpcSpy }
-}
+// The ONE shared query-builder double, not a local hand-roll — its
+// eqSpy / updateSpy / upsertSpy carry the same (table, ...args) convention the
+// assertions below already used, and `supabase.rpc` IS the rpc spy. The local
+// version broke the moment this function's connection read was paginated onto
+// .order().range(); that divergence is what the shared stub exists to end. It
+// also paginates for real, so a >1000-connection fixture is genuinely walked.
+const makeSupabase = (tables: Record<string, TableSpec>) =>
+  createSupabaseDouble(tables, { rpc: { data: {}, error: null } })
 
 /** Finds the merge_integration_connection_metadata RPC call whose p_patch contains `key`. */
 function findMetadataMergeCall(rpcSpy: ReturnType<typeof vi.fn>, key: string) {
@@ -166,7 +133,7 @@ describe('ownerRezReviewsSync', () => {
       { onConflict: 'org_id,external_id,external_source', ignoreDuplicates: false },
     )
 
-    const cursorMergeCall = findMetadataMergeCall(supabase.rpcSpy, 'reviews_sync_cursor')
+    const cursorMergeCall = findMetadataMergeCall(supabase.rpc, 'reviews_sync_cursor')
     expect(cursorMergeCall).toBeDefined()
     const patch = (cursorMergeCall?.[1] as { p_patch: Record<string, unknown> }).p_patch
     expect(patch.reviews_sync_cursor).toBe(start.toISOString())
@@ -223,7 +190,7 @@ describe('ownerRezReviewsSync', () => {
       logger: makeLogger(),
     })
 
-    expect(supabase.rpcSpy).toHaveBeenCalledWith(
+    expect(supabase.rpc).toHaveBeenCalledWith(
       'merge_integration_connection_metadata',
       expect.objectContaining({
         p_status: 'revoked',
@@ -309,7 +276,7 @@ describe('ownerRezReviewsSync', () => {
       logger: makeLogger(),
     })
 
-    expect(supabase.rpcSpy).toHaveBeenCalledWith(
+    expect(supabase.rpc).toHaveBeenCalledWith(
       'merge_integration_connection_metadata',
       expect.objectContaining({
         p_user_id: 'user_1',
