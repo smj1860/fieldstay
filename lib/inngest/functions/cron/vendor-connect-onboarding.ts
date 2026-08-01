@@ -28,12 +28,28 @@
  */
 
 import { inngest }             from '@/lib/inngest/client'
+import { fetchAllRows }        from '@/lib/inngest/paginate'
 import { createServiceClient } from '@/lib/supabase/server'
 import { ensureVendorConnectInvited } from '@/lib/stripe/vendor-connect-invite'
 import { unwrapJoin } from '@/lib/utils/supabase-joins'
 
 import { reportError } from '@/lib/observability/report-error'
 const BATCH_SIZE = 25
+
+/** Nullability matches the live schema: name and stripe_connect_token are
+ *  NOT NULL; email is nullable (the query filters it out) and so are both
+ *  Connect columns. `organizations` is a to-one embed, which PostgREST may
+ *  still hand back as an array — hence unwrapJoin at the use site. */
+interface VendorRow {
+  id:                            string
+  org_id:                        string
+  name:                          string
+  email:                         string | null
+  stripe_connect_token:          string
+  stripe_connect_account_id:     string | null
+  stripe_connect_invite_sent_at: string | null
+  organizations:                 { name: string | null } | { name: string | null }[] | null
+}
 
 export const vendorConnectOnboardingCron = inngest.createFunction(
   {
@@ -52,30 +68,40 @@ export const vendorConnectOnboardingCron = inngest.createFunction(
       const cutoff = new Date()
       cutoff.setDate(cutoff.getDate() - 2)
 
-      const { data, error } = await supabase
-        .from('vendors')
-        .select(`
-          id,
-          org_id,
-          name,
-          email,
-          stripe_connect_token,
-          stripe_connect_account_id,
-          stripe_connect_invite_sent_at,
-          organizations ( name )
-        `)
-        .eq('is_active', true)
-        .not('email', 'is', null)
-        .is('stripe_connect_account_id', null)
-        .is('stripe_connect_invite_sent_at', null)
-        .gte('created_at', cutoff.toISOString())
-
-      if (error) {
-        logger.error('[vendor-connect-cron] fetch failed', { error: error.message })
-        throw new Error(`Failed to fetch vendors: ${error.message}`)
-      }
-
-      return data ?? []
+      // Paginated: every org's newly-added vendors, not one tenant's. The
+      // 2-day created_at window bounds this today, but the row count scales
+      // with how many tenants added vendors in those two days — a platform
+      // quantity, not a tenant one. Truncated at 1000, the vendors sorted
+      // past the cap never receive a Connect invite at all: the next run's
+      // window has moved on, and stripe_connect_invite_sent_at is still NULL
+      // with nobody looking at it.
+      return await fetchAllRows<VendorRow>(
+        (from, to) => supabase
+          .from('vendors')
+          .select(`
+            id,
+            org_id,
+            name,
+            email,
+            stripe_connect_token,
+            stripe_connect_account_id,
+            stripe_connect_invite_sent_at,
+            organizations ( name )
+          `)
+          .eq('is_active', true)
+          .not('email', 'is', null)
+          .is('stripe_connect_account_id', null)
+          .is('stripe_connect_invite_sent_at', null)
+          .gte('created_at', cutoff.toISOString())
+          .order('id')
+          .range(from, to),
+        { label: 'vendor-connect-onboarding.uninvited-vendors' },
+      ).catch((err: unknown) => {
+        logger.error('[vendor-connect-cron] fetch failed', {
+          error: err instanceof Error ? err.message : String(err),
+        })
+        throw err
+      })
     })
 
     logger.info(`[vendor-connect-cron] ${vendors.length} vendors to onboard`)

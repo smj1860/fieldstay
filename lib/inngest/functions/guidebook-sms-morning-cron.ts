@@ -1,4 +1,5 @@
 import { inngest } from '@/lib/inngest/client'
+import { fetchAllRows } from '@/lib/inngest/paginate'
 import { createServiceClient } from '@/lib/supabase/server'
 import { getWeatherForLocation } from '@/lib/weather/tomorrow'
 import { sendSMS, buildSponsorLine } from '@/lib/sms/telnyx'
@@ -10,6 +11,20 @@ import { getFeaturedAmenityLine } from '@/lib/guidebook/featured-amenities'
 import type { GuidebookSponsor } from '@/types/database'
 
 const FALLBACK_TIMEZONE = 'America/New_York'
+
+/** Nullability matches the live schema: org_id/property_id are NOT NULL on
+ *  guidebook_guest_sms_optins, the last-sent date is nullable, and the
+ *  `!inner` booking embed still arrives as an array from PostgREST. */
+interface MorningOptinRow {
+  id:                    string
+  org_id:                string
+  property_id:           string
+  last_morning_sms_date: string | null
+  bookings:
+    | { checkin_date: string; checkout_date: string }
+    | { checkin_date: string; checkout_date: string }[]
+    | null
+}
 
 /**
  * Fan-out shape (same pattern as ical-sync/daily-wrapup): the cron only
@@ -39,19 +54,31 @@ export const guidebookSmsMorningCron = inngest.createFunction(
     // ── Fetch eligible opt-ins with booking window validation ─────────────────
     const optins = await step.run('fetch-active-optins', async () => {
       const supabase = createServiceClient({ system: 'inngest:guidebook-sms-morning-cron' })
-      const { data, error } = await supabase
-        .from('guidebook_guest_sms_optins')
-        .select(`
-          id, org_id, property_id, last_morning_sms_date,
-          bookings!inner ( checkin_date, checkout_date )
-        `)
-        .eq('is_active', true)
-        .or(`last_morning_sms_date.is.null,last_morning_sms_date.lt.${todayDate}`)
-
-      if (error) throw new Error(`Failed to fetch optins: ${error.message}`)
+      // Paginated, and this one matters more than it looks. The DB filter is
+      // only `is_active = true` plus "not already nudged today" — opt-in rows
+      // are never deleted (they are the TCPA consent audit trail), so this
+      // set accumulates every guest who ever opted in, across every tenant,
+      // forever. The "is this guest currently mid-stay" narrowing happens in
+      // JavaScript BELOW the query, so a max_rows truncation does not merely
+      // trim the tail: the 1000 rows PostgREST returns can be entirely
+      // historical opt-ins, and the cron then dispatches zero nudges while
+      // reporting a clean run.
+      const data = await fetchAllRows<MorningOptinRow>(
+        (from, to) => supabase
+          .from('guidebook_guest_sms_optins')
+          .select(`
+            id, org_id, property_id, last_morning_sms_date,
+            bookings!inner ( checkin_date, checkout_date )
+          `)
+          .eq('is_active', true)
+          .or(`last_morning_sms_date.is.null,last_morning_sms_date.lt.${todayDate}`)
+          .order('id')
+          .range(from, to),
+        { label: 'guidebook-sms-morning.active-optins' },
+      )
 
       // Filter to guests currently in their stay
-      return (data ?? [])
+      return data
         .map((o) => ({ ...o, booking: unwrapJoin(o.bookings) }))
         .filter((o) => o.booking && o.booking.checkin_date <= todayDate && o.booking.checkout_date >= todayDate)
         .map((o) => ({ id: o.id, org_id: o.org_id, property_id: o.property_id, checkin_date: o.booking!.checkin_date }))

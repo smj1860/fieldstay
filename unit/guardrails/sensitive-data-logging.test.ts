@@ -34,8 +34,25 @@ import { collectSourceFiles, rel, read } from './scan'
 
 const LOG_CALL = /(?:console\.(?:log|error|warn|info)|reportError|logAuditEvents?)\(([\s\S]{0,300}?)\)/g
 
+// Email addresses and money figures are named by CLAUDE.md in the same
+// breath as the fields above ("Logging actual_cost, email, Stripe tokens";
+// "no PII in audit metadata"), but the original pattern list omitted both —
+// which is exactly why five sites shipped putting an address or an amount
+// into audit_events.metadata (owners/actions.ts's owner_email and amount,
+// crew-invite's email, (auth)/callback's email, the Stripe work-order-invoice
+// handler's amount). All five are fixed; these two alternations keep them
+// fixed.
+//
+// They match an OBJECT KEY carrying the value (`email:`, `owner_email:`,
+// `amount:`, and the ES6 shorthand `{ transaction_type, amount, … }`) or a
+// direct `.email` property read — deliberately NOT the bare word, because
+// several log MESSAGES legitimately say "email" in prose
+// ("[inviteCrewMember] email send failed") and a variable named `emailErr`
+// is an error object, not an address. Derived, non-identifying keys are
+// unaffected by construction: `email_sent`, `email_hash`, and `email_source`
+// have a word character after "email", so neither alternation fires.
 const SENSITIVE_FIELD =
-  /\bactual_cost\b|\bguest_phone\w*\b|\bphone_e164\b|\bsms_body\b|\bmessage_body\b|\bclient_secret\b|\bstripe_token\b|\bpayment_method_id\b/
+  /\bactual_cost\b|\bguest_phone\w*\b|\bphone_e164\b|\bsms_body\b|\bmessage_body\b|\bclient_secret\b|\bstripe_token\b|\bpayment_method_id\b|(?:^|[^\w])(?:\w+_)?(?:email|amount)\s*:|\.email\b|[{,]\s*(?:\w+_)?(?:email|amount)\s*[,}]/
 
 const MASKED = /\*\*\*|\.slice\(-|redact/i
 
@@ -71,6 +88,19 @@ describe('guardrail: no sensitive fields (actual_cost, guest phone, SMS body, St
   // above means "nothing to catch," not "the regex is silently broken."
   it('detects a sensitive field in a synthetic unmasked log call (sanity: the scan is not silently inert)', () => {
     expect(SENSITIVE_FIELD.test('actual_cost: workOrder.actual_cost') && !MASKED.test('actual_cost: workOrder.actual_cost')).toBe(true)
+  })
+
+  it('detects an email address or money figure in synthetic audit metadata', () => {
+    expect(SENSITIVE_FIELD.test('metadata: { owner_email: ownerEmail }')).toBe(true)
+    expect(SENSITIVE_FIELD.test('metadata: { email: session.user.email }')).toBe(true)
+    expect(SENSITIVE_FIELD.test('metadata: { amount: inv.total }')).toBe(true)
+    expect(SENSITIVE_FIELD.test('metadata: { transaction_type, amount, property_id }')).toBe(true)
+  })
+
+  it('does not flag prose, error objects, or derived non-identifying keys', () => {
+    expect(SENSITIVE_FIELD.test("'[inviteCrewMember] email send failed'")).toBe(false)
+    expect(SENSITIVE_FIELD.test('emailErr, { site: "serverAction.owners" }')).toBe(false)
+    expect(SENSITIVE_FIELD.test('metadata: { email_sent: true, email_hash: h, email_source: s }')).toBe(false)
   })
 
   it('does not flag a synthetic masked log call', () => {

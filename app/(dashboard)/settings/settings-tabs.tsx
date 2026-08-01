@@ -481,6 +481,7 @@ function VendorAutoAssignToggle({ mode }: { mode: string }) {
 
 function SecurityTab() {
   const [state, formAction, pending] = useActionState(changePassword, null)
+  const [showCurrent, setShowCurrent] = useState(false)
   const [showNew,     setShowNew]     = useState(false)
   const [showConfirm, setShowConfirm] = useState(false)
 
@@ -512,6 +513,35 @@ function SecurityTab() {
         )}
 
         <form action={formAction} className="space-y-4">
+          {/* Re-authentication, not a formality: changePassword verifies this
+              against Supabase before it will rotate the password, so a stolen
+              session alone can't take the account over. */}
+          <div>
+            <label htmlFor="current-password" className="label">Current Password</label>
+            <div className="relative">
+              <Input
+                id="current-password"
+                name="current_password"
+                type={showCurrent ? 'text' : 'password'}
+                required
+                className="pr-10"
+                placeholder="Enter your current password"
+                autoComplete="current-password"
+              />
+              <button
+                type="button"
+                onClick={() => setShowCurrent((v) => !v)}
+                className="absolute right-3 top-1/2 -translate-y-1/2"
+                style={{ color: 'var(--text-muted)' }}
+                aria-label={showCurrent ? 'Hide current password' : 'Show current password'}
+              >
+                {showCurrent
+                  ? <EyeOff className="w-4 h-4" />
+                  : <Eye    className="w-4 h-4" />}
+              </button>
+            </div>
+          </div>
+
           <div>
             <label htmlFor="new-password" className="label">New Password</label>
             <div className="relative">

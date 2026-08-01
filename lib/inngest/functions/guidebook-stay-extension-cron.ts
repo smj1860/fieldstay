@@ -1,7 +1,22 @@
 import { inngest }             from '@/lib/inngest/client'
+import { fetchAllRows }        from '@/lib/inngest/paginate'
 import { createServiceClient } from '@/lib/supabase/server'
 
 const FALLBACK_TIMEZONE = 'America/New_York'
+
+/** Nullability matches the live schema: extension_gap_threshold_days and
+ *  extension_message_days_before are NOT NULL (both have defaults); the
+ *  discount / contact-method / URL columns are nullable. */
+interface ExtensionConfigRow {
+  org_id:                        string
+  is_active:                     boolean
+  extension_messaging_enabled:   boolean
+  extension_gap_threshold_days:  number
+  extension_discount_pct:        number | null
+  extension_contact_method:      string | null
+  extension_ownerrez_url:        string | null
+  extension_message_days_before: number
+}
 
 export const guidebookStayExtensionCron = inngest.createFunction(
   { id: 'guidebook-stay-extension-cron', name: 'Guidebook: Stay Extension Check' },
@@ -13,19 +28,27 @@ export const guidebookStayExtensionCron = inngest.createFunction(
     // Fetch orgs with extension messaging enabled
     const configs = await step.run('fetch-extension-configs', async () => {
       const supabase = createServiceClient({ system: 'inngest:guidebook-stay-extension-cron' })
-      const { data, error } = await supabase
-        .from('guidebook_configurations')
-        .select(`
-          org_id, is_active,
-          extension_messaging_enabled, extension_gap_threshold_days,
-          extension_discount_pct, extension_contact_method,
-          extension_ownerrez_url, extension_message_days_before
-        `)
-        .eq('is_active', true)
-        .eq('extension_messaging_enabled', true)
-
-      if (error) throw new Error(`Failed to fetch configs: ${error.message}`)
-      return data ?? []
+      // Paginated: one row per ORG that opted into gap-night messaging, so
+      // the result set is a slice of the platform's tenant count rather than
+      // one tenant's data. The per-org gap search below only runs for orgs in
+      // this list, so a max_rows truncation silently switches the feature off
+      // for every org sorted past row 1000 — the revenue-generating extension
+      // offer is simply never sent and the cron still reports success.
+      return await fetchAllRows<ExtensionConfigRow>(
+        (from, to) => supabase
+          .from('guidebook_configurations')
+          .select(`
+            org_id, is_active,
+            extension_messaging_enabled, extension_gap_threshold_days,
+            extension_discount_pct, extension_contact_method,
+            extension_ownerrez_url, extension_message_days_before
+          `)
+          .eq('is_active', true)
+          .eq('extension_messaging_enabled', true)
+          .order('org_id')
+          .range(from, to),
+        { label: 'guidebook-stay-extension-cron.configs' },
+      )
     })
 
     logger.info(`Checking ${configs.length} orgs for stay extension opportunities`)

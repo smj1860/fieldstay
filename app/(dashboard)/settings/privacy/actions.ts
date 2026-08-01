@@ -1,6 +1,6 @@
 'use server'
 import crypto                  from 'crypto'
-import { requireOrgMember }    from '@/lib/auth'
+import { requireOrgRole }      from '@/lib/auth'
 import { createServiceClient } from '@/lib/supabase/server'
 import { logAuditEvent }       from '@/lib/audit'
 
@@ -10,12 +10,19 @@ import { reportError } from '@/lib/observability/report-error'
  * Matches by email — finds all bookings where guest_email = the provided address.
  * Replaces name with '[Deleted]' and sets email to NULL.
  * The booking record itself is retained for financial/P&L integrity.
+ *
+ * ADMIN-ONLY. This runs with the service role, so RLS is not a backstop here:
+ * the only thing standing between a caller and an irreversible, org-wide scrub
+ * of guest PII is this gate. It used to be `requireOrgMember()`, which meant a
+ * `viewer` or `crew` member could destroy booking data they cannot even read
+ * through RLS. `requireOrgRole(['admin'])` also passes `owner` automatically
+ * (see is_org_member) — matching the role model used everywhere else.
  */
 export async function anonymizeGuestData(
   guestEmail: string,
 ): Promise<{ success: boolean; bookingsAnonymized: number; error?: string }> {
   try {
-    const { user, membership } = await requireOrgMember()
+    const { user, membership } = await requireOrgRole(['admin'])
 
     if (!guestEmail || !guestEmail.includes('@')) {
       return { success: false, bookingsAnonymized: 0, error: 'Invalid email address' }

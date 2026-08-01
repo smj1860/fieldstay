@@ -4,7 +4,7 @@ import { revalidatePath } from 'next/cache'
 import { redirect } from 'next/navigation'
 import { cookies } from 'next/headers'
 import { requireOrgMember, requireOrgRole } from '@/lib/auth'
-import { createClient } from '@/lib/supabase/server'
+import { createClient, createReauthClient } from '@/lib/supabase/server'
 import { stripe, PLANS } from '@/lib/stripe/client'
 import { inngest } from '@/lib/inngest/client'
 import { geocodeZip } from '@/lib/geocoding'
@@ -111,20 +111,59 @@ export async function updateSlackWebhook(
 
 // ── Security / Password ───────────────────────────────────────
 
+/**
+ * Supabase's `updateUser({ password })` authenticates on the SESSION alone —
+ * it never asks for the old password. Without the re-authentication below,
+ * anyone who obtains a session (a stolen cookie, an unlocked laptop, an XSS
+ * token grab) can set a new password and lock the real owner out: session
+ * theft escalates straight to permanent account takeover.
+ *
+ * The check runs on a session-less anon client (`createReauthClient`) so a
+ * successful sign-in here does not rotate — and a failed one does not
+ * disturb — the caller's live session cookies.
+ */
 export async function changePassword(
   _prev: SettingsActionState | null,
   formData: FormData
 ): Promise<SettingsActionState> {
   try {
-    const newPassword = (formData.get('new_password') as string)?.trim()
-    const confirm     = (formData.get('confirm_password') as string)?.trim()
+    const currentPassword = (formData.get('current_password') as string) ?? ''
+    const newPassword     = (formData.get('new_password') as string)?.trim()
+    const confirm         = (formData.get('confirm_password') as string)?.trim()
 
+    if (!currentPassword)
+      return { error: 'Enter your current password' }
     if (!newPassword || newPassword.length < 8)
       return { error: 'Password must be at least 8 characters' }
     if (newPassword !== confirm)
       return { error: 'Passwords do not match' }
 
     const { user, supabase, membership } = await requireOrgMember()
+
+    if (!user.email) {
+      // Password auth is email+password only; no address means no password
+      // to verify against, and we will not skip the check.
+      return { error: 'This account cannot change its password here.' }
+    }
+
+    const reauth = createReauthClient()
+    const { error: reauthError } = await reauth.auth.signInWithPassword({
+      email:    user.email,
+      password: currentPassword,
+    })
+
+    if (reauthError) {
+      await logAuditEvent({
+        orgId:   membership.org_id,
+        actorId: user.id,
+        action:  'account.password_change_denied',
+      })
+      // Deliberately specific: this is the caller's own account and a vague
+      // message here only confuses a legitimate user — it discloses nothing
+      // an attacker holding the session doesn't already know.
+      return { error: 'Current password is incorrect' }
+    }
+
     const { error } = await supabase.auth.updateUser({ password: newPassword })
 
     if (error) {

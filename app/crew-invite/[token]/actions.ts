@@ -155,7 +155,10 @@ export async function activateCrewAccount(formData: FormData): Promise<{ error?:
     action:     'crew.account.activated',
     targetType: 'crew_member',
     targetId:   crewId,
-    metadata:   { email: activationEmail },
+    // Intentionally omit the address itself — no PII in audit metadata.
+    // What matters for an investigation is whether the crew member supplied
+    // an email during activation or we already had one on file.
+    metadata:   { email_source: crew.email ? 'on_file' : 'entered_at_activation' },
   })
 
   // Sign in the newly created user so the crew layout's auth check passes

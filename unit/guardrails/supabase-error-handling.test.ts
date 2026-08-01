@@ -200,7 +200,7 @@ const BASELINE: Record<string, number> = {
   'lib/inngest/functions/cron/maintenance-schedules-helpers.ts': 1,
   'lib/inngest/functions/cron/maintenance-schedules.ts': 2,
   'lib/inngest/functions/cron/vendor-compliance-expiry-check.ts': 2,
-  'lib/inngest/functions/cron/vendor-compliance-grace-check.ts': 3,
+  'lib/inngest/functions/cron/vendor-compliance-grace-check.ts': 1,
   'lib/inngest/functions/cron/work-order-ops.ts': 2,
   'lib/inngest/functions/email-subscriber-checkin.ts': 1,
   'lib/inngest/functions/email-trial-lifecycle.tsx': 4,

@@ -1,8 +1,22 @@
 import { inngest } from '@/lib/inngest/client'
+import { fetchAllRows } from '@/lib/inngest/paginate'
 import { createServiceClient } from '@/lib/supabase/server'
 import { stripe } from '@/lib/stripe/client'
 import { getActiveSponsorCount } from '@/lib/guidebook/helpers'
 import { unwrapJoin } from '@/lib/utils/supabase-joins'
+
+/** Nullability matches the live schema: org_id is NOT NULL on
+ *  guidebook_configurations, both date columns are nullable, and the
+ *  to-one `organizations` embed can arrive as an array from PostgREST. */
+interface GuidebookOrgRow {
+  org_id:               string
+  grace_period_ends_at: string | null
+  trial_ends_at:        string | null
+  organizations:
+    | { stripe_customer_id: string | null; stripe_subscription_id: string | null }
+    | { stripe_customer_id: string | null; stripe_subscription_id: string | null }[]
+    | null
+}
 
 export const guidebookDailyMonitor = inngest.createFunction(
   {
@@ -16,21 +30,31 @@ export const guidebookDailyMonitor = inngest.createFunction(
     // Fetch all active guidebook orgs in one query
     const activeOrgs = await step.run('fetch-active-guidebook-orgs', async () => {
       const supabase = createServiceClient({ system: 'inngest:guidebook-daily-monitor' })
-      const { data, error } = await supabase
-        .from('guidebook_configurations')
-        .select(`
-          org_id,
-          grace_period_ends_at,
-          trial_ends_at,
-          organizations (
-            stripe_customer_id,
-            stripe_subscription_id
-          )
-        `)
-        .eq('is_active', true)
-
-      if (error) throw new Error(`Failed to fetch active guidebooks: ${error.message}`)
-      return data ?? []
+      // Paginated: one row per ORG with an active guidebook, so the result
+      // set is the platform's tenant count. This list drives three separate
+      // per-org decisions below — sponsor-credit dispatch, grace-period
+      // expiry and trial lock-out — so a max_rows truncation means the orgs
+      // past row 1000 are never billed a credit they earned, never have an
+      // expired grace period acted on, and keep an expired trial live
+      // indefinitely. All three fail in the customer's favour or against it
+      // silently, with the cron reporting a healthy run either way.
+      return await fetchAllRows<GuidebookOrgRow>(
+        (from, to) => supabase
+          .from('guidebook_configurations')
+          .select(`
+            org_id,
+            grace_period_ends_at,
+            trial_ends_at,
+            organizations (
+              stripe_customer_id,
+              stripe_subscription_id
+            )
+          `)
+          .eq('is_active', true)
+          .order('org_id')
+          .range(from, to),
+        { label: 'guidebook-daily-monitor.active-orgs' },
+      )
     })
 
     logger.info(`Evaluating ${activeOrgs.length} active guidebook orgs for billing credits`)
