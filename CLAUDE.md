@@ -724,6 +724,7 @@ async function geocodeZip(zip: string): Promise<{ lat: number; lng: number } | n
 | `assigned_crew_id` on work_orders | `assigned_crew_member_id` (old column deprecated) |
 | `membership.user_id` in server actions | `user.id` — OrgMembership has no user_id field. Destructure `user` from `requireOrgMember()` |
 | `supabase.raw('column_name')` | Does not exist on Supabase JS client. For column-to-column comparisons (e.g. `current_quantity < par_level`), fetch the rows and filter in JavaScript |
+| Naming a `GENERATED ALWAYS` column in an `.insert()`/`.update()` payload (`work_order_line_items.line_total`, `assignment_outcomes.duration_minutes`, `checklist_item_signals.flag_probability`/`.dynamic_photo_required`) | Omit it and let the database compute it. Postgres rejects the WHOLE statement with `428C9`, not just that column — and where the error is only logged, the entire write vanishes silently. This shipped twice: every vendor completion stored zero line items, and the crew-scoring learning loop recorded nothing. `supabase/schema_reference.sql` renders these as plain `DEFAULT`s, which is what made both inserts look correct — the LIVE DB is authoritative. Enforced by `unit/guardrails/generated-column-writes.test.ts` |
 | Adding a DB column via migration without updating `types/database.ts` | Every migration that adds a column must also add that column to the matching interface in `types/database.ts` in the same commit. Supabase's TS client infers return types from this file, not from the live DB. Missing columns here cause build failures even when the query and select string are correct |
 | Adding a new event to `events.ts` outside the closing `}` of `FieldStayEvents` | The final `}` in `events.ts` closes the `FieldStayEvents` type. Every new event entry must be placed before it, with a comma after the preceding entry's closing brace |
 | An unbounded `.select()` in a platform-wide cron | PostgREST's `max_rows = 1000` truncates it silently — 200, no error, no signal. Paginate via `fetchAllRows()` (`lib/inngest/paginate.ts`) or use a `count`/`head` aggregate |
@@ -1229,6 +1230,11 @@ following them stops being a memory test. Five layers, checked in CI via
      job still runs every step, no step is `continue-on-error`, `lint` keeps
      its `--max-warnings` ratchet, and the two install-free `db-invariants`
      scripts stay dependency-free and self-disarming.
+   - `generated-column-writes` — no `.insert()`/`.update()` payload may name a
+     `GENERATED ALWAYS` column. The column list is verified against the live
+     `information_schema.columns.is_generated`, NOT against
+     `supabase/schema_reference.sql`, which renders generated columns as plain
+     `DEFAULT`s and is exactly why this class shipped twice.
    - `public-route-rate-limiting` — every prefix in `proxy.ts`'s
      `TOKEN_ROUTES` has a matching branch in `rateLimiterForPathname()`,
      and the two guessable-invite-token `BYPASS_ROUTES` entries
