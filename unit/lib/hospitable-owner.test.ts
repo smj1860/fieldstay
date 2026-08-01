@@ -15,47 +15,16 @@ import { createServiceClient } from '@/lib/supabase/server'
 import { getValidHospitableToken } from '@/lib/integrations/providers/hospitable-token'
 import { hospitableFetch } from '@/lib/integrations/providers/hospitable'
 import { RateLimitError } from '@/lib/integrations/types'
+import { createSupabaseDouble, type TableSpec } from '../stubs/supabase-query-double'
 
-interface QueuedByTable { [table: string]: unknown[] }
 
-// Same queue-based Supabase mock pattern used by
-// unit/inngest/hospitable-incremental-sync.test.ts: each `.from(table)` call
-// consumes the next queued response for that table in call order. Reads that
-// end in `.order(...)` (listActiveConnections) or a plain `.eq(...)` chain
-// with no terminal method (the local-table lookup) resolve via `.then`;
-// reads ending in `.maybeSingle()` resolve via that method instead.
-function makeSupabase(queued: QueuedByTable) {
-  const counters: Record<string, number> = {}
-  const calls: { table: string; method: string; args: unknown[] }[] = []
-
-  const from = vi.fn((table: string) => {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const chain: any = {}
-    const record = (method: string, args: unknown[]) => {
-      calls.push({ table, method, args })
-      return chain
-    }
-    chain.select = (...a: unknown[]) => record('select', a)
-    chain.upsert = (...a: unknown[]) => record('upsert', a)
-    chain.eq     = (...a: unknown[]) => record('eq', a)
-    chain.not    = (...a: unknown[]) => record('not', a)
-    chain.order  = (...a: unknown[]) => record('order', a)
-
-    const resolveNext = () => {
-      const idx = counters[table] ?? 0
-      counters[table] = idx + 1
-      const result = queued[table]?.[idx] ?? { data: null, error: null }
-      return Promise.resolve(result)
-    }
-
-    chain.maybeSingle = () => resolveNext()
-    chain.then = (resolve: (v: unknown) => unknown, reject?: (e: unknown) => unknown) =>
-      resolveNext().then(resolve, reject)
-    return chain
-  })
-
-  return { from, calls }
-}
+// The ONE shared query-builder double, not a local hand-roll. The local
+// version modelled only .select/.upsert/.eq/.not/.order, so it broke the
+// moment listActiveConnections was paginated onto .range() — exactly the
+// divergence unit/stubs/supabase-query-double.ts exists to end. It also
+// paginates for real, so a >1000-connection fixture is genuinely walked
+// rather than being answered in full on page 0.
+const makeSupabase = (tables: Record<string, TableSpec>) => createSupabaseDouble(tables)
 
 const CONN_A = { user_id: 'user_a', org_id: 'org_a', external_user_id: 'hosp_user_a', updated_at: '2026-07-20' }
 const CONN_B = { user_id: 'user_b', org_id: 'org_b', external_user_id: 'hosp_user_b', updated_at: '2026-07-19' }

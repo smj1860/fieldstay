@@ -54,6 +54,7 @@ import { generateTurnoversForProperty } from '@/lib/turnovers/generator'
 import { RateLimitError, TokenRevokedError } from '@/lib/integrations/types'
 import type { OwnerRezBooking } from '@/lib/integrations/types'
 import { invokeHandler } from './test-helpers'
+import { createSupabaseDouble, type TableSpec } from '../stubs/supabase-query-double'
 
 function makeLogger() {
   return { info: vi.fn(), warn: vi.fn(), error: vi.fn() }
@@ -67,54 +68,19 @@ function makeAllowlistStep(allowed: string[]) {
   }
 }
 
-interface QueuedByTable { [table: string]: { data?: unknown; error?: unknown }[] }
 
 // Queue-based .from(table) mock (see unit/owner-portal/load-owner-portal-data.test.ts
 // for the reference pattern): each call to the same table consumes the next
 // queued response for that table, in call order. upsertSpy/updateSpy record
 // every write for assertions on payload + conflict-target shape.
-function makeSupabase(queued: QueuedByTable) {
-  const counters: Record<string, number> = {}
-  const upsertSpy = vi.fn()
-  const updateSpy = vi.fn()
-  const eqSpy     = vi.fn()
-  // integration_connections.metadata is now merged atomically via the
-  // merge_integration_connection_metadata RPC (see
-  // lib/integrations/connection-metadata.ts) instead of a
-  // select-then-update round trip.
-  const rpcSpy = vi.fn()
-  const rpc = vi.fn((fnName: string, args: unknown) => {
-    rpcSpy(fnName, args)
-    return Promise.resolve({ data: {}, error: null })
-  })
-
-  const from = vi.fn((table: string) => {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const chain: any = {}
-    chain.select = vi.fn(() => chain)
-    chain.eq     = vi.fn((column: string, value: unknown) => { eqSpy(table, column, value); return chain })
-    chain.in     = vi.fn(() => chain)
-    chain.neq    = vi.fn(() => chain)
-    chain.order  = vi.fn(() => chain)
-    chain.limit  = vi.fn(() => chain)
-    chain.update = vi.fn((payload: unknown) => { updateSpy(table, payload); return chain })
-    chain.upsert = vi.fn((payload: unknown, opts: unknown) => { upsertSpy(table, payload, opts); return chain })
-
-    const resolveNext = () => {
-      const idx = counters[table] ?? 0
-      counters[table] = idx + 1
-      return Promise.resolve(queued[table]?.[idx] ?? { data: null, error: null })
-    }
-
-    chain.single      = vi.fn(() => resolveNext())
-    chain.maybeSingle = vi.fn(() => resolveNext())
-    chain.then = (resolve: (v: unknown) => unknown, reject?: (e: unknown) => unknown) =>
-      resolveNext().then(resolve, reject)
-    return chain
-  })
-
-  return { from, upsertSpy, updateSpy, eqSpy, rpc, rpcSpy }
-}
+// The ONE shared query-builder double, not a local hand-roll — its
+// eqSpy / updateSpy / upsertSpy carry the same (table, ...args) convention the
+// assertions below already used, and `supabase.rpc` IS the rpc spy. The local
+// version broke the moment this function's connection read was paginated onto
+// .order().range(); that divergence is what the shared stub exists to end. It
+// also paginates for real, so a >1000-connection fixture is genuinely walked.
+const makeSupabase = (tables: Record<string, TableSpec>) =>
+  createSupabaseDouble(tables, { rpc: { data: {}, error: null } })
 
 /** Finds the merge_integration_connection_metadata RPC call whose p_patch contains `key`. */
 function findMetadataMergeCall(rpcSpy: ReturnType<typeof vi.fn>, key: string) {
@@ -357,7 +323,7 @@ describe('ownerRezConnectionSync (per-connection handler)', () => {
     // Cursor correctness: sync_cursor must be the PRE-fetch timestamp, not
     // last_synced_at (post-fetch) — using the post-fetch value would miss
     // any booking modified upstream during the fetch window.
-    const cursorMergeCall = findMetadataMergeCall(supabase.rpcSpy, 'sync_cursor')
+    const cursorMergeCall = findMetadataMergeCall(supabase.rpc, 'sync_cursor')
     expect(cursorMergeCall).toBeDefined()
     const patch = (cursorMergeCall?.[1] as { p_patch: Record<string, unknown> }).p_patch
     expect(patch.sync_cursor).toBe(start.toISOString())
@@ -405,7 +371,7 @@ describe('ownerRezConnectionSync (per-connection handler)', () => {
     // The step returns before reaching the cursor-advance code at all —
     // a failed lookup must not silently mark this run as synced.
     expect(supabase.updateSpy).not.toHaveBeenCalled()
-    expect(supabase.rpcSpy).not.toHaveBeenCalled()
+    expect(supabase.rpc).not.toHaveBeenCalled()
     expect(result).toEqual({ connectionId: 'conn_1', synced: false })
   })
 
@@ -428,7 +394,7 @@ describe('ownerRezConnectionSync (per-connection handler)', () => {
       invokeHandler(ownerRezConnectionSync, { event: SYNC_EVENT, step, logger: makeLogger() })
     ).rejects.toThrow()
 
-    expect(supabase.rpcSpy).toHaveBeenCalledWith(
+    expect(supabase.rpc).toHaveBeenCalledWith(
       'merge_integration_connection_metadata',
       expect.objectContaining({ p_status: 'revoked' }),
     )
@@ -468,7 +434,7 @@ describe('ownerRezConnectionSync (per-connection handler)', () => {
 
     // The transient status is written via the atomic metadata merge with
     // NO status change — rate-limited must not flip the connection to error.
-    const rateLimitMergeCall = findMetadataMergeCall(supabase.rpcSpy, 'last_sync_status')
+    const rateLimitMergeCall = findMetadataMergeCall(supabase.rpc, 'last_sync_status')
     expect(rateLimitMergeCall).toBeDefined()
     const payload = rateLimitMergeCall?.[1] as { p_status: string | null; p_patch: Record<string, unknown> }
     expect(payload.p_status).toBeNull()

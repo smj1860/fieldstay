@@ -181,7 +181,6 @@ const BASELINE: Record<string, number> = {
   'lib/guidebook/featured-amenities.ts': 1,
 
   'lib/guidebook/sync.ts': 4,
-  'lib/ical/conflict-detection.ts': 1,
   'lib/inngest/functions/apply-master-checklist.ts': 1,
   'lib/inngest/functions/asset-scan.ts': 1,
   'lib/inngest/functions/auto-assign-turnover.ts': 6,
@@ -259,7 +258,7 @@ const BASELINE: Record<string, number> = {
   'lib/support/account-tools.ts': 3,
   'lib/support/retrieve.ts': 1,
   'lib/turnovers/assignment.ts': 1,
-  'lib/turnovers/generator.ts': 5,
+  'lib/turnovers/generator.ts': 4,
 }
 
 describe('guardrail: Supabase results are not destructured for data without error', () => {

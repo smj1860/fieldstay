@@ -1,4 +1,5 @@
 import type { createServiceClient } from '@/lib/supabase/server'
+import { fetchAllRows } from '@/lib/inngest/paginate'
 
 // Tied to the real factory's return type rather than a literal `any` —
 // createClient()/createServiceClient({ system: 'lib/ical/conflict-detection' }) both omit the <Database> generic
@@ -11,7 +12,13 @@ type DBClient = ReturnType<typeof createServiceClient>
 
 export interface FlaggedBooking {
   id:           string
-  source:       string
+  /**
+   * Nullable to match the column. bookings.source has a DEFAULT of 'other'
+   * but is NOT NULL-constrained, so an explicit null insert stores one — the
+   * previous non-null type here was only ever satisfied because the read was
+   * untyped.
+   */
+  source:       string | null
   guestName:    string | null
   checkinDate:  string
   checkoutDate: string
@@ -32,13 +39,31 @@ export async function detectAndFlagOverlaps(
   supabase: DBClient,
   propertyId: string
 ): Promise<FlaggedBooking[]> {
-  const { data: bookings } = await supabase
-    .from('bookings')
-    .select('id, checkin_date, checkout_date, source, guest_name, has_overlap_conflict')
-    .eq('property_id', propertyId)
-    .eq('status', 'confirmed')
+  // Every confirmed booking for this property, over its whole history — the
+  // input to the pairwise overlap scan below. Both failure modes here end the
+  // same way, with a real double-booking never surfaced to the PM:
+  //
+  //   - Truncation. At max_rows = 1000 PostgREST returns the first 1000 with a
+  //     200 and no signal, so any overlap involving a booking past the cap is
+  //     invisible.
+  //   - The discarded error. A failed read returned [], which this function
+  //     reports as "no conflicts found" — indistinguishable from a clean
+  //     calendar. fetchAllRows logs, reports, and throws instead.
+  const bookings = await fetchAllRows<{
+    id: string; checkin_date: string; checkout_date: string
+    source: string | null; guest_name: string | null; has_overlap_conflict: boolean | null
+  }>(
+    (from, to) => supabase
+      .from('bookings')
+      .select('id, checkin_date, checkout_date, source, guest_name, has_overlap_conflict')
+      .eq('property_id', propertyId)
+      .eq('status', 'confirmed')
+      .order('id')
+      .range(from, to),
+    { label: 'conflict-detection.bookings' },
+  )
 
-  if (!bookings || bookings.length === 0) return []
+  if (bookings.length === 0) return []
 
   const overlapping = new Set<string>()
 

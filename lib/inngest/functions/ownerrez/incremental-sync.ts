@@ -179,16 +179,26 @@ export const ownerRezIncrementalSync = inngest.createFunction(
 
     const connections = await step.run('fetch-connections', async () => {
       const supabase = createServiceClient({ system: 'inngest:incremental-sync' })
-      let query = supabase
-        .from('integration_connections')
-        .select('id, user_id, org_id, external_user_id')
-        .eq('provider_id', PROVIDER)
-        .eq('status', 'active')
+      // PLATFORM-WIDE when unscoped — every org with a live OwnerRez
+      // connection, not one tenant's. At max_rows = 1000 PostgREST returns the
+      // first 1000 with a 200 and no truncation signal, so every connection
+      // past that stops syncing while the cron still reports success. The
+      // error was discarded outright too: a failed read became "no active
+      // connections" and the whole tick was skipped silently.
+      return await fetchAllRows<{ id: string; user_id: string; org_id: string | null; external_user_id: string | null }>(
+        (from, to) => {
+          let query = supabase
+            .from('integration_connections')
+            .select('id, user_id, org_id, external_user_id')
+            .eq('provider_id', PROVIDER)
+            .eq('status', 'active')
 
-      if (scopedUserId) query = query.eq('user_id', scopedUserId)
+          if (scopedUserId) query = query.eq('user_id', scopedUserId)
 
-      const { data } = await query
-      return data ?? []
+          return query.order('id').range(from, to)
+        },
+        { label: 'ownerrez-incremental-sync.connections' },
+      )
     })
 
     if (!connections.length) {

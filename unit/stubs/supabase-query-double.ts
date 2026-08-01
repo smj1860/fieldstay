@@ -88,6 +88,7 @@ export interface SupabaseDouble {
   selectSpy: Spy
   eqSpy:     Spy
   inSpy:     Spy
+  notSpy:    Spy
   insertSpy: Spy
   updateSpy: Spy
   upsertSpy: Spy
@@ -154,6 +155,7 @@ export function createSupabaseDouble(
     selectSpy: vi.fn(),
     eqSpy:     vi.fn(),
     inSpy:     vi.fn(),
+    notSpy:    vi.fn(),
     insertSpy: vi.fn(),
     updateSpy: vi.fn(),
     upsertSpy: vi.fn(),
@@ -165,6 +167,7 @@ export function createSupabaseDouble(
     select: spies.selectSpy,
     eq:     spies.eqSpy,
     in:     spies.inSpy,
+    not:    spies.notSpy,
     insert: spies.insertSpy,
     update: spies.updateSpy,
     upsert: spies.upsertSpy,

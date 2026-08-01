@@ -7,6 +7,7 @@ vi.mock('@/lib/supabase/server', () => ({
 import { hospTeammateSyncCron } from '@/lib/inngest/functions/hospitable/teammate-sync-cron'
 import { createServiceClient } from '@/lib/supabase/server'
 import { invokeHandler } from './test-helpers'
+import { createSupabaseDouble, type TableSpec } from '../stubs/supabase-query-double'
 
 function runAllStep() {
   return { run: vi.fn((_name: string, cb: () => unknown) => cb()), sendEvent: vi.fn() }
@@ -16,31 +17,12 @@ function makeLogger() {
   return { info: vi.fn(), error: vi.fn() }
 }
 
-interface QueuedByTable { [table: string]: { data?: unknown; error?: unknown }[] }
-
-function makeSupabase(queued: QueuedByTable) {
-  const counters: Record<string, number> = {}
-
-  const from = vi.fn((table: string) => {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const chain: any = {}
-    chain.select = () => chain
-    chain.eq     = () => chain
-    chain.not    = () => chain
-
-    const resolveNext = () => {
-      const idx = counters[table] ?? 0
-      counters[table] = idx + 1
-      return Promise.resolve(queued[table]?.[idx] ?? { data: null, error: null })
-    }
-
-    chain.then = (resolve: (v: unknown) => unknown, reject?: (e: unknown) => unknown) =>
-      resolveNext().then(resolve, reject)
-    return chain
-  })
-
-  return { from }
-}
+// Uses the ONE shared query-builder double rather than a local hand-roll.
+// The local version modelled only .select/.eq/.not, so it broke the moment
+// this cron's connection read was paginated onto .order().range() — which is
+// precisely the divergence unit/stubs/supabase-query-double.ts exists to end.
+// It also paginates for real, so a >1000-row fixture is genuinely walked.
+const makeSupabase = (tables: Record<string, TableSpec>) => createSupabaseDouble(tables)
 
 describe('hospTeammateSyncCron', () => {
   beforeEach(() => {
@@ -126,6 +108,29 @@ describe('hospTeammateSyncCron', () => {
       event: {},
       step:  runAllStep(),
       logger: makeLogger(),
-    })).rejects.toThrow('Failed to fetch connections: db timeout')
+    })).rejects.toThrow(/db timeout/)
+  })
+
+  it('dispatches for every connection past the first page, not just the first 1000', async () => {
+    // The regression this encodes: this is a PLATFORM-WIDE read of every
+    // active Hospitable connection. Unpaginated, PostgREST caps it at
+    // max_rows = 1000 and returns a 200 with no truncation signal, so every
+    // connection past the cap silently stops being resynced while the cron
+    // still reports success.
+    const connections = Array.from({ length: 1_450 }, (_, i) => ({
+      user_id: `user_${i}`, org_id: `org_${i}`, external_user_id: `ext_${i}`,
+    }))
+    // Fixed spec: .range() really slices it, so fetchAllRows drains two pages.
+    const supabase = makeSupabase({ integration_connections: { data: connections, error: null } })
+    ;(createServiceClient as ReturnType<typeof vi.fn>).mockReturnValue(supabase)
+
+    const step = runAllStep()
+    const result = await invokeHandler(hospTeammateSyncCron, {
+      event: {},
+      step,
+      logger: makeLogger(),
+    })
+
+    expect(result).toEqual({ dispatched: 1_450 })
   })
 })

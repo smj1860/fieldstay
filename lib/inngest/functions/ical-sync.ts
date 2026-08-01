@@ -365,7 +365,9 @@ export const syncIcalFeed = inngest.createFunction(
               table: {
                 headers: ['Source', 'Guest', 'Check-in', 'Check-out'],
                 rows: newConflicts.map(c => [
-                  c.source,
+                  // bookings.source is nullable — an em dash rather than an
+                  // empty cell in the PM's double-booking alert.
+                  c.source ?? '—',
                   c.guestName ?? '—',
                   c.checkinDate,
                   c.checkoutDate,
