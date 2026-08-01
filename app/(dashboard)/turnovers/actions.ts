@@ -675,23 +675,23 @@ export async function bulkUpdateTurnoverStatus(
   try {
     const { supabase, membership } = await requireOrgMember()
 
-    // Only update turnovers that belong to this org and aren't already terminal.
-    // Fetch property_id/org_id alongside id for the completion events below.
-    const { data: eligible } = await supabase
+    // Eligibility is the WHERE clause, not an earlier read — the same fix
+    // updateTurnoverStatus already carries (see the comment there). This
+    // previously read `eligible`, then updated unconditionally with a fresh
+    // completed_at, then fanned out per row: two concurrent bulk completions
+    // both matched, both re-stamped completed_at, and both fired
+    // turnover/completed, so emit-completion-metric double-counted and the
+    // durations assignment_outcomes and crew scoring derive were corrupted.
+    // Only rows this UPDATE actually claimed come back, and only those emit.
+    const completedAt = new Date().toISOString()
+
+    const { data: completed, error } = await supabase
       .from('turnovers')
-      .select('id, property_id, org_id')
+      .update({ status, completed_at: completedAt })
       .in('id', turnoverIds)
       .eq('org_id', membership.org_id)
       .in('status', ['pending_assignment', 'assigned', 'in_progress', 'flagged'])
-
-    if (!eligible?.length) return { success: true }
-
-    const ids = eligible.map(t => t.id)
-
-    const { error } = await supabase
-      .from('turnovers')
-      .update({ status, completed_at: new Date().toISOString() })
-      .in('id', ids)
+      .select('id, property_id, org_id')
 
     if (error) {
       console.error('[bulkUpdateTurnoverStatus]', error)
@@ -699,11 +699,12 @@ export async function bulkUpdateTurnoverStatus(
       return { error: 'Operation failed. Please try again.' }
     }
 
+    if (!completed?.length) return { success: true }
+
     // Fire the same automation event single-completion uses.
     // One event per turnover so each has its own Inngest retry path.
-    const now = new Date().toISOString()
     await Promise.all(
-      eligible.map(t =>
+      completed.map(t =>
         inngest.send({
           name: 'turnover/completed',
           data: {
@@ -711,7 +712,7 @@ export async function bulkUpdateTurnoverStatus(
             property_id:          t.property_id,
             org_id:               t.org_id,
             completed_by_crew_id: '',  // PM-initiated bulk completion
-            completed_at:         now,
+            completed_at:         completedAt,
           },
         })
       )

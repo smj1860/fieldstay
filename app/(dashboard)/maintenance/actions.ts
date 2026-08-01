@@ -5,18 +5,30 @@ import { redirect, unstable_rethrow } from 'next/navigation'
 import { requireOrgMember, requireOrgRole } from '@/lib/auth'
 import { inngest } from '@/lib/inngest/client'
 import { calcNextDueDate } from '@/lib/turnovers/generator'
+import { fetchAllRows } from '@/lib/inngest/paginate'
 import { logAuditEvent } from '@/lib/audit'
 import { reportError } from '@/lib/observability/report-error'
 import type { WoStatus, WoCategory, ScheduleFrequency, ScheduleType, VendorSpecialty } from '@/types/database'
 import { PriorityLevelSchema, WoStatusSchema, WoCategorySchema } from '@/lib/schemas/work-order'
-import type { SupabaseClient } from '@supabase/supabase-js'
 import {
   resolveWorkOrderStatus,
   sendQuoteRequestEmails,
+  checkQuoteVendorsAssignable,
   checkCrewTimeOffWarning,
   dispatchWorkOrderEvents,
 } from './create-work-order-helpers'
-import { isVendorHardBlocked, VENDOR_HARD_BLOCKED_ERROR } from '@/lib/vendors/compliance'
+import {
+  COMPLETED_WORK_ORDER_SELECT,
+  finalizeWorkOrderCompletion,
+  workOrderCompletionFields,
+  type CompletedWorkOrderRow,
+} from './complete-work-order-helpers'
+import {
+  isVendorHardBlocked,
+  VendorComplianceCheckError,
+  VENDOR_HARD_BLOCKED_ERROR,
+  VENDOR_COMPLIANCE_UNVERIFIABLE_ERROR,
+} from '@/lib/vendors/compliance'
 import { toStorageObjectPath } from '@/lib/storage/object-path'
 
 // work-order-photos is a PRIVATE bucket — reads go through short-lived
@@ -161,6 +173,13 @@ export async function createWorkOrder(
     if (vendor_id && !request_quotes && await isVendorHardBlocked(supabase, vendor_id, membership.org_id)) {
       return { error: VENDOR_HARD_BLOCKED_ERROR }
     }
+
+    // Quote mode dispatches to `quote_vendor_ids` instead of `vendor_id`, and
+    // used to skip both the in-org check and the compliance gate entirely.
+    const quoteVendorProblem = request_quotes
+      ? await checkQuoteVendorsAssignable(supabase, membership.org_id, quote_vendor_ids)
+      : null
+    if (quoteVendorProblem) return quoteVendorProblem
 
     // In quote-request mode, WO starts as quote_requested with no vendor assigned yet
     const woStatus            = resolveWorkOrderStatus(request_quotes, vendor_id)
@@ -470,47 +489,55 @@ export async function updateWorkOrderStatus(
       return { error: 'This work order is assigned to a vendor — it must be completed through the vendor portal so the invoice and payment can be generated.' }
     }
 
-    const update: Record<string, unknown> = { status }
-    if (status === 'completed') {
-      update.completed_date   = isoDate()
-      update.completion_notes = notes ?? null
-    }
+    const update: Record<string, unknown> = status === 'completed'
+      ? workOrderCompletionFields(notes ?? null)
+      : { status }
 
-    const { error } = await supabase
+    // Completing is guarded by the WHERE clause as well as by the read above:
+    // .neq('status', 'completed') makes exactly one of two racing UPDATEs
+    // match a row, so the loser gets `updated === null` and does not re-fire
+    // the completion fan-out.
+    let query = supabase
       .from('work_orders')
       .update(update)
       .eq('id', workOrderId)
       .eq('org_id', membership.org_id)
+    if (status === 'completed') query = query.neq('status', 'completed')
+
+    const { data: updated, error } = await query.select(COMPLETED_WORK_ORDER_SELECT).maybeSingle()
 
     if (error) {
       console.error('[updateWorkOrderStatus]', error)
+      reportError(error, { site: 'serverAction.maintenance.updateWorkOrderStatus.update', orgId: membership.org_id })
       return { error: 'Operation failed. Please try again.' }
     }
 
     if (status === 'completed') {
-      await inngest.send({
-        name: 'work-order/completed',
-        data: {
-          work_order_id: workOrderId,
-          property_id:   current.property_id,
-          org_id:        membership.org_id,
-          actual_cost:   current.actual_cost ?? current.estimated_cost ?? null,
-        },
-      })
-
-      if (current.source_schedule_id) {
-        await advanceScheduleAfterCompletion(supabase, current.source_schedule_id, membership.org_id, current.source ?? undefined)
+      // Every completion side effect — the work-order/completed event that
+      // posts the owner_transactions expense, the work_order_updates row, and
+      // the source maintenance-schedule advance — lives in ONE helper shared
+      // with bulkUpdateWorkOrderStatus and markWorkVerified.
+      if (updated) {
+        await finalizeWorkOrderCompletion(
+          supabase,
+          membership.org_id,
+          [updated as CompletedWorkOrderRow],
+          {
+            statusFromById: new Map([[workOrderId, current.status as WoStatus]]),
+            notes:          notes ?? null,
+          },
+        )
       }
+    } else {
+      await supabase.from('work_order_updates').insert({
+        work_order_id:             workOrderId,
+        org_id:                    membership.org_id,
+        updated_via_vendor_portal: false,
+        status_from:               current.status as WoStatus,
+        status_to:                 status,
+        notes:                     notes ?? null,
+      })
     }
-
-    await supabase.from('work_order_updates').insert({
-      work_order_id:             workOrderId,
-      org_id:                    membership.org_id,
-      updated_via_vendor_portal: false,
-      status_from:               current.status as WoStatus,
-      status_to:                 status,
-      notes:                     notes ?? null,
-    })
 
     revalidatePath('/maintenance')
     revalidatePath(`/maintenance/${workOrderId}`)
@@ -522,51 +549,9 @@ export async function updateWorkOrderStatus(
   }
 }
 
-// ── Feature 4: Advance schedule after WO completion ──────────────────────────
-
-async function advanceScheduleAfterCompletion(
-  supabase: SupabaseClient,
-  scheduleId: string,
-  orgId: string,
-  workOrderSource?: string
-) {
-  const { data: schedule } = await supabase
-    .from('maintenance_schedules')
-    .select('id, schedule_type, frequency, next_due_date, auto_create_wo')
-    .eq('id', scheduleId)
-    .eq('org_id', orgId)
-    .single()
-
-  if (!schedule || !schedule.next_due_date) return
-
-  const lastCompleted = isoDate()
-
-  if (schedule.schedule_type === 'routine' && schedule.frequency) {
-    // Bumped (gap-driven) completions anchor to the ACTUAL completion date —
-    // anchoring to the original scheduled date would discard the benefit of
-    // having done the work early and silently desync the cadence over time.
-    // Normal on-time completions keep the existing fixed-calendar anchor.
-    const anchor = workOrderSource === 'vacancy_gap_suggestion'
-      ? new Date(lastCompleted)
-      : new Date(schedule.next_due_date)
-
-    const nextDue = calcNextDueDate(schedule.frequency as ScheduleFrequency, anchor)
-
-    await supabase
-      .from('maintenance_schedules')
-      .update({
-        last_completed_date: lastCompleted,
-        next_due_date:       nextDue.toISOString().split('T')[0],
-      })
-      .eq('id', scheduleId)
-  } else {
-    // Seasonal / one-time: just record completion date
-    await supabase
-      .from('maintenance_schedules')
-      .update({ last_completed_date: lastCompleted })
-      .eq('id', scheduleId)
-  }
-}
+// Feature 4 (advance the source schedule after a WO completion) now lives in
+// ./complete-work-order-helpers.ts, alongside the rest of the completion side
+// effects, so all three completion paths get it.
 
 // ── Feature 2: Log actual cost (PM-side) ─────────────────────────────────────
 
@@ -829,6 +814,11 @@ export async function sendQuoteRequests(
       return { error: 'Cannot request quotes on a completed or cancelled work order', sent: 0 }
     }
 
+    // This action validated the work order but never the vendor ids — neither
+    // that they belong to the caller's org nor that they are compliance-clear.
+    const vendorProblem = await checkQuoteVendorsAssignable(supabase, membership.org_id, vendorIds)
+    if (vendorProblem) return { ...vendorProblem, sent: 0 }
+
     // Skip vendors who already have a pending or submitted quote for this WO
     const { data: existing } = await supabase
       .from('quote_requests')
@@ -907,6 +897,24 @@ export async function approveQuoteRequest(
       .single()
 
     if (!qr) return { error: 'Quote request not found' }
+
+    // Approval is the point where the vendor is actually assigned
+    // (portal_enabled + a completion token), and it never checked compliance
+    // at all — so an RFQ sent before a COI lapsed could still be approved into
+    // a live dispatch 46+ days later. Checked BEFORE the atomic claim below so
+    // a blocked vendor doesn't leave the quote stuck in 'approved' with the
+    // work order unassigned. isVendorHardBlocked fails closed (throws) — that
+    // must block, not fall through to the generic catch as a pass.
+    try {
+      if (await isVendorHardBlocked(supabase, qr.vendor_id, membership.org_id)) {
+        return { error: VENDOR_HARD_BLOCKED_ERROR }
+      }
+    } catch (complianceErr) {
+      if (complianceErr instanceof VendorComplianceCheckError) {
+        return { error: VENDOR_COMPLIANCE_UNVERIFIABLE_ERROR }
+      }
+      throw complianceErr
+    }
 
     // Atomic status guard — prevents double-approval from concurrent requests
     const { data: claimed } = await supabase
@@ -1413,16 +1421,18 @@ export async function bulkUpdateWorkOrderStatus(
     // the same selection still go through.
     let targetIds = workOrderIds
     let skippedCount = 0
+    const statusFromById = new Map<string, WoStatus | null>()
     if (status === 'completed') {
       const { data: rows } = await supabase
         .from('work_orders')
-        .select('id, vendor_id')
+        .select('id, vendor_id, status')
         .in('id', workOrderIds)
         .eq('org_id', membership.org_id)
 
       const vendorAssignedIds = new Set((rows ?? []).filter((r) => r.vendor_id).map((r) => r.id))
       targetIds    = workOrderIds.filter((id) => !vendorAssignedIds.has(id))
       skippedCount = vendorAssignedIds.size
+      for (const row of rows ?? []) statusFromById.set(row.id, (row.status ?? null) as WoStatus | null)
     }
 
     if (targetIds.length === 0) {
@@ -1431,15 +1441,39 @@ export async function bulkUpdateWorkOrderStatus(
         : {}
     }
 
-    const { error } = await supabase
+    // Same completion payload the single-WO path writes — bulk previously set
+    // `status` alone, leaving completed_date NULL on every bulk-completed WO.
+    const update = status === 'completed' ? workOrderCompletionFields() : { status }
+
+    // `.neq('status', 'completed')` + selecting the claimed rows back is what
+    // makes the fan-out below fire exactly once per work order even if two
+    // bulk completions race — never off a pre-read that both would have seen.
+    let query = supabase
       .from('work_orders')
-      .update({ status })
+      .update(update)
       .in('id', targetIds)
       .eq('org_id', membership.org_id)
+    if (status === 'completed') query = query.neq('status', 'completed')
+
+    const { data: updatedRows, error } = await query.select(COMPLETED_WORK_ORDER_SELECT)
 
     if (error) {
       console.error('[bulkUpdateWorkOrderStatus]', error)
+      reportError(error, { site: 'serverAction.maintenance.bulkUpdateWorkOrderStatus.update', orgId: membership.org_id })
       return { error: 'Operation failed. Please try again.' }
+    }
+
+    // The completion fan-out the bulk path never had: without this a PM who
+    // bulk-completes ten recurring WOs at month end gets an owner P&L short
+    // ten maintenance expenses, and ten source schedules stuck on their old
+    // next_due_date so the cron re-creates the same work orders.
+    if (status === 'completed' && updatedRows?.length) {
+      await finalizeWorkOrderCompletion(
+        supabase,
+        membership.org_id,
+        updatedRows as CompletedWorkOrderRow[],
+        { statusFromById, updatedByUserId: user.id },
+      )
     }
 
     await logAuditEvent({
@@ -1712,12 +1746,25 @@ export async function broadcastMaintenanceTemplate(
 
     if (!properties || properties.length === 0) return { error: 'No matching properties found' }
 
-    const { data: existingSchedules } = await supabase
-      .from('maintenance_schedules')
-      .select('property_id, name')
-      .in('property_id', (properties as { id: string }[]).map((p) => p.id))
+    // PostgREST truncates an unbounded select at max_rows = 1000 with a 200 and
+    // no truncation signal. This set IS the duplicate guard, and there is no
+    // unique constraint on maintenance_schedules behind it (there deliberately
+    // can't be: duplicateMaintenanceScheduleItem copies a row's name onto the
+    // same property on purpose), so a truncated read here silently re-created
+    // schedules that already existed — 50 properties × a 25-item template is
+    // already past the cap.
+    const existingSchedules = await fetchAllRows<{ property_id: string; name: string }>(
+      (from, to) => supabase
+        .from('maintenance_schedules')
+        .select('property_id, name')
+        .eq('org_id', membership.org_id)
+        .in('property_id', (properties as { id: string }[]).map((p) => p.id))
+        .order('id', { ascending: true })
+        .range(from, to),
+      { label: 'broadcastMaintenanceTemplate.existing_schedules' },
+    )
 
-    const existingNames = new Set((existingSchedules ?? []).map((s: { property_id: string; name: string }) => `${s.property_id}::${s.name}`))
+    const existingNames = new Set(existingSchedules.map((s) => `${s.property_id}::${s.name}`))
 
     const fallbackDueDate = new Date(Date.now() + 30 * 86_400_000).toISOString().split('T')[0]
 

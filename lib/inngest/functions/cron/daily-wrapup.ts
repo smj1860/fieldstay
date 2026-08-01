@@ -1,7 +1,8 @@
 import { inngest }                         from '@/lib/inngest/client'
 import { createServiceClient }             from '@/lib/supabase/server'
 import { resend, FROM }                    from '@/lib/resend/client'
-import { getPmEmails, diffDigestSnapshot } from '@/lib/inngest/helpers'
+import { getPmEmails, getPmMembersByOrgIds, diffDigestSnapshot } from '@/lib/inngest/helpers'
+import { fetchAllRows }                    from '@/lib/inngest/paginate'
 import { missingAssetTypesFromDiscoveredSet } from '@/lib/asset-discovery/config'
 import { renderDailyWrapUpEmail }          from '@/lib/resend/emails/daily-wrapup'
 import { unwrapJoin, unwrapJoinArray }     from '@/lib/utils/supabase-joins'
@@ -31,14 +32,34 @@ export const dailyWrapUp = inngest.createFunction(
     const nowMs = await step.run('capture-now', async () => Date.now())
 
     // ── Every org with an active, invite-accepted PM is a candidate ─────────
+    //
+    // "Who is the PM" is getPmMembersByOrgIds()'s contract, not this cron's
+    // (CLAUDE.md): it owns the invite_accepted_at filter and the role
+    // preference. Open-coding `.in('role', …)` + `.not('invite_accepted_at',
+    // 'is', null)` here re-derived both — the drift that has shipped as a live
+    // lockout bug three times. Enumerate the tenants first, then let the
+    // helper decide which of them actually have a reachable PM.
+    //
+    // The tenant enumeration is paginated: the previous open-coded read was an
+    // unbounded select on organization_members, so past PostgREST's
+    // max_rows = 1000 member rows every org sorted later silently stopped
+    // receiving a wrap-up.
     const orgIds = await step.run('find-active-orgs', async () => {
       const supabase = createServiceClient({ system: 'inngest:daily-wrapup' })
-      const { data } = await supabase
-        .from('organization_members')
-        .select('org_id')
-        .in('role', ['owner', 'admin'])
-        .not('invite_accepted_at', 'is', null)
-      return Array.from(new Set((data ?? []).map((m) => m.org_id as string)))
+
+      const orgs = await fetchAllRows<{ id: string }>(
+        (from, to) => supabase
+          .from('organizations')
+          .select('id')
+          .order('id', { ascending: true })
+          .range(from, to),
+        { label: 'organizations(daily-wrapup)' }
+      )
+
+      const pmByOrg = await getPmMembersByOrgIds(supabase, orgs.map((o) => o.id), {
+        roles: ['owner', 'admin'],
+      })
+      return [...pmByOrg.keys()]
     })
 
     if (orgIds.length) {

@@ -105,6 +105,62 @@ rules:
       assigned_crew_member_id.
     pattern-regex: \bassigned_crew_id\b
 
+  # ── Shared helper: getPmMembersByOrgIds ──────────────────────────────────
+  # PROMOTED from ratchet.yml (2026-07-31) once its last 3 sites were migrated
+  # — cron/daily-wrapup.ts, cron/stale-feed-alert.ts and
+  # hospitable/calendar-sync-cron.ts each re-derived the helper's contract by
+  # hand. NARROWED DELIBERATELY: the naive table-wide ban on
+  # .from('organization_members') gives 17 hits, most of them legitimate
+  # non-role reads; requiring a role filter gives exactly the drift class.
+  - id: fieldstay-role-filtered-membership-read
+    languages: [typescript]
+    severity: ERROR
+    message: >-
+      Role-filtered organization_members selection belongs in the auth helpers
+      (lib/auth.ts, lib/crew-auth.ts) or getPmMembersByOrgIds/getOrgDispatcher
+      in lib/inngest/helpers.ts. Open-coding `.in('role', …)` / `.eq('role', …)`
+      re-derives the membership semantics (invite_accepted_at, owner always
+      passing) that have already drifted into live bugs three times.
+    paths:
+      exclude:
+        - /lib/auth.ts
+        - /lib/crew-auth.ts
+        - /lib/inngest/helpers.ts
+    pattern-regex: from\(\s*['"]organization_members['"]\s*\)[\s\S]{0,400}?\.(in|eq)\(\s*['"]role['"]
+
+  # ── Shared helper: lib/http/timeout.ts budgets ───────────────────────────
+  # PROMOTED from ratchet.yml (2026-07-31) once its last site — the Anthropic
+  # normalization call in build-shopping-cart.ts — got ANTHROPIC_TIMEOUT_MS.
+  # NARROWED DELIBERATELY: a bare `fetch(...)` ban produces 43 hits, most of
+  # them client components calling same-origin API routes with a relative path
+  # (no SSRF surface, no hanging-serverless-function risk). Restricted to a
+  # LITERAL absolute http(s) URL, which is the outbound case the budgets exist
+  # for and the only one that can be recognised with certainty.
+  #
+  # This is strictly WEAKER than unit/guardrails/external-fetch-timeout.test.ts
+  # inside lib/** (5 baselined files there vs. 0 here, because those build
+  # their URL from a variable and this rule cannot see that). It is not a
+  # replacement for that test — it EXTENDS the coverage to app/ and
+  # components/, which the vitest test does not scan at all.
+  - id: fieldstay-untimed-external-fetch
+    languages: [typescript]
+    severity: ERROR
+    message: >-
+      Outbound fetch() with no AbortSignal — it has no timeout at all and hangs
+      until the platform kills the function. Pass a budget from
+      lib/http/timeout.ts, or use safeFetch() (lib/security/url-guard.ts) when
+      any part of the URL is tenant-supplied.
+    paths:
+      exclude:
+        - /lib/http/timeout.ts
+        - /lib/security/url-guard.ts
+    patterns:
+      - pattern: fetch($U, ...)
+      - metavariable-regex:
+          metavariable: $U
+          regex: ^['"`]https?://
+      - pattern-not-regex: signal
+
   # ── Private storage buckets ──────────────────────────────────────────────
   - id: fieldstay-get-public-url-on-private-bucket
     languages: [typescript]

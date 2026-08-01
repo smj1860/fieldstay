@@ -22,6 +22,58 @@ zero, it is a chokepoint. If it does not, it is a ratchet — put it in
 record its starting count. Do not ship a "chokepoint" with a handful of
 suppressions; that is a ratchet wearing a costume.
 
+**Promoting a ratchet to a chokepoint** is the point of the ratchet. When a
+rule's count reaches 0, move the whole rule into `chokepoints.yml`, raise its
+severity to `ERROR`, and DELETE its `baseline-counts.json` key — a baseline
+entry for a rule `ratchet.yml` no longer declares is a number nobody can
+lower, and `check-semgrep-ratchet.mjs` fails on it in that direction too.
+Then prove it gates: reintroduce the violation, confirm
+`semgrep --config .semgrep/chokepoints.yml --error` exits 1, revert. Two rules
+were promoted this way on 2026-08-01 —
+`fieldstay-role-filtered-membership-read` (3 → 0, the three crons migrated onto
+`getPmMembersByOrgIds`) and `fieldstay-untimed-external-fetch` (1 → 0, the
+Anthropic call in `build-shopping-cart.ts` given `ANTHROPIC_TIMEOUT_MS`).
+
+## Severity inside the ratchet family
+
+A ratchet rule whose majority is permitted-by-policy is one people learn to
+ignore, and `fieldstay-supabase-unbounded-select` was exactly that: 284
+findings, all pattern-correct, most of them the case CLAUDE.md explicitly
+allows ("Fine for a request handler rendering one org's page; never acceptable
+for a platform-wide scan"). It is now a four-tier ladder along the only axis
+that predicts whether PostgREST's 1000-row cap can actually be reached — what
+bounds the result set:
+
+| Tier | Rule suffix | Bound | Sev | Count |
+|---|---|---|---|---|
+| 1 | `-table-scan` | nothing but the table | ERROR | 38 |
+| 2 | `-cross-tenant` | some entity, but not one org | ERROR | 81 |
+| 3 | `-in-list` | one org, sized by an `.in()` array | WARNING | 50 |
+| 4 | `-org-scoped` | one org, one parent — the permitted case | INFO | 112 |
+
+The four are **mutually exclusive and exhaustive**: every finding of the
+original rule lands in exactly one tier, so the counts still sum to the whole
+class and no site is lost between tiers. Tier 1 is the burn-down target — at 0
+it moves to `chokepoints.yml` like any other promoted rule.
+
+Two mechanics worth knowing before editing these:
+
+- The POSITIVE `pattern-inside: $Y.eq("org_id", ...)` that tiers 3–4 use to
+  assert single-tenant scope must **not** be wrapped in a `pattern-either`.
+  Semgrep then emits the enclosing call's own range as a finding and the count
+  inflates several-fold (591 instead of 81 when it was tried). Two sibling
+  `pattern-inside`s AND correctly and do not inflate — that is how tier 3
+  requires org scope and an `.in()` list at once.
+- `.in('org_id', …)` is deliberately **not** treated as org scope. All five
+  occurrences in the tree are multi-tenant cron fan-ins, i.e. the high-signal
+  case, not the permitted one.
+
+`lib/inngest/**` gets no tier of its own: it is already gated at file
+granularity by `unit/guardrails/unbounded-select.test.ts` on a shrink-only
+baseline, so a cron tier would add a number without adding coverage — and the
+ladder already promotes about half of `lib/inngest`'s findings into tiers 1–2
+on merit rather than by path.
+
 **`paths.exclude` vs. `pattern-not-inside`.** These answer different questions
 and are not interchangeable:
 

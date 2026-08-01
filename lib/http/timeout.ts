@@ -31,6 +31,14 @@ export const SMS_TIMEOUT_MS = 10_000
 export const KROGER_TIMEOUT_MS = 15_000
 
 /**
+ * Anthropic messages API — item-name normalization inside the Kroger cart
+ * builder's Inngest step. Generous relative to the others because it is a
+ * token-generating call rather than a lookup, but still finite: unbounded, a
+ * hung request burns the whole step budget and the cart is never built.
+ */
+export const ANTHROPIC_TIMEOUT_MS = 30_000
+
+/**
  * True when `err` is the abort raised by AbortSignal.timeout() — i.e. we
  * stopped waiting, as opposed to the service returning an error.
  *

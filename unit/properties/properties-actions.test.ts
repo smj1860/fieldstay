@@ -13,7 +13,12 @@ vi.mock('next/navigation', () => ({
   },
 }))
 vi.mock('@/lib/auth', () => ({
+  // Every mutating action in this file is now role-gated on admin|manager
+  // (owner passes automatically) to match the properties/property_assets RLS
+  // write policies and the door-code RPCs. markStepComplete deliberately keeps
+  // requireOrgMember — see the comment on it in the action file.
   requireOrgMember: vi.fn(),
+  requireOrgRole:   vi.fn(),
 }))
 vi.mock('next/cache', () => ({ revalidatePath: vi.fn() }))
 vi.mock('@/lib/geocoding', () => ({ geocodeZip: vi.fn() }))
@@ -24,7 +29,7 @@ vi.mock('@/lib/checklists/apply-master-template', () => ({
 }))
 vi.mock('@/lib/inngest/client', () => ({ inngest: { send: vi.fn() } }))
 
-import { requireOrgMember } from '@/lib/auth'
+import { requireOrgMember, requireOrgRole } from '@/lib/auth'
 import { geocodeZip } from '@/lib/geocoding'
 import { logAuditEvent } from '@/lib/audit'
 import { reportError } from '@/lib/observability/report-error'
@@ -80,6 +85,19 @@ function fd(fields: Record<string, string> = {}) {
   return f
 }
 
+// Both gates resolve to the same context: saveDetails-style actions call
+// requireOrgRole, markStepComplete calls requireOrgMember.
+function mockAuthed(supabase: ReturnType<typeof makeSupabase>) {
+  const ctx = { supabase, membership, user: { id: 'user_1' } }
+  vi.mocked(requireOrgMember).mockResolvedValue(ctx as never)
+  vi.mocked(requireOrgRole).mockResolvedValue(ctx as never)
+}
+
+function mockAuthFailure(message: string) {
+  vi.mocked(requireOrgMember).mockRejectedValue(new Error(message))
+  vi.mocked(requireOrgRole).mockRejectedValue(new Error(message))
+}
+
 describe('properties/actions', () => {
   beforeEach(() => {
     vi.clearAllMocks()
@@ -94,9 +112,7 @@ describe('properties/actions', () => {
           { error: null }, // lat/lng geocode update
         ],
       })
-      vi.mocked(requireOrgMember).mockResolvedValue({
-        supabase, membership, user: { id: 'user_1' },
-      } as never)
+      mockAuthed(supabase)
       vi.mocked(geocodeZip).mockResolvedValue({ lat: 32.6, lng: -85.9 })
 
       await expect(createProperty(null, fd({ zip: '36853', door_code: '1234' })))
@@ -114,7 +130,7 @@ describe('properties/actions', () => {
 
     it('rejects when the property name is missing', async () => {
       const supabase = makeSupabase({})
-      vi.mocked(requireOrgMember).mockResolvedValue({ supabase, membership, user: { id: 'user_1' } } as never)
+      mockAuthed(supabase)
 
       const emptyForm = new FormData()
       const result = await createProperty(null, emptyForm)
@@ -127,7 +143,7 @@ describe('properties/actions', () => {
       const supabase = makeSupabase({
         properties: [{ data: null, count: 25, error: null }],
       })
-      vi.mocked(requireOrgMember).mockResolvedValue({ supabase, membership, user: { id: 'user_1' } } as never)
+      mockAuthed(supabase)
 
       const result = await createProperty(null, fd())
 
@@ -138,7 +154,7 @@ describe('properties/actions', () => {
     })
 
     it('rejects and never touches the DB when the caller is unauthenticated', async () => {
-      vi.mocked(requireOrgMember).mockRejectedValue(new Error('REDIRECT:/login'))
+      mockAuthFailure('REDIRECT:/login')
 
       await expect(createProperty(null, fd())).rejects.toThrow('REDIRECT:/login')
     })
@@ -147,11 +163,9 @@ describe('properties/actions', () => {
   describe('updateProperty', () => {
     it('updates a property scoped to the caller org', async () => {
       const supabase = makeSupabase({
-        properties: [{ data: { zip: '36853' } }, { error: null }],
+        properties: [{ data: { zip: '36853' } }, { data: { id: 'prop_1' }, error: null }],
       })
-      vi.mocked(requireOrgMember).mockResolvedValue({
-        supabase, membership, user: { id: 'user_1' },
-      } as never)
+      mockAuthed(supabase)
 
       const result = await updateProperty('prop_1', null, fd({ zip: '36853' }))
 
@@ -161,11 +175,9 @@ describe('properties/actions', () => {
 
     it('geocodes and patches lat/lng only when the ZIP actually changes', async () => {
       const supabase = makeSupabase({
-        properties: [{ data: { zip: '36853' } }, { error: null }, { error: null }],
+        properties: [{ data: { zip: '36853' } }, { data: { id: 'prop_1' }, error: null }, { data: { id: 'prop_1' }, error: null }],
       })
-      vi.mocked(requireOrgMember).mockResolvedValue({
-        supabase, membership, user: { id: 'user_1' },
-      } as never)
+      mockAuthed(supabase)
       vi.mocked(geocodeZip).mockResolvedValue({ lat: 32.6, lng: -85.9 })
 
       await updateProperty('prop_1', null, fd({ zip: '36854' }))
@@ -175,11 +187,9 @@ describe('properties/actions', () => {
 
     it('scopes the update to the caller org, not just the property id (IDOR check)', async () => {
       const supabase = makeSupabase({
-        properties: [{ data: { zip: null } }, { error: null }],
+        properties: [{ data: { zip: null } }, { data: { id: 'prop_1' }, error: null }],
       })
-      vi.mocked(requireOrgMember).mockResolvedValue({
-        supabase, membership, user: { id: 'user_1' },
-      } as never)
+      mockAuthed(supabase)
 
       await updateProperty('other-orgs-property', null, fd())
 
@@ -189,7 +199,7 @@ describe('properties/actions', () => {
 
     it('rejects when the property name is missing', async () => {
       const supabase = makeSupabase({})
-      vi.mocked(requireOrgMember).mockResolvedValue({ supabase, membership, user: { id: 'user_1' } } as never)
+      mockAuthed(supabase)
 
       const emptyForm = new FormData()
       const result = await updateProperty('prop_1', null, emptyForm)
@@ -198,9 +208,55 @@ describe('properties/actions', () => {
       expect(supabase.from).not.toHaveBeenCalled()
     })
 
+    // ── Regressions from the 2026-07-31 audit ────────────────────────────
+    // updateProperty was gated on requireOrgMember only. A `viewer` passed
+    // that gate; the properties UPDATE was then denied by RLS, which affects
+    // 0 rows and returns NO error, so the action reported success — and went
+    // on to call store_property_door_code, whose own guard was org membership
+    // in ANY role, overwriting the door code.
+    it('refuses the update when the caller lacks the admin|manager role', async () => {
+      const supabase = makeSupabase({})
+      vi.mocked(requireOrgRole).mockRejectedValue(
+        new Error('You do not have permission to perform this action.')
+      )
+
+      const result = await updateProperty('prop_1', null, fd({ door_code: '4821' }))
+
+      expect(result).toEqual({ error: 'Operation failed. Please try again.' })
+      expect(supabase.from).not.toHaveBeenCalled()
+      expect(supabase.rpc).not.toHaveBeenCalled()
+    })
+
+    it('reports a permission failure — and never writes the door code — when the update matches 0 rows', async () => {
+      const supabase = makeSupabase({
+        properties: [{ data: { zip: null } }, { data: null, error: null }],
+      })
+      mockAuthed(supabase)
+
+      const result = await updateProperty('prop_1', null, fd({ door_code: '4821' }))
+
+      expect(result.error).toContain('permission')
+      expect(result.success).toBeUndefined()
+      expect(supabase.rpc).not.toHaveBeenCalled()
+      expect(logAuditEvent).not.toHaveBeenCalled()
+    })
+
+    it('surfaces a door-code write failure instead of reporting a successful save', async () => {
+      const supabase = makeSupabase({
+        properties: [{ data: { zip: null } }, { data: { id: 'prop_1' }, error: null }],
+      })
+      mockAuthed(supabase)
+      vi.mocked(supabase.rpc).mockResolvedValue({ data: null, error: { message: 'vault down' } })
+
+      const result = await updateProperty('prop_1', null, fd({ door_code: '4821' }))
+
+      expect(result).toEqual({ error: 'Operation failed. Please try again.' })
+      expect(logAuditEvent).not.toHaveBeenCalled()
+    })
+
     it('returns a generic error and never touches the DB when the caller is unauthenticated', async () => {
       const supabase = makeSupabase({})
-      vi.mocked(requireOrgMember).mockRejectedValue(new Error('REDIRECT:/login'))
+      mockAuthFailure('REDIRECT:/login')
 
       const result = await updateProperty('prop_1', null, fd())
 
@@ -215,9 +271,7 @@ describe('properties/actions', () => {
         properties: [{ data: { id: 'prop_1', door_code_secret_id: 'secret_1' } }],
       })
       vi.mocked(supabase.rpc).mockResolvedValue({ data: '4821', error: null })
-      vi.mocked(requireOrgMember).mockResolvedValue({
-        supabase, membership, user: { id: 'user_1' },
-      } as never)
+      mockAuthed(supabase)
 
       const result = await revealPropertyDoorCode('prop_1')
 
@@ -229,9 +283,7 @@ describe('properties/actions', () => {
       const supabase = makeSupabase({
         properties: [{ data: { id: 'prop_1', door_code_secret_id: null } }],
       })
-      vi.mocked(requireOrgMember).mockResolvedValue({
-        supabase, membership, user: { id: 'user_1' },
-      } as never)
+      mockAuthed(supabase)
 
       const result = await revealPropertyDoorCode('prop_1')
 
@@ -241,9 +293,7 @@ describe('properties/actions', () => {
 
     it('rejects a property id that does not belong to the caller org (IDOR check)', async () => {
       const supabase = makeSupabase({ properties: [{ data: null }] })
-      vi.mocked(requireOrgMember).mockResolvedValue({
-        supabase, membership, user: { id: 'user_1' },
-      } as never)
+      mockAuthed(supabase)
 
       const result = await revealPropertyDoorCode('other-orgs-property')
 
@@ -251,9 +301,40 @@ describe('properties/actions', () => {
       expect(supabase.rpc).not.toHaveBeenCalled()
     })
 
+    // A `viewer` could read the decrypted door code: the action gated on
+    // requireOrgMember, and read_property_door_code's own guard was
+    // get_user_org_ids() (any role). Both layers now require admin|manager.
+    it('refuses to decrypt for a caller without the admin|manager role', async () => {
+      const supabase = makeSupabase({
+        properties: [{ data: { id: 'prop_1', door_code_secret_id: 'secret_1' } }],
+      })
+      vi.mocked(requireOrgRole).mockRejectedValue(
+        new Error('You do not have permission to perform this action.')
+      )
+
+      const result = await revealPropertyDoorCode('prop_1')
+
+      expect(result).toEqual({ error: 'Operation failed. Please try again.' })
+      expect(supabase.rpc).not.toHaveBeenCalled()
+      expect(logAuditEvent).not.toHaveBeenCalled()
+    })
+
+    it('distinguishes a failed lookup from a property that simply has no row', async () => {
+      const supabase = makeSupabase({
+        properties: [{ data: null, error: { message: 'permission denied' } }],
+      })
+      mockAuthed(supabase)
+
+      const result = await revealPropertyDoorCode('prop_1')
+
+      expect(result).toEqual({ error: 'Operation failed. Please try again.' })
+      expect(reportError).toHaveBeenCalled()
+      expect(supabase.rpc).not.toHaveBeenCalled()
+    })
+
     it('returns a generic error and never touches the DB when the caller is unauthenticated', async () => {
       const supabase = makeSupabase({})
-      vi.mocked(requireOrgMember).mockRejectedValue(new Error('REDIRECT:/login'))
+      mockAuthFailure('REDIRECT:/login')
 
       const result = await revealPropertyDoorCode('prop_1')
 
@@ -265,9 +346,9 @@ describe('properties/actions', () => {
   describe('markStepComplete', () => {
     it('marks a setup step complete, scoped to the caller org', async () => {
       const supabase = makeSupabase({
-        properties: [{ data: { setup_steps_completed: { details: true } } }, { error: null }],
+        properties: [{ data: { setup_steps_completed: { details: true } } }, { data: { id: 'prop_1' }, error: null }],
       })
-      vi.mocked(requireOrgMember).mockResolvedValue({ supabase, membership, user: { id: 'user_1' } } as never)
+      mockAuthed(supabase)
 
       await expect(markStepComplete('prop_1', 'ical')).resolves.toBeUndefined()
 
@@ -276,9 +357,21 @@ describe('properties/actions', () => {
     })
 
     it('propagates the failure when the caller is unauthenticated', async () => {
-      vi.mocked(requireOrgMember).mockRejectedValue(new Error('boom'))
+      mockAuthFailure('boom')
 
       await expect(markStepComplete('prop_1', 'ical')).rejects.toThrow('boom')
+    })
+
+    // markStepComplete stays on requireOrgMember (five setup actions call it
+    // after their own gated write). The 0-row UPDATE is what must fail closed:
+    // it used to mark a step complete in the UI for a caller RLS denied.
+    it('throws instead of reporting progress when the update matches 0 rows', async () => {
+      const supabase = makeSupabase({
+        properties: [{ data: { setup_steps_completed: {} } }, { data: null, error: null }],
+      })
+      mockAuthed(supabase)
+
+      await expect(markStepComplete('prop_1', 'ical')).rejects.toThrow(/permission/)
     })
   })
 
@@ -297,9 +390,7 @@ describe('properties/actions', () => {
         asset_type_standards:  [{ data: null }],
         property_assets:       [{ data: { id: 'asset_1' } }],
       })
-      vi.mocked(requireOrgMember).mockResolvedValue({
-        supabase, membership, user: { id: 'user_1' },
-      } as never)
+      mockAuthed(supabase)
 
       const result = await createAsset('prop_1', null, buildAssetForm({ make: 'Rheem', model: 'XE50' }))
 
@@ -313,9 +404,7 @@ describe('properties/actions', () => {
 
     it('rejects a property id that does not belong to the caller org (IDOR check)', async () => {
       const supabase = makeSupabase({ properties: [{ data: null }] })
-      vi.mocked(requireOrgMember).mockResolvedValue({
-        supabase, membership, user: { id: 'user_1' },
-      } as never)
+      mockAuthed(supabase)
 
       const result = await createAsset('other-orgs-property', null, buildAssetForm())
 
@@ -325,9 +414,7 @@ describe('properties/actions', () => {
 
     it('rejects when required fields are missing', async () => {
       const supabase = makeSupabase({})
-      vi.mocked(requireOrgMember).mockResolvedValue({
-        supabase, membership, user: { id: 'user_1' },
-      } as never)
+      mockAuthed(supabase)
 
       const emptyForm = new FormData()
       const result = await createAsset('prop_1', null, emptyForm)
@@ -349,9 +436,7 @@ describe('properties/actions', () => {
       const supabase = makeSupabase({
         property_assets: [{ data: { asset_type: 'water_heater' }, error: null }],
       })
-      vi.mocked(requireOrgMember).mockResolvedValue({
-        supabase, membership, user: { id: 'user_1' },
-      } as never)
+      mockAuthed(supabase)
 
       const result = await updateAsset('asset_1', 'prop_1', null, buildAssetForm())
 
@@ -363,9 +448,7 @@ describe('properties/actions', () => {
       const supabase = makeSupabase({
         property_assets: [{ data: null, error: { message: 'No rows found' } }],
       })
-      vi.mocked(requireOrgMember).mockResolvedValue({
-        supabase, membership, user: { id: 'user_1' },
-      } as never)
+      mockAuthed(supabase)
 
       const result = await updateAsset('other-orgs-asset', 'prop_1', null, buildAssetForm())
 
@@ -375,10 +458,10 @@ describe('properties/actions', () => {
 
   describe('deactivateAsset', () => {
     it('deactivates an asset scoped to the caller org', async () => {
-      const supabase = makeSupabase({})
-      vi.mocked(requireOrgMember).mockResolvedValue({
-        supabase, membership, user: { id: 'user_1' },
-      } as never)
+      const supabase = makeSupabase({
+        property_assets: [{ data: { id: 'asset_1' }, error: null }],
+      })
+      mockAuthed(supabase)
 
       const result = await deactivateAsset('asset_1')
 
@@ -386,6 +469,18 @@ describe('properties/actions', () => {
       const eqCalls = supabase.calls.filter((c) => c.table === 'property_assets' && c.method === 'eq')
       expect(eqCalls.some((c) => c.args[0] === 'org_id' && c.args[1] === 'org_1')).toBe(true)
       expect(logAuditEvent).toHaveBeenCalledWith(expect.objectContaining({ action: 'asset.deactivated' }))
+    })
+
+    it('reports a permission failure when the update matches 0 rows', async () => {
+      const supabase = makeSupabase({
+        property_assets: [{ data: null, error: null }],
+      })
+      mockAuthed(supabase)
+
+      const result = await deactivateAsset('other-orgs-asset')
+
+      expect(result.error).toContain('permission')
+      expect(logAuditEvent).not.toHaveBeenCalled()
     })
   })
 
@@ -403,9 +498,7 @@ describe('properties/actions', () => {
         asset_type_standards:  [{ data: [] }],
         property_assets:       [{ error: null }],
       })
-      vi.mocked(requireOrgMember).mockResolvedValue({
-        supabase, membership, user: { id: 'user_1' },
-      } as never)
+      mockAuthed(supabase)
 
       const result = await bulkImportAssets('prop_1', rows)
 
@@ -421,9 +514,7 @@ describe('properties/actions', () => {
     // ownership check createAsset already had.
     it('rejects a property id that does not belong to the caller org (IDOR check — regression test for the fix in this session)', async () => {
       const supabase = makeSupabase({ properties: [{ data: null }] })
-      vi.mocked(requireOrgMember).mockResolvedValue({
-        supabase, membership, user: { id: 'user_1' },
-      } as never)
+      mockAuthed(supabase)
 
       const result = await bulkImportAssets('other-orgs-property', rows)
 
@@ -434,7 +525,7 @@ describe('properties/actions', () => {
 
     it('returns a generic error and never touches the DB when the caller is unauthenticated', async () => {
       const supabase = makeSupabase({})
-      vi.mocked(requireOrgMember).mockRejectedValue(new Error('REDIRECT:/login'))
+      mockAuthFailure('REDIRECT:/login')
 
       const result = await bulkImportAssets('prop_1', rows)
 
@@ -446,10 +537,10 @@ describe('properties/actions', () => {
 
   describe('archiveProperty', () => {
     it('archives a property scoped to the caller org and redirects to /properties', async () => {
-      const supabase = makeSupabase({})
-      vi.mocked(requireOrgMember).mockResolvedValue({
-        supabase, membership, user: { id: 'user_1' },
-      } as never)
+      const supabase = makeSupabase({
+        properties: [{ data: { id: 'prop_1' }, error: null }],
+      })
+      mockAuthed(supabase)
 
       await expect(archiveProperty('prop_1')).rejects.toThrow('REDIRECT:/properties')
 
@@ -458,9 +549,25 @@ describe('properties/actions', () => {
       expect(logAuditEvent).toHaveBeenCalledWith(expect.objectContaining({ action: 'property.archived' }))
     })
 
+    it('throws instead of redirecting as if archived when the update matches 0 rows', async () => {
+      const supabase = makeSupabase({
+        properties: [{ data: null, error: null }],
+      })
+      mockAuthed(supabase)
+
+      // The outer catch deliberately replaces the message with a generic one
+      // (details-form.tsx surfaces e.message directly to the PM). What matters
+      // is that it throws at all instead of redirecting to /properties as if
+      // the archive had happened.
+      await expect(archiveProperty('other-orgs-property'))
+        .rejects.toThrow('Failed to archive property. Please try again.')
+      expect(mockRedirect).not.toHaveBeenCalled()
+      expect(logAuditEvent).not.toHaveBeenCalled()
+    })
+
     it('rejects and never touches the DB when the caller is unauthenticated', async () => {
       const supabase = makeSupabase({})
-      vi.mocked(requireOrgMember).mockRejectedValue(new Error('REDIRECT:/login'))
+      mockAuthFailure('REDIRECT:/login')
 
       await expect(archiveProperty('prop_1')).rejects.toThrow('REDIRECT:/login')
       expect(supabase.from).not.toHaveBeenCalled()

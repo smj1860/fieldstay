@@ -63,6 +63,29 @@ async function writeCoords(
   }
 }
 
+/**
+ * store_property_door_code, with its error reported rather than discarded and
+ * WITHOUT surfacing a user-facing failure — used only where the surrounding
+ * write has already committed. Never logs the door code itself.
+ */
+async function reportDoorCodeWrite(
+  supabase:   ActionSupabase,
+  propertyId: string,
+  orgId:      string,
+  doorCode:   string | null,
+  site:       string,
+): Promise<void> {
+  const { error } = await supabase.rpc('store_property_door_code', {
+    p_property_id: propertyId,
+    p_org_id:      orgId,
+    p_door_code:   doorCode,
+  })
+  if (error) {
+    console.error(`[${site}] door code write failed`, error)
+    reportError(error, { site: `serverAction.properties.${site}.storeDoorCode`, orgId })
+  }
+}
+
 // ── Create ──────────────────────────────────────────────────
 
 export async function createProperty(
@@ -157,23 +180,12 @@ export async function createProperty(
       return { error: 'Operation failed. Please try again.' }
     }
 
+    // The property row is already committed, so a Vault failure here must not
+    // roll the whole create back into an error the PM would retry (creating a
+    // duplicate). reportDoorCodeWrite() logs and reports without throwing —
+    // the door code can be re-saved from the property edit form.
     if (door_code) {
-      // The property row is already committed, so a Vault failure here must not
-      // roll the whole create back into an error the PM would retry (creating a
-      // duplicate). Report it and continue — the door code can be re-saved from
-      // the property edit form.
-      const { error: doorCodeError } = await supabase.rpc('store_property_door_code', {
-        p_property_id: property.id,
-        p_org_id:      membership.org_id,
-        p_door_code:   door_code,
-      })
-      if (doorCodeError) {
-        console.error('[createProperty] door code write failed', doorCodeError)
-        reportError(doorCodeError, {
-          site:  'serverAction.properties.createProperty.storeDoorCode',
-          orgId: membership.org_id,
-        })
-      }
+      await reportDoorCodeWrite(supabase, property.id, membership.org_id, door_code, 'createProperty')
     }
 
     if (zip) {

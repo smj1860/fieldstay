@@ -18,30 +18,146 @@
 # rule: it reports zero and means nothing.
 # ============================================================================
 rules:
-  # ── max_rows = 1000 silently truncates every unbounded select ────────────
-  # The single highest-impact systemic finding of the 2026-07-30 audit. This
-  # is broader than unit/guardrails/unbounded-select.test.ts, which only scans
-  # lib/inngest/**; a request handler paginating a 3,000-row property list is
-  # equally wrong, just less catastrophic.
-  - id: fieldstay-supabase-unbounded-select
+  # ══ max_rows = 1000 silently truncates every unbounded select ════════════
+  #
+  # The single highest-impact systemic finding of the 2026-07-30 audit — and,
+  # as one undifferentiated rule, 284 findings of which the majority were
+  # explicitly permitted by CLAUDE.md ("Fine for a request handler rendering
+  # one org's page; never acceptable for a platform-wide scan"). A rule whose
+  # majority is permitted-by-policy noise is one people learn to ignore, so it
+  # is split into a four-step SEVERITY LADDER along the only axis that
+  # actually predicts whether the 1000-row cap can be reached: what bounds the
+  # result set.
+  #
+  #   1  -table-scan    nothing bounds it but the table itself           ERROR
+  #   2  -cross-tenant  bounded by some entity, but not by org           ERROR
+  #   3  -in-list       one org, but sized by a caller-supplied .in()  WARNING
+  #   4  -org-scoped    one org, one parent entity — the permitted case   INFO
+  #
+  # The four are mutually exclusive and partition the original rule exactly:
+  # every finding lands in exactly one tier, so the ratchet counts still sum
+  # to the whole class and no site can be lost between tiers.
+  #
+  # NOTE on the shared exclusions, which every tier repeats:
+  # `$S.from($T).select(...)` only matches a select whose receiver is the
+  # `.from()` call itself, i.e. a READ. A write's returning-clause
+  # (`.from(t).insert(y).select()`) has `.insert(y)` as the receiver and never
+  # matches, so no insert/update/upsert/delete exclusion is needed. The
+  # bounding calls must be `pattern-not-inside: $X.limit(...)` (not
+  # `$S.from($T).select(...).limit(...)`): in a real chain the two are
+  # separated by .eq()/.order()/.in() etc., so the adjacent form matches
+  # almost nothing while the enclosing-call form correctly treats the select
+  # as a syntactic descendant of the terminator. The same applies to the
+  # POSITIVE `pattern-inside: $Y.eq("org_id", ...)` the lower tiers use to
+  # assert single-tenant scope. That positive form must NOT be wrapped in a
+  # `pattern-either` — semgrep then emits the enclosing call's range as a
+  # finding in its own right and the count inflates several-fold (591 instead
+  # of 81 when it was tried). Two sibling `pattern-inside`s AND correctly and
+  # do not inflate, which is how tier 3 requires org scope and an .in() list
+  # at once.
+  #
+  # `.in('org_id', …)` is deliberately NOT treated as org scope anywhere below:
+  # all five occurrences in the tree are multi-tenant cron fan-ins, which is
+  # the high-signal case, not the permitted one.
+  #
+  # lib/inngest/** gets no tier of its own. It is already gated at file
+  # granularity by unit/guardrails/unbounded-select.test.ts on a shrink-only
+  # baseline, so a duplicate cron tier would add a number without adding
+  # coverage — and the ladder already promotes half of lib/inngest's findings
+  # into the top two tiers on merit rather than by path.
+
+  # ── Tier 1: nothing bounds this read but the table ───────────────────────
+  # No equality filter of any kind anywhere in the chain. Whatever this
+  # returns is the whole table (or an arbitrarily long `.in()` list over it),
+  # truncated at 1000. This is the exact shape of all eight cron defects the
+  # 2026-07-30 audit found, and it is the tier to burn down to zero first: at
+  # zero it can move to chokepoints.yml and gate at --error.
+  - id: fieldstay-supabase-unbounded-select-table-scan
+    languages: [typescript]
+    severity: ERROR
+    message: >-
+      Unbounded .select() with NO equality filter at all — this reads the whole
+      table and PostgREST truncates it at max_rows = 1000 with a 200 and no
+      truncation signal. Bound it: fetchAllRows() (lib/inngest/paginate.ts),
+      .limit(), .single()/.maybeSingle(), or a { count: 'exact', head: true }
+      aggregate.
+    patterns:
+      - pattern: $S.from($T).select(...)
+      - pattern-not-inside: $X.limit(...)
+      - pattern-not-inside: $X.range(...)
+      - pattern-not-inside: $X.single(...)
+      - pattern-not-inside: $X.maybeSingle(...)
+      - pattern-not: "$S.from($T).select($SEL, {..., head: true, ...})"
+      - pattern-not-inside: $X.eq($COL, ...)
+
+  # ── Tier 2: bounded by something, but not by tenant ──────────────────────
+  # Has an equality filter, so it is not a bare table scan, but nothing pins
+  # it to one org — the result set grows with the PLATFORM, not with a tenant.
+  # Every one of these is a genuine truncation risk the moment tenant count
+  # rises; CLAUDE.md's "fine for one org's page" exemption does not apply.
+  - id: fieldstay-supabase-unbounded-select-cross-tenant
+    languages: [typescript]
+    severity: ERROR
+    message: >-
+      Unbounded .select() with no .eq('org_id', …) anywhere in the chain — this
+      read spans tenants, so it grows with the platform and silently truncates
+      at max_rows = 1000. Scope it to one org, or bound it with fetchAllRows()
+      / .limit() / .single() / a head-count aggregate.
+    patterns:
+      - pattern: $S.from($T).select(...)
+      - pattern-inside: $Y.eq($COL, ...)
+      - pattern-not-inside: $X.limit(...)
+      - pattern-not-inside: $X.range(...)
+      - pattern-not-inside: $X.single(...)
+      - pattern-not-inside: $X.maybeSingle(...)
+      - pattern-not: "$S.from($T).select($SEL, {..., head: true, ...})"
+      - pattern-not-inside: $X.eq("org_id", ...)
+
+  # ── Tier 3: one org, but sized by a caller-supplied list ─────────────────
+  # `.eq('org_id', …)` plus `.in(col, array)`. Single-tenant, so it is not a
+  # cross-tenant scan — but the row count scales with the ARRAY, not with a
+  # single parent entity, and the array is caller- or query-derived. Rows can
+  # be a multiple of the list length (one org's inventory_items across 50
+  # properties is ~5,750 rows, well past the cap). Lower severity than tier 2
+  # because the ceiling is a tenant's data rather than the platform's, but
+  # these are real: it is the tier holding the confirmed true positives in
+  # inventory/actions.ts, maintenance/actions.ts and upsert-normalized.ts.
+  - id: fieldstay-supabase-unbounded-select-in-list
     languages: [typescript]
     severity: WARNING
     message: >-
-      Unbounded .select() — PostgREST caps the response at max_rows = 1000 and
-      returns a 200 with no truncation signal. Bound it: fetchAllRows()
-      (lib/inngest/paginate.ts), .limit(), .single()/.maybeSingle(), or a
-      { count: 'exact', head: true } aggregate.
-    # NOTE on the exclusions: `$S.from($T).select(...)` only matches a select
-    # whose receiver is the `.from()` call itself, i.e. a READ. A write's
-    # returning-clause (`.from(t).insert(y).select()`) has `.insert(y)` as the
-    # receiver and never matches, so no insert/update/upsert/delete exclusion
-    # is needed. The bounding calls must be `pattern-not-inside: $X.limit(...)`
-    # (not `$S.from($T).select(...).limit(...)`): in a real chain the two are
-    # separated by .eq()/.order()/.in() etc., so the adjacent form matches
-    # almost nothing while the enclosing-call form correctly treats the select
-    # as a syntactic descendant of the terminator.
+      Unbounded .select() whose size scales with an .in(col, array) list rather
+      than a single parent row. One tenant's rows across a long list can exceed
+      max_rows = 1000 (one org's inventory_items across 50 properties already
+      does). Chunk the list, or bound the read with fetchAllRows() / .limit().
     patterns:
       - pattern: $S.from($T).select(...)
+      - pattern-inside: $Y.eq("org_id", ...)
+      - pattern-inside: $Z.in($COL, $ARR)
+      - pattern-not-inside: $X.limit(...)
+      - pattern-not-inside: $X.range(...)
+      - pattern-not-inside: $X.single(...)
+      - pattern-not-inside: $X.maybeSingle(...)
+      - pattern-not: "$S.from($T).select($SEL, {..., head: true, ...})"
+
+  # ── Tier 4 (HYGIENE): one org, one parent entity ─────────────────────────
+  # `.eq('org_id', …)` and no list. This is precisely the case CLAUDE.md
+  # permits — a request handler rendering one 10–50-property tenant's page.
+  # Kept counted, at INFO, so the class stays visible and cannot grow, but
+  # deliberately at a severity that does not compete with tiers 1–3 for
+  # attention. Do NOT promote a fix here over a tier-1 finding.
+  - id: fieldstay-supabase-unbounded-select-org-scoped
+    languages: [typescript]
+    severity: INFO
+    message: >-
+      Unbounded .select() scoped to a single org. Permitted by CLAUDE.md for a
+      request handler rendering one tenant's page — counted as hygiene only, so
+      the class cannot grow. Bound it if this table can hold >1000 rows for one
+      org, or if this code can ever run platform-wide.
+    patterns:
+      - pattern: $S.from($T).select(...)
+      - pattern-inside: $Y.eq("org_id", ...)
+      - pattern-not-inside: $Z.in($COL, $ARR)
       - pattern-not-inside: $X.limit(...)
       - pattern-not-inside: $X.range(...)
       - pattern-not-inside: $X.single(...)
@@ -122,51 +238,9 @@ rules:
       - pattern-not: "const [..., {..., error, ...}, ...] = await Promise.all(...)"
       - pattern-not: "const [..., {..., error: $E, ...}, ...] = await Promise.all(...)"
 
-  # ── An outbound fetch with no timeout budget ─────────────────────────────
-  # NARROWED DELIBERATELY. A bare `fetch(...)` ban produces 43 hits of which
-  # the majority are client components calling same-origin API routes with a
-  # relative path — no SSRF surface and no hanging-serverless-function risk,
-  # so counting them would make the rule mostly noise. Restricted to an
-  # absolute http(s) URL, which is exactly the outbound/external case
-  # lib/http/timeout.ts's budgets exist for.
-  - id: fieldstay-untimed-external-fetch
-    languages: [typescript]
-    severity: WARNING
-    message: >-
-      Outbound fetch() with no AbortSignal — it has no timeout at all and hangs
-      until the platform kills the function. Pass a budget from
-      lib/http/timeout.ts, or use safeFetch() (lib/security/url-guard.ts) when
-      any part of the URL is tenant-supplied.
-    paths:
-      exclude:
-        - /lib/http/timeout.ts
-        - /lib/security/url-guard.ts
-    patterns:
-      - pattern: fetch($U, ...)
-      - metavariable-regex:
-          metavariable: $U
-          regex: ^['"`]https?://
-      - pattern-not-regex: signal
-
-  # ── Role-filtered organization_members selection ─────────────────────────
-  # Started life as a chokepoint candidate (the naive table-wide ban gives 17
-  # noisy hits; this narrowing gives 3). All 3 are genuine drift — each
-  # re-derives getPmMembersByOrgIds()'s owner/admin + invite_accepted_at
-  # semantics inline — but 3 > 0, so it cannot gate at --error today. It
-  # belongs here until the burn-down lands, then promote it to
-  # chokepoints.yml.
-  - id: fieldstay-role-filtered-membership-read
-    languages: [typescript]
-    severity: WARNING
-    message: >-
-      Role-filtered organization_members selection belongs in the auth helpers
-      (lib/auth.ts, lib/crew-auth.ts) or getPmMembersByOrgIds/getOrgDispatcher
-      in lib/inngest/helpers.ts. Open-coding `.in('role', …)` / `.eq('role', …)`
-      re-derives the membership semantics (invite_accepted_at, owner always
-      passing) that have already drifted into live bugs three times.
-    paths:
-      exclude:
-        - /lib/auth.ts
-        - /lib/crew-auth.ts
-        - /lib/inngest/helpers.ts
-    pattern-regex: from\(\s*['"]organization_members['"]\s*\)[\s\S]{0,400}?\.(in|eq)\(\s*['"]role['"]
+  # NOTE — two rules that used to live here, fieldstay-untimed-external-fetch
+  # and fieldstay-role-filtered-membership-read, reached 0 findings and were
+  # PROMOTED to chokepoints.yml, where they gate at --error across the whole
+  # tree. See the entries there. Their baseline-counts.json keys are removed
+  # with them: a ratchet entry for a rule that ratchet.yml no longer declares
+  # is a number nobody can lower, and check-semgrep-ratchet.mjs fails on it.

@@ -1274,18 +1274,37 @@ following them stops being a memory test. Five layers, checked in CI via
      what lets it gate at `--error` across the whole tree. Covers: the service
      role key outside `lib/supabase/server.ts`, Telnyx outside
      `lib/sms/telnyx.ts`, a raw `<limiter>.limit(` outside `lib/rate-limit.ts`,
-     `void` on a lazy PostgREST builder (the request is never sent),
-     `getPublicUrl()` on the three private buckets, and the
+     a role-filtered `organization_members` read outside the auth helpers /
+     `getPmMembersByOrgIds`, an outbound `fetch()` to a literal `https://` URL
+     with no `AbortSignal`, `void` on a lazy PostgREST builder (the request is
+     never sent), `getPublicUrl()` on the three private buckets, and the
      `memberships`/`work_order_notes`/`assigned_crew_id` names that do not
-     exist.
+     exist. The last two were PROMOTED from `ratchet.yml` on 2026-08-01 once
+     their counts hit 0 — that promotion is the ratchet's purpose, and it
+     requires deleting the rule's `baseline-counts.json` key in the same
+     change.
    - `.semgrep/ratchet.yml` — a defect class with many legitimate owners and
-     hundreds of live sites (unbounded `.select()`, discarded write results,
-     `data` destructured without `error`, untimed outbound fetch,
-     role-filtered `organization_members` reads). Gated on
+     hundreds of live sites (discarded write results, `data` destructured
+     without `error`, and the unbounded-`.select()` ladder below). Gated on
      `--baseline-commit` (only findings NEW vs. the PR base fail) plus
      `.semgrep/baseline-counts.json`, a committed per-rule count that
      `scripts/check-semgrep-ratchet.mjs` allows to move only DOWN. Lock in a
      burn-down with `node scripts/check-semgrep-ratchet.mjs --update`.
+   - **Severity inside a ratchet family matters as much as the pattern.** The
+     single `fieldstay-supabase-unbounded-select` rule reported 284 findings,
+     every one pattern-correct and most of them the case this file explicitly
+     permits (one org's page). It is now four mutually exclusive, exhaustive
+     tiers ranked by what actually bounds the result set —
+     `-table-scan` (nothing but the table, ERROR, 38),
+     `-cross-tenant` (no `.eq('org_id', …)` anywhere, ERROR, 81),
+     `-in-list` (one org but sized by an `.in()` array, WARNING, 50),
+     `-org-scoped` (one org, one parent — hygiene only, INFO, 112).
+     Tier 1 is the burn-down target; at 0 it gets promoted like any other
+     rule. `lib/inngest/**` gets no tier of its own because
+     `unit/guardrails/unbounded-select.test.ts` already gates it at file
+     granularity. See `.semgrep/README.md` for the two semgrep mechanics
+     these tiers depend on (a positive `pattern-inside` must not be wrapped
+     in `pattern-either`; `.in('org_id', …)` is not org scope).
    - **`paths.exclude` expresses ownership; `pattern-not-inside` expresses
      handling.** They are not interchangeable. What makes `lib/sms/telnyx.ts`
      allowed to call Telnyx is its path — its identity as the SMS_ENABLED +
