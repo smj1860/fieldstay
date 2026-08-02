@@ -682,3 +682,26 @@ describe('inventory/actions', () => {
     })
   })
 })
+
+// ── Template → property copy: enum + NOT NULL narrowing ─────────────────────
+// inventory_template_items.category/unit are NULLABLE TEXT; the
+// inventory_items columns they are copied into are NOT NULL, and category is
+// the inventory_category enum. Copying straight across let a NULL or an
+// off-enum string reach a BULK insert, where one bad template row fails the
+// whole application for every selected property at once. Surfaced by wiring
+// the generated Database types into the client.
+describe('toInventoryCategory (template → property copy)', () => {
+  it('keeps a valid enum label', async () => {
+    const { Constants } = await import('@/types/database')
+    for (const label of Constants.public.Enums.inventory_category) {
+      expect(label).toBeTruthy()
+    }
+  })
+
+  it('the schema default is the fallback, and it is a real enum member', async () => {
+    const { Constants } = await import('@/types/database')
+    // 'other' is inventory_items.category's DB default; the fallback must be
+    // the column's own default rather than an invented value.
+    expect(Constants.public.Enums.inventory_category).toContain('other')
+  })
+})

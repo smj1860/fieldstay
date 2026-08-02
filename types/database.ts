@@ -1779,3 +1779,23 @@ export interface PromoHospitableLaunchCounter {
  */
 export type { Database } from './database.generated'
 
+/**
+ * Row / payload helpers from the generated schema, re-exported so callers get
+ * them from the same place as everything else.
+ *
+ * Use `TablesInsert<'x'>` for an insert payload instead of hand-writing the
+ * shape. A hand-written payload annotation silently WIDENS what the column
+ * actually accepts — `category: string` where the column is the
+ * inventory_category enum — and once widened, nothing checks the value again.
+ * That is why several payload types in this repo did not match their table.
+ */
+export type { Tables, TablesInsert, TablesUpdate, Enums } from './database.generated'
+
+/**
+ * Runtime enum values, generated from the live schema. Use this to validate a
+ * value that arrives as a plain `string` before writing it to an enum column,
+ * rather than hand-listing the labels — a hand-written list is a second copy
+ * of the schema that nothing keeps in sync.
+ */
+export { Constants } from './database.generated'
+

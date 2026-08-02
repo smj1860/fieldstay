@@ -18,7 +18,7 @@ import { cookies } from 'next/headers'
 // live schema and Database re-exports it, so wiring the generic here is:
 //
 //   import type { Database } from '@/types/database'
-//   return createServerClient<Database>(
+//   return createServerClient(
 //
 // Measured on that basis: 138 errors, across 44 files — a long tail of
 // insert/update payload mismatches, nullability, and Json shapes, each needing
