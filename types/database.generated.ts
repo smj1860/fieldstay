@@ -1,32 +1,27 @@
 /**
- * FieldStay — Generated Supabase Types (Reference)
+ * FieldStay — Database types, GENERATED FROM THE LIVE SCHEMA.
  *
- * Auto-generated from the live Supabase project (vpmznjktllhmmbfnxuvk).
- * DO NOT EDIT BY HAND. Regenerate with:  pnpm run types:supabase
- * (requires a logged-in Supabase CLI: `supabase login`, or a
- * SUPABASE_ACCESS_TOKEN in the environment.)
+ * DO NOT HAND-EDIT. Regenerate with:
  *
- * ⚠️  STALE — generated 2026-07-16. The schema has moved on since: this file
- * is missing platform_inventory_templates and everything else added by the 44
- * migrations dated after that. Regenerate before relying on it, and
- * especially before wiring it into lib/supabase/server.ts.
+ *   npx supabase gen types typescript --project-id vpmznjktllhmmbfnxuvk > types/database.generated.ts
  *
- * Not currently imported by the app. types/database.ts is the hand-maintained
- * file the codebase actually imports from (flat per-table interfaces, plus the
- * domain scalar unions MemberRole/WoStatus/...). Use this file as a drift-check
- * reference: when adding or changing columns, cross-check the Row/Insert/Update
- * shapes here against types/database.ts.
+ * (or the Supabase MCP `generate_typescript_types` tool against the same
+ * project), in the SAME COMMIT as the migration that changed the schema —
+ * the rule CLAUDE.md already states for types/database.ts.
  *
- * The intended end state is for this file to type the wire — createClient() and
- * createServiceClient() in lib/supabase/server.ts currently omit the <Database>
- * generic, so every .from(...).select(...) in the app resolves to `any`.
- * Measured 2026-07-27: applying the generic against THIS (stale) file surfaces
- * 384 type errors. A large share are artifacts of the staleness above — one
- * missing column on work_orders cascades into ~40 errors in a single file — so
- * regenerating is a prerequisite for getting a real number, not an optional
- * first step. See scripts/check-type-drift.mjs, which already gates enum and
- * column presence in CI; what the generic would add on top is nullability and
- * write-shape correctness.
+ * WHY THIS FILE EXISTS
+ * types/database.ts was hand-written, and its interfaces do not satisfy
+ * postgrest-js's GenericSchema constraint (they lack the index signatures and
+ * Relationships shape it requires). That is why lib/supabase/server.ts omits
+ * the <Database> generic and every .from()/.rpc() call in the app is typed as
+ * `any`. Measured 2026-08-02: wiring <Database> to the hand-written type
+ * produces 2267 errors, of which 2163 are the single `never` collapse that
+ * failure mode causes. Wiring it to THIS file instead produces 138 — a 94%
+ * reduction — because row types actually resolve.
+ *
+ * types/database.ts remains the public import surface (Property, WorkOrder,
+ * MemberRole, …). It now derives those aliases from this file rather than
+ * restating them, so there is one source of truth and no drift between them.
  */
 
 export type Json =
@@ -94,6 +89,13 @@ export type Database = {
             columns: ["asset_id"]
             isOneToOne: false
             referencedRelation: "property_assets"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "asset_depreciation_entries_org_id_fkey"
+            columns: ["org_id"]
+            isOneToOne: false
+            referencedRelation: "organizations"
             referencedColumns: ["id"]
           },
         ]
@@ -266,6 +268,13 @@ export type Database = {
             columns: ["crew_member_id"]
             isOneToOne: false
             referencedRelation: "crew_members"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "assignment_outcomes_org_id_fkey"
+            columns: ["org_id"]
+            isOneToOne: false
+            referencedRelation: "organizations"
             referencedColumns: ["id"]
           },
           {
@@ -728,6 +737,8 @@ export type Database = {
           id: string
           name: string
           requires_section_photo: boolean
+          room_synced_at: string | null
+          room_template_id: string | null
           sort_order: number
           template_id: string
         }
@@ -736,6 +747,8 @@ export type Database = {
           id?: string
           name: string
           requires_section_photo?: boolean
+          room_synced_at?: string | null
+          room_template_id?: string | null
           sort_order?: number
           template_id: string
         }
@@ -744,10 +757,19 @@ export type Database = {
           id?: string
           name?: string
           requires_section_photo?: boolean
+          room_synced_at?: string | null
+          room_template_id?: string | null
           sort_order?: number
           template_id?: string
         }
         Relationships: [
+          {
+            foreignKeyName: "checklist_template_sections_room_template_id_fkey"
+            columns: ["room_template_id"]
+            isOneToOne: false
+            referencedRelation: "room_templates"
+            referencedColumns: ["id"]
+          },
           {
             foreignKeyName: "checklist_template_sections_template_id_fkey"
             columns: ["template_id"]
@@ -941,6 +963,13 @@ export type Database = {
             referencedRelation: "crew_members"
             referencedColumns: ["id"]
           },
+          {
+            foreignKeyName: "crew_availability_org_id_fkey"
+            columns: ["org_id"]
+            isOneToOne: false
+            referencedRelation: "organizations"
+            referencedColumns: ["id"]
+          },
         ]
       }
       crew_feedback: {
@@ -1081,6 +1110,38 @@ export type Database = {
           },
         ]
       }
+      demo_activity_log: {
+        Row: {
+          id: string
+          kind: string
+          org_id: string
+          payload: Json
+          simulated_at: string
+        }
+        Insert: {
+          id?: string
+          kind: string
+          org_id: string
+          payload?: Json
+          simulated_at?: string
+        }
+        Update: {
+          id?: string
+          kind?: string
+          org_id?: string
+          payload?: Json
+          simulated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "demo_activity_log_org_id_fkey"
+            columns: ["org_id"]
+            isOneToOne: false
+            referencedRelation: "organizations"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       guidebook_configurations: {
         Row: {
           created_at: string
@@ -1207,11 +1268,60 @@ export type Database = {
           },
         ]
       }
+      guidebook_offer_redemptions: {
+        Row: {
+          booking_id: string | null
+          id: string
+          opened_at: string
+          org_id: string
+          sponsor_id: string
+        }
+        Insert: {
+          booking_id?: string | null
+          id?: string
+          opened_at?: string
+          org_id: string
+          sponsor_id: string
+        }
+        Update: {
+          booking_id?: string | null
+          id?: string
+          opened_at?: string
+          org_id?: string
+          sponsor_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "guidebook_offer_redemptions_booking_id_fkey"
+            columns: ["booking_id"]
+            isOneToOne: false
+            referencedRelation: "bookings"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "guidebook_offer_redemptions_org_id_fkey"
+            columns: ["org_id"]
+            isOneToOne: false
+            referencedRelation: "organizations"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "guidebook_offer_redemptions_sponsor_id_fkey"
+            columns: ["sponsor_id"]
+            isOneToOne: false
+            referencedRelation: "guidebook_sponsors"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       guidebook_property_configs: {
         Row: {
           check_in_instructions: string | null
           check_out_instructions: string | null
           created_at: string
+          featured_amenities: string[] | null
+          featured_amenity_notes: string | null
+          hero_photo_storage_path: string | null
           house_rules: string | null
           id: string
           is_published: boolean
@@ -1226,6 +1336,9 @@ export type Database = {
           check_in_instructions?: string | null
           check_out_instructions?: string | null
           created_at?: string
+          featured_amenities?: string[] | null
+          featured_amenity_notes?: string | null
+          hero_photo_storage_path?: string | null
           house_rules?: string | null
           id?: string
           is_published?: boolean
@@ -1240,6 +1353,9 @@ export type Database = {
           check_in_instructions?: string | null
           check_out_instructions?: string | null
           created_at?: string
+          featured_amenities?: string[] | null
+          featured_amenity_notes?: string | null
+          hero_photo_storage_path?: string | null
           house_rules?: string | null
           id?: string
           is_published?: boolean
@@ -1360,6 +1476,71 @@ export type Database = {
             foreignKeyName: "guidebook_sponsors_org_id_fkey"
             columns: ["org_id"]
             isOneToOne: false
+            referencedRelation: "organizations"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      hospitable_launch_promo: {
+        Row: {
+          attribution_source: string | null
+          awarded_at: string | null
+          congrats_email_sent_at: string | null
+          converted_to_paid_at: string | null
+          created_at: string
+          hospitable_tagged: boolean
+          hospitable_tagged_at: string | null
+          org_id: string
+          price_lock_active: boolean
+          price_lock_amount_cents: number | null
+          price_lock_awarded: boolean
+          price_lock_expires_at: string | null
+          price_lock_sequence: number | null
+          price_lock_tier: string | null
+          price_lock_years: number | null
+          updated_at: string
+        }
+        Insert: {
+          attribution_source?: string | null
+          awarded_at?: string | null
+          congrats_email_sent_at?: string | null
+          converted_to_paid_at?: string | null
+          created_at?: string
+          hospitable_tagged?: boolean
+          hospitable_tagged_at?: string | null
+          org_id: string
+          price_lock_active?: boolean
+          price_lock_amount_cents?: number | null
+          price_lock_awarded?: boolean
+          price_lock_expires_at?: string | null
+          price_lock_sequence?: number | null
+          price_lock_tier?: string | null
+          price_lock_years?: number | null
+          updated_at?: string
+        }
+        Update: {
+          attribution_source?: string | null
+          awarded_at?: string | null
+          congrats_email_sent_at?: string | null
+          converted_to_paid_at?: string | null
+          created_at?: string
+          hospitable_tagged?: boolean
+          hospitable_tagged_at?: string | null
+          org_id?: string
+          price_lock_active?: boolean
+          price_lock_amount_cents?: number | null
+          price_lock_awarded?: boolean
+          price_lock_expires_at?: string | null
+          price_lock_sequence?: number | null
+          price_lock_tier?: string | null
+          price_lock_years?: number | null
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "hospitable_launch_promo_org_id_fkey"
+            columns: ["org_id"]
+            isOneToOne: true
             referencedRelation: "organizations"
             referencedColumns: ["id"]
           },
@@ -1497,6 +1678,47 @@ export type Database = {
           },
         ]
       }
+      integration_entity_owners: {
+        Row: {
+          created_at: string
+          entity_kind: string
+          external_id: string
+          id: string
+          org_id: string
+          provider_id: string
+          resolved_via: string
+          updated_at: string
+        }
+        Insert: {
+          created_at?: string
+          entity_kind: string
+          external_id: string
+          id?: string
+          org_id: string
+          provider_id: string
+          resolved_via: string
+          updated_at?: string
+        }
+        Update: {
+          created_at?: string
+          entity_kind?: string
+          external_id?: string
+          id?: string
+          org_id?: string
+          provider_id?: string
+          resolved_via?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "integration_entity_owners_org_id_fkey"
+            columns: ["org_id"]
+            isOneToOne: false
+            referencedRelation: "organizations"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       integration_providers: {
         Row: {
           auth_type: string
@@ -1525,6 +1747,7 @@ export type Database = {
         Row: {
           category: Database["public"]["Enums"]["inventory_category"]
           created_at: string
+          default_par_level: number
           default_unit: string
           description: string | null
           id: string
@@ -1534,6 +1757,7 @@ export type Database = {
         Insert: {
           category?: Database["public"]["Enums"]["inventory_category"]
           created_at?: string
+          default_par_level?: number
           default_unit?: string
           description?: string | null
           id?: string
@@ -1543,6 +1767,7 @@ export type Database = {
         Update: {
           category?: Database["public"]["Enums"]["inventory_category"]
           created_at?: string
+          default_par_level?: number
           default_unit?: string
           description?: string | null
           id?: string
@@ -1603,6 +1828,8 @@ export type Database = {
           notes: string | null
           org_id: string
           property_id: string
+          reviewed_at: string | null
+          reviewed_by: string | null
           status: string
           submitted_by: string | null
           updated_at: string
@@ -1613,6 +1840,8 @@ export type Database = {
           notes?: string | null
           org_id: string
           property_id: string
+          reviewed_at?: string | null
+          reviewed_by?: string | null
           status?: string
           submitted_by?: string | null
           updated_at?: string
@@ -1623,11 +1852,20 @@ export type Database = {
           notes?: string | null
           org_id?: string
           property_id?: string
+          reviewed_at?: string | null
+          reviewed_by?: string | null
           status?: string
           submitted_by?: string | null
           updated_at?: string
         }
         Relationships: [
+          {
+            foreignKeyName: "inventory_count_drafts_org_id_fkey"
+            columns: ["org_id"]
+            isOneToOne: false
+            referencedRelation: "organizations"
+            referencedColumns: ["id"]
+          },
           {
             foreignKeyName: "inventory_count_drafts_property_id_fkey"
             columns: ["property_id"]
@@ -1751,6 +1989,7 @@ export type Database = {
           par_level: number
           preferred_brand: string | null
           property_id: string
+          source_template_id: string | null
           unit: string
           updated_at: string
         }
@@ -1769,6 +2008,7 @@ export type Database = {
           par_level?: number
           preferred_brand?: string | null
           property_id: string
+          source_template_id?: string | null
           unit?: string
           updated_at?: string
         }
@@ -1787,6 +2027,7 @@ export type Database = {
           par_level?: number
           preferred_brand?: string | null
           property_id?: string
+          source_template_id?: string | null
           unit?: string
           updated_at?: string
         }
@@ -1810,6 +2051,13 @@ export type Database = {
             columns: ["property_id"]
             isOneToOne: false
             referencedRelation: "properties"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "inventory_items_source_template_id_fkey"
+            columns: ["source_template_id"]
+            isOneToOne: false
+            referencedRelation: "inventory_templates"
             referencedColumns: ["id"]
           },
         ]
@@ -1878,6 +2126,7 @@ export type Database = {
           id: string
           name: string
           org_id: string
+          source_platform_template_id: string | null
         }
         Insert: {
           created_at?: string
@@ -1885,6 +2134,7 @@ export type Database = {
           id?: string
           name: string
           org_id: string
+          source_platform_template_id?: string | null
         }
         Update: {
           created_at?: string
@@ -1892,8 +2142,24 @@ export type Database = {
           id?: string
           name?: string
           org_id?: string
+          source_platform_template_id?: string | null
         }
-        Relationships: []
+        Relationships: [
+          {
+            foreignKeyName: "inventory_templates_org_id_fkey"
+            columns: ["org_id"]
+            isOneToOne: false
+            referencedRelation: "organizations"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "inventory_templates_source_platform_template_id_fkey"
+            columns: ["source_platform_template_id"]
+            isOneToOne: false
+            referencedRelation: "platform_inventory_templates"
+            referencedColumns: ["id"]
+          },
+        ]
       }
       maintenance_catalog_items: {
         Row: {
@@ -1991,6 +2257,13 @@ export type Database = {
             columns: ["property_id"]
             isOneToOne: false
             referencedRelation: "properties"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "maintenance_completions_work_order_id_fkey"
+            columns: ["work_order_id"]
+            isOneToOne: false
+            referencedRelation: "work_orders"
             referencedColumns: ["id"]
           },
         ]
@@ -2202,6 +2475,13 @@ export type Database = {
             referencedColumns: ["id"]
           },
           {
+            foreignKeyName: "maintenance_schedules_source_catalog_item_id_fkey"
+            columns: ["source_catalog_item_id"]
+            isOneToOne: false
+            referencedRelation: "org_maintenance_catalog_items"
+            referencedColumns: ["id"]
+          },
+          {
             foreignKeyName: "maintenance_schedules_source_template_item_id_fkey"
             columns: ["source_template_item_id"]
             isOneToOne: false
@@ -2251,6 +2531,13 @@ export type Database = {
           work_order_id?: string | null
         }
         Relationships: [
+          {
+            foreignKeyName: "messages_org_id_fkey"
+            columns: ["org_id"]
+            isOneToOne: false
+            referencedRelation: "organizations"
+            referencedColumns: ["id"]
+          },
           {
             foreignKeyName: "messages_turnover_id_fkey"
             columns: ["turnover_id"]
@@ -2370,6 +2657,63 @@ export type Database = {
         }
         Relationships: []
       }
+      org_inventory_catalog: {
+        Row: {
+          category: Database["public"]["Enums"]["inventory_category"]
+          created_at: string
+          default_par_level: number
+          default_unit: string
+          description: string | null
+          id: string
+          is_active: boolean
+          name: string
+          org_id: string
+          platform_catalog_item_id: string | null
+          updated_at: string
+        }
+        Insert: {
+          category?: Database["public"]["Enums"]["inventory_category"]
+          created_at?: string
+          default_par_level?: number
+          default_unit?: string
+          description?: string | null
+          id?: string
+          is_active?: boolean
+          name: string
+          org_id: string
+          platform_catalog_item_id?: string | null
+          updated_at?: string
+        }
+        Update: {
+          category?: Database["public"]["Enums"]["inventory_category"]
+          created_at?: string
+          default_par_level?: number
+          default_unit?: string
+          description?: string | null
+          id?: string
+          is_active?: boolean
+          name?: string
+          org_id?: string
+          platform_catalog_item_id?: string | null
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "org_inventory_catalog_org_id_fkey"
+            columns: ["org_id"]
+            isOneToOne: false
+            referencedRelation: "organizations"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "org_inventory_catalog_platform_catalog_item_id_fkey"
+            columns: ["platform_catalog_item_id"]
+            isOneToOne: false
+            referencedRelation: "inventory_catalog"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       org_invites: {
         Row: {
           accepted_at: string | null
@@ -2414,99 +2758,62 @@ export type Database = {
           },
         ]
       }
-      org_master_checklist_items: {
+      org_maintenance_catalog_items: {
         Row: {
+          asset_category: string | null
+          category: string
           created_at: string
+          description: string | null
           id: string
+          is_active: boolean
+          name: string
           org_id: string
-          section: string
+          platform_catalog_item_id: string | null
           sort_order: number
-          source: string
-          task: string
+          suggested_recurrence: string | null
           updated_at: string
         }
         Insert: {
+          asset_category?: string | null
+          category: string
           created_at?: string
+          description?: string | null
           id?: string
+          is_active?: boolean
+          name: string
           org_id: string
-          section: string
+          platform_catalog_item_id?: string | null
           sort_order?: number
-          source?: string
-          task: string
+          suggested_recurrence?: string | null
           updated_at?: string
         }
         Update: {
+          asset_category?: string | null
+          category?: string
           created_at?: string
+          description?: string | null
           id?: string
+          is_active?: boolean
+          name?: string
           org_id?: string
-          section?: string
+          platform_catalog_item_id?: string | null
           sort_order?: number
-          source?: string
-          task?: string
+          suggested_recurrence?: string | null
           updated_at?: string
         }
         Relationships: [
           {
-            foreignKeyName: "org_master_checklist_items_org_id_fkey"
+            foreignKeyName: "org_maintenance_catalog_items_org_id_fkey"
             columns: ["org_id"]
             isOneToOne: false
             referencedRelation: "organizations"
             referencedColumns: ["id"]
           },
-        ]
-      }
-      org_master_maintenance_schedules: {
-        Row: {
-          created_at: string
-          description: string | null
-          estimated_cost: number | null
-          frequency: string
-          id: string
-          is_active: boolean
-          month_day: number | null
-          notes: string | null
-          org_id: string
-          specialty: string | null
-          title: string
-          updated_at: string
-          week_day: number | null
-        }
-        Insert: {
-          created_at?: string
-          description?: string | null
-          estimated_cost?: number | null
-          frequency?: string
-          id?: string
-          is_active?: boolean
-          month_day?: number | null
-          notes?: string | null
-          org_id: string
-          specialty?: string | null
-          title: string
-          updated_at?: string
-          week_day?: number | null
-        }
-        Update: {
-          created_at?: string
-          description?: string | null
-          estimated_cost?: number | null
-          frequency?: string
-          id?: string
-          is_active?: boolean
-          month_day?: number | null
-          notes?: string | null
-          org_id?: string
-          specialty?: string | null
-          title?: string
-          updated_at?: string
-          week_day?: number | null
-        }
-        Relationships: [
           {
-            foreignKeyName: "org_master_maintenance_schedules_org_id_fkey"
-            columns: ["org_id"]
+            foreignKeyName: "org_maintenance_catalog_items_platform_catalog_item_id_fkey"
+            columns: ["platform_catalog_item_id"]
             isOneToOne: false
-            referencedRelation: "organizations"
+            referencedRelation: "maintenance_catalog_items"
             referencedColumns: ["id"]
           },
         ]
@@ -2632,11 +2939,15 @@ export type Database = {
         Row: {
           auto_assign_enabled: boolean
           auto_assign_mode: string
+          bathroom_room_template_id: string | null
+          bedroom_room_template_id: string | null
           billing_email: string | null
           comms_log_retention_days: number
           created_at: string
+          default_room_templates_seeded_at: string | null
           guest_pii_retention_days: number
           id: string
+          is_demo: boolean
           kroger_location_id: string | null
           kroger_location_name: string | null
           max_properties: number
@@ -2661,11 +2972,15 @@ export type Database = {
         Insert: {
           auto_assign_enabled?: boolean
           auto_assign_mode?: string
+          bathroom_room_template_id?: string | null
+          bedroom_room_template_id?: string | null
           billing_email?: string | null
           comms_log_retention_days?: number
           created_at?: string
+          default_room_templates_seeded_at?: string | null
           guest_pii_retention_days?: number
           id?: string
+          is_demo?: boolean
           kroger_location_id?: string | null
           kroger_location_name?: string | null
           max_properties?: number
@@ -2690,11 +3005,15 @@ export type Database = {
         Update: {
           auto_assign_enabled?: boolean
           auto_assign_mode?: string
+          bathroom_room_template_id?: string | null
+          bedroom_room_template_id?: string | null
           billing_email?: string | null
           comms_log_retention_days?: number
           created_at?: string
+          default_room_templates_seeded_at?: string | null
           guest_pii_retention_days?: number
           id?: string
+          is_demo?: boolean
           kroger_location_id?: string | null
           kroger_location_name?: string | null
           max_properties?: number
@@ -2716,7 +3035,22 @@ export type Database = {
           updated_at?: string
           vendor_auto_assign_mode?: string
         }
-        Relationships: []
+        Relationships: [
+          {
+            foreignKeyName: "organizations_bathroom_room_template_id_fkey"
+            columns: ["bathroom_room_template_id"]
+            isOneToOne: false
+            referencedRelation: "room_templates"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "organizations_bedroom_room_template_id_fkey"
+            columns: ["bedroom_room_template_id"]
+            isOneToOne: false
+            referencedRelation: "room_templates"
+            referencedColumns: ["id"]
+          },
+        ]
       }
       owner_portal_tokens: {
         Row: {
@@ -2905,6 +3239,44 @@ export type Database = {
           },
         ]
       }
+      pending_oauth_authorizations: {
+        Row: {
+          code_vault_secret_id: string
+          created_at: string
+          expires_at: string
+          id: string
+          pending_link_token: string
+          provider_id: string
+          redirect_uri: string
+        }
+        Insert: {
+          code_vault_secret_id: string
+          created_at?: string
+          expires_at?: string
+          id?: string
+          pending_link_token: string
+          provider_id: string
+          redirect_uri: string
+        }
+        Update: {
+          code_vault_secret_id?: string
+          created_at?: string
+          expires_at?: string
+          id?: string
+          pending_link_token?: string
+          provider_id?: string
+          redirect_uri?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "pending_oauth_authorizations_provider_id_fkey"
+            columns: ["provider_id"]
+            isOneToOne: false
+            referencedRelation: "integration_providers"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       platform_admins: {
         Row: {
           created_at: string
@@ -2917,6 +3289,140 @@ export type Database = {
         Update: {
           created_at?: string
           user_id?: string
+        }
+        Relationships: []
+      }
+      platform_inventory_template_items: {
+        Row: {
+          catalog_item_id: string
+          created_at: string
+          id: string
+          par_level: number
+          platform_inventory_template_id: string
+          preferred_brand: string | null
+          sort_order: number
+        }
+        Insert: {
+          catalog_item_id: string
+          created_at?: string
+          id?: string
+          par_level?: number
+          platform_inventory_template_id: string
+          preferred_brand?: string | null
+          sort_order?: number
+        }
+        Update: {
+          catalog_item_id?: string
+          created_at?: string
+          id?: string
+          par_level?: number
+          platform_inventory_template_id?: string
+          preferred_brand?: string | null
+          sort_order?: number
+        }
+        Relationships: [
+          {
+            foreignKeyName: "platform_inventory_template_i_platform_inventory_template__fkey"
+            columns: ["platform_inventory_template_id"]
+            isOneToOne: false
+            referencedRelation: "platform_inventory_templates"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "platform_inventory_template_items_catalog_item_id_fkey"
+            columns: ["catalog_item_id"]
+            isOneToOne: false
+            referencedRelation: "inventory_catalog"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      platform_inventory_templates: {
+        Row: {
+          created_at: string
+          description: string | null
+          id: string
+          name: string
+          updated_at: string
+        }
+        Insert: {
+          created_at?: string
+          description?: string | null
+          id?: string
+          name: string
+          updated_at?: string
+        }
+        Update: {
+          created_at?: string
+          description?: string | null
+          id?: string
+          name?: string
+          updated_at?: string
+        }
+        Relationships: []
+      }
+      platform_seed_room_template_items: {
+        Row: {
+          created_at: string
+          id: string
+          notes: string | null
+          platform_seed_room_template_id: string
+          requires_photo: boolean
+          sort_order: number
+          task: string
+        }
+        Insert: {
+          created_at?: string
+          id?: string
+          notes?: string | null
+          platform_seed_room_template_id: string
+          requires_photo?: boolean
+          sort_order?: number
+          task: string
+        }
+        Update: {
+          created_at?: string
+          id?: string
+          notes?: string | null
+          platform_seed_room_template_id?: string
+          requires_photo?: boolean
+          sort_order?: number
+          task?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "platform_seed_room_template_i_platform_seed_room_template__fkey"
+            columns: ["platform_seed_room_template_id"]
+            isOneToOne: false
+            referencedRelation: "platform_seed_room_templates"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      platform_seed_room_templates: {
+        Row: {
+          auto_include: boolean
+          created_at: string
+          id: string
+          name: string
+          sort_order: number
+          updated_at: string
+        }
+        Insert: {
+          auto_include?: boolean
+          created_at?: string
+          id?: string
+          name: string
+          sort_order?: number
+          updated_at?: string
+        }
+        Update: {
+          auto_include?: boolean
+          created_at?: string
+          id?: string
+          name?: string
+          sort_order?: number
+          updated_at?: string
         }
         Relationships: []
       }
@@ -2983,6 +3489,36 @@ export type Database = {
           phone?: string | null
           unsubscribe_token?: string
           updated_at?: string
+        }
+        Relationships: []
+      }
+      promo_hospitable_launch_counter: {
+        Row: {
+          first_tier_awarded_count: number
+          first_tier_max: number
+          id: number
+          launch_at: string
+          second_tier_awarded_count: number
+          second_tier_max: number
+          second_tier_window_days: number
+        }
+        Insert: {
+          first_tier_awarded_count?: number
+          first_tier_max?: number
+          id?: number
+          launch_at?: string
+          second_tier_awarded_count?: number
+          second_tier_max?: number
+          second_tier_window_days?: number
+        }
+        Update: {
+          first_tier_awarded_count?: number
+          first_tier_max?: number
+          id?: number
+          launch_at?: string
+          second_tier_awarded_count?: number
+          second_tier_max?: number
+          second_tier_window_days?: number
         }
         Relationships: []
       }
@@ -3763,6 +4299,82 @@ export type Database = {
           },
         ]
       }
+      room_template_items: {
+        Row: {
+          created_at: string
+          id: string
+          notes: string | null
+          requires_photo: boolean
+          room_template_id: string
+          sort_order: number
+          task: string
+        }
+        Insert: {
+          created_at?: string
+          id?: string
+          notes?: string | null
+          requires_photo?: boolean
+          room_template_id: string
+          sort_order?: number
+          task: string
+        }
+        Update: {
+          created_at?: string
+          id?: string
+          notes?: string | null
+          requires_photo?: boolean
+          room_template_id?: string
+          sort_order?: number
+          task?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "room_template_items_room_template_id_fkey"
+            columns: ["room_template_id"]
+            isOneToOne: false
+            referencedRelation: "room_templates"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      room_templates: {
+        Row: {
+          auto_include: boolean
+          created_at: string
+          id: string
+          is_system: boolean
+          name: string
+          org_id: string
+          updated_at: string
+        }
+        Insert: {
+          auto_include?: boolean
+          created_at?: string
+          id?: string
+          is_system?: boolean
+          name: string
+          org_id: string
+          updated_at?: string
+        }
+        Update: {
+          auto_include?: boolean
+          created_at?: string
+          id?: string
+          is_system?: boolean
+          name?: string
+          org_id?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "room_templates_org_id_fkey"
+            columns: ["org_id"]
+            isOneToOne: false
+            referencedRelation: "organizations"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       stay_extension_requests: {
         Row: {
           booking_id: string
@@ -4104,9 +4716,9 @@ export type Database = {
           checklist_template_id: string | null
           checkout_datetime: string
           completed_at: string | null
-          crew_duration_minutes: number | null
           completion_notes: string | null
           created_at: string
+          crew_duration_minutes: number | null
           dates_change_acknowledged_at: string | null
           dates_changed_at: string | null
           id: string
@@ -4137,9 +4749,9 @@ export type Database = {
           checklist_template_id?: string | null
           checkout_datetime: string
           completed_at?: string | null
-          crew_duration_minutes?: number | null
           completion_notes?: string | null
           created_at?: string
+          crew_duration_minutes?: number | null
           dates_change_acknowledged_at?: string | null
           dates_changed_at?: string | null
           id?: string
@@ -4170,9 +4782,9 @@ export type Database = {
           checklist_template_id?: string | null
           checkout_datetime?: string
           completed_at?: string | null
-          crew_duration_minutes?: number | null
           completion_notes?: string | null
           created_at?: string
+          crew_duration_minutes?: number | null
           dates_change_acknowledged_at?: string | null
           dates_changed_at?: string | null
           id?: string
@@ -4282,6 +4894,13 @@ export type Database = {
           work_order_id?: string
         }
         Relationships: [
+          {
+            foreignKeyName: "vendor_assignment_outcomes_org_id_fkey"
+            columns: ["org_id"]
+            isOneToOne: false
+            referencedRelation: "organizations"
+            referencedColumns: ["id"]
+          },
           {
             foreignKeyName: "vendor_assignment_outcomes_property_id_fkey"
             columns: ["property_id"]
@@ -4427,6 +5046,7 @@ export type Database = {
           stripe_connect_invite_sent_at: string | null
           stripe_connect_onboarded_at: string | null
           stripe_connect_token: string
+          stripe_connect_token_expires_at: string | null
           updated_at: string
         }
         Insert: {
@@ -4458,6 +5078,7 @@ export type Database = {
           stripe_connect_invite_sent_at?: string | null
           stripe_connect_onboarded_at?: string | null
           stripe_connect_token?: string
+          stripe_connect_token_expires_at?: string | null
           updated_at?: string
         }
         Update: {
@@ -4489,6 +5110,7 @@ export type Database = {
           stripe_connect_invite_sent_at?: string | null
           stripe_connect_onboarded_at?: string | null
           stripe_connect_token?: string
+          stripe_connect_token_expires_at?: string | null
           updated_at?: string
         }
         Relationships: [
@@ -4769,6 +5391,7 @@ export type Database = {
           assigned_crew_member_id: string | null
           category: Database["public"]["Enums"]["wo_category"] | null
           client_report_id: string | null
+          completed_by_name: string | null
           completed_date: string | null
           completion_notes: string | null
           completion_token: string | null
@@ -4820,6 +5443,7 @@ export type Database = {
           assigned_crew_member_id?: string | null
           category?: Database["public"]["Enums"]["wo_category"] | null
           client_report_id?: string | null
+          completed_by_name?: string | null
           completed_date?: string | null
           completion_notes?: string | null
           completion_token?: string | null
@@ -4871,6 +5495,7 @@ export type Database = {
           assigned_crew_member_id?: string | null
           category?: Database["public"]["Enums"]["wo_category"] | null
           client_report_id?: string | null
+          completed_by_name?: string | null
           completed_date?: string | null
           completion_notes?: string | null
           completion_token?: string | null
@@ -4958,6 +5583,13 @@ export type Database = {
             referencedColumns: ["id"]
           },
           {
+            foreignKeyName: "work_orders_source_schedule_id_fkey"
+            columns: ["source_schedule_id"]
+            isOneToOne: false
+            referencedRelation: "maintenance_schedules"
+            referencedColumns: ["id"]
+          },
+          {
             foreignKeyName: "work_orders_source_turnover_id_fkey"
             columns: ["source_turnover_id"]
             isOneToOne: false
@@ -5011,6 +5643,33 @@ export type Database = {
     }
     Functions: {
       apply_crew_score_recompute: { Args: never; Returns: Json }
+      apply_inventory_counts: {
+        Args: { p_counts: Json; p_org_id: string }
+        Returns: number
+      }
+      approve_inventory_count_draft: {
+        Args: { p_draft_id: string; p_org_id: string; p_reviewer: string }
+        Returns: Json
+      }
+      approve_quote_request: {
+        Args: {
+          p_completion_token: string
+          p_org_id: string
+          p_quote_request_id: string
+          p_token_expires_at: string
+        }
+        Returns: Json
+      }
+      claim_hospitable_promo_slot: {
+        Args: { p_org_id: string; p_price_cents: number; p_tier: string }
+        Returns: {
+          already_awarded: boolean
+          lock_years: number
+          not_eligible: boolean
+          sequence_number: number
+          window_closed: boolean
+        }[]
+      }
       claim_pending_integration_link: {
         Args: { p_pending_link_token: string; p_user_id: string }
         Returns: {
@@ -5019,12 +5678,47 @@ export type Database = {
           provider_id: string
         }[]
       }
+      claim_pending_oauth_authorization: {
+        Args: { p_pending_link_token: string }
+        Returns: {
+          authorization_code: string
+          provider_id: string
+          redirect_uri: string
+        }[]
+      }
       cleanup_expired_oauth_states: { Args: never; Returns: undefined }
       cleanup_expired_pending_integration_links: {
         Args: never
         Returns: undefined
       }
+      cleanup_expired_pending_oauth_authorizations: {
+        Args: never
+        Returns: undefined
+      }
       cleanup_webhook_dedup: { Args: never; Returns: undefined }
+      clone_inventory_from_property: {
+        Args: {
+          p_org_id: string
+          p_source_property_id: string
+          p_target_property_id: string
+        }
+        Returns: {
+          added: number
+          skipped: number
+          source_count: number
+        }[]
+      }
+      complete_work_order_via_token: {
+        Args: {
+          p_completed_by_name: string
+          p_line_items: Json
+          p_notes: string
+          p_platform_fee_pct?: number
+          p_subtotal: number
+          p_work_order_id: string
+        }
+        Returns: Json
+      }
       create_organization_with_owner: {
         Args: {
           p_billing_email: string
@@ -5051,6 +5745,17 @@ export type Database = {
         }
         Returns: string
       }
+      create_pending_oauth_authorization: {
+        Args: {
+          p_authorization_code: string
+          p_pending_link_token: string
+          p_provider_id: string
+          p_redirect_uri: string
+        }
+        Returns: string
+      }
+      db_invariant_report: { Args: never; Returns: Json }
+      db_type_shape_report: { Args: never; Returns: Json }
       delete_vault_secret: { Args: { p_secret_id: string }; Returns: undefined }
       disconnect_integration_token: {
         Args: { p_provider_id: string; p_user_id: string }
@@ -5066,6 +5771,8 @@ export type Database = {
         }[]
       }
       get_crew_member_id: { Args: never; Returns: string }
+      get_crew_org_ids: { Args: never; Returns: string[] }
+      get_crew_property_ids: { Args: never; Returns: string[] }
       get_crew_turnover_ids: { Args: never; Returns: string[] }
       get_repeat_issues: {
         Args: { since_date: string }
@@ -5078,6 +5785,32 @@ export type Database = {
       }
       get_system_health: { Args: never; Returns: Json }
       get_user_org_ids: { Args: never; Returns: string[] }
+      inventory_below_par_for_org: {
+        Args: { p_org_id: string }
+        Returns: {
+          current_quantity: number
+          first_count_recorded_at: string
+          id: string
+          name: string
+          par_level: number
+          property_id: string
+        }[]
+      }
+      inventory_below_par_items: {
+        Args: { p_org_id: string; p_property_ids?: string[] }
+        Returns: {
+          current_quantity: number
+          first_count_recorded_at: string
+          id: string
+          name: string
+          par_level: number
+          preferred_brand: string
+          property_id: string
+          property_name: string
+          property_zip: string
+          unit: string
+        }[]
+      }
       is_org_member: {
         Args: {
           p_org_id: string
@@ -5086,6 +5819,7 @@ export type Database = {
         Returns: boolean
       }
       is_platform_staff: { Args: never; Returns: boolean }
+      is_platform_staff_admin: { Args: never; Returns: boolean }
       match_kb_chunks: {
         Args: {
           match_count?: number
@@ -5100,8 +5834,36 @@ export type Database = {
           title: string
         }[]
       }
+      merge_integration_connection_metadata: {
+        Args: {
+          p_patch: Json
+          p_provider_id: string
+          p_status?: string
+          p_user_id: string
+        }
+        Returns: Json
+      }
+      metrics_inventory_below_par_count: { Args: never; Returns: number }
+      metrics_vendor_compliance_counts: {
+        Args: never
+        Returns: {
+          compliance_status: string
+          count: number
+        }[]
+      }
+      metrics_work_order_backlog: {
+        Args: never
+        Returns: {
+          count: number
+          status: string
+        }[]
+      }
       next_wo_number: { Args: { p_org_id: string }; Returns: string }
       next_work_order_invoice_seq: { Args: never; Returns: number }
+      notify_crew_sync: {
+        Args: { p_entity: string; p_user_ids: string[] }
+        Returns: undefined
+      }
       purge_expired_audit_events: { Args: never; Returns: Json }
       read_integration_refresh_token: {
         Args: { p_provider_id: string; p_user_id: string }
@@ -5116,14 +5878,31 @@ export type Database = {
         Returns: string
       }
       recompute_vendor_scores: { Args: never; Returns: number }
-      replace_master_checklist_items: {
-        Args: { p_items: Json; p_org_id: string }
-        Returns: undefined
+      remove_crew_from_turnover: {
+        Args: {
+          p_crew_member_id: string
+          p_org_id: string
+          p_turnover_id: string
+        }
+        Returns: Json
+      }
+      replace_platform_inventory_template_items: {
+        Args: { p_items: Json; p_template_id: string }
+        Returns: number
+      }
+      replace_room_template_items: {
+        Args: { p_items: Json; p_room_template_id: string }
+        Returns: number
+      }
+      replace_seed_room_template_items: {
+        Args: { p_items: Json; p_template_id: string }
+        Returns: number
       }
       revoke_integration_token: {
         Args: { p_provider_id: string; p_user_id: string }
         Returns: undefined
       }
+      storage_org_prefix: { Args: { object_name: string }; Returns: string }
       store_integration_refresh_token: {
         Args: {
           p_expires_at?: string
@@ -5147,6 +5926,25 @@ export type Database = {
       store_property_door_code: {
         Args: { p_door_code: string; p_org_id: string; p_property_id: string }
         Returns: string
+      }
+      tag_hospitable_trial_signup: {
+        Args: { p_landing_page_cookie_present?: boolean; p_org_id: string }
+        Returns: undefined
+      }
+      update_organization_subscription_from_stripe: {
+        Args: {
+          p_customer_id: string
+          p_max_properties: number
+          p_plan: Database["public"]["Enums"]["org_plan"]
+          p_plan_status: Database["public"]["Enums"]["org_plan_status"]
+          p_stripe_subscription_id: string
+          p_trial_ends_at: string
+        }
+        Returns: {
+          org_id: string
+          org_name: string
+          previous_plan: Database["public"]["Enums"]["org_plan"]
+        }[]
       }
     }
     Enums: {
@@ -5322,6 +6120,7 @@ export type Database = {
         | "maintenance_schedule"
         | "crew_flag"
         | "guest_report"
+        | "vacancy_gap_suggestion"
       wo_status:
         | "pending"
         | "quote_requested"
@@ -5637,6 +6436,7 @@ export const Constants = {
         "maintenance_schedule",
         "crew_flag",
         "guest_report",
+        "vacancy_gap_suggestion",
       ],
       wo_status: [
         "pending",
