@@ -3,6 +3,7 @@
 import { z }                   from 'zod'
 import { createServiceClient, createClient, adminFetch } from '@/lib/supabase/server'
 import { acceptOrgInvite }     from '@/lib/auth/invites'
+import { deleteOrphanedAuthUser } from '@/lib/auth'
 import { redirect }            from 'next/navigation'
 import { headers }             from 'next/headers'
 import { inviteAcceptRatelimit, checkLimit } from '@/lib/rate-limit'
@@ -102,7 +103,7 @@ export async function acceptTeamInvite(formData: FormData): Promise<{ error?: st
 
   const { accepted } = await acceptOrgInvite(authData.user.id, invite.email, token)
   if (!accepted) {
-    await admin.auth.admin.deleteUser(authData.user.id)
+    await deleteOrphanedAuthUser(admin, authData.user.id, 'serverAction.acceptInvite.notAccepted')
     return { error: 'This invitation could not be accepted. Please request a new one.' }
   }
 

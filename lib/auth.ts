@@ -232,3 +232,52 @@ export async function requireProperty(propertyId: string) {
 
   return { user, supabase, membership, property }
 }
+
+/**
+ * Delete an auth user that was just created and then turned out to belong to
+ * nothing — an invite claimed by someone else mid-flight, or a failed link.
+ *
+ * Exists because the three call sites that do this all discarded the result:
+ *
+ *   await supabase.auth.admin.deleteUser(authData.user.id)
+ *
+ * Those cleanup branches exist SPECIFICALLY to prevent an orphaned auth user —
+ * an account that can log in, fails every requireCrewMember()/requireOrgMember()
+ * check with nothing explaining why, and shows up nowhere on the PM side. If
+ * the delete itself fails (a transient admin-API error, a network blip), the
+ * orphan is created anyway and nobody finds out, because nothing inspected the
+ * error. The failure mode the branch was written to prevent, arriving silently
+ * through the branch that prevents it.
+ *
+ * Nothing here can undo a failed delete — the point is that it becomes VISIBLE
+ * (console + Sentry, tagged by call site) so an operator can clean it up. The
+ * user id is a UUID, not PII, so it is safe in Sentry `extra` per the logging
+ * rules.
+ *
+ * NEVER THROWS, deliberately. Every caller is already on its own error path,
+ * about to return a specific message ('This invite has already been used').
+ * gotrue normally reports failure in `{ error }`, but a network-level fault
+ * throws — and letting that propagate would replace the caller's precise
+ * message with a generic crash, on top of the orphan. The cleanup failing must
+ * not also destroy the explanation the user was about to get.
+ *
+ * Returns true when the account is gone, false when an orphan is now live.
+ */
+export async function deleteOrphanedAuthUser(
+  admin:  { auth: { admin: { deleteUser: (id: string) => Promise<{ error: unknown }> } } },
+  userId: string,
+  site:   string,
+): Promise<boolean> {
+  try {
+    const { error } = await admin.auth.admin.deleteUser(userId)
+    if (!error) return true
+
+    console.error('[deleteOrphanedAuthUser] cleanup failed — orphaned auth user', { site, userId })
+    reportError(error, { site, extra: { userId, orphaned: true } })
+    return false
+  } catch (err) {
+    console.error('[deleteOrphanedAuthUser] cleanup threw — orphaned auth user', { site, userId })
+    reportError(err, { site, extra: { userId, orphaned: true, threw: true } })
+    return false
+  }
+}

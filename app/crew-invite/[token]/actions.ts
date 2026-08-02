@@ -3,6 +3,7 @@
 import { createServiceClient } from '@/lib/supabase/server'
 import { createClient }        from '@/lib/supabase/server'
 import { logAuditEvent }       from '@/lib/audit'
+import { deleteOrphanedAuthUser } from '@/lib/auth'
 import { redirect }            from 'next/navigation'
 import { headers }             from 'next/headers'
 import { z }                   from 'zod'
@@ -182,7 +183,7 @@ export async function activateCrewAccount(formData: FormData): Promise<{ error?:
     .select('id')
 
   if (linkError) {
-    await supabase.auth.admin.deleteUser(authData.user.id)
+    await deleteOrphanedAuthUser(supabase, authData.user.id, 'serverAction.crewInvite.activate.linkFailed')
     console.error('[activateCrewAccount] link failed', { code: linkError.code, message: linkError.message })
     return { error: 'Failed to activate account. Please try again.' }
   }
@@ -191,7 +192,7 @@ export async function activateCrewAccount(formData: FormData): Promise<{ error?:
     // Claimed by someone else while this request was creating the auth user.
     // The account just minted belongs to nothing, so it is removed rather
     // than left behind as a login that can never reach the crew app.
-    await supabase.auth.admin.deleteUser(authData.user.id)
+    await deleteOrphanedAuthUser(supabase, authData.user.id, 'serverAction.crewInvite.activate.alreadyClaimed')
     return { error: 'This invite has already been used' }
   }
 
