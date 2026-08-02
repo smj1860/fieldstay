@@ -1,3 +1,4 @@
+import { unwrap } from '@/lib/supabase/unwrap'
 import 'server-only'
 import { createServiceClient } from '@/lib/supabase/server'
 import { logAuditEvent }       from '@/lib/audit'
@@ -9,14 +10,18 @@ export async function acceptOrgInvite(
 ): Promise<{ accepted: boolean; orgId?: string }> {
   const admin = createServiceClient({ system: 'lib/auth/invites' })
 
-  const { data: invite } = await admin
+  // A failed read used to return { accepted: false }, which is the same answer
+  // as "no such invite" — so a transient error silently left the user signed up
+  // but not in the org they were invited to, with nothing logged.
+  const inviteRes = await admin
     .from('org_invites')
     .select('id, org_id, email, role, expires_at')
     .eq('token', inviteToken)
     .is('accepted_at', null)
     .gt('expires_at', new Date().toISOString())
-    .single()
+    .maybeSingle()
 
+  const invite = unwrap(inviteRes, { site: 'lib.auth.invites.acceptInvite' })
   if (!invite) return { accepted: false }
   if (invite.email.toLowerCase() !== userEmail.toLowerCase()) return { accepted: false }
 

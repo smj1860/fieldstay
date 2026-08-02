@@ -1,3 +1,4 @@
+import { unwrap } from '@/lib/supabase/unwrap'
 import { createServiceClient } from '@/lib/supabase/server'
 import { VendorQuotePortal }   from '../vendor-portal'
 import { unwrapJoin }          from '@/lib/utils/supabase-joins'
@@ -8,7 +9,9 @@ export default async function QuotePortalPage({ params }: Props) {
   const { token }  = await params
   const supabase   = createServiceClient({ publicSurface: 'work-orders--token--quote' })
 
-  const { data: qr } = await supabase
+  // A failed read rendered the invalid/expired-quote state, which sends the
+  // vendor chasing a link that is actually fine.
+  const qrRes = await supabase
     .from('quote_requests')
     .select(`
       id, status, quote_token_expires_at,
@@ -19,7 +22,9 @@ export default async function QuotePortalPage({ params }: Props) {
       )
     `)
     .eq('quote_token', token)
-    .single()
+    .maybeSingle()
+
+  const qr = unwrap(qrRes, { site: 'page.work-orders.quote' })
 
   if (!qr) {
     return (

@@ -45,7 +45,9 @@ function makeSupabase(queue: Record<string, Resp[]>) {
         return chain
       })
     }
-    chain.single = vi.fn(() => Promise.resolve(result))
+    chain.single      = vi.fn(() => Promise.resolve(result))
+    // The source-turnover lookup now uses maybeSingle().
+    chain.maybeSingle = vi.fn(() => Promise.resolve(result))
     chain.then   = (resolve: (v: unknown) => unknown) => Promise.resolve(result).then(resolve)
     return chain
   })

@@ -1,3 +1,4 @@
+import { unwrap } from '@/lib/supabase/unwrap'
 import { redirect }        from 'next/navigation'
 import { createClient }    from '@/lib/supabase/server'
 import { TimeOffRequest }  from '@/components/crew/time-off-request'
@@ -7,12 +8,15 @@ export default async function CrewAvailabilityPage() {
   const { data: { user } }      = await supabase.auth.getUser()
   if (!user) redirect('/login')
 
-  const { data: crewMember } = await supabase
+  // A failed read used to bounce the crew member to /login, which reads as
+  // "you are signed out" during what is really a transient DB error.
+  const crewMemberRes = await supabase
     .from('crew_members')
     .select('id, org_id')
     .eq('user_id', user.id)
-    .single()
+    .maybeSingle()
 
+  const crewMember = unwrap(crewMemberRes, { site: 'page.crew.availability' })
   if (!crewMember) redirect('/login')
 
   return (

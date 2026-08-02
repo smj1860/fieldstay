@@ -1,3 +1,4 @@
+import { unwrap } from '@/lib/supabase/unwrap'
 import type { Metadata } from 'next'
 import { createClient, createServiceClient } from '@/lib/supabase/server'
 import { logAuditEvent } from '@/lib/audit'
@@ -39,12 +40,20 @@ export default async function CrewLayout({
   // crew PWA (bounced to /ops with a spurious security.route.mismatch audit
   // entry).
   const admin = createServiceClient({ authenticatedUser: user })
-  const { data: crewRecord } = await admin
+  const crewRes = await admin
     .from('crew_members')
     .select('id, name, org_id')
     .eq('user_id', user.id)
     .eq('is_active', true)
     .maybeSingle()
+
+  // A failed read is NOT "a PM wandered into the crew app". Discarding the
+  // error left crewRecord null and sent every transient DB blip down the
+  // branch below, which writes a security.route.mismatch AUDIT event — so an
+  // outage manufactured fake security findings for whoever investigates it
+  // later. unwrap() throws to the segment's error boundary instead; the guard
+  // still fails closed, because throwing renders no crew UI either.
+  const crewRecord = unwrap(crewRes, { site: 'app.crew.layout.crew-gate' })
 
   if (!crewRecord) {
     await logAuditEvent({

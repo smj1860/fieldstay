@@ -122,7 +122,6 @@ function findOffenders(): string[] {
 // explicit .limit() plus documented "continue next run" semantics, or replace
 // it with a count/RPC aggregate.
 const BASELINE = new Set<string>([
-  'lib/inngest/functions/apply-master-checklist.ts',
   'lib/inngest/functions/auto-assign-turnover.ts',
   'lib/inngest/functions/auto-assign-vendor.ts',
   'lib/inngest/functions/checklist-broadcast.ts',

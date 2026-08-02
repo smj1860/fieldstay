@@ -42,7 +42,9 @@ function makeSupabase(user: { id: string } | null, queued: QueuedByTable = {}) {
       return Promise.resolve(result)
     }
 
-    chain.single = () => resolveNext()
+    chain.single      = () => resolveNext()
+    // requireCrewMember() and the crew route reads use maybeSingle().
+    chain.maybeSingle = () => resolveNext()
     chain.then   = (resolve: (v: unknown) => unknown, reject?: (e: unknown) => unknown) =>
       resolveNext().then(resolve, reject)
     return chain

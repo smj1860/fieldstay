@@ -18,7 +18,7 @@
 // a stay that turned out to not exist.
 // ============================================================
 
-import { unwrapList } from '@/lib/supabase/unwrap'
+import { fetchAllRows } from '@/lib/inngest/paginate'
 import { inngest }             from '@/lib/inngest/client'
 import { createServiceClient } from '@/lib/supabase/server'
 import { OwnerRezApiClient }    from '@/lib/integrations/providers/ownerrez-api'
@@ -52,18 +52,23 @@ export const ownerRezReconciliationHandler = inngest.createFunction(
     const propertyIds = await step.run('fetch-property-ids', async () => {
       const supabase = createServiceClient({ system: 'inngest:reconciliation-handler' })
 
-      // An empty list here means "reconcile nothing", so a failed read made
-      // the whole reconciliation sweep a silent no-op that still reported success.
-      const data = unwrapList(
-        await supabase
+      // Paginated, and it throws on failure. Both matter here: an empty list
+      // means "reconcile nothing", so a failed read made the whole sweep a
+      // silent no-op that still reported success — and a truncated read at
+      // PostgREST's max_rows = 1000 would quietly reconcile only part of a
+      // large org's portfolio, which looks identical to a clean run.
+      const data = await fetchAllRows<{ external_id: string | null }>(
+        (from, to) => supabase
           .from('properties')
           .select('external_id')
           .eq('org_id', org_id)
-          .eq('external_source', PROVIDER),
-        { site: 'inngest.ownerrez-reconciliation.property-ids', orgId: org_id },
+          .eq('external_source', PROVIDER)
+          .order('id', { ascending: true })
+          .range(from, to),
+        { label: `properties(ownerrez-reconciliation)[org=${org_id}]` },
       )
 
-      return (data as Array<{ external_id: string | null }>)
+      return data
         .map((p) => Number(p.external_id))
         .filter((id) => !Number.isNaN(id))
     })

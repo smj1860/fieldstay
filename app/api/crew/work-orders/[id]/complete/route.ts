@@ -1,3 +1,4 @@
+import { tryUnwrap } from '@/lib/supabase/unwrap'
 import { NextRequest, NextResponse } from 'next/server'
 import { createServiceClient }       from '@/lib/supabase/server'
 import { requireCrewMember }         from '@/lib/crew-auth'
@@ -32,14 +33,24 @@ export async function POST(
   // work_orders; assignment is verified explicitly below instead of via RLS.
   const supabase = createServiceClient({ crew })
 
-  const { data: wo } = await supabase
+  const woRes = await supabase
     .from('work_orders')
     .select('id, wo_number, title, property_id, org_id, assigned_crew_member_id, status')
     .eq('id', id)
     .eq('assigned_crew_member_id', crew.id)
     .eq('org_id', crew.org_id)
-    .single()
+    .maybeSingle()
 
+  // 503, not 404, when the READ fails: lib/dexie/net.ts classifies 4xx as
+  // TERMINAL and >=500 as transient, so answering a transient DB error with a
+  // 404 dead-lettered the crew member's queued mutation permanently instead of
+  // retrying it. A genuinely missing row still returns 404.
+  const woOut = tryUnwrap(woRes, { site: 'api.crew.work-orders.complete', orgId: crew.org_id })
+  if (!woOut.ok) {
+    return NextResponse.json({ error: 'Could not load the work order. Please try again.' }, { status: 503 })
+  }
+
+  const wo = woOut.data
   if (!wo)                       return NextResponse.json({ error: 'Not found' }, { status: 404 })
   if (wo.status === 'completed') return NextResponse.json({ alreadyCompleted: true })
 

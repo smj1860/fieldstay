@@ -44,6 +44,10 @@ function makeSupabase(queued: QueuedByTable) {
     chain.eq     = vi.fn((column: string, value: unknown) => { eqSpy(table, column, value); return chain })
     chain.neq    = vi.fn(() => chain)
     chain.update = vi.fn((payload: unknown) => { updateSpy(table, payload); return chain })
+    // fetch-property-ids is paginated through fetchAllRows(), which chains
+    // .order().range() before awaiting.
+    chain.order  = vi.fn(() => chain)
+    chain.range  = vi.fn(() => chain)
 
     const resolveNext = () => {
       const idx = counters[table] ?? 0

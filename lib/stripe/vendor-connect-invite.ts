@@ -1,3 +1,4 @@
+import { unwrap } from '@/lib/supabase/unwrap'
 import { stripe }              from '@/lib/stripe/client'
 import { resend, FROM }        from '@/lib/resend/client'
 import { createServiceClient } from '@/lib/supabase/server'
@@ -34,7 +35,9 @@ async function claimVendorConnectInvite(
 }> {
   const staleBefore = new Date(Date.now() - CLAIM_STALE_AFTER_MS).toISOString()
 
-  const { data: claimed } = await supabase
+  // A failed claim returned { claimed: false }, identical to "another run got
+  // there first" — so the vendor's Connect invite was silently never sent.
+  const claimedRes = await supabase
     .from('vendors')
     .update({ stripe_connect_invite_claimed_at: new Date().toISOString() })
     .eq('id', vendorId)
@@ -42,6 +45,8 @@ async function claimVendorConnectInvite(
     .or(`stripe_connect_invite_claimed_at.is.null,stripe_connect_invite_claimed_at.lt.${staleBefore}`)
     .select('stripe_connect_account_id, stripe_connect_invite_sent_at')
     .maybeSingle()
+
+  const claimed = unwrap(claimedRes, { site: 'lib.stripe.vendor-connect-invite.claim', orgId })
 
   if (!claimed) return { claimed: false, accountId: null, alreadySent: false }
 

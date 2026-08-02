@@ -48,7 +48,11 @@ export const applyMasterChecklistJob = inngest.createFunction(
             .from('properties')
             .select('id')
             .in('id', batch)
-            .eq('org_id', org_id),
+            .eq('org_id', org_id)
+            // Bounded by construction — `batch` is a BATCH_SIZE slice, so this
+            // can never return more rows than that. Stated explicitly so the
+            // bound is visible rather than inferred from the caller.
+            .limit(BATCH_SIZE),
           { site: 'inngest.apply-master-checklist.ownership', orgId: org_id },
         )
 
