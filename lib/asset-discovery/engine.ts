@@ -14,13 +14,20 @@ import {
  */
 export async function getMissingAssetDiscoveryTypes(
   supabase:   DBClient,
+  orgId:      string,
   propertyId: string,
 ): Promise<AssetType[]> {
   // An empty result makes every required asset look undiscovered, so a
   // failed read would re-prompt for assets the property already has.
+  //
+  // org_id is redundant with property_id for correctness (a property belongs
+  // to exactly one org) but not for safety: the only caller runs on a service
+  // -role client, where RLS is not a backstop, so the tenant scope has to be
+  // in the query itself.
   const existingRes = await supabase
     .from('property_assets')
     .select('asset_type, make, model, photo_url, is_na')
+    .eq('org_id', orgId)
     .eq('property_id', propertyId)
     .eq('is_active', true)
     .in('asset_type', REQUIRED_ASSET_TYPES)

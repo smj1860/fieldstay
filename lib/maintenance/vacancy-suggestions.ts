@@ -25,6 +25,7 @@ export interface MaintenanceCandidate {
  */
 export async function findMaintenanceCandidatesForWindow(
   supabase:    SupabaseClient,
+  orgId:       string,
   propertyId:  string,
   windowStart: string,
   windowEnd:   string | null
@@ -38,9 +39,15 @@ export async function findMaintenanceCandidatesForWindow(
 
   // An empty list reads as "no maintenance due in this gap", so a failed
   // read silently suppressed every vacancy suggestion for the property.
+  //
+  // org_id is redundant with property_id for correctness (a property belongs
+  // to exactly one org) but not for safety: the caller is an Inngest step on a
+  // service-role client, where RLS is not a backstop, so the tenant scope has
+  // to be in the query itself.
   const candidatesRes = await supabase
     .from('maintenance_schedules')
     .select('id, name, next_due_date, estimated_cost, assigned_vendor_id, active_from_month, active_to_month')
+    .eq('org_id', orgId)
     .eq('property_id', propertyId)
     .eq('is_active', true)
     .lte('next_due_date', effectiveEnd.toISOString().split('T')[0])

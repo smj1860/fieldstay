@@ -26,7 +26,7 @@ describe('getMissingAssetDiscoveryTypes', () => {
   it('scopes the query to the given property, active assets only, and the required asset types', async () => {
     const supabase = makeSupabase([])
 
-    await getMissingAssetDiscoveryTypes(supabase as never, 'prop_1')
+    await getMissingAssetDiscoveryTypes(supabase as never, 'org_1', 'prop_1')
 
     expect(supabase.calls.some((c) => c.method === 'eq' && c.args[0] === 'property_id' && c.args[1] === 'prop_1')).toBe(true)
     expect(supabase.calls.some((c) => c.method === 'eq' && c.args[0] === 'is_active' && c.args[1] === true)).toBe(true)
@@ -35,7 +35,7 @@ describe('getMissingAssetDiscoveryTypes', () => {
 
   it('returns every required type when no property_assets rows exist yet', async () => {
     const supabase = makeSupabase([])
-    const missing  = await getMissingAssetDiscoveryTypes(supabase as never, 'prop_1')
+    const missing  = await getMissingAssetDiscoveryTypes(supabase as never, 'org_1', 'prop_1')
     expect(missing).toEqual(REQUIRED_ASSET_TYPES)
   })
 
@@ -43,7 +43,7 @@ describe('getMissingAssetDiscoveryTypes', () => {
     const supabase = makeSupabase([
       { asset_type: 'hvac', make: 'Carrier', model: null, photo_url: null, is_na: false },
     ])
-    const missing = await getMissingAssetDiscoveryTypes(supabase as never, 'prop_1')
+    const missing = await getMissingAssetDiscoveryTypes(supabase as never, 'org_1', 'prop_1')
     expect(missing).not.toContain('hvac')
   })
 
@@ -51,7 +51,7 @@ describe('getMissingAssetDiscoveryTypes', () => {
     const supabase = makeSupabase([
       { asset_type: 'water_heater', make: null, model: 'ProLine XE', photo_url: null, is_na: false },
     ])
-    const missing = await getMissingAssetDiscoveryTypes(supabase as never, 'prop_1')
+    const missing = await getMissingAssetDiscoveryTypes(supabase as never, 'org_1', 'prop_1')
     expect(missing).not.toContain('water_heater')
   })
 
@@ -59,7 +59,7 @@ describe('getMissingAssetDiscoveryTypes', () => {
     const supabase = makeSupabase([
       { asset_type: 'refrigerator', make: null, model: null, photo_url: 'https://x/photo.jpg', is_na: false },
     ])
-    const missing = await getMissingAssetDiscoveryTypes(supabase as never, 'prop_1')
+    const missing = await getMissingAssetDiscoveryTypes(supabase as never, 'org_1', 'prop_1')
     expect(missing).not.toContain('refrigerator')
   })
 
@@ -67,7 +67,7 @@ describe('getMissingAssetDiscoveryTypes', () => {
     const supabase = makeSupabase([
       { asset_type: 'generator', make: null, model: null, photo_url: null, is_na: true },
     ])
-    const missing = await getMissingAssetDiscoveryTypes(supabase as never, 'prop_1')
+    const missing = await getMissingAssetDiscoveryTypes(supabase as never, 'org_1', 'prop_1')
     expect(missing).not.toContain('generator')
   })
 
@@ -75,7 +75,7 @@ describe('getMissingAssetDiscoveryTypes', () => {
     const supabase = makeSupabase([
       { asset_type: 'dishwasher', make: null, model: null, photo_url: null, is_na: false },
     ])
-    const missing = await getMissingAssetDiscoveryTypes(supabase as never, 'prop_1')
+    const missing = await getMissingAssetDiscoveryTypes(supabase as never, 'org_1', 'prop_1')
     expect(missing).toContain('dishwasher')
   })
 
@@ -95,7 +95,7 @@ describe('getMissingAssetDiscoveryTypes', () => {
     const supabase = { from: vi.fn(() => chain) }
 
     await expect(
-      getMissingAssetDiscoveryTypes(supabase as never, 'prop_1')
+      getMissingAssetDiscoveryTypes(supabase as never, 'org_1', 'prop_1')
     ).rejects.toThrow()
   })
 })
