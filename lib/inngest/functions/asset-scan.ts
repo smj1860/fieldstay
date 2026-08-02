@@ -23,6 +23,7 @@ import { inngest } from '@/lib/inngest/client'
 import { createServiceClient } from '@/lib/supabase/server'
 import { scanDataPlateImage, isValidScanMediaType } from '@/lib/assets/scan-data-plate'
 import { toStorageObjectPath } from '@/lib/storage/object-path'
+import type { TablesUpdate } from '@/types/database'
 
 // PRIVATE bucket — downloads here go through the service-role client, which
 // bypasses both the bucket's public flag and its RLS policies, so this works
@@ -83,7 +84,7 @@ export const assetDataPlateScan = inngest.createFunction(
       if (!asset) return
 
       const found = Boolean(result.make || result.model || result.serial_number)
-      const updates: Record<string, unknown> = {}
+      const updates: TablesUpdate<'property_assets'> = {}
 
       // Never downgrade an already-completed scan — a duplicate/retried run
       // disagreeing on `found` (LLM output isn't perfectly deterministic)

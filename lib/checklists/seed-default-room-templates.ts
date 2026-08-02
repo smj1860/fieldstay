@@ -3,6 +3,7 @@ import { reportError } from '@/lib/observability/report-error'
 import { fetchAllRows } from '@/lib/inngest/paginate'
 import { createServiceClient } from '@/lib/supabase/server'
 import { logAuditEvent } from '@/lib/audit'
+import type { TablesUpdate } from '@/types/database'
 
 type ServiceClient = ReturnType<typeof createServiceClient>
 
@@ -172,7 +173,7 @@ export async function seedDefaultRoomTemplatesIfNeeded(orgId: string): Promise<v
   // fully completed or because a PM cleared just one side of the
   // mapping. Re-deriving an existing template's id here would silently
   // overwrite whatever the PM currently has that mapping set to.
-  const mappingUpdates: Record<string, string> = {}
+  const mappingUpdates: TablesUpdate<'organizations'> = {}
   if (results['Bedroom']?.created)  mappingUpdates.bedroom_room_template_id  = results['Bedroom'].id
   if (results['Bathroom']?.created) mappingUpdates.bathroom_room_template_id = results['Bathroom'].id
 

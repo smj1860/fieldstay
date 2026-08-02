@@ -1,10 +1,30 @@
 import { createServerClient } from '@supabase/ssr'
 import { cookies } from 'next/headers'
 
-// Database['public'] doesn't satisfy postgrest-js v2.106's GenericSchema constraint
-// (hand-written interfaces lack index signatures required by Record<string, GenericTable>).
-// We omit the <Database> type arg so Schema defaults to `any`, which allows all
-// .from() queries to type-check. Replace with Supabase CLI-generated types once connected.
+// The <Database> generic is still omitted, so `Schema` defaults to `any` and
+// NO .from() or .rpc() call in this app is type-checked. That is a real gap,
+// not a style choice: reviews.internal_notes (fixed 2026-08-02) was selected
+// by a cron for months — PostgREST rejects the whole select on an unknown
+// column, so the job threw on every run for every org — and nothing compared
+// the select string against the schema because there was nothing to compare
+// it to.
+//
+// The blocker used to be that types/database.ts was hand-written and its
+// interfaces do not satisfy postgrest-js's GenericSchema constraint (no index
+// signatures, no Relationships), so binding them collapsed every row type to
+// `never`: 2267 errors, 2163 of them that one collapse.
+//
+// That blocker is now GONE. types/database.generated.ts is generated from the
+// live schema and Database re-exports it, so wiring the generic here is:
+//
+//   import type { Database } from '@/types/database'
+//   return createServerClient(
+//
+// Measured on that basis: 123 errors as of 2026-08-03 (was 138) — a long tail of
+// insert/update payload mismatches, nullability, and Json shapes, each needing
+// its own judgement rather than one mechanical fix. Wiring it is the next step
+// and must land with those 138 resolved, not before; a half-wired client is
+// worse than an unwired one because it looks checked.
 
 /**
  * Server-side Supabase client for use in:

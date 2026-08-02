@@ -1,5 +1,6 @@
 import { createServiceClient } from '@/lib/supabase/server'
 import { generateBaseSlug, generateUniqueSlugsForProperties } from '@/lib/guidebook/slug'
+import type { TablesUpdate } from '@/types/database'
 
 /**
  * Ensures an org has a guidebook_configurations row, starting the 30-day
@@ -136,7 +137,7 @@ export async function syncGuidebookConfigsFromProperty(
       const config = configByPropertyId.get(prop.id)
       if (!config) return // no guidebook config yet — createGuidebookPropertyConfigsForProperties handles creation
 
-      const patch: Record<string, unknown> = {}
+      const patch: TablesUpdate<'guidebook_property_configs'> = {}
 
       if (!config.wifi_network           && prop.wifi_name)             patch.wifi_network           = prop.wifi_name
       if (!config.wifi_password          && prop.wifi_password)         patch.wifi_password          = prop.wifi_password

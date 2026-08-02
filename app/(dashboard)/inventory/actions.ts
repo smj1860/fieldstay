@@ -7,7 +7,8 @@ import { logAuditEvent } from '@/lib/audit'
 import { reportError } from '@/lib/observability/report-error'
 import { unwrapJoin } from '@/lib/utils/supabase-joins'
 import { fetchAllRows } from '@/lib/inngest/paginate'
-import type { InventoryCategory } from '@/types/database'
+import type { InventoryCategory, TablesInsert, TablesUpdate } from '@/types/database'
+import { Constants } from '@/types/database'
 
 /**
  * Deterministic, locale-independent string ordering for CANONICALISATION.
@@ -56,6 +57,18 @@ export async function updateParLevel(
     reportError(err, { site: 'serverAction.inventory.updateParLevel' })
     return { error: 'Operation failed. Please try again.' }
   }
+}
+
+/**
+ * Narrow a free-text category to the inventory_category enum the column
+ * accepts, falling back to the column's own default.
+ *
+ * The valid labels come from Constants (generated from the live schema), not a
+ * hand-written list — a second copy of an enum is a copy that drifts.
+ */
+function toInventoryCategory(value: string | null): InventoryCategory {
+  const valid: readonly string[] = Constants.public.Enums.inventory_category
+  return value !== null && valid.includes(value) ? (value as InventoryCategory) : 'other'
 }
 
 // ── Add inventory items (bulk) ───────────────────────────────────────────────
@@ -452,20 +465,11 @@ export async function applyTemplateToProperties(
     }
 
     let applied = 0
-    const allToInsert: Array<{
-      property_id:             string
-      org_id:                  string
-      catalog_item_id:         string | null
-      source_template_id:      string
-      name:                    string
-      category:                string
-      unit:                    string
-      par_level:               number
-      current_quantity:        number
-      low_stock_threshold_pct: number
-      is_active:               boolean
-      preferred_brand:         string | null
-    }> = []
+    // TablesInsert, not a hand-written shape: the previous annotation declared
+    // `category: string`, which widened the inventory_category enum the column
+    // actually accepts. Deriving the payload type from the schema means the
+    // narrowing is checked here rather than discovered by PostgREST.
+    const allToInsert: Array<TablesInsert<'inventory_items'>> = []
 
     for (const propertyId of targetPropertyIds) {
       const existing = existingByProperty[propertyId] ?? { catalogIds: new Set<string>(), names: new Set<string>() }
@@ -482,8 +486,16 @@ export async function applyTemplateToProperties(
           catalog_item_id:         item.catalog_item_id ?? null,
           source_template_id:      templateId,
           name:                    item.name,
-          category:                item.category,
-          unit:                    item.unit,
+          // inventory_template_items.category/unit are NULLABLE TEXT;
+          // inventory_items.category/unit are NOT NULL (category is the
+          // inventory_category enum). Copying one straight into the other let
+          // a NULL or an off-enum string reach the insert, where Postgres
+          // would reject it — and because this is a BULK insert, one bad
+          // template row would fail the whole application, for every selected
+          // property at once. The fallbacks are the column defaults declared
+          // in the schema ('other' / 'units'), not invented values.
+          category:                toInventoryCategory(item.category),
+          unit:                    item.unit ?? 'units',
           par_level:               item.par_level,
           current_quantity:        0,
           low_stock_threshold_pct: 20,
@@ -685,7 +697,7 @@ export async function updatePurchaseOrderStatus(
     if (!po) return { error: 'Purchase order not found' }
     if (po.status === status) return {}
 
-    const statusUpdate: Record<string, unknown> = { status }
+    const statusUpdate: TablesUpdate<'purchase_orders'> = { status }
     if (status === 'sent') statusUpdate.sent_at = new Date().toISOString()
 
     const { data: updated, error } = await supabase

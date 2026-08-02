@@ -2,11 +2,9 @@ import { inngest } from '@/lib/inngest/client'
 import { reportError } from '@/lib/observability/report-error'
 import { createServiceClient } from '@/lib/supabase/server'
 import { resend, FROM } from '@/lib/resend/client'
-import { getPmEmails, createPmNotification } from '@/lib/inngest/helpers'
+import { createPmNotification } from '@/lib/inngest/helpers'
 import { formatPropertyDateTime } from '@/lib/utils/timezone'
 import { renderPmAlert } from '@/lib/resend/emails/pm-alert'
-import { assetTypeDisplayName, missingAssetTypesFromDiscoveredSet } from '@/lib/asset-discovery/config'
-import type { AssetType } from '@/types/database'
 import { logAuditEvent } from '@/lib/audit'
 import { incrementCounter } from '@/lib/observability/metrics'
 import { unwrapJoin, unwrapJoinArray } from '@/lib/utils/supabase-joins'
@@ -147,48 +145,21 @@ export const handleTurnoverCompleted = inngest.createFunction(
       })
     })
 
-    await step.run('notify-pm-of-open-mandatory-items', async () => {
-      const supabase = createServiceClient({ system: 'inngest:turnover-events' })
-
-      const { data: assets } = await supabase
-        .from('property_assets')
-        .select('asset_type, make, model, photo_url, is_na')
-        .eq('property_id', property_id)
-        .eq('org_id', org_id)
-        .eq('is_active', true)
-
-      const discoveredTypes = new Set(
-        (assets ?? [])
-          .filter((a) => a.is_na === true || a.make !== null || a.model !== null || a.photo_url !== null)
-          .map((a) => a.asset_type as AssetType)
-      )
-      const missingTypes = missingAssetTypesFromDiscoveredSet(discoveredTypes)
-
-      if (!missingTypes.length) return { skipped: 'none_missing' }
-
-      const [{ data: property }, pmEmails] = await Promise.all([
-        supabase.from('properties').select('name').eq('id', property_id).eq('org_id', org_id).single(),
-        getPmEmails(supabase, org_id),
-      ])
-      const [pmEmail] = pmEmails
-
-      if (!pmEmail) return { skipped: 'no_pm_email' }
-
-      await resend.emails.send({
-        from:    FROM,
-        to:      pmEmail,
-        subject: `⚠️ ${missingTypes.length} asset${missingTypes.length !== 1 ? 's' : ''} still need discovery — ${property?.name}`,
-        html: await renderPmAlert({
-          heading:  'Asset discovery still incomplete',
-          body:     `The crew marked this turnover complete, but ${missingTypes.length} required asset${missingTypes.length !== 1 ? 's haven\'t' : ' hasn\'t'} been discovered yet at ${property?.name}.`,
-          details:  missingTypes.map((t) => ({ label: assetTypeDisplayName(t), value: 'Not yet captured' })),
-          ctaLabel: 'View Property Assets →',
-          ctaUrl:   `${process.env.NEXT_PUBLIC_APP_URL}/assets`,
-        }),
-      }, { idempotencyKey: `turnover-completed-mandatory-open-${turnover_id}` })
-
-      return { notified: true, missing_count: missingTypes.length }
-    })
+    // REMOVED: the per-turnover "N assets still need discovery" email.
+    //
+    // It fired immediately on every completed turnover, to the first PM email,
+    // whenever any required asset type was still undiscovered at that property.
+    // The daily wrap-up already reports exactly this: cron/daily-wrapup.ts
+    // builds `checklistSection` from the SAME predicate over the SAME columns
+    // (missingAssetTypesFromDiscoveredSet over the is_na/make/model/photo_url
+    // filter), per property, once a day.
+    //
+    // So this was the same number delivered twice — but the per-turnover copy
+    // arrived on a trigger the PM cannot act on differently (asset discovery is
+    // not a turnover task) and at a rate set by turnover volume, which is
+    // exactly the shape that trains people to filter a sender. Deleted rather
+    // than made conditional: there is no threshold at which a duplicate of the
+    // wrap-up's own content is worth its own send.
 
     await step.run('record-completion-milestones', async () => {
       const supabase = createServiceClient({ system: 'inngest:turnover-events' })

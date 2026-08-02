@@ -589,6 +589,24 @@ export async function myAction(input: MyInput): Promise<ActionResult> {
 
 **This is the most important housekeeping rule in the codebase.**
 
+There are now TWO type files, and a migration touches both:
+
+- `types/database.generated.ts` — GENERATED from the live schema, never
+  hand-edited. Regenerate with
+  `npx supabase gen types typescript --project-id vpmznjktllhmmbfnxuvk > types/database.generated.ts`
+  (or the Supabase MCP `generate_typescript_types` tool). It owns `Json` and
+  `Database`; `types/database.ts` re-exports both from it. It exists because
+  the hand-written interfaces do not satisfy postgrest-js's `GenericSchema`
+  constraint, which is why `lib/supabase/server.ts` still omits the
+  `<Database>` generic and no `.from()`/`.rpc()` call is type-checked yet —
+  see the comment in that file for the remaining work.
+- `types/database.ts` — hand-written named interfaces (`Property`,
+  `WorkOrder`, `MemberRole`, …), the app's import surface. Diffed against the
+  live schema on 2026-08-02 and accurate: the only differences were two
+  PostgREST embed aliases (not columns) and the deliberately-omitted
+  deprecated `work_orders.assigned_crew_id`. `scripts/check-type-drift.mjs`
+  keeps it honest.
+
 Whenever a DB migration adds or changes a column, update `types/database.ts`
 in the same commit. The Supabase TypeScript client infers return types from
 this file — not from the live database schema. A column that exists in the DB

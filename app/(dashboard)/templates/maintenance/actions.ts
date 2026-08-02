@@ -5,7 +5,7 @@ import { requireOrgRole } from '@/lib/auth'
 import { logAuditEvent } from '@/lib/audit'
 import { reportError } from '@/lib/observability/report-error'
 import { unwrapJoin } from '@/lib/utils/supabase-joins'
-import type { ScheduleFrequency, VendorSpecialty } from '@/types/database'
+import type { ScheduleFrequency, VendorSpecialty, TablesUpdate } from '@/types/database'
 
 // Item-level CRUD for maintenance_schedule_template_items — didn't exist
 // before this pass (createMaintenanceScheduleTemplate only inserts items at
@@ -103,7 +103,7 @@ export async function updateMaintenanceTemplateItem(
     const template = unwrapJoin(item.maintenance_schedule_templates)
     if (template?.is_system) return { error: 'System templates cannot be edited.' }
 
-    const patch: Record<string, unknown> = {}
+    const patch: TablesUpdate<'maintenance_schedule_template_items'> = {}
     if (updates.name !== undefined) {
       const trimmed = updates.name.trim()
       if (!trimmed) return { error: 'Item name is required.' }

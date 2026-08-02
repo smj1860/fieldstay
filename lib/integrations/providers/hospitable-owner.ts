@@ -45,7 +45,14 @@ export interface ResolvedHospitableOwner {
 }
 
 /** Domain table + column that stores each entity kind's provider-side id. */
-const LOCAL_SOURCE: Record<HospitableEntityKind, { table: string }> = {
+// The table name is a literal union, not `string`. Typed as `string` it
+// widened to "any table in the schema", so postgrest-js intersected the column
+// names of all 94 of them and resolved every .eq()/.select() argument to
+// `never` — the query was unverifiable rather than wrong. All three tables do
+// carry org_id / external_id / external_source (checked against the live
+// schema), which is what makes the shared query below legitimate; the union
+// is what lets the type system confirm it.
+const LOCAL_SOURCE: Record<HospitableEntityKind, { table: 'bookings' | 'properties' | 'reviews' }> = {
   reservation: { table: 'bookings' },
   property:    { table: 'properties' },
   review:      { table: 'reviews' },

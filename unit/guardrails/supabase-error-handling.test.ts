@@ -232,7 +232,7 @@ const BASELINE: Record<string, number> = {
   'lib/inngest/functions/platform-inventory-template-broadcast.ts': 5,
   'lib/inngest/functions/promo-hospitable-award-lock.ts': 1,
   'lib/inngest/functions/support-conversation-escalated.ts': 2,
-  'lib/inngest/functions/turnover-events.ts': 9,
+  'lib/inngest/functions/turnover-events.ts': 7,
   'lib/inngest/functions/work-order-crew-assigned.ts': 1,
   'lib/inngest/functions/work-order-crew-completed.ts': 1,
   'lib/inngest/functions/work-order-dispatch.ts': 5,

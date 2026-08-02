@@ -8,6 +8,7 @@ import { logAuditEvents }            from '@/lib/audit'
 import { revokeIntegrationToken }    from '@/lib/integrations/vault'
 import { stripe }                    from '@/lib/stripe/client'
 import { reportError }               from '@/lib/observability/report-error'
+import type { TablesUpdate } from '@/types/database'
 
 type Admin = ReturnType<typeof createServiceClient>
 
@@ -173,7 +174,12 @@ async function cancelOrgSubscriptions(
   }
   if (!org) return null
 
-  const subs: Array<{ id: string; column: string; site: string }> = []
+  // `column` is a literal union, not `string`: it is used to index the typed
+  // organizations update payload below, and a plain `string` index would make
+  // that payload implicitly `any` — quietly giving up the checking this write
+  // just gained.
+  type SubscriptionColumn = 'stripe_subscription_id' | 'repuguard_stripe_subscription_id'
+  const subs: Array<{ id: string; column: SubscriptionColumn; site: string }> = []
   if (org.stripe_subscription_id) {
     subs.push({
       id:     org.stripe_subscription_id as string,
@@ -191,7 +197,7 @@ async function cancelOrgSubscriptions(
 
   if (!subs.length) return null
 
-  const cleared: Record<string, null> = {}
+  const cleared: TablesUpdate<'organizations'> = {}
   for (const sub of subs) {
     try {
       await stripe.subscriptions.cancel(sub.id)
