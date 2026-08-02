@@ -20,7 +20,7 @@ import { cookies } from 'next/headers'
 //   import type { Database } from '@/types/database'
 //   return createServerClient(
 //
-// Measured on that basis: 138 errors, across 44 files — a long tail of
+// Measured on that basis: 123 errors as of 2026-08-03 (was 138) — a long tail of
 // insert/update payload mismatches, nullability, and Json shapes, each needing
 // its own judgement rather than one mechanical fix. Wiring it is the next step
 // and must land with those 138 resolved, not before; a half-wired client is

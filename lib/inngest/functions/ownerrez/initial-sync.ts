@@ -39,6 +39,7 @@ import {
   syncGuidebookConfigsFromProperty,
 } from '@/lib/guidebook/sync'
 import { mergeIntegrationConnectionMetadata } from '@/lib/integrations/connection-metadata'
+import type { TablesUpdate } from '@/types/database'
 
 import { reportError } from '@/lib/observability/report-error'
 const PROVIDER = 'ownerrez'
@@ -172,7 +173,7 @@ export const ownerRezInitialSync = inngest.createFunction(
           const orData = fetchPropsResult.patchData.find((p) => p.externalId === existing.external_id)
           if (!orData) continue
 
-          const patch: Record<string, unknown> = {}
+          const patch: TablesUpdate<'properties'> = {}
 
           // === null (not a falsy check) on all three — a falsy check also
           // matches a legitimate 0 (e.g. a studio's bedroom count), which

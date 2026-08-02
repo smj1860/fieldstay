@@ -7,7 +7,7 @@ import { logAuditEvent } from '@/lib/audit'
 import { reportError } from '@/lib/observability/report-error'
 import { unwrapJoin } from '@/lib/utils/supabase-joins'
 import { fetchAllRows } from '@/lib/inngest/paginate'
-import type { InventoryCategory, TablesInsert } from '@/types/database'
+import type { InventoryCategory, TablesInsert, TablesUpdate } from '@/types/database'
 import { Constants } from '@/types/database'
 
 /**
@@ -697,7 +697,7 @@ export async function updatePurchaseOrderStatus(
     if (!po) return { error: 'Purchase order not found' }
     if (po.status === status) return {}
 
-    const statusUpdate: Record<string, unknown> = { status }
+    const statusUpdate: TablesUpdate<'purchase_orders'> = { status }
     if (status === 'sent') statusUpdate.sent_at = new Date().toISOString()
 
     const { data: updated, error } = await supabase

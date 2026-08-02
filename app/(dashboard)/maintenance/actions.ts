@@ -8,7 +8,7 @@ import { calcNextDueDate } from '@/lib/turnovers/generator'
 import { fetchAllRows } from '@/lib/inngest/paginate'
 import { logAuditEvent } from '@/lib/audit'
 import { reportError } from '@/lib/observability/report-error'
-import type { WoStatus, WoCategory, ScheduleFrequency, ScheduleType, VendorSpecialty } from '@/types/database'
+import type { WoStatus, WoCategory, ScheduleFrequency, ScheduleType, VendorSpecialty, TablesUpdate } from '@/types/database'
 import { PriorityLevelSchema, WoStatusSchema, WoCategorySchema } from '@/lib/schemas/work-order'
 import {
   resolveWorkOrderStatus,
@@ -506,7 +506,7 @@ export async function updateWorkOrderStatus(
       return { error: 'This work order is assigned to a vendor — it must be completed through the vendor portal so the invoice and payment can be generated.' }
     }
 
-    const update: Record<string, unknown> = status === 'completed'
+    const update: TablesUpdate<'work_orders'> = status === 'completed'
       ? workOrderCompletionFields(notes ?? null)
       : { status }
 

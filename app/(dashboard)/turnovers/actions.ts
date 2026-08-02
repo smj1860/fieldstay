@@ -7,6 +7,7 @@ import { inngest, sendEventAsync } from '@/lib/inngest/client'
 import { logAuditEvent } from '@/lib/audit'
 import { unwrapJoin } from '@/lib/utils/supabase-joins'
 import { reportError } from '@/lib/observability/report-error'
+import type { TablesUpdate } from '@/types/database'
 
 export type TurnoverActionState = { error?: string; success?: boolean; warning?: string }
 
@@ -306,7 +307,7 @@ export async function updateTurnoverStatus(
   try {
     const { supabase, membership, user } = await requireOrgMember()
 
-    const update: Record<string, unknown> = { status }
+    const update: TablesUpdate<'turnovers'> = { status }
     const completedAt = new Date().toISOString()
     if (status === 'in_progress') {
       update.started_at = completedAt
