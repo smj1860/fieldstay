@@ -21,7 +21,7 @@ vi.mock('@/lib/observability/metrics', () => ({
   incrementCounter: vi.fn(),
 }))
 
-import { handleTurnoverCreated } from '@/lib/inngest/functions/turnover-events'
+import { handleTurnoverCreated, handleTurnoverCompleted } from '@/lib/inngest/functions/turnover-events'
 import { createServiceClient } from '@/lib/supabase/server'
 import { resend } from '@/lib/resend/client'
 import { invokeHandler } from './test-helpers'
@@ -154,5 +154,40 @@ describe('handleTurnoverCreated', () => {
 
     expect(resend.emails.send).not.toHaveBeenCalled()
     expect(result).toBeUndefined()
+  })
+})
+
+// ── Turnover completion must not send email ─────────────────────────────────
+// The "N assets still need discovery" email used to fire here on every
+// completed turnover. It duplicated the daily wrap-up's checklistSection,
+// which is built from the same predicate over the same columns, so it was
+// removed. This pins that: completion notifies the PM IN-APP
+// (createPmNotification) and sends nothing to an inbox.
+//
+// A permissive chain double is used deliberately — this asserts what the
+// handler does NOT do, so the doubles must not be the reason a send is
+// missing. Every step runs for real against a client that answers everything.
+function permissiveSupabase() {
+  const result = { data: [], error: null, count: 0 }
+  const chain: unknown = new Proxy({}, {
+    get: (_t, prop) => {
+      if (prop === 'then') return (resolve: (v: unknown) => unknown) => resolve(result)
+      return () => chain
+    },
+  })
+  return { from: vi.fn(() => chain) }
+}
+
+describe('handleTurnoverCompleted', () => {
+  it('notifies the PM in-app and sends NO email — asset-discovery email removed', async () => {
+    ;(createServiceClient as ReturnType<typeof vi.fn>).mockReturnValue(permissiveSupabase())
+
+    await invokeHandler(handleTurnoverCompleted, {
+      event:  { data: { turnover_id: 'to_1', property_id: 'prop_1', org_id: 'org_1' } },
+      step:   runAllStep(),
+      logger: { info: vi.fn(), error: vi.fn() },
+    })
+
+    expect(resend.emails.send).not.toHaveBeenCalled()
   })
 })
