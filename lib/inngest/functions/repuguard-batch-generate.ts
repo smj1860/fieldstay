@@ -22,7 +22,14 @@ export const repuguardBatchGenerate = inngest.createFunction(
 
       const { data, error } = await supabase
         .from('reviews')
-        .select('id, review_text, rating, guest_name, internal_notes, properties(name)')
+        // `internal_notes` is NOT selected: there is no such column on
+        // `reviews` (verified against the live API — PostgREST answers
+        // `42703 column reviews.internal_notes does not exist`). Naming it
+        // here made PostgREST reject the WHOLE select, so `error` was always
+        // set and the throw below fired on every run, for every org — batch
+        // generation had never produced a single draft. See the note at the
+        // internalNotes assignment below.
+        .select('id, review_text, rating, guest_name, properties(name)')
         .eq('org_id', org_id)
         .eq('response_status', 'pending')
         .order('created_at', { ascending: true })
@@ -55,7 +62,14 @@ export const repuguardBatchGenerate = inngest.createFunction(
         const guestName     = (review.guest_name as string | null) ?? 'Guest'
         const reviewText    = review.review_text as string
         const starRating    = review.rating as number
-        const internalNotes = (review.internal_notes as string | null) ?? null
+        // Always null, deliberately and visibly. generateReviewResponse()
+        // supports internal notes (it sanitises and truncates them into the
+        // prompt), but `reviews` has no internal_notes column and nothing in
+        // the codebase writes one — the only internal_notes that exists is on
+        // `properties`. The capability is kept wired so that adding the column
+        // plus a way to populate it is the whole change; what is removed is
+        // the pretence that it is already being read.
+        const internalNotes: string | null = null
 
         let parsed
         try {

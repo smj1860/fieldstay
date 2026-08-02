@@ -69,7 +69,7 @@ function baseReview(overrides: Partial<Record<string, unknown>> = {}) {
   return {
     id: 'review_1', org_id: ORG_ID, external_source: 'airbnb',
     review_text: 'The place was great but the wifi was slow.',
-    rating: 4, guest_name: 'Jamie', internal_notes: null,
+    rating: 4, guest_name: 'Jamie',
     properties: { name: 'Lakeview Cabin' },
     ...overrides,
   }
