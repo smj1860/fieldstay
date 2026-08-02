@@ -1777,6 +1777,125 @@ export interface PromoHospitableLaunchCounter {
  * work_orders.assigned_crew_id. They remain the app's import surface, and
  * scripts/check-type-drift.mjs keeps them honest against the live schema.
  */
+
+/**
+ * table name -> the hand-written Row interface that models it.
+ *
+ * PARSED BY scripts/check-type-drift.mjs. This is not decoration and it is not
+ * used at runtime: the drift gate reads this map to know which interface to
+ * diff against which live table, in BOTH directions — a table with no entry is
+ * reported as unmodelled, and an entry naming a table that no longer exists is
+ * reported as stale.
+ *
+ * It exists as its own declaration because the mapping used to be a side
+ * effect of the hand-written `Database.public.Tables` block. When Database
+ * moved to the generated file (2026-08-02) that block went with it, and the
+ * drift gate — which greps for `Tables: { ... } Views:` — silently matched
+ * nothing and reported all 92 tables as unmodelled. Pointing the gate at the
+ * generated file instead would have been worse than useless: that file is
+ * generated FROM the live schema, so diffing the two can never fail.
+ *
+ * The hand-written interfaces are what can drift, so they are what is checked.
+ * Add an entry in the same commit that adds a table + its interface.
+ */
+export interface HandWrittenRowMap {
+  profiles:                            Profile
+  organizations:                       Organization
+  organization_members:                OrganizationMember
+  properties:                          Property
+  property_owners:                     PropertyOwner
+  owner_portal_tokens:                 OwnerPortalToken
+  ical_feeds:                          IcalFeed
+  bookings:                            Booking
+  crew_members:                        CrewMember
+  crew_availability:                   CrewAvailability
+  vendors:                             Vendor
+  checklist_templates:                 ChecklistTemplate
+  checklist_template_sections:         ChecklistTemplateSection
+  checklist_template_items:            ChecklistTemplateItem
+  room_templates:                      RoomTemplate
+  room_template_items:                 RoomTemplateItem
+  org_inventory_catalog:               OrgInventoryCatalogItem
+  org_maintenance_catalog_items:       OrgMaintenanceCatalogItem
+  platform_staff:                      PlatformStaff
+  platform_seed_room_templates:        PlatformSeedRoomTemplate
+  platform_seed_room_template_items:   PlatformSeedRoomTemplateItem
+  turnovers:                           Turnover
+  turnover_assignments:                TurnoverAssignment
+  checklist_instances:                 ChecklistInstance
+  checklist_instance_items:            ChecklistInstanceItem
+  inventory_catalog:                   InventoryCatalogItem
+  inventory_items:                     InventoryItem
+  inventory_counts:                    InventoryCount
+  inventory_count_items:               InventoryCountItem
+  inventory_count_drafts:              InventoryCountDraft
+  inventory_count_draft_items:         InventoryCountDraftItem
+  purchase_orders:                     PurchaseOrder
+  purchase_order_items:                PurchaseOrderItem
+  work_orders:                         WorkOrder
+  work_order_line_items:               WorkOrderLineItem
+  work_order_updates:                  WorkOrderUpdate
+  work_order_photos:                   WorkOrderPhoto
+  maintenance_schedules:               MaintenanceSchedule
+  maintenance_schedule_templates:      MaintenanceScheduleTemplate
+  maintenance_schedule_template_items: MaintenanceScheduleTemplateItem
+  owner_transactions:                  OwnerTransaction
+  org_milestones:                      OrgMilestone
+  audit_events:                        AuditEvent
+  stripe_processed_events:             StripeProcessedEvent
+  org_invites:                         OrgInvite
+  quote_requests:                      QuoteRequest
+  communication_logs:                  CommunicationLog
+  messages:                            Message
+  push_subscriptions:                  PushSubscription
+  org_sms_templates:                   OrgSmsTemplate
+  assignment_outcomes:                 AssignmentOutcome
+  vendor_assignment_outcomes:          VendorAssignmentOutcome
+  crew_feedback:                       CrewFeedback
+  checklist_item_signals:              ChecklistItemSignal
+  inventory_templates:                 InventoryTemplate
+  inventory_template_items:            InventoryTemplateItem
+  platform_inventory_templates:        PlatformInventoryTemplate
+  platform_inventory_template_items:   PlatformInventoryTemplateItem
+  maintenance_catalog_items:           MaintenanceCatalogItem
+  maintenance_completions:             MaintenanceCompletion
+  work_order_invoices:                 WorkOrderInvoice
+  reservation_messages:                ReservationMessage
+  reviews:                             Review
+  review_responses:                    ReviewResponse
+  property_assets:                     PropertyAsset
+  asset_type_standards:                AssetTypeStandard
+  asset_depreciation_entries:          AssetDepreciationEntry
+  asset_manuals:                       AssetManual
+  vendor_compliance_documents:         VendorComplianceDocument
+  integration_providers:               IntegrationProvider
+  integration_connections:             IntegrationConnection
+  oauth_states:                        OAuthState
+  processed_webhooks:                  ProcessedWebhook
+  integration_entity_owners:           IntegrationEntityOwner
+  pending_integration_links:           PendingIntegrationLink
+  pending_oauth_authorizations:        PendingOAuthAuthorization
+  support_kb_chunks:                   SupportKbChunk
+  support_conversations:               SupportConversation
+  support_messages:                    SupportMessage
+  guidebook_configurations:            GuidebookConfiguration
+  guidebook_sponsors:                  GuidebookSponsor
+  guidebook_property_configs:          GuidebookPropertyConfig
+  guidebook_guest_sms_optins:          GuidebookGuestSmsOptin
+  guidebook_offer_redemptions:         GuidebookOfferRedemption
+  stay_extension_requests:             StayExtensionRequest
+  notifications:                       Notification
+  notification_digest_state:           NotificationDigestState
+  demo_activity_log:                   DemoActivityLog
+  hospitable_launch_promo:             HospitableLaunchPromo
+  promo_hospitable_launch_counter:     PromoHospitableLaunchCounter
+}
+
+/** Views modelled by hand, same contract as HandWrittenRowMap. */
+export interface HandWrittenViewMap {
+  vendor_compliance_status: VendorComplianceStatus
+}
+
 export type { Database } from './database.generated'
 
 /**
