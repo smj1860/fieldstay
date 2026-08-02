@@ -40,23 +40,70 @@ A ratchet rule whose majority is permitted-by-policy is one people learn to
 ignore, and `fieldstay-supabase-unbounded-select` was exactly that: 284
 findings, all pattern-correct, most of them the case CLAUDE.md explicitly
 allows ("Fine for a request handler rendering one org's page; never acceptable
-for a platform-wide scan"). It is now a four-tier ladder along the only axis
+for a platform-wide scan"). It is now a severity ladder along the only axis
 that predicts whether PostgREST's 1000-row cap can actually be reached — what
 bounds the result set:
 
 | Tier | Rule suffix | Bound | Sev | Count |
 |---|---|---|---|---|
 | 1 | `-table-scan` | nothing but the table | ERROR | 38 → **0, promoted** |
-| 2 | `-cross-tenant` | some entity, but not one org | ERROR | 81 |
-| 3 | `-in-list` | one org, sized by an `.in()` array | WARNING | 50 |
-| 4 | `-org-scoped` | one org, one parent — the permitted case | INFO | 112 |
+| 2 | `-cross-tenant` | no org scope AND no parent row | ERROR | 53 → **0, promoted** |
+| 2b | `-single-parent` | one non-org parent row, no org scope | WARNING | 47 |
+| 2c | `-global-table` | table has no `org_id` column to scope to | INFO | 5 |
+| 3 | `-in-list` | one org, sized by an `.in()` array | WARNING | 46 |
+| 4 | `-org-scoped` | one org, one parent — the permitted case | INFO | 113 |
 
-The four are **mutually exclusive and exhaustive**: every finding of the
+The tiers are **mutually exclusive and exhaustive**: every finding of the
 original rule lands in exactly one tier, so the counts still sum to the whole
 class and no site is lost between tiers. Tier 1 WAS the burn-down target and
 reached 0 on 2026-08-01, so it now lives in `chokepoints.yml` and gates at
 `--error` across the whole tree; its `baseline-counts.json` key was deleted in
-the same change. `-cross-tenant` is the next target.
+the same change.
+
+**Tier 2 reached 0 on 2026-08-02, and not by fixing anything.** Its 53 findings
+were 47 reads scoped by a non-org parent id, 5 reads of tables that have no
+`org_id` column at all, and 1 correctly org-scoped read the rule could not see
+(below). None was a cross-tenant scan. Splitting 2b and 2c out is what made the
+tier mean what its name says; the same 53 reads are still counted, under names
+that describe them. It was **promoted to `chokepoints.yml` the same day** and
+its `baseline-counts.json` key deleted in that change.
+
+Before promoting it, two things were checked that a count of 0 does not tell
+you. First, that the rule still **fires**: a rule at zero because it is broken
+looks exactly like one at zero because the tree is clean, so it was run against
+a deliberately cross-tenant read (fires, exit 1) plus org-scoped, dotted-org-
+scoped and parent-scoped controls (silent). Second, that nothing in the tree can
+trip it accidentally: the new `metavariable-regex` negatives only recognise a
+**string-literal** column name, so a dynamic `.eq(someVar, …)` would read as
+"no scope" and fail the build tree-wide. There are currently **zero** non-literal
+`.eq()` column names in the codebase. If one is ever introduced legitimately,
+widen those negatives — never add a `nosemgrep`.
+
+Mutual exclusion is now **enforced** by `scripts/check-semgrep-ratchet.mjs`,
+which fails when one site matches two ladder tiers. That is not defensive
+paranoia: the 2b/2c split introduced exactly that overlap
+(`platform_inventory_template_items` filtered by
+`platform_inventory_template_id` satisfied both), and the ladder total read 212
+against an unchanged population of 211 until it was caught. A tier that
+double-counts cannot be burned to a meaningful zero.
+
+**The org-scope matcher is dotted-aware.** Tiers 2, 2b, 3 and 4 all recognise
+`.eq('checklist_templates.org_id', …)` — a filter on an embedded resource
+through an `!inner` join — as org scope, not just the undotted `'org_id'`. The
+literal matcher this replaced counted a correctly single-tenant read as a
+cross-tenant scan. The tenant boundary does not care which side of a join
+carries the column. That reclassification is the one raised number in
+`baseline-counts.json`'s history (`-org-scoped` 112 → 113); the ladder total is
+unchanged, which is the invariant that matters.
+
+The global-table list in tiers 2/2b/2c is **derived from the live schema**, not
+curated: every public table with no `org_id` column AND no foreign key to a
+table that has one. A table with no `org_id` but a tenant-linked parent
+(`work_order_photos`, `purchase_order_items`, …) is deliberately excluded from
+that list — those are ordinary child tables and belong in the tiers above. The
+tables are counted rather than skipped, because `profiles`, `processed_webhooks`
+and `support_kb_chunks` still grow with the platform and still truncate at 1000;
+what tier 2c drops is the *tenant* framing, not the truncation coverage.
 
 Tier 1 is the one promoted rule with no `paths.exclude`: no file legitimately
 owns "read an entire table unbounded", so the exemption is expressed purely as
@@ -65,12 +112,14 @@ head-count aggregate) in `pattern-not-inside`.
 
 Two mechanics worth knowing before editing these:
 
-- The POSITIVE `pattern-inside: $Y.eq("org_id", ...)` that tiers 3–4 use to
-  assert single-tenant scope must **not** be wrapped in a `pattern-either`.
-  Semgrep then emits the enclosing call's own range as a finding and the count
-  inflates several-fold (591 instead of 81 when it was tried). Two sibling
-  `pattern-inside`s AND correctly and do not inflate — that is how tier 3
-  requires org scope and an `.in()` list at once.
+- The POSITIVE `pattern-inside` that tiers 3–4 use to assert single-tenant
+  scope must **not** be wrapped in a `pattern-either`. Semgrep then emits the
+  enclosing call's own range as a finding and the count inflates several-fold
+  (591 instead of 81 when it was tried). Two sibling `pattern-inside`s AND
+  correctly and do not inflate — that is how tier 3 requires org scope and an
+  `.in()` list at once. A nested `patterns:` block *is* safe, and is how the
+  dotted-aware org matcher is expressed: `pattern-inside:` → `patterns:` →
+  `pattern` + `metavariable-regex`. Verified against the counts, not assumed.
 - `.in('org_id', …)` is deliberately **not** treated as org scope. All five
   occurrences in the tree are multi-tenant cron fan-ins, i.e. the high-signal
   case, not the permitted one.

@@ -33,6 +33,16 @@ import { readFileSync, writeFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import { dirname, join } from 'node:path'
 
+// Explicit ASCII comparator, NOT localeCompare and NOT a bare .sort(): every
+// use below orders text that ends up in CI log output or in a COMMITTED file,
+// so the order must be byte-stable across machines and locales rather than
+// locale-correct. localeCompare would make a CI diff — or the key order of
+// baseline-counts.json — depend on the runner. A bare .sort() happens to be
+// byte-stable for strings, but says nothing about the intent and is
+// type-dependent the moment the array is not strings (SonarQube S2871).
+// Declared up here because it is used before the report-printing section.
+const byRuleId = (a, b) => (a < b ? -1 : (a > b ? 1 : 0))
+
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..')
 const RULES = join(ROOT, '.semgrep', 'ratchet.yml')
 const BASELINE_FILE = join(ROOT, '.semgrep', 'baseline-counts.json')
@@ -79,12 +89,51 @@ for (const result of report.results) {
 const declared = [...readFileSync(RULES, 'utf8').matchAll(/^[ \t]*-[ \t]*id:[ \t]*(\S+)/gm)].map((m) => m[1])
 for (const id of declared) actual[id] ??= 0
 
+// ── The unbounded-select ladder must stay a PARTITION ───────────────────────
+// Its tiers claim to be mutually exclusive, which is what lets the per-tier
+// counts sum to the whole defect class. A site matching two tiers is counted
+// twice: the class looks bigger than it is, and burning one tier to zero no
+// longer proves those sites are gone — they are still counted under the other.
+//
+// Not hypothetical. Splitting -global-table out of -cross-tenant introduced
+// exactly this: platform_inventory_template_items filtered by
+// platform_inventory_template_id satisfied both -single-parent (a non-org
+// parent id) and -global-table (a table with no org_id), and the ladder total
+// read 212 against an unchanged population of 211. A comment saying "mutually
+// exclusive" cannot catch that; this can.
+const LADDER_PREFIX = 'fieldstay-supabase-unbounded-select-'
+const siteToTiers = new Map()
+for (const result of report.results) {
+  const id = ruleIdOf(result.check_id)
+  if (!id.startsWith(LADDER_PREFIX)) continue
+  const site = `${result.path}:${result.start.line}`
+  if (!siteToTiers.has(site)) siteToTiers.set(site, new Set())
+  siteToTiers.get(site).add(id.slice(LADDER_PREFIX.length))
+}
+const overlaps = [...siteToTiers.entries()].filter(([, tiers]) => tiers.size > 1)
+
+if (overlaps.length) {
+  console.error(
+    '\n::error title=Semgrep ladder is not a partition::' +
+      `${overlaps.length} site(s) match more than one unbounded-select tier, so the ` +
+      'per-tier counts double-count them and no tier can be burned to a meaningful zero.'
+  )
+  for (const [site, tiers] of overlaps) {
+    console.error(`  ✗ ${site}  →  ${[...tiers].sort(byRuleId).join(' + ')}`)
+  }
+  console.error(
+    '\nMake the tiers exclusive again: give the tier that should NOT win a negative ' +
+      'for the other tier\'s discriminator (see the tier 2b/2c note in .semgrep/ratchet.yml).'
+  )
+  process.exit(1)
+}
+
 // ── Compare ─────────────────────────────────────────────────────────────────
 const baselineDoc = JSON.parse(readFileSync(BASELINE_FILE, 'utf8'))
 const baseline = baselineDoc.counts
 
 if (UPDATE) {
-  baselineDoc.counts = Object.fromEntries(Object.entries(actual).sort(([a], [b]) => a.localeCompare(b)))
+  baselineDoc.counts = Object.fromEntries(Object.entries(actual).sort(([a], [b]) => byRuleId(a, b)))
   baselineDoc.measured_at = new Date().toISOString().slice(0, 10)
   writeFileSync(BASELINE_FILE, JSON.stringify(baselineDoc, null, 2) + '\n')
   console.log('Updated .semgrep/baseline-counts.json:')
@@ -127,11 +176,6 @@ for (const id of new Set([...Object.keys(actual), ...Object.keys(baseline)])) {
 }
 
 console.log('semgrep ratchet — per-rule counts')
-// Explicit ASCII comparator, NOT localeCompare: these are rule ids in CI log
-// output, so the order must be byte-stable across machines and locales rather
-// than locale-correct. localeCompare would make the diff depend on the runner.
-const byRuleId = (a, b) => (a < b ? -1 : (a > b ? 1 : 0))
-
 for (const id of Object.keys(actual).sort(byRuleId)) {
   console.log(`  ${String(actual[id]).padStart(5)}  ${id}   (baseline ${baseline[id] ?? '—'})`)
 }

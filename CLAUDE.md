@@ -1300,22 +1300,50 @@ following them stops being a memory test. Five layers, checked in CI via
    - **Severity inside a ratchet family matters as much as the pattern.** The
      single `fieldstay-supabase-unbounded-select` rule reported 284 findings,
      every one pattern-correct and most of them the case this file explicitly
-     permits (one org's page). It is now four mutually exclusive, exhaustive
+     permits (one org's page). It is now six mutually exclusive, exhaustive
      tiers ranked by what actually bounds the result set —
      `-table-scan` (nothing but the table, ERROR, 38 → **0, PROMOTED to
      `chokepoints.yml` 2026-08-01**),
-     `-cross-tenant` (no `.eq('org_id', …)` anywhere, ERROR, 81),
-     `-in-list` (one org but sized by an `.in()` array, WARNING, 50),
-     `-org-scoped` (one org, one parent — hygiene only, INFO, 112).
+     `-cross-tenant` (no org scope AND no parent row, ERROR, 53 → **0,
+     PROMOTED to `chokepoints.yml` 2026-08-02**),
+     `-single-parent` (one non-org parent id, no org scope, WARNING, 47),
+     `-global-table` (the table has no `org_id` column, INFO, 5),
+     `-in-list` (one org but sized by an `.in()` array, WARNING, 46),
+     `-org-scoped` (one org, one parent — hygiene only, INFO, 113).
      Tier 1 WAS the burn-down target and reached 0, so it now gates at
      `--error` across the whole tree rather than only on findings new vs. the
      PR base — a single unbounded table read anywhere fails the build. Its
      `baseline-counts.json` key was deleted in the same change, per the
-     promotion rule. `-cross-tenant` is the next burn-down target. `lib/inngest/**` gets no tier of its own because
+     promotion rule.
+     **`-cross-tenant` then reached 0 on 2026-08-02 without a single site
+     being fixed** — its 53 findings were 47 parent-scoped reads, 5 reads of
+     org-less platform tables, and 1 correctly org-scoped read the matcher
+     could not see. Splitting `-single-parent`/`-global-table` out is what
+     made the tier mean its name; the same reads are still counted. Promoting
+     it required two checks a count of 0 cannot give you: that the rule still
+     FIRES (verified against a deliberately cross-tenant read plus org-scoped,
+     dotted-org-scoped and parent-scoped controls — a rule at zero because it
+     is broken looks identical to one at zero because the tree is clean), and
+     that its `metavariable-regex` negatives — which only recognise a
+     string-literal column name — cannot be tripped by a dynamic
+     `.eq(someVar, …)`; there are currently zero such call sites.
+     **Two invariants make a "0"
+     here trustworthy, and both are enforced rather than asserted:** the
+     ladder must stay a partition (one site, one tier — enforced by
+     `scripts/check-semgrep-ratchet.mjs`, which caught a real 2b/2c overlap
+     that had inflated the total by one), and the org matcher must be
+     dotted-aware (`.eq('rel.org_id', …)` through an `!inner` join IS org
+     scope; the literal `'org_id'` matcher counted a single-tenant read as a
+     cross-tenant scan). The global-table list is derived from the live
+     schema — no `org_id` column and no FK to a table that has one — never
+     hand-curated, and those tables stay COUNTED because `profiles` /
+     `processed_webhooks` / `support_kb_chunks` still truncate at 1000.
+     `lib/inngest/**` gets no tier of its own because
      `unit/guardrails/unbounded-select.test.ts` already gates it at file
-     granularity. See `.semgrep/README.md` for the two semgrep mechanics
+     granularity. See `.semgrep/README.md` for the semgrep mechanics
      these tiers depend on (a positive `pattern-inside` must not be wrapped
-     in `pattern-either`; `.in('org_id', …)` is not org scope).
+     in `pattern-either`, though a nested `patterns:` block is safe;
+     `.in('org_id', …)` is not org scope).
    - **`paths.exclude` expresses ownership; `pattern-not-inside` expresses
      handling.** They are not interchangeable. What makes `lib/sms/telnyx.ts`
      allowed to call Telnyx is its path — its identity as the SMS_ENABLED +
