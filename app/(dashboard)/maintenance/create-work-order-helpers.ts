@@ -1,3 +1,4 @@
+import { unwrap } from '@/lib/supabase/unwrap'
 import 'server-only'
 import { fetchAllRows } from '@/lib/inngest/paginate'
 
@@ -197,7 +198,9 @@ export async function checkCrewTimeOffWarning(
 ): Promise<string | undefined> {
   if (!crewMemberId || !scheduledDate) return undefined
 
-  const { data: timeOff } = await supabase
+  // An empty result reads as "crew is available", so a failed read would
+  // assign work to someone who booked the day off.
+  const timeOffRes = await supabase
     .from('crew_availability')
     .select('id')
     .eq('org_id', orgId)
@@ -205,6 +208,8 @@ export async function checkCrewTimeOffWarning(
     .eq('available_date', scheduledDate)
     .eq('is_available', false)
     .maybeSingle()
+
+  const timeOff = unwrap(timeOffRes, { site: 'serverAction.maintenance.crew-time-off', orgId })
 
   return timeOff
     ? 'Work order created, but the assigned crew member marked time off on the scheduled date.'

@@ -35,7 +35,7 @@ describe('getMissingAssetDiscoveryTypes', () => {
 
   it('returns every required type when no property_assets rows exist yet', async () => {
     const supabase = makeSupabase([])
-    const missing = await getMissingAssetDiscoveryTypes(supabase as never, 'prop_1')
+    const missing  = await getMissingAssetDiscoveryTypes(supabase as never, 'prop_1')
     expect(missing).toEqual(REQUIRED_ASSET_TYPES)
   })
 
@@ -79,7 +79,11 @@ describe('getMissingAssetDiscoveryTypes', () => {
     expect(missing).toContain('dishwasher')
   })
 
-  it('treats a null `existing` result (query error swallowed by Supabase) as an empty verified set', async () => {
+  // Contract CHANGED (2026-08-03): this used to assert that a failed read was
+  // swallowed and every required asset reported missing — which is the defect,
+  // not the feature. A discovery prompt for assets the property already has is
+  // worse than an error, so the read now throws.
+  it('throws when the `existing` query fails, rather than reporting every asset missing', async () => {
     const calls: { method: string; args: unknown[] }[] = []
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const chain: any = {}
@@ -90,8 +94,9 @@ describe('getMissingAssetDiscoveryTypes', () => {
       Promise.resolve({ data: null, error: { message: 'boom' } }).then(resolve)
     const supabase = { from: vi.fn(() => chain) }
 
-    const missing = await getMissingAssetDiscoveryTypes(supabase as never, 'prop_1')
-    expect(missing).toEqual(REQUIRED_ASSET_TYPES)
+    await expect(
+      getMissingAssetDiscoveryTypes(supabase as never, 'prop_1')
+    ).rejects.toThrow()
   })
 })
 

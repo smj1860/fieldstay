@@ -11,6 +11,7 @@
  * client.
  */
 
+import { tryUnwrap } from '@/lib/supabase/unwrap'
 import { createServiceClient } from '@/lib/supabase/server'
 import {
   buildDoorCodeSMS,
@@ -60,12 +61,18 @@ export async function renderSmsBody(
 ): Promise<string> {
   const supabase = createServiceClient({ system: 'lib/sms/templates' })
 
-  const { data } = await supabase
+  // Degrade, don't throw: falling back to the built-in copy is the right
+  // behaviour for a missing custom template, and an SMS should still go out
+  // if this lookup fails. tryUnwrap still logs and reports.
+  const templateRes = await supabase
     .from('org_sms_templates')
     .select('body')
     .eq('org_id', orgId)
     .eq('key', key)
     .maybeSingle()
+
+  const templateOut = tryUnwrap(templateRes, { site: 'lib.sms.templates', orgId })
+  const data = templateOut.ok ? templateOut.data : null
 
   // Custom template found — render and return
   if (data?.body) return renderTemplate(data.body, vars)

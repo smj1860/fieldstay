@@ -1,4 +1,5 @@
 'use client'
+import { tryUnwrap } from '@/lib/supabase/unwrap'
 
 import { useState, useEffect, useRef } from 'react'
 import { Loader2, Check } from 'lucide-react'
@@ -28,12 +29,18 @@ export function TriggerLedgerButton({ taxYear, orgId }: Readonly<{ taxYear: numb
     const interval = setInterval(async () => {
       attemptsRef.current++
 
-      const { data } = await supabase
+      // Degrade, don't throw: this is a poll for an async job result, so a
+      // failed tick should just try again next interval rather than break
+      // the button. tryUnwrap still logs and reports.
+      const pollRes = await supabase
         .from('org_milestones')
         .select('value')
         .eq('org_id', orgId)
         .eq('milestone', `depreciation_ledger_${taxYear}`)
         .maybeSingle()
+
+      const pollOut = tryUnwrap<{ value: unknown }>(pollRes, { site: 'ui.capital-planning.ledger-poll', orgId })
+      const data = pollOut.ok ? pollOut.data : null
 
       const value = data?.value as { entry_count?: number; total_depr?: number } | undefined
 

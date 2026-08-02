@@ -119,12 +119,15 @@ describe('findMaintenanceCandidatesForWindow', () => {
     expect(result.map((c) => c.id)).toEqual(['summer_only'])
   })
 
-  it('returns an empty array when the query errors (data is null)', async () => {
+  // Contract CHANGED (2026-08-03): an empty array reads as "no maintenance due
+  // in this gap", so swallowing the error silently suppressed every vacancy
+  // suggestion for the property. It now throws.
+  it('throws when the query errors, rather than reporting no candidates', async () => {
     const supabase = makeSupabase({ data: null, error: { message: 'boom' } })
 
-    const result = await findMaintenanceCandidatesForWindow(supabase as never, 'prop_1', '2026-07-22', null)
-
-    expect(result).toEqual([])
+    await expect(
+      findMaintenanceCandidatesForWindow(supabase as never, 'prop_1', '2026-07-22', null)
+    ).rejects.toThrow()
   })
 
   it('preserves the shape of each returned candidate', async () => {

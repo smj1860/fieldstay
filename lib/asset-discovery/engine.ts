@@ -1,3 +1,4 @@
+import { unwrapList } from '@/lib/supabase/unwrap'
 import type { DBClient } from '@/lib/supabase/server'
 import type { AssetType } from '@/types/database'
 import {
@@ -15,12 +16,16 @@ export async function getMissingAssetDiscoveryTypes(
   supabase:   DBClient,
   propertyId: string,
 ): Promise<AssetType[]> {
-  const { data: existing } = await supabase
+  // An empty result makes every required asset look undiscovered, so a
+  // failed read would re-prompt for assets the property already has.
+  const existingRes = await supabase
     .from('property_assets')
     .select('asset_type, make, model, photo_url, is_na')
     .eq('property_id', propertyId)
     .eq('is_active', true)
     .in('asset_type', REQUIRED_ASSET_TYPES)
+
+  const existing = unwrapList(existingRes, { site: 'lib.asset-discovery.engine.existing' })
 
   const verifiedTypes = new Set(
     (existing ?? [])

@@ -1,4 +1,5 @@
 'use client'
+import { tryUnwrap } from '@/lib/supabase/unwrap'
 
 import { useState, useEffect, useRef } from 'react'
 import { Loader2, Check }                from 'lucide-react'
@@ -36,12 +37,18 @@ export function TriggerProjectionsButton({
     const interval = setInterval(async () => {
       attemptsRef.current++
 
-      const { data } = await supabase
+      // Degrade, don't throw: this is a poll for an async job result, so a
+      // failed tick should just try again next interval rather than break
+      // the button. tryUnwrap still logs and reports.
+      const pollRes = await supabase
         .from('org_milestones')
         .select('value')
         .eq('org_id', orgId)
         .eq('milestone', `capex_projection_${currentYear}`)
         .maybeSingle()
+
+      const pollOut = tryUnwrap<{ value: unknown }>(pollRes, { site: 'ui.capital-planning.projections-poll', orgId })
+      const data = pollOut.ok ? pollOut.data : null
 
       if (data?.value) {
         setPolling(false)

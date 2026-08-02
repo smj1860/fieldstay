@@ -17,6 +17,7 @@
 //   https://fieldstay.app/api/webhooks/ownerrez
 // ============================================================
 
+import { unwrap } from '@/lib/supabase/unwrap'
 import { NextResponse, type NextRequest }            from 'next/server'
 import { createHash }                                from 'crypto'
 import { getProvider }                               from '@/lib/integrations/registry'
@@ -98,12 +99,18 @@ async function processRevocation(args: {
   }
 
   const supabase = createServiceClient({ publicSurface: 'api-webhooks--provider-' })
-  const { data: existingConn } = await supabase
+  // A failed read used to land in the "already processed or not found" branch
+  // below, which SKIPS the revocation — so a transient error left a revoked
+  // provider token active on our side, and the webhook answered 2xx so the
+  // provider never redelivered. Throwing makes the delivery retryable.
+  const existingConnRes = await supabase
     .from('integration_connections')
     .select('status, org_id')
     .eq('provider_id', providerId)
     .eq('external_user_id', externalUserId)
     .maybeSingle()
+
+  const existingConn = unwrap(existingConnRes, { site: 'webhook.provider.revocation.connection' })
 
   if (!existingConn || existingConn.status === 'revoked' || existingConn.status === 'disconnected') {
     console.log(

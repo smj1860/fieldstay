@@ -28,6 +28,7 @@
 // exists to eliminate.
 // ============================================================================
 
+import { unwrap } from '@/lib/supabase/unwrap'
 import { fetchAllRows }           from '@/lib/inngest/paginate'
 import { createServiceClient }     from '@/lib/supabase/server'
 import { getValidHospitableToken } from './hospitable-token'
@@ -248,13 +249,18 @@ export async function resolveHospitableOwner(params: {
   }
 
   // ── 1. Cache ──────────────────────────────────────────────────────────────
-  const { data: cached } = await supabase
+  // This resolves which ORG a webhook entity belongs to. A discarded error
+  // reads as a cache miss, which silently widens or drops the scoping
+  // decision rather than failing.
+  const cachedRes = await supabase
     .from('integration_entity_owners')
     .select('org_id')
     .eq('provider_id', PROVIDER)
     .eq('entity_kind', entityKind)
     .eq('external_id', externalId)
     .maybeSingle()
+
+  const cached = unwrap(cachedRes, { site: 'lib.integrations.hospitable-owner.cache' })
 
   if (cached?.org_id) {
     const conn = byOrg.get(cached.org_id as string)

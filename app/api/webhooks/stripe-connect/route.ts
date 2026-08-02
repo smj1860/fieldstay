@@ -1,3 +1,4 @@
+import { unwrap } from '@/lib/supabase/unwrap'
 import { NextRequest, NextResponse }  from 'next/server'
 import { stripe }                     from '@/lib/stripe/client'
 import { createServiceClient }        from '@/lib/supabase/server'
@@ -112,11 +113,17 @@ async function handleAccountUpdated(
   const chargesEnabled = account.charges_enabled
 
   // Find the vendor by their Connect account ID
-  const { data: vendor } = await supabase
+  // maybeSingle() keeps "a Connect account created outside FieldStay" as a
+  // legitimate no-op, while a failed read now throws rather than silently
+  // dropping the charges_enabled transition — which left the vendor unable to
+  // be paid, with Stripe seeing a 2xx and never redelivering.
+  const vendorRes = await supabase
     .from('vendors')
     .select('id, org_id, stripe_connect_charges_enabled')
     .eq('stripe_connect_account_id', account.id)
-    .single()
+    .maybeSingle()
+
+  const vendor = unwrap(vendorRes, { site: 'webhook.stripe-connect.vendor' })
 
   // Could be a Connect account created outside FieldStay — ignore
   if (!vendor) return

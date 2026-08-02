@@ -1,3 +1,4 @@
+import { tryUnwrapList } from '@/lib/supabase/unwrap'
 import { createServiceClient } from '@/lib/supabase/server'
 import { logAuditEvents } from '@/lib/audit'
 import {
@@ -36,15 +37,22 @@ export async function upsertNormalizedProperties(
 
   // Fetch existing content field values BEFORE the upsert, so we can diff
   // against what's about to be written.
-  const { data: existingRows } = await supabase
+  // Degrade, don't throw: these rows feed the content-overwrite audit log
+  // below, not the upsert itself, so a failure costs the log entry rather
+  // than the sync. tryUnwrap still records that it happened.
+  const existingRowsRes = await supabase
     .from('properties')
     .select('external_id, wifi_name, wifi_password, access_instructions, house_manual')
     .eq('org_id', orgId)
     .eq('external_source', provider)
     .in('external_id', normalized.map((n) => n.external_id))
 
+  const existingRowsOut = tryUnwrapList(existingRowsRes, {
+    site: 'lib.properties.upsert-normalized.existing', orgId,
+  })
+
   const existingByExternalId = new Map(
-    (existingRows ?? []).map((row) => [row.external_id as string, row])
+    (existingRowsOut.ok ? existingRowsOut.data : []).map((row) => [row.external_id as string, row])
   )
 
   const rows = normalized.map((n) => ({

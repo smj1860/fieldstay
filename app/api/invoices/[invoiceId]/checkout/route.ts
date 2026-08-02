@@ -1,3 +1,4 @@
+import { unwrap } from '@/lib/supabase/unwrap'
 import { NextRequest, NextResponse }  from 'next/server'
 import { requireOrgMember }           from '@/lib/auth'
 import { stripe }                     from '@/lib/stripe/client'
@@ -21,7 +22,9 @@ export async function POST(
   const supabase = createServiceClient({ authorizedBy: membership })
 
   // Fetch invoice with vendor Connect details — scoped to PM's org
-  const { data: invoice } = await supabase
+  // A failed read used to render as 404 'Invoice not found', pointing the PM
+  // at a missing invoice instead of a transient error.
+  const invoiceRes = await supabase
     .from('work_order_invoices')
     .select(`
       id,
@@ -41,6 +44,8 @@ export async function POST(
     .eq('id', invoiceId)
     .eq('org_id', membership.org_id)
     .single()
+
+  const invoice = unwrap(invoiceRes, { site: 'api.invoices.checkout', orgId: membership.org_id })
 
   if (!invoice) {
     return NextResponse.json({ error: 'Invoice not found' }, { status: 404 })

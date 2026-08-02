@@ -1,3 +1,4 @@
+import { unwrapList } from '@/lib/supabase/unwrap'
 import type { SupabaseClient } from '@supabase/supabase-js'
 import { isMaintenanceItemActiveThisMonth } from '@/lib/utils/maintenance'
 
@@ -35,14 +36,20 @@ export async function findMaintenanceCandidatesForWindow(
     ? new Date(Math.min(new Date(windowEnd).getTime(), capMs))
     : new Date(capMs)
 
-  const { data: candidates } = await supabase
+  // An empty list reads as "no maintenance due in this gap", so a failed
+  // read silently suppressed every vacancy suggestion for the property.
+  const candidatesRes = await supabase
     .from('maintenance_schedules')
     .select('id, name, next_due_date, estimated_cost, assigned_vendor_id, active_from_month, active_to_month')
     .eq('property_id', propertyId)
     .eq('is_active', true)
     .lte('next_due_date', effectiveEnd.toISOString().split('T')[0])
 
-  return (candidates ?? []).filter((c) =>
+  const candidates = unwrapList(candidatesRes, {
+    site: 'lib.maintenance.vacancy-suggestions',
+  })
+
+  return candidates.filter((c) =>
     isMaintenanceItemActiveThisMonth(c.active_from_month ?? null, c.active_to_month ?? null)
   )
 }
