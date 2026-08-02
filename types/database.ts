@@ -10,6 +10,18 @@
  * integration_connections, oauth_states).
  */
 
+/**
+ * A Postgres `json`/`jsonb` value. Used by the Functions block at the bottom
+ * of this file, whose generated signatures are written in terms of it.
+ */
+export type Json =
+  | string
+  | number
+  | boolean
+  | null
+  | { [key: string]: Json | undefined }
+  | Json[]
+
 // ─────────────────────────────────────────────────────────────
 // Scalar union types — mirror Postgres enums and CHECK constraints
 // ─────────────────────────────────────────────────────────────
@@ -1884,7 +1896,348 @@ export interface Database {
     Views: {
       vendor_compliance_status: { Row: VendorComplianceStatus }
     }
-    Functions: Record<string, never>
+    /**
+     * Postgres functions reachable via `supabase.rpc(...)`.
+     *
+     * GENERATED from the live schema (project vpmznjktllhmmbfnxuvk) — do not
+     * hand-edit an entry. Regenerate when a migration adds or changes a
+     * function, in the same commit as that migration, exactly like the table
+     * interfaces above.
+     *
+     * This was `Record<string, never>` until 2026-08-02, which meant every one
+     * of the ~40 `.rpc()` call sites in app/ and lib/ was UNTYPED: a misspelled
+     * function name, a wrong argument name, or a changed return shape compiled
+     * cleanly and failed at runtime. approveInventoryCount had grown a
+     * hand-written `ApproveCountResult` mirror of the SQL with an `as` cast,
+     * which nothing kept in sync with the migration.
+     *
+     * ⚠️  NOT YET ENFORCED, and do not read a green `tsc` as evidence that it
+     * is. lib/supabase/server.ts deliberately omits the `<Database>` generic
+     * (see the note at the top of that file), so `Schema` defaults to `any`
+     * and `.rpc()` accepts anything no matter what this block says. Filling
+     * this in is the PREREQUISITE for enforcement, not enforcement itself.
+     *
+     * Measured 2026-08-02: adding `<Database>` to the three createServerClient
+     * calls produces 2267 type errors, essentially all from `.from()` rather
+     * than `.rpc()` — the hand-written table interfaces lack the index
+     * signatures and Relationships shape postgrest-js's GenericSchema wants.
+     * That is the job open PR #160 exists for. Until it lands, the cheap way
+     * to make THIS block bite without touching `.from()` is a typed `rpc()`
+     * wrapper constrained on `keyof Database['public']['Functions']`, applied
+     * at the call sites.
+     *
+     * The three `Database["public"]["Enums"][...]` references the generator
+     * emits are rewritten to this file's own exported aliases, because `Enums`
+     * here is still `Record<string, never>` — the enum unions live as top-level
+     * exports (MemberRole, OrgPlan, OrgPlanStatus) and are drift-checked
+     * against the live schema by scripts/check-type-drift.mjs's ENUM_MAP.
+     */
+    Functions: {
+      apply_crew_score_recompute: { Args: never; Returns: Json }
+      apply_inventory_counts: {
+        Args: { p_counts: Json; p_org_id: string }
+        Returns: number
+      }
+      approve_inventory_count_draft: {
+        Args: { p_draft_id: string; p_org_id: string; p_reviewer: string }
+        Returns: Json
+      }
+      approve_quote_request: {
+        Args: {
+          p_completion_token: string
+          p_org_id: string
+          p_quote_request_id: string
+          p_token_expires_at: string
+        }
+        Returns: Json
+      }
+      claim_hospitable_promo_slot: {
+        Args: { p_org_id: string; p_price_cents: number; p_tier: string }
+        Returns: {
+          already_awarded: boolean
+          lock_years: number
+          not_eligible: boolean
+          sequence_number: number
+          window_closed: boolean
+        }[]
+      }
+      claim_pending_integration_link: {
+        Args: { p_pending_link_token: string; p_user_id: string }
+        Returns: {
+          external_user_id: string
+          org_id: string
+          provider_id: string
+        }[]
+      }
+      claim_pending_oauth_authorization: {
+        Args: { p_pending_link_token: string }
+        Returns: {
+          authorization_code: string
+          provider_id: string
+          redirect_uri: string
+        }[]
+      }
+      cleanup_expired_oauth_states: { Args: never; Returns: undefined }
+      cleanup_expired_pending_integration_links: {
+        Args: never
+        Returns: undefined
+      }
+      cleanup_expired_pending_oauth_authorizations: {
+        Args: never
+        Returns: undefined
+      }
+      cleanup_webhook_dedup: { Args: never; Returns: undefined }
+      clone_inventory_from_property: {
+        Args: {
+          p_org_id: string
+          p_source_property_id: string
+          p_target_property_id: string
+        }
+        Returns: {
+          added: number
+          skipped: number
+          source_count: number
+        }[]
+      }
+      complete_work_order_via_token: {
+        Args: {
+          p_completed_by_name: string
+          p_line_items: Json
+          p_notes: string
+          p_platform_fee_pct?: number
+          p_subtotal: number
+          p_work_order_id: string
+        }
+        Returns: Json
+      }
+      create_organization_with_owner: {
+        Args: {
+          p_billing_email: string
+          p_max_properties: number
+          p_name: string
+          p_slug: string
+          p_trial_ends_at: string
+          p_user_id: string
+        }
+        Returns: {
+          created: boolean
+          org_id: string
+        }[]
+      }
+      create_pending_integration_link: {
+        Args: {
+          p_access_token: string
+          p_external_user_id: string
+          p_metadata?: Json
+          p_pending_link_token: string
+          p_provider_id: string
+          p_refresh_token?: string
+          p_scope?: string
+        }
+        Returns: string
+      }
+      create_pending_oauth_authorization: {
+        Args: {
+          p_authorization_code: string
+          p_pending_link_token: string
+          p_provider_id: string
+          p_redirect_uri: string
+        }
+        Returns: string
+      }
+      db_invariant_report: { Args: never; Returns: Json }
+      db_type_shape_report: { Args: never; Returns: Json }
+      delete_vault_secret: { Args: { p_secret_id: string }; Returns: undefined }
+      disconnect_integration_token: {
+        Args: { p_provider_id: string; p_user_id: string }
+        Returns: undefined
+      }
+      get_asset_repair_summary: {
+        Args: never
+        Returns: {
+          asset_id: string
+          last_serviced_at: string
+          total_repair_cost: number
+          total_repairs: number
+        }[]
+      }
+      get_crew_member_id: { Args: never; Returns: string }
+      get_crew_org_ids: { Args: never; Returns: string[] }
+      get_crew_property_ids: { Args: never; Returns: string[] }
+      get_crew_turnover_ids: { Args: never; Returns: string[] }
+      get_repeat_issues: {
+        Args: { since_date: string }
+        Returns: {
+          category: string
+          org_id: string
+          property_id: string
+          wo_count: number
+        }[]
+      }
+      get_system_health: { Args: never; Returns: Json }
+      get_user_org_ids: { Args: never; Returns: string[] }
+      inventory_below_par_for_org: {
+        Args: { p_org_id: string }
+        Returns: {
+          current_quantity: number
+          first_count_recorded_at: string
+          id: string
+          name: string
+          par_level: number
+          property_id: string
+        }[]
+      }
+      inventory_below_par_items: {
+        Args: { p_org_id: string; p_property_ids?: string[] }
+        Returns: {
+          current_quantity: number
+          first_count_recorded_at: string
+          id: string
+          name: string
+          par_level: number
+          preferred_brand: string
+          property_id: string
+          property_name: string
+          property_zip: string
+          unit: string
+        }[]
+      }
+      is_org_member: {
+        Args: {
+          p_org_id: string
+          p_roles?: MemberRole[]
+        }
+        Returns: boolean
+      }
+      is_platform_staff: { Args: never; Returns: boolean }
+      is_platform_staff_admin: { Args: never; Returns: boolean }
+      match_kb_chunks: {
+        Args: {
+          match_count?: number
+          min_similarity?: number
+          query_embedding: string
+        }
+        Returns: {
+          content: string
+          id: string
+          similarity: number
+          source: string
+          title: string
+        }[]
+      }
+      merge_integration_connection_metadata: {
+        Args: {
+          p_patch: Json
+          p_provider_id: string
+          p_status?: string
+          p_user_id: string
+        }
+        Returns: Json
+      }
+      metrics_inventory_below_par_count: { Args: never; Returns: number }
+      metrics_vendor_compliance_counts: {
+        Args: never
+        Returns: {
+          compliance_status: string
+          count: number
+        }[]
+      }
+      metrics_work_order_backlog: {
+        Args: never
+        Returns: {
+          count: number
+          status: string
+        }[]
+      }
+      next_wo_number: { Args: { p_org_id: string }; Returns: string }
+      next_work_order_invoice_seq: { Args: never; Returns: number }
+      notify_crew_sync: {
+        Args: { p_entity: string; p_user_ids: string[] }
+        Returns: undefined
+      }
+      purge_expired_audit_events: { Args: never; Returns: Json }
+      read_integration_refresh_token: {
+        Args: { p_provider_id: string; p_user_id: string }
+        Returns: string
+      }
+      read_integration_token: {
+        Args: { p_provider_id: string; p_user_id: string }
+        Returns: string
+      }
+      read_property_door_code: {
+        Args: { p_org_id: string; p_property_id: string }
+        Returns: string
+      }
+      recompute_vendor_scores: { Args: never; Returns: number }
+      remove_crew_from_turnover: {
+        Args: {
+          p_crew_member_id: string
+          p_org_id: string
+          p_turnover_id: string
+        }
+        Returns: Json
+      }
+      replace_platform_inventory_template_items: {
+        Args: { p_items: Json; p_template_id: string }
+        Returns: number
+      }
+      replace_room_template_items: {
+        Args: { p_items: Json; p_room_template_id: string }
+        Returns: number
+      }
+      replace_seed_room_template_items: {
+        Args: { p_items: Json; p_template_id: string }
+        Returns: number
+      }
+      revoke_integration_token: {
+        Args: { p_provider_id: string; p_user_id: string }
+        Returns: undefined
+      }
+      storage_org_prefix: { Args: { object_name: string }; Returns: string }
+      store_integration_refresh_token: {
+        Args: {
+          p_expires_at?: string
+          p_provider_id: string
+          p_refresh_token: string
+          p_user_id: string
+        }
+        Returns: string
+      }
+      store_integration_token: {
+        Args: {
+          p_access_token: string
+          p_external_user_id: string
+          p_metadata?: Json
+          p_provider_id: string
+          p_scope?: string
+          p_user_id: string
+        }
+        Returns: string
+      }
+      store_property_door_code: {
+        Args: { p_door_code: string; p_org_id: string; p_property_id: string }
+        Returns: string
+      }
+      tag_hospitable_trial_signup: {
+        Args: { p_landing_page_cookie_present?: boolean; p_org_id: string }
+        Returns: undefined
+      }
+      update_organization_subscription_from_stripe: {
+        Args: {
+          p_customer_id: string
+          p_max_properties: number
+          p_plan: OrgPlan
+          p_plan_status: OrgPlanStatus
+          p_stripe_subscription_id: string
+          p_trial_ends_at: string
+        }
+        Returns: {
+          org_id: string
+          org_name: string
+          previous_plan: OrgPlan
+        }[]
+      }
+    }
     Enums: Record<string, never>
   }
 }

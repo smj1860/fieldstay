@@ -47,7 +47,7 @@ bounds the result set:
 | Tier | Rule suffix | Bound | Sev | Count |
 |---|---|---|---|---|
 | 1 | `-table-scan` | nothing but the table | ERROR | 38 → **0, promoted** |
-| 2 | `-cross-tenant` | no org scope AND no parent row | ERROR | 53 → **0** |
+| 2 | `-cross-tenant` | no org scope AND no parent row | ERROR | 53 → **0, promoted** |
 | 2b | `-single-parent` | one non-org parent row, no org scope | WARNING | 47 |
 | 2c | `-global-table` | table has no `org_id` column to scope to | INFO | 5 |
 | 3 | `-in-list` | one org, sized by an `.in()` array | WARNING | 46 |
@@ -65,8 +65,19 @@ were 47 reads scoped by a non-org parent id, 5 reads of tables that have no
 `org_id` column at all, and 1 correctly org-scoped read the rule could not see
 (below). None was a cross-tenant scan. Splitting 2b and 2c out is what made the
 tier mean what its name says; the same 53 reads are still counted, under names
-that describe them. Tier 2 stays in `ratchet.yml` at a baseline of 0 — which
-already fails any new finding — until it is promoted in its own change.
+that describe them. It was **promoted to `chokepoints.yml` the same day** and
+its `baseline-counts.json` key deleted in that change.
+
+Before promoting it, two things were checked that a count of 0 does not tell
+you. First, that the rule still **fires**: a rule at zero because it is broken
+looks exactly like one at zero because the tree is clean, so it was run against
+a deliberately cross-tenant read (fires, exit 1) plus org-scoped, dotted-org-
+scoped and parent-scoped controls (silent). Second, that nothing in the tree can
+trip it accidentally: the new `metavariable-regex` negatives only recognise a
+**string-literal** column name, so a dynamic `.eq(someVar, …)` would read as
+"no scope" and fail the build tree-wide. There are currently **zero** non-literal
+`.eq()` column names in the codebase. If one is ever introduced legitimately,
+widen those negatives — never add a `nosemgrep`.
 
 Mutual exclusion is now **enforced** by `scripts/check-semgrep-ratchet.mjs`,
 which fails when one site matches two ladder tiers. That is not defensive

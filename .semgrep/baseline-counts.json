@@ -25,14 +25,20 @@
     "matcher could not see, so a correctly single-tenant read was being counted as",
     "a cross-tenant scan. It moved OUT of -cross-tenant and INTO -org-scoped. The",
     "ladder total is unchanged at 211 across the change, which is the invariant",
-    "that matters and is now enforced (mutual exclusion) by the ratchet script."
+    "that matters and is now enforced (mutual exclusion) by the ratchet script.",
+    "",
+    "PROMOTED 2026-08-02: -cross-tenant reached 0 (see above) and moved to",
+    "chokepoints.yml, where it gates at --error across the whole tree instead of",
+    "only on findings new vs. the PR base. Its key is deleted here in the same",
+    "change, per the promotion rule in .semgrep/README.md \u2014 a rule cannot be in",
+    "both files, and check-semgrep-ratchet.mjs fails on a baseline entry whose",
+    "rule ratchet.yml no longer declares."
   ],
   "measured_at": "2026-08-01",
   "counts": {
     "fieldstay-supabase-discarded-result": 144,
     "fieldstay-supabase-read-without-error": 376,
     "fieldstay-supabase-read-without-error-fan-in": 17,
-    "fieldstay-supabase-unbounded-select-cross-tenant": 0,
     "fieldstay-supabase-unbounded-select-global-table": 5,
     "fieldstay-supabase-unbounded-select-in-list": 46,
     "fieldstay-supabase-unbounded-select-org-scoped": 113,

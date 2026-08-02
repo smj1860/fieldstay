@@ -42,12 +42,15 @@ rules:
   # 2c/2b overlap this split introduced (one site matching both, inflating the
   # ladder total by one) is exactly what a comment cannot catch.
   #
-  # Tier 1 reached 0 and was PROMOTED to chokepoints.yml on 2026-08-01. Tier 2
-  # reached 0 on 2026-08-02 by the 2b/2c split — the 53 findings it held were
-  # 47 parent-scoped reads and 5 reads of tables with no org_id, plus one
-  # correctly org-scoped read the rule could not see (below). NONE was a real
-  # cross-tenant scan. It stays here at a baseline of 0, which already fails
-  # any new finding, until it is promoted in its own change.
+  # Tiers 1 and 2 both reached 0 and now live in chokepoints.yml, gating at
+  # --error across the whole tree: -table-scan on 2026-08-01, -cross-tenant on
+  # 2026-08-02. Neither is defined in this file any more; the ladder rows above
+  # are kept so the tier numbering still reads as one sequence.
+  #
+  # Tier 2 reached 0 by the 2b/2c split, not by fixing sites — the 53 findings
+  # it held were 47 parent-scoped reads and 5 reads of tables with no org_id,
+  # plus one correctly org-scoped read the rule could not see (below). NONE was
+  # a real cross-tenant scan. Those 52 reads are still counted here, as 2b/2c.
   #
   # NOTE on the shared exclusions, which every tier repeats:
   # `$S.from($T).select(...)` only matches a select whose receiver is the
@@ -93,54 +96,6 @@ rules:
   # A dotted org filter IS org scope; the tenant boundary does not care which
   # side of the join carries the column.
   #
-  # ── Tier 2: no tenant scope AND no parent entity ─────────────────────────
-  # Has an equality filter, so it is not a bare table scan (that is tier 1, now
-  # promoted to chokepoints.yml at zero), but nothing pins it to one org and
-  # nothing pins it to one parent row either — the result set grows with the
-  # PLATFORM. This is the genuine cross-tenant class and the burn-down target:
-  # every finding here is expected to be a real defect, so the tier is meant to
-  # reach 0 and be promoted to chokepoints.yml.
-  #
-  # Two populations were split out of this tier because neither is a tenant
-  # boundary problem, and together they were 52 of its 53 findings — enough
-  # noise to make the tier unactionable:
-  #   • scoped by a non-org parent id  → -single-parent (tier 2b)
-  #   • a table with no org_id at all  → -global-table  (tier 2c)
-  - id: fieldstay-supabase-unbounded-select-cross-tenant
-    languages: [typescript]
-    severity: ERROR
-    message: >-
-      Unbounded .select() with no org scope and no single parent row — this
-      read spans tenants, so it grows with the platform and silently truncates
-      at max_rows = 1000. Scope it to one org, or bound it with fetchAllRows()
-      / .limit() / .single() / a head-count aggregate.
-    patterns:
-      - pattern: $S.from($T).select(...)
-      - pattern-inside: $Y.eq($COL, ...)
-      - pattern-not-inside: $X.limit(...)
-      - pattern-not-inside: $X.range(...)
-      - pattern-not-inside: $X.single(...)
-      - pattern-not-inside: $X.maybeSingle(...)
-      - pattern-not: "$S.from($T).select($SEL, {..., head: true, ...})"
-      # org scope, dotted or not — see the note above
-      - pattern-not-inside:
-          patterns:
-            - pattern: $X.eq($OCOL, ...)
-            - metavariable-regex:
-                metavariable: $OCOL
-                regex: ^["'](?:[A-Za-z_]+\.)?org_id["']$
-      # scoped by one non-org parent row → tier 2b
-      - pattern-not-inside:
-          patterns:
-            - pattern: $X.eq($PCOL, ...)
-            - metavariable-regex:
-                metavariable: $PCOL
-                regex: ^["'](?:[A-Za-z_]+\.)?(?!org_id)[A-Za-z_]*_id["']$
-      # a table with no org_id column → tier 2c
-      - metavariable-regex:
-          metavariable: $T
-          regex: ^(?!["'](?:asset_type_standards|integration_providers|inventory_catalog|maintenance_catalog_items|oauth_states|pending_integration_links|pending_oauth_authorizations|platform_admins|platform_inventory_template_items|platform_inventory_templates|platform_seed_room_template_items|platform_seed_room_templates|platform_staff|processed_webhooks|profiles|promo_hospitable_launch_counter|stripe_processed_events|support_kb_chunks)["']$)
-
   # ── Tier 2b: one parent entity, but no org filter ────────────────────────
   # `.eq('property_id', …)` / `.eq('work_order_id', …)` / `.eq('user_id', …)`
   # with no org scope. The row count is bounded by ONE parent row's children,

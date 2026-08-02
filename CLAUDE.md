@@ -1304,7 +1304,8 @@ following them stops being a memory test. Five layers, checked in CI via
      tiers ranked by what actually bounds the result set —
      `-table-scan` (nothing but the table, ERROR, 38 → **0, PROMOTED to
      `chokepoints.yml` 2026-08-01**),
-     `-cross-tenant` (no org scope AND no parent row, ERROR, 53 → **0**),
+     `-cross-tenant` (no org scope AND no parent row, ERROR, 53 → **0,
+     PROMOTED to `chokepoints.yml` 2026-08-02**),
      `-single-parent` (one non-org parent id, no org scope, WARNING, 47),
      `-global-table` (the table has no `org_id` column, INFO, 5),
      `-in-list` (one org but sized by an `.in()` array, WARNING, 46),
@@ -1318,8 +1319,15 @@ following them stops being a memory test. Five layers, checked in CI via
      being fixed** — its 53 findings were 47 parent-scoped reads, 5 reads of
      org-less platform tables, and 1 correctly org-scoped read the matcher
      could not see. Splitting `-single-parent`/`-global-table` out is what
-     made the tier mean its name; the same reads are still counted. It is
-     eligible for promotion in its own change. **Two invariants make a "0"
+     made the tier mean its name; the same reads are still counted. Promoting
+     it required two checks a count of 0 cannot give you: that the rule still
+     FIRES (verified against a deliberately cross-tenant read plus org-scoped,
+     dotted-org-scoped and parent-scoped controls — a rule at zero because it
+     is broken looks identical to one at zero because the tree is clean), and
+     that its `metavariable-regex` negatives — which only recognise a
+     string-literal column name — cannot be tripped by a dynamic
+     `.eq(someVar, …)`; there are currently zero such call sites.
+     **Two invariants make a "0"
      here trustworthy, and both are enforced rather than asserted:** the
      ladder must stay a partition (one site, one tier — enforced by
      `scripts/check-semgrep-ratchet.mjs`, which caught a real 2b/2c overlap
