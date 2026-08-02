@@ -1,3 +1,4 @@
+import { unwrap } from '@/lib/supabase/unwrap'
 import { inngest } from '@/lib/inngest/client'
 import { createServiceClient } from '@/lib/supabase/server'
 import { sendSMS } from '@/lib/sms/telnyx'
@@ -53,7 +54,10 @@ export const guidebookGuestOptedIn = inngest.createFunction(
       // UPDATE only succeeds if door_code_sent_at IS NULL.
       // If this step is retried after a successful SMS send, the timestamp is
       // already set, the UPDATE affects 0 rows, and we skip the send.
-      const { data: claimed } = await supabase
+      // A failed claim returned null, which this step reads as "already sent"
+      // and skips — so the guest silently never received their door code.
+      // Throwing lets Inngest retry the claim instead.
+      const claimRes = await supabase
         .from('guidebook_guest_sms_optins')
         .update({
           door_code_sent_at: new Date().toISOString(),
@@ -63,6 +67,11 @@ export const guidebookGuestOptedIn = inngest.createFunction(
         .is('door_code_sent_at', null)    // ← atomic guard: only claim once
         .select('id')
         .maybeSingle()
+
+      const claimed = unwrap(claimRes, {
+        site:  'inngest.guidebook-guest-opted-in.door-code-claim',
+        orgId: property.org_id,
+      })
 
       // No row returned = already claimed by a prior (successful) invocation
       if (!claimed) return { skipped: 'already_sent' }

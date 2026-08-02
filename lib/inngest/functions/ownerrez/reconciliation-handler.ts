@@ -18,6 +18,7 @@
 // a stay that turned out to not exist.
 // ============================================================
 
+import { unwrapList } from '@/lib/supabase/unwrap'
 import { inngest }             from '@/lib/inngest/client'
 import { createServiceClient } from '@/lib/supabase/server'
 import { OwnerRezApiClient }    from '@/lib/integrations/providers/ownerrez-api'
@@ -51,13 +52,18 @@ export const ownerRezReconciliationHandler = inngest.createFunction(
     const propertyIds = await step.run('fetch-property-ids', async () => {
       const supabase = createServiceClient({ system: 'inngest:reconciliation-handler' })
 
-      const { data } = await supabase
-        .from('properties')
-        .select('external_id')
-        .eq('org_id', org_id)
-        .eq('external_source', PROVIDER)
+      // An empty list here means "reconcile nothing", so a failed read made
+      // the whole reconciliation sweep a silent no-op that still reported success.
+      const data = unwrapList(
+        await supabase
+          .from('properties')
+          .select('external_id')
+          .eq('org_id', org_id)
+          .eq('external_source', PROVIDER),
+        { site: 'inngest.ownerrez-reconciliation.property-ids', orgId: org_id },
+      )
 
-      return ((data ?? []) as Array<{ external_id: string | null }>)
+      return (data as Array<{ external_id: string | null }>)
         .map((p) => Number(p.external_id))
         .filter((id) => !Number.isNaN(id))
     })

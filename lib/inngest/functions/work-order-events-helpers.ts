@@ -1,3 +1,4 @@
+import { tryUnwrap } from '@/lib/supabase/unwrap'
 import { NonRetriableError } from 'inngest'
 import type { createServiceClient } from '@/lib/supabase/server'
 import { getOrgDispatcher } from '@/lib/inngest/helpers'
@@ -153,13 +154,17 @@ export async function loadDispatchContext(
   const propertyAddress = (property as { address: string | null } | null)?.address ?? ''
 
   // Fetch org name for the dispatcher email footer
+  // Degrade, don't throw: orgName already has a sensible default and this
+  // only fills an email footer. tryUnwrap still logs and reports.
   let orgName = 'FieldStay Property Management'
-  const { data: orgRow } = await supabase
+  const orgRes = await supabase
     .from('organizations')
     .select('name')
     .eq('id', orgId)
-    .single()
-  if (orgRow?.name) orgName = orgRow.name
+    .maybeSingle()
+
+  const orgOut = tryUnwrap(orgRes, { site: 'inngest.work-order-events.org-name', orgId })
+  if (orgOut.ok && orgOut.data?.name) orgName = orgOut.data.name
 
   return {
     dispatched:      true as const,

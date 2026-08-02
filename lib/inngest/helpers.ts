@@ -1,3 +1,4 @@
+import { unwrap } from '@/lib/supabase/unwrap'
 import type { createServiceClient } from '@/lib/supabase/server'
 import { adminFetch } from '@/lib/supabase/server'
 import { reportError } from '@/lib/observability/report-error'
@@ -400,12 +401,19 @@ export async function diffDigestSnapshot(
   category: string,
   currentIds: string[]
 ): Promise<DigestDiffResult> {
-  const { data: existing } = await supabase
+  // A failed read used to leave previousIds empty, which makes EVERY item in
+  // the digest look net-new — the daily wrap-up would re-announce the whole
+  // backlog as if it had just appeared.
+  const existingRes = await supabase
     .from('notification_digest_state')
     .select('snapshot')
     .eq('org_id', orgId)
     .eq('category', category)
     .maybeSingle()
+
+  const existing = unwrap(existingRes, {
+    site: 'inngest.helpers.diffDigestSnapshot', orgId,
+  })
 
   // snapshot is jsonb — it is whatever was last written, so narrow rather
   // than optional-chain through the Json union.

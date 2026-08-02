@@ -238,10 +238,13 @@ export const assetHealthOrg = inngest.createFunction(
 
       if (!activeAssets.length) return 0
 
-      const { data: standards } = await supabase
-        .from('asset_type_standards')
-        .select('asset_type, lifespan_min_years, lifespan_max_years, avg_replacement_cost_high, age_weight, condition_weight')
-        .limit(ASSET_TYPE_STANDARDS_LIMIT)
+      const standards = unwrapList(
+        await supabase
+          .from('asset_type_standards')
+          .select('asset_type, lifespan_min_years, lifespan_max_years, avg_replacement_cost_high, age_weight, condition_weight')
+          .limit(ASSET_TYPE_STANDARDS_LIMIT),
+        { site: 'inngest.asset-health.score-org.standards', orgId },
+      )
 
       const windowStart = new Date(Date.now() - REPAIR_HISTORY_WINDOW_DAYS * 86_400_000)
         .toISOString().split('T')[0]!
