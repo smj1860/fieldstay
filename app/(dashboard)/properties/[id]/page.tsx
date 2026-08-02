@@ -1,3 +1,4 @@
+import { toOneOf } from '@/lib/db-enums'
 import { requireProperty } from '@/lib/auth'
 import { calcSetupProgress, WIZARD_STEPS } from '@/lib/wizard'
 import Link from 'next/link'
@@ -16,7 +17,9 @@ import type { MaintenanceSchedule, MaintenanceCatalogItem } from '@/types/databa
 import type { Metadata } from 'next'
 import { throwIfAnyQueryFailed } from '@/lib/supabase/unwrap'
 
-function feedStatusTone(status: string): 'green' | 'red' | 'slate' {
+const INVOICE_STATUSES = ['pending_payment', 'paid', 'cancelled'] as const
+
+function feedStatusTone(status: string | null): 'green' | 'red' | 'slate' {
   if (status === 'success') return 'green'
   if (status === 'error') return 'red'
   return 'slate'
@@ -139,7 +142,10 @@ export default async function PropertyDetailPage({ params }: Props) {
       woTitle:       wo?.title ?? 'Work Order',
       woNumber:      wo?.wo_number ?? null,
       invoiceNumber: inv.invoice_number,
-      status:        inv.status,
+      // work_order_invoices.status is TEXT with
+      // CHECK (status IN ('pending_payment','paid','cancelled')); 'pending_payment'
+      // is the column's own DEFAULT.
+      status:        toOneOf(INVOICE_STATUSES, inv.status, 'pending_payment'),
       total:         inv.total,
       submittedAt:   inv.submitted_at,
       paidAt:        inv.paid_at,
@@ -207,7 +213,7 @@ export default async function PropertyDetailPage({ params }: Props) {
       <Card className="mb-4">
         <h3 className="font-semibold text-primary-themed mb-4">Property Details</h3>
         <div className="grid grid-cols-2 gap-y-3 text-sm">
-          <DetailRow label="Type" value={property.property_type} className="capitalize" />
+          <DetailRow label="Type" value={property.property_type ?? 'house'} className="capitalize" />
           <DetailRow label="Bedrooms" value={`${property.bedrooms}`} />
           {property.bathrooms !== null && (
             <DetailRow label="Bathrooms" value={`${property.bathrooms}`} />
@@ -215,8 +221,9 @@ export default async function PropertyDetailPage({ params }: Props) {
           {property.square_footage !== null && (
             <DetailRow label="Sq Footage" value={`${property.square_footage.toLocaleString()} sqft`} />
           )}
-          <DetailRow label="Check-in"  value={property.checkin_time} />
-          <DetailRow label="Check-out" value={property.checkout_time} />
+          {/* Nullable columns; these are their own DB DEFAULTs. */}
+          <DetailRow label="Check-in"  value={property.checkin_time  ?? '15:00:00'} />
+          <DetailRow label="Check-out" value={property.checkout_time ?? '11:00:00'} />
           {property.wifi_name  && <DetailRow label="Wi-Fi" value={`${property.wifi_name} / ${property.wifi_password}`} />}
           {property.door_code_secret_id && (
             <>

@@ -77,7 +77,25 @@ export default async function WorkOrderPage({ params }: Props) {
 
   const property        = unwrapJoin(wo.properties)
   const vendor           = unwrapJoin(wo.vendors)
-  const reportedByCrew   = unwrapJoin(wo.reported_by_crew)
+  // The ONE assertion in this file, and it is a supabase-js limitation rather
+  // than a schema question: its select-string TYPE parser cannot read the
+  // FK-column embed form (`alias:fk_column(name)`), so for
+  // work_orders→crew_members — which has three FK columns (the deprecated
+  // one, plus assigned_crew_member_id and reported_by_crew_member_id) — it
+  // reports a false ambiguity even though the select names the FK column
+  // explicitly.
+  //
+  // PostgREST resolves it. Verified 2026-08-02 against the live project, with
+  // controls, and the status codes are the proof because PostgREST raises the
+  // ambiguity error BEFORE the grant check:
+  //   select=reported_by_crew:reported_by_crew_member_id(name) → 401 (grant)
+  //   select=crew_members(name)                                → 300 PGRST201
+  //   select=reported_by_crew:no_such_fk_column(name)          → 400 PGRST200
+  // Reaching the grant check at all means the embed resolved; the third case
+  // confirms the FK-column form is really parsed, not silently ignored.
+  const reportedByCrew   = unwrapJoin(
+    wo.reported_by_crew as unknown as { name: string } | { name: string }[] | null
+  )
 
   const workOrderData: WorkOrderDetailData = {
     id:                     wo.id,

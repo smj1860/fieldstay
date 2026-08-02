@@ -9,6 +9,7 @@
 // ============================================================
 
 import { createServiceClient } from '@/lib/supabase/server'
+import type { Json } from '@/types/database'
 
 /**
  * Merges `patch` into integration_connections.metadata for the given
@@ -18,16 +19,20 @@ import { createServiceClient } from '@/lib/supabase/server'
 export async function mergeIntegrationConnectionMetadata(params: {
   userId:     string
   providerId: string
-  patch:      Record<string, unknown>
+  patch:      Record<string, Json>
   status?:    string
-}): Promise<Record<string, unknown>> {
+}): Promise<Record<string, Json | undefined>> {
   const supabase = createServiceClient({ system: 'lib/integrations/connection-metadata' })
 
+  // p_status is DEFAULT NULL and the function does COALESCE(p_status, status),
+  // so omitting it is exactly "leave status alone" — which is what the
+  // generated `p_status?: string` signature expects. Passing an explicit null
+  // means the same thing to Postgres but is not what the arg type allows.
   const { data, error } = await supabase.rpc('merge_integration_connection_metadata', {
     p_user_id:     params.userId,
     p_provider_id: params.providerId,
     p_patch:       params.patch,
-    p_status:      params.status ?? null,
+    ...(params.status === undefined ? {} : { p_status: params.status }),
   })
 
   if (error) {
@@ -36,5 +41,6 @@ export async function mergeIntegrationConnectionMetadata(params: {
     )
   }
 
-  return (data as Record<string, unknown> | null) ?? {}
+  // The column is jsonb, so the RPC's return is only an object by convention.
+  return data !== null && typeof data === 'object' && !Array.isArray(data) ? data : {}
 }

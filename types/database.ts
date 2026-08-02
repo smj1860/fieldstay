@@ -1389,7 +1389,10 @@ export interface GuidebookConfiguration {
   extension_messaging_enabled:   boolean
   extension_gap_threshold_days:  number
   extension_discount_pct:        number | null
-  extension_contact_method:      'ownerrez_url' | 'email' | 'sms' | null
+  // TEXT column (DEFAULT 'email'), not a Postgres enum — narrow it with
+  // asExtensionContactMethod() from components/guidebook/guest-guidebook-view
+  // at the point of use rather than asserting the union here.
+  extension_contact_method:      string | null
   extension_ownerrez_url:        string | null
   extension_message_days_before: number
   created_at:            string
@@ -1521,9 +1524,12 @@ export interface PropertyAsset {
   warranty_provider:          string | null
   warranty_notes:             string | null
   placed_in_service_date:     string | null
-  macrs_class:                MacrsClass
-  depreciation_method:        string
-  salvage_value:              number
+  // NULLABLE in the live schema (DEFAULT '5_year'); asset_depreciation_entries
+  // .macrs_class is the NOT NULL one.
+  macrs_class:                MacrsClass | null
+  // Both NULLABLE in the live schema, with DEFAULTs ('macrs', 0).
+  depreciation_method:        string | null
+  salvage_value:              number | null
   health_score:               number | null
   health_score_updated_at:    string | null
   replacement_status:         'projected' | 'budgeted' | 'approved' | 'deferred'

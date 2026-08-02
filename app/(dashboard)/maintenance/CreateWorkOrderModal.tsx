@@ -17,7 +17,6 @@ import type {
   CrewMemberOption, AssetOption, VendorComplianceRow,
   PropertyOptionWithCoords, VendorOptionWithCoords,
 } from './maintenance-board'
-import type { ComplianceStatus } from '@/types/database'
 
 /**
  * The "New Work Order" creation form — extracted out of
@@ -56,7 +55,11 @@ export function CreateWorkOrderModal({
   const selectedProperty = properties.find((p) => p.id === selectedPropertyId) ?? null
   const assetsForProperty = propertyAssets.filter((a) => a.property_id === selectedPropertyId)
 
-  const complianceFor = (vendorId: string): ComplianceStatus | null =>
+  // `string | null`, matching VendorComplianceRow: compliance_status is a
+  // computed column on a VIEW and lib/vendors/compliance-status.ts treats it
+  // as an open allowlist, so an unrecognized state must reach that check
+  // rather than fail to type here.
+  const complianceFor = (vendorId: string): string | null =>
     vendorCompliance.find((c) => c.vendor_id === vendorId)?.compliance_status ?? null
 
   const vendorDistance = (vendorId: string): number | null => {
@@ -472,7 +475,7 @@ export function CreateWorkOrderModal({
                         className="w-4 h-4 rounded border-themed text-brand-600 focus:outline-none focus:ring-2 focus:ring-[var(--accent-gold)]"
                       />
                       <span className="flex-1 text-sm font-medium text-primary-themed">{v.name}</span>
-                      <span className="text-xs text-muted-themed capitalize">{v.specialty.replace('_', ' ')}</span>
+                      <span className="text-xs text-muted-themed capitalize">{v.specialty?.replace('_', ' ') ?? '—'}</span>
                     </label>
                   ))}
                 </div>

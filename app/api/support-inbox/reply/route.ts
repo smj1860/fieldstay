@@ -18,6 +18,10 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   const body = await req.json() as { conversationId?: string; content?: string }
   const { conversationId, content } = body
 
+  if (!conversationId) {
+    return NextResponse.json({ error: 'conversationId is required' }, { status: 400 })
+  }
+
   if (!content?.trim()) {
     return NextResponse.json({ error: 'Message content is required' }, { status: 400 })
   }

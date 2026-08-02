@@ -16,6 +16,8 @@
 //  8. mark-complete           — write last_sync_status to integration_connections
 // ============================================================
 
+import { asJsonObject } from '@/lib/json'
+import type { Json } from '@/types/database'
 import { inngest }             from '@/lib/inngest/client'
 import { NonRetriableError }   from 'inngest'
 import { fetchTurnoverCreatedEvents } from '@/lib/inngest/turnover-created-events'
@@ -247,6 +249,19 @@ export const hospInitialSync = inngest.createFunction(
               return null
             }
 
+            // bookings.checkin_date/checkout_date are NOT NULL. Because this
+            // is a BULK upsert, one reservation missing either date would make
+            // Postgres reject the whole batch (23502) and lose every other
+            // booking in it — so skip it the same way an unmapped property is
+            // skipped, loudly.
+            if (normalized.checkin_date === null || normalized.checkout_date === null) {
+              logger.warn(
+                `[Hospitable:${user_id}] Skipping reservation ${res.id} — missing ` +
+                `${normalized.checkin_date === null ? 'arrival' : 'departure'} date`
+              )
+              return null
+            }
+
             // Only a confirmed, paying-guest stay should post revenue — not
             // a tentative request, a cancellation, or the owner's own stay.
             if (normalized.status === 'confirmed' && normalized.stay_type === 'guest_stay') {
@@ -428,7 +443,7 @@ export const hospInitialSync = inngest.createFunction(
 
 async function updateConnectionMeta(
   userId: string,
-  patch:  Record<string, unknown>
+  patch:  Record<string, Json>
 ): Promise<void> {
   const supabase = createServiceClient({ system: 'inngest:initial-sync' })
   const { data: existing } = await supabase
@@ -438,7 +453,7 @@ async function updateConnectionMeta(
     .eq('provider_id', PROVIDER)
     .maybeSingle()
 
-  const existingMeta = (existing?.metadata as Record<string, unknown> | null) ?? {}
+  const existingMeta = asJsonObject(existing?.metadata) ?? {}
 
   await supabase
     .from('integration_connections')

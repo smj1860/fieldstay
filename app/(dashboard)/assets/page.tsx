@@ -4,6 +4,9 @@ import { fetchAllRows } from '@/lib/inngest/paginate'
 import type { Metadata } from 'next'
 import { AssetManager } from './asset-manager'
 import { throwIfAnyQueryFailed } from '@/lib/supabase/unwrap'
+import { toOneOf } from '@/lib/db-enums'
+
+const REPLACEMENT_STATUSES = ['projected', 'budgeted', 'approved', 'deferred'] as const
 
 export const metadata: Metadata = { title: 'Assets' }
 
@@ -51,7 +54,14 @@ export default async function AssetsPage() {
     <AssetManager
       orgId={membership.org_id}
       properties={properties ?? []}
-      assets={assets ?? []}
+      // replacement_status is TEXT with
+      // CHECK (replacement_status IN ('projected','budgeted','approved','deferred')) —
+      // a constraint neither the generated types nor Constants can see.
+      // 'projected' is the column's own DEFAULT.
+      assets={(assets ?? []).map((a) => ({
+        ...a,
+        replacement_status: toOneOf(REPLACEMENT_STATUSES, a.replacement_status, 'projected'),
+      }))}
       standards={standards ?? []}
     />
   )

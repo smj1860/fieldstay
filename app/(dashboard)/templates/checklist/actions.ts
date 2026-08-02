@@ -19,7 +19,11 @@ function assertCanManage(role: string): string | null {
   return null
 }
 
-export interface RoomTemplateItemInput {
+// A type alias, not an interface: these values are stored in a jsonb
+// column, and only a type alias gets the implicit index signature that makes
+// it assignable to Json. An interface never satisfies Json, however plain
+// its fields.
+export type RoomTemplateItemInput = {
   task: string
   requires_photo: boolean
   notes: string

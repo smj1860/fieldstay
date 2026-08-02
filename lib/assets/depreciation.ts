@@ -43,7 +43,10 @@ export function calculateAnnualDepreciation(
 
   if (yearOfService < 1) return null
 
-  const rate        = getMacrsRate(asset.macrs_class, yearOfService)
+  // property_assets.macrs_class is nullable; '5_year' is the column's DEFAULT,
+  // so an unset asset depreciates exactly as the database would have had it.
+  const macrsClass  = asset.macrs_class ?? '5_year'
+  const rate        = getMacrsRate(macrsClass, yearOfService)
   const costBasis   = asset.purchase_price - (asset.salvage_value ?? 0)
   const currentDepr = Math.round(costBasis * rate * 100) / 100
   const endingBasis = Math.max(0, costBasis - priorCumulative - currentDepr)
@@ -53,7 +56,7 @@ export function calculateAnnualDepreciation(
     org_id:                        asset.org_id,
     asset_id:                      asset.id,
     tax_year:                      taxYear,
-    macrs_class:                   asset.macrs_class,
+    macrs_class:                   macrsClass,
     cost_basis:                    costBasis,
     prior_cumulative_depreciation: priorCumulative,
     current_year_depreciation:     currentDepr,

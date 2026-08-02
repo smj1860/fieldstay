@@ -1,5 +1,7 @@
 'use server'
 
+import { toDbEnum } from '@/lib/db-enums'
+import { doorCodeArgs } from '@/lib/properties/door-code'
 import { revalidatePath } from 'next/cache'
 import { redirect, unstable_rethrow } from 'next/navigation'
 import { requireOrgRole } from '@/lib/auth'
@@ -28,7 +30,7 @@ export async function saveDetails(
     const city          = (formData.get('city') as string)?.trim() || null
     const state         = (formData.get('state') as string)?.trim() || null
     const zip           = (formData.get('zip') as string)?.trim() || null
-    const property_type = formData.get('property_type') as string || 'house'
+    const property_type = toDbEnum('property_type', formData.get('property_type') as string | null, 'house')
     const bedrooms      = parseInt(formData.get('bedrooms') as string) || 1
     const bathrooms     = formData.get('bathrooms') ? parseFloat(formData.get('bathrooms') as string) : null
     const max_guests    = parseInt(formData.get('max_guests') as string) || 2
@@ -99,11 +101,10 @@ export async function saveDetails(
     }
 
     if (!door_code_unchanged) {
-      const { error: doorCodeError } = await supabase.rpc('store_property_door_code', {
-        p_property_id: propertyId,
-        p_org_id:      membership.org_id,
-        p_door_code:   door_code,
-      })
+      const { error: doorCodeError } = await supabase.rpc(
+        'store_property_door_code',
+        doorCodeArgs(propertyId, membership.org_id, door_code)
+      )
 
       if (doorCodeError) {
         console.error('[saveDetails] door code write failed', doorCodeError)

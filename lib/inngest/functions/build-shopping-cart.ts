@@ -118,9 +118,12 @@ export const buildShoppingCart = inngest.createFunction(
           .eq('id', org_id)
           .single(),
 
+        // p_property_ids is DEFAULT NULL ("every property"), so omitting it
+        // says the same thing as the explicit null this used to pass — and it
+        // is what the generated `p_property_ids?: string[]` arg type accepts.
         supabase.rpc('inventory_below_par_items', {
-          p_org_id:       org_id,
-          p_property_ids: property_ids?.length ? property_ids : null,
+          p_org_id: org_id,
+          ...(property_ids?.length ? { p_property_ids: property_ids } : {}),
         }),
 
         supabase

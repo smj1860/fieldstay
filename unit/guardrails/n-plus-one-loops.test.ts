@@ -109,7 +109,7 @@ const EXCEPTIONS: Record<string, string> = {
   // and the Stripe-id clear was collapsed from one update per subscription
   // into a single batched patch. Pruned 2026-07-30 with the account-deletion
   // org-orphaning fix.
-  'app/(dashboard)/maintenance/actions.ts:854':
+  'app/(dashboard)/maintenance/actions.ts:855':
     'Per-vendor quote_requests insert — each row needs its own randomly generated quote_token before its own Inngest event fires; the insert could theoretically be batched with the token generated client-side, but that\'s a sync-logic change, not a lint fix.',
   'app/(dashboard)/maintenance/create-work-order-helpers.ts:152':
     'Extracted-helper twin of app/(dashboard)/maintenance/actions.ts:837 — same reasoning.',
@@ -119,7 +119,7 @@ const EXCEPTIONS: Record<string, string> = {
     'Per-photo storage upload + work_order_photos row — each photo is a distinct uploaded file with its own generated storage path; there is no batched form of a storage upload.',
   'app/api/work-orders/[token]/photos/route.ts:105':
     'Same per-photo storage-upload + row pattern as app/actions/work-order-public.ts:268.',
-  'app/(dashboard)/maintenance/CreateWorkOrderModal.tsx:118':
+  'app/(dashboard)/maintenance/CreateWorkOrderModal.tsx:121':
     'Same per-photo storage-upload + row pattern, client-side.',
   'lib/asset-discovery/seed-from-amenities.ts:62':
     'Real N+1 (existence-check select + insert per property) left as a known, bounded cost — deferred rather than fixed blind in the same PR that added this guardrail, since it touches live PMS-sync logic. Bounded by properties-per-org (10-50 per CLAUDE.md\'s target user).',
@@ -133,10 +133,10 @@ const EXCEPTIONS: Record<string, string> = {
     'Per-section insert (parent-before-child, same reasoning as clone-actions.ts:114) — additionally guarded by a template-signature equality check just above that skips the whole delete-then-recreate rebuild when nothing changed.',
   'lib/inngest/functions/cron/guest-pii-retention.ts:132':
     'Per-secret delete_vault_secret RPC call — each is a distinct external Vault secret; structurally cannot be batched into one call any more than "one API call per distinct external resource" ever can. Bounded since the 2026-07-30 scalability pass: the loop now iterates one BOOKING_BATCH_SIZE page inside a per-batch step, not an org\'s entire un-anonymized booking history.',
-  'lib/inngest/functions/ownerrez/initial-sync.ts:172':
+  'lib/inngest/functions/ownerrez/initial-sync.ts:173':
     'Per-property conditional field patch (bedrooms/bathrooms/square_footage) — each property\'s patch object contains different values, so it is not a uniform batched update. Pre-fetch of existing rows just above IS already batched via .in(\'external_id\', ids).',
   'lib/guidebook/sync.ts:136':
-    'Per-property conditional guidebook-config patch — same shape as ownerrez/initial-sync.ts:171 (differing patch per row); the read side just above is already batched via .in(\'property_id\', ids).',
+    'Per-property conditional guidebook-config patch — same shape as ownerrez/initial-sync.ts:173 (differing patch per row); the read side just above is already batched via .in(\'property_id\', ids).',
   'lib/properties/upsert-normalized.ts:129':
     'Per-property conditional cleaning_cost backfill — same differing-patch-per-row shape as the two entries above.',
   'lib/inngest/functions/turnover-events.ts:180':

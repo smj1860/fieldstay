@@ -22,6 +22,7 @@ import type {
 import { IntegrationMisconfiguredError } from '../types'
 import type { NormalizedBooking } from '@/lib/bookings/normalize'
 import { unmappedBookingStatus } from '@/lib/bookings/normalize'
+import type { Enums, TablesUpdate } from '@/types/database'
 import { ok, fail, timingSafeEqual, extractClientIp, isIpInCidr } from '../webhook-verification'
 
 // ── OwnerRez webhook source-IP allowlist (audit 2026-07-30, L-4) ────────────
@@ -331,7 +332,7 @@ export const ownerRezProvider: IntegrationProvider = {
 // ownerrez/incremental-sync.ts — consolidated here as the single source of
 // truth, mirroring where Hospitable's equivalent mappers live.
 
-export function mapOwnerRezBookingStatus(status: string): string {
+export function mapOwnerRezBookingStatus(status: string): Enums<'booking_status'> {
   const s = status.toLowerCase()
   if (s === 'confirmed') return 'confirmed'
   if (s === 'cancelled' || s === 'canceled') return 'cancelled'
@@ -339,7 +340,7 @@ export function mapOwnerRezBookingStatus(status: string): string {
   return unmappedBookingStatus('ownerrez', status)
 }
 
-export function mapOwnerRezChannelToSource(channel?: string): string {
+export function mapOwnerRezChannelToSource(channel?: string): Enums<'booking_source'> {
   if (!channel) return 'other'
   const c = channel.toLowerCase()
   if (c.includes('airbnb')) return 'airbnb'
@@ -379,7 +380,7 @@ function isPresent<T>(value: T | null | undefined): value is T {
   return value !== null && value !== undefined
 }
 
-function patchAddressFields(patch: Record<string, unknown>, addr: OwnerRezProperty['address']): void {
+function patchAddressFields(patch: TablesUpdate<'properties'>, addr: OwnerRezProperty['address']): void {
   if (!addr) return
   if (addr.street1)     patch.address = addr.street1
   if (addr.state)       patch.state   = addr.state
@@ -393,7 +394,7 @@ function patchAddressFields(patch: Record<string, unknown>, addr: OwnerRezProper
 // skipped. Low real-world likelihood (no real US property sits on the
 // equator or requires a minimum renter age of 0), but corrected for
 // consistency with the rest of the codebase's null-handling convention.
-function patchDetailScalarFields(patch: Record<string, unknown>, detail: OwnerRezProperty): void {
+function patchDetailScalarFields(patch: TablesUpdate<'properties'>, detail: OwnerRezProperty): void {
   if (isPresent(detail.latitude))        patch.lat            = detail.latitude
   if (isPresent(detail.longitude))       patch.lng            = detail.longitude
   if (isPresent(detail.max_guests))      patch.max_guests      = detail.max_guests
@@ -405,7 +406,7 @@ function patchDetailScalarFields(patch: Record<string, unknown>, detail: OwnerRe
 }
 
 function patchListingContentFields(
-  patch:    Record<string, unknown>,
+  patch:    TablesUpdate<'properties'>,
   existing: OwnerRezDetailPatchExisting,
   listing:  OwnerRezListing
 ): void {
@@ -439,8 +440,8 @@ export function buildOwnerRezDetailPatch(
   existing: OwnerRezDetailPatchExisting,
   detail:  OwnerRezProperty | null,
   listing: OwnerRezListing | undefined
-): Record<string, unknown> {
-  const patch: Record<string, unknown> = {}
+): TablesUpdate<'properties'> {
+  const patch: TablesUpdate<'properties'> = {}
 
   if (detail) {
     patchAddressFields(patch, detail.address)
@@ -535,10 +536,10 @@ export interface OwnerRezBookingRow {
   external_id:         string
   checkin_date:        string
   checkout_date:       string
-  status:              string
+  status:              Enums<'booking_status'>
   guest_name:          string | null
   guest_email:         string | null
-  source:              string
+  source:              Enums<'booking_source'>
   is_block:            boolean
   stay_type:           string
   actual_total_amount: number | null
@@ -583,6 +584,30 @@ export function buildOwnerRezBookingRow(
     stay_type:           normalized.stay_type,
     actual_total_amount: normalized.actual_total_amount,
   }
+}
+
+/** An OwnerRez booking row whose property resolved to a FieldStay property. */
+export type MappedOwnerRezBookingRow = OwnerRezBookingRow & { property_id: string }
+
+/**
+ * Splits built rows into those whose OwnerRez property resolved to a
+ * FieldStay property and a count of those that did not.
+ *
+ * bookings.property_id is NOT NULL, so an unresolved row cannot be stored at
+ * all — and because the upsert is a SINGLE multi-row statement, one such row
+ * makes Postgres reject the WHOLE batch (23502), losing every other booking
+ * in the same sync. Dropping them here keeps one unmapped property from
+ * taking down the org's entire booking sync; the caller logs the count so the
+ * skip stays visible rather than silent.
+ */
+export function partitionMappedBookingRows(rows: OwnerRezBookingRow[]): {
+  mapped:        MappedOwnerRezBookingRow[]
+  unmappedCount: number
+} {
+  const mapped = rows.filter(
+    (r): r is MappedOwnerRezBookingRow => r.property_id !== null
+  )
+  return { mapped, unmappedCount: rows.length - mapped.length }
 }
 
 /**

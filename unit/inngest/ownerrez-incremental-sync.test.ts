@@ -436,8 +436,12 @@ describe('ownerRezConnectionSync (per-connection handler)', () => {
     // NO status change — rate-limited must not flip the connection to error.
     const rateLimitMergeCall = findMetadataMergeCall(supabase.rpc, 'last_sync_status')
     expect(rateLimitMergeCall).toBeDefined()
-    const payload = rateLimitMergeCall?.[1] as { p_status: string | null; p_patch: Record<string, unknown> }
-    expect(payload.p_status).toBeNull()
+    // p_status is DEFAULT NULL with COALESCE(p_status, status) server-side, so
+    // OMITTING it is how "leave the status alone" is expressed — the same
+    // meaning the explicit null used to carry, and what the generated
+    // `p_status?: string` arg type accepts.
+    const payload = rateLimitMergeCall?.[1] as { p_status?: string; p_patch: Record<string, unknown> }
+    expect(payload).not.toHaveProperty('p_status')
     expect(payload.p_patch.last_sync_status).toBe('rate_limited')
     expect(step.sleep).not.toHaveBeenCalled()
   })

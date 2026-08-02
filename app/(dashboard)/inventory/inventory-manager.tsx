@@ -62,7 +62,10 @@ interface DraftItem {
   previous_quantity: number
   counted_qty: number
   notes: string | null
-  inventory_items: { name: string; unit: string }[]
+  // item_id is a to-ONE FK to inventory_items, so PostgREST embeds an object.
+  // Typed as an array, every `inventory_items[0]` below was undefined and the
+  // review table rendered '—' for every item name.
+  inventory_items: { name: string; unit: string } | null
 }
 
 interface PendingDraft {
@@ -71,7 +74,10 @@ interface PendingDraft {
   status: string
   created_at: string
   notes: string | null
-  crew_members: { name: string }[] | null
+  // inventory_count_drafts.submitted_by is a to-ONE FK to crew_members, so
+  // PostgREST embeds it as an object. Typed as an array, `crew_members[0]`
+  // was always undefined and the submitter's name never rendered.
+  crew_members: { name: string } | null
   inventory_count_draft_items: DraftItem[]
 }
 
@@ -1168,8 +1174,8 @@ function PendingCountReview({
             >
               <div className="flex-1 min-w-0">
                 <span className="text-sm font-medium text-primary-themed">{propName(draft.property_id)}</span>
-                {draft.crew_members?.[0] && (
-                  <span className="text-xs text-muted-themed ml-2">by {draft.crew_members[0]?.name ?? 'Unknown'}</span>
+                {draft.crew_members && (
+                  <span className="text-xs text-muted-themed ml-2">by {draft.crew_members.name}</span>
                 )}
                 {draft.created_at && (
                   <span className="text-xs text-muted-themed ml-2">· {formatDate(draft.created_at)}</span>
@@ -1195,10 +1201,10 @@ function PendingCountReview({
                         <div key={di.id} className="grid grid-cols-[1fr_80px_80px_80px] gap-2 px-4 py-2.5 border-b border-themed last:border-0 text-sm items-center">
                           <div>
                             <span className="font-medium text-primary-themed">
-                              {di.inventory_items?.[0]?.name ?? '—'}
+                              {di.inventory_items?.name ?? '—'}
                             </span>
-                            {di.inventory_items?.[0]?.unit && (
-                              <span className="text-xs text-muted-themed ml-1">({di.inventory_items[0]?.unit})</span>
+                            {di.inventory_items?.unit && (
+                              <span className="text-xs text-muted-themed ml-1">({di.inventory_items.unit})</span>
                             )}
                             {di.notes && (
                               <p className="text-xs text-muted-themed mt-0.5 italic">{di.notes}</p>

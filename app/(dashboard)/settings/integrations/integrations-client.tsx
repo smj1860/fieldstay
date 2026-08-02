@@ -1,5 +1,7 @@
 'use client'
 
+import { asJsonObject } from '@/lib/json'
+import type { Json } from '@/types/database'
 import { useState, useTransition, useEffect } from 'react'
 import { useSearchParams, useRouter }          from 'next/navigation'
 import { Loader2, PlugZap, Unplug, RefreshCw }  from 'lucide-react'
@@ -89,7 +91,8 @@ interface Connection {
   status:           string
   external_user_id: string | null
   created_at:       string
-  metadata:         Record<string, unknown> | null
+  // jsonb — narrowed with asJsonObject() before use, never indexed raw.
+  metadata:         Json
 }
 
 export function IntegrationsClient({
@@ -340,7 +343,7 @@ const SYNC_TIMEOUT_MS = 10 * 60 * 1000
  * last_sync_status yet) and also picks up if the user navigates here mid-sync.
  */
 function useSyncProgress(providerId: string, connection: Connection | null): SyncState {
-  const initialMeta       = (connection?.metadata ?? {}) as Record<string, unknown>
+  const initialMeta       = asJsonObject(connection?.metadata) ?? {}
   const initialSyncStatus = typeof initialMeta.last_sync_status === 'string'
     ? initialMeta.last_sync_status
     : null

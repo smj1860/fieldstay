@@ -1,3 +1,4 @@
+import { asBooleanMap } from '@/lib/json'
 import { cache } from 'react'
 import { createClient, createServiceClient } from '@/lib/supabase/server'
 import { redirect } from 'next/navigation'
@@ -6,6 +7,23 @@ import { logAuditEvent } from '@/lib/audit'
 import { unwrapJoin } from '@/lib/utils/supabase-joins'
 import { reportError } from '@/lib/observability/report-error'
 import { setActorContext, setTenantContext } from '@/lib/observability/sentry-context'
+
+/**
+ * organizations.repuguard_status is TEXT with
+ * CHECK (repuguard_status IN ('inactive','trial','active','cancelled')) — a
+ * constraint the column's type cannot carry, so narrow it here instead of
+ * asserting. 'inactive' is the column's own DEFAULT.
+ */
+const REPUGUARD_STATUSES = ['inactive', 'trial', 'active', 'cancelled'] as const
+
+function toRepuguardStatus(
+  value: string | null | undefined,
+): (typeof REPUGUARD_STATUSES)[number] {
+  for (const status of REPUGUARD_STATUSES) {
+    if (status === value) return status
+  }
+  return 'inactive'
+}
 
 export interface OrgMembership {
   org_id: string
@@ -120,9 +138,8 @@ const getMembershipContext = cache(async () => {
       plan_status:    orgData?.plan_status ?? 'trialing',
       max_properties: orgData?.max_properties ?? 5,
       trial_ends_at:  orgData?.trial_ends_at ?? null,
-      repuguard_status: orgData?.repuguard_status ?? 'inactive',
-      onboarding_steps_completed:
-        (orgData?.onboarding_steps_completed ?? {}) as Record<string, boolean>,
+      repuguard_status: toRepuguardStatus(orgData?.repuguard_status),
+      onboarding_steps_completed: asBooleanMap(orgData?.onboarding_steps_completed),
     },
   }
 

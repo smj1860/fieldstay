@@ -1,3 +1,4 @@
+import type { Json } from '@/types/database'
 import type { WebhookVerificationResult } from './webhook-verification'
 
 export type ProviderAuthType = 'oauth2' | 'api_key'
@@ -14,8 +15,11 @@ export interface TokenResponse {
   externalUserId: string
   /** Scopes granted (optional — not all providers return this) */
   scope?: string
-  /** Any non-sensitive provider-specific metadata to persist in the connection row */
-  metadata?: Record<string, unknown>
+  /**
+   * Any non-sensitive provider-specific metadata to persist in the connection
+   * row. `Json`, not `unknown` — it is written straight into a jsonb column.
+   */
+  metadata?: Record<string, Json>
   /**
    * Refresh token, for providers whose access tokens expire (e.g. Kroger).
    * Stored in its own Vault secret via store_integration_refresh_token —

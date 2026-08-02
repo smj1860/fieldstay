@@ -7,6 +7,8 @@
  *
  * Naming convention: "domain/action"
  */
+import type { Enums } from '@/types/database'
+
 
 export type FieldStayEvents = {
 
@@ -183,7 +185,9 @@ export type FieldStayEvents = {
       work_order_id: string
       property_id:   string
       org_id:        string
-      category:      string
+      // The work order's own category enum — NOT vendor_specialty, which is a
+      // different (smaller) set. auto-assign-vendor maps between them.
+      category:      Enums<'wo_category'>
     }
   }
 
@@ -510,7 +514,7 @@ export type FieldStayEvents = {
   'asset/manual_lookup.requested': {
     data: {
       org_id:     string
-      asset_type: string
+      asset_type: Enums<'asset_type'>
       make:       string
       model:      string
     }

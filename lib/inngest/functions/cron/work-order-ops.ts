@@ -4,6 +4,7 @@ import { calcNextDueDate } from '@/lib/turnovers/generator'
 import { logAuditEvent, logAuditEvents } from '@/lib/audit'
 import { createPmNotification } from '@/lib/inngest/helpers'
 import { isVendorHardBlocked } from '@/lib/vendors/compliance'
+import type { Enums } from '@/types/database'
 import { unwrapJoin } from '@/lib/utils/supabase-joins'
 import { fetchAllRows, fetchDistinctOrgIds } from '@/lib/inngest/paginate'
 import { reportError } from '@/lib/observability/report-error'
@@ -13,7 +14,10 @@ const AGING_DAYS = 7
 interface AutoWoSchedule {
   id: string; name: string; org_id: string; property_id: string
   next_due_date: string | null; frequency: string | null; schedule_type: string | null
-  assigned_vendor_id: string | null; vendor_specialty_hint: string | null
+  // vendor_specialty_hint is the vendor_specialty enum, whose labels are all
+  // valid wo_category labels too — that subset relationship is what lets the
+  // hint double as the created work order's category below.
+  assigned_vendor_id: string | null; vendor_specialty_hint: Enums<'vendor_specialty'> | null
   estimated_cost: number | null; instructions: string | null
   properties: { name: string } | { name: string }[] | null
 }
@@ -223,7 +227,7 @@ export const workOrderOpsOrg = inngest.createFunction(
 
       const agingWOs = await fetchAllRows<{
         id: string; org_id: string; property_id: string
-        status: string; created_at: string
+        status: Enums<'wo_status'>; created_at: string
       }>(
         (from, to) => supabase
           .from('work_orders')

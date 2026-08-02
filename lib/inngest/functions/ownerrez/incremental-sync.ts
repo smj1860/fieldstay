@@ -63,8 +63,10 @@ import { createGuidebookPropertyConfigsForProperties } from '@/lib/guidebook/syn
 import { seedPresentAssetsFromAmenities } from '@/lib/asset-discovery/seed-from-amenities'
 import {
   buildOwnerRezBookingRow,
+  partitionMappedBookingRows,
   selectOwnerRezBookingsToPostRevenue,
 } from '@/lib/integrations/providers/ownerrez'
+import type { MappedOwnerRezBookingRow } from '@/lib/integrations/providers/ownerrez'
 import { mergeIntegrationConnectionMetadata } from '@/lib/integrations/connection-metadata'
 
 const PROVIDER = 'ownerrez'
@@ -249,8 +251,7 @@ type ActiveConnection = {
   metadata:         unknown
 }
 
-type BookingRow      = ReturnType<typeof buildOwnerRezBookingRow>
-type OwnerBlockRow   = BookingRow & { property_id: string }
+type OwnerBlockRow   = MappedOwnerRezBookingRow
 type SyncLogger      = { info: (msg: string, meta?: unknown) => void
                          warn: (msg: string) => void
                          error: (msg: string) => void }
@@ -305,7 +306,17 @@ async function persistBookings(
   const externalToFsId = await resolveExternalPropertyIdMap(supabase, conn.org_id, bookings)
   if (!externalToFsId) return null
 
-  const bookingRows = bookings.map((b) => buildOwnerRezBookingRow(conn.org_id, b, externalToFsId))
+  const builtRows = bookings.map((b) => buildOwnerRezBookingRow(conn.org_id, b, externalToFsId))
+  const { mapped: bookingRows, unmappedCount } = partitionMappedBookingRows(builtRows)
+
+  if (unmappedCount) {
+    logger.warn(
+      `[OwnerRez:${conn.user_id}] skipping ${unmappedCount} booking(s) whose OwnerRez property has no FieldStay property`
+    )
+  }
+  if (!bookingRows.length) {
+    return { affectedPropertyIds: [], bookingsToPostRevenue: [], ownerBlocks: [] }
+  }
 
   const { data: upserted, error } = await supabase
     .from('bookings')
@@ -322,15 +333,11 @@ async function persistBookings(
   )
 
   return {
-    affectedPropertyIds: Array.from(new Set(
-      bookingRows.map((b) => b.property_id).filter((id): id is string => id !== null)
-    )),
+    affectedPropertyIds: Array.from(new Set(bookingRows.map((b) => b.property_id))),
     bookingsToPostRevenue: selectOwnerRezBookingsToPostRevenue(bookingRows, idByExternalId),
     // Blocks never generate turnovers (filtered at the generator query level),
     // but a known vacancy window is the best signal for scheduling maintenance.
-    ownerBlocks: bookingRows.filter(
-      (r): r is OwnerBlockRow => Boolean(r.is_block) && r.property_id !== null
-    ),
+    ownerBlocks: bookingRows.filter((r) => Boolean(r.is_block)),
   }
 }
 
@@ -753,6 +760,16 @@ export const ownerRezConnectionSync = inngest.createFunction(
           return { skipped: true, reason: 'connection_not_active' }
         }
 
+        // org_id is nullable on integration_connections. A connection not
+        // bound to an org cannot be tenant-scoped, so there is no org whose
+        // properties or bookings this sync could safely write — skip rather
+        // than carry a null org_id into the write path.
+        if (!conn.org_id) {
+          logger.warn(`[OwnerRez:${userId}] connection ${connectionId} has no org_id — skipping`)
+          return { skipped: true, reason: 'connection_without_org' }
+        }
+        const activeConn: ActiveConnection = { ...conn, org_id: conn.org_id }
+
         const metadata = (conn.metadata ?? {}) as Record<string, unknown>
         const sinceUtc = (metadata['sync_cursor'] as string | undefined) ?? undefined
 
@@ -761,7 +778,7 @@ export const ownerRezConnectionSync = inngest.createFunction(
         // one of its two required parameters.
         let propertyIds: number[] | undefined
         if (!sinceUtc) {
-          propertyIds = await loadConnectedPropertyIds(supabase, conn.org_id)
+          propertyIds = await loadConnectedPropertyIds(supabase, activeConn.org_id)
           if (!propertyIds.length) {
             console.log(`[OwnerRez:${userId}] No connected properties and no sync cursor — skipping`)
             return { skipped: true, reason: 'no_cursor_no_properties' }
@@ -778,7 +795,7 @@ export const ownerRezConnectionSync = inngest.createFunction(
           const bookings = await new OwnerRezApiClient(userId)
             .getBookings({ sinceUtc, propertyIds, includeGuest: true })
 
-          const persisted = await persistBookings(supabase, conn, bookings, logger)
+          const persisted = await persistBookings(supabase, activeConn, bookings, logger)
           if (!persisted) {
             // Property lookup failed — already logged and reported. Bailing
             // out here is what prevents a booking upsert from overwriting
@@ -786,8 +803,8 @@ export const ownerRezConnectionSync = inngest.createFunction(
             return
           }
 
-          await notifyOwnerBlockOpportunities(supabase, conn.org_id, persisted.ownerBlocks, logger)
-          await updateSyncCursor(conn, fetchStartedAt, bookings.length, logger)
+          await notifyOwnerBlockOpportunities(supabase, activeConn.org_id, persisted.ownerBlocks, logger)
+          await updateSyncCursor(activeConn, fetchStartedAt, bookings.length, logger)
 
           logger.info(`[OwnerRez:${userId}] sync complete — ${bookings.length} bookings`, {
             bookingCount: bookings.length,
@@ -802,7 +819,7 @@ export const ownerRezConnectionSync = inngest.createFunction(
         } catch (err) {
           // Rethrows for the retriable/permanent cases; returns for the
           // generic one, which has already recorded status + notified the PM.
-          await handleConnectionSyncFailure(err, { supabase, conn, userId, logger })
+          await handleConnectionSyncFailure(err, { supabase, conn: activeConn, userId, logger })
         }
       })
 
@@ -854,7 +871,7 @@ async function notifyConnectionErrorThrottled(
   supabase: ReturnType<typeof createServiceClient>,
   connectionId: string,
   userId: string,
-  orgId: string | null,
+  orgId: string,
   humanError: string
 ): Promise<void> {
   try {
@@ -880,7 +897,7 @@ async function notifyConnectionErrorThrottled(
         name: 'integration/connection.error',
         data: {
           user_id:     userId,
-          org_id:      orgId ?? '',
+          org_id:      orgId,
           provider_id: PROVIDER,
           reason:      humanError,
         },

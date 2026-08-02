@@ -6,6 +6,8 @@ import { RateLimitError, TokenRevokedError, translateSyncError } from '@/lib/int
 import type { OwnerRezReview } from '@/lib/integrations/types'
 import { logAuditEvent }       from '@/lib/audit'
 import { mergeIntegrationConnectionMetadata } from '@/lib/integrations/connection-metadata'
+import { asJsonObject } from '@/lib/json'
+import type { Json } from '@/types/database'
 
 export const ownerRezReviewsSync = inngest.createFunction(
   {
@@ -47,7 +49,7 @@ export const ownerRezReviewsSync = inngest.createFunction(
       // one tenant's. At max_rows = 1000 PostgREST returns the first 1000 with
       // a 200 and no truncation signal, so every connection past that stops
       // pulling reviews while the cron still reports success.
-      return await fetchAllRows<{ user_id: string; org_id: string | null; metadata: Record<string, unknown> | null }>(
+      return await fetchAllRows<{ user_id: string; org_id: string | null; metadata: Json }>(
         (from, to) => admin
           .from('integration_connections')
           .select('user_id, org_id, metadata')
@@ -62,7 +64,7 @@ export const ownerRezReviewsSync = inngest.createFunction(
     for (const conn of connections) {
       const userId = conn.user_id as string
       const orgId  = conn.org_id  as string
-      const meta   = (conn.metadata as Record<string, unknown> | null) ?? {}
+      const meta   = asJsonObject(conn.metadata) ?? {}
       const cursor = typeof meta['reviews_sync_cursor'] === 'string'
         ? meta['reviews_sync_cursor']
         : undefined

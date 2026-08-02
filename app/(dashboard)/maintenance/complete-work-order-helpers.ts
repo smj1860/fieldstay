@@ -5,7 +5,7 @@ import type { SupabaseClient } from '@supabase/supabase-js'
 import { inngest } from '@/lib/inngest/client'
 import { calcNextDueDate } from '@/lib/turnovers/generator'
 import { reportError } from '@/lib/observability/report-error'
-import type { ScheduleFrequency, WoStatus } from '@/types/database'
+import type { ScheduleFrequency, TablesUpdate, WoStatus } from '@/types/database'
 
 /**
  * THE single completion path for a work order.
@@ -66,8 +66,8 @@ function isoDate() { return new Date().toISOString().split('T')[0] }
  * `completion_notes` is only included when the caller actually has notes —
  * writing `null` unconditionally would wipe notes an earlier save recorded.
  */
-export function workOrderCompletionFields(notes?: string | null): Record<string, unknown> {
-  const fields: Record<string, unknown> = {
+export function workOrderCompletionFields(notes?: string | null): TablesUpdate<'work_orders'> {
+  const fields: TablesUpdate<'work_orders'> = {
     status:         'completed' satisfies WoStatus,
     completed_date: isoDate(),
   }

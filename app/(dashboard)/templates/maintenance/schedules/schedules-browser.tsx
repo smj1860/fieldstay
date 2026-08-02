@@ -25,7 +25,8 @@ const FREQUENCIES: { value: ScheduleFrequency; label: string }[] = [
 ]
 
 interface Property { id: string; name: string }
-interface Vendor { id: string; name: string; specialty: string }
+// vendors.specialty is NULLABLE.
+interface Vendor { id: string; name: string; specialty: string | null }
 
 interface ScheduleRow {
   id:                 string
