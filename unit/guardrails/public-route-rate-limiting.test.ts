@@ -68,6 +68,21 @@ function extractRateLimiterFunctionBody(src: string): string {
   return src.slice(openBrace, i)
 }
 
+/**
+ * Every canonical helper that proves a route requires a session, plus the raw
+ * auth.getUser() call the older routes gate on inline. A route matching any of
+ * these is NOT a public surface.
+ *
+ * This list used to be duplicated in two `it()` bodies, which is how it drifts:
+ * requirePlatformStaff (lib/auth.ts) was added and the routes that adopted it
+ * immediately read as unauthenticated to BOTH checks. Add new gates here only.
+ */
+const AUTH_GATES = [
+  'requireOrgMember', 'requireOrgRole', 'requireAuth',
+  'requirePlatformAdmin', 'requirePlatformStaff', 'requireCrewMember',
+  'auth.getUser()',
+]
+
 describe('guardrail: public token-guessable routes stay rate-limited', () => {
   const proxySrc = read(join(ROOT, 'proxy.ts'))
   const tokenRoutes = extractStringLiteralPrefixes(proxySrc, 'TOKEN_ROUTES')
@@ -133,10 +148,6 @@ describe('guardrail: every unauthenticated API route has SOME rate limiter', () 
     ['app/api/health/route.ts',                  'no side effects, returns no data'],
   ])
 
-  const AUTH_GATES = [
-    'requireOrgMember', 'requireOrgRole', 'requireAuth',
-    'requirePlatformAdmin', 'requireCrewMember', 'auth.getUser()',
-  ]
 
   // NOTE: no \b before Limiter/Ratelimit. Every limiter in lib/rate-limit.ts is
   // named <thing>Limiter or <thing>Ratelimit, so a leading word boundary would
@@ -239,11 +250,6 @@ describe('guardrail: every rate-limited public route is actually reachable unaut
     // An auth gate means the route is MEANT to require a session — its
     // limiter is a per-user quota, not a public-surface throttle, so the
     // 307-to-login is correct behaviour and not a finding.
-    const AUTH_GATES = [
-      'requireOrgMember', 'requireOrgRole', 'requireAuth',
-      'requirePlatformAdmin', 'requireCrewMember', 'auth.getUser()',
-    ]
-
     const offenders = collectSourceFiles(['app/api'])
       .map((f) => ({ file: f, path: rel(f) }))
       .filter(({ path }) => path.endsWith('/route.ts'))

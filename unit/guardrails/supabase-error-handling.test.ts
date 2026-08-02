@@ -108,7 +108,6 @@ const BASELINE: Record<string, number> = {
   'app/(dashboard)/properties/[id]/setup/maintenance/actions.ts': 4,
   'app/(dashboard)/properties/actions.ts': 6,
   'app/(dashboard)/properties/clone-actions.ts': 4,
-  'app/(dashboard)/properties/page.tsx': 1,
   'app/(dashboard)/reviews/actions.ts': 2,
   'app/(dashboard)/settings/actions.ts': 11,
   'app/(dashboard)/settings/integrations/actions.ts': 4,
@@ -135,8 +134,6 @@ const BASELINE: Record<string, number> = {
   'app/api/gdpr/export/route.ts': 5,
   'app/api/guidebook/redeem/route.ts': 2,
   'app/api/repuguard/generate/route.ts': 4,
-  'app/api/support-inbox/reply/route.ts': 1,
-  'app/api/support-inbox/resolve/route.ts': 1,
   'app/api/vendor-connect/[token]/onboard/route.ts': 2,
   'app/api/webhooks/stripe/handlers/core-billing.ts': 2,
   'app/api/work-orders/[token]/complete/route.ts': 3,
@@ -149,7 +146,6 @@ const BASELINE: Record<string, number> = {
   'app/g/kit/[media_kit_token]/print/page.tsx': 2,
   'app/onboarding/page.tsx': 3,
   'lib/asset-discovery/seed-from-amenities.ts': 2,
-  'lib/auth.ts': 3,
   'lib/checklists/apply-master-template.ts': 5,
   'lib/checklists/seed-default-room-templates.ts': 2,
 
@@ -196,7 +192,6 @@ const BASELINE: Record<string, number> = {
 
   'lib/integrations/providers/kroger-token.ts': 2,
   'lib/push/send-push.ts': 2,
-  'lib/supabase/unwrap.ts': 1,
   'lib/support/account-tools.ts': 3,
   'lib/turnovers/generator.ts': 4,
 }

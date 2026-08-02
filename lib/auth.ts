@@ -1,6 +1,8 @@
 import { asBooleanMap } from '@/lib/json'
 import { cache } from 'react'
-import { createClient, createServiceClient } from '@/lib/supabase/server'
+import { NextResponse } from 'next/server'
+import { createClient } from '@/lib/supabase/server'
+import { tryUnwrap, unwrap } from '@/lib/supabase/unwrap'
 import { redirect } from 'next/navigation'
 import type { MemberRole } from '@/types/database'
 import { logAuditEvent } from '@/lib/audit'
@@ -192,21 +194,6 @@ export async function requireOrgRole(allowedRoles: MemberRole[]) {
 }
 
 /**
- * Return the current user's role in their org.
- * Used to gate owner-only UI in settings pages.
- */
-export async function getOrgMembership(userId: string, orgId: string) {
-  const admin = createServiceClient({ system: 'lib/auth' })
-  const { data } = await admin
-    .from('organization_members')
-    .select('role')
-    .eq('user_id', userId)
-    .eq('org_id', orgId)
-    .single()
-  return data ?? null
-}
-
-/**
  * Verify the current user is a FieldStay platform admin (platform_staff
  * with role = 'admin') — independent of any organization_members role,
  * since a platform admin isn't necessarily a member of any given org.
@@ -216,8 +203,17 @@ export async function getOrgMembership(userId: string, orgId: string) {
 export async function requirePlatformAdmin() {
   const { user, supabase } = await requireAuth()
 
-  const { data } = await supabase.rpc('is_platform_staff_admin')
-  if (!data) {
+  // unwrap, not a discarded error: a failed RPC used to return `data === null`,
+  // which took the same branch as "you are not a platform admin" — so an
+  // outage both bounced a real admin to /ops AND wrote a
+  // security.route.mismatch audit row for an intrusion that never happened.
+  // Poisoning the audit log is worse than the bounce, since that log is what
+  // someone reads while investigating. Throwing keeps the gate closed without
+  // fabricating the event.
+  const isAdmin = unwrap(await supabase.rpc('is_platform_staff_admin'), {
+    site: 'lib.auth.requirePlatformAdmin',
+  })
+  if (!isAdmin) {
     await logAuditEvent({
       actorId:    user.id,
       action:     'security.route.mismatch',
@@ -231,6 +227,63 @@ export async function requirePlatformAdmin() {
   return { user, supabase }
 }
 
+type SupabaseServerClient = Awaited<ReturnType<typeof createClient>>
+
+export type PlatformStaffResult =
+  | { ok: true;  user: { id: string }; supabase: SupabaseServerClient; staff: { user_id: string } }
+  | { ok: false; response: NextResponse }
+
+/**
+ * Canonical platform-staff gate for Route Handlers under app/api/support-inbox/*.
+ *
+ * The lookup was open-coded identically in both of those routes, and in both
+ * the read's error was dropped — so a transient DB failure produced `staff ===
+ * null`, which is the same value as "this user is not staff", and the route
+ * answered 403. It failed in the safe direction, but indistinguishably from a
+ * real authorization denial: staff saw "Not staff" during an outage and had no
+ * way to tell that apart from having lost access.
+ *
+ * Same distinction (and the same 503) as requireCrewMember in lib/crew-auth.ts:
+ * a failed read keeps the gate closed but stays retryable and shows up in
+ * Sentry, rather than being silently absorbed as a denial.
+ *
+ * The two Server Components with this gate are deliberately NOT on this helper:
+ * app/(dashboard)/support-inbox/page.tsx redirects rather than returning a
+ * response, and app/(dashboard)/layout.tsx reads it as one element of a nav
+ * fan-in. Both already handle their read errors.
+ */
+export async function requirePlatformStaff(): Promise<PlatformStaffResult> {
+  const supabase = await createClient()
+  const { data: { user } } = await supabase.auth.getUser()
+
+  if (!user) {
+    return { ok: false, response: NextResponse.json({ error: 'Unauthorized' }, { status: 401 }) }
+  }
+
+  const staffRes = await supabase
+    .from('platform_staff')
+    .select('user_id')
+    .eq('user_id', user.id)
+    .maybeSingle()
+
+  const staffOut = tryUnwrap(staffRes, { site: 'lib.auth.requirePlatformStaff' })
+  if (!staffOut.ok) {
+    return {
+      ok: false,
+      response: NextResponse.json(
+        { error: 'Could not verify staff access. Please try again.' },
+        { status: 503 },
+      ),
+    }
+  }
+
+  if (!staffOut.data) {
+    return { ok: false, response: NextResponse.json({ error: 'Not staff' }, { status: 403 }) }
+  }
+
+  return { ok: true, user, supabase, staff: staffOut.data }
+}
+
 /**
  * Verify a property belongs to the user's org.
  * Returns the property or redirects to /properties if not found.
@@ -238,12 +291,21 @@ export async function requirePlatformAdmin() {
 export async function requireProperty(propertyId: string) {
   const { user, supabase, membership } = await requireOrgMember()
 
-  const { data: property } = await supabase
+  // maybeSingle + unwrap: with .single() and a discarded error, a transient
+  // read failure was indistinguishable from "that property isn't yours" and
+  // silently bounced the PM back to /properties mid-edit. maybeSingle keeps a
+  // genuinely missing row as data:null (the redirect), leaving `error` to mean
+  // only a real failure.
+  const propertyRes = await supabase
     .from('properties')
     .select('*')
     .eq('id', propertyId)
     .eq('org_id', membership.org_id)
-    .single()
+    .maybeSingle()
+
+  const property = unwrap(propertyRes, {
+    site: 'lib.auth.requireProperty', orgId: membership.org_id,
+  })
 
   if (!property) redirect('/properties')
 
