@@ -1,3 +1,4 @@
+import { throwIfAnyQueryFailed } from '@/lib/supabase/unwrap'
 import { inngest } from '@/lib/inngest/client'
 import { createServiceClient } from '@/lib/supabase/server'
 import { haversineKm, proximityScore, clamp01 } from '@/lib/scoring/geo'
@@ -63,13 +64,17 @@ export const autoAssignVendor = inngest.createFunction(
       const supabase = createServiceClient({ system: 'inngest:auto-assign-vendor' })
 
       const [
-        { data: org },
-        { data: property },
-        { data: vendors },
-        { data: complianceRows },
+        { data: org,            error: orgError },
+        { data: property,       error: propertyError },
+        { data: vendors,        error: vendorsError },
+        { data: complianceRows, error: complianceError },
       ] = await Promise.all([
-        supabase.from('organizations').select('vendor_auto_assign_mode').eq('id', org_id).single(),
-        supabase.from('properties').select('id, lat, lng').eq('id', property_id).eq('org_id', org_id).single(),
+        // maybeSingle(), not single(): a genuinely missing org/property must
+        // stay a graceful skip (both are already null-handled below), whereas
+        // single() reports zero rows as PGRST116 — which the error check above
+        // would treat as a failure and retry.
+        supabase.from('organizations').select('vendor_auto_assign_mode').eq('id', org_id).maybeSingle(),
+        supabase.from('properties').select('id, lat, lng').eq('id', property_id).eq('org_id', org_id).maybeSingle(),
         supabase
           .from('vendors')
           .select('id, name, lat, lng, avg_rating')
@@ -78,6 +83,15 @@ export const autoAssignVendor = inngest.createFunction(
           .eq('is_active', true),
         supabase.from('vendor_compliance_status').select('vendor_id, compliance_status').eq('org_id', org_id),
       ])
+
+      // A failed read here is indistinguishable from "this org has no matching
+      // vendors" once the error is discarded — both leave `vendors` empty and
+      // the function returns no suggestion. Throwing lets Inngest retry a
+      // transient failure instead of recording a silent non-suggestion.
+      throwIfAnyQueryFailed(
+        { site: 'inngest.auto-assign-vendor.load-context', orgId: org_id },
+        orgError, propertyError, vendorsError, complianceError,
+      )
 
       const mode = org?.vendor_auto_assign_mode ?? 'disabled'
       if (mode !== 'suggest' || !vendors?.length) return null

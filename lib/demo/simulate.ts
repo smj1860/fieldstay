@@ -1,7 +1,6 @@
-import type { Json } from '@/types/database'
 import 'server-only'
 import { createServiceClient } from '@/lib/supabase/server'
-import type { DemoSideEffectKind } from '@/types/database'
+import type { DemoSideEffectKind, Json } from '@/types/database'
 
 /**
  * Demo-safe side-effect wrapper.

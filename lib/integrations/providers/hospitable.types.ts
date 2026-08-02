@@ -7,9 +7,8 @@
 // unaffected.
 // ============================================================
 
-import type { Json } from '@/types/database'
 
-import type { CrewRole } from '@/types/database'
+import type { CrewRole, Json } from '@/types/database'
 
 export interface HospitableUser {
   id:      string   // UUID

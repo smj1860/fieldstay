@@ -1,3 +1,4 @@
+import { fetchAllRows } from '@/lib/inngest/paginate'
 import type { Enums } from '@/types/database'
 import { inngest } from '@/lib/inngest/client'
 import { createServiceClient } from '@/lib/supabase/server'
@@ -104,18 +105,28 @@ export const handleInventoryCountSubmitted = inngest.createFunction(
       const typedCount = countItems as CountRow[]
       const itemIds    = typedCount.map((c) => c.inventory_item_id)
 
-      // 1 query: bulk fetch all inventory item metadata, scoped to this org —
-      // itemIds come from inventory_count_items and must not be trusted to
-      // already belong to org_id.
-      const { data: inventoryItems } = await supabase
-        .from('inventory_items')
-        .select('id, property_id, name, category, unit, par_level, low_stock_threshold_pct')
-        .eq('org_id', org_id)
-        .in('id', itemIds)
+      // Bulk fetch all inventory item metadata, scoped to this org — itemIds
+      // come from inventory_count_items and must not be trusted to already
+      // belong to org_id.
+      //
+      // Paginated rather than a bare select: the result is sized by the
+      // count's item list, not by a single parent row, so a large count could
+      // cross PostgREST's max_rows = 1000 cap — which returns 200 with no
+      // truncation signal and would silently drop items from the below-par
+      // computation. fetchAllRows also throws on a failed read instead of
+      // leaving `data` null and reporting "nothing below par".
+      const typedInv = await fetchAllRows<InvRow>(
+        (from, to) => supabase
+          .from('inventory_items')
+          .select('id, property_id, name, category, unit, par_level, low_stock_threshold_pct')
+          .eq('org_id', org_id)
+          .in('id', itemIds)
+          .order('id', { ascending: true })
+          .range(from, to),
+        { label: `inventory_items(count-metadata)[org=${org_id}]` },
+      )
 
-      if (!inventoryItems?.length) return { belowParItems: [] }
-
-      const typedInv    = inventoryItems as InvRow[]
+      if (!typedInv.length) return { belowParItems: [] }
       const orgItemIds  = new Set(typedInv.map((inv) => inv.id))
       // Only ever write quantities for items confirmed to belong to this org.
       const orgScopedCount = typedCount.filter((c) => orgItemIds.has(c.inventory_item_id))

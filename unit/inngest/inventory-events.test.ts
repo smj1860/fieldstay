@@ -47,6 +47,10 @@ function makeSupabase(queued: Record<string, { data?: unknown; error?: unknown }
     chain.insert = (...a: unknown[]) => record('insert', a)
     chain.update = (...a: unknown[]) => record('update', a)
     chain.upsert = (...a: unknown[]) => record('upsert', a)
+    // The inventory_items metadata read is paginated through fetchAllRows(),
+    // which chains .order().range() before awaiting.
+    chain.order  = (...a: unknown[]) => record('order', a)
+    chain.range  = (...a: unknown[]) => record('range', a)
 
     const resolveNext = () => {
       const idx = counters[table] ?? 0

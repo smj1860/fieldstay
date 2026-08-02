@@ -8,6 +8,7 @@ import { calcNextDueDate } from '@/lib/turnovers/generator'
 import { fetchAllRows } from '@/lib/inngest/paginate'
 import { logAuditEvent } from '@/lib/audit'
 import { reportError } from '@/lib/observability/report-error'
+import { reportQueryError } from '@/lib/supabase/unwrap'
 import type { WoStatus, WoCategory, ScheduleFrequency, ScheduleType, VendorSpecialty, TablesUpdate, Enums } from '@/types/database'
 import { PriorityLevelSchema, WoStatusSchema, WoCategorySchema } from '@/lib/schemas/work-order'
 import {
@@ -1101,7 +1102,10 @@ async function resolveVendorForSchedule(
   let vendorId: string | null = schedule.assigned_vendor_id ?? null
 
   if (!vendorId && schedule.vendor_specialty_hint) {
-    const { data: hintVendor } = await supabase
+    // A failed lookup must not read as "no vendor of that specialty" — that
+    // silently downgrades the WO to unassigned. Report it and fall through
+    // explicitly, matching the hard-blocked branch below.
+    const { data: hintVendor, error: hintError } = await supabase
       .from('vendors')
       .select('id')
       .eq('org_id', orgId)
@@ -1110,6 +1114,11 @@ async function resolveVendorForSchedule(
       .order('avg_rating', { ascending: false })
       .limit(1)
       .maybeSingle()
+
+    reportQueryError(hintError, {
+      site:  'serverAction.maintenance.resolveVendorForSchedule.hintVendor',
+      orgId,
+    })
     vendorId = hintVendor?.id ?? null
   }
 
@@ -1124,12 +1133,22 @@ export async function createWorkOrderFromSchedule(
   try {
     const { supabase, membership } = await requireOrgRole(['admin', 'manager'])
 
-    const { data: schedule } = await supabase
+    // maybeSingle() + an explicit error check: single() reports zero rows as
+    // PGRST116, which made a real read failure and a genuinely missing
+    // schedule both surface as "Schedule not found".
+    const { data: schedule, error: scheduleError } = await supabase
       .from('maintenance_schedules')
       .select('*')
       .eq('id', scheduleId)
       .eq('org_id', membership.org_id)
-      .single()
+      .maybeSingle()
+
+    if (reportQueryError(scheduleError, {
+      site:  'serverAction.maintenance.createWorkOrderFromSchedule.schedule',
+      orgId: membership.org_id,
+    })) {
+      return { error: 'Operation failed. Please try again.' }
+    }
 
     if (!schedule) return { error: 'Schedule not found' }
 
@@ -1142,13 +1161,24 @@ export async function createWorkOrderFromSchedule(
     // mirrors the auto-create check in the maintenance-schedule cron, so a
     // double-click on "Create Work Order Now" doesn't create a duplicate while
     // still allowing the next cycle's WO once this one is completed/cancelled.
-    const { data: existingWO } = await supabase
+    const { data: existingWO, error: existingWOError } = await supabase
       .from('work_orders')
       .select('id')
       .eq('source_schedule_id', scheduleId)
       .eq('scheduled_date', scheduledDate)
       .not('status', 'in', '("completed","cancelled")')
       .maybeSingle()
+
+    // Fail CLOSED. Discarding this error left `existingWO` null, which reads as
+    // "no open WO for this schedule" and falls straight through to creating
+    // one — so a failed idempotency check produced exactly the duplicate the
+    // check exists to prevent.
+    if (reportQueryError(existingWOError, {
+      site:  'serverAction.maintenance.createWorkOrderFromSchedule.existingWO',
+      orgId: membership.org_id,
+    })) {
+      return { error: 'Operation failed. Please try again.' }
+    }
 
     if (existingWO) return { success: true }
 

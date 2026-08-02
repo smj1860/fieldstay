@@ -9,8 +9,7 @@
 // with a raw driver error rather than a validation message.
 // ============================================================
 
-import { Constants } from '@/types/database'
-import type { Enums } from '@/types/database'
+import { Constants, type Enums } from '@/types/database'
 
 type EnumName = keyof typeof Constants.public.Enums
 

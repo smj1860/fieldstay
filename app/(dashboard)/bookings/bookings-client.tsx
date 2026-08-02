@@ -1,7 +1,6 @@
 'use client'
 
 import { asJsonObject } from '@/lib/json'
-import type { Json } from '@/types/database'
 import { useState, useTransition, useActionState, useMemo, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
 import Link from 'next/link'
@@ -22,7 +21,7 @@ import { Button } from '@/components/ui/Button'
 import { Input } from '@/components/ui/Input'
 import { RequiredMark } from '@/components/ui/RequiredMark'
 import type { VacancyGap } from './page'
-import type { BookingSource, BookingStatus } from '@/types/database'
+import type { BookingSource, BookingStatus, Json } from '@/types/database'
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 

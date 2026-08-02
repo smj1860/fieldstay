@@ -76,7 +76,7 @@ export function SetupVendorsStep({ vendors: initialVendors, continueAction }: Pr
               <div>
                 <div className="text-sm font-medium text-primary-themed">{v.name}</div>
                 <div className="text-xs text-muted-themed capitalize">
-                  {v.specialty?.replace(/_/g, ' ') ?? '—'}{v.contact_name ? ` · ${v.contact_name}` : ''}
+                  {v.specialty?.replaceAll('_', ' ') ?? '—'}{v.contact_name ? ` · ${v.contact_name}` : ''}
                 </div>
               </div>
             </div>

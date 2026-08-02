@@ -2,6 +2,7 @@ import { inngest }             from '@/lib/inngest/client'
 import { createServiceClient } from '@/lib/supabase/server'
 import { unwrapJoin }          from '@/lib/utils/supabase-joins'
 import type { TablesInsert }   from '@/types/database'
+import { unwrapList }          from '@/lib/supabase/unwrap'
 
 const ALPHA_PRIOR = 2  // prior: assume "probably clean"
 const BETA_PRIOR  = 1  // prior: with small upward bias on flag probability
@@ -38,7 +39,12 @@ export const computeChecklistSignals = inngest.createFunction(
 
       type Page = Awaited<ReturnType<typeof fetchPage>>
       async function fetchPage(offset: number) {
-        const { data } = await supabase
+        // The discarded error on this read is exactly what hid the
+        // checklist_instances.property_id bug: PostgREST rejected the whole
+        // select on the unknown column, `data` came back null, `data ?? []`
+        // turned that into "no completions", and the cron reported success
+        // while computing nothing for months. unwrapList throws instead.
+        const res = await supabase
           .from('checklist_instance_items')
           .select(`
             id, section_name, task,
@@ -52,7 +58,8 @@ export const computeChecklistSignals = inngest.createFunction(
           .gte('completed_at', windowStart)
           .order('completed_at', { ascending: false })
           .range(offset, offset + FETCH_PAGE_SIZE - 1)
-        return data ?? []
+
+        return unwrapList(res, { site: 'inngest.checklist-signals.fetch-windowed-completions' })
       }
 
       const all: Page = []

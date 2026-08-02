@@ -1,3 +1,4 @@
+import { unwrapList } from '@/lib/supabase/unwrap'
 import type { TablesInsert } from '@/types/database'
 import { inngest } from '@/lib/inngest/client'
 import { createServiceClient } from '@/lib/supabase/server'
@@ -126,12 +127,17 @@ export const dailyAssetHealth = inngest.createFunction(
         })
       }
 
-      const { data: currentStandards } = await supabase
+      const standardsRes = await supabase
         .from('asset_type_standards')
         .select('asset_type, display_name, age_weight, condition_weight, lifespan_min_years, lifespan_max_years')
         // Fixed platform reference table (21 asset types today); the explicit
         // bound documents that and keeps it out of the unbounded-select class.
         .limit(ASSET_TYPE_STANDARDS_LIMIT)
+
+      const currentStandards = unwrapList(
+        standardsRes,
+        { site: 'inngest.asset-health.scoring-weight-nudge.standards' },
+      )
 
       // .upsert() is an INSERT ... ON CONFLICT DO UPDATE, so the payload has
       // to be a row Postgres could actually insert — display_name and the two

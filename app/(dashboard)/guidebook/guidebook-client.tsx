@@ -1,7 +1,6 @@
 'use client'
 
 import { asBooleanMap } from '@/lib/json'
-import type { Json } from '@/types/database'
 import { asExtensionContactMethod, type ExtensionContactMethod } from '@/components/guidebook/guest-guidebook-view'
 import { useState, useEffect, useRef, useCallback } from 'react'
 import { createClient } from '@/lib/supabase/client'
@@ -12,7 +11,7 @@ import { SponsorFormModal } from './sponsor-form-modal'
 import { CelebrationModal } from './celebration-modal'
 import { upsertPropertyGuidebookConfig, updateStayExtensionSettings } from '@/app/actions/guidebook'
 import { MAX_FEATURED_AMENITIES, prettifyAmenityKey } from '@/lib/guidebook/featured-amenities'
-import type { GuidebookSponsor, GuidebookConfiguration, GuidebookSlotType, GuidebookSponsorStatus } from '@/types/database'
+import type { GuidebookSponsor, GuidebookConfiguration, GuidebookSlotType, GuidebookSponsorStatus, Json } from '@/types/database'
 
 type Property = {
   id:         string

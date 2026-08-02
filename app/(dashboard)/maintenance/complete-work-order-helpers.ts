@@ -1,4 +1,3 @@
-import type { TablesUpdate } from '@/types/database'
 import 'server-only'
 import { fetchAllRows } from '@/lib/inngest/paginate'
 
@@ -6,7 +5,7 @@ import type { SupabaseClient } from '@supabase/supabase-js'
 import { inngest } from '@/lib/inngest/client'
 import { calcNextDueDate } from '@/lib/turnovers/generator'
 import { reportError } from '@/lib/observability/report-error'
-import type { ScheduleFrequency, WoStatus } from '@/types/database'
+import type { ScheduleFrequency, TablesUpdate, WoStatus } from '@/types/database'
 
 /**
  * THE single completion path for a work order.
