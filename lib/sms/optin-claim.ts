@@ -1,3 +1,4 @@
+import { unwrap } from '@/lib/supabase/unwrap'
 import type { SupabaseClient } from '@supabase/supabase-js'
 
 type DailySmsDateColumn = 'last_morning_sms_date' | 'last_evening_sms_date'
@@ -15,7 +16,11 @@ export async function claimDailySmsSlot(
   dateColumn: DailySmsDateColumn,
   todayDate: string
 ): Promise<boolean> {
-  const { data } = await supabase
+  // A failed claim returned false, which every caller reads as "already sent
+  // today" — so a transient error silently suppressed the guest's SMS with
+  // nothing logged. Throwing lets the cron retry; the retry re-reads the
+  // date column, so it still cannot double-send.
+  const claimRes = await supabase
     .from('guidebook_guest_sms_optins')
     .update({ [dateColumn]: todayDate, updated_at: new Date().toISOString() })
     .eq('id', optinId)
@@ -23,7 +28,7 @@ export async function claimDailySmsSlot(
     .select('id')
     .maybeSingle()
 
-  return Boolean(data)
+  return Boolean(unwrap(claimRes, { site: 'lib.sms.optin-claim' }))
 }
 
 /** Rolls back a claim after a failed send so the next run can retry. */

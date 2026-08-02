@@ -22,6 +22,7 @@
 // reconciliation.
 // ============================================================
 
+import { unwrap } from '@/lib/supabase/unwrap'
 import { inngest }             from '@/lib/inngest/client'
 import { createServiceClient } from '@/lib/supabase/server'
 import { logAuditEvent }       from '@/lib/audit'
@@ -51,13 +52,22 @@ export const hospPropertyMerge = inngest.createFunction(
       // no longer matches an active connection) — no worse than before.
       let scopedOrgId: string | null = null
       if (external_user_id) {
-        const { data: connection } = await supabase
+        // scopedOrgId is the ONLY tenant filter on the two service-role reads
+        // below (see the `if (scopedOrgId)` guards). Discarding this error left
+        // it null, which does not narrow the merge to one org — it widens it to
+        // every org, where another tenant can hold the same Hospitable
+        // external_id. A failed lookup must abort, not silently unscope.
+        const connectionRes = await supabase
           .from('integration_connections')
           .select('org_id')
           .eq('provider_id',      PROVIDER)
           .eq('external_user_id', external_user_id)
           .eq('status',           'active')
           .maybeSingle()
+
+        const connection = unwrap(connectionRes, {
+          site: 'inngest.hospitable-property-merge.connection-scope',
+        })
         scopedOrgId = connection?.org_id ?? null
       }
 

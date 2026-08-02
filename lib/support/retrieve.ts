@@ -1,3 +1,4 @@
+import { tryUnwrapList } from '@/lib/supabase/unwrap'
 import 'server-only'
 import { createServiceClient } from '@/lib/supabase/server'
 import { embedText }           from './embed'
@@ -45,10 +46,14 @@ export async function retrieveContext(query: string): Promise<string[]> {
 async function fallbackRetrieve(
   supabase: ReturnType<typeof createServiceClient>
 ): Promise<string[]> {
-  const { data } = await supabase
+  // Degrade, don't throw: the support bot should still answer without KB
+  // context. tryUnwrapList still logs and reports the failure.
+  const chunksRes = await supabase
     .from('support_kb_chunks')
     .select('content')
     .order('created_at', { ascending: false })
     .limit(5)
-  return (data ?? []).map((row) => row.content as string)
+
+  const out = tryUnwrapList(chunksRes, { site: 'lib.support.retrieve' })
+  return (out.ok ? out.data : []).map((row) => row.content as string)
 }

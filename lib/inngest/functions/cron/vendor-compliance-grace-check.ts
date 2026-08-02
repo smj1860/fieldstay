@@ -1,3 +1,4 @@
+import { unwrap } from '@/lib/supabase/unwrap'
 import { inngest }             from '@/lib/inngest/client'
 import { fetchAllRows }        from '@/lib/inngest/paginate'
 import { createServiceClient } from '@/lib/supabase/server'
@@ -121,13 +122,22 @@ export const vendorComplianceGraceCheck = inngest.createFunction(
 
         // Idempotency: only proceed if this run is the one that flips the
         // gate — guards against a retried step re-logging the same doc.
-        const { data: updated } = await supabase
+        // A failed claim used to be indistinguishable from "another run got
+        // there first" — both returned null and skipped. But this claim IS the
+        // hard-block, so a discarded error meant the vendor was never blocked
+        // and nothing said so. Throw and let Inngest retry.
+        const claimRes = await supabase
           .from('vendor_compliance_documents')
           .update({ hard_blocked_at: new Date().toISOString() })
           .eq('id', doc.id)
           .is('hard_blocked_at', null)
           .select('id')
           .maybeSingle()
+
+        const updated = unwrap(claimRes, {
+          site:  'inngest.vendor-compliance-grace-check.hard-block-claim',
+          orgId: doc.org_id,
+        })
 
         if (!updated) return null
 

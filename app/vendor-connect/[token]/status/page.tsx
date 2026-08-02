@@ -1,3 +1,4 @@
+import { unwrap } from '@/lib/supabase/unwrap'
 import { createServiceClient } from '@/lib/supabase/server'
 
 export default async function VendorConnectStatusPage({
@@ -11,12 +12,16 @@ export default async function VendorConnectStatusPage({
   const { already_onboarded } = await searchParams
   const supabase        = createServiceClient({ publicSurface: 'vendor-connect--token--status' })
 
-  const { data: vendor } = await supabase
+  // A failed read used to render the "not finished onboarding" state with a
+  // generic 'Vendor' name — a wrong answer rather than an error.
+  const vendorRes = await supabase
     .from('vendors')
     .select('name, stripe_connect_charges_enabled')
     .eq('stripe_connect_token', token)
     .eq('is_active', true)
-    .single()
+    .maybeSingle()
+
+  const vendor = unwrap(vendorRes, { site: 'page.vendor-connect.status' })
 
   const isComplete = vendor?.stripe_connect_charges_enabled || already_onboarded === 'true'
   const vendorName = vendor?.name ?? 'Vendor'

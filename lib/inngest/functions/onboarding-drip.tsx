@@ -1,3 +1,4 @@
+import { unwrapList } from '@/lib/supabase/unwrap'
 import { inngest }                                 from '@/lib/inngest/client'
 import { createServiceClient }                     from '@/lib/supabase/server'
 import { resend }                                  from '@/lib/resend/client'
@@ -132,13 +133,19 @@ export const onboardingDrip = inngest.createFunction(
 
     const isConnected = await step.run('check-pms-connection', async () => {
       const supabase = createServiceClient({ system: 'inngest:onboarding-drip' })
-      const { data: connections } = await supabase
+      // A failed read reads as "no integrations connected", which sends the
+      // drip email nudging a PM to connect one they already have.
+      const connectionsRes = await supabase
         .from('integration_connections')
         .select('provider_id')
         .eq('org_id', org_id)
         .eq('status', 'active')
         .limit(1)
-      return (connections?.length ?? 0) > 0
+
+      const connections = unwrapList(connectionsRes, {
+        site: 'inngest.onboarding-drip.integrations', orgId: org_id,
+      })
+      return connections.length > 0
     })
 
     await step.run('send-reengagement', async () => {

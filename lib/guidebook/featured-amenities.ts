@@ -7,6 +7,7 @@
  * semicolon-separated, positionally matched to the selected amenities.
  */
 
+import { tryUnwrap } from '@/lib/supabase/unwrap'
 import type { DBClient } from '@/lib/supabase/server'
 
 export const MAX_FEATURED_AMENITIES = 3
@@ -109,12 +110,20 @@ export async function getFeaturedAmenityLine(
     rotationOffset?:   number
   },
 ): Promise<string | null> {
-  const { data: guidebookConfig } = await supabase
+  // Degrade, don't throw: resolveFeaturedAmenities() already falls back to
+  // the PMS-synced amenities when no config row is present, and an SMS
+  // should still go out. tryUnwrap logs and reports.
+  const guidebookConfigRes = await supabase
     .from('guidebook_property_configs')
     .select('featured_amenities, featured_amenity_notes')
     .eq('org_id', params.orgId)
     .eq('property_id', params.propertyId)
     .maybeSingle()
+
+  const configOut = tryUnwrap(guidebookConfigRes, {
+    site: 'lib.guidebook.featured-amenities', orgId: params.orgId,
+  })
+  const guidebookConfig = configOut.ok ? configOut.data : null
 
   const featuredAmenities = resolveFeaturedAmenities(
     guidebookConfig?.featured_amenities ?? null,

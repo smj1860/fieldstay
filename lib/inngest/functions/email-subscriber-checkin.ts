@@ -1,3 +1,4 @@
+import { unwrap } from '@/lib/supabase/unwrap'
 import { inngest }           from '@/lib/inngest/client'
 import { createServiceClient } from '@/lib/supabase/server'
 import { resend }             from '@/lib/resend/client'
@@ -19,11 +20,15 @@ export const sendSubscriberCheckin = inngest.createFunction(
     // Confirm they're still an active subscriber before sending
     const stillActive = await step.run('confirm-still-active', async () => {
       const supabase = createServiceClient({ system: 'inngest:email-subscriber-checkin' })
-      const { data: org } = await supabase
+      // maybeSingle() + unwrap(): a deleted org is a legitimate skip, a failed
+      // read is not — and both used to produce the same silent "not active".
+      const orgRes = await supabase
         .from('organizations')
         .select('plan_status')
         .eq('id', org_id)
-        .single()
+        .maybeSingle()
+
+      const org = unwrap(orgRes, { site: 'inngest.email-subscriber-checkin.org', orgId: org_id })
       return org?.plan_status === 'active'
     })
 

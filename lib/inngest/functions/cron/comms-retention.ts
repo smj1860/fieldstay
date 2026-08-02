@@ -1,3 +1,4 @@
+import { unwrap } from '@/lib/supabase/unwrap'
 import { inngest } from '@/lib/inngest/client'
 import { createServiceClient } from '@/lib/supabase/server'
 import { logAuditEvents } from '@/lib/audit'
@@ -75,11 +76,15 @@ export const commsRetentionOrg = inngest.createFunction(
     return await step.run('purge-comms-logs', async () => {
       const supabase = createServiceClient({ system: 'inngest:comms-retention' })
 
-      const { data: org } = await supabase
+      // A failed read used to surface as reason: 'org_missing', which reads
+      // as "nothing to do for this tenant" rather than "retention did not run".
+      const orgRes = await supabase
         .from('organizations')
         .select('comms_log_retention_days')
         .eq('id', orgId)
         .maybeSingle()
+
+      const org = unwrap(orgRes, { site: 'inngest.comms-retention.org', orgId })
 
       if (!org) return { org_id: orgId, soft_deleted: 0, hard_purged: 0, reason: 'org_missing' }
 

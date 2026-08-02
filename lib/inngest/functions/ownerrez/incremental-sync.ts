@@ -425,7 +425,7 @@ async function notifyOwnerBlockOpportunities(
     ownerBlocks.map(async (row) => {
       try {
         const candidates = await findMaintenanceCandidatesForWindow(
-          supabase, row.property_id, row.checkin_date, row.checkout_date
+          supabase, orgId, row.property_id, row.checkin_date, row.checkout_date
         )
         if (!candidates.length) return
 

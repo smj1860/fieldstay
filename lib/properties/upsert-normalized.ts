@@ -1,10 +1,26 @@
 import { createServiceClient } from '@/lib/supabase/server'
+import { fetchAllRows } from '@/lib/inngest/paginate'
+import { reportError } from '@/lib/observability/report-error'
 import { logAuditEvents } from '@/lib/audit'
 import {
   CONTENT_FIELDS,
   REDACTED_CONTENT_FIELDS,
   type NormalizedProperty,
 } from '@/lib/properties/normalize'
+
+/**
+ * The pre-upsert snapshot of the four PM-editable content fields, keyed for
+ * the overwrite diff below. A type alias rather than an interface on purpose:
+ * only an alias gets the implicit index signature that makes it assignable to
+ * logContentOverwrites' `Record<string, unknown>` parameter.
+ */
+type ExistingContentRow = {
+  external_id:         string | null
+  wifi_name:           string | null
+  wifi_password:       string | null
+  access_instructions: string | null
+  house_manual:        string | null
+}
 
 /**
  * Shared writer for single-call providers (e.g. Hospitable, whose
@@ -36,15 +52,35 @@ export async function upsertNormalizedProperties(
 
   // Fetch existing content field values BEFORE the upsert, so we can diff
   // against what's about to be written.
-  const { data: existingRows } = await supabase
-    .from('properties')
-    .select('external_id, wifi_name, wifi_password, access_instructions, house_manual')
-    .eq('org_id', orgId)
-    .eq('external_source', provider)
-    .in('external_id', normalized.map((n) => n.external_id))
+  // Degrade, don't throw: these rows feed the content-overwrite audit log
+  // below, not the upsert itself, so a failure costs the log entry rather
+  // than the sync. tryUnwrap still records that it happened.
+  //
+  // Paginated because the result is sized by the `.in()` list, not by a single
+  // parent row: a PMS sync passes every property in the org at once, so a
+  // large account silently loses its overwrite audit trail past max_rows.
+  let existingRows: ExistingContentRow[] = []
+  try {
+    existingRows = await fetchAllRows<ExistingContentRow>(
+      (from, to) => supabase
+        .from('properties')
+        .select('external_id, wifi_name, wifi_password, access_instructions, house_manual')
+        .eq('org_id', orgId)
+        .eq('external_source', provider)
+        .in('external_id', normalized.map((n) => n.external_id))
+        .order('external_id')
+        .range(from, to),
+      { label: 'lib.properties.upsert-normalized.existing' },
+    )
+  } catch (err) {
+    // Degrade, don't throw — see above. fetchAllRows throws on failure, so the
+    // catch is what makes it non-fatal; reportError keeps it visible.
+    console.error('[upsertNormalizedProperties] existing-content read failed', err)
+    reportError(err, { site: 'lib.properties.upsert-normalized.existing', orgId })
+  }
 
   const existingByExternalId = new Map(
-    (existingRows ?? []).map((row) => [row.external_id as string, row])
+    existingRows.map((row) => [row.external_id as string, row])
   )
 
   const rows = normalized.map((n) => ({

@@ -1,3 +1,4 @@
+import { unwrap } from '@/lib/supabase/unwrap'
 import type { SupabaseClient } from '@supabase/supabase-js'
 import { isMaintenanceItemActiveThisMonth } from '@/lib/utils/maintenance'
 import { logAuditEvent } from '@/lib/audit'
@@ -49,13 +50,21 @@ export async function createMaintenanceWorkOrder(
   daysUntilDue: number,
 ): Promise<VendorPortalEvent | null> {
   // Idempotency: skip insert if a WO already exists for this schedule + due date
-  const { data: existingWO } = await supabase
+  // Fail CLOSED: discarding this error left existingWO null, which reads as
+  // "no WO yet for this schedule+date" and falls through to creating one —
+  // producing exactly the duplicate this check exists to prevent.
+  const existingWORes = await supabase
     .from('work_orders')
     .select('id')
     .eq('source_schedule_id', schedule.id)
     .eq('scheduled_date', schedule.next_due_date!)
     .eq('source', 'maintenance_schedule')
     .maybeSingle()
+
+  const existingWO = unwrap(existingWORes, {
+    site:  'inngest.maintenance-schedules.existingWO',
+    orgId: schedule.org_id,
+  })
 
   let wo = existingWO
   if (!existingWO) {

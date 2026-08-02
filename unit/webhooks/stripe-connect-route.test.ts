@@ -43,7 +43,10 @@ function makeSupabase(
       return chain
     })
     chain.eq     = vi.fn(() => chain)
-    chain.single = vi.fn(() => Promise.resolve(resolveWith))
+    chain.single      = vi.fn(() => Promise.resolve(resolveWith))
+    // The vendor lookup uses maybeSingle() so "no matching vendor" is
+    // data:null rather than a PGRST116 error.
+    chain.maybeSingle = chain.single
     chain.then   = (resolve: (v: unknown) => unknown) => Promise.resolve(resolveWith).then(resolve)
     return chain
   })

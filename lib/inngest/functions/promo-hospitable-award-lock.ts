@@ -1,3 +1,4 @@
+import { unwrap } from '@/lib/supabase/unwrap'
 import { NonRetriableError } from 'inngest'
 import { inngest } from '@/lib/inngest/client'
 import { createServiceClient } from '@/lib/supabase/server'
@@ -154,11 +155,17 @@ export const awardHospitablePriceLock = inngest.createFunction(
       // milestone check in build-shopping-cart.ts: a step that throws after
       // the external send succeeds re-runs its whole body on retry, so the
       // send itself must be guarded, not just split into a later step.
-      const { data: existing } = await supabase
+      // This read is the send-once guard. Discarding its error returned null,
+      // which reads as "not sent yet" and sends the congrats email AGAIN.
+      const existingRes = await supabase
         .from('hospitable_launch_promo')
         .select('congrats_email_sent_at')
         .eq('org_id', org_id)
         .maybeSingle()
+
+      const existing = unwrap(existingRes, {
+        site: 'inngest.promo-hospitable-award-lock.send-once-guard', orgId: org_id,
+      })
 
       if (existing?.congrats_email_sent_at) return
 

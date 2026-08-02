@@ -599,7 +599,7 @@ export async function snapshotChecklist(
 
   // Progressive Asset Discovery: inject system-mandated, non-deletable tasks
   // for any required asset type not yet verified on this property.
-  const missingAssetTypes = await getMissingAssetDiscoveryTypes(supabase, propertyId)
+  const missingAssetTypes = await getMissingAssetDiscoveryTypes(supabase, orgId, propertyId)
   if (missingAssetTypes.length > 0) {
     items.push(...buildAssetDiscoveryItems(instance.id, turnoverID, missingAssetTypes, items.length))
   }

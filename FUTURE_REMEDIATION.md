@@ -501,3 +501,81 @@ transcript.
   append a duplicate escalation note. Cosmetic (a duplicate note, not a
   duplicate financial record); closing it needs a product decision about
   what makes two escalation events "the same".
+
+---
+
+## 18. `check-type-drift.mjs` compares column PRESENCE but not NULLABILITY
+
+**File:** `scripts/check-type-drift.mjs` (CI job `db-invariants`)
+
+Found while wiring the `<Database>` generic into the Supabase clients
+(2026-08-03, PR #548). The gate diffs `types/database.ts` against the live
+schema for enum labels, table presence, and column presence — but never
+compares whether a column is nullable. So a hand-written interface can claim
+`specialty: VendorSpecialty` for a column that is `NULL`-able and the gate
+stays green.
+
+That is not a cosmetic gap. It is the direction that actually breaks: code
+trusts the non-null type and dereferences. Four of the defects the generic
+found were exactly this shape — `vendors.specialty` and
+`crew_members.specialty` are nullable, and two components called
+`.replace()` on them unguarded; `property_assets.macrs_class` /
+`depreciation_method` / `salvage_value` are nullable and the depreciation
+calculator passed them straight through. Those four were corrected in #548,
+but nothing stops the next one.
+
+**The data is already there — this is script-only work.** No migration and
+no new plumbing:
+
+- `public.db_type_shape_report()` already returns `is_nullable` per column
+  (see `supabase/migrations/20260726014601_...sql`, the `'is_nullable',
+  (c.is_nullable = 'YES')` key). The script simply ignores it — `grep -c
+  is_nullable scripts/check-type-drift.mjs` is 0.
+- `parseInterfaces()` already captures each field's TYPE TEXT, not just its
+  name (`fields[f[1]] = f[2]`), so the TS side needs no new parsing either.
+
+**Suggested fix:** in the section-3 column loop, for every column present on
+both sides, compare `dbCols[col].is_nullable` against whether the TS type
+text matches `/\|\s*null/` (or the field is declared optional with `?:`).
+
+Two asymmetries worth encoding rather than treating alike:
+
+- **DB nullable + TS non-null → failure.** This is the dangerous direction
+  described above.
+- **DB NOT NULL + TS nullable → warning at most.** Over-defensive, never
+  unsafe, and sometimes deliberate (a column that is NOT NULL today but was
+  backfilled recently). Consider reporting it separately rather than failing.
+
+**Size, measured 2026-08-03 against production: 17 columns**, all in the
+dangerous direction, across 90 mapped tables / 1106 fields:
+
+```
+bookings.source                            ical_feeds.source
+checklist_item_signals.dynamic_photo_required   organizations.repuguard_status
+checklist_item_signals.flag_probability     properties.avg_stay_length
+crew_members.preferred_contact              properties.avg_turnovers_per_month
+crew_members.specialty                      properties.bedrooms
+ical_feeds.last_sync_status                 properties.checkin_time
+vendors.specialty                           properties.checkout_time
+work_order_line_items.line_total            properties.max_guests
+                                            properties.property_type
+```
+
+17 is small enough to FIX in the same PR that adds the check, so this needs
+no clean-baseline ratchet — unlike `supabase-error-handling`. Note most of
+these are nullable-with-a-DEFAULT, so the fix is usually to mark the field
+`| null` and route the read through `withPropertyDefaults()`
+(`lib/properties/defaults.ts`) or the column's own default, not to change
+the schema.
+
+**Two gotchas for whoever picks this up:**
+
+- The interfaces carry PostgREST embed aliases as fields (e.g.
+  `turnovers.turnover_assignments`, `turnover_assignments.crew_members`).
+  They are not columns, so they simply won't join against
+  `information_schema` — but they must not be reported as "TS field missing
+  from the DB" either. `COLUMN_ALLOWLIST` already exists for this.
+- `Json` columns and the deliberate widenings (e.g.
+  `guidebook_configurations.extension_contact_method` is TEXT-with-CHECK and
+  is intentionally typed `string | null`, narrowed at the boundary instead)
+  need an allowlist entry or they will read as drift.

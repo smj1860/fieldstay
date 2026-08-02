@@ -1,3 +1,4 @@
+import { unwrap } from '@/lib/supabase/unwrap'
 import { inngest } from '@/lib/inngest/client'
 import { createServiceClient } from '@/lib/supabase/server'
 import { getActiveSponsorCount } from '@/lib/guidebook/helpers'
@@ -36,11 +37,15 @@ export const guidebookSponsorActivated = inngest.createFunction(
     const wasUnlocked = await step.run('evaluate-guidebook-lock', async () => {
       const supabase = createServiceClient({ system: 'inngest:guidebook-sponsor-activated' })
 
-      const { data: config } = await supabase
+      const configRes = await supabase
         .from('guidebook_configurations')
         .select('trial_ends_at')
         .eq('org_id', orgId)
         .maybeSingle()
+
+      const config = unwrap(configRes, {
+        site: 'inngest.guidebook-sponsor-activated.config', orgId,
+      })
 
       const inTrial = config?.trial_ends_at
         ? new Date() < new Date(config.trial_ends_at)

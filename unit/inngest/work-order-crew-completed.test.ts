@@ -26,7 +26,9 @@ function makeSupabase(perTable: Record<string, { data?: unknown; error?: unknown
     const chain: any = {}
     chain.select = vi.fn(() => chain)
     chain.eq     = vi.fn(() => chain)
-    chain.single = vi.fn(() => Promise.resolve(result))
+    chain.single      = vi.fn(() => Promise.resolve(result))
+    // Same result: the property lookup now uses maybeSingle().
+    chain.maybeSingle = vi.fn(() => Promise.resolve(result))
     return chain
   })
   return { from }

@@ -14,6 +14,7 @@
 // SECURITY: Never log token values. Server-side only.
 // ============================================================
 
+import { unwrap } from '@/lib/supabase/unwrap'
 import { createServiceClient }         from '@/lib/supabase/server'
 import { redis }                       from '@/lib/rate-limit'
 import {
@@ -135,13 +136,20 @@ async function refreshHospitableTokenLocked(
   for (let i = 0; i < REFRESH_LOCK_MAX_WAITS; i++) {
     await new Promise((resolve) => setTimeout(resolve, REFRESH_LOCK_WAIT_MS))
 
-    const { data: connection } = await admin
+    // maybeSingle() + unwrap(): no connection is a legitimate answer, a
+    // failed read is not — and both used to look the same to the refresh
+    // decision below.
+    const connectionRes = await admin
       .from('integration_connections')
       .select('expires_at')
       .eq('user_id',     userId)
       .eq('provider_id', HOSPITABLE_PROVIDER_ID)
       .eq('status',      'active')
-      .single()
+      .maybeSingle()
+
+    const connection = unwrap(connectionRes, {
+      site: 'lib.integrations.hospitable-token.expiry',
+    })
 
     if (connection && !shouldRefresh(connection.expires_at)) {
       const token = await readIntegrationToken(userId, HOSPITABLE_PROVIDER_ID)

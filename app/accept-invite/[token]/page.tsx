@@ -1,3 +1,4 @@
+import { unwrap } from '@/lib/supabase/unwrap'
 import { createServiceClient } from '@/lib/supabase/server'
 import { AcceptForm }           from './accept-form'
 import { AlertTriangle }        from 'lucide-react'
@@ -11,13 +12,17 @@ export default async function AcceptInvitePage({
   const { token } = await params
   const admin = createServiceClient({ publicSurface: 'accept-invite--token-' })
 
-  const { data: invite } = await admin
+  // A failed read rendered the "invalid or expired invite" state, which sends
+  // the invitee chasing a link that is actually fine.
+  const inviteRes = await admin
     .from('org_invites')
     .select('id, email, role, expires_at, organizations(name)')
     .eq('token', token)
     .is('accepted_at', null)
     .gt('expires_at', new Date().toISOString())
-    .single()
+    .maybeSingle()
+
+  const invite = unwrap(inviteRes, { site: 'page.accept-invite' })
 
   if (!invite) {
     return (

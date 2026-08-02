@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
 import { setActorContext, setTenantContext } from '@/lib/observability/sentry-context'
+import { tryUnwrap } from '@/lib/supabase/unwrap'
 
 type SupabaseServerClient = Awaited<ReturnType<typeof createClient>>
 
@@ -34,13 +35,33 @@ export async function requireCrewMember(): Promise<CrewAuthResult> {
     return { ok: false, response: NextResponse.json({ error: 'Not authenticated' }, { status: 401 }) }
   }
 
-  const { data: crew } = await supabase
+  // maybeSingle(), so "no such crew member" is data:null rather than PGRST116,
+  // and a real read failure is the only thing left in `error`.
+  const crewRes = await supabase
     .from('crew_members')
     .select('id, org_id')
     .eq('user_id', user.id)
     .eq('is_active', true)
-    .single()
+    .maybeSingle()
 
+  // A FAILED read is not the same answer as "you are not crew", and the
+  // difference is load-bearing for the crew PWA's outbox: lib/dexie/net.ts
+  // classifies 4xx as TERMINAL and >=500 as transient. Returning 403 here on a
+  // transient DB error therefore dead-lettered the crew member's queued work —
+  // a completed turnover, an inventory count — permanently, instead of
+  // retrying it. 503 keeps the gate closed while staying retryable.
+  const crewOut = tryUnwrap(crewRes, { site: 'lib.crew-auth.requireCrewMember' })
+  if (!crewOut.ok) {
+    return {
+      ok: false,
+      response: NextResponse.json(
+        { error: 'Could not verify crew access. Please try again.' },
+        { status: 503 },
+      ),
+    }
+  }
+
+  const crew = crewOut.data
   if (!crew) {
     return { ok: false, response: NextResponse.json({ error: 'Crew member not found' }, { status: 403 }) }
   }

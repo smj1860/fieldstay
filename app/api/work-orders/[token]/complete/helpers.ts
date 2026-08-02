@@ -1,3 +1,4 @@
+import { unwrap } from '@/lib/supabase/unwrap'
 import type { SupabaseClient } from '@supabase/supabase-js'
 import { inngest } from '@/lib/inngest/client'
 import { logAuditEvent } from '@/lib/audit'
@@ -138,11 +139,17 @@ export async function dispatchCompletionEvents(
 
   // Fire turnover completion automation if this WO is linked to a turnover
   if (claimed.source_turnover_id) {
-    const { data: turnover } = await supabase
+    // Discarding this error left `turnover` null, which skips the
+    // turnover/completed event below — so the linked turnover never completed
+    // and its downstream side effects (owner_transactions, notifications)
+    // never fired, with nothing recorded.
+    const turnoverRes = await supabase
       .from('turnovers')
       .select('id, property_id, org_id, status')
       .eq('id', claimed.source_turnover_id)
-      .single()
+      .maybeSingle()
+
+    const turnover = unwrap(turnoverRes, { site: 'api.work-orders.complete.source-turnover' })
 
     if (turnover && !['completed', 'cancelled'].includes(turnover.status)) {
       await inngest.send({

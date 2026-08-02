@@ -16,6 +16,7 @@
 //      A user with no org yet simply has nothing to sync until they have one.
 // ============================================================
 
+import { unwrap } from '@/lib/supabase/unwrap'
 import 'server-only'
 
 import { createServiceClient } from '@/lib/supabase/server'
@@ -87,7 +88,10 @@ export async function finalizeIntegrationConnection(params: {
   // Deterministic earliest-accepted-membership rule, same as
   // claim_pending_integration_link()'s org resolution.
   const admin = createServiceClient({ system: 'lib/integrations/finalize-connection' })
-  const { data: membership } = await admin
+  // Completes the fix described on the link write below: discarding THIS
+  // error leaves `membership` null, which skips the link entirely — the same
+  // org-less connection and silently-never-run sync, just caused by the read.
+  const membershipRes = await admin
     .from('organization_members')
     .select('org_id')
     .eq('user_id', userId)
@@ -95,6 +99,8 @@ export async function finalizeIntegrationConnection(params: {
     .order('created_at', { ascending: true })
     .limit(1)
     .maybeSingle()
+
+  const membership = unwrap(membershipRes, { site: 'lib.integrations.finalize-connection.membership' })
 
   // Whether this connection row is confirmed to belong to `membership.org_id`
   // after the link below. Only then is it safe to fire an org-scoped initial

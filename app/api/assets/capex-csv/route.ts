@@ -1,6 +1,7 @@
 /**
  * CapEx CSV Export — GET /api/assets/capex-csv?year=2025
  */
+import { unwrap } from '@/lib/supabase/unwrap'
 import { requireOrgMember } from '@/lib/auth'
 import { dataExportLimiter, checkLimit } from '@/lib/rate-limit'
 import type { CapExProjectionPayload, CapExProjectionItem } from '@/lib/inngest/functions/capex-projections'
@@ -24,12 +25,16 @@ export async function GET(req: Request) {
   const url  = new URL(req.url)
   const year = parseInt(url.searchParams.get('year') ?? String(new Date().getFullYear()), 10)
 
-  const { data: milestone } = await supabase
+  // A failed read used to export an empty CSV, which looks like "no capex
+  // planned" rather than an error.
+  const milestoneRes = await supabase
     .from('org_milestones')
     .select('value')
     .eq('org_id', membership.org_id)
     .eq('milestone', `capex_projection_${year}`)
     .maybeSingle()
+
+  const milestone = unwrap(milestoneRes, { site: 'api.assets.capex-csv', orgId: membership.org_id })
 
   const payload = milestone?.value as CapExProjectionPayload | null
 

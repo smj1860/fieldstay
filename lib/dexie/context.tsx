@@ -1,5 +1,6 @@
 'use client'
 
+import { tryUnwrap } from '@/lib/supabase/unwrap'
 import { createContext, useContext, useEffect, useState, type ReactNode } from 'react'
 import type { AuthChangeEvent, Session, RealtimePostgresChangesPayload } from '@supabase/supabase-js'
 import { createClient } from '@/lib/supabase/client'
@@ -437,12 +438,19 @@ export function DexieProvider({ userId: userIdProp, children }: { userId?: strin
     }
 
     async function run() {
-      const { data: crewMember } = await supabase
+      // Degrade, don't throw: this runs inside a client-side effect that has
+      // no error boundary of its own, and the provider must not tear down the
+      // crew PWA over one failed lookup — the next run retries. tryUnwrap
+      // still logs and reports, so the failure is no longer silent.
+      const crewRes = await supabase
         .from('crew_members')
         .select('id, org_id')
         .eq('user_id', userId!)
         .eq('is_active', true)
         .maybeSingle()
+
+      const crewOut    = tryUnwrap<{ id: string; org_id: string }>(crewRes, { site: 'dexie.context.crew-member' })
+      const crewMember = crewOut.ok ? crewOut.data : null
       if (!crewMember || cancelled) return
 
       setCrewMemberId(crewMember.id as string)

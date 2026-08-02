@@ -11,6 +11,7 @@
 //   - Revocation webhook body uses "action", not "event_type"
 // ============================================================
 
+import { tryUnwrap } from '@/lib/supabase/unwrap'
 import type {
   IntegrationProvider,
   TokenResponse,
@@ -96,6 +97,38 @@ function buildUserAgent(): string {
 }
 
 // ── Provider adapter ─────────────────────────────────────────────────────────
+
+/**
+ * Resolves which FieldStay connection an OwnerRez webhook belongs to, so
+ * ownerrez-incremental-sync.ts can scope its work to that one connection
+ * instead of re-syncing every active OwnerRez tenant platform-wide.
+ *
+ * Degrades rather than throwing: an unresolved connection deliberately falls
+ * back to the full platform sweep (see events.ts), so the webhook is still
+ * handled — but tryUnwrap records WHY the scoped path was skipped instead of
+ * silently widening it.
+ */
+async function resolveOwnerRezWebhookConnection(
+  externalUserId: string | null | undefined,
+): Promise<{ user_id: string; org_id: string } | null> {
+  if (!externalUserId) return null
+
+  const { createServiceClient } = await import('@/lib/supabase/server')
+  const supabase = createServiceClient({ system: 'lib/integrations/providers/ownerrez' })
+
+  const connRes = await supabase
+    .from('integration_connections')
+    .select('user_id, org_id')
+    .eq('provider_id', 'ownerrez')
+    .eq('external_user_id', externalUserId)
+    .eq('status', 'active')
+    .maybeSingle()
+
+  const connOut = tryUnwrap(connRes, { site: 'lib.integrations.ownerrez.webhook-scope' })
+  const conn    = connOut.ok ? connOut.data : null
+
+  return conn?.org_id ? { user_id: conn.user_id, org_id: conn.org_id } : null
+}
 
 export const ownerRezProvider: IntegrationProvider = {
   id:          'ownerrez',
@@ -277,19 +310,7 @@ export const ownerRezProvider: IntegrationProvider = {
           // platform-wide. Falls back to unresolved (fields simply omitted)
           // if the lookup misses — the sync function then falls back to its
           // full-sweep behavior, same as before this resolution existed.
-          let connection: { user_id: string; org_id: string } | null = null
-          if (externalUserId) {
-            const { createServiceClient } = await import('@/lib/supabase/server')
-            const supabase = createServiceClient({ system: 'lib/integrations/providers/ownerrez' })
-            const { data: conn } = await supabase
-              .from('integration_connections')
-              .select('user_id, org_id')
-              .eq('provider_id', 'ownerrez')
-              .eq('external_user_id', externalUserId)
-              .eq('status', 'active')
-              .maybeSingle()
-            if (conn?.org_id) connection = { user_id: conn.user_id, org_id: conn.org_id }
-          }
+          const connection = await resolveOwnerRezWebhookConnection(externalUserId)
 
           const { inngest } = await import('@/lib/inngest/client')
           await inngest.send({

@@ -1,3 +1,4 @@
+import { tryUnwrap } from '@/lib/supabase/unwrap'
 import { NextRequest, NextResponse } from 'next/server'
 import { requireCrewMember } from '@/lib/crew-auth'
 import { inngest } from '@/lib/inngest/client'
@@ -21,13 +22,23 @@ export async function POST(
   if (!auth.ok) return auth.response
   const { user, supabase, crew } = auth
 
-  const { data: turnover } = await supabase
+  const turnoverRes = await supabase
     .from('turnovers')
     .select('id, org_id, status')
     .eq('id', turnover_id)
     .eq('org_id', crew.org_id)
-    .single()
+    .maybeSingle()
 
+  // 503, not 404, when the READ fails: lib/dexie/net.ts classifies 4xx as
+  // TERMINAL and >=500 as transient, so answering a transient DB error with a
+  // 404 dead-lettered the crew member's queued mutation permanently instead of
+  // retrying it. A genuinely missing row still returns 404.
+  const turnoverOut = tryUnwrap(turnoverRes, { site: 'api.crew.turnovers.start', orgId: crew.org_id })
+  if (!turnoverOut.ok) {
+    return NextResponse.json({ error: 'Could not load the turnover. Please try again.' }, { status: 503 })
+  }
+
+  const turnover = turnoverOut.data
   if (!turnover) return NextResponse.json({ error: 'Turnover not found' }, { status: 404 })
 
   if (!(await isCrewAssignedToTurnover(supabase, turnover_id, crew.id))) {

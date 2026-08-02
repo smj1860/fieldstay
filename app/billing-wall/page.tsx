@@ -1,3 +1,4 @@
+import { unwrap } from '@/lib/supabase/unwrap'
 import { redirect }     from 'next/navigation'
 import { createClient } from '@/lib/supabase/server'
 import { buttonVariantClass } from '@/components/ui/Button'
@@ -9,12 +10,15 @@ export default async function BillingWallPage() {
 
   if (!user) redirect('/login')
 
-  const { data: row } = await supabase
+  // A failed read redirected to /login, which reads as "you are signed out"
+  // during what is really a transient error.
+  const rowRes = await supabase
     .from('organization_members')
     .select('org_id, organizations(name, plan_status, trial_ends_at)')
     .eq('user_id', user.id)
-    .single()
+    .maybeSingle()
 
+  const row = unwrap(rowRes, { site: 'page.billing-wall' })
   if (!row) redirect('/login')
 
   const org = unwrapJoin(row.organizations)
