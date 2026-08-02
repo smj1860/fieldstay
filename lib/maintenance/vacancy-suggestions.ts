@@ -1,8 +1,14 @@
-import { unwrapList } from '@/lib/supabase/unwrap'
+import { fetchAllRows } from '@/lib/inngest/paginate'
 import type { SupabaseClient } from '@supabase/supabase-js'
 import { isMaintenanceItemActiveThisMonth } from '@/lib/utils/maintenance'
 
 const LOOKAHEAD_DAYS = 90
+
+/** The selected shape — the two month columns drive the seasonal filter below. */
+interface CandidateRow extends MaintenanceCandidate {
+  active_from_month: number | null
+  active_to_month:   number | null
+}
 
 export interface MaintenanceCandidate {
   id:                 string
@@ -44,17 +50,21 @@ export async function findMaintenanceCandidatesForWindow(
   // to exactly one org) but not for safety: the caller is an Inngest step on a
   // service-role client, where RLS is not a backstop, so the tenant scope has
   // to be in the query itself.
-  const candidatesRes = await supabase
-    .from('maintenance_schedules')
-    .select('id, name, next_due_date, estimated_cost, assigned_vendor_id, active_from_month, active_to_month')
-    .eq('org_id', orgId)
-    .eq('property_id', propertyId)
-    .eq('is_active', true)
-    .lte('next_due_date', effectiveEnd.toISOString().split('T')[0])
-
-  const candidates = unwrapList(candidatesRes, {
-    site: 'lib.maintenance.vacancy-suggestions',
-  })
+  // Paginated for the same reason: a truncated page reads as "nothing due",
+  // which is the failure this comment block is about. fetchAllRows throws
+  // instead of returning a short list.
+  const candidates = await fetchAllRows<CandidateRow>(
+    (from, to) => supabase
+      .from('maintenance_schedules')
+      .select('id, name, next_due_date, estimated_cost, assigned_vendor_id, active_from_month, active_to_month')
+      .eq('org_id', orgId)
+      .eq('property_id', propertyId)
+      .eq('is_active', true)
+      .lte('next_due_date', effectiveEnd.toISOString().split('T')[0])
+      .order('next_due_date')
+      .range(from, to),
+    { label: 'lib.maintenance.vacancy-suggestions' },
+  )
 
   return candidates.filter((c) =>
     isMaintenanceItemActiveThisMonth(c.active_from_month ?? null, c.active_to_month ?? null)

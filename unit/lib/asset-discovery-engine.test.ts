@@ -9,7 +9,10 @@ function makeSupabase(rows: Row[]) {
   const calls: { method: string; args: unknown[] }[] = []
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const chain: any = {}
-  for (const m of ['select', 'eq', 'in']) {
+  // order/range are stubbed because the read pages through fetchAllRows. The
+  // chain resolves the same rows for every page, which terminates after one
+  // page only because fixtures are shorter than the 1000-row page size.
+  for (const m of ['select', 'eq', 'in', 'order', 'range']) {
     chain[m] = vi.fn((...args: unknown[]) => {
       calls.push({ method: m, args })
       return chain
@@ -87,7 +90,10 @@ describe('getMissingAssetDiscoveryTypes', () => {
     const calls: { method: string; args: unknown[] }[] = []
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const chain: any = {}
-    for (const m of ['select', 'eq', 'in']) {
+    // order/range are stubbed because the read pages through fetchAllRows. The
+    // chain resolves the same rows for every page, which terminates after one
+    // page only because fixtures are shorter than the 1000-row page size.
+    for (const m of ['select', 'eq', 'in', 'order', 'range']) {
       chain[m] = vi.fn((...args: unknown[]) => { calls.push({ method: m, args }); return chain })
     }
     chain.then = (resolve: (v: unknown) => unknown) =>
