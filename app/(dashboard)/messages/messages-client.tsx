@@ -12,7 +12,8 @@ import type { Message } from '@/types/database'
 interface CrewOption {
   id:        string
   name:      string
-  specialty: string
+  // crew_members.specialty is nullable.
+  specialty: string | null
   user_id:   string
 }
 
@@ -326,7 +327,7 @@ export function MessagesClient({ currentUserId, orgId, crew, initialMessages, ha
 
           {allThreads.map((t) => {
             const label = t.type === 'direct' ? t.crew.name : t.groupLabel
-            const sub   = t.type === 'direct' ? t.crew.specialty : `${t.participants.length} members`
+            const sub   = t.type === 'direct' ? (t.crew.specialty ?? 'Crew') : `${t.participants.length} members`
             const initial = label.charAt(0).toUpperCase()
             const isGroupItem = t.type === 'group'
 

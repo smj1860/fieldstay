@@ -1,3 +1,4 @@
+import type { TablesUpdate } from '@/types/database'
 import 'server-only'
 import { fetchAllRows } from '@/lib/inngest/paginate'
 
@@ -66,8 +67,8 @@ function isoDate() { return new Date().toISOString().split('T')[0] }
  * `completion_notes` is only included when the caller actually has notes —
  * writing `null` unconditionally would wipe notes an earlier save recorded.
  */
-export function workOrderCompletionFields(notes?: string | null): Record<string, unknown> {
-  const fields: Record<string, unknown> = {
+export function workOrderCompletionFields(notes?: string | null): TablesUpdate<'work_orders'> {
+  const fields: TablesUpdate<'work_orders'> = {
     status:         'completed' satisfies WoStatus,
     completed_date: isoDate(),
   }

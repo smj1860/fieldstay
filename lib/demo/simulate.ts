@@ -1,3 +1,4 @@
+import type { Json } from '@/types/database'
 import 'server-only'
 import { createServiceClient } from '@/lib/supabase/server'
 import type { DemoSideEffectKind } from '@/types/database'
@@ -19,7 +20,8 @@ import type { DemoSideEffectKind } from '@/types/database'
 export interface SimulatedSideEffect {
   orgId:   string
   kind:    DemoSideEffectKind
-  payload: Record<string, unknown>
+  // Written verbatim into demo_activity_log.payload (jsonb).
+  payload: Record<string, Json>
 }
 
 /**

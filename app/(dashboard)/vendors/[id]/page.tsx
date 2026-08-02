@@ -163,7 +163,7 @@ export default async function VendorDetailPage({ params }: Props) {
         <div>
           <h1 className="page-title">{vendor.name}</h1>
           <p className="text-sm text-muted-themed mt-0.5 capitalize">
-            {vendor.specialty.replace(/_/g, ' ')}
+            {vendor.specialty?.replace(/_/g, ' ') ?? '—'}
           </p>
         </div>
         <div className="flex flex-col items-end gap-2">

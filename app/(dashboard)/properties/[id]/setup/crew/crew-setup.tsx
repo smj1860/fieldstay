@@ -9,7 +9,8 @@ import { RequiredMark } from '@/components/ui/RequiredMark'
 
 interface CrewMember {
   id: string; name: string; email: string | null
-  phone: string | null; preferred_contact: string; specialty: string
+  // preferred_contact and specialty are both NULLABLE on crew_members.
+  phone: string | null; preferred_contact: string | null; specialty: string | null
 }
 
 export function CrewSetup({

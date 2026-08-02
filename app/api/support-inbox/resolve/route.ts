@@ -18,6 +18,10 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   const body = await req.json() as { conversationId?: string }
   const { conversationId } = body
 
+  if (!conversationId) {
+    return NextResponse.json({ error: 'conversationId is required' }, { status: 400 })
+  }
+
   const { error } = await supabase
     .from('support_conversations')
     .update({

@@ -265,6 +265,18 @@ async function syncReservation(
 
     const normalized = hospitableReservationToNormalized(reservation)
 
+    // bookings.checkin_date/checkout_date are NOT NULL, but Hospitable's
+    // normalized shape allows null (their payload does not always carry both).
+    // A row missing either would be rejected by Postgres (23502), so there is
+    // no booking to record — say so instead of throwing a raw constraint error.
+    if (normalized.checkin_date === null || normalized.checkout_date === null) {
+      throw new NonRetriableError(
+        `Hospitable reservation ${normalized.external_id} has no ${
+          normalized.checkin_date === null ? 'arrival' : 'departure'
+        } date — cannot store a booking without it`
+      )
+    }
+
     const datesChanged = !existing
       || existing.checkin_date  !== normalized.checkin_date
       || existing.checkout_date !== normalized.checkout_date

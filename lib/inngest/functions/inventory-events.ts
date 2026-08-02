@@ -1,3 +1,4 @@
+import type { Enums } from '@/types/database'
 import { inngest } from '@/lib/inngest/client'
 import { createServiceClient } from '@/lib/supabase/server'
 import { resend, FROM } from '@/lib/resend/client'
@@ -98,7 +99,7 @@ export const handleInventoryCountSubmitted = inngest.createFunction(
       if (!countItems?.length) return { belowParItems: [] }
 
       type CountRow = { inventory_item_id: string; quantity_counted: number }
-      type InvRow   = { id: string; name: string; category: string; unit: string; par_level: number; low_stock_threshold_pct: number }
+      type InvRow   = { id: string; property_id: string; name: string; category: Enums<'inventory_category'>; unit: string; par_level: number; low_stock_threshold_pct: number }
 
       const typedCount = countItems as CountRow[]
       const itemIds    = typedCount.map((c) => c.inventory_item_id)
@@ -108,7 +109,7 @@ export const handleInventoryCountSubmitted = inngest.createFunction(
       // already belong to org_id.
       const { data: inventoryItems } = await supabase
         .from('inventory_items')
-        .select('id, name, category, unit, par_level, low_stock_threshold_pct')
+        .select('id, property_id, name, category, unit, par_level, low_stock_threshold_pct')
         .eq('org_id', org_id)
         .in('id', itemIds)
 
@@ -119,11 +120,31 @@ export const handleInventoryCountSubmitted = inngest.createFunction(
       // Only ever write quantities for items confirmed to belong to this org.
       const orgScopedCount = typedCount.filter((c) => orgItemIds.has(c.inventory_item_id))
 
-      // 1 query: bulk upsert current quantities (replaces N sequential UPDATEs)
+      // 1 query: bulk upsert current quantities (replaces N sequential UPDATEs).
+      //
+      // The payload carries the full row, not just { id, current_quantity }:
+      // .upsert() is INSERT ... ON CONFLICT DO UPDATE, so its insert arm has
+      // to be valid, and property_id / org_id / name are NOT NULL with no
+      // default. Every id here is already known to exist (orgItemIds), so the
+      // insert arm never fires — but a partial payload made the whole
+      // statement one unmatched id away from a 23502 that would have thrown
+      // away every quantity in the submission, not just the odd one out.
+      const invById = new Map(typedInv.map((inv) => [inv.id, inv]))
+
       const { error: quantityWriteError } = await supabase
         .from('inventory_items')
         .upsert(
-          orgScopedCount.map((c) => ({ id: c.inventory_item_id, current_quantity: c.quantity_counted })),
+          orgScopedCount.flatMap((c) => {
+            const inv = invById.get(c.inventory_item_id)
+            if (!inv) return []
+            return [{
+              id:               inv.id,
+              org_id,
+              property_id:      inv.property_id,
+              name:             inv.name,
+              current_quantity: c.quantity_counted,
+            }]
+          }),
           { onConflict: 'id' }
         )
 

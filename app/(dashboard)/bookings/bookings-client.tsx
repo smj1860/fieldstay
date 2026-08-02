@@ -1,5 +1,7 @@
 'use client'
 
+import { asJsonObject } from '@/lib/json'
+import type { Json } from '@/types/database'
 import { useState, useTransition, useActionState, useMemo, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
 import Link from 'next/link'
@@ -52,7 +54,8 @@ interface ConnectionRow {
   provider_id:   string
   status:        string
   last_used_at:  string | null
-  metadata:      Record<string, unknown> | null
+  // jsonb — narrowed with asJsonObject() before use, never indexed raw.
+  metadata:      Json
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -567,7 +570,8 @@ function ConnectionPill({ connection }: Readonly<{ connection: ConnectionRow }>)
   const lastSynced = connection.last_used_at
     ? ` — last synced ${new Date(connection.last_used_at).toLocaleString()}`
     : ''
-  const syncError = (connection.metadata?.last_sync_error as string) ?? 'connection needs attention'
+  const lastSyncError = asJsonObject(connection.metadata)?.last_sync_error
+  const syncError = typeof lastSyncError === 'string' ? lastSyncError : 'connection needs attention'
   const title = isHealthy
     ? `${connection.provider_id} connected${lastSynced}`
     : `${connection.provider_id}: ${syncError}`

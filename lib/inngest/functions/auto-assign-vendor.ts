@@ -1,6 +1,7 @@
 import { inngest } from '@/lib/inngest/client'
 import { createServiceClient } from '@/lib/supabase/server'
 import { haversineKm, proximityScore, clamp01 } from '@/lib/scoring/geo'
+import type { Enums } from '@/types/database'
 import { computeWorkloadMap, computeFamiliarIds } from '@/lib/scoring/pools'
 
 // Compliance nudges the score down instead of a second hard filter layered on
@@ -13,6 +14,35 @@ const COMPLIANCE_FACTOR: Record<string, number> = {
   expiring_soon: 0.85,
   compliant:     1.0,
   no_documents:  1.0,
+}
+
+/**
+ * wo_category → vendor_specialty.
+ *
+ * The two enums are NOT the same set: `appliance`, `flooring`,
+ * `windows_doors` and `structural` are work-order categories with no vendor
+ * specialty of their own. Passing one straight into `.eq('specialty', …)`
+ * makes PostgREST reject the whole query (22P02, invalid input value for enum
+ * vendor_specialty) — and since that error was discarded, the function saw
+ * "no vendors" and returned no suggestion, so auto-assign silently did
+ * nothing for those four categories. They route to `general`, which is who
+ * actually takes that work.
+ */
+const SPECIALTY_BY_CATEGORY: Record<Enums<'wo_category'>, Enums<'vendor_specialty'>> = {
+  hvac:          'hvac',
+  plumbing:      'plumbing',
+  electrical:    'electrical',
+  cleaning:      'cleaning',
+  landscaping:   'landscaping',
+  roofing:       'roofing',
+  pest_control:  'pest_control',
+  pool:          'pool',
+  general:       'general',
+  other:         'other',
+  appliance:     'general',
+  flooring:      'general',
+  windows_doors: 'general',
+  structural:    'general',
 }
 
 interface VendorCandidate {
@@ -44,7 +74,7 @@ export const autoAssignVendor = inngest.createFunction(
           .from('vendors')
           .select('id, name, lat, lng, avg_rating')
           .eq('org_id', org_id)
-          .eq('specialty', category)
+          .eq('specialty', SPECIALTY_BY_CATEGORY[category])
           .eq('is_active', true),
         supabase.from('vendor_compliance_status').select('vendor_id, compliance_status').eq('org_id', org_id),
       ])
@@ -57,7 +87,11 @@ export const autoAssignVendor = inngest.createFunction(
       // as {} on replay. Same reasoning applies to familiarVendorIds below
       // (array, not Set).
       const complianceByVendor: Record<string, string> = {}
-      for (const c of complianceRows ?? []) complianceByVendor[c.vendor_id] = c.compliance_status
+      for (const c of complianceRows ?? []) {
+        // vendor_compliance_status is a VIEW — vendor_id is nullable there.
+        if (c.vendor_id === null || c.compliance_status === null) continue
+        complianceByVendor[c.vendor_id] = c.compliance_status
+      }
 
       // Hard exclusion — no human in the loop yet to override a bad pick, so
       // a hard-blocked vendor (expired compliance docs, 46+ days) never enters

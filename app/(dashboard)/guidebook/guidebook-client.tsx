@@ -1,5 +1,8 @@
 'use client'
 
+import { asBooleanMap } from '@/lib/json'
+import type { Json } from '@/types/database'
+import { asExtensionContactMethod, type ExtensionContactMethod } from '@/components/guidebook/guest-guidebook-view'
 import { useState, useEffect, useRef, useCallback } from 'react'
 import { createClient } from '@/lib/supabase/client'
 import type { RealtimePostgresChangesPayload } from '@supabase/supabase-js'
@@ -17,7 +20,8 @@ type Property = {
   address:    string | null
   lat:        number | null
   lng:        number | null
-  amenities:  Record<string, boolean> | null
+  // jsonb — narrowed with asBooleanMap() at the point of use.
+  amenities:  Json
 }
 
 const SLOT_TYPE_CONFIG: Record<GuidebookSlotType, { icon: LucideIcon; label: string }> = {
@@ -618,7 +622,7 @@ function PropertyGuidebookForm({
     ? supabase.storage.from(HERO_PHOTO_BUCKET).getPublicUrl(config.heroPhotoStoragePath).data.publicUrl
     : null
 
-  const syncedAmenityKeys = Object.entries(property.amenities ?? {})
+  const syncedAmenityKeys = Object.entries(asBooleanMap(property.amenities))
     .filter(([, present]) => present)
     .map(([key]) => key)
 
@@ -899,10 +903,9 @@ function GapNightMessagingSection({ config }: { config: GuidebookConfiguration |
   const [discount, setDiscount]         = useState(
     config?.extension_discount_pct != null ? String(config.extension_discount_pct) : ''
   )
-  const [contactMethod, setContactMethod] = useState<'ownerrez_url' | 'email' | 'sms'>(
-    config?.extension_contact_method && config.extension_contact_method !== null
-      ? config.extension_contact_method
-      : 'email'
+  // extension_contact_method is a TEXT column; 'email' is its DB default.
+  const [contactMethod, setContactMethod] = useState<ExtensionContactMethod>(
+    asExtensionContactMethod(config?.extension_contact_method) ?? 'email'
   )
   const [ownerRezUrl, setOwnerRezUrl] = useState(config?.extension_ownerrez_url ?? '')
   const [daysBefore, setDaysBefore]   = useState(String(config?.extension_message_days_before ?? 2))

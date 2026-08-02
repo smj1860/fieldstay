@@ -1,3 +1,4 @@
+import { asBooleanMap } from '@/lib/json'
 import { requireOrgMember } from '@/lib/auth'
 import Link from 'next/link'
 import { Plus } from 'lucide-react'
@@ -100,7 +101,18 @@ export default async function PropertiesPage() {
       {!properties?.length ? (
         <EmptyState />
       ) : (
-        <PropertiesGrid properties={properties} opsCountsByProperty={opsCountsByProperty} />
+        <PropertiesGrid
+          // This page selects a narrow subset of `properties`, so it resolves
+          // just those columns' own DEFAULTs rather than the whole-row helper.
+          properties={properties.map((p) => ({
+            ...p,
+            property_type:         p.property_type ?? 'house',
+            bedrooms:              p.bedrooms      ?? 1,
+            bathrooms:             p.bathrooms     ?? 1,
+            setup_steps_completed: asBooleanMap(p.setup_steps_completed),
+          }))}
+          opsCountsByProperty={opsCountsByProperty}
+        />
       )}
     </div>
   )

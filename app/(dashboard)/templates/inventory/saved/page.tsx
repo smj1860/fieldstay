@@ -1,3 +1,4 @@
+import { toDbEnum } from '@/lib/db-enums'
 import type { Metadata } from 'next'
 import { requireOrgMember } from '@/lib/auth'
 import { InventorySubnav } from '@/components/templates/inventory-subnav'
@@ -77,8 +78,10 @@ export default async function SavedInventoryTemplatesPage() {
             .map((item) => ({
               id:              item.id,
               name:            item.name,
-              category:        item.category,
-              unit:            item.unit,
+              // inventory_template_items.category/unit are NULLABLE text —
+              // unlike inventory_items, where category is a NOT NULL enum.
+              category:        toDbEnum('inventory_category', item.category, 'other'),
+              unit:            item.unit ?? 'units',
               par_level:       item.par_level,
               notes:           item.notes,
               preferred_brand: item.preferred_brand,

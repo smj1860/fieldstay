@@ -83,8 +83,15 @@ export const vendorComplianceExpiryCheck = inngest.createFunction(
 
         if (!updated) return null
 
-        const vendor    = unwrapJoin(doc.vendors)
-        const expiry    = parseLocalDate(doc.expiry_date, 'expiry_date')
+        const vendor = unwrapJoin(doc.vendors)
+
+        // expiry_date is nullable; a document with no expiry has nothing to
+        // warn about. parseLocalDate would throw on it, which would fail the
+        // step rather than skip the row.
+        const expiryDate = doc.expiry_date
+        if (expiryDate === null) return null
+
+        const expiry    = parseLocalDate(expiryDate, 'expiry_date')
         const daysUntil = Math.round((expiry.getTime() - Date.now()) / 86_400_000)
 
         await logAuditEvent({
@@ -106,7 +113,7 @@ export const vendorComplianceExpiryCheck = inngest.createFunction(
           org_id:        doc.org_id,
           document_type: doc.document_type,
           vendor_name:   vendor?.name ?? 'Vendor',
-          expiry_date:   doc.expiry_date,
+          expiry_date:   expiryDate,
           days_until:    daysUntil,
         }
       })

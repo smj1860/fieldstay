@@ -1,3 +1,4 @@
+import { nullableArg } from '@/lib/supabase/rpc-args'
 import { NextRequest, NextResponse } from 'next/server'
 import { createServiceClient } from '@/lib/supabase/server'
 import { workOrderRatelimit, checkLimit } from '@/lib/rate-limit'
@@ -142,7 +143,8 @@ export async function POST(
     p_work_order_id:     workOrder.id,
     p_line_items:        safeLineItems,
     p_subtotal:          subtotal,
-    p_notes:             notes,
+    // p_notes is a plain `text` parameter — NULL means "no notes given".
+    p_notes:             nullableArg(notes),
     p_completed_by_name: completedByName,
     p_platform_fee_pct:  platformFeePct,
   })

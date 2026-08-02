@@ -90,7 +90,9 @@ export default async function TemplatesChecklistPage() {
 
 function buildSectionsByProperty(
   templates: Array<{
-    property_id: string
+    // checklist_templates.property_id is nullable — an org-level template has
+    // no property, and there is no per-property row to key it under.
+    property_id: string | null
     checklist_template_sections: Array<{
       id: string
       name: string
@@ -101,6 +103,7 @@ function buildSectionsByProperty(
 ): Record<string, PropertyOverviewSection[]> {
   const map: Record<string, PropertyOverviewSection[]> = {}
   for (const template of templates) {
+    if (template.property_id === null) continue
     map[template.property_id] = (template.checklist_template_sections ?? []).map((section) => {
       const roomTemplate = unwrapJoin(section.room_templates)
       return {

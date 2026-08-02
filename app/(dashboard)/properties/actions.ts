@@ -6,11 +6,13 @@ import { redirect, unstable_rethrow } from 'next/navigation'
 import { requireOrgMember, requireOrgRole } from '@/lib/auth'
 import { geocodeZip } from '@/lib/geocoding'
 import { calculateHealthScore } from '@/lib/assets/health-score'
+import { isDbEnum, toDbEnum } from '@/lib/db-enums'
+import { doorCodeArgs } from '@/lib/properties/door-code'
 import { logAuditEvent } from '@/lib/audit'
 import { applyMasterChecklistToProperty } from '@/lib/checklists/apply-master-template'
 import { reportError } from '@/lib/observability/report-error'
 import { reportQueryError } from '@/lib/supabase/unwrap'
-import type { AssetType, MemberRole } from '@/types/database'
+import type { AssetType, Enums, MemberRole, TablesInsert } from '@/types/database'
 
 // properties/property_assets both gate writes on
 // is_org_member(org_id, ARRAY['admin','manager']) at the RLS layer, and
@@ -76,11 +78,10 @@ async function reportDoorCodeWrite(
   doorCode:   string | null,
   site:       string,
 ): Promise<void> {
-  const { error } = await supabase.rpc('store_property_door_code', {
-    p_property_id: propertyId,
-    p_org_id:      orgId,
-    p_door_code:   doorCode,
-  })
+  const { error } = await supabase.rpc(
+    'store_property_door_code',
+    doorCodeArgs(propertyId, orgId, doorCode)
+  )
   if (error) {
     console.error(`[${site}] door code write failed`, error)
     reportError(error, { site: `serverAction.properties.${site}.storeDoorCode`, orgId })
@@ -101,7 +102,7 @@ export async function createProperty(
     const city          = (formData.get('city') as string)?.trim()
     const state         = (formData.get('state') as string)?.trim()
     const zip           = (formData.get('zip') as string)?.trim()
-    const property_type = formData.get('property_type') as string || 'house'
+    const property_type = toDbEnum('property_type', formData.get('property_type') as string | null, 'house')
     const bedrooms      = parseInt(formData.get('bedrooms') as string) || 1
     const bathrooms     = parseFloat(formData.get('bathrooms') as string) || 1
     const max_guests    = parseInt(formData.get('max_guests') as string) || 2
@@ -239,7 +240,7 @@ export async function updateProperty(
     const city          = (formData.get('city') as string)?.trim()
     const state         = (formData.get('state') as string)?.trim()
     const zip           = (formData.get('zip') as string)?.trim()
-    const property_type = formData.get('property_type') as string || 'house'
+    const property_type = toDbEnum('property_type', formData.get('property_type') as string | null, 'house')
     const bedrooms      = parseInt(formData.get('bedrooms') as string) || 1
     const bathrooms     = parseFloat(formData.get('bathrooms') as string) || 1
     const max_guests    = parseInt(formData.get('max_guests') as string) || 2
@@ -286,11 +287,10 @@ export async function updateProperty(
       return { error: NOTHING_UPDATED }
     }
 
-    const { error: doorCodeError } = await supabase.rpc('store_property_door_code', {
-      p_property_id: propertyId,
-      p_org_id:      membership.org_id,
-      p_door_code:   door_code,
-    })
+    const { error: doorCodeError } = await supabase.rpc(
+      'store_property_door_code',
+      doorCodeArgs(propertyId, membership.org_id, door_code)
+    )
 
     if (doorCodeError) {
       console.error('[updateProperty] door code write failed', doorCodeError)
@@ -475,7 +475,7 @@ export type AssetActionState = { error?: string; success?: boolean }
 // to save asset" error for a save that actually succeeded.
 async function fireManualLookup(
   orgId:     string,
-  assetType: string,
+  assetType: AssetType,
   make:      string | null,
   model:     string | null
 ): Promise<void> {
@@ -501,7 +501,7 @@ export async function createAsset(
     const { supabase, membership, user } = await requireOrgRole(PROPERTY_WRITE_ROLES)
 
     const name              = (formData.get('name') as string)?.trim()
-    const asset_type        = formData.get('asset_type') as AssetType
+    const asset_type_raw    = formData.get('asset_type') as string | null
     const make              = (formData.get('make') as string)?.trim() || null
     const model             = (formData.get('model') as string)?.trim() || null
     const serial_number     = (formData.get('serial_number') as string)?.trim() || null
@@ -516,8 +516,15 @@ export async function createAsset(
     const lifespan_raw         = formData.get('expected_lifespan_years')
     const expected_lifespan_years = lifespan_raw ? parseInt(lifespan_raw as string) : null
 
-    if (!name)       return { error: 'Asset name is required' }
-    if (!asset_type) return { error: 'Asset type is required' }
+    if (!name)           return { error: 'Asset name is required' }
+    if (!asset_type_raw) return { error: 'Asset type is required' }
+
+    // property_assets.asset_type is an enum with no default, so there is no
+    // safe value to fall back to — reject rather than coerce.
+    if (!isDbEnum('asset_type', asset_type_raw)) {
+      return { error: `Unrecognized asset type: ${asset_type_raw}` }
+    }
+    const asset_type: AssetType = asset_type_raw
 
     const { data: property } = await supabase
       .from('properties')
@@ -744,14 +751,33 @@ export async function bulkImportAssets(
 
     if (!property) return { imported: 0, error: 'Property not found' }
 
+    // asset_type arrives from an uploaded CSV. The parser flags unresolvable
+    // types, but that runs client-side and this action takes the parsed rows
+    // on trust, so re-check here — the column is an enum and this is a BULK
+    // insert, meaning one unrecognized value makes Postgres reject every row
+    // (22P02) behind a generic "Operation failed" with nothing naming the
+    // offending type.
+    const validRows = rows.filter(
+      (r): r is CsvAssetRow & { asset_type: AssetType } => isDbEnum('asset_type', r.asset_type)
+    )
+    if (validRows.length !== rows.length) {
+      const badTypes = [...new Set(
+        rows.filter((r) => !isDbEnum('asset_type', r.asset_type)).map((r) => r.asset_type)
+      )]
+      return {
+        imported: 0,
+        error: `Unrecognized asset type(s): ${badTypes.join(', ')}. Fix these rows and re-upload.`,
+      }
+    }
+
     // Platform catalog (21 rows today). fetchAllRows costs exactly one request
     // at this size and cannot silently truncate if the catalog ever grows.
     // Nullability matches the live schema: all three are NOT NULL on
     // asset_type_standards (lifespan_min_years / lifespan_max_years smallint
     // NOT NULL, macrs_class_default NOT NULL DEFAULT '5_year').
     const standards = await fetchAllRows<{
-      asset_type:          string
-      macrs_class_default: string
+      asset_type:          AssetType
+      macrs_class_default: Enums<'macrs_class'>
       lifespan_min_years:  number
       lifespan_max_years:  number
     }>(
@@ -765,7 +791,7 @@ export async function bulkImportAssets(
 
     const stdMap = Object.fromEntries(standards.map((s) => [s.asset_type, s]))
 
-    const insertRows = rows.map((row) => {
+    const insertRows: TablesInsert<'property_assets'>[] = validRows.map((row) => {
       const std = stdMap[row.asset_type]
       return {
         org_id:                     membership.org_id,

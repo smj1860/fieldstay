@@ -1,3 +1,4 @@
+import { asBooleanMap } from '@/lib/json'
 import { inngest } from '@/lib/inngest/client'
 import { fetchAllRows } from '@/lib/inngest/paginate'
 import { createServiceClient } from '@/lib/supabase/server'
@@ -150,7 +151,7 @@ export const guidebookSmsMorningSend = inngest.createFunction(
       // amenities. See lib/guidebook/featured-amenities.ts.
       const amenityLine = await getFeaturedAmenityLine(supabase, {
         orgId, propertyId,
-        propertyAmenities: property.amenities ?? null,
+        propertyAmenities: asBooleanMap(property.amenities),
         checkinDate, todayDate,
       })
 

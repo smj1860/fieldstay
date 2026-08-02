@@ -8,7 +8,7 @@ import { calcNextDueDate } from '@/lib/turnovers/generator'
 import { fetchAllRows } from '@/lib/inngest/paginate'
 import { logAuditEvent } from '@/lib/audit'
 import { reportError } from '@/lib/observability/report-error'
-import type { WoStatus, WoCategory, ScheduleFrequency, ScheduleType, VendorSpecialty, TablesUpdate } from '@/types/database'
+import type { WoStatus, WoCategory, ScheduleFrequency, ScheduleType, VendorSpecialty, TablesUpdate, Enums } from '@/types/database'
 import { PriorityLevelSchema, WoStatusSchema, WoCategorySchema } from '@/lib/schemas/work-order'
 import {
   resolveWorkOrderStatus,
@@ -1082,6 +1082,42 @@ export async function deleteWorkOrder(workOrderId: string): Promise<void> {
 
 // ── Create Work Order from Schedule ─────────────────────────────────────────
 
+/**
+ * Vendor selection chain for a schedule-created WO: explicitly assigned
+ * vendor → best-rated active vendor matching the specialty hint → nobody.
+ *
+ * A hard-blocked vendor is not a valid resolution — it falls through as if the
+ * chain found no one, so the WO lands in the vendor-suggestion flow instead of
+ * silently assigning someone 31+ days out of compliance. Mirrors
+ * resolveScheduleVendor() in lib/inngest/functions/cron/work-order-ops.ts so
+ * the manual "Create Work Order Now" button resolves a vendor exactly the way
+ * the nightly automation does.
+ */
+async function resolveVendorForSchedule(
+  supabase: Awaited<ReturnType<typeof requireOrgRole>>['supabase'],
+  orgId:    string,
+  schedule: { assigned_vendor_id: string | null; vendor_specialty_hint: Enums<'vendor_specialty'> | null },
+): Promise<string | null> {
+  let vendorId: string | null = schedule.assigned_vendor_id ?? null
+
+  if (!vendorId && schedule.vendor_specialty_hint) {
+    const { data: hintVendor } = await supabase
+      .from('vendors')
+      .select('id')
+      .eq('org_id', orgId)
+      .eq('specialty', schedule.vendor_specialty_hint)
+      .eq('is_active', true)
+      .order('avg_rating', { ascending: false })
+      .limit(1)
+      .maybeSingle()
+    vendorId = hintVendor?.id ?? null
+  }
+
+  if (!vendorId) return null
+
+  return (await isVendorHardBlocked(supabase, vendorId, orgId)) ? null : vendorId
+}
+
 export async function createWorkOrderFromSchedule(
   scheduleId: string
 ): Promise<MaintenanceActionState> {
@@ -1097,6 +1133,11 @@ export async function createWorkOrderFromSchedule(
 
     if (!schedule) return { error: 'Schedule not found' }
 
+    // next_due_date is nullable — a schedule with no due date has no date to
+    // create (or de-duplicate) a work order against.
+    const scheduledDate = schedule.next_due_date
+    if (!scheduledDate) return { error: 'This schedule has no next due date yet.' }
+
     // Idempotency: skip if an open WO already exists for this schedule + date —
     // mirrors the auto-create check in the maintenance-schedule cron, so a
     // double-click on "Create Work Order Now" doesn't create a duplicate while
@@ -1105,37 +1146,13 @@ export async function createWorkOrderFromSchedule(
       .from('work_orders')
       .select('id')
       .eq('source_schedule_id', scheduleId)
-      .eq('scheduled_date', schedule.next_due_date)
+      .eq('scheduled_date', scheduledDate)
       .not('status', 'in', '("completed","cancelled")')
       .maybeSingle()
 
     if (existingWO) return { success: true }
 
-    // Vendor selection chain: assigned → specialty hint → null. Mirrors the
-    // cron's auto-create-wo step (lib/inngest/functions/cron/work-order-ops.ts)
-    // so the manual "Create Work Order Now" button resolves a vendor the same
-    // way the nightly automation does.
-    let vendorId: string | null = schedule.assigned_vendor_id ?? null
-    if (!vendorId && schedule.vendor_specialty_hint) {
-      const { data: hintVendor } = await supabase
-        .from('vendors')
-        .select('id')
-        .eq('org_id', membership.org_id)
-        .eq('specialty', schedule.vendor_specialty_hint)
-        .eq('is_active', true)
-        .order('avg_rating', { ascending: false })
-        .limit(1)
-        .maybeSingle()
-      vendorId = hintVendor?.id ?? null
-    }
-
-    // A hard-blocked assigned/specialty-hint vendor is not a valid resolution —
-    // fall through as if the chain found no vendor, same as the null branches
-    // above, so the WO lands in the vendor-suggestion flow below instead of
-    // silently assigning someone 31+ days out of compliance.
-    if (vendorId && await isVendorHardBlocked(supabase, vendorId, membership.org_id)) {
-      vendorId = null
-    }
+    const vendorId = await resolveVendorForSchedule(supabase, membership.org_id, schedule)
 
     // vendor_specialty_hint values are a subset of WoCategory, so this is a
     // safe direct cast — the closest thing a maintenance schedule has to a
@@ -1159,7 +1176,7 @@ export async function createWorkOrderFromSchedule(
         status:             WoStatusSchema.parse(vendorId ? 'assigned' : 'pending'),
         source:             'maintenance_schedule',
         source_schedule_id: schedule.id,
-        scheduled_date:     schedule.next_due_date,
+        scheduled_date:     scheduledDate,
         estimated_cost:     schedule.estimated_cost,
         portal_enabled:     !!vendorId,
         completion_token:   vendorId ? completion_token : null,
@@ -2013,7 +2030,10 @@ export async function duplicateMaintenanceScheduleItem(
 
     if (fetchErr || !original) return { error: 'Item not found' }
 
-    const { id: _id, created_at: _ca, updated_at: _ua, ...rest } = original as Record<string, unknown>
+    // `original` is a fully typed maintenance_schedules row; casting it to
+    // Record<string, unknown> here erased that and left the insert below
+    // unchecked against the table it writes to.
+    const { id: _id, created_at: _ca, updated_at: _ua, ...rest } = original
 
     const { error } = await supabase
       .from('maintenance_schedules')

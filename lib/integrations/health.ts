@@ -131,7 +131,8 @@ export async function getIntegrationHealth(orgId: string): Promise<IntegrationHe
     return {
       kind:        'ical_feed',
       id:          f.id,
-      providerId:  f.source,
+      // ical_feeds.source is nullable; 'other' is the column's own default.
+      providerId:  f.source ?? 'other',
       label:       `${property?.name ?? 'Unknown property'} — ${f.name}`,
       status:      feedStatus(f.last_sync_status, f.last_synced_at),
       lastSyncAt:  f.last_synced_at,

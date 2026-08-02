@@ -19,6 +19,7 @@ import type { OwnerRezProperty, OwnerRezBooking, OwnerRezListing } from '@/lib/i
 import {
   buildOwnerRezDetailPatch,
   buildOwnerRezBookingRow,
+  partitionMappedBookingRows,
   selectOwnerRezBookingsToPostRevenue,
 } from '@/lib/integrations/providers/ownerrez'
 import { logAuditEvent }        from '@/lib/audit'
@@ -39,7 +40,7 @@ import {
   syncGuidebookConfigsFromProperty,
 } from '@/lib/guidebook/sync'
 import { mergeIntegrationConnectionMetadata } from '@/lib/integrations/connection-metadata'
-import type { TablesUpdate } from '@/types/database'
+import type { TablesInsert, TablesUpdate } from '@/types/database'
 
 import { reportError } from '@/lib/observability/report-error'
 const PROVIDER = 'ownerrez'
@@ -116,7 +117,7 @@ export const ownerRezInitialSync = inngest.createFunction(
         }))
 
         const supabase = createServiceClient({ system: 'inngest:initial-sync' })
-        const rows = properties.map((p) => ({
+        const rows: TablesInsert<'properties'>[] = properties.map((p) => ({
           org_id,
           name:            p.name,
           bedrooms:        p.bedrooms,
@@ -500,7 +501,14 @@ export const ownerRezInitialSync = inngest.createFunction(
             fsProps.map((p) => [p.external_id, p.id])
           )
 
-          const bookingRows = bookings.map((b) => buildOwnerRezBookingRow(org_id, b, externalToFsId))
+          const builtRows = bookings.map((b) => buildOwnerRezBookingRow(org_id, b, externalToFsId))
+          const { mapped: bookingRows, unmappedCount } = partitionMappedBookingRows(builtRows)
+
+          if (unmappedCount) {
+            logger.warn(
+              `[OwnerRez:${user_id}] skipping ${unmappedCount} booking(s) whose OwnerRez property has no FieldStay property`
+            )
+          }
 
           const { data: upserted, error } = await supabase
             .from('bookings')

@@ -6,6 +6,8 @@
 // external_source are added by each sync's call site — they aren't part of
 // the raw provider payload a pure mapper can produce.
 
+import type { Enums } from '@/types/database'
+
 export interface NormalizedBooking {
   external_id:           string
   property_external_id:  string | null
@@ -13,10 +15,13 @@ export interface NormalizedBooking {
   checkout_date:         string | null
   checkin_time:          string | null
   checkout_time:         string | null
-  status:                string
+  // status/source are the bookings table's own enums, not free strings —
+  // typing them as `string` here let every provider mapper widen the value,
+  // and once widened nothing checked it again before the insert.
+  status:                Enums<'booking_status'>
   guest_name:            string | null
   guest_email:           string | null
-  source:                string
+  source:                Enums<'booking_source'>
   is_block:              boolean
   // Distinguishes an owner's personal-use stay from a paying guest
   // reservation. Providers with no equivalent concept (OwnerRez, Uplisting,

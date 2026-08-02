@@ -279,11 +279,17 @@ async function uploadSignOffPhotos(
       console.error('[submitWorkOrderSignOff] photo upload', uploadErr)
       continue
     }
-    await supabase.from('work_order_photos').insert({
+    // work_order_photos has created_at (DEFAULT now()), NOT uploaded_at —
+    // naming a column that does not exist made PostgREST reject the whole
+    // insert, and the discarded result meant every vendor sign-off photo
+    // landed in the bucket and was then never linked to its work order.
+    const { error: insertErr } = await supabase.from('work_order_photos').insert({
       work_order_id: workOrderId,
       storage_path:  path,
-      uploaded_at:   new Date().toISOString(),
     })
+    if (insertErr) {
+      console.error('[submitWorkOrderSignOff] photo row insert', insertErr)
+    }
   }
 }
 

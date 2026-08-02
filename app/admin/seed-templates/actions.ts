@@ -5,7 +5,10 @@ import { requirePlatformAdmin } from '@/lib/auth'
 import { logAuditEvent } from '@/lib/audit'
 
 import { reportError } from '@/lib/observability/report-error'
-export interface SeedTemplateItemInput {
+// A type alias, not an interface — see RoomTemplateItemInput: only a type
+// alias has the implicit index signature required to satisfy Json, and these
+// items are written into a jsonb column.
+export type SeedTemplateItemInput = {
   task:           string
   requires_photo: boolean
   notes:          string

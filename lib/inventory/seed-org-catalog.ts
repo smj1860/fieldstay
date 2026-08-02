@@ -1,3 +1,4 @@
+import type { Tables } from '@/types/database'
 import 'server-only'
 import { reportError } from '@/lib/observability/report-error'
 import { fetchAllRows } from '@/lib/inngest/paginate'
@@ -36,7 +37,10 @@ export async function seedOrgInventoryCatalogIfNeeded(orgId: string): Promise<vo
   // it, because the count check above short-circuits every later call.
   let platformItems
   try {
-    platformItems = await fetchAllRows<Record<string, unknown>>(
+    platformItems = await fetchAllRows<
+      Pick<Tables<'inventory_catalog'>,
+        'id' | 'name' | 'category' | 'default_unit' | 'default_par_level' | 'description'>
+    >(
       (from, to) => supabase
         .from('inventory_catalog')
         .select('id, name, category, default_unit, default_par_level, description')

@@ -160,7 +160,7 @@ export default async function TurnoverDetailPage({ params }: Props) {
           )}
           {assignments.length > 0 ? (
             assignments.map((a) => {
-              const crew = a.crew_members[0]
+              const crew = unwrapJoin(a.crew_members)
               return (
                 <div key={a.id} className="flex items-center gap-2">
                   <div

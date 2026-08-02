@@ -1,6 +1,7 @@
 import { inngest }             from '@/lib/inngest/client'
 import { createServiceClient } from '@/lib/supabase/server'
 import { unwrapJoin }          from '@/lib/utils/supabase-joins'
+import type { TablesInsert }   from '@/types/database'
 
 const ALPHA_PRIOR = 2  // prior: assume "probably clean"
 const BETA_PRIOR  = 1  // prior: with small upward bias on flag probability
@@ -44,8 +45,7 @@ export const computeChecklistSignals = inngest.createFunction(
             crew_notes, photo_storage_path, requires_photo,
             is_completed, completed_at,
             checklist_instances!inner (
-              property_id,
-              turnovers!inner ( org_id )
+              turnovers!inner ( org_id, property_id )
             )
           `)
           .eq('is_completed', true)
@@ -74,16 +74,16 @@ export const computeChecklistSignals = inngest.createFunction(
       const inst = unwrapJoin(item.checklist_instances)
       if (!inst) continue
 
-      const turnoversRaw = (inst as unknown as { turnovers: { org_id: string } | { org_id: string }[] }).turnovers
-      const tvo = unwrapJoin(turnoversRaw)
-      if (!tvo?.org_id) continue
+      const tvo = unwrapJoin(inst.turnovers)
+      if (!tvo?.org_id || !tvo.property_id) continue
 
-      const key = `${(inst as { property_id: string }).property_id}|${item.section_name}|${item.task}|${tvo.org_id}`
+      const key = `${tvo.property_id}|${item.section_name}|${item.task}|${tvo.org_id}`
       if (!groups.has(key)) groups.set(key, [])
       groups.get(key)!.push(item)
     }
 
-    const upserts: object[] = []
+    const upserts: TablesInsert<'checklist_item_signals'>[] = []
+    let required = 0
 
     for (const [key, completions] of groups) {
       const [property_id, section_name, task, org_id] = key.split('|') as [string, string, string, string]
@@ -113,6 +113,7 @@ export const computeChecklistSignals = inngest.createFunction(
       // Human-readable reason — shown to crew + PM so they understand why
       let reason: string | null = null
       if (flagProb >= PHOTO_THRESHOLD) {
+        required++
         if (consecutive >= 3) {
           reason = `Flagged on ${consecutive} consecutive turnovers`
         } else if (total_completions < 5) {
@@ -148,11 +149,6 @@ export const computeChecklistSignals = inngest.createFunction(
           })
       }
     })
-
-    const required = upserts.filter((u) => {
-      const typed = u as { alpha: number; beta: number }
-      return typed.beta / (typed.alpha + typed.beta) >= PHOTO_THRESHOLD
-    }).length
 
     logger.info(`[checklistSignals] Upserted ${upserts.length} signals, ${required} requiring photo`)
     return { computed: upserts.length, photo_required: required }

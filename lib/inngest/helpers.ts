@@ -2,6 +2,7 @@ import type { createServiceClient } from '@/lib/supabase/server'
 import { adminFetch } from '@/lib/supabase/server'
 import { reportError } from '@/lib/observability/report-error'
 import { fetchAllRows } from '@/lib/inngest/paginate'
+import type { Enums } from '@/types/database'
 
 type ServiceClient = ReturnType<typeof createServiceClient>
 
@@ -47,8 +48,18 @@ export async function getPmMembers(
   return byOrg.get(orgId) ?? []
 }
 
-interface MemberRow {
+/**
+ * As selected from organization_members, where user_id is NULLABLE — a
+ * membership row can exist before its auth user does (invite flow).
+ */
+interface MemberFetchRow {
   org_id:  string
+  user_id: string | null
+  role:    Enums<'member_role'>
+}
+
+/** A membership we can actually reach: user_id resolved, role a PM role. */
+interface MemberRow extends MemberFetchRow {
   user_id: string
   role:    PmRole
 }
@@ -86,7 +97,7 @@ export async function getPmMembersByOrgIds(
   // from the map — and every caller reads a missing org as "no PM to notify",
   // so the alert simply never goes out. `.order('org_id')` is required by
   // fetchAllRows for stable page boundaries.
-  const members = await fetchAllRows<MemberRow>(
+  const fetched = await fetchAllRows<MemberFetchRow>(
     (from, to) => supabase
       .from('organization_members')
       .select('org_id, user_id, role')
@@ -96,6 +107,16 @@ export async function getPmMembersByOrgIds(
       .order('org_id')
       .range(from, to),
     { label: 'getPmMembersByOrgIds.organization_members' },
+  )
+
+  // A membership whose user_id is still NULL has no auth user yet, so no
+  // mailbox to resolve — drop it here rather than downstream, where a null
+  // key would silently miss in the email map and look like "no PM to notify".
+  // The role re-check mirrors the .in('role', roles) filter above, which
+  // constrains the rows on the server but not the column's declared type.
+  const requestedRoles = new Set<string>(roles)
+  const members = fetched.filter(
+    (m): m is MemberRow => m.user_id !== null && requestedRoles.has(m.role)
   )
 
   if (!members.length) return new Map()
@@ -386,7 +407,16 @@ export async function diffDigestSnapshot(
     .eq('category', category)
     .maybeSingle()
 
-  const previousIds: string[] = Array.isArray(existing?.snapshot?.ids) ? existing.snapshot.ids : []
+  // snapshot is jsonb — it is whatever was last written, so narrow rather
+  // than optional-chain through the Json union.
+  const snapshot = existing?.snapshot
+  const rawIds =
+    snapshot !== null && typeof snapshot === 'object' && !Array.isArray(snapshot)
+      ? snapshot.ids
+      : undefined
+  const previousIds: string[] = Array.isArray(rawIds)
+    ? rawIds.filter((id): id is string => typeof id === 'string')
+    : []
   const previousSet = new Set(previousIds)
   const currentSet  = new Set(currentIds)
 

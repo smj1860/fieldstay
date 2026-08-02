@@ -10,6 +10,20 @@ import { applyMasterChecklistToProperty, fetchOrgRoomTemplateData } from '@/lib/
 import { seedOrgInventoryCatalogIfNeeded } from '@/lib/inventory/seed-org-catalog'
 import { generateTurnoversForProperty } from '@/lib/turnovers/generator'
 import { REQUIRED_ASSET_TYPES, ASSET_TYPE_DISPLAY_NAMES } from '@/lib/asset-discovery/config'
+import type { Database, TablesInsert } from '@/types/database'
+
+/** Any real table in the public schema — see WIPE_ORDER for why not `string`. */
+type DemoTable = keyof Database['public']['Tables']
+
+/**
+ * Tables that actually carry an org_id column. The wipe filters every DELETE
+ * on `.eq('org_id', orgId)`, so a table without that column could never be
+ * scoped to the demo org — listing one in WIPE_ORDER is a bug this type
+ * catches at compile time rather than at `DELETE` time.
+ */
+type OrgScopedTable = {
+  [K in DemoTable]: 'org_id' extends keyof Database['public']['Tables'][K]['Row'] ? K : never
+}[DemoTable]
 
 /**
  * Wipe + reseed the roadshow demo org.
@@ -33,18 +47,20 @@ import { REQUIRED_ASSET_TYPES, ASSET_TYPE_DISPLAY_NAMES } from '@/lib/asset-disc
  * again — which is the property that actually matters at a trade show.
  */
 
-// Deleted child-first. Tables whose only link to the org is through a parent
-// row (work_order_line_items, checklist_template_items, inventory_template_items)
-// are covered by ON DELETE CASCADE from the parent listed here.
-const WIPE_ORDER: readonly string[] = [
+// Deleted child-first, each filtered by `.eq('org_id', orgId)`.
+//
+// Typed as OrgScopedTable, not `string`: a bare `string` widens
+// supabase.from() across every table in the schema, postgrest-js intersects
+// their columns, and every argument downstream resolves to `never`. The
+// narrower type also proves each entry really has an org_id column to filter
+// on — a claim this list previously made only in a comment.
+const WIPE_ORDER: readonly OrgScopedTable[] = [
   'demo_activity_log',
   'owner_transactions',
   'asset_depreciation_entries',
-  'work_order_photos',
   'work_order_updates',
   'work_order_line_items',
   'work_orders',
-  'checklist_instance_items',
   'checklist_instances',
   'turnover_assignments',
   'assignment_outcomes',
@@ -58,9 +74,7 @@ const WIPE_ORDER: readonly string[] = [
   'property_assets',
   'inventory_counts',
   'inventory_items',
-  'inventory_template_items',
   'inventory_templates',
-  'purchase_order_items',
   'purchase_orders',
   'review_responses',
   'reviews',
@@ -72,26 +86,30 @@ const WIPE_ORDER: readonly string[] = [
   'guidebook_sponsors',
   'guidebook_configurations',
   'property_owners',
-  'checklist_template_items',
-  'checklist_template_sections',
   'checklist_templates',
   'notifications',
   'properties',
 ]
 
-// Tables in WIPE_ORDER reached only through a parent FK. Verified against the
-// live schema: these are exactly the listed tables with NO org_id column, so a
-// `.eq('org_id', ...)` delete against them would error. They are removed by
-// cascade from their parent instead. Every other table in WIPE_ORDER does have
-// org_id and gets an explicitly filtered delete.
-const CASCADE_ONLY = new Set([
+// Reached only through a parent FK. `Exclude<DemoTable, OrgScopedTable>` is
+// the compiler checking the claim this comment used to assert by hand: these
+// tables have NO org_id column, so a `.eq('org_id', ...)` delete against them
+// would error. They are removed by cascade from the parent rows WIPE_ORDER
+// deletes above.
+//
+// Exported because it is a schema fact this seeder's safety model depends on,
+// not merely a local note: if one of these ever gains an org_id column, the
+// `Exclude` stops matching and this list fails to compile — which is the
+// signal to give it an explicit filtered delete in WIPE_ORDER instead of
+// trusting the cascade.
+export const CASCADE_ONLY: readonly Exclude<DemoTable, OrgScopedTable>[] = [
   'work_order_photos',
   'checklist_instance_items',
   'inventory_template_items',
   'purchase_order_items',
   'checklist_template_items',
   'checklist_template_sections',
-])
+]
 
 export interface SeedOptions {
   /** Delete all existing demo-org content before inserting. */
@@ -138,8 +156,6 @@ async function wipeDemoOrg(supabase: ServiceClient, orgId: string): Promise<void
   await assertDemoOrg(supabase, orgId)
 
   for (const table of WIPE_ORDER) {
-    if (CASCADE_ONLY.has(table)) continue
-
     // Sequential by necessity: the deletes are ordered child-to-parent, so
     // parallelizing them would violate FK ordering.
     const { error } = await supabase.from(table).delete().eq('org_id', orgId)
@@ -171,15 +187,26 @@ export function pickDemoInventorySelection<T extends { category: string }>(items
 }
 
 /** Insert helper that surfaces the failing table instead of a bare PostgREST error. */
-async function insertRows(
+async function insertRows<T extends DemoTable>(
   supabase: ServiceClient,
-  table:    string,
-  rows:     Array<Record<string, unknown>>,
+  table:    T,
+  rows:     TablesInsert<T>[],
 ): Promise<Array<{ id: string }>> {
   if (rows.length === 0) return []
-  const { data, error } = await supabase.from(table).insert(rows).select('id')
+
+  // postgrest-js resolves .insert()'s payload type from a LITERAL table name
+  // and cannot do it through a generic parameter: `.from(table)` here is a
+  // union of all 94 table builders, so their payload types intersect to
+  // `never`. The schema check that matters is NOT lost — it moved to the call
+  // sites, each of which passes TablesInsert<'that_table'>[] and is checked
+  // against the real Insert type of the table it names. This one assertion
+  // only carries already-checked rows across the generic boundary.
+  const request = supabase.from(table).insert(rows as never).select('id') as unknown as
+    PromiseLike<{ data: Array<{ id: string }> | null; error: { message: string } | null }>
+
+  const { data, error } = await request
   if (error) throw new Error(`Seed insert failed on ${table}: ${error.message}`)
-  return (data ?? []) as Array<{ id: string }>
+  return data ?? []
 }
 
 /**
@@ -372,7 +399,7 @@ export async function seedDemoOrg(opts: SeedOptions = {}): Promise<SeedResult> {
   counts.property_owners = (await insertRows(supabase, 'property_owners', ownerRows)).length
 
   // ── Crew ─────────────────────────────────────────────────────────────────
-  const crewRows = DEMO_CREW.map((c) => ({
+  const crewRows: TablesInsert<'crew_members'>[] = DEMO_CREW.map((c) => ({
     org_id:            orgId,
     name:              c.name,
     email:             c.email,
@@ -432,7 +459,7 @@ export async function seedDemoOrg(opts: SeedOptions = {}): Promise<SeedResult> {
 
   // Every COI current and comfortably in the future — a hard-block mid-demo
   // would be a correct feature demonstration and a terrible sales moment.
-  const complianceRows = vendors.map((v, i) => ({
+  const complianceRows: TablesInsert<'vendor_compliance_documents'>[] = vendors.map((v, i) => ({
     org_id:          orgId,
     vendor_id:       v.id,
     document_type:   'coi',
@@ -599,8 +626,8 @@ export async function seedDemoOrg(opts: SeedOptions = {}): Promise<SeedResult> {
 function buildBookingRows(
   orgId:            string,
   propertyIdByKey:  Map<string, string>,
-): Array<Record<string, unknown>> {
-  const rows: Array<Record<string, unknown>> = []
+): TablesInsert<'bookings'>[] {
+  const rows: TablesInsert<'bookings'>[] = []
   const sources = ['airbnb', 'vrbo', 'direct', 'ownerrez'] as const
   let guestIndex = 0
 

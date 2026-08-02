@@ -6,7 +6,7 @@ import { detectAndFlagOverlaps } from '@/lib/ical/conflict-detection'
 import { getPmEmails } from '@/lib/inngest/helpers'
 import { resend, FROM } from '@/lib/resend/client'
 import { renderPmAlert } from '@/lib/resend/emails/pm-alert'
-import type { BookingSource } from '@/types/database'
+import type { BookingSource, TablesInsert, Enums } from '@/types/database'
 
 import { reportError } from '@/lib/observability/report-error'
 import { fetchAllRows, fetchDistinctOrgIds } from '@/lib/inngest/paginate'
@@ -217,7 +217,10 @@ export const syncIcalFeed = inngest.createFunction(
       async (): Promise<{ newBookings: Array<{ id: string; guestEmail: string | null }>; cancelledBookingIds: string[] }> => {
         const supabase = createServiceClient({ system: 'inngest:ical-sync' })
 
-        type ExistingRow = { id: string; ical_uid: string; status: string; guest_email: string | null }
+        // ical_uid is NULLABLE on bookings (rows from OwnerRez/Hospitable have
+        // none); only feed-sourced rows carry one, and only those can be
+        // matched against this feed's events.
+        type ExistingRow = { id: string; ical_uid: string | null; status: Enums<'booking_status'>; guest_email: string | null }
 
         // Paginated: a long-lived feed accumulates more than PostgREST's
         // 1000-row cap, and a truncated "existing" map would make every
@@ -234,7 +237,9 @@ export const syncIcalFeed = inngest.createFunction(
         )
 
         const existingByUid = new Map<string, ExistingRow>(
-          existingBookings.map((b) => [b.ical_uid, b])
+          existingBookings
+            .filter((b): b is ExistingRow & { ical_uid: string } => b.ical_uid !== null)
+            .map((b) => [b.ical_uid, b])
         )
         // Inngest serializes step.run() results as JSON, so Date objects become
         // strings. toDateString/toTimeString/isAllDay all accept Date | string.
@@ -250,7 +255,7 @@ export const syncIcalFeed = inngest.createFunction(
 
         // ── Bulk upsert all current feed events ──────────────────────────────
         // Single round-trip replaces N individual updates/inserts.
-        const upsertRows = typedEvents.map((event) => ({
+        const upsertRows: TablesInsert<'bookings'>[] = typedEvents.map((event) => ({
           property_id:   property_id,
           org_id:        org_id,
           ical_feed_id:  feed_id,
@@ -278,7 +283,7 @@ export const syncIcalFeed = inngest.createFunction(
           // benefit (nothing reads raw_ical_data).
         }))
 
-        type UpsertedRow = { id: string; ical_uid: string; status: string }
+        type UpsertedRow = { id: string; ical_uid: string; status: Enums<'booking_status'> }
         const { data: upserted } = await supabase
           .from('bookings')
           .upsert(upsertRows, { onConflict: 'ical_feed_id,ical_uid', ignoreDuplicates: false })

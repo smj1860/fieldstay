@@ -7,6 +7,8 @@
 // unaffected.
 // ============================================================
 
+import type { Json } from '@/types/database'
+
 import type { CrewRole } from '@/types/database'
 
 export interface HospitableUser {
@@ -307,8 +309,9 @@ export interface HospitablePagedReviews {
 // response shape (only conversation_id/reservation_id at the message-list
 // level), so callers derive their own dedup key from conversation_id +
 // created_at + sender_type + a hash of body. attachments/reactions are
-// typed loosely (unknown[]) — not consumed by FieldStay today, just
-// preserved for a future UI.
+// typed loosely (Json[]) — not consumed by FieldStay today, just preserved
+// for a future UI. Json rather than unknown because the value is written
+// verbatim into reservation_messages.attachments, a jsonb column.
 export interface HospitableMessage {
   platform:          string
   platform_id:       number
@@ -316,7 +319,7 @@ export interface HospitableMessage {
   reservation_id:    string | null
   content_type:      string
   body:              string
-  attachments:       unknown[] | null
+  attachments:       Json[] | null
   sender_type:       'host' | 'guest'
   sender_role:       string | null
   sender: {
