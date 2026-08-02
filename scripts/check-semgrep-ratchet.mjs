@@ -33,6 +33,16 @@ import { readFileSync, writeFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import { dirname, join } from 'node:path'
 
+// Explicit ASCII comparator, NOT localeCompare and NOT a bare .sort(): every
+// use below orders text that ends up in CI log output or in a COMMITTED file,
+// so the order must be byte-stable across machines and locales rather than
+// locale-correct. localeCompare would make a CI diff — or the key order of
+// baseline-counts.json — depend on the runner. A bare .sort() happens to be
+// byte-stable for strings, but says nothing about the intent and is
+// type-dependent the moment the array is not strings (SonarQube S2871).
+// Declared up here because it is used before the report-printing section.
+const byRuleId = (a, b) => (a < b ? -1 : (a > b ? 1 : 0))
+
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..')
 const RULES = join(ROOT, '.semgrep', 'ratchet.yml')
 const BASELINE_FILE = join(ROOT, '.semgrep', 'baseline-counts.json')
@@ -109,7 +119,7 @@ if (overlaps.length) {
       'per-tier counts double-count them and no tier can be burned to a meaningful zero.'
   )
   for (const [site, tiers] of overlaps) {
-    console.error(`  ✗ ${site}  →  ${[...tiers].sort().join(' + ')}`)
+    console.error(`  ✗ ${site}  →  ${[...tiers].sort(byRuleId).join(' + ')}`)
   }
   console.error(
     '\nMake the tiers exclusive again: give the tier that should NOT win a negative ' +
@@ -123,7 +133,7 @@ const baselineDoc = JSON.parse(readFileSync(BASELINE_FILE, 'utf8'))
 const baseline = baselineDoc.counts
 
 if (UPDATE) {
-  baselineDoc.counts = Object.fromEntries(Object.entries(actual).sort(([a], [b]) => a.localeCompare(b)))
+  baselineDoc.counts = Object.fromEntries(Object.entries(actual).sort(([a], [b]) => byRuleId(a, b)))
   baselineDoc.measured_at = new Date().toISOString().slice(0, 10)
   writeFileSync(BASELINE_FILE, JSON.stringify(baselineDoc, null, 2) + '\n')
   console.log('Updated .semgrep/baseline-counts.json:')
@@ -166,11 +176,6 @@ for (const id of new Set([...Object.keys(actual), ...Object.keys(baseline)])) {
 }
 
 console.log('semgrep ratchet — per-rule counts')
-// Explicit ASCII comparator, NOT localeCompare: these are rule ids in CI log
-// output, so the order must be byte-stable across machines and locales rather
-// than locale-correct. localeCompare would make the diff depend on the runner.
-const byRuleId = (a, b) => (a < b ? -1 : (a > b ? 1 : 0))
-
 for (const id of Object.keys(actual).sort(byRuleId)) {
   console.log(`  ${String(actual[id]).padStart(5)}  ${id}   (baseline ${baseline[id] ?? '—'})`)
 }

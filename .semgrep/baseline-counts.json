@@ -5,7 +5,7 @@
     "fieldstay-supabase-unbounded-select rule (284) into the severity ladder below,",
     "and after fieldstay-role-filtered-membership-read (3 -> 0) and",
     "fieldstay-untimed-external-fetch (1 -> 0) were fixed and PROMOTED to",
-    "chokepoints.yml \u2014 which is why they no longer appear here.",
+    "chokepoints.yml — which is why they no longer appear here.",
     "scripts/check-semgrep-ratchet.mjs re-runs the ratchet rules and FAILS if any",
     "count is higher than the number here. Numbers may only go DOWN: fix sites,",
     "then run `node scripts/check-semgrep-ratchet.mjs --update` to lock the",
@@ -30,11 +30,11 @@
     "PROMOTED 2026-08-02: -cross-tenant reached 0 (see above) and moved to",
     "chokepoints.yml, where it gates at --error across the whole tree instead of",
     "only on findings new vs. the PR base. Its key is deleted here in the same",
-    "change, per the promotion rule in .semgrep/README.md \u2014 a rule cannot be in",
+    "change, per the promotion rule in .semgrep/README.md — a rule cannot be in",
     "both files, and check-semgrep-ratchet.mjs fails on a baseline entry whose",
     "rule ratchet.yml no longer declares."
   ],
-  "measured_at": "2026-08-01",
+  "measured_at": "2026-08-02",
   "counts": {
     "fieldstay-supabase-discarded-result": 144,
     "fieldstay-supabase-read-without-error": 376,
