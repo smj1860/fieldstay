@@ -109,6 +109,31 @@ function notifyCrewAssigned(orgId: string, crewMemberId: string, turnoverIds: st
   })
 }
 
+/**
+ * fetchAllRows, degrading to null instead of throwing.
+ *
+ * Every read below is bounded by an .in() list or a single parent, so none of
+ * them is a platform scan — but "unlikely to truncate" is not the same as
+ * bounded, and a short page here reads as "no time off" / "no conflict" /
+ * "not yet assigned", which is precisely the class of silence this whole pass
+ * is removing. Pagination makes truncation impossible; the null return lets
+ * each caller keep its own fail-vs-degrade decision rather than inheriting
+ * fetchAllRows' throw.
+ */
+async function tryFetchAll<T>(
+  fetchPage: (from: number, to: number) => PromiseLike<{ data: T[] | null; error: { message: string } | null }>,
+  site:      string,
+  orgId:     string,
+): Promise<T[] | null> {
+  try {
+    return await fetchAllRows<T>(fetchPage, { label: site })
+  } catch (err) {
+    console.error(`[${site}]`, err)
+    reportError(err, { site, orgId })
+    return null
+  }
+}
+
 // ── Crew assignment ──────────────────────────────────────────────────────────
 
 /**
@@ -228,17 +253,19 @@ async function loadAssignmentTargets<T>(
   crewMemberId: string,
   select:       string,
 ): Promise<AssignmentTargets<T>> {
-  const turnoverRes = await supabase
-    .from('turnovers')
-    .select(select)
-    .in('id', turnoverIds)
-    .eq('org_id', orgId)
-
-  if (reportQueryError(turnoverRes.error, { site: 'serverAction.turnovers.loadAssignmentTargets.turnovers', orgId })) {
-    return { ok: false, error: 'Could not load those turnovers. Please try again.' }
-  }
-  const turnovers = (turnoverRes.data ?? []) as T[]
-  if (!turnovers.length) return { ok: false, error: 'Turnovers not found' }
+  const turnoverRows = await tryFetchAll<T>(
+    (from, to) => supabase
+      .from('turnovers')
+      .select(select)
+      .in('id', turnoverIds)
+      .eq('org_id', orgId)
+      .order('id')
+      .range(from, to) as never,
+    'serverAction.turnovers.loadAssignmentTargets.turnovers', orgId,
+  )
+  if (turnoverRows === null) return { ok: false, error: 'Could not load those turnovers. Please try again.' }
+  if (!turnoverRows.length) return { ok: false, error: 'Turnovers not found' }
+  const turnovers = turnoverRows
 
   // maybeSingle: with .single() a nonexistent crew id came back as a PGRST116
   // ERROR, not as null — the not-found branch was only reachable because that
@@ -286,16 +313,19 @@ export async function assignCrew(
     // crew member who booked that Saturday off got assigned it anyway. The
     // outcome now degrades to a warning that says we could not check.
     const turnoverDates = [...new Set(turnovers.map(t => t.checkout_datetime.split('T')[0]))]
-    const timeOffRes = await supabase
-      .from('crew_availability')
-      .select('available_date')
-      .eq('org_id', membership.org_id)
-      .eq('crew_member_id', crewMemberId)
-      .eq('is_available', false)
-      .in('available_date', turnoverDates)
-
-    const timeOff = tryUnwrapList(timeOffRes, { site: 'serverAction.turnovers.assignCrew.timeOff', orgId: membership.org_id })
-    const timeOffCount = timeOff.ok ? timeOff.data.length : 0
+    const timeOffRows = await tryFetchAll<{ available_date: string }>(
+      (from, to) => supabase
+        .from('crew_availability')
+        .select('available_date')
+        .eq('org_id', membership.org_id)
+        .eq('crew_member_id', crewMemberId)
+        .eq('is_available', false)
+        .in('available_date', turnoverDates)
+        .order('available_date')
+        .range(from, to),
+      'serverAction.turnovers.assignCrew.timeOff', membership.org_id,
+    )
+    const timeOffCount = timeOffRows?.length ?? 0
 
     // Batch: remove other-crew assignments across all turnovers in one query
     await supabase
@@ -354,7 +384,7 @@ export async function assignCrew(
 
     revalidatePath('/turnovers')
     const warnings: string[] = []
-    if (!timeOff.ok)      warnings.push(`Couldn't check ${crew.name}'s time off — please verify manually.`)
+    if (timeOffRows === null) warnings.push(`Couldn't check ${crew.name}'s time off — please verify manually.`)
     if (timeOffCount > 0) warnings.push(`${crew.name} marked time off on ${timeOffCount} of the assigned date(s).`)
 
     if (warnings.length > 0) return { success: true, warning: warnings.join(' ') }
@@ -647,16 +677,18 @@ export async function addCrewToTurnover(
     // tracking, the crew push, and the audit row. The PM was told the
     // assignment worked; the genuinely-new turnovers in the batch were never
     // inserted at all, because the batch insert is all-or-nothing.
-    const assignedRes = await supabase
-      .from('turnover_assignments')
-      .select('turnover_id')
-      .in('turnover_id', verifiedIds)
-      .eq('crew_member_id', crewMemberId)
-
-    if (reportQueryError(assignedRes.error, { site: 'serverAction.turnovers.addCrewToTurnover.existing', orgId: membership.org_id })) {
-      return { error: 'Could not check existing assignments. Please try again.' }
-    }
-    const alreadyAssigned = new Set((assignedRes.data ?? []).map(a => a.turnover_id))
+    const assignedRows = await tryFetchAll<{ turnover_id: string }>(
+      (from, to) => supabase
+        .from('turnover_assignments')
+        .select('turnover_id')
+        .in('turnover_id', verifiedIds)
+        .eq('crew_member_id', crewMemberId)
+        .order('turnover_id')
+        .range(from, to),
+      'serverAction.turnovers.addCrewToTurnover.existing', membership.org_id,
+    )
+    if (assignedRows === null) return { error: 'Could not check existing assignments. Please try again.' }
+    const alreadyAssigned = new Set(assignedRows.map(a => a.turnover_id))
 
     // Batch insert only the missing assignments
     const toInsert = verifiedIds.filter(id => !alreadyAssigned.has(id))
@@ -718,36 +750,41 @@ export async function addCrewToTurnover(
     // empty result used to mean "no conflict", so a failed read double-booked
     // one cleaner into two overlapping windows and showed the PM a clean
     // success.
-    const existingRes = await supabase
-      .from('turnover_assignments')
-      .select('turnover_id, turnovers!inner(checkout_datetime, checkin_datetime, status)')
-      .eq('crew_member_id', crewMemberId)
-      .not('turnovers.status', 'in', '("completed","cancelled")')
+    const existingAssignments = await tryFetchAll<{ turnover_id: string; turnovers: unknown }>(
+      (from, to) => supabase
+        .from('turnover_assignments')
+        .select('turnover_id, turnovers!inner(checkout_datetime, checkin_datetime, status)')
+        .eq('crew_member_id', crewMemberId)
+        .not('turnovers.status', 'in', '("completed","cancelled")')
+        .order('turnover_id')
+        .range(from, to),
+      'serverAction.turnovers.addCrewToTurnover.conflicts', membership.org_id,
+    )
 
-    const existingOut = tryUnwrapList(existingRes, { site: 'serverAction.turnovers.addCrewToTurnover.conflicts', orgId: membership.org_id })
-    const existingAssignments = existingOut.ok ? existingOut.data : []
-
-    const conflictCount = countScheduleConflicts(turnovers, existingAssignments)
+    const conflictCount = countScheduleConflicts(turnovers, existingAssignments ?? [])
 
     // Time-off check — non-blocking (a known conflict doesn't block), but an
     // UNKNOWN one must not read as clean. See assignCrew for the full note.
     const turnoverDates = [...new Set(turnovers.map(t => t.checkout_datetime.split('T')[0]))]
-    const timeOffRes = await supabase
-      .from('crew_availability')
-      .select('available_date')
-      .eq('org_id', membership.org_id)
-      .eq('crew_member_id', crewMemberId)
-      .eq('is_available', false)
-      .in('available_date', turnoverDates)
-
-    const timeOff = tryUnwrapList(timeOffRes, { site: 'serverAction.turnovers.addCrewToTurnover.timeOff', orgId: membership.org_id })
-    const timeOffCount = timeOff.ok ? timeOff.data.length : 0
+    const timeOffRows = await tryFetchAll<{ available_date: string }>(
+      (from, to) => supabase
+        .from('crew_availability')
+        .select('available_date')
+        .eq('org_id', membership.org_id)
+        .eq('crew_member_id', crewMemberId)
+        .eq('is_available', false)
+        .in('available_date', turnoverDates)
+        .order('available_date')
+        .range(from, to),
+      'serverAction.turnovers.addCrewToTurnover.timeOff', membership.org_id,
+    )
+    const timeOffCount = timeOffRows?.length ?? 0
 
     revalidatePath('/turnovers')
     const warnings: string[] = []
-    if (!existingOut.ok)   warnings.push(`Couldn't check ${crew.name}'s other assignments for conflicts — please verify manually.`)
+    if (existingAssignments === null) warnings.push(`Couldn't check ${crew.name}'s other assignments for conflicts — please verify manually.`)
     if (conflictCount > 0) warnings.push(`${crew.name} may have a scheduling conflict with ${conflictCount} other turnover(s).`)
-    if (!timeOff.ok)       warnings.push(`Couldn't check ${crew.name}'s time off — please verify manually.`)
+    if (timeOffRows === null) warnings.push(`Couldn't check ${crew.name}'s time off — please verify manually.`)
     if (timeOffCount > 0)  warnings.push(`${crew.name} marked time off on ${timeOffCount} of the assigned date(s).`)
 
     if (warnings.length > 0) return { success: true, warning: warnings.join(' ') }
@@ -1116,14 +1153,21 @@ export async function dismissSuggestion(turnoverId: string): Promise<TurnoverAct
     const crewIds = (turnover?.suggested_crew_ids as string[] | null) ?? []
     if (crewIds.length) {
       try {
-        // Same optional-bedrooms read as acceptSuggestion. The no-property
-        // branch needs an `error` key too, so the result has one shape to unwrap.
-        const propertyRes = turnover?.property_id
-          ? await supabase.from('properties').select('bedrooms').eq('id', turnover.property_id).maybeSingle()
-          : { data: null, error: null }
+        // Same optional-bedrooms read as acceptSuggestion. Written as a plain
+        // guarded await rather than a ternary: a PostgREST builder inside a
+        // ternary arm reads as a discarded lazy query, which is a shape worth
+        // not having in the tree even when this one was awaited.
+        let property: { bedrooms: number | null } | null = null
+        if (turnover?.property_id) {
+          const propertyRes = await supabase
+            .from('properties')
+            .select('bedrooms')
+            .eq('id', turnover.property_id)
+            .maybeSingle()
 
-        const propertyOut = tryUnwrap(propertyRes, { site: 'serverAction.turnovers.dismissSuggestion.bedrooms', orgId: membership.org_id })
-        const property = propertyOut.ok ? propertyOut.data : null
+          const propertyOut = tryUnwrap(propertyRes, { site: 'serverAction.turnovers.dismissSuggestion.bedrooms', orgId: membership.org_id })
+          property = propertyOut.ok ? propertyOut.data : null
+        }
 
         const { createServiceClient } = await import('@/lib/supabase/server')
         const service = createServiceClient({ system: 'action:turnover-suggestion-tracking' })

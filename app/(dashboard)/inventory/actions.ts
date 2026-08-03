@@ -457,17 +457,28 @@ async function verifyTemplateAndProperties(
   }
   if (!templateRes.data) return { ok: false, error: 'Template not found.' }
 
-  const ownedRes = await supabase
-    .from('properties')
-    .select('id')
-    .eq('org_id', orgId)
-    .in('id', propertyIds)
-
-  if (reportQueryError(ownedRes.error, { site: 'serverAction.inventory.applyTemplateToProperties.owned', orgId })) {
+  // Paginated as well as error-checked: this is the tenant filter, so a
+  // truncated page silently drops properties the PM does own — the same wrong
+  // answer as a failed read, just quieter.
+  let ownedRows: { id: string }[]
+  try {
+    ownedRows = await fetchAllRows<{ id: string }>(
+      (from, to) => supabase
+        .from('properties')
+        .select('id')
+        .eq('org_id', orgId)
+        .in('id', propertyIds)
+        .order('id')
+        .range(from, to),
+      { label: 'serverAction.inventory.applyTemplateToProperties.owned' },
+    )
+  } catch (err) {
+    console.error('[applyTemplateToProperties] property verification failed', err)
+    reportError(err, { site: 'serverAction.inventory.applyTemplateToProperties.owned', orgId })
     return { ok: false, error: 'Could not verify the selected properties. Nothing was applied — please try again.' }
   }
 
-  const verified = new Set((ownedRes.data ?? []).map((p) => p.id))
+  const verified = new Set(ownedRows.map((p) => p.id))
   const targetPropertyIds = propertyIds.filter((id) => verified.has(id))
   if (targetPropertyIds.length === 0) return { ok: false, error: 'No valid properties selected' }
 

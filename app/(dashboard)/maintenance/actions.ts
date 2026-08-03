@@ -5,7 +5,7 @@ import { redirect, unstable_rethrow } from 'next/navigation'
 import { requireOrgMember, requireOrgRole } from '@/lib/auth'
 import { inngest } from '@/lib/inngest/client'
 import { calcNextDueDate } from '@/lib/turnovers/generator'
-import { fetchAllRows } from '@/lib/inngest/paginate'
+import { fetchAllRows, SUPABASE_MAX_ROWS } from '@/lib/inngest/paginate'
 import { logAuditEvent } from '@/lib/audit'
 import { reportError } from '@/lib/observability/report-error'
 import { reportQueryError } from '@/lib/supabase/unwrap'
@@ -890,11 +890,16 @@ export async function sendQuoteRequests(
     // existingVendorIds empty, every selected vendor was re-sent, and each got
     // a SECOND RFQ email carrying a second quote token. A duplicate outbound
     // vendor email is worse than making the PM retry.
+    // Paginated too: a truncated page has the same effect as the failed read
+    // described above — a vendor already holding a live RFQ looks new and gets
+    // a second one.
     const existingRes = await supabase
       .from('quote_requests')
       .select('vendor_id')
       .eq('work_order_id', workOrderId)
+      .eq('org_id', membership.org_id)
       .in('status', ['pending', 'submitted'])
+      .limit(SUPABASE_MAX_ROWS)
 
     if (reportQueryError(existingRes.error, { site: 'serverAction.maintenance.sendQuoteRequests.existing', orgId: membership.org_id })) {
       return { error: 'Could not check existing quote requests. Please try again.', sent: 0 }
@@ -1377,6 +1382,7 @@ export async function bulkAssignVendor(
       .select('id, suggestion_status, suggested_vendor_ids')
       .in('id', workOrderIds)
       .eq('org_id', membership.org_id)
+      .limit(SUPABASE_MAX_ROWS)
 
     if (reportQueryError(workOrdersRes.error, { site: 'serverAction.maintenance.bulkAssignVendor.workOrders', orgId: membership.org_id })) {
       return { error: 'Could not load the selected work orders. Please try again.' }
@@ -1978,6 +1984,7 @@ async function loadBroadcastInputs(
     .select('id, name, description, schedule_frequency, vendor_specialty_hint, estimated_cost, sort_order, asset_category, active_from_month, active_to_month')
     .eq('template_id', templateId)
     .order('sort_order', { ascending: true })
+    .limit(SUPABASE_MAX_ROWS)
 
   if (reportQueryError(itemsRes.error, { site: 'serverAction.maintenance.broadcastMaintenanceTemplate.items', orgId })) {
     return { ok: false, error: "Could not load the template's items. Please try again." }
@@ -1985,16 +1992,26 @@ async function loadBroadcastInputs(
   const items = (itemsRes.data ?? []) as BroadcastItem[]
   if (items.length === 0) return { ok: false, error: 'Template has no items' }
 
-  const propertiesRes = await supabase
-    .from('properties')
-    .select('id')
-    .eq('org_id', orgId)
-    .in('id', propertyIds)
-
-  if (reportQueryError(propertiesRes.error, { site: 'serverAction.maintenance.broadcastMaintenanceTemplate.props', orgId })) {
+  // Paginated: this is the org filter for the client-supplied propertyIds AND
+  // the loop source every inserted row's property_id comes from, so a
+  // truncated page silently drops properties from the broadcast.
+  let properties: { id: string }[]
+  try {
+    properties = await fetchAllRows<{ id: string }>(
+      (from, to) => supabase
+        .from('properties')
+        .select('id')
+        .eq('org_id', orgId)
+        .in('id', propertyIds)
+        .order('id')
+        .range(from, to),
+      { label: 'serverAction.maintenance.broadcastMaintenanceTemplate.props' },
+    )
+  } catch (err) {
+    console.error('[broadcastMaintenanceTemplate] property verification failed', err)
+    reportError(err, { site: 'serverAction.maintenance.broadcastMaintenanceTemplate.props', orgId })
     return { ok: false, error: 'Could not verify the selected properties. Please try again.' }
   }
-  const properties = propertiesRes.data ?? []
   if (properties.length === 0) return { ok: false, error: 'No matching properties found' }
 
   return { ok: true, items, properties, template }
