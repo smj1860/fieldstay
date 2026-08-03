@@ -86,7 +86,7 @@ export async function POST(
     .eq('id', id)
     .neq('status', 'completed')
     .select(COMPLETED_WORK_ORDER_SELECT)
-    .maybeSingle<CompletedWorkOrderRow>()
+    .maybeSingle()
 
   if (error) {
     console.error('[CrewWorkOrderComplete]', error)
@@ -103,7 +103,7 @@ export async function POST(
   //
   // This also writes the work_order_updates row this route used to insert
   // itself; doing both would double-log the status change.
-  await finalizeWorkOrderCompletion(supabase, wo.org_id, [updated], {
+  await finalizeWorkOrderCompletion(supabase, wo.org_id, [updated as CompletedWorkOrderRow], {
     statusFromById:  new Map([[id, wo.status as WoStatus | null]]),
     notes:           trimmedNotes,
     updatedByUserId: user.id,
