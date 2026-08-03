@@ -109,7 +109,7 @@ const EXCEPTIONS: Record<string, string> = {
   // and the Stripe-id clear was collapsed from one update per subscription
   // into a single batched patch. Pruned 2026-07-30 with the account-deletion
   // org-orphaning fix.
-  'app/(dashboard)/maintenance/actions.ts:855':
+  'app/(dashboard)/maintenance/actions.ts:912':
     'Per-vendor quote_requests insert — each row needs its own randomly generated quote_token before its own Inngest event fires; the insert could theoretically be batched with the token generated client-side, but that\'s a sync-logic change, not a lint fix.',
   'app/(dashboard)/maintenance/create-work-order-helpers.ts:153':
     'Extracted-helper twin of app/(dashboard)/maintenance/actions.ts:837 — same reasoning.',

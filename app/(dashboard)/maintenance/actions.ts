@@ -163,12 +163,17 @@ export async function createWorkOrder(
       return { error: 'Select at least one vendor to request quotes from' }
     }
 
-    const { data: property } = await supabase
+    const propertyRes = await supabase
       .from('properties')
       .select('id')
       .eq('id', property_id)
       .eq('org_id', membership.org_id)
-      .single()
+      .maybeSingle()
+
+    if (reportQueryError(propertyRes.error, { site: 'serverAction.maintenance.createWorkOrder.property', orgId: membership.org_id })) {
+      return { error: 'Could not verify the property. Please try again.' }
+    }
+    const property = propertyRes.data
 
     if (!property) return { error: 'Property not found' }
 
@@ -368,13 +373,24 @@ export async function updateWorkOrder(
 
     const priority = PriorityLevelSchema.safeParse(data.priority).data ?? 'medium'
 
-    // Fetch current vendor_id before updating to detect a vendor change
-    const { data: currentWo } = await supabase
+    // Fetch current vendor_id before updating to detect a vendor change.
+    //
+    // Failed closed, before the write. A silent null made previousVendorId
+    // null, so `newVendorId !== previousVendorId` was true for ANY vendor and
+    // work-order/vendor.assigned fired on an unchanged vendor — a duplicate
+    // dispatch email to a real vendor, off a comparison against a value we
+    // never actually read.
+    const currentWoRes = await supabase
       .from('work_orders')
       .select('vendor_id')
       .eq('id', workOrderId)
       .eq('org_id', membership.org_id)
-      .single()
+      .maybeSingle()
+
+    if (reportQueryError(currentWoRes.error, { site: 'serverAction.maintenance.updateWorkOrder.current', orgId: membership.org_id })) {
+      return { error: 'Could not load the work order. Please try again.' }
+    }
+    const currentWo = currentWoRes.data
 
     const previousVendorId = currentWo?.vendor_id ?? null
     const newVendorId      = data.vendor_id || null
@@ -447,12 +463,17 @@ export async function addWorkOrderNote(
   try {
     const { supabase, membership } = await requireOrgRole(['admin', 'manager'])
 
-    const { data: wo } = await supabase
+    const woRes = await supabase
       .from('work_orders')
       .select('id, org_id')
       .eq('id', workOrderId)
       .eq('org_id', membership.org_id)
-      .single()
+      .maybeSingle()
+
+    if (reportQueryError(woRes.error, { site: 'serverAction.maintenance.addWorkOrderNote', orgId: membership.org_id })) {
+      return { error: 'Could not add the note. Please try again.' }
+    }
+    const wo = woRes.data
 
     if (!wo) return { error: 'Work order not found' }
 
@@ -487,12 +508,17 @@ export async function updateWorkOrderStatus(
   try {
     const { supabase, membership } = await requireOrgRole(['admin', 'manager'])
 
-    const { data: current } = await supabase
+    const currentRes = await supabase
       .from('work_orders')
       .select('status, source_schedule_id, source, actual_cost, estimated_cost, title, property_id, vendor_id')
       .eq('id', workOrderId)
       .eq('org_id', membership.org_id)
-      .single()
+      .maybeSingle()
+
+    if (reportQueryError(currentRes.error, { site: 'serverAction.maintenance.updateWorkOrderStatus', orgId: membership.org_id })) {
+      return { error: 'Could not load the work order. Please try again.' }
+    }
+    const current = currentRes.data
 
     if (!current) return { error: 'Work order not found' }
 
@@ -580,12 +606,17 @@ export async function logActualCost(
   try {
     const { supabase, membership, user } = await requireOrgRole(['admin', 'manager'])
 
-    const { data: wo } = await supabase
+    const woRes = await supabase
       .from('work_orders')
       .select('id, status, title, property_id, actual_cost')
       .eq('id', workOrderId)
       .eq('org_id', membership.org_id)
-      .single()
+      .maybeSingle()
+
+    if (reportQueryError(woRes.error, { site: 'serverAction.maintenance.logActualCost', orgId: membership.org_id })) {
+      return { error: 'Could not load the work order. Please try again.' }
+    }
+    const wo = woRes.data
 
     if (!wo) return { error: 'Work order not found' }
 
@@ -765,21 +796,31 @@ export async function deleteWorkOrderPhoto(photoId: string): Promise<{ error?: s
   try {
     const { supabase, membership } = await requireOrgRole(['admin', 'manager'])
 
-    const { data: photo } = await supabase
+    const photoRes = await supabase
       .from('work_order_photos')
       .select('id, storage_path, work_order_id')
       .eq('id', photoId)
-      .single()
+      .maybeSingle()
+
+    if (reportQueryError(photoRes.error, { site: 'serverAction.maintenance.deleteWorkOrderPhoto.photo', orgId: membership.org_id })) {
+      return { error: 'Could not delete the photo. Please try again.' }
+    }
+    const photo = photoRes.data
 
     if (!photo) return { error: 'Photo not found' }
 
     // Verify the work order belongs to this org before deleting
-    const { data: wo } = await supabase
+    const woRes = await supabase
       .from('work_orders')
       .select('id')
       .eq('id', photo.work_order_id)
       .eq('org_id', membership.org_id)
-      .single()
+      .maybeSingle()
+
+    if (reportQueryError(woRes.error, { site: 'serverAction.maintenance.deleteWorkOrderPhoto.workOrder', orgId: membership.org_id })) {
+      return { error: 'Could not delete the photo. Please try again.' }
+    }
+    const wo = woRes.data
 
     if (!wo) return { error: 'Photo not found' }
 
@@ -820,12 +861,17 @@ export async function sendQuoteRequests(
 
     if (!vendorIds.length) return { error: 'Select at least one vendor', sent: 0 }
 
-    const { data: wo } = await supabase
+    const woRes = await supabase
       .from('work_orders')
       .select('id, property_id, status')
       .eq('id', workOrderId)
       .eq('org_id', membership.org_id)
-      .single()
+      .maybeSingle()
+
+    if (reportQueryError(woRes.error, { site: 'serverAction.maintenance.sendQuoteRequests.workOrder', orgId: membership.org_id })) {
+      return { error: 'Could not load the work order. Please try again.', sent: 0 }
+    }
+    const wo = woRes.data
 
     if (!wo) return { error: 'Work order not found', sent: 0 }
     if (wo.status === 'completed' || wo.status === 'cancelled') {
@@ -837,12 +883,23 @@ export async function sendQuoteRequests(
     const vendorProblem = await checkQuoteVendorsAssignable(supabase, membership.org_id, vendorIds)
     if (vendorProblem) return { ...vendorProblem, sent: 0 }
 
-    // Skip vendors who already have a pending or submitted quote for this WO
-    const { data: existing } = await supabase
+    // Skip vendors who already have a pending or submitted quote for this WO.
+    //
+    // This is a dedup filter with no unique constraint behind it, so its empty
+    // result and its failure must not share a branch: a failed read made
+    // existingVendorIds empty, every selected vendor was re-sent, and each got
+    // a SECOND RFQ email carrying a second quote token. A duplicate outbound
+    // vendor email is worse than making the PM retry.
+    const existingRes = await supabase
       .from('quote_requests')
       .select('vendor_id')
       .eq('work_order_id', workOrderId)
       .in('status', ['pending', 'submitted'])
+
+    if (reportQueryError(existingRes.error, { site: 'serverAction.maintenance.sendQuoteRequests.existing', orgId: membership.org_id })) {
+      return { error: 'Could not check existing quote requests. Please try again.', sent: 0 }
+    }
+    const existing = existingRes.data
 
     const existingVendorIds = new Set((existing ?? []).map((r) => r.vendor_id))
     const toSend = vendorIds.filter((id) => !existingVendorIds.has(id))
@@ -912,12 +969,17 @@ export async function approveQuoteRequest(
   try {
     const { supabase, membership } = await requireOrgRole(['admin', 'manager'])
 
-    const { data: qr } = await supabase
+    const qrRes = await supabase
       .from('quote_requests')
       .select('id, work_order_id, vendor_id, quoted_amount, status, org_id')
       .eq('id', quoteRequestId)
       .eq('org_id', membership.org_id)
-      .single()
+      .maybeSingle()
+
+    if (reportQueryError(qrRes.error, { site: 'serverAction.maintenance.approveQuoteRequest', orgId: membership.org_id })) {
+      return { error: 'Could not load the quote request. Please try again.' }
+    }
+    const qr = qrRes.data
 
     if (!qr) return { error: 'Quote request not found' }
 
@@ -1011,12 +1073,17 @@ export async function declineQuoteRequest(
   try {
     const { supabase, membership } = await requireOrgRole(['admin', 'manager'])
 
-    const { data: qr } = await supabase
+    const qrRes = await supabase
       .from('quote_requests')
       .select('id, work_order_id')
       .eq('id', quoteRequestId)
       .eq('org_id', membership.org_id)
-      .single()
+      .maybeSingle()
+
+    if (reportQueryError(qrRes.error, { site: 'serverAction.maintenance.declineQuoteRequest', orgId: membership.org_id })) {
+      return { error: 'Could not decline the quote. Please try again.' }
+    }
+    const qr = qrRes.data
 
     if (!qr) return { error: 'Quote request not found' }
 
@@ -1040,12 +1107,23 @@ export async function deleteWorkOrder(workOrderId: string): Promise<void> {
   try {
     const { supabase, membership, user } = await requireOrgRole(['admin', 'manager'])
 
-    const { data: current } = await supabase
+    const currentRes = await supabase
       .from('work_orders')
       .select('status')
       .eq('id', workOrderId)
       .eq('org_id', membership.org_id)
-      .single()
+      .maybeSingle()
+
+    // Throws rather than returning, because this action is Promise<void> and
+    // its caller (use-work-order-actions.ts) renders the thrown message. The
+    // message is written here rather than letting SupabaseQueryError surface,
+    // so nothing internal reaches the UI. A silent null used to skip the whole
+    // cancel block — no status change, no update row, no audit event — while
+    // the confirm dialog closed as if the work order had been cancelled.
+    if (reportQueryError(currentRes.error, { site: 'serverAction.maintenance.deleteWorkOrder', orgId: membership.org_id })) {
+      throw new Error('Could not load the work order. Please try again.')
+    }
+    const current = currentRes.data
 
     if (current) {
       await supabase
@@ -1270,12 +1348,17 @@ export async function bulkAssignVendor(
   try {
     const { supabase, membership, user } = await requireOrgRole(['admin', 'manager'])
 
-    const { data: vendor } = await supabase
+    const vendorRes = await supabase
       .from('vendors')
       .select('id, name')
       .eq('id', vendorId)
       .eq('org_id', membership.org_id)
-      .single()
+      .maybeSingle()
+
+    if (reportQueryError(vendorRes.error, { site: 'serverAction.maintenance.bulkAssignVendor.vendor', orgId: membership.org_id })) {
+      return { error: 'Could not verify the vendor. Please try again.' }
+    }
+    const vendor = vendorRes.data
 
     if (!vendor) return { error: 'Vendor not found' }
 
@@ -1283,11 +1366,22 @@ export async function bulkAssignVendor(
       return { error: VENDOR_HARD_BLOCKED_ERROR }
     }
 
-    const { data: workOrders } = await supabase
+    // Fails closed, and it can afford to: this read is before the UPDATE, so
+    // an early return leaves nothing half-done. A silent null skipped
+    // trackVendorAssignmentAgainstSuggestions entirely, which left every work
+    // order in the batch on suggestion_status 'pending' forever — the UI keeps
+    // offering accept/dismiss on an already-assigned WO, and nothing
+    // reconciles it later — while the vendor-scoring loop recorded nothing.
+    const workOrdersRes = await supabase
       .from('work_orders')
       .select('id, suggestion_status, suggested_vendor_ids')
       .in('id', workOrderIds)
       .eq('org_id', membership.org_id)
+
+    if (reportQueryError(workOrdersRes.error, { site: 'serverAction.maintenance.bulkAssignVendor.workOrders', orgId: membership.org_id })) {
+      return { error: 'Could not load the selected work orders. Please try again.' }
+    }
+    const workOrders = workOrdersRes.data
 
     const { error } = await supabase
       .from('work_orders')
@@ -1342,12 +1436,17 @@ export async function acceptVendorSuggestion(workOrderId: string): Promise<{ err
   try {
     const { supabase, membership, user } = await requireOrgRole(['admin', 'manager'])
 
-    const { data: wo } = await supabase
+    const woRes = await supabase
       .from('work_orders')
       .select('id, suggested_vendor_ids')
       .eq('id', workOrderId)
       .eq('org_id', membership.org_id)
-      .single()
+      .maybeSingle()
+
+    if (reportQueryError(woRes.error, { site: 'serverAction.maintenance.acceptVendorSuggestion', orgId: membership.org_id })) {
+      return { error: 'Could not load the work order. Please try again.' }
+    }
+    const wo = woRes.data
 
     if (!wo) return { error: 'Work order not found' }
 
@@ -1416,12 +1515,24 @@ export async function dismissVendorSuggestion(workOrderId: string): Promise<{ er
   try {
     const { supabase, membership, user } = await requireOrgRole(['admin', 'manager'])
 
-    const { data: wo } = await supabase
+    // Fails closed BEFORE the dismissal write, same call as turnovers'
+    // dismissSuggestion. A silent null left vendorId undefined, so the
+    // "rejected" outcome row was never written (the algorithm keeps suggesting
+    // the vendor the PM just rejected) and the audit row below recorded
+    // `vendor_id: null` for a dismissal that did have one — an affirmatively
+    // wrong row in the log someone reads during an incident. The update is
+    // idempotent, so a retry gets both.
+    const woRes = await supabase
       .from('work_orders')
       .select('suggested_vendor_ids')
       .eq('id', workOrderId)
       .eq('org_id', membership.org_id)
-      .single()
+      .maybeSingle()
+
+    if (reportQueryError(woRes.error, { site: 'serverAction.maintenance.dismissVendorSuggestion', orgId: membership.org_id })) {
+      return { error: 'Could not load the work order. Please try again.' }
+    }
+    const wo = woRes.data
 
     const { error } = await supabase
       .from('work_orders')
@@ -1613,12 +1724,17 @@ export async function createMaintenanceSchedule(
   try {
     const { supabase, membership } = await requireOrgRole(['admin', 'manager'])
 
-    const { data: property } = await supabase
+    const propertyRes = await supabase
       .from('properties')
       .select('id')
       .eq('id', data.property_id)
       .eq('org_id', membership.org_id)
-      .single()
+      .maybeSingle()
+
+    if (reportQueryError(propertyRes.error, { site: 'serverAction.maintenance.createMaintenanceSchedule', orgId: membership.org_id })) {
+      return { error: 'Could not verify the property. Please try again.' }
+    }
+    const property = propertyRes.data
 
     if (!property) return { error: 'Property not found' }
 
@@ -1807,6 +1923,83 @@ export type BroadcastResult = {
 
 // Idempotent: skip if a maintenance_schedule with the same name
 // already exists on the property
+type BroadcastItem = {
+  id: string; name: string; description: string | null
+  schedule_frequency: ScheduleFrequency; vendor_specialty_hint: VendorSpecialty | null
+  estimated_cost: number | null; sort_order: number
+  asset_category: string | null
+  active_from_month: number | null; active_to_month: number | null
+}
+
+type BroadcastInputs =
+  | { ok: false; error: string }
+  | {
+      ok: true
+      items:      BroadcastItem[]
+      properties: { id: string }[]
+      /** is_system drives is_from_standard_template on every inserted row. */
+      template:   { id: string; org_id: string | null; is_system: boolean }
+    }
+
+/**
+ * The three reads broadcastMaintenanceTemplate needs before it can fan a
+ * template out across properties. Extracted to keep the action under the
+ * cognitive-complexity ceiling once each read grew its own error branch.
+ *
+ * All three fail closed, and the property read especially: it IS the org
+ * filter for the client-supplied propertyIds, and its result is what every
+ * inserted row's property_id comes from. An empty result and a failed read
+ * used to be the same "No matching properties found" — which, for the items
+ * read, also meant a 25-item template reported itself as empty and invited the
+ * PM to re-create it as a duplicate.
+ */
+async function loadBroadcastInputs(
+  supabase:    Awaited<ReturnType<typeof requireOrgRole>>['supabase'],
+  orgId:       string,
+  templateId:  string,
+  propertyIds: string[],
+): Promise<BroadcastInputs> {
+  const templateRes = await supabase
+    .from('maintenance_schedule_templates')
+    .select('id, org_id, is_system')
+    .eq('id', templateId)
+    .maybeSingle()
+
+  if (reportQueryError(templateRes.error, { site: 'serverAction.maintenance.broadcastMaintenanceTemplate.template', orgId })) {
+    return { ok: false, error: 'Could not load the template. Please try again.' }
+  }
+  const template = templateRes.data
+  if (!template || (!template.is_system && template.org_id !== orgId)) {
+    return { ok: false, error: 'Template not found' }
+  }
+
+  const itemsRes = await supabase
+    .from('maintenance_schedule_template_items')
+    .select('id, name, description, schedule_frequency, vendor_specialty_hint, estimated_cost, sort_order, asset_category, active_from_month, active_to_month')
+    .eq('template_id', templateId)
+    .order('sort_order', { ascending: true })
+
+  if (reportQueryError(itemsRes.error, { site: 'serverAction.maintenance.broadcastMaintenanceTemplate.items', orgId })) {
+    return { ok: false, error: "Could not load the template's items. Please try again." }
+  }
+  const items = (itemsRes.data ?? []) as BroadcastItem[]
+  if (items.length === 0) return { ok: false, error: 'Template has no items' }
+
+  const propertiesRes = await supabase
+    .from('properties')
+    .select('id')
+    .eq('org_id', orgId)
+    .in('id', propertyIds)
+
+  if (reportQueryError(propertiesRes.error, { site: 'serverAction.maintenance.broadcastMaintenanceTemplate.props', orgId })) {
+    return { ok: false, error: 'Could not verify the selected properties. Please try again.' }
+  }
+  const properties = propertiesRes.data ?? []
+  if (properties.length === 0) return { ok: false, error: 'No matching properties found' }
+
+  return { ok: true, items, properties, template }
+}
+
 export async function broadcastMaintenanceTemplate(
   templateId:         string,
   propertyIds:        string[],
@@ -1818,31 +2011,9 @@ export async function broadcastMaintenanceTemplate(
 
     if (propertyIds.length === 0) return { error: 'Select at least one property' }
 
-    const { data: template } = await supabase
-      .from('maintenance_schedule_templates')
-      .select('id, org_id, is_system')
-      .eq('id', templateId)
-      .single()
-
-    if (!template || (!template.is_system && template.org_id !== membership.org_id)) {
-      return { error: 'Template not found' }
-    }
-
-    const { data: items } = await supabase
-      .from('maintenance_schedule_template_items')
-      .select('id, name, description, schedule_frequency, vendor_specialty_hint, estimated_cost, sort_order, asset_category, active_from_month, active_to_month')
-      .eq('template_id', templateId)
-      .order('sort_order', { ascending: true })
-
-    if (!items || items.length === 0) return { error: 'Template has no items' }
-
-    const { data: properties } = await supabase
-      .from('properties')
-      .select('id')
-      .eq('org_id', membership.org_id)
-      .in('id', propertyIds)
-
-    if (!properties || properties.length === 0) return { error: 'No matching properties found' }
+    const inputs = await loadBroadcastInputs(supabase, membership.org_id, templateId, propertyIds)
+    if (!inputs.ok) return { error: inputs.error }
+    const { items, properties, template } = inputs
 
     // PostgREST truncates an unbounded select at max_rows = 1000 with a 200 and
     // no truncation signal. This set IS the duplicate guard, and there is no
@@ -1963,12 +2134,17 @@ export async function updateMaintenanceTemplate(
 
     if (!name) return { error: 'Name is required' }
 
-    const { data: template } = await supabase
+    const templateRes = await supabase
       .from('maintenance_schedule_templates')
       .select('id, is_system')
       .eq('id', templateId)
       .eq('org_id', membership.org_id)
-      .single()
+      .maybeSingle()
+
+    if (reportQueryError(templateRes.error, { site: 'serverAction.maintenance.updateMaintenanceTemplate', orgId: membership.org_id })) {
+      return { error: 'Could not load the template. Please try again.' }
+    }
+    const template = templateRes.data
 
     if (!template)          return { error: 'Template not found' }
     if (template.is_system) return { error: 'System templates cannot be edited' }
@@ -2132,12 +2308,17 @@ export async function addCatalogItemToProperty(
 
     // Verify property belongs to this org — propertyId is client-supplied and
     // must not be trusted to already scope to the caller's org.
-    const { data: property } = await supabase
+    const propertyRes = await supabase
       .from('properties')
       .select('id')
       .eq('id', propertyId)
       .eq('org_id', membership.org_id)
-      .single()
+      .maybeSingle()
+
+    if (reportQueryError(propertyRes.error, { site: 'serverAction.maintenance.addCatalogItemToProperty', orgId: membership.org_id })) {
+      return { error: 'Could not verify the property. Please try again.' }
+    }
+    const property = propertyRes.data
 
     if (!property) return { error: 'Property not found' }
 
@@ -2200,12 +2381,17 @@ export async function addCustomMaintenanceItem(
 
     // Verify property belongs to this org — propertyId is client-supplied and
     // must not be trusted to already scope to the caller's org.
-    const { data: property } = await supabase
+    const propertyRes = await supabase
       .from('properties')
       .select('id')
       .eq('id', propertyId)
       .eq('org_id', membership.org_id)
-      .single()
+      .maybeSingle()
+
+    if (reportQueryError(propertyRes.error, { site: 'serverAction.maintenance.addCustomMaintenanceItem', orgId: membership.org_id })) {
+      return { error: 'Could not verify the property. Please try again.' }
+    }
+    const property = propertyRes.data
 
     if (!property) return { error: 'Property not found' }
 
