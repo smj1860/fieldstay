@@ -15,7 +15,14 @@ function hasPositiveAmount(value: number | null | undefined): value is number {
 // ── Booking Confirmed (Hospitable / OwnerRez) ────────────────────────────────
 
 export const handleBookingConfirmed = inngest.createFunction(
-  { id: 'booking-confirmed', name: 'Booking Confirmed — Post Revenue', retries: 3 },
+  {
+    id: 'booking-confirmed', name: 'Booking Confirmed — Post Revenue', retries: 3,
+    // The heaviest burst on the platform: ownerrez/hospitable initial-sync
+    // dispatches one of these per imported booking, so connecting a single new
+    // PMS account can emit thousands in one go. Each posts revenue to
+    // owner_transactions.
+    concurrency: { limit: 10 },
+  },
   { event: 'booking/confirmed' as const },
   async ({ event, step }) => {
     const { booking_id, property_id, org_id, source, actual_total_amount } = event.data

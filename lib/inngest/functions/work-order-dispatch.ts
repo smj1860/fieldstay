@@ -11,6 +11,11 @@ export const workOrderDispatch = inngest.createFunction(
     id:      'work-order-dispatch',
     name:    'Send Work Order to Vendor',
     retries: 3,
+    // Burst-exposed AND sends through an external provider. Resend's default
+    // is 2 req/s, so throttle to 1/s: this handler receives a BATCH of events
+    // (see the sender), and without a cap the whole batch lands at once.
+    concurrency: { limit: 5 },
+    throttle:    { limit: 60, period: '1m' },
   },
   { event: 'work-order/dispatched' },
 

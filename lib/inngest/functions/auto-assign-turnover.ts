@@ -5,7 +5,14 @@ import { haversineKm, proximityScore } from '@/lib/scoring/geo'
 import { computeWorkloadMap, computeFamiliarIds } from '@/lib/scoring/pools'
 
 export const autoAssignTurnover = inngest.createFunction(
-  { id: 'auto-assign-turnover', name: 'Auto-Assign Crew to Turnover', retries: 2 },
+  {
+    id: 'auto-assign-turnover', name: 'Auto-Assign Crew to Turnover', retries: 2,
+    // Triggered by turnover/created, which the generator emits as an ARRAY —
+    // one per turnover it just created for a property. This handler runs ~8
+    // queries per invocation, so an uncapped batch is the single largest
+    // multiplier on connection usage in the whole event graph.
+    concurrency: { limit: 10 },
+  },
   { event: 'turnover/created' },
   async ({ event, step }) => {
     const { turnover_id, property_id, org_id, checkout_datetime } = event.data
