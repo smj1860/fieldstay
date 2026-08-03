@@ -36,8 +36,8 @@
   ],
   "measured_at": "2026-08-03",
   "counts": {
-    "fieldstay-supabase-discarded-result": 141,
-    "fieldstay-supabase-read-without-error": 258,
+    "fieldstay-supabase-discarded-result": 140,
+    "fieldstay-supabase-read-without-error": 257,
     "fieldstay-supabase-read-without-error-fan-in": 15,
     "fieldstay-supabase-unbounded-select-global-table": 5,
     "fieldstay-supabase-unbounded-select-in-list": 36,

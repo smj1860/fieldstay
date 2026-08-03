@@ -39,7 +39,7 @@ function makeSupabase(queue: Record<string, Resp[]>) {
     const result: Resp = q?.length ? q.shift()! : { data: null, error: null }
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const chain: any = {}
-    for (const m of ['select', 'insert', 'update', 'upsert', 'delete', 'eq', 'in']) {
+    for (const m of ['select', 'insert', 'update', 'upsert', 'delete', 'eq', 'in', 'not', 'is']) {
       chain[m] = vi.fn((...args: unknown[]) => {
         calls.push({ table, method: m, args })
         return chain
@@ -146,12 +146,45 @@ describe('dispatchCompletionEvents', () => {
   it('cascades turnover/completed for a linked turnover that is still open', async () => {
     const linked = { ...CLAIMED, source_turnover_id: 'to_1' }
     const supabase = makeSupabase({
-      turnovers: [{ data: { id: 'to_1', property_id: 'prop_1', org_id: 'org_1', status: 'in_progress' }, error: null }],
+      turnovers: [
+        // 1st call: the read.  2nd call: the claiming UPDATE, which must match
+        // a row before the event may fire.
+        { data: { id: 'to_1', property_id: 'prop_1', org_id: 'org_1', status: 'in_progress' }, error: null },
+        { data: { id: 'to_1' }, error: null },
+      ],
     })
 
     await dispatchCompletionEvents(asClient(supabase), linked, 'inv_1', 'tok_1', null, 150)
 
+    // The turnover must actually be CLOSED, not merely announced as closed.
+    // Firing the event without writing status is what left the cleaning fee
+    // posted against a turnover still sitting open on the board — and let a
+    // later real completion fire the same event a second time.
+    const statusWrite = supabase.calls.find(
+      (c) => c.table === 'turnovers' && c.method === 'update',
+    )
+    expect(statusWrite?.args[0]).toMatchObject({ status: 'completed' })
+
     expect(inngest.send).toHaveBeenCalledWith(
+      expect.objectContaining({ name: 'turnover/completed' }),
+    )
+  })
+
+  it('does NOT fire turnover/completed when the claim matches zero rows', async () => {
+    // Another path completed the turnover between our read and our update.
+    // That path fires its own event; firing a second one double-counts the
+    // completion metric and corrupts the derived duration.
+    const linked = { ...CLAIMED, source_turnover_id: 'to_1' }
+    const supabase = makeSupabase({
+      turnovers: [
+        { data: { id: 'to_1', property_id: 'prop_1', org_id: 'org_1', status: 'in_progress' }, error: null },
+        { data: null, error: null },   // claim matched nothing
+      ],
+    })
+
+    await dispatchCompletionEvents(asClient(supabase), linked, 'inv_1', 'tok_1', null, 150)
+
+    expect(inngest.send).not.toHaveBeenCalledWith(
       expect.objectContaining({ name: 'turnover/completed' }),
     )
   })

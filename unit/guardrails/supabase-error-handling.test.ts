@@ -171,7 +171,7 @@ const BASELINE: Record<string, number> = {
   'lib/inngest/functions/hospitable/initial-sync.ts': 2,
   'lib/inngest/functions/hostaway/initial-sync.ts': 2,
   'lib/inngest/functions/ical-sync.ts': 2,
-  'lib/inngest/functions/inventory-events.ts': 7,
+  'lib/inngest/functions/inventory-events.ts': 6,
   'lib/inngest/functions/kroger-connected.ts': 2,
   'lib/inngest/functions/log-message-comm.ts': 2,
   'lib/inngest/functions/notify-assignment-gap.ts': 2,

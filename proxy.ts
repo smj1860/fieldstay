@@ -279,7 +279,12 @@ async function enforceTokenRouteRateLimit(
   limiter:  Ratelimit,
   nonce:    string,
 ): Promise<NextResponse | null> {
-  const ip = extractClientIp(request) ?? request.headers.get('x-real-ip') ?? '127.0.0.1'
+  // extractClientIp already prefers the platform-set headers (including
+  // x-real-ip) over x-forwarded-for — this used to pass x-real-ip as a
+  // FALLBACK behind a client-spoofable XFF read, which inverted the trust
+  // order. The constant is the last resort: one shared bucket is the right
+  // failure mode, since a per-request unique key would mean no limit at all.
+  const ip = extractClientIp(request) ?? '127.0.0.1'
 
   const decision = await checkLimit(limiter, ip, {
     onError: 'allow',
