@@ -227,7 +227,15 @@ function rateLimiterForPathname(pathname: string) {
   // OAuth callbacks are BYPASS_ROUTES (no session to check) but must still be
   // throttled — the oneclick route stores unvalidated authorization codes in
   // Vault, so the limiter check below runs BEFORE the bypass early-return.
-  if (pathname.startsWith('/api/integrations/') && pathname.includes('/callback'))
+  //
+  // /connect needs the same treatment and did not have it: this matcher used
+  // to require `/callback`, so /api/integrations/<provider>/connect matched no
+  // branch at all. That route reaches auth.getUser() but does NOT gate on it
+  // (marketplace arrivals are unauthenticated by design) and then performs a
+  // service-role INSERT into oauth_states carrying a caller-supplied
+  // return_to — an unauthenticated, unbounded write to the primary database.
+  if (pathname.startsWith('/api/integrations/') &&
+      (pathname.includes('/callback') || pathname.includes('/connect')))
     return oauthCallbackRatelimit
   return null
 }

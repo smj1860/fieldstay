@@ -4,6 +4,13 @@ import { createServiceClient }       from '@/lib/supabase/server'
 import { requireCrewMember }         from '@/lib/crew-auth'
 import { inngest }                   from '@/lib/inngest/client'
 import { logAuditEvent }             from '@/lib/audit'
+import {
+  workOrderCompletionFields,
+  finalizeWorkOrderCompletion,
+  COMPLETED_WORK_ORDER_SELECT,
+  type CompletedWorkOrderRow,
+} from '@/app/(dashboard)/maintenance/complete-work-order-helpers'
+import type { WoStatus } from '@/types/database'
 
 /**
  * POST /api/crew/work-orders/[id]/complete
@@ -54,20 +61,32 @@ export async function POST(
   if (!wo)                       return NextResponse.json({ error: 'Not found' }, { status: 404 })
   if (wo.status === 'completed') return NextResponse.json({ alreadyCompleted: true })
 
+  const trimmedNotes = notes?.trim() ? notes.trim() : 'Marked complete by crew'
+
   // The WHERE clause (not the earlier read) is the real guard against a
   // concurrent duplicate request completing the WO twice — .neq ensures
   // only one racing request's UPDATE actually matches a row.
+  //
+  // The column payload comes from workOrderCompletionFields() and the row is
+  // selected back as COMPLETED_WORK_ORDER_SELECT so this path can hand it to
+  // finalizeWorkOrderCompletion below. Writing the columns inline is what made
+  // this a FOURTH completion path that silently skipped every side effect:
+  // no work-order/completed event (so no owner_transactions maintenance
+  // expense) and, worse, no source-schedule advance — leaving next_due_date
+  // untouched, so the nightly cron kept seeing the schedule as due, kept
+  // colliding with wo_maintenance_schedule_date_unique, and kept discarding
+  // the 23505 as an expected lost race. The schedule stopped recurring
+  // permanently, with nothing logged anywhere.
   const { data: updated, error } = await supabase
     .from('work_orders')
     .update({
-      status:         'completed',
-      completed_date: new Date().toISOString().split('T')[0],
-      updated_at:     new Date().toISOString(),
+      ...workOrderCompletionFields(trimmedNotes),
+      updated_at: new Date().toISOString(),
     })
     .eq('id', id)
     .neq('status', 'completed')
-    .select('id')
-    .maybeSingle()
+    .select(COMPLETED_WORK_ORDER_SELECT)
+    .maybeSingle<CompletedWorkOrderRow>()
 
   if (error) {
     console.error('[CrewWorkOrderComplete]', error)
@@ -77,18 +96,23 @@ export async function POST(
   // Lost the race to a concurrent request — it already completed this WO.
   if (!updated) return NextResponse.json({ alreadyCompleted: true })
 
-  // Record the status change (+ optional note) in the WO update log
-  await supabase.from('work_order_updates').insert({
-    work_order_id:             id,
-    org_id:                    wo.org_id,
-    updated_by_user_id:        user.id,
-    updated_via_vendor_portal: false,
-    status_from:               wo.status,
-    status_to:                 'completed',
-    notes:                     notes?.trim() ? notes.trim() : 'Marked complete by crew',
+  // Every completion side effect — the work-order/completed event (which posts
+  // the owner_transactions maintenance expense), the work_order_updates audit
+  // row, and the source maintenance-schedule advance. Called with the row the
+  // UPDATE actually claimed, so a lost race fans out nothing.
+  //
+  // This also writes the work_order_updates row this route used to insert
+  // itself; doing both would double-log the status change.
+  await finalizeWorkOrderCompletion(supabase, wo.org_id, [updated], {
+    statusFromById:  new Map([[id, wo.status as WoStatus | null]]),
+    notes:           trimmedNotes,
+    updatedByUserId: user.id,
   })
 
-  // Notify PM via Inngest
+  // Notify PM via Inngest. Kept alongside work-order/completed: this is the
+  // crew-specific PM notification ("✓ Work Complete — WO-123"), while
+  // handleWorkOrderCompleted only posts the expense, so the two do not
+  // produce duplicate notifications.
   await inngest.send({
     name: 'work-order/crew.completed',
     data: {

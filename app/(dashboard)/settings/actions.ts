@@ -15,6 +15,14 @@ import type { ContactPref, VendorSpecialty, CrewRole } from '@/types/database'
 import { renderCrewInviteEmail } from '@/emails/crew-invite'
 import { renderSmsBody } from '@/lib/sms/templates'
 
+/**
+ * Ceilings on the two crew actions that fan out to third-party contact
+ * details. Both exist because `emailSendActionLimiter` counts CALLS, and a
+ * call-counting limiter bounds nothing when one call reaches N recipients.
+ */
+const MAX_BULK_IMPORT_ROWS       = 500   // one import
+const MAX_BULK_INVITE_RECIPIENTS = 200   // one bulk-invite fan-out
+
 export type SettingsActionState = {
   error?: string
   success?: boolean
@@ -405,6 +413,20 @@ export async function bulkImportCrew(
     const { supabase, membership, user } = await requireOrgMember()
 
     if (!rows.length) return { imported: 0, skipped: 0, error: 'No rows to import' }
+
+    // Bounded because this is the STAGING half of a mail-relay: rows land in
+    // crew_members carrying arbitrary email/phone, and inviteAllUninvitedCrew
+    // then mails every one of them. An unbounded import let a single trial
+    // account load a list of any size and hand it to that fan-out.
+    // 500 is far above a real crew roster (this product targets 10–50
+    // properties) and low enough that the list cannot be a mailing list.
+    if (rows.length > MAX_BULK_IMPORT_ROWS) {
+      return {
+        imported: 0,
+        skipped:  0,
+        error:    `Too many rows in one import (${rows.length}). Please split it into batches of ${MAX_BULK_IMPORT_ROWS} or fewer.`,
+      }
+    }
 
     const valid   = rows.filter((r) => r.name?.trim())
     const skipped = rows.length - valid.length
@@ -867,6 +889,10 @@ export async function inviteAllUninvitedCrew(): Promise<{ sent: number; error?: 
     // domain, which risks the domain's reputation using someone else's address
     // as the target. Fails OPEN: an abuse limiter must not block real invites
     // during a Redis outage.
+    // NOTE: the real budget check happens AFTER the recipient list is known,
+    // just below — it consumes one token per recipient. This first check is a
+    // cheap "is this caller already exhausted?" gate so a spent caller doesn't
+    // pay for the query.
     const rl = await checkLimit(emailSendActionLimiter, `crew-bulk-invite:${user.id}`, {
       onError: 'allow',
       site:    'serverAction.settings.inviteAllUninvitedCrew',
@@ -881,6 +907,7 @@ export async function inviteAllUninvitedCrew(): Promise<{ sent: number; error?: 
       .is('user_id', null)
       .is('invite_sent_at', null)
       .or('email.not.is.null,phone.not.is.null')
+      .limit(MAX_BULK_INVITE_RECIPIENTS)
 
     if (queryError) {
       console.error('[inviteAllUninvitedCrew] query failed')
@@ -889,6 +916,23 @@ export async function inviteAllUninvitedCrew(): Promise<{ sent: number; error?: 
     }
 
     if (!uninvited?.length) return { sent: 0 }
+
+    // The budget that actually bounds outbound volume: one token per RECIPIENT.
+    // The per-call check above allowed 20 calls/hour, and each call fanned out
+    // to every uninvited crew row — so 20 × 1,000 = 20,000 emails and 20,000
+    // SMS per hour to addresses staged through bulkImportCrew, all from our
+    // sending domain and our Telnyx number. Counting calls bounded nothing.
+    const recipientBudget = await checkLimit(emailSendActionLimiter, `crew-bulk-invite:${user.id}`, {
+      onError: 'allow',
+      site:    'serverAction.settings.inviteAllUninvitedCrew.recipients',
+      cost:    uninvited.length,
+    })
+    if (!recipientBudget.allowed) {
+      return {
+        sent: 0,
+        error: `That would invite ${uninvited.length} people, which is over your hourly limit. Please try again in a little while.`,
+      }
+    }
 
     const { data: org } = await supabase
       .from('organizations')

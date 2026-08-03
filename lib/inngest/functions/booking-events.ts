@@ -102,7 +102,19 @@ export const handleBookingConfirmed = inngest.createFunction(
 )
 
 export const handleBookingDetected = inngest.createFunction(
-  { id: 'booking-detected', name: 'Handle New Booking', retries: 3 },
+  {
+    id: 'booking-detected', name: 'Handle New Booking', retries: 3,
+    // Serialized per property. ical-sync fires one booking/detected per new
+    // booking, so a sync ingesting N bookings for one property used to run N
+    // copies of generateTurnoversForProperty concurrently against the same
+    // rows. The generator's dedup is an in-memory context loaded once per run,
+    // so a loser of the Pass 1 insert race could still reach Pass 2 believing
+    // no standalone existed and insert a pair alongside it — two turnovers for
+    // one checkout, and two cleaning-fee rows on the owner's P&L.
+    // generator.ts now keeps its context truthful on 23505 as well, but this
+    // key is what removes the race rather than narrowing it.
+    concurrency: { limit: 1, key: 'event.data.property_id' },
+  },
   { event: 'booking/detected' as const },
   async ({ event, step, logger }) => {
     const { booking_id, property_id, org_id } = event.data

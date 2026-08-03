@@ -1,7 +1,8 @@
-import { unwrap } from '@/lib/supabase/unwrap'
+import { unwrap, tryUnwrap } from '@/lib/supabase/unwrap'
 import type { SupabaseClient } from '@supabase/supabase-js'
 import { inngest } from '@/lib/inngest/client'
 import { logAuditEvent } from '@/lib/audit'
+import { advanceSchedulesAfterCompletion } from '@/app/(dashboard)/maintenance/complete-work-order-helpers'
 
 /**
  * Helpers for POST /api/work-orders/[token]/complete.
@@ -135,6 +136,36 @@ export async function dispatchCompletionEvents(
         photo_paths:      [],
       },
     })
+  }
+
+  // Advance the source maintenance schedule, if this WO came from one.
+  //
+  // The vendor portal was a completion path that never did this: next_due_date
+  // stayed put, so the nightly cron kept seeing the schedule as due, kept
+  // colliding with wo_maintenance_schedule_date_unique, and kept treating the
+  // 23505 as an expected lost race — the schedule silently stopped recurring.
+  //
+  // Read here rather than returned from complete_work_order_via_token(),
+  // because widening that function's return shape needs a migration and the
+  // local/live migration ledgers are currently out of sync. Two columns on one
+  // already-claimed row; cheap, and it keeps this fix migration-free.
+  const scheduleRes = await supabase
+    .from('work_orders')
+    .select('source_schedule_id, source')
+    .eq('id', claimed.id)
+    .eq('org_id', claimed.org_id)
+    .maybeSingle()
+
+  const scheduleOut = tryUnwrap<{ source_schedule_id: string | null; source: string | null }>(
+    scheduleRes, { site: 'api.work-orders.complete.source-schedule', orgId: claimed.org_id },
+  )
+  const scheduleRow = scheduleOut.ok ? scheduleOut.data : null
+
+  if (scheduleRow?.source_schedule_id) {
+    await advanceSchedulesAfterCompletion(supabase, claimed.org_id, [{
+      scheduleId:      scheduleRow.source_schedule_id,
+      workOrderSource: scheduleRow.source,
+    }])
   }
 
   // Fire turnover completion automation if this WO is linked to a turnover

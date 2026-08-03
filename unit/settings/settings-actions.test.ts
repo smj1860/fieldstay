@@ -75,6 +75,7 @@ import {
   deactivateVendor,
   inviteCrewMember,
   inviteAllUninvitedCrew,
+  bulkImportCrew,
   updateAutoAssignMode,
   createCheckoutSession,
 } from '@/app/(dashboard)/settings/actions'
@@ -113,6 +114,7 @@ function makeSupabase(queued: QueuedByTable = {}) {
     chain.eq     = (...a: unknown[]) => record('eq', a)
     chain.is     = (...a: unknown[]) => record('is', a)
     chain.or     = (...a: unknown[]) => record('or', a)
+    chain.limit  = (...a: unknown[]) => record('limit', a)
 
     const resolveNext = () => {
       const idx = counters[table] ?? 0
@@ -433,6 +435,49 @@ describe('settings/actions', () => {
       const eqCalls = supabase.calls.filter((c) => c.table === 'crew_members' && c.method === 'eq')
       expect(eqCalls.some((c) => c.args[0] === 'org_id' && c.args[1] === ORG_ID)).toBe(true)
       expect(logAuditEvents).not.toHaveBeenCalled()
+    })
+
+    // The recipient fan-out is what this action actually spends, and the
+    // per-call limiter above it counts calls, not people. Without a bound on
+    // the query itself, one allowed call reached every uninvited row (capped
+    // only by PostgREST's max_rows = 1000), so 20 calls/hour meant up to
+    // 20,000 emails and 20,000 SMS per hour to third-party addresses.
+    it('bounds the recipient list so one call cannot fan out unbounded', async () => {
+      const supabase = makeSupabase({ crew_members: [{ data: [], error: null }] })
+      mockAuthed(supabase, 'admin')
+
+      await inviteAllUninvitedCrew()
+
+      const limitCall = supabase.calls.find((c) => c.table === 'crew_members' && c.method === 'limit')
+      expect(limitCall).toBeDefined()
+      expect(limitCall!.args[0]).toBeLessThanOrEqual(200)
+    })
+  })
+
+  describe('bulkImportCrew — fan-out staging bound', () => {
+    it('rejects an oversized import without writing anything', async () => {
+      const supabase = makeSupabase()
+      mockAuthed(supabase, 'admin')
+
+      const rows = Array.from({ length: 501 }, (_, i) => ({ name: `Crew ${i}`, email: `c${i}@example.com` }))
+      const result = await bulkImportCrew(rows)
+
+      expect(result.imported).toBe(0)
+      expect(result.error).toMatch(/too many rows/i)
+      // The staging write must not happen — these rows are the address list
+      // inviteAllUninvitedCrew would later mail.
+      expect(supabase.calls.some((c) => c.table === 'crew_members' && c.method === 'insert')).toBe(false)
+    })
+
+    it('accepts an import at the cap', async () => {
+      const supabase = makeSupabase({ crew_members: [{ data: null, error: null }] })
+      mockAuthed(supabase, 'admin')
+
+      const rows = Array.from({ length: 500 }, (_, i) => ({ name: `Crew ${i}` }))
+      const result = await bulkImportCrew(rows)
+
+      expect(result.error).toBeUndefined()
+      expect(result.imported).toBe(500)
     })
   })
 
