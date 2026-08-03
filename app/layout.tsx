@@ -2,6 +2,7 @@ import type { Metadata, Viewport } from 'next'
 import { headers }                   from 'next/headers'
 import Script                        from 'next/script'
 import { Inter } from 'next/font/google'
+import { Analytics } from '@vercel/analytics/next'
 import { SessionRefreshGuard } from '@/components/session-refresh-guard'
 import { CookieNotice } from '@/components/cookie-notice'
 import './globals.css'
@@ -65,6 +66,7 @@ export default async function RootLayout({
         <SessionRefreshGuard />
         {children}
         <CookieNotice />
+        <Analytics />
       </body>
     </html>
   )
