@@ -17,8 +17,9 @@ import { reportError } from '@/lib/observability/report-error'
 //
 // Distinguishing "the query errored" from "the query returned zero rows".
 //
-// The default `const { data } = await supabase.from(...)...` shape collapses
-// both into `data == null`, so an RLS regression, a missing GRANT, or a
+// The default destructure — the one that binds only `data` off a Supabase
+// result and drops `error` on the floor — collapses both into a null `data`,
+// so an RLS regression, a missing GRANT, or a
 // transient network failure renders the same friendly "no vendors yet" empty
 // state as a genuinely empty table — with nothing in the console and nothing
 // in Sentry. That is exactly how the notification bell went dark in

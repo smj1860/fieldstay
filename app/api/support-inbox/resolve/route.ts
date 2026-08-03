@@ -1,19 +1,10 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { createClient }              from '@/lib/supabase/server'
+import { requirePlatformStaff }      from '@/lib/auth'
 
 export async function POST(req: NextRequest): Promise<NextResponse> {
-  const supabase = await createClient()
-  const { data: { user } } = await supabase.auth.getUser()
-
-  if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
-
-  const { data: staff } = await supabase
-    .from('platform_staff')
-    .select('user_id')
-    .eq('user_id', user.id)
-    .maybeSingle()
-
-  if (!staff) return NextResponse.json({ error: 'Not staff' }, { status: 403 })
+  const auth = await requirePlatformStaff()
+  if (!auth.ok) return auth.response
+  const { supabase } = auth
 
   const body = await req.json() as { conversationId?: string }
   const { conversationId } = body

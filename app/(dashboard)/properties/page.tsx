@@ -19,7 +19,7 @@ export default async function PropertiesPage() {
     { count: ownerPortalTokenCount },
     { data: openWOs, error: openWOsError },
     { data: unassignedTOs, error: unassignedTOsError },
-    { data: erroredFeeds },
+    { data: erroredFeeds, error: erroredFeedsError },
   ] = await Promise.all([
     supabase
       .from('properties')
@@ -54,7 +54,13 @@ export default async function PropertiesPage() {
 
   // Logs + reports every failure, then throws so the segment's error.tsx
   // renders a real error state — an outage must not look like empty data.
-  throwIfAnyQueryFailed({ site: 'page.properties', orgId: membership.org_id }, propertiesError, openWOsError, unassignedTOsError)
+  // erroredFeeds is in here for the same reason as the other three: it drives
+  // the per-property sync-error badge, so a failed read renders a confident
+  // "0 sync errors" on properties whose calendars are actually broken.
+  throwIfAnyQueryFailed(
+    { site: 'page.properties', orgId: membership.org_id },
+    propertiesError, openWOsError, unassignedTOsError, erroredFeedsError,
+  )
 
   const opsCountsByProperty: Record<string, { openWorkOrders: number; unassignedTurnovers: number; syncErrors: number }> = {}
   const bump = (propertyId: string, key: 'openWorkOrders' | 'unassignedTurnovers' | 'syncErrors') => {
