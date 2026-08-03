@@ -1,5 +1,10 @@
 # FieldStay Third Pre-Launch Audit — 2026-08-03
 
+> **RE-VERIFIED against `origin/main` @ `8fd4064` (PR #551 merged).** See the
+> [Verification Addendum](#verification-addendum--re-verified-against-8fd4064)
+> at the end. Summary: **all 9 CRITICALs stand**; 2 findings fixed by #551,
+> 3 withdrawn as invalid, 1 mechanism corrected, 1 scope narrowed.
+
 **Scope:** Full-repo sweep across seven dimensions, run the day before the
 intended launch. Unlike audits 06 and 07, no area was declared out of scope —
 each lane re-read its territory from scratch rather than trusting the prior
@@ -580,3 +585,173 @@ while those are fixed post-launch is a legitimate call.
 
 **Post-launch:** the six guardrail bypasses, C4/H5/H6 (Dexie — significant work,
 and the crew PWA is lower-traffic on day one), complexity burn-down.
+
+---
+
+# Verification Addendum — re-verified against `8fd4064`
+
+The audit ran at baseline `7e954c6`. PR #551 ("database generic wiring") merged
+afterwards. Every finding was re-checked against `origin/main` @ `8fd4064`, and
+the live DB findings were re-queried against `vpmznjktllhmmbfnxuvk`.
+
+**Bottom line: the launch verdict is unchanged. All nine CRITICALs stand.**
+
+### Scope of the merge
+
+PR #551 changed 7 files: `inventory/actions.ts`, `maintenance/actions.ts`,
+`turnovers/actions.ts`, a new `lib/tenancy/verify.ts`, two guardrail tests, and
+`.semgrep/baseline-counts.json`. Every file backing a CRITICAL is
+**byte-identical** to the audit baseline — verified by comparing blob hashes,
+then spot-checking the code directly:
+
+| Finding | Confirmed present at `8fd4064` |
+|---|---|
+| C1 | `status: 'completed'` still an inline literal in the crew route; no `finalizeWorkOrderCompletion` |
+| C2 | `handleBookingDetected` still `{ id, name, retries: 3 }` — no `concurrency` key |
+| C3 | `inventory/page.tsx` still unbounded; its comment now says "up to ~2,500 rows" — 2.5× the cap it truncates at |
+| C4 | `if (!crewMember \|\| cancelled) return` still above every listener; comment still claims "the next run retries" |
+| C5–C7, C9 | files untouched |
+| C8 | infrastructure, unaffected by a code merge |
+| H1 | re-queried live: `get_crew_turnover_ids` still lacks `is_active`; both siblings have it |
+| H10 | still 311 live ledger entries |
+| H13 | `compliance-documents` still `file_size_limit = NULL`, `allowed_mime_types = NULL` |
+
+### FIXED by PR #551 (2)
+
+- **`addCrewToTurnover` unbounded conflict read** — now `tryFetchAll(...)` with
+  `.range()` at `turnovers/actions.ts:765-775`, and it fails *loudly*: a null
+  result surfaces "Couldn't check … for conflicts — please verify manually."
+  (`:789`). The `alreadyAssigned` pre-check is paginated and fails closed too.
+- **Cognitive complexity 26 in `addCrewToTurnover`** — eliminated via
+  `loadAssignmentTargets`, `sendAssignmentPush`, `countScheduleConflicts`,
+  `fetchCrewTimeOff`, `tryFetchAll`. `maintenance/actions.ts` is **unchanged**
+  (CC 23 @ `:131`, CC 21 @ `:1630`) and grew 2369 → 2529 lines; the commit's
+  "to zero" refers to the supabase-error-handling ratchet, not complexity.
+
+Also fixed in passing, unreported by the audit: `push_subscriptions`
+(`turnovers/actions.ts:206-215`) **gained a missing `.eq('org_id', orgId)` on a
+service-role read** — a genuine tenant-isolation fix.
+
+### WITHDRAWN as invalid (3)
+
+- **C3's `inventory/actions.ts:428` site — mis-attributed.** At baseline that
+  line was a `properties` read, not `inventory_items`. Both `inventory_items`
+  reads in that file were *already* paginated. C3's real site list is **three**
+  files, not five: `inventory/page.tsx:33`,
+  `templates/inventory/par-levels/page.tsx:24`,
+  `templates/inventory/saved/page.tsx:23` — all three re-read and confirmed
+  genuinely unbounded and org-scoped-only. The fifth claimed site,
+  `templates/inventory/actions.ts:409`, is an `.in('id', …)` read sized by a
+  client-supplied list, which is a different and much weaker class — it
+  truncates only on a >1000-item template edit. **C3's severity is unchanged**
+  (the page that breaks at ~15 properties is real), but its blast radius is
+  narrower than reported.
+- **Null `checkin_datetime` → zero-width interval** — `turnovers.checkin_datetime`
+  is `NOT NULL` (`schema_reference.sql:2615`, `database.generated.ts:4715`). The
+  `?? checkout_datetime` fallback at `turnovers/actions.ts:262` is dead code, not
+  a live bug. Worth deleting so it stops reading as a handled case.
+- **L4 — `next_wo_number` callable by `authenticated`** — its ACL is
+  `postgres=X | service_role=X`. `authenticated` cannot call it. The finding was
+  inferred from an `_unshipped` migration's comment describing the
+  *pre-hardening* state rather than from the live grant.
+
+### CORRECTED mechanism (1)
+
+**C5** claimed `cleanup_expired_oauth_states` does not exist and its migration
+sits in `_unshipped/`. Both wrong: the function **exists in production**, defined
+by a shipped migration (`20260531181701_integration_framework.sql`), is
+`service_role`-only, and has `search_path` pinned. What sits in `_unshipped/` is
+a *hardening* migration whose effect landed by another route.
+
+**The finding survives on its substance:** `pg_cron` is not installed and there
+are zero code references to the function, so **nothing ever calls it**. Expired
+`oauth_states` rows still accumulate with no bound. The unauthenticated
+unbounded write is real; only the stated reason for the missing cleanup was
+wrong.
+
+### Both corrections share one root cause
+
+Two of the three withdrawals came from an agent treating
+`supabase/migrations/_unshipped/` as evidence of what is *not* in production,
+when those changes had landed by another route. That is the same drift as
+**H10** — local migration files are not a reliable picture of live state. It
+strengthens H10 rather than weakening it, and it is a standing hazard for any
+future audit: **verify against the live DB, not the migrations directory.**
+
+### `lib/tenancy/verify.ts` (new, reviewed)
+
+A new shared tenancy helper days before launch warrants scrutiny; it is
+**correct**. `verifyPropertyInOrg` filters on both `.eq('id', …)` and
+`.eq('org_id', …)`, and **fails closed in both directions** — a read error and
+a missing row each return `{ok:false}`, with no path returning `ok:true` on a
+failed read. It correctly separates "read failed" from "not yours", which is the
+defect it was extracted to fix. All 7 call sites branch correctly
+(`if (!owned.ok) return { error: owned.error }`) and every one passes
+`membership.org_id` from `requireOrgMember()`, never a client value.
+
+Two nits, neither a defect: the `createClient` import is a value import used
+only in a type position (`import type` would avoid pulling the service-role
+module into the graph), and the parameter type would also accept a service-role
+client — safe here since the helper filters `org_id` explicitly, but the type
+carries no guarantee.
+
+### Guardrail and baseline changes — all tightening, none loosened
+
+Checked specifically because a removed guardrail line can be either a burn-down
+or a loosened check:
+
+- **`supabase-error-handling.test.ts`** — three baseline entries deleted
+  (8 + 23 + 16 = **47 sites moved from allowed to forbidden**). A mandatory
+  burn-down: the test fails on a stale entry, so leaving them would break CI.
+  Zero is real — the only remaining unchecked destructures are dynamic
+  `import()`s the matcher excludes.
+- **`n-plus-one-loops.test.ts`** — one line, `:855` → `:907`. Pure line shift;
+  the code at the new offset is byte-identical to baseline. No exception added
+  or broadened.
+- **`.semgrep/baseline-counts.json`** — every changed count went **down**
+  (`read-without-error` 306→259, `discarded-result` 143→142,
+  `unbounded-select-in-list` 43→36, `-single-parent` 45→40). None increased, so
+  nothing bypassed the ratchet.
+
+**One caveat on the "bounded reads" claim:** three maintenance sites
+(`maintenance/actions.ts:892, 1375, 1966`) were bounded with
+`.limit(SUPABASE_MAX_ROWS)` = `.limit(1000)` — exactly the PostgREST cap, so a
+1001st row is still silently dropped. All three are small-cardinality, so this
+is acceptable rather than a bug, but **the ratchet count moved without the
+truncation risk actually being removed.** Worth knowing before trusting that
+counter as a proxy for safety.
+
+### New findings introduced by #551
+
+None of substance. Verified: no newly-added discarded results (a diff-scoped
+grep for added bare `await supabase…` returns zero), no new unbounded selects
+(all 14 added `.select(` calls terminate in `maybeSingle()`, `fetchAllRows`/
+`tryFetchAll`, or an explicit `.limit()`), and no service-role call without org
+scope.
+
+Three minor observations:
+1. `applyTemplateToProperties` error precedence changed — a valid empty template
+   with no owned properties now reports "No valid properties selected" instead
+   of "No items in template". Cosmetic.
+2. `countScheduleConflicts` is now O(n × m) over a fully-paginated set — fixing
+   the unbounded read removed the accidental 1000-row cap that used to hide it.
+   Small in practice.
+3. `addCrewToTurnover`'s status advance (`:728`) issues
+   `.update({status:'assigned'}).in('id', pendingIds)` with **no** status
+   precondition, while its sibling `assignCrew:371-375` **does** have
+   `.eq('status','pending_assignment')`. Pre-existing, not introduced here, but
+   the asymmetry between two sibling actions is the same TOCTOU shape as the
+   `updatePurchaseOrderStatus` finding.
+
+### Still valid, in the changed files
+
+- **`updatePurchaseOrderStatus` TOCTOU** — now `inventory/actions.ts:786`
+  (pre-read) vs `:791-797` (UPDATE). Still no status precondition in the WHERE;
+  two concurrent calls both pass, both `logAuditEvent`, both send
+  `purchase-order/approved` with no dedup key.
+- **`assignCrew` double-assign race** — now `turnovers/actions.ts:353-357`
+  (delete), `:360-363` (upsert), `:371-375` (status). Delete and status update
+  still discard their results; delete-then-upsert still two statements. Confirmed
+  against live schema that `turnover_assignments_crew_unique` is
+  `(turnover_id, crew_member_id)` and so does **not** constrain
+  one-crew-per-turnover.
