@@ -2,12 +2,13 @@
 
 import { revalidatePath } from 'next/cache'
 import { fetchAllRows } from '@/lib/inngest/paginate'
+import { verifyPropertyInOrg } from '@/lib/tenancy/verify'
 import { requireOrgMember, requireOrgRole } from '@/lib/auth'
 import { inngest, sendEventAsync } from '@/lib/inngest/client'
 import { logAuditEvent } from '@/lib/audit'
 import { unwrapJoin } from '@/lib/utils/supabase-joins'
 import { reportError } from '@/lib/observability/report-error'
-import { reportQueryError, tryUnwrap, tryUnwrapList } from '@/lib/supabase/unwrap'
+import { reportQueryError, tryUnwrap } from '@/lib/supabase/unwrap'
 import type { TablesUpdate } from '@/types/database'
 
 export type TurnoverActionState = { error?: string; success?: boolean; warning?: string }
@@ -132,6 +133,35 @@ async function tryFetchAll<T>(
     reportError(err, { site, orgId })
     return null
   }
+}
+
+/**
+ * Days this crew member marked unavailable that fall on the turnover dates
+ * being assigned. Shared by both assignment actions, which had identical copies.
+ *
+ * Returns null when the read failed, which both callers surface as a warning:
+ * "non-blocking" means a KNOWN conflict doesn't block, never that an unknown
+ * one counts as clean.
+ */
+async function fetchCrewTimeOff(
+  supabase:     Awaited<ReturnType<typeof requireOrgMember>>['supabase'],
+  orgId:        string,
+  crewMemberId: string,
+  dates:        string[],
+  site:         string,
+): Promise<{ available_date: string }[] | null> {
+  return tryFetchAll<{ available_date: string }>(
+    (from, to) => supabase
+      .from('crew_availability')
+      .select('available_date')
+      .eq('org_id', orgId)
+      .eq('crew_member_id', crewMemberId)
+      .eq('is_available', false)
+      .in('available_date', dates)
+      .order('available_date')
+      .range(from, to),
+    site, orgId,
+  )
 }
 
 // ── Crew assignment ──────────────────────────────────────────────────────────
@@ -313,17 +343,9 @@ export async function assignCrew(
     // crew member who booked that Saturday off got assigned it anyway. The
     // outcome now degrades to a warning that says we could not check.
     const turnoverDates = [...new Set(turnovers.map(t => t.checkout_datetime.split('T')[0]))]
-    const timeOffRows = await tryFetchAll<{ available_date: string }>(
-      (from, to) => supabase
-        .from('crew_availability')
-        .select('available_date')
-        .eq('org_id', membership.org_id)
-        .eq('crew_member_id', crewMemberId)
-        .eq('is_available', false)
-        .in('available_date', turnoverDates)
-        .order('available_date')
-        .range(from, to),
-      'serverAction.turnovers.assignCrew.timeOff', membership.org_id,
+    const timeOffRows = await fetchCrewTimeOff(
+      supabase, membership.org_id, crewMemberId, turnoverDates,
+      'serverAction.turnovers.assignCrew.timeOff',
     )
     const timeOffCount = timeOffRows?.length ?? 0
 
@@ -568,17 +590,8 @@ export async function createManualTurnover(
 
     // Verify property belongs to this org — property_id is client-supplied and
     // must not be trusted to already scope to the caller's org.
-    const propertyRes = await supabase
-      .from('properties')
-      .select('id')
-      .eq('id', property_id)
-      .eq('org_id', membership.org_id)
-      .maybeSingle()
-
-    if (reportQueryError(propertyRes.error, { site: 'serverAction.turnovers.createManualTurnover.property', orgId: membership.org_id })) {
-      return { error: 'Could not verify that property. Please try again.' }
-    }
-    if (!propertyRes.data) return { error: 'Property not found' }
+    const owned = await verifyPropertyInOrg(supabase, membership.org_id, property_id, 'serverAction.turnovers.createManualTurnover.property')
+    if (!owned.ok) return { error: owned.error }
 
     // Get default checklist template for the property.
     //
@@ -766,17 +779,9 @@ export async function addCrewToTurnover(
     // Time-off check — non-blocking (a known conflict doesn't block), but an
     // UNKNOWN one must not read as clean. See assignCrew for the full note.
     const turnoverDates = [...new Set(turnovers.map(t => t.checkout_datetime.split('T')[0]))]
-    const timeOffRows = await tryFetchAll<{ available_date: string }>(
-      (from, to) => supabase
-        .from('crew_availability')
-        .select('available_date')
-        .eq('org_id', membership.org_id)
-        .eq('crew_member_id', crewMemberId)
-        .eq('is_available', false)
-        .in('available_date', turnoverDates)
-        .order('available_date')
-        .range(from, to),
-      'serverAction.turnovers.addCrewToTurnover.timeOff', membership.org_id,
+    const timeOffRows = await fetchCrewTimeOff(
+      supabase, membership.org_id, crewMemberId, turnoverDates,
+      'serverAction.turnovers.addCrewToTurnover.timeOff',
     )
     const timeOffCount = timeOffRows?.length ?? 0
 

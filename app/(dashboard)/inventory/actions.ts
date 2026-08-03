@@ -1,6 +1,7 @@
 'use server'
 
 import { revalidatePath } from 'next/cache'
+import { verifyPropertyInOrg } from '@/lib/tenancy/verify'
 import { requireOrgMember, requireOrgRole } from '@/lib/auth'
 import { inngest } from '@/lib/inngest/client'
 import { logAuditEvent } from '@/lib/audit'
@@ -92,17 +93,8 @@ export async function addInventoryItems(
     // The PM saw "Property not found" for a property they had just picked off
     // the list, and the whole filled-in bulk-add form was thrown away with
     // nothing logged.
-    const propertyRes = await supabase
-      .from('properties')
-      .select('id')
-      .eq('id', property_id)
-      .eq('org_id', membership.org_id)
-      .maybeSingle()
-
-    if (reportQueryError(propertyRes.error, { site: 'serverAction.inventory.addInventoryItems', orgId: membership.org_id })) {
-      return { error: 'Could not verify the property. Please try again.' }
-    }
-    if (!propertyRes.data) return { error: 'Property not found' }
+    const owned = await verifyPropertyInOrg(supabase, membership.org_id, property_id, 'serverAction.inventory.addInventoryItems')
+    if (!owned.ok) return { error: owned.error }
 
     const rows = []
     for (let i = 0; i < itemCount; i++) {
@@ -222,17 +214,12 @@ export async function submitInventoryCount(
     // and it costs more here: a rejected submit discards a whole physical count
     // session the PM hand-entered, and "Property not found" gives them no
     // reason to retry.
-    const propertyRes = await supabase
-      .from('properties')
-      .select('id')
-      .eq('id', property_id)
-      .eq('org_id', membership.org_id)
-      .maybeSingle()
-
-    if (reportQueryError(propertyRes.error, { site: 'serverAction.inventory.submitInventoryCount', orgId: membership.org_id })) {
-      return { error: 'Could not verify the property. Your counts were not saved — please try again.' }
-    }
-    if (!propertyRes.data) return { error: 'Property not found' }
+    const owned = await verifyPropertyInOrg(
+      supabase, membership.org_id, property_id,
+      'serverAction.inventory.submitInventoryCount',
+      'Could not verify the property. Your counts were not saved — please try again.',
+    )
+    if (!owned.ok) return { error: owned.error }
 
     // Create the inventory_count record
     const { data: count, error: countError } = await supabase
@@ -341,6 +328,37 @@ export async function addTemplateItem(
   }
 }
 
+/**
+ * Ownership gate for a single inventory_template_items row.
+ *
+ * inventory_template_items has no org_id of its own — ownership runs through
+ * its parent template — and BOTH writes it guards (the brand update and the
+ * delete) filter on .eq('id', itemId) alone. So this read is the only
+ * application-level org scope on either statement, and RLS is the sole backstop
+ * if it is ever loosened. Extracted so there is one copy of that reasoning
+ * rather than two that can drift apart.
+ */
+async function verifyTemplateItemInOrg(
+  supabase: Awaited<ReturnType<typeof requireOrgMember>>['supabase'],
+  orgId:    string,
+  itemId:   string,
+  site:     string,
+): Promise<{ ok: true } | { ok: false; error: string }> {
+  const res = await supabase
+    .from('inventory_template_items')
+    .select('id, inventory_templates!inner(org_id)')
+    .eq('id', itemId)
+    .eq('inventory_templates.org_id', orgId)
+    .maybeSingle()
+
+  if (reportQueryError(res.error, { site, orgId })) {
+    return { ok: false, error: 'Could not verify the template item. Please try again.' }
+  }
+  if (!res.data) return { ok: false, error: 'Item not found' }
+
+  return { ok: true }
+}
+
 export async function updateTemplateItemBrand(
   itemId: string,
   brand:  string | null
@@ -348,20 +366,8 @@ export async function updateTemplateItemBrand(
   try {
     const { supabase, membership } = await requireOrgMember()
 
-    // This read is the only application-level org scope on the write below —
-    // that statement filters on .eq('id', itemId) alone, so RLS is the sole
-    // backstop if this gate is ever loosened. Report the failure, never proceed.
-    const itemRes = await supabase
-      .from('inventory_template_items')
-      .select('id, inventory_templates!inner(org_id)')
-      .eq('id', itemId)
-      .eq('inventory_templates.org_id', membership.org_id)
-      .maybeSingle()
-
-    if (reportQueryError(itemRes.error, { site: 'serverAction.inventory.updateTemplateItemBrand', orgId: membership.org_id })) {
-      return { error: 'Could not verify the template item. Please try again.' }
-    }
-    if (!itemRes.data) return { error: 'Item not found' }
+    const owned = await verifyTemplateItemInOrg(supabase, membership.org_id, itemId, 'serverAction.inventory.updateTemplateItemBrand')
+    if (!owned.ok) return { error: owned.error }
 
     const { error } = await supabase
       .from('inventory_template_items')
@@ -386,20 +392,8 @@ export async function removeTemplateItem(itemId: string): Promise<{ error?: stri
   try {
     const { supabase, membership } = await requireOrgMember()
 
-    // This read is the only application-level org scope on the write below —
-    // that statement filters on .eq('id', itemId) alone, so RLS is the sole
-    // backstop if this gate is ever loosened. Report the failure, never proceed.
-    const itemRes = await supabase
-      .from('inventory_template_items')
-      .select('id, inventory_templates!inner(org_id)')
-      .eq('id', itemId)
-      .eq('inventory_templates.org_id', membership.org_id)
-      .maybeSingle()
-
-    if (reportQueryError(itemRes.error, { site: 'serverAction.inventory.removeTemplateItem', orgId: membership.org_id })) {
-      return { error: 'Could not verify the template item. Please try again.' }
-    }
-    if (!itemRes.data) return { error: 'Item not found' }
+    const owned = await verifyTemplateItemInOrg(supabase, membership.org_id, itemId, 'serverAction.inventory.removeTemplateItem')
+    if (!owned.ok) return { error: owned.error }
 
     const { error } = await supabase
       .from('inventory_template_items')

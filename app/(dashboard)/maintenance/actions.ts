@@ -2,6 +2,7 @@
 
 import { revalidatePath } from 'next/cache'
 import { redirect, unstable_rethrow } from 'next/navigation'
+import { verifyPropertyInOrg } from '@/lib/tenancy/verify'
 import { requireOrgMember, requireOrgRole } from '@/lib/auth'
 import { inngest } from '@/lib/inngest/client'
 import { calcNextDueDate } from '@/lib/turnovers/generator'
@@ -163,19 +164,8 @@ export async function createWorkOrder(
       return { error: 'Select at least one vendor to request quotes from' }
     }
 
-    const propertyRes = await supabase
-      .from('properties')
-      .select('id')
-      .eq('id', property_id)
-      .eq('org_id', membership.org_id)
-      .maybeSingle()
-
-    if (reportQueryError(propertyRes.error, { site: 'serverAction.maintenance.createWorkOrder.property', orgId: membership.org_id })) {
-      return { error: 'Could not verify the property. Please try again.' }
-    }
-    const property = propertyRes.data
-
-    if (!property) return { error: 'Property not found' }
+    const owned = await verifyPropertyInOrg(supabase, membership.org_id, property_id, 'serverAction.maintenance.createWorkOrder.property')
+    if (!owned.ok) return { error: owned.error }
 
     if (vendor_id && !request_quotes && await isVendorHardBlocked(supabase, vendor_id, membership.org_id)) {
       return { error: VENDOR_HARD_BLOCKED_ERROR }
@@ -1730,19 +1720,8 @@ export async function createMaintenanceSchedule(
   try {
     const { supabase, membership } = await requireOrgRole(['admin', 'manager'])
 
-    const propertyRes = await supabase
-      .from('properties')
-      .select('id')
-      .eq('id', data.property_id)
-      .eq('org_id', membership.org_id)
-      .maybeSingle()
-
-    if (reportQueryError(propertyRes.error, { site: 'serverAction.maintenance.createMaintenanceSchedule', orgId: membership.org_id })) {
-      return { error: 'Could not verify the property. Please try again.' }
-    }
-    const property = propertyRes.data
-
-    if (!property) return { error: 'Property not found' }
+    const owned = await verifyPropertyInOrg(supabase, membership.org_id, data.property_id, 'serverAction.maintenance.createMaintenanceSchedule')
+    if (!owned.ok) return { error: owned.error }
 
     const { error } = await supabase.from('maintenance_schedules').insert({
       property_id:        data.property_id,
@@ -2325,19 +2304,8 @@ export async function addCatalogItemToProperty(
 
     // Verify property belongs to this org — propertyId is client-supplied and
     // must not be trusted to already scope to the caller's org.
-    const propertyRes = await supabase
-      .from('properties')
-      .select('id')
-      .eq('id', propertyId)
-      .eq('org_id', membership.org_id)
-      .maybeSingle()
-
-    if (reportQueryError(propertyRes.error, { site: 'serverAction.maintenance.addCatalogItemToProperty', orgId: membership.org_id })) {
-      return { error: 'Could not verify the property. Please try again.' }
-    }
-    const property = propertyRes.data
-
-    if (!property) return { error: 'Property not found' }
+    const owned = await verifyPropertyInOrg(supabase, membership.org_id, propertyId, 'serverAction.maintenance.addCatalogItemToProperty')
+    if (!owned.ok) return { error: owned.error }
 
     const { data: catalogItem, error: catErr } = await supabase
       .from('maintenance_catalog_items')
@@ -2398,19 +2366,8 @@ export async function addCustomMaintenanceItem(
 
     // Verify property belongs to this org — propertyId is client-supplied and
     // must not be trusted to already scope to the caller's org.
-    const propertyRes = await supabase
-      .from('properties')
-      .select('id')
-      .eq('id', propertyId)
-      .eq('org_id', membership.org_id)
-      .maybeSingle()
-
-    if (reportQueryError(propertyRes.error, { site: 'serverAction.maintenance.addCustomMaintenanceItem', orgId: membership.org_id })) {
-      return { error: 'Could not verify the property. Please try again.' }
-    }
-    const property = propertyRes.data
-
-    if (!property) return { error: 'Property not found' }
+    const owned = await verifyPropertyInOrg(supabase, membership.org_id, propertyId, 'serverAction.maintenance.addCustomMaintenanceItem')
+    if (!owned.ok) return { error: owned.error }
 
     const { error } = await supabase
       .from('maintenance_schedules')
