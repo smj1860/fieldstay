@@ -255,6 +255,7 @@ export function DexieProvider({ userId: userIdProp, children }: { userId?: strin
     let v2ReconnectTimer: ReturnType<typeof setTimeout> | null = null
 
     let visibilityHandler: (() => void) | null = null
+    let bootRetryHandler: (() => void) | null = null
     let v2AuthSubscription: { unsubscribe: () => void } | null = null
     let v2SignalHandler: SyncSignalHandler | null = null
 
@@ -437,11 +438,60 @@ export function DexieProvider({ userId: userIdProp, children }: { userId?: strin
       await subscribeV2(crewMemberId)
     }
 
+    // The crew member id, cached across sessions in the local-only sync_meta
+    // store. Written on every successful resolution; read back when the live
+    // lookup fails.
+    //
+    // Without this, run() below bailed on ANY failure of that one query — and
+    // because every listener (Realtime channels, `online`, `visibilitychange`,
+    // the safety poll) is installed after it, and the effect keys on [userId]
+    // so it never re-runs, the provider never synced again for the life of the
+    // session. That is not a rare path: public/sw.js serves the cached shell
+    // on navigation, so a crew member opening the PWA at a property with no
+    // signal mounts fully offline and trips exactly this query. crewMemberId
+    // then stayed null, which silently disabled both "Confirm Complete"
+    // buttons — the turnover could never be completed and no cleaning fee
+    // posted, with no error shown anywhere.
+    const CREW_ID_KEY = 'crew_member_id'
+
+    async function cacheCrewMemberId(id: string): Promise<void> {
+      try {
+        await getDexieDb(userId!).sync_meta.put({ key: CREW_ID_KEY, value: id })
+      } catch {
+        // A cache write failure must never break the boot path it exists to
+        // protect — this run already has its id from the live query.
+      }
+    }
+
+    async function cachedCrewMemberId(): Promise<string | null> {
+      try {
+        return (await getDexieDb(userId!).sync_meta.get(CREW_ID_KEY))?.value ?? null
+      } catch {
+        return null
+      }
+    }
+
+    // run() is now reachable more than once (the boot retry below re-invokes
+    // it on `online`), and a flapping connection can fire that repeatedly.
+    // Without this latch two concurrent boots would each open their own
+    // Realtime channels and install their own safety poll, leaking both.
+    let booting = false
+
     async function run() {
+      if (booting || cancelled) return
+      booting = true
+      try {
+        await bootSync()
+      } finally {
+        booting = false
+      }
+    }
+
+    async function bootSync() {
       // Degrade, don't throw: this runs inside a client-side effect that has
       // no error boundary of its own, and the provider must not tear down the
-      // crew PWA over one failed lookup — the next run retries. tryUnwrap
-      // still logs and reports, so the failure is no longer silent.
+      // crew PWA over one failed lookup. tryUnwrap still logs and reports, so
+      // the failure is no longer silent.
       const crewRes = await supabase
         .from('crew_members')
         .select('id, org_id')
@@ -451,12 +501,46 @@ export function DexieProvider({ userId: userIdProp, children }: { userId?: strin
 
       const crewOut    = tryUnwrap<{ id: string; org_id: string }>(crewRes, { site: 'dexie.context.crew-member' })
       const crewMember = crewOut.ok ? crewOut.data : null
-      if (!crewMember || cancelled) return
 
-      setCrewMemberId(crewMember.id as string)
+      if (cancelled) return
+
+      // Live lookup won: cache it so a later offline mount can still boot.
+      if (crewMember) {
+        void cacheCrewMemberId(crewMember.id as string)
+      }
+
+      // Live lookup failed (offline mount, transient 5xx, cold start). Fall
+      // back to the id this device resolved on a previous session so the rest
+      // of the provider — listeners, safety poll, and the two confirm buttons
+      // — still comes up. Reads are served from the Dexie cache anyway; the
+      // outbox is what carries writes back when signal returns.
+      const resolvedCrewId = crewMember?.id ?? await cachedCrewMemberId()
+      if (cancelled) return
+
+      if (!resolvedCrewId) {
+        // Never resolved on this device, so there is nothing to fall back to.
+        // Retry when connectivity returns instead of leaving the provider
+        // permanently inert — this listener is deliberately installed even
+        // though the rest of the boot did not happen.
+        if (!bootRetryHandler) {
+          bootRetryHandler = () => { void run() }
+          globalThis.addEventListener('online', bootRetryHandler)
+        }
+        return
+      }
+
+      // Boot is going ahead, so the retry listener has done its job. Leaving
+      // it installed would re-enter run() on the next `online` and install a
+      // second set of channels and a second safety poll.
+      if (bootRetryHandler) {
+        globalThis.removeEventListener('online', bootRetryHandler)
+        bootRetryHandler = null
+      }
+
+      setCrewMemberId(resolvedCrewId)
 
       if (CREW_SYNC_V2) {
-        await runV2(crewMember.id)
+        await runV2(resolvedCrewId)
         return
       }
 
@@ -464,44 +548,44 @@ export function DexieProvider({ userId: userIdProp, children }: { userId?: strin
       // since it last synced; a fresh device (no cursors) naturally does a
       // full pull. Scope reconciliation inside syncAssignedTurnovers guards
       // against a stale cursor ever hiding an assignment change.
-      await resync(crewMember.id)
+      await resync(resolvedCrewId)
       if (cancelled) return
 
       channel = supabase
-        .channel(`turnover-assignments-${crewMember.id}`)
+        .channel(`turnover-assignments-${resolvedCrewId}`)
         .on(
           'postgres_changes',
-          { event: '*', schema: 'public', table: 'turnover_assignments', filter: `crew_member_id=eq.${crewMember.id}` },
+          { event: '*', schema: 'public', table: 'turnover_assignments', filter: `crew_member_id=eq.${resolvedCrewId}` },
           async () => {
-            await syncAssignedTurnovers(supabase, userId!, crewMember.id)
-            if (!cancelled) await refreshChecklistSubscription(crewMember.id)
+            await syncAssignedTurnovers(supabase, userId!, resolvedCrewId)
+            if (!cancelled) await refreshChecklistSubscription(resolvedCrewId)
             if (!cancelled) await refreshAssetsSubscription()
           }
         )
         .on(
           'postgres_changes',
-          { event: '*', schema: 'public', table: 'work_orders', filter: `assigned_crew_member_id=eq.${crewMember.id}` },
+          { event: '*', schema: 'public', table: 'work_orders', filter: `assigned_crew_member_id=eq.${resolvedCrewId}` },
           () => {
-            void syncWorkOrders(supabase, userId!, crewMember.id).then(() => {
+            void syncWorkOrders(supabase, userId!, resolvedCrewId).then(() => {
               if (!cancelled) return refreshAssetsSubscription()
             })
           }
         )
         .subscribe()
 
-      onlineHandler = () => resyncSafe(crewMember.id)
+      onlineHandler = () => resyncSafe(resolvedCrewId)
       globalThis.addEventListener('online', onlineHandler)
 
       // PWA returning from background has likely missed postgres_changes
       // events — Realtime never replays what happened while disconnected.
       visibilityHandler = () => {
-        if (globalThis.document?.visibilityState === 'visible') resyncSafe(crewMember.id)
+        if (globalThis.document?.visibilityState === 'visible') resyncSafe(resolvedCrewId)
       }
       globalThis.document?.addEventListener('visibilitychange', visibilityHandler)
 
       // Safety poll: same correctness backstop v2 has, on the path that
       // actually ships today.
-      installSafetyPoll(() => resyncSafe(crewMember.id))
+      installSafetyPoll(() => resyncSafe(resolvedCrewId))
     }
 
     run().catch((err) => console.error('[DexieProvider] sync failed:', err))
@@ -512,6 +596,7 @@ export function DexieProvider({ userId: userIdProp, children }: { userId?: strin
       if (checklistChannel) supabase.removeChannel(checklistChannel)
       if (assetsChannel) supabase.removeChannel(assetsChannel)
       if (onlineHandler) globalThis.removeEventListener('online', onlineHandler)
+      if (bootRetryHandler) globalThis.removeEventListener('online', bootRetryHandler)
       // Crew Sync v2 teardown — everything here is null when the flag is off.
       if (v2Channel) {
         const ch = v2Channel

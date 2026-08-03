@@ -27,7 +27,7 @@ export function ChecklistView({
     openNoteItemId, setOpenNoteItemId, noteText, setNoteText,
     fileInputRefs, sectionPhotoRefs, sectionPhotoPrompt, setSectionPhotoPrompt,
     toggleItem, saveNote, openNote, handleSectionPhoto, handlePhotoCapture,
-    toggleChecklistConfirm, checklistConfirmSyncFailed,
+    toggleChecklistConfirm, checklistConfirmSyncFailed, actionError,
     items,
   } = actions
 
@@ -304,6 +304,18 @@ export function ChecklistView({
                 )}
               </div>
             </button>
+          )}
+
+          {/* A refusal before the mutation is ever enqueued (e.g. the crew
+              profile hasn't resolved yet) used to be a bare `return`, leaving
+              this button a dead control with no feedback at all. */}
+          {actionError && (
+            <div
+              className="-mt-3 mb-4 px-4 py-2 rounded-lg text-xs"
+              style={{ background: 'var(--accent-red-dim)', color: 'var(--accent-red)' }}
+            >
+              {actionError}
+            </div>
           )}
 
           {checklistConfirmSyncFailed && (

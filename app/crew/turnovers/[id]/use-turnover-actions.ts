@@ -275,8 +275,22 @@ export function useTurnoverActions(id: string) {
     await updateInventoryQuantity(userId, itemId, qty)
   }
 
+  // A null crewMemberId used to make this a silent no-op: the button did
+  // nothing at all — no error, no toast, no state change — and because
+  // auto-completion keys off both confirmations, the turnover could never be
+  // completed and no cleaning fee posted. The provider now falls back to a
+  // cached id, so this is genuinely rare; when it does happen the crew member
+  // must be told rather than left tapping a dead control.
+  const CREW_ID_UNRESOLVED =
+    'Still connecting your crew profile. Check your connection and try again in a moment.'
+
   const toggleChecklistConfirm = async () => {
-    if (!instance || !crewMemberId) return
+    if (!instance) return
+    if (!crewMemberId) {
+      setActionError(CREW_ID_UNRESOLVED)
+      return
+    }
+    setActionError(null)
     const confirming = !instance.completed_at
     if (confirming && missingAssetTypes.length > 0) {
       setPendingConfirm({
@@ -291,7 +305,11 @@ export function useTurnoverActions(id: string) {
   }
 
   const toggleInventoryConfirm = async () => {
-    if (!crewMemberId) return
+    if (!crewMemberId) {
+      setActionError(CREW_ID_UNRESOLVED)
+      return
+    }
+    setActionError(null)
     await confirmInventoryComplete(userId, id, crewMemberId, !turnover?.inventory_confirmed_complete_at)
   }
 

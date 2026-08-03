@@ -154,7 +154,7 @@ import { guidebookBillingCreditHandler }  from '@/lib/inngest/functions/guideboo
 import { guidebookGraceExpiredHandler }   from '@/lib/inngest/functions/guidebook-grace-expired-handler'
 import { guidebookSponsorPaymentRecovered } from '@/lib/inngest/functions/guidebook-sponsor-payment-recovered'
 import { guidebookGuestOptedIn }            from '@/lib/inngest/functions/guidebook-guest-opted-in'
-import { guidebookPreArrivalEmailCron }     from '@/lib/inngest/functions/guidebook-pre-arrival-email-cron'
+import { guidebookPreArrivalEmailCron, guidebookPreArrivalEmailOrg } from '@/lib/inngest/functions/guidebook-pre-arrival-email-cron'
 import { guidebookSmsMorningCron, guidebookSmsMorningSend } from '@/lib/inngest/functions/guidebook-sms-morning-cron'
 import { guidebookSmsEveningCron, guidebookSmsEveningSend } from '@/lib/inngest/functions/guidebook-sms-evening-cron'
 import { guidebookStayExtensionCron }       from '@/lib/inngest/functions/guidebook-stay-extension-cron'
@@ -331,6 +331,7 @@ export const { GET, POST, PUT } = serve({
     guidebookSponsorPaymentRecovered,
     guidebookGuestOptedIn,
     guidebookPreArrivalEmailCron,
+    guidebookPreArrivalEmailOrg,
     guidebookSmsMorningCron,
     guidebookSmsMorningSend,
     guidebookSmsEveningCron,

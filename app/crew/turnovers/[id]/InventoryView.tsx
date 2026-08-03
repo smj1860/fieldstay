@@ -18,7 +18,7 @@ export function InventoryView({
   const {
     userId,
     inventoryItems, invByCategory, getCount, handleCountChange,
-    toggleInventoryConfirm, inventoryConfirmSyncFailed,
+    toggleInventoryConfirm, inventoryConfirmSyncFailed, actionError,
   } = actions
 
   return (
@@ -122,6 +122,18 @@ export function InventoryView({
           Confirm Inventory Complete
         </p>
       </button>
+
+      {/* The confirm handler can refuse before it ever reaches the outbox —
+          e.g. the crew profile hasn't resolved yet. That refusal used to be a
+          bare `return`, so the button simply did nothing. */}
+      {actionError && (
+        <div
+          className="-mt-3 mb-4 px-4 py-2 rounded-lg text-xs"
+          style={{ background: 'var(--accent-red-dim)', color: 'var(--accent-red)' }}
+        >
+          {actionError}
+        </div>
+      )}
 
       {inventoryConfirmSyncFailed && (
         <div
