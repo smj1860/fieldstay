@@ -166,7 +166,12 @@ export async function retryFailedMutation(
  */
 export async function retryAllFailedMutations(userId: string): Promise<void> {
   const db = getDexieDb(userId)
-  const failed = (await db.mutations.toArray()).filter((m) => !!m.failed)
+  // orderBy('id') — NOT a bare toArray(). The drain replays in id order, and
+  // SyncEngine.holdBackSuccessors() deliberately dead-letters a record's whole
+  // remaining sequence so a retry re-applies it in the order the crew member
+  // performed it. Clearing the flags in an unspecified order would leave that
+  // sequence intact but re-queue it non-deterministically.
+  const failed = (await db.mutations.orderBy('id').toArray()).filter((m) => !!m.failed)
 
   for (const mutation of failed) {
     await db.mutations.update(mutation.id!, {

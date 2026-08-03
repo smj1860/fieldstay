@@ -24,6 +24,7 @@ import { createClient } from '@/lib/supabase/client'
 import type { MutationTable } from '@/lib/dexie/schema'
 import { retryAllFailedMutations, discardFailedMutation } from '@/lib/dexie/helpers'
 import { retryFailedPhotoUploads, discardPendingPhoto } from '@/lib/dexie/photo-sync'
+import { STALLED_NETWORK_ATTEMPTS } from '@/lib/dexie/net'
 import { Button } from '@/components/ui/Button'
 import { Badge } from '@/components/ui/Badge'
 import { Dialog } from '@/components/ui/Dialog'
@@ -67,6 +68,21 @@ export function FailedSyncBanner({ userId }: Readonly<{ userId: string }>) {
     [],
   ) ?? []
 
+  // Transport failures deliberately never dead-letter — losing a crew
+  // member's work because their signal is bad would be worse than the bug
+  // this surfaces. But the drain STOPS at a blocked head, so every later
+  // change on the device queues behind it. Previously that state was
+  // completely invisible: `failed` is never set on the network path, this
+  // banner filters on `failed`, and the only trace anywhere was the pending
+  // count in the logout dialog. A crew member could work a whole shift, sync
+  // nothing, and find out at logout.
+  const stalledMutations = useLiveQuery(
+    () => db.mutations
+      .filter((m) => !m.failed && (m.networkRetryCount ?? 0) >= STALLED_NETWORK_ATTEMPTS)
+      .toArray(),
+    [],
+  ) ?? []
+
   const entries: FailedEntry[] = [
     ...failedMutations.map((m) => ({
       key:     `mutation-${m.id}`,
@@ -82,7 +98,34 @@ export function FailedSyncBanner({ userId }: Readonly<{ userId: string }>) {
     })),
   ]
 
-  if (entries.length === 0) return null
+  if (entries.length === 0 && stalledMutations.length === 0) return null
+
+  // A stalled queue is NOT a failure — the work is intact and still retrying,
+  // so it gets its own amber notice with no discard affordance rather than
+  // being folded into the red "didn't sync" list.
+  const stalledNotice = stalledMutations.length > 0 && (
+    <div
+      className="mx-4 mt-3 rounded-xl p-4"
+      style={{ background: 'var(--accent-amber-dim)', border: '1px solid var(--accent-amber-dim)' }}
+      role="status"
+    >
+      <div className="flex items-start gap-3">
+        <AlertTriangle className="w-5 h-5 shrink-0 mt-0.5" style={{ color: 'var(--accent-amber)' }} />
+        <div className="flex-1 min-w-0">
+          <p className="text-sm font-bold" style={{ color: 'var(--accent-amber)' }}>
+            {stalledMutations.length} change{stalledMutations.length !== 1 ? 's' : ''} still trying to sync
+          </p>
+          <p className="text-xs mt-0.5" style={{ color: 'var(--text-secondary)' }}>
+            Your work is saved on this phone and will keep retrying on its own.
+            If this stays here, move somewhere with better signal before you
+            finish for the day.
+          </p>
+        </div>
+      </div>
+    </div>
+  )
+
+  if (entries.length === 0) return <>{stalledNotice}</>
 
   const retryAll = async () => {
     setRetrying(true)
@@ -96,6 +139,7 @@ export function FailedSyncBanner({ userId }: Readonly<{ userId: string }>) {
 
   return (
     <>
+      {stalledNotice}
       <div
         className="mx-4 mt-3 rounded-xl p-4"
         style={{ background: 'var(--accent-red-dim)', border: '1px solid var(--accent-red-dim)' }}
