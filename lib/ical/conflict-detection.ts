@@ -26,11 +26,13 @@ export interface FlaggedBooking {
 }
 
 /**
- * Scans all confirmed bookings for a property, flags any whose date range
- * overlaps another confirmed booking (regardless of source/feed), and
- * clears the flag on any booking that's no longer in conflict (e.g. the
- * other side was cancelled). Same-day turnovers (checkout == checkin) are
- * NOT a conflict.
+ * Scans confirmed bookings for a property that have not already ended, flags
+ * any whose date range overlaps another (regardless of source/feed), and
+ * clears the flag on any that's no longer in conflict (e.g. the other side was
+ * cancelled). Same-day turnovers (checkout == checkin) are NOT a conflict.
+ *
+ * Deliberately scoped to current and future bookings — see the window comment
+ * on the read below for why, and for the one behavioural consequence.
  *
  * Returns only the bookings that were newly flagged in this call — use
  * this to decide whether to alert the PM, so already-known conflicts don't
@@ -40,7 +42,7 @@ export async function detectAndFlagOverlaps(
   supabase: DBClient,
   propertyId: string
 ): Promise<FlaggedBooking[]> {
-  // Every confirmed booking for this property, over its whole history — the
+  // Confirmed bookings for this property that have not already ended — the
   // input to the pairwise overlap scan below. Both failure modes here end the
   // same way, with a real double-booking never surfaced to the PM:
   //
@@ -50,6 +52,28 @@ export async function detectAndFlagOverlaps(
   //   - The discarded error. A failed read returned [], which this function
   //     reports as "no conflicts found" — indistinguishable from a clean
   //     calendar. fetchAllRows logs, reports, and throws instead.
+  //
+  // BOUNDED BY DATE, and this is what makes the scan affordable. It used to
+  // read the property's ENTIRE booking history and compare every pair: a
+  // five-year property with 500 bookings is ~125,000 comparisons plus a
+  // full-history read, and this runs on every feed sync (hourly, per feed) and
+  // after every booking write. The window collapses that to roughly 20 rows
+  // and a few hundred comparisons.
+  //
+  // Nothing is lost, because a conflict between two bookings that are already
+  // over cannot be acted on — the PM cannot un-double-book last month. The one
+  // behavioural consequence is that `toClear` below no longer reaches past
+  // bookings, so a historical booking keeps whatever has_overlap_conflict flag
+  // it last had. That is the correct record of a conflict that really did
+  // happen, not stale state to be cleaned up.
+  //
+  // The one-day lookback absorbs timezone skew: checkin_date/checkout_date are
+  // DATE columns compared against a UTC "today", and a property in UTC-7 is
+  // still on the previous calendar day for several hours.
+  const windowStart = new Date(Date.now() - 24 * 60 * 60 * 1000)
+    .toISOString()
+    .slice(0, 10)
+
   const bookings = await fetchAllRows<{
     id: string; checkin_date: string; checkout_date: string
     source: string | null; guest_name: string | null; has_overlap_conflict: boolean | null
@@ -59,6 +83,9 @@ export async function detectAndFlagOverlaps(
       .select('id, checkin_date, checkout_date, source, guest_name, has_overlap_conflict')
       .eq('property_id', propertyId)
       .eq('status', 'confirmed')
+      // Uses idx_bookings_property_overlap_scan
+      // (property_id, checkin_date, checkout_date) WHERE status = 'confirmed'.
+      .gte('checkout_date', windowStart)
       .order('id')
       .range(from, to),
     { label: 'conflict-detection.bookings' },

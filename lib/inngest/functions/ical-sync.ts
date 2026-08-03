@@ -147,8 +147,23 @@ export const syncIcalFeed = inngest.createFunction(
   {
     id:      'ical-sync-feed',
     name:    'Sync iCal Feed',
-    // Allow up to 20 feeds syncing in parallel
-    concurrency: { limit: 5 },
+    // Up to 20 feeds syncing in parallel. The comment used to say 20 while the
+    // value said 5 — both were written in the same commit, so this was an
+    // original typo rather than a deliberate throttle someone lowered.
+    //
+    // 5 is not merely conservative, it is under-provisioned: a feed sync takes
+    // ~3–8s (external fetch + parse + upsert), so 5 concurrent caps throughput
+    // near 3,600 feeds/hour. Demand is 2 feeds x ~30 properties x tenants, so
+    // the hourly cron starts queueing faster than it drains at roughly 60
+    // tenants — and it fails silently, as calendars going progressively
+    // staler while every run still reports success.
+    //
+    // Raised only now that lib/ical/conflict-detection.ts bounds its overlap
+    // scan to current-and-future bookings. Before that, each sync re-read the
+    // property's entire booking history and compared every pair, so a 4x
+    // concurrency increase would have multiplied the heaviest query in the
+    // loop rather than the cheapest.
+    concurrency: { limit: 20 },
     // Retry up to 2 times on network errors
     retries: 2,
   },
