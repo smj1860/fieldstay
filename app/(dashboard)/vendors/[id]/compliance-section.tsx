@@ -15,6 +15,53 @@ import { RequiredMark } from '@/components/ui/RequiredMark'
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 
+/**
+ * Extension → MIME, mirroring `compliance-documents`' allowed_mime_types.
+ *
+ * The bucket now enforces a MIME allowlist (it was the only bucket with none,
+ * and this upload goes browser → Supabase directly, so the bucket is the ONLY
+ * enforcement point in the path). That makes `file.type` load-bearing rather
+ * than advisory — and `file.type` is not reliable: browsers report
+ * `application/octet-stream`, or an empty string, for files from some sources,
+ * and Windows reports PDFs inconsistently depending on the installed handler.
+ * Passing that straight through would have the bucket reject perfectly valid
+ * COIs, with a raw storage error as the only explanation.
+ *
+ * So the extension decides, and `file.type` is used only to disambiguate
+ * `.jpg`/`.jpeg`. Keep this map and the bucket's allowed_mime_types in sync —
+ * an entry here that the bucket rejects turns into an upload failure, and an
+ * omission turns into a file the user cannot upload at all.
+ */
+const EXTENSION_CONTENT_TYPES: Record<string, string> = {
+  pdf:  'application/pdf',
+  jpg:  'image/jpeg',
+  jpeg: 'image/jpeg',
+  png:  'image/png',
+  webp: 'image/webp',
+  heic: 'image/heic',
+}
+
+const ACCEPTED_EXTENSIONS = Object.keys(EXTENSION_CONTENT_TYPES).map((e) => `.${e}`)
+
+/**
+ * The content type to upload with, or null when the file is not an accepted
+ * kind. Resolving by extension rather than trusting `file.type` means the
+ * client rejects the same set the bucket does, with a message that names the
+ * accepted formats instead of surfacing a storage-layer error.
+ */
+function resolveContentType(file: File): string | null {
+  const ext = file.name.split('.').pop()?.toLowerCase() ?? ''
+  const byExtension = EXTENSION_CONTENT_TYPES[ext]
+  if (byExtension) return byExtension
+
+  // No usable extension — fall back to the browser's type, but only when it is
+  // one the bucket actually accepts.
+  const reported = file.type?.toLowerCase()
+  return reported && Object.values(EXTENSION_CONTENT_TYPES).includes(reported)
+    ? reported
+    : null
+}
+
 const DOC_TYPE_LABELS: Record<ComplianceDocType, string> = {
   coi:                 'Certificate of Insurance',
   workers_comp:        'Workers Comp',
@@ -60,9 +107,18 @@ function AddDocumentForm({
     const ext  = file.name.split('.').pop() ?? 'pdf'
     const path = `${orgId}/${vendorId}/${Date.now()}-${crypto.randomUUID()}.${ext}`
 
+    const contentType = resolveContentType(file)
+    if (!contentType) {
+      setUploadError(
+        `That file type isn't accepted. Please upload a PDF or an image (${ACCEPTED_EXTENSIONS.join(', ')}).`
+      )
+      setUploading(false)
+      return
+    }
+
     const { error } = await supabase.storage
       .from('compliance-documents')
-      .upload(path, file, { contentType: file.type })
+      .upload(path, file, { contentType })
 
     if (error) {
       setUploadError(error.message)
@@ -153,10 +209,14 @@ function AddDocumentForm({
             {/* File upload */}
             <div className="sm:col-span-2">
               <label htmlFor="document-file" className="label">Upload Document (PDF, image)</label>
+              {/* `accept` is derived from the same map the upload validates
+                  against, so the picker cannot drift from what the bucket
+                  accepts. It was hand-written and already out of date — it
+                  omitted .heic, which recent iPhones produce by default. */}
               <Input
                 id="document-file"
                 type="file"
-                accept=".pdf,.jpg,.jpeg,.png,.webp"
+                accept={ACCEPTED_EXTENSIONS.join(',')}
                 className="py-2 text-sm"
                 onChange={handleFileUpload}
                 disabled={uploading}
