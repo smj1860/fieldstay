@@ -183,6 +183,45 @@ export async function dispatchCompletionEvents(
     const turnover = unwrap(turnoverRes, { site: 'api.work-orders.complete.source-turnover' })
 
     if (turnover && !['completed', 'cancelled'].includes(turnover.status)) {
+      const completedAt = new Date().toISOString()
+
+      // CLAIM the turnover, don't just read it. The read above proved the
+      // status at the time of the read; only the UPDATE's own WHERE clause
+      // proves this caller is the one closing it.
+      //
+      // Previously this fired turnover/completed while never writing
+      // turnovers.status at all, so: the cleaning fee posted and the PM was
+      // told "✓ Turnover complete", while the turnover stayed in_progress on
+      // the board. When someone later completed it for real, the
+      // .neq('status','completed') guard on that path passed — it was still
+      // in_progress — and the event fired a SECOND time. The owner_transactions
+      // upsert absorbed the duplicate, but fieldstay_turnovers_completed_total
+      // counted twice and completed_at landed hours after the fee, corrupting
+      // the duration that assignment_outcomes and crew scoring derive from it.
+      const claimRes = await supabase
+        .from('turnovers')
+        .update({ status: 'completed', completed_at: completedAt })
+        .eq('id', turnover.id)
+        .not('status', 'in', '("completed","cancelled")')
+        .select('id')
+        .maybeSingle()
+
+      const claimOut = tryUnwrap<{ id: string }>(claimRes, {
+        site:  'api.work-orders.complete.claim-turnover',
+        orgId: claimed.org_id,
+      })
+
+      if (!claimOut.ok) {
+        // Do NOT fall through to the event: firing it after a failed claim
+        // reintroduces exactly the fee-posted-but-turnover-open state.
+        console.error('[work-order-complete] turnover claim failed', { turnoverId: turnover.id })
+        return
+      }
+
+      // Zero rows means another path completed it between the read and the
+      // update — that path fires its own event, so this one must not.
+      if (!claimOut.data) return
+
       await inngest.send({
         name: 'turnover/completed',
         data: {
@@ -190,7 +229,7 @@ export async function dispatchCompletionEvents(
           property_id:          turnover.property_id,
           org_id:               turnover.org_id,
           completed_by_crew_id: '',
-          completed_at:         new Date().toISOString(),
+          completed_at:         completedAt,
         },
       })
     }

@@ -107,12 +107,6 @@ export async function POST(
     return NextResponse.json({ error: 'Technician name is required' }, { status: 400 })
   }
 
-  // Sanity bound on the submitted total — catches a typo (an extra zero) or
-  // a malicious payload before it becomes actual_cost/an invoice amount.
-  if (subtotal > 1_000_000) {
-    return NextResponse.json({ error: 'Invoice total must be under $1,000,000. Please check your entries.' }, { status: 400 })
-  }
-
   // Validate line items if provided
   const VALID_LINE_TYPES = new Set(['labor', 'material', 'equipment', 'subcontractor', 'other'])
   const safeLineItems = lineItemsPayload.filter((item) =>
@@ -122,6 +116,47 @@ export async function POST(
     typeof item.unit_cost === 'number' && item.unit_cost > 0 &&
     typeof item.quantity === 'number' && item.quantity > 0
   )
+
+  // ── The invoice total is DERIVED, never accepted ────────────────────────
+  //
+  // `line_total` is a GENERATED ALWAYS column precisely so a client cannot
+  // state a line total that disagrees with its own quantity × unit cost. That
+  // control was then defeated one level up: `subtotal` came straight from the
+  // request body, bounded only on the upside, and was written to
+  // work_orders.actual_cost, work_order_invoices.subtotal/.total and the
+  // Stripe platform fee. This is the only UNAUTHENTICATED path in the app that
+  // mints financial records.
+  //
+  // It was wrong in both directions, and the non-adversarial direction is the
+  // likelier one: a submission whose third line item fails validation drops
+  // that item from safeLineItems but left it counted in `subtotal`, so the
+  // stored invoice total silently exceeded the sum of the items printed
+  // beneath it. Adversarially, $50 of line items with `subtotal: 999999` was
+  // simply accepted, as was a negative value (which passed the `> 1_000_000`
+  // check and produced a negative platform fee).
+  //
+  // So: when line items are present they ARE the invoice, and the total is
+  // computed from the same rows the RPC inserts. The client's figure is only
+  // honoured for the legacy no-line-items path, where there is nothing to
+  // derive from.
+  const derivedSubtotal = safeLineItems.reduce(
+    (sum, item) => sum + item.quantity * item.unit_cost,
+    0,
+  )
+  const effectiveSubtotal = safeLineItems.length > 0
+    ? Math.round(derivedSubtotal * 100) / 100   // cents; avoids FP dust reaching money columns
+    : subtotal
+
+  if (!Number.isFinite(effectiveSubtotal) || effectiveSubtotal < 0) {
+    return NextResponse.json({ error: 'Invoice total is not a valid amount.' }, { status: 400 })
+  }
+
+  // Sanity bound — catches a typo (an extra zero) or a malicious payload
+  // before it becomes actual_cost/an invoice amount. Applied to the DERIVED
+  // value so a pile of line items cannot exceed it either.
+  if (effectiveSubtotal > 1_000_000) {
+    return NextResponse.json({ error: 'Invoice total must be under $1,000,000. Please check your entries.' }, { status: 400 })
+  }
 
   // ONE TRANSACTION. Every database write for this completion — the claim, the
   // invoice, the line items, the status-change row — happens inside
@@ -142,7 +177,7 @@ export async function POST(
   const { data: rpcResult, error: rpcError } = await supabase.rpc('complete_work_order_via_token', {
     p_work_order_id:     workOrder.id,
     p_line_items:        safeLineItems,
-    p_subtotal:          subtotal,
+    p_subtotal:          effectiveSubtotal,
     // p_notes is a plain `text` parameter — NULL means "no notes given".
     p_notes:             nullableArg(notes),
     p_completed_by_name: completedByName,
@@ -170,7 +205,7 @@ export async function POST(
     invoiceId:      result.invoice_id,
     invoiceNumber:  result.invoice_number,
     invoiceInserted: result.invoice_inserted,
-    subtotal,
+    subtotal: effectiveSubtotal,
     notes,
     token,
   })

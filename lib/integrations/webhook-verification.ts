@@ -59,15 +59,45 @@ export function isTimestampFresh(timestampSeconds: number, toleranceSeconds = 30
 }
 
 /**
- * Extracts the originating client IP from a request's `x-forwarded-for`
- * header — Vercel's edge network prepends the real client IP as the first
- * entry (not client-spoofable there), so the first comma-separated value is
- * the one to trust. Returns null if the header is absent or empty.
+ * Extracts the originating client IP, preferring headers a client cannot set.
+ *
+ * This used to read `x-forwarded-for` and take the FIRST entry, justified by
+ * "Vercel's edge network prepends the real client IP (not client-spoofable
+ * there)". That claim could not be verified, and it is the wrong default
+ * either way: the standard proxy behaviour is to APPEND, so with a plain
+ * append-style proxy the leftmost entry is whatever the caller typed. Every
+ * per-IP limiter in the app keys on this one function — ownerPortal,
+ * workOrder, guidebook, vendorConnect, inviteAccept, demo, unsubscribe, and
+ * both guidebook limiters — so a single spoofed header would have given each
+ * request its own bucket and made all of them ornamental at once. It also
+ * feeds the Hospitable/OwnerRez CIDR allowlists.
+ *
+ * Order of trust:
+ *   1. `x-vercel-forwarded-for` — set by Vercel's edge, which strips any
+ *      client-supplied copy. Nothing downstream of the client can forge it.
+ *   2. `x-real-ip` — also platform-set on Vercel, and what
+ *      `@vercel/functions`' own `ipAddress()` reaches for first.
+ *   3. `x-forwarded-for`, RIGHTMOST entry — last resort. Rightmost rather
+ *      than leftmost because the classic spoof is a client prepending a fake
+ *      entry that a proxy then appends the real address after; taking the
+ *      right-hand end reads the value added by the closest proxy rather than
+ *      the one the caller supplied.
+ *
+ * Returns null when nothing usable is present, which every caller already
+ * treats as "no IP" (the limiters fall back to a constant, so an absent
+ * header shares one bucket rather than minting unlimited ones).
  */
 export function extractClientIp(request: Request): string | null {
-  const header = request.headers.get('x-forwarded-for')
-  const first   = header?.split(',')[0]?.trim()
-  return first?.length ? first : null
+  const platform =
+    request.headers.get('x-vercel-forwarded-for')?.trim() ||
+    request.headers.get('x-real-ip')?.trim()
+  if (platform?.length) return platform
+
+  const forwarded = request.headers.get('x-forwarded-for')
+  if (!forwarded) return null
+
+  const entries = forwarded.split(',').map((e) => e.trim()).filter((e) => e.length > 0)
+  return entries.at(-1) ?? null
 }
 
 function ipv4ToInt(ip: string): number | null {

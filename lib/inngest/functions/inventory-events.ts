@@ -56,6 +56,60 @@ export const handlePurchaseOrderApproved = inngest.createFunction(
   }
 )
 
+interface BelowParItem {
+  id:               string
+  name:             string
+  current_quantity: number
+  par_level:        number
+  quantity_to_buy:  number
+  unit:             string
+}
+
+/**
+ * The two writes that turn a bare purchase_orders header into a usable PO.
+ *
+ * Extracted so the create path and the repair path (an existing header with
+ * zero line items, left behind by a partially-applied earlier attempt) run
+ * exactly the same code. Both throw rather than returning a discarded result:
+ * a PO with no items is indistinguishable from a healthy one in the UI, so a
+ * swallowed error here is invisible until a PM opens an empty restock order.
+ */
+async function insertPoItems(
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- service client is untyped repo-wide (no <Database> generic; see lib/supabase/server.ts)
+  supabase: any,
+  purchaseOrderId: string,
+  items: BelowParItem[],
+): Promise<void> {
+  const { error } = await supabase.from('purchase_order_items').insert(
+    items.map((item) => ({
+      purchase_order_id: purchaseOrderId,
+      inventory_item_id: item.id,
+      item_name:         item.name,
+      current_quantity:  item.current_quantity,
+      par_level:         item.par_level,
+      quantity_to_buy:   item.quantity_to_buy,
+      unit:              item.unit,
+    }))
+  )
+  if (error) {
+    throw new Error(`purchase_order_items insert failed for PO ${purchaseOrderId}: ${error.message}`)
+  }
+}
+
+async function markPoSent(
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- service client is untyped repo-wide (no <Database> generic; see lib/supabase/server.ts)
+  supabase: any,
+  purchaseOrderId: string,
+): Promise<void> {
+  const { error } = await supabase
+    .from('purchase_orders')
+    .update({ status: 'sent', sent_at: new Date().toISOString() })
+    .eq('id', purchaseOrderId)
+  if (error) {
+    throw new Error(`purchase_orders status update failed for PO ${purchaseOrderId}: ${error.message}`)
+  }
+}
+
 /**
  * Triggered when a crew member submits an inventory count.
  *
@@ -217,14 +271,39 @@ export const handleInventoryCountSubmitted = inngest.createFunction(
     const { purchaseOrderId, alreadyExisted } = await step.run('create-purchase-order', async () => {
       const supabase = createServiceClient({ system: 'inngest:inventory-events' })
       // Idempotency: a PO for this count may already exist from a prior retry
-      const { data: existing } = await supabase
+      const { data: existing, error: existingError } = await supabase
         .from('purchase_orders')
-        .select('id')
+        .select('id, purchase_order_items(id)')
         .eq('source_count_id', count_id)
         .eq('org_id', org_id)
         .maybeSingle()
 
-      if (existing) return { purchaseOrderId: existing.id, alreadyExisted: true }
+      // A failed pre-check must not read as "no PO exists" — that would create
+      // a second one for the same count.
+      if (existingError) {
+        throw new Error(`purchase_orders pre-check failed: ${existingError.message}`)
+      }
+
+      // Only short-circuit on a COMPLETE prior PO. The previous version
+      // returned on the header row alone, which made a half-written PO
+      // permanent: if the items insert below failed (or the process died
+      // between the two writes), the retry found the header, declared
+      // alreadyExisted, and the PM opened a restock order listing nothing —
+      // forever, with nothing logged. Falling through instead lets the items
+      // insert be retried against the existing header.
+      const existingItemCount = (existing?.purchase_order_items ?? []).length
+      if (existing && existingItemCount > 0) {
+        return { purchaseOrderId: existing.id, alreadyExisted: true }
+      }
+      if (existing) {
+        logger.warn(
+          `Count ${count_id}: purchase order ${existing.id} exists with zero line items — ` +
+          'completing it rather than treating it as done.'
+        )
+        await insertPoItems(supabase, existing.id, belowParItems)
+        await markPoSent(supabase, existing.id)
+        return { purchaseOrderId: existing.id, alreadyExisted: false }
+      }
 
       const { data: po } = await supabase
         .from('purchase_orders')
@@ -240,23 +319,11 @@ export const handleInventoryCountSubmitted = inngest.createFunction(
 
       if (!po) throw new Error('Failed to create purchase order')
 
-      await supabase.from('purchase_order_items').insert(
-        belowParItems.map((item) => ({
-          purchase_order_id: po.id,
-          inventory_item_id: item.id,
-          item_name:         item.name,
-          current_quantity:  item.current_quantity,
-          par_level:         item.par_level,
-          quantity_to_buy:   item.quantity_to_buy,
-          unit:              item.unit,
-        }))
-      )
-
-      // Mark PO as sent
-      await supabase
-        .from('purchase_orders')
-        .update({ status: 'sent', sent_at: new Date().toISOString() })
-        .eq('id', po.id)
+      // Both writes now THROW on failure instead of discarding their result.
+      // Discarding them is what let the step report success with no line
+      // items, and what made the status update silently skippable.
+      await insertPoItems(supabase, po.id, belowParItems)
+      await markPoSent(supabase, po.id)
 
       return { purchaseOrderId: po.id, alreadyExisted: false }
     })

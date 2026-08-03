@@ -61,10 +61,17 @@ describe('POST /api/guidebook/sponsor-checkout', () => {
     expect(callOrder).toEqual(['limit', 'lookup'])
   })
 
-  it('keys the limiter on the caller IP from x-forwarded-for', async () => {
+  // extractClientIp prefers platform-set headers and, falling back to
+  // x-forwarded-for, reads the RIGHTMOST entry — a client-prepended value must
+  // not become the rate-limit key, or each request mints its own bucket.
+  it('keys the limiter on the platform-set caller IP, not a client-supplied one', async () => {
     const req = new NextRequest('http://localhost/api/guidebook/sponsor-checkout', {
       method:  'POST',
-      headers: { 'content-type': 'application/json', 'x-forwarded-for': '203.0.113.7, 10.0.0.1' },
+      headers: {
+        'content-type':    'application/json',
+        'x-real-ip':       '203.0.113.7',
+        'x-forwarded-for': '1.2.3.4, 203.0.113.7',
+      },
       body:    JSON.stringify({ mediaKitToken: 'kit-token-abc-123' }),
     })
     vi.mocked(createSponsorCheckoutSession).mockResolvedValue({ url: 'https://checkout.stripe.com/pay/cs_1' })
@@ -72,6 +79,7 @@ describe('POST /api/guidebook/sponsor-checkout', () => {
     await POST(req)
 
     expect(guidebookSponsorCheckoutLimiter.limit).toHaveBeenCalledWith('203.0.113.7')
+    expect(guidebookSponsorCheckoutLimiter.limit).not.toHaveBeenCalledWith('1.2.3.4')
   })
 
   it('rejects a request with no mediaKitToken before calling the checkout action', async () => {
