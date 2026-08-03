@@ -1,10 +1,12 @@
 'use server'
 
 import { revalidatePath } from 'next/cache'
+import { verifyPropertyInOrg } from '@/lib/tenancy/verify'
 import { requireOrgMember, requireOrgRole } from '@/lib/auth'
 import { inngest } from '@/lib/inngest/client'
 import { logAuditEvent } from '@/lib/audit'
 import { reportError } from '@/lib/observability/report-error'
+import { reportQueryError } from '@/lib/supabase/unwrap'
 import { unwrapJoin } from '@/lib/utils/supabase-joins'
 import { fetchAllRows } from '@/lib/inngest/paginate'
 import type { InventoryCategory, TablesInsert, TablesUpdate } from '@/types/database'
@@ -86,14 +88,13 @@ export async function addInventoryItems(
     if (!property_id) return { error: 'Property is required' }
     if (itemCount === 0) return { error: 'Select at least one item' }
 
-    const { data: property } = await supabase
-      .from('properties')
-      .select('id')
-      .eq('id', property_id)
-      .eq('org_id', membership.org_id)
-      .single()
-
-    if (!property) return { error: 'Property not found' }
+    // maybeSingle + reportQueryError: with .single() and a discarded error, a
+    // failed read and "no such property in your org" produced the same answer.
+    // The PM saw "Property not found" for a property they had just picked off
+    // the list, and the whole filled-in bulk-add form was thrown away with
+    // nothing logged.
+    const owned = await verifyPropertyInOrg(supabase, membership.org_id, property_id, 'serverAction.inventory.addInventoryItems')
+    if (!owned.ok) return { error: owned.error }
 
     const rows = []
     for (let i = 0; i < itemCount; i++) {
@@ -208,15 +209,17 @@ export async function submitInventoryCount(
 
     if (!property_id) return { error: 'Property is required' }
 
-    // Verify property belongs to org
-    const { data: property } = await supabase
-      .from('properties')
-      .select('id')
-      .eq('id', property_id)
-      .eq('org_id', membership.org_id)
-      .single()
-
-    if (!property) return { error: 'Property not found' }
+    // Verify property belongs to org.
+    // maybeSingle + reportQueryError for the same reason as addInventoryItems,
+    // and it costs more here: a rejected submit discards a whole physical count
+    // session the PM hand-entered, and "Property not found" gives them no
+    // reason to retry.
+    const owned = await verifyPropertyInOrg(
+      supabase, membership.org_id, property_id,
+      'serverAction.inventory.submitInventoryCount',
+      'Could not verify the property. Your counts were not saved — please try again.',
+    )
+    if (!owned.ok) return { error: owned.error }
 
     // Create the inventory_count record
     const { data: count, error: countError } = await supabase
@@ -287,13 +290,16 @@ export async function addTemplateItem(
   try {
     const { supabase, membership } = await requireOrgMember()
 
-    const { data: template } = await supabase
+    const templateRes = await supabase
       .from('inventory_templates')
       .select('id')
       .eq('id', templateId)
       .eq('org_id', membership.org_id)
       .maybeSingle()
-    if (!template) return { error: 'Template not found.' }
+    if (reportQueryError(templateRes.error, { site: 'serverAction.inventory.addTemplateItem', orgId: membership.org_id })) {
+      return { error: 'Could not verify the template. Please try again.' }
+    }
+    if (!templateRes.data) return { error: 'Template not found.' }
 
     const { data, error } = await supabase
       .from('inventory_template_items')
@@ -322,6 +328,37 @@ export async function addTemplateItem(
   }
 }
 
+/**
+ * Ownership gate for a single inventory_template_items row.
+ *
+ * inventory_template_items has no org_id of its own — ownership runs through
+ * its parent template — and BOTH writes it guards (the brand update and the
+ * delete) filter on .eq('id', itemId) alone. So this read is the only
+ * application-level org scope on either statement, and RLS is the sole backstop
+ * if it is ever loosened. Extracted so there is one copy of that reasoning
+ * rather than two that can drift apart.
+ */
+async function verifyTemplateItemInOrg(
+  supabase: Awaited<ReturnType<typeof requireOrgMember>>['supabase'],
+  orgId:    string,
+  itemId:   string,
+  site:     string,
+): Promise<{ ok: true } | { ok: false; error: string }> {
+  const res = await supabase
+    .from('inventory_template_items')
+    .select('id, inventory_templates!inner(org_id)')
+    .eq('id', itemId)
+    .eq('inventory_templates.org_id', orgId)
+    .maybeSingle()
+
+  if (reportQueryError(res.error, { site, orgId })) {
+    return { ok: false, error: 'Could not verify the template item. Please try again.' }
+  }
+  if (!res.data) return { ok: false, error: 'Item not found' }
+
+  return { ok: true }
+}
+
 export async function updateTemplateItemBrand(
   itemId: string,
   brand:  string | null
@@ -329,14 +366,8 @@ export async function updateTemplateItemBrand(
   try {
     const { supabase, membership } = await requireOrgMember()
 
-    const { data: item } = await supabase
-      .from('inventory_template_items')
-      .select('id, inventory_templates!inner(org_id)')
-      .eq('id', itemId)
-      .eq('inventory_templates.org_id', membership.org_id)
-      .maybeSingle()
-
-    if (!item) return { error: 'Item not found' }
+    const owned = await verifyTemplateItemInOrg(supabase, membership.org_id, itemId, 'serverAction.inventory.updateTemplateItemBrand')
+    if (!owned.ok) return { error: owned.error }
 
     const { error } = await supabase
       .from('inventory_template_items')
@@ -361,14 +392,8 @@ export async function removeTemplateItem(itemId: string): Promise<{ error?: stri
   try {
     const { supabase, membership } = await requireOrgMember()
 
-    const { data: item } = await supabase
-      .from('inventory_template_items')
-      .select('id, inventory_templates!inner(org_id)')
-      .eq('id', itemId)
-      .eq('inventory_templates.org_id', membership.org_id)
-      .maybeSingle()
-
-    if (!item) return { error: 'Item not found' }
+    const owned = await verifyTemplateItemInOrg(supabase, membership.org_id, itemId, 'serverAction.inventory.removeTemplateItem')
+    if (!owned.ok) return { error: owned.error }
 
     const { error } = await supabase
       .from('inventory_template_items')
@@ -389,6 +414,71 @@ export async function removeTemplateItem(itemId: string): Promise<{ error?: stri
   }
 }
 
+/**
+ * Ownership preamble for applyTemplateToProperties: the template must belong to
+ * the caller's org, and every selected property must too.
+ *
+ * The property check is the ONLY thing standing between a client-supplied
+ * property_id and a cross-org write — inventory_items' RLS INSERT check
+ * verifies org_id but cannot verify that property_id belongs to that org (see
+ * the caller's comment). So its failure must never share a branch with its
+ * empty result: `ownedProperties ?? []` collapsed both into "you own none of
+ * these", which told a PM who had ticked twelve of their own properties that
+ * none were valid. That message blames the user's data for an outage, and it
+ * is exactly the kind of message someone "fixes" by loosening the filter.
+ *
+ * Extracted from the action to keep it under the cognitive-complexity ceiling.
+ */
+type TemplateOwnership =
+  | { ok: false; error: string }
+  | { ok: true;  targetPropertyIds: string[] }
+
+async function verifyTemplateAndProperties(
+  supabase:    Awaited<ReturnType<typeof requireOrgMember>>['supabase'],
+  orgId:       string,
+  templateId:  string,
+  propertyIds: string[],
+): Promise<TemplateOwnership> {
+  const templateRes = await supabase
+    .from('inventory_templates')
+    .select('id')
+    .eq('id', templateId)
+    .eq('org_id', orgId)
+    .maybeSingle()
+
+  if (reportQueryError(templateRes.error, { site: 'serverAction.inventory.applyTemplateToProperties', orgId })) {
+    return { ok: false, error: 'Could not verify the template. Please try again.' }
+  }
+  if (!templateRes.data) return { ok: false, error: 'Template not found.' }
+
+  // Paginated as well as error-checked: this is the tenant filter, so a
+  // truncated page silently drops properties the PM does own — the same wrong
+  // answer as a failed read, just quieter.
+  let ownedRows: { id: string }[]
+  try {
+    ownedRows = await fetchAllRows<{ id: string }>(
+      (from, to) => supabase
+        .from('properties')
+        .select('id')
+        .eq('org_id', orgId)
+        .in('id', propertyIds)
+        .order('id')
+        .range(from, to),
+      { label: 'serverAction.inventory.applyTemplateToProperties.owned' },
+    )
+  } catch (err) {
+    console.error('[applyTemplateToProperties] property verification failed', err)
+    reportError(err, { site: 'serverAction.inventory.applyTemplateToProperties.owned', orgId })
+    return { ok: false, error: 'Could not verify the selected properties. Nothing was applied — please try again.' }
+  }
+
+  const verified = new Set(ownedRows.map((p) => p.id))
+  const targetPropertyIds = propertyIds.filter((id) => verified.has(id))
+  if (targetPropertyIds.length === 0) return { ok: false, error: 'No valid properties selected' }
+
+  return { ok: true, targetPropertyIds }
+}
+
 export async function applyTemplateToProperties(
   templateId: string,
   propertyIds: string[]
@@ -396,13 +486,9 @@ export async function applyTemplateToProperties(
   try {
     const { supabase, membership } = await requireOrgMember()
 
-    const { data: template } = await supabase
-      .from('inventory_templates')
-      .select('id')
-      .eq('id', templateId)
-      .eq('org_id', membership.org_id)
-      .maybeSingle()
-    if (!template) return { error: 'Template not found.', applied: 0 }
+    const ownership = await verifyTemplateAndProperties(supabase, membership.org_id, templateId, propertyIds)
+    if (!ownership.ok) return { error: ownership.error, applied: 0 }
+    const targetPropertyIds = ownership.targetPropertyIds
 
     const { data: items, error: itemsErr } = await supabase
       .from('inventory_template_items')
@@ -424,14 +510,6 @@ export async function applyTemplateToProperties(
     // inserted with a mismatched org_id/property_id pair. Verify explicitly
     // and drop anything that doesn't check out, same pattern as
     // clone_inventory_from_property's target-property check.
-    const { data: ownedProperties } = await supabase
-      .from('properties')
-      .select('id')
-      .eq('org_id', membership.org_id)
-      .in('id', propertyIds)
-    const verifiedPropertyIds = new Set((ownedProperties ?? []).map((p) => p.id))
-    const targetPropertyIds = propertyIds.filter((id) => verifiedPropertyIds.has(id))
-    if (targetPropertyIds.length === 0) return { error: 'No valid properties selected', applied: 0 }
 
     // Fetch all existing items for ALL target properties, then group by property.
     //
@@ -687,13 +765,23 @@ export async function updatePurchaseOrderStatus(
   try {
     const { user, supabase, membership } = await requireOrgRole(['admin', 'manager'])
 
-    const { data: po } = await supabase
+    // This row is all-or-nothing: it decides the idempotent no-op, supplies
+    // old_status for the audit row, and carries property_id +
+    // total_estimated_cost into purchase-order/approved. A silent null skipped
+    // the whole transition — the PO sat in `sent` forever, no event fired, so
+    // the downstream restock expense never reached the owner ledger, and the PM
+    // was told the PO did not exist.
+    const poRes = await supabase
       .from('purchase_orders')
       .select('id, property_id, total_estimated_cost, status')
       .eq('id', purchaseOrderId)
       .eq('org_id', membership.org_id)
-      .single()
+      .maybeSingle()
 
+    if (reportQueryError(poRes.error, { site: 'serverAction.inventory.updatePurchaseOrderStatus', orgId: membership.org_id })) {
+      return { error: 'Could not load the purchase order. Please try again.' }
+    }
+    const po = poRes.data
     if (!po) return { error: 'Purchase order not found' }
     if (po.status === status) return {}
 
