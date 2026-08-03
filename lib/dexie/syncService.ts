@@ -41,6 +41,11 @@ export class SyncEngine {
   // a shared IndexedDB, so two tabs each pass their own guard — withTabLock()
   // in processOutbox() is what actually serializes the drain across tabs.
   private isProcessing = false
+  // Ids held back mid-drain by holdBackSuccessors(). Scoped to a single
+  // drain (cleared at its start) — the durable state is the row's `failed`
+  // flag; this only stops the current loop's pre-computed snapshot from
+  // pushing a row that was marked failed after the snapshot was taken.
+  private readonly heldBack = new Set<number>()
   private disposed = false
   // Single pending wake-up for a drain that stopped on a not-yet-due
   // mutation. One handle only — scheduleRetry() clears any previous timer
@@ -142,9 +147,17 @@ export class SyncEngine {
     const db = getDexieDb(this.userId)
     const pending = (await db.mutations.orderBy('id').toArray()).filter((m) => !m.failed)
 
+    // `pending` is a SNAPSHOT taken before the loop. holdBackSuccessors() can
+    // mark rows failed part-way through it, and the loop would otherwise push
+    // them anyway — sending exactly the write that was just held back to
+    // preserve ordering, which defeats the whole point.
+    this.heldBack.clear()
+
     for (const mutation of pending) {
       // Auto-incrementing key — always populated once read back from the table.
       const id = mutation.id as number
+
+      if (this.heldBack.has(id)) continue
 
       // Backoff gate: a mutation still inside its retry window stops the
       // drain entirely (never skip-and-continue — later mutations against
@@ -184,6 +197,49 @@ export class SyncEngine {
     } catch (err) {
       if (this.stopped()) return 'stop'
       return await this.handleFailure(mutation, id, err) ? 'stop' : 'continue'
+    }
+  }
+
+  /**
+   * Marks every still-queued mutation for the SAME record as failed, once one
+   * of them dead-letters.
+   *
+   * Without this, dead-lettering silently drops one write out of the middle of
+   * a record's sequence: the drain moves on, later writes for that record land
+   * on the server, and a subsequent "Retry all" replays the stale one on top
+   * of them. Holding the successors back keeps the sequence intact so a retry
+   * re-applies it in the order the crew member performed it.
+   *
+   * They carry a distinct lastError so the banner does not tell a crew member
+   * that five separate things failed when one did.
+   */
+  private async holdBackSuccessors(
+    db: FieldStayDexie,
+    mutation: MutationRow,
+    failedId: number,
+  ): Promise<void> {
+    const successors = (await db.mutations.orderBy('id').toArray()).filter(
+      (m) =>
+        !m.failed &&
+        (m.id as number) > failedId &&
+        m.table === mutation.table &&
+        m.targetId === mutation.targetId,
+    )
+
+    if (successors.length === 0) return
+
+    console.warn(
+      `[SyncEngine] holding back ${successors.length} later change(s) to ` +
+      `${mutation.table}/${mutation.targetId} so the retry order is preserved`
+    )
+
+    for (const successor of successors) {
+      const successorId = successor.id as number
+      await db.mutations.update(successorId, {
+        failed:    true,
+        lastError: 'Held back so earlier changes to this item retry in order',
+      })
+      this.heldBack.add(successorId)
     }
   }
 
@@ -237,8 +293,27 @@ export class SyncEngine {
         failed: true,
         lastError: describeFailure(err),
       })
-      // A mutation that will never succeed must not block every later write
-      // against other records — it is finished, so the drain continues.
+
+      // Dead-lettering breaks this record's mutation ORDER, and nothing used
+      // to put it back. The drain continues past the dead letter (correctly —
+      // other records must not be blocked), so later mutations for the SAME
+      // record push successfully on top of a gap. Then "Retry all" clears the
+      // failed flag in place, the row keeps its original low id, and the drain
+      // replays the stale payload as though it were the newest write.
+      //
+      // Concretely: crew ticks a checklist item (#10) → 500s five times →
+      // dead-letters. They realise it isn't done and un-tick it (#11) → pushes
+      // fine, server now false. They tap Retry all → #10 replays
+      // is_completed = true → the server flips BACK to complete, and the next
+      // delta pull overwrites Dexie too, so the un-tick disappears from the
+      // phone as well. Same shape for inventory_items.current_quantity (an old
+      // count overwriting a corrected one) and crew_availability.
+      //
+      // So: hold back this record's remaining queued mutations too. They keep
+      // their ids, so the sequence is preserved and a retry replays
+      // tick-then-un-tick in the order the crew member actually performed
+      // them. Scoped to (table, targetId) — every other record keeps draining.
+      await this.holdBackSuccessors(db, mutation, id)
       return false
     }
 

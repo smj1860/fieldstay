@@ -110,11 +110,45 @@ function isTerminalDataCode(code: string): boolean {
 export function classifyUploadFailure(err: unknown): UploadFailureKind {
   if (!isOnline()) return 'network'
   if (err instanceof UploadHttpError) return classifyHttpStatus(err.status)
-  if (err instanceof UploadDataError && err.code && isTerminalDataCode(err.code)) return 'terminal'
+
+  // A DATA error carrying a Postgres/PostgREST code demonstrably REACHED the
+  // server — the server is what produced the code. It is therefore terminal or
+  // transient, and must never fall through to the transport-message test
+  // below.
+  //
+  // That fall-through was a real trap. A Postgres statement timeout arrives as
+  // UploadDataError('… canceling statement due to statement timeout', '57014').
+  // 57014 is not 22/23/42 and not PGRST, so it was not terminal; the message
+  // then matched \btimeout\b and it was classified 'network'. The network
+  // branch in SyncEngine.handleFailure never consumes a retry, never sets
+  // `failed`, and stops the drain — so one server-side timeout pinned the head
+  // of the outbox forever and blocked every later write on the device, while
+  // FailedSyncBanner (which filters on `failed`) showed nothing at all.
+  //
+  // Classified 'transient': it may well succeed on replay, but it now spends
+  // the retry budget and eventually dead-letters into a surface a crew member
+  // can see.
+  if (err instanceof UploadDataError && err.code) {
+    return isTerminalDataCode(err.code) ? 'terminal' : 'transient'
+  }
+
   if (err instanceof TypeError) return 'network'
   if (NETWORK_MESSAGE_PATTERN.test(messageOf(err))) return 'network'
   return 'transient'
 }
+
+/**
+ * How many consecutive transport failures — all while the device reported
+ * itself ONLINE — before the outbox is treated as stalled and surfaced.
+ *
+ * Transport failures deliberately never dead-letter: discarding a crew
+ * member's work because their connection is bad would be far worse than the
+ * bug this bounds. But an unbounded, silent retry loop is its own failure —
+ * the drain stops at the blocked head, so every later write on the device
+ * queues behind it invisibly. Past this threshold the mutation stays queued
+ * and keeps retrying; it simply stops being invisible.
+ */
+export const STALLED_NETWORK_ATTEMPTS = 5
 
 // navigator.locks is unavailable in non-secure contexts, in workers on some
 // engines, and in the jsdom/node test environment. Declared narrowly here
