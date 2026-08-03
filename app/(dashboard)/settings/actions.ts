@@ -1266,6 +1266,15 @@ export async function createCheckoutSession(
       success_url:          `${process.env.NEXT_PUBLIC_APP_URL}/settings?checkout=success`,
       cancel_url:           `${process.env.NEXT_PUBLIC_APP_URL}/settings`,
       metadata:             { org_id: membership.org_id, plan: planKey },
+      // Stamped on the SUBSCRIPTION as well as the session. Session metadata
+      // only reaches checkout.session.completed; without this, a
+      // customer.subscription.* event carries no org reference at all and the
+      // handler can only resolve the org via organizations.stripe_customer_id
+      // — a link that, for a first-time subscriber, does not exist until
+      // checkout.session.completed lands. Stripe does not guarantee ordering
+      // between the two, so a subscription.created delivered first found no
+      // org and silently dropped the entitlement write.
+      subscription_data:    { metadata: { org_id: membership.org_id, plan: planKey } },
     }, {
       // Collapses the double-click the guard above cannot see: two clicks a
       // second apart both pass the live-subscription check (neither has
