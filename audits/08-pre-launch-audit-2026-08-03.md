@@ -3,7 +3,12 @@
 > **RE-VERIFIED against `origin/main` @ `8fd4064` (PR #551 merged).** See the
 > [Verification Addendum](#verification-addendum--re-verified-against-8fd4064)
 > at the end. Summary: **all 9 CRITICALs stand**; 2 findings fixed by #551,
-> 3 withdrawn as invalid, 1 mechanism corrected, 1 scope narrowed.
+> 4 withdrawn as invalid, 1 mechanism corrected, 1 scope narrowed.
+>
+> **Remediation status (2026-08-03):** all 8 code-level CRITICALs closed, plus
+> H2/H3 (OAuth binding + open redirect), H4 (Stripe entitlement race), H8
+> (Inngest concurrency) and H16 (DB gate armedness). C8 is a dashboard action.
+> Findings marked ✅ RESOLVED inline carry their outcome.
 
 **Scope:** Full-repo sweep across seven dimensions, run the day before the
 intended launch. Unlike audits 06 and 07, no area was declared out of scope —
@@ -469,15 +474,40 @@ and log `x-forwarded-for` vs `x-vercel-forwarded-for` server-side.
 fails CI outright, on the eve of a launch where hotfixes are likely. Burn down
 a few or raise the cap to ~210 with a dated comment. Do not disable it.
 
-### H16 — The DB-invariant and type-drift gates self-disarm
+### H16 — The DB-invariant and type-drift gates self-disarm — ✅ RESOLVED 2026-08-03
 `.github/workflows/ci.yml:266-267`, `:188-217`
 
 `check-db-invariants.mjs` is what mechanically verifies RLS-on-every-table,
 zero `anon` grants, FK covering indexes and dedupe-key uniqueness. It exits 0
 with a `::warning` when secrets are missing. **A green CI does not prove it
-ran.** Open the last run on main and confirm real check output rather than the
-UNARMED warning — 5 minutes, and it determines how much of this audit's
-"clean" verdict CI is actually holding up.
+ran.**
+
+**Outcome.** The job *was* armed — PR #553's log shows real secrets and real
+check output — so no invariant had actually gone unverified. But that was luck,
+not design: nothing about the check's status distinguished "ran and passed"
+from "skipped silently", which is the defect. Two fixes, both preserving the
+reason self-disarm exists (fork PRs must not sit on a permanently red required
+check, which `unit/guardrails/ci-gating.test.ts` deliberately asserts):
+
+- `DB_INVARIANTS_REQUIRE_ARMED=1` makes an absent secret a hard failure. CI
+  sets it for non-fork runs only, so forks keep the disarm and the canonical
+  repo cannot silently skip.
+- `DB_INVARIANTS_ALLOW_PROD=1` / `npm run check:db-invariants:prod` allows a
+  deliberate production verification. `db_invariant_report()` is `LANGUAGE sql`
+  / `SECURITY DEFINER` with zero DDL or DML, so this is read-only; the blanket
+  refusal existed to keep prod credentials out of CI, not because the check
+  writes.
+
+Also corrected the script header's load-bearing (and unsound) claim that
+"schema-level invariants verified on the E2E project hold for production by
+construction" — the ledgers have diverged, so an E2E pass is evidence about
+E2E only. That is a gap in what CI can *prove*, not a known production defect.
+
+**Production was verified directly and passes all nine checks**: no table
+without RLS, zero `anon` grants, every FK column indexed, every dedup column
+uniquely indexed, every member-facing policy grant-backed, no memberless orgs,
+every storage policy org-scoped, and the policy-less table and bucket
+allowlists match production 1:1 in both directions.
 
 ---
 
@@ -506,8 +536,14 @@ UNARMED warning — 5 minutes, and it determines how much of this audit's
 - **`assignCrew` can double-assign** — delete-then-upsert is not atomic and
   `turnover_assignments_crew_unique` is on `(turnover_id, crew_member_id)`, so
   two PMs assigning different crew both succeed.
-- **`maintenance_schedule_templates.org_id` has no FK** to `organizations` —
-  the only such table in the schema.
+- ~~**`maintenance_schedule_templates.org_id` has no FK** to `organizations` —
+  the only such table in the schema.~~ **WITHDRAWN — not a defect.** The column
+  is genuinely FK-less, but deliberately so: the table holds the platform-level
+  seed template `FieldStay STR Standard` under the sentinel `org_id`
+  `00000000-0000-0000-0000-000000000000`, a "belongs to no tenant" marker.
+  Creating an `organizations` row purely to satisfy the constraint would then
+  trip the memberless-org check. It is an explicit, reasoned entry in
+  `ORG_ID_FK_EXCEPTIONS` (`scripts/check-db-invariants.mjs`). See the addendum.
 - **Billed LLM + Mapbox calls with no limiter** — `fireManualLookup`
   (`properties/actions.ts:486`, web-search tool, ~$0.01–0.03/call) and
   `geocodeZip` (`lib/geocoding.ts:37`, no cache despite zip→lat/lng being
@@ -632,7 +668,31 @@ Also fixed in passing, unreported by the audit: `push_subscriptions`
 (`turnovers/actions.ts:206-215`) **gained a missing `.eq('org_id', orgId)` on a
 service-role read** — a genuine tenant-isolation fix.
 
-### WITHDRAWN as invalid (3)
+### WITHDRAWN as invalid (4)
+
+- **`maintenance_schedule_templates.org_id` has no FK — not a defect.**
+  Withdrawn 2026-08-03 while resolving H16. The observation was accurate (the
+  column has zero FK constraints, verified against the live DB) but the
+  conclusion was wrong: it is a deliberate, documented exception in
+  `ORG_ID_FK_EXCEPTIONS` (`scripts/check-db-invariants.mjs`). The table holds
+  the platform seed template under sentinel `org_id`
+  `00000000-0000-0000-0000-000000000000` — "belongs to no tenant" — and adding
+  an `organizations` row to satisfy the FK would then violate the
+  memberless-org invariant. The DB-layer lane additionally reasoned that
+  `db_invariant_report()`'s check 9 "should flag this, and that it hasn't is
+  corroborating evidence for the ledger drift." That inference was also wrong —
+  the check doesn't flag it because it is allowlisted, not because it is
+  looking at a different database.
+
+  **The general lesson, since two lanes made the same mistake:** an invariant
+  checker passing on something that *looks* like a violation is at least as
+  likely to mean "deliberate exception" as "checker is blind." Read the
+  allowlist before concluding the tool is broken.
+
+  Production was verified directly during this correction and **passes all nine
+  invariant checks** — see the H16 entry below.
+
+### Previously withdrawn (3)
 
 - **C3's `inventory/actions.ts:428` site — mis-attributed.** At baseline that
   line was a `properties` read, not `inventory_items`. Both `inventory_items`
