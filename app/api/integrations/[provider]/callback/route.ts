@@ -44,6 +44,7 @@ import { holdPendingOAuthCode }           from '@/lib/integrations/vault'
 import { finalizeIntegrationConnection }  from '@/lib/integrations/finalize-connection'
 import { logAuditEvent }                  from '@/lib/audit'
 import { RateLimitError, IntegrationMisconfiguredError } from '@/lib/integrations/types'
+import { timingSafeEqual }                 from '@/lib/integrations/webhook-verification'
 
 import { reportError } from '@/lib/observability/report-error'
 
@@ -173,6 +174,43 @@ export async function GET(
     return errorRedirect('invalid_state')
   }
 
+  //    The state COOKIE is the second half of the CSRF check, and until now it
+  //    was written by /connect, described in-comment as a "secondary
+  //    verification source", and then never actually compared — only deleted.
+  //    That left the DB row as the only proof, and a DB row is not proof the
+  //    person completing the flow is the person who started it: anyone can
+  //    start a flow, authorize with their OWN provider account, capture the
+  //    resulting callback URL, and hand it to a logged-in PM. The state row is
+  //    real, unexpired and for the right provider, so validation passed and
+  //    the attacker's PMS account got bound to the victim's org.
+  //
+  //    The cookie closes that, because an attacker cannot set it in the
+  //    victim's browser. Enforced only for a flow that HAD a browser to set it
+  //    in — a marketplace arrival legitimately has no prior cookie, and that
+  //    path is separately gated below by requiring a real signup before the
+  //    code is ever exchanged.
+  const stateCookie = request.cookies.get(`oauth_state_${providerId}`)?.value ?? null
+
+  //    `sameBrowser` is what the cookie actually proves: this request carries
+  //    the one-time value /connect set when the flow STARTED, so the browser
+  //    finishing the handshake is the browser that began it. An attacker
+  //    cannot set a cookie in the victim's browser, which is why this — and
+  //    not the DB row — is what distinguishes a legitimate mid-flow account
+  //    switch from a forwarded callback URL.
+  const sameBrowser = stateCookie !== null && timingSafeEqual(stateCookie, returnedState)
+
+  //    A cookie that is PRESENT but wrong is never legitimate. Absent is
+  //    allowed: a marketplace arrival has no prior cookie, and that path is
+  //    separately gated below by requiring a real signup before the code is
+  //    ever exchanged.
+  if (stateCookie !== null && !sameBrowser) {
+    console.error(
+      `[OAuth:${providerId}] State cookie mismatch — the callback was completed in a ` +
+      `different browser session than the one that started it (state: ${returnedState.slice(0, 8)}...)`
+    )
+    return errorRedirect('invalid_state')
+  }
+
   // ── 3. Load the provider adapter ──────────────────────────
   let providerAdapter
   try {
@@ -197,7 +235,40 @@ export async function GET(
   //         the exchange must not happen before signup)
   const { data: { user: sessionUser } } = await supabase.auth.getUser()
 
-  const appUserId: string | null = sessionUser?.id ?? stateRecord.user_id ?? null
+  //    Whether the SESSION may override the owner /connect recorded turns on
+  //    `sameBrowser`, not on the session alone.
+  //
+  //    Unconditionally preferring sessionUser (the previous behavior) meant a
+  //    flow started by one person could be completed by, and bound to,
+  //    whoever opened the callback URL. That is the whole attack: start a
+  //    flow, authorize with your OWN provider account, send the resulting
+  //    callback URL to a logged-in PM. The state row is real, unexpired and
+  //    for the right provider, so it validated — and the attacker's PMS
+  //    account became the victim org's live integration. Inbound webhooks
+  //    then resolve that external account straight to the victim's org, so
+  //    the cross-tenant write access persists well beyond the handshake.
+  //
+  //    But a session/state mismatch is not always hostile: the same person
+  //    may have started the flow signed out (or as another account) and
+  //    signed in before finishing. That case is indistinguishable from the
+  //    attack by user ids alone — and entirely distinguishable by the cookie,
+  //    which only the originating browser has.
+  if (stateRecord.user_id && sessionUser?.id && sessionUser.id !== stateRecord.user_id && !sameBrowser) {
+    console.error(
+      `[OAuth:${providerId}] State owner does not match the active session and the ` +
+      `originating browser cannot be confirmed — refusing to bind this connection ` +
+      `(state: ${returnedState.slice(0, 8)}...)`
+    )
+    return errorRedirect('invalid_state')
+  }
+
+  //    Same browser → the live session wins (a mid-flow account switch binds
+  //    to who the user actually is now). Otherwise the recorded owner wins,
+  //    falling back to the session only when /connect had nobody to record —
+  //    the marketplace arrival.
+  const appUserId: string | null = sameBrowser
+    ? (sessionUser?.id ?? stateRecord.user_id ?? null)
+    : (stateRecord.user_id ?? sessionUser?.id ?? null)
 
   //    OwnerRez: code expires after 10 minutes and is single-use.
   //    We pass redirectUri because we included it in step 1 — it must match exactly,
@@ -297,9 +368,18 @@ export async function GET(
   revalidatePath('/inventory')
 
   // ── 7. Success — redirect to dashboard ────────────────────
-  const returnTo  = stateRecord.return_to ?? '/settings?tab=integrations'
-  // Guard against open redirects: only allow paths starting with /
-  const safePath  = returnTo.startsWith('/') ? returnTo : '/settings?tab=integrations'
+  const returnTo = stateRecord.return_to ?? '/settings?tab=integrations'
+  // Guard against open redirects. `startsWith('/')` ALONE is not sufficient
+  // and was the bug: '//evil.com'.startsWith('/') is true, and
+  // new URL('//evil.com/x', 'https://app.fieldstay.com') resolves to
+  // https://evil.com/x — a protocol-relative URL is absolute. `return_to` is
+  // taken verbatim from /connect's query string, so this sent the victim
+  // off-site carrying a FieldStay-looking ?connected= param. A backslash is
+  // rejected for the same reason: browsers normalise '/\' to '//'.
+  const safePath =
+    returnTo.startsWith('/') && !returnTo.startsWith('//') && !returnTo.startsWith('/\\')
+      ? returnTo
+      : '/settings?tab=integrations'
   const returnUrl = new URL(safePath, appUrl)
 
   // Pass a success flag so the UI can show a "Connected!" toast
