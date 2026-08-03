@@ -37,21 +37,63 @@
  *      orphaning as (7), one level down
  *
  * Runs in the CI `db-invariants` job against the DEDICATED E2E PROJECT
- * (docs/E2E_SETUP.md) — never production; CI must not hold prod credentials.
- * Both projects receive every migration, so schema-level invariants verified
- * on the E2E project hold for production by construction. Grant state is the
- * one exception (it isn't purely migration-driven — Supabase default
- * privileges differ per project), which is why check 4 demands ZERO rather
- * than diffing a baseline.
+ * (docs/E2E_SETUP.md). Grant state isn't purely migration-driven (Supabase
+ * default privileges differ per project), which is why check 4 demands ZERO
+ * rather than diffing a baseline.
  *
- * Self-disarms with a CI warning annotation when the E2E secrets are absent,
- * mirroring the e2e job's gate.
+ * ⚠️ THE E2E RUN DOES NOT SPEAK FOR PRODUCTION.
+ *
+ * This header used to claim it did: "both projects receive every migration, so
+ * schema-level invariants verified on the E2E project hold for production by
+ * construction." The premise is unsound — the two projects' migration ledgers
+ * have diverged (verified 2026-08-03: 33 local files absent from live history,
+ * 35 live entries with no local file), so "both receive every migration" is an
+ * assumption, not a guarantee, and an E2E pass is evidence about the E2E
+ * project only.
+ *
+ * That is a gap in what CI can PROVE, not a known production defect. Production
+ * was verified directly on 2026-08-03 and passes all nine checks — including
+ * org_id_columns_without_fk, whose single entry is the deliberate
+ * ORG_ID_FK_EXCEPTIONS case below. The point is that nothing in CI told us
+ * that; a human had to go and look. Hence the opt-in below.
+ *
+ * Two consequences are now handled explicitly rather than assumed away:
+ *
+ *   TARGETING — the report function is `LANGUAGE sql` / SECURITY DEFINER with
+ *   no DDL or DML (supabase/migrations/20260724131000_db_invariant_report.sql),
+ *   i.e. provably read-only, so running it against production is safe. The
+ *   blanket production refusal below stays the DEFAULT (CI should not hold
+ *   prod credentials by accident) but is now opt-in-able via
+ *   DB_INVARIANTS_ALLOW_PROD=1 for a deliberate, human-run verification:
+ *       npm run check:db-invariants:prod
+ *
+ *   ARMEDNESS — self-disarming keeps fork PRs and unconfigured clones from
+ *   sitting on a permanently red required check, which is a real and good
+ *   reason (see unit/guardrails/ci-gating.test.ts). But on the canonical repo
+ *   a silent skip is indistinguishable from a pass, and a `::warning` is not
+ *   something anyone reads on a green run. Set DB_INVARIANTS_REQUIRE_ARMED=1
+ *   (the CI job does, for non-fork runs) to turn an absent secret into a hard
+ *   failure instead.
  */
 
 const url = process.env.NEXT_PUBLIC_SUPABASE_URL
 const key = process.env.SUPABASE_SERVICE_ROLE_KEY
 
 if (!url || !key) {
+  // On the canonical repo an unarmed run is a silent skip wearing a green
+  // check. Forks legitimately have no secrets, so the warn-and-pass path below
+  // stays — this flag is what separates the two.
+  if (process.env.DB_INVARIANTS_REQUIRE_ARMED === '1') {
+    console.error(
+      'DB invariant gate is REQUIRED on this run but UNARMED: ' +
+        'NEXT_PUBLIC_SUPABASE_URL / SUPABASE_SERVICE_ROLE_KEY are not set. ' +
+        'Passing here would report a green check for invariants nobody verified. ' +
+        'Configure the E2E secrets (docs/E2E_SETUP.md), or unset ' +
+        'DB_INVARIANTS_REQUIRE_ARMED if this run genuinely cannot hold them.'
+    )
+    process.exit(1)
+  }
+
   console.log(
     '::warning title=DB invariant gate UNARMED::NEXT_PUBLIC_SUPABASE_URL / ' +
       'SUPABASE_SERVICE_ROLE_KEY are not configured, so database invariants ' +
@@ -62,13 +104,25 @@ if (!url || !key) {
 }
 
 const PROD_PROJECT_REF = 'vpmznjktllhmmbfnxuvk'
-if (url.includes(PROD_PROJECT_REF)) {
+const allowProd = process.env.DB_INVARIANTS_ALLOW_PROD === '1'
+
+if (url.includes(PROD_PROJECT_REF) && !allowProd) {
   console.error(
     'Refusing to run: NEXT_PUBLIC_SUPABASE_URL points at the PRODUCTION ' +
       'Supabase project. CI must use the dedicated E2E project — see ' +
-      'docs/E2E_SETUP.md.'
+      'docs/E2E_SETUP.md.\n' +
+      'If you MEANT to verify production (this check is read-only — the report ' +
+      'function performs no DDL or DML), re-run with DB_INVARIANTS_ALLOW_PROD=1, ' +
+      'or use: npm run check:db-invariants:prod'
   )
   process.exit(1)
+}
+
+if (url.includes(PROD_PROJECT_REF)) {
+  console.log(
+    'Verifying invariants against PRODUCTION (read-only). The E2E run does not ' +
+      'speak for production — see the header note.'
+  )
 }
 
 // Tables that are deliberately service-role-only: RLS enabled with zero

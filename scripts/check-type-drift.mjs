@@ -64,6 +64,19 @@ const url = process.env.NEXT_PUBLIC_SUPABASE_URL
 const key = process.env.SUPABASE_SERVICE_ROLE_KEY
 
 if (!url || !key) {
+  // See scripts/check-db-invariants.mjs for the full reasoning: forks have no
+  // secrets and must not sit on a permanently red required check, but on the
+  // canonical repo a silent skip is a green check for work nobody did.
+  if (process.env.DB_INVARIANTS_REQUIRE_ARMED === '1') {
+    console.error(
+      'Type drift gate is REQUIRED on this run but UNARMED: ' +
+        'NEXT_PUBLIC_SUPABASE_URL / SUPABASE_SERVICE_ROLE_KEY are not set. ' +
+        'Configure the E2E secrets (docs/E2E_SETUP.md), or unset ' +
+        'DB_INVARIANTS_REQUIRE_ARMED if this run genuinely cannot hold them.'
+    )
+    process.exit(1)
+  }
+
   console.log(
     '::warning title=Type drift gate UNARMED::NEXT_PUBLIC_SUPABASE_URL / ' +
       'SUPABASE_SERVICE_ROLE_KEY are not configured, so types/database.ts ' +
