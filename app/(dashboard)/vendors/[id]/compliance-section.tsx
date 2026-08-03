@@ -31,6 +31,16 @@ import { RequiredMark } from '@/components/ui/RequiredMark'
  * `.jpg`/`.jpeg`. Keep this map and the bucket's allowed_mime_types in sync —
  * an entry here that the bucket rejects turns into an upload failure, and an
  * omission turns into a file the user cannot upload at all.
+ * unit/guardrails/compliance-upload-mime-parity.test.ts enforces that.
+ *
+ * HEIC is deliberately EXCLUDED, unlike the sibling photo buckets
+ * (turnover-photos, work-order-photos, crew-uploads) which all allow it. Those
+ * hold crew photo streams rendered in-app; this bucket holds documents a PM
+ * opens in a browser tab to READ and verify (see handleView's
+ * globalThis.open). Chrome, Firefox and Edge do not render HEIC — only Safari
+ * does — so accepting it produces compliance documents the reviewer cannot
+ * open. Refusing at selection time, with a message naming the accepted
+ * formats, is better than storing an unreadable certificate.
  */
 const EXTENSION_CONTENT_TYPES: Record<string, string> = {
   pdf:  'application/pdf',
@@ -38,7 +48,6 @@ const EXTENSION_CONTENT_TYPES: Record<string, string> = {
   jpeg: 'image/jpeg',
   png:  'image/png',
   webp: 'image/webp',
-  heic: 'image/heic',
 }
 
 const ACCEPTED_EXTENSIONS = Object.keys(EXTENSION_CONTENT_TYPES).map((e) => `.${e}`)

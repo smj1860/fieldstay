@@ -11,11 +11,19 @@
 -- any admin/manager/owner in any org, bounded only by the project-wide upload
 -- ceiling. Bucket-level limits are the only enforcement point that path has.
 --
--- Limits chosen to match the sibling private buckets (turnover-photos,
--- work-order-photos: 10 MB) and to carry the document types the UI actually
--- offers. PDF is included because COIs and licenses are overwhelmingly PDFs;
--- the image types mirror the accept list so a phone photo of a certificate
--- still works.
+-- Size limit matches the sibling private buckets (turnover-photos,
+-- work-order-photos: 10 MB). PDF leads the type list because COIs and licenses
+-- are overwhelmingly PDFs; the image types cover a photographed certificate.
+--
+-- HEIC is deliberately OMITTED even though every other bucket here allows it.
+-- Those buckets hold crew photo streams rendered inside the app; this one
+-- holds documents a PM opens in a browser tab to read and verify. Chrome,
+-- Firefox and Edge do not render HEIC — only Safari does — so allowing it
+-- would let a vendor submit a certificate their reviewer cannot open. The
+-- client refuses it at selection time instead
+-- (app/(dashboard)/vendors/[id]/compliance-section.tsx), and
+-- unit/guardrails/compliance-upload-mime-parity.test.ts keeps the two lists
+-- identical.
 
 UPDATE storage.buckets
 SET file_size_limit    = 10485760,  -- 10 MB, same as turnover-photos/work-order-photos
@@ -23,7 +31,6 @@ SET file_size_limit    = 10485760,  -- 10 MB, same as turnover-photos/work-order
       'application/pdf',
       'image/jpeg',
       'image/png',
-      'image/webp',
-      'image/heic'
+      'image/webp'
     ]
 WHERE id = 'compliance-documents';
