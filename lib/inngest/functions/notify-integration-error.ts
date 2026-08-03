@@ -11,7 +11,14 @@ const PROVIDER_DISPLAY_NAMES: Record<string, string> = {
 }
 
 export const notifyIntegrationError = inngest.createFunction(
-  { id: 'notify-integration-error', name: 'Notify PM: Integration Connection Error', retries: 2 },
+  {
+    id: 'notify-integration-error', name: 'Notify PM: Integration Connection Error', retries: 2,
+    // Dispatched as an array from three separate sync paths — a provider
+    // outage fails every connection at once, so this is precisely the case
+    // where the alert storm would compound the incident it is reporting.
+    concurrency: { limit: 5 },
+    throttle:    { limit: 60, period: '1m' },
+  },
   { event: 'integration/connection.error' as const },
   async ({ event, step }) => {
     const { org_id, provider_id, reason } = event.data

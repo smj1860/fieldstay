@@ -114,4 +114,47 @@ describe('guardrail: install-free CI scripts stay install-free', () => {
     expect(src).toMatch(/::warning title=.*UNARMED/)
     expect(src).toMatch(/process\.exit\(0\)/)
   })
+
+  // The other half of that trade-off. Self-disarming is right for forks and
+  // wrong for the canonical repo, where an absent secret is a misconfiguration
+  // and the warn-and-pass path renders as a green required check for work
+  // nobody did. On 2026-08-03 the db-invariants job WAS armed and did run —
+  // but the check status alone could not have told you that either way, and
+  // that indistinguishability is the defect, not the outcome.
+  // DB_INVARIANTS_REQUIRE_ARMED is what separates the two cases; without it
+  // the disarm is unconditional again.
+  it.each(INSTALL_FREE_SCRIPTS)('%s fails loudly when armedness is REQUIRED but secrets are absent', (script) => {
+    const src = readFileSync(join(ROOT, script), 'utf8')
+    expect(
+      src,
+      `${script} must honour DB_INVARIANTS_REQUIRE_ARMED — otherwise an unarmed run on the canonical repo passes silently.`,
+    ).toMatch(/DB_INVARIANTS_REQUIRE_ARMED/)
+    // The require-armed branch has to EXIT NON-ZERO; matching the env var name
+    // alone would pass on a version that merely logged and carried on — and
+    // would also match the header comment rather than any code, which is
+    // exactly what a first-draft version of this assertion did.
+    expect(
+      src,
+      `${script}'s DB_INVARIANTS_REQUIRE_ARMED branch must exit non-zero, not just log.`,
+    ).toMatch(/process\.env\.DB_INVARIANTS_REQUIRE_ARMED[\s\S]{0,800}?process\.exit\(1\)/)
+  })
+
+  it('the db-invariants CI job sets DB_INVARIANTS_REQUIRE_ARMED', () => {
+    const ci = readFileSync(join(ROOT, '.github/workflows/ci.yml'), 'utf8')
+    expect(
+      ci,
+      'The db-invariants job must set DB_INVARIANTS_REQUIRE_ARMED, or the scripts fall back to warn-and-pass and the gate can go green without running.',
+    ).toMatch(/DB_INVARIANTS_REQUIRE_ARMED:/)
+  })
+
+  // The production refusal is a default, not a prohibition: the report
+  // function is read-only, so a human must be able to point this at prod
+  // deliberately. That escape hatch is the only way the gate's assurances ever
+  // describe production rather than the E2E project.
+  it('check-db-invariants.mjs allows a deliberate, opt-in production run', () => {
+    const src = readFileSync(join(ROOT, 'scripts/check-db-invariants.mjs'), 'utf8')
+    expect(src).toMatch(/DB_INVARIANTS_ALLOW_PROD/)
+    const pkg = JSON.parse(readFileSync(join(ROOT, 'package.json'), 'utf8'))
+    expect(pkg.scripts['check:db-invariants:prod']).toBeDefined()
+  })
 })

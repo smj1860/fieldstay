@@ -72,14 +72,31 @@ export function upstashConfigured(): boolean {
 export async function checkLimit(
   limiter:    Ratelimit,
   identifier: string,
-  options:    { onError: LimitFailPolicy; site: string },
+  options:    {
+    onError: LimitFailPolicy
+    site:    string
+    /**
+     * Tokens this call consumes. Defaults to 1 — one call, one token.
+     *
+     * Pass the RECIPIENT COUNT for anything that fans out. A limiter that
+     * counts calls bounds nothing when one allowed call sends to a thousand
+     * people: 20 invites/hour and 20 bulk-invites/hour of 1,000 recipients
+     * each are the same budget to Redis and three orders of magnitude apart in
+     * what they cost us and in how much third-party mail we emit.
+     */
+    cost?:   number
+  },
 ): Promise<LimitDecision> {
   if (!upstashConfigured()) {
     return { allowed: true, skipped: true, errored: false, limit: 0, remaining: 0, reset: Date.now() }
   }
 
+  // A zero/negative cost would silently consume nothing; a fractional one is
+  // meaningless to the sliding-window counter. Normalize to a whole token.
+  const cost = Math.max(1, Math.floor(options.cost ?? 1))
+
   try {
-    const { success, limit, remaining, reset } = await limiter.limit(identifier)
+    const { success, limit, remaining, reset } = await limiter.limit(identifier, { rate: cost })
     return { allowed: success, skipped: false, errored: false, limit, remaining, reset }
   } catch (err) {
     console.error(`[rate-limit] check failed at ${site(options.site)} — failing ${options.onError === 'allow' ? 'OPEN' : 'CLOSED'}`, err)

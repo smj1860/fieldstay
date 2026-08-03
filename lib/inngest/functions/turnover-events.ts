@@ -26,6 +26,11 @@ export const handleTurnoverCreated = inngest.createFunction(
     id:      'turnover-created',
     name:    'Handle New Turnover',
     retries: 2,
+    // Burst-exposed AND sends through an external provider. Resend's default
+    // is 2 req/s, so throttle to 1/s: this handler receives a BATCH of events
+    // (see the sender), and without a cap the whole batch lands at once.
+    concurrency: { limit: 5 },
+    throttle:    { limit: 60, period: '1m' },
   },
   { event: 'turnover/created' as const },
   async ({ event, step }) => {
@@ -116,6 +121,11 @@ export const handleTurnoverCompleted = inngest.createFunction(
     id:      'turnover-completed',
     name:    'Handle Turnover Completed',
     retries: 2,
+    // Burst-exposed AND sends through an external provider. Resend's default
+    // is 2 req/s, so throttle to 1/s: this handler receives a BATCH of events
+    // (see the sender), and without a cap the whole batch lands at once.
+    concurrency: { limit: 5 },
+    throttle:    { limit: 60, period: '1m' },
   },
   { event: 'turnover/completed' as const },
   async ({ event, step, logger }) => {

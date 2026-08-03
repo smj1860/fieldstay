@@ -27,7 +27,7 @@ describe('webhookDedupCleanup', () => {
     vi.clearAllMocks()
   })
 
-  it('delegates to cleanup_webhook_dedup() and reports success', async () => {
+  it('delegates to both TTL cleanup RPCs and reports success', async () => {
     const supabase = makeSupabase({ data: null, error: null })
     ;(createServiceClient as ReturnType<typeof vi.fn>).mockReturnValue(supabase)
 
@@ -38,10 +38,32 @@ describe('webhookDedupCleanup', () => {
       logger,
     })
 
-    expect(supabase.rpc).toHaveBeenCalledTimes(1)
+    expect(supabase.rpc).toHaveBeenCalledTimes(2)
     expect(supabase.rpc).toHaveBeenCalledWith('cleanup_webhook_dedup')
+    // oauth_states rides this cron: the function has existed since the
+    // integration framework shipped but had no caller anywhere, so expired
+    // rows accumulated forever on a table an unauthenticated route writes to.
+    expect(supabase.rpc).toHaveBeenCalledWith('cleanup_expired_oauth_states')
     expect(result).toEqual({ ok: true })
     expect(logger.info).toHaveBeenCalledWith(expect.stringContaining('TTL sweep complete'))
+  })
+
+  it('throws when the oauth_states sweep errors, so Inngest retries the step', async () => {
+    // Only the SECOND rpc fails — the first must still be seen as successful,
+    // so this also proves the two steps are independent.
+    const supabase = makeSupabase({ data: null, error: null })
+    ;(supabase.rpc as ReturnType<typeof vi.fn>)
+      .mockResolvedValueOnce({ data: null, error: null })
+      .mockResolvedValueOnce({ data: null, error: { message: 'timeout' } })
+    ;(createServiceClient as ReturnType<typeof vi.fn>).mockReturnValue(supabase)
+
+    await expect(
+      invokeHandler(webhookDedupCleanup, {
+        event:  {},
+        step:   makeStep(),
+        logger: { info: vi.fn(), error: vi.fn() },
+      }),
+    ).rejects.toThrow('cleanup_expired_oauth_states failed: timeout')
   })
 
   it('throws when the RPC call itself errors, so Inngest retries the step', async () => {

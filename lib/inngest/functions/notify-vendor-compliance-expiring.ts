@@ -13,7 +13,14 @@ const DOC_TYPE_LABELS: Record<string, string> = {
 }
 
 export const notifyVendorComplianceExpiring = inngest.createFunction(
-  { id: 'notify-vendor-compliance-expiring', name: 'Notify Vendor: Compliance Doc Expiring Soon', retries: 2 },
+  {
+    id: 'notify-vendor-compliance-expiring', name: 'Notify Vendor: Compliance Doc Expiring Soon', retries: 2,
+    // cron/vendor-compliance-expiry-check processes up to MAX_DOCS_PER_RUN
+    // (200) documents in one run and can hand this handler that many events at
+    // once. It emails the vendor, and Resend's default is 2 req/s.
+    concurrency: { limit: 5 },
+    throttle:    { limit: 60, period: '1m' },
+  },
   { event: 'vendor-compliance/expiry-warning' as const },
   async ({ event, step, logger }) => {
     const { document_id, vendor_id, org_id, document_type, vendor_name, expiry_date, days_until } = event.data

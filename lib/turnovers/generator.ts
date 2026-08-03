@@ -4,6 +4,8 @@ import { getMissingAssetDiscoveryTypes, buildAssetDiscoveryItems } from '@/lib/a
 import { propertyLocalToUtc } from '@/lib/utils/timezone'
 import { unwrapJoinArray } from '@/lib/utils/supabase-joins'
 import { fetchAllRows } from '@/lib/inngest/paginate'
+import { reportError } from '@/lib/observability/report-error'
+import { tryUnwrap } from '@/lib/supabase/unwrap'
 
 export interface GeneratedTurnover {
   id:                string
@@ -335,10 +337,36 @@ async function insertStandaloneTurnover(
 
   if (error) {
     // 23505 = unique_violation: concurrent worker already inserted this standalone.
-    // The new turnovers_standalone_unique partial index makes this safe to ignore.
-    if (error.code !== '23505') {
-      console.error('[generator] Pass 1 insert error', { propertyId, bookingId: booking.id, code: error.code, msg: error.message })
+    // The turnovers_standalone_unique partial index makes this safe to ignore —
+    // but NOT safe to return null for. The caller records the returned id in
+    // ctx.existingStandalones, and Pass 2 keys off that set to decide between
+    // upgrading the standalone and inserting a fresh pair. Returning null on a
+    // lost race left the loser's ctx believing no standalone existed, so it
+    // inserted a pair ALONGSIDE the winner's standalone — the two partial
+    // unique indexes are disjoint, so nothing at the DB layer forbids the
+    // coexistence. That is two turnovers for one physical checkout, and two
+    // cleaning-fee rows on the owner's P&L once both complete.
+    // Re-read the winner's row so the loser's context stays truthful.
+    if (error.code === '23505') {
+      const winnerRes = await supabase
+        .from('turnovers')
+        .select('id')
+        .eq('property_id',     propertyId)
+        .eq('booking_id',      booking.id)
+        .is('prev_booking_id', null)
+        .maybeSingle()
+
+      // A failed re-read must not silently degrade back to the old `return
+      // null` behaviour — that is precisely the state that let Pass 2 insert a
+      // duplicate pair. Report it and return null only because there is
+      // nothing better to return; the concurrency key on booking-detected is
+      // what makes this branch rare in the first place.
+      const winnerOut = tryUnwrap<{ id: string }>(winnerRes, {
+        site: 'turnovers.generator.insertStandaloneTurnover.winner-reread',
+      })
+      return winnerOut.ok ? (winnerOut.data?.id ?? null) : null
     }
+    console.error('[generator] Pass 1 insert error', { propertyId, bookingId: booking.id, code: error.code, msg: error.message })
     return null
   }
 
@@ -366,7 +394,7 @@ async function upgradeStandaloneToPair(
 ): Promise<void> {
   const { propertyId, outgoingBookingId, incomingBookingId, checkoutDT, checkinDT, windowMinutes, priority } = params
 
-  await supabase
+  const { error } = await supabase
     .from('turnovers')
     .update({
       booking_id:         incomingBookingId,
@@ -379,6 +407,40 @@ async function upgradeStandaloneToPair(
     .eq('booking_id',      outgoingBookingId)
     .is('prev_booking_id', null)
     .eq('property_id',     propertyId)
+
+  if (!error) return
+
+  // 23505 here means a concurrent run already created the pair this upgrade
+  // was going to produce, so the standalone this run is holding is now the
+  // redundant duplicate — leaving it in place is the second half of the
+  // double-billing bug. Drop it, but only while it is still an unclaimed,
+  // auto-generated standalone: once a PM has assigned or a crew member has
+  // started it, the row carries work and deleting it would destroy that.
+  if (error.code === '23505') {
+    const { error: cleanupError } = await supabase
+      .from('turnovers')
+      .delete()
+      .eq('property_id',     propertyId)
+      .eq('booking_id',      outgoingBookingId)
+      .is('prev_booking_id', null)
+      .eq('status',          'pending_assignment')
+      .eq('auto_generated',  true)
+
+    if (cleanupError) {
+      console.error('[generator] redundant standalone cleanup failed', {
+        propertyId, outgoingBookingId, code: cleanupError.code, msg: cleanupError.message,
+      })
+      reportError(cleanupError, { site: 'turnovers.generator.upgradeStandaloneToPair.cleanup' })
+    }
+    return
+  }
+
+  // Any other error was previously discarded entirely, so a failed upgrade
+  // looked identical to a successful one.
+  console.error('[generator] standalone upgrade failed', {
+    propertyId, outgoingBookingId, incomingBookingId, code: error.code, msg: error.message,
+  })
+  reportError(error, { site: 'turnovers.generator.upgradeStandaloneToPair' })
 }
 
 /**

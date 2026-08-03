@@ -25,6 +25,20 @@ export const webhookDedupCleanup = inngest.createFunction(
       if (error) throw new Error(`cleanup_webhook_dedup failed: ${error.message}`)
     })
 
+    // oauth_states rides along here rather than getting its own cron: same
+    // cadence, same off-peak slot, same "expire rows nobody will ever read
+    // again" job. cleanup_expired_oauth_states() has existed in the database
+    // since the integration framework shipped, but nothing has ever called it
+    // — pg_cron is not installed on this project and no code referenced it —
+    // so expires_at was written and then never acted on. Every abandoned OAuth
+    // handshake has been accumulating since, on a table an unauthenticated
+    // route can insert into.
+    await step.run('cleanup-expired-oauth-states', async () => {
+      const supabase = createServiceClient({ system: 'inngest:webhook-dedup-cleanup' })
+      const { error } = await supabase.rpc('cleanup_expired_oauth_states')
+      if (error) throw new Error(`cleanup_expired_oauth_states failed: ${error.message}`)
+    })
+
     logger.info('[WebhookDedupCleanup] TTL sweep complete')
     return { ok: true }
   },

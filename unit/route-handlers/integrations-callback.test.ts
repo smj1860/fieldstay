@@ -98,12 +98,20 @@ function oauthProvider(overrides: Partial<IntegrationProvider> = {}): Integratio
   }
 }
 
-function callbackRequest(providerParam: string, search: string) {
-  return new NextRequest(`http://localhost/api/integrations/${providerParam}/callback${search}`)
+function callbackRequest(providerParam: string, search: string, stateCookie?: string) {
+  const req = new NextRequest(`http://localhost/api/integrations/${providerParam}/callback${search}`)
+  // The one-time cookie /connect sets when the flow starts. Its presence and
+  // value are what prove the browser finishing the handshake is the browser
+  // that began it — an attacker cannot set it in the victim's browser.
+  if (stateCookie !== undefined) req.cookies.set(`oauth_state_${providerParam}`, stateCookie)
+  return req
 }
 
-function callGet(providerParam: string, search: string) {
-  return GET(callbackRequest(providerParam, search), { params: Promise.resolve({ provider: providerParam }) })
+function callGet(providerParam: string, search: string, stateCookie?: string) {
+  return GET(
+    callbackRequest(providerParam, search, stateCookie),
+    { params: Promise.resolve({ provider: providerParam }) },
+  )
 }
 
 function locationOf(res: Response): string {
@@ -354,11 +362,11 @@ describe('GET /api/integrations/[provider]/callback (OAuth CSRF state validation
     expect(locationOf(res)).toContain('error=storage_failed')
   })
 
-  it('IDOR/session-priority: an active session always wins over a user_id recorded on the state row', async () => {
-    // The state row was minted for a different user_id (e.g. the flow
-    // started signed out and the browser later signed into a different
-    // account) — the currently authenticated session must be the one the
-    // connection attaches to, never the state row's stashed value.
+  it('IDOR/session-priority: with the originating browser confirmed, an active session wins over a user_id recorded on the state row', async () => {
+    // Legitimate mid-flow account switch: the flow started signed out (or as
+    // another account) and the browser signed in before finishing. Same
+    // browser, so the state cookie is present and matches — the connection
+    // attaches to who the user actually is now.
     vi.mocked(createServerClient).mockReturnValue(makeAuthClient({ id: 'session_user' }) as never)
     const admin = makeAdmin({
       oauth_states: [{ data: { state: 's1', provider_id: 'ownerrez', user_id: 'stale_state_user', return_to: null }, error: null }],
@@ -368,7 +376,7 @@ describe('GET /api/integrations/[provider]/callback (OAuth CSRF state validation
     vi.mocked(createServiceClient).mockReturnValue(admin as never)
     vi.mocked(getProvider).mockReturnValue(oauthProvider())
 
-    await callGet('ownerrez', '?code=abc123&state=s1')
+    await callGet('ownerrez', '?code=abc123&state=s1', 's1')
 
     expect(storeIntegrationToken).toHaveBeenCalledWith(
       expect.objectContaining({ userId: 'session_user' }),
@@ -376,6 +384,85 @@ describe('GET /api/integrations/[provider]/callback (OAuth CSRF state validation
     expect(logAuditEvent).toHaveBeenCalledWith(
       expect.objectContaining({ actorId: 'session_user' }),
     )
+  })
+
+  it('refuses to bind when the state row has a different owner and the originating browser cannot be confirmed', async () => {
+    // The attack the session-priority rule used to enable: the attacker starts
+    // a flow, authorizes with their OWN provider account, and sends the
+    // resulting callback URL to a logged-in PM. The state row is real,
+    // unexpired and for the right provider, so it validates — but it was
+    // minted in the ATTACKER's browser, so the victim's request carries no
+    // state cookie. Binding here would make the attacker's PMS account the
+    // victim org's live integration, and inbound webhooks would then resolve
+    // that external account straight to the victim's org.
+    vi.mocked(createServerClient).mockReturnValue(makeAuthClient({ id: 'victim_user' }) as never)
+    const admin = makeAdmin({
+      oauth_states: [{ data: { state: 's1', provider_id: 'ownerrez', user_id: 'attacker_user', return_to: null }, error: null }],
+      organization_members: [{ data: null, error: null }],
+      integration_connections: [{ data: null, error: null }],
+    })
+    vi.mocked(createServiceClient).mockReturnValue(admin as never)
+    vi.mocked(getProvider).mockReturnValue(oauthProvider())
+
+    const res = await callGet('ownerrez', '?code=abc123&state=s1')   // no cookie
+
+    expect(locationOf(res)).toContain('error=invalid_state')
+    expect(storeIntegrationToken).not.toHaveBeenCalled()
+  })
+
+  // '//evil.com'.startsWith('/') is TRUE, and new URL('//evil.com/x', origin)
+  // resolves to https://evil.com/x — a protocol-relative URL is absolute.
+  // return_to comes verbatim from /connect's query string, so a startsWith('/')
+  // check alone sent the victim off-site carrying a FieldStay-looking
+  // ?connected= param.
+  it.each([
+    ['//evil.example/x',  'protocol-relative'],
+    ['/\\evil.example',   'backslash form browsers normalise to //'],
+    ['https://evil.example', 'absolute'],
+  ])('does not honour a %s return_to (%s)', async (returnTo) => {
+    vi.mocked(createServerClient).mockReturnValue(makeAuthClient({ id: 'u1' }) as never)
+    const admin = makeAdmin({
+      oauth_states: [{ data: { state: 's1', provider_id: 'ownerrez', user_id: 'u1', return_to: returnTo }, error: null }],
+      organization_members: [{ data: null, error: null }],
+      integration_connections: [{ data: null, error: null }],
+    })
+    vi.mocked(createServiceClient).mockReturnValue(admin as never)
+    vi.mocked(getProvider).mockReturnValue(oauthProvider())
+
+    const res = await callGet('ownerrez', '?code=abc123&state=s1', 's1')
+
+    expect(locationOf(res)).not.toContain('evil.example')
+    expect(locationOf(res)).toContain(APP_URL)
+  })
+
+  it('honours an ordinary relative return_to', async () => {
+    vi.mocked(createServerClient).mockReturnValue(makeAuthClient({ id: 'u1' }) as never)
+    const admin = makeAdmin({
+      oauth_states: [{ data: { state: 's1', provider_id: 'ownerrez', user_id: 'u1', return_to: '/setup/pms?step=2' }, error: null }],
+      organization_members: [{ data: null, error: null }],
+      integration_connections: [{ data: null, error: null }],
+    })
+    vi.mocked(createServiceClient).mockReturnValue(admin as never)
+    vi.mocked(getProvider).mockReturnValue(oauthProvider())
+
+    const res = await callGet('ownerrez', '?code=abc123&state=s1', 's1')
+
+    expect(locationOf(res)).toContain('/setup/pms')
+    expect(locationOf(res)).toContain('connected=ownerrez')
+  })
+
+  it('rejects a callback whose state cookie is present but does not match the returned state', async () => {
+    vi.mocked(createServerClient).mockReturnValue(makeAuthClient({ id: 'session_user' }) as never)
+    const admin = makeAdmin({
+      oauth_states: [{ data: { state: 's1', provider_id: 'ownerrez', user_id: 'session_user', return_to: null }, error: null }],
+    })
+    vi.mocked(createServiceClient).mockReturnValue(admin as never)
+    vi.mocked(getProvider).mockReturnValue(oauthProvider())
+
+    const res = await callGet('ownerrez', '?code=abc123&state=s1', 'a-different-state')
+
+    expect(locationOf(res)).toContain('error=invalid_state')
+    expect(storeIntegrationToken).not.toHaveBeenCalled()
   })
 
   it('falls back to the state row\'s user_id only when there is no active session', async () => {

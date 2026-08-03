@@ -115,10 +115,10 @@ const EXCEPTIONS: Record<string, string> = {
     'Extracted-helper twin of app/(dashboard)/maintenance/actions.ts:837 — same reasoning.',
   'app/(dashboard)/properties/clone-actions.ts:114':
     'Per-section checklist_template_sections insert — each section needs its own DB-generated id before the child checklist_template_items insert can reference it as section_id. Parent-before-child dependency, not a batchable read.',
-  'app/actions/work-order-public.ts:268':
+  'app/actions/work-order-public.ts:311':
     'Per-photo storage upload + work_order_photos row — each photo is a distinct uploaded file with its own generated storage path; there is no batched form of a storage upload.',
   'app/api/work-orders/[token]/photos/route.ts:105':
-    'Same per-photo storage-upload + row pattern as app/actions/work-order-public.ts:268.',
+    'Same per-photo storage-upload + row pattern as app/actions/work-order-public.ts:311.',
   'app/(dashboard)/maintenance/CreateWorkOrderModal.tsx:121':
     'Same per-photo storage-upload + row pattern, client-side.',
   'lib/asset-discovery/seed-from-amenities.ts:62':
@@ -139,7 +139,7 @@ const EXCEPTIONS: Record<string, string> = {
     'Per-property conditional guidebook-config patch — same shape as ownerrez/initial-sync.ts:173 (differing patch per row); the read side just above is already batched via .in(\'property_id\', ids).',
   'lib/properties/upsert-normalized.ts:165':
     'Per-property conditional cleaning_cost backfill — same differing-patch-per-row shape as the two entries above.',
-  'lib/inngest/functions/turnover-events.ts:180':
+  'lib/inngest/functions/turnover-events.ts:190':
     'Milestone-flag upserts — the milestones array has at most 3 possible entries (first_turnover_complete/_10/_50) and is almost always exactly 1; negligible enough that batching would add more complexity than it saves.',
   'lib/push/send-push.ts:48':
     'Per-subscription webpush.sendNotification call (+ conditional delete on a 410) — each subscription is a distinct external Web Push endpoint; inherently one call per endpoint, like the Vault-secret case above.',

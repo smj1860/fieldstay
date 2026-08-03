@@ -80,8 +80,16 @@ export function workOrderCompletionFields(notes?: string | null): TablesUpdate<'
  * orders. The read is batched into one `.in()` query; the writes are
  * necessarily one per schedule because each carries its own computed
  * next_due_date.
+ *
+ * Exported so the vendor portal completion path
+ * (app/api/work-orders/[token]/complete/helpers.ts) can advance its source
+ * schedules WITHOUT going through finalizeWorkOrderCompletion. That path
+ * deliberately does not fire `work-order/completed` — its expense posts from
+ * the Stripe invoice-paid handler instead, and firing both would put two
+ * writers on the same owner_transactions row. The schedule advance was the
+ * one side effect it was missing, so it is the only one it should borrow.
  */
-async function advanceSchedulesAfterCompletion(
+export async function advanceSchedulesAfterCompletion(
   supabase: SupabaseClient,
   orgId:    string,
   entries:  { scheduleId: string; workOrderSource: string | null }[],

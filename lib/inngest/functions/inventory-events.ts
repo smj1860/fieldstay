@@ -69,6 +69,10 @@ export const handleInventoryCountSubmitted = inngest.createFunction(
     id:      'inventory-count-submitted',
     name:    'Process Inventory Count',
     retries: 2,
+    // Batch-dispatched, and this handler both writes a purchase order and
+    // notifies the PM. Resend's default is 2 req/s.
+    concurrency: { limit: 5 },
+    throttle:    { limit: 60, period: '1m' },
   },
   { event: 'inventory/count-submitted' as const },
   async ({ event, step, logger }) => {

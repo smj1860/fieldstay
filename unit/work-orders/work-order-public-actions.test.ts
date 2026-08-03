@@ -22,6 +22,10 @@ vi.mock('@/lib/rate-limit', async () => {
   const { checkLimitStub, retryAfterSecondsStub } = await import('@/unit/stubs/rate-limit')
   return {
     signOffRatelimit: { limit: vi.fn(async () => ({ success: true })) },
+    // dispatchWorkOrderToVendor consults this before sending; without it here
+    // the import resolves to undefined and the stub throws inside the action's
+    // try/catch, which surfaces as the generic error rather than the real one.
+    emailSendActionLimiter: { limit: vi.fn(async () => ({ success: true })) },
     checkLimit:         checkLimitStub(),
     retryAfterSeconds:  retryAfterSecondsStub,
   }
@@ -42,7 +46,7 @@ import {
 type Resp = { data?: unknown; error?: unknown }
 
 function makeSupabase(queue: Record<string, Resp[]>) {
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars -- args captured for path assertions
+  // args captured for path assertions
   const uploadMock = vi.fn(async (_path: string, _file: unknown, _opts?: unknown) => ({ error: null }))
   const from = vi.fn((table: string) => {
     const q = queue[table]
@@ -52,7 +56,7 @@ function makeSupabase(queue: Record<string, Resp[]>) {
     // `.is(...)` is the sign-off UPDATE's TOCTOU precondition
     // (.is('public_signed_off_at', null)); `.maybeSingle()` is how it reads
     // back whether it actually matched a row.
-    for (const m of ['select', 'insert', 'update', 'eq', 'is']) {
+    for (const m of ['select', 'insert', 'update', 'eq', 'is', 'ilike', 'limit']) {
       chain[m] = vi.fn(() => chain)
     }
     chain.single      = vi.fn(() => Promise.resolve(result))
@@ -94,6 +98,7 @@ describe('actions/work-order-public', () => {
     it('dispatches a work order verified to belong to the caller org', async () => {
       const supabase = makeSupabase({
         work_orders: [{ data: baseWo(), error: null }, { error: null }],
+        vendors:     [{ data: { id: 'ven_1', name: 'Ace Plumbing', email: 'vendor@example.com', phone: null }, error: null }],
         profiles:    [{ data: { full_name: 'Sam Jones', phone: null } }],
         organizations: [{ data: { name: 'Lake Martin Delivery' } }],
       })
@@ -117,6 +122,7 @@ describe('actions/work-order-public', () => {
     it('sends an SMS alongside the dispatch email when a vendor phone is provided', async () => {
       const supabase = makeSupabase({
         work_orders: [{ data: baseWo(), error: null }, { error: null }],
+        vendors:     [{ data: { id: 'ven_1', name: 'Ace Plumbing', email: 'vendor@example.com', phone: '(206) 555-1234' }, error: null }],
         profiles:    [{ data: { full_name: 'Sam Jones', phone: null } }],
         organizations: [{ data: { name: 'Lake Martin Delivery' } }],
       })
@@ -132,6 +138,56 @@ describe('actions/work-order-public', () => {
 
       expect(result.success).toBe(true)
       expect(sendSMS).toHaveBeenCalledWith('+12065551234', 'sms body', { orgId: 'org_1' })
+    })
+
+    // The recipient must come from our own vendors table, never from the
+    // request body: this action sends both an email and an SMS, and relaying
+    // to a caller-supplied address made it a general-purpose mail/SMS relay
+    // for any authenticated trial user.
+    it('refuses to send to an address that is not a vendor in the caller org', async () => {
+      const supabase = makeSupabase({
+        work_orders: [{ data: baseWo(), error: null }, { error: null }],
+        vendors:     [{ data: null, error: null }],   // no such vendor in this org
+        profiles:    [{ data: { full_name: 'Sam Jones', phone: null } }],
+        organizations: [{ data: { name: 'Lake Martin Delivery' } }],
+      })
+      vi.mocked(requireOrgMember).mockResolvedValue({
+        supabase, membership, user: { id: 'user_1' },
+      } as never)
+
+      const result = await dispatchWorkOrderToVendor({
+        workOrderId: 'wo_1', vendorEmail: 'attacker@evil.example', vendorName: 'Ace Plumbing',
+        vendorPhone: '(206) 555-9999',
+      })
+
+      expect(result.success).toBeUndefined()
+      expect(result.error).toMatch(/not in your address book/i)
+      expect(inngest.send).not.toHaveBeenCalled()
+      expect(sendSMS).not.toHaveBeenCalled()
+    })
+
+    it('sends to the vendor row contact details, ignoring what the caller supplied', async () => {
+      const supabase = makeSupabase({
+        work_orders: [{ data: baseWo(), error: null }, { error: null }],
+        vendors:     [{ data: { id: 'ven_1', name: 'Ace Plumbing', email: 'real@vendor.example', phone: null }, error: null }],
+        profiles:    [{ data: { full_name: 'Sam Jones', phone: null } }],
+        organizations: [{ data: { name: 'Lake Martin Delivery' } }],
+      })
+      vi.mocked(requireOrgMember).mockResolvedValue({
+        supabase, membership, user: { id: 'user_1' },
+      } as never)
+
+      const result = await dispatchWorkOrderToVendor({
+        workOrderId: 'wo_1', vendorEmail: 'real@vendor.example', vendorName: 'Attacker Display Name',
+      })
+
+      expect(result.success).toBe(true)
+      expect(inngest.send).toHaveBeenCalledWith(expect.objectContaining({
+        data: expect.objectContaining({
+          vendorEmail: 'real@vendor.example',
+          vendorName:  'Ace Plumbing',   // from the DB row, NOT input.vendorName
+        }),
+      }))
     })
 
     it('rejects a work order id that does not belong to the caller org (IDOR check)', async () => {

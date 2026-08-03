@@ -110,11 +110,26 @@ export async function GET(
   //    across cross-device flows and easier to expire/consume server-side.
   const admin = createServiceClient({ publicSurface: 'integrations-oauth-connect' })
 
+  // return_to is caller-supplied and lands in an unbounded `text` column on a
+  // row this (unauthenticated-by-design) route writes with the service role.
+  // Cap it here so the write cannot be used to push arbitrary volume into the
+  // primary database, and normalize anything unusable to the default rather
+  // than storing it. The open-redirect check on the way back out lives in
+  // /callback; this is purely about what we are willing to persist.
+  const DEFAULT_RETURN_TO = '/settings?tab=integrations'
+  const MAX_RETURN_TO_LEN = 512
+
+  const rawReturnTo = request.nextUrl.searchParams.get('return_to')
+  const returnTo =
+    rawReturnTo && rawReturnTo.length <= MAX_RETURN_TO_LEN && rawReturnTo.startsWith('/')
+      ? rawReturnTo
+      : DEFAULT_RETURN_TO
+
   const { error: stateError } = await admin.from('oauth_states').insert({
     state,
     user_id:     user?.id ?? null,
     provider_id: providerId,
-    return_to:   request.nextUrl.searchParams.get('return_to') ?? '/settings?tab=integrations',
+    return_to:   returnTo,
   })
 
   if (stateError) {

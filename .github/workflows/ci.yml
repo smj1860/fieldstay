@@ -254,6 +254,17 @@ jobs:
     env:
       NEXT_PUBLIC_SUPABASE_URL:  ${{ secrets.NEXT_PUBLIC_SUPABASE_URL }}
       SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+      # Both scripts self-disarm (warn + exit 0) when the secrets are absent,
+      # so a fork PR — which cannot read secrets — is not blocked by a
+      # permanently red required check. That is deliberate and correct.
+      #
+      # It is also indistinguishable from a pass on a green run, which is how
+      # "the DB gate is green" can mean "the DB gate did not run". On the
+      # CANONICAL repo the secrets are always available, so an unarmed run
+      # there is a misconfiguration, not a fork — make it fail loudly.
+      # `head.repo.fork` is false for same-repo PRs and pushes; for a fork PR
+      # it is true and this stays unset, preserving the disarm.
+      DB_INVARIANTS_REQUIRE_ARMED: ${{ github.event.pull_request.head.repo.fork && '0' || '1' }}
     steps:
       - uses: actions/checkout@v4
         with:

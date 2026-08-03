@@ -988,4 +988,20 @@ export type FieldStayEvents = {
     }
   }
 
+  // Guest pre-arrival guidebook emails, fanned out one per org by
+  // guidebookPreArrivalEmailCron. The handler loads its OWN org's eligible
+  // bookings — the platform-wide booking list is deliberately not carried on
+  // the event, which is what keeps the per-run step count proportional to one
+  // tenant's check-ins rather than the whole platform's.
+  //
+  // checkin_date rides along so a retry re-uses the date the dispatcher
+  // computed, rather than re-reading the wall clock and drifting to the next
+  // day mid-run.
+  'org/guidebook_pre_arrival.requested': {
+    data: {
+      org_id:       string
+      checkin_date: string
+    }
+  }
+
 }
