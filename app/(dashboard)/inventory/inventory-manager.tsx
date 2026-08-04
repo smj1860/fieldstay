@@ -9,7 +9,7 @@ import {
 } from 'lucide-react'
 import { cn, INVENTORY_CATEGORY_LABELS, formatDate } from '@/lib/utils'
 import { unwrapJoinArray } from '@/lib/utils/supabase-joins'
-import { updateParLevel, addInventoryItems, submitInventoryCount, approveInventoryCount, rejectInventoryCount, triggerShoppingCart } from './actions'
+import { updateParLevel, addInventoryItems, submitInventoryCount, triggerShoppingCart } from './actions'
 import type { InventoryCategory, PoStatus } from '@/types/database'
 import { PortfolioInventoryView } from './portfolio-view'
 import { CartReadyBanner } from '@/components/inventory/cart-ready-banner'
@@ -54,31 +54,6 @@ interface InventoryCount {
   property_id: string
   submitted_at: string
   notes: string | null
-}
-
-interface DraftItem {
-  id: string
-  item_id: string
-  previous_quantity: number
-  counted_qty: number
-  notes: string | null
-  // item_id is a to-ONE FK to inventory_items, so PostgREST embeds an object.
-  // Typed as an array, every `inventory_items[0]` below was undefined and the
-  // review table rendered '—' for every item name.
-  inventory_items: { name: string; unit: string } | null
-}
-
-interface PendingDraft {
-  id: string
-  property_id: string
-  status: string
-  created_at: string
-  notes: string | null
-  // inventory_count_drafts.submitted_by is a to-ONE FK to crew_members, so
-  // PostgREST embeds it as an object. Typed as an array, `crew_members[0]`
-  // was always undefined and the submitter's name never rendered.
-  crew_members: { name: string } | null
-  inventory_count_draft_items: DraftItem[]
 }
 
 interface PortfolioItem {
@@ -1119,146 +1094,6 @@ function PropertyInventoryCard({
   )
 }
 
-// ── Pending Count Review ──────────────────────────────────────────────────────
-
-function diffColor(diff: number, neutralColor: string): string {
-  if (diff > 0) return 'var(--accent-green)'
-  if (diff < 0) return 'var(--accent-red)'
-  return neutralColor
-}
-
-function PendingCountReview({
-  drafts,
-  properties,
-  onRefresh,
-}: {
-  drafts: PendingDraft[]
-  properties: Property[]
-  onRefresh: () => void
-}) {
-  const [isPending, startTransition] = useTransition()
-  const [expanded, setExpanded]      = useState<string | null>(drafts[0]?.id ?? null)
-
-  if (drafts.length === 0) return null
-
-  const propName = (id: string) => properties.find(p => p.id === id)?.name ?? '—'
-
-  const handleApprove = (draftId: string) => {
-    startTransition(async () => {
-      await approveInventoryCount(draftId)
-      onRefresh()
-    })
-  }
-  const handleReject = (draftId: string) => {
-    startTransition(async () => {
-      await rejectInventoryCount(draftId)
-      onRefresh()
-    })
-  }
-
-  return (
-    <Card className="p-0 overflow-hidden mb-6">
-      <div className="px-5 py-3 border-b border-themed bg-canvas-themed flex items-center gap-2">
-        <AlertTriangle className="w-4 h-4" style={{ color: 'var(--accent-amber)' }} />
-        <span className="text-sm font-semibold text-primary-themed">Pending Count Review</span>
-        <Badge tone="amber">{drafts.length}</Badge>
-      </div>
-      {drafts.map(draft => {
-        const draftItems = draft.inventory_count_draft_items ?? []
-        const isOpen = expanded === draft.id
-        return (
-          <div key={draft.id} className="border-b border-themed last:border-0">
-            <button
-              onClick={() => setExpanded(isOpen ? null : draft.id)}
-              className="w-full flex items-center gap-3 px-5 py-3 text-left hover:bg-canvas-themed transition-colors"
-            >
-              <div className="flex-1 min-w-0">
-                <span className="text-sm font-medium text-primary-themed">{propName(draft.property_id)}</span>
-                {draft.crew_members && (
-                  <span className="text-xs text-muted-themed ml-2">by {draft.crew_members.name}</span>
-                )}
-                {draft.created_at && (
-                  <span className="text-xs text-muted-themed ml-2">· {formatDate(draft.created_at)}</span>
-                )}
-              </div>
-              <span className="text-xs text-muted-themed">{draftItems.length} items</span>
-              <ChevronDown className={cn('w-4 h-4 text-muted-themed transition-transform', isOpen && 'rotate-180')} />
-            </button>
-
-            {isOpen && (
-              <div className="px-5 pb-4">
-                <div className="border border-themed rounded-xl overflow-hidden mb-3 overflow-x-auto">
-                  <div className="min-w-[400px]">
-                    <div className="grid grid-cols-[1fr_80px_80px_80px] gap-2 px-4 py-2 bg-canvas-themed text-xs font-semibold text-muted-themed uppercase tracking-wide border-b border-themed">
-                      <span>Item</span>
-                      <span className="text-right">Previous</span>
-                      <span className="text-right">Submitted</span>
-                      <span className="text-right">Change</span>
-                    </div>
-                    {draftItems.map(di => {
-                      const diff = di.counted_qty - di.previous_quantity
-                      return (
-                        <div key={di.id} className="grid grid-cols-[1fr_80px_80px_80px] gap-2 px-4 py-2.5 border-b border-themed last:border-0 text-sm items-center">
-                          <div>
-                            <span className="font-medium text-primary-themed">
-                              {di.inventory_items?.name ?? '—'}
-                            </span>
-                            {di.inventory_items?.unit && (
-                              <span className="text-xs text-muted-themed ml-1">({di.inventory_items.unit})</span>
-                            )}
-                            {di.notes && (
-                              <p className="text-xs text-muted-themed mt-0.5 italic">{di.notes}</p>
-                            )}
-                          </div>
-                          <span className="text-right text-muted-themed tabular-nums">{di.previous_quantity}</span>
-                          <span
-                            className="text-right tabular-nums font-medium"
-                            style={{
-                              color: diffColor(diff, 'var(--accent-amber)'),
-                            }}
-                          >
-                            {di.counted_qty}
-                          </span>
-                          <span
-                            className="text-right text-xs tabular-nums"
-                            style={{
-                              color: diffColor(diff, 'var(--text-muted)'),
-                            }}
-                          >
-                            {diff > 0 ? `+${diff}` : diff === 0 ? '—' : String(diff)}
-                          </span>
-                        </div>
-                      )
-                    })}
-                  </div>
-                </div>
-                <div className="flex gap-2">
-                  <Button
-                    onClick={() => handleApprove(draft.id)}
-                    disabled={isPending}
-                    className="text-sm flex-1"
-                  >
-                    Approve & Commit
-                  </Button>
-                  <Button
-                    variant="ghost"
-                    onClick={() => handleReject(draft.id)}
-                    disabled={isPending}
-                    className="text-sm"
-                    style={{ color: 'var(--accent-red)' }}
-                  >
-                    Reject
-                  </Button>
-                </div>
-              </div>
-            )}
-          </div>
-        )
-      })}
-    </Card>
-  )
-}
-
 // ── Main InventoryManager ─────────────────────────────────────────────────────
 
 type InventoryTab = 'property' | 'portfolio'
@@ -1270,7 +1105,6 @@ export function InventoryManager({
   catalogItems,
   recentCounts,
   allInventoryItems,
-  pendingDrafts,
   cartData,
   showKrogerNudge = false,
 }: {
@@ -1280,7 +1114,6 @@ export function InventoryManager({
   catalogItems: CatalogItem[]
   recentCounts: InventoryCount[]
   allInventoryItems: PortfolioItem[]
-  pendingDrafts: PendingDraft[]
   cartData: (CartBuildResult & { built_at: string; location_name: string }) | null
   showKrogerNudge?: boolean
 }) {
@@ -1358,15 +1191,6 @@ export function InventoryManager({
 
       {/* Tab bar */}
       <Tabs tabs={tabs} active={activeTab} onChange={setActiveTab} className="mb-5" />
-
-      {/* Pending count reviews — show on property tab */}
-      {activeTab === 'property' && pendingDrafts.length > 0 && (
-        <PendingCountReview
-          drafts={pendingDrafts}
-          properties={properties}
-          onRefresh={() => router.refresh()}
-        />
-      )}
 
       {activeTab === 'property' && (
         properties.length === 0 ? (

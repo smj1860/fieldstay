@@ -611,15 +611,41 @@ async function uploadWorkOrderReport(
   if (!res.ok) throw new UploadHttpError(`Failed to place work order ${targetId}`, res.status)
 }
 
+
 /**
- * Crew inventory count submitted for PM review. Routed through the Route
- * Handler (not a direct table write) because a draft is a two-table insert
- * plus a previous-quantity diff the client can't compute authoritatively.
- * `targetId` is a client-generated draft id: the route uses it as the row's
- * primary key, so an outbox replay after a connectivity blip collides
- * harmlessly instead of creating a second draft.
+ * A crew inventory count taken during a turnover, submitted as one count.
+ *
+ * Routed through the Route Handler rather than written directly because the
+ * count is a three-part server-side action — record the count, apply the
+ * quantities, fire `inventory/count-submitted` so the below-par restock
+ * pipeline sees it — none of which a direct table write can do.
+ *
+ * `targetId` is the client-generated count id, used by the route as the
+ * `inventory_counts` primary key so a replay collides rather than recording
+ * the same physical count twice.
  */
-async function uploadInventoryCountDraft(
+/**
+ * A message to the operations team. Routed through the Route Handler because
+ * resolving WHICH PM receives it needs the service client — crew have no RLS
+ * visibility into organization_members.
+ *
+ * `targetId` is the client-generated message id, used as the primary key so a
+ * replay after a dropped response collides instead of sending twice.
+ */
+async function uploadCrewMessage(
+  _supabase: DexieSupabaseClient,
+  targetId: string,
+  payload: MutationPayload,
+): Promise<void> {
+  const res = await fetch('/api/crew/messages', {
+    method:  'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body:    JSON.stringify({ messageId: targetId, content: payload.content }),
+  })
+  if (!res.ok) throw new UploadHttpError(`Failed to send message ${targetId}`, res.status)
+}
+
+async function uploadInventoryCount(
   _supabase: DexieSupabaseClient,
   targetId: string,
   payload: MutationPayload,
@@ -628,32 +654,13 @@ async function uploadInventoryCountDraft(
     method:  'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
-      draftId:       targetId,
-      propertyId:    payload.property_id,
-      counts:        payload.counts,
-      notes:         payload.notes,
-      itemNotes:     payload.item_notes,
-      submitAsDraft: true,
+      countId:    targetId,
+      propertyId: payload.property_id,
+      counts:     payload.counts,
+      notes:      typeof payload.notes === 'string' ? payload.notes : '',
     }),
   })
   if (!res.ok) throw new UploadHttpError(`Failed to submit inventory count ${targetId}`, res.status)
-}
-
-async function uploadInventoryItemCount(
-  supabase: DexieSupabaseClient,
-  targetId: string,
-  payload: MutationPayload,
-): Promise<void> {
-  if (!('current_quantity' in payload)) {
-    throw new UploadDataError(`inventory_items upload had no quantity for id ${targetId}`, 'NO_FIELDS')
-  }
-  const { data, error } = await supabase
-    .from('inventory_items')
-    .update({ current_quantity: payload.current_quantity })
-    .eq('id', targetId)
-    .select('id')
-  if (error) throw new UploadDataError(`inventory_items upload failed: ${error.message}`, error.code)
-  if (!data || data.length === 0) throw new Error(`inventory_items upload matched zero rows for id ${targetId}`)
 }
 
 async function uploadPropertyAssetInsert(
@@ -722,46 +729,6 @@ async function uploadPropertyAssetPhotoUpdate(
   }
 }
 
-async function uploadCrewAvailability(
-  supabase: DexieSupabaseClient,
-  targetId: string,
-  payload: MutationPayload,
-): Promise<void> {
-  const isAvailable = payload.is_available === 1
-  if (payload.org_id) {
-    // Full INSERT — upsert on primary key to handle any duplicate
-    const { error } = await supabase
-      .from('crew_availability')
-      .upsert({
-        id:             targetId,
-        org_id:         payload.org_id,
-        crew_member_id: payload.crew_member_id,
-        available_date: payload.available_date,
-        is_available:   isAvailable,
-        notes:          payload.notes ?? null,
-        created_at:     payload.created_at,
-      })
-    if (error) throw new UploadDataError(`crew_availability upsert failed: ${error.message}`, error.code)
-    return
-  }
-
-  // UPDATE of existing row — only push fields the mutation actually carried.
-  // Never `payload.x ?? null`: a mutation that omitted a field must leave it
-  // alone, not NULL it (see the doc comment on uploadChecklistInstanceItem).
-  const fieldUpdate: MutationPayload = {}
-  if ('is_available' in payload) fieldUpdate.is_available = isAvailable
-  if ('notes' in payload)        fieldUpdate.notes = payload.notes ?? null
-  if (Object.keys(fieldUpdate).length === 0) return
-
-  const { data, error } = await supabase
-    .from('crew_availability')
-    .update(fieldUpdate)
-    .eq('id', targetId)
-    .select('id')
-  if (error) throw new UploadDataError(`crew_availability upload failed: ${error.message}`, error.code)
-  if (!data || data.length === 0) throw new Error(`crew_availability upload matched zero rows for id ${targetId}`)
-}
-
 // Keyed by `${table}:${op}` — every value in lib/dexie/schema.ts's
 // MutationTable union must have a matching entry here (for every op it's
 // actually enqueued with), or an unhandled table silently vanishes from the
@@ -774,14 +741,11 @@ const UPLOAD_HANDLERS: Record<string, UploadHandler> = {
   'checklist_instances:PUT':        uploadChecklistInstanceConfirmation,
   'checklist_instances:PATCH':      uploadChecklistInstanceConfirmation,
   'work_order_reports:PUT':         uploadWorkOrderReport,
-  'inventory_items:PUT':            uploadInventoryItemCount,
-  'inventory_items:PATCH':          uploadInventoryItemCount,
+  'inventory_counts:PUT':           uploadInventoryCount,
   'property_assets:PUT':            uploadPropertyAssetInsert,
   'property_assets:PATCH':          uploadPropertyAssetPhotoUpdate,
-  'crew_availability:PUT':          uploadCrewAvailability,
-  'crew_availability:PATCH':        uploadCrewAvailability,
   'crew_work_orders:PATCH':         uploadCrewWorkOrderChange,
-  'inventory_count_drafts:PUT':     uploadInventoryCountDraft,
+  'messages:PUT':                   uploadCrewMessage,
 }
 
 /**

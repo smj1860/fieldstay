@@ -34,12 +34,11 @@ const MUTATION_LABELS: Record<MutationTable, string> = {
   checklist_instance_items: 'Checklist task update',
   checklist_instances:      'Checklist completion confirmation',
   turnovers:                'Turnover update',
-  inventory_items:          'Inventory count',
-  crew_availability:        'Time-off request',
+  inventory_counts:         'Inventory count',
   work_order_reports:       'Work order request',
   property_assets:          'Appliance details',
   crew_work_orders:         'Work order completion',
-  inventory_count_drafts:   'Inventory count submission',
+  messages:                 'Message to your operations team',
 }
 
 interface FailedEntry {

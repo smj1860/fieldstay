@@ -669,43 +669,6 @@ export interface InventoryCountItem {
   created_at:        string
 }
 
-// Field names match the live schema (submitted_by, item_id, counted_qty) —
-// not the never-applied crew_member_id/submitted_at/inventory_item_id/
-// submitted_quantity names from the superseded schema_history_gaps
-// migrations (20260609000003/20260609111810), whose CREATE TABLE IF NOT
-// EXISTS no-op'd against the table 20260604223326_add_inventory_count_drafts.sql
-// had already created. reviewed_at/reviewed_by were added for real by
-// 20260725201500_add_reviewed_columns_to_inventory_count_drafts.sql, after
-// the drift check caught app/(dashboard)/inventory/actions.ts writing to
-// them against columns that didn't exist yet.
-export interface InventoryCountDraft {
-  id:           string
-  org_id:       string
-  property_id:  string
-  submitted_by: string | null
-  status:       'pending_review' | 'approved' | 'rejected'
-  reviewed_at:  string | null
-  reviewed_by:  string | null
-  notes:        string | null
-  created_at:   string
-  updated_at:   string
-}
-
-export interface InventoryCountDraftItem {
-  id:                string
-  draft_id:          string
-  item_id:           string
-  previous_quantity: number
-  counted_qty:       number
-  // `note` (singular) is a legacy duplicate column nobody writes or reads —
-  // app/api/crew/inventory-count/route.ts and app/(dashboard)/inventory/
-  // page.tsx both use `notes` (plural) exclusively. Kept here only so the
-  // interface doesn't silently drop a real live column (see CLAUDE.md's
-  // "Two inventory tables with different column names" section).
-  note:              string | null
-  notes:             string | null
-}
-
 export interface PurchaseOrder {
   id:                   string
   property_id:          string
@@ -1834,8 +1797,6 @@ export interface HandWrittenRowMap {
   inventory_items:                     InventoryItem
   inventory_counts:                    InventoryCount
   inventory_count_items:               InventoryCountItem
-  inventory_count_drafts:              InventoryCountDraft
-  inventory_count_draft_items:         InventoryCountDraftItem
   purchase_orders:                     PurchaseOrder
   purchase_order_items:                PurchaseOrderItem
   work_orders:                         WorkOrder

@@ -38,8 +38,6 @@ async function writeAndQueue(
     db.turnovers,
     db.checklist_instances,
     db.checklist_instance_items,
-    db.inventory_items,
-    db.crew_availability,
     db.crew_work_orders,
     db.property_assets,
     db.sync_meta,
@@ -310,95 +308,136 @@ export async function completeWorkOrder(
   )
 }
 
-/** Updates an inventory item's on-hand quantity locally and queues the mutation. */
-export async function updateInventoryQuantity(
-  userId: string,
-  itemId: string,
-  currentQuantity: number,
-): Promise<void> {
-  const changes = { current_quantity: currentQuantity }
-
-  await writeAndQueue(userId, 'inventory_items', itemId, 'PATCH', changes, (db) =>
-    db.inventory_items.update(itemId, changes),
-  )
-}
-
-// ── Crew inventory count (PM-reviewed draft) ──────────────────────────────
+// ── Messages to the operations team ───────────────────────────────────────
 //
-// A count is submitted for PM review, so it must NOT be written through
-// updateInventoryQuantity() (which pushes straight to
-// inventory_items.current_quantity and would bypass review). The in-progress
-// count therefore lives in the local-only `sync_meta` store until submit,
-// and submit itself goes through the outbox like every other crew write —
-// previously the whole page held counts in React state and posted with a
-// live fetch(), so a count entered with no signal was lost both on submit
-// failure AND on navigation.
+// Messages used to be the ONE crew-facing action that wasn't offline-safe:
+// sendMessageToPM is a live Server Action, so a message composed at a property
+// with no signal simply failed, and the crew FAQ carried an entry telling crew
+// not to assume it had queued. Reading history offline was the inverse
+// trade — 90 days of it cached on every device to back a screen whose whole
+// point is getting a reply.
+//
+// So: history is read from the server, and the SEND goes through the outbox
+// like every other crew write. Retry, backoff, and the failed-sync banner all
+// come for free.
 
-export interface InventoryCountDraft {
-  counts:    Record<string, number>
-  itemNotes: Record<string, string>
-  notes:     string
-}
+const MESSAGE_COMPOSE_KEY = 'message_compose_draft'
 
-const EMPTY_DRAFT: InventoryCountDraft = { counts: {}, itemNotes: {}, notes: '' }
-
-function inventoryDraftKey(propertyId: string): string {
-  return `inventory_count_draft:${propertyId}`
-}
-
-/** Reads the locally-staged (unsubmitted) count for a property. */
-export async function loadInventoryCountDraft(
-  userId: string,
-  propertyId: string,
-): Promise<InventoryCountDraft> {
+/** The half-typed message in the compose box, so it survives navigation. */
+export async function loadMessageDraft(userId: string): Promise<string> {
   const db = getDexieDb(userId)
-  const row = await db.sync_meta.get(inventoryDraftKey(propertyId))
-  if (!row?.value) return EMPTY_DRAFT
-  try {
-    return { ...EMPTY_DRAFT, ...(JSON.parse(row.value) as Partial<InventoryCountDraft>) }
-  } catch (err) {
-    console.error('[inventory draft] corrupt local draft — starting fresh:', err)
-    reportError(err, { site: 'lib.dexie.helpers.loadInventoryCountDraft' })
-    return EMPTY_DRAFT
+  return (await db.sync_meta.get(MESSAGE_COMPOSE_KEY))?.value ?? ''
+}
+
+export async function saveMessageDraft(userId: string, text: string): Promise<void> {
+  const db = getDexieDb(userId)
+  if (!text) {
+    await db.sync_meta.delete(MESSAGE_COMPOSE_KEY)
+    return
   }
-}
-
-/** Persists the in-progress count locally so it survives navigation and app restarts. */
-export async function saveInventoryCountDraft(
-  userId: string,
-  propertyId: string,
-  draft: InventoryCountDraft,
-): Promise<void> {
-  const db = getDexieDb(userId)
-  await db.sync_meta.put({ key: inventoryDraftKey(propertyId), value: JSON.stringify(draft) })
+  await db.sync_meta.put({ key: MESSAGE_COMPOSE_KEY, value: text })
 }
 
 /**
- * Queues the count for submission and clears the local staging row. The
- * draft id is generated here and used by the Route Handler as the
- * `inventory_count_drafts` primary key, so an outbox replay collides
- * harmlessly rather than creating a second draft.
+ * Queues a message and clears the compose draft in one transaction, so a crash
+ * between the two can neither lose the message nor leave a duplicate sitting
+ * in the box.
+ *
+ * The id is client-generated and used by the route as the `messages` primary
+ * key, so a replay after a dropped response collides instead of sending twice.
+ * Returns it so the UI can show the message as pending until it drains.
  */
-export async function submitInventoryCountDraft(
+export async function queueMessageToPM(userId: string, content: string): Promise<string> {
+  const messageId = crypto.randomUUID()
+
+  await writeAndQueue(
+    userId, 'messages', messageId, 'PUT',
+    { content },
+    (db) => db.sync_meta.delete(MESSAGE_COMPOSE_KEY),
+  )
+
+  return messageId
+}
+
+// ── Turnover inventory count ──────────────────────────────────────────────
+//
+// A count is staged locally while the crew member walks the property, then
+// submitted as ONE count when they confirm inventory complete.
+//
+// Two rules the previous per-item write-through violated:
+//
+//  - Nothing is pre-filled. The count input used to default to the item's
+//    last known `current_quantity`, so a crew member had to actively
+//    overwrite the previous number rather than enter a fresh one — the
+//    strongest possible anchor on a measurement that drives automated
+//    purchasing. An absent key now means "not counted"; 0 means "counted,
+//    none on hand", and only counted items are ever submitted.
+//  - The count is a COUNT, not a column write. Writing
+//    `inventory_items.current_quantity` per item produced no
+//    `inventory_counts` record, no previous-vs-counted diff for the PM, and
+//    never fired `inventory/count-submitted` — so the crew's counts, the
+//    most accurate stock data the system has, never reached the below-par
+//    restock pipeline at all.
+
+/** Counted quantities by inventory_items.id. An absent key is NOT a zero. */
+export type TurnoverInventoryCounts = Record<string, number>
+
+/** Per-turnover, not per-property: a partial count must never bleed into the
+ *  next turnover at the same property. */
+function turnoverCountKey(turnoverId: string): string {
+  return `inventory_count:turnover:${turnoverId}`
+}
+
+export async function loadTurnoverInventoryCounts(
+  userId: string,
+  turnoverId: string,
+): Promise<TurnoverInventoryCounts> {
+  const db = getDexieDb(userId)
+  const row = await db.sync_meta.get(turnoverCountKey(turnoverId))
+  if (!row?.value) return {}
+  try {
+    const parsed: unknown = JSON.parse(row.value)
+    return (parsed && typeof parsed === 'object' ? parsed : {}) as TurnoverInventoryCounts
+  } catch (err) {
+    console.error('[inventory count] corrupt local draft — starting fresh:', err)
+    reportError(err, { site: 'lib.dexie.helpers.loadTurnoverInventoryCounts' })
+    return {}
+  }
+}
+
+/**
+ * Persists the in-progress count so it survives navigation, a reload, or the
+ * PWA being reclaimed mid-shift. The per-item write-through this replaces was
+ * crudely durable for exactly this reason — dropping it without persisting
+ * here would make a partial count LESS safe than before.
+ */
+export async function saveTurnoverInventoryCounts(
+  userId: string,
+  turnoverId: string,
+  counts: TurnoverInventoryCounts,
+): Promise<void> {
+  const db = getDexieDb(userId)
+  await db.sync_meta.put({ key: turnoverCountKey(turnoverId), value: JSON.stringify(counts) })
+}
+
+/**
+ * Queues the staged count for submission and clears the local staging row, in
+ * one transaction. The count id is client-generated and used by the route as
+ * the `inventory_counts` primary key, so an outbox replay collides on the PK
+ * rather than recording the same physical count twice.
+ */
+export async function submitTurnoverInventoryCounts(
   userId: string,
   propertyId: string,
-  draft: InventoryCountDraft,
+  turnoverId: string,
+  counts: TurnoverInventoryCounts,
 ): Promise<void> {
-  const draftId = crypto.randomUUID()
-  const payload = {
-    property_id: propertyId,
-    counts:      draft.counts,
-    item_notes:  draft.itemNotes,
-    notes:       draft.notes,
-  }
+  const countId = crypto.randomUUID()
 
-  // Queueing the submission and clearing the local staging row must commit
-  // together. As two transactions, a crash in between left BOTH a queued
-  // submission and a staged draft — the crew member resubmits, gets a second
-  // crypto.randomUUID() draft id (so the route's primary-key idempotency can't
-  // see the collision), and the PM reviews the same count twice.
-  await writeAndQueue(userId, 'inventory_count_drafts', draftId, 'PUT', payload, (db) =>
-    db.sync_meta.delete(inventoryDraftKey(propertyId)),
+  await writeAndQueue(
+    userId, 'inventory_counts', countId, 'PUT',
+    { property_id: propertyId, counts },
+    (db) => db.sync_meta.delete(turnoverCountKey(turnoverId)),
   )
 }
 
@@ -441,62 +480,4 @@ export async function submitWorkOrderReport(
     title:        report.title,
     is_emergency: report.isEmergency,
   })
-}
-
-/**
- * Creates or updates a crew_availability row. When `id` is omitted a new row
- * is created (queued as a PUT carrying org_id, which SyncEngine's
- * crew_availability handler treats as a full upsert); when `id` is provided
- * an existing row is patched (queued without org_id, which SyncEngine treats
- * as a partial update).
- */
-export async function saveCrewAvailability(
-  userId: string,
-  params: {
-    id?:           string
-    orgId:         string
-    crewMemberId:  string
-    date:          string
-    isAvailable:   boolean
-    notes:         string | null
-  },
-): Promise<void> {
-  const isAvailable = params.isAvailable ? 1 : 0
-
-  if (params.id) {
-    const existingId = params.id
-    await writeAndQueue(
-      userId, 'crew_availability', existingId, 'PATCH',
-      { is_available: isAvailable, notes: params.notes },
-      (db) => db.crew_availability.update(existingId, {
-        is_available: isAvailable,
-        notes:        params.notes ?? '',
-      }),
-    )
-    return
-  }
-
-  const id = crypto.randomUUID()
-  const createdAt = new Date().toISOString()
-
-  await writeAndQueue(
-    userId, 'crew_availability', id, 'PUT',
-    {
-      org_id:         params.orgId,
-      crew_member_id: params.crewMemberId,
-      available_date: params.date,
-      is_available:   isAvailable,
-      notes:          params.notes,
-      created_at:     createdAt,
-    },
-    (db) => db.crew_availability.add({
-      id,
-      org_id:         params.orgId,
-      crew_member_id: params.crewMemberId,
-      available_date: params.date,
-      is_available:   isAvailable,
-      notes:          params.notes ?? '',
-      created_at:     createdAt,
-    }),
-  )
 }

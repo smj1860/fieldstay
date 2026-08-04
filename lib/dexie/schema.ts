@@ -71,7 +71,10 @@ export interface InventoryItemRow {
   category:         string
   unit:             string
   par_level:        number
-  current_quantity: number
+  // No current_quantity. The crew count input is blank until counted — showing
+  // the previous count made it the default value a crew member had to type
+  // over, anchoring a measurement that drives automated purchasing. Nothing on
+  // the device reads it, so it is not fetched or cached.
 }
 
 export interface PropertyRow {
@@ -84,29 +87,6 @@ export interface PropertyRow {
   lat:      number | null
   lng:      number | null
   timezone: string   // IANA identifier, e.g. "America/Chicago" — see lib/utils/timezone.ts
-}
-
-export interface CrewAvailabilityRow {
-  id:             string
-  org_id:         string
-  crew_member_id: string
-  available_date: string
-  is_available:   number
-  notes:          string
-  created_at:     string
-}
-
-export interface MessageRow {
-  id:           string
-  org_id:       string
-  sender_id:    string
-  recipient_id: string
-  content:      string
-  read_at:      string | null
-  turnover_id:  string
-  group_id:     string
-  group_label:  string
-  created_at:   string
 }
 
 // Progressive Asset Discovery cache — synced read-only for properties the
@@ -192,11 +172,10 @@ export type MutationTable =
   | 'turnovers'
   | 'checklist_instances'
   | 'work_order_reports'
-  | 'inventory_items'
-  | 'crew_availability'
+  | 'inventory_counts'
   | 'property_assets'
   | 'crew_work_orders'
-  | 'inventory_count_drafts'
+  | 'messages'
 
 export interface MutationRow {
   id?:        number
@@ -242,8 +221,6 @@ export class FieldStayDexie extends Dexie {
   checklist_instance_items!: Table<ChecklistInstanceItemRow, string>
   inventory_items!:          Table<InventoryItemRow, string>
   properties!:               Table<PropertyRow, string>
-  crew_availability!:        Table<CrewAvailabilityRow, string>
-  messages!:                 Table<MessageRow, string>
   pending_photo_uploads!:    Table<PendingPhotoUploadRow, string>
   mutations!:                Table<MutationRow, number>
   sync_meta!:                Table<SyncMetaRow, string>
@@ -399,6 +376,35 @@ export class FieldStayDexie extends Dexie {
             .modify((p: PendingPhotoUploadRow) => { p.failed = p.failed ? 1 : 0 }),
         ]).then(() => undefined),
       )
+
+    // crew_availability leaves the crew cache entirely. Time off is now an
+    // online-only screen: app/crew/availability reads its rows server-side and
+    // writes through a Server Action, so nothing on the device reads this
+    // store. It was the second-heaviest thing the five-minute safety poll
+    // pulled — a full 30-days-back-to-a-year-forward window, uncursored, on
+    // every tick — to back a screen that needs a connection to be useful.
+    //
+    // The `crew_availability` UPLOAD_HANDLERS entries deliberately REMAIN for
+    // one release: a mutation queued before this deploy lives in `mutations`,
+    // not in the store being dropped here, and must still drain rather than
+    // dead-letter as NO_HANDLER.
+    this.version(10).stores({
+      crew_availability: null,
+    })
+
+    // messages leaves the crew cache too. History is read from the server
+    // (app/crew/messages/page.tsx) and the unread badge is server-rendered by
+    // the crew layout — the badge's Dexie live query was the only reason this
+    // table had to be cached at all. It was the heaviest thing the safety poll
+    // pulled: up to 500 rows across a rolling 90-day window, uncursored, every
+    // five minutes, with no reconciliation.
+    //
+    // SENDING a message is now offline-capable for the first time — it goes
+    // through the outbox as a 'messages' mutation (see queueMessageToPM), so
+    // nothing about this drop reduces what a crew member can do without signal.
+    this.version(11).stores({
+      messages: null,
+    })
   }
 }
 
@@ -416,8 +422,6 @@ export const CREW_SYNCED_TABLES: Readonly<Record<string, string>> = {
   checklist_instance_items: 'checklist_instance_items',
   inventory_items:          'inventory_items',
   properties:                'properties',
-  crew_availability:        'crew_availability',
-  messages:                 'messages',
   crew_work_orders:         'work_orders',
   property_assets:          'property_assets',
 }

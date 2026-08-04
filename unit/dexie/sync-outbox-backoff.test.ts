@@ -32,14 +32,14 @@ const NOW = Date.parse('2026-07-25T12:00:00.000Z')
 function db(): FakeDexieDb { return holder.db as FakeDexieDb }
 function supabaseCalls() { return (holder.supabase as ReturnType<typeof makeFakeSupabase>).calls }
 
-// inventory_items:PATCH is the simplest pure-supabase upload handler
+// checklist_instance_items:PATCH is the simplest pure-supabase upload handler
 // (update → eq → select) — no fetch()-routed side effects to stub.
 async function seedMutation(overrides: Partial<MutationRow> = {}): Promise<number> {
   const id = await db().mutations.add({
-    table:      'inventory_items',
+    table:      'checklist_instance_items',
     targetId:   'item1',
     op:         'PATCH',
-    payload:    { current_quantity: 3 },
+    payload:    { is_completed: 1 },
     createdAt:  new Date(NOW).toISOString(),
     retryCount: 0,
     ...overrides,
@@ -114,7 +114,7 @@ describe('processOutbox — retry backoff', () => {
     const sameRecId = await seedMutation()                        // item1 again, due
     const otherId   = await seedMutation({ targetId: 'item2' })   // different record, due
     holder.supabase = makeFakeSupabase({
-      inventory_items: [UPLOAD_OK, UPLOAD_OK, UPLOAD_OK, UPLOAD_OK],
+      checklist_instance_items: [UPLOAD_OK, UPLOAD_OK, UPLOAD_OK, UPLOAD_OK],
     })
 
     const engine = new SyncEngine('u1')
@@ -150,7 +150,7 @@ describe('processOutbox — retry backoff', () => {
       await seedMutation({ targetId })
     }
     holder.supabase = makeFakeSupabase({
-      inventory_items: Array.from({ length: 10 }, () => ({
+      checklist_instance_items: Array.from({ length: 10 }, () => ({
         error: { message: 'server exploded', code: 'XX000' },   // transient
       })),
     })
@@ -167,7 +167,7 @@ describe('processOutbox — retry backoff', () => {
 
   it('retries a due mutation and clears nextAttemptAt on success (row removed)', async () => {
     const id = await seedMutation({ retryCount: 2, nextAttemptAt: NOW - 1_000 })
-    holder.supabase = makeFakeSupabase({ inventory_items: [UPLOAD_OK] })
+    holder.supabase = makeFakeSupabase({ checklist_instance_items: [UPLOAD_OK] })
 
     await new SyncEngine('u1').processOutbox()
 
@@ -179,7 +179,7 @@ describe('processOutbox — retry backoff', () => {
   it('sets nextAttemptAt with backoff on push failure and resumes via the timer', async () => {
     vi.spyOn(Math, 'random').mockReturnValue(0.5) // jitter factor 1.0
     const id = await seedMutation()
-    holder.supabase = makeFakeSupabase({ inventory_items: [UPLOAD_FAIL, UPLOAD_OK] })
+    holder.supabase = makeFakeSupabase({ checklist_instance_items: [UPLOAD_FAIL, UPLOAD_OK] })
 
     await new SyncEngine('u1').processOutbox()
 
@@ -194,7 +194,7 @@ describe('processOutbox — retry backoff', () => {
 
   it('keeps the permanent-failure (dead-letter) path unchanged', async () => {
     const id = await seedMutation({ retryCount: 4 })
-    holder.supabase = makeFakeSupabase({ inventory_items: [UPLOAD_FAIL, UPLOAD_OK] })
+    holder.supabase = makeFakeSupabase({ checklist_instance_items: [UPLOAD_FAIL, UPLOAD_OK] })
 
     const engine = new SyncEngine('u1')
     await engine.processOutbox()

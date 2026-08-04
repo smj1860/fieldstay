@@ -18,6 +18,7 @@ export function InventoryView({
   const {
     userId,
     inventoryItems, invByCategory, getCount, handleCountChange,
+    countedSoFar, countedTotal,
     toggleInventoryConfirm, inventoryConfirmSyncFailed, actionError,
   } = actions
 
@@ -41,8 +42,10 @@ export function InventoryView({
                 </p>
                 <div className="bg-card-themed rounded-xl border border-themed divide-y divide-themed overflow-hidden">
                   {catItems.map((item) => {
-                    const qty    = getCount(item)
-                    const isLow  = qty < item.par_level
+                    const qty = getCount(item)
+                    // Only a real count can be low. An item nobody has counted
+                    // yet is unknown, not well-stocked and not short.
+                    const isLow = qty !== undefined && qty < item.par_level
                     return (
                       <div key={item.id} className="flex items-center gap-3 px-4 py-2.5">
                         <div className="flex-1 min-w-0">
@@ -56,7 +59,7 @@ export function InventoryView({
                         </div>
                         <div className="flex items-center gap-2 flex-shrink-0">
                           <button
-                            onClick={() => handleCountChange(item.id, qty - 1)}
+                            onClick={() => handleCountChange(item.id, (qty ?? 0) - 1)}
                             className="rounded-lg border border-themed flex items-center justify-center text-muted-themed hover:bg-raised-themed active:bg-raised-themed transition-colors"
                             style={{ width: 48, height: 48 }}
                             aria-label={`Decrease ${item.name}`}
@@ -66,8 +69,17 @@ export function InventoryView({
                           <input
                             type="number"
                             min={0}
-                            value={qty}
-                            onChange={(e) => handleCountChange(item.id, parseInt(e.target.value, 10) || 0)}
+                            // Empty, not 0, until it is actually counted — and
+                            // clearing the field returns it to uncounted
+                            // rather than asserting a zero.
+                            value={qty ?? ''}
+                            placeholder="—"
+                            onChange={(e) => {
+                              const raw = e.target.value.trim()
+                              if (raw === '') return void handleCountChange(item.id, null)
+                              const parsed = Number.parseInt(raw, 10)
+                              if (!Number.isNaN(parsed)) void handleCountChange(item.id, parsed)
+                            }}
                             onKeyDown={(e) => {
                               if (e.key !== 'Enter') return
                               e.preventDefault()
@@ -81,7 +93,7 @@ export function InventoryView({
                             style={{ height: 48 }}
                           />
                           <button
-                            onClick={() => handleCountChange(item.id, qty + 1)}
+                            onClick={() => handleCountChange(item.id, (qty ?? 0) + 1)}
                             className="rounded-lg border border-themed flex items-center justify-center text-muted-themed hover:bg-raised-themed active:bg-raised-themed transition-colors"
                             style={{ width: 48, height: 48 }}
                             aria-label={`Increase ${item.name}`}
@@ -96,7 +108,10 @@ export function InventoryView({
               </div>
             ))}
           </div>
-          <p className="text-xs text-muted-themed text-center mt-2">Inventory updates save automatically</p>
+          <p className="text-xs text-muted-themed text-center mt-2">
+            {countedSoFar} of {countedTotal} counted · saved on this phone,
+            sent when you confirm below
+          </p>
         </div>
       )}
 
@@ -118,9 +133,17 @@ export function InventoryView({
         {turnover.inventory_confirmed_complete_at
           ? <CheckCircle2 className="w-6 h-6 flex-shrink-0" style={{ color: 'var(--accent-green)' }} />
           : <Circle className="w-6 h-6 text-muted-themed flex-shrink-0" />}
-        <p className="text-base font-semibold" style={{ color: turnover.inventory_confirmed_complete_at ? 'var(--accent-green)' : 'var(--text-primary)' }}>
-          Confirm Inventory Complete
-        </p>
+        <div className="min-w-0">
+          <p className="text-base font-semibold" style={{ color: turnover.inventory_confirmed_complete_at ? 'var(--accent-green)' : 'var(--text-primary)' }}>
+            Confirm Inventory Complete
+          </p>
+          {!turnover.inventory_confirmed_complete_at && countedSoFar > 0 && countedSoFar < countedTotal && (
+            <p className="text-xs mt-0.5" style={{ color: 'var(--text-muted)' }}>
+              Sends the {countedSoFar} item{countedSoFar !== 1 ? 's' : ''} you counted.
+              Anything left blank is skipped, not set to zero.
+            </p>
+          )}
+        </div>
       </button>
 
       {/* The confirm handler can refuse before it ever reaches the outbox —

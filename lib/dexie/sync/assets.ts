@@ -8,6 +8,7 @@ import type { DexieSupabaseClient } from './types'
 import { getDexieDb, type PropertyAssetRow } from '../schema'
 import { fetchInChunksPaginated } from './chunked'
 import { bulkPutShadowed } from './shadow'
+import { scopeChanged, rememberScope } from './scope'
 import { reportError } from '@/lib/observability/report-error'
 
 // Properties this crew member currently has a stake in — same derivation as
@@ -27,12 +28,25 @@ export async function computeAssignedPropertyIds(userId: string): Promise<string
   return [...ids]
 }
 
+/**
+ * `force` bypasses the scope gate — used when the crew Assets page opens,
+ * which is the one moment freshness is worth a round trip and also when a
+ * co-crew member's capture is most likely to have landed since the last pull.
+ */
 export async function syncPropertyAssets(
   supabase: DexieSupabaseClient,
   userId: string,
   propertyIds: string[],
+  force = false,
 ): Promise<void> {
   if (!propertyIds.length) return
+
+  // Assets are monotonic — captured once, then captured. Re-pulling every
+  // assigned property's full asset set on a five-minute timer bought nothing
+  // but load; the assigned-property set changing is the event that matters,
+  // because that is when a device needs them warm before it loses signal.
+  if (!force && !(await scopeChanged(userId, 'scope:property_assets', propertyIds))) return
+
   const db = getDexieDb(userId)
 
   // Paginated per chunk: this is a ONE-TO-MANY scope. Chunking property_ids
@@ -68,4 +82,8 @@ export async function syncPropertyAssets(
     }))
     await bulkPutShadowed(db.property_assets, userId, 'property_assets', normalized as PropertyAssetRow[])
   }
+
+  // Recorded only after the fetch succeeded — a failed pull must be retried,
+  // not remembered as done.
+  await rememberScope(userId, 'scope:property_assets', propertyIds)
 }

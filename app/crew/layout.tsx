@@ -69,9 +69,19 @@ export default async function CrewLayout({
   }
   // ── End PM guard ───────────────────────────────────────────────────────────
 
+  // Unread badge count. This used to be a Dexie live query in the bottom nav,
+  // which is why `messages` had to be cached on every device at all. A badge
+  // does not need to be live — re-rendering it on navigation is plenty, and it
+  // costs one HEAD count rather than 500 rows every five minutes.
+  const { count: unreadCount } = await admin
+    .from('messages')
+    .select('id', { count: 'exact', head: true })
+    .eq('recipient_id', user.id)
+    .is('read_at', null)
+
   return (
     <div className="theme-locked-light">
-      <CrewShell crewName={crewRecord.name} userId={user.id}>{children}</CrewShell>
+      <CrewShell crewName={crewRecord.name} userId={user.id} unreadCount={unreadCount}>{children}</CrewShell>
     </div>
   )
 }

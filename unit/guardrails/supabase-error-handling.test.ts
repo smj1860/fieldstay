@@ -125,7 +125,6 @@ const BASELINE: Record<string, number> = {
   'app/api/assets/cpa-export/route.ts': 2,
   'app/api/assets/request-scan/route.ts': 3,
   'app/api/crew/feedback/route.ts': 3,
-  'app/api/crew/inventory-count/route.ts': 5,
   'app/api/crew/turnovers/[id]/complete/route.ts': 2,
   'app/api/crew/work-order-reports/route.ts': 2,
   'app/api/gdpr/export/route.ts': 5,

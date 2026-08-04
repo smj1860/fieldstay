@@ -61,10 +61,10 @@ function setOnline(value: boolean): void {
 
 async function seed(overrides: Partial<MutationRow> = {}): Promise<number> {
   return await db().mutations.add({
-    table:      'inventory_items',
+    table:      'checklist_instance_items',
     targetId:   'item1',
     op:         'PATCH',
-    payload:    { current_quantity: 3 },
+    payload:    { is_completed: 1 },
     createdAt:  new Date().toISOString(),
     retryCount: 0,
     ...overrides,
@@ -84,7 +84,7 @@ afterEach(() => vi.restoreAllMocks())
 describe('F8 — a mutation queued mid-drain is not stranded until the next tick', () => {
   it('re-drains once the in-flight pass settles instead of dropping the wake-up', async () => {
     holder.supabase = makeFakeSupabase({
-      inventory_items: [UPLOAD_OK, UPLOAD_OK, UPLOAD_OK],
+      checklist_instance_items: [UPLOAD_OK, UPLOAD_OK, UPLOAD_OK],
     })
     await seed({ targetId: 'first' })
 
@@ -111,7 +111,7 @@ describe('F8 — a mutation queued mid-drain is not stranded until the next tick
   })
 
   it('does not loop when nothing new was queued', async () => {
-    holder.supabase = makeFakeSupabase({ inventory_items: [UPLOAD_OK] })
+    holder.supabase = makeFakeSupabase({ checklist_instance_items: [UPLOAD_OK] })
     await seed()
 
     const engine = new SyncEngine('u1')
@@ -129,7 +129,7 @@ describe('F10 — payload versioning and unknown handlers', () => {
   it('stamps the current payload version on every newly queued mutation', async () => {
     const { enqueueMutationTx } = await import('@/lib/dexie/syncService')
     // eslint-disable-next-line @typescript-eslint/no-explicit-any -- fake db, not a real FieldStayDexie
-    await enqueueMutationTx(db() as any, 'inventory_items', 'item1', 'PATCH', { current_quantity: 1 })
+    await enqueueMutationTx(db() as any, 'checklist_instance_items', 'item1', 'PATCH', { is_completed: 1 })
 
     const [row] = await db().mutations.toArray() as unknown as MutationRow[]
     expect(

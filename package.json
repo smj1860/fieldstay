@@ -10,7 +10,7 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "eslint . --max-warnings 201",
+    "lint": "eslint . --max-warnings 198",
     "check:ui-classes": "bash scripts/check-raw-ui-classes.sh",
     "check:db-invariants": "node scripts/check-db-invariants.mjs",
     "check:db-invariants:prod": "DB_INVARIANTS_ALLOW_PROD=1 node scripts/check-db-invariants.mjs",

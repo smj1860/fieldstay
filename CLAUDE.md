@@ -181,7 +181,14 @@ turnovers                   — Has turnover_status, is_same_day_turnover,
                               suggested_crew_ids, suggestion_reasoning, suggestion_status
 turnover_assignments        — crew → turnover join
 crew_members                — Has home_lat/lng, reliability_score, capacity_score
-crew_availability           — crew marks available/unavailable by date
+crew_availability           — crew marks available/unavailable by date. NOT in the crew
+                              Dexie cache: time off is an online-only screen (server-rendered
+                              rows + a Server Action), so it is not synced to devices.
+                              `messages` is the same — history is server-rendered and the
+                              unread badge is a server-side count; only SENDING is offline
+                              (an outbox mutation). `property_assets`/`inventory_items` are
+                              cached but pulled on assigned-property-set change plus screen
+                              open (lib/dexie/sync/scope.ts), not on the safety poll
 assignment_outcomes         — learning loop: PM accepts/overrides, duration from
                               checklist timestamps, pm_rating
 ```
@@ -420,7 +427,7 @@ and is **fully gone** — no dependency, no `lib/powersync/` directory, no
   shapes mirror the Supabase tables they cache. Get an instance via
   `getDexieDb(userId)`.
 - `lib/dexie/context.tsx` — `DexieProvider` pulls turnovers/properties/
-  inventory/checklists/messages from Supabase into Dexie tables on an interval
+  inventory/checklists from Supabase into Dexie tables on an interval
   and on reconnect; client components read from Dexie, never from Supabase
   directly.
 - `lib/dexie/syncService.ts` — `enqueueMutation()` queues a local write into
@@ -838,6 +845,14 @@ verified identical on that date (276/276).
 Write a new file in `supabase/migrations/` named `YYYYMMDDHHMMSS_description.sql`
 and apply it via `supabase db push` against project `vpmznjktllhmmbfnxuvk`.
 
+**Apply it to the E2E project (`syhthijeqlnltufdawyb`) in the same sitting.**
+`scripts/check-type-drift.mjs` runs against E2E, not production, and refuses
+to run against prod at all — so a migration applied only to prod fails CI with
+what looks like a types problem and is really a project-skew one. The rule was
+already in `docs/E2E_SETUP.md` ("keep the E2E project migrated in lockstep");
+it is repeated here because this section naming only the production ref is
+what made it easy to miss.
+
 Always update `types/database.ts` in the same commit as the migration.
 
 ### Known legacy tables
@@ -923,15 +938,17 @@ const { supabase, crew, user } = auth
 | What you might assume | What actually exists |
 |---|---|
 | `work_order_notes` | `work_order_updates` |
-| `inventory_count_draft_items.inventory_item_id` | `item_id` |
-| `inventory_count_draft_items.submitted_quantity` | `counted_qty` |
 | `memberships` | `organization_members` |
 | `membership.user_id` | `user.id` |
 | `assigned_crew_id` | `assigned_crew_member_id` |
 
-**Two inventory tables with different column names — do not mix them:**
-- `inventory_count_draft_items`: `item_id`, `counted_qty`, `note`, `notes`, `previous_quantity`
-- `inventory_count_items` (legacy direct-commit): `inventory_item_id`, `quantity_counted`
+**One inventory count family.** `inventory_counts` + `inventory_count_items`
+(`inventory_item_id`, `quantity_counted`) is now the only one, used by the PM's
+own counts and by the crew route. The parallel `inventory_count_drafts` /
+`inventory_count_draft_items` pair — with its own, different column vocabulary —
+was dropped by `20260804125424_drop_inventory_count_drafts.sql`: it was
+unreachable (its only writer was a crew page nothing linked to), held zero rows,
+and gated crew counts behind a PM approval that product never wanted.
 
 ### UI component locations
 
@@ -1248,13 +1265,6 @@ following them stops being a memory test. Five layers, checked in CI via
      without masking it — the structural backstop for the sensitive-data
      rule in Code Quality Standards and the Standing Audit Checklist. A
      clean-baseline ratchet, same model as `tailwind-color-ratchet`.
-   - `inventory-table-column-mixup` — a query against
-     `inventory_count_draft_items` or `inventory_count_items` may not
-     reference the other table's column names (the "do not mix them" pair
-     in Table and column names below) — scoped to the same `.from(...)`
-     call's own query chain, not the whole file, since both tables' column
-     names are individually valid TypeScript, just wrong for the table in
-     scope. Also a clean-baseline ratchet.
    - Added by the 2026-07-30 pre-launch remediation, one line each — read the
      header comment in each file for the defect it encodes:
      `unbounded-select` (the `max_rows = 1000` rule, `lib/inngest/**`),

@@ -24,7 +24,7 @@ const holder = vi.hoisted(() => ({
   uploadGate: null as null | { promise: Promise<unknown>; onStart: () => void },
 }))
 
-// SyncEngine's only outbound dependency. inventory_items:PATCH is the
+// SyncEngine's only outbound dependency. checklist_instance_items:PATCH is the
 // simplest upload handler (update → eq → select), so a single stub covers it.
 vi.mock('@/lib/supabase/client', () => ({
   createClient: () => ({
@@ -93,7 +93,7 @@ afterEach(async () => {
 
 describe('crew logout leaves no local database behind', () => {
   it('a drain triggered after logout does not re-create the deleted database', async () => {
-    await enqueueMutation(USER, 'inventory_items', 'item1', 'PATCH', { current_quantity: 3 })
+    await enqueueMutation(USER, 'checklist_instance_items', 'item1', 'PATCH', { is_completed: 1 })
     expect(await crewDbNames()).toContain(CREW_DB)
 
     await performLogout()
@@ -111,13 +111,13 @@ describe('crew logout leaves no local database behind', () => {
     await performLogout()
 
     // A component still mounted mid-teardown firing one last optimistic write.
-    await enqueueMutation(USER, 'inventory_items', 'item1', 'PATCH', { current_quantity: 9 })
+    await enqueueMutation(USER, 'checklist_instance_items', 'item1', 'PATCH', { current_quantity: 9 })
 
     expect(await crewDbNames()).toEqual([])
   })
 
   it('a drain that is mid-flight when logout lands does not re-create it', async () => {
-    await enqueueMutation(USER, 'inventory_items', 'item1', 'PATCH', { current_quantity: 3 })
+    await enqueueMutation(USER, 'checklist_instance_items', 'item1', 'PATCH', { is_completed: 1 })
 
     let rejectUpload: (err: unknown) => void = () => {}
     let markStarted: () => void = () => {}

@@ -1776,112 +1776,6 @@ export type Database = {
         }
         Relationships: []
       }
-      inventory_count_draft_items: {
-        Row: {
-          counted_qty: number
-          draft_id: string
-          id: string
-          item_id: string
-          note: string | null
-          notes: string | null
-          previous_quantity: number
-        }
-        Insert: {
-          counted_qty?: number
-          draft_id: string
-          id?: string
-          item_id: string
-          note?: string | null
-          notes?: string | null
-          previous_quantity?: number
-        }
-        Update: {
-          counted_qty?: number
-          draft_id?: string
-          id?: string
-          item_id?: string
-          note?: string | null
-          notes?: string | null
-          previous_quantity?: number
-        }
-        Relationships: [
-          {
-            foreignKeyName: "inventory_count_draft_items_draft_id_fkey"
-            columns: ["draft_id"]
-            isOneToOne: false
-            referencedRelation: "inventory_count_drafts"
-            referencedColumns: ["id"]
-          },
-          {
-            foreignKeyName: "inventory_count_draft_items_item_id_fkey"
-            columns: ["item_id"]
-            isOneToOne: false
-            referencedRelation: "inventory_items"
-            referencedColumns: ["id"]
-          },
-        ]
-      }
-      inventory_count_drafts: {
-        Row: {
-          created_at: string
-          id: string
-          notes: string | null
-          org_id: string
-          property_id: string
-          reviewed_at: string | null
-          reviewed_by: string | null
-          status: string
-          submitted_by: string | null
-          updated_at: string
-        }
-        Insert: {
-          created_at?: string
-          id?: string
-          notes?: string | null
-          org_id: string
-          property_id: string
-          reviewed_at?: string | null
-          reviewed_by?: string | null
-          status?: string
-          submitted_by?: string | null
-          updated_at?: string
-        }
-        Update: {
-          created_at?: string
-          id?: string
-          notes?: string | null
-          org_id?: string
-          property_id?: string
-          reviewed_at?: string | null
-          reviewed_by?: string | null
-          status?: string
-          submitted_by?: string | null
-          updated_at?: string
-        }
-        Relationships: [
-          {
-            foreignKeyName: "inventory_count_drafts_org_id_fkey"
-            columns: ["org_id"]
-            isOneToOne: false
-            referencedRelation: "organizations"
-            referencedColumns: ["id"]
-          },
-          {
-            foreignKeyName: "inventory_count_drafts_property_id_fkey"
-            columns: ["property_id"]
-            isOneToOne: false
-            referencedRelation: "properties"
-            referencedColumns: ["id"]
-          },
-          {
-            foreignKeyName: "inventory_count_drafts_submitted_by_fkey"
-            columns: ["submitted_by"]
-            isOneToOne: false
-            referencedRelation: "crew_members"
-            referencedColumns: ["id"]
-          },
-        ]
-      }
       inventory_count_items: {
         Row: {
           count_id: string
@@ -5647,10 +5541,6 @@ export type Database = {
         Args: { p_counts: Json; p_org_id: string }
         Returns: number
       }
-      approve_inventory_count_draft: {
-        Args: { p_draft_id: string; p_org_id: string; p_reviewer: string }
-        Returns: Json
-      }
       approve_quote_request: {
         Args: {
           p_completion_token: string
@@ -5858,6 +5748,7 @@ export type Database = {
           status: string
         }[]
       }
+      migration_ledger_versions: { Args: never; Returns: Json }
       next_wo_number: { Args: { p_org_id: string }; Returns: string }
       next_work_order_invoice_seq: { Args: never; Returns: number }
       notify_crew_sync: {

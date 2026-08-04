@@ -35,6 +35,7 @@ import {
 import { getCursor, advanceCursor, partitionByKnown } from './cursors'
 import { fetchInChunks, fetchInChunksPaginated, IN_CHUNK_SIZE } from './chunked'
 import { bulkPutShadowed } from './shadow'
+import { scopeChanged, rememberScope } from './scope'
 import { reportError } from '@/lib/observability/report-error'
 
 const TURNOVER_COLUMNS =
@@ -178,6 +179,14 @@ async function syncScopeReferenceData(
     if (properties.length) await db.properties.bulkPut(properties as PropertyRow[])
   }
 
+  // Gated on the assigned-property set changing, not on the poll. Everything
+  // the crew reads off an inventory row — name, unit, category, par_level — is
+  // PM-edited and rare; current_quantity is the churny column and no crew
+  // surface renders it any more (the count input is blank until counted), so a
+  // cursor would only return rows whose crew-relevant fields hadn't moved.
+  // Opening the inventory tab forces a pull, which is when freshness counts.
+  if (!force && !(await scopeChanged(userId, 'scope:inventory_items', propertyIds))) return true
+
   // Paginated per chunk — ONE-TO-MANY, and the worst instance of it in the
   // codebase: CLAUDE.md states outright that one org's inventory_items across
   // 50 properties is ~5,750 rows. Chunking property_ids never bounded that, so
@@ -188,7 +197,7 @@ async function syncScopeReferenceData(
     (chunk, from, to) =>
       supabase
         .from('inventory_items')
-        .select('id, property_id, org_id, name, category, unit, par_level, current_quantity')
+        .select('id, property_id, org_id, name, category, unit, par_level')
         .in('property_id', chunk)
         .eq('is_active', true)
         .order('id')
@@ -199,11 +208,13 @@ async function syncScopeReferenceData(
     reportError(new Error('inventory fetch failed'), { site: 'dexie.sync.turnovers.inventory' })
     return false
   }
-  // Shadowed: a crew member's queued-but-unpushed count must not be reverted
-  // in front of them by a routine pull.
+  // A plain bulkPut, not bulkPutShadowed: there is no inventory_items mutation
+  // type any more, so nothing can be pending to replay over these rows. A
+  // count is staged locally and submitted as an inventory_counts row instead.
   if (inventory.length) {
-    await bulkPutShadowed(db.inventory_items, userId, 'inventory_items', inventory as InventoryItemRow[])
+    await db.inventory_items.bulkPut(inventory as InventoryItemRow[])
   }
+  await rememberScope(userId, 'scope:inventory_items', propertyIds)
   return true
 }
 

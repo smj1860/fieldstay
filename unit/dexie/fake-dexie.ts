@@ -104,8 +104,6 @@ export function makeFakeDexieDb() {
     inventory_items:          fakeTable('id'),
     crew_work_orders:         fakeTable('id'),
     property_assets:          fakeTable('id'),
-    messages:                 fakeTable('id'),
-    crew_availability:        fakeTable('id'),
     pending_photo_uploads:    fakeTable('id'),
     sync_meta:                fakeTable('key'),
     mutations:                fakeTable('id'),

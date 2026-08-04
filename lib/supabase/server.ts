@@ -24,8 +24,8 @@ import type { Database } from '@/types/database'
 //     Vendor sign-off photos uploaded to storage and were then never linked
 //     to their work order.
 //   - Three to-one embeds indexed with [0] (turnover_assignments->crew_members,
-//     inventory_count_drafts->crew_members, draft items->inventory_items), each
-//     silently rendering blank, plus one to-MANY embed (reviews->
+//     plus two on the since-removed inventory count drafts), each silently
+//     rendering blank, plus one to-MANY embed (reviews->
 //     review_responses) read as an object, which opened the response editor
 //     empty for any review that already had a draft.
 //   - wo_category values with no vendor_specialty counterpart (appliance,

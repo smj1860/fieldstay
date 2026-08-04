@@ -14,8 +14,6 @@
 import type { DexieSupabaseClient } from './types'
 import { syncAssignedTurnovers } from './turnovers'
 import { syncWorkOrders } from './work-orders'
-import { syncMessages } from './messages'
-import { syncCrewAvailability } from './availability'
 import { computeAssignedPropertyIds, syncPropertyAssets } from './assets'
 import { resetAllCursors } from './cursors'
 import { pruneLocalCache } from '../prune'
@@ -34,8 +32,6 @@ export const CREW_RESYNC_COVERAGE: Readonly<Record<string, string>> = {
   inventory_items:          'syncAssignedTurnovers',
   properties:               'syncAssignedTurnovers',
   crew_work_orders:         'syncWorkOrders',
-  messages:                 'syncMessages',
-  crew_availability:        'syncCrewAvailability',
   property_assets:          'syncPropertyAssets',
 }
 
@@ -49,12 +45,15 @@ export async function fullCrewResync(
   supabase: DexieSupabaseClient,
   userId: string,
   crewMemberId: string,
+  opts: { reconcile?: boolean } = {},
 ): Promise<void> {
   await Promise.all([
     syncAssignedTurnovers(supabase, userId, crewMemberId),
-    syncWorkOrders(supabase, userId, crewMemberId),
-    syncMessages(supabase, userId),
-    syncCrewAvailability(supabase, userId, crewMemberId),
+    // `reconcile` costs work_orders one extra query (the membership snapshot),
+    // which only reassignment-away needs. Passed on the events where a device
+    // may have missed a broadcast — mount, reconnect, foreground, signal — and
+    // periodically from the safety poll, not on every tick.
+    syncWorkOrders(supabase, userId, crewMemberId, false, opts.reconcile ?? false),
   ])
 
   // property_assets deliberately has no broadcast trigger — this is its only
