@@ -39,6 +39,18 @@ export const KROGER_TIMEOUT_MS = 15_000
 export const ANTHROPIC_TIMEOUT_MS = 30_000
 
 /**
+ * Crew PWA → /api/assets/request-scan, from inside the Dexie outbox drain.
+ *
+ * The only budget here that is spent on a phone rather than a server, and it
+ * holds the drain open while it runs, so it is deliberately tight: the route
+ * itself only validates and hands off to Inngest (the billed Claude call
+ * happens later, out of band), and a crew member on marginal signal is better
+ * served by a fast failure that retries on the existing backoff than by a
+ * request that hangs and blocks every later mutation behind it.
+ */
+export const SCAN_REQUEST_TIMEOUT_MS = 10_000
+
+/**
  * True when `err` is the abort raised by AbortSignal.timeout() — i.e. we
  * stopped waiting, as opposed to the service returning an error.
  *

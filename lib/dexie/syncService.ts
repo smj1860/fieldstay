@@ -9,6 +9,7 @@ import {
 } from './net'
 
 import { reportError } from '@/lib/observability/report-error'
+import { SCAN_REQUEST_TIMEOUT_MS } from '@/lib/http/timeout'
 type DexieSupabaseClient = ReturnType<typeof createClient>
 
 const MAX_RETRIES = 5
@@ -719,13 +720,52 @@ async function uploadPropertyAssetPhotoUpdate(
   // route re-derives the expected storage path from the asset's own
   // (already-org-verified) photo_url and rejects a mismatch, so this can't
   // fire any earlier than this point.
+  //
+  // AWAITED, and a failure fails the whole mutation. This was previously a
+  // fire-and-forget fetch whose only handling was a console.error — and
+  // because the handler still returned normally, pushOne() deleted the outbox
+  // row immediately after. A scan request lost to a dropped connection (the
+  // common case: a crew member photographing a data plate on marginal rural
+  // signal) had no retry, no dead letter, and no banner entry. The crew member
+  // saw a saved asset and the scan simply never happened, which is exactly the
+  // silent loss the outbox exists to prevent.
+  //
+  // Re-running this handler is safe: the property_assets update above is
+  // idempotent (same photo_url), and the scan route skips an asset whose
+  // scan_status is already 'pending'/'processing' rather than burning a second
+  // billed Claude vision call.
   if (payload.scanRequest) {
     const { storagePath, mediaType } = payload.scanRequest as { storagePath: string; mediaType: string }
-    fetch('/api/assets/request-scan', {
+    const res = await fetch('/api/assets/request-scan', {
       method:  'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ asset_id: targetId, storage_path: storagePath, media_type: mediaType }),
-    }).catch((err) => console.error('[SyncEngine] scan request failed:', err))
+      // No AbortSignal meant no timeout at all: the request could hang
+      // indefinitely rather than reject, so even the old .catch() would never
+      // have fired. Now it also holds the drain open, so the budget is real.
+      signal: AbortSignal.timeout(SCAN_REQUEST_TIMEOUT_MS),
+    })
+
+    // 429 is the daily scan spend ceiling (scanLimiter fails CLOSED), not a
+    // sync failure: the photo IS saved and only the optional AI scan is
+    // skipped. Dead-lettering it would tell a crew member their asset didn't
+    // sync, which is false. Reported rather than swallowed so a cap that trips
+    // routinely is visible instead of being a console line nobody reads.
+    if (res.status === 429) {
+      reportError(new Error('Data-plate scan skipped — daily scan limit reached'), {
+        site:  'lib.dexie.syncService.scanRequest.rate_limited',
+        extra: { asset_id: targetId },
+      })
+      return
+    }
+
+    // Everything else goes through the standard classifier: other 4xx is
+    // terminal (a replay cannot fix a rejected storage path), 5xx and network
+    // failures are retried on the existing backoff and dead-letter into the
+    // property_assets entry of failed-sync-banner.tsx.
+    if (!res.ok) {
+      throw new UploadHttpError(`asset scan request failed: ${res.status}`, res.status)
+    }
   }
 }
 
