@@ -263,3 +263,33 @@ node scripts/check-migration-ledger.mjs --update
 ```
 
 which refuses to grow the set.
+
+### Repair log — E2E, 2026-08-04
+
+One row realigned, an instance of the "same migration under a different
+version (renumbered)" class in the table above, created the same day it was
+caught:
+
+| | Version | Name |
+|---|---|---|
+| Local file | `20260804125424` | `drop_inventory_count_drafts` |
+| E2E ledger row (before) | `20260804134220` | `drop_inventory_count_drafts` |
+| E2E ledger row (after) | `20260804125424` | `drop_inventory_count_drafts` |
+
+Cause: the migration was applied to E2E through MCP `apply_migration`, which
+stamps its own generation timestamp rather than honouring the version declared
+in the filename. The schema was correct throughout — only the ledger's record
+of *which* file produced it was wrong, which is exactly the divergence that is
+invisible from the repo.
+
+Repaired with a metadata-only `UPDATE` of `version` on that single row (the
+equivalent of `supabase migration repair`, per the note at the top of this
+file). Nothing else in the row changed, and no schema was touched.
+
+Deliberately NOT added to `scripts/migration-ledger-baseline.json`. The E2E
+baseline exists to freeze divergence *inherited* from the July branch, and
+padding it with drift created after the gate was written would blunt the gate
+on its first day. New drift gets repaired; only the historical set is frozen.
+
+Post-repair parity: production `0 / 0` (hard gate), E2E `70 / 133` — exactly
+the frozen baseline, with no new and no stale entries.
