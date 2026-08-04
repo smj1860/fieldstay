@@ -6,7 +6,7 @@ import {
 } from 'lucide-react'
 import type { MemberRole } from '@/types/database'
 
-export type NavCondition = 'repuguard' | 'staff'
+export type NavCondition = 'staff'
 
 export interface NavItem {
   id:         string
@@ -39,7 +39,7 @@ export const ALL_NAV_ITEMS: NavItem[] = [
 
   // ── Management tier — matches today's exact order ────────────
   { id: 'properties',       href: '/properties',       label: 'Properties',       icon: Building2,   roles: ['admin', 'manager', 'viewer'], tier: 'management', category: 'Portfolio' },
-  { id: 'reviews',          href: '/reviews',          label: 'Reviews',          icon: Star,         roles: ['admin', 'manager'],           tier: 'management', category: 'Guest & Comms', condition: 'repuguard' },
+  { id: 'reviews',          href: '/reviews',          label: 'Reviews',          icon: Star,         roles: ['admin', 'manager'],           tier: 'management', category: 'Guest & Comms' },
   { id: 'assets',           href: '/assets',           label: 'Assets',           icon: ShieldCheck, roles: ['admin', 'manager'],           tier: 'management', category: 'Portfolio' },
   { id: 'capital-planning', href: '/capital-planning', label: 'Capital Planning', icon: TrendingUp,  roles: ['admin', 'manager'],           tier: 'management', category: 'Portfolio', keywords: ['capex', 'budget'] },
   { id: 'templates',        href: '/templates',        label: 'Templates',       icon: LayoutTemplate, roles: ['admin', 'manager'],         tier: 'management', category: 'Portfolio' },
@@ -64,12 +64,11 @@ export const ALL_NAV_ITEMS: NavItem[] = [
  */
 export function getVisibleNavItems(
   role: MemberRole,
-  opts: { repuguardActive?: boolean; isStaff?: boolean } = {}
+  opts: { isStaff?: boolean } = {}
 ): NavItem[] {
   const effectiveRole: MemberRole = role === 'owner' ? 'admin' : role
   return ALL_NAV_ITEMS.filter((item) => {
     if (!item.roles.includes(effectiveRole)) return false
-    if (item.condition === 'repuguard' && !opts.repuguardActive) return false
     if (item.condition === 'staff' && !opts.isStaff) return false
     return true
   })

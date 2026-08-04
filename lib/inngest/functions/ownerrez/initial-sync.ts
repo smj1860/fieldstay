@@ -720,16 +720,12 @@ export const ownerRezInitialSync = inngest.createFunction(
 
     // ── Step 4: Auto-activate RepuGuard ────────────────────────────────────────
 
-    await step.run('auto-activate-repuguard', async () => {
-      // RepuGuard is bundled for all OwnerRez users — activate on first connect.
-      // .in() filter skips orgs already active, so reconnects are safe.
-      const supabase = createServiceClient({ system: 'inngest:initial-sync' })
-      await supabase
-        .from('organizations')
-        .update({ repuguard_status: 'active' })
-        .eq('id', org_id)
-        .in('repuguard_status', ['inactive', 'cancelled'])
-    })
+    // REMOVED: the 'auto-activate-repuguard' step. RepuGuard ships with every
+    // plan and nothing gates on organizations.repuguard_status any more, so
+    // activating it on OwnerRez connect is a no-op. It is worth naming why it
+    // existed: this step was the ONLY thing that ever moved the column off its
+    // 'inactive' default, which is exactly why every org that had not connected
+    // OwnerRez was locked out of a feature included in their plan.
 
     // Webhook delivery is NOT registered per-connection via the API — confirmed
     // 2026-07-16 against the live OwnerRez dashboard: the URL, Basic Auth

@@ -14,10 +14,9 @@ interface PmMoreDrawerProps {
   open:    boolean
   onClose: () => void
   role:    MemberRole
-  repuguardActive?: boolean
 }
 
-export function PmMoreDrawer({ open, onClose, role, repuguardActive = false }: Readonly<PmMoreDrawerProps>) {
+export function PmMoreDrawer({ open, onClose, role }: Readonly<PmMoreDrawerProps>) {
   const pathname = usePathname()
   const drawerRef = useRef<HTMLDivElement>(null)
 
@@ -26,7 +25,7 @@ export function PmMoreDrawer({ open, onClose, role, repuguardActive = false }: R
   // (the one ops-tier item with no persistent tab of its own), shows up
   // here. help/support-inbox aren't reachable from mobile today, so they
   // stay excluded.
-  const items = getVisibleNavItems(role, { repuguardActive }).filter(
+  const items = getVisibleNavItems(role).filter(
     (item) => (item.tier === 'management' || item.id === 'bookings') &&
       item.id !== 'help' && item.id !== 'support-inbox'
   )

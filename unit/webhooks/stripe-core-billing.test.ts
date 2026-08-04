@@ -35,7 +35,7 @@ import type Stripe from 'stripe'
 function makeSupabase(
   queued: Record<string, { data?: unknown; error?: unknown }[]>,
   rpcResult: { data: unknown; error?: unknown } = {
-    data: { org_id: 'org_1', org_name: 'Lake Martin', previous_plan: 'starter' },
+    data: { org_id: 'org_1', org_name: 'Lake Martin', previous_plan: 'starter', applied: true },
     error: null,
   },
 ) {
@@ -78,12 +78,16 @@ const subscription = (overrides: Record<string, unknown> = {}) => ({
   ...overrides,
 }) as unknown as Stripe.Subscription
 
+// Stripe `event.created`, seconds — drives the RPC's stale-delivery guard.
+const EVENT_CREATED = Math.floor(Date.parse('2026-08-04T12:00:00Z') / 1000)
+
 const run = (supabase: ReturnType<typeof makeSupabase>, sub: Stripe.Subscription) =>
   handleCoreSubscriptionUpdate(
     supabase as unknown as StripeSupabaseClient,
     sub,
     'customer.subscription.created',
     undefined,
+    EVENT_CREATED,
   )
 
 describe('handleCoreSubscriptionUpdate — org resolution', () => {

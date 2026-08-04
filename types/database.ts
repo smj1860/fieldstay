@@ -104,6 +104,13 @@ export interface Organization {
   billing_email:                string | null
   stripe_customer_id:           string | null
   stripe_subscription_id:       string | null
+  /**
+   * `created` of the most recent Stripe subscription event applied to this
+   * row. Drives update_organization_subscription_from_stripe's stale-delivery
+   * guard — Stripe retries for ~3 days and does not guarantee order, so an
+   * older event must not overwrite a newer one.
+   */
+  stripe_event_at:              string | null
   plan:                         OrgPlan
   plan_status:                  OrgPlanStatus
   trial_ends_at:                string | null

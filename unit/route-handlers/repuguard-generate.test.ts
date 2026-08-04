@@ -129,17 +129,30 @@ describe('POST /api/repuguard/generate', () => {
     expect(res.status).toBe(403)
   })
 
-  it('rejects when RepuGuard is not active for the org', async () => {
+  // Was: "rejects when RepuGuard is not active for the org". That gate is gone.
+  // RepuGuard is included in every plan, but the route checked
+  // organizations.repuguard_status — a column that DEFAULTs to 'inactive' and
+  // was only ever flipped by the OwnerRez initial-sync auto-activate step, so
+  // any org that never connected OwnerRez got a 403 on a feature included in
+  // their plan (6 of 8 production orgs at the time of the fix). Org membership
+  // is the entitlement now; the 403 above for a non-member still stands.
+  it('serves an org whose legacy repuguard_status is still inactive', async () => {
     vi.mocked(createServerClient).mockReturnValue(makeAuthClient({ id: USER_ID }) as never)
     const admin = makeAdmin({
       organization_members: [{ data: { org_id: ORG_ID }, error: null }],
       organizations:        [{ data: { repuguard_status: 'inactive' }, error: null }],
+      reviews:              [{ data: baseReview(), error: null }],
+      review_responses:     [{ data: null, error: null }],
     })
     vi.mocked(createServiceClient).mockReturnValue(admin as never)
+    vi.mocked(generateReviewResponse).mockResolvedValue({
+      response: 'Thanks for staying with us!', word_count: 150, tone_used: 'warm',
+      flags: [], flag_reason: null,
+    })
 
     const res = await POST(postRequest({ review_id: 'review_1' }))
 
-    expect(res.status).toBe(403)
+    expect(res.status).toBe(200)
   })
 
   it('IDOR: returns 404 for a review_id belonging to a different org — the lookup is scoped by org_id', async () => {

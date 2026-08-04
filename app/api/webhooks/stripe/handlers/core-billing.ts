@@ -175,6 +175,14 @@ interface SubscriptionFields {
   plan:           PlanKey
   planStatus:     OrgPlanStatus
   trialEndsAt:    string | null
+  /** Stripe `event.created`, ISO. Drives the RPC's stale-delivery guard. */
+  eventAt:        string
+}
+
+/** What the RPC did — `applied: false` means the delivery was stale. */
+interface SubscriptionWriteResult {
+  previousPlan: PlanKey | null
+  applied:      boolean
 }
 
 /**
@@ -191,7 +199,7 @@ async function applySubscriptionUpdate(
   org:        ResolvedOrg,
   customerId: string,
   fields:     SubscriptionFields,
-): Promise<PlanKey | null> {
+): Promise<SubscriptionWriteResult> {
   const { data: rpcResult, error: updateError } = await supabase
     .rpc('update_organization_subscription_from_stripe', {
       p_customer_id:            customerId,
@@ -203,6 +211,12 @@ async function applySubscriptionUpdate(
       // trial passes NULL — but pg_proc records no argument nullability, so
       // the generated Args type says `string`. See lib/supabase/rpc-args.ts.
       p_trial_ends_at:          nullableArg(fields.trialEndsAt),
+      // The FOR UPDATE lock orders CONCURRENT deliveries; it cannot tell a
+      // newer event from an older one. Stripe does not guarantee order and
+      // retries for ~3 days, so a delayed trialing->active retry could land
+      // after a later active->past_due and hand entitlement back on a failed
+      // card. The RPC rejects an event older than the last one applied.
+      p_event_at:               fields.eventAt,
     })
     .maybeSingle()
 
@@ -215,8 +229,9 @@ async function applySubscriptionUpdate(
   // StripeSupabaseClient carries no <Database> generic (see the note in
   // types/database.ts), so .rpc() infers `{}` rather than the real shape —
   // cast to the RETURNS TABLE columns from the migration.
-  const updated = rpcResult as { org_id: string; org_name: string | null; previous_plan: PlanKey } | null
-  if (updated) return updated.previous_plan
+  const updated = rpcResult as
+    { org_id: string; org_name: string | null; previous_plan: PlanKey; applied: boolean } | null
+  if (updated) return { previousPlan: updated.previous_plan, applied: updated.applied }
 
   // The RPC keys on stripe_customer_id, which is normally in agreement with
   // the org we just resolved — resolveSubscriptionOrg backfills that column
@@ -247,7 +262,54 @@ async function applySubscriptionUpdate(
 
   // Genuinely unknown on this path — the pre-update plan was never read under
   // a lock. Null is honest; a guess would mislabel the plan-change email.
-  return null
+  //
+  // `applied: true` because this branch DID write. It is also the one path with
+  // no recency guard: the RPC found no row to compare against, so there is no
+  // stored stripe_event_at to check. That is acceptable because it only
+  // triggers for an org whose customer id disagrees with the one we resolved —
+  // rare, and the alternative (skipping the write) re-opens the silent
+  // entitlement drop the metadata resolution exists to fix.
+  return { previousPlan: null, applied: true }
+}
+
+/**
+ * Syncs only plan_status for a subscription whose price we cannot map to a plan.
+ *
+ * An unrecognized price is NOT Starter. This replaced
+ * `getPlanByPriceId(priceId) ?? 'starter'`, which wrote max_properties: 15 over
+ * whatever plan the org actually held. PLANS.enterprise has
+ * monthlyPriceId/annualPriceId of null (it is "contact for pricing"), so
+ * getPlanByPriceId can NEVER return 'enterprise' — every enterprise org was
+ * rewritten to Starter/15 on any subscription event. Promo prices,
+ * grandfathered prices and dashboard-created subscriptions are the same case.
+ *
+ * Status still syncs, because past_due/cancelled must take effect regardless of
+ * whether we can name the tier. Only the entitlement columns are left alone
+ * rather than guessed downward.
+ */
+async function syncStatusForUnmappedPrice(
+  supabase: StripeSupabaseClient,
+  org:      ResolvedOrg,
+  ctx:      { subscription: Stripe.Subscription; priceId: string; planStatus: OrgPlanStatus },
+): Promise<void> {
+  reportError(new Error('Stripe subscription carries an unmapped price id'), {
+    site:  'webhook.stripe.core-billing.unmapped-price',
+    orgId: org.id,
+    extra: {
+      subscription_id: ctx.subscription.id,
+      price_id:        ctx.priceId,
+      plan_status:     ctx.planStatus,
+    },
+  })
+
+  const { error: statusError } = await supabase
+    .from('organizations')
+    .update({ plan_status: ctx.planStatus })
+    .eq('id', org.id)
+
+  if (statusError) {
+    throw new Error(`plan_status sync failed for org ${org.id}: ${statusError.message}`)
+  }
 }
 
 /** Core billing subscription created or updated (plan/status sync + trial-lifecycle emails). */
@@ -256,6 +318,8 @@ export async function handleCoreSubscriptionUpdate(
   subscription: Stripe.Subscription,
   eventType: 'customer.subscription.created' | 'customer.subscription.updated',
   previousStatus: string | undefined,
+  /** Stripe `event.created` (seconds). Drives the RPC's stale-delivery guard. */
+  eventCreated: number,
 ): Promise<void> {
   const customerId = subscription.customer as string
   // The plan-bearing item, not blindly items.data[0] — an add-on line could
@@ -301,33 +365,28 @@ export async function handleCoreSubscriptionUpdate(
   // of whether we can name the tier. Only the entitlement columns are left
   // alone rather than guessed downward.
   if (!planKey) {
-    reportError(new Error('Stripe subscription carries an unmapped price id'), {
-      site:  'webhook.stripe.core-billing.unmapped-price',
-      orgId: org.id,
-      extra: { subscription_id: subscription.id, price_id: priceId, plan_status: planStatus },
-    })
-
-    const { error: statusError } = await supabase
-      .from('organizations')
-      .update({ plan_status: planStatus })
-      .eq('id', org.id)
-
-    if (statusError) {
-      throw new Error(`plan_status sync failed for org ${org.id}: ${statusError.message}`)
-    }
+    await syncStatusForUnmappedPrice(supabase, org, { subscription, priceId, planStatus })
     return
   }
 
   const plan = planKey
 
-  const previousPlan = await applySubscriptionUpdate(supabase, org, customerId, {
+  const { previousPlan, applied } = await applySubscriptionUpdate(supabase, org, customerId, {
     subscriptionId: subscription.id,
     plan,
     planStatus,
     trialEndsAt: subscription.trial_end
       ? new Date(subscription.trial_end * 1000).toISOString()
       : null,
+    eventAt: new Date(eventCreated * 1000).toISOString(),
   })
+
+  // A stale delivery wrote nothing, so nothing downstream may fire either: the
+  // billing/subscription-updated event, the audit row and the lifecycle emails
+  // would all describe a transition that did not happen. Returning here is the
+  // difference between "we ignored an out-of-order retry" and "we told the PM
+  // their trial started again".
+  if (!applied) return
 
   // previous_plan is only meaningful on an update to an existing
   // subscription — never on creation, where the org's pre-signup default

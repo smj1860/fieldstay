@@ -50,7 +50,7 @@ function makeSubscription(overrides: Partial<{
 // orgRow is what the `organizations` read resolves to.
 function makeSupabase(
   rpcResult: { data: unknown; error?: unknown } = {
-    data: { org_id: 'org_1', org_name: 'Lake Martin Delivery', previous_plan: 'starter' },
+    data: { org_id: 'org_1', org_name: 'Lake Martin Delivery', previous_plan: 'starter', applied: true },
     error: null,
   },
   orgRow: { data: unknown; error?: unknown } = {
@@ -97,6 +97,10 @@ function makeSupabase(
   return { rpc, from, orgUpdate } as never
 }
 
+// Stripe `event.created`, seconds. Threaded into the RPC's stale-delivery
+// guard — an event older than the last one applied to the org is rejected.
+const EVENT_CREATED = Math.floor(Date.parse('2026-08-04T12:00:00Z') / 1000)
+
 describe('handleCoreSubscriptionUpdate — previous_plan enrichment', () => {
   beforeEach(() => {
     vi.clearAllMocks()
@@ -110,6 +114,7 @@ describe('handleCoreSubscriptionUpdate — previous_plan enrichment', () => {
       makeSubscription({ status: 'active', priceId: 'price_growth', trialEnd: null }),
       'customer.subscription.updated',
       'active',
+      EVENT_CREATED
     )
 
     expect((supabase as { rpc: ReturnType<typeof vi.fn> }).rpc).toHaveBeenCalledWith(
@@ -121,13 +126,14 @@ describe('handleCoreSubscriptionUpdate — previous_plan enrichment', () => {
         p_plan_status:            'active',
         p_max_properties:         50,
         p_trial_ends_at:          null,
+        p_event_at:               new Date(EVENT_CREATED * 1000).toISOString(),
       },
     )
   })
 
   it('includes the org\'s pre-update plan as previous_plan on a genuine tier change (update event)', async () => {
     const supabase = makeSupabase({
-      data: { org_id: 'org_1', org_name: 'Lake Martin Delivery', previous_plan: 'starter' },
+      data: { org_id: 'org_1', org_name: 'Lake Martin Delivery', previous_plan: 'starter', applied: true },
       error: null,
     })
 
@@ -136,6 +142,7 @@ describe('handleCoreSubscriptionUpdate — previous_plan enrichment', () => {
       makeSubscription({ status: 'active', priceId: 'price_growth' }),
       'customer.subscription.updated',
       'active',
+      EVENT_CREATED
     )
 
     expect(inngest.send).toHaveBeenCalledWith({
@@ -154,7 +161,7 @@ describe('handleCoreSubscriptionUpdate — previous_plan enrichment', () => {
     // Simulates an org whose DB default happens to differ from the tier
     // they signed up for — this must NOT be reported as a "plan change".
     const supabase = makeSupabase({
-      data: { org_id: 'org_1', org_name: 'Lake Martin Delivery', previous_plan: 'starter' },
+      data: { org_id: 'org_1', org_name: 'Lake Martin Delivery', previous_plan: 'starter', applied: true },
       error: null,
     })
 
@@ -163,6 +170,7 @@ describe('handleCoreSubscriptionUpdate — previous_plan enrichment', () => {
       makeSubscription({ status: 'trialing', priceId: 'price_growth', trialEnd: 1234567890 }),
       'customer.subscription.created',
       undefined,
+      EVENT_CREATED
     )
 
     expect(inngest.send).toHaveBeenCalledWith(
@@ -175,7 +183,7 @@ describe('handleCoreSubscriptionUpdate — previous_plan enrichment', () => {
 
   it('reports previous_plan equal to the new plan when nothing actually changed tier (e.g. a status-only update)', async () => {
     const supabase = makeSupabase({
-      data: { org_id: 'org_1', org_name: 'Lake Martin Delivery', previous_plan: 'growth' },
+      data: { org_id: 'org_1', org_name: 'Lake Martin Delivery', previous_plan: 'growth', applied: true },
       error: null,
     })
 
@@ -184,6 +192,7 @@ describe('handleCoreSubscriptionUpdate — previous_plan enrichment', () => {
       makeSubscription({ status: 'active', priceId: 'price_growth' }),
       'customer.subscription.updated',
       'active',
+      EVENT_CREATED
     )
 
     expect(inngest.send).toHaveBeenCalledWith(
@@ -208,6 +217,7 @@ describe('handleCoreSubscriptionUpdate — previous_plan enrichment', () => {
       makeSubscription(),
       'customer.subscription.updated',
       'active',
+      EVENT_CREATED
     )
 
     expect((supabase as unknown as { orgUpdate: ReturnType<typeof vi.fn> }).orgUpdate)
@@ -234,6 +244,7 @@ describe('handleCoreSubscriptionUpdate — previous_plan enrichment', () => {
       makeSubscription({ priceId: 'price_sponsor_slot' }),
       'customer.subscription.updated',
       'active',
+      EVENT_CREATED
     )
 
     expect(inngest.send).not.toHaveBeenCalled()
@@ -244,9 +255,58 @@ describe('handleCoreSubscriptionUpdate — previous_plan enrichment', () => {
     const supabase = makeSupabase({ data: null, error: { message: 'row lock timeout' } })
 
     await expect(
-      handleCoreSubscriptionUpdate(supabase, makeSubscription(), 'customer.subscription.updated', 'active'),
+      handleCoreSubscriptionUpdate(supabase, makeSubscription(), 'customer.subscription.updated', 'active', EVENT_CREATED),
     ).rejects.toThrow('row lock timeout')
 
     expect(inngest.send).not.toHaveBeenCalled()
+  })
+})
+
+// ── Stale delivery ──────────────────────────────────────────────────────────
+//
+// The FOR UPDATE row lock orders CONCURRENT deliveries; it cannot tell a newer
+// event from an older one. Stripe does not guarantee order and retries for ~3
+// days, so a delayed trialing->active retry could land after a later
+// active->past_due and hand entitlement back on a failed card. The RPC now
+// rejects an event older than the last one applied and reports applied: false.
+describe('handleCoreSubscriptionUpdate — stale delivery', () => {
+  beforeEach(() => vi.clearAllMocks())
+
+  it('fires no event, audit row or email when the RPC reports the delivery was stale', async () => {
+    const supabase = makeSupabase({
+      data: { org_id: 'org_1', org_name: 'Lake Martin Delivery', previous_plan: 'growth', applied: false },
+      error: null,
+    })
+
+    await handleCoreSubscriptionUpdate(
+      supabase,
+      makeSubscription({ status: 'trialing', priceId: 'price_growth', trialEnd: 1234567890 }),
+      'customer.subscription.created',
+      undefined,
+      EVENT_CREATED,
+    )
+
+    // Nothing was written, so nothing downstream may describe a transition:
+    // announcing a trial start again is worse than the silent skip.
+    expect(inngest.send).not.toHaveBeenCalled()
+  })
+
+  it('passes the event timestamp through so the RPC can make that decision', async () => {
+    const supabase = makeSupabase()
+
+    await handleCoreSubscriptionUpdate(
+      supabase,
+      makeSubscription({ status: 'active', priceId: 'price_growth' }),
+      'customer.subscription.updated',
+      'active',
+      EVENT_CREATED,
+    )
+
+    expect((supabase as { rpc: ReturnType<typeof vi.fn> }).rpc).toHaveBeenCalledWith(
+      'update_organization_subscription_from_stripe',
+      expect.objectContaining({
+        p_event_at: new Date(EVENT_CREATED * 1000).toISOString(),
+      }),
+    )
   })
 })

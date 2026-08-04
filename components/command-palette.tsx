@@ -34,15 +34,14 @@ function pushRecent(href: string) {
 
 interface CommandPaletteProps {
   role:             MemberRole
-  repuguardActive?: boolean
   isStaff?:         boolean
 }
 
-export function CommandPalette({ role, repuguardActive = false, isStaff = false }: Readonly<CommandPaletteProps>) {
+export function CommandPalette({ role, isStaff = false }: Readonly<CommandPaletteProps>) {
   const router = useRouter()
   const [open, setOpen] = useState(false)
 
-  const items = getVisibleNavItems(role, { repuguardActive, isStaff })
+  const items = getVisibleNavItems(role, { isStaff })
   // Recomputed from localStorage each time the palette is open — a cheap,
   // synchronous read, so there's no need to mirror it into state via an
   // effect (which would just trigger an extra cascading render on open).

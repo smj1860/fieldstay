@@ -194,7 +194,9 @@ async function onSubscriptionUpserted(
   if (!isCoreBillingSubscription(subscription)) return
 
   const previousAttributes = event.data.previous_attributes as Partial<{ status: string }> | undefined
-  await handleCoreSubscriptionUpdate(supabase, subscription, event.type, previousAttributes?.status)
+  await handleCoreSubscriptionUpdate(
+    supabase, subscription, event.type, previousAttributes?.status, event.created,
+  )
 }
 
 type DeletedSubscription = Extract<StripeEvent, { type: 'customer.subscription.deleted' }>['data']['object']
