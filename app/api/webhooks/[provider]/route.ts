@@ -21,6 +21,7 @@ import { unwrap } from '@/lib/supabase/unwrap'
 import { NextResponse, type NextRequest }            from 'next/server'
 import { createHash }                                from 'crypto'
 import { getProvider }                               from '@/lib/integrations/registry'
+import { canonicalJson, PayloadTooDeepError }        from '@/lib/integrations/canonical-json'
 import { revokeIntegrationToken, findUserByExternalId } from '@/lib/integrations/vault'
 import { logAuditEvent }                             from '@/lib/audit'
 import { createServiceClient }                       from '@/lib/supabase/server'
@@ -267,11 +268,33 @@ export async function POST(
   //    documented retry behavior), so it still collides on the hash and is
   //    still deduped; two distinct real changes to the same entity always
   //    differ in `created` and/or `data`, so they hash differently and are
-  //    never conflated. JSON.stringify is deterministic for a given parsed
-  //    object, and a retry redelivers the exact same JSON structure/values
-  //    as the original, so hashing the already-parsed `payload` here is
-  //    safe without a second raw-body read.
-  const dedupSource = JSON.stringify(payload)
+  //    never conflated.
+  //
+  //    canonicalJson, not JSON.stringify. stringify emits keys in the parsed
+  //    object's own property order — i.e. the order the PROVIDER serialized
+  //    them in — so the key depended on their serializer rather than on the
+  //    content. A retry re-serialized through a different path (different
+  //    node, schema shim, re-encoding proxy) carries the same logical event
+  //    with a different key order, hashes differently, and is processed a
+  //    second time with nothing to show it was a duplicate. Sorting keys
+  //    recursively removes that dependency; see lib/integrations/canonical-json.ts
+  //    for why hashing the raw body would have been worse, not better.
+  //
+  //    The depth guard is not incidental: JSON.parse accepts ~20,000 levels of
+  //    nesting while JSON.stringify overflows the stack at ~5,000, so the
+  //    stringify call this replaces threw an uncaught RangeError on a deeply
+  //    nested body and the route answered 500. canonicalJson rejects past 64
+  //    levels instead, which turns that into input validation at the boundary.
+  let dedupSource: string
+  try {
+    dedupSource = canonicalJson(payload)
+  } catch (err) {
+    if (err instanceof PayloadTooDeepError) {
+      console.warn(`[Webhook:${providerId}] Rejected over-nested payload: ${err.message}`)
+      return NextResponse.json({ error: 'Payload too deeply nested' }, { status: 400 })
+    }
+    throw err
+  }
   const webhookId    = createHash('sha256').update(dedupSource).digest('hex')
 
   {
@@ -310,11 +333,12 @@ export async function POST(
   //    read-status-then-act sequence, which is a TOCTOU: two concurrent
   //    redeliveries both read status='active', both passed, and both revoked.
   //    revoke_integration_token() is itself idempotent (a second call reads
-  //    the already-nulled secret ids and deletes nothing), so the damage was
-  //    not the revoke — it was a duplicate integration.revoked audit row and a
-  //    SECOND "your connection was disconnected" email to the PM for one
-  //    disconnection. The claim INSERT is atomic, so concurrent redeliveries
-  //    of the same payload now collapse on the unique index instead.
+  //    the already-nulled secret ids and deletes nothing), and the PM
+  //    notification is already collapsed by notifyIntegrationError's
+  //    day-scoped dedupeKey, so the whole residual damage is one duplicate
+  //    integration.revoked audit row. The claim INSERT is atomic, so
+  //    concurrent redeliveries of the same payload now collapse on the unique
+  //    index instead.
   //
   //    Residual, stated rather than papered over: Hospitable's three
   //    interchangeable action names hash differently, so three genuinely
@@ -322,6 +346,14 @@ export async function POST(
   //    hashing. In practice those arrive sequentially and the status check in
   //    processRevocation makes the 2nd and 3rd no-ops; only a true
   //    simultaneous arrival of two DIFFERENT aliases still races.
+  //
+  //    Deliberately NOT closed with a semantic `provider:revocation:userId`
+  //    key. That key survives for the table's 72h TTL, so a user who revokes,
+  //    reconnects, and revokes again inside that window would have the second
+  //    revocation discarded as a duplicate and their token left live. Trading
+  //    a duplicate audit row for an unrevoked credential is the wrong way
+  //    round; invalidating the key on reconnect would mean coupling the OAuth
+  //    connect path to this dedup table, which is not worth it for one row.
   const REVOCATION_ACTIONS = new Set([
     'application_authorization_revoked',
     'integration.disconnected',
