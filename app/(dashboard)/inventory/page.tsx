@@ -48,7 +48,6 @@ export default async function InventoryPage() {
     { data: purchaseOrders, error: purchaseOrdersError },
     { data: catalogItems, error: catalogItemsError },
     { data: recentCounts, error: recentCountsError },
-    { data: pendingDrafts, error: pendingDraftsError },
   ] = await Promise.all([
     supabase
       .from('properties')
@@ -79,24 +78,11 @@ export default async function InventoryPage() {
       .eq('org_id', membership.org_id)
       .order('submitted_at', { ascending: false })
       .limit(50),
-    supabase
-      .from('inventory_count_drafts')
-      .select(`
-        id, property_id, status, created_at, notes,
-        crew_members!submitted_by(name),
-        inventory_count_draft_items(
-          id, item_id, previous_quantity, counted_qty, notes,
-          inventory_items(name, unit)
-        )
-      `)
-      .eq('org_id', membership.org_id)
-      .eq('status', 'pending_review')
-      .order('created_at', { ascending: false }),
   ])
 
   // Logs + reports every failure, then throws so the segment's error.tsx
   // renders a real error state — an outage must not look like empty data.
-  throwIfAnyQueryFailed({ site: 'page.inventory', orgId: membership.org_id }, propertiesError, purchaseOrdersError, catalogItemsError, recentCountsError, pendingDraftsError)
+  throwIfAnyQueryFailed({ site: 'page.inventory', orgId: membership.org_id }, propertiesError, purchaseOrdersError, catalogItemsError, recentCountsError)
 
   // fetchAllRows throws on a page error, which the segment's error.tsx turns
   // into the same real error state throwIfAnyQueryFailed produces above.
@@ -148,7 +134,6 @@ export default async function InventoryPage() {
         catalogItems={catalogItems ?? []}
         recentCounts={recentCounts ?? []}
         allInventoryItems={normalizedAllInventoryItems}
-        pendingDrafts={pendingDrafts ?? []}
         cartData={cartData}
         showKrogerNudge={showKrogerNudge}
       />

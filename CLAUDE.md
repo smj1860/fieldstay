@@ -923,15 +923,17 @@ const { supabase, crew, user } = auth
 | What you might assume | What actually exists |
 |---|---|
 | `work_order_notes` | `work_order_updates` |
-| `inventory_count_draft_items.inventory_item_id` | `item_id` |
-| `inventory_count_draft_items.submitted_quantity` | `counted_qty` |
 | `memberships` | `organization_members` |
 | `membership.user_id` | `user.id` |
 | `assigned_crew_id` | `assigned_crew_member_id` |
 
-**Two inventory tables with different column names — do not mix them:**
-- `inventory_count_draft_items`: `item_id`, `counted_qty`, `note`, `notes`, `previous_quantity`
-- `inventory_count_items` (legacy direct-commit): `inventory_item_id`, `quantity_counted`
+**One inventory count family.** `inventory_counts` + `inventory_count_items`
+(`inventory_item_id`, `quantity_counted`) is now the only one, used by the PM's
+own counts and by the crew route. The parallel `inventory_count_drafts` /
+`inventory_count_draft_items` pair — with its own, different column vocabulary —
+was dropped by `20260804120000_drop_inventory_count_drafts.sql`: it was
+unreachable (its only writer was a crew page nothing linked to), held zero rows,
+and gated crew counts behind a PM approval that product never wanted.
 
 ### UI component locations
 
@@ -1248,13 +1250,6 @@ following them stops being a memory test. Five layers, checked in CI via
      without masking it — the structural backstop for the sensitive-data
      rule in Code Quality Standards and the Standing Audit Checklist. A
      clean-baseline ratchet, same model as `tailwind-color-ratchet`.
-   - `inventory-table-column-mixup` — a query against
-     `inventory_count_draft_items` or `inventory_count_items` may not
-     reference the other table's column names (the "do not mix them" pair
-     in Table and column names below) — scoped to the same `.from(...)`
-     call's own query chain, not the whole file, since both tables' column
-     names are individually valid TypeScript, just wrong for the table in
-     scope. Also a clean-baseline ratchet.
    - Added by the 2026-07-30 pre-launch remediation, one line each — read the
      header comment in each file for the defect it encodes:
      `unbounded-select` (the `max_rows = 1000` rule, `lib/inngest/**`),

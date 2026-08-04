@@ -107,91 +107,11 @@ describe('POST /api/crew/inventory-count', () => {
     const eqCalls = supabase.calls.filter((c) => c.table === 'properties' && c.method === 'eq')
     expect(eqCalls.some((c) => c.args[0] === 'org_id' && c.args[1] === ORG_ID)).toBe(true)
     expect(eqCalls.some((c) => c.args[0] === 'id' && c.args[1] === 'other_org_property')).toBe(true)
-    expect(supabase.calls.some((c) => c.table === 'inventory_count_drafts')).toBe(false)
     expect(supabase.calls.some((c) => c.table === 'inventory_counts')).toBe(false)
   })
 
-  describe('draft submission (submitAsDraft: true)', () => {
-    it('creates a draft scoped to the crew member\'s own org and id', async () => {
-      const supabase = makeSupabase({
-        properties:                [{ data: { id: PROP_ID }, error: null }],
-        inventory_count_drafts:    [{ data: null, error: null }, { data: { id: 'draft_1' }, error: null }],
-        inventory_items:           [{ data: [{ id: 'item_1', current_quantity: 4 }], error: null }],
-        inventory_count_draft_items: [{ data: null, error: null }],
-      })
-      mockAuthed(supabase)
 
-      const res = await POST(
-        postRequest({
-          propertyId:    PROP_ID,
-          counts:        { item_1: 2 },
-          notes:         'low on paper towels',
-          itemNotes:     { item_1: 'almost out' },
-          submitAsDraft: true,
-        }),
-      )
-
-      expect(res.status).toBe(200)
-      await expect(res.json()).resolves.toEqual({ success: true, draftId: 'draft_1' })
-
-      const draftInsert = supabase.calls.find((c) => c.table === 'inventory_count_drafts' && c.method === 'insert')
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const inserted = draftInsert!.args[0] as any
-      expect(inserted).toEqual({
-        org_id:       ORG_ID,
-        property_id:  PROP_ID,
-        submitted_by: CREW_ID,
-        status:       'pending_review',
-        notes:        'low on paper towels',
-      })
-
-      const itemsInsert = supabase.calls.find(
-        (c) => c.table === 'inventory_count_draft_items' && c.method === 'insert',
-      )
-      expect(itemsInsert!.args[0]).toEqual([
-        {
-          draft_id:          'draft_1',
-          item_id:           'item_1',
-          previous_quantity: 4,
-          counted_qty:       2,
-          notes:             'almost out',
-        },
-      ])
-    })
-
-    it('short-circuits on a recent duplicate draft (double-tap dedup) without creating a new one', async () => {
-      const supabase = makeSupabase({
-        properties:             [{ data: { id: PROP_ID }, error: null }],
-        inventory_count_drafts: [{ data: { id: 'existing_draft' }, error: null }],
-      })
-      mockAuthed(supabase)
-
-      const res = await POST(
-        postRequest({ propertyId: PROP_ID, counts: { item_1: 2 }, notes: '', submitAsDraft: true }),
-      )
-
-      expect(res.status).toBe(200)
-      await expect(res.json()).resolves.toEqual({ success: true, draftId: 'existing_draft' })
-      expect(supabase.calls.some((c) => c.table === 'inventory_count_drafts' && c.method === 'insert')).toBe(false)
-    })
-
-    it('returns 500 when the draft insert fails to return a row', async () => {
-      const supabase = makeSupabase({
-        properties:             [{ data: { id: PROP_ID }, error: null }],
-        inventory_count_drafts: [{ data: null, error: null }, { data: null, error: { message: 'fail' } }],
-        inventory_items:        [{ data: [], error: null }],
-      })
-      mockAuthed(supabase)
-
-      const res = await POST(
-        postRequest({ propertyId: PROP_ID, counts: {}, notes: '', submitAsDraft: true }),
-      )
-
-      expect(res.status).toBe(500)
-    })
-  })
-
-  describe('legacy direct-commit path', () => {
+  describe('count submission', () => {
     it('commits counts, updates inventory scoped to the crew member\'s org, audits, and notifies Inngest', async () => {
       const supabase = makeSupabase({
         properties:            [{ data: { id: PROP_ID }, error: null }],

@@ -196,7 +196,6 @@ export type MutationTable =
   | 'crew_availability'
   | 'property_assets'
   | 'crew_work_orders'
-  | 'inventory_count_drafts'
 
 export interface MutationRow {
   id?:        number

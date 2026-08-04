@@ -26,7 +26,7 @@ type Admin = ReturnType<typeof createServiceClient>
  * either way, so this list is a safety net, not a duplicate of the cascade.
  *
  * Order is FK-safe: none of these reference each other, and all of their own
- * child tables (e.g. inventory_template_items, inventory_count_draft_items)
+ * child tables (e.g. inventory_template_items, inventory_count_items)
  * cascade from the parent rows removed here.
  */
 /**
@@ -50,7 +50,6 @@ const ORG_TABLES_WITHOUT_CASCADE = [
   'assignment_outcomes',
   'vendor_assignment_outcomes',
   'crew_availability',
-  'inventory_count_drafts',
   'inventory_templates',
   'maintenance_schedule_templates',
   'messages',
