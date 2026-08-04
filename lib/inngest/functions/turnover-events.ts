@@ -146,6 +146,7 @@ async function collectCompletionTimestamps(
       .select('completed_at')
       .eq('instance_id', instance.id)
       .not('completed_at', 'is', null)
+      .limit(500)
     if (itemsError) throw itemsError
 
     for (const item of items ?? []) timestamps.push(item.completed_at!)

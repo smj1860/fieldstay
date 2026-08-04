@@ -43,7 +43,8 @@ export default async function TurnoversPage() {
       .neq('status', 'cancelled')
       .gte('checkout_datetime', since.toISOString())
       .lte('checkout_datetime', until.toISOString())
-      .order('checkout_datetime', { ascending: true }),
+      .order('checkout_datetime', { ascending: true })
+      .limit(5000),
     supabase
       .from('properties')
       .select('id, name, city, state')

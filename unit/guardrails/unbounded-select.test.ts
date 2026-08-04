@@ -145,7 +145,6 @@ const BASELINE = new Set<string>([
   'lib/inngest/functions/ownerrez/ownerrez-reviews-sync.ts',
   'lib/inngest/functions/ownerrez/reconciliation-handler.ts',
   'lib/inngest/functions/platform-inventory-template-broadcast.ts',
-  'lib/inngest/functions/turnover-events.ts',
 ])
 
 describe('guardrail: no unbounded .select() in lib/inngest/**', () => {

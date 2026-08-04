@@ -212,7 +212,7 @@ describe('handleTurnoverCompleted — record-crew-duration', () => {
         return { select: vi.fn(() => ({ eq: vi.fn(() => ({ eq: vi.fn(() => ({ maybeSingle: vi.fn(() => Promise.resolve(opts.checklistInstance ?? { data: null, error: null })) })) })) })) }
       }
       if (table === 'checklist_instance_items') {
-        return { select: vi.fn(() => ({ eq: vi.fn(() => ({ not: vi.fn(() => Promise.resolve(opts.checklistItems ?? { data: [], error: null })) })) })) }
+        return { select: vi.fn(() => ({ eq: vi.fn(() => ({ not: vi.fn(() => ({ limit: vi.fn(() => Promise.resolve(opts.checklistItems ?? { data: [], error: null })) })) })) })) }
       }
       if (table === 'inventory_items') {
         return { select: vi.fn(() => ({ eq: vi.fn(() => ({ gt: vi.fn(() => ({ order: vi.fn(() => ({ limit: vi.fn(() => ({ maybeSingle: vi.fn(() => Promise.resolve(opts.lastInventoryEdit ?? { data: null, error: null })) })) })) })) })) })) }
