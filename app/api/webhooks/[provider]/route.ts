@@ -303,7 +303,6 @@ export async function POST(
   try {
     await providerAdapter.handleWebhookEvent({ action, payload, externalUserId, correlationId })
   } catch (err) {
-    // Again: log, don't 500 — provider is not responsible for our processing errors
     console.error(`[Webhook:${providerId}] Handler threw for action "${action}":`, err)
     reportError(err, { site: 'webhook.provider.handler', extra: { provider: providerId, action: safeAction } })
 
@@ -326,6 +325,19 @@ export async function POST(
         extra: { provider: providerId, action: safeAction },
       })
     }
+
+    // Let the provider see the failure and retry per its own schedule.
+    //
+    // This used to `return 200` here, on the reasoning that "the provider is
+    // not responsible for our processing errors" and that OwnerRez "will retry
+    // infinitely" otherwise. That combination made the release above dead
+    // code: a 2xx tells the provider the delivery succeeded, so no retry ever
+    // arrives to use the window the release just opened. Releasing the claim
+    // AND reporting success is the one pairing that both loses the event and
+    // drops the dedup protection. Neither provider retries without bound —
+    // both use bounded exponential backoff — and the three sibling routes
+    // (stripe, stripe-connect, telnyx) have always returned 500 here.
+    return NextResponse.json({ error: 'Handler failed' }, { status: 500 })
   }
 
   return NextResponse.json({ received: true }, { status: 200 })

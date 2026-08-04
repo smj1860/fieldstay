@@ -105,15 +105,21 @@ describe('POST /api/webhooks/[provider] — dedup claim release on handler failu
     ;(getProvider as ReturnType<typeof vi.fn>).mockReturnValue(adapter)
   })
 
-  it('deletes the processed_webhooks claim when handleWebhookEvent throws, and still returns 200', async () => {
+  // Was: "…and still returns 200". That pairing was the defect. Releasing the
+  // claim only helps if a retry actually arrives to use the window it opens,
+  // and a 2xx tells the provider the delivery succeeded — so no retry ever
+  // came, the event was lost, AND the dedup protection had been dropped on the
+  // way out. The three sibling webhook routes (stripe, stripe-connect, telnyx)
+  // have always returned 500 here; this one was the outlier.
+  it('deletes the processed_webhooks claim when handleWebhookEvent throws, and returns 500 so the provider retries', async () => {
     const payload = { action: 'reservation.changed', id: 'evt_1', data: { id: 'res_1' } }
     const expectedKey = `hospitable:${createHash('sha256').update(JSON.stringify(payload)).digest('hex')}`
     adapter.handleWebhookEvent.mockRejectedValueOnce(new Error('Inngest unreachable'))
 
     const res = await callPost('hospitable', payload)
 
-    expect(res.status).toBe(200)
-    expect(await res.clone().json()).toEqual({ received: true })
+    expect(res.status).toBe(500)
+    expect(await res.clone().json()).toEqual({ error: 'Handler failed' })
     expect(supabase.insertedIds.has(expectedKey)).toBe(false)
     expect(reportError).toHaveBeenCalledWith(
       expect.any(Error),
