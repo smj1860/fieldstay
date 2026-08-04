@@ -58,13 +58,17 @@ export function FailedSyncBanner({ userId }: Readonly<{ userId: string }>) {
   const [retrying, setRetrying] = useState(false)
   const [confirmDiscard, setConfirmDiscard] = useState<FailedEntry | null>(null)
 
+  // Index-backed (`failed` is stored 0/1 — IndexedDB cannot index a boolean).
+  // These are live queries on tables that are written on every checklist tick
+  // and every drain step, so as `.filter()` full scans they re-deserialized
+  // the whole outbox, three times, on each of those writes.
   const failedMutations = useLiveQuery(
-    () => db.mutations.filter((m) => !!m.failed).toArray(),
+    () => db.mutations.where('failed').equals(1).toArray(),
     [],
   ) ?? []
 
   const failedPhotos = useLiveQuery(
-    () => db.pending_photo_uploads.filter((p) => !!p.failed).toArray(),
+    () => db.pending_photo_uploads.where('failed').equals(1).toArray(),
     [],
   ) ?? []
 
@@ -83,6 +87,20 @@ export function FailedSyncBanner({ userId }: Readonly<{ userId: string }>) {
     [],
   ) ?? []
 
+  // Photos stall the same way and were covered by NEITHER surface: a transport
+  // failure never sets `failed` (by design — a bad signal must not destroy
+  // crew work), so they fell out of failedPhotos above, and the stalled notice
+  // only ever looked at db.mutations. A whole shift of verification photos
+  // could retry forever against a captive portal with nothing on screen.
+  const stalledPhotos = useLiveQuery(
+    () => db.pending_photo_uploads
+      .filter((p) => !p.failed && (p.network_retry_count ?? 0) >= STALLED_NETWORK_ATTEMPTS)
+      .toArray(),
+    [],
+  ) ?? []
+
+  const stalledCount = stalledMutations.length + stalledPhotos.length
+
   const entries: FailedEntry[] = [
     ...failedMutations.map((m) => ({
       key:     `mutation-${m.id}`,
@@ -98,12 +116,12 @@ export function FailedSyncBanner({ userId }: Readonly<{ userId: string }>) {
     })),
   ]
 
-  if (entries.length === 0 && stalledMutations.length === 0) return null
+  if (entries.length === 0 && stalledCount === 0) return null
 
   // A stalled queue is NOT a failure — the work is intact and still retrying,
   // so it gets its own amber notice with no discard affordance rather than
   // being folded into the red "didn't sync" list.
-  const stalledNotice = stalledMutations.length > 0 && (
+  const stalledNotice = stalledCount > 0 && (
     <div
       className="mx-4 mt-3 rounded-xl p-4"
       style={{ background: 'var(--accent-amber-dim)', border: '1px solid var(--accent-amber-dim)' }}
@@ -113,7 +131,7 @@ export function FailedSyncBanner({ userId }: Readonly<{ userId: string }>) {
         <AlertTriangle className="w-5 h-5 shrink-0 mt-0.5" style={{ color: 'var(--accent-amber)' }} />
         <div className="flex-1 min-w-0">
           <p className="text-sm font-bold" style={{ color: 'var(--accent-amber)' }}>
-            {stalledMutations.length} change{stalledMutations.length !== 1 ? 's' : ''} still trying to sync
+            {stalledCount} change{stalledCount !== 1 ? 's' : ''} still trying to sync
           </p>
           <p className="text-xs mt-0.5" style={{ color: 'var(--text-secondary)' }}>
             Your work is saved on this phone and will keep retrying on its own.

@@ -6,7 +6,7 @@ import { CalendarCheck, CalendarDays, MessageSquare, LogOut, Bell, X, HelpCircle
 import { useLiveQuery }             from 'dexie-react-hooks'
 import { DexieProvider, useDexieDb } from '@/lib/dexie/context'
 import { CrewContext }              from '@/lib/crew/crew-context'
-import { closeDexieDb, markDexieShutdown, resumeDexieDb } from '@/lib/dexie/schema'
+import { closeDexieDb, listenForRemoteShutdown, markDexieShutdown, resumeDexieDb } from '@/lib/dexie/schema'
 import { getSyncEngine, disposeSyncEngine } from '@/lib/dexie/syncService'
 import { processPendingPhotoUploads } from '@/lib/dexie/photo-sync'
 import { countPendingSyncWork }      from '@/lib/dexie/prune'
@@ -235,6 +235,21 @@ export function CrewShell({
       reportError(err, { site: 'page.crew.crew-shell.push' })
     }
   }
+
+  // Logging out in ANOTHER tab has to end this one too. IndexedDB is a
+  // per-origin resource but the shutdown latch is per-document module state,
+  // so without this a sibling tab kept draining, kept re-creating the database
+  // the logging-out tab had just deleted, and kept rendering the signed-out
+  // crew member's assignments — and its open connection blocked that delete
+  // outright, which is what left logout hanging with the user still signed in.
+  useEffect(() => {
+    if (!userId) return
+    return listenForRemoteShutdown(userId, () => {
+      setSignedOut(true)
+      disposeSyncEngine()
+      startTransition(() => router.push('/login?next=/crew'))
+    })
+  }, [userId, router])
 
   useEffect(() => {
     if (!userId || signedOut) return

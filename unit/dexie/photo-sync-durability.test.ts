@@ -160,7 +160,7 @@ describe('photo queue durability', () => {
     }
 
     const row = await photoRow()
-    expect(row).toMatchObject({ retry_count: 5, failed: true })
+    expect(row).toMatchObject({ retry_count: 5, failed: 1 })
     expect(row!.last_error).toBeTruthy()
     // The blob must still exist — "Retry" in the failed-sync banner has
     // nothing to upload otherwise.
@@ -175,7 +175,7 @@ describe('photo queue durability', () => {
       await processPendingPhotoUploads(failingClient, 'u1')
       vi.setSystemTime(Date.now() + 600_000)
     }
-    expect((await photoRow())!.failed).toBe(true)
+    expect((await photoRow())!.failed).toBe(1)
 
     const ok = makeStorage([{ error: null }])
     // eslint-disable-next-line @typescript-eslint/no-explicit-any -- narrow storage stub
@@ -247,7 +247,7 @@ describe('photo queue durability', () => {
 
     const row = await photoRow()
     expect(row, 'the row survives — it is the only record of the photo').toBeDefined()
-    expect(row).toMatchObject({ retry_count: 5, failed: true })
+    expect(row).toMatchObject({ retry_count: 5, failed: 1 })
     expect(row!.last_error, 'and says why, on the failed-sync surface').toBeTruthy()
     expect(deletedBlobs, 'the blob is kept so "Retry" has something to upload').toEqual([])
   })
@@ -261,7 +261,7 @@ describe('photo queue durability', () => {
       await processPendingPhotoUploads(stuck.client as any, 'u1')
       vi.setSystemTime(Date.now() + 600_000)
     }
-    expect((await photoRow())!.failed).toBe(true)
+    expect((await photoRow())!.failed).toBe(1)
 
     // The safety poll lands the missing rows.
     await db().checklist_instance_items.put({ id: 'item1', is_completed: 1, instance_id: 'inst1' })
@@ -275,5 +275,24 @@ describe('photo queue durability', () => {
     expect(ok.attempts).toEqual([PHOTO_PATH])
     expect(await photoRow()).toBeUndefined()
     expect(deletedBlobs).toEqual(['blob1'])
+  })
+
+  it('a photo whose blob is gone dead-letters instead of vanishing', async () => {
+    // Storage cleared, evicted under quota pressure, or the blob write never
+    // landed (it goes to a SEPARATE IndexedDB from this row, so the two can
+    // never commit together). Deleting the row — what this used to do — made
+    // that indistinguishable from a successful upload: the crew member's photo
+    // ceased to exist with nothing anywhere saying so.
+    holder.blob = null
+    const storage = makeStorage([])
+
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any -- narrow storage stub
+    await processPendingPhotoUploads(storage.client as any, 'u1')
+
+    const row = await photoRow()
+    expect(row, 'the row must survive so the failed-sync surface can show it').toBeDefined()
+    expect(row!.failed).toBe(1)
+    expect(row!.last_error).toBeTruthy()
+    expect(storage.attempts, 'and nothing is uploaded — there are no bytes to send').toEqual([])
   })
 })

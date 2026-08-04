@@ -88,6 +88,27 @@ describe('guardrail: every cached crew table is bounded', () => {
     ].join('\n')).toEqual([])
   })
 
+  it('both outboxes are covered by BOTH the dead-letter and the stalled surface', () => {
+    // A transport failure deliberately never sets `failed` — losing a crew
+    // member's work because their signal is bad would be worse than the bug
+    // that rule creates. But the drain stops at a blocked head, so the work
+    // queues up invisibly, which is what the amber stalled notice exists to
+    // say. It only ever queried db.mutations: a whole shift of photos could
+    // retry forever against a captive portal with nothing on screen, on a
+    // banner whose own header comment claims it covers "every queued photo".
+    for (const table of ['mutations', 'pending_photo_uploads']) {
+      expect(
+        new RegExp(`db\\.${table}[\\s\\S]{0,80}?failed`).test(BANNER_SRC),
+        `${table} has no dead-letter query in the failed-sync banner`,
+      ).toBe(true)
+      expect(
+        new RegExp(`db\\.${table}[\\s\\S]{0,200}?STALLED_NETWORK_ATTEMPTS`).test(BANNER_SRC),
+        `${table} has no stalled-queue query in the failed-sync banner — a transport ` +
+        'failure there never dead-letters, so this is its ONLY visible surface',
+      ).toBe(true)
+    }
+  })
+
   it('every RECONCILED_AT_PULL claim is backed by a real bulkDelete in that file', () => {
     for (const [table, file] of Object.entries(RECONCILED_AT_PULL)) {
       const src = readFileSync(join(ROOT, file), 'utf8')
@@ -102,8 +123,26 @@ describe('guardrail: every cached crew table is bounded', () => {
     // The failed-sync surface is built on these rows: collecting them
     // eagerly would re-create the exact silent-loss bug they exist to fix.
     expect(PRUNE_SRC).toContain('DEAD_LETTER_RETENTION_DAYS')
-    expect(PRUNE_SRC).toMatch(/failed && m\.createdAt < horizon/)
-    expect(PRUNE_SRC).toMatch(/failed && p\.created_at < horizon/)
+    // Both dead-letter queues are selected by the `failed` flag AND gated on
+    // the retention horizon — never collected on the flag alone.
+    expect(PRUNE_SRC).toMatch(/where\('failed'\)\.equals\(1\)[\s\S]{0,120}?m\.createdAt < horizon/)
+    expect(PRUNE_SRC).toMatch(/where\('failed'\)\.equals\(1\)[\s\S]{0,120}?p\.created_at < horizon/)
+  })
+
+  it('abandoning a dead letter rewinds the cursor that would hide the server row', () => {
+    // A queued mutation is shadowed over every pull (lib/dexie/sync/shadow.ts)
+    // while the cursor advances past the server row it masks. Dropping the
+    // mutation without rewinding leaves the cache pinned to a value the server
+    // never accepted — permanently, since the delta filter will never return
+    // that row again. Applies to the timed prune here AND to an explicit
+    // discard (lib/dexie/helpers.ts).
+    expect(PRUNE_SRC).toContain('invalidateCursorsFor')
+    const helpers = readFileSync(join(ROOT, 'lib', 'dexie', 'helpers.ts'), 'utf8')
+    expect(
+      /discardFailedMutation[\s\S]{0,600}?invalidateCursorsFor/.test(helpers),
+      'discardFailedMutation drops the outbox row without rewinding the cursor — ' +
+      'the local row then keeps a value the server never accepted, forever',
+    ).toBe(true)
   })
 
   it('the logout warning counts only genuinely pending work', () => {

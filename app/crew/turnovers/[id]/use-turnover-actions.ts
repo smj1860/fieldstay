@@ -192,8 +192,15 @@ export function useTurnoverActions(id: string) {
 
     const ext     = file.name.split('.').pop() ?? 'jpg'
     const slug    = sectionName.replace(/\s+/g, '-').toLowerCase()
-    const path    = orgScopedStoragePath(orgId, `turnover-${id}`, `section-${slug}-${Date.now()}.${ext}`)
-    const blobKey = `photo-section-${sectionName}-${Date.now()}`
+    // Both keys are UUID-suffixed, not Date.now()-suffixed. Two captures
+    // landing in the same millisecond (a double-tap, a retry) produced
+    // identical keys: the second savePendingPhotoBlob() overwrote the first
+    // blob, both queue rows referenced it, and the first row's
+    // discardPendingPhoto() deleted it out from under the second — which then
+    // hit the missing-blob branch. The tracking row's own id has always used
+    // crypto.randomUUID(); these two just predated the convention.
+    const path    = orgScopedStoragePath(orgId, `turnover-${id}`, `section-${slug}-${crypto.randomUUID()}.${ext}`)
+    const blobKey = `photo-section-${crypto.randomUUID()}`
 
     try {
       const sectionItem = items?.find((i) => i.section_name === sectionName)
@@ -236,8 +243,9 @@ export function useTurnoverActions(id: string) {
     }
     try {
       const ext     = file.name.split('.').pop() ?? 'jpg'
-      const path    = orgScopedStoragePath(orgId, `turnover-${id}`, `${itemId}-${Date.now()}.${ext}`)
-      const blobKey = `photo-${itemId}-${Date.now()}`
+      // UUID-suffixed, not Date.now() — see handleSectionPhoto above.
+      const path    = orgScopedStoragePath(orgId, `turnover-${id}`, `${itemId}-${crypto.randomUUID()}.${ext}`)
+      const blobKey = `photo-${crypto.randomUUID()}`
 
       const compressed = await compressPhotoForQueue(file)
       await savePendingPhotoBlob(userId, blobKey, compressed)

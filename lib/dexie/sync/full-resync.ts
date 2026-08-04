@@ -17,6 +17,7 @@ import { syncWorkOrders } from './work-orders'
 import { syncMessages } from './messages'
 import { syncCrewAvailability } from './availability'
 import { computeAssignedPropertyIds, syncPropertyAssets } from './assets'
+import { resetAllCursors } from './cursors'
 import { pruneLocalCache } from '../prune'
 
 /**
@@ -63,4 +64,24 @@ export async function fullCrewResync(
   await syncPropertyAssets(supabase, userId, propertyIds)
 
   await pruneLocalCache(userId)
+}
+
+/**
+ * fullCrewResync with every delta cursor rewound first, so the next pull
+ * transfers whole rows instead of "what changed since".
+ *
+ * The repair path for a device whose cache has diverged from the server.
+ * There was none: `force` was plumbed through every sync function but never
+ * passed as `true` from anywhere in the app, and nothing ever reset a cursor —
+ * so once a row was masked by a local write that was later abandoned, the
+ * delta filter would skip it forever and the only way out was logout, which
+ * destroys the outbox along with the cache.
+ */
+export async function forceFullCrewResync(
+  supabase: DexieSupabaseClient,
+  userId: string,
+  crewMemberId: string,
+): Promise<void> {
+  await resetAllCursors(userId)
+  await fullCrewResync(supabase, userId, crewMemberId)
 }

@@ -91,6 +91,28 @@ export async function getPendingPhotoBlob(userId: string, key: string): Promise<
   return result
 }
 
+/**
+ * Every blob key currently held for this user.
+ *
+ * Exists so lib/dexie/prune.ts can find blobs nothing references any more.
+ * This store is a SEPARATE IndexedDB database from the crew cache that holds
+ * the `pending_photo_uploads` tracking rows, so a blob and its row can never
+ * be written atomically: if the row write throws (quota) or the PWA is
+ * reclaimed between the two, the blob is stranded with nothing pointing at it.
+ * Nothing collected those, and at multiple MB each they push the origin toward
+ * eviction of the entire offline cache — including the mutation outbox.
+ */
+export async function listPendingPhotoBlobKeys(userId: string): Promise<string[]> {
+  const db = await openDb(userId)
+  const keys = await new Promise<string[]>((resolve, reject) => {
+    const req = db.transaction(STORE_NAME, 'readonly').objectStore(STORE_NAME).getAllKeys()
+    req.onsuccess = () => resolve(req.result as string[])
+    req.onerror   = () => reject(req.error)
+  })
+  db.close()
+  return keys
+}
+
 export async function deletePendingPhotoBlob(userId: string, key: string): Promise<void> {
   const db = await openDb(userId)
   await new Promise<void>((resolve, reject) => {

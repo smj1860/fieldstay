@@ -151,7 +151,7 @@ describe('outbox durability — offline attempts', () => {
       await vi.advanceTimersByTimeAsync(600_000)
     }
 
-    expect(await mutationRow(id)).toMatchObject({ retryCount: 5, failed: true })
+    expect(await mutationRow(id)).toMatchObject({ retryCount: 5, failed: 1 })
   })
 })
 
@@ -234,7 +234,7 @@ describe('outbox durability — ordering', () => {
     // attempt rather than burning five retries, and the queue moves on.
     const rows = await db().mutations.toArray() as unknown as MutationRow[]
     expect(rows).toHaveLength(1)
-    expect(rows[0]).toMatchObject({ targetId: 't-bad', failed: true })
+    expect(rows[0]).toMatchObject({ targetId: 't-bad', failed: 1 })
     expect(pushed.some((u) => u.includes('t-good'))).toBe(true)
   })
 })
