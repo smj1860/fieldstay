@@ -40,6 +40,19 @@ const CREW_SYNC_V2 = process.env.NEXT_PUBLIC_CREW_SYNC_V2 === 'true'
  * that wasn't running. */
 const SAFETY_POLL_INTERVAL_MS = 5 * 60_000
 
+/**
+ * How many safety-poll ticks between work-order MEMBERSHIP reconciles (~20
+ * min at the interval above).
+ *
+ * The routine delta returns closed work orders as tombstones, so completion
+ * and cancellation need no snapshot. Only reassignment-away is invisible to a
+ * delta, and the broadcast trigger notifies both the old and the new assignee
+ * when it happens — this periodic pass exists so correctness never depends on
+ * that broadcast having arrived. Mount, reconnect, foreground and signal all
+ * reconcile unconditionally.
+ */
+const RECONCILE_EVERY_N_POLLS = 4
+
 interface DexieContextValue {
   db:           FieldStayDexie | null
   userId:       string | null
@@ -234,7 +247,10 @@ export function DexieProvider({ userId: userIdProp, children }: { userId?: strin
         .on(
           'postgres_changes',
           { event: '*', schema: 'public', table: 'property_assets', filter: `property_id=in.(${propertyIds.join(',')})` },
-          () => { void syncPropertyAssets(supabase, userId!, subscribedAssetPropertyIds) }
+          // force: a change event means the rows genuinely moved, so the
+          // scope gate (which asks 'did the property set change?') must not
+          // suppress it.
+          () => { void syncPropertyAssets(supabase, userId!, subscribedAssetPropertyIds, true) }
         )
         .subscribe()
     }
@@ -274,8 +290,8 @@ export function DexieProvider({ userId: userIdProp, children }: { userId?: strin
     // queries instead of re-downloading every assigned turnover's full
     // checklist. Cursors are a bandwidth optimization only; correctness
     // never depends on them (see lib/dexie/sync/cursors.ts).
-    async function resync(crewMemberId: string): Promise<void> {
-      await fullCrewResync(supabase, userId!, crewMemberId)
+    async function resync(crewMemberId: string, reconcile = true): Promise<void> {
+      await fullCrewResync(supabase, userId!, crewMemberId, { reconcile })
       if (cancelled) return
 
       await refreshChecklistSubscription(crewMemberId)
@@ -315,14 +331,24 @@ export function DexieProvider({ userId: userIdProp, children }: { userId?: strin
         })
     }
 
-    function resyncSafe(crewMemberId: string): void {
-      runCoalesced(() => resync(crewMemberId), 'resync')
+    function resyncSafe(crewMemberId: string, reconcile = true): void {
+      runCoalesced(() => resync(crewMemberId, reconcile), 'resync')
     }
 
     // Installed on BOTH paths (see SAFETY_POLL_INTERVAL_MS above) — the
     // correctness backstop is not allowed to depend on a feature flag.
-    function installSafetyPoll(run: () => void): void {
-      safetyPollTimer = setInterval(run, SAFETY_POLL_INTERVAL_MS)
+    //
+    // The poll reconciles work-order MEMBERSHIP every RECONCILE_EVERY_N_POLLS
+    // ticks rather than on each one. Membership only changes on reassignment,
+    // which the broadcast trigger already signals to both the old and the new
+    // assignee; the periodic pass is what stops correctness depending on that
+    // broadcast arriving. Every other tick is a pure delta.
+    let pollTick = 0
+    function installSafetyPoll(run: (reconcile: boolean) => void): void {
+      safetyPollTimer = setInterval(() => {
+        pollTick += 1
+        run(pollTick % RECONCILE_EVERY_N_POLLS === 0)
+      }, SAFETY_POLL_INTERVAL_MS)
     }
 
     // ── Crew Sync v2 (flag on): broadcast signal + delta pull ──────────────
@@ -337,12 +363,12 @@ export function DexieProvider({ userId: userIdProp, children }: { userId?: strin
     // channel's scope is the user id, which never changes mid-session — and
     // it also covers property_assets (no broadcast trigger; see the doc's
     // section 1) directly instead of via refreshAssetsSubscription.
-    async function resyncV2(crewMemberId: string): Promise<void> {
-      await fullCrewResync(supabase, userId!, crewMemberId)
+    async function resyncV2(crewMemberId: string, reconcile = true): Promise<void> {
+      await fullCrewResync(supabase, userId!, crewMemberId, { reconcile })
     }
 
-    function resyncV2Safe(crewMemberId: string): void {
-      runCoalesced(() => resyncV2(crewMemberId), 'v2 resync')
+    function resyncV2Safe(crewMemberId: string, reconcile = true): void {
+      runCoalesced(() => resyncV2(crewMemberId, reconcile), 'v2 resync')
     }
 
     // Retry helper for scheduleV2Reconnect's timer callback — kept as its
@@ -460,7 +486,7 @@ export function DexieProvider({ userId: userIdProp, children }: { userId?: strin
 
       // Safety poll: correctness backstop for missed broadcasts and the
       // freshness path for property_assets.
-      installSafetyPoll(() => resyncV2Safe(crewMemberId))
+      installSafetyPoll((reconcile) => resyncV2Safe(crewMemberId, reconcile))
 
       await subscribeV2(crewMemberId)
     }
@@ -612,7 +638,7 @@ export function DexieProvider({ userId: userIdProp, children }: { userId?: strin
 
       // Safety poll: same correctness backstop v2 has, on the path that
       // actually ships today.
-      installSafetyPoll(() => resyncSafe(resolvedCrewId))
+      installSafetyPoll((reconcile) => resyncSafe(resolvedCrewId, reconcile))
     }
 
     run().catch((err) => console.error('[DexieProvider] sync failed:', err))

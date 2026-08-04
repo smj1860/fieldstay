@@ -15,6 +15,7 @@ import type { ChecklistInstanceItemRow as ChecklistItem, InventoryItemRow as Inv
 import { assetTypeDisplayName, missingAssetTypesFromDiscoveredSet } from '@/lib/asset-discovery/config'
 import type { AssetType } from '@/types/database'
 import { orgScopedStoragePath } from '@/lib/storage/object-path'
+import { invalidateScope } from '@/lib/dexie/sync/scope'
 
 import { reportError } from '@/lib/observability/report-error'
 function isAssetDiscovered(asset: Pick<PropertyAssetRow, 'make' | 'model' | 'is_na' | 'photo_url'>): boolean {
@@ -412,6 +413,14 @@ export function useTurnoverActions(id: string) {
         if (!cancelled) setStagedCounts({ turnoverId: id, values: {} })
       })
     return () => { cancelled = true }
+  }, [userId, id])
+
+  // Inventory rows are pulled on assigned-property changes rather than on a
+  // timer (lib/dexie/sync/scope.ts). Opening a turnover is when a par-level
+  // edit is worth picking up, so forget the recorded scope and let the next
+  // resync re-pull.
+  useEffect(() => {
+    void invalidateScope(userId, 'scope:inventory_items')
   }, [userId, id])
 
   /** Staged counts for THIS turnover, or null until they have loaded. */

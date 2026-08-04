@@ -309,19 +309,6 @@ export async function completeWorkOrder(
   )
 }
 
-/** Updates an inventory item's on-hand quantity locally and queues the mutation. */
-export async function updateInventoryQuantity(
-  userId: string,
-  itemId: string,
-  currentQuantity: number,
-): Promise<void> {
-  const changes = { current_quantity: currentQuantity }
-
-  await writeAndQueue(userId, 'inventory_items', itemId, 'PATCH', changes, (db) =>
-    db.inventory_items.update(itemId, changes),
-  )
-}
-
 // ── Messages to the operations team ───────────────────────────────────────
 //
 // Messages used to be the ONE crew-facing action that wasn't offline-safe:

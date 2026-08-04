@@ -183,7 +183,12 @@ turnover_assignments        — crew → turnover join
 crew_members                — Has home_lat/lng, reliability_score, capacity_score
 crew_availability           — crew marks available/unavailable by date. NOT in the crew
                               Dexie cache: time off is an online-only screen (server-rendered
-                              rows + a Server Action), so it is not synced to devices
+                              rows + a Server Action), so it is not synced to devices.
+                              `messages` is the same — history is server-rendered and the
+                              unread badge is a server-side count; only SENDING is offline
+                              (an outbox mutation). `property_assets`/`inventory_items` are
+                              cached but pulled on assigned-property-set change plus screen
+                              open (lib/dexie/sync/scope.ts), not on the safety poll
 assignment_outcomes         — learning loop: PM accepts/overrides, duration from
                               checklist timestamps, pm_rating
 ```

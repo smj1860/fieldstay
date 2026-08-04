@@ -13,7 +13,7 @@
 // force, delta afterwards.
 
 import type { DexieSupabaseClient } from './types'
-import { getDexieDb, type CrewWorkOrderRow, type PropertyRow } from '../schema'
+import { getDexieDb, type CrewWorkOrderRow, type PropertyRow, type FieldStayDexie } from '../schema'
 import { getCursor, advanceCursor } from './cursors'
 import { fetchInChunks, IN_CHUNK_SIZE } from './chunked'
 import { bulkPutShadowed } from './shadow'
@@ -39,35 +39,123 @@ async function fullPull(scoped: ScopedQuery): Promise<WoPull | null> {
 }
 
 /**
- * Delta pull: an id-only membership snapshot (the reconciliation mechanism —
- * cursors are a bandwidth optimization and must never decide membership)
- * plus only the rows that changed since the cursor.
+ * Membership snapshot: the id set the crew member currently has open. This —
+ * never the cursor — is what decides membership, because a delta can only
+ * report rows that still MATCH its filter.
  */
-async function deltaPull(
+async function idSnapshot(
   supabase: DexieSupabaseClient,
-  scoped: () => { gt: (col: string, v: string) => PromiseLike<{ data: unknown; error: unknown }> },
   crewMemberId: string,
   twoWeeksAgo: string,
-  cursor: string,
-): Promise<WoPull | null> {
-  const { data: idRows, error: idError } = await supabase
+): Promise<Set<string> | null> {
+  const { data, error } = await supabase
     .from('work_orders')
     .select('id')
     .eq('assigned_crew_member_id', crewMemberId)
     .not('status', 'in', '("completed","cancelled")')
     .or(`scheduled_date.is.null,scheduled_date.gte.${twoWeeksAgo}`)
-  if (idError) {
-    console.error('[work-orders sync] work_orders id snapshot failed:', idError)
+  if (error) {
+    console.error('[work-orders sync] work_orders id snapshot failed:', error)
     return null
   }
-  const currentIds = new Set(((idRows ?? []) as { id: string }[]).map((w) => w.id))
+  return new Set(((data ?? []) as { id: string }[]).map((w) => w.id))
+}
 
-  const { data, error } = await scoped().gt('updated_at', cursor)
+/**
+ * Delta pull WITHOUT the status filter, so a work order that closed since the
+ * cursor comes back carrying its new status and can be removed locally — a
+ * tombstone rather than a silent disappearance.
+ *
+ * That is what lets the routine pass cost ONE query instead of two. The old
+ * delta excluded completed/cancelled, so a closed WO simply stopped matching
+ * and only the id snapshot could notice; running that snapshot on every
+ * five-minute tick made work_orders the most expensive cursored entity in the
+ * crew sync, despite being the only one with a broadcast trigger to lean on.
+ *
+ * The case a tombstone still cannot cover is reassignment AWAY: the row stops
+ * matching `assigned_crew_member_id`, so it is not returned at all. That is
+ * what `reconcile` is for — see syncWorkOrders.
+ */
+async function deltaPull(
+  supabase: DexieSupabaseClient,
+  crewMemberId: string,
+  cursor: string,
+): Promise<Record<string, unknown>[] | null> {
+  const { data, error } = await supabase
+    .from('work_orders')
+    .select(WO_COLUMNS)
+    .eq('assigned_crew_member_id', crewMemberId)
+    .gt('updated_at', cursor)
   if (error) {
     console.error('[work-orders sync] work_orders delta fetch failed:', error)
     return null
   }
-  return { fetched: (data ?? []) as Record<string, unknown>[], currentIds }
+  return (data ?? []) as Record<string, unknown>[]
+}
+
+/** Statuses that take a work order off the crew member's plate. */
+const CLOSED_STATUSES = new Set(['completed', 'cancelled'])
+
+/**
+ * What a pull decided: rows to cache, rows the cursor should advance from
+ * (tombstones included), and ids that must leave the device.
+ */
+interface WoResolution {
+  fetched:     Record<string, unknown>[]
+  seen:        Record<string, unknown>[]
+  departedIds: Set<string>
+}
+
+/** First pull, or a forced one: the data fetch doubles as the membership snapshot. */
+async function resolveFullPull(
+  db: FieldStayDexie,
+  scoped: ScopedQuery,
+): Promise<WoResolution | null> {
+  const pulled = await fullPull(scoped)
+  if (pulled === null) return null
+
+  const cached = (await db.crew_work_orders.toArray()).map((w) => w.id)
+  return {
+    fetched:     pulled.fetched,
+    seen:        pulled.fetched,
+    departedIds: new Set(cached.filter((id) => !pulled.currentIds.has(id))),
+  }
+}
+
+/**
+ * Routine pull: one delta query, with closed work orders arriving as
+ * tombstones rather than silently ceasing to match.
+ *
+ * `reconcile` adds the membership snapshot, which is only needed for
+ * reassignment AWAY — the one departure a delta cannot see, because the row
+ * stops matching assigned_crew_member_id and is not returned at all. The
+ * broadcast trigger notifies both the previous and the new assignee when that
+ * happens, so the signal path normally covers it; this is the backstop that
+ * keeps correctness from depending on a broadcast having arrived.
+ */
+async function resolveDeltaPull(
+  supabase: DexieSupabaseClient,
+  db: FieldStayDexie,
+  crewMemberId: string,
+  twoWeeksAgo: string,
+  cursor: string,
+  reconcile: boolean,
+): Promise<WoResolution | null> {
+  const delta = await deltaPull(supabase, crewMemberId, cursor)
+  if (delta === null) return null
+
+  const isClosed = (w: Record<string, unknown>) => CLOSED_STATUSES.has(w.status as string)
+  const departedIds = new Set(delta.filter(isClosed).map((w) => w.id as string))
+
+  if (reconcile) {
+    const currentIds = await idSnapshot(supabase, crewMemberId, twoWeeksAgo)
+    if (currentIds === null) return null
+    for (const w of await db.crew_work_orders.toArray()) {
+      if (!currentIds.has(w.id)) departedIds.add(w.id)
+    }
+  }
+
+  return { fetched: delta.filter((w) => !isClosed(w)), seen: delta, departedIds }
 }
 
 export async function syncWorkOrders(
@@ -75,6 +163,7 @@ export async function syncWorkOrders(
   userId: string,
   crewMemberId: string,
   force = false,
+  reconcile = false,
 ): Promise<void> {
   const db = getDexieDb(userId)
   // Match the turnover window: surface WOs scheduled within the last two
@@ -90,19 +179,14 @@ export async function syncWorkOrders(
 
   const cursor = force ? null : await getCursor(userId, 'cursor:work_orders')
 
-  const pulled = cursor === null
-    ? await fullPull(scoped)
-    : await deltaPull(supabase, scoped, crewMemberId, twoWeeksAgo, cursor)
-  if (pulled === null) return
-  const { fetched, currentIds } = pulled
+  const resolved = cursor === null
+    ? await resolveFullPull(db, scoped)
+    : await resolveDeltaPull(supabase, db, crewMemberId, twoWeeksAgo, cursor, reconcile)
+  if (resolved === null) return
+  const { fetched, seen, departedIds } = resolved
 
-  // Reconcile: anything cached locally that's no longer in the crew
-  // member's open set (completed, cancelled, or reassigned away) is removed.
-  const staleIds = (await db.crew_work_orders.toArray())
-    .map((w) => w.id)
-    .filter((id) => !currentIds.has(id))
-  if (staleIds.length) {
-    await db.crew_work_orders.bulkDelete(staleIds)
+  if (departedIds.size) {
+    await db.crew_work_orders.bulkDelete([...departedIds])
   }
 
   if (fetched.length) {
@@ -138,5 +222,5 @@ export async function syncWorkOrders(
       if (properties.length) await db.properties.bulkPut(properties as PropertyRow[])
     }
   }
-  await advanceCursor(userId, 'cursor:work_orders', fetched as { updated_at?: string | null }[])
+  await advanceCursor(userId, 'cursor:work_orders', seen as { updated_at?: string | null }[])
 }

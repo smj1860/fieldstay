@@ -45,10 +45,15 @@ export async function fullCrewResync(
   supabase: DexieSupabaseClient,
   userId: string,
   crewMemberId: string,
+  opts: { reconcile?: boolean } = {},
 ): Promise<void> {
   await Promise.all([
     syncAssignedTurnovers(supabase, userId, crewMemberId),
-    syncWorkOrders(supabase, userId, crewMemberId),
+    // `reconcile` costs work_orders one extra query (the membership snapshot),
+    // which only reassignment-away needs. Passed on the events where a device
+    // may have missed a broadcast — mount, reconnect, foreground, signal — and
+    // periodically from the safety poll, not on every tick.
+    syncWorkOrders(supabase, userId, crewMemberId, false, opts.reconcile ?? false),
   ])
 
   // property_assets deliberately has no broadcast trigger — this is its only

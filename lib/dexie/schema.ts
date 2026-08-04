@@ -71,7 +71,10 @@ export interface InventoryItemRow {
   category:         string
   unit:             string
   par_level:        number
-  current_quantity: number
+  // No current_quantity. The crew count input is blank until counted — showing
+  // the previous count made it the default value a crew member had to type
+  // over, anchoring a measurement that drives automated purchasing. Nothing on
+  // the device reads it, so it is not fetched or cached.
 }
 
 export interface PropertyRow {
