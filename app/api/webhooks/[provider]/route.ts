@@ -72,6 +72,36 @@ async function notifyRevokedConnection(
   })
 }
 
+/**
+ * Drops this delivery's dedup claim so a redelivery is processed rather than
+ * discarded as a duplicate.
+ *
+ * Shared by both failure paths (revocation and provider delegation) — they had
+ * drifted, and the revocation path had no claim to release at all because it
+ * ran ahead of the insert. A release is only ever correct when paired with a
+ * non-2xx response: a 2xx tells the provider the delivery succeeded, so the
+ * retry that would use this window never arrives.
+ */
+async function releaseDedupClaim(
+  providerId: string,
+  webhookId:  string,
+  safeAction: string,
+): Promise<void> {
+  const releaseClient = createServiceClient({ publicSurface: 'api-webhooks--provider-' })
+  const { error: releaseErr } = await releaseClient
+    .from('processed_webhooks')
+    .delete()
+    .eq('webhook_id', `${providerId}:${webhookId}`)
+
+  if (releaseErr) {
+    console.error(`[Webhook:${providerId}] Failed to release dedup claim: ${releaseErr.message}`)
+    reportError(new Error(releaseErr.message), {
+      site:  'webhook.provider.dedup_release',
+      extra: { provider: providerId, action: safeAction },
+    })
+  }
+}
+
 async function processRevocation(args: {
   providerId:     string
   externalUserId: string
@@ -201,40 +231,20 @@ export async function POST(
       ?? asIdString(payload.account_id)
       ?? asIdString((payload.data as { user?: { id?: string } } | undefined)?.user?.id)
       ?? ''
-  const correlationId  = payload.id ? String(payload.id) : crypto.randomUUID()
+  // asIdString, not String(): payload.id is `unknown`, and this file's own
+  // helper exists precisely because String({}) yields the useless literal
+  // '[object Object]' instead of falling through. An object id is truthy, so
+  // the randomUUID() fallback never fired and every such delivery shared one
+  // correlation id — collapsing the audit rows that exist to let staff trace a
+  // single incident onto the same unusable key.
+  const correlationId  = asIdString(payload.id) ?? crypto.randomUUID()
 
   const safeAction        = action.slice(0, 100)
   const safeCorrelationId = correlationId.slice(0, 100)
 
   console.log(`[Webhook:${providerId}] action="${safeAction}" correlationId=${safeCorrelationId}`)
 
-  // ── 4. Handle generic "authorization revoked" universally ─
-  //    This event means the user disconnected our app from within the provider.
-  //    We must destroy their stored token so future API calls don't fail silently.
-  //
-  //    Hospitable uses 'application_authorization_revoked', 'integration.disconnected',
-  //    and 'integration_disconnected' interchangeably for this action — all three
-  //    must trigger the same cleanup. OwnerRez uses only 'application_authorization_revoked'.
-  const REVOCATION_ACTIONS = new Set([
-    'application_authorization_revoked',
-    'integration.disconnected',
-    'integration_disconnected',
-  ])
-
-  if (REVOCATION_ACTIONS.has(action)) {
-    try {
-      await processRevocation({ providerId, externalUserId, correlationId })
-    } catch (err) {
-      // Log but don't return 500 — OwnerRez must get a 200 or it will retry infinitely
-      console.error(`[Webhook:${providerId}] Failed to process revocation:`, err)
-      reportError(err, { site: 'webhook.provider.revocation_processing', extra: { provider: providerId } })
-    }
-
-    // Return 200 immediately after revocation
-    return NextResponse.json({ received: true }, { status: 200 })
-  }
-
-  // ── 5a. Dedup webhooks using a content hash, not payload.id ──────────────
+  // ── 4a. Dedup webhooks using a content hash, not payload.id ──────────────
   //    Most providers retry failed webhooks several times (exponential backoff).
   //    A successful DB write that times out before the response window
   //    generates retries — all of which we must discard after the first success.
@@ -286,6 +296,56 @@ export async function POST(
   // (lib/inngest/functions/cron/webhook-dedup-cleanup.ts) instead of a
   // probabilistic roll on the hot webhook path — see H-5.
 
+  // ── 4b. Handle generic "authorization revoked" universally ─
+  //    This event means the user disconnected our app from within the provider.
+  //    We must destroy their stored token so future API calls don't fail silently.
+  //
+  //    Hospitable uses 'application_authorization_revoked', 'integration.disconnected',
+  //    and 'integration_disconnected' interchangeably for this action — all three
+  //    must trigger the same cleanup. OwnerRez uses only 'application_authorization_revoked'.
+  //
+  //    This runs AFTER the dedup claim above, not before it. It used to return
+  //    200 ahead of the claim, so revocation was the one event class with no
+  //    dedup at all — its only protection was processRevocation's
+  //    read-status-then-act sequence, which is a TOCTOU: two concurrent
+  //    redeliveries both read status='active', both passed, and both revoked.
+  //    revoke_integration_token() is itself idempotent (a second call reads
+  //    the already-nulled secret ids and deletes nothing), so the damage was
+  //    not the revoke — it was a duplicate integration.revoked audit row and a
+  //    SECOND "your connection was disconnected" email to the PM for one
+  //    disconnection. The claim INSERT is atomic, so concurrent redeliveries
+  //    of the same payload now collapse on the unique index instead.
+  //
+  //    Residual, stated rather than papered over: Hospitable's three
+  //    interchangeable action names hash differently, so three genuinely
+  //    distinct payloads for one user action are not collapsed by content
+  //    hashing. In practice those arrive sequentially and the status check in
+  //    processRevocation makes the 2nd and 3rd no-ops; only a true
+  //    simultaneous arrival of two DIFFERENT aliases still races.
+  const REVOCATION_ACTIONS = new Set([
+    'application_authorization_revoked',
+    'integration.disconnected',
+    'integration_disconnected',
+  ])
+
+  if (REVOCATION_ACTIONS.has(action)) {
+    try {
+      await processRevocation({ providerId, externalUserId, correlationId })
+    } catch (err) {
+      console.error(`[Webhook:${providerId}] Failed to process revocation:`, err)
+      reportError(err, { site: 'webhook.provider.revocation_processing', extra: { provider: providerId } })
+
+      // Same contract as the delegation catch below: the claim is released so
+      // a redelivery is not swallowed as a duplicate, and the provider is told
+      // to send one. Releasing and then returning 200 would leave the event
+      // lost AND the claim gone.
+      await releaseDedupClaim(providerId, webhookId, safeAction)
+      return NextResponse.json({ error: 'Revocation processing failed' }, { status: 500 })
+    }
+
+    return NextResponse.json({ received: true }, { status: 200 })
+  }
+
   // ── 5. Delegate provider-specific events ──────────────────
   //    OwnerRez's real non-revocation actions, per OwnerRez's own webhooks
   //    doc (2026-07-16): entity_update/entity_delete, plus a create action
@@ -303,7 +363,6 @@ export async function POST(
   try {
     await providerAdapter.handleWebhookEvent({ action, payload, externalUserId, correlationId })
   } catch (err) {
-    // Again: log, don't 500 — provider is not responsible for our processing errors
     console.error(`[Webhook:${providerId}] Handler threw for action "${action}":`, err)
     reportError(err, { site: 'webhook.provider.handler', extra: { provider: providerId, action: safeAction } })
 
@@ -313,19 +372,20 @@ export async function POST(
     // and the provider's retry, which resends a byte-identical body and so
     // hashes identically, would be discarded as a duplicate. That silently
     // drops a real event forever. Deleting the claim lets the retry through.
-    const releaseClient = createServiceClient({ publicSurface: 'api-webhooks--provider-' })
-    const { error: releaseErr } = await releaseClient
-      .from('processed_webhooks')
-      .delete()
-      .eq('webhook_id', `${providerId}:${webhookId}`)
+    await releaseDedupClaim(providerId, webhookId, safeAction)
 
-    if (releaseErr) {
-      console.error(`[Webhook:${providerId}] Failed to release dedup claim: ${releaseErr.message}`)
-      reportError(new Error(releaseErr.message), {
-        site:  'webhook.provider.dedup_release',
-        extra: { provider: providerId, action: safeAction },
-      })
-    }
+    // Let the provider see the failure and retry per its own schedule.
+    //
+    // This used to `return 200` here, on the reasoning that "the provider is
+    // not responsible for our processing errors" and that OwnerRez "will retry
+    // infinitely" otherwise. That combination made the release above dead
+    // code: a 2xx tells the provider the delivery succeeded, so no retry ever
+    // arrives to use the window the release just opened. Releasing the claim
+    // AND reporting success is the one pairing that both loses the event and
+    // drops the dedup protection. Neither provider retries without bound —
+    // both use bounded exponential backoff — and the three sibling routes
+    // (stripe, stripe-connect, telnyx) have always returned 500 here.
+    return NextResponse.json({ error: 'Handler failed' }, { status: 500 })
   }
 
   return NextResponse.json({ received: true }, { status: 200 })

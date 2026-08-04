@@ -49,6 +49,10 @@ function makeSupabase(queue: Record<string, Resp[]>) {
       })
     }
     chain.single = vi.fn(() => Promise.resolve(result))
+    // The token lookups use maybeSingle() + tryUnwrap() so that a query ERROR
+    // is distinguishable from "no such token" — destructuring data alone made
+    // a DB outage render as "Invalid or expired link".
+    chain.maybeSingle = vi.fn(() => Promise.resolve(result))
     chain.then   = (resolve: (v: unknown) => unknown) => Promise.resolve(result).then(resolve)
     return chain
   })
@@ -192,7 +196,16 @@ describe('POST /api/work-orders/[token]/complete', () => {
     expect(res.status).toBe(400)
   })
 
-  it('rejects an implausibly large invoice subtotal before it becomes actual_cost', async () => {
+  // This used to assert a 400 on a large client-supplied `subtotal`. The
+  // bound was never the real control: the client's figure reached
+  // actual_cost at all only because `effectiveSubtotal` fell back to it when
+  // no line item survived validation — so a payload with NO valid items and
+  // `subtotal: 999999` sailed under the $1M bound and wrote an arbitrary
+  // actual_cost on the app's only unauthenticated money-minting path, which
+  // then posts to owner_transactions under an ignoreDuplicates upsert (i.e.
+  // permanently). The client's figure is now ignored outright, which is the
+  // stronger property: assert the value that reaches the RPC, not the status.
+  it('ignores a client-supplied subtotal — it can never reach the transaction', async () => {
     const supabase = makeSupabase({
       work_orders: [{ data: baseWo(), error: null }],
       vendors:     [{ data: { org_id: 'org_1' }, error: null }],
@@ -201,7 +214,70 @@ describe('POST /api/work-orders/[token]/complete', () => {
 
     const res = await callPost(VALID_TOKEN, { completedByName: 'Joe', subtotal: 5_000_000 })
 
+    expect(res.status).toBe(200)
+    // 0, not 5_000_000: the RPC leaves actual_cost untouched on `p_subtotal > 0`.
+    expect(supabase.rpc).toHaveBeenCalledWith(
+      'complete_work_order_via_token',
+      expect.objectContaining({ p_subtotal: 0 }),
+    )
+  })
+
+  it('rejects a submission whose line items ALL failed validation', async () => {
+    const supabase = makeSupabase({
+      work_orders: [{ data: baseWo(), error: null }],
+      vendors:     [{ data: { org_id: 'org_1' }, error: null }],
+    })
+    vi.mocked(createServiceClient).mockReturnValue(supabase as never)
+
+    // The exact shape that used to reach the `subtotal` fallback.
+    const res = await callPost(VALID_TOKEN, {
+      completedByName: 'Joe',
+      lineItems: [{ line_type: 'bogus', description: 'Nope', quantity: 1, unit_cost: 10 }],
+      subtotal: 999_999,
+    })
+
     expect(res.status).toBe(400)
+    expect(supabase.rpc).not.toHaveBeenCalled()
+  })
+
+  it('still bounds the DERIVED total, so line items cannot exceed $1M either', async () => {
+    const supabase = makeSupabase({
+      work_orders: [{ data: baseWo(), error: null }],
+      vendors:     [{ data: { org_id: 'org_1' }, error: null }],
+    })
+    vi.mocked(createServiceClient).mockReturnValue(supabase as never)
+
+    const res = await callPost(VALID_TOKEN, {
+      completedByName: 'Joe',
+      lineItems: [{ line_type: 'labor', description: 'Rebuild', quantity: 3, unit_cost: 900_000 }],
+    })
+
+    expect(res.status).toBe(400)
+    expect(supabase.rpc).not.toHaveBeenCalled()
+  })
+
+  it('derives the total from the surviving items when some are dropped', async () => {
+    const supabase = makeSupabase({
+      work_orders: [{ data: baseWo(), error: null }],
+      vendors:     [{ data: { org_id: 'org_1' }, error: null }],
+    })
+    vi.mocked(createServiceClient).mockReturnValue(supabase as never)
+
+    // The non-adversarial direction: the vendor's own subtotal counts the
+    // dropped row, so the stored invoice used to exceed the sum of the items
+    // printed beneath it. p_subtotal must match the items the RPC inserts.
+    await callPost(VALID_TOKEN, {
+      completedByName: 'Joe',
+      lineItems: [
+        { line_type: 'labor', description: 'Fix sink', quantity: 2, unit_cost: 75 },
+        { line_type: 'labor', description: 'Dropped',  quantity: 0, unit_cost: 500 },  // quantity 0
+      ],
+      subtotal: 650,
+    })
+
+    const args = supabase.rpc.mock.calls[0]![1] as { p_subtotal: number; p_line_items: unknown[] }
+    expect(args.p_line_items).toHaveLength(1)
+    expect(args.p_subtotal).toBe(150)
   })
 
   it('returns 409 when the transaction reports the claim was already taken', async () => {

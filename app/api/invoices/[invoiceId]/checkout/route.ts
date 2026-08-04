@@ -2,6 +2,7 @@ import { unwrap } from '@/lib/supabase/unwrap'
 import { NextRequest, NextResponse }  from 'next/server'
 import { requireOrgMember }           from '@/lib/auth'
 import { stripe }                     from '@/lib/stripe/client'
+import { platformFeePct }             from '@/lib/stripe/platform-fee'
 import { createServiceClient }        from '@/lib/supabase/server'
 import { logAuditEvent }              from '@/lib/audit'
 import { unwrapJoin }                 from '@/lib/utils/supabase-joins'
@@ -91,10 +92,14 @@ export async function POST(
   const property         = unwrapJoin(invoice.properties)
   const amountCents      = Math.round(invoice.total * 100)
   const feeCents         = Math.round(invoice.platform_fee_amount * 100)
-  const platformFeePct   = parseFloat(process.env.STRIPE_PLATFORM_FEE_PCT ?? '0')
+  // Returns a FRACTION (0.03 for 3%), so no /100 here. Shared with the vendor
+  // completion route so a malformed value cannot silently mean 0% on one path
+  // and something else on the other — and so it is reported rather than
+  // parsed inline into a NaN nobody sees.
+  const feePct = platformFeePct()
 
   // Recalculate fee fresh in case the env var changed since invoice creation
-  const currentFeeCents = Math.round(amountCents * platformFeePct / 100)
+  const currentFeeCents = Math.round(amountCents * feePct)
   const finalFeeCents   = currentFeeCents > 0 ? currentFeeCents : feeCents
 
   const session = await stripe.checkout.sessions.create({

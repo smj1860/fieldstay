@@ -132,7 +132,6 @@ const BASELINE: Record<string, number> = {
   'app/api/repuguard/generate/route.ts': 4,
   'app/api/vendor-connect/[token]/onboard/route.ts': 2,
   'app/api/webhooks/stripe/handlers/core-billing.ts': 1,
-  'app/api/work-orders/[token]/complete/route.ts': 3,
   'app/api/work-orders/[token]/photos/route.ts': 2,
   'app/api/work-orders/[token]/quote/route.ts': 3,
   'app/crew/turnovers/actions.ts': 3,

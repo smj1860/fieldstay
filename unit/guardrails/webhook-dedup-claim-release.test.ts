@@ -83,6 +83,41 @@ function chainOffsets(src: string, table: string, method: 'insert' | 'delete'): 
   return hits
 }
 
+/**
+ * `status: 4xx|5xx` — the provider is told the delivery failed, so it retries.
+ * This is what makes a release meaningful.
+ */
+const RETRYABLE_STATUS = /status:\s*(?:4\d\d|5\d\d)/
+/** An explicit 2xx — the provider records the delivery as succeeded. */
+const SUCCESS_STATUS = /status:\s*2\d\d/
+
+/**
+ * Name of the function enclosing `offset`, by scanning back to the nearest
+ * `function <name>(` declaration.
+ *
+ * A release extracted into a shared `releaseDedupClaim()` helper — which is
+ * better code than the same delete copy-pasted into two catch blocks — would
+ * otherwise read as "deletes outside a catch" and fail this guardrail. So a
+ * release is satisfied EITHER by a delete sitting directly in a catch, OR by
+ * a call to the helper that contains it sitting in a catch.
+ */
+function enclosingFunctionName(src: string, offset: number): string | null {
+  const decl = /function\s+([A-Za-z_$][\w$]*)\s*\(/g
+  let name: string | null = null
+  let m: RegExpExecArray | null
+  while ((m = decl.exec(src)) !== null && m.index < offset) name = m[1]!
+  return name
+}
+
+/** Offsets of every call to `name(` in `src`. */
+function callOffsets(src: string, name: string): number[] {
+  const hits: number[] = []
+  const re = new RegExp(`\\b${name}\\s*\\(`, 'g')
+  let m: RegExpExecArray | null
+  while ((m = re.exec(src)) !== null) hits.push(m.index)
+  return hits
+}
+
 function claimTablesIn(src: string): string[] {
   const tables = new Set<string>()
   for (const m of src.matchAll(FROM_CALL)) {
@@ -118,13 +153,52 @@ export function findViolations(files: Array<{ path: string; src: string }>): Ded
         continue
       }
 
-      const inCatch = deletes.some((d) => catches.some(([s, e]) => d > s && d < e))
-      if (!inCatch) {
+      const isInCatch = (offset: number) => catches.some(([s, e]) => offset > s && offset < e)
+
+      // Every offset that constitutes "releasing the claim on a failure path":
+      // the delete itself when it sits in a catch, plus any call to a helper
+      // function that wraps the delete.
+      const releaseSites = deletes.filter(isInCatch)
+      for (const d of deletes) {
+        if (isInCatch(d)) continue
+        const helper = enclosingFunctionName(src, d)
+        if (helper) releaseSites.push(...callOffsets(src, helper).filter(isInCatch))
+      }
+
+      if (releaseSites.length === 0) {
         violations.push({
           file:   path,
           table,
-          reason: `deletes from ${table} but not inside a catch block — a release only counts on the failure path`,
+          reason: `deletes from ${table} but never on a failure path — a release only counts inside a catch (directly, or via a helper called from one)`,
         })
+        continue
+      }
+
+      // The other half of the invariant, and the one this file used to state
+      // in prose without checking: a release is only meaningful if the SAME
+      // catch also asks the provider to redeliver. app/api/webhooks/[provider]
+      // released the claim and then returned 200, so the provider recorded the
+      // delivery as successful and no retry ever arrived to use the window the
+      // release had just opened — the event was lost AND the dedup protection
+      // was dropped. A release paired with a 2xx is strictly worse than no
+      // release at all.
+      for (const [start, end] of catches) {
+        if (!releaseSites.some((r) => r > start && r < end)) continue
+        const body = src.slice(start, end)
+
+        if (!RETRYABLE_STATUS.test(body)) {
+          violations.push({
+            file:   path,
+            table,
+            reason: `releases the ${table} claim in a catch that never returns 4xx/5xx — the provider treats the delivery as succeeded and never redelivers, so the release is dead code and the event is lost`,
+          })
+        } else if (SUCCESS_STATUS.test(body)) {
+          violations.push({
+            file:   path,
+            table,
+            reason: `releases the ${table} claim in a catch that can still return 2xx — a success response on the path that just dropped the claim loses the event`,
+          })
+        }
       }
     }
   }
@@ -165,6 +239,23 @@ describe('guardrail: webhook dedup claims are released on handler failure', () =
       ".from('stripe_processed_events').select()",
     )
     expect(broken, 'fixture did not change — the release pattern moved').not.toBe(target!.src)
+
+    const violations = findViolations([{ path: target!.path, src: broken }])
+    expect(violations.length).toBeGreaterThan(0)
+  })
+
+  it('DETECTS a release paired with a 2xx (the [provider] route\'s shipped shape)', () => {
+    const target = webhookRouteFiles().find((f) => f.path.includes('[provider]'))
+    expect(target, 'provider webhook route not found').toBeDefined()
+
+    // Reintroduce the exact defect: the claim release stays, but the catch
+    // reports success instead of asking for a redelivery. The provider then
+    // never retries, so the release accomplishes nothing and the event is lost.
+    const broken = target!.src.replace(
+      /return NextResponse\.json\(\{ error: 'Handler failed' \}, \{ status: 500 \}\)/,
+      "return NextResponse.json({ received: true }, { status: 200 })",
+    )
+    expect(broken, 'fixture did not change — the failure return moved').not.toBe(target!.src)
 
     const violations = findViolations([{ path: target!.path, src: broken }])
     expect(violations.length).toBeGreaterThan(0)
