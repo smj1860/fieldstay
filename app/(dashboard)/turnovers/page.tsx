@@ -6,6 +6,64 @@ import { throwIfAnyQueryFailed } from '@/lib/supabase/unwrap'
 
 export const metadata: Metadata = { title: 'Turnovers' }
 
+const TURNOVER_COLUMNS = `
+        id, property_id, booking_id, checkout_datetime, checkin_datetime,
+        window_minutes, status, priority, notes, completed_at, started_at,
+        crew_duration_minutes,
+        checklist_template_id, is_same_day_turnover, is_archived,
+        suggested_crew_ids, suggestion_reasoning, suggestion_status,
+        turnover_assignments (
+          id, crew_member_id,
+          crew_member:crew_members ( id, name, phone, email )
+        )
+      `
+
+/** PostgREST's max_rows (supabase/config.toml). A .limit() above it does nothing. */
+const PAGE_SIZE = 1000
+
+/**
+ * The board's window is 67 days wide, which is NOT inside the 1000-row cap for
+ * a large org: 50 properties turning over daily is ~3,350 rows. An unbounded
+ * read would have returned the first 1000 with a 200 and no truncation signal,
+ * so turnovers would simply be missing from the board with nothing logged.
+ * Drained by page instead.
+ */
+type TurnoverQuery = ReturnType<typeof buildTurnoverPage>
+function buildTurnoverPage(
+  supabase: Awaited<ReturnType<typeof requireOrgMember>>['supabase'],
+  orgId: string,
+  since: string,
+  until: string,
+  from: number,
+) {
+  return supabase
+    .from('turnovers')
+    .select(TURNOVER_COLUMNS)
+    .eq('org_id', orgId)
+    .neq('status', 'cancelled')
+    .gte('checkout_datetime', since)
+    .lte('checkout_datetime', until)
+    .order('checkout_datetime', { ascending: true })
+    .range(from, from + PAGE_SIZE - 1)
+}
+
+async function fetchAllTurnovers(
+  supabase: Awaited<ReturnType<typeof requireOrgMember>>['supabase'],
+  orgId: string,
+  since: string,
+  until: string,
+): Promise<Awaited<TurnoverQuery>> {
+  const rows: NonNullable<Awaited<TurnoverQuery>['data']> = []
+
+  for (let from = 0; ; from += PAGE_SIZE) {
+    const result = await buildTurnoverPage(supabase, orgId, since, until, from)
+    if (result.error) return result
+    const page = result.data ?? []
+    rows.push(...page)
+    if (page.length < PAGE_SIZE) return { ...result, data: rows }
+  }
+}
+
 export default async function TurnoversPage() {
   const { supabase, membership } = await requireOrgMember()
 
@@ -26,25 +84,12 @@ export default async function TurnoversPage() {
     { data: crewAvailability, error: crewAvailabilityError },
     { data: org, error: orgError },
   ] = await Promise.all([
-    supabase
-      .from('turnovers')
-      .select(`
-        id, property_id, booking_id, checkout_datetime, checkin_datetime,
-        window_minutes, status, priority, notes, completed_at, started_at,
-        crew_duration_minutes,
-        checklist_template_id, is_same_day_turnover, is_archived,
-        suggested_crew_ids, suggestion_reasoning, suggestion_status,
-        turnover_assignments (
-          id, crew_member_id,
-          crew_member:crew_members ( id, name, phone, email )
-        )
-      `)
-      .eq('org_id', membership.org_id)
-      .neq('status', 'cancelled')
-      .gte('checkout_datetime', since.toISOString())
-      .lte('checkout_datetime', until.toISOString())
-      .order('checkout_datetime', { ascending: true })
-      .limit(5000),
+    fetchAllTurnovers(
+      supabase,
+      membership.org_id,
+      since.toISOString(),
+      until.toISOString(),
+    ),
     supabase
       .from('properties')
       .select('id, name, city, state')

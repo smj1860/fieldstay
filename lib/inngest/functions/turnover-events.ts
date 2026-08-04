@@ -115,23 +115,19 @@ export const handleTurnoverCreated = inngest.createFunction(
 type TurnoverServiceClient = ReturnType<typeof createServiceClient>
 
 /**
- * Every completion-type timestamp for a turnover: each checklist item's
- * completed_at, plus inventory's single completion signal.
+ * The earliest and latest checklist item completion, or [] if none.
  *
- * Inventory contributes at most one (unlike checklist, it has no per-item
- * timestamps — see the crew-facing InventoryView flow): the explicit "Confirm
- * Inventory Complete" press if it happened, else the last inventory quantity
- * edit after this turnover's inventory work began, as a fallback for crew who
- * forgot to press it. inventory_started_at itself is NOT a signal — it marks
- * when work began, not when something was completed.
+ * Only the extremes matter — the duration is MAX - MIN — so the database is
+ * asked for exactly those two rows rather than every item. That also removes
+ * an unbounded read: a checklist runs 30-60 items today, but nothing in the
+ * schema caps it, and PostgREST would silently truncate at max_rows and skew
+ * the result.
  */
-async function collectCompletionTimestamps(
+async function checklistCompletionRange(
   supabase:   TurnoverServiceClient,
   turnoverId: string,
   orgId:      string,
 ): Promise<string[]> {
-  const timestamps: string[] = []
-
   const { data: instance, error: instanceError } = await supabase
     .from('checklist_instances')
     .select('id')
@@ -139,19 +135,40 @@ async function collectCompletionTimestamps(
     .eq('org_id', orgId)
     .maybeSingle()
   if (instanceError) throw instanceError
+  if (!instance) return []
 
-  if (instance) {
-    const { data: items, error: itemsError } = await supabase
-      .from('checklist_instance_items')
-      .select('completed_at')
-      .eq('instance_id', instance.id)
-      .not('completed_at', 'is', null)
-      .limit(500)
-    if (itemsError) throw itemsError
+  const end = (ascending: boolean) => supabase
+    .from('checklist_instance_items')
+    .select('completed_at')
+    .eq('instance_id', instance.id)
+    .not('completed_at', 'is', null)
+    .order('completed_at', { ascending })
+    .limit(1)
+    .maybeSingle()
 
-    for (const item of items ?? []) timestamps.push(item.completed_at!)
-  }
+  const ends = await Promise.all([end(true), end(false)])
 
+  const endsError = ends.find((r) => r.error)?.error
+  if (endsError) throw endsError
+
+  return ends.map((r) => r.data?.completed_at).filter((t): t is string => Boolean(t))
+}
+
+/**
+ * Inventory's single completion signal, or null.
+ *
+ * Unlike checklist, inventory has no per-item timestamps (see the crew-facing
+ * InventoryView flow): the explicit "Confirm Inventory Complete" press if it
+ * happened, else the last inventory quantity edit after this turnover's
+ * inventory work began, as a fallback for crew who forgot to press it.
+ * inventory_started_at itself is NOT a signal — it marks when work began, not
+ * when something was completed.
+ */
+async function inventoryCompletionSignal(
+  supabase:   TurnoverServiceClient,
+  turnoverId: string,
+  orgId:      string,
+): Promise<string | null> {
   const { data: turnover, error: turnoverError } = await supabase
     .from('turnovers')
     .select('property_id, inventory_started_at, inventory_confirmed_complete_at')
@@ -160,24 +177,32 @@ async function collectCompletionTimestamps(
     .maybeSingle()
   if (turnoverError) throw turnoverError
 
-  if (turnover?.inventory_confirmed_complete_at) {
-    timestamps.push(turnover.inventory_confirmed_complete_at)
-    return timestamps
-  }
+  if (turnover?.inventory_confirmed_complete_at) return turnover.inventory_confirmed_complete_at
+  if (!turnover?.inventory_started_at) return null
 
-  if (turnover?.inventory_started_at) {
-    const { data: lastEdited, error: lastEditedError } = await supabase
-      .from('inventory_items')
-      .select('updated_at')
-      .eq('property_id', turnover.property_id)
-      .gt('updated_at', turnover.inventory_started_at)
-      .order('updated_at', { ascending: false })
-      .limit(1)
-      .maybeSingle()
-    if (lastEditedError) throw lastEditedError
+  const { data: lastEdited, error: lastEditedError } = await supabase
+    .from('inventory_items')
+    .select('updated_at')
+    .eq('property_id', turnover.property_id)
+    .gt('updated_at', turnover.inventory_started_at)
+    .order('updated_at', { ascending: false })
+    .limit(1)
+    .maybeSingle()
+  if (lastEditedError) throw lastEditedError
 
-    if (lastEdited) timestamps.push(lastEdited.updated_at)
-  }
+  return lastEdited?.updated_at ?? null
+}
+
+/** Every completion-type timestamp for a turnover: checklist plus inventory. */
+async function collectCompletionTimestamps(
+  supabase:   TurnoverServiceClient,
+  turnoverId: string,
+  orgId:      string,
+): Promise<string[]> {
+  const timestamps = await checklistCompletionRange(supabase, turnoverId, orgId)
+
+  const inventorySignal = await inventoryCompletionSignal(supabase, turnoverId, orgId)
+  if (inventorySignal) timestamps.push(inventorySignal)
 
   return timestamps
 }
