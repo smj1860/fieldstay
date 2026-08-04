@@ -10,23 +10,6 @@ import { unwrapJoin } from '@/lib/utils/supabase-joins'
 import { reportError } from '@/lib/observability/report-error'
 import { setActorContext, setTenantContext } from '@/lib/observability/sentry-context'
 
-/**
- * organizations.repuguard_status is TEXT with
- * CHECK (repuguard_status IN ('inactive','trial','active','cancelled')) — a
- * constraint the column's type cannot carry, so narrow it here instead of
- * asserting. 'inactive' is the column's own DEFAULT.
- */
-const REPUGUARD_STATUSES = ['inactive', 'trial', 'active', 'cancelled'] as const
-
-function toRepuguardStatus(
-  value: string | null | undefined,
-): (typeof REPUGUARD_STATUSES)[number] {
-  for (const status of REPUGUARD_STATUSES) {
-    if (status === value) return status
-  }
-  return 'inactive'
-}
-
 export interface OrgMembership {
   org_id: string
   role: MemberRole
@@ -36,7 +19,6 @@ export interface OrgMembership {
     plan_status: string
     max_properties: number
     trial_ends_at: string | null
-    repuguard_status: 'inactive' | 'trial' | 'active' | 'cancelled'
     onboarding_steps_completed: Record<string, boolean>
   }
 }
@@ -90,7 +72,7 @@ const getMembershipContext = cache(async () => {
     .from('organization_members')
     .select(`
       org_id, role, invite_accepted_at,
-      organizations ( name, plan, plan_status, max_properties, trial_ends_at, repuguard_status, onboarding_steps_completed )
+      organizations ( name, plan, plan_status, max_properties, trial_ends_at, onboarding_steps_completed )
     `)
     .eq('user_id', user.id)
     .not('invite_accepted_at', 'is', null)
@@ -140,7 +122,6 @@ const getMembershipContext = cache(async () => {
       plan_status:    orgData?.plan_status ?? 'trialing',
       max_properties: orgData?.max_properties ?? 5,
       trial_ends_at:  orgData?.trial_ends_at ?? null,
-      repuguard_status: toRepuguardStatus(orgData?.repuguard_status),
       onboarding_steps_completed: asBooleanMap(orgData?.onboarding_steps_completed),
     },
   }

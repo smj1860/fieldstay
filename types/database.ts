@@ -128,10 +128,8 @@ export interface Organization {
   comms_log_retention_days:     number
   guest_pii_retention_days:     number
   slack_webhook_url:            string | null
-  repuguard_status:             'inactive' | 'trial' | 'active' | 'cancelled'
   repuguard_trial_start:        string | null
   repuguard_trial_end:          string | null
-  repuguard_stripe_subscription_id: string | null
   repuguard_founding_member:    boolean
   /**
    * Roadshow demo tenant marker (20260726160000_demo_org_support.sql).
