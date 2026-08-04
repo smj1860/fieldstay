@@ -2,7 +2,7 @@ import type Stripe from 'stripe'
 import { inngest } from '@/lib/inngest/client'
 import { PLANS, getPlanByPriceId, type PlanKey } from '@/lib/stripe/client'
 import { logAuditEvent } from '@/lib/audit'
-import { getPmMembers } from '@/lib/inngest/helpers'
+import { getPmMembers, createPmNotification } from '@/lib/inngest/helpers'
 import { tryUnwrap } from '@/lib/supabase/unwrap'
 import { nullableArg } from '@/lib/supabase/rpc-args'
 import { reportError } from '@/lib/observability/report-error'
@@ -445,6 +445,64 @@ export async function handleCoreSubscriptionUpdate(
       })
     })
   }
+}
+
+/**
+ * A core-billing invoice failed to collect — tell the PM.
+ *
+ * Core billing had no dunning at all: onInvoicePaymentFailed acted only on
+ * guidebook sponsor subscriptions, so a declined card on the primary revenue
+ * path notified nobody. Entitlement still degrades correctly (Stripe follows
+ * with customer.subscription.updated -> past_due), so this is a notification
+ * gap rather than an access bug — but the secondary product had a
+ * payment-failure path and the main one did not.
+ *
+ * Resolved metadata-first like every other core-billing handler, and it throws
+ * on a read failure rather than returning: the route releases the dedup claim
+ * on a throw, so Stripe retries. Silently swallowing here would reproduce the
+ * class this audit spent most of its time on.
+ */
+export async function handleCoreInvoicePaymentFailed(
+  supabase:     StripeSupabaseClient,
+  subscription: Stripe.Subscription,
+  invoiceId:    string,
+): Promise<void> {
+  const customerId    = subscription.customer as string
+  const metadataOrgId = subscription.metadata?.org_id ?? null
+
+  const org =
+    (metadataOrgId
+      ? await findOrg(supabase, 'id', metadataOrgId, 'webhook.stripe.core-billing.dunning-by-metadata')
+      : null)
+    ?? await findOrg(supabase, 'stripe_customer_id', customerId, 'webhook.stripe.core-billing.dunning-by-customer')
+
+  if (!org) {
+    reportError(new Error('Core invoice payment failed for an unresolvable org'), {
+      site:  'webhook.stripe.core-billing.dunning-unresolved',
+      extra: { subscription_id: subscription.id, customer_id: customerId },
+    })
+    return
+  }
+
+  // Keyed on the invoice, not the org+day: Stripe retries collection on its
+  // own schedule and each attempt fires this event again, so a day-scoped key
+  // would collapse genuinely distinct failed invoices while an unkeyed insert
+  // would nag the PM once per retry.
+  await createPmNotification(supabase, {
+    orgId:     org.id,
+    type:      'billing_payment_failed',
+    title:     'Payment failed — update your card',
+    subtitle:  'Stripe could not collect your latest FieldStay invoice. Your plan stays active while Stripe retries.',
+    href:      '/settings',
+    severity:  'red',
+    dedupeKey: `billing-payment-failed-${invoiceId}`,
+  })
+
+  await logAuditEvent({
+    orgId:    org.id,
+    action:   'billing.payment.failed',
+    metadata: { subscriptionId: subscription.id, invoiceId },
+  })
 }
 
 /** Core billing subscription cancelled. */

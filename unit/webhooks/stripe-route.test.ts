@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { NextRequest } from 'next/server'
 
 vi.mock('@/lib/stripe/client', () => ({
+  STRIPE_API_VERSION: '2025-02-24.acacia',
   stripe: {
     webhooks:      { constructEvent: vi.fn() },
     subscriptions: { retrieve: vi.fn() },
@@ -26,14 +27,16 @@ vi.mock('@/app/api/webhooks/stripe/handlers/core-billing', () => ({
   handleCheckoutSessionBilling:  vi.fn(),
   handleCoreSubscriptionUpdate:  vi.fn(),
   handleCoreSubscriptionCancelled: vi.fn(),
+  handleCoreInvoicePaymentFailed:  vi.fn(),
 }))
 
 import { POST } from '@/app/api/webhooks/stripe/route'
 import { stripe } from '@/lib/stripe/client'
 import { createServiceClient } from '@/lib/supabase/server'
+import { reportError } from '@/lib/observability/report-error'
 import { handleWorkOrderInvoicePaid } from '@/app/api/webhooks/stripe/handlers/work-order-invoice'
-import { handleSponsorCheckoutCompleted } from '@/app/api/webhooks/stripe/handlers/guidebook-sponsor'
-import { handleCheckoutSessionBilling, handleCoreSubscriptionUpdate, handleCoreSubscriptionCancelled } from '@/app/api/webhooks/stripe/handlers/core-billing'
+import { handleSponsorCheckoutCompleted, handleSponsorPaymentFailed } from '@/app/api/webhooks/stripe/handlers/guidebook-sponsor'
+import { handleCheckoutSessionBilling, handleCoreSubscriptionUpdate, handleCoreSubscriptionCancelled, handleCoreInvoicePaymentFailed } from '@/app/api/webhooks/stripe/handlers/core-billing'
 
 // Minimal chainable Supabase mock — every builder method returns itself,
 // and the chain resolves (via `then`) to whatever result was configured for
@@ -309,5 +312,71 @@ describe('POST /api/webhooks/stripe — non-core subscription isolation', () => 
     await emit('customer.subscription.updated', { org_id: 'org_1', plan: 'growth' })
 
     expect(handleCoreSubscriptionUpdate).toHaveBeenCalledTimes(1)
+  })
+})
+
+// ── invoice.subscription shape + core-billing dunning ───────────────────────
+describe('POST /api/webhooks/stripe — invoice events', () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+    ;(createServiceClient as ReturnType<typeof vi.fn>).mockReturnValue(
+      makeSupabase({ stripe_processed_events: { error: null } })
+    )
+  })
+
+  const emitInvoice = (type: string, invoice: Record<string, unknown>) => {
+    ;(stripe.webhooks.constructEvent as ReturnType<typeof vi.fn>).mockReturnValue({
+      id: 'evt_inv', type, data: { object: { id: 'in_1', ...invoice } },
+    })
+    return POST(postRequest('{}', 'sig'))
+  }
+
+  it('notifies the PM when a CORE billing invoice fails — the dunning gap', () => {
+    // This handler used to act only on guidebook_sponsor subscriptions, so a
+    // declined card on the primary revenue path told the PM nothing.
+    ;(stripe.subscriptions.retrieve as ReturnType<typeof vi.fn>).mockResolvedValue({
+      id: 'sub_1', customer: 'cus_1', metadata: { org_id: 'org_1', plan: 'growth' },
+    })
+
+    return emitInvoice('invoice.payment_failed', { subscription: 'sub_1' }).then(() => {
+      expect(handleCoreInvoicePaymentFailed).toHaveBeenCalledOnce()
+    })
+  })
+
+  it('does NOT route a sponsor invoice failure into core billing dunning', async () => {
+    ;(stripe.subscriptions.retrieve as ReturnType<typeof vi.fn>).mockResolvedValue({
+      id: 'sub_s', customer: 'cus_s',
+      metadata: { feature: 'guidebook_sponsor', org_id: 'org_1', guidebook_sponsor_id: 'spon_1' },
+    })
+
+    await emitInvoice('invoice.payment_failed', { subscription: 'sub_s' })
+
+    expect(handleSponsorPaymentFailed).toHaveBeenCalledOnce()
+    expect(handleCoreInvoicePaymentFailed).not.toHaveBeenCalled()
+  })
+
+  it('reports an unexpected invoice.subscription shape instead of silently returning', async () => {
+    // `invoice.subscription as string | null` type-checked nothing. Stripe has
+    // moved subscription linkage on Invoice in later API versions, so an
+    // apiVersion bump would make this an object (or undefined), send the
+    // handler down its `if (!subId) return` path, and stop every sponsor
+    // payment-failure event with nothing logged.
+    await emitInvoice('invoice.payment_failed', { subscription: { id: 'sub_1' } })
+
+    expect(stripe.subscriptions.retrieve).not.toHaveBeenCalled()
+    expect(reportError).toHaveBeenCalledWith(
+      expect.any(Error),
+      expect.objectContaining({
+        site: 'webhook.stripe.invoice_payment_failed.subscription_shape',
+      }),
+    )
+  })
+
+  it('treats a genuinely absent subscription as a no-op, not a report', async () => {
+    // A one-off invoice has no subscription at all — that is normal, not drift.
+    await emitInvoice('invoice.payment_failed', { subscription: null })
+
+    expect(stripe.subscriptions.retrieve).not.toHaveBeenCalled()
+    expect(reportError).not.toHaveBeenCalled()
   })
 })

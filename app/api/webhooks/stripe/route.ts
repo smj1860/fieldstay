@@ -1,6 +1,6 @@
 import type Stripe from 'stripe'
 import { NextRequest, NextResponse } from 'next/server'
-import { stripe } from '@/lib/stripe/client'
+import { stripe, STRIPE_API_VERSION } from '@/lib/stripe/client'
 import { createServiceClient } from '@/lib/supabase/server'
 import { reportError } from '@/lib/observability/report-error'
 import { handleWorkOrderInvoicePaid } from './handlers/work-order-invoice'
@@ -14,6 +14,7 @@ import {
   handleCheckoutSessionBilling,
   handleCoreSubscriptionUpdate,
   handleCoreSubscriptionCancelled,
+  handleCoreInvoicePaymentFailed,
 } from './handlers/core-billing'
 
 export async function POST(request: NextRequest) {
@@ -106,7 +107,7 @@ async function routeStripeEvent(supabase: ServiceClient, event: StripeEvent): Pr
       return
 
     case 'invoice.payment_failed':
-      await onInvoicePaymentFailed(event.data.object)
+      await onInvoicePaymentFailed(supabase, event.data.object)
       return
 
     case 'invoice.payment_succeeded':
@@ -218,20 +219,62 @@ async function onSubscriptionDeleted(supabase: ServiceClient, subscription: Dele
 
 type StripeInvoice = Extract<StripeEvent, { type: 'invoice.payment_failed' }>['data']['object']
 
-async function onInvoicePaymentFailed(invoice: StripeInvoice): Promise<void> {
-  const subId = invoice.subscription as string | null
+/**
+ * The invoice's subscription id, narrowed rather than cast.
+ *
+ * `invoice.subscription as string | null` type-checked nothing: `as` tells the
+ * compiler to stop looking. It is correct on the pinned apiVersion
+ * ('2025-02-24.acacia'), but Stripe has moved subscription linkage on Invoice
+ * in later API versions — so bumping apiVersion, which reads like routine
+ * dependency work, would silently make this `undefined`, send both callers
+ * straight down their `if (!subId) return` path, and stop every sponsor
+ * payment-failure and payment-recovery event with no compile error, no runtime
+ * error, and nothing logged. The grace-period and recovery flows would simply
+ * go quiet.
+ *
+ * Reading it as `unknown` and narrowing makes an unexpected shape a reported
+ * runtime signal instead of a silent early return.
+ */
+function subscriptionIdOf(invoice: { subscription?: unknown }, site: string): string | null {
+  const raw = invoice.subscription
+  if (typeof raw === 'string') return raw
+  if (raw === null || raw === undefined) return null
+
+  // An object (an expanded Subscription) or anything else means the field's
+  // shape changed under us — most likely an apiVersion bump.
+  reportError(new Error('Unexpected invoice.subscription shape'), {
+    site,
+    extra: { received_type: typeof raw, api_version: STRIPE_API_VERSION },
+  })
+  return null
+}
+
+async function onInvoicePaymentFailed(supabase: ServiceClient, invoice: StripeInvoice): Promise<void> {
+  const subId = subscriptionIdOf(invoice, 'webhook.stripe.invoice_payment_failed.subscription_shape')
   if (!subId) return
 
   const subscription = await stripe.subscriptions.retrieve(subId)
+
   if (subscription.metadata?.feature === 'guidebook_sponsor') {
     await handleSponsorPaymentFailed(subscription)
+    return
+  }
+
+  // Core billing had NO dunning at all: this handler acted only on sponsor
+  // subscriptions, so a failed card on the primary revenue path told the PM
+  // nothing. Entitlement still degrades correctly via
+  // customer.subscription.updated -> past_due, so this is a notification gap
+  // rather than an access bug — but the secondary product had a payment-failure
+  // path and the main one did not, which reads as an oversight.
+  if (isCoreBillingSubscription(subscription)) {
+    await handleCoreInvoicePaymentFailed(supabase, subscription, invoice.id ?? subId)
   }
 }
 
 async function onInvoicePaymentSucceeded(
   invoice: Extract<StripeEvent, { type: 'invoice.payment_succeeded' }>['data']['object'],
 ): Promise<void> {
-  const subId = invoice.subscription as string | null
+  const subId = subscriptionIdOf(invoice, 'webhook.stripe.invoice_payment_succeeded.subscription_shape')
   if (!subId) return
 
   // Early exit: avoid Stripe API call for non-sponsor invoices.

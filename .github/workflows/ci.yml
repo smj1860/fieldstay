@@ -274,10 +274,24 @@ jobs:
       # `head.repo.fork` is false for same-repo PRs and pushes; for a fork PR
       # it is true and this stays unset, preserving the disarm.
       DB_INVARIANTS_REQUIRE_ARMED: ${{ github.event.pull_request.head.repo.fork && '0' || '1' }}
+      # Same disarm/require pair for the Stripe price drift gate. Its secrets
+      # are different (Stripe, not Supabase) so it needs its own flag — but the
+      # reasoning is identical: a fork cannot read them, the canonical repo
+      # always can, and a silent skip there would be a green check for a
+      # comparison nobody made.
+      STRIPE_SECRET_KEY: ${{ secrets.STRIPE_SECRET_KEY }}
+      STRIPE_PRICE_STARTER_MONTHLY:   ${{ secrets.STRIPE_PRICE_STARTER_MONTHLY }}
+      STRIPE_PRICE_STARTER_ANNUAL:    ${{ secrets.STRIPE_PRICE_STARTER_ANNUAL }}
+      STRIPE_PRICE_GROWTH_MONTHLY:    ${{ secrets.STRIPE_PRICE_GROWTH_MONTHLY }}
+      STRIPE_PRICE_GROWTH_ANNUAL:     ${{ secrets.STRIPE_PRICE_GROWTH_ANNUAL }}
+      STRIPE_PRICE_PORTFOLIO_MONTHLY: ${{ secrets.STRIPE_PRICE_PORTFOLIO_MONTHLY }}
+      STRIPE_PRICE_PORTFOLIO_ANNUAL:  ${{ secrets.STRIPE_PRICE_PORTFOLIO_ANNUAL }}
+      STRIPE_PRICE_SPONSOR_MONTHLY:   ${{ secrets.STRIPE_PRICE_SPONSOR_MONTHLY }}
+      STRIPE_PRICE_DRIFT_REQUIRE_ARMED: ${{ github.event.pull_request.head.repo.fork && '0' || '1' }}
     steps:
       - uses: actions/checkout@v4
         with:
-          # This job only reads the repo and runs three scripts — no reason to
+          # This job only reads the repo and runs four scripts — no reason to
           # leave the checkout token on disk.
           persist-credentials: false
       - uses: actions/setup-node@v4
@@ -286,3 +300,4 @@ jobs:
       - run: node scripts/check-db-invariants.mjs
       - run: node scripts/check-type-drift.mjs
       - run: node scripts/check-migration-ledger.mjs
+      - run: node scripts/check-stripe-price-drift.mjs

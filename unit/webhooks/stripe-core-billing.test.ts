@@ -14,10 +14,18 @@ vi.mock('@/lib/stripe/client', () => ({
 }))
 vi.mock('@/lib/inngest/client', () => ({ inngest: { send: vi.fn(async () => undefined) } }))
 vi.mock('@/lib/audit',            () => ({ logAuditEvent: vi.fn(async () => undefined) }))
-vi.mock('@/lib/inngest/helpers',  () => ({ getPmMembers: vi.fn(async () => []) }))
+vi.mock('@/lib/inngest/helpers',  () => ({
+  getPmMembers: vi.fn(async () => []),
+  createPmNotification: vi.fn(async () => undefined),
+}))
 vi.mock('@/lib/observability/report-error', () => ({ reportError: vi.fn() }))
 
-import { handleCoreSubscriptionUpdate, handleCoreSubscriptionCancelled } from '@/app/api/webhooks/stripe/handlers/core-billing'
+import {
+  handleCoreSubscriptionUpdate,
+  handleCoreSubscriptionCancelled,
+  handleCoreInvoicePaymentFailed,
+} from '@/app/api/webhooks/stripe/handlers/core-billing'
+import { createPmNotification } from '@/lib/inngest/helpers'
 import type { StripeSupabaseClient } from '@/app/api/webhooks/stripe/handlers/types'
 import type Stripe from 'stripe'
 
@@ -391,6 +399,71 @@ describe('handleCoreSubscriptionCancelled', () => {
     expect(reportError).toHaveBeenCalledWith(
       expect.any(Error),
       expect.objectContaining({ site: 'webhook.stripe.core-billing.cancel-unresolved' }),
+    )
+  })
+})
+
+// ── Core billing dunning ────────────────────────────────────────────────────
+//
+// onInvoicePaymentFailed acted only on guidebook_sponsor subscriptions, so a
+// declined card on the primary revenue path notified nobody. Entitlement still
+// degraded correctly via customer.subscription.updated -> past_due, so this
+// was a notification gap rather than an access bug — but the secondary product
+// had a payment-failure path and the main one did not.
+describe('handleCoreInvoicePaymentFailed', () => {
+  beforeEach(() => vi.clearAllMocks())
+
+  const dunning = (supabase: ReturnType<typeof makeSupabase>, sub: Stripe.Subscription, invoiceId = 'in_1') =>
+    handleCoreInvoicePaymentFailed(supabase as unknown as StripeSupabaseClient, sub, invoiceId)
+
+  it('notifies the PM, keyed on the INVOICE so Stripe retries do not nag', async () => {
+    const supabase = makeSupabase({
+      organizations: [{ data: { id: 'org_1', name: 'Lake Martin' }, error: null }],
+    })
+
+    await dunning(supabase, subscription({ metadata: { org_id: 'org_1' } }), 'in_42')
+
+    expect(createPmNotification).toHaveBeenCalledWith(
+      supabase,
+      expect.objectContaining({
+        orgId:     'org_1',
+        type:      'billing_payment_failed',
+        severity:  'red',
+        // Not org+day: Stripe retries collection on its own schedule and each
+        // attempt re-fires this event, while a day-scoped key would also
+        // collapse two genuinely different failed invoices.
+        dedupeKey: 'billing-payment-failed-in_42',
+      }),
+    )
+  })
+
+  it('throws on a read failure so Stripe retries, rather than dropping the notice', async () => {
+    const supabase = makeSupabase({
+      organizations: [{ data: null, error: { message: 'connection reset', code: '57P01' } }],
+    })
+
+    await expect(
+      dunning(supabase, subscription({ metadata: { org_id: 'org_1' } })),
+    ).rejects.toThrow(/org lookup/)
+
+    expect(createPmNotification).not.toHaveBeenCalled()
+  })
+
+  it('reports rather than throwing when the org is genuinely unresolvable', async () => {
+    const { reportError } = await import('@/lib/observability/report-error')
+    const supabase = makeSupabase({
+      organizations: [
+        { data: null, error: null },
+        { data: null, error: null },
+      ],
+    })
+
+    await expect(dunning(supabase, subscription())).resolves.toBeUndefined()
+
+    expect(createPmNotification).not.toHaveBeenCalled()
+    expect(reportError).toHaveBeenCalledWith(
+      expect.any(Error),
+      expect.objectContaining({ site: 'webhook.stripe.core-billing.dunning-unresolved' }),
     )
   })
 })
