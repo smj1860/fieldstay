@@ -663,29 +663,6 @@ async function uploadInventoryCount(
   if (!res.ok) throw new UploadHttpError(`Failed to submit inventory count ${targetId}`, res.status)
 }
 
-/**
- * Legacy per-item quantity write. No crew surface enqueues this any more —
- * the turnover tab submits a whole count through uploadInventoryCount above —
- * but the handler stays for one release so a mutation already sitting in a
- * device's outbox drains instead of dead-lettering as NO_HANDLER.
- */
-async function uploadInventoryItemCount(
-  supabase: DexieSupabaseClient,
-  targetId: string,
-  payload: MutationPayload,
-): Promise<void> {
-  if (!('current_quantity' in payload)) {
-    throw new UploadDataError(`inventory_items upload had no quantity for id ${targetId}`, 'NO_FIELDS')
-  }
-  const { data, error } = await supabase
-    .from('inventory_items')
-    .update({ current_quantity: payload.current_quantity })
-    .eq('id', targetId)
-    .select('id')
-  if (error) throw new UploadDataError(`inventory_items upload failed: ${error.message}`, error.code)
-  if (!data || data.length === 0) throw new Error(`inventory_items upload matched zero rows for id ${targetId}`)
-}
-
 async function uploadPropertyAssetInsert(
   supabase: DexieSupabaseClient,
   targetId: string,
@@ -752,52 +729,6 @@ async function uploadPropertyAssetPhotoUpdate(
   }
 }
 
-/**
- * Legacy time-off write. Time off is an online-only screen now
- * (app/crew/availability), so no crew surface enqueues this any more — but the
- * handler stays for one release so a mutation already sitting in a device's
- * outbox drains instead of dead-lettering as NO_HANDLER.
- */
-async function uploadCrewAvailability(
-  supabase: DexieSupabaseClient,
-  targetId: string,
-  payload: MutationPayload,
-): Promise<void> {
-  const isAvailable = payload.is_available === 1
-  if (payload.org_id) {
-    // Full INSERT — upsert on primary key to handle any duplicate
-    const { error } = await supabase
-      .from('crew_availability')
-      .upsert({
-        id:             targetId,
-        org_id:         payload.org_id,
-        crew_member_id: payload.crew_member_id,
-        available_date: payload.available_date,
-        is_available:   isAvailable,
-        notes:          payload.notes ?? null,
-        created_at:     payload.created_at,
-      })
-    if (error) throw new UploadDataError(`crew_availability upsert failed: ${error.message}`, error.code)
-    return
-  }
-
-  // UPDATE of existing row — only push fields the mutation actually carried.
-  // Never `payload.x ?? null`: a mutation that omitted a field must leave it
-  // alone, not NULL it (see the doc comment on uploadChecklistInstanceItem).
-  const fieldUpdate: MutationPayload = {}
-  if ('is_available' in payload) fieldUpdate.is_available = isAvailable
-  if ('notes' in payload)        fieldUpdate.notes = payload.notes ?? null
-  if (Object.keys(fieldUpdate).length === 0) return
-
-  const { data, error } = await supabase
-    .from('crew_availability')
-    .update(fieldUpdate)
-    .eq('id', targetId)
-    .select('id')
-  if (error) throw new UploadDataError(`crew_availability upload failed: ${error.message}`, error.code)
-  if (!data || data.length === 0) throw new Error(`crew_availability upload matched zero rows for id ${targetId}`)
-}
-
 // Keyed by `${table}:${op}` — every value in lib/dexie/schema.ts's
 // MutationTable union must have a matching entry here (for every op it's
 // actually enqueued with), or an unhandled table silently vanishes from the
@@ -811,12 +742,8 @@ const UPLOAD_HANDLERS: Record<string, UploadHandler> = {
   'checklist_instances:PATCH':      uploadChecklistInstanceConfirmation,
   'work_order_reports:PUT':         uploadWorkOrderReport,
   'inventory_counts:PUT':           uploadInventoryCount,
-  'inventory_items:PUT':            uploadInventoryItemCount,
-  'inventory_items:PATCH':          uploadInventoryItemCount,
   'property_assets:PUT':            uploadPropertyAssetInsert,
   'property_assets:PATCH':          uploadPropertyAssetPhotoUpdate,
-  'crew_availability:PUT':          uploadCrewAvailability,
-  'crew_availability:PATCH':        uploadCrewAvailability,
   'crew_work_orders:PATCH':         uploadCrewWorkOrderChange,
   'messages:PUT':                   uploadCrewMessage,
 }

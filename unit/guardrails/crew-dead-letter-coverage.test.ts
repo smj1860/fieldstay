@@ -88,6 +88,24 @@ describe('guardrail: every cached crew table is bounded', () => {
     ].join('\n')).toEqual([])
   })
 
+  it('every MutationTable member has an UPLOAD_HANDLERS entry', () => {
+    // A table in the union with no handler reaches uploadOne(), throws
+    // NO_HANDLER, and dead-letters with "saved by an older version of the app"
+    // — correct for a row queued by a PREVIOUS release, but a lie for one this
+    // build can still enqueue. Anything removable from the union must lose its
+    // enqueue site first, then its handler; the union is what ties the two.
+    const sync = readFileSync(join(ROOT, 'lib', 'dexie', 'syncService.ts'), 'utf8')
+    const handlerBlock = sync.slice(sync.indexOf('const UPLOAD_HANDLERS'))
+
+    const missing = mutationTables().filter((t) => !new RegExp(`'${t}:`).test(handlerBlock))
+
+    expect(missing, [
+      'These MutationTable members have no UPLOAD_HANDLERS entry, so anything',
+      'queued for them dead-letters as "saved by an older version of the app":',
+      ...missing,
+    ].join('\n')).toEqual([])
+  })
+
   it('both outboxes are covered by BOTH the dead-letter and the stalled surface', () => {
     // A transport failure deliberately never sets `failed` — losing a crew
     // member's work because their signal is bad would be worse than the bug

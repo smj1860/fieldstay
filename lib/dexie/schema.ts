@@ -172,13 +172,7 @@ export type MutationTable =
   | 'turnovers'
   | 'checklist_instances'
   | 'work_order_reports'
-  // Legacy: the crew turnover tab used to write current_quantity per item.
-  // No crew surface enqueues this any more — the whole count now goes through
-  // 'inventory_counts' — but the handler stays for one release so a mutation
-  // already queued on a device drains instead of dead-lettering as NO_HANDLER.
-  | 'inventory_items'
   | 'inventory_counts'
-  | 'crew_availability'
   | 'property_assets'
   | 'crew_work_orders'
   | 'messages'

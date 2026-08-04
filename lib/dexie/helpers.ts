@@ -38,7 +38,6 @@ async function writeAndQueue(
     db.turnovers,
     db.checklist_instances,
     db.checklist_instance_items,
-    db.inventory_items,
     db.crew_work_orders,
     db.property_assets,
     db.sync_meta,

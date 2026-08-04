@@ -43,10 +43,10 @@ const SERVER_FAIL = { error: { message: 'server exploded', code: 'XX000' } }
 
 async function seedMutation(overrides: Partial<MutationRow> = {}): Promise<number> {
   const id = await db().mutations.add({
-    table:      'inventory_items',
+    table:      'checklist_instance_items',
     targetId:   'item1',
     op:         'PATCH',
-    payload:    { current_quantity: 3 },
+    payload:    { is_completed: 1 },
     createdAt:  new Date(NOW).toISOString(),
     retryCount: 0,
     ...overrides,
@@ -86,7 +86,7 @@ describe('outbox durability — offline attempts', () => {
     const id = await seedMutation()
     // Any queued response here would be a bug to consume — offline means
     // the drain must not touch the network at all.
-    holder.supabase = makeFakeSupabase({ inventory_items: [UPLOAD_OK] })
+    holder.supabase = makeFakeSupabase({ checklist_instance_items: [UPLOAD_OK] })
     setOnline(false)
 
     const engine = new SyncEngine('u1')
@@ -106,7 +106,7 @@ describe('outbox durability — offline attempts', () => {
     const engine = new SyncEngine('u1')
     await engine.processOutbox()
 
-    holder.supabase = makeFakeSupabase({ inventory_items: [UPLOAD_OK] })
+    holder.supabase = makeFakeSupabase({ checklist_instance_items: [UPLOAD_OK] })
     setOnline(true)
     await engine.processOutbox()
 
@@ -122,7 +122,7 @@ describe('outbox durability — offline attempts', () => {
       // Generous: each loop iteration below drains twice (the direct call
       // plus the backoff timer it scheduled), and an exhausted queue would
       // fall back to a success-shaped empty response.
-      inventory_items: Array.from({ length: 400 }, () => ({ error: { message: 'TypeError: Failed to fetch' } })),
+      checklist_instance_items: Array.from({ length: 400 }, () => ({ error: { message: 'TypeError: Failed to fetch' } })),
     })
 
     const engine = new SyncEngine('u1')
@@ -142,7 +142,7 @@ describe('outbox durability — offline attempts', () => {
   it('a genuine server rejection still dead-letters at MAX_RETRIES', async () => {
     const id = await seedMutation()
     holder.supabase = makeFakeSupabase({
-      inventory_items: Array.from({ length: 10 }, () => SERVER_FAIL),
+      checklist_instance_items: Array.from({ length: 10 }, () => SERVER_FAIL),
     })
 
     const engine = new SyncEngine('u1')

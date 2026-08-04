@@ -23,11 +23,11 @@ beforeEach(() => {
 describe('pending-mutation shadowing', () => {
   it('rebases a queued local write over the freshly-pulled server row', async () => {
     await db().mutations.add({
-      table: 'inventory_items', targetId: 'i1', op: 'PATCH',
+      table: 'inventory_counts', targetId: 'i1', op: 'PUT',
       payload: { current_quantity: 7 }, createdAt: '2026-07-30T00:00:00Z', retryCount: 0,
     })
 
-    const [row] = await shadowPendingMutations('u1', 'inventory_items', [
+    const [row] = await shadowPendingMutations('u1', 'inventory_counts', [
       { id: 'i1', current_quantity: 2, name: 'Towels' },
     ])
 
@@ -39,11 +39,11 @@ describe('pending-mutation shadowing', () => {
   it('applies queued mutations in insertion order, so the newest value wins', async () => {
     for (const qty of [4, 9]) {
       await db().mutations.add({
-        table: 'inventory_items', targetId: 'i1', op: 'PATCH',
+        table: 'inventory_counts', targetId: 'i1', op: 'PUT',
         payload: { current_quantity: qty }, createdAt: '2026-07-30T00:00:00Z', retryCount: 0,
       })
     }
-    const [row] = await shadowPendingMutations('u1', 'inventory_items', [{ id: 'i1', current_quantity: 2 }])
+    const [row] = await shadowPendingMutations('u1', 'inventory_counts', [{ id: 'i1', current_quantity: 2 }])
     expect(row).toMatchObject({ current_quantity: 9 })
   })
 
@@ -69,7 +69,7 @@ describe('pending-mutation shadowing', () => {
 
   it('leaves rows with no queued mutation untouched', async () => {
     const rows = [{ id: 'i9', current_quantity: 2 }]
-    expect(await shadowPendingMutations('u1', 'inventory_items', rows)).toBe(rows)
+    expect(await shadowPendingMutations('u1', 'inventory_counts', rows)).toBe(rows)
   })
 })
 

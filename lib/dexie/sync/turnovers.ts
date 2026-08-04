@@ -208,10 +208,11 @@ async function syncScopeReferenceData(
     reportError(new Error('inventory fetch failed'), { site: 'dexie.sync.turnovers.inventory' })
     return false
   }
-  // Shadowed: a crew member's queued-but-unpushed count must not be reverted
-  // in front of them by a routine pull.
+  // A plain bulkPut, not bulkPutShadowed: there is no inventory_items mutation
+  // type any more, so nothing can be pending to replay over these rows. A
+  // count is staged locally and submitted as an inventory_counts row instead.
   if (inventory.length) {
-    await bulkPutShadowed(db.inventory_items, userId, 'inventory_items', inventory as InventoryItemRow[])
+    await db.inventory_items.bulkPut(inventory as InventoryItemRow[])
   }
   await rememberScope(userId, 'scope:inventory_items', propertyIds)
   return true
