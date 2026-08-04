@@ -49,6 +49,10 @@ function makeSupabase(queue: Record<string, Resp[]>) {
       })
     }
     chain.single = vi.fn(() => Promise.resolve(result))
+    // The token lookups use maybeSingle() + tryUnwrap() so that a query ERROR
+    // is distinguishable from "no such token" — destructuring data alone made
+    // a DB outage render as "Invalid or expired link".
+    chain.maybeSingle = vi.fn(() => Promise.resolve(result))
     chain.then   = (resolve: (v: unknown) => unknown) => Promise.resolve(result).then(resolve)
     return chain
   })

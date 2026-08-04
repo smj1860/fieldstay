@@ -5,6 +5,8 @@ import { workOrderRatelimit, checkLimit } from '@/lib/rate-limit'
 import { extractClientIp } from '@/lib/integrations/webhook-verification'
 import { finalizeVendorCompletion, type CompletionResult } from './helpers'
 import { reportError } from '@/lib/observability/report-error'
+import { platformFeePct } from '@/lib/stripe/platform-fee'
+import { tryUnwrap } from '@/lib/supabase/unwrap'
 
 /**
  * POST /api/work-orders/[token]/complete
@@ -33,13 +35,31 @@ export async function POST(
 
   const supabase = createServiceClient({ publicSurface: 'api-work-orders--token--complete' })
 
-  // Validate token
-  const { data: workOrder } = await supabase
+  // Validate token.
+  //
+  // tryUnwrap, not `const { data } = await …`: destructuring data alone
+  // collapsed "the query errored" and "no such token" into the same null, so
+  // any DB failure — pool exhaustion, statement timeout, a Supabase blip —
+  // told the contractor their link was invalid, with nothing logged and
+  // nothing reported. They abandon the submission or call the PM, who then
+  // tests the same link successfully and finds nothing wrong. An outage on
+  // the vendor completion path was invisible in monitoring and misattributed
+  // to token expiry by the only person who ever saw it.
+  const workOrderRes = await supabase
     .from('work_orders')
     .select('id, org_id, property_id, vendor_id, status, portal_enabled, completion_token_expires_at')
     .eq('completion_token', token)
-    .single()
+    .maybeSingle()
 
+  const lookup = tryUnwrap(workOrderRes, { site: 'route.work-orders.complete.token' })
+  if (!lookup.ok) {
+    return NextResponse.json(
+      { error: 'Service temporarily unavailable. Please try again.' },
+      { status: 503 },
+    )
+  }
+
+  const workOrder = lookup.data
   if (!workOrder) {
     return NextResponse.json({ error: 'Invalid or expired link' }, { status: 404 })
   }
@@ -62,13 +82,25 @@ export async function POST(
   // Verify the assigned vendor's org matches the work order's org before any
   // invoice record can be created against it.
   if (workOrder.vendor_id) {
-    const { data: vendorRow } = await supabase
+    const vendorRes = await supabase
       .from('vendors')
       .select('org_id')
       .eq('id', workOrder.vendor_id)
-      .single()
+      .maybeSingle()
 
-    if (!vendorRow || vendorRow.org_id !== workOrder.org_id) {
+    // Same reason as the token lookup above: a failed query must not be
+    // reported as an authorization decision. Failing closed here was at least
+    // safe, but it told the contractor they were "not authorized" for what was
+    // actually an outage — and logged nothing either way.
+    const vendorLookup = tryUnwrap(vendorRes, { site: 'route.work-orders.complete.vendor' })
+    if (!vendorLookup.ok) {
+      return NextResponse.json(
+        { error: 'Service temporarily unavailable. Please try again.' },
+        { status: 503 },
+      )
+    }
+
+    if (!vendorLookup.data || vendorLookup.data.org_id !== workOrder.org_id) {
       return NextResponse.json({ error: 'Vendor not authorized for this work order' }, { status: 403 })
     }
   }
@@ -215,7 +247,10 @@ export async function POST(
   // What stays HERE is everything that must not be rolled back by a later DB
   // failure, and must not fire from inside a transaction that might abort:
   // token validation, payload validation, the audit log, and event dispatch.
-  const platformFeePct = Number.parseFloat(process.env.STRIPE_PLATFORM_FEE_PCT ?? '0') / 100
+  // Validated + reported rather than parsed inline: a malformed value used to
+  // become NaN here, serialize to JSON null, and get COALESCEd to a 0% fee on
+  // every invoice with nothing logged anywhere.
+  const feePct = platformFeePct()
 
   const { data: rpcResult, error: rpcError } = await supabase.rpc('complete_work_order_via_token', {
     p_work_order_id:     workOrder.id,
@@ -224,7 +259,7 @@ export async function POST(
     // p_notes is a plain `text` parameter — NULL means "no notes given".
     p_notes:             nullableArg(notes),
     p_completed_by_name: completedByName,
-    p_platform_fee_pct:  platformFeePct,
+    p_platform_fee_pct:  feePct,
   })
 
   if (rpcError || !rpcResult) {
@@ -269,7 +304,9 @@ export async function GET(
   const { token } = await params
   const supabase = createServiceClient({ publicSurface: 'api-work-orders--token--complete' })
 
-  const { data: workOrder } = await supabase
+  // Same conflation as POST: without separating the error from the empty
+  // result, an outage renders the vendor portal page as "Not found".
+  const workOrderRes = await supabase
     .from('work_orders')
     .select(`
       id, title, description, status, portal_enabled,
@@ -277,8 +314,17 @@ export async function GET(
       properties (name, city, state)
     `)
     .eq('completion_token', token)
-    .single()
+    .maybeSingle()
 
+  const lookup = tryUnwrap(workOrderRes, { site: 'route.work-orders.complete.token.GET' })
+  if (!lookup.ok) {
+    return NextResponse.json(
+      { error: 'Service temporarily unavailable. Please try again.' },
+      { status: 503 },
+    )
+  }
+
+  const workOrder = lookup.data
   if (!workOrder || !workOrder.portal_enabled) {
     return NextResponse.json({ error: 'Not found' }, { status: 404 })
   }
