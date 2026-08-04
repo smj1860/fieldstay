@@ -239,8 +239,8 @@ const failures = []
 
 const newLocalOnly = localOnly.filter((v) => !frozenLocalOnly.has(v))
 const newLedgerOnly = ledgerOnly.filter((v) => !frozenLedgerOnly.has(v))
-const staleLocalOnly = [...frozenLocalOnly].filter((v) => !localOnly.includes(v)).sort()
-const staleLedgerOnly = [...frozenLedgerOnly].filter((v) => !ledgerOnly.includes(v)).sort()
+const staleLocalOnly = sorted([...frozenLocalOnly].filter((v) => !localOnly.includes(v)))
+const staleLedgerOnly = sorted([...frozenLedgerOnly].filter((v) => !ledgerOnly.includes(v)))
 
 // Built once, not re-read per offending version — 70 findings would otherwise
 // be 70 directory scans.
@@ -295,10 +295,13 @@ if (failures.length > 0) {
 }
 
 const frozenTotal = frozenLocalOnly.size + frozenLedgerOnly.size
+const plural = frozenTotal === 1 ? '' : 's'
+const parityNote =
+  frozenTotal > 0
+    ? `, ${frozenTotal} frozen pre-existing divergence${plural} unchanged.`
+    : ', exact 1:1 parity.'
+
 console.log(
   `Migration ledger OK for ${frozen.label ?? projectRef} — ${localVersions.size} local files, ` +
-    `${ledgerVersions.size} ledger rows` +
-    (frozenTotal > 0
-      ? `, ${frozenTotal} frozen pre-existing divergence${frozenTotal === 1 ? '' : 's'} unchanged.`
-      : ', exact 1:1 parity.')
+    `${ledgerVersions.size} ledger rows${parityNote}`
 )
