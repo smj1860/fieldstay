@@ -212,7 +212,31 @@ describe('handleTurnoverCompleted — record-crew-duration', () => {
         return { select: vi.fn(() => ({ eq: vi.fn(() => ({ eq: vi.fn(() => ({ maybeSingle: vi.fn(() => Promise.resolve(opts.checklistInstance ?? { data: null, error: null })) })) })) })) }
       }
       if (table === 'checklist_instance_items') {
-        return { select: vi.fn(() => ({ eq: vi.fn(() => ({ not: vi.fn(() => ({ limit: vi.fn(() => Promise.resolve(opts.checklistItems ?? { data: [], error: null })) })) })) })) }
+        // The step asks the DB for the earliest and latest completed_at — two
+        // bounded reads — rather than pulling every item and sorting in
+        // memory. Fixtures stay a plain array of items; this double answers
+        // from it the way .order(...).limit(1) would, so each test still
+        // expresses its case as "these are the item completions".
+        const res = opts.checklistItems ?? { data: [], error: null }
+        const pick = (ascending: boolean) => {
+          if (res.error) return { data: null, error: res.error }
+          const rows = [...((res.data as { completed_at: string }[] | null) ?? [])]
+            .sort((a, b) => a.completed_at.localeCompare(b.completed_at))
+          return { data: (ascending ? rows[0] : rows[rows.length - 1]) ?? null, error: null }
+        }
+        return {
+          select: vi.fn(() => ({
+            eq: vi.fn(() => ({
+              not: vi.fn(() => ({
+                order: vi.fn((_col: string, o: { ascending: boolean }) => ({
+                  limit: vi.fn(() => ({
+                    maybeSingle: vi.fn(() => Promise.resolve(pick(o.ascending))),
+                  })),
+                })),
+              })),
+            })),
+          })),
+        }
       }
       if (table === 'inventory_items') {
         return { select: vi.fn(() => ({ eq: vi.fn(() => ({ gt: vi.fn(() => ({ order: vi.fn(() => ({ limit: vi.fn(() => ({ maybeSingle: vi.fn(() => Promise.resolve(opts.lastInventoryEdit ?? { data: null, error: null })) })) })) })) })) })) }
