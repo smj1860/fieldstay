@@ -933,7 +933,7 @@ const { supabase, crew, user } = auth
 (`inventory_item_id`, `quantity_counted`) is now the only one, used by the PM's
 own counts and by the crew route. The parallel `inventory_count_drafts` /
 `inventory_count_draft_items` pair — with its own, different column vocabulary —
-was dropped by `20260804120000_drop_inventory_count_drafts.sql`: it was
+was dropped by `20260804125424_drop_inventory_count_drafts.sql`: it was
 unreachable (its only writer was a crew page nothing linked to), held zero rows,
 and gated crew counts behind a PM approval that product never wanted.
 
