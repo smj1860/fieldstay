@@ -77,7 +77,7 @@ export function InventoryView({
                             onChange={(e) => {
                               const raw = e.target.value.trim()
                               if (raw === '') return void handleCountChange(item.id, null)
-                              const parsed = parseInt(raw, 10)
+                              const parsed = Number.parseInt(raw, 10)
                               if (!Number.isNaN(parsed)) void handleCountChange(item.id, parsed)
                             }}
                             onKeyDown={(e) => {

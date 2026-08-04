@@ -32,10 +32,10 @@ export function CrewMessagesView({
   const dexieUserId = useDexieUserId()
   const router      = useRouter()
 
-  const [draft, setDraft]         = useState('')
-  const [draftLoaded, setLoaded]  = useState(false)
-  const [sendError, setSendError] = useState<string | null>(null)
-  const bottomRef                 = useRef<HTMLDivElement>(null)
+  const [draft, setDraft]             = useState('')
+  const [draftLoaded, setDraftLoaded] = useState(false)
+  const [sendError, setSendError]     = useState<string | null>(null)
+  const bottomRef                     = useRef<HTMLDivElement>(null)
 
   // Queued-but-unsent messages. `failed` ones are deliberately included: that
   // message has NOT reached the server either, so hiding it would tell the
@@ -50,8 +50,8 @@ export function CrewMessagesView({
   useEffect(() => {
     let cancelled = false
     void loadMessageDraft(dexieUserId)
-      .then((saved) => { if (!cancelled) { setDraft(saved); setLoaded(true) } })
-      .catch(() => { if (!cancelled) setLoaded(true) })
+      .then((saved) => { if (!cancelled) { setDraft(saved); setDraftLoaded(true) } })
+      .catch(() => { if (!cancelled) setDraftLoaded(true) })
     return () => { cancelled = true }
   }, [dexieUserId])
 

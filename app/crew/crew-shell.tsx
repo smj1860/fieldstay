@@ -407,7 +407,7 @@ export function CrewShell({
  * `messages` had to be cached on the device at all — 500 rows every five
  * minutes to keep one number current. A badge does not need to be live.
  */
-function CrewBottomNav({ unreadCount, onHelpClick }: { unreadCount: number; onHelpClick: () => void }) {
+function CrewBottomNav({ unreadCount, onHelpClick }: Readonly<{ unreadCount: number; onHelpClick: () => void }>) {
   const pathname = usePathname()
 
   const tabs = [
