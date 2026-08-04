@@ -35,7 +35,7 @@ const CREW_SYNC_V2 = process.env.NEXT_PUBLIC_CREW_SYNC_V2 === 'true'
  *
  * Runs on BOTH sync paths. It used to be v2-only, which meant the shipping
  * (flag-off) configuration had no safety poll at all: messages,
- * crew_availability, inventory_items and properties refreshed only on mount
+ * inventory_items and properties refreshed only on mount
  * and on `online`, and the crew-sync-coverage guardrail asserted a mechanism
  * that wasn't running. */
 const SAFETY_POLL_INTERVAL_MS = 5 * 60_000

@@ -39,7 +39,6 @@ async function writeAndQueue(
     db.checklist_instances,
     db.checklist_instance_items,
     db.inventory_items,
-    db.crew_availability,
     db.crew_work_orders,
     db.property_assets,
     db.sync_meta,
@@ -444,62 +443,4 @@ export async function submitWorkOrderReport(
     title:        report.title,
     is_emergency: report.isEmergency,
   })
-}
-
-/**
- * Creates or updates a crew_availability row. When `id` is omitted a new row
- * is created (queued as a PUT carrying org_id, which SyncEngine's
- * crew_availability handler treats as a full upsert); when `id` is provided
- * an existing row is patched (queued without org_id, which SyncEngine treats
- * as a partial update).
- */
-export async function saveCrewAvailability(
-  userId: string,
-  params: {
-    id?:           string
-    orgId:         string
-    crewMemberId:  string
-    date:          string
-    isAvailable:   boolean
-    notes:         string | null
-  },
-): Promise<void> {
-  const isAvailable = params.isAvailable ? 1 : 0
-
-  if (params.id) {
-    const existingId = params.id
-    await writeAndQueue(
-      userId, 'crew_availability', existingId, 'PATCH',
-      { is_available: isAvailable, notes: params.notes },
-      (db) => db.crew_availability.update(existingId, {
-        is_available: isAvailable,
-        notes:        params.notes ?? '',
-      }),
-    )
-    return
-  }
-
-  const id = crypto.randomUUID()
-  const createdAt = new Date().toISOString()
-
-  await writeAndQueue(
-    userId, 'crew_availability', id, 'PUT',
-    {
-      org_id:         params.orgId,
-      crew_member_id: params.crewMemberId,
-      available_date: params.date,
-      is_available:   isAvailable,
-      notes:          params.notes,
-      created_at:     createdAt,
-    },
-    (db) => db.crew_availability.add({
-      id,
-      org_id:         params.orgId,
-      crew_member_id: params.crewMemberId,
-      available_date: params.date,
-      is_available:   isAvailable,
-      notes:          params.notes ?? '',
-      created_at:     createdAt,
-    }),
-  )
 }

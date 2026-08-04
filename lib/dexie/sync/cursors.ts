@@ -75,7 +75,7 @@ export function partitionByKnown(
 /**
  * Which cursors gate the pull that would re-fetch a given mutation's table.
  * Tables pulled in full every time (inventory_items, properties,
- * crew_availability, property_assets) have no cursor and so need no rewind.
+ * property_assets) have no cursor and so need no rewind.
  */
 const CURSORS_BY_MUTATION_TABLE: Readonly<Partial<Record<MutationTable, readonly SyncCursorKey[]>>> = {
   turnovers:                ['cursor:turnovers'],

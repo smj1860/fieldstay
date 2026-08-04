@@ -1,28 +1,31 @@
 'use client'
 
-import { useState, useMemo } from 'react'
-import { useLiveQuery } from 'dexie-react-hooks'
-import { useDexieDb, useDexieUserId } from '@/lib/dexie/context'
-import { saveCrewAvailability } from '@/lib/dexie/helpers'
+import { useState, useMemo, useTransition } from 'react'
+import { useRouter } from 'next/navigation'
+import { saveCrewAvailability } from '@/app/crew/availability/actions'
 import { ChevronLeft, ChevronRight, XCircle, CheckCircle2 } from 'lucide-react'
 import { Button } from '@/components/ui/Button'
 import { Input } from '@/components/ui/Input'
 
-interface Props {
-  crewMemberId: string
-  orgId:        string
-}
-
-type AvailRow = {
+export type AvailRow = {
   id:             string
   available_date: string
-  is_available:   number   // 1 = available, 0 = not
+  is_available:   boolean
   notes:          string | null
 }
 
-export function TimeOffRequest({ crewMemberId, orgId }: Readonly<Props>) {
-  const db     = useDexieDb()
-  const userId = useDexieUserId()
+/**
+ * Rows come from the server (app/crew/availability/page.tsx), not the Dexie
+ * cache — time off is deliberately online-only, so there is nothing to sync to
+ * the device for it. See app/crew/availability/actions.ts.
+ *
+ * crewMemberId/orgId used to be props threaded through to the write; the
+ * server action derives both from the authenticated crew context instead, so
+ * the client no longer names the org it's writing to.
+ */
+export function TimeOffRequest({ rows }: Readonly<{ rows: AvailRow[] }>) {
+  const router = useRouter()
+  const [pending, startTransition] = useTransition()
 
   const [weekOffset, setWeekOffset] = useState(0) // 0 = current week, 1 = next, -1 = prev
 
@@ -45,22 +48,18 @@ export function TimeOffRequest({ crewMemberId, orgId }: Readonly<Props>) {
     }
   }, [weekOffset])
 
-  // Read existing availability records for this window from the local cache
-  const existingRows = useLiveQuery(
-    () => db.crew_availability
-      .where('crew_member_id').equals(crewMemberId)
-      .filter((r) => r.available_date >= windowStart && r.available_date <= windowEnd)
-      .toArray() as unknown as Promise<AvailRow[]>,
-    [crewMemberId, windowStart, windowEnd]
+  // Existing records for the visible 7-day window.
+  const existingRows = useMemo(
+    () => rows.filter((r) => r.available_date >= windowStart && r.available_date <= windowEnd),
+    [rows, windowStart, windowEnd]
   )
 
-  // Read upcoming time-off records beyond the 7-day window (for the list below)
-  const upcomingTimeOff = useLiveQuery(
-    () => db.crew_availability
-      .where('crew_member_id').equals(crewMemberId)
-      .filter((r) => r.available_date > windowEnd && r.is_available === 0)
-      .sortBy('available_date') as unknown as Promise<AvailRow[]>,
-    [crewMemberId, windowEnd]
+  // Time off booked beyond the visible window (for the list below).
+  const upcomingTimeOff = useMemo(
+    () => rows
+      .filter((r) => r.available_date > windowEnd && !r.is_available)
+      .sort((a, b) => a.available_date.localeCompare(b.available_date)),
+    [rows, windowEnd]
   )
 
   // Local draft state — what the crew member has selected but not yet saved
@@ -82,7 +81,7 @@ export function TimeOffRequest({ crewMemberId, orgId }: Readonly<Props>) {
 
   const existingMap = useMemo(() => {
     const m = new Map<string, AvailRow>()
-    for (const row of existingRows ?? []) m.set(row.available_date, row)
+    for (const row of existingRows) m.set(row.available_date, row)
     return m
   }, [existingRows])
 
@@ -104,7 +103,7 @@ export function TimeOffRequest({ crewMemberId, orgId }: Readonly<Props>) {
       }
 
       // Add to draft — flip from whatever the current DB state is
-      const dbIsTimeOff = existing ? existing.is_available === 0 : false
+      const dbIsTimeOff = existing ? !existing.is_available : false
       return {
         ...prev,
         [dateStr]: {
@@ -130,18 +129,24 @@ export function TimeOffRequest({ crewMemberId, orgId }: Readonly<Props>) {
       for (const [dateStr, change] of Object.entries(draft)) {
         const existing = existingMap.get(dateStr)
 
-        await saveCrewAvailability(userId, {
-          id:           existing?.id,
-          orgId,
-          crewMemberId,
-          date:         dateStr,
-          isAvailable:  !change.timeOff,
-          notes:        change.note || null,
+        const { error } = await saveCrewAvailability({
+          id:          existing?.id,
+          date:        dateStr,
+          isAvailable: !change.timeOff,
+          notes:       change.note || null,
         })
+        // Stop on the first failure rather than pressing on: the days that did
+        // save are already committed, and clearing the draft would hide the
+        // ones that didn't.
+        if (error) {
+          setSaveError(error)
+          return
+        }
       }
 
       setDraft({})
       setSavedAt(new Date())
+      startTransition(() => router.refresh())
     } catch (err) {
       setSaveError('Failed to save — please try again')
       console.error('[TimeOffRequest] save error:', err)
@@ -154,14 +159,17 @@ export function TimeOffRequest({ crewMemberId, orgId }: Readonly<Props>) {
     setCancellingId(row.id)
     setCancelError(null)
     try {
-      await saveCrewAvailability(userId, {
-        id:           row.id,
-        orgId,
-        crewMemberId,
-        date:         row.available_date,
-        isAvailable:  true,
-        notes:        null,
+      const { error } = await saveCrewAvailability({
+        id:          row.id,
+        date:        row.available_date,
+        isAvailable: true,
+        notes:       null,
       })
+      if (error) {
+        setCancelError(error)
+        return
+      }
+      startTransition(() => router.refresh())
     } catch (err) {
       setCancelError('Failed to cancel — please try again')
       console.error('[TimeOffRequest] cancel error:', err)
@@ -221,7 +229,7 @@ export function TimeOffRequest({ crewMemberId, orgId }: Readonly<Props>) {
           const isTimeOff = draftItem
             ? draftItem.timeOff
             : existing
-            ? existing.is_available === 0
+            ? !existing.is_available
             : false
 
           const noteValue = draftItem?.note ?? existing?.notes ?? ''
@@ -285,7 +293,7 @@ export function TimeOffRequest({ crewMemberId, orgId }: Readonly<Props>) {
           <Button
             variant="cta"
             onClick={saveChanges}
-            disabled={saving}
+            disabled={saving || pending}
             className="w-full py-3 text-sm active:scale-95"
           >
             {saving ? 'Saving…' : 'Save Changes'}
@@ -303,13 +311,13 @@ export function TimeOffRequest({ crewMemberId, orgId }: Readonly<Props>) {
       )}
 
       {/* Upcoming time off (beyond the 14-day window) */}
-      {(upcomingTimeOff?.length ?? 0) > 0 && (
+      {upcomingTimeOff.length > 0 && (
         <div className="mt-6">
           <h3 className="text-sm font-semibold text-muted-themed uppercase tracking-wide mb-3">
             Upcoming Time Off
           </h3>
           <div className="space-y-2">
-            {upcomingTimeOff?.map((row) => (
+            {upcomingTimeOff.map((row) => (
               <div
                 key={row.id}
                 className="flex items-center justify-between bg-card-themed
@@ -328,7 +336,7 @@ export function TimeOffRequest({ crewMemberId, orgId }: Readonly<Props>) {
                 <Button
                   variant="danger"
                   onClick={() => cancelUpcoming(row)}
-                  disabled={cancellingId === row.id}
+                  disabled={cancellingId === row.id || pending}
                   className="text-xs px-3 py-2"
                 >
                   {cancellingId === row.id ? 'Cancelling…' : 'Cancel'}

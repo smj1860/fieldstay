@@ -86,16 +86,6 @@ export interface PropertyRow {
   timezone: string   // IANA identifier, e.g. "America/Chicago" — see lib/utils/timezone.ts
 }
 
-export interface CrewAvailabilityRow {
-  id:             string
-  org_id:         string
-  crew_member_id: string
-  available_date: string
-  is_available:   number
-  notes:          string
-  created_at:     string
-}
-
 export interface MessageRow {
   id:           string
   org_id:       string
@@ -246,7 +236,6 @@ export class FieldStayDexie extends Dexie {
   checklist_instance_items!: Table<ChecklistInstanceItemRow, string>
   inventory_items!:          Table<InventoryItemRow, string>
   properties!:               Table<PropertyRow, string>
-  crew_availability!:        Table<CrewAvailabilityRow, string>
   messages!:                 Table<MessageRow, string>
   pending_photo_uploads!:    Table<PendingPhotoUploadRow, string>
   mutations!:                Table<MutationRow, number>
@@ -403,6 +392,21 @@ export class FieldStayDexie extends Dexie {
             .modify((p: PendingPhotoUploadRow) => { p.failed = p.failed ? 1 : 0 }),
         ]).then(() => undefined),
       )
+
+    // crew_availability leaves the crew cache entirely. Time off is now an
+    // online-only screen: app/crew/availability reads its rows server-side and
+    // writes through a Server Action, so nothing on the device reads this
+    // store. It was the second-heaviest thing the five-minute safety poll
+    // pulled — a full 30-days-back-to-a-year-forward window, uncursored, on
+    // every tick — to back a screen that needs a connection to be useful.
+    //
+    // The `crew_availability` UPLOAD_HANDLERS entries deliberately REMAIN for
+    // one release: a mutation queued before this deploy lives in `mutations`,
+    // not in the store being dropped here, and must still drain rather than
+    // dead-letter as NO_HANDLER.
+    this.version(10).stores({
+      crew_availability: null,
+    })
   }
 }
 
@@ -420,7 +424,6 @@ export const CREW_SYNCED_TABLES: Readonly<Record<string, string>> = {
   checklist_instance_items: 'checklist_instance_items',
   inventory_items:          'inventory_items',
   properties:                'properties',
-  crew_availability:        'crew_availability',
   messages:                 'messages',
   crew_work_orders:         'work_orders',
   property_assets:          'property_assets',

@@ -3,6 +3,18 @@ import { redirect }        from 'next/navigation'
 import { createClient }    from '@/lib/supabase/server'
 import { TimeOffRequest }  from '@/components/crew/time-off-request'
 
+/**
+ * Time off is an online-only screen — see ./actions.ts for why. Rows are read
+ * here rather than from the Dexie cache, so crew_availability no longer has to
+ * be synced to every crew device on a five-minute poll to back a screen that
+ * needs a connection to be useful anyway.
+ */
+export const dynamic = 'force-dynamic'
+
+/** The window the crew calendar can actually navigate to. */
+const LOOKBACK_DAYS  = 30
+const LOOKAHEAD_DAYS = 365
+
 export default async function CrewAvailabilityPage() {
   const supabase                = await createClient()
   const { data: { user } }      = await supabase.auth.getUser()
@@ -19,12 +31,35 @@ export default async function CrewAvailabilityPage() {
   const crewMember = unwrap(crewMemberRes, { site: 'page.crew.availability' })
   if (!crewMember) redirect('/login')
 
+  // `new Date()` rather than `Date.now()` arithmetic — the latter trips
+  // react-hooks/purity in a Server Component render, and this matches how the
+  // dashboard's other server pages build their date windows.
+  const fromDate = new Date()
+  fromDate.setDate(fromDate.getDate() - LOOKBACK_DAYS)
+  const toDate = new Date()
+  toDate.setDate(toDate.getDate() + LOOKAHEAD_DAYS)
+
+  const from = fromDate.toISOString().slice(0, 10)
+  const to   = toDate.toISOString().slice(0, 10)
+
+  // Own rows only — crew_member_id is the isolation guard, the same one the
+  // sync function this replaces relied on.
+  const availabilityRes = await supabase
+    .from('crew_availability')
+    .select('id, available_date, is_available, notes')
+    .eq('crew_member_id', crewMember.id as string)
+    .gte('available_date', from)
+    .lte('available_date', to)
+    .order('available_date', { ascending: true })
+
+  const availability = unwrap(availabilityRes, {
+    site:  'page.crew.availability.rows',
+    orgId: crewMember.org_id as string,
+  })
+
   return (
     <div className="px-4 pt-4 pb-24">
-      <TimeOffRequest
-        crewMemberId={crewMember.id as string}
-        orgId={crewMember.org_id as string}
-      />
+      <TimeOffRequest rows={availability ?? []} />
     </div>
   )
 }

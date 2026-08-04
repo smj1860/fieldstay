@@ -181,7 +181,9 @@ turnovers                   — Has turnover_status, is_same_day_turnover,
                               suggested_crew_ids, suggestion_reasoning, suggestion_status
 turnover_assignments        — crew → turnover join
 crew_members                — Has home_lat/lng, reliability_score, capacity_score
-crew_availability           — crew marks available/unavailable by date
+crew_availability           — crew marks available/unavailable by date. NOT in the crew
+                              Dexie cache: time off is an online-only screen (server-rendered
+                              rows + a Server Action), so it is not synced to devices
 assignment_outcomes         — learning loop: PM accepts/overrides, duration from
                               checklist timestamps, pm_rating
 ```

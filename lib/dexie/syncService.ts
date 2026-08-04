@@ -731,6 +731,12 @@ async function uploadPropertyAssetPhotoUpdate(
   }
 }
 
+/**
+ * Legacy time-off write. Time off is an online-only screen now
+ * (app/crew/availability), so no crew surface enqueues this any more — but the
+ * handler stays for one release so a mutation already sitting in a device's
+ * outbox drains instead of dead-lettering as NO_HANDLER.
+ */
 async function uploadCrewAvailability(
   supabase: DexieSupabaseClient,
   targetId: string,

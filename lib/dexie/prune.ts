@@ -21,9 +21,6 @@ import { deletePendingPhotoBlob, listPendingPhotoBlobKeys } from './photo-queue'
 import { invalidateCursorsFor } from './sync/cursors'
 import { MESSAGE_WINDOW_DAYS } from './sync/messages'
 
-/** Matches syncCrewAvailability's own 30-day lookback. */
-const AVAILABILITY_RETENTION_DAYS = 30
-
 /**
  * How long a dead-lettered mutation / failed photo stays on the device
  * before it's collected. Long enough that a crew member who only opens the
@@ -71,14 +68,6 @@ export async function pruneLocalCache(userId: string): Promise<void> {
   const messages = await db.messages.toArray()
   await db.messages.bulkDelete(
     messages.filter((m) => m.created_at < messageHorizon).map((m) => m.id)
-  )
-
-  // available_date is a plain date string (YYYY-MM-DD), so a lexical
-  // comparison against the date part of the horizon is the correct one.
-  const availabilityHorizon = daysAgoIso(AVAILABILITY_RETENTION_DAYS).slice(0, 10)
-  const availability = await db.crew_availability.toArray()
-  await db.crew_availability.bulkDelete(
-    availability.filter((a) => a.available_date < availabilityHorizon).map((a) => a.id)
   )
 
   await pruneExpiredDeadLetters(userId)
