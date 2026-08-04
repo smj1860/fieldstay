@@ -139,11 +139,20 @@ describe('guardrail: public token-guessable routes stay rate-limited', () => {
 
 describe('guardrail: every unauthenticated API route has SOME rate limiter', () => {
   // Exempt by construction, each for a reason that is not "we forgot".
+  //
+  // The four app/api/webhooks/* routes used to live here as
+  // "signature-verified". That reasoning does not survive contact with what a
+  // rate limiter is for: a signature proves the request came from the
+  // provider, it does not bound how MANY such requests arrive — and for
+  // app/api/webhooks/[provider] it does not even bound whose data they touch,
+  // because the credential is app-level (Basic Auth / a shared secret set at
+  // app registration) while the payload's own user_id selects which tenant's
+  // integration token gets revoked. One leaked secret was therefore unbounded
+  // mass revocation across every tenant, with nothing to throttle or alert on
+  // it. They are now covered by the '/api/webhooks/' branch in
+  // rateLimiterForPathname(), so the exemptions are deleted rather than
+  // re-justified.
   const EXEMPT = new Map<string, string>([
-    ['app/api/webhooks/stripe/route.ts',         'signature-verified via stripe.webhooks.constructEvent'],
-    ['app/api/webhooks/stripe-connect/route.ts', 'signature-verified via stripe.webhooks.constructEvent'],
-    ['app/api/webhooks/[provider]/route.ts',     'signature-verified via lib/integrations/webhook-verification'],
-    ['app/api/webhooks/telnyx/route.ts',         'signature-verified'],
     ['app/api/inngest/route.ts',                 'internal event runner, Inngest-signed'],
     ['app/api/health/route.ts',                  'no side effects, returns no data'],
   ])
@@ -191,6 +200,28 @@ describe('guardrail: every unauthenticated API route has SOME rate limiter', () 
         ...offenders,
       ].join('\n')
     ).toEqual([])
+  })
+
+  // Pinned separately from the sweep above so removing the branch fails with
+  // the REASON rather than just relisting four paths as offenders.
+  it('provider webhooks are throttled despite being BYPASS_ROUTES', () => {
+    const proxySrc    = read(join(ROOT, 'proxy.ts'))
+    const limiterBody = extractRateLimiterFunctionBody(proxySrc)
+
+    expect(
+      limiterBody,
+      [
+        "rateLimiterForPathname() lost its '/api/webhooks/' branch.",
+        '',
+        'Webhook routes are in BYPASS_ROUTES, so nothing else throttles them —',
+        'the limiter check runs BEFORE the bypass early-return precisely so a',
+        'bypassed route can still be limited. Signature verification is not a',
+        'substitute: it proves the request came from the provider, not how many',
+        'arrived, and for /api/webhooks/[provider] the credential is app-level',
+        "while the payload's user_id picks whose integration token is revoked.",
+        'Without this branch, one leaked secret is unbounded mass revocation.',
+      ].join('\n')
+    ).toMatch(/startsWith\('\/api\/webhooks\/'\)/)
   })
 })
 

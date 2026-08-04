@@ -312,6 +312,30 @@ export const oauthCallbackRatelimit = new Ratelimit({
   prefix:    'rl:oauth-callback',
 })
 
+// Provider webhook deliveries (/api/webhooks/*). These were in BYPASS_ROUTES
+// with no rateLimiterForPathname branch, so they were the one externally-
+// POSTable surface with no throttle at all.
+//
+// The exposure this bounds is specific: webhook authenticity is verified with
+// an APP-LEVEL credential (Basic Auth / a shared signing secret set at app
+// registration), not a per-user one, so the payload's own user_id is what
+// selects whose integration token gets revoked. One leaked credential is
+// therefore "revoke any tenant's integration" — and with no limiter, every
+// tenant's, in a single burst.
+//
+// 600/min per IP is deliberately far above real delivery volume. A provider
+// fans every tenant's events out from a small set of source IPs, so this
+// bucket is shared across the whole platform's traffic from that provider —
+// a tight limit here would drop legitimate deliveries, which for a webhook
+// means a lost event, not a retried one. This is a blast-radius ceiling and
+// an alerting signal, not a precision control.
+export const webhookRatelimit = new Ratelimit({
+  redis,
+  limiter:   Ratelimit.slidingWindow(600, '1 m'),
+  analytics: false,
+  prefix:    'rl:webhook',
+})
+
 // Sign-off action — 5 submissions per 5 minutes per work order token
 // A contractor will never legitimately submit more than once
 export const signOffRatelimit = new Ratelimit({
