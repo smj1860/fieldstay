@@ -845,6 +845,14 @@ verified identical on that date (276/276).
 Write a new file in `supabase/migrations/` named `YYYYMMDDHHMMSS_description.sql`
 and apply it via `supabase db push` against project `vpmznjktllhmmbfnxuvk`.
 
+**Apply it to the E2E project (`syhthijeqlnltufdawyb`) in the same sitting.**
+`scripts/check-type-drift.mjs` runs against E2E, not production, and refuses
+to run against prod at all — so a migration applied only to prod fails CI with
+what looks like a types problem and is really a project-skew one. The rule was
+already in `docs/E2E_SETUP.md` ("keep the E2E project migrated in lockstep");
+it is repeated here because this section naming only the production ref is
+what made it easy to miss.
+
 Always update `types/database.ts` in the same commit as the migration.
 
 ### Known legacy tables
