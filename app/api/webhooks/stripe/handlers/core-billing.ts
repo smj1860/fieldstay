@@ -258,9 +258,12 @@ export async function handleCoreSubscriptionUpdate(
   previousStatus: string | undefined,
 ): Promise<void> {
   const customerId = subscription.customer as string
-  const priceId     = subscription.items.data[0]?.price.id ?? ''
-  const planKey     = getPlanByPriceId(priceId) ?? 'starter'
-  const plan        = planKey as PlanKey
+  // The plan-bearing item, not blindly items.data[0] — an add-on line could
+  // sit in position 0 and mask the real plan price.
+  const priceId    = subscription.items.data.find((i) => getPlanByPriceId(i.price.id))?.price.id
+                     ?? subscription.items.data[0]?.price.id
+                     ?? ''
+  const planKey    = getPlanByPriceId(priceId)
 
   const planStatus = subscription.status === 'active'   ? 'active'
                     : subscription.status === 'trialing' ? 'trialing'
@@ -284,6 +287,38 @@ export async function handleCoreSubscriptionUpdate(
   // do the locked update.
   const org = await resolveSubscriptionOrg(supabase, subscription, customerId, priceId)
   if (!org) return
+
+  // An unrecognized price is NOT Starter.
+  //
+  // This used to be `getPlanByPriceId(priceId) ?? 'starter'`, which wrote
+  // max_properties: 15 over any plan whose price we cannot map. PLANS.enterprise
+  // has monthlyPriceId/annualPriceId of null (it is "contact for pricing"), so
+  // getPlanByPriceId can NEVER return 'enterprise' — every enterprise org was
+  // rewritten to Starter/15 on any subscription event. Promo prices,
+  // grandfathered prices and dashboard-created subscriptions are the same case.
+  //
+  // Status still syncs, because past_due/cancelled must take effect regardless
+  // of whether we can name the tier. Only the entitlement columns are left
+  // alone rather than guessed downward.
+  if (!planKey) {
+    reportError(new Error('Stripe subscription carries an unmapped price id'), {
+      site:  'webhook.stripe.core-billing.unmapped-price',
+      orgId: org.id,
+      extra: { subscription_id: subscription.id, price_id: priceId, plan_status: planStatus },
+    })
+
+    const { error: statusError } = await supabase
+      .from('organizations')
+      .update({ plan_status: planStatus })
+      .eq('id', org.id)
+
+    if (statusError) {
+      throw new Error(`plan_status sync failed for org ${org.id}: ${statusError.message}`)
+    }
+    return
+  }
+
+  const plan = planKey
 
   const previousPlan = await applySubscriptionUpdate(supabase, org, customerId, {
     subscriptionId: subscription.id,
@@ -357,19 +392,50 @@ export async function handleCoreSubscriptionUpdate(
 export async function handleCoreSubscriptionCancelled(
   supabase: StripeSupabaseClient,
   subscription: Stripe.Subscription,
-  customerId: string,
 ): Promise<void> {
-  const { data: org } = await supabase
-    .from('organizations')
-    .select('id')
-    .eq('stripe_customer_id', customerId)
-    .single()
-  if (!org) return
+  const customerId = subscription.customer as string
 
-  await supabase
+  // Metadata first, customer id second — the same resolution order the
+  // create/update path uses, and for the same reason. applySubscriptionUpdate
+  // documents a live case where the customer-id backfill deliberately no-ops
+  // (an org already carrying a DIFFERENT customer id); for such an org,
+  // customer-id-only resolution found nothing and returned silently.
+  //
+  // findOrg throws on a read failure instead of collapsing it into "no org".
+  // This used to be `const { data: org } = await …single()` with the error
+  // discarded, so a transient DB failure produced org === null, the handler
+  // returned, and the route answered Stripe 200 — no retry, plan_status left
+  // 'active' forever, and a cancelled customer kept full entitlement with
+  // nothing logged. findOrg exists in this very file precisely to stop that;
+  // cancellation was the one handler that never got it, and it fails in the
+  // more expensive direction.
+  const metadataOrgId = subscription.metadata?.org_id ?? null
+  const org =
+    (metadataOrgId
+      ? await findOrg(supabase, 'id', metadataOrgId, 'webhook.stripe.core-billing.cancel-by-metadata')
+      : null)
+    ?? await findOrg(supabase, 'stripe_customer_id', customerId, 'webhook.stripe.core-billing.cancel-by-customer')
+
+  if (!org) {
+    // Genuinely unresolvable rather than a read error (findOrg would have
+    // thrown). Report instead of retrying forever.
+    reportError(new Error('Core subscription cancelled for an unresolvable org'), {
+      site:  'webhook.stripe.core-billing.cancel-unresolved',
+      extra: { subscription_id: subscription.id, customer_id: customerId },
+    })
+    return
+  }
+
+  const { error: updateError } = await supabase
     .from('organizations')
     .update({ plan_status: 'cancelled' })
     .eq('id', org.id)
+
+  // Throw so the claim releases and Stripe retries — a silently dropped
+  // cancellation is an entitlement the customer has stopped paying for.
+  if (updateError) {
+    throw new Error(`plan_status cancel failed for org ${org.id}: ${updateError.message}`)
+  }
 
   await logAuditEvent({
     orgId:    org.id,

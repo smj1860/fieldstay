@@ -1,3 +1,4 @@
+import type Stripe from 'stripe'
 import { NextRequest, NextResponse } from 'next/server'
 import { stripe } from '@/lib/stripe/client'
 import { createServiceClient } from '@/lib/supabase/server'
@@ -9,10 +10,6 @@ import {
   handleSponsorPaymentFailed,
   handleSponsorPaymentRecovered,
 } from './handlers/guidebook-sponsor'
-import {
-  handleRepuguardSubscriptionUpdated,
-  handleRepuguardSubscriptionCancelled,
-} from './handlers/repuguard-subscription'
 import {
   handleCheckoutSessionBilling,
   handleCoreSubscriptionUpdate,
@@ -154,16 +151,47 @@ async function onCheckoutSessionCompleted(supabase: ServiceClient, session: Chec
   })
 }
 
+/**
+ * True when this subscription is core billing — i.e. an org's actual plan.
+ *
+ * The discriminator is the ABSENCE of a `feature` tag, not a blacklist of the
+ * features we happen to know about. createCheckoutSession stamps
+ * subscription_data.metadata = { org_id, plan } and nothing else; every
+ * non-core product stamps a `feature` (guidebook_sponsor, and historically
+ * repuguard). Guarding on absence means a future product cannot corrupt core
+ * billing just by not being listed here.
+ *
+ * This is load-bearing. onSubscriptionUpserted used to check ONLY
+ * `feature === 'repuguard'` and let everything else fall through to
+ * handleCoreSubscriptionUpdate. Guidebook sponsor subscriptions carry
+ * `org_id` in subscription_data.metadata (app/actions/guidebook.ts), so
+ * resolveSubscriptionOrg's metadata-first lookup RESOLVED the sponsoring org
+ * and never reached its `getPlanByPriceId` "not one of our plans" guard —
+ * the sponsor's price then fell to the `?? 'starter'` default. Every sponsor
+ * checkout therefore rewrote the sponsoring org to plan 'starter' /
+ * max_properties 15 and overwrote organizations.stripe_subscription_id with
+ * the SPONSOR's subscription id, cutting the org's real plan loose.
+ *
+ * The metadata-first resolution and the sponsor's own org_id were each
+ * correct in isolation; the breakage is in their interaction, which is why
+ * resolveSubscriptionOrg's comment still asserts sponsor subscriptions
+ * "legitimately have no org".
+ */
+function isCoreBillingSubscription(subscription: { metadata?: Stripe.Metadata | null }): boolean {
+  return !subscription.metadata?.feature
+}
+
 async function onSubscriptionUpserted(
   supabase: ServiceClient,
   event:    Extract<StripeEvent, { type: 'customer.subscription.created' | 'customer.subscription.updated' }>,
 ): Promise<void> {
   const subscription = event.data.object
 
-  if (subscription.metadata?.feature === 'repuguard') {
-    await handleRepuguardSubscriptionUpdated(supabase, subscription, event.type)
-    return
-  }
+  // Non-core subscriptions are driven by their own event flows — the sponsor
+  // lifecycle by checkout.session.completed plus the invoice.* events, and
+  // (historically) repuguard by a subscription that no product creates any
+  // more. Neither may reach core billing's entitlement write.
+  if (!isCoreBillingSubscription(subscription)) return
 
   const previousAttributes = event.data.previous_attributes as Partial<{ status: string }> | undefined
   await handleCoreSubscriptionUpdate(supabase, subscription, event.type, previousAttributes?.status)
@@ -172,17 +200,18 @@ async function onSubscriptionUpserted(
 type DeletedSubscription = Extract<StripeEvent, { type: 'customer.subscription.deleted' }>['data']['object']
 
 async function onSubscriptionDeleted(supabase: ServiceClient, subscription: DeletedSubscription): Promise<void> {
-  if (subscription.metadata?.feature === 'repuguard') {
-    await handleRepuguardSubscriptionCancelled(supabase, subscription, 'customer.subscription.deleted')
-    return
-  }
-
   if (subscription.metadata?.feature === 'guidebook_sponsor') {
     await handleSponsorSubscriptionCancelled(subscription)
     return
   }
 
-  await handleCoreSubscriptionCancelled(supabase, subscription, subscription.customer as string)
+  // Any other feature-tagged subscription is not core billing and must not
+  // cancel the org's plan. A legacy repuguard subscription cancelling in
+  // Stripe would otherwise fall through and set the org's core plan_status to
+  // 'cancelled', killing the plan they actually pay for.
+  if (!isCoreBillingSubscription(subscription)) return
+
+  await handleCoreSubscriptionCancelled(supabase, subscription)
 }
 
 type StripeInvoice = Extract<StripeEvent, { type: 'invoice.payment_failed' }>['data']['object']

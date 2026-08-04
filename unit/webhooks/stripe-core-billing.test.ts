@@ -17,7 +17,7 @@ vi.mock('@/lib/audit',            () => ({ logAuditEvent: vi.fn(async () => unde
 vi.mock('@/lib/inngest/helpers',  () => ({ getPmMembers: vi.fn(async () => []) }))
 vi.mock('@/lib/observability/report-error', () => ({ reportError: vi.fn() }))
 
-import { handleCoreSubscriptionUpdate } from '@/app/api/webhooks/stripe/handlers/core-billing'
+import { handleCoreSubscriptionUpdate, handleCoreSubscriptionCancelled } from '@/app/api/webhooks/stripe/handlers/core-billing'
 import type { StripeSupabaseClient } from '@/app/api/webhooks/stripe/handlers/types'
 import type Stripe from 'stripe'
 
@@ -210,5 +210,183 @@ describe('handleCoreSubscriptionUpdate — org resolution', () => {
     await expect(
       run(supabase, subscription({ metadata: { org_id: 'org_1' } })),
     ).rejects.toThrow(/org lookup \(id\) failed/)
+  })
+})
+
+// ── Unmapped price ids ──────────────────────────────────────────────────────
+//
+// `getPlanByPriceId(priceId) ?? 'starter'` treated "I cannot map this price"
+// as "this customer is on the cheapest tier", writing max_properties: 15 over
+// whatever they actually held. PLANS.enterprise has monthlyPriceId/annualPriceId
+// of null (it is "contact for pricing"), so getPlanByPriceId can NEVER return
+// 'enterprise' — every enterprise org was rewritten to Starter/15 on any
+// subscription event. Promo prices, grandfathered prices and dashboard-created
+// subscriptions are the same case.
+describe('handleCoreSubscriptionUpdate — unmapped price ids', () => {
+  beforeEach(() => vi.clearAllMocks())
+
+  it('does NOT write plan or max_properties for a price it cannot map', async () => {
+    const supabase = makeSupabase({
+      organizations: [
+        { data: { id: 'org_1', name: 'Lake Martin' }, error: null }, // by metadata id
+        { data: null, error: null },                                 // backfill update
+        { data: null, error: null },                                 // status-only update
+      ],
+    })
+
+    await run(supabase, subscription({
+      metadata: { org_id: 'org_1' },
+      status:   'active',
+      // An enterprise/custom/grandfathered price — real, ours, unmappable.
+      items:    { data: [{ price: { id: 'price_enterprise_custom' } }] },
+    }))
+
+    // The entitlement RPC — which is what writes plan/max_properties — must
+    // not run at all.
+    expect(supabase.rpc).not.toHaveBeenCalled()
+
+    // Status still syncs: past_due/cancelled must take effect even when the
+    // tier cannot be named. (The FIRST organizations update on this path is
+    // resolveSubscriptionOrg's stripe_customer_id backfill, so match on the
+    // payload rather than on call order.)
+    const updates = supabase.calls
+      .filter((c) => c.table === 'organizations' && c.method === 'update')
+      .map((c) => c.args[0])
+
+    expect(updates).toContainEqual({ plan_status: 'active' })
+    // Nothing on this path may name plan or max_properties.
+    for (const payload of updates) {
+      expect(payload).not.toHaveProperty('plan')
+      expect(payload).not.toHaveProperty('max_properties')
+    }
+  })
+
+  it('reports the unmapped price rather than silently downgrading', async () => {
+    const { reportError } = await import('@/lib/observability/report-error')
+    const supabase = makeSupabase({
+      organizations: [
+        { data: { id: 'org_1', name: 'Lake Martin' }, error: null },
+        { data: null, error: null },
+        { data: null, error: null },
+      ],
+    })
+
+    await run(supabase, subscription({
+      metadata: { org_id: 'org_1' },
+      items:    { data: [{ price: { id: 'price_enterprise_custom' } }] },
+    }))
+
+    expect(reportError).toHaveBeenCalledWith(
+      expect.any(Error),
+      expect.objectContaining({ site: 'webhook.stripe.core-billing.unmapped-price' }),
+    )
+  })
+
+  it('picks the plan-bearing item rather than assuming position 0', async () => {
+    const supabase = makeSupabase({
+      organizations: [
+        { data: { id: 'org_1', name: 'Lake Martin' }, error: null },
+        { data: null, error: null },
+        { data: null, error: null },
+      ],
+    })
+
+    // An add-on line sits first; the plan price is second.
+    await run(supabase, subscription({
+      metadata: { org_id: 'org_1' },
+      items: { data: [
+        { price: { id: 'price_addon_seat' } },
+        { price: { id: 'price_growth_monthly' } },
+      ] },
+    }))
+
+    expect(supabase.rpc).toHaveBeenCalledWith(
+      'update_organization_subscription_from_stripe',
+      expect.objectContaining({ p_plan: 'growth' }),
+    )
+  })
+})
+
+// ── Cancellation ────────────────────────────────────────────────────────────
+//
+// This handler used to be `const { data: org } = await …single()` with the
+// error discarded, resolving ONLY by stripe_customer_id. Both halves failed
+// the same way: org === null, silent return, Stripe answered 200, plan_status
+// left 'active' forever. It fails in the more expensive direction than the
+// create/update path — the customer stopped paying and kept full entitlement.
+describe('handleCoreSubscriptionCancelled', () => {
+  beforeEach(() => vi.clearAllMocks())
+
+  const cancel = (supabase: ReturnType<typeof makeSupabase>, sub: Stripe.Subscription) =>
+    handleCoreSubscriptionCancelled(supabase as unknown as StripeSupabaseClient, sub)
+
+  it('throws on a read failure instead of silently keeping the org entitled', async () => {
+    const supabase = makeSupabase({
+      organizations: [{ data: null, error: { message: 'connection reset', code: '57P01' } }],
+    })
+
+    await expect(
+      cancel(supabase, subscription({ metadata: { org_id: 'org_1' } })),
+    ).rejects.toThrow(/org lookup/)
+
+    // Nothing may be written on a failed read.
+    expect(supabase.calls.some((c) => c.method === 'update')).toBe(false)
+  })
+
+  it('resolves via subscription metadata, not customer id alone', async () => {
+    // applySubscriptionUpdate documents a live case where the customer-id
+    // backfill deliberately no-ops (org already carries a DIFFERENT customer
+    // id). Customer-id-only resolution finds nothing for such an org and
+    // silently leaves a cancelled subscription entitled.
+    const supabase = makeSupabase({
+      organizations: [
+        { data: { id: 'org_1', name: 'Lake Martin' }, error: null }, // by metadata id
+        { data: null, error: null },                                 // the cancel update
+      ],
+    })
+
+    await cancel(supabase, subscription({ metadata: { org_id: 'org_1' } }))
+
+    const customerLookup = supabase.calls.some(
+      (c) => c.method === 'eq' && c.args[0] === 'stripe_customer_id',
+    )
+    expect(customerLookup).toBe(false)
+
+    const updates = supabase.calls
+      .filter((c) => c.table === 'organizations' && c.method === 'update')
+      .map((c) => c.args[0])
+    expect(updates).toContainEqual({ plan_status: 'cancelled' })
+  })
+
+  it('throws when the cancel write fails, so Stripe retries', async () => {
+    const supabase = makeSupabase({
+      organizations: [
+        { data: { id: 'org_1', name: 'Lake Martin' }, error: null },
+        { data: null, error: { message: 'deadlock detected', code: '40P01' } },
+      ],
+    })
+
+    await expect(
+      cancel(supabase, subscription({ metadata: { org_id: 'org_1' } })),
+    ).rejects.toThrow(/plan_status cancel failed/)
+  })
+
+  it('reports rather than throwing when the org is genuinely unresolvable', async () => {
+    const { reportError } = await import('@/lib/observability/report-error')
+    const supabase = makeSupabase({
+      organizations: [
+        { data: null, error: null },   // metadata lookup: no such org
+        { data: null, error: null },   // customer lookup: no such org
+      ],
+    })
+
+    await expect(
+      cancel(supabase, subscription({ metadata: { org_id: 'org_gone' } })),
+    ).resolves.toBeUndefined()
+
+    expect(reportError).toHaveBeenCalledWith(
+      expect.any(Error),
+      expect.objectContaining({ site: 'webhook.stripe.core-billing.cancel-unresolved' }),
+    )
   })
 })

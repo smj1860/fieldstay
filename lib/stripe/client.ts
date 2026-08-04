@@ -1,4 +1,5 @@
 import Stripe from 'stripe'
+import { STRIPE_TIMEOUT_MS } from '@/lib/http/timeout'
 
 // Stripe's constructor throws ("Neither apiKey nor config.authenticator
 // provided") on an empty string, not just a missing one — so eagerly
@@ -15,6 +16,15 @@ function getClient(): Stripe {
     realClient = new Stripe(process.env.STRIPE_SECRET_KEY ?? '', {
       apiVersion: '2025-02-24.acacia',
       typescript: true,
+      // The SDK default is 80s, longer than the platform's function budget. A
+      // slow call inside the webhook handler (onInvoicePaymentFailed and
+      // onInvoicePaymentSucceeded both retrieve a subscription mid-request)
+      // gets the whole invocation killed, which skips the catch that releases
+      // the dedup claim — and Stripe's retry then hits the still-held claim
+      // and is discarded as a duplicate. A bounded timeout turns that into a
+      // normal handler throw, which DOES release the claim.
+      timeout:           STRIPE_TIMEOUT_MS,
+      maxNetworkRetries: 2,
     })
   }
   return realClient

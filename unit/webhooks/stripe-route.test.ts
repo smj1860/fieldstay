@@ -22,10 +22,6 @@ vi.mock('@/app/api/webhooks/stripe/handlers/guidebook-sponsor', () => ({
   handleSponsorPaymentFailed:          vi.fn(),
   handleSponsorPaymentRecovered:       vi.fn(),
 }))
-vi.mock('@/app/api/webhooks/stripe/handlers/repuguard-subscription', () => ({
-  handleRepuguardSubscriptionUpdated:   vi.fn(),
-  handleRepuguardSubscriptionCancelled: vi.fn(),
-}))
 vi.mock('@/app/api/webhooks/stripe/handlers/core-billing', () => ({
   handleCheckoutSessionBilling:  vi.fn(),
   handleCoreSubscriptionUpdate:  vi.fn(),
@@ -37,7 +33,7 @@ import { stripe } from '@/lib/stripe/client'
 import { createServiceClient } from '@/lib/supabase/server'
 import { handleWorkOrderInvoicePaid } from '@/app/api/webhooks/stripe/handlers/work-order-invoice'
 import { handleSponsorCheckoutCompleted } from '@/app/api/webhooks/stripe/handlers/guidebook-sponsor'
-import { handleCheckoutSessionBilling } from '@/app/api/webhooks/stripe/handlers/core-billing'
+import { handleCheckoutSessionBilling, handleCoreSubscriptionUpdate, handleCoreSubscriptionCancelled } from '@/app/api/webhooks/stripe/handlers/core-billing'
 
 // Minimal chainable Supabase mock — every builder method returns itself,
 // and the chain resolves (via `then`) to whatever result was configured for
@@ -252,5 +248,66 @@ describe('POST /api/webhooks/stripe', () => {
 
     expect(secondRes.status).toBe(200)
     expect(handleCheckoutSessionBilling).toHaveBeenCalledTimes(2)
+  })
+})
+
+// ── Non-core subscriptions must never reach core billing ────────────────────
+//
+// onSubscriptionUpserted used to check ONLY `feature === 'repuguard'` and let
+// everything else fall through to handleCoreSubscriptionUpdate. Guidebook
+// sponsor subscriptions carry org_id in subscription_data.metadata
+// (app/actions/guidebook.ts), so core billing's metadata-first resolution
+// RESOLVED the sponsoring org, never reached its "not one of our plans" guard,
+// and the sponsor price fell to the `?? 'starter'` default — every sponsor
+// checkout rewrote the sponsoring org to Starter/15 properties and overwrote
+// its stripe_subscription_id with the sponsor's.
+describe('POST /api/webhooks/stripe — non-core subscription isolation', () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+    ;(createServiceClient as ReturnType<typeof vi.fn>).mockReturnValue(
+      makeSupabase({ stripe_processed_events: { error: null } })
+    )
+  })
+
+  const emit = (type: string, metadata: Record<string, string>) => {
+    ;(stripe.webhooks.constructEvent as ReturnType<typeof vi.fn>).mockReturnValue({
+      id: 'evt_iso', type,
+      data: { object: { id: 'sub_x', customer: 'cus_x', status: 'active', metadata,
+                        items: { data: [{ price: { id: 'price_sponsor_monthly' } }] } } },
+    })
+    return POST(postRequest('{}', 'sig'))
+  }
+
+  it('does NOT route a guidebook sponsor subscription update into core billing', async () => {
+    await emit('customer.subscription.updated', {
+      feature: 'guidebook_sponsor', org_id: 'org_1', guidebook_sponsor_id: 'spon_1',
+    })
+
+    expect(handleCoreSubscriptionUpdate).not.toHaveBeenCalled()
+  })
+
+  it('does NOT route a sponsor subscription CREATED into core billing either', async () => {
+    await emit('customer.subscription.created', {
+      feature: 'guidebook_sponsor', org_id: 'org_1', guidebook_sponsor_id: 'spon_1',
+    })
+
+    expect(handleCoreSubscriptionUpdate).not.toHaveBeenCalled()
+  })
+
+  it('does NOT let a legacy repuguard subscription cancel the org core plan', async () => {
+    // RepuGuard is included in every plan now — no subscription is created for
+    // it — but a legacy subscription can still exist in Stripe, and its
+    // deletion must not set the org's core plan_status to 'cancelled'.
+    await emit('customer.subscription.deleted', { feature: 'repuguard', org_id: 'org_1' })
+
+    expect(handleCoreSubscriptionCancelled).not.toHaveBeenCalled()
+  })
+
+  it('still routes an untagged subscription to core billing', async () => {
+    // Core billing is the ABSENCE of a feature tag: createCheckoutSession
+    // stamps { org_id, plan } and nothing else.
+    await emit('customer.subscription.updated', { org_id: 'org_1', plan: 'growth' })
+
+    expect(handleCoreSubscriptionUpdate).toHaveBeenCalledTimes(1)
   })
 })
