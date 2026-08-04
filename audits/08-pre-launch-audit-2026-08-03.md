@@ -5,10 +5,12 @@
 > at the end. Summary: **all 9 CRITICALs stand**; 2 findings fixed by #551,
 > 4 withdrawn as invalid, 1 mechanism corrected, 1 scope narrowed.
 >
-> **Remediation status (2026-08-03):** all 8 code-level CRITICALs closed, plus
-> H2/H3 (OAuth binding + open redirect), H4 (Stripe entitlement race), H8
-> (Inngest concurrency) and H16 (DB gate armedness). C8 is a dashboard action.
-> Findings marked ✅ RESOLVED inline carry their outcome.
+> **Remediation status (2026-08-04):** all 8 code-level CRITICALs closed, plus
+> H2/H3 (OAuth binding + open redirect), H4 (Stripe entitlement race), H5–H9,
+> H11, H13, H14, H16, and H10 (migration ledger — reconciled to 1:1 parity and
+> now gated in CI). C8 is a dashboard action, done. **Still open: H1
+> (crew offboarding), H12 (`.in()` URI limits), H15 (lint headroom), and the
+> MEDIUMs.** Findings marked ✅ RESOLVED inline carry their outcome.
 
 **Scope:** Full-repo sweep across seven dimensions, run the day before the
 intended launch. Unlike audits 06 and 07, no area was declared out of scope —
@@ -431,6 +433,50 @@ schema invariants hold for production by construction.
 **Fix:** `supabase migration repair --status applied <version>` for the 33
 before any further push. **Do not run `db push` against production until
 reconciled.**
+
+#### ✅ RESOLVED 2026-08-03 / 2026-08-04
+
+Reconciled and then made mechanically enforceable. Three parts:
+
+1. **The two orphaned SECURITY DEFINER functions were recovered** from
+   `schema_migrations.statements` and committed as real files —
+   `20260730140000_atomic_subscription_plan_update.sql` (the billing
+   `FOR UPDATE` plan-change lock) and
+   `20260730150000_fix_checklist_started_at_trigger_collision.sql`. Both
+   existed in production and in no file anywhere, so a fresh environment
+   built from the repo would have silently lacked them. This was the part of
+   H10 with a real correctness consequence, not just a procedural one.
+2. **The ledger was reconciled to exact 1:1 parity** — 36 missing rows
+   inserted, 35 stale renumbered rows deleted, 311 → 312 (313 with the RPC
+   below). Both diff directions empty; `db_invariant_report()` byte-identical
+   afterwards. Executed via direct SQL against
+   `supabase_migrations.schema_migrations` (equivalent to what
+   `migration repair` does) because the operator's machine has no Supabase
+   CLI. Runbook and evidence: `docs/migration-reconciliation/`.
+3. **A CI gate now measures it** — `scripts/check-migration-ledger.mjs`,
+   third step of the `db-invariants` job, diffing local files against
+   `public.migration_ledger_versions()` in both directions.
+   `scripts/migration-ledger-baseline.json` freezes grandfathered divergence
+   per project, shrink-only; production's entry is **empty**, so any
+   recurrence fails the build.
+
+**This closes the finding and opens a smaller one.** Building the gate
+required pointing it at the E2E project, which turned out to be diverged by
+**203 versions** (70 local files unrecorded, 133 ledger rows with no local
+file) — worse than production ever was. Its schema is current (spot-checked:
+every object from the newest migrations is present), so this is bookkeeping,
+not missing DDL, and it was inherited when the project was branched from
+production in July 2026. It is grandfathered in the baseline so the required
+check is not permanently red.
+
+The consequence is one the audit already flagged and can now state
+precisely: **`supabase db push` against the E2E project is unsafe for exactly
+the reason it was unsafe against production**, and CLAUDE.md's claim that
+"both projects receive every migration, so invariants verified there hold for
+production by construction" is false. That sentence has been removed from
+`.github/workflows/ci.yml` and from the `check-db-invariants.mjs` header.
+Burning the 203 down is the same repair procedure, run against
+`syhthijeqlnltufdawyb`.
 
 ### H11 — iCal sync cannot keep up with its own schedule
 `lib/inngest/functions/ical-sync.ts:151` — the comment says "up to 20 feeds in

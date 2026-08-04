@@ -842,6 +842,18 @@ a local file, which is exactly the drift closed on 2026-07-30
 (CLAUDE_MIGRATION_RECONCILE_1). Local files and live history were
 verified identical on that date (276/276).
 
+**It drifted straight back, and the "verified identical" line above is why
+this is now a CI gate rather than a promise.** By 2026-08-03 production was
+36 local-only / 35 ledger-only (audit H10, reconciled to 313/313 exact
+parity; runbook in `docs/migration-reconciliation/`). Two of those 35 were
+SECURITY DEFINER functions living in production with no file anywhere. If
+you apply schema through MCP — which is sometimes the only option, e.g. the
+operator has no Supabase CLI — you MUST also commit the matching file at the
+SAME version the ledger recorded, and renumbering an already-applied file
+orphans its ledger row. `scripts/check-migration-ledger.mjs` now fails CI on
+either; run `pnpm run check:migration-ledger:prod` after any out-of-band
+apply.
+
 Write a new file in `supabase/migrations/` named `YYYYMMDDHHMMSS_description.sql`
 and apply it via `supabase db push` against project `vpmznjktllhmmbfnxuvk`.
 
@@ -1324,6 +1336,25 @@ following them stops being a memory test. Five layers, checked in CI via
    `20260725043000_add_quote_requested_to_wo_status.sql`. Both allowlists
    are shrink-only, same ratchet as `SERVICE_ROLE_ONLY_TABLES`. Self-disarms
    the same way as the other two checks.
+
+   **Migration ledger parity gate** (`scripts/check-migration-ledger.mjs`,
+   same `db-invariants` CI job, third step) — diffs `supabase/migrations/*.sql`
+   against the live `supabase_migrations.schema_migrations` ledger via
+   `public.migration_ledger_versions()`, in BOTH directions. A local file with
+   no ledger row means `supabase db push` will replay it; a ledger row with no
+   local file means the repo cannot reproduce the database. Production had 36
+   and 35 of those respectively on 2026-08-03 (audit H10) — two of them
+   SECURITY DEFINER functions that existed in production and in no file
+   anywhere. **MCP `apply_migration` without committing the matching file, and
+   renumbering an already-applied file, are the two causes** — see the
+   Migration discipline rule under "Adding new schema". Grandfathered
+   divergence is frozen per project in
+   `scripts/migration-ledger-baseline.json`, shrink-only: production's entry
+   is EMPTY (hard gate), the E2E project's holds 203 pre-existing entries it
+   inherited when branched from prod. A new migration is by definition not in
+   the frozen set, so parity is mandatory for it on every project.
+   `--update` refuses to grow a set; `unit/guardrails/ci-gating.test.ts`
+   enforces the empty-prod and ceiling rules with no DB access.
 
 5. **Semgrep rules** (`.semgrep/`, CI `semgrep` job) — real TypeScript AST
    matching, so a rule survives reformatting, renamed intermediates, and

@@ -221,3 +221,45 @@ Local file version → live application-time version:
 | `20260801280000` | `20260801150136` | 20260801280000_authz_gate_security_definer_rpcs.sql |
 | `20260801290000` | `20260801215556` | 20260801290000_assign_wo_number_security_definer.sql |
 | `20260802120000` | `20260802002907` | 20260802120000_approve_quote_request_lock_order.sql |
+
+---
+
+## Follow-up: the E2E project is diverged too (open)
+
+Recorded 2026-08-04 while building `scripts/check-migration-ledger.mjs`, which
+had to be pointed at both projects.
+
+`syhthijeqlnltufdawyb` (fieldstay-e2e) is diverged from `supabase/migrations/`
+by **203 versions**: 70 local files with no ledger row, 133 ledger rows with no
+local file. That is worse than production ever was.
+
+**Its schema is current.** Spot-checked directly rather than inferred —
+`db_invariant_report`, `db_type_shape_report`,
+`update_organization_subscription_from_stripe`, `integration_entity_owners`,
+`promo_hospitable_launch_counter`, `guidebook_offer_redemptions`,
+`turnovers.crew_duration_minutes`, the `vacancy_gap_suggestion` enum label and
+`profiles.unsubscribe_token` are all present. So this is bookkeeping, not
+missing DDL, and no E2E test is running against a stale schema.
+
+Two consequences that are real:
+
+- **`supabase db push` against the E2E project is unsafe**, for exactly the
+  reason it was unsafe against production before this runbook was executed.
+- CLAUDE.md and `.github/workflows/ci.yml` used to claim "both projects receive
+  every migration, so invariants verified there hold for production by
+  construction." That is false, and both statements have been corrected. An
+  E2E `db-invariants` pass is evidence about the E2E project only; verify
+  production deliberately with `pnpm run check:db-invariants:prod` and
+  `pnpm run check:migration-ledger:prod`.
+
+The divergence is frozen in `scripts/migration-ledger-baseline.json` under the
+`syhthijeqlnltufdawyb` key so the required check is not permanently red. That
+freeze is shrink-only and is **not** an endorsement — burning it down is the
+same procedure as the two steps above, run against this project instead. Lock
+in progress with:
+
+```
+node scripts/check-migration-ledger.mjs --update
+```
+
+which refuses to grow the set.

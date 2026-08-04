@@ -14,6 +14,8 @@
     "check:ui-classes": "bash scripts/check-raw-ui-classes.sh",
     "check:db-invariants": "node scripts/check-db-invariants.mjs",
     "check:db-invariants:prod": "DB_INVARIANTS_ALLOW_PROD=1 node scripts/check-db-invariants.mjs",
+    "check:migration-ledger": "node scripts/check-migration-ledger.mjs",
+    "check:migration-ledger:prod": "DB_INVARIANTS_ALLOW_PROD=1 node scripts/check-migration-ledger.mjs",
     "inngest:dev": "npx inngest-cli@latest dev",
     "types:supabase": "supabase gen types typescript --project-id vpmznjktllhmmbfnxuvk > types/database.generated.ts",
     "e2e": "playwright test",

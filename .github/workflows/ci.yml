@@ -229,26 +229,35 @@ jobs:
   # former enforcement leftover, closed by check-type-drift.mjs) that
   # types/database.ts's enums/tables/columns still match the live schema.
   # Runs against the DEDICATED E2E project (same secrets as the e2e job —
-  # CI never holds production credentials); both projects receive every
-  # migration, so invariants verified there hold for production by
-  # construction.
+  # CI never holds production credentials).
+  #
+  # This comment used to end "both projects receive every migration, so
+  # invariants verified there hold for production by construction." That is
+  # FALSE and is exactly what check-migration-ledger.mjs was added to measure:
+  # on 2026-08-04 the E2E project's ledger diverged from supabase/migrations/
+  # by 203 versions across the two directions. Its schema is current — the
+  # bookkeeping is what drifted — but "both receive every migration" is an
+  # assumption, not a guarantee, and an E2E pass is evidence about the E2E
+  # project only. Verify production deliberately and read-only with
+  # `pnpm run check:db-invariants:prod` / `check:migration-ledger:prod`.
   #
   # Self-disarming like the e2e job, but at the SCRIPT level rather than via a
-  # separate gate-detection step: both scripts print a `::warning …UNARMED`
+  # separate gate-detection step: all three scripts print a `::warning …UNARMED`
   # annotation and exit 0 when NEXT_PUBLIC_SUPABASE_URL /
   # SUPABASE_SERVICE_ROLE_KEY are absent, so a fork PR or an unconfigured repo
   # gets the same loud-but-green outcome without repeating an `if:` guard on
   # every step. Verified by unit/guardrails/ci-gating.test.ts.
   #
-  # NO `pnpm install` STEP, deliberately: both scripts use only Node builtins
-  # and global fetch (Node 22), so this job skips the install entirely. That is
-  # safe only while it stays true — unit/guardrails/ci-gating.test.ts fails
-  # LOCALLY if either script grows a bare-specifier import, which would
-  # otherwise break this job in CI and nowhere else. Add an install step here
-  # if such a dependency is ever genuinely needed.
+  # NO `pnpm install` STEP, deliberately: all three scripts use only Node
+  # builtins and global fetch (Node 22), so this job skips the install
+  # entirely. That is safe only while it stays true —
+  # unit/guardrails/ci-gating.test.ts fails LOCALLY if any of them grows a
+  # bare-specifier import, which would otherwise break this job in CI and
+  # nowhere else. Add an install step here if such a dependency is ever
+  # genuinely needed.
   #
-  # See scripts/check-db-invariants.mjs and scripts/check-type-drift.mjs for
-  # the check details.
+  # See scripts/check-db-invariants.mjs, scripts/check-type-drift.mjs and
+  # scripts/check-migration-ledger.mjs for the check details.
   db-invariants:
     runs-on: ubuntu-latest
     env:
@@ -268,7 +277,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          # This job only reads the repo and runs two scripts — no reason to
+          # This job only reads the repo and runs three scripts — no reason to
           # leave the checkout token on disk.
           persist-credentials: false
       - uses: actions/setup-node@v4
@@ -276,3 +285,4 @@ jobs:
           node-version: 22
       - run: node scripts/check-db-invariants.mjs
       - run: node scripts/check-type-drift.mjs
+      - run: node scripts/check-migration-ledger.mjs
