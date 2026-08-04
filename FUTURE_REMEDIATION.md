@@ -900,17 +900,27 @@ day that generic is wired up — which is the stated direction — every stale
 column in the generated file becomes a compile error or, worse, a silently
 wrong inferred row type. The drift is free right now and expensive later.
 
-### Related: three more RepuGuard columns are now unread
+### ~~Related: three more RepuGuard columns are now unread~~ — RESOLVED 2026-08-04
 
 `repuguard_trial_start`, `repuguard_trial_end` and `repuguard_founding_member`
-survive on `organizations`. Grepping `app/`, `lib/` and `components/` finds
-zero readers of any of them, and on production all three are empty (0 trial
-starts, 0 trial ends, 0 founding members across 8 orgs).
+were held back from `20260804230000` because a "founding member" flag can
+encode commercial intent (grandfathered pricing, a launch cohort) that
+outlives whatever code once set it, and a column drop is irreversible.
 
-They were deliberately NOT dropped alongside the other two: that change was
-scoped to the two columns confirmed unread AND confirmed empty in the same
-pass, and `repuguard_founding_member` in particular reads like it could carry
-commercial meaning (grandfathered pricing, launch cohort) that outlives the
-code which set it. Dropping a column is irreversible; confirm with the product
-owner that no founding-member cohort needs preserving, then drop all three in
-one migration.
+Confirmed with the product owner and dropped in
+`20260804240000_drop_remaining_repuguard_columns.sql`, applied to both
+projects. The evidence: zero readers anywhere in the repo (only the
+`Organization` interface and the historical migrations that created them), and
+all three empty on BOTH projects — 0 trial starts, 0 trial ends, 0 founding
+members across 8 production orgs and 1 E2E org. No cohort existed to preserve.
+
+The trial columns had in fact been carrying nothing since June:
+`20260608122111_repuguard_bundled_activation.sql` explicitly NULLed
+`repuguard_trial_start`/`repuguard_trial_end` when RepuGuard was folded into
+every plan. `organizations` now has no `repuguard%` column at all.
+
+**This does not shrink the generated-types item above — it grows it.**
+`types/database.generated.ts` is now stale by six columns on `organizations`:
+one missing (`stripe_event_at`) and five declaring columns that no longer
+exist. `types/database.ts` is correct, so CI stays green, but the regeneration
+commit is now worth more than when it was first logged.
