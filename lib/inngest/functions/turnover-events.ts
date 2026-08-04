@@ -154,7 +154,7 @@ async function collectCompletionTimestamps(
 
   const { data: turnover, error: turnoverError } = await supabase
     .from('turnovers')
-    .select('property_id, inventory_started_at, inventory_confirmed_complete_at')
+    .select('property_id, completed_at, inventory_started_at, inventory_confirmed_complete_at')
     .eq('id', turnoverId)
     .eq('org_id', orgId)
     .maybeSingle()
@@ -165,12 +165,17 @@ async function collectCompletionTimestamps(
     return timestamps
   }
 
-  if (turnover?.inventory_started_at) {
+  // Capped at completed_at (already written before this event fires — see
+  // the turnover-completion call sites) so a retried/delayed run of this step
+  // cannot pick up a LATER inventory edit unrelated to this turnover and
+  // report it as this turnover's completion signal.
+  if (turnover?.inventory_started_at && turnover.completed_at) {
     const { data: lastEdited, error: lastEditedError } = await supabase
       .from('inventory_items')
       .select('updated_at')
       .eq('property_id', turnover.property_id)
       .gt('updated_at', turnover.inventory_started_at)
+      .lte('updated_at', turnover.completed_at)
       .order('updated_at', { ascending: false })
       .limit(1)
       .maybeSingle()
@@ -346,7 +351,9 @@ export const handleTurnoverCompleted = inngest.createFunction(
 
       const timestamps = await collectCompletionTimestamps(supabase, turnover_id, org_id)
 
-      if (timestamps.length === 0) return { skipped: 'no_completion_signals' }
+      // Fewer than two signals gives MAX == MIN, i.e. a fabricated 0-minute
+      // duration rather than "we don't know" — skip persisting it.
+      if (timestamps.length < 2) return { skipped: 'insufficient_completion_signals' }
 
       timestamps.sort((a, b) => new Date(a).getTime() - new Date(b).getTime())
       const startedAt   = timestamps[0]!

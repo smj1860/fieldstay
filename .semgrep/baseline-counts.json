@@ -32,7 +32,14 @@
     "only on findings new vs. the PR base. Its key is deleted here in the same",
     "change, per the promotion rule in .semgrep/README.md — a rule cannot be in",
     "both files, and check-semgrep-ratchet.mjs fails on a baseline entry whose",
-    "rule ratchet.yml no longer declares."
+    "rule ratchet.yml no longer declares.",
+    "",
+    "RE-MEASURED 2026-08-04. -org-scoped 106 -> 105 and -single-parent 37 -> 36:",
+    "the turnover-duration feature's two new reads (the turnovers page select and",
+    "collectCompletionTimestamps' checklist_instance_items read) tripped the diff-",
+    "scoped ratchet gate on introduction, so both were bounded with .limit()",
+    "rather than left as new sites. A one-off fix alongside the feature, not a",
+    "dedicated burn-down pass."
   ],
   "measured_at": "2026-08-04",
   "counts": {

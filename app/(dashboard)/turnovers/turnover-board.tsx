@@ -921,7 +921,7 @@ export function TurnoverBoard({
   bookings = [],
   crewAvailability = [],
   showAutoAssignNudge = false,
-}: {
+}: Readonly<{
   turnovers: Turnover[]
   propertyMap: Record<string, Property>
   crewMembers: CrewMember[]
@@ -932,7 +932,7 @@ export function TurnoverBoard({
   bookings?: BookingRow[]
   crewAvailability?: CrewAvailabilityRow[]
   showAutoAssignNudge?: boolean
-}) {
+}>) {
   const searchParams = useSearchParams()
   const urlStatus    = searchParams.get('status')
 

@@ -62,9 +62,13 @@ async function notifyOrgAdmin(
   if (userErr) {
     console.error('[stripe] admin.getUserById failed while resolving billing email name:', userErr.message)
   }
-  const fullName = data?.user?.user_metadata?.full_name as string | undefined
+  // user_metadata is an arbitrary JSON blob signup wrote — full_name is not
+  // guaranteed to be a string, and a bare `as string` cast would let a
+  // non-string value reach .split() and throw.
+  const fullName = data?.user?.user_metadata?.full_name
+  const firstName = typeof fullName === 'string' ? fullName.split(' ')[0] : undefined
 
-  await send(primaryPm.email, fullName?.split(' ')[0] ?? 'there', primaryPm.userId)
+  await send(primaryPm.email, firstName ?? 'there', primaryPm.userId)
 }
 
 interface ResolvedOrg { id: string; name: string | null }
