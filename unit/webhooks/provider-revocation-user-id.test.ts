@@ -40,6 +40,12 @@ function makeSupabase(existingConn: { data?: unknown; error?: unknown }) {
     chain.select      = vi.fn(() => chain)
     chain.eq          = vi.fn(() => chain)
     chain.maybeSingle = vi.fn(async () => existingConn)
+    // Revocation now runs AFTER the content-hash dedup claim rather than
+    // returning ahead of it, so the double has to model the claim insert (and
+    // the release on the failure path) or every revocation test throws before
+    // it reaches processRevocation.
+    chain.insert      = vi.fn(async () => ({ error: null }))
+    chain.delete      = vi.fn(() => chain)
     return chain
   })
   return { from }

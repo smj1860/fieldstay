@@ -142,12 +142,33 @@ describe('POST /api/webhooks/[provider] — content-hash dedup', () => {
     expect(supabase.insertedIds.size).toBe(2)
   })
 
-  it('skips the dedup path entirely for the universal authorization_revoked action', async () => {
+  // Was: "skips the dedup path entirely for the universal
+  // authorization_revoked action". That skip was the defect. Revocation
+  // returned 200 ahead of the claim insert, so it was the one event class with
+  // no dedup at all — its only protection was processRevocation's
+  // read-status-then-act sequence, a TOCTOU that let two concurrent
+  // redeliveries both observe status='active', both revoke, both write an
+  // integration.revoked audit row, and both email the PM. It now takes a claim
+  // like every other event, so the unique index collapses them instead.
+  it('claims a dedup row for the universal authorization_revoked action', async () => {
     const payload = { action: 'application_authorization_revoked', user_id: '12345' }
 
     await callPost('ownerrez', payload)
 
-    expect(supabase.insertedIds.size).toBe(0)
+    expect(supabase.insertedIds.size).toBe(1)
+    // Still short-circuits the provider adapter — revocation is handled
+    // universally, not delegated.
     expect(adapter.handleWebhookEvent).not.toHaveBeenCalled()
+  })
+
+  it('discards a redelivered revocation instead of revoking twice', async () => {
+    const payload = { action: 'application_authorization_revoked', user_id: '12345' }
+
+    const res1 = await callPost('ownerrez', payload)
+    const res2 = await callPost('ownerrez', payload)
+
+    expect(await res1.clone().json()).not.toHaveProperty('duplicate')
+    expect(await res2.clone().json()).toEqual({ received: true, duplicate: true })
+    expect(supabase.insertedIds.size).toBe(1)
   })
 })

@@ -65,7 +65,12 @@ async function seedPhotoMutation(): Promise<number> {
 }
 
 function mockScanResponse(status: number) {
-  const fetchMock = vi.fn(async () => new Response(JSON.stringify({}), { status }))
+  // Typed args, not `async () => …`: the zero-arg form gives the mock a
+  // zero-length tuple, so reading calls[0][1] to assert the AbortSignal is a
+  // tsc error even though vitest runs it fine.
+  const fetchMock = vi.fn(
+    async (_url: string, _init?: RequestInit) => new Response(JSON.stringify({}), { status }),
+  )
   vi.stubGlobal('fetch', fetchMock)
   return fetchMock
 }
@@ -112,8 +117,8 @@ describe('asset scan request — durability inside the outbox', () => {
     // An AbortSignal is the only thing that gives a fetch() a timeout at all;
     // without one the request can hang instead of rejecting, so even the old
     // .catch() would never have fired.
-    const init = fetchMock.mock.calls[0]![1] as RequestInit
-    expect(init.signal).toBeInstanceOf(AbortSignal)
+    const init = fetchMock.mock.calls[0]![1]
+    expect(init?.signal).toBeInstanceOf(AbortSignal)
   })
 
   it('KEEPS the mutation queued when the scan request 500s — the regression', async () => {

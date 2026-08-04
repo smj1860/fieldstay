@@ -91,6 +91,33 @@ const RETRYABLE_STATUS = /status:\s*(?:4\d\d|5\d\d)/
 /** An explicit 2xx — the provider records the delivery as succeeded. */
 const SUCCESS_STATUS = /status:\s*2\d\d/
 
+/**
+ * Name of the function enclosing `offset`, by scanning back to the nearest
+ * `function <name>(` declaration.
+ *
+ * A release extracted into a shared `releaseDedupClaim()` helper — which is
+ * better code than the same delete copy-pasted into two catch blocks — would
+ * otherwise read as "deletes outside a catch" and fail this guardrail. So a
+ * release is satisfied EITHER by a delete sitting directly in a catch, OR by
+ * a call to the helper that contains it sitting in a catch.
+ */
+function enclosingFunctionName(src: string, offset: number): string | null {
+  const decl = /function\s+([A-Za-z_$][\w$]*)\s*\(/g
+  let name: string | null = null
+  let m: RegExpExecArray | null
+  while ((m = decl.exec(src)) !== null && m.index < offset) name = m[1]!
+  return name
+}
+
+/** Offsets of every call to `name(` in `src`. */
+function callOffsets(src: string, name: string): number[] {
+  const hits: number[] = []
+  const re = new RegExp(`\\b${name}\\s*\\(`, 'g')
+  let m: RegExpExecArray | null
+  while ((m = re.exec(src)) !== null) hits.push(m.index)
+  return hits
+}
+
 function claimTablesIn(src: string): string[] {
   const tables = new Set<string>()
   for (const m of src.matchAll(FROM_CALL)) {
@@ -126,12 +153,23 @@ export function findViolations(files: Array<{ path: string; src: string }>): Ded
         continue
       }
 
-      const inCatch = deletes.some((d) => catches.some(([s, e]) => d > s && d < e))
-      if (!inCatch) {
+      const isInCatch = (offset: number) => catches.some(([s, e]) => offset > s && offset < e)
+
+      // Every offset that constitutes "releasing the claim on a failure path":
+      // the delete itself when it sits in a catch, plus any call to a helper
+      // function that wraps the delete.
+      const releaseSites = deletes.filter(isInCatch)
+      for (const d of deletes) {
+        if (isInCatch(d)) continue
+        const helper = enclosingFunctionName(src, d)
+        if (helper) releaseSites.push(...callOffsets(src, helper).filter(isInCatch))
+      }
+
+      if (releaseSites.length === 0) {
         violations.push({
           file:   path,
           table,
-          reason: `deletes from ${table} but not inside a catch block — a release only counts on the failure path`,
+          reason: `deletes from ${table} but never on a failure path — a release only counts inside a catch (directly, or via a helper called from one)`,
         })
         continue
       }
@@ -145,8 +183,8 @@ export function findViolations(files: Array<{ path: string; src: string }>): Ded
       // was dropped. A release paired with a 2xx is strictly worse than no
       // release at all.
       for (const [start, end] of catches) {
+        if (!releaseSites.some((r) => r > start && r < end)) continue
         const body = src.slice(start, end)
-        if (chainOffsets(body, table, 'delete').length === 0) continue
 
         if (!RETRYABLE_STATUS.test(body)) {
           violations.push({
