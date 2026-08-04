@@ -177,9 +177,11 @@ export async function POST(
   // unauthenticated money-minting path was bypassed by supplying nothing to
   // derive from, and `p_subtotal` writes work_orders.actual_cost
   // unconditionally (the RPC's `IF v_has_line_items` guard covers only the
-  // invoice). From there it posts to owner_transactions under an
-  // `ignoreDuplicates` upsert, so the first value written is the owner's P&L
-  // permanently — there is no correcting write.
+  // invoice). From there handleWorkOrderCompleted posts it to
+  // owner_transactions under an `ignoreDuplicates` upsert, so that automatic
+  // path will never overwrite it. A PM can still correct it — logActualCost()
+  // upserts the same row with onConflict and no ignoreDuplicates — but only
+  // if someone notices the figure is wrong in the first place.
   //
   // So the total is now DERIVED with no fallback. The legacy path derives 0,
   // which leaves actual_cost untouched (`CASE WHEN p_subtotal > 0`) — exactly

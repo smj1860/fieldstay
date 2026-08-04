@@ -202,9 +202,11 @@ describe('POST /api/work-orders/[token]/complete', () => {
   // no line item survived validation — so a payload with NO valid items and
   // `subtotal: 999999` sailed under the $1M bound and wrote an arbitrary
   // actual_cost on the app's only unauthenticated money-minting path, which
-  // then posts to owner_transactions under an ignoreDuplicates upsert (i.e.
-  // permanently). The client's figure is now ignored outright, which is the
-  // stronger property: assert the value that reaches the RPC, not the status.
+  // then posts to owner_transactions under an ignoreDuplicates upsert, so the
+  // automatic path never overwrites it and correcting it takes a PM noticing
+  // and calling logActualCost(). The client's figure is now ignored outright,
+  // which is the stronger property: assert the value that reaches the RPC,
+  // not the status.
   it('ignores a client-supplied subtotal — it can never reach the transaction', async () => {
     const supabase = makeSupabase({
       work_orders: [{ data: baseWo(), error: null }],
