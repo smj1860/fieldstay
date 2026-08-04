@@ -323,6 +323,88 @@ export async function updateInventoryQuantity(
   )
 }
 
+// ── Turnover inventory count ──────────────────────────────────────────────
+//
+// A count is staged locally while the crew member walks the property, then
+// submitted as ONE count when they confirm inventory complete.
+//
+// Two rules the previous per-item write-through violated:
+//
+//  - Nothing is pre-filled. The count input used to default to the item's
+//    last known `current_quantity`, so a crew member had to actively
+//    overwrite the previous number rather than enter a fresh one — the
+//    strongest possible anchor on a measurement that drives automated
+//    purchasing. An absent key now means "not counted"; 0 means "counted,
+//    none on hand", and only counted items are ever submitted.
+//  - The count is a COUNT, not a column write. Writing
+//    `inventory_items.current_quantity` per item produced no
+//    `inventory_counts` record, no previous-vs-counted diff for the PM, and
+//    never fired `inventory/count-submitted` — so the crew's counts, the
+//    most accurate stock data the system has, never reached the below-par
+//    restock pipeline at all.
+
+/** Counted quantities by inventory_items.id. An absent key is NOT a zero. */
+export type TurnoverInventoryCounts = Record<string, number>
+
+/** Per-turnover, not per-property: a partial count must never bleed into the
+ *  next turnover at the same property. */
+function turnoverCountKey(turnoverId: string): string {
+  return `inventory_count:turnover:${turnoverId}`
+}
+
+export async function loadTurnoverInventoryCounts(
+  userId: string,
+  turnoverId: string,
+): Promise<TurnoverInventoryCounts> {
+  const db = getDexieDb(userId)
+  const row = await db.sync_meta.get(turnoverCountKey(turnoverId))
+  if (!row?.value) return {}
+  try {
+    const parsed: unknown = JSON.parse(row.value)
+    return (parsed && typeof parsed === 'object' ? parsed : {}) as TurnoverInventoryCounts
+  } catch (err) {
+    console.error('[inventory count] corrupt local draft — starting fresh:', err)
+    reportError(err, { site: 'lib.dexie.helpers.loadTurnoverInventoryCounts' })
+    return {}
+  }
+}
+
+/**
+ * Persists the in-progress count so it survives navigation, a reload, or the
+ * PWA being reclaimed mid-shift. The per-item write-through this replaces was
+ * crudely durable for exactly this reason — dropping it without persisting
+ * here would make a partial count LESS safe than before.
+ */
+export async function saveTurnoverInventoryCounts(
+  userId: string,
+  turnoverId: string,
+  counts: TurnoverInventoryCounts,
+): Promise<void> {
+  const db = getDexieDb(userId)
+  await db.sync_meta.put({ key: turnoverCountKey(turnoverId), value: JSON.stringify(counts) })
+}
+
+/**
+ * Queues the staged count for submission and clears the local staging row, in
+ * one transaction. The count id is client-generated and used by the route as
+ * the `inventory_counts` primary key, so an outbox replay collides on the PK
+ * rather than recording the same physical count twice.
+ */
+export async function submitTurnoverInventoryCounts(
+  userId: string,
+  propertyId: string,
+  turnoverId: string,
+  counts: TurnoverInventoryCounts,
+): Promise<void> {
+  const countId = crypto.randomUUID()
+
+  await writeAndQueue(
+    userId, 'inventory_counts', countId, 'PUT',
+    { property_id: propertyId, counts },
+    (db) => db.sync_meta.delete(turnoverCountKey(turnoverId)),
+  )
+}
+
 /**
  * Saves a crew member's free-text turnover summary/notes for the PM —
  * written straight to turnovers.completion_notes (already rendered on the

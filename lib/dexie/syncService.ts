@@ -612,6 +612,42 @@ async function uploadWorkOrderReport(
 }
 
 
+/**
+ * A crew inventory count taken during a turnover, submitted as one count.
+ *
+ * Routed through the Route Handler rather than written directly because the
+ * count is a three-part server-side action — record the count, apply the
+ * quantities, fire `inventory/count-submitted` so the below-par restock
+ * pipeline sees it — none of which a direct table write can do.
+ *
+ * `targetId` is the client-generated count id, used by the route as the
+ * `inventory_counts` primary key so a replay collides rather than recording
+ * the same physical count twice.
+ */
+async function uploadInventoryCount(
+  _supabase: DexieSupabaseClient,
+  targetId: string,
+  payload: MutationPayload,
+): Promise<void> {
+  const res = await fetch('/api/crew/inventory-count', {
+    method:  'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      countId:    targetId,
+      propertyId: payload.property_id,
+      counts:     payload.counts,
+      notes:      typeof payload.notes === 'string' ? payload.notes : '',
+    }),
+  })
+  if (!res.ok) throw new UploadHttpError(`Failed to submit inventory count ${targetId}`, res.status)
+}
+
+/**
+ * Legacy per-item quantity write. No crew surface enqueues this any more —
+ * the turnover tab submits a whole count through uploadInventoryCount above —
+ * but the handler stays for one release so a mutation already sitting in a
+ * device's outbox drains instead of dead-lettering as NO_HANDLER.
+ */
 async function uploadInventoryItemCount(
   supabase: DexieSupabaseClient,
   targetId: string,
@@ -747,6 +783,7 @@ const UPLOAD_HANDLERS: Record<string, UploadHandler> = {
   'checklist_instances:PUT':        uploadChecklistInstanceConfirmation,
   'checklist_instances:PATCH':      uploadChecklistInstanceConfirmation,
   'work_order_reports:PUT':         uploadWorkOrderReport,
+  'inventory_counts:PUT':           uploadInventoryCount,
   'inventory_items:PUT':            uploadInventoryItemCount,
   'inventory_items:PATCH':          uploadInventoryItemCount,
   'property_assets:PUT':            uploadPropertyAssetInsert,
