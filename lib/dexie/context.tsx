@@ -282,11 +282,41 @@ export function DexieProvider({ userId: userIdProp, children }: { userId?: strin
       await refreshAssetsSubscription()
     }
 
-    function resyncSafe(crewMemberId: string): void {
+    // ── Resync coalescing ─────────────────────────────────────────────────
+    //
+    // A phone waking in a parking lot fires `online` and `visibilitychange →
+    // visible` within the same second, and the 5-minute safety poll can land
+    // in the same window; on the v1 path a turnover_assignments event can too.
+    // Each of those used to start its own fullCrewResync with nothing
+    // serializing them, so three concurrent passes ran on the worst possible
+    // connection — tripling the query volume, racing advanceCursor()'s
+    // read-modify-write, and letting one pass's pruneLocalCache() bulkDelete
+    // from a snapshot another was still mutating (visible as flicker and
+    // transient empty states).
+    //
+    // One in flight, at most one queued follow-up — the same shape
+    // createSyncSignalHandler() already uses per entity.
+    let resyncInFlight: Promise<void> | null = null
+    let resyncQueued = false
+
+    function runCoalesced(run: () => Promise<void>, label: string): void {
       if (cancelled) return
-      void resync(crewMemberId).catch((err) =>
-        console.error('[DexieProvider] resync failed:', err)
-      )
+      if (resyncInFlight) {
+        resyncQueued = true
+        return
+      }
+      resyncInFlight = run()
+        .catch((err) => console.error(`[DexieProvider] ${label} failed:`, err))
+        .finally(() => {
+          resyncInFlight = null
+          if (cancelled || !resyncQueued) return
+          resyncQueued = false
+          runCoalesced(run, label)
+        })
+    }
+
+    function resyncSafe(crewMemberId: string): void {
+      runCoalesced(() => resync(crewMemberId), 'resync')
     }
 
     // Installed on BOTH paths (see SAFETY_POLL_INTERVAL_MS above) — the
@@ -312,10 +342,7 @@ export function DexieProvider({ userId: userIdProp, children }: { userId?: strin
     }
 
     function resyncV2Safe(crewMemberId: string): void {
-      if (cancelled) return
-      void resyncV2(crewMemberId).catch((err) =>
-        console.error('[DexieProvider] v2 resync failed:', err)
-      )
+      runCoalesced(() => resyncV2(crewMemberId), 'v2 resync')
     }
 
     // Retry helper for scheduleV2Reconnect's timer callback — kept as its

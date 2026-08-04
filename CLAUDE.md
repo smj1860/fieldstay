@@ -450,8 +450,33 @@ almost the whole crew surface):
   `lib/dexie/prune.ts` — `messages` grew forever at 500 rows a pull. And every
   member of the `MutationTable` union must have a retry affordance in
   `app/crew/_components/failed-sync-banner.tsx`: a mutation that dead-letters
-  where no crew member can see it is work silently thrown away. Enforced by
+  where no crew member can see it is work silently thrown away. BOTH outboxes
+  (`mutations` and `pending_photo_uploads`) need a dead-letter query AND a
+  stalled-queue query there — a transport failure never sets `failed`, so the
+  stalled surface is its only visible one. Enforced by
   `unit/guardrails/crew-dead-letter-coverage.test.ts`.
+- **The optimistic local write and its outbox row commit in ONE Dexie
+  transaction.** Use `writeAndQueue()`/`enqueueMutationTx()` (`lib/dexie/
+  helpers.ts`, `lib/dexie/syncService.ts`) — never a bare `table.update()`
+  followed by a separate `enqueueMutation()`. As two transactions, a PWA
+  reclaimed between them left the cache updated with nothing queued to send
+  it, and no delta pull corrects that because the server row's `updated_at`
+  never changed. Nothing async-external may go inside the block: an IDB
+  transaction auto-commits the moment an await leaves it, so the
+  `processOutbox()` kick stays outside.
+- **Abandoning a queued mutation rewinds the cursor that was masking the
+  server row.** `discardFailedMutation()` and `pruneExpiredDeadLetters()` call
+  `invalidateCursorsFor()`. While a mutation is queued, `shadow.ts` replays it
+  over every pull AND `advanceCursor()` moves past the server row it masks —
+  drop it without rewinding and the delta filter skips that row forever.
+  `forceFullCrewResync()` is the whole-cache version, for a device that has
+  already diverged.
+- **`failed` is `0 | 1`, never a boolean** (`DeadLetterFlag`). IndexedDB has no
+  boolean key type, so a boolean `failed` is silently absent from its index and
+  every dead-letter query degrades to a full scan — three of which are
+  `useLiveQuery`s live on every crew screen, over a table written on every
+  checklist tick. Truthiness checks (`!m.failed`) are unaffected; only literal
+  `true`/`false` writes.
 
 **Crew Sync v2 coverage convention** (`docs/CREW_SYNC_V2_PHASES.md` section 5e):
 every Supabase-backed table the crew PWA caches in Dexie is covered by the

@@ -74,7 +74,10 @@ const TERMINAL_CODE_PATTERN = /^(22|23|42)\d{3}$/
 
 // Client-side codes this codebase raises for a mutation that is structurally
 // unsendable — replaying it byte-for-byte can only fail the same way.
-const TERMINAL_CODES = new Set(['NO_FIELDS'])
+// NO_HANDLER: the mutation names a (table, op) this build has no upload
+// handler for — an outbox row queued by an older release. Replay cannot
+// conjure the handler back, so it must not burn the retry budget first.
+const TERMINAL_CODES = new Set(['NO_FIELDS', 'NO_HANDLER'])
 
 function messageOf(err: unknown): string {
   if (err instanceof Error) return err.message

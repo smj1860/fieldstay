@@ -79,7 +79,6 @@ export async function updateChecklistItem(
   input: UpdateChecklistItemInput,
   crewMemberId?: string | null,
 ): Promise<void> {
-  const db = getDexieDb(userId)
   const completedAt = input.isCompleted ? new Date().toISOString() : null
 
   const changes: Record<string, unknown> = {

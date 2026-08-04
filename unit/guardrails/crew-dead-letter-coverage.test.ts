@@ -88,6 +88,27 @@ describe('guardrail: every cached crew table is bounded', () => {
     ].join('\n')).toEqual([])
   })
 
+  it('both outboxes are covered by BOTH the dead-letter and the stalled surface', () => {
+    // A transport failure deliberately never sets `failed` — losing a crew
+    // member's work because their signal is bad would be worse than the bug
+    // that rule creates. But the drain stops at a blocked head, so the work
+    // queues up invisibly, which is what the amber stalled notice exists to
+    // say. It only ever queried db.mutations: a whole shift of photos could
+    // retry forever against a captive portal with nothing on screen, on a
+    // banner whose own header comment claims it covers "every queued photo".
+    for (const table of ['mutations', 'pending_photo_uploads']) {
+      expect(
+        new RegExp(`db\\.${table}[\\s\\S]{0,80}?failed`).test(BANNER_SRC),
+        `${table} has no dead-letter query in the failed-sync banner`,
+      ).toBe(true)
+      expect(
+        new RegExp(`db\\.${table}[\\s\\S]{0,200}?STALLED_NETWORK_ATTEMPTS`).test(BANNER_SRC),
+        `${table} has no stalled-queue query in the failed-sync banner — a transport ` +
+        'failure there never dead-letters, so this is its ONLY visible surface',
+      ).toBe(true)
+    }
+  })
+
   it('every RECONCILED_AT_PULL claim is backed by a real bulkDelete in that file', () => {
     for (const [table, file] of Object.entries(RECONCILED_AT_PULL)) {
       const src = readFileSync(join(ROOT, file), 'utf8')
