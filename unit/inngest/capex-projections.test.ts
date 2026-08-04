@@ -1,3 +1,4 @@
+import { DEFAULT_PAGE_SIZE as PAGE } from '@/lib/inngest/paginate'
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 
 vi.mock('@/lib/supabase/server', () => ({
@@ -127,7 +128,7 @@ describe('generateCapexProjections (dispatcher)', () => {
 
     expect(result).toEqual({ dispatched: 1_500, tax_year: 2026 })
     const ranges = supabase.calls.filter((c) => c.table === 'organizations' && c.method === 'range')
-    expect(ranges.map((c) => c.args)).toEqual([[0, 999], [1000, 1999]])
+    expect(ranges.map((c) => c.args)).toEqual([[0, PAGE - 1], [PAGE, 2 * PAGE - 1]])
 
     const [, events] = step.sendEvent.mock.calls[0]! as [string, Array<{ data: { org_id: string } }>]
     expect(events).toHaveLength(1_500)
@@ -241,7 +242,7 @@ describe('capexProjectionOrg (per org)', () => {
 
     expect(result).toMatchObject({ total_assets: 1_750, years_with_items: 1 })
     const ranges = supabase.calls.filter((c) => c.table === 'property_assets' && c.method === 'range')
-    expect(ranges.map((c) => c.args)).toEqual([[0, 999], [1000, 1999]])
+    expect(ranges.map((c) => c.args)).toEqual([[0, PAGE - 1], [PAGE, 2 * PAGE - 1]])
 
     const upsert = milestonePayload(supabase)
     const projections = (upsert.args[0] as { value: { projections: Record<number, { items: unknown[] }> } }).value.projections

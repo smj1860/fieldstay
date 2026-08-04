@@ -3,6 +3,8 @@ import { TurnoverBoard } from './turnover-board'
 import { unwrapJoin } from '@/lib/utils/supabase-joins'
 import type { Metadata } from 'next'
 import { throwIfAnyQueryFailed } from '@/lib/supabase/unwrap'
+import { fetchAllRows } from '@/lib/inngest/paginate'
+import { reportError } from '@/lib/observability/report-error'
 
 export const metadata: Metadata = { title: 'Turnovers' }
 
@@ -18,51 +20,33 @@ const TURNOVER_COLUMNS = `
         )
       `
 
-/** PostgREST's max_rows (supabase/config.toml). A .limit() above it does nothing. */
-const PAGE_SIZE = 1000
-
 /**
- * The board's window is 67 days wide, which is NOT inside the 1000-row cap for
- * a large org: 50 properties turning over daily is ~3,350 rows. An unbounded
- * read would have returned the first 1000 with a 200 and no truncation signal,
- * so turnovers would simply be missing from the board with nothing logged.
- * Drained by page instead.
+ * Every read on this page is drained through fetchAllRows, and every one of
+ * them ends in `.order('id')`.
+ *
+ * ORDER MATTERS, and not for presentation. `.range()` is OFFSET pagination:
+ * page 2 asks the database for "rows 999-1997 of this ordering", so the
+ * ordering has to be TOTAL or the two pages are answering different questions.
+ * checkout_datetime is emphatically not unique — short-term rentals share a
+ * standard checkout hour, so a 50-property org has dozens of rows on the same
+ * timestamp — and Postgres is free to break those ties differently in two
+ * separately-planned queries. The result is rows returned twice (duplicate
+ * React keys, duplicate cards) AND rows returned never, which is the exact
+ * defect the pagination was added to fix. `id` as a final tiebreaker makes the
+ * sort total. See the "MUST apply a stable .order(...)" note in
+ * lib/inngest/paginate.ts.
+ *
+ * The window is 67 days wide, which is NOT inside PostgREST's 1000-row cap for
+ * a large org — ~3,350 turnovers and ~3,350 availability rows at 50 properties
+ * / 50 crew. Truncation there is silent: a 200, no error, no signal. For
+ * bookings it is worse than silent, because stayTypeByBookingId turns a
+ * truncated booking into `stay_type: null`, which is indistinguishable from a
+ * booking that genuinely has no stay type.
+ *
+ * maxRows is per-read and deliberately snug: blowing it throws a labelled
+ * error rather than paging on forever inside a Server Component render.
  */
-type TurnoverQuery = ReturnType<typeof buildTurnoverPage>
-function buildTurnoverPage(
-  supabase: Awaited<ReturnType<typeof requireOrgMember>>['supabase'],
-  orgId: string,
-  since: string,
-  until: string,
-  from: number,
-) {
-  return supabase
-    .from('turnovers')
-    .select(TURNOVER_COLUMNS)
-    .eq('org_id', orgId)
-    .neq('status', 'cancelled')
-    .gte('checkout_datetime', since)
-    .lte('checkout_datetime', until)
-    .order('checkout_datetime', { ascending: true })
-    .range(from, from + PAGE_SIZE - 1)
-}
-
-async function fetchAllTurnovers(
-  supabase: Awaited<ReturnType<typeof requireOrgMember>>['supabase'],
-  orgId: string,
-  since: string,
-  until: string,
-): Promise<Awaited<TurnoverQuery>> {
-  const rows: NonNullable<Awaited<TurnoverQuery>['data']> = []
-
-  for (let from = 0; ; from += PAGE_SIZE) {
-    const result = await buildTurnoverPage(supabase, orgId, since, until, from)
-    if (result.error) return result
-    const page = result.data ?? []
-    rows.push(...page)
-    if (page.length < PAGE_SIZE) return { ...result, data: rows }
-  }
-}
+const MAX_BOARD_ROWS = 20_000
 
 export default async function TurnoversPage() {
   const { supabase, membership } = await requireOrgMember()
@@ -76,56 +60,88 @@ export default async function TurnoversPage() {
   const rangeStart = since.toISOString().split('T')[0]!
   const rangeEnd   = until.toISOString().split('T')[0]!
 
-  const [
-    { data: turnovers, error: turnoversError },
-    { data: properties, error: propertiesError },
-    { data: bookings, error: bookingsError },
-    { data: crew, error: crewError },
-    { data: crewAvailability, error: crewAvailabilityError },
-    { data: org, error: orgError },
-  ] = await Promise.all([
-    fetchAllTurnovers(
-      supabase,
-      membership.org_id,
-      since.toISOString(),
-      until.toISOString(),
-    ),
-    supabase
-      .from('properties')
-      .select('id, name, city, state')
-      .eq('org_id', membership.org_id)
-      .eq('is_active', true)
-      .order('name'),
-    supabase
-      .from('bookings')
-      .select('id, property_id, checkin_date, checkout_date, guest_name, status, source, stay_type')
-      .eq('org_id', membership.org_id)
-      .gte('checkout_date', rangeStart)
-      .lte('checkin_date',  rangeEnd)
-      .in('status', ['confirmed', 'tentative'])
-      .order('checkin_date', { ascending: true }),
-    supabase
-      .from('crew_members')
-      .select('id, name, phone, email, specialty')
-      .eq('org_id', membership.org_id)
-      .eq('is_active', true)
-      .order('name'),
-    supabase
-      .from('crew_availability')
-      .select('crew_member_id, available_date, is_available')
-      .eq('org_id', membership.org_id)
-      .gte('available_date', rangeStart)
-      .lte('available_date', rangeEnd),
-    supabase
-      .from('organizations')
-      .select('auto_assign_mode')
-      .eq('id', membership.org_id)
-      .single(),
-  ])
+  // fetchAllRows THROWS on a failed page rather than returning { data, error },
+  // which is the same end state this page already wanted — but it throws a
+  // plain Error with no Sentry context, so the batch is wrapped to report once
+  // with the call site before rethrowing. Rethrowing is deliberate: the
+  // segment's error.tsx must render a real error state, never empty data.
+  let turnovers, properties, bookings, crew, crewAvailability, orgResult
+  try {
+    ;[turnovers, properties, bookings, crew, crewAvailability, orgResult] = await Promise.all([
+      fetchAllRows(
+        (from, to) => supabase
+          .from('turnovers')
+          .select(TURNOVER_COLUMNS)
+          .eq('org_id', membership.org_id)
+          .neq('status', 'cancelled')
+          .gte('checkout_datetime', since.toISOString())
+          .lte('checkout_datetime', until.toISOString())
+          .order('checkout_datetime', { ascending: true })
+          .order('id', { ascending: true })
+          .range(from, to),
+        { label: 'page.turnovers.turnovers', maxRows: MAX_BOARD_ROWS },
+      ),
+      fetchAllRows(
+        (from, to) => supabase
+          .from('properties')
+          .select('id, name, city, state')
+          .eq('org_id', membership.org_id)
+          .eq('is_active', true)
+          .order('name')
+          .order('id', { ascending: true })
+          .range(from, to),
+        { label: 'page.turnovers.properties', maxRows: MAX_BOARD_ROWS },
+      ),
+      fetchAllRows(
+        (from, to) => supabase
+          .from('bookings')
+          .select('id, property_id, checkin_date, checkout_date, guest_name, status, source, stay_type')
+          .eq('org_id', membership.org_id)
+          .gte('checkout_date', rangeStart)
+          .lte('checkin_date',  rangeEnd)
+          .in('status', ['confirmed', 'tentative'])
+          .order('checkin_date', { ascending: true })
+          .order('id', { ascending: true })
+          .range(from, to),
+        { label: 'page.turnovers.bookings', maxRows: MAX_BOARD_ROWS },
+      ),
+      fetchAllRows(
+        (from, to) => supabase
+          .from('crew_members')
+          .select('id, name, phone, email, specialty')
+          .eq('org_id', membership.org_id)
+          .eq('is_active', true)
+          .order('name')
+          .order('id', { ascending: true })
+          .range(from, to),
+        { label: 'page.turnovers.crew_members', maxRows: MAX_BOARD_ROWS },
+      ),
+      fetchAllRows(
+        (from, to) => supabase
+          .from('crew_availability')
+          .select('id, crew_member_id, available_date, is_available')
+          .eq('org_id', membership.org_id)
+          .gte('available_date', rangeStart)
+          .lte('available_date', rangeEnd)
+          .order('id', { ascending: true })
+          .range(from, to),
+        { label: 'page.turnovers.crew_availability', maxRows: MAX_BOARD_ROWS },
+      ),
+      supabase
+        .from('organizations')
+        .select('auto_assign_mode')
+        .eq('id', membership.org_id)
+        .single(),
+    ])
+  } catch (err) {
+    reportError(err, { site: 'page.turnovers', orgId: membership.org_id })
+    throw err
+  }
 
-  // Logs + reports every failure, then throws so the segment's error.tsx
-  // renders a real error state — an outage must not look like empty data.
-  throwIfAnyQueryFailed({ site: 'page.turnovers', orgId: membership.org_id }, turnoversError, propertiesError, bookingsError, crewError, crewAvailabilityError, orgError)
+  // Logs + reports the failure, then throws so the segment's error.tsx renders
+  // a real error state — an outage must not look like empty data.
+  throwIfAnyQueryFailed({ site: 'page.turnovers', orgId: membership.org_id }, orgResult.error)
+  const org = orgResult.data
 
   const propertyMap = Object.fromEntries(
     (properties ?? []).map((p) => [p.id, p])

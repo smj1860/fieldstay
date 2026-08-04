@@ -1,3 +1,4 @@
+import { DEFAULT_PAGE_SIZE as PAGE } from '@/lib/inngest/paginate'
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 
 vi.mock('@/lib/supabase/server', () => ({
@@ -656,7 +657,7 @@ describe('maintenanceSchedulesOrg (per-org handler)', () => {
     expect(result).toMatchObject({ checked: 2_100 })
     // Three pages requested for the due-schedule scan.
     const dueRanges = supabase.calls.filter((c) => c.table === 'maintenance_schedules' && c.method === 'range')
-    expect(dueRanges.slice(0, 3).map((c) => c.args)).toEqual([[0, 999], [1000, 1999], [2000, 2999]])
+    expect(dueRanges.slice(0, 3).map((c) => c.args)).toEqual([[0, PAGE - 1], [PAGE, 2 * PAGE - 1], [2 * PAGE, 3 * PAGE - 1]])
 
     // ...and ZERO steps spent walking them. Reminder-only schedules do no work
     // in this pass at all — their PM-facing surface is cron-daily-wrapup — but
