@@ -89,14 +89,15 @@ export async function POST(
     unit_cost:   number
     line_total?: number
   }[] = []
-  let subtotal = 0
+  // `subtotal` is deliberately NOT read from the body any more — see the
+  // derivation block below for why the previous fallback was reachable only
+  // by the payload shape it was meant to exclude.
 
   if (contentType.includes('application/json')) {
     const body = await request.json().catch(() => ({}))
     notes            = typeof body.notes === 'string' ? body.notes.trim() || null : null
     completedByName  = typeof body.completedByName === 'string' ? body.completedByName.trim() || null : null
     lineItemsPayload = Array.isArray(body.lineItems) ? body.lineItems : []
-    subtotal         = typeof body.subtotal === 'number' ? body.subtotal : 0
   } else {
     const formData   = await request.formData()
     notes            = (formData.get('notes') as string | null)?.trim() || null
@@ -135,17 +136,59 @@ export async function POST(
   // simply accepted, as was a negative value (which passed the `> 1_000_000`
   // check and produced a negative platform fee).
   //
-  // So: when line items are present they ARE the invoice, and the total is
-  // computed from the same rows the RPC inserts. The client's figure is only
-  // honoured for the legacy no-line-items path, where there is nothing to
-  // derive from.
+  // The first fix kept a `safeLineItems.length > 0 ? derived : subtotal`
+  // fallback, justified as serving "the legacy no-line-items path". It served
+  // the opposite: the legacy FormData branch never assigns `subtotal` at all
+  // (it stayed 0), so the client's figure could ONLY be reached by a JSON
+  // submission whose line items had all failed validation — `lineItems: []`,
+  // or a set where every entry was rejected. The one control on the app's only
+  // unauthenticated money-minting path was bypassed by supplying nothing to
+  // derive from, and `p_subtotal` writes work_orders.actual_cost
+  // unconditionally (the RPC's `IF v_has_line_items` guard covers only the
+  // invoice). From there it posts to owner_transactions under an
+  // `ignoreDuplicates` upsert, so the first value written is the owner's P&L
+  // permanently — there is no correcting write.
+  //
+  // So the total is now DERIVED with no fallback. The legacy path derives 0,
+  // which leaves actual_cost untouched (`CASE WHEN p_subtotal > 0`) — exactly
+  // the behaviour it had before, since its `subtotal` was always 0 anyway.
   const derivedSubtotal = safeLineItems.reduce(
     (sum, item) => sum + item.quantity * item.unit_cost,
     0,
   )
-  const effectiveSubtotal = safeLineItems.length > 0
-    ? Math.round(derivedSubtotal * 100) / 100   // cents; avoids FP dust reaching money columns
-    : subtotal
+  // cents; avoids FP dust reaching money columns
+  const effectiveSubtotal = Math.round(derivedSubtotal * 100) / 100
+
+  // Items were submitted and every one was rejected. The portal filters to
+  // `validItems` and refuses to submit an empty set, so this is a malformed or
+  // hand-crafted payload rather than anything the real client produces —
+  // and it is the exact shape that used to reach the `subtotal` fallback.
+  if (lineItemsPayload.length > 0 && safeLineItems.length === 0) {
+    return NextResponse.json(
+      { error: 'No valid line items. Each needs a type, description, quantity > 0 and unit cost > 0.' },
+      { status: 400 },
+    )
+  }
+
+  // A partial drop stays accepted — the portal's own filter is looser than
+  // this one (it does not check quantity), so rejecting outright would fail
+  // real submissions, including ones already queued in a vendor's offline
+  // outbox under an older build. But it must not stay SILENT: the derived
+  // total and the stored line items now agree with each other, while the
+  // vendor still believes they billed for the dropped row.
+  if (safeLineItems.length !== lineItemsPayload.length) {
+    reportError(
+      new Error('Vendor completion dropped invalid line items'),
+      {
+        site:  'route.work-orders.complete.line_items_dropped',
+        extra: {
+          work_order_id: workOrder.id,
+          submitted:     lineItemsPayload.length,
+          accepted:      safeLineItems.length,
+        },
+      },
+    )
+  }
 
   if (!Number.isFinite(effectiveSubtotal) || effectiveSubtotal < 0) {
     return NextResponse.json({ error: 'Invoice total is not a valid amount.' }, { status: 400 })
