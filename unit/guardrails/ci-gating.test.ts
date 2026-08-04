@@ -47,7 +47,11 @@ const ciDirectives = ci
   .join('\n')
 
 /** Scripts run by `node` in CI with no dependency install ahead of them. */
-const INSTALL_FREE_SCRIPTS = ['scripts/check-db-invariants.mjs', 'scripts/check-type-drift.mjs']
+const INSTALL_FREE_SCRIPTS = [
+  'scripts/check-db-invariants.mjs',
+  'scripts/check-type-drift.mjs',
+  'scripts/check-migration-ledger.mjs',
+]
 
 describe('guardrail: lint warning ratchet', () => {
   it('the lint script carries --max-warnings so warning drift fails CI', () => {
@@ -87,7 +91,7 @@ describe('guardrail: CI runs every gate', () => {
     expect(ciDirectives).not.toMatch(/continue-on-error/)
   })
 
-  it('the db-invariants job runs both live-schema checks', () => {
+  it('the db-invariants job runs every live-schema check', () => {
     for (const script of INSTALL_FREE_SCRIPTS) {
       expect(ciDirectives, `ci.yml no longer runs ${script}`).toContain(`node ${script}`)
     }
@@ -156,5 +160,79 @@ describe('guardrail: install-free CI scripts stay install-free', () => {
     expect(src).toMatch(/DB_INVARIANTS_ALLOW_PROD/)
     const pkg = JSON.parse(readFileSync(join(ROOT, 'package.json'), 'utf8'))
     expect(pkg.scripts['check:db-invariants:prod']).toBeDefined()
+  })
+
+  // Same escape hatch, and for a stronger reason: the ledger-parity invariant
+  // is ABOUT production. The repo is the source of truth for what production
+  // has applied, and CI can only ever observe the E2E project.
+  it('check-migration-ledger.mjs allows a deliberate, opt-in production run', () => {
+    const src = readFileSync(join(ROOT, 'scripts/check-migration-ledger.mjs'), 'utf8')
+    expect(src).toMatch(/DB_INVARIANTS_ALLOW_PROD/)
+    const pkg = JSON.parse(readFileSync(join(ROOT, 'package.json'), 'utf8'))
+    expect(pkg.scripts['check:migration-ledger:prod']).toBeDefined()
+  })
+})
+
+// ============================================================================
+// The ledger-parity baseline is a RATCHET, and a ratchet whose baseline can be
+// edited freely is a suppression list. scripts/check-migration-ledger.mjs
+// enforces "shrink-only" against the LIVE ledger, which CI can only do for the
+// one project it holds secrets for — these assertions hold for the file itself,
+// with no database, so they also run on a fork and in every local `pnpm test`.
+//
+// Production's entry being EMPTY is the load-bearing one. It was reconciled on
+// 2026-08-03 (audit H10) from 36 local-only / 35 ledger-only to exact 1:1
+// parity, which is what makes prod a hard gate rather than a grandfathered
+// mess. Re-populating it would silently restore the pre-H10 world.
+// ============================================================================
+describe('guardrail: migration ledger baseline is shrink-only', () => {
+  const PROD_REF = 'vpmznjktllhmmbfnxuvk'
+  const baseline = JSON.parse(
+    readFileSync(join(ROOT, 'scripts/migration-ledger-baseline.json'), 'utf8'),
+  ) as {
+    projects: Record<string, { label?: string; localOnly: string[]; ledgerOnly: string[] }>
+  }
+
+  it('production carries NO grandfathered divergence', () => {
+    const prod = baseline.projects[PROD_REF]
+    expect(prod, 'the production entry must stay in the baseline, empty').toBeDefined()
+    expect(
+      [...prod!.localOnly, ...prod!.ledgerOnly],
+      'Production was reconciled to exact 1:1 parity on 2026-08-03. An entry here means new drift was grandfathered instead of fixed — record the migration, or commit the missing file.',
+    ).toEqual([])
+  })
+
+  // Ceilings, not targets. LOWER them as the E2E project is repaired; never
+  // raise them. A raise is the "absorb the new drift" move the script's
+  // --update mode already refuses at runtime.
+  it.each([
+    ['syhthijeqlnltufdawyb', 70, 133],
+  ])('%s stays within its frozen divergence ceiling', (ref, maxLocalOnly, maxLedgerOnly) => {
+    const entry = baseline.projects[ref]
+    expect(entry, `baseline entry for ${ref} disappeared`).toBeDefined()
+    expect(entry!.localOnly.length).toBeLessThanOrEqual(maxLocalOnly)
+    expect(entry!.ledgerOnly.length).toBeLessThanOrEqual(maxLedgerOnly)
+  })
+
+  it('every grandfathered version is a well-formed migration version', () => {
+    const malformed: string[] = []
+    for (const [ref, entry] of Object.entries(baseline.projects)) {
+      for (const v of [...entry.localOnly, ...entry.ledgerOnly]) {
+        if (!/^\d{14}$/.test(v)) malformed.push(`${ref}: ${v}`)
+      }
+    }
+    expect(malformed, 'baseline entries are bare YYYYMMDDHHMMSS versions, not filenames').toEqual([])
+  })
+
+  it('no version is listed as BOTH local-only and ledger-only', () => {
+    // Mutually exclusive by construction — a version present in both sets
+    // would mean the diff that produced it was computed wrong, and the entry
+    // would then mask a real finding on whichever side later diverges.
+    const overlaps: string[] = []
+    for (const [ref, entry] of Object.entries(baseline.projects)) {
+      const local = new Set(entry.localOnly)
+      for (const v of entry.ledgerOnly) if (local.has(v)) overlaps.push(`${ref}: ${v}`)
+    }
+    expect(overlaps).toEqual([])
   })
 })
