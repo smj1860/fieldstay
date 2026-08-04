@@ -1,3 +1,4 @@
+import { DEFAULT_PAGE_SIZE as PAGE } from '@/lib/inngest/paginate'
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 
 vi.mock('@/lib/supabase/server', () => ({
@@ -319,6 +320,6 @@ describe('assetHealthOrg (per org)', () => {
 
     expect(result).toEqual({ org_id: 'org_1', assets_scored: 1_750 })
     const ranges = supabase.calls.filter((c) => c.table === 'property_assets' && c.method === 'range')
-    expect(ranges.map((c) => c.args)).toEqual([[0, 999], [1000, 1999]])
+    expect(ranges.map((c) => c.args)).toEqual([[0, PAGE - 1], [PAGE, 2 * PAGE - 1]])
   })
 })

@@ -14,8 +14,22 @@
 
 export const SUPABASE_MAX_ROWS = 1000
 
-/** Default page size — matches the PostgREST cap, so one request per page. */
-export const DEFAULT_PAGE_SIZE = SUPABASE_MAX_ROWS
+/**
+ * Default page size — deliberately one BELOW the PostgREST cap.
+ *
+ * The drain's only termination signal is `page.length < pageSize`. If pageSize
+ * equalled max_rows, a server-side cap at or below it would clamp the very
+ * first response, that short page would read as "no more rows", and the drain
+ * would return a truncated set as though it were complete — silently, with a
+ * 200 and no signal. That is bit-for-bit the failure this helper exists to
+ * prevent, so the helper must not be able to cause it.
+ *
+ * At 999 a full page is provably unclamped: reaching pageSize means the server
+ * did not truncate. The cost is one extra round trip per ~1M rows.
+ * `unit/guardrails/pagination-page-size.test.ts` ties this to the max_rows in
+ * supabase/config.toml so the two cannot drift apart.
+ */
+export const DEFAULT_PAGE_SIZE = SUPABASE_MAX_ROWS - 1
 
 export interface PaginateOptions {
   pageSize?: number

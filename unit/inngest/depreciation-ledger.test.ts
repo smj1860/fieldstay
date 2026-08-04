@@ -1,3 +1,4 @@
+import { DEFAULT_PAGE_SIZE as PAGE } from '@/lib/inngest/paginate'
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 
 vi.mock('@/lib/supabase/server', () => ({
@@ -137,7 +138,7 @@ describe('generateDepreciationLedger (dispatcher)', () => {
 
     expect(result).toMatchObject({ dispatched: 2 })
     const ranges = supabase.calls.filter((c) => c.table === 'property_assets' && c.method === 'range')
-    expect(ranges.map((c) => c.args)).toEqual([[0, 999], [1000, 1999]])
+    expect(ranges.map((c) => c.args)).toEqual([[0, PAGE - 1], [PAGE, 2 * PAGE - 1]])
   })
 
   it('dispatches only the requested org (and year) for a manual trigger, with no platform scan', async () => {
@@ -296,7 +297,7 @@ describe('depreciationLedgerOrg (per org)', () => {
 
     expect(result).toMatchObject({ entries_written: 1_750 })
     const ranges = supabase.calls.filter((c) => c.table === 'property_assets' && c.method === 'range')
-    expect(ranges.map((c) => c.args)).toEqual([[0, 999], [1000, 1999]])
+    expect(ranges.map((c) => c.args)).toEqual([[0, PAGE - 1], [PAGE, 2 * PAGE - 1]])
   })
 
   it('is idempotent across a re-run: same conflict key, same computed entry, no accumulation', async () => {
