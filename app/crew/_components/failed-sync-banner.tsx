@@ -40,6 +40,7 @@ const MUTATION_LABELS: Record<MutationTable, string> = {
   work_order_reports:       'Work order request',
   property_assets:          'Appliance details',
   crew_work_orders:         'Work order completion',
+  messages:                 'Message to your operations team',
 }
 
 interface FailedEntry {

@@ -422,7 +422,7 @@ and is **fully gone** — no dependency, no `lib/powersync/` directory, no
   shapes mirror the Supabase tables they cache. Get an instance via
   `getDexieDb(userId)`.
 - `lib/dexie/context.tsx` — `DexieProvider` pulls turnovers/properties/
-  inventory/checklists/messages from Supabase into Dexie tables on an interval
+  inventory/checklists from Supabase into Dexie tables on an interval
   and on reconnect; client components read from Dexie, never from Supabase
   directly.
 - `lib/dexie/syncService.ts` — `enqueueMutation()` queues a local write into

@@ -86,19 +86,6 @@ export interface PropertyRow {
   timezone: string   // IANA identifier, e.g. "America/Chicago" — see lib/utils/timezone.ts
 }
 
-export interface MessageRow {
-  id:           string
-  org_id:       string
-  sender_id:    string
-  recipient_id: string
-  content:      string
-  read_at:      string | null
-  turnover_id:  string
-  group_id:     string
-  group_label:  string
-  created_at:   string
-}
-
 // Progressive Asset Discovery cache — synced read-only for properties the
 // crew member is currently assigned to (see lib/asset-discovery/config.ts
 // for the REQUIRED_ASSET_TYPES list this is checked against).
@@ -191,6 +178,7 @@ export type MutationTable =
   | 'crew_availability'
   | 'property_assets'
   | 'crew_work_orders'
+  | 'messages'
 
 export interface MutationRow {
   id?:        number
@@ -236,7 +224,6 @@ export class FieldStayDexie extends Dexie {
   checklist_instance_items!: Table<ChecklistInstanceItemRow, string>
   inventory_items!:          Table<InventoryItemRow, string>
   properties!:               Table<PropertyRow, string>
-  messages!:                 Table<MessageRow, string>
   pending_photo_uploads!:    Table<PendingPhotoUploadRow, string>
   mutations!:                Table<MutationRow, number>
   sync_meta!:                Table<SyncMetaRow, string>
@@ -407,6 +394,20 @@ export class FieldStayDexie extends Dexie {
     this.version(10).stores({
       crew_availability: null,
     })
+
+    // messages leaves the crew cache too. History is read from the server
+    // (app/crew/messages/page.tsx) and the unread badge is server-rendered by
+    // the crew layout — the badge's Dexie live query was the only reason this
+    // table had to be cached at all. It was the heaviest thing the safety poll
+    // pulled: up to 500 rows across a rolling 90-day window, uncursored, every
+    // five minutes, with no reconciliation.
+    //
+    // SENDING a message is now offline-capable for the first time — it goes
+    // through the outbox as a 'messages' mutation (see queueMessageToPM), so
+    // nothing about this drop reduces what a crew member can do without signal.
+    this.version(11).stores({
+      messages: null,
+    })
   }
 }
 
@@ -424,7 +425,6 @@ export const CREW_SYNCED_TABLES: Readonly<Record<string, string>> = {
   checklist_instance_items: 'checklist_instance_items',
   inventory_items:          'inventory_items',
   properties:                'properties',
-  messages:                 'messages',
   crew_work_orders:         'work_orders',
   property_assets:          'property_assets',
 }

@@ -88,15 +88,6 @@ describe('local cache pruning', () => {
     expect(await db().property_assets.toArray()).toEqual([])
   })
 
-  it('drops messages older than the 90-day server window and keeps newer ones', async () => {
-    await db().messages.put({ id: 'old', created_at: new Date(Date.now() - 200 * DAY).toISOString() })
-    await db().messages.put({ id: 'new', created_at: new Date(Date.now() - 2 * DAY).toISOString() })
-
-    await pruneLocalCache('u1')
-
-    expect((await db().messages.toArray()).map((m) => m.id)).toEqual(['new'])
-  })
-
   it('keeps live dead letters and only collects expired ones', async () => {
     const recent = new Date(Date.now() - 2 * DAY).toISOString()
     const ancient = new Date(Date.now() - 200 * DAY).toISOString()

@@ -14,7 +14,6 @@
 import type { DexieSupabaseClient } from './types'
 import { syncAssignedTurnovers } from './turnovers'
 import { syncWorkOrders } from './work-orders'
-import { syncMessages } from './messages'
 import { computeAssignedPropertyIds, syncPropertyAssets } from './assets'
 import { resetAllCursors } from './cursors'
 import { pruneLocalCache } from '../prune'
@@ -33,7 +32,6 @@ export const CREW_RESYNC_COVERAGE: Readonly<Record<string, string>> = {
   inventory_items:          'syncAssignedTurnovers',
   properties:               'syncAssignedTurnovers',
   crew_work_orders:         'syncWorkOrders',
-  messages:                 'syncMessages',
   property_assets:          'syncPropertyAssets',
 }
 
@@ -51,7 +49,6 @@ export async function fullCrewResync(
   await Promise.all([
     syncAssignedTurnovers(supabase, userId, crewMemberId),
     syncWorkOrders(supabase, userId, crewMemberId),
-    syncMessages(supabase, userId),
   ])
 
   // property_assets deliberately has no broadcast trigger — this is its only

@@ -624,6 +624,27 @@ async function uploadWorkOrderReport(
  * `inventory_counts` primary key so a replay collides rather than recording
  * the same physical count twice.
  */
+/**
+ * A message to the operations team. Routed through the Route Handler because
+ * resolving WHICH PM receives it needs the service client — crew have no RLS
+ * visibility into organization_members.
+ *
+ * `targetId` is the client-generated message id, used as the primary key so a
+ * replay after a dropped response collides instead of sending twice.
+ */
+async function uploadCrewMessage(
+  _supabase: DexieSupabaseClient,
+  targetId: string,
+  payload: MutationPayload,
+): Promise<void> {
+  const res = await fetch('/api/crew/messages', {
+    method:  'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body:    JSON.stringify({ messageId: targetId, content: payload.content }),
+  })
+  if (!res.ok) throw new UploadHttpError(`Failed to send message ${targetId}`, res.status)
+}
+
 async function uploadInventoryCount(
   _supabase: DexieSupabaseClient,
   targetId: string,
@@ -797,6 +818,7 @@ const UPLOAD_HANDLERS: Record<string, UploadHandler> = {
   'crew_availability:PUT':          uploadCrewAvailability,
   'crew_availability:PATCH':        uploadCrewAvailability,
   'crew_work_orders:PATCH':         uploadCrewWorkOrderChange,
+  'messages:PUT':                   uploadCrewMessage,
 }
 
 /**

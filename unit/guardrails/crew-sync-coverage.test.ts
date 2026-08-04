@@ -38,7 +38,7 @@ const TRIGGERED_TABLES = [
 // inventory_items/properties are pulled inside the turnovers scope pull
 // rather than having their own trigger; crew_availability/messages have no
 // trigger at all.
-const SAFETY_POLL_ONLY = ['property_assets', 'inventory_items', 'properties', 'messages']
+const SAFETY_POLL_ONLY = ['property_assets', 'inventory_items', 'properties']
 
 function findBroadcastMigrationSql(): string {
   const file = readdirSync(MIGRATIONS_DIR).find((f) => f.includes('crew_sync_broadcast'))

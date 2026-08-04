@@ -322,6 +322,57 @@ export async function updateInventoryQuantity(
   )
 }
 
+// ── Messages to the operations team ───────────────────────────────────────
+//
+// Messages used to be the ONE crew-facing action that wasn't offline-safe:
+// sendMessageToPM is a live Server Action, so a message composed at a property
+// with no signal simply failed, and the crew FAQ carried an entry telling crew
+// not to assume it had queued. Reading history offline was the inverse
+// trade — 90 days of it cached on every device to back a screen whose whole
+// point is getting a reply.
+//
+// So: history is read from the server, and the SEND goes through the outbox
+// like every other crew write. Retry, backoff, and the failed-sync banner all
+// come for free.
+
+const MESSAGE_COMPOSE_KEY = 'message_compose_draft'
+
+/** The half-typed message in the compose box, so it survives navigation. */
+export async function loadMessageDraft(userId: string): Promise<string> {
+  const db = getDexieDb(userId)
+  return (await db.sync_meta.get(MESSAGE_COMPOSE_KEY))?.value ?? ''
+}
+
+export async function saveMessageDraft(userId: string, text: string): Promise<void> {
+  const db = getDexieDb(userId)
+  if (!text) {
+    await db.sync_meta.delete(MESSAGE_COMPOSE_KEY)
+    return
+  }
+  await db.sync_meta.put({ key: MESSAGE_COMPOSE_KEY, value: text })
+}
+
+/**
+ * Queues a message and clears the compose draft in one transaction, so a crash
+ * between the two can neither lose the message nor leave a duplicate sitting
+ * in the box.
+ *
+ * The id is client-generated and used by the route as the `messages` primary
+ * key, so a replay after a dropped response collides instead of sending twice.
+ * Returns it so the UI can show the message as pending until it drains.
+ */
+export async function queueMessageToPM(userId: string, content: string): Promise<string> {
+  const messageId = crypto.randomUUID()
+
+  await writeAndQueue(
+    userId, 'messages', messageId, 'PUT',
+    { content },
+    (db) => db.sync_meta.delete(MESSAGE_COMPOSE_KEY),
+  )
+
+  return messageId
+}
+
 // ── Turnover inventory count ──────────────────────────────────────────────
 //
 // A count is staged locally while the crew member walks the property, then
