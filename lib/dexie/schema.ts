@@ -469,6 +469,30 @@ export function isDexieShutdown(userId: string): boolean {
 }
 
 /**
+ * True for the rejection Dexie raises when work is in flight against a handle
+ * that has since been closed.
+ *
+ * The comment above says callers "already handle" this. Most do; the outbox
+ * drain did not, and it is invoked as `void processOutbox()`, so the rejection
+ * escaped unhandled — intermittently, because it needs a close to land inside
+ * the window where a drain is mid-await. A sibling tab logging out closes the
+ * connection synchronously from the BroadcastChannel handler (by design: the
+ * deleting tab must not be blocked), which is exactly that window.
+ *
+ * Matched on `name` rather than `instanceof`: Dexie's error classes are not
+ * exported as constructors that survive bundling, and the same rejection can
+ * arrive from a structured-clone boundary with the prototype stripped.
+ */
+export function isDatabaseClosedError(err: unknown): boolean {
+  if (typeof err !== 'object' || err === null) return false
+  const { name, inner } = err as { name?: unknown; inner?: unknown }
+  if (name === 'DatabaseClosedError') return true
+  // Dexie nests the original under `inner` when it wraps a rejection.
+  return typeof inner === 'object' && inner !== null &&
+    (inner as { name?: unknown }).name === 'DatabaseClosedError'
+}
+
+/**
  * Marks the user's local database as shutting down. MUST be called before
  * closeDexieDb() — anything that reaches getDexieDb() after this point gets a
  * closed handle instead of a freshly re-created database.
