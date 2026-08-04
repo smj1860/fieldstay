@@ -1,5 +1,30 @@
 # Migration ledger reconciliation — runbook (H10)
 
+> ## ✅ COMPLETED 2026-08-03
+>
+> Steps 1 and 2 were executed against `vpmznjktllhmmbfnxuvk` via direct SQL
+> against `supabase_migrations.schema_migrations`, NOT the Supabase CLI — the
+> CLI is not installed on the operator's machine, and `migration repair` only
+> INSERTs/DELETEs rows in that table, so the two are equivalent. No schema was
+> touched.
+>
+> | | Before | After |
+> |---|---|---|
+> | Ledger rows | 311 | **312** |
+> | Local migration files | 312 | 312 |
+> | Versions in live but not local | 35 | **0** |
+> | Versions in local but not live | 36 | **0** |
+> | Ledger names embedding a stray timestamp | 5 | **0** |
+>
+> Verified after: exact 1:1 set equality in both directions, and
+> `db_invariant_report()` byte-identical to before — production still passes
+> all nine checks.
+>
+> **`supabase db push` is now safe to run.** It should report nothing pending.
+> If it wants to apply anything, stop and re-check before proceeding.
+>
+> The command lists below are retained as the record of what was applied.
+
 Generated 2026-08-03 against project `vpmznjktllhmmbfnxuvk`.
 
 ## What is wrong
@@ -15,7 +40,7 @@ revoke/restore pair — `20260801280000_authz_gate_security_definer_rpcs`
 revokes a grant and `20260801290000_assign_wo_number_security_definer`
 restores it — and a partial or reordered replay breaks work-order inserts.
 
-**Do not run `supabase db push` until this runbook has been completed.**
+~~**Do not run `supabase db push` until this runbook has been completed.**~~ — completed, see the banner above.
 
 ## State at generation time
 
