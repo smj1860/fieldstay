@@ -239,7 +239,7 @@ describe('handleTurnoverCompleted — record-crew-duration', () => {
         }
       }
       if (table === 'inventory_items') {
-        return { select: vi.fn(() => ({ eq: vi.fn(() => ({ gt: vi.fn(() => ({ order: vi.fn(() => ({ limit: vi.fn(() => ({ maybeSingle: vi.fn(() => Promise.resolve(opts.lastInventoryEdit ?? { data: null, error: null })) })) })) })) })) })) }
+        return { select: vi.fn(() => ({ eq: vi.fn(() => ({ gt: vi.fn(() => ({ lte: vi.fn(() => ({ order: vi.fn(() => ({ limit: vi.fn(() => ({ maybeSingle: vi.fn(() => Promise.resolve(opts.lastInventoryEdit ?? { data: null, error: null })) })) })) })) })) })) })) }
       }
       if (table === 'assignment_outcomes') {
         return { update: assignmentOutcomesUpdate }
@@ -275,7 +275,34 @@ describe('handleTurnoverCompleted — record-crew-duration', () => {
       logger: makeLogger(),
     })
 
+    // Distinct from the one-signal case below, and deliberately so: nothing
+    // was recorded at all here, versus something was recorded but spans no
+    // time. Both skip the write; only the reason tells you which, and that
+    // reason is what shows up in Inngest's step history.
     expect(captured.value).toEqual({ skipped: 'no_completion_signals' })
+    expect(supabase.assignmentOutcomesUpdate).not.toHaveBeenCalled()
+    expect(supabase.turnoverUpdate).not.toHaveBeenCalled()
+  })
+
+  it('skips persisting when exactly one completion signal exists (MAX == MIN would fabricate a 0-minute duration)', async () => {
+    const supabase = makeSupabase({
+      checklistInstance: { data: { id: 'inst_1' }, error: null },
+      checklistItems: {
+        data: [{ completed_at: '2026-07-25T10:00:00.000Z' }],
+        error: null,
+      },
+      turnoverRow: { data: { property_id: 'prop_1', inventory_started_at: null, inventory_confirmed_complete_at: null }, error: null },
+    })
+    ;(createServiceClient as ReturnType<typeof vi.fn>).mockReturnValue(supabase)
+    const { step, captured } = onlyRecordCrewDurationStep()
+
+    await invokeHandler(handleTurnoverCompleted, {
+      event:  { data: baseEvent },
+      step,
+      logger: makeLogger(),
+    })
+
+    expect(captured.value).toEqual({ skipped: 'insufficient_completion_signals' })
     expect(supabase.assignmentOutcomesUpdate).not.toHaveBeenCalled()
     expect(supabase.turnoverUpdate).not.toHaveBeenCalled()
   })
@@ -355,7 +382,7 @@ describe('handleTurnoverCompleted — record-crew-duration', () => {
         error: null,
       },
       turnoverRow: {
-        data: { property_id: 'prop_1', inventory_started_at: '2026-07-25T09:50:00.000Z', inventory_confirmed_complete_at: null },
+        data: { property_id: 'prop_1', completed_at: '2026-07-25T11:00:00.000Z', inventory_started_at: '2026-07-25T09:50:00.000Z', inventory_confirmed_complete_at: null },
         error: null,
       },
       lastInventoryEdit: { data: { updated_at: '2026-07-25T10:30:00.000Z' }, error: null },

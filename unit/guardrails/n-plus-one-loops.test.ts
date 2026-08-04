@@ -139,7 +139,7 @@ const EXCEPTIONS: Record<string, string> = {
     'Per-property conditional guidebook-config patch — same shape as ownerrez/initial-sync.ts:184 (differing patch per row); the read side just above is already batched via .in(\'property_id\', ids).',
   'lib/properties/upsert-normalized.ts:172':
     'Per-property conditional cleaning_cost backfill — same differing-patch-per-row shape as the two entries above.',
-  'lib/inngest/functions/turnover-events.ts:340':
+  'lib/inngest/functions/turnover-events.ts:354':
     'Milestone-flag upserts — the milestones array has at most 3 possible entries (first_turnover_complete/_10/_50) and is almost always exactly 1; negligible enough that batching would add more complexity than it saves.',
   'lib/push/send-push.ts:61':
     'Per-subscription webpush.sendNotification call (+ conditional delete on a 410) — each subscription is a distinct external Web Push endpoint; inherently one call per endpoint, like the Vault-secret case above.',

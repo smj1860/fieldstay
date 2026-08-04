@@ -1404,3 +1404,54 @@ Fix is the same one-line shape (`- 1`) plus updating that test's expected
 ranges to derive from the constant instead of hardcoding them. Deliberately
 out of scope of the turnovers-pagination change, which was confined to the
 `lib/inngest/paginate.ts` callers.
+
+---
+
+## 30. Core-billing webhook can write entitlement to a different org than it notifies
+
+**File:** `app/api/webhooks/stripe/handlers/core-billing.ts`,
+`resolveSubscriptionOrg()` / `applySubscriptionUpdate()` /
+`handleCoreSubscriptionUpdate()` (around lines 115–255, 289–322)
+
+Flagged by CodeRabbit on PR #542. `resolveSubscriptionOrg()` resolves the org
+by subscription metadata first, customer id second, and returns it as `org`.
+`applySubscriptionUpdate(supabase, org, customerId, ...)` then calls
+`update_organization_subscription_from_stripe`, an RPC that does its own
+independent lookup **keyed on `p_customer_id`**, not on `org.id` — the two
+resolutions are not guaranteed to agree. The RPC's own fallback comment
+(lines 225–236) already documents that they *can* disagree: "org already
+carrying a DIFFERENT customer id, where the backfill deliberately no-ops."
+
+When they disagree, `applySubscriptionUpdate` writes entitlement fields
+(plan, plan_status, max_properties, trial_ends_at) to whatever org the RPC's
+customer-id lookup found — call it org B — and returns org B's
+`previous_plan`. But `handleCoreSubscriptionUpdate` (line 289 onward) keeps
+using `org` — org A, the metadata-resolved one — for the
+`billing/subscription-updated` Inngest event, the audit log entry, and the
+trial/payment emails. Org A gets notified of a plan change it didn't
+actually receive; org B silently has its entitlement changed with no event,
+no audit row, and no email.
+
+**Why not fixed here:** this needs an explicit reconciliation policy, not a
+mechanical patch. The RPC is the source of truth for what actually got
+written (it holds the row lock), so the natural fix is having
+`applySubscriptionUpdate` return the RPC's own `org_id`/`org_name` and using
+*that* for every downstream side effect instead of the pre-resolved `org` —
+but that changes behavior for the (hopefully large) majority of calls where
+the two agree, and needs to handle the "RPC found nothing, fell back to a
+direct update on org.id" branch (lines 233–250) consistently too, since that
+branch's write target and the side effects' target are already the same
+(`org.id`) and must stay that way. It also deserves a regression test that
+mocks the RPC to return a *different* `org_id` than the metadata-resolved
+one and asserts the notification fires for the RPC's org — the existing
+`unit/webhooks/core-billing-subscription-update.test.ts` mocks always agree
+on `org_id`, so this class of bug wouldn't be caught by the current suite.
+Given this is live billing/entitlement code with multiple interacting fixes
+already layered on it (see the comment block at lines 274–288), it's a
+"heavy lift" per CodeRabbit's own label and warrants a dedicated pass rather
+than a drive-by change.
+
+**Renumbered from 21 to 30 when this was rebased.** The branch it was
+authored on predated items 21-29; 21 is now a different, resolved finding
+(`types/database.generated.ts` drift). The content is unchanged and was
+confirmed absent from main before appending — it had never landed.
