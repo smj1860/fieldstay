@@ -162,13 +162,13 @@ describe('processOutbox — retry backoff', () => {
 
     // Fifth failure dead-letters: row kept, marked failed, no backoff window.
     const row = await mutationRow(id)
-    expect(row).toMatchObject({ retryCount: 5, failed: true })
+    expect(row).toMatchObject({ retryCount: 5, failed: 1 })
     expect(row?.nextAttemptAt).toBeUndefined()
     expect(vi.getTimerCount()).toBe(0)
 
     // Dead-lettered rows are excluded from later drains, not retried forever.
     await engine.processOutbox()
     expect(supabaseCalls().filter((c) => c.method === 'update')).toHaveLength(1)
-    expect(await mutationRow(id)).toMatchObject({ retryCount: 5, failed: true })
+    expect(await mutationRow(id)).toMatchObject({ retryCount: 5, failed: 1 })
   })
 })

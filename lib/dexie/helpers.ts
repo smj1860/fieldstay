@@ -1,6 +1,55 @@
-import { getDexieDb } from './schema'
+import { getDexieDb, isDexieShutdown, type FieldStayDexie, type MutationRow } from './schema'
 import { reportError } from '@/lib/observability/report-error'
-import { enqueueMutation, getSyncEngine } from './syncService'
+import { enqueueMutation, enqueueMutationTx, getSyncEngine } from './syncService'
+import { invalidateCursorsFor } from './sync/cursors'
+
+/**
+ * Commits an optimistic local write and its outbox row in ONE Dexie
+ * transaction, then kicks the drain.
+ *
+ * The two writes used to be separate IndexedDB transactions. A PWA reclaimed
+ * between them (iOS backgrounding, a quota error, a closed tab) left the cache
+ * updated with nothing queued to send it: the crew member saw the change as
+ * saved forever, the server never heard about it, the failed-sync banner had
+ * no row to show, and no delta pull would ever correct it because the server
+ * row's updated_at never changed. See enqueueMutationTx().
+ *
+ * `apply` may only touch Dexie. Anything that awaits a non-Dexie promise
+ * inside the transaction lets IndexedDB auto-commit it early, and the rest of
+ * the block throws TransactionInactiveError — which is precisely why the
+ * processOutbox() kick is outside it.
+ */
+async function writeAndQueue(
+  userId:   string,
+  table:    MutationRow['table'],
+  targetId: string,
+  op:       MutationRow['op'],
+  payload:  Record<string, unknown>,
+  apply:    (db: FieldStayDexie) => Promise<unknown>,
+): Promise<void> {
+  if (isDexieShutdown(userId)) return
+  const db = getDexieDb(userId)
+
+  // Array form: Dexie's variadic transaction() overloads stop at five tables,
+  // and every store a helper might touch has to be in scope up front — an IDB
+  // transaction cannot widen its scope once it has started.
+  await db.transaction('rw', [
+    db.mutations,
+    db.turnovers,
+    db.checklist_instances,
+    db.checklist_instance_items,
+    db.inventory_items,
+    db.crew_availability,
+    db.crew_work_orders,
+    db.property_assets,
+    db.sync_meta,
+  ], async () => {
+    await apply(db)
+    await enqueueMutationTx(db, table, targetId, op, payload)
+  })
+
+  void getSyncEngine(userId).processOutbox()
+}
 
 export interface UpdateChecklistItemInput {
   isCompleted:       boolean
@@ -43,11 +92,11 @@ export async function updateChecklistItem(
   if (input.crewNotes !== undefined) changes.crew_notes = input.crewNotes
   if (input.photoStoragePath !== undefined) changes.photo_storage_path = input.photoStoragePath
 
-  await db.checklist_instance_items.update(itemId, changes)
-  await enqueueMutation(userId, 'checklist_instance_items', itemId, 'PATCH', changes)
-  // enqueueMutation already fires processOutbox() in the background —
-  // intentionally not awaited here so the caller returns as soon as the
-  // local write lands.
+  await writeAndQueue(userId, 'checklist_instance_items', itemId, 'PATCH', changes, (db) =>
+    db.checklist_instance_items.update(itemId, changes),
+  )
+  // writeAndQueue fires processOutbox() in the background — intentionally not
+  // awaited, so the caller returns as soon as the local write lands.
 }
 
 /**
@@ -66,15 +115,14 @@ export async function confirmChecklistComplete(
   crewMemberId: string,
   confirmed:    boolean,
 ): Promise<void> {
-  const db = getDexieDb(userId)
-
   const changes: Record<string, unknown> = {
     completed_at:         confirmed ? new Date().toISOString() : null,
     completed_by_crew_id: confirmed ? crewMemberId : '',
   }
 
-  await db.checklist_instances.update(instanceId, changes)
-  await enqueueMutation(userId, 'checklist_instances', instanceId, 'PATCH', changes)
+  await writeAndQueue(userId, 'checklist_instances', instanceId, 'PATCH', changes, (db) =>
+    db.checklist_instances.update(instanceId, changes),
+  )
 }
 
 /**
@@ -89,15 +137,14 @@ export async function confirmInventoryComplete(
   crewMemberId: string,
   confirmed:    boolean,
 ): Promise<void> {
-  const db = getDexieDb(userId)
-
   const changes: Record<string, unknown> = {
     inventory_confirmed_complete_at: confirmed ? new Date().toISOString() : null,
     inventory_confirmed_by_crew_id:  confirmed ? crewMemberId : '',
   }
 
-  await db.turnovers.update(turnoverId, changes)
-  await enqueueMutation(userId, 'turnovers', turnoverId, 'PATCH', changes)
+  await writeAndQueue(userId, 'turnovers', turnoverId, 'PATCH', changes, (db) =>
+    db.turnovers.update(turnoverId, changes),
+  )
 }
 
 /**
@@ -112,13 +159,12 @@ export async function acknowledgeDatesChanged(
   userId: string,
   turnoverId: string,
 ): Promise<void> {
-  const db = getDexieDb(userId)
   const acknowledgedAt = new Date().toISOString()
+  const changes = { dates_change_acknowledged_at: acknowledgedAt }
 
-  await db.turnovers.update(turnoverId, { dates_change_acknowledged_at: acknowledgedAt })
-  await enqueueMutation(userId, 'turnovers', turnoverId, 'PATCH', {
-    dates_change_acknowledged_at: acknowledgedAt,
-  })
+  await writeAndQueue(userId, 'turnovers', turnoverId, 'PATCH', changes, (db) =>
+    db.turnovers.update(turnoverId, changes),
+  )
 }
 
 /**
@@ -144,7 +190,7 @@ export async function retryFailedMutation(
 
   for (const mutation of failed) {
     await db.mutations.update(mutation.id!, {
-      failed:            false,
+      failed:            0,
       retryCount:        0,
       networkRetryCount: 0,
       // 0 is unconditionally in the past, so the row is immediately due —
@@ -171,11 +217,12 @@ export async function retryAllFailedMutations(userId: string): Promise<void> {
   // remaining sequence so a retry re-applies it in the order the crew member
   // performed it. Clearing the flags in an unspecified order would leave that
   // sequence intact but re-queue it non-deterministically.
-  const failed = (await db.mutations.orderBy('id').toArray()).filter((m) => !!m.failed)
+  const failed = (await db.mutations.where('failed').equals(1).toArray())
+    .sort((a, b) => (a.id as number) - (b.id as number))
 
   for (const mutation of failed) {
     await db.mutations.update(mutation.id!, {
-      failed:            false,
+      failed:            0,
       retryCount:        0,
       networkRetryCount: 0,
       nextAttemptAt:     0,
@@ -194,7 +241,14 @@ export async function retryAllFailedMutations(userId: string): Promise<void> {
  */
 export async function discardFailedMutation(userId: string, mutationId: number): Promise<void> {
   const db = getDexieDb(userId)
+  const mutation = await db.mutations.get(mutationId)
   await db.mutations.delete(mutationId)
+
+  // Abandoning the write hands authority back to the server — but the pull
+  // that would fetch the server's value has already moved its cursor past
+  // that row (see invalidateCursorsFor). Without this rewind the local cache
+  // stays pinned to a value the server never accepted, forever and silently.
+  if (mutation) await invalidateCursorsFor(userId, mutation.table)
 }
 
 /**
@@ -207,13 +261,12 @@ export async function discardFailedMutation(userId: string, mutationId: number):
  * not lose or corrupt anything.
  */
 export async function markInventoryStarted(userId: string, turnoverId: string): Promise<void> {
-  const db = getDexieDb(userId)
   const startedAt = new Date().toISOString()
+  const changes = { inventory_started_at: startedAt }
 
-  await db.turnovers.update(turnoverId, { inventory_started_at: startedAt })
-  await enqueueMutation(userId, 'turnovers', turnoverId, 'PATCH', {
-    inventory_started_at: startedAt,
-  })
+  await writeAndQueue(userId, 'turnovers', turnoverId, 'PATCH', changes, (db) =>
+    db.turnovers.update(turnoverId, changes),
+  )
 }
 
 /**
@@ -222,13 +275,9 @@ export async function markInventoryStarted(userId: string, turnoverId: string): 
  * is set authoritatively by the server, not the client clock.
  */
 export async function startTurnover(userId: string, turnoverId: string): Promise<void> {
-  const db = getDexieDb(userId)
-
-  await db.turnovers.update(turnoverId, { status: 'in_progress' })
-
-  await enqueueMutation(userId, 'turnovers', turnoverId, 'PATCH', {
-    status: 'in_progress',
-  })
+  await writeAndQueue(userId, 'turnovers', turnoverId, 'PATCH', { status: 'in_progress' }, (db) =>
+    db.turnovers.update(turnoverId, { status: 'in_progress' }),
+  )
 }
 
 /**
@@ -238,13 +287,9 @@ export async function startTurnover(userId: string, turnoverId: string): Promise
  * pipeline fires for crew completions.
  */
 export async function completeTurnover(userId: string, turnoverId: string): Promise<void> {
-  const db = getDexieDb(userId)
-
-  await db.turnovers.update(turnoverId, { status: 'completed' })
-
-  await enqueueMutation(userId, 'turnovers', turnoverId, 'PATCH', {
-    status: 'completed',
-  })
+  await writeAndQueue(userId, 'turnovers', turnoverId, 'PATCH', { status: 'completed' }, (db) =>
+    db.turnovers.update(turnoverId, { status: 'completed' }),
+  )
 }
 
 /**
@@ -259,14 +304,11 @@ export async function completeWorkOrder(
   workOrderId: string,
   notes: string,
 ): Promise<void> {
-  const db = getDexieDb(userId)
-
-  await db.crew_work_orders.update(workOrderId, { status: 'completed' })
-
-  await enqueueMutation(userId, 'crew_work_orders', workOrderId, 'PATCH', {
-    status: 'completed',
-    notes,
-  })
+  await writeAndQueue(
+    userId, 'crew_work_orders', workOrderId, 'PATCH',
+    { status: 'completed', notes },
+    (db) => db.crew_work_orders.update(workOrderId, { status: 'completed' }),
+  )
 }
 
 /** Updates an inventory item's on-hand quantity locally and queues the mutation. */
@@ -275,13 +317,11 @@ export async function updateInventoryQuantity(
   itemId: string,
   currentQuantity: number,
 ): Promise<void> {
-  const db = getDexieDb(userId)
+  const changes = { current_quantity: currentQuantity }
 
-  await db.inventory_items.update(itemId, { current_quantity: currentQuantity })
-
-  await enqueueMutation(userId, 'inventory_items', itemId, 'PATCH', {
-    current_quantity: currentQuantity,
-  })
+  await writeAndQueue(userId, 'inventory_items', itemId, 'PATCH', changes, (db) =>
+    db.inventory_items.update(itemId, changes),
+  )
 }
 
 // ── Crew inventory count (PM-reviewed draft) ──────────────────────────────
@@ -345,16 +385,22 @@ export async function submitInventoryCountDraft(
   propertyId: string,
   draft: InventoryCountDraft,
 ): Promise<void> {
-  const db = getDexieDb(userId)
   const draftId = crypto.randomUUID()
-
-  await enqueueMutation(userId, 'inventory_count_drafts', draftId, 'PUT', {
+  const payload = {
     property_id: propertyId,
     counts:      draft.counts,
     item_notes:  draft.itemNotes,
     notes:       draft.notes,
-  })
-  await db.sync_meta.delete(inventoryDraftKey(propertyId))
+  }
+
+  // Queueing the submission and clearing the local staging row must commit
+  // together. As two transactions, a crash in between left BOTH a queued
+  // submission and a staged draft — the crew member resubmits, gets a second
+  // crypto.randomUUID() draft id (so the route's primary-key idempotency can't
+  // see the collision), and the PM reviews the same count twice.
+  await writeAndQueue(userId, 'inventory_count_drafts', draftId, 'PUT', payload, (db) =>
+    db.sync_meta.delete(inventoryDraftKey(propertyId)),
+  )
 }
 
 /**
@@ -367,9 +413,9 @@ export async function submitTurnoverSummaryNotes(
   turnoverId: string,
   notes: string,
 ): Promise<void> {
-  const db = getDexieDb(userId)
-  await db.turnovers.update(turnoverId, { completion_notes: notes })
-  await enqueueMutation(userId, 'turnovers', turnoverId, 'PATCH', { completion_notes: notes })
+  await writeAndQueue(userId, 'turnovers', turnoverId, 'PATCH', { completion_notes: notes }, (db) =>
+    db.turnovers.update(turnoverId, { completion_notes: notes }),
+  )
 }
 
 /**
@@ -416,40 +462,42 @@ export async function saveCrewAvailability(
     notes:         string | null
   },
 ): Promise<void> {
-  const db = getDexieDb(userId)
   const isAvailable = params.isAvailable ? 1 : 0
 
   if (params.id) {
-    await db.crew_availability.update(params.id, {
-      is_available: isAvailable,
-      notes:        params.notes ?? '',
-    })
-    await enqueueMutation(userId, 'crew_availability', params.id, 'PATCH', {
-      is_available: isAvailable,
-      notes:        params.notes,
-    })
+    const existingId = params.id
+    await writeAndQueue(
+      userId, 'crew_availability', existingId, 'PATCH',
+      { is_available: isAvailable, notes: params.notes },
+      (db) => db.crew_availability.update(existingId, {
+        is_available: isAvailable,
+        notes:        params.notes ?? '',
+      }),
+    )
     return
   }
 
   const id = crypto.randomUUID()
   const createdAt = new Date().toISOString()
 
-  await db.crew_availability.add({
-    id,
-    org_id:         params.orgId,
-    crew_member_id: params.crewMemberId,
-    available_date: params.date,
-    is_available:   isAvailable,
-    notes:          params.notes ?? '',
-    created_at:     createdAt,
-  })
-
-  await enqueueMutation(userId, 'crew_availability', id, 'PUT', {
-    org_id:         params.orgId,
-    crew_member_id: params.crewMemberId,
-    available_date: params.date,
-    is_available:   isAvailable,
-    notes:          params.notes,
-    created_at:     createdAt,
-  })
+  await writeAndQueue(
+    userId, 'crew_availability', id, 'PUT',
+    {
+      org_id:         params.orgId,
+      crew_member_id: params.crewMemberId,
+      available_date: params.date,
+      is_available:   isAvailable,
+      notes:          params.notes,
+      created_at:     createdAt,
+    },
+    (db) => db.crew_availability.add({
+      id,
+      org_id:         params.orgId,
+      crew_member_id: params.crewMemberId,
+      available_date: params.date,
+      is_available:   isAvailable,
+      notes:          params.notes ?? '',
+      created_at:     createdAt,
+    }),
+  )
 }

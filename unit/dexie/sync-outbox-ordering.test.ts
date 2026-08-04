@@ -131,7 +131,7 @@ describe('outbox — a server timeout no longer blocks the queue forever', () =>
 
     const row = await mutationRow(id)
     expect(row?.retryCount, 'a server-side timeout must consume the retry budget').toBeGreaterThan(0)
-    expect(row?.failed, 'and must eventually become visible to the crew member').toBe(true)
+    expect(row?.failed, 'and must eventually become visible to the crew member').toBe(1)
   })
 })
 
@@ -163,11 +163,11 @@ describe('outbox — dead-lettering preserves a record\'s mutation order (H6)', 
     const engine = new SyncEngine('u1')
     await engine.processOutbox()
 
-    expect((await mutationRow(tickId))?.failed, 'the tick dead-letters').toBe(true)
+    expect((await mutationRow(tickId))?.failed, 'the tick dead-letters').toBe(1)
     expect(
       (await mutationRow(untickId))?.failed,
       'the un-tick must be held back, or Retry all replays the tick ON TOP of it',
-    ).toBe(true)
+    ).toBe(1)
 
     // The un-tick never reached the server, so there is no newer server state
     // for a later Retry-all replay of the tick to clobber. (`calls` records
@@ -197,7 +197,7 @@ describe('outbox — dead-lettering preserves a record\'s mutation order (H6)', 
     const engine = new SyncEngine('u1')
     await engine.processOutbox()
 
-    expect((await mutationRow(failing))?.failed).toBe(true)
+    expect((await mutationRow(failing))?.failed).toBe(1)
     expect(
       await mutationRow(other),
       'an unrelated record must still drain — blocking everything was the bug this replaced',

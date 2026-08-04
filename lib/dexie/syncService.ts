@@ -13,6 +13,22 @@ type DexieSupabaseClient = ReturnType<typeof createClient>
 
 const MAX_RETRIES = 5
 
+/**
+ * Shape version stamped onto every newly-queued mutation payload. Bump this
+ * whenever a payload's shape changes and add the matching entry to
+ * PAYLOAD_MIGRATIONS — a device can be offline across a deploy, so an outbox
+ * row routinely outlives the release that wrote it.
+ */
+export const OUTBOX_PAYLOAD_VERSION = 1
+
+/**
+ * `lastError` for a mutation that never failed on its own — it is queued
+ * behind a dead letter for the same record and must not be pushed until that
+ * one is resolved. Distinct wording so the banner doesn't tell a crew member
+ * five separate things failed when one did.
+ */
+export const HELD_BACK_REASON = 'Held back so earlier changes to this item retry in order'
+
 // Retry backoff: 5 s base doubling per retry, capped at 5 min, each delay
 // scaled by a uniform 0.5–1.5× jitter factor so a fleet of crew devices
 // coming back from the same outage doesn't retry in lockstep.
@@ -218,13 +234,15 @@ export class SyncEngine {
     mutation: MutationRow,
     failedId: number,
   ): Promise<void> {
-    const successors = (await db.mutations.orderBy('id').toArray()).filter(
-      (m) =>
-        !m.failed &&
-        (m.id as number) > failedId &&
-        m.table === mutation.table &&
-        m.targetId === mutation.targetId,
+    // Index-backed per-record lookup ([table+targetId], added in schema v9) —
+    // this used to scan the whole outbox on every dead-letter.
+    const successors = (
+      await db.mutations
+        .where('[table+targetId]').equals([mutation.table, mutation.targetId])
+        .toArray()
     )
+      .filter((m) => !m.failed && (m.id as number) > failedId)
+      .sort((a, b) => (a.id as number) - (b.id as number))
 
     if (successors.length === 0) return
 
@@ -236,8 +254,8 @@ export class SyncEngine {
     for (const successor of successors) {
       const successorId = successor.id as number
       await db.mutations.update(successorId, {
-        failed:    true,
-        lastError: 'Held back so earlier changes to this item retry in order',
+        failed:    1,
+        lastError: HELD_BACK_REASON,
       })
       this.heldBack.add(successorId)
     }
@@ -290,7 +308,7 @@ export class SyncEngine {
       )
       await db.mutations.update(id, {
         retryCount: newRetryCount,
-        failed: true,
+        failed: 1,
         lastError: describeFailure(err),
       })
 
@@ -732,6 +750,64 @@ export function disposeSyncEngine(): void {
   engineUserId = null
 }
 
+/**
+ * Queues a mutation in the outbox WITHOUT kicking the drain.
+ *
+ * Exists so a caller can commit its optimistic local write and this outbox row
+ * in ONE Dexie transaction (see lib/dexie/helpers.ts). Those two writes used to
+ * be separate IndexedDB transactions with a suspend/kill window between them:
+ * the local row landed, the app was reclaimed (iOS backgrounding a PWA, a
+ * quota error, a closed tab), and the outbox row never did. The crew member
+ * then saw their tick as done forever while the server never heard about it,
+ * with nothing in the failed-sync surface because there was no mutation row to
+ * mark failed — and no delta pull would correct it either, since the server
+ * row's updated_at never changed.
+ *
+ * ⚠️ Never `await` anything non-Dexie between this and the caller's own write.
+ * An IndexedDB transaction auto-commits the moment control returns to the event
+ * loop without a pending request against it, so an interleaved fetch() (or a
+ * processOutbox() call, which does network I/O) makes the rest of the block
+ * throw TransactionInactiveError. The drain kick belongs OUTSIDE the block.
+ */
+export async function enqueueMutationTx(
+  db: FieldStayDexie,
+  table: MutationRow['table'],
+  targetId: string,
+  op: MutationRow['op'],
+  payload: Record<string, unknown>,
+): Promise<number> {
+  // A record with a dead letter is FROZEN: every later write to it is queued
+  // already-held-back.
+  //
+  // holdBackSuccessors() only ever saw the successors that existed AT the
+  // moment of dead-lettering, which is the less likely half of the problem —
+  // the corrective edit is normally made AFTER the failure, not before it.
+  // Concretely: crew ticks an item (#10) → 500s five times → dead-letters, no
+  // successors to hold. They realise it isn't done and un-tick it (#11) →
+  // pushes fine, server now false. They tap Retry all → #10 keeps its original
+  // low id, replays is_completed = true, and the server flips BACK — then the
+  // next delta pull overwrites Dexie, so the un-tick disappears from the phone
+  // too. Same shape for inventory_items.current_quantity and crew_availability.
+  //
+  // Freezing at enqueue keeps the whole sequence intact, so Retry all replays
+  // tick-then-un-tick in the order the crew member actually performed them.
+  const frozen = await db.mutations
+    .where('[table+targetId]').equals([table, targetId])
+    .filter((m) => m.failed === 1)
+    .count()
+
+  return db.mutations.add({
+    table,
+    targetId,
+    op,
+    payload,
+    createdAt:      new Date().toISOString(),
+    retryCount:     0,
+    payloadVersion: OUTBOX_PAYLOAD_VERSION,
+    ...(frozen > 0 ? { failed: 1 as const, lastError: HELD_BACK_REASON } : {}),
+  })
+}
+
 /** Queues a mutation in the outbox and fires processOutbox() in the background. */
 export async function enqueueMutation(
   userId: string,
@@ -745,14 +821,9 @@ export async function enqueueMutation(
   if (isDexieShutdown(userId)) return
 
   const db = getDexieDb(userId)
-  await db.mutations.add({
-    table,
-    targetId,
-    op,
-    payload,
-    createdAt:  new Date().toISOString(),
-    retryCount: 0,
-  })
+  await db.transaction('rw', db.mutations, () =>
+    enqueueMutationTx(db, table, targetId, op, payload),
+  )
 
   void getSyncEngine(userId).processOutbox()
 }

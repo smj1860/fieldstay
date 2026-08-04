@@ -50,7 +50,7 @@ describe('pending-mutation shadowing', () => {
   it('shadows dead-lettered mutations too — that write did not reach the server either', async () => {
     await db().mutations.add({
       table: 'turnovers', targetId: 't1', op: 'PATCH',
-      payload: { status: 'completed' }, createdAt: '2026-07-30T00:00:00Z', retryCount: 5, failed: true,
+      payload: { status: 'completed' }, createdAt: '2026-07-30T00:00:00Z', retryCount: 5, failed: 1,
     })
     const [row] = await shadowPendingMutations('u1', 'turnovers', [{ id: 't1', status: 'in_progress' }])
     expect(row).toMatchObject({ status: 'completed' })
@@ -100,10 +100,10 @@ describe('local cache pruning', () => {
   it('keeps live dead letters and only collects expired ones', async () => {
     const recent = new Date(Date.now() - 2 * DAY).toISOString()
     const ancient = new Date(Date.now() - 200 * DAY).toISOString()
-    await db().mutations.add({ table: 'turnovers', targetId: 't1', op: 'PATCH', payload: {}, createdAt: recent, retryCount: 5, failed: true })
-    await db().mutations.add({ table: 'turnovers', targetId: 't2', op: 'PATCH', payload: {}, createdAt: ancient, retryCount: 5, failed: true })
-    await db().pending_photo_uploads.put({ id: 'ph1', created_at: ancient, failed: true, local_blob_key: 'k1' })
-    await db().pending_photo_uploads.put({ id: 'ph2', created_at: recent, failed: true, local_blob_key: 'k2' })
+    await db().mutations.add({ table: 'turnovers', targetId: 't1', op: 'PATCH', payload: {}, createdAt: recent, retryCount: 5, failed: 1 })
+    await db().mutations.add({ table: 'turnovers', targetId: 't2', op: 'PATCH', payload: {}, createdAt: ancient, retryCount: 5, failed: 1 })
+    await db().pending_photo_uploads.put({ id: 'ph1', created_at: ancient, failed: 1, local_blob_key: 'k1' })
+    await db().pending_photo_uploads.put({ id: 'ph2', created_at: recent, failed: 1, local_blob_key: 'k2' })
 
     await pruneLocalCache('u1')
 
@@ -117,7 +117,7 @@ describe('local cache pruning', () => {
 describe('countPendingSyncWork', () => {
   it('counts only work still on its way, reporting dead letters separately', async () => {
     await db().mutations.add({ table: 'turnovers', targetId: 't1', op: 'PATCH', payload: {}, createdAt: '', retryCount: 0 })
-    await db().mutations.add({ table: 'turnovers', targetId: 't2', op: 'PATCH', payload: {}, createdAt: '', retryCount: 5, failed: true })
+    await db().mutations.add({ table: 'turnovers', targetId: 't2', op: 'PATCH', payload: {}, createdAt: '', retryCount: 5, failed: 1 })
     await db().pending_photo_uploads.put({ id: 'p1', created_at: '', local_blob_key: 'k' })
 
     expect(await countPendingSyncWork('u1')).toEqual({ pending: 2, deadLettered: 1 })

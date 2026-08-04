@@ -19,7 +19,7 @@
 //    id-set pulls), so a conservative or missing cursor can only cost
 //    bandwidth, never correctness.
 
-import { getDexieDb } from '../schema'
+import { getDexieDb, type MutationTable } from '../schema'
 
 export const CURSOR_OVERLAP_MS = 10_000
 
@@ -71,6 +71,60 @@ export function partitionByKnown(
   }
   return { known, fresh }
 }
+
+/**
+ * Which cursors gate the pull that would re-fetch a given mutation's table.
+ * Tables pulled in full every time (inventory_items, properties,
+ * crew_availability, property_assets) have no cursor and so need no rewind.
+ */
+const CURSORS_BY_MUTATION_TABLE: Readonly<Partial<Record<MutationTable, readonly SyncCursorKey[]>>> = {
+  turnovers:                ['cursor:turnovers'],
+  checklist_instances:      ['cursor:checklist_instances'],
+  checklist_instance_items: ['cursor:checklist_items'],
+  crew_work_orders:         ['cursor:work_orders'],
+}
+
+/**
+ * Rewinds the cursors guarding a table so the next pull re-fetches the
+ * server's authoritative row for it.
+ *
+ * Required whenever a pending mutation is ABANDONED. While it was queued,
+ * shadowPendingMutations() replayed it over every pulled row — and
+ * advanceCursor() moved past that row's updated_at at the same time. Drop the
+ * mutation and the overlay disappears, but the cursor does not come back: the
+ * delta filter `.gt('updated_at', cursor)` will never return that row again,
+ * and partitionByKnown() routes it down the delta path because the device
+ * already knows the id. The local cache is then pinned to a value the server
+ * never accepted, permanently and invisibly.
+ *
+ * That happens on an explicit discard AND with no user action at all, when
+ * pruneExpiredDeadLetters() collects a dead letter at 30 days.
+ */
+export async function invalidateCursorsFor(userId: string, table: MutationTable): Promise<void> {
+  const keys = CURSORS_BY_MUTATION_TABLE[table]
+  if (!keys?.length) return
+  const db = getDexieDb(userId)
+  await Promise.all(keys.map((key) => db.sync_meta.delete(key)))
+}
+
+/**
+ * Rewinds EVERY cursor, so the next resync transfers full rows rather than a
+ * delta. The repair path for a device whose cache has diverged from the server
+ * — previously there was none: `force` was plumbed through every sync function
+ * but never passed as `true` from anywhere, and cursors were never reset, so
+ * the only way out was logout, which destroys the outbox along with the cache.
+ */
+export async function resetAllCursors(userId: string): Promise<void> {
+  const db = getDexieDb(userId)
+  await Promise.all(ALL_CURSOR_KEYS.map((key) => db.sync_meta.delete(key)))
+}
+
+const ALL_CURSOR_KEYS: readonly SyncCursorKey[] = [
+  'cursor:turnovers',
+  'cursor:checklist_instances',
+  'cursor:checklist_items',
+  'cursor:work_orders',
+]
 
 export async function getCursor(userId: string, key: SyncCursorKey): Promise<string | null> {
   const row = await getDexieDb(userId).sync_meta.get(key)

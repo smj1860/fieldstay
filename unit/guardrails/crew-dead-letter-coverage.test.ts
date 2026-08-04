@@ -102,8 +102,26 @@ describe('guardrail: every cached crew table is bounded', () => {
     // The failed-sync surface is built on these rows: collecting them
     // eagerly would re-create the exact silent-loss bug they exist to fix.
     expect(PRUNE_SRC).toContain('DEAD_LETTER_RETENTION_DAYS')
-    expect(PRUNE_SRC).toMatch(/failed && m\.createdAt < horizon/)
-    expect(PRUNE_SRC).toMatch(/failed && p\.created_at < horizon/)
+    // Both dead-letter queues are selected by the `failed` flag AND gated on
+    // the retention horizon — never collected on the flag alone.
+    expect(PRUNE_SRC).toMatch(/where\('failed'\)\.equals\(1\)[\s\S]{0,120}?m\.createdAt < horizon/)
+    expect(PRUNE_SRC).toMatch(/where\('failed'\)\.equals\(1\)[\s\S]{0,120}?p\.created_at < horizon/)
+  })
+
+  it('abandoning a dead letter rewinds the cursor that would hide the server row', () => {
+    // A queued mutation is shadowed over every pull (lib/dexie/sync/shadow.ts)
+    // while the cursor advances past the server row it masks. Dropping the
+    // mutation without rewinding leaves the cache pinned to a value the server
+    // never accepted — permanently, since the delta filter will never return
+    // that row again. Applies to the timed prune here AND to an explicit
+    // discard (lib/dexie/helpers.ts).
+    expect(PRUNE_SRC).toContain('invalidateCursorsFor')
+    const helpers = readFileSync(join(ROOT, 'lib', 'dexie', 'helpers.ts'), 'utf8')
+    expect(
+      /discardFailedMutation[\s\S]{0,600}?invalidateCursorsFor/.test(helpers),
+      'discardFailedMutation drops the outbox row without rewinding the cursor — ' +
+      'the local row then keeps a value the server never accepted, forever',
+    ).toBe(true)
   })
 
   it('the logout warning counts only genuinely pending work', () => {
