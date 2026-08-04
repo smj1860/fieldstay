@@ -105,6 +105,33 @@ describe('syncWorkOrders', () => {
     expect(reconciling.calls.filter((c) => c.table === 'work_orders' && c.method === 'select')).toHaveLength(2)
   })
 
+  it('full pull drains every page — a full first page is not the whole membership', async () => {
+    // The full pull doubles as the membership snapshot: anything cached but
+    // absent from it is deleted off the device. Reading one unbounded page and
+    // treating it as complete meant PostgREST's silent max_rows cutoff would
+    // present rows past the cap as "no longer assigned" and wipe them locally,
+    // with a 200 and nothing logged. Draining removes the ceiling.
+    const PAGE = 200
+    const page1 = Array.from({ length: PAGE }, (_, i) => ({ ...WO1, id: `wo${i}` }))
+    const page2 = [{ ...WO1, id: 'wo-past-the-cap' }]
+    await db().crew_work_orders.bulkPut([{ id: 'wo-past-the-cap', property_id: 'p1', status: 'assigned' }])
+    await db().properties.bulkPut([{ id: 'p1' }])
+
+    const supabase = makeFakeSupabase({
+      work_orders: [{ data: page1 }, { data: page2 }],
+    })
+
+    await syncWorkOrders(supabase as unknown as DexieSupabaseClient, 'u1', 'crew1')
+
+    expect(
+      await db().crew_work_orders.get('wo-past-the-cap'),
+      'a row on the second page must not be read as a departure and deleted',
+    ).toBeDefined()
+
+    const ranges = supabase.calls.filter((c) => c.table === 'work_orders' && c.method === 'range')
+    expect(ranges.map((c) => c.args)).toEqual([[0, PAGE - 1], [PAGE, 2 * PAGE - 1]])
+  })
+
   it('delta sync: changed rows land in Dexie and only missing properties are fetched', async () => {
     await db().crew_work_orders.bulkPut([{ id: 'wo1', property_id: 'p1', status: 'assigned' }])
     await db().properties.bulkPut([{ id: 'p1' }])

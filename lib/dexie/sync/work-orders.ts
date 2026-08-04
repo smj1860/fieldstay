@@ -25,16 +25,40 @@ const WO_COLUMNS =
 
 
 interface WoPull { fetched: Record<string, unknown>[]; currentIds: Set<string> }
-type ScopedQuery = () => PromiseLike<{ data: unknown; error: unknown }>
+
+/**
+ * A `.range()`-paged read of work_orders. Every read in this file is one.
+ *
+ * PostgREST caps a response at max_rows and gives no truncation signal
+ * (CLAUDE.md, Supabase patterns), and here a silent cutoff is worse than a
+ * short list: the full pull and the id snapshot both decide MEMBERSHIP, so a
+ * row past the cap reads as "no longer assigned" and is deleted off the
+ * device. Draining to a short page removes the ceiling entirely rather than
+ * moving it somewhere less likely to be hit.
+ */
+type PagedQuery = (from: number, to: number) => PromiseLike<{ data: unknown; error: unknown }>
+
+const WO_PAGE_SIZE = 200
+
+/** Drains a paged read until a short page arrives. Null on the first error. */
+async function drainPages(query: PagedQuery, label: string): Promise<Record<string, unknown>[] | null> {
+  const rows: Record<string, unknown>[] = []
+  for (let from = 0; ; from += WO_PAGE_SIZE) {
+    const { data, error } = await query(from, from + WO_PAGE_SIZE - 1)
+    if (error) {
+      console.error(`[work-orders sync] ${label} failed:`, error)
+      return null
+    }
+    const page = (data ?? []) as Record<string, unknown>[]
+    rows.push(...page)
+    if (page.length < WO_PAGE_SIZE) return rows
+  }
+}
 
 /** Full pull: the data fetch doubles as the membership snapshot. */
-async function fullPull(scoped: ScopedQuery): Promise<WoPull | null> {
-  const { data, error } = await scoped()
-  if (error) {
-    console.error('[work-orders sync] work_orders fetch failed:', error)
-    return null
-  }
-  const fetched = (data ?? []) as Record<string, unknown>[]
+async function fullPull(scoped: PagedQuery): Promise<WoPull | null> {
+  const fetched = await drainPages(scoped, 'work_orders fetch')
+  if (fetched === null) return null
   return { fetched, currentIds: new Set(fetched.map((w) => w.id as string)) }
 }
 
@@ -48,17 +72,18 @@ async function idSnapshot(
   crewMemberId: string,
   twoWeeksAgo: string,
 ): Promise<Set<string> | null> {
-  const { data, error } = await supabase
+  const rows = await drainPages((from, to) => supabase
     .from('work_orders')
     .select('id')
     .eq('assigned_crew_member_id', crewMemberId)
     .not('status', 'in', '("completed","cancelled")')
     .or(`scheduled_date.is.null,scheduled_date.gte.${twoWeeksAgo}`)
-  if (error) {
-    console.error('[work-orders sync] work_orders id snapshot failed:', error)
-    return null
-  }
-  return new Set(((data ?? []) as { id: string }[]).map((w) => w.id))
+    // Paging by offset needs a total order, or pages overlap and skip.
+    .order('id', { ascending: true })
+    .range(from, to),
+  'work_orders id snapshot')
+  if (rows === null) return null
+  return new Set(rows.map((w) => w.id as string))
 }
 
 /**
@@ -81,16 +106,14 @@ async function deltaPull(
   crewMemberId: string,
   cursor: string,
 ): Promise<Record<string, unknown>[] | null> {
-  const { data, error } = await supabase
+  return drainPages((from, to) => supabase
     .from('work_orders')
     .select(WO_COLUMNS)
     .eq('assigned_crew_member_id', crewMemberId)
     .gt('updated_at', cursor)
-  if (error) {
-    console.error('[work-orders sync] work_orders delta fetch failed:', error)
-    return null
-  }
-  return (data ?? []) as Record<string, unknown>[]
+    .order('id', { ascending: true })
+    .range(from, to),
+  'work_orders delta fetch')
 }
 
 /** Statuses that take a work order off the crew member's plate. */
@@ -109,7 +132,7 @@ interface WoResolution {
 /** First pull, or a forced one: the data fetch doubles as the membership snapshot. */
 async function resolveFullPull(
   db: FieldStayDexie,
-  scoped: ScopedQuery,
+  scoped: PagedQuery,
 ): Promise<WoResolution | null> {
   const pulled = await fullPull(scoped)
   if (pulled === null) return null
@@ -170,12 +193,14 @@ export async function syncWorkOrders(
   // weeks onward, plus any with no scheduled date yet.
   const twoWeeksAgo = new Date(Date.now() - 14 * 86_400_000).toISOString().split('T')[0]!
 
-  const scoped = () => supabase
+  const scoped: PagedQuery = (from, to) => supabase
     .from('work_orders')
     .select(WO_COLUMNS)
     .eq('assigned_crew_member_id', crewMemberId)
     .not('status', 'in', '("completed","cancelled")')
     .or(`scheduled_date.is.null,scheduled_date.gte.${twoWeeksAgo}`)
+    .order('id', { ascending: true })
+    .range(from, to)
 
   const cursor = force ? null : await getCursor(userId, 'cursor:work_orders')
 

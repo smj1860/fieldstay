@@ -44,6 +44,11 @@ export default async function CrewAvailabilityPage() {
 
   // Own rows only — crew_member_id is the isolation guard, the same one the
   // sync function this replaces relied on.
+  //
+  // The limit is an exact bound rather than a truncating cap: crew_availability
+  // is UNIQUE (crew_member_id, available_date), so the window can hold at most
+  // one row per day in it. Without it this is an unbounded .select() and
+  // PostgREST's max_rows would decide the cutoff silently.
   const availabilityRes = await supabase
     .from('crew_availability')
     .select('id, available_date, is_available, notes')
@@ -51,6 +56,7 @@ export default async function CrewAvailabilityPage() {
     .gte('available_date', from)
     .lte('available_date', to)
     .order('available_date', { ascending: true })
+    .limit(LOOKBACK_DAYS + LOOKAHEAD_DAYS + 1)
 
   const availability = unwrap(availabilityRes, {
     site:  'page.crew.availability.rows',
