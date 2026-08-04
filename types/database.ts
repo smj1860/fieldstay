@@ -518,9 +518,14 @@ export interface Turnover {
   started_at:            string | null
   completed_at:          string | null
   // integer NULL in the live schema (migration
-  // 20260731000000_turnover_crew_duration_minutes). Not written by any code
-  // path yet — modelled here because the type-drift gate compares the LIVE
-  // schema to this interface, not to what the code currently touches.
+  // 20260731000000_turnover_crew_duration_minutes).
+  //
+  // Actual crew work-time metric: MAX - MIN across every completion-type
+  // timestamp (checklist item completions + inventory's completion signal)
+  // — distinct from started_at/completed_at above, which just reflect the
+  // Start Turnover / status="completed" button presses. Computed once by
+  // turnover-events.ts's record-crew-duration step; null until the
+  // turnover completes and a plausible duration is found.
   crew_duration_minutes: number | null
   // Inventory has no per-turnover scoping of its own (inventory_items is
   // persistent, property-level state edited across many turnovers), so

@@ -202,7 +202,35 @@ existing `cleanup_webhook_dedup()` pattern.
 
 ---
 
-## 8. `repuguard/activated` event is defined but never wired to anything
+## 8. ~~`repuguard/activated` event is defined but never wired to anything~~ — RESOLVED 2026-07-30, deleted
+
+**Resolution:** deleted the unused event type from `lib/inngest/events.ts`
+rather than wiring it up. RepuGuard is bundled into every plan tier —
+`docs/support/16-pricing-and-plans.md`'s "What Every Plan Includes" lists
+"RepuGuard AI review response drafting" alongside turnovers, work orders,
+etc. with no separate charge or opt-in. There is no live path anywhere in
+the app that creates a standalone `feature: 'repuguard'` Stripe
+subscription for this event to have paired with — the webhook handlers in
+`app/api/webhooks/stripe/handlers/repuguard-subscription.ts` that listen
+for `subscription.metadata?.feature === 'repuguard'` have no producer
+either. `repuguard_status` instead gets auto-activated directly (no Stripe
+subscription, no event) on first PMS connect —
+`lib/inngest/functions/ownerrez/initial-sync.ts`'s `auto-activate-repuguard`
+step flips inactive/cancelled orgs to `'active'` on OwnerRez connect. So
+there was never going to be a meaningful "activation" moment for this event
+to represent.
+
+**Note for a future pass, not done here:** since `repuguard/activated` was
+scoped to the standalone-subscription path and that path has no live
+producer, the `repuguard-subscription.ts` webhook handlers themselves (and
+the `feature: 'repuguard'` branches in `app/api/webhooks/stripe/route.ts`
+that call them) may also be dead code from before bundling — worth its own
+audit pass to confirm before removing, since deleting a webhook branch has
+more blast radius than deleting an unused event type.
+
+Original item kept below for context:
+
+### ~~`repuguard/activated` event is defined but never wired to anything~~
 
 **File:** `lib/inngest/events.ts`
 
@@ -227,7 +255,7 @@ onboarding step RepuGuard activation should kick off).
 
 ---
 
-## 9. `billing/subscription-updated` is sent but has zero consumers
+## 9. ~~`billing/subscription-updated` is sent but has zero consumers~~ — RESOLVED 2026-07-30
 
 **File:** `app/api/webhooks/stripe/route.ts` (send site), `lib/inngest/events.ts`
 
@@ -248,9 +276,67 @@ notification consumer (mirroring `notifyIntegrationError`'s shape), or
 remove the dead `inngest.send()` call and the event type if no
 notification was ever actually wanted here.
 
+**Resolution:** built the consumer. Before doing so, checked whether a
+plan change already surfaces anything else (the working assumption going
+in) — it doesn't: the Stripe Checkout `success_url` sets
+`?checkout=success` on `/settings`, but nothing in the app reads that
+query param (no toast, no confirmation banner), and the only billing
+emails that exist are for trial-start and trial→active first-payment —
+neither fires again for a plan-tier change on an already-active org. So
+this event was the only hook ever positioned for it, and it was genuinely
+dead, not redundant.
+
+Implementation:
+- `handleCoreSubscriptionUpdate` (`core-billing.ts`) now selects the org's
+  `plan` *before* the update overwrites it, and includes a
+  `previous_plan: string | null` field on the `billing/subscription-updated`
+  event — non-null only on a genuine tier change on an existing
+  subscription. Deliberately always `null` on `customer.subscription.created`
+  (initial signup), even if the org's pre-signup default plan happens to
+  differ from the tier they signed up for — that's not a "plan changed"
+  event from the PM's perspective, and the trial-lifecycle-start email
+  already covers signup.
+- New `notifyPlanChanged` function
+  (`lib/inngest/functions/notify-plan-changed.ts`, registered in
+  `app/api/inngest/route.ts`) consumes the event, no-ops when
+  `previous_plan` is null or equals the new `plan` (nothing to report), and
+  otherwise creates a PM-facing in-app notification via
+  `createPmNotification()` (`type: 'billing_plan_changed'`, e.g. "Your plan
+  changed to Growth" / "Previously Starter") — this mirrors
+  `notifyIntegrationError`'s shape as suggested, using the in-app
+  notifications bell rather than a new email template, consistent with
+  CLAUDE.md's note that the bell "superseded 7 PM email categories."
+  Dedupe key is day-scoped (`plan-changed-{org}-{from}-{to}-{date}`,
+  matching `notify-integration-error.ts`'s convention) so a same-day retry
+  doesn't double-insert but a later repeat of the same transition
+  (upgrade → downgrade → upgrade again) still notifies.
+- New tests: `unit/webhooks/core-billing-subscription-update.test.ts`
+  (the `previous_plan` enrichment logic) and
+  `unit/inngest/notify-plan-changed.test.ts` (the consumer). Full
+  verification pass green.
+
 ---
 
-## 10. Dashboard layout and `requireOrgMember()` are two independent implementations of the same lookup
+## 10. ~~Dashboard layout and `requireOrgMember()` are two independent implementations of the same lookup~~ — RESOLVED, already fixed prior to this note
+
+**Resolution:** already fixed by commit `97a5553` ("Memoize
+requireOrgMember() per request and fix dashboard layout waterfall"),
+merged before this remediation pass caught up to it — this item was simply
+never marked resolved in this file. `app/(dashboard)/layout.tsx` now calls
+`requireOrgMember()` directly instead of inlining its own
+`organization_members` query, and `OrgMembership` in `lib/auth.ts` was
+extended to carry `repuguard_status` and `onboarding_steps_completed` — the
+exact fields the layout needed that the original `OrgMembership` type
+didn't carry. That's the first of the two suggested fixes below (extend
+`OrgMembership`/`requireOrgMember()`), not the second (a separate shared
+helper). Verified current `layout.tsx` has no independent
+`organization_members`/`organizations` query left — `requireOrgMember()` is
+the sole lookup, and it's `cache()`-memoized per request so the page
+rendered inside the layout shares the same query rather than re-running it.
+
+Original item kept below for context:
+
+### ~~Dashboard layout and `requireOrgMember()` are two independent implementations of the same lookup~~
 
 **Files:** `app/(dashboard)/layout.tsx`, `lib/auth.ts`
 
@@ -275,11 +361,6 @@ instead of two.
 
 ## 11. Login/signup/password-reset have no FieldStay-side rate limiting
 
-**Status: undecided** — open question is whether Supabase Auth's built-in
-limiting is sufficient as-is, or whether FieldStay should add its own
-app-level throttling on top. Not yet resolved either way; no code change
-made pending that decision.
-
 **Files:** `app/(auth)/login/login-form.tsx`, `app/(auth)/signup/signup-form.tsx`,
 `app/(auth)/forgot-password/forgot-password-form.tsx`,
 `app/(auth)/reset-password/reset-password-form.tsx`
@@ -294,14 +375,51 @@ invisible to and unmanaged by this repo. This corrects an earlier assumption
 in this project's history that rate limiting had been "added" to these
 routes — that isn't true of the current code.
 
-**Suggested fix (pending the decision above):** if Supabase's built-in
-limits are judged insufficient, add an app-level pre-check — e.g. a Server
-Action wrapper that rate-limits by IP/email before calling the Supabase
-client — for tighter, FieldStay-controlled throttling.
+**Status: decided 2026-07-30 — mixed.** Supabase Auth's built-in limiting is
+sufficient for signup/password-reset; login is the one gap worth a
+follow-up. Concrete limits (from Supabase's documented defaults, matching
+`[auth.rate_limit]`/`[auth.email]` in `supabase/config.toml`):
+
+| Endpoint | Limit |
+|---|---|
+| Sign up (`/auth/v1/signup`) | 60s cooldown before a repeat request for the same email |
+| Password reset (`/auth/v1/recover`) | 60s cooldown before a repeat request for the same email |
+| Login / token refresh (`/auth/v1/token`) | 1,800 requests/hour per IP, token-bucket bursts up to 30 |
+| Default built-in email provider | 2 emails/hour **project-wide** (signup confirmations + password resets combined) |
+| Custom SMTP | Limits depend on the external provider instead — Supabase recommends this to lift the default's testing-grade limits |
+
+**Two separate findings here, not one:**
+
+1. **Signup/password-reset: the 60s per-email cooldown is adequate as-is.**
+   It rate-limits the thing that matters (repeat delivery to one target
+   address); no FieldStay-side duplication needed.
+
+2. **Login is the real gap, and it's operational risk, not just theory:**
+   the limit is 1,800 req/hour **per IP**, with bursts up to 30 — that's
+   IP-scoped only, not per-account. A single IP can throw 30 password
+   guesses at one specific target account instantly, then continue at
+   ~30/minute indefinitely, all within Supabase's own limit. That's
+   materially weaker than a per-account lockout/backoff for a targeted
+   credential-stuffing attempt against one user. **Suggested fix (not yet
+   implemented — scoping only):** add a per-account (email-keyed, not just
+   IP-keyed) attempt counter in `lib/rate-limit.ts` ahead of
+   `supabase.auth.signInWithPassword()` in `login-form.tsx`, failing open
+   the same way the existing abuse-rate limiters do per CLAUDE.md's SMS
+   section (never lock a real user out on a Redis outage).
+
+3. ~~Unrelated to security, but more urgent: verify production custom SMTP
+   is actually configured.~~ **Confirmed by repo owner 2026-07-30: a non-
+   issue.** Production Supabase Auth is configured to send through Resend's
+   SMTP relay, not Supabase's default built-in mailer — the 2-emails/hour
+   project-wide cap only applies to that default mailer and doesn't apply
+   here. (Still can't be independently verified from this repo —
+   `supabase/config.toml`'s `[auth.email.smtp]` block is commented out and
+   production SMTP is dashboard-only state with no record in code — this
+   line reflects the repo owner's confirmation, not a repo-side check.)
 
 ---
 
-## 12. `crew/feedback` sends its notification email outside Inngest, un-awaited
+## 12. ~~`crew/feedback` sends its notification email outside Inngest, un-awaited~~ — RESOLVED 2026-07-30
 
 **File:** `app/api/crew/feedback/route.ts`
 
@@ -316,9 +434,67 @@ notification is silently lost with no retry.
 `crew/feedback.submitted`) and send the notification email from a handler,
 matching the pattern used everywhere else in this codebase.
 
+**Resolution:** implemented as suggested. Added `crew/feedback.submitted`
+to `lib/inngest/events.ts`, moved the `notifyPlatformStaff()` email logic
+into a new `notifyCrewFeedback` function
+(`lib/inngest/functions/notify-crew-feedback.ts`, registered in
+`app/api/inngest/route.ts`), and `app/api/crew/feedback/route.ts` now
+`await`s `inngest.send()` (confirming Inngest accepted the job) instead of
+firing the email itself with `void ... .catch()`. A send failure is still
+logged without failing the crew member's 200 response, since the
+`crew_feedback` row is already durably written by that point — only the
+*mechanism* for the notification changed, not the accepted-loss tier for
+notification delivery. Test coverage moved with it:
+`unit/route-handlers/crew-feedback.test.ts` now asserts the route enqueues
+the event (and that a send failure doesn't affect the response), and the
+email-sending behavior itself is covered by the new
+`unit/inngest/notify-crew-feedback.test.ts`.
+
 ---
 
-## 13. Migration filename timestamps vs. recorded applied versions have drifted
+## 13. ~~Migration filename timestamps vs. recorded applied versions have drifted~~ — RESOLVED 2026-07-30
+
+**Resolution:** took a third path neither (a) nor (b) below anticipated:
+updated the **remote ledger** to match the local filenames, rather than
+renaming ~250 local files (which would have broken the exact-filename
+references throughout CLAUDE.md, docs/, code comments, and guardrail tests).
+In production (`vpmznjktllhmmbfnxuvk`), rewrote the 67 discrepant
+`supabase_migrations.schema_migrations` rows so `version` equals the local
+filename's timestamp prefix and `name` equals its description (this also
+normalized 9 rows whose `name` had a second timestamp embedded in it). Done
+as a two-phase update (temp-prefixed versions, then stripped) inside one
+transaction so the primary key never saw a transient collision. Verified by
+digest: `md5` over the sorted `version_name` set now matches `md5` over the
+sorted local filename set exactly (276 = 276).
+
+One local file was the odd one out: `20260617000003_add_missing_fk_indexes.sql`,
+an applied-under-another-timestamp draft (it already carried a 2026-07-08
+"NOT RECORDED IN LIVE MIGRATION HISTORY" header) that the 2026-07-28
+`_unshipped/` sweep missed — moved to `supabase/migrations/_unshipped/` with
+the standard SUPERSEDED header.
+
+**Deliberately out of scope:** the E2E project's (`syhthijeqlnltufdawyb`)
+ledger, which contains genuine duplicate applies and E2E-only entries from
+its independently-migrated era. Nothing reads it — the `db-invariants` and
+type-drift CI gates verify E2E via RPCs against the live schema, not the
+ledger — so reconciling it would be churn without benefit. Schema parity is
+what matters there, and those gates enforce it.
+
+**Go-forward convention:** when applying a migration via the MCP
+`apply_migration` tool, it stamps the row with its own execution-time
+version regardless of the `name` passed — so after each apply, fix the new
+row to match the local filename:
+```sql
+UPDATE supabase_migrations.schema_migrations
+SET version = '<local file timestamp>', name = '<local file description>'
+WHERE version = (SELECT max(version) FROM supabase_migrations.schema_migrations);
+```
+(or keep passing the full filename as `name` and batch-fix later — either
+way, don't let the drift re-accumulate silently.)
+
+Original item kept below for context:
+
+### ~~Migration filename timestamps vs. recorded applied versions have drifted~~
 
 **Files:** `supabase/migrations/*.sql` (local) vs. Supabase's migration
 history table for project `vpmznjktllhmmbfnxuvk` (remote)
@@ -579,3 +755,108 @@ the schema.
   `guidebook_configurations.extension_contact_method` is TEXT-with-CHECK and
   is intentionally typed `string | null`, narrowed at the boundary instead)
   need an allowlist entry or they will read as drift.
+
+---
+
+## 19. 49 more `jsx-a11y/label-has-associated-control` violations across 11 files
+
+Found while fixing the 7 in `turnovers/turnover-board.tsx` (now resolved —
+each `<label>` there was a sibling of its control with no `htmlFor`/`id`
+link, so screen readers announced the field with no name, and clicking the
+label text didn't focus the control). Same rule already runs repo-wide on
+every `npm run lint` (`eslint .`) at `warn` severity as part of the jsx-a11y
+rollout described in CLAUDE.md's Code Quality Standards — this is the full
+list of what it's still catching, pulled via:
+
+```bash
+npx eslint . --format json 2>/dev/null | node -e "
+const data = JSON.parse(require('fs').readFileSync(0, 'utf8'));
+for (const f of data) {
+  const n = f.messages.filter(m => m.ruleId === 'jsx-a11y/label-has-associated-control').length;
+  if (n) console.log(n, f.filePath);
+}
+"
+```
+
+**File-by-file breakdown (56 total found 2026-07-31, 7 already fixed in
+`turnover-board.tsx`, 49 remaining):**
+
+| Count | File |
+|---|---|
+| 11 | `app/(dashboard)/maintenance/maintenance-board.tsx` |
+| 10 | `app/(dashboard)/vendors/vendors-client.tsx` |
+| 7  | `app/(dashboard)/comms-log/comms-log-client.tsx` |
+| 6  | `app/(dashboard)/bookings/bookings-client.tsx` |
+| 4  | `app/(dashboard)/reviews/reviews-client.tsx` |
+| 3  | `app/(dashboard)/settings/settings-tabs.tsx` |
+| 2  | `app/(dashboard)/maintenance/CreateWorkOrderModal.tsx` |
+| 2  | `components/property/PropertyMaintenanceManager.tsx` |
+| 2  | `components/work-orders/VendorDispatchDialog.tsx` |
+| 1  | `app/(dashboard)/properties/clone-property-modal.tsx` |
+| 1  | `app/(dashboard)/templates/maintenance/create/create-template-builder.tsx` |
+
+Note `settings-tabs.tsx` includes 2 flagged as "A form label must have
+accessible text" (lines 629, 661) rather than the more common "must be
+associated with a control" message — same underlying rule, worth checking
+those two aren't a genuinely empty `<label>` rather than just a missing
+`htmlFor`/`id` pair before applying the same mechanical fix.
+
+**Suggested fix:** same mechanical pattern as `turnover-board.tsx` — add a
+matching `id`/`htmlFor` pair to each label/control. Watch for the same
+uniqueness trap that came up there: any label/control pair that renders
+inside a list item (a row per turnover, vendor, work order, etc.) needs an
+id keyed off that row's own id (e.g. `` `field-name-${row.id}` ``), not a
+static string, or multiple simultaneously-rendered rows collide on the
+same DOM id. A static id is only safe for a form that has at most one
+mounted instance at a time (a modal, a single settings panel).
+
+Not done in this pass because it's real, multi-file work rather than a
+one-line change — 11 files' worth of JSX to individually verify (which
+control each label is meant to pair with, and whether that control is
+inside a list needing a per-row id) is enough surface area to warrant its
+own pass rather than folding it into an unrelated PR.
+
+---
+
+## 20. Turnover card header nests interactive elements (`role="button"` div containing real buttons/inputs)
+
+**File:** `app/(dashboard)/turnovers/turnover-board.tsx`, `TurnoverCard`'s
+card header (`<div role="button" tabIndex={0} onClick={...expand/collapse...}>`,
+around line 370)
+
+Flagged by CodeRabbit on PR #542: the header div that toggles the card's
+expanded state is a `role="button"` container, but it wraps several real
+interactive descendants — a bulk-select `<input type="checkbox">`, a
+`<button>` on the pending-assignment status badge, and (further down the
+same header) the `CrewAssignment` component's own buttons and the
+`QuickFlagPanel`/archive buttons. Each of those descendants calls
+`e.stopPropagation()` on its own click to keep it from *also* toggling the
+card, which works functionally, but nesting real interactive controls
+inside a `role="button"` ancestor is a known ARIA/WCAG anti-pattern —
+assistive tech has no well-defined behavior for "interactive element
+inside an interactive element," and a screen reader user tabbing through
+the card can get an inconsistent read on what's actually clickable.
+
+This predates this PR — the pattern already existed before any of the
+turnover-events/duration-tracking/FAQ work landed; this PR only touched a
+couple of the *nested* propagation-guard divs inside it (fixing their own,
+separate keyboard-listener gaps), not the outer header itself.
+
+**Suggested fix:** per CodeRabbit's own recommendation, either (a) make the
+expand/collapse trigger a real `<button>` that wraps only non-interactive
+content (property name, status badges, times — move the checkbox, crew
+controls, and action buttons outside it), or (b) keep the header as a
+plain non-interactive `<div>` and add a small dedicated expand/collapse
+`<button>` (e.g. wrapping just the chevron icon) as the actual toggle
+control, with the rest of the header's content living alongside it rather
+than inside a click target.
+
+**Why not fixed here:** this is a real layout restructuring, not a
+markup-only tweak — CodeRabbit itself tagged it "Heavy lift." Getting it
+right means deciding where the click-to-expand hit target should actually
+live once it's no longer "the whole header," verifying every existing
+propagation-stopping button still works with the new structure, and a live
+browser check (this pattern is used across the whole card, so a visual
+regression here would be immediately obvious to every PM using the
+Turnovers board) — not something to attempt as a drive-by fix while
+resolving an unrelated merge conflict.

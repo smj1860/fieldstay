@@ -73,12 +73,9 @@ export const WO_STATUS_LABELS = {
   cancelled:       'Cancelled',
 } as const
 
-/** Duration between started_at and completed_at */
-export function formatDuration(startedAt: string | null, completedAt: string | null): string | null {
-  if (!startedAt || !completedAt) return null
-  const totalMins = Math.round(
-    (new Date(completedAt).getTime() - new Date(startedAt).getTime()) / 60_000
-  )
+/** Formats a raw minute count (e.g. turnovers.crew_duration_minutes) as "1h 35m" */
+export function formatDurationMinutes(totalMins: number | null): string | null {
+  if (totalMins === null) return null
   if (totalMins < 1)  return '< 1m'
   if (totalMins < 60) return `${totalMins}m`
   const h = Math.floor(totalMins / 60)

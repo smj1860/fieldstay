@@ -112,6 +112,102 @@ export const handleTurnoverCreated = inngest.createFunction(
   }
 )
 
+type TurnoverServiceClient = ReturnType<typeof createServiceClient>
+
+/**
+ * Every completion-type timestamp for a turnover: each checklist item's
+ * completed_at, plus inventory's single completion signal.
+ *
+ * Inventory contributes at most one (unlike checklist, it has no per-item
+ * timestamps — see the crew-facing InventoryView flow): the explicit "Confirm
+ * Inventory Complete" press if it happened, else the last inventory quantity
+ * edit after this turnover's inventory work began, as a fallback for crew who
+ * forgot to press it. inventory_started_at itself is NOT a signal — it marks
+ * when work began, not when something was completed.
+ */
+async function collectCompletionTimestamps(
+  supabase:   TurnoverServiceClient,
+  turnoverId: string,
+  orgId:      string,
+): Promise<string[]> {
+  const timestamps: string[] = []
+
+  const { data: instance, error: instanceError } = await supabase
+    .from('checklist_instances')
+    .select('id')
+    .eq('turnover_id', turnoverId)
+    .eq('org_id', orgId)
+    .maybeSingle()
+  if (instanceError) throw instanceError
+
+  if (instance) {
+    const { data: items, error: itemsError } = await supabase
+      .from('checklist_instance_items')
+      .select('completed_at')
+      .eq('instance_id', instance.id)
+      .not('completed_at', 'is', null)
+      .limit(500)
+    if (itemsError) throw itemsError
+
+    for (const item of items ?? []) timestamps.push(item.completed_at!)
+  }
+
+  const { data: turnover, error: turnoverError } = await supabase
+    .from('turnovers')
+    .select('property_id, inventory_started_at, inventory_confirmed_complete_at')
+    .eq('id', turnoverId)
+    .eq('org_id', orgId)
+    .maybeSingle()
+  if (turnoverError) throw turnoverError
+
+  if (turnover?.inventory_confirmed_complete_at) {
+    timestamps.push(turnover.inventory_confirmed_complete_at)
+    return timestamps
+  }
+
+  if (turnover?.inventory_started_at) {
+    const { data: lastEdited, error: lastEditedError } = await supabase
+      .from('inventory_items')
+      .select('updated_at')
+      .eq('property_id', turnover.property_id)
+      .gt('updated_at', turnover.inventory_started_at)
+      .order('updated_at', { ascending: false })
+      .limit(1)
+      .maybeSingle()
+    if (lastEditedError) throw lastEditedError
+
+    if (lastEdited) timestamps.push(lastEdited.updated_at)
+  }
+
+  return timestamps
+}
+
+interface DurationWrite {
+  what:  string
+  site:  string
+  error: { message: string } | null
+}
+
+/**
+ * Logs and reports the first failed write of the crew-duration pair.
+ *
+ * Extracted so the step body carries one branch instead of one per write —
+ * both go to the same place, and the step is already at the cognitive
+ * complexity ceiling.
+ */
+function reportDurationWriteFailure(
+  logger:  { error: (msg: string, meta?: Record<string, unknown>) => void },
+  orgId:   string,
+  results: readonly DurationWrite[],
+): boolean {
+  const failed = results.find((r) => r.error !== null)
+  if (!failed?.error) return false
+
+  logger.error(`${failed.what} update failed`, { error: failed.error.message })
+  reportError(failed.error, { site: `inngest.turnover-events.${failed.site}`, orgId })
+  return true
+}
+
 /**
  * Triggered when a turnover is marked complete by crew.
  * Sends a brief "turnover complete" notification to the PM.
@@ -248,26 +344,13 @@ export const handleTurnoverCompleted = inngest.createFunction(
     await step.run('record-crew-duration', async () => {
       const supabase = createServiceClient({ system: 'inngest:turnover-events' })
 
-      const { data: instance } = await supabase
-        .from('checklist_instances')
-        .select('id')
-        .eq('turnover_id', turnover_id)
-        .eq('org_id', org_id)
-        .maybeSingle()
+      const timestamps = await collectCompletionTimestamps(supabase, turnover_id, org_id)
 
-      if (!instance) return { skipped: 'no_checklist_instance' }
+      if (timestamps.length === 0) return { skipped: 'no_completion_signals' }
 
-      const { data: items } = await supabase
-        .from('checklist_instance_items')
-        .select('completed_at')
-        .eq('instance_id', instance.id)
-        .not('completed_at', 'is', null)
-        .order('completed_at', { ascending: true })
-
-      if (!items?.length) return { skipped: 'no_completed_items' }
-
-      const startedAt   = items[0]!.completed_at!
-      const completedAt = items[items.length - 1]!.completed_at!
+      timestamps.sort((a, b) => new Date(a).getTime() - new Date(b).getTime())
+      const startedAt   = timestamps[0]!
+      const completedAt = timestamps[timestamps.length - 1]!
 
       const durationMinutes = (new Date(completedAt).getTime() - new Date(startedAt).getTime()) / 60_000
 
@@ -276,30 +359,48 @@ export const handleTurnoverCompleted = inngest.createFunction(
         return { skipped: 'anomalous_duration', duration_minutes: durationMinutes }
       }
 
-      // duration_minutes is DELIBERATELY not written: it is GENERATED ALWAYS on
-      // assignment_outcomes, derived from started_at/completed_at with its own
-      // 480-minute plausibility cap (the same bound as
-      // MAX_PLAUSIBLE_DURATION_MINUTES above). Naming it here raised 428C9
-      // "cannot insert a non-DEFAULT value into column", which failed the WHOLE
-      // update — so started_at and completed_at were never written either, and
-      // the assignment-outcomes learning loop that feeds crew scoring recorded
-      // nothing at all. The error was then discarded by destructuring `data`
-      // without `error`, so it surfaced as `updated_rows: 0` and looked like
-      // "no matching rows" rather than a failed write.
-      const { data: updatedRows, error: outcomeError } = await supabase
-        .from('assignment_outcomes')
-        .update({ started_at: startedAt, completed_at: completedAt })
-        .eq('turnover_id', turnover_id)
-        .eq('org_id', org_id)
-        .select('id')
+      const roundedMinutes = Math.round(durationMinutes)
 
-      if (outcomeError) {
-        logger.error('assignment_outcomes duration update failed', { error: outcomeError.message })
-        reportError(outcomeError, { site: 'inngest.turnover-events.assignmentOutcomeDuration', orgId: org_id })
-        return { updated_rows: 0, duration_minutes: Math.round(durationMinutes), error: true }
-      }
+      // ONE calculation feeds both consumers — assignment_outcomes (the
+      // crew-scoring learning loop) and turnovers.crew_duration_minutes (the
+      // PM-facing board display) — so the two numbers cannot drift apart.
+      //
+      // But they are written differently, and the asymmetry is not an
+      // oversight. assignment_outcomes.duration_minutes is GENERATED ALWAYS,
+      // derived from started_at/completed_at with its own 480-minute
+      // plausibility cap (the same bound as MAX_PLAUSIBLE_DURATION_MINUTES
+      // above), so it must NOT be named in the payload: doing so raised 428C9
+      // "cannot insert a non-DEFAULT value into column", which failed the
+      // WHOLE update — started_at and completed_at were never written either,
+      // and the learning loop that feeds crew scoring recorded nothing at all.
+      // turnovers.crew_duration_minutes is an ordinary integer column and IS
+      // written here.
+      const [assignmentResult, turnoverResult] = await Promise.all([
+        supabase
+          .from('assignment_outcomes')
+          .update({ started_at: startedAt, completed_at: completedAt })
+          .eq('turnover_id', turnover_id)
+          .eq('org_id', org_id)
+          .select('id'),
+        supabase
+          .from('turnovers')
+          .update({ crew_duration_minutes: roundedMinutes })
+          .eq('id', turnover_id)
+          .eq('org_id', org_id),
+      ])
 
-      return { updated_rows: updatedRows?.length ?? 0, duration_minutes: Math.round(durationMinutes) }
+      // Reported, not thrown, and never discarded: destructuring `data`
+      // without `error` is what let the 428C9 above surface as
+      // `updated_rows: 0` and read like "no matching rows" for weeks.
+      const writeFailed = reportDurationWriteFailure(logger, org_id, [
+        { what: 'assignment_outcomes duration', site: 'assignmentOutcomeDuration', error: assignmentResult.error },
+        { what: 'turnovers crew_duration_minutes', site: 'turnoverCrewDuration', error: turnoverResult.error },
+      ])
+
+      const updatedRows = assignmentResult.data?.length ?? 0
+      if (writeFailed) return { updated_rows: updatedRows, duration_minutes: roundedMinutes, error: true }
+
+      return { updated_rows: updatedRows, duration_minutes: roundedMinutes }
     })
 
     logger.info('turnover-completed done', { workflowId, turnover_id })

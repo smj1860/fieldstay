@@ -5,18 +5,16 @@ vi.mock('@/lib/supabase/server', () => ({
   createClient:        vi.fn(),
   createServiceClient: vi.fn(),
 }))
-vi.mock('@/lib/resend/client', () => ({
-  resend: { emails: { send: vi.fn(async () => ({ data: { id: 'email_1' }, error: null })) } },
-  FROM:   'FieldStay <noreply@fieldstay.app>',
+vi.mock('@/lib/inngest/client', () => ({
+  inngest: { send: vi.fn() },
 }))
-vi.mock('@/lib/resend/emails/pm-alert', () => ({
-  renderPmAlert: vi.fn(async () => '<html>alert</html>'),
+vi.mock('@/lib/observability/report-error', () => ({
+  reportError: vi.fn(),
 }))
 
 import { POST } from '@/app/api/crew/feedback/route'
 import { createClient, createServiceClient } from '@/lib/supabase/server'
-import { resend } from '@/lib/resend/client'
-import { renderPmAlert } from '@/lib/resend/emails/pm-alert'
+import { inngest } from '@/lib/inngest/client'
 
 const CREW_ID = 'crew_1'
 const ORG_ID  = 'org_1'
@@ -220,7 +218,7 @@ describe('POST /api/crew/feedback', () => {
     expect(res.status).toBe(500)
   })
 
-  it('fires a fire-and-forget staff notification email after a successful submit', async () => {
+  it('enqueues the staff notification via Inngest after a successful submit', async () => {
     vi.mocked(createClient).mockResolvedValue(
       makeAuthClient({ id: USER_ID }, { data: { id: CREW_ID, org_id: ORG_ID }, error: null }) as never,
     )
@@ -230,12 +228,24 @@ describe('POST /api/crew/feedback', () => {
     const res = await POST(postRequest({ feedbackText: 'Great shift today' }))
     expect(res.status).toBe(200)
 
-    await vi.waitFor(() => {
-      expect(renderPmAlert).toHaveBeenCalledWith(
-        expect.objectContaining({ heading: 'New crew feedback submitted', body: 'Great shift today' }),
-      )
-      expect(resend.emails.send).toHaveBeenCalledTimes(1)
+    expect(inngest.send).toHaveBeenCalledWith({
+      name: 'crew/feedback.submitted',
+      data: { org_id: ORG_ID, crew_member_id: CREW_ID, feedback_text: 'Great shift today' },
     })
+  })
+
+  it('still returns success when the Inngest send fails — the feedback row is already durably written', async () => {
+    vi.mocked(createClient).mockResolvedValue(
+      makeAuthClient({ id: USER_ID }, { data: { id: CREW_ID, org_id: ORG_ID }, error: null }) as never,
+    )
+    const service = makeServiceClient()
+    vi.mocked(createServiceClient).mockReturnValue(service as never)
+    vi.mocked(inngest.send).mockRejectedValueOnce(new Error('event API unreachable'))
+
+    const res = await POST(postRequest({ feedbackText: 'Great shift today' }))
+
+    expect(res.status).toBe(200)
+    await expect(res.json()).resolves.toEqual({ submitted: true })
   })
 
   it('accepts a null propertyId (feedback not tied to a specific property)', async () => {

@@ -8,7 +8,7 @@ import {
   AlertTriangle, CheckCircle2, Flag, X, UserPlus, LayoutList, GanttChartSquare,
   Sparkles, Check,
 } from 'lucide-react'
-import { cn, formatWindow, TURNOVER_STATUS_LABELS, formatDuration } from '@/lib/utils'
+import { cn, formatWindow, TURNOVER_STATUS_LABELS, formatDurationMinutes } from '@/lib/utils'
 import { Dialog } from '@/components/ui/Dialog'
 import { StatusDot } from '@/components/ui/StatusDot'
 import { Card } from '@/components/ui/Card'
@@ -78,6 +78,7 @@ interface Turnover {
   notes: string | null
   completed_at: string | null
   started_at: string | null
+  crew_duration_minutes: number | null
   checklist_template_id: string | null
   is_same_day_turnover: boolean | null
   suggested_crew_ids: string[] | null
@@ -347,7 +348,7 @@ function TurnoverCard({
   const windowColor  = windowUrgencyColor(windowMins)
   const urgencyTone  = turnoverUrgencyTone(isOverdue, turnover.priority)
 
-  const duration = formatDuration(turnover.started_at, turnover.completed_at)
+  const duration = formatDurationMinutes(turnover.crew_duration_minutes)
 
   const handleStatus = (status: 'in_progress' | 'completed' | 'flagged' | 'cancelled') => {
     if (status === 'flagged' && !flagNotes) {
@@ -525,8 +526,9 @@ function TurnoverCard({
           {/* Flag notes input */}
           {showFlagInput && (
             <div className="space-y-2">
-              <label htmlFor="turnover-board-what-needs-attention" className="text-xs font-medium text-secondary-themed">What needs attention?</label>
-              <textarea id="turnover-board-what-needs-attention"
+              <label htmlFor={`flag-notes-${turnover.id}`} className="text-xs font-medium text-secondary-themed">What needs attention?</label>
+              <textarea
+                id={`flag-notes-${turnover.id}`}
                 value={flagNotes}
                 onChange={(e) => setFlagNotes(e.target.value)}
                 rows={2}

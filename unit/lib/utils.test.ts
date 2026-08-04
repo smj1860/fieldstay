@@ -7,7 +7,7 @@ import {
   windowMinutes,
   formatWindow,
   slugify,
-  formatDuration,
+  formatDurationMinutes,
   PRIORITY_COLORS,
   TURNOVER_STATUS_LABELS,
   WO_STATUS_LABELS,
@@ -129,33 +129,25 @@ describe('slugify', () => {
   })
 })
 
-describe('formatDuration', () => {
-  it('returns null when startedAt is missing', () => {
-    expect(formatDuration(null, '2026-07-06T12:00:00.000Z')).toBeNull()
-  })
-
-  it('returns null when completedAt is missing', () => {
-    expect(formatDuration('2026-07-06T12:00:00.000Z', null)).toBeNull()
-  })
-
-  it('returns null when both are missing', () => {
-    expect(formatDuration(null, null)).toBeNull()
+describe('formatDurationMinutes', () => {
+  it('returns null when minutes is null', () => {
+    expect(formatDurationMinutes(null)).toBeNull()
   })
 
   it('formats sub-minute durations as "< 1m"', () => {
-    expect(formatDuration('2026-07-06T12:00:00.000Z', '2026-07-06T12:00:10.000Z')).toBe('< 1m')
+    expect(formatDurationMinutes(0)).toBe('< 1m')
   })
 
   it('formats sub-hour durations as minutes', () => {
-    expect(formatDuration('2026-07-06T12:00:00.000Z', '2026-07-06T12:45:00.000Z')).toBe('45m')
+    expect(formatDurationMinutes(45)).toBe('45m')
   })
 
   it('formats exact-hour durations without a minutes suffix', () => {
-    expect(formatDuration('2026-07-06T12:00:00.000Z', '2026-07-06T14:00:00.000Z')).toBe('2h')
+    expect(formatDurationMinutes(120)).toBe('2h')
   })
 
   it('formats hour-and-minute durations', () => {
-    expect(formatDuration('2026-07-06T12:00:00.000Z', '2026-07-06T13:35:00.000Z')).toBe('1h 35m')
+    expect(formatDurationMinutes(95)).toBe('1h 35m')
   })
 })
 

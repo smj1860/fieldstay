@@ -1,8 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createServiceClient } from '@/lib/supabase/server'
 import { requireCrewMember }   from '@/lib/crew-auth'
-import { resend, FROM }              from '@/lib/resend/client'
-import { renderPmAlert }             from '@/lib/resend/emails/pm-alert'
+import { inngest }             from '@/lib/inngest/client'
+import { reportError }         from '@/lib/observability/report-error'
 
 // Input validation at the boundary (CLAUDE.md standing audit checklist →
 // Sanitization). Unbounded, this text went straight into both a DB insert and
@@ -70,38 +70,21 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     return NextResponse.json({ error: 'Something went wrong' }, { status: 500 })
   }
 
-  // Notify platform staff — fire-and-forget, never blocks the crew's success state.
-  void notifyPlatformStaff(crew.id, crew.org_id, feedbackText)
-    .catch((err) => console.error('[CrewFeedback] staff notify failed:', err))
+  // Staff notification goes through Inngest for retry/durability instead of
+  // a fire-and-forget email send that a torn-down serverless instance could
+  // silently drop. Awaiting the event send (not the email itself) confirms
+  // Inngest accepted the job; a send failure here is logged but still
+  // doesn't block the crew member's success response — the feedback row
+  // above is already durably written.
+  try {
+    await inngest.send({
+      name: 'crew/feedback.submitted',
+      data: { org_id: crew.org_id, crew_member_id: crew.id, feedback_text: feedbackText },
+    })
+  } catch (err) {
+    console.error('[CrewFeedback] failed to enqueue staff notification:', err)
+    reportError(err, { site: 'route.crew.feedback.notify_enqueue', orgId: crew.org_id })
+  }
 
   return NextResponse.json({ submitted: true })
-}
-
-async function notifyPlatformStaff(
-  crewMemberId: string,
-  orgId:        string,
-  feedbackText: string,
-): Promise<void> {
-  const service = createServiceClient({ system: 'route:crew-feedback-notify-staff' })
-
-  const [{ data: cm }, { data: org }] = await Promise.all([
-    service.from('crew_members').select('name').eq('id', crewMemberId).single(),
-    service.from('organizations').select('name').eq('id', orgId).single(),
-  ])
-
-  await resend.emails.send({
-    from:    FROM,
-    to:      'stephen@fieldstay.app',
-    subject: `New crew feedback from ${cm?.name ?? 'a crew member'}`,
-    html: await renderPmAlert({
-      heading: 'New crew feedback submitted',
-      body:    feedbackText,
-      details: [
-        { label: 'Crew member',  value: cm?.name ?? null },
-        { label: 'Organization', value: org?.name ?? null },
-      ],
-      ctaLabel: 'View in Support Inbox →',
-      ctaUrl:   `${process.env.NEXT_PUBLIC_APP_URL}/support-inbox`,
-    }),
-  })
 }

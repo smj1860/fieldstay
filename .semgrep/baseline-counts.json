@@ -36,12 +36,12 @@
   ],
   "measured_at": "2026-08-04",
   "counts": {
-    "fieldstay-supabase-discarded-result": 139,
-    "fieldstay-supabase-read-without-error": 252,
-    "fieldstay-supabase-read-without-error-fan-in": 15,
+    "fieldstay-supabase-discarded-result": 138,
+    "fieldstay-supabase-read-without-error": 250,
+    "fieldstay-supabase-read-without-error-fan-in": 14,
     "fieldstay-supabase-unbounded-select-global-table": 5,
     "fieldstay-supabase-unbounded-select-in-list": 36,
-    "fieldstay-supabase-unbounded-select-org-scoped": 106,
-    "fieldstay-supabase-unbounded-select-single-parent": 37
+    "fieldstay-supabase-unbounded-select-org-scoped": 105,
+    "fieldstay-supabase-unbounded-select-single-parent": 36
   }
 }

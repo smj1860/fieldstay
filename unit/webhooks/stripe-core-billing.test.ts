@@ -25,10 +25,23 @@ import type Stripe from 'stripe'
  * Chainable Supabase mock. Each table gets a QUEUE of results so the two
  * different organizations reads (by metadata id, then by customer id) can be
  * answered independently — which is the whole point of these tests.
+ *
+ * The entitlement WRITE goes through update_organization_subscription_from_stripe
+ * (one transaction: lookup, row lock, read old plan, write), so `rpc` is what
+ * these tests assert the write against. Resolution still runs first and is
+ * what they actually exercise — the RPC only writes; it never decides which
+ * org was found.
  */
-function makeSupabase(queued: Record<string, { data?: unknown; error?: unknown }[]>) {
+function makeSupabase(
+  queued: Record<string, { data?: unknown; error?: unknown }[]>,
+  rpcResult: { data: unknown; error?: unknown } = {
+    data: { org_id: 'org_1', org_name: 'Lake Martin', previous_plan: 'starter' },
+    error: null,
+  },
+) {
   const counters: Record<string, number> = {}
   const calls: { table: string; method: string; args: unknown[] }[] = []
+  const rpc = vi.fn(() => ({ maybeSingle: vi.fn(() => Promise.resolve(rpcResult)) }))
 
   const from = vi.fn((table: string) => {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -52,7 +65,7 @@ function makeSupabase(queued: Record<string, { data?: unknown; error?: unknown }
     return chain
   })
 
-  return { from, auth: { admin: { getUserById: vi.fn(async () => ({ data: null })) } }, calls }
+  return { from, rpc, auth: { admin: { getUserById: vi.fn(async () => ({ data: null })) } }, calls }
 }
 
 const subscription = (overrides: Record<string, unknown> = {}) => ({
@@ -104,14 +117,15 @@ describe('handleCoreSubscriptionUpdate — org resolution', () => {
     )
     expect(customerLookup).toBe(false)
 
-    const updates = supabase.calls.filter((c) => c.table === 'organizations' && c.method === 'update')
-    const entitlement = updates.find((u) => (u.args[0] as Record<string, unknown>).plan !== undefined)
-    expect(entitlement?.args[0]).toMatchObject({
-      stripe_subscription_id: 'sub_1',
-      plan:                   'growth',
-      plan_status:            'trialing',
-      max_properties:         40,
-    })
+    expect(supabase.rpc).toHaveBeenCalledWith(
+      'update_organization_subscription_from_stripe',
+      expect.objectContaining({
+        p_stripe_subscription_id: 'sub_1',
+        p_plan:                   'growth',
+        p_plan_status:            'trialing',
+        p_max_properties:         40,
+      }),
+    )
   })
 
   it('backfills stripe_customer_id when the org was found via metadata', async () => {
@@ -144,11 +158,11 @@ describe('handleCoreSubscriptionUpdate — org resolution', () => {
 
     await run(supabase, subscription())
 
-    const entitlement = supabase.calls.find(
-      (c) => c.table === 'organizations' && c.method === 'update'
-        && (c.args[0] as Record<string, unknown>).plan !== undefined,
+    const customerLookup = supabase.calls.some(
+      (c) => c.table === 'organizations' && c.method === 'eq' && c.args[0] === 'stripe_customer_id',
     )
-    expect(entitlement).toBeDefined()
+    expect(customerLookup, 'the customer-id lookup is the whole point of this path').toBe(true)
+    expect(supabase.rpc).toHaveBeenCalled()
   })
 
   // The fix's teeth: an unresolvable org for one of OUR plans must retry, not

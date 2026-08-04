@@ -31,6 +31,7 @@ export default async function TurnoversPage() {
       .select(`
         id, property_id, booking_id, checkout_datetime, checkin_datetime,
         window_minutes, status, priority, notes, completed_at, started_at,
+        crew_duration_minutes,
         checklist_template_id, is_same_day_turnover, is_archived,
         suggested_crew_ids, suggestion_reasoning, suggestion_status,
         turnover_assignments (
@@ -42,7 +43,8 @@ export default async function TurnoversPage() {
       .neq('status', 'cancelled')
       .gte('checkout_datetime', since.toISOString())
       .lte('checkout_datetime', until.toISOString())
-      .order('checkout_datetime', { ascending: true }),
+      .order('checkout_datetime', { ascending: true })
+      .limit(5000),
     supabase
       .from('properties')
       .select('id, name, city, state')

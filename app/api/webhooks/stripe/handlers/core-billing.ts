@@ -4,7 +4,9 @@ import { PLANS, getPlanByPriceId, type PlanKey } from '@/lib/stripe/client'
 import { logAuditEvent } from '@/lib/audit'
 import { getPmMembers } from '@/lib/inngest/helpers'
 import { tryUnwrap } from '@/lib/supabase/unwrap'
+import { nullableArg } from '@/lib/supabase/rpc-args'
 import { reportError } from '@/lib/observability/report-error'
+import type { OrgPlanStatus } from '@/types/database'
 import type { StripeSupabaseClient } from './types'
 
 /** Core billing checkout completed — links the Stripe customer id to the org. */
@@ -168,6 +170,86 @@ async function resolveSubscriptionOrg(
   )
 }
 
+interface SubscriptionFields {
+  subscriptionId: string
+  plan:           PlanKey
+  planStatus:     OrgPlanStatus
+  trialEndsAt:    string | null
+}
+
+/**
+ * Writes the org's entitlement and returns the plan it held beforehand.
+ *
+ * The RPC does the lookup, row lock, read-old, and write in ONE server-side
+ * transaction (supabase/migrations/20260730140000_atomic_subscription_plan_update.sql).
+ * PostgREST cannot express that shape — there is no RETURNING of a pre-update
+ * column — so a plain read-then-write let two concurrent deliveries for the
+ * same org both read the same stale previous_plan.
+ */
+async function applySubscriptionUpdate(
+  supabase:   StripeSupabaseClient,
+  org:        ResolvedOrg,
+  customerId: string,
+  fields:     SubscriptionFields,
+): Promise<PlanKey | null> {
+  const { data: rpcResult, error: updateError } = await supabase
+    .rpc('update_organization_subscription_from_stripe', {
+      p_customer_id:            customerId,
+      p_stripe_subscription_id: fields.subscriptionId,
+      p_plan:                   fields.plan,
+      p_plan_status:            fields.planStatus,
+      p_max_properties:         PLANS[fields.plan].maxProperties,
+      // The parameter is a plain nullable timestamptz — a subscription with no
+      // trial passes NULL — but pg_proc records no argument nullability, so
+      // the generated Args type says `string`. See lib/supabase/rpc-args.ts.
+      p_trial_ends_at:          nullableArg(fields.trialEndsAt),
+    })
+    .maybeSingle()
+
+  if (updateError) {
+    throw new Error(
+      `update_organization_subscription_from_stripe failed for customer ${customerId}: ${updateError.message}`,
+    )
+  }
+
+  // StripeSupabaseClient carries no <Database> generic (see the note in
+  // types/database.ts), so .rpc() infers `{}` rather than the real shape —
+  // cast to the RETURNS TABLE columns from the migration.
+  const updated = rpcResult as { org_id: string; org_name: string | null; previous_plan: PlanKey } | null
+  if (updated) return updated.previous_plan
+
+  // The RPC keys on stripe_customer_id, which is normally in agreement with
+  // the org we just resolved — resolveSubscriptionOrg backfills that column
+  // when metadata got us here first. It disagrees for an org already carrying
+  // a DIFFERENT customer id, where the backfill deliberately no-ops: the
+  // metadata lookup found the org, the RPC's lookup does not, and returning
+  // on that miss would re-open the silent entitlement drop the metadata
+  // resolution exists to fix. Write it directly instead, scoped to the org we
+  // did resolve.
+  console.warn(
+    `[stripe] subscription RPC found no org for customer ${customerId}; ` +
+    `falling back to a direct update on org ${org.id}`,
+  )
+  const { error: fallbackError } = await supabase
+    .from('organizations')
+    .update({
+      stripe_subscription_id: fields.subscriptionId,
+      plan:            fields.plan,
+      plan_status:     fields.planStatus,
+      max_properties:  PLANS[fields.plan].maxProperties,
+      trial_ends_at:   fields.trialEndsAt,
+    })
+    .eq('id', org.id)
+
+  if (fallbackError) {
+    throw new Error(`organizations update failed for org ${org.id}: ${fallbackError.message}`)
+  }
+
+  // Genuinely unknown on this path — the pre-update plan was never read under
+  // a lock. Null is honest; a guess would mislabel the plan-change email.
+  return null
+}
+
 /** Core billing subscription created or updated (plan/status sync + trial-lifecycle emails). */
 export async function handleCoreSubscriptionUpdate(
   supabase: StripeSupabaseClient,
@@ -185,21 +267,38 @@ export async function handleCoreSubscriptionUpdate(
                     : subscription.status === 'past_due' ? 'past_due'
                     : 'cancelled'
 
+  // Two independent fixes meet on this block and BOTH are load-bearing, so
+  // neither side of the merge wins outright:
+  //
+  //  - Resolving the org must happen through subscription metadata first and
+  //    the customer id second, because the customer-id link is written by
+  //    checkout.session.completed and Stripe does not guarantee it arrives
+  //    before subscription.created. Customer-id-only resolution left
+  //    first-time subscribers paid and entitlement-less.
+  //  - The update itself must hold a row lock, because two concurrent
+  //    deliveries for the same org could both read the same stale
+  //    previous_plan before either write committed.
+  //
+  // Resolve first — it also throws to force a Stripe retry when one of our
+  // plans has no resolvable org yet, and backfills the customer link — then
+  // do the locked update.
   const org = await resolveSubscriptionOrg(supabase, subscription, customerId, priceId)
   if (!org) return
 
-  await supabase
-    .from('organizations')
-    .update({
-      stripe_subscription_id: subscription.id,
-      plan,
-      plan_status:     planStatus,
-      max_properties:  PLANS[plan].maxProperties,
-      trial_ends_at:   subscription.trial_end
-        ? new Date(subscription.trial_end * 1000).toISOString()
-        : null,
-    })
-    .eq('id', org.id)
+  const previousPlan = await applySubscriptionUpdate(supabase, org, customerId, {
+    subscriptionId: subscription.id,
+    plan,
+    planStatus,
+    trialEndsAt: subscription.trial_end
+      ? new Date(subscription.trial_end * 1000).toISOString()
+      : null,
+  })
+
+  // previous_plan is only meaningful on an update to an existing
+  // subscription — never on creation, where the org's pre-signup default
+  // plan isn't a real "previous" tier the PM ever knowingly held.
+  const genuinePreviousPlan =
+    eventType === 'customer.subscription.updated' ? previousPlan : null
 
   await inngest.send({
     name: 'billing/subscription-updated',
@@ -208,6 +307,7 @@ export async function handleCoreSubscriptionUpdate(
       stripe_subscription_id: subscription.id,
       plan,
       plan_status:            planStatus,
+      previous_plan:          genuinePreviousPlan,
     },
   })
 

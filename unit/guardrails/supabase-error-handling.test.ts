@@ -124,7 +124,7 @@ const BASELINE: Record<string, number> = {
 
   'app/api/assets/cpa-export/route.ts': 2,
   'app/api/assets/request-scan/route.ts': 3,
-  'app/api/crew/feedback/route.ts': 3,
+  'app/api/crew/feedback/route.ts': 1,
   'app/api/crew/turnovers/[id]/complete/route.ts': 2,
   'app/api/crew/work-order-reports/route.ts': 2,
   'app/api/gdpr/export/route.ts': 5,
@@ -181,7 +181,7 @@ const BASELINE: Record<string, number> = {
   'lib/inngest/functions/ownerrez/ownerrez-reviews-sync.ts': 3,
   'lib/inngest/functions/platform-inventory-template-broadcast.ts': 5,
   'lib/inngest/functions/support-conversation-escalated.ts': 2,
-  'lib/inngest/functions/turnover-events.ts': 7,
+  'lib/inngest/functions/turnover-events.ts': 5,
   'lib/inngest/functions/work-order-dispatch.ts': 5,
   'lib/inngest/functions/work-order-events.ts': 8,
   'lib/inngest/functions/work-order-invoice.ts': 2,

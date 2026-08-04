@@ -15,6 +15,7 @@ import { createClient }             from '@/lib/supabase/client'
 import { cn }                       from '@/lib/utils'
 import { InstallBanner }            from '@/components/pwa/install-banner'
 import { Dialog }                   from '@/components/ui/Dialog'
+import { MULTI_CREW_START_FAQ }     from '@/lib/faq-content'
 
 import { reportError } from '@/lib/observability/report-error'
 function urlBase64ToUint8Array(base64String: string) {
@@ -627,6 +628,10 @@ const FAQ_ITEMS = [
   {
     q: 'My coworker and I are splitting a turnover. If one of us has no signal, will we see each other’s checklist taps?',
     a: 'Not in real time — you’ll each only see what’s on your own phone until the offline one reconnects. The moment it does, it automatically pulls the latest state, so nothing gets lost, it just catches up rather than updating live.',
+  },
+  {
+    q: MULTI_CREW_START_FAQ.question,
+    a: MULTI_CREW_START_FAQ.answer,
   },
   {
     q: 'Will I get notified if I’m assigned a new job while I’m offline?',

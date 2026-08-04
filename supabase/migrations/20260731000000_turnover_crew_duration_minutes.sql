@@ -16,10 +16,29 @@
 -- replaying it against either project is a no-op (ADD COLUMN IF NOT EXISTS)
 -- while a fresh project now gets the column it was always supposed to have.
 --
--- Nothing in app/ or lib/ reads or writes this column yet — it is currently
--- unused groundwork. It is modelled in types/database.ts regardless, because
--- the type-drift gate compares the LIVE schema against the TS interfaces, not
--- against what the code happens to touch.
+-- WHAT WRITES IT. The reconstruction above landed on main while the branch
+-- that motivated the column was still open, so main's copy of this file said
+-- "nothing in app/ or lib/ reads or writes this column yet". That stopped
+-- being true at this merge; the rest of this comment is the original
+-- migration's own description of the feature, carried over.
+--
+-- A stored, computed-once "how long did the crew actually take" metric,
+-- replacing the Start-Turnover-press-to-Confirm-Complete-press span previously
+-- shown on the turnover board (turnovers.started_at/completed_at). Those two
+-- buttons stay as status-transition controls, but their timestamps don't
+-- reflect actual work time — a turnover can sit "in progress" for hours before
+-- crew starts, or after they finish, without anyone pressing Complete.
+--
+-- Computed by lib/inngest/functions/turnover-events.ts's record-crew-duration
+-- step as MAX(completion timestamps) - MIN(completion timestamps) across every
+-- checklist_instance_item.completed_at plus inventory's own single completion
+-- signal (inventory_confirmed_complete_at, or a last-edit fallback if that was
+-- never pressed) — written here AND to the existing
+-- assignment_outcomes.duration_minutes so both consumers share one calculation
+-- instead of two that can silently drift apart.
+--
+-- Nullable, no default — stays null until a turnover completes and the step
+-- successfully computes a plausible duration.
 -- ============================================================================
 
 ALTER TABLE turnovers

@@ -2,7 +2,7 @@
 
 import { useState } from 'react'
 import { ChevronDown } from 'lucide-react'
-import { CREW_VISIBILITY_FAQ, TEAM_ACCESS_FAQ } from '@/lib/faq-content'
+import { CREW_VISIBILITY_FAQ, TEAM_ACCESS_FAQ, MARKETING_OFFLINE_FAQ, MARKETING_TRIAL_FAQ } from '@/lib/faq-content'
 
 const MARKETING_FAQ = [
   {
@@ -22,12 +22,13 @@ const MARKETING_FAQ = [
     a: 'Teammates synced from Hospitable are added as FieldStay crew members automatically, mapped to the right role — Cleaning, Maintenance, Concierge, Manager, and so on. They get an email invite, create a free account, and install the app to their phone home screen. No App Store required, and they only ever see their own assigned turnovers.',
   },
   {
-    q: 'Does it work without cell service?',
-    a: 'Yes. The crew app stores checklists and task details on the device. Crew can complete an entire turnover offline and the work syncs to the cloud the moment they\'re back in range. Built specifically for properties in rural and low-signal areas.',
+    // Shared verbatim with the OwnerRez landing page — see lib/faq-content.ts.
+    q: MARKETING_OFFLINE_FAQ.question,
+    a: MARKETING_OFFLINE_FAQ.answer,
   },
   {
-    q: 'What happens when my trial ends?',
-    a: 'After 14 days you\'ll be prompted to choose a plan. If you don\'t subscribe, your account is paused and your data is retained for 30 days so you can pick back up without losing anything. No credit card is required to start.',
+    q: MARKETING_TRIAL_FAQ.question,
+    a: MARKETING_TRIAL_FAQ.answer,
   },
   {
     // Shared verbatim with the other landing page and the in-app help page —
