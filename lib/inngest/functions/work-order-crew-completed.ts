@@ -1,3 +1,4 @@
+import { tryUnwrap } from '@/lib/supabase/unwrap'
 import { inngest }             from '@/lib/inngest/client'
 import { createServiceClient } from '@/lib/supabase/server'
 import { createPmNotification } from '@/lib/inngest/helpers'
@@ -30,11 +31,18 @@ export const handleWorkOrderCrewCompleted = inngest.createFunction(
           .single(),
       ])
 
-      const { data: property } = await supabase
+      // Degrade, don't throw: the caller already falls back to 'the property'.
+      // tryUnwrap still logs and reports so the failure isn't invisible.
+      const propertyRes = await supabase
         .from('properties')
         .select('name, address')
         .eq('id', woRes.data?.property_id ?? '')
-        .single()
+        .maybeSingle()
+
+      const propertyOut = tryUnwrap(propertyRes, {
+        site: 'inngest.work-order-crew-completed.property', orgId,
+      })
+      const property = propertyOut.ok ? propertyOut.data : null
 
       return { wo: woRes.data, crew: crewRes.data, property }
     })

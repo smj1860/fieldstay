@@ -31,7 +31,8 @@ import type { AssignedCrewMember } from '@/types/database'
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
-interface CrewMember { id: string; name: string; phone: string | null; email: string | null; specialty: string }
+// crew_members.specialty is NULLABLE.
+interface CrewMember { id: string; name: string; phone: string | null; email: string | null; specialty: string | null }
 interface Property   { id: string; name: string; city: string | null; state: string | null }
 
 interface BookingRow {
@@ -66,7 +67,9 @@ interface Turnover {
   // (turnovers.booking_id → bookings.stay_type) — null for manually-created
   // turnovers with no linked booking, or when the booking fell outside the
   // page's fetched booking window.
-  stay_type: 'guest_stay' | 'owner_stay' | null
+  // bookings.stay_type is TEXT (DEFAULT 'guest_stay'), not an enum — the
+  // `=== 'owner_stay'` check below is unaffected by the wider type.
+  stay_type: string | null
   checkout_datetime: string
   checkin_datetime: string
   window_minutes: number | null
@@ -80,7 +83,9 @@ interface Turnover {
   is_same_day_turnover: boolean | null
   suggested_crew_ids: string[] | null
   suggestion_reasoning: string | null
-  suggestion_status: 'pending' | 'accepted' | 'overridden' | 'dismissed' | null
+  // turnovers.suggestion_status is TEXT, not an enum; the `=== 'pending'`
+  // check below is unaffected by the wider type.
+  suggestion_status: string | null
   is_archived: boolean
   turnover_assignments: TurnoverAssignment[]
 }

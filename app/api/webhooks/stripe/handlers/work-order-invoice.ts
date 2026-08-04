@@ -1,3 +1,4 @@
+import { unwrap } from '@/lib/supabase/unwrap'
 import type Stripe from 'stripe'
 import { inngest } from '@/lib/inngest/client'
 import { logAuditEvent } from '@/lib/audit'
@@ -16,7 +17,13 @@ export async function handleWorkOrderInvoicePaid(
   orgId: string,
 ): Promise<void> {
   // Idempotent update — safe to run twice
-  const { data: inv } = await supabase
+  // maybeSingle(), so the idempotent second delivery (status already 'paid',
+  // zero rows matched) stays data:null with no error — while a REAL failure
+  // now throws instead of being swallowed. It used to return early, so the
+  // webhook answered Stripe 200 having marked nothing paid and posted no
+  // owner_transactions expense; Stripe then never retried, and the payment
+  // was recorded nowhere.
+  const invRes = await supabase
     .from('work_order_invoices')
     .update({
       status:                   'paid',
@@ -29,8 +36,9 @@ export async function handleWorkOrderInvoicePaid(
     .eq('org_id', orgId)
     .eq('status', 'pending_payment')  // only update if still pending (idempotent)
     .select('id, work_order_id, vendor_id, property_id, total')
-    .single()
+    .maybeSingle()
 
+  const inv = unwrap(invRes, { site: 'webhook.stripe.work-order-invoice.mark-paid', orgId })
   if (!inv) return
 
   // Post expense to owner_transactions
@@ -76,7 +84,9 @@ export async function handleWorkOrderInvoicePaid(
     action:     'work_order.invoice.paid',
     targetType: 'work_order_invoice',
     targetId:   inv.id,
-    metadata:   { amount: inv.total },
-    // No Stripe session ID or payment intent ID — financial PII rule
+    // No Stripe session ID or payment intent ID, and no figure either — the
+    // financial-specifics rule covers the amount too. targetId points at the
+    // work_order_invoices row, which carries the total.
+    metadata:   { currency: 'usd' },
   })
 }

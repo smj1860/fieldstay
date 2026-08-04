@@ -30,6 +30,7 @@ function makeSupabase(queued: Record<string, { data?: unknown; error?: unknown }
     chain.select = (...a: unknown[]) => record('select', a)
     chain.eq     = (...a: unknown[]) => record('eq', a)
     chain.in     = (...a: unknown[]) => record('in', a)
+    chain.order  = (...a: unknown[]) => record('order', a)
     chain.range  = (...a: unknown[]) => record('range', a)
     chain.insert = (...a: unknown[]) => record('insert', a)
 

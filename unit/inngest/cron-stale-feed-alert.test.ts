@@ -4,12 +4,13 @@ vi.mock('@/lib/supabase/server', () => ({
   createServiceClient: vi.fn(),
 }))
 vi.mock('@/lib/inngest/helpers', () => ({
-  getPmMembers: vi.fn(async () => []),
+  getPmMembers:         vi.fn(async () => []),
+  getPmMembersByOrgIds: vi.fn(async () => new Map()),
 }))
 
 import { staleFeedAlert } from '@/lib/inngest/functions/cron/stale-feed-alert'
 import { createServiceClient } from '@/lib/supabase/server'
-import { getPmMembers } from '@/lib/inngest/helpers'
+import { getPmMembers, getPmMembersByOrgIds } from '@/lib/inngest/helpers'
 import { invokeHandler } from './test-helpers'
 import { createSupabaseDouble, type TableSpec } from '../stubs/supabase-query-double'
 
@@ -50,19 +51,15 @@ describe('staleFeedAlert', () => {
         ],
         error: null,
       },
-      // The PM per org is now resolved from ONE organization_members query for
-      // every org at once (owner ranked before admin), instead of a
-      // getPmMembers() call per org that also did a GoTrue round-trip per
-      // member. org_2 deliberately has no PM row — it must be skipped, not crash.
-      organization_members: {
-        data: [
-          { org_id: 'org_1', user_id: 'user_admin', role: 'admin' },
-          { org_id: 'org_1', user_id: 'user_1', role: 'owner' },
-        ],
-        error: null,
-      },
     })
     ;(createServiceClient as ReturnType<typeof vi.fn>).mockReturnValue(supabase)
+    // The PM per org comes from ONE batched getPmMembersByOrgIds() call for
+    // every org at once — the helper owns the owner-before-admin ordering and
+    // the invite_accepted_at filter, which this cron used to re-derive inline.
+    // org_2 deliberately has no entry — it must be skipped, not crash.
+    ;(getPmMembersByOrgIds as ReturnType<typeof vi.fn>).mockResolvedValue(
+      new Map([['org_1', [{ userId: 'user_1', email: 'pm@x.com', role: 'owner' }]]]),
+    )
 
     const step = makeStep()
     const result = await invokeHandler(staleFeedAlert, {
@@ -102,12 +99,11 @@ describe('staleFeedAlert', () => {
         ],
         error: null,
       },
-      organization_members: {
-        data: [{ org_id: 'org_1', user_id: 'user_1', role: 'owner' }],
-        error: null,
-      },
     })
     ;(createServiceClient as ReturnType<typeof vi.fn>).mockReturnValue(supabase)
+    ;(getPmMembersByOrgIds as ReturnType<typeof vi.fn>).mockResolvedValue(
+      new Map([['org_1', [{ userId: 'user_1', email: 'pm@x.com', role: 'owner' }]]]),
+    )
 
     const step = makeStep()
     await invokeHandler(staleFeedAlert, {

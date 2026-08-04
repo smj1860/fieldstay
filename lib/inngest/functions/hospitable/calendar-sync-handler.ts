@@ -110,8 +110,12 @@ export const hospCalendarSyncHandler = inngest.createFunction(
 
       if (fetchErr) throw new Error(`Fetching existing blocks failed: ${fetchErr.message}`)
 
+      // bookings.external_id is nullable. A block with no external_id did not
+      // come from this provider's feed, so "the feed no longer lists it" says
+      // nothing about it — leave it alone rather than cancelling it for being
+      // absent from a set it was never going to be in.
       const toCancel = (existingBlocks ?? []).filter(
-        (b) => !currentExternalIds.has(b.external_id)
+        (b) => b.external_id !== null && !currentExternalIds.has(b.external_id)
       )
 
       if (toCancel.length > 0) {

@@ -21,7 +21,8 @@ const ORG_ID  = 'org_1'
 const USER_ID = 'user_1'
 
 // Minimal chainable auth-client mock: only crew_members is ever queried
-// through this client, and always resolves via .single().
+// through this client. requireCrewMember() resolves it with .maybeSingle(),
+// so "no such crew member" is data:null rather than a PGRST116 error.
 function makeAuthClient(
   user: { id: string } | null,
   crewResult: { data: unknown; error?: unknown } = { data: null, error: null },
@@ -31,7 +32,8 @@ function makeAuthClient(
   chain.select = vi.fn(() => chain)
   chain.eq     = vi.fn(() => chain)
   chain.not    = vi.fn(() => chain)
-  chain.single = vi.fn(() => Promise.resolve(crewResult))
+  chain.single      = vi.fn(() => Promise.resolve(crewResult))
+  chain.maybeSingle = chain.single
 
   return {
     auth: { getUser: vi.fn(async () => ({ data: { user } })) },

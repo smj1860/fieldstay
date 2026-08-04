@@ -1,13 +1,25 @@
-import 'server-only'
-
 import type { PostgrestError } from '@supabase/supabase-js'
 import { reportError } from '@/lib/observability/report-error'
 
 // ============================================================================
+// Deliberately NOT marked `import 'server-only'`, unlike most of lib/.
+//
+// Nothing in this file is a server capability: every export is a pure
+// function over an already-resolved `{ data, error }` object, and its only
+// two side effects — console.error and reportError() (@sentry/nextjs, which
+// is isomorphic) — work identically in the browser. The marker was here by
+// convention rather than because anything needed protecting, and it broke
+// the build the moment the crew PWA's Dexie pull layer (lib/dexie/context.tsx,
+// a Client Component that reads Supabase directly by design) needed to tell a
+// failed read apart from an empty one. Same rationale as lib/storage/
+// object-path.ts and lib/sms/template-registry.ts: client-safe by
+// construction, so no marker.
+//
 // Distinguishing "the query errored" from "the query returned zero rows".
 //
-// The default `const { data } = await supabase.from(...)...` shape collapses
-// both into `data == null`, so an RLS regression, a missing GRANT, or a
+// The default destructure — the one that binds only `data` off a Supabase
+// result and drops `error` on the floor — collapses both into a null `data`,
+// so an RLS regression, a missing GRANT, or a
 // transient network failure renders the same friendly "no vendors yet" empty
 // state as a genuinely empty table — with nothing in the console and nothing
 // in Sentry. That is exactly how the notification bell went dark in

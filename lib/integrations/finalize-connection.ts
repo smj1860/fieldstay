@@ -16,11 +16,13 @@
 //      A user with no org yet simply has nothing to sync until they have one.
 // ============================================================
 
+import { unwrap } from '@/lib/supabase/unwrap'
 import 'server-only'
 
 import { createServiceClient } from '@/lib/supabase/server'
 import { storeIntegrationToken, storeIntegrationRefreshToken } from '@/lib/integrations/vault'
 import { inngest } from '@/lib/inngest/client'
+import { reportError } from '@/lib/observability/report-error'
 import type { TokenResponse } from '@/lib/integrations/types'
 
 interface OAuthConnectedContext {
@@ -86,7 +88,10 @@ export async function finalizeIntegrationConnection(params: {
   // Deterministic earliest-accepted-membership rule, same as
   // claim_pending_integration_link()'s org resolution.
   const admin = createServiceClient({ system: 'lib/integrations/finalize-connection' })
-  const { data: membership } = await admin
+  // Completes the fix described on the link write below: discarding THIS
+  // error leaves `membership` null, which skips the link entirely — the same
+  // org-less connection and silently-never-run sync, just caused by the read.
+  const membershipRes = await admin
     .from('organization_members')
     .select('org_id')
     .eq('user_id', userId)
@@ -95,8 +100,21 @@ export async function finalizeIntegrationConnection(params: {
     .limit(1)
     .maybeSingle()
 
+  const membership = unwrap(membershipRes, { site: 'lib.integrations.finalize-connection.membership' })
+
+  // Whether this connection row is confirmed to belong to `membership.org_id`
+  // after the link below. Only then is it safe to fire an org-scoped initial
+  // sync — firing for an org whose connection row is owned by a DIFFERENT org
+  // starts a sync that cannot find its own token.
+  let linkedOrgId: string | null = null
+
   if (membership?.org_id) {
-    await admin
+    // (user_id, provider_id) is UNIQUE on integration_connections, so this
+    // targets at most one row — maybeSingle() both bounds the read and lets a
+    // 0-row result be told apart from a failed write. The error used to be
+    // discarded entirely: a failed link left the connection org-less and the
+    // sync silently never ran, with nothing logged.
+    const { data: linked, error: linkError } = await admin
       .from('integration_connections')
       .update({ org_id: membership.org_id })
       .eq('user_id', userId)
@@ -105,16 +123,44 @@ export async function finalizeIntegrationConnection(params: {
       // to this org (reconnect). Never silently repoint a connection owned by
       // a different org the user is also a member of. Mirrors connectWithApiKey.
       .or(`org_id.is.null,org_id.eq.${membership.org_id}`)
+      .select('id')
+      .maybeSingle()
+
+    if (linkError) {
+      // The token IS stored at this point, so this is a partial failure. Throw
+      // rather than return a half-linked connection: callers map it to their
+      // storage_failed redirect, and a retry is idempotent
+      // (store_integration_token updates the existing row).
+      console.error('[finalizeIntegrationConnection] org link failed', linkError)
+      reportError(linkError, {
+        site:  'lib.integrations.finalizeIntegrationConnection.link',
+        orgId: membership.org_id,
+        extra: { provider_id: providerId },
+      })
+      throw new Error('Failed to link integration connection to organization')
+    }
+
+    if (linked) {
+      linkedOrgId = membership.org_id
+    } else {
+      // 0 rows matched: the row exists but is owned by another org this user
+      // also belongs to. Expected and deliberately non-fatal — but it must not
+      // be followed by an initial sync attributed to the wrong org.
+      console.warn(
+        '[finalizeIntegrationConnection] connection already owned by another org — not relinking',
+        { provider_id: providerId },
+      )
+    }
   }
 
   const fireConnectedEvent = OAUTH_CONNECTED_EVENTS[providerId]
-  if (fireConnectedEvent && membership?.org_id) {
+  if (fireConnectedEvent && linkedOrgId) {
     await fireConnectedEvent({
       userId,
-      orgId:          membership.org_id,
+      orgId:          linkedOrgId,
       externalUserId: tokenData.externalUserId,
     })
   }
 
-  return { orgId: membership?.org_id ?? null }
+  return { orgId: linkedOrgId }
 }

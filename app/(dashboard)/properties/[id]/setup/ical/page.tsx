@@ -29,7 +29,15 @@ export default async function IcalPage({ params }: Props) {
         Connect your Airbnb and VRBO calendars. FieldStay syncs bookings every 4 hours
         and automatically creates turnovers in the gaps between stays.
       </p>
-      <IcalManager propertyId={property.id} feeds={feeds ?? []} />
+      {/* ical_feeds.source is nullable; 'other' is the column's own DEFAULT. */}
+      <IcalManager
+        propertyId={property.id}
+        feeds={(feeds ?? []).map((f) => ({
+          ...f,
+          source:           f.source           ?? 'other',
+          last_sync_status: f.last_sync_status ?? 'pending',
+        }))}
+      />
     </Card>
   )
 }

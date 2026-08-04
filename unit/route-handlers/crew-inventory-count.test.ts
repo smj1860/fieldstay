@@ -41,8 +41,12 @@ function makeSupabase(queued: QueuedByTable = {}) {
     chain.insert = (...a: unknown[]) => record('insert', a)
     chain.update = (...a: unknown[]) => record('update', a)
     chain.eq     = (...a: unknown[]) => record('eq', a)
+    // This read paginates via fetchAllRows(), which drains .order().range().
+    chain.order  = (...a: unknown[]) => record('order', a)
+    chain.range  = (...a: unknown[]) => record('range', a)
     chain.in     = (...a: unknown[]) => record('in', a)
     chain.gte    = (...a: unknown[]) => record('gte', a)
+    chain.limit  = (...a: unknown[]) => record('limit', a)
 
     const resolveNext = () => {
       const idx = counters[table] ?? 0
@@ -104,91 +108,11 @@ describe('POST /api/crew/inventory-count', () => {
     const eqCalls = supabase.calls.filter((c) => c.table === 'properties' && c.method === 'eq')
     expect(eqCalls.some((c) => c.args[0] === 'org_id' && c.args[1] === ORG_ID)).toBe(true)
     expect(eqCalls.some((c) => c.args[0] === 'id' && c.args[1] === 'other_org_property')).toBe(true)
-    expect(supabase.calls.some((c) => c.table === 'inventory_count_drafts')).toBe(false)
     expect(supabase.calls.some((c) => c.table === 'inventory_counts')).toBe(false)
   })
 
-  describe('draft submission (submitAsDraft: true)', () => {
-    it('creates a draft scoped to the crew member\'s own org and id', async () => {
-      const supabase = makeSupabase({
-        properties:                [{ data: { id: PROP_ID }, error: null }],
-        inventory_count_drafts:    [{ data: null, error: null }, { data: { id: 'draft_1' }, error: null }],
-        inventory_items:           [{ data: [{ id: 'item_1', current_quantity: 4 }], error: null }],
-        inventory_count_draft_items: [{ data: null, error: null }],
-      })
-      mockAuthed(supabase)
 
-      const res = await POST(
-        postRequest({
-          propertyId:    PROP_ID,
-          counts:        { item_1: 2 },
-          notes:         'low on paper towels',
-          itemNotes:     { item_1: 'almost out' },
-          submitAsDraft: true,
-        }),
-      )
-
-      expect(res.status).toBe(200)
-      await expect(res.json()).resolves.toEqual({ success: true, draftId: 'draft_1' })
-
-      const draftInsert = supabase.calls.find((c) => c.table === 'inventory_count_drafts' && c.method === 'insert')
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const inserted = draftInsert!.args[0] as any
-      expect(inserted).toEqual({
-        org_id:       ORG_ID,
-        property_id:  PROP_ID,
-        submitted_by: CREW_ID,
-        status:       'pending_review',
-        notes:        'low on paper towels',
-      })
-
-      const itemsInsert = supabase.calls.find(
-        (c) => c.table === 'inventory_count_draft_items' && c.method === 'insert',
-      )
-      expect(itemsInsert!.args[0]).toEqual([
-        {
-          draft_id:          'draft_1',
-          item_id:           'item_1',
-          previous_quantity: 4,
-          counted_qty:       2,
-          notes:             'almost out',
-        },
-      ])
-    })
-
-    it('short-circuits on a recent duplicate draft (double-tap dedup) without creating a new one', async () => {
-      const supabase = makeSupabase({
-        properties:             [{ data: { id: PROP_ID }, error: null }],
-        inventory_count_drafts: [{ data: { id: 'existing_draft' }, error: null }],
-      })
-      mockAuthed(supabase)
-
-      const res = await POST(
-        postRequest({ propertyId: PROP_ID, counts: { item_1: 2 }, notes: '', submitAsDraft: true }),
-      )
-
-      expect(res.status).toBe(200)
-      await expect(res.json()).resolves.toEqual({ success: true, draftId: 'existing_draft' })
-      expect(supabase.calls.some((c) => c.table === 'inventory_count_drafts' && c.method === 'insert')).toBe(false)
-    })
-
-    it('returns 500 when the draft insert fails to return a row', async () => {
-      const supabase = makeSupabase({
-        properties:             [{ data: { id: PROP_ID }, error: null }],
-        inventory_count_drafts: [{ data: null, error: null }, { data: null, error: { message: 'fail' } }],
-        inventory_items:        [{ data: [], error: null }],
-      })
-      mockAuthed(supabase)
-
-      const res = await POST(
-        postRequest({ propertyId: PROP_ID, counts: {}, notes: '', submitAsDraft: true }),
-      )
-
-      expect(res.status).toBe(500)
-    })
-  })
-
-  describe('legacy direct-commit path', () => {
+  describe('count submission', () => {
     it('commits counts, updates inventory scoped to the crew member\'s org, audits, and notifies Inngest', async () => {
       const supabase = makeSupabase({
         properties:            [{ data: { id: PROP_ID }, error: null }],
@@ -259,6 +183,116 @@ describe('POST /api/crew/inventory-count', () => {
       const res = await POST(postRequest({ propertyId: PROP_ID, counts: {}, notes: '' }))
 
       expect(res.status).toBe(500)
+      expect(inngest.send).not.toHaveBeenCalled()
+    })
+  })
+
+  // The caller is the crew PWA's offline outbox, so every request here can
+  // arrive twice and hours apart — well outside the five-minute double-tap
+  // window. The countId is the primary key precisely so a replay collides;
+  // treating that collision as a failure would 500 a count that HAD reached
+  // the server, and the outbox would burn its retries and dead-letter it.
+  describe('replay of an outbox submission (23505 on the count id)', () => {
+    const COUNT_ID = '11111111-2222-4333-8444-555555555555'
+    const PK_CONFLICT = { data: null, error: { code: '23505', message: 'duplicate key' } }
+
+    it('reports success without re-applying when the first attempt fully landed', async () => {
+      const supabase = makeSupabase({
+        properties:            [{ data: { id: PROP_ID }, error: null }],
+        inventory_counts:      [{ data: null, error: null }, PK_CONFLICT],
+        inventory_count_items: [{ data: [{ id: 'existing_item' }], error: null }],
+      })
+      mockAuthed(supabase)
+
+      const res = await POST(
+        postRequest({ countId: COUNT_ID, propertyId: PROP_ID, counts: { item_1: 5 }, notes: '' }),
+      )
+
+      expect(res.status).toBe(200)
+      await expect(res.json()).resolves.toEqual({ success: true, duplicate: true })
+      expect(
+        supabase.calls.some((c) => c.table === 'inventory_count_items' && c.method === 'insert'),
+        'the physical count must not be recorded twice',
+      ).toBe(false)
+      expect(inngest.send).not.toHaveBeenCalled()
+    })
+
+    it('resumes when the first attempt died between the count row and its items', async () => {
+      const supabase = makeSupabase({
+        properties:            [{ data: { id: PROP_ID }, error: null }],
+        inventory_counts:      [{ data: null, error: null }, PK_CONFLICT],
+        // First call is the replay probe (empty), second is the items insert.
+        inventory_count_items: [{ data: [], error: null }, { data: null, error: null }],
+        inventory_items:       [{ data: null, error: null }],
+      })
+      mockAuthed(supabase)
+
+      const res = await POST(
+        postRequest({ countId: COUNT_ID, propertyId: PROP_ID, counts: { item_1: 5 }, notes: '' }),
+      )
+
+      expect(res.status).toBe(200)
+      const itemsInsert = supabase.calls.find(
+        (c) => c.table === 'inventory_count_items' && c.method === 'insert',
+      )
+      expect(
+        itemsInsert!.args[0],
+        'the resumed apply must attach to the count row the first attempt created',
+      ).toEqual([{ count_id: COUNT_ID, inventory_item_id: 'item_1', quantity_counted: 5 }])
+      expect(inngest.send).toHaveBeenCalledWith({
+        name: 'inventory/count-submitted',
+        data: { count_id: COUNT_ID, property_id: PROP_ID, org_id: ORG_ID },
+      })
+    })
+  })
+
+  // Each of these used to be indistinguishable from a normal outcome, because
+  // the result was destructured for `data` with `error` dropped on the floor.
+  describe('a failed query is not reported as a normal outcome', () => {
+    it('answers 500, not 404, when the property lookup itself fails', async () => {
+      const supabase = makeSupabase({
+        properties: [{ data: null, error: { message: 'connection reset' } }],
+      })
+      mockAuthed(supabase)
+
+      const res = await POST(postRequest({ propertyId: PROP_ID, counts: {}, notes: '' }))
+
+      expect(
+        res.status,
+        '404 would tell the outbox the property is gone and dead-letter the count',
+      ).toBe(500)
+    })
+
+    it('does not fall through to the insert when the dedup read fails', async () => {
+      const supabase = makeSupabase({
+        properties:       [{ data: { id: PROP_ID }, error: null }],
+        inventory_counts: [{ data: null, error: { message: 'connection reset' } }],
+      })
+      mockAuthed(supabase)
+
+      const res = await POST(postRequest({ propertyId: PROP_ID, counts: { item_1: 5 }, notes: '' }))
+
+      expect(res.status).toBe(500)
+      expect(
+        supabase.calls.some((c) => c.table === 'inventory_counts' && c.method === 'insert'),
+        'inserting anyway turns a transient read failure into a second physical count',
+      ).toBe(false)
+    })
+
+    it('answers 500 when the count row lands but its items do not', async () => {
+      const supabase = makeSupabase({
+        properties:            [{ data: { id: PROP_ID }, error: null }],
+        inventory_counts:      [{ data: null, error: null }, { data: { id: 'count_1' }, error: null }],
+        inventory_count_items: [{ data: null, error: { message: 'insert failed' } }],
+      })
+      mockAuthed(supabase)
+
+      const res = await POST(postRequest({ propertyId: PROP_ID, counts: { item_1: 5 }, notes: '' }))
+
+      expect(
+        res.status,
+        'a count with no items is not a submitted count — the device must retry',
+      ).toBe(500)
       expect(inngest.send).not.toHaveBeenCalled()
     })
   })

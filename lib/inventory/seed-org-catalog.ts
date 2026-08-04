@@ -1,4 +1,7 @@
+import type { Tables } from '@/types/database'
 import 'server-only'
+import { reportError } from '@/lib/observability/report-error'
+import { fetchAllRows } from '@/lib/inngest/paginate'
 import { createServiceClient } from '@/lib/supabase/server'
 
 /**
@@ -28,16 +31,33 @@ export async function seedOrgInventoryCatalogIfNeeded(orgId: string): Promise<vo
   }
   if ((count ?? 0) > 0) return
 
-  const { data: platformItems, error } = await supabase
-    .from('inventory_catalog')
-    .select('id, name, category, default_unit, default_par_level, description')
-    .eq('is_active', true)
-
-  if (error) {
+  // Paginated: this read defines a NEW org's ENTIRE starting inventory catalog,
+  // and it runs exactly once per org. A truncated result would seed that tenant
+  // with a permanently incomplete catalog — there is no second pass to correct
+  // it, because the count check above short-circuits every later call.
+  let platformItems
+  try {
+    platformItems = await fetchAllRows<
+      Pick<Tables<'inventory_catalog'>,
+        'id' | 'name' | 'category' | 'default_unit' | 'default_par_level' | 'description'>
+    >(
+      (from, to) => supabase
+        .from('inventory_catalog')
+        .select('id, name, category, default_unit, default_par_level, description')
+        .eq('is_active', true)
+        .order('id')
+        .range(from, to),
+      { label: 'seedOrgInventoryCatalog.platformItems' },
+    )
+  } catch (error) {
+    // Reported, not merely logged: returning here leaves the org with NO
+    // inventory catalog, and the count check above means this function will
+    // never retry for that org — the gap is permanent and invisible.
     console.error('[seedOrgInventoryCatalogIfNeeded] failed to fetch platform catalog:', error)
+    reportError(error, { site: 'lib.inventory.seedOrgInventoryCatalog.platformItems' })
     return
   }
-  if (!platformItems?.length) return
+  if (!platformItems.length) return
 
   const { error: insertError } = await supabase
     .from('org_inventory_catalog')

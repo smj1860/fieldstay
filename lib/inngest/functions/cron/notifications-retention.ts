@@ -41,13 +41,20 @@ async function purgeNotificationsBefore(
   let deleted = 0
 
   for (let batch = 0; batch < MAX_BATCHES_PER_RUN; batch++) {
-    let query = supabase
+    // `.limit(BATCH_SIZE)` is applied HERE rather than on a separate
+    // `query.limit(...)` statement so the bound is visible at the read itself.
+    // It was already bounded, but only after the builder was reassigned, which
+    // reads (to a person and to the semgrep rule alike) as an unbounded scan of
+    // a platform-wide table.
+    const base = supabase
       .from('notifications')
       .select('id')
       .lt('created_at', cutoffIso)
-    if (onlyRead) query = query.not('read_at', 'is', null)
+      .limit(BATCH_SIZE)
 
-    const { data: stale, error: selectError } = await query.limit(BATCH_SIZE)
+    const { data: stale, error: selectError } = await (
+      onlyRead ? base.not('read_at', 'is', null) : base
+    )
     if (selectError) throw new Error(`notifications retention select failed: ${selectError.message}`)
     if (!stale || stale.length === 0) return { deleted, exhausted: true }
 

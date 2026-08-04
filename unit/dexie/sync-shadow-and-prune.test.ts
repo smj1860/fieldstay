@@ -23,11 +23,11 @@ beforeEach(() => {
 describe('pending-mutation shadowing', () => {
   it('rebases a queued local write over the freshly-pulled server row', async () => {
     await db().mutations.add({
-      table: 'inventory_items', targetId: 'i1', op: 'PATCH',
+      table: 'inventory_counts', targetId: 'i1', op: 'PUT',
       payload: { current_quantity: 7 }, createdAt: '2026-07-30T00:00:00Z', retryCount: 0,
     })
 
-    const [row] = await shadowPendingMutations('u1', 'inventory_items', [
+    const [row] = await shadowPendingMutations('u1', 'inventory_counts', [
       { id: 'i1', current_quantity: 2, name: 'Towels' },
     ])
 
@@ -39,18 +39,18 @@ describe('pending-mutation shadowing', () => {
   it('applies queued mutations in insertion order, so the newest value wins', async () => {
     for (const qty of [4, 9]) {
       await db().mutations.add({
-        table: 'inventory_items', targetId: 'i1', op: 'PATCH',
+        table: 'inventory_counts', targetId: 'i1', op: 'PUT',
         payload: { current_quantity: qty }, createdAt: '2026-07-30T00:00:00Z', retryCount: 0,
       })
     }
-    const [row] = await shadowPendingMutations('u1', 'inventory_items', [{ id: 'i1', current_quantity: 2 }])
+    const [row] = await shadowPendingMutations('u1', 'inventory_counts', [{ id: 'i1', current_quantity: 2 }])
     expect(row).toMatchObject({ current_quantity: 9 })
   })
 
   it('shadows dead-lettered mutations too — that write did not reach the server either', async () => {
     await db().mutations.add({
       table: 'turnovers', targetId: 't1', op: 'PATCH',
-      payload: { status: 'completed' }, createdAt: '2026-07-30T00:00:00Z', retryCount: 5, failed: true,
+      payload: { status: 'completed' }, createdAt: '2026-07-30T00:00:00Z', retryCount: 5, failed: 1,
     })
     const [row] = await shadowPendingMutations('u1', 'turnovers', [{ id: 't1', status: 'in_progress' }])
     expect(row).toMatchObject({ status: 'completed' })
@@ -69,7 +69,7 @@ describe('pending-mutation shadowing', () => {
 
   it('leaves rows with no queued mutation untouched', async () => {
     const rows = [{ id: 'i9', current_quantity: 2 }]
-    expect(await shadowPendingMutations('u1', 'inventory_items', rows)).toBe(rows)
+    expect(await shadowPendingMutations('u1', 'inventory_counts', rows)).toBe(rows)
   })
 })
 
@@ -88,22 +88,13 @@ describe('local cache pruning', () => {
     expect(await db().property_assets.toArray()).toEqual([])
   })
 
-  it('drops messages older than the 90-day server window and keeps newer ones', async () => {
-    await db().messages.put({ id: 'old', created_at: new Date(Date.now() - 200 * DAY).toISOString() })
-    await db().messages.put({ id: 'new', created_at: new Date(Date.now() - 2 * DAY).toISOString() })
-
-    await pruneLocalCache('u1')
-
-    expect((await db().messages.toArray()).map((m) => m.id)).toEqual(['new'])
-  })
-
   it('keeps live dead letters and only collects expired ones', async () => {
     const recent = new Date(Date.now() - 2 * DAY).toISOString()
     const ancient = new Date(Date.now() - 200 * DAY).toISOString()
-    await db().mutations.add({ table: 'turnovers', targetId: 't1', op: 'PATCH', payload: {}, createdAt: recent, retryCount: 5, failed: true })
-    await db().mutations.add({ table: 'turnovers', targetId: 't2', op: 'PATCH', payload: {}, createdAt: ancient, retryCount: 5, failed: true })
-    await db().pending_photo_uploads.put({ id: 'ph1', created_at: ancient, failed: true, local_blob_key: 'k1' })
-    await db().pending_photo_uploads.put({ id: 'ph2', created_at: recent, failed: true, local_blob_key: 'k2' })
+    await db().mutations.add({ table: 'turnovers', targetId: 't1', op: 'PATCH', payload: {}, createdAt: recent, retryCount: 5, failed: 1 })
+    await db().mutations.add({ table: 'turnovers', targetId: 't2', op: 'PATCH', payload: {}, createdAt: ancient, retryCount: 5, failed: 1 })
+    await db().pending_photo_uploads.put({ id: 'ph1', created_at: ancient, failed: 1, local_blob_key: 'k1' })
+    await db().pending_photo_uploads.put({ id: 'ph2', created_at: recent, failed: 1, local_blob_key: 'k2' })
 
     await pruneLocalCache('u1')
 
@@ -117,7 +108,7 @@ describe('local cache pruning', () => {
 describe('countPendingSyncWork', () => {
   it('counts only work still on its way, reporting dead letters separately', async () => {
     await db().mutations.add({ table: 'turnovers', targetId: 't1', op: 'PATCH', payload: {}, createdAt: '', retryCount: 0 })
-    await db().mutations.add({ table: 'turnovers', targetId: 't2', op: 'PATCH', payload: {}, createdAt: '', retryCount: 5, failed: true })
+    await db().mutations.add({ table: 'turnovers', targetId: 't2', op: 'PATCH', payload: {}, createdAt: '', retryCount: 5, failed: 1 })
     await db().pending_photo_uploads.put({ id: 'p1', created_at: '', local_blob_key: 'k' })
 
     expect(await countPendingSyncWork('u1')).toEqual({ pending: 2, deadLettered: 1 })

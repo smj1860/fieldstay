@@ -6,8 +6,9 @@
 
 import type { DexieSupabaseClient } from './types'
 import { getDexieDb, type PropertyAssetRow } from '../schema'
-import { fetchInChunks } from './chunked'
+import { fetchInChunksPaginated } from './chunked'
 import { bulkPutShadowed } from './shadow'
+import { scopeChanged, rememberScope } from './scope'
 import { reportError } from '@/lib/observability/report-error'
 
 // Properties this crew member currently has a stake in — same derivation as
@@ -27,20 +28,43 @@ export async function computeAssignedPropertyIds(userId: string): Promise<string
   return [...ids]
 }
 
+/**
+ * `force` bypasses the scope gate — used when the crew Assets page opens,
+ * which is the one moment freshness is worth a round trip and also when a
+ * co-crew member's capture is most likely to have landed since the last pull.
+ */
 export async function syncPropertyAssets(
   supabase: DexieSupabaseClient,
   userId: string,
   propertyIds: string[],
+  force = false,
 ): Promise<void> {
   if (!propertyIds.length) return
+
+  // Assets are monotonic — captured once, then captured. Re-pulling every
+  // assigned property's full asset set on a five-minute timer bought nothing
+  // but load; the assigned-property set changing is the event that matters,
+  // because that is when a device needs them warm before it loses signal.
+  if (!force && !(await scopeChanged(userId, 'scope:property_assets', propertyIds))) return
+
   const db = getDexieDb(userId)
 
-  const assets = await fetchInChunks<string, Record<string, unknown>>(propertyIds, (chunk) =>
-    supabase
-      .from('property_assets')
-      .select('id, org_id, property_id, asset_type, make, model, is_na, photo_url')
-      .in('property_id', chunk)
-      .eq('is_active', true),
+  // Paginated per chunk: this is a ONE-TO-MANY scope. Chunking property_ids
+  // bounds the ID LIST, not the ROW COUNT — 100 properties fan out to every
+  // active asset on each, so the request can ask for far more than PostgREST's
+  // 1000-row cap and get a silent short page back. Same defect class as the
+  // crew checklist truncation (see fetchInChunksPaginated); here it would mean
+  // assets simply missing from a crew member's device.
+  const assets = await fetchInChunksPaginated<string, Record<string, unknown>>(
+    propertyIds,
+    (chunk, from, to) =>
+      supabase
+        .from('property_assets')
+        .select('id, org_id, property_id, asset_type, make, model, is_na, photo_url')
+        .in('property_id', chunk)
+        .eq('is_active', true)
+        .order('id')
+        .range(from, to),
   )
   if (assets === null) {
     console.error('[asset sync] property_assets fetch failed')
@@ -58,4 +82,8 @@ export async function syncPropertyAssets(
     }))
     await bulkPutShadowed(db.property_assets, userId, 'property_assets', normalized as PropertyAssetRow[])
   }
+
+  // Recorded only after the fetch succeeded — a failed pull must be retried,
+  // not remembered as done.
+  await rememberScope(userId, 'scope:property_assets', propertyIds)
 }

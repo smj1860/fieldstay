@@ -5,36 +5,55 @@ import { unwrapJoin } from '@/lib/utils/supabase-joins'
 import type { Metadata } from 'next'
 import type { CartBuildResult } from '@/lib/kroger/types'
 import { throwIfAnyQueryFailed } from '@/lib/supabase/unwrap'
+import { fetchAllRows } from '@/lib/inngest/paginate'
+import type { InventoryItem } from '@/types/database'
+
+/** `select('*, property:properties(name)')` — the embed arrives as an array. */
+type InventoryItemRow = InventoryItem & {
+  property: { name: string } | { name: string }[] | null
+}
 
 export const metadata: Metadata = { title: 'Inventory' }
 
 export default async function InventoryPage() {
   const { supabase, membership } = await requireOrgMember()
 
+  // Fetched once, unfiltered by is_active, with the superset of columns both
+  // `items` (active-only) and `allInventoryItems` (all statuses, portfolio-
+  // wide) need — the two used to be separate queries against the same table.
+  //
+  // PAGINATED, not a bare .select(): at ~67 items per property this crosses
+  // PostgREST's max_rows = 1000 at roughly FIFTEEN properties, which is inside
+  // this product's stated 10–50 target. Because the sort is property_id first,
+  // the truncation is not a partial list — every property sorted past the cut
+  // renders with zero inventory, and the below-par counts, the restock UI and
+  // the Kroger cart all compute off this array. It returns 200 with no error,
+  // so nothing anywhere surfaces it. Kicked off before the Promise.all below
+  // so it still runs concurrently with the other five reads.
+  const allInventoryItemsPromise = fetchAllRows<InventoryItemRow>(
+    (from, to) => supabase
+      .from('inventory_items')
+      .select('*, property:properties(name)')
+      .eq('org_id', membership.org_id)
+      .order('property_id')
+      .order('category')
+      .order('name')
+      .order('id')   // stable tiebreaker — page boundaries must not shift
+      .range(from, to),
+    { label: 'page.inventory.inventory_items' },
+  )
+
   const [
     { data: properties, error: propertiesError },
-    { data: allInventoryItemsRaw, error: allInventoryItemsRawError },
     { data: purchaseOrders, error: purchaseOrdersError },
     { data: catalogItems, error: catalogItemsError },
     { data: recentCounts, error: recentCountsError },
-    { data: pendingDrafts, error: pendingDraftsError },
   ] = await Promise.all([
     supabase
       .from('properties')
       .select('id, name, city, state')
       .eq('org_id', membership.org_id)
       .eq('is_active', true)
-      .order('name'),
-    // Fetched once, unfiltered by is_active, with the superset of columns
-    // both `items` (active-only) and `allInventoryItems` (all statuses,
-    // portfolio-wide) need — the two used to be separate queries against
-    // the same table, fetching up to ~2,500 rows twice per page load.
-    supabase
-      .from('inventory_items')
-      .select('*, property:properties(name)')
-      .eq('org_id', membership.org_id)
-      .order('property_id')
-      .order('category')
       .order('name'),
     supabase
       .from('purchase_orders')
@@ -59,24 +78,15 @@ export default async function InventoryPage() {
       .eq('org_id', membership.org_id)
       .order('submitted_at', { ascending: false })
       .limit(50),
-    supabase
-      .from('inventory_count_drafts')
-      .select(`
-        id, property_id, status, created_at, notes,
-        crew_members!submitted_by(name),
-        inventory_count_draft_items(
-          id, item_id, previous_quantity, counted_qty, notes,
-          inventory_items(name, unit)
-        )
-      `)
-      .eq('org_id', membership.org_id)
-      .eq('status', 'pending_review')
-      .order('created_at', { ascending: false }),
   ])
 
   // Logs + reports every failure, then throws so the segment's error.tsx
   // renders a real error state — an outage must not look like empty data.
-  throwIfAnyQueryFailed({ site: 'page.inventory', orgId: membership.org_id }, propertiesError, allInventoryItemsRawError, purchaseOrdersError, catalogItemsError, recentCountsError, pendingDraftsError)
+  throwIfAnyQueryFailed({ site: 'page.inventory', orgId: membership.org_id }, propertiesError, purchaseOrdersError, catalogItemsError, recentCountsError)
+
+  // fetchAllRows throws on a page error, which the segment's error.tsx turns
+  // into the same real error state throwIfAnyQueryFailed produces above.
+  const allInventoryItemsRaw = await allInventoryItemsPromise
 
   const { data: cartMilestone, error: cartMilestoneError } = await supabase
     .from('org_milestones')
@@ -124,7 +134,6 @@ export default async function InventoryPage() {
         catalogItems={catalogItems ?? []}
         recentCounts={recentCounts ?? []}
         allInventoryItems={normalizedAllInventoryItems}
-        pendingDrafts={pendingDrafts ?? []}
         cartData={cartData}
         showKrogerNudge={showKrogerNudge}
       />

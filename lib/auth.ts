@@ -1,11 +1,31 @@
+import { asBooleanMap } from '@/lib/json'
 import { cache } from 'react'
-import { createClient, createServiceClient } from '@/lib/supabase/server'
+import { NextResponse } from 'next/server'
+import { createClient } from '@/lib/supabase/server'
+import { tryUnwrap, unwrap } from '@/lib/supabase/unwrap'
 import { redirect } from 'next/navigation'
 import type { MemberRole } from '@/types/database'
 import { logAuditEvent } from '@/lib/audit'
 import { unwrapJoin } from '@/lib/utils/supabase-joins'
 import { reportError } from '@/lib/observability/report-error'
 import { setActorContext, setTenantContext } from '@/lib/observability/sentry-context'
+
+/**
+ * organizations.repuguard_status is TEXT with
+ * CHECK (repuguard_status IN ('inactive','trial','active','cancelled')) — a
+ * constraint the column's type cannot carry, so narrow it here instead of
+ * asserting. 'inactive' is the column's own DEFAULT.
+ */
+const REPUGUARD_STATUSES = ['inactive', 'trial', 'active', 'cancelled'] as const
+
+function toRepuguardStatus(
+  value: string | null | undefined,
+): (typeof REPUGUARD_STATUSES)[number] {
+  for (const status of REPUGUARD_STATUSES) {
+    if (status === value) return status
+  }
+  return 'inactive'
+}
 
 export interface OrgMembership {
   org_id: string
@@ -120,9 +140,8 @@ const getMembershipContext = cache(async () => {
       plan_status:    orgData?.plan_status ?? 'trialing',
       max_properties: orgData?.max_properties ?? 5,
       trial_ends_at:  orgData?.trial_ends_at ?? null,
-      repuguard_status: orgData?.repuguard_status ?? 'inactive',
-      onboarding_steps_completed:
-        (orgData?.onboarding_steps_completed ?? {}) as Record<string, boolean>,
+      repuguard_status: toRepuguardStatus(orgData?.repuguard_status),
+      onboarding_steps_completed: asBooleanMap(orgData?.onboarding_steps_completed),
     },
   }
 
@@ -175,21 +194,6 @@ export async function requireOrgRole(allowedRoles: MemberRole[]) {
 }
 
 /**
- * Return the current user's role in their org.
- * Used to gate owner-only UI in settings pages.
- */
-export async function getOrgMembership(userId: string, orgId: string) {
-  const admin = createServiceClient({ system: 'lib/auth' })
-  const { data } = await admin
-    .from('organization_members')
-    .select('role')
-    .eq('user_id', userId)
-    .eq('org_id', orgId)
-    .single()
-  return data ?? null
-}
-
-/**
  * Verify the current user is a FieldStay platform admin (platform_staff
  * with role = 'admin') — independent of any organization_members role,
  * since a platform admin isn't necessarily a member of any given org.
@@ -199,8 +203,17 @@ export async function getOrgMembership(userId: string, orgId: string) {
 export async function requirePlatformAdmin() {
   const { user, supabase } = await requireAuth()
 
-  const { data } = await supabase.rpc('is_platform_staff_admin')
-  if (!data) {
+  // unwrap, not a discarded error: a failed RPC used to return `data === null`,
+  // which took the same branch as "you are not a platform admin" — so an
+  // outage both bounced a real admin to /ops AND wrote a
+  // security.route.mismatch audit row for an intrusion that never happened.
+  // Poisoning the audit log is worse than the bounce, since that log is what
+  // someone reads while investigating. Throwing keeps the gate closed without
+  // fabricating the event.
+  const isAdmin = unwrap(await supabase.rpc('is_platform_staff_admin'), {
+    site: 'lib.auth.requirePlatformAdmin',
+  })
+  if (!isAdmin) {
     await logAuditEvent({
       actorId:    user.id,
       action:     'security.route.mismatch',
@@ -214,6 +227,63 @@ export async function requirePlatformAdmin() {
   return { user, supabase }
 }
 
+type SupabaseServerClient = Awaited<ReturnType<typeof createClient>>
+
+export type PlatformStaffResult =
+  | { ok: true;  user: { id: string }; supabase: SupabaseServerClient; staff: { user_id: string } }
+  | { ok: false; response: NextResponse }
+
+/**
+ * Canonical platform-staff gate for Route Handlers under app/api/support-inbox/*.
+ *
+ * The lookup was open-coded identically in both of those routes, and in both
+ * the read's error was dropped — so a transient DB failure produced `staff ===
+ * null`, which is the same value as "this user is not staff", and the route
+ * answered 403. It failed in the safe direction, but indistinguishably from a
+ * real authorization denial: staff saw "Not staff" during an outage and had no
+ * way to tell that apart from having lost access.
+ *
+ * Same distinction (and the same 503) as requireCrewMember in lib/crew-auth.ts:
+ * a failed read keeps the gate closed but stays retryable and shows up in
+ * Sentry, rather than being silently absorbed as a denial.
+ *
+ * The two Server Components with this gate are deliberately NOT on this helper:
+ * app/(dashboard)/support-inbox/page.tsx redirects rather than returning a
+ * response, and app/(dashboard)/layout.tsx reads it as one element of a nav
+ * fan-in. Both already handle their read errors.
+ */
+export async function requirePlatformStaff(): Promise<PlatformStaffResult> {
+  const supabase = await createClient()
+  const { data: { user } } = await supabase.auth.getUser()
+
+  if (!user) {
+    return { ok: false, response: NextResponse.json({ error: 'Unauthorized' }, { status: 401 }) }
+  }
+
+  const staffRes = await supabase
+    .from('platform_staff')
+    .select('user_id')
+    .eq('user_id', user.id)
+    .maybeSingle()
+
+  const staffOut = tryUnwrap(staffRes, { site: 'lib.auth.requirePlatformStaff' })
+  if (!staffOut.ok) {
+    return {
+      ok: false,
+      response: NextResponse.json(
+        { error: 'Could not verify staff access. Please try again.' },
+        { status: 503 },
+      ),
+    }
+  }
+
+  if (!staffOut.data) {
+    return { ok: false, response: NextResponse.json({ error: 'Not staff' }, { status: 403 }) }
+  }
+
+  return { ok: true, user, supabase, staff: staffOut.data }
+}
+
 /**
  * Verify a property belongs to the user's org.
  * Returns the property or redirects to /properties if not found.
@@ -221,14 +291,72 @@ export async function requirePlatformAdmin() {
 export async function requireProperty(propertyId: string) {
   const { user, supabase, membership } = await requireOrgMember()
 
-  const { data: property } = await supabase
+  // maybeSingle + unwrap: with .single() and a discarded error, a transient
+  // read failure was indistinguishable from "that property isn't yours" and
+  // silently bounced the PM back to /properties mid-edit. maybeSingle keeps a
+  // genuinely missing row as data:null (the redirect), leaving `error` to mean
+  // only a real failure.
+  const propertyRes = await supabase
     .from('properties')
     .select('*')
     .eq('id', propertyId)
     .eq('org_id', membership.org_id)
-    .single()
+    .maybeSingle()
+
+  const property = unwrap(propertyRes, {
+    site: 'lib.auth.requireProperty', orgId: membership.org_id,
+  })
 
   if (!property) redirect('/properties')
 
   return { user, supabase, membership, property }
+}
+
+/**
+ * Delete an auth user that was just created and then turned out to belong to
+ * nothing — an invite claimed by someone else mid-flight, or a failed link.
+ *
+ * Exists because the three call sites that do this all discarded the result:
+ *
+ *   await supabase.auth.admin.deleteUser(authData.user.id)
+ *
+ * Those cleanup branches exist SPECIFICALLY to prevent an orphaned auth user —
+ * an account that can log in, fails every requireCrewMember()/requireOrgMember()
+ * check with nothing explaining why, and shows up nowhere on the PM side. If
+ * the delete itself fails (a transient admin-API error, a network blip), the
+ * orphan is created anyway and nobody finds out, because nothing inspected the
+ * error. The failure mode the branch was written to prevent, arriving silently
+ * through the branch that prevents it.
+ *
+ * Nothing here can undo a failed delete — the point is that it becomes VISIBLE
+ * (console + Sentry, tagged by call site) so an operator can clean it up. The
+ * user id is a UUID, not PII, so it is safe in Sentry `extra` per the logging
+ * rules.
+ *
+ * NEVER THROWS, deliberately. Every caller is already on its own error path,
+ * about to return a specific message ('This invite has already been used').
+ * gotrue normally reports failure in `{ error }`, but a network-level fault
+ * throws — and letting that propagate would replace the caller's precise
+ * message with a generic crash, on top of the orphan. The cleanup failing must
+ * not also destroy the explanation the user was about to get.
+ *
+ * Returns true when the account is gone, false when an orphan is now live.
+ */
+export async function deleteOrphanedAuthUser(
+  admin:  { auth: { admin: { deleteUser: (id: string) => Promise<{ error: unknown }> } } },
+  userId: string,
+  site:   string,
+): Promise<boolean> {
+  try {
+    const { error } = await admin.auth.admin.deleteUser(userId)
+    if (!error) return true
+
+    console.error('[deleteOrphanedAuthUser] cleanup failed — orphaned auth user', { site, userId })
+    reportError(error, { site, extra: { userId, orphaned: true } })
+    return false
+  } catch (err) {
+    console.error('[deleteOrphanedAuthUser] cleanup threw — orphaned auth user', { site, userId })
+    reportError(err, { site, extra: { userId, orphaned: true, threw: true } })
+    return false
+  }
 }

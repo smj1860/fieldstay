@@ -1,3 +1,4 @@
+import { tryUnwrap } from '@/lib/supabase/unwrap'
 import { inngest }             from '@/lib/inngest/client'
 import { createServiceClient } from '@/lib/supabase/server'
 import { resend, FROM }        from '@/lib/resend/client'
@@ -62,11 +63,17 @@ export const handleWorkOrderInvoicePaid = inngest.createFunction(
         return
       }
 
-      const { data: org } = await supabase
+      // Degrade, don't throw: orgName falls back to 'Your property manager'
+      // below, and a paid-invoice receipt should still go out. tryUnwrap logs
+      // and reports the failure rather than swallowing it.
+      const orgRes = await supabase
         .from('organizations')
         .select('name')
         .eq('id', org_id)
-        .single()
+        .maybeSingle()
+
+      const orgOut = tryUnwrap(orgRes, { site: 'inngest.work-order-invoice-paid.org', orgId: org_id })
+      const org    = orgOut.ok ? orgOut.data : null
 
       await resend.emails.send(
         {

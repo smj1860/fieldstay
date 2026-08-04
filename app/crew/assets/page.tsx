@@ -1,6 +1,8 @@
 'use client'
+import { useEffect } from 'react'
 import { useLiveQuery } from 'dexie-react-hooks'
-import { useDexieDb } from '@/lib/dexie/context'
+import { useDexieDb, useDexieUserId } from '@/lib/dexie/context'
+import { invalidateScope } from '@/lib/dexie/sync/scope'
 import Link from 'next/link'
 import { ClipboardList, ChevronRight } from 'lucide-react'
 import { missingAssetTypesFromDiscoveredSet } from '@/lib/asset-discovery/config'
@@ -27,7 +29,17 @@ function missingCount(propertyId: string, assets: PropertyAssetRow[]): number {
 }
 
 export default function CrewAssetsPage() {
-  const db = useDexieDb()
+  const db     = useDexieDb()
+  const userId = useDexieUserId()
+
+  // Assets are pulled when the assigned-property set changes, not on a timer
+  // (lib/dexie/sync/scope.ts). Opening this screen is the other moment
+  // freshness is worth a round trip — it is also when a co-crew member's
+  // capture is most likely to have landed since the last pull — so forget the
+  // recorded scope and let the next resync re-pull.
+  useEffect(() => {
+    void invalidateScope(userId, 'scope:property_assets')
+  }, [userId])
 
   const turnovers = useLiveQuery(
     () => db.turnovers.filter((t) => t.status !== 'completed' && t.status !== 'cancelled').toArray(),

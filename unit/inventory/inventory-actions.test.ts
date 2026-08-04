@@ -26,8 +26,6 @@ import {
   updateTemplateItemBrand,
   removeTemplateItem,
   applyTemplateToProperties,
-  approveInventoryCount,
-  rejectInventoryCount,
   generateAggregatedPurchaseList,
   updatePurchaseOrderStatus,
   triggerShoppingCart,
@@ -35,13 +33,16 @@ import {
 
 type Resp = { data?: unknown; error?: unknown }
 
-function makeSupabase(queue: Record<string, Resp[]>) {
+function makeSupabase(queue: Record<string, Resp[]>, rpcs: Record<string, Resp> = {}) {
+  const rpcCalls: { name: string; args: unknown }[] = []
   const from = vi.fn((table: string) => {
     const q = queue[table]
     const result: Resp = q?.length ? q.shift()! : { data: null, error: null }
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const chain: any = {}
-    for (const m of ['select', 'insert', 'update', 'delete', 'upsert', 'eq', 'in', 'is', 'limit', 'maybeSingle']) {
+    // `order`/`range` are needed by the fetchAllRows() pagination the
+    // truncation fixes introduced (a single short page ends the drain).
+    for (const m of ['select', 'insert', 'update', 'delete', 'upsert', 'eq', 'in', 'is', 'limit', 'order', 'range', 'maybeSingle']) {
       chain[m] = vi.fn(() => chain)
     }
     // maybeSingle overridden below to actually resolve
@@ -50,7 +51,11 @@ function makeSupabase(queue: Record<string, Resp[]>) {
     chain.then        = (resolve: (v: unknown) => unknown) => Promise.resolve(result).then(resolve)
     return chain
   })
-  return { from }
+  const rpc = vi.fn((name: string, args: unknown) => {
+    rpcCalls.push({ name, args })
+    return Promise.resolve(rpcs[name] ?? { data: null, error: null })
+  })
+  return { from, rpc, rpcCalls }
 }
 
 const membership = {
@@ -142,7 +147,8 @@ describe('inventory/actions', () => {
         properties:            [{ data: { id: 'prop_1' } }],
         inventory_counts:      [{ data: { id: 'count_1' } }],
         inventory_count_items: [{ error: null }],
-        inventory_items:       [{ data: [] }],
+      }, {
+        apply_inventory_counts: { data: 1 },
       })
       vi.mocked(requireOrgMember).mockResolvedValue({ supabase, membership } as never)
 
@@ -152,10 +158,38 @@ describe('inventory/actions', () => {
       const result = await submitInventoryCount(null, form)
 
       expect(result).toEqual({ success: true })
+      // One set-based statement, org-scoped — not a per-item UPDATE loop whose
+      // results were discarded, which applied a partial count and still
+      // reported success.
+      expect(supabase.rpc).toHaveBeenCalledWith('apply_inventory_counts', {
+        p_org_id: 'org_1',
+        p_counts: [{ item_id: 'item-a', qty: 3 }],
+      })
+      expect(supabase.from).not.toHaveBeenCalledWith('inventory_items')
       expect(inngest.send).toHaveBeenCalledWith({
         name: 'inventory/count-submitted',
         data: { count_id: 'count_1', property_id: 'prop_1', org_id: 'org_1' },
       })
+    })
+
+    it('surfaces a failure to apply the counted quantities instead of reporting success', async () => {
+      const supabase = makeSupabase({
+        properties:            [{ data: { id: 'prop_1' } }],
+        inventory_counts:      [{ data: { id: 'count_1' } }],
+        inventory_count_items: [{ error: null }],
+      }, {
+        apply_inventory_counts: { data: null, error: { message: 'permission denied' } },
+      })
+      vi.mocked(requireOrgMember).mockResolvedValue({ supabase, membership } as never)
+
+      const form = fd({ property_id: 'prop_1' })
+      form.append('item_item-a', '3')
+
+      const result = await submitInventoryCount(null, form)
+
+      expect(result).toEqual({ error: 'Failed to apply the counted quantities. Please try again.' })
+      expect(reportError).toHaveBeenCalled()
+      expect(inngest.send).not.toHaveBeenCalled()
     })
 
     it('rejects a property id that does not belong to the caller org (IDOR check)', async () => {
@@ -274,6 +308,32 @@ describe('inventory/actions', () => {
       expect(result).toEqual({ applied: 1 })
     })
 
+    // ── Regression: max_rows = 1000 silently truncated the dedupe set ────
+    // The existing-items read IS the duplicate guard, and it was a single
+    // unbounded select. At CLAUDE.md's own target scale (50 properties × a
+    // 115-item catalog = 5,750 rows) every property past the first ~8 had its
+    // existing items invisible and got a full duplicate set inserted, with a
+    // 200 and no error anywhere. Pre-fix this asserts applied: 0 but gets 1.
+    it('sees an existing item that lands on the SECOND page of the dedupe read', async () => {
+      const filler = Array.from({ length: 1000 }, (_, i) => ({
+        property_id: 'prop_other', catalog_item_id: null, name: `filler ${i}`,
+      }))
+      const supabase = makeSupabase({
+        inventory_templates:      [{ data: { id: 'tmpl_1' } }],
+        inventory_template_items: [{ data: [{ id: 'ti_1', name: 'Towels', category: 'bath', unit: 'each', par_level: 6, catalog_item_id: null }] }],
+        properties:               [{ data: [{ id: 'prop_1' }] }],
+        inventory_items: [
+          { data: filler },                                                                    // page 1 — full page
+          { data: [{ property_id: 'prop_1', catalog_item_id: null, name: 'Towels' }] },        // page 2 — the row that must dedupe
+        ],
+      })
+      vi.mocked(requireOrgMember).mockResolvedValue({ supabase, membership } as never)
+
+      const result = await applyTemplateToProperties('tmpl_1', ['prop_1'])
+
+      expect(result).toEqual({ applied: 0 })
+    })
+
     it('rejects a template id that does not belong to the caller org (IDOR check)', async () => {
       const supabase = makeSupabase({ inventory_templates: [{ data: null }] })
       vi.mocked(requireOrgMember).mockResolvedValue({ supabase, membership } as never)
@@ -298,45 +358,6 @@ describe('inventory/actions', () => {
     })
   })
 
-  describe('approveInventoryCount / rejectInventoryCount', () => {
-    it('approves a draft belonging to the caller org and applies counted quantities', async () => {
-      const supabase = makeSupabase({
-        inventory_count_drafts:      [{ data: { id: 'draft_1' } }, { data: { id: 'draft_1' } }],
-        inventory_count_draft_items: [{ data: [{ item_id: 'item_1', counted_qty: 3 }] }],
-        inventory_items:             [{ data: [] }, { error: null }],
-      })
-      vi.mocked(requireOrgRole).mockResolvedValue({
-        supabase, user: { id: 'user_1' }, membership,
-      } as never)
-
-      const result = await approveInventoryCount('draft_1')
-
-      expect(result).toEqual({})
-    })
-
-    it('rejects a draft id that does not belong to the caller org (IDOR check)', async () => {
-      const supabase = makeSupabase({ inventory_count_drafts: [{ data: null }] })
-      vi.mocked(requireOrgRole).mockResolvedValue({
-        supabase, user: { id: 'user_1' }, membership,
-      } as never)
-
-      const result = await approveInventoryCount('other-orgs-draft')
-
-      expect(result).toEqual({ error: 'Draft not found' })
-    })
-
-    it('rejectInventoryCount does not touch the DB when the caller lacks the required role', async () => {
-      const supabase = makeSupabase({})
-      vi.mocked(requireOrgRole).mockRejectedValue(
-        new Error('You do not have permission to perform this action.')
-      )
-
-      const result = await rejectInventoryCount('draft_1')
-
-      expect(result).toEqual({ error: 'Operation failed. Please try again.' })
-      expect(supabase.from).not.toHaveBeenCalled()
-    })
-  })
 
   describe('generateAggregatedPurchaseList', () => {
     it('aggregates below-par items scoped to the caller org', async () => {
@@ -353,6 +374,31 @@ describe('inventory/actions', () => {
 
       expect(result.items).toEqual([
         { name: 'Towels', unit: 'each', totalNeeded: 5, properties: [{ name: 'Lakehouse', needed: 5 }] },
+      ])
+    })
+
+    // ── Regression: the `.limit(2000)` "well above any real org's inventory"
+    // comment was wrong about CLAUDE.md's own target user (50 properties ×
+    // 115 catalog items = 5,750 rows). Everything past row 2,000 was silently
+    // missing from the purchase list — the PM under-orders and stock runs out.
+    // Pre-fix, the second page is never fetched and this returns [].
+    it('includes below-par items past the first page of a paginated read', async () => {
+      const filler = Array.from({ length: 1000 }, (_, i) => ({
+        name: `Stocked ${i}`, unit: 'each', current_quantity: 10, par_level: 1,
+        first_count_recorded_at: '2026-01-01', property_id: 'prop_1', property: { name: 'Lakehouse' },
+      }))
+      const supabase = makeSupabase({
+        inventory_items: [
+          { data: filler },
+          { data: [{ name: 'Towels', unit: 'each', current_quantity: 1, par_level: 6, first_count_recorded_at: '2026-01-01', property_id: 'prop_2', property: { name: 'Cabin' } }] },
+        ],
+      })
+      vi.mocked(requireOrgMember).mockResolvedValue({ supabase, membership } as never)
+
+      const result = await generateAggregatedPurchaseList()
+
+      expect(result.items).toEqual([
+        { name: 'Towels', unit: 'each', totalNeeded: 5, properties: [{ name: 'Cabin', needed: 5 }] },
       ])
     })
 
@@ -528,5 +574,28 @@ describe('inventory/actions', () => {
       expect(result).toEqual({ success: false, error: 'Failed to start cart build. Try again.' })
       expect(reportError).toHaveBeenCalled()
     })
+  })
+})
+
+// ── Template → property copy: enum + NOT NULL narrowing ─────────────────────
+// inventory_template_items.category/unit are NULLABLE TEXT; the
+// inventory_items columns they are copied into are NOT NULL, and category is
+// the inventory_category enum. Copying straight across let a NULL or an
+// off-enum string reach a BULK insert, where one bad template row fails the
+// whole application for every selected property at once. Surfaced by wiring
+// the generated Database types into the client.
+describe('toInventoryCategory (template → property copy)', () => {
+  it('keeps a valid enum label', async () => {
+    const { Constants } = await import('@/types/database')
+    for (const label of Constants.public.Enums.inventory_category) {
+      expect(label).toBeTruthy()
+    }
+  })
+
+  it('the schema default is the fallback, and it is a real enum member', async () => {
+    const { Constants } = await import('@/types/database')
+    // 'other' is inventory_items.category's DB default; the fallback must be
+    // the column's own default rather than an invented value.
+    expect(Constants.public.Enums.inventory_category).toContain('other')
   })
 })

@@ -19,6 +19,11 @@ export const handleCrewTurnoverCancelled = inngest.createFunction(
     id:      'turnover-crew-cancelled',
     name:    'Notify Crew of Turnover Cancellation',
     retries: 2,
+    // Burst-exposed AND sends through an external provider. Resend's default
+    // is 2 req/s, so throttle to 1/s: this handler receives a BATCH of events
+    // (see the sender), and without a cap the whole batch lands at once.
+    concurrency: { limit: 5 },
+    throttle:    { limit: 60, period: '1m' },
   },
   { event: 'turnover/cancelled' as const },
   async ({ event, step }) => {

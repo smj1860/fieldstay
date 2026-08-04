@@ -1,3 +1,4 @@
+import { unwrap } from '@/lib/supabase/unwrap'
 import { createServiceClient } from '@/lib/supabase/server'
 import { notFound } from 'next/navigation'
 import type { Metadata } from 'next'
@@ -17,7 +18,9 @@ export default async function VendorPortalPage({
   // Use service client — no session cookie available for vendor
   const supabase = createServiceClient({ publicSurface: 'work-orders--token-' })
 
-  const { data: workOrder } = await supabase
+  // A failed read fell into notFound(), telling the vendor their work-order
+  // link is dead when it is not.
+  const workOrderRes = await supabase
     .from('work_orders')
     .select(`
       id, org_id, asset_id, title, description, status, portal_enabled,
@@ -33,8 +36,9 @@ export default async function VendorPortalPage({
     `)
     .eq('completion_token', token)
     .eq('portal_enabled', true)
-    .single()
+    .maybeSingle()
 
+  const workOrder = unwrap(workOrderRes, { site: 'page.work-orders.token' })
   if (!workOrder) notFound()
 
   const manualUrl = await getManualUrlForAsset(

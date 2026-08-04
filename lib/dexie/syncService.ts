@@ -13,6 +13,41 @@ type DexieSupabaseClient = ReturnType<typeof createClient>
 
 const MAX_RETRIES = 5
 
+/**
+ * Shape version stamped onto every newly-queued mutation payload. Bump this
+ * whenever a payload's shape changes and add the matching entry to
+ * PAYLOAD_MIGRATIONS — a device can be offline across a deploy, so an outbox
+ * row routinely outlives the release that wrote it.
+ */
+export const OUTBOX_PAYLOAD_VERSION = 1
+
+/**
+ * `lastError` for a mutation that never failed on its own — it is queued
+ * behind a dead letter for the same record and must not be pushed until that
+ * one is resolved. Distinct wording so the banner doesn't tell a crew member
+ * five separate things failed when one did.
+ */
+export const HELD_BACK_REASON = 'Held back so earlier changes to this item retry in order'
+
+/**
+ * Consecutive failed pushes against DISTINCT records before the drain gives up
+ * for this pass.
+ *
+ * The ordering invariant the drain protects is per-record — a later write to
+ * turnover A must not overtake an earlier one — but it used to be enforced
+ * globally: any retryable failure, or any head still inside its backoff
+ * window, stopped the whole queue. One flaky record therefore stranded every
+ * unrelated record behind it, which on reconnect after an offline shift is
+ * dozens of writes waiting on one.
+ *
+ * Blocking strictly per-record would swing too far the other way: when the
+ * server itself is unhappy, every record fails, and per-record blocking turns
+ * one wasted request per wave into N. So: block per record, but treat several
+ * distinct records failing in a row as evidence the problem is not the record,
+ * and stand down until the scheduled retry.
+ */
+export const CONSECUTIVE_FAILURE_CIRCUIT_BREAK = 3
+
 // Retry backoff: 5 s base doubling per retry, capped at 5 min, each delay
 // scaled by a uniform 0.5–1.5× jitter factor so a fleet of crew devices
 // coming back from the same outage doesn't retry in lockstep.
@@ -41,6 +76,14 @@ export class SyncEngine {
   // a shared IndexedDB, so two tabs each pass their own guard — withTabLock()
   // in processOutbox() is what actually serializes the drain across tabs.
   private isProcessing = false
+  // Set when a drain was requested while one was already running — see
+  // processOutbox(). The running pass re-drains rather than dropping the row.
+  private redrainRequested = false
+  // Ids held back mid-drain by holdBackSuccessors(). Scoped to a single
+  // drain (cleared at its start) — the durable state is the row's `failed`
+  // flag; this only stops the current loop's pre-computed snapshot from
+  // pushing a row that was marked failed after the snapshot was taken.
+  private readonly heldBack = new Set<number>()
   private disposed = false
   // Single pending wake-up for a drain that stopped on a not-yet-due
   // mutation. One handle only — scheduleRetry() clears any previous timer
@@ -125,10 +168,24 @@ export class SyncEngine {
   }
 
   async processOutbox(): Promise<void> {
-    if (this.isProcessing || this.stopped()) return
+    if (this.stopped()) return
+    // A drain works from a snapshot taken before its loop, so a mutation
+    // queued while one is in flight is invisible to it — and enqueueMutation's
+    // own kick lands here and is dropped by the guard. That row then sat until
+    // the crew shell's next 30 s tick, which is precisely the reconnect window
+    // where a crew member is most likely to still be working. Worse at logout,
+    // where the bounded final flush could report "clean" for a row it never
+    // attempted. Remember the wake-up instead of discarding it.
+    if (this.isProcessing) {
+      this.redrainRequested = true
+      return
+    }
     this.isProcessing = true
     try {
-      await withTabLock(`fieldstay-crew-outbox-${this.userId}`, () => this.drain())
+      do {
+        this.redrainRequested = false
+        await withTabLock(`fieldstay-crew-outbox-${this.userId}`, () => this.drain())
+      } while (this.redrainRequested && !this.stopped())
     } finally {
       this.isProcessing = false
     }
@@ -142,16 +199,33 @@ export class SyncEngine {
     const db = getDexieDb(this.userId)
     const pending = (await db.mutations.orderBy('id').toArray()).filter((m) => !m.failed)
 
+    // `pending` is a SNAPSHOT taken before the loop. holdBackSuccessors() can
+    // mark rows failed part-way through it, and the loop would otherwise push
+    // them anyway — sending exactly the write that was just held back to
+    // preserve ordering, which defeats the whole point.
+    this.heldBack.clear()
+
+    // Records whose queue is blocked for the rest of this pass: one of their
+    // mutations is mid-backoff or just failed, so every LATER mutation for the
+    // same record must wait rather than overtake it. Scoped to the record —
+    // see CONSECUTIVE_FAILURE_CIRCUIT_BREAK for why it isn't global any more,
+    // and for what still stops the whole drain.
+    const blockedRecords = new Set<string>()
+    let consecutiveFailures = 0
+
     for (const mutation of pending) {
       // Auto-incrementing key — always populated once read back from the table.
       const id = mutation.id as number
+      const record = `${mutation.table}:${mutation.targetId}`
 
-      // Backoff gate: a mutation still inside its retry window stops the
-      // drain entirely (never skip-and-continue — later mutations against
-      // the same record must not jump ahead). Resume when it comes due.
-      if (mutation.nextAttemptAt !== undefined && mutation.nextAttemptAt > Date.now()) {
-        this.scheduleRetry(mutation.nextAttemptAt)
-        return
+      if (this.heldBack.has(id) || blockedRecords.has(record)) continue
+
+      // Backoff gate: a mutation still inside its retry window blocks its own
+      // record (never skip-and-continue — later mutations against the SAME
+      // record must not jump ahead). Resume when it comes due.
+      if (this.isBackingOff(mutation)) {
+        blockedRecords.add(record)
+        continue
       }
 
       // Connectivity can drop mid-drain — re-check before every push so the
@@ -161,29 +235,100 @@ export class SyncEngine {
       // not write to (or re-open) a database that no longer exists.
       if (!isOnline() || this.stopped()) return
 
-      if (await this.pushOne(db, mutation, id) === 'stop') return
+      const outcome = await this.pushOne(db, mutation, id)
+      if (outcome === 'abort') return
+      if (outcome !== 'blocked') {
+        consecutiveFailures = 0
+        continue
+      }
+
+      blockedRecords.add(record)
+      consecutiveFailures += 1
+      // Distinct records failing back to back means the server, not the
+      // record — stop pushing into it and wait for the scheduled retry.
+      if (consecutiveFailures >= CONSECUTIVE_FAILURE_CIRCUIT_BREAK) return
     }
   }
 
+  /** True when this mutation is still inside its retry window (and schedules the resume). */
+  private isBackingOff(mutation: MutationRow): boolean {
+    if (mutation.nextAttemptAt === undefined || mutation.nextAttemptAt <= Date.now()) return false
+    this.scheduleRetry(mutation.nextAttemptAt)
+    return true
+  }
+
   /**
-   * Pushes one mutation and records the outcome. Returns 'stop' when the drain
-   * must not continue — either to preserve per-record ordering, or because
-   * this user signed out mid-push and their local database is gone.
+   * Pushes one mutation and records the outcome.
+   *
+   *  - 'continue' — done with this mutation; the drain may proceed.
+   *  - 'blocked'  — this RECORD's queue must not advance (ordering), but other
+   *                 records may still drain.
+   *  - 'abort'    — stop touching storage entirely: this user signed out
+   *                 mid-push and their local database is gone.
    */
-  private async pushOne(db: FieldStayDexie, mutation: MutationRow, id: number): Promise<'continue' | 'stop'> {
+  private async pushOne(
+    db: FieldStayDexie,
+    mutation: MutationRow,
+    id: number,
+  ): Promise<'continue' | 'blocked' | 'abort'> {
     try {
       await uploadOne(this.supabase, mutation)
       // Signing out while this push was in flight deletes the outbox
       // underneath us. Bail before touching storage: bookkeeping for a
       // signed-out user has nothing to write to, and going ahead would ask
       // getDexieDb() for a database that no longer exists.
-      if (this.stopped()) return 'stop'
+      if (this.stopped()) return 'abort'
       // Successful push clears the whole row — nextAttemptAt with it.
       await db.mutations.delete(id)
       return 'continue'
     } catch (err) {
-      if (this.stopped()) return 'stop'
-      return await this.handleFailure(mutation, id, err) ? 'stop' : 'continue'
+      if (this.stopped()) return 'abort'
+      return await this.handleFailure(mutation, id, err) ? 'blocked' : 'continue'
+    }
+  }
+
+  /**
+   * Marks every still-queued mutation for the SAME record as failed, once one
+   * of them dead-letters.
+   *
+   * Without this, dead-lettering silently drops one write out of the middle of
+   * a record's sequence: the drain moves on, later writes for that record land
+   * on the server, and a subsequent "Retry all" replays the stale one on top
+   * of them. Holding the successors back keeps the sequence intact so a retry
+   * re-applies it in the order the crew member performed it.
+   *
+   * They carry a distinct lastError so the banner does not tell a crew member
+   * that five separate things failed when one did.
+   */
+  private async holdBackSuccessors(
+    db: FieldStayDexie,
+    mutation: MutationRow,
+    failedId: number,
+  ): Promise<void> {
+    // Index-backed per-record lookup ([table+targetId], added in schema v9) —
+    // this used to scan the whole outbox on every dead-letter.
+    const successors = (
+      await db.mutations
+        .where('[table+targetId]').equals([mutation.table, mutation.targetId])
+        .toArray()
+    )
+      .filter((m) => !m.failed && (m.id as number) > failedId)
+      .sort((a, b) => (a.id as number) - (b.id as number))
+
+    if (successors.length === 0) return
+
+    console.warn(
+      `[SyncEngine] holding back ${successors.length} later change(s) to ` +
+      `${mutation.table}/${mutation.targetId} so the retry order is preserved`
+    )
+
+    for (const successor of successors) {
+      const successorId = successor.id as number
+      await db.mutations.update(successorId, {
+        failed:    1,
+        lastError: HELD_BACK_REASON,
+      })
+      this.heldBack.add(successorId)
     }
   }
 
@@ -234,11 +379,30 @@ export class SyncEngine {
       )
       await db.mutations.update(id, {
         retryCount: newRetryCount,
-        failed: true,
+        failed: 1,
         lastError: describeFailure(err),
       })
-      // A mutation that will never succeed must not block every later write
-      // against other records — it is finished, so the drain continues.
+
+      // Dead-lettering breaks this record's mutation ORDER, and nothing used
+      // to put it back. The drain continues past the dead letter (correctly —
+      // other records must not be blocked), so later mutations for the SAME
+      // record push successfully on top of a gap. Then "Retry all" clears the
+      // failed flag in place, the row keeps its original low id, and the drain
+      // replays the stale payload as though it were the newest write.
+      //
+      // Concretely: crew ticks a checklist item (#10) → 500s five times →
+      // dead-letters. They realise it isn't done and un-tick it (#11) → pushes
+      // fine, server now false. They tap Retry all → #10 replays
+      // is_completed = true → the server flips BACK to complete, and the next
+      // delta pull overwrites Dexie too, so the un-tick disappears from the
+      // phone as well. Same shape for inventory_items.current_quantity (an old
+      // count overwriting a corrected one) and crew_availability.
+      //
+      // So: hold back this record's remaining queued mutations too. They keep
+      // their ids, so the sequence is preserved and a retry replays
+      // tick-then-un-tick in the order the crew member actually performed
+      // them. Scoped to (table, targetId) — every other record keeps draining.
+      await this.holdBackSuccessors(db, mutation, id)
       return false
     }
 
@@ -447,15 +611,41 @@ async function uploadWorkOrderReport(
   if (!res.ok) throw new UploadHttpError(`Failed to place work order ${targetId}`, res.status)
 }
 
+
 /**
- * Crew inventory count submitted for PM review. Routed through the Route
- * Handler (not a direct table write) because a draft is a two-table insert
- * plus a previous-quantity diff the client can't compute authoritatively.
- * `targetId` is a client-generated draft id: the route uses it as the row's
- * primary key, so an outbox replay after a connectivity blip collides
- * harmlessly instead of creating a second draft.
+ * A crew inventory count taken during a turnover, submitted as one count.
+ *
+ * Routed through the Route Handler rather than written directly because the
+ * count is a three-part server-side action — record the count, apply the
+ * quantities, fire `inventory/count-submitted` so the below-par restock
+ * pipeline sees it — none of which a direct table write can do.
+ *
+ * `targetId` is the client-generated count id, used by the route as the
+ * `inventory_counts` primary key so a replay collides rather than recording
+ * the same physical count twice.
  */
-async function uploadInventoryCountDraft(
+/**
+ * A message to the operations team. Routed through the Route Handler because
+ * resolving WHICH PM receives it needs the service client — crew have no RLS
+ * visibility into organization_members.
+ *
+ * `targetId` is the client-generated message id, used as the primary key so a
+ * replay after a dropped response collides instead of sending twice.
+ */
+async function uploadCrewMessage(
+  _supabase: DexieSupabaseClient,
+  targetId: string,
+  payload: MutationPayload,
+): Promise<void> {
+  const res = await fetch('/api/crew/messages', {
+    method:  'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body:    JSON.stringify({ messageId: targetId, content: payload.content }),
+  })
+  if (!res.ok) throw new UploadHttpError(`Failed to send message ${targetId}`, res.status)
+}
+
+async function uploadInventoryCount(
   _supabase: DexieSupabaseClient,
   targetId: string,
   payload: MutationPayload,
@@ -464,32 +654,13 @@ async function uploadInventoryCountDraft(
     method:  'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
-      draftId:       targetId,
-      propertyId:    payload.property_id,
-      counts:        payload.counts,
-      notes:         payload.notes,
-      itemNotes:     payload.item_notes,
-      submitAsDraft: true,
+      countId:    targetId,
+      propertyId: payload.property_id,
+      counts:     payload.counts,
+      notes:      typeof payload.notes === 'string' ? payload.notes : '',
     }),
   })
   if (!res.ok) throw new UploadHttpError(`Failed to submit inventory count ${targetId}`, res.status)
-}
-
-async function uploadInventoryItemCount(
-  supabase: DexieSupabaseClient,
-  targetId: string,
-  payload: MutationPayload,
-): Promise<void> {
-  if (!('current_quantity' in payload)) {
-    throw new UploadDataError(`inventory_items upload had no quantity for id ${targetId}`, 'NO_FIELDS')
-  }
-  const { data, error } = await supabase
-    .from('inventory_items')
-    .update({ current_quantity: payload.current_quantity })
-    .eq('id', targetId)
-    .select('id')
-  if (error) throw new UploadDataError(`inventory_items upload failed: ${error.message}`, error.code)
-  if (!data || data.length === 0) throw new Error(`inventory_items upload matched zero rows for id ${targetId}`)
 }
 
 async function uploadPropertyAssetInsert(
@@ -558,46 +729,6 @@ async function uploadPropertyAssetPhotoUpdate(
   }
 }
 
-async function uploadCrewAvailability(
-  supabase: DexieSupabaseClient,
-  targetId: string,
-  payload: MutationPayload,
-): Promise<void> {
-  const isAvailable = payload.is_available === 1
-  if (payload.org_id) {
-    // Full INSERT — upsert on primary key to handle any duplicate
-    const { error } = await supabase
-      .from('crew_availability')
-      .upsert({
-        id:             targetId,
-        org_id:         payload.org_id,
-        crew_member_id: payload.crew_member_id,
-        available_date: payload.available_date,
-        is_available:   isAvailable,
-        notes:          payload.notes ?? null,
-        created_at:     payload.created_at,
-      })
-    if (error) throw new UploadDataError(`crew_availability upsert failed: ${error.message}`, error.code)
-    return
-  }
-
-  // UPDATE of existing row — only push fields the mutation actually carried.
-  // Never `payload.x ?? null`: a mutation that omitted a field must leave it
-  // alone, not NULL it (see the doc comment on uploadChecklistInstanceItem).
-  const fieldUpdate: MutationPayload = {}
-  if ('is_available' in payload) fieldUpdate.is_available = isAvailable
-  if ('notes' in payload)        fieldUpdate.notes = payload.notes ?? null
-  if (Object.keys(fieldUpdate).length === 0) return
-
-  const { data, error } = await supabase
-    .from('crew_availability')
-    .update(fieldUpdate)
-    .eq('id', targetId)
-    .select('id')
-  if (error) throw new UploadDataError(`crew_availability upload failed: ${error.message}`, error.code)
-  if (!data || data.length === 0) throw new Error(`crew_availability upload matched zero rows for id ${targetId}`)
-}
-
 // Keyed by `${table}:${op}` — every value in lib/dexie/schema.ts's
 // MutationTable union must have a matching entry here (for every op it's
 // actually enqueued with), or an unhandled table silently vanishes from the
@@ -610,18 +741,32 @@ const UPLOAD_HANDLERS: Record<string, UploadHandler> = {
   'checklist_instances:PUT':        uploadChecklistInstanceConfirmation,
   'checklist_instances:PATCH':      uploadChecklistInstanceConfirmation,
   'work_order_reports:PUT':         uploadWorkOrderReport,
-  'inventory_items:PUT':            uploadInventoryItemCount,
-  'inventory_items:PATCH':          uploadInventoryItemCount,
+  'inventory_counts:PUT':           uploadInventoryCount,
   'property_assets:PUT':            uploadPropertyAssetInsert,
   'property_assets:PATCH':          uploadPropertyAssetPhotoUpdate,
-  'crew_availability:PUT':          uploadCrewAvailability,
-  'crew_availability:PATCH':        uploadCrewAvailability,
   'crew_work_orders:PATCH':         uploadCrewWorkOrderChange,
-  'inventory_count_drafts:PUT':     uploadInventoryCountDraft,
+  'messages:PUT':                   uploadCrewMessage,
+}
+
+/**
+ * Payload-shape migrations, keyed by the version they upgrade FROM.
+ *
+ * An outbox row can outlive the release that queued it — a device offline
+ * across a deploy replays yesterday's payload shape against today's handler.
+ * Add an entry here in the same change that bumps OUTBOX_PAYLOAD_VERSION.
+ */
+const PAYLOAD_MIGRATIONS: Readonly<Record<number, (payload: MutationPayload) => MutationPayload>> = {}
+
+function migratePayload(mutation: MutationRow): MutationPayload {
+  let payload = mutation.payload
+  for (let version = mutation.payloadVersion ?? 1; version < OUTBOX_PAYLOAD_VERSION; version++) {
+    payload = PAYLOAD_MIGRATIONS[version]?.(payload) ?? payload
+  }
+  return payload
 }
 
 async function uploadOne(supabase: DexieSupabaseClient, mutation: MutationRow): Promise<void> {
-  const { table, targetId, op, payload } = mutation
+  const { table, targetId, op } = mutation
 
   const handler = UPLOAD_HANDLERS[`${table}:${op}`]
   if (!handler) {
@@ -629,10 +774,21 @@ async function uploadOne(supabase: DexieSupabaseClient, mutation: MutationRow): 
     // instead of letting processOutbox() treat this as a successful sync
     // and silently delete the mutation from the outbox without it ever
     // reaching Supabase.
-    throw new Error(`[SyncEngine] no upload handler for mutation: table="${table}" op="${op}" targetId="${targetId}"`)
+    //
+    // TERMINAL, not transient: a (table, op) this build has no handler for
+    // cannot start working on retry #5. It was previously a bare Error, which
+    // classifies as transient — five pointless round trips, then a dead letter
+    // whose user-facing text was the developer string below.
+    console.error(
+      `[SyncEngine] no upload handler for mutation: table="${table}" op="${op}" targetId="${targetId}"`,
+    )
+    throw new UploadDataError(
+      'This change was saved by an older version of the app and can no longer be sent.',
+      'NO_HANDLER',
+    )
   }
 
-  await handler(supabase, targetId, payload)
+  await handler(supabase, targetId, migratePayload(mutation))
 }
 
 let engine: SyncEngine | null = null
@@ -657,6 +813,64 @@ export function disposeSyncEngine(): void {
   engineUserId = null
 }
 
+/**
+ * Queues a mutation in the outbox WITHOUT kicking the drain.
+ *
+ * Exists so a caller can commit its optimistic local write and this outbox row
+ * in ONE Dexie transaction (see lib/dexie/helpers.ts). Those two writes used to
+ * be separate IndexedDB transactions with a suspend/kill window between them:
+ * the local row landed, the app was reclaimed (iOS backgrounding a PWA, a
+ * quota error, a closed tab), and the outbox row never did. The crew member
+ * then saw their tick as done forever while the server never heard about it,
+ * with nothing in the failed-sync surface because there was no mutation row to
+ * mark failed — and no delta pull would correct it either, since the server
+ * row's updated_at never changed.
+ *
+ * ⚠️ Never `await` anything non-Dexie between this and the caller's own write.
+ * An IndexedDB transaction auto-commits the moment control returns to the event
+ * loop without a pending request against it, so an interleaved fetch() (or a
+ * processOutbox() call, which does network I/O) makes the rest of the block
+ * throw TransactionInactiveError. The drain kick belongs OUTSIDE the block.
+ */
+export async function enqueueMutationTx(
+  db: FieldStayDexie,
+  table: MutationRow['table'],
+  targetId: string,
+  op: MutationRow['op'],
+  payload: Record<string, unknown>,
+): Promise<number> {
+  // A record with a dead letter is FROZEN: every later write to it is queued
+  // already-held-back.
+  //
+  // holdBackSuccessors() only ever saw the successors that existed AT the
+  // moment of dead-lettering, which is the less likely half of the problem —
+  // the corrective edit is normally made AFTER the failure, not before it.
+  // Concretely: crew ticks an item (#10) → 500s five times → dead-letters, no
+  // successors to hold. They realise it isn't done and un-tick it (#11) →
+  // pushes fine, server now false. They tap Retry all → #10 keeps its original
+  // low id, replays is_completed = true, and the server flips BACK — then the
+  // next delta pull overwrites Dexie, so the un-tick disappears from the phone
+  // too. Same shape for inventory_items.current_quantity and crew_availability.
+  //
+  // Freezing at enqueue keeps the whole sequence intact, so Retry all replays
+  // tick-then-un-tick in the order the crew member actually performed them.
+  const frozen = await db.mutations
+    .where('[table+targetId]').equals([table, targetId])
+    .filter((m) => m.failed === 1)
+    .count()
+
+  return db.mutations.add({
+    table,
+    targetId,
+    op,
+    payload,
+    createdAt:      new Date().toISOString(),
+    retryCount:     0,
+    payloadVersion: OUTBOX_PAYLOAD_VERSION,
+    ...(frozen > 0 ? { failed: 1 as const, lastError: HELD_BACK_REASON } : {}),
+  })
+}
+
 /** Queues a mutation in the outbox and fires processOutbox() in the background. */
 export async function enqueueMutation(
   userId: string,
@@ -670,14 +884,9 @@ export async function enqueueMutation(
   if (isDexieShutdown(userId)) return
 
   const db = getDexieDb(userId)
-  await db.mutations.add({
-    table,
-    targetId,
-    op,
-    payload,
-    createdAt:  new Date().toISOString(),
-    retryCount: 0,
-  })
+  await db.transaction('rw', db.mutations, () =>
+    enqueueMutationTx(db, table, targetId, op, payload),
+  )
 
   void getSyncEngine(userId).processOutbox()
 }

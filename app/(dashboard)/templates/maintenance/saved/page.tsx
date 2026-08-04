@@ -1,4 +1,6 @@
 import type { Metadata } from 'next'
+import type { ScheduleFrequency, VendorSpecialty } from '@/types/database'
+import { fetchAllRows } from '@/lib/inngest/paginate'
 import { requireOrgMember } from '@/lib/auth'
 import { MaintenanceSubnav } from '@/components/templates/maintenance-subnav'
 import { unwrapJoin } from '@/lib/utils/supabase-joins'
@@ -6,29 +8,55 @@ import { SavedTemplatesBrowser } from './saved-templates-browser'
 
 export const metadata: Metadata = { title: 'Saved Maintenance Templates — Templates — FieldStay' }
 
+interface SavedTemplateRow {
+  id:          string
+  org_id:      string | null
+  name:        string
+  description: string | null
+  is_system:   boolean
+  maintenance_schedule_template_items: {
+    id:                    string
+    name:                  string
+    description:           string | null
+    schedule_frequency:    ScheduleFrequency
+    vendor_specialty_hint: VendorSpecialty | null
+    estimated_cost:        number | null
+    is_optional_flag:      string | null
+    sort_order:            number
+  }[] | null
+}
+
 export default async function SavedMaintenanceTemplatesPage() {
   const { supabase, membership } = await requireOrgMember()
 
   const [
-    { data: templates, error: templatesError },
+    templates,
     { data: usageRows, error: usageError },
     { data: properties, error: propertiesError },
   ] = await Promise.all([
     // No org_id filter — RLS already scopes this to the caller's own
     // org's templates plus the always-visible is_system one, same as
     // the query this replaces in app/(dashboard)/maintenance/page.tsx.
-    supabase
-      .from('maintenance_schedule_templates')
-      .select(`
-        id, org_id, name, description, is_system,
-        maintenance_schedule_template_items (
-          id, name, description, schedule_frequency, vendor_specialty_hint,
-          estimated_cost, is_optional_flag, sort_order
-        )
-      `)
-      .order('is_system', { ascending: false })
-      .order('name')
-      .order('sort_order', { referencedTable: 'maintenance_schedule_template_items', ascending: true }),
+    // Paginated. RLS scopes this to the caller's org plus the is_system rows,
+    // so it is not a cross-tenant read — but it is a ONE-TO-MANY select
+    // (templates plus all their items), and a truncated page would render a
+    // template with a silently incomplete item list.
+    fetchAllRows<SavedTemplateRow>(
+      (from, to) => supabase
+        .from('maintenance_schedule_templates')
+        .select(`
+          id, org_id, name, description, is_system,
+          maintenance_schedule_template_items (
+            id, name, description, schedule_frequency, vendor_specialty_hint,
+            estimated_cost, is_optional_flag, sort_order
+          )
+        `)
+        .order('is_system', { ascending: false })
+        .order('name')
+        .order('sort_order', { referencedTable: 'maintenance_schedule_template_items', ascending: true })
+        .range(from, to),
+      { label: 'page.savedMaintenanceTemplates' },
+    ),
     supabase
       .from('maintenance_schedules')
       .select('property_id, source_template_item_id, maintenance_schedule_template_items(template_id)')
@@ -43,7 +71,6 @@ export default async function SavedMaintenanceTemplatesPage() {
       .order('name'),
   ])
 
-  if (templatesError)  console.error('[SavedMaintenanceTemplatesPage] templates query failed', templatesError)
   if (usageError)      console.error('[SavedMaintenanceTemplatesPage] usage query failed', usageError)
   if (propertiesError) console.error('[SavedMaintenanceTemplatesPage] properties query failed', propertiesError)
 

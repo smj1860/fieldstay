@@ -4,7 +4,7 @@ import { revalidatePath } from 'next/cache'
 import { requireOrgRole } from '@/lib/auth'
 import { logAuditEvent } from '@/lib/audit'
 import { reportError } from '@/lib/observability/report-error'
-import type { InventoryCategory } from '@/types/database'
+import type { InventoryCategory, TablesUpdate } from '@/types/database'
 
 // ── Master List (org_inventory_catalog) ─────────────────────────────────────
 
@@ -58,7 +58,7 @@ export async function updateCatalogItem(
   try {
     const { user, supabase, membership } = await requireOrgRole(['admin', 'manager'])
 
-    const patch: Record<string, string> = {}
+    const patch: TablesUpdate<'org_inventory_catalog'> = {}
     if (updates.name !== undefined) {
       const trimmed = updates.name.trim()
       if (!trimmed) return { error: 'Item name is required.' }

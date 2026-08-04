@@ -589,71 +589,43 @@ ID) into this pattern without realizing it needs escaping/validation first.
 
 ---
 
-## 16. Vendor work-order completion is ordered-but-not-atomic (no transaction)
+## 16. Vendor work-order completion — RESOLVED 2026-08-01
 
 **Files:** `app/api/work-orders/[token]/complete/route.ts`,
-`app/api/work-orders/[token]/complete/helpers.ts`
+`app/api/work-orders/[token]/complete/helpers.ts`,
+`supabase/migrations/20260801200000_complete_work_order_via_token_rpc.sql`
 
-Found via e2e `21-work-order-offline.spec.ts:103` failing with
-`invoices.length` `Expected: 1, Received: 0` — the work order reached
-`completed` with **zero** invoice rows.
+The completion is now ONE TRANSACTION: `complete_work_order_via_token()` claims
+the work order, allocates the invoice number, inserts the invoice, the line
+items and the status-change row, and returns the result. Either all of it
+lands or none does, which closes all three residual holes the 2026-07-31
+reordering left open — the compensating delete that could itself fail, the
+window where an invoice existed against a not-yet-completed work order, and
+the burnt invoice number on a post-sequence failure. `rollbackUnclaimedInvoice`
+and `createVendorInvoice` are deleted rather than kept: a rolled-back
+transaction leaves nothing to compensate for.
 
-The route performs one logical action across several non-transactional
-writes: create the invoice (line-item insert → `next_work_order_invoice_seq`
-RPC → `work_order_invoices` upsert), atomically claim
-`work_orders.status = 'completed'`, then insert line items, audit, and
-dispatch events. Originally the claim came *first*, which made a failure
-anywhere after it unrecoverable: the WO was already irreversibly
-`completed`, so every vendor retry could only get the already-closed
-`409 → terminal dead-letter`, and the invoice was lost forever while the
-work order looked done. That affects the entire vendor-gets-paid flow.
+The route keeps token validation, payload validation, the audit log and Inngest
+dispatch — the last two deliberately OUTSIDE the transaction, since an event
+fired from one that later aborts cannot be unfired.
 
-**Already fixed (2026-07-31):** invoice creation now runs *before* the
-claim, with `rollbackUnclaimedInvoice()` compensating when the claim is
-lost, and line items deliberately kept *after* the claim (the claim is the
-mutex that keeps them exactly-once; they have no unique key to dedupe a
-replay against). `status = 'completed'` is now the last irreversible thing
-to become true, so a pre-claim failure leaves the WO claimable and the
-vendor's retry succeeds. Covered by `unit/route-handlers/
-work-order-token-complete{,-helpers}.test.ts`, four of which were confirmed
-to fail against the old ordering.
+Verified against the live E2E project inside a rolled-back `DO` block: claim +
+invoice + 2 line items + 1 status row in a single call; a replay returning
+`already_closed` and writing nothing further; an unpriced completion writing no
+invoice and leaving `actual_cost` untouched. Applied to BOTH projects.
 
-**Still outstanding — the proper fix.** Ordering plus a compensating
-delete is a saga, not a transaction. Residual holes:
+**It also surfaced a live silent-data-loss bug** — see the note in
+`unit/guardrails/generated-column-writes.test.ts`. `work_order_line_items.line_total`
+is `GENERATED ALWAYS`, so the old `insertVendorLineItems()` insert failed with
+428C9 on EVERY vendor completion and only `console.error`'d, discarding the
+vendor's itemisation entirely. A second instance of the same class
+(`assignment_outcomes.duration_minutes` in `turnover-events.ts`) was found by
+the new guardrail and fixed in the same change.
 
-- The compensating `rollbackUnclaimedInvoice()` can itself fail (it logs,
-  it cannot guarantee). A crash between insert and rollback leaves an
-  orphan invoice on a work order that was never completed by this request.
-- Between the invoice upsert and the claim, an invoice exists for a WO that
-  is not yet `completed` — the inverse of the original window, and readers
-  (PM invoice list, owner P&L) can observe it.
-- Sequence allocation via `next_work_order_invoice_seq` is a separate
-  round trip; a failure after it burns a number and leaves a gap.
+**The earlier blocking concern is resolved:** migrations are now applied to
+both the production and E2E projects via MCP as part of the change, so a new DB
+function no longer reds the e2e suite until someone applies it by hand.
 
-**Suggested fix:** move the whole completion into a single
-`SECURITY DEFINER` plpgsql RPC that claims the work order, allocates the
-invoice number, inserts the invoice and line items, and returns the result
-— one transaction, so either all of it happens or none of it does. The
-route keeps token validation, payload validation and event dispatch;
-everything touching the database becomes one call. Existing tests should
-largely port over, since the externally-observable invariant is unchanged.
-
-**Why it was not done at the time:** CI does not apply migrations to the
-E2E project (`docs/E2E_SETUP.md` is a manual process — confirmed again on
-2026-07-31 when the `db-invariants` job failed for exactly this reason), so
-adding a new DB function would red the entire e2e suite until someone
-applied it by hand. The route-level reordering achieves the same
-externally-observable invariant with no schema change, which is why it went
-first. Doing this properly means sequencing the migration and the code
-change together, and applying to **both** the production and E2E projects.
-
-**Related, same class:** `lib/stripe/vendor-connect-invite.ts`'s
-orphan-on-email-failure path and `lib/integrations/vault.ts`'s pending-link
-claim are the two existing examples in the repo of this "multi-step write
-with an explicit cleanup path" pattern — worth reading before designing the
-RPC, and worth revisiting once a transactional idiom exists here.
-
----
 
 ## 17. Smaller items deferred from the 2026-07-30 pre-launch remediation
 
@@ -708,63 +680,81 @@ transcript.
 
 ---
 
-## 18. `types/database.ts` is hand-written; migrate to CLI-generated types once Supabase CLI auth is available
+## 18. `check-type-drift.mjs` compares column PRESENCE but not NULLABILITY
 
-**File:** `types/database.ts`
+**File:** `scripts/check-type-drift.mjs` (CI job `db-invariants`)
 
-Found while discussing the Hospitable promo migration/type-drift gate. The
-file already carries its own note flagging this:
+Found while wiring the `<Database>` generic into the Supabase clients
+(2026-08-03, PR #548). The gate diffs `types/database.ts` against the live
+schema for enum labels, table presence, and column presence — but never
+compares whether a column is nullable. So a hand-written interface can claim
+`specialty: VendorSpecialty` for a column that is `NULL`-able and the gate
+stays green.
 
-```text
-// NOTE: Hand-written interfaces lack the index signatures required
-// by postgrest-js v2's GenericSchema constraint. The <Database>
-// type arg is omitted in lib/supabase/server.ts so .from() queries
-// default to `any`. Replace with CLI-generated types once connected:
-//   npx supabase gen types typescript --linked > types/database.ts
+That is not a cosmetic gap. It is the direction that actually breaks: code
+trusts the non-null type and dereferences. Four of the defects the generic
+found were exactly this shape — `vendors.specialty` and
+`crew_members.specialty` are nullable, and two components called
+`.replace()` on them unguarded; `property_assets.macrs_class` /
+`depreciation_method` / `salvage_value` are nullable and the depreciation
+calculator passed them straight through. Those four were corrected in #548,
+but nothing stops the next one.
+
+**The data is already there — this is script-only work.** No migration and
+no new plumbing:
+
+- `public.db_type_shape_report()` already returns `is_nullable` per column
+  (see `supabase/migrations/20260726014601_...sql`, the `'is_nullable',
+  (c.is_nullable = 'YES')` key). The script simply ignores it — `grep -c
+  is_nullable scripts/check-type-drift.mjs` is 0.
+- `parseInterfaces()` already captures each field's TYPE TEXT, not just its
+  name (`fields[f[1]] = f[2]`), so the TS side needs no new parsing either.
+
+**Suggested fix:** in the section-3 column loop, for every column present on
+both sides, compare `dbCols[col].is_nullable` against whether the TS type
+text matches `/\|\s*null/` (or the field is declared optional with `?:`).
+
+Two asymmetries worth encoding rather than treating alike:
+
+- **DB nullable + TS non-null → failure.** This is the dangerous direction
+  described above.
+- **DB NOT NULL + TS nullable → warning at most.** Over-defensive, never
+  unsafe, and sometimes deliberate (a column that is NOT NULL today but was
+  backfilled recently). Consider reporting it separately rather than failing.
+
+**Size, measured 2026-08-03 against production: 17 columns**, all in the
+dangerous direction, across 90 mapped tables / 1106 fields:
+
+```
+bookings.source                            ical_feeds.source
+checklist_item_signals.dynamic_photo_required   organizations.repuguard_status
+checklist_item_signals.flag_probability     properties.avg_stay_length
+crew_members.preferred_contact              properties.avg_turnovers_per_month
+crew_members.specialty                      properties.bedrooms
+ical_feeds.last_sync_status                 properties.checkin_time
+vendors.specialty                           properties.checkout_time
+work_order_line_items.line_total            properties.max_guests
+                                            properties.property_type
 ```
 
-Checked what "once connected" actually requires: `npx supabase` fetches
-the CLI binary fine in any environment with npm registry access — that was
-never the blocker. What's missing is credentials: `SUPABASE_ACCESS_TOKEN`
-(a personal access token, for `supabase login`/`link` against the
-Management API) and the project's database password (for `db push`'s
-direct Postgres connection; `gen types` needs the access token + link,
-not the DB password). Neither is set in any environment this repo has run
-in so far — only the app-facing `NEXT_PUBLIC_SUPABASE_URL`, anon key, and
-service role key are present. Whether a future environment gets these
-depends on deliberately adding them to that environment's env var
-configuration.
+17 is small enough to FIX in the same PR that adds the check, so this needs
+no clean-baseline ratchet — unlike `supabase-error-handling`. Note most of
+these are nullable-with-a-DEFAULT, so the fix is usually to mark the field
+`| null` and route the read through `withPropertyDefaults()`
+(`lib/properties/defaults.ts`) or the column's own default, not to change
+the schema.
 
-**Not a drop-in swap once creds exist.** Checked how the current hand-written
-types are actually consumed: **103 files** across `app/`, `lib/`, and
-`components/` import named interfaces from this file (`Property`,
-`Turnover`, `WorkOrder`, etc.) — zero files import via the
-`Database['public']['Tables']['x']['Row']` shape that `supabase gen types`
-produces. Running the generator and overwriting `types/database.ts` as-is
-would break every one of those 103 import sites, since the generated
-output has no per-table named types, only the nested `Database` interface.
+**Two gotchas for whoever picks this up:**
 
-**Suggested fix, once CLI auth is available (its own PR, not a quick
-follow-up):**
-1. Generate the raw CLI output to a separate file, e.g.
-   `types/database.generated.ts` — never hand-edit this one; regenerate on
-   every migration instead.
-2. Reduce `types/database.ts` to a thin layer of named type aliases over
-   it: `export type Property = Database['public']['Tables']['properties']['Row']`,
-   etc. — this removes the tedious "hand-copy every column from the
-   migration" step (the biggest cost of the current approach — see the
-   "types/database.ts — Keep in Sync With Every Migration" rule in
-   CLAUDE.md) while keeping all 103 existing import sites working
-   unchanged, since `Property` etc. keep existing as names, just aliased
-   instead of hand-typed.
-3. Wire the `Database` type argument into `createClient()`/
-   `createServiceClient()` in `lib/supabase/server.ts` (currently omitted
-   — see the comment already in `types/database.ts` above — so every
-   `.from()` call returns `any` today regardless of what's in this file).
-   Expect this step to surface a real wave of new type errors across the
-   ~103 call sites once genuine typing kicks in on queries that have been
-   running loose; budget time for that cleanup as part of the same PR
-   rather than treating it as a surprise scope increase partway through.
+- The interfaces carry PostgREST embed aliases as fields (e.g.
+  `turnovers.turnover_assignments`, `turnover_assignments.crew_members`).
+  They are not columns, so they simply won't join against
+  `information_schema` — but they must not be reported as "TS field missing
+  from the DB" either. `COLUMN_ALLOWLIST` already exists for this.
+- `Json` columns and the deliberate widenings (e.g.
+  `guidebook_configurations.extension_contact_method` is TEXT-with-CHECK and
+  is intentionally typed `string | null`, narrowed at the boundary instead)
+  need an allowlist entry or they will read as drift.
 
 ---
 

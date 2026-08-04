@@ -3,10 +3,9 @@ import { useEffect, useRef, useState, useTransition, useSyncExternalStore } from
 import Link                         from 'next/link'
 import { usePathname, useRouter }   from 'next/navigation'
 import { CalendarCheck, CalendarDays, MessageSquare, LogOut, Bell, X, HelpCircle, WifiOff, Wrench } from 'lucide-react'
-import { useLiveQuery }             from 'dexie-react-hooks'
-import { DexieProvider, useDexieDb } from '@/lib/dexie/context'
+import { DexieProvider }           from '@/lib/dexie/context'
 import { CrewContext }              from '@/lib/crew/crew-context'
-import { closeDexieDb, markDexieShutdown, resumeDexieDb } from '@/lib/dexie/schema'
+import { closeDexieDb, listenForRemoteShutdown, markDexieShutdown, resumeDexieDb } from '@/lib/dexie/schema'
 import { getSyncEngine, disposeSyncEngine } from '@/lib/dexie/syncService'
 import { processPendingPhotoUploads } from '@/lib/dexie/photo-sync'
 import { countPendingSyncWork }      from '@/lib/dexie/prune'
@@ -47,11 +46,14 @@ async function subscribeToPush(reg: ServiceWorkerRegistration) {
 export function CrewShell({
   crewName,
   userId,
+  unreadCount,
   children,
 }: {
-  crewName: string
-  userId:   string
-  children: React.ReactNode
+  crewName:     string
+  userId:       string
+  /** Server-rendered — see the note in CrewBottomNav. */
+  unreadCount?: number | null
+  children:     React.ReactNode
 }) {
   const router = useRouter()
   const [isPending, startTransition] = useTransition()
@@ -95,16 +97,12 @@ export function CrewShell({
    * unsynced after that, it blocks with a confirmation instead of wiping
    * silently.
    *
-   * NOTE: this intentionally does NOT, and cannot, cover crew messages.
-   * Sending a message (sendMessageToPM in
-   * app/(dashboard)/messages/actions.ts) is a live Server Action call, not
-   * a queued Dexie mutation — unlike checklist/inventory/turnover/work
-   * order writes, a message that fails to send is never written to
-   * db.mutations in the first place, so there's nothing here for this
-   * count to catch. Messages are the one crew-facing action that isn't
-   * offline-safe today. If that ever changes, route it through
-   * enqueueMutation (lib/dexie/syncService.ts) like everything else does,
-   * and it'll automatically be covered by this same count.
+   * This DOES now cover crew messages. Sending one used to be a live Server
+   * Action, so a message that failed to send was never written to
+   * db.mutations and this count could not see it — messages were the one
+   * crew-facing action that wasn't offline-safe. They go through
+   * queueMessageToPM() and the outbox now, so they are counted here like
+   * every other queued write.
    */
   async function requestLogout() {
     if (loggingOut) return
@@ -236,6 +234,21 @@ export function CrewShell({
       reportError(err, { site: 'page.crew.crew-shell.push' })
     }
   }
+
+  // Logging out in ANOTHER tab has to end this one too. IndexedDB is a
+  // per-origin resource but the shutdown latch is per-document module state,
+  // so without this a sibling tab kept draining, kept re-creating the database
+  // the logging-out tab had just deleted, and kept rendering the signed-out
+  // crew member's assignments — and its open connection blocked that delete
+  // outright, which is what left logout hanging with the user still signed in.
+  useEffect(() => {
+    if (!userId) return
+    return listenForRemoteShutdown(userId, () => {
+      setSignedOut(true)
+      disposeSyncEngine()
+      startTransition(() => router.push('/login?next=/crew'))
+    })
+  }, [userId, router])
 
   useEffect(() => {
     if (!userId || signedOut) return
@@ -382,24 +395,21 @@ export function CrewShell({
         )}
 
         <main className="flex-1 px-4 py-6">{children}</main>
-        <CrewBottomNav userId={userId} onHelpClick={() => setShowInfo(true)} />
+        <CrewBottomNav unreadCount={unreadCount ?? 0} onHelpClick={() => setShowInfo(true)} />
       </div>
     </DexieProvider>
     </CrewContext.Provider>
   )
 }
 
-function CrewBottomNav({ userId, onHelpClick }: { userId: string; onHelpClick: () => void }) {
+/**
+ * `unreadCount` is server-rendered by app/crew/layout.tsx and refreshes on
+ * navigation. It used to be a Dexie live query, which was the only reason
+ * `messages` had to be cached on the device at all — 500 rows every five
+ * minutes to keep one number current. A badge does not need to be live.
+ */
+function CrewBottomNav({ unreadCount, onHelpClick }: Readonly<{ unreadCount: number; onHelpClick: () => void }>) {
   const pathname = usePathname()
-  const db = useDexieDb()
-
-  const unreadCount = useLiveQuery(
-    () => db.messages
-      .where('recipient_id').equals(userId)
-      .filter((m) => !m.read_at)
-      .count(),
-    [userId]
-  ) ?? 0
 
   const tabs = [
     { href: '/crew',              label: 'Assignments',  icon: CalendarCheck },
@@ -593,7 +603,7 @@ const FAQ_ITEMS = [
   },
   {
     q: 'Exactly what saves when I don’t have signal?',
-    a: 'Checklist taps, crew notes, photos, inventory counts, starting or completing a turnover, completing a work order, and time-off requests all save to your phone instantly and sync automatically once you’re back online. Messages to your operations team are the one exception — those need a live connection to send (see the messaging question below).',
+    a: 'Checklist taps, crew notes, photos, inventory counts, starting or completing a turnover, completing a work order, messages to your operations team, and time-off requests all save to your phone instantly and sync automatically once you’re back online. The one thing that needs a connection is READING older messages — your conversation history loads live, so it may be blank until you’re back in range.',
   },
   {
     q: 'How do I know if something hasn’t synced yet?',
@@ -628,8 +638,8 @@ const FAQ_ITEMS = [
     a: 'No, notifications need a connection to arrive. You’ll see any new assignment the moment your phone reconnects — it’s not lost, just delayed until then.',
   },
   {
-    q: 'I tried to message my operations team with no signal and it doesn’t look like it sent — why?',
-    a: 'Messages need a live connection at the moment you hit send — unlike checklists and inventory, they’re not saved and auto-retried in the background. If you’re not sure a message went through, don’t assume it queued itself — send it again once you have signal.',
+    q: 'I sent a message with no signal — did it go through?',
+    a: 'It’s saved and waiting. A message you send with no signal shows a clock icon and “Sending when you have signal”, and it goes out on its own the moment you’re back in range — you don’t need to retype or resend it. If it ever genuinely can’t be delivered it moves to the red “didn’t sync” panel at the top of the screen. Older messages in the conversation only load when you have a connection, so the thread above may look empty while you’re offline.',
   },
   {
     q: 'I just got to a property with no signal and a screen won’t load / shows an error page — what happened?',

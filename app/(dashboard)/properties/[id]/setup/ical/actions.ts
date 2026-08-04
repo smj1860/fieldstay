@@ -1,5 +1,6 @@
 'use server'
 
+import { toDbEnum } from '@/lib/db-enums'
 import { revalidatePath } from 'next/cache'
 import { redirect, unstable_rethrow } from 'next/navigation'
 import { requireOrgMember } from '@/lib/auth'
@@ -50,7 +51,7 @@ export async function addIcalFeed(
 
     const name   = (formData.get('name') as string)?.trim()
     const url    = (formData.get('url') as string)?.trim()
-    const source = formData.get('source') as string || 'other'
+    const source = toDbEnum('ical_source', formData.get('source') as string | null, 'other')
 
     if (!name) return { error: 'Feed name is required' }
     if (!url)  return { error: 'Calendar URL is required' }

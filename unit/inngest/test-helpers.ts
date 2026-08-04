@@ -16,7 +16,15 @@ export interface StepStub {
 export interface HandlerContext {
   event:  unknown
   step:   StepStub
-  logger?: { info: (...args: unknown[]) => void; error: (...args: unknown[]) => void }
+  // `warn` is optional but real — Inngest's logger exposes it and handlers use
+  // it (e.g. inventory-events' zero-line-item PO repair path). Omitting it here
+  // meant a test that supplied one failed to typecheck while a handler that
+  // called one failed at runtime.
+  logger?: {
+    info:  (...args: unknown[]) => void
+    error: (...args: unknown[]) => void
+    warn?: (...args: unknown[]) => void
+  }
 }
 
 interface RunnableInngestFunction {

@@ -181,7 +181,14 @@ turnovers                   — Has turnover_status, is_same_day_turnover,
                               suggested_crew_ids, suggestion_reasoning, suggestion_status
 turnover_assignments        — crew → turnover join
 crew_members                — Has home_lat/lng, reliability_score, capacity_score
-crew_availability           — crew marks available/unavailable by date
+crew_availability           — crew marks available/unavailable by date. NOT in the crew
+                              Dexie cache: time off is an online-only screen (server-rendered
+                              rows + a Server Action), so it is not synced to devices.
+                              `messages` is the same — history is server-rendered and the
+                              unread badge is a server-side count; only SENDING is offline
+                              (an outbox mutation). `property_assets`/`inventory_items` are
+                              cached but pulled on assigned-property-set change plus screen
+                              open (lib/dexie/sync/scope.ts), not on the safety poll
 assignment_outcomes         — learning loop: PM accepts/overrides, duration from
                               checklist timestamps, pm_rating
 ```
@@ -420,7 +427,7 @@ and is **fully gone** — no dependency, no `lib/powersync/` directory, no
   shapes mirror the Supabase tables they cache. Get an instance via
   `getDexieDb(userId)`.
 - `lib/dexie/context.tsx` — `DexieProvider` pulls turnovers/properties/
-  inventory/checklists/messages from Supabase into Dexie tables on an interval
+  inventory/checklists from Supabase into Dexie tables on an interval
   and on reconnect; client components read from Dexie, never from Supabase
   directly.
 - `lib/dexie/syncService.ts` — `enqueueMutation()` queues a local write into
@@ -450,8 +457,33 @@ almost the whole crew surface):
   `lib/dexie/prune.ts` — `messages` grew forever at 500 rows a pull. And every
   member of the `MutationTable` union must have a retry affordance in
   `app/crew/_components/failed-sync-banner.tsx`: a mutation that dead-letters
-  where no crew member can see it is work silently thrown away. Enforced by
+  where no crew member can see it is work silently thrown away. BOTH outboxes
+  (`mutations` and `pending_photo_uploads`) need a dead-letter query AND a
+  stalled-queue query there — a transport failure never sets `failed`, so the
+  stalled surface is its only visible one. Enforced by
   `unit/guardrails/crew-dead-letter-coverage.test.ts`.
+- **The optimistic local write and its outbox row commit in ONE Dexie
+  transaction.** Use `writeAndQueue()`/`enqueueMutationTx()` (`lib/dexie/
+  helpers.ts`, `lib/dexie/syncService.ts`) — never a bare `table.update()`
+  followed by a separate `enqueueMutation()`. As two transactions, a PWA
+  reclaimed between them left the cache updated with nothing queued to send
+  it, and no delta pull corrects that because the server row's `updated_at`
+  never changed. Nothing async-external may go inside the block: an IDB
+  transaction auto-commits the moment an await leaves it, so the
+  `processOutbox()` kick stays outside.
+- **Abandoning a queued mutation rewinds the cursor that was masking the
+  server row.** `discardFailedMutation()` and `pruneExpiredDeadLetters()` call
+  `invalidateCursorsFor()`. While a mutation is queued, `shadow.ts` replays it
+  over every pull AND `advanceCursor()` moves past the server row it masks —
+  drop it without rewinding and the delta filter skips that row forever.
+  `forceFullCrewResync()` is the whole-cache version, for a device that has
+  already diverged.
+- **`failed` is `0 | 1`, never a boolean** (`DeadLetterFlag`). IndexedDB has no
+  boolean key type, so a boolean `failed` is silently absent from its index and
+  every dead-letter query degrades to a full scan — three of which are
+  `useLiveQuery`s live on every crew screen, over a table written on every
+  checklist tick. Truthiness checks (`!m.failed`) are unaffected; only literal
+  `true`/`false` writes.
 
 **Crew Sync v2 coverage convention** (`docs/CREW_SYNC_V2_PHASES.md` section 5e):
 every Supabase-backed table the crew PWA caches in Dexie is covered by the
@@ -589,6 +621,24 @@ export async function myAction(input: MyInput): Promise<ActionResult> {
 
 **This is the most important housekeeping rule in the codebase.**
 
+There are now TWO type files, and a migration touches both:
+
+- `types/database.generated.ts` — GENERATED from the live schema, never
+  hand-edited. Regenerate with
+  `npx supabase gen types typescript --project-id vpmznjktllhmmbfnxuvk > types/database.generated.ts`
+  (or the Supabase MCP `generate_typescript_types` tool). It owns `Json` and
+  `Database`; `types/database.ts` re-exports both from it. It exists because
+  the hand-written interfaces do not satisfy postgrest-js's `GenericSchema`
+  constraint, which is why `lib/supabase/server.ts` still omits the
+  `<Database>` generic and no `.from()`/`.rpc()` call is type-checked yet —
+  see the comment in that file for the remaining work.
+- `types/database.ts` — hand-written named interfaces (`Property`,
+  `WorkOrder`, `MemberRole`, …), the app's import surface. Diffed against the
+  live schema on 2026-08-02 and accurate: the only differences were two
+  PostgREST embed aliases (not columns) and the deliberately-omitted
+  deprecated `work_orders.assigned_crew_id`. `scripts/check-type-drift.mjs`
+  keeps it honest.
+
 Whenever a DB migration adds or changes a column, update `types/database.ts`
 in the same commit. The Supabase TypeScript client infers return types from
 this file — not from the live database schema. A column that exists in the DB
@@ -724,6 +774,7 @@ async function geocodeZip(zip: string): Promise<{ lat: number; lng: number } | n
 | `assigned_crew_id` on work_orders | `assigned_crew_member_id` (old column deprecated) |
 | `membership.user_id` in server actions | `user.id` — OrgMembership has no user_id field. Destructure `user` from `requireOrgMember()` |
 | `supabase.raw('column_name')` | Does not exist on Supabase JS client. For column-to-column comparisons (e.g. `current_quantity < par_level`), fetch the rows and filter in JavaScript |
+| Naming a `GENERATED ALWAYS` column in an `.insert()`/`.update()` payload (`work_order_line_items.line_total`, `assignment_outcomes.duration_minutes`, `checklist_item_signals.flag_probability`/`.dynamic_photo_required`) | Omit it and let the database compute it. Postgres rejects the WHOLE statement with `428C9`, not just that column — and where the error is only logged, the entire write vanishes silently. This shipped twice: every vendor completion stored zero line items, and the crew-scoring learning loop recorded nothing. `supabase/schema_reference.sql` renders these as plain `DEFAULT`s, which is what made both inserts look correct — the LIVE DB is authoritative. Enforced by `unit/guardrails/generated-column-writes.test.ts` |
 | Adding a DB column via migration without updating `types/database.ts` | Every migration that adds a column must also add that column to the matching interface in `types/database.ts` in the same commit. Supabase's TS client infers return types from this file, not from the live DB. Missing columns here cause build failures even when the query and select string are correct |
 | Adding a new event to `events.ts` outside the closing `}` of `FieldStayEvents` | The final `}` in `events.ts` closes the `FieldStayEvents` type. Every new event entry must be placed before it, with a comma after the preceding entry's closing brace |
 | An unbounded `.select()` in a platform-wide cron | PostgREST's `max_rows = 1000` truncates it silently — 200, no error, no signal. Paginate via `fetchAllRows()` (`lib/inngest/paginate.ts`) or use a `count`/`head` aggregate |
@@ -741,6 +792,7 @@ async function geocodeZip(zip: string): Promise<{ lat: number; lng: number } | n
 | Checking `role = 'admin'` manually | Use `is_org_member()` — it handles `owner` automatically |
 | Skipping Stripe webhook signature verification | Always `constructEvent()` first |
 | Using a new event name in `inngest.send()` without registering it | Add to `FieldStayEvents` in `lib/inngest/events.ts` first — build fails with type error if missing |
+| Completing a work order by writing `status: 'completed'` yourself | Write `workOrderCompletionFields()` and then call `finalizeWorkOrderCompletion()` with the rows the UPDATE returned (`app/(dashboard)/maintenance/complete-work-order-helpers.ts`) — the status write alone skips the `work-order/completed` event (so no `owner_transactions` maintenance expense), `completed_date`, the `work_order_updates` row, and the source-schedule advance. Enforced by `unit/guardrails/work-order-completion-side-effects.test.ts` |
 | Creating Inngest functions at `inngest/functions/` | All functions live at `lib/inngest/functions/` |
 | Adding a second `export const { GET, POST, PUT } = serve({...})` to the Inngest route | There is exactly ONE serve() call in `app/api/inngest/route.ts` — add functions to its array |
 
@@ -792,6 +844,14 @@ verified identical on that date (276/276).
 
 Write a new file in `supabase/migrations/` named `YYYYMMDDHHMMSS_description.sql`
 and apply it via `supabase db push` against project `vpmznjktllhmmbfnxuvk`.
+
+**Apply it to the E2E project (`syhthijeqlnltufdawyb`) in the same sitting.**
+`scripts/check-type-drift.mjs` runs against E2E, not production, and refuses
+to run against prod at all — so a migration applied only to prod fails CI with
+what looks like a types problem and is really a project-skew one. The rule was
+already in `docs/E2E_SETUP.md` ("keep the E2E project migrated in lockstep");
+it is repeated here because this section naming only the production ref is
+what made it easy to miss.
 
 Always update `types/database.ts` in the same commit as the migration.
 
@@ -878,15 +938,17 @@ const { supabase, crew, user } = auth
 | What you might assume | What actually exists |
 |---|---|
 | `work_order_notes` | `work_order_updates` |
-| `inventory_count_draft_items.inventory_item_id` | `item_id` |
-| `inventory_count_draft_items.submitted_quantity` | `counted_qty` |
 | `memberships` | `organization_members` |
 | `membership.user_id` | `user.id` |
 | `assigned_crew_id` | `assigned_crew_member_id` |
 
-**Two inventory tables with different column names — do not mix them:**
-- `inventory_count_draft_items`: `item_id`, `counted_qty`, `note`, `notes`, `previous_quantity`
-- `inventory_count_items` (legacy direct-commit): `inventory_item_id`, `quantity_counted`
+**One inventory count family.** `inventory_counts` + `inventory_count_items`
+(`inventory_item_id`, `quantity_counted`) is now the only one, used by the PM's
+own counts and by the crew route. The parallel `inventory_count_drafts` /
+`inventory_count_draft_items` pair — with its own, different column vocabulary —
+was dropped by `20260804125424_drop_inventory_count_drafts.sql`: it was
+unreachable (its only writer was a crew page nothing linked to), held zero rows,
+and gated crew counts behind a PM approval that product never wanted.
 
 ### UI component locations
 
@@ -1152,9 +1214,9 @@ item below" as part of the definition of done for any non-trivial change.
 ## Structural Enforcement — Guardrails
 
 Conventions in this file are enforced in code wherever they can be, so
-following them stops being a memory test. Four layers, checked in CI via
+following them stops being a memory test. Five layers, checked in CI via
 `npm run lint` and `vitest run` (plus the `db-invariants` CI job for layer
-4, which runs two scripts):
+4, which runs two scripts, and the `semgrep` job for layer 5):
 
 1. **ESLint rules** (`eslint.config.mjs`, the "Structural enforcement"
    config block) — AST-level bans scoped to `app/`, `lib/`, `components/`:
@@ -1203,13 +1265,6 @@ following them stops being a memory test. Four layers, checked in CI via
      without masking it — the structural backstop for the sensitive-data
      rule in Code Quality Standards and the Standing Audit Checklist. A
      clean-baseline ratchet, same model as `tailwind-color-ratchet`.
-   - `inventory-table-column-mixup` — a query against
-     `inventory_count_draft_items` or `inventory_count_items` may not
-     reference the other table's column names (the "do not mix them" pair
-     in Table and column names below) — scoped to the same `.from(...)`
-     call's own query chain, not the whole file, since both tables' column
-     names are individually valid TypeScript, just wrong for the table in
-     scope. Also a clean-baseline ratchet.
    - Added by the 2026-07-30 pre-launch remediation, one line each — read the
      header comment in each file for the defect it encodes:
      `unbounded-select` (the `max_rows = 1000` rule, `lib/inngest/**`),
@@ -1228,6 +1283,11 @@ following them stops being a memory test. Four layers, checked in CI via
      job still runs every step, no step is `continue-on-error`, `lint` keeps
      its `--max-warnings` ratchet, and the two install-free `db-invariants`
      scripts stay dependency-free and self-disarming.
+   - `generated-column-writes` — no `.insert()`/`.update()` payload may name a
+     `GENERATED ALWAYS` column. The column list is verified against the live
+     `information_schema.columns.is_generated`, NOT against
+     `supabase/schema_reference.sql`, which renders generated columns as plain
+     `DEFAULT`s and is exactly why this class shipped twice.
    - `public-route-rate-limiting` — every prefix in `proxy.ts`'s
      `TOKEN_ROUTES` has a matching branch in `rateLimiterForPathname()`,
      and the two guessable-invite-token `BYPASS_ROUTES` entries
@@ -1264,6 +1324,97 @@ following them stops being a memory test. Four layers, checked in CI via
    `20260725043000_add_quote_requested_to_wo_status.sql`. Both allowlists
    are shrink-only, same ratchet as `SERVICE_ROLE_ONLY_TABLES`. Self-disarms
    the same way as the other two checks.
+
+5. **Semgrep rules** (`.semgrep/`, CI `semgrep` job) — real TypeScript AST
+   matching, so a rule survives reformatting, renamed intermediates, and
+   multi-line call chains that defeat the text-scanning guardrail tests. Two
+   families, gated differently; read `.semgrep/README.md` before adding one.
+   - `.semgrep/chokepoints.yml` — a capability with exactly ONE legitimate
+     owner, named in that rule's `paths.exclude`. At **0 findings**, which is
+     what lets it gate at `--error` across the whole tree. Covers: the service
+     role key outside `lib/supabase/server.ts`, Telnyx outside
+     `lib/sms/telnyx.ts`, a raw `<limiter>.limit(` outside `lib/rate-limit.ts`,
+     a role-filtered `organization_members` read outside the auth helpers /
+     `getPmMembersByOrgIds`, an outbound `fetch()` to a literal `https://` URL
+     with no `AbortSignal`, `void` on a lazy PostgREST builder (the request is
+     never sent), `getPublicUrl()` on the three private buckets, and the
+     `memberships`/`work_order_notes`/`assigned_crew_id` names that do not
+     exist. The last two were PROMOTED from `ratchet.yml` on 2026-08-01 once
+     their counts hit 0 — that promotion is the ratchet's purpose, and it
+     requires deleting the rule's `baseline-counts.json` key in the same
+     change.
+   - `.semgrep/ratchet.yml` — a defect class with many legitimate owners and
+     hundreds of live sites (discarded write results, `data` destructured
+     without `error`, and the unbounded-`.select()` ladder below). Gated on
+     `--baseline-commit` (only findings NEW vs. the PR base fail) plus
+     `.semgrep/baseline-counts.json`, a committed per-rule count that
+     `scripts/check-semgrep-ratchet.mjs` allows to move only DOWN. Lock in a
+     burn-down with `node scripts/check-semgrep-ratchet.mjs --update`.
+   - **Severity inside a ratchet family matters as much as the pattern.** The
+     single `fieldstay-supabase-unbounded-select` rule reported 284 findings,
+     every one pattern-correct and most of them the case this file explicitly
+     permits (one org's page). It is now six mutually exclusive, exhaustive
+     tiers ranked by what actually bounds the result set —
+     `-table-scan` (nothing but the table, ERROR, 38 → **0, PROMOTED to
+     `chokepoints.yml` 2026-08-01**),
+     `-cross-tenant` (no org scope AND no parent row, ERROR, 53 → **0,
+     PROMOTED to `chokepoints.yml` 2026-08-02**),
+     `-single-parent` (one non-org parent id, no org scope, WARNING, 47),
+     `-global-table` (the table has no `org_id` column, INFO, 5),
+     `-in-list` (one org but sized by an `.in()` array, WARNING, 46),
+     `-org-scoped` (one org, one parent — hygiene only, INFO, 113).
+     Tier 1 WAS the burn-down target and reached 0, so it now gates at
+     `--error` across the whole tree rather than only on findings new vs. the
+     PR base — a single unbounded table read anywhere fails the build. Its
+     `baseline-counts.json` key was deleted in the same change, per the
+     promotion rule.
+     **`-cross-tenant` then reached 0 on 2026-08-02 without a single site
+     being fixed** — its 53 findings were 47 parent-scoped reads, 5 reads of
+     org-less platform tables, and 1 correctly org-scoped read the matcher
+     could not see. Splitting `-single-parent`/`-global-table` out is what
+     made the tier mean its name; the same reads are still counted. Promoting
+     it required two checks a count of 0 cannot give you: that the rule still
+     FIRES (verified against a deliberately cross-tenant read plus org-scoped,
+     dotted-org-scoped and parent-scoped controls — a rule at zero because it
+     is broken looks identical to one at zero because the tree is clean), and
+     that its `metavariable-regex` negatives — which only recognise a
+     string-literal column name — cannot be tripped by a dynamic
+     `.eq(someVar, …)`; there are currently zero such call sites.
+     **Two invariants make a "0"
+     here trustworthy, and both are enforced rather than asserted:** the
+     ladder must stay a partition (one site, one tier — enforced by
+     `scripts/check-semgrep-ratchet.mjs`, which caught a real 2b/2c overlap
+     that had inflated the total by one), and the org matcher must be
+     dotted-aware (`.eq('rel.org_id', …)` through an `!inner` join IS org
+     scope; the literal `'org_id'` matcher counted a single-tenant read as a
+     cross-tenant scan). The global-table list is derived from the live
+     schema — no `org_id` column and no FK to a table that has one — never
+     hand-curated, and those tables stay COUNTED because `profiles` /
+     `processed_webhooks` / `support_kb_chunks` still truncate at 1000.
+     `lib/inngest/**` gets no tier of its own because
+     `unit/guardrails/unbounded-select.test.ts` already gates it at file
+     granularity. See `.semgrep/README.md` for the semgrep mechanics
+     these tiers depend on (a positive `pattern-inside` must not be wrapped
+     in `pattern-either`, though a nested `patterns:` block is safe;
+     `.in('org_id', …)` is not org scope).
+   - **`paths.exclude` expresses ownership; `pattern-not-inside` expresses
+     handling.** They are not interchangeable. What makes `lib/sms/telnyx.ts`
+     allowed to call Telnyx is its path — its identity as the SMS_ENABLED +
+     nudge-budget chokepoint — not anything about the enclosing expression.
+     What makes a `.select()` acceptable is that it sits inside a `.limit()`
+     call. Using the wrong one gives either a rule that suppresses the same
+     construct everywhere it appears in a similar shape, or a permanently
+     blind file.
+   - **Never** silence a ratchet with `nosemgrep` or a new `paths.exclude`.
+     Fix the site or leave it counted. Prefer narrow-and-precise over
+     broad-and-suppressed: the naive table-wide ban on
+     `.from('organization_members')` gives 17 noisy hits, the role-filtered
+     narrowing gives 3 genuine ones.
+   - Deliberately overlapping with several `unit/guardrails/` tests, and NOT
+     replacing them — those tests carry cross-file invariants (every
+     `MutationTable` has a retry affordance, every `TOKEN_ROUTES` prefix has a
+     limiter branch, the CI-gating meta-checks) that are not patterns and have
+     no semgrep expression.
 
 **The meta-rule: a new convention ships WITH its guardrail.** If a rule is
 worth adding to this file, add its ESLint rule or `unit/guardrails/` test in

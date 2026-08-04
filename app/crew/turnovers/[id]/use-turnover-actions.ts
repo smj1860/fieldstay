@@ -6,13 +6,16 @@ import { createClient } from '@/lib/supabase/client'
 import { savePendingPhotoBlob, compressPhotoForQueue } from '@/lib/dexie/photo-queue'
 import { processPendingPhotoUploads } from '@/lib/dexie/photo-sync'
 import {
-  updateChecklistItem, startTurnover, completeTurnover, updateInventoryQuantity,
+  updateChecklistItem, startTurnover, completeTurnover,
   confirmChecklistComplete, confirmInventoryComplete, markInventoryStarted,
+  loadTurnoverInventoryCounts, saveTurnoverInventoryCounts, submitTurnoverInventoryCounts,
+  type TurnoverInventoryCounts,
 } from '@/lib/dexie/helpers'
 import type { ChecklistInstanceItemRow as ChecklistItem, InventoryItemRow as InvRow, PropertyAssetRow } from '@/lib/dexie/schema'
 import { assetTypeDisplayName, missingAssetTypesFromDiscoveredSet } from '@/lib/asset-discovery/config'
 import type { AssetType } from '@/types/database'
 import { orgScopedStoragePath } from '@/lib/storage/object-path'
+import { invalidateScope } from '@/lib/dexie/sync/scope'
 
 import { reportError } from '@/lib/observability/report-error'
 function isAssetDiscovered(asset: Pick<PropertyAssetRow, 'make' | 'model' | 'is_na' | 'photo_url'>): boolean {
@@ -36,7 +39,19 @@ export function useTurnoverActions(id: string) {
   const [uploadError,       setUploadError]       = useState<string | null>(null)
   const [completing,        setCompleting]        = useState(false)
   const [actionError,       setActionError]       = useState<string | null>(null)
-  const [counts,            setCounts]            = useState<Record<string, number>>({})
+  // Counted quantities by item id. A key is present only once the crew member
+  // has actually entered a number — absent means "not counted", which is what
+  // lets 0 mean "counted, none on hand". Nothing is pre-filled from
+  // current_quantity: the input used to default to the last known count, so a
+  // fresh count had to be typed over the previous one, anchoring a measurement
+  // that drives automated purchasing.
+  // Tagged with the turnover it was loaded for: the hook can be re-keyed to a
+  // different turnover before the async load resolves, and merging one
+  // turnover's staged counts into another's would submit the wrong numbers.
+  // `null` (or a stale tag) means "not loaded yet", which is distinct from
+  // "loaded and empty".
+  const [stagedCounts, setStagedCounts] =
+    useState<{ turnoverId: string; values: TurnoverInventoryCounts } | null>(null)
   const [sectionPhotoPrompt, setSectionPhotoPrompt] = useState<string | null>(null)
   const fileInputRefs      = useRef<Record<string, HTMLInputElement | null>>({})
   const sectionPhotoRefs   = useRef<Record<string, HTMLInputElement | null>>({})
@@ -192,8 +207,15 @@ export function useTurnoverActions(id: string) {
 
     const ext     = file.name.split('.').pop() ?? 'jpg'
     const slug    = sectionName.replace(/\s+/g, '-').toLowerCase()
-    const path    = orgScopedStoragePath(orgId, `turnover-${id}`, `section-${slug}-${Date.now()}.${ext}`)
-    const blobKey = `photo-section-${sectionName}-${Date.now()}`
+    // Both keys are UUID-suffixed, not Date.now()-suffixed. Two captures
+    // landing in the same millisecond (a double-tap, a retry) produced
+    // identical keys: the second savePendingPhotoBlob() overwrote the first
+    // blob, both queue rows referenced it, and the first row's
+    // discardPendingPhoto() deleted it out from under the second — which then
+    // hit the missing-blob branch. The tracking row's own id has always used
+    // crypto.randomUUID(); these two just predated the convention.
+    const path    = orgScopedStoragePath(orgId, `turnover-${id}`, `section-${slug}-${crypto.randomUUID()}.${ext}`)
+    const blobKey = `photo-section-${crypto.randomUUID()}`
 
     try {
       const sectionItem = items?.find((i) => i.section_name === sectionName)
@@ -236,8 +258,9 @@ export function useTurnoverActions(id: string) {
     }
     try {
       const ext     = file.name.split('.').pop() ?? 'jpg'
-      const path    = orgScopedStoragePath(orgId, `turnover-${id}`, `${itemId}-${Date.now()}.${ext}`)
-      const blobKey = `photo-${itemId}-${Date.now()}`
+      // UUID-suffixed, not Date.now() — see handleSectionPhoto above.
+      const path    = orgScopedStoragePath(orgId, `turnover-${id}`, `${itemId}-${crypto.randomUUID()}.${ext}`)
+      const blobKey = `photo-${crypto.randomUUID()}`
 
       const compressed = await compressPhotoForQueue(file)
       await savePendingPhotoBlob(userId, blobKey, compressed)
@@ -266,17 +289,46 @@ export function useTurnoverActions(id: string) {
     }
   }
 
-  const handleCountChange = async (itemId: string, newQty: number) => {
-    const qty = Math.max(0, newQty)
-    setCounts((prev) => ({ ...prev, [itemId]: qty }))
+  /**
+   * Records (or clears) one counted quantity locally. `null` clears the entry
+   * back to uncounted — NOT to zero, which is a real and important count in
+   * its own right and the one most worth getting to the restock pipeline.
+   *
+   * No outbox write happens here. The whole count is submitted once, when the
+   * crew member confirms inventory complete; this only stages it durably.
+   */
+  const handleCountChange = async (itemId: string, newQty: number | null) => {
+    // Staged counts not loaded yet — merging into `{}` here would discard
+    // whatever is still on its way back from IndexedDB.
+    if (counts === null) return
+
+    const next: TurnoverInventoryCounts = { ...counts }
+    if (newQty === null) delete next[itemId]
+    else next[itemId] = Math.max(0, newQty)
+
+    setStagedCounts({ turnoverId: id, values: next })
     if (!turnover?.inventory_started_at) {
       await markInventoryStarted(userId, id)
     }
-    await updateInventoryQuantity(userId, itemId, qty)
+    await saveTurnoverInventoryCounts(userId, id, next)
   }
 
+  // A null crewMemberId used to make this a silent no-op: the button did
+  // nothing at all — no error, no toast, no state change — and because
+  // auto-completion keys off both confirmations, the turnover could never be
+  // completed and no cleaning fee posted. The provider now falls back to a
+  // cached id, so this is genuinely rare; when it does happen the crew member
+  // must be told rather than left tapping a dead control.
+  const CREW_ID_UNRESOLVED =
+    'Still connecting your crew profile. Check your connection and try again in a moment.'
+
   const toggleChecklistConfirm = async () => {
-    if (!instance || !crewMemberId) return
+    if (!instance) return
+    if (!crewMemberId) {
+      setActionError(CREW_ID_UNRESOLVED)
+      return
+    }
+    setActionError(null)
     const confirming = !instance.completed_at
     if (confirming && missingAssetTypes.length > 0) {
       setPendingConfirm({
@@ -291,8 +343,32 @@ export function useTurnoverActions(id: string) {
   }
 
   const toggleInventoryConfirm = async () => {
-    if (!crewMemberId) return
-    await confirmInventoryComplete(userId, id, crewMemberId, !turnover?.inventory_confirmed_complete_at)
+    if (!crewMemberId) {
+      setActionError(CREW_ID_UNRESOLVED)
+      return
+    }
+    setActionError(null)
+    const confirming = !turnover?.inventory_confirmed_complete_at
+
+    // Confirming is the submit moment: the staged count goes to the server as
+    // ONE count, which records it, applies the quantities, and fires
+    // inventory/count-submitted so the below-par restock pipeline sees it.
+    // Only items actually counted are sent — an untouched item must not be
+    // submitted as a zero, which would order a full restock of stock nobody
+    // looked at.
+    if (confirming && counts !== null && turnover && Object.keys(counts).length > 0) {
+      try {
+        await submitTurnoverInventoryCounts(userId, turnover.property_id, id, counts)
+        setStagedCounts({ turnoverId: id, values: {} })
+      } catch (err) {
+        console.error('[Crew] inventory count submit failed:', err)
+        reportError(err, { site: 'serverAction.crew.turnovers.submitInventoryCount' })
+        setActionError('Could not save your inventory count. Please try again.')
+        return
+      }
+    }
+
+    await confirmInventoryComplete(userId, id, crewMemberId, confirming)
   }
 
   // Auto-completes the turnover the moment BOTH confirmations are in —
@@ -322,8 +398,40 @@ export function useTurnoverActions(id: string) {
     }
   }, [turnover, instance?.completed_at, userId, id])
 
-  const getCount = (item: InvRow) =>
-    counts[item.id] !== undefined ? counts[item.id] : item.current_quantity
+  // Rehydrate the staged count once per turnover. Keyed by turnover id, so a
+  // partial count abandoned at a property can never bleed into the next
+  // turnover there.
+  useEffect(() => {
+    let cancelled = false
+    void loadTurnoverInventoryCounts(userId, id)
+      .then((staged) => {
+        if (!cancelled) setStagedCounts({ turnoverId: id, values: staged })
+      })
+      .catch((err) => {
+        console.error('[Crew] could not load staged inventory count:', err)
+        reportError(err, { site: 'serverAction.crew.turnovers.loadInventoryCount' })
+        if (!cancelled) setStagedCounts({ turnoverId: id, values: {} })
+      })
+    return () => { cancelled = true }
+  }, [userId, id])
+
+  // Inventory rows are pulled on assigned-property changes rather than on a
+  // timer (lib/dexie/sync/scope.ts). Opening a turnover is when a par-level
+  // edit is worth picking up, so forget the recorded scope and let the next
+  // resync re-pull.
+  useEffect(() => {
+    void invalidateScope(userId, 'scope:inventory_items')
+  }, [userId, id])
+
+  /** Staged counts for THIS turnover, or null until they have loaded. */
+  const counts: TurnoverInventoryCounts | null =
+    stagedCounts?.turnoverId === id ? stagedCounts.values : null
+
+  /** `undefined` = not counted yet. Never falls back to current_quantity. */
+  const getCount = (item: InvRow): number | undefined => counts?.[item.id]
+
+  const countedTotal = inventoryItems?.length ?? 0
+  const countedSoFar = (inventoryItems ?? []).filter((i) => counts?.[i.id] !== undefined).length
 
   const markInProgress = async () => {
     setActionError(null)
@@ -384,7 +492,7 @@ export function useTurnoverActions(id: string) {
     fileInputRefs, sectionPhotoRefs,
     toggleItem, saveNote, openNote, handleSectionPhoto, handlePhotoCapture,
     handleCountChange, toggleChecklistConfirm, toggleInventoryConfirm,
-    getCount, markInProgress, markComplete,
+    getCount, countedSoFar, countedTotal, markInProgress, markComplete,
   }
 }
 

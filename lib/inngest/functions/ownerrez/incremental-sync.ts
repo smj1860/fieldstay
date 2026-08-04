@@ -47,9 +47,11 @@
  */
 
 import { inngest }                      from '@/lib/inngest/client'
+import { fetchAllRows } from '@/lib/inngest/paginate'
 import { NonRetriableError }            from 'inngest'
 import type { GetStepTools }            from 'inngest'
 import { createServiceClient }          from '@/lib/supabase/server'
+import { fetchTurnoverCreatedEvents } from '@/lib/inngest/turnover-created-events'
 import { OwnerRezApiClient, getRedis }  from '@/lib/integrations/providers/ownerrez-api'
 import { RateLimitError, TokenRevokedError, translateSyncError } from '@/lib/integrations/types'
 import { logAuditEvent }                from '@/lib/audit'
@@ -61,8 +63,10 @@ import { createGuidebookPropertyConfigsForProperties } from '@/lib/guidebook/syn
 import { seedPresentAssetsFromAmenities } from '@/lib/asset-discovery/seed-from-amenities'
 import {
   buildOwnerRezBookingRow,
+  partitionMappedBookingRows,
   selectOwnerRezBookingsToPostRevenue,
 } from '@/lib/integrations/providers/ownerrez'
+import type { MappedOwnerRezBookingRow } from '@/lib/integrations/providers/ownerrez'
 import { mergeIntegrationConnectionMetadata } from '@/lib/integrations/connection-metadata'
 
 const PROVIDER = 'ownerrez'
@@ -177,16 +181,26 @@ export const ownerRezIncrementalSync = inngest.createFunction(
 
     const connections = await step.run('fetch-connections', async () => {
       const supabase = createServiceClient({ system: 'inngest:incremental-sync' })
-      let query = supabase
-        .from('integration_connections')
-        .select('id, user_id, org_id, external_user_id')
-        .eq('provider_id', PROVIDER)
-        .eq('status', 'active')
+      // PLATFORM-WIDE when unscoped — every org with a live OwnerRez
+      // connection, not one tenant's. At max_rows = 1000 PostgREST returns the
+      // first 1000 with a 200 and no truncation signal, so every connection
+      // past that stops syncing while the cron still reports success. The
+      // error was discarded outright too: a failed read became "no active
+      // connections" and the whole tick was skipped silently.
+      return await fetchAllRows<{ id: string; user_id: string; org_id: string | null; external_user_id: string | null }>(
+        (from, to) => {
+          let query = supabase
+            .from('integration_connections')
+            .select('id, user_id, org_id, external_user_id')
+            .eq('provider_id', PROVIDER)
+            .eq('status', 'active')
 
-      if (scopedUserId) query = query.eq('user_id', scopedUserId)
+          if (scopedUserId) query = query.eq('user_id', scopedUserId)
 
-      const { data } = await query
-      return data ?? []
+          return query.order('id').range(from, to)
+        },
+        { label: 'ownerrez-incremental-sync.connections' },
+      )
     })
 
     if (!connections.length) {
@@ -237,8 +251,7 @@ type ActiveConnection = {
   metadata:         unknown
 }
 
-type BookingRow      = ReturnType<typeof buildOwnerRezBookingRow>
-type OwnerBlockRow   = BookingRow & { property_id: string }
+type OwnerBlockRow   = MappedOwnerRezBookingRow
 type SyncLogger      = { info: (msg: string, meta?: unknown) => void
                          warn: (msg: string) => void
                          error: (msg: string) => void }
@@ -293,7 +306,17 @@ async function persistBookings(
   const externalToFsId = await resolveExternalPropertyIdMap(supabase, conn.org_id, bookings)
   if (!externalToFsId) return null
 
-  const bookingRows = bookings.map((b) => buildOwnerRezBookingRow(conn.org_id, b, externalToFsId))
+  const builtRows = bookings.map((b) => buildOwnerRezBookingRow(conn.org_id, b, externalToFsId))
+  const { mapped: bookingRows, unmappedCount } = partitionMappedBookingRows(builtRows)
+
+  if (unmappedCount) {
+    logger.warn(
+      `[OwnerRez:${conn.user_id}] skipping ${unmappedCount} booking(s) whose OwnerRez property has no FieldStay property`
+    )
+  }
+  if (!bookingRows.length) {
+    return { affectedPropertyIds: [], bookingsToPostRevenue: [], ownerBlocks: [] }
+  }
 
   const { data: upserted, error } = await supabase
     .from('bookings')
@@ -310,15 +333,11 @@ async function persistBookings(
   )
 
   return {
-    affectedPropertyIds: Array.from(new Set(
-      bookingRows.map((b) => b.property_id).filter((id): id is string => id !== null)
-    )),
+    affectedPropertyIds: Array.from(new Set(bookingRows.map((b) => b.property_id))),
     bookingsToPostRevenue: selectOwnerRezBookingsToPostRevenue(bookingRows, idByExternalId),
     // Blocks never generate turnovers (filtered at the generator query level),
     // but a known vacancy window is the best signal for scheduling maintenance.
-    ownerBlocks: bookingRows.filter(
-      (r): r is OwnerBlockRow => Boolean(r.is_block) && r.property_id !== null
-    ),
+    ownerBlocks: bookingRows.filter((r) => Boolean(r.is_block)),
   }
 }
 
@@ -388,20 +407,25 @@ async function notifyOwnerBlockOpportunities(
 
   // Batch-fetch property names for every owner-block property in one query
   // instead of a per-booking SELECT inside the loop.
-  const { data: blockProperties } = await supabase
-    .from('properties')
-    .select('id, name')
-    .in('id', [...new Set(ownerBlocks.map((b) => b.property_id))])
+  const blockProperties = await fetchAllRows<{ id: string; name: string | null }>(
+    (from, to) => supabase
+      .from('properties')
+      .select('id, name')
+      .in('id', [...new Set(ownerBlocks.map((b) => b.property_id))])
+      .order('id')
+      .range(from, to),
+    { label: 'ownerrez-incremental.blockProperties' },
+  )
 
   const propertyNameById = Object.fromEntries(
-    (blockProperties ?? []).map((p) => [p.id, p.name as string | null])
+    blockProperties.map((p) => [p.id, p.name as string | null])
   ) as Record<string, string | null>
 
   await Promise.all(
     ownerBlocks.map(async (row) => {
       try {
         const candidates = await findMaintenanceCandidatesForWindow(
-          supabase, row.property_id, row.checkin_date, row.checkout_date
+          supabase, orgId, row.property_id, row.checkin_date, row.checkout_date
         )
         if (!candidates.length) return
 
@@ -575,25 +599,9 @@ async function runPostSyncFanOut(
 
   if (allNewTurnoverIds.length > 0) {
     const turnoverEvents = await step.run('fetch-new-turnover-data', async () => {
-      const supabase = createServiceClient({ system: 'inngest:incremental-sync' })
-      type TurnoverRow = { id: string; property_id: string; checkout_datetime: string; checkin_datetime: string; window_minutes: number | null }
-      const { data: turnovers } = await supabase
-        .from('turnovers')
-        .select('id, property_id, checkout_datetime, checkin_datetime, window_minutes')
-        .in('id', allNewTurnoverIds)
-
-      return (turnovers as TurnoverRow[] ?? []).map((t) => ({
-        name: 'turnover/created' as const,
-        data: {
-          turnover_id:       t.id,
-          property_id:       t.property_id,
-          org_id:            orgId,
-          checkout_datetime: t.checkout_datetime,
-          checkin_datetime:  t.checkin_datetime,
-          window_minutes:    t.window_minutes ?? 0,
-        },
-      }))
-    })
+        const supabase = createServiceClient({ system: 'inngest:incremental-sync' })
+        return fetchTurnoverCreatedEvents(supabase, allNewTurnoverIds, orgId)
+      })
 
     if (turnoverEvents.length > 0) {
       await step.sendEvent('fire-turnover-created-events', turnoverEvents)
@@ -752,6 +760,16 @@ export const ownerRezConnectionSync = inngest.createFunction(
           return { skipped: true, reason: 'connection_not_active' }
         }
 
+        // org_id is nullable on integration_connections. A connection not
+        // bound to an org cannot be tenant-scoped, so there is no org whose
+        // properties or bookings this sync could safely write — skip rather
+        // than carry a null org_id into the write path.
+        if (!conn.org_id) {
+          logger.warn(`[OwnerRez:${userId}] connection ${connectionId} has no org_id — skipping`)
+          return { skipped: true, reason: 'connection_without_org' }
+        }
+        const activeConn: ActiveConnection = { ...conn, org_id: conn.org_id }
+
         const metadata = (conn.metadata ?? {}) as Record<string, unknown>
         const sinceUtc = (metadata['sync_cursor'] as string | undefined) ?? undefined
 
@@ -760,7 +778,7 @@ export const ownerRezConnectionSync = inngest.createFunction(
         // one of its two required parameters.
         let propertyIds: number[] | undefined
         if (!sinceUtc) {
-          propertyIds = await loadConnectedPropertyIds(supabase, conn.org_id)
+          propertyIds = await loadConnectedPropertyIds(supabase, activeConn.org_id)
           if (!propertyIds.length) {
             console.log(`[OwnerRez:${userId}] No connected properties and no sync cursor — skipping`)
             return { skipped: true, reason: 'no_cursor_no_properties' }
@@ -777,7 +795,7 @@ export const ownerRezConnectionSync = inngest.createFunction(
           const bookings = await new OwnerRezApiClient(userId)
             .getBookings({ sinceUtc, propertyIds, includeGuest: true })
 
-          const persisted = await persistBookings(supabase, conn, bookings, logger)
+          const persisted = await persistBookings(supabase, activeConn, bookings, logger)
           if (!persisted) {
             // Property lookup failed — already logged and reported. Bailing
             // out here is what prevents a booking upsert from overwriting
@@ -785,8 +803,8 @@ export const ownerRezConnectionSync = inngest.createFunction(
             return
           }
 
-          await notifyOwnerBlockOpportunities(supabase, conn.org_id, persisted.ownerBlocks, logger)
-          await updateSyncCursor(conn, fetchStartedAt, bookings.length, logger)
+          await notifyOwnerBlockOpportunities(supabase, activeConn.org_id, persisted.ownerBlocks, logger)
+          await updateSyncCursor(activeConn, fetchStartedAt, bookings.length, logger)
 
           logger.info(`[OwnerRez:${userId}] sync complete — ${bookings.length} bookings`, {
             bookingCount: bookings.length,
@@ -801,7 +819,7 @@ export const ownerRezConnectionSync = inngest.createFunction(
         } catch (err) {
           // Rethrows for the retriable/permanent cases; returns for the
           // generic one, which has already recorded status + notified the PM.
-          await handleConnectionSyncFailure(err, { supabase, conn, userId, logger })
+          await handleConnectionSyncFailure(err, { supabase, conn: activeConn, userId, logger })
         }
       })
 
@@ -853,7 +871,7 @@ async function notifyConnectionErrorThrottled(
   supabase: ReturnType<typeof createServiceClient>,
   connectionId: string,
   userId: string,
-  orgId: string | null,
+  orgId: string,
   humanError: string
 ): Promise<void> {
   try {
@@ -879,7 +897,7 @@ async function notifyConnectionErrorThrottled(
         name: 'integration/connection.error',
         data: {
           user_id:     userId,
-          org_id:      orgId ?? '',
+          org_id:      orgId,
           provider_id: PROVIDER,
           reason:      humanError,
         },

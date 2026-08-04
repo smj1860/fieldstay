@@ -24,6 +24,7 @@ import { createClient } from '@/lib/supabase/client'
 import type { MutationTable } from '@/lib/dexie/schema'
 import { retryAllFailedMutations, discardFailedMutation } from '@/lib/dexie/helpers'
 import { retryFailedPhotoUploads, discardPendingPhoto } from '@/lib/dexie/photo-sync'
+import { STALLED_NETWORK_ATTEMPTS } from '@/lib/dexie/net'
 import { Button } from '@/components/ui/Button'
 import { Badge } from '@/components/ui/Badge'
 import { Dialog } from '@/components/ui/Dialog'
@@ -33,12 +34,11 @@ const MUTATION_LABELS: Record<MutationTable, string> = {
   checklist_instance_items: 'Checklist task update',
   checklist_instances:      'Checklist completion confirmation',
   turnovers:                'Turnover update',
-  inventory_items:          'Inventory count',
-  crew_availability:        'Time-off request',
+  inventory_counts:         'Inventory count',
   work_order_reports:       'Work order request',
   property_assets:          'Appliance details',
   crew_work_orders:         'Work order completion',
-  inventory_count_drafts:   'Inventory count submission',
+  messages:                 'Message to your operations team',
 }
 
 interface FailedEntry {
@@ -57,15 +57,48 @@ export function FailedSyncBanner({ userId }: Readonly<{ userId: string }>) {
   const [retrying, setRetrying] = useState(false)
   const [confirmDiscard, setConfirmDiscard] = useState<FailedEntry | null>(null)
 
+  // Index-backed (`failed` is stored 0/1 — IndexedDB cannot index a boolean).
+  // These are live queries on tables that are written on every checklist tick
+  // and every drain step, so as `.filter()` full scans they re-deserialized
+  // the whole outbox, three times, on each of those writes.
   const failedMutations = useLiveQuery(
-    () => db.mutations.filter((m) => !!m.failed).toArray(),
+    () => db.mutations.where('failed').equals(1).toArray(),
     [],
   ) ?? []
 
   const failedPhotos = useLiveQuery(
-    () => db.pending_photo_uploads.filter((p) => !!p.failed).toArray(),
+    () => db.pending_photo_uploads.where('failed').equals(1).toArray(),
     [],
   ) ?? []
+
+  // Transport failures deliberately never dead-letter — losing a crew
+  // member's work because their signal is bad would be worse than the bug
+  // this surfaces. But the drain STOPS at a blocked head, so every later
+  // change on the device queues behind it. Previously that state was
+  // completely invisible: `failed` is never set on the network path, this
+  // banner filters on `failed`, and the only trace anywhere was the pending
+  // count in the logout dialog. A crew member could work a whole shift, sync
+  // nothing, and find out at logout.
+  const stalledMutations = useLiveQuery(
+    () => db.mutations
+      .filter((m) => !m.failed && (m.networkRetryCount ?? 0) >= STALLED_NETWORK_ATTEMPTS)
+      .toArray(),
+    [],
+  ) ?? []
+
+  // Photos stall the same way and were covered by NEITHER surface: a transport
+  // failure never sets `failed` (by design — a bad signal must not destroy
+  // crew work), so they fell out of failedPhotos above, and the stalled notice
+  // only ever looked at db.mutations. A whole shift of verification photos
+  // could retry forever against a captive portal with nothing on screen.
+  const stalledPhotos = useLiveQuery(
+    () => db.pending_photo_uploads
+      .filter((p) => !p.failed && (p.network_retry_count ?? 0) >= STALLED_NETWORK_ATTEMPTS)
+      .toArray(),
+    [],
+  ) ?? []
+
+  const stalledCount = stalledMutations.length + stalledPhotos.length
 
   const entries: FailedEntry[] = [
     ...failedMutations.map((m) => ({
@@ -82,7 +115,34 @@ export function FailedSyncBanner({ userId }: Readonly<{ userId: string }>) {
     })),
   ]
 
-  if (entries.length === 0) return null
+  if (entries.length === 0 && stalledCount === 0) return null
+
+  // A stalled queue is NOT a failure — the work is intact and still retrying,
+  // so it gets its own amber notice with no discard affordance rather than
+  // being folded into the red "didn't sync" list.
+  const stalledNotice = stalledCount > 0 && (
+    <div
+      className="mx-4 mt-3 rounded-xl p-4"
+      style={{ background: 'var(--accent-amber-dim)', border: '1px solid var(--accent-amber-dim)' }}
+      role="status"
+    >
+      <div className="flex items-start gap-3">
+        <AlertTriangle className="w-5 h-5 shrink-0 mt-0.5" style={{ color: 'var(--accent-amber)' }} />
+        <div className="flex-1 min-w-0">
+          <p className="text-sm font-bold" style={{ color: 'var(--accent-amber)' }}>
+            {stalledCount} change{stalledCount !== 1 ? 's' : ''} still trying to sync
+          </p>
+          <p className="text-xs mt-0.5" style={{ color: 'var(--text-secondary)' }}>
+            Your work is saved on this phone and will keep retrying on its own.
+            If this stays here, move somewhere with better signal before you
+            finish for the day.
+          </p>
+        </div>
+      </div>
+    </div>
+  )
+
+  if (entries.length === 0) return <>{stalledNotice}</>
 
   const retryAll = async () => {
     setRetrying(true)
@@ -96,6 +156,7 @@ export function FailedSyncBanner({ userId }: Readonly<{ userId: string }>) {
 
   return (
     <>
+      {stalledNotice}
       <div
         className="mx-4 mt-3 rounded-xl p-4"
         style={{ background: 'var(--accent-red-dim)', border: '1px solid var(--accent-red-dim)' }}

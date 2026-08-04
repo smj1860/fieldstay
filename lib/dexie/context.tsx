@@ -1,5 +1,6 @@
 'use client'
 
+import { tryUnwrap } from '@/lib/supabase/unwrap'
 import { createContext, useContext, useEffect, useState, type ReactNode } from 'react'
 import type { AuthChangeEvent, Session, RealtimePostgresChangesPayload } from '@supabase/supabase-js'
 import { createClient } from '@/lib/supabase/client'
@@ -34,10 +35,23 @@ const CREW_SYNC_V2 = process.env.NEXT_PUBLIC_CREW_SYNC_V2 === 'true'
  *
  * Runs on BOTH sync paths. It used to be v2-only, which meant the shipping
  * (flag-off) configuration had no safety poll at all: messages,
- * crew_availability, inventory_items and properties refreshed only on mount
+ * inventory_items and properties refreshed only on mount
  * and on `online`, and the crew-sync-coverage guardrail asserted a mechanism
  * that wasn't running. */
 const SAFETY_POLL_INTERVAL_MS = 5 * 60_000
+
+/**
+ * How many safety-poll ticks between work-order MEMBERSHIP reconciles (~20
+ * min at the interval above).
+ *
+ * The routine delta returns closed work orders as tombstones, so completion
+ * and cancellation need no snapshot. Only reassignment-away is invisible to a
+ * delta, and the broadcast trigger notifies both the old and the new assignee
+ * when it happens — this periodic pass exists so correctness never depends on
+ * that broadcast having arrived. Mount, reconnect, foreground and signal all
+ * reconcile unconditionally.
+ */
+const RECONCILE_EVERY_N_POLLS = 4
 
 interface DexieContextValue {
   db:           FieldStayDexie | null
@@ -233,7 +247,10 @@ export function DexieProvider({ userId: userIdProp, children }: { userId?: strin
         .on(
           'postgres_changes',
           { event: '*', schema: 'public', table: 'property_assets', filter: `property_id=in.(${propertyIds.join(',')})` },
-          () => { void syncPropertyAssets(supabase, userId!, subscribedAssetPropertyIds) }
+          // force: a change event means the rows genuinely moved, so the
+          // scope gate (which asks 'did the property set change?') must not
+          // suppress it.
+          () => { void syncPropertyAssets(supabase, userId!, subscribedAssetPropertyIds, true) }
         )
         .subscribe()
     }
@@ -254,6 +271,7 @@ export function DexieProvider({ userId: userIdProp, children }: { userId?: strin
     let v2ReconnectTimer: ReturnType<typeof setTimeout> | null = null
 
     let visibilityHandler: (() => void) | null = null
+    let bootRetryHandler: (() => void) | null = null
     let v2AuthSubscription: { unsubscribe: () => void } | null = null
     let v2SignalHandler: SyncSignalHandler | null = null
 
@@ -272,25 +290,65 @@ export function DexieProvider({ userId: userIdProp, children }: { userId?: strin
     // queries instead of re-downloading every assigned turnover's full
     // checklist. Cursors are a bandwidth optimization only; correctness
     // never depends on them (see lib/dexie/sync/cursors.ts).
-    async function resync(crewMemberId: string): Promise<void> {
-      await fullCrewResync(supabase, userId!, crewMemberId)
+    async function resync(crewMemberId: string, reconcile = true): Promise<void> {
+      await fullCrewResync(supabase, userId!, crewMemberId, { reconcile })
       if (cancelled) return
 
       await refreshChecklistSubscription(crewMemberId)
       await refreshAssetsSubscription()
     }
 
-    function resyncSafe(crewMemberId: string): void {
+    // ── Resync coalescing ─────────────────────────────────────────────────
+    //
+    // A phone waking in a parking lot fires `online` and `visibilitychange →
+    // visible` within the same second, and the 5-minute safety poll can land
+    // in the same window; on the v1 path a turnover_assignments event can too.
+    // Each of those used to start its own fullCrewResync with nothing
+    // serializing them, so three concurrent passes ran on the worst possible
+    // connection — tripling the query volume, racing advanceCursor()'s
+    // read-modify-write, and letting one pass's pruneLocalCache() bulkDelete
+    // from a snapshot another was still mutating (visible as flicker and
+    // transient empty states).
+    //
+    // One in flight, at most one queued follow-up — the same shape
+    // createSyncSignalHandler() already uses per entity.
+    let resyncInFlight: Promise<void> | null = null
+    let resyncQueued = false
+
+    function runCoalesced(run: () => Promise<void>, label: string): void {
       if (cancelled) return
-      void resync(crewMemberId).catch((err) =>
-        console.error('[DexieProvider] resync failed:', err)
-      )
+      if (resyncInFlight) {
+        resyncQueued = true
+        return
+      }
+      resyncInFlight = run()
+        .catch((err) => console.error(`[DexieProvider] ${label} failed:`, err))
+        .finally(() => {
+          resyncInFlight = null
+          if (cancelled || !resyncQueued) return
+          resyncQueued = false
+          runCoalesced(run, label)
+        })
+    }
+
+    function resyncSafe(crewMemberId: string, reconcile = true): void {
+      runCoalesced(() => resync(crewMemberId, reconcile), 'resync')
     }
 
     // Installed on BOTH paths (see SAFETY_POLL_INTERVAL_MS above) — the
     // correctness backstop is not allowed to depend on a feature flag.
-    function installSafetyPoll(run: () => void): void {
-      safetyPollTimer = setInterval(run, SAFETY_POLL_INTERVAL_MS)
+    //
+    // The poll reconciles work-order MEMBERSHIP every RECONCILE_EVERY_N_POLLS
+    // ticks rather than on each one. Membership only changes on reassignment,
+    // which the broadcast trigger already signals to both the old and the new
+    // assignee; the periodic pass is what stops correctness depending on that
+    // broadcast arriving. Every other tick is a pure delta.
+    let pollTick = 0
+    function installSafetyPoll(run: (reconcile: boolean) => void): void {
+      safetyPollTimer = setInterval(() => {
+        pollTick += 1
+        run(pollTick % RECONCILE_EVERY_N_POLLS === 0)
+      }, SAFETY_POLL_INTERVAL_MS)
     }
 
     // ── Crew Sync v2 (flag on): broadcast signal + delta pull ──────────────
@@ -305,15 +363,12 @@ export function DexieProvider({ userId: userIdProp, children }: { userId?: strin
     // channel's scope is the user id, which never changes mid-session — and
     // it also covers property_assets (no broadcast trigger; see the doc's
     // section 1) directly instead of via refreshAssetsSubscription.
-    async function resyncV2(crewMemberId: string): Promise<void> {
-      await fullCrewResync(supabase, userId!, crewMemberId)
+    async function resyncV2(crewMemberId: string, reconcile = true): Promise<void> {
+      await fullCrewResync(supabase, userId!, crewMemberId, { reconcile })
     }
 
-    function resyncV2Safe(crewMemberId: string): void {
-      if (cancelled) return
-      void resyncV2(crewMemberId).catch((err) =>
-        console.error('[DexieProvider] v2 resync failed:', err)
-      )
+    function resyncV2Safe(crewMemberId: string, reconcile = true): void {
+      runCoalesced(() => resyncV2(crewMemberId, reconcile), 'v2 resync')
     }
 
     // Retry helper for scheduleV2Reconnect's timer callback — kept as its
@@ -431,24 +486,114 @@ export function DexieProvider({ userId: userIdProp, children }: { userId?: strin
 
       // Safety poll: correctness backstop for missed broadcasts and the
       // freshness path for property_assets.
-      installSafetyPoll(() => resyncV2Safe(crewMemberId))
+      installSafetyPoll((reconcile) => resyncV2Safe(crewMemberId, reconcile))
 
       await subscribeV2(crewMemberId)
     }
 
+    // The crew member id, cached across sessions in the local-only sync_meta
+    // store. Written on every successful resolution; read back when the live
+    // lookup fails.
+    //
+    // Without this, run() below bailed on ANY failure of that one query — and
+    // because every listener (Realtime channels, `online`, `visibilitychange`,
+    // the safety poll) is installed after it, and the effect keys on [userId]
+    // so it never re-runs, the provider never synced again for the life of the
+    // session. That is not a rare path: public/sw.js serves the cached shell
+    // on navigation, so a crew member opening the PWA at a property with no
+    // signal mounts fully offline and trips exactly this query. crewMemberId
+    // then stayed null, which silently disabled both "Confirm Complete"
+    // buttons — the turnover could never be completed and no cleaning fee
+    // posted, with no error shown anywhere.
+    const CREW_ID_KEY = 'crew_member_id'
+
+    async function cacheCrewMemberId(id: string): Promise<void> {
+      try {
+        await getDexieDb(userId!).sync_meta.put({ key: CREW_ID_KEY, value: id })
+      } catch {
+        // A cache write failure must never break the boot path it exists to
+        // protect — this run already has its id from the live query.
+      }
+    }
+
+    async function cachedCrewMemberId(): Promise<string | null> {
+      try {
+        return (await getDexieDb(userId!).sync_meta.get(CREW_ID_KEY))?.value ?? null
+      } catch {
+        return null
+      }
+    }
+
+    // run() is now reachable more than once (the boot retry below re-invokes
+    // it on `online`), and a flapping connection can fire that repeatedly.
+    // Without this latch two concurrent boots would each open their own
+    // Realtime channels and install their own safety poll, leaking both.
+    let booting = false
+
     async function run() {
-      const { data: crewMember } = await supabase
+      if (booting || cancelled) return
+      booting = true
+      try {
+        await bootSync()
+      } finally {
+        booting = false
+      }
+    }
+
+    async function bootSync() {
+      // Degrade, don't throw: this runs inside a client-side effect that has
+      // no error boundary of its own, and the provider must not tear down the
+      // crew PWA over one failed lookup. tryUnwrap still logs and reports, so
+      // the failure is no longer silent.
+      const crewRes = await supabase
         .from('crew_members')
         .select('id, org_id')
         .eq('user_id', userId!)
         .eq('is_active', true)
         .maybeSingle()
-      if (!crewMember || cancelled) return
 
-      setCrewMemberId(crewMember.id as string)
+      const crewOut    = tryUnwrap<{ id: string; org_id: string }>(crewRes, { site: 'dexie.context.crew-member' })
+      const crewMember = crewOut.ok ? crewOut.data : null
+
+      if (cancelled) return
+
+      // Live lookup won: cache it so a later offline mount can still boot.
+      if (crewMember) {
+        void cacheCrewMemberId(crewMember.id as string)
+      }
+
+      // Live lookup failed (offline mount, transient 5xx, cold start). Fall
+      // back to the id this device resolved on a previous session so the rest
+      // of the provider — listeners, safety poll, and the two confirm buttons
+      // — still comes up. Reads are served from the Dexie cache anyway; the
+      // outbox is what carries writes back when signal returns.
+      const resolvedCrewId = crewMember?.id ?? await cachedCrewMemberId()
+      if (cancelled) return
+
+      if (!resolvedCrewId) {
+        // Never resolved on this device, so there is nothing to fall back to.
+        // Retry when connectivity returns instead of leaving the provider
+        // permanently inert — this listener is deliberately installed even
+        // though the rest of the boot did not happen.
+        if (!bootRetryHandler) {
+          bootRetryHandler = () => { void run() }
+          globalThis.addEventListener('online', bootRetryHandler)
+        }
+        return
+      }
+
+      // Boot is going ahead, so the retry listener has done its job. Leaving
+      // it installed would re-enter run() on the next `online` and install a
+      // second set of channels and a second safety poll.
+      if (bootRetryHandler) {
+        globalThis.removeEventListener('online', bootRetryHandler)
+        bootRetryHandler = null
+      }
+
+      setCrewMemberId(resolvedCrewId)
 
       if (CREW_SYNC_V2) {
-        await runV2(crewMember.id)
+        await runV2(resolvedCrewId)
         return
       }
 
@@ -456,44 +601,44 @@ export function DexieProvider({ userId: userIdProp, children }: { userId?: strin
       // since it last synced; a fresh device (no cursors) naturally does a
       // full pull. Scope reconciliation inside syncAssignedTurnovers guards
       // against a stale cursor ever hiding an assignment change.
-      await resync(crewMember.id)
+      await resync(resolvedCrewId)
       if (cancelled) return
 
       channel = supabase
-        .channel(`turnover-assignments-${crewMember.id}`)
+        .channel(`turnover-assignments-${resolvedCrewId}`)
         .on(
           'postgres_changes',
-          { event: '*', schema: 'public', table: 'turnover_assignments', filter: `crew_member_id=eq.${crewMember.id}` },
+          { event: '*', schema: 'public', table: 'turnover_assignments', filter: `crew_member_id=eq.${resolvedCrewId}` },
           async () => {
-            await syncAssignedTurnovers(supabase, userId!, crewMember.id)
-            if (!cancelled) await refreshChecklistSubscription(crewMember.id)
+            await syncAssignedTurnovers(supabase, userId!, resolvedCrewId)
+            if (!cancelled) await refreshChecklistSubscription(resolvedCrewId)
             if (!cancelled) await refreshAssetsSubscription()
           }
         )
         .on(
           'postgres_changes',
-          { event: '*', schema: 'public', table: 'work_orders', filter: `assigned_crew_member_id=eq.${crewMember.id}` },
+          { event: '*', schema: 'public', table: 'work_orders', filter: `assigned_crew_member_id=eq.${resolvedCrewId}` },
           () => {
-            void syncWorkOrders(supabase, userId!, crewMember.id).then(() => {
+            void syncWorkOrders(supabase, userId!, resolvedCrewId).then(() => {
               if (!cancelled) return refreshAssetsSubscription()
             })
           }
         )
         .subscribe()
 
-      onlineHandler = () => resyncSafe(crewMember.id)
+      onlineHandler = () => resyncSafe(resolvedCrewId)
       globalThis.addEventListener('online', onlineHandler)
 
       // PWA returning from background has likely missed postgres_changes
       // events — Realtime never replays what happened while disconnected.
       visibilityHandler = () => {
-        if (globalThis.document?.visibilityState === 'visible') resyncSafe(crewMember.id)
+        if (globalThis.document?.visibilityState === 'visible') resyncSafe(resolvedCrewId)
       }
       globalThis.document?.addEventListener('visibilitychange', visibilityHandler)
 
       // Safety poll: same correctness backstop v2 has, on the path that
       // actually ships today.
-      installSafetyPoll(() => resyncSafe(crewMember.id))
+      installSafetyPoll((reconcile) => resyncSafe(resolvedCrewId, reconcile))
     }
 
     run().catch((err) => console.error('[DexieProvider] sync failed:', err))
@@ -504,6 +649,7 @@ export function DexieProvider({ userId: userIdProp, children }: { userId?: strin
       if (checklistChannel) supabase.removeChannel(checklistChannel)
       if (assetsChannel) supabase.removeChannel(assetsChannel)
       if (onlineHandler) globalThis.removeEventListener('online', onlineHandler)
+      if (bootRetryHandler) globalThis.removeEventListener('online', bootRetryHandler)
       // Crew Sync v2 teardown — everything here is null when the flag is off.
       if (v2Channel) {
         const ch = v2Channel

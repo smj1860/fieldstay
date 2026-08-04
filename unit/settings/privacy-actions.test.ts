@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 
 vi.mock('@/lib/auth', () => ({
-  requireOrgMember: vi.fn(),
+  requireOrgRole: vi.fn(),
 }))
 vi.mock('@/lib/supabase/server', () => ({
   createServiceClient: vi.fn(),
@@ -11,7 +11,7 @@ vi.mock('@/lib/audit', () => ({
 }))
 
 import { anonymizeGuestData } from '@/app/(dashboard)/settings/privacy/actions'
-import { requireOrgMember } from '@/lib/auth'
+import { requireOrgRole } from '@/lib/auth'
 import { createServiceClient } from '@/lib/supabase/server'
 import { logAuditEvent } from '@/lib/audit'
 
@@ -55,7 +55,7 @@ const ORG_ID  = 'org_1'
 const USER_ID = 'user_1'
 
 function mockAuthed(supabaseForServiceClient: ReturnType<typeof makeSupabase>) {
-  vi.mocked(requireOrgMember).mockResolvedValue({
+  vi.mocked(requireOrgRole).mockResolvedValue({
     user: { id: USER_ID } as never,
     supabase: {} as never,
     membership: {
@@ -72,8 +72,8 @@ describe('settings/privacy/actions — anonymizeGuestData', () => {
     vi.clearAllMocks()
   })
 
-  it('rejects when requireOrgMember rejects, without touching the DB', async () => {
-    vi.mocked(requireOrgMember).mockRejectedValue(new Error('REDIRECT:/login'))
+  it('rejects when the auth gate rejects, without touching the DB', async () => {
+    vi.mocked(requireOrgRole).mockRejectedValue(new Error('REDIRECT:/login'))
 
     const result = await anonymizeGuestData('guest@example.com')
 
@@ -83,6 +83,24 @@ describe('settings/privacy/actions — anonymizeGuestData', () => {
       error: 'Operation failed. Please try again.',
     })
     expect(createServiceClient).not.toHaveBeenCalled()
+  })
+
+  // The action runs with the SERVICE ROLE, so RLS is not a backstop: the auth
+  // gate is the only thing standing between a caller and an irreversible,
+  // org-wide scrub of guest PII. It shipped as requireOrgMember(), which let a
+  // `viewer` or `crew` member destroy booking data they cannot even read.
+  it('is gated on requireOrgRole([admin]) — not bare org membership', async () => {
+    const supabase = makeSupabase({
+      bookings: [
+        { data: [{ id: 'bk_1' }], error: null },
+        { data: null, error: null },
+      ],
+    })
+    mockAuthed(supabase)
+
+    await anonymizeGuestData('guest@example.com')
+
+    expect(requireOrgRole).toHaveBeenCalledWith(['admin'])
   })
 
   it('rejects a malformed email before touching the DB', async () => {

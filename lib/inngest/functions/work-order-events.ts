@@ -17,6 +17,11 @@ export const handleWorkOrderCreated = inngest.createFunction(
     id:      'work-order-created',
     name:    'Handle Work Order Created',
     retries: 2,
+    // Burst-exposed AND sends through an external provider. Resend's default
+    // is 2 req/s, so throttle to 1/s: this handler receives a BATCH of events
+    // (see the sender), and without a cap the whole batch lands at once.
+    concurrency: { limit: 5 },
+    throttle:    { limit: 60, period: '1m' },
   },
   { event: 'work-order/created' as const },
   async ({ event, step, logger }) => {
@@ -273,7 +278,16 @@ export const handleWorkOrderCreated = inngest.createFunction(
 // ── Work Order Completed (PM-side) ───────────────────────────────────────────
 
 export const handleWorkOrderCompleted = inngest.createFunction(
-  { id: 'work-order-completed', name: 'Work Order Completed — Post Expense', retries: 3 },
+  {
+    id: 'work-order-completed', name: 'Work Order Completed — Post Expense', retries: 3,
+    // finalizeWorkOrderCompletion sends these as an ARRAY (one per completed
+    // row), so a bulk month-end completion of ten recurring WOs — or a
+    // cron-driven sweep — lands the whole batch at once. Each invocation
+    // upserts owner_transactions; without a cap they contend on the same
+    // (source_reference_id, source) index in parallel against a
+    // 90-connection Postgres.
+    concurrency: { limit: 10 },
+  },
   { event: 'work-order/completed' as const },
   async ({ event, step }) => {
     const { work_order_id, property_id, org_id } = event.data
@@ -386,6 +400,11 @@ export const handleWorkOrderOverdue = inngest.createFunction(
     id:      'work-order-overdue',
     name:    'Work Order Overdue Alert',
     retries: 1,
+    // Burst-exposed AND sends through an external provider. Resend's default
+    // is 2 req/s, so throttle to 1/s: this handler receives a BATCH of events
+    // (see the sender), and without a cap the whole batch lands at once.
+    concurrency: { limit: 5 },
+    throttle:    { limit: 60, period: '1m' },
   },
   { event: 'work-order/overdue' as const },
   async ({ event, step, logger }) => {

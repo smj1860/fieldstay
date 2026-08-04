@@ -1,0 +1,332 @@
+# ============================================================================
+# FieldStay — RATCHET rules (structural enforcement, semgrep layer).
+#
+# A ratchet rule encodes a defect class with MANY legitimate owners spread
+# across the tree. There is no single file to put in `paths.exclude`, and the
+# current count is far above zero, so these cannot gate at `--error` on the
+# whole tree without turning CI permanently red.
+#
+# They gate two ways instead:
+#   1. `--baseline-commit` in CI — only findings NEW relative to the PR base
+#      fail the build. Existing sites stay visible without blocking.
+#   2. `.semgrep/baseline-counts.json` + `scripts/check-semgrep-ratchet.mjs` —
+#      a committed per-rule count that may only go DOWN. This is what makes a
+#      burn-down PR demonstrate progress instead of asserting it.
+#
+# Do NOT add `nosemgrep` comments or per-file excludes to shrink a ratchet
+# count. Fix the site, or leave it counted. A suppressed rule is worse than no
+# rule: it reports zero and means nothing.
+# ============================================================================
+rules:
+  # ══ max_rows = 1000 silently truncates every unbounded select ════════════
+  #
+  # The single highest-impact systemic finding of the 2026-07-30 audit — and,
+  # as one undifferentiated rule, 284 findings of which the majority were
+  # explicitly permitted by CLAUDE.md ("Fine for a request handler rendering
+  # one org's page; never acceptable for a platform-wide scan"). A rule whose
+  # majority is permitted-by-policy noise is one people learn to ignore, so it
+  # is split into a SEVERITY LADDER along the only axis that actually predicts
+  # whether the 1000-row cap can be reached: what bounds the result set.
+  #
+  #   1   -table-scan     nothing bounds it but the table itself         ERROR
+  #   2   -cross-tenant   no org scope AND no parent row                 ERROR
+  #   2b  -single-parent  one non-org parent row, no org scope         WARNING
+  #   2c  -global-table   a table with no org_id column to scope to       INFO
+  #   3   -in-list        one org, but sized by a caller-supplied .in() WARNING
+  #   4   -org-scoped     one org, one parent entity — the permitted case  INFO
+  #
+  # The tiers are mutually exclusive and partition the original rule exactly:
+  # every finding lands in exactly one tier, so the ratchet counts still sum
+  # to the whole class and no site can be lost between tiers. Mutual exclusion
+  # is ENFORCED by scripts/check-semgrep-ratchet.mjs, not asserted here — the
+  # 2c/2b overlap this split introduced (one site matching both, inflating the
+  # ladder total by one) is exactly what a comment cannot catch.
+  #
+  # Tiers 1 and 2 both reached 0 and now live in chokepoints.yml, gating at
+  # --error across the whole tree: -table-scan on 2026-08-01, -cross-tenant on
+  # 2026-08-02. Neither is defined in this file any more; the ladder rows above
+  # are kept so the tier numbering still reads as one sequence.
+  #
+  # Tier 2 reached 0 by the 2b/2c split, not by fixing sites — the 53 findings
+  # it held were 47 parent-scoped reads and 5 reads of tables with no org_id,
+  # plus one correctly org-scoped read the rule could not see (below). NONE was
+  # a real cross-tenant scan. Those 52 reads are still counted here, as 2b/2c.
+  #
+  # NOTE on the shared exclusions, which every tier repeats:
+  # `$S.from($T).select(...)` only matches a select whose receiver is the
+  # `.from()` call itself, i.e. a READ. A write's returning-clause
+  # (`.from(t).insert(y).select()`) has `.insert(y)` as the receiver and never
+  # matches, so no insert/update/upsert/delete exclusion is needed. The
+  # bounding calls must be `pattern-not-inside: $X.limit(...)` (not
+  # `$S.from($T).select(...).limit(...)`): in a real chain the two are
+  # separated by .eq()/.order()/.in() etc., so the adjacent form matches
+  # almost nothing while the enclosing-call form correctly treats the select
+  # as a syntactic descendant of the terminator. The same applies to the
+  # POSITIVE `pattern-inside: $Y.eq("org_id", ...)` the lower tiers use to
+  # assert single-tenant scope. That positive form must NOT be wrapped in a
+  # `pattern-either` — semgrep then emits the enclosing call's range as a
+  # finding in its own right and the count inflates several-fold (591 instead
+  # of 81 when it was tried). Two sibling `pattern-inside`s AND correctly and
+  # do not inflate, which is how tier 3 requires org scope and an .in() list
+  # at once.
+  #
+  # `.in('org_id', …)` is deliberately NOT treated as org scope anywhere below:
+  # all five occurrences in the tree are multi-tenant cron fan-ins, which is
+  # the high-signal case, not the permitted one.
+  #
+  # lib/inngest/** gets no tier of its own. It is already gated at file
+  # granularity by unit/guardrails/unbounded-select.test.ts on a shrink-only
+  # baseline, so a duplicate cron tier would add a number without adding
+  # coverage — and the ladder already promotes half of lib/inngest's findings
+  # into the top two tiers on merit rather than by path.
+
+
+  # ── What counts as org scope, and why the regex is not just "org_id" ─────
+  # The org-scope negative below matches BOTH `.eq('org_id', …)` and an
+  # embedded-resource filter like `.eq('checklist_templates.org_id', …)`, which
+  # PostgREST uses to filter a parent through an `!inner` join. The literal
+  # `pattern-not-inside: $X.eq("org_id", ...)` this replaced saw only the
+  # undotted form, so
+  #
+  #   .from('checklist_template_sections')
+  #   .select('template_id, checklist_templates!inner(...)')
+  #   .eq('checklist_templates.org_id', membership.org_id)
+  #
+  # — a correctly single-tenant read — was counted as a cross-tenant scan.
+  # A dotted org filter IS org scope; the tenant boundary does not care which
+  # side of the join carries the column.
+  #
+  # ── Tier 2b: one parent entity, but no org filter ────────────────────────
+  # `.eq('property_id', …)` / `.eq('work_order_id', …)` / `.eq('user_id', …)`
+  # with no org scope. The row count is bounded by ONE parent row's children,
+  # not by the platform, so this is a materially different risk class from a
+  # genuinely unscoped scan — a work order's line items or a crew member's
+  # availability does not approach max_rows.
+  #
+  # It is NOT zero-risk, which is why it stays counted rather than excluded:
+  # the parent id arrives from somewhere, and if that somewhere is not itself
+  # org-checked the read is an IDOR regardless of how few rows it returns.
+  # That is an authorization question this rule cannot answer — see the
+  # Manual Audit Checklist's IDOR entry in CLAUDE.md.
+  - id: fieldstay-supabase-unbounded-select-single-parent
+    languages: [typescript]
+    severity: WARNING
+    message: >-
+      Unbounded .select() scoped to a single parent row (property_id,
+      work_order_id, user_id, …) but with no .eq('org_id', …). Bounded by one
+      parent's children rather than by the platform, so truncation is unlikely
+      — but verify the parent id was itself org-checked before it got here,
+      and add org scope if this table carries one.
+    patterns:
+      - pattern: $S.from($T).select(...)
+      - pattern-inside:
+          patterns:
+            - pattern: $Y.eq($PCOL, ...)
+            - metavariable-regex:
+                metavariable: $PCOL
+                regex: ^["'](?:[A-Za-z_]+\.)?(?!org_id)[A-Za-z_]*_id["']$
+      - pattern-not-inside: $X.limit(...)
+      - pattern-not-inside: $X.range(...)
+      - pattern-not-inside: $X.single(...)
+      - pattern-not-inside: $X.maybeSingle(...)
+      - pattern-not: "$S.from($T).select($SEL, {..., head: true, ...})"
+      - pattern-not-inside:
+          patterns:
+            - pattern: $X.eq($OCOL, ...)
+            - metavariable-regex:
+                metavariable: $OCOL
+                regex: ^["'](?:[A-Za-z_]+\.)?org_id["']$
+      # A global table wins over parent scope — tier 2c. Without this,
+      # platform_inventory_template_items filtered by
+      # platform_inventory_template_id matched BOTH tiers and inflated the
+      # ladder's total by one. The tiers are mutually exclusive by design.
+      - metavariable-regex:
+          metavariable: $T
+          regex: ^(?!["'](?:asset_type_standards|integration_providers|inventory_catalog|maintenance_catalog_items|oauth_states|pending_integration_links|pending_oauth_authorizations|platform_admins|platform_inventory_template_items|platform_inventory_templates|platform_seed_room_template_items|platform_seed_room_templates|platform_staff|processed_webhooks|profiles|promo_hospitable_launch_counter|stripe_processed_events|support_kb_chunks)["']$)
+
+  # ── Tier 2c (HYGIENE): a table that has no org_id column ─────────────────
+  # Platform-global tables: fixed catalogs (inventory_catalog,
+  # maintenance_catalog_items, asset_type_standards, integration_providers,
+  # platform_*) and cross-tenant infrastructure (profiles, processed_webhooks,
+  # oauth_states, support_kb_chunks). Demanding `.eq('org_id', …)` on these is
+  # incoherent — the column does not exist, so the "scope it to one org" advice
+  # of tier 2 can never be followed and the finding can never be closed.
+  #
+  # The list is derived from the live schema, not curated by hand: every public
+  # table with no org_id column AND no foreign key to a table that has one.
+  # A table with no org_id but a tenant-linked parent (checklist_template_items,
+  # work_order_photos, purchase_order_items, …) is deliberately NOT here — those
+  # are ordinary child tables and belong in the tiers above. Re-derive with the
+  # query in the commit that added this rule if the schema changes.
+  #
+  # Counted rather than excluded because unboundedness is still real here: a
+  # bare scan of one of these is caught by tier 1 in chokepoints.yml, but a
+  # filtered read of `profiles` or `support_kb_chunks` still grows with the
+  # platform and still truncates at 1000. What this tier drops is only the
+  # TENANT framing, not the truncation coverage.
+  - id: fieldstay-supabase-unbounded-select-global-table
+    languages: [typescript]
+    severity: INFO
+    message: >-
+      Unbounded .select() on a table with no org_id column (a platform-global
+      catalog or shared infrastructure table). Not a tenant-scope problem —
+      there is no tenant column to scope to — but still subject to max_rows =
+      1000. Bound it with .limit() / fetchAllRows() if this table can grow past
+      a fixed catalog's size.
+    patterns:
+      - pattern: $S.from($T).select(...)
+      - pattern-inside: $Y.eq($COL, ...)
+      - pattern-not-inside: $X.limit(...)
+      - pattern-not-inside: $X.range(...)
+      - pattern-not-inside: $X.single(...)
+      - pattern-not-inside: $X.maybeSingle(...)
+      - pattern-not: "$S.from($T).select($SEL, {..., head: true, ...})"
+      - metavariable-regex:
+          metavariable: $T
+          regex: ^["'](?:asset_type_standards|integration_providers|inventory_catalog|maintenance_catalog_items|oauth_states|pending_integration_links|pending_oauth_authorizations|platform_admins|platform_inventory_template_items|platform_inventory_templates|platform_seed_room_template_items|platform_seed_room_templates|platform_staff|processed_webhooks|profiles|promo_hospitable_launch_counter|stripe_processed_events|support_kb_chunks)["']$
+
+  # ── Tier 3: one org, but sized by a caller-supplied list ─────────────────
+  # `.eq('org_id', …)` plus `.in(col, array)`. Single-tenant, so it is not a
+  # cross-tenant scan — but the row count scales with the ARRAY, not with a
+  # single parent entity, and the array is caller- or query-derived. Rows can
+  # be a multiple of the list length (one org's inventory_items across 50
+  # properties is ~5,750 rows, well past the cap). Lower severity than tier 2
+  # because the ceiling is a tenant's data rather than the platform's, but
+  # these are real: it is the tier holding the confirmed true positives in
+  # inventory/actions.ts, maintenance/actions.ts and upsert-normalized.ts.
+  - id: fieldstay-supabase-unbounded-select-in-list
+    languages: [typescript]
+    severity: WARNING
+    message: >-
+      Unbounded .select() whose size scales with an .in(col, array) list rather
+      than a single parent row. One tenant's rows across a long list can exceed
+      max_rows = 1000 (one org's inventory_items across 50 properties already
+      does). Chunk the list, or bound the read with fetchAllRows() / .limit().
+    patterns:
+      - pattern: $S.from($T).select(...)
+      # dotted-aware, same as tier 2 — an embedded `rel.org_id` filter is org
+      # scope. A nested `patterns:` block is safe here; it is `pattern-either`
+      # that inflates the count, per the note above.
+      - pattern-inside:
+          patterns:
+            - pattern: $Y.eq($OCOL, ...)
+            - metavariable-regex:
+                metavariable: $OCOL
+                regex: ^["'](?:[A-Za-z_]+\.)?org_id["']$
+      - pattern-inside: $Z.in($COL, $ARR)
+      - pattern-not-inside: $X.limit(...)
+      - pattern-not-inside: $X.range(...)
+      - pattern-not-inside: $X.single(...)
+      - pattern-not-inside: $X.maybeSingle(...)
+      - pattern-not: "$S.from($T).select($SEL, {..., head: true, ...})"
+
+  # ── Tier 4 (HYGIENE): one org, one parent entity ─────────────────────────
+  # `.eq('org_id', …)` and no list. This is precisely the case CLAUDE.md
+  # permits — a request handler rendering one 10–50-property tenant's page.
+  # Kept counted, at INFO, so the class stays visible and cannot grow, but
+  # deliberately at a severity that does not compete with tiers 1–3 for
+  # attention. Do NOT promote a fix here over a tier-1 finding.
+  - id: fieldstay-supabase-unbounded-select-org-scoped
+    languages: [typescript]
+    severity: INFO
+    message: >-
+      Unbounded .select() scoped to a single org. Permitted by CLAUDE.md for a
+      request handler rendering one tenant's page — counted as hygiene only, so
+      the class cannot grow. Bound it if this table can hold >1000 rows for one
+      org, or if this code can ever run platform-wide.
+    patterns:
+      - pattern: $S.from($T).select(...)
+      # dotted-aware, same as tiers 2 and 3
+      - pattern-inside:
+          patterns:
+            - pattern: $Y.eq($OCOL, ...)
+            - metavariable-regex:
+                metavariable: $OCOL
+                regex: ^["'](?:[A-Za-z_]+\.)?org_id["']$
+      - pattern-not-inside: $Z.in($COL, $ARR)
+      - pattern-not-inside: $X.limit(...)
+      - pattern-not-inside: $X.range(...)
+      - pattern-not-inside: $X.single(...)
+      - pattern-not-inside: $X.maybeSingle(...)
+      - pattern-not: "$S.from($T).select($SEL, {..., head: true, ...})"
+
+  # ── A discarded PostgREST result discards the ERROR ──────────────────────
+  # `await supabase.from(x).update(y)` resolves with { error } instead of
+  # throwing, so a surrounding try/catch cannot see the failure and neither
+  # can Sentry. Highest-precision rule in this file.
+  - id: fieldstay-supabase-discarded-result
+    languages: [typescript]
+    severity: WARNING
+    message: >-
+      This write's result is discarded. PostgREST RESOLVES with { error } — it
+      does not throw — so a surrounding try/catch cannot catch it and nothing
+      reaches Sentry. Destructure { error } and branch, or use the
+      lib/supabase/unwrap.ts helpers.
+    patterns:
+      - pattern: await <... $S.from($T).$OP(...) ...>;
+      - metavariable-regex:
+          metavariable: $OP
+          regex: ^(insert|update|upsert|delete|select|rpc)$
+      - pattern-not-inside: $X = await ...
+      - pattern-not-inside: return await ...
+      - pattern-not-inside: const $X = await ...
+      - pattern-not-inside: let $X = await ...
+      - pattern-not-inside: var $X = await ...
+      - pattern-not-inside: $F(await ...)
+      - pattern-not-inside: await Promise.$M(...)
+
+  # ── A read destructured without its error ────────────────────────────────
+  # `const { data } = await …` collapses "the query errored" and "zero rows"
+  # into the same null, so an RLS/GRANT regression renders a friendly empty
+  # state with nothing logged. This is the ~481-site class that
+  # unit/guardrails/supabase-error-handling.test.ts baselines.
+  - id: fieldstay-supabase-read-without-error
+    languages: [typescript]
+    severity: WARNING
+    message: >-
+      `data` destructured without `error`. A failed query and an empty table
+      are now indistinguishable. Use unwrap/unwrapList/tryUnwrap from
+      lib/supabase/unwrap.ts, or destructure { data, error } and branch.
+    patterns:
+      - pattern-either:
+          - pattern: "const { data } = await $Q"
+          - pattern: "const { data: $D } = await $Q"
+          - pattern: "const { data, count: $C } = await $Q"
+          - pattern: "const { data: $D, count: $C } = await $Q"
+      # Semgrep's JS object patterns match PARTIALLY — `const { data } = …`
+      # also matches `const { data, error } = …`. Without these two negations
+      # the rule reports every read in the repo, half of them already correct.
+      - pattern-not: "const {..., error, ...} = await $Q"
+      - pattern-not: "const {..., error: $E, ...} = await $Q"
+      - metavariable-pattern:
+          metavariable: $Q
+          pattern: <... $S.from($T) ...>
+
+  # ── The same class, in a Promise.all fan-in ──────────────────────────────
+  # A separate rule because the metavariable-pattern that constrains the
+  # single-read form to a `.from()` chain cannot bind through an array
+  # destructure. Reported once per STATEMENT, not per element, and suppressed
+  # entirely when any element in the statement binds `error` — both are
+  # undercounts, never overcounts. unit/guardrails/supabase-error-handling.
+  # test.ts counts these PER ELEMENT, which is one concrete reason that test
+  # is not redundant with this ruleset.
+  - id: fieldstay-supabase-read-without-error-fan-in
+    languages: [typescript]
+    severity: WARNING
+    message: >-
+      `data` destructured without `error` in a Promise.all fan-in. Every query
+      in this batch that errors is indistinguishable from one that returned no
+      rows. Use unwrap/unwrapList from lib/supabase/unwrap.ts.
+    patterns:
+      - pattern-either:
+          - pattern: "const [..., { data: $D }, ...] = await Promise.all(...)"
+          - pattern: "const [..., { data }, ...] = await Promise.all(...)"
+      - pattern-not: "const [..., {..., error, ...}, ...] = await Promise.all(...)"
+      - pattern-not: "const [..., {..., error: $E, ...}, ...] = await Promise.all(...)"
+
+  # NOTE — two rules that used to live here, fieldstay-untimed-external-fetch
+  # and fieldstay-role-filtered-membership-read, reached 0 findings and were
+  # PROMOTED to chokepoints.yml, where they gate at --error across the whole
+  # tree. See the entries there. Their baseline-counts.json keys are removed
+  # with them: a ratchet entry for a rule that ratchet.yml no longer declares
+  # is a number nobody can lower, and check-semgrep-ratchet.mjs fails on it.

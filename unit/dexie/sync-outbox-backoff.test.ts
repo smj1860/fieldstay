@@ -21,21 +21,25 @@ vi.mock('@/lib/supabase/client', () => ({
   }),
 }))
 
-import { SyncEngine, computeNextAttemptAt } from '@/lib/dexie/syncService'
+import {
+  SyncEngine,
+  computeNextAttemptAt,
+  CONSECUTIVE_FAILURE_CIRCUIT_BREAK,
+} from '@/lib/dexie/syncService'
 
 const NOW = Date.parse('2026-07-25T12:00:00.000Z')
 
 function db(): FakeDexieDb { return holder.db as FakeDexieDb }
 function supabaseCalls() { return (holder.supabase as ReturnType<typeof makeFakeSupabase>).calls }
 
-// inventory_items:PATCH is the simplest pure-supabase upload handler
+// checklist_instance_items:PATCH is the simplest pure-supabase upload handler
 // (update → eq → select) — no fetch()-routed side effects to stub.
 async function seedMutation(overrides: Partial<MutationRow> = {}): Promise<number> {
   const id = await db().mutations.add({
-    table:      'inventory_items',
+    table:      'checklist_instance_items',
     targetId:   'item1',
     op:         'PATCH',
-    payload:    { current_quantity: 3 },
+    payload:    { is_completed: 1 },
     createdAt:  new Date(NOW).toISOString(),
     retryCount: 0,
     ...overrides,
@@ -101,18 +105,31 @@ describe('processOutbox — retry backoff', () => {
     vi.restoreAllMocks()
   })
 
-  it('stops the drain at a not-yet-due head mutation and touches nothing behind it', async () => {
-    const headId = await seedMutation({ retryCount: 1, nextAttemptAt: NOW + 60_000 })
-    const laterId = await seedMutation({ targetId: 'item2' })
-    holder.supabase = makeFakeSupabase({ inventory_items: [UPLOAD_OK, UPLOAD_OK] })
+  it('blocks the not-yet-due RECORD without stranding unrelated ones', async () => {
+    // The ordering invariant is per-record, but it used to be enforced
+    // globally: one mutation inside its backoff window stopped the entire
+    // queue. On reconnect after an offline shift that is dozens of unrelated
+    // writes waiting on one flaky record.
+    const headId    = await seedMutation({ retryCount: 1, nextAttemptAt: NOW + 60_000 })
+    const sameRecId = await seedMutation()                        // item1 again, due
+    const otherId   = await seedMutation({ targetId: 'item2' })   // different record, due
+    holder.supabase = makeFakeSupabase({
+      checklist_instance_items: [UPLOAD_OK, UPLOAD_OK, UPLOAD_OK, UPLOAD_OK],
+    })
 
     const engine = new SyncEngine('u1')
     await engine.processOutbox()
 
-    // Nothing pushed — not even the due mutation behind the head.
-    expect(supabaseCalls()).toHaveLength(0)
+    // The backing-off record is untouched — including the LATER write to it,
+    // which must never overtake the one that is waiting.
     expect(await mutationRow(headId)).toMatchObject({ retryCount: 1, nextAttemptAt: NOW + 60_000 })
-    expect(await mutationRow(laterId)).toMatchObject({ retryCount: 0 })
+    expect(await mutationRow(sameRecId)).toMatchObject({ retryCount: 0 })
+
+    // An unrelated record drains.
+    expect(
+      await mutationRow(otherId),
+      'a different record must not be held behind an unrelated backoff window',
+    ).toBeUndefined()
 
     // One resume timer scheduled; a second stopped drain replaces it (single handle).
     expect(vi.getTimerCount()).toBe(1)
@@ -122,13 +139,35 @@ describe('processOutbox — retry backoff', () => {
     // When the head comes due, the timer re-runs the drain and both flush in order.
     await vi.advanceTimersByTimeAsync(60_000)
     expect(await mutationRow(headId)).toBeUndefined()
-    expect(await mutationRow(laterId)).toBeUndefined()
-    expect(supabaseCalls().filter((c) => c.method === 'update')).toHaveLength(2)
+    expect(await mutationRow(sameRecId)).toBeUndefined()
+  })
+
+  it('stands down entirely once several DISTINCT records fail in a row', async () => {
+    // Per-record blocking alone would turn a server-side outage — where every
+    // record fails — into N wasted requests per wave instead of one. Distinct
+    // records failing back to back is evidence the problem is the server.
+    for (const targetId of ['a', 'b', 'c', 'd', 'e', 'f']) {
+      await seedMutation({ targetId })
+    }
+    holder.supabase = makeFakeSupabase({
+      checklist_instance_items: Array.from({ length: 10 }, () => ({
+        error: { message: 'server exploded', code: 'XX000' },   // transient
+      })),
+    })
+
+    await new SyncEngine('u1').processOutbox()
+
+    const attempted = (await db().mutations.toArray() as unknown as MutationRow[])
+      .filter((m) => m.retryCount > 0)
+    expect(
+      attempted,
+      'the drain must stop probing a server that just rejected several unrelated records',
+    ).toHaveLength(CONSECUTIVE_FAILURE_CIRCUIT_BREAK)
   })
 
   it('retries a due mutation and clears nextAttemptAt on success (row removed)', async () => {
     const id = await seedMutation({ retryCount: 2, nextAttemptAt: NOW - 1_000 })
-    holder.supabase = makeFakeSupabase({ inventory_items: [UPLOAD_OK] })
+    holder.supabase = makeFakeSupabase({ checklist_instance_items: [UPLOAD_OK] })
 
     await new SyncEngine('u1').processOutbox()
 
@@ -140,7 +179,7 @@ describe('processOutbox — retry backoff', () => {
   it('sets nextAttemptAt with backoff on push failure and resumes via the timer', async () => {
     vi.spyOn(Math, 'random').mockReturnValue(0.5) // jitter factor 1.0
     const id = await seedMutation()
-    holder.supabase = makeFakeSupabase({ inventory_items: [UPLOAD_FAIL, UPLOAD_OK] })
+    holder.supabase = makeFakeSupabase({ checklist_instance_items: [UPLOAD_FAIL, UPLOAD_OK] })
 
     await new SyncEngine('u1').processOutbox()
 
@@ -155,20 +194,20 @@ describe('processOutbox — retry backoff', () => {
 
   it('keeps the permanent-failure (dead-letter) path unchanged', async () => {
     const id = await seedMutation({ retryCount: 4 })
-    holder.supabase = makeFakeSupabase({ inventory_items: [UPLOAD_FAIL, UPLOAD_OK] })
+    holder.supabase = makeFakeSupabase({ checklist_instance_items: [UPLOAD_FAIL, UPLOAD_OK] })
 
     const engine = new SyncEngine('u1')
     await engine.processOutbox()
 
     // Fifth failure dead-letters: row kept, marked failed, no backoff window.
     const row = await mutationRow(id)
-    expect(row).toMatchObject({ retryCount: 5, failed: true })
+    expect(row).toMatchObject({ retryCount: 5, failed: 1 })
     expect(row?.nextAttemptAt).toBeUndefined()
     expect(vi.getTimerCount()).toBe(0)
 
     // Dead-lettered rows are excluded from later drains, not retried forever.
     await engine.processOutbox()
     expect(supabaseCalls().filter((c) => c.method === 'update')).toHaveLength(1)
-    expect(await mutationRow(id)).toMatchObject({ retryCount: 5, failed: true })
+    expect(await mutationRow(id)).toMatchObject({ retryCount: 5, failed: 1 })
   })
 })

@@ -1,3 +1,4 @@
+import { tryUnwrap } from '@/lib/supabase/unwrap'
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient }              from '@/lib/supabase/server'
 
@@ -6,12 +7,20 @@ export async function POST(request: NextRequest) {
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
 
-  const { data: membership } = await supabase
+  // maybeSingle() + tryUnwrap: a failed read used to answer 403 "Not an org
+  // member", which reads as a permissions problem rather than an outage.
+  const membershipRes = await supabase
     .from('organization_members')
     .select('org_id')
     .eq('user_id', user.id)
-    .single()
+    .maybeSingle()
 
+  const membershipOut = tryUnwrap(membershipRes, { site: 'api.dashboard.push-subscribe' })
+  if (!membershipOut.ok) {
+    return NextResponse.json({ error: 'Could not verify membership. Please try again.' }, { status: 503 })
+  }
+
+  const membership = membershipOut.data
   if (!membership) return NextResponse.json({ error: 'Not an org member' }, { status: 403 })
 
   const body = await request.json().catch(() => null)

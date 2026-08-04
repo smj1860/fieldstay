@@ -1,6 +1,18 @@
+import { unwrap } from '@/lib/supabase/unwrap'
 import { inngest }             from '@/lib/inngest/client'
+import { fetchAllRows }        from '@/lib/inngest/paginate'
 import { createServiceClient } from '@/lib/supabase/server'
 import { logAuditEvent, logAuditEvents } from '@/lib/audit'
+
+/** One row of the platform-wide compliance-document scans below. Nullability
+ *  matches the live schema: only expiry_date is nullable. */
+interface ComplianceDocRow {
+  id:            string
+  org_id:        string
+  vendor_id:     string
+  document_type: string
+  expiry_date:   string | null
+}
 
 /**
  * SCHEDULED: runs every morning at 6:15am CT — 15 minutes after
@@ -40,13 +52,23 @@ export const vendorComplianceGraceCheck = inngest.createFunction(
       const supabase    = createServiceClient({ system: 'inngest:vendor-compliance-grace-check' })
       const yesterday    = new Date(Date.now() - 86_400_000).toISOString().split('T')[0]
 
-      const { data } = await supabase
-        .from('vendor_compliance_documents')
-        .select('id, org_id, vendor_id, document_type, expiry_date')
-        .eq('is_active', true)
-        .eq('expiry_date', yesterday)
-
-      return data ?? []
+      // Paginated: every org's compliance documents, not one tenant's. This
+      // is the only moment a document's grace-period entry is ever recorded —
+      // the gate is `expiry_date = yesterday`, so a document dropped by a
+      // max_rows truncation is never revisited on any later run and its
+      // `vendor.compliance.grace_period_entered` audit row simply never
+      // exists. fetchAllRows also throws on a query error, where the previous
+      // bare `{ data }` destructure turned an outage into "0 documents".
+      return await fetchAllRows<ComplianceDocRow>(
+        (from, to) => supabase
+          .from('vendor_compliance_documents')
+          .select('id, org_id, vendor_id, document_type, expiry_date')
+          .eq('is_active', true)
+          .eq('expiry_date', yesterday)
+          .order('id')
+          .range(from, to),
+        { label: 'vendor-compliance-grace-check.grace-entries' },
+      )
     })
 
     if (graceDocs.length) {
@@ -73,14 +95,23 @@ export const vendorComplianceGraceCheck = inngest.createFunction(
       const supabase  = createServiceClient({ system: 'inngest:vendor-compliance-grace-check' })
       const cutoff    = new Date(Date.now() - 46 * 86_400_000).toISOString().split('T')[0]
 
-      const { data } = await supabase
-        .from('vendor_compliance_documents')
-        .select('id, org_id, vendor_id, document_type, expiry_date')
-        .eq('is_active', true)
-        .is('hard_blocked_at', null)
-        .lte('expiry_date', cutoff)
-
-      return data ?? []
+      // Paginated: platform-wide, and this backlog only ever grows —
+      // `hard_blocked_at IS NULL` plus `expiry_date <= today-46` accumulates
+      // every expired document across every tenant until this cron clears it.
+      // Truncated at 1000, the documents past the cap keep their
+      // hard_blocked_at NULL forever, so a vendor whose COI expired months
+      // ago stays assignable to work orders with no audit trail.
+      return await fetchAllRows<ComplianceDocRow>(
+        (from, to) => supabase
+          .from('vendor_compliance_documents')
+          .select('id, org_id, vendor_id, document_type, expiry_date')
+          .eq('is_active', true)
+          .is('hard_blocked_at', null)
+          .lte('expiry_date', cutoff)
+          .order('id')
+          .range(from, to),
+        { label: 'vendor-compliance-grace-check.hard-block-candidates' },
+      )
     })
 
     logger.info(`Found ${hardBlockCandidates.length} compliance document(s) crossing into hard-block`)
@@ -91,13 +122,22 @@ export const vendorComplianceGraceCheck = inngest.createFunction(
 
         // Idempotency: only proceed if this run is the one that flips the
         // gate — guards against a retried step re-logging the same doc.
-        const { data: updated } = await supabase
+        // A failed claim used to be indistinguishable from "another run got
+        // there first" — both returned null and skipped. But this claim IS the
+        // hard-block, so a discarded error meant the vendor was never blocked
+        // and nothing said so. Throw and let Inngest retry.
+        const claimRes = await supabase
           .from('vendor_compliance_documents')
           .update({ hard_blocked_at: new Date().toISOString() })
           .eq('id', doc.id)
           .is('hard_blocked_at', null)
           .select('id')
           .maybeSingle()
+
+        const updated = unwrap(claimRes, {
+          site:  'inngest.vendor-compliance-grace-check.hard-block-claim',
+          orgId: doc.org_id,
+        })
 
         if (!updated) return null
 

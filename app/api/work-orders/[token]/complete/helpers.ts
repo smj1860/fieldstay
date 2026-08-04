@@ -1,12 +1,18 @@
+import { unwrap, tryUnwrap } from '@/lib/supabase/unwrap'
 import type { SupabaseClient } from '@supabase/supabase-js'
 import { inngest } from '@/lib/inngest/client'
 import { logAuditEvent } from '@/lib/audit'
+import { advanceSchedulesAfterCompletion } from '@/app/(dashboard)/maintenance/complete-work-order-helpers'
 
 /**
- * Helpers for POST /api/work-orders/[token]/complete — extracted out of
- * route.ts so the handler itself reads as: validate → claim → create
- * invoice → dispatch events, rather than all four concerns inline in one
- * 245-line function.
+ * Helpers for POST /api/work-orders/[token]/complete.
+ *
+ * Every DATABASE write for a completion now lives in the
+ * complete_work_order_via_token() RPC (migration 20260801200000), so what
+ * remains here is only the side effects that must NOT be inside that
+ * transaction: the audit log and Inngest dispatch. Both are non-transactional
+ * by nature — an event fired from inside a transaction that later aborts
+ * cannot be unfired.
  */
 
 export interface ClaimedWorkOrder {
@@ -23,111 +29,26 @@ export interface SafeLineItem {
   description: string
   quantity:    number
   unit_cost:   number
-  line_total:  number
 }
 
 /**
- * Everything createVendorInvoice() needs. Deliberately NOT ClaimedWorkOrder:
- * the invoice is now created BEFORE the completion claim (see the ordering
- * note on createVendorInvoice), so the only work order shape available at
- * that point is the one read from the completion token.
+ * What complete_work_order_via_token() returns. Every database write for a
+ * completion now happens inside that one function, so this file no longer
+ * creates the invoice, inserts line items, or compensates a lost claim —
+ * a rolled-back transaction leaves nothing to compensate for.
  */
-export type InvoiceTarget = Pick<ClaimedWorkOrder, 'id' | 'org_id' | 'vendor_id' | 'property_id'>
-
-export type CreateInvoiceResult =
+export type CompletionResult =
+  | { claimed: false; reason: 'not_found' | 'already_closed' }
   | {
-      ok:        true
-      invoiceId: string | null
-      /** The generated number, only when this request inserted the row. */
-      invoiceNumber: string | null
-      /**
-       * True only when THIS request's upsert actually inserted the invoice
-       * (rather than finding one an earlier attempt already created). It is
-       * what makes the rollback below safe: a request that loses the
-       * completion claim may only delete an invoice it created itself.
-       */
-      insertedByThisRequest: boolean
+      claimed:          true
+      previous_status:  string
+      work_order:       ClaimedWorkOrder
+      invoice_id:       string | null
+      /** Non-null only when THIS request minted the number. */
+      invoice_number:   string | null
+      /** True only when THIS request inserted the invoice row. */
+      invoice_inserted: boolean
     }
-  | { ok: false; error: string }
-
-/**
- * Creates the invoice record for a vendor completion, if any line items were
- * submitted and a vendor is assigned. Race-safe invoice numbering via an
- * atomic Postgres sequence, with an upsert-conflict fallback that fetches the
- * existing invoice rather than ever creating a second one for the same work
- * order.
- *
- * ORDERING — this runs BEFORE the work order is claimed as completed, and it
- * must stay that way. `work_orders.status = 'completed'` is what every other
- * reader (the PM dashboard, owner P&L, the vendor's own outbox) treats as
- * "done and billed", so it has to be the LAST thing that becomes true.
- * Claiming first published a completed work order whose invoice did not exist
- * yet, and if the invoice step then failed the work order was permanently
- * completed with no invoice: every vendor retry could only ever get the
- * already-closed 409, so the money row was simply lost. Creating the invoice
- * first is safe to repeat — the upsert is keyed on the work order — while
- * claiming first is not recoverable at all.
- */
-export async function createVendorInvoice(
-  supabase:      SupabaseClient,
-  target:        InvoiceTarget,
-  safeLineItems: SafeLineItem[],
-  subtotal:      number,
-): Promise<CreateInvoiceResult> {
-  if (safeLineItems.length === 0 || !target.vendor_id) {
-    return { ok: true, invoiceId: null, invoiceNumber: null, insertedByThisRequest: false }
-  }
-  // Generate invoice number: INV-YYYY-NNNNN via an atomic Postgres sequence.
-  // COUNT-then-INSERT is a TOCTOU race under concurrent submissions.
-  const { data: seqResult, error: seqErr } = await supabase
-    .rpc('next_work_order_invoice_seq')
-
-  if (seqErr || seqResult == null) {
-    console.error('[complete] invoice sequence error:', seqErr)
-    return { ok: false, error: 'Invoice numbering failed. Please try again.' }
-  }
-
-  const invoiceNumber = `INV-${new Date().getFullYear()}-${String(seqResult).padStart(5, '0')}`
-
-  const platformFeePct = parseFloat(process.env.STRIPE_PLATFORM_FEE_PCT ?? '0') / 100
-  const platformFee    = Math.round(subtotal * platformFeePct * 100) / 100
-
-  const { data: invoice } = await supabase
-    .from('work_order_invoices')
-    .upsert(
-      {
-        org_id:              target.org_id,
-        work_order_id:       target.id,
-        vendor_id:           target.vendor_id,
-        property_id:         target.property_id,
-        invoice_number:      invoiceNumber,
-        status:              'pending_payment',
-        subtotal,
-        total:               subtotal,
-        platform_fee_amount: platformFee,
-      },
-      { onConflict: 'work_order_id', ignoreDuplicates: true }
-    )
-    .select('id')
-    .single()
-
-  if (invoice) {
-    return { ok: true, invoiceId: invoice.id, invoiceNumber, insertedByThisRequest: true }
-  }
-
-  // UNIQUE(work_order_id) conflict — ignoreDuplicates means the upsert
-  // inserted nothing, so fetch the existing invoice instead of dropping
-  // the reference (never create a second invoice for the same WO). This is
-  // the ordinary path for a retried submission whose first attempt created
-  // the invoice but died before it could claim the completion.
-  const { data: existing } = await supabase
-    .from('work_order_invoices')
-    .select('id')
-    .eq('work_order_id', target.id)
-    .single()
-
-  return { ok: true, invoiceId: existing?.id ?? null, invoiceNumber: null, insertedByThisRequest: false }
-}
 
 /**
  * Everything that must happen once — and only once — the completion claim has
@@ -137,70 +58,30 @@ export async function createVendorInvoice(
 export async function finalizeVendorCompletion(
   supabase: SupabaseClient,
   input: {
-    claimed:        ClaimedWorkOrder
-    invoiceResult:  Extract<CreateInvoiceResult, { ok: true }>
-    safeLineItems:  SafeLineItem[]
-    subtotal:       number
-    notes:          string | null
-    token:          string
-    previousStatus: string
+    claimed:         ClaimedWorkOrder
+    invoiceId:       string | null
+    invoiceNumber:   string | null
+    invoiceInserted: boolean
+    subtotal:        number
+    notes:           string | null
+    token:           string
   },
 ): Promise<void> {
-  const { claimed, invoiceResult, safeLineItems, subtotal, notes, token, previousStatus } = input
+  const { claimed, invoiceId, invoiceNumber, invoiceInserted, subtotal, notes, token } = input
 
-  // Line items go in after the claim — the claim is the mutex that makes this
-  // exactly-once, and these rows have no unique key to dedupe a replay against.
-  await insertVendorLineItems(supabase, claimed, safeLineItems)
-
-  if (invoiceResult.insertedByThisRequest && invoiceResult.invoiceId && invoiceResult.invoiceNumber) {
-    await logVendorInvoiceCreated(claimed, invoiceResult.invoiceId, invoiceResult.invoiceNumber, subtotal)
+  // Audit only for an invoice this request actually minted — a replay that
+  // reused an existing invoice must not log a second "created" event.
+  if (invoiceInserted && invoiceId && invoiceNumber) {
+    await logVendorInvoiceCreated(claimed, invoiceId, invoiceNumber, subtotal)
   }
 
-  await supabase.from('work_order_updates').insert({
-    work_order_id:             claimed.id,
-    org_id:                    claimed.org_id,
-    updated_via_vendor_portal: true,
-    status_from:               previousStatus,
-    status_to:                 'completed',
-    notes,
-  })
-
-  await dispatchCompletionEvents(supabase, claimed, invoiceResult.invoiceId, token, notes, subtotal)
+  await dispatchCompletionEvents(supabase, claimed, invoiceId, token, notes, subtotal)
 }
 
 /**
- * Undoes the invoice side of a completion that lost its claim — a no-op
- * unless this request is the one that inserted the row.
- */
-export async function rollbackUnclaimedInvoice(
-  supabase:      SupabaseClient,
-  invoiceResult: Extract<CreateInvoiceResult, { ok: true }>,
-): Promise<void> {
-  if (!invoiceResult.insertedByThisRequest || !invoiceResult.invoiceId) return
-  await rollbackVendorInvoice(supabase, invoiceResult.invoiceId)
-}
-
-/**
- * Compensating delete for an invoice this request created and then could not
- * attach to a completion, because another path closed the work order in the
- * window between the token lookup and the atomic claim. Only ever called with
- * an id the SAME request inserted (`insertedByThisRequest`), so it can never
- * remove an invoice that belongs to a completion that did land.
- */
-export async function rollbackVendorInvoice(supabase: SupabaseClient, invoiceId: string): Promise<void> {
-  const { error } = await supabase.from('work_order_invoices').delete().eq('id', invoiceId)
-  if (error) {
-    // Surfaced rather than swallowed: the leftover is a real, if rare,
-    // orphan — an invoice with no completed work order behind it.
-    console.error('[complete] failed to roll back orphaned invoice', invoiceId, error)
-  }
-}
-
-/**
- * Audit trail for an invoice that actually stuck. Deliberately separate from
- * createVendorInvoice() and called only once the completion claim has been
- * won — logging it inside the insert would leave an audit row asserting an
- * invoice exists for every row the rollback above had to take back.
+ * Audit trail for an invoice that actually stuck. Gated on invoice_inserted
+ * from the RPC, so a replay that reused an existing invoice does not log a
+ * second "created" event for the same row.
  */
 export async function logVendorInvoiceCreated(
   claimed:       ClaimedWorkOrder,
@@ -216,35 +97,6 @@ export async function logVendorInvoiceCreated(
     metadata:   { work_order_id: claimed.id, vendor_id: claimed.vendor_id, invoice_number: invoiceNumber, amount: subtotal },
     // No actorId — unauthenticated vendor-token route
   })
-}
-
-/**
- * Vendor-submitted line items. Runs AFTER the completion claim, unlike the
- * invoice: the claim is the mutex, so exactly one request ever reaches this,
- * and these rows have no unique key of their own to dedupe a second insert
- * against.
- */
-export async function insertVendorLineItems(
-  supabase:      SupabaseClient,
-  claimed:       ClaimedWorkOrder,
-  safeLineItems: SafeLineItem[],
-): Promise<void> {
-  if (safeLineItems.length === 0) return
-
-  const { error } = await supabase.from('work_order_line_items').insert(
-    safeLineItems.map((item, idx) => ({
-      work_order_id:    claimed.id,
-      org_id:           claimed.org_id,
-      line_type:        item.line_type,
-      description:      item.description.trim(),
-      quantity:         item.quantity,
-      unit_cost:        item.unit_cost,
-      line_total:       Math.round(item.unit_cost * item.quantity * 100) / 100,
-      sort_order:       idx,
-      vendor_submitted: true,
-    }))
-  )
-  if (error) console.error('[complete] failed to insert vendor line items for', claimed.id, error)
 }
 
 /**
@@ -286,15 +138,90 @@ export async function dispatchCompletionEvents(
     })
   }
 
+  // Advance the source maintenance schedule, if this WO came from one.
+  //
+  // The vendor portal was a completion path that never did this: next_due_date
+  // stayed put, so the nightly cron kept seeing the schedule as due, kept
+  // colliding with wo_maintenance_schedule_date_unique, and kept treating the
+  // 23505 as an expected lost race — the schedule silently stopped recurring.
+  //
+  // Read here rather than returned from complete_work_order_via_token(),
+  // because widening that function's return shape needs a migration and the
+  // local/live migration ledgers are currently out of sync. Two columns on one
+  // already-claimed row; cheap, and it keeps this fix migration-free.
+  const scheduleRes = await supabase
+    .from('work_orders')
+    .select('source_schedule_id, source')
+    .eq('id', claimed.id)
+    .eq('org_id', claimed.org_id)
+    .maybeSingle()
+
+  const scheduleOut = tryUnwrap<{ source_schedule_id: string | null; source: string | null }>(
+    scheduleRes, { site: 'api.work-orders.complete.source-schedule', orgId: claimed.org_id },
+  )
+  const scheduleRow = scheduleOut.ok ? scheduleOut.data : null
+
+  if (scheduleRow?.source_schedule_id) {
+    await advanceSchedulesAfterCompletion(supabase, claimed.org_id, [{
+      scheduleId:      scheduleRow.source_schedule_id,
+      workOrderSource: scheduleRow.source,
+    }])
+  }
+
   // Fire turnover completion automation if this WO is linked to a turnover
   if (claimed.source_turnover_id) {
-    const { data: turnover } = await supabase
+    // Discarding this error left `turnover` null, which skips the
+    // turnover/completed event below — so the linked turnover never completed
+    // and its downstream side effects (owner_transactions, notifications)
+    // never fired, with nothing recorded.
+    const turnoverRes = await supabase
       .from('turnovers')
       .select('id, property_id, org_id, status')
       .eq('id', claimed.source_turnover_id)
-      .single()
+      .maybeSingle()
+
+    const turnover = unwrap(turnoverRes, { site: 'api.work-orders.complete.source-turnover' })
 
     if (turnover && !['completed', 'cancelled'].includes(turnover.status)) {
+      const completedAt = new Date().toISOString()
+
+      // CLAIM the turnover, don't just read it. The read above proved the
+      // status at the time of the read; only the UPDATE's own WHERE clause
+      // proves this caller is the one closing it.
+      //
+      // Previously this fired turnover/completed while never writing
+      // turnovers.status at all, so: the cleaning fee posted and the PM was
+      // told "✓ Turnover complete", while the turnover stayed in_progress on
+      // the board. When someone later completed it for real, the
+      // .neq('status','completed') guard on that path passed — it was still
+      // in_progress — and the event fired a SECOND time. The owner_transactions
+      // upsert absorbed the duplicate, but fieldstay_turnovers_completed_total
+      // counted twice and completed_at landed hours after the fee, corrupting
+      // the duration that assignment_outcomes and crew scoring derive from it.
+      const claimRes = await supabase
+        .from('turnovers')
+        .update({ status: 'completed', completed_at: completedAt })
+        .eq('id', turnover.id)
+        .not('status', 'in', '("completed","cancelled")')
+        .select('id')
+        .maybeSingle()
+
+      const claimOut = tryUnwrap<{ id: string }>(claimRes, {
+        site:  'api.work-orders.complete.claim-turnover',
+        orgId: claimed.org_id,
+      })
+
+      if (!claimOut.ok) {
+        // Do NOT fall through to the event: firing it after a failed claim
+        // reintroduces exactly the fee-posted-but-turnover-open state.
+        console.error('[work-order-complete] turnover claim failed', { turnoverId: turnover.id })
+        return
+      }
+
+      // Zero rows means another path completed it between the read and the
+      // update — that path fires its own event, so this one must not.
+      if (!claimOut.data) return
+
       await inngest.send({
         name: 'turnover/completed',
         data: {
@@ -302,7 +229,7 @@ export async function dispatchCompletionEvents(
           property_id:          turnover.property_id,
           org_id:               turnover.org_id,
           completed_by_crew_id: '',
-          completed_at:         new Date().toISOString(),
+          completed_at:         completedAt,
         },
       })
     }

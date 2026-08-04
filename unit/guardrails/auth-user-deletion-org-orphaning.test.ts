@@ -31,7 +31,13 @@ import { collectSourceFiles, rel, read } from './scan'
 // behaviourally in unit/route-handlers/account-delete.test.ts.
 // ============================================================================
 
-const DELETE_USER = /auth\.admin\.deleteUser\s*\(/
+// Both the raw gotrue call AND the shared rollback helper count as "this file
+// deletes an auth user". Recognising only the raw call would mean routing a
+// deletion through lib/auth.ts's deleteOrphanedAuthUser() silently exits this
+// guardrail — the check would go quiet at the exact moment the code got
+// tidier. This test failed when the helper was introduced, which is the
+// behaviour worth keeping.
+const DELETE_USER = /auth\.admin\.deleteUser\s*\(|deleteOrphanedAuthUser\s*\(/
 const DELETES_ORG = /\.from\(\s*['"]organizations['"]\s*\)[\s\S]{0,200}?\.delete\(/
 
 // Every entry is a path where the deleted auth user provably cannot own an
@@ -41,6 +47,8 @@ const EXCEPTIONS: Record<string, string> = {
     'Rollback of an auth user created moments earlier in the same request, when acceptOrgInvite() reports it could not attach the membership. The user is seconds old, joined an org someone else already owns (org_invites.org_id), and never created one — there is nothing for it to orphan. Deleting the org here would be catastrophic: it belongs to the inviter.',
   'app/crew-invite/[token]/actions.ts':
     'Same shape as accept-invite: rollback of a just-created crew auth user when the crew_members link UPDATE fails. Crew never own an organization (they hold a crew_members row, not an organization_members one — see lib/auth/invites.ts on why that distinction is load-bearing).',
+  'lib/auth.ts':
+    'Defines deleteOrphanedAuthUser(), the shared rollback helper the two invite flows above call — it is the mechanism, not a policy decision about what else to delete. Whether a given deletion may orphan an organization is a property of the CALL SITE, and every call site is listed in this table on its own merits. The helper takes a userId it is told to delete and has no way to know what that user owns; putting an organizations delete in here would be wrong for both current callers (see their entries).',
 }
 
 function findOffenders(): { file: string; reason: string }[] {
@@ -109,7 +117,6 @@ describe('guardrail: deleting an auth user must not orphan owned organizations',
       'assignment_outcomes',
       'vendor_assignment_outcomes',
       'crew_availability',
-      'inventory_count_drafts',
       'inventory_templates',
       'maintenance_schedule_templates',
       'messages',

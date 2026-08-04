@@ -12,6 +12,7 @@
 import { createServiceClient } from '@/lib/supabase/server'
 import { randomBytes } from 'crypto'
 import { unwrapJoin } from '@/lib/utils/supabase-joins'
+import type { Json } from '@/types/database'
 
 /** Service-role admin client, routed through the one central helper. */
 function getAdminClient() {
@@ -33,17 +34,19 @@ export async function storeIntegrationToken(params: {
   accessToken: string
   externalUserId: string
   scope?: string
-  metadata?: Record<string, unknown>
+  metadata?: Record<string, Json>
 }): Promise<string> {
   const admin = getAdminClient()
 
+  // p_scope is DEFAULT NULL, so omitting it is exactly what passing null
+  // meant — and it is what the generated `p_scope?: string` arg type accepts.
   const { data: secretId, error } = await admin.rpc('store_integration_token', {
     p_user_id:          params.userId,
     p_provider_id:      params.providerId,
     p_access_token:     params.accessToken,
     p_external_user_id: params.externalUserId,
-    p_scope:            params.scope ?? null,
     p_metadata:         params.metadata ?? {},
+    ...(params.scope === undefined ? {} : { p_scope: params.scope }),
   })
 
   if (error) {
@@ -146,11 +149,14 @@ export async function storeIntegrationRefreshToken(params: {
 }): Promise<void> {
   const admin = getAdminClient()
 
+  // p_expires_at is DEFAULT NULL — see storeIntegrationToken above.
   const { error } = await admin.rpc('store_integration_refresh_token', {
     p_user_id:       params.userId,
     p_provider_id:   params.providerId,
     p_refresh_token: params.refreshToken,
-    p_expires_at:    params.expiresAt ?? null,
+    ...(params.expiresAt === undefined || params.expiresAt === null
+      ? {}
+      : { p_expires_at: params.expiresAt }),
   })
 
   if (error) {

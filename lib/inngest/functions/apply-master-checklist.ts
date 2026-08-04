@@ -1,3 +1,4 @@
+import { unwrapList } from '@/lib/supabase/unwrap'
 import { inngest }                          from '@/lib/inngest/client'
 import { createServiceClient }              from '@/lib/supabase/server'
 import { seedDefaultRoomTemplatesIfNeeded } from '@/lib/checklists/seed-default-room-templates'
@@ -39,13 +40,23 @@ export const applyMasterChecklistJob = inngest.createFunction(
 
         // Explicit ownership check — service client bypasses RLS so we must
         // enforce org isolation ourselves. One bulk query per batch; no per-row calls.
-        const { data: ownedProps } = await supabase
-          .from('properties')
-          .select('id')
-          .in('id', batch)
-          .eq('org_id', org_id)
+        // This read IS the org-isolation enforcement for a service-role
+        // write, so a failure must not degrade to an empty owned-set — that
+        // silently skips every property in the batch and reports success.
+        const ownedProps = unwrapList(
+          await supabase
+            .from('properties')
+            .select('id')
+            .in('id', batch)
+            .eq('org_id', org_id)
+            // Bounded by construction — `batch` is a BATCH_SIZE slice, so this
+            // can never return more rows than that. Stated explicitly so the
+            // bound is visible rather than inferred from the caller.
+            .limit(BATCH_SIZE),
+          { site: 'inngest.apply-master-checklist.ownership', orgId: org_id },
+        )
 
-        const ownedIds = new Set((ownedProps ?? []).map((p: { id: string }) => p.id))
+        const ownedIds = new Set(ownedProps.map((p: { id: string }) => p.id))
 
         let count = 0
         for (const propertyId of batch) {

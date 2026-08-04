@@ -26,14 +26,14 @@ interface Counts {
 function fakeDb(c: Counts): FieldStayDexie {
   const table = (n: number) => ({ count: async () => n })
   const mutations = {
-    filter: (predicate: (m: { failed?: boolean }) => boolean) => ({
-      count: async () => {
-        // The check distinguishes pending (failed !== true) from
-        // dead-lettered (failed === true); resolve which one is being asked
-        // for by running the predicate against a representative row.
-        const wantsFailed = predicate({ failed: true })
-        return wantsFailed ? (c.failed ?? 0) : (c.pending ?? 0)
-      },
+    // Pending: a full-table filter on !failed.
+    filter: () => ({ count: async () => c.pending ?? 0 }),
+    // Dead-lettered: index-backed, since `failed` is stored as 0/1 (IndexedDB
+    // cannot index a boolean — see DeadLetterFlag in lib/dexie/schema.ts).
+    where: (index: string) => ({
+      equals: (value: unknown) => ({
+        count: async () => (index === 'failed' && value === 1 ? (c.failed ?? 0) : 0),
+      }),
     }),
   }
 

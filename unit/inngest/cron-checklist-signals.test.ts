@@ -42,7 +42,9 @@ function completedItem(overrides: Partial<{
   return {
     id, section_name, task, crew_notes, photo_storage_path, requires_photo,
     is_completed: true, completed_at,
-    checklist_instances: { property_id, turnovers: { org_id } },
+    // property_id lives on turnovers, NOT on checklist_instances — that table
+    // has no such column, which is why the previous select returned nothing.
+    checklist_instances: { turnovers: { org_id, property_id } },
   }
 }
 

@@ -32,6 +32,8 @@ function makeSupabase(ownedIdsByCall: string[][]) {
     chain.select = (...a: unknown[]) => record('select', a)
     chain.in     = (...a: unknown[]) => record('in', a)
     chain.eq     = (...a: unknown[]) => record('eq', a)
+    // The ownership check states its BATCH_SIZE bound explicitly with .limit().
+    chain.limit  = (...a: unknown[]) => record('limit', a)
     chain.then   = (resolve: (v: unknown) => unknown) => {
       const ids = ownedIdsByCall[call] ?? []
       call += 1

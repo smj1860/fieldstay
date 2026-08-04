@@ -47,6 +47,10 @@ function makeSupabase(queued: Record<string, { data?: unknown; error?: unknown }
     chain.insert = (...a: unknown[]) => record('insert', a)
     chain.update = (...a: unknown[]) => record('update', a)
     chain.upsert = (...a: unknown[]) => record('upsert', a)
+    // The inventory_items metadata read is paginated through fetchAllRows(),
+    // which chains .order().range() before awaiting.
+    chain.order  = (...a: unknown[]) => record('order', a)
+    chain.range  = (...a: unknown[]) => record('range', a)
 
     const resolveNext = () => {
       const idx = counters[table] ?? 0
@@ -186,7 +190,11 @@ describe('handleInventoryCountSubmitted', () => {
         { data: null, error: null },
       ],
       purchase_orders: [
-        { data: { id: 'po_existing' }, error: null }, // existing-PO check — found
+        // Existing-PO check — found, AND carrying line items. The header alone
+        // is no longer sufficient to short-circuit: a header with zero items
+        // is a half-written PO from a failed earlier attempt, and treating it
+        // as done is what left PMs with permanently empty restock orders.
+        { data: { id: 'po_existing', purchase_order_items: [{ id: 'poi_1' }] }, error: null },
       ],
     })
     ;(createServiceClient as ReturnType<typeof vi.fn>).mockReturnValue(supabase)
@@ -194,7 +202,7 @@ describe('handleInventoryCountSubmitted', () => {
     const result = await invokeHandler(handleInventoryCountSubmitted, {
       event: { data: { count_id: 'count_1', property_id: 'prop_1', org_id: 'org_1' } },
       step:  runAllStep(),
-      logger: { info: vi.fn(), error: vi.fn() },
+      logger: { info: vi.fn(), error: vi.fn(), warn: vi.fn() },
     })
 
     expect(result).toEqual({

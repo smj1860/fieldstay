@@ -8,7 +8,10 @@ function makeSupabase(response: Resp) {
   const from = vi.fn(() => {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const chain: any = {}
-    for (const m of ['select', 'eq', 'lte']) {
+    // order/range are stubbed because the read pages through fetchAllRows. The
+    // chain resolves the same rows for every page, which terminates after one
+    // page only because fixtures are shorter than the 1000-row page size.
+    for (const m of ['select', 'eq', 'lte', 'order', 'range']) {
       chain[m] = vi.fn((...args: unknown[]) => {
         calls.push({ method: m, args })
         return chain
@@ -49,7 +52,7 @@ describe('findMaintenanceCandidatesForWindow', () => {
   it('scopes the query to the given property and active schedules only', async () => {
     const supabase = makeSupabase({ data: [], error: null })
 
-    await findMaintenanceCandidatesForWindow(supabase as never, 'prop_1', '2026-07-22', null)
+    await findMaintenanceCandidatesForWindow(supabase as never, 'org_1', 'prop_1', '2026-07-22', null)
 
     expect(supabase.calls.some((c) => c.method === 'eq' && c.args[0] === 'property_id' && c.args[1] === 'prop_1')).toBe(true)
     expect(supabase.calls.some((c) => c.method === 'eq' && c.args[0] === 'is_active' && c.args[1] === true)).toBe(true)
@@ -58,7 +61,7 @@ describe('findMaintenanceCandidatesForWindow', () => {
   it('caps the effective end date at 90 days from windowStart when windowEnd is null', async () => {
     const supabase = makeSupabase({ data: [], error: null })
 
-    await findMaintenanceCandidatesForWindow(supabase as never, 'prop_1', '2026-07-22', null)
+    await findMaintenanceCandidatesForWindow(supabase as never, 'org_1', 'prop_1', '2026-07-22', null)
 
     const lteCall = supabase.calls.find((c) => c.method === 'lte')
     expect(lteCall?.args[0]).toBe('next_due_date')
@@ -68,7 +71,7 @@ describe('findMaintenanceCandidatesForWindow', () => {
   it('uses windowEnd directly when it falls within the 90-day lookahead cap', async () => {
     const supabase = makeSupabase({ data: [], error: null })
 
-    await findMaintenanceCandidatesForWindow(supabase as never, 'prop_1', '2026-07-22', '2026-08-05')
+    await findMaintenanceCandidatesForWindow(supabase as never, 'org_1', 'prop_1', '2026-07-22', '2026-08-05')
 
     const lteCall = supabase.calls.find((c) => c.method === 'lte')
     expect(lteCall?.args[1]).toBe('2026-08-05')
@@ -77,7 +80,7 @@ describe('findMaintenanceCandidatesForWindow', () => {
   it('caps the effective end date at 90 days even when windowEnd is further out', async () => {
     const supabase = makeSupabase({ data: [], error: null })
 
-    await findMaintenanceCandidatesForWindow(supabase as never, 'prop_1', '2026-07-22', '2027-01-01')
+    await findMaintenanceCandidatesForWindow(supabase as never, 'org_1', 'prop_1', '2026-07-22', '2027-01-01')
 
     const lteCall = supabase.calls.find((c) => c.method === 'lte')
     expect(lteCall?.args[1]).toBe('2026-10-20')
@@ -86,7 +89,7 @@ describe('findMaintenanceCandidatesForWindow', () => {
   it('returns candidates with no seasonal restriction unfiltered', async () => {
     const supabase = makeSupabase({ data: [candidate()], error: null })
 
-    const result = await findMaintenanceCandidatesForWindow(supabase as never, 'prop_1', '2026-07-22', null)
+    const result = await findMaintenanceCandidatesForWindow(supabase as never, 'org_1', 'prop_1', '2026-07-22', null)
 
     expect(result).toHaveLength(1)
     expect(result[0]?.id).toBe('sched_1')
@@ -100,7 +103,7 @@ describe('findMaintenanceCandidatesForWindow', () => {
       error: null,
     })
 
-    const result = await findMaintenanceCandidatesForWindow(supabase as never, 'prop_1', '2026-07-22', null)
+    const result = await findMaintenanceCandidatesForWindow(supabase as never, 'org_1', 'prop_1', '2026-07-22', null)
 
     expect(result).toHaveLength(0)
   })
@@ -114,17 +117,20 @@ describe('findMaintenanceCandidatesForWindow', () => {
       error: null,
     })
 
-    const result = await findMaintenanceCandidatesForWindow(supabase as never, 'prop_1', '2026-07-22', null)
+    const result = await findMaintenanceCandidatesForWindow(supabase as never, 'org_1', 'prop_1', '2026-07-22', null)
 
     expect(result.map((c) => c.id)).toEqual(['summer_only'])
   })
 
-  it('returns an empty array when the query errors (data is null)', async () => {
+  // Contract CHANGED (2026-08-03): an empty array reads as "no maintenance due
+  // in this gap", so swallowing the error silently suppressed every vacancy
+  // suggestion for the property. It now throws.
+  it('throws when the query errors, rather than reporting no candidates', async () => {
     const supabase = makeSupabase({ data: null, error: { message: 'boom' } })
 
-    const result = await findMaintenanceCandidatesForWindow(supabase as never, 'prop_1', '2026-07-22', null)
-
-    expect(result).toEqual([])
+    await expect(
+      findMaintenanceCandidatesForWindow(supabase as never, 'org_1', 'prop_1', '2026-07-22', null)
+    ).rejects.toThrow()
   })
 
   it('preserves the shape of each returned candidate', async () => {
@@ -133,7 +139,7 @@ describe('findMaintenanceCandidatesForWindow', () => {
       error: null,
     })
 
-    const result = await findMaintenanceCandidatesForWindow(supabase as never, 'prop_1', '2026-07-22', null)
+    const result = await findMaintenanceCandidatesForWindow(supabase as never, 'org_1', 'prop_1', '2026-07-22', null)
 
     expect(result[0]).toMatchObject({
       id: 'sched_2', name: 'HVAC filter swap', estimated_cost: null, assigned_vendor_id: 'vendor_9',

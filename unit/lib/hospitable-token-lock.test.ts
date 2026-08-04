@@ -57,6 +57,9 @@ function makeSupabase(state: ReturnType<typeof makeConnectionState>) {
         error: null,
       })
     }
+    // The expiry read uses maybeSingle() so a missing connection is data:null
+    // rather than PGRST116; same result either way here.
+    chain.maybeSingle = chain.single
     return chain
   })
   return { from }

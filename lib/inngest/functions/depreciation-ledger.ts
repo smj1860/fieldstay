@@ -37,19 +37,23 @@
 import { inngest }                     from '@/lib/inngest/client'
 import { createServiceClient }          from '@/lib/supabase/server'
 import { calculateAnnualDepreciation }  from '@/lib/assets/depreciation'
+import type { Enums } from '@/types/database'
 import { logAuditEvent }                from '@/lib/audit'
 import { fetchAllRows, fetchDistinctOrgIds } from '@/lib/inngest/paginate'
 
+// Mirrors the SELECT below against the live column nullability. The query
+// filters placed_in_service_date and purchase_price NOT NULL, but a
+// `.not(...)` filter narrows rows, not types — the loop below re-checks them.
 interface LedgerAssetRow {
   id:                     string
   org_id:                 string
   property_id:            string
   name:                   string
-  asset_type:             string
-  placed_in_service_date: string
-  purchase_price:         number
+  asset_type:             Enums<'asset_type'>
+  placed_in_service_date: string | null
+  purchase_price:         number | null
   salvage_value:          number | null
-  macrs_class:            string
+  macrs_class:            Enums<'macrs_class'> | null
 }
 
 export const generateDepreciationLedger = inngest.createFunction(
@@ -164,9 +168,21 @@ export const depreciationLedgerOrg = inngest.createFunction(
 
       const entries = []
       for (const asset of assets) {
+        // The query filters both of these NOT NULL; re-checked here because a
+        // row filter is not a type narrowing, and depreciation is meaningless
+        // without an in-service date and a cost basis. macrs_class falls back
+        // to the column's own DEFAULT.
+        if (asset.placed_in_service_date === null || asset.purchase_price === null) continue
+
         const prior = priorCumulativeMap[asset.id] ?? 0
         const entry = calculateAnnualDepreciation(
-          asset as Parameters<typeof calculateAnnualDepreciation>[0],
+          {
+            ...asset,
+            placed_in_service_date: asset.placed_in_service_date,
+            purchase_price:         asset.purchase_price,
+            macrs_class:            asset.macrs_class ?? '5_year',
+            salvage_value:          asset.salvage_value ?? 0,
+          },
           taxYear,
           prior,
         )

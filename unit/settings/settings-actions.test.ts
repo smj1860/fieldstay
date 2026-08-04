@@ -1,7 +1,23 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 
+vi.mock('@/lib/rate-limit', async () => {
+  // Stubbed because the email-send actions here now go through checkLimit().
+  // Without this the unit run consults the REAL Upstash instance configured in
+  // the environment, which makes these tests share (and exhaust) a live
+  // 20/hour budget keyed on the fixture user id — a test that fails only
+  // because an earlier run of itself used up the quota.
+  const { checkLimitStub, retryAfterSecondsStub } = await import('@/unit/stubs/rate-limit')
+  return {
+    emailSendActionLimiter: { limit: vi.fn(async () => ({ success: true })) },
+    checkLimit:             checkLimitStub(),
+    retryAfterSeconds:      retryAfterSecondsStub,
+    upstashConfigured:      () => false,
+  }
+})
+
 vi.mock('@/lib/auth', () => ({
   requireOrgMember: vi.fn(),
+  requireOrgRole:   vi.fn(),
 }))
 vi.mock('@/lib/supabase/server', () => ({
   createClient: vi.fn(),
@@ -23,6 +39,7 @@ vi.mock('@/lib/stripe/client', () => ({
   stripe: {
     billingPortal: { sessions: { create: vi.fn() } },
     checkout:      { sessions: { create: vi.fn() } },
+    subscriptions: { list: vi.fn(async () => ({ data: [] })) },
   },
   PLANS: {
     starter:   { monthlyPriceId: 'price_starter_m', annualPriceId: 'price_starter_a' },
@@ -58,9 +75,12 @@ import {
   deactivateVendor,
   inviteCrewMember,
   inviteAllUninvitedCrew,
+  bulkImportCrew,
   updateAutoAssignMode,
+  createCheckoutSession,
 } from '@/app/(dashboard)/settings/actions'
-import { requireOrgMember } from '@/lib/auth'
+import { requireOrgMember, requireOrgRole } from '@/lib/auth'
+import { stripe } from '@/lib/stripe/client'
 import { revalidatePath } from 'next/cache'
 import { geocodeZip } from '@/lib/geocoding'
 import { logAuditEvent, logAuditEvents } from '@/lib/audit'
@@ -94,6 +114,7 @@ function makeSupabase(queued: QueuedByTable = {}) {
     chain.eq     = (...a: unknown[]) => record('eq', a)
     chain.is     = (...a: unknown[]) => record('is', a)
     chain.or     = (...a: unknown[]) => record('or', a)
+    chain.limit  = (...a: unknown[]) => record('limit', a)
 
     const resolveNext = () => {
       const idx = counters[table] ?? 0
@@ -415,6 +436,49 @@ describe('settings/actions', () => {
       expect(eqCalls.some((c) => c.args[0] === 'org_id' && c.args[1] === ORG_ID)).toBe(true)
       expect(logAuditEvents).not.toHaveBeenCalled()
     })
+
+    // The recipient fan-out is what this action actually spends, and the
+    // per-call limiter above it counts calls, not people. Without a bound on
+    // the query itself, one allowed call reached every uninvited row (capped
+    // only by PostgREST's max_rows = 1000), so 20 calls/hour meant up to
+    // 20,000 emails and 20,000 SMS per hour to third-party addresses.
+    it('bounds the recipient list so one call cannot fan out unbounded', async () => {
+      const supabase = makeSupabase({ crew_members: [{ data: [], error: null }] })
+      mockAuthed(supabase, 'admin')
+
+      await inviteAllUninvitedCrew()
+
+      const limitCall = supabase.calls.find((c) => c.table === 'crew_members' && c.method === 'limit')
+      expect(limitCall).toBeDefined()
+      expect(limitCall!.args[0]).toBeLessThanOrEqual(200)
+    })
+  })
+
+  describe('bulkImportCrew — fan-out staging bound', () => {
+    it('rejects an oversized import without writing anything', async () => {
+      const supabase = makeSupabase()
+      mockAuthed(supabase, 'admin')
+
+      const rows = Array.from({ length: 501 }, (_, i) => ({ name: `Crew ${i}`, email: `c${i}@example.com` }))
+      const result = await bulkImportCrew(rows)
+
+      expect(result.imported).toBe(0)
+      expect(result.error).toMatch(/too many rows/i)
+      // The staging write must not happen — these rows are the address list
+      // inviteAllUninvitedCrew would later mail.
+      expect(supabase.calls.some((c) => c.table === 'crew_members' && c.method === 'insert')).toBe(false)
+    })
+
+    it('accepts an import at the cap', async () => {
+      const supabase = makeSupabase({ crew_members: [{ data: null, error: null }] })
+      mockAuthed(supabase, 'admin')
+
+      const rows = Array.from({ length: 500 }, (_, i) => ({ name: `Crew ${i}` }))
+      const result = await bulkImportCrew(rows)
+
+      expect(result.error).toBeUndefined()
+      expect(result.imported).toBe(500)
+    })
   })
 
   describe('updateAutoAssignMode', () => {
@@ -435,6 +499,101 @@ describe('settings/actions', () => {
       expect(result).toEqual({ success: true })
       const eqCall = supabase.calls.find((c) => c.table === 'organizations' && c.method === 'eq')
       expect(eqCall?.args).toEqual(['id', ORG_ID])
+    })
+  })
+
+  describe('createCheckoutSession', () => {
+    // An org that already has a live subscription must never be handed a
+    // second Checkout: mode:'subscription' creates a NEW subscription every
+    // time it completes, so an existing subscriber clicking a plan card ended
+    // up billed twice, with the older subscription invisible in the app (the
+    // webhook handler overwrites the single stripe_subscription_id column).
+    function mockRoleAuthed(supabase: ReturnType<typeof makeSupabase>) {
+      vi.mocked(requireOrgRole).mockResolvedValue({
+        user:       { id: USER_ID } as never,
+        supabase:   supabase as never,
+        membership: membership('admin') as never,
+      })
+    }
+
+    it('sends an org with an active subscription to the billing portal instead of a second checkout', async () => {
+      const supabase = makeSupabase({
+        organizations: [{ data: { stripe_customer_id: 'cus_1', billing_email: 'pm@example.com' }, error: null }],
+      })
+      mockRoleAuthed(supabase)
+      vi.mocked(stripe.subscriptions.list).mockResolvedValue({ data: [{ status: 'active' }] } as never)
+      vi.mocked(stripe.billingPortal.sessions.create).mockResolvedValue({ url: 'https://portal' } as never)
+
+      const result = await createCheckoutSession('growth', 'monthly')
+
+      expect(result).toEqual({ redirectUrl: 'https://portal' })
+      expect(stripe.checkout.sessions.create).not.toHaveBeenCalled()
+    })
+
+    it('treats trialing and past_due as live too', async () => {
+      for (const status of ['trialing', 'past_due', 'unpaid', 'paused']) {
+        vi.clearAllMocks()
+        const supabase = makeSupabase({
+          organizations: [{ data: { stripe_customer_id: 'cus_1', billing_email: null }, error: null }],
+        })
+        mockRoleAuthed(supabase)
+        vi.mocked(stripe.subscriptions.list).mockResolvedValue({ data: [{ status }] } as never)
+        vi.mocked(stripe.billingPortal.sessions.create).mockResolvedValue({ url: 'https://portal' } as never)
+
+        const result = await createCheckoutSession('growth', 'monthly')
+
+        expect(result, status).toEqual({ redirectUrl: 'https://portal' })
+        expect(stripe.checkout.sessions.create, status).not.toHaveBeenCalled()
+      }
+    })
+
+    it('still allows checkout after a failed first payment (incomplete is not live)', async () => {
+      // Stripe leaves a failed first charge as 'incomplete' for ~23h. Blocking
+      // on it would lock the customer out of retrying entirely.
+      const supabase = makeSupabase({
+        organizations: [{ data: { stripe_customer_id: 'cus_1', billing_email: null }, error: null }],
+        integration_connections: [{ data: null, error: null }],
+      })
+      mockRoleAuthed(supabase)
+      vi.mocked(stripe.subscriptions.list).mockResolvedValue({
+        data: [{ status: 'incomplete' }, { status: 'incomplete_expired' }, { status: 'canceled' }],
+      } as never)
+      vi.mocked(stripe.checkout.sessions.create).mockResolvedValue({ url: 'https://checkout' } as never)
+
+      const result = await createCheckoutSession('growth', 'monthly')
+
+      expect(result).toEqual({ redirectUrl: 'https://checkout' })
+      expect(stripe.billingPortal.sessions.create).not.toHaveBeenCalled()
+    })
+
+    it('passes an idempotency key so a double-click cannot mint two sessions', async () => {
+      const supabase = makeSupabase({
+        organizations: [{ data: { stripe_customer_id: null, billing_email: 'pm@example.com' }, error: null }],
+        integration_connections: [{ data: null, error: null }],
+      })
+      mockRoleAuthed(supabase)
+      vi.mocked(stripe.checkout.sessions.create).mockResolvedValue({ url: 'https://checkout' } as never)
+
+      await createCheckoutSession('growth', 'annual')
+
+      expect(stripe.checkout.sessions.create).toHaveBeenCalledWith(
+        expect.anything(),
+        expect.objectContaining({ idempotencyKey: `checkout:${ORG_ID}:growth:annual` }),
+      )
+    })
+
+    it('does not query Stripe at all for an org with no customer yet', async () => {
+      const supabase = makeSupabase({
+        organizations: [{ data: { stripe_customer_id: null, billing_email: 'pm@example.com' }, error: null }],
+        integration_connections: [{ data: null, error: null }],
+      })
+      mockRoleAuthed(supabase)
+      vi.mocked(stripe.checkout.sessions.create).mockResolvedValue({ url: 'https://checkout' } as never)
+
+      const result = await createCheckoutSession('starter', 'monthly')
+
+      expect(result).toEqual({ redirectUrl: 'https://checkout' })
+      expect(stripe.subscriptions.list).not.toHaveBeenCalled()
     })
   })
 })

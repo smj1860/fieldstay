@@ -72,14 +72,31 @@ export function upstashConfigured(): boolean {
 export async function checkLimit(
   limiter:    Ratelimit,
   identifier: string,
-  options:    { onError: LimitFailPolicy; site: string },
+  options:    {
+    onError: LimitFailPolicy
+    site:    string
+    /**
+     * Tokens this call consumes. Defaults to 1 — one call, one token.
+     *
+     * Pass the RECIPIENT COUNT for anything that fans out. A limiter that
+     * counts calls bounds nothing when one allowed call sends to a thousand
+     * people: 20 invites/hour and 20 bulk-invites/hour of 1,000 recipients
+     * each are the same budget to Redis and three orders of magnitude apart in
+     * what they cost us and in how much third-party mail we emit.
+     */
+    cost?:   number
+  },
 ): Promise<LimitDecision> {
   if (!upstashConfigured()) {
     return { allowed: true, skipped: true, errored: false, limit: 0, remaining: 0, reset: Date.now() }
   }
 
+  // A zero/negative cost would silently consume nothing; a fractional one is
+  // meaningless to the sliding-window counter. Normalize to a whole token.
+  const cost = Math.max(1, Math.floor(options.cost ?? 1))
+
   try {
-    const { success, limit, remaining, reset } = await limiter.limit(identifier)
+    const { success, limit, remaining, reset } = await limiter.limit(identifier, { rate: cost })
     return { allowed: success, skipped: false, errored: false, limit, remaining, reset }
   } catch (err) {
     console.error(`[rate-limit] check failed at ${site(options.site)} — failing ${options.onError === 'allow' ? 'OPEN' : 'CLOSED'}`, err)
@@ -314,6 +331,39 @@ export const inviteAcceptRatelimit = new Ratelimit({
   limiter:   Ratelimit.slidingWindow(10, '5 m'),
   analytics: false,
   prefix:    'rl:invite-accept',
+})
+
+// CAN-SPAM opt-out surface (/unsubscribe/*, /api/email/unsubscribe).
+// Unauthenticated by law — the opt-out must work without a login — so a
+// 64-char hex token is the only credential, and this bounds guessing it. The
+// write is a single UPDATE and mail clients doing RFC 8058 one-click may
+// retry, so the window is generous: this is anti-enumeration, not a usage cap.
+// Fails OPEN on a Redis outage (the default for the abuse limiters here): a
+// degraded limiter must never be the reason someone cannot opt out, which
+// would itself be the compliance failure.
+export const unsubscribeRatelimit = new Ratelimit({
+  redis,
+  limiter:   Ratelimit.slidingWindow(20, '1 m'),
+  analytics: false,
+  prefix:    'rl:unsubscribe',
+})
+
+// Authenticated actions that SEND EMAIL to a third party — team invites, owner
+// portal links, vendor Connect invites, bulk crew invites. An auth gate proves
+// WHO is sending, not HOW OFTEN: without a limiter a single authenticated member
+// can drive unlimited outbound mail from our sending domain, which is both a
+// spend vector and, more importantly, a way to get that domain onto blocklists
+// using someone else's address as the target. Keyed per USER, since the org is
+// not the thing being abused.
+//
+// 20/hour is far above any real invite cadence (a PM onboarding a whole team
+// does it once) while making a mail-bomb loop useless. Fails OPEN like the other
+// abuse limiters here: a Redis outage must not stop a PM inviting their staff.
+export const emailSendActionLimiter = new Ratelimit({
+  redis,
+  limiter:   Ratelimit.slidingWindow(20, '1 h'),
+  analytics: false,
+  prefix:    'rl:email-send-action',
 })
 
 // Roadshow demo surface (/demo/*) — unauthenticated and gated only by a

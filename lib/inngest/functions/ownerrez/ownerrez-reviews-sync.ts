@@ -1,10 +1,13 @@
 import { inngest }            from '@/lib/inngest/client'
+import { fetchAllRows }      from '@/lib/inngest/paginate'
 import { createServiceClient } from '@/lib/supabase/server'
 import { OwnerRezApiClient }   from '@/lib/integrations/providers/ownerrez-api'
 import { RateLimitError, TokenRevokedError, translateSyncError } from '@/lib/integrations/types'
 import type { OwnerRezReview } from '@/lib/integrations/types'
 import { logAuditEvent }       from '@/lib/audit'
 import { mergeIntegrationConnectionMetadata } from '@/lib/integrations/connection-metadata'
+import { asJsonObject } from '@/lib/json'
+import type { Json } from '@/types/database'
 
 export const ownerRezReviewsSync = inngest.createFunction(
   {
@@ -42,19 +45,26 @@ export const ownerRezReviewsSync = inngest.createFunction(
 
     const connections = await step.run('fetch-connections', async () => {
       const admin = createServiceClient({ system: 'inngest:ownerrez-reviews-sync' })
-      const { data, error } = await admin
-        .from('integration_connections')
-        .select('user_id, org_id, metadata')
-        .eq('provider_id', 'ownerrez')
-        .eq('status', 'active')
-      if (error) throw new Error(`[OwnerRez reviews sync] Failed to fetch connections: ${error.message}`)
-      return data ?? []
+      // PLATFORM-WIDE scan — every org with a live OwnerRez connection, not
+      // one tenant's. At max_rows = 1000 PostgREST returns the first 1000 with
+      // a 200 and no truncation signal, so every connection past that stops
+      // pulling reviews while the cron still reports success.
+      return await fetchAllRows<{ user_id: string; org_id: string | null; metadata: Json }>(
+        (from, to) => admin
+          .from('integration_connections')
+          .select('user_id, org_id, metadata')
+          .eq('provider_id', 'ownerrez')
+          .eq('status', 'active')
+          .order('user_id')
+          .range(from, to),
+        { label: 'ownerrez-reviews-sync.connections' },
+      )
     })
 
     for (const conn of connections) {
       const userId = conn.user_id as string
       const orgId  = conn.org_id  as string
-      const meta   = (conn.metadata as Record<string, unknown> | null) ?? {}
+      const meta   = asJsonObject(conn.metadata) ?? {}
       const cursor = typeof meta['reviews_sync_cursor'] === 'string'
         ? meta['reviews_sync_cursor']
         : undefined

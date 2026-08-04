@@ -10,6 +10,7 @@
  *  - Paginates automatically — all list methods return a complete array
  */
 
+import { unwrap } from '@/lib/supabase/unwrap'
 import { Redis }               from '@upstash/redis'
 import { createServiceClient }  from '@/lib/supabase/server'
 import { readIntegrationToken }  from '../vault'
@@ -173,12 +174,17 @@ export class OwnerRezApiClient {
   private async markConnectionError(): Promise<void> {
     const supabase = createServiceClient({ system: 'lib/integrations/providers/ownerrez-api' })
 
-    const { data: conn } = await supabase
+    // This decides whether a failing API call is an intentional disconnect
+    // or a real error. A discarded read error made every failure look like
+    // a missing connection.
+    const connRes = await supabase
       .from('integration_connections')
       .select('org_id, status')
       .eq('user_id', this.userId)
       .eq('provider_id', PROVIDER)
-      .single()
+      .maybeSingle()
+
+    const conn = unwrap(connRes, { site: 'lib.integrations.ownerrez-api.connection' })
 
     // A user-initiated disconnect (or an already-revoked connection) is a
     // deliberate end state. A 401 from a paginated fetch that was still

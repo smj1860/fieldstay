@@ -55,16 +55,21 @@ function batchEvent(overrides: Partial<{ org_id: string; requested_by: string }>
   return { data: { org_id: 'org_1', requested_by: 'user_1', ...overrides } }
 }
 
+// Deliberately has NO internal_notes key: `reviews` has no such column. The
+// fixture used to carry `internal_notes: null`, which is precisely why this
+// suite could not catch the bug it was written to cover — the double returns
+// whatever the fixture holds, so a select naming a column that does not exist
+// in the real database looked identical to one that does. A fixture is a claim
+// about the schema; this one was false.
 function review(overrides: Partial<{
   id: string; review_text: string; rating: number; guest_name: string | null
-  internal_notes: string | null; properties: unknown
+  properties: unknown
 }> = {}) {
   return {
     id:              'rev_1',
     review_text:     'Great stay, loved the view.',
     rating:           5,
     guest_name:      'Alex',
-    internal_notes:  null,
     properties:      { name: 'Sunset Villa' },
     ...overrides,
   }
@@ -81,6 +86,34 @@ const cleanResponse = {
 describe('repuguardBatchGenerate', () => {
   beforeEach(() => {
     vi.clearAllMocks()
+  })
+
+  // Regression: the select named `internal_notes`, which does not exist on
+  // `reviews`. PostgREST rejects the WHOLE select on an unknown column
+  // (verified live: 42703), so `error` was set on every run and the fetch step
+  // threw — this cron had never generated a draft for any org. The fixture
+  // carried an `internal_notes: null` key, so every test here passed against
+  // the broken query.
+  //
+  // Pinning the select string is deliberately crude. The real fix for this
+  // class is typing the query builder against the generated schema, which is
+  // in progress; until that lands, nothing else stops a phantom column from
+  // being added back.
+  it('does not select internal_notes — no such column exists on reviews', async () => {
+    const supabase = makeSupabase({ reviews: [{ data: [], error: null }] })
+    ;(createServiceClient as ReturnType<typeof vi.fn>).mockReturnValue(supabase)
+
+    await invokeHandler(repuguardBatchGenerate, {
+      event:  batchEvent(),
+      step:   makeStep(),
+      logger: defaultLogger,
+    })
+
+    const selects = supabase.calls.filter((c) => c.table === 'reviews' && c.method === 'select')
+    expect(selects.length).toBeGreaterThan(0)
+    for (const call of selects) {
+      expect(String(call.args[0])).not.toContain('internal_notes')
+    }
   })
 
   it('is a no-op when there are no pending reviews', async () => {

@@ -16,7 +16,7 @@ import {
   bulkAssignVendor, bulkUpdateWorkOrderStatus, fetchArchivedWorkOrders,
   acceptVendorSuggestion, dismissVendorSuggestion,
 } from './actions'
-import type { WoStatus, PriorityLevel, VendorSpecialty, ScheduleType, ScheduleFrequency, ComplianceStatus } from '@/types/database'
+import type { WoStatus, PriorityLevel, VendorSpecialty, ScheduleType, ScheduleFrequency } from '@/types/database'
 import { WorkOrderDetail, type WorkOrderDetailData } from '@/components/work-orders/work-order-detail'
 import { MaintenanceCalendar } from './maintenance-calendar'
 import { CreateWorkOrderModal } from './CreateWorkOrderModal'
@@ -59,14 +59,20 @@ interface WorkOrderRow {
   vendor_dispatch_email: string | null
   suggested_vendor_ids: string[] | null
   suggestion_reasoning: string | null
-  suggestion_status: 'pending' | 'accepted' | 'overridden' | 'dismissed' | null
+  // turnovers/work_orders store this as plain TEXT, not an enum — the union
+  // was an app-side convention the column never enforced. The `=== 'pending'`
+  // check below is unaffected; anything else simply doesn't render the banner.
+  suggestion_status: string | null
   created_at: string
   updated_at: string
   properties: { name: string; address: string | null; city: string | null; state: string | null; access_instructions: string | null } | { name: string; address: string | null; city: string | null; state: string | null; access_instructions: string | null }[] | null
-  vendors: { id: string; name: string; specialty: string; phone: string | null } | { id: string; name: string; specialty: string; phone: string | null }[] | null
+  // vendors.specialty is NULLABLE.
+  vendors: { id: string; name: string; specialty: string | null; phone: string | null } | { id: string; name: string; specialty: string | null; phone: string | null }[] | null
   work_order_line_items?: Array<{
     id: string; work_order_id?: string; line_type: string; description: string
-    quantity: number; unit: string | null; unit_cost: number; line_total: number
+    // line_total is GENERATED ALWAYS (quantity * unit_cost), which Postgres
+    // reports as nullable.
+    quantity: number; unit: string | null; unit_cost: number; line_total: number | null
     sort_order: number; created_at: string
   }>
   work_order_invoices?: { id: string; status: 'pending_payment' | 'paid' | 'cancelled' }
@@ -83,7 +89,10 @@ interface PropertyOption {
 interface VendorOption {
   id: string
   name: string
-  specialty: VendorSpecialty
+  // vendors.specialty is NULLABLE (default 'general', but nothing backfilled
+  // older rows). Typing it non-null is what let CreateWorkOrderModal call
+  // .replace() on it unguarded.
+  specialty: VendorSpecialty | null
   email: string | null
 }
 
@@ -101,8 +110,13 @@ export interface AssetOption {
 }
 
 export interface VendorComplianceRow {
-  vendor_id:         string
-  compliance_status: ComplianceStatus
+  vendor_id: string
+  // Deliberately `string`, not the ComplianceStatus union: this is a computed
+  // column on the vendor_compliance_status VIEW, and lib/vendors/
+  // compliance-status.ts is an allowlist precisely because the view may grow a
+  // state we don't know yet. A closed union here would make an unknown state a
+  // type error at the boundary instead of a blocked vendor, which is backwards.
+  compliance_status: string
 }
 
 export interface PropertyOptionWithCoords extends PropertyOption {

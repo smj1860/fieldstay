@@ -1,3 +1,5 @@
+import { fetchAllRows } from '@/lib/inngest/paginate'
+import type { Enums } from '@/types/database'
 import { inngest } from '@/lib/inngest/client'
 import { createServiceClient } from '@/lib/supabase/server'
 import { resend, FROM } from '@/lib/resend/client'
@@ -54,6 +56,60 @@ export const handlePurchaseOrderApproved = inngest.createFunction(
   }
 )
 
+interface BelowParItem {
+  id:               string
+  name:             string
+  current_quantity: number
+  par_level:        number
+  quantity_to_buy:  number
+  unit:             string
+}
+
+/**
+ * The two writes that turn a bare purchase_orders header into a usable PO.
+ *
+ * Extracted so the create path and the repair path (an existing header with
+ * zero line items, left behind by a partially-applied earlier attempt) run
+ * exactly the same code. Both throw rather than returning a discarded result:
+ * a PO with no items is indistinguishable from a healthy one in the UI, so a
+ * swallowed error here is invisible until a PM opens an empty restock order.
+ */
+async function insertPoItems(
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- service client is untyped repo-wide (no <Database> generic; see lib/supabase/server.ts)
+  supabase: any,
+  purchaseOrderId: string,
+  items: BelowParItem[],
+): Promise<void> {
+  const { error } = await supabase.from('purchase_order_items').insert(
+    items.map((item) => ({
+      purchase_order_id: purchaseOrderId,
+      inventory_item_id: item.id,
+      item_name:         item.name,
+      current_quantity:  item.current_quantity,
+      par_level:         item.par_level,
+      quantity_to_buy:   item.quantity_to_buy,
+      unit:              item.unit,
+    }))
+  )
+  if (error) {
+    throw new Error(`purchase_order_items insert failed for PO ${purchaseOrderId}: ${error.message}`)
+  }
+}
+
+async function markPoSent(
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- service client is untyped repo-wide (no <Database> generic; see lib/supabase/server.ts)
+  supabase: any,
+  purchaseOrderId: string,
+): Promise<void> {
+  const { error } = await supabase
+    .from('purchase_orders')
+    .update({ status: 'sent', sent_at: new Date().toISOString() })
+    .eq('id', purchaseOrderId)
+  if (error) {
+    throw new Error(`purchase_orders status update failed for PO ${purchaseOrderId}: ${error.message}`)
+  }
+}
+
 /**
  * Triggered when a crew member submits an inventory count.
  *
@@ -67,6 +123,10 @@ export const handleInventoryCountSubmitted = inngest.createFunction(
     id:      'inventory-count-submitted',
     name:    'Process Inventory Count',
     retries: 2,
+    // Batch-dispatched, and this handler both writes a purchase order and
+    // notifies the PM. Resend's default is 2 req/s.
+    concurrency: { limit: 5 },
+    throttle:    { limit: 60, period: '1m' },
   },
   { event: 'inventory/count-submitted' as const },
   async ({ event, step, logger }) => {
@@ -98,32 +158,62 @@ export const handleInventoryCountSubmitted = inngest.createFunction(
       if (!countItems?.length) return { belowParItems: [] }
 
       type CountRow = { inventory_item_id: string; quantity_counted: number }
-      type InvRow   = { id: string; name: string; category: string; unit: string; par_level: number; low_stock_threshold_pct: number }
+      type InvRow   = { id: string; property_id: string; name: string; category: Enums<'inventory_category'>; unit: string; par_level: number; low_stock_threshold_pct: number }
 
       const typedCount = countItems as CountRow[]
       const itemIds    = typedCount.map((c) => c.inventory_item_id)
 
-      // 1 query: bulk fetch all inventory item metadata, scoped to this org —
-      // itemIds come from inventory_count_items and must not be trusted to
-      // already belong to org_id.
-      const { data: inventoryItems } = await supabase
-        .from('inventory_items')
-        .select('id, name, category, unit, par_level, low_stock_threshold_pct')
-        .eq('org_id', org_id)
-        .in('id', itemIds)
+      // Bulk fetch all inventory item metadata, scoped to this org — itemIds
+      // come from inventory_count_items and must not be trusted to already
+      // belong to org_id.
+      //
+      // Paginated rather than a bare select: the result is sized by the
+      // count's item list, not by a single parent row, so a large count could
+      // cross PostgREST's max_rows = 1000 cap — which returns 200 with no
+      // truncation signal and would silently drop items from the below-par
+      // computation. fetchAllRows also throws on a failed read instead of
+      // leaving `data` null and reporting "nothing below par".
+      const typedInv = await fetchAllRows<InvRow>(
+        (from, to) => supabase
+          .from('inventory_items')
+          .select('id, property_id, name, category, unit, par_level, low_stock_threshold_pct')
+          .eq('org_id', org_id)
+          .in('id', itemIds)
+          .order('id', { ascending: true })
+          .range(from, to),
+        { label: `inventory_items(count-metadata)[org=${org_id}]` },
+      )
 
-      if (!inventoryItems?.length) return { belowParItems: [] }
-
-      const typedInv    = inventoryItems as InvRow[]
+      if (!typedInv.length) return { belowParItems: [] }
       const orgItemIds  = new Set(typedInv.map((inv) => inv.id))
       // Only ever write quantities for items confirmed to belong to this org.
       const orgScopedCount = typedCount.filter((c) => orgItemIds.has(c.inventory_item_id))
 
-      // 1 query: bulk upsert current quantities (replaces N sequential UPDATEs)
+      // 1 query: bulk upsert current quantities (replaces N sequential UPDATEs).
+      //
+      // The payload carries the full row, not just { id, current_quantity }:
+      // .upsert() is INSERT ... ON CONFLICT DO UPDATE, so its insert arm has
+      // to be valid, and property_id / org_id / name are NOT NULL with no
+      // default. Every id here is already known to exist (orgItemIds), so the
+      // insert arm never fires — but a partial payload made the whole
+      // statement one unmatched id away from a 23502 that would have thrown
+      // away every quantity in the submission, not just the odd one out.
+      const invById = new Map(typedInv.map((inv) => [inv.id, inv]))
+
       const { error: quantityWriteError } = await supabase
         .from('inventory_items')
         .upsert(
-          orgScopedCount.map((c) => ({ id: c.inventory_item_id, current_quantity: c.quantity_counted })),
+          orgScopedCount.flatMap((c) => {
+            const inv = invById.get(c.inventory_item_id)
+            if (!inv) return []
+            return [{
+              id:               inv.id,
+              org_id,
+              property_id:      inv.property_id,
+              name:             inv.name,
+              current_quantity: c.quantity_counted,
+            }]
+          }),
           { onConflict: 'id' }
         )
 
@@ -181,14 +271,39 @@ export const handleInventoryCountSubmitted = inngest.createFunction(
     const { purchaseOrderId, alreadyExisted } = await step.run('create-purchase-order', async () => {
       const supabase = createServiceClient({ system: 'inngest:inventory-events' })
       // Idempotency: a PO for this count may already exist from a prior retry
-      const { data: existing } = await supabase
+      const { data: existing, error: existingError } = await supabase
         .from('purchase_orders')
-        .select('id')
+        .select('id, purchase_order_items(id)')
         .eq('source_count_id', count_id)
         .eq('org_id', org_id)
         .maybeSingle()
 
-      if (existing) return { purchaseOrderId: existing.id, alreadyExisted: true }
+      // A failed pre-check must not read as "no PO exists" — that would create
+      // a second one for the same count.
+      if (existingError) {
+        throw new Error(`purchase_orders pre-check failed: ${existingError.message}`)
+      }
+
+      // Only short-circuit on a COMPLETE prior PO. The previous version
+      // returned on the header row alone, which made a half-written PO
+      // permanent: if the items insert below failed (or the process died
+      // between the two writes), the retry found the header, declared
+      // alreadyExisted, and the PM opened a restock order listing nothing —
+      // forever, with nothing logged. Falling through instead lets the items
+      // insert be retried against the existing header.
+      const existingItemCount = (existing?.purchase_order_items ?? []).length
+      if (existing && existingItemCount > 0) {
+        return { purchaseOrderId: existing.id, alreadyExisted: true }
+      }
+      if (existing) {
+        logger.warn(
+          `Count ${count_id}: purchase order ${existing.id} exists with zero line items — ` +
+          'completing it rather than treating it as done.'
+        )
+        await insertPoItems(supabase, existing.id, belowParItems)
+        await markPoSent(supabase, existing.id)
+        return { purchaseOrderId: existing.id, alreadyExisted: false }
+      }
 
       const { data: po } = await supabase
         .from('purchase_orders')
@@ -204,23 +319,11 @@ export const handleInventoryCountSubmitted = inngest.createFunction(
 
       if (!po) throw new Error('Failed to create purchase order')
 
-      await supabase.from('purchase_order_items').insert(
-        belowParItems.map((item) => ({
-          purchase_order_id: po.id,
-          inventory_item_id: item.id,
-          item_name:         item.name,
-          current_quantity:  item.current_quantity,
-          par_level:         item.par_level,
-          quantity_to_buy:   item.quantity_to_buy,
-          unit:              item.unit,
-        }))
-      )
-
-      // Mark PO as sent
-      await supabase
-        .from('purchase_orders')
-        .update({ status: 'sent', sent_at: new Date().toISOString() })
-        .eq('id', po.id)
+      // Both writes now THROW on failure instead of discarding their result.
+      // Discarding them is what let the step report success with no line
+      // items, and what made the status update silently skippable.
+      await insertPoItems(supabase, po.id, belowParItems)
+      await markPoSent(supabase, po.id)
 
       return { purchaseOrderId: po.id, alreadyExisted: false }
     })

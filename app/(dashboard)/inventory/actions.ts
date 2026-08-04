@@ -1,12 +1,16 @@
 'use server'
 
 import { revalidatePath } from 'next/cache'
+import { verifyPropertyInOrg } from '@/lib/tenancy/verify'
 import { requireOrgMember, requireOrgRole } from '@/lib/auth'
 import { inngest } from '@/lib/inngest/client'
 import { logAuditEvent } from '@/lib/audit'
 import { reportError } from '@/lib/observability/report-error'
+import { reportQueryError } from '@/lib/supabase/unwrap'
 import { unwrapJoin } from '@/lib/utils/supabase-joins'
-import type { InventoryCategory } from '@/types/database'
+import { fetchAllRows } from '@/lib/inngest/paginate'
+import type { InventoryCategory, TablesInsert, TablesUpdate } from '@/types/database'
+import { Constants } from '@/types/database'
 
 /**
  * Deterministic, locale-independent string ordering for CANONICALISATION.
@@ -57,6 +61,18 @@ export async function updateParLevel(
   }
 }
 
+/**
+ * Narrow a free-text category to the inventory_category enum the column
+ * accepts, falling back to the column's own default.
+ *
+ * The valid labels come from Constants (generated from the live schema), not a
+ * hand-written list — a second copy of an enum is a copy that drifts.
+ */
+function toInventoryCategory(value: string | null): InventoryCategory {
+  const valid: readonly string[] = Constants.public.Enums.inventory_category
+  return value !== null && valid.includes(value) ? (value as InventoryCategory) : 'other'
+}
+
 // ── Add inventory items (bulk) ───────────────────────────────────────────────
 
 export async function addInventoryItems(
@@ -72,14 +88,13 @@ export async function addInventoryItems(
     if (!property_id) return { error: 'Property is required' }
     if (itemCount === 0) return { error: 'Select at least one item' }
 
-    const { data: property } = await supabase
-      .from('properties')
-      .select('id')
-      .eq('id', property_id)
-      .eq('org_id', membership.org_id)
-      .single()
-
-    if (!property) return { error: 'Property not found' }
+    // maybeSingle + reportQueryError: with .single() and a discarded error, a
+    // failed read and "no such property in your org" produced the same answer.
+    // The PM saw "Property not found" for a property they had just picked off
+    // the list, and the whole filled-in bulk-add form was thrown away with
+    // nothing logged.
+    const owned = await verifyPropertyInOrg(supabase, membership.org_id, property_id, 'serverAction.inventory.addInventoryItems')
+    if (!owned.ok) return { error: owned.error }
 
     const rows = []
     for (let i = 0; i < itemCount; i++) {
@@ -127,6 +142,61 @@ export async function addInventoryItems(
 
 // ── Submit inventory count ────────────────────────────────────────────────────
 
+type CountItemRow = { count_id: string; inventory_item_id: string; quantity_counted: number }
+type CountUpdate  = { id: string; current_quantity: number }
+
+/**
+ * Persists the count rows, then applies the counted quantities to live stock.
+ *
+ * Returns a user-facing message on failure, or `null` on success.
+ *
+ * The apply step is ONE set-based UPDATE, not one round-trip per item. The
+ * previous per-item Promise.all discarded every result, so an RLS denial or a
+ * bad item id applied a partial count and still reported success — stock
+ * numbers that look freshly counted but are a mix of new and stale values,
+ * which nobody re-counts because nothing looked wrong.
+ *
+ * first_count_recorded_at (the "0 means uncounted, not critical" distinction)
+ * is COALESCE'd inside the same statement, which also removes the paginated
+ * pre-read it used to need.
+ */
+async function recordAndApplyCount(
+  supabase:   Awaited<ReturnType<typeof requireOrgMember>>['supabase'],
+  orgId:      string,
+  countItems: CountItemRow[],
+  updates:    CountUpdate[],
+): Promise<string | null> {
+  const { error: itemsError } = await supabase
+    .from('inventory_count_items')
+    .insert(countItems)
+
+  if (itemsError) {
+    console.error('[submitInventoryCount] items insert', itemsError)
+    reportError(itemsError, { site: 'serverAction.inventory.submitInventoryCount.items', orgId })
+    return 'Failed to record inventory count items. Please try again.'
+  }
+
+  const { data: applied, error: applyError } = await supabase.rpc('apply_inventory_counts', {
+    p_org_id: orgId,
+    p_counts: updates.map((u) => ({ item_id: u.id, qty: u.current_quantity })),
+  })
+
+  if (applyError) {
+    console.error('[submitInventoryCount] apply', applyError)
+    reportError(applyError, { site: 'serverAction.inventory.submitInventoryCount.apply', orgId })
+    return 'Failed to apply the counted quantities. Please try again.'
+  }
+
+  // A short count means some ids were not this org's items (or no longer
+  // exist). The count rows are already recorded, so this is reported rather
+  // than failed — but it is reported, not swallowed.
+  if ((applied ?? 0) < updates.length) {
+    console.warn('[submitInventoryCount] applied %d of %d counted items', applied ?? 0, updates.length)
+  }
+
+  return null
+}
+
 export async function submitInventoryCount(
   _prev: InventoryActionState | null,
   formData: FormData
@@ -139,15 +209,17 @@ export async function submitInventoryCount(
 
     if (!property_id) return { error: 'Property is required' }
 
-    // Verify property belongs to org
-    const { data: property } = await supabase
-      .from('properties')
-      .select('id')
-      .eq('id', property_id)
-      .eq('org_id', membership.org_id)
-      .single()
-
-    if (!property) return { error: 'Property not found' }
+    // Verify property belongs to org.
+    // maybeSingle + reportQueryError for the same reason as addInventoryItems,
+    // and it costs more here: a rejected submit discards a whole physical count
+    // session the PM hand-entered, and "Property not found" gives them no
+    // reason to retry.
+    const owned = await verifyPropertyInOrg(
+      supabase, membership.org_id, property_id,
+      'serverAction.inventory.submitInventoryCount',
+      'Could not verify the property. Your counts were not saved — please try again.',
+    )
+    if (!owned.ok) return { error: owned.error }
 
     // Create the inventory_count record
     const { data: count, error: countError } = await supabase
@@ -186,40 +258,8 @@ export async function submitInventoryCount(
     }
 
     if (countItems.length > 0) {
-      const { error: itemsError } = await supabase
-        .from('inventory_count_items')
-        .insert(countItems)
-
-      if (itemsError) {
-        console.error('[submitInventoryCount] items insert', itemsError)
-        reportError(itemsError, { site: 'serverAction.inventory.submitInventoryCount.items', orgId: membership.org_id })
-        return { error: 'Failed to record inventory count items. Please try again.' }
-      }
-
-      // Items that have never had a real count recorded get first_count_recorded_at
-      // stamped now, so the "0 means uncounted, not critical" distinction holds going
-      // forward. Supabase JS can't compare columns in an UPDATE, so check first.
-      const { data: neverCountedRows } = await supabase
-        .from('inventory_items')
-        .select('id')
-        .in('id', updates.map((u) => u.id))
-        .is('first_count_recorded_at', null)
-      const neverCountedIds = new Set((neverCountedRows ?? []).map((r) => r.id))
-
-      // Update current_quantity on each item (org_id guard) — parallel to avoid serial timeout
-      const now = new Date().toISOString()
-      await Promise.all(
-        updates.map((u) =>
-          supabase
-            .from('inventory_items')
-            .update({
-              current_quantity: u.current_quantity,
-              ...(neverCountedIds.has(u.id) ? { first_count_recorded_at: now } : {}),
-            })
-            .eq('id', u.id)
-            .eq('org_id', membership.org_id)
-        )
-      )
+      const recordError = await recordAndApplyCount(supabase, membership.org_id, countItems, updates)
+      if (recordError) return { error: recordError }
     }
 
     // Fire Inngest event
@@ -250,13 +290,16 @@ export async function addTemplateItem(
   try {
     const { supabase, membership } = await requireOrgMember()
 
-    const { data: template } = await supabase
+    const templateRes = await supabase
       .from('inventory_templates')
       .select('id')
       .eq('id', templateId)
       .eq('org_id', membership.org_id)
       .maybeSingle()
-    if (!template) return { error: 'Template not found.' }
+    if (reportQueryError(templateRes.error, { site: 'serverAction.inventory.addTemplateItem', orgId: membership.org_id })) {
+      return { error: 'Could not verify the template. Please try again.' }
+    }
+    if (!templateRes.data) return { error: 'Template not found.' }
 
     const { data, error } = await supabase
       .from('inventory_template_items')
@@ -285,6 +328,37 @@ export async function addTemplateItem(
   }
 }
 
+/**
+ * Ownership gate for a single inventory_template_items row.
+ *
+ * inventory_template_items has no org_id of its own — ownership runs through
+ * its parent template — and BOTH writes it guards (the brand update and the
+ * delete) filter on .eq('id', itemId) alone. So this read is the only
+ * application-level org scope on either statement, and RLS is the sole backstop
+ * if it is ever loosened. Extracted so there is one copy of that reasoning
+ * rather than two that can drift apart.
+ */
+async function verifyTemplateItemInOrg(
+  supabase: Awaited<ReturnType<typeof requireOrgMember>>['supabase'],
+  orgId:    string,
+  itemId:   string,
+  site:     string,
+): Promise<{ ok: true } | { ok: false; error: string }> {
+  const res = await supabase
+    .from('inventory_template_items')
+    .select('id, inventory_templates!inner(org_id)')
+    .eq('id', itemId)
+    .eq('inventory_templates.org_id', orgId)
+    .maybeSingle()
+
+  if (reportQueryError(res.error, { site, orgId })) {
+    return { ok: false, error: 'Could not verify the template item. Please try again.' }
+  }
+  if (!res.data) return { ok: false, error: 'Item not found' }
+
+  return { ok: true }
+}
+
 export async function updateTemplateItemBrand(
   itemId: string,
   brand:  string | null
@@ -292,14 +366,8 @@ export async function updateTemplateItemBrand(
   try {
     const { supabase, membership } = await requireOrgMember()
 
-    const { data: item } = await supabase
-      .from('inventory_template_items')
-      .select('id, inventory_templates!inner(org_id)')
-      .eq('id', itemId)
-      .eq('inventory_templates.org_id', membership.org_id)
-      .maybeSingle()
-
-    if (!item) return { error: 'Item not found' }
+    const owned = await verifyTemplateItemInOrg(supabase, membership.org_id, itemId, 'serverAction.inventory.updateTemplateItemBrand')
+    if (!owned.ok) return { error: owned.error }
 
     const { error } = await supabase
       .from('inventory_template_items')
@@ -324,14 +392,8 @@ export async function removeTemplateItem(itemId: string): Promise<{ error?: stri
   try {
     const { supabase, membership } = await requireOrgMember()
 
-    const { data: item } = await supabase
-      .from('inventory_template_items')
-      .select('id, inventory_templates!inner(org_id)')
-      .eq('id', itemId)
-      .eq('inventory_templates.org_id', membership.org_id)
-      .maybeSingle()
-
-    if (!item) return { error: 'Item not found' }
+    const owned = await verifyTemplateItemInOrg(supabase, membership.org_id, itemId, 'serverAction.inventory.removeTemplateItem')
+    if (!owned.ok) return { error: owned.error }
 
     const { error } = await supabase
       .from('inventory_template_items')
@@ -352,6 +414,71 @@ export async function removeTemplateItem(itemId: string): Promise<{ error?: stri
   }
 }
 
+/**
+ * Ownership preamble for applyTemplateToProperties: the template must belong to
+ * the caller's org, and every selected property must too.
+ *
+ * The property check is the ONLY thing standing between a client-supplied
+ * property_id and a cross-org write — inventory_items' RLS INSERT check
+ * verifies org_id but cannot verify that property_id belongs to that org (see
+ * the caller's comment). So its failure must never share a branch with its
+ * empty result: `ownedProperties ?? []` collapsed both into "you own none of
+ * these", which told a PM who had ticked twelve of their own properties that
+ * none were valid. That message blames the user's data for an outage, and it
+ * is exactly the kind of message someone "fixes" by loosening the filter.
+ *
+ * Extracted from the action to keep it under the cognitive-complexity ceiling.
+ */
+type TemplateOwnership =
+  | { ok: false; error: string }
+  | { ok: true;  targetPropertyIds: string[] }
+
+async function verifyTemplateAndProperties(
+  supabase:    Awaited<ReturnType<typeof requireOrgMember>>['supabase'],
+  orgId:       string,
+  templateId:  string,
+  propertyIds: string[],
+): Promise<TemplateOwnership> {
+  const templateRes = await supabase
+    .from('inventory_templates')
+    .select('id')
+    .eq('id', templateId)
+    .eq('org_id', orgId)
+    .maybeSingle()
+
+  if (reportQueryError(templateRes.error, { site: 'serverAction.inventory.applyTemplateToProperties', orgId })) {
+    return { ok: false, error: 'Could not verify the template. Please try again.' }
+  }
+  if (!templateRes.data) return { ok: false, error: 'Template not found.' }
+
+  // Paginated as well as error-checked: this is the tenant filter, so a
+  // truncated page silently drops properties the PM does own — the same wrong
+  // answer as a failed read, just quieter.
+  let ownedRows: { id: string }[]
+  try {
+    ownedRows = await fetchAllRows<{ id: string }>(
+      (from, to) => supabase
+        .from('properties')
+        .select('id')
+        .eq('org_id', orgId)
+        .in('id', propertyIds)
+        .order('id')
+        .range(from, to),
+      { label: 'serverAction.inventory.applyTemplateToProperties.owned' },
+    )
+  } catch (err) {
+    console.error('[applyTemplateToProperties] property verification failed', err)
+    reportError(err, { site: 'serverAction.inventory.applyTemplateToProperties.owned', orgId })
+    return { ok: false, error: 'Could not verify the selected properties. Nothing was applied — please try again.' }
+  }
+
+  const verified = new Set(ownedRows.map((p) => p.id))
+  const targetPropertyIds = propertyIds.filter((id) => verified.has(id))
+  if (targetPropertyIds.length === 0) return { ok: false, error: 'No valid properties selected' }
+
+  return { ok: true, targetPropertyIds }
+}
+
 export async function applyTemplateToProperties(
   templateId: string,
   propertyIds: string[]
@@ -359,13 +486,9 @@ export async function applyTemplateToProperties(
   try {
     const { supabase, membership } = await requireOrgMember()
 
-    const { data: template } = await supabase
-      .from('inventory_templates')
-      .select('id')
-      .eq('id', templateId)
-      .eq('org_id', membership.org_id)
-      .maybeSingle()
-    if (!template) return { error: 'Template not found.', applied: 0 }
+    const ownership = await verifyTemplateAndProperties(supabase, membership.org_id, templateId, propertyIds)
+    if (!ownership.ok) return { error: ownership.error, applied: 0 }
+    const targetPropertyIds = ownership.targetPropertyIds
 
     const { data: items, error: itemsErr } = await supabase
       .from('inventory_template_items')
@@ -387,24 +510,31 @@ export async function applyTemplateToProperties(
     // inserted with a mismatched org_id/property_id pair. Verify explicitly
     // and drop anything that doesn't check out, same pattern as
     // clone_inventory_from_property's target-property check.
-    const { data: ownedProperties } = await supabase
-      .from('properties')
-      .select('id')
-      .eq('org_id', membership.org_id)
-      .in('id', propertyIds)
-    const verifiedPropertyIds = new Set((ownedProperties ?? []).map((p) => p.id))
-    const targetPropertyIds = propertyIds.filter((id) => verifiedPropertyIds.has(id))
-    if (targetPropertyIds.length === 0) return { error: 'No valid properties selected', applied: 0 }
 
-    // Fetch all existing items for ALL target properties in a single query, then group by property
-    const { data: allExisting } = await supabase
-      .from('inventory_items')
-      .select('property_id, catalog_item_id, name')
-      .eq('org_id', membership.org_id)
-      .in('property_id', targetPropertyIds)
+    // Fetch all existing items for ALL target properties, then group by property.
+    //
+    // Paginated, not a single unbounded select: PostgREST caps a response at
+    // max_rows = 1000 with a 200 and no truncation signal, and this set IS the
+    // duplicate guard below. At CLAUDE.md's own target scale (50 properties ×
+    // a 115-item catalog = 5,750 rows) a truncated read meant every property
+    // past the first ~8 got a full duplicate set of inventory items inserted,
+    // silently. A unique index is not the fix here: the dedupe key is
+    // two-pronged (catalog_item_id OR case-insensitive name) and live data
+    // already contains duplicates this very bug created, so the index would
+    // fail to build.
+    const allExisting = await fetchAllRows<{ property_id: string; catalog_item_id: string | null; name: string }>(
+      (from, to) => supabase
+        .from('inventory_items')
+        .select('property_id, catalog_item_id, name')
+        .eq('org_id', membership.org_id)
+        .in('property_id', targetPropertyIds)
+        .order('id', { ascending: true })
+        .range(from, to),
+      { label: 'applyTemplateToProperties.existing_items' },
+    )
 
     const existingByProperty: Record<string, { catalogIds: Set<string>; names: Set<string> }> = {}
-    for (const row of allExisting ?? []) {
+    for (const row of allExisting) {
       if (!existingByProperty[row.property_id]) {
         existingByProperty[row.property_id] = { catalogIds: new Set(), names: new Set() }
       }
@@ -413,20 +543,11 @@ export async function applyTemplateToProperties(
     }
 
     let applied = 0
-    const allToInsert: Array<{
-      property_id:             string
-      org_id:                  string
-      catalog_item_id:         string | null
-      source_template_id:      string
-      name:                    string
-      category:                string
-      unit:                    string
-      par_level:               number
-      current_quantity:        number
-      low_stock_threshold_pct: number
-      is_active:               boolean
-      preferred_brand:         string | null
-    }> = []
+    // TablesInsert, not a hand-written shape: the previous annotation declared
+    // `category: string`, which widened the inventory_category enum the column
+    // actually accepts. Deriving the payload type from the schema means the
+    // narrowing is checked here rather than discovered by PostgREST.
+    const allToInsert: Array<TablesInsert<'inventory_items'>> = []
 
     for (const propertyId of targetPropertyIds) {
       const existing = existingByProperty[propertyId] ?? { catalogIds: new Set<string>(), names: new Set<string>() }
@@ -443,8 +564,16 @@ export async function applyTemplateToProperties(
           catalog_item_id:         item.catalog_item_id ?? null,
           source_template_id:      templateId,
           name:                    item.name,
-          category:                item.category,
-          unit:                    item.unit,
+          // inventory_template_items.category/unit are NULLABLE TEXT;
+          // inventory_items.category/unit are NOT NULL (category is the
+          // inventory_category enum). Copying one straight into the other let
+          // a NULL or an off-enum string reach the insert, where Postgres
+          // would reject it — and because this is a BULK insert, one bad
+          // template row would fail the whole application, for every selected
+          // property at once. The fallbacks are the column defaults declared
+          // in the schema ('other' / 'units'), not invented values.
+          category:                toInventoryCategory(item.category),
+          unit:                    item.unit ?? 'units',
           par_level:               item.par_level,
           current_quantity:        0,
           low_stock_threshold_pct: 20,
@@ -474,100 +603,6 @@ export async function applyTemplateToProperties(
   }
 }
 
-// ── Count approval actions ────────────────────────────────────────────────────
-
-export async function approveInventoryCount(draftId: string): Promise<{ error?: string }> {
-  try {
-    const { supabase, user, membership } = await requireOrgRole(['admin', 'manager'])
-
-    const { data: draft } = await supabase
-      .from('inventory_count_drafts')
-      .select('id')
-      .eq('id', draftId)
-      .eq('org_id', membership.org_id)
-      .maybeSingle()
-
-    if (!draft) return { error: 'Draft not found' }
-
-    const { data: draftItems } = await supabase
-      .from('inventory_count_draft_items')
-      .select('item_id, counted_qty')
-      .eq('draft_id', draftId)
-
-    if (!draftItems) return { error: 'Draft not found' }
-
-    const { data: neverCountedRows } = await supabase
-      .from('inventory_items')
-      .select('id')
-      .eq('org_id', membership.org_id)
-      .in('id', draftItems.map((item) => item.item_id))
-      .is('first_count_recorded_at', null)
-    const neverCountedIds = new Set((neverCountedRows ?? []).map((r) => r.id))
-
-    const now = new Date().toISOString()
-    await Promise.all(
-      draftItems.map(item =>
-        supabase
-          .from('inventory_items')
-          .update({
-            current_quantity: item.counted_qty,
-            ...(neverCountedIds.has(item.item_id) ? { first_count_recorded_at: now } : {}),
-          })
-          .eq('id', item.item_id)
-          .eq('org_id', membership.org_id)
-      )
-    )
-
-    const { data: approved, error: approveError } = await supabase
-      .from('inventory_count_drafts')
-      .update({ status: 'approved', reviewed_at: new Date().toISOString(), reviewed_by: user.id })
-      .eq('id', draftId)
-      .eq('org_id', membership.org_id)
-      .select('id')
-      .maybeSingle()
-
-    if (approveError || !approved) {
-      console.error('[approveInventoryCount]', approveError)
-      reportError(approveError, { site: 'serverAction.inventory.approveInventoryCount', orgId: membership.org_id })
-      return { error: 'Draft not found' }
-    }
-
-    revalidatePath('/inventory')
-    return {}
-  } catch (err) {
-    console.error('[approveInventoryCount]', err)
-    reportError(err, { site: 'serverAction.inventory.approveInventoryCount' })
-    return { error: 'Operation failed. Please try again.' }
-  }
-}
-
-export async function rejectInventoryCount(draftId: string): Promise<{ error?: string }> {
-  try {
-    const { supabase, user, membership } = await requireOrgRole(['admin', 'manager'])
-
-    const { data: rejected, error } = await supabase
-      .from('inventory_count_drafts')
-      .update({ status: 'rejected', reviewed_at: new Date().toISOString(), reviewed_by: user.id })
-      .eq('id', draftId)
-      .eq('org_id', membership.org_id)
-      .select('id')
-      .maybeSingle()
-
-    if (error || !rejected) {
-      console.error('[rejectInventoryCount]', error)
-      reportError(error, { site: 'serverAction.inventory.rejectInventoryCount', orgId: membership.org_id })
-      return { error: 'Draft not found' }
-    }
-
-    revalidatePath('/inventory')
-    return {}
-  } catch (err) {
-    console.error('[rejectInventoryCount]', err)
-    reportError(err, { site: 'serverAction.inventory.rejectInventoryCount' })
-    return { error: 'Operation failed. Please try again.' }
-  }
-}
-
 // ── Aggregated purchase list ──────────────────────────────────────────────────
 
 export interface AggregatedItem {
@@ -577,27 +612,41 @@ export interface AggregatedItem {
   properties: Array<{ name: string; needed: number }>
 }
 
+interface AggregatedItemRow {
+  name:                    string
+  unit:                    string
+  current_quantity:        number | null
+  par_level:               number | null
+  first_count_recorded_at: string | null
+  property_id:             string
+  property:                { name: string } | { name: string }[] | null
+}
+
 export async function generateAggregatedPurchaseList(): Promise<{ items: AggregatedItem[]; error?: string }> {
   try {
     const { supabase, membership } = await requireOrgMember()
 
-    // Supabase JS client can't compare two columns directly; fetch active items and filter in JS.
-    // Limit to 2000 rows (well above any real org's inventory) to prevent unbounded scans.
-    const { data: allItems, error } = await supabase
-      .from('inventory_items')
-      .select('name, unit, current_quantity, par_level, first_count_recorded_at, property_id, property:properties(name)')
-      .eq('org_id', membership.org_id)
-      .eq('is_active', true)
-      .limit(2000)
-
-    if (error) {
-      console.error('[generateAggregatedPurchaseList]', error)
-      reportError(error, { site: 'serverAction.inventory.generateAggregatedPurchaseList', orgId: membership.org_id })
-      return { items: [], error: 'Operation failed. Please try again.' }
-    }
+    // Supabase JS client can't compare two columns directly; fetch active items
+    // and filter in JS.
+    //
+    // Was `.limit(2000)` with a comment claiming that was "well above any real
+    // org's inventory" — CLAUDE.md's own target user (50 properties × a
+    // 115-item catalog = 5,750 rows) exceeds it, and everything past row 2,000
+    // was silently missing from the purchase list. Paginated instead, so the
+    // bound is "all of them" rather than a guess.
+    const allItems = await fetchAllRows<AggregatedItemRow>(
+      (from, to) => supabase
+        .from('inventory_items')
+        .select('name, unit, current_quantity, par_level, first_count_recorded_at, property_id, property:properties(name)')
+        .eq('org_id', membership.org_id)
+        .eq('is_active', true)
+        .order('id', { ascending: true })
+        .range(from, to),
+      { label: 'generateAggregatedPurchaseList.inventory_items' },
+    )
 
     const grouped: Record<string, AggregatedItem> = {}
-    for (const item of allItems ?? []) {
+    for (const item of allItems) {
       if (!item.first_count_recorded_at) continue
       if ((item.current_quantity ?? 0) > (item.par_level ?? 0)) continue
 
@@ -628,17 +677,27 @@ export async function updatePurchaseOrderStatus(
   try {
     const { user, supabase, membership } = await requireOrgRole(['admin', 'manager'])
 
-    const { data: po } = await supabase
+    // This row is all-or-nothing: it decides the idempotent no-op, supplies
+    // old_status for the audit row, and carries property_id +
+    // total_estimated_cost into purchase-order/approved. A silent null skipped
+    // the whole transition — the PO sat in `sent` forever, no event fired, so
+    // the downstream restock expense never reached the owner ledger, and the PM
+    // was told the PO did not exist.
+    const poRes = await supabase
       .from('purchase_orders')
       .select('id, property_id, total_estimated_cost, status')
       .eq('id', purchaseOrderId)
       .eq('org_id', membership.org_id)
-      .single()
+      .maybeSingle()
 
+    if (reportQueryError(poRes.error, { site: 'serverAction.inventory.updatePurchaseOrderStatus', orgId: membership.org_id })) {
+      return { error: 'Could not load the purchase order. Please try again.' }
+    }
+    const po = poRes.data
     if (!po) return { error: 'Purchase order not found' }
     if (po.status === status) return {}
 
-    const statusUpdate: Record<string, unknown> = { status }
+    const statusUpdate: TablesUpdate<'purchase_orders'> = { status }
     if (status === 'sent') statusUpdate.sent_at = new Date().toISOString()
 
     const { data: updated, error } = await supabase

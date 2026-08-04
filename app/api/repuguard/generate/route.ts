@@ -185,7 +185,13 @@ export async function POST(request: NextRequest) {
   const guestName     = (review.guest_name as string | null) ?? 'Guest'
   const reviewText    = review.review_text as string
   const starRating    = review.rating as number
-  const internalNotes = (review.internal_notes as string | null) ?? null
+  // Always null — see lib/inngest/functions/repuguard-batch-generate.ts. There
+  // is no internal_notes column on `reviews`. This path selected `*` rather
+  // than naming the column, so unlike the batch cron it never errored: the
+  // property was simply always undefined and `?? null` made that invisible.
+  // The `as string | null` cast is what let a field that cannot exist read as
+  // a field that is merely empty.
+  const internalNotes: string | null = null
 
   const generated = await generateOrFail({
     reviewText, starRating, propertyName, guestName, internalNotes,

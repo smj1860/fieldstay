@@ -30,7 +30,7 @@ function makeSupabase(queue: Record<string, Resp[]>) {
     const result: Resp = q?.length ? q.shift()! : { data: null, error: null }
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const chain: any = {}
-    for (const m of ['select', 'insert', 'update', 'delete', 'eq', 'order']) {
+    for (const m of ['select', 'insert', 'update', 'delete', 'eq', 'order', 'order', 'range']) {
       chain[m] = vi.fn(() => chain)
     }
     chain.single      = vi.fn(() => Promise.resolve(result))

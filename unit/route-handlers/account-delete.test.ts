@@ -436,7 +436,6 @@ describe('DELETE /api/account/delete', () => {
       'assignment_outcomes',
       'vendor_assignment_outcomes',
       'crew_availability',
-      'inventory_count_drafts',
       'inventory_templates',
       'maintenance_schedule_templates',
       'messages',

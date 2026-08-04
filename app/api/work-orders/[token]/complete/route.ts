@@ -1,9 +1,10 @@
+import { nullableArg } from '@/lib/supabase/rpc-args'
 import { NextRequest, NextResponse } from 'next/server'
 import { createServiceClient } from '@/lib/supabase/server'
 import { workOrderRatelimit, checkLimit } from '@/lib/rate-limit'
 import { extractClientIp } from '@/lib/integrations/webhook-verification'
-import type { WoStatus } from '@/types/database'
-import { createVendorInvoice, finalizeVendorCompletion, rollbackUnclaimedInvoice } from './helpers'
+import { finalizeVendorCompletion, type CompletionResult } from './helpers'
+import { reportError } from '@/lib/observability/report-error'
 
 /**
  * POST /api/work-orders/[token]/complete
@@ -76,12 +77,17 @@ export async function POST(
   const contentType = request.headers.get('content-type') ?? ''
   let notes:           string | null      = null
   let completedByName: string | null      = null
+  // line_total is accepted on the wire because the existing vendor portal
+  // sends it, but it is now IGNORED: complete_work_order_via_token() reads only
+  // line_type/description/quantity/unit_cost, and work_order_line_items.line_total
+  // is GENERATED ALWAYS AS (quantity * unit_cost). A client can no longer state
+  // a line total that disagrees with its own quantity and unit cost.
   let lineItemsPayload: {
     line_type:   string
     description: string
     quantity:    number
     unit_cost:   number
-    line_total:  number
+    line_total?: number
   }[] = []
   let subtotal = 0
 
@@ -101,12 +107,6 @@ export async function POST(
     return NextResponse.json({ error: 'Technician name is required' }, { status: 400 })
   }
 
-  // Sanity bound on the submitted total — catches a typo (an extra zero) or
-  // a malicious payload before it becomes actual_cost/an invoice amount.
-  if (subtotal > 1_000_000) {
-    return NextResponse.json({ error: 'Invoice total must be under $1,000,000. Please check your entries.' }, { status: 400 })
-  }
-
   // Validate line items if provided
   const VALID_LINE_TYPES = new Set(['labor', 'material', 'equipment', 'subcontractor', 'other'])
   const safeLineItems = lineItemsPayload.filter((item) =>
@@ -117,49 +117,97 @@ export async function POST(
     typeof item.quantity === 'number' && item.quantity > 0
   )
 
-  // Create the invoice BEFORE claiming the completion, and see the ordering
-  // note on createVendorInvoice() before reversing this: flipping the work
-  // order to 'completed' is the last irreversible step, so it must also be
-  // the last one. Claiming first published a completed work order whose
-  // invoice did not exist yet — briefly to any concurrent reader, and
-  // PERMANENTLY if this step then failed, since the vendor's retry could
-  // then only ever get the already-closed 409 and the invoice was lost.
-  const invoiceResult = await createVendorInvoice(supabase, workOrder, safeLineItems, subtotal)
-  if (!invoiceResult.ok) {
-    return NextResponse.json({ error: invoiceResult.error }, { status: 500 })
+  // ── The invoice total is DERIVED, never accepted ────────────────────────
+  //
+  // `line_total` is a GENERATED ALWAYS column precisely so a client cannot
+  // state a line total that disagrees with its own quantity × unit cost. That
+  // control was then defeated one level up: `subtotal` came straight from the
+  // request body, bounded only on the upside, and was written to
+  // work_orders.actual_cost, work_order_invoices.subtotal/.total and the
+  // Stripe platform fee. This is the only UNAUTHENTICATED path in the app that
+  // mints financial records.
+  //
+  // It was wrong in both directions, and the non-adversarial direction is the
+  // likelier one: a submission whose third line item fails validation drops
+  // that item from safeLineItems but left it counted in `subtotal`, so the
+  // stored invoice total silently exceeded the sum of the items printed
+  // beneath it. Adversarially, $50 of line items with `subtotal: 999999` was
+  // simply accepted, as was a negative value (which passed the `> 1_000_000`
+  // check and produced a negative platform fee).
+  //
+  // So: when line items are present they ARE the invoice, and the total is
+  // computed from the same rows the RPC inserts. The client's figure is only
+  // honoured for the legacy no-line-items path, where there is nothing to
+  // derive from.
+  const derivedSubtotal = safeLineItems.reduce(
+    (sum, item) => sum + item.quantity * item.unit_cost,
+    0,
+  )
+  const effectiveSubtotal = safeLineItems.length > 0
+    ? Math.round(derivedSubtotal * 100) / 100   // cents; avoids FP dust reaching money columns
+    : subtotal
+
+  if (!Number.isFinite(effectiveSubtotal) || effectiveSubtotal < 0) {
+    return NextResponse.json({ error: 'Invoice total is not a valid amount.' }, { status: 400 })
   }
 
-  // Atomically claim the completion — only succeeds once
-  const { data: claimed } = await supabase
-    .from('work_orders')
-    .update({
-      status:            'completed',
-      completed_date:    new Date().toISOString().split('T')[0],
-      completion_notes:  notes,
-      completed_by_name: completedByName,
-      actual_cost:       subtotal > 0 ? subtotal : undefined,
-    })
-    .eq('id', workOrder.id)
-    .in('status', ['pending', 'assigned', 'in_progress'])
-    .select('id, org_id, vendor_id, property_id, wo_number, source_turnover_id')
-    .single()
+  // Sanity bound — catches a typo (an extra zero) or a malicious payload
+  // before it becomes actual_cost/an invoice amount. Applied to the DERIVED
+  // value so a pile of line items cannot exceed it either.
+  if (effectiveSubtotal > 1_000_000) {
+    return NextResponse.json({ error: 'Invoice total must be under $1,000,000. Please check your entries.' }, { status: 400 })
+  }
 
-  if (!claimed) {
-    // Another path closed this work order between the lookup above and the
-    // claim. Take back the invoice this request just created rather than
-    // leaving it orphaned against a completion that never happened.
-    await rollbackUnclaimedInvoice(supabase, invoiceResult)
+  // ONE TRANSACTION. Every database write for this completion — the claim, the
+  // invoice, the line items, the status-change row — happens inside
+  // complete_work_order_via_token(), so either all of it lands or none does.
+  //
+  // This replaces an ordered saga (invoice first, then the claim, with
+  // rollbackUnclaimedInvoice() compensating a lost claim). The ordering fixed
+  // the catastrophic case but left three holes a compensating delete cannot
+  // close: the rollback can itself fail, an invoice was briefly visible against
+  // a not-yet-completed work order, and a failure after the sequence call burnt
+  // an invoice number. See FUTURE_REMEDIATION.md #16.
+  //
+  // What stays HERE is everything that must not be rolled back by a later DB
+  // failure, and must not fire from inside a transaction that might abort:
+  // token validation, payload validation, the audit log, and event dispatch.
+  const platformFeePct = Number.parseFloat(process.env.STRIPE_PLATFORM_FEE_PCT ?? '0') / 100
+
+  const { data: rpcResult, error: rpcError } = await supabase.rpc('complete_work_order_via_token', {
+    p_work_order_id:     workOrder.id,
+    p_line_items:        safeLineItems,
+    p_subtotal:          effectiveSubtotal,
+    // p_notes is a plain `text` parameter — NULL means "no notes given".
+    p_notes:             nullableArg(notes),
+    p_completed_by_name: completedByName,
+    p_platform_fee_pct:  platformFeePct,
+  })
+
+  if (rpcError || !rpcResult) {
+    console.error('[complete] completion transaction failed', rpcError)
+    reportError(rpcError ?? new Error('complete_work_order_via_token returned no result'), {
+      site: 'route.work-orders.complete.rpc',
+    })
+    return NextResponse.json({ error: 'Could not record completion. Please try again.' }, { status: 500 })
+  }
+
+  const result = rpcResult as CompletionResult
+
+  if (!result.claimed) {
+    // Nothing was written — the transaction rolled back in full, so unlike the
+    // previous saga there is no invoice left behind to compensate for.
     return NextResponse.json({ error: 'Work order already closed' }, { status: 409 })
   }
 
   await finalizeVendorCompletion(supabase, {
-    claimed,
-    invoiceResult,
-    safeLineItems,
-    subtotal,
+    claimed:        result.work_order,
+    invoiceId:      result.invoice_id,
+    invoiceNumber:  result.invoice_number,
+    invoiceInserted: result.invoice_inserted,
+    subtotal: effectiveSubtotal,
     notes,
     token,
-    previousStatus: workOrder.status as WoStatus,
   })
 
   return NextResponse.json({ success: true })

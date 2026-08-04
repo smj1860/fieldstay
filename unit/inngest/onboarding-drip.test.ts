@@ -77,7 +77,16 @@ function dripEvent(overrides: Partial<{
   }
 }
 
-const notUnsubscribed = { data: { email_unsubscribed_at: null }, error: null }
+// resolveEmailAudience() reads BOTH columns and fails closed, so the token
+// must be present or every send is (correctly) suppressed.
+const notUnsubscribed = {
+  data:  { email_unsubscribed_at: null, unsubscribe_token: 'f'.repeat(64) },
+  error: null,
+}
+const unsubscribedAt = (at: string) => ({
+  data:  { email_unsubscribed_at: at, unsubscribe_token: 'f'.repeat(64) },
+  error: null,
+})
 const noPmsConnection  = { data: [], error: null }
 
 beforeEach(() => {
@@ -88,7 +97,7 @@ beforeEach(() => {
 describe('onboardingDrip', () => {
   it('sends all three emails and reports the not-connected variant when no PMS is linked', async () => {
     const supabase = makeSupabase({
-      profiles: [notUnsubscribed, notUnsubscribed],
+      profiles: [notUnsubscribed, notUnsubscribed, notUnsubscribed],
       integration_connections: [noPmsConnection],
     })
     ;(createServiceClient as ReturnType<typeof vi.fn>).mockReturnValue(supabase)
@@ -131,7 +140,7 @@ describe('onboardingDrip', () => {
 
   it('reports the connected variant with different subject/copy when a PMS is linked by day 7', async () => {
     const supabase = makeSupabase({
-      profiles: [notUnsubscribed, notUnsubscribed],
+      profiles: [notUnsubscribed, notUnsubscribed, notUnsubscribed],
       integration_connections: [{ data: [{ provider_id: 'ownerrez' }], error: null }],
     })
     ;(createServiceClient as ReturnType<typeof vi.fn>).mockReturnValue(supabase)
@@ -150,9 +159,84 @@ describe('onboardingDrip', () => {
     expect(lastSubject.subject).toBe('Your guests left reviews this week. Did you respond?')
   })
 
+  // These three cover the actual CAN-SPAM defect this sequence shipped with:
+  // email_unsubscribed_at was read here but written by nothing, and no template
+  // carried an opt-out link, so the suppression below was unreachable.
+  it('sends nothing at all when the recipient already opted out before the drip starts', async () => {
+    const supabase = makeSupabase({
+      profiles: [unsubscribedAt('2026-07-01T00:00:00.000Z')],
+    })
+    ;(createServiceClient as ReturnType<typeof vi.fn>).mockReturnValue(supabase)
+
+    const result = await invokeHandler(onboardingDrip, {
+      event:  dripEvent(),
+      step:   makeStep(),
+      logger: defaultLogger,
+    })
+
+    expect(result).toEqual({ stopped: true, reason: 'unsubscribed', emails_sent: 0 })
+    expect(resend.emails.send).not.toHaveBeenCalled()
+  })
+
+  it('fails CLOSED — sends nothing when the profile read errors', async () => {
+    // An outage must not silently turn into "nobody is unsubscribed". A
+    // suppressed marketing email costs nothing; an unsuppressed one is mail to
+    // someone who asked us to stop.
+    const supabase = makeSupabase({
+      profiles: [{ data: null, error: { message: 'db down' } }],
+    })
+    ;(createServiceClient as ReturnType<typeof vi.fn>).mockReturnValue(supabase)
+
+    const result = await invokeHandler(onboardingDrip, {
+      event:  dripEvent(),
+      step:   makeStep(),
+      logger: defaultLogger,
+    })
+
+    expect(result).toEqual({ stopped: true, reason: 'unsubscribed', emails_sent: 0 })
+    expect(resend.emails.send).not.toHaveBeenCalled()
+  })
+
+  it('puts a real unsubscribe link and List-Unsubscribe headers on every send', async () => {
+    const supabase = makeSupabase({
+      profiles: [notUnsubscribed, notUnsubscribed, notUnsubscribed],
+      integration_connections: [noPmsConnection],
+    })
+    ;(createServiceClient as ReturnType<typeof vi.fn>).mockReturnValue(supabase)
+    ;(resend.emails.send as ReturnType<typeof vi.fn>).mockResolvedValue({ data: { id: 'email_1' }, error: null })
+
+    await invokeHandler(onboardingDrip, {
+      event:  dripEvent(),
+      step:   makeStep(),
+      logger: defaultLogger,
+    })
+
+    const expectedUrl = `https://app.fieldstay.test/unsubscribe/${'f'.repeat(64)}`
+
+    // RFC 8058 one-click headers on all three sends.
+    const sends = (resend.emails.send as ReturnType<typeof vi.fn>).mock.calls
+    expect(sends).toHaveLength(3)
+    for (const [payload] of sends) {
+      const headers = (payload as { headers?: Record<string, string> }).headers ?? {}
+      expect(headers['List-Unsubscribe']).toContain('/api/email/unsubscribe?token=')
+      expect(headers['List-Unsubscribe-Post']).toBe('List-Unsubscribe=One-Click')
+    }
+
+    // ...and a visible footer link in the rendered templates.
+    expect(renderWelcomeEmailV2).toHaveBeenCalledWith(
+      expect.objectContaining({ unsubscribeUrl: expectedUrl }),
+    )
+    expect(renderGuidebookFeatureAnnouncementEmail).toHaveBeenCalledWith(
+      expect.objectContaining({ unsubscribeUrl: expectedUrl }),
+    )
+    expect(renderReengagementEmail).toHaveBeenCalledWith(
+      expect.objectContaining({ unsubscribeUrl: expectedUrl }),
+    )
+  })
+
   it('stops before the guidebook email when the user unsubscribed during the first 72h', async () => {
     const supabase = makeSupabase({
-      profiles: [{ data: { email_unsubscribed_at: '2026-07-20T00:00:00.000Z' }, error: null }],
+      profiles: [notUnsubscribed, unsubscribedAt('2026-07-20T00:00:00.000Z')],
     })
     ;(createServiceClient as ReturnType<typeof vi.fn>).mockReturnValue(supabase)
     ;(resend.emails.send as ReturnType<typeof vi.fn>).mockResolvedValue({ data: { id: 'email_1' }, error: null })
@@ -171,7 +255,7 @@ describe('onboardingDrip', () => {
 
   it('stops before the reengagement email when the user unsubscribed between 72h and 168h', async () => {
     const supabase = makeSupabase({
-      profiles: [notUnsubscribed, { data: { email_unsubscribed_at: '2026-07-21T00:00:00.000Z' }, error: null }],
+      profiles: [notUnsubscribed, notUnsubscribed, unsubscribedAt('2026-07-21T00:00:00.000Z')],
     })
     ;(createServiceClient as ReturnType<typeof vi.fn>).mockReturnValue(supabase)
     ;(resend.emails.send as ReturnType<typeof vi.fn>).mockResolvedValue({ data: { id: 'email_1' }, error: null })
@@ -189,7 +273,7 @@ describe('onboardingDrip', () => {
 
   it('logs but does not throw or halt the sequence when the welcome send itself returns a Resend error', async () => {
     const supabase = makeSupabase({
-      profiles: [notUnsubscribed, notUnsubscribed],
+      profiles: [notUnsubscribed, notUnsubscribed, notUnsubscribed],
       integration_connections: [noPmsConnection],
     })
     ;(createServiceClient as ReturnType<typeof vi.fn>).mockReturnValue(supabase)
@@ -211,7 +295,7 @@ describe('onboardingDrip', () => {
 
   it('logs but does not throw when the welcome send itself throws', async () => {
     const supabase = makeSupabase({
-      profiles: [notUnsubscribed, notUnsubscribed],
+      profiles: [notUnsubscribed, notUnsubscribed, notUnsubscribed],
       integration_connections: [noPmsConnection],
     })
     ;(createServiceClient as ReturnType<typeof vi.fn>).mockReturnValue(supabase)

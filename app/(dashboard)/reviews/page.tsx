@@ -1,3 +1,4 @@
+import { unwrapJoin } from '@/lib/utils/supabase-joins'
 import { requireOrgMember } from '@/lib/auth'
 import { createServiceClient } from '@/lib/supabase/server'
 import { ReviewsClient } from './reviews-client'
@@ -75,14 +76,23 @@ export default async function ReviewsPage() {
   throwIfAnyQueryFailed({ site: 'page.reviews', orgId: membership.org_id }, reviewsError)
   const RESPONSE_WINDOW_DAYS = 14
 
-  const reviewsWithDeadline = (reviews ?? []).map(r => {
+  const reviewsWithDeadline: ReviewRow[] = (reviews ?? []).map(r => {
     const reviewDate = r.review_date ? new Date(r.review_date) : null
     const deadline   = reviewDate
       ? new Date(reviewDate.getTime() + RESPONSE_WINDOW_DAYS * 86_400_000)
       : null
     const daysRemaining = daysRemainingToRespond(deadline, r.response_status)
 
-    return { ...r, days_remaining: daysRemaining }
+    // review_responses has NO unique constraint on review_id, so PostgREST
+    // embeds it as an ARRAY. The client models one response per review and
+    // read `review_responses?.edited_response` straight off it — undefined on
+    // an array — so opening a review that already had a draft showed an EMPTY
+    // editor. Unwrap to the single row the rest of the flow expects.
+    return {
+      ...r,
+      review_responses: unwrapJoin(r.review_responses),
+      days_remaining:   daysRemaining,
+    }
   })
 
   reviewsWithDeadline.sort((a, b) => {
@@ -99,7 +109,7 @@ export default async function ReviewsPage() {
   // entry point stays reachable. ReviewsClient renders its own empty state.
   return (
     <ReviewsClient
-      reviews={reviewsWithDeadline as ReviewRow[]}
+      reviews={reviewsWithDeadline}
       manualUsedThisWeek={manualUsedThisWeek}
     />
   )

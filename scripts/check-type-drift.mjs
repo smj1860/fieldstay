@@ -64,6 +64,19 @@ const url = process.env.NEXT_PUBLIC_SUPABASE_URL
 const key = process.env.SUPABASE_SERVICE_ROLE_KEY
 
 if (!url || !key) {
+  // See scripts/check-db-invariants.mjs for the full reasoning: forks have no
+  // secrets and must not sit on a permanently red required check, but on the
+  // canonical repo a silent skip is a green check for work nobody did.
+  if (process.env.DB_INVARIANTS_REQUIRE_ARMED === '1') {
+    console.error(
+      'Type drift gate is REQUIRED on this run but UNARMED: ' +
+        'NEXT_PUBLIC_SUPABASE_URL / SUPABASE_SERVICE_ROLE_KEY are not set. ' +
+        'Configure the E2E secrets (docs/E2E_SETUP.md), or unset ' +
+        'DB_INVARIANTS_REQUIRE_ARMED if this run genuinely cannot hold them.'
+    )
+    process.exit(1)
+  }
+
   console.log(
     '::warning title=Type drift gate UNARMED::NEXT_PUBLIC_SUPABASE_URL / ' +
       'SUPABASE_SERVICE_ROLE_KEY are not configured, so types/database.ts ' +
@@ -221,21 +234,51 @@ function parseInterfaces(text) {
   return ifaces
 }
 
-// 3. `Database.public.Tables` map: `table_name: { Row: InterfaceName; ...`
+// 3. `HandWrittenRowMap`: `table_name: InterfaceName`
+//
+// This used to parse `Database.public.Tables`, which carried the mapping as a
+// side effect of being the postgrest schema type. When Database moved to
+// types/database.generated.ts (2026-08-02) that block left this file, the
+// regex matched nothing, and the gate reported all 92 tables as unmodelled —
+// a 92-failure run that looked like catastrophic drift and was really a parse
+// miss. It now reads a declaration whose ONLY purpose is this mapping, so it
+// cannot be carried away by an unrelated refactor again.
+//
+// Deliberately still types/database.ts and not the generated file: the
+// generated types are produced FROM the live schema, so diffing them against
+// it can never fail. The hand-written interfaces are the ones that can drift.
+//
+// A parse that finds nothing is now a hard failure rather than 92 confusing
+// ones — see the guard below.
 function parseTableMap(text) {
-  const tablesBlockMatch = text.match(/Tables:\s*\{([\s\S]*?)\n\s{4}\}\n\s{4}Views:/)
-  const block = tablesBlockMatch ? tablesBlockMatch[1] : text
+  const blockMatch = text.match(/export interface HandWrittenRowMap \{([\s\S]*?)\n\}/)
+  if (!blockMatch) return null
   const map = {}
   // `block` comes from this repo's own committed types/database.ts, never
   // attacker-controlled input, so ReDoS is not a real risk here.
-  const re = /^\s+(\w+):\s*\{\s*Row:\s*(\w+);/gm // NOSONAR
-  for (const m of block.matchAll(re)) map[m[1]] = m[2]
-  return map
+  const re = /^\s+(\w+):\s*(\w+)\s*$/gm // NOSONAR
+  for (const m of blockMatch[1].matchAll(re)) map[m[1]] = m[2]
+  return Object.keys(map).length ? map : null
 }
 
 const tsUnions     = parseUnionTypes(src)
 const tsInterfaces = parseInterfaces(src)
 const tsTableMap   = parseTableMap(src)
+
+// Fail loudly and once on a parse miss. Without this, an empty map makes every
+// live table look unmodelled and the operator sees ~92 failures describing a
+// problem that does not exist — which is exactly what happened when the
+// Database block moved out of this file.
+if (tsTableMap === null) {
+  console.error(
+    '::error title=Type drift check could not parse::' +
+      'types/database.ts has no parseable `export interface HandWrittenRowMap { ... }` ' +
+      'block. That map is what tells this gate which interface models which table. ' +
+      'It was probably renamed, reformatted, or moved — restore it rather than ' +
+      'treating the table findings below as real drift.'
+  )
+  process.exit(1)
+}
 
 // ── Compare ──────────────────────────────────────────────────────────────────
 

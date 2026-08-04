@@ -20,7 +20,8 @@ const VENDOR_SPECIALTIES = [
   { value: 'other',        label: 'Other'        },
 ]
 
-interface Vendor { id: string; name: string; specialty: string; contact_name: string | null }
+// vendors.specialty is NULLABLE (DEFAULT 'general', older rows unset).
+interface Vendor { id: string; name: string; specialty: string | null; contact_name: string | null }
 interface Props  { vendors: Vendor[]; continueAction: () => Promise<void> }
 
 export function SetupVendorsStep({ vendors: initialVendors, continueAction }: Props) {
@@ -75,7 +76,7 @@ export function SetupVendorsStep({ vendors: initialVendors, continueAction }: Pr
               <div>
                 <div className="text-sm font-medium text-primary-themed">{v.name}</div>
                 <div className="text-xs text-muted-themed capitalize">
-                  {v.specialty.replace(/_/g, ' ')}{v.contact_name ? ` · ${v.contact_name}` : ''}
+                  {v.specialty?.replaceAll('_', ' ') ?? '—'}{v.contact_name ? ` · ${v.contact_name}` : ''}
                 </div>
               </div>
             </div>

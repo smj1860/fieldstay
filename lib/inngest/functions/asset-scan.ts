@@ -19,10 +19,12 @@
 // this only means make/model stay blank until a PM fills them in manually.
 // ============================================================
 
+import { unwrap } from '@/lib/supabase/unwrap'
 import { inngest } from '@/lib/inngest/client'
 import { createServiceClient } from '@/lib/supabase/server'
 import { scanDataPlateImage, isValidScanMediaType } from '@/lib/assets/scan-data-plate'
 import { toStorageObjectPath } from '@/lib/storage/object-path'
+import type { TablesUpdate } from '@/types/database'
 
 // PRIVATE bucket — downloads here go through the service-role client, which
 // bypasses both the bucket's public flag and its RLS policies, so this works
@@ -73,17 +75,22 @@ export const assetDataPlateScan = inngest.createFunction(
     await step.run('save-result', async () => {
       const supabase = createServiceClient({ system: 'inngest:asset-scan' })
 
-      const { data: asset } = await supabase
+      // maybeSingle() + unwrap(): a missing asset is a legitimate no-op, but
+      // a FAILED read used to look identical and silently threw away the scan
+      // result this step exists to persist.
+      const assetRes = await supabase
         .from('property_assets')
         .select('make, model, serial_number, manufacture_date, notes, scan_status')
         .eq('id', asset_id)
         .eq('org_id', org_id)
-        .single()
+        .maybeSingle()
+
+      const asset = unwrap(assetRes, { site: 'inngest.asset-scan.save-result', orgId: org_id })
 
       if (!asset) return
 
       const found = Boolean(result.make || result.model || result.serial_number)
-      const updates: Record<string, unknown> = {}
+      const updates: TablesUpdate<'property_assets'> = {}
 
       // Never downgrade an already-completed scan — a duplicate/retried run
       // disagreeing on `found` (LLM output isn't perfectly deterministic)

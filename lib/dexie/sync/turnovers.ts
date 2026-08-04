@@ -33,8 +33,9 @@ import {
   type InventoryItemRow,
 } from '../schema'
 import { getCursor, advanceCursor, partitionByKnown } from './cursors'
-import { fetchInChunks } from './chunked'
+import { fetchInChunks, fetchInChunksPaginated, IN_CHUNK_SIZE } from './chunked'
 import { bulkPutShadowed } from './shadow'
+import { scopeChanged, rememberScope } from './scope'
 import { reportError } from '@/lib/observability/report-error'
 
 const TURNOVER_COLUMNS =
@@ -117,7 +118,7 @@ async function fetchTurnoverRows(
     // No cursor yet (or forced): one full pull of the whole scope
     const fullIds = cursor === null ? assignedIds : fresh
     const data = await fetchInChunks<string, Record<string, unknown>>(fullIds, (chunk) =>
-      supabase.from('turnovers').select(TURNOVER_COLUMNS).in('id', chunk),
+      supabase.from('turnovers').select(TURNOVER_COLUMNS).in('id', chunk).limit(IN_CHUNK_SIZE),
     )
     if (data === null) {
       console.error('[turnoverSync] turnovers fetch failed')
@@ -129,7 +130,7 @@ async function fetchTurnoverRows(
 
   if (cursor !== null && known.length) {
     const data = await fetchInChunks<string, Record<string, unknown>>(known, (chunk) =>
-      supabase.from('turnovers').select(TURNOVER_COLUMNS).in('id', chunk).gt('updated_at', cursor),
+      supabase.from('turnovers').select(TURNOVER_COLUMNS).in('id', chunk).gt('updated_at', cursor).limit(IN_CHUNK_SIZE),
     )
     if (data === null) {
       console.error('[turnoverSync] turnovers delta fetch failed')
@@ -167,7 +168,8 @@ async function syncScopeReferenceData(
       supabase
         .from('properties')
         .select('id, org_id, name, address, city, state, lat, lng, timezone')
-        .in('id', chunk),
+        .in('id', chunk)
+        .limit(IN_CHUNK_SIZE),
     )
     if (properties === null) {
       console.error('[turnoverSync] properties fetch failed')
@@ -177,23 +179,42 @@ async function syncScopeReferenceData(
     if (properties.length) await db.properties.bulkPut(properties as PropertyRow[])
   }
 
-  const inventory = await fetchInChunks(propertyIds, (chunk) =>
-    supabase
-      .from('inventory_items')
-      .select('id, property_id, org_id, name, category, unit, par_level, current_quantity')
-      .in('property_id', chunk)
-      .eq('is_active', true),
+  // Gated on the assigned-property set changing, not on the poll. Everything
+  // the crew reads off an inventory row — name, unit, category, par_level — is
+  // PM-edited and rare; current_quantity is the churny column and no crew
+  // surface renders it any more (the count input is blank until counted), so a
+  // cursor would only return rows whose crew-relevant fields hadn't moved.
+  // Opening the inventory tab forces a pull, which is when freshness counts.
+  if (!force && !(await scopeChanged(userId, 'scope:inventory_items', propertyIds))) return true
+
+  // Paginated per chunk — ONE-TO-MANY, and the worst instance of it in the
+  // codebase: CLAUDE.md states outright that one org's inventory_items across
+  // 50 properties is ~5,750 rows. Chunking property_ids never bounded that, so
+  // a crew member's device silently received the first 1000 items and treated
+  // that as the complete par list.
+  const inventory = await fetchInChunksPaginated(
+    propertyIds,
+    (chunk, from, to) =>
+      supabase
+        .from('inventory_items')
+        .select('id, property_id, org_id, name, category, unit, par_level')
+        .in('property_id', chunk)
+        .eq('is_active', true)
+        .order('id')
+        .range(from, to),
   )
   if (inventory === null) {
     console.error('[turnoverSync] inventory fetch failed')
     reportError(new Error('inventory fetch failed'), { site: 'dexie.sync.turnovers.inventory' })
     return false
   }
-  // Shadowed: a crew member's queued-but-unpushed count must not be reverted
-  // in front of them by a routine pull.
+  // A plain bulkPut, not bulkPutShadowed: there is no inventory_items mutation
+  // type any more, so nothing can be pending to replay over these rows. A
+  // count is staged locally and submitted as an inventory_counts row instead.
   if (inventory.length) {
-    await bulkPutShadowed(db.inventory_items, userId, 'inventory_items', inventory as InventoryItemRow[])
+    await db.inventory_items.bulkPut(inventory as InventoryItemRow[])
   }
+  await rememberScope(userId, 'scope:inventory_items', propertyIds)
   return true
 }
 
@@ -364,8 +385,13 @@ async function fetchWithCursorSplit(
 
   const fullIds = cursor === null ? [...knownIds, ...freshIds] : freshIds
   if (fullIds.length) {
-    const data = await fetchInChunks(fullIds, (chunk) =>
-      supabase.from(table).select(columns).in(scopeColumn, chunk),
+    // Paginated per chunk: scopeColumn is turnover_id, a ONE-TO-MANY scope, so
+    // chunking the id list does not bound the row count (see
+    // fetchInChunksPaginated). 100 turnovers x 30-60 checklist items is well
+    // past PostgREST's 1000-row cap.
+    const data = await fetchInChunksPaginated(fullIds, (chunk, from, to) =>
+      supabase.from(table).select(columns).in(scopeColumn, chunk)
+        .order('id').range(from, to),
     )
     if (data === null) {
       console.error(`[turnoverSync] ${table} fetch failed`)
@@ -376,8 +402,9 @@ async function fetchWithCursorSplit(
   }
 
   if (cursor !== null && knownIds.length) {
-    const data = await fetchInChunks(knownIds, (chunk) =>
-      supabase.from(table).select(columns).in(scopeColumn, chunk).gt('updated_at', cursor),
+    const data = await fetchInChunksPaginated(knownIds, (chunk, from, to) =>
+      supabase.from(table).select(columns).in(scopeColumn, chunk).gt('updated_at', cursor)
+        .order('id').range(from, to),
     )
     if (data === null) {
       console.error(`[turnoverSync] ${table} delta fetch failed`)
@@ -406,7 +433,7 @@ export async function pullTurnoversOnly(
   const db = getDexieDb(userId)
 
   const turnovers = await fetchInChunks(turnoverIds, (chunk) =>
-    supabase.from('turnovers').select(TURNOVER_COLUMNS).in('id', chunk),
+    supabase.from('turnovers').select(TURNOVER_COLUMNS).in('id', chunk).limit(IN_CHUNK_SIZE),
   )
   if (turnovers === null) {
     console.error('[turnoverSync] turnovers re-fetch failed')

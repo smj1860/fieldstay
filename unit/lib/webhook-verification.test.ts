@@ -101,18 +101,49 @@ describe('isTimestampFresh', () => {
 })
 
 describe('extractClientIp', () => {
-  it('returns the first IP in a multi-hop x-forwarded-for header', () => {
+  // Trust order exists because EVERY per-IP limiter in the app keys on this
+  // one function. The previous implementation took the leftmost
+  // x-forwarded-for entry, which a client controls under a standard
+  // append-style proxy — one header would have given each request its own
+  // rate-limit bucket across nine limiters simultaneously.
+  it('prefers x-vercel-forwarded-for over anything the client can set', () => {
     const request = new Request('https://example.com', {
-      headers: { 'x-forwarded-for': '38.80.170.5, 10.0.0.1, 172.16.0.1' },
+      headers: {
+        'x-vercel-forwarded-for': '203.0.113.9',
+        'x-real-ip':              '198.51.100.7',
+        'x-forwarded-for':        '1.2.3.4, 203.0.113.9',
+      },
     })
-    expect(extractClientIp(request)).toBe('38.80.170.5')
+    expect(extractClientIp(request)).toBe('203.0.113.9')
   })
 
-  it('trims whitespace around the first IP', () => {
+  it('falls back to x-real-ip when the Vercel header is absent', () => {
     const request = new Request('https://example.com', {
-      headers: { 'x-forwarded-for': '  38.80.170.5  , 10.0.0.1' },
+      headers: {
+        'x-real-ip':       '198.51.100.7',
+        'x-forwarded-for': '1.2.3.4, 198.51.100.7',
+      },
     })
-    expect(extractClientIp(request)).toBe('38.80.170.5')
+    expect(extractClientIp(request)).toBe('198.51.100.7')
+  })
+
+  // The spoof this fix exists to defeat: a caller prepends a fake entry and
+  // the proxy appends the real address after it. Reading the left-hand end
+  // returns the attacker's value; the right-hand end returns the proxy's.
+  it('does NOT return a client-prepended x-forwarded-for entry', () => {
+    const request = new Request('https://example.com', {
+      headers: { 'x-forwarded-for': '1.2.3.4, 10.0.0.1, 203.0.113.9' },
+    })
+    const ip = extractClientIp(request)
+    expect(ip).not.toBe('1.2.3.4')
+    expect(ip).toBe('203.0.113.9')
+  })
+
+  it('trims whitespace around the selected entry', () => {
+    const request = new Request('https://example.com', {
+      headers: { 'x-forwarded-for': '  1.2.3.4  ,  203.0.113.9  ' },
+    })
+    expect(extractClientIp(request)).toBe('203.0.113.9')
   })
 
   it('returns the single IP when there is only one', () => {
@@ -120,6 +151,13 @@ describe('extractClientIp', () => {
       headers: { 'x-forwarded-for': '38.80.170.5' },
     })
     expect(extractClientIp(request)).toBe('38.80.170.5')
+  })
+
+  it('ignores empty entries rather than returning an empty string', () => {
+    const request = new Request('https://example.com', {
+      headers: { 'x-forwarded-for': '203.0.113.9, ,' },
+    })
+    expect(extractClientIp(request)).toBe('203.0.113.9')
   })
 
   it('returns null when the header is absent', () => {

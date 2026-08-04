@@ -1,5 +1,6 @@
 'use server'
 
+import { nullableArg } from '@/lib/supabase/rpc-args'
 import { redirect, unstable_rethrow } from 'next/navigation'
 import { createClient, createServiceClient } from '@/lib/supabase/server'
 import { inngest } from '@/lib/inngest/client'
@@ -40,7 +41,8 @@ export async function createOrganization(
         p_user_id:        user.id,
         p_name:           name,
         p_slug:           slug,
-        p_billing_email:  user.email ?? null,
+        // organizations.billing_email is nullable and so is this parameter.
+        p_billing_email:  nullableArg(user.email ?? null),
         p_max_properties: 15,
         p_trial_ends_at:  new Date(Date.now() + 14 * 86_400_000).toISOString(),
       })

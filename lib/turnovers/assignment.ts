@@ -1,3 +1,4 @@
+import { unwrap } from '@/lib/supabase/unwrap'
 import type { createClient } from '@/lib/supabase/server'
 
 type SupabaseServerClient = Awaited<ReturnType<typeof createClient>>
@@ -15,12 +16,16 @@ export async function isCrewAssignedToTurnover(
   turnoverId: string,
   crewMemberId: string,
 ): Promise<boolean> {
-  const { data: assignment } = await supabase
+  // Callers answer `false` with a 404, and lib/dexie/net.ts treats 4xx as
+  // TERMINAL — so a failed read here discarded the crew member's queued
+  // start/complete permanently. Throw instead: the route 500s, which the
+  // outbox retries, and the check still fails closed.
+  const assignmentRes = await supabase
     .from('turnover_assignments')
     .select('id')
     .eq('turnover_id',    turnoverId)
     .eq('crew_member_id', crewMemberId)
     .maybeSingle()
 
-  return assignment !== null
+  return unwrap(assignmentRes, { site: 'lib.turnovers.isCrewAssignedToTurnover' }) !== null
 }

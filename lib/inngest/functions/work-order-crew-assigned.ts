@@ -1,3 +1,4 @@
+import { tryUnwrap } from '@/lib/supabase/unwrap'
 import { inngest }             from '@/lib/inngest/client'
 import { createServiceClient } from '@/lib/supabase/server'
 
@@ -14,12 +15,17 @@ export const handleWorkOrderCrewAssigned = inngest.createFunction(
 
     await step.run('log-assignment', async () => {
       const supabase = createServiceClient({ system: 'inngest:work-order-crew-assigned' })
-      const { data: wo } = await supabase
+      // Degrade, don't throw: this lookup only decorates the step's return
+      // value for logging. tryUnwrap still logs and reports the failure.
+      const woRes = await supabase
         .from('work_orders')
         .select('wo_number, title')
         .eq('id', workOrderId)
         .eq('org_id', orgId)
-        .single()
+        .maybeSingle()
+
+      const woOut = tryUnwrap(woRes, { site: 'inngest.work-order-crew-assigned.log', orgId })
+      const wo    = woOut.ok ? woOut.data : null
 
       return { workOrderId, woNumber: wo?.wo_number, crewMemberId }
     })

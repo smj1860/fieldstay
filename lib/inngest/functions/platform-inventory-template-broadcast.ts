@@ -13,6 +13,7 @@
  */
 
 import { inngest }             from '@/lib/inngest/client'
+import { fetchAllRows } from '@/lib/inngest/paginate'
 import { createServiceClient } from '@/lib/supabase/server'
 import { logAuditEvents }      from '@/lib/audit'
 
@@ -59,11 +60,21 @@ export const broadcastPlatformInventoryTemplate = inngest.createFunction(
         .eq('platform_inventory_template_id', templateId)
       if (!items?.length) return []
 
-      const { data: catalogRows } = await supabase
-        .from('inventory_catalog')
-        .select('id, name, category, default_unit')
-        .in('id', items.map((i) => i.catalog_item_id))
-      const catalogById = new Map((catalogRows ?? []).map((c) => [c.id, c]))
+      // Nullability matches the live schema: name, category and default_unit
+      // are all NOT NULL on inventory_catalog (default_unit NOT NULL DEFAULT
+      // 'units').
+      const catalogRows = await fetchAllRows<{
+        id: string; name: string; category: string; default_unit: string
+      }>(
+        (from, to) => supabase
+          .from('inventory_catalog')
+          .select('id, name, category, default_unit')
+          .in('id', items.map((i) => i.catalog_item_id))
+          .order('id')
+          .range(from, to),
+        { label: 'platform-inventory-broadcast.catalog' },
+      )
+      const catalogById = new Map(catalogRows.map((c) => [c.id, c]))
 
       const merged: MasterItem[] = []
       for (const item of items) {
@@ -90,8 +101,15 @@ export const broadcastPlatformInventoryTemplate = inngest.createFunction(
     const orgIds = await step.run('fetch-target-orgs', async () => {
       const supabase = createServiceClient({ system: 'inngest:platform-inventory-template-broadcast' })
       if (targetOrgIds) {
-        const { data } = await supabase.from('organizations').select('id').in('id', targetOrgIds)
-        return (data ?? []).map((o) => o.id)
+        // Paginated like the untargeted branch below: targetOrgIds is
+        // caller-supplied and a broadcast to every tenant is exactly the case
+        // that reaches the cap.
+        const data = await fetchAllRows<{ id: string }>(
+          (from, to) => supabase.from('organizations').select('id')
+            .in('id', targetOrgIds).order('id').range(from, to),
+          { label: 'platform-inventory-broadcast.targetOrgs' },
+        )
+        return data.map((o) => o.id)
       }
       const pageSize = 1000
       const all: string[] = []

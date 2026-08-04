@@ -38,7 +38,7 @@ const TRIGGERED_TABLES = [
 // inventory_items/properties are pulled inside the turnovers scope pull
 // rather than having their own trigger; crew_availability/messages have no
 // trigger at all.
-const SAFETY_POLL_ONLY = ['property_assets', 'inventory_items', 'properties', 'crew_availability', 'messages']
+const SAFETY_POLL_ONLY = ['property_assets', 'inventory_items', 'properties']
 
 function findBroadcastMigrationSql(): string {
   const file = readdirSync(MIGRATIONS_DIR).find((f) => f.includes('crew_sync_broadcast'))
@@ -160,7 +160,11 @@ describe('crew-sync-coverage guardrail — the safety poll runs on the shipping 
       'the v1 (shipping) path has no safety poll',
     ).toBe(true)
 
-    expect(CONTEXT_SRC).toContain('setInterval(run, SAFETY_POLL_INTERVAL_MS)')
+    // The interval itself, whatever the callback shape. It takes a `reconcile`
+    // argument now (work-order membership is reconciled every Nth tick rather
+    // than on each one) — what this pins is that the poll fires on
+    // SAFETY_POLL_INTERVAL_MS and nothing else.
+    expect(CONTEXT_SRC).toMatch(/setInterval\([\s\S]{0,200}?SAFETY_POLL_INTERVAL_MS\)/)
   })
 
   it('both sync paths resync through the same full-scope pull', () => {

@@ -44,6 +44,9 @@ function makeSupabase(opts: {
       if (table === 'organizations')        return Promise.resolve({ data: { name: opts.orgName ?? 'FieldStay Co' }, error: null })
       return Promise.resolve({ data: null, error: null })
     })
+    // The organizations lookup now uses maybeSingle() so a missing org is
+    // data:null rather than an error; same dispatch either way.
+    chain.maybeSingle = chain.single
     return chain
   })
   return { from }

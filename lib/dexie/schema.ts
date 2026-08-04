@@ -71,7 +71,10 @@ export interface InventoryItemRow {
   category:         string
   unit:             string
   par_level:        number
-  current_quantity: number
+  // No current_quantity. The crew count input is blank until counted — showing
+  // the previous count made it the default value a crew member had to type
+  // over, anchoring a measurement that drives automated purchasing. Nothing on
+  // the device reads it, so it is not fetched or cached.
 }
 
 export interface PropertyRow {
@@ -84,29 +87,6 @@ export interface PropertyRow {
   lat:      number | null
   lng:      number | null
   timezone: string   // IANA identifier, e.g. "America/Chicago" — see lib/utils/timezone.ts
-}
-
-export interface CrewAvailabilityRow {
-  id:             string
-  org_id:         string
-  crew_member_id: string
-  available_date: string
-  is_available:   number
-  notes:          string
-  created_at:     string
-}
-
-export interface MessageRow {
-  id:           string
-  org_id:       string
-  sender_id:    string
-  recipient_id: string
-  content:      string
-  read_at:      string | null
-  turnover_id:  string
-  group_id:     string
-  group_label:  string
-  created_at:   string
 }
 
 // Progressive Asset Discovery cache — synced read-only for properties the
@@ -140,9 +120,25 @@ export interface PendingPhotoUploadRow {
   // UI anywhere saying so.
   next_attempt_at?:     number
   network_retry_count?: number
-  failed?:              boolean
+  /** 0/1, not a boolean — see the note on MutationRow.failed. */
+  failed?:              DeadLetterFlag
   last_error?:          string
 }
+
+/**
+ * Dead-letter marker, stored as 0/1 rather than a boolean.
+ *
+ * IndexedDB has no boolean key type: a record whose indexed property holds
+ * `true` is simply omitted from that index, so `failed` could never be
+ * indexed while it was a boolean and every dead-letter query — including the
+ * three `useLiveQuery`s FailedSyncBanner keeps live on every crew screen —
+ * had to full-scan the outbox on every single write to it.
+ *
+ * 0/1 preserves every existing truthiness check (`!m.failed`, `!!m.failed`)
+ * unchanged; only the literal `true`/`false` writes moved. Version 9's
+ * upgrade normalizes rows written before this.
+ */
+export type DeadLetterFlag = 0 | 1
 
 // Tracks incremental-sync watermarks (e.g. the last `turnover_assignments.created_at`
 // pulled from Supabase), so initialSync can fetch only what changed since last time
@@ -176,11 +172,10 @@ export type MutationTable =
   | 'turnovers'
   | 'checklist_instances'
   | 'work_order_reports'
-  | 'inventory_items'
-  | 'crew_availability'
+  | 'inventory_counts'
   | 'property_assets'
   | 'crew_work_orders'
-  | 'inventory_count_drafts'
+  | 'messages'
 
 export interface MutationRow {
   id?:        number
@@ -195,7 +190,14 @@ export interface MutationRow {
   // never made it to the server. Keeping the row (excluded from the pending
   // queue) lets the UI surface "this didn't sync" instead of silently
   // discarding it.
-  failed?:    boolean
+  //
+  // 0/1 rather than boolean so it can actually be indexed — see DeadLetterFlag.
+  failed?:    DeadLetterFlag
+  // Shape version of `payload`, stamped at enqueue time. An outbox row can
+  // outlive the release that queued it (a device offline across a deploy), so
+  // the drain migrates an older payload forward rather than replaying a shape
+  // the current upload handler no longer understands. Absent ⇒ version 1.
+  payloadVersion?: number
   // Retry backoff: epoch ms before which processOutbox() must not re-push
   // this mutation. Set on push failure (exponential backoff with jitter),
   // cleared by the row's deletion on successful push. Not indexed — the
@@ -219,8 +221,6 @@ export class FieldStayDexie extends Dexie {
   checklist_instance_items!: Table<ChecklistInstanceItemRow, string>
   inventory_items!:          Table<InventoryItemRow, string>
   properties!:               Table<PropertyRow, string>
-  crew_availability!:        Table<CrewAvailabilityRow, string>
-  messages!:                 Table<MessageRow, string>
   pending_photo_uploads!:    Table<PendingPhotoUploadRow, string>
   mutations!:                Table<MutationRow, number>
   sync_meta!:                Table<SyncMetaRow, string>
@@ -341,6 +341,70 @@ export class FieldStayDexie extends Dexie {
       crew_work_orders:         'id, property_id, org_id, status, scheduled_date',
       property_assets:          'id, property_id, org_id, asset_type',
     })
+
+    // Index correction (2026-08-04 offline-sync audit). Only the three changed
+    // stores are declared — Dexie carries every other store forward unchanged.
+    //
+    //  - `mutations.failed` / `pending_photo_uploads.failed`: the predicate of
+    //    every dead-letter query in the app, previously unindexed AND
+    //    unindexABLE (booleans are not valid IndexedDB keys). FailedSyncBanner
+    //    keeps three of those queries live on every crew screen, so each one
+    //    full-scanned the outbox on every checklist tick and every drain step.
+    //  - `[table+targetId]`: the per-record lookup enqueueMutation() and
+    //    holdBackSuccessors() both do. Both ran as full scans; the former now
+    //    runs on EVERY crew write.
+    //  - `pending_photo_uploads.retry_count`: dropped. Nothing has ever queried
+    //    it — it cost an index write per attempt and bought nothing.
+    //  - `checklist_instance_items.is_completed`: dropped. Never queried by
+    //    index either, and a two-value column is close to useless as one
+    //    while costing a write on the highest-volume mutation in the app.
+    this.version(9)
+      .stores({
+        mutations:                '++id, table, targetId, failed, [table+targetId]',
+        pending_photo_uploads:    'id, target_id, target_table, failed',
+        checklist_instance_items: 'id, instance_id, turnover_id',
+      })
+      .upgrade((tx) =>
+        // Normalize the pre-existing boolean flags to the 0/1 the index needs.
+        // Rows written as `failed: true` are invisible to `.where('failed')`
+        // until this runs — which on a device that dead-lettered work while
+        // offline is exactly the row the crew member most needs to see.
+        Promise.all([
+          tx.table('mutations').toCollection()
+            .modify((m: MutationRow) => { m.failed = m.failed ? 1 : 0 }),
+          tx.table('pending_photo_uploads').toCollection()
+            .modify((p: PendingPhotoUploadRow) => { p.failed = p.failed ? 1 : 0 }),
+        ]).then(() => undefined),
+      )
+
+    // crew_availability leaves the crew cache entirely. Time off is now an
+    // online-only screen: app/crew/availability reads its rows server-side and
+    // writes through a Server Action, so nothing on the device reads this
+    // store. It was the second-heaviest thing the five-minute safety poll
+    // pulled — a full 30-days-back-to-a-year-forward window, uncursored, on
+    // every tick — to back a screen that needs a connection to be useful.
+    //
+    // The `crew_availability` UPLOAD_HANDLERS entries deliberately REMAIN for
+    // one release: a mutation queued before this deploy lives in `mutations`,
+    // not in the store being dropped here, and must still drain rather than
+    // dead-letter as NO_HANDLER.
+    this.version(10).stores({
+      crew_availability: null,
+    })
+
+    // messages leaves the crew cache too. History is read from the server
+    // (app/crew/messages/page.tsx) and the unread badge is server-rendered by
+    // the crew layout — the badge's Dexie live query was the only reason this
+    // table had to be cached at all. It was the heaviest thing the safety poll
+    // pulled: up to 500 rows across a rolling 90-day window, uncursored, every
+    // five minutes, with no reconciliation.
+    //
+    // SENDING a message is now offline-capable for the first time — it goes
+    // through the outbox as a 'messages' mutation (see queueMessageToPM), so
+    // nothing about this drop reduces what a crew member can do without signal.
+    this.version(11).stores({
+      messages: null,
+    })
   }
 }
 
@@ -358,8 +422,6 @@ export const CREW_SYNCED_TABLES: Readonly<Record<string, string>> = {
   checklist_instance_items: 'checklist_instance_items',
   inventory_items:          'inventory_items',
   properties:                'properties',
-  crew_availability:        'crew_availability',
-  messages:                 'messages',
   crew_work_orders:         'work_orders',
   property_assets:          'property_assets',
 }
@@ -446,6 +508,103 @@ export function getDexieDb(userId: string): FieldStayDexie {
   return db
 }
 
+// ── Cross-tab logout ──────────────────────────────────────────────────────
+//
+// The shutdown latch above is per-DOCUMENT module state, but IndexedDB is a
+// per-ORIGIN resource. With a second crew tab open (an office tablet, a
+// turnover opened in a new tab) logging out in tab A used to fail two ways at
+// once:
+//
+//  1. `indexedDB.deleteDatabase` fires `blocked` and WAITS while any other
+//     connection is open. Dexie's default blocked handler warns and keeps
+//     waiting, so `await Dexie.delete(...)` never resolved — and because it
+//     sits before `supabase.auth.signOut()` and the redirect in
+//     performLogout(), the user stayed signed in, on the crew screen, with the
+//     logout button already re-enabled by its own `finally`. Silent no-op.
+//  2. Tab B's own `shutdownUserIds` was never latched, so it kept draining and
+//     its next getDexieDb() would re-create the database — leaving a
+//     signed-out user's work on a shared device, the exact thing the latch
+//     exists to prevent.
+//
+// So: tell the other tabs first (they latch, close their connection, and
+// leave), and bound the delete so a tab that ignores us can never strand the
+// user mid-logout.
+const LOGOUT_CHANNEL = 'fieldstay-crew-logout'
+
+/** How long to wait for other tabs to release the database before giving up. */
+const DELETE_BLOCKED_TIMEOUT_MS = 3_000
+
+interface ShutdownMessage { type: 'shutdown'; userId: string }
+
+function broadcastShutdown(userId: string): void {
+  if (typeof BroadcastChannel === 'undefined') return
+  try {
+    const channel = new BroadcastChannel(LOGOUT_CHANNEL)
+    channel.postMessage({ type: 'shutdown', userId } satisfies ShutdownMessage)
+    channel.close()
+  } catch (err) {
+    // Never let a messaging failure block the logout it is meant to assist.
+    console.warn('[Dexie] logout broadcast failed (non-fatal):', err)
+  }
+}
+
+/**
+ * Subscribes this document to logout broadcasts from sibling tabs. Installed
+ * once per session by DexieProvider; the returned function unsubscribes.
+ *
+ * `onShutdown` is how the UI leaves the crew surface — a tab still rendering
+ * cached assignments for a user who just signed out on another tab is the
+ * same shared-device leak, just on screen instead of on disk.
+ */
+export function listenForRemoteShutdown(userId: string, onShutdown: () => void): () => void {
+  if (typeof BroadcastChannel === 'undefined') return () => {}
+
+  let channel: BroadcastChannel
+  try {
+    channel = new BroadcastChannel(LOGOUT_CHANNEL)
+  } catch {
+    return () => {}
+  }
+
+  channel.onmessage = (event: MessageEvent<ShutdownMessage>) => {
+    if (event.data?.type !== 'shutdown' || event.data.userId !== userId) return
+    // Latch BEFORE closing: anything mid-await here must not re-open storage.
+    markDexieShutdown(userId)
+    if (db && dbUserId === userId) {
+      db.close()          // release the connection so the deleting tab unblocks
+      db = null
+      dbUserId = null
+    }
+    onShutdown()
+  }
+
+  return () => channel.close()
+}
+
+/**
+ * Deletes a database, giving up rather than waiting indefinitely on a
+ * connection another tab refuses to release. Losing the delete is recoverable
+ * — the shutdown latch already blocks every read, and cleanupStaleDexieDbs()
+ * collects the residue on the next login — whereas hanging here strands the
+ * user in a half-signed-out state, which is not.
+ */
+async function deleteDbBounded(name: string): Promise<void> {
+  let timer: ReturnType<typeof setTimeout> | undefined
+  try {
+    await Promise.race([
+      Dexie.delete(name),
+      new Promise<never>((_resolve, reject) => {
+        timer = setTimeout(
+          () => reject(new Error(`IndexedDB delete of ${name} blocked by another connection`)),
+          DELETE_BLOCKED_TIMEOUT_MS,
+        )
+      }),
+    ])
+  } finally {
+    if (timer !== undefined) clearTimeout(timer)
+  }
+}
+
 export async function closeDexieDb(): Promise<void> {
   if (db) {
     const dbName = db.name
@@ -453,7 +612,12 @@ export async function closeDexieDb(): Promise<void> {
     // Latch first, synchronously, before the first await: a drain resumed by
     // the microtask queue between here and the delete below must not be able
     // to re-open what we are about to delete.
-    if (formerUserId) markDexieShutdown(formerUserId)
+    if (formerUserId) {
+      markDexieShutdown(formerUserId)
+      // Other tabs latch and close their connection, so the delete below has
+      // a chance of not being blocked in the first place.
+      broadcastShutdown(formerUserId)
+    }
     db.close()
     db = null
     dbUserId = null
@@ -461,7 +625,7 @@ export async function closeDexieDb(): Promise<void> {
     // on the device after sign-out. Crew-app data is re-synced fresh
     // on next login; nothing is lost that can't be re-fetched.
     try {
-      await Dexie.delete(dbName)
+      await deleteDbBounded(dbName)
     } catch (err) {
       console.error('[Dexie] Failed to delete DB on logout:', err)
       reportError(err, { site: 'lib.dexie.schema.Dexie' })
@@ -471,7 +635,7 @@ export async function closeDexieDb(): Promise<void> {
     // Also delete the user-namespaced photo blob store (lib/dexie/photo-queue.ts)
     if (formerUserId) {
       try {
-        await Dexie.delete(`fieldstay-photo-queue-${formerUserId}`)
+        await deleteDbBounded(`fieldstay-photo-queue-${formerUserId}`)
       } catch (err) {
         console.error('[Dexie] Failed to delete photo blob store on logout:', err)
         reportError(err, { site: 'lib.dexie.schema.Dexie' })

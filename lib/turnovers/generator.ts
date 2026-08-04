@@ -3,6 +3,9 @@ import type { PriorityLevel } from '@/types/database'
 import { getMissingAssetDiscoveryTypes, buildAssetDiscoveryItems } from '@/lib/asset-discovery/engine'
 import { propertyLocalToUtc } from '@/lib/utils/timezone'
 import { unwrapJoinArray } from '@/lib/utils/supabase-joins'
+import { fetchAllRows } from '@/lib/inngest/paginate'
+import { reportError } from '@/lib/observability/report-error'
+import { tryUnwrap } from '@/lib/supabase/unwrap'
 
 export interface GeneratedTurnover {
   id:                string
@@ -42,7 +45,7 @@ async function loadGeneratorContext(
   supabase:   DBClient,
   propertyId: string,
 ): Promise<GeneratorContext> {
-  const [propertyRes, templateRes, existingRes] = await Promise.all([
+  const [propertyRes, templateRes, existingTurnovers] = await Promise.all([
     // maybeSingle() — .single() errors when 0 rows, causing the step to throw
     supabase
       .from('properties')
@@ -55,17 +58,31 @@ async function loadGeneratorContext(
       .eq('property_id', propertyId)
       .eq('is_default', true)
       .maybeSingle(),
-    supabase
-      .from('turnovers')
-      .select('booking_id, prev_booking_id')
-      .eq('property_id', propertyId),
+    // This is the DEDUPE set — every turnover already generated for this
+    // property, over its whole history. Two failure modes were open here:
+    //
+    //   - Truncation. A property accumulates turnovers indefinitely, and at
+    //     max_rows = 1000 PostgREST returns the first 1000 with a 200 and no
+    //     signal. Every turnover past the cap looks absent, so the generator
+    //     re-creates it — silently duplicating turnovers on an established
+    //     property, which is exactly the property that can least afford it.
+    //   - The error was never checked. `existingRes.data ?? []` turned a
+    //     FAILED read into an EMPTY dedupe set, which regenerates the
+    //     property's entire turnover history at once. fetchAllRows throws.
+    fetchAllRows<{ booking_id: string | null; prev_booking_id: string | null }>(
+      (from, to) => supabase
+        .from('turnovers')
+        .select('booking_id, prev_booking_id')
+        .eq('property_id', propertyId)
+        .order('id')
+        .range(from, to),
+      { label: 'generator.existingTurnovers' },
+    ),
   ])
 
   if (propertyRes.error) {
     console.error('[generator] property fetch failed', { propertyId, error: propertyRes.error.message })
   }
-
-  const existingTurnovers = existingRes.data ?? []
 
   return {
     propertyCheckinTime:  propertyRes.data?.checkin_time  ?? null,
@@ -229,14 +246,33 @@ export async function generateTurnoversForProperty(
   orgId:       string,
   supabase:    DBClient
 ): Promise<string[]> {
-  const { data: bookings } = await supabase
-    .from('bookings')
-    .select('id, checkin_date, checkout_date, checkin_time, checkout_time')
-    .eq('property_id', propertyId)
-    .eq('is_block', false)
-    .in('status', ['confirmed', 'tentative'])
-    .order('checkin_date', { ascending: true })
-  if (!bookings?.length) return []
+  // Every booking for this property, over its whole history — the input the
+  // pair pass walks to find consecutive stays. Truncation at max_rows = 1000
+  // would silently drop the tail, so no turnover is generated for any booking
+  // past the cap and the pair straddling the boundary is missed too. The
+  // discarded error was the worse half: a failed read returned [] and this
+  // function reported "nothing to generate" rather than failing.
+  //
+  // The secondary sort on id is required by the pagination: checkin_date is
+  // not unique (two bookings can start the same day across a property's
+  // history), and range() over a non-unique sort key can skip or repeat rows
+  // across page boundaries.
+  const bookings = await fetchAllRows<{
+    id: string; checkin_date: string; checkout_date: string
+    checkin_time: string | null; checkout_time: string | null
+  }>(
+    (from, to) => supabase
+      .from('bookings')
+      .select('id, checkin_date, checkout_date, checkin_time, checkout_time')
+      .eq('property_id', propertyId)
+      .eq('is_block', false)
+      .in('status', ['confirmed', 'tentative'])
+      .order('checkin_date', { ascending: true })
+      .order('id')
+      .range(from, to),
+    { label: 'generator.bookings' },
+  )
+  if (!bookings.length) return []
 
   const ctx = await loadGeneratorContext(supabase, propertyId)
 
@@ -301,10 +337,36 @@ async function insertStandaloneTurnover(
 
   if (error) {
     // 23505 = unique_violation: concurrent worker already inserted this standalone.
-    // The new turnovers_standalone_unique partial index makes this safe to ignore.
-    if (error.code !== '23505') {
-      console.error('[generator] Pass 1 insert error', { propertyId, bookingId: booking.id, code: error.code, msg: error.message })
+    // The turnovers_standalone_unique partial index makes this safe to ignore —
+    // but NOT safe to return null for. The caller records the returned id in
+    // ctx.existingStandalones, and Pass 2 keys off that set to decide between
+    // upgrading the standalone and inserting a fresh pair. Returning null on a
+    // lost race left the loser's ctx believing no standalone existed, so it
+    // inserted a pair ALONGSIDE the winner's standalone — the two partial
+    // unique indexes are disjoint, so nothing at the DB layer forbids the
+    // coexistence. That is two turnovers for one physical checkout, and two
+    // cleaning-fee rows on the owner's P&L once both complete.
+    // Re-read the winner's row so the loser's context stays truthful.
+    if (error.code === '23505') {
+      const winnerRes = await supabase
+        .from('turnovers')
+        .select('id')
+        .eq('property_id',     propertyId)
+        .eq('booking_id',      booking.id)
+        .is('prev_booking_id', null)
+        .maybeSingle()
+
+      // A failed re-read must not silently degrade back to the old `return
+      // null` behaviour — that is precisely the state that let Pass 2 insert a
+      // duplicate pair. Report it and return null only because there is
+      // nothing better to return; the concurrency key on booking-detected is
+      // what makes this branch rare in the first place.
+      const winnerOut = tryUnwrap<{ id: string }>(winnerRes, {
+        site: 'turnovers.generator.insertStandaloneTurnover.winner-reread',
+      })
+      return winnerOut.ok ? (winnerOut.data?.id ?? null) : null
     }
+    console.error('[generator] Pass 1 insert error', { propertyId, bookingId: booking.id, code: error.code, msg: error.message })
     return null
   }
 
@@ -332,7 +394,7 @@ async function upgradeStandaloneToPair(
 ): Promise<void> {
   const { propertyId, outgoingBookingId, incomingBookingId, checkoutDT, checkinDT, windowMinutes, priority } = params
 
-  await supabase
+  const { error } = await supabase
     .from('turnovers')
     .update({
       booking_id:         incomingBookingId,
@@ -345,6 +407,40 @@ async function upgradeStandaloneToPair(
     .eq('booking_id',      outgoingBookingId)
     .is('prev_booking_id', null)
     .eq('property_id',     propertyId)
+
+  if (!error) return
+
+  // 23505 here means a concurrent run already created the pair this upgrade
+  // was going to produce, so the standalone this run is holding is now the
+  // redundant duplicate — leaving it in place is the second half of the
+  // double-billing bug. Drop it, but only while it is still an unclaimed,
+  // auto-generated standalone: once a PM has assigned or a crew member has
+  // started it, the row carries work and deleting it would destroy that.
+  if (error.code === '23505') {
+    const { error: cleanupError } = await supabase
+      .from('turnovers')
+      .delete()
+      .eq('property_id',     propertyId)
+      .eq('booking_id',      outgoingBookingId)
+      .is('prev_booking_id', null)
+      .eq('status',          'pending_assignment')
+      .eq('auto_generated',  true)
+
+    if (cleanupError) {
+      console.error('[generator] redundant standalone cleanup failed', {
+        propertyId, outgoingBookingId, code: cleanupError.code, msg: cleanupError.message,
+      })
+      reportError(cleanupError, { site: 'turnovers.generator.upgradeStandaloneToPair.cleanup' })
+    }
+    return
+  }
+
+  // Any other error was previously discarded entirely, so a failed upgrade
+  // looked identical to a successful one.
+  console.error('[generator] standalone upgrade failed', {
+    propertyId, outgoingBookingId, incomingBookingId, code: error.code, msg: error.message,
+  })
+  reportError(error, { site: 'turnovers.generator.upgradeStandaloneToPair' })
 }
 
 /**
@@ -565,7 +661,7 @@ export async function snapshotChecklist(
 
   // Progressive Asset Discovery: inject system-mandated, non-deletable tasks
   // for any required asset type not yet verified on this property.
-  const missingAssetTypes = await getMissingAssetDiscoveryTypes(supabase, propertyId)
+  const missingAssetTypes = await getMissingAssetDiscoveryTypes(supabase, orgId, propertyId)
   if (missingAssetTypes.length > 0) {
     items.push(...buildAssetDiscoveryItems(instance.id, turnoverID, missingAssetTypes, items.length))
   }

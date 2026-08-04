@@ -3,9 +3,17 @@ import { describe, it, expect, vi, beforeEach } from 'vitest'
 vi.mock('@/lib/supabase/server', () => ({
   createServiceClient: vi.fn(),
 }))
+// "Who is the PM" belongs to getPmMembersByOrgIds() (CLAUDE.md) — this cron
+// used to re-derive its role ordering and invite_accepted_at filter against
+// organization_members inline. Mocked at the helper boundary; the helper's own
+// semantics are covered by unit/inngest/helpers*.
+vi.mock('@/lib/inngest/helpers', () => ({
+  getPmMembersByOrgIds: vi.fn(async () => new Map()),
+}))
 
 import { hospCalendarSyncCron } from '@/lib/inngest/functions/hospitable/calendar-sync-cron'
 import { createServiceClient } from '@/lib/supabase/server'
+import { getPmMembersByOrgIds } from '@/lib/inngest/helpers'
 import { invokeHandler } from './test-helpers'
 
 // Every step body runs for real — the only external boundary is Supabase.
@@ -26,6 +34,9 @@ function makeSupabase(queued: QueuedByTable) {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const chain: any = {}
     chain.select = () => chain
+    // These reads paginate via fetchAllRows(), which drains .order().range().
+    chain.order  = vi.fn(() => chain)
+    chain.range  = vi.fn(() => chain)
     chain.eq     = () => chain
     chain.in     = () => chain
     chain.not    = () => chain
@@ -62,16 +73,13 @@ describe('hospCalendarSyncCron', () => {
         ],
         error: null,
       }],
-      organization_members: [{
-        data: [
-          { org_id: 'org_1', user_id: 'admin_1', role: 'admin' },
-          { org_id: 'org_1', user_id: 'owner_1', role: 'owner' }, // must win over admin_1 for org_1
-          { org_id: 'org_2', user_id: 'admin_2', role: 'admin' },
-        ],
-        error: null,
-      }],
     })
     ;(createServiceClient as ReturnType<typeof vi.fn>).mockReturnValue(supabase)
+    // limit: 1 — the helper already applied the owner-before-admin preference,
+    // so org_1's slice is the owner, not the admin.
+    ;(getPmMembersByOrgIds as ReturnType<typeof vi.fn>).mockResolvedValue(
+      new Map([['org_1', [{ userId: 'owner_1', email: 'owner_1@x.com', role: 'owner' }]], ['org_2', [{ userId: 'admin_2', email: 'admin_2@x.com', role: 'admin' }]]]),
+    )
 
     const step = runAllStep()
     const result = await invokeHandler(hospCalendarSyncCron, {
@@ -144,12 +152,11 @@ describe('hospCalendarSyncCron', () => {
         data: [{ id: 'prop_1', org_id: 'org_1', external_id: 'hosp_1' }],
         error: null,
       }],
-      organization_members: [{
-        data: [{ org_id: 'org_1', user_id: 'owner_1', role: 'owner' }],
-        error: null,
-      }],
     })
     ;(createServiceClient as ReturnType<typeof vi.fn>).mockReturnValue(supabase)
+    ;(getPmMembersByOrgIds as ReturnType<typeof vi.fn>).mockResolvedValue(
+      new Map([['org_1', [{ userId: 'owner_1', email: 'owner_1@x.com', role: 'owner' }]]]),
+    )
 
     const step = runAllStep()
     const result = await invokeHandler(hospCalendarSyncCron, {
@@ -175,9 +182,9 @@ describe('hospCalendarSyncCron', () => {
         data: [{ id: 'prop_1', org_id: 'org_orphan', external_id: 'hosp_1' }],
         error: null,
       }],
-      organization_members: [{ data: [], error: null }],
     })
     ;(createServiceClient as ReturnType<typeof vi.fn>).mockReturnValue(supabase)
+    ;(getPmMembersByOrgIds as ReturnType<typeof vi.fn>).mockResolvedValue(new Map())
 
     const step = runAllStep()
     const result = await invokeHandler(hospCalendarSyncCron, {
@@ -197,15 +204,13 @@ describe('hospCalendarSyncCron', () => {
         data: [{ id: 'prop_1', org_id: 'org_1', external_id: 'hosp_1' }],
         error: null,
       }],
-      organization_members: [{
-        data: [
-          { org_id: 'org_1', user_id: 'admin_a', role: 'admin' },
-          { org_id: 'org_1', user_id: 'admin_b', role: 'admin' },
-        ],
-        error: null,
-      }],
     })
     ;(createServiceClient as ReturnType<typeof vi.fn>).mockReturnValue(supabase)
+    // Two qualifying admins for org_1; limit: 1 means the helper hands back
+    // exactly one, so no property can be dispatched twice.
+    ;(getPmMembersByOrgIds as ReturnType<typeof vi.fn>).mockResolvedValue(
+      new Map([['org_1', [{ userId: 'admin_a', email: 'admin_a@x.com', role: 'admin' }]]]),
+    )
 
     const step = runAllStep()
     const result = await invokeHandler(hospCalendarSyncCron, {

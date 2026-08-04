@@ -8,6 +8,7 @@
 // reconnect_email_sent_at — cleared automatically the next time
 // store_integration_token succeeds (see the proactive_token_refresh migration).
 
+import { unwrap } from '@/lib/supabase/unwrap'
 import { inngest }                      from '@/lib/inngest/client'
 import { createServiceClient }          from '@/lib/supabase/server'
 import { NonRetriableError }            from 'inngest'
@@ -87,13 +88,22 @@ export const integrationTokenRefreshHandler = inngest.createFunction(
     const alreadyNotified = await step.run('mark-revoked', async () => {
       const supabase = createServiceClient({ system: 'inngest:integration-token-refresh-handler' })
 
-      const { data: updatedConn } = await supabase
+      // This UPDATE ... RETURNING is the dedup claim for the reconnect email.
+      // Discarding its error returned `false` — "not yet notified" — so a
+      // failed claim sent the email AGAIN, and the revoked status may not have
+      // been written either. Throw so Inngest retries the claim.
+      const claimRes = await supabase
         .from('integration_connections')
         .update({ status: 'revoked', updated_at: new Date().toISOString() })
         .eq('user_id',    user_id)
         .eq('provider_id', provider_id)
         .select('reconnect_email_sent_at')
         .maybeSingle()
+
+      const updatedConn = unwrap(
+        claimRes,
+        { site: 'inngest.integration-token-refresh-handler.mark-revoked' },
+      )
 
       return !!updatedConn?.reconnect_email_sent_at
     })

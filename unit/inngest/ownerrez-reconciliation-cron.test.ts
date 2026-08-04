@@ -7,6 +7,7 @@ vi.mock('@/lib/supabase/server', () => ({
 import { ownerRezReconciliationCron } from '@/lib/inngest/functions/ownerrez/reconciliation-cron'
 import { createServiceClient } from '@/lib/supabase/server'
 import { invokeHandler } from './test-helpers'
+import { createSupabaseDouble, type TableSpec } from '../stubs/supabase-query-double'
 
 function makeLogger() {
   return { info: vi.fn(), warn: vi.fn(), error: vi.fn() }
@@ -19,37 +20,18 @@ function makeStep() {
   }
 }
 
-interface QueuedByTable { [table: string]: { data?: unknown; error?: unknown }[] }
 
 // Queue-based .from(table) mock — see ownerrez-incremental-sync.test.ts for
 // the canonical explanation. eqSpy/notSpy record every filter used so the
 // scoping assertions below can prove exactly which connections this cron
 // dispatches to, without depending on internal query-builder call order.
-function makeSupabase(queued: QueuedByTable) {
-  const counters: Record<string, number> = {}
-  const eqSpy  = vi.fn()
-  const notSpy = vi.fn()
-
-  const from = vi.fn((table: string) => {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const chain: any = {}
-    chain.select = vi.fn(() => chain)
-    chain.eq     = vi.fn((column: string, value: unknown) => { eqSpy(table, column, value); return chain })
-    chain.not    = vi.fn((column: string, operator: string, value: unknown) => { notSpy(table, column, operator, value); return chain })
-
-    const resolveNext = () => {
-      const idx = counters[table] ?? 0
-      counters[table] = idx + 1
-      return Promise.resolve(queued[table]?.[idx] ?? { data: null, error: null })
-    }
-
-    chain.then = (resolve: (v: unknown) => unknown, reject?: (e: unknown) => unknown) =>
-      resolveNext().then(resolve, reject)
-    return chain
-  })
-
-  return { from, eqSpy, notSpy }
-}
+// The ONE shared query-builder double, not a local hand-roll — its eqSpy /
+// notSpy carry the same (table, ...args) convention the scoping assertions
+// below already used. The local version modelled only .select/.eq/.not, so it
+// broke the moment this cron's connection read was paginated onto
+// .order().range(); that divergence is what the shared stub exists to end. It
+// also paginates for real, so a >1000-connection fixture is genuinely walked.
+const makeSupabase = (tables: Record<string, TableSpec>) => createSupabaseDouble(tables)
 
 describe('ownerRezReconciliationCron', () => {
   beforeEach(() => {

@@ -10,6 +10,9 @@
  * integration_connections, oauth_states).
  */
 
+/** A Postgres `json`/`jsonb` value. Defined by the generated schema file. */
+export type { Json } from './database.generated'
+
 // ─────────────────────────────────────────────────────────────
 // Scalar union types — mirror Postgres enums and CHECK constraints
 // ─────────────────────────────────────────────────────────────
@@ -88,6 +91,8 @@ export interface Profile {
   phone:                  string | null
   avatar_url:             string | null
   email_unsubscribed_at:  string | null
+  // NOT NULL with a DEFAULT in the DB (20260801100000), so every row has one.
+  unsubscribe_token:      string
   created_at:             string
   updated_at:             string
 }
@@ -512,6 +517,9 @@ export interface Turnover {
   completion_notes:      string | null
   started_at:            string | null
   completed_at:          string | null
+  // integer NULL in the live schema (migration
+  // 20260731000000_turnover_crew_duration_minutes).
+  //
   // Actual crew work-time metric: MAX - MIN across every completion-type
   // timestamp (checklist item completions + inventory's completion signal)
   // — distinct from started_at/completed_at above, which just reflect the
@@ -664,43 +672,6 @@ export interface InventoryCountItem {
   inventory_item_id: string
   quantity_counted:  number
   created_at:        string
-}
-
-// Field names match the live schema (submitted_by, item_id, counted_qty) —
-// not the never-applied crew_member_id/submitted_at/inventory_item_id/
-// submitted_quantity names from the superseded schema_history_gaps
-// migrations (20260609000003/20260609111810), whose CREATE TABLE IF NOT
-// EXISTS no-op'd against the table 20260604223326_add_inventory_count_drafts.sql
-// had already created. reviewed_at/reviewed_by were added for real by
-// 20260725201500_add_reviewed_columns_to_inventory_count_drafts.sql, after
-// the drift check caught app/(dashboard)/inventory/actions.ts writing to
-// them against columns that didn't exist yet.
-export interface InventoryCountDraft {
-  id:           string
-  org_id:       string
-  property_id:  string
-  submitted_by: string | null
-  status:       'pending_review' | 'approved' | 'rejected'
-  reviewed_at:  string | null
-  reviewed_by:  string | null
-  notes:        string | null
-  created_at:   string
-  updated_at:   string
-}
-
-export interface InventoryCountDraftItem {
-  id:                string
-  draft_id:          string
-  item_id:           string
-  previous_quantity: number
-  counted_qty:       number
-  // `note` (singular) is a legacy duplicate column nobody writes or reads —
-  // app/api/crew/inventory-count/route.ts and app/(dashboard)/inventory/
-  // page.tsx both use `notes` (plural) exclusively. Kept here only so the
-  // interface doesn't silently drop a real live column (see CLAUDE.md's
-  // "Two inventory tables with different column names" section).
-  note:              string | null
-  notes:             string | null
 }
 
 export interface PurchaseOrder {
@@ -1386,7 +1357,10 @@ export interface GuidebookConfiguration {
   extension_messaging_enabled:   boolean
   extension_gap_threshold_days:  number
   extension_discount_pct:        number | null
-  extension_contact_method:      'ownerrez_url' | 'email' | 'sms' | null
+  // TEXT column (DEFAULT 'email'), not a Postgres enum — narrow it with
+  // asExtensionContactMethod() from components/guidebook/guest-guidebook-view
+  // at the point of use rather than asserting the union here.
+  extension_contact_method:      string | null
   extension_ownerrez_url:        string | null
   extension_message_days_before: number
   created_at:            string
@@ -1518,9 +1492,12 @@ export interface PropertyAsset {
   warranty_provider:          string | null
   warranty_notes:             string | null
   placed_in_service_date:     string | null
-  macrs_class:                MacrsClass
-  depreciation_method:        string
-  salvage_value:              number
+  // NULLABLE in the live schema (DEFAULT '5_year'); asset_depreciation_entries
+  // .macrs_class is the NOT NULL one.
+  macrs_class:                MacrsClass | null
+  // Both NULLABLE in the live schema, with DEFAULTs ('macrs', 0).
+  depreciation_method:        string | null
+  salvage_value:              number | null
   health_score:               number | null
   health_score_updated_at:    string | null
   replacement_status:         'projected' | 'budgeted' | 'approved' | 'deferred'
@@ -1760,131 +1737,156 @@ export interface PromoHospitableLaunchCounter {
 //   npx supabase gen types typescript --linked > types/database.ts
 // ─────────────────────────────────────────────────────────────
 
-export interface Database {
-  public: {
-    Tables: {
-      // ── Core platform ──────────────────────────────────────
-      profiles:                    { Row: Profile;                  Insert: Partial<Profile>;                  Update: Partial<Profile>;                  Relationships: [] }
-      organizations:               { Row: Organization;             Insert: Partial<Organization>;             Update: Partial<Organization>;             Relationships: [] }
-      organization_members:        { Row: OrganizationMember;       Insert: Partial<OrganizationMember>;       Update: Partial<OrganizationMember>;       Relationships: [] }
-      properties:                  { Row: Property;                 Insert: Partial<Property>;                 Update: Partial<Property>;                 Relationships: [] }
-      property_owners:             { Row: PropertyOwner;            Insert: Partial<PropertyOwner>;            Update: Partial<PropertyOwner>;            Relationships: [] }
-      owner_portal_tokens:         { Row: OwnerPortalToken;         Insert: Partial<OwnerPortalToken>;         Update: Partial<OwnerPortalToken>;         Relationships: [] }
-      ical_feeds:                  { Row: IcalFeed;                 Insert: Partial<IcalFeed>;                 Update: Partial<IcalFeed>;                 Relationships: [] }
-      bookings:                    { Row: Booking;                  Insert: Partial<Booking>;                  Update: Partial<Booking>;                  Relationships: [] }
-      crew_members:                { Row: CrewMember;               Insert: Partial<CrewMember>;               Update: Partial<CrewMember>;               Relationships: [] }
-      crew_availability:           { Row: CrewAvailability;         Insert: Partial<CrewAvailability>;         Update: Partial<CrewAvailability>;         Relationships: [] }
-      vendors:                     { Row: Vendor;                   Insert: Partial<Vendor>;                   Update: Partial<Vendor>;                   Relationships: [] }
-      checklist_templates:         { Row: ChecklistTemplate;        Insert: Partial<ChecklistTemplate>;        Update: Partial<ChecklistTemplate>;        Relationships: [] }
-      checklist_template_sections: { Row: ChecklistTemplateSection; Insert: Partial<ChecklistTemplateSection>; Update: Partial<ChecklistTemplateSection>; Relationships: [] }
-      checklist_template_items:    { Row: ChecklistTemplateItem;    Insert: Partial<ChecklistTemplateItem>;    Update: Partial<ChecklistTemplateItem>;    Relationships: [] }
-      room_templates:              { Row: RoomTemplate;             Insert: Partial<RoomTemplate>;             Update: Partial<RoomTemplate>;             Relationships: [] }
-      room_template_items:         { Row: RoomTemplateItem;         Insert: Partial<RoomTemplateItem>;         Update: Partial<RoomTemplateItem>;         Relationships: [] }
-      org_inventory_catalog:       { Row: OrgInventoryCatalogItem;  Insert: Partial<OrgInventoryCatalogItem>;  Update: Partial<OrgInventoryCatalogItem>;  Relationships: [] }
-      org_maintenance_catalog_items: { Row: OrgMaintenanceCatalogItem; Insert: Partial<OrgMaintenanceCatalogItem>; Update: Partial<OrgMaintenanceCatalogItem>; Relationships: [] }
-      platform_staff:                      { Row: PlatformStaff;                 Insert: Partial<PlatformStaff>;                 Update: Partial<PlatformStaff>;                 Relationships: [] }
-      platform_seed_room_templates:       { Row: PlatformSeedRoomTemplate;      Insert: Partial<PlatformSeedRoomTemplate>;      Update: Partial<PlatformSeedRoomTemplate>;      Relationships: [] }
-      platform_seed_room_template_items:  { Row: PlatformSeedRoomTemplateItem;  Insert: Partial<PlatformSeedRoomTemplateItem>;  Update: Partial<PlatformSeedRoomTemplateItem>;  Relationships: [] }
-      turnovers:                   { Row: Turnover;                 Insert: Partial<Turnover>;                 Update: Partial<Turnover>;                 Relationships: [] }
-      turnover_assignments:        { Row: TurnoverAssignment;       Insert: Partial<TurnoverAssignment>;       Update: Partial<TurnoverAssignment>;       Relationships: [] }
-      checklist_instances:         { Row: ChecklistInstance;        Insert: Partial<ChecklistInstance>;        Update: Partial<ChecklistInstance>;        Relationships: [] }
-      checklist_instance_items:    { Row: ChecklistInstanceItem;    Insert: Partial<ChecklistInstanceItem>;    Update: Partial<ChecklistInstanceItem>;    Relationships: [] }
-      inventory_catalog:           { Row: InventoryCatalogItem;     Insert: Partial<InventoryCatalogItem>;     Update: Partial<InventoryCatalogItem>;     Relationships: [] }
-      inventory_items:             { Row: InventoryItem;            Insert: Partial<InventoryItem>;            Update: Partial<InventoryItem>;            Relationships: [] }
-      inventory_counts:            { Row: InventoryCount;           Insert: Partial<InventoryCount>;           Update: Partial<InventoryCount>;           Relationships: [] }
-      inventory_count_items:       { Row: InventoryCountItem;       Insert: Partial<InventoryCountItem>;       Update: Partial<InventoryCountItem>;       Relationships: [] }
-      inventory_count_drafts:      { Row: InventoryCountDraft;      Insert: Partial<InventoryCountDraft>;      Update: Partial<InventoryCountDraft>;      Relationships: [] }
-      inventory_count_draft_items: { Row: InventoryCountDraftItem;  Insert: Partial<InventoryCountDraftItem>;  Update: Partial<InventoryCountDraftItem>;  Relationships: [] }
-      purchase_orders:             { Row: PurchaseOrder;            Insert: Partial<PurchaseOrder>;            Update: Partial<PurchaseOrder>;            Relationships: [] }
-      purchase_order_items:        { Row: PurchaseOrderItem;        Insert: Partial<PurchaseOrderItem>;        Update: Partial<PurchaseOrderItem>;        Relationships: [] }
-      work_orders:                 { Row: WorkOrder;                Insert: Partial<WorkOrder>;                Update: Partial<WorkOrder>;                Relationships: [] }
-      work_order_line_items:       { Row: WorkOrderLineItem;        Insert: Partial<WorkOrderLineItem>;        Update: Partial<WorkOrderLineItem>;        Relationships: [] }
-      work_order_updates:          { Row: WorkOrderUpdate;          Insert: Partial<WorkOrderUpdate>;          Update: Partial<WorkOrderUpdate>;          Relationships: [] }
-      work_order_photos:           { Row: WorkOrderPhoto;           Insert: Partial<WorkOrderPhoto>;           Update: Partial<WorkOrderPhoto>;           Relationships: [] }
-      maintenance_schedules:       { Row: MaintenanceSchedule;      Insert: Partial<MaintenanceSchedule>;      Update: Partial<MaintenanceSchedule>;      Relationships: [] }
-      maintenance_schedule_templates:      { Row: MaintenanceScheduleTemplate;      Insert: Partial<MaintenanceScheduleTemplate>;      Update: Partial<MaintenanceScheduleTemplate>;      Relationships: [] }
-      maintenance_schedule_template_items: { Row: MaintenanceScheduleTemplateItem;  Insert: Partial<MaintenanceScheduleTemplateItem>;  Update: Partial<MaintenanceScheduleTemplateItem>;  Relationships: [] }
-      owner_transactions:          { Row: OwnerTransaction;         Insert: Partial<OwnerTransaction>;         Update: Partial<OwnerTransaction>;         Relationships: [] }
-      org_milestones:              { Row: OrgMilestone;             Insert: Partial<OrgMilestone>;             Update: Partial<OrgMilestone>;             Relationships: [] }
-      audit_events:                { Row: AuditEvent;               Insert: Partial<AuditEvent>;               Update: Partial<AuditEvent>;               Relationships: [] }
-      stripe_processed_events:     { Row: StripeProcessedEvent;     Insert: Partial<StripeProcessedEvent>;     Update: Partial<StripeProcessedEvent>;     Relationships: [] }
-      org_invites:                 { Row: OrgInvite;                Insert: Partial<OrgInvite>;                Update: Partial<OrgInvite>;                Relationships: [] }
-      quote_requests:              { Row: QuoteRequest;             Insert: Partial<QuoteRequest>;             Update: Partial<QuoteRequest>;             Relationships: [] }
-      communication_logs:          { Row: CommunicationLog;              Insert: Partial<CommunicationLog>;              Update: Partial<CommunicationLog>;              Relationships: [] }
-      messages:                    { Row: Message;                       Insert: Partial<Message>;                       Update: Partial<Message>;                       Relationships: [] }
-      push_subscriptions:          { Row: PushSubscription;              Insert: Partial<PushSubscription>;              Update: Partial<PushSubscription>;              Relationships: [] }
-      org_sms_templates:           { Row: OrgSmsTemplate;                Insert: Partial<OrgSmsTemplate>;                Update: Partial<OrgSmsTemplate>;                Relationships: [] }
+/**
+ * The schema type postgrest-js binds to. Re-exported from the GENERATED file,
+ * which is the only version satisfying its GenericSchema constraint — the
+ * hand-written interface that used to live here did not, which is why
+ * lib/supabase/server.ts had to omit the <Database> generic and every query in
+ * the app was typed `any`.
+ *
+ * The named interfaces above are NOT generated and stay hand-written on
+ * purpose: they were diffed against the live schema when this landed and are
+ * accurate. The only differences were two PostgREST embed aliases (which are
+ * not columns) and the deliberately-omitted deprecated
+ * work_orders.assigned_crew_id. They remain the app's import surface, and
+ * scripts/check-type-drift.mjs keeps them honest against the live schema.
+ */
 
-      // ── Crew learning loop / feedback ───────────────────────
-      assignment_outcomes:         { Row: AssignmentOutcome;             Insert: Partial<AssignmentOutcome>;             Update: Partial<AssignmentOutcome>;             Relationships: [] }
-      vendor_assignment_outcomes:  { Row: VendorAssignmentOutcome;       Insert: Partial<VendorAssignmentOutcome>;       Update: Partial<VendorAssignmentOutcome>;       Relationships: [] }
-      crew_feedback:               { Row: CrewFeedback;                  Insert: Partial<CrewFeedback>;                  Update: Partial<CrewFeedback>;                  Relationships: [] }
-      checklist_item_signals:      { Row: ChecklistItemSignal;           Insert: Partial<ChecklistItemSignal>;           Update: Partial<ChecklistItemSignal>;           Relationships: [] }
-
-      // ── Inventory templates ─────────────────────────────────
-      inventory_templates:         { Row: InventoryTemplate;             Insert: Partial<InventoryTemplate>;             Update: Partial<InventoryTemplate>;             Relationships: [] }
-      inventory_template_items:    { Row: InventoryTemplateItem;         Insert: Partial<InventoryTemplateItem>;         Update: Partial<InventoryTemplateItem>;         Relationships: [] }
-      platform_inventory_templates:      { Row: PlatformInventoryTemplate;      Insert: Partial<PlatformInventoryTemplate>;      Update: Partial<PlatformInventoryTemplate>;      Relationships: [] }
-      platform_inventory_template_items: { Row: PlatformInventoryTemplateItem;  Insert: Partial<PlatformInventoryTemplateItem>;  Update: Partial<PlatformInventoryTemplateItem>;  Relationships: [] }
-
-      // ── Maintenance ──────────────────────────────────────────
-      maintenance_catalog_items:   { Row: MaintenanceCatalogItem;        Insert: Partial<MaintenanceCatalogItem>;        Update: Partial<MaintenanceCatalogItem>;        Relationships: [] }
-      maintenance_completions:     { Row: MaintenanceCompletion;         Insert: Partial<MaintenanceCompletion>;         Update: Partial<MaintenanceCompletion>;         Relationships: [] }
-
-      // ── Work order billing ──────────────────────────────────
-      work_order_invoices:         { Row: WorkOrderInvoice;              Insert: Partial<WorkOrderInvoice>;              Update: Partial<WorkOrderInvoice>;              Relationships: [] }
-
-      // ── Guest messaging ──────────────────────────────────────
-      reservation_messages:        { Row: ReservationMessage;            Insert: Partial<ReservationMessage>;            Update: Partial<ReservationMessage>;            Relationships: [] }
-
-      // ── RepuGuard ────────────────────────────────────────────
-      reviews:                     { Row: Review;                        Insert: Partial<Review>;                        Update: Partial<Review>;                        Relationships: [] }
-      review_responses:            { Row: ReviewResponse;                Insert: Partial<ReviewResponse>;                Update: Partial<ReviewResponse>;                Relationships: [] }
-
-      // ── Asset Health ───────────────────────────────────────
-      property_assets:             { Row: PropertyAsset;            Insert: Partial<PropertyAsset>;            Update: Partial<PropertyAsset>;            Relationships: [] }
-      asset_type_standards:        { Row: AssetTypeStandard;        Insert: Partial<AssetTypeStandard>;        Update: Partial<AssetTypeStandard>;        Relationships: [] }
-      asset_depreciation_entries:  { Row: AssetDepreciationEntry;   Insert: Partial<AssetDepreciationEntry>;   Update: Partial<AssetDepreciationEntry>;   Relationships: [] }
-      asset_manuals:               { Row: AssetManual;              Insert: Partial<AssetManual>;              Update: Partial<AssetManual>;              Relationships: [] }
-
-      // ── Vendor Compliance ──────────────────────────────────
-      vendor_compliance_documents: { Row: VendorComplianceDocument; Insert: Partial<VendorComplianceDocument>; Update: Partial<VendorComplianceDocument>; Relationships: [] }
-
-      // ── Integration framework (server-side only) ───────────
-      integration_providers:          { Row: IntegrationProvider;         Insert: Partial<IntegrationProvider>;         Update: Partial<IntegrationProvider>;         Relationships: [] }
-      integration_connections:        { Row: IntegrationConnection;       Insert: Partial<IntegrationConnection>;       Update: Partial<IntegrationConnection>;       Relationships: [] }
-      oauth_states:                   { Row: OAuthState;                  Insert: Partial<OAuthState>;                  Update: Partial<OAuthState>;                  Relationships: [] }
-      processed_webhooks:             { Row: ProcessedWebhook;            Insert: Partial<ProcessedWebhook>;            Update: Partial<ProcessedWebhook>;            Relationships: [] }
-      integration_entity_owners:      { Row: IntegrationEntityOwner;      Insert: Partial<IntegrationEntityOwner>;      Update: Partial<IntegrationEntityOwner>;      Relationships: [] }
-      pending_integration_links:      { Row: PendingIntegrationLink;      Insert: Partial<PendingIntegrationLink>;      Update: Partial<PendingIntegrationLink>;      Relationships: [] }
-      pending_oauth_authorizations:   { Row: PendingOAuthAuthorization;   Insert: Partial<PendingOAuthAuthorization>;   Update: Partial<PendingOAuthAuthorization>;   Relationships: [] }
-
-      // ── Support bot ────────────────────────────────────────
-      support_kb_chunks:     { Row: SupportKbChunk;     Insert: Partial<SupportKbChunk>;     Update: Partial<SupportKbChunk>;     Relationships: [] }
-      support_conversations: { Row: SupportConversation; Insert: Partial<SupportConversation>; Update: Partial<SupportConversation>; Relationships: [] }
-      support_messages:      { Row: SupportMessage;      Insert: Partial<SupportMessage>;      Update: Partial<SupportMessage>;      Relationships: [] }
-      // ── Self-Funding Guidebook ───────────────────────────────
-      guidebook_configurations:    { Row: GuidebookConfiguration;   Insert: Partial<GuidebookConfiguration>;   Update: Partial<GuidebookConfiguration>;   Relationships: [] }
-      guidebook_sponsors:          { Row: GuidebookSponsor;         Insert: Partial<GuidebookSponsor>;         Update: Partial<GuidebookSponsor>;         Relationships: [] }
-      guidebook_property_configs:  { Row: GuidebookPropertyConfig;  Insert: Partial<GuidebookPropertyConfig>;  Update: Partial<GuidebookPropertyConfig>;  Relationships: [] }
-      guidebook_guest_sms_optins:  { Row: GuidebookGuestSmsOptin;   Insert: Partial<GuidebookGuestSmsOptin>;   Update: Partial<GuidebookGuestSmsOptin>;   Relationships: [] }
-      guidebook_offer_redemptions: { Row: GuidebookOfferRedemption; Insert: Partial<GuidebookOfferRedemption>; Update: Partial<GuidebookOfferRedemption>; Relationships: [] }
-      stay_extension_requests:     { Row: StayExtensionRequest;     Insert: Partial<StayExtensionRequest>;     Update: Partial<StayExtensionRequest>;     Relationships: [] }
-
-      // ── In-app notifications (bell) ─────────────────────────
-      notifications:               { Row: Notification;             Insert: Partial<Notification>;             Update: Partial<Notification>;             Relationships: [] }
-      notification_digest_state:   { Row: NotificationDigestState;  Insert: Partial<NotificationDigestState>; Update: Partial<NotificationDigestState>; Relationships: [] }
-
-      // ── Roadshow demo ───────────────────────────────────────
-      demo_activity_log:           { Row: DemoActivityLog;          Insert: Partial<DemoActivityLog>;          Update: Partial<DemoActivityLog>;          Relationships: [] }
-      // ── Hospitable launch promo ─────────────────────────────
-      hospitable_launch_promo:         { Row: HospitableLaunchPromo;         Insert: Partial<HospitableLaunchPromo>;         Update: Partial<HospitableLaunchPromo>;         Relationships: [] }
-      promo_hospitable_launch_counter: { Row: PromoHospitableLaunchCounter;  Insert: Partial<PromoHospitableLaunchCounter>;  Update: Partial<PromoHospitableLaunchCounter>;  Relationships: [] }
-    }
-    Views: {
-      vendor_compliance_status: { Row: VendorComplianceStatus }
-    }
-    Functions: Record<string, never>
-    Enums: Record<string, never>
-  }
+/**
+ * table name -> the hand-written Row interface that models it.
+ *
+ * PARSED BY scripts/check-type-drift.mjs. This is not decoration and it is not
+ * used at runtime: the drift gate reads this map to know which interface to
+ * diff against which live table, in BOTH directions — a table with no entry is
+ * reported as unmodelled, and an entry naming a table that no longer exists is
+ * reported as stale.
+ *
+ * It exists as its own declaration because the mapping used to be a side
+ * effect of the hand-written `Database.public.Tables` block. When Database
+ * moved to the generated file (2026-08-02) that block went with it, and the
+ * drift gate — which greps for `Tables: { ... } Views:` — silently matched
+ * nothing and reported all 92 tables as unmodelled. Pointing the gate at the
+ * generated file instead would have been worse than useless: that file is
+ * generated FROM the live schema, so diffing the two can never fail.
+ *
+ * The hand-written interfaces are what can drift, so they are what is checked.
+ * Add an entry in the same commit that adds a table + its interface.
+ */
+export interface HandWrittenRowMap {
+  profiles:                            Profile
+  organizations:                       Organization
+  organization_members:                OrganizationMember
+  properties:                          Property
+  property_owners:                     PropertyOwner
+  owner_portal_tokens:                 OwnerPortalToken
+  ical_feeds:                          IcalFeed
+  bookings:                            Booking
+  crew_members:                        CrewMember
+  crew_availability:                   CrewAvailability
+  vendors:                             Vendor
+  checklist_templates:                 ChecklistTemplate
+  checklist_template_sections:         ChecklistTemplateSection
+  checklist_template_items:            ChecklistTemplateItem
+  room_templates:                      RoomTemplate
+  room_template_items:                 RoomTemplateItem
+  org_inventory_catalog:               OrgInventoryCatalogItem
+  org_maintenance_catalog_items:       OrgMaintenanceCatalogItem
+  platform_staff:                      PlatformStaff
+  platform_seed_room_templates:        PlatformSeedRoomTemplate
+  platform_seed_room_template_items:   PlatformSeedRoomTemplateItem
+  turnovers:                           Turnover
+  turnover_assignments:                TurnoverAssignment
+  checklist_instances:                 ChecklistInstance
+  checklist_instance_items:            ChecklistInstanceItem
+  inventory_catalog:                   InventoryCatalogItem
+  inventory_items:                     InventoryItem
+  inventory_counts:                    InventoryCount
+  inventory_count_items:               InventoryCountItem
+  purchase_orders:                     PurchaseOrder
+  purchase_order_items:                PurchaseOrderItem
+  work_orders:                         WorkOrder
+  work_order_line_items:               WorkOrderLineItem
+  work_order_updates:                  WorkOrderUpdate
+  work_order_photos:                   WorkOrderPhoto
+  maintenance_schedules:               MaintenanceSchedule
+  maintenance_schedule_templates:      MaintenanceScheduleTemplate
+  maintenance_schedule_template_items: MaintenanceScheduleTemplateItem
+  owner_transactions:                  OwnerTransaction
+  org_milestones:                      OrgMilestone
+  audit_events:                        AuditEvent
+  stripe_processed_events:             StripeProcessedEvent
+  org_invites:                         OrgInvite
+  quote_requests:                      QuoteRequest
+  communication_logs:                  CommunicationLog
+  messages:                            Message
+  push_subscriptions:                  PushSubscription
+  org_sms_templates:                   OrgSmsTemplate
+  assignment_outcomes:                 AssignmentOutcome
+  vendor_assignment_outcomes:          VendorAssignmentOutcome
+  crew_feedback:                       CrewFeedback
+  checklist_item_signals:              ChecklistItemSignal
+  inventory_templates:                 InventoryTemplate
+  inventory_template_items:            InventoryTemplateItem
+  platform_inventory_templates:        PlatformInventoryTemplate
+  platform_inventory_template_items:   PlatformInventoryTemplateItem
+  maintenance_catalog_items:           MaintenanceCatalogItem
+  maintenance_completions:             MaintenanceCompletion
+  work_order_invoices:                 WorkOrderInvoice
+  reservation_messages:                ReservationMessage
+  reviews:                             Review
+  review_responses:                    ReviewResponse
+  property_assets:                     PropertyAsset
+  asset_type_standards:                AssetTypeStandard
+  asset_depreciation_entries:          AssetDepreciationEntry
+  asset_manuals:                       AssetManual
+  vendor_compliance_documents:         VendorComplianceDocument
+  integration_providers:               IntegrationProvider
+  integration_connections:             IntegrationConnection
+  oauth_states:                        OAuthState
+  processed_webhooks:                  ProcessedWebhook
+  integration_entity_owners:           IntegrationEntityOwner
+  pending_integration_links:           PendingIntegrationLink
+  pending_oauth_authorizations:        PendingOAuthAuthorization
+  support_kb_chunks:                   SupportKbChunk
+  support_conversations:               SupportConversation
+  support_messages:                    SupportMessage
+  guidebook_configurations:            GuidebookConfiguration
+  guidebook_sponsors:                  GuidebookSponsor
+  guidebook_property_configs:          GuidebookPropertyConfig
+  guidebook_guest_sms_optins:          GuidebookGuestSmsOptin
+  guidebook_offer_redemptions:         GuidebookOfferRedemption
+  stay_extension_requests:             StayExtensionRequest
+  notifications:                       Notification
+  notification_digest_state:           NotificationDigestState
+  demo_activity_log:                   DemoActivityLog
+  hospitable_launch_promo:             HospitableLaunchPromo
+  promo_hospitable_launch_counter:     PromoHospitableLaunchCounter
 }
+
+/** Views modelled by hand, same contract as HandWrittenRowMap. */
+export interface HandWrittenViewMap {
+  vendor_compliance_status: VendorComplianceStatus
+}
+
+export type { Database } from './database.generated'
+
+/**
+ * Row / payload helpers from the generated schema, re-exported so callers get
+ * them from the same place as everything else.
+ *
+ * Use `TablesInsert<'x'>` for an insert payload instead of hand-writing the
+ * shape. A hand-written payload annotation silently WIDENS what the column
+ * actually accepts — `category: string` where the column is the
+ * inventory_category enum — and once widened, nothing checks the value again.
+ * That is why several payload types in this repo did not match their table.
+ */
+export type { Tables, TablesInsert, TablesUpdate, Enums } from './database.generated'
+
+/**
+ * Runtime enum values, generated from the live schema. Use this to validate a
+ * value that arrives as a plain `string` before writing it to an enum column,
+ * rather than hand-listing the labels — a hand-written list is a second copy
+ * of the schema that nothing keeps in sync.
+ */
+export { Constants } from './database.generated'
+

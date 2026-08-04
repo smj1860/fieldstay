@@ -371,7 +371,7 @@ describe('buildShoppingCart', () => {
     })
   })
 
-  it('passes p_property_ids null (all properties) when the event carries no property_ids', async () => {
+  it('omits p_property_ids (all properties) when the event carries no property_ids', async () => {
     const supabase = makeSupabase({
       organizations:   [{ data: { id: 'org_1', preferred_retailer: 'kroger' }, error: null }],
       org_milestones:  [{ error: null }],
@@ -380,9 +380,11 @@ describe('buildShoppingCart', () => {
 
     await invokeHandler(buildShoppingCart, baseCtx())
 
+    // p_property_ids is DEFAULT NULL server-side, so omitting the argument
+    // means exactly what passing an explicit null used to — and it is what
+    // the generated `p_property_ids?: string[]` arg type accepts.
     expect(supabase.rpc).toHaveBeenCalledWith('inventory_below_par_items', {
-      p_org_id:       'org_1',
-      p_property_ids: null,
+      p_org_id: 'org_1',
     })
   })
 

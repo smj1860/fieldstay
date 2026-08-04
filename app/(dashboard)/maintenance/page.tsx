@@ -1,5 +1,6 @@
 import { requireOrgMember } from '@/lib/auth'
 import { MaintenanceBoard } from './maintenance-board'
+import type { VendorComplianceRow } from './maintenance-board'
 import type { Metadata } from 'next'
 
 export const metadata: Metadata = { title: 'Maintenance' }
@@ -102,6 +103,14 @@ export default async function MaintenancePage() {
     if (result.error) console.error(`[MaintenancePage] ${name} query failed:`, result.error)
   }
 
+  // vendor_compliance_status is a VIEW, so Postgres reports every column as
+  // nullable regardless of the underlying tables. A row missing either field
+  // can't be matched to a vendor, so drop it here rather than widen the
+  // board's prop type to a shape it would only have to re-check.
+  const vendorCompliance = (vendorComplianceResult.data ?? []).filter(
+    (r): r is VendorComplianceRow => r.vendor_id !== null && r.compliance_status !== null
+  )
+
   return (
     <MaintenanceBoard
       workOrders={workOrdersResult.data ?? []}
@@ -110,7 +119,7 @@ export default async function MaintenancePage() {
       schedules={schedulesResult.data ?? []}
       crewMembers={crewMembersResult.data ?? []}
       propertyAssets={propertyAssetsResult.data ?? []}
-      vendorCompliance={vendorComplianceResult.data ?? []}
+      vendorCompliance={vendorCompliance}
       orgId={membership.org_id}
       role={membership.role}
     />

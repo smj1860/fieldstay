@@ -1,5 +1,5 @@
 import Link from 'next/link'
-import { requireOrgMember } from '@/lib/auth'
+import { requireOrgRole } from '@/lib/auth'
 import { createServiceClient } from '@/lib/supabase/server'
 import { Shield, Download } from 'lucide-react'
 import { Card } from '@/components/ui/Card'
@@ -12,15 +12,26 @@ const PAGE_SIZE = 50
 export default async function AuditLogPage({
   searchParams,
 }: {
-  searchParams: { page?: string }
+  searchParams: Promise<{ page?: string }>
 }) {
-  const { membership } = await requireOrgMember()
+  // requireOrgRole, NOT requireOrgMember. audit_events RLS is deliberately
+  // owner-only, and this page bypasses it with the service client so
+  // admin/managers can view for SOC2 purposes — which meant EVERY role could,
+  // including viewer and crew. lib/navigation.ts hides /settings from them,
+  // but nothing role-gates dashboard routes, so typing the URL was enough to
+  // read every role change, integration connect/disconnect, billing change and
+  // security event in the org, with actor ids and metadata. `owner` passes
+  // requireOrgRole automatically, matching is_org_member().
+  const { membership } = await requireOrgRole(['admin', 'manager'])
 
-  const page   = Math.max(1, parseInt(searchParams.page ?? '1', 10) || 1)
+  // `searchParams` is a Promise in Next 16 — read synchronously off the
+  // promise it was always `undefined`, so `page` was pinned at 1 and the
+  // rendered "Next →" link did nothing. Every other page in the repo already
+  // has the awaited form.
+  const { page: pageParam } = await searchParams
+  const page   = Math.max(1, Number.parseInt(pageParam ?? '1', 10) || 1)
   const offset = (page - 1) * PAGE_SIZE
 
-  // Use service client — audit_events RLS restricts to owner role only,
-  // but admin/managers should also be able to view for SOC2 purposes.
   const supabase = createServiceClient({ authorizedBy: membership })
 
   // Fetch one extra row to detect a next page without a separate count query.

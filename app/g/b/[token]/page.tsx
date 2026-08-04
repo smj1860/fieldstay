@@ -3,7 +3,7 @@ import { notFound } from 'next/navigation'
 import type { Metadata } from 'next'
 import { createServiceClient } from '@/lib/supabase/server'
 import { getWeatherForLocation } from '@/lib/weather/tomorrow'
-import { GuestGuidebookView } from '@/components/guidebook/guest-guidebook-view'
+import { GuestGuidebookView, asExtensionContactMethod } from '@/components/guidebook/guest-guidebook-view'
 import { GuidebookUnavailable } from '@/components/guidebook/guidebook-unavailable'
 import type { GuidebookSponsorView } from '@/components/guidebook/guest-guidebook-view'
 import type { GuidebookSponsor, GuidebookPropertyConfig, Property } from '@/types/database'
@@ -180,7 +180,7 @@ export default async function GuestBookingGuidebookPage({
       extensionConfig={
         orgConfig
           ? {
-              extension_contact_method: orgConfig.extension_contact_method,
+              extension_contact_method: asExtensionContactMethod(orgConfig.extension_contact_method),
               extension_ownerrez_url:   orgConfig.extension_ownerrez_url,
             }
           : null

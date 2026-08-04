@@ -20,6 +20,7 @@
 import { inngest }                 from '@/lib/inngest/client'
 import type { GetStepTools }       from 'inngest'
 import { NonRetriableError }       from 'inngest'
+import { fetchTurnoverCreatedEvents } from '@/lib/inngest/turnover-created-events'
 import { createServiceClient }     from '@/lib/supabase/server'
 import { resolveHospitableOwner }  from '@/lib/integrations/providers/hospitable-owner'
 import { createHash } from 'crypto'
@@ -264,6 +265,18 @@ async function syncReservation(
 
     const normalized = hospitableReservationToNormalized(reservation)
 
+    // bookings.checkin_date/checkout_date are NOT NULL, but Hospitable's
+    // normalized shape allows null (their payload does not always carry both).
+    // A row missing either would be rejected by Postgres (23502), so there is
+    // no booking to record — say so instead of throwing a raw constraint error.
+    if (normalized.checkin_date === null || normalized.checkout_date === null) {
+      throw new NonRetriableError(
+        `Hospitable reservation ${normalized.external_id} has no ${
+          normalized.checkin_date === null ? 'arrival' : 'departure'
+        } date — cannot store a booking without it`
+      )
+    }
+
     const datesChanged = !existing
       || existing.checkin_date  !== normalized.checkin_date
       || existing.checkout_date !== normalized.checkout_date
@@ -357,29 +370,7 @@ async function syncReservation(
     if (newTurnoverIds.length > 0) {
       const turnoverEvents = await step.run('fetch-new-turnover-data', async () => {
         const supabase = createServiceClient({ system: 'inngest:incremental-sync' })
-        type TRow = {
-          id:                string
-          property_id:       string
-          checkout_datetime: string
-          checkin_datetime:  string
-          window_minutes:    number | null
-        }
-        const { data: turnovers } = await supabase
-          .from('turnovers')
-          .select('id, property_id, checkout_datetime, checkin_datetime, window_minutes')
-          .in('id', newTurnoverIds)
-
-        return ((turnovers as TRow[]) ?? []).map((t) => ({
-          name: 'turnover/created' as const,
-          data: {
-            turnover_id:       t.id,
-            property_id:       t.property_id,
-            org_id:            orgId,
-            checkout_datetime: t.checkout_datetime,
-            checkin_datetime:  t.checkin_datetime,
-            window_minutes:    t.window_minutes ?? 0,
-          },
-        }))
+        return fetchTurnoverCreatedEvents(supabase, newTurnoverIds, orgId)
       })
 
       if (turnoverEvents.length > 0) {

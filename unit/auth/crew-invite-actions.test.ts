@@ -34,7 +34,17 @@ import { createServiceClient, createClient } from '@/lib/supabase/server'
 import { logAuditEvent } from '@/lib/audit'
 import { inviteAcceptRatelimit } from '@/lib/rate-limit'
 
-function makeSupabase(crewLookup: { data: unknown; error?: unknown }, updateResult: { data?: unknown; error?: unknown } = { error: null }) {
+const VALID_TOKEN = '22222222-2222-2222-2222-222222222222'
+const CREW_ID     = '11111111-1111-1111-1111-111111111111'
+
+// The default updateResult returns ONE row: the claiming UPDATE
+// (`.is('user_id', null).is('invite_accepted_at', null).select('id')`) matched.
+// A zero-row `data: []` is the loser of a concurrent activation, and must NOT
+// be confused with success — that is what left orphaned auth.users rows.
+function makeSupabase(
+  crewLookup: { data: unknown; error?: unknown },
+  updateResult: { data?: unknown; error?: unknown } = { data: [{ id: CREW_ID }], error: null },
+) {
   const update = vi.fn(() => chain)
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const chain: any = {}
@@ -56,9 +66,6 @@ function makeSupabase(crewLookup: { data: unknown; error?: unknown }, updateResu
 
   return { from, auth, update }
 }
-
-const VALID_TOKEN = '22222222-2222-2222-2222-222222222222'
-const CREW_ID     = '11111111-1111-1111-1111-111111111111'
 
 function validFormData(overrides: Record<string, string> = {}) {
   const fd = new FormData()
@@ -176,7 +183,7 @@ describe('crew-invite/[token]/actions — activateCrewAccount', () => {
           created_at: new Date().toISOString(),
         },
       },
-      { error: null }
+      { data: [{ id: CREW_ID }], error: null }
     )
     vi.mocked(createServiceClient).mockReturnValue(supabase as never)
     const signInWithPassword = vi.fn(async () => ({ error: null }))
@@ -194,6 +201,35 @@ describe('crew-invite/[token]/actions — activateCrewAccount', () => {
       expect.objectContaining({ orgId: 'org_1', action: 'crew.account.activated', targetId: CREW_ID })
     )
     expect(mockRedirect).toHaveBeenCalledWith('/crew/install')
+  })
+
+  it('deletes the newly created auth user when the claim matches zero rows (concurrent activation)', async () => {
+    // The regression this encodes: a claiming UPDATE that matches NOTHING is
+    // not an error in PostgREST, it is a successful update of zero rows. Only
+    // `linkError` was checked, so the loser of a concurrent activation fell
+    // straight through — audit event logged, user signed in, and the
+    // auth.users row it had just minted left ORPHANED with no crew_members row
+    // pointing at it. That account can log in and then fails every
+    // requireCrewMember() check, with nothing on the PM side showing the crew
+    // member as un-activated.
+    const supabase = makeSupabase(
+      {
+        data: {
+          id: CREW_ID, name: 'Jamie', email: 'jamie@example.com', org_id: 'org_1',
+          user_id: null, invite_accepted_at: null, invite_token: VALID_TOKEN, invite_sent_at: null,
+          created_at: new Date().toISOString(),
+        },
+      },
+      { data: [], error: null }
+    )
+    vi.mocked(createServiceClient).mockReturnValue(supabase as never)
+
+    const result = await activateCrewAccount(validFormData())
+
+    expect(result).toEqual({ error: 'This invite has already been used' })
+    expect(supabase.auth.admin.deleteUser).toHaveBeenCalledWith('new_user_1')
+    expect(logAuditEvent).not.toHaveBeenCalled()
+    expect(mockRedirect).not.toHaveBeenCalled()
   })
 
   it('deletes the newly created auth user when linking the crew record fails (no orphaned account)', async () => {
@@ -256,7 +292,7 @@ describe('crew-invite/[token]/actions — activateCrewAccount', () => {
           invite_sent_at: null, created_at: new Date(Date.now() - 86_400_000).toISOString(),
         },
       },
-      { error: null }
+      { data: [{ id: CREW_ID }], error: null }
     )
     vi.mocked(createServiceClient).mockReturnValue(supabase as never)
     vi.mocked(createClient).mockResolvedValue(
@@ -278,7 +314,7 @@ describe('crew-invite/[token]/actions — activateCrewAccount', () => {
           created_at:     new Date(Date.now() - 400 * 86_400_000).toISOString(),
         },
       },
-      { error: null }
+      { data: [{ id: CREW_ID }], error: null }
     )
     vi.mocked(createServiceClient).mockReturnValue(supabase as never)
     vi.mocked(createClient).mockResolvedValue(

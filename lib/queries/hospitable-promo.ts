@@ -30,7 +30,12 @@ export async function getHospitablePromoStatus(orgId: string): Promise<Hospitabl
   return {
     priceLockActive:    data.price_lock_active,
     priceLockSequence:  data.price_lock_sequence,
-    priceLockYears:     data.price_lock_years,
+    // smallint with CHECK (price_lock_years IN (1, 2)) — a constraint the
+    // column's type cannot express, so re-state it here rather than assert.
+    priceLockYears:
+      data.price_lock_years === 1 || data.price_lock_years === 2
+        ? data.price_lock_years
+        : null,
     priceLockTier:      data.price_lock_tier,
     priceLockExpiresAt: data.price_lock_expires_at,
   }

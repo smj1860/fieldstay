@@ -391,7 +391,16 @@ describe('workOrderOpsOrg (per-org handler)', () => {
     const supabase = makeSupabase({
       work_orders: [
         { data: aging, error: null },                                // paginated aging scan
-        { data: aging.map((w) => ({ id: w.id })), error: null },     // bulk update .select('id')
+        // The escalating UPDATE is CHUNKED (500), because `.select('id')` on an
+        // UPDATE is a PostgREST response and max_rows caps its RETURNING too.
+        // One seeded response per chunk, each returning only that chunk — which
+        // is exactly what production returns now that no single call can exceed
+        // the cap. Seeding one 2050-row response instead would model a
+        // RETURNING clause that cannot exist.
+        ...Array.from({ length: Math.ceil(aging.length / 500) }, (_, c) => ({
+          data:  aging.slice(c * 500, (c + 1) * 500).map((w) => ({ id: w.id })),
+          error: null,
+        })),
       ],
       work_order_updates:    [{ data: null, error: null }],
       maintenance_schedules: [{ data: [], error: null }],

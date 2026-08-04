@@ -1,3 +1,4 @@
+import { unwrapList } from '@/lib/supabase/unwrap'
 import { inngest }                                 from '@/lib/inngest/client'
 import { createServiceClient }                     from '@/lib/supabase/server'
 import { resend }                                  from '@/lib/resend/client'
@@ -6,6 +7,7 @@ import { renderGuidebookFeatureAnnouncementEmail } from '@/emails/guidebook-feat
 import { renderReengagementEmail }                 from '@/emails/reengagement-drip'
 
 import { reportError } from '@/lib/observability/report-error'
+import { resolveEmailAudience, commercialPostalAddress } from '@/lib/email/unsubscribe'
 const APP_URL = process.env.NEXT_PUBLIC_APP_URL ?? 'https://app.fieldstay.app'
 
 // Personal sender drives opens — never the generic "FieldStay" FROM constant
@@ -24,6 +26,21 @@ export const onboardingDrip = inngest.createFunction(
     const { user_id, org_id, first_name, email, org_name } = event.data
 
     // ── Email 1: Immediate welcome ──────────────────────────────────────
+    // Checked even though the user just signed up: the drip event can be
+    // re-sent, and someone who opted out on a previous account must not be
+    // mailed again. This also supplies the opt-out link that lets them stop
+    // emails 2 and 3 — without it the suppression checks below are unreachable
+    // by any actual human, which is precisely the state this sequence shipped in.
+    const audienceWelcome = await step.run('check-suppression-welcome', async () => {
+      const supabase = createServiceClient({ system: 'inngest:onboarding-drip' })
+      return resolveEmailAudience(supabase, user_id)
+    })
+
+    if (audienceWelcome.suppressed) {
+      logger.info(`[Drip:${org_id}] User suppressed — no drip emails sent`)
+      return { stopped: true, reason: 'unsubscribed', emails_sent: 0 }
+    }
+
     await step.run('send-welcome', async () => {
       try {
         const { error } = await resend.emails.send(
@@ -32,12 +49,15 @@ export const onboardingDrip = inngest.createFunction(
             to:      email,
             replyTo: 'stephen@fieldstay.app',
             subject: "You made the right call. Here's where to start.",
+            headers: audienceWelcome.headers,
             html:    await renderWelcomeEmailV2({
               firstName:       first_name,
               orgName:         org_name,
               integrationsUrl: `${APP_URL}/settings?tab=integrations`,
               onboardingUrl:   `${APP_URL}/onboarding`,
               dashboardUrl:    `${APP_URL}/ops`,
+              unsubscribeUrl:  audienceWelcome.unsubscribeUrl ?? undefined,
+              postalAddress:   commercialPostalAddress(),
             }),
           },
           { idempotencyKey: `onboarding-welcome-${org_id}` }
@@ -57,17 +77,12 @@ export const onboardingDrip = inngest.createFunction(
     await step.sleep('wait-72h', '72h')
 
     // ── Email 2: Guidebook (existing template, repurposed) ─────────────
-    const unsubscribedAt72h = await step.run('check-suppression-72h', async () => {
+    const audience72h = await step.run('check-suppression-72h', async () => {
       const supabase = createServiceClient({ system: 'inngest:onboarding-drip' })
-      const { data: profile } = await supabase
-        .from('profiles')
-        .select('email_unsubscribed_at')
-        .eq('id', user_id)
-        .maybeSingle()
-      return profile?.email_unsubscribed_at ?? null
+      return resolveEmailAudience(supabase, user_id)
     })
 
-    if (unsubscribedAt72h) {
+    if (audience72h.suppressed) {
       logger.info(`[Drip:${org_id}] User unsubscribed — stopping before Email 2`)
       return { stopped: true, reason: 'unsubscribed', emails_sent: 1 }
     }
@@ -80,10 +95,13 @@ export const onboardingDrip = inngest.createFunction(
             to:      email,
             replyTo: 'stephen@fieldstay.app',
             subject: 'The Guidebook That Knows What Time It Is',
+            headers: audience72h.headers,
             html:    await renderGuidebookFeatureAnnouncementEmail({
-              pmFirstName:  first_name,
-              dashboardUrl: `${APP_URL}/guidebook`,
-              launchDate:   'now',
+              pmFirstName:    first_name,
+              dashboardUrl:   `${APP_URL}/guidebook`,
+              launchDate:     'now',
+              unsubscribeUrl: audience72h.unsubscribeUrl ?? undefined,
+              postalAddress:  commercialPostalAddress(),
             }),
           },
           { idempotencyKey: `onboarding-guidebook-${org_id}` }
@@ -103,30 +121,31 @@ export const onboardingDrip = inngest.createFunction(
     await step.sleep('wait-96h', '96h')
 
     // ── Email 3: Behavioral split on PMS connection ────────────────────
-    const unsubscribedAt168h = await step.run('check-suppression-168h', async () => {
+    const audience168h = await step.run('check-suppression-168h', async () => {
       const supabase = createServiceClient({ system: 'inngest:onboarding-drip' })
-      const { data: profile } = await supabase
-        .from('profiles')
-        .select('email_unsubscribed_at')
-        .eq('id', user_id)
-        .maybeSingle()
-      return profile?.email_unsubscribed_at ?? null
+      return resolveEmailAudience(supabase, user_id)
     })
 
-    if (unsubscribedAt168h) {
+    if (audience168h.suppressed) {
       logger.info(`[Drip:${org_id}] User unsubscribed — sequence complete`)
       return { stopped: true, reason: 'unsubscribed', emails_sent: 2 }
     }
 
     const isConnected = await step.run('check-pms-connection', async () => {
       const supabase = createServiceClient({ system: 'inngest:onboarding-drip' })
-      const { data: connections } = await supabase
+      // A failed read reads as "no integrations connected", which sends the
+      // drip email nudging a PM to connect one they already have.
+      const connectionsRes = await supabase
         .from('integration_connections')
         .select('provider_id')
         .eq('org_id', org_id)
         .eq('status', 'active')
         .limit(1)
-      return (connections?.length ?? 0) > 0
+
+      const connections = unwrapList(connectionsRes, {
+        site: 'inngest.onboarding-drip.integrations', orgId: org_id,
+      })
+      return connections.length > 0
     })
 
     await step.run('send-reengagement', async () => {
@@ -139,6 +158,7 @@ export const onboardingDrip = inngest.createFunction(
             subject: isConnected
               ? 'Your guests left reviews this week. Did you respond?'
               : "7 days in. Here's what you're missing.",
+            headers: audience168h.headers,
             html:    await renderReengagementEmail({
               firstName:       first_name,
               orgName:         org_name,
@@ -147,6 +167,8 @@ export const onboardingDrip = inngest.createFunction(
               integrationsUrl: `${APP_URL}/settings?tab=integrations`,
               onboardingUrl:   `${APP_URL}/onboarding`,
               reviewCount:     3,
+              unsubscribeUrl:  audience168h.unsubscribeUrl ?? undefined,
+              postalAddress:   commercialPostalAddress(),
             }),
           },
           { idempotencyKey: `onboarding-reengagement-${org_id}` }

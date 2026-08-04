@@ -1,5 +1,6 @@
 import { inngest } from '@/lib/inngest/client'
 import { createServiceClient } from '@/lib/supabase/server'
+import { fetchTurnoverCreatedEvents } from '@/lib/inngest/turnover-created-events'
 import { generateTurnoversForProperty } from '@/lib/turnovers/generator'
 import { parseLocalDate } from '@/lib/utils/date-validation'
 import { reportError } from '@/lib/observability/report-error'
@@ -14,7 +15,14 @@ function hasPositiveAmount(value: number | null | undefined): value is number {
 // ── Booking Confirmed (Hospitable / OwnerRez) ────────────────────────────────
 
 export const handleBookingConfirmed = inngest.createFunction(
-  { id: 'booking-confirmed', name: 'Booking Confirmed — Post Revenue', retries: 3 },
+  {
+    id: 'booking-confirmed', name: 'Booking Confirmed — Post Revenue', retries: 3,
+    // The heaviest burst on the platform: ownerrez/hospitable initial-sync
+    // dispatches one of these per imported booking, so connecting a single new
+    // PMS account can emit thousands in one go. Each posts revenue to
+    // owner_transactions.
+    concurrency: { limit: 10 },
+  },
   { event: 'booking/confirmed' as const },
   async ({ event, step }) => {
     const { booking_id, property_id, org_id, source, actual_total_amount } = event.data
@@ -101,7 +109,19 @@ export const handleBookingConfirmed = inngest.createFunction(
 )
 
 export const handleBookingDetected = inngest.createFunction(
-  { id: 'booking-detected', name: 'Handle New Booking', retries: 3 },
+  {
+    id: 'booking-detected', name: 'Handle New Booking', retries: 3,
+    // Serialized per property. ical-sync fires one booking/detected per new
+    // booking, so a sync ingesting N bookings for one property used to run N
+    // copies of generateTurnoversForProperty concurrently against the same
+    // rows. The generator's dedup is an in-memory context loaded once per run,
+    // so a loser of the Pass 1 insert race could still reach Pass 2 believing
+    // no standalone existed and insert a pair alongside it — two turnovers for
+    // one checkout, and two cleaning-fee rows on the owner's P&L.
+    // generator.ts now keeps its context truthful on 23505 as well, but this
+    // key is what removes the race rather than narrowing it.
+    concurrency: { limit: 1, key: 'event.data.property_id' },
+  },
   { event: 'booking/detected' as const },
   async ({ event, step, logger }) => {
     const { booking_id, property_id, org_id } = event.data
@@ -202,23 +222,7 @@ export const handleBookingDetected = inngest.createFunction(
     if (newTurnoverIds.length > 0) {
       const turnoverEvents = await step.run('fetch-new-turnover-data', async () => {
         const supabase = createServiceClient({ system: 'inngest:booking-events' })
-        type TurnoverRow = { id: string; checkout_datetime: string; checkin_datetime: string; window_minutes: number | null }
-        const { data: turnovers } = await supabase
-          .from('turnovers')
-          .select('id, checkout_datetime, checkin_datetime, window_minutes')
-          .in('id', newTurnoverIds)
-
-        return (turnovers as TurnoverRow[] ?? []).map((t) => ({
-          name: 'turnover/created' as const,
-          data: {
-            turnover_id:       t.id,
-            property_id,
-            org_id,
-            checkout_datetime: t.checkout_datetime,
-            checkin_datetime:  t.checkin_datetime,
-            window_minutes:    t.window_minutes ?? 0,
-          },
-        }))
+        return fetchTurnoverCreatedEvents(supabase, newTurnoverIds, org_id)
       })
 
       if (turnoverEvents.length > 0) {

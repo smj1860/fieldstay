@@ -1,3 +1,4 @@
+import { tryUnwrapList } from '@/lib/supabase/unwrap'
 import { NextRequest, NextResponse } from 'next/server'
 import { requireOrgMember } from '@/lib/auth'
 import { classifyIntent } from '@/lib/support/classify'
@@ -72,12 +73,17 @@ export async function POST(req: NextRequest) {
     }
   }
 
-  const { data: recentRows } = await supabase
+  // Degrade, don't throw: losing prior turns makes the reply worse, not
+  // wrong, and the user should still get an answer.
+  const recentRes = await supabase
     .from('support_messages')
     .select('role, content')
     .eq('conversation_id', convoId)
     .order('created_at', { ascending: false })
     .limit(10)
+
+  const recentOut = tryUnwrapList(recentRes, { site: 'api.support.chat.history' })
+  const recentRows = recentOut.ok ? recentOut.data : []
 
   const historyRows = (recentRows ?? []).reverse()
 

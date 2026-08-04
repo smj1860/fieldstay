@@ -1,10 +1,45 @@
 import { createServerClient } from '@supabase/ssr'
 import { cookies } from 'next/headers'
+import type { Database } from '@/types/database'
 
-// Database['public'] doesn't satisfy postgrest-js v2.106's GenericSchema constraint
-// (hand-written interfaces lack index signatures required by Record<string, GenericTable>).
-// We omit the <Database> type arg so Schema defaults to `any`, which allows all
-// .from() queries to type-check. Replace with Supabase CLI-generated types once connected.
+// The <Database> generic IS wired (2026-08-03). Every .from() and .rpc() call
+// in this app is now type-checked against types/database.generated.ts, which
+// is generated from the live schema.
+//
+// Why this mattered: reviews.internal_notes was selected by a cron for months
+// — PostgREST rejects the whole select on an unknown column, so the job threw
+// on every run for every org — and nothing compared the select string against
+// the schema because, with `Schema` defaulting to `any`, there was nothing to
+// compare it to.
+//
+// Wiring it took the error count 138 -> 123 -> 0 over three passes. The last
+// pass found four more defects of exactly that class, none of which any test
+// or lint rule could have caught:
+//
+//   - checklist_instances.property_id does not exist (the column lives on
+//     turnovers). The select discarded its error, so the checklist-signals
+//     cron processed ZERO items on every run and the dynamic photo-required
+//     learning loop had never produced a signal.
+//   - work_order_photos.uploaded_at does not exist (the column is created_at).
+//     Vendor sign-off photos uploaded to storage and were then never linked
+//     to their work order.
+//   - Three to-one embeds indexed with [0] (turnover_assignments->crew_members,
+//     plus two on the since-removed inventory count drafts), each silently
+//     rendering blank, plus one to-MANY embed (reviews->
+//     review_responses) read as an object, which opened the response editor
+//     empty for any review that already had a draft.
+//   - wo_category values with no vendor_specialty counterpart (appliance,
+//     flooring, windows_doors, structural) were passed straight into
+//     .eq('specialty', ...), so PostgREST rejected the query and auto-assign
+//     silently suggested nothing for those four categories.
+//
+// KEEP IT WIRED. If a change here ever forces the generic off, that is a
+// regression, not a cleanup: an unwired client makes every one of the above
+// invisible again. Two known limits are documented at their call sites rather
+// than worked around globally — supabase-js's select-string type parser cannot
+// read the FK-column embed form `alias:fk_column(name)` (see
+// app/(dashboard)/maintenance/[id]/page.tsx), and generated RPC Args cannot
+// express a nullable parameter (see lib/supabase/rpc-args.ts).
 
 /**
  * Server-side Supabase client for use in:
@@ -19,7 +54,7 @@ import { cookies } from 'next/headers'
 export async function createClient() {
   const cookieStore = await cookies()
 
-  return createServerClient(
+  return createServerClient<Database>(
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
     process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
     {
@@ -37,6 +72,41 @@ export async function createClient() {
             // can't be set here. Middleware handles token refresh.
           }
         },
+      },
+    }
+  )
+}
+
+/**
+ * Anon-key client that reads NO cookies and writes NO cookies, so nothing it
+ * does touches the caller's live session.
+ *
+ * The one use for this is re-authentication: proving the person holding the
+ * session also knows the current password before a sensitive change (password
+ * rotation). `createClient()` cannot do that job — a successful
+ * signInWithPassword() on the cookie-bound client would silently rotate the
+ * caller's session cookies as a side effect of the check, and a failed one on
+ * some GoTrue error paths can clear them. This client makes the verification a
+ * pure question with a yes/no answer.
+ *
+ * It holds no elevated privilege at all (anon key, RLS enforced, no session),
+ * so it is not a service-role bypass and needs no ServiceRoleContext.
+ */
+export function createReauthClient() {
+  return createServerClient<Database>(
+    process.env.NEXT_PUBLIC_SUPABASE_URL!,
+    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
+    {
+      cookies: {
+        getAll: () => [],
+        setAll: () => {},
+      },
+      auth: {
+        autoRefreshToken: false,
+        persistSession:   false,
+      },
+      realtime: {
+        params: { eventsPerSecond: -1 },
       },
     }
   )
@@ -94,7 +164,7 @@ export type ServiceRoleContext =
 // lib/supabase/server.ts — createServiceClient only, leave createClient unchanged
 
 export function createServiceClient(_ctx: ServiceRoleContext) {
-  return createServerClient(
+  return createServerClient<Database>(
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
     // eslint-disable-next-line no-restricted-syntax -- the ONE canonical read of the service-role key (with adminFetch below); everywhere else goes through these helpers
     process.env.SUPABASE_SERVICE_ROLE_KEY!,
@@ -142,7 +212,7 @@ export function adminFetch(path: string, init?: RequestInit) {
 /**
  * Shared type for helper functions that accept either client — createClient()
  * and createServiceClient() both call @supabase/ssr's createServerClient()
- * with the same omitted <Database> generic (see the note above), so their
+ * with the same <Database> generic (see the note above), so their
  * return types are structurally identical. Several files independently
  * redeclared this as `SupabaseClient<any>`; use this instead.
  */

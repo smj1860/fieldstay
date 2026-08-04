@@ -192,8 +192,26 @@ interface ExtensionRequestProp {
   status:               string
 }
 
+export const EXTENSION_CONTACT_METHODS = ['ownerrez_url', 'email', 'sms'] as const
+export type ExtensionContactMethod = (typeof EXTENSION_CONTACT_METHODS)[number]
+
+/**
+ * guidebook_configurations.extension_contact_method is TEXT, not a Postgres
+ * enum, so the column can hold any string — this is the boundary that turns it
+ * into the union the UI branches on. Returns null for absent/unrecognized so
+ * each caller decides whether to fall back to the column's default ('email').
+ */
+export function asExtensionContactMethod(
+  value: string | null | undefined,
+): ExtensionContactMethod | null {
+  for (const method of EXTENSION_CONTACT_METHODS) {
+    if (method === value) return method
+  }
+  return null
+}
+
 interface ExtensionConfigProp {
-  extension_contact_method: 'ownerrez_url' | 'email' | 'sms' | null
+  extension_contact_method: ExtensionContactMethod | null
   extension_ownerrez_url:   string | null
 }
 

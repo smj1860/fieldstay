@@ -1,6 +1,9 @@
+import { unwrap } from '@/lib/supabase/unwrap'
 import type { createServiceClient } from '@/lib/supabase/server'
 import { adminFetch } from '@/lib/supabase/server'
 import { reportError } from '@/lib/observability/report-error'
+import { fetchAllRows } from '@/lib/inngest/paginate'
+import type { Enums } from '@/types/database'
 
 type ServiceClient = ReturnType<typeof createServiceClient>
 
@@ -46,8 +49,18 @@ export async function getPmMembers(
   return byOrg.get(orgId) ?? []
 }
 
-interface MemberRow {
+/**
+ * As selected from organization_members, where user_id is NULLABLE — a
+ * membership row can exist before its auth user does (invite flow).
+ */
+interface MemberFetchRow {
   org_id:  string
+  user_id: string | null
+  role:    Enums<'member_role'>
+}
+
+/** A membership we can actually reach: user_id resolved, role a PM role. */
+interface MemberRow extends MemberFetchRow {
   user_id: string
   role:    PmRole
 }
@@ -77,19 +90,39 @@ export async function getPmMembersByOrgIds(
   const uniqueOrgIds = [...new Set(orgIds)]
   if (!uniqueOrgIds.length) return new Map()
 
-  const { data: members, error } = await supabase
-    .from('organization_members')
-    .select('org_id, user_id, role')
-    .in('org_id', uniqueOrgIds)
-    .in('role', roles)
-    .not('invite_accepted_at', 'is', null)
+  // Paginated, not a bare select: this is the platform-wide fan-in — one row
+  // per eligible PM across EVERY org in the batch. The daily crons pass every
+  // tenant, so at ~150 orgs with a handful of owners/admins each this crosses
+  // PostgREST's max_rows = 1000 cap, which returns 200 with no truncation
+  // signal. Truncation here does not error, it silently drops whole tenants
+  // from the map — and every caller reads a missing org as "no PM to notify",
+  // so the alert simply never goes out. `.order('org_id')` is required by
+  // fetchAllRows for stable page boundaries.
+  const fetched = await fetchAllRows<MemberFetchRow>(
+    (from, to) => supabase
+      .from('organization_members')
+      .select('org_id, user_id, role')
+      .in('org_id', uniqueOrgIds)
+      .in('role', roles)
+      .not('invite_accepted_at', 'is', null)
+      .order('org_id')
+      .range(from, to),
+    { label: 'getPmMembersByOrgIds.organization_members' },
+  )
 
-  if (error) {
-    throw new Error(`getPmMembersByOrgIds: organization_members query failed: ${error.message}`)
-  }
-  if (!members?.length) return new Map()
+  // A membership whose user_id is still NULL has no auth user yet, so no
+  // mailbox to resolve — drop it here rather than downstream, where a null
+  // key would silently miss in the email map and look like "no PM to notify".
+  // The role re-check mirrors the .in('role', roles) filter above, which
+  // constrains the rows on the server but not the column's declared type.
+  const requestedRoles = new Set<string>(roles)
+  const members = fetched.filter(
+    (m): m is MemberRow => m.user_id !== null && requestedRoles.has(m.role)
+  )
 
-  const selected      = selectMembersPerOrg(members as MemberRow[], limit)
+  if (!members.length) return new Map()
+
+  const selected      = selectMembersPerOrg(members, limit)
   const emailByUserId = await resolveUserEmails(supabase, selected.map((m) => m.user_id))
 
   const result = new Map<string, PmMember[]>()
@@ -368,14 +401,30 @@ export async function diffDigestSnapshot(
   category: string,
   currentIds: string[]
 ): Promise<DigestDiffResult> {
-  const { data: existing } = await supabase
+  // A failed read used to leave previousIds empty, which makes EVERY item in
+  // the digest look net-new — the daily wrap-up would re-announce the whole
+  // backlog as if it had just appeared.
+  const existingRes = await supabase
     .from('notification_digest_state')
     .select('snapshot')
     .eq('org_id', orgId)
     .eq('category', category)
     .maybeSingle()
 
-  const previousIds: string[] = Array.isArray(existing?.snapshot?.ids) ? existing.snapshot.ids : []
+  const existing = unwrap(existingRes, {
+    site: 'inngest.helpers.diffDigestSnapshot', orgId,
+  })
+
+  // snapshot is jsonb — it is whatever was last written, so narrow rather
+  // than optional-chain through the Json union.
+  const snapshot = existing?.snapshot
+  const rawIds =
+    snapshot !== null && typeof snapshot === 'object' && !Array.isArray(snapshot)
+      ? snapshot.ids
+      : undefined
+  const previousIds: string[] = Array.isArray(rawIds)
+    ? rawIds.filter((id): id is string => typeof id === 'string')
+    : []
   const previousSet = new Set(previousIds)
   const currentSet  = new Set(currentIds)
 

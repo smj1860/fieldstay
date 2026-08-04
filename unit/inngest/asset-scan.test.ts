@@ -43,6 +43,9 @@ function makeSupabase(
     }
 
     chain.single = () => resolveNext()
+    // Both resolve identically here; the code under test uses
+    // maybeSingle() so a missing row is data:null rather than an error.
+    chain.maybeSingle = () => resolveNext()
     chain.then   = (resolve: (v: unknown) => unknown) => resolveNext().then(resolve)
     return chain
   })

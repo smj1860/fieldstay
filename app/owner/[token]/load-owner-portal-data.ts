@@ -1,4 +1,5 @@
 import { createServiceClient } from '@/lib/supabase/server'
+import { fetchAllRows } from '@/lib/inngest/paginate'
 import { logAuditEvent } from '@/lib/audit'
 import { computeOccupancy } from '@/lib/owner-portal/occupancy'
 import type { TxnType } from '@/types/database'
@@ -381,33 +382,45 @@ export async function loadOwnerPortalData(
   const thirteenMonthsAgo = new Date()
   thirteenMonthsAgo.setMonth(thirteenMonthsAgo.getMonth() - 13)
 
-  const [transactionsRes, bookingsRes] = await Promise.all([
-    supabase
-      .from('owner_transactions')
-      .select('id, property_id, transaction_type, category, source, amount, description, transaction_date, notes')
-      .in('property_id', txnPropertyIds)
-      .eq('visible_to_owner', true)
-      .gte('transaction_date', since.toISOString().split('T')[0]!)
-      .order('transaction_date', { ascending: false }),
+  // Both paginated: these are ONE-TO-MANY over the owner's properties, and both
+  // span a long window — transactions since `since`, bookings over a rolling 13
+  // months. A multi-property owner crosses PostgREST's 1000-row cap easily, and
+  // truncation here is not a cosmetic short list: these two reads feed the
+  // owner's P&L totals and occupancy percentages. A silently short page renders
+  // as UNDERSTATED REVENUE and understated occupancy on a financial statement
+  // the owner is given, with nothing indicating it is partial.
+  //
+  // fetchAllRows throws on a query error, which is the same outcome unwrapList
+  // produced here (it throws so the segment's error.tsx renders a real error
+  // state rather than an empty portal).
+  const [allTxns, bookingsRaw] = await Promise.all([
+    fetchAllRows<OwnerPortalTxn>(
+      (from, to) => supabase
+        .from('owner_transactions')
+        .select('id, property_id, transaction_type, category, source, amount, description, transaction_date, notes')
+        .in('property_id', txnPropertyIds)
+        .eq('visible_to_owner', true)
+        .gte('transaction_date', since.toISOString().split('T')[0]!)
+        .order('transaction_date', { ascending: false })
+        .order('id')
+        .range(from, to),
+      { label: 'owner-portal.transactions' },
+    ),
 
-    supabase
-      .from('bookings')
-      .select('id, property_id, checkin_date, checkout_date, status')
-      .in('property_id', txnPropertyIds)
-      .eq('is_block', false)
-      .in('status', ['confirmed', 'tentative'])
-      .gte('checkout_date', thirteenMonthsAgo.toISOString().split('T')[0]!)
-      .order('checkin_date', { ascending: true }),
+    fetchAllRows<Parameters<typeof computeOccupancy>[0][number]>(
+      (from, to) => supabase
+        .from('bookings')
+        .select('id, property_id, checkin_date, checkout_date, status')
+        .in('property_id', txnPropertyIds)
+        .eq('is_block', false)
+        .in('status', ['confirmed', 'tentative'])
+        .gte('checkout_date', thirteenMonthsAgo.toISOString().split('T')[0]!)
+        .order('checkin_date', { ascending: true })
+        .order('id')
+        .range(from, to),
+      { label: 'owner-portal.bookings' },
+    ),
   ])
-
-  const allTxns = unwrapList<OwnerPortalTxn>(
-    transactionsRes as PostgrestResult<OwnerPortalTxn[]>,
-    { site: 'owner-portal.transactions', orgId: ownerRaw.org_id ?? undefined },
-  )
-  const bookingsRaw = unwrapList(
-    bookingsRes as PostgrestResult<Parameters<typeof computeOccupancy>[0]>,
-    { site: 'owner-portal.bookings', orgId: ownerRaw.org_id ?? undefined },
-  )
 
   // Month filter
   const availableMonths  = getLastSixMonths()

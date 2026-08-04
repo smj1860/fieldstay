@@ -1,3 +1,4 @@
+import { unwrap } from '@/lib/supabase/unwrap'
 import type { Metadata } from 'next'
 import { createClient, createServiceClient } from '@/lib/supabase/server'
 import { logAuditEvent } from '@/lib/audit'
@@ -39,12 +40,20 @@ export default async function CrewLayout({
   // crew PWA (bounced to /ops with a spurious security.route.mismatch audit
   // entry).
   const admin = createServiceClient({ authenticatedUser: user })
-  const { data: crewRecord } = await admin
+  const crewRes = await admin
     .from('crew_members')
     .select('id, name, org_id')
     .eq('user_id', user.id)
     .eq('is_active', true)
     .maybeSingle()
+
+  // A failed read is NOT "a PM wandered into the crew app". Discarding the
+  // error left crewRecord null and sent every transient DB blip down the
+  // branch below, which writes a security.route.mismatch AUDIT event — so an
+  // outage manufactured fake security findings for whoever investigates it
+  // later. unwrap() throws to the segment's error boundary instead; the guard
+  // still fails closed, because throwing renders no crew UI either.
+  const crewRecord = unwrap(crewRes, { site: 'app.crew.layout.crew-gate' })
 
   if (!crewRecord) {
     await logAuditEvent({
@@ -60,9 +69,19 @@ export default async function CrewLayout({
   }
   // ── End PM guard ───────────────────────────────────────────────────────────
 
+  // Unread badge count. This used to be a Dexie live query in the bottom nav,
+  // which is why `messages` had to be cached on every device at all. A badge
+  // does not need to be live — re-rendering it on navigation is plenty, and it
+  // costs one HEAD count rather than 500 rows every five minutes.
+  const { count: unreadCount } = await admin
+    .from('messages')
+    .select('id', { count: 'exact', head: true })
+    .eq('recipient_id', user.id)
+    .is('read_at', null)
+
   return (
     <div className="theme-locked-light">
-      <CrewShell crewName={crewRecord.name} userId={user.id}>{children}</CrewShell>
+      <CrewShell crewName={crewRecord.name} userId={user.id} unreadCount={unreadCount}>{children}</CrewShell>
     </div>
   )
 }

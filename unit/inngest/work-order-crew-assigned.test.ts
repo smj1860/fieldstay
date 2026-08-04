@@ -14,7 +14,10 @@ function makeSupabase(result: { data?: unknown; error?: unknown }) {
   const chain: any = {}
   chain.select = vi.fn(() => chain)
   chain.eq     = eq
-  chain.single = vi.fn(() => Promise.resolve(result))
+  chain.single      = vi.fn(() => Promise.resolve(result))
+  // Same result: the code under test uses maybeSingle() so a missing row is
+  // data:null rather than a PGRST116 error.
+  chain.maybeSingle = vi.fn(() => Promise.resolve(result))
   eq.mockReturnValue(chain)
   const from = vi.fn(() => chain)
   return { from, eq }

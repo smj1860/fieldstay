@@ -28,6 +28,8 @@
 // exists to eliminate.
 // ============================================================================
 
+import { unwrap } from '@/lib/supabase/unwrap'
+import { fetchAllRows }           from '@/lib/inngest/paginate'
 import { createServiceClient }     from '@/lib/supabase/server'
 import { getValidHospitableToken } from './hospitable-token'
 import { hospitableFetch }         from './hospitable'
@@ -44,7 +46,14 @@ export interface ResolvedHospitableOwner {
 }
 
 /** Domain table + column that stores each entity kind's provider-side id. */
-const LOCAL_SOURCE: Record<HospitableEntityKind, { table: string }> = {
+// The table name is a literal union, not `string`. Typed as `string` it
+// widened to "any table in the schema", so postgrest-js intersected the column
+// names of all 94 of them and resolved every .eq()/.select() argument to
+// `never` — the query was unverifiable rather than wrong. All three tables do
+// carry org_id / external_id / external_source (checked against the live
+// schema), which is what makes the shared query below legitimate; the union
+// is what lets the type system confirm it.
+const LOCAL_SOURCE: Record<HospitableEntityKind, { table: 'bookings' | 'properties' | 'reviews' }> = {
   reservation: { table: 'bookings' },
   property:    { table: 'properties' },
   review:      { table: 'reviews' },
@@ -78,17 +87,33 @@ async function listActiveConnections(supabase: Supabase): Promise<ActiveConnecti
   // handful of consistently-busy orgs could end up probed first on every
   // cold resolution even when they're rarely the actual owner; revisit this
   // ordering if probe call volume becomes worth optimizing further.
-  const { data, error } = await supabase
-    .from('integration_connections')
-    .select('user_id, org_id, external_user_id, updated_at')
-    .eq('provider_id', PROVIDER)
-    .eq('status',      'active')
-    .not('org_id', 'is', null)
-    .order('updated_at', { ascending: false })
+  //
+  // Paginated. The ORDERING above is a heuristic, but the SET is not: this is
+  // a platform-wide read of every active Hospitable connection, and at
+  // max_rows = 1000 PostgREST would return the first 1000 with a 200 and no
+  // truncation signal — so an entity whose real owner sits past the cap could
+  // never be resolved to any connection at all, and the resolution would fail
+  // as "unknown owner" rather than probing it.
+  //
+  // The secondary sort on user_id is required by the pagination, not the
+  // heuristic: updated_at is not unique, and range() over a non-unique sort
+  // key can skip or repeat rows across page boundaries.
+  const data = await fetchAllRows<{
+    user_id: string; org_id: string | null; external_user_id: string | null
+  }>(
+    (from, to) => supabase
+      .from('integration_connections')
+      .select('user_id, org_id, external_user_id, updated_at')
+      .eq('provider_id', PROVIDER)
+      .eq('status',      'active')
+      .not('org_id', 'is', null)
+      .order('updated_at', { ascending: false })
+      .order('user_id')
+      .range(from, to),
+    { label: 'hospitable-owner.listActiveConnections' },
+  )
 
-  if (error) throw new Error(`listActiveConnections failed: ${error.message}`)
-
-  return (data ?? []).map((row) => ({
+  return data.map((row) => ({
     user_id:          row.user_id as string,
     org_id:           row.org_id  as string,
     external_user_id: (row.external_user_id as string | null) ?? null,
@@ -224,13 +249,18 @@ export async function resolveHospitableOwner(params: {
   }
 
   // ── 1. Cache ──────────────────────────────────────────────────────────────
-  const { data: cached } = await supabase
+  // This resolves which ORG a webhook entity belongs to. A discarded error
+  // reads as a cache miss, which silently widens or drops the scoping
+  // decision rather than failing.
+  const cachedRes = await supabase
     .from('integration_entity_owners')
     .select('org_id')
     .eq('provider_id', PROVIDER)
     .eq('entity_kind', entityKind)
     .eq('external_id', externalId)
     .maybeSingle()
+
+  const cached = unwrap(cachedRes, { site: 'lib.integrations.hospitable-owner.cache' })
 
   if (cached?.org_id) {
     const conn = byOrg.get(cached.org_id as string)

@@ -1,10 +1,11 @@
 'use server'
 
 import { revalidatePath } from 'next/cache'
+import { checkLimit, emailSendActionLimiter } from '@/lib/rate-limit'
 import { redirect } from 'next/navigation'
 import { cookies } from 'next/headers'
-import { requireOrgMember } from '@/lib/auth'
-import { createClient } from '@/lib/supabase/server'
+import { requireOrgMember, requireOrgRole } from '@/lib/auth'
+import { createClient, createReauthClient } from '@/lib/supabase/server'
 import { stripe, PLANS } from '@/lib/stripe/client'
 import { inngest } from '@/lib/inngest/client'
 import { geocodeZip } from '@/lib/geocoding'
@@ -13,6 +14,14 @@ import { reportError } from '@/lib/observability/report-error'
 import type { ContactPref, VendorSpecialty, CrewRole } from '@/types/database'
 import { renderCrewInviteEmail } from '@/emails/crew-invite'
 import { renderSmsBody } from '@/lib/sms/templates'
+
+/**
+ * Ceilings on the two crew actions that fan out to third-party contact
+ * details. Both exist because `emailSendActionLimiter` counts CALLS, and a
+ * call-counting limiter bounds nothing when one call reaches N recipients.
+ */
+const MAX_BULK_IMPORT_ROWS       = 500   // one import
+const MAX_BULK_INVITE_RECIPIENTS = 200   // one bulk-invite fan-out
 
 export type SettingsActionState = {
   error?: string
@@ -111,20 +120,59 @@ export async function updateSlackWebhook(
 
 // ── Security / Password ───────────────────────────────────────
 
+/**
+ * Supabase's `updateUser({ password })` authenticates on the SESSION alone —
+ * it never asks for the old password. Without the re-authentication below,
+ * anyone who obtains a session (a stolen cookie, an unlocked laptop, an XSS
+ * token grab) can set a new password and lock the real owner out: session
+ * theft escalates straight to permanent account takeover.
+ *
+ * The check runs on a session-less anon client (`createReauthClient`) so a
+ * successful sign-in here does not rotate — and a failed one does not
+ * disturb — the caller's live session cookies.
+ */
 export async function changePassword(
   _prev: SettingsActionState | null,
   formData: FormData
 ): Promise<SettingsActionState> {
   try {
-    const newPassword = (formData.get('new_password') as string)?.trim()
-    const confirm     = (formData.get('confirm_password') as string)?.trim()
+    const currentPassword = (formData.get('current_password') as string) ?? ''
+    const newPassword     = (formData.get('new_password') as string)?.trim()
+    const confirm         = (formData.get('confirm_password') as string)?.trim()
 
+    if (!currentPassword)
+      return { error: 'Enter your current password' }
     if (!newPassword || newPassword.length < 8)
       return { error: 'Password must be at least 8 characters' }
     if (newPassword !== confirm)
       return { error: 'Passwords do not match' }
 
     const { user, supabase, membership } = await requireOrgMember()
+
+    if (!user.email) {
+      // Password auth is email+password only; no address means no password
+      // to verify against, and we will not skip the check.
+      return { error: 'This account cannot change its password here.' }
+    }
+
+    const reauth = createReauthClient()
+    const { error: reauthError } = await reauth.auth.signInWithPassword({
+      email:    user.email,
+      password: currentPassword,
+    })
+
+    if (reauthError) {
+      await logAuditEvent({
+        orgId:   membership.org_id,
+        actorId: user.id,
+        action:  'account.password_change_denied',
+      })
+      // Deliberately specific: this is the caller's own account and a vague
+      // message here only confuses a legitimate user — it discloses nothing
+      // an attacker holding the session doesn't already know.
+      return { error: 'Current password is incorrect' }
+    }
+
     const { error } = await supabase.auth.updateUser({ password: newPassword })
 
     if (error) {
@@ -365,6 +413,20 @@ export async function bulkImportCrew(
     const { supabase, membership, user } = await requireOrgMember()
 
     if (!rows.length) return { imported: 0, skipped: 0, error: 'No rows to import' }
+
+    // Bounded because this is the STAGING half of a mail-relay: rows land in
+    // crew_members carrying arbitrary email/phone, and inviteAllUninvitedCrew
+    // then mails every one of them. An unbounded import let a single trial
+    // account load a list of any size and hand it to that fan-out.
+    // 500 is far above a real crew roster (this product targets 10–50
+    // properties) and low enough that the list cannot be a mailing list.
+    if (rows.length > MAX_BULK_IMPORT_ROWS) {
+      return {
+        imported: 0,
+        skipped:  0,
+        error:    `Too many rows in one import (${rows.length}). Please split it into batches of ${MAX_BULK_IMPORT_ROWS} or fewer.`,
+      }
+    }
 
     const valid   = rows.filter((r) => r.name?.trim())
     const skipped = rows.length - valid.length
@@ -667,7 +729,12 @@ export async function openBillingPortal(): Promise<void> {
   let portalUrl: string | null = null
 
   try {
-    const { supabase, membership } = await requireOrgMember()
+    // Billing is admin/owner only. The Stripe portal lets the holder cancel or
+    // downgrade the subscription, replace the payment card, and read invoice
+    // history (which carries billing-address PII) — requireOrgMember() would
+    // hand all of that to a `viewer`. requireOrgRole always passes `owner`,
+    // matching is_org_member()'s semantics in the DB.
+    const { supabase, membership } = await requireOrgRole(['admin'])
 
     const { data: org } = await supabase
       .from('organizations')
@@ -815,6 +882,23 @@ export async function inviteAllUninvitedCrew(): Promise<{ sent: number; error?: 
       return { sent: 0, error: 'Permission denied' }
     }
 
+    // Rate limit AFTER the authorization check: an unauthorized caller must not
+    // consume another user's budget, and must get the authorization error rather
+    // than a throttling one. An auth gate proves WHO is sending, not HOW OFTEN —
+    // without this one member can drive unlimited outbound mail from our sending
+    // domain, which risks the domain's reputation using someone else's address
+    // as the target. Fails OPEN: an abuse limiter must not block real invites
+    // during a Redis outage.
+    // NOTE: the real budget check happens AFTER the recipient list is known,
+    // just below — it consumes one token per recipient. This first check is a
+    // cheap "is this caller already exhausted?" gate so a spent caller doesn't
+    // pay for the query.
+    const rl = await checkLimit(emailSendActionLimiter, `crew-bulk-invite:${user.id}`, {
+      onError: 'allow',
+      site:    'serverAction.settings.inviteAllUninvitedCrew',
+    })
+    if (!rl.allowed) return { sent: 0, error: 'Too many invites sent. Please try again in a little while.' }
+
     const { data: uninvited, error: queryError } = await supabase
       .from('crew_members')
       .select('id, name, email, phone, invite_token')
@@ -823,6 +907,7 @@ export async function inviteAllUninvitedCrew(): Promise<{ sent: number; error?: 
       .is('user_id', null)
       .is('invite_sent_at', null)
       .or('email.not.is.null,phone.not.is.null')
+      .limit(MAX_BULK_INVITE_RECIPIENTS)
 
     if (queryError) {
       console.error('[inviteAllUninvitedCrew] query failed')
@@ -831,6 +916,23 @@ export async function inviteAllUninvitedCrew(): Promise<{ sent: number; error?: 
     }
 
     if (!uninvited?.length) return { sent: 0 }
+
+    // The budget that actually bounds outbound volume: one token per RECIPIENT.
+    // The per-call check above allowed 20 calls/hour, and each call fanned out
+    // to every uninvited crew row — so 20 × 1,000 = 20,000 emails and 20,000
+    // SMS per hour to addresses staged through bulkImportCrew, all from our
+    // sending domain and our Telnyx number. Counting calls bounded nothing.
+    const recipientBudget = await checkLimit(emailSendActionLimiter, `crew-bulk-invite:${user.id}`, {
+      onError: 'allow',
+      site:    'serverAction.settings.inviteAllUninvitedCrew.recipients',
+      cost:    uninvited.length,
+    })
+    if (!recipientBudget.allowed) {
+      return {
+        sent: 0,
+        error: `That would invite ${uninvited.length} people, which is over your hourly limit. Please try again in a little while.`,
+      }
+    }
 
     const { data: org } = await supabase
       .from('organizations')
@@ -1053,12 +1155,24 @@ export async function updateCommsRetention(days: number): Promise<SettingsAction
   }
 }
 
+/**
+ * Stripe subscription statuses that mean "this customer is already on a
+ * subscription" for the purposes of refusing a second Checkout.
+ *
+ * 'incomplete' and 'incomplete_expired' are excluded on purpose — those are a
+ * failed first payment, and the customer must be able to retry checkout.
+ */
+const LIVE_SUBSCRIPTION_STATUSES = new Set<string>([
+  'active', 'trialing', 'past_due', 'unpaid', 'paused',
+])
+
 export async function createCheckoutSession(
   planKey: 'starter' | 'growth' | 'portfolio',
   interval: 'monthly' | 'annual'
 ): Promise<SettingsActionState> {
   try {
-    const { supabase, membership } = await requireOrgMember()
+    // Admin/owner only — starting a checkout commits the org to a charge.
+    const { supabase, membership } = await requireOrgRole(['admin'])
 
     const planDef = PLANS[planKey]
     if (!planDef) return { error: 'Invalid plan' }
@@ -1074,6 +1188,43 @@ export async function createCheckoutSession(
       .select('stripe_customer_id, billing_email')
       .eq('id', membership.org_id)
       .single()
+
+    // An org that ALREADY has a live subscription must never be handed a
+    // second Checkout. mode:'subscription' creates a NEW subscription every
+    // time it completes, so an existing subscriber clicking a plan card —
+    // to upgrade, or just re-clicking after a slow redirect — ended up with
+    // two concurrent subscriptions on the same customer and was billed for
+    // both, with nothing in the app showing the second one (the webhook
+    // handler overwrites the single stripe_subscription_id column, so the
+    // older subscription became invisible while still charging).
+    //
+    // Changing plans is what they actually want, and that is the billing
+    // portal's job, so send them there rather than failing.
+    //
+    // Stripe is queried directly rather than reading organizations.plan_status
+    // because that column is webhook-derived and can lag in both directions —
+    // stale-active would block a legitimate re-subscribe, stale-cancelled
+    // would let the double-charge through, which is the bug being fixed.
+    if (org?.stripe_customer_id) {
+      const existing = await stripe.subscriptions.list({
+        customer: org.stripe_customer_id,
+        status:   'all',
+        limit:    100,
+      })
+
+      // 'incomplete' is deliberately NOT live: it means the first payment
+      // attempt failed and Stripe is waiting (it auto-expires in 23h). Those
+      // customers need to be able to retry checkout, not be locked out of it.
+      const hasLive = existing.data.some((s) => LIVE_SUBSCRIPTION_STATUSES.has(s.status))
+
+      if (hasLive) {
+        const portal = await stripe.billingPortal.sessions.create({
+          customer:   org.stripe_customer_id,
+          return_url: `${process.env.NEXT_PUBLIC_APP_URL}/settings`,
+        })
+        return { redirectUrl: portal.url }
+      }
+    }
 
     // Hospitable launch promo — fire-and-forget tagging event, but only for
     // orgs that actually have Hospitable connected. Every other checkout
@@ -1115,6 +1266,24 @@ export async function createCheckoutSession(
       success_url:          `${process.env.NEXT_PUBLIC_APP_URL}/settings?checkout=success`,
       cancel_url:           `${process.env.NEXT_PUBLIC_APP_URL}/settings`,
       metadata:             { org_id: membership.org_id, plan: planKey },
+      // Stamped on the SUBSCRIPTION as well as the session. Session metadata
+      // only reaches checkout.session.completed; without this, a
+      // customer.subscription.* event carries no org reference at all and the
+      // handler can only resolve the org via organizations.stripe_customer_id
+      // — a link that, for a first-time subscriber, does not exist until
+      // checkout.session.completed lands. Stripe does not guarantee ordering
+      // between the two, so a subscription.created delivered first found no
+      // org and silently dropped the entitlement write.
+      subscription_data:    { metadata: { org_id: membership.org_id, plan: planKey } },
+    }, {
+      // Collapses the double-click the guard above cannot see: two clicks a
+      // second apart both pass the live-subscription check (neither has
+      // completed yet), and without this each would mint its own session, so
+      // completing both would create two subscriptions. Keyed on what the
+      // request actually is, so the same org asking for the same plan gets
+      // the same session back. Stripe expires idempotency keys after 24h,
+      // which is the right window — beyond that a fresh session is correct.
+      idempotencyKey: `checkout:${membership.org_id}:${planKey}:${interval}`,
     })
 
     if (!session.url) return { error: 'Could not create checkout session' }

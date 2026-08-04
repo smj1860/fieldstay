@@ -1,4 +1,6 @@
+import { asBooleanMap } from '@/lib/json'
 import { inngest } from '@/lib/inngest/client'
+import { fetchAllRows } from '@/lib/inngest/paginate'
 import { createServiceClient } from '@/lib/supabase/server'
 import { getWeatherForLocation } from '@/lib/weather/tomorrow'
 import { sendSMS, buildSponsorLine } from '@/lib/sms/telnyx'
@@ -31,19 +33,35 @@ export const guidebookSmsEveningCron = inngest.createFunction(
 
     const optins = await step.run('fetch-active-optins', async () => {
       const supabase = createServiceClient({ system: 'inngest:guidebook-sms-evening-cron' })
-      const { data, error } = await supabase
-        .from('guidebook_guest_sms_optins')
-        .select(`
-          id, org_id, property_id, last_evening_sms_date,
-          bookings!inner ( checkin_date, checkout_date )
-        `)
-        .eq('is_active', true)
-        .or(`last_evening_sms_date.is.null,last_evening_sms_date.lt.${todayDate}`)
+      // Paginated: platform-wide — every org's active guest opt-ins, so this
+      // grows with tenant count. Truncation means the guests sorted past row
+      // 1000 silently never receive their evening message, with no error.
+      interface OptinRow {
+        id:                     string
+        org_id:                 string
+        property_id:            string
+        last_evening_sms_date:  string | null
+        bookings:               { checkin_date: string; checkout_date: string }
+                                | { checkin_date: string; checkout_date: string }[]
+                                | null
+      }
 
-      if (error) throw new Error(`Failed to fetch optins: ${error.message}`)
+      const data = await fetchAllRows<OptinRow>(
+        (from, to) => supabase
+          .from('guidebook_guest_sms_optins')
+          .select(`
+            id, org_id, property_id, last_evening_sms_date,
+            bookings!inner ( checkin_date, checkout_date )
+          `)
+          .eq('is_active', true)
+          .or(`last_evening_sms_date.is.null,last_evening_sms_date.lt.${todayDate}`)
+          .order('id')
+          .range(from, to),
+        { label: 'guidebook-sms-evening-cron.optins' },
+      )
 
       // Filter to guests currently in their stay; exclude checkout day (no dinner nudge)
-      return (data ?? [])
+      return data
         .map((o) => ({ ...o, booking: unwrapJoin(o.bookings) }))
         .filter((o) => o.booking && o.booking.checkin_date <= todayDate && o.booking.checkout_date > todayDate)
         .map((o) => ({ id: o.id, org_id: o.org_id, property_id: o.property_id, checkin_date: o.booking!.checkin_date }))
@@ -116,7 +134,7 @@ export const guidebookSmsEveningSend = inngest.createFunction(
       // doesn't see the same amenity twice in one day.
       const amenityLine = await getFeaturedAmenityLine(supabase, {
         orgId, propertyId,
-        propertyAmenities: property.amenities ?? null,
+        propertyAmenities: asBooleanMap(property.amenities),
         checkinDate, todayDate,
         rotationOffset: 1,
       })

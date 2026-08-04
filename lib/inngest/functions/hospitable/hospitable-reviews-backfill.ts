@@ -18,6 +18,8 @@
 // on every tick for no benefit.
 // ============================================================
 
+import { asJsonObject } from '@/lib/json'
+import type { Json } from '@/types/database'
 import { inngest }             from '@/lib/inngest/client'
 import { createServiceClient } from '@/lib/supabase/server'
 import { getValidHospitableToken } from '@/lib/integrations/providers/hospitable-token'
@@ -168,7 +170,7 @@ export const hospReviewsBackfill = inngest.createFunction(
 
 async function updateConnectionMeta(
   userId: string,
-  patch:  Record<string, unknown>
+  patch:  Record<string, Json>
 ): Promise<void> {
   const supabase = createServiceClient({ system: 'inngest:hospitable-reviews-backfill' })
   const { data: existing } = await supabase
@@ -178,7 +180,7 @@ async function updateConnectionMeta(
     .eq('provider_id', PROVIDER)
     .maybeSingle()
 
-  const existingMeta = (existing?.metadata as Record<string, unknown> | null) ?? {}
+  const existingMeta = asJsonObject(existing?.metadata) ?? {}
 
   await supabase
     .from('integration_connections')

@@ -1,3 +1,4 @@
+import { unwrap } from '@/lib/supabase/unwrap'
 import { createServiceClient } from '@/lib/supabase/server'
 import { notFound } from 'next/navigation'
 import { AcceptInviteForm } from './accept-invite-form'
@@ -18,12 +19,15 @@ export default async function CrewInvitePage({ params }: Props) {
   const { token } = await params
   const supabase  = createServiceClient({ publicSurface: 'crew-invite--token-' })
 
-  const { data: crew } = await supabase
+  // A failed read fell into notFound(), telling the crew member their invite
+  // link is dead when it is not.
+  const crewRes = await supabase
     .from('crew_members')
     .select('id, name, email, invite_sent_at, invite_accepted_at, user_id')
     .eq('invite_token', token)
-    .single()
+    .maybeSingle()
 
+  const crew = unwrap(crewRes, { site: 'page.crew-invite' })
   if (!crew) notFound()
 
   if (crew.user_id || crew.invite_accepted_at) {

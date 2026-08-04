@@ -1,3 +1,4 @@
+import { unwrap } from '@/lib/supabase/unwrap'
 import { notFound } from 'next/navigation'
 import { Archivo, Source_Serif_4 } from 'next/font/google'
 import { createServiceClient } from '@/lib/supabase/server'
@@ -26,12 +27,16 @@ export default async function MediaKitPage({
   const { media_kit_token } = await params
   const supabase = createServiceClient({ publicSurface: 'g-kit--media-kit-token-' })
 
-  const { data: sponsor } = await supabase
+  // Token-gated public page: a failed read used to fall into notFound(),
+  // telling the sponsor their media-kit link is dead. Throw to the error
+  // boundary instead so an outage doesn't read as an invalid token.
+  const sponsorRes = await supabase
     .from('guidebook_sponsors')
     .select('id, status, business_name, business_description, custom_offer_text, address, media_kit_token, slot_type, slot_context, offer_type, offer_value, offer_item')
     .eq('media_kit_token', media_kit_token)
     .maybeSingle()
 
+  const sponsor = unwrap(sponsorRes, { site: 'page.media-kit' })
   if (!sponsor) notFound()
 
   return (

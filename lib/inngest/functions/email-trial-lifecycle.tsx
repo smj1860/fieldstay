@@ -3,6 +3,7 @@ import { createServiceClient }   from '@/lib/supabase/server'
 import { resend, FROM }          from '@/lib/resend/client'
 import { renderTrialExpiringEmail } from '@/emails/trial-expiring'
 import { renderTrialExpiredEmail }  from '@/emails/trial-expired'
+import { resolveEmailAudience, commercialPostalAddress } from '@/lib/email/unsubscribe'
 
 export const handleTrialLifecycle = inngest.createFunction(
   {
@@ -14,7 +15,7 @@ export const handleTrialLifecycle = inngest.createFunction(
   },
   { event: 'billing/trial-lifecycle-start' },
   async ({ event, step }) => {
-    const { org_id, user_email, first_name, org_name, trial_ends_at } = event.data
+    const { org_id, user_id, user_email, first_name, org_name, trial_ends_at } = event.data
     const appUrl   = process.env.NEXT_PUBLIC_APP_URL!
     const trialEnd = new Date(trial_ends_at)
 
@@ -129,13 +130,40 @@ export const handleTrialLifecycle = inngest.createFunction(
 
     if (subscribedLate) return { cancelled: true, reason: 'subscribed-late' }
 
+    // The two emails above are transactional/relationship messages — they are
+    // about the status of an existing subscription, which CAN-SPAM exempts
+    // from the opt-out requirement, and suppressing them would withhold
+    // billing information the account holder needs.
+    //
+    // This one is different: its P.S. links to /billing-wall to win the
+    // customer back, which is promotional content, so it is treated as
+    // commercial and carries a real opt-out.
+    const churnAudience = await step.run('check-churn-suppression', async () => {
+      if (!user_id) return null
+      const supabase = createServiceClient({ system: 'inngest:email-trial-lifecycle' })
+      return resolveEmailAudience(supabase, user_id)
+    })
+
+    // No user_id (an event queued before user_id was added to this event's
+    // payload) means the opt-out link cannot be built — so this does not send.
+    // Skipping a win-back email is strictly better than sending a commercial
+    // message with no way to unsubscribe.
+    if (!churnAudience || churnAudience.suppressed) {
+      return { cancelled: true, reason: 'churn-feedback-suppressed' }
+    }
+
     await step.run('send-churn-feedback-email', async () => {
-      // Plain text — intentionally NOT a React Email template
+      // Plain text — intentionally NOT a React Email template, so the
+      // CAN-SPAM footer is appended by hand rather than inherited from
+      // EmailLayout.
+      const postal = commercialPostalAddress()
+      const postalBlock = postal ? `\n${postal}` : ''
       await resend.emails.send(
         {
           from:    'Stephen <stephen@fieldstay.app>',
           to:      user_email,
           subject: 'honest question',
+          headers: churnAudience.headers,
           text: `Hi ${first_name},
 
 I'm truly sorry FieldStay wasn't the right fit for you at this time.
@@ -146,7 +174,10 @@ No follow-ups after this. No sales pitch. I just want to build the best product 
 
 — Stephen
 
-P.S. If you ever want to give us another shot, your data stays for 30 days. ${appUrl}/billing-wall`,
+P.S. If you ever want to give us another shot, your data stays for 30 days. ${appUrl}/billing-wall
+
+---
+Unsubscribe from FieldStay marketing email: ${churnAudience.unsubscribeUrl}${postalBlock}`,
         },
         { idempotencyKey: `trial-churn-feedback-${org_id}` }
       )

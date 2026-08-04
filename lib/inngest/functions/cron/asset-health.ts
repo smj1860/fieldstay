@@ -1,3 +1,5 @@
+import { unwrapList } from '@/lib/supabase/unwrap'
+import type { TablesInsert } from '@/types/database'
 import { inngest } from '@/lib/inngest/client'
 import { createServiceClient } from '@/lib/supabase/server'
 import { logAuditEvents } from '@/lib/audit'
@@ -125,19 +127,24 @@ export const dailyAssetHealth = inngest.createFunction(
         })
       }
 
-      const { data: currentStandards } = await supabase
+      const standardsRes = await supabase
         .from('asset_type_standards')
-        .select('asset_type, age_weight, condition_weight, lifespan_min_years, lifespan_max_years')
+        .select('asset_type, display_name, age_weight, condition_weight, lifespan_min_years, lifespan_max_years')
         // Fixed platform reference table (21 asset types today); the explicit
         // bound documents that and keeps it out of the unbounded-select class.
         .limit(ASSET_TYPE_STANDARDS_LIMIT)
 
-      const updates: Array<{
-        asset_type:        string
-        age_weight:        number
-        condition_weight:  number
-        weight_updated_at: string
-      }> = []
+      const currentStandards = unwrapList(
+        standardsRes,
+        { site: 'inngest.asset-health.scoring-weight-nudge.standards' },
+      )
+
+      // .upsert() is an INSERT ... ON CONFLICT DO UPDATE, so the payload has
+      // to be a row Postgres could actually insert — display_name and the two
+      // lifespan columns are NOT NULL. They only ever round-trip the value
+      // already on the row (every update is guarded by `if (!std) continue`),
+      // but omitting them would make the insert arm of this statement invalid.
+      const updates: TablesInsert<'asset_type_standards'>[] = []
       const oldWeightsByType: Record<string, { age_weight: number; condition_weight: number }> = {}
 
       for (const [assetType, repairs] of Object.entries(byType)) {
@@ -148,9 +155,12 @@ export const dailyAssetHealth = inngest.createFunction(
         if (!nudge) continue
 
         updates.push({
-          asset_type:        assetType,
+          asset_type:         std.asset_type,
+          display_name:       std.display_name,
+          lifespan_min_years: std.lifespan_min_years,
+          lifespan_max_years: std.lifespan_max_years,
           ...nudge,
-          weight_updated_at: new Date().toISOString(),
+          weight_updated_at:  new Date().toISOString(),
         })
         oldWeightsByType[assetType] = {
           age_weight:       std.age_weight,
@@ -228,10 +238,13 @@ export const assetHealthOrg = inngest.createFunction(
 
       if (!activeAssets.length) return 0
 
-      const { data: standards } = await supabase
-        .from('asset_type_standards')
-        .select('asset_type, lifespan_min_years, lifespan_max_years, avg_replacement_cost_high, age_weight, condition_weight')
-        .limit(ASSET_TYPE_STANDARDS_LIMIT)
+      const standards = unwrapList(
+        await supabase
+          .from('asset_type_standards')
+          .select('asset_type, lifespan_min_years, lifespan_max_years, avg_replacement_cost_high, age_weight, condition_weight')
+          .limit(ASSET_TYPE_STANDARDS_LIMIT),
+        { site: 'inngest.asset-health.score-org.standards', orgId },
+      )
 
       const windowStart = new Date(Date.now() - REPAIR_HISTORY_WINDOW_DAYS * 86_400_000)
         .toISOString().split('T')[0]!

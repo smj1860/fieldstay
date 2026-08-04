@@ -1,3 +1,4 @@
+import { asBooleanMap } from '@/lib/json'
 import { requireOrgMember } from '@/lib/auth'
 import Link from 'next/link'
 import { Plus } from 'lucide-react'
@@ -18,7 +19,7 @@ export default async function PropertiesPage() {
     { count: ownerPortalTokenCount },
     { data: openWOs, error: openWOsError },
     { data: unassignedTOs, error: unassignedTOsError },
-    { data: erroredFeeds },
+    { data: erroredFeeds, error: erroredFeedsError },
   ] = await Promise.all([
     supabase
       .from('properties')
@@ -53,7 +54,13 @@ export default async function PropertiesPage() {
 
   // Logs + reports every failure, then throws so the segment's error.tsx
   // renders a real error state — an outage must not look like empty data.
-  throwIfAnyQueryFailed({ site: 'page.properties', orgId: membership.org_id }, propertiesError, openWOsError, unassignedTOsError)
+  // erroredFeeds is in here for the same reason as the other three: it drives
+  // the per-property sync-error badge, so a failed read renders a confident
+  // "0 sync errors" on properties whose calendars are actually broken.
+  throwIfAnyQueryFailed(
+    { site: 'page.properties', orgId: membership.org_id },
+    propertiesError, openWOsError, unassignedTOsError, erroredFeedsError,
+  )
 
   const opsCountsByProperty: Record<string, { openWorkOrders: number; unassignedTurnovers: number; syncErrors: number }> = {}
   const bump = (propertyId: string, key: 'openWorkOrders' | 'unassignedTurnovers' | 'syncErrors') => {
@@ -100,7 +107,18 @@ export default async function PropertiesPage() {
       {!properties?.length ? (
         <EmptyState />
       ) : (
-        <PropertiesGrid properties={properties} opsCountsByProperty={opsCountsByProperty} />
+        <PropertiesGrid
+          // This page selects a narrow subset of `properties`, so it resolves
+          // just those columns' own DEFAULTs rather than the whole-row helper.
+          properties={properties.map((p) => ({
+            ...p,
+            property_type:         p.property_type ?? 'house',
+            bedrooms:              p.bedrooms      ?? 1,
+            bathrooms:             p.bathrooms     ?? 1,
+            setup_steps_completed: asBooleanMap(p.setup_steps_completed),
+          }))}
+          opsCountsByProperty={opsCountsByProperty}
+        />
       )}
     </div>
   )

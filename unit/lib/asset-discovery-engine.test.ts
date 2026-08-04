@@ -9,7 +9,10 @@ function makeSupabase(rows: Row[]) {
   const calls: { method: string; args: unknown[] }[] = []
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const chain: any = {}
-  for (const m of ['select', 'eq', 'in']) {
+  // order/range are stubbed because the read pages through fetchAllRows. The
+  // chain resolves the same rows for every page, which terminates after one
+  // page only because fixtures are shorter than the 1000-row page size.
+  for (const m of ['select', 'eq', 'in', 'order', 'range']) {
     chain[m] = vi.fn((...args: unknown[]) => {
       calls.push({ method: m, args })
       return chain
@@ -26,7 +29,7 @@ describe('getMissingAssetDiscoveryTypes', () => {
   it('scopes the query to the given property, active assets only, and the required asset types', async () => {
     const supabase = makeSupabase([])
 
-    await getMissingAssetDiscoveryTypes(supabase as never, 'prop_1')
+    await getMissingAssetDiscoveryTypes(supabase as never, 'org_1', 'prop_1')
 
     expect(supabase.calls.some((c) => c.method === 'eq' && c.args[0] === 'property_id' && c.args[1] === 'prop_1')).toBe(true)
     expect(supabase.calls.some((c) => c.method === 'eq' && c.args[0] === 'is_active' && c.args[1] === true)).toBe(true)
@@ -35,7 +38,7 @@ describe('getMissingAssetDiscoveryTypes', () => {
 
   it('returns every required type when no property_assets rows exist yet', async () => {
     const supabase = makeSupabase([])
-    const missing = await getMissingAssetDiscoveryTypes(supabase as never, 'prop_1')
+    const missing  = await getMissingAssetDiscoveryTypes(supabase as never, 'org_1', 'prop_1')
     expect(missing).toEqual(REQUIRED_ASSET_TYPES)
   })
 
@@ -43,7 +46,7 @@ describe('getMissingAssetDiscoveryTypes', () => {
     const supabase = makeSupabase([
       { asset_type: 'hvac', make: 'Carrier', model: null, photo_url: null, is_na: false },
     ])
-    const missing = await getMissingAssetDiscoveryTypes(supabase as never, 'prop_1')
+    const missing = await getMissingAssetDiscoveryTypes(supabase as never, 'org_1', 'prop_1')
     expect(missing).not.toContain('hvac')
   })
 
@@ -51,7 +54,7 @@ describe('getMissingAssetDiscoveryTypes', () => {
     const supabase = makeSupabase([
       { asset_type: 'water_heater', make: null, model: 'ProLine XE', photo_url: null, is_na: false },
     ])
-    const missing = await getMissingAssetDiscoveryTypes(supabase as never, 'prop_1')
+    const missing = await getMissingAssetDiscoveryTypes(supabase as never, 'org_1', 'prop_1')
     expect(missing).not.toContain('water_heater')
   })
 
@@ -59,7 +62,7 @@ describe('getMissingAssetDiscoveryTypes', () => {
     const supabase = makeSupabase([
       { asset_type: 'refrigerator', make: null, model: null, photo_url: 'https://x/photo.jpg', is_na: false },
     ])
-    const missing = await getMissingAssetDiscoveryTypes(supabase as never, 'prop_1')
+    const missing = await getMissingAssetDiscoveryTypes(supabase as never, 'org_1', 'prop_1')
     expect(missing).not.toContain('refrigerator')
   })
 
@@ -67,7 +70,7 @@ describe('getMissingAssetDiscoveryTypes', () => {
     const supabase = makeSupabase([
       { asset_type: 'generator', make: null, model: null, photo_url: null, is_na: true },
     ])
-    const missing = await getMissingAssetDiscoveryTypes(supabase as never, 'prop_1')
+    const missing = await getMissingAssetDiscoveryTypes(supabase as never, 'org_1', 'prop_1')
     expect(missing).not.toContain('generator')
   })
 
@@ -75,23 +78,31 @@ describe('getMissingAssetDiscoveryTypes', () => {
     const supabase = makeSupabase([
       { asset_type: 'dishwasher', make: null, model: null, photo_url: null, is_na: false },
     ])
-    const missing = await getMissingAssetDiscoveryTypes(supabase as never, 'prop_1')
+    const missing = await getMissingAssetDiscoveryTypes(supabase as never, 'org_1', 'prop_1')
     expect(missing).toContain('dishwasher')
   })
 
-  it('treats a null `existing` result (query error swallowed by Supabase) as an empty verified set', async () => {
+  // Contract CHANGED (2026-08-03): this used to assert that a failed read was
+  // swallowed and every required asset reported missing — which is the defect,
+  // not the feature. A discovery prompt for assets the property already has is
+  // worse than an error, so the read now throws.
+  it('throws when the `existing` query fails, rather than reporting every asset missing', async () => {
     const calls: { method: string; args: unknown[] }[] = []
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const chain: any = {}
-    for (const m of ['select', 'eq', 'in']) {
+    // order/range are stubbed because the read pages through fetchAllRows. The
+    // chain resolves the same rows for every page, which terminates after one
+    // page only because fixtures are shorter than the 1000-row page size.
+    for (const m of ['select', 'eq', 'in', 'order', 'range']) {
       chain[m] = vi.fn((...args: unknown[]) => { calls.push({ method: m, args }); return chain })
     }
     chain.then = (resolve: (v: unknown) => unknown) =>
       Promise.resolve({ data: null, error: { message: 'boom' } }).then(resolve)
     const supabase = { from: vi.fn(() => chain) }
 
-    const missing = await getMissingAssetDiscoveryTypes(supabase as never, 'prop_1')
-    expect(missing).toEqual(REQUIRED_ASSET_TYPES)
+    await expect(
+      getMissingAssetDiscoveryTypes(supabase as never, 'org_1', 'prop_1')
+    ).rejects.toThrow()
   })
 })
 

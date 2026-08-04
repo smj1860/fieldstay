@@ -1,3 +1,4 @@
+import { unwrap } from '@/lib/supabase/unwrap'
 import { inngest } from '@/lib/inngest/client'
 import { createServiceClient } from '@/lib/supabase/server'
 import { logAuditEvents } from '@/lib/audit'
@@ -91,11 +92,15 @@ export const guestPiiRetentionOrg = inngest.createFunction(
 
     const retentionDays = await step.run('load-org-retention-days', async () => {
       const supabase = createServiceClient({ system: 'inngest:guest-pii-retention' })
-      const { data } = await supabase
+      // Skipping guest-PII retention because a read failed is not the same
+      // as skipping it because the org is gone — the first must not be silent.
+      const orgRes = await supabase
         .from('organizations')
         .select('guest_pii_retention_days')
         .eq('id', orgId)
         .maybeSingle()
+
+      const data = unwrap(orgRes, { site: 'inngest.guest-pii-retention.org', orgId })
       return data?.guest_pii_retention_days ?? null
     })
 

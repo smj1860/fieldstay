@@ -1,11 +1,10 @@
 import { inngest } from '@/lib/inngest/client'
+import { reportError } from '@/lib/observability/report-error'
 import { createServiceClient } from '@/lib/supabase/server'
 import { resend, FROM } from '@/lib/resend/client'
-import { getPmEmails, createPmNotification } from '@/lib/inngest/helpers'
+import { createPmNotification } from '@/lib/inngest/helpers'
 import { formatPropertyDateTime } from '@/lib/utils/timezone'
 import { renderPmAlert } from '@/lib/resend/emails/pm-alert'
-import { assetTypeDisplayName, missingAssetTypesFromDiscoveredSet } from '@/lib/asset-discovery/config'
-import type { AssetType } from '@/types/database'
 import { logAuditEvent } from '@/lib/audit'
 import { incrementCounter } from '@/lib/observability/metrics'
 import { unwrapJoin, unwrapJoinArray } from '@/lib/utils/supabase-joins'
@@ -27,6 +26,11 @@ export const handleTurnoverCreated = inngest.createFunction(
     id:      'turnover-created',
     name:    'Handle New Turnover',
     retries: 2,
+    // Burst-exposed AND sends through an external provider. Resend's default
+    // is 2 req/s, so throttle to 1/s: this handler receives a BATCH of events
+    // (see the sender), and without a cap the whole batch lands at once.
+    concurrency: { limit: 5 },
+    throttle:    { limit: 60, period: '1m' },
   },
   { event: 'turnover/created' as const },
   async ({ event, step }) => {
@@ -108,6 +112,101 @@ export const handleTurnoverCreated = inngest.createFunction(
   }
 )
 
+type TurnoverServiceClient = ReturnType<typeof createServiceClient>
+
+/**
+ * Every completion-type timestamp for a turnover: each checklist item's
+ * completed_at, plus inventory's single completion signal.
+ *
+ * Inventory contributes at most one (unlike checklist, it has no per-item
+ * timestamps — see the crew-facing InventoryView flow): the explicit "Confirm
+ * Inventory Complete" press if it happened, else the last inventory quantity
+ * edit after this turnover's inventory work began, as a fallback for crew who
+ * forgot to press it. inventory_started_at itself is NOT a signal — it marks
+ * when work began, not when something was completed.
+ */
+async function collectCompletionTimestamps(
+  supabase:   TurnoverServiceClient,
+  turnoverId: string,
+  orgId:      string,
+): Promise<string[]> {
+  const timestamps: string[] = []
+
+  const { data: instance, error: instanceError } = await supabase
+    .from('checklist_instances')
+    .select('id')
+    .eq('turnover_id', turnoverId)
+    .eq('org_id', orgId)
+    .maybeSingle()
+  if (instanceError) throw instanceError
+
+  if (instance) {
+    const { data: items, error: itemsError } = await supabase
+      .from('checklist_instance_items')
+      .select('completed_at')
+      .eq('instance_id', instance.id)
+      .not('completed_at', 'is', null)
+    if (itemsError) throw itemsError
+
+    for (const item of items ?? []) timestamps.push(item.completed_at!)
+  }
+
+  const { data: turnover, error: turnoverError } = await supabase
+    .from('turnovers')
+    .select('property_id, inventory_started_at, inventory_confirmed_complete_at')
+    .eq('id', turnoverId)
+    .eq('org_id', orgId)
+    .maybeSingle()
+  if (turnoverError) throw turnoverError
+
+  if (turnover?.inventory_confirmed_complete_at) {
+    timestamps.push(turnover.inventory_confirmed_complete_at)
+    return timestamps
+  }
+
+  if (turnover?.inventory_started_at) {
+    const { data: lastEdited, error: lastEditedError } = await supabase
+      .from('inventory_items')
+      .select('updated_at')
+      .eq('property_id', turnover.property_id)
+      .gt('updated_at', turnover.inventory_started_at)
+      .order('updated_at', { ascending: false })
+      .limit(1)
+      .maybeSingle()
+    if (lastEditedError) throw lastEditedError
+
+    if (lastEdited) timestamps.push(lastEdited.updated_at)
+  }
+
+  return timestamps
+}
+
+interface DurationWrite {
+  what:  string
+  site:  string
+  error: { message: string } | null
+}
+
+/**
+ * Logs and reports the first failed write of the crew-duration pair.
+ *
+ * Extracted so the step body carries one branch instead of one per write —
+ * both go to the same place, and the step is already at the cognitive
+ * complexity ceiling.
+ */
+function reportDurationWriteFailure(
+  logger:  { error: (msg: string, meta?: Record<string, unknown>) => void },
+  orgId:   string,
+  results: readonly DurationWrite[],
+): boolean {
+  const failed = results.find((r) => r.error !== null)
+  if (!failed?.error) return false
+
+  logger.error(`${failed.what} update failed`, { error: failed.error.message })
+  reportError(failed.error, { site: `inngest.turnover-events.${failed.site}`, orgId })
+  return true
+}
+
 /**
  * Triggered when a turnover is marked complete by crew.
  * Sends a brief "turnover complete" notification to the PM.
@@ -117,6 +216,11 @@ export const handleTurnoverCompleted = inngest.createFunction(
     id:      'turnover-completed',
     name:    'Handle Turnover Completed',
     retries: 2,
+    // Burst-exposed AND sends through an external provider. Resend's default
+    // is 2 req/s, so throttle to 1/s: this handler receives a BATCH of events
+    // (see the sender), and without a cap the whole batch lands at once.
+    concurrency: { limit: 5 },
+    throttle:    { limit: 60, period: '1m' },
   },
   { event: 'turnover/completed' as const },
   async ({ event, step, logger }) => {
@@ -146,48 +250,21 @@ export const handleTurnoverCompleted = inngest.createFunction(
       })
     })
 
-    await step.run('notify-pm-of-open-mandatory-items', async () => {
-      const supabase = createServiceClient({ system: 'inngest:turnover-events' })
-
-      const { data: assets } = await supabase
-        .from('property_assets')
-        .select('asset_type, make, model, photo_url, is_na')
-        .eq('property_id', property_id)
-        .eq('org_id', org_id)
-        .eq('is_active', true)
-
-      const discoveredTypes = new Set(
-        (assets ?? [])
-          .filter((a) => a.is_na === true || a.make !== null || a.model !== null || a.photo_url !== null)
-          .map((a) => a.asset_type as AssetType)
-      )
-      const missingTypes = missingAssetTypesFromDiscoveredSet(discoveredTypes)
-
-      if (!missingTypes.length) return { skipped: 'none_missing' }
-
-      const [{ data: property }, pmEmails] = await Promise.all([
-        supabase.from('properties').select('name').eq('id', property_id).eq('org_id', org_id).single(),
-        getPmEmails(supabase, org_id),
-      ])
-      const [pmEmail] = pmEmails
-
-      if (!pmEmail) return { skipped: 'no_pm_email' }
-
-      await resend.emails.send({
-        from:    FROM,
-        to:      pmEmail,
-        subject: `⚠️ ${missingTypes.length} asset${missingTypes.length !== 1 ? 's' : ''} still need discovery — ${property?.name}`,
-        html: await renderPmAlert({
-          heading:  'Asset discovery still incomplete',
-          body:     `The crew marked this turnover complete, but ${missingTypes.length} required asset${missingTypes.length !== 1 ? 's haven\'t' : ' hasn\'t'} been discovered yet at ${property?.name}.`,
-          details:  missingTypes.map((t) => ({ label: assetTypeDisplayName(t), value: 'Not yet captured' })),
-          ctaLabel: 'View Property Assets →',
-          ctaUrl:   `${process.env.NEXT_PUBLIC_APP_URL}/assets`,
-        }),
-      }, { idempotencyKey: `turnover-completed-mandatory-open-${turnover_id}` })
-
-      return { notified: true, missing_count: missingTypes.length }
-    })
+    // REMOVED: the per-turnover "N assets still need discovery" email.
+    //
+    // It fired immediately on every completed turnover, to the first PM email,
+    // whenever any required asset type was still undiscovered at that property.
+    // The daily wrap-up already reports exactly this: cron/daily-wrapup.ts
+    // builds `checklistSection` from the SAME predicate over the SAME columns
+    // (missingAssetTypesFromDiscoveredSet over the is_na/make/model/photo_url
+    // filter), per property, once a day.
+    //
+    // So this was the same number delivered twice — but the per-turnover copy
+    // arrived on a trigger the PM cannot act on differently (asset discovery is
+    // not a turnover task) and at a rate set by turnover volume, which is
+    // exactly the shape that trains people to filter a sender. Deleted rather
+    // than made conditional: there is no threshold at which a duplicate of the
+    // wrap-up's own content is worth its own send.
 
     await step.run('record-completion-milestones', async () => {
       const supabase = createServiceClient({ system: 'inngest:turnover-events' })
@@ -266,57 +343,7 @@ export const handleTurnoverCompleted = inngest.createFunction(
     await step.run('record-crew-duration', async () => {
       const supabase = createServiceClient({ system: 'inngest:turnover-events' })
 
-      const timestamps: string[] = []
-
-      const { data: instance, error: instanceError } = await supabase
-        .from('checklist_instances')
-        .select('id')
-        .eq('turnover_id', turnover_id)
-        .eq('org_id', org_id)
-        .maybeSingle()
-      if (instanceError) throw instanceError
-
-      if (instance) {
-        const { data: items, error: itemsError } = await supabase
-          .from('checklist_instance_items')
-          .select('completed_at')
-          .eq('instance_id', instance.id)
-          .not('completed_at', 'is', null)
-        if (itemsError) throw itemsError
-
-        for (const item of items ?? []) timestamps.push(item.completed_at!)
-      }
-
-      // Inventory contributes at most one completion-type signal (unlike
-      // checklist, it has no per-item timestamps — see the crew-facing
-      // InventoryView flow) — the explicit "Confirm Inventory Complete"
-      // press if it happened, else the last inventory quantity edit after
-      // this turnover's inventory work began, as a fallback for crew who
-      // forgot to press it. inventory_started_at itself is NOT a signal
-      // here — it marks when work began, not when something was completed.
-      const { data: turnover, error: turnoverError } = await supabase
-        .from('turnovers')
-        .select('property_id, inventory_started_at, inventory_confirmed_complete_at')
-        .eq('id', turnover_id)
-        .eq('org_id', org_id)
-        .maybeSingle()
-      if (turnoverError) throw turnoverError
-
-      if (turnover?.inventory_confirmed_complete_at) {
-        timestamps.push(turnover.inventory_confirmed_complete_at)
-      } else if (turnover?.inventory_started_at) {
-        const { data: lastEdited, error: lastEditedError } = await supabase
-          .from('inventory_items')
-          .select('updated_at')
-          .eq('property_id', turnover.property_id)
-          .gt('updated_at', turnover.inventory_started_at)
-          .order('updated_at', { ascending: false })
-          .limit(1)
-          .maybeSingle()
-        if (lastEditedError) throw lastEditedError
-
-        if (lastEdited) timestamps.push(lastEdited.updated_at)
-      }
+      const timestamps = await collectCompletionTimestamps(supabase, turnover_id, org_id)
 
       if (timestamps.length === 0) return { skipped: 'no_completion_signals' }
 
@@ -333,13 +360,24 @@ export const handleTurnoverCompleted = inngest.createFunction(
 
       const roundedMinutes = Math.round(durationMinutes)
 
-      // Single shared calculation feeds both consumers — assignment_outcomes
-      // (the crew-scoring learning loop) and turnovers.crew_duration_minutes
-      // (the PM-facing board display) — so the two numbers can't drift apart.
+      // ONE calculation feeds both consumers — assignment_outcomes (the
+      // crew-scoring learning loop) and turnovers.crew_duration_minutes (the
+      // PM-facing board display) — so the two numbers cannot drift apart.
+      //
+      // But they are written differently, and the asymmetry is not an
+      // oversight. assignment_outcomes.duration_minutes is GENERATED ALWAYS,
+      // derived from started_at/completed_at with its own 480-minute
+      // plausibility cap (the same bound as MAX_PLAUSIBLE_DURATION_MINUTES
+      // above), so it must NOT be named in the payload: doing so raised 428C9
+      // "cannot insert a non-DEFAULT value into column", which failed the
+      // WHOLE update — started_at and completed_at were never written either,
+      // and the learning loop that feeds crew scoring recorded nothing at all.
+      // turnovers.crew_duration_minutes is an ordinary integer column and IS
+      // written here.
       const [assignmentResult, turnoverResult] = await Promise.all([
         supabase
           .from('assignment_outcomes')
-          .update({ started_at: startedAt, completed_at: completedAt, duration_minutes: roundedMinutes })
+          .update({ started_at: startedAt, completed_at: completedAt })
           .eq('turnover_id', turnover_id)
           .eq('org_id', org_id)
           .select('id'),
@@ -350,10 +388,18 @@ export const handleTurnoverCompleted = inngest.createFunction(
           .eq('org_id', org_id),
       ])
 
-      if (assignmentResult.error) throw assignmentResult.error
-      if (turnoverResult.error) throw turnoverResult.error
+      // Reported, not thrown, and never discarded: destructuring `data`
+      // without `error` is what let the 428C9 above surface as
+      // `updated_rows: 0` and read like "no matching rows" for weeks.
+      const writeFailed = reportDurationWriteFailure(logger, org_id, [
+        { what: 'assignment_outcomes duration', site: 'assignmentOutcomeDuration', error: assignmentResult.error },
+        { what: 'turnovers crew_duration_minutes', site: 'turnoverCrewDuration', error: turnoverResult.error },
+      ])
 
-      return { updated_rows: assignmentResult.data?.length ?? 0, duration_minutes: roundedMinutes }
+      const updatedRows = assignmentResult.data?.length ?? 0
+      if (writeFailed) return { updated_rows: updatedRows, duration_minutes: roundedMinutes, error: true }
+
+      return { updated_rows: updatedRows, duration_minutes: roundedMinutes }
     })
 
     logger.info('turnover-completed done', { workflowId, turnover_id })

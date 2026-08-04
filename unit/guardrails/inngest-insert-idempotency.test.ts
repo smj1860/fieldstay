@@ -103,12 +103,20 @@ function scanInsertSites(): InsertSite[] {
 
 // Verified against the codebase 2026-07-26.
 const EXCEPTIONS: Record<string, string> = {
-  'lib/inngest/functions/inventory-events.ts:207':
-    'purchase_order_items insert is transitively protected by the purchase_orders existence pre-check just above it in the same step — the items batch-insert is only reached at all when the parent PO did not already exist (source_count_id-keyed, backed by po_source_count_unique). A same-table check on purchase_order_items itself would be redundant.',
-  'lib/inngest/functions/cron/work-order-ops.ts:263':
+  // (removed) lib/inngest/functions/inventory-events.ts — the
+  // purchase_order_items insert moved into the insertPoItems() helper so the
+  // create path and the zero-items repair path share one implementation. This
+  // scan only inspects `.insert(` INSIDE a step.run body, so it no longer sees
+  // that call at all — a blind spot, not a fix, and worth knowing about when
+  // reading this list. Behavioural coverage replaced it:
+  // unit/inngest/inventory-events-po.test.ts asserts the pre-check
+  // short-circuits only on a PO that actually has line items, that a header
+  // with zero items is repaired rather than declared done, and that both
+  // writes throw instead of being discarded.
+  'lib/inngest/functions/cron/work-order-ops.ts:281':
     'FIXED, kept as an exception because the guard is cross-table and this scan only recognizes same-table guards: the work_order_updates note batch is written only for the rows the preceding optimistic-locked bulk UPDATE actually changed (`.update({priority:\'urgent\'}).in(\'id\', ids).neq(\'priority\', \'urgent\').select(\'id\')`). A step retry matches zero rows there (they are already urgent), so zero notes are inserted. Contrast the still-open twin at cron/maintenance-schedules.ts:326.',
   'lib/inngest/functions/cron/maintenance-schedules.ts:326':
-    'REAL GAP, not fixed — the work_order_updates escalate-to-urgent-plus-note pattern in the per-org overdue pass. Unlike cron/work-order-ops.ts:263 (now guarded by an optimistic-locked bulk update), this branch updates a single WO without a returning-rows precondition, so a step retry can still append a duplicate note. Cosmetic impact only (a duplicate note, not a duplicate financial/state record); closing it needs a product decision about what makes two escalation events "the same".',
+    'REAL GAP, not fixed — the work_order_updates escalate-to-urgent-plus-note pattern in the per-org overdue pass. Unlike cron/work-order-ops.ts:277 (now guarded by an optimistic-locked bulk update), this branch updates a single WO without a returning-rows precondition, so a step retry can still append a duplicate note. Cosmetic impact only (a duplicate note, not a duplicate financial/state record); closing it needs a product decision about what makes two escalation events "the same".',
 }
 
 describe('guardrail: Inngest step.run() inserts are idempotent on retry', () => {

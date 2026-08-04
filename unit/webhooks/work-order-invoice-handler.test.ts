@@ -33,6 +33,9 @@ function makeSupabase(invoiceRow: Record<string, unknown> | null) {
         ? Promise.resolve({ data: invoiceRow, error: null })
         : Promise.resolve({ data: null, error: null })
     )
+    // The mark-paid UPDATE ... RETURNING uses maybeSingle(), so the retried
+    // delivery (zero rows matched) is data:null rather than a PGRST116 error.
+    chain.maybeSingle = chain.single
     return chain
   })
   // eslint-disable-next-line @typescript-eslint/no-explicit-any

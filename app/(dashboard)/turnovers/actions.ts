@@ -1,11 +1,15 @@
 'use server'
 
 import { revalidatePath } from 'next/cache'
+import { fetchAllRows } from '@/lib/inngest/paginate'
+import { verifyPropertyInOrg } from '@/lib/tenancy/verify'
 import { requireOrgMember, requireOrgRole } from '@/lib/auth'
 import { inngest, sendEventAsync } from '@/lib/inngest/client'
 import { logAuditEvent } from '@/lib/audit'
 import { unwrapJoin } from '@/lib/utils/supabase-joins'
 import { reportError } from '@/lib/observability/report-error'
+import { reportQueryError, tryUnwrap } from '@/lib/supabase/unwrap'
+import type { TablesUpdate } from '@/types/database'
 
 export type TurnoverActionState = { error?: string; success?: boolean; warning?: string }
 
@@ -106,7 +110,211 @@ function notifyCrewAssigned(orgId: string, crewMemberId: string, turnoverIds: st
   })
 }
 
+/**
+ * fetchAllRows, degrading to null instead of throwing.
+ *
+ * Every read below is bounded by an .in() list or a single parent, so none of
+ * them is a platform scan — but "unlikely to truncate" is not the same as
+ * bounded, and a short page here reads as "no time off" / "no conflict" /
+ * "not yet assigned", which is precisely the class of silence this whole pass
+ * is removing. Pagination makes truncation impossible; the null return lets
+ * each caller keep its own fail-vs-degrade decision rather than inheriting
+ * fetchAllRows' throw.
+ */
+async function tryFetchAll<T>(
+  fetchPage: (from: number, to: number) => PromiseLike<{ data: T[] | null; error: { message: string } | null }>,
+  site:      string,
+  orgId:     string,
+): Promise<T[] | null> {
+  try {
+    return await fetchAllRows<T>(fetchPage, { label: site })
+  } catch (err) {
+    console.error(`[${site}]`, err)
+    reportError(err, { site, orgId })
+    return null
+  }
+}
+
+/**
+ * Days this crew member marked unavailable that fall on the turnover dates
+ * being assigned. Shared by both assignment actions, which had identical copies.
+ *
+ * Returns null when the read failed, which both callers surface as a warning:
+ * "non-blocking" means a KNOWN conflict doesn't block, never that an unknown
+ * one counts as clean.
+ */
+async function fetchCrewTimeOff(
+  supabase:     Awaited<ReturnType<typeof requireOrgMember>>['supabase'],
+  orgId:        string,
+  crewMemberId: string,
+  dates:        string[],
+  site:         string,
+): Promise<{ available_date: string }[] | null> {
+  return tryFetchAll<{ available_date: string }>(
+    (from, to) => supabase
+      .from('crew_availability')
+      .select('available_date')
+      .eq('org_id', orgId)
+      .eq('crew_member_id', crewMemberId)
+      .eq('is_available', false)
+      .in('available_date', dates)
+      .order('available_date')
+      .range(from, to),
+    site, orgId,
+  )
+}
+
 // ── Crew assignment ──────────────────────────────────────────────────────────
+
+/**
+ * Shared preamble for the two crew-assignment actions.
+ *
+ * assignCrew and addCrewToTurnover both prove the client-supplied turnover ids
+ * and crew id belong to the caller's org before touching anything, and both
+ * grew a second branch per read once the discarded errors were handled.
+ * Extracting it keeps each action under the cognitive-complexity ceiling and
+ * leaves one definition of "verified" instead of two copies that can drift.
+ *
+ * Fails closed and reports: a failed verification is never the same answer as
+ * "you don't own these".
+ */
+/**
+ * Best-effort "New Assignment" push to the crew member. Extracted from
+ * assignCrew both to keep that action under the cognitive-complexity ceiling
+ * and because every failure mode in here is deliberately swallowed — the push
+ * must never fail an assignment that already committed.
+ *
+ * Both reads use tryUnwrap*, so a failure is reported rather than silently
+ * degrading to "this crew member has no devices registered".
+ */
+async function sendAssignmentPush(
+  orgId:        string,
+  crewMemberId: string,
+  turnovers:    { id: string }[],
+): Promise<void> {
+  try {
+    const { createServiceClient } = await import('@/lib/supabase/server')
+    const serviceClient = createServiceClient({ system: 'action:turnover-suggestion-tracking' })
+
+    // org_id filtered explicitly: this is a service-role client, so RLS is not
+    // scoping it. Filtering on crew_member_id alone was sound only via a
+    // non-local invariant (the id was org-checked by loadAssignmentTargets),
+    // and these rows are push endpoints — a mis-scoped read pushes another
+    // tenant's crew.
+    // Paginated as well as org-scoped: adding the org filter moved this read
+    // into the ladder's org-scoped tier, and a tier change is still a new
+    // finding because the read was never actually bounded. One crew member's
+    // devices is a handful of rows, but nothing in the query said so.
+    const subs = await fetchAllRows<{ endpoint: string; p256dh: string; auth: string }>(
+      (from, to) => serviceClient
+        .from('push_subscriptions')
+        .select('endpoint, p256dh, auth')
+        .eq('org_id', orgId)
+        .eq('crew_member_id', crewMemberId)
+        .order('endpoint')
+        .range(from, to),
+      { label: 'serverAction.turnovers.assignCrew.pushSubs' },
+    )
+    if (subs.length === 0) return
+
+    const { sendPushToCrewMember } = await import('@/lib/push/client')
+
+    const firstRes = await serviceClient
+      .from('turnovers')
+      .select('checkout_datetime, properties(name)')
+      .eq('org_id', orgId)
+      .eq('id', turnovers[0]!.id)
+      .maybeSingle()
+
+    const firstOut = tryUnwrap(firstRes, { site: 'serverAction.turnovers.assignCrew.pushBody', orgId })
+    const firstTurnover = firstOut.ok ? firstOut.data : null
+    const propName = unwrapJoin(firstTurnover?.properties)?.name
+
+    const count = turnovers.length
+    const body = count === 1 && propName
+      ? `${propName} — ${new Date(firstTurnover!.checkout_datetime).toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' })}`
+      : `${count} new assignment${count !== 1 ? 's' : ''} added`
+
+    await sendPushToCrewMember(subs, { title: 'New Assignment', body, url: '/crew' })
+  } catch (err) {
+    // Push failure must never break the assignment
+    console.error('[push] failed to notify crew member:', err)
+    reportError(err, { site: 'serverAction.turnovers.assignCrew.inner', orgId })
+  }
+}
+
+/**
+ * Counts overlaps between the turnovers being assigned and the ones this crew
+ * member already holds. Pure — extracted from addCrewToTurnover so the nested
+ * date-window comparison stops contributing to that action's complexity.
+ *
+ * Each turnover occupies [checkout_datetime, checkin_datetime); a turnover
+ * compared against itself is skipped, since re-assigning the same one is not a
+ * conflict.
+ */
+function countScheduleConflicts(
+  incoming: { id: string; checkout_datetime: string; checkin_datetime: string }[],
+  existing: { turnover_id: string; turnovers: unknown }[],
+): number {
+  let conflicts = 0
+  for (const newT of incoming) {
+    const newStart = new Date(newT.checkout_datetime).getTime()
+    const newEnd   = new Date(newT.checkin_datetime ?? newT.checkout_datetime).getTime()
+    for (const a of existing) {
+      if (a.turnover_id === newT.id) continue
+      const other = unwrapJoin(a.turnovers as { checkout_datetime: string; checkin_datetime: string } | { checkout_datetime: string; checkin_datetime: string }[] | null)
+      if (!other) continue
+      const existStart = new Date(other.checkout_datetime).getTime()
+      const existEnd   = new Date(other.checkin_datetime).getTime()
+      if (newStart < existEnd && newEnd > existStart) conflicts++
+    }
+  }
+  return conflicts
+}
+
+type AssignmentTargets<T> =
+  | { ok: false; error: string }
+  | { ok: true;  turnovers: T[]; crew: { id: string; name: string } }
+
+async function loadAssignmentTargets<T>(
+  supabase:     Awaited<ReturnType<typeof requireOrgMember>>['supabase'],
+  orgId:        string,
+  turnoverIds:  string[],
+  crewMemberId: string,
+  select:       string,
+): Promise<AssignmentTargets<T>> {
+  const turnoverRows = await tryFetchAll<T>(
+    (from, to) => supabase
+      .from('turnovers')
+      .select(select)
+      .in('id', turnoverIds)
+      .eq('org_id', orgId)
+      .order('id')
+      .range(from, to) as never,
+    'serverAction.turnovers.loadAssignmentTargets.turnovers', orgId,
+  )
+  if (turnoverRows === null) return { ok: false, error: 'Could not load those turnovers. Please try again.' }
+  if (!turnoverRows.length) return { ok: false, error: 'Turnovers not found' }
+  const turnovers = turnoverRows
+
+  // maybeSingle: with .single() a nonexistent crew id came back as a PGRST116
+  // ERROR, not as null — the not-found branch was only reachable because that
+  // error was discarded. Handling the error without switching the terminator
+  // would turn every bad id into a thrown 500.
+  const crewRes = await supabase
+    .from('crew_members')
+    .select('id, name')
+    .eq('id', crewMemberId)
+    .eq('org_id', orgId)
+    .maybeSingle()
+
+  if (reportQueryError(crewRes.error, { site: 'serverAction.turnovers.loadAssignmentTargets.crew', orgId })) {
+    return { ok: false, error: 'Could not verify that crew member. Please try again.' }
+  }
+  if (!crewRes.data) return { ok: false, error: 'Crew member not found' }
+
+  return { ok: true, turnovers, crew: crewRes.data }
+}
 
 export async function assignCrew(
   turnoverIds: string[],
@@ -115,38 +323,31 @@ export async function assignCrew(
   try {
     const { supabase, membership, user } = await requireOrgMember()
 
-    // Verify all turnovers belong to this org
-    const { data: turnovers } = await supabase
-      .from('turnovers')
-      .select('id, property_id, checkout_datetime, suggestion_status, suggested_crew_ids')
-      .in('id', turnoverIds)
-      .eq('org_id', membership.org_id)
-
-    if (!turnovers?.length) return { error: 'Turnovers not found' }
-
-    // Verify crew member belongs to this org
-    const { data: crew } = await supabase
-      .from('crew_members')
-      .select('id, name')
-      .eq('id', crewMemberId)
-      .eq('org_id', membership.org_id)
-      .single()
-
-    if (!crew) return { error: 'Crew member not found' }
+    const targets = await loadAssignmentTargets<{
+      id: string; property_id: string; checkout_datetime: string
+      suggestion_status: string | null; suggested_crew_ids: string[] | null
+    }>(
+      supabase, membership.org_id, turnoverIds, crewMemberId,
+      'id, property_id, checkout_datetime, suggestion_status, suggested_crew_ids',
+    )
+    if (!targets.ok) return { error: targets.error }
+    const { turnovers, crew } = targets
 
     const ids = turnovers.map(t => t.id)
 
-    // Time-off check — non-blocking, since a PM may want to override
+    // Time-off check — non-blocking, since a PM may want to override.
+    //
+    // "Non-blocking" means a KNOWN conflict doesn't block. It never meant an
+    // UNKNOWN one counts as clean, which is what `timeOff?.length ?? 0` did: a
+    // failed read produced zero, the PM was shown no warning at all, and the
+    // crew member who booked that Saturday off got assigned it anyway. The
+    // outcome now degrades to a warning that says we could not check.
     const turnoverDates = [...new Set(turnovers.map(t => t.checkout_datetime.split('T')[0]))]
-    const { data: timeOff } = await supabase
-      .from('crew_availability')
-      .select('available_date')
-      .eq('org_id', membership.org_id)
-      .eq('crew_member_id', crewMemberId)
-      .eq('is_available', false)
-      .in('available_date', turnoverDates)
-
-    const timeOffCount = timeOff?.length ?? 0
+    const timeOffRows = await fetchCrewTimeOff(
+      supabase, membership.org_id, crewMemberId, turnoverDates,
+      'serverAction.turnovers.assignCrew.timeOff',
+    )
+    const timeOffCount = timeOffRows?.length ?? 0
 
     // Batch: remove other-crew assignments across all turnovers in one query
     await supabase
@@ -174,12 +375,19 @@ export async function assignCrew(
       .eq('status', 'pending_assignment')
 
     const propertyIds = [...new Set(turnovers.map(t => t.property_id))]
-    const { data: propertyRows } = await supabase
-      .from('properties')
-      .select('id, bedrooms')
-      .in('id', propertyIds)
+    // Paginated: propertyIds is derived from a bulk turnover selection, and a
+    // large portfolio's bulk action can list more properties than the cap.
+    const propertyRows = await fetchAllRows<{ id: string; bedrooms: number | null }>(
+      (from, to) => supabase
+        .from('properties')
+        .select('id, bedrooms')
+        .in('id', propertyIds)
+        .order('id')
+        .range(from, to),
+      { label: 'turnovers.actions.propertyBedrooms' },
+    )
     const propertyBedrooms = Object.fromEntries(
-      (propertyRows ?? []).map(p => [p.id, p.bedrooms as number | null])
+      propertyRows.map(p => [p.id, p.bedrooms as number | null])
     )
     await trackAssignmentAgainstSuggestions(membership.org_id, crewMemberId, crew.name, turnovers, propertyBedrooms)
 
@@ -194,51 +402,14 @@ export async function assignCrew(
       metadata:   { turnover_ids: turnovers.map(t => t.id) },
     })
 
-    // Send push notification to the assigned crew member
-    try {
-      const { createServiceClient } = await import('@/lib/supabase/server')
-      const serviceClient = createServiceClient({ system: 'action:turnover-suggestion-tracking' })
-
-      const { data: subs } = await serviceClient
-        .from('push_subscriptions')
-        .select('endpoint, p256dh, auth')
-        .eq('crew_member_id', crewMemberId)
-
-      if (subs && subs.length > 0) {
-        const { sendPushToCrewMember } = await import('@/lib/push/client')
-
-        const count = turnovers.length
-        const { data: firstTurnover } = await serviceClient
-          .from('turnovers')
-          .select('checkout_datetime, properties(name)')
-          .eq('id', turnovers[0]!.id)
-          .single()
-
-        const propName = unwrapJoin(firstTurnover?.properties)?.name
-
-        const body = count === 1 && propName
-          ? `${propName} — ${new Date(firstTurnover!.checkout_datetime).toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' })}`
-          : `${count} new assignment${count !== 1 ? 's' : ''} added`
-
-        await sendPushToCrewMember(subs, {
-          title: 'New Assignment',
-          body,
-          url:   '/crew',
-        })
-      }
-    } catch (err) {
-      // Push failure must never break the assignment
-      console.error('[push] failed to notify crew member:', err)
-      reportError(err, { site: 'serverAction.turnovers.assignCrew.inner', orgId: membership.org_id })
-    }
+    await sendAssignmentPush(membership.org_id, crewMemberId, turnovers)
 
     revalidatePath('/turnovers')
-    if (timeOffCount > 0) {
-      return {
-        success: true,
-        warning: `${crew.name} marked time off on ${timeOffCount} of the assigned date(s).`,
-      }
-    }
+    const warnings: string[] = []
+    if (timeOffRows === null) warnings.push(`Couldn't check ${crew.name}'s time off — please verify manually.`)
+    if (timeOffCount > 0) warnings.push(`${crew.name} marked time off on ${timeOffCount} of the assigned date(s).`)
+
+    if (warnings.length > 0) return { success: true, warning: warnings.join(' ') }
     return { success: true }
   } catch (err) {
     console.error('[assignCrew]', err)
@@ -298,7 +469,7 @@ export async function updateTurnoverStatus(
   try {
     const { supabase, membership, user } = await requireOrgMember()
 
-    const update: Record<string, unknown> = { status }
+    const update: TablesUpdate<'turnovers'> = { status }
     const completedAt = new Date().toISOString()
     if (status === 'in_progress') {
       update.started_at = completedAt
@@ -419,22 +590,28 @@ export async function createManualTurnover(
 
     // Verify property belongs to this org — property_id is client-supplied and
     // must not be trusted to already scope to the caller's org.
-    const { data: property } = await supabase
-      .from('properties')
-      .select('id')
-      .eq('id', property_id)
-      .eq('org_id', membership.org_id)
-      .single()
+    const owned = await verifyPropertyInOrg(supabase, membership.org_id, property_id, 'serverAction.turnovers.createManualTurnover.property')
+    if (!owned.ok) return { error: owned.error }
 
-    if (!property) return { error: 'Property not found' }
-
-    // Get default checklist template for the property
-    const { data: template } = await supabase
+    // Get default checklist template for the property.
+    //
+    // maybeSingle is required, not cosmetic: a property with no default
+    // template is the ORDINARY case, and .single() reported that as a PGRST116
+    // error. Only the discarded error made the no-template path work at all.
+    // Fails closed on a real error — a turnover created with no checklist
+    // reaches the crew PWA with nothing to complete, and nobody finds out until
+    // someone is standing in the unit. Creation is trivially retryable.
+    const templateRes = await supabase
       .from('checklist_templates')
       .select('id')
       .eq('property_id', property_id)
       .eq('is_default', true)
-      .single()
+      .maybeSingle()
+
+    if (reportQueryError(templateRes.error, { site: 'serverAction.turnovers.createManualTurnover.template', orgId: membership.org_id })) {
+      return { error: "Could not load the property's checklist template. Please try again." }
+    }
+    const template = templateRes.data
 
     const { data: turnover, error } = await supabase
       .from('turnovers')
@@ -491,33 +668,40 @@ export async function addCrewToTurnover(
   try {
     const { supabase, membership, user } = await requireOrgMember()
 
-    const { data: turnovers } = await supabase
-      .from('turnovers')
-      .select('id, property_id, status, checkout_datetime, checkin_datetime, suggestion_status, suggested_crew_ids')
-      .in('id', turnoverIds)
-      .eq('org_id', membership.org_id)
-
-    if (!turnovers?.length) return { error: 'Turnovers not found' }
-
-    const { data: crew } = await supabase
-      .from('crew_members')
-      .select('id, name')
-      .eq('id', crewMemberId)
-      .eq('org_id', membership.org_id)
-      .single()
-
-    if (!crew) return { error: 'Crew member not found' }
+    const targets = await loadAssignmentTargets<{
+      id: string; property_id: string; status: string
+      checkout_datetime: string; checkin_datetime: string
+      suggestion_status: string | null; suggested_crew_ids: string[] | null
+    }>(
+      supabase, membership.org_id, turnoverIds, crewMemberId,
+      'id, property_id, status, checkout_datetime, checkin_datetime, suggestion_status, suggested_crew_ids',
+    )
+    if (!targets.ok) return { error: targets.error }
+    const { turnovers, crew } = targets
 
     const verifiedIds = turnovers.map(t => t.id)
 
-    // Fetch all existing assignments for this crew + these turnovers in one query
-    const { data: currentAssignments } = await supabase
-      .from('turnover_assignments')
-      .select('turnover_id')
-      .in('turnover_id', verifiedIds)
-      .eq('crew_member_id', crewMemberId)
-
-    const alreadyAssigned = new Set((currentAssignments ?? []).map(a => a.turnover_id))
+    // Fetch all existing assignments for this crew + these turnovers in one query.
+    //
+    // Fails closed, before any write. A silent empty result here made
+    // `alreadyAssigned` empty, so `toInsert` became EVERY id, the batch insert
+    // collided with the pre-existing row, and the 23505 branch below returned
+    // { success: true } — skipping the pending->assigned advance, suggestion
+    // tracking, the crew push, and the audit row. The PM was told the
+    // assignment worked; the genuinely-new turnovers in the batch were never
+    // inserted at all, because the batch insert is all-or-nothing.
+    const assignedRows = await tryFetchAll<{ turnover_id: string }>(
+      (from, to) => supabase
+        .from('turnover_assignments')
+        .select('turnover_id')
+        .in('turnover_id', verifiedIds)
+        .eq('crew_member_id', crewMemberId)
+        .order('turnover_id')
+        .range(from, to),
+      'serverAction.turnovers.addCrewToTurnover.existing', membership.org_id,
+    )
+    if (assignedRows === null) return { error: 'Could not check existing assignments. Please try again.' }
+    const alreadyAssigned = new Set(assignedRows.map(a => a.turnover_id))
 
     // Batch insert only the missing assignments
     const toInsert = verifiedIds.filter(id => !alreadyAssigned.has(id))
@@ -545,12 +729,19 @@ export async function addCrewToTurnover(
     }
 
     const propertyIds = [...new Set(turnovers.map(t => t.property_id))]
-    const { data: propertyRows } = await supabase
-      .from('properties')
-      .select('id, bedrooms')
-      .in('id', propertyIds)
+    // Paginated: propertyIds is derived from a bulk turnover selection, and a
+    // large portfolio's bulk action can list more properties than the cap.
+    const propertyRows = await fetchAllRows<{ id: string; bedrooms: number | null }>(
+      (from, to) => supabase
+        .from('properties')
+        .select('id, bedrooms')
+        .in('id', propertyIds)
+        .order('id')
+        .range(from, to),
+      { label: 'turnovers.actions.propertyBedrooms' },
+    )
     const propertyBedrooms = Object.fromEntries(
-      (propertyRows ?? []).map(p => [p.id, p.bedrooms as number | null])
+      propertyRows.map(p => [p.id, p.bedrooms as number | null])
     )
     await trackAssignmentAgainstSuggestions(membership.org_id, crewMemberId, crew.name, turnovers, propertyBedrooms)
 
@@ -565,42 +756,40 @@ export async function addCrewToTurnover(
       metadata:   { turnover_ids: turnovers.map(t => t.id) },
     })
 
-    // Conflict detection — check for overlapping assignments for this crew member
-    const { data: existingAssignments } = await supabase
-      .from('turnover_assignments')
-      .select('turnover_id, turnovers!inner(checkout_datetime, checkin_datetime, status)')
-      .eq('crew_member_id', crewMemberId)
-      .not('turnovers.status', 'in', '("completed","cancelled")')
+    // Conflict detection — check for overlapping assignments for this crew member.
+    //
+    // This read runs AFTER the insert, so failing closed is not available — the
+    // assignment is already committed. It therefore has to degrade loudly: an
+    // empty result used to mean "no conflict", so a failed read double-booked
+    // one cleaner into two overlapping windows and showed the PM a clean
+    // success.
+    const existingAssignments = await tryFetchAll<{ turnover_id: string; turnovers: unknown }>(
+      (from, to) => supabase
+        .from('turnover_assignments')
+        .select('turnover_id, turnovers!inner(checkout_datetime, checkin_datetime, status)')
+        .eq('crew_member_id', crewMemberId)
+        .not('turnovers.status', 'in', '("completed","cancelled")')
+        .order('turnover_id')
+        .range(from, to),
+      'serverAction.turnovers.addCrewToTurnover.conflicts', membership.org_id,
+    )
 
-    let conflictCount = 0
-    for (const newT of turnovers) {
-      const newStart = new Date((newT as unknown as { checkout_datetime: string }).checkout_datetime).getTime()
-      const newEnd   = new Date((newT as unknown as { checkin_datetime: string }).checkin_datetime ?? (newT as unknown as { checkout_datetime: string }).checkout_datetime).getTime()
-      for (const a of (existingAssignments ?? [])) {
-        if (a.turnover_id === newT.id) continue
-        const existing_turnovers = unwrapJoin(a.turnovers)
-        if (!existing_turnovers) continue
-        const existStart = new Date(existing_turnovers.checkout_datetime).getTime()
-        const existEnd   = new Date(existing_turnovers.checkin_datetime).getTime()
-        if (newStart < existEnd && newEnd > existStart) conflictCount++
-      }
-    }
+    const conflictCount = countScheduleConflicts(turnovers, existingAssignments ?? [])
 
-    // Time-off check — non-blocking, since a PM may want to override
+    // Time-off check — non-blocking (a known conflict doesn't block), but an
+    // UNKNOWN one must not read as clean. See assignCrew for the full note.
     const turnoverDates = [...new Set(turnovers.map(t => t.checkout_datetime.split('T')[0]))]
-    const { data: timeOff } = await supabase
-      .from('crew_availability')
-      .select('available_date')
-      .eq('org_id', membership.org_id)
-      .eq('crew_member_id', crewMemberId)
-      .eq('is_available', false)
-      .in('available_date', turnoverDates)
-
-    const timeOffCount = timeOff?.length ?? 0
+    const timeOffRows = await fetchCrewTimeOff(
+      supabase, membership.org_id, crewMemberId, turnoverDates,
+      'serverAction.turnovers.addCrewToTurnover.timeOff',
+    )
+    const timeOffCount = timeOffRows?.length ?? 0
 
     revalidatePath('/turnovers')
     const warnings: string[] = []
+    if (existingAssignments === null) warnings.push(`Couldn't check ${crew.name}'s other assignments for conflicts — please verify manually.`)
     if (conflictCount > 0) warnings.push(`${crew.name} may have a scheduling conflict with ${conflictCount} other turnover(s).`)
+    if (timeOffRows === null) warnings.push(`Couldn't check ${crew.name}'s time off — please verify manually.`)
     if (timeOffCount > 0)  warnings.push(`${crew.name} marked time off on ${timeOffCount} of the assigned date(s).`)
 
     if (warnings.length > 0) return { success: true, warning: warnings.join(' ') }
@@ -614,6 +803,11 @@ export async function addCrewToTurnover(
 
 // ── Remove one crew member from a turnover ───────────────────────────────────
 
+/** Return shape of the `remove_crew_from_turnover(uuid, uuid, uuid)` RPC. */
+type RemoveCrewResult =
+  | { ok: true;  remaining: number; reverted: boolean }
+  | { ok: false; reason: 'turnover_not_found' | 'assignment_not_found' }
+
 export async function removeCrewFromTurnover(
   turnoverId: string,
   crewMemberId: string
@@ -621,31 +815,39 @@ export async function removeCrewFromTurnover(
   try {
     const { supabase, membership, user } = await requireOrgMember()
 
-    const { data: turnover } = await supabase
-      .from('turnovers')
-      .select('id, status')
-      .eq('id', turnoverId)
-      .eq('org_id', membership.org_id)
-      .single()
+    // One RPC, not read-then-delete-then-count-then-update. Two concurrent
+    // removals could each run their COUNT before the other's DELETE committed,
+    // both see a non-zero remaining count, both skip the revert, and leave the
+    // turnover `assigned` with zero crew — off the needs-assignment board, so
+    // nobody is prompted to staff it. The function takes FOR UPDATE on the
+    // turnover, making the whole decision atomic. The org scope is passed
+    // explicitly because SECURITY DEFINER skips RLS inside the body.
+    const { data: rpcResult, error: rpcError } = await supabase.rpc('remove_crew_from_turnover', {
+      p_turnover_id:    turnoverId,
+      p_crew_member_id: crewMemberId,
+      p_org_id:         membership.org_id,
+    })
 
-    if (!turnover) return { error: 'Turnover not found' }
+    if (rpcError || !rpcResult) {
+      console.error('[removeCrewFromTurnover] rpc', rpcError)
+      reportError(rpcError ?? new Error('remove_crew_from_turnover returned no result'), {
+        site: 'serverAction.turnovers.removeCrewFromTurnover.rpc',
+      })
+      return { error: 'Failed to remove crew member. Please try again.' }
+    }
 
-    await supabase
-      .from('turnover_assignments')
-      .delete()
-      .eq('turnover_id', turnoverId)
-      .eq('crew_member_id', crewMemberId)
+    const result = rpcResult as RemoveCrewResult
 
-    const { data: remaining } = await supabase
-      .from('turnover_assignments')
-      .select('id')
-      .eq('turnover_id', turnoverId)
-
-    if (!remaining?.length && turnover.status === 'assigned') {
-      await supabase
-        .from('turnovers')
-        .update({ status: 'pending_assignment' })
-        .eq('id', turnoverId)
+    // Previously a failed DELETE fell through to the count, saw the crew member
+    // still present, skipped the revert, and returned success — telling the PM
+    // someone was removed who was not. Now the two "nothing happened" cases are
+    // distinguishable and both reported.
+    if (!result.ok) {
+      return {
+        error: result.reason === 'turnover_not_found'
+          ? 'Turnover not found'
+          : 'That crew member is not assigned to this turnover.',
+      }
     }
 
     await logAuditEvent({
@@ -675,23 +877,23 @@ export async function bulkUpdateTurnoverStatus(
   try {
     const { supabase, membership } = await requireOrgMember()
 
-    // Only update turnovers that belong to this org and aren't already terminal.
-    // Fetch property_id/org_id alongside id for the completion events below.
-    const { data: eligible } = await supabase
+    // Eligibility is the WHERE clause, not an earlier read — the same fix
+    // updateTurnoverStatus already carries (see the comment there). This
+    // previously read `eligible`, then updated unconditionally with a fresh
+    // completed_at, then fanned out per row: two concurrent bulk completions
+    // both matched, both re-stamped completed_at, and both fired
+    // turnover/completed, so emit-completion-metric double-counted and the
+    // durations assignment_outcomes and crew scoring derive were corrupted.
+    // Only rows this UPDATE actually claimed come back, and only those emit.
+    const completedAt = new Date().toISOString()
+
+    const { data: completed, error } = await supabase
       .from('turnovers')
-      .select('id, property_id, org_id')
+      .update({ status, completed_at: completedAt })
       .in('id', turnoverIds)
       .eq('org_id', membership.org_id)
       .in('status', ['pending_assignment', 'assigned', 'in_progress', 'flagged'])
-
-    if (!eligible?.length) return { success: true }
-
-    const ids = eligible.map(t => t.id)
-
-    const { error } = await supabase
-      .from('turnovers')
-      .update({ status, completed_at: new Date().toISOString() })
-      .in('id', ids)
+      .select('id, property_id, org_id')
 
     if (error) {
       console.error('[bulkUpdateTurnoverStatus]', error)
@@ -699,11 +901,12 @@ export async function bulkUpdateTurnoverStatus(
       return { error: 'Operation failed. Please try again.' }
     }
 
+    if (!completed?.length) return { success: true }
+
     // Fire the same automation event single-completion uses.
     // One event per turnover so each has its own Inngest retry path.
-    const now = new Date().toISOString()
     await Promise.all(
-      eligible.map(t =>
+      completed.map(t =>
         inngest.send({
           name: 'turnover/completed',
           data: {
@@ -711,7 +914,7 @@ export async function bulkUpdateTurnoverStatus(
             property_id:          t.property_id,
             org_id:               t.org_id,
             completed_by_crew_id: '',  // PM-initiated bulk completion
-            completed_at:         now,
+            completed_at:         completedAt,
           },
         })
       )
@@ -826,13 +1029,17 @@ export async function acceptSuggestion(turnoverId: string): Promise<TurnoverActi
   try {
     const { supabase, membership, user } = await requireOrgMember()
 
-    const { data: turnover } = await supabase
+    const turnoverRes = await supabase
       .from('turnovers')
       .select('id, property_id, status, suggested_crew_ids')
       .eq('id', turnoverId)
       .eq('org_id', membership.org_id)
-      .single()
+      .maybeSingle()
 
+    if (reportQueryError(turnoverRes.error, { site: 'serverAction.turnovers.acceptSuggestion', orgId: membership.org_id })) {
+      return { error: 'Could not load that turnover. Please try again.' }
+    }
+    const turnover = turnoverRes.data
     if (!turnover) return { error: 'Turnover not found' }
 
     const crewIds = (turnover.suggested_crew_ids as string[] | null) ?? []
@@ -854,11 +1061,18 @@ export async function acceptSuggestion(turnoverId: string): Promise<TurnoverActi
       .eq('id', turnoverId)
 
     try {
-      const { data: property } = await supabase
+      // Optional: feeds property_bedrooms on the outcome rows, which already
+      // tolerate null. tryUnwrap so a failure is reported rather than silently
+      // degrading the crew-scoring feature set. maybeSingle so an absent
+      // property isn't reported as an error.
+      const propertyRes = await supabase
         .from('properties')
         .select('bedrooms')
         .eq('id', turnover.property_id)
-        .single()
+        .maybeSingle()
+
+      const propertyOut = tryUnwrap(propertyRes, { site: 'serverAction.turnovers.acceptSuggestion.bedrooms', orgId: membership.org_id })
+      const property = propertyOut.ok ? propertyOut.data : null
 
       const { createServiceClient } = await import('@/lib/supabase/server')
       const service = createServiceClient({ system: 'action:turnover-suggestion-tracking' })
@@ -911,12 +1125,23 @@ export async function dismissSuggestion(turnoverId: string): Promise<TurnoverAct
   try {
     const { supabase, membership, user } = await requireOrgMember()
 
-    const { data: turnover } = await supabase
+    // Fails closed BEFORE the dismissal write. A silent null here left
+    // crewIds empty, so the negative training signal was never recorded and the
+    // audit row below affirmatively logged `crew_ids: []` for a dismissal that
+    // did have suggested crew — a wrong row in the log someone reads during an
+    // incident. The update is idempotent, so returning early costs nothing and
+    // a retry gets both the dismissal and the outcome rows.
+    const turnoverRes = await supabase
       .from('turnovers')
       .select('property_id, suggested_crew_ids')
       .eq('id', turnoverId)
       .eq('org_id', membership.org_id)
-      .single()
+      .maybeSingle()
+
+    if (reportQueryError(turnoverRes.error, { site: 'serverAction.turnovers.dismissSuggestion', orgId: membership.org_id })) {
+      return { error: 'Could not load that turnover. Please try again.' }
+    }
+    const turnover = turnoverRes.data
 
     const { error } = await supabase
       .from('turnovers')
@@ -933,9 +1158,21 @@ export async function dismissSuggestion(turnoverId: string): Promise<TurnoverAct
     const crewIds = (turnover?.suggested_crew_ids as string[] | null) ?? []
     if (crewIds.length) {
       try {
-        const { data: property } = turnover?.property_id
-          ? await supabase.from('properties').select('bedrooms').eq('id', turnover.property_id).single()
-          : { data: null }
+        // Same optional-bedrooms read as acceptSuggestion. Written as a plain
+        // guarded await rather than a ternary: a PostgREST builder inside a
+        // ternary arm reads as a discarded lazy query, which is a shape worth
+        // not having in the tree even when this one was awaited.
+        let property: { bedrooms: number | null } | null = null
+        if (turnover?.property_id) {
+          const propertyRes = await supabase
+            .from('properties')
+            .select('bedrooms')
+            .eq('id', turnover.property_id)
+            .maybeSingle()
+
+          const propertyOut = tryUnwrap(propertyRes, { site: 'serverAction.turnovers.dismissSuggestion.bedrooms', orgId: membership.org_id })
+          property = propertyOut.ok ? propertyOut.data : null
+        }
 
         const { createServiceClient } = await import('@/lib/supabase/server')
         const service = createServiceClient({ system: 'action:turnover-suggestion-tracking' })
@@ -999,13 +1236,17 @@ export async function rateTurnoverCompletion(
       return { error: 'Rating must be between 1 and 5' }
     }
 
-    const { data: turnover } = await supabase
+    const turnoverRes = await supabase
       .from('turnovers')
       .select('id, status, turnover_assignments(crew_member_id)')
       .eq('id', turnoverId)
       .eq('org_id', membership.org_id)
-      .single()
+      .maybeSingle()
 
+    if (reportQueryError(turnoverRes.error, { site: 'serverAction.turnovers.rateTurnoverCompletion', orgId: membership.org_id })) {
+      return { error: 'Could not load that turnover. Please try again.' }
+    }
+    const turnover = turnoverRes.data
     if (!turnover) return { error: 'Turnover not found' }
     if (turnover.status !== 'completed') return { error: 'Only completed turnovers can be rated' }
 

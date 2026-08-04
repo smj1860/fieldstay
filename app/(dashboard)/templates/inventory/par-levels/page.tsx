@@ -2,15 +2,44 @@ import type { Metadata } from 'next'
 import { requireOrgMember } from '@/lib/auth'
 import { InventorySubnav } from '@/components/templates/inventory-subnav'
 import { ParLevelsBrowser } from './par-levels-browser'
+import { fetchAllRows } from '@/lib/inngest/paginate'
+import type { InventoryCategory } from '@/types/database'
+
+/** Mirrors ParLevelsBrowser's ItemRow — the columns this page selects. */
+interface ParLevelItem {
+  id:                 string
+  property_id:        string
+  catalog_item_id:    string | null
+  source_template_id: string | null
+  name:               string
+  category:           InventoryCategory
+  unit:               string
+  par_level:          number
+  preferred_brand:    string | null
+}
 
 export const metadata: Metadata = { title: 'Par Levels — Templates — FieldStay' }
 
 export default async function ParLevelsPage() {
   const { supabase, membership } = await requireOrgMember()
 
+  // Paginated: org-wide inventory_items crosses PostgREST's max_rows = 1000 at
+  // roughly 15 properties (~67 items each), and a bare .select() truncates
+  // there silently with a 200 — this browser would simply stop showing par
+  // levels for the rest of the portfolio.
+  const itemsPromise = fetchAllRows<ParLevelItem>(
+    (from, to) => supabase
+      .from('inventory_items')
+      .select('id, property_id, catalog_item_id, source_template_id, name, category, unit, par_level, preferred_brand')
+      .eq('org_id', membership.org_id)
+      .eq('is_active', true)
+      .order('id')
+      .range(from, to),
+    { label: 'page.templates.par-levels.inventory_items' },
+  )
+
   const [
     { data: properties, error: propertiesError },
-    { data: items, error: itemsError },
     { data: templates, error: templatesError },
     { data: catalogItems, error: catalogError },
   ] = await Promise.all([
@@ -20,11 +49,6 @@ export default async function ParLevelsPage() {
       .eq('org_id', membership.org_id)
       .eq('is_active', true)
       .order('name'),
-    supabase
-      .from('inventory_items')
-      .select('id, property_id, catalog_item_id, source_template_id, name, category, unit, par_level, preferred_brand')
-      .eq('org_id', membership.org_id)
-      .eq('is_active', true),
     supabase
       .from('inventory_templates')
       .select('id, name')
@@ -38,9 +62,10 @@ export default async function ParLevelsPage() {
   ])
 
   if (propertiesError) console.error('[ParLevelsPage] properties query failed', propertiesError)
-  if (itemsError)      console.error('[ParLevelsPage] inventory_items query failed', itemsError)
   if (templatesError)  console.error('[ParLevelsPage] templates query failed', templatesError)
   if (catalogError)    console.error('[ParLevelsPage] catalog query failed', catalogError)
+
+  const items = await itemsPromise
 
   const templateNameById: Record<string, string> = {}
   for (const template of templates ?? []) templateNameById[template.id] = template.name

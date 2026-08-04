@@ -72,7 +72,9 @@ function makeSupabase(queued: QueuedByTable = {}) {
   return { from, auth }
 }
 
-const VALID_TOKEN = '11111111-1111-1111-1111-111111111111'
+// org_invites.token is `encode(gen_random_bytes(32), 'hex')` — 64 hex chars,
+// NOT a uuid. A uuid fixture here is what let the .uuid() validation bug ship.
+const VALID_TOKEN = 'a'.repeat(64)
 
 function validFormData(overrides: Record<string, string> = {}) {
   const fd = new FormData()
@@ -95,11 +97,11 @@ describe('accept-invite/[token]/actions — acceptTeamInvite', () => {
     vi.mocked(adminFetch).mockResolvedValue(fetchNoExistingUser())
   })
 
-  it('rejects an invalid (non-UUID) token before touching the DB', async () => {
+  it('rejects a malformed token before touching the DB', async () => {
     const supabase = makeSupabase()
     vi.mocked(createServiceClient).mockReturnValue(supabase as never)
 
-    const result = await acceptTeamInvite(validFormData({ token: 'not-a-uuid' }))
+    const result = await acceptTeamInvite(validFormData({ token: 'not-a-valid-token' }))
 
     expect(result.error).toBeTruthy()
     expect(supabase.from).not.toHaveBeenCalled()
@@ -193,5 +195,27 @@ describe('accept-invite/[token]/actions — acceptTeamInvite', () => {
     vi.mocked(createClient).mockResolvedValue({ auth: { signInWithPassword } } as never)
 
     await expect(acceptTeamInvite(validFormData())).rejects.toThrow('REDIRECT:/login')
+  })
+})
+
+// ── Regression: the token shape must match what the DB actually generates ──
+// This flow had 0 rows in production, so a validation mismatch was invisible
+// until the first real invite. Asserting against the DB's own default is the
+// only thing that would have caught it.
+describe('accept-invite token shape matches org_invites.token', () => {
+  // encode(gen_random_bytes(32), 'hex') — verified against the live column
+  // default on 2026-07-31.
+  const REAL_SHAPE = 'fdd66d07b22f03ced09b0608bb2e31e1ddd2d4339a0ae0dfa4d8c87e788fb436'
+
+  it('accepts a token of the shape the database generates', async () => {
+    const result = await acceptTeamInvite(validFormData({ token: REAL_SHAPE }))
+    expect(result?.error).not.toBe('Invite link is invalid or expired')
+  })
+
+  it('rejects a uuid — that is the crew_members.invite_token shape, not this one', async () => {
+    const result = await acceptTeamInvite(
+      validFormData({ token: '11111111-1111-1111-1111-111111111111' }),
+    )
+    expect(result?.error).toBe('Invite link is invalid or expired')
   })
 })

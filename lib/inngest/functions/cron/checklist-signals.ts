@@ -1,6 +1,8 @@
 import { inngest }             from '@/lib/inngest/client'
 import { createServiceClient } from '@/lib/supabase/server'
 import { unwrapJoin }          from '@/lib/utils/supabase-joins'
+import type { TablesInsert }   from '@/types/database'
+import { unwrapList }          from '@/lib/supabase/unwrap'
 
 const ALPHA_PRIOR = 2  // prior: assume "probably clean"
 const BETA_PRIOR  = 1  // prior: with small upward bias on flag probability
@@ -37,22 +39,27 @@ export const computeChecklistSignals = inngest.createFunction(
 
       type Page = Awaited<ReturnType<typeof fetchPage>>
       async function fetchPage(offset: number) {
-        const { data } = await supabase
+        // The discarded error on this read is exactly what hid the
+        // checklist_instances.property_id bug: PostgREST rejected the whole
+        // select on the unknown column, `data` came back null, `data ?? []`
+        // turned that into "no completions", and the cron reported success
+        // while computing nothing for months. unwrapList throws instead.
+        const res = await supabase
           .from('checklist_instance_items')
           .select(`
             id, section_name, task,
             crew_notes, photo_storage_path, requires_photo,
             is_completed, completed_at,
             checklist_instances!inner (
-              property_id,
-              turnovers!inner ( org_id )
+              turnovers!inner ( org_id, property_id )
             )
           `)
           .eq('is_completed', true)
           .gte('completed_at', windowStart)
           .order('completed_at', { ascending: false })
           .range(offset, offset + FETCH_PAGE_SIZE - 1)
-        return data ?? []
+
+        return unwrapList(res, { site: 'inngest.checklist-signals.fetch-windowed-completions' })
       }
 
       const all: Page = []
@@ -74,16 +81,16 @@ export const computeChecklistSignals = inngest.createFunction(
       const inst = unwrapJoin(item.checklist_instances)
       if (!inst) continue
 
-      const turnoversRaw = (inst as unknown as { turnovers: { org_id: string } | { org_id: string }[] }).turnovers
-      const tvo = unwrapJoin(turnoversRaw)
-      if (!tvo?.org_id) continue
+      const tvo = unwrapJoin(inst.turnovers)
+      if (!tvo?.org_id || !tvo.property_id) continue
 
-      const key = `${(inst as { property_id: string }).property_id}|${item.section_name}|${item.task}|${tvo.org_id}`
+      const key = `${tvo.property_id}|${item.section_name}|${item.task}|${tvo.org_id}`
       if (!groups.has(key)) groups.set(key, [])
       groups.get(key)!.push(item)
     }
 
-    const upserts: object[] = []
+    const upserts: TablesInsert<'checklist_item_signals'>[] = []
+    let required = 0
 
     for (const [key, completions] of groups) {
       const [property_id, section_name, task, org_id] = key.split('|') as [string, string, string, string]
@@ -113,6 +120,7 @@ export const computeChecklistSignals = inngest.createFunction(
       // Human-readable reason — shown to crew + PM so they understand why
       let reason: string | null = null
       if (flagProb >= PHOTO_THRESHOLD) {
+        required++
         if (consecutive >= 3) {
           reason = `Flagged on ${consecutive} consecutive turnovers`
         } else if (total_completions < 5) {
@@ -148,11 +156,6 @@ export const computeChecklistSignals = inngest.createFunction(
           })
       }
     })
-
-    const required = upserts.filter((u) => {
-      const typed = u as { alpha: number; beta: number }
-      return typed.beta / (typed.alpha + typed.beta) >= PHOTO_THRESHOLD
-    }).length
 
     logger.info(`[checklistSignals] Upserted ${upserts.length} signals, ${required} requiring photo`)
     return { computed: upserts.length, photo_required: required }

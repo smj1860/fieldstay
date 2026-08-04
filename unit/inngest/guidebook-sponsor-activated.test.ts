@@ -112,7 +112,12 @@ describe('guidebookSponsorActivated', () => {
     const supabase = makeSupabase({
       guidebook_sponsors: [{ data: null, error: null }],
       guidebook_configurations: [
-        { data: { trial_ends_at: '2026-08-01T00:00:00.000Z' }, error: null }, // trial ends in the future
+        // Relative, not hardcoded. This was '2026-08-01T00:00:00.000Z' with the
+        // comment "trial ends in the future" — true when written, false from
+        // 2026-08-01T00:00:00Z onward, at which point the test began failing
+        // permanently. A fixture asserting "in the future" must be computed
+        // from now, or it dates itself.
+        { data: { trial_ends_at: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString() }, error: null },
         { data: null, error: null },
       ],
     })

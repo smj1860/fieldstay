@@ -53,8 +53,10 @@ export async function checkDemoOfflineReadiness(
     workOrders,
     assets,
   ] = await Promise.all([
-    db.mutations.filter((m) => m.failed !== true).count(),
-    db.mutations.filter((m) => m.failed === true).count(),
+    db.mutations.filter((m) => !m.failed).count(),
+    // `failed` is 0/1, not a boolean (IndexedDB can't index booleans) — so this
+    // is an index-backed count rather than a full scan of the outbox.
+    db.mutations.where('failed').equals(1).count(),
     db.turnovers.count(),
     db.properties.count(),
     db.checklist_instances.count(),

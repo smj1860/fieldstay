@@ -22,7 +22,7 @@
 
 import type { SupabaseClient } from '@supabase/supabase-js'
 import { getDexieDb, isDexieShutdown, type PendingPhotoUploadRow } from './schema'
-import { computeNextAttemptAt, enqueueMutation } from './syncService'
+import { computeNextAttemptAt, enqueueMutationTx, getSyncEngine } from './syncService'
 import { getPendingPhotoBlob, deletePendingPhotoBlob } from './photo-queue'
 import { isOnline, withTabLock, classifyUploadFailure, UploadDataError } from './net'
 import { hasAnyOrgPrefix, orgScopedStoragePath } from '../storage/object-path'
@@ -84,12 +84,12 @@ export async function retryFailedPhotoUploads(
   targetId?: string,
 ): Promise<void> {
   const db = getDexieDb(userId)
-  const failed = (await db.pending_photo_uploads.toArray())
-    .filter((row) => row.failed && (targetId === undefined || row.target_id === targetId))
+  const failed = (await db.pending_photo_uploads.where('failed').equals(1).toArray())
+    .filter((row) => targetId === undefined || row.target_id === targetId)
 
   for (const row of failed) {
     await db.pending_photo_uploads.update(row.id, {
-      failed:              false,
+      failed:              0,
       retry_count:         0,
       network_retry_count: 0,
       next_attempt_at:     0,
@@ -100,37 +100,49 @@ export async function retryFailedPhotoUploads(
   void processPendingPhotoUploads(supabase, userId)
 }
 
+/**
+ * Writes the uploaded path into the local cache AND queues it for the server,
+ * in one transaction — same atomicity requirement as every helper in
+ * lib/dexie/helpers.ts. As two transactions, an app kill between them left the
+ * cache showing a photo the server would never learn about, with no outbox row
+ * and so nothing in the failed-sync surface.
+ */
 async function applyUploadedPath(
   userId: string,
   row: PendingPhotoUploadRow,
 ): Promise<void> {
   const db = getDexieDb(userId)
 
-  if (row.target_table === 'checklist_instance_items') {
-    await db.checklist_instance_items.update(row.target_id, { photo_storage_path: row.storage_path })
-    await enqueueMutation(userId, 'checklist_instance_items', row.target_id, 'PATCH', {
-      photo_storage_path: row.storage_path,
-    })
-    return
-  }
+  await db.transaction('rw', db.mutations, db.checklist_instance_items,
+    db.checklist_instances, db.property_assets, async () => {
+      if (row.target_table === 'checklist_instance_items') {
+        await db.checklist_instance_items.update(row.target_id, { photo_storage_path: row.storage_path })
+        await enqueueMutationTx(db, 'checklist_instance_items', row.target_id, 'PATCH', {
+          photo_storage_path: row.storage_path,
+        })
+        return
+      }
 
-  if (row.target_table === 'checklist_instances') {
-    await db.checklist_instances.update(row.target_id, { section_photo_path: row.storage_path ?? '' })
-    await enqueueMutation(userId, 'checklist_instances', row.target_id, 'PATCH', {
-      section_photo_path: row.storage_path,
-    })
-    return
-  }
+      if (row.target_table === 'checklist_instances') {
+        await db.checklist_instances.update(row.target_id, { section_photo_path: row.storage_path ?? '' })
+        await enqueueMutationTx(db, 'checklist_instances', row.target_id, 'PATCH', {
+          section_photo_path: row.storage_path,
+        })
+        return
+      }
 
-  // property_assets.photo_url stores the BARE object key, same as the two
-  // targets above. It used to hold a getPublicUrl() result, but turnover-photos
-  // is a private bucket now: a public URL 400s and a signed one expires, so the
-  // stable key is what gets persisted and readers sign it on demand.
-  await db.property_assets.update(row.target_id, { photo_url: row.storage_path! })
-  await enqueueMutation(userId, 'property_assets', row.target_id, 'PATCH', {
-    photo_url:   row.storage_path,
-    scanRequest: { storagePath: row.storage_path, mediaType: 'image/jpeg' },
-  })
+      // property_assets.photo_url stores the BARE object key, same as the two
+      // targets above. It used to hold a getPublicUrl() result, but turnover-photos
+      // is a private bucket now: a public URL 400s and a signed one expires, so the
+      // stable key is what gets persisted and readers sign it on demand.
+      await db.property_assets.update(row.target_id, { photo_url: row.storage_path! })
+      await enqueueMutationTx(db, 'property_assets', row.target_id, 'PATCH', {
+        photo_url:   row.storage_path,
+        scanRequest: { storagePath: row.storage_path, mediaType: 'image/jpeg' },
+      })
+    })
+
+  void getSyncEngine(userId).processOutbox()
 }
 
 /**
@@ -220,7 +232,7 @@ async function recordPhotoFailure(userId: string, row: PendingPhotoUploadRow, er
     // eventually collects one the crew never acts on.
     await db.pending_photo_uploads.update(row.id, {
       retry_count: retryCount,
-      failed:      true,
+      failed:      1,
       last_error:  message,
     })
     return
@@ -272,8 +284,16 @@ async function drainPhotoQueue(supabase: SupabaseClient, userId: string): Promis
 
     const blob = await getPendingPhotoBlob(userId, row.local_blob_key)
     if (!blob) {
-      // Blob missing (cleared browser storage, etc.) — nothing to upload
-      await db.pending_photo_uploads.delete(row.id)
+      // The bytes are gone (storage cleared, evicted under quota pressure, or
+      // the blob write never landed) — so this photo can never be sent. Deleting
+      // the row outright, as this did, made that indistinguishable from a
+      // successful upload: the crew member's photo silently ceased to exist with
+      // nothing anywhere saying so. Dead-letter it instead, so it lands on the
+      // failed-sync surface where they can at least see it and retake it.
+      await db.pending_photo_uploads.update(row.id, {
+        failed:     1,
+        last_error: 'Photo data was cleared from this device',
+      })
       continue
     }
 

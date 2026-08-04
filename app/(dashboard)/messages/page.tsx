@@ -51,7 +51,11 @@ export default async function MessagesPage({
     <MessagesClient
       currentUserId={user.id}
       orgId={membership.org_id}
-      crew={(crew ?? []).map((c) => ({ id: c.id, name: c.name, specialty: c.specialty, user_id: c.user_id as string }))}
+      // The query filters user_id NOT NULL, but a row filter narrows rows, not
+      // types — re-check here so no assertion is load-bearing.
+      crew={(crew ?? []).flatMap((c) =>
+        c.user_id === null ? [] : [{ id: c.id, name: c.name, specialty: c.specialty, user_id: c.user_id }]
+      )}
       initialMessages={pageItems}
       hasMore={hasMore}
       oldestTimestamp={oldestTs}

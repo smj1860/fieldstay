@@ -7,6 +7,8 @@
  *
  * Naming convention: "domain/action"
  */
+import type { Enums } from '@/types/database'
+
 
 export type FieldStayEvents = {
 
@@ -183,7 +185,9 @@ export type FieldStayEvents = {
       work_order_id: string
       property_id:   string
       org_id:        string
-      category:      string
+      // The work order's own category enum — NOT vendor_specialty, which is a
+      // different (smaller) set. auto-assign-vendor maps between them.
+      category:      Enums<'wo_category'>
     }
   }
 
@@ -521,7 +525,7 @@ export type FieldStayEvents = {
   'asset/manual_lookup.requested': {
     data: {
       org_id:     string
-      asset_type: string
+      asset_type: Enums<'asset_type'>
       make:       string
       model:      string
     }
@@ -619,6 +623,10 @@ export type FieldStayEvents = {
   'billing/trial-lifecycle-start': {
     data: {
       org_id:        string
+      // Optional: events already in flight when this was added carry no
+      // user_id, and the churn-feedback email degrades to not sending rather
+      // than sending a commercial message with no opt-out link.
+      user_id?:      string
       user_email:    string
       first_name:    string
       org_name:      string
@@ -988,6 +996,22 @@ export type FieldStayEvents = {
     data: {
       org_id:   string
       tax_year: number
+    }
+  }
+
+  // Guest pre-arrival guidebook emails, fanned out one per org by
+  // guidebookPreArrivalEmailCron. The handler loads its OWN org's eligible
+  // bookings — the platform-wide booking list is deliberately not carried on
+  // the event, which is what keeps the per-run step count proportional to one
+  // tenant's check-ins rather than the whole platform's.
+  //
+  // checkin_date rides along so a retry re-uses the date the dispatcher
+  // computed, rather than re-reading the wall clock and drifting to the next
+  // day mid-run.
+  'org/guidebook_pre_arrival.requested': {
+    data: {
+      org_id:       string
+      checkin_date: string
     }
   }
 

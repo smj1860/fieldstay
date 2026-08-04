@@ -1,16 +1,32 @@
+import { toDbEnum } from '@/lib/db-enums'
 import type { Metadata } from 'next'
 import { requireOrgMember } from '@/lib/auth'
 import { InventorySubnav } from '@/components/templates/inventory-subnav'
 import { SavedTemplatesBrowser } from './saved-templates-browser'
+import { fetchAllRows } from '@/lib/inngest/paginate'
 
 export const metadata: Metadata = { title: 'Saved Inventory Templates — Templates — FieldStay' }
 
 export default async function SavedInventoryTemplatesPage() {
   const { supabase, membership } = await requireOrgMember()
 
+  // Paginated: this counts template usage across the WHOLE org's inventory
+  // items, so a bare .select() silently truncates at PostgREST's max_rows =
+  // 1000 (~15 properties) and the "used by N properties" figures below just
+  // start under-reporting, with no error anywhere.
+  const usageRowsPromise = fetchAllRows<{ source_template_id: string | null; property_id: string }>(
+    (from, to) => supabase
+      .from('inventory_items')
+      .select('source_template_id, property_id')
+      .eq('org_id', membership.org_id)
+      .not('source_template_id', 'is', null)
+      .order('id')
+      .range(from, to),
+    { label: 'page.templates.saved.inventory_items' },
+  )
+
   const [
     { data: templates, error: templatesError },
-    { data: usageRows, error: usageError },
     { data: properties, error: propertiesError },
   ] = await Promise.all([
     supabase
@@ -18,11 +34,6 @@ export default async function SavedInventoryTemplatesPage() {
       .select('id, name, description, inventory_template_items(id, name, category, unit, par_level, notes, preferred_brand, sort_order)')
       .eq('org_id', membership.org_id)
       .order('name'),
-    supabase
-      .from('inventory_items')
-      .select('source_template_id, property_id')
-      .eq('org_id', membership.org_id)
-      .not('source_template_id', 'is', null),
     supabase
       .from('properties')
       .select('id, name')
@@ -32,8 +43,9 @@ export default async function SavedInventoryTemplatesPage() {
   ])
 
   if (templatesError)  console.error('[SavedInventoryTemplatesPage] templates query failed', templatesError)
-  if (usageError)      console.error('[SavedInventoryTemplatesPage] usage query failed', usageError)
   if (propertiesError) console.error('[SavedInventoryTemplatesPage] properties query failed', propertiesError)
+
+  const usageRows = await usageRowsPromise
 
   const propertyNameById: Record<string, string> = {}
   for (const property of properties ?? []) propertyNameById[property.id] = property.name
@@ -77,8 +89,10 @@ export default async function SavedInventoryTemplatesPage() {
             .map((item) => ({
               id:              item.id,
               name:            item.name,
-              category:        item.category,
-              unit:            item.unit,
+              // inventory_template_items.category/unit are NULLABLE text —
+              // unlike inventory_items, where category is a NOT NULL enum.
+              category:        toDbEnum('inventory_category', item.category, 'other'),
+              unit:            item.unit ?? 'units',
               par_level:       item.par_level,
               notes:           item.notes,
               preferred_brand: item.preferred_brand,

@@ -23,7 +23,10 @@ function makeSupabase(opts: {
       const chain: Record<string, unknown> = {}
       chain.select = vi.fn(() => chain)
       chain.eq     = vi.fn(() => chain)
-      chain.single = vi.fn(() => Promise.resolve({ data: opts.membership ?? null, error: null }))
+      chain.single      = vi.fn(() => Promise.resolve({ data: opts.membership ?? null, error: null }))
+      // The membership read uses maybeSingle() so a non-member is data:null
+      // rather than PGRST116.
+      chain.maybeSingle = chain.single
       return chain
     }
     if (table === 'push_subscriptions') {

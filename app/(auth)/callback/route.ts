@@ -65,7 +65,9 @@ export async function GET(request: NextRequest) {
       action:     'auth.account.created',
       targetType: 'user',
       targetId:   session.user.id,
-      metadata:   { email: session.user.email },
+      // Intentionally omit the address — no PII in audit metadata. targetId
+      // is the auth user id, which resolves to the account either way.
+      metadata:   { provider: session.user.app_metadata?.provider ?? 'unknown' },
     }).catch(() => {})
   }
 

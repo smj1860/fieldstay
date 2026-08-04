@@ -11,6 +11,8 @@ import { getManualUrlForAsset } from '@/lib/assets/manual-lookup'
 import { unwrapJoin }          from '@/lib/utils/supabase-joins'
 
 import { reportError } from '@/lib/observability/report-error'
+import { tryUnwrap }   from '@/lib/supabase/unwrap'
+import { checkLimit, emailSendActionLimiter } from '@/lib/rate-limit'
 const TOKEN_TTL_DAYS = 30
 const APP_URL        = process.env.NEXT_PUBLIC_APP_URL ?? 'https://app.fieldstay.com'
 
@@ -33,6 +35,20 @@ export async function dispatchWorkOrderToVendor(input: {
   try {
     const { supabase, membership, user } = await requireOrgMember()
 
+    // This action sends an email AND an SMS to addresses that arrive in the
+    // request body. Without a limiter, one authenticated trial user could loop
+    // it over attacker-chosen recipients — bounded only by Vercel concurrency
+    // — and relay from our sending domain and our Telnyx number. Resend's
+    // idempotency key includes the recipient, so varying it defeats that too.
+    // Keyed per user: the org is not the thing being abused.
+    const limit = await checkLimit(emailSendActionLimiter, user.id, {
+      onError: 'allow',   // abuse limiter, not a spend ceiling — see lib/rate-limit.ts
+      site:    'serverAction.work-order-public.dispatchWorkOrderToVendor',
+    })
+    if (!limit.allowed) {
+      return { error: 'Too many vendor dispatches in the last hour. Please try again shortly.' }
+    }
+
     const { data: wo, error: fetchErr } = await supabase
       .from('work_orders')
       .select(`
@@ -51,6 +67,33 @@ export async function dispatchWorkOrderToVendor(input: {
       return { error: 'This work order has been cancelled' }
     }
 
+    // The recipient is NEVER taken from the request body. `vendorEmail` and
+    // `vendorPhone` used to be relayed verbatim to Resend and Telnyx, which
+    // made this action a general-purpose email/SMS relay for anyone with a
+    // trial account — and the Resend idempotency key contains the recipient,
+    // so looping over addresses defeated that too. Resolve the vendor from our
+    // own records, scoped to the caller's org, and send only to the contact
+    // details that row carries.
+    const vendorRes = await supabase
+      .from('vendors')
+      .select('id, name, email, phone')
+      .eq('org_id', membership.org_id)
+      .ilike('email', input.vendorEmail.trim())
+      .limit(1)
+      .maybeSingle()
+
+    const vendorOut = tryUnwrap<{ id: string; name: string; email: string | null; phone: string | null }>(
+      vendorRes, { site: 'serverAction.work-order-public.dispatchWorkOrderToVendor.vendor', orgId: membership.org_id },
+    )
+    if (!vendorOut.ok) return { error: 'Could not verify the vendor. Please try again.' }
+    if (!vendorOut.data?.email) {
+      return { error: 'That vendor is not in your address book, or has no email on file.' }
+    }
+
+    const vendorEmail = vendorOut.data.email
+    const vendorName  = vendorOut.data.name
+    const vendorPhone = vendorOut.data.phone
+
     const token     = generatePublicToken()
     const expiresAt = new Date()
     expiresAt.setDate(expiresAt.getDate() + TOKEN_TTL_DAYS)
@@ -60,7 +103,7 @@ export async function dispatchWorkOrderToVendor(input: {
       .update({
         completion_token:            token,
         completion_token_expires_at: expiresAt.toISOString(),
-        vendor_dispatch_email:       input.vendorEmail,
+        vendor_dispatch_email:       vendorEmail,
       })
       .eq('id', input.workOrderId)
 
@@ -92,8 +135,8 @@ export async function dispatchWorkOrderToVendor(input: {
         woNumber:         wo.wo_number ?? '',
         token,
         publicUrl:        `${APP_URL}/work-orders/${token}`,
-        vendorEmail:      input.vendorEmail,
-        vendorName:       input.vendorName,
+        vendorEmail:      vendorEmail,
+        vendorName:       vendorName,
         propertyName:     (property as { name: string } | null)?.name  ?? 'Property',
         propertyAddress:  (property as { address: string | null } | null)?.address ?? '',
         title:            wo.title,
@@ -107,10 +150,10 @@ export async function dispatchWorkOrderToVendor(input: {
     })
 
     // SMS — send alongside the dispatched email when vendor has a mobile number
-    if (input.vendorPhone) {
+    if (vendorPhone) {
       const { normalizePhoneToE164, sendSMS } = await import('@/lib/sms/telnyx')
 
-      const e164 = normalizePhoneToE164(input.vendorPhone)
+      const e164 = normalizePhoneToE164(vendorPhone)
       if (e164) {
         const nteAmt     = (wo.nte_amount as number | null) ?? 0
         const nteLine    = nteAmt > 0 ? `\nNTE: $${nteAmt.toLocaleString()}` : ''
@@ -119,7 +162,7 @@ export async function dispatchWorkOrderToVendor(input: {
 
         try {
           const smsBody = await renderSmsBody(membership.org_id, 'vendor_work_order', {
-            vendor_name:   input.vendorName,
+            vendor_name:   vendorName,
             wo_number:     wo.wo_number ?? '',
             property_name: propName,
             pm_name:       profile?.full_name ?? 'Your Property Manager',
@@ -279,11 +322,17 @@ async function uploadSignOffPhotos(
       console.error('[submitWorkOrderSignOff] photo upload', uploadErr)
       continue
     }
-    await supabase.from('work_order_photos').insert({
+    // work_order_photos has created_at (DEFAULT now()), NOT uploaded_at —
+    // naming a column that does not exist made PostgREST reject the whole
+    // insert, and the discarded result meant every vendor sign-off photo
+    // landed in the bucket and was then never linked to its work order.
+    const { error: insertErr } = await supabase.from('work_order_photos').insert({
       work_order_id: workOrderId,
       storage_path:  path,
-      uploaded_at:   new Date().toISOString(),
     })
+    if (insertErr) {
+      console.error('[submitWorkOrderSignOff] photo row insert', insertErr)
+    }
   }
 }
 

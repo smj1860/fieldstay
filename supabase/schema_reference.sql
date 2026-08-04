@@ -1,6 +1,38 @@
 --
 -- FieldStay — Supabase schema_reference.sql
 --
+-- ############################################################################
+-- ## KNOWN INACCURACY — READ BEFORE TRUSTING A COLUMN DEFINITION HERE.      ##
+-- ##                                                                        ##
+-- ## This file does NOT record GENERATED ALWAYS columns as generated. It    ##
+-- ## renders them as ordinary columns with a plain DEFAULT. Example:        ##
+-- ##                                                                        ##
+-- ##   this file:  line_total  numeric(10,2)  DEFAULT (quantity * unit_cost)##
+-- ##   live DB:    line_total  GENERATED ALWAYS AS (quantity * unit_cost)   ##
+-- ##                                                                        ##
+-- ## That difference is not cosmetic. Naming a generated column in an       ##
+-- ## INSERT/UPDATE payload makes Postgres reject the WHOLE statement with   ##
+-- ## 428C9. On 2026-08-01 this cost two live silent-data-loss bugs:         ##
+-- ## every vendor work-order completion persisted ZERO line items, and the  ##
+-- ## assignment_outcomes learning loop recorded no durations at all —       ##
+-- ## because both writes named a generated column and both only logged the  ##
+-- ## error. Reading this file made each insert look correct.                ##
+-- ##                                                                        ##
+-- ## The four generated columns as of 2026-08-01 (verified against          ##
+-- ## information_schema.columns.is_generated on the live project):          ##
+-- ##   work_order_line_items.line_total                                     ##
+-- ##   assignment_outcomes.duration_minutes                                 ##
+-- ##   checklist_item_signals.flag_probability                              ##
+-- ##   checklist_item_signals.dynamic_photo_required                        ##
+-- ## unit/guardrails/generated-column-writes.test.ts fails the build on any ##
+-- ## write payload naming one.                                              ##
+-- ##                                                                        ##
+-- ## ALSO: the Generated timestamp below is 2026-07-07. Dozens of           ##
+-- ## migrations have landed since. For anything load-bearing, query the     ##
+-- ## live database — CLAUDE.md already states it is authoritative over this ##
+-- ## snapshot, and this is a concrete instance of why.                      ##
+-- ############################################################################
+--
 -- Generated: 2026-07-07T15:09:51Z (UTC)  (sections 1-3 pulled ~15:00-15:07, sections 4-6 ~15:09 — all within the same generation pass)
 --
 -- This file was generated via Supabase MCP tool introspection (execute_sql /

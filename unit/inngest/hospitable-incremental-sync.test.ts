@@ -94,6 +94,11 @@ function makeSupabase(queued: QueuedByTable) {
     chain.update = (...a: unknown[]) => record('update', a)
     chain.upsert = (...a: unknown[]) => record('upsert', a)
     chain.eq     = (...a: unknown[]) => record('eq', a)
+    // fetchTurnoverCreatedEvents drains via fetchAllRows(), which calls
+    // .order().range(). The chain is already thenable, so returning it
+    // resolves one page and terminates the pagination loop.
+    chain.order  = (...a: unknown[]) => record('order', a)
+    chain.range  = (...a: unknown[]) => record('range', a)
     chain.in     = (...a: unknown[]) => record('in', a)
     chain.not    = (...a: unknown[]) => record('not', a)
     chain.limit  = (...a: unknown[]) => record('limit', a)

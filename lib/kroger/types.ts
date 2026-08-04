@@ -59,7 +59,10 @@ export interface CartBuildResult {
   total_est?:      number
 }
 
-export interface MatchedItem {
+// A type alias, not an interface: MatchedItem is persisted into a jsonb
+// column (org_milestones.value), and only a type alias has the implicit index
+// signature that makes it assignable to Json.
+export type MatchedItem = {
   original_name:  string
   product_id:     string
   upc:            string

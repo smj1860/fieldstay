@@ -10,7 +10,13 @@ import { getManualUrlForAsset } from '@/lib/assets/manual-lookup'
 import { reportError }          from '@/lib/observability/report-error'
 
 export const handleWorkOrderVendorAssigned = inngest.createFunction(
-  { id: 'work-order-vendor-assigned', name: 'Work Order: Vendor Assigned', retries: 2 },
+  {
+    id: 'work-order-vendor-assigned', name: 'Work Order: Vendor Assigned', retries: 2,
+    // Batch-dispatched (a bulk vendor assignment emits one per work order) and
+    // notifies the vendor externally.
+    concurrency: { limit: 5 },
+    throttle:    { limit: 60, period: '1m' },
+  },
   { event: 'work-order/vendor.assigned' },
   async ({ event, step, logger }) => {
     const { workOrderId, orgId, vendorId } = event.data

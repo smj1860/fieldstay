@@ -2,7 +2,7 @@ import { NextResponse, type NextRequest } from 'next/server'
 import { updateSession } from '@/lib/supabase/middleware'
 import {
   workOrderRatelimit, vendorConnectRatelimit, ownerPortalRatelimit, guidebookRatelimit,
-  oauthCallbackRatelimit, demoRatelimit,
+  oauthCallbackRatelimit, demoRatelimit, unsubscribeRatelimit,
   checkLimit, retryAfterSeconds,
 } from '@/lib/rate-limit'
 import { extractClientIp } from '@/lib/integrations/webhook-verification'
@@ -107,6 +107,15 @@ const TOKEN_ROUTES = [
   // guarding endpoints no guest could reach. TOKEN_ROUTES (not BYPASS_ROUTES)
   // so the per-IP throttle below still applies.
   '/api/guidebook',
+
+  // CAN-SPAM opt-out. Reachable without a session by legal requirement — the
+  // recipient must be able to unsubscribe without logging in — so the 64-char
+  // token is the only credential and this belongs in TOKEN_ROUTES (throttled),
+  // not BYPASS_ROUTES. Both the human page and the RFC 8058 one-click POST
+  // target are listed; a page-only entry would have left the API a 307 to
+  // /login, which is exactly how /api/guidebook was silently dead.
+  '/unsubscribe/',
+  '/api/email/unsubscribe',
 ]
 
 // ── Bypass routes ──────────────────────────────────────────────────────────
@@ -213,10 +222,20 @@ function rateLimiterForPathname(pathname: string) {
   if (pathname.startsWith('/g/'))                 return guidebookRatelimit
   if (pathname.startsWith('/api/guidebook'))      return guidebookRatelimit
   if (pathname.startsWith('/demo/'))              return demoRatelimit
+  if (pathname.startsWith('/unsubscribe/'))          return unsubscribeRatelimit
+  if (pathname.startsWith('/api/email/unsubscribe')) return unsubscribeRatelimit
   // OAuth callbacks are BYPASS_ROUTES (no session to check) but must still be
   // throttled — the oneclick route stores unvalidated authorization codes in
   // Vault, so the limiter check below runs BEFORE the bypass early-return.
-  if (pathname.startsWith('/api/integrations/') && pathname.includes('/callback'))
+  //
+  // /connect needs the same treatment and did not have it: this matcher used
+  // to require `/callback`, so /api/integrations/<provider>/connect matched no
+  // branch at all. That route reaches auth.getUser() but does NOT gate on it
+  // (marketplace arrivals are unauthenticated by design) and then performs a
+  // service-role INSERT into oauth_states carrying a caller-supplied
+  // return_to — an unauthenticated, unbounded write to the primary database.
+  if (pathname.startsWith('/api/integrations/') &&
+      (pathname.includes('/callback') || pathname.includes('/connect')))
     return oauthCallbackRatelimit
   return null
 }
@@ -260,7 +279,12 @@ async function enforceTokenRouteRateLimit(
   limiter:  Ratelimit,
   nonce:    string,
 ): Promise<NextResponse | null> {
-  const ip = extractClientIp(request) ?? request.headers.get('x-real-ip') ?? '127.0.0.1'
+  // extractClientIp already prefers the platform-set headers (including
+  // x-real-ip) over x-forwarded-for — this used to pass x-real-ip as a
+  // FALLBACK behind a client-spoofable XFF read, which inverted the trust
+  // order. The constant is the last resort: one shared bucket is the right
+  // failure mode, since a per-request unique key would mean no limit at all.
+  const ip = extractClientIp(request) ?? '127.0.0.1'
 
   const decision = await checkLimit(limiter, ip, {
     onError: 'allow',

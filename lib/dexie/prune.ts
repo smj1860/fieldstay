@@ -16,12 +16,9 @@
 // DEAD_LETTER_RETENTION_DAYS, by which point the crew member has had every
 // opportunity to retry or discard them.
 
-import { getDexieDb } from './schema'
-import { deletePendingPhotoBlob } from './photo-queue'
-import { MESSAGE_WINDOW_DAYS } from './sync/messages'
-
-/** Matches syncCrewAvailability's own 30-day lookback. */
-const AVAILABILITY_RETENTION_DAYS = 30
+import { getDexieDb, type FieldStayDexie } from './schema'
+import { deletePendingPhotoBlob, listPendingPhotoBlobKeys } from './photo-queue'
+import { invalidateCursorsFor } from './sync/cursors'
 
 /**
  * How long a dead-lettered mutation / failed photo stays on the device
@@ -65,22 +62,72 @@ export async function pruneLocalCache(userId: string): Promise<void> {
     db.property_assets.bulkDelete(assets.filter((a) => !livePropertyIds.has(a.property_id)).map((a) => a.id)),
   ])
 
-  // ── Time-windowed: mirror the server-side pull windows ────────────────
-  const messageHorizon = daysAgoIso(MESSAGE_WINDOW_DAYS)
-  const messages = await db.messages.toArray()
-  await db.messages.bulkDelete(
-    messages.filter((m) => m.created_at < messageHorizon).map((m) => m.id)
-  )
-
-  // available_date is a plain date string (YYYY-MM-DD), so a lexical
-  // comparison against the date part of the horizon is the correct one.
-  const availabilityHorizon = daysAgoIso(AVAILABILITY_RETENTION_DAYS).slice(0, 10)
-  const availability = await db.crew_availability.toArray()
-  await db.crew_availability.bulkDelete(
-    availability.filter((a) => a.available_date < availabilityHorizon).map((a) => a.id)
-  )
-
   await pruneExpiredDeadLetters(userId)
+  await pruneOrphanPhotoBlobs(userId)
+}
+
+/** sync_meta key holding last sweep's unreferenced-but-not-yet-collected blob keys. */
+const ORPHAN_CANDIDATES_KEY = 'photo_blob_orphan_candidates'
+
+async function readOrphanCandidates(db: FieldStayDexie): Promise<Set<string>> {
+  const row = await db.sync_meta.get(ORPHAN_CANDIDATES_KEY)
+  if (!row?.value) return new Set()
+  try {
+    const parsed: unknown = JSON.parse(row.value)
+    return new Set(Array.isArray(parsed) ? (parsed as string[]) : [])
+  } catch {
+    return new Set()
+  }
+}
+
+/**
+ * Collects photo blobs no `pending_photo_uploads` row references.
+ *
+ * The blob bytes live in a SEPARATE IndexedDB database from the tracking row
+ * (see lib/dexie/photo-queue.ts), so the two can never be written atomically:
+ * a quota error on the row write, or the PWA being reclaimed between the two,
+ * strands the blob with nothing pointing at it. Nothing collected those —
+ * pruneExpiredDeadLetters only ever deletes blobs a row still names — so on a
+ * device that stays logged in they accumulate at multiple MB each until the
+ * browser evicts the whole origin, taking the mutation outbox with it.
+ *
+ * Two-generation rule: a key is only collected if it was ALSO unreferenced on
+ * the previous sweep. Sweeps run at most every safety-poll interval, so that
+ * is minutes of margin against deleting a blob whose row is still mid-enqueue
+ * — and it needs no timestamp in the key, which the key format is not
+ * obliged to carry.
+ */
+export async function pruneOrphanPhotoBlobs(userId: string): Promise<void> {
+  const db = getDexieDb(userId)
+
+  let keys: string[]
+  try {
+    keys = await listPendingPhotoBlobKeys(userId)
+  } catch (err) {
+    // Blob-store GC is never worth failing a resync over.
+    console.warn('[prune] could not enumerate photo blobs (non-fatal):', err)
+    return
+  }
+
+  const referenced = new Set((await db.pending_photo_uploads.toArray()).map((p) => p.local_blob_key))
+  const unreferenced = keys.filter((key) => !referenced.has(key))
+
+  const priorCandidates = await readOrphanCandidates(db)
+  const collectable = unreferenced.filter((key) => priorCandidates.has(key))
+
+  for (const key of collectable) {
+    try {
+      await deletePendingPhotoBlob(userId, key)
+    } catch (err) {
+      console.warn('[prune] failed to delete orphaned photo blob:', err)
+    }
+  }
+
+  // Carry forward only the keys seen unreferenced for the FIRST time.
+  await db.sync_meta.put({
+    key:   ORPHAN_CANDIDATES_KEY,
+    value: JSON.stringify(unreferenced.filter((key) => !priorCandidates.has(key))),
+  })
 }
 
 /**
@@ -92,14 +139,20 @@ export async function pruneExpiredDeadLetters(userId: string): Promise<void> {
   const db = getDexieDb(userId)
   const horizon = daysAgoIso(DEAD_LETTER_RETENTION_DAYS)
 
-  const staleMutations = (await db.mutations.toArray())
-    .filter((m) => m.failed && m.createdAt < horizon)
+  const staleMutations = (await db.mutations.where('failed').equals(1).toArray())
+    .filter((m) => m.createdAt < horizon)
   for (const mutation of staleMutations) {
     await db.mutations.delete(mutation.id as number)
+    // Same reasoning as discardFailedMutation(): while this row existed,
+    // shadowPendingMutations() replayed it over every pull AND the cursor
+    // advanced past the server row it masked. Dropping it here — with no user
+    // action at all — would otherwise leave the cache pinned to a value the
+    // server never accepted, with no path back short of logout.
+    await invalidateCursorsFor(userId, mutation.table)
   }
 
-  const stalePhotos = (await db.pending_photo_uploads.toArray())
-    .filter((p) => p.failed && p.created_at < horizon)
+  const stalePhotos = (await db.pending_photo_uploads.where('failed').equals(1).toArray())
+    .filter((p) => p.created_at < horizon)
   for (const photo of stalePhotos) {
     await db.pending_photo_uploads.delete(photo.id)
     try {
