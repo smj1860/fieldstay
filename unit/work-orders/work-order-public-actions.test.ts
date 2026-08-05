@@ -48,6 +48,11 @@ type Resp = { data?: unknown; error?: unknown }
 function makeSupabase(queue: Record<string, Resp[]>) {
   // args captured for path assertions
   const uploadMock = vi.fn(async (_path: string, _file: unknown, _opts?: unknown) => ({ error: null }))
+  // Every .update() payload, in order, tagged with its table. This mock cannot
+  // type-check a column — which is how a 64-char hex written to a `uuid`
+  // column passed every test in this file while failing 22P02 in production —
+  // so the payloads have to be asserted explicitly instead.
+  const updates: Array<{ table: string; payload: Record<string, unknown> }> = []
   const from = vi.fn((table: string) => {
     const q = queue[table]
     const result: Resp = q?.length ? q.shift()! : { data: null, error: null }
@@ -56,17 +61,24 @@ function makeSupabase(queue: Record<string, Resp[]>) {
     // `.is(...)` is the sign-off UPDATE's TOCTOU precondition
     // (.is('public_signed_off_at', null)); `.maybeSingle()` is how it reads
     // back whether it actually matched a row.
-    for (const m of ['select', 'insert', 'update', 'eq', 'is', 'ilike', 'limit']) {
+    for (const m of ['select', 'insert', 'eq', 'is', 'ilike', 'limit']) {
       chain[m] = vi.fn(() => chain)
     }
+    chain.update = vi.fn((payload: Record<string, unknown>) => {
+      updates.push({ table, payload })
+      return chain
+    })
     chain.single      = vi.fn(() => Promise.resolve(result))
     chain.maybeSingle = vi.fn(() => Promise.resolve(result))
     chain.then   = (resolve: (v: unknown) => unknown) => Promise.resolve(result).then(resolve)
     return chain
   })
   const storage = { from: vi.fn(() => ({ upload: uploadMock })) }
-  return { from, storage, uploadMock }
+  return { from, storage, uploadMock, updates }
 }
+
+/** work_orders.completion_token is `uuid` — anything else takes a 22P02. */
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
 
 const VALID_TOKEN = 'a'.repeat(64)
 
@@ -111,12 +123,48 @@ describe('actions/work-order-public', () => {
       })
 
       expect(result.success).toBe(true)
-      expect(result.token).toMatch(/^[a-f0-9]{64}$/)
+      // Was /^[a-f0-9]{64}$/ — this assertion PINNED the bug. completion_token
+      // is a `uuid` column, so the 64-char hex it demanded could never be
+      // stored; every dispatch failed with 22P02 while this test stayed green.
+      expect(result.token).toMatch(UUID_RE)
       expect(inngest.send).toHaveBeenCalledWith(expect.objectContaining({
         name: 'work-order/dispatched',
         data: expect.objectContaining({ workOrderId: 'wo_1', vendorEmail: 'vendor@example.com' }),
       }))
       expect(sendSMS).not.toHaveBeenCalled()
+    })
+
+    it('writes a UUID token and opens the portal the emailed link points at', async () => {
+      const supabase = makeSupabase({
+        work_orders: [{ data: baseWo(), error: null }, { error: null }],
+        vendors:     [{ data: { id: 'ven_1', name: 'Ace Plumbing', email: 'vendor@example.com', phone: null }, error: null }],
+        profiles:    [{ data: { full_name: 'Sam Jones', phone: null } }],
+        organizations: [{ data: { name: 'Lake Martin Delivery' } }],
+      })
+      vi.mocked(requireOrgMember).mockResolvedValue({
+        supabase, membership, user: { id: 'user_1' },
+      } as never)
+
+      const result = await dispatchWorkOrderToVendor({
+        workOrderId: 'wo_1', vendorEmail: 'vendor@example.com', vendorName: 'Ace Plumbing',
+      })
+
+      const dispatch = supabase.updates.find((u) => u.table === 'work_orders')
+      expect(dispatch).toBeDefined()
+
+      // The column is `uuid`. A hex string of any other length is not a
+      // "formatting" difference — Postgres rejects the whole UPDATE.
+      expect(dispatch!.payload.completion_token).toMatch(UUID_RE)
+      expect(dispatch!.payload.completion_token).toBe(result.token)
+
+      // app/work-orders/[token]/page.tsx filters .eq('portal_enabled', true).
+      // Without this the token is valid and the page still renders notFound(),
+      // which is indistinguishable to the vendor from a dead link.
+      expect(dispatch!.payload.portal_enabled).toBe(true)
+
+      // The emailed link must address the portal that reads completion_token,
+      // not the unreachable /wo/[token] one keyed on public_token.
+      expect(result.publicUrl).toContain(`/work-orders/${result.token}`)
     })
 
     it('sends an SMS alongside the dispatch email when a vendor phone is provided', async () => {

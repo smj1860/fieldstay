@@ -2,7 +2,6 @@
 
 import { createServiceClient } from '@/lib/supabase/server'
 import { requireOrgMember }    from '@/lib/auth'
-import { randomBytes }         from 'crypto'
 import { inngest }             from '@/lib/inngest/client'
 import { revalidatePath }      from 'next/cache'
 import { logAuditEvent }       from '@/lib/audit'
@@ -16,8 +15,23 @@ import { checkLimit, emailSendActionLimiter } from '@/lib/rate-limit'
 const TOKEN_TTL_DAYS = 30
 const APP_URL        = process.env.NEXT_PUBLIC_APP_URL ?? 'https://app.fieldstay.com'
 
+/**
+ * The dispatch token written to `work_orders.completion_token`.
+ *
+ * MUST be a UUID. That column is `uuid` in the live schema, and the previous
+ * implementation returned `randomBytes(32).toString('hex')` — 64 characters,
+ * which Postgres rejects with `22P02: invalid input syntax for type uuid`.
+ * An UPDATE is atomic, so the whole statement failed and every dispatch
+ * returned "Failed to generate work order link". Production bears this out:
+ * every completion_token in the table is a 36-char UUID (the column default,
+ * or crypto.randomUUID() from the four other writers) — not one 64-char value
+ * was ever stored.
+ *
+ * It survived 15 green unit tests because they mock the Supabase client, and
+ * a mocked database cannot fail a cast.
+ */
 function generatePublicToken(): string {
-  return randomBytes(32).toString('hex')  // 64-char hex, URL-safe
+  return crypto.randomUUID()
 }
 
 function photoFileExtension(mimeType: string): string {
@@ -104,8 +118,20 @@ export async function dispatchWorkOrderToVendor(input: {
         completion_token:            token,
         completion_token_expires_at: expiresAt.toISOString(),
         vendor_dispatch_email:       vendorEmail,
+        // The portal page this link points at filters on
+        // .eq('portal_enabled', true) (app/work-orders/[token]/page.tsx:38).
+        // Dispatching a work order created with the portal off — which is the
+        // default whenever request_quotes was set, see maintenance/actions.ts
+        // `usePortal` — minted a valid token behind a notFound(). The Inngest
+        // dispatch path already sets this for the same reason
+        // (work-order-vendor-assigned.ts:99).
+        portal_enabled:              true,
       })
       .eq('id', input.workOrderId)
+      // Defence in depth. The row was already org-scoped on the read above and
+      // this client is RLS-enforced, but a write reachable from a request body
+      // should not depend on a check made ninety lines earlier.
+      .eq('org_id', membership.org_id)
 
     if (updateErr) {
       console.error('[dispatchWorkOrderToVendor] update token', updateErr)
