@@ -35,6 +35,11 @@ export function useTurnoverActions(id: string) {
   const crewMemberId = useCrewMemberId()
   const supabase     = createClient()
 
+  // The Asset Discovery item the crew member is currently capturing against.
+  // Held as a pair because completing the checklist row and writing the asset
+  // are two different records that must not be able to disagree: the item is
+  // ticked from the modal's onCaptured, never by hand.
+  const [capturingAsset, setCapturingAsset] = useState<{ itemId: string; assetType: AssetType } | null>(null)
   const [uploadingItemId,   setUploadingItemId]   = useState<string | null>(null)
   const [uploadError,       setUploadError]       = useState<string | null>(null)
   const [completing,        setCompleting]        = useState(false)
@@ -154,6 +159,22 @@ export function useTurnoverActions(id: string) {
     },
     {}
   )
+
+  /**
+   * An Asset Discovery row is a prompt, not a task: ticking it by hand would
+   * mark the property surveyed while writing nothing to property_assets, so
+   * lib/asset-discovery/engine.ts would hand the same prompt out on the next
+   * turnover — which is exactly what production shows (660 items issued, 0
+   * ever ticked). Opening the capture form is the only way to complete one.
+   */
+  const startAssetCapture = (itemId: string, assetType: AssetType) => {
+    setCapturingAsset({ itemId, assetType })
+  }
+
+  /** Called by the capture modal once the asset is written locally + queued. */
+  const completeCapturedItem = async (itemId: string) => {
+    await updateChecklistItem(userId, itemId, { isCompleted: true }, crewMemberId)
+  }
 
   const toggleItem = async (itemId: string, current: number, requiresPhoto: number, photoPath: string | null, sectionName: string) => {
     if (!current && requiresPhoto && !photoPath) {
@@ -490,6 +511,7 @@ export function useTurnoverActions(id: string) {
     openNoteItemId, setOpenNoteItemId, noteText, setNoteText,
     pendingConfirm, setPendingConfirm,
     fileInputRefs, sectionPhotoRefs,
+    capturingAsset, setCapturingAsset, startAssetCapture, completeCapturedItem,
     toggleItem, saveNote, openNote, handleSectionPhoto, handlePhotoCapture,
     handleCountChange, toggleChecklistConfirm, toggleInventoryConfirm,
     getCount, countedSoFar, countedTotal, markInProgress, markComplete,

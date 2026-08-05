@@ -7,7 +7,18 @@ import { cn } from '@/lib/utils'
 import { Button } from '@/components/ui/Button'
 import { retryFailedMutation } from '@/lib/dexie/helpers'
 import type { ChecklistInstanceItemRow as ChecklistItem, TurnoverRow, ChecklistInstanceRow } from '@/lib/dexie/schema'
+import type { AssetType } from '@/types/database'
+import { DiscoveryCaptureModal } from '@/app/crew/_components/discovery-capture-modal'
 import type { TurnoverActions } from './use-turnover-actions'
+
+/**
+ * An Asset Discovery row opens the capture form instead of toggling, so its
+ * label describes what the tap actually does.
+ */
+function itemActionLabel(capturable: boolean, isCompleted: number): string {
+  if (capturable) return 'Capture asset details'
+  return isCompleted ? 'Mark incomplete' : 'Mark complete'
+}
 
 export function ChecklistView({
   turnover,
@@ -26,6 +37,7 @@ export function ChecklistView({
     uploadingItemId, pendingUploadIds,
     openNoteItemId, setOpenNoteItemId, noteText, setNoteText,
     fileInputRefs, sectionPhotoRefs, sectionPhotoPrompt, setSectionPhotoPrompt,
+    capturingAsset, setCapturingAsset, startAssetCapture, completeCapturedItem,
     toggleItem, saveNote, openNote, handleSectionPhoto, handlePhotoCapture,
     toggleChecklistConfirm, checklistConfirmSyncFailed, actionError,
     items,
@@ -82,6 +94,14 @@ export function ChecklistView({
                 {sectionItems.map((item: ChecklistItem) => {
                   const needsPhoto = item.requires_photo && !item.photo_storage_path
                   const uploading  = uploadingItemId === item.id
+                  // An Asset Discovery row completes by CAPTURING, not by
+                  // ticking — see startAssetCapture in use-turnover-actions.
+                  const discoveryType = item.asset_discovery_type as AssetType | ''
+                  const capturable = Boolean(discoveryType) && !item.is_completed
+                  const activate = capturable
+                    ? () => startAssetCapture(item.id, discoveryType as AssetType)
+                    : () => toggleItem(item.id, item.is_completed, item.requires_photo, item.photo_storage_path, sectionName)
+                  const activateLabel = itemActionLabel(capturable, item.is_completed)
 
                   return (
                     <div key={item.id}>
@@ -91,18 +111,18 @@ export function ChecklistView({
                       >
                         <button
                           className="flex-shrink-0 mt-0.5 p-2 -m-2"
-                          onClick={() => toggleItem(item.id, item.is_completed, item.requires_photo, item.photo_storage_path, sectionName)}
-                          aria-label={item.is_completed ? 'Mark incomplete' : 'Mark complete'}
+                          onClick={activate}
+                          aria-label={activateLabel}
                         >
                           {item.is_completed
                             ? <CheckCircle2 className="w-5 h-5" style={{ color: 'var(--accent-green)' }} />
-                            : <Circle className="w-5 h-5" style={{ color: needsPhoto ? 'var(--accent-amber)' : 'var(--text-muted)' }} />}
+                            : <Circle className="w-5 h-5" style={{ color: needsPhoto || discoveryType ? 'var(--accent-amber)' : 'var(--text-muted)' }} />}
                         </button>
 
                         <button
                           type="button"
                           className="flex-1 min-w-0 cursor-pointer text-left"
-                          onClick={() => toggleItem(item.id, item.is_completed, item.requires_photo, item.photo_storage_path, sectionName)}
+                          onClick={activate}
                         >
                           <p
                             className={cn('text-sm leading-snug', item.is_completed ? 'line-through' : 'text-primary-themed')}
@@ -352,6 +372,21 @@ export function ChecklistView({
           ← Back to Turnover
         </Button>
       </div>
+
+      {/* The same modal the standalone /crew/assets screen uses. The checklist
+          item is ticked from onCaptured, never by hand, so a completed prompt
+          always has a property_assets row behind it — which is what makes the
+          item fall off the NEXT turnover instead of being reissued forever. */}
+      {capturingAsset && (
+        <DiscoveryCaptureModal
+          propertyId={turnover.property_id}
+          orgId={turnover.org_id}
+          assetType={capturingAsset.assetType}
+          userId={userId}
+          onCaptured={() => { void completeCapturedItem(capturingAsset.itemId) }}
+          onClose={() => setCapturingAsset(null)}
+        />
+      )}
     </div>
   )
 }

@@ -61,6 +61,18 @@ export interface ChecklistInstanceItemRow {
   crew_notes:            string
   sort_order:            number
   is_section_final_item: number
+  /**
+   * The asset_type this row is prompting for, on a Progressive Asset Discovery
+   * item (`section_name = 'Asset Discovery'`); '' on every ordinary task.
+   *
+   * lib/asset-discovery/engine.ts has written this since the feature shipped
+   * and NOTHING on the crew side read it, so the discovery prompt rendered as
+   * an ordinary tick-box with no way to reach the capture form. Ticking it
+   * wrote nothing to property_assets, so the engine handed the same item out
+   * again on the next turnover — 660 of them in production, none ever ticked.
+   * Not indexed, so no Dexie version bump is needed.
+   */
+  asset_discovery_type:  string
 }
 
 export interface InventoryItemRow {

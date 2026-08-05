@@ -316,7 +316,7 @@ export async function pullChecklistsForTurnovers(
   const itemCursor = opts.force ? null : await getCursor(userId, 'cursor:checklist_items')
   const items = await fetchWithCursorSplit(
     supabase, 'checklist_instance_items',
-    'id, instance_id, turnover_id, section_name, task, is_completed, completed_at, completed_by_crew_id, requires_photo, photo_reason, photo_storage_path, crew_notes, sort_order, is_section_final_item, updated_at',
+    'id, instance_id, turnover_id, section_name, task, is_completed, completed_at, completed_by_crew_id, requires_photo, photo_reason, photo_storage_path, crew_notes, sort_order, is_section_final_item, asset_discovery_type, updated_at',
     'turnover_id', knownIds, freshIds, itemCursor,
   )
   if (items === null) return
@@ -347,6 +347,7 @@ export async function pullChecklistsForTurnovers(
         completed_by_crew_id:  row.completed_by_crew_id ?? '',
         crew_notes:            resolveCrewNotes(row, localById.get(row.id as string), thisCrewMemberId),
         photo_reason:          row.photo_reason ?? '',
+        asset_discovery_type:  row.asset_discovery_type ?? '',
       }
     })
     await bulkPutShadowed(db.checklist_instance_items, userId, 'checklist_instance_items', normalized as ChecklistInstanceItemRow[])

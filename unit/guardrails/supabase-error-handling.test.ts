@@ -136,7 +136,6 @@ const BASELINE: Record<string, number> = {
   // submit claim. Both are gone — submission is now one submit_quote_via_token
   // RPC whose error is branched on explicitly.
   'app/api/work-orders/[token]/quote/route.ts': 1,
-  'app/crew/turnovers/actions.ts': 2,
   'app/g/[slug]/page.tsx': 2,
   'app/g/b/[token]/opt-in/page.tsx': 2,
   'app/g/b/[token]/page.tsx': 4,

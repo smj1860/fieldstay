@@ -60,7 +60,13 @@ const SERVER_ACTION = /^export\s+async\s+function\s+([A-Za-z0-9_$]+)/gm
  * this note does — that the action predates the entry.
  */
 const BASELINE = new Set([
-  'app/crew/turnovers/actions.ts::submitAssetDiscovery',
+  // submitAssetDiscovery pruned 2026-08-05 by DELETING it, along with the
+  // whole file — it was the last action left there after reportTurnoverIssue
+  // went the same way. It was the online-only predecessor of the Dexie capture
+  // path: no offline outbox, and it used createServiceClient({ crew }), which
+  // is the only reason it never hit the property_assets_update RLS gap that
+  // 20260805210000 fixes. It also stamped verified_at, which the crew INSERT
+  // policy forbids and which nothing reads for discovery.
   // anonymizeGuestData pruned 2026-08-05: it now has a caller
   // (app/(dashboard)/settings/privacy/erasure-form.tsx). It was dead for the
   // usual reason — the action shipped without the page, so nothing ever
