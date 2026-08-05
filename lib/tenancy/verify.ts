@@ -31,19 +31,31 @@ type SupabaseServerClient = Awaited<ReturnType<typeof createClient>>
  * a failed read is not "this property isn't yours". Callers that need to say
  * something specific about what was lost pass `unavailableMessage`.
  */
+export interface VerifiedProperty {
+  id:       string
+  /** IANA identifier. Nullable in the schema; callers must pick a fallback. */
+  timezone: string | null
+}
+
 export async function verifyPropertyInOrg(
   supabase:   SupabaseServerClient,
   orgId:      string,
   propertyId: string,
   site:       string,
   unavailableMessage = 'Could not verify the property. Please try again.',
-): Promise<{ ok: true } | { ok: false; error: string }> {
+): Promise<{ ok: true; property: VerifiedProperty } | { ok: false; error: string }> {
   // maybeSingle, so a property that genuinely is not in this org comes back as
   // data:null rather than a PGRST116 error, leaving `error` to mean only a
   // real failure.
+  //
+  // `timezone` rides along on a read that already had to happen. It is
+  // returned rather than fetched separately because createManualTurnover
+  // needed it and the alternative was either a second round trip or a local
+  // re-implementation of "verified" — the drift this helper exists to stop.
+  // Additive: the six callers that only branch on `ok` are unaffected.
   const res = await supabase
     .from('properties')
-    .select('id')
+    .select('id, timezone')
     .eq('id', propertyId)
     .eq('org_id', orgId)
     .maybeSingle()
@@ -53,5 +65,5 @@ export async function verifyPropertyInOrg(
   }
   if (!res.data) return { ok: false, error: 'Property not found' }
 
-  return { ok: true }
+  return { ok: true, property: res.data }
 }

@@ -3,6 +3,7 @@
 import { revalidatePath } from 'next/cache'
 import { fetchAllRows } from '@/lib/inngest/paginate'
 import { verifyPropertyInOrg } from '@/lib/tenancy/verify'
+import { propertyLocalToUtc } from '@/lib/utils/timezone'
 import { requireOrgMember, requireOrgRole } from '@/lib/auth'
 import { inngest, sendEventAsync } from '@/lib/inngest/client'
 import { logAuditEvent } from '@/lib/audit'
@@ -12,6 +13,9 @@ import { reportQueryError, tryUnwrap } from '@/lib/supabase/unwrap'
 import type { TablesUpdate } from '@/types/database'
 
 export type TurnoverActionState = { error?: string; success?: boolean; warning?: string }
+
+/** A turnover window longer than this is a typo, not a booking gap. */
+const MAX_TURNOVER_WINDOW_MINUTES = 30 * 24 * 60
 
 // ── Suggestion-override tracking shared by assignCrew/addCrewToTurnover ─────
 //
@@ -574,8 +578,40 @@ export async function createManualTurnover(
       return { error: 'Property, checkout date, and check-in date are required' }
     }
 
-    const checkoutDT = new Date(`${checkout_date}T${checkout_time}:00`)
-    const checkinDT  = new Date(`${checkin_date}T${checkin_time}:00`)
+    // Verify property belongs to this org — property_id is client-supplied and
+    // must not be trusted to already scope to the caller's org. Must come
+    // BEFORE the date math now, because the conversion below needs the
+    // property's timezone.
+    const owned = await verifyPropertyInOrg(supabase, membership.org_id, property_id, 'serverAction.turnovers.createManualTurnover.property')
+    if (!owned.ok) return { error: owned.error }
+
+    // The PROPERTY's timezone, not the server's.
+    //
+    // This was `new Date(`${date}T${time}:00`)`. A date-time string with no
+    // offset is parsed as SERVER-local per ECMAScript — UTC on Vercel — so an
+    // 11:00 checkout entered for an Eastern property was stored as 11:00Z,
+    // i.e. 07:00 local. Every production property is America/New_York or
+    // America/Chicago, so every manually-created turnover was 4-6 hours early.
+    //
+    // The iCal path (lib/turnovers/generator.ts) has always converted through
+    // propertyLocalToUtc, so the two creation paths disagreed by the UTC
+    // offset for the same property on the same board — automatic turnovers
+    // right, manual ones hours off.
+    //
+    // window_minutes is unaffected either way (both ends shift equally), which
+    // is why priority never looked wrong and the skew stayed invisible.
+    const timezone   = owned.property.timezone ?? 'America/New_York'
+    const checkoutDT = propertyLocalToUtc(checkout_date, checkout_time, timezone)
+    const checkinDT  = propertyLocalToUtc(checkin_date,  checkin_time,  timezone)
+
+    // An unparseable date yields an Invalid Date, whose getTime() is NaN — and
+    // every comparison against NaN is false, so the ordering guard below used
+    // to PASS. windowMinutes then became NaN, priority silently fell through to
+    // 'medium', and the failure only surfaced later as a RangeError from
+    // toISOString(), reported to the PM as a generic "Operation failed".
+    if (!Number.isFinite(checkoutDT.getTime()) || !Number.isFinite(checkinDT.getTime())) {
+      return { error: 'Enter a valid checkout and check-in date and time.' }
+    }
 
     if (checkinDT <= checkoutDT) {
       return { error: 'Check-in must be after checkout' }
@@ -584,14 +620,14 @@ export async function createManualTurnover(
     const windowMinutes = Math.round(
       (checkinDT.getTime() - checkoutDT.getTime()) / 60_000
     )
+
+    if (windowMinutes > MAX_TURNOVER_WINDOW_MINUTES) {
+      return { error: 'That turnover window is longer than 30 days — please check the dates.' }
+    }
+
     const priority =
       windowMinutes < 120 ? 'urgent' :
       windowMinutes < 240 ? 'high'   : 'medium'
-
-    // Verify property belongs to this org — property_id is client-supplied and
-    // must not be trusted to already scope to the caller's org.
-    const owned = await verifyPropertyInOrg(supabase, membership.org_id, property_id, 'serverAction.turnovers.createManualTurnover.property')
-    if (!owned.ok) return { error: owned.error }
 
     // Get default checklist template for the property.
     //

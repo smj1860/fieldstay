@@ -313,7 +313,7 @@ describe('turnovers/actions', () => {
 
     it('creates a turnover when the property belongs to the caller org', async () => {
       const supabase = makeSupabase({
-        properties:          [{ data: { id: 'prop_1' } }],
+        properties:          [{ data: { id: 'prop_1', timezone: 'America/Chicago' } }],
         checklist_templates: [{ data: { id: 'tmpl_1' } }],
         turnovers:           [{ data: { id: 't_1' } }],
       })
@@ -337,7 +337,7 @@ describe('turnovers/actions', () => {
     })
 
     it('rejects when check-in is not after checkout', async () => {
-      const supabase = makeSupabase({ properties: [{ data: { id: 'prop_1' } }] })
+      const supabase = makeSupabase({ properties: [{ data: { id: 'prop_1', timezone: 'America/Chicago' } }] })
       vi.mocked(requireOrgMember).mockResolvedValue({ supabase, membership } as never)
 
       const result = await createManualTurnover(null, turnoverFd({
@@ -355,6 +355,83 @@ describe('turnovers/actions', () => {
 
       expect(result).toEqual({ error: 'Operation failed. Please try again.' })
       expect(supabase.from).not.toHaveBeenCalled()
+    })
+
+    // THE regression guard, and the assertion whose absence let this ship: the
+    // whole suite passed both before and after the fix, because nothing ever
+    // looked at the timestamp that got stored.
+    //
+    // `new Date('2026-07-22T11:00:00')` has no offset, so ECMAScript parses it
+    // as SERVER-local — UTC on Vercel — storing 11:00Z for an 11:00 Central
+    // checkout, six hours early. The iCal path always converted through
+    // propertyLocalToUtc, so the two creation paths disagreed by the offset on
+    // the same board.
+    it('stores checkout/checkin in the PROPERTY timezone, not the server timezone', async () => {
+      const supabase = makeSupabase({
+        properties:          [{ data: { id: 'prop_1', timezone: 'America/Chicago' } }],
+        checklist_templates: [{ data: { id: 'tmpl_1' } }],
+        turnovers:           [{ data: { id: 't_1' } }],
+      })
+      vi.mocked(requireOrgMember).mockResolvedValue({ supabase, membership } as never)
+
+      await createManualTurnover(null, turnoverFd({
+        checkout_date: '2026-07-22', checkout_time: '11:00',
+        checkin_date:  '2026-07-22', checkin_time:  '16:00',
+      }))
+
+      const insert = supabase.calls.find((c) => c.table === 'turnovers' && c.method === 'insert')
+      const row    = insert!.args[0] as { checkout_datetime: string; checkin_datetime: string; window_minutes: number }
+
+      // July → CDT (UTC-5). 11:00 local is 16:00Z, NOT 11:00Z.
+      expect(row.checkout_datetime).toBe('2026-07-22T16:00:00.000Z')
+      expect(row.checkin_datetime).toBe('2026-07-22T21:00:00.000Z')
+      // Unaffected by the bug either way — both ends shifted equally, which is
+      // why priority never looked wrong and the skew stayed invisible.
+      expect(row.window_minutes).toBe(300)
+    })
+
+    it('falls back to America/New_York when the property has no timezone', async () => {
+      const supabase = makeSupabase({
+        properties:          [{ data: { id: 'prop_1', timezone: null } }],
+        checklist_templates: [{ data: { id: 'tmpl_1' } }],
+        turnovers:           [{ data: { id: 't_1' } }],
+      })
+      vi.mocked(requireOrgMember).mockResolvedValue({ supabase, membership } as never)
+
+      await createManualTurnover(null, turnoverFd({
+        checkout_date: '2026-07-22', checkout_time: '11:00',
+      }))
+
+      const insert = supabase.calls.find((c) => c.table === 'turnovers' && c.method === 'insert')
+      const row    = insert!.args[0] as { checkout_datetime: string }
+      // July → EDT (UTC-4).
+      expect(row.checkout_datetime).toBe('2026-07-22T15:00:00.000Z')
+    })
+
+    // An Invalid Date's getTime() is NaN, and every comparison against NaN is
+    // false — so `checkinDT <= checkoutDT` PASSED, window_minutes became NaN,
+    // priority silently fell to 'medium', and the only symptom was a
+    // RangeError from toISOString() reported as "Operation failed".
+    it('rejects an unparseable date instead of failing later on toISOString', async () => {
+      const supabase = makeSupabase({ properties: [{ data: { id: 'prop_1', timezone: 'America/Chicago' } }] })
+      vi.mocked(requireOrgMember).mockResolvedValue({ supabase, membership } as never)
+
+      const result = await createManualTurnover(null, turnoverFd({ checkout_date: 'not-a-date' }))
+
+      expect(result).toEqual({ error: 'Enter a valid checkout and check-in date and time.' })
+      expect(supabase.calls.some((c) => c.table === 'turnovers')).toBe(false)
+    })
+
+    it('rejects a window longer than 30 days', async () => {
+      const supabase = makeSupabase({ properties: [{ data: { id: 'prop_1', timezone: 'America/Chicago' } }] })
+      vi.mocked(requireOrgMember).mockResolvedValue({ supabase, membership } as never)
+
+      const result = await createManualTurnover(null, turnoverFd({
+        checkout_date: '2026-07-22', checkin_date: '2026-09-30',
+      }))
+
+      expect(result.error).toMatch(/longer than 30 days/)
+      expect(supabase.calls.some((c) => c.table === 'turnovers')).toBe(false)
     })
   })
 
