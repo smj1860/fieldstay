@@ -129,6 +129,204 @@ async function trackVendorAssignmentAgainstSuggestions(
 
 // ── Create Work Order ────────────────────────────────────────────────────────
 
+/**
+ * Everything createWorkOrder reads off the form, parsed and defaulted once.
+ *
+ * Extracted for the same reason parsePropertyForm() was: nineteen fields of
+ * `(formData.get(x) as string) || null` and `cond ? parse(...) : null` are
+ * almost the entire cognitive-complexity score of the action, while being the
+ * part with no decisions in it. Pulling them out leaves the action's own
+ * branching — the guards and the two dispatch modes — legible on its own.
+ */
+interface WorkOrderFormInput {
+  title:                   string
+  property_id:             string
+  description:             string | null
+  priority:                ReturnType<typeof PriorityLevelSchema.safeParse>['data'] & string
+  category:                WoCategory | null
+  vendor_id:               string | null
+  assigned_crew_member_id: string | null
+  scheduled_date:          string | null
+  scheduled_time:          string | null
+  estimated_cost:          number | null
+  nte_amount:              number | null
+  asset_id:                string | null
+  portal_enabled:          boolean
+  request_quotes:          boolean
+  quote_vendor_ids:        string[]
+}
+
+/** `''` and a missing key both mean "not provided" for every optional field. */
+function formText(formData: FormData, key: string): string | null {
+  const raw = formData.get(key)
+  return typeof raw === 'string' && raw.trim() !== '' ? raw : null
+}
+
+function formNumber(formData: FormData, key: string): number | null {
+  const raw = formText(formData, key)
+  if (raw === null) return null
+  const parsed = parseFloat(raw)
+  // NaN is neither null nor undefined, so `??` never catches it, and every
+  // comparison against it is false — Number.isFinite is the only guard that
+  // stops a garbage cost field reaching the insert as `null` via JSON.
+  return Number.isFinite(parsed) ? parsed : null
+}
+
+function parseWorkOrderForm(formData: FormData): WorkOrderFormInput {
+  const categoryInput = formText(formData, 'category')
+  const portalRaw     = formData.get('portal_enabled')
+
+  return {
+    title:                   formText(formData, 'title')?.trim() ?? '',
+    property_id:             formText(formData, 'property_id') ?? '',
+    description:             formText(formData, 'description')?.trim() ?? null,
+    priority:                PriorityLevelSchema.safeParse(formText(formData, 'priority') ?? 'medium').data ?? 'medium',
+    category:                categoryInput ? (WoCategorySchema.safeParse(categoryInput).data ?? null) : null,
+    vendor_id:               formText(formData, 'vendor_id'),
+    assigned_crew_member_id: formText(formData, 'assigned_crew_member_id'),
+    scheduled_date:          formText(formData, 'scheduled_date'),
+    scheduled_time:          formText(formData, 'scheduled_time'),
+    estimated_cost:          formNumber(formData, 'estimated_cost'),
+    nte_amount:              formNumber(formData, 'nte_amount'),
+    asset_id:                formText(formData, 'asset_id'),
+    portal_enabled:          portalRaw === 'on' || portalRaw === 'true',
+    request_quotes:          formData.get('request_quotes') === 'true',
+    quote_vendor_ids:        formData.getAll('quote_vendor_ids') as string[],
+  }
+}
+
+/**
+ * Every reason to refuse before the work order exists, in the order the DB
+ * reads have to happen. Returns the state to hand back, or null to proceed.
+ *
+ * These must ALL run ahead of the insert. A hard-blocked vendor or a foreign
+ * crew id caught afterwards would leave an orphan work order with no way to
+ * explain itself — which is exactly why the quote-vendor check stays here even
+ * though sendQuoteRequests repeats it later.
+ */
+async function validateWorkOrderCreate(
+  supabase: SupabaseClient,
+  orgId:    string,
+  input:    WorkOrderFormInput,
+): Promise<MaintenanceActionState | null> {
+  if (!input.title)       return { error: 'Title is required' }
+  if (!input.property_id) return { error: 'Property is required' }
+  if (input.request_quotes && !input.quote_vendor_ids.length) {
+    return { error: 'Select at least one vendor to request quotes from' }
+  }
+
+  const owned = await verifyPropertyInOrg(
+    supabase, orgId, input.property_id, 'serverAction.maintenance.createWorkOrder.property',
+  )
+  if (!owned.ok) return { error: owned.error }
+
+  const directVendor = input.vendor_id && !input.request_quotes
+  if (directVendor && await isVendorHardBlocked(supabase, input.vendor_id!, orgId)) {
+    return { error: VENDOR_HARD_BLOCKED_ERROR }
+  }
+
+  // Quote mode dispatches to `quote_vendor_ids` instead of `vendor_id`, and
+  // used to skip both the in-org check and the compliance gate entirely.
+  if (input.request_quotes) {
+    const quoteVendorProblem = await checkQuoteVendorsAssignable(supabase, orgId, input.quote_vendor_ids)
+    if (quoteVendorProblem) return quoteVendorProblem
+  }
+
+  // TENANT ISOLATION: assigned_crew_member_id arrives from the client and was
+  // written unverified. work_orders_select grants read on an OR'd branch keyed
+  // by that column, so a foreign org's crew id here handed the other tenant's
+  // crew user read access to this work order.
+  return checkCrewMemberAssignable(supabase, orgId, input.assigned_crew_member_id)
+}
+
+/** The insert payload plus the one derived flag the caller still needs. */
+function buildWorkOrderInsert(input: WorkOrderFormInput, orgId: string) {
+  // In quote-request mode the WO starts as quote_requested with no vendor
+  // assigned yet, and no portal link — there is nobody to give one to.
+  const usePortal = input.portal_enabled && !input.request_quotes
+  const tokenExpiry = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString()
+
+  return {
+    usePortal,
+    payload: {
+      property_id:             input.property_id,
+      org_id:                  orgId,
+      vendor_id:               input.request_quotes ? null : input.vendor_id,
+      assigned_crew_member_id: input.assigned_crew_member_id,
+      asset_id:                input.asset_id,
+      title:                   input.title,
+      description:             input.description,
+      category:                input.category,
+      priority:                input.priority,
+      status:                  resolveWorkOrderStatus(input.request_quotes, input.vendor_id),
+      source:                  'manual' as const,
+      scheduled_date:          input.scheduled_date,
+      scheduled_time:          input.scheduled_time,
+      estimated_cost:          input.estimated_cost,
+      nte_amount:              input.nte_amount,
+      portal_enabled:          usePortal,
+      completion_token:            usePortal ? crypto.randomUUID() : null,
+      completion_token_expires_at: usePortal ? tokenExpiry : null,
+    },
+  }
+}
+
+/**
+ * The non-blocking "it was created, but…" message, if there is one.
+ *
+ * A crew member's time off outranks the vendor-notification warning: only one
+ * can be shown, and being told the assignee is away is more actionable than
+ * being told to email a vendor manually.
+ */
+async function resolveCreationWarning(
+  supabase:  SupabaseClient,
+  orgId:     string,
+  input:     WorkOrderFormInput,
+  usePortal: boolean,
+): Promise<string | undefined> {
+  const timeOff = await checkCrewTimeOffWarning(
+    supabase, orgId, input.assigned_crew_member_id, input.scheduled_date,
+  )
+  if (timeOff) return timeOff
+
+  // Otherwise the PM is left assuming the vendor was notified.
+  if (input.vendor_id && !usePortal) {
+    return 'Work order created, but the vendor was not notified because the portal link is disabled for this vendor. Enable the portal in Vendor settings or notify them manually.'
+  }
+  return undefined
+}
+
+/**
+ * ONE RFQ path. This used to call a separate exported sender in
+ * create-work-order-helpers.ts, so the create modal reached the database
+ * without the dedup filter, the vendor-id validation or the work-order status
+ * check that sendQuoteRequests performs — and the two senders had already
+ * drifted. That helper is gone; this goes through the same action the work
+ * order detail's quote panel calls.
+ *
+ * Returns a state to hand back, or null when every RFQ went out and the caller
+ * should redirect. A partial send used to be invisible: the old helper
+ * returned void and swallowed each failure, so the PM was redirected to a work
+ * order in "Awaiting Quote" that looked identical whether four vendors or none
+ * had been contacted. redirect() throws, which would discard the warning with
+ * it — so anything short of a clean send returns instead.
+ */
+async function dispatchQuoteRequestsForNewWorkOrder(
+  workOrderId: string,
+  vendorIds:   string[],
+): Promise<MaintenanceActionState | null> {
+  const rfq = await sendQuoteRequests(workOrderId, vendorIds)
+  revalidatePath('/maintenance')
+
+  if (!rfq.error) return null
+
+  return {
+    success:     true,
+    workOrderId,
+    warning:     `Work order created, but the quote requests were not all sent: ${rfq.error}`,
+  }
+}
+
 export async function createWorkOrder(
   _prev: MaintenanceActionState | null,
   formData: FormData
@@ -136,88 +334,15 @@ export async function createWorkOrder(
   try {
     const { supabase, membership, user } = await requireOrgRole(['admin', 'manager'])
 
-    const title                  = (formData.get('title') as string)?.trim()
-    const property_id            = formData.get('property_id') as string
-    const description            = (formData.get('description') as string)?.trim() || null
-    const priorityInput          = (formData.get('priority') as string) || 'medium'
-    const priority               = PriorityLevelSchema.safeParse(priorityInput).data ?? 'medium'
-    const categoryInput          = (formData.get('category') as string) || null
-    const category               = categoryInput ? (WoCategorySchema.safeParse(categoryInput).data ?? null) : null
-    const vendor_id               = (formData.get('vendor_id') as string) || null
-    const assigned_crew_member_id = (formData.get('assigned_crew_member_id') as string) || null
-    const scheduled_date         = (formData.get('scheduled_date') as string) || null
-    const scheduled_time         = (formData.get('scheduled_time') as string) || null
-    const estimated_cost         = formData.get('estimated_cost')
-      ? parseFloat(formData.get('estimated_cost') as string)
-      : null
-    const nte_amount             = formData.get('nte_amount')
-      ? parseFloat(formData.get('nte_amount') as string)
-      : null
-    const asset_id         = (formData.get('asset_id') as string) || null
-    const portal_enabled   = formData.get('portal_enabled') === 'on' || formData.get('portal_enabled') === 'true'
-    // Quote-request mode: create WO as quote_requested and send RFQs to selected vendors
-    const request_quotes   = formData.get('request_quotes') === 'true'
-    const quote_vendor_ids = formData.getAll('quote_vendor_ids') as string[]
+    const input   = parseWorkOrderForm(formData)
+    const invalid = await validateWorkOrderCreate(supabase, membership.org_id, input)
+    if (invalid) return invalid
 
-    if (!title) return { error: 'Title is required' }
-    if (!property_id) return { error: 'Property is required' }
-    if (request_quotes && !quote_vendor_ids.length) {
-      return { error: 'Select at least one vendor to request quotes from' }
-    }
-
-    const owned = await verifyPropertyInOrg(supabase, membership.org_id, property_id, 'serverAction.maintenance.createWorkOrder.property')
-    if (!owned.ok) return { error: owned.error }
-
-    if (vendor_id && !request_quotes && await isVendorHardBlocked(supabase, vendor_id, membership.org_id)) {
-      return { error: VENDOR_HARD_BLOCKED_ERROR }
-    }
-
-    // Quote mode dispatches to `quote_vendor_ids` instead of `vendor_id`, and
-    // used to skip both the in-org check and the compliance gate entirely.
-    const quoteVendorProblem = request_quotes
-      ? await checkQuoteVendorsAssignable(supabase, membership.org_id, quote_vendor_ids)
-      : null
-    if (quoteVendorProblem) return quoteVendorProblem
-
-    // TENANT ISOLATION: assigned_crew_member_id arrives from the client and was
-    // written unverified. work_orders_select grants read on an OR'd branch
-    // keyed by that column, so a foreign org's crew id here handed the other
-    // tenant's crew user read access to this work order.
-    const crewProblem = await checkCrewMemberAssignable(
-      supabase, membership.org_id, assigned_crew_member_id,
-    )
-    if (crewProblem) return crewProblem
-
-    // In quote-request mode, WO starts as quote_requested with no vendor assigned yet
-    const woStatus            = resolveWorkOrderStatus(request_quotes, vendor_id)
-    const usePortal           = portal_enabled && !request_quotes
-    const completion_token    = usePortal ? crypto.randomUUID() : null
-    const completion_token_expires_at = usePortal
-      ? new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString()
-      : null
+    const { payload, usePortal } = buildWorkOrderInsert(input, membership.org_id)
 
     const { data: wo, error } = await supabase
       .from('work_orders')
-      .insert({
-        property_id,
-        org_id:                  membership.org_id,
-        vendor_id:               request_quotes ? null : (vendor_id || null),
-        assigned_crew_member_id: assigned_crew_member_id || null,
-        asset_id:                asset_id || null,
-        title,
-        description,
-        category,
-        priority,
-        status:                  woStatus,
-        source:                  'manual',
-        scheduled_date:          scheduled_date || null,
-        scheduled_time:          scheduled_time || null,
-        estimated_cost,
-        nte_amount,
-        portal_enabled:          usePortal,
-        completion_token,
-        completion_token_expires_at,
-      })
+      .insert(payload)
       .select('id')
       .single()
 
@@ -226,59 +351,24 @@ export async function createWorkOrder(
       return { error: 'Operation failed. Please try again.' }
     }
 
-    // ONE RFQ path. This used to call a separate exported sender in
-    // create-work-order-helpers.ts, which meant the create modal reached the
-    // database without the dedup filter, the vendor-id validation or the
-    // work-order status check that sendQuoteRequests performs — and the two
-    // senders had already drifted apart. That helper is gone; this goes
-    // through the same action the work-order detail's quote panel calls.
-    //
-    // The pre-flight checkQuoteVendorsAssignable above stays despite
-    // sendQuoteRequests repeating it: it has to run BEFORE the insert, or a
-    // hard-blocked vendor leaves an orphan work order sitting in
-    // quote_requested with no RFQs and no explanation.
-    if (request_quotes && quote_vendor_ids.length) {
-      const rfq = await sendQuoteRequests(wo.id, quote_vendor_ids)
-
-      revalidatePath('/maintenance')
-
-      // A partial send used to be invisible — the old helper returned void and
-      // swallowed each failure, so the PM was redirected to a work order in
-      // "Awaiting Quote" that looked identical whether four vendors or none
-      // had been contacted. Redirecting here would discard the warning with it
-      // (redirect() throws), so anything short of a clean send returns
-      // instead: the modal already surfaces `warning` as a toast, and the PM
-      // can retry the missing vendors from the work order's quote panel.
-      if (rfq.error) {
-        return {
-          success:     true,
-          workOrderId: wo.id,
-          warning:     `Work order created, but the quote requests were not all sent: ${rfq.error}`,
-        }
-      }
-
+    if (input.request_quotes && input.quote_vendor_ids.length) {
+      const partial = await dispatchQuoteRequestsForNewWorkOrder(wo.id, input.quote_vendor_ids)
+      if (partial) return partial
       redirect(`/maintenance/${wo.id}`)
     }
 
     await dispatchWorkOrderEvents({
       workOrderId:          wo.id,
-      propertyId:           property_id,
+      propertyId:           input.property_id,
       orgId:                membership.org_id,
-      vendorId:             vendor_id,
+      vendorId:             input.vendor_id,
       usePortal,
-      requestQuotes:        request_quotes,
-      category,
-      assignedCrewMemberId: assigned_crew_member_id,
+      requestQuotes:        input.request_quotes,
+      category:             input.category,
+      assignedCrewMemberId: input.assigned_crew_member_id,
     })
 
-    // Warn the PM when a vendor was assigned but no notification will be
-    // sent — otherwise they're left assuming the vendor was notified.
-    // The crew-time-off warning below overrides this if both apply.
-    let warning: string | undefined
-    if (vendor_id && !usePortal) {
-      warning = 'Work order created, but the vendor was not notified because the portal link is disabled for this vendor. Enable the portal in Vendor settings or notify them manually.'
-    }
-    warning = (await checkCrewTimeOffWarning(supabase, membership.org_id, assigned_crew_member_id, scheduled_date)) ?? warning
+    const warning = await resolveCreationWarning(supabase, membership.org_id, input, usePortal)
 
     await logAuditEvent({
       orgId:      membership.org_id,
@@ -286,7 +376,7 @@ export async function createWorkOrder(
       action:     'work_order.created',
       targetType: 'work_order',
       targetId:   wo.id,
-      metadata:   { title, property_id, priority, source: 'manual' },
+      metadata:   { title: input.title, property_id: input.property_id, priority: input.priority, source: 'manual' },
     })
 
     revalidatePath('/maintenance')
