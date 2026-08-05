@@ -3909,6 +3909,63 @@ export type Database = {
           },
         ]
       }
+      quote_request_line_items: {
+        Row: {
+          created_at: string
+          description: string
+          id: string
+          line_total: number | null
+          line_type: Database["public"]["Enums"]["line_item_type"]
+          org_id: string
+          quantity: number
+          quote_request_id: string
+          sort_order: number
+          unit: string | null
+          unit_cost: number
+        }
+        Insert: {
+          created_at?: string
+          description: string
+          id?: string
+          line_total?: number | null
+          line_type?: Database["public"]["Enums"]["line_item_type"]
+          org_id: string
+          quantity?: number
+          quote_request_id: string
+          sort_order?: number
+          unit?: string | null
+          unit_cost: number
+        }
+        Update: {
+          created_at?: string
+          description?: string
+          id?: string
+          line_total?: number | null
+          line_type?: Database["public"]["Enums"]["line_item_type"]
+          org_id?: string
+          quantity?: number
+          quote_request_id?: string
+          sort_order?: number
+          unit?: string | null
+          unit_cost?: number
+        }
+        Relationships: [
+          {
+            foreignKeyName: "quote_request_line_items_org_id_fkey"
+            columns: ["org_id"]
+            isOneToOne: false
+            referencedRelation: "organizations"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "quote_request_line_items_quote_request_id_fkey"
+            columns: ["quote_request_id"]
+            isOneToOne: false
+            referencedRelation: "quote_requests"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       quote_requests: {
         Row: {
           created_at: string
@@ -5809,6 +5866,15 @@ export type Database = {
       store_property_door_code: {
         Args: { p_door_code: string; p_org_id: string; p_property_id: string }
         Returns: string
+      }
+      submit_quote_via_token: {
+        Args: {
+          p_line_items: Json
+          p_max_total?: number
+          p_notes: string
+          p_quote_token: string
+        }
+        Returns: Json
       }
       tag_hospitable_trial_signup: {
         Args: { p_landing_page_cookie_present?: boolean; p_org_id: string }
