@@ -4,6 +4,7 @@ import { createServiceClient } from '@/lib/supabase/server'
 import { requireOrgMember }    from '@/lib/auth'
 import { inngest }             from '@/lib/inngest/client'
 import { revalidatePath }      from 'next/cache'
+import { after }               from 'next/server'
 import { logAuditEvent }       from '@/lib/audit'
 import { renderSmsBody }       from '@/lib/sms/templates'
 import { getManualUrlForAsset } from '@/lib/assets/manual-lookup'
@@ -12,6 +13,7 @@ import { unwrapJoin }          from '@/lib/utils/supabase-joins'
 import { reportError } from '@/lib/observability/report-error'
 import { tryUnwrap }   from '@/lib/supabase/unwrap'
 import { checkLimit, emailSendActionLimiter } from '@/lib/rate-limit'
+import { parseMoneyAmount } from '@/lib/schemas/money'
 const TOKEN_TTL_DAYS = 30
 const APP_URL        = process.env.NEXT_PUBLIC_APP_URL ?? 'https://app.fieldstay.com'
 
@@ -88,11 +90,20 @@ export async function dispatchWorkOrderToVendor(input: {
     // so looping over addresses defeated that too. Resolve the vendor from our
     // own records, scoped to the caller's org, and send only to the contact
     // details that row carries.
+    // `%` and `_` are ILIKE wildcards. Unescaped, this was two bugs at once:
+    // a vendorEmail of '%' matched EVERY vendor in the org and .limit(1) then
+    // picked an arbitrary one to dispatch to; and a perfectly ordinary address
+    // like first_last@example.com matched firstXlast@example.com as well as
+    // itself (confirmed against Postgres: the unescaped pattern matches both,
+    // the escaped one matches only the real address).
+    const wantedEmail = input.vendorEmail.trim()
+    const escapedEmail = wantedEmail.replace(/[\\%_]/g, (ch) => `\\${ch}`)
+
     const vendorRes = await supabase
       .from('vendors')
       .select('id, name, email, phone')
       .eq('org_id', membership.org_id)
-      .ilike('email', input.vendorEmail.trim())
+      .ilike('email', escapedEmail)
       .limit(1)
       .maybeSingle()
 
@@ -101,6 +112,15 @@ export async function dispatchWorkOrderToVendor(input: {
     )
     if (!vendorOut.ok) return { error: 'Could not verify the vendor. Please try again.' }
     if (!vendorOut.data?.email) {
+      return { error: 'That vendor is not in your address book, or has no email on file.' }
+    }
+
+    // Belt and braces on the escaping above. This action decides who receives
+    // an email and an SMS, so the match must be an equality — not "whatever
+    // pattern matching returned first". If the escape were ever to stop
+    // reaching Postgres intact, the failure lands here as a refused dispatch
+    // rather than as a message sent to a vendor the PM never chose.
+    if (vendorOut.data.email.toLowerCase() !== wantedEmail.toLowerCase()) {
       return { error: 'That vendor is not in your address book, or has no email on file.' }
     }
 
@@ -267,15 +287,24 @@ export async function getWorkOrderByToken(token: string): Promise<{
     }
   }
 
-  // Mark as viewed on first open (fire-and-forget — don't fail page if this errors)
+  // Mark as viewed on first open. Deliberately non-fatal — a failure here must
+  // not stop the vendor seeing their work order — but NOT a floating promise:
+  // an un-awaited write can be lost when the serverless runtime is frozen or
+  // reclaimed the moment this function returns, so public_viewed_at (the only
+  // signal a PM has that the vendor opened the link) would go missing
+  // intermittently for reasons no log could explain. `after()` is exactly the
+  // "run this once the response is done, but still run it" primitive.
   if (!wo.public_viewed_at) {
-    supabase
-      .from('work_orders')
-      .update({ public_viewed_at: new Date().toISOString() })
-      .eq('id', wo.id)
-      .then(({ error: viewErr }) => {
-        if (viewErr) console.error('[getWorkOrderByToken] mark viewed', viewErr)
-      })
+    after(async () => {
+      const { error: viewErr } = await supabase
+        .from('work_orders')
+        .update({ public_viewed_at: new Date().toISOString() })
+        .eq('id', wo.id)
+      if (viewErr) {
+        console.error('[getWorkOrderByToken] mark viewed', viewErr)
+        reportError(viewErr, { site: 'serverAction.work-order-public.markViewed' })
+      }
+    })
   }
 
   return {
@@ -328,12 +357,25 @@ async function signOffThrottled(token: string): Promise<boolean> {
   return !decision.allowed
 }
 
+/**
+ * Uploads each sign-off photo and links it to the work order.
+ *
+ * Returns how many actually landed. The caller needs that number: this runs
+ * AFTER the completing UPDATE has committed and the token has been spent by
+ * the `public_signed_off_at` guard, so a vendor whose upload failed had no way
+ * to retry and was told `{ success: true }` with their evidence gone. Both
+ * failure branches stay non-fatal — a lost photo must not un-complete a
+ * finished work order — but they are no longer invisible.
+ */
 async function uploadSignOffPhotos(
   supabase:    ServiceClient,
   orgId:       string,
   workOrderId: string,
   photos:      File[],
-): Promise<void> {
+): Promise<{ uploaded: number; failed: number }> {
+  let uploaded = 0
+  let failed   = 0
+
   for (const photo of photos) {
     // Path MUST start with the owning org's id — see the identical note in
     // app/api/work-orders/[token]/photos/route.ts: the work-order-photos
@@ -346,6 +388,8 @@ async function uploadSignOffPhotos(
       .upload(path, photo, { contentType: photo.type, upsert: false })
     if (uploadErr) {
       console.error('[submitWorkOrderSignOff] photo upload', uploadErr)
+      reportError(uploadErr, { site: 'serverAction.work-order-public.signOffPhotoUpload', orgId })
+      failed++
       continue
     }
     // work_order_photos has created_at (DEFAULT now()), NOT uploaded_at —
@@ -358,8 +402,18 @@ async function uploadSignOffPhotos(
     })
     if (insertErr) {
       console.error('[submitWorkOrderSignOff] photo row insert', insertErr)
+      reportError(insertErr, { site: 'serverAction.work-order-public.signOffPhotoRow', orgId })
+      // The object is in the bucket but linked to nothing, which is
+      // indistinguishable from never having uploaded it as far as the work
+      // order is concerned — count it as failed.
+      failed++
+      continue
     }
+
+    uploaded++
   }
+
+  return { uploaded, failed }
 }
 
 export async function submitWorkOrderSignOff(
@@ -367,14 +421,21 @@ export async function submitWorkOrderSignOff(
   notes:       string,
   photos?:     File[],
   actualCost?: number
-): Promise<{ success?: boolean; error?: string }> {
+): Promise<{ success?: boolean; error?: string; warning?: string }> {
   if (!token || token.length !== 64) return { error: 'Invalid link' }
 
   const photoError = validateSignOffPhotos(photos)
   if (photoError) return { error: photoError }
 
-  if (actualCost !== undefined && (actualCost < 0 || actualCost > 1_000_000)) {
-    return { error: 'Cost must be a valid amount' }
+  // `actualCost < 0 || actualCost > 1_000_000` let NaN straight through —
+  // both comparisons are false for NaN — and supabase-js JSON-serializes NaN
+  // to `null`, so the vendor's cost silently vanished into a NULL
+  // work_orders.actual_cost. This is the UNAUTHENTICATED half of the surface
+  // lib/schemas/money.ts was written for; the sibling API route was hardened
+  // and this Server Action, reachable with the same token, was not.
+  if (actualCost !== undefined) {
+    const parsed = parseMoneyAmount(actualCost)
+    if (!parsed.ok) return { error: parsed.error }
   }
 
   if (await signOffThrottled(token)) {
@@ -460,8 +521,10 @@ export async function submitWorkOrderSignOff(
     },
   })
 
+  let photoFailures = 0
   if (photos && photos.length > 0) {
-    await uploadSignOffPhotos(supabase, wo.org_id, wo.id, photos)
+    const photoResult = await uploadSignOffPhotos(supabase, wo.org_id, wo.id, photos)
+    photoFailures = photoResult.failed
   }
 
   await inngest.send({
@@ -479,6 +542,20 @@ export async function submitWorkOrderSignOff(
       vendorEmail:     wo.vendor_dispatch_email ?? null,
     },
   })
+
+  // The sign-off itself succeeded and cannot be undone — the token is spent —
+  // so this is a warning, not an error. Saying nothing was the actual defect:
+  // the vendor was told everything went through while their photo evidence had
+  // silently gone nowhere, and by then they could not resubmit.
+  if (photoFailures > 0) {
+    return {
+      success: true,
+      warning:
+        photoFailures === 1
+          ? 'Your sign-off was recorded, but 1 photo failed to upload. Please send it to your property manager directly.'
+          : `Your sign-off was recorded, but ${photoFailures} photos failed to upload. Please send them to your property manager directly.`,
+    }
+  }
 
   return { success: true }
 }
