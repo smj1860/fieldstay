@@ -109,10 +109,14 @@ const EXCEPTIONS: Record<string, string> = {
   // and the Stripe-id clear was collapsed from one update per subscription
   // into a single batched patch. Pruned 2026-07-30 with the account-deletion
   // org-orphaning fix.
-  'app/(dashboard)/maintenance/actions.ts:944':
-    'Per-vendor quote_requests insert — each row needs its own randomly generated quote_token before its own Inngest event fires; the insert could theoretically be batched with the token generated client-side, but that\'s a sync-logic change, not a lint fix.',
-  'app/(dashboard)/maintenance/create-work-order-helpers.ts:153':
-    'Extracted-helper twin of app/(dashboard)/maintenance/actions.ts:837 — same reasoning.',
+  'app/(dashboard)/settings/privacy/actions.ts:69':
+    'Per-secret delete_vault_secret RPC in the manual Article 17 erasure — the same distinct-external-resource case as the retention cron entry below, and bounded the same way (one BOOKING_BATCH_SIZE page per iteration of the self-draining outer loop, not the guest\'s whole booking history).',
+  // ONE entry where there were two: the create-modal path had its own
+  // exported copy of this loop in create-work-order-helpers.ts, bypassing
+  // sendQuoteRequests' dedup and vendor checks. That copy is deleted and
+  // createWorkOrder calls the action.
+  'app/(dashboard)/maintenance/actions.ts:1026':
+    'Per-vendor quote_requests insert (insertQuoteRequests) — each row needs its own randomly generated quote_token before its own Inngest event fires, so batching would mean moving token generation to the caller. Bounded by the vendor count the PM ticked in one dialog, and it is the only RFQ sender in the codebase.',
   'app/(dashboard)/properties/clone-actions.ts:114':
     'Per-section checklist_template_sections insert — each section needs its own DB-generated id before the child checklist_template_items insert can reference it as section_id. Parent-before-child dependency, not a batchable read.',
   'app/api/work-orders/[token]/photos/route.ts:105':

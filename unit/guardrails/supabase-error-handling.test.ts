@@ -98,7 +98,7 @@ const BASELINE: Record<string, number> = {
   'app/(dashboard)/bookings/calendar-actions.ts': 1,
   'app/(dashboard)/capital-planning/actions.ts': 1,
   'app/(dashboard)/maintenance/work-order-actions.ts': 1,
-  'app/(dashboard)/messages/actions.ts': 4,
+  'app/(dashboard)/messages/actions.ts': 2,
   'app/(dashboard)/owners/actions.ts': 7,
   'app/(dashboard)/properties/[id]/setup/checklist/actions.ts': 3,
   'app/(dashboard)/properties/[id]/setup/details/actions.ts': 1,
@@ -132,8 +132,10 @@ const BASELINE: Record<string, number> = {
   'app/api/repuguard/generate/route.ts': 3,
   'app/api/vendor-connect/[token]/onboard/route.ts': 2,
   'app/api/work-orders/[token]/photos/route.ts': 2,
-  'app/api/work-orders/[token]/quote/route.ts': 3,
-  'app/crew/turnovers/actions.ts': 2,
+  // 3 -> 1: the two unhandled reads in POST were the token lookup and the
+  // submit claim. Both are gone — submission is now one submit_quote_via_token
+  // RPC whose error is branched on explicitly.
+  'app/api/work-orders/[token]/quote/route.ts': 1,
   'app/g/[slug]/page.tsx': 2,
   'app/g/b/[token]/opt-in/page.tsx': 2,
   'app/g/b/[token]/page.tsx': 4,

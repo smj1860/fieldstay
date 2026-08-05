@@ -1,6 +1,7 @@
 'use client'
 
 import { useState, useEffect, useTransition, useActionState } from 'react'
+import Link from 'next/link'
 import { useRouter, useSearchParams } from 'next/navigation'
 import { Loader2, Eye, EyeOff, Lock, Bell, BellOff, Webhook, AlertTriangle, MessageSquare, RotateCcw } from 'lucide-react'
 import { cn } from '@/lib/utils'
@@ -1135,6 +1136,25 @@ function LegalTab() {
           </a>
         </Card>
       ))}
+
+      {/* Internal route, not a legal document — a Link, not a new-tab <a>. */}
+      <Card className="mt-4 flex items-center justify-between gap-4">
+        <div className="flex-1 min-w-0">
+          <p className="font-medium text-sm" style={{ color: 'var(--text-primary)' }}>
+            Privacy &amp; Data Requests
+          </p>
+          <p className="text-xs mt-0.5" style={{ color: 'var(--text-muted)' }}>
+            Fulfil a guest deletion request, review automatic retention windows, and see
+            the erasure history for this organization.
+          </p>
+        </div>
+        <Link
+          href="/settings/privacy"
+          className={buttonVariantClass('secondary') + ' text-sm flex-shrink-0'}
+        >
+          Open →
+        </Link>
+      </Card>
 
       <Card className="mt-4">
         <p className="text-sm font-medium mb-1" style={{ color: 'var(--text-primary)' }}>

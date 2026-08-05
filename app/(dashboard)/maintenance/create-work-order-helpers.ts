@@ -2,7 +2,7 @@ import { unwrap } from '@/lib/supabase/unwrap'
 import 'server-only'
 import { fetchAllRows } from '@/lib/inngest/paginate'
 
-import { inngest, sendEventAsync } from '@/lib/inngest/client'
+import { sendEventAsync } from '@/lib/inngest/client'
 import type { WoStatus, WoCategory } from '@/types/database'
 import { WoStatusSchema } from '@/lib/schemas/work-order'
 import type { SupabaseClient } from '@supabase/supabase-js'
@@ -141,48 +141,6 @@ export async function checkQuoteVendorsAssignable(
   return null
 }
 
-/** Sends one RFQ (quote_requests row + Inngest notify event) per selected vendor. */
-export async function sendQuoteRequestEmails(
-  supabase:      SupabaseClient,
-  workOrderId:   string,
-  propertyId:    string,
-  orgId:         string,
-  quoteVendorIds: string[],
-): Promise<void> {
-  await Promise.all(
-    quoteVendorIds.map(async (vendorId) => {
-      const quote_token            = crypto.randomUUID()
-      const quote_token_expires_at = new Date(Date.now() + 14 * 24 * 60 * 60 * 1000).toISOString()
-
-      const { data: qr, error: qrError } = await supabase
-        .from('quote_requests')
-        .insert({
-          work_order_id: workOrderId,
-          org_id:        orgId,
-          vendor_id:     vendorId,
-          quote_token,
-          quote_token_expires_at,
-          status:        'pending',
-        })
-        .select('id')
-        .single()
-
-      if (qrError || !qr) return
-
-      await inngest.send({
-        name: 'work-order/quote-requested' as const,
-        data: {
-          work_order_id:    workOrderId,
-          quote_request_id: qr.id,
-          property_id:      propertyId,
-          org_id:           orgId,
-          vendor_id:        vendorId,
-          quote_token,
-        },
-      })
-    })
-  )
-}
 
 /**
  * Non-blocking warning check: did the crew member assigned to this work

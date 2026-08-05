@@ -6,6 +6,8 @@ import { WorkOrderDetail }                from '@/components/work-orders/work-or
 import type { WorkOrderDetailData }       from '@/components/work-orders/work-order-detail'
 import { unwrapJoin }                     from '@/lib/utils/supabase-joins'
 import { throwIfAnyQueryFailed } from '@/lib/supabase/unwrap'
+import { QuoteComparison }            from '@/components/work-orders/quote-comparison'
+import type { QuoteSummary, QuoteLineItem } from '@/components/work-orders/quote-comparison'
 
 interface Props { params: Promise<{ id: string }> }
 
@@ -19,6 +21,7 @@ export default async function WorkOrderPage({ params }: Props) {
     { data: photos, error: photosError },
     { data: orgVendors, error: orgVendorsError },
     { data: invoice, error: invoiceError },
+    { data: quotes, error: quotesError },
   ] = await Promise.all([
     supabase
       .from('work_orders')
@@ -67,11 +70,31 @@ export default async function WorkOrderPage({ params }: Props) {
       .eq('work_order_id', id)
       .eq('org_id', membership.org_id)
       .maybeSingle(),
+
+    // Quotes, with their line items. Nothing rendered these before, so a
+    // vendor's submitted quote had nowhere to appear and no way to be acted
+    // on — approveQuoteRequest and declineQuoteRequest existed with no caller
+    // anywhere in the app. Bounded by vendors-per-RFQ, which is whatever the
+    // PM ticked in one dialog.
+    supabase
+      .from('quote_requests')
+      .select(`
+        id, vendor_id, status, quoted_amount, quote_notes,
+        sent_at, submitted_at, quote_token_expires_at,
+        vendors ( id, name, specialty, phone ),
+        quote_request_line_items (
+          id, line_type, description, quantity, unit, unit_cost, line_total, sort_order
+        )
+      `)
+      .eq('work_order_id', id)
+      .eq('org_id', membership.org_id)
+      .order('sent_at', { ascending: true })
+      .limit(200),
   ])
 
   // Logs + reports every failure, then throws so the segment's error.tsx
   // renders a real error state — an outage must not look like empty data.
-  throwIfAnyQueryFailed({ site: 'page.maintenance.id', orgId: membership.org_id }, woError, lineItemsError, photosError, orgVendorsError, invoiceError)
+  throwIfAnyQueryFailed({ site: 'page.maintenance.id', orgId: membership.org_id }, woError, lineItemsError, photosError, orgVendorsError, invoiceError, quotesError)
 
   if (!wo) notFound()
 
@@ -143,6 +166,27 @@ export default async function WorkOrderPage({ params }: Props) {
     work_order_photos:     (photos    ?? []) as WorkOrderDetailData['work_order_photos'],
   }
 
+  // PostgREST returns an embed as an array or a single object depending on the
+  // relationship it inferred; unwrapJoin normalises that. The line items are a
+  // to-many embed and are always an array.
+  const quoteSummaries: QuoteSummary[] = (quotes ?? []).map((q) => {
+    const qv = unwrapJoin(q.vendors)
+    return {
+      id:                     q.id,
+      status:                 q.status as QuoteSummary['status'],
+      vendorName:             qv?.name ?? 'Unknown vendor',
+      vendorSpecialty:        qv?.specialty ?? null,
+      quoted_amount:          q.quoted_amount,
+      quote_notes:            q.quote_notes,
+      sent_at:                q.sent_at,
+      submitted_at:           q.submitted_at,
+      quote_token_expires_at: q.quote_token_expires_at,
+      lineItems: ((q.quote_request_line_items ?? []) as QuoteLineItem[])
+        .slice()
+        .sort((a, b) => a.sort_order - b.sort_order),
+    }
+  })
+
   return (
     <div className="max-w-4xl mx-auto">
       <Link
@@ -164,6 +208,13 @@ export default async function WorkOrderPage({ params }: Props) {
           vendors={(orgVendors ?? []).map(v => ({ id: v.id, name: v.name, email: v.email ?? null }))}
         />
       </div>
+
+      <QuoteComparison
+        workOrderId={wo.id}
+        quotes={quoteSummaries}
+        workOrderStatus={wo.status}
+        vendors={(orgVendors ?? []).map((v) => ({ id: v.id, name: v.name }))}
+      />
     </div>
   )
 }

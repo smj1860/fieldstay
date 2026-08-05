@@ -4,6 +4,7 @@ import { inngest }                   from '@/lib/inngest/client'
 import { workOrderRatelimit, checkLimit } from '@/lib/rate-limit'
 import { extractClientIp }           from '@/lib/integrations/webhook-verification'
 import { unwrapJoin }                from '@/lib/utils/supabase-joins'
+import { reportError }               from '@/lib/observability/report-error'
 
 // Public, unauthenticated, token-gated route — rate limit by IP so a
 // leaked/enumerated token can't drive unbounded repeated lookups or
@@ -34,6 +35,100 @@ function isQuoteTokenExpired(expiresAt: string | null | undefined): boolean {
   const expiry = new Date(expiresAt)
   if (Number.isNaN(expiry.getTime())) return true
   return expiry < new Date()
+}
+
+const MAX_QUOTE_AMOUNT = 1_000_000   // $1M — the per-quote ceiling, enforced on the DERIVED total
+const MAX_LINE_ITEMS   = 100
+const MAX_DESCRIPTION  = 300
+const VALID_LINE_TYPES = new Set(['labor', 'material', 'equipment', 'subcontractor', 'other'])
+
+interface QuoteLineItemInput {
+  line_type:   string
+  description: string
+  quantity:    number
+  unit:        string | null
+  unit_cost:   number
+}
+
+/**
+ * Validates the vendor's line items at the boundary.
+ *
+ * Deliberately REJECTS a malformed item rather than filtering it out. The
+ * completion route learned this the hard way in the opposite direction: it
+ * dropped invalid items from the insert while still counting them in the
+ * total, so the stored invoice exceeded the sum of the lines printed beneath
+ * it. Here the total is derived from what was actually stored, so silently
+ * dropping a line would instead under-quote the vendor — they would see a
+ * total lower than what they typed, on a figure they are then held to. Neither
+ * failure mode is acceptable; refusing the whole submission with a specific
+ * message is.
+ */
+function parseQuoteLineItems(raw: unknown): { value: QuoteLineItemInput[] } | { error: string } {
+  if (!Array.isArray(raw) || raw.length === 0) {
+    return { error: 'Add at least one line item with a description and cost.' }
+  }
+  if (raw.length > MAX_LINE_ITEMS) {
+    return { error: `A quote can have at most ${MAX_LINE_ITEMS} line items.` }
+  }
+
+  const value: QuoteLineItemInput[] = []
+
+  for (const [i, item] of raw.entries()) {
+    const label = `Line ${i + 1}`
+    if (typeof item !== 'object' || item === null) {
+      return { error: `${label} is not a valid line item.` }
+    }
+    const row = item as Record<string, unknown>
+
+    const description = typeof row.description === 'string' ? row.description.trim() : ''
+    if (!description) return { error: `${label} needs a description.` }
+    if (description.length > MAX_DESCRIPTION) {
+      return { error: `${label}'s description must be under ${MAX_DESCRIPTION} characters.` }
+    }
+
+    // Number.isFinite rejects NaN and Infinity, which `> 0` alone does not:
+    // NaN fails every comparison silently and JSON.stringify turns it back
+    // into null on the way to the database.
+    const quantity = typeof row.quantity === 'number' ? row.quantity : Number.NaN
+    if (!Number.isFinite(quantity) || quantity <= 0) {
+      return { error: `${label} needs a quantity greater than zero.` }
+    }
+
+    const unitCost = typeof row.unit_cost === 'number' ? row.unit_cost : Number.NaN
+    if (!Number.isFinite(unitCost) || unitCost <= 0) {
+      return { error: `${label} needs a unit cost greater than zero.` }
+    }
+
+    const lineType = typeof row.line_type === 'string' ? row.line_type : ''
+    if (!VALID_LINE_TYPES.has(lineType)) {
+      return { error: `${label} has an unrecognized type.` }
+    }
+
+    const unit = typeof row.unit === 'string' ? row.unit.trim().slice(0, 20) || null : null
+
+    value.push({ line_type: lineType, description, quantity, unit, unit_cost: unitCost })
+  }
+
+  return { value }
+}
+
+/** Return shape of the `submit_quote_via_token(text, jsonb, text, numeric)` RPC. */
+type SubmitQuoteResult =
+  | {
+      ok: true
+      quote_request_id: string
+      work_order_id:    string
+      org_id:           string
+      quoted_amount:    number
+      line_item_count:  number
+    }
+  | { ok: false; reason: 'no_line_items' | 'not_found' | 'not_pending' | 'expired' }
+
+const QUOTE_SUBMIT_FAILURES: Record<string, { status: number; message: string }> = {
+  no_line_items: { status: 400, message: 'Add at least one line item with a description and cost.' },
+  not_found:     { status: 404, message: 'Invalid or expired link' },
+  not_pending:   { status: 409, message: 'This quote request is no longer active' },
+  expired:       { status: 410, message: 'This quote link has expired' },
 }
 
 export async function GET(
@@ -86,75 +181,84 @@ export async function POST(
   const { token }  = await params
   const supabase   = createServiceClient({ publicSurface: 'api-work-orders--token--quote' })
 
-  const { data: qr } = await supabase
-    .from('quote_requests')
-    .select('id, org_id, work_order_id, status, quote_token_expires_at')
-    .eq('quote_token', token)
-    .single()
-
-  if (!qr) return NextResponse.json({ error: 'Invalid or expired link' }, { status: 404 })
-
-  if (qr.status !== 'pending') {
-    return NextResponse.json({ error: 'This quote request is no longer active' }, { status: 409 })
+  const body = await request.json().catch(() => ({})) as {
+    items?: unknown
+    notes?: unknown
   }
 
-  if (isQuoteTokenExpired(qr.quote_token_expires_at)) {
-    await supabase.from('quote_requests').update({ status: 'expired' }).eq('id', qr.id)
-    return NextResponse.json({ error: 'This quote link has expired' }, { status: 410 })
+  const items = parseQuoteLineItems(body.items)
+  if ('error' in items) {
+    return NextResponse.json({ error: items.error }, { status: 400 })
   }
 
-  const body          = await request.json().catch(() => ({})) as { amount?: number; notes?: string }
-  const quoted_amount = parseFloat(String(body.amount ?? 0))
-  const quote_notes   = (body.notes as string | undefined)?.trim() || null
+  const quote_notes = typeof body.notes === 'string' ? body.notes.trim() || null : null
 
-  if (!Number.isFinite(quoted_amount) || quoted_amount <= 0) {
-    return NextResponse.json({ error: 'A valid quote amount is required' }, { status: 400 })
-  }
-
-  const MAX_QUOTE_AMOUNT = 1_000_000 // $1M reasonable upper bound
-  if (quoted_amount > MAX_QUOTE_AMOUNT) {
-    return NextResponse.json(
-      { error: 'Quote amount exceeds maximum allowed value.' },
-      { status: 400 }
-    )
-  }
-
-  const { data: updated } = await supabase
-    .from('quote_requests')
-    .update({
-      status:       'submitted',
-      quoted_amount,
-      quote_notes,
-      submitted_at: new Date().toISOString(),
-    })
-    .eq('id', qr.id)
-    .eq('status', 'pending')
-    .select('id')
-    .single()
-
-  if (!updated) {
-    return NextResponse.json({ error: 'This quote has already been submitted' }, { status: 409 })
-  }
-
-  await supabase.from('work_order_updates').insert({
-    work_order_id:             qr.work_order_id,
-    org_id:                    qr.org_id,
-    updated_via_vendor_portal: true,
-    status_from:               null,
-    status_to:                 null,
-    notes: `Vendor submitted quote: $${quoted_amount.toFixed(2)}${quote_notes ? ' — ' + quote_notes : ''}`,
+  // ONE transaction: claim the quote, insert its line items, derive the total,
+  // log the update. The previous shape was an UPDATE followed by two more
+  // writes; with line items in the picture, a failure between them would leave
+  // a quote reading `submitted` at some amount with no itemization behind it —
+  // and permanently, because the claim is `WHERE status = 'pending'`, so the
+  // vendor's retry is refused as already-submitted.
+  //
+  // The TOTAL IS NEVER ACCEPTED FROM THE CLIENT. quoted_amount is SUM over the
+  // GENERATED ALWAYS line_total column of the rows the function just inserted.
+  // Every expiry and status check lives inside the same transaction too, so
+  // there is no window between checking and claiming.
+  const { data: rpcResult, error: rpcError } = await supabase.rpc('submit_quote_via_token', {
+    p_quote_token: token,
+    // Rebuilt as a fresh object literal rather than passed as QuoteLineItemInput[]:
+    // the RPC parameter is typed `Json`, which a named interface cannot satisfy
+    // (no index signature). The alternative is an `as unknown as Json` double
+    // assertion, which would suppress a real mismatch as readily as this one.
+    p_line_items:  items.value.map((i) => ({
+      line_type:   i.line_type,
+      description: i.description,
+      quantity:    i.quantity,
+      unit:        i.unit,
+      unit_cost:   i.unit_cost,
+    })),
+    // '' rather than null: the generated RPC parameter type is non-nullable.
+    // submit_quote_via_token normalises it back with NULLIF(btrim(...), ''),
+    // so the column still holds NULL for "no note" and never an empty string.
+    p_notes:       quote_notes ?? '',
+    p_max_total:   MAX_QUOTE_AMOUNT,
   })
+
+  if (rpcError) {
+    // 23514 is the function's own total-exceeds-maximum guard, raised (rather
+    // than returned) so the inserted rows roll back with it. It is a client
+    // input problem, not an outage.
+    if (rpcError.code === '23514') {
+      return NextResponse.json(
+        { error: `Quote total must be under $${MAX_QUOTE_AMOUNT.toLocaleString()}. Please check your entries.` },
+        { status: 400 },
+      )
+    }
+    reportError(rpcError, { site: 'route.work-orders.quote.POST' })
+    return NextResponse.json({ error: 'Service temporarily unavailable. Please try again.' }, { status: 503 })
+  }
+
+  const result = rpcResult as SubmitQuoteResult | null
+
+  if (!result?.ok) {
+    const failure = QUOTE_SUBMIT_FAILURES[result?.reason ?? 'not_found']
+    return NextResponse.json({ error: failure.message }, { status: failure.status })
+  }
 
   await inngest.send({
     name: 'work-order/quote-submitted' as const,
     data: {
-      work_order_id:    qr.work_order_id,
-      quote_request_id: qr.id,
-      org_id:           qr.org_id,
-      quoted_amount,
+      work_order_id:    result.work_order_id,
+      quote_request_id: result.quote_request_id,
+      org_id:           result.org_id,
+      quoted_amount:    result.quoted_amount,
       quote_notes,
     },
   })
 
-  return NextResponse.json({ success: true })
+  return NextResponse.json({
+    success:       true,
+    quotedAmount:  result.quoted_amount,
+    lineItemCount: result.line_item_count,
+  })
 }

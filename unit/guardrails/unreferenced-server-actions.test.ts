@@ -47,23 +47,55 @@ const SERVER_ACTION = /^export\s+async\s+function\s+([A-Za-z0-9_$]+)/gm
  * unit tests. They are recorded rather than deleted because "no caller yet" and
  * "no caller ever" look identical from here: several are plausibly staged for
  * UI that has not shipped. That is a product call, not a lint fix.
+ *
+ * ⚠️ The last three entries were added AFTER the initial baseline, and that is
+ * not a licence to keep adding. They were already dead when this guardrail was
+ * written — the matcher simply could not see it, because it searched raw file
+ * text and all three are NAMED in comments elsewhere in the tree. Fixing the
+ * matcher (stripComments, above) revealed them. Adding them corrects the
+ * baseline to what it should always have said; it does not admit new dead code.
+ *
+ * A genuinely NEW dead action must be wired up or deleted. If you find yourself
+ * about to add a line here, that is the wrong move unless you can show — as
+ * this note does — that the action predates the entry.
  */
 const BASELINE = new Set([
-  'app/crew/turnovers/actions.ts::submitAssetDiscovery',
-  'app/(dashboard)/settings/privacy/actions.ts::anonymizeGuestData',
+  // submitAssetDiscovery pruned 2026-08-05 by DELETING it, along with the
+  // whole file — it was the last action left there after reportTurnoverIssue
+  // went the same way. It was the online-only predecessor of the Dexie capture
+  // path: no offline outbox, and it used createServiceClient({ crew }), which
+  // is the only reason it never hit the property_assets_update RLS gap that
+  // 20260805210000 fixes. It also stamped verified_at, which the crew INSERT
+  // policy forbids and which nothing reads for discovery.
+  // anonymizeGuestData pruned 2026-08-05: it now has a caller
+  // (app/(dashboard)/settings/privacy/erasure-form.tsx). It was dead for the
+  // usual reason — the action shipped without the page, so nothing ever
+  // exercised it, which is how it kept an incomplete Article 17 erasure
+  // (name + email only, no raw_ical_data / Vault door code / SMS opt-in)
+  // while audit-logging request_type: 'erasure_article_17'.
   'app/(dashboard)/inventory/actions.ts::updatePurchaseOrderStatus',
   'app/(dashboard)/maintenance/actions.ts::assignCrewToWorkOrder',
   'app/(dashboard)/maintenance/actions.ts::updateWorkOrder',
   'app/(dashboard)/maintenance/actions.ts::addWorkOrderNote',
   'app/(dashboard)/maintenance/actions.ts::recordWorkOrderPhoto',
   'app/(dashboard)/maintenance/actions.ts::deleteWorkOrderPhoto',
-  'app/(dashboard)/maintenance/actions.ts::approveQuoteRequest',
-  'app/(dashboard)/maintenance/actions.ts::declineQuoteRequest',
+  // approveQuoteRequest / declineQuoteRequest / sendQuoteRequests pruned
+  // 2026-08-05: all three now have callers in
+  // components/work-orders/quote-comparison.tsx. Being dead is how
+  // approve_quote_request kept a text-into-uuid assignment that made it fail
+  // 100% of the time for two revisions — see
+  // supabase/migrations/20260805191500_approve_quote_completion_token_cast.sql.
   'app/(dashboard)/maintenance/actions.ts::recordMaintenanceCompletion',
   'app/(dashboard)/maintenance/work-order-actions.ts::reorderWorkOrderLineItems',
   'app/(dashboard)/maintenance/work-order-actions.ts::updatePropertyAccessInstructions',
   'app/(dashboard)/properties/[id]/setup/maintenance/actions.ts::addMaintenanceSchedule',
   'app/(dashboard)/properties/[id]/setup/maintenance/actions.ts::cloneMaintenanceFromProperty',
+
+  // Added 2026-08-05 when stripComments() was fixed — see the ⚠️ note above.
+  // All three predate the guardrail; none is newly dead.
+  //
+  'app/(dashboard)/maintenance/actions.ts::logActualCost',
+  'app/(dashboard)/maintenance/actions.ts::updateWorkOrderStatus',
 ])
 
 interface Action { key: string; file: string; name: string }
@@ -82,14 +114,36 @@ function findServerActions(sources: { path: string; src: string }[]): Action[] {
   return actions
 }
 
+/**
+ * Strips comments before looking for a reference.
+ *
+ * Without this the guardrail counts its own documentation as a call site, and
+ * it undercounted by four for exactly that reason: sendQuoteRequests,
+ * logActualCost, updateWorkOrderStatus and sendMessageToPM are all dead, and
+ * all four are NAMED in comments elsewhere in the tree. The best of them is
+ * lib/dexie/helpers.ts, which says "sendMessageToPM is a live Server Action"
+ * about a function nothing calls — prose asserting the very thing this test
+ * exists to verify.
+ *
+ * Same technique, and the same reason, as
+ * work-order-completion-side-effects.test.ts.
+ */
+function stripComments(src: string): string {
+  return src
+    .replace(/\/\*[\s\S]*?\*\//g, '')   // block comments, incl. JSDoc
+    .replace(/^\s*\/\/.*$/gm, '')       // whole-line // comments
+    .replace(/(?<!:)\/\/.*$/gm, '')      // trailing // (not a URL's //)
+}
+
 function findUnreferenced(sources: { path: string; src: string }[]): string[] {
   const actions = findServerActions(sources)
+  const code    = new Map(sources.map((s) => [s.path, stripComments(s.src)]))
   const unreferenced: string[] = []
 
   for (const action of actions) {
+    const re = new RegExp(`\\b${action.name}\\b`)
     const referenced = sources.some(
-      ({ path, src }) =>
-        path !== action.file && new RegExp(`\\b${action.name}\\b`).test(src),
+      ({ path }) => path !== action.file && re.test(code.get(path) ?? ''),
     )
     if (!referenced) unreferenced.push(action.key)
   }
@@ -163,6 +217,30 @@ describe('guardrail: every exported Server Action has a caller', () => {
     ]
 
     expect(findUnreferenced(sources)).toEqual(['app/x/actions.ts::testedButDead'])
+  })
+
+  // The blind spot that made this guardrail undercount by four. A comment
+  // naming an action is documentation, not a call — and the worst offender
+  // asserted the opposite in prose: lib/dexie/helpers.ts said "sendMessageToPM
+  // is a live Server Action" about a function nothing called.
+  it('does NOT count a comment as a caller, in any comment form', () => {
+    const sources = [
+      { path: 'app/x/actions.ts', src: "'use server'\nexport async function ghost() {}" },
+      { path: 'app/x/line.ts',    src: '// ghost is a live Server Action' },
+      { path: 'app/x/block.ts',   src: '/*\n * calls ghost() on submit\n */\nexport const x = 1' },
+      { path: 'app/x/trail.ts',   src: 'const y = 1 // superseded ghost' },
+    ]
+
+    expect(findUnreferenced(sources)).toEqual(['app/x/actions.ts::ghost'])
+  })
+
+  it('still counts a REAL call in a file that also has comments', () => {
+    const sources = [
+      { path: 'app/x/actions.ts', src: "'use server'\nexport async function real() {}" },
+      { path: 'app/x/page.tsx',   src: "// real() is called below\nimport { real } from './actions'\nreal()" },
+    ]
+
+    expect(findUnreferenced(sources)).toEqual([])
   })
 
   it('ignores a file that only mentions "use server" in prose', () => {

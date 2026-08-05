@@ -1126,6 +1126,30 @@ export interface QuoteRequest {
   created_at:             string
 }
 
+/**
+ * A single priced line on a vendor's quote. Same shape as WorkOrderLineItem —
+ * deliberately, because approve_quote_request() copies these rows straight into
+ * work_order_line_items so the agreed scope becomes the work order's starting
+ * line items.
+ *
+ * `line_total` is GENERATED ALWAYS AS (quantity * unit_cost) in the database.
+ * Never name it in an insert or update payload: Postgres rejects the WHOLE
+ * statement with 428C9, not just that column.
+ */
+export interface QuoteRequestLineItem {
+  id:               string
+  quote_request_id: string
+  org_id:           string
+  line_type:        LineItemType
+  description:      string
+  quantity:         number
+  unit:             string | null
+  unit_cost:        number
+  line_total:       number
+  sort_order:       number
+  created_at:       string
+}
+
 export interface CommunicationLog {
   id:                string
   org_id:            string
@@ -1819,6 +1843,7 @@ export interface HandWrittenRowMap {
   stripe_processed_events:             StripeProcessedEvent
   org_invites:                         OrgInvite
   quote_requests:                      QuoteRequest
+  quote_request_line_items:            QuoteRequestLineItem
   communication_logs:                  CommunicationLog
   messages:                            Message
   push_subscriptions:                  PushSubscription

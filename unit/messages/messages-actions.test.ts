@@ -11,7 +11,7 @@ vi.mock('next/cache', () => ({ revalidatePath: vi.fn() }))
 vi.mock('@/lib/inngest/client', () => ({ inngest: { send: vi.fn() } }))
 vi.mock('@/lib/push/send-push', () => ({ sendPushToUser: vi.fn() }))
 vi.mock('@/lib/observability/report-error', () => ({ reportError: vi.fn() }))
-// sendMessageToPM resolves "who is the PM" through getPmMembers (the single
+// The crew→PM send resolves "who is the PM" through getPmMembers (the single
 // source of truth in lib/inngest/helpers.ts) rather than the inline
 // `.in('role',[...]).limit(1)` query it used to run. Mocked here so this
 // suite tests the ROUTING decision; getPmMembers' own ordering and
@@ -19,14 +19,13 @@ vi.mock('@/lib/observability/report-error', () => ({ reportError: vi.fn() }))
 vi.mock('@/lib/inngest/helpers', () => ({ getPmMembers: vi.fn() }))
 
 import { requireOrgMember } from '@/lib/auth'
-import { createClient, createServiceClient } from '@/lib/supabase/server'
+import { createClient } from '@/lib/supabase/server'
 import { inngest } from '@/lib/inngest/client'
 import { sendPushToUser } from '@/lib/push/send-push'
 import { reportError } from '@/lib/observability/report-error'
-import { getPmMembers } from '@/lib/inngest/helpers'
 import {
   sendMessageToCrew,
-  sendMessageToPM,
+
   sendGroupMessage,
   markConversationRead,
 } from '@/app/(dashboard)/messages/actions'
@@ -125,73 +124,6 @@ describe('messages/actions', () => {
       expect(result).toEqual({ success: false, error: 'Failed to send message' })
       expect(reportError).toHaveBeenCalled()
       expect(supabase.from).not.toHaveBeenCalled()
-    })
-  })
-
-  describe('sendMessageToPM', () => {
-    it('routes the message to an admin/manager/owner contact in the sender org', async () => {
-      const supabase = makeSupabase({
-        crew_members: [{ data: { id: 'crew_1', org_id: 'org_1', name: 'Jamie Crew' } }],
-        organizations: [{ data: { slack_webhook_url: null } }],
-        messages: [{ data: { id: 'msg_1', created_at: '2026-07-22T00:00:00.000Z' } }],
-      })
-      const admin = makeSupabase({})
-      vi.mocked(createClient).mockResolvedValue(supabase as never)
-      vi.mocked(createServiceClient).mockReturnValue(admin as never)
-      vi.mocked(getPmMembers).mockResolvedValue([
-        { userId: 'pm-user-1', email: 'pm@example.com', role: 'owner' },
-      ])
-
-      const result = await sendMessageToPM('Need more towels')
-
-      expect(result).toEqual({ success: true })
-      // Delegates to getPmMembers scoped to the CREW MEMBER's org (never an
-      // org id the caller could influence), asking for the single highest-
-      // precedence contact. The inline query this replaced had no ORDER BY,
-      // so two crew messages minutes apart could land in two different
-      // inboxes with nothing tying them together.
-      expect(getPmMembers).toHaveBeenCalledWith(
-        admin,
-        'org_1',
-        { roles: ['owner', 'admin', 'manager'], limit: 1 },
-      )
-      expect(inngest.send).toHaveBeenCalledWith({
-        name: 'message/sent',
-        data: expect.objectContaining({ recipient_id: 'pm-user-1', is_crew_to_pm: true }),
-      })
-    })
-
-    it('returns Not authenticated and never queries crew_members when there is no session', async () => {
-      const supabase = makeSupabase({}, null)
-      vi.mocked(createClient).mockResolvedValue(supabase as never)
-
-      const result = await sendMessageToPM('hi')
-
-      expect(result).toEqual({ success: false, error: 'Not authenticated' })
-      expect(supabase.from).not.toHaveBeenCalled()
-    })
-
-    it('fails gracefully when the caller has no crew profile', async () => {
-      const supabase = makeSupabase({ crew_members: [{ data: null }] })
-      vi.mocked(createClient).mockResolvedValue(supabase as never)
-
-      const result = await sendMessageToPM('hi')
-
-      expect(result).toEqual({ success: false, error: 'Crew profile not found' })
-    })
-
-    it('fails gracefully when no operations contact exists for the org', async () => {
-      const supabase = makeSupabase({
-        crew_members: [{ data: { id: 'crew_1', org_id: 'org_1', name: 'Jamie Crew' } }],
-      })
-      const admin = makeSupabase({})
-      vi.mocked(createClient).mockResolvedValue(supabase as never)
-      vi.mocked(createServiceClient).mockReturnValue(admin as never)
-      vi.mocked(getPmMembers).mockResolvedValue([])
-
-      const result = await sendMessageToPM('hi')
-
-      expect(result).toEqual({ success: false, error: 'No operations contact found' })
     })
   })
 

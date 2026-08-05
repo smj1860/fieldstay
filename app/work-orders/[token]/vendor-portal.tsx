@@ -703,120 +703,16 @@ export function VendorPortal({
           }}
         />
 
-        {/* Line items */}
-        <p style={{ fontSize: 13, fontWeight: 700, color: '#374151', margin: '0 0 10px', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
-          Invoice Line Items
-        </p>
+        <LineItemEditor
+          heading="Invoice Line Items"
+          totalLabel="Invoice Total"
+          lineItems={lineItems}
+          subtotal={subtotal}
+          addLineItem={addLineItem}
+          removeLineItem={removeLineItem}
+          updateLineItem={updateLineItem}
+        />
 
-        <div style={{ display: 'flex', gap: 6, marginBottom: 6, paddingBottom: 4, borderBottom: '1px solid #e5e7eb' }}>
-          <span style={{ flex: '0 0 80px', fontSize: 10, color: '#9ca3af', fontWeight: 600, textTransform: 'uppercase' }}>Type</span>
-          <span style={{ flex: 1, fontSize: 10, color: '#9ca3af', fontWeight: 600, textTransform: 'uppercase' }}>Description</span>
-          <span style={{ flex: '0 0 50px', fontSize: 10, color: '#9ca3af', fontWeight: 600, textTransform: 'uppercase', textAlign: 'right' }}>Qty</span>
-          <span style={{ flex: '0 0 70px', fontSize: 10, color: '#9ca3af', fontWeight: 600, textTransform: 'uppercase', textAlign: 'right' }}>Unit $</span>
-          <span style={{ width: 24 }} />
-        </div>
-
-        {lineItems.map((item, idx) => (
-          <div key={idx} style={{ display: 'flex', gap: 6, marginBottom: 8, alignItems: 'center' }}>
-            <select
-              value={item.type}
-              onChange={(e) => updateLineItem(idx, 'type', e.target.value)}
-              style={{
-                flex: '0 0 80px', fontSize: 12, padding: '6px 4px',
-                border: '1px solid #d1d5db', borderRadius: 6, color: '#374151',
-              }}
-            >
-              <option value="labor">Labor</option>
-              <option value="material">Material</option>
-              <option value="equipment">Equipment</option>
-              <option value="subcontractor">Sub</option>
-              <option value="other">Other</option>
-            </select>
-
-            <input
-              type="text"
-              value={item.description}
-              onChange={(e) => updateLineItem(idx, 'description', e.target.value)}
-              placeholder="Description"
-              style={{
-                flex: 1, fontSize: 13, padding: '6px 8px',
-                border: '1px solid #d1d5db', borderRadius: 6, color: '#374151',
-              }}
-            />
-
-            <input
-              type="number"
-              min="1"
-              value={item.quantity}
-              onChange={(e) => updateLineItem(idx, 'quantity', parseInt(e.target.value) || 1)}
-              style={{
-                flex: '0 0 50px', fontSize: 13, padding: '6px 4px',
-                border: '1px solid #d1d5db', borderRadius: 6, textAlign: 'right', color: '#374151',
-              }}
-            />
-
-            <div style={{ flex: '0 0 70px', position: 'relative' }}>
-              <span style={{ position: 'absolute', left: 8, top: '50%', transform: 'translateY(-50%)', color: '#9ca3af', fontSize: 12 }}>$</span>
-              <input
-                type="number"
-                min="0"
-                step="0.01"
-                value={item.unitCost}
-                onChange={(e) => updateLineItem(idx, 'unitCost', e.target.value)}
-                placeholder="0.00"
-                style={{
-                  width: '100%', fontSize: 13, padding: '6px 6px 6px 18px',
-                  border: '1px solid #d1d5db', borderRadius: 6, textAlign: 'right', color: '#374151',
-                  boxSizing: 'border-box',
-                }}
-              />
-            </div>
-
-            <button
-              type="button"
-              onClick={() => removeLineItem(idx)}
-              disabled={lineItems.length <= 1}
-              style={{
-                width: 24, height: 24, border: 'none', background: 'none',
-                cursor: lineItems.length <= 1 ? 'not-allowed' : 'pointer',
-                color: lineItems.length <= 1 ? '#d1d5db' : '#ef4444', fontSize: 16,
-                display: 'flex', alignItems: 'center', justifyContent: 'center',
-                padding: 0,
-              }}
-            >
-              ×
-            </button>
-          </div>
-        ))}
-
-        <button
-          type="button"
-          onClick={addLineItem}
-          style={{
-            fontSize: 13, color: '#FF6B00', background: 'none',
-            border: '1px dashed #fed7aa', borderRadius: 6,
-            padding: '6px 12px', cursor: 'pointer', marginBottom: 16, width: '100%',
-          }}
-        >
-          + Add line item
-        </button>
-
-        {/* Total */}
-        <div style={{
-          backgroundColor: '#f8fafc',
-          border: '1px solid #e2e8f0',
-          borderRadius: 8,
-          padding: '12px 16px',
-          marginBottom: 16,
-          display: 'flex',
-          justifyContent: 'space-between',
-          alignItems: 'center',
-        }}>
-          <span style={{ fontSize: 14, fontWeight: 700, color: '#374151' }}>Invoice Total</span>
-          <span style={{ fontSize: 20, fontWeight: 800, color: '#0f172a' }}>
-            ${subtotal.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-          </span>
-        </div>
 
         {workOrder.nte_amount != null && subtotal > workOrder.nte_amount && (
           <p style={{ fontSize: 12, color: '#b45309', backgroundColor: '#fffbeb', border: '1px solid #fde68a', borderRadius: 6, padding: '8px 10px', marginBottom: 12, display: 'flex', alignItems: 'flex-start', gap: 6 }}>
@@ -961,6 +857,157 @@ export function VendorPortal({
   )
 }
 
+
+// ── Shared line-item editor ───────────────────────────────────────────────────
+
+/**
+ * The vendor's priced breakdown, used by BOTH portals: the quote portal (what
+ * the work will cost) and the completion portal (what it did cost).
+ *
+ * Extracted rather than copied when quotes became itemized. The two forms are
+ * the same table with the same columns and the same arithmetic, and the quote's
+ * lines are literally copied into the work order's on approval
+ * (approve_quote_request), so a divergence between the two editors would show
+ * up as a vendor quoting in one shape and invoicing in another. One editor is
+ * the only way that stays true without anyone remembering to keep it true.
+ */
+function LineItemEditor({
+  heading,
+  totalLabel,
+  lineItems,
+  subtotal,
+  addLineItem,
+  removeLineItem,
+  updateLineItem,
+}: Readonly<{
+  heading:        string
+  totalLabel:     string
+  lineItems:      LineItemInput[]
+  subtotal:       number
+  addLineItem:    () => void
+  removeLineItem: (idx: number) => void
+  updateLineItem: (idx: number, field: keyof LineItemInput, value: string | number) => void
+}>) {
+  return (
+    <>
+        {/* Extracted 2026-08-05 — see the component doc comment. */}
+        <p style={{ fontSize: 13, fontWeight: 700, color: '#374151', margin: '0 0 10px', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+          {heading}
+        </p>
+
+        <div style={{ display: 'flex', gap: 6, marginBottom: 6, paddingBottom: 4, borderBottom: '1px solid #e5e7eb' }}>
+          <span style={{ flex: '0 0 80px', fontSize: 10, color: '#9ca3af', fontWeight: 600, textTransform: 'uppercase' }}>Type</span>
+          <span style={{ flex: 1, fontSize: 10, color: '#9ca3af', fontWeight: 600, textTransform: 'uppercase' }}>Description</span>
+          <span style={{ flex: '0 0 50px', fontSize: 10, color: '#9ca3af', fontWeight: 600, textTransform: 'uppercase', textAlign: 'right' }}>Qty</span>
+          <span style={{ flex: '0 0 70px', fontSize: 10, color: '#9ca3af', fontWeight: 600, textTransform: 'uppercase', textAlign: 'right' }}>Unit $</span>
+          <span style={{ width: 24 }} />
+        </div>
+
+        {lineItems.map((item, idx) => (
+          <div key={idx} style={{ display: 'flex', gap: 6, marginBottom: 8, alignItems: 'center' }}>
+            <select
+              value={item.type}
+              onChange={(e) => updateLineItem(idx, 'type', e.target.value)}
+              style={{
+                flex: '0 0 80px', fontSize: 12, padding: '6px 4px',
+                border: '1px solid #d1d5db', borderRadius: 6, color: '#374151',
+              }}
+            >
+              <option value="labor">Labor</option>
+              <option value="material">Material</option>
+              <option value="equipment">Equipment</option>
+              <option value="subcontractor">Sub</option>
+              <option value="other">Other</option>
+            </select>
+
+            <input
+              type="text"
+              value={item.description}
+              onChange={(e) => updateLineItem(idx, 'description', e.target.value)}
+              placeholder="Description"
+              style={{
+                flex: 1, fontSize: 13, padding: '6px 8px',
+                border: '1px solid #d1d5db', borderRadius: 6, color: '#374151',
+              }}
+            />
+
+            <input
+              type="number"
+              min="1"
+              value={item.quantity}
+              onChange={(e) => updateLineItem(idx, 'quantity', parseInt(e.target.value) || 1)}
+              style={{
+                flex: '0 0 50px', fontSize: 13, padding: '6px 4px',
+                border: '1px solid #d1d5db', borderRadius: 6, textAlign: 'right', color: '#374151',
+              }}
+            />
+
+            <div style={{ flex: '0 0 70px', position: 'relative' }}>
+              <span style={{ position: 'absolute', left: 8, top: '50%', transform: 'translateY(-50%)', color: '#9ca3af', fontSize: 12 }}>$</span>
+              <input
+                type="number"
+                min="0"
+                step="0.01"
+                value={item.unitCost}
+                onChange={(e) => updateLineItem(idx, 'unitCost', e.target.value)}
+                placeholder="0.00"
+                style={{
+                  width: '100%', fontSize: 13, padding: '6px 6px 6px 18px',
+                  border: '1px solid #d1d5db', borderRadius: 6, textAlign: 'right', color: '#374151',
+                  boxSizing: 'border-box',
+                }}
+              />
+            </div>
+
+            <button
+              type="button"
+              onClick={() => removeLineItem(idx)}
+              disabled={lineItems.length <= 1}
+              style={{
+                width: 24, height: 24, border: 'none', background: 'none',
+                cursor: lineItems.length <= 1 ? 'not-allowed' : 'pointer',
+                color: lineItems.length <= 1 ? '#d1d5db' : '#ef4444', fontSize: 16,
+                display: 'flex', alignItems: 'center', justifyContent: 'center',
+                padding: 0,
+              }}
+            >
+              ×
+            </button>
+          </div>
+        ))}
+
+        <button
+          type="button"
+          onClick={addLineItem}
+          style={{
+            fontSize: 13, color: '#FF6B00', background: 'none',
+            border: '1px dashed #fed7aa', borderRadius: 6,
+            padding: '6px 12px', cursor: 'pointer', marginBottom: 16, width: '100%',
+          }}
+        >
+          + Add line item
+        </button>
+
+        {/* Total */}
+        <div style={{
+          backgroundColor: '#f8fafc',
+          border: '1px solid #e2e8f0',
+          borderRadius: 8,
+          padding: '12px 16px',
+          marginBottom: 16,
+          display: 'flex',
+          justifyContent: 'space-between',
+          alignItems: 'center',
+        }}>
+          <span style={{ fontSize: 14, fontWeight: 700, color: '#374151' }}>{totalLabel}</span>
+          <span style={{ fontSize: 20, fontWeight: 800, color: '#0f172a' }}>
+            ${subtotal.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+          </span>
+        </div>
+    </>
+  )
+}
+
 // ── Line item state type ──────────────────────────────────────────────────────
 
 interface LineItemInput {
@@ -978,39 +1025,93 @@ export function VendorQuotePortal({
   workOrder,
   property,
   expired,
-}: {
+}: Readonly<{
   token:              string
   quoteRequestStatus: string
   workOrder:          WorkOrderInfo
   property:           PropertyInfo | null
   expired:            boolean
-}) {
-  const [amount, setAmount]     = useState('')
-  const [notes, setNotes]       = useState('')
+}>) {
+  const [lineItems, setLineItems] = useState<LineItemInput[]>([
+    { type: 'labor', description: '', quantity: 1, unitCost: '' },
+  ])
+  const [notes, setNotes]           = useState('')
   const [submitting, setSubmitting] = useState(false)
-  const [success, setSuccess]   = useState(false)
-  const [error, setError]       = useState<string | null>(null)
+  const [submitted, setSubmitted]   = useState<{ total: number; count: number } | null>(null)
+  const [error, setError]           = useState<string | null>(null)
 
   const alreadyQuoted = quoteRequestStatus !== 'pending'
 
+  // Mirrors the server's derivation exactly (SUM of quantity × unit_cost). It
+  // is a PREVIEW, not the figure that gets stored: quoted_amount is computed
+  // in submit_quote_via_token from the GENERATED ALWAYS line_total column, so
+  // nothing typed here can become the quote's total by itself.
+  const subtotal = lineItems.reduce((sum, item) => {
+    const cost = parseFloat(item.unitCost) || 0
+    return sum + cost * item.quantity
+  }, 0)
+
+  function addLineItem() {
+    setLineItems((prev) => [...prev, { type: 'material', description: '', quantity: 1, unitCost: '' }])
+  }
+
+  function removeLineItem(idx: number) {
+    setLineItems((prev) => prev.filter((_, i) => i !== idx))
+  }
+
+  function updateLineItem(idx: number, field: keyof LineItemInput, value: string | number) {
+    setLineItems((prev) => prev.map((item, i) => (i === idx ? { ...item, [field]: value } : item)))
+  }
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
-    const parsed = parseFloat(amount)
-    if (!parsed || parsed <= 0) { setError('Please enter a valid quote amount.'); return }
+
+    // The server REJECTS a malformed line rather than dropping it, so the
+    // client must not send one it knows is incomplete — a blank trailing row
+    // (there is always one, that is the affordance) would otherwise fail the
+    // whole submission with "Line 4 needs a description."
+    const items = lineItems
+      .filter((item) => item.description.trim() && (parseFloat(item.unitCost) || 0) > 0)
+      .map((item) => ({
+        line_type:   item.type,
+        description: item.description.trim(),
+        quantity:    item.quantity,
+        unit:        null,
+        unit_cost:   parseFloat(item.unitCost),
+      }))
+
+    if (items.length === 0) {
+      setError('Add at least one line item with a description and cost.')
+      return
+    }
+    if (subtotal <= 0) {
+      setError('Quote total must be greater than $0.')
+      return
+    }
+    if (subtotal > MAX_SUBTOTAL) {
+      setError(`Quote total must be under $${MAX_SUBTOTAL.toLocaleString()}. Please check your entries.`)
+      return
+    }
+
     setSubmitting(true)
     setError(null)
     try {
-      const res = await fetch(`/api/work-orders/${token}/quote`, {
+      const res  = await fetch(`/api/work-orders/${token}/quote`, {
         method:  'POST',
         headers: { 'Content-Type': 'application/json' },
-        body:    JSON.stringify({ amount: parsed, notes }),
+        body:    JSON.stringify({ items, notes }),
       })
+      const body = await res.json().catch(() => ({}))
       if (!res.ok) {
-        const body = await res.json().catch(() => ({}))
         setError(body.error ?? 'Something went wrong. Please try again.')
-      } else {
-        setSuccess(true)
+        return
       }
+      // Shown from the SERVER's figures, not the local preview. If the two ever
+      // disagree the vendor sees what was actually recorded against them.
+      setSubmitted({
+        total: typeof body.quotedAmount === 'number' ? body.quotedAmount : subtotal,
+        count: typeof body.lineItemCount === 'number' ? body.lineItemCount : items.length,
+      })
     } catch {
       setError('Network error. Please check your connection.')
     } finally {
@@ -1018,9 +1119,9 @@ export function VendorQuotePortal({
     }
   }
 
-  return (
-    <PortalShell>
-      {success ? (
+  if (submitted) {
+    return (
+      <PortalShell>
         <div className="text-center">
           <div className="w-16 h-16 rounded-full bg-green-100 flex items-center justify-center mx-auto mb-4">
             <CheckCircle2 className="w-8 h-8 text-green-600" />
@@ -1028,12 +1129,20 @@ export function VendorQuotePortal({
           <h2 className="text-xl font-semibold text-accent-900 mb-2">Quote Submitted!</h2>
           <p className="text-sm text-accent-500">The property manager will review your quote and be in touch.</p>
           <div className="mt-4 p-3 bg-accent-50 rounded-lg text-left">
-            <p className="text-xs text-accent-500 mb-1">Your quote:</p>
-            <p className="text-2xl font-bold text-accent-900">${parseFloat(amount).toFixed(2)}</p>
+            <p className="text-xs text-accent-500 mb-1">
+              Your quote — {submitted.count} line item{submitted.count === 1 ? '' : 's'}:
+            </p>
+            <p className="text-2xl font-bold text-accent-900">${submitted.total.toFixed(2)}</p>
             {notes && <p className="text-sm text-accent-600 mt-1">{notes}</p>}
           </div>
         </div>
-      ) : expired ? (
+      </PortalShell>
+    )
+  }
+
+  if (expired) {
+    return (
+      <PortalShell>
         <div className="text-center">
           <div className="w-16 h-16 rounded-full bg-amber-100 flex items-center justify-center mx-auto mb-4">
             <Clock className="w-8 h-8 text-amber-600" />
@@ -1041,7 +1150,13 @@ export function VendorQuotePortal({
           <h2 className="text-xl font-semibold text-accent-900 mb-2">Link Expired</h2>
           <p className="text-sm text-accent-500">Contact the property manager for a new quote request.</p>
         </div>
-      ) : alreadyQuoted ? (
+      </PortalShell>
+    )
+  }
+
+  if (alreadyQuoted) {
+    return (
+      <PortalShell>
         <div className="text-center">
           <div className="w-16 h-16 rounded-full bg-blue-100 flex items-center justify-center mx-auto mb-4">
             <CheckCircle2 className="w-8 h-8 text-blue-600" />
@@ -1049,63 +1164,65 @@ export function VendorQuotePortal({
           <h2 className="text-xl font-semibold text-accent-900 mb-2">Quote Already Submitted</h2>
           <p className="text-sm text-accent-500">Your quote has already been received. The property manager will be in touch.</p>
         </div>
-      ) : (
-        <>
-          <p className="text-sm font-medium text-accent-700 mb-4">
-            Please review the job details below and submit your quote.
-          </p>
-          <WOInfo workOrder={workOrder} property={property} />
-          {error && (
-            <div className="flex items-start gap-2 bg-red-50 border border-red-200 text-red-700 text-sm rounded-lg px-3 py-2 mb-4">
-              <AlertTriangle className="w-4 h-4 flex-shrink-0 mt-0.5" />
-              {error}
-            </div>
-          )}
-          <form onSubmit={handleSubmit} className="space-y-4">
-            <div>
-              <label htmlFor="quote-amount" className="label">
-                Your Quote <span className="text-red-500">*</span>
-              </label>
-              <div className="relative">
-                <DollarSign className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-accent-400" />
-                <Input
-                  id="quote-amount"
-                  type="number"
-                  min="1"
-                  step="0.01"
-                  required
-                  value={amount}
-                  onChange={(e) => setAmount(e.target.value)}
-                  className="pl-8"
-                  placeholder="0.00"
-                />
-              </div>
-            </div>
-            <div>
-              <label htmlFor="quote-notes" className="label">Notes (optional)</label>
-              <textarea
-                id="quote-notes"
-                value={notes}
-                onChange={(e) => setNotes(e.target.value)}
-                rows={3}
-                className="input resize-none"
-                placeholder="Parts included, timeline, any conditions or questions…"
-              />
-            </div>
-            <Button type="submit" disabled={submitting} className="w-full py-3 text-base">
-              {submitting ? (
-                <span className="flex items-center justify-center gap-2">
-                  <Clock className="w-4 h-4 animate-spin" /> Submitting…
-                </span>
-              ) : (
-                <span className="flex items-center justify-center gap-2">
-                  <DollarSign className="w-4 h-4" /> Submit Quote
-                </span>
-              )}
-            </Button>
-          </form>
-        </>
+      </PortalShell>
+    )
+  }
+
+  return (
+    <PortalShell>
+      <p className="text-sm font-medium text-accent-700 mb-4">
+        Please review the job details below and price the work line by line. The
+        quote total is the sum of your line items.
+      </p>
+      <WOInfo workOrder={workOrder} property={property} />
+      {error && (
+        <div className="flex items-start gap-2 bg-red-50 border border-red-200 text-red-700 text-sm rounded-lg px-3 py-2 mb-4">
+          <AlertTriangle className="w-4 h-4 flex-shrink-0 mt-0.5" />
+          {error}
+        </div>
       )}
+      <form onSubmit={handleSubmit} className="space-y-4">
+        <LineItemEditor
+          heading="Quote Line Items"
+          totalLabel="Quote Total"
+          lineItems={lineItems}
+          subtotal={subtotal}
+          addLineItem={addLineItem}
+          removeLineItem={removeLineItem}
+          updateLineItem={updateLineItem}
+        />
+
+        {workOrder.nte_amount != null && subtotal > workOrder.nte_amount && (
+          <p style={{ fontSize: 12, color: '#b45309', backgroundColor: '#fffbeb', border: '1px solid #fde68a', borderRadius: 6, padding: '8px 10px', display: 'flex', alignItems: 'flex-start', gap: 6 }}>
+            <AlertTriangle style={{ width: 14, height: 14, flexShrink: 0, marginTop: 1 }} />
+            This quote exceeds the Not-to-Exceed amount of ${workOrder.nte_amount.toFixed(2)}. You can still submit it — the property manager will see the overage.
+          </p>
+        )}
+
+        <div>
+          <label htmlFor="quote-notes" className="label">Notes (optional)</label>
+          <textarea
+            id="quote-notes"
+            value={notes}
+            onChange={(e) => setNotes(e.target.value)}
+            rows={3}
+            className="input resize-none"
+            placeholder="Timeline, any conditions or questions…"
+          />
+        </div>
+
+        <Button type="submit" disabled={submitting} className="w-full py-3 text-base">
+          {submitting ? (
+            <span className="flex items-center justify-center gap-2">
+              <Clock className="w-4 h-4 animate-spin" /> Submitting…
+            </span>
+          ) : (
+            <span className="flex items-center justify-center gap-2">
+              <DollarSign className="w-4 h-4" /> Submit Quote
+            </span>
+          )}
+        </Button>
+      </form>
     </PortalShell>
   )
 }
