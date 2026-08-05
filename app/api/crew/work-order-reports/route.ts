@@ -111,12 +111,26 @@ export async function POST(request: NextRequest) {
   if (!auth.ok) return auth.response
   const { supabase, crew, user } = auth
 
-  const { data: property } = await supabase
+  const { data: property, error: propertyError } = await supabase
     .from('properties')
     .select('id, org_id, name')
     .eq('id', property_id)
     .eq('org_id', crew.org_id)
     .single()
+
+  // PGRST116 is .single()'s "no rows" — a genuine 404, and the IDOR case
+  // (a property outside the crew member's org) lands here too. Anything else
+  // is the query itself failing, which must not be reported to an offline crew
+  // member as "Property not found": that reads as permanent, so the Dexie
+  // outbox drops the report instead of retrying a transient outage.
+  if (propertyError && propertyError.code !== 'PGRST116') {
+    console.error('[CrewWorkOrderReport] property lookup', propertyError)
+    reportError(propertyError, {
+      site:  'api.crew.work-order-reports.propertyLookup',
+      orgId: crew.org_id,
+    })
+    return NextResponse.json({ error: 'Something went wrong' }, { status: 503 })
+  }
 
   if (!property) return NextResponse.json({ error: 'Property not found' }, { status: 404 })
 

@@ -522,6 +522,43 @@ async function fireManualLookup(
   }
 }
 
+/**
+ * The three numeric asset fields, parsed and validated identically for create
+ * and update — an edit reaches the same depreciation and health-score columns
+ * as a create, so it needs the same guards.
+ *
+ * The lifespan case is why these are REJECTED rather than coerced:
+ * `expected_lifespan_years ?? standardsMidpoint` could never recover from a bad
+ * value, because parseInt('abc') is NaN and NaN is neither null nor undefined —
+ * `??` hands it straight through and the asset-type-standards default, the
+ * whole point of the fallback, is skipped. NaN then reached
+ * calculateHealthScore() and JSON-serialized to null on the way to the DB, so
+ * one stray character silently produced no lifespan, no health score, and no
+ * default.
+ */
+function parseAssetNumericFields(formData: FormData):
+  | { fields: { purchase_price: number | null; estimated_replacement_cost: number | null; expected_lifespan_years: number | null } }
+  | { error: string } {
+  const price = optionalMoneyField(formData.get('purchase_price'))
+  if (!price.ok) return { error: `Purchase price: ${price.error}` }
+
+  const replacement = optionalMoneyField(formData.get('estimated_replacement_cost'))
+  if (!replacement.ok) return { error: `Replacement cost: ${replacement.error}` }
+
+  const lifespan = optionalPositiveInt(formData.get('expected_lifespan_years'), MAX_LIFESPAN_YEARS)
+  if (!lifespan.ok) {
+    return { error: `Expected lifespan must be a whole number of years between 1 and ${MAX_LIFESPAN_YEARS}.` }
+  }
+
+  return {
+    fields: {
+      purchase_price:             price.value,
+      estimated_replacement_cost: replacement.value,
+      expected_lifespan_years:    lifespan.value,
+    },
+  }
+}
+
 export async function createAsset(
   propertyId: string,
   _prev: AssetActionState | null,
@@ -543,26 +580,9 @@ export async function createAsset(
     if (!name)           return { error: 'Asset name is required' }
     if (!asset_type_raw) return { error: 'Asset type is required' }
 
-    const price = optionalMoneyField(formData.get('purchase_price'))
-    if (!price.ok) return { error: `Purchase price: ${price.error}` }
-    const purchase_price = price.value
-
-    const replacement = optionalMoneyField(formData.get('estimated_replacement_cost'))
-    if (!replacement.ok) return { error: `Replacement cost: ${replacement.error}` }
-    const estimated_replacement_cost = replacement.value
-
-    // Rejected rather than coerced, because the `??` below cannot recover from
-    // a bad value: parseInt('abc') is NaN, and NaN is neither null nor
-    // undefined, so `??` hands it straight through and the asset-type-standards
-    // midpoint — the whole point of the fallback — is skipped. NaN then reached
-    // calculateHealthScore() and JSON-serialized to null on the way to the DB,
-    // so one stray character silently produced no lifespan, no health score,
-    // and no default.
-    const lifespan_field = optionalPositiveInt(formData.get('expected_lifespan_years'), MAX_LIFESPAN_YEARS)
-    if (!lifespan_field.ok) {
-      return { error: `Expected lifespan must be a whole number of years between 1 and ${MAX_LIFESPAN_YEARS}.` }
-    }
-    const expected_lifespan_years = lifespan_field.value
+    const numbers = parseAssetNumericFields(formData)
+    if ('error' in numbers) return { error: numbers.error }
+    const { purchase_price, estimated_replacement_cost, expected_lifespan_years } = numbers.fields
 
     // property_assets.asset_type is an enum with no default, so there is no
     // safe value to fall back to — reject rather than coerce.
@@ -686,21 +706,9 @@ export async function updateAsset(
 
     if (!name) return { error: 'Asset name is required' }
 
-    // Same guards as createAsset — an edit reaches the same depreciation and
-    // health-score columns as a create.
-    const price = optionalMoneyField(formData.get('purchase_price'))
-    if (!price.ok) return { error: `Purchase price: ${price.error}` }
-    const purchase_price = price.value
-
-    const replacement = optionalMoneyField(formData.get('estimated_replacement_cost'))
-    if (!replacement.ok) return { error: `Replacement cost: ${replacement.error}` }
-    const estimated_replacement_cost = replacement.value
-
-    const lifespan_field = optionalPositiveInt(formData.get('expected_lifespan_years'), MAX_LIFESPAN_YEARS)
-    if (!lifespan_field.ok) {
-      return { error: `Expected lifespan must be a whole number of years between 1 and ${MAX_LIFESPAN_YEARS}.` }
-    }
-    const expected_lifespan_years = lifespan_field.value
+    const numbers = parseAssetNumericFields(formData)
+    if ('error' in numbers) return { error: numbers.error }
+    const { purchase_price, estimated_replacement_cost, expected_lifespan_years } = numbers.fields
 
     const { data: updated, error } = await supabase
       .from('property_assets')
