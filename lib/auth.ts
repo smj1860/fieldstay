@@ -11,21 +11,13 @@ import { reportError } from '@/lib/observability/report-error'
 import { setActorContext, setTenantContext } from '@/lib/observability/sentry-context'
 
 /**
- * organizations.repuguard_status is TEXT with
- * CHECK (repuguard_status IN ('inactive','trial','active','cancelled')) — a
- * constraint the column's type cannot carry, so narrow it here instead of
- * asserting. 'inactive' is the column's own DEFAULT.
+ * Upper bound on accepted memberships read for one user. There is no org
+ * switcher yet, so only the oldest is used; this exists so the read is bounded
+ * rather than open-ended (PostgREST truncates at max_rows = 1000 with no
+ * signal, and an unbounded select is a ratchet finding regardless of how few
+ * rows it realistically returns).
  */
-const REPUGUARD_STATUSES = ['inactive', 'trial', 'active', 'cancelled'] as const
-
-function toRepuguardStatus(
-  value: string | null | undefined,
-): (typeof REPUGUARD_STATUSES)[number] {
-  for (const status of REPUGUARD_STATUSES) {
-    if (status === value) return status
-  }
-  return 'inactive'
-}
+const MAX_MEMBERSHIPS_SCANNED = 25
 
 export interface OrgMembership {
   org_id: string
@@ -36,7 +28,6 @@ export interface OrgMembership {
     plan_status: string
     max_properties: number
     trial_ends_at: string | null
-    repuguard_status: 'inactive' | 'trial' | 'active' | 'cancelled'
     onboarding_steps_completed: Record<string, boolean>
   }
 }
@@ -90,11 +81,18 @@ const getMembershipContext = cache(async () => {
     .from('organization_members')
     .select(`
       org_id, role, invite_accepted_at,
-      organizations ( name, plan, plan_status, max_properties, trial_ends_at, repuguard_status, onboarding_steps_completed )
+      organizations ( name, plan, plan_status, max_properties, trial_ends_at, onboarding_steps_completed )
     `)
     .eq('user_id', user.id)
     .not('invite_accepted_at', 'is', null)
     .order('invite_accepted_at', { ascending: true })
+    // Bounded, though scoped to one user rather than to an org — this query is
+    // what DETERMINES the org, so it cannot be org-scoped. The ordering above
+    // already decides which row wins, and only rows[0] is ever used, so the
+    // limit changes no behaviour: it caps `membership_count` in the
+    // multi-membership report below, and a user holding 25+ accepted
+    // memberships is itself the anomaly that report exists to surface.
+    .limit(MAX_MEMBERSHIPS_SCANNED)
 
   if (error) {
     // Distinguish a real query failure from "this user has no memberships" —
@@ -140,7 +138,6 @@ const getMembershipContext = cache(async () => {
       plan_status:    orgData?.plan_status ?? 'trialing',
       max_properties: orgData?.max_properties ?? 5,
       trial_ends_at:  orgData?.trial_ends_at ?? null,
-      repuguard_status: toRepuguardStatus(orgData?.repuguard_status),
       onboarding_steps_completed: asBooleanMap(orgData?.onboarding_steps_completed),
     },
   }

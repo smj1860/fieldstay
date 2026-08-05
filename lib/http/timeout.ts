@@ -51,6 +51,16 @@ export const ANTHROPIC_TIMEOUT_MS = 30_000
 export const SCAN_REQUEST_TIMEOUT_MS = 10_000
 
 /**
+ * Stripe SDK calls. The SDK's own default is 80s — longer than the function
+ * budget, so a slow call inside the webhook handler gets the whole invocation
+ * killed by the platform. That skips the `catch` that releases the dedup
+ * claim, and Stripe's retry then hits the still-held claim and is discarded as
+ * a duplicate: the exact event loss the release exists to prevent, reached
+ * through the one door it does not cover.
+ */
+export const STRIPE_TIMEOUT_MS = 10_000
+
+/**
  * True when `err` is the abort raised by AbortSignal.timeout() — i.e. we
  * stopped waiting, as opposed to the service returning an error.
  *

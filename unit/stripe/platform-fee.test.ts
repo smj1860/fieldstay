@@ -13,9 +13,11 @@ import { reportError } from '@/lib/observability/report-error'
 // The COALESCE that stops it crashing is what makes it invisible — the only
 // symptom is revenue quietly not being collected.
 //
-// ENV_SPEC declares this as `percent`, but lib/env.ts is imported only by
-// unit/guardrails/env-schema-coverage.test.ts, so nothing executes that schema
-// at boot.
+// Defence in depth: lib/env.ts's assertServerEnv() DOES run at boot from
+// instrumentation.ts#register() and treats a present-but-malformed value as a
+// fatal error in every tier, so a bad value normally refuses the boot. This
+// covers the paths that gate misses — `next build` prints rather than throws,
+// and an unset variable is skipped entirely.
 
 const ORIGINAL = process.env.STRIPE_PLATFORM_FEE_PCT
 

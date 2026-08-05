@@ -32,13 +32,14 @@ describe('getVisibleNavItems', () => {
     expect(managerItems.some((i) => i.id === 'settings')).toBe(false)
   })
 
-  it('excludes condition:"repuguard" items by default', () => {
+  // Reviews used to carry condition:'repuguard' and was hidden unless
+  // organizations.repuguard_status was 'active'. RepuGuard is included in
+  // every plan now, and that column DEFAULTed to 'inactive' with only the
+  // OwnerRez sync ever flipping it — so the nav item was hidden from any org
+  // that never connected OwnerRez. The condition is gone entirely rather than
+  // pinned permanently true.
+  it('shows Reviews to every admin, with no feature condition', () => {
     const items = getVisibleNavItems('admin')
-    expect(items.some((i) => i.id === 'reviews')).toBe(false)
-  })
-
-  it('includes condition:"repuguard" items when repuguardActive is true', () => {
-    const items = getVisibleNavItems('admin', { repuguardActive: true })
     expect(items.some((i) => i.id === 'reviews')).toBe(true)
   })
 
@@ -52,14 +53,14 @@ describe('getVisibleNavItems', () => {
     expect(items.some((i) => i.id === 'support-inbox')).toBe(true)
   })
 
-  it('respects both condition flags simultaneously', () => {
-    const items = getVisibleNavItems('admin', { repuguardActive: true, isStaff: true })
+  it('respects the staff condition alongside unconditional items', () => {
+    const items = getVisibleNavItems('admin', { isStaff: true })
     expect(items.some((i) => i.id === 'reviews')).toBe(true)
     expect(items.some((i) => i.id === 'support-inbox')).toBe(true)
   })
 
   it('preserves ALL_NAV_ITEMS declaration order in the filtered result', () => {
-    const items = getVisibleNavItems('admin', { repuguardActive: true, isStaff: true })
+    const items = getVisibleNavItems('admin', { isStaff: true })
     const expectedOrder = ALL_NAV_ITEMS.filter((i) => items.some((v) => v.id === i.id)).map((i) => i.id)
     expect(items.map((i) => i.id)).toEqual(expectedOrder)
   })

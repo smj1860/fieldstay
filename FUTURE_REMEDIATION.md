@@ -860,3 +860,67 @@ browser check (this pattern is used across the whole card, so a visual
 regression here would be immediately obvious to every PM using the
 Turnovers board) — not something to attempt as a drive-by fix while
 resolving an unrelated merge conflict.
+
+---
+
+## 21. `types/database.generated.ts` is stale for `organizations.stripe_event_at`
+
+`supabase/migrations/20260804210000_stripe_subscription_event_recency_guard.sql`
+added `organizations.stripe_event_at timestamptz` (the monotonic guard that
+stops an out-of-order Stripe delivery overwriting newer entitlement — Stripe
+retries for ~3 days and does not guarantee order). It was applied to both
+production (`vpmznjktllhmmbfnxuvk`) and E2E (`syhthijeqlnltufdawyb`).
+
+The hand-written `types/database.ts` — the app's import surface, and the file
+`scripts/check-type-drift.mjs` actually compares against the live schema — was
+updated in the same commit, so nothing is broken and CI is not red.
+`types/database.generated.ts` was NOT regenerated, so the two type files
+disagree about this one column.
+
+The same commit's sibling migration
+(`20260804230000_drop_vestigial_repuguard_columns.sql`) DROPPED
+`organizations.repuguard_status` and `organizations.repuguard_stripe_subscription_id`,
+which the generated file still declares — so the drift is in both directions:
+one column missing, two columns that no longer exist.
+
+**Why it was not done here:** regenerating requires the Supabase CLI
+(`npx supabase gen types typescript --project-id vpmznjktllhmmbfnxuvk >
+types/database.generated.ts`) or the Supabase MCP `generate_typescript_types`
+tool, and it rewrites the whole file. Landing a multi-thousand-line generated
+diff inside a behaviour-change commit would bury the actual review surface —
+the recency guard and the RepuGuard gate removal — in noise.
+
+**Fix:** regenerate on its own, as a single mechanical commit with no other
+changes, and confirm `types/database.ts` still agrees afterwards.
+
+**Why it matters despite not being red:** `lib/supabase/server.ts` still omits
+the `<Database>` generic (see the note in `types/database.ts`), so no
+`.from()`/`.rpc()` call is type-checked against the generated schema yet. The
+day that generic is wired up — which is the stated direction — every stale
+column in the generated file becomes a compile error or, worse, a silently
+wrong inferred row type. The drift is free right now and expensive later.
+
+### ~~Related: three more RepuGuard columns are now unread~~ — RESOLVED 2026-08-04
+
+`repuguard_trial_start`, `repuguard_trial_end` and `repuguard_founding_member`
+were held back from `20260804230000` because a "founding member" flag can
+encode commercial intent (grandfathered pricing, a launch cohort) that
+outlives whatever code once set it, and a column drop is irreversible.
+
+Confirmed with the product owner and dropped in
+`20260804240000_drop_remaining_repuguard_columns.sql`, applied to both
+projects. The evidence: zero readers anywhere in the repo (only the
+`Organization` interface and the historical migrations that created them), and
+all three empty on BOTH projects — 0 trial starts, 0 trial ends, 0 founding
+members across 8 production orgs and 1 E2E org. No cohort existed to preserve.
+
+The trial columns had in fact been carrying nothing since June:
+`20260608122111_repuguard_bundled_activation.sql` explicitly NULLed
+`repuguard_trial_start`/`repuguard_trial_end` when RepuGuard was folded into
+every plan. `organizations` now has no `repuguard%` column at all.
+
+**This does not shrink the generated-types item above — it grows it.**
+`types/database.generated.ts` is now stale by six columns on `organizations`:
+one missing (`stripe_event_at`) and five declaring columns that no longer
+exist. `types/database.ts` is correct, so CI stays green, but the regeneration
+commit is now worth more than when it was first logged.

@@ -50,7 +50,6 @@ interface Props {
   orgName:                    string
   userName:                   string
   userEmail:                  string
-  repuguardActive?:           boolean
   onboardingComplete?:        boolean
   onboardingPct?:             number
   notifications?:             NotificationItem[]
@@ -321,7 +320,7 @@ function DashboardSidebar({
   )
 }
 
-export function DashboardShell({ role, orgName, userName, userEmail, repuguardActive = false, onboardingComplete = true, onboardingPct = 0, notifications = [], notificationsFailed = false, unreadMessages = 0, isStaff = false, children }: Readonly<Props>) {
+export function DashboardShell({ role, orgName, userName, userEmail, onboardingComplete = true, onboardingPct = 0, notifications = [], notificationsFailed = false, unreadMessages = 0, isStaff = false, children }: Readonly<Props>) {
   const pathname   = usePathname()
   const [collapsed,  setCollapsed]  = useState(false)
   const [mobileOpen, setMobileOpen] = useState(false)
@@ -341,7 +340,7 @@ export function DashboardShell({ role, orgName, userName, userEmail, repuguardAc
   const closeMobileDrawer = useCallback(() => setMobileOpen(false), [])
   useFocusTrap(mobileDrawerRef, mobileOpen, closeMobileDrawer)
 
-  const visibleItems = getVisibleNavItems(role, { repuguardActive, isStaff })
+  const visibleItems = getVisibleNavItems(role, { isStaff })
 
   // Split into Ops (daily-use) and Management (weekly-use) tiers, rendered
   // as two groups with a divider to keep the sidebar scannable. help and
@@ -443,7 +442,7 @@ export function DashboardShell({ role, orgName, userName, userEmail, repuguardAc
               }
             </button>
 
-            <CommandPalette role={role} repuguardActive={repuguardActive} isStaff={isStaff} />
+            <CommandPalette role={role} isStaff={isStaff} />
           </div>
 
           {/* Mobile page title — centered absolutely */}
@@ -554,7 +553,6 @@ export function DashboardShell({ role, orgName, userName, userEmail, repuguardAc
         open={moreDrawerOpen}
         onClose={() => setMoreDrawerOpen(false)}
         role={role}
-        repuguardActive={repuguardActive}
       />
     </div>
   )

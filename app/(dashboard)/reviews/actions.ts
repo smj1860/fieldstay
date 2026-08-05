@@ -10,17 +10,14 @@ const MANUAL_WEEKLY_LIMIT = 2
 
 export async function requestBatchGeneration(): Promise<{ success: boolean; error?: string }> {
   try {
-    const { user, supabase, membership } = await requireOrgMember()
+    // `supabase` is no longer destructured — the removed repuguard_status gate
+    // was this action's only DB read.
+    const { user, membership } = await requireOrgMember()
 
-    const { data: org } = await supabase
-      .from('organizations')
-      .select('repuguard_status')
-      .eq('id', membership.org_id)
-      .single()
-
-    if (org?.repuguard_status !== 'active') {
-      return { success: false, error: 'RepuGuard is not enabled for this account.' }
-    }
+    // No repuguard_status gate — RepuGuard is included in every plan. See the
+    // note in app/api/repuguard/generate/route.ts: this check locked out any
+    // org that never connected OwnerRez, since that sync was the only thing
+    // that ever flipped the column off its 'inactive' default.
 
     await inngest.send({
       name: 'repuguard/batch_generate.requested',

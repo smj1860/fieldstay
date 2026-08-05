@@ -64,7 +64,13 @@ describe('reviews/actions', () => {
       })
     })
 
-    it('refuses when RepuGuard is not enabled for the org', async () => {
+    // Was: "refuses when RepuGuard is not enabled for the org". That gate is
+    // gone. RepuGuard is included in every plan, but this checked
+    // organizations.repuguard_status — a column that DEFAULTs to 'inactive'
+    // and was only ever flipped by the OwnerRez initial-sync auto-activate
+    // step. Any org that never connected OwnerRez was refused a feature
+    // included in their plan (6 of 8 production orgs at the time of the fix).
+    it('proceeds for an org whose legacy repuguard_status is still inactive', async () => {
       const supabase = makeSupabase({
         organizations: [{ data: { repuguard_status: 'inactive' } }],
       })
@@ -74,8 +80,11 @@ describe('reviews/actions', () => {
 
       const result = await requestBatchGeneration()
 
-      expect(result).toEqual({ success: false, error: 'RepuGuard is not enabled for this account.' })
-      expect(inngest.send).not.toHaveBeenCalled()
+      expect(result).toEqual({ success: true })
+      expect(inngest.send).toHaveBeenCalledWith({
+        name: 'repuguard/batch_generate.requested',
+        data: { org_id: 'org_1', requested_by: 'user_1' },
+      })
     })
 
     it('returns a generic error and never touches the DB when the caller is unauthenticated', async () => {

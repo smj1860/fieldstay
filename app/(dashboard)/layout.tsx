@@ -40,9 +40,6 @@ export default async function DashboardLayout({
   const { user, supabase, membership } = await requireOrgMember()
   const org = membership.org
 
-  const repuguardActive =
-    org.repuguard_status === 'trial' || org.repuguard_status === 'active'
-
   const completedSteps  = org.onboarding_steps_completed
   const onboardingPct   = calcOnboardingProgress(completedSteps)
   const onboardingComplete = ONBOARDING_STEPS.every((s) => completedSteps[s.key])
@@ -182,7 +179,6 @@ export default async function DashboardLayout({
         orgName={org.name || 'FieldStay'}
         userName={displayName}
         userEmail={user.email ?? ''}
-        repuguardActive={repuguardActive}
         onboardingComplete={onboardingComplete}
         onboardingPct={onboardingPct}
         notifications={notificationFeed.items}

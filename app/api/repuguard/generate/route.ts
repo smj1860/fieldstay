@@ -63,20 +63,12 @@ async function resolveEntitledOrg(
 
   const orgId = membership.org_id as string
 
-  const { data: org } = await admin
-    .from('organizations')
-    .select('repuguard_status')
-    .eq('id', orgId)
-    .single()
-
-  if (!org || org.repuguard_status !== 'active') {
-    return {
-      response: NextResponse.json(
-        { error: 'RepuGuard is not enabled for this account.' },
-        { status: 403 }
-      ),
-    }
-  }
+  // No repuguard_status gate. RepuGuard ships with every plan — the standalone
+  // subscription was dropped long ago — but this check survived it, and the
+  // column DEFAULTs to 'inactive'. The only thing that ever set it to 'active'
+  // was the OwnerRez initial-sync auto-activate step, so any org that never
+  // connected OwnerRez got a 403 on a feature included in their plan. On
+  // production that was 6 of 8 orgs. Org membership is the entitlement now.
 
   return { orgId }
 }

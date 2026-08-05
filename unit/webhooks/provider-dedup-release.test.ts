@@ -1,6 +1,9 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { NextRequest } from 'next/server'
 import { createHash } from 'crypto'
+// canonicalJson, not JSON.stringify: the route hashes a key-sorted
+// serialization so the dedup key cannot depend on the provider's key order.
+import { canonicalJson } from '@/lib/integrations/canonical-json'
 
 // BLOCKER-3: the dedup claim in `processed_webhooks` is written BEFORE
 // handleWebhookEvent runs (so concurrent redeliveries collapse to one), but
@@ -113,7 +116,7 @@ describe('POST /api/webhooks/[provider] — dedup claim release on handler failu
   // have always returned 500 here; this one was the outlier.
   it('deletes the processed_webhooks claim when handleWebhookEvent throws, and returns 500 so the provider retries', async () => {
     const payload = { action: 'reservation.changed', id: 'evt_1', data: { id: 'res_1' } }
-    const expectedKey = `hospitable:${createHash('sha256').update(JSON.stringify(payload)).digest('hex')}`
+    const expectedKey = `hospitable:${createHash('sha256').update(canonicalJson(payload)).digest('hex')}`
     adapter.handleWebhookEvent.mockRejectedValueOnce(new Error('Inngest unreachable'))
 
     const res = await callPost('hospitable', payload)
@@ -144,7 +147,7 @@ describe('POST /api/webhooks/[provider] — dedup claim release on handler failu
 
   it('keeps the claim in place (no release) when the handler succeeds, so a genuine retry is still deduped', async () => {
     const payload = { action: 'reservation.changed', id: 'evt_1', data: { id: 'res_1' } }
-    const expectedKey = `hospitable:${createHash('sha256').update(JSON.stringify(payload)).digest('hex')}`
+    const expectedKey = `hospitable:${createHash('sha256').update(canonicalJson(payload)).digest('hex')}`
 
     await callPost('hospitable', payload)
     expect(supabase.insertedIds.has(expectedKey)).toBe(true)

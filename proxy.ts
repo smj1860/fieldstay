@@ -2,7 +2,7 @@ import { NextResponse, type NextRequest } from 'next/server'
 import { updateSession } from '@/lib/supabase/middleware'
 import {
   workOrderRatelimit, vendorConnectRatelimit, ownerPortalRatelimit, guidebookRatelimit,
-  oauthCallbackRatelimit, demoRatelimit, unsubscribeRatelimit,
+  oauthCallbackRatelimit, demoRatelimit, unsubscribeRatelimit, webhookRatelimit,
   checkLimit, retryAfterSeconds,
 } from '@/lib/rate-limit'
 import { extractClientIp } from '@/lib/integrations/webhook-verification'
@@ -237,6 +237,15 @@ function rateLimiterForPathname(pathname: string) {
   if (pathname.startsWith('/api/integrations/') &&
       (pathname.includes('/callback') || pathname.includes('/connect')))
     return oauthCallbackRatelimit
+
+  // Webhooks are BYPASS_ROUTES (providers POST with their own credential, not
+  // a session) and had no branch here, making them the one externally-POSTable
+  // surface with no throttle at all. Their authenticity check is an APP-level
+  // credential, so the payload's user_id is what decides whose integration
+  // token gets revoked — one leaked secret meant unbounded mass revocation.
+  // See webhookRatelimit for why the ceiling is deliberately generous.
+  if (pathname.startsWith('/api/webhooks/'))      return webhookRatelimit
+
   return null
 }
 

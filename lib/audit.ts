@@ -17,6 +17,7 @@ export type AuditAction =
   | 'account.deleted'
   | 'billing.subscription.updated'
   | 'billing.subscription.cancelled'
+  | 'billing.payment.failed'
   | 'ical.feed.added'
   | 'ical.feed.deleted'
   | 'comms.log.created'

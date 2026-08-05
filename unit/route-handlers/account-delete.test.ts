@@ -342,7 +342,7 @@ describe('DELETE /api/account/delete', () => {
         { data: [{ org_id: 'org_1', role: 'owner' }], error: null },
         { data: null, error: null, count: 0 },
       ],
-      organizations: [{ data: { stripe_subscription_id: 'sub_1', repuguard_stripe_subscription_id: null }, error: null }],
+      organizations: [{ data: { stripe_subscription_id: 'sub_1' }, error: null }],
     })
     vi.mocked(createServiceClient).mockReturnValue(admin as never)
     vi.mocked(stripe.subscriptions.cancel).mockRejectedValueOnce(new Error('stripe down'))
@@ -367,7 +367,7 @@ describe('DELETE /api/account/delete', () => {
         { data: [{ org_id: 'org_1', role: 'owner' }], error: null },
         { data: null, error: null, count: 0 },
       ],
-      organizations: [{ data: { stripe_subscription_id: 'sub_1', repuguard_stripe_subscription_id: null }, error: null }],
+      organizations: [{ data: { stripe_subscription_id: 'sub_1' }, error: null }],
       integration_connections: [{ data: [], error: null }],
     })
     vi.mocked(createServiceClient).mockReturnValue(admin as never)
@@ -392,7 +392,7 @@ describe('DELETE /api/account/delete', () => {
         { data: [{ org_id: 'org_1', role: 'owner' }], error: null },
         { data: null, error: null, count: 0 },
       ],
-      organizations: [{ data: { stripe_subscription_id: null, repuguard_stripe_subscription_id: null }, error: null }],
+      organizations: [{ data: { stripe_subscription_id: null }, error: null }],
       integration_connections: [{ data: [], error: null }],
     })
     vi.mocked(createServiceClient).mockReturnValue(admin as never)
@@ -416,7 +416,7 @@ describe('DELETE /api/account/delete', () => {
         { data: [{ org_id: 'org_1', role: 'owner' }], error: null },
         { data: null, error: null, count: 0 },
       ],
-      organizations: [{ data: { stripe_subscription_id: null, repuguard_stripe_subscription_id: null }, error: null }],
+      organizations: [{ data: { stripe_subscription_id: null }, error: null }],
       integration_connections: [{ data: [], error: null }],
     })
     vi.mocked(createServiceClient).mockReturnValue(admin as never)
@@ -478,7 +478,7 @@ describe('DELETE /api/account/delete', () => {
         { data: null, error: null, count: 0 },
       ],
       organizations: [
-        { data: { stripe_subscription_id: null, repuguard_stripe_subscription_id: null }, error: null },
+        { data: { stripe_subscription_id: null }, error: null },
         { data: null, error: { message: 'deadlock detected' } },  // the DELETE
       ],
       integration_connections: [{ data: [], error: null }],
@@ -502,7 +502,7 @@ describe('DELETE /api/account/delete', () => {
         { data: [{ org_id: 'org_1', role: 'owner' }], error: null },
         { data: null, error: null, count: 0 },
       ],
-      organizations: [{ data: { stripe_subscription_id: 'sub_1', repuguard_stripe_subscription_id: 'sub_rg_1' }, error: null }],
+      organizations: [{ data: { stripe_subscription_id: 'sub_1' }, error: null }],
       integration_connections: [{ data: [{ provider_id: 'ownerrez' }, { provider_id: 'kroger' }], error: null }],
     })
     vi.mocked(createServiceClient).mockReturnValue(admin as never)
@@ -512,8 +512,12 @@ describe('DELETE /api/account/delete', () => {
     expect(res.status).toBe(200)
     await expect(res.json()).resolves.toEqual({ ok: true })
 
+    // Only the core subscription now. organizations.repuguard_stripe_subscription_id
+    // was dropped with the standalone RepuGuard product — nothing had created
+    // such a subscription for a long time and 0 of 8 production orgs held a
+    // value, so that cancel branch was unreachable rather than merely idle.
     expect(stripe.subscriptions.cancel).toHaveBeenCalledWith('sub_1')
-    expect(stripe.subscriptions.cancel).toHaveBeenCalledWith('sub_rg_1')
+    expect(stripe.subscriptions.cancel).toHaveBeenCalledTimes(1)
     // org_id survives in metadata because audit_events.org_id is
     // ON DELETE SET NULL and the organizations row is about to disappear.
     expect(logAuditEvents).toHaveBeenCalledWith([

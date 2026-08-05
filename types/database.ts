@@ -104,6 +104,13 @@ export interface Organization {
   billing_email:                string | null
   stripe_customer_id:           string | null
   stripe_subscription_id:       string | null
+  /**
+   * `created` of the most recent Stripe subscription event applied to this
+   * row. Drives update_organization_subscription_from_stripe's stale-delivery
+   * guard — Stripe retries for ~3 days and does not guarantee order, so an
+   * older event must not overwrite a newer one.
+   */
+  stripe_event_at:              string | null
   plan:                         OrgPlan
   plan_status:                  OrgPlanStatus
   trial_ends_at:                string | null
@@ -121,11 +128,6 @@ export interface Organization {
   comms_log_retention_days:     number
   guest_pii_retention_days:     number
   slack_webhook_url:            string | null
-  repuguard_status:             'inactive' | 'trial' | 'active' | 'cancelled'
-  repuguard_trial_start:        string | null
-  repuguard_trial_end:          string | null
-  repuguard_stripe_subscription_id: string | null
-  repuguard_founding_member:    boolean
   /**
    * Roadshow demo tenant marker (20260726160000_demo_org_support.sql).
    * NOT an RLS bypass — the demo org is an ordinary tenant. Gates

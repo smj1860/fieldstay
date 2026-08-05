@@ -157,7 +157,7 @@ async function cancelOrgSubscriptions(
 ): Promise<NextResponse | null> {
   const { data: org, error } = await admin
     .from('organizations')
-    .select('stripe_subscription_id, repuguard_stripe_subscription_id')
+    .select('stripe_subscription_id')
     .eq('id', orgId)
     .maybeSingle()
 
@@ -177,20 +177,20 @@ async function cancelOrgSubscriptions(
   // organizations update payload below, and a plain `string` index would make
   // that payload implicitly `any` — quietly giving up the checking this write
   // just gained.
-  type SubscriptionColumn = 'stripe_subscription_id' | 'repuguard_stripe_subscription_id'
+  // The list shape is kept even though only one subscription column remains:
+  // it carries the batched checkpoint write below (one update, not one per
+  // subscription — see the N+1 guardrail) and the already-cancelled retry
+  // semantics. The repuguard_stripe_subscription_id entry was dropped with the
+  // column itself — nothing had created a standalone RepuGuard subscription
+  // for a long time, and 0 of 8 production orgs held a value, so that branch
+  // was unreachable rather than merely idle.
+  type SubscriptionColumn = 'stripe_subscription_id'
   const subs: Array<{ id: string; column: SubscriptionColumn; site: string }> = []
   if (org.stripe_subscription_id) {
     subs.push({
       id:     org.stripe_subscription_id as string,
       column: 'stripe_subscription_id',
       site:   'route.account.delete.stripe_cancel',
-    })
-  }
-  if (org.repuguard_stripe_subscription_id) {
-    subs.push({
-      id:     org.repuguard_stripe_subscription_id as string,
-      column: 'repuguard_stripe_subscription_id',
-      site:   'route.account.delete.repuguard_stripe_cancel',
     })
   }
 
