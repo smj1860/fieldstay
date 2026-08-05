@@ -33,7 +33,6 @@ const UPLOAD_PATH_EXCEPTIONS: Record<string, string> = {
   // directly. Both are service-role (RLS-exempt) but still write the prefix so
   // the object stays reachable by the PM-side signed-URL reads.
   'app/api/work-orders/[token]/photos/route.ts': 'service-role; org id read from the work order, prefix asserted below',
-  'app/actions/work-order-public.ts':            'service-role; org id read from the work order, prefix asserted below',
 }
 
 function uploadsToOrgScopedBucket(src: string): boolean {

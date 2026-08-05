@@ -21,11 +21,10 @@ vi.mock('@/lib/inngest/helpers', () => ({
   createPmNotification: vi.fn(async () => undefined),
 }))
 
-import { workOrderDispatch, workOrderSignedOff } from '@/lib/inngest/functions/work-order-dispatch'
+import { workOrderDispatch } from '@/lib/inngest/functions/work-order-dispatch'
 import { createServiceClient } from '@/lib/supabase/server'
 import { resend } from '@/lib/resend/client'
 import { ensureVendorConnectInvited } from '@/lib/stripe/vendor-connect-invite'
-import { getPmMembers, createPmNotification } from '@/lib/inngest/helpers'
 import { invokeHandler } from './test-helpers'
 
 // Both handlers here have no branching inside step.run bodies that depends on
@@ -165,70 +164,5 @@ describe('workOrderDispatch', () => {
     await invokeHandler(workOrderDispatch, { event: dispatchEvent(), step: makeStep() })
 
     expect(ensureVendorConnectInvited).not.toHaveBeenCalled()
-  })
-})
-
-function signedOffEvent(overrides: Record<string, unknown> = {}) {
-  return {
-    data: {
-      workOrderId:     'wo_1',
-      woNumber:        'WO-1001',
-      title:           'Fix leaking faucet',
-      signOffNotes:    'All done, replaced washer',
-      signedOffAt:     '2026-07-20T15:00:00.000Z',
-      propertyName:    'The Lakehouse',
-      propertyAddress: '1 Lake Dr, Austin, TX',
-      orgId:           'org_1',
-      orgName:         'Lake Martin Delivery',
-      vendorEmail:     'vendor@example.com',
-      ...overrides,
-    },
-  }
-}
-
-describe('workOrderSignedOff', () => {
-  beforeEach(() => {
-    vi.clearAllMocks()
-  })
-
-  it('notifies the PM and logs the sign-off when a PM is found', async () => {
-    ;(getPmMembers as ReturnType<typeof vi.fn>).mockResolvedValue([
-      { userId: 'u1', email: 'pm@example.com', role: 'owner' },
-    ])
-
-    const supabase = makeSupabase({
-      profiles:    [{ data: { full_name: 'Jane PM' }, error: null }],
-      work_orders: [{ data: { org_id: 'org_1', vendor_id: 'v1', property_id: 'prop_1' }, error: null }],
-      communication_logs: [{ error: null }],
-    })
-    ;(createServiceClient as ReturnType<typeof vi.fn>).mockReturnValue(supabase)
-
-    const result = await invokeHandler(workOrderSignedOff, { event: signedOffEvent(), step: makeStep() })
-
-    expect(createPmNotification).toHaveBeenCalledWith(
-      supabase,
-      expect.objectContaining({
-        orgId: 'org_1',
-        type:  'work_order_complete',
-        dedupeKey: 'work-order-signed-off-pm-wo_1',
-      })
-    )
-
-    const signoffInsert = supabase.calls.find((c) => c.table === 'communication_logs' && c.method === 'insert')
-    expect(signoffInsert?.args[0]).toMatchObject({ dedup_key: 'wo-signoff:wo_1' })
-
-    expect(result).toEqual({ notified: true, pmEmail: 'pm@example.com', woNumber: 'WO-1001' })
-  })
-
-  it('skips notification entirely when no PM email can be found for the org', async () => {
-    ;(getPmMembers as ReturnType<typeof vi.fn>).mockResolvedValue([])
-
-    const supabase = makeSupabase({})
-    ;(createServiceClient as ReturnType<typeof vi.fn>).mockReturnValue(supabase)
-
-    const result = await invokeHandler(workOrderSignedOff, { event: signedOffEvent(), step: makeStep() })
-
-    expect(result).toEqual({ skipped: 'No PM email address found' })
-    expect(createPmNotification).not.toHaveBeenCalled()
   })
 })

@@ -118,7 +118,7 @@ import { notifyVendorComplianceExpiring }   from '@/lib/inngest/functions/notify
 import { vendorComplianceGraceCheck }       from '@/lib/inngest/functions/cron/vendor-compliance-grace-check'
 
 // Work order public dispatch + sign-off
-import { workOrderDispatch, workOrderSignedOff } from '@/lib/inngest/functions/work-order-dispatch'
+import { workOrderDispatch } from '@/lib/inngest/functions/work-order-dispatch'
 
 // Work order vendor assignment → dispatch
 import { handleWorkOrderVendorAssigned } from '@/lib/inngest/functions/work-order-vendor-assigned'
@@ -309,7 +309,6 @@ export const { GET, POST, PUT } = serve({
 
     // Work order public dispatch
     workOrderDispatch,
-    workOrderSignedOff,
     handleWorkOrderVendorAssigned,
     handleWorkOrderCrewAssigned,
     handleWorkOrderCrewCompleted,

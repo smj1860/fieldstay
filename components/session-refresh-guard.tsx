@@ -6,7 +6,7 @@ import { createClient }  from '@/lib/supabase/client'
 
 const PUBLIC_PATHS = ['/', '/login', '/signup', '/forgot-password',
   '/reset-password', '/accept-invite', '/crew-invite', '/owner',
-  '/wo/', '/work-orders/']
+  '/work-orders/']
 
 function isPublicPath(pathname: string): boolean {
   return PUBLIC_PATHS.some((p) => pathname === p || pathname.startsWith(p))

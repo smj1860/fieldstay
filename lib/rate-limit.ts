@@ -336,15 +336,6 @@ export const webhookRatelimit = new Ratelimit({
   prefix:    'rl:webhook',
 })
 
-// Sign-off action — 5 submissions per 5 minutes per work order token
-// A contractor will never legitimately submit more than once
-export const signOffRatelimit = new Ratelimit({
-  redis,
-  limiter:   Ratelimit.slidingWindow(5, '5 m'),
-  analytics: false,
-  prefix:    'rl:signoff',
-})
-
 // Invite-acceptance account creation (crew-invite, accept-invite) — both
 // call supabase.auth.admin.createUser(), a real account-creation operation,
 // from a public unauthenticated route gated only by a UUID token. Keyed by

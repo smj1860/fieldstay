@@ -180,7 +180,7 @@ const BASELINE: Record<string, number> = {
   'lib/inngest/functions/platform-inventory-template-broadcast.ts': 5,
   'lib/inngest/functions/support-conversation-escalated.ts': 2,
   'lib/inngest/functions/turnover-events.ts': 5,
-  'lib/inngest/functions/work-order-dispatch.ts': 5,
+  'lib/inngest/functions/work-order-dispatch.ts': 3,
   'lib/inngest/functions/work-order-events.ts': 8,
   'lib/inngest/functions/work-order-invoice.ts': 2,
 
