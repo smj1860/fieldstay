@@ -54,32 +54,71 @@ if (!key) {
  * contract either way; unit/guardrails/env-schema-coverage.test.ts is what
  * keeps this list and ENV_SPEC from drifting apart.
  */
-const KNOWN_PRICE_ENV = [
+/**
+ * Split into required and optional, because this script cannot otherwise tell
+ * its two failure modes apart:
+ *
+ *   • Stripe has a price PLANS does not claim        → real drift, the point
+ *   • we did not TELL the script about a price       → a config gap
+ *
+ * Both look identical from here — an id in Stripe with no env var pointing at
+ * it — and the first run of this check hit the second one, reporting the three
+ * live plan monthlies as drift and advising "add the price to PLANS" when they
+ * were already in PLANS. That advice would have sent someone editing correct
+ * code. An incomplete comparison must announce itself as incomplete rather
+ * than dressing up as a finding.
+ */
+const REQUIRED_PRICE_ENV = [
   'STRIPE_PRICE_STARTER_MONTHLY',
-  'STRIPE_PRICE_STARTER_ANNUAL',
   'STRIPE_PRICE_GROWTH_MONTHLY',
-  'STRIPE_PRICE_GROWTH_ANNUAL',
   'STRIPE_PRICE_PORTFOLIO_MONTHLY',
-  'STRIPE_PRICE_PORTFOLIO_ANNUAL',
-  // Not a plan — the guidebook sponsor subscription. It is a legitimate
-  // recurring price that PLANS deliberately does not claim, so it must be
-  // named here or every run reports it as drift.
+  // Not a plan — the guidebook sponsor subscription. A legitimate recurring
+  // price that PLANS deliberately does not claim, so it must be named here or
+  // every run reports it as drift.
   'STRIPE_PRICE_SPONSOR_MONTHLY',
 ]
 
-const known = new Map()
-for (const name of KNOWN_PRICE_ENV) {
-  const value = process.env[name]
-  if (value?.trim()) known.set(value.trim(), name)
+/**
+ * Annual billing is not launched — no annual price exists in the Stripe
+ * account, and PLANS' priceId() returns null for an unset var, which
+ * createCheckoutSession already branches on. Unset is a supported state, so
+ * these must not be required. If one IS set, it still gets compared, and the
+ * dangling check below catches it pointing at a price that is not live.
+ */
+const OPTIONAL_PRICE_ENV = [
+  'STRIPE_PRICE_STARTER_ANNUAL',
+  'STRIPE_PRICE_GROWTH_ANNUAL',
+  'STRIPE_PRICE_PORTFOLIO_ANNUAL',
+]
+
+const readPrice = (name) => process.env[name]?.trim() || null
+
+const missingRequired = REQUIRED_PRICE_ENV.filter((name) => !readPrice(name))
+
+if (missingRequired.length > 0) {
+  const detail =
+    'Stripe price drift check cannot run: STRIPE_SECRET_KEY is set but these ' +
+    `price variables are not — ${missingRequired.join(', ')}.\n\n` +
+    'Without them the comparison is INCOMPLETE: every price they point at ' +
+    'would be reported as drift even though PLANS claims it correctly. That ' +
+    'is a CI configuration gap, not an application problem — do not go ' +
+    'editing lib/stripe/client.ts on the strength of it.\n\n' +
+    'Fix by adding the missing ids as repo secrets (they are the same values ' +
+    'the deployed app already uses), then set the repo variable ' +
+    'STRIPE_PRICE_DRIFT_ARMED=1 to turn this into a hard gate.'
+
+  if (process.env.STRIPE_PRICE_DRIFT_REQUIRE_ARMED === '1') {
+    console.error(detail)
+    process.exit(1)
+  }
+  console.log(`::warning title=Stripe price drift gate INCOMPLETE::${detail.replace(/\n+/g, ' ')}`)
+  process.exit(0)
 }
 
-if (known.size === 0) {
-  console.error(
-    'No STRIPE_PRICE_* variables are set, so every price in the account would ' +
-      'report as drift. Configure them, or leave STRIPE_SECRET_KEY unset to ' +
-      'disarm this check entirely.'
-  )
-  process.exit(1)
+const known = new Map()
+for (const name of [...REQUIRED_PRICE_ENV, ...OPTIONAL_PRICE_ENV]) {
+  const value = readPrice(name)
+  if (value) known.set(value, name)
 }
 
 async function stripeGet(path) {
@@ -134,9 +173,13 @@ if (unmapped.length > 0) {
       'downgrades the org (the entitlement columns are left alone and the ' +
       'event is reported), but the org also does not get the tier it is ' +
       'paying for.\n\n' +
-      'Fix by adding the price to PLANS in lib/stripe/client.ts with its env ' +
-      'var, or — if it is deliberately not a plan, like the sponsor price — ' +
-      'by naming it in KNOWN_PRICE_ENV in this script.'
+      'Check FIRST whether the price is already in PLANS and simply has no ' +
+      'env var configured here — that is a CI config gap, not drift, and the ' +
+      'required-variable check above only covers the ids it knows to expect. ' +
+      'If it is genuinely new: add it to PLANS in lib/stripe/client.ts with ' +
+      'its env var and list that var in REQUIRED_PRICE_ENV, or — if it is ' +
+      'deliberately not a plan, like the sponsor price — list it there ' +
+      'without touching PLANS.'
   )
   process.exit(1)
 }
