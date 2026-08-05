@@ -109,6 +109,8 @@ const EXCEPTIONS: Record<string, string> = {
   // and the Stripe-id clear was collapsed from one update per subscription
   // into a single batched patch. Pruned 2026-07-30 with the account-deletion
   // org-orphaning fix.
+  'app/(dashboard)/settings/privacy/actions.ts:69':
+    'Per-secret delete_vault_secret RPC in the manual Article 17 erasure — the same distinct-external-resource case as the retention cron entry below, and bounded the same way (one BOOKING_BATCH_SIZE page per iteration of the self-draining outer loop, not the guest\'s whole booking history).',
   'app/(dashboard)/maintenance/actions.ts:944':
     'Per-vendor quote_requests insert — each row needs its own randomly generated quote_token before its own Inngest event fires; the insert could theoretically be batched with the token generated client-side, but that\'s a sync-logic change, not a lint fix.',
   'app/(dashboard)/maintenance/create-work-order-helpers.ts:153':

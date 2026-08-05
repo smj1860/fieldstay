@@ -61,7 +61,12 @@ const SERVER_ACTION = /^export\s+async\s+function\s+([A-Za-z0-9_$]+)/gm
  */
 const BASELINE = new Set([
   'app/crew/turnovers/actions.ts::submitAssetDiscovery',
-  'app/(dashboard)/settings/privacy/actions.ts::anonymizeGuestData',
+  // anonymizeGuestData pruned 2026-08-05: it now has a caller
+  // (app/(dashboard)/settings/privacy/erasure-form.tsx). It was dead for the
+  // usual reason — the action shipped without the page, so nothing ever
+  // exercised it, which is how it kept an incomplete Article 17 erasure
+  // (name + email only, no raw_ical_data / Vault door code / SMS opt-in)
+  // while audit-logging request_type: 'erasure_article_17'.
   'app/(dashboard)/inventory/actions.ts::updatePurchaseOrderStatus',
   'app/(dashboard)/maintenance/actions.ts::assignCrewToWorkOrder',
   'app/(dashboard)/maintenance/actions.ts::updateWorkOrder',
