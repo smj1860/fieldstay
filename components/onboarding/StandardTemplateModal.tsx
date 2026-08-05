@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from 'react'
 import { createClient } from '@/lib/supabase/client'
-import { broadcastMaintenanceTemplate } from '@/app/(dashboard)/maintenance/actions'
+import { broadcastMaintenanceTemplate } from '@/app/(dashboard)/maintenance/maintenance-template-actions'
 import type { MaintenanceScheduleTemplateItem, ScheduleFrequency } from '@/types/database'
 import { RECURRENCE_LABELS, MONTH_NAMES } from '@/types/database'
 import { Loader2 } from 'lucide-react'

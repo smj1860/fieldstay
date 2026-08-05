@@ -10,8 +10,9 @@ import { fetchAllRows, SUPABASE_MAX_ROWS } from '@/lib/inngest/paginate'
 import { logAuditEvent } from '@/lib/audit'
 import { reportError } from '@/lib/observability/report-error'
 import { reportQueryError } from '@/lib/supabase/unwrap'
-import type { WoStatus, WoCategory, ScheduleFrequency, ScheduleType, VendorSpecialty, TablesUpdate, Enums } from '@/types/database'
+import type { WoStatus, WoCategory, ScheduleFrequency, ScheduleType, TablesUpdate, Enums } from '@/types/database'
 import { PriorityLevelSchema, WoStatusSchema, WoCategorySchema } from '@/lib/schemas/work-order'
+import { parseMoneyAmount } from '@/lib/schemas/money'
 import {
   resolveWorkOrderStatus,
   sendQuoteRequestEmails,
@@ -596,6 +597,17 @@ export async function logActualCost(
   try {
     const { supabase, membership, user } = await requireOrgRole(['admin', 'manager'])
 
+    // `data.actual_cost: number` is a compile-time claim about a value the
+    // browser supplies — nothing enforced it at runtime, and this figure
+    // reaches owner_transactions. addOwnerTransaction (owners/actions.ts)
+    // already validated its amount inline; this path, writing the same table,
+    // did not. NaN was the quiet one: it serializes to JSON null, which WIPES
+    // the nullable work_orders.actual_cost and then violates NOT NULL on
+    // owner_transactions.amount.
+    const parsedCost = parseMoneyAmount(data.actual_cost)
+    if (!parsedCost.ok) return { error: parsedCost.error }
+    const actualCost = parsedCost.amount
+
     const woRes = await supabase
       .from('work_orders')
       .select('id, status, title, property_id, actual_cost')
@@ -613,7 +625,7 @@ export async function logActualCost(
     const { error } = await supabase
       .from('work_orders')
       .update({
-        actual_cost:       data.actual_cost,
+        actual_cost:       actualCost,
         invoice_reference: data.invoice_reference || null,
       })
       .eq('id', workOrderId)
@@ -624,18 +636,28 @@ export async function logActualCost(
       return { error: 'Operation failed. Please try again.' }
     }
 
-    await supabase.from('work_order_updates').insert({
+    const { error: noteError } = await supabase.from('work_order_updates').insert({
       work_order_id:             workOrderId,
       org_id:                    membership.org_id,
       updated_via_vendor_portal: false,
       status_from:               null,
       status_to:                 null,
-      notes:                     `Actual cost logged: $${data.actual_cost.toFixed(2)}${data.invoice_reference ? ' (Invoice: ' + data.invoice_reference + ')' : ''}`,
+      notes:                     `Actual cost logged: $${actualCost.toFixed(2)}${data.invoice_reference ? ' (Invoice: ' + data.invoice_reference + ')' : ''}`,
     })
+
+    // Reported, not returned: the cost itself is already saved, and losing the
+    // history line is not worth telling the PM their edit failed. It must not
+    // vanish silently though — this used to discard its result entirely.
+    if (noteError) {
+      reportError(noteError, {
+        site:  'serverAction.maintenance.logActualCost.note',
+        orgId: membership.org_id,
+      })
+    }
 
     // Upsert expense transaction with actual cost (updates amount if already posted)
     if (wo.status === 'completed') {
-      await supabase.from('owner_transactions').upsert({
+      const { error: ledgerError } = await supabase.from('owner_transactions').upsert({
         property_id:          wo.property_id,
         org_id:               membership.org_id,
         work_order_id:        workOrderId,
@@ -643,10 +665,25 @@ export async function logActualCost(
         source_reference_id:  workOrderId,
         transaction_type:     'expense',
         category:             'maintenance',
-        amount:               data.actual_cost,
+        amount:               actualCost,
         description:          wo.title,
         transaction_date:     isoDate(),
       }, { onConflict: 'source_reference_id,source' })
+
+      // This upsert is the ONLY way a wo_completion expense can be corrected:
+      // handleWorkOrderCompleted posts it with ignoreDuplicates: true and will
+      // never overwrite. Discarding the result left work_orders.actual_cost and
+      // the owner's ledger permanently disagreeing — the PM seeing the new
+      // figure, the owner's statement still showing the old one — while the
+      // audit row below asserted the cost had been logged.
+      if (ledgerError) {
+        console.error('[logActualCost] owner_transactions', ledgerError)
+        reportError(ledgerError, {
+          site:  'serverAction.maintenance.logActualCost.ledger',
+          orgId: membership.org_id,
+        })
+        return { error: 'The cost was saved, but the owner statement could not be updated. Please retry.' }
+      }
     }
 
     await logAuditEvent({
@@ -1037,13 +1074,30 @@ export async function approveQuoteRequest(
       return { error: 'Can only approve a quote that has been submitted by the vendor' }
     }
 
+    // property_id was hardcoded to '' here. It type-checks (the event declares
+    // `string`) and then PROPAGATES: handleWorkOrderCreated forwards it into a
+    // further inngest.send, where a filter on an empty property id matches
+    // nothing — and because this is the dispatch path, the symptom is "the
+    // vendor was never notified" rather than a validation error. Read it from
+    // the work order the transaction actually committed against.
+    const propRes = await supabase
+      .from('work_orders')
+      .select('property_id')
+      .eq('id', result.work_order_id)
+      .eq('org_id', membership.org_id)
+      .maybeSingle()
+
+    if (reportQueryError(propRes.error, { site: 'serverAction.maintenance.approveQuoteRequest.property', orgId: membership.org_id })) {
+      return { error: 'The quote was approved but the vendor could not be notified. Please retry the dispatch.' }
+    }
+
     // From the RPC's return, not the pre-read: these are the ids the
     // transaction actually committed against.
     await inngest.send({
       name: 'work-order/created',
       data: {
         work_order_id:  result.work_order_id,
-        property_id:    '',
+        property_id:    propRes.data?.property_id ?? '',
         org_id:         membership.org_id,
         vendor_id:      result.vendor_id,
         portal_enabled: true,
@@ -1121,13 +1175,45 @@ export async function deleteWorkOrder(workOrderId: string): Promise<void> {
     const current = currentRes.data
 
     if (current) {
-      await supabase
+      // A completed work order has already posted its owner_transactions
+      // expense (handleWorkOrderCompleted, keyed on source_reference_id), and
+      // cancelling here does NOT reverse it — the owner would keep being
+      // charged for work the WO now says was cancelled. updateWorkOrderStatus
+      // early-returns on 'completed' and approve_quote_request refuses to
+      // touch a completed WO; this, the destructive path, had no guard at all.
+      if (current.status === 'completed') {
+        throw new Error(
+          'This work order is already completed and cannot be cancelled. ' +
+          'Adjust the logged cost or issue a credit instead.'
+        )
+      }
+      // Already there — nothing to do, and re-writing would add a second
+      // cancellation row and audit event for one action.
+      if (current.status === 'cancelled') {
+        revalidatePath('/maintenance')
+        return
+      }
+
+      const { error: cancelError } = await supabase
         .from('work_orders')
         .update({ status: 'cancelled' })
         .eq('id', workOrderId)
         .eq('org_id', membership.org_id)
 
-      await supabase.from('work_order_updates').insert({
+      // The READ above was fixed so a failure could not close the confirm
+      // dialog as though the work order had been cancelled (see the comment
+      // there). The WRITE had exactly the same hole: its result was discarded,
+      // so a failed cancel still logged the audit event and returned normally.
+      if (cancelError) {
+        console.error('[deleteWorkOrder] cancel', cancelError)
+        reportError(cancelError, {
+          site:  'serverAction.maintenance.deleteWorkOrder.cancel',
+          orgId: membership.org_id,
+        })
+        throw new Error('Could not cancel the work order. Please try again.')
+      }
+
+      const { error: noteError } = await supabase.from('work_order_updates').insert({
         work_order_id:             workOrderId,
         org_id:                    membership.org_id,
         updated_via_vendor_portal: false,
@@ -1135,6 +1221,13 @@ export async function deleteWorkOrder(workOrderId: string): Promise<void> {
         status_to:                 'cancelled',
         notes:                     'Cancelled by property manager',
       })
+
+      if (noteError) {
+        reportError(noteError, {
+          site:  'serverAction.maintenance.deleteWorkOrder.note',
+          orgId: membership.org_id,
+        })
+      }
 
       await logAuditEvent({
         orgId:      membership.org_id,
@@ -1831,350 +1924,6 @@ export async function deleteMaintenanceSchedule(
   }
 }
 
-// ── Create Maintenance Schedule Template ─────────────────────────────────────
-
-export async function createMaintenanceScheduleTemplate(data: {
-  name:        string
-  description: string | null
-  items: Array<{
-    name:                  string
-    description:           string | null
-    schedule_frequency:    ScheduleFrequency
-    vendor_specialty_hint: VendorSpecialty | null
-    estimated_cost:        number | null
-    sort_order:            number
-  }>
-}): Promise<MaintenanceActionState> {
-  try {
-    const { supabase, membership } = await requireOrgRole(['admin', 'manager'])
-
-    if (!data.name.trim()) return { error: 'Template name is required' }
-    if (!data.items.length) return { error: 'Add at least one item to the template' }
-
-    const { data: template, error: tErr } = await supabase
-      .from('maintenance_schedule_templates')
-      .insert({
-        org_id:      membership.org_id,
-        name:        data.name.trim(),
-        description: data.description || null,
-        is_system:   false,
-      })
-      .select('id')
-      .single()
-
-    if (tErr || !template) {
-      console.error('[createMaintenanceScheduleTemplate]', tErr)
-      return { error: 'Operation failed. Please try again.' }
-    }
-
-    const itemRows = data.items.map((item, i) => ({
-      template_id:           template.id,
-      name:                  item.name.trim(),
-      description:           item.description || null,
-      schedule_frequency:    item.schedule_frequency,
-      vendor_specialty_hint: item.vendor_specialty_hint || null,
-      estimated_cost:        item.estimated_cost || null,
-      sort_order:            i,
-    }))
-
-    const { error: iErr } = await supabase
-      .from('maintenance_schedule_template_items')
-      .insert(itemRows)
-
-    if (iErr) {
-      console.error('[createMaintenanceScheduleTemplate:items]', iErr)
-      return { error: 'Operation failed. Please try again.' }
-    }
-
-    revalidatePath('/maintenance')
-    revalidatePath('/templates/maintenance/create')
-    revalidatePath('/templates/maintenance/saved')
-    return { success: true, templateId: template.id }
-  } catch (err) {
-    console.error('[createMaintenanceScheduleTemplate]', err)
-    reportError(err, { site: 'serverAction.maintenance.createMaintenanceScheduleTemplate' })
-    return { error: 'Operation failed. Please try again.' }
-  }
-}
-
-// ── Maintenance Schedule Template Broadcasting ───────────────────────────────
-
-export type BroadcastResult = {
-  error?: string
-  success?: boolean
-  created?: number
-  skipped?: number
-}
-
-// Idempotent: skip if a maintenance_schedule with the same name
-// already exists on the property
-type BroadcastItem = {
-  id: string; name: string; description: string | null
-  schedule_frequency: ScheduleFrequency; vendor_specialty_hint: VendorSpecialty | null
-  estimated_cost: number | null; sort_order: number
-  asset_category: string | null
-  active_from_month: number | null; active_to_month: number | null
-}
-
-type BroadcastInputs =
-  | { ok: false; error: string }
-  | {
-      ok: true
-      items:      BroadcastItem[]
-      properties: { id: string }[]
-      /** is_system drives is_from_standard_template on every inserted row. */
-      template:   { id: string; org_id: string | null; is_system: boolean }
-    }
-
-/**
- * The three reads broadcastMaintenanceTemplate needs before it can fan a
- * template out across properties. Extracted to keep the action under the
- * cognitive-complexity ceiling once each read grew its own error branch.
- *
- * All three fail closed, and the property read especially: it IS the org
- * filter for the client-supplied propertyIds, and its result is what every
- * inserted row's property_id comes from. An empty result and a failed read
- * used to be the same "No matching properties found" — which, for the items
- * read, also meant a 25-item template reported itself as empty and invited the
- * PM to re-create it as a duplicate.
- */
-async function loadBroadcastInputs(
-  supabase:    Awaited<ReturnType<typeof requireOrgRole>>['supabase'],
-  orgId:       string,
-  templateId:  string,
-  propertyIds: string[],
-): Promise<BroadcastInputs> {
-  const templateRes = await supabase
-    .from('maintenance_schedule_templates')
-    .select('id, org_id, is_system')
-    .eq('id', templateId)
-    .maybeSingle()
-
-  if (reportQueryError(templateRes.error, { site: 'serverAction.maintenance.broadcastMaintenanceTemplate.template', orgId })) {
-    return { ok: false, error: 'Could not load the template. Please try again.' }
-  }
-  const template = templateRes.data
-  if (!template || (!template.is_system && template.org_id !== orgId)) {
-    return { ok: false, error: 'Template not found' }
-  }
-
-  const itemsRes = await supabase
-    .from('maintenance_schedule_template_items')
-    .select('id, name, description, schedule_frequency, vendor_specialty_hint, estimated_cost, sort_order, asset_category, active_from_month, active_to_month')
-    .eq('template_id', templateId)
-    .order('sort_order', { ascending: true })
-    .limit(SUPABASE_MAX_ROWS)
-
-  if (reportQueryError(itemsRes.error, { site: 'serverAction.maintenance.broadcastMaintenanceTemplate.items', orgId })) {
-    return { ok: false, error: "Could not load the template's items. Please try again." }
-  }
-  const items = (itemsRes.data ?? []) as BroadcastItem[]
-  if (items.length === 0) return { ok: false, error: 'Template has no items' }
-
-  // Paginated: this is the org filter for the client-supplied propertyIds AND
-  // the loop source every inserted row's property_id comes from, so a
-  // truncated page silently drops properties from the broadcast.
-  let properties: { id: string }[]
-  try {
-    properties = await fetchAllRows<{ id: string }>(
-      (from, to) => supabase
-        .from('properties')
-        .select('id')
-        .eq('org_id', orgId)
-        .in('id', propertyIds)
-        .order('id')
-        .range(from, to),
-      { label: 'serverAction.maintenance.broadcastMaintenanceTemplate.props' },
-    )
-  } catch (err) {
-    console.error('[broadcastMaintenanceTemplate] property verification failed', err)
-    reportError(err, { site: 'serverAction.maintenance.broadcastMaintenanceTemplate.props', orgId })
-    return { ok: false, error: 'Could not verify the selected properties. Please try again.' }
-  }
-  if (properties.length === 0) return { ok: false, error: 'No matching properties found' }
-
-  return { ok: true, items, properties, template }
-}
-
-export async function broadcastMaintenanceTemplate(
-  templateId:         string,
-  propertyIds:        string[],
-  nextDueDates:       Record<string, string>          = {},
-  recurrenceOverrides: Record<string, ScheduleFrequency> = {},
-): Promise<BroadcastResult> {
-  try {
-    const { supabase, user, membership } = await requireOrgRole(['admin', 'manager'])
-
-    if (propertyIds.length === 0) return { error: 'Select at least one property' }
-
-    const inputs = await loadBroadcastInputs(supabase, membership.org_id, templateId, propertyIds)
-    if (!inputs.ok) return { error: inputs.error }
-    const { items, properties, template } = inputs
-
-    // PostgREST truncates an unbounded select at max_rows = 1000 with a 200 and
-    // no truncation signal. This set IS the duplicate guard, and there is no
-    // unique constraint on maintenance_schedules behind it (there deliberately
-    // can't be: duplicateMaintenanceScheduleItem copies a row's name onto the
-    // same property on purpose), so a truncated read here silently re-created
-    // schedules that already existed — 50 properties × a 25-item template is
-    // already past the cap.
-    const existingSchedules = await fetchAllRows<{ property_id: string; name: string }>(
-      (from, to) => supabase
-        .from('maintenance_schedules')
-        .select('property_id, name')
-        .eq('org_id', membership.org_id)
-        .in('property_id', (properties as { id: string }[]).map((p) => p.id))
-        .order('id', { ascending: true })
-        .range(from, to),
-      { label: 'broadcastMaintenanceTemplate.existing_schedules' },
-    )
-
-    const existingNames = new Set(existingSchedules.map((s) => `${s.property_id}::${s.name}`))
-
-    const fallbackDueDate = new Date(Date.now() + 30 * 86_400_000).toISOString().split('T')[0]
-
-    const rowsToInsert: Array<{
-      property_id:               string
-      org_id:                    string
-      name:                      string
-      description:               string | null
-      schedule_type:             ScheduleType
-      frequency:                 ScheduleFrequency
-      vendor_specialty_hint:     VendorSpecialty | null
-      estimated_cost:            number | null
-      auto_create_wo:            boolean
-      next_due_date:             string
-      is_active:                 boolean
-      active_from_month:         number | null
-      active_to_month:           number | null
-      asset_category:            string | null
-      is_from_standard_template: boolean
-      source_template_item_id:   string
-    }> = []
-    let skipped = 0
-
-    for (const property of properties) {
-      for (const item of items) {
-        const key = `${property.id}::${item.name}`
-        if (existingNames.has(key)) {
-          skipped++
-          continue
-        }
-
-        rowsToInsert.push({
-          property_id:               property.id,
-          org_id:                    membership.org_id,
-          name:                      item.name,
-          description:               item.description,
-          schedule_type:             'routine',
-          frequency:                 recurrenceOverrides[item.id] ?? item.schedule_frequency,
-          vendor_specialty_hint:     item.vendor_specialty_hint,
-          estimated_cost:            item.estimated_cost,
-          auto_create_wo:            true,
-          next_due_date:             nextDueDates[item.id] ?? fallbackDueDate,
-          is_active:                 true,
-          active_from_month:         item.active_from_month ?? null,
-          active_to_month:           item.active_to_month ?? null,
-          asset_category:            item.asset_category ?? null,
-          is_from_standard_template: template.is_system,
-          source_template_item_id:   item.id,
-        })
-      }
-    }
-
-    if (rowsToInsert.length > 0) {
-      const { error } = await supabase.from('maintenance_schedules').insert(rowsToInsert)
-      if (error) {
-        console.error('[broadcastMaintenanceTemplate]', error)
-        return { error: 'Failed to broadcast template' }
-      }
-    }
-
-    await inngest.send({
-      name: 'maintenance/template-broadcast' as const,
-      data: {
-        org_id:       membership.org_id,
-        template_id:  templateId,
-        property_ids: (properties as { id: string }[]).map((p) => p.id),
-        triggered_by: user.id,
-      },
-    })
-
-    revalidatePath('/maintenance')
-    revalidatePath('/templates/maintenance/create')
-    revalidatePath('/templates/maintenance/saved')
-    revalidatePath('/templates/maintenance/schedules')
-    return { success: true, created: rowsToInsert.length, skipped }
-  } catch (err) {
-    console.error('[broadcastMaintenanceTemplate]', err)
-    reportError(err, { site: 'serverAction.maintenance.broadcastMaintenanceTemplate' })
-    return { error: 'Operation failed. Please try again.' }
-  }
-}
-
-// ── Update Maintenance Template ──────────────────────────────────────────────
-
-export async function updateMaintenanceTemplate(
-  templateId: string,
-  updates: { name: string; description: string | null }
-): Promise<{ error?: string }> {
-  try {
-    const { supabase, membership, user } = await requireOrgRole(['admin', 'manager'])
-
-    if (!['owner', 'admin', 'manager'].includes(membership.role)) {
-      return { error: 'Permission denied' }
-    }
-
-    const name        = updates.name.trim().slice(0, 100)
-    const description = updates.description?.trim().slice(0, 500) ?? null
-
-    if (!name) return { error: 'Name is required' }
-
-    const templateRes = await supabase
-      .from('maintenance_schedule_templates')
-      .select('id, is_system')
-      .eq('id', templateId)
-      .eq('org_id', membership.org_id)
-      .maybeSingle()
-
-    if (reportQueryError(templateRes.error, { site: 'serverAction.maintenance.updateMaintenanceTemplate', orgId: membership.org_id })) {
-      return { error: 'Could not load the template. Please try again.' }
-    }
-    const template = templateRes.data
-
-    if (!template)          return { error: 'Template not found' }
-    if (template.is_system) return { error: 'System templates cannot be edited' }
-
-    const { error } = await supabase
-      .from('maintenance_schedule_templates')
-      .update({ name, description })
-      .eq('id', templateId)
-      .eq('org_id', membership.org_id)
-      .eq('is_system', false)
-
-    if (error) {
-      console.error('[updateMaintenanceTemplate]', error)
-      return { error: 'Operation failed. Please try again.' }
-    }
-
-    await logAuditEvent({
-      orgId:      membership.org_id,
-      actorId:    user.id,
-      action:     'maintenance.template.updated',
-      targetType: 'maintenance_schedule_template',
-      targetId:   templateId,
-      metadata:   { name, description },
-    })
-
-    revalidatePath('/maintenance')
-    revalidatePath('/templates/maintenance/saved')
-    return {}
-  } catch (err) {
-    console.error('[updateMaintenanceTemplate]', err)
-    reportError(err, { site: 'serverAction.maintenance.updateMaintenanceTemplate' })
-    return { error: 'Operation failed. Please try again.' }
-  }
-}
 
 // ── Update a per-property maintenance schedule item ───────────────────────────
 

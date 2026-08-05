@@ -12,7 +12,7 @@ import { InlineAlert } from '@/components/ui/InlineAlert'
 import {
   addMaintenanceTemplateItem, updateMaintenanceTemplateItem, removeMaintenanceTemplateItem,
 } from '../actions'
-import { updateMaintenanceTemplate, broadcastMaintenanceTemplate } from '@/app/(dashboard)/maintenance/actions'
+import { updateMaintenanceTemplate, broadcastMaintenanceTemplate } from '@/app/(dashboard)/maintenance/maintenance-template-actions'
 import type { ScheduleFrequency, VendorSpecialty } from '@/types/database'
 
 const FREQUENCY_LABELS: Partial<Record<ScheduleFrequency, string>> = {

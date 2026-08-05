@@ -281,18 +281,31 @@ jobs:
       # people to ignore it — the opposite of what a gate is for.
       #
       # Set the repo VARIABLE STRIPE_PRICE_DRIFT_ARMED=1 once STRIPE_SECRET_KEY
-      # and the STRIPE_PRICE_* secrets are in place; from then on an unarmed run
+      # and the STRIPE_PRICE_* values are in place (see below — variables, not
+      # secrets, are the right home for the price ids); from then on an unarmed run
       # fails loudly here exactly like the Supabase gate. Until then the script
       # warns and passes, so the comparison is visible in the log without
       # blocking.
+      # STRIPE_SECRET_KEY is genuinely secret. The price IDs are NOT — they are
+      # public identifiers that appear in client-side checkout, in URLs and in
+      # the Stripe dashboard, so a repo VARIABLE is the right home for them:
+      # visible in logs, editable without secret hygiene, and far less friction
+      # than seven more secrets.
+      #
+      # `vars.X || secrets.X` accepts either, because these already exist in
+      # Vercel and one of them (SPONSOR_MONTHLY) is already a GitHub secret —
+      # that secret keeps working untouched. Vercel's env store and GitHub
+      # Actions' are separate: a value being set in Vercel does NOT make it
+      # available here, which is exactly why the first armed run saw only one
+      # of the seven and reported the three live plan monthlies as drift.
       STRIPE_SECRET_KEY: ${{ secrets.STRIPE_SECRET_KEY }}
-      STRIPE_PRICE_STARTER_MONTHLY:   ${{ secrets.STRIPE_PRICE_STARTER_MONTHLY }}
-      STRIPE_PRICE_STARTER_ANNUAL:    ${{ secrets.STRIPE_PRICE_STARTER_ANNUAL }}
-      STRIPE_PRICE_GROWTH_MONTHLY:    ${{ secrets.STRIPE_PRICE_GROWTH_MONTHLY }}
-      STRIPE_PRICE_GROWTH_ANNUAL:     ${{ secrets.STRIPE_PRICE_GROWTH_ANNUAL }}
-      STRIPE_PRICE_PORTFOLIO_MONTHLY: ${{ secrets.STRIPE_PRICE_PORTFOLIO_MONTHLY }}
-      STRIPE_PRICE_PORTFOLIO_ANNUAL:  ${{ secrets.STRIPE_PRICE_PORTFOLIO_ANNUAL }}
-      STRIPE_PRICE_SPONSOR_MONTHLY:   ${{ secrets.STRIPE_PRICE_SPONSOR_MONTHLY }}
+      STRIPE_PRICE_STARTER_MONTHLY:   ${{ vars.STRIPE_PRICE_STARTER_MONTHLY   || secrets.STRIPE_PRICE_STARTER_MONTHLY }}
+      STRIPE_PRICE_STARTER_ANNUAL:    ${{ vars.STRIPE_PRICE_STARTER_ANNUAL    || secrets.STRIPE_PRICE_STARTER_ANNUAL }}
+      STRIPE_PRICE_GROWTH_MONTHLY:    ${{ vars.STRIPE_PRICE_GROWTH_MONTHLY    || secrets.STRIPE_PRICE_GROWTH_MONTHLY }}
+      STRIPE_PRICE_GROWTH_ANNUAL:     ${{ vars.STRIPE_PRICE_GROWTH_ANNUAL     || secrets.STRIPE_PRICE_GROWTH_ANNUAL }}
+      STRIPE_PRICE_PORTFOLIO_MONTHLY: ${{ vars.STRIPE_PRICE_PORTFOLIO_MONTHLY || secrets.STRIPE_PRICE_PORTFOLIO_MONTHLY }}
+      STRIPE_PRICE_PORTFOLIO_ANNUAL:  ${{ vars.STRIPE_PRICE_PORTFOLIO_ANNUAL  || secrets.STRIPE_PRICE_PORTFOLIO_ANNUAL }}
+      STRIPE_PRICE_SPONSOR_MONTHLY:   ${{ vars.STRIPE_PRICE_SPONSOR_MONTHLY   || secrets.STRIPE_PRICE_SPONSOR_MONTHLY }}
       STRIPE_PRICE_DRIFT_REQUIRE_ARMED: ${{ (vars.STRIPE_PRICE_DRIFT_ARMED == '1' && !github.event.pull_request.head.repo.fork) && '1' || '0' }}
     steps:
       - uses: actions/checkout@v4

@@ -2850,14 +2850,10 @@ export type Database = {
           plan: Database["public"]["Enums"]["org_plan"]
           plan_status: Database["public"]["Enums"]["org_plan_status"]
           preferred_retailer: string | null
-          repuguard_founding_member: boolean
-          repuguard_status: string | null
-          repuguard_stripe_subscription_id: string | null
-          repuguard_trial_end: string | null
-          repuguard_trial_start: string | null
           slack_webhook_url: string | null
           slug: string
           stripe_customer_id: string | null
+          stripe_event_at: string | null
           stripe_subscription_id: string | null
           trial_ends_at: string | null
           updated_at: string
@@ -2883,14 +2879,10 @@ export type Database = {
           plan?: Database["public"]["Enums"]["org_plan"]
           plan_status?: Database["public"]["Enums"]["org_plan_status"]
           preferred_retailer?: string | null
-          repuguard_founding_member?: boolean
-          repuguard_status?: string | null
-          repuguard_stripe_subscription_id?: string | null
-          repuguard_trial_end?: string | null
-          repuguard_trial_start?: string | null
           slack_webhook_url?: string | null
           slug: string
           stripe_customer_id?: string | null
+          stripe_event_at?: string | null
           stripe_subscription_id?: string | null
           trial_ends_at?: string | null
           updated_at?: string
@@ -2916,14 +2908,10 @@ export type Database = {
           plan?: Database["public"]["Enums"]["org_plan"]
           plan_status?: Database["public"]["Enums"]["org_plan_status"]
           preferred_retailer?: string | null
-          repuguard_founding_member?: boolean
-          repuguard_status?: string | null
-          repuguard_stripe_subscription_id?: string | null
-          repuguard_trial_end?: string | null
-          repuguard_trial_start?: string | null
           slack_webhook_url?: string | null
           slug?: string
           stripe_customer_id?: string | null
+          stripe_event_at?: string | null
           stripe_subscription_id?: string | null
           trial_ends_at?: string | null
           updated_at?: string
@@ -5825,6 +5813,7 @@ export type Database = {
       update_organization_subscription_from_stripe: {
         Args: {
           p_customer_id: string
+          p_event_at?: string
           p_max_properties: number
           p_plan: Database["public"]["Enums"]["org_plan"]
           p_plan_status: Database["public"]["Enums"]["org_plan_status"]
@@ -5832,6 +5821,7 @@ export type Database = {
           p_trial_ends_at: string
         }
         Returns: {
+          applied: boolean
           org_id: string
           org_name: string
           previous_plan: Database["public"]["Enums"]["org_plan"]

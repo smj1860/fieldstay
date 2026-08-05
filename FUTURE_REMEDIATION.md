@@ -863,7 +863,31 @@ resolving an unrelated merge conflict.
 
 ---
 
-## 21. `types/database.generated.ts` is stale for `organizations.stripe_event_at`
+## 21. ~~`types/database.generated.ts` is stale for `organizations.stripe_event_at`~~ — RESOLVED 2026-08-05
+
+Regenerated against production (`vpmznjktllhmmbfnxuvk`) via the Supabase MCP
+`generate_typescript_types` tool, as its own mechanical commit with no other
+changes — which is what the "why it was not done here" note below asked for.
+
+The diff came out to exactly the six predicted columns on `organizations`,
+each appearing three times (Row / Insert / Update): `stripe_event_at` added,
+the five `repuguard_*` columns removed. Nothing else in the 6,300-line file
+moved, so the "landing a multi-thousand-line generated diff would bury the
+review surface" concern turned out not to apply — the schema had drifted in
+one table only.
+
+Verified afterwards: `tsc --noEmit` clean, 2,957 tests passing, and
+`types/database.ts` already carried `stripe_event_at` with no `repuguard`
+reference, so the two type files now agree. `scripts/check-type-drift.mjs`
+could not be run locally (it needs the E2E credentials and self-disarms
+without them) — but note it would not have caught this drift regardless: it
+diffs the HAND-WRITTEN `types/database.ts` against the live schema, never the
+generated file. Nothing in CI compares the generated file to anything, which
+is why this went stale silently and will again.
+
+The original entry follows.
+
+---
 
 `supabase/migrations/20260804210000_stripe_subscription_event_recency_guard.sql`
 added `organizations.stripe_event_at timestamptz` (the monotonic guard that

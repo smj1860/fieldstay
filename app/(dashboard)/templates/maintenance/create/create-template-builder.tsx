@@ -10,7 +10,7 @@ import { Dialog } from '@/components/ui/Dialog'
 import { Input } from '@/components/ui/Input'
 import { InlineAlert } from '@/components/ui/InlineAlert'
 import { RequiredMark } from '@/components/ui/RequiredMark'
-import { createMaintenanceScheduleTemplate, broadcastMaintenanceTemplate, type BroadcastResult } from '@/app/(dashboard)/maintenance/actions'
+import { createMaintenanceScheduleTemplate, broadcastMaintenanceTemplate, type BroadcastResult } from '@/app/(dashboard)/maintenance/maintenance-template-actions'
 import type { ScheduleFrequency, VendorSpecialty } from '@/types/database'
 
 const SPECIALTY_LABELS: Record<string, string> = {
