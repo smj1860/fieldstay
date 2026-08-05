@@ -42,6 +42,65 @@ function photoFileExtension(mimeType: string): string {
   return 'jpg'
 }
 
+type DispatchVendor = { id: string; name: string; email: string; phone: string | null }
+
+/**
+ * Resolves the vendor a dispatch will actually be sent to, from the caller's
+ * own address book.
+ *
+ * The recipient is NEVER taken from the request body — see the note at the
+ * call site. Extracted so dispatchWorkOrderToVendor stays under the
+ * cognitive-complexity threshold once the equality re-check below was added.
+ */
+async function resolveDispatchVendor(
+  supabase: Awaited<ReturnType<typeof requireOrgMember>>['supabase'],
+  orgId:    string,
+  rawEmail: string,
+): Promise<{ vendor: DispatchVendor } | { error: string }> {
+  const notFound = 'That vendor is not in your address book, or has no email on file.'
+
+  // `%` and `_` are ILIKE wildcards. Unescaped, this was two bugs at once: a
+  // vendorEmail of '%' matched EVERY vendor in the org and .limit(1) then
+  // picked an arbitrary one to dispatch to; and a perfectly ordinary address
+  // like first_last@example.com matched firstXlast@example.com as well as
+  // itself (confirmed against Postgres: the unescaped pattern matches both,
+  // the escaped one matches only the real address).
+  const wantedEmail  = rawEmail.trim()
+  const escapedEmail = wantedEmail.replace(/[\\%_]/g, (ch) => `\\${ch}`)
+
+  const vendorRes = await supabase
+    .from('vendors')
+    .select('id, name, email, phone')
+    .eq('org_id', orgId)
+    .ilike('email', escapedEmail)
+    .limit(1)
+    .maybeSingle()
+
+  const vendorOut = tryUnwrap<{ id: string; name: string; email: string | null; phone: string | null }>(
+    vendorRes, { site: 'serverAction.work-order-public.dispatchWorkOrderToVendor.vendor', orgId },
+  )
+  if (!vendorOut.ok)        return { error: 'Could not verify the vendor. Please try again.' }
+  if (!vendorOut.data?.email) return { error: notFound }
+
+  // Belt and braces on the escaping above. This action decides who receives an
+  // email and an SMS, so the match must be an equality — not "whatever pattern
+  // matching returned first". If the escape were ever to stop reaching
+  // Postgres intact, the failure lands here as a refused dispatch rather than
+  // as a message sent to a vendor the PM never chose.
+  if (vendorOut.data.email.toLowerCase() !== wantedEmail.toLowerCase()) {
+    return { error: notFound }
+  }
+
+  return {
+    vendor: {
+      id:    vendorOut.data.id,
+      name:  vendorOut.data.name,
+      email: vendorOut.data.email,
+      phone: vendorOut.data.phone,
+    },
+  }
+}
+
 export async function dispatchWorkOrderToVendor(input: {
   workOrderId:  string
   vendorEmail:  string
@@ -96,37 +155,10 @@ export async function dispatchWorkOrderToVendor(input: {
     // like first_last@example.com matched firstXlast@example.com as well as
     // itself (confirmed against Postgres: the unescaped pattern matches both,
     // the escaped one matches only the real address).
-    const wantedEmail = input.vendorEmail.trim()
-    const escapedEmail = wantedEmail.replace(/[\\%_]/g, (ch) => `\\${ch}`)
+    const resolved = await resolveDispatchVendor(supabase, membership.org_id, input.vendorEmail)
+    if ('error' in resolved) return { error: resolved.error }
 
-    const vendorRes = await supabase
-      .from('vendors')
-      .select('id, name, email, phone')
-      .eq('org_id', membership.org_id)
-      .ilike('email', escapedEmail)
-      .limit(1)
-      .maybeSingle()
-
-    const vendorOut = tryUnwrap<{ id: string; name: string; email: string | null; phone: string | null }>(
-      vendorRes, { site: 'serverAction.work-order-public.dispatchWorkOrderToVendor.vendor', orgId: membership.org_id },
-    )
-    if (!vendorOut.ok) return { error: 'Could not verify the vendor. Please try again.' }
-    if (!vendorOut.data?.email) {
-      return { error: 'That vendor is not in your address book, or has no email on file.' }
-    }
-
-    // Belt and braces on the escaping above. This action decides who receives
-    // an email and an SMS, so the match must be an equality — not "whatever
-    // pattern matching returned first". If the escape were ever to stop
-    // reaching Postgres intact, the failure lands here as a refused dispatch
-    // rather than as a message sent to a vendor the PM never chose.
-    if (vendorOut.data.email.toLowerCase() !== wantedEmail.toLowerCase()) {
-      return { error: 'That vendor is not in your address book, or has no email on file.' }
-    }
-
-    const vendorEmail = vendorOut.data.email
-    const vendorName  = vendorOut.data.name
-    const vendorPhone = vendorOut.data.phone
+    const { email: vendorEmail, name: vendorName, phone: vendorPhone } = resolved.vendor
 
     const token     = generatePublicToken()
     const expiresAt = new Date()
@@ -416,27 +448,69 @@ async function uploadSignOffPhotos(
   return { uploaded, failed }
 }
 
+/**
+ * The message shown when photos failed to attach to an otherwise-successful
+ * sign-off.
+ *
+ * The sign-off cannot be undone — the token is spent by the
+ * public_signed_off_at guard — so this is a warning, not an error. Saying
+ * nothing was the actual defect: the vendor was told everything went through
+ * while their photo evidence had silently gone nowhere, and by then they could
+ * not resubmit.
+ */
+/**
+ * Everything checkable before a single byte reaches the database. Returns the
+ * user-facing message, or null when the request is acceptable.
+ */
+function validateSignOffInput(
+  token:      string,
+  notes:      string,
+  photos?:    File[],
+  actualCost?: number,
+): string | null {
+  // These parameter TYPES are a compile-time claim about values an
+  // unauthenticated caller supplies. Next.js registers every exported Server
+  // Action at a stable endpoint, so this is callable directly whether or not a
+  // page renders it — `{ length: 64 }` satisfied the old length check and then
+  // threw a TypeError at token.slice() inside signOffThrottled(), and a null
+  // `notes` threw at notes.trim(). Both surfaced as a 500 rather than a
+  // rejection. Same class as the NaN cost below; narrow before use.
+  if (typeof token !== 'string' || token.length !== 64) return 'Invalid link'
+  if (typeof notes !== 'string')                        return 'Invalid sign-off notes'
+  if (photos !== undefined && !Array.isArray(photos))   return 'Invalid photo upload'
+
+  const photoError = validateSignOffPhotos(photos)
+  if (photoError) return photoError
+
+  // `actualCost < 0 || actualCost > 1_000_000` let NaN straight through — both
+  // comparisons are false for NaN — and supabase-js JSON-serializes NaN to
+  // `null`, so the vendor's cost silently vanished into a NULL
+  // work_orders.actual_cost. This is the UNAUTHENTICATED half of the surface
+  // lib/schemas/money.ts was written for; the sibling API route was hardened
+  // and this Server Action, reachable with the same token, was not.
+  if (actualCost !== undefined) {
+    const parsed = parseMoneyAmount(actualCost)
+    if (!parsed.ok) return parsed.error
+  }
+
+  return null
+}
+
+function photoFailureWarning(failed: number): string | undefined {
+  if (failed <= 0) return undefined
+  const noun = failed === 1 ? '1 photo' : `${failed} photos`
+  const them = failed === 1 ? 'it'      : 'them'
+  return `Your sign-off was recorded, but ${noun} failed to upload. Please send ${them} to your property manager directly.`
+}
+
 export async function submitWorkOrderSignOff(
   token:       string,
   notes:       string,
   photos?:     File[],
   actualCost?: number
 ): Promise<{ success?: boolean; error?: string; warning?: string }> {
-  if (!token || token.length !== 64) return { error: 'Invalid link' }
-
-  const photoError = validateSignOffPhotos(photos)
-  if (photoError) return { error: photoError }
-
-  // `actualCost < 0 || actualCost > 1_000_000` let NaN straight through —
-  // both comparisons are false for NaN — and supabase-js JSON-serializes NaN
-  // to `null`, so the vendor's cost silently vanished into a NULL
-  // work_orders.actual_cost. This is the UNAUTHENTICATED half of the surface
-  // lib/schemas/money.ts was written for; the sibling API route was hardened
-  // and this Server Action, reachable with the same token, was not.
-  if (actualCost !== undefined) {
-    const parsed = parseMoneyAmount(actualCost)
-    if (!parsed.ok) return { error: parsed.error }
-  }
+  const inputError = validateSignOffInput(token, notes, photos, actualCost)
+  if (inputError) return { error: inputError }
 
   if (await signOffThrottled(token)) {
     return { error: 'Too many requests. Please try again in a few minutes.' }
@@ -543,19 +617,6 @@ export async function submitWorkOrderSignOff(
     },
   })
 
-  // The sign-off itself succeeded and cannot be undone — the token is spent —
-  // so this is a warning, not an error. Saying nothing was the actual defect:
-  // the vendor was told everything went through while their photo evidence had
-  // silently gone nowhere, and by then they could not resubmit.
-  if (photoFailures > 0) {
-    return {
-      success: true,
-      warning:
-        photoFailures === 1
-          ? 'Your sign-off was recorded, but 1 photo failed to upload. Please send it to your property manager directly.'
-          : `Your sign-off was recorded, but ${photoFailures} photos failed to upload. Please send them to your property manager directly.`,
-    }
-  }
-
-  return { success: true }
+  const warning = photoFailureWarning(photoFailures)
+  return warning ? { success: true, warning } : { success: true }
 }

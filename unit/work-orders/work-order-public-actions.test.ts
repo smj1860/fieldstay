@@ -535,6 +535,27 @@ describe('actions/work-order-public', () => {
       expect(supabase.from).not.toHaveBeenCalled()
     })
 
+    // A Server Action's parameter types are a compile-time claim about values
+    // the caller supplies, and Next.js registers every exported action at a
+    // stable endpoint — so these are reachable by a direct POST whether or not
+    // any page renders them.
+    it.each([
+      ['an object masquerading as a 64-char token', { length: 64 }, 'All done', 'Invalid link'],
+      ['a null token',                              null,           'All done', 'Invalid link'],
+      ['null notes',                                VALID_TOKEN,    null,       'Invalid sign-off notes'],
+    ])('rejects %s instead of throwing', async (_label, token, notes, message) => {
+      const supabase = makeSupabase({})
+      vi.mocked(createServiceClient).mockReturnValue(supabase as never)
+
+      const result = await submitWorkOrderSignOff(
+        token as unknown as string,
+        notes as unknown as string,
+      )
+
+      expect(result).toEqual({ error: message })
+      expect(supabase.from).not.toHaveBeenCalled()
+    })
+
     it('uploads sign-off photos and inserts work_order_photos rows', async () => {
       const supabase = makeSupabase({
         work_orders:        [{ data: baseWo(), error: null }, { data: { id: 'wo_1' }, error: null }],
