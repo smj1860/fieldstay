@@ -14,56 +14,6 @@ import { reportError } from '@/lib/observability/report-error'
 // locking those crew members out of these two actions. Never re-implement
 // this predicate locally.
 
-export type ReportIssueResult = { success?: boolean; error?: string }
-
-export async function reportTurnoverIssue(
-  turnoverId: string,
-  title: string,
-  description: string | null,
-  priority: 'medium' | 'high' | 'urgent',
-): Promise<ReportIssueResult> {
-  try {
-    if (!title.trim()) return { error: 'Please describe the issue.' }
-
-    const auth = await requireCrewMember()
-    if (!auth.ok) return { error: 'Crew member not found' }
-    const { supabase, crew } = auth
-
-    const { data: turnover } = await supabase
-      .from('turnovers')
-      .select('id, property_id, org_id')
-      .eq('id', turnoverId)
-      .eq('org_id', crew.org_id)
-      .single()
-
-    if (!turnover) return { error: 'Turnover not found' }
-
-    const { error } = await supabase.from('work_orders').insert({
-      org_id:             turnover.org_id,
-      property_id:        turnover.property_id,
-      source_turnover_id: turnover.id,
-      title:              title.trim(),
-      description:        description?.trim() || null,
-      priority,
-      status: 'pending',
-      source: 'crew_flag',
-    })
-
-    if (error) {
-      // wo_crew_flag_source_unique — a duplicate flag on this turnover
-      // (double-submit) is a no-op, not a failure.
-      if (error.code === '23505') return { success: true }
-      console.error('[reportTurnoverIssue]', error)
-      return { error: 'Operation failed. Please try again.' }
-    }
-    return { success: true }
-  } catch (err) {
-    console.error('[reportTurnoverIssue]', err)
-    reportError(err, { site: 'serverAction.crew.turnovers.reportTurnoverIssue' })
-    return { error: 'Failed to report issue' }
-  }
-}
-
 export type SubmitAssetDiscoveryResult = { success?: boolean; error?: string }
 
 export interface AssetDiscoveryPayload {

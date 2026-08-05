@@ -133,7 +133,7 @@ const BASELINE: Record<string, number> = {
   'app/api/vendor-connect/[token]/onboard/route.ts': 2,
   'app/api/work-orders/[token]/photos/route.ts': 2,
   'app/api/work-orders/[token]/quote/route.ts': 3,
-  'app/crew/turnovers/actions.ts': 3,
+  'app/crew/turnovers/actions.ts': 2,
   'app/g/[slug]/page.tsx': 2,
   'app/g/b/[token]/opt-in/page.tsx': 2,
   'app/g/b/[token]/page.tsx': 4,

@@ -8,7 +8,7 @@ vi.mock('@/lib/audit', () => ({ logAuditEvent: vi.fn() }))
 
 import { createClient, createServiceClient } from '@/lib/supabase/server'
 import { logAuditEvent } from '@/lib/audit'
-import { reportTurnoverIssue, submitAssetDiscovery } from '@/app/crew/turnovers/actions'
+import { submitAssetDiscovery } from '@/app/crew/turnovers/actions'
 
 type Resp = { data?: unknown; error?: unknown }
 
@@ -39,79 +39,6 @@ function mockCrewAuthed(supabase: ReturnType<typeof makeSupabase>) {
 describe('crew/turnovers/actions', () => {
   beforeEach(() => {
     vi.clearAllMocks()
-  })
-
-  describe('reportTurnoverIssue', () => {
-    it('files a work order for a turnover verified to belong to the crew member org', async () => {
-      const supabase = makeSupabase({
-        crew_members: [{ data: CREW }],
-        turnovers:    [{ data: { id: 't_1', property_id: 'prop_1', org_id: 'org_1' } }],
-        work_orders:  [{ error: null }],
-      })
-      mockCrewAuthed(supabase)
-
-      const result = await reportTurnoverIssue('t_1', 'Broken AC', 'not cooling', 'high')
-
-      expect(result).toEqual({ success: true })
-      expect(supabase.from).toHaveBeenCalledWith('work_orders')
-    })
-
-    it('rejects a blank title before touching the DB', async () => {
-      const supabase = makeSupabase({})
-      mockCrewAuthed(supabase)
-
-      const result = await reportTurnoverIssue('t_1', '   ', null, 'medium')
-
-      expect(result).toEqual({ error: 'Please describe the issue.' })
-      expect(supabase.from).not.toHaveBeenCalled()
-    })
-
-    it('rejects when the caller is not authenticated', async () => {
-      const supabase = makeSupabase({}, null)
-      mockCrewAuthed(supabase)
-
-      const result = await reportTurnoverIssue('t_1', 'Broken AC', null, 'medium')
-
-      expect(result).toEqual({ error: 'Crew member not found' })
-      expect(supabase.from).not.toHaveBeenCalled()
-    })
-
-    it('rejects when the authenticated user has no active crew_members record', async () => {
-      const supabase = makeSupabase({ crew_members: [{ data: null }] })
-      mockCrewAuthed(supabase)
-
-      const result = await reportTurnoverIssue('t_1', 'Broken AC', null, 'medium')
-
-      expect(result).toEqual({ error: 'Crew member not found' })
-      expect(supabase.from).not.toHaveBeenCalledWith('turnovers')
-      expect(supabase.from).not.toHaveBeenCalledWith('work_orders')
-    })
-
-    it('rejects a turnover id that does not belong to the crew member org (IDOR check)', async () => {
-      const supabase = makeSupabase({
-        crew_members: [{ data: CREW }],
-        turnovers:    [{ data: null }],
-      })
-      mockCrewAuthed(supabase)
-
-      const result = await reportTurnoverIssue('other-orgs-turnover', 'Broken AC', null, 'medium')
-
-      expect(result).toEqual({ error: 'Turnover not found' })
-      expect(supabase.from).not.toHaveBeenCalledWith('work_orders')
-    })
-
-    it('treats a duplicate flag on the same turnover as a no-op success', async () => {
-      const supabase = makeSupabase({
-        crew_members: [{ data: CREW }],
-        turnovers:    [{ data: { id: 't_1', property_id: 'prop_1', org_id: 'org_1' } }],
-        work_orders:  [{ error: { code: '23505' } }],
-      })
-      mockCrewAuthed(supabase)
-
-      const result = await reportTurnoverIssue('t_1', 'Broken AC', null, 'medium')
-
-      expect(result).toEqual({ success: true })
-    })
   })
 
   describe('submitAssetDiscovery', () => {
