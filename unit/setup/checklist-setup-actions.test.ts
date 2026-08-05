@@ -60,7 +60,17 @@ function makeSupabase(queue: Record<string, Resp[]>) {
     chain.then        = (resolve: (v: unknown) => unknown) => Promise.resolve(result).then(resolve)
     return chain
   })
-  return { from, calls }
+  // markStepComplete (pulled in transitively) now marks the step through the
+  // atomic mark_property_setup_step RPC rather than a read+write, so it needs a
+  // non-null merged object back or it treats the call as an RLS denial.
+  const rpc = vi.fn((fn: string) =>
+    Promise.resolve(
+      fn === 'mark_property_setup_step'
+        ? { data: { details: true }, error: null }
+        : { data: null, error: null },
+    ),
+  )
+  return { from, rpc, calls }
 }
 
 const membership = {

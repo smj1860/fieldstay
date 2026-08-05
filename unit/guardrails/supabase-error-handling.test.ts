@@ -104,7 +104,7 @@ const BASELINE: Record<string, number> = {
   'app/(dashboard)/properties/[id]/setup/details/actions.ts': 1,
   'app/(dashboard)/properties/[id]/setup/ical/actions.ts': 2,
   'app/(dashboard)/properties/[id]/setup/maintenance/actions.ts': 4,
-  'app/(dashboard)/properties/actions.ts': 6,
+  'app/(dashboard)/properties/actions.ts': 3,
   'app/(dashboard)/properties/clone-actions.ts': 4,
   'app/(dashboard)/reviews/actions.ts': 1,
   'app/(dashboard)/settings/actions.ts': 11,

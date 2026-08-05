@@ -12,6 +12,7 @@ import { logAuditEvent } from '@/lib/audit'
 import { applyMasterChecklistToProperty } from '@/lib/checklists/apply-master-template'
 import { reportError } from '@/lib/observability/report-error'
 import { reportQueryError } from '@/lib/supabase/unwrap'
+import { parseMoneyAmount } from '@/lib/schemas/money'
 import type { AssetType, Enums, MemberRole, TablesInsert } from '@/types/database'
 
 // properties/property_assets both gate writes on
@@ -88,7 +89,114 @@ async function reportDoorCodeWrite(
   }
 }
 
-// ── Create ──────────────────────────────────────────────────
+/**
+ * A positive whole-number form field (bedrooms, guests, lifespan years).
+ *
+ * `parseInt(x) || fallback` was the previous shape, and it only looks like
+ * validation: it catches NaN and 0 because both are falsy, and passes
+ * NEGATIVES straight through because -5 is truthy. `bedrooms: -5` was storable.
+ */
+function positiveIntField(raw: FormDataEntryValue | null, fallback: number, max: number): number {
+  const n = Number.parseInt(raw as string, 10)
+  return Number.isInteger(n) && n > 0 && n <= max ? n : fallback
+}
+
+/** Same, but optional — absent stays null; present-but-invalid is rejected. */
+function optionalPositiveInt(
+  raw: FormDataEntryValue | null,
+  max: number,
+): { ok: true; value: number | null } | { ok: false } {
+  if (raw === null || raw === '') return { ok: true, value: null }
+  const n = Number.parseInt(raw as string, 10)
+  if (!Number.isInteger(n) || n <= 0 || n > max) return { ok: false }
+  return { ok: true, value: n }
+}
+
+/**
+ * An optional money field. Absent stays null; present-but-invalid is REJECTED
+ * rather than coerced.
+ *
+ * The previous `formData.get(x) ? parseFloat(x) : null` had no guard at all:
+ * NaN and ±Infinity both JSON-serialize to `null`, so a malformed price was
+ * indistinguishable from an omitted one, and a NEGATIVE price stored as-is.
+ * purchase_price and estimated_replacement_cost feed MACRS depreciation and
+ * calculateHealthScore, so a negative there reaches the owner's tax schedule.
+ */
+function optionalMoneyField(
+  raw: FormDataEntryValue | null,
+): { ok: true; value: number | null } | { ok: false; error: string } {
+  if (raw === null || raw === '') return { ok: true, value: null }
+  const parsed = parseMoneyAmount(Number.parseFloat(raw as string))
+  return parsed.ok ? { ok: true, value: parsed.amount } : { ok: false, error: parsed.error }
+}
+
+const MAX_BEDROOMS  = 50
+const MAX_GUESTS    = 100
+const MAX_BATHROOMS = 50
+const MAX_LIFESPAN_YEARS = 100
+const MAX_IMPORT_ROWS    = 500
+
+interface PropertyFormFields {
+  name:             string
+  address:          string
+  city:             string
+  state:            string
+  zip:              string
+  property_type:    ReturnType<typeof toDbEnum<'property_type'>>
+  bedrooms:         number
+  bathrooms:        number
+  max_guests:       number
+  checkin_time:     string
+  checkout_time:    string
+  wifi_name:        string | null
+  wifi_password:    string | null
+  door_code:        string | null
+  internal_notes:   string | null
+  avg_nightly_rate: number | null
+}
+
+/**
+ * Parses and validates the property form in one place, so createProperty stays
+ * an orchestrator. Returns the first user-facing message rather than throwing.
+ */
+function parsePropertyForm(
+  formData: FormData,
+): { fields: PropertyFormFields } | { error: string } {
+  const name = (formData.get('name') as string)?.trim()
+  if (!name) return { error: 'Property name is required' }
+
+  const rate = optionalMoneyField(formData.get('avg_nightly_rate'))
+  if (!rate.ok) return { error: `Nightly rate: ${rate.error}` }
+
+  const bathroomsRaw = Number.parseFloat(formData.get('bathrooms') as string)
+  const bathrooms =
+    Number.isFinite(bathroomsRaw) && bathroomsRaw > 0 && bathroomsRaw <= MAX_BATHROOMS
+      ? bathroomsRaw
+      : 1
+
+  return {
+    fields: {
+      name,
+      address:          (formData.get('address') as string)?.trim(),
+      city:             (formData.get('city') as string)?.trim(),
+      state:            (formData.get('state') as string)?.trim(),
+      zip:              (formData.get('zip') as string)?.trim(),
+      property_type:    toDbEnum('property_type', formData.get('property_type') as string | null, 'house'),
+      bedrooms:         positiveIntField(formData.get('bedrooms'), 1, MAX_BEDROOMS),
+      max_guests:       positiveIntField(formData.get('max_guests'), 2, MAX_GUESTS),
+      bathrooms,
+      checkin_time:     (formData.get('checkin_time') as string) || '15:00',
+      checkout_time:    (formData.get('checkout_time') as string) || '11:00',
+      wifi_name:        (formData.get('wifi_name') as string)?.trim() || null,
+      wifi_password:    (formData.get('wifi_password') as string)?.trim() || null,
+      door_code:        (formData.get('door_code') as string)?.trim() || null,
+      internal_notes:   (formData.get('internal_notes') as string)?.trim() || null,
+      avg_nightly_rate: rate.value,
+    },
+  }
+}
+
+// ── Create ──────────────────────────────────────────
 
 export async function createProperty(
   _prev: PropertyActionState | null,
@@ -97,26 +205,13 @@ export async function createProperty(
   try {
     const { supabase, membership, user } = await requireOrgRole(PROPERTY_WRITE_ROLES)
 
-    const name          = (formData.get('name') as string)?.trim()
-    const address       = (formData.get('address') as string)?.trim()
-    const city          = (formData.get('city') as string)?.trim()
-    const state         = (formData.get('state') as string)?.trim()
-    const zip           = (formData.get('zip') as string)?.trim()
-    const property_type = toDbEnum('property_type', formData.get('property_type') as string | null, 'house')
-    const bedrooms      = parseInt(formData.get('bedrooms') as string) || 1
-    const bathrooms     = parseFloat(formData.get('bathrooms') as string) || 1
-    const max_guests    = parseInt(formData.get('max_guests') as string) || 2
-    const checkin_time  = (formData.get('checkin_time') as string) || '15:00'
-    const checkout_time = (formData.get('checkout_time') as string) || '11:00'
-    const wifi_name     = (formData.get('wifi_name') as string)?.trim() || null
-    const wifi_password = (formData.get('wifi_password') as string)?.trim() || null
-    const door_code        = (formData.get('door_code') as string)?.trim() || null
-    const internal_notes   = (formData.get('internal_notes') as string)?.trim() || null
-    const avg_nightly_rate = formData.get('avg_nightly_rate')
-      ? parseFloat(formData.get('avg_nightly_rate') as string)
-      : null
-
-    if (!name) return { error: 'Property name is required' }
+    const parsed = parsePropertyForm(formData)
+    if ('error' in parsed) return { error: parsed.error }
+    const {
+      name, address, city, state, zip, property_type, bedrooms, bathrooms,
+      max_guests, checkin_time, checkout_time, wifi_name, wifi_password,
+      door_code, internal_notes, avg_nightly_rate,
+    } = parsed.fields
 
     // Plan property limit — UX only. The real enforcement is the
     // enforce_property_plan_limit trigger (migration 20260730600000), which
@@ -199,10 +294,24 @@ export async function createProperty(
       }
     }
 
-    await applyMasterChecklistToProperty(property.id, membership.org_id, supabase, {
-      force:   false,
-      actorId: user.id,
-    })
+    // Non-fatal for exactly the reason the door-code and geocode writes above
+    // are: the property row is already committed, and applyMasterChecklistToProperty
+    // DOES throw (apply-master-template.ts:317). An unguarded throw here skipped
+    // the audit log and the redirect, and surfaced as "Operation failed" for a
+    // property that exists — so the PM retries and creates a duplicate. The
+    // checklist can be re-applied from the property's checklist tab.
+    try {
+      await applyMasterChecklistToProperty(property.id, membership.org_id, supabase, {
+        force:   false,
+        actorId: user.id,
+      })
+    } catch (checklistErr) {
+      console.error('[createProperty] master checklist apply failed', checklistErr)
+      reportError(checklistErr, {
+        site:  'serverAction.properties.createProperty.checklist',
+        orgId: membership.org_id,
+      })
+    }
 
     await logAuditEvent({
       orgId:      membership.org_id,
@@ -226,106 +335,20 @@ export async function createProperty(
 }
 
 // ── Update ───────────────────────────────────────────────────
-
-export async function updateProperty(
-  propertyId: string,
-  _prev: PropertyActionState | null,
-  formData: FormData
-): Promise<PropertyActionState> {
-  try {
-    const { supabase, membership, user } = await requireOrgRole(PROPERTY_WRITE_ROLES)
-
-    const name          = (formData.get('name') as string)?.trim()
-    const address       = (formData.get('address') as string)?.trim()
-    const city          = (formData.get('city') as string)?.trim()
-    const state         = (formData.get('state') as string)?.trim()
-    const zip           = (formData.get('zip') as string)?.trim()
-    const property_type = toDbEnum('property_type', formData.get('property_type') as string | null, 'house')
-    const bedrooms      = parseInt(formData.get('bedrooms') as string) || 1
-    const bathrooms     = parseFloat(formData.get('bathrooms') as string) || 1
-    const max_guests    = parseInt(formData.get('max_guests') as string) || 2
-    const checkin_time  = (formData.get('checkin_time') as string) || '15:00'
-    const checkout_time = (formData.get('checkout_time') as string) || '11:00'
-    const wifi_name     = (formData.get('wifi_name') as string)?.trim() || null
-    const wifi_password = (formData.get('wifi_password') as string)?.trim() || null
-    const door_code     = (formData.get('door_code') as string)?.trim() || null
-    const internal_notes = (formData.get('internal_notes') as string)?.trim() || null
-
-    if (!name) return { error: 'Property name is required' }
-
-    const { data: existing } = await supabase
-      .from('properties')
-      .select('zip')
-      .eq('id', propertyId)
-      .eq('org_id', membership.org_id)
-      .single()
-
-    const { data: updated, error } = await supabase
-      .from('properties')
-      .update({
-        name, address: address || null, city: city || null,
-        state: state || null, zip: zip || null,
-        property_type, bedrooms, bathrooms, max_guests,
-        checkin_time, checkout_time, wifi_name,
-        wifi_password, internal_notes,
-      })
-      .eq('id', propertyId)
-      .eq('org_id', membership.org_id)
-      .select('id')
-      .maybeSingle()
-
-    if (error) {
-      console.error('[updateProperty]', error)
-      reportError(error, { site: 'serverAction.properties.updateProperty.update', orgId: membership.org_id })
-      return { error: 'Operation failed. Please try again.' }
-    }
-
-    // 0 rows with no error = RLS denied the write (or the property is gone).
-    // Returning success here is how a viewer's edit used to look like it saved.
-    if (!updated) {
-      console.warn('[updateProperty] update matched 0 rows', { propertyId })
-      return { error: NOTHING_UPDATED }
-    }
-
-    const { error: doorCodeError } = await supabase.rpc(
-      'store_property_door_code',
-      doorCodeArgs(propertyId, membership.org_id, door_code)
-    )
-
-    if (doorCodeError) {
-      console.error('[updateProperty] door code write failed', doorCodeError)
-      reportError(doorCodeError, {
-        site:  'serverAction.properties.updateProperty.storeDoorCode',
-        orgId: membership.org_id,
-      })
-      return { error: 'Operation failed. Please try again.' }
-    }
-
-    if (zip && zip !== (existing?.zip ?? '')) {
-      const coords = await geocodeZip(zip)
-      if (coords) {
-        await writeCoords(supabase, propertyId, coords, 'updateProperty')
-      } else {
-        console.warn('[updateProperty] geocodeZip returned null for zip:', zip)
-      }
-    }
-
-    await logAuditEvent({
-      orgId:      membership.org_id,
-      actorId:    user.id,
-      action:     'property.updated',
-      targetType: 'property',
-      targetId:   propertyId,
-    })
-
-    revalidatePath(`/properties/${propertyId}`)
-    return { success: true }
-  } catch (err) {
-    console.error('[updateProperty]', err)
-    reportError(err, { site: 'serverAction.properties.updateProperty' })
-    return { error: 'Operation failed. Please try again.' }
-  }
-}
+//
+// `updateProperty` lived here and was DELETED (2026-08-05): it had zero
+// callers — its only two references in the repo were comments in
+// lib/http/timeout.ts and lib/geocoding.ts — and the live property edit path
+// is saveDetails() in ./[id]/setup/details/actions.ts.
+//
+// It was not merely a stale copy, it was a DIVERGENT one, which is why it was
+// removed rather than left. It called store_property_door_code
+// unconditionally, and that function's NULL branch DELETES the Vault secret.
+// The edit form renders the door code masked until explicitly revealed, so
+// saveDetails guards the write behind a `door_code_unchanged` hidden field;
+// updateProperty never learned that, so wiring any form to it would have
+// destroyed a property's door code on a rename. It also never wrote
+// avg_nightly_rate, which createProperty sets — making that field write-once.
 
 // ── Door code reveal ───────────────────────────────────────────
 
@@ -400,24 +423,23 @@ export async function markStepComplete(
     // than silently marking a step complete for a caller RLS denied.
     const { supabase, membership } = await requireOrgMember()
 
-    // Fetch current steps
-    const { data } = await supabase
-      .from('properties')
-      .select('setup_steps_completed')
-      .eq('id', propertyId)
-      .eq('org_id', membership.org_id)
-      .single()
-
-    const current = (data?.setup_steps_completed as Record<string, boolean>) ?? {}
-    const updated  = { ...current, [step]: true }
-
-    const { data: stepRow, error: stepError } = await supabase
-      .from('properties')
-      .update({ setup_steps_completed: updated })
-      .eq('id', propertyId)
-      .eq('org_id', membership.org_id)
-      .select('id')
-      .maybeSingle()
+    // ONE atomic statement. This was a read, a JS spread, and a write-back —
+    // a read-modify-write with no precondition, which lost concurrent step
+    // completions (two tabs, a double-submit, or two of the five caller
+    // actions overlapping: both read the same object, both merged their own
+    // key, the second write erased the first). It also collapsed a FAILED read
+    // to `{}` and then overwrote the whole column with a single key, erasing
+    // every previously completed step on a save that reported success.
+    //
+    // mark_property_setup_step merges with jsonb `||` inside the UPDATE, so
+    // Postgres serialises the writers and there is no read to fail. It is
+    // SECURITY INVOKER, so properties' RLS write policy still applies and a
+    // denied write returns no row — which is what the null check below reads.
+    const { data: mergedSteps, error: stepError } = await supabase.rpc('mark_property_setup_step', {
+      p_property_id: propertyId,
+      p_org_id:      membership.org_id,
+      p_step:        step,
+    })
 
     if (stepError) {
       console.error('[markStepComplete]', stepError)
@@ -428,8 +450,11 @@ export async function markStepComplete(
     // 0 rows, no error: RLS denied it. Callers (the setup step actions) already
     // treat a throw as a failed save, so this surfaces instead of leaving the
     // step marked complete in the UI while nothing was written.
-    if (!stepRow) throw new Error(NOTHING_UPDATED)
+    if (!mergedSteps) throw new Error(NOTHING_UPDATED)
 
+    // Read off the value the UPDATE actually wrote, not a second query that
+    // could disagree with it.
+    const updated = mergedSteps as Record<string, boolean>
     const allSteps = ['details', 'ical', 'inventory', 'messages', 'checklist', 'maintenance', 'crew']
     const isFullySetup = allSteps.every((s) => updated[s] === true)
 
@@ -445,7 +470,12 @@ export async function markStepComplete(
         return allSteps.every((s) => steps?.[s] === true)
       })
 
-      if (fullyConfigured.length === 2) {
+      // `>= 2`, not `=== 2`: the count comes from a non-atomic read, so two
+      // properties completing setup close together (or a count that crosses 2
+      // in one step) skipped the milestone permanently with no reconciliation
+      // anywhere. The upsert below is already idempotent, so the loosened
+      // comparison cannot double-fire.
+      if (fullyConfigured.length >= 2) {
         await supabase.from('org_milestones').upsert(
           { org_id: membership.org_id, milestone: 'second_property_configured' },
           { onConflict: 'org_id,milestone', ignoreDuplicates: true }
@@ -506,18 +536,33 @@ export async function createAsset(
     const model             = (formData.get('model') as string)?.trim() || null
     const serial_number     = (formData.get('serial_number') as string)?.trim() || null
     const installation_date = (formData.get('installation_date') as string) || null
-    const purchase_price    = formData.get('purchase_price')
-      ? parseFloat(formData.get('purchase_price') as string) : null
-    const estimated_replacement_cost = formData.get('estimated_replacement_cost')
-      ? parseFloat(formData.get('estimated_replacement_cost') as string) : null
     const warranty_expiry_date = (formData.get('warranty_expiry_date') as string) || null
     const warranty_provider    = (formData.get('warranty_provider') as string)?.trim() || null
     const notes                = (formData.get('notes') as string)?.trim() || null
-    const lifespan_raw         = formData.get('expected_lifespan_years')
-    const expected_lifespan_years = lifespan_raw ? parseInt(lifespan_raw as string) : null
 
     if (!name)           return { error: 'Asset name is required' }
     if (!asset_type_raw) return { error: 'Asset type is required' }
+
+    const price = optionalMoneyField(formData.get('purchase_price'))
+    if (!price.ok) return { error: `Purchase price: ${price.error}` }
+    const purchase_price = price.value
+
+    const replacement = optionalMoneyField(formData.get('estimated_replacement_cost'))
+    if (!replacement.ok) return { error: `Replacement cost: ${replacement.error}` }
+    const estimated_replacement_cost = replacement.value
+
+    // Rejected rather than coerced, because the `??` below cannot recover from
+    // a bad value: parseInt('abc') is NaN, and NaN is neither null nor
+    // undefined, so `??` hands it straight through and the asset-type-standards
+    // midpoint — the whole point of the fallback — is skipped. NaN then reached
+    // calculateHealthScore() and JSON-serialized to null on the way to the DB,
+    // so one stray character silently produced no lifespan, no health score,
+    // and no default.
+    const lifespan_field = optionalPositiveInt(formData.get('expected_lifespan_years'), MAX_LIFESPAN_YEARS)
+    if (!lifespan_field.ok) {
+      return { error: `Expected lifespan must be a whole number of years between 1 and ${MAX_LIFESPAN_YEARS}.` }
+    }
+    const expected_lifespan_years = lifespan_field.value
 
     // property_assets.asset_type is an enum with no default, so there is no
     // safe value to fall back to — reject rather than coerce.
@@ -535,11 +580,24 @@ export async function createAsset(
 
     if (!property) return { error: 'Property not found' }
 
-    const { data: standards } = await supabase
+    // Error bound, not discarded: this read decides the asset's MACRS class,
+    // its lifespan and its health score. Treating a failed read as "no
+    // standards" wrote a DIFFERENT tax class (the '5_year' fallback) and no
+    // health score, recorded as though those were the chosen values.
+    const { data: standards, error: standardsError } = await supabase
       .from('asset_type_standards')
       .select('lifespan_min_years, lifespan_max_years, avg_replacement_cost_high, macrs_class_default')
       .eq('asset_type', asset_type)
       .single()
+
+    if (standardsError && standardsError.code !== 'PGRST116') {
+      console.error('[createAsset] asset_type_standards read failed', standardsError)
+      reportError(standardsError, {
+        site:  'serverAction.properties.createAsset.standards',
+        orgId: membership.org_id,
+      })
+      return { error: 'Could not load asset defaults. Please try again.' }
+    }
 
     const lifespan = expected_lifespan_years ?? (
       standards
@@ -622,17 +680,27 @@ export async function updateAsset(
     const model             = (formData.get('model') as string)?.trim() || null
     const serial_number     = (formData.get('serial_number') as string)?.trim() || null
     const installation_date = (formData.get('installation_date') as string) || null
-    const purchase_price    = formData.get('purchase_price')
-      ? parseFloat(formData.get('purchase_price') as string) : null
-    const estimated_replacement_cost = formData.get('estimated_replacement_cost')
-      ? parseFloat(formData.get('estimated_replacement_cost') as string) : null
     const warranty_expiry_date = (formData.get('warranty_expiry_date') as string) || null
     const warranty_provider    = (formData.get('warranty_provider') as string)?.trim() || null
     const notes                = (formData.get('notes') as string)?.trim() || null
-    const lifespan_raw         = formData.get('expected_lifespan_years')
-    const expected_lifespan_years = lifespan_raw ? parseInt(lifespan_raw as string) : null
 
     if (!name) return { error: 'Asset name is required' }
+
+    // Same guards as createAsset — an edit reaches the same depreciation and
+    // health-score columns as a create.
+    const price = optionalMoneyField(formData.get('purchase_price'))
+    if (!price.ok) return { error: `Purchase price: ${price.error}` }
+    const purchase_price = price.value
+
+    const replacement = optionalMoneyField(formData.get('estimated_replacement_cost'))
+    if (!replacement.ok) return { error: `Replacement cost: ${replacement.error}` }
+    const estimated_replacement_cost = replacement.value
+
+    const lifespan_field = optionalPositiveInt(formData.get('expected_lifespan_years'), MAX_LIFESPAN_YEARS)
+    if (!lifespan_field.ok) {
+      return { error: `Expected lifespan must be a whole number of years between 1 and ${MAX_LIFESPAN_YEARS}.` }
+    }
+    const expected_lifespan_years = lifespan_field.value
 
     const { data: updated, error } = await supabase
       .from('property_assets')
@@ -750,6 +818,33 @@ export async function bulkImportAssets(
       .single()
 
     if (!property) return { imported: 0, error: 'Property not found' }
+
+    // `rows` arrives from the client with no bound of its own, and every row
+    // goes into ONE .insert(). The action already re-validates asset_type
+    // server-side because "this action takes the parsed rows on trust" — size
+    // is the same trust, and an unbounded array is a single enormous statement
+    // against a 90-connection Postgres.
+    if (rows.length > MAX_IMPORT_ROWS) {
+      return {
+        imported: 0,
+        error: `Import is limited to ${MAX_IMPORT_ROWS} rows at a time. Split the file and re-upload.`,
+      }
+    }
+
+    // Per-row numbers are typed `number | null` but nothing enforces that at
+    // runtime. NaN and ±Infinity JSON-serialize to null (a silently dropped
+    // price), and a negative purchase_price reaches MACRS depreciation.
+    const badNumberRow = rows.findIndex((r) =>
+      [r.purchase_price, r.estimated_replacement_cost].some(
+        (v) => v !== null && v !== undefined && !(Number.isFinite(v) && v >= 0),
+      ),
+    )
+    if (badNumberRow !== -1) {
+      return {
+        imported: 0,
+        error: `Row ${badNumberRow + 1} has an invalid price. Prices must be a number of 0 or more.`,
+      }
+    }
 
     // asset_type arrives from an uploaded CSV. The parser flags unresolvable
     // types, but that runs client-side and this action takes the parsed rows
