@@ -5,6 +5,12 @@ vi.mock('@/lib/auth', () => ({
   requireOrgRole:   vi.fn(),
 }))
 vi.mock('next/cache', () => ({ revalidatePath: vi.fn() }))
+// triggerManualSync now consults a limiter; without this the test waits on a
+// real Redis round trip that never resolves in CI.
+vi.mock('@/lib/rate-limit', () => ({
+  integrationResyncLimiter: { limit: vi.fn() },
+  checkLimit: vi.fn(async () => ({ allowed: true, skipped: false, errored: false })),
+}))
 vi.mock('@/lib/inngest/client', () => {
   const send = vi.fn()
   return {
@@ -20,6 +26,7 @@ vi.mock('@/lib/supabase/server', () => ({
 vi.mock('@/lib/push/client', () => ({ sendPushToCrewMember: vi.fn() }))
 
 import { requireOrgMember, requireOrgRole } from '@/lib/auth'
+import { checkLimit } from '@/lib/rate-limit'
 import { inngest } from '@/lib/inngest/client'
 import { logAuditEvent } from '@/lib/audit'
 import { reportError } from '@/lib/observability/report-error'
@@ -90,6 +97,20 @@ function fd(fields: Record<string, string>) {
   return f
 }
 
+// Every action here is a PM board action and now gates on
+// requireOrgRole(['admin','manager']) — matching the turnovers RLS policy,
+// which a bare requireOrgMember() did not. Both are stubbed so a test never
+// silently exercises the wrong gate.
+function mockAuthed(ctx: unknown) {
+  vi.mocked(requireOrgMember).mockResolvedValue(ctx as never)
+  vi.mocked(requireOrgRole).mockResolvedValue(ctx as never)
+}
+
+function mockAuthFailure(err: unknown) {
+  vi.mocked(requireOrgMember).mockRejectedValue(err)
+  vi.mocked(requireOrgRole).mockRejectedValue(err)
+}
+
 describe('turnovers/actions', () => {
   beforeEach(() => {
     vi.clearAllMocks()
@@ -107,7 +128,7 @@ describe('turnovers/actions', () => {
         turnover_assignments: [{ error: null }],
         properties: [{ data: [{ id: 'prop_1', bedrooms: 3 }] }],
       })
-      vi.mocked(requireOrgMember).mockResolvedValue({
+      mockAuthed({
         supabase, membership, user: { id: 'user_1' },
       } as never)
 
@@ -125,7 +146,7 @@ describe('turnovers/actions', () => {
 
     it('rejects turnover ids that do not belong to the caller org (IDOR check)', async () => {
       const supabase = makeSupabase({ turnovers: [{ data: [] }] })
-      vi.mocked(requireOrgMember).mockResolvedValue({
+      mockAuthed({
         supabase, membership, user: { id: 'user_1' },
       } as never)
 
@@ -140,7 +161,7 @@ describe('turnovers/actions', () => {
         turnovers: [{ data: [{ id: 't_1', property_id: 'prop_1', checkout_datetime: '2026-07-22T11:00:00.000Z' }] }],
         crew_members: [{ data: null }],
       })
-      vi.mocked(requireOrgMember).mockResolvedValue({
+      mockAuthed({
         supabase, membership, user: { id: 'user_1' },
       } as never)
 
@@ -160,7 +181,7 @@ describe('turnovers/actions', () => {
         turnover_assignments: [{ error: null }],
         properties: [{ data: [{ id: 'prop_1', bedrooms: 3 }] }],
       })
-      vi.mocked(requireOrgMember).mockResolvedValue({
+      mockAuthed({
         supabase, membership, user: { id: 'user_1' },
       } as never)
 
@@ -172,7 +193,7 @@ describe('turnovers/actions', () => {
 
     it('returns a generic error and never touches the DB when the caller is unauthenticated', async () => {
       const supabase = makeSupabase({})
-      vi.mocked(requireOrgMember).mockRejectedValue(new Error('REDIRECT:/login'))
+      mockAuthFailure(new Error('REDIRECT:/login'))
 
       const result = await assignCrew(['t_1'], 'crew_1')
 
@@ -198,13 +219,31 @@ describe('turnovers/actions', () => {
         turnover_assignments: [{ error: null }],
         properties: [{ data: [{ id: 'prop_1', bedrooms: 3 }] }],
       })
-      vi.mocked(requireOrgMember).mockResolvedValue({
+      mockAuthed({
         supabase, membership, user: { id: 'user_1' },
       } as never)
 
       const result = await assignCrewIndividually([{ turnoverId: 't_1', crewMemberId: 'crew_1' }])
 
       expect(result).toEqual({ success: true })
+    })
+
+    // assignCrew is a REPLACE — it deletes every OTHER crew member's
+    // assignment for the turnovers it is given. The same turnover under two
+    // crew members made the two grouped calls delete each other's row,
+    // concurrently via Promise.all, and whichever landed last won. Both were
+    // reported as applied.
+    it('refuses the same turnover assigned to two crew members in one submit', async () => {
+      const supabase = makeSupabase({})
+      mockAuthed({ supabase, membership, user: { id: 'user_1' } } as never)
+
+      const result = await assignCrewIndividually([
+        { turnoverId: 't_1', crewMemberId: 'crew_a' },
+        { turnoverId: 't_1', crewMemberId: 'crew_b' },
+      ])
+
+      expect(result.error).toMatch(/only be assigned to one crew member/)
+      expect(supabase.from).not.toHaveBeenCalled()
     })
   })
 
@@ -214,7 +253,7 @@ describe('turnovers/actions', () => {
       const supabase = makeSupabase({
         turnovers: [{ data: { id: 't_1', property_id: 'prop_1', org_id: 'org_1' }, error: null }],
       })
-      vi.mocked(requireOrgMember).mockResolvedValue({
+      mockAuthed({
         supabase, membership, user: { id: 'user_1' },
       } as never)
 
@@ -232,7 +271,7 @@ describe('turnovers/actions', () => {
       const supabase = makeSupabase({
         turnovers: [{ data: { id: 't_1', property_id: 'prop_1', org_id: 'org_1' }, error: null }],
       })
-      vi.mocked(requireOrgMember).mockResolvedValue({
+      mockAuthed({
         supabase, membership, user: { id: 'user_1' },
       } as never)
 
@@ -247,7 +286,7 @@ describe('turnovers/actions', () => {
       const supabase = makeSupabase({
         turnovers: [{ data: { id: 't_1', property_id: 'prop_1', org_id: 'org_1' }, error: null }],
       })
-      vi.mocked(requireOrgMember).mockResolvedValue({
+      mockAuthed({
         supabase, membership, user: { id: 'user_1' },
       } as never)
 
@@ -264,7 +303,7 @@ describe('turnovers/actions', () => {
       const supabase = makeSupabase({
         turnovers: [{ data: null, error: null }],
       })
-      vi.mocked(requireOrgMember).mockResolvedValue({
+      mockAuthed({
         supabase, membership, user: { id: 'user_1' },
       } as never)
 
@@ -278,7 +317,7 @@ describe('turnovers/actions', () => {
       const supabase = makeSupabase({
         turnovers: [{ data: { id: 't_1', property_id: 'prop_1', org_id: 'org_1' }, error: null }],
       })
-      vi.mocked(requireOrgMember).mockResolvedValue({
+      mockAuthed({
         supabase, membership, user: { id: 'user_1' },
       } as never)
 
@@ -292,7 +331,7 @@ describe('turnovers/actions', () => {
 
     it('returns a generic error and never touches the DB when the caller is unauthenticated', async () => {
       const supabase = makeSupabase({})
-      vi.mocked(requireOrgMember).mockRejectedValue(new Error('REDIRECT:/login'))
+      mockAuthFailure(new Error('REDIRECT:/login'))
 
       const result = await updateTurnoverStatus('t_1', 'in_progress')
 
@@ -317,7 +356,7 @@ describe('turnovers/actions', () => {
         checklist_templates: [{ data: { id: 'tmpl_1' } }],
         turnovers:           [{ data: { id: 't_1' } }],
       })
-      vi.mocked(requireOrgMember).mockResolvedValue({ supabase, membership } as never)
+      mockAuthed({ supabase, membership } as never)
 
       const result = await createManualTurnover(null, turnoverFd())
 
@@ -327,7 +366,7 @@ describe('turnovers/actions', () => {
 
     it('rejects a property id that does not belong to the caller org (IDOR check)', async () => {
       const supabase = makeSupabase({ properties: [{ data: null }] })
-      vi.mocked(requireOrgMember).mockResolvedValue({ supabase, membership } as never)
+      mockAuthed({ supabase, membership } as never)
 
       const result = await createManualTurnover(null, turnoverFd({ property_id: 'other-orgs-property' }))
 
@@ -338,7 +377,7 @@ describe('turnovers/actions', () => {
 
     it('rejects when check-in is not after checkout', async () => {
       const supabase = makeSupabase({ properties: [{ data: { id: 'prop_1', timezone: 'America/Chicago' } }] })
-      vi.mocked(requireOrgMember).mockResolvedValue({ supabase, membership } as never)
+      mockAuthed({ supabase, membership } as never)
 
       const result = await createManualTurnover(null, turnoverFd({
         checkout_date: '2026-07-23', checkin_date: '2026-07-22',
@@ -349,7 +388,7 @@ describe('turnovers/actions', () => {
 
     it('returns a generic error and never touches the DB when the caller is unauthenticated', async () => {
       const supabase = makeSupabase({})
-      vi.mocked(requireOrgMember).mockRejectedValue(new Error('REDIRECT:/login'))
+      mockAuthFailure(new Error('REDIRECT:/login'))
 
       const result = await createManualTurnover(null, turnoverFd())
 
@@ -372,7 +411,7 @@ describe('turnovers/actions', () => {
         checklist_templates: [{ data: { id: 'tmpl_1' } }],
         turnovers:           [{ data: { id: 't_1' } }],
       })
-      vi.mocked(requireOrgMember).mockResolvedValue({ supabase, membership } as never)
+      mockAuthed({ supabase, membership } as never)
 
       await createManualTurnover(null, turnoverFd({
         checkout_date: '2026-07-22', checkout_time: '11:00',
@@ -396,7 +435,7 @@ describe('turnovers/actions', () => {
         checklist_templates: [{ data: { id: 'tmpl_1' } }],
         turnovers:           [{ data: { id: 't_1' } }],
       })
-      vi.mocked(requireOrgMember).mockResolvedValue({ supabase, membership } as never)
+      mockAuthed({ supabase, membership } as never)
 
       await createManualTurnover(null, turnoverFd({
         checkout_date: '2026-07-22', checkout_time: '11:00',
@@ -414,7 +453,7 @@ describe('turnovers/actions', () => {
     // RangeError from toISOString() reported as "Operation failed".
     it('rejects an unparseable date instead of failing later on toISOString', async () => {
       const supabase = makeSupabase({ properties: [{ data: { id: 'prop_1', timezone: 'America/Chicago' } }] })
-      vi.mocked(requireOrgMember).mockResolvedValue({ supabase, membership } as never)
+      mockAuthed({ supabase, membership } as never)
 
       const result = await createManualTurnover(null, turnoverFd({ checkout_date: 'not-a-date' }))
 
@@ -424,7 +463,7 @@ describe('turnovers/actions', () => {
 
     it('rejects a window longer than 30 days', async () => {
       const supabase = makeSupabase({ properties: [{ data: { id: 'prop_1', timezone: 'America/Chicago' } }] })
-      vi.mocked(requireOrgMember).mockResolvedValue({ supabase, membership } as never)
+      mockAuthed({ supabase, membership } as never)
 
       const result = await createManualTurnover(null, turnoverFd({
         checkout_date: '2026-07-22', checkin_date: '2026-09-30',
@@ -446,7 +485,7 @@ describe('turnovers/actions', () => {
         properties: [{ data: [{ id: 'prop_1', bedrooms: 3 }] }],
         crew_availability: [{ data: [] }],
       })
-      vi.mocked(requireOrgMember).mockResolvedValue({
+      mockAuthed({
         supabase, membership, user: { id: 'user_1' },
       } as never)
 
@@ -457,7 +496,7 @@ describe('turnovers/actions', () => {
 
     it('rejects turnover ids that do not belong to the caller org (IDOR check)', async () => {
       const supabase = makeSupabase({ turnovers: [{ data: [] }] })
-      vi.mocked(requireOrgMember).mockResolvedValue({
+      mockAuthed({
         supabase, membership, user: { id: 'user_1' },
       } as never)
 
@@ -471,7 +510,7 @@ describe('turnovers/actions', () => {
         turnovers: [{ data: [{ id: 't_1', property_id: 'prop_1', status: 'assigned', checkout_datetime: '2026-07-22T11:00:00.000Z', checkin_datetime: '2026-07-22T15:00:00.000Z' }] }],
         crew_members: [{ data: null }],
       })
-      vi.mocked(requireOrgMember).mockResolvedValue({
+      mockAuthed({
         supabase, membership, user: { id: 'user_1' },
       } as never)
 
@@ -482,7 +521,7 @@ describe('turnovers/actions', () => {
 
     it('returns a generic error and never touches the DB when the caller is unauthenticated', async () => {
       const supabase = makeSupabase({})
-      vi.mocked(requireOrgMember).mockRejectedValue(new Error('REDIRECT:/login'))
+      mockAuthFailure(new Error('REDIRECT:/login'))
 
       const result = await addCrewToTurnover(['t_1'], 'crew_1')
 
@@ -496,7 +535,7 @@ describe('turnovers/actions', () => {
       const supabase = makeSupabase({}, {
         remove_crew_from_turnover: { data: { ok: true, remaining: 0, reverted: true } },
       })
-      vi.mocked(requireOrgMember).mockResolvedValue({
+      mockAuthed({
         supabase, membership, user: { id: 'user_1' },
       } as never)
 
@@ -523,7 +562,7 @@ describe('turnovers/actions', () => {
       const supabase = makeSupabase({}, {
         remove_crew_from_turnover: { data: { ok: true, remaining: 0, reverted: true } },
       })
-      vi.mocked(requireOrgMember).mockResolvedValue({
+      mockAuthed({
         supabase, membership, user: { id: 'user_1' },
       } as never)
 
@@ -537,7 +576,7 @@ describe('turnovers/actions', () => {
       const supabase = makeSupabase({}, {
         remove_crew_from_turnover: { data: { ok: false, reason: 'turnover_not_found' } },
       })
-      vi.mocked(requireOrgMember).mockResolvedValue({
+      mockAuthed({
         supabase, membership, user: { id: 'user_1' },
       } as never)
 
@@ -554,7 +593,7 @@ describe('turnovers/actions', () => {
       const supabase = makeSupabase({}, {
         remove_crew_from_turnover: { data: { ok: false, reason: 'assignment_not_found' } },
       })
-      vi.mocked(requireOrgMember).mockResolvedValue({
+      mockAuthed({
         supabase, membership, user: { id: 'user_1' },
       } as never)
 
@@ -568,7 +607,7 @@ describe('turnovers/actions', () => {
       const supabase = makeSupabase({}, {
         remove_crew_from_turnover: { data: null, error: { message: 'deadlock detected' } },
       })
-      vi.mocked(requireOrgMember).mockResolvedValue({
+      mockAuthed({
         supabase, membership, user: { id: 'user_1' },
       } as never)
 
@@ -585,7 +624,7 @@ describe('turnovers/actions', () => {
       const supabase = makeSupabase({
         turnovers: [{ data: [{ id: 't_1', property_id: 'prop_1', org_id: 'org_1' }] }, { error: null }],
       })
-      vi.mocked(requireOrgMember).mockResolvedValue({ supabase, membership } as never)
+      mockAuthed({ supabase, membership } as never)
 
       const result = await bulkUpdateTurnoverStatus(['t_1'], 'completed')
 
@@ -606,7 +645,7 @@ describe('turnovers/actions', () => {
       const supabase = makeSupabase({
         turnovers: [{ data: [{ id: 't_1', property_id: 'prop_1', org_id: 'org_1' }] }],
       })
-      vi.mocked(requireOrgMember).mockResolvedValue({ supabase, membership } as never)
+      mockAuthed({ supabase, membership } as never)
 
       await bulkUpdateTurnoverStatus(['t_1'], 'completed')
 
@@ -625,31 +664,47 @@ describe('turnovers/actions', () => {
 
     // Only rows the UPDATE actually claimed emit — the loser of a race gets
     // an empty RETURNING set and fires nothing.
-    it('emits nothing when the guarded UPDATE claims no rows', async () => {
+    // 0 rows used to return { success: true }, collapsing three outcomes:
+    // nothing eligible, RLS refused the write, and ids from another org. The
+    // PM clicked complete on a selection and none of it took.
+    it('reports failure — not success — when the guarded UPDATE claims no rows', async () => {
       const supabase = makeSupabase({ turnovers: [{ data: [] }] })
-      vi.mocked(requireOrgMember).mockResolvedValue({ supabase, membership } as never)
+      mockAuthed({ supabase, membership } as never)
 
       const result = await bulkUpdateTurnoverStatus(['t_1'], 'completed')
 
-      expect(result).toEqual({ success: true })
+      expect(result.success).toBeUndefined()
+      expect(result.error).toMatch(/None of those turnovers/)
       expect(inngest.send).not.toHaveBeenCalled()
     })
 
-    it('no-ops when none of the ids are eligible (e.g. belong to another org)', async () => {
+    it('reports failure when none of the ids are eligible (e.g. belong to another org)', async () => {
       const supabase = makeSupabase({ turnovers: [{ data: [] }] })
-      vi.mocked(requireOrgMember).mockResolvedValue({ supabase, membership } as never)
+      mockAuthed({ supabase, membership } as never)
 
       const result = await bulkUpdateTurnoverStatus(['other-orgs-turnover'], 'completed')
 
-      expect(result).toEqual({ success: true })
+      expect(result.error).toMatch(/None of those turnovers/)
       expect(inngest.send).not.toHaveBeenCalled()
+    })
+
+    it('warns when only some of the selection completed', async () => {
+      const supabase = makeSupabase({
+        turnovers: [{ data: [{ id: 't_1', property_id: 'prop_1', org_id: 'org_1' }] }],
+      })
+      mockAuthed({ supabase, membership } as never)
+
+      const result = await bulkUpdateTurnoverStatus(['t_1', 't_2', 't_3'], 'completed')
+
+      expect(result.success).toBe(true)
+      expect(result.warning).toMatch(/2 of 3/)
     })
   })
 
   describe('archiveTurnover / unarchiveTurnover', () => {
     it('archives only completed turnovers scoped to the caller org', async () => {
-      const supabase = makeSupabase({})
-      vi.mocked(requireOrgMember).mockResolvedValue({
+      const supabase = makeSupabase({ turnovers: [{ data: [{ id: 't_1' }] }] })
+      mockAuthed({
         supabase, membership, user: { id: 'user_1' },
       } as never)
 
@@ -665,8 +720,8 @@ describe('turnovers/actions', () => {
     })
 
     it('unarchives turnovers scoped to the caller org', async () => {
-      const supabase = makeSupabase({})
-      vi.mocked(requireOrgMember).mockResolvedValue({
+      const supabase = makeSupabase({ turnovers: [{ data: [{ id: 't_1' }] }] })
+      mockAuthed({
         supabase, membership, user: { id: 'user_1' },
       } as never)
 
@@ -678,7 +733,7 @@ describe('turnovers/actions', () => {
 
   describe('triggerManualSync', () => {
     it('sends the sync-all event for the caller org', async () => {
-      vi.mocked(requireOrgMember).mockResolvedValue({ membership } as never)
+      mockAuthed({ membership, user: { id: 'user_1' } } as never)
 
       const result = await triggerManualSync()
 
@@ -686,8 +741,21 @@ describe('turnovers/actions', () => {
       expect(inngest.send).toHaveBeenCalledWith({ name: 'ical/sync.all.requested', data: { org_id: 'org_1' } })
     })
 
+    // Each call fans out to every iCal feed in the org — outbound HTTP to
+    // third-party calendar hosts — and nothing stopped a PM holding the button
+    // down.
+    it('refuses a second sync inside the throttle window, without firing the event', async () => {
+      mockAuthed({ membership, user: { id: 'user_1' } } as never)
+      vi.mocked(checkLimit).mockResolvedValueOnce({ allowed: false, skipped: false, errored: false } as never)
+
+      const result = await triggerManualSync()
+
+      expect(result.error).toMatch(/just started/)
+      expect(inngest.send).not.toHaveBeenCalled()
+    })
+
     it('returns a generic error when the caller is unauthenticated', async () => {
-      vi.mocked(requireOrgMember).mockRejectedValue(new Error('REDIRECT:/login'))
+      mockAuthFailure(new Error('REDIRECT:/login'))
 
       const result = await triggerManualSync()
 
@@ -699,11 +767,14 @@ describe('turnovers/actions', () => {
   describe('acceptSuggestion / dismissSuggestion', () => {
     it('accepts a pending suggestion for a turnover verified to belong to the caller org', async () => {
       const supabase = makeSupabase({
-        turnovers:             [{ data: { id: 't_1', property_id: 'prop_1', status: 'pending_assignment', suggested_crew_ids: ['crew_1'] } }],
+        turnovers:             [
+          { data: { id: 't_1', property_id: 'prop_1', status: 'pending_assignment', suggested_crew_ids: ['crew_1'] } },
+          { data: { id: 't_1' }, error: null },  // the status write, read back
+        ],
         turnover_assignments:  [{ error: null }],
         properties:            [{ data: { bedrooms: 3 } }],
       })
-      vi.mocked(requireOrgMember).mockResolvedValue({
+      mockAuthed({
         supabase, membership, user: { id: 'user_1' },
       } as never)
 
@@ -714,7 +785,7 @@ describe('turnovers/actions', () => {
 
     it('rejects a turnover id that does not belong to the caller org (IDOR check)', async () => {
       const supabase = makeSupabase({ turnovers: [{ data: null }] })
-      vi.mocked(requireOrgMember).mockResolvedValue({
+      mockAuthed({
         supabase, membership, user: { id: 'user_1' },
       } as never)
 
@@ -727,7 +798,7 @@ describe('turnovers/actions', () => {
       const supabase = makeSupabase({
         turnovers: [{ data: { id: 't_1', property_id: 'prop_1', status: 'pending_assignment', suggested_crew_ids: [] } }],
       })
-      vi.mocked(requireOrgMember).mockResolvedValue({
+      mockAuthed({
         supabase, membership, user: { id: 'user_1' },
       } as never)
 
@@ -738,15 +809,46 @@ describe('turnovers/actions', () => {
 
     it('dismisses a suggestion scoped to the caller org', async () => {
       const supabase = makeSupabase({
-        turnovers: [{ data: { property_id: 'prop_1', suggested_crew_ids: [] } }, { error: null }],
+        turnovers: [
+          { data: { property_id: 'prop_1', suggested_crew_ids: [] } },
+          { data: { id: 't_1' }, error: null },  // the dismissal write, read back
+        ],
       })
-      vi.mocked(requireOrgMember).mockResolvedValue({
+      mockAuthed({
         supabase, membership, user: { id: 'user_1' },
       } as never)
 
       const result = await dismissSuggestion('t_1')
 
       expect(result).toEqual({ success: true })
+    })
+  })
+
+  // Every action here is a PM BOARD action, but they all ran on bare
+  // requireOrgMember(), leaving RLS as the only real gate — and a refused
+  // UPDATE returns 0 rows with NO error, so the refusal was invisible. The
+  // turnovers_update policy also admits CREW for turnovers assigned to them
+  // (so the crew PWA can start/complete work), which meant a crew member
+  // satisfied it for archive, bulk-complete and dismiss too.
+  describe('role gating', () => {
+    it.each([
+      ['archiveTurnover',          () => archiveTurnover(['t_1'])],
+      ['unarchiveTurnover',        () => unarchiveTurnover(['t_1'])],
+      ['bulkUpdateTurnoverStatus', () => bulkUpdateTurnoverStatus(['t_1'], 'completed' as const)],
+      ['acceptSuggestion',         () => acceptSuggestion('t_1')],
+      ['dismissSuggestion',        () => dismissSuggestion('t_1')],
+      ['triggerManualSync',        () => triggerManualSync()],
+    ])('%s gates on admin|manager, not bare membership', async (_name, run) => {
+      const supabase = makeSupabase({})
+      // The role gate rejects; requireOrgMember would have let this through.
+      vi.mocked(requireOrgMember).mockResolvedValue({ supabase, membership, user: { id: 'u' } } as never)
+      vi.mocked(requireOrgRole).mockRejectedValue(new Error('You do not have permission to perform this action.'))
+
+      const result = await run()
+
+      expect(result.success).toBeUndefined()
+      expect(result.error).toBeTruthy()
+      expect(supabase.from).not.toHaveBeenCalled()
     })
   })
 

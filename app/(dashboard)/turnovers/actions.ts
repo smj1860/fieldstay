@@ -10,12 +10,35 @@ import { logAuditEvent } from '@/lib/audit'
 import { unwrapJoin } from '@/lib/utils/supabase-joins'
 import { reportError } from '@/lib/observability/report-error'
 import { reportQueryError, tryUnwrap } from '@/lib/supabase/unwrap'
-import type { TablesUpdate } from '@/types/database'
+import { checkLimit, integrationResyncLimiter } from '@/lib/rate-limit'
+import type { MemberRole, TablesUpdate } from '@/types/database'
 
 export type TurnoverActionState = { error?: string; success?: boolean; warning?: string }
 
 /** A turnover window longer than this is a typo, not a booking gap. */
 const MAX_TURNOVER_WINDOW_MINUTES = 30 * 24 * 60
+
+// Every action in this file is a PM BOARD action — the only callers are
+// turnover-board.tsx, QuickFlagPanel.tsx and turnover-rating.tsx. They all ran
+// on bare requireOrgMember(), leaving RLS as the only real gate:
+//
+//   turnovers_update        is_org_member(org_id, ['admin','manager'])
+//                           OR id IN get_crew_turnover_ids()
+//   turnover_assignments_*  is_org_member(org_id, ['admin','manager'])
+//
+// Two problems with relying on that. A refused UPDATE/DELETE returns 0 rows
+// and NO error, so `if (error)` alone reports success for a change that never
+// happened. And the `get_crew_turnover_ids()` clause — which exists so the
+// crew PWA can start and complete its own work — also admits crew to archive,
+// bulk-complete and dismiss suggestions on those same rows.
+//
+// requireOrgRole matches the policy in app code, so a viewer gets a real
+// permission error instead of a silent no-op. `owner` passes automatically.
+const TURNOVER_WRITE_ROLES: MemberRole[] = ['admin', 'manager']
+
+// The 0-row-no-error outcome, phrased for a PM. Mirrors properties/actions.ts.
+const NOTHING_UPDATED =
+  'You do not have permission to make this change, or the turnover no longer exists.'
 
 // ── Suggestion-override tracking shared by assignCrew/addCrewToTurnover ─────
 //
@@ -320,12 +343,47 @@ async function loadAssignmentTargets<T>(
   return { ok: true, turnovers, crew: crewRes.data }
 }
 
+/**
+ * Advances any of these turnovers still sitting at `pending_assignment`.
+ *
+ * The status filter lives in the WHERE clause, so 0 rows is the ORDINARY
+ * outcome (they were already assigned) and is deliberately not treated as a
+ * denial. Only a real error is actionable, and it is reported rather than
+ * returned: the assignment itself has already committed by this point, so
+ * failing the action here would misreport what happened.
+ *
+ * Shared by both assignment paths, which were doing this separately —
+ * addCrewToTurnover additionally pre-filtered in JavaScript off a read taken
+ * before the insert, which the DB-side filter makes unnecessary and is one
+ * fewer thing to keep in sync.
+ */
+async function advancePendingToAssigned(
+  supabase: Awaited<ReturnType<typeof requireOrgRole>>['supabase'],
+  orgId:    string,
+  ids:      string[],
+  site:     string,
+): Promise<void> {
+  if (ids.length === 0) return
+
+  const { error } = await supabase
+    .from('turnovers')
+    .update({ status: 'assigned' })
+    .in('id', ids)
+    .eq('org_id', orgId)
+    .eq('status', 'pending_assignment')
+
+  if (error) {
+    console.error(`[${site}] advance status`, error)
+    reportError(error, { site, orgId })
+  }
+}
+
 export async function assignCrew(
   turnoverIds: string[],
   crewMemberId: string
 ): Promise<TurnoverActionState> {
   try {
-    const { supabase, membership, user } = await requireOrgMember()
+    const { supabase, membership, user } = await requireOrgRole(TURNOVER_WRITE_ROLES)
 
     const targets = await loadAssignmentTargets<{
       id: string; property_id: string; checkout_datetime: string
@@ -353,12 +411,23 @@ export async function assignCrew(
     )
     const timeOffCount = timeOffRows?.length ?? 0
 
-    // Batch: remove other-crew assignments across all turnovers in one query
-    await supabase
+    // Batch: remove other-crew assignments across all turnovers in one query.
+    //
+    // assignCrew is a REPLACE, so this delete is half the operation — if it
+    // fails, the other crew stay assigned and the PM is told the reassignment
+    // worked. 0 rows is NOT checked here on purpose: it is the ordinary case
+    // (nobody else was assigned). Only a real error is actionable.
+    const { error: unassignError } = await supabase
       .from('turnover_assignments')
       .delete()
       .in('turnover_id', ids)
       .neq('crew_member_id', crewMemberId)
+
+    if (unassignError) {
+      console.error('[assignCrew] unassign others', unassignError)
+      reportError(unassignError, { site: 'serverAction.turnovers.assignCrew.unassign', orgId: membership.org_id })
+      return { error: 'Failed to reassign crew. Please try again.' }
+    }
 
     // Batch: upsert this crew member for all turnovers at once
     const { error: assignError } = await supabase.from('turnover_assignments').upsert(
@@ -371,12 +440,7 @@ export async function assignCrew(
       return { error: 'Failed to assign crew. Please try again.' }
     }
 
-    // Batch: advance status for all pending_assignment turnovers at once
-    await supabase
-      .from('turnovers')
-      .update({ status: 'assigned' })
-      .in('id', ids)
-      .eq('status', 'pending_assignment')
+    await advancePendingToAssigned(supabase, membership.org_id, ids, 'serverAction.turnovers.assignCrew.advanceStatus')
 
     const propertyIds = [...new Set(turnovers.map(t => t.property_id))]
     // Paginated: propertyIds is derived from a bulk turnover selection, and a
@@ -435,6 +499,17 @@ export async function assignCrewIndividually(
   try {
     if (!assignments.length) return { error: 'No assignments to apply' }
 
+    // assignCrew is a REPLACE — it deletes every OTHER crew member's
+    // assignment for the turnovers it is given. So the same turnover appearing
+    // under two crew members makes the two grouped calls delete each other's
+    // row, concurrently, and whichever lands last wins. Both were reported as
+    // applied. Reusing assignCrew preserves its validation and warnings, but
+    // it does not compose: N calls are N racing replaces, not N assignments.
+    const uniqueTurnovers = new Set(assignments.map((a) => a.turnoverId))
+    if (uniqueTurnovers.size !== assignments.length) {
+      return { error: 'Each turnover can only be assigned to one crew member in a single submit.' }
+    }
+
     const groups = new Map<string, string[]>()
     for (const a of assignments) {
       const list = groups.get(a.crewMemberId) ?? []
@@ -448,8 +523,17 @@ export async function assignCrewIndividually(
       )
     )
 
-    const firstError = results.find((result) => result.error)
-    if (firstError) return firstError
+    // Promise.all means earlier groups are already COMMITTED when a later one
+    // fails. Returning only the first error told the PM nothing happened, when
+    // in fact some of it did and the board was already out of sync with what
+    // they were looking at.
+    const failed = results.filter((result) => result.error)
+    if (failed.length) {
+      const applied = results.length - failed.length
+      return applied > 0
+        ? { error: `${applied} of ${results.length} crew assignments were applied before one failed — reload the board before retrying.` }
+        : { error: failed[0]!.error }
+    }
 
     const warnings = results
       .map((result) => result.warning)
@@ -471,7 +555,7 @@ export async function updateTurnoverStatus(
   notes?: string
 ): Promise<TurnoverActionState> {
   try {
-    const { supabase, membership, user } = await requireOrgMember()
+    const { supabase, membership, user } = await requireOrgRole(TURNOVER_WRITE_ROLES)
 
     const update: TablesUpdate<'turnovers'> = { status }
     const completedAt = new Date().toISOString()
@@ -515,10 +599,23 @@ export async function updateTurnoverStatus(
       return { error: 'Operation failed. Please try again.' }
     }
 
-    // Fire completion event for PM notification. `updated === null` when
-    // completing means the row was already completed — either by a concurrent
-    // request that will fire the event itself, or by an earlier save whose
-    // downstream automations already ran. Either way, don't re-fire.
+    // 0 rows means two different things here, and only one of them is fine.
+    //
+    // When COMPLETING, `.neq('status','completed')` is the TOCTOU guard: 0 rows
+    // means the turnover was already completed, by a concurrent request that
+    // fires its own event or an earlier save whose automations already ran.
+    // That is a success — don't re-fire, don't error.
+    //
+    // For every other status there is no such filter, so 0 rows can only mean
+    // RLS refused the write or the turnover is gone. That used to return
+    // `{ success: true }`: a viewer flagging a turnover saw it "work", no
+    // event fired, and nothing was written.
+    if (!updated && status !== 'completed') {
+      console.warn('[updateTurnoverStatus] update matched 0 rows', { turnover_id, status })
+      return { error: NOTHING_UPDATED }
+    }
+
+    // Fire completion event for PM notification.
     if (status === 'completed' && updated) {
       await inngest.send({
         name: 'turnover/completed',
@@ -565,7 +662,7 @@ export async function createManualTurnover(
   formData: FormData
 ): Promise<TurnoverActionState> {
   try {
-    const { supabase, membership } = await requireOrgMember()
+    const { supabase, membership } = await requireOrgRole(TURNOVER_WRITE_ROLES)
 
     const property_id        = formData.get('property_id') as string
     const checkout_date      = formData.get('checkout_date') as string
@@ -702,7 +799,7 @@ export async function addCrewToTurnover(
   crewMemberId: string
 ): Promise<TurnoverActionState> {
   try {
-    const { supabase, membership, user } = await requireOrgMember()
+    const { supabase, membership, user } = await requireOrgRole(TURNOVER_WRITE_ROLES)
 
     const targets = await loadAssignmentTargets<{
       id: string; property_id: string; status: string
@@ -756,13 +853,7 @@ export async function addCrewToTurnover(
       }
     }
 
-    // Batch advance pending_assignment turnovers to assigned
-    const pendingIds = turnovers
-      .filter(t => t.status === 'pending_assignment')
-      .map(t => t.id)
-    if (pendingIds.length > 0) {
-      await supabase.from('turnovers').update({ status: 'assigned' }).in('id', pendingIds)
-    }
+    await advancePendingToAssigned(supabase, membership.org_id, verifiedIds, 'serverAction.turnovers.addCrewToTurnover.advanceStatus')
 
     const propertyIds = [...new Set(turnovers.map(t => t.property_id))]
     // Paginated: propertyIds is derived from a bulk turnover selection, and a
@@ -849,7 +940,7 @@ export async function removeCrewFromTurnover(
   crewMemberId: string
 ): Promise<TurnoverActionState> {
   try {
-    const { supabase, membership, user } = await requireOrgMember()
+    const { supabase, membership, user } = await requireOrgRole(TURNOVER_WRITE_ROLES)
 
     // One RPC, not read-then-delete-then-count-then-update. Two concurrent
     // removals could each run their COUNT before the other's DELETE committed,
@@ -911,7 +1002,7 @@ export async function bulkUpdateTurnoverStatus(
   status: 'completed'
 ): Promise<TurnoverActionState> {
   try {
-    const { supabase, membership } = await requireOrgMember()
+    const { supabase, membership } = await requireOrgRole(TURNOVER_WRITE_ROLES)
 
     // Eligibility is the WHERE clause, not an earlier read — the same fix
     // updateTurnoverStatus already carries (see the comment there). This
@@ -937,7 +1028,12 @@ export async function bulkUpdateTurnoverStatus(
       return { error: 'Operation failed. Please try again.' }
     }
 
-    if (!completed?.length) return { success: true }
+    // 0 rows collapsed three outcomes into success: nothing was eligible
+    // (fine), RLS refused the write, or the ids belong to another org. The PM
+    // clicked "complete" on a selection and deserves to know none of it took.
+    if (!completed?.length) {
+      return { error: 'None of those turnovers could be completed — they may already be complete, cancelled, or no longer available to you.' }
+    }
 
     // Fire the same automation event single-completion uses.
     // One event per turnover so each has its own Inngest retry path.
@@ -957,6 +1053,16 @@ export async function bulkUpdateTurnoverStatus(
     )
 
     revalidatePath('/turnovers')
+
+    // Partial completion is reported rather than rounded up to success — the
+    // status filter drops already-completed and cancelled rows silently.
+    if (completed.length < turnoverIds.length) {
+      const skipped = turnoverIds.length - completed.length
+      return {
+        success: true,
+        warning: `${skipped} of ${turnoverIds.length} turnover(s) were already complete or cancelled and were left as-is.`,
+      }
+    }
     return { success: true }
   } catch (err) {
     console.error('[bulkUpdateTurnoverStatus]', err)
@@ -971,24 +1077,29 @@ export async function archiveTurnover(
   turnoverIds: string[]
 ): Promise<TurnoverActionState> {
   try {
-    const { supabase, membership, user } = await requireOrgMember()
+    const { supabase, membership, user } = await requireOrgRole(TURNOVER_WRITE_ROLES)
 
     if (!turnoverIds.length) return { error: 'No turnovers selected' }
 
     // Only completed turnovers can be archived — guard at the query level so a
     // stale client can't archive an active turnover out from under the board.
-    const { error } = await supabase
+    const { data: archived, error } = await supabase
       .from('turnovers')
       .update({ is_archived: true })
       .in('id', turnoverIds)
       .eq('org_id', membership.org_id)
       .eq('status', 'completed')
+      .select('id')
 
     if (error) {
       console.error('[archiveTurnover]', error)
       reportError(error, { site: 'serverAction.turnovers.archiveTurnover', orgId: membership.org_id })
       return { error: 'Failed to archive turnover.' }
     }
+
+    // Nothing matched: either RLS refused the write (0 rows, no error) or none
+    // of the selected turnovers is completed. Both used to return success.
+    if (!archived?.length) return { error: NOTHING_UPDATED }
 
     await logAuditEvent({
       orgId:      membership.org_id,
@@ -999,6 +1110,17 @@ export async function archiveTurnover(
     })
 
     revalidatePath('/turnovers')
+
+    // Partial success is not success. `.eq('status','completed')` silently
+    // drops active turnovers from a bulk selection, and the PM was told every
+    // one of them archived.
+    if (archived.length < turnoverIds.length) {
+      const skipped = turnoverIds.length - archived.length
+      return {
+        success: true,
+        warning: `${skipped} turnover(s) weren't archived — only completed turnovers can be.`,
+      }
+    }
     return { success: true }
   } catch (err) {
     console.error('[archiveTurnover]', err)
@@ -1011,21 +1133,25 @@ export async function unarchiveTurnover(
   turnoverIds: string[]
 ): Promise<TurnoverActionState> {
   try {
-    const { supabase, membership, user } = await requireOrgMember()
+    const { supabase, membership, user } = await requireOrgRole(TURNOVER_WRITE_ROLES)
 
     if (!turnoverIds.length) return { error: 'No turnovers selected' }
 
-    const { error } = await supabase
+    const { data: unarchived, error } = await supabase
       .from('turnovers')
       .update({ is_archived: false })
       .in('id', turnoverIds)
       .eq('org_id', membership.org_id)
+      .select('id')
 
     if (error) {
       console.error('[unarchiveTurnover]', error)
       reportError(error, { site: 'serverAction.turnovers.unarchiveTurnover', orgId: membership.org_id })
       return { error: 'Failed to unarchive.' }
     }
+
+    // No status filter here, so 0 rows can only mean denied or gone.
+    if (!unarchived?.length) return { error: NOTHING_UPDATED }
 
     await logAuditEvent({
       orgId:      membership.org_id,
@@ -1048,8 +1174,33 @@ export async function unarchiveTurnover(
 
 export async function triggerManualSync(): Promise<TurnoverActionState> {
   try {
-    const { membership } = await requireOrgMember()
+    const { membership, user } = await requireOrgRole(TURNOVER_WRITE_ROLES)
+
+    // Each call fans out to every iCal feed in the org — outbound HTTP to
+    // third-party calendar hosts — and nothing stopped a PM holding the button
+    // down. Same limiter and rationale as the integrations "Trigger Resync"
+    // button: one per org per minute.
+    //
+    // onError: 'allow' — this is an abuse/quota guard, not a spend ceiling, and
+    // a degraded Redis must not block a PM whose calendar is genuinely stale.
+    const limit = await checkLimit(integrationResyncLimiter, `ical-sync:${membership.org_id}`, {
+      onError: 'allow',
+      site:    'serverAction.turnovers.triggerManualSync',
+    })
+    if (!limit.allowed) {
+      return { error: 'A calendar sync was just started. Give it a minute before trying again.' }
+    }
+
     await inngest.send({ name: 'ical/sync.all.requested', data: { org_id: membership.org_id } })
+
+    await logAuditEvent({
+      orgId:      membership.org_id,
+      actorId:    user.id,
+      action:     'integration.sync_triggered',
+      targetType: 'organization',
+      targetId:   membership.org_id,
+      metadata:   { source: 'turnovers_board' },
+    })
     revalidatePath('/turnovers')
     return { success: true }
   } catch (err) {
@@ -1063,7 +1214,7 @@ export async function triggerManualSync(): Promise<TurnoverActionState> {
 
 export async function acceptSuggestion(turnoverId: string): Promise<TurnoverActionState> {
   try {
-    const { supabase, membership, user } = await requireOrgMember()
+    const { supabase, membership, user } = await requireOrgRole(TURNOVER_WRITE_ROLES)
 
     const turnoverRes = await supabase
       .from('turnovers')
@@ -1091,10 +1242,24 @@ export async function acceptSuggestion(turnoverId: string): Promise<TurnoverActi
       return { error: 'Failed to accept suggestion. Please try again.' }
     }
 
-    await supabase
+    // org_id filter added to match every sibling write in this file, and the
+    // result is read back: this was fully discarded, so a refused write left
+    // the turnover unassigned with the suggestion still pending while the PM
+    // was told it was accepted.
+    const { data: accepted, error: statusError } = await supabase
       .from('turnovers')
       .update({ status: 'assigned', suggestion_status: 'accepted' })
       .eq('id', turnoverId)
+      .eq('org_id', membership.org_id)
+      .select('id')
+      .maybeSingle()
+
+    if (statusError) {
+      console.error('[acceptSuggestion] status update', statusError)
+      reportError(statusError, { site: 'serverAction.turnovers.acceptSuggestion.status', orgId: membership.org_id })
+      return { error: 'Failed to accept suggestion. Please try again.' }
+    }
+    if (!accepted) return { error: NOTHING_UPDATED }
 
     try {
       // Optional: feeds property_bedrooms on the outcome rows, which already
@@ -1159,7 +1324,7 @@ export async function acceptSuggestion(turnoverId: string): Promise<TurnoverActi
 
 export async function dismissSuggestion(turnoverId: string): Promise<TurnoverActionState> {
   try {
-    const { supabase, membership, user } = await requireOrgMember()
+    const { supabase, membership, user } = await requireOrgRole(TURNOVER_WRITE_ROLES)
 
     // Fails closed BEFORE the dismissal write. A silent null here left
     // crewIds empty, so the negative training signal was never recorded and the
@@ -1179,17 +1344,23 @@ export async function dismissSuggestion(turnoverId: string): Promise<TurnoverAct
     }
     const turnover = turnoverRes.data
 
-    const { error } = await supabase
+    const { data: dismissed, error } = await supabase
       .from('turnovers')
       .update({ suggestion_status: 'dismissed' })
       .eq('id', turnoverId)
       .eq('org_id', membership.org_id)
+      .select('id')
+      .maybeSingle()
 
     if (error) {
       console.error('[dismissSuggestion]', error)
       reportError(error, { site: 'serverAction.turnovers.dismissSuggestion', orgId: membership.org_id })
       return { error: 'Operation failed. Please try again.' }
     }
+
+    // The error was already bound here; the ROW COUNT was not, so a refused
+    // write still wrote the negative training signal and the audit row below.
+    if (!dismissed) return { error: NOTHING_UPDATED }
 
     const crewIds = (turnover?.suggested_crew_ids as string[] | null) ?? []
     if (crewIds.length) {
