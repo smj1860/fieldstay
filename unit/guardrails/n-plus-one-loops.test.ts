@@ -111,10 +111,11 @@ const EXCEPTIONS: Record<string, string> = {
   // org-orphaning fix.
   'app/(dashboard)/settings/privacy/actions.ts:69':
     'Per-secret delete_vault_secret RPC in the manual Article 17 erasure — the same distinct-external-resource case as the retention cron entry below, and bounded the same way (one BOOKING_BATCH_SIZE page per iteration of the self-draining outer loop, not the guest\'s whole booking history).',
-  'app/(dashboard)/maintenance/actions.ts:944':
-    'Per-vendor quote_requests insert — each row needs its own randomly generated quote_token before its own Inngest event fires; the insert could theoretically be batched with the token generated client-side, but that\'s a sync-logic change, not a lint fix.',
-  'app/(dashboard)/maintenance/create-work-order-helpers.ts:153':
-    'Extracted-helper twin of app/(dashboard)/maintenance/actions.ts:837 — same reasoning.',
+  // The actions.ts twin is gone: sendQuoteRequests had open-coded a second
+  // copy of this same loop, and now calls sendQuoteRequestEmails instead.
+  // One implementation, one exception.
+  'app/(dashboard)/maintenance/create-work-order-helpers.ts:177':
+    'Per-vendor quote_requests insert — each row needs its own randomly generated quote_token before its own Inngest event fires, so batching would mean moving token generation to the caller. Bounded by the vendor count the PM ticked in one dialog. The sole RFQ sender: both createWorkOrder and sendQuoteRequests go through it.',
   'app/(dashboard)/properties/clone-actions.ts:114':
     'Per-section checklist_template_sections insert — each section needs its own DB-generated id before the child checklist_template_items insert can reference it as section_id. Parent-before-child dependency, not a batchable read.',
   'app/api/work-orders/[token]/photos/route.ts:105':

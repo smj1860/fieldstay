@@ -228,9 +228,28 @@ export async function createWorkOrder(
 
     // Send RFQ emails to each selected vendor
     if (request_quotes && quote_vendor_ids.length) {
-      await sendQuoteRequestEmails(supabase, wo.id, property_id, membership.org_id, quote_vendor_ids)
+      const rfq = await sendQuoteRequestEmails(supabase, wo.id, property_id, membership.org_id, quote_vendor_ids)
 
       revalidatePath('/maintenance')
+
+      // A partial send used to be invisible: sendQuoteRequestEmails returned
+      // void and swallowed each failure, so the PM was redirected to a work
+      // order in "Awaiting Quote" that looked identical whether four vendors
+      // or none had been contacted. Redirecting here would discard the
+      // warning with it (redirect() throws), so a partial send returns
+      // instead — the modal already surfaces `warning` as a toast, and the
+      // PM can add the missing vendors from the work order's quote panel.
+      if (rfq.failed.length > 0) {
+        return {
+          success:     true,
+          workOrderId: wo.id,
+          warning:
+            `Work order created, but ${rfq.failed.length} of ${quote_vendor_ids.length} quote ` +
+            `request${quote_vendor_ids.length === 1 ? '' : 's'} could not be sent. Open the work ` +
+            'order and request quotes from those vendors again.',
+        }
+      }
+
       redirect(`/maintenance/${wo.id}`)
     }
 
@@ -940,47 +959,28 @@ export async function sendQuoteRequests(
       return { error: 'All selected vendors already have an active quote request', sent: 0 }
     }
 
-    const results = await Promise.all(
-      toSend.map(async (vendorId) => {
-        const quote_token            = crypto.randomUUID()
-        const quote_token_expires_at = new Date(Date.now() + 14 * 24 * 60 * 60 * 1000).toISOString()
-
-        const { data: qr, error } = await supabase
-          .from('quote_requests')
-          .insert({
-            work_order_id: workOrderId,
-            org_id:        membership.org_id,
-            vendor_id:     vendorId,
-            quote_token,
-            quote_token_expires_at,
-            status:        'pending',
-          })
-          .select('id')
-          .single()
-
-        if (error || !qr) return false
-
-        await inngest.send({
-          name: 'work-order/quote-requested',
-          data: {
-            work_order_id:    workOrderId,
-            quote_request_id: qr.id,
-            property_id:      wo.property_id,
-            org_id:           membership.org_id,
-            vendor_id:        vendorId,
-            quote_token,
-          },
-        })
-
-        return true
-      })
+    // Was a second, open-coded copy of sendQuoteRequestEmails — same insert,
+    // same token TTL, same event — which had already drifted: this copy
+    // discarded its failures as `return false`, the other discarded them
+    // silently, and only this one had the dedup filter above. One
+    // implementation, so the next fix lands in both places by construction.
+    const rfq = await sendQuoteRequestEmails(
+      supabase, workOrderId, wo.property_id, membership.org_id, toSend,
     )
-
-    const sent = results.filter(Boolean).length
 
     revalidatePath(`/maintenance/${workOrderId}`)
     revalidatePath('/maintenance')
-    return { sent }
+
+    if (rfq.failed.length > 0) {
+      return {
+        sent:  rfq.sent,
+        error: rfq.sent === 0
+          ? 'Could not send the quote requests. Please try again.'
+          : `Sent ${rfq.sent} of ${toSend.length} quote requests — the rest failed. Please try the remaining vendors again.`,
+      }
+    }
+
+    return { sent: rfq.sent }
   } catch (err) {
     console.error('[sendQuoteRequests]', err)
     reportError(err, { site: 'serverAction.maintenance.sendQuoteRequests' })

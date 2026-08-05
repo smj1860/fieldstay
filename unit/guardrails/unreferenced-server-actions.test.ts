@@ -73,8 +73,12 @@ const BASELINE = new Set([
   'app/(dashboard)/maintenance/actions.ts::addWorkOrderNote',
   'app/(dashboard)/maintenance/actions.ts::recordWorkOrderPhoto',
   'app/(dashboard)/maintenance/actions.ts::deleteWorkOrderPhoto',
-  'app/(dashboard)/maintenance/actions.ts::approveQuoteRequest',
-  'app/(dashboard)/maintenance/actions.ts::declineQuoteRequest',
+  // approveQuoteRequest / declineQuoteRequest / sendQuoteRequests pruned
+  // 2026-08-05: all three now have callers in
+  // components/work-orders/quote-comparison.tsx. Being dead is how
+  // approve_quote_request kept a text-into-uuid assignment that made it fail
+  // 100% of the time for two revisions — see
+  // supabase/migrations/20260805191500_approve_quote_completion_token_cast.sql.
   'app/(dashboard)/maintenance/actions.ts::recordMaintenanceCompletion',
   'app/(dashboard)/maintenance/work-order-actions.ts::reorderWorkOrderLineItems',
   'app/(dashboard)/maintenance/work-order-actions.ts::updatePropertyAccessInstructions',
@@ -84,13 +88,6 @@ const BASELINE = new Set([
   // Added 2026-08-05 when stripComments() was fixed — see the ⚠️ note above.
   // All three predate the guardrail; none is newly dead.
   //
-  // sendQuoteRequests is the third leg of the vendor-quote flow, alongside
-  // approveQuoteRequest and declineQuoteRequest already listed above. All
-  // three are dead and production has zero quote_requests rows and zero work
-  // orders at 'quote_requested', so the feature has never run: the
-  // vendor-facing /work-orders/[token]/quote page exists with no PM entry
-  // point at either end.
-  'app/(dashboard)/maintenance/actions.ts::sendQuoteRequests',
   'app/(dashboard)/maintenance/actions.ts::logActualCost',
   'app/(dashboard)/maintenance/actions.ts::updateWorkOrderStatus',
 ])

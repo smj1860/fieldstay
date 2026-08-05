@@ -889,6 +889,53 @@ describe('maintenance/actions', () => {
       expect(result).toEqual({ error: 'Operation failed. Please try again.', sent: 0 })
       expect(supabase.from).not.toHaveBeenCalled()
     })
+
+    // ── The failure that used to be invisible ────────────────────────────
+    //
+    // Both RFQ senders discarded a failed insert: this action returned
+    // `false` for that vendor and reported only the successful count, and
+    // sendQuoteRequestEmails (the create-modal path) returned void and
+    // swallowed it entirely. Either way a vendor the PM ticked silently never
+    // received a request, and the work order sat in "Awaiting Quote" looking
+    // exactly like one where every RFQ went out.
+    it('reports a partial send instead of quietly returning the successful count', async () => {
+      const supabase = makeSupabase({
+        work_orders:              [{ data: { id: 'wo_1', property_id: 'prop_1', status: 'pending' } }],
+        vendors:                  [{ data: [{ id: 'vendor_1' }, { id: 'vendor_2' }] }],
+        // One entry per vendor: isVendorHardBlocked fails CLOSED, so a missing
+        // row would block vendor_2 before any insert is attempted.
+        vendor_compliance_status: [...compliant(), ...compliant()],
+        quote_requests: [
+          { data: [] },                                              // dedup read: none active
+          { data: { id: 'qr_1' } },                                  // vendor_1 inserted
+          { data: null, error: { message: 'deadlock detected', code: '40P01' } }, // vendor_2 failed
+        ],
+      })
+      vi.mocked(requireOrgRole).mockResolvedValue({ supabase, membership } as never)
+
+      const result = await sendQuoteRequests('wo_1', ['vendor_1', 'vendor_2'])
+
+      expect(result.sent).toBe(1)
+      expect(result.error).toMatch(/Sent 1 of 2/)
+    })
+
+    it('reports a total send failure as an error rather than sent: 0 with no explanation', async () => {
+      const supabase = makeSupabase({
+        work_orders:              [{ data: { id: 'wo_1', property_id: 'prop_1', status: 'pending' } }],
+        vendors:                  [{ data: [{ id: 'vendor_1' }] }],
+        vendor_compliance_status: compliant(),
+        quote_requests: [
+          { data: [] },
+          { data: null, error: { message: 'permission denied', code: '42501' } },
+        ],
+      })
+      vi.mocked(requireOrgRole).mockResolvedValue({ supabase, membership } as never)
+
+      const result = await sendQuoteRequests('wo_1', ['vendor_1'])
+
+      expect(result.sent).toBe(0)
+      expect(result.error).toMatch(/Could not send/)
+    })
   })
 
   describe('approveQuoteRequest', () => {
