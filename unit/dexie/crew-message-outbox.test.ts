@@ -1,5 +1,5 @@
 // Sending a message used to be the ONE crew-facing action that wasn't
-// offline-safe. sendMessageToPM is a live Server Action, so a message composed
+// offline-safe. The previous sendMessageToPM Server Action sent inline, so a message composed
 // at a property with no signal simply failed — and the crew FAQ carried an
 // entry telling crew not to assume it had queued itself. Meanwhile 90 days of
 // message HISTORY was cached on every device, which is the inverse of what is

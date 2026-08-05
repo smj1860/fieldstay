@@ -39,11 +39,6 @@ const EXCEPTIONS = new Map<string, string>([
     'Account/data-deletion writes are keyed by auth user id across every org the ' +
     'user belongs to — an org_id filter would defeat the purpose of the request.',
   ],
-  [
-    'app/(dashboard)/messages/actions.ts',
-    'Crew-scoped client (createServiceClient({ crew })); writes are keyed by the ' +
-    'crew member id from requireCrewMember(), whose org is fixed by that lookup.',
-  ],
 ])
 
 /** Slice from just past an opening `(` to its matching `)`. */

@@ -311,7 +311,7 @@ export async function completeWorkOrder(
 // ── Messages to the operations team ───────────────────────────────────────
 //
 // Messages used to be the ONE crew-facing action that wasn't offline-safe:
-// sendMessageToPM is a live Server Action, so a message composed at a property
+// The previous sendMessageToPM Server Action sent inline, so a message composed at a property
 // with no signal simply failed, and the crew FAQ carried an entry telling crew
 // not to assume it had queued. Reading history offline was the inverse
 // trade — 90 days of it cached on every device to back a screen whose whole

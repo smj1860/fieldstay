@@ -2,10 +2,9 @@
 
 import { revalidatePath } from 'next/cache'
 import { requireOrgMember } from '@/lib/auth'
-import { createClient, createServiceClient } from '@/lib/supabase/server'
+import { createClient } from '@/lib/supabase/server'
 import { inngest } from '@/lib/inngest/client'
 import { sendPushToUser } from '@/lib/push/send-push'
-import { getPmMembers } from '@/lib/inngest/helpers'
 import { reportError } from '@/lib/observability/report-error'
 import type { Message } from '@/types/database'
 
@@ -79,80 +78,6 @@ export async function sendMessageToCrew(
   } catch (err) {
     console.error('[sendMessageToCrew]', err)
     reportError(err, { site: 'serverAction.messages.sendMessageToCrew' })
-    return { success: false, error: 'Failed to send message' }
-  }
-}
-
-// Crew → PM message. Routes to an admin/manager/owner in the crew member's org.
-export async function sendMessageToPM(content: string): Promise<MessageActionResult> {
-  try {
-    const supabase = await createClient()
-    const { data: { user } } = await supabase.auth.getUser()
-    if (!user) return { success: false, error: 'Not authenticated' }
-
-    const trimmed = content.trim()
-    if (!trimmed) return { success: false, error: 'Message cannot be empty' }
-
-    const { data: crewMember } = await supabase
-      .from('crew_members')
-      .select('id, org_id, name')
-      .eq('user_id', user.id)
-      .maybeSingle()
-
-    if (!crewMember) return { success: false, error: 'Crew profile not found' }
-
-    // Crew members have no RLS visibility into organization_members (they're
-    // not members of the org themselves), so this lookup intentionally
-    // bypasses RLS via the service client to find a contact to route to.
-    //
-    // Routed through getPmMembers() rather than an inline query: it is the one
-    // place that applies the invite_accepted_at filter AND the owner → admin →
-    // manager ordering. The inline `.in('role', [...]).limit(1)` this replaced
-    // had no ORDER BY, so Postgres was free to hand back a different human on
-    // every call — two crew messages minutes apart could land in two different
-    // inboxes with nothing tying them together.
-    const admin = createServiceClient({ crew: crewMember })
-    const [primaryPm] = await getPmMembers(admin, crewMember.org_id, {
-      roles: ['owner', 'admin', 'manager'],
-      limit: 1,
-    })
-
-    if (!primaryPm) return { success: false, error: 'No operations contact found' }
-    const recipientId = primaryPm.userId
-
-    const { data: message, error } = await supabase
-      .from('messages')
-      .insert({
-        org_id:       crewMember.org_id,
-        sender_id:    user.id,
-        recipient_id: recipientId,
-        content:      trimmed,
-      })
-      .select('id, created_at')
-      .single()
-
-    if (error || !message) {
-      console.error('[sendMessageToPM]', error)
-      return { success: false, error: 'Failed to send message' }
-    }
-
-    await inngest.send({
-      name: 'message/sent' as const,
-      data: {
-        message_id:    message.id,
-        org_id:        crewMember.org_id,
-        sender_id:     user.id,
-        recipient_id:  recipientId,
-        is_crew_to_pm: true,
-      },
-    })
-
-    await postToSlack(supabase, crewMember.org_id, crewMember.name, trimmed)
-
-    return { success: true }
-  } catch (err) {
-    console.error('[sendMessageToPM]', err)
-    reportError(err, { site: 'serverAction.messages.sendMessageToPM' })
     return { success: false, error: 'Failed to send message' }
   }
 }
@@ -231,35 +156,5 @@ export async function markConversationRead(otherUserId: string): Promise<Message
     console.error('[markConversationRead]', err)
     reportError(err, { site: 'serverAction.messages.markConversationRead' })
     return { success: false, error: 'Failed to mark messages read' }
-  }
-}
-
-// Posts a non-fatal Slack notification when a crew member messages the PM,
-// if the org has configured an Incoming Webhook URL.
-async function postToSlack(
-  supabase: Awaited<ReturnType<typeof createClient>>,
-  orgId: string,
-  crewMemberName: string,
-  content: string
-): Promise<void> {
-  try {
-    const { data: org } = await supabase
-      .from('organizations')
-      .select('slack_webhook_url')
-      .eq('id', orgId)
-      .maybeSingle()
-
-    if (!org?.slack_webhook_url) return
-
-    await fetch(org.slack_webhook_url, {
-      method:  'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body:    JSON.stringify({
-        text: `\u{1F4AC} *${crewMemberName}* sent you a message on FieldStay:\n>${content}`,
-      }),
-    })
-  } catch (err) {
-    console.error('[postToSlack]', err)
-    reportError(err, { site: 'serverAction.messages.postToSlack', orgId })
   }
 }

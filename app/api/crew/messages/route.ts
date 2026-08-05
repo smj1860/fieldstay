@@ -10,9 +10,10 @@ import { reportError } from '@/lib/observability/report-error'
  * Drained by the Dexie outbox when a crew member sends a message.
  *
  * Messages used to be the one crew-facing action that was not offline-safe:
- * `sendMessageToPM` is a live Server Action, so a message composed at a
- * property with no signal simply failed, and the crew FAQ had an entry telling
- * crew not to trust that it queued. Routing the send through the outbox makes
+ * The previous `sendMessageToPM` Server Action sent inline, so a message
+ * composed at a property with no signal simply failed, and the crew FAQ had an
+ * entry telling crew not to trust that it queued. (That action was deleted
+ * 2026-08-05 — this route is the only crew→PM send path.) Routing the send through the outbox makes
  * it behave like every other crew write — retried, backed off, and surfaced in
  * the failed-sync banner if it never lands.
  *
