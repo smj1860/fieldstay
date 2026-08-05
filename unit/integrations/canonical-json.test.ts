@@ -96,6 +96,34 @@ describe('canonicalJson', () => {
     expect(() => canonicalJson(deep('b'))).toThrow(PayloadTooDeepError)
   })
 
+  // SonarQube flags `Object.keys(o).sort()` (Reliability/High) and suggests a
+  // localeCompare comparator. Taking that suggestion would BREAK this function:
+  // localeCompare is sensitive to the runtime locale and ICU version, so two
+  // servers — or one server across a Node upgrade — could order the same keys
+  // differently and hash identical payloads to different values, silently
+  // killing the dedup. These pin the code-unit ordering that suggestion would
+  // replace.
+  it('orders keys by UTF-16 code unit, NOT by locale collation', () => {
+    // Under most locale collations 'a' sorts before 'B'; by code unit, 'B'
+    // (0x42) precedes 'a' (0x61). This asserts the locale-independent answer.
+    expect(canonicalJson({ a: 1, B: 2 })).toBe('{"B":2,"a":1}')
+
+    // The case localeCompare is most likely to disagree on: diacritics.
+    // Code unit puts plain ASCII 'z' before 'á' (U+00E1); most collations
+    // would sort 'á' next to 'a', i.e. first.
+    expect(canonicalJson({ 'á': 1, z: 2 })).toBe('{"z":2,"á":1}')
+  })
+
+  it('is stable regardless of the process locale', () => {
+    // Same payload, two key insertion orders, compared under whatever locale
+    // this runtime has — the hash must not depend on either.
+    const a = JSON.parse('{"B":1,"a":2,"á":3,"z":4}')
+    const b = JSON.parse('{"z":4,"á":3,"a":2,"B":1}')
+
+    expect(canonicalJson(a)).toBe(canonicalJson(b))
+    expect(hash(a)).toBe(hash(b))
+  })
+
   it('produces valid JSON, so the hash input stays inspectable', () => {
     const payload = JSON.parse('{"b":[1,{"d":4,"c":3}],"a":"x"}')
     const out     = canonicalJson(payload)

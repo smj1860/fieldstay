@@ -49,6 +49,32 @@ export class PayloadTooDeepError extends Error {
  */
 const MAX_DEPTH = 64
 
+/**
+ * Key ordering for the canonical form: UTF-16 code unit, explicitly.
+ *
+ * This is what a bare `.sort()` already does for an array of strings, but it
+ * is spelled out because the property that matters here is DETERMINISM ACROSS
+ * MACHINES, and a bare `.sort()` does not say so.
+ *
+ * Deliberately NOT `String.prototype.localeCompare`, which is what SonarQube's
+ * "provide a compare function" rule suggests: localeCompare is sensitive to
+ * the runtime's locale and ICU version, so two servers — or the same server
+ * before and after a Node upgrade — could order the same two keys differently.
+ * That would hash identical payloads to different values, silently breaking
+ * the webhook dedup this function exists to make reliable. Alphabetical
+ * correctness is irrelevant here; nobody reads this ordering. Reproducibility
+ * is the whole requirement.
+ *
+ * Written as three statements rather than a chained ternary so it does not
+ * trade a SonarQube reliability finding for a `sonarjs/no-nested-conditional`
+ * lint warning.
+ */
+function byCodeUnit(a: string, b: string): number {
+  if (a < b) return -1
+  if (a > b) return 1
+  return 0
+}
+
 export function canonicalJson(value: unknown, depth = 0): string {
   // Primitives, null, and anything JSON.stringify drops (undefined, function,
   // symbol) — `?? 'null'` covers the drop, which stringify signals by
@@ -64,7 +90,7 @@ export function canonicalJson(value: unknown, depth = 0): string {
   const obj   = value as Record<string, unknown>
   const parts: string[] = []
 
-  for (const key of Object.keys(obj).sort()) {
+  for (const key of Object.keys(obj).sort(byCodeUnit)) {
     const v = obj[key]
     // JSON.stringify omits undefined-valued properties; match that so an
     // explicitly-undefined key cannot change the hash.

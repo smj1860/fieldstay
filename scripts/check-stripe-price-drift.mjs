@@ -70,7 +70,7 @@ const KNOWN_PRICE_ENV = [
 const known = new Map()
 for (const name of KNOWN_PRICE_ENV) {
   const value = process.env[name]
-  if (value && value.trim()) known.set(value.trim(), name)
+  if (value?.trim()) known.set(value.trim(), name)
 }
 
 if (known.size === 0) {
