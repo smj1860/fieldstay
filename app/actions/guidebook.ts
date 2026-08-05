@@ -8,6 +8,7 @@ import { normalizePhoneToE164 } from '@/lib/sms/telnyx'
 import { logAuditEvent } from '@/lib/audit'
 import { MAX_FEATURED_AMENITIES } from '@/lib/guidebook/featured-amenities'
 import type { GuidebookSlotType, GuidebookOfferType } from '@/types/database'
+import { z } from 'zod'
 
 import { reportError } from '@/lib/observability/report-error'
 /**
@@ -255,6 +256,29 @@ export interface UpdateStayExtensionSettingsInput {
 }
 
 /**
+ * Not exported: this file is `'use server'`, where every export must be an
+ * async action. Same constraint that keeps compareCodeUnits duplicated.
+ */
+const StayExtensionSettingsSchema = z.object({
+  discountPct: z
+    .number({ invalid_type_error: 'Discount must be a number.' })
+    .finite('Discount must be a number.')
+    .min(0, 'Discount must be between 0 and 100.')
+    .max(100, 'Discount must be between 0 and 100.')
+    .nullable(),
+  gapThresholdDays: z
+    .number({ invalid_type_error: 'Gap threshold must be a whole number of days.' })
+    .int('Gap threshold must be a whole number of days.')
+    .min(1, 'Gap threshold must be at least 1 day.')
+    .max(365, 'Gap threshold must be 365 days or fewer.'),
+  daysBefore: z
+    .number({ invalid_type_error: 'Message timing must be a whole number of days.' })
+    .int('Message timing must be a whole number of days.')
+    .min(1, 'Message timing must be at least 1 day before checkout.')
+    .max(365, 'Message timing must be 365 days or fewer.'),
+})
+
+/**
  * Saves the org-level "Gap Night" stay-extension messaging settings.
  */
 export async function updateStayExtensionSettings(
@@ -264,35 +288,50 @@ export async function updateStayExtensionSettings(
     const { user, membership } = await requireOrgRole(['admin', 'manager'])
     const supabase        = createServiceClient({ authorizedBy: membership })
 
-    if (input.discountPct !== null && (input.discountPct < 0 || input.discountPct > 100)) {
-      return { error: 'Discount must be between 0 and 100.' }
-    }
-    if (input.gapThresholdDays < 1) {
-      return { error: 'Gap threshold must be at least 1 day.' }
-    }
-    if (input.daysBefore < 1) {
-      return { error: 'Message timing must be at least 1 day before checkout.' }
+    // Every bound below used to be a bare `<` / `>` comparison, which NaN
+    // passes: `NaN < 1` and `NaN > 100` are both false. supabase-js then
+    // JSON-serializes NaN to `null` and writes a real NULL to the column. The
+    // schemas reject it because `.finite()` is what excludes NaN and ±Infinity
+    // — a comparison operator never will.
+    const settings = StayExtensionSettingsSchema.safeParse({
+      discountPct:      input.discountPct,
+      gapThresholdDays: input.gapThresholdDays,
+      daysBefore:       input.daysBefore,
+    })
+    if (!settings.success) {
+      return { error: settings.error.issues[0]?.message ?? 'Check the values and try again.' }
     }
     if (input.contactMethod === 'ownerrez_url' && !input.ownerRezUrl?.trim()) {
       return { error: 'Please enter your booking page URL.' }
     }
 
-    const { error } = await supabase
+    const { data: updated, error } = await supabase
       .from('guidebook_configurations')
       .update({
         extension_messaging_enabled:   input.enabled,
-        extension_gap_threshold_days:  input.gapThresholdDays,
-        extension_discount_pct:        input.discountPct,
+        extension_gap_threshold_days:  settings.data.gapThresholdDays,
+        extension_discount_pct:        settings.data.discountPct,
         extension_contact_method:      input.contactMethod,
         extension_ownerrez_url:        input.contactMethod === 'ownerrez_url' ? input.ownerRezUrl : null,
-        extension_message_days_before: input.daysBefore,
+        extension_message_days_before: settings.data.daysBefore,
         updated_at:                    new Date().toISOString(),
       })
       .eq('org_id', membership.org_id)
+      .select('org_id')
+      .maybeSingle()
 
     if (error) {
       console.error('[updateStayExtensionSettings]', error.message)
       return { error: 'Failed to save stay extension settings. Please try again.' }
+    }
+
+    if (!updated) {
+      // PostgREST answers a zero-row UPDATE with SUCCESS, not an error. An org
+      // with no guidebook_configurations row yet — every org before the
+      // guidebook is first set up — got a green toast, an audit event
+      // recording a change that never happened, and settings that silently did
+      // not save.
+      return { error: 'Set up your guidebook before configuring gap-night messaging.' }
     }
 
     await logAuditEvent({
@@ -311,6 +350,13 @@ export async function updateStayExtensionSettings(
     return { error: 'Operation failed. Please try again.' }
   }
 }
+
+/**
+ * How long after the original opt-in a guest may correct the number they
+ * entered. Long enough to notice a typo and resubmit; far short of the span
+ * over which a guidebook link circulates.
+ */
+const OPTIN_CORRECTION_WINDOW_MS = 15 * 60 * 1000
 
 /**
  * Guest-facing SMS opt-in. Unauthenticated (no PM session) — org_id is
@@ -334,6 +380,70 @@ export async function optInGuestSms(
       .maybeSingle()
 
     if (!booking) return { error: 'Invalid guidebook link.' }
+
+    // ── Consent gate 1: has this NUMBER revoked consent anywhere? ────────────
+    //
+    // STOP is applied globally by phone, across every org and booking
+    // (app/api/webhooks/telnyx/route.ts). The opt-in row is scoped to a single
+    // booking, so without this check an upsert writing `opted_out_at: null`
+    // resurrects a number that opted out — from an unauthenticated form, with
+    // nothing establishing that the submitter even owns the number.
+    //
+    // The sanctioned re-consent path is START/YES/UNSTOP from the handset,
+    // which is the whole reason that branch exists in the webhook. This is
+    // durable: guest-pii-retention deletes only rows with opted_out_at IS
+    // NULL, so a revocation record is kept indefinitely on purpose.
+    const revokedRes = await supabase
+      .from('guidebook_guest_sms_optins')
+      .select('id')
+      .eq('phone_e164', phoneE164)
+      .not('opted_out_at', 'is', null)
+      .limit(1)
+      .maybeSingle()
+
+    if (revokedRes.error) {
+      // Fail CLOSED. Consent is not something to assume on a degraded read —
+      // unlike the abuse limiters, which deliberately fail open.
+      console.error('[optInGuestSms] consent check', revokedRes.error.message)
+      return { error: 'Something went wrong. Please try again.' }
+    }
+    if (revokedRes.data) {
+      return { error: 'This number previously opted out. Text START to re-subscribe.' }
+    }
+
+    // ── Consent gate 2: is an existing opt-in being repointed? ───────────────
+    //
+    // The upsert conflicts on booking_id, so a second submission REPLACES
+    // phone_e164 in place and every later message on the booking — nudges,
+    // stay-extension offers — goes to the new number, with no notice to the
+    // guest. (The door code specifically is safe: guidebook-guest-opted-in
+    // claims with `.is('door_code_sent_at', null)` and this payload does not
+    // reset it, so only the first submitter ever receives it.)
+    //
+    // A blanket refusal would trap a guest who mistyped their own number, so
+    // corrections stay open for a short window after the original opt-in. That
+    // covers the real case — a typo is noticed immediately — while refusing a
+    // repoint days later, which is what a leaked link enables.
+    const existingRes = await supabase
+      .from('guidebook_guest_sms_optins')
+      .select('id, phone_e164, opted_in_at')
+      .eq('booking_id', booking.id)
+      .maybeSingle()
+
+    if (existingRes.error) {
+      console.error('[optInGuestSms] existing opt-in lookup', existingRes.error.message)
+      return { error: 'Something went wrong. Please try again.' }
+    }
+
+    const existing = existingRes.data
+    if (existing && existing.phone_e164 !== phoneE164) {
+      const optedInAt = existing.opted_in_at ? new Date(existing.opted_in_at).getTime() : 0
+      if (Date.now() - optedInAt > OPTIN_CORRECTION_WINDOW_MS) {
+        // Never echo either number back — guest PII, and confirming which
+        // number is on file would itself be a disclosure.
+        return { error: 'A different number is already signed up for this stay. Contact your host to change it.' }
+      }
+    }
 
     const { data: optin, error } = await supabase
       .from('guidebook_guest_sms_optins')

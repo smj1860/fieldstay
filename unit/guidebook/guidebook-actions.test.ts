@@ -38,7 +38,10 @@ function makeSupabase(queue: Record<string, Resp[]>) {
     const result: Resp = q?.length ? q.shift()! : { data: null, error: null }
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const chain: any = {}
-    for (const m of ['select', 'insert', 'update', 'upsert', 'eq', 'order', 'limit']) {
+    // `.not(` is the global-STOP consent check
+    // (.not('opted_out_at', 'is', null)); without it the chain call throws and
+    // every opt-in test collapses into the generic catch.
+    for (const m of ['select', 'insert', 'update', 'upsert', 'eq', 'not', 'order', 'limit']) {
       chain[m] = vi.fn((...args: unknown[]) => {
         calls.push({ table, method: m, args })
         return chain
@@ -292,7 +295,12 @@ describe('actions/guidebook', () => {
     }
 
     it('saves settings scoped to the caller org', async () => {
-      const supabase = makeSupabase({ guidebook_configurations: [{ error: null }] })
+      // The UPDATE now reads back the row it matched: PostgREST reports a
+      // zero-row UPDATE as success, so "did it error" is not the same question
+      // as "did it change anything".
+      const supabase = makeSupabase({
+        guidebook_configurations: [{ data: { org_id: 'org_1' }, error: null }],
+      })
       vi.mocked(requireOrgRole).mockResolvedValue({
         supabase, membership, user: { id: 'user_1' },
       } as never)
@@ -346,8 +354,12 @@ describe('actions/guidebook', () => {
     it('derives org_id/property_id server-side from the booking behind the token, never from client input', async () => {
       vi.mocked(normalizePhoneToE164).mockReturnValue('+12065551234')
       const supabase = makeSupabase({
-        bookings:                    [{ data: { id: 'booking_1', org_id: 'org_1', property_id: 'prop_1' } }],
-        guidebook_guest_sms_optins:  [{ data: { id: 'optin_1' }, error: null }],
+        bookings: [{ data: { id: 'booking_1', org_id: 'org_1', property_id: 'prop_1' } }],
+        guidebook_guest_sms_optins: [
+          { data: null, error: null },              // no global STOP on this number
+          { data: null, error: null },              // no existing opt-in for the booking
+          { data: { id: 'optin_1' }, error: null }, // the upsert
+        ],
       })
       vi.mocked(createServiceClient).mockReturnValue(supabase as never)
 
@@ -361,6 +373,98 @@ describe('actions/guidebook', () => {
           propertyId: 'prop_1', phoneE164: '+12065551234',
         },
       })
+    })
+
+    it('refuses a number that opted out ANYWHERE, and points at the handset path', async () => {
+      // STOP is applied globally by phone across every org and booking, but
+      // the opt-in row is scoped to one booking — so an upsert writing
+      // `opted_out_at: null` used to resurrect a revoked number from an
+      // unauthenticated form, with nothing proving the submitter owns it.
+      vi.mocked(normalizePhoneToE164).mockReturnValue('+12065551234')
+      const supabase = makeSupabase({
+        bookings: [{ data: { id: 'booking_1', org_id: 'org_1', property_id: 'prop_1' } }],
+        guidebook_guest_sms_optins: [{ data: { id: 'revoked_1' }, error: null }],
+      })
+      vi.mocked(createServiceClient).mockReturnValue(supabase as never)
+
+      const result = await optInGuestSms('valid-guidebook-token', '(206) 555-1234')
+
+      expect(result).toEqual({
+        error: 'This number previously opted out. Text START to re-subscribe.',
+      })
+      expect(inngest.send).not.toHaveBeenCalled()
+    })
+
+    it('fails CLOSED when the consent check itself errors', async () => {
+      // Unlike the abuse limiters, which deliberately fail open, consent is
+      // never assumed on a degraded read.
+      vi.mocked(normalizePhoneToE164).mockReturnValue('+12065551234')
+      const supabase = makeSupabase({
+        bookings: [{ data: { id: 'booking_1', org_id: 'org_1', property_id: 'prop_1' } }],
+        guidebook_guest_sms_optins: [{ data: null, error: { message: 'redis/pg down' } }],
+      })
+      vi.mocked(createServiceClient).mockReturnValue(supabase as never)
+
+      const result = await optInGuestSms('valid-guidebook-token', '(206) 555-1234')
+
+      expect(result).toEqual({ error: 'Something went wrong. Please try again.' })
+      expect(inngest.send).not.toHaveBeenCalled()
+    })
+
+    it('refuses to repoint an established opt-in at a different number', async () => {
+      // The upsert conflicts on booking_id, so a second submission replaced
+      // phone_e164 in place and every later message on the booking went to the
+      // new number with no notice to the guest.
+      vi.mocked(normalizePhoneToE164).mockReturnValue('+12065559999')
+      const supabase = makeSupabase({
+        bookings: [{ data: { id: 'booking_1', org_id: 'org_1', property_id: 'prop_1' } }],
+        guidebook_guest_sms_optins: [
+          { data: null, error: null },
+          {
+            data: {
+              id: 'optin_1',
+              phone_e164:  '+12065551234',
+              opted_in_at: new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString(),
+            },
+            error: null,
+          },
+        ],
+      })
+      vi.mocked(createServiceClient).mockReturnValue(supabase as never)
+
+      const result = await optInGuestSms('valid-guidebook-token', '(206) 555-9999')
+
+      expect(result).toEqual({
+        error: 'A different number is already signed up for this stay. Contact your host to change it.',
+      })
+      // Neither number is echoed back — confirming what is on file would itself
+      // be a disclosure of guest PII.
+      expect(JSON.stringify(result)).not.toContain('2065551234')
+      expect(inngest.send).not.toHaveBeenCalled()
+    })
+
+    it('still allows a guest to correct a typo shortly after opting in', async () => {
+      vi.mocked(normalizePhoneToE164).mockReturnValue('+12065559999')
+      const supabase = makeSupabase({
+        bookings: [{ data: { id: 'booking_1', org_id: 'org_1', property_id: 'prop_1' } }],
+        guidebook_guest_sms_optins: [
+          { data: null, error: null },
+          {
+            data: {
+              id: 'optin_1',
+              phone_e164:  '+12065551234',
+              opted_in_at: new Date(Date.now() - 60 * 1000).toISOString(),  // 1 min ago
+            },
+            error: null,
+          },
+          { data: { id: 'optin_1' }, error: null },
+        ],
+      })
+      vi.mocked(createServiceClient).mockReturnValue(supabase as never)
+
+      const result = await optInGuestSms('valid-guidebook-token', '(206) 555-9999')
+
+      expect(result).toEqual({ success: true })
     })
 
     it('rejects an invalid/unrecognized guidebook token before writing anything (IDOR/token check)', async () => {

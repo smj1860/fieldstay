@@ -167,6 +167,54 @@ describe('actions/work-order-public', () => {
       expect(result.publicUrl).toContain(`/work-orders/${result.token}`)
     })
 
+    it('does not let a LIKE wildcard select an arbitrary vendor to dispatch to', async () => {
+      // '%' matched EVERY vendor in the org and .limit(1) then picked one, so
+      // the email, the SMS and the portal token went to a vendor the PM never
+      // named while the UI reported the address they typed. The escape is the
+      // real fix; the equality re-check below it is what makes a failure a
+      // refused dispatch rather than a misdirected one.
+      const supabase = makeSupabase({
+        work_orders: [{ data: baseWo(), error: null }, { error: null }],
+        vendors:     [{ data: { id: 'ven_1', name: 'Ace Plumbing', email: 'vendor@example.com', phone: null }, error: null }],
+      })
+      vi.mocked(requireOrgMember).mockResolvedValue({
+        supabase, membership, user: { id: 'user_1' },
+      } as never)
+
+      const result = await dispatchWorkOrderToVendor({
+        workOrderId: 'wo_1', vendorEmail: '%', vendorName: 'Whoever',
+      })
+
+      expect(result.error).toBe('That vendor is not in your address book, or has no email on file.')
+      expect(inngest.send).not.toHaveBeenCalled()
+      expect(sendSMS).not.toHaveBeenCalled()
+    })
+
+    it('escapes LIKE metacharacters so a real address containing "_" matches only itself', async () => {
+      // Underscores are legal and common in email local parts, and unescaped
+      // they match any single character — confirmed against Postgres, where
+      // the unescaped pattern matched both first_last@ and firstXlast@.
+      const supabase = makeSupabase({
+        work_orders: [{ data: baseWo(), error: null }, { error: null }],
+        vendors:     [{ data: { id: 'ven_1', name: 'Ace', email: 'first_last@example.com', phone: null }, error: null }],
+        profiles:    [{ data: { full_name: 'Sam Jones', phone: null } }],
+        organizations: [{ data: { name: 'Lake Martin Delivery' } }],
+      })
+      vi.mocked(requireOrgMember).mockResolvedValue({
+        supabase, membership, user: { id: 'user_1' },
+      } as never)
+
+      const result = await dispatchWorkOrderToVendor({
+        workOrderId: 'wo_1', vendorEmail: 'first_last@example.com', vendorName: 'Ace',
+      })
+
+      expect(result.success).toBe(true)
+      const ilikeCall = supabase.from.mock.results
+        .flatMap((r) => (r.value as { ilike?: { mock: { calls: unknown[][] } } }).ilike?.mock.calls ?? [])
+        .find((args) => args[0] === 'email')
+      expect(ilikeCall?.[1]).toBe('first\\_last@example.com')
+    })
+
     it('sends an SMS alongside the dispatch email when a vendor phone is provided', async () => {
       const supabase = makeSupabase({
         work_orders: [{ data: baseWo(), error: null }, { error: null }],
@@ -468,13 +516,43 @@ describe('actions/work-order-public', () => {
       expect(supabase.from).not.toHaveBeenCalled()
     })
 
-    it('rejects an invalid actual cost before hitting the DB', async () => {
+    // NaN is the one that mattered: `cost < 0 || cost > 1_000_000` is false for
+    // NaN on both sides, so it reached the write, and supabase-js serializes it
+    // to JSON null — the vendor's cost silently became a NULL actual_cost with
+    // no error anywhere. Infinity took the same path past the lower bound.
+    it.each([
+      ['negative',  -5,                        'Amount cannot be negative.'],
+      ['NaN',       Number.NaN,                'Enter a valid amount.'],
+      ['Infinity',  Number.POSITIVE_INFINITY,  'Enter a valid amount.'],
+      ['over $1M',  5_000_000,                 'Amount must be under $1,000,000.'],
+    ])('rejects a %s actual cost before hitting the DB', async (_label, cost, message) => {
       const supabase = makeSupabase({})
       vi.mocked(createServiceClient).mockReturnValue(supabase as never)
 
-      const result = await submitWorkOrderSignOff(VALID_TOKEN, 'All done', undefined, -5)
+      const result = await submitWorkOrderSignOff(VALID_TOKEN, 'All done', undefined, cost)
 
-      expect(result).toEqual({ error: 'Cost must be a valid amount' })
+      expect(result).toEqual({ error: message })
+      expect(supabase.from).not.toHaveBeenCalled()
+    })
+
+    // A Server Action's parameter types are a compile-time claim about values
+    // the caller supplies, and Next.js registers every exported action at a
+    // stable endpoint — so these are reachable by a direct POST whether or not
+    // any page renders them.
+    it.each([
+      ['an object masquerading as a 64-char token', { length: 64 }, 'All done', 'Invalid link'],
+      ['a null token',                              null,           'All done', 'Invalid link'],
+      ['null notes',                                VALID_TOKEN,    null,       'Invalid sign-off notes'],
+    ])('rejects %s instead of throwing', async (_label, token, notes, message) => {
+      const supabase = makeSupabase({})
+      vi.mocked(createServiceClient).mockReturnValue(supabase as never)
+
+      const result = await submitWorkOrderSignOff(
+        token as unknown as string,
+        notes as unknown as string,
+      )
+
+      expect(result).toEqual({ error: message })
       expect(supabase.from).not.toHaveBeenCalled()
     })
 
@@ -497,6 +575,44 @@ describe('actions/work-order-public', () => {
       // keyed on (storage.foldername(name))[1].
       const uploadedPath = String((supabase.uploadMock.mock.calls as unknown as unknown[][])[0]![0])
       expect(uploadedPath.startsWith('org_1/')).toBe(true)
+    })
+
+    it('still completes but WARNS when a photo upload fails', async () => {
+      // The uploads run after the completing UPDATE has committed and the
+      // token has been spent by the public_signed_off_at guard, so the vendor
+      // cannot resubmit. Reporting a bare `{ success: true }` told them their
+      // evidence was filed when it had gone nowhere.
+      const supabase = makeSupabase({
+        work_orders:       [{ data: baseWo(), error: null }, { data: { id: 'wo_1' }, error: null }],
+        work_order_photos: [{ error: null }],
+      })
+      supabase.uploadMock.mockResolvedValueOnce({ error: { message: 'storage down' } } as never)
+      vi.mocked(createServiceClient).mockReturnValue(supabase as never)
+      const photos = [new File(['x'], 'p0.jpg', { type: 'image/jpeg' })]
+
+      const result = await submitWorkOrderSignOff(VALID_TOKEN, 'All done', photos)
+
+      // The sign-off itself stands — a lost photo must not un-complete a
+      // finished work order.
+      expect(result.success).toBe(true)
+      expect(result.error).toBeUndefined()
+      expect(result.warning).toContain('1 photo failed to upload')
+    })
+
+    it('warns when the photo row insert fails even though the object uploaded', async () => {
+      // An object in the bucket that is linked to no work order is, from the
+      // work order's point of view, the same as never having been uploaded.
+      const supabase = makeSupabase({
+        work_orders:       [{ data: baseWo(), error: null }, { data: { id: 'wo_1' }, error: null }],
+        work_order_photos: [{ error: { message: 'insert failed' } }],
+      })
+      vi.mocked(createServiceClient).mockReturnValue(supabase as never)
+      const photos = [new File(['x'], 'p0.jpg', { type: 'image/jpeg' })]
+
+      const result = await submitWorkOrderSignOff(VALID_TOKEN, 'All done', photos)
+
+      expect(result.success).toBe(true)
+      expect(result.warning).toContain('1 photo failed to upload')
     })
   })
 })
