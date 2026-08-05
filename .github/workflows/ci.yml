@@ -274,11 +274,17 @@ jobs:
       # `head.repo.fork` is false for same-repo PRs and pushes; for a fork PR
       # it is true and this stays unset, preserving the disarm.
       DB_INVARIANTS_REQUIRE_ARMED: ${{ github.event.pull_request.head.repo.fork && '0' || '1' }}
-      # Same disarm/require pair for the Stripe price drift gate. Its secrets
-      # are different (Stripe, not Supabase) so it needs its own flag — but the
-      # reasoning is identical: a fork cannot read them, the canonical repo
-      # always can, and a silent skip there would be a green check for a
-      # comparison nobody made.
+      # Stripe price drift gate. Deliberately OPT-IN, unlike the Supabase gate
+      # above: the Supabase secrets already exist on this repo, the Stripe ones
+      # may not. Requiring armed before they are configured turns a brand-new
+      # check into a permanently red required check on every PR, which teaches
+      # people to ignore it — the opposite of what a gate is for.
+      #
+      # Set the repo VARIABLE STRIPE_PRICE_DRIFT_ARMED=1 once STRIPE_SECRET_KEY
+      # and the STRIPE_PRICE_* secrets are in place; from then on an unarmed run
+      # fails loudly here exactly like the Supabase gate. Until then the script
+      # warns and passes, so the comparison is visible in the log without
+      # blocking.
       STRIPE_SECRET_KEY: ${{ secrets.STRIPE_SECRET_KEY }}
       STRIPE_PRICE_STARTER_MONTHLY:   ${{ secrets.STRIPE_PRICE_STARTER_MONTHLY }}
       STRIPE_PRICE_STARTER_ANNUAL:    ${{ secrets.STRIPE_PRICE_STARTER_ANNUAL }}
@@ -287,7 +293,7 @@ jobs:
       STRIPE_PRICE_PORTFOLIO_MONTHLY: ${{ secrets.STRIPE_PRICE_PORTFOLIO_MONTHLY }}
       STRIPE_PRICE_PORTFOLIO_ANNUAL:  ${{ secrets.STRIPE_PRICE_PORTFOLIO_ANNUAL }}
       STRIPE_PRICE_SPONSOR_MONTHLY:   ${{ secrets.STRIPE_PRICE_SPONSOR_MONTHLY }}
-      STRIPE_PRICE_DRIFT_REQUIRE_ARMED: ${{ github.event.pull_request.head.repo.fork && '0' || '1' }}
+      STRIPE_PRICE_DRIFT_REQUIRE_ARMED: ${{ (vars.STRIPE_PRICE_DRIFT_ARMED == '1' && !github.event.pull_request.head.repo.fork) && '1' || '0' }}
     steps:
       - uses: actions/checkout@v4
         with:

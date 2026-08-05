@@ -10,6 +10,15 @@ import { unwrapJoin } from '@/lib/utils/supabase-joins'
 import { reportError } from '@/lib/observability/report-error'
 import { setActorContext, setTenantContext } from '@/lib/observability/sentry-context'
 
+/**
+ * Upper bound on accepted memberships read for one user. There is no org
+ * switcher yet, so only the oldest is used; this exists so the read is bounded
+ * rather than open-ended (PostgREST truncates at max_rows = 1000 with no
+ * signal, and an unbounded select is a ratchet finding regardless of how few
+ * rows it realistically returns).
+ */
+const MAX_MEMBERSHIPS_SCANNED = 25
+
 export interface OrgMembership {
   org_id: string
   role: MemberRole
@@ -77,6 +86,13 @@ const getMembershipContext = cache(async () => {
     .eq('user_id', user.id)
     .not('invite_accepted_at', 'is', null)
     .order('invite_accepted_at', { ascending: true })
+    // Bounded, though scoped to one user rather than to an org — this query is
+    // what DETERMINES the org, so it cannot be org-scoped. The ordering above
+    // already decides which row wins, and only rows[0] is ever used, so the
+    // limit changes no behaviour: it caps `membership_count` in the
+    // multi-membership report below, and a user holding 25+ accepted
+    // memberships is itself the anomaly that report exists to surface.
+    .limit(MAX_MEMBERSHIPS_SCANNED)
 
   if (error) {
     // Distinguish a real query failure from "this user has no memberships" —

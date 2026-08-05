@@ -36,9 +36,12 @@ function orgFor(name: string) {
 }
 
 /**
- * getMembershipContext() now ends its chain on .order(), not .single() — a
- * user may legitimately hold several accepted memberships, and .single()
- * errored outright on the second one.
+ * getMembershipContext() ends its chain on .limit(), not .single() — a user may
+ * legitimately hold several accepted memberships, and .single() errored
+ * outright on the second one. The .limit() bounds the read (an unbounded
+ * .select() is a semgrep ratchet finding regardless of how few rows it
+ * realistically returns); .order() before it is what makes the winning row
+ * deterministic.
  */
 function makeSupabase(opts: {
   user:     FakeUser | null
@@ -50,7 +53,8 @@ function makeSupabase(opts: {
   chain.select = () => chain
   chain.eq     = () => chain
   chain.not    = () => chain
-  chain.order  = () => Promise.resolve({ data: opts.rows ?? null, error: opts.error ?? null })
+  chain.order  = () => chain
+  chain.limit  = () => Promise.resolve({ data: opts.rows ?? null, error: opts.error ?? null })
 
   return {
     auth: {
