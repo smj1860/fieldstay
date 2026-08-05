@@ -61,9 +61,6 @@ import {
   createMaintenanceSchedule,
   updateMaintenanceSchedule,
   deleteMaintenanceSchedule,
-  createMaintenanceScheduleTemplate,
-  broadcastMaintenanceTemplate,
-  updateMaintenanceTemplate,
   updateMaintenanceScheduleItem,
   duplicateMaintenanceScheduleItem,
   removeMaintenanceScheduleItem,
@@ -72,6 +69,11 @@ import {
   recordMaintenanceCompletion,
   fetchArchivedWorkOrders,
 } from '@/app/(dashboard)/maintenance/actions'
+import {
+  createMaintenanceScheduleTemplate,
+  broadcastMaintenanceTemplate,
+  updateMaintenanceTemplate,
+} from '@/app/(dashboard)/maintenance/maintenance-template-actions'
 
 type Resp = { data?: unknown; error?: unknown }
 
