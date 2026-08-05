@@ -5,6 +5,7 @@ import { Inter } from 'next/font/google'
 import { SessionRefreshGuard } from '@/components/session-refresh-guard'
 import { CookieNotice } from '@/components/cookie-notice'
 import './globals.css'
+import { Analytics } from "@vercel/analytics/next"
 
 const inter = Inter({
   subsets:  ['latin'],
