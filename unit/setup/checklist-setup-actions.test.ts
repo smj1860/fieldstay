@@ -40,6 +40,8 @@ import {
   type ChecklistSectionInput,
 } from '@/app/(dashboard)/properties/[id]/setup/checklist/actions'
 
+import { setupStepRpcStub } from '@/unit/stubs/setup-step-rpc'
+
 type Resp = { data?: unknown; error?: unknown }
 
 function makeSupabase(queue: Record<string, Resp[]>) {
@@ -60,7 +62,8 @@ function makeSupabase(queue: Record<string, Resp[]>) {
     chain.then        = (resolve: (v: unknown) => unknown) => Promise.resolve(result).then(resolve)
     return chain
   })
-  return { from, calls }
+  const rpc = setupStepRpcStub()
+  return { from, rpc, calls }
 }
 
 const membership = {

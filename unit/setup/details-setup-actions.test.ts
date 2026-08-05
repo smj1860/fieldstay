@@ -36,6 +36,8 @@ import { requireOrgMember, requireOrgRole } from '@/lib/auth'
 import { logAuditEvent } from '@/lib/audit'
 import { saveDetails } from '@/app/(dashboard)/properties/[id]/setup/details/actions'
 
+import { setupStepRpcStub } from '@/unit/stubs/setup-step-rpc'
+
 type Resp = { data?: unknown; error?: unknown }
 
 function makeSupabase(queue: Record<string, Resp[]>) {
@@ -58,7 +60,7 @@ function makeSupabase(queue: Record<string, Resp[]>) {
     chain.then        = (resolve: (v: unknown) => unknown) => Promise.resolve(result).then(resolve)
     return chain
   })
-  const rpc = vi.fn(() => Promise.resolve({ data: null, error: null }))
+  const rpc = setupStepRpcStub()
   return { from, rpc, calls }
 }
 

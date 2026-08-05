@@ -5698,6 +5698,10 @@ export type Database = {
       }
       is_platform_staff: { Args: never; Returns: boolean }
       is_platform_staff_admin: { Args: never; Returns: boolean }
+      mark_property_setup_step: {
+        Args: { p_org_id: string; p_property_id: string; p_step: string }
+        Returns: Json
+      }
       match_kb_chunks: {
         Args: {
           match_count?: number

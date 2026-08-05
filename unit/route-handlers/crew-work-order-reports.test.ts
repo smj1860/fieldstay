@@ -2,14 +2,22 @@ import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { NextRequest } from 'next/server'
 
 vi.mock('@/lib/supabase/server', () => ({
-  createClient: vi.fn(),
+  createClient:        vi.fn(),
+  // The PM notification is a service-role insert: `notifications` has no
+  // INSERT policy for org members, and crew authenticate with the
+  // RLS-enforced client.
+  createServiceClient: vi.fn(),
+}))
+vi.mock('@/lib/inngest/helpers', () => ({
+  createPmNotification: vi.fn(),
 }))
 vi.mock('@/lib/audit', () => ({
   logAuditEvent: vi.fn(),
 }))
 
 import { POST } from '@/app/api/crew/work-order-reports/route'
-import { createClient } from '@/lib/supabase/server'
+import { createClient, createServiceClient } from '@/lib/supabase/server'
+import { createPmNotification } from '@/lib/inngest/helpers'
 import { logAuditEvent } from '@/lib/audit'
 
 const CREW_ID = 'crew_1'
@@ -74,6 +82,7 @@ const baseBody = {
 describe('POST /api/crew/work-order-reports', () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    vi.mocked(createServiceClient).mockReturnValue(makeSupabase({ id: USER_ID }) as never)
   })
 
   it('rejects a missing report_id before touching auth', async () => {
@@ -135,7 +144,7 @@ describe('POST /api/crew/work-order-reports', () => {
       { id: USER_ID },
       {
         crew_members:    [{ data: { id: CREW_ID, org_id: ORG_ID }, error: null }],
-        properties:      [{ data: { id: PROP_ID, org_id: ORG_ID }, error: null }],
+        properties:      [{ data: { id: PROP_ID, org_id: ORG_ID, name: 'Lakeview Cabin' }, error: null }],
         property_assets: [{ data: null, error: null }],
       },
     )
@@ -155,8 +164,8 @@ describe('POST /api/crew/work-order-reports', () => {
       { id: USER_ID },
       {
         crew_members: [{ data: { id: CREW_ID, org_id: ORG_ID }, error: null }],
-        properties:   [{ data: { id: PROP_ID, org_id: ORG_ID }, error: null }],
-        work_orders:  [{ data: null, error: null }],
+        properties:   [{ data: { id: PROP_ID, org_id: ORG_ID, name: 'Lakeview Cabin' }, error: null }],
+        work_orders:  [{ data: { id: 'wo_1' }, error: null }],
       },
     )
     vi.mocked(createClient).mockResolvedValue(supabase as never)
@@ -195,9 +204,9 @@ describe('POST /api/crew/work-order-reports', () => {
       { id: USER_ID },
       {
         crew_members:    [{ data: { id: CREW_ID, org_id: ORG_ID }, error: null }],
-        properties:      [{ data: { id: PROP_ID, org_id: ORG_ID }, error: null }],
+        properties:      [{ data: { id: PROP_ID, org_id: ORG_ID, name: 'Lakeview Cabin' }, error: null }],
         property_assets: [{ data: { id: 'asset_1', asset_type: 'hvac' }, error: null }],
-        work_orders:     [{ data: null, error: null }],
+        work_orders:     [{ data: { id: 'wo_1' }, error: null }],
       },
     )
     vi.mocked(createClient).mockResolvedValue(supabase as never)
@@ -216,7 +225,7 @@ describe('POST /api/crew/work-order-reports', () => {
       { id: USER_ID },
       {
         crew_members: [{ data: { id: CREW_ID, org_id: ORG_ID }, error: null }],
-        properties:   [{ data: { id: PROP_ID, org_id: ORG_ID }, error: null }],
+        properties:   [{ data: { id: PROP_ID, org_id: ORG_ID, name: 'Lakeview Cabin' }, error: null }],
         work_orders:  [{ data: null, error: { code: '23505' } }],
       },
     )
@@ -229,12 +238,111 @@ describe('POST /api/crew/work-order-reports', () => {
     expect(logAuditEvent).not.toHaveBeenCalled()
   })
 
+  // This route is the ONE crew work-order path, and it used to do a bare
+  // insert and stop. With no event of any kind, a crew flag reached the PM
+  // only via the 6pm daily wrap-up digest's `vendor_id IS NULL` sweep — up to
+  // a day late, and the same delay for a burst pipe as for a loose cabinet.
+  it('notifies the PM immediately, linked to the new work order', async () => {
+    const supabase = makeSupabase(
+      { id: USER_ID },
+      {
+        crew_members: [{ data: { id: CREW_ID, org_id: ORG_ID }, error: null }],
+        properties:   [{ data: { id: PROP_ID, org_id: ORG_ID, name: 'Lakeview Cabin' }, error: null }],
+        work_orders:  [{ data: { id: 'wo_1' }, error: null }],
+      },
+    )
+    vi.mocked(createClient).mockResolvedValue(supabase as never)
+
+    const res = await POST(postRequest(baseBody))
+
+    expect(res.status).toBe(200)
+    expect(createPmNotification).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({
+        orgId:     ORG_ID,
+        type:      'work_order_created',
+        href:      '/maintenance/wo_1',
+        subtitle:  'Leaking faucet',
+        severity:  'amber',
+        dedupeKey: 'crew-flag-report_1',
+      }),
+    )
+  })
+
+  it('raises the severity and the title for an emergency flag', async () => {
+    const supabase = makeSupabase(
+      { id: USER_ID },
+      {
+        crew_members: [{ data: { id: CREW_ID, org_id: ORG_ID }, error: null }],
+        properties:   [{ data: { id: PROP_ID, org_id: ORG_ID, name: 'Lakeview Cabin' }, error: null }],
+        work_orders:  [{ data: { id: 'wo_1' }, error: null }],
+      },
+    )
+    vi.mocked(createClient).mockResolvedValue(supabase as never)
+
+    await POST(postRequest({ ...baseBody, is_emergency: true }))
+
+    const arg = vi.mocked(createPmNotification).mock.calls[0]![1]
+    expect(arg.severity).toBe('red')
+    expect(arg.title).toContain('Urgent')
+    expect(arg.title).toContain('Lakeview Cabin')
+  })
+
+  it('still notifies on an outbox retry, and dedupes on the report id', async () => {
+    // The retry exists because the first response was lost — and the
+    // notification may have been what was lost with it. The work order id is
+    // NOT stable here (the insert returns nothing), so the dedupe key is keyed
+    // on the client report id, which the retry reproduces exactly.
+    const supabase = makeSupabase(
+      { id: USER_ID },
+      {
+        crew_members: [{ data: { id: CREW_ID, org_id: ORG_ID }, error: null }],
+        properties:   [{ data: { id: PROP_ID, org_id: ORG_ID, name: 'Lakeview Cabin' }, error: null }],
+        work_orders:  [{ data: null, error: { code: '23505' } }],
+      },
+    )
+    vi.mocked(createClient).mockResolvedValue(supabase as never)
+    // The service client recovers the id the first attempt created.
+    vi.mocked(createServiceClient).mockReturnValue(
+      makeSupabase({ id: USER_ID }, { work_orders: [{ data: { id: 'wo_1' }, error: null }] }) as never,
+    )
+
+    const res = await POST(postRequest(baseBody))
+
+    await expect(res.json()).resolves.toEqual({ success: true, duplicate: true })
+    expect(createPmNotification).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({ href: '/maintenance/wo_1', dedupeKey: 'crew-flag-report_1' }),
+    )
+  })
+
+  it('does not fail the crew report when the notification throws', async () => {
+    // The work order is already committed. A failed notification must never
+    // ask a crew member to re-report.
+    const supabase = makeSupabase(
+      { id: USER_ID },
+      {
+        crew_members: [{ data: { id: CREW_ID, org_id: ORG_ID }, error: null }],
+        properties:   [{ data: { id: PROP_ID, org_id: ORG_ID, name: 'Lakeview Cabin' }, error: null }],
+        work_orders:  [{ data: { id: 'wo_1' }, error: null }],
+      },
+    )
+    vi.mocked(createClient).mockResolvedValue(supabase as never)
+    vi.mocked(createPmNotification).mockRejectedValueOnce(new Error('notifications down'))
+
+    const res = await POST(postRequest(baseBody))
+
+    expect(res.status).toBe(200)
+    await expect(res.json()).resolves.toEqual({ success: true })
+    expect(logAuditEvent).toHaveBeenCalled()
+  })
+
   it('returns 500 on a non-duplicate insert error', async () => {
     const supabase = makeSupabase(
       { id: USER_ID },
       {
         crew_members: [{ data: { id: CREW_ID, org_id: ORG_ID }, error: null }],
-        properties:   [{ data: { id: PROP_ID, org_id: ORG_ID }, error: null }],
+        properties:   [{ data: { id: PROP_ID, org_id: ORG_ID, name: 'Lakeview Cabin' }, error: null }],
         work_orders:  [{ data: null, error: { code: '500', message: 'db down' } }],
       },
     )

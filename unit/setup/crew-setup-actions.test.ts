@@ -32,6 +32,8 @@ import { requireOrgMember } from '@/lib/auth'
 import { logAuditEvent } from '@/lib/audit'
 import { addCrewMember, completeCrewStep } from '@/app/(dashboard)/properties/[id]/setup/crew/actions'
 
+import { setupStepRpcStub } from '@/unit/stubs/setup-step-rpc'
+
 type Resp = { data?: unknown; error?: unknown }
 
 function makeSupabase(queue: Record<string, Resp[]>) {
@@ -50,7 +52,8 @@ function makeSupabase(queue: Record<string, Resp[]>) {
     chain.then        = (resolve: (v: unknown) => unknown) => Promise.resolve(result).then(resolve)
     return chain
   })
-  return { from }
+  const rpc = setupStepRpcStub()
+  return { from, rpc }
 }
 
 const membership = {

@@ -21,7 +21,6 @@ vi.mock('@/lib/rate-limit', async () => {
   // so existing `.limit` assertions and fail-policy tests still apply.
   const { checkLimitStub, retryAfterSecondsStub } = await import('@/unit/stubs/rate-limit')
   return {
-    signOffRatelimit: { limit: vi.fn(async () => ({ success: true })) },
     // dispatchWorkOrderToVendor consults this before sending; without it here
     // the import resolves to undefined and the stub throws inside the action's
     // try/catch, which surfaces as the generic error rather than the real one.
@@ -32,16 +31,9 @@ vi.mock('@/lib/rate-limit', async () => {
 })
 
 import { requireOrgMember } from '@/lib/auth'
-import { createServiceClient } from '@/lib/supabase/server'
 import { inngest } from '@/lib/inngest/client'
-import { logAuditEvent } from '@/lib/audit'
 import { normalizePhoneToE164, sendSMS } from '@/lib/sms/telnyx'
-import { signOffRatelimit } from '@/lib/rate-limit'
-import {
-  dispatchWorkOrderToVendor,
-  getWorkOrderByToken,
-  submitWorkOrderSignOff,
-} from '@/app/actions/work-order-public'
+import { dispatchWorkOrderToVendor } from '@/app/actions/work-order-public'
 
 type Resp = { data?: unknown; error?: unknown }
 
@@ -58,9 +50,6 @@ function makeSupabase(queue: Record<string, Resp[]>) {
     const result: Resp = q?.length ? q.shift()! : { data: null, error: null }
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const chain: any = {}
-    // `.is(...)` is the sign-off UPDATE's TOCTOU precondition
-    // (.is('public_signed_off_at', null)); `.maybeSingle()` is how it reads
-    // back whether it actually matched a row.
     for (const m of ['select', 'insert', 'eq', 'is', 'ilike', 'limit']) {
       chain[m] = vi.fn(() => chain)
     }
@@ -80,8 +69,6 @@ function makeSupabase(queue: Record<string, Resp[]>) {
 /** work_orders.completion_token is `uuid` — anything else takes a 22P02. */
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
 
-const VALID_TOKEN = 'a'.repeat(64)
-
 const membership = {
   org_id: 'org_1',
   role:   'admin' as const,
@@ -91,7 +78,6 @@ const membership = {
 describe('actions/work-order-public', () => {
   beforeEach(() => {
     vi.clearAllMocks()
-    vi.mocked(signOffRatelimit.limit).mockResolvedValue({ success: true } as never)
   })
 
   describe('dispatchWorkOrderToVendor — authenticated PM action', () => {
@@ -326,293 +312,6 @@ describe('actions/work-order-public', () => {
 
       expect(result).toEqual({ error: 'Operation failed. Please try again.' })
       expect(supabase.from).not.toHaveBeenCalled()
-    })
-  })
-
-  describe('getWorkOrderByToken — public, token-gated', () => {
-    function baseWo(overrides: Partial<Record<string, unknown>> = {}) {
-      return {
-        id: 'wo_1', wo_number: 'WO-1', status: 'assigned', title: 'Fix sink',
-        description: 'leaky', nte_amount: 100, access_notes: null,
-        lockbox_code: null, parking_notes: null,
-        public_token_expires_at: null, public_viewed_at: '2026-07-01T00:00:00.000Z',
-        public_signed_off_at: null, sign_off_notes: null, vendor_dispatch_email: null,
-        properties: { id: 'prop_1', name: 'Lakeview Cabin', address: '1 Lake Rd' },
-        vendors: { id: 'vendor_1', name: 'Ace Plumbing' },
-        organizations: { name: 'Lake Martin Delivery' },
-        ...overrides,
-      }
-    }
-
-    it('returns the work order for a valid, unexpired token', async () => {
-      const supabase = makeSupabase({ work_orders: [{ data: baseWo(), error: null }] })
-      vi.mocked(createServiceClient).mockReturnValue(supabase as never)
-
-      const result = await getWorkOrderByToken(VALID_TOKEN)
-
-      expect(result.data?.id).toBe('wo_1')
-      expect(result.error).toBeUndefined()
-    })
-
-    it('rejects a malformed token before hitting the DB', async () => {
-      const supabase = makeSupabase({})
-      vi.mocked(createServiceClient).mockReturnValue(supabase as never)
-
-      const result = await getWorkOrderByToken('too-short')
-
-      expect(result).toEqual({ error: 'Invalid link' })
-      expect(supabase.from).not.toHaveBeenCalled()
-    })
-
-    it('rejects an unrecognized token (mismatched/invalid token check)', async () => {
-      const supabase = makeSupabase({ work_orders: [{ data: null, error: { message: 'not found' } }] })
-      vi.mocked(createServiceClient).mockReturnValue(supabase as never)
-
-      const result = await getWorkOrderByToken(VALID_TOKEN)
-
-      expect(result).toEqual({ error: 'Work order not found or link has expired' })
-    })
-
-    it('rejects an expired token', async () => {
-      const supabase = makeSupabase({
-        work_orders: [{ data: baseWo({ public_token_expires_at: '2020-01-01T00:00:00.000Z' }), error: null }],
-      })
-      vi.mocked(createServiceClient).mockReturnValue(supabase as never)
-
-      const result = await getWorkOrderByToken(VALID_TOKEN)
-
-      expect(result).toEqual({ error: 'This work order link has expired. Contact your property manager.' })
-    })
-  })
-
-  describe('submitWorkOrderSignOff — public, token-gated', () => {
-    function baseWo(overrides: Partial<Record<string, unknown>> = {}) {
-      return {
-        id: 'wo_1', wo_number: 'WO-1', status: 'assigned', title: 'Fix sink', org_id: 'org_1',
-        public_token_expires_at: null, public_signed_off_at: null,
-        vendor_dispatch_email: 'vendor@example.com',
-        properties: { name: 'Lakeview Cabin', address: '1 Lake Rd' },
-        organizations: { name: 'Lake Martin Delivery' },
-        ...overrides,
-      }
-    }
-
-    it('records a sign-off for a valid, unexpired token', async () => {
-      const supabase = makeSupabase({
-        // 2nd entry = the conditional UPDATE's own
-        // .select('id').maybeSingle() readback: a row means this request won
-        // the .is('public_signed_off_at', null) claim.
-        work_orders: [{ data: baseWo(), error: null }, { data: { id: 'wo_1' }, error: null }],
-      })
-      vi.mocked(createServiceClient).mockReturnValue(supabase as never)
-
-      const result = await submitWorkOrderSignOff(VALID_TOKEN, 'All done', undefined, 150)
-
-      expect(result).toEqual({ success: true })
-      expect(inngest.send).toHaveBeenCalledWith(expect.objectContaining({
-        name: 'work-order/signed-off',
-        data: expect.objectContaining({ workOrderId: 'wo_1', orgId: 'org_1' }),
-      }))
-      expect(logAuditEvent).toHaveBeenCalledWith(expect.objectContaining({
-        action: 'work_order.vendor_signoff', orgId: 'org_1', targetId: 'wo_1',
-      }))
-    })
-
-    it('rejects a malformed token before hitting the DB', async () => {
-      const supabase = makeSupabase({})
-      vi.mocked(createServiceClient).mockReturnValue(supabase as never)
-
-      const result = await submitWorkOrderSignOff('too-short', 'All done')
-
-      expect(result).toEqual({ error: 'Invalid link' })
-      expect(supabase.from).not.toHaveBeenCalled()
-    })
-
-    it('rejects an unrecognized token (mismatched/invalid token check)', async () => {
-      const supabase = makeSupabase({ work_orders: [{ data: null, error: { message: 'not found' } }] })
-      vi.mocked(createServiceClient).mockReturnValue(supabase as never)
-
-      const result = await submitWorkOrderSignOff(VALID_TOKEN, 'All done')
-
-      expect(result).toEqual({ error: 'Work order not found' })
-      expect(inngest.send).not.toHaveBeenCalled()
-    })
-
-    it('rejects a sign-off already recorded (double-submit guard)', async () => {
-      const supabase = makeSupabase({
-        work_orders: [{ data: baseWo({ public_signed_off_at: '2026-07-01T00:00:00.000Z' }), error: null }],
-      })
-      vi.mocked(createServiceClient).mockReturnValue(supabase as never)
-
-      const result = await submitWorkOrderSignOff(VALID_TOKEN, 'All done')
-
-      expect(result).toEqual({ error: 'This work order has already been signed off' })
-    })
-
-    // M-3: the read above is only a nicer error message. The real guard is the
-    // precondition inside the UPDATE — two concurrent submits both pass the
-    // read, and exactly one matches the .is('public_signed_off_at', null)
-    // clause. The loser must NOT go on to upload photos, log an audit event,
-    // or fire the downstream notification.
-    it('TOCTOU: the concurrent loser is rejected even though its pre-read saw an unsigned work order', async () => {
-      const supabase = makeSupabase({
-        work_orders: [
-          { data: baseWo(), error: null },        // pre-read: not signed off yet
-          { data: null, error: null },            // conditional UPDATE matched ZERO rows
-        ],
-      })
-      vi.mocked(createServiceClient).mockReturnValue(supabase as never)
-
-      const result = await submitWorkOrderSignOff(VALID_TOKEN, 'All done', undefined, 150)
-
-      expect(result).toEqual({ error: 'This work order has already been signed off' })
-      expect(logAuditEvent).not.toHaveBeenCalled()
-      expect(inngest.send).not.toHaveBeenCalled()
-      expect(supabase.uploadMock).not.toHaveBeenCalled()
-    })
-
-    it('rejects sign-off on a cancelled work order', async () => {
-      const supabase = makeSupabase({
-        work_orders: [{ data: baseWo({ status: 'cancelled' }), error: null }],
-      })
-      vi.mocked(createServiceClient).mockReturnValue(supabase as never)
-
-      const result = await submitWorkOrderSignOff(VALID_TOKEN, 'All done')
-
-      expect(result).toEqual({ error: 'This work order has been cancelled' })
-    })
-
-    it('rejects an expired token', async () => {
-      const supabase = makeSupabase({
-        work_orders: [{ data: baseWo({ public_token_expires_at: '2020-01-01T00:00:00.000Z' }), error: null }],
-      })
-      vi.mocked(createServiceClient).mockReturnValue(supabase as never)
-
-      const result = await submitWorkOrderSignOff(VALID_TOKEN, 'All done')
-
-      expect(result).toEqual({ error: 'This work order link has expired' })
-    })
-
-    it('rejects when the per-token rate limit is exceeded', async () => {
-      vi.mocked(signOffRatelimit.limit).mockResolvedValue({ success: false } as never)
-      const supabase = makeSupabase({})
-      vi.mocked(createServiceClient).mockReturnValue(supabase as never)
-
-      const result = await submitWorkOrderSignOff(VALID_TOKEN, 'All done')
-
-      expect(result).toEqual({ error: 'Too many requests. Please try again in a few minutes.' })
-      expect(supabase.from).not.toHaveBeenCalled()
-    })
-
-    it('rejects more than the maximum allowed photos', async () => {
-      const supabase = makeSupabase({})
-      vi.mocked(createServiceClient).mockReturnValue(supabase as never)
-      const photos = Array.from({ length: 6 }, (_, i) =>
-        new File(['x'], `p${i}.jpg`, { type: 'image/jpeg' }))
-
-      const result = await submitWorkOrderSignOff(VALID_TOKEN, 'All done', photos)
-
-      expect(result).toEqual({ error: 'Maximum 5 photos allowed' })
-      expect(supabase.from).not.toHaveBeenCalled()
-    })
-
-    // NaN is the one that mattered: `cost < 0 || cost > 1_000_000` is false for
-    // NaN on both sides, so it reached the write, and supabase-js serializes it
-    // to JSON null — the vendor's cost silently became a NULL actual_cost with
-    // no error anywhere. Infinity took the same path past the lower bound.
-    it.each([
-      ['negative',  -5,                        'Amount cannot be negative.'],
-      ['NaN',       Number.NaN,                'Enter a valid amount.'],
-      ['Infinity',  Number.POSITIVE_INFINITY,  'Enter a valid amount.'],
-      ['over $1M',  5_000_000,                 'Amount must be under $1,000,000.'],
-    ])('rejects a %s actual cost before hitting the DB', async (_label, cost, message) => {
-      const supabase = makeSupabase({})
-      vi.mocked(createServiceClient).mockReturnValue(supabase as never)
-
-      const result = await submitWorkOrderSignOff(VALID_TOKEN, 'All done', undefined, cost)
-
-      expect(result).toEqual({ error: message })
-      expect(supabase.from).not.toHaveBeenCalled()
-    })
-
-    // A Server Action's parameter types are a compile-time claim about values
-    // the caller supplies, and Next.js registers every exported action at a
-    // stable endpoint — so these are reachable by a direct POST whether or not
-    // any page renders them.
-    it.each([
-      ['an object masquerading as a 64-char token', { length: 64 }, 'All done', 'Invalid link'],
-      ['a null token',                              null,           'All done', 'Invalid link'],
-      ['null notes',                                VALID_TOKEN,    null,       'Invalid sign-off notes'],
-    ])('rejects %s instead of throwing', async (_label, token, notes, message) => {
-      const supabase = makeSupabase({})
-      vi.mocked(createServiceClient).mockReturnValue(supabase as never)
-
-      const result = await submitWorkOrderSignOff(
-        token as unknown as string,
-        notes as unknown as string,
-      )
-
-      expect(result).toEqual({ error: message })
-      expect(supabase.from).not.toHaveBeenCalled()
-    })
-
-    it('uploads sign-off photos and inserts work_order_photos rows', async () => {
-      const supabase = makeSupabase({
-        work_orders:        [{ data: baseWo(), error: null }, { data: { id: 'wo_1' }, error: null }],
-        work_order_photos:  [{ error: null }],
-      })
-      vi.mocked(createServiceClient).mockReturnValue(supabase as never)
-      const photos = [new File(['x'], 'p0.jpg', { type: 'image/jpeg' })]
-
-      const result = await submitWorkOrderSignOff(VALID_TOKEN, 'All done', photos)
-
-      expect(result).toEqual({ success: true })
-      expect(supabase.storage.from).toHaveBeenCalledWith('work-order-photos')
-      expect(supabase.uploadMock).toHaveBeenCalled()
-
-      // M4: the object path must start with the owning org's id — the
-      // work-order-photos bucket moves to private + org-scoped storage RLS
-      // keyed on (storage.foldername(name))[1].
-      const uploadedPath = String((supabase.uploadMock.mock.calls as unknown as unknown[][])[0]![0])
-      expect(uploadedPath.startsWith('org_1/')).toBe(true)
-    })
-
-    it('still completes but WARNS when a photo upload fails', async () => {
-      // The uploads run after the completing UPDATE has committed and the
-      // token has been spent by the public_signed_off_at guard, so the vendor
-      // cannot resubmit. Reporting a bare `{ success: true }` told them their
-      // evidence was filed when it had gone nowhere.
-      const supabase = makeSupabase({
-        work_orders:       [{ data: baseWo(), error: null }, { data: { id: 'wo_1' }, error: null }],
-        work_order_photos: [{ error: null }],
-      })
-      supabase.uploadMock.mockResolvedValueOnce({ error: { message: 'storage down' } } as never)
-      vi.mocked(createServiceClient).mockReturnValue(supabase as never)
-      const photos = [new File(['x'], 'p0.jpg', { type: 'image/jpeg' })]
-
-      const result = await submitWorkOrderSignOff(VALID_TOKEN, 'All done', photos)
-
-      // The sign-off itself stands — a lost photo must not un-complete a
-      // finished work order.
-      expect(result.success).toBe(true)
-      expect(result.error).toBeUndefined()
-      expect(result.warning).toContain('1 photo failed to upload')
-    })
-
-    it('warns when the photo row insert fails even though the object uploaded', async () => {
-      // An object in the bucket that is linked to no work order is, from the
-      // work order's point of view, the same as never having been uploaded.
-      const supabase = makeSupabase({
-        work_orders:       [{ data: baseWo(), error: null }, { data: { id: 'wo_1' }, error: null }],
-        work_order_photos: [{ error: { message: 'insert failed' } }],
-      })
-      vi.mocked(createServiceClient).mockReturnValue(supabase as never)
-      const photos = [new File(['x'], 'p0.jpg', { type: 'image/jpeg' })]
-
-      const result = await submitWorkOrderSignOff(VALID_TOKEN, 'All done', photos)
-
-      expect(result.success).toBe(true)
-      expect(result.warning).toContain('1 photo failed to upload')
     })
   })
 })

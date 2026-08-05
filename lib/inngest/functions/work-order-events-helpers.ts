@@ -9,7 +9,6 @@ import { renderSmsBody } from '@/lib/sms/templates'
 import { getManualUrlForAsset } from '@/lib/assets/manual-lookup'
 import { reportError } from '@/lib/observability/report-error'
 import { unwrapJoin } from '@/lib/utils/supabase-joins'
-import { randomBytes } from 'crypto'
 
 /**
  * Helpers for handleWorkOrderCreated's vendor-dispatch flow
@@ -120,7 +119,16 @@ export async function loadDispatchContext(
   // Only generate a new one if the WO somehow arrived here without one.
   let token = wo.completion_token
   if (!token) {
-    token = randomBytes(32).toString('hex')
+    // MUST be a UUID — completion_token is `uuid`, and the previous
+    // randomBytes(32).toString('hex') is 64 characters, which Postgres rejects
+    // with 22P02. Identical to the defect that made dispatchWorkOrderToVendor
+    // fail on every call (fixed in #565); this is the same line in the other
+    // dispatch path's fallback branch. Unreachable today — all three
+    // `work-order/created` producers that set portal_enabled: true mint a
+    // crypto.randomUUID() token first — so it never fired, but the failure
+    // mode here is worse: it throws inside an Inngest step, so the dispatch
+    // would retry and fail forever rather than returning a message.
+    token = crypto.randomUUID()
     const expiresAt = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString()
     const { error: tokenErr } = await supabase
       .from('work_orders')
@@ -128,6 +136,11 @@ export async function loadDispatchContext(
         completion_token:            token,
         completion_token_expires_at: expiresAt,
         vendor_dispatch_email:       vendor.email,
+        // The portal page filters .eq('portal_enabled', true). Reaching this
+        // branch means the WO had no token, i.e. it was not created
+        // portal-enabled — so minting a token without opening the gate would
+        // email a link that renders notFound().
+        portal_enabled:              true,
       })
       .eq('id', workOrderId)
 

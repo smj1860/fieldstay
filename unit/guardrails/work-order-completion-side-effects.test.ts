@@ -57,16 +57,17 @@ const RAW_COMPLETION_WRITE =
 /**
  * Known offenders, each with the reason it is not yet fixed. Shrink-only —
  * never add to this without the same standard of justification.
+ *
+ * EMPTY, and it should stay that way. Its one entry was
+ * app/actions/work-order-public.ts's submitWorkOrderSignOff — the /wo/[token]
+ * vendor portal, which wrote `status: 'completed'` directly. That portal was
+ * deleted rather than repaired: it keyed on work_orders.public_token, a column
+ * nothing wrote and which held zero rows in production, while the live portal
+ * (/work-orders/[token] on completion_token) already routed completion through
+ * the helpers. Recording the violation here instead of suppressing it is what
+ * kept it visible until the deletion landed.
  */
-const EXCEPTIONS: Record<string, string> = {
-  'app/actions/work-order-public.ts':
-    "submitWorkOrderSignOff, the /wo/[token] vendor portal. It is UNREACHABLE: it " +
-    "keys on work_orders.public_token, which no code path writes and which has zero " +
-    "rows in production — the live portal is /work-orders/[token] on completion_token. " +
-    'Deleting the dead portal is the real fix and is a product decision, so the ' +
-    'violation is recorded here rather than papered over. If this file ever becomes ' +
-    'reachable again, the exception must go before it does.',
-}
+const EXCEPTIONS: Record<string, string> = {}
 
 describe('guardrail: every work-order completion path runs the completion side effects', () => {
   it('a file that writes the completion columns also calls finalizeWorkOrderCompletion', () => {

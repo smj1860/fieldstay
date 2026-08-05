@@ -37,7 +37,7 @@ import { applyMasterChecklistToProperty } from '@/lib/checklists/apply-master-te
 import { inngest } from '@/lib/inngest/client'
 import {
   createProperty,
-  updateProperty,
+
   revealPropertyDoorCode,
   markStepComplete,
   createAsset,
@@ -158,112 +158,27 @@ describe('properties/actions', () => {
 
       await expect(createProperty(null, fd())).rejects.toThrow('REDIRECT:/login')
     })
+
+    // The property row is already committed by this point. An unguarded throw
+    // skipped the redirect and returned "Operation failed" for a property that
+    // EXISTS — so the PM retries and creates a duplicate. The door-code and
+    // geocode writes on either side of it were already non-fatal for this
+    // exact reason; the checklist apply was not.
+    it('still redirects when the master checklist apply throws', async () => {
+      const supabase = makeSupabase({
+        properties: [
+          { data: null, count: 0, error: null },
+          { data: { id: 'prop_1' } },
+        ],
+      })
+      mockAuthed(supabase)
+      vi.mocked(applyMasterChecklistToProperty).mockRejectedValueOnce(new Error('template missing'))
+
+      await expect(createProperty(null, fd()))
+        .rejects.toThrow('REDIRECT:/properties/prop_1/setup/details')
+    })
   })
 
-  describe('updateProperty', () => {
-    it('updates a property scoped to the caller org', async () => {
-      const supabase = makeSupabase({
-        properties: [{ data: { zip: '36853' } }, { data: { id: 'prop_1' }, error: null }],
-      })
-      mockAuthed(supabase)
-
-      const result = await updateProperty('prop_1', null, fd({ zip: '36853' }))
-
-      expect(result).toEqual({ success: true })
-      expect(logAuditEvent).toHaveBeenCalledWith(expect.objectContaining({ action: 'property.updated' }))
-    })
-
-    it('geocodes and patches lat/lng only when the ZIP actually changes', async () => {
-      const supabase = makeSupabase({
-        properties: [{ data: { zip: '36853' } }, { data: { id: 'prop_1' }, error: null }, { data: { id: 'prop_1' }, error: null }],
-      })
-      mockAuthed(supabase)
-      vi.mocked(geocodeZip).mockResolvedValue({ lat: 32.6, lng: -85.9 })
-
-      await updateProperty('prop_1', null, fd({ zip: '36854' }))
-
-      expect(geocodeZip).toHaveBeenCalledWith('36854')
-    })
-
-    it('scopes the update to the caller org, not just the property id (IDOR check)', async () => {
-      const supabase = makeSupabase({
-        properties: [{ data: { zip: null } }, { data: { id: 'prop_1' }, error: null }],
-      })
-      mockAuthed(supabase)
-
-      await updateProperty('other-orgs-property', null, fd())
-
-      const eqCalls = supabase.calls.filter((c) => c.table === 'properties' && c.method === 'eq')
-      expect(eqCalls.some((c) => c.args[0] === 'org_id' && c.args[1] === 'org_1')).toBe(true)
-    })
-
-    it('rejects when the property name is missing', async () => {
-      const supabase = makeSupabase({})
-      mockAuthed(supabase)
-
-      const emptyForm = new FormData()
-      const result = await updateProperty('prop_1', null, emptyForm)
-
-      expect(result).toEqual({ error: 'Property name is required' })
-      expect(supabase.from).not.toHaveBeenCalled()
-    })
-
-    // ── Regressions from the 2026-07-31 audit ────────────────────────────
-    // updateProperty was gated on requireOrgMember only. A `viewer` passed
-    // that gate; the properties UPDATE was then denied by RLS, which affects
-    // 0 rows and returns NO error, so the action reported success — and went
-    // on to call store_property_door_code, whose own guard was org membership
-    // in ANY role, overwriting the door code.
-    it('refuses the update when the caller lacks the admin|manager role', async () => {
-      const supabase = makeSupabase({})
-      vi.mocked(requireOrgRole).mockRejectedValue(
-        new Error('You do not have permission to perform this action.')
-      )
-
-      const result = await updateProperty('prop_1', null, fd({ door_code: '4821' }))
-
-      expect(result).toEqual({ error: 'Operation failed. Please try again.' })
-      expect(supabase.from).not.toHaveBeenCalled()
-      expect(supabase.rpc).not.toHaveBeenCalled()
-    })
-
-    it('reports a permission failure — and never writes the door code — when the update matches 0 rows', async () => {
-      const supabase = makeSupabase({
-        properties: [{ data: { zip: null } }, { data: null, error: null }],
-      })
-      mockAuthed(supabase)
-
-      const result = await updateProperty('prop_1', null, fd({ door_code: '4821' }))
-
-      expect(result.error).toContain('permission')
-      expect(result.success).toBeUndefined()
-      expect(supabase.rpc).not.toHaveBeenCalled()
-      expect(logAuditEvent).not.toHaveBeenCalled()
-    })
-
-    it('surfaces a door-code write failure instead of reporting a successful save', async () => {
-      const supabase = makeSupabase({
-        properties: [{ data: { zip: null } }, { data: { id: 'prop_1' }, error: null }],
-      })
-      mockAuthed(supabase)
-      vi.mocked(supabase.rpc).mockResolvedValue({ data: null, error: { message: 'vault down' } })
-
-      const result = await updateProperty('prop_1', null, fd({ door_code: '4821' }))
-
-      expect(result).toEqual({ error: 'Operation failed. Please try again.' })
-      expect(logAuditEvent).not.toHaveBeenCalled()
-    })
-
-    it('returns a generic error and never touches the DB when the caller is unauthenticated', async () => {
-      const supabase = makeSupabase({})
-      mockAuthFailure('REDIRECT:/login')
-
-      const result = await updateProperty('prop_1', null, fd())
-
-      expect(result).toEqual({ error: 'Operation failed. Please try again.' })
-      expect(supabase.from).not.toHaveBeenCalled()
-    })
-  })
 
   describe('revealPropertyDoorCode', () => {
     it('decrypts and returns the door code, auditing the reveal', async () => {
@@ -344,16 +259,40 @@ describe('properties/actions', () => {
   })
 
   describe('markStepComplete', () => {
-    it('marks a setup step complete, scoped to the caller org', async () => {
-      const supabase = makeSupabase({
-        properties: [{ data: { setup_steps_completed: { details: true } } }, { data: { id: 'prop_1' }, error: null }],
-      })
+    it('marks a setup step complete through the atomic RPC, scoped to the caller org', async () => {
+      const supabase = makeSupabase({})
       mockAuthed(supabase)
+      vi.mocked(supabase.rpc).mockResolvedValue({ data: { details: true, ical: true }, error: null })
 
       await expect(markStepComplete('prop_1', 'ical')).resolves.toBeUndefined()
 
-      const eqCalls = supabase.calls.filter((c) => c.table === 'properties' && c.method === 'eq')
-      expect(eqCalls.some((c) => c.args[0] === 'org_id' && c.args[1] === 'org_1')).toBe(true)
+      expect(supabase.rpc).toHaveBeenCalledWith('mark_property_setup_step', {
+        p_property_id: 'prop_1',
+        p_org_id:      'org_1',
+        p_step:        'ical',
+      })
+    })
+
+    // THE regression guard. This was a read, a JS spread, and a write-back.
+    // That shape lost concurrent completions (both writers merged onto the
+    // same snapshot) and, worse, collapsed a FAILED read to `{}` — so the
+    // write-back erased every previously completed step while reporting
+    // success. The merge now happens inside the UPDATE via jsonb `||`, so
+    // there is no snapshot to go stale and no read to fail. If a separate
+    // read of setup_steps_completed ever reappears here, both bugs are back.
+    it('does not read setup_steps_completed separately — the merge is in the UPDATE', async () => {
+      const supabase = makeSupabase({})
+      mockAuthed(supabase)
+      vi.mocked(supabase.rpc).mockResolvedValue({ data: { ical: true }, error: null })
+
+      await markStepComplete('prop_1', 'ical')
+
+      const propertyReads = supabase.calls.filter(
+        (c) => c.table === 'properties' && c.method === 'select' &&
+               String(c.args[0]).includes('setup_steps_completed'),
+      )
+      expect(propertyReads).toHaveLength(0)
+      expect(supabase.calls.filter((c) => c.table === 'properties' && c.method === 'update')).toHaveLength(0)
     })
 
     it('propagates the failure when the caller is unauthenticated', async () => {
@@ -363,15 +302,51 @@ describe('properties/actions', () => {
     })
 
     // markStepComplete stays on requireOrgMember (five setup actions call it
-    // after their own gated write). The 0-row UPDATE is what must fail closed:
-    // it used to mark a step complete in the UI for a caller RLS denied.
-    it('throws instead of reporting progress when the update matches 0 rows', async () => {
-      const supabase = makeSupabase({
-        properties: [{ data: { setup_steps_completed: {} } }, { data: null, error: null }],
-      })
+    // after their own gated write). The RPC is SECURITY INVOKER, so RLS still
+    // applies and a denied write returns NO ROW — which must fail closed
+    // rather than mark the step complete in the UI.
+    it('throws instead of reporting progress when the RPC matches 0 rows', async () => {
+      const supabase = makeSupabase({})
       mockAuthed(supabase)
+      vi.mocked(supabase.rpc).mockResolvedValue({ data: null, error: null })
 
       await expect(markStepComplete('prop_1', 'ical')).rejects.toThrow(/permission/)
+    })
+
+    it('throws when the RPC itself errors', async () => {
+      const supabase = makeSupabase({})
+      mockAuthed(supabase)
+      vi.mocked(supabase.rpc).mockResolvedValue({ data: null, error: { message: 'deadlock detected' } })
+
+      await expect(markStepComplete('prop_1', 'ical')).rejects.toThrow(/setup progress/)
+    })
+
+    // The fully-set-up check reads the value the UPDATE actually wrote, not a
+    // second query that could disagree with it.
+    it('checks the org milestone off the merged value the RPC returned', async () => {
+      const allDone = {
+        details: true, ical: true, inventory: true, messages: true,
+        checklist: true, maintenance: true, crew: true,
+      }
+      const supabase = makeSupabase({
+        properties: [{ data: [{ id: 'prop_1', setup_steps_completed: allDone }, { id: 'prop_2', setup_steps_completed: allDone }] }],
+      })
+      mockAuthed(supabase)
+      vi.mocked(supabase.rpc).mockResolvedValue({ data: allDone, error: null })
+
+      await markStepComplete('prop_1', 'crew')
+
+      expect(supabase.calls.some((c) => c.table === 'org_milestones' && c.method === 'upsert')).toBe(true)
+    })
+
+    it('does not reach for the milestone until the property is fully set up', async () => {
+      const supabase = makeSupabase({})
+      mockAuthed(supabase)
+      vi.mocked(supabase.rpc).mockResolvedValue({ data: { details: true, ical: true }, error: null })
+
+      await markStepComplete('prop_1', 'ical')
+
+      expect(supabase.calls.some((c) => c.table === 'org_milestones')).toBe(false)
     })
   })
 
@@ -484,6 +459,74 @@ describe('properties/actions', () => {
     })
   })
 
+  // Every numeric field here reached the DB through `parseFloat(x) || fallback`
+  // or `x ? parseFloat(x) : null`, neither of which is validation: `|| f`
+  // catches NaN and 0 but passes NEGATIVES (truthy), and the bare ternary
+  // passes NaN and ±Infinity, which supabase-js serializes to `null`.
+  // purchase_price and estimated_replacement_cost feed MACRS depreciation and
+  // calculateHealthScore.
+  describe('numeric input validation', () => {
+    function assetForm(fields: Record<string, string>) {
+      const f = new FormData()
+      f.append('name', 'Water heater')
+      f.append('asset_type', 'water_heater')
+      for (const [k, v] of Object.entries(fields)) f.append(k, v)
+      return f
+    }
+
+    it.each([
+      ['negative',  '-500'],
+      ['NaN',       'abc'],
+      ['Infinity',  'Infinity'],
+      ['over $1M',  '5000000'],
+    ])('rejects a %s purchase price before any write', async (_label, value) => {
+      const supabase = makeSupabase({})
+      mockAuthed(supabase)
+
+      const result = await createAsset('prop_1', null, assetForm({ purchase_price: value }))
+
+      expect(result.error).toMatch(/Purchase price/)
+      expect(supabase.from).not.toHaveBeenCalled()
+    })
+
+    // `expected_lifespan_years ?? standardsMidpoint` could never recover from a
+    // bad value: parseInt('abc') is NaN, and NaN is neither null nor undefined,
+    // so `??` handed it straight through and the standards default — the whole
+    // point of the fallback — was skipped.
+    it('rejects a non-numeric lifespan rather than letting NaN defeat the ?? default', async () => {
+      const supabase = makeSupabase({})
+      mockAuthed(supabase)
+
+      const result = await createAsset('prop_1', null, assetForm({ expected_lifespan_years: 'abc' }))
+
+      expect(result.error).toMatch(/lifespan/i)
+      expect(supabase.from).not.toHaveBeenCalled()
+    })
+
+    it('rejects a negative nightly rate on the property form', async () => {
+      const supabase = makeSupabase({})
+      mockAuthed(supabase)
+
+      const result = await createProperty(null, fd({ avg_nightly_rate: '-250' }))
+
+      expect(result.error).toMatch(/Nightly rate/)
+      expect(supabase.from).not.toHaveBeenCalled()
+    })
+
+    it('clamps a negative bedroom count to the default instead of storing it', async () => {
+      const supabase = makeSupabase({
+        properties: [{ data: null, count: 0, error: null }, { data: { id: 'prop_1' } }],
+      })
+      mockAuthed(supabase)
+
+      await expect(createProperty(null, fd({ bedrooms: '-5', max_guests: '-2' })))
+        .rejects.toThrow('REDIRECT:/properties/prop_1/setup/details')
+
+      const insert = supabase.calls.find((c) => c.table === 'properties' && c.method === 'insert')
+      expect(insert!.args[0]).toEqual(expect.objectContaining({ bedrooms: 1, max_guests: 2 }))
+    })
+  })
+
   describe('bulkImportAssets', () => {
     const rows: CsvAssetRow[] = [{
       name: 'Fridge', asset_type: 'refrigerator', make: null, model: null,
@@ -532,6 +575,31 @@ describe('properties/actions', () => {
       expect(result).toEqual({ imported: 0, error: 'Import failed — please try again' })
       expect(reportError).toHaveBeenCalled()
       expect(supabase.from).not.toHaveBeenCalled()
+    })
+    it('refuses an import larger than the row cap before any insert', async () => {
+      const supabase = makeSupabase({ properties: [{ data: { id: 'prop_1' } }] })
+      mockAuthed(supabase)
+      const many = Array.from({ length: 501 }, () => rows[0]!)
+
+      const result = await bulkImportAssets('prop_1', many)
+
+      expect(result.imported).toBe(0)
+      expect(result.error).toMatch(/limited to 500 rows/)
+      expect(supabase.calls.some((c) => c.table === 'property_assets')).toBe(false)
+    })
+
+    it('names the offending row when a price is not a finite non-negative number', async () => {
+      const supabase = makeSupabase({ properties: [{ data: { id: 'prop_1' } }] })
+      mockAuthed(supabase)
+
+      const result = await bulkImportAssets('prop_1', [
+        rows[0]!,
+        { ...rows[0]!, purchase_price: -1 },
+      ])
+
+      expect(result.imported).toBe(0)
+      expect(result.error).toMatch(/Row 2/)
+      expect(supabase.calls.some((c) => c.table === 'property_assets')).toBe(false)
     })
   })
 
