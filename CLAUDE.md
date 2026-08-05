@@ -1306,6 +1306,16 @@ following them stops being a memory test. Five layers, checked in CI via
      (`/accept-invite`, `/crew-invite`, which skip `TOKEN_ROUTES` entirely)
      still rate-limit inline via `inviteAcceptRatelimit` — the structural
      backstop for the Standing Audit Checklist's rate-limiting item.
+   - `unreferenced-server-actions` — every exported Server Action has a
+     reference somewhere in `app/`/`lib/`/`components/`. **A unit test does
+     NOT count as a caller**, and that is the whole point: three superseded
+     implementations were found dead in one week (`/wo/[token]`,
+     `reportTurnoverIssue`, `updateProperty`), each with a full passing test
+     suite. A dead action is not merely untidy — it keeps the API surface of
+     the live one while missing the safety its replacement had to learn, so
+     whoever revives it inherits the old bug. `updateProperty` would have
+     deleted a property's door code on a rename. Shrink-only baseline of the
+     15 already dead when it was written; never add to it.
 
 3. **`check:ui-classes`** — the raw `btn-*`/`badge-*`/`card` class grep.
 
