@@ -17,13 +17,19 @@ vi.mock('@/lib/rate-limit', async () => {
 
 vi.mock('@/lib/auth', () => ({
   requireOrgMember: vi.fn(),
+  // toggleTransactionVisibility and deleteOwnerTransaction moved to
+  // requireOrgRole: owner_transactions' RLS restricts UPDATE/DELETE to
+  // admin|manager, but PostgREST answers a zero-row update with SUCCESS — so a
+  // viewer's call used to return {} and log an audit row for a change RLS had
+  // refused. The gate now refuses in app code.
+  requireOrgRole: vi.fn(),
 }))
 vi.mock('next/cache', () => ({ revalidatePath: vi.fn() }))
 vi.mock('@/lib/audit', () => ({ logAuditEvent: vi.fn() }))
 vi.mock('@/lib/observability/report-error', () => ({ reportError: vi.fn() }))
 vi.mock('@/lib/resend/client', () => ({ sendOwnerPortalEmail: vi.fn() }))
 
-import { requireOrgMember } from '@/lib/auth'
+import { requireOrgMember, requireOrgRole } from '@/lib/auth'
 import { logAuditEvent } from '@/lib/audit'
 import { reportError } from '@/lib/observability/report-error'
 import { sendOwnerPortalEmail } from '@/lib/resend/client'
@@ -50,6 +56,10 @@ function makeSupabase(queue: Record<string, Resp[]>) {
       chain[m] = vi.fn(() => chain)
     }
     chain.single = vi.fn(() => Promise.resolve(result))
+    // `.update(...).eq(...).select('id')` and `.delete().eq(...).select('id')`
+    // resolve to the queued result too — both actions now check that a row was
+    // actually affected rather than trusting a null error.
+    chain.maybeSingle = vi.fn(() => Promise.resolve(result))
     chain.then   = (resolve: (v: unknown) => unknown) => Promise.resolve(result).then(resolve)
     return chain
   })
@@ -294,8 +304,8 @@ describe('owners/actions', () => {
 
   describe('toggleTransactionVisibility', () => {
     it('toggles visibility scoped to the caller org', async () => {
-      const supabase = makeSupabase({})
-      vi.mocked(requireOrgMember).mockResolvedValue({
+      const supabase = makeSupabase({ owner_transactions: [{ data: [{ id: 'txn_1' }] }] })
+      vi.mocked(requireOrgRole).mockResolvedValue({
         supabase, membership, user: { id: 'user_1' },
       } as never)
 
@@ -311,12 +321,39 @@ describe('owners/actions', () => {
 
     it('returns a generic error and never touches the DB when the caller is unauthenticated', async () => {
       const supabase = makeSupabase({})
-      vi.mocked(requireOrgMember).mockRejectedValue(new Error('REDIRECT:/login'))
+      vi.mocked(requireOrgRole).mockRejectedValue(new Error('REDIRECT:/login'))
 
       const result = await toggleTransactionVisibility('txn_1', false)
 
       expect(result).toEqual({ error: 'Operation failed. Please try again.' })
       expect(supabase.from).not.toHaveBeenCalled()
+    })
+
+    // The defect: owner_transactions' RLS restricts UPDATE to admin|manager,
+    // and PostgREST answers a zero-row update with SUCCESS, not an error. So a
+    // viewer used to get {} back plus an audit row asserting a change that
+    // never happened. Zero affected rows must never read as a change.
+    it('reports not-found rather than success when no row was updated', async () => {
+      const supabase = makeSupabase({ owner_transactions: [{ data: [] }] })
+      vi.mocked(requireOrgRole).mockResolvedValue({
+        supabase, membership, user: { id: 'user_1' },
+      } as never)
+
+      const result = await toggleTransactionVisibility('txn_1', false)
+
+      expect(result).toEqual({ error: 'That transaction could not be found.' })
+      expect(logAuditEvent).not.toHaveBeenCalled()
+    })
+
+    it('is gated on admin|manager, not bare org membership', async () => {
+      const supabase = makeSupabase({ owner_transactions: [{ data: [{ id: 'txn_1' }] }] })
+      vi.mocked(requireOrgRole).mockResolvedValue({
+        supabase, membership, user: { id: 'user_1' },
+      } as never)
+
+      await toggleTransactionVisibility('txn_1', true)
+
+      expect(requireOrgRole).toHaveBeenCalledWith(['admin', 'manager'])
     })
   })
 
@@ -352,7 +389,7 @@ describe('owners/actions', () => {
       const supabase = makeSupabase({
         owner_transactions: [{ data: [{ id: 'txn_1' }] }],
       })
-      vi.mocked(requireOrgMember).mockResolvedValue({
+      vi.mocked(requireOrgRole).mockResolvedValue({
         supabase, membership, user: { id: 'user_1' },
       } as never)
 
@@ -363,22 +400,54 @@ describe('owners/actions', () => {
       }))
     })
 
-    it('does not log an audit event when the id does not belong to the caller org (no row deleted)', async () => {
+    // Was: "does not log an audit event when ... no row deleted". Not logging
+    // was right, but the action returns void, so the caller read the silent
+    // no-op as a successful delete. A row vanishing from the owner's financial
+    // ledger — or NOT vanishing — must not be ambiguous in either direction.
+    it('throws rather than silently no-opping when no row was deleted', async () => {
       const supabase = makeSupabase({
         owner_transactions: [{ data: [] }],
       })
-      vi.mocked(requireOrgMember).mockResolvedValue({
+      vi.mocked(requireOrgRole).mockResolvedValue({
         supabase, membership, user: { id: 'user_1' },
       } as never)
 
-      await deleteOwnerTransaction('other-orgs-txn')
+      await expect(deleteOwnerTransaction('other-orgs-txn'))
+        .rejects.toThrow('That transaction could not be found.')
 
       expect(logAuditEvent).not.toHaveBeenCalled()
     })
 
+    it('throws on a delete error instead of discarding it', async () => {
+      // The error used to be dropped entirely — `const { data } = await ...` —
+      // so a failed delete was indistinguishable from a successful one.
+      const supabase = makeSupabase({
+        owner_transactions: [{ data: null, error: { message: 'deadlock detected' } }],
+      })
+      vi.mocked(requireOrgRole).mockResolvedValue({
+        supabase, membership, user: { id: 'user_1' },
+      } as never)
+
+      await expect(deleteOwnerTransaction('txn_1'))
+        .rejects.toThrow('Could not delete the transaction. Please try again.')
+
+      expect(logAuditEvent).not.toHaveBeenCalled()
+    })
+
+    it('is gated on admin|manager, not bare org membership', async () => {
+      const supabase = makeSupabase({ owner_transactions: [{ data: [{ id: 'txn_1' }] }] })
+      vi.mocked(requireOrgRole).mockResolvedValue({
+        supabase, membership, user: { id: 'user_1' },
+      } as never)
+
+      await deleteOwnerTransaction('txn_1')
+
+      expect(requireOrgRole).toHaveBeenCalledWith(['admin', 'manager'])
+    })
+
     it('throws and never touches the DB when the caller is unauthenticated', async () => {
       const supabase = makeSupabase({})
-      vi.mocked(requireOrgMember).mockRejectedValue(new Error('REDIRECT:/login'))
+      vi.mocked(requireOrgRole).mockRejectedValue(new Error('REDIRECT:/login'))
 
       await expect(deleteOwnerTransaction('txn_1')).rejects.toThrow('REDIRECT:/login')
       expect(supabase.from).not.toHaveBeenCalled()

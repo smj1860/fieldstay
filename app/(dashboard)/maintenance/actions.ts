@@ -12,6 +12,7 @@ import { reportError } from '@/lib/observability/report-error'
 import { reportQueryError } from '@/lib/supabase/unwrap'
 import type { WoStatus, WoCategory, ScheduleFrequency, ScheduleType, VendorSpecialty, TablesUpdate, Enums } from '@/types/database'
 import { PriorityLevelSchema, WoStatusSchema, WoCategorySchema } from '@/lib/schemas/work-order'
+import { parseMoneyAmount } from '@/lib/schemas/money'
 import {
   resolveWorkOrderStatus,
   sendQuoteRequestEmails,
@@ -596,6 +597,17 @@ export async function logActualCost(
   try {
     const { supabase, membership, user } = await requireOrgRole(['admin', 'manager'])
 
+    // `data.actual_cost: number` is a compile-time claim about a value the
+    // browser supplies — nothing enforced it at runtime, and this figure
+    // reaches owner_transactions. addOwnerTransaction (owners/actions.ts)
+    // already validated its amount inline; this path, writing the same table,
+    // did not. NaN was the quiet one: it serializes to JSON null, which WIPES
+    // the nullable work_orders.actual_cost and then violates NOT NULL on
+    // owner_transactions.amount.
+    const parsedCost = parseMoneyAmount(data.actual_cost)
+    if (!parsedCost.ok) return { error: parsedCost.error }
+    const actualCost = parsedCost.amount
+
     const woRes = await supabase
       .from('work_orders')
       .select('id, status, title, property_id, actual_cost')
@@ -613,7 +625,7 @@ export async function logActualCost(
     const { error } = await supabase
       .from('work_orders')
       .update({
-        actual_cost:       data.actual_cost,
+        actual_cost:       actualCost,
         invoice_reference: data.invoice_reference || null,
       })
       .eq('id', workOrderId)
@@ -624,18 +636,28 @@ export async function logActualCost(
       return { error: 'Operation failed. Please try again.' }
     }
 
-    await supabase.from('work_order_updates').insert({
+    const { error: noteError } = await supabase.from('work_order_updates').insert({
       work_order_id:             workOrderId,
       org_id:                    membership.org_id,
       updated_via_vendor_portal: false,
       status_from:               null,
       status_to:                 null,
-      notes:                     `Actual cost logged: $${data.actual_cost.toFixed(2)}${data.invoice_reference ? ' (Invoice: ' + data.invoice_reference + ')' : ''}`,
+      notes:                     `Actual cost logged: $${actualCost.toFixed(2)}${data.invoice_reference ? ' (Invoice: ' + data.invoice_reference + ')' : ''}`,
     })
+
+    // Reported, not returned: the cost itself is already saved, and losing the
+    // history line is not worth telling the PM their edit failed. It must not
+    // vanish silently though — this used to discard its result entirely.
+    if (noteError) {
+      reportError(noteError, {
+        site:  'serverAction.maintenance.logActualCost.note',
+        orgId: membership.org_id,
+      })
+    }
 
     // Upsert expense transaction with actual cost (updates amount if already posted)
     if (wo.status === 'completed') {
-      await supabase.from('owner_transactions').upsert({
+      const { error: ledgerError } = await supabase.from('owner_transactions').upsert({
         property_id:          wo.property_id,
         org_id:               membership.org_id,
         work_order_id:        workOrderId,
@@ -643,10 +665,25 @@ export async function logActualCost(
         source_reference_id:  workOrderId,
         transaction_type:     'expense',
         category:             'maintenance',
-        amount:               data.actual_cost,
+        amount:               actualCost,
         description:          wo.title,
         transaction_date:     isoDate(),
       }, { onConflict: 'source_reference_id,source' })
+
+      // This upsert is the ONLY way a wo_completion expense can be corrected:
+      // handleWorkOrderCompleted posts it with ignoreDuplicates: true and will
+      // never overwrite. Discarding the result left work_orders.actual_cost and
+      // the owner's ledger permanently disagreeing — the PM seeing the new
+      // figure, the owner's statement still showing the old one — while the
+      // audit row below asserted the cost had been logged.
+      if (ledgerError) {
+        console.error('[logActualCost] owner_transactions', ledgerError)
+        reportError(ledgerError, {
+          site:  'serverAction.maintenance.logActualCost.ledger',
+          orgId: membership.org_id,
+        })
+        return { error: 'The cost was saved, but the owner statement could not be updated. Please retry.' }
+      }
     }
 
     await logAuditEvent({
@@ -1037,13 +1074,30 @@ export async function approveQuoteRequest(
       return { error: 'Can only approve a quote that has been submitted by the vendor' }
     }
 
+    // property_id was hardcoded to '' here. It type-checks (the event declares
+    // `string`) and then PROPAGATES: handleWorkOrderCreated forwards it into a
+    // further inngest.send, where a filter on an empty property id matches
+    // nothing — and because this is the dispatch path, the symptom is "the
+    // vendor was never notified" rather than a validation error. Read it from
+    // the work order the transaction actually committed against.
+    const propRes = await supabase
+      .from('work_orders')
+      .select('property_id')
+      .eq('id', result.work_order_id)
+      .eq('org_id', membership.org_id)
+      .maybeSingle()
+
+    if (reportQueryError(propRes.error, { site: 'serverAction.maintenance.approveQuoteRequest.property', orgId: membership.org_id })) {
+      return { error: 'The quote was approved but the vendor could not be notified. Please retry the dispatch.' }
+    }
+
     // From the RPC's return, not the pre-read: these are the ids the
     // transaction actually committed against.
     await inngest.send({
       name: 'work-order/created',
       data: {
         work_order_id:  result.work_order_id,
-        property_id:    '',
+        property_id:    propRes.data?.property_id ?? '',
         org_id:         membership.org_id,
         vendor_id:      result.vendor_id,
         portal_enabled: true,
@@ -1121,13 +1175,45 @@ export async function deleteWorkOrder(workOrderId: string): Promise<void> {
     const current = currentRes.data
 
     if (current) {
-      await supabase
+      // A completed work order has already posted its owner_transactions
+      // expense (handleWorkOrderCompleted, keyed on source_reference_id), and
+      // cancelling here does NOT reverse it — the owner would keep being
+      // charged for work the WO now says was cancelled. updateWorkOrderStatus
+      // early-returns on 'completed' and approve_quote_request refuses to
+      // touch a completed WO; this, the destructive path, had no guard at all.
+      if (current.status === 'completed') {
+        throw new Error(
+          'This work order is already completed and cannot be cancelled. ' +
+          'Adjust the logged cost or issue a credit instead.'
+        )
+      }
+      // Already there — nothing to do, and re-writing would add a second
+      // cancellation row and audit event for one action.
+      if (current.status === 'cancelled') {
+        revalidatePath('/maintenance')
+        return
+      }
+
+      const { error: cancelError } = await supabase
         .from('work_orders')
         .update({ status: 'cancelled' })
         .eq('id', workOrderId)
         .eq('org_id', membership.org_id)
 
-      await supabase.from('work_order_updates').insert({
+      // The READ above was fixed so a failure could not close the confirm
+      // dialog as though the work order had been cancelled (see the comment
+      // there). The WRITE had exactly the same hole: its result was discarded,
+      // so a failed cancel still logged the audit event and returned normally.
+      if (cancelError) {
+        console.error('[deleteWorkOrder] cancel', cancelError)
+        reportError(cancelError, {
+          site:  'serverAction.maintenance.deleteWorkOrder.cancel',
+          orgId: membership.org_id,
+        })
+        throw new Error('Could not cancel the work order. Please try again.')
+      }
+
+      const { error: noteError } = await supabase.from('work_order_updates').insert({
         work_order_id:             workOrderId,
         org_id:                    membership.org_id,
         updated_via_vendor_portal: false,
@@ -1135,6 +1221,13 @@ export async function deleteWorkOrder(workOrderId: string): Promise<void> {
         status_to:                 'cancelled',
         notes:                     'Cancelled by property manager',
       })
+
+      if (noteError) {
+        reportError(noteError, {
+          site:  'serverAction.maintenance.deleteWorkOrder.note',
+          orgId: membership.org_id,
+        })
+      }
 
       await logAuditEvent({
         orgId:      membership.org_id,

@@ -2,7 +2,7 @@
 
 import { revalidatePath } from 'next/cache'
 import { checkLimit, emailSendActionLimiter } from '@/lib/rate-limit'
-import { requireOrgMember } from '@/lib/auth'
+import { requireOrgMember, requireOrgRole } from '@/lib/auth'
 import { logAuditEvent } from '@/lib/audit'
 import { reportError } from '@/lib/observability/report-error'
 import { sendOwnerPortalEmail } from '@/lib/resend/client'
@@ -313,18 +313,32 @@ export async function toggleTransactionVisibility(
   visible: boolean
 ): Promise<{ error?: string }> {
   try {
-    const { supabase, membership, user } = await requireOrgMember()
+    // requireOrgRole, not requireOrgMember. owner_transactions' RLS already
+    // restricts UPDATE to admin|manager — but PostgREST answers an update that
+    // matches zero rows with SUCCESS, not an error. So a viewer's call bound a
+    // null `error`, logged an owner.transaction.visibility_changed audit row,
+    // and returned {} — the UI flipped the toggle and the audit log asserted a
+    // change that RLS had silently refused. Refusing in app code makes the
+    // denial a real message instead of a phantom success.
+    const { supabase, membership, user } = await requireOrgRole(['admin', 'manager'])
 
-    const { error } = await supabase
+    const { data: updated, error } = await supabase
       .from('owner_transactions')
       .update({ visible_to_owner: visible })
       .eq('id', txnId)
       .eq('org_id', membership.org_id)
+      .select('id')
 
     if (error) {
       console.error('[toggleTransactionVisibility]', error)
       reportError(error, { site: 'serverAction.owners.toggleTransactionVisibility', orgId: membership.org_id })
       return { error: 'Operation failed. Please try again.' }
+    }
+
+    // Belt and braces on the same problem: zero rows means the transaction is
+    // not this org's (or is gone), which must not be reported as a change.
+    if (!updated || updated.length === 0) {
+      return { error: 'That transaction could not be found.' }
     }
 
     await logAuditEvent({
@@ -394,23 +408,41 @@ export async function revokeOwnerPortalToken(ownerId: string): Promise<OwnersAct
 
 export async function deleteOwnerTransaction(txnId: string): Promise<void> {
   try {
-    const { supabase, membership, user } = await requireOrgMember()
-    const { data } = await supabase
+    // requireOrgRole, not requireOrgMember — same reasoning as
+    // toggleTransactionVisibility above. owner_transactions' RLS restricts
+    // DELETE to admin|manager, so a viewer's call removed nothing and returned
+    // an empty array; the audit guard below correctly skipped, but this action
+    // returns void, which the caller reads as success. Deleting a row from the
+    // owner's financial ledger is not something to fail silently in either
+    // direction.
+    const { supabase, membership, user } = await requireOrgRole(['admin', 'manager'])
+
+    const { data, error } = await supabase
       .from('owner_transactions')
       .delete()
       .eq('id', txnId)
       .eq('org_id', membership.org_id)
       .select('id')
 
-    if (data && data.length > 0) {
-      await logAuditEvent({
-        orgId:      membership.org_id,
-        actorId:    user.id,
-        action:     'owner.transaction.deleted',
-        targetType: 'owner_transaction',
-        targetId:   txnId,
-      })
+    // The error was previously discarded entirely, so a failed delete was
+    // indistinguishable from a successful one from the caller's side.
+    if (error) {
+      console.error('[deleteOwnerTransaction]', error)
+      reportError(error, { site: 'serverAction.owners.deleteOwnerTransaction', orgId: membership.org_id })
+      throw new Error('Could not delete the transaction. Please try again.')
     }
+
+    if (!data || data.length === 0) {
+      throw new Error('That transaction could not be found.')
+    }
+
+    await logAuditEvent({
+      orgId:      membership.org_id,
+      actorId:    user.id,
+      action:     'owner.transaction.deleted',
+      targetType: 'owner_transaction',
+      targetId:   txnId,
+    })
 
     revalidatePath('/owners')
   } catch (err) {

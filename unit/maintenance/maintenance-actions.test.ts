@@ -493,6 +493,54 @@ describe('maintenance/actions', () => {
       expect(result).toEqual({})
     })
 
+    // `actual_cost: number` is a compile-time claim about a browser-supplied
+    // value. This figure reaches owner_transactions, and addOwnerTransaction
+    // (owners/actions.ts) already validated its amount inline while this path,
+    // writing the same table, did not.
+    it.each([
+      ['negative',  -5000,     'Amount cannot be negative.'],
+      ['NaN',       Number.NaN, 'Enter a valid amount.'],
+      ['Infinity',  Number.POSITIVE_INFINITY, 'Enter a valid amount.'],
+      ['over $1M',  5_000_000, 'Amount must be under $1,000,000.'],
+    ])('rejects a %s cost before any write', async (_label, cost, message) => {
+      const supabase = makeSupabase({})
+      vi.mocked(requireOrgRole).mockResolvedValue({
+        supabase, membership, user: { id: 'user_1' },
+      } as never)
+
+      const result = await logActualCost('wo_1', { actual_cost: cost as number })
+
+      expect(result).toEqual({ error: message })
+      // Rejected at the boundary — nothing reached the database. NaN is the
+      // quiet one: supabase-js serializes it to JSON null, which WIPES the
+      // nullable work_orders.actual_cost and then violates NOT NULL on
+      // owner_transactions.amount.
+      expect(supabase.from).not.toHaveBeenCalled()
+    })
+
+    // This upsert is the ONLY correction path for a wo_completion expense —
+    // handleWorkOrderCompleted posts it with ignoreDuplicates: true and never
+    // overwrites. Discarding its result left work_orders.actual_cost and the
+    // owner's ledger permanently disagreeing while the audit row asserted the
+    // cost had been logged.
+    it('surfaces a failed owner_transactions upsert instead of reporting success', async () => {
+      const supabase = makeSupabase({
+        work_orders:        [{ data: { id: 'wo_1', status: 'completed', title: 'Fix faucet', property_id: 'prop_1', actual_cost: null } }, { error: null }],
+        work_order_updates: [{ error: null }],
+        owner_transactions: [{ error: { message: 'permission denied for table owner_transactions' } }],
+      })
+      vi.mocked(requireOrgRole).mockResolvedValue({
+        supabase, membership, user: { id: 'user_1' },
+      } as never)
+
+      const result = await logActualCost('wo_1', { actual_cost: 150 })
+
+      expect(result).toEqual({
+        error: 'The cost was saved, but the owner statement could not be updated. Please retry.',
+      })
+      expect(logAuditEvent).not.toHaveBeenCalled()
+    })
+
     it('rejects a work order id that does not belong to the caller org (IDOR check)', async () => {
       const supabase = makeSupabase({ work_orders: [{ data: null }] })
       vi.mocked(requireOrgRole).mockResolvedValue({ supabase, membership } as never)
