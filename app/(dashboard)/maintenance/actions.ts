@@ -12,10 +12,10 @@ import { reportError } from '@/lib/observability/report-error'
 import { reportQueryError } from '@/lib/supabase/unwrap'
 import type { WoStatus, WoCategory, ScheduleFrequency, ScheduleType, TablesUpdate, Enums } from '@/types/database'
 import { PriorityLevelSchema, WoStatusSchema, WoCategorySchema } from '@/lib/schemas/work-order'
+import type { SupabaseClient } from '@supabase/supabase-js'
 import { parseMoneyAmount } from '@/lib/schemas/money'
 import {
   resolveWorkOrderStatus,
-  sendQuoteRequestEmails,
   checkCrewMemberAssignable,
   checkQuoteVendorsAssignable,
   checkCrewTimeOffWarning,
@@ -226,27 +226,34 @@ export async function createWorkOrder(
       return { error: 'Operation failed. Please try again.' }
     }
 
-    // Send RFQ emails to each selected vendor
+    // ONE RFQ path. This used to call a separate exported sender in
+    // create-work-order-helpers.ts, which meant the create modal reached the
+    // database without the dedup filter, the vendor-id validation or the
+    // work-order status check that sendQuoteRequests performs — and the two
+    // senders had already drifted apart. That helper is gone; this goes
+    // through the same action the work-order detail's quote panel calls.
+    //
+    // The pre-flight checkQuoteVendorsAssignable above stays despite
+    // sendQuoteRequests repeating it: it has to run BEFORE the insert, or a
+    // hard-blocked vendor leaves an orphan work order sitting in
+    // quote_requested with no RFQs and no explanation.
     if (request_quotes && quote_vendor_ids.length) {
-      const rfq = await sendQuoteRequestEmails(supabase, wo.id, property_id, membership.org_id, quote_vendor_ids)
+      const rfq = await sendQuoteRequests(wo.id, quote_vendor_ids)
 
       revalidatePath('/maintenance')
 
-      // A partial send used to be invisible: sendQuoteRequestEmails returned
-      // void and swallowed each failure, so the PM was redirected to a work
-      // order in "Awaiting Quote" that looked identical whether four vendors
-      // or none had been contacted. Redirecting here would discard the
-      // warning with it (redirect() throws), so a partial send returns
-      // instead — the modal already surfaces `warning` as a toast, and the
-      // PM can add the missing vendors from the work order's quote panel.
-      if (rfq.failed.length > 0) {
+      // A partial send used to be invisible — the old helper returned void and
+      // swallowed each failure, so the PM was redirected to a work order in
+      // "Awaiting Quote" that looked identical whether four vendors or none
+      // had been contacted. Redirecting here would discard the warning with it
+      // (redirect() throws), so anything short of a clean send returns
+      // instead: the modal already surfaces `warning` as a toast, and the PM
+      // can retry the missing vendors from the work order's quote panel.
+      if (rfq.error) {
         return {
           success:     true,
           workOrderId: wo.id,
-          warning:
-            `Work order created, but ${rfq.failed.length} of ${quote_vendor_ids.length} quote ` +
-            `request${quote_vendor_ids.length === 1 ? '' : 's'} could not be sent. Open the work ` +
-            'order and request quotes from those vendors again.',
+          warning:     `Work order created, but the quote requests were not all sent: ${rfq.error}`,
         }
       }
 
@@ -898,6 +905,87 @@ export async function deleteWorkOrderPhoto(photoId: string): Promise<{ error?: s
 
 // ── Send quote requests to multiple vendors ───────────────────────────────────
 
+/** How long a vendor has to respond to an RFQ before the token stops working. */
+const QUOTE_TOKEN_TTL_MS = 14 * 24 * 60 * 60 * 1000
+
+/**
+ * Sends one RFQ (quote_requests row + Inngest notify event) per vendor.
+ *
+ * Not exported and not a Server Action: sendQuoteRequests below is the ONLY
+ * way to send an RFQ, including from createWorkOrder. There used to be a
+ * second exported sender in create-work-order-helpers.ts that the create modal
+ * called directly, bypassing every check this action performs — the two had
+ * already drifted (only this path deduped against live RFQs, only this path
+ * validated the vendor ids), and each discarded its insert failures in its own
+ * different way. Deleted rather than shared, so there is nothing left to call
+ * around the gate.
+ *
+ * The per-vendor loop is intrinsic: each RFQ needs its own generated token
+ * before its own event fires, so a batched insert would have to move token
+ * generation to the caller. Bounded by the vendor count the PM ticked in one
+ * dialog.
+ */
+async function insertQuoteRequests(
+  supabase:    SupabaseClient,
+  workOrderId: string,
+  propertyId:  string,
+  orgId:       string,
+  vendorIds:   string[],
+): Promise<{ sent: number; failed: string[] }> {
+  const outcomes = await Promise.all(
+    vendorIds.map(async (vendorId) => {
+      const quote_token            = crypto.randomUUID()
+      const quote_token_expires_at = new Date(Date.now() + QUOTE_TOKEN_TTL_MS).toISOString()
+
+      const { data: qr, error: qrError } = await supabase
+        .from('quote_requests')
+        .insert({
+          work_order_id: workOrderId,
+          org_id:        orgId,
+          vendor_id:     vendorId,
+          quote_token,
+          quote_token_expires_at,
+          status:        'pending',
+        })
+        .select('id')
+        .single()
+
+      if (qrError || !qr) {
+        // A failed RFQ used to vanish — one sender returned `false` and
+        // reported only the success count, the other swallowed it without even
+        // a log. Either way the PM got a work order in "Awaiting Quote" that
+        // looked identical whether every vendor had been contacted or none had.
+        console.error('[sendQuoteRequests] RFQ insert failed', {
+          workOrderId, vendorId, code: qrError?.code, message: qrError?.message,
+        })
+        reportError(qrError ?? new Error('quote_requests insert returned no row'), {
+          site: 'serverAction.maintenance.sendQuoteRequests.insert', orgId,
+        })
+        return { ok: false as const, vendorId }
+      }
+
+      await inngest.send({
+        name: 'work-order/quote-requested' as const,
+        data: {
+          work_order_id:    workOrderId,
+          quote_request_id: qr.id,
+          property_id:      propertyId,
+          org_id:           orgId,
+          vendor_id:        vendorId,
+          quote_token,
+        },
+      })
+
+      return { ok: true as const, vendorId }
+    })
+  )
+
+  return {
+    sent:   outcomes.filter((o) => o.ok).length,
+    failed: outcomes.filter((o) => !o.ok).map((o) => o.vendorId),
+  }
+}
+
 export async function sendQuoteRequests(
   workOrderId: string,
   vendorIds: string[]
@@ -959,12 +1047,7 @@ export async function sendQuoteRequests(
       return { error: 'All selected vendors already have an active quote request', sent: 0 }
     }
 
-    // Was a second, open-coded copy of sendQuoteRequestEmails — same insert,
-    // same token TTL, same event — which had already drifted: this copy
-    // discarded its failures as `return false`, the other discarded them
-    // silently, and only this one had the dedup filter above. One
-    // implementation, so the next fix lands in both places by construction.
-    const rfq = await sendQuoteRequestEmails(
+    const rfq = await insertQuoteRequests(
       supabase, workOrderId, wo.property_id, membership.org_id, toSend,
     )
 

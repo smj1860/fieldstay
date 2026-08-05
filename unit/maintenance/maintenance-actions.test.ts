@@ -273,10 +273,17 @@ describe('maintenance/actions', () => {
         properties:      [{ data: { id: 'prop_1' } }],
         // RFQ recipients are now org-verified and compliance-checked before
         // the work order is created, same as a direct vendor assignment.
-        vendors:         [{ data: [{ id: 'vendor_1' }] }],
-        vendor_compliance_status: compliant(),
-        work_orders:     [{ data: { id: 'wo_1' } }],
-        quote_requests:  [{ data: { id: 'qr_1' } }],
+        // createWorkOrder now dispatches through sendQuoteRequests rather than
+        // a separate sender, so the queues cover BOTH passes: the pre-flight
+        // vendor check before the insert, then the action's own work-order
+        // re-read, vendor check, dedup read and insert.
+        vendors:         [{ data: [{ id: 'vendor_1' }] }, { data: [{ id: 'vendor_1' }] }],
+        vendor_compliance_status: [...compliant(), ...compliant()],
+        work_orders:     [
+          { data: { id: 'wo_1' } },
+          { data: { id: 'wo_1', property_id: 'prop_1', status: 'quote_requested' } },
+        ],
+        quote_requests:  [{ data: [] }, { data: { id: 'qr_1' } }],
       })
       vi.mocked(requireOrgRole).mockResolvedValue({
         supabase, membership, user: { id: 'user_1' },
@@ -288,8 +295,41 @@ describe('maintenance/actions', () => {
       await expect(createWorkOrder(null, form)).rejects.toThrow('REDIRECT:/maintenance/wo_1')
     })
 
+    // The create modal used to reach the database through its own exported
+    // sender, which had no dedup filter, no vendor-id validation and no
+    // work-order status check — and swallowed every insert failure. Both paths
+    // are now the same action, so a failed send surfaces as a warning instead
+    // of a redirect past it. redirect() throws, so returning is the only way
+    // to carry the warning at all.
+    it('warns instead of redirecting when the RFQ send fails, and does not lose the work order', async () => {
+      const supabase = makeSupabase({
+        properties:      [{ data: { id: 'prop_1' } }],
+        vendors:         [{ data: [{ id: 'vendor_1' }] }, { data: [{ id: 'vendor_1' }] }],
+        vendor_compliance_status: [...compliant(), ...compliant()],
+        work_orders:     [
+          { data: { id: 'wo_1' } },
+          { data: { id: 'wo_1', property_id: 'prop_1', status: 'quote_requested' } },
+        ],
+        quote_requests:  [
+          { data: [] },
+          { data: null, error: { message: 'deadlock detected', code: '40P01' } },
+        ],
+      })
+      vi.mocked(requireOrgRole).mockResolvedValue({
+        supabase, membership, user: { id: 'user_1' },
+      } as never)
+
+      const form = woFd({ request_quotes: 'true' })
+      form.append('quote_vendor_ids', 'vendor_1')
+
+      const result = await createWorkOrder(null, form)
+
+      expect(result).toMatchObject({ success: true, workOrderId: 'wo_1' })
+      expect(result?.warning).toMatch(/quote requests were not all sent/)
+    })
+
     // ── Regression: the RFQ path routed around the vendor gates ──────────
-    // `quote_vendor_ids` went straight from the form to sendQuoteRequestEmails
+    // `quote_vendor_ids` went straight from the form to a separate sender
     // with NO org check and NO compliance check. Both tests below created the
     // work order and dispatched RFQs against the pre-fix code.
     it('refuses to RFQ a vendor id that does not belong to the caller org (IDOR check)', async () => {
@@ -894,8 +934,8 @@ describe('maintenance/actions', () => {
     //
     // Both RFQ senders discarded a failed insert: this action returned
     // `false` for that vendor and reported only the successful count, and
-    // sendQuoteRequestEmails (the create-modal path) returned void and
-    // swallowed it entirely. Either way a vendor the PM ticked silently never
+    // the create modal's separate sender returned void and swallowed it
+    // entirely. Either way a vendor the PM ticked silently never
     // received a request, and the work order sat in "Awaiting Quote" looking
     // exactly like one where every RFQ went out.
     it('reports a partial send instead of quietly returning the successful count', async () => {

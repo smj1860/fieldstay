@@ -2,7 +2,7 @@ import { unwrap } from '@/lib/supabase/unwrap'
 import 'server-only'
 import { fetchAllRows } from '@/lib/inngest/paginate'
 
-import { inngest, sendEventAsync } from '@/lib/inngest/client'
+import { sendEventAsync } from '@/lib/inngest/client'
 import type { WoStatus, WoCategory } from '@/types/database'
 import { WoStatusSchema } from '@/lib/schemas/work-order'
 import type { SupabaseClient } from '@supabase/supabase-js'
@@ -141,89 +141,6 @@ export async function checkQuoteVendorsAssignable(
   return null
 }
 
-/** How long a vendor has to respond to an RFQ before the token stops working. */
-export const QUOTE_TOKEN_TTL_MS = 14 * 24 * 60 * 60 * 1000
-
-export interface QuoteRequestSendResult {
-  /** Vendors that now hold a live RFQ. */
-  sent:   number
-  /** Vendor ids whose RFQ could not be created. Never silently empty. */
-  failed: string[]
-}
-
-/**
- * Sends one RFQ (quote_requests row + Inngest notify event) per selected
- * vendor, and REPORTS what actually happened.
- *
- * It used to return `void` and swallow every insert failure — `if (qrError ||
- * !qr) return`, with the error not even logged. A PM selecting four vendors
- * where two inserts failed got a work order sitting in "Awaiting Quote",
- * indistinguishable from one where all four RFQs went out, waiting on vendors
- * who were never contacted. Nothing in the UI or the logs could tell them
- * apart, and the natural recovery (re-request quotes) had no UI either.
- *
- * The per-vendor loop stays: each RFQ needs its own generated token before its
- * own event fires, so a batched insert would have to move token generation
- * client-side. It is bounded by the vendor count the PM ticked in one dialog.
- */
-export async function sendQuoteRequestEmails(
-  supabase:      SupabaseClient,
-  workOrderId:   string,
-  propertyId:    string,
-  orgId:         string,
-  quoteVendorIds: string[],
-): Promise<QuoteRequestSendResult> {
-  const outcomes = await Promise.all(
-    quoteVendorIds.map(async (vendorId) => {
-      const quote_token            = crypto.randomUUID()
-      const quote_token_expires_at = new Date(Date.now() + QUOTE_TOKEN_TTL_MS).toISOString()
-
-      const { data: qr, error: qrError } = await supabase
-        .from('quote_requests')
-        .insert({
-          work_order_id: workOrderId,
-          org_id:        orgId,
-          vendor_id:     vendorId,
-          quote_token,
-          quote_token_expires_at,
-          status:        'pending',
-        })
-        .select('id')
-        .single()
-
-      if (qrError || !qr) {
-        // Logged AND reported. The caller decides what to tell the PM; this
-        // function's job is to stop the failure from being invisible.
-        console.error('[sendQuoteRequestEmails] RFQ insert failed', {
-          workOrderId, vendorId, code: qrError?.code, message: qrError?.message,
-        })
-        reportError(qrError ?? new Error('quote_requests insert returned no row'), {
-          site: 'maintenance.sendQuoteRequestEmails', orgId,
-        })
-        return { ok: false as const, vendorId }
-      }
-
-      await inngest.send({
-        name: 'work-order/quote-requested' as const,
-        data: {
-          work_order_id:    workOrderId,
-          quote_request_id: qr.id,
-          property_id:      propertyId,
-          org_id:           orgId,
-          vendor_id:        vendorId,
-          quote_token,
-        },
-      })
-
-      return { ok: true as const, vendorId }
-    })
-  )
-
-  return {
-    sent:   outcomes.filter((o) => o.ok).length,
-    failed: outcomes.filter((o) => !o.ok).map((o) => o.vendorId),
-  }
-}
 
 /**
  * Non-blocking warning check: did the crew member assigned to this work
