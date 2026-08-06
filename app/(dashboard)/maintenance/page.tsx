@@ -1,4 +1,5 @@
 import { requireOrgMember } from '@/lib/auth'
+import { SUPABASE_MAX_ROWS } from '@/lib/inngest/paginate'
 import { MaintenanceBoard } from './maintenance-board'
 import type { VendorComplianceRow } from './maintenance-board'
 import type { Metadata } from 'next'
@@ -84,10 +85,19 @@ export default async function MaintenancePage() {
       .eq('is_active', true)
       .order('name'),
 
+    // Bounded rather than left to PostgREST's silent max_rows truncation.
+    // One row per vendor in this org, so 1000 is far above the target user's
+    // book — but an unbounded read that happens to be small is still an
+    // unbounded read, and this one decorates a picker that DISABLES blocked
+    // vendors: a truncated map renders a blocked vendor as selectable. The
+    // server gate (isVendorHardBlocked) still refuses it, so the failure mode
+    // is a confusing refusal rather than an uninsured dispatch — but saying
+    // the bound out loud is what keeps that true.
     supabase
       .from('vendor_compliance_status')
       .select('vendor_id, compliance_status, org_onboarding_grace')
-      .eq('org_id', membership.org_id),
+      .eq('org_id', membership.org_id)
+      .limit(SUPABASE_MAX_ROWS),
   ])
 
   // A query erroring (bad filter value, RLS misconfiguration, etc.) and a
