@@ -44,7 +44,15 @@ export default async function DashboardLayout({
   const onboardingPct   = calcOnboardingProgress(completedSteps)
   const onboardingComplete = ONBOARDING_STEPS.every((s) => completedSteps[s.key])
 
-  if (!onboardingComplete) {
+  // Only admins and owners can COMPLETE the wizard: organizations' RLS UPDATE
+  // policy is is_org_member(id, ARRAY['admin']), which passes owner too and
+  // nobody else. Sending anyone else to /setup is a dead end — every step's
+  // save is denied by RLS — so a manager invited before the owner finished
+  // step 1 was pinned to /setup, /settings, /help and /billing-wall with no
+  // error to explain it. They should just use the app.
+  const canFinishSetup = membership.role === 'admin' || membership.role === 'owner'
+
+  if (!onboardingComplete && canFinishSetup) {
     const hasStartedSetup = Object.values(completedSteps).some(Boolean)
 
     if (!hasStartedSetup) {
