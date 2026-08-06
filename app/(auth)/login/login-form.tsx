@@ -45,8 +45,14 @@ export function LoginForm() {
     }
 
     if (inviteToken) {
-      await acceptInviteForCurrentUser(inviteToken)
-      router.push('/ops')
+      // Branch on the result — see the note in app/(auth)/callback/route.ts.
+      // acceptInviteForCurrentUser already returned { accepted }; throwing it
+      // away sent someone whose invite had expired (or was crew-role, which is
+      // refused on purpose) straight to /ops, from which requireOrgMember()
+      // bounced them to /onboarding to create their own separate org with no
+      // explanation. Same destination and same message as the OAuth path.
+      const { accepted } = await acceptInviteForCurrentUser(inviteToken)
+      router.push(accepted ? '/ops' : '/onboarding?invite=invalid')
       router.refresh()
       return
     }

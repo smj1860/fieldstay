@@ -71,10 +71,23 @@ export async function GET(request: NextRequest) {
     }).catch(() => {})
   }
 
-  // Handle team invite token if present
+  // Handle team invite token if present.
+  //
+  // The result is branched on, not discarded. acceptOrgInvite returns false for
+  // an expired or already-claimed token, an email that does not match the
+  // invite, a lost claim race, and — deliberately — a crew-role org invite,
+  // which it refuses because an organization_members row would grant a cleaner
+  // read access to the whole org's turnovers, bookings and guest PII.
+  //
+  // This used to redirect to /ops unconditionally. With no membership row,
+  // requireOrgMember() then bounced the user to /onboarding, where they were
+  // shown "Name your organization" with nothing explaining what happened — so
+  // someone who clicked "join my teammate's account" silently created their own
+  // separate org instead. The password-signup path (acceptTeamInvite) has
+  // always checked this result; the two OAuth/login paths did not.
   if (inviteToken) {
-    await acceptOrgInvite(session.user.id, session.user.email ?? '', inviteToken)
-    return NextResponse.redirect(`${origin}/ops`)
+    const { accepted } = await acceptOrgInvite(session.user.id, session.user.email ?? '', inviteToken)
+    return NextResponse.redirect(`${origin}${accepted ? '/ops' : '/onboarding?invite=invalid'}`)
   }
 
   const finalNext  = resolveOAuthNext(next, request)

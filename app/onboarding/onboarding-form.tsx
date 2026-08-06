@@ -12,6 +12,16 @@ type Step = 'name-org' | 'connect-pms'
 interface OnboardingFormProps {
   userEmail:    string
   initialStep?: Step
+  /**
+   * Set when the user arrived here after an invite acceptance FAILED — an
+   * expired or already-used token, an email that does not match the invite, or
+   * a crew-role org invite (which acceptOrgInvite refuses on purpose, since an
+   * organization_members row would hand a cleaner portfolio-wide guest PII).
+   *
+   * Without this they landed on "Name your organization" with no explanation
+   * and created their own separate org, believing they had joined a team.
+   */
+  inviteFailed?: boolean
 }
 
 const PMS_OPTIONS = [
@@ -39,7 +49,7 @@ const PMS_OPTIONS = [
   // },
 ]
 
-export function OnboardingForm({ userEmail, initialStep = 'name-org' }: Readonly<OnboardingFormProps>) {
+export function OnboardingForm({ userEmail, initialStep = 'name-org', inviteFailed = false }: Readonly<OnboardingFormProps>) {
   const [state, action, pending] = useActionState(createOrganization, null)
   const [step, setStep]           = useState<Step>(initialStep)
 
@@ -83,6 +93,18 @@ export function OnboardingForm({ userEmail, initialStep = 'name-org' }: Readonly
       <p className="text-sm mb-6" style={{ color: 'var(--text-muted)' }}>
         This is how your team and properties will be grouped. You can change it later.
       </p>
+
+      {inviteFailed && (
+        <div
+          className="text-sm rounded-lg px-4 py-3 border mb-4"
+          style={{ background: 'var(--accent-amber-dim)', borderColor: 'var(--accent-amber)', color: 'var(--accent-amber)' }}
+        >
+          That invitation could not be accepted — it may have expired, already
+          been used, or been sent to a different email address. Ask whoever
+          invited you for a new link. Creating an organization below makes a
+          NEW, separate account rather than joining theirs.
+        </div>
+      )}
 
       <form action={action} className="space-y-4">
         {state?.error && (

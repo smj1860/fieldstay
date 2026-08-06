@@ -5,8 +5,17 @@ import { logAuditEvent } from '@/lib/audit'
 import { redirect } from 'next/navigation'
 import { OnboardingForm } from './onboarding-form'
 
-export default async function OnboardingPage() {
+interface Props {
+  searchParams: Promise<{ invite?: string }>
+}
+
+export default async function OnboardingPage({ searchParams }: Props) {
   const { user } = await requireAuth()
+  // Both invite-acceptance call sites redirect here with ?invite=invalid when
+  // acceptOrgInvite returns false, rather than dropping the user on "Name your
+  // organization" with no explanation — see the note on OnboardingForm's
+  // inviteFailed prop.
+  const inviteFailed = (await searchParams).invite === 'invalid'
 
   // ── Crew-member guard ──────────────────────────────────────────────────────
   // A crew member has a crew_members.user_id record but no organization_members
@@ -82,9 +91,9 @@ export default async function OnboardingPage() {
     if (connection) redirect('/ops')
 
     // Org exists but no PMS connected yet — resume at step 2 directly.
-    return <OnboardingForm userEmail={user.email ?? ''} initialStep="connect-pms" />
+    return <OnboardingForm userEmail={user.email ?? ''} initialStep="connect-pms" inviteFailed={inviteFailed} />
   }
   // ── End resume-in-progress guard ────────────────────────────────────────────
 
-  return <OnboardingForm userEmail={user.email ?? ''} />
+  return <OnboardingForm userEmail={user.email ?? ''} inviteFailed={inviteFailed} />
 }
