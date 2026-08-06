@@ -32,6 +32,15 @@ export function VendorDispatchDialog({
     handleDispatch, handleCopyUrl,
   } = actions
 
+  // A typed address that matches no vendor on file. Compared case-insensitively
+  // because the server resolves the same way (ILIKE), so a differently-cased
+  // match is the SAME vendor and must not be announced as a new one.
+  const typedEmail = dispatchEmail.trim().toLowerCase()
+  const isNewVendorEmail =
+    typedEmail.includes('@') &&
+    !vendors.some((v) => v.email?.toLowerCase() === typedEmail)
+
+
   return (
     <Dialog
       open
@@ -76,7 +85,8 @@ export function VendorDispatchDialog({
     >
       <div className="space-y-4">
         <p className="text-xs -mt-2" style={{ color: 'var(--text-muted)' }}>
-          Vendor receives a magic link to view and sign off this work order
+          Assigns this work order to the vendor and emails them a link to view
+          and sign it off. Texted too, if they have a mobile number on file.
         </p>
 
         {!dispatchedUrl ? (
@@ -123,6 +133,16 @@ export function VendorDispatchDialog({
                 placeholder="contractor@email.com"
                 className="w-full text-sm"
               />
+              {/* The free-text box used to be a dead end — an address that was
+                  not already a vendor was refused outright. It now creates the
+                  vendor, which is what lets the work order point at them and
+                  what lets them be paid, so say so before the PM commits. */}
+              {isNewVendorEmail && (
+                <p className="text-xs" style={{ color: 'var(--accent-amber)' }}>
+                  Not in your vendor list — they&apos;ll be added as a vendor and
+                  sent a payment-setup invite so you can pay them through FieldStay.
+                </p>
+              )}
             </div>
 
             {/* Vendor name */}
