@@ -1996,6 +1996,61 @@ export async function bulkUpdateWorkOrderStatus(
 
 // ── Maintenance Schedule CRUD ────────────────────────────────────────────────
 
+/**
+ * The first next_due_date for a schedule the caller did not supply one for.
+ *
+ * A schedule with a NULL next_due_date is INERT, not merely undated. Every
+ * consumer selects on that column with a comparison — the maintenance cron
+ * uses `.lt('next_due_date', today)` for overdue and `.lte(...)` for the alert
+ * window, and cron-daily-wrapup's due section does the same — and in SQL a
+ * NULL satisfies no comparison, so the row is absent from every one of those
+ * result sets. It is not reported late; it is not reported at all. And the
+ * only writer of next_due_date anywhere is the roll-forward after a work
+ * order fires, which advances an EXISTING date. Nothing bootstraps a missing
+ * one, so NULL is permanent.
+ *
+ * Two callers were shipping exactly that: schedules-browser.tsx's "add
+ * schedule" hard-codes next_due_date: null with auto_create_wo: true, and
+ * maintenance-board.tsx reads the field from a form input the PM may leave
+ * blank. Both produced a schedule that renders as active with auto-create
+ * ticked and silently never does anything. Deriving the date here rather than
+ * at either call site is deliberate — it is the one place both go through,
+ * and the property is about the stored row, not about any one form.
+ *
+ * (Mirrors the fallback the standard-template broadcast already applies in
+ * maintenance-template-actions.ts, but frequency-aware: a weekly schedule
+ * should not wait the flat 30 days that path uses.)
+ */
+function resolveFirstDueDate(
+  scheduleType: ScheduleType,
+  frequency:    ScheduleFrequency | null,
+  monthDue:     number | null,
+  provided:     string | null,
+): string | null {
+  if (provided) return provided
+
+  const today = new Date()
+  if (scheduleType === 'routine') {
+    // No frequency is not a real state for a routine schedule, but the column
+    // is nullable — calcNextDueDate's own default (monthly) covers it rather
+    // than letting the row fall through to NULL.
+    return calcNextDueDate(frequency ?? 'monthly', today).toISOString().split('T')[0]!
+  }
+
+  if (scheduleType === 'seasonal' && monthDue) {
+    // The next occurrence of that month: this year if it has not passed,
+    // otherwise next year. Carried over from the deleted setup-step action,
+    // which is the only piece of it worth keeping.
+    const year = today.getMonth() + 1 >= monthDue ? today.getFullYear() + 1 : today.getFullYear()
+    return `${year}-${String(monthDue).padStart(2, '0')}-01`
+  }
+
+  // Seasonal with no month is genuinely underspecified — there is nothing to
+  // derive from. The row stays dormant, and the UI flags it as unscheduled
+  // rather than pretending a date we invented is what the PM meant.
+  return null
+}
+
 export async function createMaintenanceSchedule(
   data: {
     property_id:       string
@@ -2025,7 +2080,9 @@ export async function createMaintenanceSchedule(
       schedule_type:      data.schedule_type,
       frequency:          data.frequency || null,
       month_due:          data.month_due || null,
-      next_due_date:      data.next_due_date || null,
+      next_due_date:      resolveFirstDueDate(
+        data.schedule_type, data.frequency || null, data.month_due || null, data.next_due_date || null,
+      ),
       estimated_cost:     data.estimated_cost || null,
       assigned_vendor_id: data.assigned_vendor_id || null,
       auto_create_wo:     data.auto_create_wo,
@@ -2074,7 +2131,14 @@ export async function updateMaintenanceSchedule(
         schedule_type:      data.schedule_type,
         frequency:          data.frequency || null,
         month_due:          data.month_due || null,
-        next_due_date:      data.next_due_date || null,
+        // Same derivation as create. An edit that clears the date would
+        // otherwise re-open exactly the hole create just closed — and the
+        // inline row editor sends the whole row on every Save, so clearing
+        // the date box is a single keystroke away. Pausing a schedule is
+        // is_active = false; a blank date has never meant "paused".
+        next_due_date:      resolveFirstDueDate(
+          data.schedule_type, data.frequency || null, data.month_due || null, data.next_due_date || null,
+        ),
         estimated_cost:     data.estimated_cost || null,
         assigned_vendor_id: data.assigned_vendor_id || null,
         auto_create_wo:     data.auto_create_wo,

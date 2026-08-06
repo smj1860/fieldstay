@@ -1612,6 +1612,110 @@ describe('maintenance/actions', () => {
       expect(result).toEqual({ error: 'Operation failed. Please try again.' })
       expect(supabase.from).not.toHaveBeenCalled()
     })
+
+    // ── next_due_date must never be stored NULL for a datable schedule ──────
+    //
+    // A NULL next_due_date does not mean "undated", it means INERT. Every
+    // consumer selects on that column with a comparison — the maintenance
+    // cron's .lt(...) for overdue and .lte(...) for the alert window, and
+    // cron-daily-wrapup's due section — and a NULL satisfies no comparison in
+    // SQL, so the row is absent from all of them. The only writer of the
+    // column anywhere is the roll-forward that ADVANCES an existing date;
+    // nothing bootstraps a missing one, so NULL is permanent.
+    //
+    // Two live callers were storing exactly that. schedules-browser.tsx's
+    // "add schedule" hard-codes next_due_date: null with auto_create_wo: true,
+    // and maintenance-board.tsx reads a form field the PM may leave blank.
+    // Both rendered as a healthy active schedule that silently never fired.
+    function insertedRow(supabase: ReturnType<typeof makeSupabase>) {
+      // from() is called twice: properties (ownership check), then the insert.
+      return supabase.from.mock.results[1]!.value.insert.mock.calls[0]![0]
+    }
+
+    it.each([
+      ['weekly',      'weekly'],
+      ['quarterly',   'quarterly'],
+      ['annual',      'annual'],
+    ])('derives a first due date for a routine %s schedule when none is given', async (_label, frequency) => {
+      const supabase = makeSupabase({
+        properties:            [{ data: { id: 'prop_1' } }],
+        maintenance_schedules: [{ error: null }],
+      })
+      vi.mocked(requireOrgRole).mockResolvedValue({ supabase, membership } as never)
+
+      await createMaintenanceSchedule({
+        ...scheduleInput,
+        frequency:     frequency as typeof scheduleInput.frequency,
+        next_due_date: null,
+      })
+
+      const due = insertedRow(supabase).next_due_date
+      expect(due).toMatch(/^\d{4}-\d{2}-\d{2}$/)
+      // Strictly in the future: a date already past would fire a work order on
+      // the next cron pass, which is not what "add a quarterly schedule" means.
+      expect(new Date(due).getTime()).toBeGreaterThan(Date.now())
+    })
+
+    // The frequency column is nullable even for routine schedules, so the
+    // derivation must not fall through to NULL on that path.
+    it('still derives a date for a routine schedule with no frequency', async () => {
+      const supabase = makeSupabase({
+        properties:            [{ data: { id: 'prop_1' } }],
+        maintenance_schedules: [{ error: null }],
+      })
+      vi.mocked(requireOrgRole).mockResolvedValue({ supabase, membership } as never)
+
+      await createMaintenanceSchedule({ ...scheduleInput, frequency: null, next_due_date: null })
+
+      expect(insertedRow(supabase).next_due_date).toMatch(/^\d{4}-\d{2}-\d{2}$/)
+    })
+
+    it('derives the next occurrence of the month for a seasonal schedule', async () => {
+      const supabase = makeSupabase({
+        properties:            [{ data: { id: 'prop_1' } }],
+        maintenance_schedules: [{ error: null }],
+      })
+      vi.mocked(requireOrgRole).mockResolvedValue({ supabase, membership } as never)
+
+      await createMaintenanceSchedule({
+        ...scheduleInput,
+        schedule_type: 'seasonal',
+        frequency:     null,
+        month_due:     3,
+        next_due_date: null,
+      })
+
+      expect(insertedRow(supabase).next_due_date).toMatch(/^\d{4}-03-01$/)
+    })
+
+    // The one case nothing can be derived from — there is no month and no
+    // frequency to project forward. Storing an invented date would be worse
+    // than storing NULL; the schedules browser flags it as "Not scheduled".
+    it('leaves the date NULL for a seasonal schedule with no month', async () => {
+      const supabase = makeSupabase({
+        properties:            [{ data: { id: 'prop_1' } }],
+        maintenance_schedules: [{ error: null }],
+      })
+      vi.mocked(requireOrgRole).mockResolvedValue({ supabase, membership } as never)
+
+      await createMaintenanceSchedule({
+        ...scheduleInput, schedule_type: 'seasonal', frequency: null, month_due: null, next_due_date: null,
+      })
+
+      expect(insertedRow(supabase).next_due_date).toBeNull()
+    })
+
+    it('never overrides a date the caller did supply', async () => {
+      const supabase = makeSupabase({
+        properties:            [{ data: { id: 'prop_1' } }],
+        maintenance_schedules: [{ error: null }],
+      })
+      vi.mocked(requireOrgRole).mockResolvedValue({ supabase, membership } as never)
+
+      await createMaintenanceSchedule({ ...scheduleInput, next_due_date: '2026-08-01' })
+
+      expect(insertedRow(supabase).next_due_date).toBe('2026-08-01')
+    })
   })
 
   describe('updateMaintenanceSchedule / deleteMaintenanceSchedule', () => {
@@ -1628,6 +1732,20 @@ describe('maintenance/actions', () => {
       const result = await updateMaintenanceSchedule('sched_1', updateInput)
 
       expect(result).toEqual({ success: true })
+    })
+
+    // The inline row editor sends the WHOLE row on every Save, so clearing the
+    // date box is one keystroke from re-opening the hole create just closed.
+    // Pausing a schedule is is_active = false; a blank date has never meant
+    // "paused", it means invisible to every cron that reads the column.
+    it('re-derives the due date when an edit clears it', async () => {
+      const supabase = makeSupabase({ maintenance_schedules: [{ error: null }] })
+      vi.mocked(requireOrgRole).mockResolvedValue({ supabase, membership } as never)
+
+      await updateMaintenanceSchedule('sched_1', { ...updateInput, next_due_date: null })
+
+      const patch = supabase.from.mock.results[0]!.value.update.mock.calls[0]![0]
+      expect(patch.next_due_date).toMatch(/^\d{4}-\d{2}-\d{2}$/)
     })
 
     it('soft-deletes a schedule scoped to the caller org', async () => {
