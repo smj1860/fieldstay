@@ -83,11 +83,16 @@ const BASELINE = new Set([
   // the owner ledger. Its own dependency was dead too: total_estimated_cost is
   // written nowhere in the pipeline, so the ledger step would have skipped
   // even if the event had fired.
-  'app/(dashboard)/maintenance/actions.ts::assignCrewToWorkOrder',
-  'app/(dashboard)/maintenance/actions.ts::updateWorkOrder',
-  'app/(dashboard)/maintenance/actions.ts::addWorkOrderNote',
-  'app/(dashboard)/maintenance/actions.ts::recordWorkOrderPhoto',
-  'app/(dashboard)/maintenance/actions.ts::deleteWorkOrderPhoto',
+  // The seven work-order actions in maintenance/actions.ts —
+  // assignCrewToWorkOrder, updateWorkOrder, addWorkOrderNote,
+  // updateWorkOrderStatus, logActualCost, recordWorkOrderPhoto,
+  // deleteWorkOrderPhoto — were pruned 2026-08-06 by DELETING all seven. They
+  // read as the pieces of a work-order detail screen; that screen already
+  // exists at /maintenance/[id] and does the same jobs through narrower,
+  // purpose-built actions. See the header comment at their old site for the
+  // per-action mapping and for the one real finding among them
+  // (recordWorkOrderPhoto never verified its work order belonged to the
+  // caller's org — the reachable delete sibling does).
   // approveQuoteRequest / declineQuoteRequest / sendQuoteRequests pruned
   // 2026-08-05: all three now have callers in
   // components/work-orders/quote-comparison.tsx. Being dead is how
@@ -115,8 +120,6 @@ const BASELINE = new Set([
   // Added 2026-08-05 when stripComments() was fixed — see the ⚠️ note above.
   // All three predate the guardrail; none is newly dead.
   //
-  'app/(dashboard)/maintenance/actions.ts::logActualCost',
-  'app/(dashboard)/maintenance/actions.ts::updateWorkOrderStatus',
 ])
 
 interface Action { key: string; file: string; name: string }

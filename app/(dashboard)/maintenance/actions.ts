@@ -10,10 +10,9 @@ import { fetchAllRows, SUPABASE_MAX_ROWS } from '@/lib/inngest/paginate'
 import { logAuditEvent } from '@/lib/audit'
 import { reportError } from '@/lib/observability/report-error'
 import { reportQueryError } from '@/lib/supabase/unwrap'
-import type { WoStatus, WoCategory, ScheduleFrequency, ScheduleType, TablesUpdate, Enums } from '@/types/database'
+import type { WoStatus, WoCategory, ScheduleFrequency, ScheduleType, Enums } from '@/types/database'
 import { PriorityLevelSchema, WoStatusSchema, WoCategorySchema } from '@/lib/schemas/work-order'
 import type { SupabaseClient } from '@supabase/supabase-js'
-import { parseMoneyAmount } from '@/lib/schemas/money'
 import {
   resolveWorkOrderStatus,
   checkCrewMemberAssignable,
@@ -43,8 +42,6 @@ const PHOTO_SIGNED_URL_TTL_SECONDS = 300  // 5 minutes
 export type MaintenanceActionState = { error?: string; success?: boolean; workOrderId?: string; templateId?: string; warning?: string }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
-
-function isoDate() { return new Date().toISOString().split('T')[0] }
 
 // ── Suggestion-override tracking for bulkAssignVendor ───────────────────────
 //
@@ -422,435 +419,42 @@ export async function rateWorkOrderVendor(
   }
 }
 
-// ── Assign Crew to Work Order ─────────────────────────────────────────────────
-
-export async function assignCrewToWorkOrder(
-  workOrderId: string,
-  crewMemberId: string | null
-): Promise<{ error?: string }> {
-  try {
-    const { supabase, membership } = await requireOrgRole(['admin', 'manager'])
-
-    // Same tenant-isolation check as createWorkOrder: the .eq('org_id') below
-    // scopes the WORK ORDER to this org, but nothing scoped the CREW ID being
-    // written into it, and that column is what the RLS read policy keys its
-    // second branch on.
-    const crewProblem = await checkCrewMemberAssignable(supabase, membership.org_id, crewMemberId)
-    if (crewProblem) return crewProblem
-
-    const { error } = await supabase
-      .from('work_orders')
-      .update({
-        assigned_crew_member_id: crewMemberId || null,
-        vendor_id:               crewMemberId ? null : undefined,
-      })
-      .eq('id', workOrderId)
-      .eq('org_id', membership.org_id)
-
-    if (error) {
-      console.error('[assignCrewToWorkOrder]', error)
-      return { error: 'Operation failed. Please try again.' }
-    }
-    revalidatePath('/maintenance')
-    return {}
-  } catch (err) {
-    console.error('[assignCrewToWorkOrder]', err)
-    reportError(err, { site: 'serverAction.maintenance.assignCrewToWorkOrder' })
-    return { error: 'Operation failed. Please try again.' }
-  }
-}
-
-// ── Update Work Order ────────────────────────────────────────────────────────
-
-export async function updateWorkOrder(
-  workOrderId: string,
-  data: {
-    title:           string
-    description:     string | null
-    priority:        string
-    vendor_id:       string | null
-    scheduled_date:  string | null
-    scheduled_time:  string | null
-    estimated_cost:  number | null
-    portal_enabled:  boolean
-  }
-): Promise<{ error?: string }> {
-  try {
-    const { supabase, membership, user } = await requireOrgRole(['admin', 'manager'])
-
-    const priority = PriorityLevelSchema.safeParse(data.priority).data ?? 'medium'
-
-    // Fetch current vendor_id before updating to detect a vendor change.
-    //
-    // Failed closed, before the write. A silent null made previousVendorId
-    // null, so `newVendorId !== previousVendorId` was true for ANY vendor and
-    // work-order/vendor.assigned fired on an unchanged vendor — a duplicate
-    // dispatch email to a real vendor, off a comparison against a value we
-    // never actually read.
-    const currentWoRes = await supabase
-      .from('work_orders')
-      .select('vendor_id')
-      .eq('id', workOrderId)
-      .eq('org_id', membership.org_id)
-      .maybeSingle()
-
-    if (reportQueryError(currentWoRes.error, { site: 'serverAction.maintenance.updateWorkOrder.current', orgId: membership.org_id })) {
-      return { error: 'Could not load the work order. Please try again.' }
-    }
-    const currentWo = currentWoRes.data
-
-    const previousVendorId = currentWo?.vendor_id ?? null
-    const newVendorId      = data.vendor_id || null
-
-    if (
-      newVendorId &&
-      newVendorId !== previousVendorId &&
-      await isVendorHardBlocked(supabase, newVendorId, membership.org_id)
-    ) {
-      return { error: VENDOR_HARD_BLOCKED_ERROR }
-    }
-
-    const { error } = await supabase
-      .from('work_orders')
-      .update({
-        title:          data.title,
-        description:    data.description || null,
-        priority,
-        vendor_id:      newVendorId,
-        scheduled_date: data.scheduled_date || null,
-        scheduled_time: data.scheduled_time || null,
-        estimated_cost: data.estimated_cost || null,
-        portal_enabled: data.portal_enabled,
-      })
-      .eq('id', workOrderId)
-      .eq('org_id', membership.org_id)
-
-    if (error) {
-      console.error('[updateWorkOrder]', error)
-      return { error: 'Operation failed. Please try again.' }
-    }
-
-    // Fire dispatch if a vendor was set or changed
-    if (newVendorId && newVendorId !== previousVendorId) {
-      await inngest.send({
-        name: 'work-order/vendor.assigned',
-        data: {
-          workOrderId,
-          orgId:           membership.org_id,
-          vendorId:        newVendorId,
-          previousVendorId,
-        },
-      })
-    }
-
-    await logAuditEvent({
-      orgId:      membership.org_id,
-      actorId:    user.id,
-      action:     'work_order.updated',
-      targetType: 'work_order',
-      targetId:   workOrderId,
-    })
-
-    revalidatePath(`/maintenance/${workOrderId}`)
-    revalidatePath('/maintenance')
-    return {}
-  } catch (err) {
-    console.error('[updateWorkOrder]', err)
-    reportError(err, { site: 'serverAction.maintenance.updateWorkOrder' })
-    return { error: 'Operation failed. Please try again.' }
-  }
-}
-
-// ── Add Work Order Note ──────────────────────────────────────────────────────
-
-export async function addWorkOrderNote(
-  workOrderId: string,
-  note: string
-): Promise<{ error?: string }> {
-  try {
-    const { supabase, membership } = await requireOrgRole(['admin', 'manager'])
-
-    const woRes = await supabase
-      .from('work_orders')
-      .select('id, org_id')
-      .eq('id', workOrderId)
-      .eq('org_id', membership.org_id)
-      .maybeSingle()
-
-    if (reportQueryError(woRes.error, { site: 'serverAction.maintenance.addWorkOrderNote', orgId: membership.org_id })) {
-      return { error: 'Could not add the note. Please try again.' }
-    }
-    const wo = woRes.data
-
-    if (!wo) return { error: 'Work order not found' }
-
-    const { data: { user } } = await supabase.auth.getUser()
-
-    await supabase.from('work_order_updates').insert({
-      work_order_id:             workOrderId,
-      org_id:                    membership.org_id,
-      updated_by_user_id:        user?.id ?? null,
-      updated_via_vendor_portal: false,
-      status_from:               null,
-      status_to:                 null,
-      notes:                     note.trim(),
-    })
-
-    revalidatePath(`/maintenance/${workOrderId}`)
-    return {}
-  } catch (err) {
-    console.error('[addWorkOrderNote]', err)
-    reportError(err, { site: 'serverAction.maintenance.addWorkOrderNote' })
-    return { error: 'Operation failed. Please try again.' }
-  }
-}
-
-// ── Update Work Order Status ─────────────────────────────────────────────────
-
-export async function updateWorkOrderStatus(
-  workOrderId: string,
-  status: WoStatus,
-  notes?: string
-): Promise<MaintenanceActionState> {
-  try {
-    const { supabase, membership } = await requireOrgRole(['admin', 'manager'])
-
-    const currentRes = await supabase
-      .from('work_orders')
-      .select('status, source_schedule_id, source, actual_cost, estimated_cost, title, property_id, vendor_id')
-      .eq('id', workOrderId)
-      .eq('org_id', membership.org_id)
-      .maybeSingle()
-
-    if (reportQueryError(currentRes.error, { site: 'serverAction.maintenance.updateWorkOrderStatus', orgId: membership.org_id })) {
-      return { error: 'Could not load the work order. Please try again.' }
-    }
-    const current = currentRes.data
-
-    if (!current) return { error: 'Work order not found' }
-
-    // Already completed (e.g. double-click or retried request) — no-op rather
-    // than re-firing work-order/completed and double-advancing its schedule.
-    if (current.status === 'completed') return { success: true }
-
-    // Vendor-assigned work orders must be completed through the vendor's own
-    // portal (line items → invoice → Stripe Connect payout) — completing it
-    // here would leave no invoice and no payment path.
-    if (status === 'completed' && current.vendor_id) {
-      return { error: 'This work order is assigned to a vendor — it must be completed through the vendor portal so the invoice and payment can be generated.' }
-    }
-
-    const update: TablesUpdate<'work_orders'> = status === 'completed'
-      ? workOrderCompletionFields(notes ?? null)
-      : { status }
-
-    // Completing is guarded by the WHERE clause as well as by the read above:
-    // .neq('status', 'completed') makes exactly one of two racing UPDATEs
-    // match a row, so the loser gets `updated === null` and does not re-fire
-    // the completion fan-out.
-    let query = supabase
-      .from('work_orders')
-      .update(update)
-      .eq('id', workOrderId)
-      .eq('org_id', membership.org_id)
-    if (status === 'completed') query = query.neq('status', 'completed')
-
-    const { data: updated, error } = await query.select(COMPLETED_WORK_ORDER_SELECT).maybeSingle()
-
-    if (error) {
-      console.error('[updateWorkOrderStatus]', error)
-      reportError(error, { site: 'serverAction.maintenance.updateWorkOrderStatus.update', orgId: membership.org_id })
-      return { error: 'Operation failed. Please try again.' }
-    }
-
-    if (status === 'completed') {
-      // Every completion side effect — the work-order/completed event that
-      // posts the owner_transactions expense, the work_order_updates row, and
-      // the source maintenance-schedule advance — lives in ONE helper shared
-      // with bulkUpdateWorkOrderStatus and markWorkVerified.
-      if (updated) {
-        await finalizeWorkOrderCompletion(
-          supabase,
-          membership.org_id,
-          [updated as CompletedWorkOrderRow],
-          {
-            statusFromById: new Map([[workOrderId, current.status as WoStatus]]),
-            notes:          notes ?? null,
-          },
-        )
-      }
-    } else {
-      await supabase.from('work_order_updates').insert({
-        work_order_id:             workOrderId,
-        org_id:                    membership.org_id,
-        updated_via_vendor_portal: false,
-        status_from:               current.status as WoStatus,
-        status_to:                 status,
-        notes:                     notes ?? null,
-      })
-    }
-
-    revalidatePath('/maintenance')
-    revalidatePath(`/maintenance/${workOrderId}`)
-    return { success: true }
-  } catch (err) {
-    console.error('[updateWorkOrderStatus]', err)
-    reportError(err, { site: 'serverAction.maintenance.updateWorkOrderStatus' })
-    return { error: 'Operation failed. Please try again.' }
-  }
-}
-
-// Feature 4 (advance the source schedule after a WO completion) now lives in
-// ./complete-work-order-helpers.ts, alongside the rest of the completion side
-// effects, so all three completion paths get it.
-
-// ── Feature 2: Log actual cost (PM-side) ─────────────────────────────────────
-
-export async function logActualCost(
-  workOrderId: string,
-  data: { actual_cost: number; invoice_reference?: string }
-): Promise<{ error?: string }> {
-  try {
-    const { supabase, membership, user } = await requireOrgRole(['admin', 'manager'])
-
-    // `data.actual_cost: number` is a compile-time claim about a value the
-    // browser supplies — nothing enforced it at runtime, and this figure
-    // reaches owner_transactions. addOwnerTransaction (owners/actions.ts)
-    // already validated its amount inline; this path, writing the same table,
-    // did not. NaN was the quiet one: it serializes to JSON null, which WIPES
-    // the nullable work_orders.actual_cost and then violates NOT NULL on
-    // owner_transactions.amount.
-    const parsedCost = parseMoneyAmount(data.actual_cost)
-    if (!parsedCost.ok) return { error: parsedCost.error }
-    const actualCost = parsedCost.amount
-
-    const woRes = await supabase
-      .from('work_orders')
-      .select('id, status, title, property_id, actual_cost')
-      .eq('id', workOrderId)
-      .eq('org_id', membership.org_id)
-      .maybeSingle()
-
-    if (reportQueryError(woRes.error, { site: 'serverAction.maintenance.logActualCost', orgId: membership.org_id })) {
-      return { error: 'Could not load the work order. Please try again.' }
-    }
-    const wo = woRes.data
-
-    if (!wo) return { error: 'Work order not found' }
-
-    const { error } = await supabase
-      .from('work_orders')
-      .update({
-        actual_cost:       actualCost,
-        invoice_reference: data.invoice_reference || null,
-      })
-      .eq('id', workOrderId)
-      .eq('org_id', membership.org_id)
-
-    if (error) {
-      console.error('[logActualCost]', error)
-      return { error: 'Operation failed. Please try again.' }
-    }
-
-    const { error: noteError } = await supabase.from('work_order_updates').insert({
-      work_order_id:             workOrderId,
-      org_id:                    membership.org_id,
-      updated_via_vendor_portal: false,
-      status_from:               null,
-      status_to:                 null,
-      notes:                     `Actual cost logged: $${actualCost.toFixed(2)}${data.invoice_reference ? ' (Invoice: ' + data.invoice_reference + ')' : ''}`,
-    })
-
-    // Reported, not returned: the cost itself is already saved, and losing the
-    // history line is not worth telling the PM their edit failed. It must not
-    // vanish silently though — this used to discard its result entirely.
-    if (noteError) {
-      reportError(noteError, {
-        site:  'serverAction.maintenance.logActualCost.note',
-        orgId: membership.org_id,
-      })
-    }
-
-    // Upsert expense transaction with actual cost (updates amount if already posted)
-    if (wo.status === 'completed') {
-      const { error: ledgerError } = await supabase.from('owner_transactions').upsert({
-        property_id:          wo.property_id,
-        org_id:               membership.org_id,
-        work_order_id:        workOrderId,
-        source:               'wo_completion',
-        source_reference_id:  workOrderId,
-        transaction_type:     'expense',
-        category:             'maintenance',
-        amount:               actualCost,
-        description:          wo.title,
-        transaction_date:     isoDate(),
-      }, { onConflict: 'source_reference_id,source' })
-
-      // This upsert is the ONLY way a wo_completion expense can be corrected:
-      // handleWorkOrderCompleted posts it with ignoreDuplicates: true and will
-      // never overwrite. Discarding the result left work_orders.actual_cost and
-      // the owner's ledger permanently disagreeing — the PM seeing the new
-      // figure, the owner's statement still showing the old one — while the
-      // audit row below asserted the cost had been logged.
-      if (ledgerError) {
-        console.error('[logActualCost] owner_transactions', ledgerError)
-        reportError(ledgerError, {
-          site:  'serverAction.maintenance.logActualCost.ledger',
-          orgId: membership.org_id,
-        })
-        return { error: 'The cost was saved, but the owner statement could not be updated. Please retry.' }
-      }
-    }
-
-    await logAuditEvent({
-      orgId:      membership.org_id,
-      actorId:    user.id,
-      action:     'work_order.cost.logged',
-      targetType: 'work_order',
-      targetId:   workOrderId,
-    })
-
-    revalidatePath(`/maintenance/${workOrderId}`)
-    revalidatePath('/maintenance')
-    return {}
-  } catch (err) {
-    console.error('[logActualCost]', err)
-    reportError(err, { site: 'serverAction.maintenance.logActualCost' })
-    return { error: 'Operation failed. Please try again.' }
-  }
-}
-
-// ── Feature 1: Upload work order photo (record after client-side upload) ──────
-
-export async function recordWorkOrderPhoto(
-  workOrderId: string,
-  storagePath: string
-): Promise<{ error?: string }> {
-  try {
-    // org scoping enforced by RLS's WITH CHECK on work_order_photos_insert
-    const { supabase } = await requireOrgRole(['admin', 'manager'])
-
-    const { data: { user } } = await supabase.auth.getUser()
-
-    const { error } = await supabase.from('work_order_photos').insert({
-      work_order_id: workOrderId,
-      storage_path:  storagePath,
-      uploaded_by:   user?.id ?? 'pm',
-    })
-
-    if (error) {
-      console.error('[recordWorkOrderPhoto]', error)
-      return { error: 'Operation failed. Please try again.' }
-    }
-
-    revalidatePath(`/maintenance/${workOrderId}`)
-    return {}
-  } catch (err) {
-    console.error('[recordWorkOrderPhoto]', err)
-    reportError(err, { site: 'serverAction.maintenance.recordWorkOrderPhoto' })
-    return { error: 'Operation failed. Please try again.' }
-  }
-}
+// ── Work-order editing: deliberately absent ──────────────────────────────────
+//
+// Seven exported actions used to sit here — assignCrewToWorkOrder,
+// updateWorkOrder, addWorkOrderNote, updateWorkOrderStatus, logActualCost,
+// recordWorkOrderPhoto, deleteWorkOrderPhoto. None had a caller. They read as
+// the pieces of a work-order detail screen, but that screen already exists
+// (/maintenance/[id] -> components/work-orders/work-order-detail.tsx) and gets
+// the same jobs done through narrower, purpose-built actions:
+//
+//   status changes  -> markVendorAcknowledged / markWorkVerified / cancel,
+//                      each carrying its own side effects, plus
+//                      bulkUpdateWorkOrderStatus from the board
+//   vendor dispatch -> dispatchWorkOrderToVendor (app/actions/work-order-public)
+//   actual cost     -> the Stripe invoice webhook writes the real invoice
+//                      total; finalizeWorkOrderCompletion falls back to
+//                      estimated_cost. A hand-entered figure competes with
+//                      both, over the one field CLAUDE.md says never to log.
+//   history entries -> written by the status-change and completion helpers
+//   photos          -> attached at creation (CreateWorkOrderModal) and by the
+//                      vendor through /api/work-orders/[token]/photos
+//
+// Three capabilities went with them and genuinely do not exist anywhere else:
+// editing a work order's fields after creation, re-assigning crew after
+// creation, and a PM adding or removing a photo after creation. Deleting them
+// is the deliberate choice — the live flow is create (maintenance page, the
+// create modal, or a maintenance schedule) then dispatch, and a dead action is
+// not a feature. If one of those is wanted later it gets written against the
+// detail page that exists now, rather than revived from a version that
+// predates it.
+//
+// The one worth knowing about before it went: recordWorkOrderPhoto never
+// verified that its workOrderId belonged to the caller's org — it leaned
+// entirely on the RLS WITH CHECK — and it wrote a caller-supplied storagePath
+// verbatim, bypassing orgScopedStoragePath(). Its sibling deleteWorkOrderPhoto
+// does both checks. That asymmetry is exactly the shape this class of finding
+// keeps taking: the reachable half got hardened, the dead half did not.
 
 /**
  * Mints short-lived signed URLs for a work order's photos.
@@ -935,63 +539,6 @@ export async function getWorkOrderPhotoUrls(
   }
 }
 
-export async function deleteWorkOrderPhoto(photoId: string): Promise<{ error?: string }> {
-  try {
-    const { supabase, membership } = await requireOrgRole(['admin', 'manager'])
-
-    const photoRes = await supabase
-      .from('work_order_photos')
-      .select('id, storage_path, work_order_id')
-      .eq('id', photoId)
-      .maybeSingle()
-
-    if (reportQueryError(photoRes.error, { site: 'serverAction.maintenance.deleteWorkOrderPhoto.photo', orgId: membership.org_id })) {
-      return { error: 'Could not delete the photo. Please try again.' }
-    }
-    const photo = photoRes.data
-
-    if (!photo) return { error: 'Photo not found' }
-
-    // Verify the work order belongs to this org before deleting
-    const woRes = await supabase
-      .from('work_orders')
-      .select('id')
-      .eq('id', photo.work_order_id)
-      .eq('org_id', membership.org_id)
-      .maybeSingle()
-
-    if (reportQueryError(woRes.error, { site: 'serverAction.maintenance.deleteWorkOrderPhoto.workOrder', orgId: membership.org_id })) {
-      return { error: 'Could not delete the photo. Please try again.' }
-    }
-    const wo = woRes.data
-
-    if (!wo) return { error: 'Photo not found' }
-
-    // Delete from storage with the SERVICE client, not the caller's.
-    // The storage DELETE policy only matches objects whose first path segment
-    // is the caller's org id; legacy `wo-<id>/…` objects predate that
-    // contract, so an RLS-scoped remove() would silently no-op on them and
-    // leave the file behind after its row was deleted. The org ownership
-    // check above is what authorizes this.
-    const { createServiceClient } = await import('@/lib/supabase/server')
-    const service = createServiceClient({ authorizedBy: membership })
-    const objectPath = toStorageObjectPath(WORK_ORDER_PHOTO_BUCKET, photo.storage_path)
-    if (objectPath) {
-      const { error: removeErr } = await service.storage.from(WORK_ORDER_PHOTO_BUCKET).remove([objectPath])
-      if (removeErr) console.error('[deleteWorkOrderPhoto] storage remove failed', removeErr)
-    }
-
-    // Delete record
-    await supabase.from('work_order_photos').delete().eq('id', photoId)
-
-    revalidatePath(`/maintenance/${photo.work_order_id}`)
-    return {}
-  } catch (err) {
-    console.error('[deleteWorkOrderPhoto]', err)
-    reportError(err, { site: 'serverAction.maintenance.deleteWorkOrderPhoto' })
-    return { error: 'Operation failed. Please try again.' }
-  }
-}
 
 // ── Send quote requests to multiple vendors ───────────────────────────────────
 
