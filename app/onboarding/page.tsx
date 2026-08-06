@@ -9,7 +9,7 @@ interface Props {
   searchParams: Promise<{ invite?: string }>
 }
 
-export default async function OnboardingPage({ searchParams }: Props) {
+export default async function OnboardingPage({ searchParams }: Readonly<Props>) {
   const { user } = await requireAuth()
   // Both invite-acceptance call sites redirect here with ?invite=invalid when
   // acceptOrgInvite returns false, rather than dropping the user on "Name your

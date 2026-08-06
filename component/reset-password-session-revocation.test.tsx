@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { render, screen, fireEvent, waitFor } from '@testing-library/react'
+import { render, screen, fireEvent } from '@testing-library/react'
 
 const push = vi.fn()
 vi.mock('next/navigation', () => ({ useRouter: () => ({ push }) }))
@@ -26,8 +26,7 @@ import { ResetPasswordForm } from '@/app/(auth)/reset-password/reset-password-fo
 // ============================================================================
 
 async function fillAndSubmit(pw = 'correct horse battery') {
-  await waitFor(() => expect(screen.getByLabelText(/^New Password$/i)).toBeTruthy())
-  fireEvent.change(screen.getByLabelText(/^New Password$/i),         { target: { value: pw } })
+  fireEvent.change(await screen.findByLabelText(/^New Password$/i), { target: { value: pw } })
   fireEvent.change(screen.getByLabelText(/^Confirm New Password$/i), { target: { value: pw } })
   fireEvent.submit(screen.getByRole('button', { name: /Update Password/i }))
 }
@@ -44,7 +43,10 @@ describe('reset-password — session revocation', () => {
     render(<ResetPasswordForm />)
     await fillAndSubmit()
 
-    await waitFor(() => expect(signOut).toHaveBeenCalled())
+    // findByText resolves once the success banner renders, which only happens
+    // after the signOut await above it has settled — so this is the same
+    // "wait for the async work" the waitFor was doing, without polling.
+    await screen.findByText(/Password updated/i)
     // 'global', not the default local scope — a local sign-out drops only the
     // browser doing the reset and leaves the intruder's session untouched.
     expect(signOut).toHaveBeenCalledWith({ scope: 'global' })
@@ -56,7 +58,7 @@ describe('reset-password — session revocation', () => {
     render(<ResetPasswordForm />)
     await fillAndSubmit()
 
-    await waitFor(() => expect(screen.getByText(/too weak/i)).toBeTruthy())
+    expect(await screen.findByText(/too weak/i)).toBeTruthy()
     expect(signOut).not.toHaveBeenCalled()
   })
 
@@ -70,19 +72,18 @@ describe('reset-password — session revocation', () => {
     render(<ResetPasswordForm />)
     await fillAndSubmit()
 
-    await waitFor(() => expect(screen.getByText(/could not sign out your other devices/i)).toBeTruthy())
+    expect(await screen.findByText(/could not sign out your other devices/i)).toBeTruthy()
     expect(screen.queryByText(/Password updated/i)).toBeNull()
     expect(push).not.toHaveBeenCalled()
   })
 
   it('refuses to submit at all when the two passwords differ', async () => {
     render(<ResetPasswordForm />)
-    await waitFor(() => expect(screen.getByLabelText(/^New Password$/i)).toBeTruthy())
-    fireEvent.change(screen.getByLabelText(/^New Password$/i),         { target: { value: 'aaaaaaaa' } })
+    fireEvent.change(await screen.findByLabelText(/^New Password$/i), { target: { value: 'aaaaaaaa' } })
     fireEvent.change(screen.getByLabelText(/^Confirm New Password$/i), { target: { value: 'bbbbbbbb' } })
     fireEvent.submit(screen.getByRole('button', { name: /Update Password/i }))
 
-    await waitFor(() => expect(screen.getByText(/Passwords do not match/i)).toBeTruthy())
+    expect(await screen.findByText(/Passwords do not match/i)).toBeTruthy()
     expect(updateUser).not.toHaveBeenCalled()
     expect(signOut).not.toHaveBeenCalled()
   })
