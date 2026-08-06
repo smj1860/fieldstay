@@ -104,3 +104,62 @@ on failure.
   on parallel workers against one org.
 - `global-setup.ts` cleans stale `[E2E]%` rows before seeding, so an aborted
   run never poisons the next one.
+
+### GRANT parity with production (checked 2026-08-06)
+
+**A new E2E project starts with looser table privileges than production, and
+the `db-invariants` job runs against E2E.** That combination is worth
+understanding, because it means the gate can pass on a permission posture the
+thing it protects does not have.
+
+A Supabase project created through the dashboard carries a default-privilege
+entry that production does not:
+
+```sql
+-- pg_default_acl, grantor postgres, schema public, objtype r (tables)
+-- {postgres=arwdDxtm/postgres, authenticated=arwdDxtm/postgres, service_role=…}
+```
+
+`arwdDxtm` is everything — INSERT, SELECT, UPDATE, DELETE, **TRUNCATE**,
+REFERENCES, TRIGGER. So every table created by a migration inherits full
+`authenticated` access automatically. On 2026-08-06 the E2E project had
+TRUNCATE, REFERENCES and TRIGGER granted to `authenticated` on **all 91**
+public tables, plus 86 more (table, privilege) DML pairs than production, while
+production had zero of the three extras.
+
+Two consequences, and the second is the one that matters:
+
+1. `TRUNCATE` bypasses RLS entirely, so a signed-in user on that project could
+   empty any table. E2E holds no real data, so this was a test-project problem.
+2. The `db-invariants` gate exists partly to catch a **missing** GRANT — the
+   defect class that made the notification bell go dark in production, where
+   `notifications` had correct RLS policies and no `authenticated` grant
+   (`20260710200000_grant_authenticated_missing_tables.sql`). On a project where
+   every new table is granted everything by default, that check can never fail.
+
+Repaired by removing the source and then matching production exactly:
+
+```sql
+ALTER DEFAULT PRIVILEGES FOR ROLE postgres IN SCHEMA public
+  REVOKE ALL ON TABLES FROM authenticated;
+
+REVOKE ALL ON ALL TABLES IN SCHEMA public FROM authenticated;
+-- then re-GRANT production's exact per-table privilege set
+```
+
+Deliberately **not** a migration: this is project configuration, not a schema
+change, and a migration hard-coding a grant snapshot goes stale the moment the
+next table is added. Run it against any newly created E2E project as part of
+step 1. Verify with the fingerprint — it must be identical on both projects:
+
+```sql
+SELECT md5(string_agg(table_name||':'||privilege_type, ',' ORDER BY table_name, privilege_type))
+FROM information_schema.role_table_grants
+WHERE table_schema = 'public' AND grantee = 'authenticated';
+```
+
+There is no automated check for this yet. `db_invariant_report()` could grow an
+`overbroad_authenticated_grants` section (TRUNCATE/REFERENCES/TRIGGER granted to
+a client role) and a `default_privileges_to_client_roles` one — both are true
+invariants of production, so the gate could assert them without needing to see
+production at all.
