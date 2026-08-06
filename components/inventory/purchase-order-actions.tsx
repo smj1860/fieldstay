@@ -34,7 +34,7 @@ interface PurchaseOrderActionsProps {
 }
 
 /** Terminal states have nothing left to do — see PO_TRANSITIONS in actions.ts. */
-const TERMINAL: readonly PoStatus[] = ['received', 'cancelled']
+const TERMINAL: ReadonlySet<PoStatus> = new Set(['received', 'cancelled'])
 
 export function PurchaseOrderActions({
   purchaseOrderId,
@@ -49,7 +49,7 @@ export function PurchaseOrderActions({
   const [error, setError] = useState<string | null>(null)
   const [pending, startTransition] = useTransition()
 
-  if (TERMINAL.includes(status)) return null
+  if (TERMINAL.has(status)) return null
 
   function run(next: 'ordered' | 'received' | 'cancelled', totalCost?: number) {
     setError(null)
