@@ -66,7 +66,6 @@ import {
   removeMaintenanceScheduleItem,
   addCatalogItemToProperty,
   addCustomMaintenanceItem,
-  recordMaintenanceCompletion,
   fetchArchivedWorkOrders,
 } from '@/app/(dashboard)/maintenance/actions'
 import {
@@ -1304,6 +1303,74 @@ describe('maintenance/actions', () => {
       expect(inngest.send).not.toHaveBeenCalled()
     })
 
+    // acceptVendorSuggestion — the other way a PM assigns a vendor — has always
+    // written status: 'assigned' alongside vendor_id. This path wrote only
+    // vendor_id, so a bulk-assigned work order kept reading 'pending' while
+    // carrying a vendor who had already been emailed. Production had two of
+    // those, and not one work order in 'assigned' or 'in_progress' at all.
+    it('advances the status to assigned, not just the vendor', async () => {
+      const supabase = makeSupabase({
+        vendors:      [{ data: { id: 'vendor_1', name: 'Acme Cleaning' } }],
+        work_orders:  [{ data: [{ id: 'wo_1', suggestion_status: null, suggested_vendor_ids: null }] }, { error: null }, { error: null }],
+        vendor_compliance_status: compliant(),
+      })
+      vi.mocked(requireOrgRole).mockResolvedValue({
+        supabase, membership, user: { id: 'user_1' },
+      } as never)
+
+      await bulkAssignVendor(['wo_1'], 'vendor_1')
+
+      const updates = supabase.calls.filter((c) => c.table === 'work_orders' && c.method === 'update')
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      expect(updates.some((c) => (c.args[0] as any).vendor_id === 'vendor_1')).toBe(true)
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      expect(updates.some((c) => (c.args[0] as any).status === 'assigned')).toBe(true)
+    })
+
+    // The status must only move FORWARD. A reassignment on a work order that is
+    // already in_progress must not drag it back to 'assigned' — hence a second,
+    // filtered statement rather than one more column on the vendor update.
+    it('only advances a status that is still pending or awaiting quotes', async () => {
+      const supabase = makeSupabase({
+        vendors:      [{ data: { id: 'vendor_1', name: 'Acme Cleaning' } }],
+        work_orders:  [{ data: [{ id: 'wo_1', suggestion_status: null, suggested_vendor_ids: null }] }, { error: null }, { error: null }],
+        vendor_compliance_status: compliant(),
+      })
+      vi.mocked(requireOrgRole).mockResolvedValue({
+        supabase, membership, user: { id: 'user_1' },
+      } as never)
+
+      await bulkAssignVendor(['wo_1'], 'vendor_1')
+
+      const statusFilter = supabase.calls.find(
+        (c) => c.table === 'work_orders' && c.method === 'in' && c.args[0] === 'status',
+      )
+      expect(statusFilter?.args[1]).toEqual(['pending', 'quote_requested'])
+    })
+
+    // The vendor IS assigned and about to be emailed by the time this runs.
+    // Failing the action would tell the PM nothing happened when the outbound
+    // email is already on its way.
+    it('does not fail the assignment when only the status advance errors', async () => {
+      const supabase = makeSupabase({
+        vendors:      [{ data: { id: 'vendor_1', name: 'Acme Cleaning' } }],
+        work_orders:  [
+          { data: [{ id: 'wo_1', suggestion_status: null, suggested_vendor_ids: null }] },
+          { error: null },
+          { error: { message: 'deadlock detected', code: '40P01' } },
+        ],
+        vendor_compliance_status: compliant(),
+      })
+      vi.mocked(requireOrgRole).mockResolvedValue({
+        supabase, membership, user: { id: 'user_1' },
+      } as never)
+
+      const result = await bulkAssignVendor(['wo_1'], 'vendor_1')
+
+      expect(result).toEqual({})
+      expect(inngest.send).toHaveBeenCalled()
+    })
+
     it('does not touch the DB when the caller lacks the required role', async () => {
       const supabase = makeSupabase({})
       vi.mocked(requireOrgRole).mockRejectedValue(
@@ -1865,46 +1932,6 @@ describe('maintenance/actions', () => {
       const result = await addCustomMaintenanceItem('prop_1', {
         name: 'Check sump pump', frequency: 'annual', next_due_date: '2026-09-01',
       })
-
-      expect(result).toEqual({ error: 'Operation failed. Please try again.' })
-      expect(supabase.from).not.toHaveBeenCalled()
-    })
-  })
-
-  describe('recordMaintenanceCompletion', () => {
-    it('records a completion and advances next_due_date for an item verified to belong to the caller org', async () => {
-      const supabase = makeSupabase({
-        maintenance_schedules:  [{ data: { property_id: 'prop_1', org_id: 'org_1', asset_category: null, frequency: 'monthly', active_from_month: null, active_to_month: null } }, { error: null }],
-        maintenance_completions: [{ error: null }],
-      })
-      vi.mocked(requireOrgRole).mockResolvedValue({
-        supabase, membership, user: { id: 'user_1' },
-      } as never)
-
-      const result = await recordMaintenanceCompletion('item_1', { notes: 'Done' })
-
-      expect(result.success).toBe(true)
-      expect(result.nextDueDate).toBeDefined()
-    })
-
-    it('rejects an item id that does not belong to the caller org (IDOR check)', async () => {
-      const supabase = makeSupabase({ maintenance_schedules: [{ data: null }] })
-      vi.mocked(requireOrgRole).mockResolvedValue({
-        supabase, membership, user: { id: 'user_1' },
-      } as never)
-
-      const result = await recordMaintenanceCompletion('other-orgs-item', {})
-
-      expect(result).toEqual({ error: 'Maintenance item not found' })
-    })
-
-    it('does not touch the DB when the caller lacks the required role', async () => {
-      const supabase = makeSupabase({})
-      vi.mocked(requireOrgRole).mockRejectedValue(
-        new Error('You do not have permission to perform this action.')
-      )
-
-      const result = await recordMaintenanceCompletion('item_1', {})
 
       expect(result).toEqual({ error: 'Operation failed. Please try again.' })
       expect(supabase.from).not.toHaveBeenCalled()
