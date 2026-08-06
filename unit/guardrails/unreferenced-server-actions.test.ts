@@ -100,8 +100,17 @@ const BASELINE = new Set([
   // the only writer of maintenance_completions. See the note at its old site.
   'app/(dashboard)/maintenance/work-order-actions.ts::reorderWorkOrderLineItems',
   'app/(dashboard)/maintenance/work-order-actions.ts::updatePropertyAccessInstructions',
-  'app/(dashboard)/properties/[id]/setup/maintenance/actions.ts::addMaintenanceSchedule',
-  'app/(dashboard)/properties/[id]/setup/maintenance/actions.ts::cloneMaintenanceFromProperty',
+  // addMaintenanceSchedule / cloneMaintenanceFromProperty pruned 2026-08-06 by
+  // DELETING both, along with a THIRD dead action in the same file this
+  // guardrail could not see — see the import-path note on findUnreferenced().
+  // addMaintenanceSchedule was a divergent duplicate of
+  // createMaintenanceSchedule that gated on requireOrgMember() instead of
+  // requireOrgRole(['admin','manager']) and computed next_due_date only for
+  // seasonal schedules, so every ROUTINE schedule it created was born
+  // permanently dormant: the maintenance cron filters on
+  // .lt('next_due_date', today) and only ever advances an existing date, and
+  // NULL satisfies no comparison. cloneMaintenanceFromProperty was superseded
+  // by clone-actions.ts, which it disagreed with on what cloning even means.
 
   // Added 2026-08-05 when stripComments() was fixed — see the ⚠️ note above.
   // All three predate the guardrail; none is newly dead.
@@ -147,15 +156,72 @@ function stripComments(src: string): string {
     .replace(/(?<!:)\/\/.*$/gm, '')      // trailing // (not a URL's //)
 }
 
+const IMPORT_SOURCE = /from\s+['"]([^'"]+)['"]/g
+
+/** Repo-relative, extension-less path an import specifier points at. */
+function resolveImport(fromFile: string, spec: string): string | null {
+  const strip = (p: string) => p.replace(/\.(tsx?|jsx?)$/, '')
+  if (spec.startsWith('@/')) return strip(spec.slice(2))
+  if (!spec.startsWith('.')) return null            // package import
+  const dir   = fromFile.split('/').slice(0, -1)
+  const parts = spec.split('/')
+  for (const part of parts) {
+    if (part === '.') continue
+    else if (part === '..') dir.pop()
+    else dir.push(part)
+  }
+  return strip(dir.join('/'))
+}
+
+/**
+ * Files whose imports reach `target` (a repo-relative .ts/.tsx path).
+ *
+ * Only consulted for AMBIGUOUS names — see findUnreferenced below.
+ */
+function importersOf(sources: { path: string; src: string }[], target: string): Set<string> {
+  const want = target.replace(/\.(tsx?)$/, '')
+  const out  = new Set<string>()
+  for (const { path, src } of sources) {
+    IMPORT_SOURCE.lastIndex = 0
+    for (const m of src.matchAll(IMPORT_SOURCE)) {
+      if (resolveImport(path, m[1]!) === want) { out.add(path); break }
+    }
+  }
+  return out
+}
+
 function findUnreferenced(sources: { path: string; src: string }[]): string[] {
   const actions = findServerActions(sources)
   const code    = new Map(sources.map((s) => [s.path, stripComments(s.src)]))
   const unreferenced: string[] = []
 
+  // How many distinct action files export each name. A name exported once can
+  // be matched by bare identifier anywhere; a name exported TWICE cannot —
+  // see the note in the loop.
+  const exportCount = new Map<string, number>()
+  for (const a of actions) exportCount.set(a.name, (exportCount.get(a.name) ?? 0) + 1)
+
   for (const action of actions) {
     const re = new RegExp(`\\b${action.name}\\b`)
+
+    // A name exported from more than one action file cannot be resolved by
+    // bare identifier: the LIVE copy's call sites mask the dead one, and the
+    // guardrail reports both as referenced. That is not hypothetical — it hid
+    // a third dead action in properties/[id]/setup/maintenance/actions.ts
+    // (deleteMaintenanceSchedule, shadowed by the live same-named action in
+    // maintenance/actions.ts) for as long as this test has existed. For an
+    // ambiguous name, a reference only counts from a file that actually
+    // imports THIS file. Unambiguous names keep the looser bare-identifier
+    // match, which tolerates re-exports and non-import references.
+    const candidates = exportCount.get(action.name)! > 1
+      ? importersOf(sources, action.file)
+      : null
+
     const referenced = sources.some(
-      ({ path }) => path !== action.file && re.test(code.get(path) ?? ''),
+      ({ path }) =>
+        path !== action.file &&
+        (candidates === null || candidates.has(path)) &&
+        re.test(code.get(path) ?? ''),
     )
     if (!referenced) unreferenced.push(action.key)
   }
@@ -250,6 +316,44 @@ describe('guardrail: every exported Server Action has a caller', () => {
     const sources = [
       { path: 'app/x/actions.ts', src: "'use server'\nexport async function real() {}" },
       { path: 'app/x/page.tsx',   src: "// real() is called below\nimport { real } from './actions'\nreal()" },
+    ]
+
+    expect(findUnreferenced(sources)).toEqual([])
+  })
+
+  // The blind spot that hid a third dead action in the setup/maintenance step
+  // for as long as this guardrail has existed: two files export the same
+  // action name, one is live, and the live one's call sites make the dead one
+  // look referenced. Both directions are pinned — a rule that over-corrects
+  // into false positives is as useless as one that under-reports.
+  it('does NOT let a live action mask a dead one that shares its name', () => {
+    const sources = [
+      { path: 'app/live/actions.ts', src: "'use server'\nexport async function deleteThing() {}" },
+      { path: 'app/dead/actions.ts', src: "'use server'\nexport async function deleteThing() {}" },
+      { path: 'app/live/page.tsx',   src: "import { deleteThing } from '@/app/live/actions'\ndeleteThing()" },
+    ]
+
+    expect(findUnreferenced(sources)).toEqual(['app/dead/actions.ts::deleteThing'])
+  })
+
+  it('resolves a relative import to the right one of two same-named actions', () => {
+    const sources = [
+      { path: 'app/live/actions.ts', src: "'use server'\nexport async function deleteThing() {}" },
+      { path: 'app/dead/actions.ts', src: "'use server'\nexport async function deleteThing() {}" },
+      { path: 'app/dead/page.tsx',   src: "import { deleteThing } from './actions'\ndeleteThing()" },
+    ]
+
+    // The DEAD path's file is the one with a real importer here, so the
+    // verdict must flip — proof the resolver reads the path, not the name.
+    expect(findUnreferenced(sources)).toEqual(['app/live/actions.ts::deleteThing'])
+  })
+
+  it('counts both when each same-named action has its own importer', () => {
+    const sources = [
+      { path: 'app/a/actions.ts', src: "'use server'\nexport async function shared() {}" },
+      { path: 'app/b/actions.ts', src: "'use server'\nexport async function shared() {}" },
+      { path: 'app/a/page.tsx',   src: "import { shared } from './actions'\nshared()" },
+      { path: 'app/b/page.tsx',   src: "import { shared } from '@/app/b/actions'\nshared()" },
     ]
 
     expect(findUnreferenced(sources)).toEqual([])

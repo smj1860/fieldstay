@@ -1,10 +1,11 @@
 'use client'
 
 import { useState, useTransition } from 'react'
+import Link from 'next/link'
 import { StandardTemplateModal } from '@/components/onboarding/StandardTemplateModal'
 import { completeMaintenanceStep } from './actions'
 import { Loader2 } from 'lucide-react'
-import { Button } from '@/components/ui/Button'
+import { Button, buttonVariantClass } from '@/components/ui/Button'
 
 interface Props {
   propertyId: string
@@ -15,6 +16,12 @@ interface Props {
 // built via Templates → Maintenance → Create Template instead of inline
 // here. Standard Template stays, since applying the real seeded 36-item
 // schedule as-is is still the fast path for a new property.
+//
+// The custom path is now a LINK to that builder rather than prose telling the
+// PM where to go afterwards. Nothing was wired to the removed inline form, so
+// the only route to a non-standard schedule was reading the paragraph above
+// and navigating there by hand — and the step's own actions.ts still carried
+// the orphaned addMaintenanceSchedule behind it (deleted with this change).
 export function MaintenanceSetupStep({ propertyId }: Props) {
   const [showStandardModal, setShowStandardModal] = useState(false)
   const [completing, startComplete] = useTransition()
@@ -32,17 +39,23 @@ export function MaintenanceSetupStep({ propertyId }: Props) {
           Set Up Maintenance Schedule
         </h2>
         <p className="text-sm text-muted-themed text-center mt-2 max-w-xs">
-          Apply the standard FieldStay maintenance schedule now, or skip and
-          build a custom one later from Templates → Maintenance.
+          Apply the standard FieldStay maintenance schedule now, or build your
+          own template and apply that instead.
         </p>
 
-        <div className="mt-8 w-full">
+        <div className="mt-8 w-full flex flex-col gap-3">
           <Button
             onClick={() => setShowStandardModal(true)}
             className="w-full py-4 rounded-xl text-sm font-semibold transition-colors"
           >
             Use Standard Template
           </Button>
+          <Link
+            href="/templates/maintenance/create"
+            className={`${buttonVariantClass('secondary')} w-full py-4 rounded-xl text-sm font-semibold transition-colors`}
+          >
+            Create Template
+          </Link>
         </div>
 
         <button
