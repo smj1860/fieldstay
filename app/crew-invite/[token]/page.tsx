@@ -4,16 +4,9 @@ import { notFound } from 'next/navigation'
 import { AcceptInviteForm } from './accept-invite-form'
 import { CheckCircle2, AlarmClock } from 'lucide-react'
 import { buttonVariantClass } from '@/components/ui/Button'
+import { crewInviteIsExpired } from '@/lib/crew/invite-expiry'
 
 interface Props { params: Promise<{ token: string }> }
-
-// Plain helper, not a component — keeps the Date.now() call out of the
-// page component's own body (react-hooks/purity flags impure calls inside
-// anything it identifies as a component/hook; this is a one-shot
-// server-rendered check, not something subject to re-render concerns).
-function isInviteExpired(sentAt: string, ttlDays: number): boolean {
-  return new Date(sentAt).getTime() + ttlDays * 86_400_000 < Date.now()
-}
 
 export default async function CrewInvitePage({ params }: Props) {
   const { token } = await params
@@ -23,7 +16,7 @@ export default async function CrewInvitePage({ params }: Props) {
   // link is dead when it is not.
   const crewRes = await supabase
     .from('crew_members')
-    .select('id, name, email, invite_sent_at, invite_accepted_at, user_id')
+    .select('id, name, email, invite_sent_at, invite_accepted_at, user_id, created_at')
     .eq('invite_token', token)
     .maybeSingle()
 
@@ -47,21 +40,26 @@ export default async function CrewInvitePage({ params }: Props) {
     )
   }
 
-  if (crew.invite_sent_at) {
-    const expired = isInviteExpired(crew.invite_sent_at, 7)
-    if (expired) {
-      return (
-        <div className="min-h-screen bg-brand-800 flex items-center justify-center p-4">
-          <div className="bg-card-themed rounded-2xl p-8 max-w-md w-full text-center">
-            <AlarmClock className="w-8 h-8 mx-auto mb-3" style={{ color: 'var(--accent-amber)' }} />
-            <h2 className="text-lg font-bold text-primary-themed mb-2">Invite Link Expired</h2>
-            <p className="text-sm text-muted-themed">
-              This link has expired. Ask your property manager to send a new invite.
-            </p>
-          </div>
+  // Shared with the Server Action, deliberately — this page used to run its
+  // own copy of the rule, and only `if (crew.invite_sent_at)` at that, so a row
+  // with a NULL invite_sent_at rendered a working activation form no matter how
+  // old it was. The action hardened its copy (fall back to created_at) because
+  // a permanently-valid token mints a real auth account; the page never
+  // followed. Not exploitable — the action is the gate and refuses it — but the
+  // crew member filled in a password form before being told the link was dead,
+  // and that was 5 of the 8 invites pending in production on 2026-08-06.
+  if (crewInviteIsExpired(crew.invite_sent_at, crew.created_at)) {
+    return (
+      <div className="min-h-screen bg-brand-800 flex items-center justify-center p-4">
+        <div className="bg-card-themed rounded-2xl p-8 max-w-md w-full text-center">
+          <AlarmClock className="w-8 h-8 mx-auto mb-3" style={{ color: 'var(--accent-amber)' }} />
+          <h2 className="text-lg font-bold text-primary-themed mb-2">Invite Link Expired</h2>
+          <p className="text-sm text-muted-themed">
+            This link has expired. Ask your property manager to send a new invite.
+          </p>
         </div>
-      )
-    }
+      </div>
+    )
   }
 
   return (
