@@ -103,7 +103,13 @@ const BASELINE = new Set([
   // duplicate of advanceSchedulesAfterCompletion that anchored next_due_date to
   // today instead of the schedule's own date, ignored schedule_type, and was
   // the only writer of maintenance_completions. See the note at its old site.
-  'app/(dashboard)/maintenance/work-order-actions.ts::reorderWorkOrderLineItems',
+  // reorderWorkOrderLineItems pruned 2026-08-06 by DELETING it — the
+  // drag-and-drop control whose save shape it was written for never got built.
+  // Its absence was not the real defect: sort_order defaulted to a flat 0 on
+  // every hand-entered line, so the three reads that `.order('sort_order')`
+  // were sorting an all-ties column and could return a different order run to
+  // run — on the invoice a vendor is paid against. Fixed at the source
+  // (nextLineItemSortOrder) plus created_at/id tiebreakers on each read.
   'app/(dashboard)/maintenance/work-order-actions.ts::updatePropertyAccessInstructions',
   // addMaintenanceSchedule / cloneMaintenanceFromProperty pruned 2026-08-06 by
   // DELETING both, along with a THIRD dead action in the same file this

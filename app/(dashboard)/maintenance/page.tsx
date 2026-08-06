@@ -41,7 +41,14 @@ export default async function MaintenancePage() {
       `)
       .eq('org_id', membership.org_id)
       .in('status', ['pending', 'quote_requested', 'assigned', 'in_progress'])
-      .order('created_at', { ascending: false }),
+      .order('created_at', { ascending: false })
+      // The embedded line items were never ordered at all here, so the board's
+      // work-order detail showed them in an order Postgres chose — and could
+      // choose differently on the next load. Same three keys as the standalone
+      // detail page (/maintenance/[id]) so the two agree.
+      .order('sort_order', { referencedTable: 'work_order_line_items', ascending: true })
+      .order('created_at', { referencedTable: 'work_order_line_items', ascending: true })
+      .order('id',         { referencedTable: 'work_order_line_items', ascending: true }),
 
     supabase
       .from('properties')

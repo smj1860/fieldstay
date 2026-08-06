@@ -14,6 +14,54 @@ import {
 
 // ── Line Items ────────────────────────────────────────────────
 
+/**
+ * The next sort_order for a work order's line items.
+ *
+ * sort_order decides the order line items print in — on the work-order detail
+ * page, on the board, and on the invoice at /invoices/[invoiceId], all three
+ * of which read them back with `.order('sort_order')`. This used to default to
+ * a flat 0, and the only UI that adds a line item never passed one, so every
+ * PM-entered line on a work order carried the SAME sort key. Sorting rows that
+ * all tie leaves the order up to Postgres, which is free to return a different
+ * one on a different run — so an invoice going to a vendor and feeding an
+ * owner statement could shuffle its own lines between loads.
+ *
+ * The quote-approval path already got this right: approve_quote_request offsets
+ * the copied lines past whatever the work order holds, with a comment saying
+ * two items would otherwise both claim 0. This is the same rule for the
+ * hand-entry path.
+ *
+ * MAX+1 is read-then-write, so two simultaneous adds can land on the same
+ * number. That is deliberately not guarded: a collision costs a tie between
+ * exactly two rows, which the created_at/id tiebreakers on every read already
+ * resolve deterministically. A sequence or an advisory lock would be real
+ * machinery for a cosmetic outcome.
+ */
+async function nextLineItemSortOrder(
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- Supabase client is untyped repo-wide (no <Database> generic; see lib/supabase/server.ts)
+  supabase: any,
+  workOrderId: string,
+  orgId: string,
+): Promise<number> {
+  const { data, error } = await supabase
+    .from('work_order_line_items')
+    .select('sort_order')
+    .eq('work_order_id', workOrderId)
+    .eq('org_id', orgId)
+    .order('sort_order', { ascending: false })
+    .limit(1)
+    .maybeSingle()
+
+  // A failed read must not silently reintroduce the flat-0 default it exists
+  // to remove — but it also must not block adding the line. Reported, then
+  // fall back to 0, where the tiebreakers still give a stable order.
+  if (error) {
+    reportError(error, { site: 'maintenance.addWorkOrderLineItem.sortOrder', orgId })
+    return 0
+  }
+  return typeof data?.sort_order === 'number' ? data.sort_order + 1 : 0
+}
+
 export async function addWorkOrderLineItem(
   workOrderId: string,
   item: {
@@ -26,6 +74,8 @@ export async function addWorkOrderLineItem(
   }
 ) {
   const { supabase, membership } = await requireOrgRole(['admin', 'manager'])
+
+  const sortOrder = item.sort_order ?? await nextLineItemSortOrder(supabase, workOrderId, membership.org_id)
 
   const { error } = await supabase
     .from('work_order_line_items')
@@ -42,7 +92,7 @@ export async function addWorkOrderLineItem(
       quantity:      item.quantity,
       unit:          item.unit,
       unit_cost:     item.unit_cost,
-      sort_order:    item.sort_order ?? 0,
+      sort_order:    sortOrder,
     })
 
   if (error) {
@@ -85,24 +135,20 @@ export async function deleteWorkOrderLineItem(lineItemId: string) {
   revalidatePath('/maintenance')
 }
 
-export async function reorderWorkOrderLineItems(
-  updates: Array<{ id: string; sort_order: number }>
-) {
-  const { supabase, membership } = await requireOrgRole(['admin', 'manager'])
-
-  const promises = updates.map(({ id, sort_order }) =>
-    supabase
-      .from('work_order_line_items')
-      .update({ sort_order })
-      .eq('id', id)
-      .eq('org_id', membership.org_id)
-  )
-
-  const results = await Promise.all(promises)
-  const failed = results.find(({ error }) => error)
-  if (failed?.error) throw new Error(`Failed to reorder: ${failed.error.message}`)
-  revalidatePath('/maintenance')
-}
+// reorderWorkOrderLineItems was deleted here 2026-08-06. It took a list of
+// {id, sort_order} pairs — the shape a drag-and-drop control sends after a drop
+// shifts everything below it — and it had no caller, because that drag handle
+// was never built: line-items-editor.tsx adds a line and deletes a line, and
+// that is the whole editor.
+//
+// The idea behind it was sound (arrange the lines the way the invoice should
+// read, rather than the order they were typed), but its absence was not the
+// real problem. The real problem was that sort_order had no meaningful value
+// to reorder: every hand-entered line defaulted to 0, so the three reads that
+// `.order('sort_order')` were sorting an all-ties column. That is fixed at the
+// source — see nextLineItemSortOrder above, and the created_at/id tiebreakers
+// on each read. If hand-arranging is ever wanted, it gets built against a
+// column that now means something.
 
 // ── Sign-Off ──────────────────────────────────────────────────
 

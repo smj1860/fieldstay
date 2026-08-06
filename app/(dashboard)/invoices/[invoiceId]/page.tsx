@@ -66,10 +66,16 @@ export default async function InvoicePage({
   // Fetch vendor-submitted line items
   const { data: lineItems, error: lineItemsError } = await supabase
     .from('work_order_line_items')
-    .select('id, line_type, description, quantity, unit_cost, line_total, sort_order')
+    .select('id, line_type, description, quantity, unit_cost, line_total, sort_order, created_at')
     .eq('work_order_id', invoice.work_order_id)
     .eq('vendor_submitted', true)
-    .order('sort_order', { ascending: true })
+    // This is the document a vendor is paid against and that feeds the owner
+    // statement, so its line order must be the same every time it is opened.
+    // sort_order alone did not give that: it defaulted to a flat 0, and rows
+    // tied on the sort key come back in whatever order Postgres likes.
+    .order('sort_order',  { ascending: true })
+    .order('created_at',  { ascending: true })
+    .order('id',          { ascending: true })
 
 
   // Logs + reports, then throws so the segment's error.tsx renders a real
