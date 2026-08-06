@@ -86,7 +86,7 @@ export default async function MaintenancePage() {
 
     supabase
       .from('vendor_compliance_status')
-      .select('vendor_id, compliance_status')
+      .select('vendor_id, compliance_status, org_onboarding_grace')
       .eq('org_id', membership.org_id),
   ])
 

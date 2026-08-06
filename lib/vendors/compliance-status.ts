@@ -28,7 +28,22 @@ export const NON_BLOCKING_COMPLIANCE_STATUSES: ReadonlySet<string> = new Set([
  * (isVendorHardBlocked) treats a genuinely missing view row as blocked
  * separately, because there it means the vendor is not in the caller's org.
  */
-export function isBlockingComplianceStatus(status: string | null | undefined): boolean {
+export function isBlockingComplianceStatus(
+  status: string | null | undefined,
+  /**
+   * The vendor's org is inside its 60-day onboarding window
+   * (vendor_compliance_status.org_onboarding_grace). Blocking is suspended for
+   * it entirely — see the same check in isVendorHardBlocked.
+   *
+   * This argument exists so the courtesy disable and the server gate cannot
+   * disagree. They already share the allowlist above for exactly that reason:
+   * a disabled <option> that the server would have allowed is a vendor the PM
+   * cannot pick for no visible reason, and the inverse is a vendor they pick
+   * and are then mysteriously refused.
+   */
+  orgOnboardingGrace?: boolean | null,
+): boolean {
   if (status === null || status === undefined) return false
+  if (orgOnboardingGrace === true) return false
   return !NON_BLOCKING_COMPLIANCE_STATUSES.has(status)
 }

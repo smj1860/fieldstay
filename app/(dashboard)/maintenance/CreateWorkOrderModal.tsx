@@ -70,10 +70,17 @@ export function CreateWorkOrderModal({
   }
 
   const selectedCompliance = selectedVendor ? complianceFor(selectedVendor) : null
+  // The 60-day new-account window suspends blocking entirely. Passed to
+  // isBlockingComplianceStatus so this disable and the server gate agree — an
+  // <option> greyed out here that the server would have allowed is a vendor
+  // the PM cannot pick for no visible reason.
+  const graceFor = (vendorId: string) =>
+    vendorCompliance.find((c) => c.vendor_id === vendorId)?.org_onboarding_grace ?? false
+  const inOnboardingGrace = selectedVendor ? graceFor(selectedVendor) : false
   // Mirrors the server-side allowlist in lib/vendors/compliance.ts exactly, so
   // the disabled option and the server gate can never disagree about a status
   // neither of them recognizes.
-  const selectedBlocked = isBlockingComplianceStatus(selectedCompliance)
+  const selectedBlocked = isBlockingComplianceStatus(selectedCompliance, inOnboardingGrace)
 
   const handlePhotoSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = Array.from(e.target.files ?? [])
@@ -400,7 +407,7 @@ export function CreateWorkOrderModal({
                     {vendors.map((v) => {
                       const status = complianceFor(v.id)
                       const dist   = vendorDistance(v.id)
-                      const blocked = isBlockingComplianceStatus(status)
+                      const blocked = isBlockingComplianceStatus(status, graceFor(v.id))
                       const label  = [
                         v.name,
                         dist != null ? `${dist.toFixed(1)} mi` : null,
@@ -415,7 +422,7 @@ export function CreateWorkOrderModal({
                   </select>
 
                   {/* Compliance banner */}
-                  {selectedCompliance === 'hard_blocked' && (
+                  {selectedCompliance === 'hard_blocked' && !inOnboardingGrace && (
                     <div className="text-xs rounded-lg px-3 py-2 mt-2 flex items-center gap-1.5"
                          style={{ background: 'var(--accent-red-dim)', color: 'var(--accent-red)', border: '1px solid rgba(240,84,84,0.2)' }}>
                       <ShieldOff className="w-3.5 h-3.5 flex-shrink-0" />

@@ -5564,6 +5564,8 @@ export type Database = {
           lat: number | null
           lng: number | null
           org_id: string | null
+          org_onboarding_grace: boolean | null
+          org_onboarding_grace_ends_at: string | null
           service_radius_miles: number | null
           service_zip: string | null
           vendor_id: string | null
