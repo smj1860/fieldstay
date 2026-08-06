@@ -117,8 +117,16 @@ describe('(auth)/callback — invite acceptance result is honoured', () => {
     expect(createClient).not.toHaveBeenCalled()
   })
 
-  it('rejects an absolute or protocol-relative next, falling back to /onboarding', async () => {
-    const res = await GET(request({ code: 'abc', next: '//evil.example.com' }))
+  // The backslash case is the one the route's own string check used to admit —
+  // harmless here only because this handler concatenates `origin + path`
+  // instead of parsing, which was an accident of this call site rather than a
+  // property of the check. See lib/auth/safe-redirect.ts.
+  it.each([
+    ['protocol-relative', '//evil.example.com'],
+    ['absolute',          'https://evil.example.com'],
+    ['backslash',         '/\\evil.example.com'],
+  ])('rejects a %s next, falling back to /onboarding', async (_label, next) => {
+    const res = await GET(request({ code: 'abc', next }))
 
     expect(res.headers.get('location')).toBe(`${ORIGIN}/onboarding`)
   })

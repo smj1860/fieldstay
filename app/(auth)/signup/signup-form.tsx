@@ -4,6 +4,7 @@ import { useState } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
 import { createClient } from '@/lib/supabase/client'
 import { GoogleSignInButton } from '@/components/auth/GoogleSignInButton'
+import { safeNextPath } from '@/lib/auth/safe-redirect'
 import { Button } from '@/components/ui/Button'
 import { Input } from '@/components/ui/Input'
 import Link from 'next/link'
@@ -12,7 +13,10 @@ export function SignupForm() {
   const router       = useRouter()
   const searchParams = useSearchParams()
   const inviteToken  = searchParams.get('invite_token')
-  const next         = searchParams.get('next') ?? undefined
+  // Same validation as the login form — this feeds both router.push() below
+  // and the emailRedirectTo callback URL. See lib/auth/safe-redirect.ts.
+  const nextRaw      = searchParams.get('next')
+  const next         = nextRaw ? safeNextPath(nextRaw, '/onboarding') : undefined
   const prefillEmail = searchParams.get('email') ?? ''
 
   const [fullName,         setFullName]         = useState('')

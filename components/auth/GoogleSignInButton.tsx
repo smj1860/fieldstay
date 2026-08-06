@@ -1,6 +1,7 @@
 'use client'
 
 import { createClient } from '@/lib/supabase/client'
+import { safeNextPath } from '@/lib/auth/safe-redirect'
 
 interface Props {
   next?:  string
@@ -14,8 +15,13 @@ export function GoogleSignInButton({
   const supabase = createClient()
 
   async function handleGoogleSignIn() {
+    // Defence in depth — the callback re-validates this cookie on the way out,
+    // but a rejected value should never be written in the first place.
     if (next) {
-      document.cookie = `fs-oauth-next=${encodeURIComponent(next)}; path=/; max-age=300; SameSite=Lax; Secure`
+      const safe = safeNextPath(next, '')
+      if (safe) {
+        document.cookie = `fs-oauth-next=${encodeURIComponent(safe)}; path=/; max-age=300; SameSite=Lax; Secure`
+      }
     }
 
     await supabase.auth.signInWithOAuth({

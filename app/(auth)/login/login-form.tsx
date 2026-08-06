@@ -5,6 +5,7 @@ import { useRouter, useSearchParams } from 'next/navigation'
 import { createClient } from '@/lib/supabase/client'
 import { GoogleSignInButton } from '@/components/auth/GoogleSignInButton'
 import { acceptInviteForCurrentUser } from './actions'
+import { safeNextPath } from '@/lib/auth/safe-redirect'
 import { Button } from '@/components/ui/Button'
 import { Input } from '@/components/ui/Input'
 import Link from 'next/link'
@@ -19,7 +20,10 @@ const ERROR_MESSAGES: Record<string, string> = {
 export function LoginForm() {
   const router       = useRouter()
   const searchParams = useSearchParams()
-  const next         = searchParams.get('next') ?? '/ops'
+  // Validated, not trusted: this reaches router.push(), and an unchecked
+  // `?next=//evil.example.com` navigates straight off-origin after a real
+  // sign-in on the real site. See lib/auth/safe-redirect.ts.
+  const next         = safeNextPath(searchParams.get('next'), '/ops')
   const inviteToken  = searchParams.get('invite_token')
 
   const [email,    setEmail]    = useState('')
