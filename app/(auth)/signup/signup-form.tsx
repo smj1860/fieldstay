@@ -7,6 +7,7 @@ import { GoogleSignInButton } from '@/components/auth/GoogleSignInButton'
 import { safeNextPath } from '@/lib/auth/safe-redirect'
 import { Button } from '@/components/ui/Button'
 import { Input } from '@/components/ui/Input'
+import { InlineAlert } from '@/components/ui/InlineAlert'
 import Link from 'next/link'
 
 export function SignupForm() {
@@ -111,29 +112,22 @@ export function SignupForm() {
       </div>
 
       <form onSubmit={handleSubmit} className="space-y-4">
-      {error && (
-        <div className="bg-red-50 border border-red-200 text-red-700 text-sm rounded-lg px-4 py-3">
-          {error}
-        </div>
-      )}
+      {error && <InlineAlert tone="error">{error}</InlineAlert>}
 
       {emailExists && (
-        <div
-          className="text-sm rounded-lg px-4 py-3"
-          style={{ background: 'var(--accent-amber-dim)', color: 'var(--accent-amber)', border: '1px solid var(--accent-amber)' }}
-        >
+        <InlineAlert tone="warning">
           An account with this email already exists.{' '}
           <Link href="/login" className="underline font-medium">Log in</Link>
           {' '}instead, or use{' '}
           <Link href="/forgot-password" className="underline font-medium">forgot password</Link>
           {' '}if you don&apos;t remember it.
-        </div>
+        </InlineAlert>
       )}
 
       {inviteToken && (
-        <div className="bg-blue-50 border border-blue-200 text-blue-700 text-sm rounded-lg px-4 py-3">
+        <InlineAlert tone="info">
           You&apos;re creating an account to accept a team invitation.
-        </div>
+        </InlineAlert>
       )}
 
       <div>
@@ -189,7 +183,7 @@ export function SignupForm() {
           placeholder="Re-enter your password"
         />
         {passwordMismatch && (
-          <p className="mt-1.5 text-xs text-red-500">Passwords do not match.</p>
+          <p className="mt-1.5 text-xs" style={{ color: 'var(--accent-red)' }}>Passwords do not match.</p>
         )}
       </div>
 

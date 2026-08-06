@@ -8,6 +8,7 @@ import { acceptInviteForCurrentUser } from './actions'
 import { safeNextPath } from '@/lib/auth/safe-redirect'
 import { Button } from '@/components/ui/Button'
 import { Input } from '@/components/ui/Input'
+import { InlineAlert } from '@/components/ui/InlineAlert'
 import Link from 'next/link'
 
 const ERROR_MESSAGES: Record<string, string> = {
@@ -68,12 +69,7 @@ export function LoginForm() {
   return (
     <div className="space-y-4">
       {callbackError && (
-        <div
-          className="px-4 py-3 rounded-lg text-sm"
-          style={{ background: 'var(--accent-red-dim)', color: 'var(--accent-red)', border: '1px solid rgba(240,84,84,0.2)' }}
-        >
-          {callbackError}
-        </div>
+        <InlineAlert tone="error">{callbackError}</InlineAlert>
       )}
 
       <GoogleSignInButton next={next} label="Sign in with Google" />
@@ -90,11 +86,7 @@ export function LoginForm() {
       </div>
 
       <form onSubmit={handleSubmit} className="space-y-4">
-      {error && (
-        <div className="bg-red-50 border border-red-200 text-red-700 text-sm rounded-lg px-4 py-3">
-          {error}
-        </div>
-      )}
+      {error && <InlineAlert tone="error">{error}</InlineAlert>}
 
       <div>
         <label htmlFor="email" className="label">Email</label>
