@@ -9,7 +9,7 @@ import { reportError } from '@/lib/observability/report-error'
 import { reportQueryError } from '@/lib/supabase/unwrap'
 import { unwrapJoin } from '@/lib/utils/supabase-joins'
 import { fetchAllRows } from '@/lib/inngest/paginate'
-import type { InventoryCategory, TablesInsert, TablesUpdate } from '@/types/database'
+import type { InventoryCategory, PoStatus, TablesInsert, TablesUpdate } from '@/types/database'
 import { Constants } from '@/types/database'
 
 /**
@@ -670,12 +670,73 @@ export async function generateAggregatedPurchaseList(): Promise<{ items: Aggrega
 
 // ── Purchase Order Status ─────────────────────────────────────────────────────
 
+type PmSettablePoStatus = 'ordered' | 'received' | 'cancelled'
+
+/**
+ * The statuses a PM may set by hand, and what each one may move to.
+ *
+ * `draft` and `sent` are written by the restock pipeline itself
+ * (lib/inngest/functions/inventory-events.ts), never by a person, so neither
+ * is a destination here. `acknowledged` belongs to a vendor-acknowledgement
+ * flow that does not exist for restock POs — there is no vendor on one — so it
+ * is a source state only, never something the PM can select.
+ *
+ * `received` and `cancelled` are terminal: a PO that has been received cannot
+ * be un-received, and reviving a cancelled one would fire
+ * purchase-order/approved a second time against an unchanged
+ * source_reference_id. (The owner_transactions upsert would swallow the
+ * duplicate, but the ledger amount would then be frozen at whatever the first
+ * attempt recorded, which is worse than refusing.)
+ */
+const PO_TRANSITIONS: Record<PoStatus, readonly PmSettablePoStatus[]> = {
+  draft:        ['ordered', 'cancelled'],
+  sent:         ['ordered', 'cancelled'],
+  acknowledged: ['ordered', 'cancelled'],
+  ordered:      ['received', 'cancelled'],
+  received:     [],
+  cancelled:    [],
+}
+
+/** Highest per-PO restock spend accepted, to catch a cents/dollars slip. */
+const MAX_PO_TOTAL = 100_000
+
+/**
+ * Marks a restock purchase order as ordered / received / cancelled.
+ *
+ * This is the step that closes the inventory loop. Everything upstream of it
+ * is automatic — a crew count fires `inventory/count-submitted`, the below-par
+ * items become a PO, the PO is emailed to the PM (immediately for a same-day
+ * flip, otherwise inside the daily wrap-up), and a connected Kroger account
+ * gets a cart built from the same items. But the actual buying happens
+ * OUTSIDE FieldStay in every one of those paths: the PM submits the cart on
+ * kroger.com, or with no Kroger connection orders however they like. Nothing
+ * tells us it happened, which is why this exists — and why it takes a cost.
+ *
+ * `purchase_orders.total_estimated_cost` is written NOWHERE else. The PO is
+ * inserted with `total_estimated_cost: null` (a count carries quantities, not
+ * prices) and no later step fills it in. `handlePurchaseOrderApproved` skips
+ * on a null total, so before this parameter existed the restock expense could
+ * not reach the owner ledger even if the event had fired: production has 1
+ * purchase order, 136 line items, 0 non-null costs, and 0 `inventory_purchase`
+ * owner_transactions. The amount the PM actually paid is the only trustworthy
+ * figure available at any point in the flow, so it is captured here.
+ */
 export async function updatePurchaseOrderStatus(
   purchaseOrderId: string,
-  status: 'sent' | 'acknowledged' | 'ordered' | 'received' | 'cancelled'
+  status: PmSettablePoStatus,
+  totalCost?: number | null,
 ): Promise<{ error?: string }> {
   try {
     const { user, supabase, membership } = await requireOrgRole(['admin', 'manager'])
+
+    // NaN defeats `??` and every `> 0` comparison silently, so Number.isFinite
+    // is the guard, not a nullish check — an unparseable amount must be
+    // rejected outright rather than written to the ledger as a garbage number.
+    if (totalCost !== undefined && totalCost !== null) {
+      if (!Number.isFinite(totalCost) || totalCost < 0 || totalCost > MAX_PO_TOTAL) {
+        return { error: 'Enter a total between $0 and $100,000.' }
+      }
+    }
 
     // This row is all-or-nothing: it decides the idempotent no-op, supplies
     // old_status for the audit row, and carries property_id +
@@ -697,21 +758,48 @@ export async function updatePurchaseOrderStatus(
     if (!po) return { error: 'Purchase order not found' }
     if (po.status === status) return {}
 
-    const statusUpdate: TablesUpdate<'purchase_orders'> = { status }
-    if (status === 'sent') statusUpdate.sent_at = new Date().toISOString()
+    const allowed = PO_TRANSITIONS[po.status as PoStatus] ?? []
+    if (!allowed.includes(status)) {
+      return { error: `A ${po.status} purchase order cannot be marked ${status}.` }
+    }
 
+    const statusUpdate: TablesUpdate<'purchase_orders'> = { status }
+    // Only carried on the transition that spends money. Rounded to cents:
+    // a raw float from a text input reaches the owner ledger otherwise.
+    const resolvedCost = totalCost === undefined || totalCost === null
+      ? po.total_estimated_cost
+      : Math.round(totalCost * 100) / 100
+    if (status === 'ordered' && resolvedCost !== po.total_estimated_cost) {
+      statusUpdate.total_estimated_cost = resolvedCost
+    }
+
+    // `.eq('status', po.status)` makes this a compare-and-swap rather than a
+    // blind write. Two PMs marking the same PO ordered at once both read
+    // `sent` above and would both fall through; the precondition means exactly
+    // one UPDATE matches a row, so exactly one fires purchase-order/approved
+    // and writes an audit entry. (The owner_transactions upsert would have
+    // absorbed the duplicate expense, but the second event would still have
+    // overwritten nothing while logging a second, false status change.)
     const { data: updated, error } = await supabase
       .from('purchase_orders')
       .update(statusUpdate)
       .eq('id', purchaseOrderId)
       .eq('org_id', membership.org_id)
+      .eq('status', po.status)
       .select('id')
       .maybeSingle()
 
-    if (error || !updated) {
+    if (error) {
       console.error('[updatePurchaseOrderStatus]', error)
       reportError(error, { site: 'serverAction.inventory.updatePurchaseOrderStatus', orgId: membership.org_id })
       return { error: 'Operation failed. Please try again.' }
+    }
+    // No error and no row means the compare-and-swap lost — someone else moved
+    // this PO between the read and the write. Distinguished from a failure so
+    // the PM is told what actually happened instead of retrying into the same
+    // race. Not an error to report: it is the guard working.
+    if (!updated) {
+      return { error: 'Someone else updated this purchase order. Refresh and try again.' }
     }
 
     await logAuditEvent({
@@ -720,6 +808,8 @@ export async function updatePurchaseOrderStatus(
       action:     'purchase_order.status_changed',
       targetType: 'purchase_order',
       targetId:   purchaseOrderId,
+      // The spend itself is deliberately absent — audit metadata is not a
+      // second home for financial specifics (CLAUDE.md, sensitive-data rule).
       metadata:   { old_status: po.status, new_status: status },
     })
 
@@ -730,7 +820,7 @@ export async function updatePurchaseOrderStatus(
           purchase_order_id:    purchaseOrderId,
           property_id:          po.property_id,
           org_id:               membership.org_id,
-          total_estimated_cost: po.total_estimated_cost,
+          total_estimated_cost: resolvedCost,
         },
       })
     }

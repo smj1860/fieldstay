@@ -14,6 +14,7 @@ import type { InventoryCategory, PoStatus } from '@/types/database'
 import { PortfolioInventoryView } from './portfolio-view'
 import { CartReadyBanner } from '@/components/inventory/cart-ready-banner'
 import { InventoryItemCard } from '@/components/inventory/inventory-item-card'
+import { PurchaseOrderActions } from '@/components/inventory/purchase-order-actions'
 import { NudgeBanner } from '@/components/nudge-banner'
 import { Dialog } from '@/components/ui/Dialog'
 import { Card } from '@/components/ui/Card'
@@ -993,6 +994,14 @@ function PropertyInventoryDetail({
                               </div>
                             </div>
                           </div>
+                        )}
+                        {isExpanded && (
+                          <PurchaseOrderActions
+                            purchaseOrderId={po.id}
+                            status={po.status}
+                            totalEstimatedCost={po.total_estimated_cost}
+                            onDone={onRefresh}
+                          />
                         )}
                       </div>
                     )
