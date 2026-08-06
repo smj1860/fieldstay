@@ -231,6 +231,20 @@ function PropertySchedulesEditor({
             <div key={row.id} className="border border-themed rounded-xl p-3 space-y-2">
               <div className="flex items-center justify-between gap-2">
                 <span className="text-sm font-medium text-primary-themed truncate">{row.name}</span>
+                {/*
+                  A schedule with no due date is INERT, not just undated: every
+                  consumer selects on next_due_date with a comparison, and a
+                  NULL satisfies none of them, so the row never appears in the
+                  cron's due/overdue sets or the daily wrap-up. It used to
+                  render identically to a working schedule — auto-create
+                  ticked, nothing amiss — which is what made it invisible.
+                  createMaintenanceSchedule now derives a date, so this should
+                  only ever show for a seasonal schedule with no month set (the
+                  one case nothing can be derived from) or a legacy row.
+                */}
+                {row.next_due_date === null && (
+                  <Badge tone="amber" className="flex-shrink-0 text-xs">Not scheduled</Badge>
+                )}
                 {canManage && (
                   <button
                     type="button"

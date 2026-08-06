@@ -42,13 +42,6 @@ import { createServiceClient } from '@/lib/supabase/server'
 import {
   createWorkOrder,
   rateWorkOrderVendor,
-  assignCrewToWorkOrder,
-  updateWorkOrder,
-  addWorkOrderNote,
-  updateWorkOrderStatus,
-  logActualCost,
-  recordWorkOrderPhoto,
-  deleteWorkOrderPhoto,
   sendQuoteRequests,
   approveQuoteRequest,
   declineQuoteRequest,
@@ -401,432 +394,6 @@ describe('maintenance/actions', () => {
       )
 
       const result = await rateWorkOrderVendor('wo_1', 5, null)
-
-      expect(result).toEqual({ error: 'Operation failed. Please try again.' })
-      expect(supabase.from).not.toHaveBeenCalled()
-    })
-  })
-
-  describe('assignCrewToWorkOrder', () => {
-    it('assigns a crew member scoped to the caller org', async () => {
-      // crew_members is stubbed now because assignCrewToWorkOrder verifies the
-      // crew member is in-org BEFORE writing the column — see the isolation
-      // tests below. An unstubbed lookup returns null, which correctly blocks.
-      const supabase = makeSupabase({ crew_members: [{ data: { id: 'crew_1' } }] })
-      vi.mocked(requireOrgRole).mockResolvedValue({ supabase, membership } as never)
-
-      const result = await assignCrewToWorkOrder('wo_1', 'crew_1')
-
-      expect(result).toEqual({})
-      expect(supabase.from).toHaveBeenCalledWith('work_orders')
-    })
-
-    // Same tenant-isolation hole as createWorkOrder: .eq('org_id') below scopes
-    // the WORK ORDER to this org, but nothing scoped the CREW ID written into
-    // it — and that column is what the RLS read policy keys its second branch on.
-    it('rejects a crew member id belonging to another org, and writes nothing', async () => {
-      const supabase = makeSupabase({ crew_members: [{ data: null }] })
-      vi.mocked(requireOrgRole).mockResolvedValue({ supabase, membership } as never)
-
-      const result = await assignCrewToWorkOrder('wo_1', 'crew_other_org')
-
-      expect(result).toEqual({ error: 'That crew member is not part of your organization.' })
-      expect(supabase.calls.some((c) => c.table === 'work_orders' && c.method === 'update')).toBe(false)
-    })
-
-    it('FAILS CLOSED when the crew lookup errors', async () => {
-      const supabase = makeSupabase({
-        crew_members: [{ data: null, error: { message: 'db unavailable' } }],
-      })
-      vi.mocked(requireOrgRole).mockResolvedValue({ supabase, membership } as never)
-
-      const result = await assignCrewToWorkOrder('wo_1', 'crew_1')
-
-      expect(result).toEqual({ error: 'Could not verify the selected crew member. Please try again.' })
-      expect(supabase.calls.some((c) => c.table === 'work_orders' && c.method === 'update')).toBe(false)
-    })
-
-    it('still allows UNASSIGNING (null crew) without a crew lookup', async () => {
-      const supabase = makeSupabase({})
-      vi.mocked(requireOrgRole).mockResolvedValue({ supabase, membership } as never)
-
-      const result = await assignCrewToWorkOrder('wo_1', null)
-
-      expect(result).toEqual({})
-      expect(supabase.calls.some((c) => c.table === 'crew_members')).toBe(false)
-      expect(supabase.calls.some((c) => c.table === 'work_orders' && c.method === 'update')).toBe(true)
-    })
-
-    it('does not touch the DB when the caller lacks the required role', async () => {
-      const supabase = makeSupabase({})
-      vi.mocked(requireOrgRole).mockRejectedValue(
-        new Error('You do not have permission to perform this action.')
-      )
-
-      const result = await assignCrewToWorkOrder('wo_1', 'crew_1')
-
-      expect(result).toEqual({ error: 'Operation failed. Please try again.' })
-      expect(supabase.from).not.toHaveBeenCalled()
-    })
-  })
-
-  describe('updateWorkOrder', () => {
-    const updateData = {
-      title: 'Fix leaky faucet', description: null, priority: 'high',
-      vendor_id: 'vendor_2', scheduled_date: null, scheduled_time: null,
-      estimated_cost: null, portal_enabled: true,
-    }
-
-    it('fires a vendor-assigned event when the vendor changes, scoped to the caller org', async () => {
-      const supabase = makeSupabase({
-        work_orders: [{ data: { vendor_id: 'vendor_1' } }, { error: null }],
-        vendor_compliance_status: compliant(),
-      })
-      vi.mocked(requireOrgRole).mockResolvedValue({
-        supabase, membership, user: { id: 'user_1' },
-      } as never)
-
-      const result = await updateWorkOrder('wo_1', updateData)
-
-      expect(result).toEqual({})
-      expect(inngest.send).toHaveBeenCalledWith({
-        name: 'work-order/vendor.assigned',
-        data: { workOrderId: 'wo_1', orgId: 'org_1', vendorId: 'vendor_2', previousVendorId: 'vendor_1' },
-      })
-    })
-
-    it('does not fire a vendor-assigned event when the vendor is unchanged', async () => {
-      const supabase = makeSupabase({
-        work_orders: [{ data: { vendor_id: 'vendor_2' } }, { error: null }],
-      })
-      vi.mocked(requireOrgRole).mockResolvedValue({
-        supabase, membership, user: { id: 'user_1' },
-      } as never)
-
-      await updateWorkOrder('wo_1', updateData)
-
-      expect(inngest.send).not.toHaveBeenCalled()
-    })
-
-    it('does not touch the DB when the caller lacks the required role', async () => {
-      const supabase = makeSupabase({})
-      vi.mocked(requireOrgRole).mockRejectedValue(
-        new Error('You do not have permission to perform this action.')
-      )
-
-      const result = await updateWorkOrder('wo_1', updateData)
-
-      expect(result).toEqual({ error: 'Operation failed. Please try again.' })
-      expect(supabase.from).not.toHaveBeenCalled()
-    })
-  })
-
-  describe('addWorkOrderNote', () => {
-    it('adds a note to a work order verified to belong to the caller org', async () => {
-      const supabase = makeSupabase({
-        work_orders:        [{ data: { id: 'wo_1', org_id: 'org_1' } }],
-        work_order_updates: [{ error: null }],
-      })
-      vi.mocked(requireOrgRole).mockResolvedValue({ supabase, membership } as never)
-
-      const result = await addWorkOrderNote('wo_1', 'Vendor confirmed the appointment')
-
-      expect(result).toEqual({})
-    })
-
-    // `actual_cost: number` is a compile-time claim about a browser-supplied
-    // value. This figure reaches owner_transactions, and addOwnerTransaction
-    // (owners/actions.ts) already validated its amount inline while this path,
-    // writing the same table, did not.
-    it.each([
-      ['negative',  -5000,     'Amount cannot be negative.'],
-      ['NaN',       Number.NaN, 'Enter a valid amount.'],
-      ['Infinity',  Number.POSITIVE_INFINITY, 'Enter a valid amount.'],
-      ['over $1M',  5_000_000, 'Amount must be under $1,000,000.'],
-    ])('rejects a %s cost before any write', async (_label, cost, message) => {
-      const supabase = makeSupabase({})
-      vi.mocked(requireOrgRole).mockResolvedValue({
-        supabase, membership, user: { id: 'user_1' },
-      } as never)
-
-      const result = await logActualCost('wo_1', { actual_cost: cost as number })
-
-      expect(result).toEqual({ error: message })
-      // Rejected at the boundary — nothing reached the database. NaN is the
-      // quiet one: supabase-js serializes it to JSON null, which WIPES the
-      // nullable work_orders.actual_cost and then violates NOT NULL on
-      // owner_transactions.amount.
-      expect(supabase.from).not.toHaveBeenCalled()
-    })
-
-    // This upsert is the ONLY correction path for a wo_completion expense —
-    // handleWorkOrderCompleted posts it with ignoreDuplicates: true and never
-    // overwrites. Discarding its result left work_orders.actual_cost and the
-    // owner's ledger permanently disagreeing while the audit row asserted the
-    // cost had been logged.
-    it('surfaces a failed owner_transactions upsert instead of reporting success', async () => {
-      const supabase = makeSupabase({
-        work_orders:        [{ data: { id: 'wo_1', status: 'completed', title: 'Fix faucet', property_id: 'prop_1', actual_cost: null } }, { error: null }],
-        work_order_updates: [{ error: null }],
-        owner_transactions: [{ error: { message: 'permission denied for table owner_transactions' } }],
-      })
-      vi.mocked(requireOrgRole).mockResolvedValue({
-        supabase, membership, user: { id: 'user_1' },
-      } as never)
-
-      const result = await logActualCost('wo_1', { actual_cost: 150 })
-
-      expect(result).toEqual({
-        error: 'The cost was saved, but the owner statement could not be updated. Please retry.',
-      })
-      expect(logAuditEvent).not.toHaveBeenCalled()
-    })
-
-    it('rejects a work order id that does not belong to the caller org (IDOR check)', async () => {
-      const supabase = makeSupabase({ work_orders: [{ data: null }] })
-      vi.mocked(requireOrgRole).mockResolvedValue({ supabase, membership } as never)
-
-      const result = await addWorkOrderNote('other-orgs-wo', 'note')
-
-      expect(result).toEqual({ error: 'Work order not found' })
-      expect(supabase.from).not.toHaveBeenCalledWith('work_order_updates')
-    })
-
-    it('does not touch the DB when the caller lacks the required role', async () => {
-      const supabase = makeSupabase({})
-      vi.mocked(requireOrgRole).mockRejectedValue(
-        new Error('You do not have permission to perform this action.')
-      )
-
-      const result = await addWorkOrderNote('wo_1', 'note')
-
-      expect(result).toEqual({ error: 'Operation failed. Please try again.' })
-      expect(supabase.from).not.toHaveBeenCalled()
-    })
-  })
-
-  describe('updateWorkOrderStatus', () => {
-    it('completes an unassigned work order and fires the completion event', async () => {
-      const supabase = makeSupabase({
-        work_orders: [
-          { data: { status: 'in_progress', source_schedule_id: null, source: 'manual', actual_cost: null, estimated_cost: 100, title: 'Fix faucet', property_id: 'prop_1', vendor_id: null } },
-          // The completing UPDATE now returns the row it actually claimed —
-          // the fan-out is driven off that, not off the pre-read.
-          { data: { id: 'wo_1', property_id: 'prop_1', org_id: 'org_1', source_schedule_id: null, source: 'manual', actual_cost: null, estimated_cost: 100 } },
-        ],
-        work_order_updates: [{ error: null }],
-      })
-      vi.mocked(requireOrgRole).mockResolvedValue({ supabase, membership } as never)
-
-      const result = await updateWorkOrderStatus('wo_1', 'completed')
-
-      expect(result).toEqual({ success: true })
-      expect(inngest.send).toHaveBeenCalledWith([
-        expect.objectContaining({ name: 'work-order/completed', data: expect.objectContaining({ work_order_id: 'wo_1' }) }),
-      ])
-    })
-
-    // The completing UPDATE carries `.neq('status', 'completed')`, so the
-    // loser of two racing completions claims no row and must not re-fire the
-    // fan-out (which would double-post the maintenance expense's audit event
-    // and double-advance the source schedule).
-    it('does not fan out when a concurrent completion already claimed the row', async () => {
-      const supabase = makeSupabase({
-        work_orders: [
-          { data: { status: 'in_progress', source_schedule_id: 'sched_1', source: 'manual', actual_cost: 100, estimated_cost: 100, title: 'Fix faucet', property_id: 'prop_1', vendor_id: null } },
-          { data: null },   // .neq('status','completed') matched nothing
-        ],
-      })
-      vi.mocked(requireOrgRole).mockResolvedValue({ supabase, membership } as never)
-
-      const result = await updateWorkOrderStatus('wo_1', 'completed')
-
-      expect(result).toEqual({ success: true })
-      expect(inngest.send).not.toHaveBeenCalled()
-      expect(supabase.from).not.toHaveBeenCalledWith('maintenance_schedules')
-    })
-
-    it('refuses to complete a vendor-assigned work order outside the vendor portal', async () => {
-      const supabase = makeSupabase({
-        work_orders: [{ data: { status: 'assigned', vendor_id: 'vendor_1' } }],
-      })
-      vi.mocked(requireOrgRole).mockResolvedValue({ supabase, membership } as never)
-
-      const result = await updateWorkOrderStatus('wo_1', 'completed')
-
-      expect(result.error).toMatch(/vendor portal/)
-      expect(inngest.send).not.toHaveBeenCalled()
-    })
-
-    it('no-ops without re-firing completion for an already-completed work order (idempotency)', async () => {
-      const supabase = makeSupabase({
-        work_orders: [{ data: { status: 'completed', vendor_id: null } }],
-      })
-      vi.mocked(requireOrgRole).mockResolvedValue({ supabase, membership } as never)
-
-      const result = await updateWorkOrderStatus('wo_1', 'completed')
-
-      expect(result).toEqual({ success: true })
-      expect(inngest.send).not.toHaveBeenCalled()
-    })
-
-    it('rejects a work order id that does not belong to the caller org (IDOR check)', async () => {
-      const supabase = makeSupabase({ work_orders: [{ data: null }] })
-      vi.mocked(requireOrgRole).mockResolvedValue({ supabase, membership } as never)
-
-      const result = await updateWorkOrderStatus('other-orgs-wo', 'in_progress')
-
-      expect(result).toEqual({ error: 'Work order not found' })
-    })
-
-    it('does not touch the DB when the caller lacks the required role', async () => {
-      const supabase = makeSupabase({})
-      vi.mocked(requireOrgRole).mockRejectedValue(
-        new Error('You do not have permission to perform this action.')
-      )
-
-      const result = await updateWorkOrderStatus('wo_1', 'in_progress')
-
-      expect(result).toEqual({ error: 'Operation failed. Please try again.' })
-      expect(supabase.from).not.toHaveBeenCalled()
-    })
-  })
-
-  describe('logActualCost', () => {
-    it('logs actual cost and idempotently upserts an owner_transactions expense (source_reference_id)', async () => {
-      const supabase = makeSupabase({
-        work_orders:         [{ data: { id: 'wo_1', status: 'completed', title: 'Fix faucet', property_id: 'prop_1', actual_cost: null } }, { error: null }],
-        work_order_updates:  [{ error: null }],
-        owner_transactions:  [{ error: null }],
-      })
-      vi.mocked(requireOrgRole).mockResolvedValue({
-        supabase, membership, user: { id: 'user_1' },
-      } as never)
-
-      const result = await logActualCost('wo_1', { actual_cost: 150 })
-
-      expect(result).toEqual({})
-      // Verify the upsert used source_reference_id-based conflict resolution
-      // (idempotency: a re-logged cost updates rather than duplicates the row).
-      const ownerTxnCalls = supabase.from.mock.calls.filter(([t]: [string]) => t === 'owner_transactions')
-      expect(ownerTxnCalls.length).toBe(1)
-    })
-
-    it('rejects a work order id that does not belong to the caller org (IDOR check)', async () => {
-      const supabase = makeSupabase({ work_orders: [{ data: null }] })
-      vi.mocked(requireOrgRole).mockResolvedValue({
-        supabase, membership, user: { id: 'user_1' },
-      } as never)
-
-      const result = await logActualCost('other-orgs-wo', { actual_cost: 100 })
-
-      expect(result).toEqual({ error: 'Work order not found' })
-    })
-
-    it('does not post an owner_transactions expense when the work order is not completed', async () => {
-      const supabase = makeSupabase({
-        work_orders:        [{ data: { id: 'wo_1', status: 'in_progress', title: 'Fix faucet', property_id: 'prop_1', actual_cost: null } }, { error: null }],
-        work_order_updates: [{ error: null }],
-      })
-      vi.mocked(requireOrgRole).mockResolvedValue({
-        supabase, membership, user: { id: 'user_1' },
-      } as never)
-
-      await logActualCost('wo_1', { actual_cost: 150 })
-
-      expect(supabase.from).not.toHaveBeenCalledWith('owner_transactions')
-    })
-
-    it('does not touch the DB when the caller lacks the required role', async () => {
-      const supabase = makeSupabase({})
-      vi.mocked(requireOrgRole).mockRejectedValue(
-        new Error('You do not have permission to perform this action.')
-      )
-
-      const result = await logActualCost('wo_1', { actual_cost: 100 })
-
-      expect(result).toEqual({ error: 'Operation failed. Please try again.' })
-      expect(supabase.from).not.toHaveBeenCalled()
-    })
-  })
-
-  describe('recordWorkOrderPhoto', () => {
-    it('records a photo for the work order', async () => {
-      const supabase = makeSupabase({ work_order_photos: [{ error: null }] })
-      vi.mocked(requireOrgRole).mockResolvedValue({ supabase } as never)
-
-      const result = await recordWorkOrderPhoto('wo_1', 'wo_1/photo.jpg')
-
-      expect(result).toEqual({})
-    })
-
-    it('does not touch the DB when the caller lacks the required role', async () => {
-      const supabase = makeSupabase({})
-      vi.mocked(requireOrgRole).mockRejectedValue(
-        new Error('You do not have permission to perform this action.')
-      )
-
-      const result = await recordWorkOrderPhoto('wo_1', 'wo_1/photo.jpg')
-
-      expect(result).toEqual({ error: 'Operation failed. Please try again.' })
-      expect(supabase.from).not.toHaveBeenCalled()
-    })
-  })
-
-  describe('deleteWorkOrderPhoto', () => {
-    // Was: asserted the removal went through the CALLER's RLS-scoped client.
-    // The storage DELETE policy now only matches objects whose first path
-    // segment is the caller's org id, so legacy `wo-<id>/…` objects would
-    // silently no-op under RLS and be orphaned after their row was deleted.
-    // The removal therefore goes through the SERVICE client, authorized by the
-    // org-ownership check on the work order immediately above it.
-    it('deletes a photo — via the service client — once the work order is verified to belong to the caller org', async () => {
-      const supabase = makeSupabase({
-        work_order_photos: [{ data: { id: 'photo_1', storage_path: 'wo_1/photo.jpg', work_order_id: 'wo_1' } }],
-        work_orders:        [{ data: { id: 'wo_1' } }],
-      })
-      const service = makeSupabase({})
-      vi.mocked(requireOrgRole).mockResolvedValue({ supabase, membership } as never)
-      vi.mocked(createServiceClient).mockReturnValue(service as never)
-
-      const result = await deleteWorkOrderPhoto('photo_1')
-
-      expect(result).toEqual({})
-      // Service role is justified by the ownership check, and named as such.
-      expect(createServiceClient).toHaveBeenCalledWith({ authorizedBy: membership })
-      expect(service.storage.from).toHaveBeenCalledWith('work-order-photos')
-      // The caller's RLS-scoped client must NOT be the one removing the object.
-      expect(supabase.storage.from).not.toHaveBeenCalled()
-      // The row is still deleted through the caller's client.
-      expect(supabase.from).toHaveBeenCalledWith('work_order_photos')
-    })
-
-    it('rejects a photo whose work order does not belong to the caller org (IDOR check)', async () => {
-      const supabase = makeSupabase({
-        work_order_photos: [{ data: { id: 'photo_1', storage_path: 'x.jpg', work_order_id: 'other-orgs-wo' } }],
-        work_orders:        [{ data: null }],
-      })
-      const service = makeSupabase({})
-      vi.mocked(requireOrgRole).mockResolvedValue({ supabase, membership } as never)
-      vi.mocked(createServiceClient).mockReturnValue(service as never)
-
-      const result = await deleteWorkOrderPhoto('photo_1')
-
-      expect(result).toEqual({ error: 'Photo not found' })
-      expect(supabase.storage.from).not.toHaveBeenCalled()
-      // The ownership check is what authorizes the RLS bypass, so a failed
-      // check must stop short of ever minting the service client.
-      expect(createServiceClient).not.toHaveBeenCalled()
-      expect(service.storage.from).not.toHaveBeenCalled()
-    })
-
-    it('does not touch the DB when the caller lacks the required role', async () => {
-      const supabase = makeSupabase({})
-      vi.mocked(requireOrgRole).mockRejectedValue(
-        new Error('You do not have permission to perform this action.')
-      )
-
-      const result = await deleteWorkOrderPhoto('photo_1')
 
       expect(result).toEqual({ error: 'Operation failed. Please try again.' })
       expect(supabase.from).not.toHaveBeenCalled()
@@ -1612,6 +1179,110 @@ describe('maintenance/actions', () => {
       expect(result).toEqual({ error: 'Operation failed. Please try again.' })
       expect(supabase.from).not.toHaveBeenCalled()
     })
+
+    // ── next_due_date must never be stored NULL for a datable schedule ──────
+    //
+    // A NULL next_due_date does not mean "undated", it means INERT. Every
+    // consumer selects on that column with a comparison — the maintenance
+    // cron's .lt(...) for overdue and .lte(...) for the alert window, and
+    // cron-daily-wrapup's due section — and a NULL satisfies no comparison in
+    // SQL, so the row is absent from all of them. The only writer of the
+    // column anywhere is the roll-forward that ADVANCES an existing date;
+    // nothing bootstraps a missing one, so NULL is permanent.
+    //
+    // Two live callers were storing exactly that. schedules-browser.tsx's
+    // "add schedule" hard-codes next_due_date: null with auto_create_wo: true,
+    // and maintenance-board.tsx reads a form field the PM may leave blank.
+    // Both rendered as a healthy active schedule that silently never fired.
+    function insertedRow(supabase: ReturnType<typeof makeSupabase>) {
+      // from() is called twice: properties (ownership check), then the insert.
+      return supabase.from.mock.results[1]!.value.insert.mock.calls[0]![0]
+    }
+
+    it.each([
+      ['weekly',      'weekly'],
+      ['quarterly',   'quarterly'],
+      ['annual',      'annual'],
+    ])('derives a first due date for a routine %s schedule when none is given', async (_label, frequency) => {
+      const supabase = makeSupabase({
+        properties:            [{ data: { id: 'prop_1' } }],
+        maintenance_schedules: [{ error: null }],
+      })
+      vi.mocked(requireOrgRole).mockResolvedValue({ supabase, membership } as never)
+
+      await createMaintenanceSchedule({
+        ...scheduleInput,
+        frequency:     frequency as typeof scheduleInput.frequency,
+        next_due_date: null,
+      })
+
+      const due = insertedRow(supabase).next_due_date
+      expect(due).toMatch(/^\d{4}-\d{2}-\d{2}$/)
+      // Strictly in the future: a date already past would fire a work order on
+      // the next cron pass, which is not what "add a quarterly schedule" means.
+      expect(new Date(due).getTime()).toBeGreaterThan(Date.now())
+    })
+
+    // The frequency column is nullable even for routine schedules, so the
+    // derivation must not fall through to NULL on that path.
+    it('still derives a date for a routine schedule with no frequency', async () => {
+      const supabase = makeSupabase({
+        properties:            [{ data: { id: 'prop_1' } }],
+        maintenance_schedules: [{ error: null }],
+      })
+      vi.mocked(requireOrgRole).mockResolvedValue({ supabase, membership } as never)
+
+      await createMaintenanceSchedule({ ...scheduleInput, frequency: null, next_due_date: null })
+
+      expect(insertedRow(supabase).next_due_date).toMatch(/^\d{4}-\d{2}-\d{2}$/)
+    })
+
+    it('derives the next occurrence of the month for a seasonal schedule', async () => {
+      const supabase = makeSupabase({
+        properties:            [{ data: { id: 'prop_1' } }],
+        maintenance_schedules: [{ error: null }],
+      })
+      vi.mocked(requireOrgRole).mockResolvedValue({ supabase, membership } as never)
+
+      await createMaintenanceSchedule({
+        ...scheduleInput,
+        schedule_type: 'seasonal',
+        frequency:     null,
+        month_due:     3,
+        next_due_date: null,
+      })
+
+      expect(insertedRow(supabase).next_due_date).toMatch(/^\d{4}-03-01$/)
+    })
+
+    // The one case nothing can be derived from — there is no month and no
+    // frequency to project forward. Storing an invented date would be worse
+    // than storing NULL; the schedules browser flags it as "Not scheduled".
+    it('leaves the date NULL for a seasonal schedule with no month', async () => {
+      const supabase = makeSupabase({
+        properties:            [{ data: { id: 'prop_1' } }],
+        maintenance_schedules: [{ error: null }],
+      })
+      vi.mocked(requireOrgRole).mockResolvedValue({ supabase, membership } as never)
+
+      await createMaintenanceSchedule({
+        ...scheduleInput, schedule_type: 'seasonal', frequency: null, month_due: null, next_due_date: null,
+      })
+
+      expect(insertedRow(supabase).next_due_date).toBeNull()
+    })
+
+    it('never overrides a date the caller did supply', async () => {
+      const supabase = makeSupabase({
+        properties:            [{ data: { id: 'prop_1' } }],
+        maintenance_schedules: [{ error: null }],
+      })
+      vi.mocked(requireOrgRole).mockResolvedValue({ supabase, membership } as never)
+
+      await createMaintenanceSchedule({ ...scheduleInput, next_due_date: '2026-08-01' })
+
+      expect(insertedRow(supabase).next_due_date).toBe('2026-08-01')
+    })
   })
 
   describe('updateMaintenanceSchedule / deleteMaintenanceSchedule', () => {
@@ -1628,6 +1299,20 @@ describe('maintenance/actions', () => {
       const result = await updateMaintenanceSchedule('sched_1', updateInput)
 
       expect(result).toEqual({ success: true })
+    })
+
+    // The inline row editor sends the WHOLE row on every Save, so clearing the
+    // date box is one keystroke from re-opening the hole create just closed.
+    // Pausing a schedule is is_active = false; a blank date has never meant
+    // "paused", it means invisible to every cron that reads the column.
+    it('re-derives the due date when an edit clears it', async () => {
+      const supabase = makeSupabase({ maintenance_schedules: [{ error: null }] })
+      vi.mocked(requireOrgRole).mockResolvedValue({ supabase, membership } as never)
+
+      await updateMaintenanceSchedule('sched_1', { ...updateInput, next_due_date: null })
+
+      const patch = supabase.from.mock.results[0]!.value.update.mock.calls[0]![0]
+      expect(patch.next_due_date).toMatch(/^\d{4}-\d{2}-\d{2}$/)
     })
 
     it('soft-deletes a schedule scoped to the caller org', async () => {

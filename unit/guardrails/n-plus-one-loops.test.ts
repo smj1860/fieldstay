@@ -115,7 +115,7 @@ const EXCEPTIONS: Record<string, string> = {
   // exported copy of this loop in create-work-order-helpers.ts, bypassing
   // sendQuoteRequests' dedup and vendor checks. That copy is deleted and
   // createWorkOrder calls the action.
-  'app/(dashboard)/maintenance/actions.ts:1026':
+  'app/(dashboard)/maintenance/actions.ts:573':
     'Per-vendor quote_requests insert (insertQuoteRequests) — each row needs its own randomly generated quote_token before its own Inngest event fires, so batching would mean moving token generation to the caller. Bounded by the vendor count the PM ticked in one dialog, and it is the only RFQ sender in the codebase.',
   'app/(dashboard)/properties/clone-actions.ts:114':
     'Per-section checklist_template_sections insert — each section needs its own DB-generated id before the child checklist_template_items insert can reference it as section_id. Parent-before-child dependency, not a batchable read.',
