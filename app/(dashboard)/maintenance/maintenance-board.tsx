@@ -117,6 +117,13 @@ export interface VendorComplianceRow {
   // state we don't know yet. A closed union here would make an unknown state a
   // type error at the boundary instead of a blocked vendor, which is backwards.
   compliance_status: string
+  /**
+   * The vendor's org is inside its 60-day onboarding window, during which
+   * compliance never blocks assignment. Nullable because the view reports
+   * every column as nullable — treat absent as "not in grace", the same
+   * direction the server gate takes.
+   */
+  org_onboarding_grace: boolean | null
 }
 
 export interface PropertyOptionWithCoords extends PropertyOption {

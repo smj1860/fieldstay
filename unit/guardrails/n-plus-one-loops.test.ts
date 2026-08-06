@@ -121,7 +121,7 @@ const EXCEPTIONS: Record<string, string> = {
     'Per-section checklist_template_sections insert — each section needs its own DB-generated id before the child checklist_template_items insert can reference it as section_id. Parent-before-child dependency, not a batchable read.',
   'app/api/work-orders/[token]/photos/route.ts:105':
     'Per-photo storage upload + work_order_photos row — each photo is a distinct uploaded file with its own generated storage path; there is no batched form of a storage upload.',
-  'app/(dashboard)/maintenance/CreateWorkOrderModal.tsx:121':
+  'app/(dashboard)/maintenance/CreateWorkOrderModal.tsx:128':
     'Same per-photo storage-upload + row pattern, client-side.',
   'lib/asset-discovery/seed-from-amenities.ts:62':
     'Real N+1 (existence-check select + insert per property) left as a known, bounded cost — deferred rather than fixed blind in the same PR that added this guardrail, since it touches live PMS-sync logic. Bounded by properties-per-org (10-50 per CLAUDE.md\'s target user).',

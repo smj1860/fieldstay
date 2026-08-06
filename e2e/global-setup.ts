@@ -93,6 +93,36 @@ export default async function globalSetup(_config: FullConfig) {
 
   const orgId = membership.org_id
 
+  // ── Age the org past the compliance onboarding grace ──────────────────────
+  //
+  // vendor_compliance_status exposes org_onboarding_grace: an org younger than
+  // 60 days is never compliance-blocked, so a brand-new PM is not told "you may
+  // not dispatch anybody" before they have had a chance to collect a single
+  // document (migration 20260806140000).
+  //
+  // This fixture org stands in for an ESTABLISHED tenant — every other spec
+  // already assumes that (onboarding complete, billing active). Its created_at
+  // is otherwise just whenever the E2E project happened to be provisioned, and
+  // while that date is inside the window the two hard-block specs in
+  // 24-vendor-compliance-block.spec.ts test nothing: the vendor they backdate
+  // into hard_blocked is silently permitted, and the failure reads as "the
+  // Blocked label never appeared" with no hint that the org's age caused it.
+  // Exactly that happened when the grace shipped.
+  //
+  // Set explicitly on every run rather than fixed once in the database, so a
+  // re-provisioned E2E project cannot quietly re-enter the window.
+  const { error: ageErr } = await supabase
+    .from('organizations')
+    .update({ created_at: new Date(Date.now() - 400 * 24 * 60 * 60 * 1000).toISOString() })
+    .eq('id', orgId)
+
+  if (ageErr) {
+    throw new Error(
+      `Failed to age the E2E org past the compliance onboarding grace: ${ageErr.message}. ` +
+      `The vendor hard-block specs cannot pass while the org is under 60 days old.`
+    )
+  }
+
   // Store org_id so teardown can reference it without re-auth
   fs.writeFileSync(
     path.join(__dirname, '.auth', 'context.json'),

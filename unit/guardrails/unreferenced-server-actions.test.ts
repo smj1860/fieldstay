@@ -85,7 +85,10 @@ const BASELINE = new Set([
   // approve_quote_request kept a text-into-uuid assignment that made it fail
   // 100% of the time for two revisions — see
   // supabase/migrations/20260805191500_approve_quote_completion_token_cast.sql.
-  'app/(dashboard)/maintenance/actions.ts::recordMaintenanceCompletion',
+  // recordMaintenanceCompletion pruned 2026-08-06 by DELETING it — a divergent
+  // duplicate of advanceSchedulesAfterCompletion that anchored next_due_date to
+  // today instead of the schedule's own date, ignored schedule_type, and was
+  // the only writer of maintenance_completions. See the note at its old site.
   'app/(dashboard)/maintenance/work-order-actions.ts::reorderWorkOrderLineItems',
   'app/(dashboard)/maintenance/work-order-actions.ts::updatePropertyAccessInstructions',
   'app/(dashboard)/properties/[id]/setup/maintenance/actions.ts::addMaintenanceSchedule',

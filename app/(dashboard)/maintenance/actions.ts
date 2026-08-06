@@ -1656,6 +1656,34 @@ export async function bulkAssignVendor(
       return { error: 'Operation failed. Please try again.' }
     }
 
+    // Advance the status too. acceptVendorSuggestion — the OTHER way a PM
+    // assigns a vendor — has always written `status: 'assigned'` alongside
+    // vendor_id; this path only wrote vendor_id, so a bulk-assigned work order
+    // kept saying `pending` while carrying a vendor and having already emailed
+    // them. Production had two of those and not a single work order in
+    // `assigned` or `in_progress` at all.
+    //
+    // A SECOND, filtered statement rather than a column on the update above:
+    // the vendor must be set on every selected row, but the status must only
+    // move FORWARD. Folding it in would either drag an in_progress work order
+    // back to `assigned` on a reassignment, or (if filtered inline) skip the
+    // vendor write on exactly the rows that are mid-flight.
+    const { error: statusError } = await supabase
+      .from('work_orders')
+      .update({ status: 'assigned' })
+      .in('id', workOrderIds)
+      .eq('org_id', membership.org_id)
+      .in('status', ['pending', 'quote_requested'])
+
+    // Reported, not returned: the vendor IS assigned and about to be emailed.
+    // Failing the whole action here would tell the PM nothing happened.
+    if (statusError) {
+      console.error('[bulkAssignVendor] status advance failed', statusError)
+      reportError(statusError, {
+        site: 'serverAction.maintenance.bulkAssignVendor.status', orgId: membership.org_id,
+      })
+    }
+
     if (workOrders?.length) {
       await trackVendorAssignmentAgainstSuggestions(membership.org_id, vendorId, vendor.name, workOrders)
     }
@@ -2330,73 +2358,25 @@ export async function addCustomMaintenanceItem(
   }
 }
 
-// ── Record a maintenance completion and advance next_due_date ─────────────────
-
-export async function recordMaintenanceCompletion(
-  scheduleItemId: string,
-  input: { notes?: string; work_order_id?: string },
-): Promise<{ error?: string; success?: boolean; nextDueDate?: string }> {
-  try {
-    const { supabase, membership, user } = await requireOrgRole(['admin', 'manager'])
-
-    const { data: item, error: fetchErr } = await supabase
-      .from('maintenance_schedules')
-      .select('property_id, org_id, asset_category, frequency, active_from_month, active_to_month')
-      .eq('id', scheduleItemId)
-      .eq('org_id', membership.org_id)
-      .single()
-
-    if (fetchErr || !item) return { error: 'Maintenance item not found' }
-
-    const today = new Date()
-    const next  = new Date(today)
-    switch (item.frequency) {
-      case 'weekly':      next.setDate(next.getDate() + 7);         break
-      case 'biweekly':    next.setDate(next.getDate() + 14);        break
-      case 'monthly':     next.setMonth(next.getMonth() + 1);       break
-      case 'quarterly':   next.setMonth(next.getMonth() + 3);       break
-      case 'semi_annual': next.setMonth(next.getMonth() + 6);       break
-      case 'annual':      next.setFullYear(next.getFullYear() + 1); break
-    }
-    const nextDueDateStr = next.toISOString().split('T')[0]
-
-    const { error: compErr } = await supabase
-      .from('maintenance_completions')
-      .insert({
-        maintenance_schedule_id: scheduleItemId,
-        property_id:             item.property_id,
-        org_id:                  item.org_id,
-        asset_category:          item.asset_category ?? null,
-        completed_at:            today.toISOString(),
-        completed_by:            user.id,
-        notes:                   input.notes ?? null,
-        work_order_id:           input.work_order_id ?? null,
-        next_due_date_set:       nextDueDateStr,
-      })
-
-    if (compErr) {
-      console.error('[recordMaintenanceCompletion] insert', compErr)
-      return { error: 'Failed to record completion' }
-    }
-
-    const { error: updateErr } = await supabase
-      .from('maintenance_schedules')
-      .update({ next_due_date: nextDueDateStr })
-      .eq('id', scheduleItemId)
-
-    if (updateErr) {
-      console.error('[recordMaintenanceCompletion] update next_due_date', updateErr)
-    }
-
-    revalidatePath(`/properties/${item.property_id}`)
-    revalidatePath('/maintenance')
-    return { success: true, nextDueDate: nextDueDateStr }
-  } catch (err) {
-    console.error('[recordMaintenanceCompletion]', err)
-    reportError(err, { site: 'serverAction.maintenance.recordMaintenanceCompletion' })
-    return { error: 'Operation failed. Please try again.' }
-  }
-}
+// recordMaintenanceCompletion was DELETED 2026-08-06. It was a second, and
+// DIVERGENT, implementation of the schedule advance that already lives in
+// advanceSchedulesAfterCompletion (./complete-work-order-helpers.ts), and it
+// disagreed with the live one in three ways that would each have shipped as a
+// bug the moment anything called it:
+//
+//   - it anchored next_due_date to TODAY on every completion. The live path
+//     anchors to the schedule's own next_due_date, so a fixed calendar cadence
+//     stays fixed; only a gap-driven (vacancy_gap_suggestion) completion
+//     re-anchors to the actual date. Anchoring always-to-today silently walks
+//     every recurring schedule later with each early completion.
+//   - it ignored schedule_type entirely, so a seasonal or one-time schedule
+//     would have been advanced as if routine.
+//   - it SELECTed active_from_month / active_to_month and then never read
+//     them, which is what a half-finished seasonal implementation looks like.
+//
+// It was also the only writer of maintenance_completions anywhere in the
+// codebase, so that table has never held a row. Reviving the action rather
+// than deleting it would have meant reviving the cadence drift with it.
 
 // ── Fetch Completed/Cancelled Work Orders (on demand) ───────────────────────
 // The maintenance page query defaults to active-status work orders only

@@ -2,6 +2,16 @@ import type { SupabaseClient } from '@supabase/supabase-js'
 import { reportError } from '@/lib/observability/report-error'
 import { NON_BLOCKING_COMPLIANCE_STATUSES } from '@/lib/vendors/compliance-status'
 
+// TWO DIFFERENT CLOCKS, and they are easy to confuse:
+//
+//   45 days — how long a DOCUMENT may stay expired before it hard-blocks.
+//             Computed inside the view as compliance_status.
+//   60 days — how long a NEW ORG is exempt from being blocked at all, from
+//             organizations.created_at. Exposed as the view's
+//             org_onboarding_grace column and applied below, deliberately not
+//             folded into compliance_status (see
+//             20260806140000_vendor_compliance_onboarding_grace.sql).
+//
 // vendor_compliance_status (migration 20260606051120, grace period widened to
 // 45 days by 20260720170645) computes compliance_status live off
 // vendor_compliance_documents.expiry_date — 'hard_blocked' means the vendor's
@@ -42,7 +52,7 @@ export async function isVendorHardBlocked(
 ): Promise<boolean> {
   const { data, error } = await supabase
     .from('vendor_compliance_status')
-    .select('compliance_status')
+    .select('compliance_status, org_onboarding_grace')
     .eq('vendor_id', vendorId)
     .eq('org_id', orgId)
     .maybeSingle()
@@ -69,6 +79,20 @@ export async function isVendorHardBlocked(
 
   const status = data.compliance_status as string | null
   if (status !== null && NON_BLOCKING_COMPLIANCE_STATUSES.has(status)) return false
+
+  // ONBOARDING GRACE. A PM who signed up days ago has not had time to collect
+  // documents, and several of the COIs they already hold are lapsed precisely
+  // BECAUSE they have not chased a renewal yet. Blocking them would make the
+  // first thing FieldStay does for a new account "you may not dispatch
+  // anybody". The window is a fact on the view (org_onboarding_grace, 60 days
+  // from organizations.created_at) rather than a state folded into
+  // compliance_status, so the notification bell and the vendor badge still
+  // report the document as expired — the PM is TOLD, just not BLOCKED.
+  //
+  // Checked AFTER the allowlist so the ordinary non-blocking path costs
+  // nothing, and BEFORE the unrecognized-status report so a young org does not
+  // generate Sentry noise for a state that is not going to block it anyway.
+  if (data.org_onboarding_grace === true) return false
 
   // Unrecognized (or null) status: block, and report so the allowlist above
   // gets updated deliberately rather than discovered by an uninsured dispatch.
