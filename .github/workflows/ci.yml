@@ -4,6 +4,11 @@ on:
   pull_request:
   push:
     branches: [main]
+  # Manual trigger. Added 2026-08-06 while diagnosing a repo-wide stop in run
+  # creation: with only pull_request and push triggers there was no way to ask
+  # for a run, so "is CI working again?" could only be answered by pushing a
+  # commit. A no-op commit is a poor diagnostic instrument.
+  workflow_dispatch:
 
 # Cancel a still-running CI run for this branch/PR when a new commit lands
 # on it, instead of letting both run to completion. Without this, rapid
@@ -21,9 +26,24 @@ on:
 # exactly the race this block exists to prevent. A single group for the
 # whole workflow serializes every run (across all branches and PRs) that
 # touches the shared E2E Supabase project.
+#
+# cancel-in-progress is conditional, and the condition is the point. With a
+# flat `true`, the run that verifies a MERGE COMMIT is as cancellable as any
+# other — and on 2026-08-06 that is exactly what happened: PR #576 merged at
+# 15:09:30, the push run for merge commit 3a16a06c started at 15:09:36, and it
+# was cancelled 46 seconds later by the next event to arrive. main's HEAD had
+# never been verified by anything, which is the same end state as the dead-CI
+# incident the semgrep job's comment describes, reached by a different route.
+#
+# A PR run is safe to cancel: superseded by the next push to the same PR, and
+# whatever it would have told you, the newer run tells you about newer code. A
+# push to main is not superseded by anything — it is the only run that will
+# ever evaluate that commit. So pushes queue behind an in-flight run instead of
+# replacing it, which preserves the serialization above without ever discarding
+# the verification of something already merged.
 concurrency:
   group: ${{ github.workflow }}
-  cancel-in-progress: true
+  cancel-in-progress: ${{ github.event_name != 'push' }}
 
 # ── Two supply-chain conventions used by every job below ────────────────────
 #
