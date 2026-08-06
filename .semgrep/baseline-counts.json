@@ -34,9 +34,9 @@
     "both files, and check-semgrep-ratchet.mjs fails on a baseline entry whose",
     "rule ratchet.yml no longer declares."
   ],
-  "measured_at": "2026-08-05",
+  "measured_at": "2026-08-06",
   "counts": {
-    "fieldstay-supabase-discarded-result": 124,
+    "fieldstay-supabase-discarded-result": 120,
     "fieldstay-supabase-read-without-error": 230,
     "fieldstay-supabase-read-without-error-fan-in": 14,
     "fieldstay-supabase-unbounded-select-global-table": 5,
