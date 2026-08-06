@@ -464,6 +464,156 @@ describe('inventory/actions', () => {
       expect(result).toEqual({ error: 'Operation failed. Please try again.' })
       expect(supabase.from).not.toHaveBeenCalled()
     })
+
+    // ── The money leg ────────────────────────────────────────────────────────
+    // purchase_orders.total_estimated_cost is written NOWHERE else in the
+    // codebase: the PO is inserted with null (a count carries quantities, not
+    // prices) and no later step fills it in. handlePurchaseOrderApproved skips
+    // on a null total, so before the cost parameter existed the restock
+    // expense could not reach the owner ledger even once the event fired.
+    // Production bears that out: 1 PO, 136 line items, 0 non-null costs, 0
+    // inventory_purchase owner_transactions.
+    it('persists the amount the PM entered and carries it into the event', async () => {
+      const supabase = makeSupabase({
+        purchase_orders: [
+          { data: { id: 'po_1', property_id: 'prop_1', total_estimated_cost: null, status: 'sent' } },
+          { data: { id: 'po_1' } },
+        ],
+      })
+      vi.mocked(requireOrgRole).mockResolvedValue({ supabase, user: { id: 'user_1' }, membership } as never)
+
+      const result = await updatePurchaseOrderStatus('po_1', 'ordered', 87.499)
+
+      expect(result).toEqual({})
+      // Rounded to cents — a raw float from a text input must not reach the ledger.
+      expect(supabase.from.mock.results[1]!.value.update)
+        .toHaveBeenCalledWith(expect.objectContaining({ status: 'ordered', total_estimated_cost: 87.5 }))
+      expect(inngest.send).toHaveBeenCalledWith(expect.objectContaining({
+        data: expect.objectContaining({ total_estimated_cost: 87.5 }),
+      }))
+    })
+
+    it('falls back to the stored cost when the PM leaves the amount blank', async () => {
+      const supabase = makeSupabase({
+        purchase_orders: [
+          { data: { id: 'po_1', property_id: 'prop_1', total_estimated_cost: 42, status: 'sent' } },
+          { data: { id: 'po_1' } },
+        ],
+      })
+      vi.mocked(requireOrgRole).mockResolvedValue({ supabase, user: { id: 'user_1' }, membership } as never)
+
+      await updatePurchaseOrderStatus('po_1', 'ordered')
+
+      expect(inngest.send).toHaveBeenCalledWith(expect.objectContaining({
+        data: expect.objectContaining({ total_estimated_cost: 42 }),
+      }))
+    })
+
+    // NaN defeats `??` and every `> 0` comparison silently — Number.isFinite is
+    // the only guard that catches it, and an unparseable amount must never be
+    // written to a ledger as a garbage number.
+    it.each([
+      ['NaN',      Number.NaN],
+      ['Infinity', Number.POSITIVE_INFINITY],
+      ['negative', -5],
+      ['absurd',   1_000_000],
+    ])('refuses a %s amount before touching the DB', async (_label, value) => {
+      const supabase = makeSupabase({})
+      vi.mocked(requireOrgRole).mockResolvedValue({ supabase, user: { id: 'user_1' }, membership } as never)
+
+      const result = await updatePurchaseOrderStatus('po_1', 'ordered', value)
+
+      expect(result.error).toMatch(/between \$0 and/)
+      expect(supabase.from).not.toHaveBeenCalled()
+      expect(inngest.send).not.toHaveBeenCalled()
+    })
+
+    // ── Transition legality ──────────────────────────────────────────────────
+    // Reviving a terminal PO would fire purchase-order/approved a second time
+    // against an unchanged source_reference_id. The owner_transactions upsert
+    // would swallow the duplicate, which is worse than refusing: the ledger
+    // amount stays frozen at whatever the first attempt recorded while the UI
+    // shows the new one.
+    it.each([
+      ['received',  'received'],
+      ['cancelled', 'cancelled'],
+    ])('refuses to move a %s purchase order back to ordered', async (_label, from) => {
+      const supabase = makeSupabase({
+        purchase_orders: [{ data: { id: 'po_1', property_id: 'prop_1', total_estimated_cost: 10, status: from } }],
+      })
+      vi.mocked(requireOrgRole).mockResolvedValue({ supabase, user: { id: 'user_1' }, membership } as never)
+
+      const result = await updatePurchaseOrderStatus('po_1', 'ordered')
+
+      expect(result.error).toContain('cannot be marked ordered')
+      expect(inngest.send).not.toHaveBeenCalled()
+      expect(logAuditEvent).not.toHaveBeenCalled()
+    })
+
+    it('refuses to mark a sent purchase order received without it being ordered first', async () => {
+      const supabase = makeSupabase({
+        purchase_orders: [{ data: { id: 'po_1', property_id: 'prop_1', total_estimated_cost: null, status: 'sent' } }],
+      })
+      vi.mocked(requireOrgRole).mockResolvedValue({ supabase, user: { id: 'user_1' }, membership } as never)
+
+      const result = await updatePurchaseOrderStatus('po_1', 'received')
+
+      expect(result.error).toContain('cannot be marked received')
+    })
+
+    // ── Compare-and-swap ─────────────────────────────────────────────────────
+    // Two PMs marking the same PO ordered both read `sent` and both fall
+    // through the equality no-op above. The .eq('status', <old>) precondition
+    // on the UPDATE means exactly one matches a row.
+    it('reports a lost race instead of firing a second approved event', async () => {
+      const supabase = makeSupabase({
+        purchase_orders: [
+          { data: { id: 'po_1', property_id: 'prop_1', total_estimated_cost: 10, status: 'sent' } },
+          { data: null, error: null },   // UPDATE ... WHERE status = 'sent' matched nothing
+        ],
+      })
+      vi.mocked(requireOrgRole).mockResolvedValue({ supabase, user: { id: 'user_1' }, membership } as never)
+
+      const result = await updatePurchaseOrderStatus('po_1', 'ordered')
+
+      expect(result.error).toMatch(/Someone else updated/)
+      expect(inngest.send).not.toHaveBeenCalled()
+      expect(logAuditEvent).not.toHaveBeenCalled()
+      // A lost CAS is the guard working, not an outage — it must not page anyone.
+      expect(reportError).not.toHaveBeenCalled()
+    })
+
+    // Without this the CAS test above is satisfied by the `!updated` branch
+    // alone and would keep passing if the precondition were deleted from the
+    // query — a guardrail that cannot fail is not a guardrail.
+    it('puts the old status on the UPDATE itself, not only on the read', async () => {
+      const supabase = makeSupabase({
+        purchase_orders: [
+          { data: { id: 'po_1', property_id: 'prop_1', total_estimated_cost: 10, status: 'sent' } },
+          { data: { id: 'po_1' } },
+        ],
+      })
+      vi.mocked(requireOrgRole).mockResolvedValue({ supabase, user: { id: 'user_1' }, membership } as never)
+
+      await updatePurchaseOrderStatus('po_1', 'ordered')
+
+      expect(supabase.from.mock.results[1]!.value.eq).toHaveBeenCalledWith('status', 'sent')
+    })
+
+    it('never writes the spend into the audit trail', async () => {
+      const supabase = makeSupabase({
+        purchase_orders: [
+          { data: { id: 'po_1', property_id: 'prop_1', total_estimated_cost: null, status: 'sent' } },
+          { data: { id: 'po_1' } },
+        ],
+      })
+      vi.mocked(requireOrgRole).mockResolvedValue({ supabase, user: { id: 'user_1' }, membership } as never)
+
+      await updatePurchaseOrderStatus('po_1', 'ordered', 250)
+
+      const meta = vi.mocked(logAuditEvent).mock.calls[0]![0].metadata
+      expect(JSON.stringify(meta)).not.toContain('250')
+    })
   })
 
   describe('triggerShoppingCart', () => {

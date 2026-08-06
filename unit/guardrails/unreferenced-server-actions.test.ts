@@ -73,7 +73,16 @@ const BASELINE = new Set([
   // exercised it, which is how it kept an incomplete Article 17 erasure
   // (name + email only, no raw_ical_data / Vault door code / SMS opt-in)
   // while audit-logging request_type: 'erasure_article_17'.
-  'app/(dashboard)/inventory/actions.ts::updatePurchaseOrderStatus',
+  // updatePurchaseOrderStatus pruned 2026-08-06: it now has a caller
+  // (components/inventory/purchase-order-actions.tsx). This one inverts the
+  // usual finding — not a dead action hiding a bug, but a dead action that was
+  // the missing HALF of a live feature. Every restock path ends outside
+  // FieldStay (the PM submits the Kroger cart on kroger.com, or buys off the
+  // emailed list), so with no way to say "ordered", purchase-order/approved
+  // had no producer that could ever run and the restock expense never reached
+  // the owner ledger. Its own dependency was dead too: total_estimated_cost is
+  // written nowhere in the pipeline, so the ledger step would have skipped
+  // even if the event had fired.
   'app/(dashboard)/maintenance/actions.ts::assignCrewToWorkOrder',
   'app/(dashboard)/maintenance/actions.ts::updateWorkOrder',
   'app/(dashboard)/maintenance/actions.ts::addWorkOrderNote',
