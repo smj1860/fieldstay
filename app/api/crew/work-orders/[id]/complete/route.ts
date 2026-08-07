@@ -61,6 +61,26 @@ export async function POST(
   if (!wo)                       return NextResponse.json({ error: 'Not found' }, { status: 404 })
   if (wo.status === 'completed') return NextResponse.json({ alreadyCompleted: true })
 
+  // A cancelled work order must not be completable, and nothing else stopped
+  // it: the check above only catches `completed`, and the UPDATE's
+  // `.neq('status', 'completed')` below MATCHES a cancelled row. So completing
+  // one flipped it to `completed` and ran the full side-effect chain —
+  // including the owner_transactions maintenance expense — for work that was
+  // called off. This is the turnover complete route's guard, which that route
+  // already had and this one did not.
+  //
+  // Nothing removes a cancelled work order from the crew's device either: the
+  // sync pulls by assigned_crew_member_id with no status filter, and only the
+  // crew LIST filters cancelled out. 409 deliberately — lib/dexie/net.ts
+  // treats 4xx as terminal, and this refusal is permanent, so retrying it
+  // forever is the wrong behaviour.
+  if (wo.status === 'cancelled') {
+    return NextResponse.json(
+      { error: 'This work order was cancelled. Check with your manager before doing any more work on it.' },
+      { status: 409 },
+    )
+  }
+
   const trimmedNotes = notes?.trim() ? notes.trim() : 'Marked complete by crew'
 
   // The WHERE clause (not the earlier read) is the real guard against a
@@ -85,6 +105,7 @@ export async function POST(
     })
     .eq('id', id)
     .neq('status', 'completed')
+    .neq('status', 'cancelled')
     .select(COMPLETED_WORK_ORDER_SELECT)
     .maybeSingle()
 

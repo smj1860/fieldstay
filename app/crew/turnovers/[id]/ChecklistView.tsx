@@ -40,7 +40,7 @@ export function ChecklistView({
     capturingAsset, setCapturingAsset, startAssetCapture, completeCapturedItem,
     toggleItem, saveNote, openNote, handleSectionPhoto, handlePhotoCapture,
     toggleChecklistConfirm, checklistConfirmSyncFailed, actionError,
-    items,
+    items, isCancelled,
   } = actions
 
   return (
@@ -300,13 +300,14 @@ export function ChecklistView({
               disabled={
                 (!instance.completed_at && pendingPhotos.length > 0)
                 || turnover.status === 'completed'
+                || isCancelled
               }
               className={cn(
                 'w-full flex items-center gap-3 px-4 py-4 rounded-xl border-2 mt-2 mb-4 text-left transition-colors',
                 !instance.completed_at && pendingPhotos.length > 0
                   ? 'border-themed opacity-60 cursor-not-allowed'
                   : !instance.completed_at && 'border-themed hover:bg-raised-themed',
-                turnover.status === 'completed' && 'cursor-not-allowed'
+                (turnover.status === 'completed' || isCancelled) && 'cursor-not-allowed'
               )}
               style={instance.completed_at ? { borderColor: 'var(--accent-green)', background: 'var(--accent-green-dim)' } : undefined}
             >

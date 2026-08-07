@@ -70,7 +70,45 @@ export function useTurnoverActions(id: string) {
   // UX used everywhere else in the app.
   const [pendingConfirm, setPendingConfirm] = useState<{ message: string; onConfirm: () => void } | null>(null)
 
-  const turnover = useLiveQuery(() => db.turnovers.get(id), [id])
+  // `?? null` is load-bearing: useLiveQuery returns `undefined` until the
+  // query first resolves, and db.turnovers.get() ALSO resolves to `undefined`
+  // for a row that is not there. Collapsing both into `undefined` is what made
+  // the page render its loading spinner forever for a turnover that had left
+  // the device — "still loading" and "gone" were the same state. Now
+  // `undefined` means loading and `null` means resolved-and-absent.
+  const turnover = useLiveQuery(() => db.turnovers.get(id).then((t) => t ?? null), [id])
+
+  // …but resolved-and-absent is only meaningful once a turnovers pull has
+  // actually completed. On a fresh install (or right after
+  // forceFullCrewResync(), which clears the cursors) the cache is legitimately
+  // empty and every turnover would read as "gone". The cursor is the durable
+  // record that a pull landed, so it is what separates "your cache has not
+  // filled yet" from "this is not in your assigned set".
+  const turnoversCursor = useLiveQuery(() => db.sync_meta.get('cursor:turnovers'), [])
+  const turnoverMissing = turnover === null && !!turnoversCursor?.value
+
+  /**
+   * A cancelled turnover is still on the device, and every control on this
+   * page used to stay live on it.
+   *
+   * Nothing removes it: cancelTurnoversForBooking() flips `turnovers.status`
+   * but leaves the turnover_assignments row, so reconcileRemovedTurnovers()
+   * (which keys off the assigned set, not status) never drops it, and the
+   * next pull simply writes `cancelled` into the cache. The crew LIST filters
+   * cancelled out — this DETAIL page never did, so a crew member already on it
+   * when the guest cancels sees no change at all.
+   *
+   * The server half of this shipped already: the complete route answers a
+   * cancelled turnover with 409. But lib/dexie/net.ts treats 4xx as TERMINAL,
+   * so that refusal DEAD-LETTERS the mutation — after completeTurnover() has
+   * already flipped the local row to `completed`. The crew member finishes a
+   * job that was called off, the device says complete, the server never
+   * agrees, and the failed-sync banner offers a retry that can only fail
+   * again. The guard belongs on both sides; only one side had it.
+   */
+  const isCancelled = turnover?.status === 'cancelled'
+  const CANCELLED_MESSAGE =
+    'This turnover was cancelled. Check with your manager before doing any more work on it.'
 
   const property = useLiveQuery(
     () => turnover ? db.properties.get(turnover.property_id) : undefined,
@@ -345,6 +383,10 @@ export function useTurnoverActions(id: string) {
 
   const toggleChecklistConfirm = async () => {
     if (!instance) return
+    if (isCancelled) {
+      setActionError(CANCELLED_MESSAGE)
+      return
+    }
     if (!crewMemberId) {
       setActionError(CREW_ID_UNRESOLVED)
       return
@@ -364,6 +406,10 @@ export function useTurnoverActions(id: string) {
   }
 
   const toggleInventoryConfirm = async () => {
+    if (isCancelled) {
+      setActionError(CANCELLED_MESSAGE)
+      return
+    }
     if (!crewMemberId) {
       setActionError(CREW_ID_UNRESOLVED)
       return
@@ -405,7 +451,11 @@ export function useTurnoverActions(id: string) {
   // status landing at 'completed' queued duplicate outbox rows.
   const autoCompletedRef = useRef(false)
   useEffect(() => {
-    if (!turnover || turnover.status === 'completed') return
+    // `cancelled` as well as `completed`: this fires with NO user action the
+    // moment both confirmations land, so without it a cancelled turnover
+    // auto-queues a PATCH the server is guaranteed to refuse with a 409 —
+    // which dead-letters rather than retries.
+    if (!turnover || turnover.status === 'completed' || turnover.status === 'cancelled') return
     if (autoCompletedRef.current) return
     const checklistConfirmed = !!instance?.completed_at
     const inventoryConfirmed = !!turnover.inventory_confirmed_complete_at
@@ -455,6 +505,10 @@ export function useTurnoverActions(id: string) {
   const countedSoFar = (inventoryItems ?? []).filter((i) => counts?.[i.id] !== undefined).length
 
   const markInProgress = async () => {
+    if (isCancelled) {
+      setActionError(CANCELLED_MESSAGE)
+      return
+    }
     setActionError(null)
     try {
       await startTurnover(userId, id)
@@ -466,6 +520,10 @@ export function useTurnoverActions(id: string) {
   }
 
   const runMarkComplete = async (onDone: () => void) => {
+    if (isCancelled) {
+      setActionError(CANCELLED_MESSAGE)
+      return
+    }
     setCompleting(true)
     setActionError(null)
     try {
@@ -480,6 +538,14 @@ export function useTurnoverActions(id: string) {
   }
 
   const markComplete = (onDone: () => void) => {
+    // Guarded HERE, not only in runMarkComplete: this path can divert into the
+    // "still missing photos/assets — mark complete anyway?" dialog first, and
+    // on a cancelled turnover that asks the crew member to confirm an action
+    // that was never going to be allowed.
+    if (isCancelled) {
+      setActionError(CANCELLED_MESSAGE)
+      return
+    }
     const warnings: string[] = []
     if (pendingPhotos.length > 0) {
       warnings.push(`${pendingPhotos.length} item${pendingPhotos.length !== 1 ? 's' : ''} still need photos`)
@@ -501,7 +567,7 @@ export function useTurnoverActions(id: string) {
   }
 
   return {
-    userId, crewMemberId,
+    userId, crewMemberId, isCancelled, CANCELLED_MESSAGE, turnoverMissing,
     turnover, property, instance, items, inventoryItems,
     checklistConfirmSyncFailed, inventoryConfirmSyncFailed, pendingUploadIds,
     completedCount, totalCount, pendingPhotos, missingAssetTypes,

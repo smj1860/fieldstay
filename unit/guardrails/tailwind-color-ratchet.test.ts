@@ -35,7 +35,6 @@ const BASELINE = new Set<string>([
   'app/crew/crew-shell.tsx',
   'app/crew/error.tsx',
   'app/crew/page.tsx',
-  'app/crew/work-orders/[id]/page.tsx',
   'app/dpa/page.tsx',
   'app/hospitable/page.tsx',
   'app/owner/[token]/page.tsx',
