@@ -50,6 +50,24 @@ describe('scope gate', () => {
     expect(await scopeChanged(USER, 'scope:inventory_items', ['p1', 'p2'])).toBe(false)
   })
 
+  // The scope key is a CANONICALISATION key, so its ordering must not depend
+  // on the runtime's locale or ICU version — the same rule compareCodeUnits
+  // exists for in the inventory action and build-shopping-cart. A
+  // locale-dependent sort can only ever produce a different string for the
+  // same set (a redundant pull, benign) and never the same string for two
+  // different sets, so this is consistency rather than a live bug — but the
+  // benign direction stops being guaranteed the moment the key is used for
+  // anything stronger than a cache hint.
+  it('orders ids by code unit, not by locale collation', async () => {
+    // Locale collation puts 'a' before 'B'; code-unit ordering does not.
+    // Recording one order and checking the other must still read as unchanged.
+    await rememberScope(USER, 'scope:property_assets', ['B', 'a'])
+    expect(await scopeChanged(USER, 'scope:property_assets', ['a', 'B'])).toBe(false)
+
+    const stored = await db().sync_meta.get('scope:property_assets')
+    expect(stored?.value, 'code-unit order puts uppercase first').toBe('B,a')
+  })
+
   it('notices a property joining or leaving the scope', async () => {
     await rememberScope(USER, 'scope:inventory_items', ['p1'])
     expect(await scopeChanged(USER, 'scope:inventory_items', ['p1', 'p2'])).toBe(true)
