@@ -681,10 +681,31 @@ export interface CancelledTurnoverAssignment {
   crewMemberId: string
 }
 
+/** Matches lib/storage/object-path.ts's guard — see the note in cancelTurnoversForBooking. */
+const BOOKING_ID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
+
 export async function cancelTurnoversForBooking(
   bookingId: string,
   supabase:  DBClient
 ): Promise<CancelledTurnoverAssignment[]> {
+  // `.or()` takes a PostgREST FILTER EXPRESSION, not bound parameters — the
+  // string below is parsed server-side, so a value containing a comma or a
+  // PostgREST operator would add clauses rather than being matched literally.
+  // CLAUDE.md bans building queries by interpolation for exactly this reason.
+  //
+  // Not currently exploitable, and worth saying so precisely rather than
+  // implying otherwise: all three callers (ical-sync, hospitable's
+  // incremental-sync, ownerrez's reconciliation-handler) pass an id they read
+  // back from OUR bookings table, never a provider-supplied identifier. This
+  // guard exists because nothing in the type system says that — `bookingId:
+  // string` accepts anything — and the next caller to pass an external id
+  // would open it silently. Every other interpolated `.or()` in the codebase
+  // splices a server-derived timestamp or org id; this is the only one taking
+  // a value that travels in from a sync path.
+  if (!BOOKING_ID_RE.test(bookingId)) {
+    throw new Error('cancelTurnoversForBooking: bookingId is not a uuid')
+  }
+
   // Single atomic UPDATE ... RETURNING (via .update().select()) rather than
   // a separate SELECT-then-UPDATE — captures who was assigned in the same
   // statement that flips status, so there's no window for a concurrent
@@ -693,12 +714,22 @@ export async function cancelTurnoversForBooking(
   // turnover_assignments rows to embed — a 'pending_assignment' turnover
   // never had a crew member, regardless of its post-update status here, so
   // no separate status check is needed on the returned rows.
-  const { data: updated } = await supabase
+  const { data: updated, error } = await supabase
     .from('turnovers')
     .update({ status: 'cancelled' })
     .or(`booking_id.eq.${bookingId},prev_booking_id.eq.${bookingId}`)
     .in('status', ['pending_assignment', 'assigned'])
     .select('id, org_id, turnover_assignments(crew_member_id)')
+
+  // A discarded error here returned [] — indistinguishable from "no turnovers
+  // needed cancelling". The booking is cancelled, its turnovers stay
+  // pending_assignment or assigned, and notifyCrewOfCancelledTurnovers is
+  // handed an empty list, so nobody is told. A crew member turns up to clean a
+  // stay that is not happening. Every caller runs this inside step.run(), so
+  // throwing gets the retry this deserves instead of a silent no-op.
+  if (error) {
+    throw new Error(`cancelTurnoversForBooking failed for booking ${bookingId}: ${error.message}`)
+  }
 
   const cancelled: CancelledTurnoverAssignment[] = []
   for (const t of updated ?? []) {

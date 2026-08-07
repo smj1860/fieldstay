@@ -185,7 +185,7 @@ const BASELINE: Record<string, number> = {
   'lib/integrations/providers/kroger-token.ts': 2,
   'lib/push/send-push.ts': 2,
   'lib/support/account-tools.ts': 3,
-  'lib/turnovers/generator.ts': 4,
+  'lib/turnovers/generator.ts': 3,
 }
 
 describe('guardrail: Supabase results are not destructured for data without error', () => {

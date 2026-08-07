@@ -27,6 +27,12 @@ function makeSupabase(response: { data?: unknown; error?: unknown }) {
   return { from }
 }
 
+// cancelTurnoversForBooking splices bookingId into a PostgREST `.or()` filter
+// expression, which is parsed server-side rather than bound as a parameter, so
+// it now refuses anything that is not a uuid. Real ids are uuids — every caller
+// reads them back from our own bookings table — so the fixtures use one too.
+const BOOKING_ID = '11111111-2222-4333-8444-555555555555'
+
 describe('cancelTurnoversForBooking', () => {
   beforeEach(() => vi.clearAllMocks())
 
@@ -36,7 +42,7 @@ describe('cancelTurnoversForBooking', () => {
       error: null,
     })
 
-    const result = await cancelTurnoversForBooking('booking_1', supabase as never)
+    const result = await cancelTurnoversForBooking(BOOKING_ID, supabase as never)
 
     expect(result).toEqual([{ turnoverId: 'to_1', orgId: 'org_1', crewMemberId: 'crew_1' }])
   })
@@ -47,7 +53,7 @@ describe('cancelTurnoversForBooking', () => {
       error: null,
     })
 
-    const result = await cancelTurnoversForBooking('booking_1', supabase as never)
+    const result = await cancelTurnoversForBooking(BOOKING_ID, supabase as never)
 
     expect(result).toEqual([{ turnoverId: 'to_1', orgId: 'org_1', crewMemberId: 'crew_1' }])
   })
@@ -61,7 +67,7 @@ describe('cancelTurnoversForBooking', () => {
       error: null,
     })
 
-    const result = await cancelTurnoversForBooking('booking_1', supabase as never)
+    const result = await cancelTurnoversForBooking(BOOKING_ID, supabase as never)
 
     expect(result).toEqual([])
   })
@@ -75,13 +81,43 @@ describe('cancelTurnoversForBooking', () => {
       error: null,
     })
 
-    const result = await cancelTurnoversForBooking('booking_1', supabase as never)
+    const result = await cancelTurnoversForBooking(BOOKING_ID, supabase as never)
 
     expect(result).toEqual([
       { turnoverId: 'to_1', orgId: 'org_1', crewMemberId: 'crew_1' },
       { turnoverId: 'to_2', orgId: 'org_1', crewMemberId: 'crew_1' },
     ])
   })
+
+  // A discarded error returned [] — indistinguishable from "nothing needed
+  // cancelling". The booking is cancelled, its turnovers stay assigned, and
+  // notifyCrewOfCancelledTurnovers gets an empty list, so nobody is told. A
+  // crew member turns up to clean a stay that is not happening. Every caller
+  // runs this inside step.run(), so throwing gets the retry it deserves.
+  it('throws rather than reporting "nothing cancelled" when the UPDATE fails', async () => {
+    const supabase = makeSupabase({ data: null, error: { message: 'deadlock detected', code: '40P01' } })
+
+    await expect(cancelTurnoversForBooking(BOOKING_ID, supabase as never))
+      .rejects.toThrow(/deadlock detected/)
+  })
+
+  // `.or()` takes a filter EXPRESSION, not bound parameters, so a value with a
+  // comma or a PostgREST operator would add clauses instead of being matched
+  // literally. Not currently reachable — every caller passes an id read back
+  // from our own bookings table — but nothing in the type system says so.
+  it.each([
+    ['a comma-smuggled clause', 'x,status.eq.completed'],
+    ['a bare operator',         'eq.anything'],
+    ['an empty string',         ''],
+    ['a plain label',           'booking_1'],
+  ])('refuses %s rather than splicing it into the filter', async (_label, value) => {
+    const supabase = makeSupabase({ data: [], error: null })
+
+    await expect(cancelTurnoversForBooking(value, supabase as never))
+      .rejects.toThrow(/not a uuid/)
+    expect(supabase.from).not.toHaveBeenCalled()
+  })
+
 })
 
 describe('notifyCrewOfCancelledTurnovers', () => {
