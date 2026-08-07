@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { formatOffer } from '@/lib/guidebook/offer'
+import { formatOffer, asOfferType } from '@/lib/guidebook/offer'
 
 describe('formatOffer', () => {
   describe('percentage', () => {
@@ -74,5 +74,39 @@ describe('formatOffer', () => {
     it('returns null', () => {
       expect(formatOffer('none', null, null, null)).toBeNull()
     })
+  })
+})
+
+describe('asOfferType', () => {
+  // guidebook_sponsors.offer_type is a TEXT column with a CHECK constraint, so
+  // PostgREST hands it back as a bare string. This is the narrowing boundary.
+
+  it.each(['percentage', 'fixed_amount', 'item', 'custom', 'none'])(
+    'passes through the known offer type %s',
+    (value) => {
+      expect(asOfferType(value)).toBe(value)
+    },
+  )
+
+  it.each([
+    ['an unknown string', 'bogo'],
+    ['an empty string',   ''],
+    ['null',              null],
+    ['undefined',         undefined],
+  ])('falls back to none for %s', (_label, value) => {
+    // 'none' is the safe direction: formatOffer renders nothing for it, so a
+    // sponsor line is omitted rather than built from a value nothing
+    // understands.
+    expect(asOfferType(value)).toBe('none')
+  })
+
+  it('the fallback that makes unknown input safe is what makes a MISSING entry invisible', () => {
+    // Which is why the member list is a Record<GuidebookOfferType, true> and
+    // not an array: adding a value to the union fails the BUILD until it is
+    // listed. There is no runtime assertion that can catch this — a forgotten
+    // entry looks exactly like a genuinely unknown value, and every sponsor
+    // using it would silently show no offer. Verified by reverting the Record
+    // to an array and adding a union member: tsc stayed green.
+    expect(asOfferType('bogo')).toBe('none')
   })
 })

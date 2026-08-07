@@ -1,6 +1,28 @@
 import type { GuidebookOfferType } from '@/types/database'
 
-const OFFER_TYPES: readonly GuidebookOfferType[] = ['percentage', 'fixed_amount', 'item', 'custom', 'none']
+/**
+ * Every member of GuidebookOfferType, as a Record so TypeScript enforces
+ * EXHAUSTIVENESS: add a value to the union and this stops compiling until it
+ * is listed here.
+ *
+ * That, not lookup speed, is the reason this is not a plain array. A
+ * five-element array's `.includes()` is if anything faster than a Set — but an
+ * array has no compile-time link back to the union, so a newly added offer
+ * type would silently fall through asOfferType() to 'none' and every sponsor
+ * using it would render no offer at all, with nothing failing anywhere. The
+ * fallback that makes unknown input safe is exactly what makes a MISSING entry
+ * invisible, so the list has to be checked by the compiler rather than by
+ * whoever remembers to update it.
+ */
+const OFFER_TYPES: Record<GuidebookOfferType, true> = {
+  percentage:   true,
+  fixed_amount: true,
+  item:         true,
+  custom:       true,
+  none:         true,
+}
+
+const OFFER_TYPE_KEYS = new Set<string>(Object.keys(OFFER_TYPES))
 
 /**
  * Narrows guidebook_sponsors.offer_type — a TEXT column with a CHECK
@@ -14,7 +36,7 @@ const OFFER_TYPES: readonly GuidebookOfferType[] = ['percentage', 'fixed_amount'
  * understands.
  */
 export function asOfferType(value: string | null | undefined): GuidebookOfferType {
-  return OFFER_TYPES.includes(value as GuidebookOfferType) ? (value as GuidebookOfferType) : 'none'
+  return OFFER_TYPE_KEYS.has(value ?? '') ? (value as GuidebookOfferType) : 'none'
 }
 
 function formatOfferPrice(value: number): string {
