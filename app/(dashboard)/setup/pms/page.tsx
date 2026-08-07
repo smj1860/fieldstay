@@ -50,7 +50,12 @@ export default async function OnboardingPmsPage() {
   // Count active connections across all PMS providers
   const activeConnections = (connections ?? []).filter((c) => c.status === 'active')
 
-  const { data: properties } = activeConnections.length
+  // The two reads above are error-checked and this one was not, so a failed
+  // read rendered as "no properties imported" — on the step whose entire job is
+  // to show the PM that their PMS import worked. Silence here reads as "the
+  // connection did nothing", which is the one wrong conclusion this page must
+  // never draw for them.
+  const { data: properties, error: propertiesError } = activeConnections.length
     ? await admin
         .from('properties')
         .select('id, name, city, state')
@@ -58,7 +63,9 @@ export default async function OnboardingPmsPage() {
         .eq('is_active', true)
         .order('name')
         .limit(10)
-    : { data: [] }
+    : { data: [], error: null }
+
+  throwIfAnyQueryFailed({ site: 'page.setup.pms', orgId: membership.org_id }, propertiesError)
 
   async function continueAction() {
     'use server'

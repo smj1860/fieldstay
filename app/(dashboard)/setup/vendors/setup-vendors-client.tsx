@@ -24,7 +24,7 @@ const VENDOR_SPECIALTIES = [
 interface Vendor { id: string; name: string; specialty: string | null; contact_name: string | null }
 interface Props  { vendors: Vendor[]; continueAction: () => Promise<void> }
 
-export function SetupVendorsStep({ vendors: initialVendors, continueAction }: Props) {
+export function SetupVendorsStep({ vendors: initialVendors, continueAction }: Readonly<Props>) {
   const [vendors, setVendors] = useState(initialVendors)
   const [view, setView]       = useState<'list' | 'add'>('list')
   const [savedName, setSavedName] = useState<string | null>(null)
