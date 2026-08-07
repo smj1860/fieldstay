@@ -1,6 +1,7 @@
 import { notFound } from 'next/navigation'
 import { Archivo, Source_Serif_4 } from 'next/font/google'
 import { createServiceClient } from '@/lib/supabase/server'
+import { isUuid } from '@/lib/validation/uuid'
 import { unwrap } from '@/lib/supabase/unwrap'
 import { PrintKit } from './print-kit'
 import type { GuidebookSponsor } from '@/types/database'
@@ -25,6 +26,12 @@ export default async function PrintKitPage({
   params: Promise<{ media_kit_token: string }>
 }) {
   const { media_kit_token } = await params
+
+  // Same shape check as the non-print page — media_kit_token is a `uuid`, so a
+  // malformed one is 22P02, which unwrap() escalates to the error boundary
+  // rather than the 404 an invalid link deserves.
+  if (!isUuid(media_kit_token)) notFound()
+
   const supabase = createServiceClient({ publicSurface: 'g-kit--media-kit-token-print' })
 
   const sponsorRes = await supabase

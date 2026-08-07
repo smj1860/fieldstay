@@ -86,10 +86,9 @@ export const guidebookGuestOptedIn = inngest.createFunction(
         door_code:     doorCode,
         portal_url:    portalUrl,
       })
-      const result = await sendSMS(phoneE164, body, { orgId: property.org_id })
-
-      if (!result.sent) {
-        // SMS failed — roll back the claim so a retry can attempt again
+      // Releases the one-shot claim so a later run can send. Both exits below
+      // need it, for opposite reasons.
+      const releaseClaim = async (): Promise<void> => {
         const { error: rollbackError } = await supabase
           .from('guidebook_guest_sms_optins')
           .update({ door_code_sent_at: null })
@@ -102,8 +101,37 @@ export const guidebookGuestOptedIn = inngest.createFunction(
             orgId: property.org_id,
           })
         }
+      }
 
-        throw new Error(`SMS send failed: ${result.reason ?? 'unknown'}`)
+      // sendSMS THROWS on a real send failure — dispatchToTelnyx throws on a
+      // timeout or any non-2xx. That throw used to escape this step with the
+      // claim still held, so the Inngest retry hit
+      // `.is('door_code_sent_at', null)`, matched zero rows, and returned
+      // `already_sent` — reporting success for a door code the guest never
+      // received, and never trying again. That is the exact failure the
+      // comment above the claim describes for a different case; this was the
+      // same shape one layer down, still open.
+      let result
+      try {
+        result = await sendSMS(phoneE164, body, { orgId: property.org_id })
+      } catch (err) {
+        await releaseClaim()
+        throw err
+      }
+
+      if (!result.sent) {
+        // NOT a failure. sendSMS only returns sent:false for a DELIBERATE
+        // skip — SMS_ENABLED off, the daily nudge budget, demo-org
+        // suppression — because every real failure throws (above). Throwing
+        // here turned a config state into a retried failure: with
+        // SMS_ENABLED=false, every guest opt-in produced a failing run
+        // reading "SMS send failed", which is both untrue and noise that
+        // would mask the real failures once SMS is switched on.
+        //
+        // Release the claim so the send can happen once the skip no longer
+        // applies, and end cleanly — a retry cannot change an env var.
+        await releaseClaim()
+        return { skipped: result.reason ?? 'not_sent' }
       }
 
       return { sent: true }

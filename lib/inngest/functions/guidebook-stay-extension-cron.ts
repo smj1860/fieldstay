@@ -1,6 +1,7 @@
 import { inngest }             from '@/lib/inngest/client'
 import { fetchAllRows }        from '@/lib/inngest/paginate'
 import { createServiceClient } from '@/lib/supabase/server'
+import { unwrap }              from '@/lib/supabase/unwrap'
 
 const FALLBACK_TIMEZONE = 'America/New_York'
 
@@ -62,28 +63,60 @@ export const guidebookStayExtensionCron = inngest.createFunction(
           Date.now() + config.extension_message_days_before * 24 * 60 * 60 * 1000
         ).toISOString().split('T')[0]
 
-        const { data: bookings } = await supabase
-          .from('bookings')
-          .select('id, org_id, property_id, checkout_date')
-          .eq('org_id', config.org_id)
-          .eq('checkout_date', targetCheckout)
-          .eq('status', 'confirmed')
-          .eq('is_block', false)
+        // Paginated AND error-bound, for two separate reasons.
+        //
+        // The error: discarding it made a failed read indistinguishable from
+        // "this org has no checkouts that day" — `bookings` came back null,
+        // `?? []` turned it into zero iterations, and the cron returned a
+        // successful `dispatched: 0`.
+        //
+        // The bound: one org's checkouts on one exact date is ~properties-per-
+        // org (10-50 for the target user), so this cannot realistically reach
+        // PostgREST's 1000-row cap. "Realistically" is doing the work in that
+        // sentence, and it is exactly the reasoning that left eight
+        // platform-wide crons silently truncated until the 2026-07-30 audit.
+        // fetchAllRows costs one extra round trip only once the set actually
+        // exceeds a page — i.e. never, on current assumptions — and removes
+        // the assumption instead of restating it.
+        const bookings = await fetchAllRows<{
+          id: string; org_id: string; property_id: string; checkout_date: string
+        }>(
+          (from, to) => supabase
+            .from('bookings')
+            .select('id, org_id, property_id, checkout_date')
+            .eq('org_id', config.org_id)
+            .eq('checkout_date', targetCheckout)
+            .eq('status', 'confirmed')
+            .eq('is_block', false)
+            .order('id')
+            .range(from, to),
+          { label: 'guidebook-stay-extension-cron.bookings' },
+        )
 
         let sent = 0
 
-        for (const booking of bookings ?? []) {
+        for (const booking of bookings) {
           // Check if extension request already sent (idempotency via UNIQUE(booking_id))
-          const { data: existing } = await supabase
+          const existingRes = await supabase
             .from('stay_extension_requests')
             .select('id')
             .eq('booking_id', booking.id)
+            .eq('org_id', config.org_id)
             .maybeSingle()
+
+          // A failed read here returns null too, which read as "not yet
+          // handled" — the opposite of safe. It would fall through to the
+          // insert and rely on UNIQUE(booking_id) to catch the duplicate,
+          // whose own error was then also discarded.
+          const existing = unwrap(existingRes, {
+            site:  'inngest.guidebook-stay-extension-cron.existing-request',
+            orgId: config.org_id,
+          })
 
           if (existing) continue  // already handled
 
           // Find the NEXT booking at this property after checkout
-          const { data: nextBooking } = await supabase
+          const nextBookingRes = await supabase
             .from('bookings')
             .select('id, checkin_date')
             .eq('property_id', booking.property_id)
@@ -93,6 +126,14 @@ export const guidebookStayExtensionCron = inngest.createFunction(
             .order('checkin_date', { ascending: true })
             .limit(1)
             .maybeSingle()
+
+          // Same shape again: a failed read looked identical to "no future
+          // booking", which `continue`s — silently declining to offer the
+          // extension rather than retrying.
+          const nextBooking = unwrap(nextBookingRes, {
+            site:  'inngest.guidebook-stay-extension-cron.next-booking',
+            orgId: config.org_id,
+          })
 
           // Calculate gap
           const nextCheckin = nextBooking?.checkin_date
@@ -107,14 +148,23 @@ export const guidebookStayExtensionCron = inngest.createFunction(
           if (gapDays < config.extension_gap_threshold_days) continue  // gap too small
 
           // Get guest SMS opt-in if available
-          const { data: optin } = await supabase
+          const optinRes = await supabase
             .from('guidebook_guest_sms_optins')
             .select('phone_e164, is_active')
             .eq('booking_id', booking.id)
             .maybeSingle()
 
+          // A dropped error here degrades silently rather than failing: the
+          // request is still created and the PM still notified, but
+          // guestPhoneE164 goes out null, so the guest half of the gap-night
+          // offer is never sent and nothing says why.
+          const optin = unwrap(optinRes, {
+            site:  'inngest.guidebook-stay-extension-cron.optin',
+            orgId: config.org_id,
+          })
+
           // Create the extension request record
-          const { data: request } = await supabase
+          const requestRes = await supabase
             .from('stay_extension_requests')
             .insert({
               org_id:               config.org_id,
@@ -127,6 +177,18 @@ export const guidebookStayExtensionCron = inngest.createFunction(
             })
             .select('id')
             .single()
+
+          // 23505 is the ONE benign outcome: another run won the race against
+          // UNIQUE(booking_id) between the existence check above and here, so
+          // that run owns the notification. Every other error — an FK
+          // violation, a constraint failure, an outage — used to take the same
+          // silent `continue`, dropping the offer and still reporting success.
+          if (requestRes.error?.code === '23505') continue
+
+          const request = unwrap(requestRes, {
+            site:  'inngest.guidebook-stay-extension-cron.insert-request',
+            orgId: config.org_id,
+          })
 
           if (!request) continue
 

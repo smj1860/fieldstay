@@ -158,14 +158,48 @@ describe('guidebookGuestOptedIn', () => {
     expect(result).toEqual({ optinId: 'optin_1', sentDoorCode: true })
   })
 
-  it('rolls back the claim and throws when the SMS send fails, so a retry can attempt again', async () => {
+  // The two exits below are NOT the same event, and conflating them is what
+  // shipped: sendSMS THROWS on a real send failure (dispatchToTelnyx throws on
+  // a timeout or any non-2xx) and returns {sent:false} only for a DELIBERATE
+  // skip. One test used to feed a {sent:false} and assert a throw, which
+  // asserted the wrong half of both behaviours at once.
+
+  it('releases the claim and rethrows when the SMS send THROWS, so the Inngest retry can send again', async () => {
     const supabase = makeSupabase(
       {
         properties: [{ data: propertyRow, error: null }],
         bookings:   [{ data: bookingRow, error: null }],
         guidebook_guest_sms_optins: [
           { data: { id: 'optin_1' }, error: null }, // claim succeeds
-          { data: null, error: null },              // rollback update
+          { data: null, error: null },              // claim release
+        ],
+      },
+      { data: '4321', error: null }
+    )
+    ;(createServiceClient as ReturnType<typeof vi.fn>).mockReturnValue(supabase)
+    ;(sendSMS as ReturnType<typeof vi.fn>).mockRejectedValueOnce(new Error('Telnyx 502'))
+
+    await expect(
+      invokeHandler(guidebookGuestOptedIn, { event: optedInEvent(), step: makeStep() })
+    ).rejects.toThrow('Telnyx 502')
+
+    // Without the release, the retry hits `.is('door_code_sent_at', null)`,
+    // matches zero rows, returns `already_sent` — and the guest never gets
+    // their door code while the run reports success.
+    const releaseCall = supabase.calls.filter(
+      (c) => c.table === 'guidebook_guest_sms_optins' && c.method === 'update'
+    )[1]
+    expect(releaseCall?.args[0]).toEqual({ door_code_sent_at: null })
+  })
+
+  it('releases the claim and ends cleanly — no throw — when sendSMS reports a deliberate skip', async () => {
+    const supabase = makeSupabase(
+      {
+        properties: [{ data: propertyRow, error: null }],
+        bookings:   [{ data: bookingRow, error: null }],
+        guidebook_guest_sms_optins: [
+          { data: { id: 'optin_1' }, error: null }, // claim succeeds
+          { data: null, error: null },              // claim release
         ],
       },
       { data: '4321', error: null }
@@ -173,11 +207,21 @@ describe('guidebookGuestOptedIn', () => {
     ;(createServiceClient as ReturnType<typeof vi.fn>).mockReturnValue(supabase)
     ;(sendSMS as ReturnType<typeof vi.fn>).mockResolvedValueOnce({ sent: false, reason: 'SMS_ENABLED is not true' })
 
-    await expect(
-      invokeHandler(guidebookGuestOptedIn, { event: optedInEvent(), step: makeStep() })
-    ).rejects.toThrow('SMS send failed: SMS_ENABLED is not true')
+    // SMS_ENABLED=false is production's current state. Throwing here made
+    // EVERY guest opt-in a failing, retried Inngest run reading "SMS send
+    // failed" — untrue, and noise that would mask real failures once SMS is
+    // switched on. A retry cannot change an env var.
+    const result = await invokeHandler(guidebookGuestOptedIn, {
+      event: optedInEvent(),
+      step:  makeStep(),
+    })
+    expect(result).toEqual({ optinId: 'optin_1', sentDoorCode: true })
 
-    const rollbackCall = supabase.calls.filter((c) => c.table === 'guidebook_guest_sms_optins' && c.method === 'update')[1]
-    expect(rollbackCall?.args[0]).toEqual({ door_code_sent_at: null })
+    // Still released, for the opposite reason: so the send can happen once
+    // the skip no longer applies.
+    const releaseCall = supabase.calls.filter(
+      (c) => c.table === 'guidebook_guest_sms_optins' && c.method === 'update'
+    )[1]
+    expect(releaseCall?.args[0]).toEqual({ door_code_sent_at: null })
   })
 })

@@ -2,6 +2,7 @@ import { unwrap } from '@/lib/supabase/unwrap'
 import { notFound } from 'next/navigation'
 import { Archivo, Source_Serif_4 } from 'next/font/google'
 import { createServiceClient } from '@/lib/supabase/server'
+import { isUuid } from '@/lib/validation/uuid'
 import { MediaKitClient } from './media-kit-client'
 import type { GuidebookSponsor } from '@/types/database'
 
@@ -25,6 +26,15 @@ export default async function MediaKitPage({
   params: Promise<{ media_kit_token: string }>
 }) {
   const { media_kit_token } = await params
+
+  // media_kit_token is a `uuid` column, so a malformed one is Postgres 22P02 —
+  // which unwrap() turns into a throw and the segment error boundary renders
+  // as "something went wrong". That is the exact inversion of the note below:
+  // an outage must not read as an invalid token, but neither may a genuinely
+  // invalid token read as an outage. Shape-check first and 404 it, so each of
+  // the two failures gets its own honest surface.
+  if (!isUuid(media_kit_token)) notFound()
+
   const supabase = createServiceClient({ publicSurface: 'g-kit--media-kit-token-' })
 
   // Token-gated public page: a failed read used to fall into notFound(),

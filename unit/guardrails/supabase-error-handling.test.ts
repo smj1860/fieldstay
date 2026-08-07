@@ -106,7 +106,13 @@ const BASELINE: Record<string, number> = {
   'app/(dashboard)/templates/inventory/actions.ts': 2,
   'app/(dashboard)/templates/maintenance/actions.ts': 3,
   'app/(dashboard)/vendors/actions.ts': 3,
-  'app/actions/guidebook.ts': 3,
+  // 3 -> 2: optInGuestSms's booking lookup now binds and reports its error.
+  // Discarding it made a transient failure indistinguishable from a bad token,
+  // so a guest with a valid link was told the link was invalid.
+  // 2 -> 1: createSponsorCheckoutSession's media-kit-token lookup had the SAME
+  // defect one function over — a sponsor holding a valid link was told it was
+  // invalid whenever the query itself failed.
+  'app/actions/guidebook.ts': 1,
 
   'app/api/repuguard/generate/route.ts': 3,
   'app/api/vendor-connect/[token]/onboard/route.ts': 2,
@@ -123,10 +129,28 @@ const BASELINE: Record<string, number> = {
   'lib/inngest/functions/cron/work-order-ops.ts': 2,
   'lib/inngest/functions/email-trial-lifecycle.tsx': 4,
   'lib/inngest/functions/flagged-turnover-wo.ts': 3,
-  'lib/inngest/functions/guidebook-sms-evening-cron.ts': 3,
-  'lib/inngest/functions/guidebook-sms-morning-cron.ts': 4,
-  'lib/inngest/functions/guidebook-stay-extension-cron.ts': 5,
-  'lib/inngest/functions/guidebook-stay-extension-handler.ts': 4,
+  // 3 -> 0 (entry deleted), same three reads as its morning twin below: a
+  // failed sponsor lookup was indistinguishable from an org with no sponsors,
+  // and a failed opt-in read from a guest who opted out — every one of them
+  // ending at "no SMS" with nothing logged.
+  // 4 -> 0 (entry deleted): every read in the per-guest send now unwraps. The
+  // opt-in one mattered most — `{ data: optin }` collapsed "this guest opted
+  // out" and "the consent read failed" into the same null, and both ended at
+  // `return false`, so a transient failure silently suppressed the message
+  // with nothing logged and no retry. The two sponsor reads had the same
+  // shape: a failed lookup produced an empty pool, indistinguishable from an
+  // org that simply has no sponsor in that slot.
+  //
+  // guidebook-stay-extension-cron.ts 5 -> 0 and
+  // guidebook-stay-extension-handler.ts 4 -> 0 (both entries deleted): the
+  // gap-night offer's whole failure
+  // surface was silent. In the cron a failed bookings read looked like "this
+  // org has no checkouts", a failed existence check looked like "not yet
+  // handled", and a failed next-booking read looked like "open calendar" —
+  // each ending in a successful `dispatched: 0`. In the handler a failed
+  // context read left `booking` null, so `portalUrl` was null, so the guest
+  // SMS block was skipped entirely while the PM email went out reading
+  // "checks out on undefined".
   'lib/inngest/functions/hospitable/hospitable-reviews-backfill.ts': 2,
   'lib/inngest/functions/hospitable/incremental-sync.ts': 5,
   'lib/inngest/functions/hospitable/initial-sync.ts': 2,

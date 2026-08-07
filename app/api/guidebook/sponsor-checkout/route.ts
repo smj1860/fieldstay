@@ -3,6 +3,7 @@ import { createSponsorCheckoutSession } from '@/app/actions/guidebook'
 import { guidebookSponsorCheckoutLimiter, checkLimit } from '@/lib/rate-limit'
 import { extractClientIp } from '@/lib/integrations/webhook-verification'
 import { reportError } from '@/lib/observability/report-error'
+import { isUuid } from '@/lib/validation/uuid'
 
 export async function POST(req: NextRequest): Promise<NextResponse> {
   // Throttle BEFORE the token is read, so a guessing attack is capped by the
@@ -31,9 +32,17 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   try {
     const body = await req.json() as { mediaKitToken?: string }
 
-    if (!body.mediaKitToken || typeof body.mediaKitToken !== 'string') {
+    // Shape-checked, not just type-checked. guidebook_sponsors.media_kit_token
+    // is a `uuid`, so a malformed token reaches `.eq()` as Postgres 22P02,
+    // throws out of the action's unwrap(), and lands in its catch — which
+    // reports to Sentry and tells the sponsor "Unable to start checkout.
+    // Please try again." for a link that will never work no matter how many
+    // times they try. On a public unauthenticated endpoint that is also a free
+    // way to burn the Sentry quota. An unusable token is an invalid link, and
+    // gets the same message a nonexistent one does.
+    if (!isUuid(body.mediaKitToken)) {
       return NextResponse.json(
-        { error: 'mediaKitToken is required' },
+        { error: 'Invalid media kit link.' },
         { status: 400 }
       )
     }

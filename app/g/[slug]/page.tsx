@@ -9,6 +9,7 @@ import type { GuidebookSponsorView } from '@/components/guidebook/guest-guideboo
 import type { GuidebookSponsor, GuidebookPropertyConfig, Property } from '@/types/database'
 import { unwrap, unwrapList } from '@/lib/supabase/unwrap'
 
+/** Only for a property with no timezone — see the note in app/g/b/[token]/page.tsx. */
 const FALLBACK_TIMEZONE = 'America/New_York'
 
 // A guidebook's active sponsor slots are a small, curated set per org; the
@@ -30,7 +31,7 @@ function heroPhotoUrl(path: string | null | undefined): string | null {
 const CONFIG_FIELDS = `
   id, slug, wifi_network, wifi_password, check_in_instructions,
   check_out_instructions, house_rules, is_published, org_id,
-  properties(id, name, address, lat, lng, checkin_time, checkout_time)
+  properties(id, name, address, lat, lng, timezone, checkin_time, checkout_time)
 `
 
 const getGuidebookConfig = cache(async (slug: string) => {
@@ -114,8 +115,9 @@ export default async function GuestGuidebookPage({
   const sponsors = unwrapList(sponsorsRes, { site: 'page.g.slug', orgId: config.org_id })
 
   const hourOfDay = Number(
-    new Intl.DateTimeFormat('en-US', { hour: 'numeric', hour12: false, timeZone: FALLBACK_TIMEZONE })
-      .format(new Date())
+    new Intl.DateTimeFormat('en-US', {
+      hour: 'numeric', hour12: false, timeZone: property.timezone || FALLBACK_TIMEZONE,
+    }).format(new Date())
   )
 
   const weather = property.lat && property.lng

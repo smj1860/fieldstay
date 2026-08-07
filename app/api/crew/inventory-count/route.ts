@@ -4,6 +4,7 @@ import { inngest } from '@/lib/inngest/client'
 import { logAuditEvents } from '@/lib/audit'
 import { reportQueryError, unwrapList } from '@/lib/supabase/unwrap'
 import { fetchAllRows } from '@/lib/inngest/paginate'
+import { UUID_RE } from '@/lib/validation/uuid'
 
 /**
  * POST /api/crew/inventory-count
@@ -37,7 +38,7 @@ interface CountSubmission {
   itemNotes?: Record<string, string>
 }
 
-const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
+
 
 /** Double-tap window for clients that submit without a count id. */
 const DEDUP_WINDOW_MS = 5 * 60 * 1000

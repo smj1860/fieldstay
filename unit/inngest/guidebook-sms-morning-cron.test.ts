@@ -13,10 +13,42 @@ vi.mock('@/lib/sms/telnyx', () => ({
 vi.mock('@/lib/sms/templates', () => ({
   renderSmsBody: vi.fn(async () => 'rendered sms body'),
 }))
-vi.mock('@/lib/sms/optin-claim', () => ({
-  claimDailySmsSlot:   vi.fn(async () => true),
-  releaseDailySmsSlot: vi.fn(async () => undefined),
-}))
+// sendClaimedDailySms is stubbed with a faithful delegating implementation
+// rather than a bare vi.fn(): every assertion in this file is about WHICH slot
+// gets claimed and whether it is released, and those calls now happen inside
+// the helper. Delegating keeps them observable here. The helper's own
+// release-on-throw contract is tested directly in unit/sms/optin-claim.test.ts
+// — the crons must not be the only place it is covered.
+vi.mock('@/lib/sms/optin-claim', () => {
+  const claimDailySmsSlot   = vi.fn(async () => true)
+  const releaseDailySmsSlot = vi.fn(async () => undefined)
+  return {
+    claimDailySmsSlot,
+    releaseDailySmsSlot,
+    sendClaimedDailySms: vi.fn(async (
+      supabase: unknown,
+      optinId: string,
+      dateColumn: string,
+      todayDate: string,
+      send: () => Promise<{ sent: boolean }>,
+    ) => {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const claimed = await (claimDailySmsSlot as any)(supabase, optinId, dateColumn, todayDate)
+      if (!claimed) return false
+      let res: { sent: boolean }
+      try {
+        res = await send()
+      } catch (err) {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        await (releaseDailySmsSlot as any)(supabase, optinId, dateColumn)
+        throw err
+      }
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      if (!res.sent) await (releaseDailySmsSlot as any)(supabase, optinId, dateColumn)
+      return res.sent
+    }),
+  }
+})
 
 import { guidebookSmsMorningCron, guidebookSmsMorningSend } from '@/lib/inngest/functions/guidebook-sms-morning-cron'
 import { createServiceClient } from '@/lib/supabase/server'
@@ -330,4 +362,84 @@ describe('guidebookSmsMorningSend (per-guest handler)', () => {
     expect(result).toEqual({ optinId: 'optin_1', sent: false })
     expect(releaseDailySmsSlot).toHaveBeenCalledWith(supabase, 'optin_1', 'last_morning_sms_date')
   })
+
+  // ── Check-in day ──────────────────────────────────────────────────────────
+  // The cron's eligibility filter is `checkin_date <= today AND checkout_date
+  // >= today`, so a guest whose stay STARTS today is included — but the cron
+  // fires 7-11 AM and check-in is typically mid-afternoon.
+
+  it('sends an arrival reminder — not the weather/sponsor nudge — on the guest\'s check-in day', async () => {
+    const supabase = makeSupabase({
+      guidebook_guest_sms_optins: [{ data: optinDetailRow(), error: null }],
+      properties:                 [{ data: { ...propertyRow, checkin_time: '16:00:00' }, error: null }],
+    })
+    ;(createServiceClient as ReturnType<typeof vi.fn>).mockReturnValue(supabase)
+
+    const arrivalEvent = { data: { ...sendEvent.data, checkin_date: '2026-07-22' } } // == today_date
+
+    const result = await invokeHandler(guidebookSmsMorningSend, { event: arrivalEvent, step: makeStep() })
+
+    // Previously this guest got "it's 72°F at your rental, here's a coffee
+    // spot 0.4 mi away" hours before they had keys.
+    expect(renderSmsBody).toHaveBeenCalledWith('org_1', 'arrival_reminder', {
+      property_name: 'Lake House',
+      checkin_line:  'Just a reminder that check-in is at 4:00 PM.',
+    })
+    expect(renderSmsBody).not.toHaveBeenCalledWith('org_1', 'morning_nudge', expect.anything())
+    expect(sendSMS).toHaveBeenCalledWith('+15551234567', 'rendered sms body', { category: 'nudge', orgId: 'org_1' })
+    expect(result).toEqual({ optinId: 'optin_1', sent: true })
+  })
+
+  it('does not need weather or coordinates to send the arrival reminder', async () => {
+    const supabase = makeSupabase({
+      guidebook_guest_sms_optins: [{ data: optinDetailRow(), error: null }],
+      // No lat/lng — a property that could never receive the normal nudge.
+      properties:                 [{ data: { id: 'prop_1', name: 'Lake House', lat: null, lng: null, checkin_time: '15:00:00' }, error: null }],
+    })
+    ;(createServiceClient as ReturnType<typeof vi.fn>).mockReturnValue(supabase)
+
+    const arrivalEvent = { data: { ...sendEvent.data, checkin_date: '2026-07-22' } }
+    const result = await invokeHandler(guidebookSmsMorningSend, { event: arrivalEvent, step: makeStep() })
+
+    expect(getWeatherForLocation).not.toHaveBeenCalled()
+    expect(result).toEqual({ optinId: 'optin_1', sent: true })
+  })
+
+  it('omits the check-in sentence entirely when the property has no check-in time', async () => {
+    const supabase = makeSupabase({
+      guidebook_guest_sms_optins: [{ data: optinDetailRow(), error: null }],
+      // OwnerRez-synced properties explicitly write null here.
+      properties:                 [{ data: { ...propertyRow, checkin_time: null }, error: null }],
+    })
+    ;(createServiceClient as ReturnType<typeof vi.fn>).mockReturnValue(supabase)
+
+    const arrivalEvent = { data: { ...sendEvent.data, checkin_date: '2026-07-22' } }
+    await invokeHandler(guidebookSmsMorningSend, { event: arrivalEvent, step: makeStep() })
+
+    // Empty, not "check-in is at ." — the template joins on a truthy check.
+    expect(renderSmsBody).toHaveBeenCalledWith('org_1', 'arrival_reminder', {
+      property_name: 'Lake House',
+      checkin_line:  '',
+    })
+  })
+
+  it('still sends the normal nudge mid-stay, including on checkout morning', async () => {
+    const supabase = makeSupabase({
+      guidebook_guest_sms_optins: [{ data: optinDetailRow(), error: null }],
+      properties:                 [{ data: propertyRow, error: null }],
+      guidebook_sponsors:         [{ data: [sponsorRow()], error: null }],
+    })
+    ;(createServiceClient as ReturnType<typeof vi.fn>).mockReturnValue(supabase)
+    ;(getWeatherForLocation as ReturnType<typeof vi.fn>).mockResolvedValue(clearWeather)
+
+    // checkin_date < today. The send handler is not told checkout_date at all,
+    // so the outgoing guest on a same-day flip takes exactly this path — they
+    // ARE still in the house on checkout morning and a local recommendation
+    // still lands. Deliberately unchanged.
+    await invokeHandler(guidebookSmsMorningSend, { event: sendEvent, step: makeStep() })
+
+    expect(renderSmsBody).toHaveBeenCalledWith('org_1', 'morning_nudge', expect.anything())
+    expect(renderSmsBody).not.toHaveBeenCalledWith('org_1', 'arrival_reminder', expect.anything())
+  })
+
 })

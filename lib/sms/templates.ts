@@ -103,6 +103,16 @@ function renderDefault(
         vars.offer_line ? String(vars.offer_line) : null
       )
 
+    case 'arrival_reminder':
+      // Inline rather than a telnyx.ts builder: there is no legacy builder to
+      // preserve, and checkin_line is already assembled (or omitted) by the
+      // caller so a property with no check-in time still reads correctly.
+      return [
+        `Looking forward to hosting you at ${vars.property_name ?? 'your rental'} today!`,
+        vars.checkin_line ? String(vars.checkin_line) : '',
+        'Reply STOP to opt out.',
+      ].filter(Boolean).join(' ')
+
     case 'evening_nudge':
       return buildEveningNudgeSMS(
         String(vars.property_name ?? ''),

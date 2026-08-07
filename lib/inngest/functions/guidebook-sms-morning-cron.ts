@@ -2,14 +2,16 @@ import { asBooleanMap } from '@/lib/json'
 import { inngest } from '@/lib/inngest/client'
 import { fetchAllRows } from '@/lib/inngest/paginate'
 import { createServiceClient } from '@/lib/supabase/server'
+import { unwrap } from '@/lib/supabase/unwrap'
 import { getWeatherForLocation } from '@/lib/weather/tomorrow'
 import { sendSMS, buildSponsorLine } from '@/lib/sms/telnyx'
 import { renderSmsBody } from '@/lib/sms/templates'
-import { claimDailySmsSlot, releaseDailySmsSlot } from '@/lib/sms/optin-claim'
-import { pickNearestSponsor } from '@/lib/sms/pick-nearest-sponsor'
+import { sendClaimedDailySms } from '@/lib/sms/optin-claim'
+import { formatTime12h } from '@/lib/utils/time-of-day'
+import { pickNearestSponsor, SPONSOR_POOL_COLUMNS, type SponsorPoolRow } from '@/lib/sms/pick-nearest-sponsor'
 import { unwrapJoin } from '@/lib/utils/supabase-joins'
 import { getFeaturedAmenityLine } from '@/lib/guidebook/featured-amenities'
-import type { GuidebookSponsor } from '@/types/database'
+import { asOfferType } from '@/lib/guidebook/offer'
 
 const FALLBACK_TIMEZONE = 'America/New_York'
 
@@ -132,19 +134,75 @@ export const guidebookSmsMorningSend = inngest.createFunction(
 
       // Re-fetch instead of trusting the dispatch-time snapshot: is_active
       // may have flipped (guest texted STOP) since the cron ran.
-      const { data: optin } = await supabase
+      //
+      // Unwrapped, not destructured. `{ data: optin }` collapsed "this guest
+      // opted out" and "the consent read failed" into the same null, and both
+      // ended at `return false` — so a transient failure silently suppressed
+      // the message with nothing logged and no retry. The two outcomes need
+      // opposite handling: opted-out is final, a failed read must be retried.
+      const optinRes = await supabase
         .from('guidebook_guest_sms_optins')
         .select('id, phone_e164, is_active')
         .eq('id', optinId)
         .maybeSingle()
+
+      const optin = unwrap(optinRes, {
+        site: 'inngest.guidebook-sms-morning-send.optin', orgId,
+      })
       if (!optin?.is_active) return false
 
-      const { data: property } = await supabase
+      const propertyRes = await supabase
         .from('properties')
-        .select('id, name, lat, lng, amenities')
+        .select('id, name, lat, lng, amenities, checkin_time')
         .eq('id', propertyId)
+        .eq('org_id', orgId)
         .maybeSingle()
-      if (!property?.lat || !property?.lng) return false
+
+      const property = unwrap(propertyRes, {
+        site: 'inngest.guidebook-sms-morning-send.property', orgId,
+      })
+      if (!property) return false
+
+      // ── Check-in day: this guest has not arrived yet ──────────────────────
+      //
+      // The eligibility filter is `checkin_date <= today AND checkout_date >=
+      // today`, so a guest whose stay STARTS today is in the set — but this
+      // cron fires 7-11 AM and check-in is typically mid-afternoon. They were
+      // getting the full nudge — "it's 72°F at your rental, here's a coffee
+      // spot 0.4 mi away" — hours before they had keys, as though they were
+      // already in the house.
+      //
+      // Deliberately BEFORE the lat/lng and weather guards below: an arrival
+      // reminder needs neither, and a property without coordinates should
+      // still be able to send one.
+      //
+      // The outgoing guest on a same-day flip is a different case and is left
+      // alone: `checkout_date >= today` includes them on checkout morning,
+      // when they ARE still in the house and a local recommendation still
+      // lands. The evening cron already excludes them (`checkout_date >
+      // today`).
+      //
+      // Same claim slot, so a guest still gets exactly one morning message —
+      // this one instead of the nudge, never both.
+      if (checkinDate === todayDate) {
+        return await sendClaimedDailySms(
+          supabase, optinId, 'last_morning_sms_date', todayDate,
+          async () => {
+            const checkinAt = formatTime12h(property.checkin_time)
+            const arrivalBody = await renderSmsBody(orgId, 'arrival_reminder', {
+              property_name: property.name,
+              // Omitted entirely rather than left blank when the property has
+              // no check-in time — 27 of 27 production properties have one,
+              // but the column is nullable and OwnerRez-synced properties
+              // explicitly write null.
+              checkin_line: checkinAt ? `Just a reminder that check-in is at ${checkinAt}.` : '',
+            })
+            return await sendSMS(optin.phone_e164, arrivalBody, { category: 'nudge', orgId })
+          },
+        )
+      }
+
+      if (!property.lat || !property.lng) return false
 
       // Featured-amenity content is independent of sponsors — a property
       // with no active sponsors can still get a message if it has featured
@@ -160,14 +218,29 @@ export const guidebookSmsMorningSend = inngest.createFunction(
 
       // Rain alert takes priority if precip >= 60% and rainy_day sponsor exists
       if (weather.precipitationProbability >= 60) {
-        const { data: rainySponsors } = await supabase
-          .from('guidebook_sponsors')
-          .select('id, org_id, business_name, offer_type, offer_value, offer_item, custom_offer_text, lat, lng, slot_type')
-          .eq('org_id', orgId)
-          .eq('status', 'active')
-          .eq('slot_type', 'rainy_day')
+        // A failed sponsor lookup used to produce an empty pool, which falls
+        // through to "no offer" and ends at `return false` — a silently
+        // skipped nudge indistinguishable from an org with no rainy-day
+        // sponsor. fetchAllRows throws instead.
+        // fetchAllRows, not a bare select. guidebook_sponsors is capped at SIX
+        // rows per org by the schema itself (slot_number CHECK 1..6 plus
+        // UNIQUE(org_id, slot_number)), so this drains in exactly one request —
+        // the pagination costs nothing at current scale and stops the read from
+        // resting on that cap. If the slot ceiling is ever raised, a .limit()
+        // would have started truncating silently; this throws instead.
+        const rainySponsors = await fetchAllRows<SponsorPoolRow>(
+          (from, to) => supabase
+            .from('guidebook_sponsors')
+            .select(SPONSOR_POOL_COLUMNS)
+            .eq('org_id', orgId)
+            .eq('status', 'active')
+            .eq('slot_type', 'rainy_day')
+            .order('id')
+            .range(from, to),
+          { label: 'guidebook-sms-morning-send.rainy-sponsors' },
+        )
 
-        const pickedRainy = pickNearestSponsor((rainySponsors ?? []) as GuidebookSponsor[], property.lat, property.lng)
+        const pickedRainy = pickNearestSponsor(rainySponsors, property.lat, property.lng)
 
         if (pickedRainy) {
           const { sponsor: rainySponsor, distanceMiles: rainyDistanceMi } = pickedRainy
@@ -175,39 +248,50 @@ export const guidebookSmsMorningSend = inngest.createFunction(
           // Claim the slot atomically before sending — a retry of this
           // step after a successful send now finds the slot already
           // claimed and skips re-sending, instead of double-texting.
-          const claimed = await claimDailySmsSlot(supabase, optinId, 'last_morning_sms_date', todayDate)
-          if (!claimed) return false
+          // Rendering is INSIDE the claimed section: it can throw too, and
+          // releasing only around sendSMS left the day's slot claimed for a
+          // template failure just the same.
+          return await sendClaimedDailySms(
+            supabase, optinId, 'last_morning_sms_date', todayDate,
+            async () => {
+              const rainOfferLine = buildSponsorLine(
+                rainySponsor.business_name,
+                asOfferType(rainySponsor.offer_type),
+                rainySponsor.offer_value,
+                rainySponsor.offer_item,
+                rainySponsor.custom_offer_text,
+                rainyDistanceMi
+              )
 
-          const rainOfferLine = buildSponsorLine(
-            rainySponsor.business_name,
-            rainySponsor.offer_type,
-            rainySponsor.offer_value,
-            rainySponsor.offer_item,
-            rainySponsor.custom_offer_text,
-            rainyDistanceMi
+              const rainBody = await renderSmsBody(orgId, 'rain_alert', {
+                property_name: property.name,
+                offer_line:    rainOfferLine,
+              })
+              return await sendSMS(optin.phone_e164, rainBody, { category: 'nudge', orgId })
+            },
           )
-
-          const rainBody = await renderSmsBody(orgId, 'rain_alert', {
-            property_name: property.name,
-            offer_line:    rainOfferLine,
-          })
-          const res = await sendSMS(optin.phone_e164, rainBody, { category: 'nudge', orgId })
-          if (!res.sent) {
-            await releaseDailySmsSlot(supabase, optinId, 'last_morning_sms_date')
-          }
-          return res.sent
         }
       }
 
       // Morning brew → general fallback
-      const { data: sponsorsData } = await supabase
-        .from('guidebook_sponsors')
-        .select('id, org_id, business_name, offer_type, offer_value, offer_item, custom_offer_text, lat, lng, slot_type')
-        .eq('org_id', orgId)
-        .eq('status', 'active')
-        .in('slot_type', ['morning_brew', 'general'])
-
-      const orgSponsors  = (sponsorsData ?? []) as GuidebookSponsor[]
+      // Same reasoning as the rainy-day pool above.
+      // fetchAllRows, not a bare select. guidebook_sponsors is capped at SIX
+      // rows per org by the schema itself (slot_number CHECK 1..6 plus
+      // UNIQUE(org_id, slot_number)), so this drains in exactly one request —
+      // the pagination costs nothing at current scale and stops the read from
+      // resting on that cap. If the slot ceiling is ever raised, a .limit()
+      // would have started truncating silently; this throws instead.
+      const orgSponsors = await fetchAllRows<SponsorPoolRow>(
+        (from, to) => supabase
+          .from('guidebook_sponsors')
+          .select(SPONSOR_POOL_COLUMNS)
+          .eq('org_id', orgId)
+          .eq('status', 'active')
+          .in('slot_type', ['morning_brew', 'general'])
+          .order('id')
+          .range(from, to),
+        { label: 'guidebook-sms-morning-send.sponsors' },
+      )
       const morningBrews = orgSponsors.filter((s) => s.slot_type === 'morning_brew')
       const pool         = morningBrews.length > 0 ? morningBrews : orgSponsors.filter((s) => s.slot_type === 'general')
       const picked       = pickNearestSponsor(pool, property.lat, property.lng)
@@ -215,7 +299,7 @@ export const guidebookSmsMorningSend = inngest.createFunction(
       const sponsorLine = picked
         ? buildSponsorLine(
             picked.sponsor.business_name,
-            picked.sponsor.offer_type,
+            asOfferType(picked.sponsor.offer_type),
             picked.sponsor.offer_value,
             picked.sponsor.offer_item,
             picked.sponsor.custom_offer_text,
@@ -229,20 +313,17 @@ export const guidebookSmsMorningSend = inngest.createFunction(
       if (!offerLine) return false
 
       // Claim the slot atomically before sending — see rain-alert branch above.
-      const claimed = await claimDailySmsSlot(supabase, optinId, 'last_morning_sms_date', todayDate)
-      if (!claimed) return false
-
-      const morningBody = await renderSmsBody(orgId, 'morning_nudge', {
-        property_name: property.name,
-        temperature:   Math.round(weather.temperature),
-        offer_line:    offerLine,
-      })
-      const res = await sendSMS(optin.phone_e164, morningBody, { category: 'nudge', orgId })
-
-      if (!res.sent) {
-        await releaseDailySmsSlot(supabase, optinId, 'last_morning_sms_date')
-      }
-      return res.sent
+      return await sendClaimedDailySms(
+        supabase, optinId, 'last_morning_sms_date', todayDate,
+        async () => {
+          const morningBody = await renderSmsBody(orgId, 'morning_nudge', {
+            property_name: property.name,
+            temperature:   Math.round(weather.temperature),
+            offer_line:    offerLine,
+          })
+          return await sendSMS(optin.phone_e164, morningBody, { category: 'nudge', orgId })
+        },
+      )
     })
 
     return { optinId, sent }

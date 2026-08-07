@@ -4,6 +4,7 @@ import { guidebookRedeemLimiter, checkLimit } from '@/lib/rate-limit'
 import { extractClientIp } from '@/lib/integrations/webhook-verification'
 import { reportError } from '@/lib/observability/report-error'
 import { unwrap } from '@/lib/supabase/unwrap'
+import { isUuid } from '@/lib/validation/uuid'
 
 /**
  * POST /api/guidebook/redeem
@@ -27,7 +28,16 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   }
 
   const body = await req.json().catch(() => null) as { sponsorId?: string; bookingToken?: string | null } | null
-  if (!body?.sponsorId || typeof body.sponsorId !== 'string') {
+
+  // Shape-checked before it reaches a `uuid` column, not just type-checked.
+  // `guidebook_sponsors.id` is a uuid, so a non-UUID string is Postgres 22P02
+  // — which unwrap() below turns into a throw, and the catch turns into
+  // `{ok:true}` PLUS a Sentry report. On a public, unauthenticated endpoint
+  // that is a free way for anyone to burn the Sentry quota and bury this
+  // route's real database failures in noise; the limiter bounds it only while
+  // Redis is up, and this one deliberately fails OPEN. A malformed id is a bad
+  // request, so say so.
+  if (!isUuid(body?.sponsorId)) {
     return NextResponse.json({ error: 'sponsorId is required' }, { status: 400 })
   }
 
@@ -47,7 +57,15 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     }
 
     let bookingId: string | null = null
-    if (body.bookingToken && typeof body.bookingToken === 'string') {
+    // isUuid, not just a truthy string check — and note this one SKIPS rather
+    // than 400s. `bookings.guidebook_token` is also a uuid, so a malformed
+    // token threw 22P02 out of unwrap(), escaped the try entirely, and landed
+    // in the outer catch: the guest got `{ok:true}` and the redemption insert
+    // below never ran at all. The stated intent two lines down is to fall back
+    // to an ANONYMOUS redemption when the booking can't be attributed, so
+    // that is what an unusable token should do — degrade attribution, not
+    // discard the redemption.
+    if (isUuid(body.bookingToken)) {
       const bookingRes = await supabase
         .from('bookings')
         .select('id, org_id')
@@ -59,10 +77,39 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
       if (booking && booking.org_id === sponsor.org_id) bookingId = booking.id
     }
 
-    const { error } = await supabase.from('guidebook_offer_redemptions').insert({
-      org_id:     sponsor.org_id,
-      sponsor_id: sponsor.id,
-      booking_id: bookingId,
+    // Insert-or-increment, as ONE statement (migration 20260807170000).
+    //
+    // The row is written when the guest opens the redemption pass — the coupon
+    // they show at the counter — and opening it more than once is the NORMAL
+    // case: look at the offer from the couch, close it, walk over, open it
+    // again for staff. That gives two genuinely different numbers, and the
+    // sponsor wants both: COUNT(*) is redemptions (deduped per booking per day
+    // by uniq_guidebook_offer_redemptions_sponsor_booking_day), SUM(open_count)
+    // is engagement.
+    //
+    // Per day, not per stay: a daily perk is legitimately redeemable on each
+    // day of a booking, so collapsing the whole stay would under-count.
+    //
+    // An RPC rather than the JS client, for two reasons. The arbiter is a
+    // PARTIAL EXPRESSION index (on the UTC date of opened_at) and PostgREST's
+    // on_conflict takes only plain column names, so this upsert is not
+    // expressible through the client at all. And read-then-write here would be
+    // a TOCTOU — two taps racing would both read 1 and both write 2.
+    //
+    // Anonymous redemptions (bookingId null, from the property-level
+    // /g/[slug] guidebook) fall outside the partial index by design — with no
+    // guest identity there is nothing to dedupe on, and collapsing them by
+    // (sponsor, day) would merge different guests into one. Each is its own
+    // row at open_count = 1, so both aggregates still read correctly.
+    // p_booking_id is OMITTED rather than passed as null for the anonymous
+    // case — the function declares `DEFAULT NULL` precisely so this is
+    // expressible. Supabase's type generator has no notion of a nullable
+    // argument, so without the default the only ways to call this with a null
+    // would be a cast or a second write path.
+    const { error } = await supabase.rpc('record_guidebook_offer_open', {
+      p_org_id:     sponsor.org_id,
+      p_sponsor_id: sponsor.id,
+      ...(bookingId ? { p_booking_id: bookingId } : {}),
     })
 
     if (error) {

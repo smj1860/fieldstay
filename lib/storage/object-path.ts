@@ -20,11 +20,11 @@
 // components, Server Actions, Route Handlers, and Inngest steps alike. No
 // `server-only`, no Supabase import.
 
+import { UUID_RE } from '@/lib/validation/uuid'
+
 export const ORG_SCOPED_PHOTO_BUCKETS = ['work-order-photos', 'turnover-photos'] as const
 
 export type OrgScopedPhotoBucket = (typeof ORG_SCOPED_PHOTO_BUCKETS)[number]
-
-const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
 
 /**
  * Builds an object key for an org-scoped photo bucket.

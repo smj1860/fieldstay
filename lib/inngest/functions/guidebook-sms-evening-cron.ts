@@ -2,14 +2,15 @@ import { asBooleanMap } from '@/lib/json'
 import { inngest } from '@/lib/inngest/client'
 import { fetchAllRows } from '@/lib/inngest/paginate'
 import { createServiceClient } from '@/lib/supabase/server'
+import { unwrap } from '@/lib/supabase/unwrap'
 import { getWeatherForLocation } from '@/lib/weather/tomorrow'
 import { sendSMS, buildSponsorLine } from '@/lib/sms/telnyx'
 import { renderSmsBody } from '@/lib/sms/templates'
-import { claimDailySmsSlot, releaseDailySmsSlot } from '@/lib/sms/optin-claim'
-import { pickNearestSponsor } from '@/lib/sms/pick-nearest-sponsor'
+import { sendClaimedDailySms } from '@/lib/sms/optin-claim'
+import { pickNearestSponsor, SPONSOR_POOL_COLUMNS, type SponsorPoolRow } from '@/lib/sms/pick-nearest-sponsor'
 import { unwrapJoin } from '@/lib/utils/supabase-joins'
 import { getFeaturedAmenityLine } from '@/lib/guidebook/featured-amenities'
-import type { GuidebookSponsor } from '@/types/database'
+import { asOfferType } from '@/lib/guidebook/offer'
 
 const FALLBACK_TIMEZONE = 'America/New_York'
 
@@ -111,18 +112,32 @@ export const guidebookSmsEveningSend = inngest.createFunction(
 
       // Re-fetch instead of trusting the dispatch-time snapshot: is_active
       // may have flipped (guest texted STOP) since the cron ran.
-      const { data: optin } = await supabase
+      // Unwrapped, not destructured — the same pairing as the morning send.
+      // `{ data: optin }` collapsed "this guest opted out" and "the consent
+      // read failed" into the same null, and both ended at `return false`, so
+      // a transient failure silently suppressed the message with nothing
+      // logged and no retry. Opting out is final; a failed read must retry.
+      const optinRes = await supabase
         .from('guidebook_guest_sms_optins')
         .select('id, phone_e164, is_active')
         .eq('id', optinId)
         .maybeSingle()
+
+      const optin = unwrap(optinRes, {
+        site: 'inngest.guidebook-sms-evening-send.optin', orgId,
+      })
       if (!optin?.is_active) return false
 
-      const { data: property } = await supabase
+      const propertyRes = await supabase
         .from('properties')
         .select('id, name, lat, lng, amenities')
         .eq('id', propertyId)
+        .eq('org_id', orgId)
         .maybeSingle()
+
+      const property = unwrap(propertyRes, {
+        site: 'inngest.guidebook-sms-evening-send.property', orgId,
+      })
       if (!property?.lat || !property?.lng) return false
 
       const weather = await getWeatherForLocation(property.lat, property.lng).catch(() => null)
@@ -139,14 +154,26 @@ export const guidebookSmsEveningSend = inngest.createFunction(
         rotationOffset: 1,
       })
 
-      const { data: sponsorsData } = await supabase
-        .from('guidebook_sponsors')
-        .select('id, org_id, business_name, offer_type, offer_value, offer_item, custom_offer_text, lat, lng, slot_type')
-        .eq('org_id', orgId)
-        .eq('status', 'active')
-        .in('slot_type', ['dinner_pints', 'rainy_day', 'general'])
-
-      const orgSponsors = (sponsorsData ?? []) as GuidebookSponsor[]
+      // Bound and error-handled for the same reasons as the morning send's
+      // pool: discarding the error made a failed lookup indistinguishable
+      // from an org with no sponsors, and both end at "no offer" -> no SMS.
+      // fetchAllRows, not a bare select. guidebook_sponsors is capped at SIX
+      // rows per org by the schema itself (slot_number CHECK 1..6 plus
+      // UNIQUE(org_id, slot_number)), so this drains in exactly one request —
+      // the pagination costs nothing at current scale and stops the read from
+      // resting on that cap. If the slot ceiling is ever raised, a .limit()
+      // would have started truncating silently; this throws instead.
+      const orgSponsors = await fetchAllRows<SponsorPoolRow>(
+        (from, to) => supabase
+          .from('guidebook_sponsors')
+          .select(SPONSOR_POOL_COLUMNS)
+          .eq('org_id', orgId)
+          .eq('status', 'active')
+          .in('slot_type', ['dinner_pints', 'rainy_day', 'general'])
+          .order('id')
+          .range(from, to),
+        { label: 'guidebook-sms-evening-send.sponsors' },
+      )
 
       // Rain → dinner → general fallback
       const primarySlot  = isRainy ? 'rainy_day' : 'dinner_pints'
@@ -158,7 +185,7 @@ export const guidebookSmsEveningSend = inngest.createFunction(
       const sponsorLine = picked
         ? buildSponsorLine(
             picked.sponsor.business_name,
-            picked.sponsor.offer_type,
+            asOfferType(picked.sponsor.offer_type),
             picked.sponsor.offer_value,
             picked.sponsor.offer_item,
             picked.sponsor.custom_offer_text,
@@ -174,20 +201,20 @@ export const guidebookSmsEveningSend = inngest.createFunction(
       // Claim the slot atomically before sending — a retry of this step
       // after a successful send now finds the slot already claimed and
       // skips re-sending, instead of double-texting the guest.
-      const claimed = await claimDailySmsSlot(supabase, optinId, 'last_evening_sms_date', todayDate)
-      if (!claimed) return false
-
-      const templateKey = isRainy && primaryPool.length > 0 ? 'rain_alert' as const : 'evening_nudge' as const
-      const eveningBody = await renderSmsBody(orgId, templateKey, {
-        property_name: property.name,
-        offer_line:    offerLine,
-      })
-      const res = await sendSMS(optin.phone_e164, eveningBody, { category: 'nudge', orgId })
-
-      if (!res.sent) {
-        await releaseDailySmsSlot(supabase, optinId, 'last_evening_sms_date')
-      }
-      return res.sent
+      // Rendering is INSIDE the claimed section: it can throw too, and
+      // releasing only around sendSMS left the day's slot claimed for a
+      // template failure just the same.
+      return await sendClaimedDailySms(
+        supabase, optinId, 'last_evening_sms_date', todayDate,
+        async () => {
+          const templateKey = isRainy && primaryPool.length > 0 ? 'rain_alert' as const : 'evening_nudge' as const
+          const eveningBody = await renderSmsBody(orgId, templateKey, {
+            property_name: property.name,
+            offer_line:    offerLine,
+          })
+          return await sendSMS(optin.phone_e164, eveningBody, { category: 'nudge', orgId })
+        },
+      )
     })
 
     return { optinId, sent }

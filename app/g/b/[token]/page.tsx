@@ -8,6 +8,15 @@ import { GuidebookUnavailable } from '@/components/guidebook/guidebook-unavailab
 import type { GuidebookSponsorView } from '@/components/guidebook/guest-guidebook-view'
 import type { GuidebookSponsor, GuidebookPropertyConfig, Property } from '@/types/database'
 
+/**
+ * Used only when a property somehow has no timezone. It is NOT the default:
+ * computing "what time is it for this guest" in Eastern for every property in
+ * the country is how a Central property's guidebook reads midnight at 11pm
+ * local — and hourOfDay selects which SPONSOR SLOTS are shown, so the wrong
+ * hour shows the wrong paying sponsors. Production is already 4 of 27
+ * properties in America/Chicago, and the error grows westward: two hours in
+ * Mountain, three in Pacific, five in Hawaii.
+ */
 const FALLBACK_TIMEZONE = 'America/New_York'
 
 const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL
@@ -24,10 +33,13 @@ function heroPhotoUrl(path: string | null | undefined): string | null {
 
 type StayPhase = 'arrival' | 'mid' | 'checkout'
 
-function computeStay(checkinDate: string, checkoutDate: string): {
+export function computeStay(checkinDate: string, checkoutDate: string, timeZone: string): {
   phase: StayPhase; nightIndex: number; totalNights: number
 } {
-  const today = new Intl.DateTimeFormat('en-CA', { timeZone: FALLBACK_TIMEZONE }).format(new Date()) // YYYY-MM-DD
+  // The guest's local date, not the server's and not Eastern's. On checkout
+  // eve a Central property crossed into `checkout` phase an hour early, so the
+  // guidebook showed checkout instructions to a guest still mid-stay.
+  const today = new Intl.DateTimeFormat('en-CA', { timeZone }).format(new Date()) // YYYY-MM-DD
   const totalNights = Math.max(1, Math.round(
     (Date.parse(checkoutDate) - Date.parse(checkinDate)) / 86_400_000
   ))
@@ -42,7 +54,7 @@ function computeStay(checkinDate: string, checkoutDate: string): {
 const CONFIG_FIELDS = `
   id, slug, wifi_network, wifi_password, check_in_instructions,
   check_out_instructions, house_rules, is_published, org_id,
-  properties(id, name, address, lat, lng, checkin_time, checkout_time)
+  properties(id, name, address, lat, lng, timezone, checkin_time, checkout_time)
 `
 
 const getGuidebookData = cache(async (token: string) => {
@@ -139,8 +151,10 @@ export default async function GuestBookingGuidebookPage({
     .eq('org_id', booking.org_id)
     .eq('status', 'active')
 
+  const timeZone = property.timezone || FALLBACK_TIMEZONE
+
   const hourOfDay = Number(
-    new Intl.DateTimeFormat('en-US', { hour: 'numeric', hour12: false, timeZone: FALLBACK_TIMEZONE })
+    new Intl.DateTimeFormat('en-US', { hour: 'numeric', hour12: false, timeZone })
       .format(new Date())
   )
 
@@ -174,7 +188,7 @@ export default async function GuestBookingGuidebookPage({
       hourOfDay={hourOfDay}
       weather={weather}
       heroPhotoUrl={heroPhotoUrl(config.hero_photo_storage_path)}
-      stay={computeStay(booking.checkin_date, booking.checkout_date)}
+      stay={computeStay(booking.checkin_date, booking.checkout_date, timeZone)}
       bookingToken={token}
       extensionRequest={extensionRequest ?? null}
       extensionConfig={

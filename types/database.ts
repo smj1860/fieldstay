@@ -1480,6 +1480,13 @@ export interface GuidebookOfferRedemption {
   sponsor_id: string
   booking_id: string | null
   opened_at:  string
+  /**
+   * Times the pass was opened for this (sponsor, booking, UTC day). The row
+   * itself is deduped by uniq_guidebook_offer_redemptions_sponsor_booking_day,
+   * so COUNT(*) is redemptions and SUM(open_count) is engagement — two numbers
+   * a sponsor wants separately. NOT NULL DEFAULT 1 (20260807170000).
+   */
+  open_count: number
 }
 
 export interface GuidebookGuestSmsOptin {

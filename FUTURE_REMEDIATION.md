@@ -1106,3 +1106,55 @@ turnover is not in the assigned set at all — at which point the existing
 safe today (assets are pulled narrow and pruned wide, so they are
 over-retained, never lost), but once the assigned set is bounded, all three
 should be derived from one helper rather than three hand-rolled sets.
+
+---
+
+## 24. Guest SMS opt-in stores no evidence of the consent it relies on
+
+**File:** `app/actions/guidebook.ts` (`optInGuestSms`), table
+`guidebook_guest_sms_optins`
+
+Found during the guidebook audit (2026-08-07). Not fixed here: it needs a
+migration, and what to retain is a legal question rather than an engineering
+one.
+
+The consent LOGIC is careful — STOP is honoured globally by phone across every
+org and booking, re-consent is restricted to the handset (START/YES/UNSTOP),
+the revocation record is deliberately kept forever by
+`guest-pii-retention`, and a degraded consent read fails closed. What is
+missing is the EVIDENCE.
+
+`guidebook_guest_sms_optins` holds `phone_e164`, `opted_in_at`,
+`opted_out_at`, `is_active` and the send bookkeeping — and nothing about the
+consent event itself:
+
+- no record of the disclosure text the guest was actually shown (it lives only
+  in `app/g/b/[token]/opt-in/opt-in-client.tsx`, and changing that copy leaves
+  no trace of what earlier opt-ins agreed to)
+- no IP address or user agent
+- no record of which guidebook token was used
+
+Under TCPA the burden of proving prior express written consent sits with the
+sender. Today the strongest evidence FieldStay could produce for a disputed
+opt-in is a row saying a number opted in at a timestamp — with no way to show
+what was on screen when it happened, and no way to distinguish the guest from
+anyone else holding the booking's guidebook link.
+
+**Why it was not just added.** Storing an IP and user agent against a phone
+number is itself a PII expansion, and `guest-pii-retention` currently deletes
+opt-in rows (except revocations) on a schedule — so consent evidence would
+need its own retention rule, probably a longer one than the PII it sits
+beside. That is a decision for whoever owns the compliance posture, not a
+default to pick while auditing.
+
+**If it is taken on**, the shape that fits the existing design: a
+`consent_disclosure_version` (or the literal text hash) written alongside
+`opted_in_at`, plus request metadata, and an explicit carve-out in
+`lib/inngest/functions/cron/guest-pii-retention.ts` so consent records outlive
+the guest data they attest to — mirroring how revocations are already exempt
+from that sweep.
+
+**Adjacent, already fixed 2026-08-07:** the 15-minute number-correction window
+was measured from `opted_in_at`, which the upsert refreshes on every
+submission, so the window restarted on each resubmit and could be walked
+forward indefinitely. It now anchors on the immutable `created_at`.

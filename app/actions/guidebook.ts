@@ -1,6 +1,7 @@
 'use server'
 
 import { createServiceClient } from '@/lib/supabase/server'
+import { unwrap } from '@/lib/supabase/unwrap'
 import { stripe } from '@/lib/stripe/client'
 import { requireOrgRole } from '@/lib/auth'
 import { inngest } from '@/lib/inngest/client'
@@ -17,20 +18,78 @@ import { reportError } from '@/lib/observability/report-error'
  * invoked via /api/guidebook/sponsor-checkout rather than called
  * directly as a Server Action from a client component.
  */
+/**
+ * Sponsor states that still carry a LIVE Stripe subscription, so starting a
+ * fresh checkout would create a second one billing the same business.
+ *
+ * `payment_failed` is the non-obvious member. It is set from
+ * `invoice.payment_failed`, which does NOT end the subscription — Stripe keeps
+ * it in dunning, and guidebook-sponsor-payment-recovered flips the row
+ * straight back to 'active' when a retry succeeds. A sponsor who sees the
+ * failure notice and re-opens their media-kit link was therefore able to buy a
+ * SECOND subscription while the first was still being retried.
+ *
+ * 'cancelled' is deliberately absent: that subscription is gone, and buying
+ * again is the whole point of keeping the media kit link alive.
+ */
+const SPONSOR_STATUSES_WITH_LIVE_SUBSCRIPTION = ['active', 'payment_failed'] as const
+
+/**
+ * Returns the URL of an already-created Checkout Session if it is still
+ * payable, so a repeat click reuses it instead of minting another.
+ *
+ * Same helper the work-order invoice route has had all along
+ * (app/api/invoices/[invoiceId]/checkout/route.ts, "Store the session ID for
+ * potential reuse on duplicate clicks"). The sponsor path WROTE
+ * checkout_session_id for exactly this purpose and then never read it back
+ * from anywhere in the codebase — so every click, reload, or retry minted a
+ * new session, each payable for 24 hours. Two of them paid means two
+ * subscriptions, two checkout.session.completed webhooks with distinct event
+ * ids (so the dedup table does not collapse them), and an activation handler
+ * that overwrites stripe_subscription_id with whichever lands last — leaving
+ * the other subscription billing monthly with nothing in FieldStay able to
+ * cancel it.
+ */
+async function openSessionUrl(sessionId: string | null): Promise<string | null> {
+  if (!sessionId) return null
+  try {
+    const existing = await stripe.checkout.sessions.retrieve(sessionId)
+    return existing.status === 'open' ? existing.url : null
+  } catch {
+    // Expired or not found — the caller mints a new one.
+    return null
+  }
+}
+
 export async function createSponsorCheckoutSession(
   mediaKitToken: string
 ): Promise<{ url: string } | { error: string }> {
   try {
     const supabase = createServiceClient({ publicSurface: 'guidebook-sponsor-media-kit' })
 
-    const { data: sponsor } = await supabase
+    // maybeSingle + unwrap, not `{ data }` off .single(): discarding the error
+    // made an outage or an RLS regression indistinguishable from a bad token,
+    // so a sponsor holding a perfectly valid link was told it was invalid.
+    // Identical to the defect already fixed in optInGuestSms below — same
+    // file, one function over.
+    const sponsorRes = await supabase
       .from('guidebook_sponsors')
-      .select('id, org_id, business_name, slot_type, status')
+      .select('id, org_id, business_name, slot_type, status, checkout_session_id')
       .eq('media_kit_token', mediaKitToken)
-      .single()
+      .maybeSingle()
 
-    if (!sponsor)                    return { error: 'Invalid media kit link.' }
-    if (sponsor.status === 'active') return { error: 'This sponsorship slot is already active.' }
+    const sponsor = unwrap(sponsorRes, {
+      site: 'serverAction.guidebook.createSponsorCheckoutSession.sponsor',
+    })
+
+    if (!sponsor) return { error: 'Invalid media kit link.' }
+
+    if ((SPONSOR_STATUSES_WITH_LIVE_SUBSCRIPTION as readonly string[]).includes(sponsor.status)) {
+      return { error: 'This sponsorship slot is already active.' }
+    }
+
+    const reusable = await openSessionUrl(sponsor.checkout_session_id)
+    if (reusable) return { url: reusable }
 
     const appUrl = process.env.NEXT_PUBLIC_APP_URL ?? 'https://app.fieldstay.app'
 
@@ -57,7 +116,16 @@ export async function createSponsorCheckoutSession(
 
     if (!session.url) return { error: 'Stripe did not return a checkout URL.' }
 
-    await supabase
+    // Compare-and-swap on the value we read, not a blind overwrite. The reuse
+    // check above closes the repeat-click case; this closes the concurrent one
+    // — two requests that both saw no reusable session and both created one.
+    // Whichever swap matches the value it read owns the slot; the loser expires
+    // its own session and hands back the winner's, so only ONE payable session
+    // for this sponsor exists at a time. A plain `if (already active)` before
+    // the write is exactly the TOCTOU the audit checklist calls out: the
+    // precondition has to be in the WHERE clause.
+    const priorSessionId = sponsor.checkout_session_id
+    const claim = supabase
       .from('guidebook_sponsors')
       .update({
         checkout_session_id: session.id,
@@ -65,6 +133,49 @@ export async function createSponsorCheckoutSession(
       })
       .eq('id', sponsor.id)
       .eq('org_id', sponsor.org_id) // explicit tenant guard
+
+    const claimRes = await (
+      priorSessionId
+        ? claim.eq('checkout_session_id', priorSessionId)
+        : claim.is('checkout_session_id', null)
+    )
+      .select('id')
+      .maybeSingle()
+
+    const claimed = unwrap(claimRes, {
+      site:  'serverAction.guidebook.createSponsorCheckoutSession.claim',
+      orgId: sponsor.org_id,
+    })
+
+    if (!claimed) {
+      // Lost the swap: a concurrent request stored its session after we read.
+      // Expire ours so it can never be paid, and return theirs.
+      await stripe.checkout.sessions.expire(session.id).catch((err: unknown) => {
+        // Non-fatal, but it must not be silent — an un-expired orphan session
+        // is precisely the double-subscription risk this block exists to close.
+        reportError(err, {
+          site:  'serverAction.guidebook.createSponsorCheckoutSession.expire-orphan',
+          orgId: sponsor.org_id,
+        })
+      })
+
+      const currentRes = await supabase
+        .from('guidebook_sponsors')
+        .select('checkout_session_id')
+        .eq('id', sponsor.id)
+        .eq('org_id', sponsor.org_id)
+        .maybeSingle()
+
+      const winnerUrl = await openSessionUrl(
+        unwrap(currentRes, {
+          site:  'serverAction.guidebook.createSponsorCheckoutSession.reread',
+          orgId: sponsor.org_id,
+        })?.checkout_session_id ?? null
+      )
+
+      if (winnerUrl) return { url: winnerUrl }
+      return { error: 'Unable to start checkout. Please try again.' }
+    }
 
     // Unauthenticated flow (media kit page has no PM session) — no actorId
     await logAuditEvent({
@@ -355,6 +466,12 @@ export async function updateStayExtensionSettings(
  * How long after the original opt-in a guest may correct the number they
  * entered. Long enough to notice a typo and resubmit; far short of the span
  * over which a guidebook link circulates.
+ *
+ * Measured from guidebook_guest_sms_optins.created_at, which the upsert never
+ * writes, rather than opted_in_at, which it refreshes on every submission.
+ * From opted_in_at the window was not 15 minutes from the opt-in at all — it
+ * was 15 minutes from the LAST submission, so resubmitting inside it restarted
+ * the clock and the window could be walked forward without limit.
  */
 const OPTIN_CORRECTION_WINDOW_MS = 15 * 60 * 1000
 
@@ -373,12 +490,24 @@ export async function optInGuestSms(
 
     const supabase = createServiceClient({ publicSurface: 'guidebook-guest-sms-optin' })
 
-    const { data: booking } = await supabase
+    // Binds its error, like the two consent reads below it. Discarding it made
+    // a transient failure indistinguishable from a bad token, so a guest
+    // holding a perfectly valid link was told the link was invalid — with
+    // nothing logged and nothing reported. The two reads that follow this one
+    // both already failed closed with an explicit note about why; this was the
+    // odd one out.
+    const bookingRes = await supabase
       .from('bookings')
       .select('id, org_id, property_id')
       .eq('guidebook_token', guidebookToken)
       .maybeSingle()
 
+    if (bookingRes.error) {
+      console.error('[optInGuestSms] booking lookup', bookingRes.error.message)
+      reportError(bookingRes.error, { site: 'serverAction.guidebook.optInGuestSms.booking' })
+      return { error: 'Something went wrong. Please try again.' }
+    }
+    const booking = bookingRes.data
     if (!booking) return { error: 'Invalid guidebook link.' }
 
     // ── Consent gate 1: has this NUMBER revoked consent anywhere? ────────────
@@ -424,9 +553,15 @@ export async function optInGuestSms(
     // corrections stay open for a short window after the original opt-in. That
     // covers the real case — a typo is noticed immediately — while refusing a
     // repoint days later, which is what a leaked link enables.
+    // created_at, not opted_in_at. The upsert below REFRESHES opted_in_at on
+    // every submission, so a window measured from it walks forward: repoint at
+    // 14 minutes, and the 15-minute clock restarts from there, indefinitely.
+    // created_at carries the original row's timestamp and the upsert never
+    // names it, so it is the only immutable anchor here — and "how long after
+    // the ORIGINAL opt-in" is what this window is documented to mean.
     const existingRes = await supabase
       .from('guidebook_guest_sms_optins')
-      .select('id, phone_e164, opted_in_at')
+      .select('id, phone_e164, created_at')
       .eq('booking_id', booking.id)
       .maybeSingle()
 
@@ -437,8 +572,8 @@ export async function optInGuestSms(
 
     const existing = existingRes.data
     if (existing && existing.phone_e164 !== phoneE164) {
-      const optedInAt = existing.opted_in_at ? new Date(existing.opted_in_at).getTime() : 0
-      if (Date.now() - optedInAt > OPTIN_CORRECTION_WINDOW_MS) {
+      const firstOptedInAt = existing.created_at ? new Date(existing.created_at).getTime() : 0
+      if (Date.now() - firstOptedInAt > OPTIN_CORRECTION_WINDOW_MS) {
         // Never echo either number back — guest PII, and confirming which
         // number is on file would itself be a disclosure.
         return { error: 'A different number is already signed up for this stay. Contact your host to change it.' }
