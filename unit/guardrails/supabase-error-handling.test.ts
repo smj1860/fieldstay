@@ -109,7 +109,10 @@ const BASELINE: Record<string, number> = {
   // 3 -> 2: optInGuestSms's booking lookup now binds and reports its error.
   // Discarding it made a transient failure indistinguishable from a bad token,
   // so a guest with a valid link was told the link was invalid.
-  'app/actions/guidebook.ts': 2,
+  // 2 -> 1: createSponsorCheckoutSession's media-kit-token lookup had the SAME
+  // defect one function over — a sponsor holding a valid link was told it was
+  // invalid whenever the query itself failed.
+  'app/actions/guidebook.ts': 1,
 
   'app/api/repuguard/generate/route.ts': 3,
   'app/api/vendor-connect/[token]/onboard/route.ts': 2,

@@ -3,6 +3,7 @@ import { inngest } from '@/lib/inngest/client'
 import { createServiceClient } from '@/lib/supabase/server'
 import { getActiveSponsorCount } from '@/lib/guidebook/helpers'
 import { logAuditEvent } from '@/lib/audit'
+import { reportError } from '@/lib/observability/report-error'
 
 export const guidebookSponsorActivated = inngest.createFunction(
   { id: 'guidebook-sponsor-activated', name: 'Guidebook: Sponsor Activated' },
@@ -12,6 +13,35 @@ export const guidebookSponsorActivated = inngest.createFunction(
 
     await step.run('activate-sponsor-row', async () => {
       const supabase = createServiceClient({ system: 'inngest:guidebook-sponsor-activated' })
+
+      // Read before the write purely to catch the anomaly below. Replacing one
+      // non-null subscription id with a DIFFERENT one means this sponsor now
+      // has two live Stripe subscriptions and FieldStay can only ever see the
+      // second — the first keeps billing the business monthly with nothing
+      // here able to cancel it. createSponsorCheckoutSession now reuses an
+      // open session and compare-and-swaps the new one, so our own flow should
+      // not produce this; a subscription created outside it still can, and it
+      // must not pass silently.
+      const existingRes = await supabase
+        .from('guidebook_sponsors')
+        .select('stripe_subscription_id')
+        .eq('id', sponsorId)
+        .eq('org_id', orgId)
+        .maybeSingle()
+
+      const existing = unwrap(existingRes, {
+        site: 'inngest.guidebook-sponsor-activated.existing-subscription', orgId,
+      })
+
+      const priorSubscriptionId = existing?.stripe_subscription_id ?? null
+      if (priorSubscriptionId && priorSubscriptionId !== subscriptionId) {
+        reportError(new Error('Sponsor activated with a second Stripe subscription'), {
+          site:  'inngest.guidebook-sponsor-activated.duplicate-subscription',
+          orgId,
+          extra: { sponsor_id: sponsorId, prior_subscription_id: priorSubscriptionId, new_subscription_id: subscriptionId },
+        })
+      }
+
       const { error } = await supabase
         .from('guidebook_sponsors')
         .update({
@@ -53,7 +83,12 @@ export const guidebookSponsorActivated = inngest.createFunction(
 
       if (!inTrial && activeSponsorCount < 3) return false
 
-      await supabase
+      // Bound and thrown, matching the identical upsert in
+      // guidebook-sponsor-payment-recovered. Discarded, a failed unlock left
+      // the guidebook locked while this step returned `wasUnlocked: true` and
+      // the audit row recorded an unlock that never happened — the sponsor
+      // paid and the guidebook stayed dark.
+      const { error } = await supabase
         .from('guidebook_configurations')
         .upsert(
           {
@@ -64,6 +99,8 @@ export const guidebookSponsorActivated = inngest.createFunction(
           },
           { onConflict: 'org_id' }
         )
+
+      if (error) throw new Error(`Failed to unlock guidebook: ${error.message}`)
 
       return true
     })

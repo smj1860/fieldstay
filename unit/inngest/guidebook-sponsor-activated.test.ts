@@ -9,11 +9,15 @@ vi.mock('@/lib/guidebook/helpers', () => ({
 vi.mock('@/lib/audit', () => ({
   logAuditEvent: vi.fn(),
 }))
+vi.mock('@/lib/observability/report-error', () => ({
+  reportError: vi.fn(),
+}))
 
 import { guidebookSponsorActivated } from '@/lib/inngest/functions/guidebook-sponsor-activated'
 import { createServiceClient } from '@/lib/supabase/server'
 import { getActiveSponsorCount } from '@/lib/guidebook/helpers'
 import { logAuditEvent } from '@/lib/audit'
+import { reportError } from '@/lib/observability/report-error'
 import { invokeHandler } from './test-helpers'
 
 // Queue-based `.from(table)` mock — same convention as checklist-broadcast
@@ -92,8 +96,18 @@ describe('guidebookSponsorActivated', () => {
       stripe_subscription_id: 'sub_1',
       stripe_customer_id:     'cus_1',
     })
-    const sponsorEqCalls = supabase.calls.filter((c) => c.table === 'guidebook_sponsors' && c.method === 'eq')
-    expect(sponsorEqCalls.map((c) => c.args)).toEqual([['id', 'sponsor_1'], ['org_id', 'org_1']])
+    // Stated as "every guidebook_sponsors access is scoped by BOTH id and
+    // org_id" rather than as a positional list, so adding a read to this step
+    // cannot quietly weaken it into passing on a subset.
+    const sponsorEqArgs = supabase.calls
+      .filter((c) => c.table === 'guidebook_sponsors' && c.method === 'eq')
+      .map((c) => JSON.stringify(c.args))
+    expect(sponsorEqArgs.filter((a) => a === JSON.stringify(['id', 'sponsor_1'])).length)
+      .toBe(sponsorEqArgs.filter((a) => a === JSON.stringify(['org_id', 'org_1'])).length)
+    expect(sponsorEqArgs.length).toBeGreaterThanOrEqual(2)
+    expect(new Set(sponsorEqArgs)).toEqual(
+      new Set([JSON.stringify(['id', 'sponsor_1']), JSON.stringify(['org_id', 'org_1'])]),
+    )
 
     const configUpsert = supabase.calls.find((c) => c.table === 'guidebook_configurations' && c.method === 'upsert')
     expect(configUpsert?.args[0]).toMatchObject({ org_id: 'org_1', is_active: true, grace_period_ends_at: null })
@@ -170,5 +184,73 @@ describe('guidebookSponsorActivated', () => {
     expect(first).toEqual(second)
     expect(supabase.calls.filter((c) => c.table === 'guidebook_sponsors' && c.method === 'update')).toHaveLength(2)
     expect(logAuditEvent).toHaveBeenCalledTimes(2)
+  })
+
+  it('throws when the unlock upsert fails, instead of reporting an unlock that never happened', async () => {
+    const supabase = makeSupabase({
+      guidebook_sponsors: [{ data: null, error: null }],
+      guidebook_configurations: [
+        { data: { trial_ends_at: null }, error: null },
+        { data: null, error: { message: 'permission denied for table guidebook_configurations' } },
+      ],
+    })
+    ;(createServiceClient as ReturnType<typeof vi.fn>).mockReturnValue(supabase)
+    ;(getActiveSponsorCount as ReturnType<typeof vi.fn>).mockResolvedValue(3)
+
+    // Discarded, a failed unlock left the guidebook locked while the step
+    // returned wasUnlocked: true and the audit row recorded an unlock that
+    // never happened — the sponsor paid and the guidebook stayed dark, with
+    // the record saying otherwise. Matches the identical upsert in
+    // guidebook-sponsor-payment-recovered, which always threw.
+    await expect(
+      invokeHandler(guidebookSponsorActivated, { event: checkoutEvent(), step: makeStep() })
+    ).rejects.toThrow(/Failed to unlock guidebook/)
+
+    expect(logAuditEvent).not.toHaveBeenCalled()
+  })
+
+  it('reports — rather than silently overwriting — when a second subscription id replaces a live one', async () => {
+    const supabase = makeSupabase({
+      guidebook_sponsors: [
+        { data: { stripe_subscription_id: 'sub_previous' }, error: null }, // already has a live subscription
+        { data: null, error: null },                                       // the activation update
+      ],
+      guidebook_configurations: [{ data: { trial_ends_at: null }, error: null }],
+    })
+    ;(createServiceClient as ReturnType<typeof vi.fn>).mockReturnValue(supabase)
+    ;(getActiveSponsorCount as ReturnType<typeof vi.fn>).mockResolvedValue(1)
+
+    await invokeHandler(guidebookSponsorActivated, { event: checkoutEvent(), step: makeStep() })
+
+    // Overwriting stripe_subscription_id orphans the previous subscription:
+    // it keeps billing the business monthly and nothing in FieldStay can
+    // reach it any more. The write still proceeds (the new subscription is
+    // the real one now) but the anomaly must not pass unnoticed.
+    expect(reportError).toHaveBeenCalledWith(
+      expect.objectContaining({ message: 'Sponsor activated with a second Stripe subscription' }),
+      expect.objectContaining({
+        site:  'inngest.guidebook-sponsor-activated.duplicate-subscription',
+        extra: expect.objectContaining({
+          prior_subscription_id: 'sub_previous',
+          new_subscription_id:   'sub_1',
+        }),
+      }),
+    )
+  })
+
+  it('does not report when a replay writes back the SAME subscription id', async () => {
+    const supabase = makeSupabase({
+      guidebook_sponsors: [
+        { data: { stripe_subscription_id: 'sub_1' }, error: null }, // same as the event's
+        { data: null, error: null },
+      ],
+      guidebook_configurations: [{ data: { trial_ends_at: null }, error: null }],
+    })
+    ;(createServiceClient as ReturnType<typeof vi.fn>).mockReturnValue(supabase)
+    ;(getActiveSponsorCount as ReturnType<typeof vi.fn>).mockResolvedValue(1)
+
+    await invokeHandler(guidebookSponsorActivated, { event: checkoutEvent(), step: makeStep() })
+
+    expect(reportError).not.toHaveBeenCalled()
   })
 })

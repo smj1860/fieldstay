@@ -7,7 +7,11 @@ vi.mock('@/lib/supabase/server', () => ({
   createServiceClient: vi.fn(),
 }))
 vi.mock('@/lib/stripe/client', () => ({
-  stripe: { checkout: { sessions: { create: vi.fn() } } },
+  // retrieve/expire back the duplicate-session defence in
+  // createSponsorCheckoutSession: reuse an already-open session rather than
+  // minting a second payable one, and expire our own if we lose the
+  // compare-and-swap to a concurrent request.
+  stripe: { checkout: { sessions: { create: vi.fn(), retrieve: vi.fn(), expire: vi.fn() } } },
 }))
 vi.mock('@/lib/inngest/client', () => ({ inngest: { send: vi.fn() } }))
 vi.mock('@/lib/audit', () => ({ logAuditEvent: vi.fn() }))
@@ -41,7 +45,11 @@ function makeSupabase(queue: Record<string, Resp[]>) {
     // `.not(` is the global-STOP consent check
     // (.not('opted_out_at', 'is', null)); without it the chain call throws and
     // every opt-in test collapses into the generic catch.
-    for (const m of ['select', 'insert', 'update', 'upsert', 'eq', 'not', 'order', 'limit']) {
+    // `.is(` is the compare-and-swap precondition on a sponsor row that has no
+    // stored checkout session yet (.is('checkout_session_id', null)); without
+    // it the chain call throws and the whole action collapses into its generic
+    // catch, which reads as a Stripe failure.
+    for (const m of ['select', 'insert', 'update', 'upsert', 'eq', 'is', 'not', 'order', 'limit']) {
       chain[m] = vi.fn((...args: unknown[]) => {
         calls.push({ table, method: m, args })
         return chain
@@ -70,7 +78,8 @@ describe('actions/guidebook', () => {
     it('creates a Stripe checkout session for a valid, inactive sponsor slot', async () => {
       const supabase = makeSupabase({
         guidebook_sponsors: [
-          { data: { id: 'sponsor_1', org_id: 'org_1', business_name: 'Lakeside Grill', slot_type: 'restaurant', status: 'pending' } },
+          { data: { id: 'sponsor_1', org_id: 'org_1', business_name: 'Lakeside Grill', slot_type: 'restaurant', status: 'pending', checkout_session_id: null } },
+          { data: { id: 'sponsor_1' } }, // compare-and-swap of the session id wins
         ],
       })
       vi.mocked(createServiceClient).mockReturnValue(supabase as never)
@@ -125,6 +134,130 @@ describe('actions/guidebook', () => {
       const result = await createSponsorCheckoutSession('kit_token_abc')
 
       expect(result).toEqual({ error: 'Unable to start checkout. Please try again.' })
+    })
+
+    // ── Duplicate-subscription defences ──────────────────────────────────
+    // Two payable sessions for one sponsor means two subscriptions, two
+    // checkout.session.completed webhooks with distinct event ids (so the
+    // Stripe dedup table does not collapse them), and an activation handler
+    // that overwrites stripe_subscription_id with whichever lands last —
+    // leaving the other one billing monthly with nothing able to cancel it.
+
+    it('reuses an already-open checkout session instead of minting a second payable one', async () => {
+      const supabase = makeSupabase({
+        guidebook_sponsors: [
+          { data: { id: 'sponsor_1', org_id: 'org_1', business_name: 'Lakeside Grill', slot_type: 'restaurant', status: 'pending', checkout_session_id: 'cs_prior' } },
+        ],
+      })
+      vi.mocked(createServiceClient).mockReturnValue(supabase as never)
+      vi.mocked(stripe.checkout.sessions.retrieve).mockResolvedValue({
+        id: 'cs_prior', status: 'open', url: 'https://checkout.stripe.com/cs_prior',
+      } as never)
+
+      const result = await createSponsorCheckoutSession('kit_token_abc')
+
+      // checkout_session_id was written for exactly this and then never read
+      // back anywhere, so every click, reload, and retry minted a new session
+      // — each payable for 24 hours.
+      expect(result).toEqual({ url: 'https://checkout.stripe.com/cs_prior' })
+      expect(stripe.checkout.sessions.create).not.toHaveBeenCalled()
+    })
+
+    it('mints a new session when the stored one is no longer open', async () => {
+      const supabase = makeSupabase({
+        guidebook_sponsors: [
+          { data: { id: 'sponsor_1', org_id: 'org_1', business_name: 'Lakeside Grill', slot_type: 'restaurant', status: 'pending', checkout_session_id: 'cs_expired' } },
+          { data: { id: 'sponsor_1' } }, // compare-and-swap wins
+        ],
+      })
+      vi.mocked(createServiceClient).mockReturnValue(supabase as never)
+      vi.mocked(stripe.checkout.sessions.retrieve).mockResolvedValue({
+        id: 'cs_expired', status: 'expired', url: null,
+      } as never)
+      vi.mocked(stripe.checkout.sessions.create).mockResolvedValue({
+        id: 'cs_2', url: 'https://checkout.stripe.com/cs_2',
+      } as never)
+
+      const result = await createSponsorCheckoutSession('kit_token_abc')
+
+      expect(result).toEqual({ url: 'https://checkout.stripe.com/cs_2' })
+    })
+
+    it('expires its own session and returns the winner\'s when it loses the compare-and-swap', async () => {
+      const supabase = makeSupabase({
+        guidebook_sponsors: [
+          { data: { id: 'sponsor_1', org_id: 'org_1', business_name: 'Lakeside Grill', slot_type: 'restaurant', status: 'pending', checkout_session_id: null } },
+          { data: null },                                  // CAS matched 0 rows — a concurrent request got there first
+          { data: { checkout_session_id: 'cs_winner' } },   // re-read finds the winner's session
+        ],
+      })
+      vi.mocked(createServiceClient).mockReturnValue(supabase as never)
+      vi.mocked(stripe.checkout.sessions.create).mockResolvedValue({
+        id: 'cs_loser', url: 'https://checkout.stripe.com/cs_loser',
+      } as never)
+      vi.mocked(stripe.checkout.sessions.retrieve).mockResolvedValue({
+        id: 'cs_winner', status: 'open', url: 'https://checkout.stripe.com/cs_winner',
+      } as never)
+      vi.mocked(stripe.checkout.sessions.expire).mockResolvedValue({} as never)
+
+      const result = await createSponsorCheckoutSession('kit_token_abc')
+
+      // A plain `if (already active)` before the write is the exact TOCTOU the
+      // audit checklist calls out — the precondition has to be in the WHERE
+      // clause, and the loser has to clean up after itself.
+      expect(stripe.checkout.sessions.expire).toHaveBeenCalledWith('cs_loser')
+      expect(result).toEqual({ url: 'https://checkout.stripe.com/cs_winner' })
+    })
+
+    it('refuses a sponsor in payment_failed — its subscription is still live in dunning', async () => {
+      const supabase = makeSupabase({
+        guidebook_sponsors: [
+          { data: { id: 'sponsor_1', org_id: 'org_1', business_name: 'Lakeside Grill', slot_type: 'restaurant', status: 'payment_failed', checkout_session_id: null } },
+        ],
+      })
+      vi.mocked(createServiceClient).mockReturnValue(supabase as never)
+
+      // payment_failed comes from invoice.payment_failed, which does NOT end
+      // the subscription — Stripe keeps retrying, and
+      // guidebook-sponsor-payment-recovered flips the row back to 'active'.
+      // Only 'active' was blocked, so a sponsor who saw the failure notice
+      // could buy a SECOND subscription while the first was still in dunning.
+      const result = await createSponsorCheckoutSession('kit_token_abc')
+
+      expect(result).toEqual({ error: 'This sponsorship slot is already active.' })
+      expect(stripe.checkout.sessions.create).not.toHaveBeenCalled()
+    })
+
+    it('allows a cancelled sponsor to buy again — that subscription is genuinely gone', async () => {
+      const supabase = makeSupabase({
+        guidebook_sponsors: [
+          { data: { id: 'sponsor_1', org_id: 'org_1', business_name: 'Lakeside Grill', slot_type: 'restaurant', status: 'cancelled', checkout_session_id: null } },
+          { data: { id: 'sponsor_1' } },
+        ],
+      })
+      vi.mocked(createServiceClient).mockReturnValue(supabase as never)
+      vi.mocked(stripe.checkout.sessions.create).mockResolvedValue({
+        id: 'cs_3', url: 'https://checkout.stripe.com/cs_3',
+      } as never)
+
+      const result = await createSponsorCheckoutSession('kit_token_abc')
+
+      expect(result).toEqual({ url: 'https://checkout.stripe.com/cs_3' })
+    })
+
+    it('does not tell a sponsor their valid link is invalid when the lookup itself fails', async () => {
+      const supabase = makeSupabase({
+        guidebook_sponsors: [{ data: null, error: { message: 'connection reset', code: '08006' } }],
+      })
+      vi.mocked(createServiceClient).mockReturnValue(supabase as never)
+
+      // Discarding the read error collapsed "no such token" and "the query
+      // failed" into the same null — identical to the defect already fixed in
+      // optInGuestSms, one function over in the same file.
+      const result = await createSponsorCheckoutSession('kit_token_abc')
+
+      expect(result).toEqual({ error: 'Unable to start checkout. Please try again.' })
+      expect(stripe.checkout.sessions.create).not.toHaveBeenCalled()
     })
   })
 
