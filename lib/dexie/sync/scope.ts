@@ -30,8 +30,33 @@ import { getDexieDb } from '../schema'
 
 export type ScopeKey = 'scope:property_assets' | 'scope:inventory_items'
 
+/**
+ * Deterministic, locale-independent ordering for CANONICALISATION — the same
+ * rule and the same reason as compareCodeUnits in the inventory action and
+ * build-shopping-cart: comparing by UTF-16 code unit gives the same answer on
+ * every machine, in every locale, under every ICU version, and
+ * String.localeCompare does not.
+ *
+ * Duplicated rather than imported: the two existing copies live in a
+ * `'use server'` module and an Inngest function, and this is a CLIENT module —
+ * importing either would drag server code into the crew bundle.
+ *
+ * This is a consistency fix, not a live bug: a locale-dependent sort here can
+ * only ever produce a DIFFERENT string for the same id set, which reads as
+ * "scope changed" and costs one redundant pull. It can never produce the same
+ * string for two different sets, so it cannot cause a MISSED pull. Worth
+ * correcting anyway — the key is a canonicalisation key, and the moment it is
+ * used for anything stronger than a cache hint the benign direction stops
+ * being guaranteed.
+ */
+function compareCodeUnits(a: string, b: string): number {
+  if (a < b) return -1
+  if (a > b) return 1
+  return 0
+}
+
 function serialize(ids: readonly string[]): string {
-  return [...ids].sort((a, b) => a.localeCompare(b)).join(',')
+  return [...ids].sort(compareCodeUnits).join(',')
 }
 
 /**

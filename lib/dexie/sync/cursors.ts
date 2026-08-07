@@ -23,11 +23,26 @@ import { getDexieDb, type MutationTable } from '../schema'
 
 export const CURSOR_OVERLAP_MS = 10_000
 
-export type SyncCursorKey =
-  | 'cursor:turnovers'
-  | 'cursor:checklist_instances'
-  | 'cursor:checklist_items'
-  | 'cursor:work_orders'
+/**
+ * Every delta cursor, as a value — the type is DERIVED from it rather than
+ * declared alongside it, so the union and the list cannot disagree.
+ *
+ * resetAllCursors() reads this rather than CURSORS_BY_MUTATION_TABLE below,
+ * and the difference is load-bearing: that map answers "which cursors guard
+ * the table this ABANDONED MUTATION targets", which is a strictly smaller
+ * question. A cursor gating a cache the crew only ever READS has no mutation
+ * table pointing at it, so deriving the full-reset list from that map would
+ * quietly leave exactly such a cursor un-reset — in the one function whose
+ * entire purpose is repairing a device whose cache has diverged.
+ */
+export const SYNC_CURSOR_KEYS = [
+  'cursor:turnovers',
+  'cursor:checklist_instances',
+  'cursor:checklist_items',
+  'cursor:work_orders',
+] as const
+
+export type SyncCursorKey = typeof SYNC_CURSOR_KEYS[number]
 
 /**
  * Pure cursor-advance rule, extracted for direct unit testing:
@@ -74,14 +89,43 @@ export function partitionByKnown(
 
 /**
  * Which cursors gate the pull that would re-fetch a given mutation's table.
- * Tables pulled in full every time (inventory_items, properties,
- * property_assets) have no cursor and so need no rewind.
+ *
+ * TOTAL, not Partial — every member of MutationTable must appear, and a table
+ * that genuinely needs no rewind says so with an explicit empty array and a
+ * reason. As a Partial this compiled fine with a table simply missing, and the
+ * consequence of an accidental omission is the exact failure this module exists
+ * to prevent (see invalidateCursorsFor below): the local cache pinned to a
+ * value the server never accepted, permanently, with no user-visible symptom
+ * and nothing in any log. That is far too quiet to leave to whether the next
+ * person remembers this map exists. Now it is a compile error.
+ *
+ * The four empty entries are empty for two different reasons, and the
+ * distinction matters if one of them ever changes:
+ *
+ *  • NOT CACHED AT ALL. work_order_reports, inventory_counts and messages are
+ *    outbox-only — the crew SUBMITS them and never reads them back from Dexie
+ *    (see CREW_SYNCED_TABLES in ../schema.ts). There is no cached row to pin,
+ *    so there is nothing to rewind.
+ *  • CACHED BUT UNCURSORED. property_assets IS in the Dexie cache, but it is
+ *    pulled as a full set whenever the assigned-property scope changes
+ *    (./scope.ts) rather than by an `.gt('updated_at', …)` delta. A full pull
+ *    re-fetches the server row unconditionally, so abandoning a mutation
+ *    already self-heals. Give property_assets a cursor and this entry stops
+ *    being correct.
  */
-const CURSORS_BY_MUTATION_TABLE: Readonly<Partial<Record<MutationTable, readonly SyncCursorKey[]>>> = {
+const CURSORS_BY_MUTATION_TABLE: Readonly<Record<MutationTable, readonly SyncCursorKey[]>> = {
   turnovers:                ['cursor:turnovers'],
   checklist_instances:      ['cursor:checklist_instances'],
   checklist_instance_items: ['cursor:checklist_items'],
   crew_work_orders:         ['cursor:work_orders'],
+
+  // Not cached — outbox-only submissions, nothing to re-fetch.
+  work_order_reports:       [],
+  inventory_counts:         [],
+  messages:                 [],
+
+  // Cached, but pulled as a full scope set rather than a delta — see above.
+  property_assets:          [],
 }
 
 /**
@@ -102,7 +146,7 @@ const CURSORS_BY_MUTATION_TABLE: Readonly<Partial<Record<MutationTable, readonly
  */
 export async function invalidateCursorsFor(userId: string, table: MutationTable): Promise<void> {
   const keys = CURSORS_BY_MUTATION_TABLE[table]
-  if (!keys?.length) return
+  if (!keys.length) return
   const db = getDexieDb(userId)
   await Promise.all(keys.map((key) => db.sync_meta.delete(key)))
 }
@@ -116,15 +160,9 @@ export async function invalidateCursorsFor(userId: string, table: MutationTable)
  */
 export async function resetAllCursors(userId: string): Promise<void> {
   const db = getDexieDb(userId)
-  await Promise.all(ALL_CURSOR_KEYS.map((key) => db.sync_meta.delete(key)))
+  await Promise.all(SYNC_CURSOR_KEYS.map((key) => db.sync_meta.delete(key)))
 }
 
-const ALL_CURSOR_KEYS: readonly SyncCursorKey[] = [
-  'cursor:turnovers',
-  'cursor:checklist_instances',
-  'cursor:checklist_items',
-  'cursor:work_orders',
-]
 
 export async function getCursor(userId: string, key: SyncCursorKey): Promise<string | null> {
   const row = await getDexieDb(userId).sync_meta.get(key)
