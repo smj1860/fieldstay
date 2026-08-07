@@ -11,9 +11,12 @@ import { TimeOffRequest }  from '@/components/crew/time-off-request'
  */
 export const dynamic = 'force-dynamic'
 
-/** The window the crew calendar can actually navigate to. */
-const LOOKBACK_DAYS  = 30
-const LOOKAHEAD_DAYS = 365
+/**
+ * The window the crew calendar can actually navigate to. Imported from the
+ * action rather than redeclared, so the range this page SHOWS and the range
+ * the action ACCEPTS cannot drift apart.
+ */
+import { LOOKBACK_DAYS, LOOKAHEAD_DAYS } from './actions'
 
 export default async function CrewAvailabilityPage() {
   const supabase                = await createClient()
