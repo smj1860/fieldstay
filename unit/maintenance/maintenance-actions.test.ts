@@ -378,13 +378,22 @@ describe('maintenance/actions', () => {
 
   describe('rateWorkOrderVendor', () => {
     it('rates the vendor scoped to the caller org', async () => {
-      const supabase = makeSupabase({})
+      const supabase = makeSupabase({ work_orders: [{ data: { id: 'wo_1' } }] })
       vi.mocked(requireOrgRole).mockResolvedValue({ supabase, membership } as never)
 
       const result = await rateWorkOrderVendor('wo_1', 5, 'Great work')
 
       expect(result).toEqual({})
       expect(supabase.from).toHaveBeenCalledWith('work_orders')
+    })
+
+    it('reports a refused rating instead of returning success', async () => {
+      const supabase = makeSupabase({ work_orders: [{ data: null, error: null }] })
+      vi.mocked(requireOrgRole).mockResolvedValue({ supabase, membership } as never)
+
+      const result = await rateWorkOrderVendor('wo_1', 5, 'Great work')
+
+      expect(result.error).toMatch(/permission|no longer exists/)
     })
 
     it('does not touch the DB when the caller lacks the required role', async () => {
@@ -728,13 +737,42 @@ describe('maintenance/actions', () => {
   describe('declineQuoteRequest', () => {
     it('declines a quote request verified to belong to the caller org', async () => {
       const supabase = makeSupabase({
-        quote_requests: [{ data: { id: 'qr_1', work_order_id: 'wo_1' } }, { error: null }],
+        quote_requests: [{ data: { id: 'qr_1', work_order_id: 'wo_1' } }, { data: { id: 'qr_1' }, error: null }],
       })
       vi.mocked(requireOrgRole).mockResolvedValue({ supabase, membership } as never)
 
       const result = await declineQuoteRequest('qr_1')
 
       expect(result).toEqual({})
+    })
+
+    // approveQuoteRequest goes through a transactional RPC; this twin threw its
+    // write result away entirely and returned success unconditionally, so a
+    // refused or failed decline closed the dialog as though it had worked.
+    it('reports a refused decline instead of closing the dialog as though it worked', async () => {
+      const supabase = makeSupabase({
+        quote_requests: [{ data: { id: 'qr_1', work_order_id: 'wo_1' } }, { data: null, error: null }],
+      })
+      vi.mocked(requireOrgRole).mockResolvedValue({ supabase, membership } as never)
+
+      const result = await declineQuoteRequest('qr_1')
+
+      expect(result.error).toMatch(/permission|no longer exists/)
+    })
+
+    it('reports a failed decline rather than returning success', async () => {
+      const supabase = makeSupabase({
+        quote_requests: [
+          { data: { id: 'qr_1', work_order_id: 'wo_1' } },
+          { data: null, error: { message: 'deadlock detected', code: '40P01' } },
+        ],
+      })
+      vi.mocked(requireOrgRole).mockResolvedValue({ supabase, membership } as never)
+
+      const result = await declineQuoteRequest('qr_1')
+
+      expect(result.error).toBeTruthy()
+      expect(reportError).toHaveBeenCalled()
     })
 
     it('rejects a quote request id that does not belong to the caller org (IDOR check)', async () => {
@@ -843,7 +881,7 @@ describe('maintenance/actions', () => {
     it('bulk-assigns a vendor verified to belong to the caller org', async () => {
       const supabase = makeSupabase({
         vendors:      [{ data: { id: 'vendor_1', name: 'Acme Cleaning' } }],
-        work_orders:  [{ data: [{ id: 'wo_1', suggestion_status: null, suggested_vendor_ids: null }] }, { error: null }],
+        work_orders:  [{ data: [{ id: 'wo_1', suggestion_status: null, suggested_vendor_ids: null }] }, { data: [{ id: 'wo_1' }], error: null }],
         vendor_compliance_status: compliant(),
       })
       vi.mocked(requireOrgRole).mockResolvedValue({
@@ -875,10 +913,29 @@ describe('maintenance/actions', () => {
     // vendor_id, so a bulk-assigned work order kept reading 'pending' while
     // carrying a vendor who had already been emailed. Production had two of
     // those, and not one work order in 'assigned' or 'in_progress' at all.
+    // `.in('id', ...)` matching FEWER rows than asked for is silent — no error,
+    // just a shorter result — so a bulk assign where every id was foreign or
+    // refused wrote nothing and still told the PM the vendor was assigned.
+    it('reports a batch where the update claimed no rows, without dispatching', async () => {
+      const supabase = makeSupabase({
+        vendors:      [{ data: { id: 'vendor_1', name: 'Acme Cleaning' } }],
+        work_orders:  [{ data: [{ id: 'wo_1', suggestion_status: null, suggested_vendor_ids: null }] }, { data: [], error: null }],
+        vendor_compliance_status: compliant(),
+      })
+      vi.mocked(requireOrgRole).mockResolvedValue({
+        supabase, membership, user: { id: 'user_1' },
+      } as never)
+
+      const result = await bulkAssignVendor(['wo_1'], 'vendor_1')
+
+      expect(result.error).toMatch(/permission|no longer exists/)
+      expect(inngest.send).not.toHaveBeenCalled()
+    })
+
     it('advances the status to assigned, not just the vendor', async () => {
       const supabase = makeSupabase({
         vendors:      [{ data: { id: 'vendor_1', name: 'Acme Cleaning' } }],
-        work_orders:  [{ data: [{ id: 'wo_1', suggestion_status: null, suggested_vendor_ids: null }] }, { error: null }, { error: null }],
+        work_orders:  [{ data: [{ id: 'wo_1', suggestion_status: null, suggested_vendor_ids: null }] }, { data: [{ id: 'wo_1' }], error: null }, { error: null }],
         vendor_compliance_status: compliant(),
       })
       vi.mocked(requireOrgRole).mockResolvedValue({
@@ -900,7 +957,7 @@ describe('maintenance/actions', () => {
     it('only advances a status that is still pending or awaiting quotes', async () => {
       const supabase = makeSupabase({
         vendors:      [{ data: { id: 'vendor_1', name: 'Acme Cleaning' } }],
-        work_orders:  [{ data: [{ id: 'wo_1', suggestion_status: null, suggested_vendor_ids: null }] }, { error: null }, { error: null }],
+        work_orders:  [{ data: [{ id: 'wo_1', suggestion_status: null, suggested_vendor_ids: null }] }, { data: [{ id: 'wo_1' }], error: null }, { error: null }],
         vendor_compliance_status: compliant(),
       })
       vi.mocked(requireOrgRole).mockResolvedValue({
@@ -923,7 +980,7 @@ describe('maintenance/actions', () => {
         vendors:      [{ data: { id: 'vendor_1', name: 'Acme Cleaning' } }],
         work_orders:  [
           { data: [{ id: 'wo_1', suggestion_status: null, suggested_vendor_ids: null }] },
-          { error: null },
+          { data: [{ id: 'wo_1' }], error: null },
           { error: { message: 'deadlock detected', code: '40P01' } },
         ],
         vendor_compliance_status: compliant(),
@@ -954,7 +1011,7 @@ describe('maintenance/actions', () => {
   describe('acceptVendorSuggestion / dismissVendorSuggestion', () => {
     it('accepts a suggested vendor for a work order verified to belong to the caller org', async () => {
       const supabase = makeSupabase({
-        work_orders: [{ data: { id: 'wo_1', suggested_vendor_ids: ['vendor_1'] } }, { error: null }],
+        work_orders: [{ data: { id: 'wo_1', status: 'pending', suggested_vendor_ids: ['vendor_1'] } }, { data: { id: 'wo_1' }, error: null }, { error: null }],
         vendor_compliance_status: compliant(),
       })
       vi.mocked(requireOrgRole).mockResolvedValue({
@@ -978,13 +1035,90 @@ describe('maintenance/actions', () => {
       expect(result).toEqual({ error: 'Work order not found' })
     })
 
+    // Same defect as the turnover board's acceptSuggestion, on the other board.
+    // bulkAssignVendor already split the vendor write from the status advance
+    // so the status only moves FORWARD; this path still folded
+    // `status: 'assigned'` into one unconditional update, so accepting a
+    // suggestion on a completed work order reopened it.
+    it.each([
+      ['completed', /already complete/],
+      ['cancelled', /was cancelled/],
+    ])('refuses to reopen a %s work order, writing nothing', async (status, message) => {
+      const supabase = makeSupabase({
+        work_orders: [{ data: { id: 'wo_1', status, suggested_vendor_ids: ['vendor_1'] } }],
+        vendor_compliance_status: compliant(),
+      })
+      vi.mocked(requireOrgRole).mockResolvedValue({
+        supabase, membership, user: { id: 'user_1' },
+      } as never)
+
+      const result = await acceptVendorSuggestion('wo_1')
+
+      expect(result.error).toMatch(message)
+      expect(supabase.calls.some(c => c.method === 'update')).toBe(false)
+      expect(inngest.send).not.toHaveBeenCalled()
+    })
+
+    // Accepting on a work order already in_progress records WHO — it must not
+    // walk the status backwards to `assigned`.
+    it('advances the status only from the two pre-vendor statuses', async () => {
+      const supabase = makeSupabase({
+        work_orders: [
+          { data: { id: 'wo_1', status: 'in_progress', suggested_vendor_ids: ['vendor_1'] } },
+          { data: { id: 'wo_1' }, error: null },
+          { error: null },
+        ],
+        vendor_compliance_status: compliant(),
+      })
+      vi.mocked(requireOrgRole).mockResolvedValue({
+        supabase, membership, user: { id: 'user_1' },
+      } as never)
+
+      const result = await acceptVendorSuggestion('wo_1')
+
+      expect(result).toEqual({})
+      // The vendor write carries no `status` column at all …
+      const vendorWrite = supabase.calls.find(
+        c => c.table === 'work_orders' && c.method === 'update' &&
+             (c.args[0] as { vendor_id?: string })?.vendor_id === 'vendor_1',
+      )
+      expect(vendorWrite?.args[0]).not.toHaveProperty('status')
+      // … and the advance is filtered to pending/quote_requested, which
+      // in_progress is not in.
+      expect(
+        supabase.calls.some(c => c.table === 'work_orders' && c.method === 'in' &&
+          c.args[0] === 'status' &&
+          Array.isArray(c.args[1]) && (c.args[1] as string[]).join() === 'pending,quote_requested'),
+      ).toBe(true)
+    })
+
+    // A refused UPDATE returns 0 rows and NO error; this path discarded the
+    // row count entirely and reported success for a change that never happened.
+    it('reports a refused write instead of claiming the suggestion was accepted', async () => {
+      const supabase = makeSupabase({
+        work_orders: [
+          { data: { id: 'wo_1', status: 'pending', suggested_vendor_ids: ['vendor_1'] } },
+          { data: null, error: null },
+        ],
+        vendor_compliance_status: compliant(),
+      })
+      vi.mocked(requireOrgRole).mockResolvedValue({
+        supabase, membership, user: { id: 'user_1' },
+      } as never)
+
+      const result = await acceptVendorSuggestion('wo_1')
+
+      expect(result.error).toMatch(/permission|no longer exists/)
+      expect(inngest.send).not.toHaveBeenCalled()
+    })
+
     // Fail-closed regression: the compliance gate is the enforcement boundary
     // for every assignment path. It previously discarded its error, so an RLS
     // denial or a transient failure returned "not blocked" and dispatched an
     // uninsured vendor to a customer's property.
     it('blocks the assignment when the compliance read itself errors', async () => {
       const supabase = makeSupabase({
-        work_orders: [{ data: { id: 'wo_1', suggested_vendor_ids: ['vendor_1'] } }],
+        work_orders: [{ data: { id: 'wo_1', status: 'pending', suggested_vendor_ids: ['vendor_1'] } }],
         vendor_compliance_status: [{ data: null, error: { message: 'permission denied', code: '42501' } }],
       })
       vi.mocked(requireOrgRole).mockResolvedValue({
@@ -1001,7 +1135,7 @@ describe('maintenance/actions', () => {
     // corrected and may gain a new state. An unrecognized status must block.
     it('blocks the assignment on an unrecognized compliance status', async () => {
       const supabase = makeSupabase({
-        work_orders: [{ data: { id: 'wo_1', suggested_vendor_ids: ['vendor_1'] } }],
+        work_orders: [{ data: { id: 'wo_1', status: 'pending', suggested_vendor_ids: ['vendor_1'] } }],
         vendor_compliance_status: [{ data: { compliance_status: 'documents_invalid' } }],
       })
       vi.mocked(requireOrgRole).mockResolvedValue({
@@ -1016,7 +1150,7 @@ describe('maintenance/actions', () => {
 
     it('errors when there is no suggestion to accept', async () => {
       const supabase = makeSupabase({
-        work_orders: [{ data: { id: 'wo_1', suggested_vendor_ids: [] } }],
+        work_orders: [{ data: { id: 'wo_1', status: 'pending', suggested_vendor_ids: [] } }],
       })
       vi.mocked(requireOrgRole).mockResolvedValue({
         supabase, membership, user: { id: 'user_1' },
@@ -1029,7 +1163,7 @@ describe('maintenance/actions', () => {
 
     it('dismisses a suggestion scoped to the caller org', async () => {
       const supabase = makeSupabase({
-        work_orders: [{ data: { suggested_vendor_ids: ['vendor_1'] } }, { error: null }],
+        work_orders: [{ data: { suggested_vendor_ids: ['vendor_1'] } }, { data: { id: 'wo_1' }, error: null }],
       })
       vi.mocked(requireOrgRole).mockResolvedValue({
         supabase, membership, user: { id: 'user_1' },
@@ -1038,6 +1172,62 @@ describe('maintenance/actions', () => {
       const result = await dismissVendorSuggestion('wo_1')
 
       expect(result).toEqual({})
+    })
+
+    // A refused dismissal returns 0 rows and NO error. Without the row count
+    // it still wrote the negative training signal below it and reported
+    // success — the turnovers-side dismissSuggestion already carried this fix.
+    it('does not record a training signal when the dismissal itself was refused', async () => {
+      const supabase = makeSupabase({
+        work_orders: [{ data: { suggested_vendor_ids: ['vendor_1'] } }, { data: null, error: null }],
+      })
+      vi.mocked(requireOrgRole).mockResolvedValue({
+        supabase, membership, user: { id: 'user_1' },
+      } as never)
+
+      const result = await dismissVendorSuggestion('wo_1')
+
+      expect(result.error).toMatch(/permission|no longer exists/)
+      expect(createServiceClient).not.toHaveBeenCalled()
+    })
+
+    // A PostgREST builder RESOLVES with { error } — it never rejects — so the
+    // bare `await service.from(...).upsert(...)` these two paths used meant
+    // their try/catch caught nothing and the failure they exist to report
+    // could not fire.
+    it.each([
+      ['acceptVendorSuggestion', () => acceptVendorSuggestion('wo_1'), true],
+      ['dismissVendorSuggestion', () => dismissVendorSuggestion('wo_1'), false],
+    ])('%s reports an outcome-upsert failure instead of swallowing it', async (_name, run, isAccept) => {
+      const service = makeSupabase({
+        vendor_assignment_outcomes: [{ error: { message: 'permission denied', code: '42501' } }],
+      })
+      vi.mocked(createServiceClient).mockReturnValue(service as never)
+
+      const supabase = makeSupabase({
+        work_orders: [
+          { data: { id: 'wo_1', status: 'pending', suggested_vendor_ids: ['vendor_1'] } },
+          { data: { id: 'wo_1' }, error: null },
+          { error: null },
+        ],
+        vendor_compliance_status: compliant(),
+      })
+      vi.mocked(requireOrgRole).mockResolvedValue({
+        supabase, membership, user: { id: 'user_1' },
+      } as never)
+
+      // Non-blocking is correct — the assignment/dismissal itself stands …
+      const result = await run()
+      expect(result).toEqual({})
+      // … but invisible is not.
+      expect(reportError).toHaveBeenCalledWith(
+        expect.objectContaining({ code: '42501' }),
+        expect.objectContaining({
+          site: isAccept
+            ? 'serverAction.maintenance.acceptVendorSuggestion'
+            : 'serverAction.maintenance.dismissVendorSuggestion',
+        }),
+      )
     })
   })
 
@@ -1293,7 +1483,7 @@ describe('maintenance/actions', () => {
     }
 
     it('updates a schedule scoped to the caller org', async () => {
-      const supabase = makeSupabase({ maintenance_schedules: [{ error: null }] })
+      const supabase = makeSupabase({ maintenance_schedules: [{ data: { id: 'sched_1' }, error: null }] })
       vi.mocked(requireOrgRole).mockResolvedValue({ supabase, membership } as never)
 
       const result = await updateMaintenanceSchedule('sched_1', updateInput)
@@ -1315,8 +1505,26 @@ describe('maintenance/actions', () => {
       expect(patch.next_due_date).toMatch(/^\d{4}-\d{2}-\d{2}$/)
     })
 
+    // Every one of these has a WHERE clause of just id + org, so 0 rows can
+    // only mean refused or gone — never "already in that state". Each one
+    // previously bound `error` alone and reported success on 0 rows.
+    it.each([
+      ['updateMaintenanceSchedule',     () => updateMaintenanceSchedule('sched_1', updateInput)],
+      ['deleteMaintenanceSchedule',     () => deleteMaintenanceSchedule('sched_1')],
+      ['updateMaintenanceScheduleItem', () => updateMaintenanceScheduleItem('item_1', { name: 'Renamed' })],
+      ['removeMaintenanceScheduleItem', () => removeMaintenanceScheduleItem('item_1', 'prop_1')],
+    ])('%s reports a refused write instead of returning success', async (_name, run) => {
+      const supabase = makeSupabase({ maintenance_schedules: [{ data: null, error: null }] })
+      vi.mocked(requireOrgRole).mockResolvedValue({ supabase, membership } as never)
+
+      const result = await run()
+
+      expect(result.success).toBeUndefined()
+      expect(result.error).toMatch(/permission|no longer exists/)
+    })
+
     it('soft-deletes a schedule scoped to the caller org', async () => {
-      const supabase = makeSupabase({ maintenance_schedules: [{ error: null }] })
+      const supabase = makeSupabase({ maintenance_schedules: [{ data: { id: 'sched_1' }, error: null }] })
       vi.mocked(requireOrgRole).mockResolvedValue({ supabase, membership } as never)
 
       const result = await deleteMaintenanceSchedule('sched_1')
@@ -1502,7 +1710,7 @@ describe('maintenance/actions', () => {
 
   describe('updateMaintenanceScheduleItem / duplicateMaintenanceScheduleItem / removeMaintenanceScheduleItem', () => {
     it('updates a schedule item scoped to the caller org', async () => {
-      const supabase = makeSupabase({ maintenance_schedules: [{ error: null }] })
+      const supabase = makeSupabase({ maintenance_schedules: [{ data: { id: 'item_1' }, error: null }] })
       vi.mocked(requireOrgRole).mockResolvedValue({ supabase, membership } as never)
 
       const result = await updateMaintenanceScheduleItem('item_1', { name: 'Renamed item' })
@@ -1534,7 +1742,7 @@ describe('maintenance/actions', () => {
     })
 
     it('removes (soft-deletes) an item scoped to the caller org', async () => {
-      const supabase = makeSupabase({ maintenance_schedules: [{ error: null }] })
+      const supabase = makeSupabase({ maintenance_schedules: [{ data: { id: 'item_1' }, error: null }] })
       vi.mocked(requireOrgRole).mockResolvedValue({ supabase, membership } as never)
 
       const result = await removeMaintenanceScheduleItem('item_1', 'prop_1')

@@ -34,6 +34,14 @@ import {
 } from '@/lib/vendors/compliance'
 import { toStorageObjectPath } from '@/lib/storage/object-path'
 
+// A refused UPDATE returns 0 rows and NO error, so `if (error)` alone reports
+// success for a change that never happened. Every write below whose WHERE
+// clause is just id + org — where 0 rows can only mean refused or gone, never
+// "already in that state" — reads the row count back and returns this.
+// Phrased for a PM. Mirrors turnovers/actions.ts and properties/actions.ts.
+const NOTHING_UPDATED =
+  'You do not have permission to make this change, or the record no longer exists.'
+
 // work-order-photos is a PRIVATE bucket — reads go through short-lived
 // signed URLs, never a `/object/public/...` link.
 const WORK_ORDER_PHOTO_BUCKET      = 'work-order-photos'
@@ -396,7 +404,7 @@ export async function rateWorkOrderVendor(
   try {
     const { supabase, membership } = await requireOrgRole(['admin', 'manager'])
 
-    const { error } = await supabase
+    const { data: rated, error } = await supabase
       .from('work_orders')
       .update({
         vendor_rating:       rating,
@@ -404,11 +412,15 @@ export async function rateWorkOrderVendor(
       })
       .eq('id', workOrderId)
       .eq('org_id', membership.org_id)
+      .select('id')
+      .maybeSingle()
 
     if (error) {
       console.error('[rateWorkOrderVendor]', error)
+      reportError(error, { site: 'serverAction.maintenance.rateWorkOrderVendor', orgId: membership.org_id })
       return { error: 'Operation failed. Please try again.' }
     }
+    if (!rated) return { error: NOTHING_UPDATED }
     revalidatePath('/maintenance')
     revalidatePath('/vendors')
     return {}
@@ -856,10 +868,25 @@ export async function declineQuoteRequest(
 
     if (!qr) return { error: 'Quote request not found' }
 
-    await supabase
+    // approveQuoteRequest goes through a transactional RPC; this twin threw its
+    // write result away entirely and returned success unconditionally, so a
+    // refused or failed decline closed the dialog as though it had worked. The
+    // org filter matches every sibling write — the id was already proven in-org
+    // by the read above, so this is consistency, not a new gate.
+    const { data: declined, error: declineError } = await supabase
       .from('quote_requests')
       .update({ status: 'declined' })
       .eq('id', quoteRequestId)
+      .eq('org_id', membership.org_id)
+      .select('id')
+      .maybeSingle()
+
+    if (declineError) {
+      console.error('[declineQuoteRequest]', declineError)
+      reportError(declineError, { site: 'serverAction.maintenance.declineQuoteRequest.update', orgId: membership.org_id })
+      return { error: 'Could not decline the quote. Please try again.' }
+    }
+    if (!declined) return { error: NOTHING_UPDATED }
 
     revalidatePath(`/maintenance/${qr.work_order_id}`)
     return {}
@@ -1013,6 +1040,40 @@ async function resolveVendorForSchedule(
   return (await isVendorHardBlocked(supabase, vendorId, orgId)) ? null : vendorId
 }
 
+/**
+ * Advances a routine schedule past the work order just created from it.
+ *
+ * Reported, not returned: the work order IS created by the time this runs, so
+ * failing the action here would tell the PM nothing happened. But the result
+ * used to be discarded ENTIRELY, and a schedule that never advances is due
+ * again tomorrow — the cron re-creates the same work order every run, with no
+ * signal that the advance is the thing failing.
+ */
+async function advanceScheduleNextDueDate(
+  supabase:   Awaited<ReturnType<typeof requireOrgRole>>['supabase'],
+  schedule:   { schedule_type: string | null; frequency: string | null; next_due_date: string | null },
+  scheduleId: string,
+  orgId:      string,
+): Promise<void> {
+  if (schedule.schedule_type !== 'routine' || !schedule.frequency || !schedule.next_due_date) return
+
+  const nextDue = calcNextDueDate(schedule.frequency as ScheduleFrequency, new Date(schedule.next_due_date))
+
+  const { error } = await supabase
+    .from('maintenance_schedules')
+    .update({ next_due_date: nextDue.toISOString().split('T')[0] })
+    .eq('id', scheduleId)
+    .eq('org_id', orgId)
+
+  if (error) {
+    console.error('[createWorkOrderFromSchedule] next_due_date advance failed', error)
+    reportError(error, {
+      site:  'serverAction.maintenance.createWorkOrderFromSchedule.advance',
+      orgId,
+    })
+  }
+}
+
 export async function createWorkOrderFromSchedule(
   scheduleId: string
 ): Promise<MaintenanceActionState> {
@@ -1106,14 +1167,11 @@ export async function createWorkOrderFromSchedule(
       return { error: 'Operation failed. Please try again.' }
     }
 
-    // Feature 4: Advance next_due_date immediately on manual WO creation from schedule
-    if (schedule.schedule_type === 'routine' && schedule.frequency && schedule.next_due_date) {
-      const nextDue = calcNextDueDate(schedule.frequency as ScheduleFrequency, new Date(schedule.next_due_date))
-      await supabase
-        .from('maintenance_schedules')
-        .update({ next_due_date: nextDue.toISOString().split('T')[0] })
-        .eq('id', scheduleId)
-    }
+    // Feature 4: Advance next_due_date immediately on manual WO creation from
+    // schedule. Extracted to a named helper rather than inlined: binding and
+    // reporting the result took this function to a cognitive complexity of 16,
+    // over CLAUDE.md's limit of 15.
+    await advanceScheduleNextDueDate(supabase, schedule, scheduleId, membership.org_id)
 
     if (vendorId) {
       await inngest.send({
@@ -1192,23 +1250,31 @@ export async function bulkAssignVendor(
     }
     const workOrders = workOrdersRes.data
 
-    const { error } = await supabase
+    // The row count is read back and compared against the ids the org-scoped
+    // read above actually returned. `.in('id', …)` matching FEWER rows than
+    // asked for is silent — no error, just a shorter result — so a bulk assign
+    // where every id was foreign or refused wrote nothing at all and still
+    // reported success, having already told the PM the vendor was assigned.
+    const { data: assignedRows, error } = await supabase
       .from('work_orders')
       .update({ vendor_id: vendorId, assigned_crew_member_id: null })
       .in('id', workOrderIds)
       .eq('org_id', membership.org_id)
+      .select('id')
 
     if (error) {
       console.error('[bulkAssignVendor]', error)
+      reportError(error, { site: 'serverAction.maintenance.bulkAssignVendor.update', orgId: membership.org_id })
       return { error: 'Operation failed. Please try again.' }
     }
+    if (!assignedRows?.length) return { error: NOTHING_UPDATED }
 
-    // Advance the status too. acceptVendorSuggestion — the OTHER way a PM
-    // assigns a vendor — has always written `status: 'assigned'` alongside
-    // vendor_id; this path only wrote vendor_id, so a bulk-assigned work order
-    // kept saying `pending` while carrying a vendor and having already emailed
-    // them. Production had two of those and not a single work order in
-    // `assigned` or `in_progress` at all.
+    // Advance the status too. Both vendor-assignment paths now split the vendor
+    // write from the status advance so the status only ever moves FORWARD; this
+    // path used to write vendor_id alone, so a bulk-assigned work order kept
+    // saying `pending` while carrying a vendor and having already emailed them.
+    // Production had two of those and not a single work order in `assigned` or
+    // `in_progress` at all.
     //
     // A SECOND, filtered statement rather than a column on the update above:
     // the vendor must be set on every selected row, but the status must only
@@ -1269,13 +1335,30 @@ export async function bulkAssignVendor(
 
 // ── Accept auto-suggested vendor ─────────────────────────────────────────────
 
+/**
+ * The statuses a pending vendor suggestion may still be accepted from.
+ *
+ * An ALLOWLIST, not a `completed`/`cancelled` denylist, so a wo_status value
+ * added later fails closed rather than silently joining the acceptable set.
+ */
+const VENDOR_SUGGESTION_ACCEPTABLE_STATUSES = [
+  'pending', 'quote_requested', 'assigned', 'in_progress',
+] as const
+
+function terminalVendorSuggestionError(status: string): string {
+  if (status === 'cancelled') {
+    return 'This work order was cancelled — accepting the suggestion would reopen it.'
+  }
+  return 'This work order is already complete — accepting the suggestion would reopen it.'
+}
+
 export async function acceptVendorSuggestion(workOrderId: string): Promise<{ error?: string }> {
   try {
     const { supabase, membership, user } = await requireOrgRole(['admin', 'manager'])
 
     const woRes = await supabase
       .from('work_orders')
-      .select('id, suggested_vendor_ids')
+      .select('id, status, suggested_vendor_ids')
       .eq('id', workOrderId)
       .eq('org_id', membership.org_id)
       .maybeSingle()
@@ -1287,6 +1370,17 @@ export async function acceptVendorSuggestion(workOrderId: string): Promise<{ err
 
     if (!wo) return { error: 'Work order not found' }
 
+    // bulkAssignVendor — the OTHER way a PM assigns a vendor — already splits
+    // the vendor write from the status advance so the status only moves
+    // FORWARD. This path still folded `status: 'assigned'` into one
+    // unconditional update, so accepting a suggestion on a completed work order
+    // reopened it, and accepting on an in_progress one dragged it back to
+    // `assigned`. Terminal states are refused outright; the rest advance only
+    // from the two pre-vendor statuses, exactly as bulkAssignVendor does.
+    if (!(VENDOR_SUGGESTION_ACCEPTABLE_STATUSES as readonly string[]).includes(wo.status)) {
+      return { error: terminalVendorSuggestionError(wo.status) }
+    }
+
     const vendorId = (wo.suggested_vendor_ids as string[] | null)?.[0]
     if (!vendorId) return { error: 'No suggestion to accept' }
 
@@ -1294,24 +1388,55 @@ export async function acceptVendorSuggestion(workOrderId: string): Promise<{ err
       return { error: VENDOR_HARD_BLOCKED_ERROR }
     }
 
-    const { error } = await supabase
+    // The status allowlist repeats the check above as the ATOMIC one, so a
+    // completion landing between the read and this write cannot be overwritten.
+    // The row count is read back for the same reason it is everywhere else in
+    // this file: a refused UPDATE returns 0 rows and NO error.
+    const { data: accepted, error } = await supabase
       .from('work_orders')
-      .update({ vendor_id: vendorId, status: 'assigned', suggestion_status: 'accepted' })
+      .update({ vendor_id: vendorId, suggestion_status: 'accepted' })
       .eq('id', workOrderId)
       .eq('org_id', membership.org_id)
+      .in('status', VENDOR_SUGGESTION_ACCEPTABLE_STATUSES)
+      .select('id')
+      .maybeSingle()
 
     if (error) {
       console.error('[acceptVendorSuggestion]', error)
+      reportError(error, { site: 'serverAction.maintenance.acceptVendorSuggestion', orgId: membership.org_id })
       return { error: 'Failed to accept suggestion. Please try again.' }
+    }
+    if (!accepted) {
+      return { error: 'You do not have permission to make this change, or the work order no longer exists.' }
+    }
+
+    // Forward-only, in its own filtered statement — see bulkAssignVendor.
+    const { error: statusError } = await supabase
+      .from('work_orders')
+      .update({ status: 'assigned' })
+      .eq('id', workOrderId)
+      .eq('org_id', membership.org_id)
+      .in('status', ['pending', 'quote_requested'])
+
+    // Reported, not returned: the vendor IS assigned and about to be notified.
+    if (statusError) {
+      console.error('[acceptVendorSuggestion] status advance failed', statusError)
+      reportError(statusError, { site: 'serverAction.maintenance.acceptVendorSuggestion.status', orgId: membership.org_id })
     }
 
     try {
       const { createServiceClient } = await import('@/lib/supabase/server')
       const service = createServiceClient({ system: 'action:maintenance-suggestion-tracking' })
-      await service.from('vendor_assignment_outcomes').upsert(
+      // `if (error) throw` is load-bearing, not decoration. A PostgREST builder
+      // RESOLVES with { error } on a database failure — it never rejects — so
+      // the bare `await` this replaces meant the catch below caught nothing and
+      // its comment described a signal that could not fire. The turnovers-side
+      // twins (acceptSuggestion/dismissSuggestion) have always thrown here.
+      const { error: outcomeError } = await service.from('vendor_assignment_outcomes').upsert(
         { work_order_id: workOrderId, org_id: membership.org_id, vendor_id: vendorId, was_accepted: true, was_suggestion: true },
         { onConflict: 'work_order_id,vendor_id', ignoreDuplicates: false }
       )
+      if (outcomeError) throw outcomeError
     } catch (err) {
       // Outcome recording must not break the acceptance flow — but the failure
       // still needs to be visible, or the vendor-score learning loop silently
@@ -1371,26 +1496,37 @@ export async function dismissVendorSuggestion(workOrderId: string): Promise<{ er
     }
     const wo = woRes.data
 
-    const { error } = await supabase
+    const { data: dismissed, error } = await supabase
       .from('work_orders')
       .update({ suggestion_status: 'dismissed' })
       .eq('id', workOrderId)
       .eq('org_id', membership.org_id)
+      .select('id')
+      .maybeSingle()
 
     if (error) {
       console.error('[dismissVendorSuggestion]', error)
+      reportError(error, { site: 'serverAction.maintenance.dismissVendorSuggestion', orgId: membership.org_id })
       return { error: 'Operation failed. Please try again.' }
     }
+    // The row count is what stops a refused dismissal from still writing the
+    // negative training signal below — the same fix the turnovers-side
+    // dismissSuggestion already carries.
+    if (!dismissed) return { error: NOTHING_UPDATED }
 
     const vendorId = (wo?.suggested_vendor_ids as string[] | null)?.[0]
     if (vendorId) {
       try {
         const { createServiceClient } = await import('@/lib/supabase/server')
         const service = createServiceClient({ system: 'action:maintenance-suggestion-tracking' })
-        await service.from('vendor_assignment_outcomes').upsert(
+        // See acceptVendorSuggestion: an awaited builder resolves with
+        // { error }, it does not reject, so without this throw the catch below
+        // was unreachable for the failure it exists to report.
+        const { error: outcomeError } = await service.from('vendor_assignment_outcomes').upsert(
           { work_order_id: workOrderId, org_id: membership.org_id, vendor_id: vendorId, was_accepted: false, was_suggestion: true },
           { onConflict: 'work_order_id,vendor_id', ignoreDuplicates: false }
         )
+        if (outcomeError) throw outcomeError
       } catch (err) {
         // Outcome recording must not break the dismissal flow — but the
         // failure still needs to be visible, or the vendor-score learning
@@ -1670,7 +1806,7 @@ export async function updateMaintenanceSchedule(
   try {
     const { supabase, membership } = await requireOrgRole(['admin', 'manager'])
 
-    const { error } = await supabase
+    const { data: updated, error } = await supabase
       .from('maintenance_schedules')
       .update({
         name:               data.name,
@@ -1693,11 +1829,15 @@ export async function updateMaintenanceSchedule(
       })
       .eq('id', scheduleId)
       .eq('org_id', membership.org_id)
+      .select('id')
+      .maybeSingle()
 
     if (error) {
       console.error('[updateMaintenanceSchedule]', error)
+      reportError(error, { site: 'serverAction.maintenance.updateMaintenanceSchedule', orgId: membership.org_id })
       return { error: 'Operation failed. Please try again.' }
     }
+    if (!updated) return { error: NOTHING_UPDATED }
 
     revalidatePath('/maintenance')
     revalidatePath('/templates/maintenance/schedules')
@@ -1715,16 +1855,20 @@ export async function deleteMaintenanceSchedule(
   try {
     const { supabase, membership } = await requireOrgRole(['admin', 'manager'])
 
-    const { error } = await supabase
+    const { data: deleted, error } = await supabase
       .from('maintenance_schedules')
       .update({ is_active: false })
       .eq('id', scheduleId)
       .eq('org_id', membership.org_id)
+      .select('id')
+      .maybeSingle()
 
     if (error) {
       console.error('[deleteMaintenanceSchedule]', error)
+      reportError(error, { site: 'serverAction.maintenance.deleteMaintenanceSchedule', orgId: membership.org_id })
       return { error: 'Operation failed. Please try again.' }
     }
+    if (!deleted) return { error: NOTHING_UPDATED }
 
     revalidatePath('/maintenance')
     revalidatePath('/templates/maintenance/schedules')
@@ -1755,16 +1899,20 @@ export async function updateMaintenanceScheduleItem(
   try {
     const { supabase, membership } = await requireOrgRole(['admin', 'manager'])
 
-    const { error } = await supabase
+    const { data: updated, error } = await supabase
       .from('maintenance_schedules')
       .update(updates)
       .eq('id', itemId)
       .eq('org_id', membership.org_id)
+      .select('id')
+      .maybeSingle()
 
     if (error) {
       console.error('[updateMaintenanceScheduleItem]', error)
+      reportError(error, { site: 'serverAction.maintenance.updateMaintenanceScheduleItem', orgId: membership.org_id })
       return { error: 'Failed to update item' }
     }
+    if (!updated) return { error: NOTHING_UPDATED }
 
     revalidatePath('/maintenance')
     return { success: true }
@@ -1831,16 +1979,20 @@ export async function removeMaintenanceScheduleItem(
   try {
     const { supabase, membership } = await requireOrgRole(['admin', 'manager'])
 
-    const { error } = await supabase
+    const { data: removed, error } = await supabase
       .from('maintenance_schedules')
       .update({ is_active: false })
       .eq('id', itemId)
       .eq('org_id', membership.org_id)
+      .select('id')
+      .maybeSingle()
 
     if (error) {
       console.error('[removeMaintenanceScheduleItem]', error)
+      reportError(error, { site: 'serverAction.maintenance.removeMaintenanceScheduleItem', orgId: membership.org_id })
       return { error: 'Failed to remove item' }
     }
+    if (!removed) return { error: NOTHING_UPDATED }
 
     revalidatePath(`/properties/${propertyId}`)
     revalidatePath('/maintenance')

@@ -9,7 +9,7 @@ import { inngest, sendEventAsync } from '@/lib/inngest/client'
 import { logAuditEvent } from '@/lib/audit'
 import { unwrapJoin } from '@/lib/utils/supabase-joins'
 import { reportError } from '@/lib/observability/report-error'
-import { reportQueryError, tryUnwrap } from '@/lib/supabase/unwrap'
+import { reportQueryError, tryUnwrap, tryUnwrapList } from '@/lib/supabase/unwrap'
 import { checkLimit, integrationResyncLimiter } from '@/lib/rate-limit'
 import type { MemberRole, TablesUpdate } from '@/types/database'
 
@@ -1277,6 +1277,25 @@ export async function triggerManualSync(): Promise<TurnoverActionState> {
 
 // ── Accept auto-assignment suggestion ────────────────────────────────────────
 
+/**
+ * The statuses a pending suggestion may still be accepted from.
+ *
+ * An ALLOWLIST, not a `completed`/`cancelled` denylist: a turnover_status value
+ * added later must fail closed here rather than silently joining the acceptable
+ * set. Everything in it is a pre-terminal state where naming the crew is still
+ * meaningful.
+ */
+const SUGGESTION_ACCEPTABLE_STATUSES = [
+  'pending_assignment', 'assigned', 'in_progress', 'flagged',
+] as const
+
+function terminalSuggestionError(status: string): string {
+  if (status === 'cancelled') {
+    return 'This turnover was cancelled — accepting the suggestion would reopen it.'
+  }
+  return 'This turnover is already complete — accepting the suggestion would reopen it.'
+}
+
 export async function acceptSuggestion(turnoverId: string): Promise<TurnoverActionState> {
   try {
     const { supabase, membership, user } = await requireOrgRole(TURNOVER_WRITE_ROLES)
@@ -1294,8 +1313,51 @@ export async function acceptSuggestion(turnoverId: string): Promise<TurnoverActi
     const turnover = turnoverRes.data
     if (!turnover) return { error: 'Turnover not found' }
 
+    // The board hides `cancelled` but NOT `completed`, so a turnover the PM
+    // marked done themselves keeps rendering its suggestion banner with an
+    // Accept button. Clicking it wrote `status: 'assigned'` with no
+    // precondition — the finished turnover left the Completed column, kept its
+    // now-meaningless completed_at, and could be completed a second time.
+    //
+    // advancePendingToAssigned() — the sibling every other assignment path goes
+    // through — has always carried `.eq('status', 'pending_assignment')`. This
+    // was the one status write in the file that didn't, which is why assignCrew
+    // could never resurrect a turnover and this could.
+    if (!(SUGGESTION_ACCEPTABLE_STATUSES as readonly string[]).includes(turnover.status)) {
+      return { error: terminalSuggestionError(turnover.status) }
+    }
+
     const crewIds = (turnover.suggested_crew_ids as string[] | null) ?? []
     if (!crewIds.length) return { error: 'No suggestion to accept' }
+
+    // Every other assignment path proves its crew ids belong to the org before
+    // writing turnover_assignments (loadAssignmentTargets' `.eq('org_id', …)`).
+    // This one trusted suggested_crew_ids wholesale. That column is written
+    // only by auto-assign-turnover, which scores crew inside the org, so there
+    // is no reachable cross-tenant path today — but turnover_assignments'
+    // INSERT policy checks org_id ALONE, so a row pairing this caller's org_id
+    // with a foreign crew_member_id would pass RLS. The invariant is enforced
+    // here rather than inherited from a distant Inngest function.
+    //
+    // It also turns the ordinary case — a crew member deleted or moved since
+    // the suggestion was written — from an opaque FK violation into a message
+    // that says what happened.
+    const suggestedCrewRes = await supabase
+      .from('crew_members')
+      .select('id')
+      .in('id', crewIds)
+      .eq('org_id', membership.org_id)
+      .limit(crewIds.length)
+
+    const suggestedCrewOut = tryUnwrapList<{ id: string }>(suggestedCrewRes, {
+      site: 'serverAction.turnovers.acceptSuggestion.crew', orgId: membership.org_id,
+    })
+    if (!suggestedCrewOut.ok) {
+      return { error: 'Could not verify the suggested crew. Please try again.' }
+    }
+    if (suggestedCrewOut.data.length !== crewIds.length) {
+      return { error: 'The suggested crew member is no longer available.' }
+    }
 
     const { error: assignError } = await supabase.from('turnover_assignments').upsert(
       crewIds.map(crewId => ({ turnover_id: turnoverId, crew_member_id: crewId, org_id: membership.org_id })),
@@ -1311,11 +1373,18 @@ export async function acceptSuggestion(turnoverId: string): Promise<TurnoverActi
     // result is read back: this was fully discarded, so a refused write left
     // the turnover unassigned with the suggestion still pending while the PM
     // was told it was accepted.
+    //
+    // The status allowlist repeats the check above as the ATOMIC one. The read
+    // is what produces a useful message; this is what makes it race-safe, so a
+    // completion or cancellation landing between the two cannot be overwritten.
+    // 0 rows here is therefore genuinely ambiguous (refused, gone, or just
+    // completed), which is exactly what NOTHING_UPDATED says.
     const { data: accepted, error: statusError } = await supabase
       .from('turnovers')
-      .update({ status: 'assigned', suggestion_status: 'accepted' })
+      .update({ suggestion_status: 'accepted' })
       .eq('id', turnoverId)
       .eq('org_id', membership.org_id)
+      .in('status', SUGGESTION_ACCEPTABLE_STATUSES)
       .select('id')
       .maybeSingle()
 
@@ -1325,6 +1394,14 @@ export async function acceptSuggestion(turnoverId: string): Promise<TurnoverActi
       return { error: 'Failed to accept suggestion. Please try again.' }
     }
     if (!accepted) return { error: NOTHING_UPDATED }
+
+    // Only `pending_assignment` advances. Accepting a suggestion on a turnover
+    // already in_progress or flagged records WHO — it must not walk the status
+    // backwards to 'assigned'.
+    await advancePendingToAssigned(
+      supabase, membership.org_id, [turnoverId],
+      'serverAction.turnovers.acceptSuggestion.advanceStatus',
+    )
 
     try {
       // Optional: feeds property_bedrooms on the outcome rows, which already
