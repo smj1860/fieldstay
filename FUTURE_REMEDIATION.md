@@ -1015,3 +1015,94 @@ milestone claim in its step 6. The pieces to think about before shipping it:
 - **A kill switch.** Anything that spends money automatically should be gated
   on an org-level setting, the way `SMS_ENABLED` gates sends, rather than being
   unconditional on deploy.
+
+---
+
+## 23. The crew device's cached turnover set is unbounded — and local pruning cannot fix it
+
+**Files:** `lib/dexie/sync/turnovers.ts` (`fetchAssignedTurnoverIds`),
+`lib/dexie/prune.ts` (`pruneLocalCache`), `lib/dexie/sync/assets.ts`
+(`computeAssignedPropertyIds`)
+
+Found during the Dexie sync audit (2026-08-07). Not fixed here because the
+remedy is a RETENTION POLICY decision — how far back a crew member can open a
+finished turnover offline — not a defect fix, and getting it wrong deletes
+work off a phone.
+
+**The finding.** `fetchAssignedTurnoverIds()` reads `turnover_assignments`
+for the crew member with **no date bound and no status filter**:
+
+```ts
+supabase.from('turnover_assignments').select('turnover_id').eq('crew_member_id', crewMemberId)
+```
+
+Every turnover they have ever been assigned stays in the assigned set forever,
+because a completed turnover keeps its assignment row (`cancelTurnoversForBooking`
+doesn't remove them either — see item 22's neighbour finding). So
+`reconcileRemovedTurnovers()`, which removes anything NOT in the assigned set,
+never removes finished work.
+
+Everything scoped to that set grows with it:
+
+| Table | Scoped to | Grows? |
+|---|---|---|
+| `turnovers` | assigned set | yes |
+| `checklist_instances` / `checklist_instance_items` | assigned set | yes |
+| `properties`, `inventory_items` | ALL cached turnovers (`syncScopeReferenceData`) | yes |
+| `property_assets` | ACTIVE turnovers only (`computeAssignedPropertyIds`) | pulled narrow, pruned wide → over-retained |
+
+`prune.ts`'s own header says it exists because "everything else is bulkPut-only
+and therefore grows without bound on a device that stays logged in for months."
+It fixed `messages`. This is the same problem one level up: the pruning that
+does exist is scoped to a set that itself never shrinks.
+
+**Evidence.** Production is pre-launch small, but already lopsided: 19
+`turnover_assignments` rows, of which **12 (63%) point at completed or
+cancelled turnovers**, and 324 `checklist_instance_items` sit on completed
+turnovers. Extrapolating from that ratio — ~27 checklist items per turnover — a
+crew member doing 3 turnovers a day accumulates roughly 1,100 turnovers and
+~30,000 checklist-item rows per year, none ever removed, plus the properties,
+inventory items and assets behind them.
+
+The consequence is the one this file already documents for orphaned photo
+blobs: storage pressure, then the browser evicts the origin, and **the mutation
+outbox goes with it**. Same catastrophic ending, different road.
+
+**The trap: pruning locally does NOT work.** The obvious fix — delete finished
+turnovers older than N days from Dexie — thrashes. `partitionByKnown()` splits
+the assigned set into "known" (already cached, delta-pulled) and "fresh" (not
+cached, pulled in FULL with no cursor). A turnover pruned locally but still in
+the assigned set is by definition not cached, so the very next `fullCrewResync`
+classifies it as fresh and pulls the whole row back — along with its checklist
+instances and items, which take the same known/fresh split. Delete, re-pull,
+delete, re-pull, every safety-poll tick, forever. Anyone who tries the local-GC
+approach first will lose an afternoon to this.
+
+**So the bound has to be on the assignment query itself**, so an old finished
+turnover is not in the assigned set at all — at which point the existing
+`reconcileRemovedTurnovers()` removes it and its checklists for free, and
+`pruneLocalCache()`'s property scope shrinks on its own with no change.
+
+**What has to be decided first:**
+
+- **The window.** The crew list renders `today .. today+7d`
+  (`app/crew/page.tsx`), so a lookback of a week or two preserves everything
+  the UI can actually reach. Anything shorter starts deleting turnovers a crew
+  member could still navigate to; anything much longer barely bounds it.
+- **The safety condition, which is not optional.** A turnover must NEVER leave
+  the device while an outbox mutation still references it or its checklist
+  rows — pending OR dead-lettered. `shadowPendingMutations()` replays those
+  over every pull, and `FailedSyncBanner` is built on them; dropping the cached
+  row underneath a queued write destroys both the retry affordance and the
+  crew member's most recent truth.
+- **Whether the detail page needs a read-only past view.** With the window in
+  place, opening an old completed turnover hits the "no longer assigned to
+  you" state added 2026-08-07. That is honest but may not be the desired
+  product answer for work finished last month.
+
+**Also worth folding in when this is done:** the three scopes above disagree.
+`computeAssignedPropertyIds()` filters out completed/cancelled;
+`syncScopeReferenceData()` and `pruneLocalCache()` do not. The direction is
+safe today (assets are pulled narrow and pruned wide, so they are
+over-retained, never lost), but once the assigned set is bounded, all three
+should be derived from one helper rather than three hand-rolled sets.

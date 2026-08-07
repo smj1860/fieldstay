@@ -51,6 +51,46 @@ export const ANTHROPIC_TIMEOUT_MS = 30_000
 export const SCAN_REQUEST_TIMEOUT_MS = 10_000
 
 /**
+ * Crew PWA → the Route Handlers the Dexie outbox posts to (turnover
+ * start/complete, work-order complete, work-order reports, crew messages,
+ * inventory counts).
+ *
+ * Same reasoning as SCAN_REQUEST_TIMEOUT_MS above, and the same drain — but
+ * these six had no signal at all, and in this loop a hang is not slow, it is
+ * PERMANENT:
+ *
+ *   pushOne() awaits uploadOne() → the fetch never settles → drain() never
+ *   returns → withTabLock() never returns → processOutbox()'s try never
+ *   reaches its finally → `isProcessing` stays true for the life of the page.
+ *
+ * Every later processOutbox() — the 30s interval, the `online` event, the kick
+ * enqueueMutation() fires, the bounded flush at logout — then hits
+ * `if (this.isProcessing) { redrainRequested = true; return }` and does
+ * nothing. The crew member's queue never moves again.
+ *
+ * And it is invisible while it happens. STALLED_NETWORK_ATTEMPTS counts FAILED
+ * transport attempts; a hang never fails, so networkRetryCount never
+ * increments and the stalled surface never fires. FailedSyncBanner filters on
+ * `failed`, which is never set. The one thing the crew member does eventually
+ * see is the logout "unsynced work" dialog — with no way to resolve it.
+ *
+ * A mobile network that accepts the connection and then never answers — a
+ * captive portal, a cell handoff, a black-holing proxy — produces exactly
+ * this, and navigator.onLine stays true throughout.
+ *
+ * Looser than the scan budget because these routes do real work (the
+ * completion routes fire Inngest events, write audit rows and notify the PM)
+ * rather than validating and handing off. Still far tighter than "never".
+ *
+ * An abort surfaces as a DOMException whose message contains "timed out",
+ * which lib/dexie/net.ts classifies as `network` — so it costs no retry
+ * budget, backs off, and becomes visible through STALLED_NETWORK_ATTEMPTS.
+ * That is the correct treatment for a timeout, and it only works once the
+ * request can actually time out.
+ */
+export const CREW_OUTBOX_TIMEOUT_MS = 15_000
+
+/**
  * Stripe SDK calls. The SDK's own default is 80s — longer than the function
  * budget, so a slow call inside the webhook handler gets the whole invocation
  * killed by the platform. That skips the `catch` that releases the dedup

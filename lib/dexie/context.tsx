@@ -228,9 +228,32 @@ export function DexieProvider({ userId: userIdProp, children }: { userId?: strin
         && propertyIds.every((id) => subscribedAssetPropertyIds.includes(id))
       if (sameSet) return
 
-      subscribedAssetPropertyIds = propertyIds
       await syncPropertyAssets(supabase, userId!, propertyIds)
       if (myGeneration !== assetsRefreshGeneration) return // superseded while syncing
+
+      // The bookkeeping is written HERE, after the last supersede check, and
+      // nothing below awaits — so a call that gets superseded leaves it
+      // untouched, and it can never describe a set the live channel does not.
+      //
+      // It used to be assigned before the syncPropertyAssets await above, and
+      // a superseded call returned having already overwritten it:
+      //
+      //   subscribed = [p1], channel covers [p1]
+      //   A: computes [p1,p2] → writes subscribed = [p1,p2] → awaits sync
+      //   B: computes [p1,p2] → sameSet vs [p1,p2] is now TRUE → returns
+      //   A: resolves, sees it was superseded → returns without subscribing
+      //
+      // End state: bookkeeping claims [p1,p2], the channel still covers [p1]
+      // alone, and every later refresh short-circuits on sameSet — so p2's
+      // subscription is never installed. A co-crew member's asset capture on
+      // p2 stops arriving live; it degrades to the scope-gate pull on screen
+      // open, which is quiet enough that nobody would connect the two.
+      //
+      // refreshChecklistSubscription never had this: it has no await between
+      // its supersede check and its subscribe, so its equivalent write is
+      // already inside the committed section. This is the same rule, applied
+      // to the function that grew a second await.
+      subscribedAssetPropertyIds = propertyIds
 
       // Only remove the old channel once we're committed to installing this
       // call's replacement — removing it earlier (before the second await)

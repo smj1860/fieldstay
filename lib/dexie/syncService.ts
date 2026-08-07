@@ -9,7 +9,7 @@ import {
 } from './net'
 
 import { reportError } from '@/lib/observability/report-error'
-import { SCAN_REQUEST_TIMEOUT_MS } from '@/lib/http/timeout'
+import { SCAN_REQUEST_TIMEOUT_MS, CREW_OUTBOX_TIMEOUT_MS } from '@/lib/http/timeout'
 type DexieSupabaseClient = ReturnType<typeof createClient>
 
 const MAX_RETRIES = 5
@@ -507,14 +507,20 @@ async function uploadTurnoverChange(
     // Routed through a Server Route Handler (not a direct table write) so
     // the turnover/completed pipeline (cleaning-fee posting, PM
     // notification, crew-duration tracking) fires for crew completions.
-    const res = await fetch(`/api/crew/turnovers/${targetId}/complete`, { method: 'POST' })
+    const res = await fetch(`/api/crew/turnovers/${targetId}/complete`, {
+      method: 'POST',
+      signal: AbortSignal.timeout(CREW_OUTBOX_TIMEOUT_MS),
+    })
     if (!res.ok) throw new UploadHttpError(`Failed to complete turnover ${targetId}`, res.status)
     return
   }
   if (payload.status === 'in_progress') {
     // Routed through a Server Route Handler so started_at is set
     // authoritatively by the server, not the client clock.
-    const res = await fetch(`/api/crew/turnovers/${targetId}/start`, { method: 'POST' })
+    const res = await fetch(`/api/crew/turnovers/${targetId}/start`, {
+      method: 'POST',
+      signal: AbortSignal.timeout(CREW_OUTBOX_TIMEOUT_MS),
+    })
     if (!res.ok) throw new UploadHttpError(`Failed to start turnover ${targetId}`, res.status)
     return
   }
@@ -588,6 +594,7 @@ async function uploadCrewWorkOrderChange(
   const res = await fetch(`/api/crew/work-orders/${targetId}/complete`, {
     method:  'POST',
     headers: { 'Content-Type': 'application/json' },
+    signal:  AbortSignal.timeout(CREW_OUTBOX_TIMEOUT_MS),
     body:    JSON.stringify({ notes: typeof payload.notes === 'string' ? payload.notes : '' }),
   })
   if (!res.ok) throw new UploadHttpError(`Failed to complete work order ${targetId}`, res.status)
@@ -601,6 +608,7 @@ async function uploadWorkOrderReport(
   const res = await fetch('/api/crew/work-order-reports', {
     method:  'POST',
     headers: { 'Content-Type': 'application/json' },
+    signal:  AbortSignal.timeout(CREW_OUTBOX_TIMEOUT_MS),
     body: JSON.stringify({
       report_id:    payload.report_id ?? targetId,
       property_id:  payload.property_id,
@@ -641,6 +649,7 @@ async function uploadCrewMessage(
   const res = await fetch('/api/crew/messages', {
     method:  'POST',
     headers: { 'Content-Type': 'application/json' },
+    signal:  AbortSignal.timeout(CREW_OUTBOX_TIMEOUT_MS),
     body:    JSON.stringify({ messageId: targetId, content: payload.content }),
   })
   if (!res.ok) throw new UploadHttpError(`Failed to send message ${targetId}`, res.status)
@@ -654,6 +663,7 @@ async function uploadInventoryCount(
   const res = await fetch('/api/crew/inventory-count', {
     method:  'POST',
     headers: { 'Content-Type': 'application/json' },
+    signal:  AbortSignal.timeout(CREW_OUTBOX_TIMEOUT_MS),
     body: JSON.stringify({
       countId:    targetId,
       propertyId: payload.property_id,
