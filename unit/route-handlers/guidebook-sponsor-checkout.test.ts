@@ -28,6 +28,13 @@ function postRequest(body: unknown) {
   })
 }
 
+// Real UUIDs: guidebook_sponsors.media_kit_token is a `uuid` column, so the
+// previous fixture ('kit-token-abc-123') could not have existed in production
+// — against the live schema it is error 22P02, not a miss. The suite was green
+// on input the database would have rejected outright.
+const KIT_TOKEN     = '66666666-6666-4666-8666-666666666666'
+const MISSING_TOKEN = '77777777-7777-4777-8777-777777777777'
+
 describe('POST /api/guidebook/sponsor-checkout', () => {
   beforeEach(() => {
     vi.clearAllMocks()
@@ -37,7 +44,7 @@ describe('POST /api/guidebook/sponsor-checkout', () => {
   it('returns 429 without touching the checkout action when the limiter denies', async () => {
     vi.mocked(guidebookSponsorCheckoutLimiter.limit).mockResolvedValue({ success: false } as never)
 
-    const res  = await POST(postRequest({ mediaKitToken: 'kit-token-abc-123' }))
+    const res  = await POST(postRequest({ mediaKitToken: KIT_TOKEN }))
     const json = await res.json()
 
     expect(res.status).toBe(429)
@@ -56,7 +63,7 @@ describe('POST /api/guidebook/sponsor-checkout', () => {
       return { url: 'https://checkout.stripe.com/pay/cs_1' }
     })
 
-    await POST(postRequest({ mediaKitToken: 'kit-token-abc-123' }))
+    await POST(postRequest({ mediaKitToken: KIT_TOKEN }))
 
     expect(callOrder).toEqual(['limit', 'lookup'])
   })
@@ -72,7 +79,7 @@ describe('POST /api/guidebook/sponsor-checkout', () => {
         'x-real-ip':       '203.0.113.7',
         'x-forwarded-for': '1.2.3.4, 203.0.113.7',
       },
-      body:    JSON.stringify({ mediaKitToken: 'kit-token-abc-123' }),
+      body:    JSON.stringify({ mediaKitToken: KIT_TOKEN }),
     })
     vi.mocked(createSponsorCheckoutSession).mockResolvedValue({ url: 'https://checkout.stripe.com/pay/cs_1' })
 
@@ -96,18 +103,32 @@ describe('POST /api/guidebook/sponsor-checkout', () => {
     expect(createSponsorCheckoutSession).not.toHaveBeenCalled()
   })
 
+  it('rejects a malformed mediaKitToken as an invalid link, without reaching the action', async () => {
+    const res  = await POST(postRequest({ mediaKitToken: 'kit-token-abc-123' }))
+    const json = await res.json()
+
+    // media_kit_token is a uuid. A well-formed-but-not-UUID string used to
+    // sail past the typeof check into the action's `.eq()`, hit 22P02, throw
+    // out of unwrap(), and land in the action's catch — which reports to
+    // Sentry and tells the sponsor "Unable to start checkout. Please try
+    // again." for a link that will never work however many times they try.
+    expect(res.status).toBe(400)
+    expect(json).toEqual({ error: 'Invalid media kit link.' })
+    expect(createSponsorCheckoutSession).not.toHaveBeenCalled()
+  })
+
   it('passes the exact client-supplied mediaKitToken through to the action unmodified — the action itself is the only place org scoping happens (media_kit_token lookup)', async () => {
     vi.mocked(createSponsorCheckoutSession).mockResolvedValue({ url: 'https://checkout.stripe.com/pay/cs_1' })
 
-    await POST(postRequest({ mediaKitToken: 'kit-token-abc-123' }))
+    await POST(postRequest({ mediaKitToken: KIT_TOKEN }))
 
-    expect(createSponsorCheckoutSession).toHaveBeenCalledWith('kit-token-abc-123')
+    expect(createSponsorCheckoutSession).toHaveBeenCalledWith(KIT_TOKEN)
   })
 
   it('returns the checkout URL on success', async () => {
     vi.mocked(createSponsorCheckoutSession).mockResolvedValue({ url: 'https://checkout.stripe.com/pay/cs_1' })
 
-    const res = await POST(postRequest({ mediaKitToken: 'kit-token-abc-123' }))
+    const res = await POST(postRequest({ mediaKitToken: KIT_TOKEN }))
     const json = await res.json()
 
     expect(res.status).toBe(200)
@@ -117,7 +138,7 @@ describe('POST /api/guidebook/sponsor-checkout', () => {
   it('surfaces an action-level error (e.g. invalid/unknown token) as a 400, not a 500', async () => {
     vi.mocked(createSponsorCheckoutSession).mockResolvedValue({ error: 'Invalid media kit link.' })
 
-    const res = await POST(postRequest({ mediaKitToken: 'nonexistent-token' }))
+    const res = await POST(postRequest({ mediaKitToken: MISSING_TOKEN }))
     const json = await res.json()
 
     expect(res.status).toBe(400)
@@ -127,7 +148,7 @@ describe('POST /api/guidebook/sponsor-checkout', () => {
   it('returns a generic 500 (no raw error detail) when the action throws unexpectedly', async () => {
     vi.mocked(createSponsorCheckoutSession).mockRejectedValue(new Error('stripe network timeout'))
 
-    const res = await POST(postRequest({ mediaKitToken: 'kit-token-abc-123' }))
+    const res = await POST(postRequest({ mediaKitToken: KIT_TOKEN }))
     const json = await res.json()
 
     expect(res.status).toBe(500)
@@ -137,7 +158,7 @@ describe('POST /api/guidebook/sponsor-checkout', () => {
   it('returns 400 when the sponsorship slot is already active (a real auth-model rejection for this token route)', async () => {
     vi.mocked(createSponsorCheckoutSession).mockResolvedValue({ error: 'This sponsorship slot is already active.' })
 
-    const res = await POST(postRequest({ mediaKitToken: 'kit-token-abc-123' }))
+    const res = await POST(postRequest({ mediaKitToken: KIT_TOKEN }))
 
     expect(res.status).toBe(400)
   })
