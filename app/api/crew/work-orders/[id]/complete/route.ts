@@ -11,6 +11,7 @@ import {
   type CompletedWorkOrderRow,
 } from '@/app/(dashboard)/maintenance/complete-work-order-helpers'
 import type { WoStatus } from '@/types/database'
+import { UUID_RE } from '@/lib/validation/uuid'
 
 /**
  * POST /api/crew/work-orders/[id]/complete
@@ -33,7 +34,7 @@ import type { WoStatus } from '@/types/database'
  * Not reachable from our own client (the PWA builds the URL from cached
  * crew_work_orders ids), which is why it is asserted rather than assumed.
  */
-const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
+
 
 /** Free text typed on a phone into an unbounded `completion_notes` column. */
 const MAX_NOTES_LENGTH = 2000

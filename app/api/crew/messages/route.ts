@@ -4,6 +4,7 @@ import { requireCrewMember } from '@/lib/crew-auth'
 import { createServiceClient } from '@/lib/supabase/server'
 import { getPmMembers } from '@/lib/inngest/helpers'
 import { reportError } from '@/lib/observability/report-error'
+import { UUID_RE } from '@/lib/validation/uuid'
 
 /**
  * POST /api/crew/messages
@@ -110,7 +111,7 @@ async function notifyPmSlack(
  * (/api/crew/inventory-count) already validates its own, and this one is the
  * copy that did not.
  */
-const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
+
 
 /**
  * `content` is unbounded `text` in the database and has no maxLength on the

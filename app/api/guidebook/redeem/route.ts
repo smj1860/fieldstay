@@ -4,6 +4,7 @@ import { guidebookRedeemLimiter, checkLimit } from '@/lib/rate-limit'
 import { extractClientIp } from '@/lib/integrations/webhook-verification'
 import { reportError } from '@/lib/observability/report-error'
 import { unwrap } from '@/lib/supabase/unwrap'
+import { isUuid } from '@/lib/validation/uuid'
 
 /**
  * POST /api/guidebook/redeem
@@ -27,7 +28,16 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   }
 
   const body = await req.json().catch(() => null) as { sponsorId?: string; bookingToken?: string | null } | null
-  if (!body?.sponsorId || typeof body.sponsorId !== 'string') {
+
+  // Shape-checked before it reaches a `uuid` column, not just type-checked.
+  // `guidebook_sponsors.id` is a uuid, so a non-UUID string is Postgres 22P02
+  // — which unwrap() below turns into a throw, and the catch turns into
+  // `{ok:true}` PLUS a Sentry report. On a public, unauthenticated endpoint
+  // that is a free way for anyone to burn the Sentry quota and bury this
+  // route's real database failures in noise; the limiter bounds it only while
+  // Redis is up, and this one deliberately fails OPEN. A malformed id is a bad
+  // request, so say so.
+  if (!isUuid(body?.sponsorId)) {
     return NextResponse.json({ error: 'sponsorId is required' }, { status: 400 })
   }
 
@@ -47,7 +57,15 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     }
 
     let bookingId: string | null = null
-    if (body.bookingToken && typeof body.bookingToken === 'string') {
+    // isUuid, not just a truthy string check — and note this one SKIPS rather
+    // than 400s. `bookings.guidebook_token` is also a uuid, so a malformed
+    // token threw 22P02 out of unwrap(), escaped the try entirely, and landed
+    // in the outer catch: the guest got `{ok:true}` and the redemption insert
+    // below never ran at all. The stated intent two lines down is to fall back
+    // to an ANONYMOUS redemption when the booking can't be attributed, so
+    // that is what an unusable token should do — degrade attribution, not
+    // discard the redemption.
+    if (isUuid(body.bookingToken)) {
       const bookingRes = await supabase
         .from('bookings')
         .select('id, org_id')
