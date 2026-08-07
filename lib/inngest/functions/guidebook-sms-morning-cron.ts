@@ -5,7 +5,7 @@ import { createServiceClient } from '@/lib/supabase/server'
 import { getWeatherForLocation } from '@/lib/weather/tomorrow'
 import { sendSMS, buildSponsorLine } from '@/lib/sms/telnyx'
 import { renderSmsBody } from '@/lib/sms/templates'
-import { claimDailySmsSlot, releaseDailySmsSlot } from '@/lib/sms/optin-claim'
+import { sendClaimedDailySms } from '@/lib/sms/optin-claim'
 import { pickNearestSponsor } from '@/lib/sms/pick-nearest-sponsor'
 import { unwrapJoin } from '@/lib/utils/supabase-joins'
 import { getFeaturedAmenityLine } from '@/lib/guidebook/featured-amenities'
@@ -175,27 +175,28 @@ export const guidebookSmsMorningSend = inngest.createFunction(
           // Claim the slot atomically before sending — a retry of this
           // step after a successful send now finds the slot already
           // claimed and skips re-sending, instead of double-texting.
-          const claimed = await claimDailySmsSlot(supabase, optinId, 'last_morning_sms_date', todayDate)
-          if (!claimed) return false
+          // Rendering is INSIDE the claimed section: it can throw too, and
+          // releasing only around sendSMS left the day's slot claimed for a
+          // template failure just the same.
+          return await sendClaimedDailySms(
+            supabase, optinId, 'last_morning_sms_date', todayDate,
+            async () => {
+              const rainOfferLine = buildSponsorLine(
+                rainySponsor.business_name,
+                rainySponsor.offer_type,
+                rainySponsor.offer_value,
+                rainySponsor.offer_item,
+                rainySponsor.custom_offer_text,
+                rainyDistanceMi
+              )
 
-          const rainOfferLine = buildSponsorLine(
-            rainySponsor.business_name,
-            rainySponsor.offer_type,
-            rainySponsor.offer_value,
-            rainySponsor.offer_item,
-            rainySponsor.custom_offer_text,
-            rainyDistanceMi
+              const rainBody = await renderSmsBody(orgId, 'rain_alert', {
+                property_name: property.name,
+                offer_line:    rainOfferLine,
+              })
+              return await sendSMS(optin.phone_e164, rainBody, { category: 'nudge', orgId })
+            },
           )
-
-          const rainBody = await renderSmsBody(orgId, 'rain_alert', {
-            property_name: property.name,
-            offer_line:    rainOfferLine,
-          })
-          const res = await sendSMS(optin.phone_e164, rainBody, { category: 'nudge', orgId })
-          if (!res.sent) {
-            await releaseDailySmsSlot(supabase, optinId, 'last_morning_sms_date')
-          }
-          return res.sent
         }
       }
 
@@ -229,20 +230,17 @@ export const guidebookSmsMorningSend = inngest.createFunction(
       if (!offerLine) return false
 
       // Claim the slot atomically before sending — see rain-alert branch above.
-      const claimed = await claimDailySmsSlot(supabase, optinId, 'last_morning_sms_date', todayDate)
-      if (!claimed) return false
-
-      const morningBody = await renderSmsBody(orgId, 'morning_nudge', {
-        property_name: property.name,
-        temperature:   Math.round(weather.temperature),
-        offer_line:    offerLine,
-      })
-      const res = await sendSMS(optin.phone_e164, morningBody, { category: 'nudge', orgId })
-
-      if (!res.sent) {
-        await releaseDailySmsSlot(supabase, optinId, 'last_morning_sms_date')
-      }
-      return res.sent
+      return await sendClaimedDailySms(
+        supabase, optinId, 'last_morning_sms_date', todayDate,
+        async () => {
+          const morningBody = await renderSmsBody(orgId, 'morning_nudge', {
+            property_name: property.name,
+            temperature:   Math.round(weather.temperature),
+            offer_line:    offerLine,
+          })
+          return await sendSMS(optin.phone_e164, morningBody, { category: 'nudge', orgId })
+        },
+      )
     })
 
     return { optinId, sent }

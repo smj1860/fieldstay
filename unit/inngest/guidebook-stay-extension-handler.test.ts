@@ -229,6 +229,128 @@ describe('guidebookStayExtensionHandler', () => {
     expect(sendSMS).not.toHaveBeenCalled()
   })
 
+  it('throws instead of silently dropping the offer when the context read fails', async () => {
+    const supabase = makeSupabase({
+      properties: [{ data: propertyRow, error: null }],
+      bookings:   [{ data: null, error: { message: 'connection reset', code: '08006' } }],
+    })
+    ;(createServiceClient as ReturnType<typeof vi.fn>).mockReturnValue(supabase)
+    ;(getPmEmails as ReturnType<typeof vi.fn>).mockResolvedValue(['pm@example.com'])
+
+    // Both errors used to be discarded, which left `booking` null — so
+    // `portalUrl` was null, the entire guest-SMS block was skipped, and the PM
+    // email went out reading "checks out on undefined". The step reported
+    // success, so Inngest never retried and nothing was logged.
+    await expect(
+      invokeHandler(guidebookStayExtensionHandler, { event: requestEvent(), step: makeStep() })
+    ).rejects.toThrow(/Supabase query failed/)
+
+    expect(sendSMS).not.toHaveBeenCalled()
+    expect(resend.emails.send).not.toHaveBeenCalled()
+  })
+
+  // The two guest-SMS exits below are NOT the same event. sendSMS THROWS on a
+  // real send failure (dispatchToTelnyx throws on a timeout or any non-2xx) and
+  // returns {sent:false} only for a DELIBERATE skip. Only the {sent:false} half
+  // released the claim; the throw escaped with it still held.
+  it('releases the guest-SMS claim and rethrows when the send THROWS, so the retry can send again', async () => {
+    const supabase = makeSupabase({
+      properties: [{ data: propertyRow, error: null }],
+      bookings:   [{ data: bookingRow, error: null }],
+      guidebook_guest_sms_optins: [{ data: { is_active: true }, error: null }],
+      stay_extension_requests: [
+        { data: { id: 'req_1' }, error: null }, // claim succeeds
+        { data: null, error: null },            // claim release
+      ],
+    })
+    ;(createServiceClient as ReturnType<typeof vi.fn>).mockReturnValue(supabase)
+    ;(sendSMS as ReturnType<typeof vi.fn>).mockRejectedValueOnce(new Error('Telnyx 502'))
+
+    await expect(
+      invokeHandler(guidebookStayExtensionHandler, { event: requestEvent(), step: makeStep() })
+    ).rejects.toThrow('Telnyx 502')
+
+    // Without the release, the retry hits `.is('sms_sent_at', null)`, matches
+    // zero rows, returns `already_sent` — the guest never gets the offer and
+    // the run reports success.
+    const releaseCall = supabase.calls.filter(
+      (c) => c.table === 'stay_extension_requests' && c.method === 'update',
+    )[1]
+    expect(releaseCall?.args[0]).toEqual({ sms_sent_at: null })
+  })
+
+  it('releases the guest-SMS claim and ends cleanly — no throw — when the send is a deliberate skip', async () => {
+    const supabase = makeSupabase({
+      properties: [{ data: propertyRow, error: null }],
+      bookings:   [{ data: bookingRow, error: null }],
+      guidebook_guest_sms_optins: [{ data: { is_active: true }, error: null }],
+      stay_extension_requests: [
+        { data: { id: 'req_1' }, error: null }, // claim succeeds
+        { data: null, error: null },            // claim release
+        { data: null, error: null },            // pm_notified_at stamp
+      ],
+    })
+    ;(createServiceClient as ReturnType<typeof vi.fn>).mockReturnValue(supabase)
+    ;(getPmEmails as ReturnType<typeof vi.fn>).mockResolvedValue(['pm@example.com'])
+    ;(sendSMS as ReturnType<typeof vi.fn>).mockResolvedValueOnce({ sent: false, reason: 'SMS_ENABLED is not true' })
+
+    // SMS_ENABLED=false is production's current state — it must not turn every
+    // gap-night offer into a retried failure. Released anyway, for the opposite
+    // reason: so the send can happen once the skip no longer applies.
+    await invokeHandler(guidebookStayExtensionHandler, { event: requestEvent(), step: makeStep() })
+
+    const releaseCall = supabase.calls.filter(
+      (c) => c.table === 'stay_extension_requests' && c.method === 'update',
+    )[1]
+    expect(releaseCall?.args[0]).toEqual({ sms_sent_at: null })
+    expect(resend.emails.send).toHaveBeenCalled()
+  })
+
+  it('releases the PM-SMS claim and rethrows when the PM send THROWS', async () => {
+    const supabase = makeSupabase({
+      properties: [{ data: propertyRow, error: null }],
+      bookings:   [{ data: bookingRow, error: null }],
+      profiles: [{ data: { phone: '512-555-9999' }, error: null }],
+      stay_extension_requests: [
+        { data: { id: 'req_1' }, error: null }, // pm-sms claim succeeds
+        { data: null, error: null },            // claim release
+      ],
+    })
+    ;(createServiceClient as ReturnType<typeof vi.fn>).mockReturnValue(supabase)
+    ;(getPmMembers as ReturnType<typeof vi.fn>).mockResolvedValue([{ userId: 'u1', email: 'pm@example.com', role: 'owner' }])
+    ;(sendSMS as ReturnType<typeof vi.fn>).mockRejectedValueOnce(new Error('Telnyx 502'))
+
+    await expect(
+      invokeHandler(guidebookStayExtensionHandler, {
+        event: requestEvent({ guestPhoneE164: null, contactMethod: 'sms' }),
+        step:  makeStep(),
+      })
+    ).rejects.toThrow('Telnyx 502')
+
+    const releaseCall = supabase.calls.filter(
+      (c) => c.table === 'stay_extension_requests' && c.method === 'update',
+    )[1]
+    expect(releaseCall?.args[0]).toEqual({ pm_notified_at: null })
+  })
+
+  it('retries rather than skipping forever when the atomic claim itself errors', async () => {
+    const supabase = makeSupabase({
+      properties: [{ data: propertyRow, error: null }],
+      bookings:   [{ data: bookingRow, error: null }],
+      guidebook_guest_sms_optins: [{ data: { is_active: true }, error: null }],
+      // A FAILED claim returns null data too — indistinguishable from "already
+      // claimed" once the error is dropped, so the send was skipped forever.
+      stay_extension_requests: [{ data: null, error: { message: 'deadlock detected', code: '40P01' } }],
+    })
+    ;(createServiceClient as ReturnType<typeof vi.fn>).mockReturnValue(supabase)
+
+    await expect(
+      invokeHandler(guidebookStayExtensionHandler, { event: requestEvent(), step: makeStep() })
+    ).rejects.toThrow(/Supabase query failed/)
+
+    expect(sendSMS).not.toHaveBeenCalled()
+  })
+
   it('idempotency: does not re-notify the PM by SMS when a prior run already claimed pm_notified_at', async () => {
     const supabase = makeSupabase({
       properties: [{ data: propertyRow, error: null }],

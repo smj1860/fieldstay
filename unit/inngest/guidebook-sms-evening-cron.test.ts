@@ -13,10 +13,42 @@ vi.mock('@/lib/sms/telnyx', () => ({
 vi.mock('@/lib/sms/templates', () => ({
   renderSmsBody: vi.fn(async () => 'rendered sms body'),
 }))
-vi.mock('@/lib/sms/optin-claim', () => ({
-  claimDailySmsSlot:   vi.fn(async () => true),
-  releaseDailySmsSlot: vi.fn(async () => undefined),
-}))
+// sendClaimedDailySms is stubbed with a faithful delegating implementation
+// rather than a bare vi.fn(): every assertion in this file is about WHICH slot
+// gets claimed and whether it is released, and those calls now happen inside
+// the helper. Delegating keeps them observable here. The helper's own
+// release-on-throw contract is tested directly in unit/sms/optin-claim.test.ts
+// — the crons must not be the only place it is covered.
+vi.mock('@/lib/sms/optin-claim', () => {
+  const claimDailySmsSlot   = vi.fn(async () => true)
+  const releaseDailySmsSlot = vi.fn(async () => undefined)
+  return {
+    claimDailySmsSlot,
+    releaseDailySmsSlot,
+    sendClaimedDailySms: vi.fn(async (
+      supabase: unknown,
+      optinId: string,
+      dateColumn: string,
+      todayDate: string,
+      send: () => Promise<{ sent: boolean }>,
+    ) => {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const claimed = await (claimDailySmsSlot as any)(supabase, optinId, dateColumn, todayDate)
+      if (!claimed) return false
+      let res: { sent: boolean }
+      try {
+        res = await send()
+      } catch (err) {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        await (releaseDailySmsSlot as any)(supabase, optinId, dateColumn)
+        throw err
+      }
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      if (!res.sent) await (releaseDailySmsSlot as any)(supabase, optinId, dateColumn)
+      return res.sent
+    }),
+  }
+})
 
 import { guidebookSmsEveningCron, guidebookSmsEveningSend } from '@/lib/inngest/functions/guidebook-sms-evening-cron'
 import { createServiceClient } from '@/lib/supabase/server'

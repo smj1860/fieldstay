@@ -5,7 +5,7 @@ import { createServiceClient } from '@/lib/supabase/server'
 import { getWeatherForLocation } from '@/lib/weather/tomorrow'
 import { sendSMS, buildSponsorLine } from '@/lib/sms/telnyx'
 import { renderSmsBody } from '@/lib/sms/templates'
-import { claimDailySmsSlot, releaseDailySmsSlot } from '@/lib/sms/optin-claim'
+import { sendClaimedDailySms } from '@/lib/sms/optin-claim'
 import { pickNearestSponsor } from '@/lib/sms/pick-nearest-sponsor'
 import { unwrapJoin } from '@/lib/utils/supabase-joins'
 import { getFeaturedAmenityLine } from '@/lib/guidebook/featured-amenities'
@@ -174,20 +174,20 @@ export const guidebookSmsEveningSend = inngest.createFunction(
       // Claim the slot atomically before sending — a retry of this step
       // after a successful send now finds the slot already claimed and
       // skips re-sending, instead of double-texting the guest.
-      const claimed = await claimDailySmsSlot(supabase, optinId, 'last_evening_sms_date', todayDate)
-      if (!claimed) return false
-
-      const templateKey = isRainy && primaryPool.length > 0 ? 'rain_alert' as const : 'evening_nudge' as const
-      const eveningBody = await renderSmsBody(orgId, templateKey, {
-        property_name: property.name,
-        offer_line:    offerLine,
-      })
-      const res = await sendSMS(optin.phone_e164, eveningBody, { category: 'nudge', orgId })
-
-      if (!res.sent) {
-        await releaseDailySmsSlot(supabase, optinId, 'last_evening_sms_date')
-      }
-      return res.sent
+      // Rendering is INSIDE the claimed section: it can throw too, and
+      // releasing only around sendSMS left the day's slot claimed for a
+      // template failure just the same.
+      return await sendClaimedDailySms(
+        supabase, optinId, 'last_evening_sms_date', todayDate,
+        async () => {
+          const templateKey = isRainy && primaryPool.length > 0 ? 'rain_alert' as const : 'evening_nudge' as const
+          const eveningBody = await renderSmsBody(orgId, templateKey, {
+            property_name: property.name,
+            offer_line:    offerLine,
+          })
+          return await sendSMS(optin.phone_e164, eveningBody, { category: 'nudge', orgId })
+        },
+      )
     })
 
     return { optinId, sent }

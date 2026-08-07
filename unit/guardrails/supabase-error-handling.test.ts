@@ -128,8 +128,14 @@ const BASELINE: Record<string, number> = {
   'lib/inngest/functions/flagged-turnover-wo.ts': 3,
   'lib/inngest/functions/guidebook-sms-evening-cron.ts': 3,
   'lib/inngest/functions/guidebook-sms-morning-cron.ts': 4,
-  'lib/inngest/functions/guidebook-stay-extension-cron.ts': 5,
-  'lib/inngest/functions/guidebook-stay-extension-handler.ts': 4,
+  // 5 -> 0 and 4 -> 0 (entries deleted): the gap-night offer's whole failure
+  // surface was silent. In the cron a failed bookings read looked like "this
+  // org has no checkouts", a failed existence check looked like "not yet
+  // handled", and a failed next-booking read looked like "open calendar" —
+  // each ending in a successful `dispatched: 0`. In the handler a failed
+  // context read left `booking` null, so `portalUrl` was null, so the guest
+  // SMS block was skipped entirely while the PM email went out reading
+  // "checks out on undefined".
   'lib/inngest/functions/hospitable/hospitable-reviews-backfill.ts': 2,
   'lib/inngest/functions/hospitable/incremental-sync.ts': 5,
   'lib/inngest/functions/hospitable/initial-sync.ts': 2,
