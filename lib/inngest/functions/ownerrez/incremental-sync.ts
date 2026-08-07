@@ -47,7 +47,7 @@
  */
 
 import { inngest }                      from '@/lib/inngest/client'
-import { fetchAllRows } from '@/lib/inngest/paginate'
+import { fetchAllRows, SUPABASE_MAX_ROWS } from '@/lib/inngest/paginate'
 import { NonRetriableError }            from 'inngest'
 import type { GetStepTools }            from 'inngest'
 import { createServiceClient }          from '@/lib/supabase/server'
@@ -68,13 +68,13 @@ import {
 } from '@/lib/integrations/providers/ownerrez'
 import type { MappedOwnerRezBookingRow } from '@/lib/integrations/providers/ownerrez'
 import { mergeIntegrationConnectionMetadata } from '@/lib/integrations/connection-metadata'
+import { unwrap, unwrapList } from '@/lib/supabase/unwrap'
 
 const PROVIDER = 'ownerrez'
 
-const CIRCUIT_KEY       = 'ownerrez:circuit:consecutive_failures'
 const CIRCUIT_THRESHOLD = 10
 
-// ── Circuit breaker ─────────────────────────────────────────────────────────
+// ── Circuit breaker — PER CONNECTION ────────────────────────────────────────
 //
 // The breaker's whole job is to stop hammering a failing OwnerRez API. It
 // used to increment inside `catch { /* non-fatal */ }`, which meant that
@@ -90,57 +90,95 @@ const CIRCUIT_THRESHOLD = 10
 // stops a single hot instance from looping against a dead API, and it is
 // strictly better than "no breaker at all". Every Redis failure is logged
 // with context and reported, never swallowed.
-let localCircuitFailures = 0
+//
+// The key is keyed BY CONNECTION. It used to be one global
+// 'ownerrez:circuit:consecutive_failures' shared by every tenant, which was
+// wrong in both directions at once:
+//
+//   • recordCircuitFailure() is called from handleConnectionSyncFailure — a
+//     PER-CONNECTION handler. One org with a bad token incremented the shared
+//     counter every hour, and at the threshold the DISPATCHER returned early,
+//     so no org synced at all for up to the key's 30-minute TTL. One
+//     customer's expired credentials halted OwnerRez sync platform-wide.
+//   • resetCircuitBreaker() does redis.del() on ANY connection's success. With
+//     connections fanned out concurrently, one healthy org wiped the failures
+//     nine failing orgs had just recorded — so a genuinely degraded-but-not-
+//     dead API (some calls succeeding) could never trip the breaker, which is
+//     precisely the case it exists for.
+//
+// Per-connection keys give the same protection with neither coupling: if the
+// API is truly down, every connection fails and every connection's breaker
+// opens independently. It also removes a real race — `del` on success and
+// `incr` on failure were hitting one key from parallel runs.
+const circuitKey = (connectionId: string) => `ownerrez:circuit:${connectionId}`
 
-async function isCircuitOpen(logger: { warn: (msg: string) => void }): Promise<boolean> {
+const localCircuitFailures = new Map<string, number>()
+
+async function isCircuitOpen(
+  logger: { warn: (msg: string) => void },
+  connectionId: string,
+): Promise<boolean> {
+  const local = localCircuitFailures.get(connectionId) ?? 0
   try {
-    const failCount = await getRedis().get<number>(CIRCUIT_KEY) ?? 0
+    const failCount = await getRedis().get<number>(circuitKey(connectionId)) ?? 0
     return failCount >= CIRCUIT_THRESHOLD
   } catch (err) {
     logger.warn(
       `[OwnerRez] Circuit-breaker state unreadable (Redis error) — falling back to the ` +
-      `in-memory failure count (${localCircuitFailures}/${CIRCUIT_THRESHOLD}): ` +
+      `in-memory failure count (${local}/${CIRCUIT_THRESHOLD}) for connection ${connectionId}: ` +
       `${err instanceof Error ? err.message : String(err)}`
     )
     reportError(err, {
       site:  'inngest.ownerrez-incremental-sync.circuit_breaker_read',
-      extra: { localCircuitFailures },
+      extra: { connection_id: connectionId, localCircuitFailures: local },
     })
-    return localCircuitFailures >= CIRCUIT_THRESHOLD
+    return local >= CIRCUIT_THRESHOLD
   }
 }
 
-async function recordCircuitFailure(logger: { warn: (msg: string) => void }): Promise<void> {
-  localCircuitFailures++
+async function recordCircuitFailure(
+  logger: { warn: (msg: string) => void },
+  connectionId: string,
+): Promise<void> {
+  const local = (localCircuitFailures.get(connectionId) ?? 0) + 1
+  localCircuitFailures.set(connectionId, local)
   try {
     const redis    = getRedis()
-    const newCount = await redis.incr(CIRCUIT_KEY)
-    if (newCount === 1) await redis.expire(CIRCUIT_KEY, 30 * 60)
+    const newCount = await redis.incr(circuitKey(connectionId))
+    if (newCount === 1) await redis.expire(circuitKey(connectionId), 30 * 60)
   } catch (err) {
     logger.warn(
       `[OwnerRez] Could not record circuit-breaker failure in Redis — the shared counter ` +
-      `is not advancing; only the in-memory fallback (${localCircuitFailures}/` +
-      `${CIRCUIT_THRESHOLD}) is protecting the API: ${err instanceof Error ? err.message : String(err)}`
+      `is not advancing for connection ${connectionId}; only the in-memory fallback ` +
+      `(${local}/${CIRCUIT_THRESHOLD}) is protecting the API: ` +
+      `${err instanceof Error ? err.message : String(err)}`
     )
     reportError(err, {
       site:  'inngest.ownerrez-incremental-sync.circuit_breaker_increment',
-      extra: { localCircuitFailures },
+      extra: { connection_id: connectionId, localCircuitFailures: local },
     })
   }
 }
 
-async function resetCircuitBreaker(logger: { warn: (msg: string) => void }): Promise<void> {
-  localCircuitFailures = 0
+async function resetCircuitBreaker(
+  logger: { warn: (msg: string) => void },
+  connectionId: string,
+): Promise<void> {
+  localCircuitFailures.delete(connectionId)
   try {
-    await getRedis().del(CIRCUIT_KEY)
+    await getRedis().del(circuitKey(connectionId))
   } catch (err) {
     // Failing to CLEAR the breaker errs toward staying closed — safe, but
     // it can keep syncs paused for up to the key's 30-minute TTL, so say so.
     logger.warn(
-      `[OwnerRez] Could not reset the circuit breaker after a successful sync — it will ` +
-      `clear on its own when the key expires: ${err instanceof Error ? err.message : String(err)}`
+      `[OwnerRez] Could not reset the circuit breaker for connection ${connectionId} after a ` +
+      `successful sync — it will clear on its own when the key expires: ` +
+      `${err instanceof Error ? err.message : String(err)}`
     )
-    reportError(err, { site: 'inngest.ownerrez-incremental-sync.circuit_breaker_reset' })
+    reportError(err, {
+      site:  'inngest.ownerrez-incremental-sync.circuit_breaker_reset',
+      extra: { connection_id: connectionId },
+    })
   }
 }
 
@@ -169,15 +207,6 @@ export const ownerRezIncrementalSync = inngest.createFunction(
     // behavior this function always had before scoping existed.
     const scopedUserId = event?.data && 'user_id' in event.data ? event.data.user_id : undefined
     logger.info('ownerrez-incremental-sync triggered', { scoped: Boolean(scopedUserId) })
-
-    // Circuit breaker: if the OwnerRez API is degraded, skip this tick
-    // entirely rather than queueing per-connection runs that will all fail.
-    const circuitOpen = await step.run('check-circuit-breaker', () => isCircuitOpen(logger))
-
-    if (circuitOpen) {
-      logger.warn('[OwnerRez] Circuit breaker open — skipping tick, waiting for recovery')
-      return { dispatched: 0, circuit_open: true }
-    }
 
     const connections = await step.run('fetch-connections', async () => {
       const supabase = createServiceClient({ system: 'inngest:incremental-sync' })
@@ -216,9 +245,29 @@ export const ownerRezIncrementalSync = inngest.createFunction(
       ? true
       : new Date().getUTCHours() === NEW_PROPERTY_DIFF_UTC_HOUR
 
+    // Circuit breaker, per connection. This replaces a single global check
+    // that returned early for the WHOLE tick — one org's expired token used to
+    // stop every other org from syncing. Each connection is now filtered on its
+    // own breaker, so a failing tenant is skipped and healthy tenants proceed.
+    // ownerRezConnectionSync re-checks its own breaker too (a run queued before
+    // the breaker opened must not pile onto a degraded API), so this is an
+    // optimisation to avoid dispatching no-op runs, not the enforcement point.
+    const syncable = await step.run('filter-open-circuits', async () => {
+      const open: string[] = []
+      for (const conn of connections) {
+        if (await isCircuitOpen(logger, conn.id)) open.push(conn.id)
+      }
+      return connections.filter((c) => !open.includes(c.id))
+    })
+
+    if (!syncable.length) {
+      logger.warn('[OwnerRez] Every active connection has an open circuit breaker — skipping tick')
+      return { dispatched: 0, circuit_open: true }
+    }
+
     await step.sendEvent(
       'fan-out-connection-syncs',
-      connections.map((conn) => ({
+      syncable.map((conn) => ({
         name: 'ownerrez/connection.sync.requested' as const,
         data: {
           connection_id:        conn.id,
@@ -230,7 +279,7 @@ export const ownerRezIncrementalSync = inngest.createFunction(
       }))
     )
 
-    return { dispatched: connections.length }
+    return { dispatched: syncable.length }
   }
 )
 
@@ -569,7 +618,7 @@ async function handleConnectionSyncFailure(
     metadata:   { provider_id: PROVIDER, error: humanError },
   })
 
-  await recordCircuitFailure(logger)
+  await recordCircuitFailure(logger, conn.id)
   await notifyConnectionErrorThrottled(supabase, conn.id, userId, conn.org_id, humanError)
 }
 
@@ -690,7 +739,7 @@ export const ownerRezConnectionSync = inngest.createFunction(
 
     // Queued runs dispatched before the breaker opened must not pile onto a
     // degraded API — re-check here, not just in the dispatcher.
-    const circuitOpen = await step.run('check-circuit-breaker', () => isCircuitOpen(logger))
+    const circuitOpen = await step.run('check-circuit-breaker', () => isCircuitOpen(logger, connectionId))
 
     if (circuitOpen) {
       logger.warn(`[OwnerRez:${userId}] Circuit breaker open — skipping connection sync`)
@@ -710,13 +759,26 @@ export const ownerRezConnectionSync = inngest.createFunction(
           const orProperties = await new OwnerRezApiClient(userId).getProperties()
           if (!orProperties.length) return []
 
-          const { data: known } = await supabase
+          // Unwrapped: this read decides which properties are NEW, so a
+          // failure that returns null does not degrade — it amplifies.
+          // `knownIds` becomes empty, EVERY OwnerRez property looks new, and
+          // the block below re-fires integration/ownerrez.connected for the
+          // whole org: a full initial sync per tick off one transient read.
+          // (Its steps are idempotent, so this was wasted work rather than
+          // corruption — but it is wasted work proportional to the org, on the
+          // hour, until the read recovers.)
+          const knownRes = await supabase
             .from('properties')
             .select('external_id')
             .eq('org_id', orgId)
             .eq('external_source', PROVIDER)
+            .order('id')
+            .limit(SUPABASE_MAX_ROWS)
 
-          const knownIds = new Set((known ?? []).map((p) => p.external_id))
+          const known = unwrapList(knownRes, {
+            site: 'inngest.ownerrez-connection-sync.known-properties', orgId,
+          })
+          const knownIds = new Set(known.map((p) => p.external_id))
           return orProperties
             .map((p) => String(p.id))
             .filter((id) => !knownIds.has(id))
@@ -750,11 +812,22 @@ export const ownerRezConnectionSync = inngest.createFunction(
         // Re-fetch the connection: metadata (sync_cursor) and status may have
         // changed between dispatch and this run — a revoked/disconnected
         // connection must not be synced off a stale snapshot.
-        const { data: conn } = await supabase
+        // Unwrapped: a failed read returned null and was reported as
+        // `connection_not_active`, which is both wrong and unactionable — the
+        // run succeeded, Inngest did not retry, and the operator saw a healthy
+        // connection labelled inactive. (No bookings were lost: the cursor
+        // only advances on the success path, so the next tick refetches the
+        // same window.)
+        const connRes = await supabase
           .from('integration_connections')
           .select('id, user_id, org_id, external_user_id, metadata, status')
           .eq('id', connectionId)
           .maybeSingle()
+
+        const conn = unwrap(connRes, {
+          site: 'inngest.ownerrez-connection-sync.reload-connection',
+          orgId: orgId ?? undefined,
+        })
 
         if (!conn || conn.status !== 'active') {
           return { skipped: true, reason: 'connection_not_active' }
@@ -810,7 +883,7 @@ export const ownerRezConnectionSync = inngest.createFunction(
             bookingCount: bookings.length,
           })
 
-          await resetCircuitBreaker(logger)
+          await resetCircuitBreaker(logger, activeConn.id)
 
           return {
             affectedPropertyIds:   persisted.affectedPropertyIds,

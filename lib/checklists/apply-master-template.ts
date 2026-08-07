@@ -4,6 +4,7 @@ import type { SupabaseClient } from '@supabase/supabase-js'
 import type { RoomTemplateItem } from '@/types/database'
 import { logAuditEvent } from '@/lib/audit'
 import { seedDefaultRoomTemplatesIfNeeded } from './seed-default-room-templates'
+import { unwrap } from '@/lib/supabase/unwrap'
 
 /**
  * Applies the org's master checklist to a single property.
@@ -253,13 +254,30 @@ export async function applyMasterChecklistToProperty(
     return
   }
 
-  // Check whether this property already has a default template
-  const { data: existingTemplate } = await supabase
+  // Check whether this property already has a default template.
+  //
+  // Unwrapped, and this one compounds. Every sync caller passes force:false
+  // precisely so this guard protects them — but the guard read discarded its
+  // error, so a transient failure made `existingTemplate` null, the guard
+  // below evaluated false, and the function created a SECOND default template
+  // for a property that already had one. Nothing at the database level stopped
+  // it, and it snowballs: with two rows, the .maybeSingle() here starts
+  // erroring on EVERY subsequent run, that error was discarded too, and each
+  // run added another. The property ends up with a non-deterministic
+  // checklist, and a PM-customised template can be shadowed by a fresh
+  // default. (20260807190000 adds the partial unique index that makes the
+  // second insert fail loudly instead.)
+  const existingTemplateRes = await supabase
     .from('checklist_templates')
     .select('id')
     .eq('property_id', propertyId)
     .eq('is_default', true)
     .maybeSingle()
+
+  const existingTemplate = unwrap(existingTemplateRes, {
+    site:  'lib.checklists.apply-master-template.existing-default',
+    orgId,
+  })
 
   if (existingTemplate && !force) {
     // Respect the existing (possibly PM-customised) template, but the

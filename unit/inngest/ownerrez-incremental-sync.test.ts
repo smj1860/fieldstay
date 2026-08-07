@@ -160,7 +160,7 @@ describe('ownerRezIncrementalSync (dispatcher)', () => {
     })
     ;(createServiceClient as ReturnType<typeof vi.fn>).mockReturnValue(supabase)
 
-    const step = makeAllowlistStep(['check-circuit-breaker', 'fetch-connections'])
+    const step = makeAllowlistStep(['filter-open-circuits', 'fetch-connections'])
     const result = await invokeHandler(ownerRezIncrementalSync, { event: {}, step, logger: makeLogger() })
 
     expect(result).toEqual({ dispatched: 2 })
@@ -191,7 +191,7 @@ describe('ownerRezIncrementalSync (dispatcher)', () => {
     })
     ;(createServiceClient as ReturnType<typeof vi.fn>).mockReturnValue(supabase)
 
-    const step = makeAllowlistStep(['check-circuit-breaker', 'fetch-connections'])
+    const step = makeAllowlistStep(['filter-open-circuits', 'fetch-connections'])
     await invokeHandler(ownerRezIncrementalSync, { event: {}, step, logger: makeLogger() })
 
     expect(step.sendEvent).toHaveBeenCalledWith('fan-out-connection-syncs', [
@@ -210,7 +210,7 @@ describe('ownerRezIncrementalSync (dispatcher)', () => {
     })
     ;(createServiceClient as ReturnType<typeof vi.fn>).mockReturnValue(supabase)
 
-    const step = makeAllowlistStep(['check-circuit-breaker', 'fetch-connections'])
+    const step = makeAllowlistStep(['filter-open-circuits', 'fetch-connections'])
     await invokeHandler(ownerRezIncrementalSync, {
       event: {
         data: {
@@ -231,19 +231,77 @@ describe('ownerRezIncrementalSync (dispatcher)', () => {
     ])
   })
 
-  it('skips the whole tick when the circuit breaker is open', async () => {
+  // ── The breaker is PER CONNECTION ───────────────────────────────────────
+  //
+  // This block replaces a test asserting the whole tick was skipped when "the"
+  // breaker was open. There was one global key,
+  // 'ownerrez:circuit:consecutive_failures', shared by every tenant, and
+  // recordCircuitFailure() is called from handleConnectionSyncFailure — a
+  // PER-CONNECTION handler. So one org's expired token incremented the shared
+  // counter hourly and, at the threshold, stopped EVERY org from syncing for
+  // up to the key's 30-minute TTL.
+  //
+  // The same key was wrong in the other direction too: resetCircuitBreaker()
+  // does redis.del() on any connection's success, and connections fan out
+  // concurrently — so one healthy org wiped failures nine failing orgs had
+  // just recorded, and a degraded-but-not-dead API could never trip the
+  // breaker at all.
+
+  it('skips only the connection whose breaker is open and still dispatches the healthy ones', async () => {
+    baseMocks()
+    ;(getRedis as ReturnType<typeof vi.fn>).mockReturnValue({
+      // conn_1 is over the threshold; conn_2 is clean.
+      get: vi.fn(async (key: string) => (key === 'ownerrez:circuit:conn_1' ? 10 : 0)),
+    })
+    const CONN_2 = { ...CONN_ROW, id: 'conn_2', user_id: 'user_2', external_user_id: 'ext_2' }
+    const supabase = makeSupabase({
+      integration_connections: [{ data: [CONN_ROW, CONN_2], error: null }],
+    })
+    ;(createServiceClient as ReturnType<typeof vi.fn>).mockReturnValue(supabase)
+
+    const step = makeAllowlistStep(['filter-open-circuits', 'fetch-connections'])
+    const result = await invokeHandler(ownerRezIncrementalSync, { event: {}, step, logger: makeLogger() })
+
+    // The whole point: user_1's broken connection must not cost user_2 a sync.
+    expect(result).toEqual({ dispatched: 1 })
+    expect(step.sendEvent).toHaveBeenCalledWith('fan-out-connection-syncs', [
+      expect.objectContaining({
+        data: expect.objectContaining({ connection_id: 'conn_2' }),
+      }),
+    ])
+  })
+
+  it('skips the tick only when EVERY connection has an open breaker', async () => {
     baseMocks()
     ;(getRedis as ReturnType<typeof vi.fn>).mockReturnValue({
       get: vi.fn().mockResolvedValue(10),
     })
-    const supabase = makeSupabase({})
+    const supabase = makeSupabase({
+      integration_connections: [{ data: [CONN_ROW], error: null }],
+    })
     ;(createServiceClient as ReturnType<typeof vi.fn>).mockReturnValue(supabase)
 
-    const step = makeAllowlistStep(['check-circuit-breaker', 'fetch-connections'])
+    const step = makeAllowlistStep(['filter-open-circuits', 'fetch-connections'])
     const result = await invokeHandler(ownerRezIncrementalSync, { event: {}, step, logger: makeLogger() })
 
     expect(result).toEqual({ dispatched: 0, circuit_open: true })
     expect(step.sendEvent).not.toHaveBeenCalled()
+  })
+
+  it('reads a breaker key scoped to the connection id, not a shared one', async () => {
+    baseMocks()
+    const get = vi.fn().mockResolvedValue(0)
+    ;(getRedis as ReturnType<typeof vi.fn>).mockReturnValue({ get })
+    const supabase = makeSupabase({
+      integration_connections: [{ data: [CONN_ROW], error: null }],
+    })
+    ;(createServiceClient as ReturnType<typeof vi.fn>).mockReturnValue(supabase)
+
+    const step = makeAllowlistStep(['filter-open-circuits', 'fetch-connections'])
+    await invokeHandler(ownerRezIncrementalSync, { event: {}, step, logger: makeLogger() })
+
+    expect(get).toHaveBeenCalledWith('ownerrez:circuit:conn_1')
+    expect(get).not.toHaveBeenCalledWith('ownerrez:circuit:consecutive_failures')
   })
 
   // Audit 2026-07-30: every breaker Redis call sat in `catch { /* non-fatal */ }`,
@@ -256,11 +314,12 @@ describe('ownerRezIncrementalSync (dispatcher)', () => {
     ;(getRedis as ReturnType<typeof vi.fn>).mockReturnValue({
       get: vi.fn().mockRejectedValue(new Error('redis unreachable')),
     })
-    const supabase = makeSupabase({ integration_connections: [{ data: [] }] })
+    // One connection, so the per-connection breaker read actually happens.
+    const supabase = makeSupabase({ integration_connections: [{ data: [CONN_ROW], error: null }] })
     ;(createServiceClient as ReturnType<typeof vi.fn>).mockReturnValue(supabase)
 
     const logger = makeLogger()
-    const step   = makeAllowlistStep(['check-circuit-breaker', 'fetch-connections'])
+    const step   = makeAllowlistStep(['filter-open-circuits', 'fetch-connections'])
     await invokeHandler(ownerRezIncrementalSync, { event: {}, step, logger })
 
     // Never swallowed: the operator can see the breaker is running degraded.

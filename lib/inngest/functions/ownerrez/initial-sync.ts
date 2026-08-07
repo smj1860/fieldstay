@@ -43,6 +43,7 @@ import { mergeIntegrationConnectionMetadata } from '@/lib/integrations/connectio
 import type { TablesInsert, TablesUpdate } from '@/types/database'
 
 import { reportError } from '@/lib/observability/report-error'
+import { unwrapList } from '@/lib/supabase/unwrap'
 const PROVIDER = 'ownerrez'
 
 async function writeSyncCount(
@@ -317,24 +318,44 @@ export const ownerRezInitialSync = inngest.createFunction(
         const supabase    = createServiceClient({ system: 'inngest:initial-sync' })
         const externalIds = fetchPropsResult.patchData.map((p) => p.externalId)
 
-        const { data: properties } = await supabase
+        // Unwrapped: a failed read returned null, `!properties?.length`
+        // short-circuited to [], and every property this sync just created
+        // silently never got a checklist — a turnover with no checklist for
+        // the crew to work from, reported as a clean sync.
+        const propertiesRes = await supabase
           .from('properties')
           .select('id')
           .eq('org_id', org_id)
           .eq('external_source', PROVIDER)
           .in('external_id', externalIds)
 
-        if (!properties?.length) return []
+        const properties = unwrapList(propertiesRes, {
+          site: 'inngest.ownerrez-initial-sync.properties-needing-checklist', orgId: org_id,
+        })
 
-        // Filter to properties without an existing default template
-        const { data: existingTemplates } = await supabase
+        if (!properties.length) return []
+
+        // Filter to properties without an existing default template.
+        //
+        // Also unwrapped, though this one errs the other way: a failure made
+        // `hasTemplate` empty so EVERY property looked like it needed one.
+        // applyMasterChecklistToProperty's own force:false guard absorbs that
+        // (it re-checks per property and returns early), so the cost was
+        // wasted work rather than duplicates — but that guard is the only
+        // thing standing between this and duplicate default templates, and it
+        // had the identical discarded-error defect until this same change.
+        const existingTemplatesRes = await supabase
           .from('checklist_templates')
           .select('property_id')
           .eq('org_id', org_id)
           .eq('is_default', true)
           .in('property_id', properties.map((p) => p.id))
 
-        const hasTemplate = new Set((existingTemplates ?? []).map((t) => t.property_id as string))
+        const existingTemplates = unwrapList(existingTemplatesRes, {
+          site: 'inngest.ownerrez-initial-sync.existing-templates', orgId: org_id,
+        })
+
+        const hasTemplate = new Set(existingTemplates.map((t) => t.property_id as string))
         return properties
           .filter((p) => !hasTemplate.has(p.id as string))
           .map((p) => p.id as string)
