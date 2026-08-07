@@ -32,7 +32,10 @@ Then prove it gates: reintroduce the violation, confirm
 were promoted this way on 2026-08-01 —
 `fieldstay-role-filtered-membership-read` (3 → 0, the three crons migrated onto
 `getPmMembersByOrgIds`) and `fieldstay-untimed-external-fetch` (1 → 0, the
-Anthropic call in `build-shopping-cart.ts` given `ANTHROPIC_TIMEOUT_MS`).
+Anthropic call in `build-shopping-cart.ts` given `ANTHROPIC_TIMEOUT_MS`). A
+third, `fieldstay-supabase-unbounded-select-global-table` (tier 2c of the
+severity ladder below), was promoted on 2026-08-07 — see that section for its
+history.
 
 ## Severity inside the ratchet family
 
@@ -49,7 +52,7 @@ bounds the result set:
 | 1 | `-table-scan` | nothing but the table | ERROR | 38 → **0, promoted** |
 | 2 | `-cross-tenant` | no org scope AND no parent row | ERROR | 53 → **0, promoted** |
 | 2b | `-single-parent` | one non-org parent row, no org scope | WARNING | 47 |
-| 2c | `-global-table` | table has no `org_id` column to scope to | INFO | 5 |
+| 2c | `-global-table` | table has no `org_id` column to scope to | ERROR | 5 → **0, promoted** |
 | 3 | `-in-list` | one org, sized by an `.in()` array | WARNING | 46 |
 | 4 | `-org-scoped` | one org, one parent — the permitted case | INFO | 113 |
 
@@ -79,6 +82,19 @@ trip it accidentally: the new `metavariable-regex` negatives only recognise a
 `.eq()` column names in the codebase. If one is ever introduced legitimately,
 widen those negatives — never add a `nosemgrep`.
 
+**Tier 2c reached 0 on 2026-08-07, and this one *was* fixed, not just
+reclassified** — the two burn-downs read identically in the table above but
+are different in kind. All 5 sites got an explicit bound: `.limit()` on the
+four Server Component pages reading `maintenance_catalog_items`,
+`inventory_catalog` and `integration_providers` (×2), and `fetchAllRows()` on
+the one Inngest step reading `platform_inventory_template_items` — chosen
+there because its sibling `inventory_catalog` read three lines below it in the
+same function already used that pattern. Same before-promoting checks as tier
+2: the rule was confirmed to still fire (a deliberately unbounded
+`integration_providers` read reintroduced in a scratch file under `lib/`,
+`semgrep --config .semgrep/chokepoints.yml --error` run against it, exit 1,
+reverted) before its `baseline-counts.json` key was deleted.
+
 Mutual exclusion is now **enforced** by `scripts/check-semgrep-ratchet.mjs`,
 which fails when one site matches two ladder tiers. That is not defensive
 paranoia: the 2b/2c split introduced exactly that overlap
@@ -96,19 +112,23 @@ carries the column. That reclassification is the one raised number in
 `baseline-counts.json`'s history (`-org-scoped` 112 → 113); the ladder total is
 unchanged, which is the invariant that matters.
 
-The global-table list in tiers 2/2b/2c is **derived from the live schema**, not
-curated: every public table with no `org_id` column AND no foreign key to a
-table that has one. A table with no `org_id` but a tenant-linked parent
-(`work_order_photos`, `purchase_order_items`, …) is deliberately excluded from
-that list — those are ordinary child tables and belong in the tiers above. The
-tables are counted rather than skipped, because `profiles`, `processed_webhooks`
-and `support_kb_chunks` still grow with the platform and still truncate at 1000;
-what tier 2c drops is the *tenant* framing, not the truncation coverage.
+The global-table list — shared by tier 2's `-cross-tenant` negative, tier 2b's
+`-single-parent` negative, and tier 2c itself in `chokepoints.yml` — is
+**derived from the live schema**, not curated: every public table with no
+`org_id` column AND no foreign key to a table that has one. A table with no
+`org_id` but a tenant-linked parent (`work_order_photos`,
+`purchase_order_items`, …) is deliberately excluded from that list — those are
+ordinary child tables and belong in the tiers above. The tables stay bound
+rather than exempted, because `profiles`, `processed_webhooks` and
+`support_kb_chunks` still grow with the platform and still truncate at 1000;
+what tier 2c drops is the *tenant* framing, not the truncation requirement.
 
-Tier 1 is the one promoted rule with no `paths.exclude`: no file legitimately
-owns "read an entire table unbounded", so the exemption is expressed purely as
-the bounding constructs (`.limit` / `.range` / `.single` / `.maybeSingle` / a
-head-count aggregate) in `pattern-not-inside`.
+Tiers 1, 2 and 2c are the promoted rules with no `paths.exclude`: no file
+legitimately owns "read an entire table unbounded" (tiers 1–2), and no file
+owns "read a platform-global catalog with no explicit bound" (tier 2c) either
+— every exemption is expressed purely as the bounding constructs (`.limit` /
+`.range` / `.single` / `.maybeSingle` / a head-count aggregate) in
+`pattern-not-inside`.
 
 Two mechanics worth knowing before editing these:
 

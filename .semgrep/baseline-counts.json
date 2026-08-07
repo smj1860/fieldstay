@@ -41,16 +41,22 @@
     "inventory/page.tsx (inventory_catalog), settings/integrations/page.tsx and",
     "setup/pms/page.tsx (integration_providers). -read-without-error dropped",
     "222 -> 221 as a side effect: fetchAllRows throws on a page error instead of",
-    "the prior bare `const { data } = await ...` read. Not yet promoted to",
-    "chokepoints.yml — that needs the reintroduce/confirm/revert proof in",
-    ".semgrep/README.md's promotion protocol, done separately."
+    "the prior bare `const { data } = await ...` read.",
+    "",
+    "PROMOTED 2026-08-07: -global-table reached 0 (see above) and moved to",
+    "chokepoints.yml, where it gates at --error across the whole tree instead of",
+    "only on findings new vs. the PR base. Its key is deleted here in the same",
+    "change, per the promotion rule in .semgrep/README.md. Verified before",
+    "promoting, same protocol as -cross-tenant: a deliberately unbounded",
+    "integration_providers read was reintroduced in a scratch file,",
+    "`semgrep --config .semgrep/chokepoints.yml --error` was confirmed to exit",
+    "1 against it, then it was reverted."
   ],
   "measured_at": "2026-08-07",
   "counts": {
     "fieldstay-supabase-discarded-result": 113,
     "fieldstay-supabase-read-without-error": 218,
     "fieldstay-supabase-read-without-error-fan-in": 14,
-    "fieldstay-supabase-unbounded-select-global-table": 0,
     "fieldstay-supabase-unbounded-select-in-list": 36,
     "fieldstay-supabase-unbounded-select-org-scoped": 101,
     "fieldstay-supabase-unbounded-select-single-parent": 34
