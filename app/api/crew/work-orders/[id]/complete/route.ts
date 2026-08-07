@@ -20,11 +20,33 @@ import type { WoStatus } from '@/types/database'
  * to them, flips status to completed, records a status update note, and
  * notifies the PM via Inngest (work-order/crew.completed).
  */
+/**
+ * work_orders.id is a `uuid`, so a malformed id in the path does not fail a
+ * type check — it reaches Postgres and raises 22P02. This route deliberately
+ * answers a failed READ with 503 so a TRANSIENT database error retries rather
+ * than dead-lettering the crew member's queued completion. A malformed id is
+ * not transient, so without this check it would 503-loop forever: the outbox
+ * never drains, the logout "unsynced work" warning stays armed, and none of it
+ * is visible to the dead-letter banner because a transport failure never sets
+ * the `failed` flag.
+ *
+ * Not reachable from our own client (the PWA builds the URL from cached
+ * crew_work_orders ids), which is why it is asserted rather than assumed.
+ */
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
+
+/** Free text typed on a phone into an unbounded `completion_notes` column. */
+const MAX_NOTES_LENGTH = 2000
+
 export async function POST(
   req: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ): Promise<NextResponse> {
   const { id } = await params
+
+  if (!UUID_RE.test(id)) {
+    return NextResponse.json({ error: 'Invalid work order id' }, { status: 400 })
+  }
 
   // Canonical crew auth gate (lib/crew-auth.ts). This route was the last
   // straggler on the inline-lookup pattern the 2026-07-22 crew-auth sweep
@@ -35,6 +57,13 @@ export async function POST(
   const { crew, user } = auth
 
   const { notes } = (await req.json().catch(() => ({}))) as { notes?: string }
+
+  if (typeof notes === 'string' && notes.length > MAX_NOTES_LENGTH) {
+    return NextResponse.json(
+      { error: `Completion notes are too long — please keep them under ${MAX_NOTES_LENGTH} characters.` },
+      { status: 400 },
+    )
+  }
 
   // Service client for the WO read/update — crew role has no UPDATE policy on
   // work_orders; assignment is verified explicitly below instead of via RLS.

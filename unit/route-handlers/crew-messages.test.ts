@@ -53,7 +53,11 @@ function post(body: unknown) {
   })
 }
 
-const validBody = { messageId: 'msg_1', content: 'Sink is leaking in unit 4' }
+// messages.id is a `uuid` column, so the route validates the shape at the
+// boundary: a malformed id reaches Postgres, raises 22P02, and earns a 500 —
+// which lib/dexie/net.ts retries FOREVER.
+const MESSAGE_ID = '5c8f1a22-6666-4777-8888-999900001111'
+const validBody = { messageId: MESSAGE_ID, content: 'Sink is leaking in unit 4' }
 
 // The crew→PM Slack notification lived in sendMessageToPM, the Server Action
 // this route replaced. Moving messaging to the Dexie outbox dropped it: the
@@ -149,5 +153,56 @@ describe('POST /api/crew/messages — Slack notification', () => {
 
     const [, init] = vi.mocked(safeFetch).mock.calls[0]!
     expect(JSON.parse(String((init as RequestInit).body)).text).toContain('A crew member')
+  })
+})
+
+// ============================================================================
+// A crew message is client-generated free text with a client-generated id, and
+// neither was bounded. `messages.id` is a uuid column and `content` is
+// unbounded `text`.
+//
+// The id matters more than it looks: a malformed one reaches Postgres, raises
+// 22P02, and is answered with a 500 — which lib/dexie/net.ts treats as
+// TRANSIENT, so the outbox retries that send FOREVER. It never drains, it
+// keeps the logout "unsynced work" warning armed permanently, and it stays
+// invisible to the dead-letter banner because a transport failure never sets
+// the `failed` flag. Not reachable from our own client (queueMessageToPM uses
+// crypto.randomUUID), which is exactly why the sibling crew route that takes a
+// client-generated id already asserts it and this one did not.
+// ============================================================================
+describe('POST /api/crew/messages — input bounds', () => {
+  beforeEach(() => {
+    deferred.length = 0
+    vi.clearAllMocks()
+    vi.mocked(requireCrewMember).mockResolvedValue({
+      ok: true, user: { id: 'user_1' }, supabase: makeClient(), crew: CREW,
+    } as never)
+    vi.mocked(createServiceClient).mockReturnValue(makeClient() as never)
+    vi.mocked(getPmMembers).mockResolvedValue([{ userId: 'pm_1' }] as never)
+  })
+
+  it.each([
+    ['a non-uuid id', 'msg_1'],
+    ['an empty-ish id', '   '],
+    ['a sql-ish id', "1' OR '1'='1"],
+  ])('rejects %s with a terminal 400 rather than a 500 the outbox retries forever', async (_label, messageId) => {
+    const res = await POST(post({ messageId, content: 'hello' }))
+
+    expect(res.status).toBe(400)
+    expect(getPmMembers).not.toHaveBeenCalled()
+  })
+
+  // `content` is unbounded text AND is pushed into the Slack webhook body.
+  it('rejects an oversized message before resolving a recipient', async () => {
+    const res = await POST(post({ messageId: MESSAGE_ID, content: 'x'.repeat(2001) }))
+
+    expect(res.status).toBe(400)
+    expect(getPmMembers).not.toHaveBeenCalled()
+  })
+
+  it('accepts a message at exactly the limit', async () => {
+    const res = await POST(post({ messageId: MESSAGE_ID, content: 'x'.repeat(2000) }))
+
+    expect(res.status).toBe(200)
   })
 })

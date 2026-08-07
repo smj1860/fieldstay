@@ -95,6 +95,31 @@ async function notifyPmSlack(
   }
 }
 
+/**
+ * messages.id is a `uuid` column, so a non-uuid messageId does not fail a type
+ * check — it reaches Postgres, raises 22P02, and is answered with a 500. That
+ * matters here more than it looks: lib/dexie/net.ts treats >=500 as TRANSIENT,
+ * so the outbox would retry that send FOREVER — never draining, keeping the
+ * logout "unsynced work" warning armed permanently, and staying invisible to
+ * the dead-letter banner because a transport failure never sets the `failed`
+ * flag.
+ *
+ * Not reachable from our own client (queueMessageToPM uses crypto.randomUUID),
+ * which is exactly why it is worth asserting at the boundary rather than
+ * assuming: the sibling crew route that takes a client-generated id
+ * (/api/crew/inventory-count) already validates its own, and this one is the
+ * copy that did not.
+ */
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
+
+/**
+ * `content` is unbounded `text` in the database and has no maxLength on the
+ * composer, so a paste is stored verbatim AND pushed into the Slack webhook
+ * body. Bounded at the boundary, with a matching maxLength on the textarea so
+ * a crew member is stopped while typing rather than after tapping send.
+ */
+const MAX_MESSAGE_LENGTH = 2000
+
 export async function POST(request: NextRequest) {
   const body = await request.json().catch(() => null)
 
@@ -102,7 +127,16 @@ export async function POST(request: NextRequest) {
   const content   = typeof body?.content === 'string' ? body.content.trim() : ''
 
   if (!messageId) return NextResponse.json({ error: 'Missing messageId' }, { status: 400 })
+  if (!UUID_RE.test(messageId)) {
+    return NextResponse.json({ error: 'Invalid messageId' }, { status: 400 })
+  }
   if (!content)   return NextResponse.json({ error: 'Message cannot be empty' }, { status: 400 })
+  if (content.length > MAX_MESSAGE_LENGTH) {
+    return NextResponse.json(
+      { error: `Message is too long — please keep it under ${MAX_MESSAGE_LENGTH} characters.` },
+      { status: 400 },
+    )
+  }
 
   const auth = await requireCrewMember()
   if (!auth.ok) return auth.response

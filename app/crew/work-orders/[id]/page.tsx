@@ -138,6 +138,7 @@ export default function CrewWorkOrderPage({ params }: { params: Promise<{ id: st
               Completion Notes (optional)
             </h2>
             <textarea
+              maxLength={2000}
               value={notes}
               onChange={(e) => setNotes(e.target.value)}
               placeholder="Describe what was done, any issues found..."

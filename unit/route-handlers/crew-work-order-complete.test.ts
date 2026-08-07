@@ -46,6 +46,19 @@ function makeAuthClient(userId: string | null, crewResult: Resp) {
   return { auth: { getUser }, from }
 }
 
+// work_orders.id is a `uuid` column. The route rejects a malformed path param
+// at the boundary so it can never reach Postgres, raise 22P02, and be answered
+// with the 503 that lib/dexie/net.ts retries forever.
+const WO_ID = '7c9e6679-7425-40de-944b-e07fc1f90ae7'
+/**
+ * Stand-ins for "a real work order that is not yours". They must be
+ * well-formed uuids: the IDOR guard is the org/assignment scoping, not the id
+ * FORMAT, and a malformed id is now rejected earlier — which would let these
+ * tests pass without ever exercising what they are named for.
+ */
+const OTHER_ORG_WO   = '2f1b8c44-1111-4222-8333-444455556666'
+const OTHER_CREW_WO  = '3a2c9d55-2222-4333-8444-555566667777'
+
 function postRequest(body: unknown = {}) {
   return new NextRequest('http://localhost/api/crew/work-orders/wo_1/complete', {
     method:  'POST',
@@ -67,7 +80,7 @@ describe('POST /api/crew/work-orders/[id]/complete', () => {
     const authClient = makeAuthClient(null, { data: null, error: null })
     vi.mocked(createClient).mockResolvedValue(authClient as never)
 
-    const res = await call('wo_1')
+    const res = await call(WO_ID)
 
     expect(res.status).toBe(401)
     expect(createServiceClient).not.toHaveBeenCalled()
@@ -77,7 +90,7 @@ describe('POST /api/crew/work-orders/[id]/complete', () => {
     const authClient = makeAuthClient('user_1', { data: null, error: null })
     vi.mocked(createClient).mockResolvedValue(authClient as never)
 
-    const res = await call('wo_1')
+    const res = await call(WO_ID)
 
     expect(res.status).toBe(403)
     expect(createServiceClient).not.toHaveBeenCalled()
@@ -89,7 +102,7 @@ describe('POST /api/crew/work-orders/[id]/complete', () => {
     const serviceClient = makeSupabase({ work_orders: [{ data: null, error: null }] })
     vi.mocked(createServiceClient).mockReturnValue(serviceClient as never)
 
-    const res = await call('other-orgs-wo')
+    const res = await call(OTHER_ORG_WO)
 
     expect(res.status).toBe(404)
     expect(inngest.send).not.toHaveBeenCalled()
@@ -108,21 +121,51 @@ describe('POST /api/crew/work-orders/[id]/complete', () => {
     const serviceClient = makeSupabase({ work_orders: [{ data: null, error: null }] })
     vi.mocked(createServiceClient).mockReturnValue(serviceClient as never)
 
-    const res = await call('wo_assigned_to_someone_else')
+    const res = await call(OTHER_CREW_WO)
 
     expect(res.status).toBe(404)
     expect(inngest.send).not.toHaveBeenCalled()
+  })
+
+  // work_orders.id is a uuid column. This route answers a failed READ with 503
+  // on purpose, so a transient DB error retries rather than dead-lettering the
+  // crew member's queued completion — but a malformed id is NOT transient, so
+  // without a boundary check it 503-loops forever: the outbox never drains and
+  // none of it is visible to the dead-letter banner.
+  it('rejects a malformed work order id with 400 rather than a 503 the outbox retries forever', async () => {
+    const authClient = makeAuthClient('user_1', { data: { id: 'crew_1', org_id: 'org_1' }, error: null })
+    vi.mocked(createClient).mockResolvedValue(authClient as never)
+    const serviceClient = makeSupabase({})
+    vi.mocked(createServiceClient).mockReturnValue(serviceClient as never)
+
+    const res = await call('not-a-uuid')
+
+    expect(res.status).toBe(400)
+    expect(serviceClient.from).not.toHaveBeenCalled()
+    expect(inngest.send).not.toHaveBeenCalled()
+  })
+
+  it('rejects oversized completion notes without touching the work order', async () => {
+    const authClient = makeAuthClient('user_1', { data: { id: 'crew_1', org_id: 'org_1' }, error: null })
+    vi.mocked(createClient).mockResolvedValue(authClient as never)
+    const serviceClient = makeSupabase({})
+    vi.mocked(createServiceClient).mockReturnValue(serviceClient as never)
+
+    const res = await call(WO_ID, { notes: 'x'.repeat(2001) })
+
+    expect(res.status).toBe(400)
+    expect(serviceClient.from).not.toHaveBeenCalled()
   })
 
   it('returns alreadyCompleted when the work order is already completed', async () => {
     const authClient = makeAuthClient('user_1', { data: { id: 'crew_1', org_id: 'org_1' }, error: null })
     vi.mocked(createClient).mockResolvedValue(authClient as never)
     const serviceClient = makeSupabase({
-      work_orders: [{ data: { id: 'wo_1', org_id: 'org_1', assigned_crew_member_id: 'crew_1', status: 'completed' }, error: null }],
+      work_orders: [{ data: { id: WO_ID, org_id: 'org_1', assigned_crew_member_id: 'crew_1', status: 'completed' }, error: null }],
     })
     vi.mocked(createServiceClient).mockReturnValue(serviceClient as never)
 
-    const res = await call('wo_1')
+    const res = await call(WO_ID)
     const json = await res.json()
 
     expect(json).toEqual({ alreadyCompleted: true })
@@ -142,11 +185,11 @@ describe('POST /api/crew/work-orders/[id]/complete', () => {
     const authClient = makeAuthClient('user_1', { data: { id: 'crew_1', org_id: 'org_1' }, error: null })
     vi.mocked(createClient).mockResolvedValue(authClient as never)
     const serviceClient = makeSupabase({
-      work_orders: [{ data: { id: 'wo_1', org_id: 'org_1', assigned_crew_member_id: 'crew_1', status: 'cancelled' }, error: null }],
+      work_orders: [{ data: { id: WO_ID, org_id: 'org_1', assigned_crew_member_id: 'crew_1', status: 'cancelled' }, error: null }],
     })
     vi.mocked(createServiceClient).mockReturnValue(serviceClient as never)
 
-    const res  = await call('wo_1')
+    const res  = await call(WO_ID)
     const json = await res.json()
 
     expect(res.status).toBe(409)
@@ -163,13 +206,13 @@ describe('POST /api/crew/work-orders/[id]/complete', () => {
     vi.mocked(createClient).mockResolvedValue(authClient as never)
     const serviceClient = makeSupabase({
       work_orders: [
-        { data: { id: 'wo_1', org_id: 'org_1', assigned_crew_member_id: 'crew_1', status: 'in_progress' }, error: null },
+        { data: { id: WO_ID, org_id: 'org_1', assigned_crew_member_id: 'crew_1', status: 'in_progress' }, error: null },
         { data: null, error: null },
       ],
     })
     vi.mocked(createServiceClient).mockReturnValue(serviceClient as never)
 
-    await call('wo_1')
+    await call(WO_ID)
 
     const neqs = serviceClient.calls.filter((c) => c.method === 'neq').map((c) => c.args)
     expect(neqs).toContainEqual(['status', 'completed'])
@@ -181,13 +224,13 @@ describe('POST /api/crew/work-orders/[id]/complete', () => {
     vi.mocked(createClient).mockResolvedValue(authClient as never)
     const serviceClient = makeSupabase({
       work_orders: [
-        { data: { id: 'wo_1', org_id: 'org_1', assigned_crew_member_id: 'crew_1', status: 'in_progress' }, error: null },
+        { data: { id: WO_ID, org_id: 'org_1', assigned_crew_member_id: 'crew_1', status: 'in_progress' }, error: null },
         { data: null, error: null }, // claim update — lost the race
       ],
     })
     vi.mocked(createServiceClient).mockReturnValue(serviceClient as never)
 
-    const res = await call('wo_1')
+    const res = await call(WO_ID)
     const json = await res.json()
 
     expect(json).toEqual({ alreadyCompleted: true })
@@ -199,13 +242,13 @@ describe('POST /api/crew/work-orders/[id]/complete', () => {
     vi.mocked(createClient).mockResolvedValue(authClient as never)
     const serviceClient = makeSupabase({
       work_orders: [
-        { data: { id: 'wo_1', org_id: 'org_1', assigned_crew_member_id: 'crew_1', status: 'in_progress' }, error: null },
+        { data: { id: WO_ID, org_id: 'org_1', assigned_crew_member_id: 'crew_1', status: 'in_progress' }, error: null },
         { data: null, error: { message: 'db down' } },
       ],
     })
     vi.mocked(createServiceClient).mockReturnValue(serviceClient as never)
 
-    const res = await call('wo_1')
+    const res = await call(WO_ID)
 
     expect(res.status).toBe(500)
   })
@@ -215,28 +258,28 @@ describe('POST /api/crew/work-orders/[id]/complete', () => {
     vi.mocked(createClient).mockResolvedValue(authClient as never)
     const serviceClient = makeSupabase({
       work_orders: [
-        { data: { id: 'wo_1', wo_number: 'WO-1', title: 'Fix sink', property_id: 'prop_1', org_id: 'org_1', assigned_crew_member_id: 'crew_1', status: 'in_progress' }, error: null },
-        { data: { id: 'wo_1' }, error: null },
+        { data: { id: WO_ID, wo_number: 'WO-1', title: 'Fix sink', property_id: 'prop_1', org_id: 'org_1', assigned_crew_member_id: 'crew_1', status: 'in_progress' }, error: null },
+        { data: { id: WO_ID }, error: null },
       ],
       work_order_updates: [{ data: null, error: null }],
     })
     vi.mocked(createServiceClient).mockReturnValue(serviceClient as never)
 
-    const res = await call('wo_1', { notes: 'Replaced the trap' })
+    const res = await call(WO_ID, { notes: 'Replaced the trap' })
     const json = await res.json()
 
     expect(json).toEqual({ completed: true })
     expect(inngest.send).toHaveBeenCalledWith(expect.objectContaining({
       name: 'work-order/crew.completed',
       data: expect.objectContaining({
-        workOrderId:  'wo_1',
+        workOrderId:  WO_ID,
         orgId:        'org_1',
         crewMemberId: 'crew_1',
         notes:        'Replaced the trap',
       }),
     }))
     expect(logAuditEvent).toHaveBeenCalledWith(expect.objectContaining({
-      orgId: 'org_1', actorId: 'user_1', action: 'work_order.updated', targetId: 'wo_1',
+      orgId: 'org_1', actorId: 'user_1', action: 'work_order.updated', targetId: WO_ID,
     }))
   })
 })
