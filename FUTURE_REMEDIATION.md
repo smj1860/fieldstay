@@ -948,3 +948,70 @@ every plan. `organizations` now has no `repuguard%` column at all.
 one missing (`stripe_event_at`) and five declaring columns that no longer
 exist. `types/database.ts` is correct, so CI stays green, but the regeneration
 commit is now worth more than when it was first logged.
+
+---
+
+## 22. The Kroger cart does not build itself — it waits for a PM button press
+
+**Files:** `lib/inngest/functions/inventory-events.ts`
+(`handleInventoryCountSubmitted`), `lib/inngest/functions/build-shopping-cart.ts`,
+`app/(dashboard)/inventory/actions.ts` (`triggerShoppingCart`)
+
+**Deferred deliberately — the button is acceptable for launch** (product owner,
+2026-08-07). Logged so the gap between the stated promise and the shipped
+behaviour is written down rather than rediscovered.
+
+CLAUDE.md's "core automation promise" states it flatly:
+
+> When inventory drops below par, a Kroger cart builds itself.
+
+It does not. Found while auditing the crew inventory screen against the
+intended flow (crew counts → below par → PM email, immediate for a same-day
+flip and aggregated otherwise → Kroger cart when connected).
+
+**What actually happens.** `handleInventoryCountSubmitted` applies the count,
+computes below-par items, creates the `purchase_orders` row, and emails the PM.
+It sends **no Inngest events at all** — verified by grep, the function body
+contains zero `inngest.send`/`sendEventAsync` calls.
+
+The only sender of `inventory/cart_requested` anywhere in the repo is
+`triggerShoppingCart()` in `app/(dashboard)/inventory/actions.ts`, whose only
+caller is a "Build Cart" button at `app/(dashboard)/inventory/inventory-manager.tsx:1231`.
+
+So the PM must notice the restock email, open the inventory page, and press a
+button. Everything downstream of that press is correct and already hardened —
+`buildShoppingCart` checks `preferred_retailer === 'kroger'`, checks the OAuth
+connection and location id, and no-ops cleanly when either is missing, which is
+exactly the "no Kroger account connected → email only" branch of the flow.
+
+**Why this was not just implemented.** It writes to the customer's REAL Kroger
+cart. That function's own header comment records a past incident:
+
+> A PM double-clicking "Build Cart" produced two concurrent runs, each of which
+> added the same items to the REAL Kroger cart — real duplicate grocery spend.
+
+Auto-firing it on every crew count submission across every property is a
+materially different risk and load profile from a deliberate button press, so
+it is a product decision rather than a defect fix.
+
+**What it would take.** Send `inventory/cart_requested` from
+`handleInventoryCountSubmitted` after the purchase order is created, gated on
+the org having Kroger connected, scoped to the single `property_id` the count
+came from. The duplicate-protection already exists and does not need building:
+`buildShoppingCart` has a per-org concurrency limit of 1 plus a content-keyed
+milestone claim in its step 6. The pieces to think about before shipping it:
+
+- **Fan-out.** One event per count submission, per property. A 50-property org
+  doing evening turnovers submits ~50 counts in a window; the per-org
+  concurrency limit of 1 serialises them, which is safe but slow, and each run
+  currently emails the PM a "your cart is ready" notice.
+- **Whether the PM wants a cart per property or one merged cart.** The existing
+  button already supports both — `triggerShoppingCart()` takes `propertyIds`
+  and a `modality`. An automatic trigger has to pick one, and per-property is
+  the natural fit for the event but probably not what a PM wants to receive.
+- **The same-day-flip distinction.** The email path already treats a same-day
+  flip as urgent and everything else as end-of-day aggregate. An automatic cart
+  build plausibly wants the same split rather than firing on every count.
+- **A kill switch.** Anything that spends money automatically should be gated
+  on an org-level setting, the way `SMS_ENABLED` gates sends, rather than being
+  unconditional on deploy.
