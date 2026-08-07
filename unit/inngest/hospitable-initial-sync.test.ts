@@ -114,6 +114,11 @@ function makeSupabase(queued: QueuedByTable) {
     chain.upsert = (...a: unknown[]) => record('upsert', a)
     chain.eq     = (...a: unknown[]) => record('eq', a)
     chain.in     = (...a: unknown[]) => record('in', a)
+    // fetchAllRows() pages via .order()/.range(); a queued page shorter than
+    // the page size ends the drain, so each paginated read still consumes
+    // exactly one queued entry for its table.
+    chain.order  = (...a: unknown[]) => record('order', a)
+    chain.range  = (...a: unknown[]) => record('range', a)
 
     const resolveNext = () => {
       const idx = counters[table] ?? 0

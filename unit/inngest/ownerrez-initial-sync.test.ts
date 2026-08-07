@@ -84,6 +84,10 @@ function makeSupabase(queued: QueuedByTable) {
     chain.in     = vi.fn(() => chain)
     chain.order  = vi.fn(() => chain)
     chain.limit  = vi.fn(() => chain)
+    // fetchAllRows() pages via .range(); a queued page shorter than the page
+    // size ends the drain, so each paginated read still consumes exactly one
+    // queued entry for its table.
+    chain.range  = vi.fn(() => chain)
     chain.update = vi.fn((payload: unknown) => { updateSpy(table, payload); return chain })
     chain.upsert = vi.fn((payload: unknown, opts: unknown) => { upsertSpy(table, payload, opts); return chain })
 

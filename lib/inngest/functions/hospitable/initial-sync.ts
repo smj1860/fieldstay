@@ -51,7 +51,7 @@ import {
 
 import { reportError } from '@/lib/observability/report-error'
 import { mergeIntegrationConnectionMetadata } from '@/lib/integrations/connection-metadata'
-import { unwrapList } from '@/lib/supabase/unwrap'
+import { fetchAllRows } from '@/lib/inngest/paginate'
 const PROVIDER = 'hospitable'
 
 // Initial sync backfills 3 months forward, not the 6 that
@@ -312,23 +312,34 @@ export const hospInitialSync = inngest.createFunction(
       if (revenueEligibleExternalIds.length > 0) {
         const revenueEvents = await step.run('fetch-bookings-for-revenue', async () => {
           const supabase = createServiceClient({ system: 'inngest:initial-sync' })
-          // Unwrapped: `?? []` on a failed read means ZERO booking/confirmed
+          // Paginated AND error-bound, for two separate reasons.
+          //
+          // Paginated: this is one row per reservation the initial sync just
+          // imported, so it is sized by the org's whole booking history, not
+          // by its property count. A PM onboarding 50 properties with a year
+          // of stays each is past PostgREST's max_rows = 1000 on day one, and
+          // truncation there is silent — the rows past 1000 simply never
+          // produce a booking/confirmed event.
+          //
+          // Error-bound: `?? []` on a failed read meant ZERO booking/confirmed
           // events, so no revenue is posted to owner_transactions for any of
           // this org's imported reservations — a silent financial omission that
           // the initial sync then reports as a clean run. Nothing re-drives it
           // either: the revenue post is idempotent by design (see the comment
           // above), so a later re-run would fix it — but only if someone knew
-          // to trigger one.
-          const rowsRes = await supabase
-            .from('bookings')
-            .select('id, property_id, actual_total_amount')
-            .eq('org_id', org_id)
-            .eq('external_source', PROVIDER)
-            .in('external_id', revenueEligibleExternalIds)
-
-          const rows = unwrapList(rowsRes, {
-            site: 'inngest.hospitable-initial-sync.bookings-for-revenue', orgId: org_id,
-          })
+          // to trigger one. fetchAllRows throws on a page error, so the step
+          // gets an Inngest retry instead.
+          const rows = await fetchAllRows<{ id: string; property_id: string; actual_total_amount: number | null }>(
+            (from, to) => supabase
+              .from('bookings')
+              .select('id, property_id, actual_total_amount')
+              .eq('org_id', org_id)
+              .eq('external_source', PROVIDER)
+              .in('external_id', revenueEligibleExternalIds)
+              .order('id', { ascending: true })
+              .range(from, to),
+            { label: `bookings-for-revenue(hospitable)[org=${org_id}]` },
+          )
 
           return rows.map((b) => ({
             name: 'booking/confirmed' as const,

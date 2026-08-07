@@ -137,6 +137,40 @@ describe('ownerRezReconciliationHandler', () => {
     expect(result).toEqual({ cancelledCount: 0 })
   })
 
+  it('refuses to cancel everything when OwnerRez returns ZERO bookings', async () => {
+    baseMocks(async () => [])
+
+    const supabase = makeSupabase({
+      properties: [{ data: [{ external_id: '42' }], error: null }],
+      bookings:   [
+        { data: [{ id: 'b1', external_id: '100' }, { id: 'b2', external_id: '200' }], error: null },
+      ],
+    })
+    ;(createServiceClient as ReturnType<typeof vi.fn>).mockReturnValue(supabase)
+
+    const result = await invokeHandler(ownerRezReconciliationHandler, {
+      event:  { data: { user_id: 'user_1', org_id: 'org_1' } },
+      step:   makeAllowlistStep(ALLOWED),
+      logger: makeLogger(),
+    })
+
+    // This function reconciles by ABSENCE — the only way a hard delete is
+    // detectable. Its degenerate input is an empty current set: then every
+    // booking in the org is absent, so the pass cancelled all of them,
+    // cancelled their turnovers, and texted the crew that their jobs were off.
+    // Daily, off one bad API response.
+    //
+    // getBookings() throws on a non-2xx, so this is the 200-with-nothing case:
+    // an upstream hiccup, a propertyIds filter that stopped matching, or a
+    // genuinely emptied account — indistinguishable here. The asymmetry
+    // decides it: not cancelling leaves stale rows one more day; cancelling
+    // wrongly sends crew home from stays that are still happening.
+    expect(supabase.updateSpy).not.toHaveBeenCalled()
+    expect(cancelTurnoversForBooking).not.toHaveBeenCalled()
+    expect(notifyCrewOfCancelledTurnovers).not.toHaveBeenCalled()
+    expect(result).toEqual({ skipped: true, reason: 'empty_current_set' })
+  })
+
   it('skips gracefully (no throw) and never reaches cancel-stale-bookings when OwnerRez rate-limits the full listing fetch', async () => {
     baseMocks(async () => { throw new RateLimitError(30) })
 

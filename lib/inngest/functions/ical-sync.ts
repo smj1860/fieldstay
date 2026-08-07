@@ -16,6 +16,86 @@ import { safeFetch } from '@/lib/security/url-guard'
 // top of the hour. Applied per-org now that fan-out is two-stage.
 const JITTER_WINDOW_MS = 55 * 60 * 1000
 
+// ical_uid is NULLABLE on bookings (rows from OwnerRez/Hospitable have none);
+// only feed-sourced rows carry one, and only those can be matched against a
+// feed's events.
+type ExistingBookingRow = {
+  id:            string
+  ical_uid:      string | null
+  status:        Enums<'booking_status'>
+  guest_email:   string | null
+  checkout_date: string
+}
+
+/**
+ * The absent-booking cancellation pass: which known bookings does this feed no
+ * longer mention, and of those, which may actually be cancelled?
+ *
+ * Absence is the ONLY cancellation signal an iCal feed gives — there is no
+ * tombstone — so this pass has to exist. Two things bound it.
+ *
+ * 1. An empty parse is not a mass cancellation.
+ *
+ * A structurally valid VCALENDAR carrying zero VEVENTs parses cleanly to [].
+ * (A non-iCal body does NOT reach here — ICAL.parse throws and the download
+ * step fails the run.) With `seenUids` empty, every confirmed booking on the
+ * feed is absent, so this pass cancelled all of them,
+ * cancelTurnoversForBooking cancelled their pending/assigned turnovers, and
+ * notifyCrewOfCancelledTurnovers texted the crew that their jobs were off. The
+ * next hourly sync would re-create the bookings, but the turnovers were
+ * already cancelled and the crew already told.
+ *
+ * A host regenerating the feed URL, unpublishing a listing, or serving a
+ * placeholder calendar all produce exactly this shape. A genuinely emptied
+ * calendar produces it too — the two are indistinguishable from the payload,
+ * which is the point: when the signal cannot tell them apart, the tie has to
+ * break toward NOT cancelling. Being wrong the other way sends crew home from
+ * a stay that is still happening.
+ *
+ * 2. A booking that aged out of the feed window was not cancelled.
+ *
+ * Airbnb/VRBO feeds carry a rolling FUTURE window, so a completed stay drops
+ * out on its own. Cancelling on absence therefore reclassified finished stays
+ * as cancelled once they aged out — wrong in owner_transactions and the owner
+ * portal's P&L, for every past booking, forever. Only bookings that have not
+ * yet checked out can be meaningfully cancelled by a feed.
+ */
+function bookingsAbsentFromFeed(params: {
+  existingByUid: Map<string, ExistingBookingRow>
+  seenUids:      Set<string>
+  eventCount:    number
+  feedId:        string
+  orgId:         string
+}): string[] {
+  const { existingByUid, seenUids, eventCount, feedId, orgId } = params
+
+  if (eventCount === 0 && existingByUid.size > 0) {
+    console.error(
+      `[ical-sync] Feed ${feedId} parsed to ZERO events while holding ` +
+      `${existingByUid.size} known booking(s) — skipping the absent-booking ` +
+      `cancellation pass rather than cancelling them all`
+    )
+    reportError(new Error('iCal feed parsed empty while holding known bookings'), {
+      site:  'inngest.ical-sync.empty-feed-guard',
+      orgId,
+      extra: { feed_id: feedId, known_bookings: existingByUid.size },
+    })
+    return []
+  }
+
+  const today = new Date().toISOString().slice(0, 10)
+  const absent: string[] = []
+
+  for (const [uid, existing] of existingByUid.entries()) {
+    if (seenUids.has(uid)) continue
+    if (existing.status !== 'confirmed') continue
+    if (existing.checkout_date < today) continue   // aged out, not cancelled
+    absent.push(existing.id)
+  }
+
+  return absent
+}
+
 /**
  * SCHEDULED: runs hourly.
  * Also triggered manually via `ical/sync.all.requested`.
@@ -232,10 +312,7 @@ export const syncIcalFeed = inngest.createFunction(
       async (): Promise<{ newBookings: Array<{ id: string; guestEmail: string | null }>; cancelledBookingIds: string[] }> => {
         const supabase = createServiceClient({ system: 'inngest:ical-sync' })
 
-        // ical_uid is NULLABLE on bookings (rows from OwnerRez/Hospitable have
-        // none); only feed-sourced rows carry one, and only those can be
-        // matched against this feed's events.
-        type ExistingRow = { id: string; ical_uid: string | null; status: Enums<'booking_status'>; guest_email: string | null }
+        type ExistingRow = ExistingBookingRow
 
         // Paginated: a long-lived feed accumulates more than PostgREST's
         // 1000-row cap, and a truncated "existing" map would make every
@@ -244,7 +321,7 @@ export const syncIcalFeed = inngest.createFunction(
         const existingBookings = await fetchAllRows<ExistingRow>(
           (from, to) => supabase
             .from('bookings')
-            .select('id, ical_uid, status, guest_email')
+            .select('id, ical_uid, status, guest_email, checkout_date')
             .eq('ical_feed_id', feed_id)
             .order('id', { ascending: true })
             .range(from, to),
@@ -322,19 +399,31 @@ export const syncIcalFeed = inngest.createFunction(
         }
 
         // ── Bulk cancel bookings absent from the latest feed ─────────────────
-        const toCancel: string[] = []
-        for (const [uid, existing] of existingByUid.entries()) {
-          if (!seenUids.has(uid) && existing.status === 'confirmed') {
-            toCancel.push(existing.id)
-            cancelledIds.push(existing.id)
-          }
-        }
+        // See bookingsAbsentFromFeed for the two guards that bound this pass:
+        // an empty parse is not a mass cancellation, and a booking that aged
+        // out of the feed's rolling future window was not cancelled.
+        const toCancel = bookingsAbsentFromFeed({
+          existingByUid,
+          seenUids,
+          eventCount: typedEvents.length,
+          feedId:     feed_id,
+          orgId:      org_id,
+        })
+        cancelledIds.push(...toCancel)
 
         if (toCancel.length > 0) {
-          await supabase
+          const { error: cancelError } = await supabase
             .from('bookings')
             .update({ status: 'cancelled' })
             .in('id', toCancel)
+            .eq('org_id', org_id)
+
+          // Bound: discarded, a failed cancel still returned these ids as
+          // `cancelledBookingIds`, so the steps below cancelled their turnovers
+          // and texted the crew about bookings that were still confirmed.
+          if (cancelError) {
+            throw new Error(`iCal absent-booking cancel failed: ${cancelError.message}`)
+          }
         }
 
         return { newBookings: newBookingRows, cancelledBookingIds: cancelledIds }

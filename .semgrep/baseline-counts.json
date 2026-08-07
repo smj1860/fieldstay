@@ -102,8 +102,8 @@
     "fieldstay-supabase-discarded-result": 77,
     "fieldstay-supabase-read-without-error": 138,
     "fieldstay-supabase-read-without-error-fan-in": 0,
-    "fieldstay-supabase-unbounded-select-in-list": 32,
-    "fieldstay-supabase-unbounded-select-org-scoped": 95,
+    "fieldstay-supabase-unbounded-select-in-list": 29,
+    "fieldstay-supabase-unbounded-select-org-scoped": 94,
     "fieldstay-supabase-unbounded-select-single-parent": 27
   }
 }
