@@ -135,6 +135,69 @@ async function purgeSmsOptIns(
  * through RLS. `requireOrgRole(['admin'])` also passes `owner` automatically
  * (see is_org_member) — matching the role model used everywhere else.
  */
+/** SHA-256 — irreversible, suitable for an audit trail without exposing PII. */
+function hashEmail(email: string): string {
+  return crypto.createHash('sha256').update(email).digest('hex')
+}
+
+/**
+ * Records a scrub that stopped partway and returns the caller-safe result.
+ *
+ * Two things were wrong with returning `{ error: fetchErr.message }` directly.
+ *
+ * It handed a raw Postgres message to the browser — CLAUDE.md's error-handling
+ * rule ("Never return raw error messages to the client"); those carry column
+ * and constraint names and sometimes the offending value.
+ *
+ * And it was the only exit that skipped BOTH reportError and logAuditEvent. A
+ * mid-batch failure could leave a real number of bookings already scrubbed —
+ * irreversibly — with nothing in Sentry and nothing in the audit log. For an
+ * Article 17 erasure the audit log is the compliance artifact; "some of it
+ * happened and we have no record of which" is the worst available outcome.
+ */
+async function recordPartialErasure(params: {
+  err:                unknown
+  site:               string
+  orgId:              string
+  actorId:            string
+  emailHash:          string
+  bookingsAnonymized: number
+  optInsDeleted:      number
+  optInsRetained:     number
+}): Promise<ErasureResult> {
+  const { err, site, orgId, actorId, emailHash, bookingsAnonymized, optInsDeleted, optInsRetained } = params
+
+  console.error(`[anonymizeGuestData] ${site}`, err)
+  reportError(err, { site, orgId, extra: { bookings_anonymized: bookingsAnonymized } })
+
+  if (bookingsAnonymized > 0) {
+    await logAuditEvent({
+      actorId,
+      orgId,
+      action:     'gdpr.data_erasure.completed',
+      targetType: 'guest',
+      metadata:   {
+        email_hash:          emailHash,
+        bookings_anonymized: bookingsAnonymized,
+        optins_deleted:      optInsDeleted,
+        optins_retained:     optInsRetained,
+        request_type:        'erasure_article_17',
+        partial:             true,
+      },
+    })
+  }
+
+  return {
+    success: false,
+    bookingsAnonymized,
+    optInsDeleted,
+    optInsRetained,
+    error: bookingsAnonymized > 0
+      ? `Erasure stopped partway — ${bookingsAnonymized} booking(s) were anonymized before it failed. Re-run to finish; already-scrubbed rows are skipped.`
+      : 'Operation failed. Please try again.',
+  }
+}
+
 export async function anonymizeGuestData(guestEmail: string): Promise<ErasureResult> {
   try {
     const { user, membership } = await requireOrgRole(['admin'])
@@ -151,6 +214,12 @@ export async function anonymizeGuestData(guestEmail: string): Promise<ErasureRes
     let optInsDeleted      = 0
     let optInsRetained     = 0
 
+    const emailHash = hashEmail(normalizedEmail)
+    const partial = (err: unknown, site: string) => recordPartialErasure({
+      err, site, orgId, actorId: user.id, emailHash,
+      bookingsAnonymized, optInsDeleted, optInsRetained,
+    })
+
     for (let batch = 0; batch < MAX_BOOKING_BATCHES; batch++) {
       const { data: affected, error: fetchErr } = await supabase
         .from('bookings')
@@ -161,7 +230,7 @@ export async function anonymizeGuestData(guestEmail: string): Promise<ErasureRes
         .limit(BOOKING_BATCH_SIZE)
 
       if (fetchErr) {
-        return { success: false, bookingsAnonymized, error: fetchErr.message }
+        return partial(fetchErr, 'serverAction.settings.privacy.anonymizeGuestData.fetch')
       }
       if (!affected?.length) break
 
@@ -176,7 +245,7 @@ export async function anonymizeGuestData(guestEmail: string): Promise<ErasureRes
 
       const optIns = await purgeSmsOptIns(supabase, ids, orgId)
       if ('error' in optIns) {
-        return { success: false, bookingsAnonymized, error: optIns.error }
+        return partial(new Error(optIns.error), 'serverAction.settings.privacy.anonymizeGuestData.optIns')
       }
       optInsDeleted  += optIns.deleted
       optInsRetained += optIns.retained
@@ -194,7 +263,7 @@ export async function anonymizeGuestData(guestEmail: string): Promise<ErasureRes
         .eq('org_id', orgId)
 
       if (updateErr) {
-        return { success: false, bookingsAnonymized, error: updateErr.message }
+        return partial(updateErr, 'serverAction.settings.privacy.anonymizeGuestData.update')
       }
 
       bookingsAnonymized += ids.length
@@ -211,11 +280,7 @@ export async function anonymizeGuestData(guestEmail: string): Promise<ErasureRes
       action:     'gdpr.data_erasure.completed',
       targetType: 'guest',
       metadata:   {
-        // SHA-256: irreversible, suitable for audit trail without exposing PII
-        email_hash:          crypto
-          .createHash('sha256')
-          .update(normalizedEmail)
-          .digest('hex'),
+        email_hash:          emailHash,
         bookings_anonymized: bookingsAnonymized,
         optins_deleted:      optInsDeleted,
         optins_retained:     optInsRetained,

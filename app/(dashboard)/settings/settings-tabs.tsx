@@ -27,7 +27,7 @@ import {
   updateCommsRetention,
   updateSlackWebhook,
 } from './actions'
-import { SMS_TEMPLATE_REGISTRY, renderTemplate, type SmsTemplateKey } from '@/lib/sms/template-registry'
+import { SMS_TEMPLATE_REGISTRY, renderTemplate, hasOptOutNotice, SMS_OPT_OUT_NOTICE, type SmsTemplateKey } from '@/lib/sms/template-registry'
 import { getOrgSmsTemplates, saveOrgSmsTemplate, resetOrgSmsTemplate } from './actions'
 
 // ── Constants ────────────────────────────────────────────────────────────────
@@ -67,9 +67,28 @@ interface Props {
   connections?:      Record<string, ConnectionInfo>
   krogerNeedsStore?: boolean
   hospitablePromo?:  HospitablePromoStatus | null
+  /**
+   * Whether a Slack webhook is set. The URL itself is deliberately never sent
+   * to the client — it is a bearer credential and `orgs_select` lets every
+   * member of the org read the row it lives on.
+   */
+  slackWebhookConfigured?: boolean
+  /**
+   * Mirrors the `orgs_update` RLS policy (admin, plus owner via is_org_member).
+   * Presentation only — the server actions enforce it independently; this just
+   * stops the UI from offering a control whose write the database will drop.
+   */
+  canEditOrgSettings?: boolean
 }
 
-export function SettingsTabs({ org, connections = {}, krogerNeedsStore = false, hospitablePromo = null }: Props) {
+export function SettingsTabs({
+  org,
+  connections = {},
+  krogerNeedsStore = false,
+  hospitablePromo = null,
+  slackWebhookConfigured = false,
+  canEditOrgSettings = false,
+}: Readonly<Props>) {
   const searchParams = useSearchParams()
   const requestedTab = searchParams.get('tab') as Tab | null
   const initialTab   = requestedTab && (TABS as readonly string[]).includes(requestedTab)
@@ -115,10 +134,10 @@ export function SettingsTabs({ org, connections = {}, krogerNeedsStore = false, 
       </div>
 
       {/* Tab panels */}
-      {activeTab === 'Organization'  && <OrgTab org={org} connections={connections} krogerNeedsStore={krogerNeedsStore} />}
+      {activeTab === 'Organization'  && <OrgTab org={org} connections={connections} krogerNeedsStore={krogerNeedsStore} canEdit={canEditOrgSettings} />}
       {activeTab === 'Billing'       && <BillingTab org={org} hospitablePromo={hospitablePromo} />}
       {activeTab === 'Security'      && <SecurityTab />}
-      {activeTab === 'Notifications' && <NotificationsTab org={org} />}
+      {activeTab === 'Notifications' && <NotificationsTab slackWebhookConfigured={slackWebhookConfigured} canEdit={canEditOrgSettings} />}
       {activeTab === 'Team'          && <TeamTabRedirect />}
       {activeTab === 'Audit Log'     && <AuditLogTabRedirect />}
       {activeTab === 'Account'       && <AccountTabRedirect />}
@@ -129,7 +148,7 @@ export function SettingsTabs({ org, connections = {}, krogerNeedsStore = false, 
 
 // ── Organization tab ─────────────────────────────────────────────────────────
 
-function OrgTab({ org, connections, krogerNeedsStore }: { org: Organization; connections: Record<string, ConnectionInfo>; krogerNeedsStore?: boolean }) {
+function OrgTab({ org, connections, krogerNeedsStore, canEdit }: Readonly<{ org: Organization; connections: Record<string, ConnectionInfo>; krogerNeedsStore?: boolean; canEdit: boolean }>) {
   const [state, formAction, pending] = useActionState(updateOrgSettings, null)
 
   const plan        = PLAN_INFO[org.plan as keyof typeof PLAN_INFO] ?? PLAN_INFO.starter
@@ -187,11 +206,21 @@ function OrgTab({ org, connections, krogerNeedsStore }: { org: Organization; con
           </div>
 
           <div className="pt-2 border-t border-themed">
-            <Button type="submit" disabled={pending}>
-              {pending ? (
-                <><Loader2 className="w-4 h-4 animate-spin" /> Saving…</>
-              ) : 'Save Changes'}
-            </Button>
+            {/* orgs_update is admin-only, and an UPDATE that RLS filters out
+                matches zero rows and returns no error — so offering this to a
+                manager produced "Settings saved successfully" over an
+                unchanged row. The action refuses independently. */}
+            {canEdit ? (
+              <Button type="submit" disabled={pending}>
+                {pending ? (
+                  <><Loader2 className="w-4 h-4 animate-spin" /> Saving…</>
+                ) : 'Save Changes'}
+              </Button>
+            ) : (
+              <p className="text-xs" style={{ color: 'var(--text-muted)' }}>
+                Only an admin or the account owner can change these settings.
+              </p>
+            )}
           </div>
         </form>
       </Card>
@@ -299,12 +328,20 @@ function CommsRetentionSelector({ days }: { days: number }) {
   const [saving,    startSave]    = useTransition()
   const [saveError, setSaveError] = useState<string | null>(null)
 
+  // Reverts on failure. The write was optimistic and one-way: on an error the
+  // control kept showing the NEW value next to the error message, so the
+  // screen asserted a retention period the server had not accepted, until
+  // someone happened to reload.
   const handleChange = (value: number) => {
+    const previous = current
     setCurrent(value)
     setSaveError(null)
     startSave(async () => {
       const result = await updateCommsRetention(value)
-      if (result.error) setSaveError(result.error)
+      if (result.error) {
+        setCurrent(previous)
+        setSaveError(result.error)
+      }
     })
   }
 
@@ -320,6 +357,7 @@ function CommsRetentionSelector({ days }: { days: number }) {
         value={current}
         onChange={(e) => handleChange(Number(e.target.value))}
         disabled={saving}
+        aria-label="Communications log retention period"
         className="input text-sm w-auto"
       >
         {COMMS_RETENTION_OPTIONS.map((opt) => (
@@ -355,12 +393,20 @@ function AutoAssignToggle({ mode }: { mode: string }) {
   const [saving,   startSave]   = useTransition()
   const [saveError, setSaveError] = useState<string | null>(null)
 
+  // Reverts on failure — and this is the one where it matters most. A PM
+  // switching Autopilot OFF saw "Off" selected next to an error, and reasonably
+  // read that as "it's off, but something else went wrong." The server still
+  // held 'autopilot' and kept auto-assigning crew to every new turnover.
   const handleChange = (value: 'disabled' | 'suggest' | 'autopilot') => {
+    const previous = current
     setCurrent(value)
     setSaveError(null)
     startSave(async () => {
       const result = await updateAutoAssignMode(value)
-      if (result.error) setSaveError(result.error)
+      if (result.error) {
+        setCurrent(previous)
+        setSaveError(result.error)
+      }
     })
   }
 
@@ -376,6 +422,8 @@ function AutoAssignToggle({ mode }: { mode: string }) {
         {AUTO_ASSIGN_OPTIONS.map((opt) => (
           <button
             key={opt.value}
+            type="button"
+            aria-pressed={current === opt.value}
             onClick={() => handleChange(opt.value)}
             disabled={saving}
             className={cn(
@@ -427,30 +475,34 @@ function VendorAutoAssignToggle({ mode }: { mode: string }) {
   const [saving,    startSave]    = useTransition()
   const [saveError, setSaveError] = useState<string | null>(null)
 
+  // Reverts on failure — same reasoning as AutoAssignToggle above.
   const handleChange = (value: 'disabled' | 'suggest') => {
+    const previous = current
     setCurrent(value)
     setSaveError(null)
     startSave(async () => {
       const result = await updateVendorAutoAssignMode(value)
-      if (result.error) setSaveError(result.error)
+      if (result.error) {
+        setCurrent(previous)
+        setSaveError(result.error)
+      }
     })
   }
 
   return (
     <div>
       {saveError && (
-        <div
-          className="text-sm rounded-lg px-3 py-2 mb-3"
-          style={{ background: 'var(--accent-red-dim)', border: '1px solid var(--accent-red)', color: 'var(--accent-red)' }}
-        >
+        <InlineAlert tone="error" className="mb-3">
           {saveError}
-        </div>
+        </InlineAlert>
       )}
 
       <div className="flex gap-2 flex-wrap">
         {VENDOR_AUTO_ASSIGN_OPTIONS.map((opt) => (
           <button
             key={opt.value}
+            type="button"
+            aria-pressed={current === opt.value}
             onClick={() => handleChange(opt.value)}
             disabled={saving}
             className={cn(
@@ -561,6 +613,7 @@ function SecurityTab() {
                 onClick={() => setShowNew((v) => !v)}
                 className="absolute right-3 top-1/2 -translate-y-1/2"
                 style={{ color: 'var(--text-muted)' }}
+                aria-label={showNew ? 'Hide new password' : 'Show new password'}
               >
                 {showNew
                   ? <EyeOff className="w-4 h-4" />
@@ -587,6 +640,7 @@ function SecurityTab() {
                 onClick={() => setShowConfirm((v) => !v)}
                 className="absolute right-3 top-1/2 -translate-y-1/2"
                 style={{ color: 'var(--text-muted)' }}
+                aria-label={showConfirm ? 'Hide confirmed password' : 'Show confirmed password'}
               >
                 {showConfirm
                   ? <EyeOff className="w-4 h-4" />
@@ -620,12 +674,24 @@ const PUSH_PREFS = [
 
 const EMAIL_PREFS = [
   { key: 'email_daily_digest',  label: 'Daily ops digest',    desc: 'Summary of today\'s activity each morning'  },
-  { key: 'email_weekly_report', label: 'Weekly report',       desc: 'Full ops report every Monday morning'       },
+  // Weekly report — hidden 2026-08-07, deliberately commented rather than
+  // deleted because it may come back.
+  //
+  // There is no weekly report: no cron, no email template, no content queries.
+  // The switch offered control over a feature that was never built, so every
+  // state of it was equally meaningless. Restoring the row means building the
+  // report first — see docs/PUSH_NOTIFICATIONS.md.
+  // { key: 'email_weekly_report', label: 'Weekly report',       desc: 'Full ops report every Monday morning'       },
 ] as const
 
-function NotificationsTab({ org }: { org: Organization }) {
+function NotificationsTab({
+  slackWebhookConfigured,
+  canEdit,
+}: Readonly<{ slackWebhookConfigured: boolean; canEdit: boolean }>) {
   const [state, formAction, pending] = useActionState(updateNotificationPrefs, null)
   const [slackState, slackAction, slackPending] = useActionState(updateSlackWebhook, null)
+
+  const slackSaveLabel = slackWebhookConfigured ? 'Replace Webhook' : 'Save Webhook'
 
   return (
     <div className="max-w-xl space-y-6">
@@ -757,32 +823,63 @@ function NotificationsTab({ org }: { org: Organization }) {
           </InlineAlert>
         )}
 
+        {slackWebhookConfigured && (
+          <p className="text-sm mb-3 flex items-center gap-1.5" style={{ color: 'var(--text-primary)' }}>
+            <StatusDot status="good" label="Webhook configured" />
+            A webhook is configured.
+          </p>
+        )}
+
         <form action={slackAction} className="space-y-3">
           <div>
             <label htmlFor="slack-webhook-url" className="block text-xs font-medium text-muted-themed mb-1.5">
-              Slack Incoming Webhook URL
+              {slackWebhookConfigured ? 'Replace Webhook URL' : 'Slack Incoming Webhook URL'}
             </label>
+            {/* Renders empty even when one is set — the stored URL is a bearer
+                credential and is never sent to the browser. Because of that,
+                blank no longer means "clear it"; Remove below does. */}
             <Input
               id="slack-webhook-url"
               type="url"
               name="slack_webhook_url"
-              defaultValue={org.slack_webhook_url ?? ''}
+              defaultValue=""
+              disabled={!canEdit}
               placeholder="https://hooks.slack.com/services/..."
               className="w-full"
             />
             <p className="text-xs text-muted-themed mt-1.5">
               When a crew member sends you a message, it will also be posted to this Slack channel.
-              Leave blank to disable. Create one at{' '}
-              <span className="font-mono">api.slack.com/apps</span> → Incoming Webhooks.
+              Create one at <span className="font-mono">api.slack.com/apps</span> → Incoming Webhooks.
+              {slackWebhookConfigured && ' The current URL isn’t shown — enter a new one to replace it.'}
             </p>
           </div>
 
-          <Button type="submit" disabled={slackPending}>
-            {slackPending
-              ? <><Loader2 className="w-4 h-4 animate-spin" /> Saving…</>
-              : 'Save Webhook'
-            }
-          </Button>
+          {canEdit ? (
+            <div className="flex items-center gap-3 flex-wrap">
+              <Button type="submit" disabled={slackPending}>
+                {slackPending
+                  ? <><Loader2 className="w-4 h-4 animate-spin" /> Saving…</>
+                  : slackSaveLabel
+                }
+              </Button>
+
+              {slackWebhookConfigured && (
+                <Button
+                  type="submit"
+                  name="intent"
+                  value="remove"
+                  variant="danger"
+                  disabled={slackPending}
+                >
+                  Remove
+                </Button>
+              )}
+            </div>
+          ) : (
+            <p className="text-xs" style={{ color: 'var(--text-muted)' }}>
+              Only an admin or the account owner can change this.
+            </p>
+          )}
         </form>
       </Card>
 
@@ -995,9 +1092,22 @@ function SmsTemplatesCard() {
                       placeholder="Enter your custom message…"
                       maxLength={1000}
                     />
-                    <p className="text-xs text-muted-themed mt-1 text-right">
-                      {body.length}/1000
-                    </p>
+                    <div className="flex items-start justify-between gap-3 mt-1">
+                      {/* Shown while typing rather than only on save: an
+                          override replaces the default wholesale, so dropping
+                          the opt-out line silently strips it from every send. */}
+                      {!hasOptOutNotice(body) ? (
+                        <p className="text-xs" style={{ color: 'var(--accent-amber)' }}>
+                          Add an opt-out instruction containing &ldquo;STOP&rdquo; — required on every
+                          message. We&rsquo;ll append &ldquo;{SMS_OPT_OUT_NOTICE}&rdquo; if you don&rsquo;t.
+                        </p>
+                      ) : (
+                        <span />
+                      )}
+                      <p className="text-xs text-muted-themed text-right flex-shrink-0">
+                        {body.length}/1000
+                      </p>
+                    </div>
                   </div>
 
                   {/* Live preview */}

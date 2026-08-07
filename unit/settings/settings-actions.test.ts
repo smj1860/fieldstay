@@ -78,6 +78,8 @@ import {
   bulkImportCrew,
   updateAutoAssignMode,
   createCheckoutSession,
+  saveOrgSmsTemplate,
+  updateSlackWebhook,
 } from '@/app/(dashboard)/settings/actions'
 import { requireOrgMember, requireOrgRole } from '@/lib/auth'
 import { stripe } from '@/lib/stripe/client'
@@ -111,6 +113,7 @@ function makeSupabase(queued: QueuedByTable = {}) {
     chain.insert = (...a: unknown[]) => record('insert', a)
     chain.update = (...a: unknown[]) => record('update', a)
     chain.delete = (...a: unknown[]) => record('delete', a)
+    chain.upsert = (...a: unknown[]) => record('upsert', a)
     chain.eq     = (...a: unknown[]) => record('eq', a)
     chain.is     = (...a: unknown[]) => record('is', a)
     chain.or     = (...a: unknown[]) => record('or', a)
@@ -595,5 +598,210 @@ describe('settings/actions', () => {
       expect(result).toEqual({ redirectUrl: 'https://checkout' })
       expect(stripe.subscriptions.list).not.toHaveBeenCalled()
     })
+  })
+})
+
+// ─────────────────────────────────────────────────────────────────────────────
+// saveOrgSmsTemplate — the opt-out notice and the template key
+//
+// An org override REPLACES the built-in body wholesale (lib/sms/templates.ts's
+// renderSmsBody prefers it unconditionally), and all ten built-in defaults end
+// with "Reply STOP to opt out." Nothing downstream re-adds it — sendSMS hands
+// the body straight to Telnyx. So before these guards, saving one template
+// without an opt-out line silently stripped the opt-out instruction from every
+// message that org sent, guest and crew alike, for as long as the override
+// existed. That is the compliance requirement SMS_ENABLED is being held shut
+// for until 10DLC verification clears.
+// ─────────────────────────────────────────────────────────────────────────────
+describe('saveOrgSmsTemplate', () => {
+  beforeEach(() => vi.clearAllMocks())
+
+  it('refuses a body with no opt-out instruction, and writes nothing', async () => {
+    const supabase = makeSupabase()
+    mockAuthed(supabase)
+
+    const result = await saveOrgSmsTemplate(
+      'morning_nudge',
+      'Good morning! It is {{temperature}}°F at {{property_name}} today.'
+    )
+
+    expect(result.error).toMatch(/opt out/i)
+    expect(supabase.calls.some((c) => c.method === 'upsert')).toBe(false)
+  })
+
+  it('accepts alternative opt-out wording — the keyword is what carriers act on', async () => {
+    const supabase = makeSupabase()
+    mockAuthed(supabase)
+
+    // A PM who writes their own phrasing has satisfied the requirement just as
+    // well as our default sentence; the guard must not force our exact copy.
+    const result = await saveOrgSmsTemplate(
+      'morning_nudge',
+      'Morning from {{property_name}}! Text STOP to unsubscribe.'
+    )
+
+    expect(result).toEqual({})
+    expect(supabase.calls.some((c) => c.method === 'upsert')).toBe(true)
+  })
+
+  it('does not mistake "stop" inside another word for an opt-out instruction', async () => {
+    const supabase = makeSupabase()
+    mockAuthed(supabase)
+
+    // Prose that merely contains the letters is not opt-out instructions.
+    // "NON-STOP" is the one that matters: a plain \bSTOP\b matches it, because
+    // a hyphen counts as a word boundary — this exact body was accepted by the
+    // first version of hasOptOutNotice.
+    const result = await saveOrgSmsTemplate(
+      'morning_nudge',
+      'The shuttle stops right outside {{property_name}} — NON-STOP to the lake!'
+    )
+
+    expect(result.error).toMatch(/opt out/i)
+    expect(supabase.calls.some((c) => c.method === 'upsert')).toBe(false)
+  })
+
+  it('rejects a key that is not in the registry, and writes nothing', async () => {
+    const supabase = makeSupabase()
+    mockAuthed(supabase)
+
+    // A Server Action is an HTTP endpoint any authenticated caller can invoke
+    // directly, so the typed `SmsTemplateKey` at the UI call site proves
+    // nothing. An unrecognised key wrote a row renderSmsBody can never read.
+    const result = await saveOrgSmsTemplate('not_a_real_key', 'Hi. Reply STOP to opt out.')
+
+    expect(result.error).toBe('Unknown template.')
+    expect(supabase.calls.some((c) => c.method === 'upsert')).toBe(false)
+  })
+
+  it('scopes the upsert to the caller\'s own org', async () => {
+    const supabase = makeSupabase()
+    mockAuthed(supabase)
+
+    await saveOrgSmsTemplate('door_code', 'Code is {{door_code}}. Reply STOP to opt out.')
+
+    const upsert = supabase.calls.find((c) => c.method === 'upsert')
+    expect((upsert?.args[0] as { org_id: string }).org_id).toBe(ORG_ID)
+  })
+})
+
+// ─────────────────────────────────────────────────────────────────────────────
+// The five org-settings writes are admin-only in the DATABASE — `orgs_update`
+// is is_org_member(id, ARRAY['admin']) — and a Postgres UPDATE whose rows RLS
+// filters out matches ZERO rows and returns NO error.
+//
+// So gating these on bare requireOrgMember() meant a manager, viewer or crew
+// member got the whole happy path: `{ success: true }`, "Settings saved
+// successfully" in the UI, and an audit row recording a change that never
+// happened. The audit rows are the worst of it — a log that records changes
+// which did not occur actively misleads whoever reads it in an investigation.
+// ─────────────────────────────────────────────────────────────────────────────
+describe('org-settings writes are gated to admin/owner, matching orgs_update RLS', () => {
+  beforeEach(() => vi.clearAllMocks())
+
+  const DENIED = /Only an admin or the account owner/
+
+  it.each(['manager', 'viewer', 'crew'])(
+    'refuses a %s: no write, and no audit row claiming one happened',
+    async (role) => {
+      const supabase = makeSupabase()
+      mockAuthed(supabase, role)
+
+      const result = await updateOrgSettings(null, formData({ name: 'New Name' }))
+
+      expect(result.error).toMatch(DENIED)
+      expect(supabase.from).not.toHaveBeenCalled()
+      expect(logAuditEvent).not.toHaveBeenCalled()
+    }
+  )
+
+  it.each(['admin', 'owner'])('still lets a %s through', async (role) => {
+    const supabase = makeSupabase({ organizations: [{ data: null, error: null }] })
+    mockAuthed(supabase, role)
+
+    const result = await updateOrgSettings(null, formData({ name: 'New Name' }))
+
+    expect(result).toEqual({ success: true })
+    expect(supabase.calls.some((c) => c.table === 'organizations' && c.method === 'update')).toBe(true)
+  })
+
+  it('refuses a manager on updateAutoAssignMode — the one with ongoing side effects', async () => {
+    const supabase = makeSupabase()
+    mockAuthed(supabase, 'manager')
+
+    // Reported as saved, this is the setting that keeps auto-assigning crew to
+    // every new turnover after the PM believes they switched it off.
+    const result = await updateAutoAssignMode('disabled')
+
+    expect(result.error).toMatch(DENIED)
+    expect(supabase.from).not.toHaveBeenCalled()
+    expect(logAuditEvent).not.toHaveBeenCalled()
+  })
+
+  it('refuses a manager on updateSlackWebhook', async () => {
+    const supabase = makeSupabase()
+    mockAuthed(supabase, 'manager')
+
+    const result = await updateSlackWebhook(
+      null,
+      formData({ slack_webhook_url: 'https://hooks.slack.com/services/T/B/x' })
+    )
+
+    expect(result.error).toMatch(DENIED)
+    expect(supabase.from).not.toHaveBeenCalled()
+    expect(logAuditEvent).not.toHaveBeenCalled()
+  })
+})
+
+describe('updateSlackWebhook — blank no longer means "clear it"', () => {
+  beforeEach(() => vi.clearAllMocks())
+
+  it('refuses a blank submit instead of wiping the configured webhook', async () => {
+    const supabase = makeSupabase()
+    mockAuthed(supabase, 'admin')
+
+    // The field now renders EMPTY even when a webhook is set, because the
+    // stored URL is a bearer credential and is no longer sent to the browser.
+    // Under the old "blank means null" rule, that empty field wiped the
+    // webhook on any unrelated save of this form.
+    const result = await updateSlackWebhook(null, formData({ slack_webhook_url: '   ' }))
+
+    expect(result.error).toMatch(/Remove/i)
+    expect(supabase.from).not.toHaveBeenCalled()
+  })
+
+  it('clears it only on an explicit remove intent', async () => {
+    const supabase = makeSupabase({ organizations: [{ data: null, error: null }] })
+    mockAuthed(supabase, 'admin')
+
+    const result = await updateSlackWebhook(null, formData({ slack_webhook_url: '', intent: 'remove' }))
+
+    expect(result).toEqual({ success: true })
+    const update = supabase.calls.find((c) => c.table === 'organizations' && c.method === 'update')
+    expect((update?.args[0] as { slack_webhook_url: string | null }).slack_webhook_url).toBeNull()
+  })
+
+  it('still rejects a non-Slack URL', async () => {
+    const supabase = makeSupabase()
+    mockAuthed(supabase, 'admin')
+
+    const result = await updateSlackWebhook(null, formData({ slack_webhook_url: 'https://evil.example.com/hook' }))
+
+    expect(result.error).toMatch(/Slack Incoming Webhook/i)
+    expect(supabase.from).not.toHaveBeenCalled()
+  })
+
+  it('never puts the URL in the audit metadata', async () => {
+    const supabase = makeSupabase({ organizations: [{ data: null, error: null }] })
+    mockAuthed(supabase, 'admin')
+
+    const url = 'https://hooks.slack.com/services/T000/B000/secret'
+    await updateSlackWebhook(null, formData({ slack_webhook_url: url }))
+
+    const logged = vi.mocked(logAuditEvent).mock.calls[0]?.[0]
+    expect(JSON.stringify(logged)).not.toContain('secret')
+    expect(logged).toEqual(
+      expect.objectContaining({ metadata: expect.objectContaining({ configured: true }) })
+    )
   })
 })

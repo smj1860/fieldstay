@@ -101,8 +101,19 @@ const BASELINE: Record<string, number> = {
   'app/(dashboard)/properties/actions.ts': 3,
   'app/(dashboard)/properties/clone-actions.ts': 4,
   'app/(dashboard)/settings/actions.ts': 11,
-  'app/(dashboard)/settings/integrations/actions.ts': 4,
-  'app/(dashboard)/settings/team/actions.ts': 3,
+  // 4 -> 1: the three connection lookups now go through tryUnwrap. The
+  // disconnectIntegration one was the costly one — a failed read produced the
+  // same null as "no such connection", so the PM was told the integration
+  // isn't connected while the provider token stayed live in Vault. Same defect
+  // on the same table as the deleted findUserByExternalId (lib/integrations/
+  // vault.ts). getSyncProgress's bare `catch { return null }` now reports too.
+  'app/(dashboard)/settings/integrations/actions.ts': 1,
+  // 3 -> 2: removeMember's target-role lookup unwraps. It is the ONLY thing
+  // enforcing "an owner cannot be removed", and the delete below it is
+  // org-scoped but role-blind — so a transient failure of that read let the
+  // delete run against an owner, and a non-member id returned { ok: true }
+  // with an audit row for a removal that never happened.
+  'app/(dashboard)/settings/team/actions.ts': 2,
   'app/(dashboard)/templates/inventory/actions.ts': 2,
   'app/(dashboard)/templates/maintenance/actions.ts': 3,
   'app/(dashboard)/vendors/actions.ts': 3,

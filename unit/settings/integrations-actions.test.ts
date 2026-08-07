@@ -288,6 +288,29 @@ describe('settings/integrations/actions', () => {
       expect(disconnectIntegrationToken).not.toHaveBeenCalled()
     })
 
+    it('says nothing was disconnected — not "isn\'t connected" — when the lookup itself fails', async () => {
+      mockAuthed('admin')
+      const supabase = makeSupabase({
+        integration_connections: [
+          { data: null, error: { message: 'connection reset', code: '08006' } },
+        ],
+      })
+      vi.mocked(createServiceClient).mockReturnValue(supabase as never)
+
+      const result = await disconnectIntegration('hospitable')
+
+      // The distinction matters because this is a credential. Discarded, the
+      // read error produced the same null as "no such connection", so the PM
+      // was told the integration isn't connected and the action returned —
+      // while the token stayed live in Vault and the connection stayed active.
+      // They believe they revoked access; nothing did, and nothing retries.
+      expect(result.error).toMatch(/nothing was disconnected/i)
+      expect(result.error).not.toMatch(/isn't connected\./i)
+      expect(readIntegrationToken).not.toHaveBeenCalled()
+      expect(disconnectIntegrationToken).not.toHaveBeenCalled()
+      expect(logAuditEvent).not.toHaveBeenCalled()
+    })
+
     it('revokes at the provider and disconnects locally on the happy path', async () => {
       mockAuthed('admin')
       const supabase = makeSupabase({

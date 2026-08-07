@@ -24,11 +24,15 @@ import {
 } from '@/lib/sms/telnyx'
 import {
   renderTemplate,
+  withOptOutNotice,
   type SmsTemplateKey,
 } from '@/lib/sms/template-registry'
 
 export {
   renderTemplate,
+  hasOptOutNotice,
+  withOptOutNotice,
+  SMS_OPT_OUT_NOTICE,
   SMS_TEMPLATE_REGISTRY,
   type SmsTemplateKey,
   type SmsTemplateVariable,
@@ -74,8 +78,19 @@ export async function renderSmsBody(
   const templateOut = tryUnwrap(templateRes, { site: 'lib.sms.templates', orgId })
   const data = templateOut.ok ? templateOut.data : null
 
-  // Custom template found — render and return
-  if (data?.body) return renderTemplate(data.body, vars)
+  // Custom template found — render and return.
+  //
+  // withOptOutNotice is the backstop, not decoration. An org override REPLACES
+  // the default body wholesale, and every one of the ten built-in defaults ends
+  // with "Reply STOP to opt out." — so before this, saving a custom template
+  // that omitted it silently stripped the opt-out instruction from every SMS
+  // that org sent, guest and crew alike, for as long as the override existed.
+  // Nothing downstream re-added it: sendSMS passes the body straight to Telnyx.
+  //
+  // saveOrgSmsTemplate now rejects a body with no opt-out keyword, but that
+  // guard only covers rows written through that action. This one covers rows
+  // written by any path, including any saved before the rule existed.
+  if (data?.body) return withOptOutNotice(renderTemplate(data.body, vars))
 
   // Fall back to hardcoded defaults — keeps the existing builder logic
   return renderDefault(key, vars, turnoverData)

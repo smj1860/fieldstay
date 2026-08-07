@@ -7,6 +7,7 @@ import { createServiceClient, adminFetch } from '@/lib/supabase/server'
 import { sendTeamInviteEmail }       from '@/lib/resend/client'
 import { revalidatePath }            from 'next/cache'
 import { logAuditEvent }             from '@/lib/audit'
+import { tryUnwrap }                 from '@/lib/supabase/unwrap'
 
 import { reportError } from '@/lib/observability/report-error'
 const EmailSchema = z.string().email('Invalid email address.')
@@ -146,15 +147,39 @@ export async function removeMember(
 
     const admin = createServiceClient({ authorizedBy: membership })
 
-    // Prevent removing another owner
-    const { data: targetMember } = await admin
+    // Prevent removing another owner.
+    //
+    // This read is the ONLY thing enforcing that rule, so its error can't be
+    // discarded. `const { data: targetMember }` collapsed three outcomes into
+    // one undefined — "they're an owner" never reached the guard, "they aren't
+    // a member of this org at all" looked identical to "they're a removable
+    // member", and a transient failure of the read itself let the delete
+    // proceed against an owner. Nothing downstream would have caught it: the
+    // delete below is org-scoped but role-blind, and a delete matching zero
+    // rows returns no error, so the action reported success and wrote an audit
+    // row for a removal that never happened.
+    //
+    // maybeSingle, not single: a non-member must be distinguishable from a
+    // failed lookup, and .single() reports both as an error.
+    const targetRes = await admin
       .from('organization_members')
       .select('role')
       .eq('org_id', membership.org_id)
       .eq('user_id', targetUserId)
-      .single()
+      .maybeSingle()
 
-    if (targetMember?.role === 'owner') {
+    const targetOut = tryUnwrap(targetRes, {
+      site:  'serverAction.settings.team.removeMember.targetLookup',
+      orgId: membership.org_id,
+    })
+
+    if (!targetOut.ok) {
+      return { error: 'Could not verify that member right now. Please try again.' }
+    }
+    if (!targetOut.data) {
+      return { error: 'That person is not a member of your organization.' }
+    }
+    if (targetOut.data.role === 'owner') {
       return { error: 'Cannot remove an owner from the organization.' }
     }
 
