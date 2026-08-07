@@ -78,6 +78,8 @@ export async function seedPresentAssetsFromAmenities(
       .eq('property_id', property.id as string)
       .eq('is_active', true)
       .in('asset_type', presentAssetTypes)
+      // Bounded by the fixed asset-type list this function checks.
+      .limit(presentAssetTypes.length)
     const existingAssetsOutcome = tryUnwrapList(existingAssetsRes, {
       site: 'lib.asset-discovery.seed-from-amenities.seedPresentAssetsFromAmenities',
       orgId,
@@ -185,6 +187,8 @@ export async function seedAbsentOptionalAssetsFromAmenities(
       .eq('property_id', property.id as string)
       .eq('is_active', true)
       .in('asset_type', absentTypes)
+      // Bounded by the fixed asset-type list this function checks.
+      .limit(absentTypes.length)
     const existingAssetsOutcome = tryUnwrapList(existingAssetsRes, {
       site: 'lib.asset-discovery.seed-from-amenities.seedAbsentOptionalAssetsFromAmenities',
       orgId,

@@ -58,6 +58,8 @@ export const autoAssignTurnover = inngest.createFunction(
         .eq('available_date', checkoutDate)
         .eq('is_available', false)
         .in('crew_member_id', crew.map((c) => c.id))
+        // Bounded: at most one row per crew member per date.
+        .limit(crew.length)
 
       const timeOff = unwrapList(timeOffRes, { site: 'inngest.auto-assign-turnover.load-context', orgId: org_id })
 
@@ -66,15 +68,21 @@ export const autoAssignTurnover = inngest.createFunction(
 
       if (!availableCrew.length) return null
 
-      // Familiarity: which crew have been assigned to this property before
-      const propertyTurnoversRes = await supabase
-        .from('turnovers')
-        .select('id')
-        .eq('property_id', property_id)
-        .eq('org_id', org_id)
-        .neq('id', turnover_id)
-
-      const propertyTurnovers = unwrapList(propertyTurnoversRes, { site: 'inngest.auto-assign-turnover.load-context', orgId: org_id })
+      // Familiarity: which crew have been assigned to this property before.
+      // Paginated: every prior turnover for this property, which grows
+      // without bound over the property's lifetime — same reasoning as the
+      // turnover_assignments read below that consumes these ids.
+      const propertyTurnovers = await fetchAllRows<{ id: string }>(
+        (from, to) => supabase
+          .from('turnovers')
+          .select('id')
+          .eq('property_id', property_id)
+          .eq('org_id', org_id)
+          .neq('id', turnover_id)
+          .order('id')
+          .range(from, to),
+        { label: 'auto-assign-turnover.property-turnovers' },
+      )
 
       const pastTurnoverIds = propertyTurnovers.map((t) => t.id)
       let familiarCrewIds: string[] = []

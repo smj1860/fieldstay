@@ -11,6 +11,10 @@ import { unwrap, unwrapList } from '@/lib/supabase/unwrap'
 
 const FALLBACK_TIMEZONE = 'America/New_York'
 
+// A guidebook's active sponsor slots are a small, curated set per org; the
+// explicit bound documents that and keeps it out of the unbounded-select class.
+const ACTIVE_SPONSORS_LIMIT = 100
+
 const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL
 
 function sponsorPhotoUrl(path: string | null): string | null {
@@ -105,6 +109,7 @@ export default async function GuestGuidebookPage({
     .select('id, status, slot_type, business_name, business_description, custom_offer_text, address, offer_type, offer_value, offer_item, featured_item, business_phone, business_website, lat, lng, photo_storage_path')
     .eq('org_id', config.org_id)
     .eq('status', 'active')
+    .limit(ACTIVE_SPONSORS_LIMIT)
 
   const sponsors = unwrapList(sponsorsRes, { site: 'page.g.slug', orgId: config.org_id })
 

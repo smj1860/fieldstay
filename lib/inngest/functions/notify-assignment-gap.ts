@@ -69,6 +69,8 @@ export const notifyAssignmentGap = inngest.createFunction(
           .from('push_subscriptions')
           .select('endpoint, p256dh, auth')
           .eq('user_id', member.userId)
+          // Bounded: one manager's own registered devices.
+          .limit(20)
         const subs = unwrapList(subsRes, { site: 'inngest.notify-assignment-gap.push-manager', orgId: org_id })
 
         if (!subs.length) return

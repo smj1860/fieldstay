@@ -106,6 +106,8 @@ export async function sendGroupMessage(
       .select('id, user_id')
       .in('id', crewMemberIds)
       .eq('org_id', membership.org_id)
+      // Bounded by the recipient list the caller selected.
+      .limit(crewMemberIds.length)
     const crewUsers = unwrapList<{ id: string; user_id: string | null }>(
       crewUsersRes,
       { site: 'serverAction.messages.sendGroupMessage', orgId: membership.org_id }

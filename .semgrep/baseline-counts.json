@@ -76,15 +76,34 @@
     "-discarded-result 87 -> 83 and -read-without-error 171 -> 170, main's own",
     "independent fixes (unrelated PRs merged in between) had already lowered a",
     "few of these sites further. Re-run via --update rather than hand-merged,",
-    "per the usual rule that these counts are a measurement, not an edit."
+    "per the usual rule that these counts are a measurement, not an edit.",
+    "",
+    "BURNED DOWN 2026-08-07 (fourth pass, same day): CI's --baseline-commit",
+    "semgrep job failed on 9 findings the fan-in fix's read-without-error",
+    "rewrite incidentally surfaced as NEW relative to the PR base — the",
+    "underlying unbounded selects (-in-list, -org-scoped, -single-parent tiers)",
+    "already existed pre-rewrite and were already counted in these baselines,",
+    "but touching those exact lines to add error handling made semgrep's diff",
+    "view treat them as introduced by this PR. Fixed for real rather than",
+    "waiting them out: an explicit .limit() on 7 of the 9 (bounded by a",
+    "recipient/parent-id list or a fixed small set), fetchAllRows() on the",
+    "cpa-export depreciation-schedule read (a tax document silently truncating",
+    "is a correctness bug, not a display nicety) and on auto-assign-turnover's",
+    "property-turnovers read (same unbounded-over-lifetime shape its sibling",
+    "turnover_assignments read next to it already documented and paginated).",
+    "-in-list 36 -> 34, -org-scoped 101 -> 98, -single-parent 34 -> 30 — 9 net",
+    "across the two files with a double fix (seed-from-amenities.ts,",
+    "auto-assign-turnover.ts) plus the 7 single-finding files. Verified",
+    "against the exact CI invocation: `semgrep --config .semgrep/ratchet.yml",
+    "--baseline-commit <merge-base> --json` returns zero results."
   ],
   "measured_at": "2026-08-07",
   "counts": {
     "fieldstay-supabase-discarded-result": 83,
     "fieldstay-supabase-read-without-error": 170,
     "fieldstay-supabase-read-without-error-fan-in": 0,
-    "fieldstay-supabase-unbounded-select-in-list": 36,
-    "fieldstay-supabase-unbounded-select-org-scoped": 101,
-    "fieldstay-supabase-unbounded-select-single-parent": 34
+    "fieldstay-supabase-unbounded-select-in-list": 34,
+    "fieldstay-supabase-unbounded-select-org-scoped": 98,
+    "fieldstay-supabase-unbounded-select-single-parent": 30
   }
 }

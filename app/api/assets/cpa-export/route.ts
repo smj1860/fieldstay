@@ -12,7 +12,8 @@ import { dataExportLimiter, checkLimit } from '@/lib/rate-limit'
 import { PDFDocument, PDFFont, StandardFonts, rgb } from 'pdf-lib'
 import { MACRS_LABELS } from '@/lib/assets/depreciation'
 import { unwrapJoin } from '@/lib/utils/supabase-joins'
-import { unwrap, unwrapList } from '@/lib/supabase/unwrap'
+import { unwrap } from '@/lib/supabase/unwrap'
+import { fetchAllRows } from '@/lib/inngest/paginate'
 import type { MacrsClass } from '@/types/database'
 
 // ── Layout constants ──────────────────────────────���───────────────────────────
@@ -108,24 +109,28 @@ export async function GET(req: Request) {
 
   const org = unwrap(orgRes, { site: 'route.assets.cpa-export.GET', orgId: membership.org_id })
 
-  // Load depreciation entries with asset + property names
-  const entriesRes = await supabase
-    .from('asset_depreciation_entries')
-    .select(`
-      id, asset_id, tax_year, macrs_class,
-      cost_basis, prior_cumulative_depreciation,
-      current_year_depreciation, ending_adjusted_basis,
-      depreciation_rate,
-      property_assets (
-        name, placed_in_service_date, property_id,
-        properties ( name )
-      )
-    `)
-    .eq('org_id', membership.org_id)
-    .eq('tax_year', taxYear)
-    .order('asset_id')
-
-  const entries = unwrapList(entriesRes, { site: 'route.assets.cpa-export.GET', orgId: membership.org_id })
+  // Load depreciation entries with asset + property names. Paginated: a tax
+  // document silently missing rows past max_rows = 1000 is a correctness bug,
+  // not a display truncation — every asset for the year must be on it.
+  const entries = await fetchAllRows(
+    (from, to) => supabase
+      .from('asset_depreciation_entries')
+      .select(`
+        id, asset_id, tax_year, macrs_class,
+        cost_basis, prior_cumulative_depreciation,
+        current_year_depreciation, ending_adjusted_basis,
+        depreciation_rate,
+        property_assets (
+          name, placed_in_service_date, property_id,
+          properties ( name )
+        )
+      `)
+      .eq('org_id', membership.org_id)
+      .eq('tax_year', taxYear)
+      .order('asset_id')
+      .range(from, to),
+    { label: 'cpa-export.entries' },
+  )
 
   if (!entries?.length) {
     return new Response(

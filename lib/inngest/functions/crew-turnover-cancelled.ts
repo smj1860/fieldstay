@@ -80,6 +80,8 @@ export const handleCrewTurnoverCancelled = inngest.createFunction(
         .from('push_subscriptions')
         .select('endpoint, p256dh, auth')
         .eq('crew_member_id', crew_member_id)
+        // Bounded: one crew member's own registered devices.
+        .limit(20)
       const subs = unwrapList(subsRes, { site: 'inngest.crew-turnover-cancelled.push-cancellation', orgId: org_id })
 
       if (!subs.length) return { sent: false, reason: 'no-subscriptions' }
