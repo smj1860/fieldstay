@@ -63,4 +63,46 @@ describe('crew auth drift guardrail', () => {
       ...offenders,
     ].join('\n')).toEqual([])
   })
+
+  // ── The two crew turnover routes drifted, and the drift was the bug ───────
+  //
+  // start/ and complete/ share a prologue: authenticate, load the turnover
+  // scoped to the crew member's own org, confirm they are assigned to it. The
+  // start route was hardened to answer a failed READ with 503 rather than 404,
+  // because lib/dexie/net.ts classifies 4xx as TERMINAL and >=500 as transient
+  // — a 404 on a transient DB error permanently DEAD-LETTERS the crew member's
+  // queued mutation. The complete route kept `const { data } = await ...
+  // .single()` and went on discarding finished work: job done, PM never saw it
+  // finish, cleaning fee never posted.
+  //
+  // Copying the fix into the second route would have left exactly the shape
+  // that allowed the drift, so it lives in one place now. This keeps it there:
+  // a new crew turnover route that re-inlines the prologue cannot pick up the
+  // next fix either.
+  it('crew turnover routes load their context through the shared helper, not by re-inlining it', () => {
+    const routes = collectSourceFiles(join(ROOT, 'app', 'api', 'crew', 'turnovers'))
+      .filter((f) => f.endsWith('route.ts'))
+
+    expect(routes.length, 'no crew turnover routes found — has the path moved?').toBeGreaterThan(0)
+
+    // Any direct call at all — NOT "calls it and does not also import the
+    // helper". The first version of this check used that weaker condition and
+    // a canary walked straight through it: a route that re-inlined
+    // requireCrewMember() while still importing the helper was reported clean,
+    // which is precisely the half-migrated state drift looks like. A route
+    // using the helper has no reason to call requireCrewMember itself.
+    const offenders = routes.filter((file) =>
+      /requireCrewMember\s*\(/.test(readFileSync(file, 'utf8')),
+    )
+
+    expect(
+      offenders.map((f) => relative(ROOT, f)),
+      'These crew turnover routes call requireCrewMember() directly instead of\n' +
+      'loadCrewTurnoverContext() from lib/turnovers/crew-route-context.ts. That\n' +
+      'helper carries the 503-vs-404 rule the Dexie outbox depends on, the\n' +
+      'org-scoped read, and the assignment check. Re-inlining it is how the\n' +
+      'start and complete routes diverged in the first place.',
+    ).toEqual([])
+  })
+
 })

@@ -1,8 +1,8 @@
+import { tryUnwrap } from '@/lib/supabase/unwrap'
 import { NextRequest, NextResponse } from 'next/server'
-import { requireCrewMember } from '@/lib/crew-auth'
 import { inngest } from '@/lib/inngest/client'
 import { resolveTurnoverCompletedAt } from '@/lib/turnovers/completion'
-import { isCrewAssignedToTurnover } from '@/lib/turnovers/assignment'
+import { loadCrewTurnoverContext } from '@/lib/turnovers/crew-route-context'
 import { logAuditEvent } from '@/lib/audit'
 
 /**
@@ -20,33 +20,67 @@ export async function POST(
   { params }: { params: Promise<{ id: string }> }
 ) {
   const { id: turnover_id } = await params
-  const auth = await requireCrewMember()
-  if (!auth.ok) return auth.response
-  const { user, supabase, crew } = auth
 
-  const { data: turnover } = await supabase
-    .from('turnovers')
-    .select('id, property_id, org_id, status, inventory_confirmed_complete_at')
-    .eq('id', turnover_id)
-    .eq('org_id', crew.org_id)
-    .single()
+  // Auth, org-scoped load and the assignment check all live in one place. This
+  // route is WHY that helper exists: it kept `const { data } = await ...
+  // .single()` long after the sibling start route was hardened, so a transient
+  // DB error answered 404 — terminal to lib/dexie/net.ts — and permanently
+  // discarded a crew member's finished work. Copying the fix across would have
+  // left the same shape that allowed the drift.
+  const ctx = await loadCrewTurnoverContext<{
+    id: string; property_id: string; org_id: string; status: string
+    inventory_confirmed_complete_at: string | null
+  }>(
+    turnover_id,
+    'id, property_id, org_id, status, inventory_confirmed_complete_at',
+    'api.crew.turnovers.complete',
+  )
+  if (!ctx.ok) return ctx.response
 
-  if (!turnover) return NextResponse.json({ error: 'Turnover not found' }, { status: 404 })
-
-  if (!(await isCrewAssignedToTurnover(supabase, turnover_id, crew.id))) {
-    return NextResponse.json({ error: 'Turnover not found' }, { status: 404 })
-  }
+  const { user, supabase, crew } = ctx.auth
+  const turnover = ctx.turnover
 
   // Already completed (e.g. retried upload) — no-op, don't re-fire the event.
   if (turnover.status === 'completed') {
     return NextResponse.json({ success: true })
   }
 
-  const { data: checklistInstance } = await supabase
+  // A cancelled turnover must not be completable. Nothing removes a cancelled
+  // turnover from the crew's Dexie cache and no crew screen checks the status,
+  // so a PM cancelling a job the crew already has offline left it looking
+  // perfectly normal and tappable. Completing it fired turnover/completed,
+  // which posts a cleaning_fee to the owner's ledger — a real charge for work
+  // that was called off. Production holds 6 cancelled turnovers, so this is a
+  // reachable state, not a theoretical one.
+  //
+  // 409, deliberately: lib/dexie/net.ts treats 4xx as terminal, and that is
+  // correct here — replaying this can never succeed. It dead-letters into the
+  // failed-sync banner where the crew member can see WHY, which is the honest
+  // outcome. Silently answering success would tell them the job was recorded.
+  if (turnover.status === 'cancelled') {
+    return NextResponse.json(
+      { error: 'This turnover was cancelled. Check with your manager before doing any more work on it.' },
+      { status: 409 },
+    )
+  }
+
+  const checklistRes = await supabase
     .from('checklist_instances')
     .select('completed_at')
     .eq('turnover_id', turnover_id)
     .maybeSingle()
+
+  // Also 503 rather than a swallowed null: a failed read here silently changed
+  // the RECORDED COMPLETION TIME. resolveTurnoverCompletedAt falls back to
+  // wall-clock when either confirmation timestamp is missing, so a transient
+  // error would have stamped "now" instead of when the crew actually finished
+  // — and that timestamp is what crew duration, assignment_outcomes and crew
+  // scoring are all derived from.
+  const checklistOut = tryUnwrap(checklistRes, { site: 'api.crew.turnovers.complete.checklist', orgId: crew.org_id })
+  if (!checklistOut.ok) {
+    return NextResponse.json({ error: 'Could not load the turnover. Please try again.' }, { status: 503 })
+  }
+  const checklistInstance = checklistOut.data
 
   // When completion was driven by both the "Confirm Checklist Complete"
   // and "Confirm Inventory Complete" checkboxes, completed_at should
@@ -68,6 +102,9 @@ export async function POST(
     .eq('id', turnover_id)
     .eq('org_id', crew.org_id)
     .neq('status', 'completed')
+    // Belt to the early return above's braces: the status could change between
+    // that read and this write, and a cancel is exactly the change that races.
+    .neq('status', 'cancelled')
     .select('id')
     .maybeSingle()
 

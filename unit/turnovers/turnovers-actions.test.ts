@@ -248,6 +248,46 @@ describe('turnovers/actions', () => {
   })
 
   describe('updateTurnoverStatus', () => {
+    // ── A cancelled turnover must not be completable ────────────────────────
+    //
+    // Completing one fires turnover/completed, which posts a cleaning_fee to
+    // the owner's ledger — a real charge for work that was called off. The
+    // guard was .neq('status','completed') alone, which a cancelled row passes.
+    // Production holds 6 cancelled turnovers, so the state is reachable.
+    it('refuses to complete a cancelled turnover and says so, rather than reporting success', async () => {
+      const supabase = makeSupabase({
+        turnovers: [
+          { data: null, error: null },                 // the guarded UPDATE matched nothing
+          { data: { status: 'cancelled' }, error: null }, // ...because it is cancelled
+        ],
+      })
+      mockAuthed({ supabase, membership, user: { id: 'user_1' } } as never)
+
+      const result = await updateTurnoverStatus('t_1', 'completed')
+
+      expect(result.error).toMatch(/cancelled/i)
+      expect(inngest.send).not.toHaveBeenCalled()
+    })
+
+    // The same 0-row outcome means something entirely different when a
+    // concurrent request won the completion claim — that IS a success, and
+    // re-firing the event would double-count the metric and overwrite
+    // completed_at. Distinguishing the two is the whole point of the re-read.
+    it('still treats an already-completed turnover as success without re-firing', async () => {
+      const supabase = makeSupabase({
+        turnovers: [
+          { data: null, error: null },                 // lost the completion claim
+          { data: { status: 'completed' }, error: null },
+        ],
+      })
+      mockAuthed({ supabase, membership, user: { id: 'user_1' } } as never)
+
+      const result = await updateTurnoverStatus('t_1', 'completed')
+
+      expect(result.error).toBeUndefined()
+      expect(inngest.send).not.toHaveBeenCalled()
+    })
+
     it('marks a turnover completed and fires the completion event', async () => {
       // The conditional UPDATE returns the row it actually matched.
       const supabase = makeSupabase({
@@ -279,6 +319,26 @@ describe('turnovers/actions', () => {
 
       expect(supabase.calls).toContainEqual(
         expect.objectContaining({ table: 'turnovers', method: 'neq', args: ['status', 'completed'] })
+      )
+    })
+
+    // The WHERE clause is the real guard; the re-read below it only explains
+    // WHY zero rows matched. Asserting on the re-read alone would let someone
+    // delete this filter — and actually complete a cancelled turnover, posting
+    // the cleaning fee — with every test still green. That is not a
+    // hypothetical: removing this .neq broke nothing until this test existed.
+    it('guards completion against cancelled in the WHERE clause, not just in the message', async () => {
+      const supabase = makeSupabase({
+        turnovers: [{ data: { id: 't_1', property_id: 'prop_1', org_id: 'org_1' }, error: null }],
+      })
+      mockAuthed({
+        supabase, membership, user: { id: 'user_1' },
+      } as never)
+
+      await updateTurnoverStatus('t_1', 'completed')
+
+      expect(supabase.calls).toContainEqual(
+        expect.objectContaining({ table: 'turnovers', method: 'neq', args: ['status', 'cancelled'] })
       )
     })
 

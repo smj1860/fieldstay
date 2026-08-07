@@ -1,8 +1,6 @@
-import { tryUnwrap } from '@/lib/supabase/unwrap'
 import { NextRequest, NextResponse } from 'next/server'
-import { requireCrewMember } from '@/lib/crew-auth'
 import { inngest } from '@/lib/inngest/client'
-import { isCrewAssignedToTurnover } from '@/lib/turnovers/assignment'
+import { loadCrewTurnoverContext } from '@/lib/turnovers/crew-route-context'
 import { logAuditEvent } from '@/lib/audit'
 
 /**
@@ -18,32 +16,18 @@ export async function POST(
   { params }: { params: Promise<{ id: string }> }
 ) {
   const { id: turnover_id } = await params
-  const auth = await requireCrewMember()
-  if (!auth.ok) return auth.response
-  const { user, supabase, crew } = auth
 
-  const turnoverRes = await supabase
-    .from('turnovers')
-    .select('id, org_id, status')
-    .eq('id', turnover_id)
-    .eq('org_id', crew.org_id)
-    .maybeSingle()
+  // Auth, org-scoped load and the assignment check all live in one place —
+  // see lib/turnovers/crew-route-context.ts for why they are not inlined here.
+  const ctx = await loadCrewTurnoverContext<{ id: string; org_id: string; status: string }>(
+    turnover_id,
+    'id, org_id, status',
+    'api.crew.turnovers.start',
+  )
+  if (!ctx.ok) return ctx.response
 
-  // 503, not 404, when the READ fails: lib/dexie/net.ts classifies 4xx as
-  // TERMINAL and >=500 as transient, so answering a transient DB error with a
-  // 404 dead-lettered the crew member's queued mutation permanently instead of
-  // retrying it. A genuinely missing row still returns 404.
-  const turnoverOut = tryUnwrap(turnoverRes, { site: 'api.crew.turnovers.start', orgId: crew.org_id })
-  if (!turnoverOut.ok) {
-    return NextResponse.json({ error: 'Could not load the turnover. Please try again.' }, { status: 503 })
-  }
-
-  const turnover = turnoverOut.data
-  if (!turnover) return NextResponse.json({ error: 'Turnover not found' }, { status: 404 })
-
-  if (!(await isCrewAssignedToTurnover(supabase, turnover_id, crew.id))) {
-    return NextResponse.json({ error: 'Turnover not found' }, { status: 404 })
-  }
+  const { user, supabase, crew } = ctx.auth
+  const turnover = ctx.turnover
 
   // Already in progress or further along — no-op (safe for retried uploads)
   if (turnover.status !== 'assigned') {
