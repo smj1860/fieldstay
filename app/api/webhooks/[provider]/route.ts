@@ -17,12 +17,12 @@
 //   https://fieldstay.app/api/webhooks/ownerrez
 // ============================================================
 
-import { unwrap } from '@/lib/supabase/unwrap'
+import { unwrapList } from '@/lib/supabase/unwrap'
 import { NextResponse, type NextRequest }            from 'next/server'
 import { createHash }                                from 'crypto'
 import { getProvider }                               from '@/lib/integrations/registry'
 import { canonicalJson, PayloadTooDeepError }        from '@/lib/integrations/canonical-json'
-import { revokeIntegrationToken, findUserByExternalId } from '@/lib/integrations/vault'
+import { revokeIntegrationToken } from '@/lib/integrations/vault'
 import { logAuditEvent }                             from '@/lib/audit'
 import { createServiceClient }                       from '@/lib/supabase/server'
 import { inngest }                                   from '@/lib/inngest/client'
@@ -119,31 +119,45 @@ async function processRevocation(args: {
     return
   }
 
-  const appUserId = await findUserByExternalId(providerId, externalUserId)
-
-  if (!appUserId) {
-    console.warn(
-      `[Webhook:${providerId}] Revocation for unknown external user ${externalUserId} — ` +
-      `may have already been disconnected`
-    )
-    return
-  }
-
   const supabase = createServiceClient({ publicSurface: 'api-webhooks--provider-' })
-  // A failed read used to land in the "already processed or not found" branch
-  // below, which SKIPS the revocation — so a transient error left a revoked
-  // provider token active on our side, and the webhook answered 2xx so the
-  // provider never redelivered. Throwing makes the delivery retryable.
-  const existingConnRes = await supabase
+
+  // ONE read for every connection bound to this external account.
+  //
+  // This used to be two: findUserByExternalId() to get the user, then a second
+  // lookup of the same (provider_id, external_user_id) row to check its status.
+  // The second one already unwrapped, with a comment explaining exactly why —
+  // "a transient error left a revoked provider token active on our side, and
+  // the webhook answered 2xx so the provider never redelivered". But
+  // findUserByExternalId ran FIRST and swallowed its own error into `null`,
+  // and the caller treated null as "may have already been disconnected" and
+  // returned. So in the precise failure the unwrap was added for, the unwrap
+  // was never reached: the fix sat behind the bug.
+  //
+  // Two more things the old first read got wrong, both fixed by folding it in:
+  //
+  //   • .eq('status', 'active') — identity resolution filtered by health. A
+  //     connection sitting in 'error' after a failed token refresh resolved to
+  //     no user, so a provider revoking THAT account never destroyed its Vault
+  //     secret. The status decision belongs below, where it already lives.
+  //   • .single() — integration_connections is UNIQUE (user_id, provider_id),
+  //     NOT on external_user_id, so two FieldStay users connecting the same
+  //     provider account is a legal state that made .single() error. Every
+  //     connection bound to a revoked external account is invalid, so all of
+  //     them are revoked, not an arbitrary one.
+  const connsRes = await supabase
     .from('integration_connections')
-    .select('status, org_id')
-    .eq('provider_id', providerId)
+    .select('user_id, status, org_id')
+    .eq('provider_id',      providerId)
     .eq('external_user_id', externalUserId)
-    .maybeSingle()
+    .limit(50)
 
-  const existingConn = unwrap(existingConnRes, { site: 'webhook.provider.revocation.connection' })
+  const conns = unwrapList(connsRes, { site: 'webhook.provider.revocation.connections' })
 
-  if (!existingConn || existingConn.status === 'revoked' || existingConn.status === 'disconnected') {
+  const actionable = conns.filter(
+    (c) => c.status !== 'revoked' && c.status !== 'disconnected'
+  )
+
+  if (!actionable.length) {
     console.log(
       `[Webhook:${providerId}] Revocation already processed or connection ` +
       `not found for external user ${externalUserId} — skipping`
@@ -151,23 +165,28 @@ async function processRevocation(args: {
     return
   }
 
-  await revokeIntegrationToken(appUserId, providerId)
-  console.log(
-    `[Webhook:${providerId}] Token revoked — FieldStay user ${appUserId} ` +
-    `(external user ${externalUserId})`
-  )
-  await logAuditEvent({
-    orgId:      existingConn.org_id ?? undefined,
-    actorId:    appUserId,
-    action:     'integration.revoked',
-    targetType: 'integration_provider',
-    targetId:   providerId,
-    metadata:   { externalUserId, trigger: 'webhook' },
-    correlationId,
-  })
+  for (const conn of actionable) {
+    const appUserId = conn.user_id as string
 
-  await notifyRevokedConnection(providerId, appUserId, existingConn.org_id ?? null)
+    await revokeIntegrationToken(appUserId, providerId)
+    console.log(
+      `[Webhook:${providerId}] Token revoked — FieldStay user ${appUserId} ` +
+      `(external user ${externalUserId})`
+    )
+    await logAuditEvent({
+      orgId:      conn.org_id ?? undefined,
+      actorId:    appUserId,
+      action:     'integration.revoked',
+      targetType: 'integration_provider',
+      targetId:   providerId,
+      metadata:   { externalUserId, trigger: 'webhook' },
+      correlationId,
+    })
+
+    await notifyRevokedConnection(providerId, appUserId, conn.org_id ?? null)
+  }
 }
+
 
 export async function POST(
   request: NextRequest,
