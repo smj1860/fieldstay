@@ -176,7 +176,7 @@ const BASELINE: Record<string, number> = {
   'lib/inngest/functions/ownerrez/incremental-sync.ts': 4,
   'lib/inngest/functions/ownerrez/initial-sync.ts': 6,
   'lib/inngest/functions/ownerrez/ownerrez-reviews-sync.ts': 3,
-  'lib/inngest/functions/platform-inventory-template-broadcast.ts': 5,
+  'lib/inngest/functions/platform-inventory-template-broadcast.ts': 4,
   'lib/inngest/functions/support-conversation-escalated.ts': 2,
   'lib/inngest/functions/turnover-events.ts': 5,
   'lib/inngest/functions/work-order-dispatch.ts': 3,

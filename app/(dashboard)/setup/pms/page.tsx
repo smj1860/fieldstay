@@ -27,6 +27,7 @@ export default async function OnboardingPmsPage() {
     .in('id', PMS_PROVIDER_IDS)
     .eq('is_active', true)
     .order('display_name')
+    .limit(PMS_PROVIDER_IDS.length)
 
 
   // Logs + reports, then throws so the segment's error.tsx renders a real

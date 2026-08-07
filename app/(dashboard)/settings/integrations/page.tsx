@@ -9,6 +9,10 @@ import { throwIfAnyQueryFailed } from '@/lib/supabase/unwrap'
 
 export const metadata: Metadata = { title: 'Integrations — FieldStay' }
 
+// Fixed platform registry (a handful of providers today); the explicit bound
+// documents that and keeps it out of the unbounded-select class.
+const INTEGRATION_PROVIDERS_LIMIT = 200
+
 export default async function IntegrationsPage() {
   const { membership } = await requireOrgMember()
 
@@ -19,6 +23,7 @@ export default async function IntegrationsPage() {
     .select('id, display_name, auth_type, is_active')
     .eq('is_active', true)
     .order('display_name')
+    .limit(INTEGRATION_PROVIDERS_LIMIT)
 
 
   // Logs + reports, then throws so the segment's error.tsx renders a real
