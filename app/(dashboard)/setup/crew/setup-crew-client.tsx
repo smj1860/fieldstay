@@ -21,7 +21,7 @@ interface Props {
   continueAction: () => Promise<void>
 }
 
-export function SetupCrewStep({ crew: initialCrew, continueAction }: Props) {
+export function SetupCrewStep({ crew: initialCrew, continueAction }: Readonly<Props>) {
   const [crew, setCrew] = useState(initialCrew)
   const [view, setView] = useState<'list' | 'add'>('list')
   const [savedName, setSavedName] = useState<string | null>(null)
@@ -198,20 +198,48 @@ export function SetupCrewStep({ crew: initialCrew, continueAction }: Props) {
   )
 }
 
+/**
+ * inviteCrewMember returns { error?, success? } and has five distinct refusal
+ * paths — permission denied, crew member not found, no email or phone on file,
+ * already has an active account, and a failed send. This component awaited it,
+ * threw the result away, and rendered a green "Invited" every time.
+ *
+ * That is worse than showing nothing: a PM who has just added an outside
+ * cleaner sees a tick, believes the link went out, and moves on. The crew
+ * member never hears anything, and the PM has no reason to look again.
+ *
+ * The other two call sites of this action (both in crew-manage-client.tsx)
+ * have always branched on result.error. This was the odd one out, and it is
+ * the one on the page a PM sees exactly once, during setup, when they have the
+ * least context for noticing that nothing happened.
+ */
 function InviteChip({
   memberId, inviteSentAt, hasApp,
-}: { memberId: string; inviteSentAt: string | null; hasApp: boolean }) {
+}: Readonly<{ memberId: string; inviteSentAt: string | null; hasApp: boolean }>) {
   const [sent, setSent] = useState(false)
   const [busy, setBusy] = useState(false)
+  const [error, setError] = useState<string | null>(null)
 
   if (hasApp) return <Badge tone="green" className="text-xs">In App</Badge>
   if (sent)   return <span className="text-xs inline-flex items-center gap-1" style={{ color: 'var(--accent-green)' }}><Check className="w-3.5 h-3.5" /> Invited</span>
 
+  async function handleInvite() {
+    setBusy(true)
+    setError(null)
+    const result = await inviteCrewMember(memberId)
+    setBusy(false)
+    if (result.error) setError(result.error)
+    else              setSent(true)
+  }
+
   return (
-    <Button variant="secondary"
-            onClick={async () => { setBusy(true); await inviteCrewMember(memberId); setBusy(false); setSent(true) }}
-            disabled={busy} className="text-xs py-1 px-2.5">
-      {busy ? 'Sending…' : inviteSentAt ? 'Resend Invite' : 'Invite to App'}
-    </Button>
+    <div className="flex flex-col items-end gap-1">
+      <Button variant="secondary" onClick={handleInvite} disabled={busy} className="text-xs py-1 px-2.5">
+        {busy ? 'Sending…' : inviteSentAt ? 'Resend Invite' : 'Invite to App'}
+      </Button>
+      {error && (
+        <span className="text-xs text-right" style={{ color: 'var(--accent-red)' }}>{error}</span>
+      )}
+    </div>
   )
 }
