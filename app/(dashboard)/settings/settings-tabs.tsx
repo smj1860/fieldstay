@@ -88,7 +88,7 @@ export function SettingsTabs({
   hospitablePromo = null,
   slackWebhookConfigured = false,
   canEditOrgSettings = false,
-}: Props) {
+}: Readonly<Props>) {
   const searchParams = useSearchParams()
   const requestedTab = searchParams.get('tab') as Tab | null
   const initialTab   = requestedTab && (TABS as readonly string[]).includes(requestedTab)
@@ -148,7 +148,7 @@ export function SettingsTabs({
 
 // ── Organization tab ─────────────────────────────────────────────────────────
 
-function OrgTab({ org, connections, krogerNeedsStore, canEdit }: { org: Organization; connections: Record<string, ConnectionInfo>; krogerNeedsStore?: boolean; canEdit: boolean }) {
+function OrgTab({ org, connections, krogerNeedsStore, canEdit }: Readonly<{ org: Organization; connections: Record<string, ConnectionInfo>; krogerNeedsStore?: boolean; canEdit: boolean }>) {
   const [state, formAction, pending] = useActionState(updateOrgSettings, null)
 
   const plan        = PLAN_INFO[org.plan as keyof typeof PLAN_INFO] ?? PLAN_INFO.starter
@@ -680,7 +680,7 @@ const EMAIL_PREFS = [
 function NotificationsTab({
   slackWebhookConfigured,
   canEdit,
-}: { slackWebhookConfigured: boolean; canEdit: boolean }) {
+}: Readonly<{ slackWebhookConfigured: boolean; canEdit: boolean }>) {
   const [state, formAction, pending] = useActionState(updateNotificationPrefs, null)
   const [slackState, slackAction, slackPending] = useActionState(updateSlackWebhook, null)
 
