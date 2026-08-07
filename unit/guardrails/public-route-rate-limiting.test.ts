@@ -81,6 +81,14 @@ const AUTH_GATES = [
   'requireOrgMember', 'requireOrgRole', 'requireAuth',
   'requirePlatformAdmin', 'requirePlatformStaff', 'requireCrewMember',
   'auth.getUser()',
+  // Wrappers whose FIRST act is one of the gates above. This check reads file
+  // text, so a route that moves its gate behind a helper stops looking gated
+  // and gets reported as a public unauthenticated route — which is what
+  // happened when the two crew turnover routes were de-duplicated into
+  // loadCrewTurnoverContext(). A wrapper only belongs here if calling it is
+  // unconditionally an auth check; this one calls requireCrewMember() and
+  // returns its response on failure before touching anything else.
+  'loadCrewTurnoverContext',
 ]
 
 describe('guardrail: public token-guessable routes stay rate-limited', () => {

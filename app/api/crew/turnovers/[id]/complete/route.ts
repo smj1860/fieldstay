@@ -1,9 +1,8 @@
 import { tryUnwrap } from '@/lib/supabase/unwrap'
 import { NextRequest, NextResponse } from 'next/server'
-import { requireCrewMember } from '@/lib/crew-auth'
 import { inngest } from '@/lib/inngest/client'
 import { resolveTurnoverCompletedAt } from '@/lib/turnovers/completion'
-import { isCrewAssignedToTurnover } from '@/lib/turnovers/assignment'
+import { loadCrewTurnoverContext } from '@/lib/turnovers/crew-route-context'
 import { logAuditEvent } from '@/lib/audit'
 
 /**
@@ -21,36 +20,25 @@ export async function POST(
   { params }: { params: Promise<{ id: string }> }
 ) {
   const { id: turnover_id } = await params
-  const auth = await requireCrewMember()
-  if (!auth.ok) return auth.response
-  const { user, supabase, crew } = auth
 
-  const turnoverRes = await supabase
-    .from('turnovers')
-    .select('id, property_id, org_id, status, inventory_confirmed_complete_at')
-    .eq('id', turnover_id)
-    .eq('org_id', crew.org_id)
-    .maybeSingle()
+  // Auth, org-scoped load and the assignment check all live in one place. This
+  // route is WHY that helper exists: it kept `const { data } = await ...
+  // .single()` long after the sibling start route was hardened, so a transient
+  // DB error answered 404 — terminal to lib/dexie/net.ts — and permanently
+  // discarded a crew member's finished work. Copying the fix across would have
+  // left the same shape that allowed the drift.
+  const ctx = await loadCrewTurnoverContext<{
+    id: string; property_id: string; org_id: string; status: string
+    inventory_confirmed_complete_at: string | null
+  }>(
+    turnover_id,
+    'id, property_id, org_id, status, inventory_confirmed_complete_at',
+    'api.crew.turnovers.complete',
+  )
+  if (!ctx.ok) return ctx.response
 
-  // 503, not 404, when the READ fails — the sibling start route was fixed for
-  // exactly this and this one was not. lib/dexie/net.ts classifies 4xx as
-  // TERMINAL and >=500 as transient, so answering a transient DB error with a
-  // 404 DEAD-LETTERED the crew member's queued completion permanently. That is
-  // worse here than on start: completion is the end of the work, so the job was
-  // done, the PM never saw it finish, and the cleaning fee never posted.
-  // `.single()` made it likelier still, since it raises PGRST116 for zero rows
-  // and so could not be told apart from a real failure.
-  const turnoverOut = tryUnwrap(turnoverRes, { site: 'api.crew.turnovers.complete', orgId: crew.org_id })
-  if (!turnoverOut.ok) {
-    return NextResponse.json({ error: 'Could not load the turnover. Please try again.' }, { status: 503 })
-  }
-
-  const turnover = turnoverOut.data
-  if (!turnover) return NextResponse.json({ error: 'Turnover not found' }, { status: 404 })
-
-  if (!(await isCrewAssignedToTurnover(supabase, turnover_id, crew.id))) {
-    return NextResponse.json({ error: 'Turnover not found' }, { status: 404 })
-  }
+  const { user, supabase, crew } = ctx.auth
+  const turnover = ctx.turnover
 
   // Already completed (e.g. retried upload) — no-op, don't re-fire the event.
   if (turnover.status === 'completed') {
