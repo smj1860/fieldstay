@@ -54,6 +54,8 @@ vi.mock('@/lib/observability/report-error', () => ({ reportError: vi.fn() }))
 // The turnover row every query in the hook resolves against. Mutated per test.
 let TURNOVER: Record<string, unknown> | undefined
 let INSTANCE: Record<string, unknown> | undefined
+/** The `cursor:turnovers` sync_meta row — undefined until a pull has landed. */
+let CURSOR: { key: string; value: string } | undefined
 
 vi.mock('@/lib/dexie/context', () => ({
   useDexieDb:      () => FAKE_DB,
@@ -75,6 +77,7 @@ const emptyTable = {
 
 const FAKE_DB = {
   turnovers:                 { get: async () => TURNOVER },
+  sync_meta:                 { get: async () => CURSOR },
   properties:                { get: async () => ({ id: 'prop_1', name: 'Cabin', timezone: 'America/Chicago' }) },
   checklist_instances:       { where: () => ({ equals: () => ({ first: async () => INSTANCE }) }) },
   checklist_instance_items:  emptyTable,
@@ -104,6 +107,7 @@ import { TurnoverHub } from '@/app/crew/turnovers/[id]/TurnoverHub'
 /** Drives the hook's write entry points from a real render. */
 function Probe() {
   const a = useTurnoverActions('t_1')
+  if (a.turnoverMissing) return <span>gone</span>
   if (!a.turnover) return <span>loading</span>
   return (
     <div>
@@ -127,6 +131,7 @@ describe('crew turnover detail — a cancelled turnover is not workable', () => 
     vi.clearAllMocks()
     TURNOVER = { ...CANCELLED }
     INSTANCE = undefined
+    CURSOR   = { key: 'cursor:turnovers', value: '2026-08-07T00:00:00Z' }
   })
 
   it.each([
@@ -217,5 +222,58 @@ describe('TurnoverHub — a cancelled turnover offers no controls', () => {
     hub({ isCancelled: false })
     expect(screen.getByText('Start Turnover')).toBeTruthy()
     expect(screen.getByText('Mark as Complete').closest('button')?.hasAttribute('disabled')).toBe(false)
+  })
+})
+
+// ============================================================================
+// "Gone" and "still loading" were the same branch: useLiveQuery returns
+// `undefined` until its query first resolves, and db.turnovers.get() ALSO
+// resolves to `undefined` for a row that is not there. So a turnover that left
+// the device — reconcileRemovedTurnovers() drops anything no longer in the
+// crew member's assigned set — left them staring at a spinner that could never
+// resolve.
+//
+// The fix has to distinguish a THIRD state, not just two: a cold cache is
+// legitimately empty, and reading that as "no longer assigned to you" would be
+// a worse lie than the spinner. The turnovers cursor is the durable record
+// that a pull actually landed.
+// ============================================================================
+describe('crew turnover detail — gone is distinguished from still loading', () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+    INSTANCE = undefined
+  })
+
+  it('reports a turnover that left the device, once a pull has landed', async () => {
+    TURNOVER = undefined
+    CURSOR   = { key: 'cursor:turnovers', value: '2026-08-07T00:00:00Z' }
+
+    render(<Probe />)
+
+    expect(await screen.findByText('gone')).toBeTruthy()
+  })
+
+  // The case that makes this a three-state problem rather than two. Without
+  // the cursor gate, every turnover on a fresh install reads as unassigned.
+  it('still reports loading when the cache has never been filled', async () => {
+    TURNOVER = undefined
+    CURSOR   = undefined
+
+    render(<Probe />)
+    await new Promise((r) => setTimeout(r, 20))
+
+    expect(screen.getByText('loading')).toBeTruthy()
+    expect(screen.queryByText('gone')).toBeNull()
+  })
+
+  it('reports neither once the turnover is actually present', async () => {
+    TURNOVER = { ...CANCELLED, status: 'assigned' }
+    CURSOR   = { key: 'cursor:turnovers', value: '2026-08-07T00:00:00Z' }
+
+    render(<Probe />)
+    await screen.findByText('start')
+
+    expect(screen.queryByText('gone')).toBeNull()
+    expect(screen.queryByText('loading')).toBeNull()
   })
 })

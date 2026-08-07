@@ -22,7 +22,47 @@ export default function CrewTurnoverPage() {
   const [view, setView] = useState<'hub' | 'checklist' | 'inventory'>('hub')
 
   const actions = useTurnoverActions(id)
-  const { turnover, property, instance, userId, uploadError, pendingConfirm, setPendingConfirm, isCancelled } = actions
+  const { turnover, property, instance, userId, uploadError, pendingConfirm, setPendingConfirm, isCancelled, turnoverMissing } = actions
+
+  // "Gone" and "still loading" were the same branch, so a turnover that left
+  // the device — reconcileRemovedTurnovers() drops anything no longer in the
+  // crew member's assigned set — left them staring at a spinner that would
+  // never resolve. turnoverMissing is only true once a turnovers pull has
+  // actually landed, so a cold cache still reads as loading rather than as a
+  // reassignment that did not happen.
+  if (turnoverMissing) {
+    return (
+      <div className="min-h-screen p-4" style={{ background: 'var(--bg-page)' }}>
+        <button
+          onClick={() => router.push('/crew')}
+          className="flex items-center justify-center rounded-lg text-muted-themed hover:text-secondary-themed hover:bg-raised-themed transition-colors mb-4"
+          style={{ width: 44, height: 44 }}
+          aria-label="Back to assignments"
+        >
+          <ArrowLeft className="w-4 h-4" />
+        </button>
+        <div
+          className="flex items-start gap-2 rounded-xl px-4 py-3"
+          style={{ background: 'var(--accent-amber-dim)', border: '1px solid var(--accent-amber)' }}
+          role="alert"
+        >
+          <AlertCircle className="w-4 h-4 flex-shrink-0 mt-0.5" style={{ color: 'var(--accent-amber)' }} />
+          <div>
+            <p className="text-sm font-semibold" style={{ color: 'var(--accent-amber)' }}>
+              This turnover is no longer assigned to you
+            </p>
+            <p className="text-sm mt-0.5" style={{ color: 'var(--accent-amber)' }}>
+              It may have been reassigned or removed. Check with your manager if
+              you were expecting to work it.
+            </p>
+          </div>
+        </div>
+        <Button variant="secondary" onClick={() => router.push('/crew')} className="w-full mt-4">
+          Back to my assignments
+        </Button>
+      </div>
+    )
+  }
 
   if (!turnover) {
     return <CrewLoading />

@@ -70,7 +70,22 @@ export function useTurnoverActions(id: string) {
   // UX used everywhere else in the app.
   const [pendingConfirm, setPendingConfirm] = useState<{ message: string; onConfirm: () => void } | null>(null)
 
-  const turnover = useLiveQuery(() => db.turnovers.get(id), [id])
+  // `?? null` is load-bearing: useLiveQuery returns `undefined` until the
+  // query first resolves, and db.turnovers.get() ALSO resolves to `undefined`
+  // for a row that is not there. Collapsing both into `undefined` is what made
+  // the page render its loading spinner forever for a turnover that had left
+  // the device — "still loading" and "gone" were the same state. Now
+  // `undefined` means loading and `null` means resolved-and-absent.
+  const turnover = useLiveQuery(() => db.turnovers.get(id).then((t) => t ?? null), [id])
+
+  // …but resolved-and-absent is only meaningful once a turnovers pull has
+  // actually completed. On a fresh install (or right after
+  // forceFullCrewResync(), which clears the cursors) the cache is legitimately
+  // empty and every turnover would read as "gone". The cursor is the durable
+  // record that a pull landed, so it is what separates "your cache has not
+  // filled yet" from "this is not in your assigned set".
+  const turnoversCursor = useLiveQuery(() => db.sync_meta.get('cursor:turnovers'), [])
+  const turnoverMissing = turnover === null && !!turnoversCursor?.value
 
   /**
    * A cancelled turnover is still on the device, and every control on this
@@ -552,7 +567,7 @@ export function useTurnoverActions(id: string) {
   }
 
   return {
-    userId, crewMemberId, isCancelled, CANCELLED_MESSAGE,
+    userId, crewMemberId, isCancelled, CANCELLED_MESSAGE, turnoverMissing,
     turnover, property, instance, items, inventoryItems,
     checklistConfirmSyncFailed, inventoryConfirmSyncFailed, pendingUploadIds,
     completedCount, totalCount, pendingPhotos, missingAssetTypes,
