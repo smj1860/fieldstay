@@ -16,10 +16,6 @@ import { collectSourceFiles, rel, read } from './scan'
 const COLOR_UTILITY = /(?:text|bg|border|ring)-(?:red|blue|green|amber|yellow|slate|gray|gold)-[0-9]{3}/
 
 const BASELINE = new Set<string>([
-  'app/(auth)/forgot-password/forgot-password-form.tsx',
-  'app/(auth)/login/login-form.tsx',
-  'app/(auth)/reset-password/reset-password-form.tsx',
-  'app/(auth)/signup/signup-form.tsx',
   'app/(dashboard)/crew-manage/crew-manage-client.tsx',
   'app/(dashboard)/inventory/inventory-manager.tsx',
   'app/(dashboard)/maintenance/maintenance-board.tsx',

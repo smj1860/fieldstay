@@ -4,6 +4,7 @@ import { useState } from 'react'
 import { createClient } from '@/lib/supabase/client'
 import { Button } from '@/components/ui/Button'
 import { Input } from '@/components/ui/Input'
+import { InlineAlert } from '@/components/ui/InlineAlert'
 
 export function ForgotPasswordForm() {
   const [email,     setEmail]     = useState('')
@@ -33,10 +34,10 @@ export function ForgotPasswordForm() {
 
   if (submitted) {
     return (
-      <div className="bg-green-50 border border-green-200 text-green-700 text-sm rounded-lg px-4 py-3">
+      <InlineAlert tone="success">
         If an account exists for <strong>{email}</strong>, a password reset
         link has been sent. Check your inbox.
-      </div>
+      </InlineAlert>
     )
   }
 

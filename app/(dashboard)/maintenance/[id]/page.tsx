@@ -49,7 +49,15 @@ export default async function WorkOrderPage({ params }: Props) {
       .from('work_order_line_items')
       .select('id, work_order_id, line_type, description, quantity, unit, unit_cost, line_total, sort_order, created_at')
       .eq('work_order_id', id)
-      .order('sort_order', { ascending: true }),
+      // created_at + id are stable tiebreakers, not decoration. sort_order used
+      // to default to a flat 0 on every hand-entered line, and rows that tie on
+      // the sort key come back in whatever order Postgres likes — a different
+      // one run to run. New lines now get a real sequence (see
+      // nextLineItemSortOrder), but pre-existing all-zero rows still need these
+      // to render the same way twice.
+      .order('sort_order', { ascending: true })
+      .order('created_at', { ascending: true })
+      .order('id',         { ascending: true }),
 
     supabase
       .from('work_order_photos')

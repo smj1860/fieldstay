@@ -91,6 +91,38 @@ describe('guardrail: CI runs every gate', () => {
     expect(ciDirectives).not.toMatch(/continue-on-error/)
   })
 
+  // A run that verifies a MERGE COMMIT must not be cancellable. The concurrency
+  // block is a single repo-wide group so that runs cannot race each other over
+  // the shared E2E Supabase project — correct, and load-bearing — but with a
+  // flat `cancel-in-progress: true` the push run for a merge is as disposable
+  // as any other. On 2026-08-06 PR #576 merged at 15:09:30, the push run for
+  // merge commit 3a16a06c started at 15:09:36, and the next event to arrive
+  // cancelled it 46 seconds later. main's HEAD was never verified by anything.
+  //
+  // A PR run is genuinely superseded by the next push to that PR. A push to
+  // main is superseded by nothing — it is the only run that will ever evaluate
+  // that commit.
+  it('a push to main is never cancelled by a later run', () => {
+    const block = /concurrency:\s*\n(?:\s+#[^\n]*\n)*\s+group:[^\n]*\n\s+cancel-in-progress:\s*([^\n]+)/.exec(ci)
+
+    expect(block, 'ci.yml no longer has a concurrency block with cancel-in-progress').not.toBeNull()
+
+    const value = block![1]!.trim()
+    expect(
+      value,
+      'cancel-in-progress must exclude push events, or a merge commit\'s ' +
+      'verification run can be cancelled and main ships unverified. Expected an ' +
+      "expression gated on github.event_name != 'push'.",
+    ).toMatch(/github\.event_name\s*!=\s*'push'/)
+  })
+
+  // Without a manual trigger the only way to ask "is CI working?" is to push a
+  // commit, which is a poor diagnostic instrument — and was the actual
+  // constraint while investigating the run-creation stop on 2026-08-06.
+  it('CI can be triggered manually', () => {
+    expect(ci).toMatch(/^\s*workflow_dispatch:/m)
+  })
+
   it('the db-invariants job runs every live-schema check', () => {
     for (const script of INSTALL_FREE_SCRIPTS) {
       expect(ciDirectives, `ci.yml no longer runs ${script}`).toContain(`node ${script}`)

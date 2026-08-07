@@ -5,6 +5,7 @@ import { PayInvoiceButton }    from './pay-button'
 import { Check } from 'lucide-react'
 import { unwrapJoin }          from '@/lib/utils/supabase-joins'
 import { throwIfAnyQueryFailed } from '@/lib/supabase/unwrap'
+import { SUPABASE_MAX_ROWS }   from '@/lib/inngest/paginate'
 
 export const metadata: Metadata = { title: 'Invoice — FieldStay' }
 
@@ -66,10 +67,28 @@ export default async function InvoicePage({
   // Fetch vendor-submitted line items
   const { data: lineItems, error: lineItemsError } = await supabase
     .from('work_order_line_items')
-    .select('id, line_type, description, quantity, unit_cost, line_total, sort_order')
+    .select('id, line_type, description, quantity, unit_cost, line_total, sort_order, created_at')
     .eq('work_order_id', invoice.work_order_id)
+    // The org scope is defence in depth, not decoration: invoice.work_order_id
+    // came from a row already filtered by org above, but work_order_line_items
+    // carries its own org_id and nothing forces those two to agree. It also
+    // bounds the read for semgrep's unbounded-select ladder.
+    .eq('org_id', membership.org_id)
     .eq('vendor_submitted', true)
-    .order('sort_order', { ascending: true })
+    // This is the document a vendor is paid against and that feeds the owner
+    // statement, so its line order must be the same every time it is opened.
+    // sort_order alone did not give that: it defaulted to a flat 0, and rows
+    // tied on the sort key come back in whatever order Postgres likes.
+    .order('sort_order',  { ascending: true })
+    .order('created_at',  { ascending: true })
+    .order('id',          { ascending: true })
+    // Explicit bound. PostgREST caps every response at max_rows and returns a
+    // 200 with no truncation signal, so an unbounded read here would silently
+    // drop lines off the bottom of an invoice — the one document where a
+    // missing row means someone is underpaid. One work order's vendor lines
+    // will never approach this; naming the cap is what makes that a checked
+    // assumption instead of an unstated one.
+    .limit(SUPABASE_MAX_ROWS)
 
 
   // Logs + reports, then throws so the segment's error.tsx renders a real

@@ -5,8 +5,10 @@ import { useRouter, useSearchParams } from 'next/navigation'
 import { createClient } from '@/lib/supabase/client'
 import { GoogleSignInButton } from '@/components/auth/GoogleSignInButton'
 import { acceptInviteForCurrentUser } from './actions'
+import { safeNextPath } from '@/lib/auth/safe-redirect'
 import { Button } from '@/components/ui/Button'
 import { Input } from '@/components/ui/Input'
+import { InlineAlert } from '@/components/ui/InlineAlert'
 import Link from 'next/link'
 
 const ERROR_MESSAGES: Record<string, string> = {
@@ -19,7 +21,10 @@ const ERROR_MESSAGES: Record<string, string> = {
 export function LoginForm() {
   const router       = useRouter()
   const searchParams = useSearchParams()
-  const next         = searchParams.get('next') ?? '/ops'
+  // Validated, not trusted: this reaches router.push(), and an unchecked
+  // `?next=//evil.example.com` navigates straight off-origin after a real
+  // sign-in on the real site. See lib/auth/safe-redirect.ts.
+  const next         = safeNextPath(searchParams.get('next'), '/ops')
   const inviteToken  = searchParams.get('invite_token')
 
   const [email,    setEmail]    = useState('')
@@ -45,8 +50,14 @@ export function LoginForm() {
     }
 
     if (inviteToken) {
-      await acceptInviteForCurrentUser(inviteToken)
-      router.push('/ops')
+      // Branch on the result — see the note in app/(auth)/callback/route.ts.
+      // acceptInviteForCurrentUser already returned { accepted }; throwing it
+      // away sent someone whose invite had expired (or was crew-role, which is
+      // refused on purpose) straight to /ops, from which requireOrgMember()
+      // bounced them to /onboarding to create their own separate org with no
+      // explanation. Same destination and same message as the OAuth path.
+      const { accepted } = await acceptInviteForCurrentUser(inviteToken)
+      router.push(accepted ? '/ops' : '/onboarding?invite=invalid')
       router.refresh()
       return
     }
@@ -58,12 +69,7 @@ export function LoginForm() {
   return (
     <div className="space-y-4">
       {callbackError && (
-        <div
-          className="px-4 py-3 rounded-lg text-sm"
-          style={{ background: 'var(--accent-red-dim)', color: 'var(--accent-red)', border: '1px solid rgba(240,84,84,0.2)' }}
-        >
-          {callbackError}
-        </div>
+        <InlineAlert tone="error">{callbackError}</InlineAlert>
       )}
 
       <GoogleSignInButton next={next} label="Sign in with Google" />
@@ -80,11 +86,7 @@ export function LoginForm() {
       </div>
 
       <form onSubmit={handleSubmit} className="space-y-4">
-      {error && (
-        <div className="bg-red-50 border border-red-200 text-red-700 text-sm rounded-lg px-4 py-3">
-          {error}
-        </div>
-      )}
+      {error && <InlineAlert tone="error">{error}</InlineAlert>}
 
       <div>
         <label htmlFor="email" className="label">Email</label>

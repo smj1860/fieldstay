@@ -55,7 +55,7 @@ export default async function globalSetup(_config: FullConfig) {
     // rate-limiting, an outage) is visible at all is this on-page error
     // banner — grab it so a login failure doesn't come with `current URL:
     // .../login` as its only clue.
-    const bannerText = await page.locator('.bg-red-50').first().textContent().catch(() => null)
+    const bannerText = await page.locator('[role="alert"]').first().textContent().catch(() => null)
     const bannerSuffix = bannerText ? ` — page error: "${bannerText.trim()}"` : ' (no error banner found on page)'
     throw new Error(`Login failed — current URL: ${url}${bannerSuffix}`)
   }

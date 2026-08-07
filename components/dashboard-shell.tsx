@@ -62,8 +62,24 @@ interface Props {
 
 const CLUSTER_ORDER = ['Portfolio', 'Team & Vendors', 'Guest & Comms'] as const
 
+/**
+ * Mirrors organizations' RLS UPDATE policy — is_org_member(id, ARRAY['admin']),
+ * which passes 'owner' unconditionally and nobody else. Anyone this returns
+ * false for cannot save a setup step at all, so they are not shown the link.
+ */
+function canFinishSetup(role: MemberRole): boolean {
+  return role === 'admin' || role === 'owner'
+}
+
 interface DashboardSidebarProps {
   mobile?:             boolean
+  /**
+   * Needed only to decide whether the "Finish setup" link is shown. The wizard
+   * is admin/owner-only at the database level (organizations' RLS UPDATE
+   * policy is is_org_member(id, ARRAY['admin'])), so offering it to a manager
+   * or viewer points them at a page where every save is denied.
+   */
+  role:                MemberRole
   pathname:            string
   collapsed:           boolean
   onCloseMobile:       () => void
@@ -86,6 +102,7 @@ interface DashboardSidebarProps {
 // on every route change, so this ran on every single navigation.
 function DashboardSidebar({
   mobile = false,
+  role,
   pathname,
   collapsed,
   onCloseMobile,
@@ -190,7 +207,7 @@ function DashboardSidebar({
 
       {/* Nav links */}
       <nav className="flex-1 px-2 py-4 space-y-0.5 overflow-y-auto">
-        {!onboardingComplete && (!collapsed || mobile) && (
+        {!onboardingComplete && canFinishSetup(role) && (!collapsed || mobile) && (
           <Link
             href="/setup"
             onClick={onCloseMobile}
@@ -363,6 +380,7 @@ export function DashboardShell({ role, orgName, userName, userEmail, onboardingC
       {/* Desktop sidebar — pinned via sticky positioning while the page scrolls as one unit */}
       <div className="hidden md:flex flex-shrink-0 sticky top-0 h-screen">
         <DashboardSidebar
+          role={role}
           pathname={pathname}
           collapsed={collapsed}
           onCloseMobile={() => setMobileOpen(false)}
@@ -393,6 +411,7 @@ export function DashboardShell({ role, orgName, userName, userEmail, onboardingC
           <div ref={mobileDrawerRef} role="dialog" aria-modal="true" className="relative z-10 h-full flex-shrink-0">
             <DashboardSidebar
               mobile
+              role={role}
               pathname={pathname}
               collapsed={collapsed}
               onCloseMobile={() => setMobileOpen(false)}

@@ -6,6 +6,7 @@ import { createClient } from '@/lib/supabase/client'
 import type { AuthChangeEvent } from '@supabase/supabase-js'
 import { Button } from '@/components/ui/Button'
 import { Input } from '@/components/ui/Input'
+import { InlineAlert } from '@/components/ui/InlineAlert'
 
 export function ResetPasswordForm() {
   const router = useRouter()
@@ -54,10 +55,32 @@ export function ResetPasswordForm() {
     setLoading(true)
     const supabase = createClient()
     const { error } = await supabase.auth.updateUser({ password })
-    setLoading(false)
 
     if (error) {
+      setLoading(false)
       setError(error.message)
+      return
+    }
+
+    // Revoke every session, on every device, before sending them to sign in
+    // again. updateUser() changes the password and leaves all existing
+    // sessions alive — so the most common reason to reset one ("someone else
+    // got into my account") did not actually evict that someone. They kept a
+    // working session; only the password they no longer needed had changed.
+    //
+    // Errors here are surfaced rather than swallowed: the password IS already
+    // updated at this point, so the user must not be told the reset failed —
+    // but they do need to know the old sessions may still be live, because
+    // that is the difference between "handled" and "still compromised".
+    const { error: signOutError } = await supabase.auth.signOut({ scope: 'global' })
+    setLoading(false)
+
+    if (signOutError) {
+      console.error('[reset-password] global sign-out failed:', signOutError.message)
+      setError(
+        'Your password was updated, but we could not sign out your other devices. ' +
+        'Sign in and use Settings to sign out everywhere.'
+      )
       return
     }
 
@@ -67,31 +90,29 @@ export function ResetPasswordForm() {
 
   if (success) {
     return (
-      <div className="bg-green-50 border border-green-200 text-green-700 text-sm rounded-lg px-4 py-3">
+      <InlineAlert tone="success">
         Password updated. Redirecting to sign in…
-      </div>
+      </InlineAlert>
     )
   }
 
   if (!ready) {
     return (
-      <div className="bg-amber-50 border border-amber-200 text-amber-700 text-sm rounded-lg px-4 py-3">
+      <InlineAlert tone="warning">
         Verifying your reset link… If this doesn&apos;t resolve, your link
         may have expired. Request a new one from the{' '}
         <a href="/forgot-password" className="underline font-medium">
           forgot password
         </a>{' '}
         page.
-      </div>
+      </InlineAlert>
     )
   }
 
   return (
     <form onSubmit={handleSubmit} className="space-y-4">
       {error && (
-        <div className="bg-red-50 border border-red-200 text-red-700 text-sm rounded-lg px-4 py-3">
-          {error}
-        </div>
+        <InlineAlert tone="error">{error}</InlineAlert>
       )}
 
       <div>
@@ -120,7 +141,7 @@ export function ResetPasswordForm() {
           placeholder="Re-enter your new password"
         />
         {mismatch && (
-          <p className="mt-1.5 text-xs text-red-500">Passwords do not match.</p>
+          <p className="mt-1.5 text-xs" style={{ color: 'var(--accent-red)' }}>Passwords do not match.</p>
         )}
       </div>
 

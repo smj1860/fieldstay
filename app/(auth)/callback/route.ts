@@ -3,6 +3,7 @@ import type { NextRequest }    from 'next/server'
 import { createClient }        from '@/lib/supabase/server'
 import { logAuditEvent }       from '@/lib/audit'
 import { acceptOrgInvite }     from '@/lib/auth/invites'
+import { safeNextPath }        from '@/lib/auth/safe-redirect'
 
 function classifyAuthError(error: { message?: string }): string {
   const msg = error.message?.toLowerCase() ?? ''
@@ -11,22 +12,22 @@ function classifyAuthError(error: { message?: string }): string {
   return 'auth_callback'
 }
 
-// C-1: only allow same-origin relative paths — reject protocol-relative and absolute URLs
-function sanitizeRedirectPath(raw: string | null): string {
-  const path = raw ?? '/onboarding'
-  return path.startsWith('/') && !path.startsWith('//') ? path : '/onboarding'
-}
-
+// Both the ?next= param and the fs-oauth-next cookie go through the shared
+// validator. The local copies this replaced used a startsWith check, which
+// admits `/\evil.com` — a string every browser resolves to a DIFFERENT origin.
+// It was harmless here only because this route concatenates `origin + path`
+// rather than parsing; the two client forms had no check at all. See
+// lib/auth/safe-redirect.ts.
 function resolveOAuthNext(next: string, request: NextRequest): string {
   if (next !== '/onboarding' || !request.cookies.has('fs-oauth-next')) return next
   const cookieVal = decodeURIComponent(request.cookies.get('fs-oauth-next')!.value)
-  return cookieVal.startsWith('/') && !cookieVal.startsWith('//') ? cookieVal : next
+  return safeNextPath(cookieVal, next)
 }
 
 export async function GET(request: NextRequest) {
   const { searchParams, origin } = new URL(request.url)
   const code        = searchParams.get('code')
-  const next        = sanitizeRedirectPath(searchParams.get('next'))
+  const next        = safeNextPath(searchParams.get('next'), '/onboarding')
   const inviteToken = searchParams.get('invite_token')
 
   if (!code) {
@@ -71,10 +72,23 @@ export async function GET(request: NextRequest) {
     }).catch(() => {})
   }
 
-  // Handle team invite token if present
+  // Handle team invite token if present.
+  //
+  // The result is branched on, not discarded. acceptOrgInvite returns false for
+  // an expired or already-claimed token, an email that does not match the
+  // invite, a lost claim race, and — deliberately — a crew-role org invite,
+  // which it refuses because an organization_members row would grant a cleaner
+  // read access to the whole org's turnovers, bookings and guest PII.
+  //
+  // This used to redirect to /ops unconditionally. With no membership row,
+  // requireOrgMember() then bounced the user to /onboarding, where they were
+  // shown "Name your organization" with nothing explaining what happened — so
+  // someone who clicked "join my teammate's account" silently created their own
+  // separate org instead. The password-signup path (acceptTeamInvite) has
+  // always checked this result; the two OAuth/login paths did not.
   if (inviteToken) {
-    await acceptOrgInvite(session.user.id, session.user.email ?? '', inviteToken)
-    return NextResponse.redirect(`${origin}/ops`)
+    const { accepted } = await acceptOrgInvite(session.user.id, session.user.email ?? '', inviteToken)
+    return NextResponse.redirect(`${origin}${accepted ? '/ops' : '/onboarding?invite=invalid'}`)
   }
 
   const finalNext  = resolveOAuthNext(next, request)

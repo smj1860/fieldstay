@@ -8,6 +8,7 @@ import { redirect }            from 'next/navigation'
 import { headers }             from 'next/headers'
 import { z }                   from 'zod'
 import { inviteAcceptRatelimit, checkLimit } from '@/lib/rate-limit'
+import { crewInviteIsExpired } from '@/lib/crew/invite-expiry'
 import { extractClientIp }     from '@/lib/integrations/webhook-verification'
 
 const ActivateSchema = z.object({
@@ -24,28 +25,6 @@ const ActivateSchema = z.object({
   message: 'Passwords do not match',
   path:    ['confirm'],
 })
-
-const INVITE_TTL_MS = 7 * 86_400_000
-
-/**
- * Fails CLOSED. This check used to be nested inside `if (crew.invite_sent_at)`,
- * so a crew row with a NULL invite_sent_at had a PERMANENTLY valid activation
- * token that mints a real auth account — and ~40% of live crew_members rows
- * have that column NULL (11 of 28 on 2026-07-30: invited by SMS, or created
- * before the column existed).
- *
- * The fallback is created_at, NOT a hard reject. Rejecting outright would be
- * the same class of mistake as filtering crew on invite_accepted_at, which has
- * silently locked out real crew three times (see lib/crew-auth.ts). This is
- * only reached for genuinely PENDING invites anyway — a row with a user_id or
- * an invite_accepted_at already returned "already used" before this point — so
- * no activated crew member can be affected either way.
- */
-function inviteIsExpired(sentAt: string | null, createdAt: string | null): boolean {
-  const issuedAt = sentAt ?? createdAt
-  if (!issuedAt) return true
-  return new Date(issuedAt).getTime() + INVITE_TTL_MS < Date.now()
-}
 
 type ActivationSupabase = ReturnType<typeof createServiceClient>
 
@@ -143,7 +122,7 @@ export async function activateCrewAccount(formData: FormData): Promise<{ error?:
   const activationEmail = crew.email ?? submittedEmail
   if (!activationEmail) return { error: 'Enter an email address to finish setting up your account' }
 
-  if (inviteIsExpired(crew.invite_sent_at, crew.created_at)) {
+  if (crewInviteIsExpired(crew.invite_sent_at, crew.created_at)) {
     return { error: 'This invite link has expired. Ask your manager to send a new one.' }
   }
 
