@@ -954,7 +954,7 @@ describe('maintenance/actions', () => {
   describe('acceptVendorSuggestion / dismissVendorSuggestion', () => {
     it('accepts a suggested vendor for a work order verified to belong to the caller org', async () => {
       const supabase = makeSupabase({
-        work_orders: [{ data: { id: 'wo_1', suggested_vendor_ids: ['vendor_1'] } }, { error: null }],
+        work_orders: [{ data: { id: 'wo_1', status: 'pending', suggested_vendor_ids: ['vendor_1'] } }, { data: { id: 'wo_1' }, error: null }, { error: null }],
         vendor_compliance_status: compliant(),
       })
       vi.mocked(requireOrgRole).mockResolvedValue({
@@ -978,13 +978,90 @@ describe('maintenance/actions', () => {
       expect(result).toEqual({ error: 'Work order not found' })
     })
 
+    // Same defect as the turnover board's acceptSuggestion, on the other board.
+    // bulkAssignVendor already split the vendor write from the status advance
+    // so the status only moves FORWARD; this path still folded
+    // `status: 'assigned'` into one unconditional update, so accepting a
+    // suggestion on a completed work order reopened it.
+    it.each([
+      ['completed', /already complete/],
+      ['cancelled', /was cancelled/],
+    ])('refuses to reopen a %s work order, writing nothing', async (status, message) => {
+      const supabase = makeSupabase({
+        work_orders: [{ data: { id: 'wo_1', status, suggested_vendor_ids: ['vendor_1'] } }],
+        vendor_compliance_status: compliant(),
+      })
+      vi.mocked(requireOrgRole).mockResolvedValue({
+        supabase, membership, user: { id: 'user_1' },
+      } as never)
+
+      const result = await acceptVendorSuggestion('wo_1')
+
+      expect(result.error).toMatch(message)
+      expect(supabase.calls.some(c => c.method === 'update')).toBe(false)
+      expect(inngest.send).not.toHaveBeenCalled()
+    })
+
+    // Accepting on a work order already in_progress records WHO — it must not
+    // walk the status backwards to `assigned`.
+    it('advances the status only from the two pre-vendor statuses', async () => {
+      const supabase = makeSupabase({
+        work_orders: [
+          { data: { id: 'wo_1', status: 'in_progress', suggested_vendor_ids: ['vendor_1'] } },
+          { data: { id: 'wo_1' }, error: null },
+          { error: null },
+        ],
+        vendor_compliance_status: compliant(),
+      })
+      vi.mocked(requireOrgRole).mockResolvedValue({
+        supabase, membership, user: { id: 'user_1' },
+      } as never)
+
+      const result = await acceptVendorSuggestion('wo_1')
+
+      expect(result).toEqual({})
+      // The vendor write carries no `status` column at all …
+      const vendorWrite = supabase.calls.find(
+        c => c.table === 'work_orders' && c.method === 'update' &&
+             (c.args[0] as { vendor_id?: string })?.vendor_id === 'vendor_1',
+      )
+      expect(vendorWrite?.args[0]).not.toHaveProperty('status')
+      // … and the advance is filtered to pending/quote_requested, which
+      // in_progress is not in.
+      expect(
+        supabase.calls.some(c => c.table === 'work_orders' && c.method === 'in' &&
+          c.args[0] === 'status' &&
+          Array.isArray(c.args[1]) && (c.args[1] as string[]).join() === 'pending,quote_requested'),
+      ).toBe(true)
+    })
+
+    // A refused UPDATE returns 0 rows and NO error; this path discarded the
+    // row count entirely and reported success for a change that never happened.
+    it('reports a refused write instead of claiming the suggestion was accepted', async () => {
+      const supabase = makeSupabase({
+        work_orders: [
+          { data: { id: 'wo_1', status: 'pending', suggested_vendor_ids: ['vendor_1'] } },
+          { data: null, error: null },
+        ],
+        vendor_compliance_status: compliant(),
+      })
+      vi.mocked(requireOrgRole).mockResolvedValue({
+        supabase, membership, user: { id: 'user_1' },
+      } as never)
+
+      const result = await acceptVendorSuggestion('wo_1')
+
+      expect(result.error).toMatch(/permission|no longer exists/)
+      expect(inngest.send).not.toHaveBeenCalled()
+    })
+
     // Fail-closed regression: the compliance gate is the enforcement boundary
     // for every assignment path. It previously discarded its error, so an RLS
     // denial or a transient failure returned "not blocked" and dispatched an
     // uninsured vendor to a customer's property.
     it('blocks the assignment when the compliance read itself errors', async () => {
       const supabase = makeSupabase({
-        work_orders: [{ data: { id: 'wo_1', suggested_vendor_ids: ['vendor_1'] } }],
+        work_orders: [{ data: { id: 'wo_1', status: 'pending', suggested_vendor_ids: ['vendor_1'] } }],
         vendor_compliance_status: [{ data: null, error: { message: 'permission denied', code: '42501' } }],
       })
       vi.mocked(requireOrgRole).mockResolvedValue({
@@ -1001,7 +1078,7 @@ describe('maintenance/actions', () => {
     // corrected and may gain a new state. An unrecognized status must block.
     it('blocks the assignment on an unrecognized compliance status', async () => {
       const supabase = makeSupabase({
-        work_orders: [{ data: { id: 'wo_1', suggested_vendor_ids: ['vendor_1'] } }],
+        work_orders: [{ data: { id: 'wo_1', status: 'pending', suggested_vendor_ids: ['vendor_1'] } }],
         vendor_compliance_status: [{ data: { compliance_status: 'documents_invalid' } }],
       })
       vi.mocked(requireOrgRole).mockResolvedValue({
@@ -1016,7 +1093,7 @@ describe('maintenance/actions', () => {
 
     it('errors when there is no suggestion to accept', async () => {
       const supabase = makeSupabase({
-        work_orders: [{ data: { id: 'wo_1', suggested_vendor_ids: [] } }],
+        work_orders: [{ data: { id: 'wo_1', status: 'pending', suggested_vendor_ids: [] } }],
       })
       vi.mocked(requireOrgRole).mockResolvedValue({
         supabase, membership, user: { id: 'user_1' },

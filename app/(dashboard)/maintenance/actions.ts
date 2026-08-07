@@ -1269,13 +1269,30 @@ export async function bulkAssignVendor(
 
 // ── Accept auto-suggested vendor ─────────────────────────────────────────────
 
+/**
+ * The statuses a pending vendor suggestion may still be accepted from.
+ *
+ * An ALLOWLIST, not a `completed`/`cancelled` denylist, so a wo_status value
+ * added later fails closed rather than silently joining the acceptable set.
+ */
+const VENDOR_SUGGESTION_ACCEPTABLE_STATUSES = [
+  'pending', 'quote_requested', 'assigned', 'in_progress',
+] as const
+
+function terminalVendorSuggestionError(status: string): string {
+  if (status === 'cancelled') {
+    return 'This work order was cancelled — accepting the suggestion would reopen it.'
+  }
+  return 'This work order is already complete — accepting the suggestion would reopen it.'
+}
+
 export async function acceptVendorSuggestion(workOrderId: string): Promise<{ error?: string }> {
   try {
     const { supabase, membership, user } = await requireOrgRole(['admin', 'manager'])
 
     const woRes = await supabase
       .from('work_orders')
-      .select('id, suggested_vendor_ids')
+      .select('id, status, suggested_vendor_ids')
       .eq('id', workOrderId)
       .eq('org_id', membership.org_id)
       .maybeSingle()
@@ -1287,6 +1304,17 @@ export async function acceptVendorSuggestion(workOrderId: string): Promise<{ err
 
     if (!wo) return { error: 'Work order not found' }
 
+    // bulkAssignVendor — the OTHER way a PM assigns a vendor — already splits
+    // the vendor write from the status advance so the status only moves
+    // FORWARD. This path still folded `status: 'assigned'` into one
+    // unconditional update, so accepting a suggestion on a completed work order
+    // reopened it, and accepting on an in_progress one dragged it back to
+    // `assigned`. Terminal states are refused outright; the rest advance only
+    // from the two pre-vendor statuses, exactly as bulkAssignVendor does.
+    if (!(VENDOR_SUGGESTION_ACCEPTABLE_STATUSES as readonly string[]).includes(wo.status)) {
+      return { error: terminalVendorSuggestionError(wo.status) }
+    }
+
     const vendorId = (wo.suggested_vendor_ids as string[] | null)?.[0]
     if (!vendorId) return { error: 'No suggestion to accept' }
 
@@ -1294,15 +1322,40 @@ export async function acceptVendorSuggestion(workOrderId: string): Promise<{ err
       return { error: VENDOR_HARD_BLOCKED_ERROR }
     }
 
-    const { error } = await supabase
+    // The status allowlist repeats the check above as the ATOMIC one, so a
+    // completion landing between the read and this write cannot be overwritten.
+    // The row count is read back for the same reason it is everywhere else in
+    // this file: a refused UPDATE returns 0 rows and NO error.
+    const { data: accepted, error } = await supabase
       .from('work_orders')
-      .update({ vendor_id: vendorId, status: 'assigned', suggestion_status: 'accepted' })
+      .update({ vendor_id: vendorId, suggestion_status: 'accepted' })
       .eq('id', workOrderId)
       .eq('org_id', membership.org_id)
+      .in('status', VENDOR_SUGGESTION_ACCEPTABLE_STATUSES)
+      .select('id')
+      .maybeSingle()
 
     if (error) {
       console.error('[acceptVendorSuggestion]', error)
+      reportError(error, { site: 'serverAction.maintenance.acceptVendorSuggestion', orgId: membership.org_id })
       return { error: 'Failed to accept suggestion. Please try again.' }
+    }
+    if (!accepted) {
+      return { error: 'You do not have permission to make this change, or the work order no longer exists.' }
+    }
+
+    // Forward-only, in its own filtered statement — see bulkAssignVendor.
+    const { error: statusError } = await supabase
+      .from('work_orders')
+      .update({ status: 'assigned' })
+      .eq('id', workOrderId)
+      .eq('org_id', membership.org_id)
+      .in('status', ['pending', 'quote_requested'])
+
+    // Reported, not returned: the vendor IS assigned and about to be notified.
+    if (statusError) {
+      console.error('[acceptVendorSuggestion] status advance failed', statusError)
+      reportError(statusError, { site: 'serverAction.maintenance.acceptVendorSuggestion.status', orgId: membership.org_id })
     }
 
     try {

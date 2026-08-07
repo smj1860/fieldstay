@@ -60,7 +60,7 @@ function makeSupabase(queue: Record<string, Resp[]>, rpcs: Record<string, Resp> 
     const result: Resp = q?.length ? q.shift()! : { data: null, error: null }
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const chain: any = {}
-    for (const m of ['select', 'insert', 'update', 'delete', 'upsert', 'eq', 'neq', 'in', 'not', 'is', 'order', 'range']) {
+    for (const m of ['select', 'insert', 'update', 'delete', 'upsert', 'eq', 'neq', 'in', 'not', 'is', 'limit', 'order', 'range']) {
       chain[m] = vi.fn((...args: unknown[]) => { calls.push({ table, method: m, args }); return chain })
     }
     chain.single      = vi.fn(() => Promise.resolve(result))
@@ -829,8 +829,10 @@ describe('turnovers/actions', () => {
       const supabase = makeSupabase({
         turnovers:             [
           { data: { id: 't_1', property_id: 'prop_1', status: 'pending_assignment', suggested_crew_ids: ['crew_1'] } },
-          { data: { id: 't_1' }, error: null },  // the status write, read back
+          { data: { id: 't_1' }, error: null },  // the suggestion_status write, read back
+          { error: null },                       // advancePendingToAssigned
         ],
+        crew_members:          [{ data: [{ id: 'crew_1' }] }],
         turnover_assignments:  [{ error: null }],
         properties:            [{ data: { bedrooms: 3 } }],
       })
@@ -841,6 +843,97 @@ describe('turnovers/actions', () => {
       const result = await acceptSuggestion('t_1')
 
       expect(result).toEqual({ success: true })
+
+      // The status advance is the SIBLING helper's filtered statement, not a
+      // column folded into the suggestion write — that is what stops it walking
+      // an in_progress turnover backwards.
+      const advance = supabase.calls.find(
+        c => c.table === 'turnovers' && c.method === 'update' &&
+             (c.args[0] as { status?: string })?.status === 'assigned',
+      )
+      expect(advance).toBeTruthy()
+      expect(
+        supabase.calls.some(c => c.table === 'turnovers' && c.method === 'eq' &&
+          c.args[0] === 'status' && c.args[1] === 'pending_assignment'),
+      ).toBe(true)
+    })
+
+    // The board hides `cancelled` but NOT `completed`, so a turnover the PM
+    // marked done themselves keeps rendering its suggestion banner with a live
+    // Accept button. That wrote `status: 'assigned'` with no precondition: the
+    // finished turnover left the Completed column, kept its now-meaningless
+    // completed_at, and could be completed a second time.
+    it.each([
+      ['completed', /already complete/],
+      ['cancelled', /was cancelled/],
+    ])('refuses to reopen a %s turnover, writing nothing', async (status, message) => {
+      const supabase = makeSupabase({
+        turnovers: [{ data: { id: 't_1', property_id: 'prop_1', status, suggested_crew_ids: ['crew_1'] } }],
+      })
+      mockAuthed({ supabase, membership, user: { id: 'user_1' } } as never)
+
+      const result = await acceptSuggestion('t_1')
+
+      expect(result.error).toMatch(message)
+      expect(supabase.calls.some(c => c.method === 'update' || c.method === 'upsert')).toBe(false)
+    })
+
+    // The read above produces the message; the WHERE clause is what makes it
+    // race-safe. A completion landing between the two must not be overwritten.
+    it('gates the suggestion write on the status allowlist, not just the earlier read', async () => {
+      const supabase = makeSupabase({
+        turnovers: [
+          { data: { id: 't_1', property_id: 'prop_1', status: 'pending_assignment', suggested_crew_ids: ['crew_1'] } },
+          { data: null, error: null },   // completed in the gap — 0 rows, no error
+        ],
+        crew_members:         [{ data: [{ id: 'crew_1' }] }],
+        turnover_assignments: [{ error: null }],
+      })
+      mockAuthed({ supabase, membership, user: { id: 'user_1' } } as never)
+
+      const result = await acceptSuggestion('t_1')
+
+      expect(result.error).toMatch(/permission|no longer exists/)
+      const statusFilter = supabase.calls.find(
+        c => c.table === 'turnovers' && c.method === 'in' && c.args[0] === 'status',
+      )
+      expect(statusFilter?.args[1]).toEqual(
+        expect.arrayContaining(['pending_assignment', 'assigned', 'in_progress', 'flagged']),
+      )
+      expect(statusFilter?.args[1]).not.toContain('completed')
+      expect(statusFilter?.args[1]).not.toContain('cancelled')
+    })
+
+    // Every other assignment path proves its crew ids belong to the org before
+    // writing turnover_assignments. This one trusted suggested_crew_ids
+    // wholesale, and that table's INSERT policy checks org_id ALONE — so a row
+    // pairing the caller's org_id with a foreign crew_member_id passes RLS.
+    it('refuses to assign a suggested crew id that is not in the caller org', async () => {
+      const supabase = makeSupabase({
+        turnovers:    [{ data: { id: 't_1', property_id: 'prop_1', status: 'pending_assignment', suggested_crew_ids: ['crew_from_another_org'] } }],
+        crew_members: [{ data: [] }],
+      })
+      mockAuthed({ supabase, membership, user: { id: 'user_1' } } as never)
+
+      const result = await acceptSuggestion('t_1')
+
+      expect(result.error).toMatch(/no longer available/)
+      expect(supabase.calls.some(c => c.table === 'turnover_assignments')).toBe(false)
+    })
+
+    // A failed crew read must not read as "zero matching crew" and it must not
+    // read as "all fine" either — it fails closed with its own message.
+    it('fails closed when the crew verification read itself errors', async () => {
+      const supabase = makeSupabase({
+        turnovers:    [{ data: { id: 't_1', property_id: 'prop_1', status: 'pending_assignment', suggested_crew_ids: ['crew_1'] } }],
+        crew_members: [{ data: null, error: { message: 'permission denied', code: '42501' } }],
+      })
+      mockAuthed({ supabase, membership, user: { id: 'user_1' } } as never)
+
+      const result = await acceptSuggestion('t_1')
+
+      expect(result.error).toMatch(/verify the suggested crew/)
+      expect(supabase.calls.some(c => c.table === 'turnover_assignments')).toBe(false)
     })
 
     it('rejects a turnover id that does not belong to the caller org (IDOR check)', async () => {
