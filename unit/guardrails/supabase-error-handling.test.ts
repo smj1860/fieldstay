@@ -117,7 +117,13 @@ const BASELINE: Record<string, number> = {
   'app/api/repuguard/generate/route.ts': 3,
   'app/api/vendor-connect/[token]/onboard/route.ts': 2,
   'app/g/b/[token]/page.tsx': 4,
-  'lib/checklists/apply-master-template.ts': 5,
+  // 5 -> 4: the already-has-a-default guard read now unwraps. Discarded, a
+  // transient failure made existingTemplate null, the guard evaluated false,
+  // and a SECOND default template was created for a property that already had
+  // one — then compounded, because with two rows the guard's .maybeSingle()
+  // errored on every later run and each run added another.
+  // 20260807190000 adds the partial unique index that makes it impossible.
+  'lib/checklists/apply-master-template.ts': 4,
   'lib/checklists/seed-default-room-templates.ts': 2,
 
   'lib/guidebook/sync.ts': 4,
@@ -152,8 +158,19 @@ const BASELINE: Record<string, number> = {
   // SMS block was skipped entirely while the PM email went out reading
   // "checks out on undefined".
   'lib/inngest/functions/hospitable/hospitable-reviews-backfill.ts': 2,
-  'lib/inngest/functions/hospitable/incremental-sync.ts': 5,
-  'lib/inngest/functions/hospitable/initial-sync.ts': 2,
+  // 5 -> 0 (entry deleted). Two of them drove DECISIONS rather than display:
+  // the existing-booking read feeds `datesChanged`, so a failed read
+  // regenerated the property's turnovers on every webhook; the
+  // existing-property read feeds `isNewProperty`, re-running the whole
+  // first-time seeding path plus a spurious "new property" PM notification.
+  // The other three failed toward silently-unlinked data — a review stored
+  // with no property, guest messages with no booking, and a read failure
+  // surfacing as "Property not in FieldStay".
+  // 2 -> 0 (entry deleted). The revenue read was the costly one: `?? []` on a
+  // failed read meant ZERO booking/confirmed events, so no revenue posted to
+  // owner_transactions for any imported reservation — reported as a clean
+  // sync. The other was inside a local read-modify-write metadata merge that
+  // this change deleted in favour of the atomic RPC.
   'lib/inngest/functions/hostaway/initial-sync.ts': 2,
   'lib/inngest/functions/ical-sync.ts': 2,
   // 5 -> 3: the count-session and count-items reads at the top of the
@@ -162,8 +179,17 @@ const BASELINE: Record<string, number> = {
   'lib/inngest/functions/inventory-events.ts': 3,
   // 3 -> 1: the two hand-rolled email_unsubscribed_at reads were replaced by
   // resolveEmailAudience(), which goes through tryUnwrap and fails closed.
-  'lib/inngest/functions/ownerrez/incremental-sync.ts': 4,
-  'lib/inngest/functions/ownerrez/initial-sync.ts': 6,
+  // 4 -> 2: the new-property diff's `known` read and the connection reload
+  // unwrap. The first amplified rather than degraded — a null result made
+  // every OwnerRez property look new, re-firing a full initial sync for the
+  // whole org, hourly. The second reported a healthy connection as
+  // `connection_not_active`.
+  'lib/inngest/functions/ownerrez/incremental-sync.ts': 2,
+  // 6 -> 4: the checklist-seeding reads unwrap. A failed properties read
+  // short-circuited to [] and every freshly synced property silently never got
+  // a checklist — a turnover with nothing for the crew to work from, reported
+  // as a clean sync.
+  'lib/inngest/functions/ownerrez/initial-sync.ts': 4,
   'lib/inngest/functions/ownerrez/ownerrez-reviews-sync.ts': 3,
   'lib/inngest/functions/platform-inventory-template-broadcast.ts': 4,
   'lib/inngest/functions/work-order-dispatch.ts': 3,

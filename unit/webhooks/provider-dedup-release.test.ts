@@ -69,6 +69,7 @@ function makeSupabase() {
     })
     chain.select      = vi.fn(() => chain)
     chain.eq          = vi.fn(() => chain)
+    chain.limit       = vi.fn(() => Promise.resolve({ data: [], error: null }))
     chain.maybeSingle = vi.fn(() => Promise.resolve({ data: null }))
     return chain
   })

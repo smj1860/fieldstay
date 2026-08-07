@@ -92,6 +92,16 @@ function makeSupabase(queued: QueuedByTable) {
   const counters: Record<string, number> = {}
   const calls: { table: string; method: string; args: unknown[] }[] = []
 
+  // integration_connections.metadata is merged atomically through the
+  // merge_integration_connection_metadata RPC (lib/integrations/
+  // connection-metadata.ts) rather than a local select-then-update. Mirrors
+  // the OwnerRez doubles, which have gone through this helper all along.
+  const rpcSpy = vi.fn()
+  const rpc = vi.fn((fnName: string, args: unknown) => {
+    rpcSpy(fnName, args)
+    return Promise.resolve({ data: {}, error: null })
+  })
+
   const from = vi.fn((table: string) => {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const chain: any = {}
@@ -104,6 +114,11 @@ function makeSupabase(queued: QueuedByTable) {
     chain.upsert = (...a: unknown[]) => record('upsert', a)
     chain.eq     = (...a: unknown[]) => record('eq', a)
     chain.in     = (...a: unknown[]) => record('in', a)
+    // fetchAllRows() pages via .order()/.range(); a queued page shorter than
+    // the page size ends the drain, so each paginated read still consumes
+    // exactly one queued entry for its table.
+    chain.order  = (...a: unknown[]) => record('order', a)
+    chain.range  = (...a: unknown[]) => record('range', a)
 
     const resolveNext = () => {
       const idx = counters[table] ?? 0
@@ -119,7 +134,7 @@ function makeSupabase(queued: QueuedByTable) {
     return chain
   })
 
-  return { from, calls }
+  return { from, rpc, rpcSpy, calls }
 }
 
 const EVENT_DATA = { user_id: 'user_1', org_id: 'org_1', external_user_id: 'ext_1' }
@@ -203,14 +218,8 @@ describe('hospInitialSync', () => {
     ])
   })
 
-  it('marks the connection as errored with a translated message when the Vault token is missing, instead of failing silently', async () => {
-    const supabase = makeSupabase({
-      integration_connections: [
-        { error: null },                          // handle-failure: status update
-        { data: { metadata: {} }, error: null },  // handle-failure -> updateConnectionMeta: read
-        { error: null },                          // handle-failure -> updateConnectionMeta: write
-      ],
-    })
+  it('marks the connection errored and stamps the metadata in ONE atomic write', async () => {
+    const supabase = makeSupabase({})
     ;(createServiceClient as ReturnType<typeof vi.fn>).mockReturnValue(supabase)
     ;(readIntegrationToken as ReturnType<typeof vi.fn>).mockResolvedValue(null)
 
@@ -222,20 +231,29 @@ describe('hospInitialSync', () => {
       logger: makeLogger(),
     })).rejects.toThrow('No Hospitable token found')
 
+    // This used to be a .update({status:'error'}) followed by a separate
+    // read-then-update metadata merge. Two statements meant a crash between
+    // them left the connection flipped to 'error' while its metadata still
+    // claimed the last sync succeeded — and the local merge discarded its
+    // read's error, so a failed read replaced the WHOLE metadata object with
+    // just the patch, dropping every other key.
+    expect(supabase.rpcSpy).toHaveBeenCalledWith(
+      'merge_integration_connection_metadata',
+      expect.objectContaining({
+        p_user_id:     EVENT_DATA.user_id,
+        p_provider_id: 'hospitable',
+        p_status:      'error',
+        p_patch:       expect.objectContaining({ last_sync_status: 'error' }),
+      }),
+    )
+
+    // No direct status write left to race the merge.
     const statusUpdate = supabase.calls.find(
-      (c) => c.table === 'integration_connections' && c.method === 'update' && (c.args[0] as Record<string, unknown>).status === 'error'
+      (c) => c.table === 'integration_connections'
+        && c.method === 'update'
+        && (c.args[0] as Record<string, unknown>).status === 'error'
     )
-    expect(statusUpdate).toBeDefined()
-
-    const metaUpdate = supabase.calls.find(
-      (c) => c.table === 'integration_connections' && c.method === 'update' && 'metadata' in (c.args[0] as Record<string, unknown>)
-    )
-    const metadata = (metaUpdate?.args[0] as { metadata: Record<string, unknown> }).metadata
-    expect(metadata.last_sync_status).toBe('error')
-    expect(typeof metadata.last_sync_error).toBe('string')
-
-    // Never got past reading the token — no properties/reservations fetched
-    expect(hospFetchProperties).not.toHaveBeenCalled()
+    expect(statusUpdate).toBeUndefined()
   })
 
   it('runs one step.run per reservation window, and a throw on a later window does not re-invoke earlier windows on retry', async () => {

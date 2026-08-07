@@ -102,19 +102,57 @@ export const ownerRezReconciliationHandler = inngest.createFunction(
 
     const currentExternalIds = new Set(currentExternalIdList)
 
+    // An EMPTY current set is not "everything was deleted upstream".
+    //
+    // This whole function reconciles by absence — the header says so, and that
+    // is the only way a hard delete is ever detectable. But absence-as-signal
+    // has one degenerate input: if getBookings() comes back empty, every
+    // non-cancelled OwnerRez booking in the org is absent, so the pass below
+    // cancelled ALL of them, cancelled their turnovers, and texted the crew
+    // that their jobs were off. Daily, for one bad API response.
+    //
+    // getBookings() throws on a non-2xx, so this is specifically the 200-with-
+    // nothing case: an upstream hiccup, a propertyIds filter that stopped
+    // matching, or a genuinely emptied account. Those are indistinguishable
+    // here, and the asymmetry decides it — declining to cancel leaves stale
+    // rows for one more day, cancelling wrongly sends crew home from stays
+    // that are still happening. Mirrors the same guard in ical-sync.ts.
+    if (currentExternalIds.size === 0) {
+      logger.error(
+        `[OwnerRez reconciliation] org ${org_id}: OwnerRez returned ZERO bookings for ` +
+        `${propertyIds.length} propert${propertyIds.length === 1 ? 'y' : 'ies'} — ` +
+        `skipping the stale-booking pass rather than cancelling everything`
+      )
+      reportError(new Error('OwnerRez reconciliation returned zero bookings'), {
+        site:  'inngest.ownerrez-reconciliation-handler.empty-result-guard',
+        orgId: org_id,
+        extra: { property_count: propertyIds.length },
+      })
+      return { skipped: true, reason: 'empty_current_set' }
+    }
+
     const result = await step.run('cancel-stale-bookings', async () => {
       const supabase = createServiceClient({ system: 'inngest:reconciliation-handler' })
 
-      const { data: existing, error } = await supabase
-        .from('bookings')
-        .select('id, external_id')
-        .eq('org_id', org_id)
-        .eq('external_source', PROVIDER)
-        .neq('status', 'cancelled')
+      // Paginated, for the reason this file already gives for the property
+      // read above: at PostgREST's max_rows = 1000 a truncated page here does
+      // not merely miss rows — every booking past the cap is absent from
+      // `existing`, so it is never considered, and the sweep silently stops
+      // reconciling the older half of a long-lived org's calendar while
+      // reporting a clean run.
+      const existing = await fetchAllRows<{ id: string; external_id: string | null }>(
+        (from, to) => supabase
+          .from('bookings')
+          .select('id, external_id')
+          .eq('org_id', org_id)
+          .eq('external_source', PROVIDER)
+          .neq('status', 'cancelled')
+          .order('id', { ascending: true })
+          .range(from, to),
+        { label: `bookings(ownerrez-reconciliation)[org=${org_id}]` },
+      )
 
-      if (error) throw new Error(`Fetching existing bookings failed: ${error.message}`)
-
-      const stale = (existing ?? []).filter(
+      const stale = existing.filter(
         (b) => b.external_id !== null && !currentExternalIds.has(b.external_id)
       )
 
@@ -126,6 +164,7 @@ export const ownerRezReconciliationHandler = inngest.createFunction(
           .from('bookings')
           .update({ status: 'cancelled' })
           .eq('id', booking.id)
+          .eq('org_id', org_id)
 
         if (cancelErr) {
           logger.error(`[OwnerRez reconciliation] failed to cancel booking ${booking.id}: ${cancelErr.message}`)

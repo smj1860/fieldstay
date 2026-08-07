@@ -16,8 +16,6 @@
 //  8. mark-complete           — write last_sync_status to integration_connections
 // ============================================================
 
-import { asJsonObject } from '@/lib/json'
-import type { Json } from '@/types/database'
 import { inngest }             from '@/lib/inngest/client'
 import { NonRetriableError }   from 'inngest'
 import { fetchTurnoverCreatedEvents } from '@/lib/inngest/turnover-created-events'
@@ -52,6 +50,8 @@ import {
 } from '@/lib/asset-discovery/seed-from-amenities'
 
 import { reportError } from '@/lib/observability/report-error'
+import { mergeIntegrationConnectionMetadata } from '@/lib/integrations/connection-metadata'
+import { fetchAllRows } from '@/lib/inngest/paginate'
 const PROVIDER = 'hospitable'
 
 // Initial sync backfills 3 months forward, not the 6 that
@@ -312,14 +312,36 @@ export const hospInitialSync = inngest.createFunction(
       if (revenueEligibleExternalIds.length > 0) {
         const revenueEvents = await step.run('fetch-bookings-for-revenue', async () => {
           const supabase = createServiceClient({ system: 'inngest:initial-sync' })
-          const { data: rows } = await supabase
-            .from('bookings')
-            .select('id, property_id, actual_total_amount')
-            .eq('org_id', org_id)
-            .eq('external_source', PROVIDER)
-            .in('external_id', revenueEligibleExternalIds)
+          // Paginated AND error-bound, for two separate reasons.
+          //
+          // Paginated: this is one row per reservation the initial sync just
+          // imported, so it is sized by the org's whole booking history, not
+          // by its property count. A PM onboarding 50 properties with a year
+          // of stays each is past PostgREST's max_rows = 1000 on day one, and
+          // truncation there is silent — the rows past 1000 simply never
+          // produce a booking/confirmed event.
+          //
+          // Error-bound: `?? []` on a failed read meant ZERO booking/confirmed
+          // events, so no revenue is posted to owner_transactions for any of
+          // this org's imported reservations — a silent financial omission that
+          // the initial sync then reports as a clean run. Nothing re-drives it
+          // either: the revenue post is idempotent by design (see the comment
+          // above), so a later re-run would fix it — but only if someone knew
+          // to trigger one. fetchAllRows throws on a page error, so the step
+          // gets an Inngest retry instead.
+          const rows = await fetchAllRows<{ id: string; property_id: string; actual_total_amount: number | null }>(
+            (from, to) => supabase
+              .from('bookings')
+              .select('id, property_id, actual_total_amount')
+              .eq('org_id', org_id)
+              .eq('external_source', PROVIDER)
+              .in('external_id', revenueEligibleExternalIds)
+              .order('id', { ascending: true })
+              .range(from, to),
+            { label: `bookings-for-revenue(hospitable)[org=${org_id}]` },
+          )
 
-          return (rows ?? []).map((b) => ({
+          return rows.map((b) => ({
             name: 'booking/confirmed' as const,
             data: {
               booking_id:          b.id as string,
@@ -394,12 +416,26 @@ export const hospInitialSync = inngest.createFunction(
 
       // ── 8. Mark sync complete ─────────────────────────────────────────────
       await step.run('mark-complete', async () => {
-        await updateConnectionMeta(user_id, {
-          last_sync_status: 'success',
-          last_sync_error:  null,
-          last_synced_at:   new Date().toISOString(),
-          last_sync_count:  reservationCount,
-          external_user_id,
+        // The shared atomic merge, not a local read-then-update. There WAS a
+        // local updateConnectionMeta() here doing exactly the read-modify-write
+        // that 20260722130000 added this RPC to eliminate — and whose header
+        // names this case: "concurrent sync runs for the same connection can
+        // otherwise silently clobber each other's metadata writes". OwnerRez
+        // already used the helper; Hospitable had its own copy.
+        //
+        // It also discarded the read's error, which was worse than the race:
+        // `existingMeta` fell back to {} and the update then REPLACED the whole
+        // metadata object with just the patch, dropping every other key.
+        await mergeIntegrationConnectionMetadata({
+          userId:     user_id,
+          providerId: PROVIDER,
+          patch: {
+            last_sync_status: 'success',
+            last_sync_error:  null,
+            last_synced_at:   new Date().toISOString(),
+            last_sync_count:  reservationCount,
+            external_user_id,
+          },
         })
       })
 
@@ -420,17 +456,19 @@ export const hospInitialSync = inngest.createFunction(
       reportError(err, { site: 'inngest.hospitable-initial-sync.mark-complete' })
 
       await step.run('handle-failure', async () => {
-        const supabase = createServiceClient({ system: 'inngest:initial-sync' })
-        await supabase
-          .from('integration_connections')
-          .update({ status: 'error' })
-          .eq('user_id', user_id)
-          .eq('provider_id', PROVIDER)
-
-        await updateConnectionMeta(user_id, {
-          last_sync_status: 'error',
-          last_sync_error:  friendlyMsg,
-          last_synced_at:   new Date().toISOString(),
+        // One atomic write, not a status update followed by a metadata merge.
+        // Split across two statements, a crash between them left the connection
+        // flipped to 'error' with metadata still claiming the last sync
+        // succeeded — and the status write discarded its own result besides.
+        await mergeIntegrationConnectionMetadata({
+          userId:     user_id,
+          providerId: PROVIDER,
+          status:     'error',
+          patch: {
+            last_sync_status: 'error',
+            last_sync_error:  friendlyMsg,
+            last_synced_at:   new Date().toISOString(),
+          },
         })
       })
 
@@ -441,23 +479,3 @@ export const hospInitialSync = inngest.createFunction(
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
-async function updateConnectionMeta(
-  userId: string,
-  patch:  Record<string, Json>
-): Promise<void> {
-  const supabase = createServiceClient({ system: 'inngest:initial-sync' })
-  const { data: existing } = await supabase
-    .from('integration_connections')
-    .select('metadata')
-    .eq('user_id', userId)
-    .eq('provider_id', PROVIDER)
-    .maybeSingle()
-
-  const existingMeta = asJsonObject(existing?.metadata) ?? {}
-
-  await supabase
-    .from('integration_connections')
-    .update({ metadata: { ...existingMeta, ...patch } })
-    .eq('user_id', userId)
-    .eq('provider_id', PROVIDER)
-}

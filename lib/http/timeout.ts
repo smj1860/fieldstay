@@ -101,6 +101,26 @@ export const CREW_OUTBOX_TIMEOUT_MS = 15_000
 export const STRIPE_TIMEOUT_MS = 10_000
 
 /**
+ * PMS provider REST + OAuth calls (Hospitable, OwnerRez, Hostaway).
+ *
+ * 30s because these are third-party APIs reached from inside Inngest steps
+ * that already retry with backoff — a slow-but-alive provider should be given
+ * room rather than thrashed, and Inngest handles the eventual failure.
+ *
+ * These were the four remaining entries in the external-fetch-timeout
+ * baseline, and hospitableFetch() is the reason the gap mattered more than the
+ * count suggests: it is the single wrapper every Hospitable API call goes
+ * through, and hospIncrementalSync runs at concurrency [{limit: 8}]. Eight
+ * requests hung on an unresponsive provider therefore consumed the whole
+ * concurrency budget and stalled ALL Hospitable webhook processing — the
+ * chokepoint that exists so one place needs the timeout was the one place
+ * without it.
+ *
+ * ownerrez-api.ts had this value inline already; it now shares the constant.
+ */
+export const PMS_API_TIMEOUT_MS = 30_000
+
+/**
  * True when `err` is the abort raised by AbortSignal.timeout() — i.e. we
  * stopped waiting, as opposed to the service returning an error.
  *

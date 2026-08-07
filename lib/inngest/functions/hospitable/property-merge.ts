@@ -15,19 +15,51 @@
 // Edge case: if a FieldStay property row already exists under new_id (i.e.
 // new_id was itself already a distinct, previously-synced property before
 // the merge), a blind rename would collide with that row's
-// (external_id, external_source) uniqueness and silently combine two
-// properties' booking history. Automatically merging two already-established
+// (org_id, external_id, external_source) uniqueness and silently combine two
+// properties' booking history. Note the org_id in that key — it is PER ORG,
+// which is why every lookup below must carry an org scope: two tenants
+// co-hosting one listing legitimately hold the same external_id. Automatically merging two already-established
 // properties is too risky to do unattended — instead the previous_id property
 // is marked inactive and an audit event is written for manual PM
 // reconciliation.
 // ============================================================
 
-import { unwrap } from '@/lib/supabase/unwrap'
+import { unwrap, unwrapList } from '@/lib/supabase/unwrap'
 import { inngest }             from '@/lib/inngest/client'
 import { createServiceClient } from '@/lib/supabase/server'
 import { logAuditEvent }       from '@/lib/audit'
+import { reportError }         from '@/lib/observability/report-error'
 
 const PROVIDER = 'hospitable'
+
+/**
+ * The org that owns the Hospitable account this webhook came from.
+ *
+ * Returns null rather than guessing. Deliberately NOT `.maybeSingle()`:
+ * integration_connections is UNIQUE (user_id, provider_id), so nothing stops
+ * two FieldStay users — in two different orgs — connecting the same Hospitable
+ * account and producing two rows for one external_user_id. maybeSingle turns
+ * that into an error, and an error here previously degraded to "no scope",
+ * which is the one outcome that must never happen. Ambiguous attribution and
+ * no attribution get the same answer: null.
+ */
+async function resolveOwningOrg(
+  supabase: ReturnType<typeof createServiceClient>,
+  externalUserId: string | undefined,
+): Promise<string | null> {
+  if (!externalUserId) return null
+
+  const res = await supabase
+    .from('integration_connections')
+    .select('org_id')
+    .eq('provider_id',      PROVIDER)
+    .eq('external_user_id', externalUserId)
+    .limit(10)
+
+  const rows = unwrapList(res, { site: 'inngest.hospitable-property-merge.connection-scope' })
+  const orgIds = [...new Set(rows.map((r) => r.org_id))]
+  return orgIds.length === 1 ? orgIds[0]! : null
+}
 
 export const hospPropertyMerge = inngest.createFunction(
   {
@@ -42,63 +74,94 @@ export const hospPropertyMerge = inngest.createFunction(
     const result = await step.run('remap-or-flag', async () => {
       const supabase = createServiceClient({ system: 'inngest:property-merge' })
 
-      // When the webhook carries the connected account's own user id, resolve
-      // the org up front and scope both lookups below to it — same co-host
-      // collision risk BLOCKER-1 closes for incremental-sync.ts: an unscoped
-      // (external_id, external_source) match can hit more than one row when
-      // a property is co-hosted across two customers, and .maybeSingle()
-      // throws on more than one match. Falls through to the previous
-      // unscoped behavior when absent (older payload shapes, or a value that
-      // no longer matches an active connection) — no worse than before.
-      let scopedOrgId: string | null = null
-      if (external_user_id) {
-        // scopedOrgId is the ONLY tenant filter on the two service-role reads
-        // below (see the `if (scopedOrgId)` guards). Discarding this error left
-        // it null, which does not narrow the merge to one org — it widens it to
-        // every org, where another tenant can hold the same Hospitable
-        // external_id. A failed lookup must abort, not silently unscope.
-        const connectionRes = await supabase
-          .from('integration_connections')
-          .select('org_id')
-          .eq('provider_id',      PROVIDER)
-          .eq('external_user_id', external_user_id)
-          .eq('status',           'active')
-          .maybeSingle()
+      // ── Resolve the owning org. This is the ONLY tenant filter. ──────────
+      //
+      // It used to be optional: `if (scopedOrgId) query = query.eq('org_id',
+      // …)`, documented as falling back to the older unscoped behaviour and
+      // therefore "no worse than before". It was worse than it read, because
+      // properties is UNIQUE (org_id, external_id, external_source) — PER ORG,
+      // not globally — so two tenants legitimately hold the same Hospitable
+      // external_id whenever a property is co-hosted. Unscoped, that gives
+      // either:
+      //
+      //   • two matching rows -> .maybeSingle() errors, the error was
+      //     discarded, and the run returned `skipped: no_previous_property`.
+      //     The merge silently never happened for EITHER org; or
+      //   • one matching row belonging to a DIFFERENT org -> this function
+      //     renames that tenant's property external_id off one webhook
+      //     belonging to another tenant, breaking their sync mapping.
+      //
+      // `status = 'active'` was the second half of the problem and is dropped
+      // here. Elsewhere (lib/integrations/vault.ts, providers/ownerrez.ts)
+      // requiring an active connection is right — those need working
+      // credentials to call an API. Here the connection is used ONLY as a
+      // tenant scope key, and a connection in 'error' (a token refresh that
+      // failed), 'revoked', or 'disconnected' still tells us exactly which org
+      // owns the rows. Filtering it out did not narrow the write, it widened
+      // it. Production makes that concrete: all 5 connections are currently
+      // non-active, so EVERY webhook took the unscoped path.
+      const scopedOrgId = await resolveOwningOrg(supabase, external_user_id)
 
-        const connection = unwrap(connectionRes, {
-          site: 'inngest.hospitable-property-merge.connection-scope',
+      if (!scopedOrgId) {
+        // Cannot attribute this webhook to a tenant. Skipping is the only safe
+        // action — a service-role write with no org filter is never the
+        // fallback for "we don't know whose this is".
+        reportError(new Error('Hospitable property-merge could not resolve an owning org'), {
+          site:  'inngest.hospitable-property-merge.unattributable',
+          extra: { has_external_user_id: Boolean(external_user_id), previous_external_id, new_external_id },
         })
-        scopedOrgId = connection?.org_id ?? null
+        return { action: 'skipped', reason: 'unattributable' as const }
       }
 
-      let previousQuery = supabase
+      const previousRes = await supabase
         .from('properties')
         .select('id, org_id, name')
+        .eq('org_id',          scopedOrgId)
         .eq('external_id',     previous_external_id)
         .eq('external_source', PROVIDER)
-      if (scopedOrgId) previousQuery = previousQuery.eq('org_id', scopedOrgId)
-      const { data: previousProperty } = await previousQuery.maybeSingle()
+        .maybeSingle()
+
+      // Unwrapped: a failed read returns null too, and reading that as "no such
+      // property" is what turned the multi-match case into a silent success.
+      const previousProperty = unwrap(previousRes, {
+        site:  'inngest.hospitable-property-merge.previous-property',
+        orgId: scopedOrgId,
+      })
 
       if (!previousProperty) {
         return { action: 'skipped', reason: 'no_previous_property' as const }
       }
 
-      let newPropertyQuery = supabase
+      const existingNewRes = await supabase
         .from('properties')
         .select('id')
+        .eq('org_id',          scopedOrgId)
         .eq('external_id',     new_external_id)
         .eq('external_source', PROVIDER)
-      if (scopedOrgId) newPropertyQuery = newPropertyQuery.eq('org_id', scopedOrgId)
-      const { data: existingNewProperty } = await newPropertyQuery.maybeSingle()
+        .maybeSingle()
+
+      const existingNewProperty = unwrap(existingNewRes, {
+        site:  'inngest.hospitable-property-merge.new-property',
+        orgId: scopedOrgId,
+      })
 
       if (existingNewProperty) {
         // Both sides of the merge already exist as separate FieldStay
         // properties — flag for manual reconciliation rather than silently
         // combining two properties' booking/turnover/work-order history.
-        await supabase
+        const { error: deactivateError } = await supabase
           .from('properties')
           .update({ is_active: false, updated_at: new Date().toISOString() })
           .eq('id', previousProperty.id)
+          .eq('org_id', scopedOrgId)
+
+        // Bound: discarded, a failed deactivation still wrote the audit event
+        // and returned 'flagged_for_manual_review', so the PM would be told to
+        // reconcile two properties while the stale one stayed active and kept
+        // generating turnovers.
+        if (deactivateError) {
+          throw new Error(`Property deactivation failed: ${deactivateError.message}`)
+        }
 
         await logAuditEvent({
           orgId:      previousProperty.org_id,
@@ -125,6 +188,7 @@ export const hospPropertyMerge = inngest.createFunction(
         .from('properties')
         .update({ external_id: new_external_id, updated_at: new Date().toISOString() })
         .eq('id', previousProperty.id)
+        .eq('org_id', scopedOrgId)
 
       if (error) throw new Error(`Property external_id remap failed: ${error.message}`)
 

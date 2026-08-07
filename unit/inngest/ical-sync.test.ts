@@ -64,6 +64,7 @@ vi.mock('@/lib/observability/report-error', () => ({
 }))
 
 import { syncAllIcalFeeds, syncOrgIcalFeeds, syncIcalFeed } from '@/lib/inngest/functions/ical-sync'
+import { reportError } from '@/lib/observability/report-error'
 import { createServiceClient } from '@/lib/supabase/server'
 import { parseIcalFeed } from '@/lib/ical/parser'
 import { cancelTurnoversForBooking, notifyCrewOfCancelledTurnovers } from '@/lib/turnovers/generator'
@@ -456,8 +457,8 @@ describe('syncIcalFeed', () => {
       bookings: [
         {
           data: [
-            { id: 'booking_existing', ical_uid: 'uid_existing', status: 'confirmed', guest_email: null },
-            { id: 'booking_gone', ical_uid: 'uid_gone', status: 'confirmed', guest_email: null },
+            { id: 'booking_existing', ical_uid: 'uid_existing', status: 'confirmed', guest_email: null, checkout_date: '2099-01-01' },
+            { id: 'booking_gone', ical_uid: 'uid_gone', status: 'confirmed', guest_email: null, checkout_date: '2099-01-01' },
           ],
           error: null,
         }, // existing bookings for this feed
@@ -490,7 +491,13 @@ describe('syncIcalFeed', () => {
   })
 
   it('batches the crew notification across every cancelled booking in a single sync into one call', async () => {
-    ;(parseIcalFeed as ReturnType<typeof vi.fn>).mockReturnValue([])
+    // Driven from a NON-empty feed on purpose. This used to use an empty parse
+    // with two known bookings — which is now refused outright as a broken-feed
+    // signature (see the empty-feed test below), so the batching behaviour it
+    // is actually about needed a scenario that still reaches the cancel pass.
+    ;(parseIcalFeed as ReturnType<typeof vi.fn>).mockReturnValue([
+      { uid: 'uid_still_here', guestName: 'Stays', start: new Date('2099-02-01'), end: new Date('2099-02-05'), status: 'confirmed' },
+    ])
     ;(detectAndFlagOverlaps as ReturnType<typeof vi.fn>).mockResolvedValue([])
     ;(cancelTurnoversForBooking as ReturnType<typeof vi.fn>)
       .mockResolvedValueOnce([{ turnoverId: 'to_1', orgId: 'org_1', crewMemberId: 'crew_1' }])
@@ -504,13 +511,14 @@ describe('syncIcalFeed', () => {
       bookings: [
         {
           data: [
-            { id: 'booking_gone_1', ical_uid: 'uid_gone_1', status: 'confirmed', guest_email: null },
-            { id: 'booking_gone_2', ical_uid: 'uid_gone_2', status: 'confirmed', guest_email: null },
+            { id: 'booking_here',   ical_uid: 'uid_still_here', status: 'confirmed', guest_email: null, checkout_date: '2099-01-01' },
+            { id: 'booking_gone_1', ical_uid: 'uid_gone_1',     status: 'confirmed', guest_email: null, checkout_date: '2099-01-01' },
+            { id: 'booking_gone_2', ical_uid: 'uid_gone_2',     status: 'confirmed', guest_email: null, checkout_date: '2099-01-01' },
           ],
           error: null,
-        }, // existing bookings for this feed — both absent from the (empty) feed pull below
-        { data: [], error: null }, // upsert([]).select() — nothing currently in the feed
-        { data: null, error: null }, // bulk-cancel update for both gone bookings
+        },
+        { data: [{ id: 'booking_here', ical_uid: 'uid_still_here', status: 'confirmed' }], error: null },
+        { data: null, error: null },   // bulk-cancel update for both gone bookings
       ],
       org_milestones: [{ data: null, error: null }],
     })
@@ -525,6 +533,81 @@ describe('syncIcalFeed', () => {
       { turnoverId: 'to_1', orgId: 'org_1', crewMemberId: 'crew_1' },
       { turnoverId: 'to_2', orgId: 'org_1', crewMemberId: 'crew_2' },
     ])
+  })
+
+  it('refuses to mass-cancel when the feed parses to ZERO events but bookings are known', async () => {
+    ;(parseIcalFeed as ReturnType<typeof vi.fn>).mockReturnValue([])
+    ;(detectAndFlagOverlaps as ReturnType<typeof vi.fn>).mockResolvedValue([])
+
+    const supabase = makeSupabase({
+      ical_feeds: [
+        { data: { url: 'https://feeds.example.com/foo.ics', source: 'airbnb', org_id: 'org_1' }, error: null },
+        { data: null, error: null },
+      ],
+      bookings: [
+        {
+          data: [
+            { id: 'booking_1', ical_uid: 'uid_1', status: 'confirmed', guest_email: null, checkout_date: '2099-01-01' },
+            { id: 'booking_2', ical_uid: 'uid_2', status: 'confirmed', guest_email: null, checkout_date: '2099-01-01' },
+          ],
+          error: null,
+        },
+        { data: [], error: null },
+      ],
+      org_milestones: [{ data: null, error: null }],
+    })
+    ;(createServiceClient as ReturnType<typeof vi.fn>).mockReturnValue(supabase)
+
+    const result = await invokeHandler(syncIcalFeed, { event: baseEvent(), step: makeStep(), logger: makeLogger() })
+
+    // A structurally valid VCALENDAR with zero VEVENTs parses cleanly to [].
+    // (A non-iCal body never reaches here — ICAL.parse throws and the download
+    // step fails the run.) A host regenerating the feed URL, unpublishing a
+    // listing, or serving a placeholder produces exactly this shape, and it is
+    // indistinguishable from a genuinely emptied calendar. Cancelling would
+    // cancel every turnover and text the crew that their jobs are off.
+    expect(cancelTurnoversForBooking).not.toHaveBeenCalled()
+    expect(notifyCrewOfCancelledTurnovers).not.toHaveBeenCalled()
+    expect(result).toMatchObject({ cancelled: 0 })
+    expect(reportError).toHaveBeenCalledWith(
+      expect.any(Error),
+      expect.objectContaining({ site: 'inngest.ical-sync.empty-feed-guard' }),
+    )
+  })
+
+  it('does not cancel a past booking that simply aged out of the feed window', async () => {
+    ;(parseIcalFeed as ReturnType<typeof vi.fn>).mockReturnValue([
+      { uid: 'uid_future', guestName: 'Ahead', start: new Date('2099-02-01'), end: new Date('2099-02-05'), status: 'confirmed' },
+    ])
+    ;(detectAndFlagOverlaps as ReturnType<typeof vi.fn>).mockResolvedValue([])
+
+    const supabase = makeSupabase({
+      ical_feeds: [
+        { data: { url: 'https://feeds.example.com/foo.ics', source: 'airbnb', org_id: 'org_1' }, error: null },
+        { data: null, error: null },
+      ],
+      bookings: [
+        {
+          data: [
+            { id: 'booking_future', ical_uid: 'uid_future', status: 'confirmed', guest_email: null, checkout_date: '2099-01-01' },
+            { id: 'booking_past',   ical_uid: 'uid_past',   status: 'confirmed', guest_email: null, checkout_date: '2020-01-05' },
+          ],
+          error: null,
+        },
+        { data: [{ id: 'booking_future', ical_uid: 'uid_future', status: 'confirmed' }], error: null },
+      ],
+      org_milestones: [{ data: null, error: null }],
+    })
+    ;(createServiceClient as ReturnType<typeof vi.fn>).mockReturnValue(supabase)
+
+    const result = await invokeHandler(syncIcalFeed, { event: baseEvent(), step: makeStep(), logger: makeLogger() })
+
+    // Airbnb/VRBO feeds carry a rolling FUTURE window, so a completed stay
+    // drops out on its own. Cancelling on absence reclassified finished stays
+    // as cancelled — wrong in owner_transactions and the owner portal's P&L,
+    // for every past booking, forever.
+    expect(cancelTurnoversForBooking).not.toHaveBeenCalled()
+    expect(result).toMatchObject({ cancelled: 0 })
   })
 
   it('marks the feed errored and re-throws when the feed URL is unreachable (non-2xx response)', async () => {

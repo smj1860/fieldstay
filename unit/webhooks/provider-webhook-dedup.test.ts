@@ -53,6 +53,11 @@ function makeSupabase() {
     })
     chain.select       = vi.fn(() => chain)
     chain.eq           = vi.fn(() => chain)
+    // The revocation path now LIST-reads every connection bound to the
+    // external account (one read, replacing findUserByExternalId + a second
+    // status lookup). Empty list = nothing to revoke, which is what these
+    // dedup-focused tests want.
+    chain.limit        = vi.fn(() => Promise.resolve({ data: [], error: null }))
     chain.maybeSingle  = vi.fn(() => Promise.resolve({ data: null }))
     return chain
   })

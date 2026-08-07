@@ -18,6 +18,7 @@ import { unwrap } from '@/lib/supabase/unwrap'
 import { reportError } from '@/lib/observability/report-error'
 import { createServiceClient }         from '@/lib/supabase/server'
 import { redis }                       from '@/lib/rate-limit'
+import { PMS_API_TIMEOUT_MS } from '@/lib/http/timeout'
 import {
   readIntegrationToken,
   readIntegrationRefreshToken,
@@ -280,6 +281,7 @@ async function exchangeRefreshToken(params: {
   refreshToken: string
 }): Promise<HospitableTokenResponse> {
   const response = await fetch(HOSPITABLE_TOKEN_URL, {
+    signal: AbortSignal.timeout(PMS_API_TIMEOUT_MS),
     method: 'POST',
     headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
     body: JSON.stringify({

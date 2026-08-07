@@ -44,6 +44,7 @@ import {
 } from '@/lib/asset-discovery/seed-from-amenities'
 
 import { reportError } from '@/lib/observability/report-error'
+import { unwrap } from '@/lib/supabase/unwrap'
 const HOSPITABLE_API_BASE = 'https://public.api.hospitable.com/v2'
 const PROVIDER            = 'hospitable'
 
@@ -237,13 +238,20 @@ async function syncReservation(
       )
     }
 
-    const { data: property } = await supabase
+    // Unwrapped so the thrown error names the real cause. Both outcomes retry,
+    // but a failed read used to surface as "Property … not in FieldStay",
+    // sending whoever reads it to look for a missing property sync.
+    const propertyRes = await supabase
       .from('properties')
       .select('id')
       .eq('org_id',          orgId)
       .eq('external_id',     hospPropertyId)
       .eq('external_source', PROVIDER)
       .maybeSingle()
+
+    const property = unwrap(propertyRes, {
+      site: 'inngest.hospitable-incremental.booking-property', orgId,
+    })
 
     if (!property) {
       throw new Error(
@@ -255,13 +263,23 @@ async function syncReservation(
     // Scoped to the resolved org — an unscoped lookup could hit a
     // co-hosted twin reservation belonging to a different customer and
     // read the wrong existing dates, feeding a false datesChanged result.
-    const { data: existing } = await supabase
+    // Unwrapped. The comment above reasons about reading the WRONG dates; a
+    // failed read is the other way this goes wrong and was unhandled — null
+    // makes `datesChanged` below true, so every webhook during a read outage
+    // regenerates this property's turnovers. That errs in the safe direction
+    // (better to regenerate than to miss a real date change) but it does so
+    // silently and with churn, and turnover/created events fan out from it.
+    const existingRes = await supabase
       .from('bookings')
       .select('checkin_date, checkout_date')
       .eq('org_id',          orgId)
       .eq('external_id',     entityId)
       .eq('external_source', PROVIDER)
       .maybeSingle()
+
+    const existing = unwrap(existingRes, {
+      site: 'inngest.hospitable-incremental.existing-booking', orgId,
+    })
 
     const normalized = hospitableReservationToNormalized(reservation)
 
@@ -409,13 +427,22 @@ async function syncProperty(
     // co-hosted property already synced by a different customer is still
     // correctly treated as new for this org.
     const supabase = createServiceClient({ system: 'inngest:incremental-sync' })
-    const { data: existingProperty } = await supabase
+    // Unwrapped: null makes isNewProperty true, which re-runs the whole
+    // first-time seeding path (master checklist, guidebook config, amenity
+    // assets) for a property that already has it. applyMasterChecklist's
+    // force:false guard absorbs the checklist half; the rest is wasted work
+    // plus a spurious "new property" PM notification.
+    const existingPropertyRes = await supabase
       .from('properties')
       .select('id')
       .eq('org_id',          owner.orgId)
       .eq('external_id',     entityId)
       .eq('external_source', PROVIDER)
       .maybeSingle()
+
+    const existingProperty = unwrap(existingPropertyRes, {
+      site: 'inngest.hospitable-incremental.existing-property', orgId: owner.orgId,
+    })
 
     return {
       skipped:       false as const,
@@ -622,13 +649,20 @@ async function syncReview(
     // org sharing the same external_id must never override that trusted org.
     const hospPropertyId = review.property?.id ?? null
     if (hospPropertyId) {
-      const { data: prop } = await supabase
+      // Unwrapped: a failed read left resolvedPropertyId null and the review
+      // was stored unattached to any property — permanently, since nothing
+      // re-links it later.
+      const propRes = await supabase
         .from('properties')
         .select('id')
         .eq('org_id',          orgId)
         .eq('external_id',     hospPropertyId)
         .eq('external_source', PROVIDER)
         .maybeSingle()
+
+      const prop = unwrap(propRes, {
+        site: 'inngest.hospitable-incremental.review-property', orgId,
+      })
 
       if (prop) {
         resolvedPropertyId = prop.id
@@ -702,13 +736,20 @@ async function syncMessages(
     // bookingId is scoped to the resolved org — an unscoped lookup would
     // return a co-hosted twin belonging to a different customer.
     const supabase = createServiceClient({ system: 'inngest:incremental-sync' })
-    const { data: booking } = await supabase
+    // Unwrapped: same shape as the review lookup — a failed read stored the
+    // guest messages with a null booking_id, unattached to the stay they
+    // belong to, and nothing re-links them afterwards.
+    const bookingRes = await supabase
       .from('bookings')
       .select('id')
       .eq('org_id',          owner.orgId)
       .eq('external_id',     entityId)
       .eq('external_source', PROVIDER)
       .maybeSingle()
+
+    const booking = unwrap(bookingRes, {
+      site: 'inngest.hospitable-incremental.message-booking', orgId: owner.orgId,
+    })
 
     return {
       skipped:   false as const,

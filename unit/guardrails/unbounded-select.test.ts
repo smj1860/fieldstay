@@ -130,15 +130,12 @@ const BASELINE = new Set<string>([
   'lib/inngest/functions/flagged-turnover-wo.ts',
   'lib/inngest/functions/hospitable/calendar-sync-handler.ts',
   'lib/inngest/functions/hospitable/hospitable-reviews-backfill.ts',
-  'lib/inngest/functions/hospitable/initial-sync.ts',
-  'lib/inngest/functions/hospitable/property-merge.ts',
   'lib/inngest/functions/hospitable/teammate-sync-handler.ts',
   'lib/inngest/functions/hostaway/initial-sync.ts',
   'lib/inngest/functions/inventory-events.ts',
   'lib/inngest/functions/ownerrez/incremental-sync.ts',
   'lib/inngest/functions/ownerrez/initial-sync.ts',
   'lib/inngest/functions/ownerrez/ownerrez-reviews-sync.ts',
-  'lib/inngest/functions/ownerrez/reconciliation-handler.ts',
   'lib/inngest/functions/platform-inventory-template-broadcast.ts',
 ])
 

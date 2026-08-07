@@ -191,29 +191,23 @@ export async function readIntegrationRefreshToken(
   return token as string | null
 }
 
-/**
- * Look up a FieldStay user ID by their external provider user ID.
- * Used by the webhook handler to find the right user when OwnerRez
- * sends a revocation event that only includes the OwnerRez user_id.
- */
-export async function findUserByExternalId(
-  providerId: string,
-  externalUserId: string
-): Promise<string | null> {
-  const admin = getAdminClient()
-
-  const { data, error } = await admin
-    .from('integration_connections')
-    .select('user_id')
-    .eq('provider_id', providerId)
-    .eq('external_user_id', externalUserId)
-    .eq('status', 'active')
-    .single()
-
-  if (error || !data) return null
-
-  return data.user_id as string
-}
+// findUserByExternalId() lived here and is deleted, not merely unused.
+//
+// Its body was `if (error || !data) return null` — a query failure and "no
+// such connection" collapsed into the same answer — and its one caller (the
+// provider revocation webhook) read that null as "already disconnected",
+// returned 2xx, and left a token the provider had revoked live in Vault.
+//
+// It also filtered .eq('status','active'), so a connection in 'error' after a
+// failed token refresh resolved to nobody and never had its secret destroyed,
+// and used .single() on a predicate that is NOT unique
+// (integration_connections is UNIQUE (user_id, provider_id), not on
+// external_user_id).
+//
+// The webhook now reads the connections itself, unwrapped and unfiltered by
+// status, and revokes every one bound to the external account. Deleted rather
+// than left dead so nothing reaches for a helper carrying all three defects —
+// the same reasoning as CLAUDE.md's unreferenced-server-actions rule.
 
 // ── Marketplace install: pending authorization codes ────────────────────────
 // Holds the UNEXCHANGED OAuth authorization code for a user with no FieldStay
