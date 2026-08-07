@@ -256,7 +256,12 @@ export async function updateNotificationPrefs(
       push_inventory:      formData.get('push_inventory')      === 'on',
       push_work_orders:    formData.get('push_work_orders')    === 'on',
       email_daily_digest:  formData.get('email_daily_digest')  === 'on',
-      email_weekly_report: formData.get('email_weekly_report') === 'on',
+      // Paired with the commented-out row in settings-tabs.tsx's EMAIL_PREFS.
+      // Left here rather than deleted for the same reason: the weekly report
+      // does not exist yet and may be built later. Kept commented instead of
+      // live because with the switch unrendered this would read a field the
+      // form never submits and persist a hardcoded false on every save.
+      // email_weekly_report: formData.get('email_weekly_report') === 'on',
     }
 
     const { error } = await supabase.auth.updateUser({ data: { notification_prefs: prefs } })

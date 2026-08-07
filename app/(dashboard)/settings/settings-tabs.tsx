@@ -674,7 +674,14 @@ const PUSH_PREFS = [
 
 const EMAIL_PREFS = [
   { key: 'email_daily_digest',  label: 'Daily ops digest',    desc: 'Summary of today\'s activity each morning'  },
-  { key: 'email_weekly_report', label: 'Weekly report',       desc: 'Full ops report every Monday morning'       },
+  // Weekly report — hidden 2026-08-07, deliberately commented rather than
+  // deleted because it may come back.
+  //
+  // There is no weekly report: no cron, no email template, no content queries.
+  // The switch offered control over a feature that was never built, so every
+  // state of it was equally meaningless. Restoring the row means building the
+  // report first — see docs/PUSH_NOTIFICATIONS.md.
+  // { key: 'email_weekly_report', label: 'Weekly report',       desc: 'Full ops report every Monday morning'       },
 ] as const
 
 function NotificationsTab({

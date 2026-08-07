@@ -184,17 +184,41 @@ These need a human answer before Phase 1 ships.
 2. **Section heading.** "Push Notifications — Receive alerts on this device" no
    longer describes it. Suggest "Alerts" for the category block, with the push
    master as its own labelled row ("Also push these to my devices").
-3. **Weekly report** — cut the switch, or build the report? Recommend cutting
-   it; add it back if the report is genuinely wanted.
+3. ~~**Weekly report** — cut the switch, or build the report?~~ **DECIDED
+   2026-08-07: hidden.** The row is commented out (not deleted) in
+   `settings-tabs.tsx`'s `EMAIL_PREFS`, with its paired line in
+   `updateNotificationPrefs`. It may come back; restoring it means building the
+   report first — there is currently no cron, no template and no content
+   queries behind it.
 4. **Do PMs get a push subscription prompt at all?** Today only the crew PWA
    registers subscriptions. The PM dashboard would need the service worker
    registration + permission prompt. Verify whether the existing SW is scoped to
    `/crew`.
-5. **What does the push master do before a device is subscribed?** Turning it on
-   with no `push_subscriptions` row is a silent no-op. It should either trigger
-   the browser permission prompt on toggle, or render disabled with an explicit
-   "enable notifications in this browser first". Do not let it sit on and do
-   nothing — that is the same lie this whole document exists to remove.
+### The push master triggers the browser permission prompt (DECIDED 2026-08-07)
+
+Switching the master on calls `Notification.requestPermission()`, then registers
+the service worker and writes the `push_subscriptions` row. Three outcomes, and
+only one of them may leave the toggle on:
+
+| Permission result | Toggle | Why |
+|---|---|---|
+| `granted` | stays on, subscription saved | the normal path |
+| `denied` | **revert to off**, explain how to re-enable in browser settings | a browser denial is sticky — `requestPermission()` will not re-prompt, so leaving it on means it can never do anything |
+| `dismissed` | revert to off, no error | they closed the prompt; let them retry |
+
+Leaving the toggle on after a denial is precisely the failure this document
+exists to remove: a control that reports a state it does not have.
+
+**The pref and the subscription are not the same thing, and this is the subtle
+part.** The preference is per *user* (one row, all their devices). Browser
+permission and the subscription are per *device*. So a user who enables push on
+their laptop and then opens the dashboard on their phone has the pref on and no
+subscription there — push silently will not arrive on the phone.
+
+The UI must therefore show two distinct states: the account-level "I want push"
+pref, and "this browser is subscribed." When the pref is on but the current
+device is not subscribed, show an inline prompt to enable it here — do not
+render it as if push were working.
 
 ---
 
