@@ -1,3 +1,4 @@
+import { tryUnwrap } from '@/lib/supabase/unwrap'
 import { NextRequest, NextResponse } from 'next/server'
 import { requireCrewMember } from '@/lib/crew-auth'
 import { inngest } from '@/lib/inngest/client'
@@ -24,13 +25,27 @@ export async function POST(
   if (!auth.ok) return auth.response
   const { user, supabase, crew } = auth
 
-  const { data: turnover } = await supabase
+  const turnoverRes = await supabase
     .from('turnovers')
     .select('id, property_id, org_id, status, inventory_confirmed_complete_at')
     .eq('id', turnover_id)
     .eq('org_id', crew.org_id)
-    .single()
+    .maybeSingle()
 
+  // 503, not 404, when the READ fails — the sibling start route was fixed for
+  // exactly this and this one was not. lib/dexie/net.ts classifies 4xx as
+  // TERMINAL and >=500 as transient, so answering a transient DB error with a
+  // 404 DEAD-LETTERED the crew member's queued completion permanently. That is
+  // worse here than on start: completion is the end of the work, so the job was
+  // done, the PM never saw it finish, and the cleaning fee never posted.
+  // `.single()` made it likelier still, since it raises PGRST116 for zero rows
+  // and so could not be told apart from a real failure.
+  const turnoverOut = tryUnwrap(turnoverRes, { site: 'api.crew.turnovers.complete', orgId: crew.org_id })
+  if (!turnoverOut.ok) {
+    return NextResponse.json({ error: 'Could not load the turnover. Please try again.' }, { status: 503 })
+  }
+
+  const turnover = turnoverOut.data
   if (!turnover) return NextResponse.json({ error: 'Turnover not found' }, { status: 404 })
 
   if (!(await isCrewAssignedToTurnover(supabase, turnover_id, crew.id))) {
@@ -42,11 +57,42 @@ export async function POST(
     return NextResponse.json({ success: true })
   }
 
-  const { data: checklistInstance } = await supabase
+  // A cancelled turnover must not be completable. Nothing removes a cancelled
+  // turnover from the crew's Dexie cache and no crew screen checks the status,
+  // so a PM cancelling a job the crew already has offline left it looking
+  // perfectly normal and tappable. Completing it fired turnover/completed,
+  // which posts a cleaning_fee to the owner's ledger — a real charge for work
+  // that was called off. Production holds 6 cancelled turnovers, so this is a
+  // reachable state, not a theoretical one.
+  //
+  // 409, deliberately: lib/dexie/net.ts treats 4xx as terminal, and that is
+  // correct here — replaying this can never succeed. It dead-letters into the
+  // failed-sync banner where the crew member can see WHY, which is the honest
+  // outcome. Silently answering success would tell them the job was recorded.
+  if (turnover.status === 'cancelled') {
+    return NextResponse.json(
+      { error: 'This turnover was cancelled. Check with your manager before doing any more work on it.' },
+      { status: 409 },
+    )
+  }
+
+  const checklistRes = await supabase
     .from('checklist_instances')
     .select('completed_at')
     .eq('turnover_id', turnover_id)
     .maybeSingle()
+
+  // Also 503 rather than a swallowed null: a failed read here silently changed
+  // the RECORDED COMPLETION TIME. resolveTurnoverCompletedAt falls back to
+  // wall-clock when either confirmation timestamp is missing, so a transient
+  // error would have stamped "now" instead of when the crew actually finished
+  // — and that timestamp is what crew duration, assignment_outcomes and crew
+  // scoring are all derived from.
+  const checklistOut = tryUnwrap(checklistRes, { site: 'api.crew.turnovers.complete.checklist', orgId: crew.org_id })
+  if (!checklistOut.ok) {
+    return NextResponse.json({ error: 'Could not load the turnover. Please try again.' }, { status: 503 })
+  }
+  const checklistInstance = checklistOut.data
 
   // When completion was driven by both the "Confirm Checklist Complete"
   // and "Confirm Inventory Complete" checkboxes, completed_at should
@@ -68,6 +114,9 @@ export async function POST(
     .eq('id', turnover_id)
     .eq('org_id', crew.org_id)
     .neq('status', 'completed')
+    // Belt to the early return above's braces: the status could change between
+    // that read and this write, and a cancel is exactly the change that races.
+    .neq('status', 'cancelled')
     .select('id')
     .maybeSingle()
 

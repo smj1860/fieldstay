@@ -179,4 +179,88 @@ describe('POST /api/crew/turnovers/[id]/complete', () => {
     const orgScoped = turnoverCalls.some((c) => c.method === 'eq' && c.args[0] === 'org_id' && c.args[1] === 'org_1')
     expect(orgScoped).toBe(true)
   })
+
+  // ── A cancelled turnover must not be completable ───────────────────────────
+  //
+  // Nothing removes a cancelled turnover from the crew's Dexie cache and no
+  // crew screen checks the status, so a PM cancelling a job the crew already
+  // holds offline left it looking perfectly normal and tappable. Completing it
+  // fires turnover/completed, which posts a cleaning_fee to the owner's ledger
+  // — a real charge for work that was called off. Production holds 6 cancelled
+  // turnovers, so this is a reachable state.
+  it('refuses to complete a cancelled turnover, and posts no fee', async () => {
+    const supabase = makeSupabase({
+      turnovers:            [{ data: { id: 'turnover_1', property_id: 'prop_1', org_id: 'org_1', status: 'cancelled', inventory_confirmed_complete_at: null } }],
+      turnover_assignments: [{ data: { id: 'ta_1' } }],
+    })
+    authOk(supabase)
+
+    const res  = await call('turnover_1')
+    const json = await res.json()
+
+    expect(res.status).toBe(409)
+    expect(json.error).toMatch(/cancelled/i)
+    expect(inngest.send).not.toHaveBeenCalled()
+    expect(logAuditEvent).not.toHaveBeenCalled()
+  })
+
+  // 4xx is TERMINAL in lib/dexie/net.ts, which is the right classification
+  // here: replaying this can never succeed. It dead-letters into the
+  // failed-sync banner where the crew member can read why.
+  it('answers the cancelled case with a terminal status, not a retryable one', async () => {
+    const supabase = makeSupabase({
+      turnovers:            [{ data: { id: 'turnover_1', property_id: 'prop_1', org_id: 'org_1', status: 'cancelled', inventory_confirmed_complete_at: null } }],
+      turnover_assignments: [{ data: { id: 'ta_1' } }],
+    })
+    authOk(supabase)
+
+    const res = await call('turnover_1')
+
+    expect(res.status).toBeGreaterThanOrEqual(400)
+    expect(res.status).toBeLessThan(500)
+  })
+
+  // ── A failed READ must not dead-letter the crew member's work ─────────────
+  //
+  // lib/dexie/net.ts classifies 4xx as TERMINAL and >=500 as transient. This
+  // route answered a transient DB error with 404, which discarded the queued
+  // completion permanently — the job was done, the PM never saw it finish, and
+  // the cleaning fee never posted. The sibling start route was fixed for
+  // exactly this; this one was not.
+  it('returns 503, not 404, when the turnover read itself fails', async () => {
+    const supabase = makeSupabase({
+      turnovers: [{ data: null, error: { code: '57014', message: 'canceling statement due to statement timeout' } }],
+    })
+    authOk(supabase)
+
+    const res = await call('turnover_1')
+
+    expect(res.status).toBe(503)
+    expect(inngest.send).not.toHaveBeenCalled()
+  })
+
+  it('still returns 404 when the turnover genuinely does not exist', async () => {
+    const supabase = makeSupabase({ turnovers: [{ data: null, error: null }] })
+    authOk(supabase)
+
+    expect((await call('turnover_1')).status).toBe(404)
+  })
+
+  // A failed checklist read silently changed the RECORDED COMPLETION TIME:
+  // resolveTurnoverCompletedAt falls back to wall-clock when a confirmation
+  // timestamp is missing, and that timestamp feeds crew duration,
+  // assignment_outcomes and crew scoring.
+  it('returns 503 rather than stamping a wall-clock time when the checklist read fails', async () => {
+    const supabase = makeSupabase({
+      turnovers:            [{ data: { id: 'turnover_1', property_id: 'prop_1', org_id: 'org_1', status: 'in_progress', inventory_confirmed_complete_at: '2026-08-07T10:00:00.000Z' } }],
+      turnover_assignments: [{ data: { id: 'ta_1' } }],
+      checklist_instances:  [{ data: null, error: { code: '57014', message: 'timeout' } }],
+    })
+    authOk(supabase)
+
+    const res = await call('turnover_1')
+
+    expect(res.status).toBe(503)
+    expect(inngest.send).not.toHaveBeenCalled()
+  })
 })

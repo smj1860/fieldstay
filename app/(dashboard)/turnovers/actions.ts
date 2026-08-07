@@ -549,6 +549,66 @@ export async function assignCrewIndividually(
 
 // ── Status update ────────────────────────────────────────────────────────────
 
+/**
+ * The column payload for a turnover status change.
+ *
+ * Pulled out of updateTurnoverStatus purely to keep that function under
+ * CLAUDE.md's cognitive-complexity limit — the per-status branching is
+ * self-contained and reads better named than inline.
+ */
+function buildTurnoverStatusUpdate(
+  status:      'in_progress' | 'completed' | 'flagged' | 'cancelled',
+  timestamp:   string,
+  notes:       string | undefined,
+): TablesUpdate<'turnovers'> {
+  const update: TablesUpdate<'turnovers'> = { status }
+
+  if (status === 'in_progress') update.started_at = timestamp
+  if (status === 'completed') {
+    update.completed_at     = timestamp
+    update.completion_notes = notes ?? null
+  }
+  if (status === 'flagged' && notes) update.completion_notes = notes
+
+  return update
+}
+
+/**
+ * Explains a guarded completion UPDATE that matched no row.
+ *
+ * Two filters can produce that outcome and they mean opposite things to the
+ * PM. `.neq('status','completed')` losing means a concurrent request already
+ * completed it — genuinely a success, and re-firing turnover/completed would
+ * double-count the metric and overwrite completed_at.
+ * `.neq('status','cancelled')` losing means the job was called off, and
+ * answering success there would tell the PM a cancelled turnover had just been
+ * marked done while no cleaning fee posted and no event fired.
+ *
+ * Returns the message to show, or null when the outcome was benign. Extracted
+ * rather than inlined because adding this branch took updateTurnoverStatus to
+ * a cognitive complexity of 19, over CLAUDE.md's limit of 15.
+ */
+async function completionBlockedReason(
+  supabase: Awaited<ReturnType<typeof requireOrgRole>>['supabase'],
+  turnoverId: string,
+  orgId: string,
+): Promise<string | null> {
+  const currentRes = await supabase
+    .from('turnovers')
+    .select('status')
+    .eq('id', turnoverId)
+    .eq('org_id', orgId)
+    .maybeSingle()
+
+  if (reportQueryError(currentRes.error, { site: 'serverAction.turnovers.updateTurnoverStatus.recheck', orgId })) {
+    return 'Operation failed. Please try again.'
+  }
+  if (currentRes.data?.status === 'cancelled') {
+    return 'This turnover was cancelled and cannot be marked complete.'
+  }
+  return null
+}
+
 export async function updateTurnoverStatus(
   turnover_id: string,
   status: 'in_progress' | 'completed' | 'flagged' | 'cancelled',
@@ -557,18 +617,8 @@ export async function updateTurnoverStatus(
   try {
     const { supabase, membership, user } = await requireOrgRole(TURNOVER_WRITE_ROLES)
 
-    const update: TablesUpdate<'turnovers'> = { status }
     const completedAt = new Date().toISOString()
-    if (status === 'in_progress') {
-      update.started_at = completedAt
-    }
-    if (status === 'completed') {
-      update.completed_at     = completedAt
-      update.completion_notes = notes ?? null
-    }
-    if (notes && status === 'flagged') {
-      update.completion_notes = notes
-    }
+    const update = buildTurnoverStatusUpdate(status, completedAt, notes)
 
     // Completing is guarded by the WHERE clause, not by an earlier read.
     // This previously selected the current status, computed
@@ -588,7 +638,15 @@ export async function updateTurnoverStatus(
       .eq('id', turnover_id)
       .eq('org_id', membership.org_id)
     if (status === 'completed') {
-      query = query.neq('status', 'completed')
+      query = query
+        .neq('status', 'completed')
+        // A cancelled turnover must not be completable from here either.
+        // Completing one fires turnover/completed, which posts a cleaning_fee
+        // to the owner's ledger — a real charge for work that was called off.
+        // Production holds 6 cancelled turnovers, so the state is reachable.
+        // Same guard as app/api/crew/turnovers/[id]/complete/route.ts, which
+        // additionally rejects it up front so the crew member is told why.
+        .neq('status', 'cancelled')
     }
 
     const { data: updated, error } = await query.select('id, property_id, org_id').maybeSingle()
@@ -601,10 +659,12 @@ export async function updateTurnoverStatus(
 
     // 0 rows means two different things here, and only one of them is fine.
     //
-    // When COMPLETING, `.neq('status','completed')` is the TOCTOU guard: 0 rows
-    // means the turnover was already completed, by a concurrent request that
-    // fires its own event or an earlier save whose automations already ran.
-    // That is a success — don't re-fire, don't error.
+    // When COMPLETING, the .neq() pair is the TOCTOU guard: 0 rows means the
+    // turnover was already completed — by a concurrent request that fires its
+    // own event, or an earlier save whose automations already ran — or that it
+    // is cancelled. Already-completed is a success: don't re-fire, don't error.
+    // Cancelled is reported, because silently answering success would tell the
+    // PM a cancelled job had just been marked done.
     //
     // For every other status there is no such filter, so 0 rows can only mean
     // RLS refused the write or the turnover is gone. That used to return
@@ -613,6 +673,11 @@ export async function updateTurnoverStatus(
     if (!updated && status !== 'completed') {
       console.warn('[updateTurnoverStatus] update matched 0 rows', { turnover_id, status })
       return { error: NOTHING_UPDATED }
+    }
+
+    if (!updated && status === 'completed') {
+      const blocked = await completionBlockedReason(supabase, turnover_id, membership.org_id)
+      if (blocked) return { error: blocked }
     }
 
     // Fire completion event for PM notification.
