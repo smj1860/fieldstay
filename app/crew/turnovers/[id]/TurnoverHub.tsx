@@ -4,6 +4,17 @@ import { Button } from '@/components/ui/Button'
 import type { TurnoverRow } from '@/lib/dexie/schema'
 import type { TurnoverActions } from './use-turnover-actions'
 
+/**
+ * Extracted rather than left as a chained ternary: adding the cancelled state
+ * made it a third branch, and CLAUDE.md bans nested conditionals.
+ */
+function markCompleteLabel(completing: boolean, isComplete: boolean, isCancelled: boolean) {
+  if (completing)  return <><Loader2 className="w-4 h-4 animate-spin" /> Saving…</>
+  if (isComplete)  return <><Check className="w-4 h-4" /> Marked Complete</>
+  if (isCancelled) return 'Turnover Cancelled'
+  return 'Mark as Complete'
+}
+
 export function TurnoverHub({
   turnover,
   actions,
@@ -19,7 +30,7 @@ export function TurnoverHub({
   onOpenSummary:         () => void
   onMarkCompleteSuccess: () => void
 }>) {
-  const { completedCount, totalCount, inventoryItems, actionError, completing, markInProgress, markComplete } = actions
+  const { completedCount, totalCount, inventoryItems, actionError, completing, markInProgress, markComplete, isCancelled } = actions
 
   return (
     <div className="space-y-3 mt-4">
@@ -49,8 +60,12 @@ export function TurnoverHub({
         </div>
       )}
 
-      {/* Start Turnover — only if status === 'assigned' */}
-      {turnover.status === 'assigned' && (
+      {/* Start Turnover — only if status === 'assigned' and not cancelled.
+          `assigned` and `cancelled` are not mutually exclusive on the device:
+          cancelTurnoversForBooking() flips turnovers.status server-side, and
+          the crew row keeps whatever the last pull wrote — so this needs its
+          own check rather than relying on the status equality above. */}
+      {turnover.status === 'assigned' && !isCancelled && (
         <Button variant="secondary" onClick={() => void markInProgress()} className="w-full py-4 text-base">
           Start Turnover
         </Button>
@@ -94,15 +109,11 @@ export function TurnoverHub({
       <Button
         variant="cta"
         onClick={() => markComplete(onMarkCompleteSuccess)}
-        disabled={completing || turnover.status === 'completed'}
+        disabled={completing || turnover.status === 'completed' || isCancelled}
         className="w-full py-4 text-base flex items-center justify-center gap-2
                    disabled:opacity-60 disabled:cursor-not-allowed"
       >
-        {completing
-          ? <><Loader2 className="w-4 h-4 animate-spin" /> Saving…</>
-          : turnover.status === 'completed'
-          ? <><Check className="w-4 h-4" /> Marked Complete</>
-          : 'Mark as Complete'}
+        {markCompleteLabel(completing, turnover.status === 'completed', isCancelled)}
       </Button>
 
       {/* Turnover Summary & Additional Notes — secondary, at the bottom */}

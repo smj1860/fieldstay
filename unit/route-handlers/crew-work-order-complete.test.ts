@@ -129,6 +129,53 @@ describe('POST /api/crew/work-orders/[id]/complete', () => {
     expect(inngest.send).not.toHaveBeenCalled()
   })
 
+  // Neither half of this guarded. The check above only catches `completed`,
+  // and the claim UPDATE's `.neq('status', 'completed')` MATCHES a cancelled
+  // row — so completing a cancelled work order flipped it to `completed` and
+  // ran the whole side-effect chain, including the owner_transactions
+  // maintenance expense, for work that was called off.
+  //
+  // 409, not 404 or 500: lib/dexie/net.ts treats 4xx as terminal, and this
+  // refusal is permanent, so the queued mutation must stop rather than retry
+  // forever. Same answer the turnover complete route already gave.
+  it('refuses a cancelled work order with 409 and writes nothing', async () => {
+    const authClient = makeAuthClient('user_1', { data: { id: 'crew_1', org_id: 'org_1' }, error: null })
+    vi.mocked(createClient).mockResolvedValue(authClient as never)
+    const serviceClient = makeSupabase({
+      work_orders: [{ data: { id: 'wo_1', org_id: 'org_1', assigned_crew_member_id: 'crew_1', status: 'cancelled' }, error: null }],
+    })
+    vi.mocked(createServiceClient).mockReturnValue(serviceClient as never)
+
+    const res  = await call('wo_1')
+    const json = await res.json()
+
+    expect(res.status).toBe(409)
+    expect(json.error).toMatch(/was cancelled/i)
+    expect(serviceClient.calls.some((c) => c.method === 'update')).toBe(false)
+    expect(inngest.send).not.toHaveBeenCalled()
+    expect(logAuditEvent).not.toHaveBeenCalled()
+  })
+
+  // The read produces the message; the WHERE clause is what makes it
+  // race-safe against a cancellation landing between the two.
+  it('excludes cancelled in the claim UPDATE itself, not only in the earlier read', async () => {
+    const authClient = makeAuthClient('user_1', { data: { id: 'crew_1', org_id: 'org_1' }, error: null })
+    vi.mocked(createClient).mockResolvedValue(authClient as never)
+    const serviceClient = makeSupabase({
+      work_orders: [
+        { data: { id: 'wo_1', org_id: 'org_1', assigned_crew_member_id: 'crew_1', status: 'in_progress' }, error: null },
+        { data: null, error: null },
+      ],
+    })
+    vi.mocked(createServiceClient).mockReturnValue(serviceClient as never)
+
+    await call('wo_1')
+
+    const neqs = serviceClient.calls.filter((c) => c.method === 'neq').map((c) => c.args)
+    expect(neqs).toContainEqual(['status', 'completed'])
+    expect(neqs).toContainEqual(['status', 'cancelled'])
+  })
+
   it('returns alreadyCompleted without re-firing the event when a concurrent request already won the completion claim', async () => {
     const authClient = makeAuthClient('user_1', { data: { id: 'crew_1', org_id: 'org_1' }, error: null })
     vi.mocked(createClient).mockResolvedValue(authClient as never)

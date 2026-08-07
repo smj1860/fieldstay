@@ -22,7 +22,7 @@ export default function CrewTurnoverPage() {
   const [view, setView] = useState<'hub' | 'checklist' | 'inventory'>('hub')
 
   const actions = useTurnoverActions(id)
-  const { turnover, property, instance, userId, uploadError, pendingConfirm, setPendingConfirm } = actions
+  const { turnover, property, instance, userId, uploadError, pendingConfirm, setPendingConfirm, isCancelled } = actions
 
   if (!turnover) {
     return <CrewLoading />
@@ -41,6 +41,33 @@ export default function CrewTurnoverPage() {
       >
         <ArrowLeft className="w-4 h-4" />
       </button>
+
+      {/*
+        A cancelled turnover stays on the device — see the note on isCancelled
+        in use-turnover-actions.ts. The crew LIST filters cancelled out, so the
+        only way to be looking at one is to have been on this page already when
+        the guest cancelled, which is exactly the case where nobody would
+        otherwise notice. Same wording as the push notification that fires from
+        crew-turnover-cancelled.ts, so the two agree.
+      */}
+      {isCancelled && (
+        <div
+          className="flex items-start gap-2 rounded-xl px-4 py-3 mb-4"
+          style={{ background: 'var(--accent-red-dim)', border: '1px solid rgba(240,84,84,0.25)' }}
+          role="alert"
+        >
+          <AlertCircle className="w-4 h-4 flex-shrink-0 mt-0.5" style={{ color: 'var(--accent-red)' }} />
+          <div>
+            <p className="text-sm font-semibold" style={{ color: 'var(--accent-red)' }}>
+              This turnover was cancelled
+            </p>
+            <p className="text-sm mt-0.5" style={{ color: 'var(--accent-red)' }}>
+              A cancelled booking removed this turnover — no need to go. Check with
+              your manager before doing any more work on it.
+            </p>
+          </div>
+        </div>
+      )}
 
       {/* Property info card — always visible across all views */}
       <div className="bg-card-themed rounded-xl border border-themed p-4 mb-4">

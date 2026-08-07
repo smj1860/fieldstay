@@ -19,7 +19,7 @@ export function InventoryView({
     userId,
     inventoryItems, invByCategory, getCount, handleCountChange,
     countedSoFar, countedTotal,
-    toggleInventoryConfirm, inventoryConfirmSyncFailed, actionError,
+    toggleInventoryConfirm, inventoryConfirmSyncFailed, actionError, isCancelled,
   } = actions
 
   return (
@@ -122,11 +122,11 @@ export function InventoryView({
       <button
         type="button"
         onClick={() => void toggleInventoryConfirm()}
-        disabled={turnover.status === 'completed'}
+        disabled={turnover.status === 'completed' || isCancelled}
         className={cn(
           'w-full flex items-center gap-3 px-4 py-4 rounded-xl border-2 mt-2 mb-4 text-left transition-colors',
           !turnover.inventory_confirmed_complete_at && 'border-themed hover:bg-raised-themed',
-          turnover.status === 'completed' && 'cursor-not-allowed'
+          (turnover.status === 'completed' || isCancelled) && 'cursor-not-allowed'
         )}
         style={turnover.inventory_confirmed_complete_at ? { borderColor: 'var(--accent-green)', background: 'var(--accent-green-dim)' } : undefined}
       >

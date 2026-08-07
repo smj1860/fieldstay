@@ -92,7 +92,7 @@ export default function CrewWorkOrderPage({ params }: { params: Promise<{ id: st
           <ArrowLeft className="w-5 h-5 text-secondary-themed" />
         </button>
         <div className="flex items-center gap-2">
-          <Wrench className="w-4 h-4 text-amber-600" />
+          <Wrench className="w-4 h-4" style={{ color: 'var(--accent-amber)' }} />
           <span className="font-bold text-sm text-primary-themed">Work Order</span>
           {wo.wo_number && (
             <span className="text-xs text-muted-themed">{wo.wo_number}</span>
@@ -124,7 +124,15 @@ export default function CrewWorkOrderPage({ params }: { params: Promise<{ id: st
           </div>
         )}
 
-        {wo.status !== 'completed' && (
+        {/* `cancelled` as well as `completed`: nothing removes a cancelled
+            work order from the device — the crew sync pulls by
+            assigned_crew_member_id with no status filter, and only the crew
+            LIST filters cancelled out. This detail page offered the full
+            completion form on one, and the server accepted it (its
+            .neq('status','completed') matched a cancelled row), running the
+            whole side-effect chain including the owner_transactions
+            maintenance expense for work that was called off. */}
+        {wo.status !== 'completed' && wo.status !== 'cancelled' && (
           <div className="pt-4 border-t border-themed">
             <h2 className="text-xs font-bold text-muted-themed uppercase tracking-wide mb-2">
               Completion Notes (optional)
@@ -145,10 +153,25 @@ export default function CrewWorkOrderPage({ params }: { params: Promise<{ id: st
               {completing ? 'Marking Complete...' : 'Mark Work Complete'}
             </button>
             {completeError && (
-              <p className="text-sm text-center mt-2 text-red-600">
+              <p className="text-sm text-center mt-2" style={{ color: 'var(--accent-red)' }}>
                 {completeError}
               </p>
             )}
+          </div>
+        )}
+
+        {wo.status === 'cancelled' && (
+          <div
+            className="rounded-xl p-3 text-center border"
+            style={{ background: 'var(--accent-red-dim)', borderColor: 'var(--accent-red)' }}
+            role="alert"
+          >
+            <p className="text-sm font-bold" style={{ color: 'var(--accent-red)' }}>
+              This work order was cancelled
+            </p>
+            <p className="text-sm mt-0.5" style={{ color: 'var(--accent-red)' }}>
+              No need to do this one. Check with your manager before doing any more work on it.
+            </p>
           </div>
         )}
 
