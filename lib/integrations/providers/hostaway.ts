@@ -25,6 +25,7 @@
 
 import type { IntegrationProvider } from '@/lib/integrations/types'
 import { fail } from '@/lib/integrations/webhook-verification'
+import { PMS_API_TIMEOUT_MS } from '@/lib/http/timeout'
 
 // Exact field names from Hostaway API GET /v1/listings response
 export interface HostawayListing {
@@ -113,6 +114,7 @@ export async function hostawayExchangeCredentials(
   })
 
   const res = await fetch(`${BASE_URL}/accessTokens`, {
+    signal: AbortSignal.timeout(PMS_API_TIMEOUT_MS),
     method:  'POST',
     headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
     body:    body.toString(),
@@ -165,7 +167,7 @@ export async function hostawayFetchListings(
 
     const res = await fetch(
       `${BASE_URL}/listings?limit=${LIMIT}&offset=${offset}&includeResources=0`,
-      { headers: hostawayProvider.getApiHeaders(token) }
+      { headers: hostawayProvider.getApiHeaders(token), signal: AbortSignal.timeout(PMS_API_TIMEOUT_MS) }
     )
 
     if (!res.ok) {
@@ -216,6 +218,7 @@ export async function hostawayFetchReservations(
     })
 
     const res = await fetch(`${BASE_URL}/reservations?${params}`, {
+      signal: AbortSignal.timeout(PMS_API_TIMEOUT_MS),
       headers: hostawayProvider.getApiHeaders(token),
     })
 

@@ -26,6 +26,7 @@ import type {
 } from '../types'
 
 import { reportError } from '@/lib/observability/report-error'
+import { PMS_API_TIMEOUT_MS } from '@/lib/http/timeout'
 const BASE_URL   = 'https://api.ownerrez.com'
 const PROVIDER   = 'ownerrez'
 
@@ -133,7 +134,7 @@ export class OwnerRezApiClient {
         'Accept':        'application/json',
         ...(options?.body ? { 'Content-Type': 'application/json' } : {}),
       },
-      signal: AbortSignal.timeout(30_000),
+      signal: AbortSignal.timeout(PMS_API_TIMEOUT_MS),
       ...(options?.body ? { body: options.body } : {}),
     })
 

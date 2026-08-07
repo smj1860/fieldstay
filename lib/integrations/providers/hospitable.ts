@@ -22,6 +22,7 @@ import { hospitableApiLimiter, checkLimit } from '@/lib/rate-limit'
 import { ok, fail, timingSafeEqual, extractClientIp, isIpInCidr } from '@/lib/integrations/webhook-verification'
 import { unwrapJoin } from '@/lib/utils/supabase-joins'
 import { reportError } from '@/lib/observability/report-error'
+import { PMS_API_TIMEOUT_MS } from '@/lib/http/timeout'
 import type {
   HospitableUser,
   HospitableProperty,
@@ -80,6 +81,7 @@ export const hospitableProvider: IntegrationProvider = {
     }
 
     const response = await fetch(HOSPITABLE_TOKEN_URL, {
+      signal: AbortSignal.timeout(PMS_API_TIMEOUT_MS),
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -116,6 +118,7 @@ export const hospitableProvider: IntegrationProvider = {
 
     // Fetch the user ID immediately after exchange for a stable external identifier
     const userRes = await fetch(`${HOSPITABLE_API_BASE}/user`, {
+      signal: AbortSignal.timeout(PMS_API_TIMEOUT_MS),
       headers: {
         'Authorization': `Bearer ${data.access_token}`,
         'Accept':        'application/json',
@@ -159,6 +162,7 @@ export const hospitableProvider: IntegrationProvider = {
     }
 
     const response = await fetch(HOSPITABLE_TOKEN_URL, {
+      signal: AbortSignal.timeout(PMS_API_TIMEOUT_MS),
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -482,7 +486,7 @@ export async function hospitableFetch(url: string, token: string): Promise<Respo
     throw new RateLimitError(retryAfterSeconds)
   }
 
-  const res = await fetch(url, { headers: hospitableProvider.getApiHeaders(token) })
+  const res = await fetch(url, { headers: hospitableProvider.getApiHeaders(token), signal: AbortSignal.timeout(PMS_API_TIMEOUT_MS) })
 
   if (res.status === 429) {
     const retryAfter = parseInt(res.headers.get('Retry-After') ?? '60', 10)

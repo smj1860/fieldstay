@@ -81,14 +81,14 @@ function findOffenders(): string[] {
 // (geocoding, weather/tomorrow, sms/telnyx, kroger/client) were fixed.
 // SHRINK-ONLY: fixing a file means deleting its line here.
 const BASELINE: Record<string, string> = {
-  'lib/integrations/providers/hospitable-token.ts':
-    'Hospitable OAuth token exchange — needs a provider timeout budget; owned by the integrations area.',
-  'lib/integrations/providers/hospitable.ts':
-    'Hospitable token + REST client (hospitableFetch is the wrapper; the raw call inside it is what is unbounded).',
-  'lib/integrations/providers/hostaway.ts':
-    'Hostaway token + listings + reservations client — same as above.',
-  'lib/integrations/providers/ownerrez.ts':
-    'OwnerRez token exchange + revocation — same as above.',
+  // The four PMS provider clients (hospitable, hospitable-token, hostaway,
+  // ownerrez) are GONE from this list: every raw fetch in them now carries
+  // PMS_API_TIMEOUT_MS. hospitableFetch() was the one that mattered most —
+  // the single wrapper every Hospitable API call goes through, with
+  // hospIncrementalSync running at concurrency [{limit: 8}], so eight hung
+  // requests consumed the whole budget and stalled all webhook processing.
+  // The chokepoint that exists so one place needs a timeout was the one place
+  // without it.
   'lib/supabase/server.ts':
     "adminFetch() is a thin pass-through to the Supabase Admin REST API and forwards init verbatim; its callers supply the signal (see resolveUserEmails in lib/inngest/helpers.ts), which is why the raw call here carries none.",
 }

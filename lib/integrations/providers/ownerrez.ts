@@ -25,6 +25,7 @@ import type { NormalizedBooking } from '@/lib/bookings/normalize'
 import { unmappedBookingStatus } from '@/lib/bookings/normalize'
 import type { Enums, TablesUpdate } from '@/types/database'
 import { ok, fail, timingSafeEqual, extractClientIp, isIpInCidr } from '../webhook-verification'
+import { PMS_API_TIMEOUT_MS } from '@/lib/http/timeout'
 
 // ── OwnerRez webhook source-IP allowlist (audit 2026-07-30, L-4) ────────────
 //
@@ -148,6 +149,7 @@ export const ownerRezProvider: IntegrationProvider = {
   // Step 3: Exchange the temporary code for a long-lived access token
   async exchangeCodeForToken({ code, redirectUri }) {
     const response = await fetch(OWNERREZ_TOKEN_URL, {
+      signal: AbortSignal.timeout(PMS_API_TIMEOUT_MS),
       method: 'POST',
       headers: {
         'Content-Type':  'application/x-www-form-urlencoded',
@@ -192,6 +194,7 @@ export const ownerRezProvider: IntegrationProvider = {
   // Called when a FieldStay user disconnects OwnerRez from within our UI
   async revokeAccessToken({ token }) {
     const response = await fetch(`${OWNERREZ_API_BASE}/oauth/access_token/${token}`, {
+      signal: AbortSignal.timeout(PMS_API_TIMEOUT_MS),
       method:  'DELETE',
       headers: {
         'Authorization': `Basic ${buildBasicAuth()}`,
