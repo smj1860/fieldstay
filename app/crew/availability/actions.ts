@@ -3,6 +3,9 @@
 import { revalidatePath } from 'next/cache'
 import { requireCrewMember } from '@/lib/crew-auth'
 import { reportError } from '@/lib/observability/report-error'
+// From ./window.ts, not declared here: this file is `'use server'`, and a
+// Server Actions module may only export async functions.
+import { LOOKBACK_DAYS, LOOKAHEAD_DAYS } from './window'
 
 /**
  * Time-off is deliberately NOT offline-capable.
@@ -19,15 +22,6 @@ import { reportError } from '@/lib/observability/report-error'
  * Note what this also fixes: org_id and crew_member_id now come from the
  * authenticated crew context, not from props the client passed in.
  */
-/**
- * The window the crew calendar can navigate to, and therefore the only window
- * a write may target. Exported so app/crew/availability/page.tsx reads exactly
- * the range this action will accept — if they drift, the screen either offers
- * days the action rejects or accepts days it will never show back.
- */
-export const LOOKBACK_DAYS  = 30
-export const LOOKAHEAD_DAYS = 365
-
 /** crew_availability.notes is free text from a phone keyboard; bound it. */
 const MAX_NOTE_LENGTH = 500
 

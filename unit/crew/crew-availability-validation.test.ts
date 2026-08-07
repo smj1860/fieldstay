@@ -20,7 +20,8 @@ vi.mock('@/lib/crew-auth', () => ({ requireCrewMember: () => requireCrewMember()
 vi.mock('next/cache', () => ({ revalidatePath: vi.fn() }))
 vi.mock('@/lib/observability/report-error', () => ({ reportError: vi.fn() }))
 
-import { saveCrewAvailability, LOOKBACK_DAYS, LOOKAHEAD_DAYS } from '@/app/crew/availability/actions'
+import { saveCrewAvailability } from '@/app/crew/availability/actions'
+import { LOOKBACK_DAYS, LOOKAHEAD_DAYS } from '@/app/crew/availability/window'
 
 function makeSupabase() {
   const calls: { table: string; method: string; args: unknown[] }[] = []

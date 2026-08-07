@@ -16,7 +16,7 @@ export const dynamic = 'force-dynamic'
  * action rather than redeclared, so the range this page SHOWS and the range
  * the action ACCEPTS cannot drift apart.
  */
-import { LOOKBACK_DAYS, LOOKAHEAD_DAYS } from './actions'
+import { LOOKBACK_DAYS, LOOKAHEAD_DAYS } from './window'
 
 export default async function CrewAvailabilityPage() {
   const supabase                = await createClient()
