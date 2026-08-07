@@ -83,6 +83,31 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
       booking_id: bookingId,
     })
 
+    // 23505 against uniq_guidebook_offer_redemptions_sponsor_booking_day
+    // (migration 20260807150000) is the SUCCESS path, not a failure: this
+    // sponsor is already counted for this booking today.
+    //
+    // The row is written when the guest opens the redemption pass — the coupon
+    // they show at the counter — and opening it more than once is the NORMAL
+    // case: look at the offer from the couch, close it, walk over, open it
+    // again for staff. Counting each reopen inflated the exact number a paying
+    // sponsor judges their slot by.
+    //
+    // Per day, not per stay: a daily perk is legitimately redeemable on each
+    // day of a booking, so collapsing the whole stay would under-count.
+    //
+    // Caught here rather than expressed as upsert({onConflict}): the index is
+    // an EXPRESSION index (on the UTC date of opened_at), and PostgREST's
+    // on_conflict only takes plain column names.
+    //
+    // Anonymous redemptions (bookingId null, from the property-level
+    // /g/[slug] guidebook) fall outside the partial index by design — with no
+    // guest identity there is nothing to dedupe on, and collapsing them by
+    // (sponsor, day) would merge different guests into one.
+    if (error?.code === '23505') {
+      return NextResponse.json({ ok: true })
+    }
+
     if (error) {
       // Redemption logging is best-effort — never fail the guest UX over it —
       // but it must not be SILENT either: without the code/message here, a

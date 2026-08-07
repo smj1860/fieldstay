@@ -4,6 +4,9 @@ import { NextRequest } from 'next/server'
 vi.mock('@/lib/supabase/server', () => ({
   createServiceClient: vi.fn(),
 }))
+vi.mock('@/lib/observability/report-error', () => ({
+  reportError: vi.fn(),
+}))
 vi.mock('@/lib/rate-limit', async () => {
   // checkLimit() is now the only sanctioned way to consult a limiter
   // (lib/rate-limit.ts). The stub delegates to the limiter doubles below
@@ -19,6 +22,7 @@ vi.mock('@/lib/rate-limit', async () => {
 import { POST } from '@/app/api/guidebook/redeem/route'
 import { createServiceClient } from '@/lib/supabase/server'
 import { guidebookRedeemLimiter } from '@/lib/rate-limit'
+import { reportError } from '@/lib/observability/report-error'
 
 // Real UUIDs, because every one of these ids is a Postgres `uuid` column and
 // the route now shape-checks before querying. The previous fixtures
@@ -223,6 +227,45 @@ describe('POST /api/guidebook/redeem', () => {
       sponsor_id: SPONSOR_ID,
       booking_id: null,
     })
+  })
+
+  it('treats a 23505 as already-counted-today, not as a failure to report', async () => {
+    const reportSpy = vi.mocked(reportError)
+    const service = makeServiceClient({
+      insertResult: {
+        error: {
+          code:    '23505',
+          message: 'duplicate key value violates unique constraint "uniq_guidebook_offer_redemptions_sponsor_booking_day"',
+        },
+      },
+    })
+    vi.mocked(createServiceClient).mockReturnValue(service as never)
+
+    const res = await POST(postRequest({ sponsorId: SPONSOR_ID, bookingToken: BOOKING_TOK }))
+
+    // Reopening the pass is the normal case — the guest looks at the offer,
+    // closes it, walks to the business, opens it again for staff. The second
+    // open must be a no-op, NOT a reported error, or the dedup constraint just
+    // moves the noise from the sponsor's count into Sentry.
+    expect(res.status).toBe(200)
+    expect(await res.json()).toEqual({ ok: true })
+    expect(reportSpy).not.toHaveBeenCalled()
+  })
+
+  it('still reports a non-23505 insert failure', async () => {
+    const reportSpy = vi.mocked(reportError)
+    const service = makeServiceClient({
+      insertResult: { error: { code: '42501', message: 'new row violates row-level security policy' } },
+    })
+    vi.mocked(createServiceClient).mockReturnValue(service as never)
+
+    const res = await POST(postRequest({ sponsorId: SPONSOR_ID }))
+
+    expect(res.status).toBe(200)
+    expect(reportSpy).toHaveBeenCalledWith(
+      expect.any(Error),
+      expect.objectContaining({ site: 'route.guidebook.redeem.insert' }),
+    )
   })
 
   it('returns ok:true even when the insert fails (table not yet migrated) — never fails the guest UX', async () => {
