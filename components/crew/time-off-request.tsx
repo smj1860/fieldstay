@@ -6,6 +6,21 @@ import { saveCrewAvailability } from '@/app/crew/availability/actions'
 import { ChevronLeft, ChevronRight, XCircle, CheckCircle2 } from 'lucide-react'
 import { Button } from '@/components/ui/Button'
 import { Input } from '@/components/ui/Input'
+import { isOnline } from '@/lib/dexie/net'
+
+/**
+ * Time off is the ONE crew screen with no offline fallback — every other write
+ * goes through the Dexie outbox and survives a dead zone. So "Failed to save —
+ * please try again" was the least useful thing to say here: retrying is
+ * exactly what will not work, and the crew member has no way to know that this
+ * screen is different from every other one they use.
+ */
+const OFFLINE_MESSAGE =
+  "You're offline. Time off needs a connection — this one screen can't save your request for later."
+
+function failureMessage(fallback: string): string {
+  return isOnline() ? fallback : OFFLINE_MESSAGE
+}
 
 export type AvailRow = {
   id:             string
@@ -148,7 +163,7 @@ export function TimeOffRequest({ rows }: Readonly<{ rows: AvailRow[] }>) {
       setSavedAt(new Date())
       startTransition(() => router.refresh())
     } catch (err) {
-      setSaveError('Failed to save — please try again')
+      setSaveError(failureMessage('Failed to save — please try again'))
       console.error('[TimeOffRequest] save error:', err)
     } finally {
       setSaving(false)
@@ -171,7 +186,7 @@ export function TimeOffRequest({ rows }: Readonly<{ rows: AvailRow[] }>) {
       }
       startTransition(() => router.refresh())
     } catch (err) {
-      setCancelError('Failed to cancel — please try again')
+      setCancelError(failureMessage('Failed to cancel — please try again'))
       console.error('[TimeOffRequest] cancel error:', err)
     } finally {
       setCancellingId(null)
@@ -238,25 +253,25 @@ export function TimeOffRequest({ rows }: Readonly<{ rows: AvailRow[] }>) {
           return (
             <div
               key={dateStr}
-              className={`rounded-xl border transition-all ${
-                isTimeOff
-                  ? 'bg-amber-500/10 border-amber-500/30'
-                  : 'bg-card-themed border-transparent'
-              }`}
+              className="rounded-xl border transition-all"
+              style={isTimeOff
+                ? { background: 'var(--accent-amber-dim)', borderColor: 'var(--accent-amber)' }
+                : { background: 'var(--bg-card)', borderColor: 'transparent' }}
             >
               <button
                 onClick={() => toggleDay(dateStr)}
                 className="w-full flex items-center justify-between px-4 py-3"
               >
-                <span className={`text-sm font-semibold ${
-                  isTimeOff ? 'text-amber-400 line-through' : 'text-primary-themed'
-                }`}>
+                <span
+                  className={`text-sm font-semibold ${isTimeOff ? 'line-through' : ''}`}
+                  style={{ color: isTimeOff ? 'var(--accent-amber)' : 'var(--text-primary)' }}
+                >
                   {formatDay(day)}
                 </span>
                 <span>
                   {isTimeOff
-                    ? <XCircle className="w-5 h-5 text-amber-400" />
-                    : <CheckCircle2 className="w-5 h-5 text-green-400" />
+                    ? <XCircle className="w-5 h-5" style={{ color: 'var(--accent-amber)' }} />
+                    : <CheckCircle2 className="w-5 h-5" style={{ color: 'var(--accent-green)' }} />
                   }
                 </span>
               </button>
@@ -266,6 +281,7 @@ export function TimeOffRequest({ rows }: Readonly<{ rows: AvailRow[] }>) {
                 <div className="px-4 pb-3">
                   <Input
                     type="text"
+                    maxLength={500}
                     placeholder="Reason (optional)"
                     value={noteValue}
                     onChange={(e) => {
@@ -321,10 +337,11 @@ export function TimeOffRequest({ rows }: Readonly<{ rows: AvailRow[] }>) {
               <div
                 key={row.id}
                 className="flex items-center justify-between bg-card-themed
-                           rounded-xl px-4 py-3 border border-amber-500/20"
+                           rounded-xl px-4 py-3 border"
+                style={{ borderColor: 'var(--accent-amber)' }}
               >
                 <div>
-                  <p className="text-sm font-semibold text-amber-400">
+                  <p className="text-sm font-semibold" style={{ color: 'var(--accent-amber)' }}>
                     {new Date(row.available_date + 'T00:00:00').toLocaleDateString(
                       'en-US', { month: 'short', day: 'numeric', weekday: 'short' }
                     )}

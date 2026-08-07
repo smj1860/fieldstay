@@ -3,6 +3,9 @@
 import { revalidatePath } from 'next/cache'
 import { requireCrewMember } from '@/lib/crew-auth'
 import { reportError } from '@/lib/observability/report-error'
+// From ./window.ts, not declared here: this file is `'use server'`, and a
+// Server Actions module may only export async functions.
+import { LOOKBACK_DAYS, LOOKAHEAD_DAYS } from './window'
 
 /**
  * Time-off is deliberately NOT offline-capable.
@@ -19,6 +22,43 @@ import { reportError } from '@/lib/observability/report-error'
  * Note what this also fixes: org_id and crew_member_id now come from the
  * authenticated crew context, not from props the client passed in.
  */
+/** crew_availability.notes is free text from a phone keyboard; bound it. */
+const MAX_NOTE_LENGTH = 500
+
+const ISO_DATE_RE = /^\d{4}-\d{2}-\d{2}$/
+
+/**
+ * Validates the client-supplied date at the boundary.
+ *
+ * `available_date` was written straight through. A malformed value only earned
+ * a Postgres 22007 rendered as the generic catch-all message, and a
+ * well-formed but absurd one (the year 3000) was accepted and stored where no
+ * screen would ever show it again — invisible to the crew member who set it
+ * and to the PM whose time-off check reads a bounded range.
+ */
+function invalidDateReason(date: string): string | null {
+  if (!ISO_DATE_RE.test(date)) return 'That date is not valid. Please reload and try again.'
+
+  const parsed = new Date(`${date}T00:00:00Z`)
+  if (Number.isNaN(parsed.getTime())) {
+    return 'That date is not valid. Please reload and try again.'
+  }
+  // Round-trip check: `2026-02-31` matches the regex and Date rolls it over to
+  // March 3 rather than rejecting it.
+  if (parsed.toISOString().slice(0, 10) !== date) {
+    return 'That date is not valid. Please reload and try again.'
+  }
+
+  const today = new Date()
+  const min   = new Date(today); min.setUTCDate(min.getUTCDate() - LOOKBACK_DAYS)
+  const max   = new Date(today); max.setUTCDate(max.getUTCDate() + LOOKAHEAD_DAYS)
+
+  if (parsed < min || parsed > max) {
+    return 'That date is outside the window you can request time off for.'
+  }
+  return null
+}
+
 export async function saveCrewAvailability(input: {
   id?:         string
   date:        string
@@ -29,7 +69,14 @@ export async function saveCrewAvailability(input: {
   if (!auth.ok) return { error: 'Could not verify your crew profile. Please reload and try again.' }
   const { supabase, crew } = auth
 
-  const notes = input.notes?.trim() ? input.notes.trim() : null
+  const dateProblem = invalidDateReason(input.date)
+  if (dateProblem) return { error: dateProblem }
+
+  const trimmed = input.notes?.trim()
+  if (trimmed && trimmed.length > MAX_NOTE_LENGTH) {
+    return { error: `Please keep the reason under ${MAX_NOTE_LENGTH} characters.` }
+  }
+  const notes = trimmed ? trimmed : null
 
   try {
     if (input.id) {

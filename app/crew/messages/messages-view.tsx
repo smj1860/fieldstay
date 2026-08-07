@@ -142,6 +142,7 @@ export function CrewMessagesView({
         {sendError && <div className="px-3 pt-2 text-xs" style={{ color: 'var(--accent-red)' }}>{sendError}</div>}
         <div className="p-3 flex items-end gap-2">
           <textarea
+            maxLength={2000}
             value={draft}
             onChange={(e) => updateDraft(e.target.value)}
             onKeyDown={(e) => {

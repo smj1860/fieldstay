@@ -42,7 +42,6 @@ const BASELINE = new Set<string>([
   'app/privacy/page.tsx',
   'app/terms/page.tsx',
   'app/work-orders/[token]/vendor-portal.tsx',
-  'components/crew/time-off-request.tsx',
   'components/hospitable/PricingSection.tsx',
   'components/hospitable/faq-section.tsx',
   'components/landing/homepage-content.tsx',

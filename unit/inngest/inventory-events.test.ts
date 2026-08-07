@@ -94,6 +94,66 @@ describe('handleInventoryCountSubmitted', () => {
     expect(supabase.from).toHaveBeenCalledWith('inventory_counts')
   })
 
+  // These two reads sit at the TOP of the below-par path and used to discard
+  // their error. A transient failure or an RLS regression was therefore
+  // indistinguishable from "this count has no items": the step returned
+  // belowParItems: [], the function reported SUCCESS, and the entire restock
+  // evaporated — no purchase order, no PM email, no cart — while the crew
+  // member's device showed the count as submitted. Throwing is what gets the
+  // Inngest retry this deserves.
+  it('throws instead of reporting success when the count session read fails', async () => {
+    const supabase = makeSupabase({
+      inventory_counts: [{ data: null, error: { message: 'deadlock detected', code: '40P01' } }],
+    })
+    ;(createServiceClient as ReturnType<typeof vi.fn>).mockReturnValue(supabase)
+
+    await expect(invokeHandler(handleInventoryCountSubmitted, {
+      event: { data: { count_id: 'count_1', property_id: 'prop_1', org_id: 'org_1' } },
+      step:  runAllStep(),
+      logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
+    })).rejects.toThrow(/lookup failed/i)
+
+    expect(resend.emails.send).not.toHaveBeenCalled()
+  })
+
+  it('throws instead of reporting success when the count items read fails', async () => {
+    const supabase = makeSupabase({
+      inventory_counts:      [{ data: { id: 'count_1' }, error: null }],
+      inventory_count_items: [{ data: null, error: { message: 'permission denied', code: '42501' } }],
+    })
+    ;(createServiceClient as ReturnType<typeof vi.fn>).mockReturnValue(supabase)
+
+    await expect(invokeHandler(handleInventoryCountSubmitted, {
+      event: { data: { count_id: 'count_1', property_id: 'prop_1', org_id: 'org_1' } },
+      step:  runAllStep(),
+      logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
+      // fetchAllRows() raises its own "Paginated fetch failed" — the message
+      // is its, the PROPERTY under test is that a failed read throws at all
+      // rather than returning an empty below-par set and reporting success.
+    })).rejects.toThrow(/paginated fetch failed|failed to load/i)
+
+    expect(resend.emails.send).not.toHaveBeenCalled()
+  })
+
+  // A genuinely absent session is NOT an error — a forged or mismatched
+  // count_id must not reach another org's rows, and there is nothing to retry.
+  // The canary for the two tests above: if the fix had turned every empty
+  // result into a throw, this would fail.
+  it('still no-ops quietly when the count session is genuinely absent', async () => {
+    const supabase = makeSupabase({
+      inventory_counts: [{ data: null, error: null }],
+    })
+    ;(createServiceClient as ReturnType<typeof vi.fn>).mockReturnValue(supabase)
+
+    const result = await invokeHandler(handleInventoryCountSubmitted, {
+      event: { data: { count_id: 'forged', property_id: 'prop_1', org_id: 'org_1' } },
+      step:  runAllStep(),
+      logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
+    })
+
+    expect(result).toEqual({ count_id: 'forged', purchaseOrderCreated: false })
+  })
+
   it('is a no-op when everything counted is at or above par', async () => {
     const supabase = makeSupabase({
       inventory_counts:      [{ data: { id: 'count_1' }, error: null }],
@@ -210,6 +270,46 @@ describe('handleInventoryCountSubmitted', () => {
     })
     expect(supabase.calls.some((c) => c.table === 'purchase_orders' && c.method === 'insert')).toBe(false)
     expect(supabase.calls.some((c) => c.table === 'purchase_order_items')).toBe(false)
+  })
+
+  // The aggregated daily path returns an observable
+  // { sent: false, reason: 'no_pm_email' }. The IMMEDIATE one — a guest
+  // arriving today or tomorrow — just returned, so the single most
+  // time-critical email in the restock flow could go nowhere with no trace.
+  it('records why the immediate same-day email was not sent when there is no PM address', async () => {
+    const supabase = makeSupabase({
+      inventory_counts:      [{ data: { id: 'count_1' }, error: null }],
+      inventory_count_items: [{ data: [{ inventory_item_id: 'item_1', quantity_counted: 0 }], error: null }],
+      inventory_items: [
+        { data: [{ id: 'item_1', name: 'Coffee Pods', category: 'kitchen', unit: 'box', par_level: 4, low_stock_threshold_pct: 100 }], error: null },
+        { data: null, error: null },
+      ],
+      purchase_orders: [
+        { data: null, error: null },
+        { data: { id: 'po_3' }, error: null },
+        { data: null, error: null },
+        { data: null, error: null },
+      ],
+      purchase_order_items: [{ data: null, error: null }],
+      org_milestones:       [{ data: null, error: null }],
+      bookings: [
+        { data: [{ id: 'bk_1' }], error: null },
+        { data: [{ id: 'bk_2' }], error: null },
+      ],
+      properties: [{ data: { name: 'The Lakehouse' }, error: null }],
+    })
+    ;(createServiceClient as ReturnType<typeof vi.fn>).mockReturnValue(supabase)
+    ;(getPmEmails as ReturnType<typeof vi.fn>).mockResolvedValue([])
+
+    const warn = vi.fn()
+    await invokeHandler(handleInventoryCountSubmitted, {
+      event: { data: { count_id: 'count_1', property_id: 'prop_1', org_id: 'org_1' } },
+      step:  runAllStep(),
+      logger: { info: vi.fn(), warn, error: vi.fn() },
+    })
+
+    expect(resend.emails.send).not.toHaveBeenCalled()
+    expect(warn).toHaveBeenCalledWith(expect.stringMatching(/no PM email/i))
   })
 
   it('sends an immediate PM email for a same-day flip', async () => {

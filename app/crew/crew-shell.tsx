@@ -25,14 +25,31 @@ function urlBase64ToUint8Array(base64String: string) {
   return Uint8Array.from([...rawData].map((char) => char.charCodeAt(0)))
 }
 
-async function subscribeToPush(reg: ServiceWorkerRegistration) {
-  const sub  = await reg.pushManager.subscribe({
-    userVisibleOnly:      true,
-    applicationServerKey: urlBase64ToUint8Array(process.env.NEXT_PUBLIC_VAPID_PUBLIC_KEY!),
-  })
+/**
+ * Registers a push subscription with OUR server.
+ *
+ * Every failure here used to be silent. `fetch` resolves on a 4xx/5xx rather
+ * than rejecting, so the response was discarded: a 500 from the route, or a
+ * 401 from an expired session, looked exactly like success. And the browser
+ * subscription had ALREADY been created locally by that point, so the next
+ * mount's `getSubscription()` found it, took the "already subscribed" early
+ * return, and never retried — one failed POST disabled push permanently for
+ * that device, with nothing logged and nothing shown. Push is how a crew
+ * member learns they have a new assignment or that one was cancelled.
+ *
+ * The route upserts on (crew_member_id, endpoint), so re-sending a
+ * subscription the server already has is a cheap no-op. That is what makes it
+ * safe to call this on every mount, and it is what lets a failed registration
+ * heal itself.
+ */
+export async function syncSubscriptionToServer(sub: PushSubscription): Promise<void> {
   const json = sub.toJSON()
-  if (!json.keys) return
-  await fetch('/api/crew/push-subscribe', {
+  // Previously `if (!json.keys) return` — a silent success for a subscription
+  // that could never receive anything.
+  if (!json.keys?.p256dh || !json.keys.auth) {
+    throw new Error('Push subscription is missing its encryption keys')
+  }
+  const res = await fetch('/api/crew/push-subscribe', {
     method:  'POST',
     headers: { 'Content-Type': 'application/json' },
     body:    JSON.stringify({
@@ -41,6 +58,17 @@ async function subscribeToPush(reg: ServiceWorkerRegistration) {
       auth:     json.keys.auth,
     }),
   })
+  if (!res.ok) {
+    throw new Error(`push-subscribe failed with ${res.status}`)
+  }
+}
+
+async function subscribeToPush(reg: ServiceWorkerRegistration): Promise<void> {
+  const sub = await reg.pushManager.subscribe({
+    userVisibleOnly:      true,
+    applicationServerKey: urlBase64ToUint8Array(process.env.NEXT_PUBLIC_VAPID_PUBLIC_KEY!),
+  })
+  await syncSubscriptionToServer(sub)
 }
 
 export function CrewShell({
@@ -60,6 +88,7 @@ export function CrewShell({
 
   const [swReg, setSwReg]               = useState<ServiceWorkerRegistration | null>(null)
   const [notifVisible, setNotifVisible] = useState(false)
+  const [notifError,   setNotifError]   = useState<string | null>(null)
   const [showInfo, setShowInfo]         = useState(false)
   const [loggingOut, setLoggingOut]             = useState(false)
   const [unsyncedCount, setUnsyncedCount]       = useState(0)
@@ -175,7 +204,17 @@ export function CrewShell({
       }
     }
     const supabase = createClient()
-    await supabase.auth.signOut()
+    // Local storage is ALREADY wiped by this point, so there is nowhere to
+    // stay: a signOut that throws (no signal, auth host unreachable) must not
+    // strand the crew member on a shell with no data and no way out. Report it
+    // and navigate regardless — /login re-authenticates or bounces them back
+    // into /crew, where resumeDexieDb() lifts the latch and the cache refills.
+    try {
+      await supabase.auth.signOut()
+    } catch (err) {
+      console.error('[crew-shell] signOut failed during logout:', err)
+      reportError(err, { site: 'page.crew.crew-shell.signOut' })
+    }
     startTransition(() => router.push('/login?next=/crew'))
   }
 
@@ -190,7 +229,21 @@ export function CrewShell({
         setSwReg(reg)
 
         const existing = await reg.pushManager.getSubscription()
-        if (existing) return // Already subscribed — nothing to do
+        if (existing) {
+          // NOT an early return any more. A local browser subscription is not
+          // evidence the server has the row — those are two different systems,
+          // and the POST that links them is exactly the step that can fail.
+          // Re-sending is an idempotent upsert, so this costs one request per
+          // app open and is the only thing that recovers a device whose
+          // original registration failed.
+          //
+          // Gated on isOnline() because this is a PWA that is expected to be
+          // offline: without the gate, every app open in a basement or a dead
+          // zone would throw here and report to Sentry, turning a real signal
+          // into noise. Skipping is free — the next online mount re-sends.
+          if (isOnline()) await syncSubscriptionToServer(existing)
+          return
+        }
 
         const permission = Notification.permission
         if (permission === 'default') {
@@ -225,13 +278,21 @@ export function CrewShell({
   async function enableNotifications() {
     if (!swReg) return
     const permission = await Notification.requestPermission()
-    setNotifVisible(false)
-    if (permission !== 'granted') return
+    if (permission !== 'granted') {
+      setNotifVisible(false)
+      return
+    }
+    setNotifError(null)
     try {
       await subscribeToPush(swReg)
+      setNotifVisible(false)
     } catch (err) {
+      // The prompt deliberately STAYS open: the crew member asked for
+      // notifications and did not get them, so dismissing the only control
+      // that can retry would leave them believing it worked.
       console.error('[push] subscription failed:', err)
       reportError(err, { site: 'page.crew.crew-shell.push' })
+      setNotifError('Could not turn on notifications. Check your connection and try again.')
     }
   }
 
@@ -373,6 +434,11 @@ export function CrewShell({
               <p className="text-xs" style={{ color: 'var(--text-muted)' }}>
                 Get notified when you&apos;re assigned a new job.
               </p>
+              {notifError && (
+                <p className="text-xs mt-1" style={{ color: 'var(--accent-red)' }} role="alert">
+                  {notifError}
+                </p>
+              )}
             </div>
             <div className="flex items-center gap-2 shrink-0">
               <button

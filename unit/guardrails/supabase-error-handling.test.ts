@@ -132,7 +132,10 @@ const BASELINE: Record<string, number> = {
   'lib/inngest/functions/hospitable/initial-sync.ts': 2,
   'lib/inngest/functions/hostaway/initial-sync.ts': 2,
   'lib/inngest/functions/ical-sync.ts': 2,
-  'lib/inngest/functions/inventory-events.ts': 5,
+  // 5 -> 3: the count-session and count-items reads at the top of the
+  // below-par path now bind and throw their error, so a transient failure
+  // gets an Inngest retry instead of reporting success with an empty restock.
+  'lib/inngest/functions/inventory-events.ts': 3,
   // 3 -> 1: the two hand-rolled email_unsubscribed_at reads were replaced by
   // resolveEmailAudience(), which goes through tryUnwrap and fails closed.
   'lib/inngest/functions/ownerrez/incremental-sync.ts': 4,

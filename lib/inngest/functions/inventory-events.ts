@@ -141,27 +141,60 @@ export const handleInventoryCountSubmitted = inngest.createFunction(
       // Validate the count session itself belongs to this org before trusting
       // any row derived from count_id — a forged/mismatched count_id must
       // never let one org read or write another org's inventory data.
-      const { data: countSession } = await supabase
+      // Both reads below bind their error and THROW, so Inngest retries the
+      // step. They used to discard it, which made a transient failure or an
+      // RLS regression indistinguishable from "this count has no items": the
+      // step returned `belowParItems: []`, the function reported SUCCESS, and
+      // the whole restock silently evaporated — no purchase order, no PM
+      // email, no cart — while the crew member's device showed their count as
+      // submitted. This is the top of the below-par path, so a wrong answer
+      // here costs the entire automation, not one row.
+      //
+      // fetchAllRows() further down already throws; these two were the
+      // remaining pair that did not.
+      const { data: countSession, error: countSessionError } = await supabase
         .from('inventory_counts')
         .select('id')
         .eq('id', count_id)
         .eq('org_id', org_id)
         .maybeSingle()
 
+      if (countSessionError) {
+        throw new Error(`inventory count ${count_id} lookup failed: ${countSessionError.message}`)
+      }
+      // Genuinely absent: a forged or mismatched count_id must not reach
+      // another org's rows. Nothing to retry, so this stays a quiet no-op.
       if (!countSession) return { belowParItems: [] }
 
-      // 1 query: fetch all count items for this session
-      const { data: countItems } = await supabase
-        .from('inventory_count_items')
-        .select('inventory_item_id, quantity_counted')
-        .eq('count_id', count_id)
-
-      if (!countItems?.length) return { belowParItems: [] }
-
       type CountRow = { inventory_item_id: string; quantity_counted: number }
+
+      // Paginated, matching the inventory_items read a few lines below.
+      // inventory_count_items has no org_id — count_id IS the scope, and it was
+      // org-checked immediately above — so the parent is the isolation
+      // boundary, but that says nothing about SIZE. A count is one row per item
+      // at the property, and /api/crew/inventory-count caps a submission at
+      // exactly 1000 items, which is also PostgREST's max_rows: a full-size
+      // count sits precisely on the truncation boundary and would come back as
+      // 1000 rows with a 200 and no signal that anything was dropped. Silently
+      // losing count rows here silently shrinks the below-par set, which is the
+      // whole purpose of this function.
+      //
+      // fetchAllRows also throws on a failed read, which is the behaviour the
+      // explicit error check this replaces was added for.
+      const countItems = await fetchAllRows<CountRow>(
+        (from, to) => supabase
+          .from('inventory_count_items')
+          .select('inventory_item_id, quantity_counted')
+          .eq('count_id', count_id)
+          .order('inventory_item_id', { ascending: true })
+          .range(from, to),
+        { label: `inventory_count_items[count=${count_id}]` },
+      )
+
+      if (!countItems.length) return { belowParItems: [] }
       type InvRow   = { id: string; property_id: string; name: string; category: Enums<'inventory_category'>; unit: string; par_level: number; low_stock_threshold_pct: number }
 
-      const typedCount = countItems as CountRow[]
+      const typedCount = countItems
       const itemIds    = typedCount.map((c) => c.inventory_item_id)
 
       // Bulk fetch all inventory item metadata, scoped to this org — itemIds
@@ -400,7 +433,17 @@ export const handleInventoryCountSubmitted = inngest.createFunction(
         )
         const [pmEmail] = pmEmails
 
-        if (!pmEmail) return
+        // The aggregated daily path returns an observable
+        // `{ sent: false, reason: 'no_pm_email' }` for this case. The IMMEDIATE
+        // one — the same-day flip, where a guest arrives today or tomorrow —
+        // just returned, so the single most time-critical email in the whole
+        // restock flow could go nowhere with no trace at all.
+        if (!pmEmail) {
+          logger.warn(
+            `Same-day flip PO ${purchaseOrderId} has no PM email to notify — immediate restock alert not sent`,
+          )
+          return
+        }
 
         await resend.emails.send({
           from:    FROM,
