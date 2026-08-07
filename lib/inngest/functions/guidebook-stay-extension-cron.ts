@@ -1,7 +1,7 @@
 import { inngest }             from '@/lib/inngest/client'
 import { fetchAllRows }        from '@/lib/inngest/paginate'
 import { createServiceClient } from '@/lib/supabase/server'
-import { unwrap, unwrapList }  from '@/lib/supabase/unwrap'
+import { unwrap }              from '@/lib/supabase/unwrap'
 
 const FALLBACK_TIMEZONE = 'America/New_York'
 
@@ -63,24 +63,35 @@ export const guidebookStayExtensionCron = inngest.createFunction(
           Date.now() + config.extension_message_days_before * 24 * 60 * 60 * 1000
         ).toISOString().split('T')[0]
 
-        // Unwrapped, not destructured. Discarding this error made a failed
-        // read indistinguishable from "this org has no checkouts that day":
-        // `bookings` came back null, `?? []` turned it into zero iterations,
-        // and the cron returned a successful `dispatched: 0`. Bounded by one
-        // org's checkouts on one exact date, so no pagination is needed — the
-        // error handling is the whole point here.
-        const bookingsRes = await supabase
-          .from('bookings')
-          .select('id, org_id, property_id, checkout_date')
-          .eq('org_id', config.org_id)
-          .eq('checkout_date', targetCheckout)
-          .eq('status', 'confirmed')
-          .eq('is_block', false)
-
-        const bookings = unwrapList(bookingsRes, {
-          site:  'inngest.guidebook-stay-extension-cron.bookings',
-          orgId: config.org_id,
-        })
+        // Paginated AND error-bound, for two separate reasons.
+        //
+        // The error: discarding it made a failed read indistinguishable from
+        // "this org has no checkouts that day" — `bookings` came back null,
+        // `?? []` turned it into zero iterations, and the cron returned a
+        // successful `dispatched: 0`.
+        //
+        // The bound: one org's checkouts on one exact date is ~properties-per-
+        // org (10-50 for the target user), so this cannot realistically reach
+        // PostgREST's 1000-row cap. "Realistically" is doing the work in that
+        // sentence, and it is exactly the reasoning that left eight
+        // platform-wide crons silently truncated until the 2026-07-30 audit.
+        // fetchAllRows costs one extra round trip only once the set actually
+        // exceeds a page — i.e. never, on current assumptions — and removes
+        // the assumption instead of restating it.
+        const bookings = await fetchAllRows<{
+          id: string; org_id: string; property_id: string; checkout_date: string
+        }>(
+          (from, to) => supabase
+            .from('bookings')
+            .select('id, org_id, property_id, checkout_date')
+            .eq('org_id', config.org_id)
+            .eq('checkout_date', targetCheckout)
+            .eq('status', 'confirmed')
+            .eq('is_block', false)
+            .order('id')
+            .range(from, to),
+          { label: 'guidebook-stay-extension-cron.bookings' },
+        )
 
         let sent = 0
 

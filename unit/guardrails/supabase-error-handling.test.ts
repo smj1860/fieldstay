@@ -130,8 +130,17 @@ const BASELINE: Record<string, number> = {
   'lib/inngest/functions/email-trial-lifecycle.tsx': 4,
   'lib/inngest/functions/flagged-turnover-wo.ts': 3,
   'lib/inngest/functions/guidebook-sms-evening-cron.ts': 3,
-  'lib/inngest/functions/guidebook-sms-morning-cron.ts': 4,
-  // 5 -> 0 and 4 -> 0 (entries deleted): the gap-night offer's whole failure
+  // 4 -> 0 (entry deleted): every read in the per-guest send now unwraps. The
+  // opt-in one mattered most — `{ data: optin }` collapsed "this guest opted
+  // out" and "the consent read failed" into the same null, and both ended at
+  // `return false`, so a transient failure silently suppressed the message
+  // with nothing logged and no retry. The two sponsor reads had the same
+  // shape: a failed lookup produced an empty pool, indistinguishable from an
+  // org that simply has no sponsor in that slot.
+  //
+  // guidebook-stay-extension-cron.ts 5 -> 0 and
+  // guidebook-stay-extension-handler.ts 4 -> 0 (both entries deleted): the
+  // gap-night offer's whole failure
   // surface was silent. In the cron a failed bookings read looked like "this
   // org has no checkouts", a failed existence check looked like "not yet
   // handled", and a failed next-booking read looked like "open calendar" —

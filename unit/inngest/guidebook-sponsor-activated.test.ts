@@ -102,10 +102,16 @@ describe('guidebookSponsorActivated', () => {
     const sponsorEqArgs = supabase.calls
       .filter((c) => c.table === 'guidebook_sponsors' && c.method === 'eq')
       .map((c) => JSON.stringify(c.args))
-    expect(sponsorEqArgs.filter((a) => a === JSON.stringify(['id', 'sponsor_1'])).length)
-      .toBe(sponsorEqArgs.filter((a) => a === JSON.stringify(['org_id', 'org_1'])).length)
-    expect(sponsorEqArgs.length).toBeGreaterThanOrEqual(2)
-    expect(new Set(sponsorEqArgs)).toEqual(
+
+    const idScoped     = sponsorEqArgs.filter((a) => a === JSON.stringify(['id', 'sponsor_1'])).length
+    const orgScoped    = sponsorEqArgs.filter((a) => a === JSON.stringify(['org_id', 'org_1'])).length
+    const distinctArgs = new Set(sponsorEqArgs)
+
+    // Every id filter is matched by an org filter, so no statement can reach a
+    // sponsor row on id alone.
+    expect(orgScoped).toBe(idScoped)
+    expect(idScoped).toBeGreaterThan(0)
+    expect(distinctArgs).toEqual(
       new Set([JSON.stringify(['id', 'sponsor_1']), JSON.stringify(['org_id', 'org_1'])]),
     )
 

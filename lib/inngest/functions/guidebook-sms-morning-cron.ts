@@ -2,6 +2,7 @@ import { asBooleanMap } from '@/lib/json'
 import { inngest } from '@/lib/inngest/client'
 import { fetchAllRows } from '@/lib/inngest/paginate'
 import { createServiceClient } from '@/lib/supabase/server'
+import { unwrap, unwrapList } from '@/lib/supabase/unwrap'
 import { getWeatherForLocation } from '@/lib/weather/tomorrow'
 import { sendSMS, buildSponsorLine } from '@/lib/sms/telnyx'
 import { renderSmsBody } from '@/lib/sms/templates'
@@ -133,18 +134,33 @@ export const guidebookSmsMorningSend = inngest.createFunction(
 
       // Re-fetch instead of trusting the dispatch-time snapshot: is_active
       // may have flipped (guest texted STOP) since the cron ran.
-      const { data: optin } = await supabase
+      //
+      // Unwrapped, not destructured. `{ data: optin }` collapsed "this guest
+      // opted out" and "the consent read failed" into the same null, and both
+      // ended at `return false` — so a transient failure silently suppressed
+      // the message with nothing logged and no retry. The two outcomes need
+      // opposite handling: opted-out is final, a failed read must be retried.
+      const optinRes = await supabase
         .from('guidebook_guest_sms_optins')
         .select('id, phone_e164, is_active')
         .eq('id', optinId)
         .maybeSingle()
+
+      const optin = unwrap(optinRes, {
+        site: 'inngest.guidebook-sms-morning-send.optin', orgId,
+      })
       if (!optin?.is_active) return false
 
-      const { data: property } = await supabase
+      const propertyRes = await supabase
         .from('properties')
         .select('id, name, lat, lng, amenities, checkin_time')
         .eq('id', propertyId)
+        .eq('org_id', orgId)
         .maybeSingle()
+
+      const property = unwrap(propertyRes, {
+        site: 'inngest.guidebook-sms-morning-send.property', orgId,
+      })
       if (!property) return false
 
       // ── Check-in day: this guest has not arrived yet ──────────────────────
@@ -202,14 +218,22 @@ export const guidebookSmsMorningSend = inngest.createFunction(
 
       // Rain alert takes priority if precip >= 60% and rainy_day sponsor exists
       if (weather.precipitationProbability >= 60) {
-        const { data: rainySponsors } = await supabase
+        // Unwrapped like every other read here: a failed sponsor lookup
+        // produced an empty pool, which falls through to "no offer" and ends
+        // at `return false` — a silently skipped nudge that looks identical to
+        // an org with no rainy-day sponsor.
+        const rainyRes = await supabase
           .from('guidebook_sponsors')
           .select('id, org_id, business_name, offer_type, offer_value, offer_item, custom_offer_text, lat, lng, slot_type')
           .eq('org_id', orgId)
           .eq('status', 'active')
           .eq('slot_type', 'rainy_day')
 
-        const pickedRainy = pickNearestSponsor((rainySponsors ?? []) as GuidebookSponsor[], property.lat, property.lng)
+        const rainySponsors = unwrapList(rainyRes, {
+          site: 'inngest.guidebook-sms-morning-send.rainy-sponsors', orgId,
+        })
+
+        const pickedRainy = pickNearestSponsor(rainySponsors as GuidebookSponsor[], property.lat, property.lng)
 
         if (pickedRainy) {
           const { sponsor: rainySponsor, distanceMiles: rainyDistanceMi } = pickedRainy
@@ -243,14 +267,17 @@ export const guidebookSmsMorningSend = inngest.createFunction(
       }
 
       // Morning brew → general fallback
-      const { data: sponsorsData } = await supabase
+      const sponsorsRes = await supabase
         .from('guidebook_sponsors')
         .select('id, org_id, business_name, offer_type, offer_value, offer_item, custom_offer_text, lat, lng, slot_type')
         .eq('org_id', orgId)
         .eq('status', 'active')
         .in('slot_type', ['morning_brew', 'general'])
 
-      const orgSponsors  = (sponsorsData ?? []) as GuidebookSponsor[]
+      // Same reasoning as the rainy-day pool above.
+      const orgSponsors = unwrapList(sponsorsRes, {
+        site: 'inngest.guidebook-sms-morning-send.sponsors', orgId,
+      }) as GuidebookSponsor[]
       const morningBrews = orgSponsors.filter((s) => s.slot_type === 'morning_brew')
       const pool         = morningBrews.length > 0 ? morningBrews : orgSponsors.filter((s) => s.slot_type === 'general')
       const picked       = pickNearestSponsor(pool, property.lat, property.lng)
