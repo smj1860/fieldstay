@@ -21,8 +21,12 @@ test.describe('Authentication', () => {
     await page.fill('#email',    process.env.E2E_PM_EMAIL!)
     await page.fill('#password', 'definitely-wrong-password-12345')
     await page.click('button[type="submit"]')
-    // Error div appears without page navigation
-    await expect(page.locator('.bg-red-50')).toBeVisible({ timeout: 5_000 })
+    // Error banner appears without page navigation. Targeted by ROLE, not by a
+    // colour class: this asserted `.bg-red-50` and went red the moment those
+    // banners moved to CSS variables — the test was passing on a Tailwind
+    // utility, which is not what "the user was told their password was wrong"
+    // means. role=alert is what InlineAlert renders for an error tone.
+    await expect(page.locator('[role="alert"]')).toBeVisible({ timeout: 5_000 })
     await expect(page).toHaveURL(/\/login/)
   })
 

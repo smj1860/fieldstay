@@ -11,6 +11,24 @@ const toneStyle: Record<Tone, { background: string; borderColor: string; color: 
   info:    { background: 'var(--accent-blue-dim)',  borderColor: 'var(--accent-blue)',  color: 'var(--accent-blue)'  },
 }
 
+/**
+ * `alert` interrupts a screen reader immediately; `status` waits for a pause.
+ * Something has gone wrong is worth interrupting for, a confirmation is not —
+ * so error/warning get `alert` and success/info get `status`.
+ *
+ * This also gives tests a selector tied to MEANING rather than to styling.
+ * e2e/specs/01-auth.spec.ts asserted the login failure banner with
+ * `.bg-red-50`, which broke the moment those banners moved to CSS variables —
+ * the test was green because of a colour class, and a colour class is not what
+ * "the user was told their password was wrong" means.
+ */
+const toneRole: Record<Tone, 'alert' | 'status'> = {
+  success: 'status',
+  error:   'alert',
+  warning: 'alert',
+  info:    'status',
+}
+
 interface InlineAlertProps extends HTMLAttributes<HTMLDivElement> {
   tone: Tone
 }
@@ -21,6 +39,8 @@ interface InlineAlertProps extends HTMLAttributes<HTMLDivElement> {
 export function InlineAlert({ tone, className = '', style, ...props }: Readonly<InlineAlertProps>) {
   return (
     <div
+      // Before the spread, so an unusual call site can still override it.
+      role={toneRole[tone]}
       className={`text-sm rounded-lg border px-3 py-2 ${className}`}
       style={{ ...toneStyle[tone], ...style }}
       {...props}
