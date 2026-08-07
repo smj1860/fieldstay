@@ -355,6 +355,12 @@ export async function updateStayExtensionSettings(
  * How long after the original opt-in a guest may correct the number they
  * entered. Long enough to notice a typo and resubmit; far short of the span
  * over which a guidebook link circulates.
+ *
+ * Measured from guidebook_guest_sms_optins.created_at, which the upsert never
+ * writes, rather than opted_in_at, which it refreshes on every submission.
+ * From opted_in_at the window was not 15 minutes from the opt-in at all — it
+ * was 15 minutes from the LAST submission, so resubmitting inside it restarted
+ * the clock and the window could be walked forward without limit.
  */
 const OPTIN_CORRECTION_WINDOW_MS = 15 * 60 * 1000
 
@@ -373,12 +379,24 @@ export async function optInGuestSms(
 
     const supabase = createServiceClient({ publicSurface: 'guidebook-guest-sms-optin' })
 
-    const { data: booking } = await supabase
+    // Binds its error, like the two consent reads below it. Discarding it made
+    // a transient failure indistinguishable from a bad token, so a guest
+    // holding a perfectly valid link was told the link was invalid — with
+    // nothing logged and nothing reported. The two reads that follow this one
+    // both already failed closed with an explicit note about why; this was the
+    // odd one out.
+    const bookingRes = await supabase
       .from('bookings')
       .select('id, org_id, property_id')
       .eq('guidebook_token', guidebookToken)
       .maybeSingle()
 
+    if (bookingRes.error) {
+      console.error('[optInGuestSms] booking lookup', bookingRes.error.message)
+      reportError(bookingRes.error, { site: 'serverAction.guidebook.optInGuestSms.booking' })
+      return { error: 'Something went wrong. Please try again.' }
+    }
+    const booking = bookingRes.data
     if (!booking) return { error: 'Invalid guidebook link.' }
 
     // ── Consent gate 1: has this NUMBER revoked consent anywhere? ────────────
@@ -424,9 +442,15 @@ export async function optInGuestSms(
     // corrections stay open for a short window after the original opt-in. That
     // covers the real case — a typo is noticed immediately — while refusing a
     // repoint days later, which is what a leaked link enables.
+    // created_at, not opted_in_at. The upsert below REFRESHES opted_in_at on
+    // every submission, so a window measured from it walks forward: repoint at
+    // 14 minutes, and the 15-minute clock restarts from there, indefinitely.
+    // created_at carries the original row's timestamp and the upsert never
+    // names it, so it is the only immutable anchor here — and "how long after
+    // the ORIGINAL opt-in" is what this window is documented to mean.
     const existingRes = await supabase
       .from('guidebook_guest_sms_optins')
-      .select('id, phone_e164, opted_in_at')
+      .select('id, phone_e164, created_at')
       .eq('booking_id', booking.id)
       .maybeSingle()
 
@@ -437,8 +461,8 @@ export async function optInGuestSms(
 
     const existing = existingRes.data
     if (existing && existing.phone_e164 !== phoneE164) {
-      const optedInAt = existing.opted_in_at ? new Date(existing.opted_in_at).getTime() : 0
-      if (Date.now() - optedInAt > OPTIN_CORRECTION_WINDOW_MS) {
+      const firstOptedInAt = existing.created_at ? new Date(existing.created_at).getTime() : 0
+      if (Date.now() - firstOptedInAt > OPTIN_CORRECTION_WINDOW_MS) {
         // Never echo either number back — guest PII, and confirming which
         // number is on file would itself be a disclosure.
         return { error: 'A different number is already signed up for this stay. Contact your host to change it.' }

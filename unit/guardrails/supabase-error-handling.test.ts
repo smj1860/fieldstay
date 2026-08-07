@@ -106,7 +106,10 @@ const BASELINE: Record<string, number> = {
   'app/(dashboard)/templates/inventory/actions.ts': 2,
   'app/(dashboard)/templates/maintenance/actions.ts': 3,
   'app/(dashboard)/vendors/actions.ts': 3,
-  'app/actions/guidebook.ts': 3,
+  // 3 -> 2: optInGuestSms's booking lookup now binds and reports its error.
+  // Discarding it made a transient failure indistinguishable from a bad token,
+  // so a guest with a valid link was told the link was invalid.
+  'app/actions/guidebook.ts': 2,
 
   'app/api/repuguard/generate/route.ts': 3,
   'app/api/vendor-connect/[token]/onboard/route.ts': 2,

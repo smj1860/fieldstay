@@ -424,7 +424,7 @@ describe('actions/guidebook', () => {
             data: {
               id: 'optin_1',
               phone_e164:  '+12065551234',
-              opted_in_at: new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString(),
+              created_at:  new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString(),
             },
             error: null,
           },
@@ -453,7 +453,7 @@ describe('actions/guidebook', () => {
             data: {
               id: 'optin_1',
               phone_e164:  '+12065551234',
-              opted_in_at: new Date(Date.now() - 60 * 1000).toISOString(),  // 1 min ago
+              created_at:  new Date(Date.now() - 60 * 1000).toISOString(),  // 1 min ago
             },
             error: null,
           },
@@ -465,6 +465,60 @@ describe('actions/guidebook', () => {
       const result = await optInGuestSms('valid-guidebook-token', '(206) 555-9999')
 
       expect(result).toEqual({ success: true })
+    })
+
+    // The window is anchored to created_at, which the upsert never writes —
+    // not opted_in_at, which it REFRESHES on every submission. Measured from
+    // opted_in_at it was never "15 minutes from the opt-in" at all: it was 15
+    // minutes from the LAST submission, so resubmitting just inside it
+    // restarted the clock and the window could be walked forward without
+    // limit — exactly the days-later repoint the comment says a leaked link
+    // enables.
+    it('refuses a repoint 24h after the original opt-in even if the row was resubmitted a minute ago', async () => {
+      vi.mocked(normalizePhoneToE164).mockReturnValue('+12065559999')
+      const supabase = makeSupabase({
+        bookings: [{ data: { id: 'booking_1', org_id: 'org_1', property_id: 'prop_1' } }],
+        guidebook_guest_sms_optins: [
+          { data: null, error: null },
+          {
+            data: {
+              id: 'optin_1',
+              phone_e164: '+12065551234',
+              // Original opt-in a day ago …
+              created_at:  new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString(),
+              // … but refreshed a minute ago, which used to reopen the window.
+              opted_in_at: new Date(Date.now() - 60 * 1000).toISOString(),
+            },
+            error: null,
+          },
+        ],
+      })
+      vi.mocked(createServiceClient).mockReturnValue(supabase as never)
+
+      const result = await optInGuestSms('valid-guidebook-token', '(206) 555-9999')
+
+      expect(result).toEqual({
+        error: 'A different number is already signed up for this stay. Contact your host to change it.',
+      })
+      expect(inngest.send).not.toHaveBeenCalled()
+    })
+
+    // Two of the three reads in this action already failed closed with an
+    // explicit note about why. The booking lookup discarded its error, so a
+    // transient failure was indistinguishable from a bad token and a guest
+    // holding a valid link was told the link was invalid.
+    it('fails closed, not "invalid link", when the booking lookup itself errors', async () => {
+      vi.mocked(normalizePhoneToE164).mockReturnValue('+12065551234')
+      const supabase = makeSupabase({
+        bookings: [{ data: null, error: { message: 'deadlock detected', code: '40P01' } }],
+      })
+      vi.mocked(createServiceClient).mockReturnValue(supabase as never)
+
+      const result = await optInGuestSms('valid-guidebook-token', '(206) 555-1234')
+
+      expect(result).toEqual({ error: 'Something went wrong. Please try again.' })
+      expect(JSON.stringify(result)).not.toMatch(/invalid guidebook link/i)
+      expect(inngest.send).not.toHaveBeenCalled()
     })
 
     it('rejects an invalid/unrecognized guidebook token before writing anything (IDOR/token check)', async () => {
