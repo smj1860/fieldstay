@@ -138,26 +138,63 @@ lock-down. Moving read state to its own table closes that too.
 
 ---
 
+## The switch model (DECIDED 2026-08-07)
+
+One master **Push** toggle, plus the existing per-category toggles. The
+categories decide whether the notification happens at all; the master decides
+whether it also reaches a device.
+
+| Category | Push master | Result |
+|---|---|---|
+| on | off | Bell only |
+| on | on | Bell **and** push |
+| off | — | Neither |
+
+So the master is a delivery-channel switch, not a category. It can never
+surface something the category toggle suppressed, which means push has no
+independent notion of "what to send" to keep in sync — the categories are the
+single source of truth for that.
+
+### What this implies about where filtering happens
+
+`notifications` rows are **org-scoped and shared** — one row, visible to every
+member. So a category being off for one user *cannot* mean the row isn't
+written: another member in the same org may have that category on, and skipping
+the insert would silently rob them of it.
+
+Therefore:
+
+- **Bell:** always write the row. Filter per user at **read** time, in
+  `getPersistedNotifications()` and the derived-alert sections. A user's
+  category preference is a view filter, never a write gate.
+- **Push:** decided per recipient at **send** time — category on AND master on.
+- **Unread badge:** must apply the same filter as the feed, or the badge counts
+  items the user cannot see and never clears.
+
+That last one is the easy thing to get wrong.
+
+---
+
 ## Open decisions
 
 These need a human answer before Phase 1 ships.
 
 1. **Do managers get the digest option**, or only owners and admins?
    `getPmEmails` currently resolves `['owner', 'admin']`.
-2. **Section heading.** If the four switches drive both bell and push, "Push
-   Notifications — Receive alerts on this device" is wrong. Suggest "Alerts"
-   with per-row bell/push sub-toggles, or two columns.
-3. **Bell and push independently, or one switch for both?** Two checkboxes per
-   category is more honest but doubles the UI. A single switch is simpler but
-   means someone who wants the bell without their phone buzzing has no option.
-   Recommend: one switch per category with a separate global "also push to my
-   devices" master toggle.
-4. **Weekly report** — cut the switch, or build the report? Recommend cutting
+2. **Section heading.** "Push Notifications — Receive alerts on this device" no
+   longer describes it. Suggest "Alerts" for the category block, with the push
+   master as its own labelled row ("Also push these to my devices").
+3. **Weekly report** — cut the switch, or build the report? Recommend cutting
    it; add it back if the report is genuinely wanted.
-5. **Do PMs get a push subscription prompt at all?** Today only the crew PWA
+4. **Do PMs get a push subscription prompt at all?** Today only the crew PWA
    registers subscriptions. The PM dashboard would need the service worker
    registration + permission prompt. Verify whether the existing SW is scoped to
    `/crew`.
+5. **What does the push master do before a device is subscribed?** Turning it on
+   with no `push_subscriptions` row is a silent no-op. It should either trigger
+   the browser permission prompt on toggle, or render disabled with an explicit
+   "enable notifications in this browser first". Do not let it sit on and do
+   nothing — that is the same lie this whole document exists to remove.
 
 ---
 
@@ -174,15 +211,19 @@ independent of my admin's."
    deliberate `ON DELETE CASCADE`. Update `types/database.ts` in the same commit.
    Apply to the E2E project (`syhthijeqlnltufdawyb`) in the same sitting.
 2. `lib/notifications/prefs.ts` — read/write helpers, with a documented default
-   for a user who has never saved (recommend: opted **in**, matching today's
-   always-on rendering).
+   for a user who has never saved. Recommend: categories default **on**
+   (matching today's always-on rendering), push master defaults **off** — an
+   unasked-for phone notification is worse than a missing one, and the master
+   cannot do anything useful until a device is subscribed anyway.
 3. `updateNotificationPrefs` → write to the table, drop the auth-metadata write.
    Add a `getNotificationPrefs` read for the tab.
 4. `daily-wrapup.ts` — resolve all opted-in recipients for the org, send to
    each, **per-recipient idempotency key** (trap 3).
 5. Settings UI — load real state, no more unconditional `defaultChecked`. Use
    `components/ui/Checkbox` rather than the current hand-rolled
-   `<input type="checkbox">` (CLAUDE.md names this explicitly).
+   `<input type="checkbox">` (CLAUDE.md names this explicitly). The push master
+   row can ship here, disabled, with the "no device subscribed yet" copy —
+   Phase 3 makes it live.
 
 **Estimate:** ~1 day.
 
@@ -199,7 +240,10 @@ independent of my admin's."
    - the unread badge count
    - `cron/notifications-retention.ts` (its "only read rows" purge now means
      "read by everyone", or switch to age-only — decide and document)
-3. Category filtering. Map switch → content:
+3. Category filtering, applied at READ time (see "where filtering happens"
+   above — rows are shared, so a category toggle is a view filter and must
+   never gate the insert). The unread badge must apply the identical filter or
+   it counts items the user cannot see and never clears. Map switch → content:
 
    | Switch | Persisted types | Derived section |
    |---|---|---|
@@ -223,8 +267,11 @@ independent of my admin's."
    dashboard. Verify the existing SW's scope first (open decision 5).
 3. Emit push alongside bell creation. `createPmNotification()` is the single
    chokepoint for every persisted type — hooking there covers maintenance,
-   turnover-complete and the whole work-order family in **one** place, gated on
-   the user's pref.
+   turnover-complete and the whole work-order family in **one** place. Gate per
+   recipient on `category on AND push master on`; resolve the org's members and
+   send only to those who pass. Note this is a per-recipient fan-out inside what
+   is currently a single insert, so mind `n-plus-one-loops` — batch the pref
+   lookup for the org rather than querying per member.
 4. **Derived alerts have no event moment.** Inventory below-par and unassigned
    turnovers are recomputed on read; there is nothing to hang a push on. They
    need either a cron that pushes a daily summary, or promotion to real
@@ -249,6 +296,12 @@ the same again if promoted to persisted rows.
   (trap 4).
 - A user with a category off does not see that category in the bell, and
   billing/integration/compliance items appear regardless.
+- A category off for user A still writes the row, and user B (same org, category
+  on) still sees it — the shared-row case that makes filtering a read concern.
+- The unread badge matches the filtered feed: a user with a category off never
+  has a badge they cannot clear.
+- Push master off + category on = bell row written, no push sent.
+- Push master on + category off = neither.
 - `sendPushToUser` reaches a PM with no `crew_members` row (Phase 3).
 
 ---
