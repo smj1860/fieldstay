@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { requireOrgMember } from '@/lib/auth'
+import { reportQueryError } from '@/lib/supabase/unwrap'
 
 export async function POST(request: NextRequest) {
   const body = await request.json().catch(() => null)
@@ -10,11 +11,15 @@ export async function POST(request: NextRequest) {
   // Derive org_id from the session — never from the client body
   const { supabase, membership } = await requireOrgMember()
 
-  await supabase
+  const { error } = await supabase
     .from('org_milestones')
     .update({ review_clicked: true, dismissed: true })
     .eq('org_id', membership.org_id)
     .eq('milestone', body.milestone)
+
+  if (reportQueryError(error, { site: 'route.milestones.reviewClicked', orgId: membership.org_id })) {
+    return NextResponse.json({ error: 'Failed to update milestone' }, { status: 500 })
+  }
 
   return NextResponse.json({ success: true })
 }

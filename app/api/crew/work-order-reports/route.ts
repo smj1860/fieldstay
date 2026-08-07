@@ -138,13 +138,24 @@ export async function POST(request: NextRequest) {
   // they select (falls back to 'general' for "Other" / no asset).
   let assetType: AssetType | null = null
   if (asset_id) {
-    const { data: asset } = await supabase
+    const { data: asset, error: assetError } = await supabase
       .from('property_assets')
       .select('id, asset_type')
       .eq('id', asset_id)
       .eq('property_id', property_id)
       .eq('org_id', crew.org_id)
       .single()
+
+    // Same reasoning as the property lookup above: PGRST116 is a genuine
+    // 404, anything else is the query itself failing.
+    if (assetError && assetError.code !== 'PGRST116') {
+      console.error('[CrewWorkOrderReport] asset lookup', assetError)
+      reportError(assetError, {
+        site:  'api.crew.work-order-reports.assetLookup',
+        orgId: crew.org_id,
+      })
+      return NextResponse.json({ error: 'Something went wrong' }, { status: 503 })
+    }
 
     if (!asset) return NextResponse.json({ error: 'Asset not found' }, { status: 404 })
     assetType = asset.asset_type as AssetType

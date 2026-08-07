@@ -193,11 +193,19 @@ export class OwnerRezApiClient {
     // disconnect look like an urgent problem requiring reconnection.
     if (conn?.status === 'disconnected' || conn?.status === 'revoked') return
 
-    await supabase
+    const { error: updateError } = await supabase
       .from('integration_connections')
       .update({ status: 'error' })
       .eq('user_id', this.userId)
       .eq('provider_id', PROVIDER)
+
+    if (updateError) {
+      console.error(`[OwnerRez:${this.userId}] failed to mark connection error`, updateError)
+      reportError(updateError, {
+        site:  'lib.integrations.ownerrez-api.markConnectionError',
+        orgId: conn?.org_id ?? undefined,
+      })
+    }
 
     try {
       const { inngest } = await import('@/lib/inngest/client')

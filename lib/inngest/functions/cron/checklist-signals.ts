@@ -149,11 +149,12 @@ export const computeChecklistSignals = inngest.createFunction(
       const supabase = createServiceClient({ system: 'inngest:checklist-signals' })
       const CHUNK = 200
       for (let i = 0; i < upserts.length; i += CHUNK) {
-        await supabase
+        const { error } = await supabase
           .from('checklist_item_signals')
           .upsert(upserts.slice(i, i + CHUNK), {
             onConflict: 'property_id,section_name,task',
           })
+        if (error) throw new Error(`checklist_item_signals upsert failed: ${error.message}`)
       }
     })
 

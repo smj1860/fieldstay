@@ -15,11 +15,18 @@ export async function handleCheckoutSessionBilling(
   orgId: string,
   customerId: string,
 ): Promise<void> {
-  await supabase
+  const { error } = await supabase
     .from('organizations')
     .update({ stripe_customer_id: customerId })
     .eq('id', orgId)
     .is('stripe_customer_id', null)
+
+  // Throw so the route's dedup claim releases and Stripe retries — a silently
+  // dropped customer-id link leaves every later customer-id-only lookup for
+  // this org (invoice events, the billing portal) missing.
+  if (error) {
+    throw new Error(`stripe_customer_id link failed for org ${orgId}: ${error.message}`)
+  }
 }
 
 /**

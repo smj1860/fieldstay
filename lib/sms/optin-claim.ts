@@ -1,4 +1,5 @@
 import { unwrap } from '@/lib/supabase/unwrap'
+import { reportError } from '@/lib/observability/report-error'
 import type { SupabaseClient } from '@supabase/supabase-js'
 
 type DailySmsDateColumn = 'last_morning_sms_date' | 'last_evening_sms_date'
@@ -37,8 +38,13 @@ export async function releaseDailySmsSlot(
   optinId: string,
   dateColumn: DailySmsDateColumn
 ): Promise<void> {
-  await supabase
+  const { error } = await supabase
     .from('guidebook_guest_sms_optins')
     .update({ [dateColumn]: null })
     .eq('id', optinId)
+
+  if (error) {
+    console.error('[releaseDailySmsSlot]', error.message)
+    reportError(error, { site: 'lib.sms.optin-claim.release', extra: { date_column: dateColumn } })
+  }
 }

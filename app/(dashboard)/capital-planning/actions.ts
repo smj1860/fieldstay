@@ -6,6 +6,7 @@ import { inngest }          from '@/lib/inngest/client'
 import { logAuditEvent }    from '@/lib/audit'
 
 import { reportError } from '@/lib/observability/report-error'
+import { throwIfAnyQueryFailed, isRealQueryError } from '@/lib/supabase/unwrap'
 export async function triggerDepreciationLedger(taxYear: number, orgId: string): Promise<void> {
   try {
     const { membership } = await requireOrgMember()
@@ -62,12 +63,18 @@ export async function updateReplacementStatus(
 
     // Defense in depth: verify asset belongs to this org even though RLS
     // enforces the same check — service client is never used here.
-    const { data: asset } = await supabase
+    const assetRes = await supabase
       .from('property_assets')
       .select('id, name, org_id')
       .eq('id', assetId)
       .eq('org_id', membership.org_id)  // explicit org scope
       .single()
+
+    throwIfAnyQueryFailed(
+      { site: 'serverAction.capital-planning.updateReplacementStatus', orgId: membership.org_id },
+      isRealQueryError(assetRes.error) ? assetRes.error : null,
+    )
+    const asset = assetRes.data
 
     if (!asset) return { error: 'Asset not found' }
 

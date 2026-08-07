@@ -5,6 +5,7 @@ import { requirePlatformAdmin } from '@/lib/auth'
 import { logAuditEvent } from '@/lib/audit'
 
 import { reportError } from '@/lib/observability/report-error'
+import { unwrap } from '@/lib/supabase/unwrap'
 // A type alias, not an interface — see RoomTemplateItemInput: only a type
 // alias has the implicit index signature required to satisfy Json, and these
 // items are written into a jsonb column.
@@ -24,12 +25,13 @@ export async function createSeedTemplate(
     const trimmed = name.trim()
     if (!trimmed) return { error: 'Template name is required.' }
 
-    const { data: maxRow } = await supabase
+    const maxRowRes = await supabase
       .from('platform_seed_room_templates')
       .select('sort_order')
       .order('sort_order', { ascending: false })
       .limit(1)
       .maybeSingle()
+    const maxRow = unwrap(maxRowRes, { site: 'serverAction.admin.seed-templates.createSeedTemplate' })
 
     const { data, error } = await supabase
       .from('platform_seed_room_templates')
@@ -181,11 +183,12 @@ export async function saveSeedTemplateItems(
   try {
     const { user, supabase } = await requirePlatformAdmin()
 
-    const { data: template } = await supabase
+    const templateRes = await supabase
       .from('platform_seed_room_templates')
       .select('id')
       .eq('id', templateId)
       .maybeSingle()
+    const template = unwrap(templateRes, { site: 'serverAction.admin.seed-templates.saveSeedTemplateItems' })
     if (!template) return { error: 'Template not found.', saved: 0 }
 
     // Atomic delete+insert via RPC — a plain client-side delete() then

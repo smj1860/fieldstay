@@ -4,6 +4,7 @@ import { revalidatePath } from 'next/cache'
 import { requireOrgMember } from '@/lib/auth'
 import { logAuditEvent } from '@/lib/audit'
 import { detectAndFlagOverlapsBestEffort } from '@/lib/ical/conflict-detection'
+import { isRealQueryError, reportQueryError } from '@/lib/supabase/unwrap'
 
 export async function updateBookingDates(
   bookingId: string,
@@ -22,13 +23,17 @@ export async function updateBookingDates(
   // owned by FieldStay; saving a drag here would silently diverge from
   // the real reservation until the next sync overwrites it with no
   // indication to the PM that their change was never real.
-  const { data: booking } = await supabase
+  const { data: booking, error: bookingError } = await supabase
     .from('bookings')
     .select('id, property_id, ical_feed_id, external_source')
     .eq('id', bookingId)
     .eq('org_id', membership.org_id)
     .single()
 
+  if (isRealQueryError(bookingError)) {
+    reportQueryError(bookingError, { site: 'serverAction.bookings.updateBookingDates', orgId: membership.org_id })
+    return { error: 'Operation failed. Please try again.' }
+  }
   if (!booking) return { error: 'Booking not found' }
   if (booking.ical_feed_id !== null || booking.external_source !== null) {
     return { error: 'This booking is synced from an external source and cannot be edited here' }

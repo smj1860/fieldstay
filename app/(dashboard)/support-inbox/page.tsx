@@ -11,14 +11,12 @@ export default async function SupportInboxPage() {
 
   // A failed staff lookup must not read as "not staff" — that silently
   // redirects an actual staff member away from the inbox with no signal.
-  const staff = unwrap(
-    await supabase
-      .from('platform_staff')
-      .select('user_id, role')
-      .eq('user_id', user.id)
-      .maybeSingle(),
-    { site: 'page.support-inbox.staff' },
-  )
+  const staffRes = await supabase
+    .from('platform_staff')
+    .select('user_id, role')
+    .eq('user_id', user.id)
+    .maybeSingle()
+  const staff = unwrap(staffRes, { site: 'page.support-inbox.staff' })
 
   if (!staff) redirect('/ops')
 

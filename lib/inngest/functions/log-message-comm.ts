@@ -1,5 +1,6 @@
 import { inngest } from '@/lib/inngest/client'
 import { createServiceClient } from '@/lib/supabase/server'
+import { isRealQueryError, throwIfAnyQueryFailed, unwrap } from '@/lib/supabase/unwrap'
 
 // Auto-logs in-app PM ↔ crew messages to the communications log for audit history.
 export const logMessageCommunication = inngest.createFunction(
@@ -10,12 +11,18 @@ export const logMessageCommunication = inngest.createFunction(
 
     const message = await step.run('fetch-message', async () => {
       const supabase = createServiceClient({ system: 'inngest:log-message-comm' })
-      const { data } = await supabase
+      const { data, error } = await supabase
         .from('messages')
         .select('content, created_at, work_order_id')
         .eq('id', message_id)
         .eq('org_id', org_id)
         .single()
+      if (isRealQueryError(error)) {
+        throwIfAnyQueryFailed(
+          { site: 'inngest.log-message-communication.fetch-message', orgId: org_id },
+          error
+        )
+      }
       return data
     })
 
@@ -25,13 +32,13 @@ export const logMessageCommunication = inngest.createFunction(
 
     const crewMember = await step.run('resolve-crew-member', async () => {
       const supabase = createServiceClient({ system: 'inngest:log-message-comm' })
-      const { data } = await supabase
+      const res = await supabase
         .from('crew_members')
         .select('id')
         .eq('user_id', crewUserId)
         .eq('org_id', org_id)
         .maybeSingle()
-      return data
+      return unwrap(res, { site: 'inngest.log-message-communication.resolve-crew-member', orgId: org_id })
     })
 
     if (!crewMember) return { skipped: 'crew_member_not_found' }

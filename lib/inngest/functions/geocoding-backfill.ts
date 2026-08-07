@@ -1,6 +1,7 @@
 import { inngest } from '@/lib/inngest/client'
 import { createServiceClient } from '@/lib/supabase/server'
 import { geocodeZip } from '@/lib/geocoding'
+import { unwrapList } from '@/lib/supabase/unwrap'
 
 function chunk<T>(arr: T[], size: number): T[][] {
   const out: T[][] = []
@@ -30,13 +31,14 @@ export const geocodingBackfill = inngest.createFunction(
       const pageSize = 1000
       const properties: { id: string; zip: string | null }[] = []
       for (let from = 0; ; from += pageSize) {
-        const { data } = await supabase
+        const pageRes = await supabase
           .from('properties')
           .select('id, zip')
           .is('lat', null)
           .not('zip', 'is', null)
           .range(from, from + pageSize - 1)
-        if (!data?.length) break
+        const data = unwrapList(pageRes, { site: 'inngest.geocoding-backfill.geocode-properties' })
+        if (!data.length) break
         properties.push(...data)
         if (data.length < pageSize) break
       }
@@ -83,13 +85,14 @@ export const geocodingBackfill = inngest.createFunction(
       const pageSize = 1000
       const vendors: { id: string; service_zip: string | null }[] = []
       for (let from = 0; ; from += pageSize) {
-        const { data } = await supabase
+        const pageRes = await supabase
           .from('vendors')
           .select('id, service_zip')
           .is('lat', null)
           .not('service_zip', 'is', null)
           .range(from, from + pageSize - 1)
-        if (!data?.length) break
+        const data = unwrapList(pageRes, { site: 'inngest.geocoding-backfill.geocode-vendors' })
+        if (!data.length) break
         vendors.push(...data)
         if (data.length < pageSize) break
       }

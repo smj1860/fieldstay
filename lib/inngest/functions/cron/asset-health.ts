@@ -1,4 +1,4 @@
-import { unwrapList } from '@/lib/supabase/unwrap'
+import { throwIfAnyQueryFailed, unwrapList } from '@/lib/supabase/unwrap'
 import type { TablesInsert } from '@/types/database'
 import { inngest } from '@/lib/inngest/client'
 import { createServiceClient } from '@/lib/supabase/server'
@@ -169,9 +169,16 @@ export const dailyAssetHealth = inngest.createFunction(
       }
 
       if (updates.length) {
-        await supabase
+        const { error: upsertError } = await supabase
           .from('asset_type_standards')
           .upsert(updates, { onConflict: 'asset_type' })
+
+        if (upsertError) {
+          throwIfAnyQueryFailed(
+            { site: 'inngest.asset-health.scoring-weight-nudge.upsert' },
+            upsertError
+          )
+        }
 
         // Platform-level event — no org_id, orgId intentionally omitted
         await logAuditEvents(

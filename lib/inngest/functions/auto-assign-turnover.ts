@@ -3,6 +3,7 @@ import { fetchAllRows } from '@/lib/inngest/paginate'
 import { createServiceClient } from '@/lib/supabase/server'
 import { haversineKm, proximityScore } from '@/lib/scoring/geo'
 import { computeWorkloadMap, computeFamiliarIds } from '@/lib/scoring/pools'
+import { throwIfAnyQueryFailed, isRealQueryError, unwrapList } from '@/lib/supabase/unwrap'
 
 export const autoAssignTurnover = inngest.createFunction(
   {
@@ -21,10 +22,10 @@ export const autoAssignTurnover = inngest.createFunction(
       const supabase = createServiceClient({ system: 'inngest:auto-assign-turnover' })
 
       const [
-        { data: org },
-        { data: turnover },
-        { data: property },
-        { data: crew },
+        { data: org, error: orgError },
+        { data: turnover, error: turnoverError },
+        { data: property, error: propertyError },
+        { data: crew, error: crewError },
       ] = await Promise.all([
         supabase.from('organizations').select('auto_assign_mode').eq('id', org_id).single(),
         supabase.from('turnovers').select('id, status, is_same_day_turnover').eq('id', turnover_id).eq('org_id', org_id).single(),
@@ -35,6 +36,13 @@ export const autoAssignTurnover = inngest.createFunction(
           .eq('org_id', org_id)
           .eq('is_active', true),
       ])
+      throwIfAnyQueryFailed(
+        { site: 'inngest.auto-assign-turnover.load-context', orgId: org_id },
+        isRealQueryError(orgError) ? orgError : null,
+        isRealQueryError(turnoverError) ? turnoverError : null,
+        isRealQueryError(propertyError) ? propertyError : null,
+        crewError,
+      )
 
       const mode = (org?.auto_assign_mode ?? 'disabled') as string
       if (mode === 'disabled' || !turnover || !crew?.length) return null
@@ -43,7 +51,7 @@ export const autoAssignTurnover = inngest.createFunction(
       // date — there's no human in the loop here to override a bad auto-pick,
       // so this is a hard exclusion rather than a score penalty.
       const checkoutDate = checkout_datetime.split('T')[0]
-      const { data: timeOff } = await supabase
+      const timeOffRes = await supabase
         .from('crew_availability')
         .select('crew_member_id')
         .eq('org_id', org_id)
@@ -51,20 +59,24 @@ export const autoAssignTurnover = inngest.createFunction(
         .eq('is_available', false)
         .in('crew_member_id', crew.map((c) => c.id))
 
-      const unavailableIds = new Set((timeOff ?? []).map((t) => t.crew_member_id))
+      const timeOff = unwrapList(timeOffRes, { site: 'inngest.auto-assign-turnover.load-context', orgId: org_id })
+
+      const unavailableIds = new Set(timeOff.map((t) => t.crew_member_id))
       const availableCrew  = crew.filter((c) => !unavailableIds.has(c.id))
 
       if (!availableCrew.length) return null
 
       // Familiarity: which crew have been assigned to this property before
-      const { data: propertyTurnovers } = await supabase
+      const propertyTurnoversRes = await supabase
         .from('turnovers')
         .select('id')
         .eq('property_id', property_id)
         .eq('org_id', org_id)
         .neq('id', turnover_id)
 
-      const pastTurnoverIds = (propertyTurnovers ?? []).map((t) => t.id)
+      const propertyTurnovers = unwrapList(propertyTurnoversRes, { site: 'inngest.auto-assign-turnover.load-context', orgId: org_id })
+
+      const pastTurnoverIds = propertyTurnovers.map((t) => t.id)
       let familiarCrewIds: string[] = []
 
       if (pastTurnoverIds.length > 0) {

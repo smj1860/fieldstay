@@ -3,6 +3,7 @@ import { createServiceClient } from '@/lib/supabase/server'
 import { parseLocalDate }      from '@/lib/utils/date-validation'
 import { logAuditEvent }       from '@/lib/audit'
 import { unwrapJoin }          from '@/lib/utils/supabase-joins'
+import { unwrap, unwrapList }  from '@/lib/supabase/unwrap'
 
 // Mirrors the 30-day "expiring_soon" window in the vendor_compliance_status
 // view (migration 20260606051120) — a document enters this window the same
@@ -46,7 +47,7 @@ export const vendorComplianceExpiryCheck = inngest.createFunction(
       const windowEnd = new Date(Date.now() + EXPIRING_SOON_WINDOW_DAYS * 86_400_000)
         .toISOString().split('T')[0]
 
-      const { data } = await supabase
+      const res = await supabase
         .from('vendor_compliance_documents')
         .select('id, org_id, vendor_id, document_type, expiry_date, vendors ( name )')
         .eq('is_active', true)
@@ -56,7 +57,7 @@ export const vendorComplianceExpiryCheck = inngest.createFunction(
         .order('expiry_date', { ascending: true })
         .limit(MAX_DOCS_PER_RUN)
 
-      return data ?? []
+      return unwrapList(res, { site: 'inngest.cron-vendor-compliance-expiry-check.find-expiring-documents' })
     })
 
     logger.info(`Found ${documents.length} compliance document(s) entering the expiring-soon window`)
@@ -73,13 +74,18 @@ export const vendorComplianceExpiryCheck = inngest.createFunction(
 
         // Idempotency: only proceed if this run is the one that flips the
         // gate — guards against a retried step re-emitting for the same doc.
-        const { data: updated } = await supabase
+        const updateRes = await supabase
           .from('vendor_compliance_documents')
           .update({ first_warned_at: new Date().toISOString() })
           .eq('id', doc.id)
           .is('first_warned_at', null)
           .select('id')
           .maybeSingle()
+        const updated = unwrap(updateRes, {
+          site:  'inngest.cron-vendor-compliance-expiry-check.mark-warned',
+          orgId: doc.org_id,
+          extra: { document_id: doc.id },
+        })
 
         if (!updated) return null
 

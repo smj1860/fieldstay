@@ -1,6 +1,7 @@
 import { inngest } from '@/lib/inngest/client'
 import { createServiceClient } from '@/lib/supabase/server'
 import { fetchAllRows } from '@/lib/inngest/paginate'
+import { unwrap } from '@/lib/supabase/unwrap'
 
 const NO_BOOKING_WINDOW_DAYS = 14
 
@@ -101,11 +102,13 @@ export const turnoverPriorityDecay = inngest.createFunction(
     if (idsToDowngrade.length) {
       await step.run('downgrade-turnovers', async () => {
         const supabase = createServiceClient({ system: 'inngest:turnover-priority-decay' })
-        await supabase
+        const res = await supabase
           .from('turnovers')
           .update({ priority: 'low' })
           .in('id', idsToDowngrade)
           .eq('priority', 'medium')  // optimistic lock — don't clobber a manual override made between the check and this write
+
+        unwrap(res, { site: 'inngest.turnover-priority-decay.downgrade-turnovers' })
       })
     }
 

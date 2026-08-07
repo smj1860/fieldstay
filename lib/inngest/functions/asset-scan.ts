@@ -48,11 +48,12 @@ export const assetDataPlateScan = inngest.createFunction(
 
     await step.run('mark-processing', async () => {
       const supabase = createServiceClient({ system: 'inngest:asset-scan' })
-      await supabase
+      const { error } = await supabase
         .from('property_assets')
         .update({ scan_status: 'processing' })
         .eq('id', asset_id)
         .eq('org_id', org_id)
+      if (error) throw new Error(`property_assets mark-processing failed: ${error.message}`)
     })
 
     const result = await step.run('scan-image', async () => {

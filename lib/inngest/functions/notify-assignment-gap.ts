@@ -3,6 +3,7 @@ import { createServiceClient } from '@/lib/supabase/server'
 import { resend, FROM }        from '@/lib/resend/client'
 import { renderPmAlert }       from '@/lib/resend/emails/pm-alert'
 import { getPmMembers, type PmMember } from '@/lib/inngest/helpers'
+import { throwIfAnyQueryFailed, isRealQueryError, unwrapList } from '@/lib/supabase/unwrap'
 
 export const notifyAssignmentGap = inngest.createFunction(
   { id: 'notify-assignment-gap', name: 'Notify PM: Crew Coverage Gap', retries: 2 },
@@ -13,10 +14,14 @@ export const notifyAssignmentGap = inngest.createFunction(
     const context = await step.run('load-context', async () => {
       const supabase = createServiceClient({ system: 'inngest:notify-assignment-gap' })
 
-      const [{ data: property }, pmMembers] = await Promise.all([
+      const [{ data: property, error: propertyError }, pmMembers] = await Promise.all([
         supabase.from('properties').select('name').eq('id', property_id).eq('org_id', org_id).single(),
         getPmMembers(supabase, org_id, { roles: ['owner', 'admin', 'manager'], limit: 10 }),
       ])
+      throwIfAnyQueryFailed(
+        { site: 'inngest.notify-assignment-gap.load-context', orgId: org_id },
+        isRealQueryError(propertyError) ? propertyError : null,
+      )
 
       return {
         propertyName: property?.name ?? 'Property',
@@ -60,12 +65,13 @@ export const notifyAssignmentGap = inngest.createFunction(
     for (const member of context.pmMembers as PmMember[]) {
       await step.run(`push-manager-${member.userId}`, async () => {
         const supabase = createServiceClient({ system: 'inngest:notify-assignment-gap' })
-        const { data: subs } = await supabase
+        const subsRes = await supabase
           .from('push_subscriptions')
           .select('endpoint, p256dh, auth')
           .eq('user_id', member.userId)
+        const subs = unwrapList(subsRes, { site: 'inngest.notify-assignment-gap.push-manager', orgId: org_id })
 
-        if (!subs?.length) return
+        if (!subs.length) return
 
         const { sendPushToCrewMember } = await import('@/lib/push/client')
         await sendPushToCrewMember(subs, {

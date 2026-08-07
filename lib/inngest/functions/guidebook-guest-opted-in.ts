@@ -3,6 +3,7 @@ import { inngest } from '@/lib/inngest/client'
 import { createServiceClient } from '@/lib/supabase/server'
 import { sendSMS } from '@/lib/sms/telnyx'
 import { renderSmsBody } from '@/lib/sms/templates'
+import { reportError } from '@/lib/observability/report-error'
 
 export const guidebookGuestOptedIn = inngest.createFunction(
   { id: 'guidebook-guest-opted-in', name: 'Guidebook: Guest Opted In to SMS' },
@@ -89,10 +90,18 @@ export const guidebookGuestOptedIn = inngest.createFunction(
 
       if (!result.sent) {
         // SMS failed — roll back the claim so a retry can attempt again
-        await supabase
+        const { error: rollbackError } = await supabase
           .from('guidebook_guest_sms_optins')
           .update({ door_code_sent_at: null })
           .eq('id', optinId)
+
+        if (rollbackError) {
+          console.error('[guidebook-guest-opted-in] claim rollback failed', rollbackError.message)
+          reportError(rollbackError, {
+            site:  'inngest.guidebook-guest-opted-in.claim-rollback',
+            orgId: property.org_id,
+          })
+        }
 
         throw new Error(`SMS send failed: ${result.reason ?? 'unknown'}`)
       }

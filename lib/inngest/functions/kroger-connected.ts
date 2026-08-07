@@ -2,6 +2,7 @@ import { inngest } from '@/lib/inngest/client'
 import { createServiceClient } from '@/lib/supabase/server'
 import { getClientToken, findNearestKrogerStore } from '@/lib/kroger/client'
 import { logAuditEvent } from '@/lib/audit'
+import { unwrap, throwIfAnyQueryFailed, isRealQueryError } from '@/lib/supabase/unwrap'
 
 export type KrogerConnectedEvent = {
   name: 'integration/kroger.connected'
@@ -25,7 +26,7 @@ export const setupKrogerOnConnect = inngest.createFunction(
     const result = await step.run('find-and-store-nearest-location', async () => {
       const supabase = createServiceClient({ system: 'inngest:kroger-connected' })
 
-      const { data: property } = await supabase
+      const propertyRes = await supabase
         .from('properties')
         .select('zip')
         .eq('org_id', org_id)
@@ -34,6 +35,8 @@ export const setupKrogerOnConnect = inngest.createFunction(
         .order('created_at', { ascending: true })
         .limit(1)
         .maybeSingle()
+
+      const property = unwrap(propertyRes, { site: 'inngest.kroger-connected.find-and-store-nearest-location', orgId: org_id })
 
       if (!property?.zip) {
         await supabase.from('org_milestones').upsert(
@@ -54,12 +57,18 @@ export const setupKrogerOnConnect = inngest.createFunction(
         return { found: false, reason: 'no_store_in_range' }
       }
 
-      const { data: connection } = await supabase
+      const connectionRes = await supabase
         .from('integration_connections')
         .select('metadata')
         .eq('org_id', org_id)
         .eq('provider_id', 'kroger')
         .single()
+
+      throwIfAnyQueryFailed(
+        { site: 'inngest.kroger-connected.find-and-store-nearest-location', orgId: org_id },
+        isRealQueryError(connectionRes.error) ? connectionRes.error : null,
+      )
+      const connection = connectionRes.data
 
       await supabase
         .from('integration_connections')

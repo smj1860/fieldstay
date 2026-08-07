@@ -6,6 +6,7 @@ import { renderSmsBody }       from '@/lib/sms/templates'
 import { escapeHtml }          from '@/lib/utils/html'
 import { reportError }         from '@/lib/observability/report-error'
 import { unwrapJoin }          from '@/lib/utils/supabase-joins'
+import { throwIfAnyQueryFailed, isRealQueryError } from '@/lib/supabase/unwrap'
 
 /**
  * Triggered when one or more turnovers are assigned to a crew member via
@@ -31,7 +32,10 @@ export const handleCrewAssigned = inngest.createFunction(
     const { crew, turnovers } = await step.run('fetch-assignment-data', async () => {
       const supabase = createServiceClient({ system: 'inngest:crew-assignment' })
 
-      const [{ data: crew }, { data: turnovers }] = await Promise.all([
+      const [
+        { data: crew, error: crewError },
+        { data: turnovers, error: turnoversError },
+      ] = await Promise.all([
         supabase
           .from('crew_members')
           .select('id, name, email, phone')
@@ -47,6 +51,11 @@ export const handleCrewAssigned = inngest.createFunction(
           .in('id', turnover_ids)
           .eq('org_id', org_id),
       ])
+      throwIfAnyQueryFailed(
+        { site: 'inngest.crew-assignment.fetch-assignment-data', orgId: org_id },
+        isRealQueryError(crewError) ? crewError : null,
+        turnoversError,
+      )
 
       return { crew, turnovers: turnovers ?? [] }
     })
@@ -118,11 +127,17 @@ export const handleCrewAssigned = inngest.createFunction(
         if (!e164) return { skipped: true, reason: 'invalid-phone' }
 
         const supabase = createServiceClient({ system: 'inngest:crew-assignment' })
-        const { data: org } = await supabase
+        const orgRes = await supabase
           .from('organizations')
           .select('name')
           .eq('id', org_id)
           .single()
+
+        throwIfAnyQueryFailed(
+          { site: 'inngest.crew-assignment.send-assignment-sms', orgId: org_id },
+          isRealQueryError(orgRes.error) ? orgRes.error : null,
+        )
+        const org = orgRes.data
 
         const smsRows = turnovers.map((t) => {
           const prop = unwrapJoin(t.properties)

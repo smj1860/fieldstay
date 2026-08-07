@@ -3,6 +3,7 @@ import { createServiceClient } from '@/lib/supabase/server'
 import { requireCrewMember }   from '@/lib/crew-auth'
 import { inngest }             from '@/lib/inngest/client'
 import { reportError }         from '@/lib/observability/report-error'
+import { unwrap }              from '@/lib/supabase/unwrap'
 
 // Input validation at the boundary (CLAUDE.md standing audit checklist →
 // Sanitization). Unbounded, this text went straight into both a DB insert and
@@ -46,12 +47,13 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   // property_id its org_id has no relationship to. Same shape as the
   // verification in app/api/crew/inventory-count/route.ts.
   if (propertyId !== null) {
-    const { data: property } = await service
+    const propertyRes = await service
       .from('properties')
       .select('id')
       .eq('id', propertyId)
       .eq('org_id', crew.org_id)
       .maybeSingle()
+    const property = unwrap(propertyRes, { site: 'route.crew.feedback.POST', orgId: crew.org_id })
 
     if (!property) {
       return NextResponse.json({ error: 'Property not found' }, { status: 404 })

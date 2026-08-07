@@ -192,12 +192,16 @@ export async function runCapexProjectionForOrg(
     projections,
   }
 
-  await supabase
+  const { error: upsertError } = await supabase
     .from('org_milestones')
     .upsert(
       { org_id: orgId, milestone: `capex_projection_${currentYear}`, value: payload },
       { onConflict: 'org_id,milestone' },
     )
+
+  if (upsertError) {
+    throw new Error(`capex_projection upsert failed for org ${orgId}: ${upsertError.message}`)
+  }
 
   return {
     years_with_items: Object.keys(projections).length,

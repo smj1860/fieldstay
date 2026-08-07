@@ -3,6 +3,7 @@ import { createClient }        from '@/lib/supabase/server'
 import { createServiceClient } from '@/lib/supabase/server'
 import { logAuditEvents }      from '@/lib/audit'
 import { dataExportLimiter, checkLimit } from '@/lib/rate-limit'
+import { throwIfAnyQueryFailed, unwrapList } from '@/lib/supabase/unwrap'
 
 /**
  * GET /api/gdpr/export
@@ -35,11 +36,11 @@ export async function GET() {
   const admin = createServiceClient({ authenticatedUser: user })
 
   const [
-    { data: profile },
-    { data: memberships },
-    { data: crewMember },
-    { data: pushSubs },
-    { data: auditEvents },
+    { data: profile, error: profileError },
+    { data: memberships, error: membershipsError },
+    { data: crewMember, error: crewMemberError },
+    { data: pushSubs, error: pushSubsError },
+    { data: auditEvents, error: auditEventsError },
   ] = await Promise.all([
     admin.from('profiles').select('id, full_name, avatar_url, created_at').eq('id', user.id).single(),
     admin.from('organization_members').select('org_id, role, invite_accepted_at').eq('user_id', user.id),
@@ -47,15 +48,23 @@ export async function GET() {
     admin.from('push_subscriptions').select('endpoint, created_at').eq('user_id', user.id),
     admin.from('audit_events').select('action, target_type, target_id, created_at').eq('actor_id', user.id).order('created_at', { ascending: false }).limit(500),
   ])
+  // A partial failure here must not silently ship an incomplete GDPR export
+  // as though it were complete — fail the request instead.
+  throwIfAnyQueryFailed(
+    { site: 'route.gdpr.export', extra: { userId: user.id } },
+    profileError, membershipsError, crewMemberError, pushSubsError, auditEventsError,
+  )
 
-  const crewAssignments = crewMember
-    ? (await admin
-        .from('turnover_assignments')
-        .select('turnover_id, assigned_at')
-        .eq('crew_member_id', crewMember.id)
-        .order('assigned_at', { ascending: false })
-        .limit(200)).data
-    : []
+  let crewAssignments: { turnover_id: string; assigned_at: string }[] = []
+  if (crewMember) {
+    const assignmentsRes = await admin
+      .from('turnover_assignments')
+      .select('turnover_id, assigned_at')
+      .eq('crew_member_id', crewMember.id)
+      .order('assigned_at', { ascending: false })
+      .limit(200)
+    crewAssignments = unwrapList(assignmentsRes, { site: 'route.gdpr.export', extra: { userId: user.id } })
+  }
 
   const orgIds = (memberships ?? []).map((m) => m.org_id)
 

@@ -8,6 +8,7 @@ import { logAuditEvent } from '@/lib/audit'
 import { inngest } from '@/lib/inngest/client'
 
 import { reportError } from '@/lib/observability/report-error'
+import { unwrap } from '@/lib/supabase/unwrap'
 export interface PlatformTemplateItemInput {
   catalog_item_id: string
   par_level:       number
@@ -139,11 +140,12 @@ export async function savePlatformInventoryTemplateItems(
   try {
     const { user, supabase } = await requirePlatformAdmin()
 
-    const { data: template } = await supabase
+    const templateRes = await supabase
       .from('platform_inventory_templates')
       .select('id')
       .eq('id', templateId)
       .maybeSingle()
+    const template = unwrap(templateRes, { site: 'serverAction.admin.inventory-templates.savePlatformInventoryTemplateItems' })
     if (!template) return { error: 'Template not found.', saved: 0 }
 
     const { error: replaceError } = await supabase.rpc('replace_platform_inventory_template_items', {

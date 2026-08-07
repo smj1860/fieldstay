@@ -6,6 +6,7 @@ import { platformFeePct }             from '@/lib/stripe/platform-fee'
 import { createServiceClient }        from '@/lib/supabase/server'
 import { logAuditEvent }              from '@/lib/audit'
 import { unwrapJoin }                 from '@/lib/utils/supabase-joins'
+import { reportError }                from '@/lib/observability/report-error'
 
 export async function POST(
   _request: NextRequest,
@@ -139,11 +140,19 @@ export async function POST(
   })
 
   // Store the session ID for potential reuse on duplicate clicks
-  await supabase
+  const { error: cacheSessionErr } = await supabase
     .from('work_order_invoices')
     .update({ stripe_checkout_session_id: session.id })
     .eq('id', invoiceId)
     .eq('org_id', membership.org_id)
+
+  if (cacheSessionErr) {
+    console.error('[invoices/checkout] failed to cache session id', cacheSessionErr)
+    reportError(cacheSessionErr, {
+      site:  'api.invoices.checkout.cacheSession',
+      orgId: membership.org_id,
+    })
+  }
 
   await logAuditEvent({
     orgId:      membership.org_id,

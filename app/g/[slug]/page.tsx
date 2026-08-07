@@ -7,6 +7,7 @@ import { GuestGuidebookView } from '@/components/guidebook/guest-guidebook-view'
 import { GuidebookUnavailable } from '@/components/guidebook/guidebook-unavailable'
 import type { GuidebookSponsorView } from '@/components/guidebook/guest-guidebook-view'
 import type { GuidebookSponsor, GuidebookPropertyConfig, Property } from '@/types/database'
+import { unwrap, unwrapList } from '@/lib/supabase/unwrap'
 
 const FALLBACK_TIMEZONE = 'America/New_York'
 
@@ -83,11 +84,13 @@ export default async function GuestGuidebookPage({
   const property = config.properties as unknown as Property
   if (!property) notFound()
 
-  const { data: orgConfig } = await supabase
+  const orgConfigRes = await supabase
     .from('guidebook_configurations')
     .select('is_active')
     .eq('org_id', config.org_id)
     .maybeSingle()
+
+  const orgConfig = unwrap(orgConfigRes, { site: 'page.g.slug', orgId: config.org_id })
 
   // M1 (isolation): decide this BEFORE constructing any client-component
   // props. The config row holds wifi_password, check_in_instructions and
@@ -97,11 +100,13 @@ export default async function GuestGuidebookPage({
   const isActive = Boolean(config.is_published) && Boolean(orgConfig?.is_active)
   if (!isActive) return <GuidebookUnavailable />
 
-  const { data: sponsors } = await supabase
+  const sponsorsRes = await supabase
     .from('guidebook_sponsors')
     .select('id, status, slot_type, business_name, business_description, custom_offer_text, address, offer_type, offer_value, offer_item, featured_item, business_phone, business_website, lat, lng, photo_storage_path')
     .eq('org_id', config.org_id)
     .eq('status', 'active')
+
+  const sponsors = unwrapList(sponsorsRes, { site: 'page.g.slug', orgId: config.org_id })
 
   const hourOfDay = Number(
     new Intl.DateTimeFormat('en-US', { hour: 'numeric', hour12: false, timeZone: FALLBACK_TIMEZONE })

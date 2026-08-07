@@ -13,6 +13,7 @@ import { inngest }             from '@/lib/inngest/client'
 import { createServiceClient } from '@/lib/supabase/server'
 import { renderSmsBody }       from '@/lib/sms/templates'
 import { reportError }         from '@/lib/observability/report-error'
+import { throwIfAnyQueryFailed, isRealQueryError, unwrapList } from '@/lib/supabase/unwrap'
 
 export const handleCrewTurnoverCancelled = inngest.createFunction(
   {
@@ -32,7 +33,10 @@ export const handleCrewTurnoverCancelled = inngest.createFunction(
     const { crew, org } = await step.run('fetch-notify-data', async () => {
       const supabase = createServiceClient({ system: 'inngest:crew-turnover-cancelled' })
 
-      const [{ data: crew }, { data: org }] = await Promise.all([
+      const [
+        { data: crew, error: crewError },
+        { data: org, error: orgError },
+      ] = await Promise.all([
         supabase
           .from('crew_members')
           .select('id, phone')
@@ -45,6 +49,11 @@ export const handleCrewTurnoverCancelled = inngest.createFunction(
           .eq('id', org_id)
           .single(),
       ])
+      throwIfAnyQueryFailed(
+        { site: 'inngest.crew-turnover-cancelled.fetch-notify-data', orgId: org_id },
+        isRealQueryError(crewError) ? crewError : null,
+        isRealQueryError(orgError) ? orgError : null,
+      )
 
       return { crew, org }
     })
@@ -67,12 +76,13 @@ export const handleCrewTurnoverCancelled = inngest.createFunction(
     // invite_accepted_at note in CLAUDE.md.
     await step.run('push-cancellation', async () => {
       const supabase = createServiceClient({ system: 'inngest:crew-turnover-cancelled' })
-      const { data: subs } = await supabase
+      const subsRes = await supabase
         .from('push_subscriptions')
         .select('endpoint, p256dh, auth')
         .eq('crew_member_id', crew_member_id)
+      const subs = unwrapList(subsRes, { site: 'inngest.crew-turnover-cancelled.push-cancellation', orgId: org_id })
 
-      if (!subs?.length) return { sent: false, reason: 'no-subscriptions' }
+      if (!subs.length) return { sent: false, reason: 'no-subscriptions' }
 
       const { sendPushToCrewMember } = await import('@/lib/push/client')
       await sendPushToCrewMember(subs, {

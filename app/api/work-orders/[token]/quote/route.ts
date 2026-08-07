@@ -5,6 +5,7 @@ import { workOrderRatelimit, checkLimit } from '@/lib/rate-limit'
 import { extractClientIp }           from '@/lib/integrations/webhook-verification'
 import { unwrapJoin }                from '@/lib/utils/supabase-joins'
 import { reportError }               from '@/lib/observability/report-error'
+import { isRealQueryError, throwIfAnyQueryFailed } from '@/lib/supabase/unwrap'
 
 // Public, unauthenticated, token-gated route — rate limit by IP so a
 // leaked/enumerated token can't drive unbounded repeated lookups or
@@ -141,7 +142,7 @@ export async function GET(
   const { token }  = await params
   const supabase   = createServiceClient({ publicSurface: 'api-work-orders--token--quote' })
 
-  const { data: qr } = await supabase
+  const { data: qr, error: qrError } = await supabase
     .from('quote_requests')
     .select(`
       id, status, quote_token_expires_at,
@@ -153,6 +154,9 @@ export async function GET(
     .eq('quote_token', token)
     .single()
 
+  if (isRealQueryError(qrError)) {
+    throwIfAnyQueryFailed({ site: 'route.work-orders.quote.GET' }, qrError)
+  }
   if (!qr) return NextResponse.json({ error: 'Not found' }, { status: 404 })
 
   if (isQuoteTokenExpired(qr.quote_token_expires_at)) {
