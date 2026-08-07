@@ -15,6 +15,10 @@ type InventoryItemRow = InventoryItem & {
 
 export const metadata: Metadata = { title: 'Inventory' }
 
+// Fixed platform seed catalog (115 items, 10 categories today); the explicit
+// bound documents that and keeps it out of the unbounded-select class.
+const INVENTORY_CATALOG_LIMIT = 500
+
 export default async function InventoryPage() {
   const { supabase, membership } = await requireOrgMember()
 
@@ -71,7 +75,8 @@ export default async function InventoryPage() {
       .select('id, name, category, default_unit')
       .eq('is_active', true)
       .order('category')
-      .order('name'),
+      .order('name')
+      .limit(INVENTORY_CATALOG_LIMIT),
     supabase
       .from('inventory_counts')
       .select('id, property_id, submitted_at, notes')

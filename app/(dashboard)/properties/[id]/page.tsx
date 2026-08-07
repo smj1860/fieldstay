@@ -19,6 +19,10 @@ import { throwIfAnyQueryFailed } from '@/lib/supabase/unwrap'
 
 const INVOICE_STATUSES = ['pending_payment', 'paid', 'cancelled'] as const
 
+// Fixed platform reference table (a few dozen items today); the explicit
+// bound documents that and keeps it out of the unbounded-select class.
+const MAINTENANCE_CATALOG_ITEMS_LIMIT = 500
+
 function feedStatusTone(status: string | null): 'green' | 'red' | 'slate' {
   if (status === 'success') return 'green'
   if (status === 'error') return 'red'
@@ -105,7 +109,8 @@ export default async function PropertyDetailPage({ params }: Props) {
       .select('*')
       .eq('is_active', true)
       .order('category')
-      .order('sort_order'),
+      .order('sort_order')
+      .limit(MAINTENANCE_CATALOG_ITEMS_LIMIT),
 
     // Invoices paid to vendors for work orders at this property
     supabase

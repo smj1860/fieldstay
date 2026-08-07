@@ -54,11 +54,19 @@ export const broadcastPlatformInventoryTemplate = inngest.createFunction(
 
     const masterItems = await step.run('fetch-master-items', async () => {
       const supabase = createServiceClient({ system: 'inngest:platform-inventory-template-broadcast' })
-      const { data: items } = await supabase
-        .from('platform_inventory_template_items')
-        .select('catalog_item_id, par_level, preferred_brand, sort_order')
-        .eq('platform_inventory_template_id', templateId)
-      if (!items?.length) return []
+      const items = await fetchAllRows<{
+        catalog_item_id: string; par_level: number; preferred_brand: string | null; sort_order: number
+      }>(
+        (from, to) => supabase
+          .from('platform_inventory_template_items')
+          .select('catalog_item_id, par_level, preferred_brand, sort_order')
+          .eq('platform_inventory_template_id', templateId)
+          .order('sort_order')
+          .order('catalog_item_id')
+          .range(from, to),
+        { label: 'platform-inventory-broadcast.master-items' },
+      )
+      if (!items.length) return []
 
       // Nullability matches the live schema: name, category and default_unit
       // are all NOT NULL on inventory_catalog (default_unit NOT NULL DEFAULT
