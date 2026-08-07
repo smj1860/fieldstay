@@ -1272,6 +1272,7 @@ export type Database = {
         Row: {
           booking_id: string | null
           id: string
+          open_count: number
           opened_at: string
           org_id: string
           sponsor_id: string
@@ -1279,6 +1280,7 @@ export type Database = {
         Insert: {
           booking_id?: string | null
           id?: string
+          open_count?: number
           opened_at?: string
           org_id: string
           sponsor_id: string
@@ -1286,6 +1288,7 @@ export type Database = {
         Update: {
           booking_id?: string | null
           id?: string
+          open_count?: number
           opened_at?: string
           org_id?: string
           sponsor_id?: string
@@ -5820,6 +5823,10 @@ export type Database = {
         Returns: string
       }
       recompute_vendor_scores: { Args: never; Returns: number }
+      record_guidebook_offer_open: {
+        Args: { p_booking_id?: string; p_org_id: string; p_sponsor_id: string }
+        Returns: undefined
+      }
       remove_crew_from_turnover: {
         Args: {
           p_crew_member_id: string

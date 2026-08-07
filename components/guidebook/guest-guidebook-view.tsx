@@ -8,6 +8,7 @@ import { getActiveSlotTypes, getTimeOfDay } from '@/lib/weather/tomorrow'
 import { formatOffer } from '@/lib/guidebook/offer'
 import { CopyButton } from './copy-button'
 import styles from './guest-guidebook-view.module.css'
+import { formatTime12h } from '@/lib/utils/time-of-day'
 
 const CHARCOAL = '#0E0E10'
 const CARD     = '#17171A'
@@ -43,17 +44,6 @@ const WHY_CHIP: Record<GuidebookSlotType, string> = {
   outdoor_adventure: "Today's pick",
   general:           "Today's pick",
   other:             "Today's pick",
-}
-
-function formatTime12h(time: string | null | undefined): string | null {
-  if (!time) return null
-  const [hourStr, minuteStr] = time.split(':')
-  const hour = Number(hourStr)
-  const minute = Number(minuteStr)
-  if (Number.isNaN(hour) || Number.isNaN(minute)) return null
-  const period = hour >= 12 ? 'PM' : 'AM'
-  const displayHour = hour % 12 === 0 ? 12 : hour % 12
-  return `${displayHour}:${minute.toString().padStart(2, '0')} ${period}`
 }
 
 function formatClock(d: Date): string {

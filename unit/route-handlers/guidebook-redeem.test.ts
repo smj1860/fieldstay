@@ -44,6 +44,11 @@ function makeServiceClient(opts: {
   bookingResult?: { data: unknown; error?: unknown }
   insertResult?:  { error: unknown }
 } = {}) {
+  // The write goes through record_guidebook_offer_open (migration
+  // 20260807170000), which does the insert-or-increment in one statement — the
+  // arbiter is a partial EXPRESSION index that PostgREST's on_conflict cannot
+  // name, and read-then-write in the route would be a TOCTOU.
+  const rpcMock = vi.fn(() => Promise.resolve(opts.insertResult ?? { error: null }))
   const insertMock = vi.fn(() => Promise.resolve(opts.insertResult ?? { error: null }))
 
   const from = vi.fn((table: string) => {
@@ -85,7 +90,7 @@ function makeServiceClient(opts: {
     return chain
   })
 
-  return { from, insertMock }
+  return { from, insertMock, rpc: rpcMock }
 }
 
 function postRequest(body: unknown) {
@@ -141,10 +146,11 @@ describe('POST /api/guidebook/redeem', () => {
     // unattributed, while the guest still saw {ok:true}. The route's own
     // stated fallback is an anonymous redemption; this is it.
     expect(res.status).toBe(200)
-    expect(service.insertMock).toHaveBeenCalledWith({
-      org_id:     ORG_ID,
-      sponsor_id: SPONSOR_ID,
-      booking_id: null,
+    // p_booking_id omitted, not null: the function declares DEFAULT NULL so
+    // the anonymous case is expressible without a cast.
+    expect(service.rpc).toHaveBeenCalledWith('record_guidebook_offer_open', {
+      p_org_id:     ORG_ID,
+      p_sponsor_id: SPONSOR_ID,
     })
   })
 
@@ -166,7 +172,7 @@ describe('POST /api/guidebook/redeem', () => {
 
     expect(res.status).toBe(200)
     expect(json).toEqual({ ok: true })
-    expect(service.insertMock).not.toHaveBeenCalled()
+    expect(service.rpc).not.toHaveBeenCalled()
   })
 
   it('returns ok:true without inserting when the sponsor is not active', async () => {
@@ -180,7 +186,7 @@ describe('POST /api/guidebook/redeem', () => {
 
     expect(res.status).toBe(200)
     expect(json).toEqual({ ok: true })
-    expect(service.insertMock).not.toHaveBeenCalled()
+    expect(service.rpc).not.toHaveBeenCalled()
   })
 
   it('logs the redemption without a booking_id when no bookingToken is supplied', async () => {
@@ -190,10 +196,11 @@ describe('POST /api/guidebook/redeem', () => {
     const res = await POST(postRequest({ sponsorId: SPONSOR_ID }))
 
     expect(res.status).toBe(200)
-    expect(service.insertMock).toHaveBeenCalledWith({
-      org_id:     ORG_ID,
-      sponsor_id: SPONSOR_ID,
-      booking_id: null,
+    // p_booking_id omitted, not null: the function declares DEFAULT NULL so
+    // the anonymous case is expressible without a cast.
+    expect(service.rpc).toHaveBeenCalledWith('record_guidebook_offer_open', {
+      p_org_id:     ORG_ID,
+      p_sponsor_id: SPONSOR_ID,
     })
   })
 
@@ -206,10 +213,10 @@ describe('POST /api/guidebook/redeem', () => {
     const res = await POST(postRequest({ sponsorId: SPONSOR_ID, bookingToken: BOOKING_TOK }))
 
     expect(res.status).toBe(200)
-    expect(service.insertMock).toHaveBeenCalledWith({
-      org_id:     ORG_ID,
-      sponsor_id: SPONSOR_ID,
-      booking_id: BOOKING_ID,
+    expect(service.rpc).toHaveBeenCalledWith('record_guidebook_offer_open', {
+      p_org_id:     ORG_ID,
+      p_sponsor_id: SPONSOR_ID,
+      p_booking_id: BOOKING_ID,
     })
   })
 
@@ -222,37 +229,15 @@ describe('POST /api/guidebook/redeem', () => {
     const res = await POST(postRequest({ sponsorId: SPONSOR_ID, bookingToken: BOOKING_TOK }))
 
     expect(res.status).toBe(200)
-    expect(service.insertMock).toHaveBeenCalledWith({
-      org_id:     ORG_ID,
-      sponsor_id: SPONSOR_ID,
-      booking_id: null,
+    // p_booking_id omitted, not null: the function declares DEFAULT NULL so
+    // the anonymous case is expressible without a cast.
+    expect(service.rpc).toHaveBeenCalledWith('record_guidebook_offer_open', {
+      p_org_id:     ORG_ID,
+      p_sponsor_id: SPONSOR_ID,
     })
   })
 
-  it('treats a 23505 as already-counted-today, not as a failure to report', async () => {
-    const reportSpy = vi.mocked(reportError)
-    const service = makeServiceClient({
-      insertResult: {
-        error: {
-          code:    '23505',
-          message: 'duplicate key value violates unique constraint "uniq_guidebook_offer_redemptions_sponsor_booking_day"',
-        },
-      },
-    })
-    vi.mocked(createServiceClient).mockReturnValue(service as never)
-
-    const res = await POST(postRequest({ sponsorId: SPONSOR_ID, bookingToken: BOOKING_TOK }))
-
-    // Reopening the pass is the normal case — the guest looks at the offer,
-    // closes it, walks to the business, opens it again for staff. The second
-    // open must be a no-op, NOT a reported error, or the dedup constraint just
-    // moves the noise from the sponsor's count into Sentry.
-    expect(res.status).toBe(200)
-    expect(await res.json()).toEqual({ ok: true })
-    expect(reportSpy).not.toHaveBeenCalled()
-  })
-
-  it('still reports a non-23505 insert failure', async () => {
+  it('reports a write failure from the open-recorder RPC', async () => {
     const reportSpy = vi.mocked(reportError)
     const service = makeServiceClient({
       insertResult: { error: { code: '42501', message: 'new row violates row-level security policy' } },
@@ -261,6 +246,9 @@ describe('POST /api/guidebook/redeem', () => {
 
     const res = await POST(postRequest({ sponsorId: SPONSOR_ID }))
 
+    // Best-effort for the guest — they still get their offer — but not silent:
+    // a sustained failure here is indistinguishable from "nobody redeemed
+    // anything" in the sponsor's reporting.
     expect(res.status).toBe(200)
     expect(reportSpy).toHaveBeenCalledWith(
       expect.any(Error),

@@ -6,6 +6,7 @@ import { getWeatherForLocation } from '@/lib/weather/tomorrow'
 import { sendSMS, buildSponsorLine } from '@/lib/sms/telnyx'
 import { renderSmsBody } from '@/lib/sms/templates'
 import { sendClaimedDailySms } from '@/lib/sms/optin-claim'
+import { formatTime12h } from '@/lib/utils/time-of-day'
 import { pickNearestSponsor } from '@/lib/sms/pick-nearest-sponsor'
 import { unwrapJoin } from '@/lib/utils/supabase-joins'
 import { getFeaturedAmenityLine } from '@/lib/guidebook/featured-amenities'
@@ -141,10 +142,51 @@ export const guidebookSmsMorningSend = inngest.createFunction(
 
       const { data: property } = await supabase
         .from('properties')
-        .select('id, name, lat, lng, amenities')
+        .select('id, name, lat, lng, amenities, checkin_time')
         .eq('id', propertyId)
         .maybeSingle()
-      if (!property?.lat || !property?.lng) return false
+      if (!property) return false
+
+      // ── Check-in day: this guest has not arrived yet ──────────────────────
+      //
+      // The eligibility filter is `checkin_date <= today AND checkout_date >=
+      // today`, so a guest whose stay STARTS today is in the set — but this
+      // cron fires 7-11 AM and check-in is typically mid-afternoon. They were
+      // getting the full nudge — "it's 72°F at your rental, here's a coffee
+      // spot 0.4 mi away" — hours before they had keys, as though they were
+      // already in the house.
+      //
+      // Deliberately BEFORE the lat/lng and weather guards below: an arrival
+      // reminder needs neither, and a property without coordinates should
+      // still be able to send one.
+      //
+      // The outgoing guest on a same-day flip is a different case and is left
+      // alone: `checkout_date >= today` includes them on checkout morning,
+      // when they ARE still in the house and a local recommendation still
+      // lands. The evening cron already excludes them (`checkout_date >
+      // today`).
+      //
+      // Same claim slot, so a guest still gets exactly one morning message —
+      // this one instead of the nudge, never both.
+      if (checkinDate === todayDate) {
+        return await sendClaimedDailySms(
+          supabase, optinId, 'last_morning_sms_date', todayDate,
+          async () => {
+            const checkinAt = formatTime12h(property.checkin_time)
+            const arrivalBody = await renderSmsBody(orgId, 'arrival_reminder', {
+              property_name: property.name,
+              // Omitted entirely rather than left blank when the property has
+              // no check-in time — 27 of 27 production properties have one,
+              // but the column is nullable and OwnerRez-synced properties
+              // explicitly write null.
+              checkin_line: checkinAt ? `Just a reminder that check-in is at ${checkinAt}.` : '',
+            })
+            return await sendSMS(optin.phone_e164, arrivalBody, { category: 'nudge', orgId })
+          },
+        )
+      }
+
+      if (!property.lat || !property.lng) return false
 
       // Featured-amenity content is independent of sponsors — a property
       // with no active sponsors can still get a message if it has featured

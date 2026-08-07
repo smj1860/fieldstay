@@ -77,36 +77,40 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
       if (booking && booking.org_id === sponsor.org_id) bookingId = booking.id
     }
 
-    const { error } = await supabase.from('guidebook_offer_redemptions').insert({
-      org_id:     sponsor.org_id,
-      sponsor_id: sponsor.id,
-      booking_id: bookingId,
-    })
-
-    // 23505 against uniq_guidebook_offer_redemptions_sponsor_booking_day
-    // (migration 20260807150000) is the SUCCESS path, not a failure: this
-    // sponsor is already counted for this booking today.
+    // Insert-or-increment, as ONE statement (migration 20260807170000).
     //
     // The row is written when the guest opens the redemption pass — the coupon
     // they show at the counter — and opening it more than once is the NORMAL
     // case: look at the offer from the couch, close it, walk over, open it
-    // again for staff. Counting each reopen inflated the exact number a paying
-    // sponsor judges their slot by.
+    // again for staff. That gives two genuinely different numbers, and the
+    // sponsor wants both: COUNT(*) is redemptions (deduped per booking per day
+    // by uniq_guidebook_offer_redemptions_sponsor_booking_day), SUM(open_count)
+    // is engagement.
     //
     // Per day, not per stay: a daily perk is legitimately redeemable on each
     // day of a booking, so collapsing the whole stay would under-count.
     //
-    // Caught here rather than expressed as upsert({onConflict}): the index is
-    // an EXPRESSION index (on the UTC date of opened_at), and PostgREST's
-    // on_conflict only takes plain column names.
+    // An RPC rather than the JS client, for two reasons. The arbiter is a
+    // PARTIAL EXPRESSION index (on the UTC date of opened_at) and PostgREST's
+    // on_conflict takes only plain column names, so this upsert is not
+    // expressible through the client at all. And read-then-write here would be
+    // a TOCTOU — two taps racing would both read 1 and both write 2.
     //
     // Anonymous redemptions (bookingId null, from the property-level
     // /g/[slug] guidebook) fall outside the partial index by design — with no
     // guest identity there is nothing to dedupe on, and collapsing them by
-    // (sponsor, day) would merge different guests into one.
-    if (error?.code === '23505') {
-      return NextResponse.json({ ok: true })
-    }
+    // (sponsor, day) would merge different guests into one. Each is its own
+    // row at open_count = 1, so both aggregates still read correctly.
+    // p_booking_id is OMITTED rather than passed as null for the anonymous
+    // case — the function declares `DEFAULT NULL` precisely so this is
+    // expressible. Supabase's type generator has no notion of a nullable
+    // argument, so without the default the only ways to call this with a null
+    // would be a cast or a second write path.
+    const { error } = await supabase.rpc('record_guidebook_offer_open', {
+      p_org_id:     sponsor.org_id,
+      p_sponsor_id: sponsor.id,
+      ...(bookingId ? { p_booking_id: bookingId } : {}),
+    })
 
     if (error) {
       // Redemption logging is best-effort — never fail the guest UX over it —

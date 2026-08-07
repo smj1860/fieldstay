@@ -13,6 +13,7 @@
 export type SmsTemplateKey =
   | 'door_code'
   | 'morning_nudge'
+  | 'arrival_reminder'
   | 'evening_nudge'
   | 'rain_alert'
   | 'stay_extension'
@@ -87,6 +88,17 @@ export const SMS_TEMPLATE_REGISTRY: SmsTemplateConfig[] = [
       { token: '{{offer_line}}',    description: 'Sponsor line — always names the active sponsor; includes their offer or custom message plus distance when available', example: 'Sunrise Coffee has 20% off — just show this screen (0.4 mi away)' },
     ],
     defaultBody: 'Good morning! It\'s {{temperature}}°F at {{property_name}} today. {{offer_line}} Reply STOP to opt out.',
+  },
+  {
+    key:         'arrival_reminder',
+    label:       'Arrival Reminder — Check-In Day',
+    description: 'Replaces the morning nudge on a guest\'s CHECK-IN day. The morning cron runs 7-11 AM but check-in is typically mid-afternoon, so a guest arriving today would otherwise get "it\'s 72°F at your rental, here\'s a coffee spot" hours before they have keys.',
+    audience:    'guest',
+    variables: [
+      { token: '{{property_name}}', description: 'Property name', example: 'Lakeside Lodge' },
+      { token: '{{checkin_line}}',  description: 'Check-in time sentence — empty when the property has no check-in time set, so the message still reads correctly', example: 'Just a reminder that check-in is at 4:00 PM.' },
+    ],
+    defaultBody: 'Looking forward to hosting you at {{property_name}} today! {{checkin_line}} Reply STOP to opt out.',
   },
   {
     key:         'evening_nudge',
