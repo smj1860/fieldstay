@@ -79,6 +79,7 @@ import {
   updateAutoAssignMode,
   createCheckoutSession,
   saveOrgSmsTemplate,
+  updateSlackWebhook,
 } from '@/app/(dashboard)/settings/actions'
 import { requireOrgMember, requireOrgRole } from '@/lib/auth'
 import { stripe } from '@/lib/stripe/client'
@@ -681,5 +682,126 @@ describe('saveOrgSmsTemplate', () => {
 
     const upsert = supabase.calls.find((c) => c.method === 'upsert')
     expect((upsert?.args[0] as { org_id: string }).org_id).toBe(ORG_ID)
+  })
+})
+
+// ─────────────────────────────────────────────────────────────────────────────
+// The five org-settings writes are admin-only in the DATABASE — `orgs_update`
+// is is_org_member(id, ARRAY['admin']) — and a Postgres UPDATE whose rows RLS
+// filters out matches ZERO rows and returns NO error.
+//
+// So gating these on bare requireOrgMember() meant a manager, viewer or crew
+// member got the whole happy path: `{ success: true }`, "Settings saved
+// successfully" in the UI, and an audit row recording a change that never
+// happened. The audit rows are the worst of it — a log that records changes
+// which did not occur actively misleads whoever reads it in an investigation.
+// ─────────────────────────────────────────────────────────────────────────────
+describe('org-settings writes are gated to admin/owner, matching orgs_update RLS', () => {
+  beforeEach(() => vi.clearAllMocks())
+
+  const DENIED = /Only an admin or the account owner/
+
+  it.each(['manager', 'viewer', 'crew'])(
+    'refuses a %s: no write, and no audit row claiming one happened',
+    async (role) => {
+      const supabase = makeSupabase()
+      mockAuthed(supabase, role)
+
+      const result = await updateOrgSettings(null, formData({ name: 'New Name' }))
+
+      expect(result.error).toMatch(DENIED)
+      expect(supabase.from).not.toHaveBeenCalled()
+      expect(logAuditEvent).not.toHaveBeenCalled()
+    }
+  )
+
+  it.each(['admin', 'owner'])('still lets a %s through', async (role) => {
+    const supabase = makeSupabase({ organizations: [{ data: null, error: null }] })
+    mockAuthed(supabase, role)
+
+    const result = await updateOrgSettings(null, formData({ name: 'New Name' }))
+
+    expect(result).toEqual({ success: true })
+    expect(supabase.calls.some((c) => c.table === 'organizations' && c.method === 'update')).toBe(true)
+  })
+
+  it('refuses a manager on updateAutoAssignMode — the one with ongoing side effects', async () => {
+    const supabase = makeSupabase()
+    mockAuthed(supabase, 'manager')
+
+    // Reported as saved, this is the setting that keeps auto-assigning crew to
+    // every new turnover after the PM believes they switched it off.
+    const result = await updateAutoAssignMode('disabled')
+
+    expect(result.error).toMatch(DENIED)
+    expect(supabase.from).not.toHaveBeenCalled()
+    expect(logAuditEvent).not.toHaveBeenCalled()
+  })
+
+  it('refuses a manager on updateSlackWebhook', async () => {
+    const supabase = makeSupabase()
+    mockAuthed(supabase, 'manager')
+
+    const result = await updateSlackWebhook(
+      null,
+      formData({ slack_webhook_url: 'https://hooks.slack.com/services/T/B/x' })
+    )
+
+    expect(result.error).toMatch(DENIED)
+    expect(supabase.from).not.toHaveBeenCalled()
+    expect(logAuditEvent).not.toHaveBeenCalled()
+  })
+})
+
+describe('updateSlackWebhook — blank no longer means "clear it"', () => {
+  beforeEach(() => vi.clearAllMocks())
+
+  it('refuses a blank submit instead of wiping the configured webhook', async () => {
+    const supabase = makeSupabase()
+    mockAuthed(supabase, 'admin')
+
+    // The field now renders EMPTY even when a webhook is set, because the
+    // stored URL is a bearer credential and is no longer sent to the browser.
+    // Under the old "blank means null" rule, that empty field wiped the
+    // webhook on any unrelated save of this form.
+    const result = await updateSlackWebhook(null, formData({ slack_webhook_url: '   ' }))
+
+    expect(result.error).toMatch(/Remove/i)
+    expect(supabase.from).not.toHaveBeenCalled()
+  })
+
+  it('clears it only on an explicit remove intent', async () => {
+    const supabase = makeSupabase({ organizations: [{ data: null, error: null }] })
+    mockAuthed(supabase, 'admin')
+
+    const result = await updateSlackWebhook(null, formData({ slack_webhook_url: '', intent: 'remove' }))
+
+    expect(result).toEqual({ success: true })
+    const update = supabase.calls.find((c) => c.table === 'organizations' && c.method === 'update')
+    expect((update?.args[0] as { slack_webhook_url: string | null }).slack_webhook_url).toBeNull()
+  })
+
+  it('still rejects a non-Slack URL', async () => {
+    const supabase = makeSupabase()
+    mockAuthed(supabase, 'admin')
+
+    const result = await updateSlackWebhook(null, formData({ slack_webhook_url: 'https://evil.example.com/hook' }))
+
+    expect(result.error).toMatch(/Slack Incoming Webhook/i)
+    expect(supabase.from).not.toHaveBeenCalled()
+  })
+
+  it('never puts the URL in the audit metadata', async () => {
+    const supabase = makeSupabase({ organizations: [{ data: null, error: null }] })
+    mockAuthed(supabase, 'admin')
+
+    const url = 'https://hooks.slack.com/services/T000/B000/secret'
+    await updateSlackWebhook(null, formData({ slack_webhook_url: url }))
+
+    const logged = vi.mocked(logAuditEvent).mock.calls[0]?.[0]
+    expect(JSON.stringify(logged)).not.toContain('secret')
+    expect(logged).toEqual(
+      expect.objectContaining({ metadata: expect.objectContaining({ configured: true }) })
+    )
   })
 })

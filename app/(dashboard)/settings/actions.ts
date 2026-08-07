@@ -11,7 +11,7 @@ import { inngest } from '@/lib/inngest/client'
 import { geocodeZip } from '@/lib/geocoding'
 import { logAuditEvent, logAuditEvents } from '@/lib/audit'
 import { reportError } from '@/lib/observability/report-error'
-import type { ContactPref, VendorSpecialty, CrewRole } from '@/types/database'
+import type { ContactPref, VendorSpecialty, CrewRole, MemberRole } from '@/types/database'
 import { renderCrewInviteEmail } from '@/emails/crew-invite'
 import { renderSmsBody } from '@/lib/sms/templates'
 import { hasOptOutNotice, SMS_TEMPLATE_REGISTRY } from '@/lib/sms/template-registry'
@@ -34,12 +34,39 @@ export type SettingsActionState = {
 
 // ── Organization ─────────────────────────────────────────────
 
+/**
+ * Every write to `organizations` is admin-only in the database:
+ * `orgs_update` is `is_org_member(id, ARRAY['admin'::member_role])`, and
+ * is_org_member always passes `owner`.
+ *
+ * These five actions all gated on bare `requireOrgMember()` and leaned on that
+ * policy to do the enforcing — but a Postgres UPDATE whose rows RLS filters out
+ * matches ZERO rows and returns NO error. So for a manager, viewer or crew
+ * member the action ran to completion, returned `{ success: true }`, and wrote
+ * an audit row recording a change that never happened. The UI said "Settings
+ * saved successfully"; the setting was unchanged.
+ *
+ * The audit rows are the worst part: a log that records changes which did not
+ * occur is actively misleading to whoever reads it during an investigation,
+ * which is the one job that log has.
+ *
+ * This matches the policy rather than second-guessing it — nobody who could
+ * successfully write before loses the ability now; a silent no-op becomes an
+ * honest refusal.
+ */
+const ORG_SETTINGS_DENIED = 'Only an admin or the account owner can change organization settings.'
+
+function canEditOrgSettings(role: MemberRole): boolean {
+  return role === 'owner' || role === 'admin'
+}
+
 export async function updateOrgSettings(
   _prev: SettingsActionState | null,
   formData: FormData
 ): Promise<SettingsActionState> {
   try {
     const { user, supabase, membership } = await requireOrgMember()
+    if (!canEditOrgSettings(membership.role)) return { error: ORG_SETTINGS_DENIED }
 
     const name          = (formData.get('name') as string)?.trim()
     const billing_email = (formData.get('billing_email') as string)?.trim() || null
@@ -82,11 +109,27 @@ export async function updateSlackWebhook(
 ): Promise<SettingsActionState> {
   try {
     const { user, supabase, membership } = await requireOrgMember()
+    if (!canEditOrgSettings(membership.role)) return { error: ORG_SETTINGS_DENIED }
 
-    const url = (formData.get('slack_webhook_url') as string)?.trim() || null
+    // The stored URL is no longer sent to the browser (see the note on the
+    // select in settings/page.tsx — it is a bearer credential and every member
+    // of the org can read that row). The field therefore renders EMPTY even
+    // when one is configured, so blank can no longer mean "clear it": that
+    // would wipe the webhook on any unrelated save. Clearing is now an
+    // explicit intent carried by its own submit button.
+    const intent = formData.get('intent')
+    const entered = (formData.get('slack_webhook_url') as string)?.trim() ?? ''
 
-    if (url && !url.startsWith('https://hooks.slack.com/')) {
-      return { error: 'That doesn\'t look like a Slack Incoming Webhook URL' }
+    let url: string | null
+    if (intent === 'remove') {
+      url = null
+    } else if (!entered) {
+      return { error: 'Enter a webhook URL, or use Remove to clear the current one.' }
+    } else {
+      if (!entered.startsWith('https://hooks.slack.com/')) {
+        return { error: 'That doesn\'t look like a Slack Incoming Webhook URL' }
+      }
+      url = entered
     }
 
     const { error } = await supabase
@@ -352,11 +395,24 @@ export async function updateCrewMember(
         // alone leans on RLS as the ONLY thing scoping the statement, which is
         // exactly the shape CLAUDE.md's tenant-isolation rule exists to keep
         // out of the codebase.
-        await supabase
+        const { error: geocodeErr } = await supabase
           .from('crew_members')
           .update({ home_lat: coords.lat, home_lng: coords.lng })
           .eq('id', crewId)
           .eq('org_id', membership.org_id)
+
+        // Non-fatal — the member's details did save; only the coordinates
+        // didn't, which degrades auto-assign proximity scoring rather than
+        // losing the edit. But discarding it entirely meant a crew member
+        // silently sat at null coordinates and simply never scored well for
+        // any nearby turnover, with nothing anywhere saying why.
+        if (geocodeErr) {
+          console.error('[updateCrewMember] home coordinates write failed', geocodeErr.message)
+          reportError(geocodeErr, {
+            site:  'serverAction.settings.updateCrewMember.geocodeWrite',
+            orgId: membership.org_id,
+          })
+        }
       }
     }
 
@@ -604,11 +660,21 @@ export async function updateVendor(
       const coords = await geocodeZip(service_zip)
       if (coords) {
         // Org-scoped for the same reason as the crew_members twin above.
-        await supabase
+        const { error: geocodeErr } = await supabase
           .from('vendors')
           .update({ lat: coords.lat, lng: coords.lng })
           .eq('id', vendorId)
           .eq('org_id', membership.org_id)
+
+        // Non-fatal for the same reason as the crew_members twin above: the
+        // vendor's details saved, and only proximity scoring degrades.
+        if (geocodeErr) {
+          console.error('[updateVendor] coordinates write failed', geocodeErr.message)
+          reportError(geocodeErr, {
+            site:  'serverAction.settings.updateVendor.geocodeWrite',
+            orgId: membership.org_id,
+          })
+        }
       }
     }
 
@@ -1072,6 +1138,7 @@ export async function updateAutoAssignMode(
 ): Promise<SettingsActionState> {
   try {
     const { supabase, membership, user } = await requireOrgMember()
+    if (!canEditOrgSettings(membership.role)) return { error: ORG_SETTINGS_DENIED }
 
     const { error } = await supabase
       .from('organizations')
@@ -1107,6 +1174,7 @@ export async function updateVendorAutoAssignMode(
 ): Promise<SettingsActionState> {
   try {
     const { supabase, membership, user } = await requireOrgMember()
+    if (!canEditOrgSettings(membership.role)) return { error: ORG_SETTINGS_DENIED }
 
     const { error } = await supabase
       .from('organizations')
@@ -1140,6 +1208,7 @@ export async function updateVendorAutoAssignMode(
 export async function updateCommsRetention(days: number): Promise<SettingsActionState> {
   try {
     const { user, supabase, membership } = await requireOrgMember()
+    if (!canEditOrgSettings(membership.role)) return { error: ORG_SETTINGS_DENIED }
 
     const { error } = await supabase
       .from('organizations')
