@@ -129,7 +129,10 @@ const BASELINE: Record<string, number> = {
   'lib/inngest/functions/cron/work-order-ops.ts': 2,
   'lib/inngest/functions/email-trial-lifecycle.tsx': 4,
   'lib/inngest/functions/flagged-turnover-wo.ts': 3,
-  'lib/inngest/functions/guidebook-sms-evening-cron.ts': 3,
+  // 3 -> 0 (entry deleted), same three reads as its morning twin below: a
+  // failed sponsor lookup was indistinguishable from an org with no sponsors,
+  // and a failed opt-in read from a guest who opted out — every one of them
+  // ending at "no SMS" with nothing logged.
   // 4 -> 0 (entry deleted): every read in the per-guest send now unwraps. The
   // opt-in one mattered most — `{ data: optin }` collapsed "this guest opted
   // out" and "the consent read failed" into the same null, and both ended at

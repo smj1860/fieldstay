@@ -2,16 +2,16 @@ import { asBooleanMap } from '@/lib/json'
 import { inngest } from '@/lib/inngest/client'
 import { fetchAllRows } from '@/lib/inngest/paginate'
 import { createServiceClient } from '@/lib/supabase/server'
-import { unwrap, unwrapList } from '@/lib/supabase/unwrap'
+import { unwrap } from '@/lib/supabase/unwrap'
 import { getWeatherForLocation } from '@/lib/weather/tomorrow'
 import { sendSMS, buildSponsorLine } from '@/lib/sms/telnyx'
 import { renderSmsBody } from '@/lib/sms/templates'
 import { sendClaimedDailySms } from '@/lib/sms/optin-claim'
 import { formatTime12h } from '@/lib/utils/time-of-day'
-import { pickNearestSponsor } from '@/lib/sms/pick-nearest-sponsor'
+import { pickNearestSponsor, SPONSOR_POOL_COLUMNS, type SponsorPoolRow } from '@/lib/sms/pick-nearest-sponsor'
 import { unwrapJoin } from '@/lib/utils/supabase-joins'
 import { getFeaturedAmenityLine } from '@/lib/guidebook/featured-amenities'
-import type { GuidebookSponsor } from '@/types/database'
+import { asOfferType } from '@/lib/guidebook/offer'
 
 const FALLBACK_TIMEZONE = 'America/New_York'
 
@@ -218,22 +218,29 @@ export const guidebookSmsMorningSend = inngest.createFunction(
 
       // Rain alert takes priority if precip >= 60% and rainy_day sponsor exists
       if (weather.precipitationProbability >= 60) {
-        // Unwrapped like every other read here: a failed sponsor lookup
-        // produced an empty pool, which falls through to "no offer" and ends
-        // at `return false` — a silently skipped nudge that looks identical to
-        // an org with no rainy-day sponsor.
-        const rainyRes = await supabase
-          .from('guidebook_sponsors')
-          .select('id, org_id, business_name, offer_type, offer_value, offer_item, custom_offer_text, lat, lng, slot_type')
-          .eq('org_id', orgId)
-          .eq('status', 'active')
-          .eq('slot_type', 'rainy_day')
+        // A failed sponsor lookup used to produce an empty pool, which falls
+        // through to "no offer" and ends at `return false` — a silently
+        // skipped nudge indistinguishable from an org with no rainy-day
+        // sponsor. fetchAllRows throws instead.
+        // fetchAllRows, not a bare select. guidebook_sponsors is capped at SIX
+        // rows per org by the schema itself (slot_number CHECK 1..6 plus
+        // UNIQUE(org_id, slot_number)), so this drains in exactly one request —
+        // the pagination costs nothing at current scale and stops the read from
+        // resting on that cap. If the slot ceiling is ever raised, a .limit()
+        // would have started truncating silently; this throws instead.
+        const rainySponsors = await fetchAllRows<SponsorPoolRow>(
+          (from, to) => supabase
+            .from('guidebook_sponsors')
+            .select(SPONSOR_POOL_COLUMNS)
+            .eq('org_id', orgId)
+            .eq('status', 'active')
+            .eq('slot_type', 'rainy_day')
+            .order('id')
+            .range(from, to),
+          { label: 'guidebook-sms-morning-send.rainy-sponsors' },
+        )
 
-        const rainySponsors = unwrapList(rainyRes, {
-          site: 'inngest.guidebook-sms-morning-send.rainy-sponsors', orgId,
-        })
-
-        const pickedRainy = pickNearestSponsor(rainySponsors as GuidebookSponsor[], property.lat, property.lng)
+        const pickedRainy = pickNearestSponsor(rainySponsors, property.lat, property.lng)
 
         if (pickedRainy) {
           const { sponsor: rainySponsor, distanceMiles: rainyDistanceMi } = pickedRainy
@@ -249,7 +256,7 @@ export const guidebookSmsMorningSend = inngest.createFunction(
             async () => {
               const rainOfferLine = buildSponsorLine(
                 rainySponsor.business_name,
-                rainySponsor.offer_type,
+                asOfferType(rainySponsor.offer_type),
                 rainySponsor.offer_value,
                 rainySponsor.offer_item,
                 rainySponsor.custom_offer_text,
@@ -267,17 +274,24 @@ export const guidebookSmsMorningSend = inngest.createFunction(
       }
 
       // Morning brew → general fallback
-      const sponsorsRes = await supabase
-        .from('guidebook_sponsors')
-        .select('id, org_id, business_name, offer_type, offer_value, offer_item, custom_offer_text, lat, lng, slot_type')
-        .eq('org_id', orgId)
-        .eq('status', 'active')
-        .in('slot_type', ['morning_brew', 'general'])
-
       // Same reasoning as the rainy-day pool above.
-      const orgSponsors = unwrapList(sponsorsRes, {
-        site: 'inngest.guidebook-sms-morning-send.sponsors', orgId,
-      }) as GuidebookSponsor[]
+      // fetchAllRows, not a bare select. guidebook_sponsors is capped at SIX
+      // rows per org by the schema itself (slot_number CHECK 1..6 plus
+      // UNIQUE(org_id, slot_number)), so this drains in exactly one request —
+      // the pagination costs nothing at current scale and stops the read from
+      // resting on that cap. If the slot ceiling is ever raised, a .limit()
+      // would have started truncating silently; this throws instead.
+      const orgSponsors = await fetchAllRows<SponsorPoolRow>(
+        (from, to) => supabase
+          .from('guidebook_sponsors')
+          .select(SPONSOR_POOL_COLUMNS)
+          .eq('org_id', orgId)
+          .eq('status', 'active')
+          .in('slot_type', ['morning_brew', 'general'])
+          .order('id')
+          .range(from, to),
+        { label: 'guidebook-sms-morning-send.sponsors' },
+      )
       const morningBrews = orgSponsors.filter((s) => s.slot_type === 'morning_brew')
       const pool         = morningBrews.length > 0 ? morningBrews : orgSponsors.filter((s) => s.slot_type === 'general')
       const picked       = pickNearestSponsor(pool, property.lat, property.lng)
@@ -285,7 +299,7 @@ export const guidebookSmsMorningSend = inngest.createFunction(
       const sponsorLine = picked
         ? buildSponsorLine(
             picked.sponsor.business_name,
-            picked.sponsor.offer_type,
+            asOfferType(picked.sponsor.offer_type),
             picked.sponsor.offer_value,
             picked.sponsor.offer_item,
             picked.sponsor.custom_offer_text,

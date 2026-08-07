@@ -1,5 +1,22 @@
 import type { GuidebookOfferType } from '@/types/database'
 
+const OFFER_TYPES: readonly GuidebookOfferType[] = ['percentage', 'fixed_amount', 'item', 'custom', 'none']
+
+/**
+ * Narrows guidebook_sponsors.offer_type — a TEXT column with a CHECK
+ * constraint, so PostgREST hands it back as a bare `string` — to the union the
+ * formatters actually branch on.
+ *
+ * Same pattern and same reason as asExtensionContactMethod for
+ * extension_contact_method. Unrecognised input falls back to 'none', which
+ * formatOffer already treats as "no offer to show" — the safe direction: a
+ * sponsor line is omitted rather than rendered from a value nothing
+ * understands.
+ */
+export function asOfferType(value: string | null | undefined): GuidebookOfferType {
+  return OFFER_TYPES.includes(value as GuidebookOfferType) ? (value as GuidebookOfferType) : 'none'
+}
+
 function formatOfferPrice(value: number): string {
   return value % 1 === 0 ? String(value) : value.toFixed(2)
 }
