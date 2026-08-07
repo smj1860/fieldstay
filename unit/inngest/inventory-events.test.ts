@@ -127,7 +127,10 @@ describe('handleInventoryCountSubmitted', () => {
       event: { data: { count_id: 'count_1', property_id: 'prop_1', org_id: 'org_1' } },
       step:  runAllStep(),
       logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
-    })).rejects.toThrow(/failed to load/i)
+      // fetchAllRows() raises its own "Paginated fetch failed" — the message
+      // is its, the PROPERTY under test is that a failed read throws at all
+      // rather than returning an empty below-par set and reporting success.
+    })).rejects.toThrow(/paginated fetch failed|failed to load/i)
 
     expect(resend.emails.send).not.toHaveBeenCalled()
   })

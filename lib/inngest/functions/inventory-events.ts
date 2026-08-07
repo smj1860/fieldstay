@@ -166,21 +166,35 @@ export const handleInventoryCountSubmitted = inngest.createFunction(
       // another org's rows. Nothing to retry, so this stays a quiet no-op.
       if (!countSession) return { belowParItems: [] }
 
-      // 1 query: fetch all count items for this session
-      const { data: countItems, error: countItemsError } = await supabase
-        .from('inventory_count_items')
-        .select('inventory_item_id, quantity_counted')
-        .eq('count_id', count_id)
-
-      if (countItemsError) {
-        throw new Error(`inventory count items for ${count_id} failed to load: ${countItemsError.message}`)
-      }
-      if (!countItems?.length) return { belowParItems: [] }
-
       type CountRow = { inventory_item_id: string; quantity_counted: number }
+
+      // Paginated, matching the inventory_items read a few lines below.
+      // inventory_count_items has no org_id — count_id IS the scope, and it was
+      // org-checked immediately above — so the parent is the isolation
+      // boundary, but that says nothing about SIZE. A count is one row per item
+      // at the property, and /api/crew/inventory-count caps a submission at
+      // exactly 1000 items, which is also PostgREST's max_rows: a full-size
+      // count sits precisely on the truncation boundary and would come back as
+      // 1000 rows with a 200 and no signal that anything was dropped. Silently
+      // losing count rows here silently shrinks the below-par set, which is the
+      // whole purpose of this function.
+      //
+      // fetchAllRows also throws on a failed read, which is the behaviour the
+      // explicit error check this replaces was added for.
+      const countItems = await fetchAllRows<CountRow>(
+        (from, to) => supabase
+          .from('inventory_count_items')
+          .select('inventory_item_id, quantity_counted')
+          .eq('count_id', count_id)
+          .order('inventory_item_id', { ascending: true })
+          .range(from, to),
+        { label: `inventory_count_items[count=${count_id}]` },
+      )
+
+      if (!countItems.length) return { belowParItems: [] }
       type InvRow   = { id: string; property_id: string; name: string; category: Enums<'inventory_category'>; unit: string; par_level: number; low_stock_threshold_pct: number }
 
-      const typedCount = countItems as CountRow[]
+      const typedCount = countItems
       const itemIds    = typedCount.map((c) => c.inventory_item_id)
 
       // Bulk fetch all inventory item metadata, scoped to this org — itemIds
