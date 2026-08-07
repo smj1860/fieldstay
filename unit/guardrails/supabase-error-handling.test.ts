@@ -158,8 +158,19 @@ const BASELINE: Record<string, number> = {
   // SMS block was skipped entirely while the PM email went out reading
   // "checks out on undefined".
   'lib/inngest/functions/hospitable/hospitable-reviews-backfill.ts': 2,
-  'lib/inngest/functions/hospitable/incremental-sync.ts': 5,
-  'lib/inngest/functions/hospitable/initial-sync.ts': 2,
+  // 5 -> 0 (entry deleted). Two of them drove DECISIONS rather than display:
+  // the existing-booking read feeds `datesChanged`, so a failed read
+  // regenerated the property's turnovers on every webhook; the
+  // existing-property read feeds `isNewProperty`, re-running the whole
+  // first-time seeding path plus a spurious "new property" PM notification.
+  // The other three failed toward silently-unlinked data — a review stored
+  // with no property, guest messages with no booking, and a read failure
+  // surfacing as "Property not in FieldStay".
+  // 2 -> 0 (entry deleted). The revenue read was the costly one: `?? []` on a
+  // failed read meant ZERO booking/confirmed events, so no revenue posted to
+  // owner_transactions for any imported reservation — reported as a clean
+  // sync. The other was inside a local read-modify-write metadata merge that
+  // this change deleted in favour of the atomic RPC.
   'lib/inngest/functions/hostaway/initial-sync.ts': 2,
   'lib/inngest/functions/ical-sync.ts': 2,
   // 5 -> 3: the count-session and count-items reads at the top of the
