@@ -53,6 +53,53 @@ export function renderTemplate(
   })
 }
 
+// ── Opt-out notice ────────────────────────────────────────────────────────────
+
+/**
+ * The canonical opt-out sentence. Every one of the built-in defaults below
+ * ends with it — that uniformity is the invariant, not a stylistic accident.
+ */
+export const SMS_OPT_OUT_NOTICE = 'Reply STOP to opt out.'
+
+/**
+ * Does a message body carry opt-out instructions?
+ *
+ * Tolerant about wording, strict about the keyword. A PM who writes "Text STOP
+ * to unsubscribe" or "STOP para cancelar" has satisfied the requirement just as
+ * well as our default sentence, so this does not demand the exact copy above —
+ * it demands the standalone keyword carriers actually act on.
+ *
+ * Two deliberate narrowings, because a false positive here is worse than a
+ * false negative: a wrongly-accepted body ships without opt-out instructions,
+ * while a wrongly-rejected one just asks the PM to add four characters.
+ *
+ *   • Uppercase only. The instruction is conventionally capitalised precisely
+ *     so it stands out in a wall of text, and every built-in default does it.
+ *   • Not hyphen-joined. `\bSTOP\b` alone matches "NON-STOP", because a hyphen
+ *     is a word boundary — a body advertising a non-stop shuttle would have
+ *     counted as an opt-out notice. That was not hypothetical; it is what the
+ *     first version of this function did.
+ */
+export function hasOptOutNotice(body: string): boolean {
+  return /(?:^|[^\w-])STOP(?![\w-])/.test(body)
+}
+
+/**
+ * Returns `body` guaranteed to carry an opt-out notice, appending the
+ * canonical sentence when it does not.
+ *
+ * This is the enforcement point rather than save-time validation alone,
+ * because it covers a row written by ANY path — a template saved before this
+ * rule existed, a direct edit in the Supabase dashboard, a future importer —
+ * which is precisely the "an application-level `if` does not catch rows
+ * written by another route" rule in CLAUDE.md's Standing Audit Checklist.
+ */
+export function withOptOutNotice(body: string): string {
+  if (hasOptOutNotice(body)) return body
+  const trimmed = body.trimEnd()
+  return trimmed ? `${trimmed} ${SMS_OPT_OUT_NOTICE}` : SMS_OPT_OUT_NOTICE
+}
+
 // ── Registry ──────────────────────────────────────────────────────────────────
 
 export const SMS_TEMPLATE_REGISTRY: SmsTemplateConfig[] = [

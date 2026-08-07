@@ -9,8 +9,12 @@ vi.mock('@/lib/supabase/server', () => ({
 vi.mock('@/lib/audit', () => ({
   logAuditEvent: vi.fn(),
 }))
+vi.mock('@/lib/observability/report-error', () => ({
+  reportError: vi.fn(),
+}))
 
 import { anonymizeGuestData } from '@/app/(dashboard)/settings/privacy/actions'
+import { reportError } from '@/lib/observability/report-error'
 import { requireOrgRole } from '@/lib/auth'
 import { createServiceClient } from '@/lib/supabase/server'
 import { logAuditEvent } from '@/lib/audit'
@@ -311,8 +315,28 @@ describe('settings/privacy/actions — anonymizeGuestData', () => {
 
     const result = await anonymizeGuestData('guest@example.com')
 
-    expect(result).toEqual({ success: false, bookingsAnonymized: 200, error: 'db down' })
-    expect(logAuditEvent).not.toHaveBeenCalled()
+    expect(result.success).toBe(false)
+    expect(result.bookingsAnonymized).toBe(200)
+    // The raw Postgres message must not reach the browser (CLAUDE.md: never
+    // return raw error messages to the client) — but the operator does need to
+    // know the erasure is incomplete and that some rows are already gone.
+    expect(result.error).not.toContain('db down')
+    expect(result.error).toMatch(/stopped partway/i)
+    expect(result.error).toContain('200')
+
+    // 200 bookings were irreversibly scrubbed before this failed. Returning
+    // without an audit row left an Article 17 erasure that partly happened
+    // with no compliance record of which part — the worst available outcome.
+    expect(logAuditEvent).toHaveBeenCalledWith(
+      expect.objectContaining({
+        action:   'gdpr.data_erasure.completed',
+        metadata: expect.objectContaining({ partial: true, bookings_anonymized: 200 }),
+      })
+    )
+    // Still a hash, never the address itself.
+    const logged = vi.mocked(logAuditEvent).mock.calls[0]?.[0] as { metadata: Record<string, unknown> }
+    expect(logged.metadata.email_hash).toMatch(/^[a-f0-9]{64}$/)
+    expect(JSON.stringify(logged.metadata)).not.toContain('guest@example.com')
   })
 
   it('returns success with zero count when no bookings match, without calling update', async () => {
@@ -336,9 +360,15 @@ describe('settings/privacy/actions — anonymizeGuestData', () => {
 
     const result = await anonymizeGuestData('guest@example.com')
 
-    expect(result).toEqual({ success: false, bookingsAnonymized: 0, error: 'db down' })
+    expect(result.success).toBe(false)
+    expect(result.bookingsAnonymized).toBe(0)
+    expect(result.error).toBe('Operation failed. Please try again.')
+    expect(result.error).not.toContain('db down')
     expect(supabase.calls.some((c) => c.table === 'bookings' && c.method === 'update')).toBe(false)
+    // Nothing was scrubbed, so there is nothing to record — but it must still
+    // be reported, which the bare `return { error: err.message }` never did.
     expect(logAuditEvent).not.toHaveBeenCalled()
+    expect(reportError).toHaveBeenCalled()
   })
 
   it('surfaces an opt-in purge failure instead of scrubbing the bookings anyway', async () => {
@@ -355,10 +385,14 @@ describe('settings/privacy/actions — anonymizeGuestData', () => {
 
     const result = await anonymizeGuestData('guest@example.com')
 
-    expect(result).toEqual({ success: false, bookingsAnonymized: 0, error: 'optins down' })
+    expect(result.success).toBe(false)
+    expect(result.bookingsAnonymized).toBe(0)
+    expect(result.error).toBe('Operation failed. Please try again.')
+    expect(result.error).not.toContain('optins down')
     // The bookings must NOT be scrubbed — the guest's phone is still on file,
     // and the booking row is the only thing left that can find it again.
     expect(supabase.calls.some((c) => c.table === 'bookings' && c.method === 'update')).toBe(false)
     expect(logAuditEvent).not.toHaveBeenCalled()
+    expect(reportError).toHaveBeenCalled()
   })
 })

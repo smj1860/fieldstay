@@ -27,7 +27,7 @@ import {
   updateCommsRetention,
   updateSlackWebhook,
 } from './actions'
-import { SMS_TEMPLATE_REGISTRY, renderTemplate, type SmsTemplateKey } from '@/lib/sms/template-registry'
+import { SMS_TEMPLATE_REGISTRY, renderTemplate, hasOptOutNotice, SMS_OPT_OUT_NOTICE, type SmsTemplateKey } from '@/lib/sms/template-registry'
 import { getOrgSmsTemplates, saveOrgSmsTemplate, resetOrgSmsTemplate } from './actions'
 
 // ── Constants ────────────────────────────────────────────────────────────────
@@ -995,9 +995,22 @@ function SmsTemplatesCard() {
                       placeholder="Enter your custom message…"
                       maxLength={1000}
                     />
-                    <p className="text-xs text-muted-themed mt-1 text-right">
-                      {body.length}/1000
-                    </p>
+                    <div className="flex items-start justify-between gap-3 mt-1">
+                      {/* Shown while typing rather than only on save: an
+                          override replaces the default wholesale, so dropping
+                          the opt-out line silently strips it from every send. */}
+                      {!hasOptOutNotice(body) ? (
+                        <p className="text-xs" style={{ color: 'var(--accent-amber)' }}>
+                          Add an opt-out instruction containing &ldquo;STOP&rdquo; — required on every
+                          message. We&rsquo;ll append &ldquo;{SMS_OPT_OUT_NOTICE}&rdquo; if you don&rsquo;t.
+                        </p>
+                      ) : (
+                        <span />
+                      )}
+                      <p className="text-xs text-muted-themed text-right flex-shrink-0">
+                        {body.length}/1000
+                      </p>
+                    </div>
                   </div>
 
                   {/* Live preview */}

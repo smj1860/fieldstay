@@ -7,6 +7,7 @@ import { readIntegrationToken, disconnectIntegrationToken } from '@/lib/integrat
 import { getProvider }                   from '@/lib/integrations/registry'
 import { logAuditEvent }                 from '@/lib/audit'
 import { reportError } from '@/lib/observability/report-error'
+import { tryUnwrap }   from '@/lib/supabase/unwrap'
 // Hostaway is not fully implemented yet (see connectWithApiKey below) —
 // storeIntegrationToken and hostawayExchangeCredentials are unused while
 // it's disabled. Re-add both imports when re-enabling.
@@ -25,22 +26,35 @@ export async function getSyncProgress(providerId: string): Promise<{
     const { membership } = await requireOrgMember()
     const supabase = createServiceClient({ authorizedBy: membership })
 
-    const { data } = await supabase
+    const res = await supabase
       .from('integration_connections')
       .select('metadata')
       .eq('org_id', membership.org_id)
       .eq('provider_id', providerId)
       .maybeSingle()
 
-    if (!data) return null
+    // Degrading to null is right for this one — it drives a progress readout
+    // that the client polls, so a blank tick is recoverable and throwing would
+    // break the page. tryUnwrap keeps the degradation while still logging and
+    // reporting, so a persistent outage shows up somewhere.
+    const out = tryUnwrap(res, {
+      site:  'serverAction.settings.integrations.getSyncProgress',
+      orgId: membership.org_id,
+    })
+    if (!out.ok || !out.data) return null
 
-    const meta = (data.metadata as Record<string, unknown> | null) ?? {}
+    const meta = (out.data.metadata as Record<string, unknown> | null) ?? {}
     return {
       propertiesFound: typeof meta.properties_found === 'number' ? meta.properties_found : null,
       bookingsFound:   typeof meta.bookings_found   === 'number' ? meta.bookings_found   : null,
       lastSyncStatus:  typeof meta.last_sync_status === 'string' ? meta.last_sync_status : null,
     }
-  } catch {
+  } catch (err) {
+    // Was a bare `catch { return null }` — every failure here, including a
+    // thrown auth error, vanished with nothing logged anywhere. CLAUDE.md:
+    // a caught error must do something visible.
+    console.error('[getSyncProgress]', err)
+    reportError(err, { site: 'serverAction.settings.integrations.getSyncProgress' })
     return null
   }
 }
@@ -60,13 +74,27 @@ export async function triggerResync(
   }
 
   const supabase = createServiceClient({ authorizedBy: membership })
-  const { data: connection } = await supabase
+  const connectionRes = await supabase
     .from('integration_connections')
     .select('user_id, org_id, external_user_id, status')
     .eq('org_id', membership.org_id)
     .eq('provider_id', providerId)
     .maybeSingle()
 
+  // Same reasoning as disconnectIntegration below, milder consequence: a failed
+  // read told a PM whose integration is connected and healthy that it isn't
+  // connected at all, which is the message that sends them to reconnect (and
+  // re-authorize with the provider) to fix a problem that was never theirs.
+  const connectionOut = tryUnwrap(connectionRes, {
+    site:  'serverAction.settings.integrations.triggerResync.lookup',
+    orgId: membership.org_id,
+  })
+
+  if (!connectionOut.ok) {
+    return { error: 'Couldn\'t check the integration right now. Please try again.' }
+  }
+
+  const connection = connectionOut.data
   if (!connection || connection.status === 'revoked' || connection.status === 'disconnected') {
     return { error: 'This integration isn’t connected — connect it first.' }
   }
@@ -207,13 +235,33 @@ export async function disconnectIntegration(
     // their colleague set up). Vault operations key on user_id, so we need the
     // actual owner, not the current session user. Mirrors triggerResync's approach.
     const supabase = createServiceClient({ authorizedBy: membership })
-    const { data: connection } = await supabase
+    const connectionRes = await supabase
       .from('integration_connections')
       .select('user_id')
       .eq('org_id', membership.org_id)
       .eq('provider_id', providerId)
       .maybeSingle()
 
+    // Unwrapped because the two outcomes this read collapses have opposite
+    // meanings for a credential. Discarded, a failed lookup produced the same
+    // null as "no such connection", so the PM was told the integration isn't
+    // connected and the action returned — while the provider token stayed live
+    // in Vault and the connection stayed active. The PM believes they revoked
+    // access; nothing revoked it, and nothing retries.
+    //
+    // This is the same defect, on the same table, that findUserByExternalId
+    // carried in the provider revocation webhook (see the note where it was
+    // deleted in lib/integrations/vault.ts).
+    const connectionOut = tryUnwrap(connectionRes, {
+      site:  'serverAction.settings.integrations.disconnectIntegration.lookup',
+      orgId: membership.org_id,
+    })
+
+    if (!connectionOut.ok) {
+      return { error: 'Couldn\'t reach the integration right now — nothing was disconnected. Please try again.' }
+    }
+
+    const connection = connectionOut.data
     if (!connection) {
       return { error: 'This integration isn\'t connected.' }
     }

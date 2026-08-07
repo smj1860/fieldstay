@@ -78,6 +78,7 @@ import {
   bulkImportCrew,
   updateAutoAssignMode,
   createCheckoutSession,
+  saveOrgSmsTemplate,
 } from '@/app/(dashboard)/settings/actions'
 import { requireOrgMember, requireOrgRole } from '@/lib/auth'
 import { stripe } from '@/lib/stripe/client'
@@ -111,6 +112,7 @@ function makeSupabase(queued: QueuedByTable = {}) {
     chain.insert = (...a: unknown[]) => record('insert', a)
     chain.update = (...a: unknown[]) => record('update', a)
     chain.delete = (...a: unknown[]) => record('delete', a)
+    chain.upsert = (...a: unknown[]) => record('upsert', a)
     chain.eq     = (...a: unknown[]) => record('eq', a)
     chain.is     = (...a: unknown[]) => record('is', a)
     chain.or     = (...a: unknown[]) => record('or', a)
@@ -595,5 +597,89 @@ describe('settings/actions', () => {
       expect(result).toEqual({ redirectUrl: 'https://checkout' })
       expect(stripe.subscriptions.list).not.toHaveBeenCalled()
     })
+  })
+})
+
+// ─────────────────────────────────────────────────────────────────────────────
+// saveOrgSmsTemplate — the opt-out notice and the template key
+//
+// An org override REPLACES the built-in body wholesale (lib/sms/templates.ts's
+// renderSmsBody prefers it unconditionally), and all ten built-in defaults end
+// with "Reply STOP to opt out." Nothing downstream re-adds it — sendSMS hands
+// the body straight to Telnyx. So before these guards, saving one template
+// without an opt-out line silently stripped the opt-out instruction from every
+// message that org sent, guest and crew alike, for as long as the override
+// existed. That is the compliance requirement SMS_ENABLED is being held shut
+// for until 10DLC verification clears.
+// ─────────────────────────────────────────────────────────────────────────────
+describe('saveOrgSmsTemplate', () => {
+  beforeEach(() => vi.clearAllMocks())
+
+  it('refuses a body with no opt-out instruction, and writes nothing', async () => {
+    const supabase = makeSupabase()
+    mockAuthed(supabase)
+
+    const result = await saveOrgSmsTemplate(
+      'morning_nudge',
+      'Good morning! It is {{temperature}}°F at {{property_name}} today.'
+    )
+
+    expect(result.error).toMatch(/opt out/i)
+    expect(supabase.calls.some((c) => c.method === 'upsert')).toBe(false)
+  })
+
+  it('accepts alternative opt-out wording — the keyword is what carriers act on', async () => {
+    const supabase = makeSupabase()
+    mockAuthed(supabase)
+
+    // A PM who writes their own phrasing has satisfied the requirement just as
+    // well as our default sentence; the guard must not force our exact copy.
+    const result = await saveOrgSmsTemplate(
+      'morning_nudge',
+      'Morning from {{property_name}}! Text STOP to unsubscribe.'
+    )
+
+    expect(result).toEqual({})
+    expect(supabase.calls.some((c) => c.method === 'upsert')).toBe(true)
+  })
+
+  it('does not mistake "stop" inside another word for an opt-out instruction', async () => {
+    const supabase = makeSupabase()
+    mockAuthed(supabase)
+
+    // Prose that merely contains the letters is not opt-out instructions.
+    // "NON-STOP" is the one that matters: a plain \bSTOP\b matches it, because
+    // a hyphen counts as a word boundary — this exact body was accepted by the
+    // first version of hasOptOutNotice.
+    const result = await saveOrgSmsTemplate(
+      'morning_nudge',
+      'The shuttle stops right outside {{property_name}} — NON-STOP to the lake!'
+    )
+
+    expect(result.error).toMatch(/opt out/i)
+    expect(supabase.calls.some((c) => c.method === 'upsert')).toBe(false)
+  })
+
+  it('rejects a key that is not in the registry, and writes nothing', async () => {
+    const supabase = makeSupabase()
+    mockAuthed(supabase)
+
+    // A Server Action is an HTTP endpoint any authenticated caller can invoke
+    // directly, so the typed `SmsTemplateKey` at the UI call site proves
+    // nothing. An unrecognised key wrote a row renderSmsBody can never read.
+    const result = await saveOrgSmsTemplate('not_a_real_key', 'Hi. Reply STOP to opt out.')
+
+    expect(result.error).toBe('Unknown template.')
+    expect(supabase.calls.some((c) => c.method === 'upsert')).toBe(false)
+  })
+
+  it('scopes the upsert to the caller\'s own org', async () => {
+    const supabase = makeSupabase()
+    mockAuthed(supabase)
+
+    await saveOrgSmsTemplate('door_code', 'Code is {{door_code}}. Reply STOP to opt out.')
+
+    const upsert = supabase.calls.find((c) => c.method === 'upsert')
+    expect((upsert?.args[0] as { org_id: string }).org_id).toBe(ORG_ID)
   })
 })

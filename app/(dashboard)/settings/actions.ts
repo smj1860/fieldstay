@@ -14,6 +14,7 @@ import { reportError } from '@/lib/observability/report-error'
 import type { ContactPref, VendorSpecialty, CrewRole } from '@/types/database'
 import { renderCrewInviteEmail } from '@/emails/crew-invite'
 import { renderSmsBody } from '@/lib/sms/templates'
+import { hasOptOutNotice, SMS_TEMPLATE_REGISTRY } from '@/lib/sms/template-registry'
 
 /**
  * Ceilings on the two crew actions that fan out to third-party contact
@@ -346,7 +347,16 @@ export async function updateCrewMember(
     if (zipChanged && data.home_zip) {
       const coords = await geocodeZip(data.home_zip)
       if (coords) {
-        await supabase.from('crew_members').update({ home_lat: coords.lat, home_lng: coords.lng }).eq('id', crewId)
+        // .eq('org_id') here as well as on the update above: the RLS policy on
+        // crew_members already refuses a cross-org write, but an id filter
+        // alone leans on RLS as the ONLY thing scoping the statement, which is
+        // exactly the shape CLAUDE.md's tenant-isolation rule exists to keep
+        // out of the codebase.
+        await supabase
+          .from('crew_members')
+          .update({ home_lat: coords.lat, home_lng: coords.lng })
+          .eq('id', crewId)
+          .eq('org_id', membership.org_id)
       }
     }
 
@@ -593,7 +603,12 @@ export async function updateVendor(
     if (zipChanged && service_zip) {
       const coords = await geocodeZip(service_zip)
       if (coords) {
-        await supabase.from('vendors').update({ lat: coords.lat, lng: coords.lng }).eq('id', vendorId)
+        // Org-scoped for the same reason as the crew_members twin above.
+        await supabase
+          .from('vendors')
+          .update({ lat: coords.lat, lng: coords.lng })
+          .eq('id', vendorId)
+          .eq('org_id', membership.org_id)
       }
     }
 
@@ -1325,6 +1340,29 @@ export async function saveOrgSmsTemplate(
 
     if (!key || !body.trim()) return { error: 'Key and body are required.' }
     if (body.trim().length > 1000) return { error: 'Template must be 1000 characters or fewer.' }
+
+    // The key was typed `string` and never checked, though the table's own
+    // migration comment claims "Valid keys are enforced at the application
+    // layer". A Server Action is an HTTP endpoint any authenticated caller can
+    // invoke directly, so an unrecognised key wrote a row that renderSmsBody
+    // (which only ever looks up registry keys) can never read — an org's
+    // template list growing rows that do nothing.
+    if (!SMS_TEMPLATE_REGISTRY.some((t) => t.key === key)) {
+      return { error: 'Unknown template.' }
+    }
+
+    // An override REPLACES the default body wholesale, and all ten defaults
+    // carry an opt-out notice. Without this, saving a template that omits it
+    // silently stripped the opt-out instruction from every SMS this org sends
+    // — the exact compliance requirement the SMS_ENABLED flag is being held
+    // shut for until 10DLC verification clears. renderSmsBody re-appends it as
+    // a backstop for rows written by other paths; this is the half that tells
+    // the PM, instead of quietly rewriting what they typed.
+    if (!hasOptOutNotice(body)) {
+      return {
+        error: 'Every message must tell guests how to opt out — include "STOP" (e.g. "Reply STOP to opt out.").',
+      }
+    }
 
     const { error } = await supabase
       .from('org_sms_templates')

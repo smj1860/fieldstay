@@ -68,7 +68,8 @@ function makeSupabase(queued: QueuedByTable = {}) {
       return Promise.resolve(result)
     }
 
-    chain.single = () => resolveNext()
+    chain.single      = () => resolveNext()
+    chain.maybeSingle = () => resolveNext()
     chain.then = (resolve: (v: unknown) => unknown, reject?: (e: unknown) => unknown) =>
       resolveNext().then(resolve, reject)
     return chain
@@ -250,6 +251,41 @@ describe('settings/team/actions', () => {
       expect(logAuditEvent).toHaveBeenCalledWith(
         expect.objectContaining({ orgId: ORG_ID, action: 'team.member.removed', targetId: 'target_user_1' })
       )
+    })
+
+    it('does NOT delete when the target-role lookup itself fails', async () => {
+      const supabase = makeSupabase({
+        organization_members: [
+          { data: null, error: { message: 'connection reset', code: '08006' } },
+        ],
+      })
+      mockAuthed(supabase, 'owner')
+
+      // That lookup is the only thing enforcing "an owner cannot be removed".
+      // Discarded, a transient failure made targetMember undefined, the guard
+      // evaluated false, and the delete ran — against an owner.
+      const result = await removeMember('other_owner_1')
+
+      expect(result.error).toMatch(/try again/i)
+      expect(supabase.calls.some((c) => c.table === 'organization_members' && c.method === 'delete')).toBe(false)
+      expect(logAuditEvent).not.toHaveBeenCalled()
+    })
+
+    it('reports a non-member instead of claiming a successful removal', async () => {
+      const supabase = makeSupabase({
+        organization_members: [{ data: null, error: null }],  // genuinely no such member
+      })
+      mockAuthed(supabase, 'owner')
+
+      // The delete is org-scoped, so a foreign user_id matched zero rows and
+      // returned no error — the action answered { ok: true } and wrote an
+      // audit row for a removal that never happened. "No row" and "the read
+      // failed" must lead to different outcomes, and neither is success.
+      const result = await removeMember('not_a_member')
+
+      expect(result.error).toMatch(/not a member/i)
+      expect(supabase.calls.some((c) => c.table === 'organization_members' && c.method === 'delete')).toBe(false)
+      expect(logAuditEvent).not.toHaveBeenCalled()
     })
   })
 
