@@ -4,6 +4,7 @@ import { resend, FROM }        from '@/lib/resend/client'
 import { getPmEmails }         from '@/lib/inngest/helpers'
 import { renderPmAlert }       from '@/lib/resend/emails/pm-alert'
 import { unwrapJoin }          from '@/lib/utils/supabase-joins'
+import { throwIfAnyQueryFailed, isRealQueryError } from '@/lib/supabase/unwrap'
 
 export const handleWorkOrderInvoiceSubmitted = inngest.createFunction(
   {
@@ -18,7 +19,10 @@ export const handleWorkOrderInvoiceSubmitted = inngest.createFunction(
     await step.run('notify-pm-of-invoice', async () => {
       const supabase = createServiceClient({ system: 'inngest:work-order-invoice' })
 
-      const [{ data: wo }, { data: invoice }] = await Promise.all([
+      const [
+        { data: wo, error: woError },
+        { data: invoice, error: invoiceError },
+      ] = await Promise.all([
         supabase
           .from('work_orders')
           .select('id, title, vendors ( name ), properties ( name )')
@@ -32,6 +36,11 @@ export const handleWorkOrderInvoiceSubmitted = inngest.createFunction(
           .eq('org_id', org_id)
           .single(),
       ])
+      throwIfAnyQueryFailed(
+        { site: 'inngest.work-order-invoice.notify-pm-of-invoice', orgId: org_id },
+        isRealQueryError(woError) ? woError : null,
+        isRealQueryError(invoiceError) ? invoiceError : null,
+      )
 
       if (!wo || !invoice) {
         logger.warn(`[invoice-submitted] WO or invoice not found`, { work_order_id, invoice_id })

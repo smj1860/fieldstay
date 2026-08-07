@@ -1401,7 +1401,8 @@ following them stops being a memory test. Five layers, checked in CI via
      `-cross-tenant` (no org scope AND no parent row, ERROR, 53 → **0,
      PROMOTED to `chokepoints.yml` 2026-08-02**),
      `-single-parent` (one non-org parent id, no org scope, WARNING, 47),
-     `-global-table` (the table has no `org_id` column, INFO, 5),
+     `-global-table` (the table has no `org_id` column, ERROR, 5 → **0,
+     PROMOTED to `chokepoints.yml` 2026-08-07**),
      `-in-list` (one org but sized by an `.in()` array, WARNING, 46),
      `-org-scoped` (one org, one parent — hygiene only, INFO, 113).
      Tier 1 WAS the burn-down target and reached 0, so it now gates at
@@ -1432,6 +1433,17 @@ following them stops being a memory test. Five layers, checked in CI via
      schema — no `org_id` column and no FK to a table that has one — never
      hand-curated, and those tables stay COUNTED because `profiles` /
      `processed_webhooks` / `support_kb_chunks` still truncate at 1000.
+     **`-global-table` then reached 0 on 2026-08-07, and unlike `-cross-tenant`
+     this one was a real burn-down** — its 5 sites were bounded, not
+     reclassified: an explicit `.limit()` on the four Server Component pages
+     reading `maintenance_catalog_items`, `inventory_catalog` and
+     `integration_providers` (×2), and `fetchAllRows()` on the one Inngest
+     step reading `platform_inventory_template_items`, matching its sibling
+     `inventory_catalog` read in the same function. Same before-promoting
+     fire-check as `-cross-tenant`: a deliberately unbounded
+     `integration_providers` read was reintroduced in a scratch file,
+     confirmed to fail `semgrep --config .semgrep/chokepoints.yml --error`,
+     then reverted.
      `lib/inngest/**` gets no tier of its own because
      `unit/guardrails/unbounded-select.test.ts` already gates it at file
      granularity. See `.semgrep/README.md` for the semgrep mechanics

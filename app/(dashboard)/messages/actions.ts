@@ -6,6 +6,7 @@ import { createClient } from '@/lib/supabase/server'
 import { inngest } from '@/lib/inngest/client'
 import { sendPushToUser } from '@/lib/push/send-push'
 import { reportError } from '@/lib/observability/report-error'
+import { isRealQueryError, throwIfAnyQueryFailed, unwrapList } from '@/lib/supabase/unwrap'
 import type { Message } from '@/types/database'
 
 export interface MessageActionResult {
@@ -27,12 +28,19 @@ export async function sendMessageToCrew(
 
     // Verify the crew member belongs to this org and derive the recipient from the DB —
     // never trust a client-supplied user_id for the recipient
-    const { data: crewMember } = await supabase
+    const { data: crewMember, error: crewMemberError } = await supabase
       .from('crew_members')
       .select('id, user_id')
       .eq('id', crewMemberId)
       .eq('org_id', membership.org_id)
       .single()
+
+    if (isRealQueryError(crewMemberError)) {
+      throwIfAnyQueryFailed(
+        { site: 'serverAction.messages.sendMessageToCrew', orgId: membership.org_id },
+        crewMemberError
+      )
+    }
 
     if (!crewMember?.user_id) {
       return { success: false, error: 'Crew member not found' }
@@ -93,13 +101,19 @@ export async function sendGroupMessage(
     const { user, supabase, membership } = await requireOrgMember()
     if (crewMemberIds.length < 2) return { error: 'Select at least 2 recipients for a group message' }
 
-    const { data: crewUsers } = await supabase
+    const crewUsersRes = await supabase
       .from('crew_members')
       .select('id, user_id')
       .in('id', crewMemberIds)
       .eq('org_id', membership.org_id)
+      // Bounded by the recipient list the caller selected.
+      .limit(crewMemberIds.length)
+    const crewUsers = unwrapList<{ id: string; user_id: string | null }>(
+      crewUsersRes,
+      { site: 'serverAction.messages.sendGroupMessage', orgId: membership.org_id }
+    )
 
-    if (!crewUsers?.length) return { error: 'No valid recipients found' }
+    if (!crewUsers.length) return { error: 'No valid recipients found' }
 
     const groupId = crypto.randomUUID()
 

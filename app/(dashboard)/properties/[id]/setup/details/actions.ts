@@ -9,9 +9,34 @@ import { markStepComplete } from '@/app/(dashboard)/properties/actions'
 import { logAuditEvent } from '@/lib/audit'
 
 import { reportError } from '@/lib/observability/report-error'
+import { throwIfAnyQueryFailed, isRealQueryError } from '@/lib/supabase/unwrap'
 import type { MemberRole } from '@/types/database'
 
 export type DetailsState = { error?: string; success?: boolean }
+
+// Guest access fields (wifi_password/door_code/internal_notes) are
+// secrets — never put their values in audit metadata, just record that
+// a change happened. door_code is now Vault-encrypted (no plaintext
+// column to diff against), so treat any submitted/cleared door code as
+// a reportable change rather than comparing decrypted values.
+// When door_code_unchanged is set the door-code write was skipped, so
+// neither door-code clause may count as a change — otherwise the submitted
+// (empty) value would be read as "cleared" and audit-log a credential
+// change that never happened.
+function computeGuestAccessChanged(
+  submitted: { wifi_password: string | null; internal_notes: string | null; door_code: string | null; door_code_unchanged: boolean },
+  existing: { wifi_password: string | null; internal_notes: string | null; door_code_secret_id: string | null } | null,
+): boolean {
+  const doorCodeChanged = !submitted.door_code_unchanged && (
+    Boolean(submitted.door_code) ||
+    (submitted.door_code === null && Boolean(existing?.door_code_secret_id))
+  )
+  return (
+    submitted.wifi_password  !== (existing?.wifi_password  ?? null) ||
+    submitted.internal_notes !== (existing?.internal_notes ?? null) ||
+    doorCodeChanged
+  )
+}
 
 // Same role set as the properties_update RLS policy and the door-code RPCs
 // (migration 20260731201000). `owner` passes automatically via requireOrgRole.
@@ -63,12 +88,18 @@ export async function saveDetails(
 
     if (!name) return { error: 'Property name is required' }
 
-    const { data: existing } = await supabase
+    const existingRes = await supabase
       .from('properties')
       .select('wifi_password, door_code_secret_id, internal_notes')
       .eq('id', propertyId)
       .eq('org_id', membership.org_id)
       .single()
+
+    throwIfAnyQueryFailed(
+      { site: 'serverAction.properties.setup.details.saveDetails.existing', orgId: membership.org_id },
+      isRealQueryError(existingRes.error) ? existingRes.error : null,
+    )
+    const existing = existingRes.data
 
     const { data: updated, error } = await supabase
       .from('properties')
@@ -132,23 +163,10 @@ export async function saveDetails(
       },
     })
 
-    // Guest access fields (wifi_password/door_code/internal_notes) are
-    // secrets — never put their values in audit metadata, just record that
-    // a change happened. door_code is now Vault-encrypted (no plaintext
-    // column to diff against), so treat any submitted/cleared door code as
-    // a reportable change rather than comparing decrypted values.
-    // When door_code_unchanged is set the door-code write was skipped above, so
-    // neither door-code clause may count as a change — otherwise the submitted
-    // (empty) value would be read as "cleared" and audit-log a credential
-    // change that never happened.
-    const doorCodeChanged = !door_code_unchanged && (
-      Boolean(door_code) ||
-      (door_code === null && Boolean(existing?.door_code_secret_id))
+    const guestAccessChanged = computeGuestAccessChanged(
+      { wifi_password, internal_notes, door_code, door_code_unchanged },
+      existing,
     )
-    const guestAccessChanged =
-      wifi_password    !== (existing?.wifi_password    ?? null) ||
-      internal_notes   !== (existing?.internal_notes   ?? null) ||
-      doorCodeChanged
 
     if (guestAccessChanged) {
       await logAuditEvent({

@@ -42,15 +42,19 @@ rules:
   # 2c/2b overlap this split introduced (one site matching both, inflating the
   # ladder total by one) is exactly what a comment cannot catch.
   #
-  # Tiers 1 and 2 both reached 0 and now live in chokepoints.yml, gating at
+  # Tiers 1, 2 and 2c all reached 0 and now live in chokepoints.yml, gating at
   # --error across the whole tree: -table-scan on 2026-08-01, -cross-tenant on
-  # 2026-08-02. Neither is defined in this file any more; the ladder rows above
-  # are kept so the tier numbering still reads as one sequence.
+  # 2026-08-02, -global-table on 2026-08-07 (its 5 sites bounded with an
+  # explicit .limit() / fetchAllRows(), an actual burn-down unlike tier 2's
+  # split below). None of the three is defined in this file any more; the
+  # ladder rows above are kept so the tier numbering still reads as one
+  # sequence.
   #
   # Tier 2 reached 0 by the 2b/2c split, not by fixing sites — the 53 findings
   # it held were 47 parent-scoped reads and 5 reads of tables with no org_id,
   # plus one correctly org-scoped read the rule could not see (below). NONE was
-  # a real cross-tenant scan. Those 52 reads are still counted here, as 2b/2c.
+  # a real cross-tenant scan. Those 52 reads are still counted here (in 2b, and
+  # in chokepoints.yml's promoted 2c).
   #
   # NOTE on the shared exclusions, which every tier repeats:
   # `$S.from($T).select(...)` only matches a select whose receiver is the
@@ -145,45 +149,9 @@ rules:
           regex: ^(?!["'](?:asset_type_standards|integration_providers|inventory_catalog|maintenance_catalog_items|oauth_states|pending_integration_links|pending_oauth_authorizations|platform_admins|platform_inventory_template_items|platform_inventory_templates|platform_seed_room_template_items|platform_seed_room_templates|platform_staff|processed_webhooks|profiles|promo_hospitable_launch_counter|stripe_processed_events|support_kb_chunks)["']$)
 
   # ── Tier 2c (HYGIENE): a table that has no org_id column ─────────────────
-  # Platform-global tables: fixed catalogs (inventory_catalog,
-  # maintenance_catalog_items, asset_type_standards, integration_providers,
-  # platform_*) and cross-tenant infrastructure (profiles, processed_webhooks,
-  # oauth_states, support_kb_chunks). Demanding `.eq('org_id', …)` on these is
-  # incoherent — the column does not exist, so the "scope it to one org" advice
-  # of tier 2 can never be followed and the finding can never be closed.
-  #
-  # The list is derived from the live schema, not curated by hand: every public
-  # table with no org_id column AND no foreign key to a table that has one.
-  # A table with no org_id but a tenant-linked parent (checklist_template_items,
-  # work_order_photos, purchase_order_items, …) is deliberately NOT here — those
-  # are ordinary child tables and belong in the tiers above. Re-derive with the
-  # query in the commit that added this rule if the schema changes.
-  #
-  # Counted rather than excluded because unboundedness is still real here: a
-  # bare scan of one of these is caught by tier 1 in chokepoints.yml, but a
-  # filtered read of `profiles` or `support_kb_chunks` still grows with the
-  # platform and still truncates at 1000. What this tier drops is only the
-  # TENANT framing, not the truncation coverage.
-  - id: fieldstay-supabase-unbounded-select-global-table
-    languages: [typescript]
-    severity: INFO
-    message: >-
-      Unbounded .select() on a table with no org_id column (a platform-global
-      catalog or shared infrastructure table). Not a tenant-scope problem —
-      there is no tenant column to scope to — but still subject to max_rows =
-      1000. Bound it with .limit() / fetchAllRows() if this table can grow past
-      a fixed catalog's size.
-    patterns:
-      - pattern: $S.from($T).select(...)
-      - pattern-inside: $Y.eq($COL, ...)
-      - pattern-not-inside: $X.limit(...)
-      - pattern-not-inside: $X.range(...)
-      - pattern-not-inside: $X.single(...)
-      - pattern-not-inside: $X.maybeSingle(...)
-      - pattern-not: "$S.from($T).select($SEL, {..., head: true, ...})"
-      - metavariable-regex:
-          metavariable: $T
-          regex: ^["'](?:asset_type_standards|integration_providers|inventory_catalog|maintenance_catalog_items|oauth_states|pending_integration_links|pending_oauth_authorizations|platform_admins|platform_inventory_template_items|platform_inventory_templates|platform_seed_room_template_items|platform_seed_room_templates|platform_staff|processed_webhooks|profiles|promo_hospitable_launch_counter|stripe_processed_events|support_kb_chunks)["']$
+  # Reached 0 on 2026-08-07 and PROMOTED to chokepoints.yml — see that file
+  # for the surviving rule and history. Kept here as a ladder-row marker only,
+  # same treatment as tiers 1 and 2 above.
 
   # ── Tier 3: one org, but sized by a caller-supplied list ─────────────────
   # `.eq('org_id', …)` plus `.in(col, array)`. Single-tenant, so it is not a

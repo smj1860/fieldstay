@@ -6,6 +6,7 @@ import { resend, FROM } from '@/lib/resend/client'
 import { getPmEmails } from '@/lib/inngest/helpers'
 import { renderPmAlert } from '@/lib/resend/emails/pm-alert'
 import { logAuditEvent } from '@/lib/audit'
+import { throwIfAnyQueryFailed, isRealQueryError } from '@/lib/supabase/unwrap'
 
 // ── Purchase Order Approved ───────────────────────────────────────────────────
 
@@ -389,10 +390,14 @@ export const handleInventoryCountSubmitted = inngest.createFunction(
     if (isSameDayFlip) {
       await step.run('email-po-to-pm-immediate', async () => {
         const supabase = createServiceClient({ system: 'inngest:inventory-events' })
-        const [{ data: property }, pmEmails] = await Promise.all([
+        const [{ data: property, error: propertyError }, pmEmails] = await Promise.all([
           supabase.from('properties').select('name').eq('id', property_id).eq('org_id', org_id).single(),
           getPmEmails(supabase, org_id),
         ])
+        throwIfAnyQueryFailed(
+          { site: 'inngest.inventory-events.email-po-to-pm-immediate', orgId: org_id },
+          isRealQueryError(propertyError) ? propertyError : null,
+        )
         const [pmEmail] = pmEmails
 
         if (!pmEmail) return

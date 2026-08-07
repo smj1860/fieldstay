@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { createServiceClient } from '@/lib/supabase/server'
 import { workOrderRatelimit, checkLimit } from '@/lib/rate-limit'
 import { extractClientIp } from '@/lib/integrations/webhook-verification'
+import { isRealQueryError, throwIfAnyQueryFailed } from '@/lib/supabase/unwrap'
 
 /**
  * POST /api/work-orders/[token]/photos — upload completion photos, one call
@@ -41,12 +42,15 @@ async function checkPhotoRateLimit(request: NextRequest): Promise<NextResponse |
 async function loadOpenWorkOrder(token: string) {
   const supabase = createServiceClient({ publicSurface: 'api-work-orders--token--photos' })
 
-  const { data: workOrder } = await supabase
+  const { data: workOrder, error } = await supabase
     .from('work_orders')
     .select('id, org_id, status, portal_enabled, completion_token_expires_at')
     .eq('completion_token', token)
     .single()
 
+  if (isRealQueryError(error)) {
+    throwIfAnyQueryFailed({ site: 'route.work-orders.photos.loadOpenWorkOrder' }, error)
+  }
   if (!workOrder) return { error: NextResponse.json({ error: 'Invalid or expired link' }, { status: 404 }) }
   if (!workOrder.portal_enabled) {
     return { error: NextResponse.json({ error: 'Vendor portal not enabled for this work order' }, { status: 403 }) }
@@ -171,11 +175,15 @@ export async function DELETE(
   const photoId = typeof body.photoId === 'string' ? body.photoId : null
   if (!photoId) return NextResponse.json({ error: 'photoId required' }, { status: 400 })
 
-  const { data: photo } = await supabase
+  const { data: photo, error: photoError } = await supabase
     .from('work_order_photos')
     .select('id, storage_path, work_order_id')
     .eq('id', photoId)
     .single()
+
+  if (isRealQueryError(photoError)) {
+    throwIfAnyQueryFailed({ site: 'route.work-orders.photos.DELETE' }, photoError)
+  }
 
   // Ownership check — the token proves access to workOrder.id, not to any
   // photo id a caller might supply, so confirm the photo actually belongs

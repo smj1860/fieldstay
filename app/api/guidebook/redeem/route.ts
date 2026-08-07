@@ -3,6 +3,7 @@ import { createServiceClient } from '@/lib/supabase/server'
 import { guidebookRedeemLimiter, checkLimit } from '@/lib/rate-limit'
 import { extractClientIp } from '@/lib/integrations/webhook-verification'
 import { reportError } from '@/lib/observability/report-error'
+import { unwrap } from '@/lib/supabase/unwrap'
 
 /**
  * POST /api/guidebook/redeem
@@ -33,11 +34,12 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   try {
     const supabase = createServiceClient({ publicSurface: 'api-guidebook-redeem' })
 
-    const { data: sponsor } = await supabase
+    const sponsorRes = await supabase
       .from('guidebook_sponsors')
       .select('id, org_id, status')
       .eq('id', body.sponsorId)
       .maybeSingle()
+    const sponsor = unwrap(sponsorRes, { site: 'route.guidebook.redeem.sponsor' })
 
     if (!sponsor || sponsor.status !== 'active') {
       // Don't disclose sponsor existence on a public surface
@@ -46,11 +48,12 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
 
     let bookingId: string | null = null
     if (body.bookingToken && typeof body.bookingToken === 'string') {
-      const { data: booking } = await supabase
+      const bookingRes = await supabase
         .from('bookings')
         .select('id, org_id')
         .eq('guidebook_token', body.bookingToken)
         .maybeSingle()
+      const booking = unwrap(bookingRes, { site: 'route.guidebook.redeem.booking', orgId: sponsor.org_id })
       // Tenant isolation: only attach the booking if it belongs to the
       // sponsor's org — otherwise log anonymously.
       if (booking && booking.org_id === sponsor.org_id) bookingId = booking.id

@@ -35,6 +35,7 @@ function makeSupabase(queued: Record<string, { data?: unknown; error?: unknown }
     const record = () => chain
     chain.select = record
     chain.eq     = record
+    chain.limit  = record
 
     const resolveNext = () => {
       const idx = counters[table] ?? 0

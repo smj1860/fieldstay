@@ -4,6 +4,7 @@ import { createServiceClient } from '@/lib/supabase/server'
 import { stripe } from '@/lib/stripe/client'
 import { getActiveSponsorCount } from '@/lib/guidebook/helpers'
 import { unwrapJoin } from '@/lib/utils/supabase-joins'
+import { throwIfAnyQueryFailed } from '@/lib/supabase/unwrap'
 
 /** Nullability matches the live schema: org_id is NOT NULL on
  *  guidebook_configurations, both date columns are nullable, and the
@@ -139,13 +140,18 @@ export const guidebookDailyMonitor = inngest.createFunction(
         const activeSponsorCount = await getActiveSponsorCount(row.org_id)
         if (activeSponsorCount >= 3) return { skipped: true }
 
-        await supabase
+        const { error } = await supabase
           .from('guidebook_configurations')
           .update({
             is_active:  false,
             updated_at: new Date().toISOString(),
           })
           .eq('org_id', row.org_id)
+
+        throwIfAnyQueryFailed(
+          { site: 'inngest.guidebook-daily-monitor.check-trial-expired', orgId: row.org_id },
+          error
+        )
 
         return { locked: true, activeSponsorCount }
       })

@@ -4,6 +4,7 @@ import { getActiveSponsorCount } from '@/lib/guidebook/helpers'
 import { getPmEmails } from '@/lib/inngest/helpers'
 import { sendGuidebookGracePeriodEmail } from '@/lib/resend/client'
 import { logAuditEvent } from '@/lib/audit'
+import { throwIfAnyQueryFailed, isRealQueryError, unwrap } from '@/lib/supabase/unwrap'
 
 export const guidebookSponsorDeactivated = inngest.createFunction(
   { id: 'guidebook-sponsor-deactivated', name: 'Guidebook: Sponsor Deactivated' },
@@ -42,11 +43,15 @@ export const guidebookSponsorDeactivated = inngest.createFunction(
       if (activeSponsorCount >= 3) return null
 
       const supabase = createServiceClient({ system: 'inngest:guidebook-sponsor-deactivated' })
-      const { data: existingConfig } = await supabase
+      const configRes = await supabase
         .from('guidebook_configurations')
         .select('is_active, grace_period_ends_at')
         .eq('org_id', orgId)
         .maybeSingle()
+      const existingConfig = unwrap(configRes, {
+        site:  'inngest.guidebook-sponsor-deactivated.evaluate-guidebook-lock',
+        orgId,
+      })
 
       // Already locked, or a grace period is already running — don't reset
       // the countdown or re-notify the PM on a second deactivation event.
@@ -70,10 +75,14 @@ export const guidebookSponsorDeactivated = inngest.createFunction(
     if (gracePeriodEndsAt) {
       await step.run('notify-pm-grace-period', async () => {
         const supabase = createServiceClient({ system: 'inngest:guidebook-sponsor-deactivated' })
-        const [emails, { data: org }] = await Promise.all([
+        const [emails, { data: org, error: orgError }] = await Promise.all([
           getPmEmails(supabase, orgId),
           supabase.from('organizations').select('name').eq('id', orgId).single(),
         ])
+        throwIfAnyQueryFailed(
+          { site: 'inngest.guidebook-sponsor-deactivated.notify-pm-grace-period', orgId },
+          isRealQueryError(orgError) ? orgError : null,
+        )
         const orgName = org?.name ?? ''
         if (emails.length === 0) return
 

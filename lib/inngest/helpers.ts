@@ -432,10 +432,16 @@ export async function diffDigestSnapshot(
   const unchangedIds = currentIds.filter((id) => previousSet.has(id))
   const removedIds   = previousIds.filter((id) => !currentSet.has(id))
 
-  await supabase.from('notification_digest_state').upsert(
+  const { error: upsertError } = await supabase.from('notification_digest_state').upsert(
     { org_id: orgId, category, snapshot: { ids: currentIds }, updated_at: new Date().toISOString() },
     { onConflict: 'org_id,category' }
   )
+
+  if (upsertError) {
+    throw new Error(
+      `notification_digest_state upsert failed for org ${orgId}, category ${category}: ${upsertError.message}`
+    )
+  }
 
   return { newIds, unchangedIds, removedIds }
 }

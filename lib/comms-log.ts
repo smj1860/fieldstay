@@ -1,4 +1,5 @@
 import { createServiceClient } from '@/lib/supabase/server'
+import { reportError } from '@/lib/observability/report-error'
 import type { CommChannel, CommRecipientType } from '@/types/database'
 
 /**
@@ -21,7 +22,7 @@ export async function logSystemCommunication(data: {
 }): Promise<void> {
   const admin = createServiceClient({ system: 'lib/comms-log' })
 
-  await admin.from('communication_logs').insert({
+  const { error } = await admin.from('communication_logs').insert({
     org_id:            data.org_id,
     recipient_type:    data.recipient_type,
     vendor_id:         data.vendor_id         ?? null,
@@ -35,4 +36,9 @@ export async function logSystemCommunication(data: {
     logged_by_user_id: null,
     communicated_at:   new Date().toISOString(),
   })
+
+  if (error) {
+    console.error('[logSystemCommunication]', error)
+    reportError(error, { site: 'lib.comms-log.logSystemCommunication', orgId: data.org_id })
+  }
 }

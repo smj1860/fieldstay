@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { requireOrgMember } from '@/lib/auth'
+import { throwIfAnyQueryFailed } from '@/lib/supabase/unwrap'
 
 export async function POST(request: NextRequest) {
   const body = await request.json().catch(() => null)
@@ -10,11 +11,13 @@ export async function POST(request: NextRequest) {
   // Derive org_id from the session — never from the client body
   const { supabase, membership } = await requireOrgMember()
 
-  await supabase
+  const { error } = await supabase
     .from('org_milestones')
     .update({ prompted_at: new Date().toISOString() })
     .eq('org_id', membership.org_id)
     .eq('milestone', body.milestone)
+
+  throwIfAnyQueryFailed({ site: 'route.milestones.seen.POST', orgId: membership.org_id }, error)
 
   return NextResponse.json({ success: true })
 }

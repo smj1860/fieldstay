@@ -6,6 +6,7 @@ import { createServiceClient } from '@/lib/supabase/server'
 import { inngest } from '@/lib/inngest/client'
 
 import { reportError } from '@/lib/observability/report-error'
+import { isRealQueryError, throwIfAnyQueryFailed } from '@/lib/supabase/unwrap'
 const MANUAL_WEEKLY_LIMIT = 2
 
 export async function requestBatchGeneration(): Promise<{ success: boolean; error?: string }> {
@@ -78,12 +79,18 @@ export async function submitManualReview(input: {
 
     // Verify property belongs to this org if supplied
     if (input.propertyId) {
-      const { data: prop } = await supabase
+      const { data: prop, error: propError } = await supabase
         .from('properties')
         .select('id')
         .eq('id', input.propertyId)
         .eq('org_id', membership.org_id)
         .single()
+      if (isRealQueryError(propError)) {
+        throwIfAnyQueryFailed(
+          { site: 'serverAction.reviews.submitManualReview', orgId: membership.org_id },
+          propError
+        )
+      }
       if (!prop) return { error: 'Property not found.' }
     }
 

@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from 'react'
 import { createClient } from '@/lib/supabase/client'
+import { reportError } from '@/lib/observability/report-error'
 import { requestBatchGeneration, submitManualReview } from './actions'
 import { Dialog } from '@/components/ui/Dialog'
 import { Button } from '@/components/ui/Button'
@@ -227,10 +228,18 @@ export function ReviewsClient({ reviews: initialReviews, manualUsedThisWeek }: P
     }
 
     // Update review status
-    await supabase
+    const { error: statusErr } = await supabase
       .from('reviews')
       .update({ response_status: 'ready', updated_at: new Date().toISOString() })
       .eq('id', selected.id)
+
+    if (statusErr) {
+      console.error('[reviews] Failed to update review status:', statusErr)
+      reportError(statusErr, { site: 'client.reviews.markReady', orgId: selected.org_id })
+      alert('Failed to save: ' + statusErr.message)
+      setSavingStatus(null)
+      return
+    }
 
     const updatedReview: ReviewRow = {
       ...selected,

@@ -14,6 +14,7 @@ import { createClient } from '@/lib/supabase/server'
 import { inngest } from '@/lib/inngest/client'
 import { scanLimiter, checkLimit } from '@/lib/rate-limit'
 import { toStorageObjectPath } from '@/lib/storage/object-path'
+import { tryUnwrap, throwIfAnyQueryFailed, isRealQueryError } from '@/lib/supabase/unwrap'
 
 const PHOTO_BUCKET = 'turnover-photos'
 
@@ -60,20 +61,33 @@ export async function POST(request: NextRequest) {
 
   // Resolve the caller's org via whichever identity they have — PM (org
   // member) or crew member — then verify the asset actually belongs to it.
-  const [{ data: membership }, { data: crew }] = await Promise.all([
-    supabase.from('organization_members').select('org_id').eq('user_id', user.id).not('invite_accepted_at', 'is', null).limit(1).maybeSingle(),
-    supabase.from('crew_members').select('org_id').eq('user_id', user.id).eq('is_active', true).maybeSingle(),
+  const [membershipOut, crewOut] = await Promise.all([
+    supabase
+      .from('organization_members').select('org_id').eq('user_id', user.id).not('invite_accepted_at', 'is', null).limit(1).maybeSingle()
+      .then((res) => tryUnwrap(res, { site: 'route.assets.request-scan.membership' })),
+    supabase
+      .from('crew_members').select('org_id').eq('user_id', user.id).eq('is_active', true).maybeSingle()
+      .then((res) => tryUnwrap(res, { site: 'route.assets.request-scan.crew' })),
   ])
+  if (!membershipOut.ok || !crewOut.ok) {
+    return NextResponse.json({ error: 'Lookup failed. Please try again.' }, { status: 500 })
+  }
 
-  const orgId = membership?.org_id ?? crew?.org_id
+  const orgId = membershipOut.data?.org_id ?? crewOut.data?.org_id
   if (!orgId) return NextResponse.json({ error: 'Not authorized' }, { status: 403 })
 
-  const { data: asset } = await supabase
+  const assetRes = await supabase
     .from('property_assets')
     .select('id, photo_url, scan_status')
     .eq('id', asset_id)
     .eq('org_id', orgId)
     .single()
+
+  throwIfAnyQueryFailed(
+    { site: 'route.assets.request-scan.asset', orgId },
+    isRealQueryError(assetRes.error) ? assetRes.error : null,
+  )
+  const asset = assetRes.data
 
   if (!asset) return NextResponse.json({ error: 'Asset not found' }, { status: 404 })
 

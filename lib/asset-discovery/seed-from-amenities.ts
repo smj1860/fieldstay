@@ -1,4 +1,5 @@
 import { createServiceClient } from '@/lib/supabase/server'
+import { tryUnwrapList } from '@/lib/supabase/unwrap'
 import type { AssetType } from '@/types/database'
 import { assetTypeDisplayName } from '@/lib/asset-discovery/config'
 
@@ -71,14 +72,23 @@ export async function seedPresentAssetsFromAmenities(
 
     // Skip types that already have an active property_assets row — never
     // duplicate or overwrite a crew-captured or PM-entered record.
-    const { data: existingAssets } = await supabase
+    const existingAssetsRes = await supabase
       .from('property_assets')
       .select('asset_type')
       .eq('property_id', property.id as string)
       .eq('is_active', true)
       .in('asset_type', presentAssetTypes)
+      // Bounded by the fixed asset-type list this function checks.
+      .limit(presentAssetTypes.length)
+    const existingAssetsOutcome = tryUnwrapList(existingAssetsRes, {
+      site: 'lib.asset-discovery.seed-from-amenities.seedPresentAssetsFromAmenities',
+      orgId,
+    })
+    // A failed existence check must not fall through to "no existing
+    // assets" — that would insert duplicate stubs. Skip this property.
+    if (!existingAssetsOutcome.ok) continue
 
-    const existingTypes = new Set((existingAssets ?? []).map((a) => a.asset_type as AssetType))
+    const existingTypes = new Set(existingAssetsOutcome.data.map((a) => a.asset_type as AssetType))
     const stubs = presentAssetTypes
       .filter((assetType) => !existingTypes.has(assetType))
       .map((assetType) => ({
@@ -171,14 +181,23 @@ export async function seedAbsentOptionalAssetsFromAmenities(
 
     // Skip types that already have an active property_assets row — never
     // overwrite crew-captured or PM-entered records.
-    const { data: existingAssets } = await supabase
+    const existingAssetsRes = await supabase
       .from('property_assets')
       .select('asset_type')
       .eq('property_id', property.id as string)
       .eq('is_active', true)
       .in('asset_type', absentTypes)
+      // Bounded by the fixed asset-type list this function checks.
+      .limit(absentTypes.length)
+    const existingAssetsOutcome = tryUnwrapList(existingAssetsRes, {
+      site: 'lib.asset-discovery.seed-from-amenities.seedAbsentOptionalAssetsFromAmenities',
+      orgId,
+    })
+    // A failed existence check must not fall through to "no existing
+    // assets" — that would insert duplicate stubs. Skip this property.
+    if (!existingAssetsOutcome.ok) continue
 
-    const existingTypes = new Set((existingAssets ?? []).map((a) => a.asset_type as AssetType))
+    const existingTypes = new Set(existingAssetsOutcome.data.map((a) => a.asset_type as AssetType))
     const stubs = absentTypes
       .filter((assetType) => !existingTypes.has(assetType))
       .map((assetType) => ({

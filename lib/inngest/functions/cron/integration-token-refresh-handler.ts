@@ -152,11 +152,17 @@ export const integrationTokenRefreshHandler = inngest.createFunction(
           return
         }
 
-        await supabase
+        const { error: markSentError } = await supabase
           .from('integration_connections')
           .update({ reconnect_email_sent_at: new Date().toISOString(), updated_at: new Date().toISOString() })
           .eq('user_id',    user_id)
           .eq('provider_id', provider_id)
+
+        if (markSentError) {
+          logger.error(
+            `[TokenRefresh] Failed to record reconnect_email_sent_at for ${provider_id}:${user_id}: ${JSON.stringify(markSentError)}`
+          )
+        }
 
         logger.info(`[TokenRefresh] Reconnect email sent to ${pmEmail} for ${providerLabel}`)
       })

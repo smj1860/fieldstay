@@ -8,7 +8,7 @@ import { getManualUrlForAsset } from '@/lib/assets/manual-lookup'
 import { unwrapJoin }          from '@/lib/utils/supabase-joins'
 
 import { reportError } from '@/lib/observability/report-error'
-import { tryUnwrap }   from '@/lib/supabase/unwrap'
+import { tryUnwrap, unwrap } from '@/lib/supabase/unwrap'
 import { checkLimit, emailSendActionLimiter } from '@/lib/rate-limit'
 import {
   isVendorHardBlocked,
@@ -347,17 +347,25 @@ export async function dispatchWorkOrderToVendor(input: {
       })
     }
 
-    const { data: profile } = await supabase
+    const profileRes = await supabase
       .from('profiles')
       .select('full_name, phone')
       .eq('id', user.id)
       .single()
+    const profile = unwrap(profileRes, {
+      site:  'serverAction.work-order-public.dispatchWorkOrderToVendor.profile',
+      orgId: membership.org_id,
+    })
 
-    const { data: org } = await supabase
+    const orgRes = await supabase
       .from('organizations')
       .select('name')
       .eq('id', membership.org_id)
       .single()
+    const org = unwrap(orgRes, {
+      site:  'serverAction.work-order-public.dispatchWorkOrderToVendor.org',
+      orgId: membership.org_id,
+    })
 
     const property = unwrapJoin(wo.properties)
 

@@ -147,10 +147,12 @@ export async function loadDispatchContext(
     if (tokenErr) throw new Error(`Failed to write completion_token: ${tokenErr.message}`)
   } else {
     // Record dispatch email even if token was already set
-    await supabase
+    const { error: dispatchEmailErr } = await supabase
       .from('work_orders')
       .update({ vendor_dispatch_email: vendor.email })
       .eq('id', workOrderId)
+
+    if (dispatchEmailErr) throw new Error(`Failed to record vendor_dispatch_email: ${dispatchEmailErr.message}`)
   }
 
   // Dispatcher info — use org owner/admin since work_orders has no created_by

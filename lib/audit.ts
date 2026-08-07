@@ -192,7 +192,7 @@ export async function logAuditEvents(entries: AuditParams[]): Promise<void> {
   if (!entries.length) return
   try {
     const admin = createServiceClient({ system: 'lib/audit' })
-    await admin.from('audit_events').insert(
+    const { error } = await admin.from('audit_events').insert(
       entries.map((params) => ({
         org_id:      params.orgId      ?? null,
         actor_id:    params.actorId    ?? null,
@@ -206,6 +206,10 @@ export async function logAuditEvents(entries: AuditParams[]): Promise<void> {
         },
       }))
     )
+    if (error) {
+      console.error('[Audit] Failed to write audit event:', error)
+      reportError(error, { site: 'lib.audit.Audit' })
+    }
   } catch (err) {
     // Audit failures must never crash the main flow — log and continue
     console.error('[Audit] Failed to write audit event:', err)

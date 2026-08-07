@@ -278,7 +278,57 @@ rules:
             - metavariable-regex:
                 metavariable: $PCOL
                 regex: ^["'](?:[A-Za-z_]+\.)?(?!org_id)[A-Za-z_]*_id["']$
-      # a table with no org_id column → ratchet.yml's -global-table
+      # a table with no org_id column → this file's -global-table, below
       - metavariable-regex:
           metavariable: $T
           regex: ^(?!["'](?:asset_type_standards|integration_providers|inventory_catalog|maintenance_catalog_items|oauth_states|pending_integration_links|pending_oauth_authorizations|platform_admins|platform_inventory_template_items|platform_inventory_templates|platform_seed_room_template_items|platform_seed_room_templates|platform_staff|processed_webhooks|profiles|promo_hospitable_launch_counter|stripe_processed_events|support_kb_chunks)["']$)
+
+  # ── PROMOTED 2026-08-07: tier 2c of the unbounded-select ladder ─────────
+  # Platform-global tables: fixed catalogs (inventory_catalog,
+  # maintenance_catalog_items, asset_type_standards, integration_providers,
+  # platform_*) and cross-tenant infrastructure (profiles, processed_webhooks,
+  # oauth_states, support_kb_chunks). Demanding `.eq('org_id', …)` on these is
+  # incoherent — the column does not exist — so unlike tier 2 (-cross-tenant)
+  # this tier was never fixable by reclassification; it started at 5 and was
+  # burned to 0 the direct way, by bounding every site: an explicit `.limit()`
+  # on properties/[id]/page.tsx (maintenance_catalog_items), inventory/page.tsx
+  # (inventory_catalog), settings/integrations/page.tsx and setup/pms/page.tsx
+  # (integration_providers), and fetchAllRows() on
+  # platform-inventory-template-broadcast.ts (platform_inventory_template_items,
+  # matching its sibling inventory_catalog read three lines below it in the
+  # same function).
+  #
+  # Counted rather than excluded, same reasoning as tier 2's -single-parent:
+  # a bare scan of one of these is caught by tier 1 above, but a filtered read
+  # of `profiles` or `support_kb_chunks` still grows with the platform and
+  # still truncates at max_rows = 1000. What this tier drops is only the
+  # TENANT framing, not the truncation coverage — so a bound is still required,
+  # just not an org filter.
+  #
+  # The table list is derived from the live schema, not curated by hand: every
+  # public table with no org_id column AND no foreign key to a table that has
+  # one. Re-derive with the query in the commit that added tier 2c if the
+  # schema changes.
+  #
+  # Its baseline-counts.json key was deleted in the same change, per the
+  # promotion rule in .semgrep/README.md.
+  - id: fieldstay-supabase-unbounded-select-global-table
+    languages: [typescript]
+    severity: ERROR
+    message: >-
+      Unbounded .select() on a table with no org_id column (a platform-global
+      catalog or shared infrastructure table). Not a tenant-scope problem —
+      there is no tenant column to scope to — but still subject to max_rows =
+      1000. Bound it with .limit() / fetchAllRows() if this table can grow past
+      a fixed catalog's size.
+    patterns:
+      - pattern: $S.from($T).select(...)
+      - pattern-inside: $Y.eq($COL, ...)
+      - pattern-not-inside: $X.limit(...)
+      - pattern-not-inside: $X.range(...)
+      - pattern-not-inside: $X.single(...)
+      - pattern-not-inside: $X.maybeSingle(...)
+      - pattern-not: "$S.from($T).select($SEL, {..., head: true, ...})"
+      - metavariable-regex:
+          metavariable: $T
+          regex: ^["'](?:asset_type_standards|integration_providers|inventory_catalog|maintenance_catalog_items|oauth_states|pending_integration_links|pending_oauth_authorizations|platform_admins|platform_inventory_template_items|platform_inventory_templates|platform_seed_room_template_items|platform_seed_room_templates|platform_staff|processed_webhooks|profiles|promo_hospitable_launch_counter|stripe_processed_events|support_kb_chunks)["']$

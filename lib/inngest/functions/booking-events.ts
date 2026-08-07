@@ -4,6 +4,7 @@ import { fetchTurnoverCreatedEvents } from '@/lib/inngest/turnover-created-event
 import { generateTurnoversForProperty } from '@/lib/turnovers/generator'
 import { parseLocalDate } from '@/lib/utils/date-validation'
 import { reportError } from '@/lib/observability/report-error'
+import { throwIfAnyQueryFailed, isRealQueryError } from '@/lib/supabase/unwrap'
 
 // A real per-booking total from the PMS beats the avg_nightly_rate estimate —
 // only a positive, present value counts as "real"; 0 or a missing figure
@@ -31,10 +32,21 @@ export const handleBookingConfirmed = inngest.createFunction(
       const supabase  = createServiceClient({ system: 'inngest:booking-events' })
       const txnSource = source === 'uplisting' ? 'uplisting_booking' : 'booking_revenue'
 
-      const [{ data: booking }, { data: property }] = await Promise.all([
+      const [
+        { data: booking, error: bookingError },
+        { data: property, error: propertyError },
+      ] = await Promise.all([
         supabase.from('bookings').select('checkin_date, checkout_date, guest_name').eq('id', booking_id).eq('org_id', org_id).single(),
         supabase.from('properties').select('avg_nightly_rate').eq('id', property_id).eq('org_id', org_id).single(),
       ])
+      // PGRST116 ("no rows") is a legitimate, already-handled case for both —
+      // booking triggers the skip below, property falls back to the estimate.
+      // Only a REAL query failure should retry the step.
+      throwIfAnyQueryFailed(
+        { site: 'inngest.booking-confirmed.post-booking-revenue', orgId: org_id },
+        isRealQueryError(bookingError) ? bookingError : null,
+        isRealQueryError(propertyError) ? propertyError : null,
+      )
 
       if (!booking) return { skipped: true }
 
@@ -131,19 +143,31 @@ export const handleBookingDetected = inngest.createFunction(
     await step.run('create-booking-revenue-transaction', async () => {
       const supabase = createServiceClient({ system: 'inngest:booking-events' })
       try {
-        const { data: prop } = await supabase
+        const { data: prop, error: propError } = await supabase
           .from('properties')
           .select('avg_nightly_rate')
           .eq('id', property_id)
           .eq('org_id', org_id)
           .single()
+        if (isRealQueryError(propError)) {
+          throwIfAnyQueryFailed(
+            { site: 'inngest.booking-detected.create-booking-revenue-transaction', orgId: org_id },
+            propError
+          )
+        }
         if (!prop?.avg_nightly_rate) return { skipped: 'no_rate' }
-        const { data: booking } = await supabase
+        const { data: booking, error: bookingError } = await supabase
           .from('bookings')
           .select('checkin_date, checkout_date, guest_name')
           .eq('id', booking_id)
           .eq('org_id', org_id)
           .single()
+        if (isRealQueryError(bookingError)) {
+          throwIfAnyQueryFailed(
+            { site: 'inngest.booking-detected.create-booking-revenue-transaction', orgId: org_id },
+            bookingError
+          )
+        }
         if (!booking) return { skipped: 'booking_not_found' }
 
         let checkin: Date, checkout: Date

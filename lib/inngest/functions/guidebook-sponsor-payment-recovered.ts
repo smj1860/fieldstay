@@ -32,7 +32,7 @@ export const guidebookSponsorPaymentRecovered = inngest.createFunction(
       if (activeSponsorCount < 3) return
 
       const supabase = createServiceClient({ system: 'inngest:guidebook-sponsor-payment-recovered' })
-      await supabase
+      const { error } = await supabase
         .from('guidebook_configurations')
         .upsert(
           {
@@ -43,6 +43,8 @@ export const guidebookSponsorPaymentRecovered = inngest.createFunction(
           },
           { onConflict: 'org_id' }
         )
+
+      if (error) throw new Error(`Failed to unlock guidebook: ${error.message}`)
     })
 
     await step.run('log-audit-event', async () => {

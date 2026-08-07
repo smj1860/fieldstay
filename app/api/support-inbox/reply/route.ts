@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { requirePlatformStaff }      from '@/lib/auth'
+import { reportError }               from '@/lib/observability/report-error'
 
 export async function POST(req: NextRequest): Promise<NextResponse> {
   const auth = await requirePlatformStaff()
@@ -31,13 +32,18 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     return NextResponse.json({ error: 'Failed to send reply. Please try again.' }, { status: 500 })
   }
 
-  await supabase
+  const { error: updateErr } = await supabase
     .from('support_conversations')
     .update({
       last_message_at:   new Date().toISOString(),
       assigned_staff_id: user.id,
     })
     .eq('id', conversationId)
+
+  if (updateErr) {
+    console.error('[support-inbox/reply] conversation update', updateErr.message)
+    reportError(updateErr, { site: 'route.support-inbox.reply.updateConversation' })
+  }
 
   return NextResponse.json({ sent: true })
 }

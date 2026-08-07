@@ -6,6 +6,7 @@ import { logAuditEvent } from '@/lib/audit'
 import { inngest } from '@/lib/inngest/client'
 
 import { reportError } from '@/lib/observability/report-error'
+import { throwIfAnyQueryFailed, unwrap } from '@/lib/supabase/unwrap'
 function revalidateRoomTemplateSurfaces() {
   revalidatePath('/templates/checklist')
 }
@@ -217,12 +218,16 @@ export async function saveRoomTemplateItems(
     const roleError = assertCanManage(membership.role)
     if (roleError) return { error: roleError, saved: 0 }
 
-    const { data: room } = await supabase
+    const roomRes = await supabase
       .from('room_templates')
       .select('id')
       .eq('id', roomTemplateId)
       .eq('org_id', membership.org_id)
       .maybeSingle()
+    const room = unwrap(roomRes, {
+      site:  'serverAction.templates.checklist.saveRoomTemplateItems',
+      orgId: membership.org_id,
+    })
     if (!room) return { error: 'Room template not found.', saved: 0 }
 
     // Atomic delete+insert via RPC — a plain client-side delete() then
@@ -268,7 +273,7 @@ export async function applyMasterChecklistToProperties(
   try {
     const { supabase, membership, user } = await requireOrgMember()
 
-    const [{ data: org }, { data: anyRoomTemplate }] = await Promise.all([
+    const [{ data: org, error: orgError }, { data: anyRoomTemplate, error: roomTemplateError }] = await Promise.all([
       supabase
         .from('organizations')
         .select('bedroom_room_template_id, bathroom_room_template_id')
@@ -280,6 +285,11 @@ export async function applyMasterChecklistToProperties(
         .eq('org_id', membership.org_id)
         .limit(1),
     ])
+    throwIfAnyQueryFailed(
+      { site: 'serverAction.templates.checklist.applyMasterChecklistToProperties', orgId: membership.org_id },
+      orgError,
+      roomTemplateError,
+    )
 
     const hasRoomTemplateConfig =
       !!org?.bedroom_room_template_id || !!org?.bathroom_room_template_id || !!anyRoomTemplate?.length

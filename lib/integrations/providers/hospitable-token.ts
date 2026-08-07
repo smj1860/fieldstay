@@ -15,6 +15,7 @@
 // ============================================================
 
 import { unwrap } from '@/lib/supabase/unwrap'
+import { reportError } from '@/lib/observability/report-error'
 import { createServiceClient }         from '@/lib/supabase/server'
 import { redis }                       from '@/lib/rate-limit'
 import {
@@ -321,11 +322,16 @@ function shouldRefresh(expiresAt: string | null): boolean {
 
 async function markConnectionError(userId: string): Promise<void> {
   const admin = getAdminClient()
-  await admin
+  const { error } = await admin
     .from('integration_connections')
     .update({ status: 'error', updated_at: new Date().toISOString() })
     .eq('user_id',     userId)
     .eq('provider_id', HOSPITABLE_PROVIDER_ID)
+
+  if (error) {
+    console.error(`[Hospitable] Failed to mark connection error for user ${userId}:`, error.message)
+    reportError(error, { site: 'lib.integrations.hospitable-token.markConnectionError' })
+  }
 }
 
 function getAdminClient() {

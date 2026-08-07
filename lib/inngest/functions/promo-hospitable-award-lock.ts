@@ -1,4 +1,5 @@
 import { unwrap } from '@/lib/supabase/unwrap'
+import { reportError } from '@/lib/observability/report-error'
 import { NonRetriableError } from 'inngest'
 import { inngest } from '@/lib/inngest/client'
 import { createServiceClient } from '@/lib/supabase/server'
@@ -178,10 +179,19 @@ export const awardHospitablePriceLock = inngest.createFunction(
         lockedPriceCents: priceCents,
       })
 
-      await supabase
+      // Not thrown: the email above already sent successfully, and a step
+      // retry from here would re-run the whole body and send it again (see
+      // the send-once guard note above). Log + report instead so a failed
+      // stamp is visible without risking a duplicate send.
+      const { error: markSentError } = await supabase
         .from('hospitable_launch_promo')
         .update({ congrats_email_sent_at: new Date().toISOString() })
         .eq('org_id', org_id)
+
+      if (markSentError) {
+        console.error(`[promo/hospitable] Failed to mark congrats email sent for org ${org_id}:`, markSentError.message)
+        reportError(markSentError, { site: 'inngest.promo-hospitable-award-lock.mark-email-sent', orgId: org_id })
+      }
     })
 
     return {

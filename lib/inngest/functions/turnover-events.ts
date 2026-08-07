@@ -8,6 +8,7 @@ import { renderPmAlert } from '@/lib/resend/emails/pm-alert'
 import { logAuditEvent } from '@/lib/audit'
 import { incrementCounter } from '@/lib/observability/metrics'
 import { unwrapJoin, unwrapJoinArray } from '@/lib/utils/supabase-joins'
+import { throwIfAnyQueryFailed, isRealQueryError, unwrap } from '@/lib/supabase/unwrap'
 
 // Durations beyond this are treated as tracking errors (e.g. a checklist item
 // completed a day late) and excluded from the auto-assignment learning loop.
@@ -41,7 +42,10 @@ export const handleTurnoverCreated = inngest.createFunction(
     const { turnover, property } = await step.run('fetch-turnover-data', async () => {
       const supabase = createServiceClient({ system: 'inngest:turnover-events' })
 
-      const [{ data: turnover }, { data: property }] = await Promise.all([
+      const [
+        { data: turnover, error: turnoverError },
+        { data: property, error: propertyError },
+      ] = await Promise.all([
         supabase
           .from('turnovers')
           .select(`
@@ -58,6 +62,11 @@ export const handleTurnoverCreated = inngest.createFunction(
           .eq('org_id', org_id)
           .single(),
       ])
+      throwIfAnyQueryFailed(
+        { site: 'inngest.turnover-events.fetch-turnover-data', orgId: org_id },
+        isRealQueryError(turnoverError) ? turnoverError : null,
+        isRealQueryError(propertyError) ? propertyError : null,
+      )
 
       return { turnover, property }
     })
@@ -262,8 +271,9 @@ export const handleTurnoverCompleted = inngest.createFunction(
     await step.run('notify-pm-of-completion', async () => {
       const supabase = createServiceClient({ system: 'inngest:turnover-events' })
 
-      const { data: property } = await supabase
+      const propertyRes = await supabase
         .from('properties').select('name').eq('id', property_id).eq('org_id', org_id).single()
+      const property = unwrap(propertyRes, { site: 'inngest.turnover-events.notify-pm-of-completion', orgId: org_id })
 
       await createPmNotification(supabase, {
         orgId:     org_id,
@@ -309,20 +319,36 @@ export const handleTurnoverCompleted = inngest.createFunction(
       if (n >= 50) milestones.push('turnover_milestone_50')
 
       for (const milestone of milestones) {
-        await supabase.from('org_milestones').upsert(
+        const { error: milestoneError } = await supabase.from('org_milestones').upsert(
           { org_id, milestone },
           { onConflict: 'org_id,milestone', ignoreDuplicates: true }
         )
+        if (milestoneError) {
+          logger.error('org_milestones upsert failed', { milestone, error: milestoneError.message })
+          reportError(milestoneError, {
+            site:  'inngest.turnover-events.record-completion-milestones',
+            orgId: org_id,
+            extra: { milestone },
+          })
+        }
       }
     })
 
     await step.run('post-cleaning-fee-expense', async () => {
       const supabase = createServiceClient({ system: 'inngest:turnover-events' })
 
-      const [{ data: property }, { data: turnover }] = await Promise.all([
+      const [
+        { data: property, error: propertyError },
+        { data: turnover, error: turnoverError },
+      ] = await Promise.all([
         supabase.from('properties').select('cleaning_cost, same_day_premium_pct').eq('id', property_id).eq('org_id', org_id).single(),
         supabase.from('turnovers').select('is_same_day_turnover').eq('id', turnover_id).eq('org_id', org_id).single(),
       ])
+      throwIfAnyQueryFailed(
+        { site: 'inngest.turnover-events.post-cleaning-fee-expense', orgId: org_id },
+        isRealQueryError(propertyError) ? propertyError : null,
+        isRealQueryError(turnoverError) ? turnoverError : null,
+      )
 
       if (!property?.cleaning_cost) return { skipped: true }
 

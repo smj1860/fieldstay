@@ -2,6 +2,7 @@
 
 import { requireOrgRole } from '@/lib/auth'
 import { reportError } from '@/lib/observability/report-error'
+import { isRealQueryError } from '@/lib/supabase/unwrap'
 import { revalidatePath } from 'next/cache'
 import { logAuditEvent } from '@/lib/audit'
 import type { WoStatus } from '@/types/database'
@@ -105,12 +106,16 @@ export async function addWorkOrderLineItem(
 export async function deleteWorkOrderLineItem(lineItemId: string) {
   const { user, supabase, membership } = await requireOrgRole(['admin', 'manager'])
 
-  const { data: lineItem } = await supabase
+  const { data: lineItem, error: lineItemError } = await supabase
     .from('work_order_line_items')
     .select('work_order_id')
     .eq('id', lineItemId)
     .eq('org_id', membership.org_id)
     .single()
+
+  if (isRealQueryError(lineItemError)) {
+    reportError(lineItemError, { site: 'maintenance.deleteWorkOrderLineItem.lookup', orgId: membership.org_id })
+  }
 
   const { error } = await supabase
     .from('work_order_line_items')

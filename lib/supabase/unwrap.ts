@@ -89,6 +89,16 @@ export interface QueryFailure {
   hint?:    string | null
 }
 
+/**
+ * True when `error` reflects an actual query failure rather than
+ * `.single()`'s "no matching row" (PGRST116) — the latter is a legitimate,
+ * often already-handled outcome (a fallback default, a skip) and must not be
+ * conflated with an RLS/network failure that should abort the caller.
+ */
+export function isRealQueryError(error: QueryFailure | null | undefined): error is QueryFailure {
+  return !!error && error.code !== 'PGRST116'
+}
+
 function record(error: QueryFailure, ctx: QueryContext): SupabaseQueryError {
   // Postgres error fields are diagnostic, never user data — safe to log.
   console.error(`[supabase:${ctx.site}]`, error.code ?? '', error.message, error.details ?? '')

@@ -1,5 +1,6 @@
 import type { SupabaseClient } from '@supabase/supabase-js'
 import { calculateHealthScore } from '@/lib/assets/health-score'
+import { unwrap } from '@/lib/supabase/unwrap'
 
 /**
  * Helpers for dailyAssetHealth's per-org scoring step and the Bayesian
@@ -108,7 +109,7 @@ export function scoreAssets(
 export async function persistScores(supabase: SupabaseClient, updates: ScoreUpdate[]): Promise<void> {
   if (!updates.length) return
 
-  await supabase
+  const res = await supabase
     .from('property_assets')
     .upsert(
       updates.map((u) => ({
@@ -118,6 +119,8 @@ export async function persistScores(supabase: SupabaseClient, updates: ScoreUpda
       })),
       { onConflict: 'id' }
     )
+
+  unwrap(res, { site: 'inngest.asset-health.persistScores' })
 }
 
 // ── Bayesian weight nudge ─────────────────────────────────────────────────────
