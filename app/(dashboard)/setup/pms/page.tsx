@@ -55,17 +55,27 @@ export default async function OnboardingPmsPage() {
   // to show the PM that their PMS import worked. Silence here reads as "the
   // connection did nothing", which is the one wrong conclusion this page must
   // never draw for them.
-  const { data: properties, error: propertiesError } = activeConnections.length
-    ? await admin
-        .from('properties')
-        .select('id, name, city, state')
-        .eq('org_id', membership.org_id)
-        .eq('is_active', true)
-        .order('name')
-        .limit(10)
-    : { data: [], error: null }
+  //
+  // An `if` block rather than a ternary around the await, deliberately. The
+  // ternary form destructures `error` just the same, but it buries the await
+  // inside a conditional expression where semgrep's discarded-result rule
+  // cannot see the destructuring and reports it as unhandled. A guardrail that
+  // cannot read the safe form of a pattern will keep flagging it, so the
+  // readable shape is the one that also stays legible to the check.
+  let properties: { id: string; name: string; city: string | null; state: string | null }[] = []
 
-  throwIfAnyQueryFailed({ site: 'page.setup.pms', orgId: membership.org_id }, propertiesError)
+  if (activeConnections.length > 0) {
+    const { data, error } = await admin
+      .from('properties')
+      .select('id, name, city, state')
+      .eq('org_id', membership.org_id)
+      .eq('is_active', true)
+      .order('name')
+      .limit(10)
+
+    throwIfAnyQueryFailed({ site: 'page.setup.pms', orgId: membership.org_id }, error)
+    properties = data ?? []
+  }
 
   async function continueAction() {
     'use server'
@@ -148,13 +158,13 @@ export default async function OnboardingPmsPage() {
       </div>
 
       {/* Properties preview if any are imported */}
-      {(properties ?? []).length > 0 && (
+      {properties.length > 0 && (
         <div>
           <p className="text-sm font-medium mb-2" style={{ color: 'var(--text-secondary)' }}>
-            {properties!.length} propert{properties!.length !== 1 ? 'ies' : 'y'} imported
+            {properties.length} propert{properties.length !== 1 ? 'ies' : 'y'} imported
           </p>
           <div className="border border-themed rounded-xl overflow-hidden">
-            {properties!.map((p) => (
+            {properties.map((p) => (
               <div key={p.id} className="flex items-center gap-3 px-4 py-2.5 border-b border-themed last:border-0">
                 <span className="text-sm font-medium text-primary-themed">{p.name}</span>
                 {(p.city || p.state) && (
