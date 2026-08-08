@@ -94,50 +94,91 @@ function unhandledCounts(): Map<string, number> {
 // Every number may only DECREASE. Lower it when you fix sites in that file;
 // delete the entry when it reaches zero. Never add an entry, never raise one.
 const BASELINE: Record<string, number> = {
-  'app/(dashboard)/bookings/actions.ts': 2,
-  'app/(dashboard)/owners/actions.ts': 7,
-  'app/(dashboard)/properties/[id]/setup/checklist/actions.ts': 3,
-  'app/(dashboard)/properties/[id]/setup/ical/actions.ts': 2,
-  'app/(dashboard)/properties/actions.ts': 3,
-  'app/(dashboard)/properties/clone-actions.ts': 4,
-  'app/(dashboard)/settings/actions.ts': 11,
-  // 4 -> 1: the three connection lookups now go through tryUnwrap. The
-  // disconnectIntegration one was the costly one — a failed read produced the
-  // same null as "no such connection", so the PM was told the integration
-  // isn't connected while the provider token stayed live in Vault. Same defect
-  // on the same table as the deleted findUserByExternalId (lib/integrations/
-  // vault.ts). getSyncProgress's bare `catch { return null }` now reports too.
-  'app/(dashboard)/settings/integrations/actions.ts': 1,
+  // 3 -> 0 (entry deleted). resolveTemplateId's template/property lookups and
+  // validateRoomTemplateIds' ownership read now unwrap — discarded, a
+  // transient failure looked identical to "not found", returning a
+  // false-negative error to the PM instead of retrying.
+  // 2 -> 0 (entry deleted). addIcalFeed's property-ownership lookup and
+  // triggerSingleFeedSync's feed lookup now filter for a real query error
+  // (isRealQueryError) before falling through their already-tolerant "not
+  // found" default, so a transient failure reports rather than silently
+  // behaving as "this property/feed doesn't exist".
+  // 3 -> 0 (entry deleted). createAsset's and bulkImportAssets' property
+  // lookups now filter for a real query error before falling through their
+  // already-tolerant "not found" default; markStepComplete's milestone-count
+  // read and the second-property milestone upsert now unwrap.
+  // 4 -> 0 (entry deleted). Every read/write in the setup clone (inventory,
+  // checklist template, maintenance schedules) now unwraps.
+  // 11 -> 0 (entry deleted). Every ownership/existence lookup across crew,
+  // vendor, invite-claim, billing-portal, and checkout-session flows now
+  // filters for a real query error (isRealQueryError) before falling through
+  // its already-tolerant "not found" default, or unwraps outright where no
+  // such tolerance existed (the billing-portal and checkout-session org
+  // reads). Discarded, a transient failure on e.g. the invite-claim read
+  // looked identical to "someone else already claimed this send", and on the
+  // checkout-session org read looked identical to "no Stripe customer yet" —
+  // silently letting a second Checkout session through for an
+  // already-subscribed org.
+  // 4 -> 1 -> 0 (entry deleted). The three connection lookups now go through
+  // tryUnwrap. The disconnectIntegration one was the costly one — a failed
+  // read produced the same null as "no such connection", so the PM was told
+  // the integration isn't connected while the provider token stayed live in
+  // Vault. Same defect on the same table as the deleted findUserByExternalId
+  // (lib/integrations/vault.ts). getSyncProgress's bare `catch { return null
+  // }` now reports too. The last one, triggerResync's Hospitable
+  // property-fan-out read, now reports its error instead of silently
+  // skipping the calendar re-sync for every active property.
   // 3 -> 2: removeMember's target-role lookup unwraps. It is the ONLY thing
   // enforcing "an owner cannot be removed", and the delete below it is
   // org-scoped but role-blind — so a transient failure of that read let the
   // delete run against an owner, and a non-member id returned { ok: true }
   // with an audit row for a removal that never happened.
-  'app/(dashboard)/settings/team/actions.ts': 2,
-  'app/(dashboard)/templates/inventory/actions.ts': 2,
-  'app/(dashboard)/templates/maintenance/actions.ts': 3,
-  'app/(dashboard)/vendors/actions.ts': 3,
+  // 2 -> 0 (entry deleted). inviteTeamMember's already-member and
+  // existing-invite lookups now filter for a real query error before
+  // falling through their already-tolerant "not found" default.
+  // 2 -> 0 (entry deleted). upsertParLevelItems' property-ownership check and
+  // its client-supplied-id verification read now unwrap/isRealQueryError —
+  // discarded, a failed verification read produced an empty verified set, so
+  // every client-supplied item id looked unowned and silently dropped out of
+  // the save instead of erroring.
+  // 3 -> 0 (entry deleted). The template/item ownership lookups in
+  // addMaintenanceTemplateItem, updateMaintenanceTemplateItem, and
+  // removeMaintenanceTemplateItem now unwrap.
   // 3 -> 2: optInGuestSms's booking lookup now binds and reports its error.
   // Discarding it made a transient failure indistinguishable from a bad token,
   // so a guest with a valid link was told the link was invalid.
-  // 2 -> 1: createSponsorCheckoutSession's media-kit-token lookup had the SAME
-  // defect one function over — a sponsor holding a valid link was told it was
-  // invalid whenever the query itself failed.
-  'app/actions/guidebook.ts': 1,
+  // 2 -> 1 -> 0 (entry deleted). createSponsorCheckoutSession's media-kit-token
+  // lookup had the SAME defect one function over — a sponsor holding a valid
+  // link was told it was invalid whenever the query itself failed.
+  // upsertPropertyGuidebookConfig's property-ownership check now filters for
+  // a real query error (isRealQueryError) before falling through to its
+  // already-tolerant "Property not found." response.
 
-  'app/api/repuguard/generate/route.ts': 3,
-  'app/api/vendor-connect/[token]/onboard/route.ts': 2,
-  'app/g/b/[token]/page.tsx': 4,
-  // 5 -> 4: the already-has-a-default guard read now unwraps. Discarded, a
-  // transient failure made existingTemplate null, the guard evaluated false,
-  // and a SECOND default template was created for a property that already had
-  // one — then compounded, because with two rows the guard's .maybeSingle()
-  // errored on every later run and each run added another.
+  // 4 -> 0 (entry deleted). The booking-by-token lookup, the org guidebook
+  // config read, the pending-extension read, and the sponsors list all now
+  // unwrap/unwrapList. Discarded, a failed booking read rendered the same
+  // 404 as an unknown token, and a failed org-config read rendered the same
+  // "guidebook unavailable" as a PM who genuinely hasn't published one —
+  // both indistinguishable from an outage to the guest looking at the page.
+  // 5 -> 4 -> 0 (entry deleted). The already-has-a-default guard read
+  // unwraps, and the remaining reads (the step-complete flag, the property
+  // fetch, the existing-sections read, the new-template insert) now unwrap
+  // or throw too. Discarded, a transient failure made existingTemplate
+  // null, the guard evaluated false, and a SECOND default template was
+  // created for a property that already had one — then compounded, because
+  // with two rows the guard's .maybeSingle() errored on every later run and
+  // each run added another.
   // 20260807190000 adds the partial unique index that makes it impossible.
-  'lib/checklists/apply-master-template.ts': 4,
-  'lib/checklists/seed-default-room-templates.ts': 2,
+  // 2 -> 0 (entry deleted). The org-seeded check and the existing-template
+  // lookup inside upsertOneSeedTemplate now filter for a real query error
+  // (isRealQueryError) before falling back to their already-tolerant "not
+  // found" default.
 
-  'lib/guidebook/sync.ts': 4,
+  // 4 -> 2: ensureGuidebookConfiguration's upsert, createGuidebookPropertyConfigsForProperties'
+  // existingConfigs read and its own upsert, and syncGuidebookConfigsFromProperty's
+  // configs read now unwrap/unwrapList. The remaining two (the property reads
+  // feeding both create/sync passes) are unchanged.
+  'lib/guidebook/sync.ts': 2,
   // 2 -> 0 (entry deleted). Both are scoring signals for a vendor SUGGESTION,
   // so they report rather than throw — a PM accepts or overrides it, and
   // there is deliberately no autopilot mode for vendors. Discarded, though, a
@@ -148,7 +189,12 @@ const BASELINE: Record<string, number> = {
   // discarded, a failure made `connection` null, which the caller reads as
   // "no store configured" — so it told a PM whose store IS connected to go
   // connect it, and wrote the kroger_store_needed flag to keep saying so.
-  'lib/inngest/functions/checklist-broadcast.ts': 4,
+  // 4 -> 0 (entry deleted). The source-template read, the target upsert, the
+  // existing-sections read, and the per-section insert all now check for a
+  // real query error and throw (per-step Inngest retry) instead of falling
+  // through their existing "not found"/"skip this section" tolerance on a
+  // transient failure — a broadcast that silently dropped a section on a
+  // transient error still reported the target as fully synced.
   // 13 -> 0 (entry deleted). Every read in the per-org digest now unwraps.
   // Discarded, each failure produced null, `?? []` made it an empty section,
   // and the digest went out silently short — with no other surface for some of
@@ -174,7 +220,6 @@ const BASELINE: Record<string, number> = {
   // the auto-create step's unique constraint rejected tomorrow's duplicate as
   // an expected race and the schedule stopped producing work orders for this
   // occurrence and every future one.
-  'lib/inngest/functions/email-trial-lifecycle.tsx': 1,
   // 3 -> 0 (entry deleted). The idempotency read was the interesting one:
   // discarded, a failure looked like "no work order yet", so the insert ran
   // and hit wo_crew_flag_source_unique — surfacing as "duplicate key" on
@@ -203,7 +248,12 @@ const BASELINE: Record<string, number> = {
   // context read left `booking` null, so `portalUrl` was null, so the guest
   // SMS block was skipped entirely while the PM email went out reading
   // "checks out on undefined".
-  'lib/inngest/functions/hospitable/hospitable-reviews-backfill.ts': 2,
+  // 2 -> 0 (entry deleted). The synced-property-list read and the connection
+  // metadata read inside updateConnectionMeta now throw on a real error.
+  // Discarded, the property-list failure looked identical to "no synced
+  // properties yet" and skipped the backfill silently; the metadata read
+  // failure meant a merged metadata patch silently dropped every other key
+  // already on the row instead of the intended {...existing, ...patch}.
   // 5 -> 0 (entry deleted). Two of them drove DECISIONS rather than display:
   // the existing-booking read feeds `datesChanged`, so a failed read
   // regenerated the property's turnovers on every webhook; the
@@ -217,8 +267,9 @@ const BASELINE: Record<string, number> = {
   // owner_transactions for any imported reservation — reported as a clean
   // sync. The other was inside a local read-modify-write metadata merge that
   // this change deleted in favour of the atomic RPC.
-  'lib/inngest/functions/hostaway/initial-sync.ts': 2,
-  'lib/inngest/functions/ical-sync.ts': 2,
+  // 2 -> 0 (entry deleted). The upsert-bookings step's upserted-rows read and
+  // the alert-pm-overlap-conflict step's property read now unwrap/filter for
+  // a real query error.
   // 5 -> 3: the count-session and count-items reads at the top of the
   // below-par path now bind and throw their error, so a transient failure
   // gets an Inngest retry instead of reporting success with an empty restock.
@@ -229,18 +280,19 @@ const BASELINE: Record<string, number> = {
   // one case where waiting is wrong, with a guest arriving today or tomorrow.
   // 3 -> 1: the two hand-rolled email_unsubscribed_at reads were replaced by
   // resolveEmailAudience(), which goes through tryUnwrap and fails closed.
-  // 4 -> 2: the new-property diff's `known` read and the connection reload
-  // unwrap. The first amplified rather than degraded — a null result made
-  // every OwnerRez property look new, re-firing a full initial sync for the
-  // whole org, hourly. The second reported a healthy connection as
-  // `connection_not_active`.
-  'lib/inngest/functions/ownerrez/incremental-sync.ts': 2,
-  // 6 -> 4: the checklist-seeding reads unwrap. A failed properties read
-  // short-circuited to [] and every freshly synced property silently never got
-  // a checklist — a turnover with nothing for the crew to work from, reported
-  // as a clean sync.
-  'lib/inngest/functions/ownerrez/initial-sync.ts': 4,
-  'lib/inngest/functions/ownerrez/ownerrez-reviews-sync.ts': 3,
+  // 4 -> 2 -> 0 (entry deleted). The new-property diff's `known` read and the
+  // connection reload unwrap. The first amplified rather than degraded — a
+  // null result made every OwnerRez property look new, re-firing a full
+  // initial sync for the whole org, hourly. The second reported a healthy
+  // connection as `connection_not_active`. The remaining two — the
+  // no-cursor property-id fallback and the throttled error-notification's
+  // recent-notification lookup — now unwrap/filter for a real error too.
+  // 3 -> 0 (entry deleted). The revoked-connection existence check, the
+  // throttled error-notification's recent-notification lookup, and the
+  // property lookup feeding the review upsert now all throw on a real error
+  // instead of falling through their existing-tolerance path — the property
+  // lookup mattered most, since a discarded failure there left every review
+  // in this batch silently unlinked from its property.
   // 3 -> 0 (entry deleted). Each failure produced a skip reason that was a
   // false statement about why: 'work order not found for comms log' for a WO
   // that exists, 'no vendor on work order' for one that has a vendor. The
@@ -254,12 +306,16 @@ const BASELINE: Record<string, number> = {
   // the legitimate ignoreDuplicates no-op, so a failed insert still reported
   // `{ posted: cost }`). The other three were the overdue-path reads, each of
   // which failed toward "no alert" with nothing logged.
-  'lib/inngest/functions/work-order-events.ts': 3,
+  // 3 -> 0 (entry deleted). The three completion/overdue/quote notification
+  // steps' work-order reads now filter for a real query error before
+  // falling through their existing "not found" tolerance.
 
-  'lib/integrations/providers/kroger-token.ts': 2,
-  'lib/push/send-push.ts': 2,
-  'lib/support/account-tools.ts': 3,
-  'lib/turnovers/generator.ts': 3,
+  // 2 -> 0 (entry deleted). sendPushToUser's crew-member and subscription
+  // lookups now report and return early on a real error, rather than
+  // treating the failure identically to "this user has no crew record" /
+  // "no subscriptions registered" and silently sending nothing.
+  // 3 -> 0 (entry deleted). snapshotChecklist's sections read, instance
+  // insert, and signals read now unwrap/unwrapList.
 }
 
 describe('guardrail: Supabase results are not destructured for data without error', () => {

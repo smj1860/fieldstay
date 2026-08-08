@@ -11,6 +11,7 @@ import type { BookingSource, TablesInsert, Enums } from '@/types/database'
 import { reportError } from '@/lib/observability/report-error'
 import { fetchAllRows, fetchDistinctOrgIds } from '@/lib/inngest/paginate'
 import { safeFetch } from '@/lib/security/url-guard'
+import { unwrap, unwrapList, throwIfAnyQueryFailed, isRealQueryError } from '@/lib/supabase/unwrap'
 
 // Feed fetches are spread across this window to avoid a thundering herd at the
 // top of the hour. Applied per-org now that fan-out is two-stage.
@@ -286,11 +287,15 @@ export const syncIcalFeed = inngest.createFunction(
     } catch (err) {
       // Mark feed as errored, then re-throw so Inngest's retry mechanism fires.
       const supabase = createServiceClient({ system: 'inngest:ical-sync' })
-      await supabase.from('ical_feeds').update({
+      const { error: markErrorErr } = await supabase.from('ical_feeds').update({
         last_synced_at:   new Date().toISOString(),
         last_sync_status: 'error',
         last_sync_error:  err instanceof Error ? err.message : 'Unknown error',
       }).eq('id', feed_id)
+      if (markErrorErr) {
+        console.error('[ical-sync-all] mark-feed-errored', markErrorErr)
+        reportError(markErrorErr, { site: 'inngest.ical-sync-all.download-ical.markErrored' })
+      }
 
       logger.error(`Feed ${feed_id} fetch failed: ${err}`)
       reportError(err, { site: 'inngest.ical-sync-all.download-ical' })
@@ -376,10 +381,11 @@ export const syncIcalFeed = inngest.createFunction(
         }))
 
         type UpsertedRow = { id: string; ical_uid: string; status: Enums<'booking_status'> }
-        const { data: upserted } = await supabase
+        const upsertRes = await supabase
           .from('bookings')
           .upsert(upsertRows, { onConflict: 'ical_feed_id,ical_uid', ignoreDuplicates: false })
           .select('id, ical_uid, status')
+        const upserted = unwrapList(upsertRes, { site: 'inngest.ical-sync-all.upsert-bookings.upsert', orgId: org_id })
 
         const upsertedRows = upserted as UpsertedRow[] ?? []
 
@@ -460,8 +466,12 @@ export const syncIcalFeed = inngest.createFunction(
         const [pmEmail] = await getPmEmails(supabase, org_id)
         if (!pmEmail) return
 
-        const { data: property } = await supabase
+        const { data: property, error: propertyErr } = await supabase
           .from('properties').select('name').eq('id', property_id).single()
+        throwIfAnyQueryFailed(
+          { site: 'inngest.ical-sync-all.alert-pm-overlap-conflict', orgId: org_id },
+          isRealQueryError(propertyErr) ? propertyErr : null,
+        )
 
         await resend.emails.send(
           {
@@ -562,16 +572,18 @@ export const syncIcalFeed = inngest.createFunction(
 
     await step.run('mark-sync-success', async () => {
       const supabase = createServiceClient({ system: 'inngest:ical-sync' })
-      await supabase.from('ical_feeds').update({
+      const markSuccessRes = await supabase.from('ical_feeds').update({
         last_synced_at:   new Date().toISOString(),
         last_sync_status: 'success',
         last_sync_error:  null,
       }).eq('id', feed_id)
+      unwrap(markSuccessRes, { site: 'inngest.ical-sync-all.mark-sync-success.feed', orgId: org_id })
 
-      await supabase.from('org_milestones').upsert(
+      const milestoneRes = await supabase.from('org_milestones').upsert(
         { org_id, milestone: 'first_ical_sync' },
         { onConflict: 'org_id,milestone', ignoreDuplicates: true }
       )
+      unwrap(milestoneRes, { site: 'inngest.ical-sync-all.mark-sync-success.milestone', orgId: org_id })
     })
 
     return {

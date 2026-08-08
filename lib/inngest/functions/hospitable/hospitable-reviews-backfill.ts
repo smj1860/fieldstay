@@ -43,12 +43,18 @@ export const hospReviewsBackfill = inngest.createFunction(
     try {
       const properties = await step.run('fetch-org-properties', async () => {
         const supabase = createServiceClient({ system: 'inngest:hospitable-reviews-backfill' })
-        const { data } = await supabase
+        const { data, error } = await supabase
           .from('properties')
           .select('id, external_id')
           .eq('org_id', org_id)
           .eq('external_source', PROVIDER)
           .not('external_id', 'is', null)
+          .limit(500)
+
+        if (error) {
+          throw new Error(`[Hospitable:${user_id}] Property lookup failed: ${error.message}`)
+        }
+
         return data ?? []
       })
 
@@ -173,18 +179,26 @@ async function updateConnectionMeta(
   patch:  Record<string, Json>
 ): Promise<void> {
   const supabase = createServiceClient({ system: 'inngest:hospitable-reviews-backfill' })
-  const { data: existing } = await supabase
+  const { data: existing, error: existingErr } = await supabase
     .from('integration_connections')
     .select('metadata')
     .eq('user_id', userId)
     .eq('provider_id', PROVIDER)
     .maybeSingle()
 
+  if (existingErr) {
+    throw new Error(`[Hospitable:${userId}] Connection metadata lookup failed: ${existingErr.message}`)
+  }
+
   const existingMeta = asJsonObject(existing?.metadata) ?? {}
 
-  await supabase
+  const { error: updateErr } = await supabase
     .from('integration_connections')
     .update({ metadata: { ...existingMeta, ...patch } })
     .eq('user_id', userId)
     .eq('provider_id', PROVIDER)
+
+  if (updateErr) {
+    throw new Error(`[Hospitable:${userId}] Connection metadata update failed: ${updateErr.message}`)
+  }
 }

@@ -2,6 +2,7 @@ import { cache } from 'react'
 import { notFound } from 'next/navigation'
 import type { Metadata } from 'next'
 import { createServiceClient } from '@/lib/supabase/server'
+import { unwrap, unwrapList } from '@/lib/supabase/unwrap'
 import { getWeatherForLocation } from '@/lib/weather/tomorrow'
 import { GuestGuidebookView, asExtensionContactMethod } from '@/components/guidebook/guest-guidebook-view'
 import { GuidebookUnavailable } from '@/components/guidebook/guidebook-unavailable'
@@ -60,11 +61,12 @@ const CONFIG_FIELDS = `
 const getGuidebookData = cache(async (token: string) => {
   const supabase = createServiceClient({ publicSurface: 'g-b--token-' })
 
-  const { data: booking } = await supabase
+  const bookingRes = await supabase
     .from('bookings')
     .select('id, org_id, property_id, checkin_date, checkout_date, guidebook_token')
     .eq('guidebook_token', token)
     .maybeSingle()
+  const booking = unwrap(bookingRes, { site: 'page.g.b.token' })
 
   if (!booking) return null
 
@@ -124,11 +126,12 @@ export default async function GuestBookingGuidebookPage({
   const property = config.properties as unknown as Property
   if (!property) notFound()
 
-  const { data: orgConfig } = await supabase
+  const orgConfigRes = await supabase
     .from('guidebook_configurations')
     .select('is_active, extension_contact_method, extension_ownerrez_url')
     .eq('org_id', booking.org_id)
     .maybeSingle()
+  const orgConfig = unwrap(orgConfigRes, { site: 'page.g.b.token', orgId: booking.org_id })
 
   // Same server-side gate as app/g/[slug]/page.tsx — see M1 note there. Lower
   // risk here (a booking token is required to reach this route at all) but the
@@ -138,18 +141,21 @@ export default async function GuestBookingGuidebookPage({
 
   // Stay-extension ("Gap Night") offer — only surfaces when the cron has
   // created a pending request for this booking.
-  const { data: extensionRequest } = await supabase
+  const extensionRequestRes = await supabase
     .from('stay_extension_requests')
     .select('id, gap_days, discount_pct, next_booking_checkin, status')
     .eq('booking_id', booking.id)
     .eq('status', 'pending')
     .maybeSingle()
+  const extensionRequest = unwrap(extensionRequestRes, { site: 'page.g.b.token', orgId: booking.org_id })
 
-  const { data: sponsors } = await supabase
+  const sponsorsRes = await supabase
     .from('guidebook_sponsors')
     .select('id, status, slot_type, business_name, business_description, custom_offer_text, address, offer_type, offer_value, offer_item, featured_item, business_phone, business_website, lat, lng, photo_storage_path')
     .eq('org_id', booking.org_id)
     .eq('status', 'active')
+    .limit(100)
+  const sponsors = unwrapList(sponsorsRes, { site: 'page.g.b.token', orgId: booking.org_id })
 
   const timeZone = property.timezone || FALLBACK_TIMEZONE
 

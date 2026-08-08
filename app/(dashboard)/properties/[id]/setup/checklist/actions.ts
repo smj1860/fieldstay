@@ -9,6 +9,7 @@ import { inngest } from '@/lib/inngest/client'
 import { logAuditEvent } from '@/lib/audit'
 
 import { reportError } from '@/lib/observability/report-error'
+import { unwrap, unwrapList } from '@/lib/supabase/unwrap'
 export type ChecklistState = { error?: string; success?: boolean }
 
 export interface ChecklistItemInput {
@@ -37,12 +38,16 @@ async function resolveTemplateId(
   templateId: string | null
 ): Promise<{ id?: string; error?: string }> {
   if (templateId) {
-    const { data: template } = await supabase
+    const templateRes = await supabase
       .from('checklist_templates')
       .select('id')
       .eq('id', templateId)
       .eq('org_id', orgId)
       .maybeSingle()
+    const template = unwrap(templateRes, {
+      site: 'serverAction.properties.setup.checklist.resolveTemplateId.template',
+      orgId,
+    })
     if (!template) return { error: 'Checklist template not found' }
     return { id: templateId }
   }
@@ -50,12 +55,16 @@ async function resolveTemplateId(
   // A client-supplied propertyId must also be confirmed to belong to this
   // org before we create a new template tied to it — same reasoning as the
   // templateId check above.
-  const { data: property } = await supabase
+  const propertyRes = await supabase
     .from('properties')
     .select('id')
     .eq('id', propertyId)
     .eq('org_id', orgId)
     .maybeSingle()
+  const property = unwrap(propertyRes, {
+    site: 'serverAction.properties.setup.checklist.resolveTemplateId.property',
+    orgId,
+  })
   if (!property) return { error: 'Property not found' }
 
   const { data, error } = await supabase
@@ -87,12 +96,17 @@ async function validateRoomTemplateIds(
   )]
   if (roomTemplateIds.length === 0) return null
 
-  const { data: ownedRooms } = await supabase
+  const ownedRoomsRes = await supabase
     .from('room_templates')
     .select('id')
     .eq('org_id', orgId)
     .in('id', roomTemplateIds)
-  if ((ownedRooms?.length ?? 0) !== roomTemplateIds.length) {
+    .limit(roomTemplateIds.length)
+  const ownedRooms = unwrapList(ownedRoomsRes, {
+    site: 'serverAction.properties.setup.checklist.validateRoomTemplateIds',
+    orgId,
+  })
+  if (ownedRooms.length !== roomTemplateIds.length) {
     return 'One or more linked room templates were not found.'
   }
   return null
@@ -117,10 +131,15 @@ async function replaceSections(
   tmplId: string,
   sections: ChecklistSectionInput[]
 ): Promise<string | null> {
-  await supabase
+  const { error: de } = await supabase
     .from('checklist_template_sections')
     .delete()
     .eq('template_id', tmplId)
+
+  if (de) {
+    console.error('[saveChecklistTemplate] section delete failed', de)
+    return 'Failed to save checklist section. Please try again.'
+  }
 
   if (sections.length === 0) return null
 

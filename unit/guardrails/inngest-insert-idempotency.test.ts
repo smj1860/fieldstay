@@ -113,7 +113,7 @@ const EXCEPTIONS: Record<string, string> = {
   // short-circuits only on a PO that actually has line items, that a header
   // with zero items is repaired rather than declared done, and that both
   // writes throw instead of being discarded.
-  'lib/inngest/functions/cron/work-order-ops.ts:323':
+  'lib/inngest/functions/cron/work-order-ops.ts:328':
     'FIXED, kept as an exception because the guard is cross-table and this scan only recognizes same-table guards: the work_order_updates note batch is written only for the rows the preceding optimistic-locked bulk UPDATE actually changed (`.update({priority:\'urgent\'}).in(\'id\', ids).neq(\'priority\', \'urgent\').select(\'id\')`). A step retry matches zero rows there (they are already urgent), so zero notes are inserted. Its twin in cron/maintenance-schedules.ts now uses the same guard (it was the last open entry in this list and was closed 2026-08-08 by copying this pattern rather than re-litigating what makes two escalation events \'the same\').',
 }
 

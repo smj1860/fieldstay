@@ -111,12 +111,18 @@ export async function detectAndFlagOverlaps(
   const toClear = bookings.filter(b => !overlapping.has(b.id) && b.has_overlap_conflict)
 
   if (toFlag.length > 0) {
-    await supabase.from('bookings').update({ has_overlap_conflict: true })
+    const { error: flagError } = await supabase.from('bookings').update({ has_overlap_conflict: true })
       .in('id', toFlag.map(b => b.id))
+    if (flagError) {
+      throw new Error(`[conflict-detection] Failed to flag overlapping bookings: ${flagError.message}`)
+    }
   }
   if (toClear.length > 0) {
-    await supabase.from('bookings').update({ has_overlap_conflict: false })
+    const { error: clearError } = await supabase.from('bookings').update({ has_overlap_conflict: false })
       .in('id', toClear.map(b => b.id))
+    if (clearError) {
+      throw new Error(`[conflict-detection] Failed to clear overlap flags: ${clearError.message}`)
+    }
   }
 
   return toFlag.map(b => ({

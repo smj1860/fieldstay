@@ -1,5 +1,6 @@
 import { createServiceClient } from '@/lib/supabase/server'
 import { generateBaseSlug, generateUniqueSlugsForProperties } from '@/lib/guidebook/slug'
+import { unwrap, unwrapList } from '@/lib/supabase/unwrap'
 import type { TablesUpdate } from '@/types/database'
 
 /**
@@ -11,12 +12,13 @@ export async function ensureGuidebookConfiguration(orgId: string): Promise<void>
   const supabase    = createServiceClient({ system: 'lib/guidebook/sync' })
   const trialEndsAt = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString()
 
-  await supabase
+  const res = await supabase
     .from('guidebook_configurations')
     .upsert(
       { org_id: orgId, is_active: true, trial_ends_at: trialEndsAt },
       { onConflict: 'org_id', ignoreDuplicates: true }
     )
+  unwrap(res, { site: 'lib.guidebook.sync.ensureGuidebookConfiguration', orgId })
 }
 
 /**
@@ -45,11 +47,13 @@ export async function createGuidebookPropertyConfigsForProperties(
   const { data: allProperties } = await propertyQuery
   if (!allProperties?.length) return
 
-  const { data: existingConfigs } = await supabase
+  const existingConfigsRes = await supabase
     .from('guidebook_property_configs')
     .select('property_id')
     .eq('org_id', orgId)
     .in('property_id', allProperties.map((p) => p.id))
+    .limit(allProperties.length)
+  const existingConfigs = unwrapList(existingConfigsRes, { site: 'lib.guidebook.sync.createGuidebookPropertyConfigsForProperties.existingConfigs', orgId })
 
   const alreadyConfigured = new Set((existingConfigs ?? []).map((c) => c.property_id))
   const newProperties      = allProperties.filter((p) => !alreadyConfigured.has(p.id))
@@ -64,9 +68,10 @@ export async function createGuidebookPropertyConfigsForProperties(
     is_published: false,   // PM must explicitly publish
   }))
 
-  await supabase
+  const upsertRes = await supabase
     .from('guidebook_property_configs')
     .upsert(rows, { onConflict: 'org_id,property_id', ignoreDuplicates: true })
+  unwrap(upsertRes, { site: 'lib.guidebook.sync.createGuidebookPropertyConfigsForProperties.upsert', orgId })
 }
 
 /**
@@ -124,11 +129,13 @@ export async function syncGuidebookConfigsFromProperty(
   const { data: props } = await propertyQuery
   if (!props?.length) return
 
-  const { data: configs } = await supabase
+  const configsRes = await supabase
     .from('guidebook_property_configs')
     .select('id, property_id, wifi_network, wifi_password, check_in_instructions, house_rules, check_out_instructions')
     .eq('org_id', orgId)
     .in('property_id', props.map((p) => p.id))
+    .limit(props.length)
+  const configs = unwrapList(configsRes, { site: 'lib.guidebook.sync.syncGuidebookConfigsFromProperty.configs', orgId })
 
   const configByPropertyId = new Map((configs ?? []).map((c) => [c.property_id, c]))
 

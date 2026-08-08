@@ -28,6 +28,7 @@ function makeSupabase(queued: Record<string, { data?: unknown; error?: unknown }
     }
     chain.select = (...a: unknown[]) => record('select', a)
     chain.eq     = (...a: unknown[]) => record('eq', a)
+    chain.limit  = (...a: unknown[]) => record('limit', a)
     chain.delete = (...a: unknown[]) => record('delete', a)
     chain.insert = (...a: unknown[]) => record('insert', a)
     chain.upsert = (...a: unknown[]) => record('upsert', a)

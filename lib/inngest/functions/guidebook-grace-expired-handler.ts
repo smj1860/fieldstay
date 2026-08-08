@@ -2,6 +2,7 @@ import { inngest } from '@/lib/inngest/client'
 import { createServiceClient } from '@/lib/supabase/server'
 import { getActiveSponsorCount } from '@/lib/guidebook/helpers'
 import { logAuditEvent } from '@/lib/audit'
+import { unwrap } from '@/lib/supabase/unwrap'
 
 export const guidebookGraceExpiredHandler = inngest.createFunction(
   {
@@ -22,19 +23,20 @@ export const guidebookGraceExpiredHandler = inngest.createFunction(
       // The PM filled the slot during the grace period — clear it and do nothing
       await step.run('clear-grace-period', async () => {
         const supabase = createServiceClient({ system: 'inngest:guidebook-grace-expired-handler' })
-        await supabase
+        const res = await supabase
           .from('guidebook_configurations')
           .update({
             grace_period_ends_at: null,
             updated_at:           new Date().toISOString(),
           })
           .eq('org_id', orgId)
+        unwrap(res, { site: 'inngest.guidebook-grace-expired-handler.clear-grace-period', orgId })
       })
     } else {
       // Grace period expired with insufficient sponsors — lock the guidebook
       await step.run('lock-guidebook', async () => {
         const supabase = createServiceClient({ system: 'inngest:guidebook-grace-expired-handler' })
-        await supabase
+        const res = await supabase
           .from('guidebook_configurations')
           .update({
             is_active:            false,
@@ -42,6 +44,7 @@ export const guidebookGraceExpiredHandler = inngest.createFunction(
             updated_at:           new Date().toISOString(),
           })
           .eq('org_id', orgId)
+        unwrap(res, { site: 'inngest.guidebook-grace-expired-handler.lock-guidebook', orgId })
       })
     }
 
