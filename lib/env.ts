@@ -279,7 +279,7 @@ export const ENV_SPEC: Readonly<Record<string, VarSpec>> = {
 
 export interface EnvIssue {
   name:     string
-  kind:     'missing' | 'malformed'
+  kind:     'missing' | 'malformed' | 'conflict'
   severity: 'error' | 'warning'
   detail:   string
 }
@@ -378,6 +378,55 @@ function inspectVar(
  * throwing, so it is directly unit-testable and can be reused by a
  * `check:env` script without side effects.
  */
+/**
+ * Cross-field check: no two STRIPE_PRICE_* variables may hold the same id.
+ *
+ * Every other check in this module looks at one variable in isolation, and a
+ * duplicated price id passes all of them — both values are present and both
+ * match the `price_` prefix. The failure is only visible by comparison, and it
+ * is a money bug: paste the ANNUAL id into the MONTHLY slot and a customer who
+ * clicked "$89/mo" is charged $890, with a valid Stripe receipt and nothing
+ * anywhere reporting a problem.
+ *
+ * There are fourteen of these ids now, set by hand in the Stripe dashboard and
+ * pasted into Vercel once per environment. Adjacent names differing by one
+ * word (_MONTHLY / _ANNUAL) pasted in pairs is close to the ideal conditions
+ * for a transposition, and the Hosts tier added two more.
+ *
+ * An error in EVERY tier and environment, like a malformed value: there is no
+ * environment in which charging the wrong price is acceptable.
+ *
+ * Iterates ENV_SPEC rather than `env` so it only ever considers declared
+ * variables — env-schema-coverage.test.ts is what keeps that list complete.
+ */
+function findDuplicatePriceIds(env: EnvRecord): EnvIssue[] {
+  const firstUseOf = new Map<string, string>()
+  const issues: EnvIssue[] = []
+
+  for (const name of Object.keys(ENV_SPEC)) {
+    if (!name.startsWith('STRIPE_PRICE_')) continue
+
+    const value = env[name]?.trim()
+    if (!value) continue   // absent/blank is the missing-var check's job, not this one
+
+    const firstUse = firstUseOf.get(value)
+    if (firstUse !== undefined) {
+      issues.push({
+        name,
+        kind:     'conflict',
+        severity: 'error',
+        detail:
+          `holds the same Stripe price id as ${firstUse}. One of the two is a paste error, ` +
+          `and the customer is charged whatever that id actually costs`,
+      })
+      continue
+    }
+    firstUseOf.set(value, name)
+  }
+
+  return issues
+}
+
 export function validateServerEnv(
   env: EnvRecord = process.env,
   target: DeployTarget = resolveDeployTarget(env),
@@ -392,12 +441,20 @@ export function validateServerEnv(
     else warnings.push(issue)
   }
 
+  errors.push(...findDuplicatePriceIds(env))
+
   return { target, errors, warnings, ok: errors.length === 0 }
+}
+
+const ISSUE_LABEL: Record<EnvIssue['kind'], string> = {
+  missing:   'NOT SET',
+  malformed: 'invalid',
+  conflict:  'DUPLICATE VALUE',
 }
 
 function formatIssues(issues: EnvIssue[]): string {
   return issues
-    .map((i) => `  • ${i.name} — ${i.kind === 'missing' ? 'NOT SET' : 'invalid'}: ${i.detail}`)
+    .map((i) => `  • ${i.name} — ${ISSUE_LABEL[i.kind]}: ${i.detail}`)
     .join('\n')
 }
 

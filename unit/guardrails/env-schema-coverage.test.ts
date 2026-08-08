@@ -257,3 +257,72 @@ describe('guardrail: env validation behaviour', () => {
     expect(resolveDeployTarget({ NODE_ENV: 'development' })).toBe('development')
   })
 })
+
+// ============================================================================
+// Cross-field: duplicate Stripe price ids.
+//
+// Every other check in lib/env.ts inspects one variable alone, and a
+// duplicated price id passes all of them — both values are present and both
+// match the `price_` prefix. It is only visible by comparison, and it is a
+// money bug: the annual id pasted into the monthly slot charges a customer who
+// clicked "$89/mo" the full $890, with a valid Stripe receipt and no error
+// anywhere. Fourteen of these ids are now set by hand, per environment, in
+// _MONTHLY/_ANNUAL pairs whose names differ by one word.
+// ============================================================================
+describe('guardrail: no two Stripe price ids may be the same', () => {
+  it('rejects the classic paste error — the annual id in the monthly slot', () => {
+    const env = fullEnv()
+    env.STRIPE_PRICE_HOSTS_MONTHLY = env.STRIPE_PRICE_HOSTS_ANNUAL
+
+    const result = validateServerEnv(env, 'production')
+
+    expect(result.ok).toBe(false)
+
+    // Which of the pair gets FLAGGED is arbitrary (first use wins, the later
+    // one is reported), so assert on the pair rather than the direction — the
+    // message has to name both for the operator to know what to fix.
+    const conflict = result.errors.find((e) => e.kind === 'conflict')
+    expect(conflict).toBeDefined()
+    expect(conflict!.severity).toBe('error')
+    expect(`${conflict!.name} ${conflict!.detail}`).toContain('STRIPE_PRICE_HOSTS_MONTHLY')
+    expect(`${conflict!.name} ${conflict!.detail}`).toContain('STRIPE_PRICE_HOSTS_ANNUAL')
+  })
+
+  it('catches a collision ACROSS plans, not just within a pair', () => {
+    const env = fullEnv()
+    env.STRIPE_PRICE_GROWTH_MONTHLY = env.STRIPE_PRICE_STARTER_MONTHLY
+
+    const result = validateServerEnv(env, 'production')
+
+    expect(result.ok).toBe(false)
+    expect(result.errors.some((e) => e.kind === 'conflict')).toBe(true)
+  })
+
+  it('is an error in every environment — there is none where the wrong charge is acceptable', () => {
+    for (const target of ['production', 'preview', 'development'] as const) {
+      const env = fullEnv()
+      env.STRIPE_PRICE_HOSTS_ANNUAL = env.STRIPE_PRICE_HOSTS_MONTHLY
+
+      const result = validateServerEnv(env, target)
+
+      expect(result.errors.some((e) => e.kind === 'conflict'), target).toBe(true)
+    }
+  })
+
+  it('does not fire on absent or blank vars — that is the missing-var check\'s job', () => {
+    const env = fullEnv()
+    env.STRIPE_PRICE_HOSTS_MONTHLY = ''
+    env.STRIPE_PRICE_HOSTS_ANNUAL  = ''
+
+    const result = validateServerEnv(env, 'production')
+
+    expect(result.errors.some((e) => e.kind === 'conflict')).toBe(false)
+    // Still reported as missing, so the blank is not silently tolerated.
+    expect(result.errors.some((e) => e.name === 'STRIPE_PRICE_HOSTS_MONTHLY' && e.kind === 'missing')).toBe(true)
+  })
+
+  it('a fully-configured environment with all-distinct ids has no conflict', () => {
+    const result = validateServerEnv(fullEnv(), 'production')
+    expect(result.errors.filter((e) => e.kind === 'conflict')).toEqual([])
+  })
+})
