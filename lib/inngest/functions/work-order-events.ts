@@ -8,7 +8,7 @@ import { stripe } from '@/lib/stripe/client'
 import { renderVendorConnectInviteEmail } from '@/lib/resend/emails/vendor-connect-invite'
 import { logAuditEvent } from '@/lib/audit'
 import { unwrapJoin } from '@/lib/utils/supabase-joins'
-import { unwrap } from '@/lib/supabase/unwrap'
+import { unwrap, throwIfAnyQueryFailed, isRealQueryError } from '@/lib/supabase/unwrap'
 import { loadDispatchContext, sendVendorDispatchEmail, sendVendorDispatchSms } from './work-order-events-helpers'
 
 // ── Work Order Created ────────────────────────────────────────────────────────
@@ -404,7 +404,7 @@ export const handleWorkOrderCompletedViaPortal = inngest.createFunction(
     await step.run('notify-pm-of-completion', async () => {
       const supabase = createServiceClient({ system: 'inngest:work-order-events' })
 
-      const { data: wo } = await supabase
+      const { data: wo, error: woError } = await supabase
         .from('work_orders')
         .select(`
           id, title, completion_notes, actual_cost, org_id,
@@ -414,6 +414,10 @@ export const handleWorkOrderCompletedViaPortal = inngest.createFunction(
         `)
         .eq('id', work_order_id)
         .single()
+      throwIfAnyQueryFailed(
+        { site: 'inngest.work-order-completed-via-portal.notify-pm-of-completion', extra: { work_order_id } },
+        isRealQueryError(woError) ? woError : null,
+      )
 
       if (!wo) return
 
@@ -464,12 +468,16 @@ export const handleWorkOrderOverdue = inngest.createFunction(
     await step.run('check-and-alert', async () => {
       const supabase = createServiceClient({ system: 'inngest:work-order-events' })
 
-      const { data: wo } = await supabase
+      const { data: wo, error: woError } = await supabase
         .from('work_orders')
         .select('id, title, status, scheduled_date, vendors(name), properties(name)')
         .eq('id', work_order_id)
         .eq('org_id', org_id)
         .single()
+      throwIfAnyQueryFailed(
+        { site: 'inngest.work-order-overdue.check-and-alert', orgId: org_id },
+        isRealQueryError(woError) ? woError : null,
+      )
 
       if (!wo || wo.status === 'completed' || wo.status === 'cancelled') return
 
@@ -606,12 +614,16 @@ export const handleWorkOrderQuoteSubmitted = inngest.createFunction(
     await step.run('notify-pm-of-quote', async () => {
       const supabase = createServiceClient({ system: 'inngest:work-order-events' })
 
-      const { data: wo } = await supabase
+      const { data: wo, error: woError } = await supabase
         .from('work_orders')
         .select('id, title, vendors ( name ), properties ( name )')
         .eq('id', work_order_id)
         .eq('org_id', org_id)
         .single()
+      throwIfAnyQueryFailed(
+        { site: 'inngest.work-order-quote-submitted.notify-pm-of-quote', orgId: org_id },
+        isRealQueryError(woError) ? woError : null,
+      )
 
       if (!wo) return
 

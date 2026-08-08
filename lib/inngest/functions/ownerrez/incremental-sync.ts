@@ -68,7 +68,7 @@ import {
 } from '@/lib/integrations/providers/ownerrez'
 import type { MappedOwnerRezBookingRow } from '@/lib/integrations/providers/ownerrez'
 import { mergeIntegrationConnectionMetadata } from '@/lib/integrations/connection-metadata'
-import { unwrap, unwrapList } from '@/lib/supabase/unwrap'
+import { unwrap, unwrapList, isRealQueryError } from '@/lib/supabase/unwrap'
 
 const PROVIDER = 'ownerrez'
 
@@ -321,13 +321,18 @@ async function loadConnectedPropertyIds(
   supabase: ReturnType<typeof createServiceClient>,
   orgId:    string
 ): Promise<number[]> {
-  const { data } = await supabase
+  const res = await supabase
     .from('properties')
     .select('external_id')
     .eq('org_id', orgId)
     .eq('external_source', PROVIDER)
 
-  return ((data ?? []) as Array<{ external_id: string | null }>)
+  const data = unwrapList<{ external_id: string | null }>(res, {
+    site: 'inngest.ownerrez-connection-sync.load-connected-properties',
+    orgId,
+  })
+
+  return data
     .map((p) => Number(p.external_id))
     .filter((id) => !Number.isNaN(id))
 }
@@ -949,7 +954,7 @@ async function notifyConnectionErrorThrottled(
 ): Promise<void> {
   try {
     const milestoneKey = `integration_error_notified:${connectionId}`
-    const { data: recentNotification } = await supabase
+    const { data: recentNotification, error: recentNotificationError } = await supabase
       .from('org_milestones')
       .select('value, achieved_at')
       .eq('org_id', orgId)
@@ -957,6 +962,14 @@ async function notifyConnectionErrorThrottled(
       .order('achieved_at', { ascending: false })
       .limit(1)
       .maybeSingle()
+
+    if (isRealQueryError(recentNotificationError)) {
+      console.error('[notifyConnectionErrorThrottled] recent-notification lookup failed:', recentNotificationError)
+      reportError(recentNotificationError, {
+        site: 'inngest.ownerrez-connection-sync.notify-error-throttle',
+        orgId,
+      })
+    }
 
     const lastNotifiedAt = (recentNotification?.value as Record<string, unknown> | null)
       ?.notified_at
@@ -975,11 +988,18 @@ async function notifyConnectionErrorThrottled(
           reason:      humanError,
         },
       })
-      await supabase.from('org_milestones').upsert({
+      const { error: milestoneError } = await supabase.from('org_milestones').upsert({
         org_id:    orgId,
         milestone: milestoneKey,
         value:     { notified_at: new Date().toISOString() },
       }, { onConflict: 'org_id,milestone' })
+      if (milestoneError) {
+        console.error('[notifyConnectionErrorThrottled] milestone upsert failed:', milestoneError)
+        reportError(milestoneError, {
+          site: 'inngest.ownerrez-connection-sync.notify-error-throttle-milestone',
+          orgId,
+        })
+      }
     }
   } catch { /* non-fatal — connection status was already written */ }
 }

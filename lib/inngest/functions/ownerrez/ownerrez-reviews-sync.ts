@@ -43,6 +43,57 @@ export const ownerRezReviewsSync = inngest.createFunction(
       })
     }
 
+    // Fires the PM notification for a revoked connection, throttled to once
+    // per 4 hours per connection — split out so the mark-revoked step below
+    // doesn't nest the milestone lookup, the throttle check and the upsert
+    // all inside its own already-deep try/catch/if chain.
+    async function notifyRevokedThrottled(
+      admin:         ReturnType<typeof createServiceClient>,
+      userId:        string,
+      orgId:         string,
+      connectionId:  string,
+      humanError:    string,
+    ): Promise<void> {
+      const milestoneKey = `integration_error_notified:${connectionId}`
+      const { data: recentNotification, error: recentNotificationErr } = await admin
+        .from('org_milestones')
+        .select('value, achieved_at')
+        .eq('org_id', orgId)
+        .eq('milestone', milestoneKey)
+        .order('achieved_at', { ascending: false })
+        .limit(1)
+        .maybeSingle()
+
+      if (recentNotificationErr) {
+        throw new Error(`[OwnerRez:${userId}] Notification-milestone lookup failed: ${recentNotificationErr.message}`)
+      }
+
+      const lastNotifiedAt = (recentNotification?.value as Record<string, unknown> | null)
+        ?.notified_at
+      const tooSoon = lastNotifiedAt &&
+        Date.now() - new Date(lastNotifiedAt as string).getTime() < 4 * 60 * 60 * 1000
+      if (tooSoon) return
+
+      await step.sendEvent(`notify-revoked-${userId}`, {
+        name: 'integration/connection.error',
+        data: {
+          user_id:     userId,
+          org_id:      orgId,
+          provider_id: 'ownerrez',
+          reason:      humanError,
+        },
+      })
+      const { error: milestoneErr } = await admin.from('org_milestones').upsert({
+        org_id:    orgId,
+        milestone: milestoneKey,
+        value:     { notified_at: new Date().toISOString() },
+      }, { onConflict: 'org_id,milestone' })
+
+      if (milestoneErr) {
+        throw new Error(`[OwnerRez:${userId}] Failed to record notification milestone: ${milestoneErr.message}`)
+      }
+    }
+
     const connections = await step.run('fetch-connections', async () => {
       const admin = createServiceClient({ system: 'inngest:ownerrez-reviews-sync' })
       // PLATFORM-WIDE scan — every org with a live OwnerRez connection, not
@@ -100,12 +151,16 @@ export const ownerRezReviewsSync = inngest.createFunction(
           const humanError = translateSyncError(err)
           await step.run(`mark-revoked-${userId}`, async () => {
             const admin = createServiceClient({ system: 'inngest:ownerrez-reviews-sync' })
-            const { data: existing } = await admin
+            const { data: existing, error: existingErr } = await admin
               .from('integration_connections')
               .select('id')
               .eq('user_id', userId)
               .eq('provider_id', 'ownerrez')
               .maybeSingle()
+
+            if (existingErr) {
+              throw new Error(`[OwnerRez:${userId}] Connection lookup failed: ${existingErr.message}`)
+            }
 
             await mergeIntegrationConnectionMetadata({
               userId,
@@ -129,37 +184,7 @@ export const ownerRezReviewsSync = inngest.createFunction(
 
             // Fire PM notification — throttled to once per 4 hours per connection
             if (existing?.id) {
-              const milestoneKey = `integration_error_notified:${existing.id}`
-              const { data: recentNotification } = await admin
-                .from('org_milestones')
-                .select('value, achieved_at')
-                .eq('org_id', orgId)
-                .eq('milestone', milestoneKey)
-                .order('achieved_at', { ascending: false })
-                .limit(1)
-                .maybeSingle()
-
-              const lastNotifiedAt = (recentNotification?.value as Record<string, unknown> | null)
-                ?.notified_at
-              const tooSoon = lastNotifiedAt &&
-                Date.now() - new Date(lastNotifiedAt as string).getTime() < 4 * 60 * 60 * 1000
-
-              if (!tooSoon) {
-                await step.sendEvent(`notify-revoked-${userId}`, {
-                  name: 'integration/connection.error',
-                  data: {
-                    user_id:     userId,
-                    org_id:      orgId,
-                    provider_id: 'ownerrez',
-                    reason:      humanError,
-                  },
-                })
-                await admin.from('org_milestones').upsert({
-                  org_id:    orgId,
-                  milestone: milestoneKey,
-                  value:     { notified_at: new Date().toISOString() },
-                }, { onConflict: 'org_id,milestone' })
-              }
+              await notifyRevokedThrottled(admin, userId, orgId, existing.id, humanError)
             }
           })
           continue
@@ -196,11 +221,15 @@ export const ownerRezReviewsSync = inngest.createFunction(
 
           const propertyMap: Map<string, string> = new Map()
           if (propertyExternalIds.length > 0) {
-            const { data: props } = await admin
+            const { data: props, error: propsErr } = await admin
               .from('properties')
               .select('id, external_id')
               .eq('org_id', orgId)
               .in('external_id', propertyExternalIds)
+
+            if (propsErr) {
+              throw new Error(`[OwnerRez:${userId}] Property lookup failed: ${propsErr.message}`)
+            }
 
             for (const p of props ?? []) {
               if (p.external_id) propertyMap.set(p.external_id, p.id as string)

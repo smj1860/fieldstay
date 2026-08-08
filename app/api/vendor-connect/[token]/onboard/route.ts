@@ -6,6 +6,7 @@ import { extractClientIp }           from '@/lib/integrations/webhook-verificati
 import { logAuditEvent }             from '@/lib/audit'
 
 import { reportError } from '@/lib/observability/report-error'
+import { isRealQueryError, throwIfAnyQueryFailed } from '@/lib/supabase/unwrap'
 /**
  * GET /api/vendor-connect/[token]/onboard
  *
@@ -37,13 +38,17 @@ interface ConnectVendor {
  * won the claim; the loser must not proceed to account creation.
  */
 async function claimAccountCreationSlot(supabase: ServiceClient, token: string): Promise<boolean> {
-  const { data: claimed } = await supabase
+  const { data: claimed, error } = await supabase
     .from('vendors')
     .update({ stripe_connect_account_id: 'pending' })
     .eq('stripe_connect_token', token)
     .is('stripe_connect_account_id', null)   // only updates if still null
     .select('id')
     .single()
+
+  if (isRealQueryError(error)) {
+    throwIfAnyQueryFailed({ site: 'route.vendor-connect.onboard.claimAccountCreationSlot' }, error)
+  }
 
   return Boolean(claimed)
 }
@@ -104,7 +109,7 @@ async function ensureConnectAccount(
     },
   })
 
-  await supabase
+  const { error: syncError } = await supabase
     .from('vendors')
     .update({
       stripe_connect_account_id:     account.id,
@@ -112,6 +117,15 @@ async function ensureConnectAccount(
     })
     .eq('id', vendor.id)
     .eq('org_id', vendor.org_id)
+
+  if (syncError) {
+    console.error('[vendor-connect/onboard] failed to record Connect account id:', syncError.message)
+    reportError(new Error(syncError.message), {
+      site:  'route.vendor-connect.onboard.ensureConnectAccount',
+      orgId: vendor.org_id,
+      extra: { vendor_id: vendor.id },
+    })
+  }
 
   await logAuditEvent({
     orgId:      vendor.org_id,
@@ -149,12 +163,16 @@ export async function GET(
 
   const supabase = createServiceClient({ publicSurface: 'api-vendor-connect--token--onboard' })
 
-  const { data: vendor } = await supabase
+  const { data: vendor, error: vendorError } = await supabase
     .from('vendors')
     .select('id, org_id, email, name, stripe_connect_account_id, stripe_connect_charges_enabled, stripe_connect_token_expires_at')
     .eq('stripe_connect_token', token)
     .eq('is_active', true)
     .single()
+
+  if (isRealQueryError(vendorError)) {
+    throwIfAnyQueryFailed({ site: 'route.vendor-connect.onboard.GET.vendorLookup' }, vendorError)
+  }
 
   if (!vendor) {
     return NextResponse.json({ error: 'Invalid or expired link' }, { status: 404 })

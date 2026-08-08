@@ -43,7 +43,7 @@ export async function handleWorkOrderInvoicePaid(
 
   // Post expense to owner_transactions
   // source_reference_id dedup prevents double-posting on retry
-  await supabase.from('owner_transactions').upsert(
+  const upsertRes = await supabase.from('owner_transactions').upsert(
     {
       org_id:               orgId,
       property_id:          inv.property_id,
@@ -59,13 +59,23 @@ export async function handleWorkOrderInvoicePaid(
     },
     { onConflict: 'source_reference_id,source', ignoreDuplicates: true }
   )
+  unwrap(upsertRes, {
+    site:  'webhook.stripe.work-order-invoice.post-expense',
+    orgId,
+    extra: { work_order_id: inv.work_order_id },
+  })
 
   // Update work order actual_cost
-  await supabase
+  const actualCostRes = await supabase
     .from('work_orders')
     .update({ actual_cost: inv.total })
     .eq('id', inv.work_order_id)
     .is('actual_cost', null)  // don't overwrite if PM already logged it
+  unwrap(actualCostRes, {
+    site:  'webhook.stripe.work-order-invoice.actual-cost',
+    orgId,
+    extra: { work_order_id: inv.work_order_id },
+  })
 
   // Fire audit event via Inngest (non-blocking)
   await inngest.send({

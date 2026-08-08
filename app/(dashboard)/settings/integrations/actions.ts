@@ -7,7 +7,7 @@ import { readIntegrationToken, disconnectIntegrationToken } from '@/lib/integrat
 import { getProvider }                   from '@/lib/integrations/registry'
 import { logAuditEvent }                 from '@/lib/audit'
 import { reportError } from '@/lib/observability/report-error'
-import { tryUnwrap }   from '@/lib/supabase/unwrap'
+import { tryUnwrap, reportQueryError } from '@/lib/supabase/unwrap'
 // Hostaway is not fully implemented yet (see connectWithApiKey below) —
 // storeIntegrationToken and hostawayExchangeCredentials are unused while
 // it's disabled. Re-add both imports when re-enabling.
@@ -135,13 +135,18 @@ export async function triggerResync(
       // out a calendar re-check for every active Hospitable property too, so
       // "Trigger Resync" means everything resyncs, not "everything except
       // blocks, wait for tomorrow's cron."
-      const { data: hospProperties } = await supabase
+      const { data: hospProperties, error: hospPropertiesError } = await supabase
         .from('properties')
         .select('id, external_id')
         .eq('org_id', resolvedOrgId)
         .eq('external_source', 'hospitable')
         .eq('is_active', true)
         .not('external_id', 'is', null)
+
+      reportQueryError(hospPropertiesError, {
+        site:  'serverAction.settings.integrations.triggerResync.hospProperties',
+        orgId: resolvedOrgId,
+      })
 
       if (hospProperties?.length) {
         await inngest.send(

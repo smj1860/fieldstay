@@ -1,7 +1,7 @@
 'use server'
 
 import { createServiceClient } from '@/lib/supabase/server'
-import { unwrap } from '@/lib/supabase/unwrap'
+import { unwrap, isRealQueryError, throwIfAnyQueryFailed } from '@/lib/supabase/unwrap'
 import { stripe } from '@/lib/stripe/client'
 import { requireOrgRole } from '@/lib/auth'
 import { inngest } from '@/lib/inngest/client'
@@ -300,12 +300,19 @@ export async function upsertPropertyGuidebookConfig(
     const { user, membership } = await requireOrgRole(['admin', 'manager'])
     const supabase        = createServiceClient({ authorizedBy: membership })
 
-    const { data: property } = await supabase
+    const { data: property, error: propertyError } = await supabase
       .from('properties')
       .select('id')
       .eq('id', input.propertyId)
       .eq('org_id', membership.org_id)
       .single()
+
+    if (isRealQueryError(propertyError)) {
+      throwIfAnyQueryFailed(
+        { site: 'serverAction.guidebook.upsertPropertyGuidebookConfig', orgId: membership.org_id },
+        propertyError,
+      )
+    }
 
     if (!property) return { error: 'Property not found.' }
 

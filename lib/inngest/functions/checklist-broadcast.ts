@@ -1,5 +1,6 @@
 import { inngest }           from '@/lib/inngest/client'
 import { createServiceClient } from '@/lib/supabase/server'
+import { isRealQueryError, throwIfAnyQueryFailed } from '@/lib/supabase/unwrap'
 
 interface TemplateItem {
   task:           string
@@ -41,7 +42,7 @@ export const broadcastChecklistTemplateJob = inngest.createFunction(
 
     const sourceTemplate = await step.run('load-source-template', async () => {
       const supabase = createServiceClient({ system: 'inngest:checklist-broadcast' })
-      const { data } = await supabase
+      const { data, error } = await supabase
         .from('checklist_templates')
         .select(`
           id, name,
@@ -54,6 +55,12 @@ export const broadcastChecklistTemplateJob = inngest.createFunction(
         .eq('org_id', org_id)
         .eq('is_default', true)
         .single()
+      if (isRealQueryError(error)) {
+        throwIfAnyQueryFailed(
+          { site: 'inngest.checklist-template-broadcast.load-source-template', orgId: org_id },
+          error,
+        )
+      }
       return data
     })
 
@@ -65,7 +72,7 @@ export const broadcastChecklistTemplateJob = inngest.createFunction(
       const applied = await step.run(`broadcast-to-${targetId}`, async () => {
         const supabase = createServiceClient({ system: 'inngest:checklist-broadcast' })
 
-        const { data: newTemplate } = await supabase
+        const { data: newTemplate, error: newTemplateError } = await supabase
           .from('checklist_templates')
           .upsert({
             property_id: targetId,
@@ -76,15 +83,29 @@ export const broadcastChecklistTemplateJob = inngest.createFunction(
           .select('id')
           .single()
 
+        if (newTemplateError) {
+          throwIfAnyQueryFailed(
+            { site: 'inngest.checklist-template-broadcast.upsert-template', orgId: org_id, extra: { targetId } },
+            newTemplateError,
+          )
+        }
+
         if (!newTemplate) return false
 
-        const { data: existingSections } = await supabase
+        const { data: existingSections, error: existingSectionsError } = await supabase
           .from('checklist_template_sections')
           .select(`
             name, sort_order, requires_section_photo,
             checklist_template_items (task, requires_photo, notes, sort_order)
           `)
           .eq('template_id', newTemplate.id)
+
+        if (existingSectionsError) {
+          throwIfAnyQueryFailed(
+            { site: 'inngest.checklist-template-broadcast.existing-sections', orgId: org_id, extra: { targetId } },
+            existingSectionsError,
+          )
+        }
 
         const sourceSignature = templateSignature((sourceTemplate.checklist_template_sections ?? []) as TemplateSection[])
 
@@ -101,7 +122,7 @@ export const broadcastChecklistTemplateJob = inngest.createFunction(
 
         const sections = sourceTemplate.checklist_template_sections ?? []
         for (const section of sections) {
-          const { data: newSection } = await supabase
+          const { data: newSection, error: newSectionError } = await supabase
             .from('checklist_template_sections')
             .insert({
               template_id:            newTemplate.id,
@@ -111,6 +132,17 @@ export const broadcastChecklistTemplateJob = inngest.createFunction(
             })
             .select('id')
             .single()
+
+          if (newSectionError) {
+            throwIfAnyQueryFailed(
+              {
+                site: 'inngest.checklist-template-broadcast.insert-section',
+                orgId: org_id,
+                extra: { targetId, sectionName: section.name },
+              },
+              newSectionError,
+            )
+          }
 
           if (!newSection) continue
 

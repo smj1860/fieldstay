@@ -4,7 +4,7 @@ import type { SupabaseClient } from '@supabase/supabase-js'
 import type { RoomTemplateItem } from '@/types/database'
 import { logAuditEvent } from '@/lib/audit'
 import { seedDefaultRoomTemplatesIfNeeded } from './seed-default-room-templates'
-import { unwrap } from '@/lib/supabase/unwrap'
+import { unwrap, unwrapList, throwIfAnyQueryFailed, isRealQueryError, reportQueryError } from '@/lib/supabase/unwrap'
 
 /**
  * Applies the org's master checklist to a single property.
@@ -32,19 +32,31 @@ import { unwrap } from '@/lib/supabase/unwrap'
 // a real, fully-populated checklist still shows the wizard's checklist step
 // as incomplete forever, because nothing ever wrote setup_steps_completed.
 async function markChecklistStepComplete(propertyId: string, supabase: SupabaseClient): Promise<void> {
-  const { data } = await supabase
+  const { data, error } = await supabase
     .from('properties')
     .select('setup_steps_completed')
     .eq('id', propertyId)
     .single()
 
+  if (isRealQueryError(error)) {
+    throwIfAnyQueryFailed(
+      { site: 'lib.checklists.apply-master-template.mark-step-complete', extra: { propertyId } },
+      error,
+    )
+  }
+
   const current = (data?.setup_steps_completed as Record<string, boolean>) ?? {}
   if (current.checklist === true) return
 
-  await supabase
+  const { error: updateError } = await supabase
     .from('properties')
     .update({ setup_steps_completed: { ...current, checklist: true } })
     .eq('id', propertyId)
+
+  reportQueryError(updateError, {
+    site: 'lib.checklists.apply-master-template.mark-step-complete-write',
+    extra: { propertyId },
+  })
 }
 
 interface ComposedSection {
@@ -208,6 +220,124 @@ function composeSections(
   return sections
 }
 
+// Resolves the template id to write sections/items into: clears an existing
+// default template's sections (cascades to items via FK) when `force` was
+// requested, or creates a fresh default template when none exists yet. Split
+// out of applyMasterChecklistToProperty so its own delete-then-recreate
+// branching doesn't add to that function's already-high complexity.
+async function getOrCreateTemplateId(
+  supabase:        SupabaseClient,
+  orgId:           string,
+  propertyId:      string,
+  existingTemplate: { id: unknown } | null,
+): Promise<string> {
+  if (!existingTemplate) {
+    const { data: newTemplate, error: newTemplateError } = await supabase
+      .from('checklist_templates')
+      .insert({ org_id: orgId, property_id: propertyId, name: 'Standard Turnover', is_default: true })
+      .select('id')
+      .single()
+
+    if (newTemplateError) {
+      throwIfAnyQueryFailed(
+        { site: 'lib.checklists.apply-master-template.create-template', orgId, extra: { propertyId } },
+        newTemplateError,
+      )
+    }
+
+    return newTemplate?.id as string
+  }
+
+  const templateId = existingTemplate.id as string
+
+  // Delete-then-insert: remove existing sections (cascades to items via FK)
+  const existingSectionsRes = await supabase
+    .from('checklist_template_sections')
+    .select('id')
+    .eq('template_id', templateId)
+
+  const existingSections = unwrapList(existingSectionsRes, {
+    site: 'lib.checklists.apply-master-template.existing-sections',
+    orgId,
+  })
+
+  if (existingSections.length) {
+    const sectionIds = existingSections.map((s) => s.id as string)
+
+    const { error: deleteItemsError } = await supabase
+      .from('checklist_template_items')
+      .delete()
+      .in('section_id', sectionIds)
+    if (deleteItemsError) {
+      throw new Error(
+        `Failed to delete existing checklist items for template ${templateId}: ${deleteItemsError.message}`
+      )
+    }
+
+    const { error: deleteSectionsError } = await supabase
+      .from('checklist_template_sections')
+      .delete()
+      .eq('template_id', templateId)
+    if (deleteSectionsError) {
+      throw new Error(
+        `Failed to delete existing checklist sections for template ${templateId}: ${deleteSectionsError.message}`
+      )
+    }
+  }
+
+  return templateId
+}
+
+// Inserts one section (and its items) per composed entry, in order. No
+// name-based grouping/deduplication — two "Bedroom 1" sections from two
+// different templates must stay distinct, never merged just because they
+// share a label.
+async function insertComposedSections(
+  supabase:   SupabaseClient,
+  templateId: string,
+  propertyId: string,
+  composed:   ComposedSection[],
+): Promise<void> {
+  for (let i = 0; i < composed.length; i++) {
+    const section = composed[i]
+
+    const { data: sectionRow, error: sectionErr } = await supabase
+      .from('checklist_template_sections')
+      .insert({
+        template_id:       templateId,
+        name:              section.name,
+        room_template_id:  section.roomTemplateId,
+        sort_order:        i,
+      })
+      .select('id')
+      .single()
+
+    if (sectionErr || !sectionRow) {
+      throw new Error(
+        `Failed to insert checklist section "${section.name}" for property ${propertyId}: ` +
+        (sectionErr?.message ?? 'no row returned')
+      )
+    }
+
+    const { error: itemsError } = await supabase.from('checklist_template_items').insert(
+      section.items.map((item) => ({
+        section_id:     sectionRow.id,
+        template_id:    templateId,
+        task:           item.task,
+        requires_photo: item.requires_photo,
+        notes:          item.notes,
+        sort_order:     item.sort_order,
+      }))
+    )
+
+    if (itemsError) {
+      throw new Error(
+        `Failed to insert checklist items for section "${section.name}" (property ${propertyId}): ${itemsError.message}`
+      )
+    }
+  }
+}
+
 export async function applyMasterChecklistToProperty(
   propertyId: string,
   orgId:      string,
@@ -231,12 +361,19 @@ export async function applyMasterChecklistToProperty(
     await seedDefaultRoomTemplatesIfNeeded(orgId)
   }
 
-  const { data: property } = await supabase
+  const { data: property, error: propertyError } = await supabase
     .from('properties')
     .select('bedrooms, bathrooms')
     .eq('id', propertyId)
     .eq('org_id', orgId)
     .single()
+
+  if (isRealQueryError(propertyError)) {
+    throwIfAnyQueryFailed(
+      { site: 'lib.checklists.apply-master-template.property', orgId, extra: { propertyId } },
+      propertyError,
+    )
+  }
 
   let composed: ComposedSection[] = []
   if (property) {
@@ -286,69 +423,10 @@ export async function applyMasterChecklistToProperty(
     return
   }
 
-  let templateId: string
+  const templateId = await getOrCreateTemplateId(supabase, orgId, propertyId, existingTemplate)
+  if (!templateId) return
 
-  if (existingTemplate) {
-    templateId = existingTemplate.id as string
-
-    // Delete-then-insert: remove existing sections (cascades to items via FK)
-    const { data: existingSections } = await supabase
-      .from('checklist_template_sections')
-      .select('id')
-      .eq('template_id', templateId)
-
-    if (existingSections?.length) {
-      const sectionIds = existingSections.map((s) => s.id as string)
-      await supabase.from('checklist_template_items').delete().in('section_id', sectionIds)
-      await supabase.from('checklist_template_sections').delete().eq('template_id', templateId)
-    }
-  } else {
-    const { data: newTemplate } = await supabase
-      .from('checklist_templates')
-      .insert({ org_id: orgId, property_id: propertyId, name: 'Standard Turnover', is_default: true })
-      .select('id')
-      .single()
-
-    if (!newTemplate) return
-    templateId = newTemplate.id as string
-  }
-
-  // Insert sections and items directly from `composed` — one section per
-  // entry, in order. No name-based grouping/deduplication here — two
-  // "Bedroom 1" sections from two different templates must stay distinct,
-  // never merged just because they share a label.
-  for (let i = 0; i < composed.length; i++) {
-    const section = composed[i]
-
-    const { data: sectionRow, error: sectionErr } = await supabase
-      .from('checklist_template_sections')
-      .insert({
-        template_id:       templateId,
-        name:              section.name,
-        room_template_id:  section.roomTemplateId,
-        sort_order:        i,
-      })
-      .select('id')
-      .single()
-
-    if (sectionErr || !sectionRow) {
-      throw new Error(
-        `Failed to insert checklist section "${section.name}" for property ${propertyId}: ` +
-        (sectionErr?.message ?? 'no row returned')
-      )
-    }
-
-    await supabase.from('checklist_template_items').insert(
-      section.items.map((item) => ({
-        section_id:     sectionRow.id,
-        template_id:    templateId,
-        task:           item.task,
-        requires_photo: item.requires_photo,
-        notes:          item.notes,
-        sort_order:     item.sort_order,
-      }))
-    )
-  }
+  await insertComposedSections(supabase, templateId, propertyId, composed)
 
   await markChecklistStepComplete(propertyId, supabase)
 

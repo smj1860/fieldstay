@@ -4,7 +4,7 @@ import { resend, FROM }          from '@/lib/resend/client'
 import { renderTrialExpiringEmail } from '@/emails/trial-expiring'
 import { renderTrialExpiredEmail }  from '@/emails/trial-expired'
 import { resolveEmailAudience, commercialPostalAddress } from '@/lib/email/unsubscribe'
-import { unwrap } from '@/lib/supabase/unwrap'
+import { tryUnwrap, unwrap } from '@/lib/supabase/unwrap'
 
 /**
  * Has this org stopped being a trial? If so the rest of the sequence must not
@@ -73,12 +73,17 @@ export const handleTrialLifecycle = inngest.createFunction(
     await step.run('send-trial-expiring-email', async () => {
       const supabase = createServiceClient({ system: 'inngest:email-trial-lifecycle' })
 
-      const { data: integration } = await supabase
+      const integrationRes = await supabase
         .from('integration_connections')
         .select('id')
         .eq('org_id', org_id)
         .eq('provider_id', 'ownerrez')
         .maybeSingle()
+      const integrationOut = tryUnwrap(integrationRes, {
+        site:  'inngest.email-trial-lifecycle.send-trial-expiring-email',
+        orgId: org_id,
+      })
+      const integration = integrationOut.ok ? integrationOut.data : null
 
       const { count: propertyCount } = await supabase
         .from('properties')

@@ -1,4 +1,4 @@
-import { unwrap } from '@/lib/supabase/unwrap'
+import { unwrap, reportQueryError } from '@/lib/supabase/unwrap'
 import { stripe }              from '@/lib/stripe/client'
 import { resend, FROM }        from '@/lib/resend/client'
 import { createServiceClient } from '@/lib/supabase/server'
@@ -62,11 +62,13 @@ async function releaseVendorConnectInviteClaim(
   vendorId: string,
   orgId: string
 ): Promise<void> {
-  await supabase
+  const { error } = await supabase
     .from('vendors')
     .update({ stripe_connect_invite_claimed_at: null })
     .eq('id', vendorId)
     .eq('org_id', orgId)
+
+  reportQueryError(error, { site: 'lib.stripe.vendor-connect-invite.release-claim', orgId })
 }
 
 export interface EnsureVendorConnectInvitedParams {
@@ -135,11 +137,15 @@ export async function ensureVendorConnectInvited(
       // Persisted immediately — independent of whether the email send below
       // succeeds — so a retry after a Resend failure reuses this account
       // instead of creating a second, untracked one.
-      await supabase
+      const persistAccountRes = await supabase
         .from('vendors')
         .update({ stripe_connect_account_id: accountId })
         .eq('id', params.vendorId)
         .eq('org_id', params.orgId)
+      unwrap(persistAccountRes, {
+        site: 'lib.stripe.vendor-connect-invite.persist-account-id',
+        orgId: params.orgId,
+      })
     }
 
     const onboardingUrl = `${process.env.NEXT_PUBLIC_APP_URL}/api/vendor-connect/${params.vendorConnectToken}/onboard`
@@ -157,11 +163,15 @@ export async function ensureVendorConnectInvited(
       }),
     })
 
-    await supabase
+    const persistSentAtRes = await supabase
       .from('vendors')
       .update({ stripe_connect_invite_sent_at: new Date().toISOString() })
       .eq('id', params.vendorId)
       .eq('org_id', params.orgId)
+    unwrap(persistSentAtRes, {
+      site: 'lib.stripe.vendor-connect-invite.persist-sent-at',
+      orgId: params.orgId,
+    })
 
     return { invited: true }
   } finally {
@@ -236,7 +246,7 @@ export async function resendVendorConnectInvite(
       }),
     })
 
-    await supabase
+    const resendPersistRes = await supabase
       .from('vendors')
       .update({
         stripe_connect_account_id:     accountId,
@@ -244,6 +254,10 @@ export async function resendVendorConnectInvite(
       })
       .eq('id', params.vendorId)
       .eq('org_id', params.orgId)
+    unwrap(resendPersistRes, {
+      site: 'lib.stripe.vendor-connect-invite.resend-persist',
+      orgId: params.orgId,
+    })
   } finally {
     await releaseVendorConnectInviteClaim(supabase, params.vendorId, params.orgId)
   }

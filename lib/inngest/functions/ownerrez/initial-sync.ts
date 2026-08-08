@@ -44,6 +44,7 @@ import type { TablesInsert, TablesUpdate } from '@/types/database'
 
 import { reportError } from '@/lib/observability/report-error'
 import { fetchAllRows } from '@/lib/inngest/paginate'
+import { tryUnwrap, unwrapList } from '@/lib/supabase/unwrap'
 const PROVIDER = 'ownerrez'
 
 async function writeSyncCount(
@@ -159,14 +160,18 @@ export const ownerRezInitialSync = inngest.createFunction(
         const supabase    = createServiceClient({ system: 'inngest:initial-sync' })
         const externalIds = fetchPropsResult.patchData.map((p) => p.externalId)
 
-        const { data: existingProps } = await supabase
+        const existingPropsRes = await supabase
           .from('properties')
           .select('id, external_id, bedrooms, bathrooms, square_footage')
           .eq('org_id', org_id)
           .eq('external_source', PROVIDER)
           .in('external_id', externalIds)
+        const existingProps = unwrapList(existingPropsRes, {
+          site:  'inngest.ownerrez-initial-sync.patch-property-fields',
+          orgId: org_id,
+        })
 
-        if (!existingProps?.length) return
+        if (!existingProps.length) return
 
         // MEDIUM-2: collect patch failures rather than silently swallowing them
         const failures: string[] = []
@@ -235,13 +240,16 @@ export const ownerRezInitialSync = inngest.createFunction(
       // the per-property steps below can be fanned out from the loop).
       const enrichTargets = await step.run('fetch-properties-to-enrich', async () => {
         const supabase = createServiceClient({ system: 'inngest:initial-sync' })
-        const { data } = await supabase
+        const res = await supabase
           .from('properties')
           .select('id, external_id, wifi_name, wifi_password, access_instructions, house_manual, amenities')
           .eq('external_source', PROVIDER)
           .eq('org_id', org_id)
           .eq('is_active', true)
-        return (data ?? []) as EnrichTarget[]
+        return unwrapList(res, {
+          site:  'inngest.ownerrez-initial-sync.fetch-properties-to-enrich',
+          orgId: org_id,
+        }) as EnrichTarget[]
       })
 
       // Step 1c-ii: batch fetch amenity listings once (shared across all
@@ -667,12 +675,17 @@ export const ownerRezInitialSync = inngest.createFunction(
         const supabase = createServiceClient({ system: 'inngest:initial-sync' })
         const isRevoked = err instanceof TokenRevokedError
 
-        const { data: existing } = await supabase
+        const existingRes = await supabase
           .from('integration_connections')
           .select('id')
           .eq('user_id', user_id)
           .eq('provider_id', PROVIDER)
           .maybeSingle()
+        const existingOut = tryUnwrap(existingRes, {
+          site:  'inngest.ownerrez-initial-sync.handle-sync-failure',
+          orgId: org_id,
+        })
+        const existing = existingOut.ok ? existingOut.data : null
 
         await mergeIntegrationConnectionMetadata({
           userId:     user_id,
@@ -705,7 +718,7 @@ export const ownerRezInitialSync = inngest.createFunction(
         // can fix them by reconnecting, and they never self-resolve on retry.
         if (existing?.id) {
           const milestoneKey = `integration_error_notified:${existing.id}`
-          const { data: recentNotification } = await supabase
+          const recentNotificationRes = await supabase
             .from('org_milestones')
             .select('value, achieved_at')
             .eq('org_id', org_id)
@@ -713,6 +726,11 @@ export const ownerRezInitialSync = inngest.createFunction(
             .order('achieved_at', { ascending: false })
             .limit(1)
             .maybeSingle()
+          const recentNotificationOut = tryUnwrap(recentNotificationRes, {
+            site:  'inngest.ownerrez-initial-sync.handle-sync-failure.throttle',
+            orgId: org_id,
+          })
+          const recentNotification = recentNotificationOut.ok ? recentNotificationOut.data : null
 
           const lastNotifiedAt = (recentNotification?.value as Record<string, unknown> | null)
             ?.notified_at
@@ -729,11 +747,18 @@ export const ownerRezInitialSync = inngest.createFunction(
                 reason:      humanError,
               },
             })
-            await supabase.from('org_milestones').upsert({
+            const { error: milestoneUpsertError } = await supabase.from('org_milestones').upsert({
               org_id:    org_id,
               milestone: milestoneKey,
               value:     { notified_at: new Date().toISOString() },
             }, { onConflict: 'org_id,milestone' })
+            if (milestoneUpsertError) {
+              console.error(`[OwnerRez:${user_id}] failed to record error-notification milestone:`, milestoneUpsertError)
+              reportError(milestoneUpsertError, {
+                site:  'inngest.ownerrez-initial-sync.handle-sync-failure.record-notified',
+                orgId: org_id,
+              })
+            }
           }
         }
       })

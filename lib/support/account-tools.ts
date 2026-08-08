@@ -3,6 +3,7 @@ import { createServiceClient } from '@/lib/supabase/server'
 import { unwrapJoin } from '@/lib/utils/supabase-joins'
 import { stripe } from '@/lib/stripe/client'
 import { reportError } from '@/lib/observability/report-error'
+import { reportQueryError, tryUnwrapList } from '@/lib/supabase/unwrap'
 
 /**
  * Account-specific data tools for the support bot.
@@ -15,7 +16,7 @@ import { reportError } from '@/lib/observability/report-error'
 export async function getPlanStatus(orgId: string) {
   const supabase = createServiceClient({ system: 'lib/support/account-tools' })
 
-  const { data: org } = await supabase
+  const { data: org, error: orgError } = await supabase
     .from('organizations')
     .select('plan_status, plan, created_at')
     .eq('id', orgId)
@@ -33,7 +34,9 @@ export async function getPlanStatus(orgId: string) {
     .eq('org_id', orgId)
     .eq('status', 'active')
 
-  if (!org) return { error: 'Could not find account information.' }
+  if (reportQueryError(orgError, { site: 'lib.support.account-tools.getPlanStatus', orgId }) || !org) {
+    return { error: 'Could not find account information.' }
+  }
 
   return {
     plan:                org.plan,
@@ -155,12 +158,18 @@ export async function getWorkOrderStatus(orgId: string) {
 
   const crewNameById = new Map<string, string>()
   if (crewIds.length) {
-    const { data: crew } = await supabase
+    const crewRes = await supabase
       .from('crew_members')
       .select('id, name')
       .eq('org_id', orgId)
       .in('id', crewIds)
-    for (const c of crew ?? []) crewNameById.set(c.id, c.name)
+    const crewOut = tryUnwrapList(crewRes, {
+      site: 'lib.support.account-tools.getWorkOrderStatus.crewLookup',
+      orgId,
+    })
+    if (crewOut.ok) {
+      for (const c of crewOut.data) crewNameById.set(c.id, c.name)
+    }
   }
 
   return {
@@ -265,13 +274,15 @@ export async function getBelowParInventory(orgId: string) {
 export async function getBillingDetails(orgId: string) {
   const supabase = createServiceClient({ system: 'lib/support/account-tools' })
 
-  const { data: org } = await supabase
+  const { data: org, error: orgError } = await supabase
     .from('organizations')
     .select('plan, plan_status, trial_ends_at, max_properties, stripe_customer_id')
     .eq('id', orgId)
     .single()
 
-  if (!org) return { error: 'Could not find billing information.' }
+  if (reportQueryError(orgError, { site: 'lib.support.account-tools.getBillingDetails', orgId }) || !org) {
+    return { error: 'Could not find billing information.' }
+  }
 
   const base = {
     plan:          org.plan,

@@ -117,7 +117,7 @@ const EXCEPTIONS: Record<string, string> = {
   // createWorkOrder calls the action.
   'app/(dashboard)/maintenance/actions.ts:585':
     'Per-vendor quote_requests insert (insertQuoteRequests) — each row needs its own randomly generated quote_token before its own Inngest event fires, so batching would mean moving token generation to the caller. Bounded by the vendor count the PM ticked in one dialog, and it is the only RFQ sender in the codebase.',
-  'app/(dashboard)/properties/clone-actions.ts:114':
+  'app/(dashboard)/properties/clone-actions.ts:121':
     'Per-section checklist_template_sections insert — each section needs its own DB-generated id before the child checklist_template_items insert can reference it as section_id. Parent-before-child dependency, not a batchable read.',
   'app/api/work-orders/[token]/photos/route.ts:109':
     'Per-photo storage upload + work_order_photos row — each photo is a distinct uploaded file with its own generated storage path; there is no batched form of a storage upload.',
@@ -131,19 +131,19 @@ const EXCEPTIONS: Record<string, string> = {
     'Real N+1 (existence check, next-booking lookup, opt-in lookup, insert — 4 queries per booking) left as a known, bounded cost — deferred rather than fixed blind, touches live guest-messaging sync logic. Bounded by same-day checkouts per org per day.',
   'lib/inngest/functions/ownerrez/reconciliation-handler.ts:162':
     'Real N+1 (cancel booking + cancel its turnovers, per stale booking) left as a known, bounded cost — deferred rather than fixed blind. Contrast lib/inngest/functions/ical-sync.ts, which batches the equivalent booking-cancel via .update().in(\'id\', ids) — a good template for fixing this one later.',
-  'lib/inngest/functions/checklist-broadcast.ts:103':
-    'Per-section insert (parent-before-child, same reasoning as clone-actions.ts:114) — additionally guarded by a template-signature equality check just above that skips the whole delete-then-recreate rebuild when nothing changed.',
+  'lib/inngest/functions/checklist-broadcast.ts:124':
+    'Per-section insert (parent-before-child, same reasoning as clone-actions.ts:121) — additionally guarded by a template-signature equality check just above that skips the whole delete-then-recreate rebuild when nothing changed.',
   'lib/inngest/functions/cron/guest-pii-retention.ts:137':
     'Per-secret delete_vault_secret RPC call — each is a distinct external Vault secret; structurally cannot be batched into one call any more than "one API call per distinct external resource" ever can. Bounded since the 2026-07-30 scalability pass: the loop now iterates one BOOKING_BATCH_SIZE page inside a per-batch step, not an org\'s entire un-anonymized booking history.',
-  'lib/inngest/functions/ownerrez/initial-sync.ts:174':
+  'lib/inngest/functions/ownerrez/initial-sync.ts:179':
     'Per-property conditional field patch (bedrooms/bathrooms/square_footage) — each property\'s patch object contains different values, so it is not a uniform batched update. Pre-fetch of existing rows just above IS already batched via .in(\'external_id\', ids).',
-  'lib/guidebook/sync.ts:136':
+  'lib/guidebook/sync.ts:141':
     'Per-property conditional guidebook-config patch — same shape as ownerrez/initial-sync.ts:173 (differing patch per row); the read side just above is already batched via .in(\'property_id\', ids).',
   'lib/properties/upsert-normalized.ts:165':
     'Per-property conditional cleaning_cost backfill — same differing-patch-per-row shape as the two entries above.',
   'lib/inngest/functions/turnover-events.ts:330':
     'Milestone-flag upserts — the milestones array has at most 3 possible entries (first_turnover_complete/_10/_50) and is almost always exactly 1; negligible enough that batching would add more complexity than it saves.',
-  'lib/push/send-push.ts:48':
+  'lib/push/send-push.ts:60':
     'Per-subscription webpush.sendNotification call (+ conditional delete on a 410) — each subscription is a distinct external Web Push endpoint; inherently one call per endpoint, like the Vault-secret case above.',
   'lib/inngest/functions/geocoding-backfill.ts:75':
     'Per-unique-coordinate-group update — already the optimized end state (grouped from one geocode call per property down to one per distinct resolved lat/lng); a single UPDATE cannot set different coordinate values across differently-grouped id sets without a CASE expression, which is a bigger and less readable change for the same 3-4 typical groups per run.',

@@ -27,18 +27,30 @@ export async function sendPushToUser(userId: string, payload: SendPushPayload): 
 
   const supabase = createServiceClient({ system: 'lib/push/send-push' })
 
-  const { data: crewMember } = await supabase
+  const { data: crewMember, error: crewMemberError } = await supabase
     .from('crew_members')
     .select('id')
     .eq('user_id', userId)
     .maybeSingle()
 
+  if (crewMemberError) {
+    console.error('[sendPushToUser] crew member lookup failed', crewMemberError.message)
+    reportError(crewMemberError, { site: 'lib.push.send-push.sendPushToUser.crewMemberLookup' })
+    return
+  }
+
   if (!crewMember) return
 
-  const { data: subscriptions } = await supabase
+  const { data: subscriptions, error: subscriptionsError } = await supabase
     .from('push_subscriptions')
     .select('id, endpoint, p256dh, auth')
     .eq('crew_member_id', crewMember.id)
+
+  if (subscriptionsError) {
+    console.error('[sendPushToUser] subscriptions lookup failed', subscriptionsError.message)
+    reportError(subscriptionsError, { site: 'lib.push.send-push.sendPushToUser.subscriptionsLookup' })
+    return
+  }
 
   if (!subscriptions || subscriptions.length === 0) return
 

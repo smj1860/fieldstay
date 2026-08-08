@@ -8,7 +8,7 @@ import { logAuditEvent } from '@/lib/audit'
 import type { ComplianceDocType } from '@/types/database'
 
 import { reportError } from '@/lib/observability/report-error'
-import { reportQueryError } from '@/lib/supabase/unwrap'
+import { isRealQueryError, reportQueryError, throwIfAnyQueryFailed, tryUnwrap } from '@/lib/supabase/unwrap'
 export type ComplianceDocActionState = { error?: string; success?: boolean }
 
 export async function createComplianceDocument(
@@ -20,12 +20,16 @@ export async function createComplianceDocument(
     const { user, supabase, membership } = await requireOrgRole(['admin', 'manager'])
 
     // Confirm vendor belongs to this org
-    const { data: vendor } = await supabase
+    const { data: vendor, error: vendorError } = await supabase
       .from('vendors')
       .select('id')
       .eq('id', vendorId)
       .eq('org_id', membership.org_id)
       .single()
+
+    if (isRealQueryError(vendorError)) {
+      throwIfAnyQueryFailed({ site: 'serverAction.vendors.createComplianceDocument.verify', orgId: membership.org_id }, vendorError)
+    }
 
     if (!vendor) return { error: 'Vendor not found' }
 
@@ -156,11 +160,21 @@ export async function deleteComplianceDocument(
 ): Promise<void> {
   try {
     const { user, supabase, membership } = await requireOrgRole(['admin', 'manager'])
-    await supabase
+    const { error } = await supabase
       .from('vendor_compliance_documents')
       .update({ is_active: false })
       .eq('id', docId)
       .eq('org_id', membership.org_id)
+
+    if (error) {
+      console.error('[deleteComplianceDocument]', error)
+      reportError(error, {
+        site:  'serverAction.vendors.deleteComplianceDocument',
+        orgId: membership.org_id,
+        extra: { document_id: docId, vendor_id: vendorId },
+      })
+      throw new Error('Could not deactivate the document. Please try again.')
+    }
 
     await logAuditEvent({
       orgId:      membership.org_id,
@@ -186,11 +200,19 @@ export async function verifyComplianceDocument(
 ): Promise<{ error?: string }> {
   try {
     const { user, supabase, membership } = await requireOrgRole(['admin', 'manager'])
-    await supabase
+    const { error } = await supabase
       .from('vendor_compliance_documents')
       .update({ is_verified: true })
       .eq('id', docId)
       .eq('org_id', membership.org_id)
+
+    if (reportQueryError(error, {
+      site:  'serverAction.vendors.verifyComplianceDocument',
+      orgId: membership.org_id,
+      extra: { document_id: docId, vendor_id: vendorId },
+    })) {
+      return { error: 'Operation failed. Please try again.' }
+    }
 
     await logAuditEvent({
       orgId:      membership.org_id,
@@ -216,12 +238,16 @@ export async function resendVendorConnectInvite(
   try {
     const { supabase, membership } = await requireOrgRole(['admin', 'manager'])
 
-    const { data: vendor } = await supabase
+    const { data: vendor, error: vendorError } = await supabase
       .from('vendors')
       .select('id, name, email, stripe_connect_charges_enabled, stripe_connect_token')
       .eq('id', vendorId)
       .eq('org_id', membership.org_id)
       .single()
+
+    if (isRealQueryError(vendorError)) {
+      throwIfAnyQueryFailed({ site: 'serverAction.vendors.resendVendorConnectInvite.verify', orgId: membership.org_id }, vendorError)
+    }
 
     if (!vendor) return { error: 'Vendor not found' }
     if (!vendor.email) return { error: 'This vendor has no email address on file.' }
@@ -239,11 +265,16 @@ export async function resendVendorConnectInvite(
     })
     if (!rl.allowed) return { error: 'Too many invites sent. Please try again in a little while.' }
 
-    const { data: org } = await supabase
+    const orgRes = await supabase
       .from('organizations')
       .select('name')
       .eq('id', membership.org_id)
       .single()
+    const orgOut = tryUnwrap(orgRes, {
+      site:  'serverAction.vendors.resendVendorConnectInvite.orgLookup',
+      orgId: membership.org_id,
+    })
+    const org = orgOut.ok ? orgOut.data : null
 
     await sendResendConnectInvite({
       vendorId:           vendor.id,

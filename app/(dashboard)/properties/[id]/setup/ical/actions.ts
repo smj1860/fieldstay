@@ -10,6 +10,7 @@ import { inngest } from '@/lib/inngest/client'
 import { assertSafeExternalUrl, UnsafeUrlError } from '@/lib/security/url-guard'
 
 import { reportError } from '@/lib/observability/report-error'
+import { isRealQueryError, reportQueryError } from '@/lib/supabase/unwrap'
 export type IcalState = { error?: string; success?: boolean }
 
 /**
@@ -59,12 +60,17 @@ export async function addIcalFeed(
     const urlError = await validateFeedUrl(url)
     if (urlError) return { error: urlError }
 
-    const { data: property } = await supabase
+    const { data: property, error: propertyError } = await supabase
       .from('properties')
       .select('id')
       .eq('id', propertyId)
       .eq('org_id', membership.org_id)
       .single()
+
+    if (isRealQueryError(propertyError)) {
+      reportQueryError(propertyError, { site: 'serverAction.properties.setup.ical.addIcalFeed.propertyLookup', orgId: membership.org_id })
+      return { error: 'Operation failed. Please try again.' }
+    }
 
     if (!property) return { error: 'Property not found' }
 
@@ -100,11 +106,13 @@ export async function addIcalFeed(
 export async function deleteIcalFeed(feedId: string, propertyId: string): Promise<void> {
   try {
     const { supabase, membership, user } = await requireOrgMember()
-    await supabase
+    const { error } = await supabase
       .from('ical_feeds')
       .delete()
       .eq('id', feedId)
       .eq('org_id', membership.org_id)
+
+    if (error) throw error
 
     await logAuditEvent({
       orgId:      membership.org_id,
@@ -138,13 +146,15 @@ export async function triggerSingleFeedSync(feedId: string, propertyId: string):
   try {
     const { supabase, membership } = await requireOrgMember()
 
-    const { data: feed } = await supabase
+    const { data: feed, error: feedError } = await supabase
       .from('ical_feeds')
       .select('id')
       .eq('id', feedId)
       .eq('org_id', membership.org_id)
       .eq('property_id', propertyId)
       .maybeSingle()
+
+    if (feedError) throw feedError
 
     if (!feed) return
 

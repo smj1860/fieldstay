@@ -4,6 +4,7 @@ import { revalidatePath } from 'next/cache'
 import { requireOrgRole } from '@/lib/auth'
 import { logAuditEvent } from '@/lib/audit'
 import { reportError } from '@/lib/observability/report-error'
+import { unwrapList, isRealQueryError, throwIfAnyQueryFailed } from '@/lib/supabase/unwrap'
 import type { InventoryCategory, TablesUpdate } from '@/types/database'
 
 // ── Master List (org_inventory_catalog) ─────────────────────────────────────
@@ -220,7 +221,11 @@ export async function createInventoryTemplate(
       // failing after the template insert succeeded is a partial-write, not
       // a fully-failed one, and this is a user-initiated one-shot action
       // with no idempotent retry path like a background job would have.
-      await supabase.from('inventory_templates').delete().eq('id', template.id)
+      const { error: cleanupError } = await supabase.from('inventory_templates').delete().eq('id', template.id)
+      if (cleanupError) {
+        console.error('[createInventoryTemplate] orphaned template cleanup', cleanupError)
+        reportError(cleanupError, { site: 'serverAction.templatesInventory.createInventoryTemplate.cleanup', orgId: membership.org_id })
+      }
       return { error: 'Failed to save template items. Please try again.' }
     }
 
@@ -318,7 +323,11 @@ export async function createInventoryTemplateFromCSV(
     if (itemsError) {
       console.error('[createInventoryTemplateFromCSV] items insert', itemsError)
       reportError(itemsError, { site: 'serverAction.templatesInventory.createInventoryTemplateFromCSV', orgId: membership.org_id })
-      await supabase.from('inventory_templates').delete().eq('id', template.id)
+      const { error: cleanupError } = await supabase.from('inventory_templates').delete().eq('id', template.id)
+      if (cleanupError) {
+        console.error('[createInventoryTemplateFromCSV] orphaned template cleanup', cleanupError)
+        reportError(cleanupError, { site: 'serverAction.templatesInventory.createInventoryTemplateFromCSV.cleanup', orgId: membership.org_id })
+      }
       return { error: 'Failed to save template items. Please try again.' }
     }
 
@@ -388,12 +397,19 @@ export async function upsertParLevelItems(
     // 20260722000000_atomic_template_item_replace.sql, which closed this
     // same gap for cloneInventoryFromProperty's target property but not
     // for this function's new-item insert path below).
-    const { data: property } = await supabase
+    const { data: property, error: propertyError } = await supabase
       .from('properties')
       .select('id')
       .eq('id', propertyId)
       .eq('org_id', membership.org_id)
       .single()
+
+    if (isRealQueryError(propertyError)) {
+      throwIfAnyQueryFailed(
+        { site: 'serverAction.templatesInventory.upsertParLevelItems.property', orgId: membership.org_id },
+        propertyError,
+      )
+    }
 
     if (!property) return { error: 'Property not found' }
 
@@ -405,12 +421,16 @@ export async function upsertParLevelItems(
       // Confirm every client-supplied id already belongs to this org
       // before upserting — RLS backstops this, but a client-supplied id
       // for another org's row should never reach the upsert call.
-      const { data: verifiedRows } = await supabase
+      const verifiedRowsRes = await supabase
         .from('inventory_items')
         .select('id')
         .in('id', existingItems.map((item) => item.id!))
         .eq('org_id', membership.org_id)
-      const verifiedIds   = new Set((verifiedRows ?? []).map((r) => r.id))
+      const verifiedRows = unwrapList(verifiedRowsRes, {
+        site: 'serverAction.templatesInventory.upsertParLevelItems.verify',
+        orgId: membership.org_id,
+      })
+      const verifiedIds   = new Set(verifiedRows.map((r) => r.id))
       const verifiedItems = existingItems.filter((item) => verifiedIds.has(item.id!))
 
       if (verifiedItems.length) {

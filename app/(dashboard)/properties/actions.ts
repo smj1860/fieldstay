@@ -11,7 +11,7 @@ import { doorCodeArgs } from '@/lib/properties/door-code'
 import { logAuditEvent } from '@/lib/audit'
 import { applyMasterChecklistToProperty } from '@/lib/checklists/apply-master-template'
 import { reportError } from '@/lib/observability/report-error'
-import { reportQueryError } from '@/lib/supabase/unwrap'
+import { reportQueryError, unwrap, unwrapList, isRealQueryError } from '@/lib/supabase/unwrap'
 import { parseMoneyAmount } from '@/lib/schemas/money'
 import type { AssetType, Enums, MemberRole, TablesInsert } from '@/types/database'
 
@@ -459,11 +459,12 @@ export async function markStepComplete(
     const isFullySetup = allSteps.every((s) => updated[s] === true)
 
     if (isFullySetup) {
-      const { data: props } = await supabase
+      const propsRes = await supabase
         .from('properties')
         .select('id, setup_steps_completed')
         .eq('org_id', membership.org_id)
         .eq('is_active', true)
+      const props = unwrapList(propsRes, { site: 'serverAction.properties.markStepComplete.propsRead', orgId: membership.org_id })
 
       const fullyConfigured = (props ?? []).filter((p) => {
         const steps = p.setup_steps_completed as Record<string, boolean>
@@ -476,10 +477,11 @@ export async function markStepComplete(
       // anywhere. The upsert below is already idempotent, so the loosened
       // comparison cannot double-fire.
       if (fullyConfigured.length >= 2) {
-        await supabase.from('org_milestones').upsert(
+        const milestoneRes = await supabase.from('org_milestones').upsert(
           { org_id: membership.org_id, milestone: 'second_property_configured' },
           { onConflict: 'org_id,milestone', ignoreDuplicates: true }
         )
+        unwrap(milestoneRes, { site: 'serverAction.properties.markStepComplete.milestone', orgId: membership.org_id })
       }
     }
 
@@ -591,13 +593,18 @@ export async function createAsset(
     }
     const asset_type: AssetType = asset_type_raw
 
-    const { data: property } = await supabase
+    const { data: property, error: propertyError } = await supabase
       .from('properties')
       .select('id')
       .eq('id', propertyId)
       .eq('org_id', membership.org_id)
       .single()
 
+    if (isRealQueryError(propertyError)) {
+      console.error('[createAsset] property read failed', propertyError)
+      reportError(propertyError, { site: 'serverAction.properties.createAsset.property', orgId: membership.org_id })
+      return { error: 'Failed to save asset' }
+    }
     if (!property) return { error: 'Property not found' }
 
     // Error bound, not discarded: this read decides the asset's MACRS class,
@@ -818,13 +825,18 @@ export async function bulkImportAssets(
   try {
     const { supabase, membership, user } = await requireOrgRole(PROPERTY_WRITE_ROLES)
 
-    const { data: property } = await supabase
+    const { data: property, error: propertyError } = await supabase
       .from('properties')
       .select('id')
       .eq('id', propertyId)
       .eq('org_id', membership.org_id)
       .single()
 
+    if (isRealQueryError(propertyError)) {
+      console.error('[bulkImportAssets] property read failed', propertyError)
+      reportError(propertyError, { site: 'serverAction.properties.bulkImportAssets.property', orgId: membership.org_id })
+      return { imported: 0, error: 'Import failed — please try again' }
+    }
     if (!property) return { imported: 0, error: 'Property not found' }
 
     // `rows` arrives from the client with no bound of its own, and every row

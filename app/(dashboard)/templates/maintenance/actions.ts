@@ -5,6 +5,7 @@ import { requireOrgRole } from '@/lib/auth'
 import { logAuditEvent } from '@/lib/audit'
 import { reportError } from '@/lib/observability/report-error'
 import { unwrapJoin } from '@/lib/utils/supabase-joins'
+import { unwrap } from '@/lib/supabase/unwrap'
 import type { ScheduleFrequency, VendorSpecialty, TablesUpdate } from '@/types/database'
 
 // Item-level CRUD for maintenance_schedule_template_items — didn't exist
@@ -38,12 +39,13 @@ export async function addMaintenanceTemplateItem(
     const trimmedName = item.name.trim()
     if (!trimmedName) return { error: 'Item name is required.' }
 
-    const { data: template } = await supabase
+    const templateRes = await supabase
       .from('maintenance_schedule_templates')
       .select('id, is_system')
       .eq('id', templateId)
       .eq('org_id', membership.org_id)
       .maybeSingle()
+    const template = unwrap(templateRes, { site: 'serverAction.templatesMaintenance.addMaintenanceTemplateItem.template', orgId: membership.org_id })
 
     if (!template)          return { error: 'Template not found.' }
     if (template.is_system) return { error: 'System templates cannot be edited.' }
@@ -92,12 +94,13 @@ export async function updateMaintenanceTemplateItem(
   try {
     const { user, supabase, membership } = await requireOrgRole(['admin', 'manager'])
 
-    const { data: item } = await supabase
+    const itemRes = await supabase
       .from('maintenance_schedule_template_items')
       .select('id, template_id, maintenance_schedule_templates!inner(org_id, is_system)')
       .eq('id', itemId)
       .eq('maintenance_schedule_templates.org_id', membership.org_id)
       .maybeSingle()
+    const item = unwrap(itemRes, { site: 'serverAction.templatesMaintenance.updateMaintenanceTemplateItem.item', orgId: membership.org_id })
 
     if (!item) return { error: 'Item not found.' }
     const template = unwrapJoin(item.maintenance_schedule_templates)
@@ -148,12 +151,13 @@ export async function removeMaintenanceTemplateItem(itemId: string): Promise<{ e
   try {
     const { user, supabase, membership } = await requireOrgRole(['admin', 'manager'])
 
-    const { data: item } = await supabase
+    const itemRes = await supabase
       .from('maintenance_schedule_template_items')
       .select('id, template_id, maintenance_schedule_templates!inner(org_id, is_system)')
       .eq('id', itemId)
       .eq('maintenance_schedule_templates.org_id', membership.org_id)
       .maybeSingle()
+    const item = unwrap(itemRes, { site: 'serverAction.templatesMaintenance.removeMaintenanceTemplateItem.item', orgId: membership.org_id })
 
     if (!item) return { error: 'Item not found.' }
     const template = unwrapJoin(item.maintenance_schedule_templates)
