@@ -3,6 +3,7 @@ import { reportError } from '@/lib/observability/report-error'
 import { fetchAllRows } from '@/lib/inngest/paginate'
 import { createServiceClient } from '@/lib/supabase/server'
 import { logAuditEvent } from '@/lib/audit'
+import { isRealQueryError, throwIfAnyQueryFailed, reportQueryError } from '@/lib/supabase/unwrap'
 import type { TablesUpdate } from '@/types/database'
 
 type ServiceClient = ReturnType<typeof createServiceClient>
@@ -133,11 +134,18 @@ export async function seedDefaultRoomTemplatesIfNeeded(orgId: string): Promise<v
     return
   }
 
-  const { data: org } = await supabase
+  const { data: org, error: orgError } = await supabase
     .from('organizations')
     .select('default_room_templates_seeded_at')
     .eq('id', orgId)
     .single()
+
+  if (isRealQueryError(orgError)) {
+    throwIfAnyQueryFailed(
+      { site: 'lib.checklists.seedDefaultRoomTemplates.org-seeded-check', orgId },
+      orgError,
+    )
+  }
 
   if (org?.default_room_templates_seeded_at) {
     // Claimed — but confirm all seed templates actually exist before
@@ -159,11 +167,16 @@ export async function seedDefaultRoomTemplatesIfNeeded(orgId: string): Promise<v
     // callers) — not load-bearing for correctness on its own, since
     // everything below is independently idempotent regardless of who
     // "wins" this claim.
-    await supabase
+    const { error: claimError } = await supabase
       .from('organizations')
       .update({ default_room_templates_seeded_at: new Date().toISOString() })
       .eq('id', orgId)
       .is('default_room_templates_seeded_at', null)
+
+    reportQueryError(claimError, {
+      site: 'lib.checklists.seedDefaultRoomTemplates.claim-seeded-at',
+      orgId,
+    })
   }
 
   const results = await upsertSeedTemplates(supabase, orgId, seedTemplates)
@@ -178,7 +191,11 @@ export async function seedDefaultRoomTemplatesIfNeeded(orgId: string): Promise<v
   if (results['Bathroom']?.created) mappingUpdates.bathroom_room_template_id = results['Bathroom'].id
 
   if (Object.keys(mappingUpdates).length > 0) {
-    await supabase.from('organizations').update(mappingUpdates).eq('id', orgId)
+    const { error: mappingError } = await supabase.from('organizations').update(mappingUpdates).eq('id', orgId)
+    reportQueryError(mappingError, {
+      site: 'lib.checklists.seedDefaultRoomTemplates.mapping-backfill',
+      orgId,
+    })
   }
 
   const createdNames = Object.entries(results).filter(([, r]) => r.created).map(([name]) => name)
@@ -247,12 +264,20 @@ async function upsertOneSeedTemplate(
     // ignoreDuplicates doesn't return the row on conflict — fetch the
     // existing one. "Not returned" here means "already exists," not
     // "failed" (upsertErr would be set for a genuine failure).
-    const { data: existing } = await supabase
+    const { data: existing, error: existingErr } = await supabase
       .from('room_templates')
       .select('id')
       .eq('org_id', orgId)
       .eq('name', template.name)
       .maybeSingle()
+    if (isRealQueryError(existingErr)) {
+      console.error(`[seedDefaultRoomTemplatesIfNeeded] existing-template lookup failed for "${template.name}":`, existingErr)
+      reportError(existingErr, {
+        site: 'lib.checklists.seedDefaultRoomTemplates.upsertOneSeedTemplate.existing',
+        orgId,
+        extra: { templateName: template.name },
+      })
+    }
     roomId = existing?.id as string | undefined
     created = false
   }
@@ -271,7 +296,7 @@ async function upsertOneSeedTemplate(
     .eq('room_template_id', roomId)
 
   if (!count) {
-    await supabase.from('room_template_items').insert(
+    const { error: itemsInsertError } = await supabase.from('room_template_items').insert(
       template.tasks.map((t, i) => ({
         room_template_id: roomId,
         task:              t.task,
@@ -280,6 +305,11 @@ async function upsertOneSeedTemplate(
         sort_order:        i,
       }))
     )
+    reportQueryError(itemsInsertError, {
+      site: 'lib.checklists.seedDefaultRoomTemplates.upsertOneSeedTemplate.items',
+      orgId,
+      extra: { templateName: template.name },
+    })
   }
 
   return { id: roomId, created }

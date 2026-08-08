@@ -7,7 +7,7 @@ import { logAuditEvent } from '@/lib/audit'
 import { reportError } from '@/lib/observability/report-error'
 import { sendOwnerPortalEmail } from '@/lib/resend/client'
 import { unwrapJoin } from '@/lib/utils/supabase-joins'
-import { tryUnwrap } from '@/lib/supabase/unwrap'
+import { isRealQueryError, throwIfAnyQueryFailed, tryUnwrap, unwrapList } from '@/lib/supabase/unwrap'
 import type { TxnCategory } from '@/types/database'
 
 export type OwnersActionState = { error?: string; success?: boolean; token?: string }
@@ -32,12 +32,16 @@ export async function addPropertyOwner(
     if (!name)        return { error: 'Owner name is required' }
 
     // Verify property belongs to this org
-    const { data: property } = await supabase
+    const { data: property, error: propertyError } = await supabase
       .from('properties')
       .select('id')
       .eq('id', property_id)
       .eq('org_id', membership.org_id)
       .single()
+
+    if (isRealQueryError(propertyError)) {
+      throwIfAnyQueryFailed({ site: 'serverAction.owners.addPropertyOwner.verify', orgId: membership.org_id }, propertyError)
+    }
 
     if (!property) return { error: 'Property not found' }
 
@@ -73,12 +77,16 @@ export async function generatePortalToken(ownerId: string): Promise<OwnersAction
     const { supabase, membership, user } = await requireOrgMember()
 
     // Verify owner belongs to this org
-    const { data: owner } = await supabase
+    const { data: owner, error: ownerError } = await supabase
       .from('property_owners')
       .select('id')
       .eq('id', ownerId)
       .eq('org_id', membership.org_id)
       .single()
+
+    if (isRealQueryError(ownerError)) {
+      throwIfAnyQueryFailed({ site: 'serverAction.owners.generatePortalToken.verify', orgId: membership.org_id }, ownerError)
+    }
 
     if (!owner) return { error: 'Owner not found' }
 
@@ -121,11 +129,16 @@ export async function generatePortalToken(ownerId: string): Promise<OwnersAction
     const portalUrl = `${appUrl}/owner/${token}`
 
     // Fetch owner name, email, property name, and org name for the email
-    const { data: ownerData } = await supabase
+    const ownerDataRes = await supabase
       .from('property_owners')
       .select('name, email, properties ( name ), organizations ( name )')
       .eq('id', ownerId)
       .single()
+    const ownerDataOut = tryUnwrap(ownerDataRes, {
+      site: 'serverAction.owners.generatePortalToken.emailLookup',
+      orgId: membership.org_id,
+    })
+    const ownerData = ownerDataOut.ok ? ownerDataOut.data : null
 
     const ownerEmail    = ownerData?.email ?? null
     const ownerName     = ownerData?.name ?? 'Property Owner'
@@ -180,13 +193,18 @@ export async function generateCombinedPortalToken(ownerIds: string[]): Promise<O
     if (ownerIds.length < 2) return { error: 'Combined links require at least two properties' }
 
     // Verify every owner row belongs to this org and collect their properties
-    const { data: owners } = await supabase
+    const ownersRes = await supabase
       .from('property_owners')
       .select('id, property_id')
       .eq('org_id', membership.org_id)
       .in('id', ownerIds)
+      .limit(ownerIds.length)
+    const owners = unwrapList(ownersRes, {
+      site: 'serverAction.owners.generateCombinedPortalToken.verify',
+      orgId: membership.org_id,
+    })
 
-    if (!owners || owners.length !== ownerIds.length) return { error: 'Owner not found' }
+    if (owners.length !== ownerIds.length) return { error: 'Owner not found' }
 
     const propertyIds = [...new Set(owners.map((o) => o.property_id))]
     if (propertyIds.length < 2) return { error: 'Combined links require at least two properties' }
@@ -258,12 +276,16 @@ export async function addOwnerTransaction(
     if (!amount || amount <= 0) return { error: 'Amount must be greater than 0' }
     if (!transaction_date)      return { error: 'Date is required' }
 
-    const { data: property } = await supabase
+    const { data: property, error: propertyError } = await supabase
       .from('properties')
       .select('id')
       .eq('id', property_id)
       .eq('org_id', membership.org_id)
       .single()
+
+    if (isRealQueryError(propertyError)) {
+      throwIfAnyQueryFailed({ site: 'serverAction.owners.addOwnerTransaction.verify', orgId: membership.org_id }, propertyError)
+    }
 
     if (!property) return { error: 'Property not found' }
 
@@ -367,12 +389,16 @@ export async function revokeOwnerPortalToken(ownerId: string): Promise<OwnersAct
     const { supabase, membership, user } = await requireOrgMember()
 
     // Verify owner belongs to this org
-    const { data: owner } = await supabase
+    const { data: owner, error: ownerError } = await supabase
       .from('property_owners')
       .select('id')
       .eq('id', ownerId)
       .eq('org_id', membership.org_id)
       .single()
+
+    if (isRealQueryError(ownerError)) {
+      throwIfAnyQueryFailed({ site: 'serverAction.owners.revokeOwnerPortalToken.verify', orgId: membership.org_id }, ownerError)
+    }
 
     if (!owner) return { error: 'Owner not found' }
 
@@ -517,12 +543,16 @@ export async function toggleCapitalPlanSharing(
 
     // Defense in depth: verify owner belongs to this org before update,
     // even though RLS enforces the same constraint.
-    const { data: owner } = await supabase
+    const { data: owner, error: ownerError } = await supabase
       .from('property_owners')
       .select('id, name, property_id')
       .eq('id', ownerId)
       .eq('org_id', membership.org_id)
       .single()
+
+    if (isRealQueryError(ownerError)) {
+      throwIfAnyQueryFailed({ site: 'serverAction.owners.toggleCapitalPlanSharing.verify', orgId: membership.org_id }, ownerError)
+    }
 
     if (!owner) return { error: 'Owner not found' }
 

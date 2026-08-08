@@ -8,6 +8,7 @@ import { logAuditEvent } from '@/lib/audit'
 import { generateReviewResponse } from '@/lib/repuguard/generate-response'
 
 import { reportError } from '@/lib/observability/report-error'
+import { isRealQueryError, throwIfAnyQueryFailed, unwrap } from '@/lib/supabase/unwrap'
 type AdminClient = ReturnType<typeof createServiceClient>
 
 /** Session + daily spend ceiling. Returns the caller, or the response to send. */
@@ -50,12 +51,16 @@ async function resolveEntitledOrg(
   admin:  AdminClient,
   userId: string,
 ): Promise<{ orgId: string } | { response: NextResponse }> {
-  const { data: membership } = await admin
+  const { data: membership, error: membershipError } = await admin
     .from('organization_members')
     .select('org_id')
     .eq('user_id', userId)
     .not('invite_accepted_at', 'is', null)
     .single()
+
+  if (isRealQueryError(membershipError)) {
+    throwIfAnyQueryFailed({ site: 'route.repuguard.generate.resolveEntitledOrg', extra: { user_id: userId } }, membershipError)
+  }
 
   if (!membership) {
     return { response: NextResponse.json({ error: 'No organization found' }, { status: 403 }) }
@@ -143,12 +148,16 @@ export async function POST(request: NextRequest) {
   const { orgId } = entitled
 
   // Fetch review with property name
-  const { data: review } = await admin
+  const { data: review, error: reviewError } = await admin
     .from('reviews')
     .select('*, properties(name)')
     .eq('id', reviewId)
     .eq('org_id', orgId)
     .single()
+
+  if (isRealQueryError(reviewError)) {
+    throwIfAnyQueryFailed({ site: 'route.repuguard.generate.POST', orgId, extra: { review_id: reviewId } }, reviewError)
+  }
 
   if (!review) {
     return NextResponse.json({ error: 'Review not found' }, { status: 404 })
@@ -157,11 +166,16 @@ export async function POST(request: NextRequest) {
   const isManual = (review.external_source as string) === 'manual'
 
   // Fetch the existing response (if any) to enforce regeneration limits
-  const { data: existingResponse } = await admin
+  const existingResponseRes = await admin
     .from('review_responses')
     .select('id, regeneration_count, generated_response')
     .eq('review_id', reviewId)
     .maybeSingle()
+  const existingResponse = unwrap(existingResponseRes, {
+    site:  'route.repuguard.generate.POST.existingResponse',
+    orgId,
+    extra: { review_id: reviewId },
+  })
 
   const isRegeneration = !!existingResponse?.generated_response
 
@@ -221,10 +235,19 @@ export async function POST(request: NextRequest) {
   }
 
   // Update review status
-  await admin
+  const { error: statusUpdateError } = await admin
     .from('reviews')
     .update({ response_status: responseStatus, updated_at: new Date().toISOString() })
     .eq('id', reviewId)
+
+  if (statusUpdateError) {
+    console.error('[RepuGuard] Failed to update review status:', statusUpdateError)
+    reportError(statusUpdateError, {
+      site:  'route.repuguard.generate.POST.statusUpdate',
+      orgId,
+      extra: { review_id: reviewId },
+    })
+  }
 
   await logAuditEvent({
     orgId:      orgId,

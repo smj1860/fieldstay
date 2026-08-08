@@ -39,6 +39,7 @@ import { generateTurnoversForProperty } from '@/lib/turnovers/generator'
 import { unmappedBookingStatus }        from '@/lib/bookings/normalize'
 
 import { reportError } from '@/lib/observability/report-error'
+import { unwrap, unwrapList } from '@/lib/supabase/unwrap'
 const PROVIDER = 'hostaway'
 
 export const hostawayInitialSync = inngest.createFunction(
@@ -102,17 +103,22 @@ export const hostawayInitialSync = inngest.createFunction(
             throw new Error(error.message)
           }
 
-          const { data: fsProps } = await supabase
+          const fsPropsRes = await supabase
             .from('properties')
             .select('id, external_id')
             .eq('org_id', org_id)
             .eq('external_source', PROVIDER)
             .in('external_id', listings.map((l) => String(l.id)))
+            .limit(listings.length)
+          const fsProps = unwrapList(fsPropsRes, {
+            site:  'inngest.hostaway-initial-sync.fetch-and-upsert-properties',
+            orgId: org_id,
+          })
 
           // O(1) lookups instead of an O(n²) .find() inside the loop
           const listingById = new Map(listings.map((l) => [String(l.id), l]))
 
-          for (const p of fsProps ?? []) {
+          for (const p of fsProps) {
             // properties.external_id is nullable — a property never synced
             // from Hostaway has nothing to look up.
             if (p.external_id === null) continue
@@ -234,11 +240,16 @@ export const hostawayInitialSync = inngest.createFunction(
 
       await step.run('handle-sync-failure', async () => {
         const supabase = createServiceClient({ system: 'inngest:initial-sync' })
-        await supabase
+        const { error: statusUpdateError } = await supabase
           .from('integration_connections')
           .update({ status: 'error' })
           .eq('user_id', user_id)
           .eq('provider_id', PROVIDER)
+
+        if (statusUpdateError) {
+          logger.error(`[Hostaway:${user_id}] failed to mark connection status error: ${statusUpdateError.message}`)
+          reportError(statusUpdateError, { site: 'inngest.hostaway-initial-sync.handle-sync-failure', orgId: org_id })
+        }
 
         await updateConnectionMetadata(user_id, {
           last_sync_status: 'error',
@@ -259,20 +270,30 @@ async function updateConnectionMetadata(
   patch:  Record<string, Json>
 ): Promise<void> {
   const supabase = createServiceClient({ system: 'inngest:initial-sync' })
-  const { data: existing } = await supabase
+  const existingRes = await supabase
     .from('integration_connections')
     .select('metadata')
     .eq('user_id', userId)
     .eq('provider_id', PROVIDER)
     .maybeSingle()
+  const existing = unwrap(existingRes, {
+    site:  'inngest.hostaway-initial-sync.updateConnectionMetadata',
+    extra: { user_id: userId },
+  })
 
   const existingMeta = asJsonObject(existing?.metadata) ?? {}
 
-  await supabase
+  const { error } = await supabase
     .from('integration_connections')
     .update({ metadata: { ...existingMeta, ...patch } })
     .eq('user_id', userId)
     .eq('provider_id', PROVIDER)
+
+  if (error) {
+    console.error(`[Hostaway] connection metadata update failed for ${userId}:`, error)
+    reportError(error, { site: 'inngest.hostaway-initial-sync.updateConnectionMetadata', extra: { user_id: userId } })
+    throw new Error(error.message)
+  }
 }
 
 function mapHostawayStatus(status: string): 'confirmed' | 'tentative' | 'cancelled' {

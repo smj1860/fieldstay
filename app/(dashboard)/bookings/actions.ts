@@ -8,6 +8,7 @@ import { detectAndFlagOverlapsBestEffort } from '@/lib/ical/conflict-detection'
 import type { BookingSource } from '@/types/database'
 
 import { reportError } from '@/lib/observability/report-error'
+import { isRealQueryError, throwIfAnyQueryFailed, tryUnwrap } from '@/lib/supabase/unwrap'
 export type BookingActionState = { error?: string; success?: boolean }
 
 // ── Create manual booking ────────────────────────────────────────────────────
@@ -32,12 +33,16 @@ export async function createBooking(
     if (checkout_date <= checkin_date) return { error: 'Check-out must be after check-in' }
 
     // Verify property belongs to this org
-    const { data: property } = await supabase
+    const { data: property, error: propertyError } = await supabase
       .from('properties')
       .select('id, name, checkin_time, checkout_time')
       .eq('id', property_id)
       .eq('org_id', membership.org_id)
       .single()
+
+    if (isRealQueryError(propertyError)) {
+      throwIfAnyQueryFailed({ site: 'serverAction.bookings.createBooking.verify', orgId: membership.org_id }, propertyError)
+    }
 
     if (!property) return { error: 'Property not found' }
 
@@ -142,23 +147,38 @@ export async function cancelBooking(
     })
 
     // 2. Cancel pending/assigned turnovers tied to this booking
-    await supabase
+    const { error: turnoverCancelError } = await supabase
       .from('turnovers')
       .update({ status: 'cancelled' })
       .eq('booking_id', bookingId)
       .eq('org_id', membership.org_id)
       .in('status', ['pending_assignment', 'assigned'])
 
+    if (turnoverCancelError) {
+      console.error('[cancelBooking] turnover cancel failed:', turnoverCancelError)
+      reportError(turnoverCancelError, {
+        site:  'serverAction.bookings.cancelBooking.turnovers',
+        orgId: membership.org_id,
+        extra: { booking_id: bookingId },
+      })
+    }
+
     // 3. Post a revenue reversal if a booking revenue transaction exists.
     //    Soft reversal (new expense row) preserves the audit trail. Uses a
     //    distinct `source` so it doesn't collide with the original
     //    UNIQUE(source_reference_id, source) row.
-    const { data: txn } = await supabase
+    const txnRes = await supabase
       .from('owner_transactions')
       .select('id, amount, property_id')
       .eq('source_reference_id', bookingId)
       .in('source', ['booking_revenue', 'uplisting_booking'])
       .maybeSingle()
+    const txnOut = tryUnwrap(txnRes, {
+      site:  'serverAction.bookings.cancelBooking.reversalLookup',
+      orgId: membership.org_id,
+      extra: { booking_id: bookingId },
+    })
+    const txn = txnOut.ok ? txnOut.data : null
 
     if (txn) {
       const { count } = await supabase

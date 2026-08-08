@@ -11,6 +11,7 @@ import {
 } from '@/lib/integrations/vault'
 import { refreshCustomerToken } from '@/lib/kroger/client'
 import { NonRetriableError }    from 'inngest'
+import { tryUnwrap }            from '@/lib/supabase/unwrap'
 
 const PROVIDER       = 'kroger' as const
 const REFRESH_WINDOW = 5 * 60 * 1_000   // refresh when < 5 min remaining
@@ -22,12 +23,17 @@ const REFRESH_WINDOW = 5 * 60 * 1_000   // refresh when < 5 min remaining
 export async function getValidKrogerToken(userId: string): Promise<string> {
   const supabase = createServiceClient({ system: 'lib/integrations/providers/kroger-token' })
 
-  const { data: conn } = await supabase
+  const connRes = await supabase
     .from('integration_connections')
     .select('expires_at, external_user_id')
     .eq('user_id',    userId)
     .eq('provider_id', PROVIDER)
     .maybeSingle()
+  const connOut = tryUnwrap(connRes, {
+    site:  'lib.integrations.kroger-token.getValidKrogerToken',
+    extra: { user_id: userId },
+  })
+  const conn = connOut.ok ? connOut.data : null
 
   const expiresAt    = conn?.expires_at ? new Date(conn.expires_at) : null
   const needsRefresh =
@@ -48,12 +54,17 @@ export async function getValidKrogerToken(userId: string): Promise<string> {
 export async function refreshKrogerToken(userId: string): Promise<string> {
   const supabase = createServiceClient({ system: 'lib/integrations/providers/kroger-token' })
 
-  const { data: conn } = await supabase
+  const connRes = await supabase
     .from('integration_connections')
     .select('external_user_id')
     .eq('user_id',    userId)
     .eq('provider_id', PROVIDER)
     .maybeSingle()
+  const connOut = tryUnwrap(connRes, {
+    site:  'lib.integrations.kroger-token.refreshKrogerToken',
+    extra: { user_id: userId },
+  })
+  const conn = connOut.ok ? connOut.data : null
 
   const refreshToken = await readIntegrationRefreshToken(userId, PROVIDER)
   if (!refreshToken) {

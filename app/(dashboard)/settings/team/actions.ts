@@ -7,10 +7,42 @@ import { createServiceClient, adminFetch } from '@/lib/supabase/server'
 import { sendTeamInviteEmail }       from '@/lib/resend/client'
 import { revalidatePath }            from 'next/cache'
 import { logAuditEvent }             from '@/lib/audit'
-import { tryUnwrap }                 from '@/lib/supabase/unwrap'
+import { tryUnwrap, throwIfAnyQueryFailed, isRealQueryError } from '@/lib/supabase/unwrap'
 
 import { reportError } from '@/lib/observability/report-error'
 const EmailSchema = z.string().email('Invalid email address.')
+
+// H-3: check not already a member using a targeted lookup (not listUsers).
+// Supabase admin REST supports GET /auth/v1/admin/users?email=x for point
+// lookups. Split out of inviteTeamMember so its own nested "found a user ->
+// check membership -> already a member" chain has its own complexity budget.
+async function findAlreadyMemberError(
+  admin: ReturnType<typeof createServiceClient>,
+  orgId: string,
+  normalizedEmail: string,
+): Promise<string | null> {
+  const userLookupRes = await adminFetch(
+    `/auth/v1/admin/users?email=${encodeURIComponent(normalizedEmail)}&per_page=1`
+  )
+  if (!userLookupRes.ok) return null
+
+  const body = await userLookupRes.json() as { users?: { id: string }[] }
+  const existingUserId = body.users?.[0]?.id
+  if (!existingUserId) return null
+
+  const { data: alreadyMember, error: alreadyMemberError } = await admin
+    .from('organization_members')
+    .select('id')
+    .eq('org_id', orgId)
+    .eq('user_id', existingUserId)
+    .single()
+  throwIfAnyQueryFailed(
+    { site: 'serverAction.team.inviteTeamMember.alreadyMember', orgId },
+    isRealQueryError(alreadyMemberError) ? alreadyMemberError : null,
+  )
+
+  return alreadyMember ? 'This person is already a member of your organization.' : null
+}
 
 export async function inviteTeamMember(
   email: string
@@ -42,29 +74,11 @@ export async function inviteTeamMember(
 
     const admin = createServiceClient({ authorizedBy: membership })
 
-    // H-3: Check not already a member using targeted lookup (not listUsers).
-    // Supabase admin REST supports GET /auth/v1/admin/users?email=x for point lookups.
-    const userLookupRes = await adminFetch(
-      `/auth/v1/admin/users?email=${encodeURIComponent(normalizedEmail)}&per_page=1`
-    )
-    if (userLookupRes.ok) {
-      const body = await userLookupRes.json() as { users?: { id: string }[] }
-      const existingUserId = body.users?.[0]?.id
-      if (existingUserId) {
-        const { data: alreadyMember } = await admin
-          .from('organization_members')
-          .select('id')
-          .eq('org_id', membership.org_id)
-          .eq('user_id', existingUserId)
-          .single()
-        if (alreadyMember) {
-          return { error: 'This person is already a member of your organization.' }
-        }
-      }
-    }
+    const alreadyMemberError = await findAlreadyMemberError(admin, membership.org_id, normalizedEmail)
+    if (alreadyMemberError) return { error: alreadyMemberError }
 
     // Check no active pending invite
-    const { data: existingInvite } = await admin
+    const { data: existingInvite, error: existingInviteError } = await admin
       .from('org_invites')
       .select('id')
       .eq('org_id', membership.org_id)
@@ -72,6 +86,10 @@ export async function inviteTeamMember(
       .is('accepted_at', null)
       .gt('expires_at', new Date().toISOString())
       .single()
+    throwIfAnyQueryFailed(
+      { site: 'serverAction.team.inviteTeamMember.existingInvite', orgId: membership.org_id },
+      isRealQueryError(existingInviteError) ? existingInviteError : null,
+    )
 
     if (existingInvite) {
       return { error: 'A pending invitation already exists for this email.' }

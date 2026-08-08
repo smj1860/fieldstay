@@ -237,7 +237,7 @@ export const autoAssignVendor = inngest.createFunction(
 
     await step.run('write-suggestion', async () => {
       const supabase = createServiceClient({ system: 'inngest:auto-assign-vendor' })
-      await supabase
+      const { error } = await supabase
         .from('work_orders')
         .update({
           suggested_vendor_ids: [top.vendor_id],
@@ -246,6 +246,7 @@ export const autoAssignVendor = inngest.createFunction(
         })
         .eq('id', work_order_id)
         .eq('org_id', org_id)
+      if (error) throw new Error(`Failed to write vendor suggestion: ${error.message}`)
     })
 
     await step.run('record-outcome', async () => {

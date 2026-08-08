@@ -6,6 +6,7 @@ import { parseLocalDate } from '@/lib/utils/date-validation'
 import { logAuditEvent } from '@/lib/audit'
 import { reportError } from '@/lib/observability/report-error'
 import { unwrapJoin } from '@/lib/utils/supabase-joins'
+import { unwrap } from '@/lib/supabase/unwrap'
 import { fetchAllRows, fetchDistinctOrgIds } from '@/lib/inngest/paginate'
 import type { Enums } from '@/types/database'
 import {
@@ -195,10 +196,11 @@ export const dailyMaintenanceScheduleCheck = inngest.createFunction(
       )
 
       if (orgs.length) {
-        await supabase.from('org_milestones').upsert(
+        const res = await supabase.from('org_milestones').upsert(
           orgs.map(org => ({ org_id: org.id, milestone: 'thirty_days' })),
           { onConflict: 'org_id,milestone', ignoreDuplicates: true }
         )
+        unwrap(res, { site: 'inngest.maintenance-schedules.check-thirty-day-milestone' })
       }
     })
 

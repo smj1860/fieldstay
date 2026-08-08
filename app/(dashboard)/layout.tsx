@@ -11,7 +11,8 @@ import { ReviewPrompt } from '@/components/review-prompt'
 import { NewPropertySetupPrompt } from '@/components/new-property-setup-prompt'
 import { calcOnboardingProgress, ONBOARDING_STEPS } from '@/lib/onboarding-wizard'
 import { getNotifications } from '@/lib/notifications'
-import { throwIfAnyQueryFailed } from '@/lib/supabase/unwrap'
+import { throwIfAnyQueryFailed, unwrapList } from '@/lib/supabase/unwrap'
+import { reportError } from '@/lib/observability/report-error'
 
 export const metadata: Metadata = {
   manifest:   '/dashboard-manifest.json',
@@ -157,21 +158,28 @@ export default async function DashboardLayout({
     const orgId = membership.org_id
     after(async () => {
       const admin = createServiceClient({ authorizedBy: membership })
-      await admin
+      const { error } = await admin
         .from('org_milestones')
         .update({ prompted_at: new Date().toISOString() })
         .eq('org_id', orgId)
         .eq('milestone', pendingMilestone.milestone)
+      if (error) {
+        console.error('[layout] mark-milestone-prompted', error)
+        reportError(error, { site: 'page.layout.tsx.markMilestonePrompted', orgId })
+      }
     })
   }
 
-  const { data: orgProperties } = newPropertyMilestones?.length
-    ? await supabase
-        .from('properties')
-        .select('id, name')
-        .eq('org_id', membership.org_id)
-        .eq('is_active', true)
-    : { data: null }
+  let orgProperties: { id: string; name: string }[] | null = null
+  if (newPropertyMilestones?.length) {
+    const orgPropertiesRes = await supabase
+      .from('properties')
+      .select('id, name')
+      .eq('org_id', membership.org_id)
+      .eq('is_active', true)
+      .limit(500)
+    orgProperties = unwrapList(orgPropertiesRes, { site: 'page.layout.tsx.orgProperties', orgId: membership.org_id })
+  }
 
   const isStaff = !!staffRow
 

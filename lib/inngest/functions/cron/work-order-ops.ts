@@ -8,6 +8,7 @@ import type { Enums } from '@/types/database'
 import { unwrapJoin } from '@/lib/utils/supabase-joins'
 import { fetchAllRows, fetchDistinctOrgIds } from '@/lib/inngest/paginate'
 import { reportError } from '@/lib/observability/report-error'
+import { throwIfAnyQueryFailed } from '@/lib/supabase/unwrap'
 
 const AGING_DAYS = 7
 
@@ -229,10 +230,14 @@ export const dailyWorkOrderOps = inngest.createFunction(
     // Platform-level, single bounded DELETE — stays in the dispatcher.
     await step.run('cleanup-webhook-inbox', async () => {
       const supabase = createServiceClient({ system: 'inngest:work-order-ops' })
-      await supabase
+      const { error } = await supabase
         .from('processed_webhooks')
         .delete()
         .lt('processed_at', new Date(nowMs - 72 * 60 * 60 * 1000).toISOString())
+
+      if (error) {
+        throwIfAnyQueryFailed({ site: 'inngest.work-order-ops.cleanup-webhook-inbox' }, error)
+      }
     })
 
     return { dispatched: orgIds.length, webhook_inbox_cleaned: true }

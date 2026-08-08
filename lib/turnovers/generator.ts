@@ -5,7 +5,7 @@ import { propertyLocalToUtc } from '@/lib/utils/timezone'
 import { unwrapJoinArray } from '@/lib/utils/supabase-joins'
 import { fetchAllRows } from '@/lib/inngest/paginate'
 import { reportError } from '@/lib/observability/report-error'
-import { tryUnwrap } from '@/lib/supabase/unwrap'
+import { tryUnwrap, unwrap, unwrapList } from '@/lib/supabase/unwrap'
 
 export interface GeneratedTurnover {
   id:                string
@@ -603,18 +603,21 @@ export async function snapshotChecklist(
   templateId: string | null
 ): Promise<void> {
   if (!templateId) return
-  const { data: sections } = await supabase
+  const sectionsRes = await supabase
     .from('checklist_template_sections')
     .select(`id, name, sort_order,
       checklist_template_items ( id, task, requires_photo, notes, sort_order )`)
     .eq('template_id', templateId)
     .order('sort_order', { ascending: true })
+    .limit(200)
+  const sections = unwrapList(sectionsRes, { site: 'turnovers.generator.snapshotChecklist.sections', orgId })
   if (!sections?.length) return
-  const { data: instance } = await supabase
+  const instanceRes = await supabase
     .from('checklist_instances')
     .insert({ turnover_id: turnoverID, org_id: orgId, template_id: templateId,
               template_snapshot: sections, status: 'not_started' })
     .select('id').single()
+  const instance = unwrap(instanceRes, { site: 'turnovers.generator.snapshotChecklist.instance', orgId })
   if (!instance) return
 
   // Dynamic photo requirements from the nightly Bayesian signal cron.
@@ -622,12 +625,14 @@ export async function snapshotChecklist(
   // brand-new item at alpha=2/beta=1 → 33% flag probability, which would
   // require a photo before any real evidence exists. Require at least 3
   // real completions before trusting the signal.
-  const { data: signals } = await supabase
+  const signalsRes = await supabase
     .from('checklist_item_signals')
     .select('section_name, task, reason')
     .eq('property_id', propertyId)
     .eq('dynamic_photo_required', true)
     .gte('total_completions', 3)
+    .limit(200)
+  const signals = unwrapList(signalsRes, { site: 'turnovers.generator.snapshotChecklist.signals', orgId })
   const signalMap = new Map(
     (signals ?? []).map((s: { section_name: string; task: string; reason: string | null }) =>
       [`${s.section_name}|${s.task}`, s])
@@ -666,7 +671,10 @@ export async function snapshotChecklist(
     items.push(...buildAssetDiscoveryItems(instance.id, turnoverID, missingAssetTypes, items.length))
   }
 
-  if (items.length > 0) await supabase.from('checklist_instance_items').insert(items)
+  if (items.length > 0) {
+    const itemsRes = await supabase.from('checklist_instance_items').insert(items)
+    unwrap(itemsRes, { site: 'turnovers.generator.snapshotChecklist.items', orgId })
+  }
 }
 
 /**

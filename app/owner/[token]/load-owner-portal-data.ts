@@ -5,7 +5,7 @@ import { computeOccupancy } from '@/lib/owner-portal/occupancy'
 import type { TxnType } from '@/types/database'
 import type { CapExProjectionPayload } from '@/lib/inngest/functions/capex-projections'
 import { unwrapJoin } from '@/lib/utils/supabase-joins'
-import { unwrap, unwrapList, type PostgrestResult } from '@/lib/supabase/unwrap'
+import { unwrap, unwrapList, reportQueryError, type PostgrestResult } from '@/lib/supabase/unwrap'
 
 /**
  * Data loading for the owner portal page — extracted out of
@@ -200,15 +200,17 @@ async function resolvePortfolioScope(
   let portfolioProperties: OwnerPortalProperty[] = [property]
 
   if (isMulti) {
-    const props = unwrapList<OwnerPortalProperty>(
-      await supabase
-        .from('properties')
-        .select('id, name, address, city, state, zip')
-        .in('id', portalToken.property_ids!)
-        .eq('org_id', orgId)   // scope to token's org
-        .order('name') as PostgrestResult<OwnerPortalProperty[]>,
-      { site: 'owner-portal.portfolioProperties', orgId },
-    )
+    const propsRes = await supabase
+      .from('properties')
+      .select('id, name, address, city, state, zip')
+      .in('id', portalToken.property_ids!)
+      .eq('org_id', orgId)   // scope to token's org
+      .order('name')
+      .limit(portalToken.property_ids!.length) as PostgrestResult<OwnerPortalProperty[]>
+    const props = unwrapList<OwnerPortalProperty>(propsRes, {
+      site: 'owner-portal.portfolioProperties',
+      orgId,
+    })
     if (props.length > 0) portfolioProperties = props
   }
 
@@ -255,15 +257,13 @@ async function loadCapexPayload(
 ): Promise<CapExProjectionPayload | null> {
   const currentYear = new Date().getFullYear()
 
-  const capexMilestone = unwrap(
-    await supabase
-      .from('org_milestones')
-      .select('value')
-      .eq('org_id', orgId)
-      .eq('milestone', `capex_projection_${currentYear}`)
-      .maybeSingle() as PostgrestResult<{ value: unknown }>,
-    { site: 'owner-portal.capexMilestone', orgId },
-  )
+  const capexMilestoneRes = await supabase
+    .from('org_milestones')
+    .select('value')
+    .eq('org_id', orgId)
+    .eq('milestone', `capex_projection_${currentYear}`)
+    .maybeSingle() as PostgrestResult<{ value: unknown }>
+  const capexMilestone = unwrap(capexMilestoneRes, { site: 'owner-portal.capexMilestone', orgId })
 
   const payload = (capexMilestone?.value as CapExProjectionPayload | undefined) ?? null
   if (!payload) return null
@@ -319,10 +319,12 @@ async function recordAccess(
   portalTokenId: string,
   orgId:         string | null,
 ): Promise<void> {
-  await supabase
+  const { error: accessError } = await supabase
     .from('owner_portal_tokens')
     .update({ last_accessed_at: new Date().toISOString() })
     .eq('id', portalTokenId)
+
+  reportQueryError(accessError, { site: 'owner-portal.recordAccess', orgId: orgId ?? undefined })
 
   if (!orgId) return
 

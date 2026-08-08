@@ -5,6 +5,47 @@ import { classifyIntent } from '@/lib/support/classify'
 import { generateResponse } from '@/lib/support/respond'
 import { inngest } from '@/lib/inngest/client'
 import { supportChatLimiter, supportChatDailyLimiter, checkLimit } from '@/lib/rate-limit'
+import type { createClient } from '@/lib/supabase/server'
+
+type SupabaseServerClient = Awaited<ReturnType<typeof createClient>>
+
+// Resolves the conversation to post into: creates one when the caller sent
+// no id, otherwise verifies the given id belongs to this user's org. Split
+// out so POST's own rate-limit/validation chain doesn't also carry this
+// create-or-verify branch's nesting.
+async function resolveConversationId(
+  supabase: SupabaseServerClient,
+  orgId:    string,
+  userId:   string,
+  conversationId: string | undefined,
+): Promise<{ id: string } | { error: string; status: number }> {
+  if (!conversationId) {
+    const { data: convo, error: convoErr } = await supabase
+      .from('support_conversations')
+      .insert({ org_id: orgId, user_id: userId })
+      .select('id')
+      .single()
+
+    if (convoErr || !convo) {
+      console.error('[support/chat] failed to create conversation', convoErr)
+      return { error: 'Could not start conversation', status: 500 }
+    }
+    return { id: convo.id as string }
+  }
+
+  const { data: existing, error: existingErr } = await supabase
+    .from('support_conversations')
+    .select('id')
+    .eq('id', conversationId)
+    .eq('user_id', userId)
+    .eq('org_id', orgId)
+    .single()
+
+  if (existingErr || !existing) {
+    return { error: 'Conversation not found', status: 404 }
+  }
+  return { id: conversationId }
+}
 
 export async function POST(req: NextRequest) {
   const { supabase, user, membership } = await requireOrgMember()
@@ -45,33 +86,11 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: 'message is required' }, { status: 400 })
   }
 
-  let convoId = conversationId
-
-  if (!convoId) {
-    const { data: convo, error: convoErr } = await supabase
-      .from('support_conversations')
-      .insert({ org_id: membership.org_id, user_id: user.id })
-      .select('id')
-      .single()
-
-    if (convoErr || !convo) {
-      console.error('[support/chat] failed to create conversation', convoErr)
-      return NextResponse.json({ error: 'Could not start conversation' }, { status: 500 })
-    }
-    convoId = convo.id as string
-  } else {
-    const { data: existing, error: existingErr } = await supabase
-      .from('support_conversations')
-      .select('id')
-      .eq('id', convoId)
-      .eq('user_id', user.id)
-      .eq('org_id', membership.org_id)
-      .single()
-
-    if (existingErr || !existing) {
-      return NextResponse.json({ error: 'Conversation not found' }, { status: 404 })
-    }
+  const conversation = await resolveConversationId(supabase, membership.org_id, user.id, conversationId)
+  if ('error' in conversation) {
+    return NextResponse.json({ error: conversation.error }, { status: conversation.status })
   }
+  const convoId = conversation.id
 
   // Degrade, don't throw: losing prior turns makes the reply worse, not
   // wrong, and the user should still get an answer.
@@ -118,15 +137,18 @@ export async function POST(req: NextRequest) {
 
   const now = new Date().toISOString()
 
-  await supabase
+  const { error: lastMessageErr } = await supabase
     .from('support_conversations')
     .update({ last_message_at: now })
     .eq('id', convoId)
+  if (lastMessageErr) {
+    console.error('[support/chat] failed to update last_message_at', lastMessageErr)
+  }
 
   if (needsEscalation) {
     const reason = escalationReason || content.slice(0, 280)
 
-    await supabase
+    const { error: escalationErr } = await supabase
       .from('support_conversations')
       .update({
         needs_human:       true,
@@ -135,6 +157,9 @@ export async function POST(req: NextRequest) {
       })
       .eq('id', convoId)
       .eq('org_id', membership.org_id)
+    if (escalationErr) {
+      console.error('[support/chat] failed to persist escalation flag', escalationErr)
+    }
 
     await inngest.send({
       name: 'support/conversation.escalated',

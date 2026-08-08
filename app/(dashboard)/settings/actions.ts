@@ -11,6 +11,7 @@ import { inngest } from '@/lib/inngest/client'
 import { geocodeZip } from '@/lib/geocoding'
 import { logAuditEvent, logAuditEvents } from '@/lib/audit'
 import { reportError } from '@/lib/observability/report-error'
+import { isRealQueryError, reportQueryError, unwrap, unwrapList } from '@/lib/supabase/unwrap'
 import type { ContactPref, VendorSpecialty, CrewRole, MemberRole } from '@/types/database'
 import { renderCrewInviteEmail } from '@/emails/crew-invite'
 import { renderSmsBody } from '@/lib/sms/templates'
@@ -320,7 +321,18 @@ export async function addCrewMember(
     if (home_zip) {
       const coords = await geocodeZip(home_zip)
       if (coords) {
-        await supabase.from('crew_members').update({ home_lat: coords.lat, home_lng: coords.lng }).eq('id', newCrew.id)
+        const { error: geocodeErr } = await supabase
+          .from('crew_members')
+          .update({ home_lat: coords.lat, home_lng: coords.lng })
+          .eq('id', newCrew.id)
+
+        if (geocodeErr) {
+          console.error('[addCrewMember] home coordinates write failed', geocodeErr.message)
+          reportError(geocodeErr, {
+            site:  'serverAction.settings.addCrewMember.geocodeWrite',
+            orgId: membership.org_id,
+          })
+        }
       }
     }
 
@@ -370,12 +382,17 @@ export async function updateCrewMember(
   try {
     const { supabase, membership, user } = await requireOrgMember()
 
-    const { data: existing } = await supabase
+    const { data: existing, error: existingError } = await supabase
       .from('crew_members')
       .select('home_zip')
       .eq('id', crewId)
       .eq('org_id', membership.org_id)
       .single()
+
+    if (isRealQueryError(existingError)) {
+      reportQueryError(existingError, { site: 'serverAction.settings.updateCrewMember.existingLookup', orgId: membership.org_id })
+      return { error: 'Operation failed. Please try again.' }
+    }
 
     const { error } = await supabase
       .from('crew_members')
@@ -454,11 +471,13 @@ export async function deactivateCrewMember(crewId: string): Promise<void> {
   try {
     const { supabase, membership, user } = await requireOrgMember()
 
-    await supabase
+    const { error } = await supabase
       .from('crew_members')
       .update({ is_active: false })
       .eq('id', crewId)
       .eq('org_id', membership.org_id)
+
+    if (error) throw error
 
     await logAuditEvent({
       orgId:      membership.org_id,
@@ -587,7 +606,18 @@ export async function addVendor(
     if (service_zip) {
       const coords = await geocodeZip(service_zip)
       if (coords) {
-        await supabase.from('vendors').update({ lat: coords.lat, lng: coords.lng }).eq('id', vendor.id)
+        const { error: geocodeErr } = await supabase
+          .from('vendors')
+          .update({ lat: coords.lat, lng: coords.lng })
+          .eq('id', vendor.id)
+
+        if (geocodeErr) {
+          console.error('[addVendor] coordinates write failed', geocodeErr.message)
+          reportError(geocodeErr, {
+            site:  'serverAction.settings.addVendor.geocodeWrite',
+            orgId: membership.org_id,
+          })
+        }
       }
     }
 
@@ -639,12 +669,17 @@ export async function updateVendor(
 
     if (!name) return { error: 'Vendor name is required' }
 
-    const { data: existing } = await supabase
+    const { data: existing, error: existingError } = await supabase
       .from('vendors')
       .select('service_zip')
       .eq('id', vendorId)
       .eq('org_id', membership.org_id)
       .single()
+
+    if (isRealQueryError(existingError)) {
+      reportQueryError(existingError, { site: 'serverAction.settings.updateVendor.existingLookup', orgId: membership.org_id })
+      return { error: 'Operation failed. Please try again.' }
+    }
 
     const { error } = await supabase
       .from('vendors')
@@ -706,11 +741,13 @@ export async function updateVendorPortal(vendorId: string, enabled: boolean): Pr
   try {
     const { user, supabase, membership } = await requireOrgMember()
 
-    await supabase
+    const { error } = await supabase
       .from('vendors')
       .update({ portal_enabled: enabled })
       .eq('id', vendorId)
       .eq('org_id', membership.org_id)
+
+    if (error) throw error
 
     await logAuditEvent({
       orgId:      membership.org_id,
@@ -734,11 +771,13 @@ export async function deactivateVendor(vendorId: string): Promise<void> {
   try {
     const { supabase, membership, user } = await requireOrgMember()
 
-    await supabase
+    const { error } = await supabase
       .from('vendors')
       .update({ is_active: false })
       .eq('id', vendorId)
       .eq('org_id', membership.org_id)
+
+    if (error) throw error
 
     await logAuditEvent({
       orgId:      membership.org_id,
@@ -822,11 +861,12 @@ export async function openBillingPortal(): Promise<void> {
     // matching is_org_member()'s semantics in the DB.
     const { supabase, membership } = await requireOrgRole(['admin'])
 
-    const { data: org } = await supabase
+    const orgRes = await supabase
       .from('organizations')
       .select('stripe_customer_id')
       .eq('id', membership.org_id)
       .single()
+    const org = unwrap(orgRes, { site: 'serverAction.settings.openBillingPortal.orgLookup', orgId: membership.org_id })
 
     if (!org?.stripe_customer_id) return
 
@@ -857,12 +897,17 @@ export async function inviteCrewMember(
       return { error: 'Permission denied' }
     }
 
-    const { data: crew } = await supabase
+    const { data: crew, error: crewError } = await supabase
       .from('crew_members')
       .select('id, name, email, phone, invite_token, user_id, invite_sent_at')
       .eq('id', crewMemberId)
       .eq('org_id', membership.org_id)
       .single()
+
+    if (isRealQueryError(crewError)) {
+      reportQueryError(crewError, { site: 'serverAction.settings.inviteCrewMember.crewLookup', orgId: membership.org_id })
+      return { error: 'Operation failed. Please try again.' }
+    }
 
     if (!crew)        return { error: 'Crew member not found' }
     if (!crew.email && !crew.phone) return { error: 'No contact information on file for this crew member' }
@@ -874,7 +919,7 @@ export async function inviteCrewMember(
     // both proceed to send. A deliberate "Resend Invite" click after the
     // window still claims successfully and sends.
     const windowStart = new Date(Date.now() - 10_000).toISOString()
-    const { data: claimed } = await supabase
+    const { data: claimed, error: claimError } = await supabase
       .from('crew_members')
       .update({ invite_sent_at: new Date().toISOString() })
       .eq('id', crewMemberId)
@@ -883,13 +928,23 @@ export async function inviteCrewMember(
       .select('id')
       .maybeSingle()
 
+    if (claimError) {
+      reportQueryError(claimError, { site: 'serverAction.settings.inviteCrewMember.claim', orgId: membership.org_id })
+      return { error: 'Operation failed. Please try again.' }
+    }
+
     if (!claimed) return { success: true }
 
-    const { data: org } = await supabase
+    const { data: org, error: orgError } = await supabase
       .from('organizations')
       .select('name')
       .eq('id', membership.org_id)
       .single()
+
+    if (isRealQueryError(orgError)) {
+      reportQueryError(orgError, { site: 'serverAction.settings.inviteCrewMember.orgLookup', orgId: membership.org_id })
+      return { error: 'Operation failed. Please try again.' }
+    }
 
     const inviteUrl = `${process.env.NEXT_PUBLIC_APP_URL}/crew-invite/${crew.invite_token}`
 
@@ -912,10 +967,15 @@ export async function inviteCrewMember(
         console.error('[inviteCrewMember] email send failed')
         reportError(emailError, { site: 'serverAction.settings.inviteCrewMember', orgId: membership.org_id })
         // Release the claim so a retry isn't blocked by the window above
-        await supabase
+        const { error: releaseError } = await supabase
           .from('crew_members')
           .update({ invite_sent_at: crew.invite_sent_at })
           .eq('id', crewMemberId)
+
+        if (releaseError) {
+          console.error('[inviteCrewMember] failed to release invite claim', releaseError.message)
+          reportError(releaseError, { site: 'serverAction.settings.inviteCrewMember.releaseClaim', orgId: membership.org_id })
+        }
         return { error: 'Failed to send invite email. Please try again.' }
       }
     }
@@ -1020,11 +1080,16 @@ export async function inviteAllUninvitedCrew(): Promise<{ sent: number; error?: 
       }
     }
 
-    const { data: org } = await supabase
+    const { data: org, error: orgError } = await supabase
       .from('organizations')
       .select('name')
       .eq('id', membership.org_id)
       .single()
+
+    if (isRealQueryError(orgError)) {
+      reportQueryError(orgError, { site: 'serverAction.settings.inviteAllUninvitedCrew.orgLookup', orgId: membership.org_id })
+      return { sent: 0, error: 'Operation failed. Please try again.' }
+    }
 
     const { resend: resendClient, FROM: from } = await import('@/lib/resend/client')
 
@@ -1038,7 +1103,7 @@ export async function inviteAllUninvitedCrew(): Promise<{ sent: number; error?: 
       // Atomically claim this crew member before sending — closes the race
       // where a double-click fires two concurrent invocations that both query
       // the same "uninvited" list and each send a duplicate invite to everyone.
-      const { data: claimed } = await supabase
+      const { data: claimed, error: claimError } = await supabase
         .from('crew_members')
         .update({ invite_sent_at: new Date().toISOString() })
         .eq('id', crew.id)
@@ -1046,6 +1111,12 @@ export async function inviteAllUninvitedCrew(): Promise<{ sent: number; error?: 
         .is('invite_sent_at', null)
         .select('id')
         .maybeSingle()
+
+      if (claimError) {
+        console.error('[inviteAllUninvitedCrew] claim failed for crew member', crew.id)
+        reportError(claimError, { site: 'serverAction.settings.inviteAllUninvitedCrew.claim', orgId: membership.org_id })
+        return null
+      }
 
       if (!claimed) return null
 
@@ -1092,11 +1163,16 @@ export async function inviteAllUninvitedCrew(): Promise<{ sent: number; error?: 
       if (delivered) return crew.id
 
       // Release the claim so a future bulk run or manual resend can retry
-      await supabase
+      const { error: releaseError } = await supabase
         .from('crew_members')
         .update({ invite_sent_at: null })
         .eq('id', crew.id)
         .eq('org_id', membership.org_id)
+
+      if (releaseError) {
+        console.error('[inviteAllUninvitedCrew] failed to release invite claim for crew member', crew.id)
+        reportError(releaseError, { site: 'serverAction.settings.inviteAllUninvitedCrew.releaseClaim', orgId: membership.org_id })
+      }
       return null
     }
 
@@ -1320,11 +1396,12 @@ export async function createCheckoutSession(
       }
     }
 
-    const { data: org } = await supabase
+    const orgRes = await supabase
       .from('organizations')
       .select('stripe_customer_id, billing_email')
       .eq('id', membership.org_id)
       .single()
+    const org = unwrap(orgRes, { site: 'serverAction.settings.createCheckoutSession.orgLookup', orgId: membership.org_id })
 
     // An org that ALREADY has a live subscription must never be handed a
     // second Checkout. mode:'subscription' creates a NEW subscription every
@@ -1373,13 +1450,18 @@ export async function createCheckoutSession(
     // Fires on every checkout call (upgrades included) since a checkout can
     // happen either before or after the org connects Hospitable; the RPC
     // itself is idempotent and only ever writes the tag once per org.
-    const { data: hospitableConnection } = await supabase
+    const { data: hospitableConnection, error: hospitableError } = await supabase
       .from('integration_connections')
       .select('id')
       .eq('org_id', membership.org_id)
       .eq('provider_id', 'hospitable')
       .eq('status', 'active')
       .maybeSingle()
+
+    if (hospitableError) {
+      console.error('[createCheckoutSession] hospitable connection lookup failed', hospitableError.message)
+      reportError(hospitableError, { site: 'serverAction.settings.createCheckoutSession.hospitableLookup', orgId: membership.org_id })
+    }
 
     if (hospitableConnection) {
       const cookieStore = await cookies()
@@ -1441,11 +1523,12 @@ export async function getOrgSmsTemplates(): Promise<
 > {
   try {
     const { supabase, membership } = await requireOrgMember()
-    const { data } = await supabase
+    const res = await supabase
       .from('org_sms_templates')
       .select('key, body')
       .eq('org_id', membership.org_id)
-    return data ?? []
+      .limit(200)
+    return unwrapList(res, { site: 'serverAction.settings.getOrgSmsTemplates', orgId: membership.org_id })
   } catch (err) {
     console.error('[getOrgSmsTemplates]', err)
     reportError(err, { site: 'serverAction.settings.getOrgSmsTemplates' })
