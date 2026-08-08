@@ -11,7 +11,7 @@ import type { BookingSource, TablesInsert, Enums } from '@/types/database'
 import { reportError } from '@/lib/observability/report-error'
 import { fetchAllRows, fetchDistinctOrgIds } from '@/lib/inngest/paginate'
 import { safeFetch } from '@/lib/security/url-guard'
-import { unwrap, unwrapList, throwIfAnyQueryFailed, isRealQueryError } from '@/lib/supabase/unwrap'
+import { unwrap, unwrapList, throwIfAnyQueryFailed, isRealQueryError, reportQueryError } from '@/lib/supabase/unwrap'
 
 // Feed fetches are spread across this window to avoid a thundering herd at the
 // top of the hour. Applied per-org now that fan-out is two-stage.
@@ -579,11 +579,17 @@ export const syncIcalFeed = inngest.createFunction(
       }).eq('id', feed_id)
       unwrap(markSuccessRes, { site: 'inngest.ical-sync-all.mark-sync-success.feed', orgId: org_id })
 
+      // Non-fatal: this is the last step of an already-successful sync (the
+      // booking upsert and downstream events fired in earlier steps). Throwing
+      // over a cosmetic milestone flag would mark this step.run — and,
+      // eventually, the whole run — as failed/retried for a sync that already
+      // did its real job, same reasoning as turnover-events.ts's
+      // record-completion-milestones step.
       const milestoneRes = await supabase.from('org_milestones').upsert(
         { org_id, milestone: 'first_ical_sync' },
         { onConflict: 'org_id,milestone', ignoreDuplicates: true }
       )
-      unwrap(milestoneRes, { site: 'inngest.ical-sync-all.mark-sync-success.milestone', orgId: org_id })
+      reportQueryError(milestoneRes.error, { site: 'inngest.ical-sync-all.mark-sync-success.milestone', orgId: org_id })
     })
 
     return {
