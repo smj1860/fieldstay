@@ -133,7 +133,6 @@ const BASELINE = new Set<string>([
   'lib/inngest/functions/ownerrez/incremental-sync.ts',
   'lib/inngest/functions/ownerrez/initial-sync.ts',
   'lib/inngest/functions/ownerrez/ownerrez-reviews-sync.ts',
-  'lib/inngest/functions/platform-inventory-template-broadcast.ts',
 ])
 
 describe('guardrail: no unbounded .select() in lib/inngest/**', () => {
@@ -142,9 +141,11 @@ describe('guardrail: no unbounded .select() in lib/inngest/**', () => {
   it('finds the select population (sanity: the scan is not silently empty)', () => {
     // Guards against the scan breaking and reading as "all clean". The floor
     // moves DOWN as files are genuinely fixed — it was 20 until daily-wrapup
-    // and inventory-events were fully bounded, which is real cleanup, not a
-    // broken matcher. Lower it only alongside a baseline entry being deleted.
-    expect(offenders.length).toBeGreaterThan(12)
+    // and inventory-events were fully bounded, then 12 until platform-
+    // inventory-template-broadcast's four reads were paginated/unwrapped,
+    // which is real cleanup, not a broken matcher. Lower it only alongside a
+    // baseline entry being deleted.
+    expect(offenders.length).toBeGreaterThan(10)
   })
 
   it('no unbounded .select() outside the grandfathered baseline files', () => {
