@@ -300,10 +300,21 @@ export const assetHealthOrg = inngest.createFunction(
         new Date().toISOString(),
       )
 
-      // persistScores is an upsert keyed on id — safe to re-run on a retry.
-      await persistScores(supabase, updates)
+      // A pure UPDATE keyed on id and scoped to this org — idempotent, so a
+      // step retry simply rewrites the same scores.
+      const persisted = await persistScores(supabase, orgId, updates)
 
-      return updates.length
+      // A shortfall means assets disappeared between the read and the write.
+      // Benign on its own, but silence here is what let a total write failure
+      // look like a healthy run for sixteen days.
+      if (persisted !== updates.length) {
+        logger.warn(
+          `[asset-health] org ${orgId}: attempted ${updates.length} score update(s), ` +
+          `${persisted} row(s) matched — assets likely removed mid-run`
+        )
+      }
+
+      return persisted
     })
 
     logger.info(`Asset health: scored ${scored} asset(s) for org ${orgId}`)

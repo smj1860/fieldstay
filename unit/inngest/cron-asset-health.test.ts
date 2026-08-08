@@ -11,7 +11,7 @@ import { dailyAssetHealth, assetHealthOrg } from '@/lib/inngest/functions/cron/a
 import { createServiceClient } from '@/lib/supabase/server'
 import { logAuditEvents } from '@/lib/audit'
 import { invokeHandler } from './test-helpers'
-import { createSupabaseDouble, type TableSpec } from '../stubs/supabase-query-double'
+import { createSupabaseDouble, type TableSpec, type SupabaseDoubleOptions } from '../stubs/supabase-query-double'
 
 // Asset health is now a DISPATCHER (`dailyAssetHealth` — distinct org ids +
 // the platform-level Bayesian weight nudge) plus a per-org scoring handler
@@ -24,8 +24,11 @@ import { createSupabaseDouble, type TableSpec } from '../stubs/supabase-query-do
 // more than once per run, so the shared double is seeded per table with a
 // queue consumed in query order; a paginated query consumes one queue entry
 // and slices it across `.range()` pages.
-function makeSupabase(queued: Record<string, TableSpec>) {
-  return createSupabaseDouble(queued)
+// Forwards `options` (notably `rpc`) — the wrapper used to drop it, so a test
+// that seeded an rpc response silently got the double's default
+// `{ data: null, error: null }` and proved nothing about the write path.
+function makeSupabase(queued: Record<string, TableSpec>, options: SupabaseDoubleOptions = {}) {
+  return createSupabaseDouble(queued, options)
 }
 
 function makeStep() {
@@ -55,7 +58,7 @@ describe('dailyAssetHealth (dispatcher)', () => {
     const result = await invokeHandler(dailyAssetHealth, {
       event:  {},
       step,
-      logger: { info: vi.fn(), error: vi.fn() },
+      logger: { info: vi.fn(), error: vi.fn(), warn: vi.fn() },
     })
 
     expect(result).toEqual({ dispatched: 0 })
@@ -79,7 +82,7 @@ describe('dailyAssetHealth (dispatcher)', () => {
     const result = await invokeHandler(dailyAssetHealth, {
       event:  {},
       step,
-      logger: { info: vi.fn(), error: vi.fn() },
+      logger: { info: vi.fn(), error: vi.fn(), warn: vi.fn() },
     })
 
     expect(result).toEqual({ dispatched: 2 })
@@ -107,7 +110,7 @@ describe('dailyAssetHealth (dispatcher)', () => {
     const result = await invokeHandler(dailyAssetHealth, {
       event:  {},
       step,
-      logger: { info: vi.fn(), error: vi.fn() },
+      logger: { info: vi.fn(), error: vi.fn(), warn: vi.fn() },
     })
 
     expect(result).toEqual({ dispatched: 2 })
@@ -141,7 +144,7 @@ describe('dailyAssetHealth (dispatcher)', () => {
     const result = await invokeHandler(dailyAssetHealth, {
       event:  {},
       step:   makeStep(),
-      logger: { info: vi.fn(), error: vi.fn() },
+      logger: { info: vi.fn(), error: vi.fn(), warn: vi.fn() },
     })
 
     expect(result).toEqual({ dispatched: 1 })
@@ -173,7 +176,7 @@ describe('dailyAssetHealth (dispatcher)', () => {
     await invokeHandler(dailyAssetHealth, {
       event:  {},
       step:   makeStep(),
-      logger: { info: vi.fn(), error: vi.fn() },
+      logger: { info: vi.fn(), error: vi.fn(), warn: vi.fn() },
     })
 
     const gte = supabase.calls.find((c) => c.table === 'work_orders' && c.method === 'gte')
@@ -203,7 +206,6 @@ describe('assetHealthOrg (per org)', () => {
           }],
           error: null,
         },
-        { data: null, error: null }, // persist-scores upsert
       ],
       asset_type_standards: [
         {
@@ -217,23 +219,33 @@ describe('assetHealthOrg (per org)', () => {
       work_orders: [
         { data: [], error: null },  // repair history
       ],
-    })
+    }, { rpc: { data: 1, error: null } })   // apply_asset_health_scores -> 1 row updated
     ;(createServiceClient as ReturnType<typeof vi.fn>).mockReturnValue(supabase)
 
     const result = await invokeHandler(assetHealthOrg, {
       event,
       step:   makeStep(),
-      logger: { info: vi.fn(), error: vi.fn() },
+      logger: { info: vi.fn(), error: vi.fn(), warn: vi.fn() },
     })
 
     expect(result).toEqual({ org_id: 'org_1', assets_scored: 1 })
 
-    const upsertCall = supabase.calls.find((c) => c.table === 'property_assets' && c.method === 'upsert')
-    expect(upsertCall).toBeDefined()
-    const [persisted] = upsertCall!.args[0] as Array<{ id: string; health_score: number }>
-    expect(persisted.id).toBe('asset_1')
-    expect(persisted.health_score).toBeGreaterThanOrEqual(0)
-    expect(persisted.health_score).toBeLessThanOrEqual(100)
+    // Scores go through apply_asset_health_scores, NOT an upsert. The upsert
+    // could never succeed: PostgREST emits INSERT ... ON CONFLICT DO UPDATE and
+    // Postgres checks NOT NULL on the proposed tuple before resolving the
+    // conflict, so a partial column list failed 23502 on org_id every time —
+    // for sixteen days, invisibly, because the result was discarded.
+    expect(supabase.calls.some((c) => c.table === 'property_assets' && c.method === 'upsert')).toBe(false)
+    expect(supabase.rpc).toHaveBeenCalledWith('apply_asset_health_scores', expect.objectContaining({
+      p_org_id: 'org_1',
+    }))
+
+    const [, rpcArgs] = (supabase.rpc as ReturnType<typeof vi.fn>).mock.calls[0]
+    const payload = (rpcArgs as { p_updates: Array<{ id: string; health_score: number }> }).p_updates
+    expect(payload).toHaveLength(1)
+    expect(payload[0]!.id).toBe('asset_1')
+    expect(payload[0]!.health_score).toBeGreaterThanOrEqual(0)
+    expect(payload[0]!.health_score).toBeLessThanOrEqual(100)
 
     // Every query this handler runs is scoped to the dispatched org.
     const assetEqs = supabase.calls.filter((c) => c.table === 'property_assets' && c.method === 'eq')
@@ -249,7 +261,7 @@ describe('assetHealthOrg (per org)', () => {
     const result = await invokeHandler(assetHealthOrg, {
       event,
       step:   makeStep(),
-      logger: { info: vi.fn(), error: vi.fn() },
+      logger: { info: vi.fn(), error: vi.fn(), warn: vi.fn() },
     })
 
     expect(result).toEqual({ org_id: 'org_1', assets_scored: 0 })
@@ -281,14 +293,15 @@ describe('assetHealthOrg (per org)', () => {
     const result = await invokeHandler(assetHealthOrg, {
       event,
       step:   makeStep(),
-      logger: { info: vi.fn(), error: vi.fn() },
+      logger: { info: vi.fn(), error: vi.fn(), warn: vi.fn() },
     })
 
     // assets_scored now reports assets actually SCORED (updates.length), not
     // assets merely found — the pre-split version returned the candidate count,
     // which reported 1 for an asset it had in fact skipped.
     expect(result).toEqual({ org_id: 'org_1', assets_scored: 0 })
-    expect(supabase.calls.some((c) => c.table === 'property_assets' && c.method === 'upsert')).toBe(false)
+    // Nothing scored means no write at all — not an empty one.
+    expect(supabase.rpc).not.toHaveBeenCalled()
   })
 
   it('scores every asset past the first page, not just the first 1000', async () => {
@@ -308,17 +321,134 @@ describe('assetHealthOrg (per org)', () => {
         error: null,
       }],
       work_orders: [{ data: [], error: null }],
-    })
+    }, { rpc: { data: 1_750, error: null } })
     ;(createServiceClient as ReturnType<typeof vi.fn>).mockReturnValue(supabase)
 
     const result = await invokeHandler(assetHealthOrg, {
       event,
       step:   makeStep(),
-      logger: { info: vi.fn(), error: vi.fn() },
+      logger: { info: vi.fn(), error: vi.fn(), warn: vi.fn() },
     })
 
     expect(result).toEqual({ org_id: 'org_1', assets_scored: 1_750 })
     const ranges = supabase.calls.filter((c) => c.table === 'property_assets' && c.method === 'range')
     expect(ranges.map((c) => c.args)).toEqual([[0, 999], [1000, 1999]])
+  })
+
+  // ── The 23502 that ran for sixteen days ───────────────────────────────────
+  // The score write was `.upsert([{ id, health_score, health_score_updated_at }],
+  // { onConflict: 'id' })`. PostgREST emits INSERT ... ON CONFLICT (id) DO
+  // UPDATE, and Postgres validates NOT NULL on the PROPOSED tuple before it
+  // resolves the conflict — so it failed 23502 on property_assets.org_id every
+  // single run, even though the row existed and DO UPDATE was the branch that
+  // would have executed. Reproduced against the live schema on an existing id.
+  //
+  // Production: 160 assets, 7 ever scored, newest health_score_updated_at
+  // 2026-06-20 — predating the file. It became visible only when the
+  // read-without-error burn-down stopped discarding the write result.
+  it('never sends an upsert — the write cannot be allowed to attempt an INSERT', async () => {
+    const supabase = makeSupabase({
+      property_assets: [{
+        data: [{
+          id: 'asset_1', org_id: 'org_1', property_id: 'prop_1', asset_type: 'hvac',
+          installation_date: '2020-01-01', expected_lifespan_years: 15,
+          estimated_replacement_cost: 6000, health_score: 90,
+        }],
+        error: null,
+      }],
+      asset_type_standards: [{
+        data: [{
+          asset_type: 'hvac', lifespan_min_years: 12, lifespan_max_years: 18,
+          avg_replacement_cost_high: 7000, age_weight: 60, condition_weight: 40,
+        }],
+        error: null,
+      }],
+      work_orders: [{ data: [], error: null }],
+    }, { rpc: { data: 1, error: null } })
+    ;(createServiceClient as ReturnType<typeof vi.fn>).mockReturnValue(supabase)
+
+    await invokeHandler(assetHealthOrg, {
+      event, step: makeStep(), logger: { info: vi.fn(), error: vi.fn(), warn: vi.fn() },
+    })
+
+    for (const method of ['upsert', 'insert']) {
+      expect(
+        supabase.calls.some((c) => c.table === 'property_assets' && c.method === method),
+        `score persistence must never ${method} into property_assets`,
+      ).toBe(false)
+    }
+  })
+
+  it('warns when fewer rows matched than were sent (assets removed mid-run)', async () => {
+    const supabase = makeSupabase({
+      property_assets: [{
+        data: [
+          { id: 'asset_1', org_id: 'org_1', property_id: 'prop_1', asset_type: 'hvac',
+            installation_date: '2020-01-01', expected_lifespan_years: 15,
+            estimated_replacement_cost: 6000, health_score: 90 },
+          { id: 'asset_2', org_id: 'org_1', property_id: 'prop_1', asset_type: 'hvac',
+            installation_date: '2019-01-01', expected_lifespan_years: 15,
+            estimated_replacement_cost: 6000, health_score: 80 },
+        ],
+        error: null,
+      }],
+      asset_type_standards: [{
+        data: [{
+          asset_type: 'hvac', lifespan_min_years: 12, lifespan_max_years: 18,
+          avg_replacement_cost_high: 7000, age_weight: 60, condition_weight: 40,
+        }],
+        error: null,
+      }],
+      work_orders: [{ data: [], error: null }],
+    }, { rpc: { data: 1, error: null } })   // sent 2, only 1 matched
+    ;(createServiceClient as ReturnType<typeof vi.fn>).mockReturnValue(supabase)
+
+    const warn = vi.fn()
+    const result = await invokeHandler(assetHealthOrg, {
+      event, step: makeStep(), logger: { info: vi.fn(), error: vi.fn(), warn },
+    })
+
+    // Reports what was actually WRITTEN, not what was attempted. Returning the
+    // attempt count is how a total write failure looked like a healthy run.
+    expect(result).toEqual({ org_id: 'org_1', assets_scored: 1 })
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining('attempted 2 score update(s), 1 row(s) matched'))
+  })
+
+  it('throws with the org on the error context when the score write fails', async () => {
+    // The old call passed only `site`, so the Sentry event named the failing
+    // query but not the customer — visible daily, actionable never.
+    const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {})
+    const supabase = makeSupabase({
+      property_assets: [{
+        data: [{
+          id: 'asset_1', org_id: 'org_1', property_id: 'prop_1', asset_type: 'hvac',
+          installation_date: '2020-01-01', expected_lifespan_years: 15,
+          estimated_replacement_cost: 6000, health_score: 90,
+        }],
+        error: null,
+      }],
+      asset_type_standards: [{
+        data: [{
+          asset_type: 'hvac', lifespan_min_years: 12, lifespan_max_years: 18,
+          avg_replacement_cost_high: 7000, age_weight: 60, condition_weight: 40,
+        }],
+        error: null,
+      }],
+      work_orders: [{ data: [], error: null }],
+    }, { rpc: { data: null, error: { message: 'null value in column "org_id"', code: '23502' } } })
+    ;(createServiceClient as ReturnType<typeof vi.fn>).mockReturnValue(supabase)
+
+    await expect(
+      invokeHandler(assetHealthOrg, {
+        event, step: makeStep(), logger: { info: vi.fn(), error: vi.fn(), warn: vi.fn() },
+      }),
+    ).rejects.toThrow()
+
+    expect(consoleError).toHaveBeenCalledWith(
+      expect.stringContaining('inngest.asset-health.persistScores'),
+      '23502',
+      expect.stringContaining('org_id'),
+      expect.anything(),
+    )
   })
 })
