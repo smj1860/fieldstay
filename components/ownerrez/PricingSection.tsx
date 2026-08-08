@@ -15,13 +15,16 @@ interface PricingSectionProps {
 // ─────────────────────────────────────────────────────────────────────────────
 const PLANS = [
   {
-    name: "Starter",
-    description: "For independent managers with a focused portfolio.",
-    monthly: 199,
-    annual: 1990,       // 2 months free: $199 × 10
-    annualSavings: 398, // $199 × 2
-    properties: "Up to 15 properties",
+    name: "Hosts",
+    description: "For hosts running a handful of listings.",
+    monthly: 89,
+    annual: 890,        // 2 months free: $89 × 10
+    annualSavings: 178, // $89 × 2
+    properties: "1–4 properties",
     highlight: false,
+    // The entry tier carries the full feature list because the pitch above
+    // is "all the features, no gates" — every tier above it differs only by
+    // property count, so they read as "Everything in <the tier below>".
     features: [
       "iCal sync (Airbnb, VRBO)",
       "Turnover board + crew app",
@@ -31,6 +34,19 @@ const PLANS = [
       "Owner P&L portal",
       "Crew email invites",
       "RepuGuard reputation management",
+    ],
+  },
+  {
+    name: "Starter",
+    description: "For independent managers with a focused portfolio.",
+    monthly: 199,
+    annual: 1990,       // 2 months free: $199 × 10
+    annualSavings: 398, // $199 × 2
+    properties: "5–15 properties",
+    highlight: false,
+    features: [
+      "Everything in Hosts",
+      "Up to 15 properties",
     ],
   },
   {
@@ -131,8 +147,8 @@ export default function PricingSection({ isLoggedIn }: Readonly<PricingSectionPr
         </div>
       </div>
 
-      {/* Plan cards — 4-column grid on wide screens, 2-col on tablet, 1-col mobile */}
-      <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-6 mb-8">
+      {/* Plan cards — 5 tiers: 5-col at 2xl, 3-col at lg, 2-col tablet, 1-col mobile */}
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-5 gap-6 mb-8">
         {PLANS.map((plan) => (
           <div
             key={plan.name}

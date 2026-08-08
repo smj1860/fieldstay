@@ -5993,7 +5993,7 @@ export type Database = {
         | "39_year"
         | "section_179"
       member_role: "admin" | "manager" | "crew" | "viewer" | "owner"
-      org_plan: "starter" | "growth" | "pro" | "enterprise" | "portfolio"
+      org_plan: "starter" | "growth" | "pro" | "enterprise" | "portfolio" | "hosts"
       org_plan_status:
         | "trialing"
         | "active"
@@ -6300,7 +6300,7 @@ export const Constants = {
       ],
       macrs_class: ["5_year", "15_year", "27_5_year", "39_year", "section_179"],
       member_role: ["admin", "manager", "crew", "viewer", "owner"],
-      org_plan: ["starter", "growth", "pro", "enterprise", "portfolio"],
+      org_plan: ["starter", "growth", "pro", "enterprise", "portfolio", "hosts"],
       org_plan_status: [
         "trialing",
         "active",

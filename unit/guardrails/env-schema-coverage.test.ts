@@ -139,6 +139,8 @@ function fullEnv(): EnvRecord {
     STRIPE_SECRET_KEY:             'sk_test_123',
     STRIPE_WEBHOOK_SECRET:         'whsec_123',
     STRIPE_CONNECT_WEBHOOK_SECRET: 'whsec_456',
+    STRIPE_PRICE_HOSTS_MONTHLY:     'price_h1',
+    STRIPE_PRICE_HOSTS_ANNUAL:      'price_h2',
     STRIPE_PRICE_STARTER_MONTHLY:   'price_1',
     STRIPE_PRICE_STARTER_ANNUAL:    'price_2',
     STRIPE_PRICE_GROWTH_MONTHLY:    'price_3',

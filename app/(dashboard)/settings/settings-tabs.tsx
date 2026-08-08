@@ -36,12 +36,13 @@ const TABS = ['Organization', 'Billing', 'Security', 'Notifications', 'Team', 'A
 type Tab = typeof TABS[number]
 
 const PLAN_INFO = {
-  starter:    { name: 'Starter',   maxProperties: 15,  description: 'Up to 15 properties',   badge: 'blue'  },
+  hosts:      { name: 'Hosts',     maxProperties: 4,   description: '1–4 properties',        badge: 'blue'  },
+  starter:    { name: 'Starter',   maxProperties: 15,  description: '5–15 properties',       badge: 'blue'  },
   growth:     { name: 'Growth',    maxProperties: 50,  description: '16–50 properties',      badge: 'green' },
   portfolio:  { name: 'Portfolio', maxProperties: 100, description: '51–100 properties',     badge: 'gold'  },
   enterprise: { name: 'Enterprise',maxProperties: 999, description: '100+ properties',       badge: 'amber' },
   // Legacy alias — orgs created before the 'pro' tier was renamed to 'starter'
-  pro:        { name: 'Starter',   maxProperties: 15,  description: 'Up to 15 properties',   badge: 'blue'  },
+  pro:        { name: 'Starter',   maxProperties: 15,  description: '5–15 properties',       badge: 'blue'  },
 } as const
 
 const PLAN_STATUS_BADGES: Record<string, 'green' | 'amber' | 'red' | 'blue' | 'gold' | 'slate'> = {
@@ -1288,9 +1289,17 @@ function LegalTab() {
 
 const DISPLAY_PLANS = [
   {
+    key:     'hosts' as const,
+    name:    'Hosts',
+    props:   '1–4 properties',
+    monthly: 89,
+    annual:  890,
+    savings: '$178',
+  },
+  {
     key:     'starter' as const,
     name:    'Starter',
-    props:   'Up to 15 properties',
+    props:   '5–15 properties',
     monthly: 199,
     annual:  1990,
     savings: '$398',
@@ -1313,6 +1322,16 @@ const DISPLAY_PLANS = [
   },
 ]
 
+/**
+ * Derived from the cards actually rendered above, NOT imported from
+ * lib/stripe/client — this is a 'use client' component and that module
+ * constructs the Stripe SDK. Deriving here means the button's key and the
+ * handler's parameter cannot drift, and adding a card is still one edit.
+ * createCheckoutSession takes the server-side CheckoutPlanKey, so a card key
+ * that is not a real plan fails to type-check at the call site.
+ */
+type CheckoutPlanKey = (typeof DISPLAY_PLANS)[number]['key']
+
 function BillingTab({ org, hospitablePromo }: Readonly<{ org: Organization; hospitablePromo: HospitablePromoStatus | null }>) {
   const currentPlan = PLAN_INFO[org.plan as keyof typeof PLAN_INFO] ?? PLAN_INFO.starter
   const statusBadge = PLAN_STATUS_BADGES[org.plan_status] ?? 'slate'
@@ -1328,7 +1347,7 @@ function BillingTab({ org, hospitablePromo }: Readonly<{ org: Organization; hosp
     startPortal(async () => { await openBillingPortal() })
   }
 
-  function handleCheckout(planKey: 'starter' | 'growth' | 'portfolio') {
+  function handleCheckout(planKey: CheckoutPlanKey) {
     setCheckoutPlan(planKey)
     setCheckoutError(null)
     startCheckoutT(async () => {
@@ -1419,7 +1438,7 @@ function BillingTab({ org, hospitablePromo }: Readonly<{ org: Organization; hosp
           </div>
         )}
 
-        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
           {DISPLAY_PLANS.map((plan) => {
             const isCurrent = org.plan === plan.key && org.plan_status === 'active'
             const isPending = checkoutPlan === plan.key && checkoutPending

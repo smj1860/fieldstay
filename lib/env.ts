@@ -143,6 +143,8 @@ export const ENV_SPEC: Readonly<Record<string, VarSpec>> = {
     tier: 'production', schema: prefixed('whsec_'),
     why: 'same, for the separate Connect webhook endpoint',
   },
+  STRIPE_PRICE_HOSTS_MONTHLY:     { tier: 'production', schema: prefixed('price_'), why: 'Hosts monthly checkout' },
+  STRIPE_PRICE_HOSTS_ANNUAL:      { tier: 'production', schema: prefixed('price_'), why: 'Hosts annual checkout' },
   STRIPE_PRICE_STARTER_MONTHLY:   { tier: 'production', schema: prefixed('price_'), why: 'Starter monthly checkout' },
   STRIPE_PRICE_STARTER_ANNUAL:    { tier: 'production', schema: prefixed('price_'), why: 'Starter annual checkout' },
   STRIPE_PRICE_GROWTH_MONTHLY:    { tier: 'production', schema: prefixed('price_'), why: 'Growth monthly checkout' },

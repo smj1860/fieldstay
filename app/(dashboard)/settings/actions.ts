@@ -6,7 +6,7 @@ import { redirect } from 'next/navigation'
 import { cookies } from 'next/headers'
 import { requireOrgMember, requireOrgRole } from '@/lib/auth'
 import { createClient, createReauthClient } from '@/lib/supabase/server'
-import { stripe, PLANS } from '@/lib/stripe/client'
+import { stripe, PLANS, type CheckoutPlanKey } from '@/lib/stripe/client'
 import { inngest } from '@/lib/inngest/client'
 import { geocodeZip } from '@/lib/geocoding'
 import { logAuditEvent, logAuditEvents } from '@/lib/audit'
@@ -1256,7 +1256,7 @@ const LIVE_SUBSCRIPTION_STATUSES = new Set<string>([
 ])
 
 export async function createCheckoutSession(
-  planKey: 'starter' | 'growth' | 'portfolio',
+  planKey: CheckoutPlanKey,
   interval: 'monthly' | 'annual'
 ): Promise<SettingsActionState> {
   try {
