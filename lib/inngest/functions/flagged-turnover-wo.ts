@@ -3,6 +3,7 @@ import { createServiceClient } from '@/lib/supabase/server'
 import { logAuditEvent }       from '@/lib/audit'
 import { getPmMembers }        from '@/lib/inngest/helpers'
 import { reportError }         from '@/lib/observability/report-error'
+import { unwrap }              from '@/lib/supabase/unwrap'
 
 export const flaggedTurnoverToWO = inngest.createFunction(
   {
@@ -18,23 +19,47 @@ export const flaggedTurnoverToWO = inngest.createFunction(
       const supabase = createServiceClient({ system: 'inngest:flagged-turnover-wo' })
 
       // Idempotency: return existing WO if this step is retried
-      const { data: existing } = await supabase
+      // This read is the step's idempotency guard, and Inngest retries steps.
+      // Discarded, a failed read looked like "no work order yet", so the
+      // insert below ran and hit wo_crew_flag_source_unique — surfacing as
+      // "WO creation failed: duplicate key" on every retry until they
+      // exhausted. No duplicate was ever created (the partial unique index on
+      // source_turnover_id WHERE source='crew_flag' is what guarantees that),
+      // but the reported cause was the collision rather than the read that
+      // caused it.
+      const existingRes = await supabase
         .from('work_orders')
         .select('id, wo_number')
+        .eq('org_id', org_id)
         .eq('source_turnover_id', turnover_id)
         .eq('source', 'crew_flag')
         .maybeSingle()
 
+      const existing = unwrap(existingRes, {
+        site: 'inngest.flagged-turnover-wo.idempotency-check', orgId: org_id,
+      })
+
       if (existing) return existing
 
-      const { data: property } = await supabase
+      const propertyRes = await supabase
         .from('properties')
         .select('name')
         .eq('id', property_id)
         .eq('org_id', org_id)
         .single()
 
-      const propName = property?.name ?? 'Property'
+      // Reported, not thrown: the 'Property' fallback is a genuinely
+      // acceptable title, and failing the whole work-order creation over a
+      // display name would be the wrong trade. But a title silently
+      // degrading to the generic word is worth knowing about.
+      if (propertyRes.error) {
+        console.error('[flagged-turnover-wo] property name lookup failed', propertyRes.error.message)
+        reportError(propertyRes.error, {
+          site: 'inngest.flagged-turnover-wo.property-name', orgId: org_id,
+        })
+      }
+
+      const propName = propertyRes.data?.name ?? 'Property'
 
       const { data: wo, error } = await supabase
         .from('work_orders')
@@ -77,11 +102,24 @@ export const flaggedTurnoverToWO = inngest.createFunction(
       await step.run(`notify-manager-${mgr.userId}`, async () => {
         const supabase = createServiceClient({ system: 'inngest:flagged-turnover-wo' })
 
-        const { data: subs } = await supabase
+        const subsRes = await supabase
           .from('push_subscriptions')
           .select('endpoint, p256dh, auth')
           .eq('user_id', mgr.userId)
 
+        // Reported, not thrown — push is best-effort here and already has its
+        // own try/catch below. Discarded entirely, though, "this manager has
+        // no device registered" and "the subscription lookup failed" were the
+        // same silent return.
+        if (subsRes.error) {
+          console.error('[flagged-turnover-wo] push subscription lookup failed', subsRes.error.message)
+          reportError(subsRes.error, {
+            site: 'inngest.flagged-turnover-wo.push-subscriptions', orgId: org_id,
+          })
+          return
+        }
+
+        const subs = subsRes.data
         if (!subs?.length) return
 
         const { sendPushToCrewMember } = await import('@/lib/push/client')

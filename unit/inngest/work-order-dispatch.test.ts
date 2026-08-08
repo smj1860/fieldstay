@@ -98,6 +98,51 @@ describe('workOrderDispatch', () => {
     vi.clearAllMocks()
   })
 
+  // ── a failed read must not present as a benign skip ────────────────────
+  //
+  // Every one of these reads used to be `const { data: x }`, and each failure
+  // produced a skip reason that was a false statement about why: 'work order
+  // not found for comms log' for a WO that exists, 'no vendor on work order'
+  // for one that has a vendor. The vendor still got the dispatch email in
+  // every case — only the record of it, or the payout invite, went missing.
+
+  it('throws instead of reporting the comms log skipped when the work-order read fails', async () => {
+    const supabase = makeSupabase({
+      work_orders: [
+        { data: null, error: { message: 'connection reset', code: '08006' } },  // log-to-comms
+      ],
+    })
+    ;(createServiceClient as ReturnType<typeof vi.fn>).mockReturnValue(supabase)
+
+    await expect(
+      invokeHandler(workOrderDispatch, { event: dispatchEvent(), step: makeStep() })
+    ).rejects.toThrow()
+
+    // The whole point of the step: no row written, and it must not look done.
+    expect(supabase.calls.some((c) => c.table === 'communication_logs' && c.method === 'insert')).toBe(false)
+  })
+
+  it('throws rather than silently skipping the Stripe Connect invite on a failed vendor read', async () => {
+    const supabase = makeSupabase({
+      work_orders: [
+        { data: { id: 'wo_1', org_id: 'org_1', vendor_id: 'v1', property_id: 'prop_1' }, error: null },
+        { data: { org_id: 'org_1', vendor_id: 'v1', wo_number: 'WO-1001' }, error: null },
+      ],
+      communication_logs: [{ error: null }],
+      vendors: [{ data: null, error: { message: 'statement timeout', code: '57014' } }],
+    })
+    ;(createServiceClient as ReturnType<typeof vi.fn>).mockReturnValue(supabase)
+
+    // The nightly cron is a genuine backstop, so the vendor is not stranded —
+    // but this step exists to spare a same-day dispatch that wait, and
+    // 'already invited or no email' claimed the opposite of what happened.
+    await expect(
+      invokeHandler(workOrderDispatch, { event: dispatchEvent(), step: makeStep() })
+    ).rejects.toThrow()
+
+    expect(ensureVendorConnectInvited).not.toHaveBeenCalled()
+  })
+
   it('emails the vendor, logs the comms record, and invites an un-onboarded vendor to Stripe Connect', async () => {
     const supabase = makeSupabase({
       work_orders: [

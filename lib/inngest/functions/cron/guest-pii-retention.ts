@@ -156,6 +156,12 @@ export const guestPiiRetentionOrg = inngest.createFunction(
             guest_pii_anonymized_at: new Date().toISOString(),
           })
           .in('id', bookingIds)
+          // Org-scoped as well as id-scoped. The ids come from the org-scoped
+          // select above so this is correct today, but it is a service-role
+          // DESTRUCTIVE write with RLS off — the id list is the only thing
+          // bounding it, and an id list is exactly the kind of thing a future
+          // refactor widens without noticing.
+          .eq('org_id', orgId)
 
         if (updateError) throw new Error(`Failed to anonymize bookings for org ${orgId}: ${updateError.message}`)
 

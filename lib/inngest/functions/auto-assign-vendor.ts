@@ -1,4 +1,5 @@
 import { throwIfAnyQueryFailed } from '@/lib/supabase/unwrap'
+import { reportError } from '@/lib/observability/report-error'
 import { inngest } from '@/lib/inngest/client'
 import { createServiceClient } from '@/lib/supabase/server'
 import { haversineKm, proximityScore, clamp01 } from '@/lib/scoring/geo'
@@ -116,7 +117,14 @@ export const autoAssignVendor = inngest.createFunction(
       if (!eligibleVendors.length) return null
 
       // Familiarity: has this vendor done a work order at this property before?
-      const { data: pastWOs } = await supabase
+      // Both scoring reads report rather than throw: this function produces a
+      // SUGGESTION a PM accepts or overrides (there is deliberately no
+      // autopilot mode for vendors), so a degraded score is absorbed by the
+      // human and failing the run outright would be worse than a weaker
+      // suggestion. Discarded entirely, though, a failed read silently
+      // removed a whole scoring signal — which is precisely what makes
+      // "the suggestions are bad lately" impossible to explain.
+      const pastWOsRes = await supabase
         .from('work_orders')
         .select('vendor_id')
         .eq('property_id', property_id)
@@ -125,17 +133,32 @@ export const autoAssignVendor = inngest.createFunction(
         .not('vendor_id', 'is', null)
         .in('vendor_id', eligibleVendors.map((v) => v.id))
 
-      const familiarVendorIds = computeFamiliarIds(pastWOs ?? [], (w) => w.vendor_id)
+      if (pastWOsRes.error) {
+        reportError(pastWOsRes.error, {
+          site: 'inngest.auto-assign-vendor.familiarity-signal', orgId: org_id,
+        })
+      }
+
+      const familiarVendorIds = computeFamiliarIds(pastWOsRes.data ?? [], (w) => w.vendor_id)
 
       // Workload: currently open (assigned/in_progress) work orders per vendor
-      const { data: openWOs } = await supabase
+      const openWOsRes = await supabase
         .from('work_orders')
         .select('vendor_id')
         .eq('org_id', org_id)
         .in('vendor_id', eligibleVendors.map((v) => v.id))
         .in('status', ['assigned', 'in_progress'])
 
-      const workloadMap = computeWorkloadMap(openWOs ?? [], (w) => w.vendor_id)
+      // Same stance as the familiarity read above. This one skews harder when
+      // it fails: an empty workload map makes every vendor look idle, so the
+      // busiest vendor scores identically to the free one.
+      if (openWOsRes.error) {
+        reportError(openWOsRes.error, {
+          site: 'inngest.auto-assign-vendor.workload-signal', orgId: org_id,
+        })
+      }
+
+      const workloadMap = computeWorkloadMap(openWOsRes.data ?? [], (w) => w.vendor_id)
 
       return {
         property:  { lat: property?.lat ?? null, lng: property?.lng ?? null },

@@ -138,7 +138,12 @@ const BASELINE: Record<string, number> = {
   'lib/checklists/seed-default-room-templates.ts': 2,
 
   'lib/guidebook/sync.ts': 4,
-  'lib/inngest/functions/auto-assign-vendor.ts': 2,
+  // 2 -> 0 (entry deleted). Both are scoring signals for a vendor SUGGESTION,
+  // so they report rather than throw — a PM accepts or overrides it, and
+  // there is deliberately no autopilot mode for vendors. Discarded, though, a
+  // failed read silently removed an entire signal: an empty workload map
+  // makes every vendor look idle, so the busiest scores the same as the free
+  // one. That is exactly what makes "the suggestions got worse" unexplainable.
   // 2 -> 0 (entry deleted). The Kroger connection read was the costly one:
   // discarded, a failure made `connection` null, which the caller reads as
   // "no store configured" — so it told a PM whose store IS connected to go
@@ -170,7 +175,12 @@ const BASELINE: Record<string, number> = {
   // an expected race and the schedule stopped producing work orders for this
   // occurrence and every future one.
   'lib/inngest/functions/email-trial-lifecycle.tsx': 4,
-  'lib/inngest/functions/flagged-turnover-wo.ts': 3,
+  // 3 -> 0 (entry deleted). The idempotency read was the interesting one:
+  // discarded, a failure looked like "no work order yet", so the insert ran
+  // and hit wo_crew_flag_source_unique — surfacing as "duplicate key" on
+  // every retry. No duplicate was ever possible (that partial unique index
+  // guarantees it), but the reported cause was the collision rather than the
+  // read that caused it.
   // 3 -> 0 (entry deleted), same three reads as its morning twin below: a
   // failed sponsor lookup was indistinguishable from an org with no sponsors,
   // and a failed opt-in read from a guest who opted out — every one of them
@@ -232,7 +242,11 @@ const BASELINE: Record<string, number> = {
   'lib/inngest/functions/ownerrez/initial-sync.ts': 4,
   'lib/inngest/functions/ownerrez/ownerrez-reviews-sync.ts': 3,
   'lib/inngest/functions/platform-inventory-template-broadcast.ts': 4,
-  'lib/inngest/functions/work-order-dispatch.ts': 3,
+  // 3 -> 0 (entry deleted). Each failure produced a skip reason that was a
+  // false statement about why: 'work order not found for comms log' for a WO
+  // that exists, 'no vendor on work order' for one that has a vendor. The
+  // vendor still received the dispatch email every time — only the record of
+  // it, or the same-day payout invite, went missing.
   // 8 -> 3. The two that mattered were both on the money path: the
   // work_orders read feeding the maintenance expense (discarded, a failed read
   // produced cost null and the step returned `{ skipped: true }` — success, so

@@ -443,39 +443,43 @@ export const maintenanceSchedulesOrg = inngest.createFunction(
           }
           const existingWO = existingWORes.data
 
-          const insertRes = existingWO
-            ? { data: existingWO, error: null }
-            : await supabase
-                .from('work_orders')
-                .insert({
-                  property_id:        schedule.property_id,
-                  org_id:             schedule.org_id,
-                  vendor_id:          schedule.assigned_vendor_id ?? null,
-                  title:              schedule.name,
-                  description:        `OVERDUE ${daysLate} day${daysLate !== 1 ? 's' : ''}. Original due date: ${dueDate.toLocaleDateString()}`,
-                  priority:           'urgent',
-                  status:             'pending',
-                  source:             'maintenance_schedule',
-                  source_schedule_id: schedule.id,
-                  scheduled_date:     schedule.next_due_date,
-                  estimated_cost:     schedule.estimated_cost,
-                  portal_enabled:     false,
-                })
-                .select('id')
-                .single()
+          // Straight-line rather than a ternary around the await: the insert's
+          // error was previously discarded entirely, so EVERY cause looked the
+          // same as success-with-no-row — a lost race (23505 on the
+          // (source_schedule_id, scheduled_date) unique index, expected and
+          // benign) was indistinguishable from a constraint violation, an RLS
+          // refusal or a dropped connection. The overdue work order simply
+          // never existed and the pass reported a clean run.
+          let wo = existingWO
 
-          // The insert's error was discarded entirely, so EVERY cause looked
-          // the same as success-with-no-row: a lost race (23505 on the
-          // (source_schedule_id, scheduled_date) unique index, which is
-          // expected and benign) was indistinguishable from a constraint
-          // violation, an RLS refusal or a dropped connection. The overdue
-          // work order simply never existed and the pass reported a clean run.
-          if (insertRes.error && insertRes.error.code !== '23505') {
-            throw new Error(
-              `overdue work order insert failed for schedule ${schedule.id}: ${insertRes.error.message}`
-            )
+          if (!wo) {
+            const { data: inserted, error: insertError } = await supabase
+              .from('work_orders')
+              .insert({
+                property_id:        schedule.property_id,
+                org_id:             schedule.org_id,
+                vendor_id:          schedule.assigned_vendor_id ?? null,
+                title:              schedule.name,
+                description:        `OVERDUE ${daysLate} day${daysLate !== 1 ? 's' : ''}. Original due date: ${dueDate.toLocaleDateString()}`,
+                priority:           'urgent',
+                status:             'pending',
+                source:             'maintenance_schedule',
+                source_schedule_id: schedule.id,
+                scheduled_date:     schedule.next_due_date,
+                estimated_cost:     schedule.estimated_cost,
+                portal_enabled:     false,
+              })
+              .select('id')
+              .single()
+
+            if (insertError && insertError.code !== '23505') {
+              throw new Error(
+                `overdue work order insert failed for schedule ${schedule.id}: ${insertError.message}`
+              )
+            }
+
+            wo = inserted
           }
-          const wo = insertRes.data
 
           if (wo && !existingWO) {
             await logAuditEvent({
