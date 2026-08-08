@@ -8,7 +8,7 @@ import { getManualUrlForAsset } from '@/lib/assets/manual-lookup'
 import { unwrapJoin }          from '@/lib/utils/supabase-joins'
 
 import { reportError } from '@/lib/observability/report-error'
-import { tryUnwrap, unwrap } from '@/lib/supabase/unwrap'
+import { tryUnwrap, isRealQueryError, reportQueryError } from '@/lib/supabase/unwrap'
 import { checkLimit, emailSendActionLimiter } from '@/lib/rate-limit'
 import {
   isVendorHardBlocked,
@@ -347,25 +347,37 @@ export async function dispatchWorkOrderToVendor(input: {
       })
     }
 
+    // Non-fatal: the work order is already assigned/token-issued by this
+    // point (the updates above), so throwing here would abort the vendor
+    // email/SMS send entirely over a display-name lookup. Both reads already
+    // have `?? '...'` fallbacks below (dispatcherName/dispatcherOrg/pmName),
+    // so a missing or errored row degrades to those defaults instead of
+    // failing a dispatch whose critical writes already succeeded.
     const profileRes = await supabase
       .from('profiles')
       .select('full_name, phone')
       .eq('id', user.id)
       .single()
-    const profile = unwrap(profileRes, {
-      site:  'serverAction.work-order-public.dispatchWorkOrderToVendor.profile',
-      orgId: membership.org_id,
-    })
+    if (isRealQueryError(profileRes.error)) {
+      reportQueryError(profileRes.error, {
+        site:  'serverAction.work-order-public.dispatchWorkOrderToVendor.profile',
+        orgId: membership.org_id,
+      })
+    }
+    const profile = profileRes.data
 
     const orgRes = await supabase
       .from('organizations')
       .select('name')
       .eq('id', membership.org_id)
       .single()
-    const org = unwrap(orgRes, {
-      site:  'serverAction.work-order-public.dispatchWorkOrderToVendor.org',
-      orgId: membership.org_id,
-    })
+    if (isRealQueryError(orgRes.error)) {
+      reportQueryError(orgRes.error, {
+        site:  'serverAction.work-order-public.dispatchWorkOrderToVendor.org',
+        orgId: membership.org_id,
+      })
+    }
+    const org = orgRes.data
 
     const property = unwrapJoin(wo.properties)
 

@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { requireOrgMember } from '@/lib/auth'
-import { throwIfAnyQueryFailed } from '@/lib/supabase/unwrap'
+import { reportQueryError } from '@/lib/supabase/unwrap'
 
 export async function POST(request: NextRequest) {
   const body = await request.json().catch(() => null)
@@ -17,7 +17,9 @@ export async function POST(request: NextRequest) {
     .eq('org_id', membership.org_id)
     .eq('milestone', body.milestone)
 
-  throwIfAnyQueryFailed({ site: 'route.milestones.seen.POST', orgId: membership.org_id }, error)
+  if (reportQueryError(error, { site: 'route.milestones.seen.POST', orgId: membership.org_id })) {
+    return NextResponse.json({ error: 'Failed to update milestone' }, { status: 500 })
+  }
 
   return NextResponse.json({ success: true })
 }

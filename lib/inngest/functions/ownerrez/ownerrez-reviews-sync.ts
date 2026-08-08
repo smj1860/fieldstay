@@ -7,6 +7,7 @@ import type { OwnerRezReview } from '@/lib/integrations/types'
 import { logAuditEvent }       from '@/lib/audit'
 import { mergeIntegrationConnectionMetadata } from '@/lib/integrations/connection-metadata'
 import { asJsonObject } from '@/lib/json'
+import { reportError } from '@/lib/observability/report-error'
 import type { Json } from '@/types/database'
 
 export const ownerRezReviewsSync = inngest.createFunction(
@@ -91,6 +92,27 @@ export const ownerRezReviewsSync = inngest.createFunction(
 
       if (milestoneErr) {
         throw new Error(`[OwnerRez:${userId}] Failed to record notification milestone: ${milestoneErr.message}`)
+      }
+    }
+
+    // Guards notifyRevokedThrottled with the connection-id presence check and
+    // the try/catch that isolates its failure — split out so the call site
+    // inside mark-revoked's step.run stays a single statement instead of
+    // adding another if/try level to an already 4-deep chain (for > catch >
+    // else-if > step.run callback).
+    async function notifyRevokedSafely(
+      admin:        ReturnType<typeof createServiceClient>,
+      userId:       string,
+      orgId:        string,
+      connectionId: string | undefined,
+      humanError:   string,
+    ): Promise<void> {
+      if (!connectionId) return
+      try {
+        await notifyRevokedThrottled(admin, userId, orgId, connectionId, humanError)
+      } catch (notifyErr) {
+        logger.error(`[OwnerRez:${userId}] Revocation notification failed: ${notifyErr instanceof Error ? notifyErr.message : String(notifyErr)}`)
+        reportError(notifyErr, { site: 'inngest.ownerrez-reviews-sync.notify-revoked', orgId })
       }
     }
 
@@ -182,10 +204,17 @@ export const ownerRezReviewsSync = inngest.createFunction(
               metadata:   { provider_id: 'ownerrez', reason: 'token_revoked' },
             })
 
-            // Fire PM notification — throttled to once per 4 hours per connection
-            if (existing?.id) {
-              await notifyRevokedThrottled(admin, userId, orgId, existing.id, humanError)
-            }
+            // Fire PM notification — throttled to once per 4 hours per
+            // connection. notifyRevokedSafely isolates its own failure: this
+            // runs inside the TokenRevokedError branch's own step.run, which
+            // is NOT wrapped by the try/catch further down that isolates a
+            // connection's failure from the rest of the loop — an uncaught
+            // throw here (a failed milestone select/upsert) would abort the
+            // whole cron tick after step retries exhaust, silently skipping
+            // every connection after this one. The revocation itself is
+            // already recorded above by this point; only the notification is
+            // at risk.
+            await notifyRevokedSafely(admin, userId, orgId, existing?.id, humanError)
           })
           continue
         } else {
