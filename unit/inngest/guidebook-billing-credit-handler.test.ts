@@ -116,4 +116,47 @@ describe('guidebookBillingCreditHandler', () => {
     expect(firstOpts).toEqual(secondOpts)
     expect(firstOpts).toEqual({ idempotencyKey: 'guidebook-credit-org_1-1800000000' })
   })
+
+  // guidebook-daily-monitor dispatches this event whenever the subscription
+  // renews within 48 hours, and it runs daily — so a period is normally
+  // evaluated on two CONSECUTIVE days. The idempotency key is keyed on
+  // (org, period end) only, so a sponsor count that crosses the 5 -> 6
+  // threshold between those two days replays the same key with a different
+  // amount. Stripe rejects that outright (idempotency_error) rather than
+  // ignoring it, which turned "the org earned a bigger reward" into a hard
+  // function failure with the smaller credit already posted.
+  it('treats a Stripe idempotency_error (same key, different amount after a tier change) as a no-op, not a failure', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    ;(getActiveSponsorCount as ReturnType<typeof vi.fn>).mockResolvedValue(6)
+    ;(stripe.invoiceItems.create as ReturnType<typeof vi.fn>).mockRejectedValue(
+      Object.assign(new Error('Keys for idempotent requests can only be used with the same parameters.'), {
+        type: 'idempotency_error',
+      }),
+    )
+
+    const result = await invokeHandler(guidebookBillingCreditHandler, {
+      event: creditEvent(),
+      step:  makeStep(),
+    })
+
+    expect(result).toEqual({
+      skipped: true, reason: 'credit_already_posted_this_period', activeSponsorCount: 6,
+    })
+    expect(warn).toHaveBeenCalled()
+    // The credit line from the first evaluation is the one that stands, so a
+    // second audit entry would claim a credit that was never posted.
+    expect(logAuditEvent).not.toHaveBeenCalled()
+  })
+
+  it('still throws (so Inngest retries) on any non-idempotency Stripe failure', async () => {
+    ;(getActiveSponsorCount as ReturnType<typeof vi.fn>).mockResolvedValue(6)
+    ;(stripe.invoiceItems.create as ReturnType<typeof vi.fn>).mockRejectedValue(
+      Object.assign(new Error('Request timed out'), { type: 'api_connection_error' }),
+    )
+
+    await expect(
+      invokeHandler(guidebookBillingCreditHandler, { event: creditEvent(), step: makeStep() }),
+    ).rejects.toThrow('Request timed out')
+    expect(logAuditEvent).not.toHaveBeenCalled()
+  })
 })
