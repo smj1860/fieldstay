@@ -1,4 +1,5 @@
 import { throwIfAnyQueryFailed } from '@/lib/supabase/unwrap'
+import { fetchAllRows } from '@/lib/inngest/paginate'
 import { inngest } from '@/lib/inngest/client'
 import { createServiceClient } from '@/lib/supabase/server'
 import { haversineKm, proximityScore, clamp01 } from '@/lib/scoring/geo'
@@ -116,26 +117,57 @@ export const autoAssignVendor = inngest.createFunction(
       if (!eligibleVendors.length) return null
 
       // Familiarity: has this vendor done a work order at this property before?
-      const { data: pastWOs } = await supabase
-        .from('work_orders')
-        .select('vendor_id')
-        .eq('property_id', property_id)
-        .eq('org_id', org_id)
-        .neq('id', work_order_id)
-        .not('vendor_id', 'is', null)
-        .in('vendor_id', eligibleVendors.map((v) => v.id))
+      // Both scoring reads report rather than throw: this function produces a
+      // SUGGESTION a PM accepts or overrides (there is deliberately no
+      // autopilot mode for vendors), so a degraded score is absorbed by the
+      // human and failing the run outright would be worse than a weaker
+      // suggestion. Discarded entirely, though, a failed read silently
+      // removed a whole scoring signal — which is precisely what makes
+      // "the suggestions are bad lately" impossible to explain.
+      // Paginated, not .limit(): both of these are AGGREGATES — every row
+      // changes the answer. Truncating at max_rows would not merely shorten a
+      // list, it would silently under-count familiarity and workload, which
+      // skews the ranking rather than shortening it. A property with a long
+      // work-order history across a wide vendor pool is exactly where that
+      // bites, and it is also where the suggestion matters most.
+      //
+      // fetchAllRows throws on a page error, which is stricter than the
+      // report-and-continue stance below. That is the right trade here: a
+      // partial page set is a wrong score, whereas a wholly absent read is at
+      // least an obviously empty one.
+      const pastWOs = await fetchAllRows<{ vendor_id: string | null }>(
+        (from, to) => supabase
+          .from('work_orders')
+          .select('vendor_id')
+          .eq('property_id', property_id)
+          .eq('org_id', org_id)
+          .neq('id', work_order_id)
+          .not('vendor_id', 'is', null)
+          .in('vendor_id', eligibleVendors.map((v) => v.id))
+          .order('id', { ascending: true })
+          .range(from, to),
+        { label: `vendor-familiarity[org=${org_id}]` },
+      )
 
-      const familiarVendorIds = computeFamiliarIds(pastWOs ?? [], (w) => w.vendor_id)
+      const familiarVendorIds = computeFamiliarIds(pastWOs, (w) => w.vendor_id)
 
       // Workload: currently open (assigned/in_progress) work orders per vendor
-      const { data: openWOs } = await supabase
-        .from('work_orders')
-        .select('vendor_id')
-        .eq('org_id', org_id)
-        .in('vendor_id', eligibleVendors.map((v) => v.id))
-        .in('status', ['assigned', 'in_progress'])
+      // Same reasoning as the familiarity read, and this one skews harder:
+      // an under-counted workload map makes busy vendors look idle, so the
+      // most loaded vendor can score identically to the free one.
+      const openWOs = await fetchAllRows<{ vendor_id: string | null }>(
+        (from, to) => supabase
+          .from('work_orders')
+          .select('vendor_id')
+          .eq('org_id', org_id)
+          .in('vendor_id', eligibleVendors.map((v) => v.id))
+          .in('status', ['assigned', 'in_progress'])
+          .order('id', { ascending: true })
+          .range(from, to),
+        { label: `vendor-workload[org=${org_id}]` },
+      )
 
-      const workloadMap = computeWorkloadMap(openWOs ?? [], (w) => w.vendor_id)
+      const workloadMap = computeWorkloadMap(openWOs, (w) => w.vendor_id)
 
       return {
         property:  { lat: property?.lat ?? null, lng: property?.lng ?? null },

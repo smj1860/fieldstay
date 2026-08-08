@@ -54,7 +54,7 @@ async function resolveScheduleVendor(
   let vendorId: string | null = schedule.assigned_vendor_id ?? null
 
   if (!vendorId && schedule.vendor_specialty_hint) {
-    const { data: hintVendor } = await supabase
+    const hintVendorRes = await supabase
       .from('vendors')
       .select('id')
       .eq('org_id', schedule.org_id)
@@ -64,7 +64,25 @@ async function resolveScheduleVendor(
       .limit(1)
       .maybeSingle()
 
-    vendorId = hintVendor?.id ?? null
+    // Reported, not thrown, matching this function's documented stance on an
+    // unverifiable vendor: an unresolvable one yields an UNASSIGNED work
+    // order rather than no work order at all. But discarding the error made
+    // "this org has no vendor with that specialty" and "the vendor lookup
+    // failed" the same answer, so a schedule with a perfectly good vendor
+    // silently produced unassigned WOs with nothing saying why.
+    if (hintVendorRes.error) {
+      logger.warn(
+        `Org ${schedule.org_id}: specialty-hint vendor lookup failed for schedule ${schedule.id} — creating the WO unassigned`,
+        { error: hintVendorRes.error.message }
+      )
+      reportError(hintVendorRes.error, {
+        site:  'inngest.work-order-ops-org.auto-create-wo.hint-vendor',
+        orgId: schedule.org_id,
+        extra: { schedule_id: schedule.id },
+      })
+    }
+
+    vendorId = hintVendorRes.data?.id ?? null
   }
 
   if (!vendorId) return null
@@ -99,11 +117,35 @@ async function advanceRoutineSchedule(
 
   const dueDate = new Date(schedule.next_due_date! + 'T00:00:00')
   const nextDue = calcNextDueDate(schedule.frequency, dueDate)
-  await supabase
+
+  // The same advance in the Server Action path (advanceScheduleNextDueDate in
+  // app/(dashboard)/maintenance/actions.ts) already binds its error and scopes
+  // to the org; this copy did neither. Same table, same column, one fixed and
+  // one not.
+  //
+  // It matters more here, because this runs daily and the failure is silent
+  // and permanent: if the advance fails, next_due_date stays put, the schedule
+  // is "due" again tomorrow, and the auto-create step's unique constraint on
+  // (source_schedule_id, scheduled_date) rejects the duplicate WO with 23505 —
+  // which this function treats as the expected race and swallows. So the
+  // schedule stops producing work orders entirely, for this occurrence AND
+  // every future one, while the cron reports a clean run every day.
+  //
+  // Zero rows is NOT an error: `.eq('next_due_date', ...)` is an optimistic
+  // lock against dailyMaintenanceScheduleCheck's Pass 1 advancing the same
+  // schedule first, and losing that race is the designed outcome.
+  const { error } = await supabase
     .from('maintenance_schedules')
     .update({ next_due_date: nextDue.toISOString().split('T')[0] })
     .eq('id', schedule.id)
+    .eq('org_id', schedule.org_id)
     .eq('next_due_date', schedule.next_due_date!)
+
+  if (error) {
+    throw new Error(
+      `maintenance_schedules next_due_date advance failed for schedule ${schedule.id}: ${error.message}`
+    )
+  }
 }
 
 /**
@@ -349,7 +391,7 @@ export const workOrderOpsOrg = inngest.createFunction(
         const property = unwrapJoin(schedule.properties)
 
         // Idempotency: skip if an open WO already exists for this schedule + date
-        const { data: existingWO } = await supabase
+        const existingWORes = await supabase
           .from('work_orders')
           .select('id')
           .eq('org_id', orgId)
@@ -358,7 +400,18 @@ export const workOrderOpsOrg = inngest.createFunction(
           .not('status', 'in', '("completed","cancelled")')
           .maybeSingle()
 
-        if (existingWO) return null
+        // Bound for visibility rather than safety: the (source_schedule_id,
+        // scheduled_date) unique constraint below is what actually prevents a
+        // duplicate, and a failed pre-check degrades into that 23505 path
+        // correctly. Silent, though, it hid the fact that this guard had
+        // stopped working at all.
+        if (existingWORes.error) {
+          throw new Error(
+            `auto-WO idempotency pre-check failed for schedule ${schedule.id}: ${existingWORes.error.message}`
+          )
+        }
+
+        if (existingWORes.data) return null
 
         // Assigned → specialty hint → nobody, with the compliance gate applied.
         const vendorId = await resolveScheduleVendor(supabase, schedule, logger)

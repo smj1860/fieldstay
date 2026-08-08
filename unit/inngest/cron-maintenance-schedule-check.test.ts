@@ -275,7 +275,12 @@ describe('maintenanceSchedulesOrg (per-org handler)', () => {
       ],
       work_orders: [
         { data: { id: 'wo_open', priority: 'medium', status: 'in_progress' }, error: null }, // existing open WO lookup
-        { data: null, error: null }, // priority update
+        // The escalation is now an optimistic-locked update that RETURNS the
+        // rows it changed (`.neq('priority','urgent').select('id')`), and the
+        // note + audit are written only for those rows. A fixture returning no
+        // rows now means "someone already escalated it", so it has to return
+        // the row for the happy path.
+        { data: [{ id: 'wo_open' }], error: null }, // priority update
       ],
       work_order_updates: [{ data: null, error: null }],
       ...baseTables(),
@@ -302,6 +307,43 @@ describe('maintenanceSchedulesOrg (per-org handler)', () => {
         metadata: expect.objectContaining({ change: 'auto_escalated_to_urgent', maintenance_schedule_id: 'sched_2' }),
       }),
     )
+  })
+
+  // A step retry re-runs this whole body. The escalation update is
+  // optimistic-locked on `.neq('priority','urgent')`, so the second pass
+  // matches zero rows — and the note must not be appended again. This was a
+  // known open gap in unit/guardrails/inngest-insert-idempotency.test.ts,
+  // closed by copying the guard cron/work-order-ops.ts already used.
+  it('writes no second escalation note when the work order is already urgent', async () => {
+    const supabase = makeSupabase({
+      maintenance_schedules: [
+        { data: [], error: null },
+        {
+          data: [{
+            id: 'sched_2', name: 'Gutter cleaning', estimated_cost: 100, next_due_date: '2026-07-10',
+            assigned_vendor_id: null, property_id: 'prop_2', org_id: 'org_1',
+            properties: { name: 'Ridge House' }, vendors: null,
+          }],
+          error: null,
+        },
+      ],
+      work_orders: [
+        { data: { id: 'wo_open', priority: 'medium', status: 'in_progress' }, error: null },
+        { data: [], error: null },   // optimistic lock matched nothing — already urgent
+      ],
+      work_order_updates: [{ data: null, error: null }],
+      ...baseTables(),
+    })
+    ;(createServiceClient as ReturnType<typeof vi.fn>).mockReturnValue(supabase)
+
+    await invokeHandler(maintenanceSchedulesOrg, {
+      event:  orgEvent(),
+      step:   makeStep(),
+      logger: { info: vi.fn(), error: vi.fn() },
+    })
+
+    expect(supabase.calls.some((c) => c.table === 'work_order_updates' && c.method === 'insert')).toBe(false)
+    expect(logAuditEvent).not.toHaveBeenCalled()
   })
 
   it('reports and skips a schedule with an invalid next_due_date instead of throwing', async () => {

@@ -44,6 +44,10 @@ function makeSupabase(queued: QueuedByTable) {
     chain.in     = (...a: unknown[]) => record('in', a)
     chain.update = (...a: unknown[]) => record('update', a)
     chain.upsert = (...a: unknown[]) => record('upsert', a)
+    // The familiarity and workload reads are aggregates, so they page through
+    // fetchAllRows() rather than issuing one unbounded select.
+    chain.order  = (...a: unknown[]) => record('order', a)
+    chain.range  = (...a: unknown[]) => record('range', a)
 
     const resolveNext = () => {
       const idx = counters[table] ?? 0

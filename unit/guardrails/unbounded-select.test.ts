@@ -126,7 +126,6 @@ const BASELINE = new Set<string>([
   'lib/inngest/functions/auto-assign-vendor.ts',
   'lib/inngest/functions/checklist-broadcast.ts',
   'lib/inngest/functions/crew-assignment.ts',
-  'lib/inngest/functions/flagged-turnover-wo.ts',
   'lib/inngest/functions/hospitable/calendar-sync-handler.ts',
   'lib/inngest/functions/hospitable/hospitable-reviews-backfill.ts',
   'lib/inngest/functions/hospitable/teammate-sync-handler.ts',

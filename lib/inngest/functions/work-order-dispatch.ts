@@ -4,6 +4,7 @@ import { render }              from '@react-email/render'
 import WorkOrderDispatchEmail  from '@/emails/WorkOrderDispatch'
 import { createServiceClient } from '@/lib/supabase/server'
 import { ensureVendorConnectInvited } from '@/lib/stripe/vendor-connect-invite'
+import { unwrap } from '@/lib/supabase/unwrap'
 
 export const workOrderDispatch = inngest.createFunction(
   {
@@ -59,11 +60,20 @@ export const workOrderDispatch = inngest.createFunction(
 
       // Use PK (workOrderId) — not wo_number — to avoid cross-org ambiguity
       // if two orgs share the same wo_number string.
-      const { data: wo } = await supabase
+      const woRes = await supabase
         .from('work_orders')
         .select('id, org_id, vendor_id, property_id')
         .eq('id', workOrderId)
         .single()
+
+      // Writing the comms row IS this step. Discarded, a failed read returned
+      // `skipped: 'work order not found for comms log'` — which is both a
+      // successful-looking outcome and a false statement about why — so the
+      // vendor got the dispatch email and the PM's communication history had
+      // no record that anything was ever sent.
+      const wo = unwrap(woRes, {
+        site: 'inngest.work-order-dispatch.log-to-comms', extra: { work_order_id: workOrderId },
+      })
 
       if (!wo) return { skipped: 'work order not found for comms log' }
 
@@ -99,20 +109,34 @@ export const workOrderDispatch = inngest.createFunction(
     await step.run('invite-vendor-to-connect-if-needed', async () => {
       const supabase = createServiceClient({ system: 'inngest:work-order-dispatch' })
 
-      const { data: wo } = await supabase
+      const woRes = await supabase
         .from('work_orders')
         .select('org_id, vendor_id, wo_number')
         .eq('id', workOrderId)
         .single()
 
+      // Both reads are unwrapped because each failure produced a skip reason
+      // that was a lie: 'no vendor on work order' for a WO that has one, and
+      // 'already invited or no email' for a vendor who is neither. The nightly
+      // cron is a real backstop so the vendor is not stranded — but this step
+      // exists precisely to spare a same-day dispatch that wait, and a silent
+      // skip removes it while reporting success.
+      const wo = unwrap(woRes, {
+        site: 'inngest.work-order-dispatch.connect-invite.wo', extra: { work_order_id: workOrderId },
+      })
+
       if (!wo?.vendor_id) return { skipped: 'no vendor on work order' }
 
-      const { data: vendor } = await supabase
+      const vendorRes = await supabase
         .from('vendors')
         .select('id, name, email, stripe_connect_account_id, stripe_connect_invite_sent_at, stripe_connect_token')
         .eq('id', wo.vendor_id)
         .eq('org_id', wo.org_id)
         .single()
+
+      const vendor = unwrap(vendorRes, {
+        site: 'inngest.work-order-dispatch.connect-invite.vendor', orgId: wo.org_id,
+      })
 
       if (!vendor?.email || vendor.stripe_connect_account_id || vendor.stripe_connect_invite_sent_at) {
         return { skipped: 'already invited or no email' }
