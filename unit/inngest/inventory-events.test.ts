@@ -51,6 +51,8 @@ function makeSupabase(queued: Record<string, { data?: unknown; error?: unknown }
     // which chains .order().range() before awaiting.
     chain.order  = (...a: unknown[]) => record('order', a)
     chain.range  = (...a: unknown[]) => record('range', a)
+    // The same-day-flip booking reads are existence checks bounded by .limit(1).
+    chain.limit  = (...a: unknown[]) => record('limit', a)
 
     const resolveNext = () => {
       const idx = counters[table] ?? 0

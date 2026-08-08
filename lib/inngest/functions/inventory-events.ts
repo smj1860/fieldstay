@@ -404,14 +404,18 @@ export const handleInventoryCountSubmitted = inngest.createFunction(
       // is the one case where waiting is wrong: a guest is arriving today or
       // tomorrow. A false negative here is silent and costs the guest a
       // half-stocked property; throwing gets the step retried instead.
+      // .limit(1) because this only ever asks "is there one?" — the result is
+      // consumed as a boolean. It also bounds the read, which an existence
+      // check has no excuse not to be.
       const checkoutRes = await supabase
         .from('bookings')
-        .select('id, checkout_date, checkin_date')
+        .select('id')
         .eq('property_id', property_id)
         .eq('org_id', org_id)
         .in('checkout_date', [todayDate])      // checking out today
         .eq('status', 'confirmed')
         .eq('is_block', false)
+        .limit(1)
 
       const checkoutsToday = unwrapList(checkoutRes, {
         site: 'inngest.inventory-events.same-day-flip.checkouts', orgId: org_id,
@@ -420,6 +424,7 @@ export const handleInventoryCountSubmitted = inngest.createFunction(
 
       // Also verify there's an incoming guest today or tomorrow
       const tomorrow = new Date(Date.now() + 86400000).toISOString().split('T')[0]!
+      // Existence check, same as above.
       const incomingRes = await supabase
         .from('bookings')
         .select('id')
@@ -428,6 +433,7 @@ export const handleInventoryCountSubmitted = inngest.createFunction(
         .in('checkin_date', [todayDate, tomorrow])
         .eq('status', 'confirmed')
         .eq('is_block', false)
+        .limit(1)
 
       const incoming = unwrapList(incomingRes, {
         site: 'inngest.inventory-events.same-day-flip.incoming', orgId: org_id,
