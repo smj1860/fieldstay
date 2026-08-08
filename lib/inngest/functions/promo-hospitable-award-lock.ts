@@ -43,7 +43,30 @@ export const awardHospitablePriceLock = inngest.createFunction(
     // conversions that were never tagged. claim_hospitable_promo_slot() would
     // reach the same not_eligible conclusion, just after doing unnecessary
     // work first.
-    const isTagged = await step.run('check-hospitable-tagged', async () => {
+    //
+    // Which is exactly why a read error here must NOT be treated as
+    // "untagged". This step is a pure optimization, and an optimization that
+    // fails is only allowed to cost time — never to change the outcome. It
+    // used to `return false` on error, and that quietly forfeited a real
+    // customer's price lock: billing/first-payment-confirmed fires exactly
+    // ONCE per org (the trialing -> active transition), so there is no second
+    // delivery to recover on. A one-second Supabase blip at that instant was
+    // the difference between a 2-year locked rate and nothing, recorded only
+    // as a console.error.
+    //
+    // The old justification — "must never hold up the core billing event" —
+    // was wrong on the facts. This is an independent Inngest consumer of a
+    // fire-and-forget event (app/api/webhooks/stripe/handlers/core-billing.ts
+    // has already returned by the time it runs); throwing or slowing down here
+    // cannot delay the Stripe webhook, the subscription update, or the sibling
+    // email-subscriber-checkin function.
+    //
+    // So `unknown` falls through to the full path and lets
+    // claim_hospitable_promo_slot() — which re-reads the same row and returns
+    // not_eligible for an untagged org — be the single authority. If the
+    // outage is real rather than transient, the RPC step throws, Inngest
+    // retries, and a terminal failure lands in Sentry via on-failure.ts.
+    const tagState = await step.run('check-hospitable-tagged', async () => {
       const supabase = createServiceClient({ system: 'inngest:promo-hospitable-award-price-lock' })
       const { data, error } = await supabase
         .from('hospitable_launch_promo')
@@ -51,19 +74,15 @@ export const awardHospitablePriceLock = inngest.createFunction(
         .eq('org_id', org_id)
         .maybeSingle()
 
-      // Fail open to "not eligible" rather than throw/retry — a promo
-      // eligibility check must never hold up the core billing event this
-      // function shares with every other conversion on the platform. Still
-      // logged, so a real outage (vs. the expected "no row yet") is visible.
       if (error) {
         console.error(`[promo/hospitable] Failed to check tag status for org ${org_id}:`, error.message)
-        return false
+        return 'unknown' as const
       }
 
-      return data?.hospitable_tagged === true
+      return data?.hospitable_tagged === true ? ('tagged' as const) : ('untagged' as const)
     })
 
-    if (!isTagged) {
+    if (tagState === 'untagged') {
       return { org_id, status: 'not_awarded' as const, reason: 'not_eligible' as const }
     }
 

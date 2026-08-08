@@ -1,4 +1,4 @@
-import { tryUnwrap } from '@/lib/supabase/unwrap'
+import { tryUnwrap, throwIfAnyQueryFailed, isRealQueryError } from '@/lib/supabase/unwrap'
 import { inngest }             from '@/lib/inngest/client'
 import { createServiceClient } from '@/lib/supabase/server'
 import { createPmNotification } from '@/lib/inngest/helpers'
@@ -31,18 +31,38 @@ export const handleWorkOrderCrewCompleted = inngest.createFunction(
           .single(),
       ])
 
-      // Degrade, don't throw: the caller already falls back to 'the property'.
-      // tryUnwrap still logs and reports so the failure isn't invisible.
-      const propertyRes = await supabase
-        .from('properties')
-        .select('name, address')
-        .eq('id', woRes.data?.property_id ?? '')
-        .maybeSingle()
+      // Neither of the two .single() reads above checked its error, so an RLS
+      // regression or a timeout was indistinguishable from PGRST116 ("no such
+      // row") — both leave `data` null. The notify step below fills every
+      // field from that null with a fallback, so a failed read shipped the PM
+      // a content-free notification ("✓ Work Complete — WO · the property",
+      // "A crew member marked \"a work order\" complete") instead of retrying.
+      // PGRST116 stays a legitimate not-found; anything else throws.
+      throwIfAnyQueryFailed(
+        { site: 'inngest.work-order-crew-completed.fetch-context', orgId },
+        isRealQueryError(woRes.error) ? woRes.error : null,
+        isRealQueryError(crewRes.error) ? crewRes.error : null,
+      )
 
-      const propertyOut = tryUnwrap(propertyRes, {
-        site: 'inngest.work-order-crew-completed.property', orgId,
-      })
-      const property = propertyOut.ok ? propertyOut.data : null
+      // Guarded rather than `.eq('id', woRes.data?.property_id ?? '')`: an
+      // empty string is not a uuid, so that query failed with 22P02 and
+      // reported a spurious parse error to Sentry in place of the real cause.
+      // Degrade, don't throw: the caller already falls back to 'the property'.
+      // tryUnwrap still logs and reports so a genuine failure isn't invisible.
+      let property: { name: string; address: string | null } | null = null
+      if (woRes.data?.property_id) {
+        const propertyRes = await supabase
+          .from('properties')
+          .select('name, address')
+          .eq('id', woRes.data.property_id)
+          .eq('org_id', orgId)
+          .maybeSingle()
+
+        const propertyOut = tryUnwrap(propertyRes, {
+          site: 'inngest.work-order-crew-completed.property', orgId,
+        })
+        property = propertyOut.ok ? propertyOut.data : null
+      }
 
       return { wo: woRes.data, crew: crewRes.data, property }
     })

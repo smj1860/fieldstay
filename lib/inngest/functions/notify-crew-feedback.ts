@@ -13,7 +13,10 @@ export const notifyCrewFeedback = inngest.createFunction(
       const supabase = createServiceClient({ system: 'inngest:notify-crew-feedback' })
 
       const [cmResult, orgResult] = await Promise.all([
-        supabase.from('crew_members').select('name').eq('id', crew_member_id).single(),
+        // org-scoped like the vendor lookup in notify-vendor-compliance-
+        // expiring.ts: this is a service-role read, so nothing else constrains
+        // the crew_member_id the event carried to the org it also carried.
+        supabase.from('crew_members').select('name').eq('id', crew_member_id).eq('org_id', org_id).single(),
         supabase.from('organizations').select('name').eq('id', org_id).single(),
       ])
 

@@ -156,18 +156,53 @@ describe('awardHospitablePriceLock', () => {
     expect(supabase.calls.some((c) => c.table === 'organizations')).toBe(false)
   })
 
-  it('fails open to not_eligible (never throws) when the tag-check query itself errors — must never block the shared billing event', async () => {
+  // This test previously asserted the OPPOSITE — that a tag-check read error
+  // "fails open to not_eligible" and skips Stripe and the claim RPC entirely.
+  // That was the bug written down as the spec. The tag check is a cost
+  // optimization for the ~all conversions that were never Hospitable-tagged;
+  // returning `false` on a read error let a transient Supabase blip forfeit a
+  // real 2-year price lock on the ONE delivery of billing/first-payment-confirmed
+  // an org ever gets. The RPC re-reads the same row and is the real authority.
+  it('falls through to the claim RPC (does not forfeit the award) when the tag-check query itself errors', async () => {
     const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {})
-    const supabase = makeSupabase({
-      hospitable_launch_promo: [{ data: null, error: { message: 'connection reset' } }],
-    })
+    const supabase = makeSupabase(
+      {
+        hospitable_launch_promo: [
+          { data: null, error: { message: 'connection reset' } }, // check-hospitable-tagged
+          { data: { congrats_email_sent_at: null }, error: null }, // send-congrats-email guard
+        ],
+        organizations: [{ data: orgBillingRow, error: null }],
+      },
+      { data: { sequence_number: 7, already_awarded: false, not_eligible: false, window_closed: false, lock_years: 2 }, error: null },
+    )
+    ;(createServiceClient as ReturnType<typeof vi.fn>).mockReturnValue(supabase)
+
+    const result = await invokeHandler(awardHospitablePriceLock, { event: BASE_EVENT, step: makeStep() })
+
+    expect(result).toEqual({ org_id: 'org_1', status: 'awarded', sequenceNumber: 7, lockYears: 2 })
+    expect(consoleError).toHaveBeenCalled()
+    expect(supabase.rpc).toHaveBeenCalled()
+    expect(sendHospitablePriceLockEmail).toHaveBeenCalled()
+  })
+
+  // The other half of the same fix: falling through must not turn an untagged
+  // org into an award. The RPC stays the authority in both directions.
+  it('still resolves to not_eligible via the RPC when the tag-check errored but the org was never tagged', async () => {
+    vi.spyOn(console, 'error').mockImplementation(() => {})
+    const supabase = makeSupabase(
+      {
+        hospitable_launch_promo: [{ data: null, error: { message: 'connection reset' } }],
+        organizations: [{ data: orgBillingRow, error: null }],
+      },
+      { data: { sequence_number: null, already_awarded: false, not_eligible: true, window_closed: false, lock_years: null }, error: null },
+    )
     ;(createServiceClient as ReturnType<typeof vi.fn>).mockReturnValue(supabase)
 
     const result = await invokeHandler(awardHospitablePriceLock, { event: BASE_EVENT, step: makeStep() })
 
     expect(result).toEqual({ org_id: 'org_1', status: 'not_awarded', reason: 'not_eligible' })
-    expect(consoleError).toHaveBeenCalled()
-    expect(stripe.subscriptions.retrieve).not.toHaveBeenCalled()
+    expect(sendHospitablePriceLockEmail).not.toHaveBeenCalled()
+    expect(logAuditEvent).not.toHaveBeenCalled()
   })
 
   it('returns already_awarded without sending a second email on a retried delivery', async () => {

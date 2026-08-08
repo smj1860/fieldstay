@@ -187,6 +187,54 @@ describe('handleTrialLifecycle', () => {
     expect(result).toEqual({ cancelled: true, reason: 'subscribed-late' })
     expect(resend.emails.send).toHaveBeenCalledTimes(2)
   })
+
+  // The plan-status check used to be `const { data: org } = await ...` with the
+  // error discarded, so a read failure produced `plan_status === undefined`,
+  // which read as "not subscribed" and marched the sequence on. The failure
+  // direction is the customer-hostile one: it tells a PAYING customer their
+  // trial ended, then asks them why FieldStay wasn't the right fit.
+  it('throws (so Inngest retries) rather than assuming "still trialing" when the plan-status read errors', async () => {
+    vi.spyOn(console, 'error').mockImplementation(() => {})
+    const supabase = makeSupabase({
+      organizations: [{ data: null, error: { message: 'connection reset', code: '08006' } }],
+    })
+    ;(createServiceClient as ReturnType<typeof vi.fn>).mockReturnValue(supabase)
+
+    await expect(
+      invokeHandler(handleTrialLifecycle, { event: trialEvent(), step: makeStep() }),
+    ).rejects.toThrow()
+    expect(resend.emails.send).not.toHaveBeenCalled()
+  })
+
+  // past_due is a CONVERTED customer whose card declined — core-billing's
+  // dunning owns them and they stay inside the app (past-due banner, not the
+  // billing wall). The check asks "still trialing?", not "active?", precisely
+  // so this org does not get a churn-feedback email alongside its dunning one.
+  it.each(['past_due', 'cancelled', 'paused'])(
+    'stops the sequence for plan_status=%s — only "trialing" keeps it alive',
+    async (planStatus) => {
+      const supabase = makeSupabase({ organizations: [{ data: { plan_status: planStatus }, error: null }] })
+      ;(createServiceClient as ReturnType<typeof vi.fn>).mockReturnValue(supabase)
+
+      const result = await invokeHandler(handleTrialLifecycle, { event: trialEvent(), step: makeStep() })
+
+      expect(result).toEqual({ cancelled: true, reason: 'subscribed-before-warning' })
+      expect(resend.emails.send).not.toHaveBeenCalled()
+    },
+  )
+
+  // A deleted org is a null row, not an error — maybeSingle rather than the
+  // .single() this used to call, whose PGRST116 would have been swallowed by
+  // the same discarded-error path.
+  it('stops the sequence when the org row no longer exists (deleted account)', async () => {
+    const supabase = makeSupabase({ organizations: [{ data: null, error: null }] })
+    ;(createServiceClient as ReturnType<typeof vi.fn>).mockReturnValue(supabase)
+
+    const result = await invokeHandler(handleTrialLifecycle, { event: trialEvent(), step: makeStep() })
+
+    expect(result).toEqual({ cancelled: true, reason: 'subscribed-before-warning' })
+    expect(resend.emails.send).not.toHaveBeenCalled()
+  })
 })
 
 describe('handleTrialLifecycle idempotency keys', () => {

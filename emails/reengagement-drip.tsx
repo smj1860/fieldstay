@@ -26,7 +26,13 @@ export function ReengagementEmail({
   unsubscribeUrl,
   postalAddress,
 }: Props) {
-  if (isConnected) {
+  // `reviewCount` used to arrive as a hardcoded literal 3 from
+  // onboarding-drip.tsx, so every connected PM was told "3 came in this week
+  // — RepuGuard already has draft responses ready", regardless of whether any
+  // review existed. It is a real count now, which means zero is reachable and
+  // has to render copy that does not claim reviews arrived.
+  if (isConnected && reviewCount > 0) {
+    const reviewNoun = reviewCount === 1 ? 'review' : 'reviews'
     return (
       <EmailLayout
         preview="Your guests left reviews this week. Did you respond?"
@@ -41,9 +47,50 @@ export function ReengagementEmail({
 
         <Text style={body}>
           Since you connected your PMS, FieldStay has been watching for new
-          reviews across your properties. <strong>{reviewCount}</strong>{' '}came
-          in this week — RepuGuard already has draft responses ready for your
-          approval.
+          reviews across your properties. <strong>{reviewCount}</strong>{' '}
+          {reviewNoun} came in this week — RepuGuard already has draft responses
+          ready for your approval.
+        </Text>
+
+        <Section style={callout}>
+          <Text style={calloutTitle}>Why this matters</Text>
+          <Text style={calloutItem}>
+            → Guests who see a fast, thoughtful response are more likely to book direct next time.
+          </Text>
+          <Text style={calloutItem}>
+            → A drafted response takes 30 seconds to approve — not 10 minutes to write.
+          </Text>
+        </Section>
+
+        <Text style={{ ...body, marginTop: 16 }}>
+          — Stephen
+        </Text>
+      </EmailLayout>
+    )
+  }
+
+  // Connected, but genuinely nothing came in this week. Same audience and the
+  // same CTA destination as the variant above — it just doesn't invent an
+  // event that didn't happen, and it doesn't fall through to the
+  // "your PMS isn't connected yet" copy, which would be equally untrue.
+  if (isConnected) {
+    return (
+      <EmailLayout
+        preview="One week in. FieldStay is watching your reviews."
+        ctaLabel="Open your dashboard →"
+        ctaUrl={dashboardUrl}
+        footerNote={`You're receiving this as part of your FieldStay onboarding for ${orgName}.`}
+        unsubscribeUrl={unsubscribeUrl}
+        postalAddress={postalAddress}
+      >
+        <Text style={heading}>One week in, {firstName}.</Text>
+        <Text style={subheading}>Your PMS is connected — here&apos;s what happens next.</Text>
+
+        <Text style={body}>
+          Since you connected your PMS, FieldStay has been watching for new
+          reviews across your properties. Nothing new came in this week — when
+          one does, RepuGuard will have a draft response waiting for your
+          approval before you even see the notification.
         </Text>
 
         <Section style={callout}>

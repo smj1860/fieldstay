@@ -174,7 +174,7 @@ const BASELINE: Record<string, number> = {
   // the auto-create step's unique constraint rejected tomorrow's duplicate as
   // an expected race and the schedule stopped producing work orders for this
   // occurrence and every future one.
-  'lib/inngest/functions/email-trial-lifecycle.tsx': 4,
+  'lib/inngest/functions/email-trial-lifecycle.tsx': 1,
   // 3 -> 0 (entry deleted). The idempotency read was the interesting one:
   // discarded, a failure looked like "no work order yet", so the insert ran
   // and hit wo_crew_flag_source_unique — surfacing as "duplicate key" on
@@ -241,7 +241,6 @@ const BASELINE: Record<string, number> = {
   // as a clean sync.
   'lib/inngest/functions/ownerrez/initial-sync.ts': 4,
   'lib/inngest/functions/ownerrez/ownerrez-reviews-sync.ts': 3,
-  'lib/inngest/functions/platform-inventory-template-broadcast.ts': 4,
   // 3 -> 0 (entry deleted). Each failure produced a skip reason that was a
   // false statement about why: 'work order not found for comms log' for a WO
   // that exists, 'no vendor on work order' for one that has a vendor. The

@@ -4,6 +4,48 @@ import { resend, FROM }          from '@/lib/resend/client'
 import { renderTrialExpiringEmail } from '@/emails/trial-expiring'
 import { renderTrialExpiredEmail }  from '@/emails/trial-expired'
 import { resolveEmailAudience, commercialPostalAddress } from '@/lib/email/unsubscribe'
+import { unwrap } from '@/lib/supabase/unwrap'
+
+/**
+ * Has this org stopped being a trial? If so the rest of the sequence must not
+ * run — every remaining message is written for someone who never converted.
+ *
+ * Two things this deliberately does NOT do, both of which it used to:
+ *
+ * 1. It does not discard the read error. The three call sites were
+ *    `const { data: org } = await ...` followed by `org?.plan_status ===
+ *    'active'`, so a read failure produced `false` — indistinguishable from
+ *    "still trialing" — and the sequence marched on. The failure direction is
+ *    the customer-hostile one: a Supabase blip during the day-14 check emails
+ *    a PAYING customer "Your FieldStay trial has ended", and three days later
+ *    "I'm truly sorry FieldStay wasn't the right fit for you." Throwing lets
+ *    Inngest retry the step instead.
+ *
+ * 2. It does not ask `plan_status === 'active'`. Non-continuation is the
+ *    safe default, so the test is "still trialing", not "successfully
+ *    converted". `past_due` is a converted customer whose card declined —
+ *    core-billing's dunning owns them, and they stay inside the app (see
+ *    app/(dashboard)/layout.tsx's past-due banner, not the billing wall), so
+ *    a churn-feedback email is both wrong and simultaneous with a dunning
+ *    one. `cancelled`/`paused` have already churned or paused deliberately.
+ *    Only `trialing` should keep this sequence alive, and a status added
+ *    later stops it rather than opting into it silently.
+ *
+ * A missing org row (deleted account) also stops the sequence — maybeSingle,
+ * so that is a null row rather than the PGRST116 that .single() would raise.
+ */
+async function hasLeftTrial(orgId: string): Promise<boolean> {
+  const supabase = createServiceClient({ system: 'inngest:email-trial-lifecycle' })
+  const res = await supabase
+    .from('organizations')
+    .select('plan_status')
+    .eq('id', orgId)
+    .maybeSingle()
+
+  const org = unwrap(res, { site: 'inngest.email-trial-lifecycle.plan-status', orgId })
+
+  return org?.plan_status !== 'trialing'
+}
 
 export const handleTrialLifecycle = inngest.createFunction(
   {
@@ -23,18 +65,10 @@ export const handleTrialLifecycle = inngest.createFunction(
     const warnAt = new Date(trialEnd.getTime() - 3 * 24 * 60 * 60 * 1000)
     await step.sleepUntil('sleep-until-warning', warnAt)
 
-    // Check if they subscribed — if so, cancel the whole sequence
-    const subscribed = await step.run('check-subscription-before-warning', async () => {
-      const supabase = createServiceClient({ system: 'inngest:email-trial-lifecycle' })
-      const { data: org } = await supabase
-        .from('organizations')
-        .select('plan_status')
-        .eq('id', org_id)
-        .single()
-      return org?.plan_status === 'active'
-    })
+    // Left the trial (converted, churned, or paused)? Cancel the sequence.
+    const leftBeforeWarning = await step.run('check-subscription-before-warning', () => hasLeftTrial(org_id))
 
-    if (subscribed) return { cancelled: true, reason: 'subscribed-before-warning' }
+    if (leftBeforeWarning) return { cancelled: true, reason: 'subscribed-before-warning' }
 
     await step.run('send-trial-expiring-email', async () => {
       const supabase = createServiceClient({ system: 'inngest:email-trial-lifecycle' })
@@ -79,17 +113,9 @@ export const handleTrialLifecycle = inngest.createFunction(
     const expiredAt = new Date(trialEnd.getTime() + 2 * 60 * 60 * 1000)
     await step.sleepUntil('sleep-until-expired', expiredAt)
 
-    const subscribedAfterWarning = await step.run('check-subscription-at-expiry', async () => {
-      const supabase = createServiceClient({ system: 'inngest:email-trial-lifecycle' })
-      const { data: org } = await supabase
-        .from('organizations')
-        .select('plan_status')
-        .eq('id', org_id)
-        .single()
-      return org?.plan_status === 'active'
-    })
+    const leftBeforeExpiry = await step.run('check-subscription-at-expiry', () => hasLeftTrial(org_id))
 
-    if (subscribedAfterWarning) return { cancelled: true, reason: 'subscribed-before-expiry' }
+    if (leftBeforeExpiry) return { cancelled: true, reason: 'subscribed-before-expiry' }
 
     await step.run('send-trial-expired-email', async () => {
       const dataExpires = new Date(trialEnd.getTime() + 30 * 24 * 60 * 60 * 1000)
@@ -118,17 +144,9 @@ export const handleTrialLifecycle = inngest.createFunction(
     // ── Day 17: Churn feedback ────────────────────────────────────────────
     await step.sleep('sleep-before-churn-email', '3 days')
 
-    const subscribedLate = await step.run('check-subscription-before-churn', async () => {
-      const supabase = createServiceClient({ system: 'inngest:email-trial-lifecycle' })
-      const { data: org } = await supabase
-        .from('organizations')
-        .select('plan_status')
-        .eq('id', org_id)
-        .single()
-      return org?.plan_status === 'active'
-    })
+    const leftLate = await step.run('check-subscription-before-churn', () => hasLeftTrial(org_id))
 
-    if (subscribedLate) return { cancelled: true, reason: 'subscribed-late' }
+    if (leftLate) return { cancelled: true, reason: 'subscribed-late' }
 
     // The two emails above are transactional/relationship messages — they are
     // about the status of an existing subscription, which CAN-SPAM exempts

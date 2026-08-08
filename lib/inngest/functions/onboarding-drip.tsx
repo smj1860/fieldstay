@@ -1,4 +1,4 @@
-import { unwrapList } from '@/lib/supabase/unwrap'
+import { unwrapCount, unwrapList } from '@/lib/supabase/unwrap'
 import { inngest }                                 from '@/lib/inngest/client'
 import { createServiceClient }                     from '@/lib/supabase/server'
 import { resend }                                  from '@/lib/resend/client'
@@ -12,6 +12,47 @@ const APP_URL = process.env.NEXT_PUBLIC_APP_URL ?? 'https://app.fieldstay.app'
 
 // Personal sender drives opens — never the generic "FieldStay" FROM constant
 const DRIP_FROM = 'Stephen from FieldStay <stephen@fieldstay.app>'
+
+/**
+ * Subject line for email 3. Three variants, not two: the reviews subject
+ * asks "Did you respond?", which presumes reviews arrived, so it cannot be
+ * used for a connected org whose real count is zero.
+ */
+function subjectForReengagement(isConnected: boolean, reviewCount: number): string {
+  if (!isConnected) return "7 days in. Here's what you're missing."
+  if (reviewCount > 0) return 'Your guests left reviews this week. Did you respond?'
+  return 'One week in. FieldStay is watching your reviews.'
+}
+
+/**
+ * The Resend SDK returns `{ data, error }` for API-level failures and only
+ * throws for transport ones — so `if (error)` is the COMMON failure shape, and
+ * it was the one branch that never reached Sentry: the `catch` called
+ * reportError, the `if (error)` wrote a log line and moved on. Every real send
+ * failure was therefore invisible outside Axiom, while the function still
+ * returned `emails_sent: 3`.
+ *
+ * Deliberately still not thrown. Unlike a broadcast, this sequence cannot be
+ * re-run — a failed step that exhausts retries kills the remaining emails and
+ * their 72h/96h sleeps with it, and losing emails 2 and 3 to a transient
+ * failure on email 1 is worse than sending fewer. So the failure is made
+ * VISIBLE and counted, and the function's return value stops overstating
+ * what it sent.
+ *
+ * `error.name` only, never JSON.stringify(error): a Resend validation error
+ * echoes the offending `to` address back in its message, and CLAUDE.md bans
+ * email addresses from logs. The full object goes to Sentry instead.
+ */
+function reportSendFailure(
+  logger: { error: (msg: string) => void },
+  label:  string,
+  orgId:  string,
+  error:  unknown,
+): void {
+  const name = (error as { name?: string } | null)?.name ?? 'unknown_error'
+  logger.error(`[Drip:${orgId}] ${label} email failed: ${name}`)
+  reportError(error, { site: `inngest.onboarding-drip.${label.toLowerCase()}`, orgId })
+}
 
 export const onboardingDrip = inngest.createFunction(
   {
@@ -41,7 +82,7 @@ export const onboardingDrip = inngest.createFunction(
       return { stopped: true, reason: 'unsubscribed', emails_sent: 0 }
     }
 
-    await step.run('send-welcome', async () => {
+    const sentWelcome = await step.run('send-welcome', async () => {
       try {
         const { error } = await resend.emails.send(
           {
@@ -63,13 +104,14 @@ export const onboardingDrip = inngest.createFunction(
           { idempotencyKey: `onboarding-welcome-${org_id}` }
         )
         if (error) {
-          logger.error(`[Drip:${org_id}] Welcome email failed: ${JSON.stringify(error)}`)
-        } else {
-          logger.info(`[Drip:${org_id}] Email 1 (Welcome) sent`)
+          reportSendFailure(logger, 'Welcome', org_id, error)
+          return false
         }
+        logger.info(`[Drip:${org_id}] Email 1 (Welcome) sent`)
+        return true
       } catch (err) {
-        logger.error(`[Drip:${org_id}] Welcome email threw: ${String(err)}`)
-        reportError(err, { site: 'inngest.onboarding-drip.send-welcome' })
+        reportSendFailure(logger, 'Welcome', org_id, err)
+        return false
       }
     })
 
@@ -87,7 +129,7 @@ export const onboardingDrip = inngest.createFunction(
       return { stopped: true, reason: 'unsubscribed', emails_sent: 1 }
     }
 
-    await step.run('send-guidebook', async () => {
+    const sentGuidebook = await step.run('send-guidebook', async () => {
       try {
         const { error } = await resend.emails.send(
           {
@@ -107,13 +149,14 @@ export const onboardingDrip = inngest.createFunction(
           { idempotencyKey: `onboarding-guidebook-${org_id}` }
         )
         if (error) {
-          logger.error(`[Drip:${org_id}] Guidebook email failed: ${JSON.stringify(error)}`)
-        } else {
-          logger.info(`[Drip:${org_id}] Email 2 (Guidebook) sent`)
+          reportSendFailure(logger, 'Guidebook', org_id, error)
+          return false
         }
+        logger.info(`[Drip:${org_id}] Email 2 (Guidebook) sent`)
+        return true
       } catch (err) {
-        logger.error(`[Drip:${org_id}] Guidebook email threw: ${String(err)}`)
-        reportError(err, { site: 'inngest.onboarding-drip.send-guidebook' })
+        reportSendFailure(logger, 'Guidebook', org_id, err)
+        return false
       }
     })
 
@@ -148,16 +191,37 @@ export const onboardingDrip = inngest.createFunction(
       return connections.length > 0
     })
 
-    await step.run('send-reengagement', async () => {
+    // The connected variant of email 3 states a number: "N came in this week
+    // — RepuGuard already has draft responses ready for your approval." That N
+    // was the literal `3`, hardcoded at the call site, so every connected PM
+    // was told three reviews arrived and drafts were waiting no matter what
+    // was actually in their account — a false factual claim in a commercial
+    // email, and one the recipient disproves by clicking the CTA. Counted for
+    // real now; the template renders honest zero-copy rather than the
+    // reviews-arrived copy when the answer is none.
+    //
+    // head+count, so this ships no rows and cannot be truncated by max_rows.
+    const reviewCount = isConnected
+      ? await step.run('count-recent-reviews', async () => {
+          const supabase = createServiceClient({ system: 'inngest:onboarding-drip' })
+          const sinceIso = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString()
+          const res = await supabase
+            .from('reviews')
+            .select('id', { count: 'exact', head: true })
+            .eq('org_id', org_id)
+            .gte('review_date', sinceIso)
+          return unwrapCount(res, { site: 'inngest.onboarding-drip.review-count', orgId: org_id })
+        })
+      : 0
+
+    const sentReengagement = await step.run('send-reengagement', async () => {
       try {
         const { error } = await resend.emails.send(
           {
             from:    DRIP_FROM,
             to:      email,
             replyTo: 'stephen@fieldstay.app',
-            subject: isConnected
-              ? 'Your guests left reviews this week. Did you respond?'
-              : "7 days in. Here's what you're missing.",
+            subject: subjectForReengagement(isConnected, reviewCount),
             headers: audience168h.headers,
             html:    await renderReengagementEmail({
               firstName:       first_name,
@@ -166,7 +230,7 @@ export const onboardingDrip = inngest.createFunction(
               dashboardUrl:    `${APP_URL}/ops`,
               integrationsUrl: `${APP_URL}/settings?tab=integrations`,
               onboardingUrl:   `${APP_URL}/onboarding`,
-              reviewCount:     3,
+              reviewCount,
               unsubscribeUrl:  audience168h.unsubscribeUrl ?? undefined,
               postalAddress:   commercialPostalAddress(),
             }),
@@ -174,16 +238,21 @@ export const onboardingDrip = inngest.createFunction(
           { idempotencyKey: `onboarding-reengagement-${org_id}` }
         )
         if (error) {
-          logger.error(`[Drip:${org_id}] Reengagement email failed: ${JSON.stringify(error)}`)
-        } else {
-          logger.info(`[Drip:${org_id}] Email 3 (Re-engagement, connected=${isConnected}) sent`)
+          reportSendFailure(logger, 'Reengagement', org_id, error)
+          return false
         }
+        logger.info(`[Drip:${org_id}] Email 3 (Re-engagement, connected=${isConnected}) sent`)
+        return true
       } catch (err) {
-        logger.error(`[Drip:${org_id}] Reengagement email threw: ${String(err)}`)
-        reportError(err, { site: 'inngest.onboarding-drip.send-reengagement' })
+        reportSendFailure(logger, 'Reengagement', org_id, err)
+        return false
       }
     })
 
-    return { org_id, emails_sent: 3, variant: isConnected ? 'connected' : 'not_connected' }
+    // Counted, not assumed: this used to hardcode 3 even when every send had
+    // failed, so the run output said the sequence completed no matter what.
+    const emailsSent = [sentWelcome, sentGuidebook, sentReengagement].filter(Boolean).length
+
+    return { org_id, emails_sent: emailsSent, variant: isConnected ? 'connected' : 'not_connected' }
   }
 )

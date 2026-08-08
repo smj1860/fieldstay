@@ -100,10 +100,10 @@
   "measured_at": "2026-08-08",
   "counts": {
     "fieldstay-supabase-discarded-result": 65,
-    "fieldstay-supabase-read-without-error": 101,
+    "fieldstay-supabase-read-without-error": 94,
     "fieldstay-supabase-read-without-error-fan-in": 0,
     "fieldstay-supabase-unbounded-select-in-list": 23,
     "fieldstay-supabase-unbounded-select-org-scoped": 85,
-    "fieldstay-supabase-unbounded-select-single-parent": 26
+    "fieldstay-supabase-unbounded-select-single-parent": 25
   }
 }
