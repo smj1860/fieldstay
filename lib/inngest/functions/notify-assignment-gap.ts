@@ -31,6 +31,11 @@ export const notifyAssignmentGap = inngest.createFunction(
 
     if (!context.pmMembers.length) return { sent: 0, reason: 'no_managers' }
 
+    // User ids, not email addresses. An Inngest function's return value is
+    // persisted and rendered in the run history, so returning `recipients:
+    // ['pm@example.com', ...]` put PM email addresses into a third-party
+    // console — the same rule as the log ban in CLAUDE.md, just a surface
+    // that is easy to forget is durable.
     const sentTo: string[] = []
 
     for (const member of context.pmMembers as PmMember[]) {
@@ -55,7 +60,7 @@ export const notifyAssignmentGap = inngest.createFunction(
           { idempotencyKey: `assignment-gap-${turnover_id}-${member.userId}` }
         )
 
-        return member.email
+        return member.userId
       })
 
       if (sent) sentTo.push(sent)
@@ -84,6 +89,6 @@ export const notifyAssignmentGap = inngest.createFunction(
       })
     }
 
-    return { sent: sentTo.length, recipients: sentTo }
+    return { sent: sentTo.length, recipientUserIds: sentTo }
   }
 )

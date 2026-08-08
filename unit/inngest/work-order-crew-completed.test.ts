@@ -102,4 +102,52 @@ describe('handleWorkOrderCrewCompleted', () => {
       subtitle: 'A crew member marked "a work order" complete',
     }))
   })
+
+  // Neither .single() checked its error, so an RLS regression or a timeout was
+  // indistinguishable from PGRST116 — both leave `data` null. Every field in
+  // the notification then falls back, so a failed read shipped the PM the
+  // content-free notification asserted in the test above instead of retrying.
+  // PGRST116 stays a legitimate not-found (that test still passes); a real
+  // error throws.
+  it.each([
+    ['work_orders',  { message: 'permission denied for table work_orders', code: '42501' }],
+    ['crew_members', { message: 'canceling statement due to statement timeout', code: '57014' }],
+  ])('throws instead of sending a content-free notification when the %s read really fails', async (table, error) => {
+    vi.spyOn(console, 'error').mockImplementation(() => {})
+    const supabase = makeSupabase({
+      work_orders:  { data: { id: 'wo_1', wo_number: 'WO-42', title: 'Fix the sink', property_id: 'prop_1' }, error: null },
+      crew_members: { data: { id: 'c1', name: 'Maria' }, error: null },
+      [table]:      { data: null, error },
+    })
+    ;(createServiceClient as ReturnType<typeof vi.fn>).mockReturnValue(supabase)
+
+    await expect(
+      invokeHandler(handleWorkOrderCrewCompleted, {
+        event: { data: { workOrderId: 'wo_1', orgId: 'org_1', crewMemberId: 'c1', completedAt: '2026-07-20T10:00:00Z', notes: null } },
+        step:  runAllStep(),
+      }),
+    ).rejects.toThrow()
+    expect(createPmNotification).not.toHaveBeenCalled()
+  })
+
+  // `.eq('id', woRes.data?.property_id ?? '')` sent an empty string where a
+  // uuid was required: Postgres rejects it with 22P02, so a missing WO
+  // produced a spurious parse error in Sentry in place of the real cause.
+  it('does not query properties at all when the work order has no property_id', async () => {
+    const supabase = makeSupabase({
+      work_orders:  { data: { id: 'wo_1', wo_number: 'WO-42', title: 'Fix the sink', property_id: null }, error: null },
+      crew_members: { data: { id: 'c1', name: 'Maria' }, error: null },
+    })
+    ;(createServiceClient as ReturnType<typeof vi.fn>).mockReturnValue(supabase)
+
+    await invokeHandler(handleWorkOrderCrewCompleted, {
+      event: { data: { workOrderId: 'wo_1', orgId: 'org_1', crewMemberId: 'c1', completedAt: '2026-07-20T10:00:00Z', notes: null } },
+      step:  runAllStep(),
+    })
+
+    expect(supabase.from).not.toHaveBeenCalledWith('properties')
+    expect(createPmNotification).toHaveBeenCalledWith(supabase, expect.objectContaining({
+      title: '✓ Work Complete — WO-42 · the property',
+    }))
+  })
 })

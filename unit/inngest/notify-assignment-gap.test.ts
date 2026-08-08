@@ -95,7 +95,11 @@ describe('notifyAssignmentGap', () => {
 
     const result = await invokeHandler(notifyAssignmentGap, { event: BASE_EVENT, step: runAllStep() })
 
-    expect(result).toEqual({ sent: 2, recipients: ['pm1@test.com', 'pm2@test.com'] })
+    // User ids, not email addresses — an Inngest run's return value is
+    // persisted and rendered in the run history, so returning emails put PM
+    // addresses into a third-party console. The `to:` assertion below still
+    // proves the right person was mailed.
+    expect(result).toEqual({ sent: 2, recipientUserIds: ['pm_1', 'pm_2'] })
     expect(getPmMembers).toHaveBeenCalledWith(supabase, 'org_1', { roles: ['owner', 'admin', 'manager'], limit: 10 })
 
     expect(resend.emails.send).toHaveBeenCalledTimes(2)
@@ -148,7 +152,7 @@ describe('notifyAssignmentGap', () => {
 
     const result = await invokeHandler(notifyAssignmentGap, { event: BASE_EVENT, step: runAllStep() })
 
-    expect(result).toEqual({ sent: 1, recipients: ['pm1@test.com'] })
+    expect(result).toEqual({ sent: 1, recipientUserIds: ['pm_1'] })
     expect(sendPushToCrewMember).toHaveBeenCalledTimes(1)
   })
 })
