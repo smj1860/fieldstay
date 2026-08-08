@@ -45,6 +45,7 @@ export async function sendPushToUser(userId: string, payload: SendPushPayload): 
     .from('push_subscriptions')
     .select('id, endpoint, p256dh, auth')
     .eq('crew_member_id', crewMember.id)
+    .limit(20)
 
   if (subscriptionsError) {
     console.error('[sendPushToUser] subscriptions lookup failed', subscriptionsError.message)

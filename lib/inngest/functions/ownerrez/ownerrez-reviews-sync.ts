@@ -226,6 +226,7 @@ export const ownerRezReviewsSync = inngest.createFunction(
               .select('id, external_id')
               .eq('org_id', orgId)
               .in('external_id', propertyExternalIds)
+              .limit(propertyExternalIds.length)
 
             if (propsErr) {
               throw new Error(`[OwnerRez:${userId}] Property lookup failed: ${propsErr.message}`)

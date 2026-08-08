@@ -426,6 +426,7 @@ export async function upsertParLevelItems(
         .select('id')
         .in('id', existingItems.map((item) => item.id!))
         .eq('org_id', membership.org_id)
+        .limit(existingItems.length)
       const verifiedRows = unwrapList(verifiedRowsRes, {
         site: 'serverAction.templatesInventory.upsertParLevelItems.verify',
         orgId: membership.org_id,

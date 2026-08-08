@@ -198,6 +198,7 @@ export async function generateCombinedPortalToken(ownerIds: string[]): Promise<O
       .select('id, property_id')
       .eq('org_id', membership.org_id)
       .in('id', ownerIds)
+      .limit(ownerIds.length)
     const owners = unwrapList(ownersRes, {
       site: 'serverAction.owners.generateCombinedPortalToken.verify',
       orgId: membership.org_id,

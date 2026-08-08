@@ -326,6 +326,7 @@ async function loadConnectedPropertyIds(
     .select('external_id')
     .eq('org_id', orgId)
     .eq('external_source', PROVIDER)
+    .limit(500)
 
   const data = unwrapList<{ external_id: string | null }>(res, {
     site: 'inngest.ownerrez-connection-sync.load-connected-properties',

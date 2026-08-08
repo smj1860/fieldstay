@@ -32,6 +32,7 @@ export async function clonePropertySetup(
       .select('name, category, unit, par_level, preferred_brand, catalog_item_id, notes')
       .eq('property_id', sourcePropertyId)
       .eq('is_active', true)
+      .limit(500)
     const sourceItems = unwrapList(sourceItemsRes, { site: 'serverAction.properties.clonePropertySetup.inventoryRead', orgId })
 
     if (sourceItems && sourceItems.length > 0) {
@@ -158,6 +159,7 @@ export async function clonePropertySetup(
       .select('name, description, schedule_type, frequency, month_due, day_of_month_due, estimated_cost, instructions, auto_create_wo, assigned_vendor_id')
       .eq('property_id', sourcePropertyId)
       .eq('is_active', true)
+      .limit(500)
     const sourceSched = unwrapList(sourceSchedRes, { site: 'serverAction.properties.clonePropertySetup.scheduleRead', orgId })
 
     if (sourceSched && sourceSched.length > 0) {

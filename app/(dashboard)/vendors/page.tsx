@@ -17,6 +17,7 @@ export default async function VendorsPage() {
     .eq('is_active', true)
     .order('specialty')
     .order('name')
+    .limit(500)
   const rawVendors = unwrapList(rawVendorsRes, ctx)
 
   // Scorecard inputs, bounded to the trailing 12 months. The previous shape

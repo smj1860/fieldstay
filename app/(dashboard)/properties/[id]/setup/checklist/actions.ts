@@ -101,6 +101,7 @@ async function validateRoomTemplateIds(
     .select('id')
     .eq('org_id', orgId)
     .in('id', roomTemplateIds)
+    .limit(roomTemplateIds.length)
   const ownedRooms = unwrapList(ownedRoomsRes, {
     site: 'serverAction.properties.setup.checklist.validateRoomTemplateIds',
     orgId,

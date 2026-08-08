@@ -163,6 +163,7 @@ export async function getWorkOrderStatus(orgId: string) {
       .select('id, name')
       .eq('org_id', orgId)
       .in('id', crewIds)
+      .limit(crewIds.length)
     const crewOut = tryUnwrapList(crewRes, {
       site: 'lib.support.account-tools.getWorkOrderStatus.crewLookup',
       orgId,

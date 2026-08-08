@@ -255,6 +255,7 @@ async function getOrCreateTemplateId(
     .from('checklist_template_sections')
     .select('id')
     .eq('template_id', templateId)
+    .limit(200)
 
   const existingSections = unwrapList(existingSectionsRes, {
     site: 'lib.checklists.apply-master-template.existing-sections',

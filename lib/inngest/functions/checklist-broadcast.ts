@@ -99,6 +99,7 @@ export const broadcastChecklistTemplateJob = inngest.createFunction(
             checklist_template_items (task, requires_photo, notes, sort_order)
           `)
           .eq('template_id', newTemplate.id)
+          .limit(200)
 
         if (existingSectionsError) {
           throwIfAnyQueryFailed(

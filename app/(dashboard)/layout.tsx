@@ -177,6 +177,7 @@ export default async function DashboardLayout({
       .select('id, name')
       .eq('org_id', membership.org_id)
       .eq('is_active', true)
+      .limit(500)
     orgProperties = unwrapList(orgPropertiesRes, { site: 'page.layout.tsx.orgProperties', orgId: membership.org_id })
   }
 

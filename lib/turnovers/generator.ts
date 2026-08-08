@@ -609,6 +609,7 @@ export async function snapshotChecklist(
       checklist_template_items ( id, task, requires_photo, notes, sort_order )`)
     .eq('template_id', templateId)
     .order('sort_order', { ascending: true })
+    .limit(200)
   const sections = unwrapList(sectionsRes, { site: 'turnovers.generator.snapshotChecklist.sections', orgId })
   if (!sections?.length) return
   const instanceRes = await supabase
@@ -630,6 +631,7 @@ export async function snapshotChecklist(
     .eq('property_id', propertyId)
     .eq('dynamic_photo_required', true)
     .gte('total_completions', 3)
+    .limit(200)
   const signals = unwrapList(signalsRes, { site: 'turnovers.generator.snapshotChecklist.signals', orgId })
   const signalMap = new Map(
     (signals ?? []).map((s: { section_name: string; task: string; reason: string | null }) =>

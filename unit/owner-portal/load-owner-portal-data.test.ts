@@ -37,6 +37,7 @@ function makeSupabase(queued: QueuedByTable) {
     chain.update = (...a: unknown[]) => record('update', a)
     chain.eq     = (...a: unknown[]) => record('eq', a)
     chain.in     = (...a: unknown[]) => record('in', a)
+    chain.limit  = (...a: unknown[]) => record('limit', a)
     chain.gte    = (...a: unknown[]) => record('gte', a)
     chain.order  = (...a: unknown[]) => record('order', a)
     chain.upsert = (...a: unknown[]) => {

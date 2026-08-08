@@ -154,6 +154,7 @@ export default async function GuestBookingGuidebookPage({
     .select('id, status, slot_type, business_name, business_description, custom_offer_text, address, offer_type, offer_value, offer_item, featured_item, business_phone, business_website, lat, lng, photo_storage_path')
     .eq('org_id', booking.org_id)
     .eq('status', 'active')
+    .limit(100)
   const sponsors = unwrapList(sponsorsRes, { site: 'page.g.b.token', orgId: booking.org_id })
 
   const timeZone = property.timezone || FALLBACK_TIMEZONE

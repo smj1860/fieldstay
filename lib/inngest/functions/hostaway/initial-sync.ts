@@ -109,6 +109,7 @@ export const hostawayInitialSync = inngest.createFunction(
             .eq('org_id', org_id)
             .eq('external_source', PROVIDER)
             .in('external_id', listings.map((l) => String(l.id)))
+            .limit(listings.length)
           const fsProps = unwrapList(fsPropsRes, {
             site:  'inngest.hostaway-initial-sync.fetch-and-upsert-properties',
             orgId: org_id,

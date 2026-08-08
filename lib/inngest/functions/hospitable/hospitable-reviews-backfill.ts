@@ -49,6 +49,7 @@ export const hospReviewsBackfill = inngest.createFunction(
           .eq('org_id', org_id)
           .eq('external_source', PROVIDER)
           .not('external_id', 'is', null)
+          .limit(500)
 
         if (error) {
           throw new Error(`[Hospitable:${user_id}] Property lookup failed: ${error.message}`)

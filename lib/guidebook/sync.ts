@@ -52,6 +52,7 @@ export async function createGuidebookPropertyConfigsForProperties(
     .select('property_id')
     .eq('org_id', orgId)
     .in('property_id', allProperties.map((p) => p.id))
+    .limit(allProperties.length)
   const existingConfigs = unwrapList(existingConfigsRes, { site: 'lib.guidebook.sync.createGuidebookPropertyConfigsForProperties.existingConfigs', orgId })
 
   const alreadyConfigured = new Set((existingConfigs ?? []).map((c) => c.property_id))
@@ -133,6 +134,7 @@ export async function syncGuidebookConfigsFromProperty(
     .select('id, property_id, wifi_network, wifi_password, check_in_instructions, house_rules, check_out_instructions')
     .eq('org_id', orgId)
     .in('property_id', props.map((p) => p.id))
+    .limit(props.length)
   const configs = unwrapList(configsRes, { site: 'lib.guidebook.sync.syncGuidebookConfigsFromProperty.configs', orgId })
 
   const configByPropertyId = new Map((configs ?? []).map((c) => [c.property_id, c]))

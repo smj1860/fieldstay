@@ -142,6 +142,7 @@ export async function triggerResync(
         .eq('external_source', 'hospitable')
         .eq('is_active', true)
         .not('external_id', 'is', null)
+        .limit(500)
 
       reportQueryError(hospPropertiesError, {
         site:  'serverAction.settings.integrations.triggerResync.hospProperties',

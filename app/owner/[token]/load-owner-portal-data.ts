@@ -205,7 +205,8 @@ async function resolvePortfolioScope(
       .select('id, name, address, city, state, zip')
       .in('id', portalToken.property_ids!)
       .eq('org_id', orgId)   // scope to token's org
-      .order('name') as PostgrestResult<OwnerPortalProperty[]>
+      .order('name')
+      .limit(portalToken.property_ids!.length) as PostgrestResult<OwnerPortalProperty[]>
     const props = unwrapList<OwnerPortalProperty>(propsRes, {
       site: 'owner-portal.portfolioProperties',
       orgId,

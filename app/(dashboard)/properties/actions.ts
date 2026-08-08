@@ -464,6 +464,7 @@ export async function markStepComplete(
         .select('id, setup_steps_completed')
         .eq('org_id', membership.org_id)
         .eq('is_active', true)
+        .limit(500)
       const props = unwrapList(propsRes, { site: 'serverAction.properties.markStepComplete.propsRead', orgId: membership.org_id })
 
       const fullyConfigured = (props ?? []).filter((p) => {

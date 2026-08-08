@@ -166,6 +166,7 @@ export const ownerRezInitialSync = inngest.createFunction(
           .eq('org_id', org_id)
           .eq('external_source', PROVIDER)
           .in('external_id', externalIds)
+          .limit(externalIds.length)
         const existingProps = unwrapList(existingPropsRes, {
           site:  'inngest.ownerrez-initial-sync.patch-property-fields',
           orgId: org_id,
@@ -246,6 +247,7 @@ export const ownerRezInitialSync = inngest.createFunction(
           .eq('external_source', PROVIDER)
           .eq('org_id', org_id)
           .eq('is_active', true)
+          .limit(500)
         return unwrapList(res, {
           site:  'inngest.ownerrez-initial-sync.fetch-properties-to-enrich',
           orgId: org_id,

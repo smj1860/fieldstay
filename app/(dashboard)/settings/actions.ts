@@ -1479,6 +1479,7 @@ export async function getOrgSmsTemplates(): Promise<
       .from('org_sms_templates')
       .select('key, body')
       .eq('org_id', membership.org_id)
+      .limit(200)
     return unwrapList(res, { site: 'serverAction.settings.getOrgSmsTemplates', orgId: membership.org_id })
   } catch (err) {
     console.error('[getOrgSmsTemplates]', err)
