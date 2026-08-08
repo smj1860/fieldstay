@@ -16,7 +16,7 @@ import { inngest }             from '@/lib/inngest/client'
 import { fetchAllRows } from '@/lib/inngest/paginate'
 import { createServiceClient } from '@/lib/supabase/server'
 import { logAuditEvents }      from '@/lib/audit'
-import { unwrap, unwrapList }  from '@/lib/supabase/unwrap'
+import { unwrap }  from '@/lib/supabase/unwrap'
 
 interface MasterItem {
   catalog_item_id: string
@@ -187,13 +187,21 @@ export const broadcastPlatformInventoryTemplate = inngest.createFunction(
         // was no unique index behind it either, so nothing downstream could
         // refuse the duplicates; 20260808060000 adds one, and this stops
         // relying on it.
-        const existingItemsRes = await supabase
-          .from('inventory_template_items')
-          .select('catalog_item_id')
-          .eq('template_id', orgTemplateId)
-        const existingItems = unwrapList<{ catalog_item_id: string | null }>(existingItemsRes, {
-          site: 'inngest.platform-inventory-broadcast.existing-items', orgId,
-        })
+        // Paginated, not .limit()'d, and that distinction is the whole point:
+        // a TRUNCATED dedup set is the same defect as an empty one, just
+        // smaller — the items past the cap look missing and get re-inserted.
+        // inventory_template_items has no org_id (it is scoped through
+        // template_id), so fetchAllRows is the bound available here, and it is
+        // the same one the master-items read at the top of this function uses.
+        const existingItems = await fetchAllRows<{ catalog_item_id: string | null }>(
+          (from, to) => supabase
+            .from('inventory_template_items')
+            .select('catalog_item_id')
+            .eq('template_id', orgTemplateId!)
+            .order('id')
+            .range(from, to),
+          { label: 'platform-inventory-broadcast.existing-items' },
+        )
         const existingCatalogItemIds = new Set(existingItems.map((i) => i.catalog_item_id))
 
         const toAdd = masterItems.filter((m) => !existingCatalogItemIds.has(m.catalog_item_id))
