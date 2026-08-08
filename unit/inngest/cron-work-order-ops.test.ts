@@ -349,6 +349,84 @@ describe('workOrderOpsOrg (per-org handler)', () => {
     )
   })
 
+  // ── the next_due_date advance ───────────────────────────────────────────
+  //
+  // A silent failure here is permanent, not transient. next_due_date stays
+  // put, so tomorrow the schedule looks due again, and the auto-create step's
+  // (source_schedule_id, scheduled_date) unique constraint rejects the
+  // duplicate as an expected race — so the schedule stops producing work
+  // orders for this occurrence AND every future one, while the cron reports a
+  // clean run every day.
+  //
+  // The same advance in app/(dashboard)/maintenance/actions.ts was already
+  // bound and org-scoped; this copy was neither.
+  it('throws when the next_due_date advance fails, rather than leaving the schedule stuck', async () => {
+    const supabase = makeSupabase({
+      work_orders: [
+        { data: [], error: null },                 // aging scan — none
+        { data: null, error: null },               // idempotency check — none
+        { data: { id: 'wo_new' }, error: null },   // the insert
+      ],
+      maintenance_schedules: [
+        {
+          data: [{
+            id: 'sched_1', name: 'Quarterly HVAC service', org_id: 'org_1', property_id: 'prop_1',
+            next_due_date: '2026-07-22', frequency: 'quarterly', schedule_type: 'routine',
+            assigned_vendor_id: null, vendor_specialty_hint: null, estimated_cost: 200,
+            instructions: 'Service the unit', properties: { name: 'Lakeview Cabin' },
+          }],
+          error: null,
+        },
+        { data: null, error: { message: 'deadlock detected', code: '40P01' } },  // the advance
+      ],
+    })
+    ;(createServiceClient as ReturnType<typeof vi.fn>).mockReturnValue(supabase)
+
+    await expect(
+      invokeHandler(workOrderOpsOrg, { event: orgEvent(), step: makeStep(), logger: makeLogger() })
+    ).rejects.toThrow(/next_due_date advance failed/)
+  })
+
+  it('scopes the next_due_date advance to the org, not just the schedule id', async () => {
+    const supabase = makeSupabase({
+      work_orders: [
+        { data: [], error: null },
+        { data: null, error: null },
+        { data: { id: 'wo_new' }, error: null },
+      ],
+      maintenance_schedules: [
+        {
+          data: [{
+            id: 'sched_1', name: 'Quarterly HVAC service', org_id: 'org_1', property_id: 'prop_1',
+            next_due_date: '2026-07-22', frequency: 'quarterly', schedule_type: 'routine',
+            assigned_vendor_id: null, vendor_specialty_hint: null, estimated_cost: 200,
+            instructions: 'Service the unit', properties: { name: 'Lakeview Cabin' },
+          }],
+          error: null,
+        },
+        { data: null, error: null },
+      ],
+    })
+    ;(createServiceClient as ReturnType<typeof vi.fn>).mockReturnValue(supabase)
+
+    await invokeHandler(workOrderOpsOrg, { event: orgEvent(), step: makeStep(), logger: makeLogger() })
+
+    // Positional, not "org_id appears somewhere on this table": the
+    // find-auto-wo-schedules read is also org-scoped, so a flat search passes
+    // whether or not the UPDATE itself carries the filter. Anchor to the
+    // update call and only look at the filters chained after it.
+    const updateIdx = supabase.calls.findIndex(
+      (c) => c.table === 'maintenance_schedules' && c.method === 'update'
+    )
+    expect(updateIdx).toBeGreaterThan(-1)
+
+    const filtersAfterUpdate = supabase.calls
+      .slice(updateIdx)
+      .filter((c) => c.table === 'maintenance_schedules' && c.method === 'eq')
+
+    expect(filtersAfterUpdate.some((c) => c.args[0] === 'org_id' && c.args[1] === 'org_1')).toBe(true)
+  })
+
   it('skips auto-creating a work order when one already exists for the schedule + due date (idempotency)', async () => {
     const supabase = makeSupabase({
       work_orders: [

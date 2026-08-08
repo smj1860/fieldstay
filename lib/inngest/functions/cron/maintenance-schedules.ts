@@ -7,6 +7,7 @@ import { logAuditEvent } from '@/lib/audit'
 import { reportError } from '@/lib/observability/report-error'
 import { unwrapJoin } from '@/lib/utils/supabase-joins'
 import { fetchAllRows, fetchDistinctOrgIds } from '@/lib/inngest/paginate'
+import type { Enums } from '@/types/database'
 import {
   createMaintenanceWorkOrder,
   computeVacancyGaps,
@@ -30,6 +31,79 @@ interface DueScheduleRow extends DueSoonScheduleRow {
   active_from_month: number | null
   active_to_month:   number | null
   vendors:           DueSoonVendor | DueSoonVendor[] | null
+}
+
+type ServiceClient = ReturnType<typeof createServiceClient>
+
+/**
+ * Escalates an already-open work order for an overdue schedule to urgent, and
+ * records the escalation note the daily wrap-up's escalation section reads.
+ *
+ * Extracted from the overdue pass because folding the idempotency guard inline
+ * took that step past both the nesting-depth and cognitive-complexity limits —
+ * and because the escalate-then-note pair is one unit: neither half is correct
+ * without the other.
+ */
+async function escalateOverdueWorkOrder(
+  supabase: ServiceClient,
+  openWO:   { id: string; priority: string | null; status: Enums<'wo_status'> },
+  schedule: { id: string; org_id: string },
+  daysLate: number,
+): Promise<void> {
+  if (openWO.priority === 'urgent') return
+
+  // `.neq('priority','urgent').select('id')` makes this an optimistic-locked
+  // update that returns the rows it actually changed, which is what makes the
+  // note insert idempotent — the same guard cron/work-order-ops.ts uses for
+  // its bulk twin. A step retry finds the WO already urgent, matches zero
+  // rows, and writes no second note.
+  //
+  // That duplicate note was a known, deliberately-open gap in
+  // unit/guardrails/inngest-insert-idempotency.test.ts, left pending a
+  // decision about what makes two escalation events "the same". The sibling
+  // had already answered that, so this copies the answer rather than
+  // re-litigating it.
+  //
+  // Both writes are bound and org-scoped. Unnoticed, a failed update left the
+  // WO at its old priority while the note below claimed it had been
+  // escalated — and the wrap-up builds its escalation section from those
+  // notes, so the digest reported an escalation that never happened.
+  const { data: escalatedRows, error: escalateError } = await supabase
+    .from('work_orders')
+    .update({ priority: 'urgent' })
+    .eq('id', openWO.id)
+    .eq('org_id', schedule.org_id)
+    .neq('priority', 'urgent')
+    .select('id')
+
+  if (escalateError) {
+    throw new Error(`overdue escalation failed for work order ${openWO.id}: ${escalateError.message}`)
+  }
+
+  // Zero rows = a concurrent run or an earlier attempt already escalated it.
+  // Not an error, and specifically not a reason to write a duplicate note.
+  if (!escalatedRows?.length) return
+
+  const { error: noteError } = await supabase.from('work_order_updates').insert({
+    work_order_id:             openWO.id,
+    org_id:                    schedule.org_id,
+    updated_via_vendor_portal: false,
+    status_from:               openWO.status,
+    status_to:                 openWO.status,
+    notes:                     `Priority auto-escalated to Urgent — ${daysLate} day${daysLate !== 1 ? 's' : ''} past scheduled date`,
+  })
+
+  if (noteError) {
+    throw new Error(`work_order_updates escalation note failed for ${openWO.id}: ${noteError.message}`)
+  }
+
+  await logAuditEvent({
+    orgId:      schedule.org_id,
+    action:     'work_order.updated',
+    targetType: 'work_order',
+    targetId:   openWO.id,
+    metadata:   { change: 'auto_escalated_to_urgent', maintenance_schedule_id: schedule.id },
+  })
 }
 
 /**
@@ -261,11 +335,31 @@ export const maintenanceSchedulesOrg = inngest.createFunction(
           // the schedule would get no PM-facing surface at all.
           if (schedule.schedule_type === 'routine' && schedule.frequency) {
             const nextDue = calcNextDueDate(schedule.frequency, dueDate)
-            await supabase
+            // Bound and org-scoped, matching advanceScheduleNextDueDate in
+            // app/(dashboard)/maintenance/actions.ts. This is the third copy of
+            // the same advance and the second that was silent.
+            //
+            // The WO has already been created by the line above, so a failed
+            // advance leaves next_due_date pointing at a date that is now
+            // handled: tomorrow the schedule looks due again, the
+            // (source_schedule_id, scheduled_date) unique constraint rejects
+            // the duplicate, and the schedule stops producing work orders for
+            // this occurrence and every future one — silently, forever.
+            //
+            // Zero rows is expected: `.eq('next_due_date', ...)` is an
+            // optimistic lock against workOrderOpsOrg advancing it first.
+            const { error: advanceError } = await supabase
               .from('maintenance_schedules')
               .update({ next_due_date: nextDue.toISOString().split('T')[0] })
               .eq('id', schedule.id)
+              .eq('org_id', schedule.org_id)
               .eq('next_due_date', schedule.next_due_date!)  // optimistic lock — prevents double-advance on retry
+
+            if (advanceError) {
+              throw new Error(
+                `maintenance_schedules next_due_date advance failed for schedule ${schedule.id}: ${advanceError.message}`
+              )
+            }
           }
         }
 
@@ -303,7 +397,13 @@ export const maintenanceSchedulesOrg = inngest.createFunction(
         const daysLate = Math.round((today.getTime() - dueDate.getTime()) / 86_400_000)
 
         // Look for an open WO tied to this schedule
-        const { data: openWO } = await supabase
+        // This read decides the whole branch, so its failure is not cosmetic.
+        // Discarded, an error made openWO null, which sent an overdue schedule
+        // that ALREADY has an open work order down the create path instead —
+        // where the unique constraint no-ops the insert. Net effect: the
+        // existing work order never gets escalated to urgent, which is the
+        // entire purpose of this pass, and the run reports success.
+        const openWORes = await supabase
           .from('work_orders')
           .select('id, priority, status')
           .eq('org_id', orgId)
@@ -313,37 +413,21 @@ export const maintenanceSchedulesOrg = inngest.createFunction(
           .limit(1)
           .maybeSingle()
 
+        if (openWORes.error) {
+          throw new Error(
+            `overdue-pass open-WO lookup failed for schedule ${schedule.id}: ${openWORes.error.message}`
+          )
+        }
+        const openWO = openWORes.data
+
         // The PM-facing escalation alerts that used to fire here are now
         // covered by cron-daily-wrapup's maintenance digest section instead.
         if (openWO) {
-          // Escalate existing WO priority to urgent if not already
-          if (openWO.priority !== 'urgent') {
-            await supabase
-              .from('work_orders')
-              .update({ priority: 'urgent' })
-              .eq('id', openWO.id)
-
-            await supabase.from('work_order_updates').insert({
-              work_order_id:             openWO.id,
-              org_id:                    schedule.org_id,
-              updated_via_vendor_portal: false,
-              status_from:               openWO.status,
-              status_to:                 openWO.status,
-              notes:                     `Priority auto-escalated to Urgent — ${daysLate} day${daysLate !== 1 ? 's' : ''} past scheduled date`,
-            })
-
-            await logAuditEvent({
-              orgId:      schedule.org_id,
-              action:     'work_order.updated',
-              targetType: 'work_order',
-              targetId:   openWO.id,
-              metadata:   { change: 'auto_escalated_to_urgent', maintenance_schedule_id: schedule.id },
-            })
-          }
+          await escalateOverdueWorkOrder(supabase, openWO, schedule, daysLate)
         } else {
           // No open WO — create one with urgent priority
           // Idempotency: skip insert if a WO already exists for this schedule + due date
-          const { data: existingWO } = await supabase
+          const existingWORes = await supabase
             .from('work_orders')
             .select('id')
             .eq('org_id', orgId)
@@ -352,8 +436,15 @@ export const maintenanceSchedulesOrg = inngest.createFunction(
             .eq('source', 'maintenance_schedule')
             .maybeSingle()
 
-          const { data: wo } = existingWO
-            ? { data: existingWO }
+          if (existingWORes.error) {
+            throw new Error(
+              `overdue-pass idempotency check failed for schedule ${schedule.id}: ${existingWORes.error.message}`
+            )
+          }
+          const existingWO = existingWORes.data
+
+          const insertRes = existingWO
+            ? { data: existingWO, error: null }
             : await supabase
                 .from('work_orders')
                 .insert({
@@ -372,6 +463,19 @@ export const maintenanceSchedulesOrg = inngest.createFunction(
                 })
                 .select('id')
                 .single()
+
+          // The insert's error was discarded entirely, so EVERY cause looked
+          // the same as success-with-no-row: a lost race (23505 on the
+          // (source_schedule_id, scheduled_date) unique index, which is
+          // expected and benign) was indistinguishable from a constraint
+          // violation, an RLS refusal or a dropped connection. The overdue
+          // work order simply never existed and the pass reported a clean run.
+          if (insertRes.error && insertRes.error.code !== '23505') {
+            throw new Error(
+              `overdue work order insert failed for schedule ${schedule.id}: ${insertRes.error.message}`
+            )
+          }
+          const wo = insertRes.data
 
           if (wo && !existingWO) {
             await logAuditEvent({

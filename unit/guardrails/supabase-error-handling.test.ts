@@ -157,8 +157,18 @@ const BASELINE: Record<string, number> = {
   // entire backlog as new. That is the exact defect diffDigestSnapshot's own
   // comment describes — closed on the snapshot read, left open on every read
   // feeding it.
-  'lib/inngest/functions/cron/maintenance-schedules.ts': 2,
-  'lib/inngest/functions/cron/work-order-ops.ts': 2,
+  // 2 -> 0 (entry deleted). The overdue pass could silently do nothing: the
+  // open-WO lookup decides the whole branch, so a failed read sent a schedule
+  // that already HAS an open work order down the create path instead, where
+  // the unique constraint no-ops the insert — the existing WO never got
+  // escalated to urgent, which is the entire purpose of that pass. The
+  // idempotency read and the insert itself were discarded the same way, so a
+  // real insert failure was indistinguishable from the expected 23505 race.
+  // 2 -> 0 (entry deleted). The next_due_date advance was the costly one: a
+  // silent failure left the schedule pointing at a date already handled, so
+  // the auto-create step's unique constraint rejected tomorrow's duplicate as
+  // an expected race and the schedule stopped producing work orders for this
+  // occurrence and every future one.
   'lib/inngest/functions/email-trial-lifecycle.tsx': 4,
   'lib/inngest/functions/flagged-turnover-wo.ts': 3,
   // 3 -> 0 (entry deleted), same three reads as its morning twin below: a
