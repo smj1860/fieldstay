@@ -47,6 +47,10 @@ import {
 type Resp = { data?: unknown; error?: unknown }
 
 function makeSupabase(queue: Record<string, Resp[]>) {
+  // Records .or() filters so a test can prove the DELETE carried its
+  // manual-source predicate — without this, an assertion that only checks the
+  // outcome would pass against a delete that filtered on nothing.
+  const orCalls: string[] = []
   const from = vi.fn((table: string) => {
     const q = queue[table]
     const result: Resp = q?.length ? q.shift()! : { data: null, error: null }
@@ -55,6 +59,7 @@ function makeSupabase(queue: Record<string, Resp[]>) {
     for (const m of ['select', 'insert', 'update', 'delete', 'upsert', 'eq', 'in', 'is']) {
       chain[m] = vi.fn(() => chain)
     }
+    chain.or = vi.fn((expr: string) => { orCalls.push(expr); return chain })
     chain.single = vi.fn(() => Promise.resolve(result))
     // `.update(...).eq(...).select('id')` and `.delete().eq(...).select('id')`
     // resolve to the queued result too — both actions now check that a row was
@@ -63,7 +68,7 @@ function makeSupabase(queue: Record<string, Resp[]>) {
     chain.then   = (resolve: (v: unknown) => unknown) => Promise.resolve(result).then(resolve)
     return chain
   })
-  return { from }
+  return { from, orCalls }
 }
 
 const membership = {
@@ -451,6 +456,66 @@ describe('owners/actions', () => {
 
       await expect(deleteOwnerTransaction('txn_1')).rejects.toThrow('REDIRECT:/login')
       expect(supabase.from).not.toHaveBeenCalled()
+    })
+
+    // ── auto-posted rows are not deletable ──────────────────────────────────
+    //
+    // Every non-manual source is written by an Inngest handler whose event
+    // fires exactly once, and each upsert is keyed on
+    // (source_reference_id, source) — so a deleted row never re-posts. It just
+    // leaves that property's P&L permanently short.
+    //
+    // The UI gated its Delete button on `!work_order_id && !booking_id`, which
+    // is a different question and got it wrong for 33 of 50 production rows.
+    // The button is now source-gated, but the button was never the boundary:
+    // this action is directly invocable.
+
+    it('refuses to delete an auto-posted transaction, and says why', async () => {
+      const supabase = makeSupabase({
+        owner_transactions: [
+          { data: [] },                                  // the guarded DELETE matched nothing
+          { data: { source: 'cleaning_fee' } },          // …but the row does exist
+        ],
+      })
+      vi.mocked(requireOrgRole).mockResolvedValue({
+        supabase, membership, user: { id: 'user_1' },
+      } as never)
+
+      await expect(deleteOwnerTransaction('txn_auto'))
+        .rejects.toThrow(/posted automatically/)
+
+      expect(logAuditEvent).not.toHaveBeenCalled()
+    })
+
+    it('still reports a genuine miss as not-found, not as a refusal', async () => {
+      const supabase = makeSupabase({
+        owner_transactions: [
+          { data: [] },     // guarded DELETE matched nothing
+          { data: null },   // …and no such row exists in this org either
+        ],
+      })
+      vi.mocked(requireOrgRole).mockResolvedValue({
+        supabase, membership, user: { id: 'user_1' },
+      } as never)
+
+      // "Doesn't exist" and "exists but is protected" need different answers —
+      // collapsing them is what made the old message misleading.
+      await expect(deleteOwnerTransaction('nope'))
+        .rejects.toThrow('That transaction could not be found.')
+    })
+
+    it('carries the manual-source predicate in the DELETE itself, not a prior read', async () => {
+      const supabase = makeSupabase({
+        owner_transactions: [{ data: [{ id: 'txn_1' }] }],
+      })
+      vi.mocked(requireOrgRole).mockResolvedValue({
+        supabase, membership, user: { id: 'user_1' },
+      } as never)
+
+      await deleteOwnerTransaction('txn_1')
+
+      // A read-then-delete would be a TOCTOU window on a financial ledger.
+      expect(supabase.orCalls).toContain('source.eq.manual,source.is.null')
     })
   })
 

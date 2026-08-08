@@ -126,13 +126,11 @@ const BASELINE = new Set<string>([
   'lib/inngest/functions/auto-assign-vendor.ts',
   'lib/inngest/functions/checklist-broadcast.ts',
   'lib/inngest/functions/crew-assignment.ts',
-  'lib/inngest/functions/cron/daily-wrapup.ts',
   'lib/inngest/functions/flagged-turnover-wo.ts',
   'lib/inngest/functions/hospitable/calendar-sync-handler.ts',
   'lib/inngest/functions/hospitable/hospitable-reviews-backfill.ts',
   'lib/inngest/functions/hospitable/teammate-sync-handler.ts',
   'lib/inngest/functions/hostaway/initial-sync.ts',
-  'lib/inngest/functions/inventory-events.ts',
   'lib/inngest/functions/ownerrez/incremental-sync.ts',
   'lib/inngest/functions/ownerrez/initial-sync.ts',
   'lib/inngest/functions/ownerrez/ownerrez-reviews-sync.ts',
@@ -143,7 +141,11 @@ describe('guardrail: no unbounded .select() in lib/inngest/**', () => {
   const offenders = findOffenders()
 
   it('finds the select population (sanity: the scan is not silently empty)', () => {
-    expect(offenders.length).toBeGreaterThan(20)
+    // Guards against the scan breaking and reading as "all clean". The floor
+    // moves DOWN as files are genuinely fixed — it was 20 until daily-wrapup
+    // and inventory-events were fully bounded, which is real cleanup, not a
+    // broken matcher. Lower it only alongside a baseline entry being deleted.
+    expect(offenders.length).toBeGreaterThan(12)
   })
 
   it('no unbounded .select() outside the grandfathered baseline files', () => {

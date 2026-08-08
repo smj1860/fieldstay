@@ -8,6 +8,7 @@ import { stripe } from '@/lib/stripe/client'
 import { renderVendorConnectInviteEmail } from '@/lib/resend/emails/vendor-connect-invite'
 import { logAuditEvent } from '@/lib/audit'
 import { unwrapJoin } from '@/lib/utils/supabase-joins'
+import { unwrap } from '@/lib/supabase/unwrap'
 import { loadDispatchContext, sendVendorDispatchEmail, sendVendorDispatchSms } from './work-order-events-helpers'
 
 // ── Work Order Created ────────────────────────────────────────────────────────
@@ -229,11 +230,20 @@ export const handleWorkOrderCreated = inngest.createFunction(
     if (event.data.vendor_id) {
       const scheduledDate = await step.run('fetch-scheduled-date', async () => {
         const supabase = createServiceClient({ system: 'inngest:work-order-events' })
-        const { data: wo } = await supabase
+        // Org-scoped and unwrapped: discarded, a failed read returned null,
+        // the whole overdue branch was skipped, and the PM never learned the
+        // work order had gone past its date — a missed alert reported as a
+        // clean run.
+        const woRes = await supabase
           .from('work_orders')
           .select('scheduled_date')
           .eq('id', work_order_id)
-          .single()
+          .eq('org_id', org_id)
+          .maybeSingle()
+
+        const wo = unwrap(woRes, {
+          site: 'inngest.work-order-created.fetch-scheduled-date', orgId: org_id,
+        })
         return wo?.scheduled_date ?? null
       })
 
@@ -248,11 +258,19 @@ export const handleWorkOrderCreated = inngest.createFunction(
 
         const stillOpen = await step.run('check-still-open-before-overdue-event', async () => {
           const supabase = createServiceClient({ system: 'inngest:work-order-events' })
-          const { data: wo } = await supabase
+          // Same treatment. Discarded, a failed read returned false, which
+          // reads as "already closed" — so the overdue event was never sent
+          // for a work order that was in fact still open.
+          const woRes = await supabase
             .from('work_orders')
             .select('status')
             .eq('id', work_order_id)
-            .single()
+            .eq('org_id', org_id)
+            .maybeSingle()
+
+          const wo = unwrap(woRes, {
+            site: 'inngest.work-order-created.check-still-open', orgId: org_id,
+          })
           return wo ? wo.status !== 'completed' && wo.status !== 'cancelled' : false
         })
 
@@ -295,19 +313,40 @@ export const handleWorkOrderCompleted = inngest.createFunction(
     await step.run('post-wo-expense', async () => {
       const supabase = createServiceClient({ system: 'inngest:work-order-events' })
 
-      const { data: wo } = await supabase
+      // Unwrapped, and org-scoped, because both defects here cost money.
+      //
+      // Discarded, a failed read left `wo` undefined, `cost` null, and the step
+      // returned `{ skipped: true }` — SUCCESS. Inngest only retries a step that
+      // throws, so the maintenance expense was never posted to
+      // owner_transactions and nothing re-drove it: `work-order/completed`
+      // fires once. The owner's P&L silently omits the cost, and the run is
+      // green. unwrap throws, so the step retries instead.
+      //
+      // The org scope matters because the row this step writes takes `org_id`
+      // and `property_id` from the EVENT, not from the work order. Reading the
+      // WO by id alone never confirmed the two agreed, so a mismatched payload
+      // would post one org's maintenance cost onto another org's ledger with
+      // service-role privileges and no RLS to stop it.
+      const woRes = await supabase
         .from('work_orders')
-        .select('title, actual_cost, estimated_cost')
+        .select('title, actual_cost')
         .eq('id', work_order_id)
-        .single()
+        .eq('org_id', org_id)
+        .maybeSingle()
+
+      const wo = unwrap(woRes, {
+        site: 'inngest.work-order-completed.load-wo', orgId: org_id,
+      })
+
+      if (!wo) return { skipped: true, reason: 'work_order_not_in_org' }
 
       // Only post once the real cost is known — estimated_cost is a placeholder
       // and would be permanently locked in by the ignoreDuplicates upsert below.
       // logActualCost() posts/corrects the expense once actual_cost is logged.
-      const cost = wo?.actual_cost ?? null
+      const cost = wo.actual_cost ?? null
       if (!cost || cost <= 0) return { skipped: true }
 
-      const { data: txn } = await supabase.from('owner_transactions').upsert({
+      const { data: txn, error: txnError } = await supabase.from('owner_transactions').upsert({
         property_id,
         org_id,
         work_order_id,
@@ -321,6 +360,18 @@ export const handleWorkOrderCompleted = inngest.createFunction(
         visible_to_owner:     false,
       }, { onConflict: 'source_reference_id,source', ignoreDuplicates: true }).select('id').maybeSingle()
 
+      // Throw so Inngest retries. Discarded, this error was indistinguishable
+      // from the dedup case below — `ignoreDuplicates` legitimately returns no
+      // row when the expense already exists — so a genuinely FAILED insert took
+      // the same path as a successful no-op and the step still returned
+      // `{ posted: cost }`. A lost expense, reported as posted.
+      if (txnError) {
+        throw new Error(
+          `Failed to post work order expense for ${work_order_id}: ${txnError.message}`
+        )
+      }
+
+      // txn is null on a real dedup hit — expected, not an error.
       if (txn) {
         await logAuditEvent({
           orgId:      org_id,
@@ -464,12 +515,19 @@ export const handleWorkOrderQuoteRequested = inngest.createFunction(
   },
   { event: 'work-order/quote-requested' as const },
   async ({ event, step, logger }) => {
-    const { work_order_id, quote_request_id } = event.data
+    const { work_order_id, quote_request_id, org_id } = event.data
 
     await step.run('send-vendor-quote-request', async () => {
       const supabase = createServiceClient({ system: 'inngest:work-order-events' })
 
-      const { data: qr } = await supabase
+      // Org-scoped. This is the read in this file with the worst failure
+      // mode if the id is ever wrong: it hands the joined property's name,
+      // address, city, state and zip to an EXTERNAL vendor by email. Reading
+      // by quote_request_id alone under the service role, with no RLS, meant
+      // nothing but the id's correctness stood between one tenant's property
+      // address and another tenant's vendor. org_id was in the event payload
+      // the whole time and simply was not destructured.
+      const qrRes = await supabase
         .from('quote_requests')
         .select(`
           id, quote_token, status,
@@ -481,7 +539,12 @@ export const handleWorkOrderQuoteRequested = inngest.createFunction(
           vendors (name, email)
         `)
         .eq('id', quote_request_id)
-        .single()
+        .eq('org_id', org_id)
+        .maybeSingle()
+
+      const qr = unwrap(qrRes, {
+        site: 'inngest.work-order-quote-requested.load-quote-request', orgId: org_id,
+      })
 
       if (!qr?.quote_token) return
 

@@ -100,6 +100,13 @@ export const handleBookingConfirmed = inngest.createFunction(
         {
           property_id,
           org_id,
+          // Set, matching handleBookingDetected's upsert one function below —
+          // its absence here was drift, not design. It left 12 of production's
+          // 29 booking-revenue rows with a null FK to the booking they came
+          // from, which the owners table read as "manually entered" and
+          // offered a Delete button for. (That guard is now source-based, so
+          // this is referential integrity rather than the fix.)
+          booking_id,
           source:               txnSource,
           source_reference_id:  booking_id,
           transaction_type:     'revenue',

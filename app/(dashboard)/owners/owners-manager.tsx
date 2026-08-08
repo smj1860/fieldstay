@@ -49,6 +49,20 @@ interface Owner {
   owner_portal_tokens: PortalToken | PortalToken[] | null
 }
 
+/**
+ * Only a manually created transaction may be deleted. Every other `source` is
+ * auto-posted by an Inngest handler whose event fires exactly once, so a
+ * deleted row never comes back — it just leaves the owner's P&L permanently
+ * short. createOwnerTransaction writes 'manual'; a NULL source is treated as
+ * deletable so a legacy row can still be cleaned up.
+ *
+ * deleteOwnerTransaction applies the identical predicate inside its DELETE —
+ * this is presentation only.
+ */
+function isManualTransaction(txn: { source: string | null }): boolean {
+  return txn.source === null || txn.source === 'manual'
+}
+
 interface Transaction {
   id: string
   property_id: string
@@ -492,7 +506,15 @@ function TransactionPanel({
                         <VisibilityToggle txn={txn} />
                       </td>
                       <td className="px-2 py-2">
-                        {!txn.work_order_id && !txn.booking_id && (
+                        {/* `source` decides this, not the FK columns. Gating on
+                            `!work_order_id && !booking_id` asked a different
+                            question and got it wrong for 33 of 50 live rows —
+                            every cleaning fee and cancellation carries neither
+                            FK, and so did 12 booking-revenue rows. All were
+                            auto-posted and none of them re-post if deleted.
+                            deleteOwnerTransaction enforces the same rule
+                            server-side; this only hides the button. */}
+                        {isManualTransaction(txn) && (
                           <Button
                             variant="ghost"
                             onClick={() => handleDelete(txn.id)}

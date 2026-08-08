@@ -139,9 +139,24 @@ const BASELINE: Record<string, number> = {
 
   'lib/guidebook/sync.ts': 4,
   'lib/inngest/functions/auto-assign-vendor.ts': 2,
-  'lib/inngest/functions/build-shopping-cart.ts': 2,
+  // 2 -> 0 (entry deleted). The Kroger connection read was the costly one:
+  // discarded, a failure made `connection` null, which the caller reads as
+  // "no store configured" — so it told a PM whose store IS connected to go
+  // connect it, and wrote the kroger_store_needed flag to keep saying so.
   'lib/inngest/functions/checklist-broadcast.ts': 4,
-  'lib/inngest/functions/cron/daily-wrapup.ts': 13,
+  // 13 -> 0 (entry deleted). Every read in the per-org digest now unwraps.
+  // Discarded, each failure produced null, `?? []` made it an empty section,
+  // and the digest went out silently short — with no other surface for some of
+  // it (handleTurnoverCreated defers unassigned-turnover warnings here by
+  // design), and `nothing_to_report` if enough failed at once, so a total
+  // outage rendered as a quiet day.
+  //
+  // The diffed sections were worse: diffDigestSnapshot upserts
+  // `{ ids: currentIds }` unconditionally, so an empty list from a failed read
+  // overwrote the stored snapshot with [] and the next day re-announced the
+  // entire backlog as new. That is the exact defect diffDigestSnapshot's own
+  // comment describes — closed on the snapshot read, left open on every read
+  // feeding it.
   'lib/inngest/functions/cron/maintenance-schedules.ts': 2,
   'lib/inngest/functions/cron/work-order-ops.ts': 2,
   'lib/inngest/functions/email-trial-lifecycle.tsx': 4,
@@ -187,7 +202,11 @@ const BASELINE: Record<string, number> = {
   // 5 -> 3: the count-session and count-items reads at the top of the
   // below-par path now bind and throw their error, so a transient failure
   // gets an Inngest retry instead of reporting success with an empty restock.
-  'lib/inngest/functions/inventory-events.ts': 3,
+  // 3 -> 0 (entry deleted). The same-day-flip detection fails in ONE
+  // direction: both booking reads produced an empty array on error, which
+  // reads as "not a same-day flip", so the PO went unmarked and the immediate
+  // restock email never sent — the order waits for the end-of-day cron in the
+  // one case where waiting is wrong, with a guest arriving today or tomorrow.
   // 3 -> 1: the two hand-rolled email_unsubscribed_at reads were replaced by
   // resolveEmailAudience(), which goes through tryUnwrap and fails closed.
   // 4 -> 2: the new-property diff's `known` read and the connection reload
@@ -204,7 +223,15 @@ const BASELINE: Record<string, number> = {
   'lib/inngest/functions/ownerrez/ownerrez-reviews-sync.ts': 3,
   'lib/inngest/functions/platform-inventory-template-broadcast.ts': 4,
   'lib/inngest/functions/work-order-dispatch.ts': 3,
-  'lib/inngest/functions/work-order-events.ts': 8,
+  // 8 -> 3. The two that mattered were both on the money path: the
+  // work_orders read feeding the maintenance expense (discarded, a failed read
+  // produced cost null and the step returned `{ skipped: true }` — success, so
+  // no Inngest retry, and the expense never reached owner_transactions), and
+  // the owner_transactions upsert itself (its error was indistinguishable from
+  // the legitimate ignoreDuplicates no-op, so a failed insert still reported
+  // `{ posted: cost }`). The other three were the overdue-path reads, each of
+  // which failed toward "no alert" with nothing logged.
+  'lib/inngest/functions/work-order-events.ts': 3,
 
   'lib/integrations/providers/kroger-token.ts': 2,
   'lib/push/send-push.ts': 2,

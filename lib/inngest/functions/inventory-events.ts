@@ -6,7 +6,8 @@ import { resend, FROM } from '@/lib/resend/client'
 import { getPmEmails } from '@/lib/inngest/helpers'
 import { renderPmAlert } from '@/lib/resend/emails/pm-alert'
 import { logAuditEvent } from '@/lib/audit'
-import { throwIfAnyQueryFailed, isRealQueryError } from '@/lib/supabase/unwrap'
+import { throwIfAnyQueryFailed, isRealQueryError, unwrapList } from '@/lib/supabase/unwrap'
+import { reportError } from '@/lib/observability/report-error'
 
 // ── Purchase Order Approved ───────────────────────────────────────────────────
 
@@ -339,7 +340,7 @@ export const handleInventoryCountSubmitted = inngest.createFunction(
         return { purchaseOrderId: existing.id, alreadyExisted: false }
       }
 
-      const { data: po } = await supabase
+      const { data: po, error: poError } = await supabase
         .from('purchase_orders')
         .insert({
           property_id:          property_id,
@@ -351,6 +352,10 @@ export const handleInventoryCountSubmitted = inngest.createFunction(
         .select('id')
         .single()
 
+      // It already threw on a null row, so the retry behaviour was right — but
+      // the DB's own message was dropped, leaving 'Failed to create purchase
+      // order' as the only evidence for every possible cause.
+      if (poError) throw new Error(`Failed to create purchase order: ${poError.message}`)
       if (!po) throw new Error('Failed to create purchase order')
 
       // Both writes now THROW on failure instead of discarding their result.
@@ -369,10 +374,20 @@ export const handleInventoryCountSubmitted = inngest.createFunction(
 
     await step.run('record-first-po-milestone', async () => {
       const supabase = createServiceClient({ system: 'inngest:inventory-events' })
-      await supabase.from('org_milestones').upsert(
+      const { error } = await supabase.from('org_milestones').upsert(
         { org_id, milestone: 'first_purchase_order' },
         { onConflict: 'org_id,milestone', ignoreDuplicates: true }
       )
+
+      // Reported, not thrown: the milestone is a UI state flag, and failing
+      // the run over it would block the restock email that follows. Discarding
+      // it entirely is still wrong — nothing else ever sets this.
+      if (error) {
+        logger.error('org_milestones first_purchase_order upsert failed', { error: error.message })
+        reportError(error, {
+          site: 'inngest.inventory-events.record-first-po-milestone', orgId: org_id,
+        })
+      }
     })
 
     // ── Detect same-day flip ─────────────────────────────────────────────────
@@ -382,21 +397,35 @@ export const handleInventoryCountSubmitted = inngest.createFunction(
       const supabase  = createServiceClient({ system: 'inngest:inventory-events' })
       const todayDate = new Date().toISOString().split('T')[0]!
 
-      const { data } = await supabase
+      // Both reads unwrap, because this whole step fails in ONE direction.
+      // Discarded, either error produced an empty array, which reads as "not a
+      // same-day flip" — so the PO is not marked urgent, the immediate email
+      // below never sends, and the restock waits for the end-of-day cron. That
+      // is the one case where waiting is wrong: a guest is arriving today or
+      // tomorrow. A false negative here is silent and costs the guest a
+      // half-stocked property; throwing gets the step retried instead.
+      // .limit(1) because this only ever asks "is there one?" — the result is
+      // consumed as a boolean. It also bounds the read, which an existence
+      // check has no excuse not to be.
+      const checkoutRes = await supabase
         .from('bookings')
-        .select('id, checkout_date, checkin_date')
+        .select('id')
         .eq('property_id', property_id)
         .eq('org_id', org_id)
         .in('checkout_date', [todayDate])      // checking out today
         .eq('status', 'confirmed')
         .eq('is_block', false)
+        .limit(1)
 
-      const hasCheckoutToday = (data?.length ?? 0) > 0
-      if (!hasCheckoutToday) return false
+      const checkoutsToday = unwrapList(checkoutRes, {
+        site: 'inngest.inventory-events.same-day-flip.checkouts', orgId: org_id,
+      })
+      if (checkoutsToday.length === 0) return false
 
       // Also verify there's an incoming guest today or tomorrow
       const tomorrow = new Date(Date.now() + 86400000).toISOString().split('T')[0]!
-      const { data: incoming } = await supabase
+      // Existence check, same as above.
+      const incomingRes = await supabase
         .from('bookings')
         .select('id')
         .eq('property_id', property_id)
@@ -404,8 +433,13 @@ export const handleInventoryCountSubmitted = inngest.createFunction(
         .in('checkin_date', [todayDate, tomorrow])
         .eq('status', 'confirmed')
         .eq('is_block', false)
+        .limit(1)
 
-      return (incoming?.length ?? 0) > 0
+      const incoming = unwrapList(incomingRes, {
+        site: 'inngest.inventory-events.same-day-flip.incoming', orgId: org_id,
+      })
+
+      return incoming.length > 0
     })
 
     // ── Mark PO with same-day-flip status ────────────────────────────────────
@@ -413,10 +447,19 @@ export const handleInventoryCountSubmitted = inngest.createFunction(
     // the immediate email below; normal counts leave it for the daily cron.
     await step.run('mark-po-email-status', async () => {
       const supabase = createServiceClient({ system: 'inngest:inventory-events' })
-      await supabase
+      // Bound and org-scoped. Discarded, a failed update left is_same_day_flip
+      // false on a PO that IS a same-day flip — the flag the inventory UI and
+      // the daily aggregation both read to decide urgency — and the step still
+      // reported success.
+      const { error } = await supabase
         .from('purchase_orders')
         .update({ is_same_day_flip: isSameDayFlip })
         .eq('id', purchaseOrderId)
+        .eq('org_id', org_id)
+
+      if (error) {
+        throw new Error(`purchase_orders same-day-flip flag update failed: ${error.message}`)
+      }
     })
 
     // ── Email PM: immediate for same-day flips only ──────────────────────────
@@ -467,11 +510,19 @@ export const handleInventoryCountSubmitted = inngest.createFunction(
           }),
         }, { idempotencyKey: `po-email-immediate-${purchaseOrderId}` })
 
-        // Mark as sent so the daily cron skips it
-        await supabase
+        // Mark as sent so the daily cron skips it. Bound and org-scoped: the
+        // email has already gone out by this point, so a discarded failure
+        // here left order_email_sent false and the end-of-day cron mailed the
+        // same restock order to the PM a second time.
+        const { error: sentError } = await supabase
           .from('purchase_orders')
           .update({ order_email_sent: true })
           .eq('id', purchaseOrderId)
+          .eq('org_id', org_id)
+
+        if (sentError) {
+          throw new Error(`purchase_orders order_email_sent update failed: ${sentError.message}`)
+        }
       })
     } else {
       logger.info(`Count ${count_id}: PO queued for end-of-day aggregated email (not a same-day flip)`)

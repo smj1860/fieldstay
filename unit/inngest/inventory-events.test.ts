@@ -51,6 +51,8 @@ function makeSupabase(queued: Record<string, { data?: unknown; error?: unknown }
     // which chains .order().range() before awaiting.
     chain.order  = (...a: unknown[]) => record('order', a)
     chain.range  = (...a: unknown[]) => record('range', a)
+    // The same-day-flip booking reads are existence checks bounded by .limit(1).
+    chain.limit  = (...a: unknown[]) => record('limit', a)
 
     const resolveNext = () => {
       const idx = counters[table] ?? 0
@@ -198,6 +200,85 @@ describe('handleInventoryCountSubmitted', () => {
     ).rejects.toThrow(/quantity upsert failed/)
 
     expect(supabase.calls.some((c) => c.table === 'purchase_orders')).toBe(false)
+  })
+
+  // ── the same-day-flip detection fails in ONE direction ─────────────────
+  //
+  // Both booking reads used to be `const { data }`, so an error produced an
+  // empty array — which reads as "not a same-day flip". The PO is then not
+  // marked urgent and the immediate restock email never sends, so the order
+  // waits for the end-of-day cron. That is the one case where waiting is
+  // wrong: a guest is arriving today or tomorrow.
+
+  const belowParTables = () => ({
+    inventory_counts:      [{ data: { id: 'count_1' }, error: null }],
+    inventory_count_items: [{ data: [{ inventory_item_id: 'item_1', quantity_counted: 2 }], error: null }],
+    inventory_items: [
+      { data: [{ id: 'item_1', name: 'Toilet Paper', category: 'paper_goods', unit: 'roll', par_level: 10, low_stock_threshold_pct: 50 }], error: null },
+      { data: null, error: null },
+    ],
+    purchase_orders: [
+      { data: null, error: null },
+      { data: { id: 'po_1' }, error: null },
+      { data: null, error: null },
+      { data: null, error: null },
+    ],
+    purchase_order_items: [{ data: null, error: null }],
+    org_milestones:       [{ data: null, error: null }],
+  })
+
+  it('throws rather than silently deciding a failed booking read is "not a same-day flip"', async () => {
+    const supabase = makeSupabase({
+      ...belowParTables(),
+      bookings: [{ data: null, error: { message: 'statement timeout', code: '57014' } }],
+    })
+    ;(createServiceClient as ReturnType<typeof vi.fn>).mockReturnValue(supabase)
+
+    await expect(
+      invokeHandler(handleInventoryCountSubmitted, {
+        event: { data: { count_id: 'count_1', property_id: 'prop_1', org_id: 'org_1' } },
+        step:  runAllStep(),
+        logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
+      })
+    ).rejects.toThrow()
+  })
+
+  it('throws when the incoming-guest read fails, having already seen a checkout today', async () => {
+    const supabase = makeSupabase({
+      ...belowParTables(),
+      bookings: [
+        { data: [{ id: 'bk_1' }], error: null },                                  // checkout today
+        { data: null, error: { message: 'connection reset', code: '08006' } },    // incoming guest
+      ],
+    })
+    ;(createServiceClient as ReturnType<typeof vi.fn>).mockReturnValue(supabase)
+
+    // Reaching the second read means a checkout IS happening today — the half
+    // of the signal that makes a false negative most costly.
+    await expect(
+      invokeHandler(handleInventoryCountSubmitted, {
+        event: { data: { count_id: 'count_1', property_id: 'prop_1', org_id: 'org_1' } },
+        step:  runAllStep(),
+        logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
+      })
+    ).rejects.toThrow()
+  })
+
+  it('scopes the same-day-flip flag write to the org', async () => {
+    const supabase = makeSupabase({
+      ...belowParTables(),
+      bookings: [{ data: [], error: null }],
+    })
+    ;(createServiceClient as ReturnType<typeof vi.fn>).mockReturnValue(supabase)
+
+    await invokeHandler(handleInventoryCountSubmitted, {
+      event: { data: { count_id: 'count_1', property_id: 'prop_1', org_id: 'org_1' } },
+      step:  runAllStep(),
+      logger: { info: vi.fn(), error: vi.fn() },
+    })
+
+    const poFilters = supabase.calls.filter((c) => c.table === 'purchase_orders' && c.method === 'eq')
+    expect(poFilters.some((c) => c.args[0] === 'org_id' && c.args[1] === 'org_1')).toBe(true)
   })
 
   it('creates a purchase order for below-par items when it is not a same-day flip', async () => {

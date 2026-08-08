@@ -8,7 +8,7 @@ import { renderPmAlert } from '@/lib/resend/emails/pm-alert'
 import { logAuditEvent } from '@/lib/audit'
 import { incrementCounter } from '@/lib/observability/metrics'
 import { unwrapJoin, unwrapJoinArray } from '@/lib/utils/supabase-joins'
-import { throwIfAnyQueryFailed, isRealQueryError, unwrap } from '@/lib/supabase/unwrap'
+import { throwIfAnyQueryFailed, isRealQueryError, unwrap, unwrapCount } from '@/lib/supabase/unwrap'
 
 // Durations beyond this are treated as tracking errors (e.g. a checklist item
 // completed a day late) and excluded from the auto-assignment learning loop.
@@ -305,13 +305,22 @@ export const handleTurnoverCompleted = inngest.createFunction(
     await step.run('record-completion-milestones', async () => {
       const supabase = createServiceClient({ system: 'inngest:turnover-events' })
 
-      const { count } = await supabase
+      // Bound: `const { count }` collapsed a failed count into the same 0 as
+      // "this org has completed nothing", which pushes an empty milestone list
+      // and records nothing. Self-healing — the count only grows and this step
+      // re-runs on every completion — so the cost is a DELAYED milestone
+      // rather than a lost one, which is exactly why it could sit here
+      // unnoticed. unwrapCount throws, so the step retries instead of
+      // reporting a successful no-op.
+      const completedRes = await supabase
         .from('turnovers')
         .select('id', { count: 'exact', head: true })
         .eq('org_id', org_id)
         .eq('status', 'completed')
 
-      const n = count ?? 0
+      const n = unwrapCount(completedRes, {
+        site: 'inngest.turnover-events.record-completion-milestones', orgId: org_id,
+      })
 
       const milestones: string[] = []
       if (n >= 1)  milestones.push('first_turnover_complete')

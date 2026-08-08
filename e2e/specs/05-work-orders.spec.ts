@@ -12,7 +12,22 @@ test.describe('Work Orders / Maintenance', () => {
     ).toBeVisible()
   })
 
+  // Retry-safe by construction. This test previously left the work order it
+  // created behind, so ONE slow attempt poisoned every retry and both tests in
+  // this file: attempt 1 timed out waiting for the dialog to close, retry 1
+  // created a second row and died on a strict-mode violation with 2 matches,
+  // retry 2 made it 3. The visible failure was three duplicate work orders;
+  // the actual fault was a single transient timeout.
+  //
+  // Clearing the rows up front makes each attempt start from the same state,
+  // so a retry can actually succeed instead of inheriting the last one's mess.
   test('[E2E] create work order appears on board', async ({ page, ctx }) => {
+    await getServiceClient()
+      .from('work_orders')
+      .delete()
+      .eq('org_id', ctx.orgId)
+      .like('title', '[E2E] Fix Leaking Faucet%')
+
     await page.goto('/maintenance')
     // Dismiss before opening any dialog — see 03-bookings.spec.ts for why
     // dismissing while a dialog is open can close the dialog instead.
@@ -40,10 +55,18 @@ test.describe('Work Orders / Maintenance', () => {
     // wait for the create to complete. Wait for the dialog to close instead
     // — that's the real signal the mutation (including its await'd
     // inngest.send() call) has finished, not just that the click dispatched.
-    await expect(page.getByRole('dialog')).not.toBeVisible({ timeout: 10_000 })
+    // 30s, not 10s: createWorkOrder awaits inngest.send(), and CI sets a real
+    // INNGEST_EVENT_KEY — so this round trip includes a live HTTP call to
+    // Inngest, not a local no-op. 10s was inside the range that call can take
+    // on a slow runner, which is what produced the timeout above.
+    await expect(page.getByRole('dialog')).not.toBeVisible({ timeout: 30_000 })
 
     try {
-      await expect(page.getByText('[E2E] Fix Leaking Faucet')).toBeVisible({ timeout: 8_000 })
+      // .first(): the board legitimately shows one card per matching work
+      // order, so a bare getByText is a strict-mode violation the moment more
+      // than one exists — which is a worse failure than the thing it is
+      // checking for, because it reports duplicates rather than absence.
+      await expect(page.getByText('[E2E] Fix Leaking Faucet').first()).toBeVisible({ timeout: 8_000 })
     } catch (uiErr) {
       // The dialog closing proves createWorkOrder returned success — but
       // this assertion has failed repeatedly in CI with no server-side
@@ -69,7 +92,9 @@ test.describe('Work Orders / Maintenance', () => {
 
   test('[E2E] work order detail page opens', async ({ page }) => {
     await page.goto('/maintenance')
-    const wo = page.getByText('[E2E] Fix Leaking Faucet')
+    // .first() for the same reason as the create test above — isVisible()
+    // throws outright on multiple matches, so the `if` never even got to run.
+    const wo = page.getByText('[E2E] Fix Leaking Faucet').first()
     if (await wo.isVisible()) {
       await wo.click()
       await expect(
