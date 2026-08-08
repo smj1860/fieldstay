@@ -7,6 +7,7 @@ import { logAuditEvent } from '@/lib/audit'
 import { reportError } from '@/lib/observability/report-error'
 import { sendOwnerPortalEmail } from '@/lib/resend/client'
 import { unwrapJoin } from '@/lib/utils/supabase-joins'
+import { tryUnwrap } from '@/lib/supabase/unwrap'
 import type { TxnCategory } from '@/types/database'
 
 export type OwnersActionState = { error?: string; success?: boolean; token?: string }
@@ -417,11 +418,36 @@ export async function deleteOwnerTransaction(txnId: string): Promise<void> {
     // direction.
     const { supabase, membership, user } = await requireOrgRole(['admin', 'manager'])
 
+    // Only a MANUALLY created row may be deleted, and the predicate lives in
+    // the DELETE itself rather than in a read-then-delete — a separate check
+    // would be a TOCTOU window on a financial ledger.
+    //
+    // Every other source is auto-posted and fires exactly once: wo_completion
+    // on work-order/completed, booking_revenue on booking/confirmed,
+    // cleaning_fee on turnover/completed. None of them re-post, because each
+    // upsert is keyed on (source_reference_id, source) and its event has
+    // already been consumed. So deleting one does not "remove a duplicate" —
+    // it permanently understates that property's P&L with nothing to restore
+    // it from.
+    //
+    // The UI's Delete button was gated on `!work_order_id && !booking_id`,
+    // which is not the same question. Measured against production: 33 of 50
+    // rows carried neither FK yet were all auto-posted — every cleaning fee,
+    // every cancellation, and 12 booking-revenue rows whose poster simply
+    // never set booking_id. There were ZERO manual rows, so every Delete
+    // button on that table was on a row that should not have had one. `source`
+    // is the reliable discriminator (createOwnerTransaction writes 'manual');
+    // the FK columns were a proxy for it that does not hold.
+    //
+    // NULL source is treated as deletable: no such row exists today, and
+    // stranding a hypothetical legacy row with no way to remove it is the
+    // worse failure.
     const { data, error } = await supabase
       .from('owner_transactions')
       .delete()
       .eq('id', txnId)
       .eq('org_id', membership.org_id)
+      .or('source.eq.manual,source.is.null')
       .select('id')
 
     // The error was previously discarded entirely, so a failed delete was
@@ -433,6 +459,34 @@ export async function deleteOwnerTransaction(txnId: string): Promise<void> {
     }
 
     if (!data || data.length === 0) {
+      // Zero rows means either "no such transaction in this org" or "it exists
+      // but is auto-posted" — tell the caller which, since the second is a
+      // refusal rather than a miss and the two need different responses.
+      const existingRes = await supabase
+        .from('owner_transactions')
+        .select('source')
+        .eq('id', txnId)
+        .eq('org_id', membership.org_id)
+        .maybeSingle()
+
+      const existingOut = tryUnwrap(existingRes, {
+        site:  'serverAction.owners.deleteOwnerTransaction.classify',
+        orgId: membership.org_id,
+      })
+
+      // This read only picks which message to show, so its failure must not
+      // masquerade as either answer — "not found" would be a lie, and
+      // "auto-posted" would be a guess.
+      if (!existingOut.ok) {
+        throw new Error('Could not delete the transaction. Please try again.')
+      }
+
+      if (existingOut.data) {
+        throw new Error(
+          'That transaction was posted automatically and can\'t be deleted. ' +
+          'Hide it from the owner instead.'
+        )
+      }
       throw new Error('That transaction could not be found.')
     }
 
