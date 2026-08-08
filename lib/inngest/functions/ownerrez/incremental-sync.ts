@@ -52,7 +52,8 @@ import { NonRetriableError }            from 'inngest'
 import type { GetStepTools }            from 'inngest'
 import { createServiceClient }          from '@/lib/supabase/server'
 import { fetchTurnoverCreatedEvents } from '@/lib/inngest/turnover-created-events'
-import { OwnerRezApiClient, getRedis }  from '@/lib/integrations/providers/ownerrez-api'
+import { OwnerRezApiClient }  from '@/lib/integrations/providers/ownerrez-api'
+import { getRedis, upstashConfigured } from '@/lib/redis'
 import { RateLimitError, TokenRevokedError, translateSyncError } from '@/lib/integrations/types'
 import { logAuditEvent }                from '@/lib/audit'
 import { reportError }                  from '@/lib/observability/report-error'
@@ -119,6 +120,16 @@ async function isCircuitOpen(
   connectionId: string,
 ): Promise<boolean> {
   const local = localCircuitFailures.get(connectionId) ?? 0
+
+  // "Upstash is not configured here" is not the same event as "Redis is down",
+  // and only the second one deserves the catch below. Upstash's free plan is
+  // production-only, so every preview deploy hits this — and calling anyway
+  // cost a doomed fetch plus one Sentry report per connection per tick, which
+  // is where CUSHION-D/E/H's 590 events came from. The degraded behaviour is
+  // identical either way (the in-memory counter is the documented fallback);
+  // only the noise differs.
+  if (!upstashConfigured()) return local >= CIRCUIT_THRESHOLD
+
   try {
     const failCount = await getRedis().get<number>(circuitKey(connectionId)) ?? 0
     return failCount >= CIRCUIT_THRESHOLD
@@ -142,6 +153,11 @@ async function recordCircuitFailure(
 ): Promise<void> {
   const local = (localCircuitFailures.get(connectionId) ?? 0) + 1
   localCircuitFailures.set(connectionId, local)
+
+  // The in-memory counter above is the protection when there is no shared one;
+  // it has already been advanced, so there is nothing left to do here.
+  if (!upstashConfigured()) return
+
   try {
     const redis    = getRedis()
     const newCount = await redis.incr(circuitKey(connectionId))
@@ -165,6 +181,9 @@ async function resetCircuitBreaker(
   connectionId: string,
 ): Promise<void> {
   localCircuitFailures.delete(connectionId)
+
+  if (!upstashConfigured()) return
+
   try {
     await getRedis().del(circuitKey(connectionId))
   } catch (err) {

@@ -1,4 +1,4 @@
-import { Redis } from '@upstash/redis'
+import { getRedis, upstashConfigured } from '@/lib/redis'
 import { reportError } from '@/lib/observability/report-error'
 import type { GuidebookOfferType } from '@/types/database'
 import { formatOffer } from '@/lib/guidebook/offer'
@@ -33,18 +33,7 @@ export type SmsCategory = 'transactional' | 'nudge'
 
 const DEFAULT_DAILY_NUDGE_BUDGET = 500
 
-// Same env names as lib/rate-limit.ts / lib/weather/tomorrow.ts — this
-// project doesn't use the standard UPSTASH_REDIS_REST_* names.
-let _redis: Redis | null = null
-function getRedis(): Redis {
-  if (!_redis) {
-    _redis = new Redis({
-      url:   process.env.upstash_fieldstay_KV_REST_API_URL!,
-      token: process.env.upstash_fieldstay_KV_REST_API_TOKEN!,
-    })
-  }
-  return _redis
-}
+// Client comes from lib/redis.ts — one construction site for the whole app.
 
 function dailyNudgeBudget(): number {
   const raw = Number(process.env.SMS_DAILY_NUDGE_BUDGET)
@@ -64,6 +53,13 @@ function nudgeBudgetKey(): string {
  * (fail CLOSED), because a cache outage must never remove the spend ceiling.
  */
 async function claimNudgeBudgetSlot(): Promise<boolean> {
+  // No Upstash in this environment means there is no shared ceiling to claim
+  // against. Refusing the slot keeps the guarantee the caller depends on — the
+  // budget must not silently become unlimited — and matches where the
+  // fail-CLOSED catch in the caller already lands on a Redis outage. Skipping
+  // the call also avoids one doomed fetch per nudge.
+  if (!upstashConfigured()) return false
+
   const key   = nudgeBudgetKey()
   const redis = getRedis()
 
@@ -91,6 +87,10 @@ async function claimNudgeBudgetSlot(): Promise<boolean> {
  * Never increases the number of messages that can go out.
  */
 async function releaseNudgeBudgetSlot(): Promise<void> {
+  // Nothing was claimed when Upstash is unconfigured (claimNudgeBudgetSlot
+  // returns false without incrementing), so there is nothing to give back.
+  if (!upstashConfigured()) return
+
   try {
     await getRedis().decr(nudgeBudgetKey())
   } catch (err) {
