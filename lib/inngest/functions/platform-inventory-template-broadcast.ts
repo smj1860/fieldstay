@@ -16,6 +16,7 @@ import { inngest }             from '@/lib/inngest/client'
 import { fetchAllRows } from '@/lib/inngest/paginate'
 import { createServiceClient } from '@/lib/supabase/server'
 import { logAuditEvents }      from '@/lib/audit'
+import { unwrap, unwrapList }  from '@/lib/supabase/unwrap'
 
 interface MasterItem {
   catalog_item_id: string
@@ -39,12 +40,15 @@ export const broadcastPlatformInventoryTemplate = inngest.createFunction(
 
     const template = await step.run('fetch-template', async () => {
       const supabase = createServiceClient({ system: 'inngest:platform-inventory-template-broadcast' })
-      const { data } = await supabase
+      // Unwrapped, not `const { data }`: a read failure here used to return
+      // null, which the caller below reports as `template_not_found` — a
+      // success-shaped result that cancels the entire broadcast.
+      const res = await supabase
         .from('platform_inventory_templates')
         .select('id, name, description')
         .eq('id', templateId)
         .maybeSingle()
-      return data
+      return unwrap(res, { site: 'inngest.platform-inventory-broadcast.fetch-template' })
     })
 
     if (!template) {
@@ -119,15 +123,17 @@ export const broadcastPlatformInventoryTemplate = inngest.createFunction(
         )
         return data.map((o) => o.id)
       }
-      const pageSize = 1000
-      const all: string[] = []
-      for (let from = 0; ; from += pageSize) {
-        const { data } = await supabase.from('organizations').select('id').range(from, from + pageSize - 1)
-        if (!data?.length) break
-        all.push(...data.map((o) => o.id))
-        if (data.length < pageSize) break
-      }
-      return all
+      // Was a hand-rolled pagination loop with `const { data }` and
+      // `if (!data?.length) break` — so a read error on page 2 was
+      // indistinguishable from "no more orgs" and silently broadcast to a
+      // PREFIX of the platform while reporting total_orgs as complete. The
+      // targeted branch six lines up already used fetchAllRows, which drains
+      // .range() pages and throws on a page error; both branches now do.
+      const rows = await fetchAllRows<{ id: string }>(
+        (from, to) => supabase.from('organizations').select('id').order('id').range(from, to),
+        { label: 'platform-inventory-broadcast.allOrgs' },
+      )
+      return rows.map((o) => o.id)
     })
 
     let syncedOrgs = 0
@@ -137,12 +143,16 @@ export const broadcastPlatformInventoryTemplate = inngest.createFunction(
       const itemsAdded = await step.run(`sync-org-${orgId}`, async () => {
         const supabase = createServiceClient({ system: 'inngest:platform-inventory-template-broadcast' })
 
-        const { data: existingTemplate } = await supabase
+        const existingTemplateRes = await supabase
           .from('inventory_templates')
           .select('id')
           .eq('org_id', orgId)
           .eq('source_platform_template_id', templateId)
           .maybeSingle()
+
+        const existingTemplate = unwrap(existingTemplateRes, {
+          site: 'inngest.platform-inventory-broadcast.existing-template', orgId,
+        })
 
         let orgTemplateId = existingTemplate?.id
         if (!orgTemplateId) {
@@ -156,18 +166,35 @@ export const broadcastPlatformInventoryTemplate = inngest.createFunction(
             })
             .select('id')
             .single()
+          // Was `logger.error(...); return 0`. A caught-and-returned error
+          // inside step.run marks the step COMPLETE and memoizes the 0, so
+          // Inngest never retries it — `retries: 3` on this function was inert
+          // for both write paths — and the org silently drops out of a
+          // broadcast whose final return still reports a healthy synced count.
+          // Throwing re-runs only this org's step; the orgs already synced in
+          // this run replay from memoized state.
           if (createError || !created) {
-            logger.error(`[platform-inventory-template-broadcast] failed to create org template for ${orgId}`, createError)
-            return 0
+            throw new Error(
+              `[platform-inventory-template-broadcast] failed to create org template for ${orgId}: ${createError?.message ?? 'no row returned'}`
+            )
           }
           orgTemplateId = created.id
         }
 
-        const { data: existingItems } = await supabase
+        // This read IS the dedup — `toAdd` is the master list minus whatever
+        // it returns. Discarding its error produced an empty Set, i.e. "this
+        // org has nothing yet", which re-inserts the entire master list. There
+        // was no unique index behind it either, so nothing downstream could
+        // refuse the duplicates; 20260808060000 adds one, and this stops
+        // relying on it.
+        const existingItemsRes = await supabase
           .from('inventory_template_items')
           .select('catalog_item_id')
           .eq('template_id', orgTemplateId)
-        const existingCatalogItemIds = new Set((existingItems ?? []).map((i) => i.catalog_item_id))
+        const existingItems = unwrapList<{ catalog_item_id: string | null }>(existingItemsRes, {
+          site: 'inngest.platform-inventory-broadcast.existing-items', orgId,
+        })
+        const existingCatalogItemIds = new Set(existingItems.map((i) => i.catalog_item_id))
 
         const toAdd = masterItems.filter((m) => !existingCatalogItemIds.has(m.catalog_item_id))
         if (!toAdd.length) return 0
@@ -187,8 +214,9 @@ export const broadcastPlatformInventoryTemplate = inngest.createFunction(
             }))
           )
         if (insertError) {
-          logger.error(`[platform-inventory-template-broadcast] failed to insert items for org ${orgId}`, insertError)
-          return 0
+          throw new Error(
+            `[platform-inventory-template-broadcast] failed to insert items for org ${orgId}: ${insertError.message}`
+          )
         }
         return toAdd.length
       })

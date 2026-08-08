@@ -220,3 +220,115 @@ describe('broadcastPlatformInventoryTemplate', () => {
     expect(logAuditEvents).not.toHaveBeenCalled()
   })
 })
+
+// ============================================================================
+// Failure handling. Every case below used to return a success-shaped result
+// while quietly doing less than it claimed — the broadcast is deliberately
+// re-runnable (that is how new master items reach existing orgs), so each of
+// these is reachable on an ordinary run, not just an exotic one.
+// ============================================================================
+describe('broadcastPlatformInventoryTemplate — failures are not silent', () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+    vi.spyOn(console, 'error').mockImplementation(() => {})
+  })
+
+  const templateRow = { data: { id: 'tmpl_1', name: 'Standard', description: null }, error: null }
+  const masterItems = {
+    data: [{ catalog_item_id: 'cat_1', par_level: 2, preferred_brand: null, sort_order: 0 }],
+    error: null,
+  }
+  const catalogRows = {
+    data: [{ id: 'cat_1', name: 'Paper Towels', category: 'paper_goods', default_unit: 'roll' }],
+    error: null,
+  }
+
+  function run(supabase: unknown, targetOrgIds: string[] | null = ['org_1']) {
+    ;(createServiceClient as ReturnType<typeof vi.fn>).mockReturnValue(supabase)
+    return invokeHandler(broadcastPlatformInventoryTemplate, {
+      event:  { data: { platform_template_id: 'tmpl_1', target_org_ids: targetOrgIds, requested_by: 'admin_1' } },
+      step:   runAllStep(),
+      logger: noopLogger,
+    })
+  }
+
+  // The template read discarded its error, so a read failure was reported as
+  // `template_not_found` and cancelled the entire broadcast as a "success".
+  it('throws rather than reporting template_not_found when the template read errors', async () => {
+    const supabase = makeSupabase({
+      platform_inventory_templates: [{ data: null, error: { message: 'connection reset' } }],
+    })
+    await expect(run(supabase)).rejects.toThrow()
+  })
+
+  // THE dedup read: `toAdd` is the master list minus whatever it returns, so a
+  // discarded error produced an empty Set — "this org has nothing yet" — and
+  // re-inserted the entire master list. There was no unique index behind it
+  // either until 20260808060000, so nothing could refuse the duplicates.
+  it('throws instead of re-inserting the whole master list when the existing-items (dedup) read errors', async () => {
+    const supabase = makeSupabase({
+      platform_inventory_templates: [templateRow],
+      platform_inventory_template_items: [masterItems],
+      inventory_catalog: [catalogRows],
+      organizations: [{ data: [{ id: 'org_1' }], error: null }],
+      inventory_templates: [{ data: { id: 'org_tmpl_1' }, error: null }],
+      inventory_template_items: [{ data: null, error: { message: 'statement timeout', code: '57014' } }],
+    })
+
+    await expect(run(supabase)).rejects.toThrow()
+    // Critically: it must not have fallen through to an insert with an empty
+    // dedup set, which is what produced duplicates.
+    expect(supabase.calls.some((c) => c.table === 'inventory_template_items' && c.method === 'insert')).toBe(false)
+  })
+
+  // A caught-and-returned error inside step.run marks the step COMPLETE and
+  // memoizes the 0, so Inngest never retries it — `retries: 3` was inert for
+  // both write paths — and the org silently drops out of a broadcast whose
+  // return value still reports a healthy synced count.
+  it('throws (so the step retries) when the item insert fails, instead of counting the org as synced-with-0', async () => {
+    const supabase = makeSupabase({
+      platform_inventory_templates: [templateRow],
+      platform_inventory_template_items: [masterItems],
+      inventory_catalog: [catalogRows],
+      organizations: [{ data: [{ id: 'org_1' }], error: null }],
+      inventory_templates: [{ data: { id: 'org_tmpl_1' }, error: null }],
+      inventory_template_items: [
+        { data: [], error: null },                                        // dedup read: org has nothing
+        { data: null, error: { message: 'deadlock detected', code: '40P01' } },  // insert
+      ],
+    })
+
+    await expect(run(supabase)).rejects.toThrow('deadlock detected')
+    expect(logAuditEvents).not.toHaveBeenCalled()
+  })
+
+  it('throws when creating the org-side template fails', async () => {
+    const supabase = makeSupabase({
+      platform_inventory_templates: [templateRow],
+      platform_inventory_template_items: [masterItems],
+      inventory_catalog: [catalogRows],
+      organizations: [{ data: [{ id: 'org_1' }], error: null }],
+      inventory_templates: [
+        { data: null, error: null },                                       // no existing linked template
+        { data: null, error: { message: 'duplicate key value', code: '23505' } },  // create
+      ],
+    })
+
+    await expect(run(supabase)).rejects.toThrow('duplicate key value')
+  })
+
+  // The untargeted branch hand-rolled its pagination with `const { data }` and
+  // `if (!data?.length) break`, so a read error on page 2 was indistinguishable
+  // from "no more orgs": the broadcast covered a PREFIX of the platform and
+  // still reported total_orgs as if it were complete. fetchAllRows throws.
+  it('throws rather than broadcasting to a prefix of the platform when an org page errors', async () => {
+    const supabase = makeSupabase({
+      platform_inventory_templates: [templateRow],
+      platform_inventory_template_items: [masterItems],
+      inventory_catalog: [catalogRows],
+      organizations: [{ data: null, error: { message: 'connection reset' } }],
+    })
+
+    await expect(run(supabase, null)).rejects.toThrow()
+  })
+})
