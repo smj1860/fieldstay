@@ -508,4 +508,42 @@ describe('buildShoppingCart', () => {
     // Tenant scoping is inside the SECURITY DEFINER function itself.
     expect(body).toContain('i.org_id = p_org_id')
   })
+
+  // ── last_cart_build is the dashboard's only record of what happened ─────
+  //
+  // Both writers of this milestone discarded their error, so a failed write
+  // returned normally, Inngest marked the step complete and memoized it, and
+  // the PM was left looking at the PREVIOUS run's result — a stale "cart
+  // added" standing in for this run's real outcome.
+
+  it('throws when the status persist fails instead of leaving the last result on screen', async () => {
+    const supabase = makeSupabase({
+      organizations:  [{ data: { id: 'org_1', preferred_retailer: 'kroger' }, error: null }],
+      org_milestones: [{ error: { message: 'deadlock detected', code: '40P01' } }],
+    }, undefined, belowPar([]))
+    ;(createServiceClient as ReturnType<typeof vi.fn>).mockReturnValue(supabase)
+
+    await expect(invokeHandler(buildShoppingCart, baseCtx())).rejects.toThrow(/last_cart_build/)
+  })
+
+  it('does not tell a connected PM to connect a Kroger store when the connection read failed', async () => {
+    const supabase = makeSupabase({
+      organizations:           [{ data: { id: 'org_1', preferred_retailer: 'kroger' }, error: null }],
+      integration_connections: [{ data: null, error: { message: 'connection reset', code: '08006' } }],
+      org_milestones:          [{ error: null }],
+    }, undefined, belowPar([belowParInventoryItem]))
+    ;(createServiceClient as ReturnType<typeof vi.fn>).mockReturnValue(supabase)
+
+    // Discarded, this error made `connection` null, which the caller reads as
+    // "no store configured" — writing the kroger_store_needed flag and putting
+    // a persistent "connect your Kroger store" prompt on the dashboard of a PM
+    // whose store is connected and fine.
+    await expect(invokeHandler(buildShoppingCart, baseCtx())).rejects.toThrow(/kroger connection lookup failed/)
+
+    const storeNeeded = supabase.calls.find(
+      (c) => c.table === 'org_milestones' && c.method === 'upsert' &&
+        (c.args[0] as { milestone?: string })?.milestone === 'kroger_store_needed'
+    )
+    expect(storeNeeded).toBeUndefined()
+  })
 })

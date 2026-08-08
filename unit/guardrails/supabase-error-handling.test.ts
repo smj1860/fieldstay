@@ -139,7 +139,10 @@ const BASELINE: Record<string, number> = {
 
   'lib/guidebook/sync.ts': 4,
   'lib/inngest/functions/auto-assign-vendor.ts': 2,
-  'lib/inngest/functions/build-shopping-cart.ts': 2,
+  // 2 -> 0 (entry deleted). The Kroger connection read was the costly one:
+  // discarded, a failure made `connection` null, which the caller reads as
+  // "no store configured" — so it told a PM whose store IS connected to go
+  // connect it, and wrote the kroger_store_needed flag to keep saying so.
   'lib/inngest/functions/checklist-broadcast.ts': 4,
   // 13 -> 0 (entry deleted). Every read in the per-org digest now unwraps.
   // Discarded, each failure produced null, `?? []` made it an empty section,
@@ -199,7 +202,11 @@ const BASELINE: Record<string, number> = {
   // 5 -> 3: the count-session and count-items reads at the top of the
   // below-par path now bind and throw their error, so a transient failure
   // gets an Inngest retry instead of reporting success with an empty restock.
-  'lib/inngest/functions/inventory-events.ts': 3,
+  // 3 -> 0 (entry deleted). The same-day-flip detection fails in ONE
+  // direction: both booking reads produced an empty array on error, which
+  // reads as "not a same-day flip", so the PO went unmarked and the immediate
+  // restock email never sent — the order waits for the end-of-day cron in the
+  // one case where waiting is wrong, with a guest arriving today or tomorrow.
   // 3 -> 1: the two hand-rolled email_unsubscribed_at reads were replaced by
   // resolveEmailAudience(), which goes through tryUnwrap and fails closed.
   // 4 -> 2: the new-property diff's `known` read and the connection reload

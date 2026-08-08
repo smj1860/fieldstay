@@ -90,13 +90,22 @@ export const buildShoppingCart = inngest.createFunction(
   async ({ event, step }) => {
     const { org_id, requested_by, property_ids, modality } = event.data
 
+    // last_cart_build is the ONLY thing the dashboard reads to say what the
+    // last Build Cart actually did. Discarded, a failed write left the PM
+    // looking at the PREVIOUS run's result — so "nothing below par" or
+    // "connect a Kroger store" silently presented as whatever happened last
+    // time, including a successful cart. Throwing gets the step retried.
     const persistCartStatus = async (status: string, extra: Record<string, unknown> = {}) => {
       const supabase = createServiceClient({ system: 'inngest:build-shopping-cart' })
-      await supabase.from('org_milestones').upsert({
+      const { error } = await supabase.from('org_milestones').upsert({
         org_id,
         milestone: 'last_cart_build',
         value: { built_at: new Date().toISOString(), requested_by, status, ...extra },
       }, { onConflict: 'org_id,milestone' })
+
+      if (error) {
+        throw new Error(`last_cart_build (${status}) persist failed: ${error.message}`)
+      }
     }
 
     // ── Step 1: Load org settings + below-par items + Kroger connection ──
@@ -111,7 +120,11 @@ export const buildShoppingCart = inngest.createFunction(
       // error, so a 50-property org (50 x 115 catalog items = 5,750 rows) had
       // every below-par item past the cap silently dropped from the cart, with
       // no signal to the PM. Now only below-par rows cross the wire at all.
-      const [{ data: org }, { data: items, error: itemsError }, { data: conn }] = await Promise.all([
+      const [
+        { data: org, error: orgError },
+        { data: items, error: itemsError },
+        { data: conn, error: connError },
+      ] = await Promise.all([
         supabase
           .from('organizations')
           .select('id, preferred_retailer')
@@ -135,6 +148,15 @@ export const buildShoppingCart = inngest.createFunction(
           .maybeSingle(),
       ])
 
+      // The connection error is the consequential one. Discarded, a failed
+      // read made `connection` null, which the caller reads as "no Kroger
+      // store configured" — so it wrote the kroger_store_needed milestone and
+      // told a PM whose store IS connected to go connect it, with a persistent
+      // action prompt on the dashboard to match.
+      if (connError) throw new Error(`kroger connection lookup failed: ${connError.message}`)
+      // `Org not found` was reported for a failed read too, which is a
+      // different and much more alarming thing to read in a log.
+      if (orgError) throw new Error(`Org ${org_id} lookup failed: ${orgError.message}`)
       if (!org) throw new Error(`Org ${org_id} not found`)
       if (itemsError) throw new Error(`inventory_below_par_items failed: ${itemsError.message}`)
 
@@ -160,10 +182,20 @@ export const buildShoppingCart = inngest.createFunction(
     const supabase = createServiceClient({ system: 'inngest:build-shopping-cart' })
 
     if (!connection || !krogerLocationId) {
-      await supabase.from('org_milestones').upsert({
+      const { error: storeNeededError } = await supabase.from('org_milestones').upsert({
         org_id,
         milestone: 'kroger_store_needed',
       }, { onConflict: 'org_id,milestone', ignoreDuplicates: true })
+
+      // Reported: this flag is the only thing that surfaces "connect a store"
+      // in the UI, so losing it silently means the PM is never told why their
+      // carts stopped building.
+      if (storeNeededError) {
+        console.error('[build-shopping-cart] kroger_store_needed upsert failed:', storeNeededError.message)
+        reportError(storeNeededError, {
+          site: 'inngest.build-shopping-cart.kroger_store_needed', orgId: org_id,
+        })
+      }
       await persistCartStatus('no_store_configured')
       return { status: 'no_store_configured', action_required: 'connect_kroger_store' }
     }
@@ -193,12 +225,24 @@ export const buildShoppingCart = inngest.createFunction(
           // degrading to list-only with no visible error state until the
           // next proactive-refresh cron tick.
           const supabase = createServiceClient({ system: 'inngest:build-shopping-cart' })
-          await supabase
+          const { error: revokeError } = await supabase
             .from('integration_connections')
             .update({ status: 'revoked' })
             .eq('user_id', connection.user_id)
             .eq('provider_id', 'kroger')
             .eq('org_id', org_id)
+
+          // Reported rather than thrown — the list-only fallback below is
+          // still the right outcome for this run. But discarding it left the
+          // connection marked active after its refresh token was revoked, so
+          // the PM never saw the reconnect prompt and every later cart build
+          // degraded to list-only for the same invisible reason.
+          if (revokeError) {
+            console.error('[build-shopping-cart] failed to mark Kroger connection revoked:', revokeError.message)
+            reportError(revokeError, {
+              site: 'inngest.build-shopping-cart.mark_connection_revoked', orgId: org_id,
+            })
+          }
         }
         console.error('Kroger token refresh failed — falling back to list-only:', err instanceof Error ? err.message : err)
         reportError(err, { site: 'inngest.build-shopping-cart.kroger_token_refresh', orgId: org_id })
@@ -468,7 +512,14 @@ ${JSON.stringify(itemsForNormalization, null, 2)}`,
     // ── Step 7: Persist result for dashboard UI ─────────────
     await step.run('persist-result', async () => {
       const supabase = createServiceClient({ system: 'inngest:build-shopping-cart' })
-      await supabase.from('org_milestones').upsert({
+      // Same rule as persistCartStatus above, and this is the costly one: by
+      // here the Kroger cart addition has already happened and is
+      // irreversible. Discarded, a failed write returned normally, Inngest
+      // marked the step complete and memoized it, so it never retried — the PM
+      // got the "your cart is ready" email while the dashboard showed the
+      // previous build. Nor could they rebuild to repair it: the
+      // duplicate-spend claim owns this fingerprint for the rest of the day.
+      const { error: persistError } = await supabase.from('org_milestones').upsert({
         org_id,
         milestone: 'last_cart_build',
         value: {
@@ -485,6 +536,10 @@ ${JSON.stringify(itemsForNormalization, null, 2)}`,
         },
       }, { onConflict: 'org_id,milestone' })
 
+      if (persistError) {
+        throw new Error(`last_cart_build persist failed: ${persistError.message}`)
+      }
+
       if (cartResult.unmatched_items.length > 0) {
         console.warn(
           `[build-shopping-cart] ${cartResult.unmatched_items.length} unmatched items for org ${org_id}:`,
@@ -496,7 +551,19 @@ ${JSON.stringify(itemsForNormalization, null, 2)}`,
     // ── Step 8: Email PM with cart summary ───────────────────────────────────
     await step.run('send-cart-ready-email', async () => {
       const admin = createServiceClient({ system: 'inngest:build-shopping-cart' })
-      const { data: userRecord } = await admin.auth.admin.getUserById(requested_by)
+      const { data: userRecord, error: userError } = await admin.auth.admin.getUserById(requested_by)
+
+      // Reported: a failed lookup and "this user has no email" both ended at
+      // the same silent return, so the one notification that a cart was built
+      // — after real money was committed to it — could vanish with no trace.
+      if (userError) {
+        console.error('[build-shopping-cart] PM lookup failed for the cart-ready notification', userError.message)
+        reportError(userError, {
+          site: 'inngest.build-shopping-cart.cart_ready_email_recipient', orgId: org_id,
+        })
+        return
+      }
+
       const pmEmail = userRecord?.user?.email
       if (!pmEmail || !userRecord.user) return
 

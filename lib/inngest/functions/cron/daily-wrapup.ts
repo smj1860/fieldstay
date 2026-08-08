@@ -141,18 +141,29 @@ export const dailyWrapUpOrg = inngest.createFunction(
       })
 
       // ── 1. Turnover schedule for tomorrow ──────────────────────────────
-      const turnoversTomorrowRes = await supabase
-        .from('turnovers')
-        .select(`
-          id, checkout_datetime, status,
-          properties ( name ),
-          turnover_assignments ( crew_members ( name ) )
-        `)
-        .eq('org_id', orgId)
-        .gte('checkout_datetime', tomorrowStart.toISOString())
-        .lt('checkout_datetime', tomorrowEnd.toISOString())
-        .neq('status', 'cancelled')
-      const turnoversTomorrow = unwrapList(turnoversTomorrowRes, digestCtx('turnoversTomorrow'))
+      // Paginated like every other read in this step. A one-day window keeps
+      // this small in practice, but "small in practice" is exactly the
+      // assumption max_rows truncation punishes silently.
+      const turnoversTomorrow = await fetchAllRows<{
+        id: string; checkout_datetime: string; status: string
+        properties: { name: string }
+        turnover_assignments: { crew_members: { name: string } }[]
+      }>(
+        (from, to) => supabase
+          .from('turnovers')
+          .select(`
+            id, checkout_datetime, status,
+            properties ( name ),
+            turnover_assignments ( crew_members ( name ) )
+          `)
+          .eq('org_id', orgId)
+          .gte('checkout_datetime', tomorrowStart.toISOString())
+          .lt('checkout_datetime', tomorrowEnd.toISOString())
+          .neq('status', 'cancelled')
+          .order('id', { ascending: true })
+          .range(from, to),
+        { label: `turnovers-tomorrow(daily-wrapup)[org=${orgId}]` },
+      )
 
 
       const tomorrowSection = (turnoversTomorrow ?? []).map((t) => {
@@ -167,9 +178,19 @@ export const dailyWrapUpOrg = inngest.createFunction(
       })
 
       // ── 2. Mandatory checklist items still open (org-wide, diffed) ─────
-      const activePropertiesRes = await supabase
-        .from('properties').select('id, name').eq('org_id', orgId).eq('is_active', true)
-      const activeProperties = unwrapList(activePropertiesRes, digestCtx('activeProperties'))
+      // Paginated: this drives the asset-discovery checklist for EVERY active
+      // property, and its ids then size the property_assets read below, so a
+      // silent max_rows truncation here shrinks two sections at once.
+      const activeProperties = await fetchAllRows<{ id: string; name: string }>(
+        (from, to) => supabase
+          .from('properties')
+          .select('id, name')
+          .eq('org_id', orgId)
+          .eq('is_active', true)
+          .order('id', { ascending: true })
+          .range(from, to),
+        { label: `properties(daily-wrapup)[org=${orgId}]` },
+      )
 
 
       const propertyIds = (activeProperties ?? []).map((p) => p.id)
@@ -182,13 +203,17 @@ export const dailyWrapUpOrg = inngest.createFunction(
         photo_url: string | null; is_na: boolean | null
       }>>()
       if (propertyIds.length) {
-        const allAssetsRes = await supabase
-          .from('property_assets')
-          .select('property_id, asset_type, make, model, photo_url, is_na')
-          .in('property_id', propertyIds)
-          .eq('org_id', orgId)
-          .eq('is_active', true)
-        const allAssets = unwrapList(allAssetsRes, digestCtx('allAssets'))
+        const allAssets = await fetchAllRows<{ property_id: string; asset_type: string; make: string | null; model: string | null; photo_url: string | null; is_na: boolean | null }>(
+          (from, to) => supabase
+            .from('property_assets')
+            .select('property_id, asset_type, make, model, photo_url, is_na')
+            .in('property_id', propertyIds)
+            .eq('org_id', orgId)
+            .eq('is_active', true)
+            .order('id', { ascending: true })
+            .range(from, to),
+          { label: `property-assets(daily-wrapup)[org=${orgId}]` },
+        )
 
 
         for (const a of allAssets ?? []) {
@@ -248,13 +273,23 @@ export const dailyWrapUpOrg = inngest.createFunction(
       }
 
       // ── 4. Expiring compliance docs (diffed) ───────────────────────────
-      const expiringDocsRes = await supabase
-        .from('vendor_compliance_documents')
-        .select('id, document_type, expiry_date, vendors ( name )')
-        .eq('org_id', orgId).eq('is_active', true)
-        .not('expiry_date', 'is', null)
-        .lte('expiry_date', new Date(now.getTime() + 30 * MS_PER_DAY).toISOString())
-      const expiringDocs = unwrapList(expiringDocsRes, digestCtx('expiringDocs'))
+      // Paginated, and this one feeds diffDigestSnapshot — a truncated list
+      // would write a SHORT snapshot, so the docs past the cap would be
+      // announced as brand new the following day.
+      const expiringDocs = await fetchAllRows<{
+        id: string; document_type: string; expiry_date: string | null
+        vendors: { name: string }
+      }>(
+        (from, to) => supabase
+          .from('vendor_compliance_documents')
+          .select('id, document_type, expiry_date, vendors ( name )')
+          .eq('org_id', orgId).eq('is_active', true)
+          .not('expiry_date', 'is', null)
+          .lte('expiry_date', new Date(now.getTime() + 30 * MS_PER_DAY).toISOString())
+          .order('id', { ascending: true })
+          .range(from, to),
+        { label: `compliance-docs(daily-wrapup)[org=${orgId}]` },
+      )
 
 
       const complianceDiff = await diffDigestSnapshot(
@@ -272,22 +307,35 @@ export const dailyWrapUpOrg = inngest.createFunction(
       })
 
       // ── 5. Daily maintenance schedule + unassigned work orders only ────
-      const dueSchedulesRes = await supabase
-        .from('maintenance_schedules')
-        .select('id, name, next_due_date, properties ( name )')
-        .eq('org_id', orgId).eq('is_active', true)
-        .lte('next_due_date', now.toISOString().split('T')[0]!)
-      const dueSchedules = unwrapList(dueSchedulesRes, digestCtx('dueSchedules'))
+      // Paginated for the same reason: schedules are per asset per property,
+      // so this grows multiplicatively with the portfolio rather than linearly.
+      const dueSchedules = await fetchAllRows<{
+        id: string; name: string; next_due_date: string | null
+        properties: { name: string }
+      }>(
+        (from, to) => supabase
+          .from('maintenance_schedules')
+          .select('id, name, next_due_date, properties ( name )')
+          .eq('org_id', orgId).eq('is_active', true)
+          .lte('next_due_date', now.toISOString().split('T')[0]!)
+          .order('id', { ascending: true })
+          .range(from, to),
+        { label: `maintenance_schedules(daily-wrapup)[org=${orgId}]` },
+      )
 
 
-      const unassignedWOsRes = await supabase
-        .from('work_orders')
-        .select('id, wo_number, title, suggested_vendor_ids, suggestion_reasoning, properties ( name ), vendors ( name )')
-        .eq('org_id', orgId)
-        .is('vendor_id', null)
-        .in('status', ['pending', 'quote_requested'])
-        .gte('created_at', since24h)
-      const unassignedWOs = unwrapList(unassignedWOsRes, digestCtx('unassignedWOs'))
+      const unassignedWOs = await fetchAllRows<{ id: string; wo_number: string | null; title: string; suggested_vendor_ids: string[] | null; suggestion_reasoning: string | null; properties: { name: string }; vendors: { name: string } | null }>(
+        (from, to) => supabase
+          .from('work_orders')
+          .select('id, wo_number, title, suggested_vendor_ids, suggestion_reasoning, properties ( name ), vendors ( name )')
+          .eq('org_id', orgId)
+          .is('vendor_id', null)
+          .in('status', ['pending', 'quote_requested'])
+          .gte('created_at', since24h)
+          .order('id', { ascending: true })
+          .range(from, to),
+        { label: `unassigned-wos(daily-wrapup)[org=${orgId}]` },
+      )
 
 
       const maintenanceSection = {
@@ -307,13 +355,17 @@ export const dailyWrapUpOrg = inngest.createFunction(
       }
 
       // ── 6. Escalating work orders (last 24h) ───────────────────────────
-      const escalationsRes = await supabase
-        .from('work_order_updates')
-        .select('work_order_id, notes, work_orders ( wo_number, title, properties ( name ) )')
-        .eq('org_id', orgId)
-        .like('notes', 'Priority auto-escalated to Urgent%')
-        .gte('created_at', since24h)
-      const escalations = unwrapList(escalationsRes, digestCtx('escalations'))
+      const escalations = await fetchAllRows<{ work_order_id: string; notes: string | null; work_orders: { wo_number: string | null; title: string; properties: { name: string } } }>(
+        (from, to) => supabase
+          .from('work_order_updates')
+          .select('work_order_id, notes, work_orders ( wo_number, title, properties ( name ) )')
+          .eq('org_id', orgId)
+          .like('notes', 'Priority auto-escalated to Urgent%')
+          .gte('created_at', since24h)
+          .order('id', { ascending: true })
+          .range(from, to),
+        { label: `escalations(daily-wrapup)[org=${orgId}]` },
+      )
 
 
       const escalationSection = (escalations ?? []).map((e) => {
@@ -328,15 +380,19 @@ export const dailyWrapUpOrg = inngest.createFunction(
       // (proximity, cost estimates). Extend this if you want that back.
       const vacancySection: Array<{ propertyName: string; gapDays: number; gapStart: string }> = []
       if (isMonday) {
-        const bookingsRes = await supabase
-          .from('bookings')
-          .select('property_id, checkout_date, checkin_date, properties ( name )')
-          .eq('org_id', orgId)
-          .gte('checkout_date', now.toISOString().split('T')[0]!)
-          .lte('checkout_date', weekAheadDateStr)
-          .neq('status', 'cancelled')
-          .order('checkout_date', { ascending: true })
-        const bookings = unwrapList(bookingsRes, digestCtx('bookings'))
+        const bookings = await fetchAllRows<{ property_id: string; checkout_date: string; checkin_date: string; properties: { name: string } }>(
+          (from, to) => supabase
+            .from('bookings')
+            .select('property_id, checkout_date, checkin_date, properties ( name )')
+            .eq('org_id', orgId)
+            .gte('checkout_date', now.toISOString().split('T')[0]!)
+            .lte('checkout_date', weekAheadDateStr)
+            .neq('status', 'cancelled')
+            .order('checkout_date', { ascending: true })
+            .order('id', { ascending: true })
+            .range(from, to),
+          { label: `vacancy-bookings(daily-wrapup)[org=${orgId}]` },
+        )
 
 
         type BookingGapRow = {
@@ -373,14 +429,18 @@ export const dailyWrapUpOrg = inngest.createFunction(
 
       // ── 8. Repeat issue alert — only if one exists ──────────────────────
       const ninetyDaysAgo = new Date(now.getTime() - 90 * MS_PER_DAY).toISOString()
-      const recentWOsRes = await supabase
-        .from('work_orders')
-        .select('id, property_id, category, properties ( name )')
-        .eq('org_id', orgId)
-        .neq('status', 'cancelled')
-        .not('category', 'is', null)
-        .gte('created_at', ninetyDaysAgo)
-      const recentWOs = unwrapList(recentWOsRes, digestCtx('recentWOs'))
+      const recentWOs = await fetchAllRows<{ id: string; property_id: string; category: string | null; properties: { name: string } }>(
+        (from, to) => supabase
+          .from('work_orders')
+          .select('id, property_id, category, properties ( name )')
+          .eq('org_id', orgId)
+          .neq('status', 'cancelled')
+          .not('category', 'is', null)
+          .gte('created_at', ninetyDaysAgo)
+          .order('id', { ascending: true })
+          .range(from, to),
+        { label: `recent-wos(daily-wrapup)[org=${orgId}]` },
+      )
 
 
       const repeatGroups: Record<string, { propertyName: string; category: string; count: number }> = {}
@@ -395,13 +455,17 @@ export const dailyWrapUpOrg = inngest.createFunction(
       const repeatSection = Object.values(repeatGroups).filter((g) => g.count >= 3)
 
       // ── 9. Turnover created, still unassigned ───────────────────────────
-      const unassignedTurnoversRes = await supabase
-        .from('turnovers')
-        .select('id, checkout_datetime, status, properties ( name ), turnover_assignments ( id )')
-        .eq('org_id', orgId)
-        .neq('status', 'cancelled')
-        .lte('checkout_datetime', new Date(now.getTime() + 2 * MS_PER_DAY).toISOString())
-      const unassignedTurnovers = unwrapList(unassignedTurnoversRes, digestCtx('unassignedTurnovers'))
+      const unassignedTurnovers = await fetchAllRows<{ id: string; checkout_datetime: string; status: string; properties: { name: string }; turnover_assignments: { id: string }[] }>(
+        (from, to) => supabase
+          .from('turnovers')
+          .select('id, checkout_datetime, status, properties ( name ), turnover_assignments ( id )')
+          .eq('org_id', orgId)
+          .neq('status', 'cancelled')
+          .lte('checkout_datetime', new Date(now.getTime() + 2 * MS_PER_DAY).toISOString())
+          .order('id', { ascending: true })
+          .range(from, to),
+        { label: `unassigned-turnovers(daily-wrapup)[org=${orgId}]` },
+      )
 
 
       const unassignedTurnoverSection = (unassignedTurnovers ?? [])
@@ -434,18 +498,22 @@ export const dailyWrapUpOrg = inngest.createFunction(
       }
 
       // ── 11. Aggregated inventory restock — reuse today's PO query ───────
-      const pendingPOsRes = await supabase
-        .from('purchase_orders')
-        .select(`
-          id, property_id,
-          purchase_order_items ( item_name, quantity_to_buy, unit ),
-          properties ( name )
-        `)
-        .eq('org_id', orgId)
-        .eq('order_email_sent', false)
-        .eq('is_same_day_flip', false)
-        .gte('created_at', now.toISOString().split('T')[0] + 'T00:00:00.000Z')
-      const pendingPOs = unwrapList(pendingPOsRes, digestCtx('pendingPOs'))
+      const pendingPOs = await fetchAllRows<{ id: string; property_id: string; purchase_order_items: { item_name: string; quantity_to_buy: number; unit: string | null }[]; properties: { name: string } }>(
+        (from, to) => supabase
+          .from('purchase_orders')
+          .select(`
+            id, property_id,
+            purchase_order_items ( item_name, quantity_to_buy, unit ),
+            properties ( name )
+          `)
+          .eq('org_id', orgId)
+          .eq('order_email_sent', false)
+          .eq('is_same_day_flip', false)
+          .gte('created_at', now.toISOString().split('T')[0] + 'T00:00:00.000Z')
+          .order('id', { ascending: true })
+          .range(from, to),
+        { label: `pending-pos(daily-wrapup)[org=${orgId}]` },
+      )
 
 
       const inventorySection = (pendingPOs ?? []).map((po) => {
