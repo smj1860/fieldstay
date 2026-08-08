@@ -6,22 +6,28 @@ import { PLANS, type PlanKey } from '@/lib/stripe/client'
 import type { OrgPlan } from '@/types/database'
 
 // ============================================================================
-// The plan price table is duplicated across FOUR files, and nothing else in CI
-// compares them:
+// The plan price table is duplicated across three files, and nothing else in
+// CI compares them:
 //
-//   lib/stripe/client.ts                      PLANS          (the source of truth)
+//   lib/stripe/client.ts                       PLANS  (the source of truth)
 //   app/(dashboard)/settings/settings-tabs.tsx PLAN_INFO + DISPLAY_PLANS
-//   components/ownerrez/PricingSection.tsx     PLANS
-//   components/hospitable/PricingSection.tsx   PLANS
+//   components/pricing/plan-tiers.ts           the landing-page table
 //
-// The two PricingSections are 'use client' marketing pages and settings-tabs
-// is a client component, so none of them can import lib/stripe/client (it
-// constructs the Stripe SDK). That is why the duplication exists — but it
+// components/pricing/plan-tiers.ts and settings-tabs are both consumed by
+// 'use client' code, so neither can import lib/stripe/client — it lives next
+// to `import Stripe from 'stripe'` and would drag the SDK into the browser
+// bundle. That is why the numbers exist in more than one place at all, and it
 // means a price that is right in Stripe and right in PLANS can be wrong on a
-// landing page indefinitely, and the landing page is what a prospect reads
+// landing page indefinitely — and the landing page is what a prospect reads
 // BEFORE paying. Exactly the class of defect as the hardcoded `reviewCount: 3`
 // in the day-7 onboarding email: a number shown to a customer that no code
 // path keeps honest.
+//
+// The count dropped from four copies to two when the two per-integration
+// PricingSections were collapsed into components/pricing/ (SonarCloud flagged
+// them at 100% duplication on new code). Getting to ONE means restructuring
+// PLANS itself, which `PlanKey = keyof typeof PLANS` constrains — until then,
+// this test is the bridge.
 //
 // So this test reads the three copies as TEXT and checks the numbers against
 // PLANS. It is deliberately a string scan rather than an import: importing a
@@ -33,11 +39,12 @@ import type { OrgPlan } from '@/types/database'
 const root = process.cwd()
 const read = (p: string) => readFileSync(join(root, p), 'utf8')
 
-const SETTINGS_TABS = 'app/(dashboard)/settings/settings-tabs.tsx'
-const PRICING_SECTIONS = [
-  'components/ownerrez/PricingSection.tsx',
-  'components/hospitable/PricingSection.tsx',
-]
+const SETTINGS_TABS  = 'app/(dashboard)/settings/settings-tabs.tsx'
+// Was the two per-integration PricingSection files, which held byte-identical
+// copies of this table. They are 28-line wrappers now and the numbers live
+// here — so this is one comparison instead of two, and there is no longer a
+// way for the two landing pages to disagree with each other at all.
+const MARKETING_TIERS = 'components/pricing/plan-tiers.ts'
 
 /** Every plan a customer can actually buy — enterprise is contact-for-pricing. */
 const PURCHASABLE = (Object.keys(PLANS) as PlanKey[]).filter((k) => k !== 'enterprise')
@@ -121,14 +128,15 @@ describe('the duplicated plan tables agree with PLANS', () => {
     }
   })
 
-  it.each(PRICING_SECTIONS)('%s prices every purchasable plan the same as PLANS', (file) => {
-    const src = read(file)
+  it('the landing-page tier table prices every purchasable plan the same as PLANS', () => {
+    const file = MARKETING_TIERS
+    const src  = read(file)
 
     for (const key of PURCHASABLE) {
       const { name, monthlyPrice, annualPrice } = PLANS[key]
 
       const card = new RegExp(
-        `name:\\s*"${name}"[\\s\\S]{0,300}?monthly:\\s*(\\d+),[\\s\\S]{0,120}?annual:\\s*(\\d+),`,
+        `name:\\s*['"]${name}['"][\\s\\S]{0,300}?monthly:\\s*(\\d+),[\\s\\S]{0,120}?annual:\\s*(\\d+),`,
       ).exec(src)
 
       expect(card, `${file} has no pricing card for '${name}'`).not.toBeNull()
@@ -137,12 +145,13 @@ describe('the duplicated plan tables agree with PLANS', () => {
     }
   })
 
-  it.each(PRICING_SECTIONS)('%s advertises a savings figure equal to two months', (file) => {
-    const src = read(file)
+  it('the landing-page tier table advertises a savings figure equal to two months', () => {
+    const file = MARKETING_TIERS
+    const src  = read(file)
 
     for (const key of PURCHASABLE) {
       const { name, monthlyPrice } = PLANS[key]
-      const card = new RegExp(`name:\\s*"${name}"[\\s\\S]{0,400}?annualSavings:\\s*(\\d+),`).exec(src)
+      const card = new RegExp(`name:\\s*['"]${name}['"][\\s\\S]{0,400}?annualSavings:\\s*(\\d+),`).exec(src)
 
       expect(card, `${file} has no annualSavings for '${name}'`).not.toBeNull()
       expect(Number(card![1]), `${file} '${name}' annualSavings should be 2 x monthly`).toBe(monthlyPrice! * 2)
