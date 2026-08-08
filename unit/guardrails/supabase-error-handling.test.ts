@@ -141,7 +141,19 @@ const BASELINE: Record<string, number> = {
   'lib/inngest/functions/auto-assign-vendor.ts': 2,
   'lib/inngest/functions/build-shopping-cart.ts': 2,
   'lib/inngest/functions/checklist-broadcast.ts': 4,
-  'lib/inngest/functions/cron/daily-wrapup.ts': 13,
+  // 13 -> 0 (entry deleted). Every read in the per-org digest now unwraps.
+  // Discarded, each failure produced null, `?? []` made it an empty section,
+  // and the digest went out silently short — with no other surface for some of
+  // it (handleTurnoverCreated defers unassigned-turnover warnings here by
+  // design), and `nothing_to_report` if enough failed at once, so a total
+  // outage rendered as a quiet day.
+  //
+  // The diffed sections were worse: diffDigestSnapshot upserts
+  // `{ ids: currentIds }` unconditionally, so an empty list from a failed read
+  // overwrote the stored snapshot with [] and the next day re-announced the
+  // entire backlog as new. That is the exact defect diffDigestSnapshot's own
+  // comment describes — closed on the snapshot read, left open on every read
+  // feeding it.
   'lib/inngest/functions/cron/maintenance-schedules.ts': 2,
   'lib/inngest/functions/cron/work-order-ops.ts': 2,
   'lib/inngest/functions/email-trial-lifecycle.tsx': 4,

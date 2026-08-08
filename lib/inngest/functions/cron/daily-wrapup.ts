@@ -3,6 +3,7 @@ import { createServiceClient }             from '@/lib/supabase/server'
 import { resend, FROM }                    from '@/lib/resend/client'
 import { getPmEmails, getPmMembersByOrgIds, diffDigestSnapshot } from '@/lib/inngest/helpers'
 import { fetchAllRows }                    from '@/lib/inngest/paginate'
+import { unwrap, unwrapList }              from '@/lib/supabase/unwrap'
 import { missingAssetTypesFromDiscoveredSet } from '@/lib/asset-discovery/config'
 import { renderDailyWrapUpEmail }          from '@/lib/resend/emails/daily-wrapup'
 import { unwrapJoin, unwrapJoinArray }     from '@/lib/utils/supabase-joins'
@@ -115,8 +116,32 @@ export const dailyWrapUpOrg = inngest.createFunction(
     const wrapup = await step.run('compute-wrapup', async () => {
       const supabase = createServiceClient({ system: 'inngest:daily-wrapup' })
 
+      // Every read below is unwrapped, and the reason is sharper than "a
+      // section would be missing".
+      //
+      // Discarded, a failed read produced `null`, `?? []` turned it into an
+      // empty section, and the digest went out silently short — no error, no
+      // retry, and a section like "turnover still unassigned" has NO other
+      // surface (handleTurnoverCreated defers to this digest by design).
+      //
+      // Worse for the diffed sections: diffDigestSnapshot UPSERTS
+      // `{ ids: currentIds }` unconditionally, so an empty list from a failed
+      // read overwrites the stored snapshot with `[]`. The next day every one
+      // of those items is `newIds`, and the wrap-up re-announces the entire
+      // backlog as brand new. That is the exact failure diffDigestSnapshot's
+      // own comment describes — it was closed for the snapshot read and left
+      // open on every read that feeds it.
+      //
+      // And if enough of these fail at once, `hasContent` is false and the
+      // send step reports `nothing_to_report`: a total outage renders as a
+      // quiet day. Throwing means Inngest retries the whole compute step,
+      // which is memoized on success, so a retry costs nothing when healthy.
+      const digestCtx = (site: string) => ({
+        site: `inngest.daily-wrapup.${site}`, orgId,
+      })
+
       // ── 1. Turnover schedule for tomorrow ──────────────────────────────
-      const { data: turnoversTomorrow } = await supabase
+      const turnoversTomorrowRes = await supabase
         .from('turnovers')
         .select(`
           id, checkout_datetime, status,
@@ -127,6 +152,8 @@ export const dailyWrapUpOrg = inngest.createFunction(
         .gte('checkout_datetime', tomorrowStart.toISOString())
         .lt('checkout_datetime', tomorrowEnd.toISOString())
         .neq('status', 'cancelled')
+      const turnoversTomorrow = unwrapList(turnoversTomorrowRes, digestCtx('turnoversTomorrow'))
+
 
       const tomorrowSection = (turnoversTomorrow ?? []).map((t) => {
         const property = unwrapJoin(t.properties)
@@ -140,8 +167,10 @@ export const dailyWrapUpOrg = inngest.createFunction(
       })
 
       // ── 2. Mandatory checklist items still open (org-wide, diffed) ─────
-      const { data: activeProperties } = await supabase
+      const activePropertiesRes = await supabase
         .from('properties').select('id, name').eq('org_id', orgId).eq('is_active', true)
+      const activeProperties = unwrapList(activePropertiesRes, digestCtx('activeProperties'))
+
 
       const propertyIds = (activeProperties ?? []).map((p) => p.id)
 
@@ -153,12 +182,14 @@ export const dailyWrapUpOrg = inngest.createFunction(
         photo_url: string | null; is_na: boolean | null
       }>>()
       if (propertyIds.length) {
-        const { data: allAssets } = await supabase
+        const allAssetsRes = await supabase
           .from('property_assets')
           .select('property_id, asset_type, make, model, photo_url, is_na')
           .in('property_id', propertyIds)
           .eq('org_id', orgId)
           .eq('is_active', true)
+        const allAssets = unwrapList(allAssetsRes, digestCtx('allAssets'))
+
 
         for (const a of allAssets ?? []) {
           const list = assetsByProperty.get(a.property_id) ?? []
@@ -200,7 +231,7 @@ export const dailyWrapUpOrg = inngest.createFunction(
       // property_asset_health_scores table).
       let assetHealthSection: Array<{ propertyName: string; score: number }> = []
       if (isFriday) {
-        const { data: scores } = await supabase
+        const scoresRes = await supabase
           .from('property_assets')
           .select('property_id, health_score, properties ( name )')
           .eq('org_id', orgId)
@@ -208,6 +239,8 @@ export const dailyWrapUpOrg = inngest.createFunction(
           .not('health_score', 'is', null)
           .order('health_score', { ascending: true })
           .limit(10)
+        const scores = unwrapList(scoresRes, digestCtx('scores'))
+
         assetHealthSection = (scores ?? []).map((s) => {
           const property = unwrapJoin(s.properties)
           return { propertyName: property?.name ?? 'Property', score: s.health_score as number }
@@ -215,12 +248,14 @@ export const dailyWrapUpOrg = inngest.createFunction(
       }
 
       // ── 4. Expiring compliance docs (diffed) ───────────────────────────
-      const { data: expiringDocs } = await supabase
+      const expiringDocsRes = await supabase
         .from('vendor_compliance_documents')
         .select('id, document_type, expiry_date, vendors ( name )')
         .eq('org_id', orgId).eq('is_active', true)
         .not('expiry_date', 'is', null)
         .lte('expiry_date', new Date(now.getTime() + 30 * MS_PER_DAY).toISOString())
+      const expiringDocs = unwrapList(expiringDocsRes, digestCtx('expiringDocs'))
+
 
       const complianceDiff = await diffDigestSnapshot(
         supabase, orgId, 'compliance_expiring',
@@ -237,19 +272,23 @@ export const dailyWrapUpOrg = inngest.createFunction(
       })
 
       // ── 5. Daily maintenance schedule + unassigned work orders only ────
-      const { data: dueSchedules } = await supabase
+      const dueSchedulesRes = await supabase
         .from('maintenance_schedules')
         .select('id, name, next_due_date, properties ( name )')
         .eq('org_id', orgId).eq('is_active', true)
         .lte('next_due_date', now.toISOString().split('T')[0]!)
+      const dueSchedules = unwrapList(dueSchedulesRes, digestCtx('dueSchedules'))
 
-      const { data: unassignedWOs } = await supabase
+
+      const unassignedWOsRes = await supabase
         .from('work_orders')
         .select('id, wo_number, title, suggested_vendor_ids, suggestion_reasoning, properties ( name ), vendors ( name )')
         .eq('org_id', orgId)
         .is('vendor_id', null)
         .in('status', ['pending', 'quote_requested'])
         .gte('created_at', since24h)
+      const unassignedWOs = unwrapList(unassignedWOsRes, digestCtx('unassignedWOs'))
+
 
       const maintenanceSection = {
         due: (dueSchedules ?? []).map((s) => {
@@ -268,12 +307,14 @@ export const dailyWrapUpOrg = inngest.createFunction(
       }
 
       // ── 6. Escalating work orders (last 24h) ───────────────────────────
-      const { data: escalations } = await supabase
+      const escalationsRes = await supabase
         .from('work_order_updates')
         .select('work_order_id, notes, work_orders ( wo_number, title, properties ( name ) )')
         .eq('org_id', orgId)
         .like('notes', 'Priority auto-escalated to Urgent%')
         .gte('created_at', since24h)
+      const escalations = unwrapList(escalationsRes, digestCtx('escalations'))
+
 
       const escalationSection = (escalations ?? []).map((e) => {
         const wo = unwrapJoin(e.work_orders)
@@ -287,7 +328,7 @@ export const dailyWrapUpOrg = inngest.createFunction(
       // (proximity, cost estimates). Extend this if you want that back.
       const vacancySection: Array<{ propertyName: string; gapDays: number; gapStart: string }> = []
       if (isMonday) {
-        const { data: bookings } = await supabase
+        const bookingsRes = await supabase
           .from('bookings')
           .select('property_id, checkout_date, checkin_date, properties ( name )')
           .eq('org_id', orgId)
@@ -295,6 +336,8 @@ export const dailyWrapUpOrg = inngest.createFunction(
           .lte('checkout_date', weekAheadDateStr)
           .neq('status', 'cancelled')
           .order('checkout_date', { ascending: true })
+        const bookings = unwrapList(bookingsRes, digestCtx('bookings'))
+
 
         type BookingGapRow = {
           property_id:   string
@@ -330,13 +373,15 @@ export const dailyWrapUpOrg = inngest.createFunction(
 
       // ── 8. Repeat issue alert — only if one exists ──────────────────────
       const ninetyDaysAgo = new Date(now.getTime() - 90 * MS_PER_DAY).toISOString()
-      const { data: recentWOs } = await supabase
+      const recentWOsRes = await supabase
         .from('work_orders')
         .select('id, property_id, category, properties ( name )')
         .eq('org_id', orgId)
         .neq('status', 'cancelled')
         .not('category', 'is', null)
         .gte('created_at', ninetyDaysAgo)
+      const recentWOs = unwrapList(recentWOsRes, digestCtx('recentWOs'))
+
 
       const repeatGroups: Record<string, { propertyName: string; category: string; count: number }> = {}
       for (const wo of recentWOs ?? []) {
@@ -350,12 +395,14 @@ export const dailyWrapUpOrg = inngest.createFunction(
       const repeatSection = Object.values(repeatGroups).filter((g) => g.count >= 3)
 
       // ── 9. Turnover created, still unassigned ───────────────────────────
-      const { data: unassignedTurnovers } = await supabase
+      const unassignedTurnoversRes = await supabase
         .from('turnovers')
         .select('id, checkout_datetime, status, properties ( name ), turnover_assignments ( id )')
         .eq('org_id', orgId)
         .neq('status', 'cancelled')
         .lte('checkout_datetime', new Date(now.getTime() + 2 * MS_PER_DAY).toISOString())
+      const unassignedTurnovers = unwrapList(unassignedTurnoversRes, digestCtx('unassignedTurnovers'))
+
 
       const unassignedTurnoverSection = (unassignedTurnovers ?? [])
         .filter((t) => {
@@ -368,10 +415,12 @@ export const dailyWrapUpOrg = inngest.createFunction(
         })
 
       // ── 10. Guidebook sponsors needed (diffed) ──────────────────────────
-      const { data: gbConfig } = await supabase
+      const gbConfigRes = await supabase
         .from('guidebook_configurations')
         .select('is_active, grace_period_ends_at')
         .eq('org_id', orgId).maybeSingle()
+
+      const gbConfig = unwrap(gbConfigRes, digestCtx('gbConfig'))
 
       let sponsorsSection: { needed: boolean; graceEndsAt: string | null } | null = null
       if (gbConfig?.is_active && gbConfig.grace_period_ends_at) {
@@ -385,7 +434,7 @@ export const dailyWrapUpOrg = inngest.createFunction(
       }
 
       // ── 11. Aggregated inventory restock — reuse today's PO query ───────
-      const { data: pendingPOs } = await supabase
+      const pendingPOsRes = await supabase
         .from('purchase_orders')
         .select(`
           id, property_id,
@@ -396,6 +445,8 @@ export const dailyWrapUpOrg = inngest.createFunction(
         .eq('order_email_sent', false)
         .eq('is_same_day_flip', false)
         .gte('created_at', now.toISOString().split('T')[0] + 'T00:00:00.000Z')
+      const pendingPOs = unwrapList(pendingPOsRes, digestCtx('pendingPOs'))
+
 
       const inventorySection = (pendingPOs ?? []).map((po) => {
         const property = unwrapJoin(po.properties)

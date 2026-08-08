@@ -29,7 +29,7 @@ import { dailyWrapUp, dailyWrapUpOrg } from '@/lib/inngest/functions/cron/daily-
 import { createServiceClient } from '@/lib/supabase/server'
 import { resend } from '@/lib/resend/client'
 import { renderDailyWrapUpEmail } from '@/lib/resend/emails/daily-wrapup'
-import { getPmEmails, getPmMembersByOrgIds } from '@/lib/inngest/helpers'
+import { getPmEmails, getPmMembersByOrgIds, diffDigestSnapshot } from '@/lib/inngest/helpers'
 import { invokeHandler } from './test-helpers'
 
 // Queue-based `.from(table)` mock — same convention as checklist-broadcast
@@ -300,5 +300,80 @@ describe('dailyWrapUpOrg (per-org handler)', () => {
       (c) => c.table === 'purchase_orders' && c.method === 'in' && c.args[0] === 'id',
     )
     expect(poIn?.args[1]).toEqual(['po_1'])
+  })
+})
+
+// ─────────────────────────────────────────────────────────────────────────────
+// A failed read must not render as an empty section.
+//
+// Each of these reads used to be `const { data: x } = await …`, so a failure
+// produced null, `?? []` made it an empty section, and the digest went out
+// silently short with no error and no retry. Some sections have no other
+// surface at all — handleTurnoverCreated defers unassigned-turnover warnings
+// to this digest by design.
+//
+// The diffed sections are worse: diffDigestSnapshot UPSERTS `{ ids: currentIds }`
+// unconditionally, so an empty list from a failed read overwrites the stored
+// snapshot with []. Every one of those items is then `newIds` tomorrow and the
+// wrap-up re-announces the whole backlog as brand new.
+// ─────────────────────────────────────────────────────────────────────────────
+describe('dailyWrapUpOrg — a failed read fails the step', () => {
+  beforeEach(() => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date(NOW_MS))
+  })
+  afterEach(() => {
+    vi.useRealTimers()
+    vi.clearAllMocks()
+  })
+
+  it('throws instead of emailing a digest that silently dropped a section', async () => {
+    const supabase = makeSupabase({
+      ...emptyOrgTables(),
+      // The very first read of the compute step.
+      turnovers: [
+        { data: null, error: { message: 'connection reset', code: '08006' } },
+        { data: [], error: null },
+      ],
+    })
+    ;(createServiceClient as ReturnType<typeof vi.fn>).mockReturnValue(supabase)
+    vi.mocked(getPmEmails).mockResolvedValue(['pm@example.com'])
+
+    await expect(
+      invokeHandler(dailyWrapUpOrg, {
+        event: { data: { org_id: 'org_1', now_ms: NOW_MS } },
+        step:  makeStep(),
+        logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
+      })
+    ).rejects.toThrow()
+
+    // Sending a short digest is the visible harm; reporting `nothing_to_report`
+    // when every read failed is the invisible one. Neither may happen.
+    expect(resend.emails.send).not.toHaveBeenCalled()
+  })
+
+  it('does not overwrite a diff snapshot with an empty list when its read failed', async () => {
+    const supabase = makeSupabase({
+      ...emptyOrgTables(),
+      // vendor_compliance_documents feeds diffDigestSnapshot('compliance_expiring').
+      vendor_compliance_documents: [
+        { data: null, error: { message: 'statement timeout', code: '57014' } },
+      ],
+    })
+    ;(createServiceClient as ReturnType<typeof vi.fn>).mockReturnValue(supabase)
+    vi.mocked(getPmEmails).mockResolvedValue(['pm@example.com'])
+
+    await expect(
+      invokeHandler(dailyWrapUpOrg, {
+        event: { data: { org_id: 'org_1', now_ms: NOW_MS } },
+        step:  makeStep(),
+        logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
+      })
+    ).rejects.toThrow()
+
+    // The snapshot write is what makes this defect outlive the failed run.
+    const complianceDiff = vi.mocked(diffDigestSnapshot).mock.calls
+      .find((c) => c[2] === 'compliance_expiring')
+    expect(complianceDiff).toBeUndefined()
   })
 })
