@@ -23,8 +23,14 @@ import type { Metadata } from 'next'
 import RepuGuardWrapper from '@/components/repuguard/RepuGuardWrapper'
 import PricingSection from '@/components/hospitable/PricingSection'
 import FaqSection from '@/components/hospitable/faq-section'
+import { marketingUrl } from '@/lib/marketing'
 
 export const metadata: Metadata = {
+  // Absolute apex canonical. fieldstay.app and app.fieldstay.app are
+  // aliases of one deployment, so this page exists at two URLs; without
+  // this Google picks a winner itself, and a relative value would resolve
+  // against metadataBase (NEXT_PUBLIC_APP_URL) to the wrong one.
+  alternates: { canonical: marketingUrl('/hospitable') },
   title: 'FieldStay for Hospitable',
   description: 'Connect your Hospitable account for automated turnovers, crew sync, asset health tracking, and a no-login vendor portal — free 14-day trial, no credit card required.',
   openGraph: {

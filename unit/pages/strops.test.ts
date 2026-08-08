@@ -2,10 +2,10 @@ import { describe, it, expect } from 'vitest'
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 
-import { FAQS } from '@/app/offline-turnover-app/faq'
+import { FAQS } from '@/app/strops/faq'
 import {
   LOADS_OFFLINE, READ_OFFLINE, WRITE_OFFLINE, RELIABILITY, NEEDS_CONNECTION,
-} from '@/app/offline-turnover-app/offline-capabilities'
+} from '@/app/strops/offline-capabilities'
 
 const root = process.cwd()
 const read = (p: string) => readFileSync(join(root, p), 'utf8')
@@ -96,7 +96,7 @@ describe('offline claims are backed by code that still exists', () => {
 })
 
 describe('JSON-LD is emitted safely', () => {
-  const page = read('app/offline-turnover-app/page.tsx')
+  const page = read('app/strops/page.tsx')
 
   it('does not use dangerouslySetInnerHTML', () => {
     // Zero uses in this codebase, and the ESLint rule says raw HTML needs
@@ -110,7 +110,7 @@ describe('JSON-LD is emitted safely', () => {
   })
 
   it('emits the payload through serializeJsonLd, not a bare JSON.stringify', () => {
-    expect(page).toContain('serializeJsonLd(buildJsonLd(appUrl))')
+    expect(page).toContain('serializeJsonLd(buildJsonLd(marketingOrigin()))')
   })
 
   // The escaping itself is exercised for real — rendered through react-dom and
@@ -123,7 +123,7 @@ describe('JSON-LD is emitted safely', () => {
 describe('structured data cannot drift from the visible page', () => {
   it('the FAQ schema is built from the same array the page renders', async () => {
     // The schema half is asserted against the REAL object, not a text match.
-    const { buildJsonLd } = await import('@/app/offline-turnover-app/json-ld')
+    const { buildJsonLd } = await import('@/app/strops/json-ld')
     const graph = buildJsonLd('https://app.fieldstay.app')['@graph']
     const faqNode = graph.find((n) => n['@type'] === 'FAQPage') as { mainEntity: { name: string }[] }
 
@@ -132,7 +132,7 @@ describe('structured data cannot drift from the visible page', () => {
     // The rendered half: the page maps the same array, so a question added to
     // FAQS appears in both or neither. Google treats schema that describes
     // copy not on the page as a structured-data violation.
-    expect(read('app/offline-turnover-app/page.tsx')).toMatch(/\{FAQS\.map/)
+    expect(read('app/strops/page.tsx')).toMatch(/\{FAQS\.map/)
   })
 
   it('every FAQ has a real question and answer', () => {
@@ -154,7 +154,7 @@ describe('structured data cannot drift from the visible page', () => {
     // quoting a stale number is the same defect class as the hardcoded
     // reviewCount: 3 in the day-7 onboarding email.
     const { PLANS } = await import('@/lib/stripe/client')
-    const { buildJsonLd } = await import('@/app/offline-turnover-app/json-ld')
+    const { buildJsonLd } = await import('@/app/strops/json-ld')
     const graph = buildJsonLd('https://app.fieldstay.app')['@graph']
     const app = graph.find((n) => n['@type'] === 'SoftwareApplication') as {
       offers: { price: string }
@@ -166,7 +166,7 @@ describe('structured data cannot drift from the visible page', () => {
 
 describe('SEO plumbing', () => {
   it('the page is in the sitemap', () => {
-    expect(read('app/sitemap.ts')).toContain('/offline-turnover-app')
+    expect(read('app/sitemap.ts')).toContain('/strops')
   })
 
   it('robots keeps token-bearing URLs out of the index', () => {
@@ -184,6 +184,43 @@ describe('SEO plumbing', () => {
   })
 
   it('declares a canonical URL', () => {
-    expect(read('app/offline-turnover-app/page.tsx')).toMatch(/alternates:\s*\{\s*canonical:/)
+    expect(read('app/strops/page.tsx')).toMatch(/alternates:\s*\{\s*canonical:/)
+  })
+
+  it('canonicalises to the APEX, absolutely — not a relative path', () => {
+    // fieldstay.app and app.fieldstay.app are aliases of the same deployment,
+    // so this page exists at two URLs. A RELATIVE canonical would resolve
+    // against the root layout's metadataBase (NEXT_PUBLIC_APP_URL) and point
+    // at app.fieldstay.app — declaring the wrong one of the two as real.
+    const page = read('app/strops/page.tsx')
+    expect(page).toContain('const CANONICAL = marketingUrl(PATH)')
+    expect(page).toContain('canonical: CANONICAL')
+    expect(page).not.toMatch(/canonical:\s*PATH\b/)
+  })
+
+  it('sends the CTA to the APP origin absolutely — host-only auth cookies', () => {
+    // Supabase sets no cookie `domain`, so a session created on fieldstay.app
+    // is never sent to app.fieldstay.app. A relative "/signup" here would sign
+    // the visitor up on the marketing host and land them logged OUT.
+    const page = read('app/strops/page.tsx')
+    expect(page).toContain("appUrl('/signup?next=/onboarding')")
+    expect(page).toContain("appUrl('/ops')")
+    expect(page).not.toMatch(/ctaHref = user \? '\/ops'/)
+  })
+
+  it('is reachable without a session — or a crawler indexes the login redirect', () => {
+    // Before this entry /strops fell through to the auth gate and returned
+    // 307 -> /login?next=%2Fstrops, verified against production.
+    expect(read('proxy.ts')).toContain("'/strops',")
+  })
+
+  it('the sitemap and robots both use the apex, not the app host', () => {
+    expect(read('app/sitemap.ts')).toContain('marketingOrigin()')
+    expect(read('app/robots.ts')).toContain('marketingOrigin()')
+    // Matches the env READ, not the bare name — both files name
+    // NEXT_PUBLIC_APP_URL in the comment explaining why they do not use it.
+    expect(read('app/sitemap.ts')).not.toContain('process.env.NEXT_PUBLIC_APP_URL')
+    expect(read('app/robots.ts')).not.toContain('process.env.NEXT_PUBLIC_APP_URL')
   })
 })
+

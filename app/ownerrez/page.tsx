@@ -7,8 +7,14 @@ import type { Metadata } from 'next'
 import RepuGuardWrapper from '@/components/repuguard/RepuGuardWrapper'
 import PricingSection from '@/components/ownerrez/PricingSection'
 import FaqSection from '@/components/ownerrez/faq-section'
+import { marketingUrl } from '@/lib/marketing'
 
 export const metadata: Metadata = {
+  // Absolute apex canonical. fieldstay.app and app.fieldstay.app are
+  // aliases of one deployment, so this page exists at two URLs; without
+  // this Google picks a winner itself, and a relative value would resolve
+  // against metadataBase (NEXT_PUBLIC_APP_URL) to the wrong one.
+  alternates: { canonical: marketingUrl('/ownerrez') },
   title: 'FieldStay for OwnerRez',
   description: 'Connect your OwnerRez account for automated turnovers, crew management, inventory, and maintenance — free 14-day trial, no credit card required.',
   openGraph: {

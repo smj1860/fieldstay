@@ -1,5 +1,5 @@
 // ============================================================================
-// /offline-turnover-app — the SEO landing page for offline capability.
+// /strops — the SEO landing page for offline capability.
 //
 // Target: people searching for a turnover/cleaning app that works where there
 // is no cell service. Head terms are "offline turnover app", "cleaning app
@@ -31,9 +31,11 @@ import {
   type Capability,
 } from './offline-capabilities'
 import { FAQS } from './faq'
-import { buildJsonLd, serializeJsonLd, OFFLINE_PAGE_PATH } from './json-ld'
+import { buildJsonLd, serializeJsonLd, STROPS_PATH } from './json-ld'
+import { marketingUrl, marketingOrigin, appUrl } from '@/lib/marketing'
 
-const PATH = OFFLINE_PAGE_PATH
+const PATH = STROPS_PATH
+const CANONICAL = marketingUrl(PATH)
 
 export const metadata: Metadata = {
   // Under 60 chars so it does not truncate in the SERP, leading with the
@@ -51,13 +53,18 @@ export const metadata: Metadata = {
     'property management app rural no signal',
     'offline checklist app for cleaners',
   ],
-  alternates: { canonical: PATH },
+  // ABSOLUTE, not relative. The root layout's metadataBase is
+  // NEXT_PUBLIC_APP_URL, so a relative '/strops' would resolve to
+  // app.fieldstay.app/strops — the wrong host. Both hostnames are aliases of
+  // one deployment, so this tag is what tells Google which of the two
+  // identical URLs is the real one.
+  alternates: { canonical: CANONICAL },
   openGraph: {
     title: 'The turnover app that works with no signal',
     description:
       'Checklists, photos and turnover completion all work offline. Everything syncs itself when the ' +
       'phone finds a bar. Built for cabins, lake houses and anywhere the cell map lies.',
-    url: PATH,
+    url: CANONICAL,
     type: 'website',
     images: ['/logo.png'],
   },
@@ -101,16 +108,19 @@ export default async function OfflineTurnoverAppPage() {
     { cookies: { getAll: () => cookieStore.getAll() } },
   )
   const { data: { user } } = await supabase.auth.getUser()
-  const ctaHref = user ? '/ops' : '/signup?next=/onboarding'
 
-  const appUrl = process.env.NEXT_PUBLIC_APP_URL ?? 'https://app.fieldstay.app'
+  // Absolute against the APP origin, not relative. Supabase sets host-only
+  // auth cookies (no `domain` in lib/supabase/server.ts), so signing up at
+  // fieldstay.app/signup would create a session the app at app.fieldstay.app
+  // never sees — the visitor would arrive logged out.
+  const ctaHref = user ? appUrl('/ops') : appUrl('/signup?next=/onboarding')
 
   return (
     <div className="min-h-screen bg-white">
       {/* Structured data. Rendered from the same FAQS array the page below
           renders, so the rich result can never describe copy that is not
           actually on the page. See serializeJsonLd() for why this is a text child. */}
-      <script type="application/ld+json">{serializeJsonLd(buildJsonLd(appUrl))}</script>
+      <script type="application/ld+json">{serializeJsonLd(buildJsonLd(marketingOrigin()))}</script>
 
       {/* ── Hero ───────────────────────────────────────────────────────── */}
       <section className="bg-[var(--mkt-ink)] text-white">

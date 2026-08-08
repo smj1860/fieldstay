@@ -1,5 +1,7 @@
 import type { MetadataRoute } from 'next'
 
+import { marketingOrigin } from '@/lib/marketing'
+
 // ============================================================================
 // There was no robots.txt before this, so crawlers were free to index every
 // reachable URL. Most of the app is auth-gated and would just 302, but three
@@ -20,7 +22,9 @@ import type { MetadataRoute } from 'next'
 // ============================================================================
 
 export default function robots(): MetadataRoute.Robots {
-  const base = (process.env.NEXT_PUBLIC_APP_URL ?? 'https://app.fieldstay.app').replace(/\/$/, '')
+  // Apex, matching the sitemap's own URLs — advertising the sitemap on one
+  // host while it lists another reads as a cross-host sitemap to crawlers.
+  const base = marketingOrigin()
 
   return {
     rules: [

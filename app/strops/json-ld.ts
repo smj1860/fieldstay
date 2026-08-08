@@ -8,9 +8,9 @@ import { FAQS } from './faq'
 // is checking proves only that the author can write the same bug twice.
 // ============================================================================
 
-export const OFFLINE_PAGE_PATH = '/offline-turnover-app'
+export const STROPS_PATH = '/strops'
 
-export function buildJsonLd(appUrl: string) {
+export function buildJsonLd(marketingUrl: string) {
   // One payload, two schema types. FAQPage drives the "People also ask" rich
   // result; SoftwareApplication is what makes the product eligible to appear
   // as an entity rather than only a blue link.
@@ -19,7 +19,7 @@ export function buildJsonLd(appUrl: string) {
     '@graph': [
       {
         '@type': 'FAQPage',
-        '@id': `${appUrl}${OFFLINE_PAGE_PATH}#faq`,
+        '@id': `${marketingUrl}${STROPS_PATH}#faq`,
         mainEntity: FAQS.map((f) => ({
           '@type': 'Question',
           name: f.question,
@@ -28,7 +28,7 @@ export function buildJsonLd(appUrl: string) {
       },
       {
         '@type': 'SoftwareApplication',
-        '@id': `${appUrl}#software`,
+        '@id': `${marketingUrl}#software`,
         name: 'FieldStay',
         applicationCategory: 'BusinessApplication',
         operatingSystem: 'Web, iOS, Android',

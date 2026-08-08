@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest'
 import { renderToStaticMarkup } from 'react-dom/server'
 
-import { buildJsonLd, serializeJsonLd } from '@/app/offline-turnover-app/json-ld'
+import { buildJsonLd, serializeJsonLd } from '@/app/strops/json-ld'
 
 // ============================================================================
 // Proves the JSON-LD escaping is load-bearing rather than cargo-culted.
@@ -92,7 +92,7 @@ describe('JSON-LD survives React rendering intact', () => {
   })
 
   it('every FAQ on the page is in the schema, and vice versa', async () => {
-    const { FAQS } = await import('@/app/offline-turnover-app/faq')
+    const { FAQS } = await import('@/app/strops/faq')
     const faqNode = buildJsonLd('https://app.fieldstay.app')['@graph']
       .find((n) => n['@type'] === 'FAQPage') as { mainEntity: { name: string }[] }
 

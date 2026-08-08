@@ -130,6 +130,18 @@ export const ENV_SPEC: Readonly<Record<string, VarSpec>> = {
     why: 'absolute URLs in every email, Stripe redirect, owner-portal link and OAuth callback',
   },
 
+  // The APEX (fieldstay.app), distinct from NEXT_PUBLIC_APP_URL above. Both
+  // hostnames are aliases of the same deployment, so every public page exists
+  // at two URLs; this is the one marketing canonicals and the sitemap declare.
+  // 'recommended' rather than 'production': lib/marketing.ts falls back to
+  // https://fieldstay.app, so an unset value is correct rather than broken —
+  // but a WRONG value silently points every canonical at the wrong host, which
+  // is why it warns on a production boot instead of passing quietly.
+  NEXT_PUBLIC_MARKETING_URL: {
+    tier: 'recommended', schema: httpUrl,
+    why: 'apex origin for marketing canonicals and the sitemap',
+  },
+
   // ── Stripe ────────────────────────────────────────────────────────────────
   STRIPE_SECRET_KEY: {
     tier: 'production', schema: prefixed('sk_'),

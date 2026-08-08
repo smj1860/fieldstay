@@ -1,9 +1,16 @@
 import type { MetadataRoute } from 'next'
 
+import { marketingOrigin } from '@/lib/marketing'
+
 // ============================================================================
-// There was no sitemap at all before /offline-turnover-app, which is a real
-// gap for a page whose entire purpose is organic search: a brand-new URL with
-// no inbound links can wait weeks for a crawler to stumble on it.
+// There was no sitemap at all before /strops, which is a real gap for a page
+// whose entire purpose is organic search: a brand-new URL with no inbound
+// links can wait weeks for a crawler to stumble on it.
+//
+// URLs use the APEX (fieldstay.app), not NEXT_PUBLIC_APP_URL. The apex and
+// app.fieldstay.app are aliases of the same deployment, so every page below
+// exists at two URLs; listing the apex — and matching that with an absolute
+// canonical on each page — is what stops Google choosing between them itself.
 //
 // PUBLIC, INDEXABLE pages only. Everything else in app/ is either behind auth
 // (the dashboard, /crew), token-gated (owner portal, vendor portal,
@@ -19,7 +26,7 @@ const PAGES: ReadonlyArray<{
   changeFreq: MetadataRoute.Sitemap[number]['changeFrequency']
 }> = [
   { path: '/',                      priority: 1.0, changeFreq: 'weekly'  },
-  { path: '/offline-turnover-app',  priority: 0.9, changeFreq: 'monthly' },
+  { path: '/strops',                priority: 0.9, changeFreq: 'monthly' },
   { path: '/ownerrez',              priority: 0.8, changeFreq: 'monthly' },
   { path: '/hospitable',            priority: 0.8, changeFreq: 'monthly' },
   { path: '/privacy',               priority: 0.3, changeFreq: 'yearly'  },
@@ -28,7 +35,7 @@ const PAGES: ReadonlyArray<{
 ]
 
 export default function sitemap(): MetadataRoute.Sitemap {
-  const base = (process.env.NEXT_PUBLIC_APP_URL ?? 'https://app.fieldstay.app').replace(/\/$/, '')
+  const base = marketingOrigin()
   // One timestamp for the whole run, so every entry agrees. Per-page dates
   // would need real content-change tracking; a build date that claims every
   // page changed today is worse than honest coarse granularity.
