@@ -12,33 +12,24 @@ import { collectSourceFiles, rel, read } from './scan'
 // (the stale-entry check below forces that). Delete entries as you migrate
 // files to var(--accent-*) tokens; never add entries.
 //
-// ── The one narrow exception, and what it is not ────────────────────────────
+// ── How the marketing pages got off this list ───────────────────────────────
 //
-// An entry may CHANGE PATH when baselined code is moved wholesale into a new
-// file, provided the old entries are deleted in the same change and the total
-// count goes DOWN. That is a relocation, not a new violation.
+// components/{ownerrez,hospitable}/PricingSection.tsx were both baselined and
+// both here for the same reason: they are a LIGHT-ONLY surface whose colors
+// could not become var(--accent-gold)/var(--text-muted), because those tokens
+// are THEME-DEPENDENT (#FCD116 vs #b8900a, #9ab5cc vs #6C757D) and a prospect
+// on a dark-mode phone would have seen a different page.
 //
-// It has been used exactly once. components/{ownerrez,hospitable}/
-// PricingSection.tsx were 274 and 281 lines differing in ten; SonarCloud
-// flagged them at 100% duplication on new code after the Hosts tier was added
-// to both. Extracting the shared markup to components/pricing/
-// PricingSection.tsx took the two baselined files to ZERO and left one
-// baselined file: 2 files -> 1, 24 occurrences -> 12.
+// The fix was not to rewrite text-gray-500 as text-[#6b7280] — that passes
+// this regex while leaving the hex hardcoded, and would have been gaming the
+// check. It was a theme-independent `--mkt-*` palette on bare :root in
+// globals.css (see "Marketing palette" there), whose values are the exact
+// hexes those pages already used, so adopting it changed nothing on screen.
 //
-// This is NOT licence to baseline a new file. The test to apply is whether the
-// moved code is byte-identical to what was already baselined — for that
-// extraction it was, verified by reconstructing the new file from the old one
-// with only the three intended prop edits applied.
-//
-// And it is not a substitute for the real fix. Those 12 utilities cannot
-// simply become var(--accent-gold)/var(--text-muted): both tokens are
-// THEME-DEPENDENT (#FCD116 vs #b8900a, #9ab5cc vs #6C757D) and the marketing
-// pages are deliberately light-only, so swapping them in would change how the
-// pages look. The file also already carries seven raw hexes this regex does
-// not match, so rewriting text-gray-500 as text-[#6b7280] would pass the check
-// while making the code worse — do not do that. The real fix is a
-// theme-independent marketing palette in globals.css, converting the whole
-// file rather than the twelve occurrences this rule happens to see.
+// Both entries are gone, and the extracted components/pricing/PricingSection
+// .tsx never needed one: it carries zero named color utilities AND zero raw
+// hex. A marketing surface has real tokens now, so a new landing page has no
+// excuse to arrive with either.
 // ============================================================================
 
 const COLOR_UTILITY = /(?:text|bg|border|ring)-(?:red|blue|green|amber|yellow|slate|gray|gold)-[0-9]{3}/
@@ -73,9 +64,6 @@ const BASELINE = new Set<string>([
   'components/hospitable/faq-section.tsx',
   'components/landing/homepage-content.tsx',
   'components/ownerrez/faq-section.tsx',
-  // Relocated, not added — see the header. Replaced the two per-integration
-  // PricingSection entries above; net 2 files -> 1, 24 occurrences -> 12.
-  'components/pricing/PricingSection.tsx',
   'components/property/PropertyMaintenanceManager.tsx',
   'components/review-prompt.tsx',
   'components/ui/InlineAlert.tsx',

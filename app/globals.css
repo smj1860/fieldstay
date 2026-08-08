@@ -91,6 +91,43 @@
   --chrome-gold-dim:   rgba(252, 209, 22, 0.14);
 }
 
+/* ── Marketing palette ───────────────────────────────────────────────────────
+ *
+ * The public landing pages (/ownerrez, /hospitable, /offline-turnover-app and
+ * the shared components/pricing/ table) are a LIGHT-ONLY surface with their
+ * own palette. They are not the app, and they must not follow the app's theme:
+ * a prospect on a dark-mode phone should still see the same page the brand
+ * guidelines describe.
+ *
+ * That is exactly why the app tokens above cannot be reused here. --accent-gold
+ * is #FCD116 in dark and #b8900a in light; --text-muted is #9ab5cc vs #6C757D.
+ * Swapping either into a marketing page changes how it looks depending on the
+ * viewer's OS setting.
+ *
+ * So these are defined ONCE, on bare :root, and are deliberately absent from
+ * every :root.light / prefers-color-scheme block below. Do not add them there.
+ *
+ * Values are the exact hexes these pages already used, so adopting them is a
+ * no-op on screen — --mkt-muted is Tailwind gray-500, --mkt-muted-strong is
+ * gray-600, --mkt-gold is gold-300, --mkt-gold-hover is gold-400. The point is
+ * to stop hardcoding them in components (CLAUDE.md → Styling Conventions),
+ * which is what unit/guardrails/tailwind-color-ratchet.test.ts measures.
+ */
+:root {
+  --mkt-ink:          #0a1628;   /* headings, primary buttons (brand-800-ish) */
+  --mkt-ink-hover:    #162a4a;
+  --mkt-surface:      #f8fafc;   /* card fill on white */
+  --mkt-surface-alt:  #f1f5f9;   /* toggle track */
+  --mkt-border:       #e2e8f0;
+  --mkt-muted:        #6b7280;   /* = Tailwind gray-500 */
+  --mkt-muted-strong: #4b5563;   /* = Tailwind gray-600 */
+  --mkt-gold:         #FCD116;   /* = gold-300 */
+  --mkt-gold-hover:   #EAB800;   /* = gold-400 */
+  --mkt-on-dark-soft:    rgba(255, 255, 255, 0.52);
+  --mkt-on-dark-softer:  rgba(255, 255, 255, 0.58);
+}
+
+
 /* ── Light theme override ─────────────────────────────────────── */
 :root.light {
   --bg-base:        #F8F9FA;

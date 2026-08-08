@@ -48,27 +48,27 @@ export default function PricingSection({ isLoggedIn, provider, entryFeatures }: 
   return (
     <div>
       <div className="text-center mb-10">
-        <h2 className="text-3xl font-bold mb-3 text-[#0a1628] font-display">
+        <h2 className="text-3xl font-bold mb-3 text-[var(--mkt-ink)] font-display">
           We do business differently.
         </h2>
-        <p className="text-gray-500 mb-2">
+        <p className="text-[var(--mkt-muted)] mb-2">
           Simple, transparent pricing. 14-day free trial, no credit card required.
         </p>
-        <p className="text-gray-600 text-sm mx-auto mb-6" style={{ maxWidth: 480 }}>
+        <p className="text-[var(--mkt-muted-strong)] text-sm mx-auto mb-6" style={{ maxWidth: 480 }}>
           Most STR software makes you pay per property and gates parts of
           the software behind higher tiers. It doesn&apos;t have to be that
           way. Flat tier pricing. All the features, no gates.
         </p>
 
         {/* Monthly / Annual toggle */}
-        <div className="inline-flex items-center gap-1 bg-[#f1f5f9] border border-[#e2e8f0] rounded-full p-1">
+        <div className="inline-flex items-center gap-1 bg-[var(--mkt-surface-alt)] border border-[var(--mkt-border)] rounded-full p-1">
           <button
             onClick={() => setAnnual(false)}
             aria-pressed={!annual}
             className={`px-4 py-1.5 rounded-full text-sm font-semibold transition-all ${
               !annual
                 ? "bg-brand-800 text-white shadow-sm"
-                : "text-gray-500 hover:text-[#0a1628]"
+                : "text-[var(--mkt-muted)] hover:text-[var(--mkt-ink)]"
             }`}
           >
             Monthly
@@ -79,11 +79,11 @@ export default function PricingSection({ isLoggedIn, provider, entryFeatures }: 
             className={`px-4 py-1.5 rounded-full text-sm font-semibold transition-all flex items-center gap-2 ${
               annual
                 ? "bg-brand-800 text-white shadow-sm"
-                : "text-gray-500 hover:text-[#0a1628]"
+                : "text-[var(--mkt-muted)] hover:text-[var(--mkt-ink)]"
             }`}
           >
             Annual
-            <span className="text-xs bg-gold-300 text-[#0a1628] px-2 py-0.5 rounded-full font-bold">
+            <span className="text-xs bg-[var(--mkt-gold)] text-[var(--mkt-ink)] px-2 py-0.5 rounded-full font-bold">
               Save 2 months
             </span>
           </button>
@@ -97,12 +97,12 @@ export default function PricingSection({ isLoggedIn, provider, entryFeatures }: 
             key={plan.name}
             className={`rounded-2xl p-6 border relative flex flex-col ${
               plan.highlight
-                ? "bg-brand-800 border-gold-300"
-                : "bg-[#f8fafc] border-[#e2e8f0]"
+                ? "bg-brand-800 border-[var(--mkt-gold)]"
+                : "bg-[var(--mkt-surface)] border-[var(--mkt-border)]"
             }`}
           >
             {plan.highlight && (
-              <div className="absolute -top-3 left-1/2 -translate-x-1/2 bg-gold-300 text-[#0a1628] text-xs font-bold px-3 py-1 rounded-full whitespace-nowrap">
+              <div className="absolute -top-3 left-1/2 -translate-x-1/2 bg-[var(--mkt-gold)] text-[var(--mkt-ink)] text-xs font-bold px-3 py-1 rounded-full whitespace-nowrap">
                 Most Popular
               </div>
             )}
@@ -111,7 +111,7 @@ export default function PricingSection({ isLoggedIn, provider, entryFeatures }: 
             <div className="mb-5">
               <div
                 className={`font-bold text-lg mb-1 ${
-                  plan.highlight ? "text-white" : "text-[#0a1628]"
+                  plan.highlight ? "text-white" : "text-[var(--mkt-ink)]"
                 }`}
               >
                 {plan.name}
@@ -122,21 +122,21 @@ export default function PricingSection({ isLoggedIn, provider, entryFeatures }: 
                   <>
                     <span
                       className={`text-3xl font-bold ${
-                        plan.highlight ? "text-white" : "text-[#0a1628]"
+                        plan.highlight ? "text-white" : "text-[var(--mkt-ink)]"
                       }`}
                     >
                       ${annual ? plan.annual!.toLocaleString() : plan.monthly}
                     </span>
                     <span
                       className={`mb-1 text-sm ${
-                        plan.highlight ? "text-white/52" : "text-gray-500"
+                        plan.highlight ? "text-[var(--mkt-on-dark-soft)]" : "text-[var(--mkt-muted)]"
                       }`}
                     >
                       {annual ? '/yr' : '/mo'}
                     </span>
                   </>
                 ) : (
-                  <span className="text-3xl font-bold text-gold-300">
+                  <span className="text-3xl font-bold text-[var(--mkt-gold)]">
                     Custom
                   </span>
                 )}
@@ -144,7 +144,7 @@ export default function PricingSection({ isLoggedIn, provider, entryFeatures }: 
 
               <p
                 className={`text-sm ${
-                  plan.highlight ? "text-white/52" : "text-gray-500"
+                  plan.highlight ? "text-[var(--mkt-on-dark-soft)]" : "text-[var(--mkt-muted)]"
                 }`}
               >
                 {plan.description}
@@ -153,8 +153,8 @@ export default function PricingSection({ isLoggedIn, provider, entryFeatures }: 
               <div
                 className={`text-xs font-semibold mt-2 rounded-lg px-3 py-1.5 inline-block ${
                   plan.highlight
-                    ? "bg-brand-panel text-white/58"
-                    : "bg-white border border-[#e2e8f0] text-[#0a1628]"
+                    ? "bg-brand-panel text-[var(--mkt-on-dark-softer)]"
+                    : "bg-white border border-[var(--mkt-border)] text-[var(--mkt-ink)]"
                 }`}
               >
                 {plan.properties}
@@ -167,7 +167,7 @@ export default function PricingSection({ isLoggedIn, provider, entryFeatures }: 
                 <li
                   key={f}
                   className={`flex items-center gap-2 text-sm ${
-                    plan.highlight ? "text-white/58" : "text-gray-500"
+                    plan.highlight ? "text-[var(--mkt-on-dark-softer)]" : "text-[var(--mkt-muted)]"
                   }`}
                 >
                   <svg
@@ -179,7 +179,7 @@ export default function PricingSection({ isLoggedIn, provider, entryFeatures }: 
                   >
                     <path
                       d="M1 5l4 4 6-8"
-                      stroke="#FCD116"
+                      stroke="var(--mkt-gold)"
                       strokeWidth="1.5"
                       strokeLinecap="round"
                       strokeLinejoin="round"
@@ -196,8 +196,8 @@ export default function PricingSection({ isLoggedIn, provider, entryFeatures }: 
                 href={ctaHref}
                 className={`block text-center py-3 rounded-xl text-sm font-bold transition-colors ${
                   plan.highlight
-                    ? "bg-gold-300 text-[#0a1628] hover:bg-[#EAB800]"
-                    : "bg-brand-800 text-white hover:bg-[#162a4a]"
+                    ? "bg-[var(--mkt-gold)] text-[var(--mkt-ink)] hover:bg-[var(--mkt-gold-hover)]"
+                    : "bg-brand-800 text-white hover:bg-[var(--mkt-ink-hover)]"
                 }`}
               >
                 Start Free Trial
@@ -205,7 +205,7 @@ export default function PricingSection({ isLoggedIn, provider, entryFeatures }: 
             ) : (
               <a
                 href="mailto:hello@fieldstay.app"
-                className="block text-center py-3 rounded-xl text-sm font-bold transition-colors bg-brand-800 text-white hover:bg-[#162a4a]"
+                className="block text-center py-3 rounded-xl text-sm font-bold transition-colors bg-brand-800 text-white hover:bg-[var(--mkt-ink-hover)]"
               >
                 Contact Us
               </a>
