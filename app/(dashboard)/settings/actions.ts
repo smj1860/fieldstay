@@ -1272,6 +1272,54 @@ export async function createCheckoutSession(
 
     if (!priceId) return { error: 'Plan not available' }
 
+    // A plan whose cap is BELOW what the org already runs must not be
+    // purchasable. max_properties is written straight from
+    // PLANS[plan].maxProperties by the Stripe webhook with no reference to
+    // what the org actually has, so buying an under-sized plan left them
+    // permanently over cap: the existing properties keep working (the cap is
+    // only checked when ADDING one), so nothing breaks loudly — they simply
+    // pay for less than they use, indefinitely, with no signal.
+    //
+    // Adding the $89 Hosts tier is what made this easy to hit: a trialing org
+    // builds up to the 15-property trial cap and the cheapest card is now one
+    // click away. The same hole existed before for any downgrade.
+    //
+    // `>` not `>=`: the add-property gate asks "can I fit one MORE", so it
+    // uses >=. This asks "does this plan cover what I already have", and an
+    // org with exactly 4 properties is covered by a 4-property plan.
+    //
+    // is_active: true matches createProperty's own count — the two gates must
+    // agree on what a property is or they contradict each other.
+    const { count: activeProperties, error: propertyCountError } = await supabase
+      .from('properties')
+      .select('id', { count: 'exact', head: true })
+      .eq('org_id', membership.org_id)
+      .eq('is_active', true)
+
+    if (propertyCountError) {
+      // Fail CLOSED. Guessing "probably fits" here bills a customer for a
+      // plan that may not cover them, which is the exact outcome this guard
+      // exists to prevent.
+      console.error('[createCheckoutSession] property count failed', propertyCountError.message)
+      reportError(propertyCountError, {
+        site: 'serverAction.settings.createCheckoutSession.propertyCount',
+        orgId: membership.org_id,
+      })
+      return { error: 'We could not verify your property count. Please try again.' }
+    }
+
+    const propertyCount = activeProperties ?? 0
+    if (propertyCount > planDef.maxProperties) {
+      // Always plural: reaching here needs propertyCount > maxProperties, and
+      // the smallest plan's cap is 4, so the count is at least 5. A
+      // singular/plural ternary would be an unreachable branch.
+      return {
+        error:
+          `${planDef.name} covers up to ${planDef.maxProperties} properties, but you have ` +
+          `${propertyCount} active properties. Choose a plan that fits, or archive the extras first.`,
+      }
+    }
+
     const { data: org } = await supabase
       .from('organizations')
       .select('stripe_customer_id, billing_email')
