@@ -24,22 +24,23 @@ const CLAIM_STALE_AFTER_MS = 2 * 60 * 1000
  * applies and returns data; the other affects zero rows. That's the whole
  * lock: no advisory lock or explicit transaction needed.
  */
+type VendorConnectClaim =
+  | { claimed: false }
+  | { claimed: true; claimedAt: string; accountId: string | null; alreadySent: boolean }
+
 async function claimVendorConnectInvite(
   supabase: ServiceClient,
   vendorId: string,
   orgId: string
-): Promise<{
-  claimed:     boolean
-  accountId:   string | null
-  alreadySent: boolean
-}> {
+): Promise<VendorConnectClaim> {
+  const now = new Date().toISOString()
   const staleBefore = new Date(Date.now() - CLAIM_STALE_AFTER_MS).toISOString()
 
   // A failed claim returned { claimed: false }, identical to "another run got
   // there first" — so the vendor's Connect invite was silently never sent.
   const claimedRes = await supabase
     .from('vendors')
-    .update({ stripe_connect_invite_claimed_at: new Date().toISOString() })
+    .update({ stripe_connect_invite_claimed_at: now })
     .eq('id', vendorId)
     .eq('org_id', orgId)
     .or(`stripe_connect_invite_claimed_at.is.null,stripe_connect_invite_claimed_at.lt.${staleBefore}`)
@@ -48,27 +49,120 @@ async function claimVendorConnectInvite(
 
   const claimed = unwrap(claimedRes, { site: 'lib.stripe.vendor-connect-invite.claim', orgId })
 
-  if (!claimed) return { claimed: false, accountId: null, alreadySent: false }
+  if (!claimed) return { claimed: false }
 
   return {
     claimed:     true,
+    claimedAt:   now,
     accountId:   claimed.stripe_connect_account_id,
     alreadySent: !!claimed.stripe_connect_invite_sent_at,
   }
 }
 
+/**
+ * Releases the claim this attempt holds — and ONLY the claim this attempt
+ * holds. Fenced on the exact claimedAt timestamp claimVendorConnectInvite()
+ * returned: without it, an attempt that runs past CLAIM_STALE_AFTER_MS (slow
+ * Stripe API, slow email send) would clear whatever claim is on the row by
+ * the time its `finally` runs — which, once the claim has gone stale, may
+ * belong to a second attempt that reclaimed it and is still in flight. That
+ * second attempt's claim would be released out from under it, letting a
+ * third attempt claim the same vendor while the second is still working.
+ */
 async function releaseVendorConnectInviteClaim(
   supabase: ServiceClient,
   vendorId: string,
-  orgId: string
+  orgId: string,
+  claimedAt: string
 ): Promise<void> {
   const { error } = await supabase
     .from('vendors')
     .update({ stripe_connect_invite_claimed_at: null })
     .eq('id', vendorId)
     .eq('org_id', orgId)
+    .eq('stripe_connect_invite_claimed_at', claimedAt)
 
-  reportQueryError(error, { site: 'lib.stripe.vendor-connect-invite.release-claim', orgId })
+  // Non-fatal by design — CLAIM_STALE_AFTER_MS reclaims an unreleased claim
+  // on its own — but a release that silently never happens should still be
+  // visible rather than only inferred from a stalled vendor two minutes later.
+  reportQueryError(error, { site: 'lib.stripe.vendor-connect-invite.release', orgId })
+}
+
+/**
+ * Returns the vendor's existing Stripe Express account id, or creates one and
+ * persists it immediately — independent of whether the email send that
+ * follows succeeds — so a retry after a Resend failure reuses this account
+ * instead of creating (and orphaning) a second one. Shared by
+ * ensureVendorConnectInvited() and resendVendorConnectInvite(), which were
+ * previously two copies of the same create-then-persist block.
+ *
+ * A failed persist throws (via unwrap) rather than returning the unsaved id:
+ * the caller must not proceed to send an invite for an account id the DB
+ * doesn't have.
+ */
+async function getOrCreateVendorStripeAccount(
+  supabase: ServiceClient,
+  claim: { accountId: string | null },
+  params: { vendorId: string; orgId: string; vendorEmail: string },
+  site: string
+): Promise<string> {
+  if (claim.accountId) return claim.accountId
+
+  const account = await stripe.accounts.create({
+    type:  'express',
+    email: params.vendorEmail,
+    metadata: {
+      vendor_id: params.vendorId,
+      org_id:    params.orgId,
+    },
+    capabilities: {
+      card_payments: { requested: true },
+      transfers:     { requested: true },
+    },
+  })
+
+  // .select().maybeSingle() rather than a bare .update(): an UPDATE that
+  // matches zero rows (the vendor was deleted/reassigned after the claim)
+  // resolves with { data: null, error: null } — no error at all — so a bare
+  // unwrap() would read that as success and return an account id that was
+  // never actually saved anywhere.
+  const persistAccountRes = await supabase
+    .from('vendors')
+    .update({ stripe_connect_account_id: account.id })
+    .eq('id', params.vendorId)
+    .eq('org_id', params.orgId)
+    .select('id')
+    .maybeSingle()
+  const persisted = unwrap(persistAccountRes, { site, orgId: params.orgId })
+
+  if (!persisted) {
+    throw new Error(
+      `Vendor ${params.vendorId} matched zero rows while persisting its new Stripe Connect account ${account.id} — the account exists in Stripe but was not saved.`
+    )
+  }
+
+  return account.id
+}
+
+/**
+ * Marks the invite as sent. The email has already gone out by the time this
+ * is called, so a failure here is logged rather than thrown — losing it only
+ * means the next attempt re-sends an invite that was already delivered, not
+ * that nothing happened.
+ */
+async function markVendorConnectInviteSent(
+  supabase: ServiceClient,
+  vendorId: string,
+  orgId: string,
+  site: string
+): Promise<void> {
+  const { error } = await supabase
+    .from('vendors')
+    .update({ stripe_connect_invite_sent_at: new Date().toISOString() })
+    .eq('id', vendorId)
+    .eq('org_id', orgId)
+
+  reportQueryError(error, { site, orgId })
 }
 
 export interface EnsureVendorConnectInvitedParams {
@@ -117,36 +211,12 @@ export async function ensureVendorConnectInvited(
       return { invited: false }
     }
 
-    let accountId = claim.accountId
-
-    if (!accountId) {
-      const account = await stripe.accounts.create({
-        type:  'express',
-        email: params.vendorEmail,
-        metadata: {
-          vendor_id: params.vendorId,
-          org_id:    params.orgId,
-        },
-        capabilities: {
-          card_payments: { requested: true },
-          transfers:     { requested: true },
-        },
-      })
-      accountId = account.id
-
-      // Persisted immediately — independent of whether the email send below
-      // succeeds — so a retry after a Resend failure reuses this account
-      // instead of creating a second, untracked one.
-      const persistAccountRes = await supabase
-        .from('vendors')
-        .update({ stripe_connect_account_id: accountId })
-        .eq('id', params.vendorId)
-        .eq('org_id', params.orgId)
-      unwrap(persistAccountRes, {
-        site: 'lib.stripe.vendor-connect-invite.persist-account-id',
-        orgId: params.orgId,
-      })
-    }
+    await getOrCreateVendorStripeAccount(
+      supabase,
+      claim,
+      params,
+      'lib.stripe.vendor-connect-invite.persist-account'
+    )
 
     const onboardingUrl = `${process.env.NEXT_PUBLIC_APP_URL}/api/vendor-connect/${params.vendorConnectToken}/onboard`
 
@@ -163,19 +233,16 @@ export async function ensureVendorConnectInvited(
       }),
     })
 
-    const persistSentAtRes = await supabase
-      .from('vendors')
-      .update({ stripe_connect_invite_sent_at: new Date().toISOString() })
-      .eq('id', params.vendorId)
-      .eq('org_id', params.orgId)
-    unwrap(persistSentAtRes, {
-      site: 'lib.stripe.vendor-connect-invite.persist-sent-at',
-      orgId: params.orgId,
-    })
+    await markVendorConnectInviteSent(
+      supabase,
+      params.vendorId,
+      params.orgId,
+      'lib.stripe.vendor-connect-invite.mark-sent'
+    )
 
     return { invited: true }
   } finally {
-    await releaseVendorConnectInviteClaim(supabase, params.vendorId, params.orgId)
+    await releaseVendorConnectInviteClaim(supabase, params.vendorId, params.orgId, claim.claimedAt)
   }
 }
 
@@ -213,23 +280,12 @@ export async function resendVendorConnectInvite(
   }
 
   try {
-    let accountId = claim.accountId
-
-    if (!accountId) {
-      const account = await stripe.accounts.create({
-        type:  'express',
-        email: params.vendorEmail,
-        metadata: {
-          vendor_id: params.vendorId,
-          org_id:    params.orgId,
-        },
-        capabilities: {
-          card_payments: { requested: true },
-          transfers:     { requested: true },
-        },
-      })
-      accountId = account.id
-    }
+    await getOrCreateVendorStripeAccount(
+      supabase,
+      claim,
+      params,
+      'lib.stripe.vendor-connect-invite.resend-persist-account'
+    )
 
     const onboardingUrl = `${process.env.NEXT_PUBLIC_APP_URL}/api/vendor-connect/${params.vendorConnectToken}/onboard`
 
@@ -246,19 +302,13 @@ export async function resendVendorConnectInvite(
       }),
     })
 
-    const resendPersistRes = await supabase
-      .from('vendors')
-      .update({
-        stripe_connect_account_id:     accountId,
-        stripe_connect_invite_sent_at: new Date().toISOString(),
-      })
-      .eq('id', params.vendorId)
-      .eq('org_id', params.orgId)
-    unwrap(resendPersistRes, {
-      site: 'lib.stripe.vendor-connect-invite.resend-persist',
-      orgId: params.orgId,
-    })
+    await markVendorConnectInviteSent(
+      supabase,
+      params.vendorId,
+      params.orgId,
+      'lib.stripe.vendor-connect-invite.resend-mark-sent'
+    )
   } finally {
-    await releaseVendorConnectInviteClaim(supabase, params.vendorId, params.orgId)
+    await releaseVendorConnectInviteClaim(supabase, params.vendorId, params.orgId, claim.claimedAt)
   }
 }
