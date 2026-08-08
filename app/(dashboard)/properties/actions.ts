@@ -11,7 +11,7 @@ import { doorCodeArgs } from '@/lib/properties/door-code'
 import { logAuditEvent } from '@/lib/audit'
 import { applyMasterChecklistToProperty } from '@/lib/checklists/apply-master-template'
 import { reportError } from '@/lib/observability/report-error'
-import { reportQueryError, unwrap, unwrapList, isRealQueryError } from '@/lib/supabase/unwrap'
+import { reportQueryError, unwrapList, isRealQueryError } from '@/lib/supabase/unwrap'
 import { parseMoneyAmount } from '@/lib/schemas/money'
 import type { AssetType, Enums, MemberRole, TablesInsert } from '@/types/database'
 
@@ -478,11 +478,17 @@ export async function markStepComplete(
       // anywhere. The upsert below is already idempotent, so the loosened
       // comparison cannot double-fire.
       if (fullyConfigured.length >= 2) {
+        // Non-fatal: the step the caller asked for (mark_property_setup_step
+        // above) already committed. Throwing here would report this whole
+        // action as failed to the caller over a purely cosmetic milestone
+        // flag — and the recompute above makes it self-healing on the next
+        // property that crosses the threshold, same reasoning as
+        // turnover-events.ts's record-completion-milestones step.
         const milestoneRes = await supabase.from('org_milestones').upsert(
           { org_id: membership.org_id, milestone: 'second_property_configured' },
           { onConflict: 'org_id,milestone', ignoreDuplicates: true }
         )
-        unwrap(milestoneRes, { site: 'serverAction.properties.markStepComplete.milestone', orgId: membership.org_id })
+        reportQueryError(milestoneRes.error, { site: 'serverAction.properties.markStepComplete.milestone', orgId: membership.org_id })
       }
     }
 

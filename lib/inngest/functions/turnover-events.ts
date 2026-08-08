@@ -8,7 +8,7 @@ import { renderPmAlert } from '@/lib/resend/emails/pm-alert'
 import { logAuditEvent } from '@/lib/audit'
 import { incrementCounter } from '@/lib/observability/metrics'
 import { unwrapJoin, unwrapJoinArray } from '@/lib/utils/supabase-joins'
-import { throwIfAnyQueryFailed, isRealQueryError, unwrap, unwrapCount } from '@/lib/supabase/unwrap'
+import { throwIfAnyQueryFailed, isRealQueryError, reportQueryError, unwrapCount } from '@/lib/supabase/unwrap'
 
 // Durations beyond this are treated as tracking errors (e.g. a checklist item
 // completed a day late) and excluded from the auto-assignment learning loop.
@@ -271,9 +271,19 @@ export const handleTurnoverCompleted = inngest.createFunction(
     await step.run('notify-pm-of-completion', async () => {
       const supabase = createServiceClient({ system: 'inngest:turnover-events' })
 
+      // Non-fatal: the title/subtitle below already fall back gracefully via
+      // `property?.name` — this step is a notification, not the completion
+      // itself — and a throw here would abort the whole function run
+      // (Inngest step retries exhausted ⇒ function fails) before
+      // post-cleaning-fee-expense, a later step in this same function, ever
+      // runs. A missing display name must never block the cleaning-fee
+      // expense from posting.
       const propertyRes = await supabase
         .from('properties').select('name').eq('id', property_id).eq('org_id', org_id).single()
-      const property = unwrap(propertyRes, { site: 'inngest.turnover-events.notify-pm-of-completion', orgId: org_id })
+      if (isRealQueryError(propertyRes.error)) {
+        reportQueryError(propertyRes.error, { site: 'inngest.turnover-events.notify-pm-of-completion', orgId: org_id })
+      }
+      const property = propertyRes.data
 
       await createPmNotification(supabase, {
         orgId:     org_id,

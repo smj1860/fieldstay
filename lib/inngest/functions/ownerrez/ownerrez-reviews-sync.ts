@@ -7,6 +7,7 @@ import type { OwnerRezReview } from '@/lib/integrations/types'
 import { logAuditEvent }       from '@/lib/audit'
 import { mergeIntegrationConnectionMetadata } from '@/lib/integrations/connection-metadata'
 import { asJsonObject } from '@/lib/json'
+import { reportError } from '@/lib/observability/report-error'
 import type { Json } from '@/types/database'
 
 /**
@@ -260,9 +261,32 @@ export const ownerRezReviewsSyncConnection = inngest.createFunction(
             metadata:   { provider_id: 'ownerrez', reason: 'token_revoked' },
           })
 
-          // Fire PM notification — throttled to once per 4 hours per connection
+          // Fire PM notification — throttled to once per 4 hours per
+          // connection, and never allowed to fail this step.
+          //
+          // notifyRevokedThrottled throws on a milestone lookup or upsert
+          // error. Letting that escape costs more than the notification it
+          // is trying to send: everything above in this callback (the
+          // metadata patch recording the revocation, and the
+          // integration.sync_failed audit event) has ALREADY run, and a
+          // step.run retry re-executes the whole callback — so each retry
+          // writes another audit row for one revocation before the run
+          // finally fails. The revocation is recorded either way; only the
+          // notification is at risk, so it degrades to a logged error.
+          //
+          // NB: the isolation is worth having, but it is no longer a
+          // blast-radius fix. This function handles ONE connection per run
+          // (the cron dispatches an event per connection — see the
+          // dispatcher's header above), so a throw here has not been able to
+          // skip other tenants since that split. It stops duplicate audit
+          // rows and a spuriously failed run, nothing wider.
           if (existing?.id) {
-            await notifyRevokedThrottled(admin, userId, orgId, existing.id, humanError)
+            try {
+              await notifyRevokedThrottled(admin, userId, orgId, existing.id, humanError)
+            } catch (notifyErr) {
+              logger.error(`[OwnerRez:${userId}] Revocation notification failed: ${notifyErr instanceof Error ? notifyErr.message : String(notifyErr)}`)
+              reportError(notifyErr, { site: 'inngest.ownerrez-reviews-sync.notify-revoked', orgId })
+            }
           }
         })
         return { user_id: userId, status: 'revoked' as const }
