@@ -1,16 +1,18 @@
-import { Redis } from '@upstash/redis'
+import { getRedisIfConfigured } from '@/lib/redis'
 import { WEATHER_TIMEOUT_MS, isTimeoutError } from '@/lib/http/timeout'
 
-// Redis.fromEnv() reads the standard UPSTASH_REDIS_REST_URL/_TOKEN names,
-// which this project doesn't use — see lib/rate-limit.ts's matching
-// upstash_fieldstay_KV_REST_API_* vars. fromEnv() logged "unable to find
-// environment variable" warnings on every /api/inngest request that
-// imports this module even though the actual credentials were present
-// under the real names.
-const redis = new Redis({
-  url:   process.env.upstash_fieldstay_KV_REST_API_URL!,
-  token: process.env.upstash_fieldstay_KV_REST_API_TOKEN!,
-})
+// Client comes from lib/redis.ts, which reads this project's
+// upstash_fieldstay_KV_REST_API_* names rather than the standard
+// UPSTASH_REDIS_REST_* ones Redis.fromEnv() expects — fromEnv() logged
+// "unable to find environment variable" on every /api/inngest request that
+// imports this module even though the credentials were present under the
+// real names.
+//
+// getRedisIfConfigured() rather than getRedis(): this is purely a cache, so
+// "no Redis" is a cache miss, not an error. Calling an unconfigured client
+// turned every weather lookup in preview into a thrown
+// "Failed to parse URL from /pipeline".
+
 
 export type SlotType =
   | 'morning_brew'
@@ -77,7 +79,8 @@ export async function getWeatherForLocation(
 ): Promise<WeatherContext> {
   const cacheKey = getCacheKey(lat, lng)
 
-  const cached = await redis.get<WeatherContext>(cacheKey)
+  const redis  = getRedisIfConfigured()
+  const cached = redis ? await redis.get<WeatherContext>(cacheKey) : null
   if (cached) return cached
 
   const apiKey = process.env.TOMORROW_IO_API_KEY
@@ -156,7 +159,7 @@ export async function getWeatherForLocation(
     fetchedAt:    new Date().toISOString(),
   }
 
-  await redis.setex(cacheKey, CACHE_TTL_SECONDS, JSON.stringify(context))
+  if (redis) await redis.setex(cacheKey, CACHE_TTL_SECONDS, JSON.stringify(context))
   return context
 }
 

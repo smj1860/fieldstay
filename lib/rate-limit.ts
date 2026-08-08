@@ -1,10 +1,10 @@
 import { Ratelimit } from '@upstash/ratelimit'
-import { Redis }     from '@upstash/redis'
+import { getRedis, upstashConfigured } from '@/lib/redis'
 
-const redis = new Redis({
-  url:   process.env.upstash_fieldstay_KV_REST_API_URL!,
-  token: process.env.upstash_fieldstay_KV_REST_API_TOKEN!,
-})
+// The shared client from lib/redis.ts — see that module for why there is
+// exactly one. Kept as a local binding so the limiter definitions below and
+// the `export { redis }` re-export are unchanged.
+const redis = getRedis()
 
 /**
  * Exported so token-refresh paths can take a short mutual-exclusion lock.
@@ -61,13 +61,13 @@ export interface LimitDecision {
 /**
  * True when both Upstash env vars are present. Exported so a caller that
  * needs to skip surrounding work (not just the limiter call) can ask.
+ *
+ * Re-exported from lib/redis.ts rather than defined here: it is now consulted
+ * by the SMS nudge budget, the weather cache and the OwnerRez breaker too, and
+ * none of those should have to import the rate limiter to ask. The re-export
+ * keeps every existing `from '@/lib/rate-limit'` import and test mock working.
  */
-export function upstashConfigured(): boolean {
-  return (
-    !!process.env.upstash_fieldstay_KV_REST_API_URL &&
-    !!process.env.upstash_fieldstay_KV_REST_API_TOKEN
-  )
-}
+export { upstashConfigured }
 
 export async function checkLimit(
   limiter:    Ratelimit,

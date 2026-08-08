@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest'
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 
 // See financial-ledger-idempotency.test.ts for the canonical explanation of
 // the allowlist-step + queue-based-supabase pattern used throughout this
@@ -10,7 +10,15 @@ vi.mock('@/lib/supabase/server', () => ({
 }))
 vi.mock('@/lib/integrations/providers/ownerrez-api', () => ({
   OwnerRezApiClient: vi.fn(),
-  getRedis: vi.fn(),
+}))
+// The Redis client moved to lib/redis.ts, the app's single construction site.
+// upstashConfigured() defaults to TRUE here so the existing breaker tests keep
+// exercising the Redis path; the preview/unconfigured behaviour has its own
+// describe block at the end of this file.
+vi.mock('@/lib/redis', () => ({
+  getRedis:            vi.fn(),
+  upstashConfigured:   vi.fn(() => true),
+  getRedisIfConfigured: vi.fn(),
 }))
 vi.mock('@/lib/audit', () => ({
   logAuditEvent: vi.fn(),
@@ -47,7 +55,8 @@ vi.mock('@/lib/inngest/client', () => ({
 import { ownerRezIncrementalSync, ownerRezConnectionSync } from '@/lib/inngest/functions/ownerrez/incremental-sync'
 import { inngest } from '@/lib/inngest/client'
 import { createServiceClient } from '@/lib/supabase/server'
-import { OwnerRezApiClient, getRedis } from '@/lib/integrations/providers/ownerrez-api'
+import { OwnerRezApiClient } from '@/lib/integrations/providers/ownerrez-api'
+import { getRedis, upstashConfigured } from '@/lib/redis'
 import { logAuditEvent } from '@/lib/audit'
 import { reportError } from '@/lib/observability/report-error'
 import { generateTurnoversForProperty } from '@/lib/turnovers/generator'
@@ -520,3 +529,79 @@ describe('ownerRezConnectionSync (per-connection handler)', () => {
     expect(supabase.from).not.toHaveBeenCalled()
   })
 })
+
+// ============================================================================
+// Upstash unconfigured (every preview deploy — the free plan is
+// production-only).
+//
+// `new Redis({ url: undefined!, token: undefined! })` constructs happily and
+// only fails at request time, building "/pipeline" as the URL and throwing
+// `TypeError: Failed to parse URL from /pipeline`. The breaker called Redis
+// three times per connection per tick regardless of whether Upstash existed,
+// and each failure was caught, logged AND reported — 590 Sentry events across
+// four days (CUSHION-D/E/H) from a condition known at boot.
+//
+// "Redis is DOWN" and "Redis was never CONFIGURED" are different states. The
+// degraded behaviour is identical (the in-memory counter is the documented
+// fallback either way); only the noise differs. The tests above cover the
+// outage path and must keep reporting. These cover the configured-away path
+// and must NOT.
+// ============================================================================
+describe('ownerRezIncrementalSync — Upstash not configured (preview)', () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+    ;(upstashConfigured as ReturnType<typeof vi.fn>).mockReturnValue(false)
+  })
+
+  afterEach(() => {
+    ;(upstashConfigured as ReturnType<typeof vi.fn>).mockReturnValue(true)
+  })
+
+  it('never touches Redis at all', async () => {
+    baseMocks()
+    const get = vi.fn()
+    ;(getRedis as ReturnType<typeof vi.fn>).mockReturnValue({ get })
+    const supabase = makeSupabase({
+      integration_connections: [{ data: [CONN_ROW], error: null }],
+    })
+    ;(createServiceClient as ReturnType<typeof vi.fn>).mockReturnValue(supabase)
+
+    const step = makeAllowlistStep(['filter-open-circuits', 'fetch-connections'])
+    await invokeHandler(ownerRezIncrementalSync, { event: {}, step, logger: makeLogger() })
+
+    expect(getRedis).not.toHaveBeenCalled()
+    expect(get).not.toHaveBeenCalled()
+  })
+
+  it('reports NOTHING to Sentry — this is the 590-event bug', async () => {
+    baseMocks()
+    ;(getRedis as ReturnType<typeof vi.fn>).mockReturnValue({ get: vi.fn() })
+    const supabase = makeSupabase({
+      integration_connections: [{ data: [CONN_ROW], error: null }],
+    })
+    ;(createServiceClient as ReturnType<typeof vi.fn>).mockReturnValue(supabase)
+
+    const step = makeAllowlistStep(['filter-open-circuits', 'fetch-connections'])
+    await invokeHandler(ownerRezIncrementalSync, { event: {}, step, logger: makeLogger() })
+
+    expect(reportError).not.toHaveBeenCalled()
+  })
+
+  it('still dispatches the sync — an absent cache must not look like an open circuit', async () => {
+    baseMocks()
+    ;(getRedis as ReturnType<typeof vi.fn>).mockReturnValue({ get: vi.fn() })
+    const supabase = makeSupabase({
+      integration_connections: [{ data: [CONN_ROW], error: null }],
+    })
+    ;(createServiceClient as ReturnType<typeof vi.fn>).mockReturnValue(supabase)
+
+    const step = makeAllowlistStep(['filter-open-circuits', 'fetch-connections'])
+    const result = await invokeHandler(ownerRezIncrementalSync, { event: {}, step, logger: makeLogger() })
+
+    // The dispatcher only returns circuit_open when it short-circuits; a
+    // normal run reports what it dispatched.
+    expect(result).toEqual({ dispatched: 1 })
+    expect(step.sendEvent).toHaveBeenCalled()
+  })
+})
+

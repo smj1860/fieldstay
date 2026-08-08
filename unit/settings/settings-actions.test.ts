@@ -42,9 +42,10 @@ vi.mock('@/lib/stripe/client', () => ({
     subscriptions: { list: vi.fn(async () => ({ data: [] })) },
   },
   PLANS: {
-    starter:   { monthlyPriceId: 'price_starter_m', annualPriceId: 'price_starter_a' },
-    growth:    { monthlyPriceId: 'price_growth_m',   annualPriceId: 'price_growth_a' },
-    portfolio: { monthlyPriceId: 'price_portfolio_m', annualPriceId: 'price_portfolio_a' },
+    hosts:     { name: 'Hosts',     maxProperties: 4,   monthlyPriceId: 'price_hosts_m',     annualPriceId: 'price_hosts_a' },
+    starter:   { name: 'Starter',   maxProperties: 15,  monthlyPriceId: 'price_starter_m',   annualPriceId: 'price_starter_a' },
+    growth:    { name: 'Growth',    maxProperties: 50,  monthlyPriceId: 'price_growth_m',    annualPriceId: 'price_growth_a' },
+    portfolio: { name: 'Portfolio', maxProperties: 100, monthlyPriceId: 'price_portfolio_m', annualPriceId: 'price_portfolio_a' },
   },
 }))
 vi.mock('@/emails/crew-invite', () => ({
@@ -583,6 +584,63 @@ describe('settings/actions', () => {
         expect.anything(),
         expect.objectContaining({ idempotencyKey: `checkout:${ORG_ID}:growth:annual` }),
       )
+    })
+
+    // ── Property-cap guard ──────────────────────────────────────────────
+    // max_properties is written straight from PLANS[plan].maxProperties by
+    // the Stripe webhook, with no reference to what the org actually has. So
+    // buying an under-sized plan left an org permanently over cap: existing
+    // properties keep working (the cap is only checked when ADDING one), so
+    // nothing breaks loudly — they just pay for less than they use, forever,
+    // with no signal. Adding the $89 Hosts tier made it one click away for a
+    // trialing org sitting at the 15-property trial cap.
+    it('refuses a plan that covers fewer properties than the org already has', async () => {
+      const supabase = makeSupabase({
+        properties: [{ data: null, error: null, count: 10 } as never],
+      })
+      mockRoleAuthed(supabase)
+
+      const result = await createCheckoutSession('hosts', 'monthly')
+
+      expect(result).toEqual({
+        error: 'Hosts covers up to 4 properties, but you have 10 active properties. ' +
+               'Choose a plan that fits, or archive the extras first.',
+      })
+      // Refused BEFORE any Stripe call — no session to abandon, no customer
+      // record touched.
+      expect(stripe.checkout.sessions.create).not.toHaveBeenCalled()
+      expect(stripe.subscriptions.list).not.toHaveBeenCalled()
+    })
+
+    it('allows a plan the org fits exactly at', async () => {
+      // Boundary: 4 properties on a 4-property plan is COVERED, not over. The
+      // add-property gate uses >= because it asks "can I fit one MORE"; this
+      // asks "does this plan cover what I have" — a different question.
+      const supabase = makeSupabase({
+        properties: [{ data: null, error: null, count: 4 } as never],
+        organizations: [{ data: { stripe_customer_id: null, billing_email: 'pm@example.com' }, error: null }],
+        integration_connections: [{ data: null, error: null }],
+      })
+      mockRoleAuthed(supabase)
+      vi.mocked(stripe.checkout.sessions.create).mockResolvedValue({ url: 'https://checkout' } as never)
+
+      const result = await createCheckoutSession('hosts', 'monthly')
+
+      expect(result).toEqual({ redirectUrl: 'https://checkout' })
+    })
+
+    it('fails CLOSED when the property count read errors — never bills a plan it could not verify', async () => {
+      // Guessing "probably fits" here charges a customer for a plan that may
+      // not cover them, which is the exact outcome the guard exists to stop.
+      const supabase = makeSupabase({
+        properties: [{ data: null, error: { message: 'statement timeout', code: '57014' } } as never],
+      })
+      mockRoleAuthed(supabase)
+
+      const result = await createCheckoutSession('hosts', 'monthly')
+
+      expect(result).toEqual({ error: 'We could not verify your property count. Please try again.' })
+      expect(stripe.checkout.sessions.create).not.toHaveBeenCalled()
     })
 
     it('does not query Stripe at all for an org with no customer yet', async () => {

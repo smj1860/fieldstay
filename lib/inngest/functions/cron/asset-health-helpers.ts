@@ -1,6 +1,6 @@
 import type { SupabaseClient } from '@supabase/supabase-js'
 import { calculateHealthScore } from '@/lib/assets/health-score'
-import { unwrap } from '@/lib/supabase/unwrap'
+import { unwrap, type PostgrestResult } from '@/lib/supabase/unwrap'
 
 /**
  * Helpers for dailyAssetHealth's per-org scoring step and the Bayesian
@@ -105,22 +105,60 @@ export function scoreAssets(
   return { updates, crossings }
 }
 
-/** Single round trip per org — upsert with onConflict: 'id' only updates the columns provided. */
-export async function persistScores(supabase: SupabaseClient, updates: ScoreUpdate[]): Promise<void> {
-  if (!updates.length) return
+/**
+ * Writes the day's scores for one org. Single round trip, and it can only ever
+ * UPDATE — it cannot create a property_assets row.
+ *
+ * This was an `.upsert(..., { onConflict: 'id' })` under the comment "upsert
+ * with onConflict: 'id' only updates the columns provided". That belief is
+ * wrong, and it meant the score write NEVER once succeeded. PostgREST emits
+ * INSERT ... ON CONFLICT (id) DO UPDATE, and Postgres validates NOT NULL on
+ * the PROPOSED tuple before resolving the conflict — so a payload of
+ * (id, health_score, health_score_updated_at) fails 23502 on org_id every
+ * time, even though the row exists and DO UPDATE is the branch that would
+ * have run. Not a race, not intermittent: a 100% failure, reproduced against
+ * the live schema on an id that already existed.
+ *
+ * It was invisible for sixteen days because the write result was discarded;
+ * the 2026-08-07 read-without-error burn-down is what turned it into a Sentry
+ * issue, not what broke it.
+ *
+ * UPDATE ... FROM jsonb_to_recordset is the shape PostgREST cannot express —
+ * per-row values in one statement — so it lives in an RPC
+ * (20260808180000_apply_asset_health_scores_rpc.sql). That RPC is
+ * SECURITY DEFINER and pins every row it touches to p_org_id.
+ *
+ * Returns the number of rows actually updated. A shortfall means assets went
+ * away between the read and the write, which is normal enough not to throw and
+ * useful enough not to swallow — the caller logs it.
+ */
+export async function persistScores(
+  supabase: SupabaseClient,
+  orgId:    string,
+  updates:  ScoreUpdate[],
+): Promise<number> {
+  if (!updates.length) return 0
 
-  const res = await supabase
-    .from('property_assets')
-    .upsert(
-      updates.map((u) => ({
-        id:                      u.id,
-        health_score:            u.health_score,
-        health_score_updated_at: u.health_score_updated_at,
-      })),
-      { onConflict: 'id' }
-    )
+  const res = await supabase.rpc('apply_asset_health_scores', {
+    p_org_id:  orgId,
+    p_updates: updates.map((u) => ({
+      id:                      u.id,
+      health_score:            u.health_score,
+      health_score_updated_at: u.health_score_updated_at,
+    })),
+  })
 
-  unwrap(res, { site: 'inngest.asset-health.persistScores' })
+  // orgId and the attempt count are on the context now: the old call passed
+  // only `site`, so the Sentry event named the failing query but not the
+  // customer it belonged to — the reason the daily failure could be seen but
+  // not acted on.
+  const updated = unwrap(res as PostgrestResult<number>, {
+    site:  'inngest.asset-health.persistScores',
+    orgId,
+    extra: { assets_attempted: updates.length },
+  })
+
+  return updated ?? 0
 }
 
 // ── Bayesian weight nudge ─────────────────────────────────────────────────────

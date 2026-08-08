@@ -65,14 +65,25 @@ function priceId(name: string): string | null {
 }
 
 export const PLANS = {
+  hosts: {
+    name:           'Hosts',
+    monthlyPriceId: priceId('STRIPE_PRICE_HOSTS_MONTHLY'),
+    annualPriceId:  priceId('STRIPE_PRICE_HOSTS_ANNUAL'),
+    maxProperties:  4,
+    monthlyPrice:   89,
+    annualPrice:    890,
+    description:    '1\u20134 properties',
+  },
   starter: {
     name:           'Starter',
     monthlyPriceId: priceId('STRIPE_PRICE_STARTER_MONTHLY'),
     annualPriceId:  priceId('STRIPE_PRICE_STARTER_ANNUAL'),
     maxProperties:  15,
+    // Cap unchanged at 15 — only the FLOOR moved when 'hosts' was added
+    // below it, so no existing org's max_properties changes.
     monthlyPrice:   199,
     annualPrice:    1990,
-    description:    'Up to 15 properties',
+    description:    '5\u201315 properties',
   },
   growth: {
     name:           'Growth',
@@ -104,6 +115,17 @@ export const PLANS = {
 } as const
 
 export type PlanKey = keyof typeof PLANS
+
+/**
+ * The plans a customer can self-serve check out. Enterprise is excluded — it
+ * is contact-for-pricing and carries no price ids.
+ *
+ * Derived rather than hand-written: this union was spelled out literally in
+ * createCheckoutSession's signature AND in settings-tabs' handleCheckout, so
+ * adding 'hosts' to PLANS produced two type errors in unrelated files that a
+ * reader had to fix by hand. Now adding a plan to PLANS is one edit.
+ */
+export type CheckoutPlanKey = Exclude<PlanKey, 'enterprise'>
 
 export function getPlanByPriceId(priceId: string): PlanKey | null {
   for (const [key, plan] of Object.entries(PLANS)) {

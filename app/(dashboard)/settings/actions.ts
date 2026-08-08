@@ -6,7 +6,7 @@ import { redirect } from 'next/navigation'
 import { cookies } from 'next/headers'
 import { requireOrgMember, requireOrgRole } from '@/lib/auth'
 import { createClient, createReauthClient } from '@/lib/supabase/server'
-import { stripe, PLANS } from '@/lib/stripe/client'
+import { stripe, PLANS, type CheckoutPlanKey } from '@/lib/stripe/client'
 import { inngest } from '@/lib/inngest/client'
 import { geocodeZip } from '@/lib/geocoding'
 import { logAuditEvent, logAuditEvents } from '@/lib/audit'
@@ -1332,7 +1332,7 @@ const LIVE_SUBSCRIPTION_STATUSES = new Set<string>([
 ])
 
 export async function createCheckoutSession(
-  planKey: 'starter' | 'growth' | 'portfolio',
+  planKey: CheckoutPlanKey,
   interval: 'monthly' | 'annual'
 ): Promise<SettingsActionState> {
   try {
@@ -1347,6 +1347,54 @@ export async function createCheckoutSession(
       : planDef.monthlyPriceId
 
     if (!priceId) return { error: 'Plan not available' }
+
+    // A plan whose cap is BELOW what the org already runs must not be
+    // purchasable. max_properties is written straight from
+    // PLANS[plan].maxProperties by the Stripe webhook with no reference to
+    // what the org actually has, so buying an under-sized plan left them
+    // permanently over cap: the existing properties keep working (the cap is
+    // only checked when ADDING one), so nothing breaks loudly — they simply
+    // pay for less than they use, indefinitely, with no signal.
+    //
+    // Adding the $89 Hosts tier is what made this easy to hit: a trialing org
+    // builds up to the 15-property trial cap and the cheapest card is now one
+    // click away. The same hole existed before for any downgrade.
+    //
+    // `>` not `>=`: the add-property gate asks "can I fit one MORE", so it
+    // uses >=. This asks "does this plan cover what I already have", and an
+    // org with exactly 4 properties is covered by a 4-property plan.
+    //
+    // is_active: true matches createProperty's own count — the two gates must
+    // agree on what a property is or they contradict each other.
+    const { count: activeProperties, error: propertyCountError } = await supabase
+      .from('properties')
+      .select('id', { count: 'exact', head: true })
+      .eq('org_id', membership.org_id)
+      .eq('is_active', true)
+
+    if (propertyCountError) {
+      // Fail CLOSED. Guessing "probably fits" here bills a customer for a
+      // plan that may not cover them, which is the exact outcome this guard
+      // exists to prevent.
+      console.error('[createCheckoutSession] property count failed', propertyCountError.message)
+      reportError(propertyCountError, {
+        site: 'serverAction.settings.createCheckoutSession.propertyCount',
+        orgId: membership.org_id,
+      })
+      return { error: 'We could not verify your property count. Please try again.' }
+    }
+
+    const propertyCount = activeProperties ?? 0
+    if (propertyCount > planDef.maxProperties) {
+      // Always plural: reaching here needs propertyCount > maxProperties, and
+      // the smallest plan's cap is 4, so the count is at least 5. A
+      // singular/plural ternary would be an unreachable branch.
+      return {
+        error:
+          `${planDef.name} covers up to ${planDef.maxProperties} properties, but you have ` +
+          `${propertyCount} active properties. Choose a plan that fits, or archive the extras first.`,
+      }
+    }
 
     const orgRes = await supabase
       .from('organizations')

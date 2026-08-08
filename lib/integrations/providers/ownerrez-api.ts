@@ -11,7 +11,6 @@
  */
 
 import { unwrap } from '@/lib/supabase/unwrap'
-import { Redis }               from '@upstash/redis'
 import { createServiceClient }  from '@/lib/supabase/server'
 import { readIntegrationToken }  from '../vault'
 import { TokenRevokedError, RateLimitError } from '../types'
@@ -27,6 +26,7 @@ import type {
 
 import { reportError } from '@/lib/observability/report-error'
 import { PMS_API_TIMEOUT_MS } from '@/lib/http/timeout'
+import { getRedis, upstashConfigured } from '@/lib/redis'
 const BASE_URL   = 'https://api.ownerrez.com'
 const PROVIDER   = 'ownerrez'
 
@@ -52,18 +52,18 @@ const RATE_LIMIT_BUDGET = 270      // 270/300 — 10% headroom before auto-disab
 const PER_CONNECTION_BUDGET  = 135
 const CONTENTION_THRESHOLD   = 135
 
-let _redis: Redis | null = null
-export function getRedis(): Redis {
-  if (!_redis) {
-    _redis = new Redis({
-      url:   process.env.upstash_fieldstay_KV_REST_API_URL!,
-      token: process.env.upstash_fieldstay_KV_REST_API_TOKEN!,
-    })
-  }
-  return _redis
-}
-
 async function checkAndIncrementRequestBudget(userId: string): Promise<void> {
+  // Without Upstash there is no shared counter, so the 270/300 window cannot
+  // be enforced at all. Skipping the check is the only option that lets the
+  // sync run — and it is what effectively happened already, except as a thrown
+  // "Failed to parse URL from /pipeline" that killed the request outright.
+  //
+  // Safe here in a way the SMS budget is not: this ceiling protects OwnerRez's
+  // own rate limit, and OwnerRez enforces it itself with a 429 that
+  // RateLimitError already handles. The SMS budget guards real spend with no
+  // second line of defence, which is why that one fails closed instead.
+  if (!upstashConfigured()) return
+
   const redis    = getRedis()
   const connKey  = `${RATE_LIMIT_KEY}:conn:${userId}`
   const pipeline = redis.pipeline()
