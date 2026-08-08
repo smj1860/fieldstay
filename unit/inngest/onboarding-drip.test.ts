@@ -16,6 +16,9 @@ vi.mock('@/emails/guidebook-feature-announcement', () => ({
 vi.mock('@/emails/reengagement-drip', () => ({
   renderReengagementEmail: vi.fn(async () => '<html>reengagement</html>'),
 }))
+vi.mock('@/lib/observability/report-error', () => ({
+  reportError: vi.fn(),
+}))
 
 import { onboardingDrip } from '@/lib/inngest/functions/onboarding-drip'
 import { createServiceClient } from '@/lib/supabase/server'
@@ -23,6 +26,7 @@ import { resend } from '@/lib/resend/client'
 import { renderWelcomeEmailV2 } from '@/emails/welcome-v2'
 import { renderGuidebookFeatureAnnouncementEmail } from '@/emails/guidebook-feature-announcement'
 import { renderReengagementEmail } from '@/emails/reengagement-drip'
+import { reportError } from '@/lib/observability/report-error'
 import { invokeHandler } from './test-helpers'
 
 // Queue-based mock: each `.from(table)` call consumes the next queued
@@ -38,6 +42,7 @@ function makeSupabase(queued: Record<string, { data?: unknown; error?: unknown }
     chain.select = () => chain
     chain.eq     = () => chain
     chain.limit  = () => chain
+    chain.gte    = () => chain
 
     const resolveNext = () => {
       const idx = counters[table] ?? 0
@@ -138,10 +143,15 @@ describe('onboardingDrip', () => {
     ])
   })
 
-  it('reports the connected variant with different subject/copy when a PMS is linked by day 7', async () => {
+  // reviewCount used to be the literal `3` at the call site, so every
+  // connected PM was told "3 came in this week — RepuGuard already has draft
+  // responses ready for your approval" no matter what was in their account:
+  // a false factual claim in a commercial email, disproved by clicking the CTA.
+  it('reports the connected variant with the REAL review count when a PMS is linked by day 7', async () => {
     const supabase = makeSupabase({
       profiles: [notUnsubscribed, notUnsubscribed, notUnsubscribed],
       integration_connections: [{ data: [{ provider_id: 'ownerrez' }], error: null }],
+      reviews: [{ data: null, error: null, count: 4 } as unknown as { data: unknown; error: unknown }],
     })
     ;(createServiceClient as ReturnType<typeof vi.fn>).mockReturnValue(supabase)
     ;(resend.emails.send as ReturnType<typeof vi.fn>).mockResolvedValue({ data: { id: 'email_1' }, error: null })
@@ -153,10 +163,52 @@ describe('onboardingDrip', () => {
     })
 
     expect(result).toEqual({ org_id: 'org_1', emails_sent: 3, variant: 'connected' })
-    expect(renderReengagementEmail).toHaveBeenCalledWith(expect.objectContaining({ isConnected: true }))
+    expect(renderReengagementEmail).toHaveBeenCalledWith(
+      expect.objectContaining({ isConnected: true, reviewCount: 4 }),
+    )
 
     const lastSubject = (resend.emails.send as ReturnType<typeof vi.fn>).mock.calls.at(-1)?.[0] as { subject: string }
     expect(lastSubject.subject).toBe('Your guests left reviews this week. Did you respond?')
+  })
+
+  // The zero case is reachable now that the count is real, and the
+  // reviews-arrived subject ("Did you respond?") presumes an event that did
+  // not happen — so connected-with-no-reviews needs its own subject, not a
+  // fall-through to the "your PMS isn't connected yet" one, which is equally
+  // untrue for this recipient.
+  it('sends the connected-but-no-reviews variant when the org genuinely had none this week', async () => {
+    const supabase = makeSupabase({
+      profiles: [notUnsubscribed, notUnsubscribed, notUnsubscribed],
+      integration_connections: [{ data: [{ provider_id: 'ownerrez' }], error: null }],
+      reviews: [{ data: null, error: null, count: 0 } as unknown as { data: unknown; error: unknown }],
+    })
+    ;(createServiceClient as ReturnType<typeof vi.fn>).mockReturnValue(supabase)
+    ;(resend.emails.send as ReturnType<typeof vi.fn>).mockResolvedValue({ data: { id: 'email_1' }, error: null })
+
+    await invokeHandler(onboardingDrip, { event: dripEvent(), step: makeStep(), logger: defaultLogger })
+
+    expect(renderReengagementEmail).toHaveBeenCalledWith(
+      expect.objectContaining({ isConnected: true, reviewCount: 0 }),
+    )
+    const lastSubject = (resend.emails.send as ReturnType<typeof vi.fn>).mock.calls.at(-1)?.[0] as { subject: string }
+    expect(lastSubject.subject).toBe('One week in. FieldStay is watching your reviews.')
+  })
+
+  // No PMS connected => no review query at all, and reviewCount stays 0.
+  it('does not query reviews when no PMS is connected', async () => {
+    const supabase = makeSupabase({
+      profiles: [notUnsubscribed, notUnsubscribed, notUnsubscribed],
+      integration_connections: [noPmsConnection],
+    })
+    ;(createServiceClient as ReturnType<typeof vi.fn>).mockReturnValue(supabase)
+    ;(resend.emails.send as ReturnType<typeof vi.fn>).mockResolvedValue({ data: { id: 'email_1' }, error: null })
+
+    await invokeHandler(onboardingDrip, { event: dripEvent(), step: makeStep(), logger: defaultLogger })
+
+    expect(supabase.from).not.toHaveBeenCalledWith('reviews')
+    expect(renderReengagementEmail).toHaveBeenCalledWith(
+      expect.objectContaining({ isConnected: false, reviewCount: 0 }),
+    )
   })
 
   // These three cover the actual CAN-SPAM defect this sequence shipped with:
@@ -288,9 +340,41 @@ describe('onboardingDrip', () => {
     })
 
     expect(defaultLogger.error).toHaveBeenCalledWith(expect.stringContaining('Welcome email failed'))
-    // The sequence still proceeds — a failed send doesn't halt the drip.
-    expect(result).toEqual({ org_id: 'org_1', emails_sent: 3, variant: 'not_connected' })
+    // The Resend SDK returns { data, error } for API-level failures and only
+    // throws for transport ones, so THIS is the common failure shape — and it
+    // was the one branch that never reached Sentry.
+    expect(reportError).toHaveBeenCalledWith(
+      expect.objectContaining({ message: 'invalid recipient' }),
+      expect.objectContaining({ site: 'inngest.onboarding-drip.welcome', orgId: 'org_1' }),
+    )
+    // The sequence still proceeds — a failed send doesn't halt the drip — but
+    // the count is now what was actually sent, not a hardcoded 3.
+    expect(result).toEqual({ org_id: 'org_1', emails_sent: 2, variant: 'not_connected' })
     expect(resend.emails.send).toHaveBeenCalledTimes(3)
+  })
+
+  // A Resend validation error echoes the offending `to` address back in its
+  // message, and CLAUDE.md bans email addresses from logs — the old call site
+  // was JSON.stringify(error), which would have written it straight to Axiom.
+  it('never writes the Resend error body (which can echo the recipient address) to the log', async () => {
+    const supabase = makeSupabase({
+      profiles: [notUnsubscribed, notUnsubscribed, notUnsubscribed],
+      integration_connections: [noPmsConnection],
+    })
+    ;(createServiceClient as ReturnType<typeof vi.fn>).mockReturnValue(supabase)
+    ;(resend.emails.send as ReturnType<typeof vi.fn>)
+      .mockResolvedValueOnce({
+        data: null,
+        error: { name: 'validation_error', message: 'Invalid `to` field: pm@example.com is not a valid address' },
+      })
+      .mockResolvedValue({ data: { id: 'email_ok' }, error: null })
+
+    await invokeHandler(onboardingDrip, { event: dripEvent(), step: makeStep(), logger: defaultLogger })
+
+    for (const [msg] of defaultLogger.error.mock.calls) {
+      expect(String(msg)).not.toContain('pm@example.com')
+    }
+    expect(defaultLogger.error).toHaveBeenCalledWith('[Drip:org_1] Welcome email failed: validation_error')
   })
 
   it('logs but does not throw when the welcome send itself throws', async () => {
@@ -309,7 +393,8 @@ describe('onboardingDrip', () => {
       logger: defaultLogger,
     })
 
-    expect(defaultLogger.error).toHaveBeenCalledWith(expect.stringContaining('Welcome email threw'))
-    expect(result).toEqual({ org_id: 'org_1', emails_sent: 3, variant: 'not_connected' })
+    expect(defaultLogger.error).toHaveBeenCalledWith(expect.stringContaining('Welcome email failed'))
+    expect(reportError).toHaveBeenCalled()
+    expect(result).toEqual({ org_id: 'org_1', emails_sent: 2, variant: 'not_connected' })
   })
 })
