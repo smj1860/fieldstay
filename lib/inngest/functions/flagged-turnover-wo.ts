@@ -4,6 +4,7 @@ import { logAuditEvent }       from '@/lib/audit'
 import { getPmMembers }        from '@/lib/inngest/helpers'
 import { reportError }         from '@/lib/observability/report-error'
 import { unwrap }              from '@/lib/supabase/unwrap'
+import { fetchAllRows }        from '@/lib/inngest/paginate'
 
 export const flaggedTurnoverToWO = inngest.createFunction(
   {
@@ -102,25 +103,33 @@ export const flaggedTurnoverToWO = inngest.createFunction(
       await step.run(`notify-manager-${mgr.userId}`, async () => {
         const supabase = createServiceClient({ system: 'inngest:flagged-turnover-wo' })
 
-        const subsRes = await supabase
-          .from('push_subscriptions')
-          .select('endpoint, p256dh, auth')
-          .eq('user_id', mgr.userId)
+        // Org-scoped as well as user-scoped: push_subscriptions carries
+        // org_id, and a manager who belongs to more than one org would
+        // otherwise get every org's devices for a notification about this
+        // org's flagged turnover.
+        //
+        // Paged rather than .limit()'d because the failure mode of a cap here
+        // is silently skipping one of the manager's devices — a handful of
+        // rows in practice, so this costs one request and removes the
+        // question.
+        //
+        // Thrown rather than reported, unlike the read this replaces: the
+        // push send below already has its own try/catch for delivery
+        // failures, so a LOOKUP failure reaching here is a different thing
+        // and shouldn't share that path. Discarded, "this manager has no
+        // device registered" and "the query failed" were the same return.
+        const subs = await fetchAllRows<{ endpoint: string; p256dh: string; auth: string }>(
+          (from, to) => supabase
+            .from('push_subscriptions')
+            .select('endpoint, p256dh, auth')
+            .eq('user_id', mgr.userId)
+            .eq('org_id', org_id)
+            .order('endpoint', { ascending: true })
+            .range(from, to),
+          { label: `push_subscriptions[user=${mgr.userId}]` },
+        )
 
-        // Reported, not thrown — push is best-effort here and already has its
-        // own try/catch below. Discarded entirely, though, "this manager has
-        // no device registered" and "the subscription lookup failed" were the
-        // same silent return.
-        if (subsRes.error) {
-          console.error('[flagged-turnover-wo] push subscription lookup failed', subsRes.error.message)
-          reportError(subsRes.error, {
-            site: 'inngest.flagged-turnover-wo.push-subscriptions', orgId: org_id,
-          })
-          return
-        }
-
-        const subs = subsRes.data
-        if (!subs?.length) return
+        if (!subs.length) return
 
         const { sendPushToCrewMember } = await import('@/lib/push/client')
         try {
