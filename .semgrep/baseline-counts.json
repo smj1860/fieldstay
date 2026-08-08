@@ -97,10 +97,10 @@
     "against the exact CI invocation: `semgrep --config .semgrep/ratchet.yml",
     "--baseline-commit <merge-base> --json` returns zero results."
   ],
-  "measured_at": "2026-08-07",
+  "measured_at": "2026-08-08",
   "counts": {
     "fieldstay-supabase-discarded-result": 75,
-    "fieldstay-supabase-read-without-error": 134,
+    "fieldstay-supabase-read-without-error": 129,
     "fieldstay-supabase-read-without-error-fan-in": 0,
     "fieldstay-supabase-unbounded-select-in-list": 29,
     "fieldstay-supabase-unbounded-select-org-scoped": 94,

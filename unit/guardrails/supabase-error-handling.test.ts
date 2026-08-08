@@ -204,7 +204,15 @@ const BASELINE: Record<string, number> = {
   'lib/inngest/functions/ownerrez/ownerrez-reviews-sync.ts': 3,
   'lib/inngest/functions/platform-inventory-template-broadcast.ts': 4,
   'lib/inngest/functions/work-order-dispatch.ts': 3,
-  'lib/inngest/functions/work-order-events.ts': 8,
+  // 8 -> 3. The two that mattered were both on the money path: the
+  // work_orders read feeding the maintenance expense (discarded, a failed read
+  // produced cost null and the step returned `{ skipped: true }` — success, so
+  // no Inngest retry, and the expense never reached owner_transactions), and
+  // the owner_transactions upsert itself (its error was indistinguishable from
+  // the legitimate ignoreDuplicates no-op, so a failed insert still reported
+  // `{ posted: cost }`). The other three were the overdue-path reads, each of
+  // which failed toward "no alert" with nothing logged.
+  'lib/inngest/functions/work-order-events.ts': 3,
 
   'lib/integrations/providers/kroger-token.ts': 2,
   'lib/push/send-push.ts': 2,
