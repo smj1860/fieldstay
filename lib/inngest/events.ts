@@ -967,6 +967,19 @@ export type FieldStayEvents = {
   // generateCapexProjections. `year` is resolved once in the dispatcher so
   // every org in a run projects against the same year even if the fan-out
   // straddles midnight on Dec 31.
+  // Per-org leg of the platform inventory-template broadcast. The dispatcher
+  // used to loop `step.run` per org inside ONE invocation, so a broadcast to
+  // thousands of tenants accumulated thousands of sequential steps in a single
+  // run and died on the step ceiling partway through — with every org after
+  // the failure point never syncing, because there was no per-org retry
+  // boundary. Same dispatcher+handler split as capex/depreciation below.
+  'inventory_template/sync_org.requested': {
+    data: {
+      org_id:               string
+      platform_template_id: string
+    }
+  }
+
   'org/capex_projection.requested': {
     data: {
       org_id: string
@@ -997,6 +1010,43 @@ export type FieldStayEvents = {
     data: {
       org_id:       string
       checkin_date: string
+    }
+  }
+
+  // Gap-night stay-extension check, fanned out one per org by
+  // guidebookStayExtensionCron. The handler RE-READS its own config rather
+  // than receiving it: the dispatcher's snapshot can be minutes old, and a
+  // discount pct / gap threshold / contact method the PM has since changed
+  // must not be the one this run offers on.
+  'org/guidebook_stay_extension.requested': {
+    data: {
+      org_id: string
+    }
+  }
+
+  // Daily guidebook billing + trial evaluation, fanned out one per org by
+  // guidebookDailyMonitor. The handler does this org's Stripe renewal lookup
+  // and its trial lock-out check; the grace-period expiry is a pure date
+  // comparison and stays batched in the dispatcher. No Stripe identifiers ride
+  // on the event — the handler reads its own row.
+  'org/guidebook_daily_monitor.requested': {
+    data: {
+      org_id: string
+    }
+  }
+
+  // One OwnerRez connection's review sync, fanned out by ownerRezReviewsSync.
+  // Per CONNECTION rather than per org because the OwnerRez API client, the
+  // token, the rate-limit backoff and the sync cursor are all keyed by user_id.
+  //
+  // This is also what makes the rate-limit `step.sleep` safe: it used to sit
+  // inside a loop over every connection on the platform, so one throttled
+  // tenant stalled every tenant queued behind it. Each connection now sleeps
+  // in its own run.
+  'integration/ownerrez_reviews.connection_requested': {
+    data: {
+      user_id: string
+      org_id:  string
     }
   }
 

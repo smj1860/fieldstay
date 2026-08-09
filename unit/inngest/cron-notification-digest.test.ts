@@ -122,6 +122,45 @@ describe('notificationDigest', () => {
     ])
   })
 
+  it('counts correctly across a multi-page scan without materialising it', async () => {
+    // Platform-wide 24h volume above PostgREST's 1000-row cap is the case this
+    // scan exists for, and the counts it produces are one integer per org.
+    // fetchAllRows held every row to get there and threw outright at its 200k
+    // ceiling; foldAllRows folds a page at a time. 2,500 work orders across
+    // three orgs is three pages.
+    const workOrders = Array.from({ length: 2_500 }, (_, i) => ({
+      org_id: `org_${i % 3}`, vendor_id: 'vendor_1', status: 'assigned',
+    }))
+    const supabase = makeSupabase({
+      work_orders:      { data: workOrders, error: null },
+      review_responses: { data: [], error: null },
+      notifications:    [
+        { data: [], error: null },
+        { data: [{ id: 'n1' }, { id: 'n2' }, { id: 'n3' }], error: null },
+      ],
+    })
+    ;(createServiceClient as ReturnType<typeof vi.fn>).mockReturnValue(supabase)
+
+    await invokeHandler(notificationDigest, {
+      event:  {},
+      step:   makeStep(),
+      logger: { info: vi.fn(), error: vi.fn() },
+    })
+
+    const ranges = supabase.calls.filter((c) => c.table === 'work_orders' && c.method === 'range')
+    expect(ranges.map((c) => c.args)).toEqual([[0, 999], [1000, 1999], [2000, 2999]])
+
+    const insert = supabase.calls.find((c) => c.table === 'notifications' && c.method === 'insert')
+    const rows = insert!.args[0] as { org_id: string; title: string }[]
+    expect(rows).toHaveLength(3)
+    // 2,500 split three ways: 834 / 833 / 833 — every page counted, none twice.
+    expect(rows.map((r) => r.title).sort()).toEqual([
+      '833 work orders created today',
+      '833 work orders created today',
+      '834 work orders created today',
+    ])
+  })
+
   it('skips a digest whose dedupe key the pre-check already found (cron rerun / retry)', async () => {
     const supabase = makeSupabase({
       work_orders: {

@@ -115,7 +115,7 @@ const EXCEPTIONS: Record<string, string> = {
   // exported copy of this loop in create-work-order-helpers.ts, bypassing
   // sendQuoteRequests' dedup and vendor checks. That copy is deleted and
   // createWorkOrder calls the action.
-  'app/(dashboard)/maintenance/actions.ts:585':
+  'app/(dashboard)/maintenance/actions.ts:586':
     'Per-vendor quote_requests insert (insertQuoteRequests) — each row needs its own randomly generated quote_token before its own Inngest event fires, so batching would mean moving token generation to the caller. Bounded by the vendor count the PM ticked in one dialog, and it is the only RFQ sender in the codebase.',
   'app/(dashboard)/properties/clone-actions.ts:122':
     'Per-section checklist_template_sections insert — each section needs its own DB-generated id before the child checklist_template_items insert can reference it as section_id. Parent-before-child dependency, not a batchable read.',
@@ -127,8 +127,8 @@ const EXCEPTIONS: Record<string, string> = {
     'Real N+1 (existence-check select + insert per property) left as a known, bounded cost — deferred rather than fixed blind in the same PR that added this guardrail, since it touches live PMS-sync logic. Bounded by properties-per-org (10-50 per CLAUDE.md\'s target user).',
   'lib/asset-discovery/seed-from-amenities.ts:171':
     'Second pass (absent-asset-types) of the same function — same reasoning as line 63.',
-  'lib/inngest/functions/guidebook-stay-extension-cron.ts:98':
-    'Real N+1 (existence check, next-booking lookup, opt-in lookup, insert — 4 queries per booking) left as a known, bounded cost — deferred rather than fixed blind, touches live guest-messaging sync logic. Bounded by same-day checkouts per org per day.',
+  'lib/inngest/functions/guidebook-stay-extension-cron.ts:165':
+    'Real N+1 (existence check, next-booking lookup, opt-in lookup, insert — 4 queries per booking) left as a known, bounded cost — deferred rather than fixed blind, touches live guest-messaging sync logic. Bounded by same-day checkouts per org per day, and since the 2026-08-09 fan-out fix it runs inside the per-org handler (guidebookStayExtensionOrg) rather than inside a loop over every org on the platform.',
   'lib/inngest/functions/ownerrez/reconciliation-handler.ts:162':
     'Real N+1 (cancel booking + cancel its turnovers, per stale booking) left as a known, bounded cost — deferred rather than fixed blind. Contrast lib/inngest/functions/ical-sync.ts, which batches the equivalent booking-cancel via .update().in(\'id\', ids) — a good template for fixing this one later.',
   'lib/inngest/functions/checklist-broadcast.ts:125':

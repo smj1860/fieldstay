@@ -32,12 +32,84 @@ import { collectSourceFiles, rel, read } from './scan'
 const LOOP_OPEN = /(?:for\s*(?:await\s*)?\(\s*(?:const|let)\s+(?:[\w$]+|\{[^}]*\}|\[[^\]]*\])\s+of\s+([^)]+?)\s*\)|\b([\w$.]+)\.forEach\()/g
 const FANOUT = /step\.(run|sendEvent)\(/
 
-/** Tokens in a collection's defining expression that make its size visibly bounded. */
+/**
+ * Does `token` appear in the collection's defining EXPRESSION, rather than
+ * merely in the name being declared?
+ *
+ * findDefinition slices from `const <name> =`, so the declaration itself is
+ * part of the string being searched — and a collection called `orgIds`
+ * contains the bound token `orgId` in its own name. Every plural-of-a-bound-
+ * token variable therefore self-satisfied the check.
+ *
+ * That is not hypothetical: it is exactly how
+ * platform-inventory-template-broadcast.ts kept `for (const orgId of orgIds)
+ * { await step.run(...) }` over a platform-wide org scan, in the one cron the
+ * 2026-07-30 fan-out pass missed, with this guardrail green the whole time.
+ * A scalability audit found it by reading the code; this test could not.
+ *
+ * Fix: search only to the RIGHT of the `=`. A token in the initialiser is
+ * evidence about the collection's size; a token in its name is evidence about
+ * nothing.
+ */
+function initialiserOf(definition: string, name: string): string {
+  const eq = definition.indexOf('=', definition.indexOf(name) + name.length)
+  return eq === -1 ? definition : definition.slice(eq + 1)
+}
+
+function boundBy(definition: string, name: string, token: string): boolean {
+  return initialiserOf(definition, name).includes(token)
+}
+
+/**
+ * Is this collection bounded — directly, or because it is DERIVED from one
+ * that is?
+ *
+ * A filter/map/slice of an org-scoped set is org-scoped. Without this,
+ * narrowing a bounded collection before the fan-out loop — which is the
+ * cheapest possible fix for a step explosion, since the loop then runs once
+ * per unit of work rather than once per row examined — makes the guardrail go
+ * RED, and the path of least resistance becomes inlining the filter back into
+ * the loop body. A check that punishes the fix teaches people to skip it.
+ *
+ * One rule, applied transitively with a visited set so a self-reference or a
+ * mutual pair cannot spin.
+ */
+function isBounded(src: string, name: string, seen = new Set<string>()): boolean {
+  if (seen.has(name)) return false
+  seen.add(name)
+
+  const definition = findDefinition(src, name)
+  // No local definition (a parameter, an import, a destructured event payload)
+  // — the size is not decidable here, so don't guess.
+  if (!definition) return false
+  if (BOUND_TOKENS.some((t) => boundBy(definition, name, t))) return true
+
+  // Every other identifier the initialiser mentions. If any of them is a
+  // bounded local collection, this one inherits the bound.
+  const initialiser = initialiserOf(definition, name)
+  const referenced  = new Set(initialiser.match(/\b[A-Za-z_$][\w$]*\b/g) ?? [])
+  referenced.delete(name)
+
+  return Array.from(referenced).some((ref) => isBounded(src, ref, seen))
+}
+
+/**
+ * Tokens in a collection's defining expression that make its size visibly
+ * bounded.
+ *
+ * `org_id` is NOT one of them, and that is deliberate: a bare `org_id` also
+ * matches `.select('org_id')` and `{ label: 'x.org_id' }`, which is what a
+ * PLATFORM-WIDE tenant scan looks like — the exact opposite of a tenant scope.
+ * `fetchDistinctOrgIds(from => supabase.from(t).select('org_id').range(...))`
+ * self-certified as bounded on that substring alone. Only a filter (`.eq`,
+ * `.in`) or the resolved JS variable counts.
+ */
 const BOUND_TOKENS = [
-  'org_id',       // scoped to one tenant (the fan-out unit)
-  'orgId',
-  '.limit(',      // explicit cap, normally with "continue next run" semantics
-  'BATCH',        // an explicitly chunked page
+  ".eq('org_id'",  // scoped to one tenant (the fan-out unit)
+  '.eq("org_id"',
+  'orgId',         // the resolved id, as passed to that filter
+  '.limit(',       // explicit cap, normally with "continue next run" semantics
+  'BATCH',         // an explicitly chunked page
   'slice(',
 ]
 
@@ -94,10 +166,53 @@ function findDefinition(src: string, name: string): string | null {
   return src.slice(m.index, i)
 }
 
+/**
+ * Blank out comments, preserving byte offsets so reported line numbers stay
+ * correct.
+ *
+ * The scan reads raw source, so it matched loop syntax written inside a
+ * COMMENT — the fan-out fix for platform-inventory-template-broadcast.ts
+ * documents the old `for (const orgId of orgIds) { await step.run(...) }` in
+ * prose explaining why it is gone, and that prose was reported as the
+ * offender. A guardrail that flags the documentation of the very defect it
+ * guards teaches people to delete the explanation.
+ */
+function stripComments(src: string): string {
+  let out = ''
+  let i = 0
+  let inString: string | null = null
+
+  while (i < src.length) {
+    const ch = src[i]!
+    const next = src[i + 1]
+
+    if (inString) {
+      if (ch === '\\') { out += src.slice(i, i + 2); i += 2; continue }
+      if (ch === inString) inString = null
+      out += ch; i++; continue
+    }
+    if (ch === "'" || ch === '"' || ch === '`') { inString = ch; out += ch; i++; continue }
+
+    if (ch === '/' && next === '/') {
+      while (i < src.length && src[i] !== '\n') { out += ' '; i++ }
+      continue
+    }
+    if (ch === '/' && next === '*') {
+      while (i < src.length && !(src[i] === '*' && src[i + 1] === '/')) {
+        out += src[i] === '\n' ? '\n' : ' '
+        i++
+      }
+      out += '  '; i += 2; continue
+    }
+    out += ch; i++
+  }
+  return out
+}
+
 function findOffenders(): string[] {
   const offenders: string[] = []
   for (const file of collectSourceFiles(['lib/inngest'])) {
-    const src = read(file)
+    const src = stripComments(read(file))
     LOOP_OPEN.lastIndex = 0
     let m: RegExpExecArray | null
     while ((m = LOOP_OPEN.exec(src))) {
@@ -108,12 +223,8 @@ function findOffenders(): string[] {
 
       const name = rootIdentifier(iterated)
       if (!name) continue
-
-      const definition = findDefinition(src, name)
-      // No local definition (a parameter, an import, a destructured event
-      // payload) — the size is not decidable here, so don't guess.
-      if (!definition) continue
-      if (BOUND_TOKENS.some((t) => definition.includes(t))) continue
+      if (!findDefinition(src, name)) continue
+      if (isBounded(src, name)) continue
 
       offenders.push(`${rel(file)}:${src.slice(0, m.index).split('\n').length}`)
     }
@@ -137,6 +248,30 @@ const EXCEPTIONS: Record<string, string> = {
   // (`org/capex_projection.requested`, `org/depreciation_ledger.requested`)
   // with `concurrency: { limit: 10 }`, matching the six converted in the
   // 2026-07-30 pass.
+
+  'lib/inngest/functions/flagged-turnover-wo.ts:102':
+    'Bounded by one org\'s PM count — a per-event handler whose `managers` is `getPmMembers(supabase, org_id, { roles: [...] })`. The org scope is a JS ARGUMENT here, which the scan cannot tell apart from the identically-named column in a `.select(\'id, org_id, ...\')` list, so no token can express it. Team size, not tenant count.',
+
+  // ── The four REAL GAPS this test surfaced on 2026-08-09, now closed ──────
+  //
+  // Not new code and not newly broken when they appeared here: newly VISIBLE.
+  // All four were passing because `org_id` used to be a BOUND_TOKEN, and
+  // `.select('org_id')` — the literal signature of a platform-wide tenant scan
+  // — contains it. The token that was supposed to mean "scoped to one tenant"
+  // was satisfied by the opposite. Same hole that hid
+  // platform-inventory-template-broadcast.ts until an external scalability
+  // audit read the code; the previous fix (search only right of the `=`)
+  // closed one instance, the substring itself was the hole.
+  //
+  // They are listed here as prose rather than as entries because the code is
+  // fixed, not because the check was relaxed:
+  //   - vendor-compliance-grace-check.ts — the per-document hard-block claim
+  //     is now one bulk optimistic-locked UPDATE per 500 documents.
+  //   - guidebook-daily-monitor.ts       -> guidebookDailyMonitorOrg
+  //   - guidebook-stay-extension-cron.ts -> guidebookStayExtensionOrg
+  //   - ownerrez-reviews-sync.ts         -> ownerRezReviewsSyncConnection
+  // The last three are dispatcher + per-tenant-handler pairs with
+  // `concurrency: { limit: 10 }`, matching the eight converted before them.
 }
 
 describe('guardrail: no step.run/step.sendEvent loop over an unbounded collection', () => {

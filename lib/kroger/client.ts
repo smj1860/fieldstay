@@ -21,6 +21,8 @@ import type {
 
 import { reportError } from '@/lib/observability/report-error'
 import { KROGER_TIMEOUT_MS, isTimeoutError } from '@/lib/http/timeout'
+import { NonRetriableError } from 'inngest'
+import { failureCount, recordFailure, recordSuccess, CircuitOpenError, CIRCUIT_BREAKER_CONFIG } from '@/lib/integrations/circuit-breaker'
 
 const KROGER_API_BASE  = 'https://api.kroger.com/v1'
 const KROGER_AUTH_BASE = 'https://api.kroger.com/v1/connect/oauth2'
@@ -70,6 +72,19 @@ async function krogerFetch(
     throw new RateLimitError(decision.errored ? 60 : retryAfterSeconds(decision))
   }
 
+  // Circuit breaker, checked BEFORE the fetch. The rate limiter above bounds
+  // how fast WE call Kroger; this bounds whether we call at all while Kroger
+  // is failing. Without it, an outage meant every independent cart-build event
+  // still waited out the full KROGER_TIMEOUT_MS, threw, and was retried by
+  // Inngest's backoff — N orgs x (1 + retries) full-timeout round-trips
+  // against a service already in trouble, each holding a step open the whole
+  // time. NonRetriable on purpose: retrying is precisely the behaviour that
+  // amplifies the outage, and the next run after the window lapses re-probes.
+  const priorFailures = await failureCount('kroger')
+  if (priorFailures >= CIRCUIT_BREAKER_CONFIG.FAILURE_THRESHOLD) {
+    throw new NonRetriableError(new CircuitOpenError('kroger').message)
+  }
+
   // Every Kroger call funnels through here, so the timeout budget is applied
   // once, at the chokepoint — same reasoning as the rate limiter above.
   // A caller-supplied signal wins (nothing sets one today).
@@ -77,6 +92,10 @@ async function krogerFetch(
   try {
     res = await fetch(input, { signal: AbortSignal.timeout(KROGER_TIMEOUT_MS), ...init })
   } catch (err) {
+    // A timeout or transport failure is exactly what the breaker counts —
+    // record it before rethrowing so the Nth concurrent caller stops paying
+    // the full timeout.
+    await recordFailure('kroger')
     if (isTimeoutError(err)) {
       // Distinct from a Kroger-returned failure: rethrown (so the Inngest
       // step retries) but named so a slow-API incident is legible in logs
@@ -89,8 +108,22 @@ async function krogerFetch(
   }
 
   if (res.status === 429) {
+    // Deliberately NOT a breaker failure: 429 is Kroger working correctly and
+    // telling us to slow down, which RateLimitError already handles. Counting
+    // it would open the circuit on our own throughput rather than their health.
     const retryAfter = Number.parseInt(res.headers.get('Retry-After') ?? '60', 10)
     throw new RateLimitError(retryAfter)
+  }
+
+  // 5xx is the provider failing; 4xx (other than 429) is us sending something
+  // wrong, and would never clear by waiting — only the former trips the breaker.
+  if (res.status >= 500) {
+    await recordFailure('kroger')
+  } else if (priorFailures > 0) {
+    // Only clear when there is something to clear. Unconditionally DELing on
+    // every success would add a Redis round-trip to every healthy Kroger call
+    // for no benefit — the count above is already in hand.
+    await recordSuccess('kroger')
   }
 
   return res

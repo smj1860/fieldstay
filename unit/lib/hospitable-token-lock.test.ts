@@ -10,9 +10,19 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 vi.mock('@/lib/supabase/server', () => ({
   createServiceClient: vi.fn(),
 }))
-vi.mock('@/lib/rate-limit', () => ({
-  redis: { set: vi.fn(), del: vi.fn() },
-}))
+// The refresh lock moved to the shared lib/integrations/refresh-lock.ts, which
+// gets its client from lib/redis.ts — the app's single construction site — so
+// that is what this mocks now. The assertions below are unchanged: they still
+// drive lock acquisition through redis.set's return value.
+vi.mock('@/lib/redis', () => {
+  const client = { set: vi.fn(), del: vi.fn() }
+  return {
+    getRedis:             () => client,
+    getRedisIfConfigured: () => client,
+    upstashConfigured:    () => true,
+    __client: client,
+  }
+})
 vi.mock('@/lib/integrations/vault', () => ({
   readIntegrationToken:          vi.fn(),
   readIntegrationRefreshToken:   vi.fn(),
@@ -22,7 +32,8 @@ vi.mock('@/lib/integrations/vault', () => ({
 
 import { getValidHospitableToken } from '@/lib/integrations/providers/hospitable-token'
 import { createServiceClient } from '@/lib/supabase/server'
-import { redis } from '@/lib/rate-limit'
+import * as redisModule from '@/lib/redis'
+const redis = (redisModule as unknown as { __client: { set: ReturnType<typeof vi.fn>; del: ReturnType<typeof vi.fn> } }).__client
 import {
   readIntegrationToken,
   readIntegrationRefreshToken,

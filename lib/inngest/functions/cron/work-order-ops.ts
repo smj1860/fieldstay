@@ -9,6 +9,7 @@ import { unwrapJoin } from '@/lib/utils/supabase-joins'
 import { fetchAllRows, fetchDistinctOrgIds } from '@/lib/inngest/paginate'
 import { reportError } from '@/lib/observability/report-error'
 import { throwIfAnyQueryFailed } from '@/lib/supabase/unwrap'
+import { dueKey, loadExistingDueDatePairs } from './maintenance-schedules-helpers'
 
 const AGING_DAYS = 7
 
@@ -388,35 +389,40 @@ export const workOrderOpsOrg = inngest.createFunction(
       )
     })
 
-    logger.info(`Org ${orgId}: ${escalated.length} WO(s) escalated, ${autoWOSchedules.length} schedule(s) eligible for auto-WO`)
+    // ONE batched idempotency read for the whole set, replacing the
+    // per-schedule pre-check that used to live inside each step.
+    //
+    // `next_due_date <= today` includes every schedule the org has ever let go
+    // overdue, and that set does not self-clear: nothing advances an
+    // already-overdue schedule past today (this pass returns early the moment
+    // its pre-check finds the work order, before advanceRoutineSchedule, and
+    // maintenance-schedules' own overdue pass never advances at all), and
+    // advanceSchedulesAfterCompletion advances routine schedules only. So a
+    // seasonal or one-time schedule that slipped once sits here forever,
+    // costing an Inngest step and a round-trip every single day to rediscover
+    // that its work order already exists.
+    //
+    // "Any work order at that date" is the correct question, and a strictly
+    // better one than the old pre-check's "any OPEN work order":
+    // wo_maintenance_schedule_date_unique ignores status, so a COMPLETED work
+    // order at that date made the insert below a guaranteed 23505 — swallowed
+    // as the expected race, returning null, having spent the step anyway.
+    const pendingSchedules = await step.run('filter-auto-wo-schedules', async () => {
+      if (!autoWOSchedules.length) return []
+      const supabase = createServiceClient({ system: 'inngest:work-order-ops' })
+      const existing = await loadExistingDueDatePairs(supabase, orgId, autoWOSchedules)
+      return autoWOSchedules.filter((s) => !existing.has(dueKey(s.id, s.next_due_date!)))
+    })
 
-    for (const schedule of autoWOSchedules) {
+    logger.info(
+      `Org ${orgId}: ${escalated.length} WO(s) escalated, ${pendingSchedules.length} of ` +
+      `${autoWOSchedules.length} auto-WO schedule(s) still need a work order`
+    )
+
+    for (const schedule of pendingSchedules) {
       const autoCreateEventData = await step.run(`auto-create-wo-${schedule.id}`, async () => {
         const supabase = createServiceClient({ system: 'inngest:work-order-ops' })
         const property = unwrapJoin(schedule.properties)
-
-        // Idempotency: skip if an open WO already exists for this schedule + date
-        const existingWORes = await supabase
-          .from('work_orders')
-          .select('id')
-          .eq('org_id', orgId)
-          .eq('source_schedule_id', schedule.id)
-          .eq('scheduled_date', schedule.next_due_date!)
-          .not('status', 'in', '("completed","cancelled")')
-          .maybeSingle()
-
-        // Bound for visibility rather than safety: the (source_schedule_id,
-        // scheduled_date) unique constraint below is what actually prevents a
-        // duplicate, and a failed pre-check degrades into that 23505 path
-        // correctly. Silent, though, it hid the fact that this guard had
-        // stopped working at all.
-        if (existingWORes.error) {
-          throw new Error(
-            `auto-WO idempotency pre-check failed for schedule ${schedule.id}: ${existingWORes.error.message}`
-          )
-        }
-
-        if (existingWORes.data) return null
 
         // Assigned → specialty hint → nobody, with the compliance gate applied.
         const vendorId = await resolveScheduleVendor(supabase, schedule, logger)
@@ -519,7 +525,7 @@ export const workOrderOpsOrg = inngest.createFunction(
     return {
       org_id:             orgId,
       aging_escalated:    escalated.length,
-      auto_wos_attempted: autoWOSchedules.length,
+      auto_wos_attempted: pendingSchedules.length,
     }
   }
 )

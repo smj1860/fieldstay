@@ -6,6 +6,7 @@ import { verifyPropertyInOrg } from '@/lib/tenancy/verify'
 import { requireOrgMember, requireOrgRole } from '@/lib/auth'
 import { inngest } from '@/lib/inngest/client'
 import { calcNextDueDate } from '@/lib/turnovers/generator'
+import { nextSeasonalDueDate } from '@/lib/utils/maintenance'
 import { fetchAllRows, SUPABASE_MAX_ROWS } from '@/lib/inngest/paginate'
 import { logAuditEvent } from '@/lib/audit'
 import { reportError } from '@/lib/observability/report-error'
@@ -1720,13 +1721,11 @@ function resolveFirstDueDate(
     return calcNextDueDate(frequency ?? 'monthly', today).toISOString().split('T')[0]!
   }
 
-  if (scheduleType === 'seasonal' && monthDue) {
-    // The next occurrence of that month: this year if it has not passed,
-    // otherwise next year. Carried over from the deleted setup-step action,
-    // which is the only piece of it worth keeping.
-    const year = today.getMonth() + 1 >= monthDue ? today.getFullYear() + 1 : today.getFullYear()
-    return `${year}-${String(monthDue).padStart(2, '0')}-01`
-  }
+  // The next occurrence of that month: this year if it has not passed,
+  // otherwise next year. Shared with the completion path
+  // (advanceSchedulesAfterCompletion), which needs the identical derivation to
+  // roll a completed seasonal schedule to next year's occurrence.
+  if (scheduleType === 'seasonal' && monthDue) return nextSeasonalDueDate(monthDue, today)
 
   // Seasonal with no month is genuinely underspecified — there is nothing to
   // derive from. The row stays dormant, and the UI flags it as unscheduled

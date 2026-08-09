@@ -4,6 +4,7 @@ import { fetchAllRows } from '@/lib/inngest/paginate'
 import type { SupabaseClient } from '@supabase/supabase-js'
 import { inngest } from '@/lib/inngest/client'
 import { calcNextDueDate } from '@/lib/turnovers/generator'
+import { nextSeasonalDueDate } from '@/lib/utils/maintenance'
 import { reportError } from '@/lib/observability/report-error'
 import type { ScheduleFrequency, TablesUpdate, WoStatus } from '@/types/database'
 
@@ -109,10 +110,11 @@ export async function advanceSchedulesAfterCompletion(
     schedules = await fetchAllRows<{
       id: string; schedule_type: string | null; frequency: string | null
       next_due_date: string | null; auto_create_wo: boolean | null
+      month_due: number | null
     }>(
       (from, to) => supabase
         .from('maintenance_schedules')
-        .select('id, schedule_type, frequency, next_due_date, auto_create_wo')
+        .select('id, schedule_type, frequency, next_due_date, auto_create_wo, month_due')
         .in('id', scheduleIds)
         .eq('org_id', orgId)
         .order('id')
@@ -128,11 +130,37 @@ export async function advanceSchedulesAfterCompletion(
   const lastCompleted = isoDate()
 
   const writes = (schedules ?? []).map((schedule: {
-    id: string; schedule_type: string | null; frequency: string | null; next_due_date: string | null
+    id: string; schedule_type: string | null; frequency: string | null
+    next_due_date: string | null; month_due: number | null
   }) => {
     if (!schedule.next_due_date) return null
 
-    // Seasonal / one-time: just record the completion date.
+    // Seasonal: roll to the next occurrence of month_due, the same derivation
+    // resolveFirstDueDate applies when the schedule is created.
+    //
+    // This branch used to record last_completed_date and nothing else, which
+    // left next_due_date permanently in the past. A seasonal schedule is
+    // recurring by definition — month_due exists for exactly that — so the
+    // effect was that completing one retired it from every date-driven surface
+    // while leaving it `is_active` and eternally overdue: the daily overdue
+    // pass re-walked it every day forever, and the PM never saw it come due
+    // again the following year. It is the engine behind the overdue set never
+    // self-clearing.
+    if (schedule.schedule_type === 'seasonal' && schedule.month_due) {
+      return supabase
+        .from('maintenance_schedules')
+        .update({
+          last_completed_date: lastCompleted,
+          next_due_date:       nextSeasonalDueDate(schedule.month_due, new Date(lastCompleted)),
+        })
+        .eq('id', schedule.id)
+        .eq('org_id', orgId)
+    }
+
+    // One-time, or a seasonal schedule with no month to recur into: record the
+    // completion date only. A one-time task genuinely has no next occurrence —
+    // whether it should also stop being `is_active` is a product decision, not
+    // this function's to make.
     if (schedule.schedule_type !== 'routine' || !schedule.frequency) {
       return supabase
         .from('maintenance_schedules')
