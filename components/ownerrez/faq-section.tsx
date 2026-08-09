@@ -1,8 +1,12 @@
+// The ownerrez landing page's FAQ content. The accordion itself is
+// components/faq/FaqSection.tsx — this file and its Hospitable twin used to
+// carry byte-identical copies of that markup, which is what SonarCloud kept
+// flagging. Shared answers come from lib/faq-content.ts.
+
 'use client'
 
-import { useState } from 'react'
-import { ChevronDown } from 'lucide-react'
 import { CREW_VISIBILITY_FAQ, TEAM_ACCESS_FAQ, MARKETING_OFFLINE_FAQ, MARKETING_TRIAL_FAQ } from '@/lib/faq-content'
+import FaqSection from '@/components/faq/FaqSection'
 
 const MARKETING_FAQ = [
   {
@@ -42,65 +46,6 @@ const MARKETING_FAQ = [
   },
 ] as const
 
-export default function FaqSection() {
-  const [openIdx, setOpenIdx] = useState<number | null>(null)
-
-  return (
-    <div className="bg-white border-t border-[#e8edf4]">
-      <div className="max-w-3xl mx-auto px-6 py-20">
-
-        <h2 className="text-3xl font-bold text-center text-[#0a1628] mb-2 font-display">
-          Common questions
-        </h2>
-        <p className="text-center text-gray-500 mb-12">
-          Quick answers before you connect.
-        </p>
-
-        <div className="divide-y divide-[#e8edf4] border border-[#e8edf4] rounded-2xl overflow-hidden">
-          {MARKETING_FAQ.map((faq, idx) => {
-            const isOpen = openIdx === idx
-            return (
-              <div key={idx}>
-                <button
-                  onClick={() => setOpenIdx(isOpen ? null : idx)}
-                  aria-expanded={isOpen}
-                  className="w-full flex items-start justify-between gap-4
-                             px-6 py-5 text-left transition-colors"
-                  style={{ background: isOpen ? '#f8fafc' : 'white' }}
-                >
-                  <span className="text-sm font-semibold text-[#0a1628] leading-snug pt-px">
-                    {faq.q}
-                  </span>
-                  <ChevronDown
-                    className="w-4 h-4 flex-shrink-0 mt-0.5 transition-transform duration-200 text-gray-400"
-                    style={{
-                      transform: isOpen ? 'rotate(180deg)' : 'rotate(0deg)',
-                    }}
-                  />
-                </button>
-                {isOpen && (
-                  <p className="px-6 pb-5 text-sm text-gray-500 leading-relaxed">
-                    {faq.a}
-                  </p>
-                )}
-              </div>
-            )
-          })}
-        </div>
-
-        <p className="text-center text-sm text-gray-400 mt-8">
-          Something else?{' '}
-          <a
-            href="mailto:support@fieldstay.app"
-            className="text-brand-800 underline font-medium hover:opacity-70
-                       transition-opacity"
-          >
-            Email us
-          </a>{' '}
-          — we respond same day.
-        </p>
-
-      </div>
-    </div>
-  )
+export default function OwnerrezFaqSection() {
+  return <FaqSection items={MARKETING_FAQ} />
 }

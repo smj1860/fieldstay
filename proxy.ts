@@ -158,6 +158,13 @@ const BYPASS_ROUTES = [
   // page branches its own nav CTA via its own auth check (app/hospitable/page.tsx).
   '/hospitable',
 
+  // Offline/STR-ops marketing landing page at fieldstay.app/strops. It exists
+  // to be found by search, so it MUST be reachable without a session: before
+  // this entry the path fell through to the auth gate and returned
+  // 307 -> /login?next=%2Fstrops, which is what a crawler would have indexed.
+  // Branches its own CTA via its own auth check, same as the two above.
+  '/strops',
+
   // Next.js internals and static assets
   '/_next',
   '/favicon',
