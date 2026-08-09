@@ -37,8 +37,13 @@ function makeSupabase(opts: {
   existingError?: { message: string } | null
   itemsInsertError?: { message: string } | null
   updateError?:  { message: string } | null
+  /** Consumed in order by maybeSingle(), for the pre-check-then-race-re-read pair. */
+  existingPoQueue?: ({ id: string; purchase_order_items: { id: string }[] } | null)[]
+  /** Error the PO insert's .select().single() returns — 23505 models a lost race. */
+  poInsertError?: { code?: string; message: string } | null
 }) {
   const calls: { table: string; method: string; args: unknown[] }[] = []
+  let maybeSingleCalls = 0
 
   const from = vi.fn((table: string) => {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -66,9 +71,19 @@ function makeSupabase(opts: {
       }
       return chain
     }
-    chain.single = () => Promise.resolve({ data: { id: 'po_new' }, error: null })
-    chain.maybeSingle = () =>
-      Promise.resolve({ data: opts.existingPo ?? null, error: opts.existingError ?? null })
+    chain.single = () =>
+      Promise.resolve(
+        opts.poInsertError
+          ? { data: null, error: opts.poInsertError }
+          : { data: { id: 'po_new' }, error: null },
+      )
+    chain.maybeSingle = () => {
+      if (opts.existingPoQueue) {
+        const next = opts.existingPoQueue[maybeSingleCalls++] ?? null
+        return Promise.resolve({ data: next, error: null })
+      }
+      return Promise.resolve({ data: opts.existingPo ?? null, error: opts.existingError ?? null })
+    }
     chain.then = (res: (v: unknown) => unknown, rej?: (e: unknown) => unknown) =>
       Promise.resolve({ data: null, error: null }).then(res, rej)
     return chain
@@ -168,5 +183,99 @@ describe('handleInventoryCountSubmitted — purchase order creation', () => {
         logger: { info: vi.fn(), error: vi.fn(), warn: vi.fn() },
       }),
     ).rejects.toThrow(/pre-check failed/)
+  })
+})
+
+// ============================================================================
+// The lost create race.
+//
+// po_source_count_unique is a partial unique index, so a concurrent duplicate
+// (a double-tap, or a crew device replaying a mutation over a flaky link) is
+// correctly rejected by Postgres with 23505 between the pre-check and the
+// insert. That is the constraint working, not a fault — and it used to throw
+// generically, burning an Inngest retry and logging an error for the one
+// outcome that is entirely correct.
+//
+// It must NOT resolve by re-reading and returning the winner's header id: this
+// file's first test exists because a header row alone is not enough. The race
+// path has to land back in the same repair logic.
+// ============================================================================
+describe('handleInventoryCountSubmitted — losing the create race', () => {
+  beforeEach(() => vi.clearAllMocks())
+
+  it('treats a 23505 as already-handled when the winner wrote a COMPLETE purchase order', async () => {
+    const supabase = makeSupabase({
+      existingPoQueue: [
+        null,                                                    // pre-check: nothing yet
+        { id: 'po_winner', purchase_order_items: [{ id: 'x' }] },// race re-read: complete
+      ],
+      poInsertError: { code: '23505', message: 'duplicate key value violates unique constraint' },
+    })
+    ;(createServiceClient as ReturnType<typeof vi.fn>).mockReturnValue(supabase)
+
+    await invokeHandler(handleInventoryCountSubmitted, {
+      event, step: makeStep([belowParItem]),
+      logger: { info: vi.fn(), error: vi.fn(), warn: vi.fn() },
+    }).catch(() => { /* later email steps are not under test */ })
+
+    // No duplicate items, and no throw that would burn a retry.
+    expect(
+      supabase.calls.some((c) => c.table === 'purchase_order_items' && c.method === 'insert'),
+      'the winner already wrote the items — re-inserting them would duplicate the restock order',
+    ).toBe(false)
+  })
+
+  it('REPAIRS the winner\'s purchase order when it lost the race to an empty header', async () => {
+    // The trap in the obvious fix: "23505 → re-read → return alreadyExisted"
+    // reintroduces exactly the permanent empty-restock-order bug the pre-check
+    // above this describe block exists to prevent.
+    const supabase = makeSupabase({
+      existingPoQueue: [
+        null,                                              // pre-check
+        { id: 'po_winner', purchase_order_items: [] },     // race re-read: header only
+      ],
+      poInsertError: { code: '23505', message: 'duplicate key value violates unique constraint' },
+    })
+    ;(createServiceClient as ReturnType<typeof vi.fn>).mockReturnValue(supabase)
+
+    await invokeHandler(handleInventoryCountSubmitted, {
+      event, step: makeStep([belowParItem]),
+      logger: { info: vi.fn(), error: vi.fn(), warn: vi.fn() },
+    }).catch(() => { /* later steps not under test */ })
+
+    const itemsInsert = supabase.calls.find(
+      (c) => c.table === 'purchase_order_items' && c.method === 'insert',
+    )
+    expect(itemsInsert, 'the race loser must complete the winner\'s empty header').toBeDefined()
+    const rows = itemsInsert!.args[0] as { purchase_order_id: string }[]
+    expect(rows[0]!.purchase_order_id).toBe('po_winner')
+  })
+
+  it('still throws on any other insert error, so a real failure retries', async () => {
+    const supabase = makeSupabase({
+      existingPoQueue: [null],
+      poInsertError: { code: '23503', message: 'foreign key violation' },
+    })
+    ;(createServiceClient as ReturnType<typeof vi.fn>).mockReturnValue(supabase)
+
+    await expect(invokeHandler(handleInventoryCountSubmitted, {
+      event, step: makeStep([belowParItem]),
+      logger: { info: vi.fn(), error: vi.fn(), warn: vi.fn() },
+    })).rejects.toThrow(/foreign key violation/)
+  })
+
+  it('throws rather than reporting a purchase order that vanished after the 23505', async () => {
+    // The winner rolled back between our insert and the re-read. Reporting a
+    // PO id that does not exist is worse than retrying.
+    const supabase = makeSupabase({
+      existingPoQueue: [null, null],
+      poInsertError: { code: '23505', message: 'duplicate key' },
+    })
+    ;(createServiceClient as ReturnType<typeof vi.fn>).mockReturnValue(supabase)
+
+    await expect(invokeHandler(handleInventoryCountSubmitted, {
+      event, step: makeStep([belowParItem]),
+      logger: { info: vi.fn(), error: vi.fn(), warn: vi.fn() },
+    })).rejects.toThrow(/vanished after a 23505/)
   })
 })

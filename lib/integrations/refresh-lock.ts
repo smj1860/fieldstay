@@ -1,4 +1,4 @@
-import { getRedisIfConfigured } from '@/lib/redis'
+import { acquireLock, releaseLock } from '@/lib/cache/single-flight'
 
 // ============================================================================
 // Single-flight locking for OAuth token refreshes, shared by every provider.
@@ -14,6 +14,12 @@ import { getRedisIfConfigured } from '@/lib/redis'
 // no guard, which a scalability audit flagged. This module is that pattern
 // lifted out so the second provider inherits it instead of getting a
 // near-copy, which is how the first one drifts.
+//
+// The SETNX itself now lives in lib/cache/single-flight.ts, shared with the
+// weather cache — a THIRD copy showed up when that stampede was fixed, which
+// is the point at which "one more near-copy" stops being defensible. This
+// module keeps only the provider key scheme and the TTL that suits a token
+// exchange.
 //
 // ── Fails OPEN, deliberately ────────────────────────────────────────────────
 //
@@ -47,19 +53,7 @@ export async function acquireRefreshLock(
   provider: RefreshLockProvider,
   userId:   string,
 ): Promise<boolean> {
-  const redis = getRedisIfConfigured()
-  if (!redis) return true
-
-  try {
-    const result = await redis.set(lockKey(provider, userId), '1', {
-      nx: true,
-      ex: LOCK_TTL_SECONDS,
-    })
-    return result === 'OK'
-  } catch (err) {
-    console.warn(`[${provider}] refresh lock unavailable, proceeding unlocked:`, err)
-    return true
-  }
+  return acquireLock(lockKey(provider, userId), LOCK_TTL_SECONDS)
 }
 
 /** Release early so the next caller doesn't wait out the TTL. Never throws. */
@@ -67,12 +61,5 @@ export async function releaseRefreshLock(
   provider: RefreshLockProvider,
   userId:   string,
 ): Promise<void> {
-  const redis = getRedisIfConfigured()
-  if (!redis) return
-
-  try {
-    await redis.del(lockKey(provider, userId))
-  } catch {
-    // Non-fatal — the TTL expires it.
-  }
+  return releaseLock(lockKey(provider, userId))
 }

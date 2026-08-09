@@ -25,7 +25,8 @@ describe('pending-mutation shadowing', () => {
     await db().mutations.add({
       table: 'inventory_counts', targetId: 'i1', op: 'PUT',
       payload: { current_quantity: 7 }, createdAt: '2026-07-30T00:00:00Z', retryCount: 0,
-    })
+    failed: 0,
+  })
 
     const [row] = await shadowPendingMutations('u1', 'inventory_counts', [
       { id: 'i1', current_quantity: 2, name: 'Towels' },
@@ -41,7 +42,8 @@ describe('pending-mutation shadowing', () => {
       await db().mutations.add({
         table: 'inventory_counts', targetId: 'i1', op: 'PUT',
         payload: { current_quantity: qty }, createdAt: '2026-07-30T00:00:00Z', retryCount: 0,
-      })
+    failed: 0,
+  })
     }
     const [row] = await shadowPendingMutations('u1', 'inventory_counts', [{ id: 'i1', current_quantity: 2 }])
     expect(row).toMatchObject({ current_quantity: 9 })
@@ -61,7 +63,8 @@ describe('pending-mutation shadowing', () => {
       table: 'property_assets', targetId: 'a1', op: 'PATCH',
       payload: { photo_url: 'https://x/y.jpg', scanRequest: { storagePath: 'p', mediaType: 'image/jpeg' } },
       createdAt: '2026-07-30T00:00:00Z', retryCount: 0,
-    })
+    failed: 0,
+  })
     const [row] = await shadowPendingMutations('u1', 'property_assets', [{ id: 'a1', photo_url: '' }])
     expect(row).toEqual({ id: 'a1', photo_url: 'https://x/y.jpg' })
     expect(row).not.toHaveProperty('scanRequest')
@@ -107,7 +110,9 @@ describe('local cache pruning', () => {
 
 describe('countPendingSyncWork', () => {
   it('counts only work still on its way, reporting dead letters separately', async () => {
-    await db().mutations.add({ table: 'turnovers', targetId: 't1', op: 'PATCH', payload: {}, createdAt: '', retryCount: 0 })
+    await db().mutations.add({ table: 'turnovers', targetId: 't1', op: 'PATCH', payload: {}, createdAt: '', retryCount: 0,
+    failed: 0,
+  })
     await db().mutations.add({ table: 'turnovers', targetId: 't2', op: 'PATCH', payload: {}, createdAt: '', retryCount: 5, failed: 1 })
     await db().pending_photo_uploads.put({ id: 'p1', created_at: '', local_blob_key: 'k' })
 

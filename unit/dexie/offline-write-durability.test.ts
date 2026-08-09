@@ -153,7 +153,10 @@ describe('F2 — a record with a dead letter is frozen', () => {
     )
 
     const other = (await mutations()).find((m) => m.targetId === 'item-2')
-    expect(other?.failed, 'an unrelated record must keep draining').toBeUndefined()
+    // 0, not undefined: `failed` is written on every outbox row now, because
+    // drain() reads through `.where('failed').equals(0)` and IndexedDB drops a
+    // record from an index when the property is absent.
+    expect(other?.failed, 'an unrelated record must keep draining').toBe(0)
   })
 
   it('does not freeze the same targetId on a different table', async () => {
@@ -169,7 +172,7 @@ describe('F2 — a record with a dead letter is frozen', () => {
     )
 
     const other = (await mutations()).find((m) => m.table === 'checklist_instances')
-    expect(other?.failed).toBeUndefined()
+    expect(other?.failed).toBe(0)
   })
 })
 

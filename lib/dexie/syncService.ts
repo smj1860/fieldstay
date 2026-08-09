@@ -198,7 +198,22 @@ export class SyncEngine {
     if (!isOnline() || this.stopped()) return
 
     const db = getDexieDb(this.userId)
-    const pending = (await db.mutations.orderBy('id').toArray()).filter((m) => !m.failed)
+
+    // Indexed, not scanned. `orderBy('id').toArray()` materialised EVERY row —
+    // live and dead-lettered — before filtering in JS, on every drain: each
+    // enqueueMutation, each reconnect, and the 30-second tick. Dead letters are
+    // kept for DEAD_LETTER_RETENTION_DAYS, so a device with a bad month of
+    // connectivity re-materialised a growing table ~2,880 times a day to find
+    // the handful of rows it could actually send.
+    //
+    // Safe only because `failed` is written on every row (schema v12 backfills
+    // it) — IndexedDB omits a record from an index when the property is
+    // undefined, so against the old data this query would have returned nothing
+    // at all and the outbox would have gone silently quiet.
+    //
+    // sortBy('id') keeps insertion order, which the per-record replay ordering
+    // below depends on.
+    const pending = await db.mutations.where('failed').equals(0).sortBy('id')
 
     // `pending` is a SNAPSHOT taken before the loop. holdBackSuccessors() can
     // mark rows failed part-way through it, and the loop would otherwise push
@@ -917,6 +932,12 @@ export async function enqueueMutationTx(
     createdAt:      new Date().toISOString(),
     retryCount:     0,
     payloadVersion: OUTBOX_PAYLOAD_VERSION,
+    // ALWAYS written, never left undefined: drain() reads this outbox through
+    // `.where('failed').equals(0)`, and IndexedDB leaves a record out of an
+    // index entirely when the indexed property is absent. An omitted `failed`
+    // would make the mutation invisible to the drain — queued forever, with
+    // nothing to see and no error raised.
+    failed:         0 as const,
     ...(frozen > 0 ? { failed: 1 as const, lastError: HELD_BACK_REASON } : {}),
   })
 }

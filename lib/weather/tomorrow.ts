@@ -1,5 +1,6 @@
 import { getRedisIfConfigured } from '@/lib/redis'
 import { WEATHER_TIMEOUT_MS, isTimeoutError } from '@/lib/http/timeout'
+import { singleFlight } from '@/lib/cache/single-flight'
 
 // Client comes from lib/redis.ts, which reads this project's
 // upstash_fieldstay_KV_REST_API_* names rather than the standard
@@ -73,16 +74,50 @@ function getCacheKey(lat: number, lng: number): string {
   return `weather:tomorrow:${roundedLat}:${roundedLng}`
 }
 
+/**
+ * Current conditions for a location, cached in Redis for an hour.
+ *
+ * Single-flighted. This is read by two PUBLIC guest pages (/g/[slug] and
+ * /g/b/[token]) as well as the morning and evening nudge crons, so concurrent
+ * misses on the same key are the normal case, not an edge one: the TTL expires
+ * at a fixed point for every guest at a property, and a cold key is hit by
+ * whatever burst of guests arrives first. Plain cache-aside turned each of
+ * those into N identical outbound calls to Tomorrow.io — N times the rate-limit
+ * consumption and N x WEATHER_TIMEOUT_MS of blocked render/step time when the
+ * provider is slow, which is exactly when the burst happens.
+ *
+ * The lock lives one layer up in lib/cache/single-flight.ts rather than inline
+ * here: two token-refresh paths already had this pattern open-coded, and a
+ * third copy is how the first two drift.
+ */
 export async function getWeatherForLocation(
   lat: number,
   lng: number
 ): Promise<WeatherContext> {
   const cacheKey = getCacheKey(lat, lng)
+  const redis    = getRedisIfConfigured()
 
+  return singleFlight<WeatherContext>({
+    key:      cacheKey,
+    read:     async () => (redis ? await redis.get<WeatherContext>(cacheKey) : null),
+    produce:  () => fetchAndCacheWeather(lat, lng, cacheKey),
+    // The producer is bounded by WEATHER_TIMEOUT_MS, so the lock only has to
+    // outlive that plus the write.
+    lockTtlSeconds: Math.ceil(WEATHER_TIMEOUT_MS / 1000) + 5,
+  })
+}
+
+/**
+ * The uncached fetch. Separate from getWeatherForLocation so the single-flight
+ * wrapper has something to call, and so the "produce" half is readable on its
+ * own.
+ */
+async function fetchAndCacheWeather(
+  lat:      number,
+  lng:      number,
+  cacheKey: string,
+): Promise<WeatherContext> {
   const redis  = getRedisIfConfigured()
-  const cached = redis ? await redis.get<WeatherContext>(cacheKey) : null
-  if (cached) return cached
-
   const apiKey = process.env.TOMORROW_IO_API_KEY
   if (!apiKey) throw new Error('TOMORROW_IO_API_KEY is not configured')
 

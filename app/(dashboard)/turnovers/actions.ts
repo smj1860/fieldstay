@@ -65,9 +65,16 @@ async function trackAssignmentAgainstSuggestions(
     )
 
     if (overridden.length > 0) {
+      // Same compare-and-swap as dismissSuggestion, and for the same reason:
+      // `overridden` was filtered on a suggestion_status read taken earlier in
+      // the request, so without a SQL precondition an accept or dismiss landing
+      // in between is silently overwritten here. The JS filter already selected
+      // only pending rows, so this narrows nothing in the uncontended case —
+      // it just makes the check atomic with the write.
       const { error: overrideError } = await service.from('turnovers')
         .update({ suggestion_status: 'overridden' })
         .eq('org_id', orgId)
+        .eq('suggestion_status', 'pending')
         .in('id', overridden.map(t => t.id))
       if (overrideError) {
         console.error('[trackAssignmentAgainstSuggestions] override update failed', overrideError)
@@ -1486,11 +1493,33 @@ export async function dismissSuggestion(turnoverId: string): Promise<TurnoverAct
     }
     const turnover = turnoverRes.data
 
+    // Compare-and-swap on the column being written. This update was scoped
+    // only by id + org_id, so a dismiss landing after an accept overwrote
+    // suggestion_status unconditionally: the accepted crew assignment stayed
+    // in place while the suggestion read as 'dismissed', NEITHER caller saw an
+    // error, and the negative training signal below was recorded against a
+    // suggestion that had in fact been accepted — teaching the scorer the
+    // opposite of what happened. Two managers on the same dashboard is not an
+    // exotic race.
+    //
+    // The precondition is `suggestion_status = 'pending'`, not the
+    // SUGGESTION_ACCEPTABLE_STATUSES list acceptSuggestion guards with: those
+    // are turnover_status values (pending_assignment/assigned/in_progress/
+    // flagged) and this column holds pending|accepted|overridden|dismissed, so
+    // matching one against the other would filter every row out and silently
+    // break dismissal altogether. 'pending' is also exactly what
+    // turnover-board.tsx requires before it renders this control at all, and
+    // what assignCrew's own overridden-write checks — so the three agree.
+    //
+    // Bonus property: dismiss becomes idempotent. A double-click now reports
+    // NOTHING_UPDATED on the second call instead of writing a second training
+    // signal for the same decision.
     const { data: dismissed, error } = await supabase
       .from('turnovers')
       .update({ suggestion_status: 'dismissed' })
       .eq('id', turnoverId)
       .eq('org_id', membership.org_id)
+      .eq('suggestion_status', 'pending')
       .select('id')
       .maybeSingle()
 

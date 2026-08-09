@@ -60,6 +60,7 @@ async function seedPhotoMutation(): Promise<number> {
     },
     createdAt:  new Date(NOW).toISOString(),
     retryCount: 0,
+    failed: 0,
   })
   return id as number
 }
@@ -171,7 +172,8 @@ describe('asset scan request — durability inside the outbox', () => {
       payload:    { photo_url: 'org_1/assets/asset_2.jpg' },
       createdAt:  new Date(NOW).toISOString(),
       retryCount: 0,
-    })
+    failed: 0,
+  })
     const fetchMock = mockScanResponse(200)
 
     await drain()

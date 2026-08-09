@@ -67,6 +67,11 @@ async function seed(overrides: Partial<MutationRow> = {}): Promise<number> {
     payload:    { is_completed: 1 },
     createdAt:  new Date().toISOString(),
     retryCount: 0,
+    // Always present, never undefined — drain() reads the outbox through
+    // `.where('failed').equals(0)` and IndexedDB leaves a record out of an
+    // index entirely when the indexed property is absent. Before `...overrides`
+    // so a test seeding a dead letter still gets one.
+    failed: 0 as const,
     ...overrides,
   }) as number
 }

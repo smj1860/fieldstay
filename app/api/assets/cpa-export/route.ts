@@ -26,6 +26,14 @@ const MT = 48   // margin top
 const MB = 40   // margin bottom
 const CW = W - ML - MR  // content width
 
+/**
+ * Ceiling on rows in one export — see the comment at the fetch below for why
+ * this route needs one at all. One row per active asset per tax year, so this
+ * is roughly two orders of magnitude above the largest plausible tenant.
+ */
+const CPA_EXPORT_MAX_ENTRIES = 20_000
+
+
 const GRAY_DARK  = rgb(0.15, 0.18, 0.25)
 const GRAY_MED   = rgb(0.35, 0.40, 0.50)
 const GRAY_LIGHT = rgb(0.65, 0.70, 0.78)
@@ -112,6 +120,52 @@ export async function GET(req: Request) {
   // Load depreciation entries with asset + property names. Paginated: a tax
   // document silently missing rows past max_rows = 1000 is a correctness bug,
   // not a display truncation — every asset for the year must be on it.
+  //
+  // Explicitly bounded, because everything after this point is synchronous CPU
+  // on the REQUEST path: several reduce passes, then pdf-lib draw calls per row
+  // with page breaks, then one pdfDoc.save() that serialises the whole
+  // document. There is no yield point in that chain, and this route has no
+  // maxDuration entry in vercel.json, so it inherits the platform default.
+  //
+  // The bound is set from what an export actually is rather than from the
+  // helper's 200k default: one row per active asset in the org for one tax
+  // year (UNIQUE (asset_id, tax_year)). Production today is 160 active assets
+  // across 27 properties — about 6 per property — and CLAUDE.md's target user
+  // runs 10-50 properties, so a real export is a few hundred rows and the PDF
+  // work is milliseconds. CPA_EXPORT_MAX_ENTRIES sits far above any plausible
+  // org while still turning the pathological case into a clear, actionable
+  // message instead of a request killed mid-serialisation with nothing to
+  // explain it.
+  //
+  // If an org ever legitimately approaches this, the fix is not a bigger
+  // number — it is moving generation off the request path onto an Inngest job
+  // that writes to Storage and hands back a signed URL, the same shape the
+  // org_milestones polling pattern already uses elsewhere.
+  // Counted BEFORE anything is shipped over the wire: `head: true` returns the
+  // count with no rows at all, so the guard costs one cheap round-trip rather
+  // than draining every page and then discovering it was too many.
+  const countRes = await supabase
+    .from('asset_depreciation_entries')
+    .select('id', { count: 'exact', head: true })
+    .eq('org_id', membership.org_id)
+    .eq('tax_year', taxYear)
+
+  if (countRes.error) {
+    unwrap(countRes, { site: 'route.assets.cpa-export.count', orgId: membership.org_id })
+  }
+
+  if ((countRes.count ?? 0) > CPA_EXPORT_MAX_ENTRIES) {
+    return Response.json(
+      {
+        error:
+          `This export covers ${countRes.count!.toLocaleString()} depreciation entries, past the ` +
+          `${CPA_EXPORT_MAX_ENTRIES.toLocaleString()} that can be generated in a single request. ` +
+          'Contact support so this can be produced as a background job.',
+      },
+      { status: 413 },
+    )
+  }
+
   const entries = await fetchAllRows(
     (from, to) => supabase
       .from('asset_depreciation_entries')
@@ -129,7 +183,7 @@ export async function GET(req: Request) {
       .eq('tax_year', taxYear)
       .order('asset_id')
       .range(from, to),
-    { label: 'cpa-export.entries' },
+    { label: 'cpa-export.entries', maxRows: CPA_EXPORT_MAX_ENTRIES },
   )
 
   if (!entries?.length) {

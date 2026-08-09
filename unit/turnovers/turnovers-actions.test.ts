@@ -975,6 +975,46 @@ describe('turnovers/actions', () => {
 
       expect(result).toEqual({ success: true })
     })
+
+    it('compare-and-swaps on suggestion_status so a dismiss cannot clobber a concurrent accept', async () => {
+      // The write was scoped only by id + org_id. A dismiss landing after an
+      // accept overwrote suggestion_status unconditionally: the accepted crew
+      // assignment stayed in place while the suggestion read as 'dismissed',
+      // NEITHER caller saw an error, and the negative training signal was
+      // recorded against a suggestion that had actually been accepted.
+      const supabase = makeSupabase({
+        turnovers: [
+          { data: { property_id: 'prop_1', suggested_crew_ids: [] } },
+          { data: { id: 't_1' }, error: null },
+        ],
+      })
+      mockAuthed({ supabase, membership, user: { id: 'user_1' } } as never)
+
+      await dismissSuggestion('t_1')
+
+      const updateIdx = supabase.calls.findIndex((c) => c.table === 'turnovers' && c.method === 'update')
+      expect(updateIdx).toBeGreaterThan(-1)
+      const filters = supabase.calls.slice(updateIdx).filter((c) => c.method === 'eq')
+      expect(filters.some((c) => c.args[0] === 'suggestion_status' && c.args[1] === 'pending')).toBe(true)
+    })
+
+    it('reports NOTHING_UPDATED and writes no training signal when the swap matches nothing', async () => {
+      // Zero rows = someone already accepted, overrode or dismissed it. That
+      // must surface, not report success — and above all must not record a
+      // negative signal for a decision this caller did not make.
+      const supabase = makeSupabase({
+        turnovers: [
+          { data: { property_id: 'prop_1', suggested_crew_ids: ['crew_1'] } },
+          { data: null, error: null },   // CAS matched nothing
+        ],
+      })
+      mockAuthed({ supabase, membership, user: { id: 'user_1' } } as never)
+
+      const result = await dismissSuggestion('t_1')
+
+      expect(result).not.toEqual({ success: true })
+      expect(supabase.calls.some((c) => c.table === 'assignment_outcomes')).toBe(false)
+    })
   })
 
   // Every action here is a PM BOARD action, but they all ran on bare

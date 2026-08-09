@@ -352,6 +352,46 @@ export const handleInventoryCountSubmitted = inngest.createFunction(
         .select('id')
         .single()
 
+      // 23505 = po_source_count_unique. A concurrent duplicate (a double-tap,
+      // or a crew device replaying a mutation over a flaky connection) lost the
+      // race between the pre-check above and this insert. That is the partial
+      // unique index doing its job, not a fault — throwing burned an Inngest
+      // retry and logged an error for the one outcome that is entirely correct.
+      //
+      // Deliberately NOT "re-read and return alreadyExisted". The pre-check
+      // above is emphatic that a header row alone is not enough: a PO whose
+      // items insert died is a restock order listing nothing, permanently.
+      // Falling back into that same repair path is what makes the race safe;
+      // short-circuiting on the winner's header id would reintroduce exactly
+      // the bug that pre-check exists to prevent.
+      if (poError?.code === '23505') {
+        const raceRes = await supabase
+          .from('purchase_orders')
+          .select('id, purchase_order_items(id)')
+          .eq('source_count_id', count_id)
+          .eq('org_id', org_id)
+          .maybeSingle()
+
+        if (raceRes.error) {
+          throw new Error(`purchase_orders race re-read failed: ${raceRes.error.message}`)
+        }
+        // Gone again means the winner was rolled back — let the step retry
+        // rather than silently reporting a PO that does not exist.
+        if (!raceRes.data) throw new Error('purchase order vanished after a 23505 — retrying')
+
+        if ((raceRes.data.purchase_order_items ?? []).length > 0) {
+          return { purchaseOrderId: raceRes.data.id, alreadyExisted: true }
+        }
+
+        logger.warn(
+          `Count ${count_id}: lost the create race to ${raceRes.data.id}, which has zero line ` +
+          'items — completing it rather than treating it as done.'
+        )
+        await insertPoItems(supabase, raceRes.data.id, belowParItems)
+        await markPoSent(supabase, raceRes.data.id)
+        return { purchaseOrderId: raceRes.data.id, alreadyExisted: false }
+      }
+
       // It already threw on a null row, so the retry behaviour was right — but
       // the DB's own message was dropped, leaving 'Failed to create purchase
       // order' as the only evidence for every possible cause.

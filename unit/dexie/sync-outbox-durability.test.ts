@@ -49,6 +49,11 @@ async function seedMutation(overrides: Partial<MutationRow> = {}): Promise<numbe
     payload:    { is_completed: 1 },
     createdAt:  new Date(NOW).toISOString(),
     retryCount: 0,
+    // Always present, never undefined — drain() reads the outbox through
+    // `.where('failed').equals(0)` and IndexedDB leaves a record out of an
+    // index entirely when the indexed property is absent. Before `...overrides`
+    // so a test seeding a dead letter still gets one.
+    failed: 0 as const,
     ...overrides,
   })
   return id as number
@@ -97,7 +102,9 @@ describe('outbox durability — offline attempts', () => {
     const row = await mutationRow(id)
     expect(row).toBeDefined()
     expect(row!.retryCount).toBe(0)
-    expect(row!.failed).toBeUndefined()
+    // 0 = queued and live. `failed` is never absent: the drain queries the
+    // index, and IndexedDB omits records whose indexed property is undefined.
+    expect(row!.failed).toBe(0)
   })
 
   it('pushes the untouched mutation as soon as the device is back online', async () => {
@@ -134,7 +141,7 @@ describe('outbox durability — offline attempts', () => {
 
     const row = await mutationRow(id)
     expect(row, 'a transport failure must never destroy the mutation').toBeDefined()
-    expect(row!.failed, 'transport failures must never dead-letter').toBeUndefined()
+    expect(row!.failed, 'transport failures must never dead-letter').toBe(0)
     expect(row!.retryCount, 'transport failures must not consume the retry budget').toBe(0)
     expect(row!.networkRetryCount!).toBeGreaterThan(5)
   })
@@ -193,11 +200,13 @@ describe('outbox durability — ordering', () => {
     await db().mutations.add({
       table: 'turnovers', targetId: 't1', op: 'PATCH',
       payload: { status: 'in_progress' }, createdAt: new Date(NOW).toISOString(), retryCount: 0,
-    })
+    failed: 0,
+  })
     await db().mutations.add({
       table: 'turnovers', targetId: 't1', op: 'PATCH',
       payload: { status: 'completed' }, createdAt: new Date(NOW).toISOString(), retryCount: 0,
-    })
+    failed: 0,
+  })
 
     const engine = new SyncEngine('u1')
     for (let i = 0; i < 6; i++) {
@@ -222,11 +231,13 @@ describe('outbox durability — ordering', () => {
     await db().mutations.add({
       table: 'turnovers', targetId: 't-bad', op: 'PATCH',
       payload: { status: 'completed' }, createdAt: new Date(NOW).toISOString(), retryCount: 0,
-    })
+    failed: 0,
+  })
     await db().mutations.add({
       table: 'turnovers', targetId: 't-good', op: 'PATCH',
       payload: { status: 'completed' }, createdAt: new Date(NOW).toISOString(), retryCount: 0,
-    })
+    failed: 0,
+  })
 
     await new SyncEngine('u1').processOutbox()
 
@@ -236,5 +247,70 @@ describe('outbox durability — ordering', () => {
     expect(rows).toHaveLength(1)
     expect(rows[0]).toMatchObject({ targetId: 't-bad', failed: 1 })
     expect(pushed.some((u) => u.includes('t-good'))).toBe(true)
+  })
+})
+
+// ============================================================================
+// The indexed drain, and the trap under it.
+//
+// drain() used to be `orderBy('id').toArray()` then `.filter(m => !m.failed)` —
+// every row, live and dead-lettered, materialised on every drain: each
+// enqueueMutation, each reconnect, and the 30-second tick. Dead letters are
+// kept for DEAD_LETTER_RETENTION_DAYS, so a device with a bad month of signal
+// re-materialised a growing table ~2,880 times a day to find the few rows it
+// could send.
+//
+// Switching to `.where('failed').equals(0)` is only safe because `failed` is
+// now written on EVERY row. IndexedDB omits a record from an index when the
+// indexed property is undefined, and enqueueMutationTx used to set `failed`
+// only on the held-back branch — so the naive index swap would have made every
+// ordinary queued mutation invisible to the drain. Not slower. Silent. Nothing
+// would sync and nothing would say why.
+// ============================================================================
+describe('outbox drain reads the index, not the whole table', () => {
+  beforeEach(() => {
+    vi.useFakeTimers()
+    vi.setSystemTime(NOW)
+    holder.db = makeFakeDexieDb()
+    holder.supabase = makeFakeSupabase({ checklist_instance_items: [UPLOAD_OK] })
+    vi.stubGlobal('navigator', { onLine: true })
+  })
+  afterEach(() => { vi.useRealTimers(); vi.unstubAllGlobals() })
+
+  it('every enqueued mutation carries failed = 0, so none is invisible to the index', async () => {
+    const { enqueueMutationTx } = await import('@/lib/dexie/syncService')
+    const d = db()
+    await d.transaction('rw', d.mutations, () =>
+      enqueueMutationTx(d as never, 'checklist_instance_items', 'item1', 'PATCH', { is_completed: 1 }),
+    )
+
+    const rows = await d.mutations.toArray()
+    expect(rows).toHaveLength(1)
+    // `undefined` here is the silent-outbox bug: the row exists, looks healthy
+    // in any dump, and is absent from `where('failed')` forever.
+    expect(rows[0]!.failed).toBe(0)
+
+    const indexed = await d.mutations.where('failed').equals(0).sortBy('id')
+    expect(indexed).toHaveLength(1)
+  })
+
+  it('a dead letter is excluded by the index rather than loaded and filtered out', async () => {
+    await seedMutation({ targetId: 'live' })
+    await seedMutation({ targetId: 'dead', failed: 1, retryCount: 5 })
+
+    const live = await db().mutations.where('failed').equals(0).sortBy('id')
+    expect(live.map((m) => m.targetId)).toEqual(['live'])
+  })
+
+  it('still drains in insertion order — the index supplies membership, sortBy supplies order', async () => {
+    // Per-record replay ordering depends on this; an index scan is ordered by
+    // the indexed key, not by id, so the explicit sort is load-bearing.
+    const d = db()
+    await seedMutation({ targetId: 'a' })
+    await seedMutation({ targetId: 'b' })
+    await seedMutation({ targetId: 'c' })
+
+    const order = (await d.mutations.where('failed').equals(0).sortBy('id')).map((m) => m.targetId)
+    expect(order).toEqual(['a', 'b', 'c'])
   })
 })

@@ -188,10 +188,14 @@ describe('getValidHospitableToken — refresh lock (H-1)', () => {
 
     expect(token).toBe('new_access_token')
     expect(fetchMock).toHaveBeenCalledTimes(1)
-    // acquireRefreshLock's own warning about the lock being unavailable —
-    // distinct from the wait-ceiling warning in the previous test.
+    // The lock-unavailable warning, distinct from the wait-ceiling warning in
+    // the previous test. Matched on the LOCK KEY rather than the prose: the
+    // SETNX moved into lib/cache/single-flight.ts when the weather cache became
+    // the third copy of this pattern, and a test pinned to a log sentence
+    // breaks on a refactor that changed no behaviour. The key names which lock
+    // failed, which is the part worth asserting.
     expect(console.warn).toHaveBeenCalledWith(
-      expect.stringContaining('refresh lock unavailable'),
+      expect.stringContaining('hospitable:refresh-lock'),
       expect.anything(),
     )
   })

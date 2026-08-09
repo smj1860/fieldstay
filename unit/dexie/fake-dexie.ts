@@ -1,6 +1,6 @@
 // In-memory stand-in for the FieldStayDexie instance, covering exactly the
 // surface the lib/dexie/sync/* functions touch (bulkPut/bulkDelete/toArray/
-// where().anyOf().primaryKeys()/where().equals().filter().count()/get/put,
+// where().anyOf().primaryKeys()/where().equals().filter().count()/sortBy/get/put,
 // plus db.transaction()). Lets the sync orchestration be unit-tested in the
 // node environment without IndexedDB.
 
@@ -15,6 +15,11 @@ function fakeCollection(matches: FakeRow[], pk: string) {
     primaryKeys: async () => matches.map((r) => r[pk]),
     toArray:     async () => matches,
     count:       async () => matches.length,
+    // Dexie sorts the MATCHED rows in memory — the index supplies membership,
+    // not order. Modelled the same way so the outbox drain's insertion-order
+    // guarantee is actually exercised.
+    sortBy:      async (field: string) =>
+      [...matches].sort((a, b) => ((a[field] as number) < (b[field] as number) ? -1 : 1)),
     filter: (predicate: (row: never) => boolean) =>
       fakeCollection(matches.filter((r) => predicate(r as never)), pk),
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -26,6 +31,12 @@ function fakeCollection(matches: FakeRow[], pk: string) {
 /**
  * Compound-index key equality, mirroring IndexedDB's array-key semantics —
  * `where('[table+targetId]').equals(['turnovers', 'x'])`.
+ *
+ * Strict `===`, deliberately: IndexedDB leaves a record OUT of an index when
+ * the indexed property is undefined, so a row seeded without `failed` is
+ * invisible to `where('failed').equals(0)` in the real thing too. A fake that
+ * quietly matched it would hide the exact hazard the outbox's indexed drain
+ * depends on avoiding.
  */
 function matchesKey(row: FakeRow, fields: string[], value: unknown): boolean {
   if (fields.length === 1) return row[fields[0]!] === value
