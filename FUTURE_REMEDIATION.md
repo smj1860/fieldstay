@@ -1158,3 +1158,87 @@ from that sweep.
 was measured from `opted_in_at`, which the upsert refreshes on every
 submission, so the window restarted on each resubmit and could be walked
 forward indefinitely. It now anchors on the immutable `created_at`.
+
+---
+
+## 25. The Inngest route serves on every deployment, so preview builds run production background jobs
+
+**Files:** `app/api/inngest/route.ts`, `lib/env.ts`
+
+Vercel's Inngest integration syncs *every* deployment, previews included. Each
+synced app registers the full function list, and Inngest fans every event and
+every cron to every registered app. So each surviving preview deployment is
+another complete copy of the platform's background workload, pointed at
+whatever infrastructure its env vars name.
+
+**Observed 2026-08-09**, not hypothetical:
+
+- `asset-health-org` ran on preview release `c8e1b3d9` at 12:31:36 UTC
+  (`environment: preview`, host `fieldstay-kbvqf0p3h-….vercel.app`) and failed
+  writing scores. It had rows to write — and the E2E project has 0 active
+  assets and 1 org, so that preview build was reading and writing the
+  **production** Supabase project with a production service-role key.
+- On 2026-08-08 at 23:01, **two different preview releases** (`7dcd0e9a`,
+  `b036ab16`) both ran `daily-wrapup-org` against the production Resend
+  account. That is the whole of CUSHION-F/G: not an idempotency bug in our
+  code, but N deployments racing on one idempotency key. Sentry issues
+  CUSHION-J/K/M, D/E/H and F/G are all this same cause.
+- It was survivable only by luck. The pre-fix `persistScores` write failed
+  100% of the time (see the RPC note in `cron/asset-health-helpers.ts`), so
+  the preview copies of that cron could not corrupt anything. Nothing gave
+  the same protection to the functions that were succeeding.
+
+**Gate crons only and it does not work.** `daily-wrapup-org` is EVENT-triggered.
+Inngest delivers an event to every synced app, so a cron-only gate would have
+left the Resend collision exactly as it is. The gate has to be on *serving*.
+
+**Why the env-var fix is not sufficient on its own.** Removing the Inngest keys
+from preview does close this, and should be done first because it is
+immediate. But environment scope is a dashboard setting that fails OPEN: one
+variable re-added by someone who does not know this history silently restores
+the entire problem, and no code review would ever see it. A route gate fails
+closed and shows up in a diff.
+
+Note also that the three Supabase vars are tier `always` — unsetting them on
+preview makes every preview deploy refuse to boot at
+`instrumentation.ts#register()`. The env-side fix for those is to point preview
+at the E2E project (`syhthijeqlnltufdawyb`), not to unscope them.
+
+**Suggested fix.** Keep the single `serve()` call and gate its exports:
+
+```ts
+const handlers = serve({ client: inngest, functions: [ ...unchanged... ] })
+
+// Non-production deployments must not register with Inngest: an app that
+// never completes the sync handshake receives neither crons nor events.
+const mayServe =
+  resolveDeployTarget() === 'production' ||
+  process.env.INNGEST_ALLOW_NON_PRODUCTION === 'true'
+
+const refuse = () =>
+  new Response('Inngest is served from production deployments only', { status: 403 })
+
+export const GET  = mayServe ? handlers.GET  : refuse
+export const POST = mayServe ? handlers.POST : refuse
+export const PUT  = mayServe ? handlers.PUT  : refuse
+```
+
+`resolveDeployTarget()` already exists in `lib/env.ts` and checks `VERCEL_ENV`
+first, so the `FIELDSTAY_ENV_TARGET` escape hatch cannot downgrade a real
+production deploy into skipping the gate.
+
+Two constraints on whoever picks this up:
+
+- `unit/guardrails/forbidden-patterns.test.ts` counts `/=\s*serve\(/g` and
+  requires exactly 1. `const handlers = serve({...})` still satisfies that, and
+  CLAUDE.md's "exactly ONE serve() call" rule is preserved — but the prose in
+  CLAUDE.md's Inngest section names the destructured-export form specifically
+  and should be updated to match.
+- `INNGEST_ALLOW_NON_PRODUCTION` must be added to `ENV_SPEC` in `lib/env.ts`
+  (tier `optional`) in the same change, or
+  `unit/guardrails/env-schema-coverage.test.ts` fails on the drift.
+
+**Cost to accept.** Previews lose background-job testing entirely — any preview
+flow calling `inngest.send()` fails. If that matters, the better answer is an
+Inngest **branch environment** for preview rather than the shared production
+one, which fixes isolation without giving the capability up.
