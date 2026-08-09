@@ -104,7 +104,7 @@ import { broadcastChecklistTemplateJob } from '@/lib/inngest/functions/checklist
 import { applyMasterChecklistJob }       from '@/lib/inngest/functions/apply-master-checklist'
 
 // Platform inventory template broadcasting
-import { broadcastPlatformInventoryTemplate } from '@/lib/inngest/functions/platform-inventory-template-broadcast'
+import { broadcastPlatformInventoryTemplate, syncInventoryTemplateForOrg } from '@/lib/inngest/functions/platform-inventory-template-broadcast'
 
 // Integration error notifications
 import { notifyIntegrationError }  from '@/lib/inngest/functions/notify-integration-error'
@@ -291,6 +291,7 @@ export const { GET, POST, PUT } = serve({
 
     // Platform inventory template broadcasting
     broadcastPlatformInventoryTemplate,
+    syncInventoryTemplateForOrg,
 
     // Integration error notifications
     notifyIntegrationError,

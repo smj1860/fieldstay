@@ -32,6 +32,31 @@ import { collectSourceFiles, rel, read } from './scan'
 const LOOP_OPEN = /(?:for\s*(?:await\s*)?\(\s*(?:const|let)\s+(?:[\w$]+|\{[^}]*\}|\[[^\]]*\])\s+of\s+([^)]+?)\s*\)|\b([\w$.]+)\.forEach\()/g
 const FANOUT = /step\.(run|sendEvent)\(/
 
+/**
+ * Does `token` appear in the collection's defining EXPRESSION, rather than
+ * merely in the name being declared?
+ *
+ * findDefinition slices from `const <name> =`, so the declaration itself is
+ * part of the string being searched — and a collection called `orgIds`
+ * contains the bound token `orgId` in its own name. Every plural-of-a-bound-
+ * token variable therefore self-satisfied the check.
+ *
+ * That is not hypothetical: it is exactly how
+ * platform-inventory-template-broadcast.ts kept `for (const orgId of orgIds)
+ * { await step.run(...) }` over a platform-wide org scan, in the one cron the
+ * 2026-07-30 fan-out pass missed, with this guardrail green the whole time.
+ * A scalability audit found it by reading the code; this test could not.
+ *
+ * Fix: search only to the RIGHT of the `=`. A token in the initialiser is
+ * evidence about the collection's size; a token in its name is evidence about
+ * nothing.
+ */
+function boundBy(definition: string, name: string, token: string): boolean {
+  const eq = definition.indexOf('=', definition.indexOf(name) + name.length)
+  const initialiser = eq === -1 ? definition : definition.slice(eq + 1)
+  return initialiser.includes(token)
+}
+
 /** Tokens in a collection's defining expression that make its size visibly bounded. */
 const BOUND_TOKENS = [
   'org_id',       // scoped to one tenant (the fan-out unit)
@@ -94,10 +119,53 @@ function findDefinition(src: string, name: string): string | null {
   return src.slice(m.index, i)
 }
 
+/**
+ * Blank out comments, preserving byte offsets so reported line numbers stay
+ * correct.
+ *
+ * The scan reads raw source, so it matched loop syntax written inside a
+ * COMMENT — the fan-out fix for platform-inventory-template-broadcast.ts
+ * documents the old `for (const orgId of orgIds) { await step.run(...) }` in
+ * prose explaining why it is gone, and that prose was reported as the
+ * offender. A guardrail that flags the documentation of the very defect it
+ * guards teaches people to delete the explanation.
+ */
+function stripComments(src: string): string {
+  let out = ''
+  let i = 0
+  let inString: string | null = null
+
+  while (i < src.length) {
+    const ch = src[i]!
+    const next = src[i + 1]
+
+    if (inString) {
+      if (ch === '\\') { out += src.slice(i, i + 2); i += 2; continue }
+      if (ch === inString) inString = null
+      out += ch; i++; continue
+    }
+    if (ch === "'" || ch === '"' || ch === '`') { inString = ch; out += ch; i++; continue }
+
+    if (ch === '/' && next === '/') {
+      while (i < src.length && src[i] !== '\n') { out += ' '; i++ }
+      continue
+    }
+    if (ch === '/' && next === '*') {
+      while (i < src.length && !(src[i] === '*' && src[i + 1] === '/')) {
+        out += src[i] === '\n' ? '\n' : ' '
+        i++
+      }
+      out += '  '; i += 2; continue
+    }
+    out += ch; i++
+  }
+  return out
+}
+
 function findOffenders(): string[] {
   const offenders: string[] = []
   for (const file of collectSourceFiles(['lib/inngest'])) {
-    const src = read(file)
+    const src = stripComments(read(file))
     LOOP_OPEN.lastIndex = 0
     let m: RegExpExecArray | null
     while ((m = LOOP_OPEN.exec(src))) {
@@ -113,7 +181,7 @@ function findOffenders(): string[] {
       // No local definition (a parameter, an import, a destructured event
       // payload) — the size is not decidable here, so don't guess.
       if (!definition) continue
-      if (BOUND_TOKENS.some((t) => definition.includes(t))) continue
+      if (BOUND_TOKENS.some((t) => boundBy(definition, name, t))) continue
 
       offenders.push(`${rel(file)}:${src.slice(0, m.index).split('\n').length}`)
     }

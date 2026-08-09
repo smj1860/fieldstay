@@ -967,6 +967,19 @@ export type FieldStayEvents = {
   // generateCapexProjections. `year` is resolved once in the dispatcher so
   // every org in a run projects against the same year even if the fan-out
   // straddles midnight on Dec 31.
+  // Per-org leg of the platform inventory-template broadcast. The dispatcher
+  // used to loop `step.run` per org inside ONE invocation, so a broadcast to
+  // thousands of tenants accumulated thousands of sequential steps in a single
+  // run and died on the step ceiling partway through — with every org after
+  // the failure point never syncing, because there was no per-org retry
+  // boundary. Same dispatcher+handler split as capex/depreciation below.
+  'inventory_template/sync_org.requested': {
+    data: {
+      org_id:               string
+      platform_template_id: string
+    }
+  }
+
   'org/capex_projection.requested': {
     data: {
       org_id: string

@@ -7,7 +7,10 @@ vi.mock('@/lib/audit', () => ({
   logAuditEvents: vi.fn(),
 }))
 
-import { broadcastPlatformInventoryTemplate } from '@/lib/inngest/functions/platform-inventory-template-broadcast'
+import {
+  broadcastPlatformInventoryTemplate,
+  syncInventoryTemplateForOrg,
+} from '@/lib/inngest/functions/platform-inventory-template-broadcast'
 import { createServiceClient } from '@/lib/supabase/server'
 import { logAuditEvents } from '@/lib/audit'
 import { invokeHandler } from './test-helpers'
@@ -50,7 +53,13 @@ function makeSupabase(queued: Record<string, { data?: unknown; error?: unknown }
 }
 
 function runAllStep() {
-  return { run: vi.fn((_name: string, cb: () => unknown) => cb()) }
+  return {
+    run:       vi.fn((_name: string, cb: () => unknown) => cb()),
+    // The dispatcher fans out via events now, so the double has to model it —
+    // without this every dispatcher test fails with "sendEvent is not a
+    // function" rather than asserting anything about the fan-out.
+    sendEvent: vi.fn(async () => undefined),
+  }
 }
 
 const noopLogger = { info: vi.fn(), error: vi.fn(), warn: vi.fn() }
@@ -112,13 +121,13 @@ describe('broadcastPlatformInventoryTemplate', () => {
     })
     ;(createServiceClient as ReturnType<typeof vi.fn>).mockReturnValue(supabase)
 
-    const result = await invokeHandler(broadcastPlatformInventoryTemplate, {
-      event:  { data: { platform_template_id: 'tmpl_1', target_org_ids: null, requested_by: 'admin_1' } },
+    const result = await invokeHandler(syncInventoryTemplateForOrg, {
+      event:  { data: { org_id: 'org_1', platform_template_id: 'tmpl_1' } },
       step:   runAllStep(),
       logger: noopLogger,
     })
 
-    expect(result).toEqual({ synced_orgs: 1, total_orgs: 1 })
+    expect(result).toEqual({ org_id: 'org_1', items_added: 1 })
 
     const orgTemplateInsert = supabase.calls.find((c) => c.table === 'inventory_templates' && c.method === 'insert')
     expect(orgTemplateInsert?.args[0]).toEqual(
@@ -174,13 +183,13 @@ describe('broadcastPlatformInventoryTemplate', () => {
     })
     ;(createServiceClient as ReturnType<typeof vi.fn>).mockReturnValue(supabase)
 
-    const result = await invokeHandler(broadcastPlatformInventoryTemplate, {
-      event:  { data: { platform_template_id: 'tmpl_1', target_org_ids: ['org_1'], requested_by: 'admin_1' } },
+    const result = await invokeHandler(syncInventoryTemplateForOrg, {
+      event:  { data: { org_id: 'org_1', platform_template_id: 'tmpl_1' } },
       step:   runAllStep(),
       logger: noopLogger,
     })
 
-    expect(result).toEqual({ synced_orgs: 1, total_orgs: 1 })
+    expect(result).toEqual({ org_id: 'org_1', items_added: 1 })
 
     // No second insert/update touching cat_1 — only cat_2 gets inserted.
     const itemInsert = supabase.calls.find((c) => c.table === 'inventory_template_items' && c.method === 'insert')
@@ -209,13 +218,13 @@ describe('broadcastPlatformInventoryTemplate', () => {
     })
     ;(createServiceClient as ReturnType<typeof vi.fn>).mockReturnValue(supabase)
 
-    const result = await invokeHandler(broadcastPlatformInventoryTemplate, {
-      event:  { data: { platform_template_id: 'tmpl_1', target_org_ids: ['org_1'], requested_by: 'admin_1' } },
+    const result = await invokeHandler(syncInventoryTemplateForOrg, {
+      event:  { data: { org_id: 'org_1', platform_template_id: 'tmpl_1' } },
       step:   runAllStep(),
       logger: noopLogger,
     })
 
-    expect(result).toEqual({ synced_orgs: 0, total_orgs: 1 })
+    expect(result).toEqual({ org_id: 'org_1', items_added: 0 })
     expect(supabase.calls.some((c) => c.table === 'inventory_template_items' && c.method === 'insert')).toBe(false)
     expect(logAuditEvents).not.toHaveBeenCalled()
   })
@@ -243,13 +252,20 @@ describe('broadcastPlatformInventoryTemplate — failures are not silent', () =>
     error: null,
   }
 
-  function run(supabase: unknown, targetOrgIds: string[] | null = ['org_1']) {
+  /** Per-org failures now belong to the handler; dispatcher failures to the dispatcher. */
+  function run(supabase: unknown, leg: 'org' | 'dispatch' = 'org') {
     ;(createServiceClient as ReturnType<typeof vi.fn>).mockReturnValue(supabase)
-    return invokeHandler(broadcastPlatformInventoryTemplate, {
-      event:  { data: { platform_template_id: 'tmpl_1', target_org_ids: targetOrgIds, requested_by: 'admin_1' } },
-      step:   runAllStep(),
-      logger: noopLogger,
-    })
+    return leg === 'org'
+      ? invokeHandler(syncInventoryTemplateForOrg, {
+          event:  { data: { org_id: 'org_1', platform_template_id: 'tmpl_1' } },
+          step:   runAllStep(),
+          logger: noopLogger,
+        })
+      : invokeHandler(broadcastPlatformInventoryTemplate, {
+          event:  { data: { platform_template_id: 'tmpl_1', target_org_ids: null, requested_by: 'admin_1' } },
+          step:   runAllStep(),
+          logger: noopLogger,
+        })
   }
 
   // The template read discarded its error, so a read failure was reported as
@@ -329,6 +345,6 @@ describe('broadcastPlatformInventoryTemplate — failures are not silent', () =>
       organizations: [{ data: null, error: { message: 'connection reset' } }],
     })
 
-    await expect(run(supabase, null)).rejects.toThrow()
+    await expect(run(supabase, 'dispatch')).rejects.toThrow()
   })
 })
