@@ -96,21 +96,54 @@ async function applyCommittedCounts(
     extra: { count_id: items[0]!.count_id, item_count: items.length },
   })) return false
 
-  const updates = await Promise.all(
-    items.map(({ inventory_item_id, quantity_counted }) =>
-      supabase
-        .from('inventory_items')
-        .update({ current_quantity: quantity_counted })
-        .eq('id', inventory_item_id)
-        .eq('org_id', crew.org_id)
-    )
-  )
-  const updateError = updates.find((r) => r.error)?.error ?? null
-  if (reportQueryError(updateError, {
+  // ONE statement, via the RPC the PM path has used all along
+  // (app/(dashboard)/inventory/actions.ts's applyCountedQuantities →
+  // apply_inventory_counts, migration 20260801260000).
+  //
+  // This used to be `Promise.all(items.map(… one UPDATE each …))`, so a single
+  // crew submission at the route's own 1,000-item cap fired up to a thousand
+  // simultaneous PostgREST round trips. Promise.all is the problem rather than
+  // the volume: nothing paces them, they all leave at once, and at any real
+  // concurrency of submissions that saturates the worker pool for every other
+  // request on the platform.
+  //
+  // Two things the hand-rolled version also quietly got wrong, which are fixed
+  // for free by using the shared implementation:
+  //
+  //   - first_count_recorded_at was never set. The RPC COALESCEs it, so the PM
+  //     path stamps it and the crew path did not — a crew count has never
+  //     registered as an item's first count.
+  //   - updated_at was never touched either, so a crew count left the row
+  //     looking untouched to anything reading that column.
+  //
+  // The org predicate moves from a per-row `.eq('org_id', …)` into the RPC's
+  // own WHERE clause — same boundary, and it is the reason the RPC takes
+  // p_org_id at all: the item ids come from the client.
+  const { data: applied, error: applyError } = await supabase.rpc('apply_inventory_counts', {
+    p_org_id: crew.org_id,
+    p_counts: items.map(({ inventory_item_id, quantity_counted }) => ({
+      item_id: inventory_item_id,
+      qty:     quantity_counted,
+    })),
+  })
+
+  if (reportQueryError(applyError, {
     site:  'route.crew.inventoryCount.quantities',
     orgId: crew.org_id,
     extra: { count_id: items[0]!.count_id },
   })) return false
+
+  // A short count means some ids were not this org's items (or no longer
+  // exist). The count rows are already recorded, so this is reported rather
+  // than failed — same stance as the PM path. The per-item loop could not tell
+  // the difference at all: an id belonging to another tenant simply matched
+  // zero rows and looked identical to success.
+  if ((applied ?? 0) < items.length) {
+    console.warn(
+      '[crew:inventory-count] applied %d of %d counted items',
+      applied ?? 0, items.length,
+    )
+  }
 
   await logAuditEvents(
     items.map(({ inventory_item_id, quantity_counted }) => ({
