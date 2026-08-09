@@ -30,7 +30,7 @@ import {
   NEEDS_CONNECTION,
   type Capability,
 } from './offline-capabilities'
-import { FAQS } from './faq'
+import { STROPS_FAQ as FAQS } from '@/lib/faq-content'
 import { buildJsonLd, serializeJsonLd, STROPS_PATH } from './json-ld'
 import { marketingUrl, marketingOrigin, appUrl } from '@/lib/marketing'
 

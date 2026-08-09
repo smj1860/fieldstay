@@ -92,7 +92,7 @@ describe('JSON-LD survives React rendering intact', () => {
   })
 
   it('every FAQ on the page is in the schema, and vice versa', async () => {
-    const { FAQS } = await import('@/app/strops/faq')
+    const { STROPS_FAQ: FAQS } = await import('@/lib/faq-content')
     const faqNode = buildJsonLd('https://app.fieldstay.app')['@graph']
       .find((n) => n['@type'] === 'FAQPage') as { mainEntity: { name: string }[] }
 

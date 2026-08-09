@@ -30,6 +30,11 @@ import { collectSourceFiles, rel, read } from './scan'
 // .tsx never needed one: it carries zero named color utilities AND zero raw
 // hex. A marketing surface has real tokens now, so a new landing page has no
 // excuse to arrive with either.
+//
+// The two faq-section.tsx entries went the same way, for the same reason, when
+// their byte-identical accordions were extracted to components/faq/. Four
+// marketing files left this list without a single pixel changing, because the
+// --mkt-* values are the exact hexes they were already using.
 // ============================================================================
 
 const COLOR_UTILITY = /(?:text|bg|border|ring)-(?:red|blue|green|amber|yellow|slate|gray|gold)-[0-9]{3}/
@@ -61,9 +66,7 @@ const BASELINE = new Set<string>([
   'app/privacy/page.tsx',
   'app/terms/page.tsx',
   'app/work-orders/[token]/vendor-portal.tsx',
-  'components/hospitable/faq-section.tsx',
   'components/landing/homepage-content.tsx',
-  'components/ownerrez/faq-section.tsx',
   'components/property/PropertyMaintenanceManager.tsx',
   'components/review-prompt.tsx',
   'components/ui/InlineAlert.tsx',

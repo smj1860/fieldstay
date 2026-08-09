@@ -114,6 +114,104 @@ export const MARKETING_TRIAL_FAQ = {
     'After 14 days you\'ll be prompted to choose a plan. If you don\'t subscribe, your account is paused and your data is retained for 30 days so you can pick back up without losing anything. No credit card is required to start.',
 } as const
 
+/**
+ * /strops — the offline SEO landing page.
+ *
+ * Lives here rather than in app/strops/ because this file is where FAQ content
+ * belongs, and because putting it next to MARKETING_OFFLINE_FAQ is the point:
+ * that pair and these answers make the same claims to the same kind of reader,
+ * so whoever edits one should see the other. The first draft of this content
+ * was a separate app/strops/faq.ts with its own duplicate FaqItem interface,
+ * which SonarCloud flagged at 70% duplication against this file.
+ *
+ * Kept SEPARATE from MARKETING_OFFLINE_FAQ rather than merged, under the rule
+ * that pair's own comment sets out: different audiences may keep differently
+ * worded answers to the same fact, and only accidentally-identical wording
+ * gets extracted. MARKETING_OFFLINE_FAQ is one line on a page about an
+ * integration; these are the whole subject of a page written for someone
+ * typing "what app is best for turnovers in low service areas" into Google.
+ * They are checked for CONSISTENCY, not merged — nothing below contradicts it.
+ *
+ * Questions are phrased as SEARCHES, not tidy headings, because they carry
+ * FAQPage structured data aimed at the "People also ask" block. The last one
+ * exists to say what does NOT work offline; a page that only claims wins reads
+ * like every other vendor's, and unit/pages/strops.test.ts fails if it goes.
+ *
+ * Every answer must stay true to app/strops/offline-capabilities.ts, which
+ * cites the implementing file for each claim.
+ */
+export const STROPS_FAQ: readonly FaqItem[] = [
+  {
+    id:       'strops-what-app-is-best',
+    question: 'What app is best for turnovers in low service areas?',
+    answer:
+      'FieldStay is built offline-first for exactly this. The crew app installs to the phone and stores ' +
+      'the day\'s turnovers, checklists, property details and inventory on the device, so it opens and ' +
+      'works with no bars at all. Cleaners tick items, take photos and complete turnovers normally; ' +
+      'everything queues locally and uploads the moment the phone finds signal again — usually before ' +
+      'they have driven back to the main road.',
+  },
+  {
+    id:       'strops-does-the-cleaning-checklist',
+    question: 'Does the cleaning checklist work without internet?',
+    answer:
+      'Yes. The entire checklist — every room and item, including photo requirements — is cached on the ' +
+      'phone before the crew arrives. Ticking items, adding notes and attaching photos all work with the ' +
+      'phone in airplane mode. Completion timestamps are recorded on the device at the moment of the tap, ' +
+      'not when it syncs, so job duration stays accurate even if the upload happens an hour later.',
+  },
+  {
+    id:       'strops-what-happens-to-photos',
+    question: 'What happens to photos taken with no cell service?',
+    answer:
+      'They are stored on the device in their own upload queue and sent independently of everything else, ' +
+      'with automatic retries. A 40-photo turnover in a basement is not held up by one failed request, ' +
+      'and a photo that ultimately cannot upload shows in the app with a retry button rather than ' +
+      'disappearing.',
+  },
+  {
+    id:       'strops-will-i-lose-work',
+    question: 'Will I lose work if the phone dies or the app closes mid-turnover?',
+    answer:
+      'No. Each change and its pending upload are written to the phone in a single transaction, so a ' +
+      'phone killed mid-tap either has the change and the queued upload or neither — never a checkbox ' +
+      'that looks ticked but was never queued. Reopening the app picks up exactly where the crew left off.',
+  },
+  {
+    id:       'strops-what-does-not-work',
+    question: 'What does NOT work offline in FieldStay?',
+    answer:
+      'Three things need a connection: requesting time off, scrolling back through message history ' +
+      '(sending a message queues offline fine), and the manager dashboard, which assumes a desk. Offline ' +
+      'support is built for the crew app on a phone at the property.',
+  },
+  {
+    id:       'strops-do-cleaners-need-to',
+    question: 'Do cleaners need to remember to sync?',
+    answer:
+      'No. There is no sync button to forget. The app uploads in the background whenever it has a ' +
+      'connection, replaying changes in the order they were made. The only time a crew member sees ' +
+      'anything about syncing is if something genuinely failed, which surfaces with a retry button.',
+  },
+  {
+    id:       'strops-does-this-work-for',
+    question: 'Does this work for rural or mountain vacation rentals?',
+    answer:
+      'That is the case it was designed around. Cabins, lake houses and mountain properties routinely ' +
+      'have no usable signal inside the building even when the driveway has a bar. Because FieldStay ' +
+      'caches everything the crew needs before they arrive and queues everything they do, the crew never ' +
+      'has to stand outside to load a checklist or upload a photo.',
+  },
+  {
+    id:       'strops-is-fieldstay-offline-first',
+    question: 'Is FieldStay offline-first or just offline-tolerant?',
+    answer:
+      'Offline-first. The crew app reads from local device storage as its normal mode of operation and ' +
+      'syncs in the background — it is not an online app with a cache bolted on. There is no separate ' +
+      '"offline mode" to switch into, because there is no online mode to switch out of.',
+  },
+] as const
+
 export const FAQ_CATEGORIES: FaqCategory[] = [
   {
     id:    'pms-sync',

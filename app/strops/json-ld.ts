@@ -1,4 +1,4 @@
-import { FAQS } from './faq'
+import { STROPS_FAQ as FAQS } from '@/lib/faq-content'
 
 // ============================================================================
 // Structured data for /offline-turnover-app.

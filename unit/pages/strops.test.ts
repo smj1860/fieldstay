@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest'
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 
-import { FAQS } from '@/app/strops/faq'
+import { STROPS_FAQ as FAQS } from '@/lib/faq-content'
 import {
   LOADS_OFFLINE, READ_OFFLINE, WRITE_OFFLINE, RELIABILITY, NEEDS_CONNECTION,
 } from '@/app/strops/offline-capabilities'
