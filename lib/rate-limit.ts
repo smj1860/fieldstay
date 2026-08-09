@@ -270,6 +270,34 @@ export const ownerPortalRatelimit = new Ratelimit({
   prefix:    'rl:owner-portal',
 })
 
+/**
+ * AGGREGATE ceiling for one token-route resource, across every source IP.
+ *
+ * Every limiter above is keyed on the caller's IP, which bounds what any one
+ * client can do and bounds nothing at all about what a *resource* can be made
+ * to serve. A single leaked owner-portal URL — a forwarded email, a link in a
+ * shared inbox, a crawler — hit from many IPs gives each of them its own fresh
+ * per-IP allowance against the same unauthenticated, financial-data query
+ * path. Load scales linearly with the number of distinct sources, and the
+ * per-IP limiter never fires once.
+ *
+ * Keyed on the PATHNAME rather than a parsed token: the token sits at a
+ * different segment on different surfaces (`/owner/{t}`, `/g/b/{t}`,
+ * `/api/work-orders/{t}/…`), and the pathname already identifies the resource
+ * exactly — two tokens are two pathnames, and `?month=…` on the same token is
+ * correctly the same bucket.
+ *
+ * Deliberately well above the per-IP window: this is a ceiling on total abuse
+ * of one resource, not a second per-client throttle, and it must not fire for
+ * an owner and their accountant reading the same statement.
+ */
+export const tokenResourceRatelimit = new Ratelimit({
+  redis,
+  limiter:   Ratelimit.slidingWindow(120, '1 m'),
+  analytics: false,
+  prefix:    'rl:token-resource',
+})
+
 // Guest-facing guidebook routes (/g/*) — media kit signup, guest guidebook
 // view, and the SMS opt-in link. All unauthenticated and token-guessable.
 export const guidebookRatelimit = new Ratelimit({

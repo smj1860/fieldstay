@@ -542,3 +542,53 @@ describe('guardrail: no `void` applied to a Supabase/PostgREST builder', () => {
     ).toEqual([])
   })
 })
+
+// ============================================================================
+// The per-IP limiter bounds a CLIENT. It bounds nothing about a RESOURCE.
+//
+// Every token-route limiter is keyed on the caller's IP, so a single leaked
+// owner-portal URL — a forwarded email, a shared inbox, a crawler — hit from
+// many sources gives each of them its own fresh allowance against the same
+// unauthenticated, financial-data query path. Load scales linearly with the
+// number of distinct IPs and the per-IP limiter never fires once.
+//
+// Checked structurally rather than behaviourally because proxy.ts is Next
+// middleware: it is not unit-invokable here, and the property that matters is
+// that BOTH buckets are consulted before a request is allowed through.
+// ============================================================================
+describe('guardrail: token routes have an aggregate per-resource ceiling, not just per-IP', () => {
+  const proxySrc = stripComments(read(join(ROOT, 'proxy.ts')))
+
+  it('consults a resource-scoped limiter in addition to the per-IP one', () => {
+    expect(
+      proxySrc,
+      'enforceTokenRouteRateLimit must check tokenResourceRatelimit as well as the per-IP limiter — ' +
+      'without it, N attacker IPs get N x the per-IP allowance against one token URL.'
+    ).toMatch(/checkLimit\(\s*tokenResourceRatelimit/)
+  })
+
+  it('keys the resource bucket on the pathname, not the IP', () => {
+    // The pathname identifies the resource exactly: two tokens are two
+    // pathnames, and `?month=…` on the same token is correctly one bucket.
+    // Keying it on the IP would just duplicate the bucket it sits beside.
+    const call = /checkLimit\(\s*tokenResourceRatelimit\s*,\s*([^,]+),/.exec(proxySrc)
+    expect(call, 'tokenResourceRatelimit call site not found').not.toBeNull()
+    expect(call![1]).toContain('pathname')
+  })
+
+  it('rejects when EITHER bucket rejects', () => {
+    // `perIp.allowed` alone would leave the resource ceiling computed and
+    // discarded — the most expensive possible no-op.
+    expect(proxySrc).toMatch(/if\s*\(\s*perIp\.allowed\s*&&\s*perResource\.allowed\s*\)\s*return null/)
+  })
+
+  it('fails OPEN on both, so a Redis outage cannot take the public surfaces down', () => {
+    const region = proxySrc.slice(
+      proxySrc.indexOf('async function enforceTokenRouteRateLimit'),
+      proxySrc.indexOf('function bypassResponse'),
+    )
+    const onErrorPolicies = [...region.matchAll(/onError:\s*'(\w+)'/g)].map((m) => m[1])
+    expect(onErrorPolicies.length).toBeGreaterThanOrEqual(2)
+    expect(onErrorPolicies.every((p) => p === 'allow')).toBe(true)
+  })
+})

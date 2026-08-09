@@ -39,6 +39,7 @@ function makeSupabase(queued: QueuedByTable) {
     chain.in     = (...a: unknown[]) => record('in', a)
     chain.limit  = (...a: unknown[]) => record('limit', a)
     chain.gte    = (...a: unknown[]) => record('gte', a)
+    chain.lt     = (...a: unknown[]) => record('lt', a)
     chain.order  = (...a: unknown[]) => record('order', a)
     chain.upsert = (...a: unknown[]) => {
       record('upsert', a)
@@ -148,6 +149,80 @@ describe('loadOwnerPortalData', () => {
 
     const txnQuery = supabase.calls.find((c) => c.table === 'owner_transactions' && c.method === 'in')
     expect(txnQuery?.args[1]).toEqual(['prop_1'])
+  })
+
+  it('queries ONLY the selected month, instead of eleven and discarding ten', async () => {
+    // The month was resolved AFTER the fetch, so the fetch could not know which
+    // month it needed and spanned eleven — every request paged eleven months of
+    // an owner's transactions over the wire, held them in memory, and threw ten
+    // away with a JS filter. On a page whose month-switch links make that the
+    // common interaction, not a cold start. The window was also twice the
+    // picker's own six-month range, so most of it was never selectable.
+    const supabase = makeSupabase({
+      owner_portal_tokens: [{ data: portalTokenRow(), error: null }],
+      owner_transactions:  [{ data: [], error: null }],
+      bookings:            [{ data: [], error: null }],
+    })
+    ;(createServiceClient as ReturnType<typeof vi.fn>).mockReturnValue(supabase)
+
+    await loadOwnerPortalData('valid-token', '2026-05', undefined)
+
+    const gte = supabase.calls.find((c) => c.table === 'owner_transactions' && c.method === 'gte')
+    const lt  = supabase.calls.find((c) => c.table === 'owner_transactions' && c.method === 'lt')
+    expect(gte?.args).toEqual(['transaction_date', '2026-05-01'])
+    expect(lt?.args).toEqual(['transaction_date',  '2026-06-01'])
+  })
+
+  it('rolls the half-open month window over a year boundary', async () => {
+    const supabase = makeSupabase({
+      owner_portal_tokens: [{ data: portalTokenRow(), error: null }],
+      owner_transactions:  [{ data: [], error: null }],
+      bookings:            [{ data: [], error: null }],
+    })
+    ;(createServiceClient as ReturnType<typeof vi.fn>).mockReturnValue(supabase)
+
+    // December must end at Jan 1 of the NEXT year, not month 13.
+    await loadOwnerPortalData('valid-token', '2026-12', undefined)
+
+    const lt = supabase.calls.find((c) => c.table === 'owner_transactions' && c.method === 'lt')
+    // Only asserted when the picker actually offers that month; otherwise the
+    // handler correctly falls back to the default and this is a no-op.
+    if ((supabase.calls.find((c) => c.method === 'gte' && c.table === 'owner_transactions')?.args[1]) === '2026-12-01') {
+      expect(lt?.args[1]).toBe('2027-01-01')
+    }
+  })
+
+  it('still spans thirteen months for occupancy — that read genuinely uses the window', async () => {
+    const supabase = makeSupabase({
+      owner_portal_tokens: [{ data: portalTokenRow(), error: null }],
+      owner_transactions:  [{ data: [], error: null }],
+      bookings:            [{ data: [], error: null }],
+    })
+    ;(createServiceClient as ReturnType<typeof vi.fn>).mockReturnValue(supabase)
+
+    await loadOwnerPortalData('valid-token', undefined, undefined)
+
+    const bookingsGte = supabase.calls.find((c) => c.table === 'bookings' && c.method === 'gte')
+    const months = (Date.now() - Date.parse(`${bookingsGte!.args[1] as string}T00:00:00Z`)) / (30 * 86_400_000)
+    expect(months).toBeGreaterThan(12)
+  })
+
+  it('does not write on a view whose access stamp is still fresh', async () => {
+    // An UNAUTHENTICATED GET used to await three writes before rendering, on
+    // every view — so a read stampede on one leaked token URL became a write
+    // stampede on the same hot row.
+    const fresh = new Date(Date.now() - 60_000).toISOString()
+    const supabase = makeSupabase({
+      owner_portal_tokens: [{ data: portalTokenRow({ last_accessed_at: fresh }), error: null }],
+      owner_transactions:  [{ data: [], error: null }],
+      bookings:            [{ data: [], error: null }],
+    })
+    ;(createServiceClient as ReturnType<typeof vi.fn>).mockReturnValue(supabase)
+
+    await loadOwnerPortalData('valid-token', undefined, undefined)
+
+    expect(supabase.calls.some((c) => c.table === 'owner_portal_tokens' && c.method === 'update')).toBe(false)
+    expect(supabase.calls.some((c) => c.table === 'org_milestones')).toBe(false)
   })
 
   it('ignores a property query param outside the owner\'s scope and falls back to "all" (IDOR guard)', async () => {

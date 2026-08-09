@@ -1,3 +1,4 @@
+import { after } from 'next/server'
 import { createServiceClient } from '@/lib/supabase/server'
 import { fetchAllRows } from '@/lib/inngest/paginate'
 import { logAuditEvent } from '@/lib/audit'
@@ -66,11 +67,6 @@ export interface OwnerPortalData {
   occupancy:            ReturnType<typeof computeOccupancy>
   lastYearMonthLabel:   string
   capexPayload:         CapExProjectionPayload | null
-}
-
-function toMonthParam(dateStr: string): string {
-  const d = new Date(dateStr + 'T00:00:00')
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`
 }
 
 function formatMonthLabel(monthParam: string): string {
@@ -314,32 +310,86 @@ function formatAddress(p: OwnerPortalProperty | null): string | null {
   return parts.length ? parts.join(', ') : null
 }
 
-async function recordAccess(
-  supabase:      SupabaseLike,
-  portalTokenId: string,
-  orgId:         string | null,
-): Promise<void> {
-  const { error: accessError } = await supabase
-    .from('owner_portal_tokens')
-    .update({ last_accessed_at: new Date().toISOString() })
-    .eq('id', portalTokenId)
+/**
+ * How stale `last_accessed_at` is allowed to get before it is rewritten.
+ *
+ * This is a "when did the owner last look at this" signal, not an access log —
+ * the audit trail is the separate `owner_portal.accessed` event. Five-minute
+ * granularity loses nothing anyone reads and removes essentially every write.
+ */
+const ACCESS_STAMP_INTERVAL_MS = 5 * 60_000
 
-  reportQueryError(accessError, { site: 'owner-portal.recordAccess', orgId: orgId ?? undefined })
+/**
+ * Record that the portal was viewed — OFF the request path, and throttled.
+ *
+ * This is an UNAUTHENTICATED GET. It used to `await` three writes before
+ * rendering: an UPDATE on the token row, an audit INSERT, and an
+ * `org_milestones` UPSERT — unconditionally, every view. So a read stampede on
+ * one leaked or prefetched token URL became a WRITE stampede on the same hot
+ * row: MVCC bloat, WAL pressure and lock contention on `owner_portal_tokens`,
+ * strictly worse than the read stampede it looks like. And the owner waited for
+ * all three before seeing anything.
+ *
+ * Two changes, and both are needed:
+ *
+ *  - THROTTLED. `last_accessed_at` is already on the token row we validated, so
+ *    skipping a rewrite inside the interval costs no extra read. At any real
+ *    request rate this collapses N writes per token into one per five minutes.
+ *  - DEFERRED via `after()`. Nothing here is load-bearing for the render, so
+ *    none of it belongs in front of it. `after()` is the supported way to run
+ *    work once the response is sent — a bare floating promise is not, and can
+ *    be killed when the function suspends.
+ *
+ * The milestone upsert is inside the same throttle deliberately: it is
+ * `ignoreDuplicates` on a fixed key, so after the first view every later one is
+ * a no-op write that still takes a row lock.
+ */
+function recordAccess(
+  supabase:       SupabaseLike,
+  portalTokenId:  string,
+  orgId:          string | null,
+  lastAccessedAt: string | null,
+): void {
+  const stampIsFresh =
+    lastAccessedAt !== null &&
+    Date.now() - new Date(lastAccessedAt).getTime() < ACCESS_STAMP_INTERVAL_MS
 
-  if (!orgId) return
+  if (stampIsFresh) return
 
-  await Promise.all([
-    logAuditEvent({
-      orgId,
-      action:     'owner_portal.accessed',
-      targetType: 'owner_portal_token',
-      targetId:   portalTokenId,
-    }),
-    supabase.from('org_milestones').upsert(
-      { org_id: orgId, milestone: 'first_owner_portal_view' },
-      { onConflict: 'org_id,milestone', ignoreDuplicates: true }
-    ),
-  ])
+  const work = async () => {
+    const { error: accessError } = await supabase
+      .from('owner_portal_tokens')
+      .update({ last_accessed_at: new Date().toISOString() })
+      .eq('id', portalTokenId)
+
+    reportQueryError(accessError, { site: 'owner-portal.recordAccess', orgId: orgId ?? undefined })
+
+    if (!orgId) return
+
+    await Promise.all([
+      logAuditEvent({
+        orgId,
+        action:     'owner_portal.accessed',
+        targetType: 'owner_portal_token',
+        targetId:   portalTokenId,
+      }),
+      supabase.from('org_milestones').upsert(
+        { org_id: orgId, milestone: 'first_owner_portal_view' },
+        { onConflict: 'org_id,milestone', ignoreDuplicates: true }
+      ),
+    ])
+  }
+
+  // `after()` throws outside a request scope. Nothing in this bookkeeping is
+  // worth failing a page render for, so a caller that is not a request (a
+  // test, a future script) still gets the writes — just not deferred.
+  try {
+    after(work)
+  } catch {
+    void work().catch((err: unknown) => {
+      console.error('[owner-portal] undeferred recordAccess failed', err)
+    })
+  }
 }
 
 // ── Entry point ──────────────────────────────────────────────────────────────
@@ -364,7 +414,7 @@ export async function loadOwnerPortalData(
   } | null
   if (!ownerRaw) return null
 
-  await recordAccess(supabase, portalToken.id, ownerRaw.org_id)
+  recordAccess(supabase, portalToken.id, ownerRaw.org_id, portalToken.last_accessed_at)
 
   const property = unwrapJoin(ownerRaw.properties) as OwnerPortalProperty | null
   if (!property) return null
@@ -374,10 +424,27 @@ export async function loadOwnerPortalData(
   )
   const { txnPropertyIds, selectedProperty, viewProperty } = scope
 
-  // Fetch all visible transactions (last 12 months to cover 6-month picker)
-  const since = new Date()
-  since.setMonth(since.getMonth() - 11)
-  since.setDate(1)
+  // Resolve the month FIRST — getLastSixMonths() is pure and monthParam is an
+  // argument, so nothing here needs the database.
+  //
+  // This used to happen AFTER the fetch, which is why the fetch spanned eleven
+  // months: it could not know which one it needed. Every request therefore
+  // paged eleven months of an owner's transactions over the wire, held them in
+  // memory, and then threw ten of them away with a JS filter — on a page whose
+  // month-switch links make that the common interaction, not a cold start. The
+  // window was also twice the picker's own range ("last 12 months to cover
+  // 6-month picker"), so most of what it discarded was never selectable.
+  const availableMonths = getLastSixMonths()
+  const defaultMonth    = availableMonths[0]!
+  const selectedMonth   = availableMonths.includes(monthParam ?? '') ? (monthParam ?? defaultMonth) : defaultMonth
+
+  // Half-open [monthStart, monthEnd) on a DATE column — string comparison on
+  // ISO dates is exact and needs no timezone reasoning.
+  const [selYear, selMonth] = selectedMonth.split('-').map(Number) as [number, number]
+  const monthStart = `${selectedMonth}-01`
+  const monthEnd   = selMonth === 12
+    ? `${selYear + 1}-01-01`
+    : `${selYear}-${String(selMonth + 1).padStart(2, '0')}-01`
 
   // Occupancy — a rolling 13-month booking window in one query; current month /
   // same-month-last-year / rolling-12mo are all derived from it.
@@ -395,14 +462,15 @@ export async function loadOwnerPortalData(
   // fetchAllRows throws on a query error, which is the same outcome unwrapList
   // produced here (it throws so the segment's error.tsx renders a real error
   // state rather than an empty portal).
-  const [allTxns, bookingsRaw] = await Promise.all([
+  const [filteredTxns, bookingsRaw] = await Promise.all([
     fetchAllRows<OwnerPortalTxn>(
       (from, to) => supabase
         .from('owner_transactions')
         .select('id, property_id, transaction_type, category, source, amount, description, transaction_date, notes')
         .in('property_id', txnPropertyIds)
         .eq('visible_to_owner', true)
-        .gte('transaction_date', since.toISOString().split('T')[0]!)
+        .gte('transaction_date', monthStart)
+        .lt('transaction_date',  monthEnd)
         .order('transaction_date', { ascending: false })
         .order('id')
         .range(from, to),
@@ -424,15 +492,10 @@ export async function loadOwnerPortalData(
     ),
   ])
 
-  // Month filter
-  const availableMonths  = getLastSixMonths()
-  const defaultMonth     = availableMonths[0]!
-  const selectedMonth    = availableMonths.includes(monthParam ?? '') ? (monthParam ?? defaultMonth) : defaultMonth
-
-  const filteredTxns = allTxns.filter(
-    (t) => toMonthParam(t.transaction_date) === selectedMonth
-  )
-
+  // No JS month filter any more — the query IS the filter. The occupancy read
+  // below still spans thirteen months on purpose: computeOccupancy derives
+  // same-month-last-year and rolling-12mo from it, so unlike the transactions
+  // it genuinely uses the whole window.
   const occupancy = computeOccupancy(
     bookingsRaw,
     selectedMonth,
