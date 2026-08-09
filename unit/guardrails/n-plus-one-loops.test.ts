@@ -129,8 +129,6 @@ const EXCEPTIONS: Record<string, string> = {
     'Second pass (absent-asset-types) of the same function — same reasoning as line 63.',
   'lib/inngest/functions/guidebook-stay-extension-cron.ts:165':
     'Real N+1 (existence check, next-booking lookup, opt-in lookup, insert — 4 queries per booking) left as a known, bounded cost — deferred rather than fixed blind, touches live guest-messaging sync logic. Bounded by same-day checkouts per org per day, and since the 2026-08-09 fan-out fix it runs inside the per-org handler (guidebookStayExtensionOrg) rather than inside a loop over every org on the platform.',
-  'lib/inngest/functions/ownerrez/reconciliation-handler.ts:162':
-    'Real N+1 (cancel booking + cancel its turnovers, per stale booking) left as a known, bounded cost — deferred rather than fixed blind. Contrast lib/inngest/functions/ical-sync.ts, which batches the equivalent booking-cancel via .update().in(\'id\', ids) — a good template for fixing this one later.',
   'lib/inngest/functions/checklist-broadcast.ts:125':
     'Per-section insert (parent-before-child, same reasoning as clone-actions.ts:122) — additionally guarded by a template-signature equality check just above that skips the whole delete-then-recreate rebuild when nothing changed.',
   'lib/inngest/functions/cron/guest-pii-retention.ts:137':

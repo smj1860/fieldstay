@@ -7,14 +7,14 @@ vi.mock('@/lib/integrations/providers/ownerrez-api', () => ({
   OwnerRezApiClient: vi.fn(),
 }))
 vi.mock('@/lib/turnovers/generator', () => ({
-  cancelTurnoversForBooking:      vi.fn().mockResolvedValue([]),
+  cancelTurnoversForBookings:     vi.fn().mockResolvedValue([]),
   notifyCrewOfCancelledTurnovers: vi.fn(),
 }))
 
 import { ownerRezReconciliationHandler } from '@/lib/inngest/functions/ownerrez/reconciliation-handler'
 import { createServiceClient } from '@/lib/supabase/server'
 import { OwnerRezApiClient } from '@/lib/integrations/providers/ownerrez-api'
-import { cancelTurnoversForBooking, notifyCrewOfCancelledTurnovers } from '@/lib/turnovers/generator'
+import { cancelTurnoversForBookings, notifyCrewOfCancelledTurnovers } from '@/lib/turnovers/generator'
 import { RateLimitError } from '@/lib/integrations/types'
 import { invokeHandler } from './test-helpers'
 
@@ -36,6 +36,7 @@ function makeSupabase(queued: QueuedByTable) {
   const counters: Record<string, number> = {}
   const updateSpy = vi.fn()
   const eqSpy     = vi.fn()
+  const inSpy     = vi.fn()
 
   const from = vi.fn((table: string) => {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -43,6 +44,7 @@ function makeSupabase(queued: QueuedByTable) {
     chain.select = vi.fn(() => chain)
     chain.eq     = vi.fn((column: string, value: unknown) => { eqSpy(table, column, value); return chain })
     chain.neq    = vi.fn(() => chain)
+    chain.in     = vi.fn((column: string, value: unknown) => { inSpy(table, column, value); return chain })
     chain.update = vi.fn((payload: unknown) => { updateSpy(table, payload); return chain })
     // fetch-property-ids is paginated through fetchAllRows(), which chains
     // .order().range() before awaiting.
@@ -62,7 +64,7 @@ function makeSupabase(queued: QueuedByTable) {
     return chain
   })
 
-  return { from, updateSpy, eqSpy }
+  return { from, updateSpy, eqSpy, inSpy }
 }
 
 function baseMocks(getBookingsImpl: () => Promise<Array<{ id: number }>>) {
@@ -82,7 +84,7 @@ describe('ownerRezReconciliationHandler', () => {
 
   it('cancels a FieldStay booking (and its turnover) whose external_id no longer appears in OwnerRez\'s current full listing', async () => {
     baseMocks(async () => [{ id: 100 }])
-    ;(cancelTurnoversForBooking as ReturnType<typeof vi.fn>).mockResolvedValueOnce([
+    ;(cancelTurnoversForBookings as ReturnType<typeof vi.fn>).mockResolvedValueOnce([
       { turnoverId: 'to_1', orgId: 'org_1', crewMemberId: 'crew_1' },
     ])
 
@@ -90,7 +92,7 @@ describe('ownerRezReconciliationHandler', () => {
       properties: [{ data: [{ external_id: '42' }], error: null }],
       bookings:   [
         { data: [{ id: 'b1', external_id: '100' }, { id: 'b2', external_id: '200' }], error: null }, // select existing
-        { data: null, error: null }, // update on b2
+        { data: [{ id: 'b2' }], error: null }, // bulk UPDATE ... RETURNING id, one row claimed
       ],
     })
     ;(createServiceClient as ReturnType<typeof vi.fn>).mockReturnValue(supabase)
@@ -104,8 +106,8 @@ describe('ownerRezReconciliationHandler', () => {
     })
 
     expect(supabase.updateSpy).toHaveBeenCalledWith('bookings', { status: 'cancelled' })
-    expect(cancelTurnoversForBooking).toHaveBeenCalledWith('b2', supabase)
-    expect(cancelTurnoversForBooking).toHaveBeenCalledTimes(1)
+    expect(cancelTurnoversForBookings).toHaveBeenCalledWith(['b2'], supabase)
+    expect(cancelTurnoversForBookings).toHaveBeenCalledTimes(1)
     expect(notifyCrewOfCancelledTurnovers).toHaveBeenCalledWith([
       { turnoverId: 'to_1', orgId: 'org_1', crewMemberId: 'crew_1' },
     ])
@@ -132,7 +134,7 @@ describe('ownerRezReconciliationHandler', () => {
     })
 
     expect(supabase.updateSpy).not.toHaveBeenCalled()
-    expect(cancelTurnoversForBooking).not.toHaveBeenCalled()
+    expect(cancelTurnoversForBookings).not.toHaveBeenCalled()
     expect(notifyCrewOfCancelledTurnovers).toHaveBeenCalledWith([])
     expect(result).toEqual({ cancelledCount: 0 })
   })
@@ -166,7 +168,7 @@ describe('ownerRezReconciliationHandler', () => {
     // decides it: not cancelling leaves stale rows one more day; cancelling
     // wrongly sends crew home from stays that are still happening.
     expect(supabase.updateSpy).not.toHaveBeenCalled()
-    expect(cancelTurnoversForBooking).not.toHaveBeenCalled()
+    expect(cancelTurnoversForBookings).not.toHaveBeenCalled()
     expect(notifyCrewOfCancelledTurnovers).not.toHaveBeenCalled()
     expect(result).toEqual({ skipped: true, reason: 'empty_current_set' })
   })
@@ -189,7 +191,7 @@ describe('ownerRezReconciliationHandler', () => {
 
     expect(result).toEqual({ skipped: true, reason: 'rate_limited' })
     expect(step.run).not.toHaveBeenCalledWith('cancel-stale-bookings', expect.any(Function))
-    expect(cancelTurnoversForBooking).not.toHaveBeenCalled()
+    expect(cancelTurnoversForBookings).not.toHaveBeenCalled()
     expect(notifyCrewOfCancelledTurnovers).not.toHaveBeenCalled()
   })
 
@@ -222,5 +224,86 @@ describe('ownerRezReconciliationHandler', () => {
 
     const propertiesEqCalls = supabase.eqSpy.mock.calls.filter((c) => c[0] === 'properties')
     expect(propertiesEqCalls.some((c) => c[1] === 'is_active')).toBe(false)
+  })
+  // ── Batching ──────────────────────────────────────────────────────────────
+  //
+  // This step used to do one UPDATE plus one cancelTurnoversForBooking() per
+  // stale booking, sequentially. Fine at the steady-state shape (a handful of
+  // hard deletes a day) and useless at the shape that actually needs it: a
+  // property unlinked upstream orphans hundreds of bookings at once, the step
+  // burns its execution budget on 2N round-trips, and Inngest retries from the
+  // top and never reaches the tail. These two tests pin the batching so a
+  // future edit cannot quietly reintroduce the per-row loop.
+
+  it('cancels a large stale set in bounded chunks rather than one round-trip per booking', async () => {
+    const STALE = 250   // > CANCEL_CHUNK (100), so this must span three chunks
+    baseMocks(async () => [{ id: 1 }])
+
+    const existing = [
+      { id: 'keep', external_id: '1' },
+      ...Array.from({ length: STALE }, (_, i) => ({ id: `b${i}`, external_id: `9${i}` })),
+    ]
+
+    const supabase = makeSupabase({
+      properties: [{ data: [{ external_id: '42' }], error: null }],
+      bookings:   [
+        { data: existing, error: null },
+        { data: Array.from({ length: 100 }, (_, i) => ({ id: `b${i}` })),       error: null },
+        { data: Array.from({ length: 100 }, (_, i) => ({ id: `b${i + 100}` })), error: null },
+        { data: Array.from({ length: 50 },  (_, i) => ({ id: `b${i + 200}` })), error: null },
+      ],
+    })
+    ;(createServiceClient as ReturnType<typeof vi.fn>).mockReturnValue(supabase)
+
+    const result = await invokeHandler(ownerRezReconciliationHandler, {
+      event:  { data: { user_id: 'user_1', org_id: 'org_1' } },
+      step:   makeAllowlistStep(ALLOWED),
+      logger: makeLogger(),
+    })
+
+    expect(result).toEqual({ cancelledCount: STALE })
+
+    // Three bulk UPDATEs, not 250 — and three turnover sweeps, not 250.
+    expect(supabase.updateSpy).toHaveBeenCalledTimes(3)
+    expect(cancelTurnoversForBookings).toHaveBeenCalledTimes(3)
+
+    // Every chunk is within the cap, and together they cover the whole set
+    // exactly once. A chunk larger than 100 would truncate its own RETURNING
+    // at max_rows and undercount; an overlap would double-cancel.
+    const idBatches = (cancelTurnoversForBookings as ReturnType<typeof vi.fn>).mock.calls
+      .map((c) => c[0] as string[])
+    expect(idBatches.map((b) => b.length)).toEqual([100, 100, 50])
+    expect(new Set(idBatches.flat()).size).toBe(STALE)
+
+    // The booking that OwnerRez still knows about is never in a cancel chunk.
+    expect(idBatches.flat()).not.toContain('keep')
+  })
+
+  it('throws rather than reporting a clean run when a chunk fails to cancel', async () => {
+    // The old per-booking path logged the failure and `continue`d, so a
+    // booking that failed to cancel produced a SMALLER cancelledCount and an
+    // otherwise successful run — indistinguishable from a booking that was
+    // never stale. Nothing revisits it: the next sweep reads the same row and
+    // makes the same write. Throwing gets the Inngest retry, which is safe
+    // because the re-read excludes anything already cancelled.
+    baseMocks(async () => [{ id: 1 }])
+
+    const supabase = makeSupabase({
+      properties: [{ data: [{ external_id: '42' }], error: null }],
+      bookings:   [
+        { data: [{ id: 'b1', external_id: '99' }], error: null },
+        { data: null, error: { message: 'deadlock detected', code: '40P01' } },
+      ],
+    })
+    ;(createServiceClient as ReturnType<typeof vi.fn>).mockReturnValue(supabase)
+
+    await expect(invokeHandler(ownerRezReconciliationHandler, {
+      event:  { data: { user_id: 'user_1', org_id: 'org_1' } },
+      step:   makeAllowlistStep(ALLOWED),
+      logger: makeLogger(),
+    })).rejects.toThrow(/cancel-stale-bookings \(40P01\)/)
+
+    expect(cancelTurnoversForBookings).not.toHaveBeenCalled()
+    expect(notifyCrewOfCancelledTurnovers).not.toHaveBeenCalled()
   })
 })
