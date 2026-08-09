@@ -17,7 +17,7 @@
 import { unwrap } from '@/lib/supabase/unwrap'
 import { reportError } from '@/lib/observability/report-error'
 import { createServiceClient }         from '@/lib/supabase/server'
-import { redis }                       from '@/lib/rate-limit'
+import { acquireRefreshLock, releaseRefreshLock } from '@/lib/integrations/refresh-lock'
 import { PMS_API_TIMEOUT_MS } from '@/lib/http/timeout'
 import {
   readIntegrationToken,
@@ -39,7 +39,6 @@ const REFRESH_WINDOW_MINUTES = 30
 //
 // 20s TTL: comfortably longer than a token exchange + two Vault writes, short
 // enough that a crashed holder self-heals within one Inngest step retry.
-const REFRESH_LOCK_TTL_SECONDS = 20
 const REFRESH_LOCK_WAIT_MS     = 250
 const REFRESH_LOCK_MAX_WAITS   = 60   // ~15s ceiling
 
@@ -81,36 +80,6 @@ export async function getValidHospitableToken(userId: string): Promise<string> {
 }
 
 /**
- * Best-effort mutual exclusion around a per-user token refresh.
- *
- * Returns true if the lock was acquired. On Redis failure it returns TRUE
- * (fail-open) — losing the lock degrades to today's behaviour, whereas
- * fail-closed would block every sync in the platform on a Redis blip. The
- * lock is an optimisation against a rare race, not a correctness barrier.
- */
-async function acquireRefreshLock(userId: string): Promise<boolean> {
-  try {
-    const result = await redis.set(
-      `hospitable:refresh-lock:${userId}`,
-      '1',
-      { nx: true, ex: REFRESH_LOCK_TTL_SECONDS },
-    )
-    return result === 'OK'
-  } catch (err) {
-    console.warn('[Hospitable] refresh lock unavailable, proceeding unlocked:', err)
-    return true
-  }
-}
-
-async function releaseRefreshLock(userId: string): Promise<void> {
-  try {
-    await redis.del(`hospitable:refresh-lock:${userId}`)
-  } catch {
-    // Non-fatal — the TTL expires it.
-  }
-}
-
-/**
  * Wraps refreshHospitableToken() in a short Redis lock so concurrent callers
  * for the same user don't interleave two refresh-token exchanges (Hospitable
  * rotates refresh tokens, so the loser's token is superseded and silently
@@ -124,13 +93,13 @@ async function refreshHospitableTokenLocked(
   userId:         string,
   externalUserId: string,
 ): Promise<string> {
-  const acquired = await acquireRefreshLock(userId)
+  const acquired = await acquireRefreshLock('hospitable', userId)
 
   if (acquired) {
     try {
       return await refreshHospitableToken(userId, externalUserId)
     } finally {
-      await releaseRefreshLock(userId)
+      await releaseRefreshLock('hospitable', userId)
     }
   }
 

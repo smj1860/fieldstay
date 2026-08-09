@@ -18,6 +18,17 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 // The limiter objects themselves are opaque tokens here — what matters is
 // WHICH one krogerFetch hands to checkLimit for a given endpoint class.
 const checkLimitMock = vi.fn()
+// The circuit breaker consults Redis before every Kroger call and clears the
+// counter after a recovery. Stubbed here so this file keeps measuring RATE
+// LIMITING — unmocked, the breaker's own Upstash round-trips land on the same
+// global fetch spy and the "called fetch once" assertions count three.
+vi.mock('@/lib/integrations/circuit-breaker', async (orig) => ({
+  ...(await orig<typeof import('@/lib/integrations/circuit-breaker')>()),
+  failureCount:  vi.fn(async () => 0),
+  recordFailure: vi.fn(async () => undefined),
+  recordSuccess: vi.fn(async () => undefined),
+}))
+
 vi.mock('@/lib/rate-limit', () => ({
   krogerAuthApiLimiter:      { __limiter: 'kroger-auth' },
   krogerProductsApiLimiter:  { __limiter: 'kroger-products' },
