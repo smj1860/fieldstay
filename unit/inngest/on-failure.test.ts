@@ -52,8 +52,12 @@ describe('onFunctionFailure', () => {
     })
 
     expect(resend.emails.send).toHaveBeenCalledTimes(1)
+    // Keyed on run_id — this handler is itself retried, and a duplicate
+    // "critical job failed" alert arrives at the exact moment the founder is
+    // already trying to work out what broke.
     expect(resend.emails.send).toHaveBeenCalledWith(
       expect.objectContaining({ subject: expect.stringContaining('turnover-completed') }),
+      { idempotencyKey: 'critical-job-failed-run_1' },
     )
     expect(result).toEqual({ function_id: 'turnover-completed', alerted: true })
   })

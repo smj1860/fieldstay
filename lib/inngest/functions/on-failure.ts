@@ -82,7 +82,7 @@ export const onFunctionFailure = inngest.createFunction(
           ctaLabel: 'Open FieldStay →',
           ctaUrl:   process.env.NEXT_PUBLIC_APP_URL ?? '',
         }),
-      })
+      }, { idempotencyKey: `critical-job-failed-${run_id}` })
     })
 
     return { function_id, alerted: true }

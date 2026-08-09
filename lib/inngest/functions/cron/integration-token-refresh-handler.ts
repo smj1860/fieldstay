@@ -84,20 +84,42 @@ export const integrationTokenRefreshHandler = inngest.createFunction(
       return { user_id, provider_id, refreshed: true }
     }
 
-    // ── Step 2: Mark revoked, check dedup (top-level, atomic UPDATE+RETURNING) ──
-    const alreadyNotified = await step.run('mark-revoked', async () => {
+    // ── Step 2: Mark revoked and CLAIM the reconnect email in one statement ──
+    const claimed = await step.run('mark-revoked', async () => {
       const supabase = createServiceClient({ system: 'inngest:integration-token-refresh-handler' })
 
-      // This UPDATE ... RETURNING is the dedup claim for the reconnect email.
-      // Discarding its error returned `false` — "not yet notified" — so a
-      // failed claim sent the email AGAIN, and the revoked status may not have
+      // The claim is now the same UPDATE that flips the status, gated on
+      // `reconnect_email_sent_at IS NULL`. It used to be split: this statement
+      // set the status and merely READ reconnect_email_sent_at, and the send
+      // step wrote it afterwards — with a failure there logged and swallowed
+      // as "non-fatal".
+      //
+      // That combination has no exit. The cron re-fires this handler for the
+      // connection every day, the refresh fails again every day (the token is
+      // revoked), and the read still finds NULL because the write that would
+      // have set it failed — so the PM gets the same "action required" email
+      // every single day until that one write happens to succeed. A dedup flag
+      // written after the thing it deduplicates is not a dedup flag.
+      //
+      // Claim-before-send inverts that: at most one email per revocation, and
+      // the send retries below rather than the claim.
+      //
+      // Safe against a genuine re-revocation because reconnecting clears the
+      // flag — store_integration_token() sets reconnect_email_sent_at = NULL
+      // (20260707170000_fix_store_integration_token_race.sql), so a connection
+      // that is fixed and later breaks again matches this filter afresh.
+      //
+      // Discarding the error returned `false` — "not yet notified" — so a
+      // failed claim sent the email anyway, and the revoked status may not have
       // been written either. Throw so Inngest retries the claim.
+      const now = new Date().toISOString()
       const claimRes = await supabase
         .from('integration_connections')
-        .update({ status: 'revoked', updated_at: new Date().toISOString() })
+        .update({ status: 'revoked', reconnect_email_sent_at: now, updated_at: now })
         .eq('user_id',    user_id)
         .eq('provider_id', provider_id)
-        .select('reconnect_email_sent_at')
+        .is('reconnect_email_sent_at', null)
+        .select('id')
         .maybeSingle()
 
       const updatedConn = unwrap(
@@ -105,11 +127,11 @@ export const integrationTokenRefreshHandler = inngest.createFunction(
         { site: 'inngest.integration-token-refresh-handler.mark-revoked' },
       )
 
-      return !!updatedConn?.reconnect_email_sent_at
+      return !!updatedConn
     })
 
     // ── Step 3: Send the reconnect email, once (top-level) ─────────────
-    if (!alreadyNotified) {
+    if (claimed) {
       await step.run('send-reconnect-email', async () => {
         const providerLabel = PROVIDER_LABELS[provider_id] ?? provider_id
 
@@ -135,36 +157,36 @@ export const integrationTokenRefreshHandler = inngest.createFunction(
           reconnectUrl: `${appUrl}/settings/integrations`,
         })
 
+        // Keyed on the connection, so the step retries below cannot turn one
+        // revocation into several emails. Resend's idempotency window is 24h,
+        // which covers the retries but deliberately not tomorrow's cron run —
+        // the DB claim above is what makes this once-per-revocation, and the
+        // key is only protecting the retry path.
         const { error: emailErr } = await resend.emails.send({
           from:    FROM,
           to:      pmEmail,
           replyTo: 'support@fieldstay.app',
           subject: `Action required — reconnect your ${providerLabel} account`,
           html,
-        })
+        }, { idempotencyKey: `integration-reconnect-${provider_id}-${user_id}` })
 
+        // THROW, where this used to log and return.
+        //
+        // The claim is taken before the send now, so swallowing a send failure
+        // would mean the PM is never told at all — the previous code could
+        // afford to shrug because tomorrow's run would try again (which was
+        // also the bug: it tried again every day forever). Throwing spends the
+        // function's remaining retries on the send, and a terminal failure
+        // reaches the dead-letter handler instead of disappearing.
         if (emailErr) {
-          logger.error(
+          throw new Error(
             `[TokenRefresh] Reconnect email send failed for org ${org_id}: ${JSON.stringify(emailErr)}`
           )
-          // Non-fatal — the connection is already marked revoked and the
-          // PM will see the error state in the UI even without the email.
-          return
         }
 
-        const { error: markSentError } = await supabase
-          .from('integration_connections')
-          .update({ reconnect_email_sent_at: new Date().toISOString(), updated_at: new Date().toISOString() })
-          .eq('user_id',    user_id)
-          .eq('provider_id', provider_id)
-
-        if (markSentError) {
-          logger.error(
-            `[TokenRefresh] Failed to record reconnect_email_sent_at for ${provider_id}:${user_id}: ${JSON.stringify(markSentError)}`
-          )
-        }
-
-        logger.info(`[TokenRefresh] Reconnect email sent to ${pmEmail} for ${providerLabel}`)
+        // Recipient address deliberately not logged — it is a PM's email, and
+        // these lines land in Axiom. The connection identifies the run.
+        logger.info(`[TokenRefresh] Reconnect email sent for ${provider_id}:${user_id} (${providerLabel})`)
       })
     } else {
       logger.info(`[TokenRefresh] Reconnect email already sent for ${provider_id}:${user_id} — skipping`)

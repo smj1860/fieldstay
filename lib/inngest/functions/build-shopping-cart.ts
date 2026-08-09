@@ -576,12 +576,17 @@ ${JSON.stringify(itemsForNormalization, null, 2)}`,
         recipientName: userRecord.user.user_metadata?.full_name ?? 'there',
       })
 
+      // Keyed on org + day, the same shape daily-wrapup.ts uses, because this
+      // is the last step of a long run: seven steps of Kroger API work happen
+      // before it, and a replay of THIS step re-sends "your cart is ready" for
+      // a cart that was already built and already reported. One cart per org
+      // per day is what the schedule produces, so that is the identity.
       await resend.emails.send({
         from:    FROM,
         to:      pmEmail,
         subject: `Your Kroger restock cart is ready (${cartResult.matched_items.length} items)`,
         html,
-      })
+      }, { idempotencyKey: `cart-ready-${org_id}-${new Date().toISOString().split('T')[0]}` })
 
       await logAuditEvent({
         orgId:      org_id,
