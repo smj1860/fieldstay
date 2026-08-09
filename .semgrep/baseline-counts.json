@@ -137,13 +137,13 @@
     "hostaway/initial-sync.ts, ownerrez-reviews-sync.ts) as a side effect of",
     "the same .limit() additions."
   ],
-  "measured_at": "2026-08-08",
+  "measured_at": "2026-08-09",
   "counts": {
     "fieldstay-supabase-discarded-result": 0,
     "fieldstay-supabase-read-without-error": 0,
     "fieldstay-supabase-read-without-error-fan-in": 0,
-    "fieldstay-supabase-unbounded-select-in-list": 13,
-    "fieldstay-supabase-unbounded-select-org-scoped": 76,
-    "fieldstay-supabase-unbounded-select-single-parent": 18
+    "fieldstay-supabase-unbounded-select-in-list": 12,
+    "fieldstay-supabase-unbounded-select-org-scoped": 73,
+    "fieldstay-supabase-unbounded-select-single-parent": 17
   }
 }

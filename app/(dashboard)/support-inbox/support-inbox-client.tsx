@@ -1,6 +1,7 @@
 'use client'
 
 import { useState, useEffect, useRef, useCallback } from 'react'
+import { Button } from '@/components/ui/Button'
 import { ChevronLeft }                 from 'lucide-react'
 import { createClient }                from '@/lib/supabase/client'
 import { cn }                          from '@/lib/utils'
@@ -18,6 +19,12 @@ interface ConversationRow {
   created_at:        string
   organizations:     { name: string } | { name: string }[] | null
 }
+
+/**
+ * Messages fetched per page. Enough that a normal thread loads whole, small
+ * enough that a months-long bot conversation does not.
+ */
+const MESSAGE_PAGE_SIZE = 50
 
 interface MessageRow {
   id:         string
@@ -52,6 +59,8 @@ export function SupportInboxClient({
   // only switch to the detail pane once the user taps a conversation.
   const [mobileShowDetail, setMobileShowDetail] = useState(false)
   const [messages, setMessages] = useState<MessageRow[]>([])
+  const [hasOlder, setHasOlder]   = useState(false)
+  const [loadingOlder, setLoadingOlder] = useState(false)
   const [replyText, setReplyText] = useState('')
   const [sending, setSending]     = useState(false)
   const supabase  = createClient()
@@ -88,16 +97,39 @@ export function SupportInboxClient({
     return () => { supabase.removeChannel(channel) }
   }, [supabase, applyConversationChange])
 
-  // Load + subscribe to messages for the selected conversation
+  // Load + subscribe to messages for the selected conversation.
+  //
+  // Newest-first + limit, then reversed for display. This used to select the
+  // ENTIRE thread with no bound before subscribing: a guest/PM <-> bot
+  // conversation accumulating over months lands thousands of rows in a staff
+  // browser tab, and pays for all of them on every conversation switch. The
+  // bot is the volume driver — a human thread stays short, an escalated one
+  // that bounced through the assistant does not.
   useEffect(() => {
     if (!selectedId) return
+
+    // `active` guards against a conversation switch landing mid-fetch: without
+    // it, a slow first page can resolve AFTER the user has moved on and
+    // overwrite the new thread with the old one's messages. The unbounded
+    // version had the same race; it is just more visible now that there is a
+    // paging cursor derived from whatever is on screen.
+    let active = true
 
     supabase
       .from('support_messages')
       .select('id, role, content, created_at')
       .eq('conversation_id', selectedId)
-      .order('created_at', { ascending: true })
-      .then((result: { data: MessageRow[] | null }) => setMessages(result.data ?? []))
+      .order('created_at', { ascending: false })
+      .limit(MESSAGE_PAGE_SIZE)
+      .then((result: { data: MessageRow[] | null }) => {
+        if (!active) return
+        const page = result.data ?? []
+        // A full page means there is probably more behind it. Exactly-N is
+        // indistinguishable from "there were exactly N", which costs one
+        // needless "Load earlier" click and never hides anything.
+        setHasOlder(page.length === MESSAGE_PAGE_SIZE)
+        setMessages([...page].reverse())
+      })
 
     const channel = supabase
       .channel(`support-inbox-messages-${selectedId}`)
@@ -109,12 +141,58 @@ export function SupportInboxClient({
       )
       .subscribe()
 
-    return () => { supabase.removeChannel(channel) }
+    return () => {
+      active = false
+      supabase.removeChannel(channel)
+    }
   }, [selectedId, supabase])
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' })
   }, [messages])
+
+  /**
+   * Fetch the page before the oldest message currently shown.
+   *
+   * Capping the initial load without this would make older history
+   * unreachable — a cheaper page at the cost of losing the thread, which for a
+   * support inbox is the wrong trade.
+   */
+  async function loadOlderMessages() {
+    const oldest = messages[0]
+    if (!selectedId || !oldest || loadingOlder) return
+    const forConversation = selectedId
+    setLoadingOlder(true)
+
+    const { data, error } = await supabase
+      .from('support_messages')
+      .select('id, role, content, created_at')
+      .eq('conversation_id', selectedId)
+      .lt('created_at', oldest.created_at)
+      .order('created_at', { ascending: false })
+      .limit(MESSAGE_PAGE_SIZE)
+
+    setLoadingOlder(false)
+    // Same stale-response guard as the initial load.
+    if (forConversation !== selectedId) return
+
+    // Bound, not discarded: a failed page read and "there is no older history"
+    // both produce an empty array, and silently clearing hasOlder would tell
+    // the user the thread starts here when it does not.
+    if (error) {
+      console.error('[support-inbox] failed to load older messages', error)
+      return
+    }
+
+    const page = (data ?? []) as MessageRow[]
+    setHasOlder(page.length === MESSAGE_PAGE_SIZE)
+    // Prepend, and de-dupe by id: `created_at` is not unique, so two messages
+    // sharing a timestamp at the page boundary would otherwise appear twice.
+    setMessages((prev) => {
+      const seen = new Set(prev.map((m) => m.id))
+      return [...[...page].reverse().filter((m) => !seen.has(m.id)), ...prev]
+    })
+  }
 
   async function sendReply() {
     if (!selectedId || !replyText.trim()) return
@@ -284,6 +362,17 @@ export function SupportInboxClient({
             </div>
 
             <div style={{ flex: 1, overflowY: 'auto', padding: '16px', display: 'flex', flexDirection: 'column', gap: '10px' }}>
+              {hasOlder && (
+                <Button
+                  type="button"
+                  variant="ghost"
+                  onClick={loadOlderMessages}
+                  disabled={loadingOlder}
+                  style={{ alignSelf: 'center', fontSize: '12px' }}
+                >
+                  {loadingOlder ? 'Loading…' : 'Load earlier messages'}
+                </Button>
+              )}
               {messages.map((m) => {
                 const style = roleBubble(m)
                 return (
