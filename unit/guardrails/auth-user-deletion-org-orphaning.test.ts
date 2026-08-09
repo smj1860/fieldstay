@@ -95,16 +95,22 @@ describe('guardrail: deleting an auth user must not orphan owned organizations',
     }
   })
 
-  it('the account-deletion route purges the org-scoped tables that have no FK cascade from organizations', () => {
+  it('the account-deletion purge covers every org-scoped table that has no FK cascade from organizations', () => {
     // Verified against the live schema on 2026-07-30 as the complete set of
-    // org_id-bearing tables with NO foreign key to organizations. A sibling
-    // migration is adding those FKs; until every one of them lands (and even
-    // after — a DELETE that the cascade already handled is a harmless no-op),
-    // the route must clear them explicitly or the tenant's data survives the
-    // organization row.
+    // org_id-bearing tables with NO foreign key to organizations, re-checked
+    // 2026-08-09. A sibling migration has been adding those FKs; until every
+    // one lands (and even after — a DELETE the cascade already handled is a
+    // harmless no-op), the purge must clear them explicitly or the tenant's
+    // data survives the organization row.
+    //
+    // The purge moved OUT of the route on 2026-08-09 (the cascade is one
+    // all-or-nothing statement and the route inherits the platform's default
+    // maxDuration, so a large tenant could never finish deleting). This
+    // asserts against wherever it lives now, and the companion assertion below
+    // is what stops it from living nowhere.
     const src = read(
-      collectSourceFiles(['app']).find(
-        (f) => rel(f) === 'app/api/account/delete/route.ts',
+      collectSourceFiles(['lib']).find(
+        (f) => rel(f) === 'lib/inngest/functions/account-deletion.ts',
       ) as string,
     )
     for (const table of [
@@ -123,8 +129,25 @@ describe('guardrail: deleting an auth user must not orphan owned organizations',
     ]) {
       expect(
         src.includes(`'${table}'`),
-        `app/api/account/delete/route.ts must purge '${table}' — it carries org_id but has no ON DELETE CASCADE from organizations, so deleting the organization leaves its rows behind.`,
+        `lib/inngest/functions/account-deletion.ts must purge '${table}' — it carries org_id but has no ON DELETE CASCADE from organizations, so deleting the organization leaves its rows behind.`,
       ).toBe(true)
     }
+  })
+
+  it('the account-deletion route still hands the purge off — moving it must not mean dropping it', () => {
+    // The route is the only caller. Relocating the purge into an Inngest
+    // function is only safe while something still fires the event; without
+    // this, deleting the send would leave a route that authorizes, cancels
+    // billing, audits "account.deleted" — and destroys nothing, permanently,
+    // with a 202 telling the user it worked.
+    const src = read(
+      collectSourceFiles(['app']).find(
+        (f) => rel(f) === 'app/api/account/delete/route.ts',
+      ) as string,
+    )
+    expect(
+      /account\/deletion\.requested/.test(src),
+      'app/api/account/delete/route.ts must send account/deletion.requested — it no longer purges anything itself.',
+    ).toBe(true)
   })
 })

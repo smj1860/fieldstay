@@ -3,6 +3,7 @@ import { cookies }                   from 'next/headers'
 import { createServerClient }        from '@supabase/ssr'
 import { Ratelimit }                 from '@upstash/ratelimit'
 import { createServiceClient }       from '@/lib/supabase/server'
+import { inngest }                   from '@/lib/inngest/client'
 import { redis, checkLimit }         from '@/lib/rate-limit'
 import { logAuditEvents }            from '@/lib/audit'
 import { revokeIntegrationToken }    from '@/lib/integrations/vault'
@@ -11,49 +12,6 @@ import { reportError }               from '@/lib/observability/report-error'
 import type { TablesUpdate } from '@/types/database'
 
 type Admin = ReturnType<typeof createServiceClient>
-
-/**
- * Org-scoped tables that do NOT (yet) have a FOREIGN KEY to organizations,
- * so deleting the organizations row does not cascade to them. Verified
- * against the live schema on 2026-07-30: every other org_id-bearing table
- * has `REFERENCES organizations(id) ON DELETE CASCADE` (audit_events and
- * system_job_runs are deliberately ON DELETE SET NULL — retained history).
- *
- * These are deleted explicitly, before the organizations row, so the purge
- * is complete regardless of whether the FK-backfill migration has been
- * applied. Once those FKs exist the explicit delete simply becomes a no-op
- * that removes rows the cascade would have removed anyway — it stays correct
- * either way, so this list is a safety net, not a duplicate of the cascade.
- *
- * Order is FK-safe: none of these reference each other, and all of their own
- * child tables (e.g. inventory_template_items, inventory_count_items)
- * cascade from the parent rows removed here.
- */
-/**
- * Tables that must be cleared BEFORE the organizations row, because they hold
- * a non-cascading FK to another table that IS in the cascade tree. Postgres
- * does not order cascade actions, so leaving these to the cascade can abort
- * the whole DELETE with a foreign-key violation. Verified 2026-07-30:
- *   work_order_invoices.property_id -> properties   ON DELETE RESTRICT
- *   work_order_invoices.vendor_id   -> vendors      ON DELETE RESTRICT
- *   work_orders.reported_by_crew_member_id -> crew_members  ON DELETE NO ACTION
- * Deleting invoices then work orders clears all three edges; every other FK
- * inside the organizations cascade tree is CASCADE or SET NULL.
- */
-const ORG_TABLES_BLOCKING_CASCADE = [
-  'work_order_invoices',
-  'work_orders',
-] as const
-
-const ORG_TABLES_WITHOUT_CASCADE = [
-  'asset_depreciation_entries',
-  'assignment_outcomes',
-  'vendor_assignment_outcomes',
-  'crew_availability',
-  'inventory_templates',
-  'maintenance_schedule_templates',
-  'messages',
-] as const
 
 // Account deletion is an irreversible, org-wide destructive action reachable
 // with only a session cookie + a password. Throttle it per user so a stolen
@@ -232,44 +190,6 @@ async function cancelOrgSubscriptions(
   return null
 }
 
-/**
- * Delete the organization itself. The ON DELETE CASCADE from every
- * org-scoped table is what actually erases the tenant's data — properties,
- * bookings (guest_name/guest_email), owner_transactions, work_orders,
- * guidebook_guest_sms_optins, communication_logs and the rest. Deleting only
- * the auth user leaves ALL of it behind, unreachable by RLS and never
- * purged; that is exactly how the two orphaned orgs found in production on
- * 2026-07-30 (10 properties, 20 bookings carrying guest PII) came to exist.
- *
- * Idempotent: every statement is a DELETE by org_id, so a re-run after a
- * partial failure is a no-op for whatever already went.
- */
-async function purgeOrganization(admin: Admin, orgId: string): Promise<NextResponse | null> {
-  for (const table of [...ORG_TABLES_BLOCKING_CASCADE, ...ORG_TABLES_WITHOUT_CASCADE]) {
-    const { error } = await admin.from(table).delete().eq('org_id', orgId)
-    if (error) {
-      console.error(`[account/delete] failed to purge ${table} for org ${orgId}`, error)
-      reportError(error, { site: 'route.account.delete.purge_org', orgId, extra: { table } })
-      return NextResponse.json(
-        { error: 'Failed to delete your organization data. Please try again.' },
-        { status: 500 }
-      )
-    }
-  }
-
-  const { error } = await admin.from('organizations').delete().eq('id', orgId)
-  if (error) {
-    console.error(`[account/delete] failed to delete organization ${orgId}`, error)
-    reportError(error, { site: 'route.account.delete.delete_org', orgId })
-    return NextResponse.json(
-      { error: 'Failed to delete your organization. Please try again.' },
-      { status: 500 }
-    )
-  }
-
-  return null
-}
-
 /** Revoke third-party tokens held in Vault. The LOOKUP failing must abort —
  *  proceeding would revoke nothing and leave live tokens behind forever,
  *  since the connection rows are about to be cascade-deleted. An individual
@@ -431,21 +351,56 @@ export async function DELETE(request: NextRequest) {
     }))
   )
 
-  // Stage 4 — destroy the org data. Ordered before deleteUser so a failure
-  // here leaves a still-usable account that can retry, rather than an
-  // orphaned tenant nobody can reach.
-  for (const orgId of ownedOrgIds) {
-    const purgeFailure = await purgeOrganization(admin, orgId)
-    if (purgeFailure) return purgeFailure
+  // Stage 4 — hand the destructive half to Inngest.
+  //
+  // Everything above this line can still refuse, and nothing above it has
+  // destroyed anything. Everything below it is irreversible, and it used to
+  // run right here: sequential DELETEs per org-scoped table, then
+  // `DELETE FROM organizations` and its cascade across 60 child tables and
+  // their descendants — one all-or-nothing statement whose cost is the
+  // tenant's entire history — and finally deleteUser. This route has no
+  // `maxDuration` entry in vercel.json, so it inherits the platform default;
+  // the Inngest route is given 300s there. A tenant whose cascade outran the
+  // request budget therefore could never delete their account: every attempt
+  // died at the same statement, rolled back, and returned a 500 inviting a
+  // retry that would do exactly the same thing.
+  //
+  // The send is the LAST thing that can fail cheaply, so it goes before the
+  // response and its failure aborts with nothing destroyed and nothing
+  // orphaned. Once it succeeds the work is Inngest's: retried automatically,
+  // checkpointed per table, and — since 'account-deletion' is in
+  // CRITICAL_FUNCTION_IDS — escalated to the founder inbox if it exhausts
+  // retries, rather than leaving an unreachable tenant behind.
+  try {
+    await inngest.send({
+      name: 'account/deletion.requested',
+      data: { user_id: caller.id, owned_org_ids: ownedOrgIds },
+    })
+  } catch (err) {
+    console.error(`[Account:${caller.id}] failed to enqueue deletion:`, err)
+    reportError(err, { site: 'route.account.delete.enqueue' })
+    return NextResponse.json(
+      { error: 'Unable to start the deletion right now. Please try again in a few minutes.' },
+      { status: 503 }
+    )
   }
 
-  // Stage 5 — finally the auth user (cascades to profiles and any remaining
-  // organization_members rows for orgs the user did not own).
-  const { error: deleteError } = await admin.auth.admin.deleteUser(caller.id)
-  if (deleteError) {
-    console.error(`[Account:${caller.id}] deleteUser failed:`, deleteError.message)
-    return NextResponse.json({ error: 'Failed to delete account. Please try again.' }, { status: 500 })
+  // Global sign-out, best effort. The auth user itself is deleted at the END
+  // of the background job — deliberately, for the reason the synchronous
+  // version gave: while it exists the tenant is reachable and the purge is
+  // re-drivable, whereas deleting it first turns a failed purge into an orphan
+  // nobody can find. That leaves a window where the caller's session outlives
+  // their click, so revoke the refresh tokens now. Not fatal if it fails: the
+  // only person holding that session is the one who just asked for all of this
+  // to be destroyed, and the job removes the user regardless.
+  const { error: signOutError } = await admin.auth.admin.signOut(caller.id, 'global')
+  if (signOutError) {
+    console.error(`[Account:${caller.id}] global sign-out failed:`, signOutError.message)
   }
 
-  return NextResponse.json({ ok: true })
+  // 202, not 200: the account is going, not gone. The client's contract is
+  // unchanged (`ok: true` → redirect to /login?deleted=1) because from the
+  // user's side nothing about the outcome differs — every check that could
+  // have stopped it has already passed.
+  return NextResponse.json({ ok: true, queued: true }, { status: 202 })
 }

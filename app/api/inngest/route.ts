@@ -139,6 +139,7 @@ import { onboardingDrip } from '@/lib/inngest/functions/onboarding-drip'
 import { computeChecklistSignals } from '@/lib/inngest/functions/cron/checklist-signals'
 
 // Dead-letter handler for failed function runs
+import { accountDeletion } from '@/lib/inngest/functions/account-deletion'
 import { onFunctionFailure } from '@/lib/inngest/functions/on-failure'
 
 // Stripe Connect vendor onboarding
@@ -355,6 +356,9 @@ export const { GET, POST, PUT } = serve({
 
     // Business metrics snapshot (Sentry Application Metrics)
     metricsSnapshot,
+
+    // Account deletion — the destructive half of DELETE /api/account/delete
+    accountDeletion,
 
     // Hospitable launch promo
     tagHospitableTrialSignup,

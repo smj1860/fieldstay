@@ -61,6 +61,49 @@ function boundBy(definition: string, name: string, token: string): boolean {
 }
 
 /**
+ * A collection whose length is fixed at compile time: an array literal of
+ * primitives, or a spread of other such arrays.
+ *
+ * The header of this file has always claimed "a plainly finite literal array"
+ * counts as bounded. It did not — nothing implemented it. account-deletion.ts
+ * loops `for (const table of ORG_PURGE_TABLES)` over nine hard-coded table
+ * names, which is as bounded as a collection can be, and was reported as an
+ * unbounded platform-wide fan-out.
+ *
+ * That matters beyond the one false positive: the cheapest way to silence this
+ * check on a literal list is an EXCEPTIONS entry, and an exception granted for
+ * a non-defect is an exception nobody re-reads when the code underneath it
+ * changes.
+ *
+ * Deliberately strict — an element that is anything other than a primitive or
+ * a spread of another finite literal array (a call, an await, a bare
+ * identifier) makes the length undecidable here and returns false. Splitting
+ * on top-level commas naively is safe in that direction too: a fragment of a
+ * nested expression fails the primitive test rather than passing it.
+ */
+function isFiniteLiteralArray(src: string, name: string, seen = new Set<string>()): boolean {
+  if (seen.has(name)) return false
+  seen.add(name)
+
+  const definition = findDefinition(src, name)
+  if (!definition) return false
+
+  const init = initialiserOf(definition, name).trim().replace(/\bas\s+const\s*$/, '').trim()
+  if (!init.startsWith('[') || !init.endsWith(']')) return false
+
+  const elements = init.slice(1, -1).split(',').map((e) => e.trim()).filter(Boolean)
+  if (!elements.length) return true
+
+  return elements.every((el) => {
+    if (/^'[^']*'$/.test(el) || /^"[^"]*"$/.test(el)) return true
+    if (/^-?\d+(\.\d+)?$/.test(el)) return true
+    if (/^(?:true|false|null)$/.test(el)) return true
+    const spread = /^\.\.\.([\w$]+)$/.exec(el)
+    return spread ? isFiniteLiteralArray(src, spread[1] as string, seen) : false
+  })
+}
+
+/**
  * Is this collection bounded — directly, or because it is DERIVED from one
  * that is?
  *
@@ -83,6 +126,7 @@ function isBounded(src: string, name: string, seen = new Set<string>()): boolean
   // — the size is not decidable here, so don't guess.
   if (!definition) return false
   if (BOUND_TOKENS.some((t) => boundBy(definition, name, t))) return true
+  if (isFiniteLiteralArray(src, name)) return true
 
   // Every other identifier the initialiser mentions. If any of them is a
   // bounded local collection, this one inherits the bound.
