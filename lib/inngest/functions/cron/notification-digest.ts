@@ -1,6 +1,6 @@
 import { inngest }              from '@/lib/inngest/client'
 import { createServiceClient }  from '@/lib/supabase/server'
-import { fetchAllRows }         from '@/lib/inngest/paginate'
+import { foldAllRows }          from '@/lib/inngest/paginate'
 
 /**
  * SCHEDULED: 12pm UTC daily (7am CT) — ahead of the 8am CT cron batch
@@ -44,45 +44,54 @@ export const notificationDigest = inngest.createFunction(
     // Both scans are paginated: unbounded, they were capped at PostgREST's
     // 1000-row limit with no error, so once platform-wide 24h volume crossed
     // that line every org sorted late simply received no digest at all.
+    //
+    // FOLDED rather than accumulated. What this step produces is one integer
+    // per org — a list the size of the tenant count — but fetchAllRows held
+    // every work order created platform-wide in the last 24 hours in memory to
+    // compute it, and threw outright at its 200k ceiling rather than degrading.
+    // foldAllRows keeps one 1000-row page at a time, so peak memory is the page
+    // and the result, not the scan.
     const woCreatedByOrg = await step.run('count-work-orders-created', async () => {
       const supabase = createServiceClient({ system: 'inngest:notification-digest' })
-      const rows = await fetchAllRows<{ org_id: string; vendor_id: string | null; status: string }>(
+      const counts = await foldAllRows<{ org_id: string; vendor_id: string | null; status: string }, Map<string, number>>(
         (from, to) => supabase
           .from('work_orders')
           .select('org_id, vendor_id, status')
           .gte('created_at', since)
           .order('id', { ascending: true })
           .range(from, to),
+        new Map(),
+        (acc, page) => {
+          for (const row of page) {
+            // Exclude WOs that cron-daily-wrapup's unassigned-WO section will
+            // name individually this evening — see the doc comment above.
+            const stillUnassigned = row.vendor_id === null && ['pending', 'quote_requested'].includes(row.status)
+            if (stillUnassigned) continue
+            acc.set(row.org_id, (acc.get(row.org_id) ?? 0) + 1)
+          }
+          return acc
+        },
         { label: 'work_orders(digest)' }
       )
-
-      // Exclude WOs that cron-daily-wrapup's unassigned-WO section will name
-      // individually this evening — see the doc comment above.
-      const counts = new Map<string, number>()
-      for (const row of rows) {
-        const stillUnassigned = row.vendor_id === null && ['pending', 'quote_requested'].includes(row.status)
-        if (stillUnassigned) continue
-        counts.set(row.org_id, (counts.get(row.org_id) ?? 0) + 1)
-      }
       return Array.from(counts.entries())
     })
 
     const repuguardByOrg = await step.run('count-repuguard-drafts', async () => {
       const supabase = createServiceClient({ system: 'inngest:notification-digest' })
-      const rows = await fetchAllRows<{ org_id: string }>(
+      const counts = await foldAllRows<{ org_id: string }, Map<string, number>>(
         (from, to) => supabase
           .from('review_responses')
           .select('org_id')
           .gte('generated_at', since)
           .order('id', { ascending: true })
           .range(from, to),
+        new Map(),
+        (acc, page) => {
+          for (const row of page) acc.set(row.org_id, (acc.get(row.org_id) ?? 0) + 1)
+          return acc
+        },
         { label: 'review_responses(digest)' }
       )
-
-      const counts = new Map<string, number>()
-      for (const row of rows) {
-        counts.set(row.org_id, (counts.get(row.org_id) ?? 0) + 1)
-      }
       return Array.from(counts.entries())
     })
 

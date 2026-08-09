@@ -4,7 +4,7 @@ import { inngest } from '@/lib/inngest/client'
 import { createServiceClient } from '@/lib/supabase/server'
 import { logAuditEvents } from '@/lib/audit'
 import { unwrapJoin } from '@/lib/utils/supabase-joins'
-import { fetchAllRows, fetchDistinctOrgIds } from '@/lib/inngest/paginate'
+import { fetchAllRows, foldAllRows, fetchDistinctOrgIds } from '@/lib/inngest/paginate'
 import {
   scoreAssets,
   persistScores,
@@ -12,7 +12,9 @@ import {
   type AssetRow,
   type AssetStandardRow,
   type RepairSummary,
-  type RepairRecord,
+  type NudgeRepairCounts,
+  lifespanYears,
+  isLateLifeRepair,
 } from './asset-health-helpers'
 
 /**
@@ -89,44 +91,14 @@ export const dailyAssetHealth = inngest.createFunction(
 
       type NudgeRow = {
         asset_id: string | null
-        actual_cost: number | null
-        estimated_cost: number | null
         completed_date: string | null
-        assets: { asset_type: string; installation_date: string | null; expected_lifespan_years: number | null }
-              | { asset_type: string; installation_date: string | null; expected_lifespan_years: number | null }[]
+        assets: { asset_type: string; installation_date: string | null }
+              | { asset_type: string; installation_date: string | null }[]
               | null
       }
 
-      const assetRepairs = await fetchAllRows<NudgeRow>(
-        (from, to) => supabase
-          .from('work_orders')
-          .select('asset_id, actual_cost, estimated_cost, completed_date, assets:property_assets!asset_id(asset_type, installation_date, expected_lifespan_years)')
-          .not('asset_id', 'is', null)
-          .eq('status', 'completed')
-          .gte('completed_date', windowStart)
-          .order('id', { ascending: true })
-          .range(from, to),
-        { label: 'work_orders(weight-nudge)' }
-      )
-
-      if (!assetRepairs.length) return { nudged: 0 }
-
-      const byType: Record<string, RepairRecord[]> = {}
-
-      for (const wo of assetRepairs) {
-        const assetInfo = unwrapJoin(wo.assets)
-        if (!assetInfo?.asset_type || !assetInfo.installation_date || !wo.completed_date) continue
-
-        const installYear = new Date(assetInfo.installation_date).getFullYear()
-        const repairYear  = new Date(wo.completed_date).getFullYear()
-        const ageAtRepair = Math.max(0, repairYear - installYear)
-        const repairCost  = wo.actual_cost ?? wo.estimated_cost ?? 0
-
-        ;(byType[assetInfo.asset_type] ??= []).push({
-          ageAtRepair, repairCost, assetType: assetInfo.asset_type,
-        })
-      }
-
+      // Standards FIRST, because the late-life test needs each type's lifespan
+      // and that is what lets the scan below fold instead of accumulate.
       const standardsRes = await supabase
         .from('asset_type_standards')
         .select('asset_type, display_name, age_weight, condition_weight, lifespan_min_years, lifespan_max_years')
@@ -139,6 +111,60 @@ export const dailyAssetHealth = inngest.createFunction(
         { site: 'inngest.asset-health.scoring-weight-nudge.standards' },
       )
 
+      const lifespanByType = new Map<string, number>(
+        (currentStandards ?? []).map((std) => [std.asset_type as string, lifespanYears(std)])
+      )
+
+      // FOLDED, not accumulated. This scan is platform-wide over a
+      // REPAIR_HISTORY_WINDOW_DAYS window of completed work orders, and it used
+      // to materialise every one of them — each with a joined property_assets
+      // row — to produce two integers per asset type. At fetchAllRows' 200k
+      // ceiling it did not degrade, it threw, taking the whole nudge with it.
+      // The accumulator is now 21 counters regardless of how many repairs the
+      // platform did.
+      //
+      // actual_cost and estimated_cost are gone from the select: computeWeightNudge
+      // never read them. Pulling a financial field platform-wide to discard it
+      // is not free, and actual_cost is one CLAUDE.md bans from logs.
+      const byType = await foldAllRows<NudgeRow, Map<string, NudgeRepairCounts>>(
+        (from, to) => supabase
+          .from('work_orders')
+          .select('asset_id, completed_date, assets:property_assets!asset_id(asset_type, installation_date)')
+          .not('asset_id', 'is', null)
+          .eq('status', 'completed')
+          .gte('completed_date', windowStart)
+          .order('id', { ascending: true })
+          .range(from, to),
+        new Map<string, NudgeRepairCounts>(),
+        (acc, page) => {
+          for (const wo of page) {
+            const assetInfo = unwrapJoin(wo.assets)
+            if (!assetInfo?.asset_type || !assetInfo.installation_date || !wo.completed_date) continue
+
+            // A repair whose asset type has no standard row was collected and
+            // then dropped at `if (!std) continue` below; dropping it here is
+            // the same outcome one pass earlier. It does change
+            // `asset_types_with_data`, which now counts only types that could
+            // actually have been nudged.
+            const lifespan = lifespanByType.get(assetInfo.asset_type)
+            if (lifespan === undefined) continue
+
+            const installYear = new Date(assetInfo.installation_date).getFullYear()
+            const repairYear  = new Date(wo.completed_date).getFullYear()
+            const ageAtRepair = Math.max(0, repairYear - installYear)
+
+            const summary = acc.get(assetInfo.asset_type) ?? { total: 0, lateLife: 0 }
+            summary.total++
+            if (isLateLifeRepair(ageAtRepair, lifespan)) summary.lateLife++
+            acc.set(assetInfo.asset_type, summary)
+          }
+          return acc
+        },
+        { label: 'work_orders(weight-nudge)' }
+      )
+
+      if (!byType.size) return { nudged: 0 }
+
       // .upsert() is an INSERT ... ON CONFLICT DO UPDATE, so the payload has
       // to be a row Postgres could actually insert — display_name and the two
       // lifespan columns are NOT NULL. They only ever round-trip the value
@@ -147,7 +173,7 @@ export const dailyAssetHealth = inngest.createFunction(
       const updates: TablesInsert<'asset_type_standards'>[] = []
       const oldWeightsByType: Record<string, { age_weight: number; condition_weight: number }> = {}
 
-      for (const [assetType, repairs] of Object.entries(byType)) {
+      for (const [assetType, repairs] of byType) {
         const std = currentStandards?.find((s) => s.asset_type === assetType)
         if (!std) continue
 
@@ -196,7 +222,7 @@ export const dailyAssetHealth = inngest.createFunction(
         )
       }
 
-      return { nudged: updates.length, asset_types_with_data: Object.keys(byType).length }
+      return { nudged: updates.length, asset_types_with_data: byType.size }
     })
 
     // COI & license expiry escalation (formerly 8.13) was removed — fully

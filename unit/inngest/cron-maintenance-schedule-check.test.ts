@@ -4,7 +4,8 @@ vi.mock('@/lib/supabase/server', () => ({
   createServiceClient: vi.fn(),
 }))
 vi.mock('@/lib/audit', () => ({
-  logAuditEvent: vi.fn(async () => undefined),
+  logAuditEvent:  vi.fn(async () => undefined),
+  logAuditEvents: vi.fn(async () => undefined),
 }))
 vi.mock('@/lib/observability/report-error', () => ({
   reportError: vi.fn(),
@@ -15,7 +16,7 @@ import {
   maintenanceSchedulesOrg,
 } from '@/lib/inngest/functions/cron/maintenance-schedules'
 import { createServiceClient } from '@/lib/supabase/server'
-import { logAuditEvent } from '@/lib/audit'
+import { logAuditEvent, logAuditEvents } from '@/lib/audit'
 import { reportError } from '@/lib/observability/report-error'
 import { invokeHandler } from './test-helpers'
 import { createSupabaseDouble, type TableSpec } from '../stubs/supabase-query-double'
@@ -45,6 +46,15 @@ function orgEvent(orgId = 'org_1') {
 function baseTables() {
   return {
     properties: [{ data: [], error: null }],  // vacancy-gap pass — no properties, short-circuits
+  }
+}
+
+/** One row of find-overdue-schedules' shape (OverdueScheduleRow). */
+function overdueSchedule(overrides: Record<string, unknown> = {}) {
+  return {
+    id: 'sched_2', name: 'Gutter cleaning', estimated_cost: 100, next_due_date: '2026-07-10',
+    assigned_vendor_id: null, property_id: 'prop_2', org_id: 'org_1',
+    ...overrides,
   }
 }
 
@@ -264,20 +274,14 @@ describe('maintenanceSchedulesOrg (per-org handler)', () => {
     const supabase = makeSupabase({
       maintenance_schedules: [
         { data: [], error: null }, // find-due-schedules — nothing due soon
-        {
-          data: [{
-            id: 'sched_2', name: 'Gutter cleaning', estimated_cost: 100, next_due_date: '2026-07-10',
-            assigned_vendor_id: null, property_id: 'prop_2', org_id: 'org_1',
-            properties: { name: 'Ridge House' }, vendors: null,
-          }],
-          error: null,
-        }, // find-overdue-schedules
+        { data: [overdueSchedule()], error: null }, // find-overdue-schedules
       ],
       work_orders: [
-        { data: { id: 'wo_open', priority: 'medium', status: 'in_progress' }, error: null }, // existing open WO lookup
-        // The escalation is now an optimistic-locked update that RETURNS the
+        // Batched: ONE open-WO read for the whole batch, returning a list.
+        { data: [{ id: 'wo_open', priority: 'medium', status: 'in_progress', source_schedule_id: 'sched_2' }], error: null },
+        // The escalation is an optimistic-locked bulk update that RETURNS the
         // rows it changed (`.neq('priority','urgent').select('id')`), and the
-        // note + audit are written only for those rows. A fixture returning no
+        // notes + audit are written only for those rows. A fixture returning no
         // rows now means "someone already escalated it", so it has to return
         // the row for the happy path.
         { data: [{ id: 'wo_open' }], error: null }, // priority update
@@ -300,35 +304,28 @@ describe('maintenanceSchedulesOrg (per-org handler)', () => {
     expect(updateCall?.args[0]).toEqual({ priority: 'urgent' })
     expect(supabase.calls.some((c) => c.table === 'work_orders' && c.method === 'insert')).toBe(false)
 
-    expect(logAuditEvent).toHaveBeenCalledWith(
+    expect(logAuditEvents).toHaveBeenCalledWith([
       expect.objectContaining({
         action:   'work_order.updated',
         targetId: 'wo_open',
         metadata: expect.objectContaining({ change: 'auto_escalated_to_urgent', maintenance_schedule_id: 'sched_2' }),
       }),
-    )
+    ])
   })
 
-  // A step retry re-runs this whole body. The escalation update is
+  // A step retry re-runs this whole body — and now a BATCH retry re-runs every
+  // schedule in the batch, not just the one that failed, so the escalation
+  // being idempotent is what makes batching safe at all. The bulk update is
   // optimistic-locked on `.neq('priority','urgent')`, so the second pass
-  // matches zero rows — and the note must not be appended again. This was a
-  // known open gap in unit/guardrails/inngest-insert-idempotency.test.ts,
-  // closed by copying the guard cron/work-order-ops.ts already used.
+  // matches zero rows and the notes must not be appended again.
   it('writes no second escalation note when the work order is already urgent', async () => {
     const supabase = makeSupabase({
       maintenance_schedules: [
         { data: [], error: null },
-        {
-          data: [{
-            id: 'sched_2', name: 'Gutter cleaning', estimated_cost: 100, next_due_date: '2026-07-10',
-            assigned_vendor_id: null, property_id: 'prop_2', org_id: 'org_1',
-            properties: { name: 'Ridge House' }, vendors: null,
-          }],
-          error: null,
-        },
+        { data: [overdueSchedule()], error: null },
       ],
       work_orders: [
-        { data: { id: 'wo_open', priority: 'medium', status: 'in_progress' }, error: null },
+        { data: [{ id: 'wo_open', priority: 'medium', status: 'in_progress', source_schedule_id: 'sched_2' }], error: null },
         { data: [], error: null },   // optimistic lock matched nothing — already urgent
       ],
       work_order_updates: [{ data: null, error: null }],
@@ -343,7 +340,253 @@ describe('maintenanceSchedulesOrg (per-org handler)', () => {
     })
 
     expect(supabase.calls.some((c) => c.table === 'work_order_updates' && c.method === 'insert')).toBe(false)
-    expect(logAuditEvent).not.toHaveBeenCalled()
+    expect(logAuditEvents).not.toHaveBeenCalled()
+  })
+
+  it('skips an already-urgent open WO entirely — no update, no note', async () => {
+    // The per-schedule version still spent a step and a round-trip to discover
+    // there was nothing to do. A permanently-overdue schedule (one nothing
+    // advances past its due date) is in this state every day forever, so it is
+    // the dominant case in the set, not an edge one.
+    const supabase = makeSupabase({
+      maintenance_schedules: [
+        { data: [], error: null },
+        { data: [overdueSchedule()], error: null },
+      ],
+      work_orders: [
+        { data: [{ id: 'wo_open', priority: 'urgent', status: 'in_progress', source_schedule_id: 'sched_2' }], error: null },
+      ],
+      ...baseTables(),
+    })
+    ;(createServiceClient as ReturnType<typeof vi.fn>).mockReturnValue(supabase)
+
+    await invokeHandler(maintenanceSchedulesOrg, {
+      event:  orgEvent(),
+      step:   makeStep(),
+      logger: { info: vi.fn(), error: vi.fn() },
+    })
+
+    expect(supabase.calls.some((c) => c.table === 'work_orders' && c.method === 'update')).toBe(false)
+    expect(supabase.calls.some((c) => c.table === 'work_orders' && c.method === 'insert')).toBe(false)
+    expect(logAuditEvents).not.toHaveBeenCalled()
+  })
+
+  it('creates the missing overdue WOs for a batch in ONE insert', async () => {
+    const overdue = [
+      overdueSchedule({ id: 'sched_a', property_id: 'prop_a' }),
+      overdueSchedule({ id: 'sched_b', property_id: 'prop_b' }),
+      overdueSchedule({ id: 'sched_c', property_id: 'prop_c' }),
+    ]
+    const supabase = makeSupabase({
+      maintenance_schedules: [
+        { data: [], error: null },
+        { data: overdue, error: null },
+      ],
+      work_orders: [
+        { data: [], error: null },  // open-WO read — none open
+        { data: [], error: null },  // existing (schedule, due date) pairs — none
+        { data: [
+          { id: 'wo_a', source_schedule_id: 'sched_a' },
+          { id: 'wo_b', source_schedule_id: 'sched_b' },
+          { id: 'wo_c', source_schedule_id: 'sched_c' },
+        ], error: null },           // the single bulk insert
+      ],
+      ...baseTables(),
+    })
+    ;(createServiceClient as ReturnType<typeof vi.fn>).mockReturnValue(supabase)
+
+    await invokeHandler(maintenanceSchedulesOrg, {
+      event:  orgEvent(),
+      step:   makeStep(),
+      logger: { info: vi.fn(), error: vi.fn() },
+    })
+
+    const inserts = supabase.calls.filter((c) => c.table === 'work_orders' && c.method === 'insert')
+    expect(inserts).toHaveLength(1)
+    expect(inserts[0]!.args[0]).toHaveLength(3)
+    expect(inserts[0]!.args[0]).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ source_schedule_id: 'sched_a', priority: 'urgent', status: 'pending', scheduled_date: '2026-07-10' }),
+      ]),
+    )
+    expect(logAuditEvents).toHaveBeenCalledWith(
+      expect.arrayContaining([
+        expect.objectContaining({ action: 'work_order.created', targetId: 'wo_a', metadata: expect.objectContaining({ source: 'maintenance_schedule_overdue' }) }),
+      ]),
+    )
+  })
+
+  it('skips a schedule that already has a WO at that due date, without a per-schedule query', async () => {
+    const overdue = [
+      overdueSchedule({ id: 'sched_a', property_id: 'prop_a' }),
+      overdueSchedule({ id: 'sched_b', property_id: 'prop_b' }),
+    ]
+    const supabase = makeSupabase({
+      maintenance_schedules: [
+        { data: [], error: null },
+        { data: overdue, error: null },
+      ],
+      work_orders: [
+        { data: [], error: null },   // no open WOs (sched_a's is completed)
+        { data: [{ source_schedule_id: 'sched_a', scheduled_date: '2026-07-10' }], error: null },
+        { data: [{ id: 'wo_b', source_schedule_id: 'sched_b' }], error: null },
+      ],
+      ...baseTables(),
+    })
+    ;(createServiceClient as ReturnType<typeof vi.fn>).mockReturnValue(supabase)
+
+    await invokeHandler(maintenanceSchedulesOrg, {
+      event:  orgEvent(),
+      step:   makeStep(),
+      logger: { info: vi.fn(), error: vi.fn() },
+    })
+
+    const inserts = supabase.calls.filter((c) => c.table === 'work_orders' && c.method === 'insert')
+    expect(inserts).toHaveLength(1)
+    expect(inserts[0]!.args[0]).toEqual([expect.objectContaining({ source_schedule_id: 'sched_b' })])
+  })
+
+  it('re-reads and retries with the survivors when the bulk insert loses a create race', async () => {
+    // A bulk INSERT here cannot use ON CONFLICT — wo_maintenance_schedule_date_unique
+    // is a PARTIAL unique index and PostgREST cannot emit an index predicate, so
+    // Postgres rejects the bare form with 42P10 (verified against the live
+    // schema). That means ONE collision aborts the whole statement. Swallowing
+    // the 23505 would silently drop every other schedule in the batch.
+    const overdue = [
+      overdueSchedule({ id: 'sched_a', property_id: 'prop_a' }),
+      overdueSchedule({ id: 'sched_b', property_id: 'prop_b' }),
+    ]
+    const supabase = makeSupabase({
+      maintenance_schedules: [
+        { data: [], error: null },
+        { data: overdue, error: null },
+      ],
+      work_orders: [
+        { data: [], error: null },                                  // no open WOs
+        { data: [], error: null },                                  // pre-check: nothing exists yet
+        { data: null, error: { code: '23505', message: 'duplicate key' } },  // sched_a lost the race
+        { data: [{ source_schedule_id: 'sched_a', scheduled_date: '2026-07-10' }], error: null },  // re-read
+        { data: [{ id: 'wo_b', source_schedule_id: 'sched_b' }], error: null },                    // survivor
+      ],
+      ...baseTables(),
+    })
+    ;(createServiceClient as ReturnType<typeof vi.fn>).mockReturnValue(supabase)
+
+    await invokeHandler(maintenanceSchedulesOrg, {
+      event:  orgEvent(),
+      step:   makeStep(),
+      logger: { info: vi.fn(), error: vi.fn() },
+    })
+
+    const inserts = supabase.calls.filter((c) => c.table === 'work_orders' && c.method === 'insert')
+    expect(inserts).toHaveLength(2)
+    // The retry carries only the schedule that did NOT collide — the loser is
+    // dropped because its work order now demonstrably exists.
+    expect(inserts[1]!.args[0]).toEqual([expect.objectContaining({ source_schedule_id: 'sched_b' })])
+    expect(logAuditEvents).toHaveBeenCalledWith([
+      expect.objectContaining({ action: 'work_order.created', targetId: 'wo_b' }),
+    ])
+  })
+
+  it('throws rather than dropping the batch when the create race never resolves', async () => {
+    const supabase = makeSupabase({
+      maintenance_schedules: [
+        { data: [], error: null },
+        { data: [overdueSchedule({ id: 'sched_a' })], error: null },
+      ],
+      work_orders: [
+        { data: [], error: null },
+        ...Array.from({ length: 3 }, () => [
+          { data: [], error: null },
+          { data: null, error: { code: '23505', message: 'duplicate key' } },
+        ]).flat(),
+      ],
+      ...baseTables(),
+    })
+    ;(createServiceClient as ReturnType<typeof vi.fn>).mockReturnValue(supabase)
+
+    await expect(invokeHandler(maintenanceSchedulesOrg, {
+      event:  orgEvent(),
+      step:   makeStep(),
+      logger: { info: vi.fn(), error: vi.fn() },
+    })).rejects.toThrow(/lost the create race/)
+  })
+
+  it('spends one step per BATCH of overdue schedules, not one per schedule', async () => {
+    // This is the whole finding. 250 overdue schedules used to mean 250
+    // sequential Inngest steps and 500 work_orders round-trips in a single
+    // invocation, every day — and the set does not self-clear, so it only ever
+    // grows. At OVERDUE_BATCH_SIZE = 100 it is 3 steps.
+    const overdue = Array.from({ length: 250 }, (_, i) =>
+      overdueSchedule({ id: `sched_${i}`, property_id: `prop_${i}` }))
+
+    const supabase = makeSupabase({
+      maintenance_schedules: [
+        { data: [], error: null },
+        { data: overdue, error: null },
+      ],
+      // Every schedule already has an urgent open WO → no writes at all, so the
+      // only work_orders traffic is the one open-WO read per batch.
+      work_orders: Array.from({ length: 3 }, (_, b) => ({
+        data: overdue.slice(b * 100, b * 100 + 100).map((s) => ({
+          id: `wo_${s.id}`, priority: 'urgent', status: 'in_progress', source_schedule_id: s.id,
+        })),
+        error: null,
+      })),
+      ...baseTables(),
+    })
+    ;(createServiceClient as ReturnType<typeof vi.fn>).mockReturnValue(supabase)
+
+    const step = makeStep()
+    const result = await invokeHandler(maintenanceSchedulesOrg, {
+      event:  orgEvent(),
+      step,
+      logger: { info: vi.fn(), error: vi.fn() },
+    })
+
+    expect(result).toMatchObject({ escalated: 250 })
+
+    const overdueSteps = step.run.mock.calls.map((c) => c[0] as string).filter((n) => n.startsWith('escalate-overdue'))
+    expect(overdueSteps).toEqual([
+      'escalate-overdue-batch-0',
+      'escalate-overdue-batch-1',
+      'escalate-overdue-batch-2',
+    ])
+
+    // Three reads for 250 schedules, not 250.
+    const woSelects = supabase.calls.filter((c) => c.table === 'work_orders' && c.method === 'select')
+    expect(woSelects).toHaveLength(3)
+  })
+
+  it('reports and skips an overdue schedule with an invalid due date without failing the batch', async () => {
+    const supabase = makeSupabase({
+      maintenance_schedules: [
+        { data: [], error: null },
+        { data: [
+          overdueSchedule({ id: 'sched_bad', next_due_date: 'not-a-date' }),
+          overdueSchedule({ id: 'sched_ok' }),
+        ], error: null },
+      ],
+      work_orders: [
+        { data: [{ id: 'wo_ok', priority: 'urgent', status: 'pending', source_schedule_id: 'sched_ok' }], error: null },
+      ],
+      ...baseTables(),
+    })
+    ;(createServiceClient as ReturnType<typeof vi.fn>).mockReturnValue(supabase)
+
+    await invokeHandler(maintenanceSchedulesOrg, {
+      event:  orgEvent(),
+      step:   makeStep(),
+      logger: { info: vi.fn(), error: vi.fn() },
+    })
+
+    expect(reportError).toHaveBeenCalledWith(
+      expect.any(Error),
+      expect.objectContaining({ site: 'inngest.maintenance-cron.invalid_due_date_overdue', orgId: 'org_1' }),
+    )
+    // The good schedule in the same batch was still processed.
+    const openRead = supabase.calls.find((c) => c.table === 'work_orders' && c.method === 'in' && c.args[0] === 'source_schedule_id')
+    expect(openRead?.args[1]).toEqual(['sched_ok'])
   })
 
   it('reports and skips a schedule with an invalid next_due_date instead of throwing', async () => {
@@ -403,9 +646,10 @@ describe('maintenanceSchedulesOrg (per-org handler)', () => {
     })
     ;(createServiceClient as ReturnType<typeof vi.fn>).mockReturnValue(supabase)
 
+    const step = makeStep()
     const result = await invokeHandler(maintenanceSchedulesOrg, {
       event:  orgEvent(),
-      step:   makeStep(),
+      step,
       logger: { info: vi.fn(), error: vi.fn() },
     })
 
@@ -413,5 +657,13 @@ describe('maintenanceSchedulesOrg (per-org handler)', () => {
     // Three pages requested for the due-schedule scan.
     const dueRanges = supabase.calls.filter((c) => c.table === 'maintenance_schedules' && c.method === 'range')
     expect(dueRanges.slice(0, 3).map((c) => c.args)).toEqual([[0, 999], [1000, 1999], [2000, 2999]])
+
+    // ...and ZERO steps spent walking them. Reminder-only schedules do no work
+    // in this pass at all — their PM-facing surface is cron-daily-wrapup — but
+    // each used to cost a full Inngest step and state round-trip to reach the
+    // `return`. 2,100 of them in one invocation is a step explosion producing
+    // nothing, and it read as healthy because the assertion above (the only
+    // one there was) is about the READ being complete.
+    expect(step.run.mock.calls.map((c) => c[0]).filter((n) => String(n).startsWith('process-schedule-'))).toEqual([])
   })
 })

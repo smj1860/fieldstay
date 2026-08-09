@@ -171,17 +171,42 @@ export interface WeightStandard {
   lifespan_max_years: number
 }
 
-export interface RepairRecord {
-  ageAtRepair: number
-  repairCost:  number
-  assetType:   string
+/**
+ * The only two things computeWeightNudge has ever read off a repair history:
+ * how many repairs there were, and how many of them landed late in the
+ * asset's expected life.
+ *
+ * It used to take `RepairRecord[]` — one object per completed work order,
+ * carrying `repairCost` and `assetType` that NOTHING read. The caller
+ * therefore materialised every asset-linked completed work order on the
+ * platform, plus its joined property_assets row, to compute two integers per
+ * asset type (21 of them). Summarising at the boundary lets the caller fold a
+ * page at a time into 21 counters, and drops `actual_cost` from the wire
+ * entirely — a field CLAUDE.md bans from logs and which this scan was pulling
+ * platform-wide for no reason at all.
+ */
+export interface NudgeRepairCounts {
+  total:    number
+  lateLife: number
 }
 
-const MAX_NUDGE         = 2.0
-const MIN_WEIGHT        = 30
-const MAX_WEIGHT        = 70
-const MIN_REPAIRS       = 5
-const TARGET_LATE_RATIO = 0.6
+const MAX_NUDGE           = 2.0
+const MIN_WEIGHT          = 30
+const MAX_WEIGHT          = 70
+const MIN_REPAIRS         = 5
+const TARGET_LATE_RATIO   = 0.6
+/** Fraction of expected lifespan past which a repair counts as "late life". */
+const LATE_LIFE_AGE_RATIO = 0.8
+
+/** Midpoint of a standard's lifespan range, with the same 10-year fallback the nudge always used. */
+export function lifespanYears(std: WeightStandard): number {
+  return Math.round((std.lifespan_min_years + std.lifespan_max_years) / 2) || 10
+}
+
+/** Did a repair at `ageAtRepair` years land in the late-life band for this lifespan? */
+export function isLateLifeRepair(ageAtRepair: number, lifespan: number): boolean {
+  return ageAtRepair / lifespan > LATE_LIFE_AGE_RATIO
+}
 
 /**
  * Pure: how aggressively a lifespan standard's age/condition weight should
@@ -190,15 +215,12 @@ const TARGET_LATE_RATIO = 0.6
  * computed nudge is too small to bother persisting.
  */
 export function computeWeightNudge(
-  repairs: RepairRecord[],
+  repairs: NudgeRepairCounts,
   std:     WeightStandard,
 ): { age_weight: number; condition_weight: number } | null {
-  if (repairs.length < MIN_REPAIRS) return null
+  if (repairs.total < MIN_REPAIRS) return null
 
-  const lifespan = Math.round((std.lifespan_min_years + std.lifespan_max_years) / 2) || 10
-
-  const lateLifeRepairs = repairs.filter((r) => r.ageAtRepair / lifespan > 0.8).length
-  const lateLifeRatio   = lateLifeRepairs / repairs.length
+  const lateLifeRatio = repairs.lateLife / repairs.total
 
   let ageNudge = 0
   if (lateLifeRatio > TARGET_LATE_RATIO) {

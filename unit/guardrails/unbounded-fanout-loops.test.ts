@@ -51,18 +51,65 @@ const FANOUT = /step\.(run|sendEvent)\(/
  * evidence about the collection's size; a token in its name is evidence about
  * nothing.
  */
-function boundBy(definition: string, name: string, token: string): boolean {
+function initialiserOf(definition: string, name: string): string {
   const eq = definition.indexOf('=', definition.indexOf(name) + name.length)
-  const initialiser = eq === -1 ? definition : definition.slice(eq + 1)
-  return initialiser.includes(token)
+  return eq === -1 ? definition : definition.slice(eq + 1)
 }
 
-/** Tokens in a collection's defining expression that make its size visibly bounded. */
+function boundBy(definition: string, name: string, token: string): boolean {
+  return initialiserOf(definition, name).includes(token)
+}
+
+/**
+ * Is this collection bounded — directly, or because it is DERIVED from one
+ * that is?
+ *
+ * A filter/map/slice of an org-scoped set is org-scoped. Without this,
+ * narrowing a bounded collection before the fan-out loop — which is the
+ * cheapest possible fix for a step explosion, since the loop then runs once
+ * per unit of work rather than once per row examined — makes the guardrail go
+ * RED, and the path of least resistance becomes inlining the filter back into
+ * the loop body. A check that punishes the fix teaches people to skip it.
+ *
+ * One rule, applied transitively with a visited set so a self-reference or a
+ * mutual pair cannot spin.
+ */
+function isBounded(src: string, name: string, seen = new Set<string>()): boolean {
+  if (seen.has(name)) return false
+  seen.add(name)
+
+  const definition = findDefinition(src, name)
+  // No local definition (a parameter, an import, a destructured event payload)
+  // — the size is not decidable here, so don't guess.
+  if (!definition) return false
+  if (BOUND_TOKENS.some((t) => boundBy(definition, name, t))) return true
+
+  // Every other identifier the initialiser mentions. If any of them is a
+  // bounded local collection, this one inherits the bound.
+  const initialiser = initialiserOf(definition, name)
+  const referenced  = new Set(initialiser.match(/\b[A-Za-z_$][\w$]*\b/g) ?? [])
+  referenced.delete(name)
+
+  return Array.from(referenced).some((ref) => isBounded(src, ref, seen))
+}
+
+/**
+ * Tokens in a collection's defining expression that make its size visibly
+ * bounded.
+ *
+ * `org_id` is NOT one of them, and that is deliberate: a bare `org_id` also
+ * matches `.select('org_id')` and `{ label: 'x.org_id' }`, which is what a
+ * PLATFORM-WIDE tenant scan looks like — the exact opposite of a tenant scope.
+ * `fetchDistinctOrgIds(from => supabase.from(t).select('org_id').range(...))`
+ * self-certified as bounded on that substring alone. Only a filter (`.eq`,
+ * `.in`) or the resolved JS variable counts.
+ */
 const BOUND_TOKENS = [
-  'org_id',       // scoped to one tenant (the fan-out unit)
-  'orgId',
-  '.limit(',      // explicit cap, normally with "continue next run" semantics
-  'BATCH',        // an explicitly chunked page
+  ".eq('org_id'",  // scoped to one tenant (the fan-out unit)
+  '.eq("org_id"',
+  'orgId',         // the resolved id, as passed to that filter
+  '.limit(',       // explicit cap, normally with "continue next run" semantics
+  'BATCH',         // an explicitly chunked page
   'slice(',
 ]
 
@@ -176,12 +223,8 @@ function findOffenders(): string[] {
 
       const name = rootIdentifier(iterated)
       if (!name) continue
-
-      const definition = findDefinition(src, name)
-      // No local definition (a parameter, an import, a destructured event
-      // payload) — the size is not decidable here, so don't guess.
-      if (!definition) continue
-      if (BOUND_TOKENS.some((t) => boundBy(definition, name, t))) continue
+      if (!findDefinition(src, name)) continue
+      if (isBounded(src, name)) continue
 
       offenders.push(`${rel(file)}:${src.slice(0, m.index).split('\n').length}`)
     }
@@ -205,6 +248,39 @@ const EXCEPTIONS: Record<string, string> = {
   // (`org/capex_projection.requested`, `org/depreciation_ledger.requested`)
   // with `concurrency: { limit: 10 }`, matching the six converted in the
   // 2026-07-30 pass.
+
+  'lib/inngest/functions/flagged-turnover-wo.ts:102':
+    'Bounded by one org\'s PM count — a per-event handler whose `managers` is `getPmMembers(supabase, org_id, { roles: [...] })`. The org scope is a JS ARGUMENT here, which the scan cannot tell apart from the identically-named column in a `.select(\'id, org_id, ...\')` list, so no token can express it. Team size, not tenant count.',
+
+  // ── REAL GAPS, newly visible 2026-08-09 ─────────────────────────────────
+  //
+  // Not new code and not newly broken: newly VISIBLE. Every one of these was
+  // passing because `org_id` used to be a BOUND_TOKEN, and `.select('org_id')`
+  // — the literal signature of a platform-wide tenant scan — contains it. The
+  // token that was supposed to mean "scoped to one tenant" was satisfied by
+  // the opposite.
+  //
+  // That is the same hole that hid platform-inventory-template-broadcast.ts
+  // from this test until an external scalability audit read the code. The
+  // previous fix (search only right of the `=`) closed one instance; the
+  // substring itself was the hole. All four below are one step.run per row of
+  // an explicitly platform-wide scan — read each file's own comment above the
+  // fetchAllRows call, which already says "PLATFORM-WIDE" or "the platform's
+  // tenant count" in prose.
+  //
+  // Listed rather than fixed in the same change that surfaced them: each needs
+  // the dispatcher + per-org-handler conversion (a new event in events.ts, a
+  // registration in the Inngest route, and its own tests), and four of those
+  // do not belong in a commit whose subject is the maintenance-schedule loops.
+  // These entries are the work order, not an absolution.
+  'lib/inngest/functions/cron/vendor-compliance-grace-check.ts:119':
+    'REAL GAP — one step.run per compliance document across every tenant. Its own comment notes the backlog "only ever grows" (hard_blocked_at IS NULL accumulates until this cron clears it), so the step count grows with it. Needs dispatcher + per-org handler.',
+  'lib/inngest/functions/guidebook-daily-monitor.ts:134':
+    'REAL GAP — one step.run per org over `activeOrgs`, which its own comment describes as "the platform\'s tenant count". Needs dispatcher + per-org handler.',
+  'lib/inngest/functions/guidebook-stay-extension-cron.ts:58':
+    'REAL GAP — one step.run per org over every guidebook config with gap-night messaging on; comment says "a slice of the platform\'s tenant count". Needs dispatcher + per-org handler.',
+  'lib/inngest/functions/ownerrez/ownerrez-reviews-sync.ts:115':
+    'REAL GAP — one step.run per OwnerRez connection platform-wide; the comment above the fetch literally reads "PLATFORM-WIDE scan". Needs dispatcher + per-connection handler.',
 }
 
 describe('guardrail: no step.run/step.sendEvent loop over an unbounded collection', () => {

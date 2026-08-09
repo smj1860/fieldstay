@@ -253,7 +253,7 @@ describe('workOrderOpsOrg (per-org handler)', () => {
     const supabase = makeSupabase({
       work_orders: [
         { data: [], error: null },       // aging scan — none
-        { data: null, error: null },     // existing-WO idempotency check for the schedule
+        { data: [], error: null },       // batched idempotency read — no WO at that date yet
         { data: { id: 'wo_new' }, error: null }, // insert .select().single()
       ],
       maintenance_schedules: [
@@ -317,7 +317,7 @@ describe('workOrderOpsOrg (per-org handler)', () => {
     const supabase = makeSupabase({
       work_orders: [
         { data: [], error: null },   // aging scan — none
-        { data: null, error: null }, // idempotency check
+        { data: [], error: null },   // batched idempotency read
         { data: { id: 'wo_new' }, error: null },
       ],
       maintenance_schedules: [
@@ -364,7 +364,7 @@ describe('workOrderOpsOrg (per-org handler)', () => {
     const supabase = makeSupabase({
       work_orders: [
         { data: [], error: null },                 // aging scan — none
-        { data: null, error: null },               // idempotency check — none
+        { data: [], error: null },                 // batched idempotency read — none
         { data: { id: 'wo_new' }, error: null },   // the insert
       ],
       maintenance_schedules: [
@@ -391,7 +391,7 @@ describe('workOrderOpsOrg (per-org handler)', () => {
     const supabase = makeSupabase({
       work_orders: [
         { data: [], error: null },
-        { data: null, error: null },
+        { data: [], error: null },
         { data: { id: 'wo_new' }, error: null },
       ],
       maintenance_schedules: [
@@ -431,7 +431,7 @@ describe('workOrderOpsOrg (per-org handler)', () => {
     const supabase = makeSupabase({
       work_orders: [
         { data: [], error: null },                    // aging scan — none
-        { data: { id: 'existing_wo' }, error: null }, // idempotency check finds one
+        { data: [{ source_schedule_id: 'sched_1', scheduled_date: '2026-07-22' }], error: null }, // batched idempotency read finds one
       ],
       maintenance_schedules: [
         {
@@ -459,6 +459,67 @@ describe('workOrderOpsOrg (per-org handler)', () => {
     expect(logAuditEvent).not.toHaveBeenCalled()
     expect(createPmNotification).not.toHaveBeenCalled()
     expect(step.sendEvent).not.toHaveBeenCalled()
+  })
+
+  it('spends no step at all on schedules whose work order already exists', async () => {
+    // `next_due_date <= today` includes everything the org has ever let go
+    // overdue, and that set does not self-clear: nothing advances an
+    // already-overdue schedule past today, so a seasonal or one-time schedule
+    // that slipped once sits in this query forever. The old shape paid one
+    // Inngest step and one work_orders round-trip per row of it, every day,
+    // to rediscover that the work order already exists. Now it is one batched
+    // read and zero steps.
+    const stuck = Array.from({ length: 300 }, (_, i) => ({
+      id: `sched_${i}`, name: `Seasonal task ${i}`, org_id: 'org_1', property_id: 'prop_1',
+      next_due_date: '2026-05-01', frequency: null, schedule_type: 'seasonal',
+      assigned_vendor_id: null, vendor_specialty_hint: null, estimated_cost: null,
+      instructions: null, properties: { name: 'Lakeview Cabin' },
+    }))
+    const supabase = makeSupabase({
+      work_orders: [
+        { data: [], error: null },  // aging scan — none
+        { data: stuck.map((s) => ({ source_schedule_id: s.id, scheduled_date: '2026-05-01' })), error: null },
+      ],
+      maintenance_schedules: [{ data: stuck, error: null }],
+    })
+    ;(createServiceClient as ReturnType<typeof vi.fn>).mockReturnValue(supabase)
+
+    const step = makeStep()
+    const result = await invokeHandler(workOrderOpsOrg, { event: orgEvent(), step, logger: makeLogger() })
+
+    expect((result as { auto_wos_attempted: number }).auto_wos_attempted).toBe(0)
+    expect(step.run.mock.calls.map((c) => c[0]).filter((n) => String(n).startsWith('auto-create-wo-'))).toEqual([])
+    expect(supabase.calls.some((c) => c.table === 'work_orders' && c.method === 'insert')).toBe(false)
+  })
+
+  it('still creates work orders for the schedules the batched read says are missing one', async () => {
+    const schedules = [
+      { id: 'sched_done',    name: 'Already handled', org_id: 'org_1', property_id: 'prop_1',
+        next_due_date: '2026-07-22', frequency: null, schedule_type: 'seasonal',
+        assigned_vendor_id: null, vendor_specialty_hint: null, estimated_cost: null,
+        instructions: null, properties: { name: 'Lakeview Cabin' } },
+      { id: 'sched_pending', name: 'Needs a WO', org_id: 'org_1', property_id: 'prop_2',
+        next_due_date: '2026-07-22', frequency: null, schedule_type: 'seasonal',
+        assigned_vendor_id: null, vendor_specialty_hint: null, estimated_cost: null,
+        instructions: null, properties: { name: 'Ridge House' } },
+    ]
+    const supabase = makeSupabase({
+      work_orders: [
+        { data: [], error: null },
+        { data: [{ source_schedule_id: 'sched_done', scheduled_date: '2026-07-22' }], error: null },
+        { data: { id: 'wo_new' }, error: null },
+      ],
+      maintenance_schedules: [{ data: schedules, error: null }],
+    })
+    ;(createServiceClient as ReturnType<typeof vi.fn>).mockReturnValue(supabase)
+
+    const step = makeStep()
+    await invokeHandler(workOrderOpsOrg, { event: orgEvent(), step, logger: makeLogger() })
+
+    expect(step.run.mock.calls.map((c) => c[0]).filter((n) => String(n).startsWith('auto-create-wo-')))
+      .toEqual(['auto-create-wo-sched_pending'])
+    const insertCall = supabase.calls.find((c) => c.table === 'work_orders' && c.method === 'insert')
+    expect(insertCall?.args[0]).toMatchObject({ source_schedule_id: 'sched_pending' })
   })
 
   it('escalates every aging work order in a >1000-row backlog, not just the first page', async () => {

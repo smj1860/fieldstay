@@ -166,6 +166,63 @@ describe('dailyAssetHealth (dispatcher)', () => {
     ])
   })
 
+  it('does not pull actual_cost across the platform to discard it', async () => {
+    // computeWeightNudge only ever read the repair COUNT and how many landed
+    // late in the asset's life. The scan nonetheless selected actual_cost and
+    // estimated_cost for every completed work order platform-wide and threw
+    // them away — a financial field CLAUDE.md bans from logs, on the wire for
+    // no reason.
+    const supabase = makeSupabase({
+      property_assets: [{ data: [{ org_id: 'org_1' }], error: null }],
+      ...NO_NUDGE,
+    })
+    ;(createServiceClient as ReturnType<typeof vi.fn>).mockReturnValue(supabase)
+
+    await invokeHandler(dailyAssetHealth, {
+      event:  {},
+      step:   makeStep(),
+      logger: { info: vi.fn(), error: vi.fn(), warn: vi.fn() },
+    })
+
+    const select = supabase.calls.find((c) => c.table === 'work_orders' && c.method === 'select')
+    expect(select!.args[0]).not.toContain('actual_cost')
+    expect(select!.args[0]).not.toContain('estimated_cost')
+  })
+
+  it('folds a multi-page repair scan into per-type counters rather than accumulating rows', async () => {
+    // 2,400 completed HVAC repairs is three pages. The nudge needs two
+    // integers out of them; the old shape held all 2,400 joined rows to get
+    // there, and past 200k threw instead of degrading.
+    const assetRepairs = Array.from({ length: 2_400 }, (_, i) => ({
+      asset_id: `asset_${i}`, completed_date: '2024-06-01',
+      assets: { asset_type: 'hvac', installation_date: '2010-01-01' },
+    }))
+    const supabase = makeSupabase({
+      property_assets:      [{ data: [{ org_id: 'org_1' }], error: null }],
+      work_orders:          [{ data: assetRepairs, error: null }],
+      asset_type_standards: [{ data: [{
+        asset_type: 'hvac', age_weight: 60, condition_weight: 40,
+        lifespan_min_years: 12, lifespan_max_years: 18, avg_replacement_cost_high: 7000,
+      }], error: null }],
+    })
+    ;(createServiceClient as ReturnType<typeof vi.fn>).mockReturnValue(supabase)
+
+    await invokeHandler(dailyAssetHealth, {
+      event:  {},
+      step:   makeStep(),
+      logger: { info: vi.fn(), error: vi.fn(), warn: vi.fn() },
+    })
+
+    const ranges = supabase.calls.filter((c) => c.table === 'work_orders' && c.method === 'range')
+    expect(ranges.map((c) => c.args)).toEqual([[0, 999], [1000, 1999], [2000, 2999]])
+
+    // Every page counted: age 14 / lifespan 15 = 0.93, so lateLifeRatio is
+    // 1.0 and the nudge is positive.
+    const upsert = supabase.calls.find((c) => c.table === 'asset_type_standards' && c.method === 'upsert')
+    const [nudged] = upsert!.args[0] as Array<{ age_weight: number }>
+    expect(nudged.age_weight).toBeGreaterThan(60)
+  })
+
   it('bounds the weight-nudge repair scan to the 3-year window instead of all work-order history', async () => {
     const supabase = makeSupabase({
       property_assets: [{ data: [{ org_id: 'org_1' }], error: null }],

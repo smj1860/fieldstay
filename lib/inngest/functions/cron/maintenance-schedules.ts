@@ -1,21 +1,21 @@
 import { inngest } from '@/lib/inngest/client'
 import { createServiceClient } from '@/lib/supabase/server'
 import { calcNextDueDate } from '@/lib/turnovers/generator'
-import { isMaintenanceItemActiveThisMonth } from '@/lib/utils/maintenance'
 import { parseLocalDate } from '@/lib/utils/date-validation'
-import { logAuditEvent } from '@/lib/audit'
-import { reportError } from '@/lib/observability/report-error'
 import { unwrapJoin } from '@/lib/utils/supabase-joins'
 import { unwrap } from '@/lib/supabase/unwrap'
 import { fetchAllRows, fetchDistinctOrgIds } from '@/lib/inngest/paginate'
-import type { Enums } from '@/types/database'
 import {
   createMaintenanceWorkOrder,
   computeVacancyGaps,
+  chunkOverdueSchedules,
+  processOverdueBatch,
+  selectActionableDueSchedules,
   type DueSoonScheduleRow,
   type DueSoonVendor,
   type GapBooking,
   type GapScheduleRow,
+  type OverdueScheduleRow,
   type VendorPortalEvent,
 } from './maintenance-schedules-helpers'
 
@@ -32,79 +32,6 @@ interface DueScheduleRow extends DueSoonScheduleRow {
   active_from_month: number | null
   active_to_month:   number | null
   vendors:           DueSoonVendor | DueSoonVendor[] | null
-}
-
-type ServiceClient = ReturnType<typeof createServiceClient>
-
-/**
- * Escalates an already-open work order for an overdue schedule to urgent, and
- * records the escalation note the daily wrap-up's escalation section reads.
- *
- * Extracted from the overdue pass because folding the idempotency guard inline
- * took that step past both the nesting-depth and cognitive-complexity limits —
- * and because the escalate-then-note pair is one unit: neither half is correct
- * without the other.
- */
-async function escalateOverdueWorkOrder(
-  supabase: ServiceClient,
-  openWO:   { id: string; priority: string | null; status: Enums<'wo_status'> },
-  schedule: { id: string; org_id: string },
-  daysLate: number,
-): Promise<void> {
-  if (openWO.priority === 'urgent') return
-
-  // `.neq('priority','urgent').select('id')` makes this an optimistic-locked
-  // update that returns the rows it actually changed, which is what makes the
-  // note insert idempotent — the same guard cron/work-order-ops.ts uses for
-  // its bulk twin. A step retry finds the WO already urgent, matches zero
-  // rows, and writes no second note.
-  //
-  // That duplicate note was a known, deliberately-open gap in
-  // unit/guardrails/inngest-insert-idempotency.test.ts, left pending a
-  // decision about what makes two escalation events "the same". The sibling
-  // had already answered that, so this copies the answer rather than
-  // re-litigating it.
-  //
-  // Both writes are bound and org-scoped. Unnoticed, a failed update left the
-  // WO at its old priority while the note below claimed it had been
-  // escalated — and the wrap-up builds its escalation section from those
-  // notes, so the digest reported an escalation that never happened.
-  const { data: escalatedRows, error: escalateError } = await supabase
-    .from('work_orders')
-    .update({ priority: 'urgent' })
-    .eq('id', openWO.id)
-    .eq('org_id', schedule.org_id)
-    .neq('priority', 'urgent')
-    .select('id')
-
-  if (escalateError) {
-    throw new Error(`overdue escalation failed for work order ${openWO.id}: ${escalateError.message}`)
-  }
-
-  // Zero rows = a concurrent run or an earlier attempt already escalated it.
-  // Not an error, and specifically not a reason to write a duplicate note.
-  if (!escalatedRows?.length) return
-
-  const { error: noteError } = await supabase.from('work_order_updates').insert({
-    work_order_id:             openWO.id,
-    org_id:                    schedule.org_id,
-    updated_via_vendor_portal: false,
-    status_from:               openWO.status,
-    status_to:                 openWO.status,
-    notes:                     `Priority auto-escalated to Urgent — ${daysLate} day${daysLate !== 1 ? 's' : ''} past scheduled date`,
-  })
-
-  if (noteError) {
-    throw new Error(`work_order_updates escalation note failed for ${openWO.id}: ${noteError.message}`)
-  }
-
-  await logAuditEvent({
-    orgId:      schedule.org_id,
-    action:     'work_order.updated',
-    targetType: 'work_order',
-    targetId:   openWO.id,
-    metadata:   { change: 'auto_escalated_to_urgent', maintenance_schedule_id: schedule.id },
-  })
 }
 
 /**
@@ -267,11 +194,7 @@ export const maintenanceSchedulesOrg = inngest.createFunction(
     // ── Pass 2 lookup: Overdue schedules ───────────────────────────────────
     const overdueSchedules = await step.run('find-overdue-schedules', async () => {
       const supabase = createServiceClient({ system: 'inngest:maintenance-schedules' })
-      return fetchAllRows<{
-        id: string; name: string; estimated_cost: number | null
-        next_due_date: string | null; assigned_vendor_id: string | null
-        property_id: string; org_id: string
-      }>(
+      return fetchAllRows<OverdueScheduleRow>(
         (from, to) => supabase
           .from('maintenance_schedules')
           .select(`
@@ -294,74 +217,56 @@ export const maintenanceSchedulesOrg = inngest.createFunction(
       `${overdueSchedules.length} overdue`
     )
 
-    for (const schedule of dueSchedules) {
+    // One step per unit of WORK, not per row looked at: reminder-only
+    // schedules, seasonally-inactive ones and unparseable dates all used to
+    // burn a full step apiece to reach a `return`. Inside a step so the
+    // invalid-date reports fire once per invocation, not on every replay.
+    const actionable = await step.run('select-actionable-due-schedules', async () =>
+      selectActionableDueSchedules(dueSchedules, today))
+
+    for (const { schedule, daysUntilDue } of actionable) {
       const processResult = await step.run(`process-schedule-${schedule.id}`, async () => {
         const supabase = createServiceClient({ system: 'inngest:maintenance-schedules' })
         const vendor   = unwrapJoin(schedule.vendors)
+        const dueDate  = parseLocalDate(schedule.next_due_date, 'next_due_date')
 
-        let dueDate: Date
-        try {
-          dueDate = parseLocalDate(schedule.next_due_date, 'next_due_date')
-        } catch (err) {
-          console.error(`[maintenance-cron] invalid next_due_date on schedule ${schedule.id}`, {
-            schedule_id:   schedule.id,
-            next_due_date: schedule.next_due_date,
-            error:         String(err),
-          })
-          reportError(err, {
-            site:  'inngest.maintenance-cron.invalid_due_date',
-            orgId: schedule.org_id,
-            extra: { schedule_id: schedule.id },
-          })
-          return
-        }
-        const daysUntilDue = Math.round((dueDate.getTime() - today.getTime()) / 86_400_000)
+        // schedule.auto_create_wo === false never reaches here — that path's
+        // PM-facing surface is cron-daily-wrapup's maintenance digest section.
+        const vendorPortalEvent: VendorPortalEvent | null =
+          await createMaintenanceWorkOrder(supabase, schedule, vendor ?? null, daysUntilDue)
 
-        // Skip items outside their seasonal window — no WO, no alert
-        if (!isMaintenanceItemActiveThisMonth(schedule.active_from_month ?? null, schedule.active_to_month ?? null)) {
-          return
-        }
+        // Advance next_due_date for routine schedules — only once a WO was
+        // actually created to track it. Reminder-only (auto_create_wo=false)
+        // schedules must NOT roll forward here: nothing acted on them yet,
+        // and cron-daily-wrapup's due-schedule section reads next_due_date
+        // at 6pm — if this 8am pass had already advanced it past today,
+        // the schedule would get no PM-facing surface at all.
+        if (schedule.schedule_type === 'routine' && schedule.frequency) {
+          const nextDue = calcNextDueDate(schedule.frequency, dueDate)
+          // Bound and org-scoped, matching advanceScheduleNextDueDate in
+          // app/(dashboard)/maintenance/actions.ts. This is the third copy of
+          // the same advance and the second that was silent.
+          //
+          // The WO has already been created by the line above, so a failed
+          // advance leaves next_due_date pointing at a date that is now
+          // handled: tomorrow the schedule looks due again, the
+          // (source_schedule_id, scheduled_date) unique constraint rejects
+          // the duplicate, and the schedule stops producing work orders for
+          // this occurrence and every future one — silently, forever.
+          //
+          // Zero rows is expected: `.eq('next_due_date', ...)` is an
+          // optimistic lock against workOrderOpsOrg advancing it first.
+          const { error: advanceError } = await supabase
+            .from('maintenance_schedules')
+            .update({ next_due_date: nextDue.toISOString().split('T')[0] })
+            .eq('id', schedule.id)
+            .eq('org_id', schedule.org_id)
+            .eq('next_due_date', schedule.next_due_date!)  // optimistic lock — prevents double-advance on retry
 
-        // schedule.auto_create_wo === false path used to alert the PM here
-        // that a schedule was coming up due soon — now covered by
-        // cron-daily-wrapup's maintenance digest section instead.
-        let vendorPortalEvent: VendorPortalEvent | null = null
-        if (schedule.auto_create_wo) {
-          vendorPortalEvent = await createMaintenanceWorkOrder(supabase, schedule, vendor ?? null, daysUntilDue)
-
-          // Advance next_due_date for routine schedules — only once a WO was
-          // actually created to track it. Reminder-only (auto_create_wo=false)
-          // schedules must NOT roll forward here: nothing acted on them yet,
-          // and cron-daily-wrapup's due-schedule section reads next_due_date
-          // at 6pm — if this 8am pass had already advanced it past today,
-          // the schedule would get no PM-facing surface at all.
-          if (schedule.schedule_type === 'routine' && schedule.frequency) {
-            const nextDue = calcNextDueDate(schedule.frequency, dueDate)
-            // Bound and org-scoped, matching advanceScheduleNextDueDate in
-            // app/(dashboard)/maintenance/actions.ts. This is the third copy of
-            // the same advance and the second that was silent.
-            //
-            // The WO has already been created by the line above, so a failed
-            // advance leaves next_due_date pointing at a date that is now
-            // handled: tomorrow the schedule looks due again, the
-            // (source_schedule_id, scheduled_date) unique constraint rejects
-            // the duplicate, and the schedule stops producing work orders for
-            // this occurrence and every future one — silently, forever.
-            //
-            // Zero rows is expected: `.eq('next_due_date', ...)` is an
-            // optimistic lock against workOrderOpsOrg advancing it first.
-            const { error: advanceError } = await supabase
-              .from('maintenance_schedules')
-              .update({ next_due_date: nextDue.toISOString().split('T')[0] })
-              .eq('id', schedule.id)
-              .eq('org_id', schedule.org_id)
-              .eq('next_due_date', schedule.next_due_date!)  // optimistic lock — prevents double-advance on retry
-
-            if (advanceError) {
-              throw new Error(
-                `maintenance_schedules next_due_date advance failed for schedule ${schedule.id}: ${advanceError.message}`
-              )
-            }
+          if (advanceError) {
+            throw new Error(
+              `maintenance_schedules next_due_date advance failed for schedule ${schedule.id}: ${advanceError.message}`
+            )
           }
         }
 
@@ -376,123 +281,15 @@ export const maintenanceSchedulesOrg = inngest.createFunction(
       }
     }
 
-    // ── Pass 2: Overdue escalation ─────────────────────────────────────────
-    for (const schedule of overdueSchedules) {
-      await step.run(`escalate-overdue-${schedule.id}`, async () => {
+    // ── Pass 2: Overdue escalation (batched) ───────────────────────────────
+    //
+    // The PM-facing escalation alerts that used to fire here are now covered
+    // by cron-daily-wrapup's maintenance digest section instead.
+    const overdueBatches = chunkOverdueSchedules(overdueSchedules)
+    for (let i = 0; i < overdueBatches.length; i++) {
+      await step.run(`escalate-overdue-batch-${i}`, async () => {
         const supabase = createServiceClient({ system: 'inngest:maintenance-schedules' })
-        let dueDate: Date
-        try {
-          dueDate = parseLocalDate(schedule.next_due_date, 'next_due_date')
-        } catch (err) {
-          console.error(`[maintenance-cron] invalid next_due_date in overdue pass for schedule ${schedule.id}`, {
-            schedule_id:   schedule.id,
-            next_due_date: schedule.next_due_date,
-            error:         String(err),
-          })
-          reportError(err, {
-            site:  'inngest.maintenance-cron.invalid_due_date_overdue',
-            orgId: schedule.org_id,
-            extra: { schedule_id: schedule.id },
-          })
-          return
-        }
-        const daysLate = Math.round((today.getTime() - dueDate.getTime()) / 86_400_000)
-
-        // Look for an open WO tied to this schedule
-        // This read decides the whole branch, so its failure is not cosmetic.
-        // Discarded, an error made openWO null, which sent an overdue schedule
-        // that ALREADY has an open work order down the create path instead —
-        // where the unique constraint no-ops the insert. Net effect: the
-        // existing work order never gets escalated to urgent, which is the
-        // entire purpose of this pass, and the run reports success.
-        const openWORes = await supabase
-          .from('work_orders')
-          .select('id, priority, status')
-          .eq('org_id', orgId)
-          .eq('source_schedule_id', schedule.id)
-          .not('status', 'in', '("completed","cancelled")')
-          .order('created_at', { ascending: false })
-          .limit(1)
-          .maybeSingle()
-
-        if (openWORes.error) {
-          throw new Error(
-            `overdue-pass open-WO lookup failed for schedule ${schedule.id}: ${openWORes.error.message}`
-          )
-        }
-        const openWO = openWORes.data
-
-        // The PM-facing escalation alerts that used to fire here are now
-        // covered by cron-daily-wrapup's maintenance digest section instead.
-        if (openWO) {
-          await escalateOverdueWorkOrder(supabase, openWO, schedule, daysLate)
-        } else {
-          // No open WO — create one with urgent priority
-          // Idempotency: skip insert if a WO already exists for this schedule + due date
-          const existingWORes = await supabase
-            .from('work_orders')
-            .select('id')
-            .eq('org_id', orgId)
-            .eq('source_schedule_id', schedule.id)
-            .eq('scheduled_date', schedule.next_due_date!)
-            .eq('source', 'maintenance_schedule')
-            .maybeSingle()
-
-          if (existingWORes.error) {
-            throw new Error(
-              `overdue-pass idempotency check failed for schedule ${schedule.id}: ${existingWORes.error.message}`
-            )
-          }
-          const existingWO = existingWORes.data
-
-          // Straight-line rather than a ternary around the await: the insert's
-          // error was previously discarded entirely, so EVERY cause looked the
-          // same as success-with-no-row — a lost race (23505 on the
-          // (source_schedule_id, scheduled_date) unique index, expected and
-          // benign) was indistinguishable from a constraint violation, an RLS
-          // refusal or a dropped connection. The overdue work order simply
-          // never existed and the pass reported a clean run.
-          let wo = existingWO
-
-          if (!wo) {
-            const { data: inserted, error: insertError } = await supabase
-              .from('work_orders')
-              .insert({
-                property_id:        schedule.property_id,
-                org_id:             schedule.org_id,
-                vendor_id:          schedule.assigned_vendor_id ?? null,
-                title:              schedule.name,
-                description:        `OVERDUE ${daysLate} day${daysLate !== 1 ? 's' : ''}. Original due date: ${dueDate.toLocaleDateString()}`,
-                priority:           'urgent',
-                status:             'pending',
-                source:             'maintenance_schedule',
-                source_schedule_id: schedule.id,
-                scheduled_date:     schedule.next_due_date,
-                estimated_cost:     schedule.estimated_cost,
-                portal_enabled:     false,
-              })
-              .select('id')
-              .single()
-
-            if (insertError && insertError.code !== '23505') {
-              throw new Error(
-                `overdue work order insert failed for schedule ${schedule.id}: ${insertError.message}`
-              )
-            }
-
-            wo = inserted
-          }
-
-          if (wo && !existingWO) {
-            await logAuditEvent({
-              orgId:      schedule.org_id,
-              action:     'work_order.created',
-              targetType: 'work_order',
-              targetId:   wo.id,
-              metadata:   { source: 'maintenance_schedule_overdue', maintenance_schedule_id: schedule.id },
-            })
-          }
-        }
+        return processOverdueBatch(supabase, orgId, overdueBatches[i]!, today)
       })
     }
 
