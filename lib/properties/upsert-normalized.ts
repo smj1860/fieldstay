@@ -121,12 +121,19 @@ export async function upsertNormalizedProperties(
     throw new Error(`Properties upsert failed: ${upsertError.message}`)
   }
 
+  // Bounded by the batch that was just upserted, not left open. This read maps
+  // external_id -> id for the rows written immediately above, so a truncation
+  // does not merely shorten a list: the caller silently loses the ids of every
+  // property past the cap and skips whatever it was going to do with them.
+  // `.limit(normalized.length)` ties the ceiling to the write it is reading
+  // back, so it can never be the thing that truncates.
   const { data: upserted, error: selectError } = await supabase
     .from('properties')
     .select('id, external_id')
     .eq('org_id', orgId)
     .eq('external_source', provider)
     .in('external_id', normalized.map((n) => n.external_id))
+    .limit(normalized.length)
 
   if (selectError) {
     throw new Error(`Properties re-select after upsert failed: ${selectError.message}`)

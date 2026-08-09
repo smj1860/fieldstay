@@ -1,5 +1,7 @@
 import { describe, it, expect } from 'vitest'
-import { collectSourceFiles, rel, read } from './scan'
+import { existsSync } from 'fs'
+import { join } from 'path'
+import { collectSourceFiles, rel, read, ROOT } from './scan'
 
 // ============================================================================
 // Unbounded-`.select()` guardrail for lib/inngest/**.
@@ -35,9 +37,24 @@ import { collectSourceFiles, rel, read } from './scan'
 // edit to a 700-line sync function, which trains people to "fix" the guardrail
 // by bumping numbers instead of reading it.
 //
-// Scope is lib/inngest/** because that is where "silently processes 1000 of N"
-// is a correctness bug rather than a pagination-UX question. Widening it to
-// app/ is a separate, larger ratchet.
+// Scope is Inngest-REACHABLE code, not the lib/inngest/** DIRECTORY. That
+// distinction is the fix for a real blind spot: the scan used to be
+// collectSourceFiles(['lib/inngest']), which asks a filesystem question, while
+// the property being enforced ("this select runs in a cron") is a reachability
+// one. An unbounded read in a shared helper CALLED from a cron had exactly the
+// same failure mode and was invisible — e.g.
+// createGuidebookPropertyConfigsForProperties in lib/guidebook/sync.ts, called
+// from three Inngest sync functions, doing an org-wide `.select('id, name')`
+// with no bound and a discarded error.
+//
+// The reachable set is COMPUTED by following `@/lib/...` imports out of
+// lib/inngest/**, never hand-listed. A curated list is the same blind spot with
+// extra steps: correct the day it is written, silently wrong the first time
+// someone adds an import.
+//
+// Still stops at lib/: app/ is a separate, larger ratchet, and "silently
+// processes 1000 of N" is a correctness bug in a cron where it is often a
+// pagination-UX question in a request handler.
 // ============================================================================
 
 const BOUNDED = [
@@ -53,6 +70,98 @@ const BOUNDED = [
 // listing the rows the write itself touched, not a scan — the write's own
 // filters bound it. Only a read-path `.select()` is in scope here.
 const WRITE_VERBS = ['.insert(', '.update(', '.upsert(', '.delete(']
+
+/** Paginating helpers whose callback carries the bound. */
+const PAGINATING_CALLERS = ['fetchAllRows', 'foldAllRows', 'fetchDistinctOrgIds']
+
+/**
+ * Is `idx` inside a paginating helper's callback, AND does that callback
+ * actually paginate?
+ *
+ * The exemption exists because a conditionally-built query cannot satisfy the
+ * chain scan:
+ *
+ *   let q = supabase.from('properties').select(…).eq(…)
+ *   if (ids?.length) q = q.in('id', ids)
+ *   return q.order('id').range(from, to)
+ *
+ * The `.range(` lands on a different expression than the `.from(`, so walking
+ * forward from `.from(` never reaches it — yet the read IS bounded. Without
+ * this, the conditional-build shape is unwritable under the rule.
+ *
+ * BUT the callback is not taken on trust. It must contain `.range(`, because
+ * `fetchAllRows` with a callback that ignores its (from, to) does not paginate
+ * at all — it re-requests the same first page until the maxRows ceiling throws.
+ * Verified by canary: deleting `.range(from, to)` from a converted call site
+ * must make this test fail, and with a bare "inside the callback" check it did
+ * not.
+ */
+function insidePaginatingCall(src: string, idx: number): boolean {
+  let depth = 0
+  for (let i = idx; i >= 0; i--) {
+    const ch = src[i]
+    if (ch === ')') depth++
+    else if (ch === '(') {
+      if (depth > 0) { depth--; continue }
+      // Generic helpers — every real call site passes a row type, e.g.
+      // `fetchAllRows<{ id: string }>(`. Matching the bare identifier misses all of them.
+      const before = src.slice(Math.max(0, i - 200), i)
+      const isPaginator = PAGINATING_CALLERS.some(
+        (fn) => new RegExp(`\\b${fn}\\s*(<[^()]*>)?\\s*$`).test(before),
+      )
+      if (!isPaginator) continue
+      return callArgsText(src, i).includes('.range(')
+    }
+  }
+  return false
+}
+
+/** Text between a call's opening paren and its matching close. */
+function callArgsText(src: string, openParenIdx: number): string {
+  let depth = 0
+  for (let i = openParenIdx; i < src.length; i++) {
+    if (src[i] === '(') depth++
+    else if (src[i] === ')') {
+      depth--
+      if (depth === 0) return src.slice(openParenIdx, i + 1)
+    }
+  }
+  return src.slice(openParenIdx)
+}
+
+/** `@/lib/foo/bar` -> `lib/foo/bar.ts` (or .tsx, or /index.ts), if it exists. */
+function resolveLibImport(spec: string): string | null {
+  if (!spec.startsWith('@/lib/')) return null
+  const base = spec.slice(2)
+  for (const candidate of [`${base}.ts`, `${base}.tsx`, `${base}/index.ts`]) {
+    if (existsSync(join(ROOT, candidate))) return candidate
+  }
+  return null
+}
+
+/**
+ * Every lib module reachable from lib/inngest/** by following `@/lib/...`
+ * imports transitively — the files whose `.select()` calls can actually run
+ * inside a cron or event handler.
+ */
+function inngestReachableFiles(): string[] {
+  const seeds = collectSourceFiles(['lib/inngest']).map((f) => rel(f))
+  const seen  = new Set(seeds)
+  const queue = [...seeds]
+
+  while (queue.length) {
+    const current = queue.pop()!
+    for (const m of read(join(ROOT, current)).matchAll(/from\s+'(@\/lib\/[^']+)'/g)) {
+      const resolved = resolveLibImport(m[1]!)
+      if (resolved && !seen.has(resolved)) {
+        seen.add(resolved)
+        queue.push(resolved)
+      }
+    }
+  }
+
+  return [...seen].sort()
+}
 
 /**
  * Extract the full method-chain text starting at a `.from(` call: walk forward
@@ -99,8 +208,8 @@ function extractChain(src: string, fromIdx: number): string {
 
 function findOffenders(): string[] {
   const offenders: string[] = []
-  for (const file of collectSourceFiles(['lib/inngest'])) {
-    const src = read(file)
+  for (const relPath of inngestReachableFiles()) {
+    const src = read(join(ROOT, relPath))
     const FROM = /\.from\(\s*['"][a-z_]+['"]\s*\)/g
     let m: RegExpExecArray | null
     while ((m = FROM.exec(src))) {
@@ -110,7 +219,8 @@ function findOffenders(): string[] {
       const beforeSelect = chain.slice(0, selectIdx)
       if (WRITE_VERBS.some((verb) => beforeSelect.includes(verb))) continue
       if (BOUNDED.some((token) => chain.includes(token))) continue
-      offenders.push(`${rel(file)}:${src.slice(0, m.index).split('\n').length}`)
+      if (insidePaginatingCall(src, m.index)) continue
+      offenders.push(`${relPath}:${src.slice(0, m.index).split('\n').length}`)
     }
   }
   return offenders

@@ -123,9 +123,9 @@ const EXCEPTIONS: Record<string, string> = {
     'Per-photo storage upload + work_order_photos row — each photo is a distinct uploaded file with its own generated storage path; there is no batched form of a storage upload.',
   'app/(dashboard)/maintenance/CreateWorkOrderModal.tsx:128':
     'Same per-photo storage-upload + row pattern, client-side.',
-  'lib/asset-discovery/seed-from-amenities.ts:63':
+  'lib/asset-discovery/seed-from-amenities.ts:70':
     'Real N+1 (existence-check select + insert per property) left as a known, bounded cost — deferred rather than fixed blind in the same PR that added this guardrail, since it touches live PMS-sync logic. Bounded by properties-per-org (10-50 per CLAUDE.md\'s target user).',
-  'lib/asset-discovery/seed-from-amenities.ts:171':
+  'lib/asset-discovery/seed-from-amenities.ts:184':
     'Second pass (absent-asset-types) of the same function — same reasoning as line 63.',
   'lib/inngest/functions/guidebook-stay-extension-cron.ts:165':
     'Real N+1 (existence check, next-booking lookup, opt-in lookup, insert — 4 queries per booking) left as a known, bounded cost — deferred rather than fixed blind, touches live guest-messaging sync logic. Bounded by same-day checkouts per org per day, and since the 2026-08-09 fan-out fix it runs inside the per-org handler (guidebookStayExtensionOrg) rather than inside a loop over every org on the platform.',
@@ -137,9 +137,9 @@ const EXCEPTIONS: Record<string, string> = {
     'Per-secret delete_vault_secret RPC call — each is a distinct external Vault secret; structurally cannot be batched into one call any more than "one API call per distinct external resource" ever can. Bounded since the 2026-07-30 scalability pass: the loop now iterates one BOOKING_BATCH_SIZE page inside a per-batch step, not an org\'s entire un-anonymized booking history.',
   'lib/inngest/functions/ownerrez/initial-sync.ts:180':
     'Per-property conditional field patch (bedrooms/bathrooms/square_footage) — each property\'s patch object contains different values, so it is not a uniform batched update. Pre-fetch of existing rows just above IS already batched via .in(\'external_id\', ids).',
-  'lib/guidebook/sync.ts:143':
+  'lib/guidebook/sync.ts:168':
     'Per-property conditional guidebook-config patch — same shape as ownerrez/initial-sync.ts:180 (differing patch per row); the read side just above is already batched via .in(\'property_id\', ids).',
-  'lib/properties/upsert-normalized.ts:165':
+  'lib/properties/upsert-normalized.ts:172':
     'Per-property conditional cleaning_cost backfill — same differing-patch-per-row shape as the two entries above.',
   'lib/inngest/functions/turnover-events.ts:330':
     'Milestone-flag upserts — the milestones array has at most 3 possible entries (first_turnover_complete/_10/_50) and is almost always exactly 1; negligible enough that batching would add more complexity than it saves.',
