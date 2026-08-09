@@ -22,8 +22,8 @@ import { invokeHandler } from './test-helpers'
 // queued response for that table, in call order. This function calls
 // `.from('vendor_compliance_documents')` three times per run with a
 // hard-block candidate present (grace-docs select, hard-block-candidates
-// select, then one update per candidate) so a fixed per-table response
-// isn't enough — order matters.
+// select, then ONE bulk update per HARD_BLOCK_CHUNK candidates) so a fixed
+// per-table response isn't enough — order matters.
 function makeSupabase(queued: Record<string, { data?: unknown; error?: unknown }[]>) {
   const counters: Record<string, number> = {}
   const calls: { table: string; method: string; args: unknown[] }[] = []
@@ -43,6 +43,7 @@ function makeSupabase(queued: Record<string, { data?: unknown; error?: unknown }
     chain.is     = (...a: unknown[]) => record('is', a)
     chain.lte    = (...a: unknown[]) => record('lte', a)
     chain.update = (...a: unknown[]) => record('update', a)
+    chain.in     = (...a: unknown[]) => record('in', a)
 
     const resolveNext = () => {
       const idx = counters[table] ?? 0
@@ -83,7 +84,8 @@ describe('vendorComplianceGraceCheck', () => {
           ],
           error: null,
         },
-        { data: { id: 'doc_block' }, error: null }, // update succeeds — this run flips the gate
+        // Bulk claim RETURNING the rows it actually flipped.
+        { data: [{ id: 'doc_block' }], error: null },
       ],
     })
     ;(createServiceClient as ReturnType<typeof vi.fn>).mockReturnValue(supabase)
@@ -94,7 +96,7 @@ describe('vendorComplianceGraceCheck', () => {
       logger: { info: vi.fn(), error: vi.fn() },
     })
 
-    expect(result).toEqual({ grace_period_entries: 1, hard_block_candidates: 1 })
+    expect(result).toEqual({ grace_period_entries: 1, hard_block_candidates: 1, hard_blocked: 1 })
 
     expect(logAuditEvents).toHaveBeenCalledWith([
       expect.objectContaining({
@@ -105,14 +107,14 @@ describe('vendorComplianceGraceCheck', () => {
       }),
     ])
 
-    expect(logAuditEvent).toHaveBeenCalledWith(
+    expect(logAuditEvents).toHaveBeenCalledWith([
       expect.objectContaining({
         orgId:      'org_1',
         action:     'vendor.compliance.hard_blocked',
         targetId:   'doc_block',
         metadata:   expect.objectContaining({ vendor_id: 'v2', document_type: 'workers_comp' }),
       }),
-    )
+    ])
 
     const updateCall = supabase.calls.find(
       (c) => c.table === 'vendor_compliance_documents' && c.method === 'update',
@@ -135,10 +137,9 @@ describe('vendorComplianceGraceCheck', () => {
       logger: { info: vi.fn(), error: vi.fn() },
     })
 
-    expect(result).toEqual({ grace_period_entries: 0, hard_block_candidates: 0 })
+    expect(result).toEqual({ grace_period_entries: 0, hard_block_candidates: 0, hard_blocked: 0 })
     expect(logAuditEvents).not.toHaveBeenCalled()
-    expect(logAuditEvent).not.toHaveBeenCalled()
-    // No per-document mark-hard-blocked step ran.
+    // No hard-block batch step ran at all.
     expect(supabase.calls.some((c) => c.method === 'update')).toBe(false)
   })
 
@@ -153,9 +154,10 @@ describe('vendorComplianceGraceCheck', () => {
           error: null,
         },
         // The gate was already flipped by another run — the `.is('hard_blocked_at', null)`
-        // precondition in the WHERE clause no longer matches, so maybeSingle() finds
-        // nothing to update and returns null data.
-        { data: null, error: null },
+        // precondition in the WHERE clause no longer matches, so the bulk
+        // claim RETURNs zero rows. Unchanged by batching: that optimistic lock
+        // is exactly what makes a whole batch safe to retry as a unit.
+        { data: [], error: null },
       ],
     })
     ;(createServiceClient as ReturnType<typeof vi.fn>).mockReturnValue(supabase)
@@ -166,8 +168,53 @@ describe('vendorComplianceGraceCheck', () => {
       logger: { info: vi.fn(), error: vi.fn() },
     })
 
-    expect(result).toEqual({ grace_period_entries: 0, hard_block_candidates: 1 })
-    expect(logAuditEvent).not.toHaveBeenCalled()
+    expect(result).toEqual({ grace_period_entries: 0, hard_block_candidates: 1, hard_blocked: 0 })
+    expect(logAuditEvents).not.toHaveBeenCalled()
+  })
+
+  it('claims a large hard-block backlog in bulk batches, not one step per document', async () => {
+    // The backlog "only ever grows" (hard_blocked_at IS NULL plus an expiry
+    // cutoff accumulates every expired document across every tenant until this
+    // cron clears it), and it used to cost one Inngest step and one round-trip
+    // per document, daily. At HARD_BLOCK_CHUNK = 500, 900 documents is 2.
+    // (Kept under PostgREST's 1000-row page so this local double's single-page
+    // queue models the read honestly — the >1000 read path has its own
+    // coverage via fetchAllRows.)
+    const docs = Array.from({ length: 900 }, (_, i) => ({
+      id: `doc_${i}`, org_id: `org_${i % 4}`, vendor_id: `v${i}`,
+      document_type: 'coi', expiry_date: '2026-01-01',
+    }))
+    const supabase = makeSupabase({
+      vendor_compliance_documents: [
+        { data: [], error: null },
+        { data: docs, error: null },
+        { data: docs.slice(0, 500).map((d) => ({ id: d.id })), error: null },
+        { data: docs.slice(500).map((d) => ({ id: d.id })),    error: null },
+      ],
+    })
+    ;(createServiceClient as ReturnType<typeof vi.fn>).mockReturnValue(supabase)
+
+    const step = makeStep()
+    const result = await invokeHandler(vendorComplianceGraceCheck, {
+      event: {},
+      step,
+      logger: { info: vi.fn(), error: vi.fn() },
+    })
+
+    expect(result).toMatchObject({ hard_block_candidates: 900, hard_blocked: 900 })
+
+    const blockSteps = step.run.mock.calls.map((c) => c[0] as string)
+      .filter((n) => n.startsWith('mark-hard-blocked'))
+    expect(blockSteps).toEqual([
+      'mark-hard-blocked-batch-0',
+      'mark-hard-blocked-batch-500',
+    ])
+
+    // Two UPDATEs for 900 documents, not 900. Chunked below max_rows so the
+    // RETURNING clause the audit trail is built from is never truncated.
+    const updates = supabase.calls.filter((c) => c.method === 'update')
+    expect(updates).toHaveLength(2)
+    expect(logAuditEvents).toHaveBeenCalledTimes(2)
   })
 
   describe('45/46-day grace-to-hard-block boundary date math', () => {

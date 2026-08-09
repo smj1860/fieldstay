@@ -252,35 +252,26 @@ const EXCEPTIONS: Record<string, string> = {
   'lib/inngest/functions/flagged-turnover-wo.ts:102':
     'Bounded by one org\'s PM count — a per-event handler whose `managers` is `getPmMembers(supabase, org_id, { roles: [...] })`. The org scope is a JS ARGUMENT here, which the scan cannot tell apart from the identically-named column in a `.select(\'id, org_id, ...\')` list, so no token can express it. Team size, not tenant count.',
 
-  // ── REAL GAPS, newly visible 2026-08-09 ─────────────────────────────────
+  // ── The four REAL GAPS this test surfaced on 2026-08-09, now closed ──────
   //
-  // Not new code and not newly broken: newly VISIBLE. Every one of these was
-  // passing because `org_id` used to be a BOUND_TOKEN, and `.select('org_id')`
-  // — the literal signature of a platform-wide tenant scan — contains it. The
-  // token that was supposed to mean "scoped to one tenant" was satisfied by
-  // the opposite.
+  // Not new code and not newly broken when they appeared here: newly VISIBLE.
+  // All four were passing because `org_id` used to be a BOUND_TOKEN, and
+  // `.select('org_id')` — the literal signature of a platform-wide tenant scan
+  // — contains it. The token that was supposed to mean "scoped to one tenant"
+  // was satisfied by the opposite. Same hole that hid
+  // platform-inventory-template-broadcast.ts until an external scalability
+  // audit read the code; the previous fix (search only right of the `=`)
+  // closed one instance, the substring itself was the hole.
   //
-  // That is the same hole that hid platform-inventory-template-broadcast.ts
-  // from this test until an external scalability audit read the code. The
-  // previous fix (search only right of the `=`) closed one instance; the
-  // substring itself was the hole. All four below are one step.run per row of
-  // an explicitly platform-wide scan — read each file's own comment above the
-  // fetchAllRows call, which already says "PLATFORM-WIDE" or "the platform's
-  // tenant count" in prose.
-  //
-  // Listed rather than fixed in the same change that surfaced them: each needs
-  // the dispatcher + per-org-handler conversion (a new event in events.ts, a
-  // registration in the Inngest route, and its own tests), and four of those
-  // do not belong in a commit whose subject is the maintenance-schedule loops.
-  // These entries are the work order, not an absolution.
-  'lib/inngest/functions/cron/vendor-compliance-grace-check.ts:119':
-    'REAL GAP — one step.run per compliance document across every tenant. Its own comment notes the backlog "only ever grows" (hard_blocked_at IS NULL accumulates until this cron clears it), so the step count grows with it. Needs dispatcher + per-org handler.',
-  'lib/inngest/functions/guidebook-daily-monitor.ts:134':
-    'REAL GAP — one step.run per org over `activeOrgs`, which its own comment describes as "the platform\'s tenant count". Needs dispatcher + per-org handler.',
-  'lib/inngest/functions/guidebook-stay-extension-cron.ts:58':
-    'REAL GAP — one step.run per org over every guidebook config with gap-night messaging on; comment says "a slice of the platform\'s tenant count". Needs dispatcher + per-org handler.',
-  'lib/inngest/functions/ownerrez/ownerrez-reviews-sync.ts:115':
-    'REAL GAP — one step.run per OwnerRez connection platform-wide; the comment above the fetch literally reads "PLATFORM-WIDE scan". Needs dispatcher + per-connection handler.',
+  // They are listed here as prose rather than as entries because the code is
+  // fixed, not because the check was relaxed:
+  //   - vendor-compliance-grace-check.ts — the per-document hard-block claim
+  //     is now one bulk optimistic-locked UPDATE per 500 documents.
+  //   - guidebook-daily-monitor.ts       -> guidebookDailyMonitorOrg
+  //   - guidebook-stay-extension-cron.ts -> guidebookStayExtensionOrg
+  //   - ownerrez-reviews-sync.ts         -> ownerRezReviewsSyncConnection
+  // The last three are dispatcher + per-tenant-handler pairs with
+  // `concurrency: { limit: 10 }`, matching the eight converted before them.
 }
 
 describe('guardrail: no step.run/step.sendEvent loop over an unbounded collection', () => {

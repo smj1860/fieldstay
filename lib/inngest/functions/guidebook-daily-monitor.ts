@@ -4,7 +4,7 @@ import { createServiceClient } from '@/lib/supabase/server'
 import { stripe } from '@/lib/stripe/client'
 import { getActiveSponsorCount } from '@/lib/guidebook/helpers'
 import { unwrapJoin } from '@/lib/utils/supabase-joins'
-import { throwIfAnyQueryFailed } from '@/lib/supabase/unwrap'
+import { throwIfAnyQueryFailed, unwrap } from '@/lib/supabase/unwrap'
 
 /** Nullability matches the live schema: org_id is NOT NULL on
  *  guidebook_configurations, both date columns are nullable, and the
@@ -19,6 +19,20 @@ interface GuidebookOrgRow {
     | null
 }
 
+/**
+ * DISPATCHER ONLY.
+ *
+ * Named "Dispatcher" all along, but it wasn't one: it ran a Stripe
+ * subscription lookup as its own step for EVERY active guidebook org, then a
+ * second serial `for (const row of activeOrgs) { await step.run(...) }` for
+ * trial lock-outs — both inside a single invocation, both scaling with the
+ * platform's tenant count. Promise.all made the Stripe steps concurrent but
+ * did nothing about how many of them there were.
+ *
+ * Now: grace-period expiry (a pure date comparison, no query) stays batched
+ * here, and everything needing a per-org Stripe call or sponsor count fans out
+ * to guidebookDailyMonitorOrg under its own concurrency cap.
+ */
 export const guidebookDailyMonitor = inngest.createFunction(
   {
     id:   'guidebook-daily-monitor',
@@ -26,8 +40,6 @@ export const guidebookDailyMonitor = inngest.createFunction(
   },
   { cron: '0 13 * * *' }, // 8 AM CT (UTC-5)
   async ({ step, logger }) => {
-    const now48hrs = new Date(Date.now() + 48 * 60 * 60 * 1000)
-
     // Fetch all active guidebook orgs in one query
     const activeOrgs = await step.run('fetch-active-guidebook-orgs', async () => {
       const supabase = createServiceClient({ system: 'inngest:guidebook-daily-monitor' })
@@ -58,111 +70,152 @@ export const guidebookDailyMonitor = inngest.createFunction(
       )
     })
 
-    logger.info(`Evaluating ${activeOrgs.length} active guidebook orgs for billing credits`)
-
-    type CreditEvent = {
-      name: 'guidebook/billing.credit.evaluate'
-      data: { orgId: string; stripeCustomerId: string; currentPeriodEnd: number }
-    }
-
-    type GraceExpiredEvent = {
-      name: 'guidebook/grace.period.expired'
-      data: { orgId: string }
-    }
-
-    const events: (CreditEvent | GraceExpiredEvent)[] = []
-
-    // Each org's Stripe lookup runs as its own independently-memoized/retried
-    // step, but the steps themselves fire concurrently instead of one at a time.
-    const creditEvents = await Promise.all(
-      activeOrgs.map((row) => {
-        const org = unwrapJoin(row.organizations)
-
-        if (!org?.stripe_subscription_id || !org.stripe_customer_id) return null
-
-        // Check renewal window — only dispatch if billing within 48 hours
-        // Store currentPeriodEnd here so the handler has it for idempotency key
-        // without needing another Stripe API call
-        return step.run(`check-renewal-${row.org_id}`, async () => {
-          const subscription = await stripe.subscriptions.retrieve(
-            org.stripe_subscription_id!
-          )
-          const periodEnd = new Date(subscription.current_period_end * 1000)
-          if (periodEnd > now48hrs) return null
-
-          // Only dispatch if org has ≥ 5 sponsors (credit threshold)
-          const activeSponsorCount = await getActiveSponsorCount(row.org_id)
-          if (activeSponsorCount < 5) return null
-
-          return {
-            name: 'guidebook/billing.credit.evaluate' as const,
-            data: {
-              orgId:            row.org_id,
-              stripeCustomerId: org.stripe_customer_id!,
-              currentPeriodEnd: subscription.current_period_end,
-            },
-          }
-        })
-      })
+    // Grace-period expiry is a pure date comparison over rows already in hand
+    // — no query, no Stripe call — so it stays batched in the dispatcher.
+    const graceExpired = activeOrgs.filter((row) =>
+      row.grace_period_ends_at !== null && new Date(row.grace_period_ends_at) <= new Date()
     )
 
-    for (const creditEvent of creditEvents) {
-      if (creditEvent) events.push(creditEvent)
+    if (graceExpired.length) {
+      await step.sendEvent(
+        'fan-out-grace-expired',
+        graceExpired.map((row) => ({
+          name: 'guidebook/grace.period.expired' as const,
+          data: { orgId: row.org_id },
+        }))
+      )
     }
 
-    // Grace period expiry check — runs daily alongside billing evaluation
-    for (const row of activeOrgs) {
-      if (!row.grace_period_ends_at) continue
-      const graceEnd = new Date(row.grace_period_ends_at)
-      if (graceEnd <= new Date()) {
-        events.push({
-          name: 'guidebook/grace.period.expired',
-          data: { orgId: row.org_id },
+    // Everything else needs a per-org Stripe call or a per-org sponsor count,
+    // so it fans out. Only orgs that could actually produce work are
+    // dispatched: an org with no Stripe subscription AND no expired trial has
+    // nothing for the handler to do, and used to cost a step to establish that.
+    const needsEvaluation = activeOrgs.filter((row) => {
+      const org = unwrapJoin(row.organizations)
+      const billable    = Boolean(org?.stripe_subscription_id && org.stripe_customer_id)
+      const trialLapsed = row.trial_ends_at !== null && new Date(row.trial_ends_at) <= new Date()
+      return billable || trialLapsed
+    })
+
+    if (needsEvaluation.length) {
+      await step.sendEvent(
+        'fan-out-guidebook-daily-monitor',
+        needsEvaluation.map((row) => ({
+          name: 'org/guidebook_daily_monitor.requested' as const,
+          data: { org_id: row.org_id },
+        }))
+      )
+    }
+
+    logger.info(
+      `Guidebook daily monitor: ${activeOrgs.length} active org(s), ` +
+      `${graceExpired.length} grace-expired, ${needsEvaluation.length} dispatched`
+    )
+
+    return {
+      evaluated:  activeOrgs.length,
+      dispatched: needsEvaluation.length + graceExpired.length,
+    }
+  }
+)
+
+/**
+ * Per-org guidebook billing + trial evaluation. One invocation = one tenant.
+ *
+ * Both halves need this org's live state, so the row is re-read here rather
+ * than carried on the event — a Stripe subscription id on an Inngest payload
+ * is both stale-able and needless, since the handler has to touch the row
+ * anyway.
+ */
+export const guidebookDailyMonitorOrg = inngest.createFunction(
+  {
+    id:          'guidebook-daily-monitor-org',
+    name:        'Guidebook: Daily Billing — per org',
+    retries:     2,
+    concurrency: { limit: 10 },
+  },
+  { event: 'org/guidebook_daily_monitor.requested' },
+  async ({ event, step, logger }) => {
+    const orgId     = event.data.org_id
+    const now48hrs  = new Date(Date.now() + 48 * 60 * 60 * 1000)
+
+    const row = await step.run('load-guidebook-config', async () => {
+      const supabase = createServiceClient({ system: 'inngest:guidebook-daily-monitor' })
+      const res = await supabase
+        .from('guidebook_configurations')
+        .select(`
+          org_id,
+          trial_ends_at,
+          is_active,
+          organizations (
+            stripe_customer_id,
+            stripe_subscription_id
+          )
+        `)
+        .eq('org_id', orgId)
+        .maybeSingle()
+
+      return unwrap(res, { site: 'inngest.guidebook-daily-monitor-org.config', orgId })
+    }) as (GuidebookOrgRow & { is_active: boolean }) | null
+
+    // Re-checked, not assumed: the dispatcher's snapshot can be minutes old,
+    // and a guidebook locked in between must not then be billed a credit.
+    if (!row?.is_active) {
+      logger.info(`Org ${orgId}: guidebook no longer active — skipping`)
+      return { org_id: orgId, skipped: true }
+    }
+
+    const org = unwrapJoin(row.organizations)
+
+    // ── Billing credit ──────────────────────────────────────────────────────
+    if (org?.stripe_subscription_id && org.stripe_customer_id) {
+      const creditEvent = await step.run('check-renewal', async () => {
+        const subscription = await stripe.subscriptions.retrieve(org.stripe_subscription_id!)
+        const periodEnd = new Date(subscription.current_period_end * 1000)
+        if (periodEnd > now48hrs) return null
+
+        // Only dispatch if org has >= 5 sponsors (credit threshold)
+        const activeSponsorCount = await getActiveSponsorCount(orgId)
+        if (activeSponsorCount < 5) return null
+
+        // current_period_end rides along so the handler has the idempotency
+        // key without a second Stripe call.
+        return { stripeCustomerId: org.stripe_customer_id!, currentPeriodEnd: subscription.current_period_end }
+      })
+
+      if (creditEvent) {
+        await step.sendEvent('send-credit-evaluate', {
+          name: 'guidebook/billing.credit.evaluate' as const,
+          data: { orgId, ...creditEvent },
         })
       }
     }
 
-    if (events.length > 0) {
-      await inngest.send(events)
-    }
+    // ── Trial expiry lock-out ───────────────────────────────────────────────
+    const trialLapsed = row.trial_ends_at !== null && new Date(row.trial_ends_at) <= new Date()
+    if (!trialLapsed) return { org_id: orgId, trial_locked: false }
 
-    logger.info(`Dispatched ${events.length} guidebook event(s)`)
+    const locked = await step.run('check-trial-expired', async () => {
+      const supabase = createServiceClient({ system: 'inngest:guidebook-daily-monitor' })
+      const activeSponsorCount = await getActiveSponsorCount(orgId)
+      if (activeSponsorCount >= 3) return false
 
-    // Trial expiry check — lock any guidebook whose trial ended overnight
-    // and still has fewer than 3 active sponsors.
-    let trialLockedCount = 0
-    for (const row of activeOrgs) {
-      if (!row.trial_ends_at) continue
-      if (new Date(row.trial_ends_at) > new Date()) continue // still in trial
+      const { error } = await supabase
+        .from('guidebook_configurations')
+        .update({
+          is_active:  false,
+          updated_at: new Date().toISOString(),
+        })
+        .eq('org_id', orgId)
 
-      await step.run(`check-trial-expired-${row.org_id}`, async () => {
-        const supabase = createServiceClient({ system: 'inngest:guidebook-daily-monitor' })
-        const activeSponsorCount = await getActiveSponsorCount(row.org_id)
-        if (activeSponsorCount >= 3) return { skipped: true }
+      throwIfAnyQueryFailed(
+        { site: 'inngest.guidebook-daily-monitor.check-trial-expired', orgId },
+        error
+      )
 
-        const { error } = await supabase
-          .from('guidebook_configurations')
-          .update({
-            is_active:  false,
-            updated_at: new Date().toISOString(),
-          })
-          .eq('org_id', row.org_id)
+      return true
+    })
 
-        throwIfAnyQueryFailed(
-          { site: 'inngest.guidebook-daily-monitor.check-trial-expired', orgId: row.org_id },
-          error
-        )
-
-        return { locked: true, activeSponsorCount }
-      })
-
-      trialLockedCount++
-    }
-
-    if (trialLockedCount > 0) {
-      logger.info(`Checked ${trialLockedCount} trial-expired guidebook org(s)`)
-    }
-
-    return { evaluated: activeOrgs.length, dispatched: events.length }
+    return { org_id: orgId, trial_locked: locked }
   }
 )

@@ -2,7 +2,13 @@ import { unwrap } from '@/lib/supabase/unwrap'
 import { inngest }             from '@/lib/inngest/client'
 import { fetchAllRows }        from '@/lib/inngest/paginate'
 import { createServiceClient } from '@/lib/supabase/server'
-import { logAuditEvent, logAuditEvents } from '@/lib/audit'
+import { logAuditEvents } from '@/lib/audit'
+
+/**
+ * Documents claimed per bulk UPDATE. Below max_rows so the RETURNING clause —
+ * which is what the audit trail is built from — is never truncated.
+ */
+const HARD_BLOCK_CHUNK = 500
 
 /** One row of the platform-wide compliance-document scans below. Nullability
  *  matches the live schema: only expiry_date is nullable. */
@@ -116,12 +122,30 @@ export const vendorComplianceGraceCheck = inngest.createFunction(
 
     logger.info(`Found ${hardBlockCandidates.length} compliance document(s) crossing into hard-block`)
 
-    for (const doc of hardBlockCandidates) {
-      await step.run(`mark-hard-blocked-${doc.id}`, async () => {
+    // ── Batched claim ────────────────────────────────────────────────────────
+    //
+    // One step and one round-trip per document, every day, over a backlog the
+    // comment above notes "only ever grows". Now one bulk claim per
+    // HARD_BLOCK_CHUNK documents.
+    //
+    // The idempotency guarantee is unchanged and is what makes a batch safe to
+    // retry as a unit: `.is('hard_blocked_at', null).select('id')` is the same
+    // optimistic lock, just applied to a set — a retry matches zero rows
+    // because the first attempt already filled the column, so no document is
+    // ever audited twice. Same shape as the aging/overdue escalations in
+    // cron/work-order-ops.ts and cron/maintenance-schedules-helpers.ts.
+    //
+    // Chunked because RETURNING is a PostgREST response like any other and
+    // truncates at max_rows: the UPDATE would claim every row correctly while
+    // reporting only the first 1000, and the audit trail — the entire point of
+    // this cron — would be short by the difference, silently.
+    let hardBlocked = 0
+
+    for (let i = 0; i < hardBlockCandidates.length; i += HARD_BLOCK_CHUNK) {
+      const chunk = hardBlockCandidates.slice(i, i + HARD_BLOCK_CHUNK)
+      hardBlocked += await step.run(`mark-hard-blocked-batch-${i}`, async () => {
         const supabase = createServiceClient({ system: 'inngest:vendor-compliance-grace-check' })
 
-        // Idempotency: only proceed if this run is the one that flips the
-        // gate — guards against a retried step re-logging the same doc.
         // A failed claim used to be indistinguishable from "another run got
         // there first" — both returned null and skipped. But this claim IS the
         // hard-block, so a discarded error meant the vendor was never blocked
@@ -129,37 +153,40 @@ export const vendorComplianceGraceCheck = inngest.createFunction(
         const claimRes = await supabase
           .from('vendor_compliance_documents')
           .update({ hard_blocked_at: new Date().toISOString() })
-          .eq('id', doc.id)
+          .in('id', chunk.map((doc) => doc.id))
           .is('hard_blocked_at', null)
           .select('id')
-          .maybeSingle()
 
-        const updated = unwrap(claimRes, {
-          site:  'inngest.vendor-compliance-grace-check.hard-block-claim',
-          orgId: doc.org_id,
+        const claimed = unwrap(claimRes, {
+          site: 'inngest.vendor-compliance-grace-check.hard-block-claim',
         })
 
-        if (!updated) return null
+        const claimedIds = new Set((claimed ?? []).map((row: { id: string }) => row.id))
+        const newlyBlocked = chunk.filter((doc) => claimedIds.has(doc.id))
+        if (!newlyBlocked.length) return 0
 
-        await logAuditEvent({
-          orgId:      doc.org_id,
-          action:     'vendor.compliance.hard_blocked',
-          targetType: 'vendor_compliance_document',
-          targetId:   doc.id,
-          metadata:   {
-            vendor_id:     doc.vendor_id,
-            document_type: doc.document_type,
-            expiry_date:   doc.expiry_date,
-          },
-        })
+        await logAuditEvents(
+          newlyBlocked.map((doc) => ({
+            orgId:      doc.org_id,
+            action:     'vendor.compliance.hard_blocked' as const,
+            targetType: 'vendor_compliance_document',
+            targetId:   doc.id,
+            metadata:   {
+              vendor_id:     doc.vendor_id,
+              document_type: doc.document_type,
+              expiry_date:   doc.expiry_date,
+            },
+          }))
+        )
 
-        return updated
+        return newlyBlocked.length
       })
     }
 
     return {
-      grace_period_entries: graceDocs.length,
+      grace_period_entries:  graceDocs.length,
       hard_block_candidates: hardBlockCandidates.length,
+      hard_blocked:          hardBlocked,
     }
   }
 )

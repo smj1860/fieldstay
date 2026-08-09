@@ -12,7 +12,7 @@ vi.mock('@/lib/audit', () => ({
   logAuditEvent: vi.fn(),
 }))
 
-import { ownerRezReviewsSync } from '@/lib/inngest/functions/ownerrez/ownerrez-reviews-sync'
+import { ownerRezReviewsSync, ownerRezReviewsSyncConnection } from '@/lib/inngest/functions/ownerrez/ownerrez-reviews-sync'
 import { createServiceClient } from '@/lib/supabase/server'
 import { OwnerRezApiClient } from '@/lib/integrations/providers/ownerrez-api'
 import { logAuditEvent } from '@/lib/audit'
@@ -67,6 +67,11 @@ function makeConn(overrides: Record<string, unknown> = {}) {
   }
 }
 
+/** The per-connection handler's trigger. */
+function connEvent(userId = 'user_1', orgId = 'org_1') {
+  return { data: { user_id: userId, org_id: orgId } }
+}
+
 const REVIEW: OwnerRezReview = {
   id:            9001,
   stars:         5,
@@ -100,15 +105,15 @@ describe('ownerRezReviewsSync', () => {
 
     const supabase = makeSupabase({
       integration_connections: [
-        { data: [makeConn()], error: null }, // fetch-connections
+        { data: makeConn(), error: null }, // load-sync-cursor
       ],
       properties: [{ data: [{ id: 'prop_1', external_id: '777' }], error: null }],
       reviews:    [{ data: null, error: null }],
     })
     ;(createServiceClient as ReturnType<typeof vi.fn>).mockReturnValue(supabase)
 
-    const result = await invokeHandler(ownerRezReviewsSync, {
-      event:  {},
+    const result = await invokeHandler(ownerRezReviewsSyncConnection, {
+      event:  connEvent(),
       step:   makeStep(),
       logger: makeLogger(),
     })
@@ -138,33 +143,11 @@ describe('ownerRezReviewsSync', () => {
     const patch = (cursorMergeCall?.[1] as { p_patch: Record<string, unknown> }).p_patch
     expect(patch.reviews_sync_cursor).toBe(start.toISOString())
 
-    expect(result).toBeUndefined()
+    expect(result).toMatchObject({ user_id: 'user_1', status: 'ok' })
     vi.useRealTimers()
   })
 
-  it('is a no-op when there are no active OwnerRez connections', async () => {
-    baseMocks(async () => [])
-
-    const supabase = makeSupabase({
-      integration_connections: [{ data: [], error: null }],
-    })
-    ;(createServiceClient as ReturnType<typeof vi.fn>).mockReturnValue(supabase)
-
-    const result = await invokeHandler(ownerRezReviewsSync, {
-      event:  {},
-      step:   makeStep(),
-      logger: makeLogger(),
-    })
-
-    expect(OwnerRezApiClient).not.toHaveBeenCalled()
-    expect(supabase.upsertSpy).not.toHaveBeenCalled()
-    expect(supabase.updateSpy).not.toHaveBeenCalled()
-    // Only fetch-connections ran — the per-connection loop body never ran.
-    expect(supabase.from).toHaveBeenCalledTimes(1)
-    expect(result).toBeUndefined()
-  })
-
-  it('marks the connection revoked, logs the audit event, fires a throttle-eligible PM notification, and still processes the next connection in the same tick', async () => {
+  it('marks the connection revoked, logs the audit event, and fires a throttle-eligible PM notification', async () => {
     baseMocks(async (userId) => {
       if (userId === 'user_1') throw new TokenRevokedError(userId)
       return []
@@ -172,7 +155,7 @@ describe('ownerRezReviewsSync', () => {
 
     const supabase = makeSupabase({
       integration_connections: [
-        { data: [makeConn(), makeConn({ user_id: 'user_2', org_id: 'org_2', metadata: {} })], error: null }, // fetch-connections
+        { data: makeConn(), error: null },       // load-sync-cursor
         { data: { id: 'conn_1' }, error: null }, // mark-revoked existing select
       ],
       org_milestones: [
@@ -184,8 +167,8 @@ describe('ownerRezReviewsSync', () => {
 
     const step = makeStep()
 
-    const result = await invokeHandler(ownerRezReviewsSync, {
-      event:  {},
+    const result = await invokeHandler(ownerRezReviewsSyncConnection, {
+      event:  connEvent(),
       step,
       logger: makeLogger(),
     })
@@ -220,10 +203,9 @@ describe('ownerRezReviewsSync', () => {
       { onConflict: 'org_id,milestone' },
     )
 
-    // The revoked connection's own failure must not abort the tick — the
-    // next connection in the loop is still constructed and processed.
-    expect(OwnerRezApiClient).toHaveBeenCalledWith('user_2')
-    expect(result).toBeUndefined()
+    // One connection per run now, so a revoked one cannot abort anyone else's
+    // sync by construction — it ends its OWN run and reports why.
+    expect(result).toMatchObject({ user_id: 'user_1', status: 'revoked' })
   })
 
   it('throttles the revoked-connection PM notification to once per 4 hours — no duplicate send when one was recorded an hour ago', async () => {
@@ -236,7 +218,7 @@ describe('ownerRezReviewsSync', () => {
 
     const supabase = makeSupabase({
       integration_connections: [
-        { data: [makeConn()], error: null },
+        { data: makeConn(), error: null },
         { data: { id: 'conn_1' }, error: null },
       ],
       org_milestones: [
@@ -247,7 +229,7 @@ describe('ownerRezReviewsSync', () => {
 
     const step = makeStep()
 
-    await invokeHandler(ownerRezReviewsSync, { event: {}, step, logger: makeLogger() })
+    await invokeHandler(ownerRezReviewsSyncConnection, { event: connEvent(), step, logger: makeLogger() })
 
     expect(step.sendEvent).not.toHaveBeenCalled()
     // The throttle-marker upsert lives inside the same `if (!tooSoon)` guard
@@ -257,7 +239,7 @@ describe('ownerRezReviewsSync', () => {
     vi.useRealTimers()
   })
 
-  it('isolates a generic per-connection fetch failure — records the error on that connection and still processes the next one', async () => {
+  it('records a generic fetch failure on the connection rather than throwing it away or re-throwing', async () => {
     baseMocks(async (userId) => {
       if (userId === 'user_1') throw new Error('boom')
       return []
@@ -265,13 +247,13 @@ describe('ownerRezReviewsSync', () => {
 
     const supabase = makeSupabase({
       integration_connections: [
-        { data: [makeConn(), makeConn({ user_id: 'user_2', org_id: 'org_2', metadata: {} })], error: null },
+        { data: makeConn(), error: null },
       ],
     })
     ;(createServiceClient as ReturnType<typeof vi.fn>).mockReturnValue(supabase)
 
-    const result = await invokeHandler(ownerRezReviewsSync, {
-      event:  {},
+    const result = await invokeHandler(ownerRezReviewsSyncConnection, {
+      event:  connEvent(),
       step:   makeStep(),
       logger: makeLogger(),
     })
@@ -286,8 +268,7 @@ describe('ownerRezReviewsSync', () => {
         }),
       }),
     )
-    expect(OwnerRezApiClient).toHaveBeenCalledWith('user_2')
-    expect(result).toBeUndefined()
+    expect(result).toMatchObject({ user_id: 'user_1', status: 'error' })
   })
 
   it('sleeps and retries once on a rate limit, then proceeds normally with the retried reviews', async () => {
@@ -300,7 +281,7 @@ describe('ownerRezReviewsSync', () => {
 
     const supabase = makeSupabase({
       integration_connections: [
-        { data: [makeConn()], error: null },
+        { data: makeConn(), error: null },
       ],
       properties: [{ data: [{ id: 'prop_1', external_id: '777' }], error: null }],
       reviews:    [{ data: null, error: null }],
@@ -309,13 +290,83 @@ describe('ownerRezReviewsSync', () => {
 
     const step = makeStep()
 
-    await invokeHandler(ownerRezReviewsSync, { event: {}, step, logger: makeLogger() })
+    await invokeHandler(ownerRezReviewsSyncConnection, { event: connEvent(), step, logger: makeLogger() })
 
+    // This sleep used to sit inside a loop over EVERY connection on the
+    // platform, so one throttled tenant put the whole run to sleep and stalled
+    // everyone queued behind it. It now sleeps only this connection's run.
     expect(step.sleep).toHaveBeenCalledWith('rate-limit-sleep-user_1', '30s')
     expect(supabase.upsertSpy).toHaveBeenCalledWith(
       'reviews',
       expect.arrayContaining([expect.objectContaining({ external_id: '9001' })]),
       expect.anything(),
     )
+  })
+})
+
+describe('ownerRezReviewsSync (dispatcher)', () => {
+  beforeEach(() => { vi.clearAllMocks() })
+
+  it('fans out one event per active connection and touches no provider API itself', async () => {
+    const conns = [
+      { user_id: 'user_1', org_id: 'org_1' },
+      { user_id: 'user_2', org_id: 'org_2' },
+    ]
+    const supabase = makeSupabase({ integration_connections: [{ data: conns, error: null }] })
+    ;(createServiceClient as ReturnType<typeof vi.fn>).mockReturnValue(supabase)
+
+    const step = makeStep()
+    const result = await invokeHandler(ownerRezReviewsSync, {
+      event: { name: 'inngest/scheduled.timer' }, step, logger: makeLogger(),
+    })
+
+    expect(result).toEqual({ dispatched: 2, trigger: 'cron' })
+    expect(step.sendEvent).toHaveBeenCalledWith('fan-out-reviews-sync', [
+      { name: 'integration/ownerrez_reviews.connection_requested', data: { user_id: 'user_1', org_id: 'org_1' } },
+      { name: 'integration/ownerrez_reviews.connection_requested', data: { user_id: 'user_2', org_id: 'org_2' } },
+    ])
+    expect(OwnerRezApiClient).not.toHaveBeenCalled()
+    expect(step.sleep).not.toHaveBeenCalled()
+  })
+
+  it('dispatches ONLY the connection that fired integration/ownerrez.connected', async () => {
+    // This trigger ignored its own payload and re-scanned every connection on
+    // the platform, so one org connecting OwnerRez kicked off a platform-wide
+    // review sync.
+    const supabase = makeSupabase({ integration_connections: [{ data: [], error: null }] })
+    ;(createServiceClient as ReturnType<typeof vi.fn>).mockReturnValue(supabase)
+
+    const step = makeStep()
+    const result = await invokeHandler(ownerRezReviewsSync, {
+      event: {
+        name: 'integration/ownerrez.connected',
+        data: { user_id: 'user_9', org_id: 'org_9', external_user_id: 'or_9' },
+      },
+      step,
+      logger: makeLogger(),
+    })
+
+    expect(result).toEqual({ dispatched: 1, trigger: 'connected' })
+    expect(step.sendEvent).toHaveBeenCalledWith('dispatch-connected-sync', {
+      name: 'integration/ownerrez_reviews.connection_requested',
+      data: { user_id: 'user_9', org_id: 'org_9' },
+    })
+    // No platform-wide scan at all.
+    expect(supabase.from).not.toHaveBeenCalled()
+  })
+
+  it('skips a connection with no org_id rather than dispatching an unscoped sync', async () => {
+    const supabase = makeSupabase({
+      integration_connections: [{ data: [{ user_id: 'user_1', org_id: null }], error: null }],
+    })
+    ;(createServiceClient as ReturnType<typeof vi.fn>).mockReturnValue(supabase)
+
+    const step = makeStep()
+    const result = await invokeHandler(ownerRezReviewsSync, {
+      event: { name: 'inngest/scheduled.timer' }, step, logger: makeLogger(),
+    })
+
+    expect(result).toEqual({ dispatched: 0, trigger: 'cron' })
+    expect(step.sendEvent).not.toHaveBeenCalled()
   })
 })
