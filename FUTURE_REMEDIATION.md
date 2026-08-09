@@ -1242,3 +1242,50 @@ Two constraints on whoever picks this up:
 flow calling `inngest.send()` fails. If that matters, the better answer is an
 Inngest **branch environment** for preview rather than the shared production
 one, which fixes isolation without giving the capability up.
+
+---
+
+## 26. Six Inngest steps still return a bearer token into execution history
+
+**Status:** open, ratcheted. Enforced by
+`unit/guardrails/inngest-history-secrets.test.ts` — the BASELINE below is
+shrink-only, so nothing new can join it, but nothing prunes it automatically
+either.
+
+**What it is.** An Inngest step's return value is persisted as execution
+history and rendered in a third-party console — durable storage outside this
+system, the same as Axiom and Sentry. Six steps return a bearer credential for
+an UNAUTHENTICATED route:
+
+| File | Column | What the token opens |
+|---|---|---|
+| `lib/inngest/functions/guidebook-guest-opted-in.ts` | `guidebook_token` | `/g/b/<token>` — the guest portal |
+| `lib/inngest/functions/guidebook-stay-extension-handler.ts` | `guidebook_token` | same |
+| `lib/inngest/functions/guidebook-pre-arrival-email-cron.ts` | `guidebook_token` | same |
+| `lib/inngest/functions/work-order-dispatch.ts` | `stripe_connect_token` | a vendor's Stripe Connect onboarding link |
+| `lib/inngest/functions/work-order-events.ts` | `stripe_connect_token`, `quote_token` | same, plus the vendor quote portal |
+| `lib/inngest/functions/cron/vendor-connect-onboarding.ts` | `stripe_connect_token` | same |
+
+**Why it is open rather than done.** `work-order-vendor-assigned.ts` was fixed
+in the same change that added the guardrail (2026-08-09) and is the reference
+shape; the remaining six are the same edit six times, but each one moves a read
+into a different consuming step and needs its own test-double sequence updated.
+Batching them was judged worse than leaving a visible, enforced list.
+
+**The fix, per file.** Stop selecting the token in the step that returns. Read
+it inside the step that consumes it, via a small primary-key helper, and return
+a boolean if the caller only needs to know whether it exists. See
+`readPublicUrl()` / `readVendorContact()` in
+`lib/inngest/functions/work-order-vendor-assigned.ts`.
+
+**When you fix one, delete its BASELINE entry in the same change.** The
+guardrail asserts every entry is still an offender, so a fixed file left in the
+list fails CI — that is deliberate, and it is what stops the list rotting into
+a permanent allowlist.
+
+**What this is NOT.** `door_code_secret_id` appears in two step returns and is
+excluded on purpose: it is a Vault secret *identifier*, redeemable only with
+service-role Vault access, not a bearer credential. The decrypted door code it
+points at is already handled correctly — `guidebook-guest-opted-in.ts` decrypts
+it inside the sending step and never returns it, which is the comment that made
+this whole class visible in the first place.
