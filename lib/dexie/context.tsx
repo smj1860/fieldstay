@@ -367,11 +367,32 @@ export function DexieProvider({ userId: userIdProp, children }: { userId?: strin
     // assignee; the periodic pass is what stops correctness depending on that
     // broadcast arriving. Every other tick is a pure delta.
     let pollTick = 0
+    let safetyPollStagger: ReturnType<typeof setTimeout> | null = null
+
+    /**
+     * JITTERED first tick. A plain setInterval put every device that mounted
+     * in the same window onto the same cadence forever — and crew devices mount
+     * in a very narrow window, because shifts start at the same time. The whole
+     * fleet then landed its full-resync ticks in near-lockstep, turning a poll
+     * that is meant to smooth load into a periodic spike.
+     *
+     * Only the FIRST tick is offset; the interval itself stays exact, so the
+     * spacing guarantee the reconcile counter depends on is unchanged. The v2
+     * reconnect path already jitters for the same reason.
+     */
     function installSafetyPoll(run: (reconcile: boolean) => void): void {
-      safetyPollTimer = setInterval(() => {
+      const tick = () => {
         pollTick += 1
         run(pollTick % RECONCILE_EVERY_N_POLLS === 0)
-      }, SAFETY_POLL_INTERVAL_MS)
+      }
+
+      // eslint-disable-next-line no-restricted-properties -- load spreading, not security: a predictable offset is fine here, an IDENTICAL one across the fleet is the bug being fixed
+      const offsetMs = Math.random() * SAFETY_POLL_INTERVAL_MS
+
+      safetyPollStagger = setTimeout(() => {
+        tick()
+        safetyPollTimer = setInterval(tick, SAFETY_POLL_INTERVAL_MS)
+      }, offsetMs)
     }
 
     // ── Crew Sync v2 (flag on): broadcast signal + delta pull ──────────────
@@ -680,7 +701,12 @@ export function DexieProvider({ userId: userIdProp, children }: { userId?: strin
         supabase.removeChannel(ch)
       }
       if (v2ReconnectTimer !== null) clearTimeout(v2ReconnectTimer)
-      if (safetyPollTimer !== null) clearInterval(safetyPollTimer)
+      // BOTH timers: the stagger is a pending setTimeout that has not yet
+      // installed the interval, so clearing only the interval would let a
+      // teardown mid-stagger fire a poll — and install a new interval — after
+      // the provider is gone.
+      if (safetyPollStagger !== null) clearTimeout(safetyPollStagger)
+      if (safetyPollTimer   !== null) clearInterval(safetyPollTimer)
       if (visibilityHandler) globalThis.document?.removeEventListener('visibilitychange', visibilityHandler)
       v2AuthSubscription?.unsubscribe()
       v2SignalHandler?.dispose()

@@ -6,6 +6,15 @@ import type { Vendor } from '@/types/database'
 
 export const metadata: Metadata = { title: 'Vendors' }
 
+/**
+ * Trailing-12-month work orders pulled to compute vendor scorecards in memory.
+ *
+ * Named rather than inline so the ORDER BY beside it reads as deliberate: this
+ * is a truncation point, and a truncation point without a stable sort returns
+ * a different arbitrary subset on every load.
+ */
+const SCORECARD_WO_LIMIT = 5_000
+
 export default async function VendorsPage() {
   const { supabase, membership } = await requireOrgMember()
   const ctx = { site: 'page.vendors', orgId: membership.org_id }
@@ -34,7 +43,15 @@ export default async function VendorsPage() {
     .eq('org_id', membership.org_id)
     .not('vendor_id', 'is', null)
     .gte('created_at', oneYearAgo.toISOString())
-    .limit(5000)
+    // ORDERED, so the cap below is deterministic. Without an ORDER BY, Postgres
+    // is free to return any 5,000 of the matching rows, and it need not return
+    // the same 5,000 twice — so an org past the cap got a scorecard that was
+    // silently wrong AND silently different on every page load, with no signal
+    // that anything had been dropped. Newest-first at least makes the truncated
+    // window "the most recent 5,000 work orders", which is a defensible
+    // statement about what the ratings and on-time percentages describe.
+    .order('created_at', { ascending: false })
+    .limit(SCORECARD_WO_LIMIT)
   const scorecardWOs = unwrapList(scorecardWOsRes, ctx)
 
   type ScorecardWO = {

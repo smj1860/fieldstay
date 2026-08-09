@@ -10,6 +10,22 @@ import { logAuditEvents } from '@/lib/audit'
  */
 const HARD_BLOCK_CHUNK = 500
 
+/**
+ * Ceiling on documents transitioned per run.
+ *
+ * Batching the claim (below) removed the step explosion, but the READ was
+ * still an uncapped fetchAllRows over a backlog whose own comment notes it
+ * "only ever grows" — so a bulk COI import could put 200k candidates into one
+ * invocation's memory and one run's write path. The sibling cron
+ * (vendor-compliance-expiry-check.ts) already caps itself at
+ * MAX_DOCS_PER_RUN = 200 for exactly this reason; this is the same pattern.
+ *
+ * Ordered oldest-expiry-first so the cap drains a backlog deterministically —
+ * the most overdue documents, which are the ones a vendor is most wrongly
+ * still assignable on, transition first. The remainder is picked up tomorrow.
+ */
+const MAX_HARD_BLOCK_PER_RUN = 2_000
+
 /** One row of the platform-wide compliance-document scans below. Nullability
  *  matches the live schema: only expiry_date is nullable. */
 interface ComplianceDocRow {
@@ -101,26 +117,42 @@ export const vendorComplianceGraceCheck = inngest.createFunction(
       const supabase  = createServiceClient({ system: 'inngest:vendor-compliance-grace-check' })
       const cutoff    = new Date(Date.now() - 46 * 86_400_000).toISOString().split('T')[0]
 
-      // Paginated: platform-wide, and this backlog only ever grows —
-      // `hard_blocked_at IS NULL` plus `expiry_date <= today-46` accumulates
-      // every expired document across every tenant until this cron clears it.
-      // Truncated at 1000, the documents past the cap keep their
-      // hard_blocked_at NULL forever, so a vendor whose COI expired months
-      // ago stays assignable to work orders with no audit trail.
-      return await fetchAllRows<ComplianceDocRow>(
-        (from, to) => supabase
-          .from('vendor_compliance_documents')
-          .select('id, org_id, vendor_id, document_type, expiry_date')
-          .eq('is_active', true)
-          .is('hard_blocked_at', null)
-          .lte('expiry_date', cutoff)
-          .order('id')
-          .range(from, to),
-        { label: 'vendor-compliance-grace-check.hard-block-candidates' },
-      )
+      // Platform-wide, and this backlog only ever grows — `hard_blocked_at IS
+      // NULL` plus `expiry_date <= today-46` accumulates every expired
+      // document across every tenant until this cron clears it.
+      //
+      // EXPLICITLY capped rather than paginated (it used to drain every page
+      // via fetchAllRows). An accidental truncation at PostgREST's 1000-row
+      // limit would leave documents past the cap with hard_blocked_at NULL
+      // FOREVER — the gate only ever looks at NULLs, so nothing revisits them —
+      // and a vendor whose COI expired months ago stays assignable with no
+      // audit trail. A DELIBERATE cap does not have that failure: the ordering
+      // is oldest-expiry-first and deterministic, so tomorrow's run resumes
+      // exactly where this one stopped, and the shortfall is logged.
+      const res = await supabase
+        .from('vendor_compliance_documents')
+        .select('id, org_id, vendor_id, document_type, expiry_date')
+        .eq('is_active', true)
+        .is('hard_blocked_at', null)
+        .lte('expiry_date', cutoff)
+        .order('expiry_date', { ascending: true })
+        .order('id',          { ascending: true })
+        .limit(MAX_HARD_BLOCK_PER_RUN)
+
+      return unwrap(res, { site: 'inngest.vendor-compliance-grace-check.hard-block-candidates' }) ?? []
     })
 
     logger.info(`Found ${hardBlockCandidates.length} compliance document(s) crossing into hard-block`)
+
+    // Never silent about a truncation — CLAUDE.md's "no silent caps" rule. A
+    // full page means there is more backlog than one run transitions, which is
+    // an operational fact someone needs to see rather than infer.
+    if (hardBlockCandidates.length === MAX_HARD_BLOCK_PER_RUN) {
+      logger.warn(
+        `Hard-block backlog hit the ${MAX_HARD_BLOCK_PER_RUN}/run ceiling — the remainder ` +
+        'carries to the next run. Oldest expiry dates were transitioned first.'
+      )
+    }
 
     // ── Batched claim ────────────────────────────────────────────────────────
     //

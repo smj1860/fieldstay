@@ -101,6 +101,20 @@ export const CREW_OUTBOX_TIMEOUT_MS = 15_000
 export const STRIPE_TIMEOUT_MS = 10_000
 
 /**
+ * Budget for one Resend send.
+ *
+ * Enforced by RACING the SDK call rather than aborting it: Resend's
+ * `PostOptions` carries only `query` — there is no `signal` anywhere in the
+ * published SDK — so nothing can cancel the in-flight request. See
+ * `sendWithTimeout` in lib/resend/client.ts for why abandoning an unknown-
+ * outcome send is nonetheless safe here.
+ *
+ * Generous, because the alternative to waiting is abandoning: a send that
+ * would have succeeded at 12s costs a retry if the budget is 10s.
+ */
+export const RESEND_TIMEOUT_MS = 20_000
+
+/**
  * PMS provider REST + OAuth calls (Hospitable, OwnerRez, Hostaway).
  *
  * 30s because these are third-party APIs reached from inside Inngest steps

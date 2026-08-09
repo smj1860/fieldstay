@@ -11,6 +11,22 @@ export const repuguardBatchGenerate = inngest.createFunction(
     id:      'repuguard-batch-generate',
     name:    'RepuGuard: Batch Generate Review Drafts',
     retries: 1,
+    // SERIALISED PER ORG. Every synced review fires its own
+    // `repuguard/batch_generate.requested`, so a webhook window that lands ten
+    // reviews for one org spawned ten concurrent executions of this function.
+    // Each one independently selects `response_status = 'pending'` and only
+    // flips the status further down, so the overlapping runs select THE SAME
+    // rows and each pays for its own Anthropic completion on them — a burst of
+    // guest reviews multiplied the paid LLM spend by the burst size and raced
+    // to write competing drafts for the same review.
+    //
+    // A concurrency key is the right control rather than a rate limiter: this
+    // is a background job, and `repuguardLimiter` is a per-USER abuse gate on
+    // the manual route (app/api/repuguard/generate/route.ts), which has no
+    // meaning for a cron-shaped fan-in. limit 1 makes the select-then-flip
+    // sequence effectively atomic across events for one tenant, while leaving
+    // different tenants fully parallel.
+    concurrency: { limit: 1, key: 'event.data.org_id' },
   },
   { event: 'repuguard/batch_generate.requested' as const },
   async ({ event, step, logger }) => {
