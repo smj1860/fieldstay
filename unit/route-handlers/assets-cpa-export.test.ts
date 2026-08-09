@@ -23,7 +23,9 @@ import { createServiceClient } from '@/lib/supabase/server'
 
 const ORG_ID = 'org_1'
 
-type Resp = { data?: unknown; error?: unknown }
+// `count` is what a `{ count: 'exact', head: true }` read resolves with —
+// no rows at all, just the total.
+type Resp = { data?: unknown; error?: unknown; count?: number }
 
 function makeSupabase(queue: Record<string, Resp[]>) {
   const calls: { table: string; method: string; args: unknown[] }[] = []
@@ -87,7 +89,8 @@ describe('GET /api/assets/cpa-export', () => {
     mockAuthed()
     const supabase = makeSupabase({
       organizations:               [{ data: { name: 'Lake Martin Delivery' }, error: null }],
-      asset_depreciation_entries:  [{ data: [], error: null }],
+      // The head-count guard consumes the first slot, then the entries read.
+      asset_depreciation_entries:  [{ count: 0, error: null }, { data: [], error: null }],
     })
     vi.mocked(createServiceClient).mockReturnValue(supabase as never)
 
@@ -102,7 +105,7 @@ describe('GET /api/assets/cpa-export', () => {
     mockAuthed()
     const supabase = makeSupabase({
       organizations:              [{ data: { name: 'Lake Martin Delivery' }, error: null }],
-      asset_depreciation_entries: [{ data: [baseEntry()], error: null }],
+      asset_depreciation_entries: [{ count: 1, error: null }, { data: [baseEntry()], error: null }],
     })
     vi.mocked(createServiceClient).mockReturnValue(supabase as never)
 
@@ -116,11 +119,37 @@ describe('GET /api/assets/cpa-export', () => {
     expect(entriesEq.some((c) => c.args[0] === 'tax_year' && c.args[1] === 2025)).toBe(true)
   })
 
+  it('refuses an export too large to build synchronously, with a count that never ships rows', async () => {
+    // Everything after the read is synchronous CPU on the REQUEST path — reduce
+    // passes, per-row pdf-lib draws, one save() that serialises the whole
+    // document, no yield point — and this route has no maxDuration entry in
+    // vercel.json. Past the ceiling the honest answer is a clear 413, not a
+    // request killed mid-serialisation with nothing to explain it.
+    mockAuthed()
+    const supabase = makeSupabase({
+      organizations:              [{ data: { name: 'Lake Martin Delivery' }, error: null }],
+      asset_depreciation_entries: [{ count: 25_000, error: null }],
+    })
+    vi.mocked(createServiceClient).mockReturnValue(supabase as never)
+
+    const res = await GET(getRequest('?tax_year=2025'))
+
+    expect(res.status).toBe(413)
+    expect((await res.json()).error).toContain('25,000')
+
+    // head: true — the guard must not drag 25,000 joined rows over the wire to
+    // discover it should not have.
+    const countCall = supabase.calls.find(
+      (c) => c.table === 'asset_depreciation_entries' && c.method === 'select',
+    )
+    expect(countCall?.args[1]).toMatchObject({ count: 'exact', head: true })
+  })
+
   it('generates a depreciation-schedule PDF for a caller with entries in the given tax year', async () => {
     mockAuthed()
     const supabase = makeSupabase({
       organizations:              [{ data: { name: 'Lake Martin Delivery' }, error: null }],
-      asset_depreciation_entries: [{
+      asset_depreciation_entries: [{ count: 2, error: null }, {
         data: [
           baseEntry(),
           baseEntry({

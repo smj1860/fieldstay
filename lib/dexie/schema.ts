@@ -417,6 +417,27 @@ export class FieldStayDexie extends Dexie {
     this.version(11).stores({
       messages: null,
     })
+
+    // `failed` is now written on EVERY outbox row, so the index can be queried
+    // instead of scanned.
+    //
+    // v9 added the index and normalized the rows that existed at that moment,
+    // but enqueueMutationTx only ever set `failed` on the held-back branch —
+    // every ordinary mutation queued since has the property ABSENT. IndexedDB
+    // omits a record from an index when the indexed property is undefined, so
+    // `.where('failed').equals(0)` would not merely be incomplete, it would
+    // return NOTHING for the normal case: the outbox would go quiet and no
+    // error would surface anywhere. This backfill is what makes the indexed
+    // query safe, and it has to run BEFORE any code relies on it — a device
+    // upgrading with work already queued must not have that work go invisible.
+    this.version(12).upgrade((tx) =>
+      Promise.all([
+        tx.table('mutations').toCollection()
+          .modify((m: MutationRow) => { m.failed = m.failed ? 1 : 0 }),
+        tx.table('pending_photo_uploads').toCollection()
+          .modify((p: PendingPhotoUploadRow) => { p.failed = p.failed ? 1 : 0 }),
+      ]).then(() => undefined),
+    )
   }
 }
 
