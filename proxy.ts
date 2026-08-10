@@ -478,9 +478,21 @@ export async function proxy(request: NextRequest) {
  * unit/lib/proxy-matcher.test.ts is what stops the pattern being narrowed
  * silently.
  */
-export const MIDDLEWARE_MATCHER =
-  '/((?!_next/static|_next/image|[^/]+\\.[a-zA-Z0-9]+$|.*\\.(?:svg|png|jpg|jpeg|gif|webp)$).*)'
-
+// The literal is INLINE, and must stay inline. Next.js statically parses this
+// object at build time and rejects anything it cannot read without evaluating:
+//
+//   Next.js can't recognize the exported `config` field in route.
+//   Entry `matcher[0]` need to be static strings or static objects.
+//
+// A `const MIDDLEWARE_MATCHER = '…'` referenced here type-checks, lints,
+// passes every unit test and every semgrep gate, and then fails `next build`.
+// Nothing in the local verification pass runs a build, so this is invisible
+// until CI — the same class as the 'use server' export rule that
+// unit/guardrails/use-server-exports.test.ts exists for, and now guarded the
+// same way by unit/guardrails/next-static-config.test.ts.
+//
+// Tests read `config.matcher[0]` rather than a second copy of the pattern, so
+// there is exactly one source of truth.
 export const config = {
-  matcher: [MIDDLEWARE_MATCHER],
+  matcher: ['/((?!_next/static|_next/image|[^/]+\\.[a-zA-Z0-9]+$|.*\\.(?:svg|png|jpg|jpeg|gif|webp)$).*)'],
 }

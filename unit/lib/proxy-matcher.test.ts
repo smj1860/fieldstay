@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest'
 import { readdirSync } from 'fs'
 import { join } from 'path'
-import { MIDDLEWARE_MATCHER, classifyRoute } from '@/proxy'
+import { config, classifyRoute } from '@/proxy'
 
 // ============================================================================
 // P3-6: the matcher decides what runs middleware AT ALL, and getting it wrong
@@ -22,8 +22,9 @@ import { MIDDLEWARE_MATCHER, classifyRoute } from '@/proxy'
 // that fails.
 // ============================================================================
 
-/** The pattern as the Next.js runtime sees it, after TS string escaping. */
-const matcher = new RegExp(`^${MIDDLEWARE_MATCHER}$`)
+// Read straight off the exported config — the pattern must live inline there
+// (Next.js statically parses it at build time), so this is the one copy.
+const matcher = new RegExp(`^${config.matcher[0]}$`)
 const runsMiddleware = (path: string) => matcher.test(path)
 
 /** Every file actually shipped in /public, read from disk, not listed here. */
