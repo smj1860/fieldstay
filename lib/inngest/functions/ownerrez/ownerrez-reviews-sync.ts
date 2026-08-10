@@ -7,6 +7,10 @@ import type { OwnerRezReview } from '@/lib/integrations/types'
 import { logAuditEvent }       from '@/lib/audit'
 import { mergeIntegrationConnectionMetadata } from '@/lib/integrations/connection-metadata'
 import { asJsonObject } from '@/lib/json'
+import {
+  shouldNotifyConnectionError,
+  recordConnectionErrorNotified,
+} from '@/lib/integrations/connection-error-notify'
 import type { Json } from '@/types/database'
 
 /**
@@ -124,57 +128,6 @@ export const ownerRezReviewsSyncConnection = inngest.createFunction(
       })
     }
 
-    // Fires the PM notification for a revoked connection, throttled to once
-    // per 4 hours per connection — split out so the mark-revoked step below
-    // doesn't nest the milestone lookup, the throttle check and the upsert
-    // all inside its own already-deep try/catch/if chain.
-    async function notifyRevokedThrottled(
-      admin:         ReturnType<typeof createServiceClient>,
-      userId:        string,
-      orgId:         string,
-      connectionId:  string,
-      humanError:    string,
-    ): Promise<void> {
-      const milestoneKey = `integration_error_notified:${connectionId}`
-      const { data: recentNotification, error: recentNotificationErr } = await admin
-        .from('org_milestones')
-        .select('value, achieved_at')
-        .eq('org_id', orgId)
-        .eq('milestone', milestoneKey)
-        .order('achieved_at', { ascending: false })
-        .limit(1)
-        .maybeSingle()
-
-      if (recentNotificationErr) {
-        throw new Error(`[OwnerRez:${userId}] Notification-milestone lookup failed: ${recentNotificationErr.message}`)
-      }
-
-      const lastNotifiedAt = (recentNotification?.value as Record<string, unknown> | null)
-        ?.notified_at
-      const tooSoon = lastNotifiedAt &&
-        Date.now() - new Date(lastNotifiedAt as string).getTime() < 4 * 60 * 60 * 1000
-      if (tooSoon) return
-
-      await step.sendEvent(`notify-revoked-${userId}`, {
-        name: 'integration/connection.error',
-        data: {
-          user_id:     userId,
-          org_id:      orgId,
-          provider_id: 'ownerrez',
-          reason:      humanError,
-        },
-      })
-      const { error: milestoneErr } = await admin.from('org_milestones').upsert({
-        org_id:    orgId,
-        milestone: milestoneKey,
-        value:     { notified_at: new Date().toISOString() },
-      }, { onConflict: 'org_id,milestone' })
-
-      if (milestoneErr) {
-        throw new Error(`[OwnerRez:${userId}] Failed to record notification milestone: ${milestoneErr.message}`)
-      }
-    }
-
     const userId = event.data.user_id
     const orgId  = event.data.org_id
 
@@ -227,7 +180,9 @@ export const ownerRezReviewsSyncConnection = inngest.createFunction(
         }
       } else if (err instanceof TokenRevokedError) {
         const humanError = translateSyncError(err)
-        await step.run(`mark-revoked-${userId}`, async () => {
+        // Returns the connection id when a PM notification is DUE, or null.
+        // The send itself is deliberately not in here — see below.
+        const notifyConnectionId = await step.run(`mark-revoked-${userId}`, async () => {
           const admin = createServiceClient({ system: 'inngest:ownerrez-reviews-sync' })
           const { data: existing, error: existingErr } = await admin
             .from('integration_connections')
@@ -260,11 +215,53 @@ export const ownerRezReviewsSyncConnection = inngest.createFunction(
             metadata:   { provider_id: 'ownerrez', reason: 'token_revoked' },
           })
 
-          // Fire PM notification — throttled to once per 4 hours per connection
-          if (existing?.id) {
-            await notifyRevokedThrottled(admin, userId, orgId, existing.id, humanError)
-          }
+          // Decide only. shouldNotifyConnectionError is a plain read and does
+          // not throw, so it cannot re-run the metadata patch and the audit
+          // event above by failing this step.
+          if (!existing?.id) return null
+          const due = await shouldNotifyConnectionError(admin, {
+            orgId,
+            connectionId: existing.id,
+            site:         'inngest.ownerrez-reviews-sync.notify-revoked.throttle',
+          })
+          return due ? existing.id : null
         })
+
+        // Fire the PM notification — throttled to once per 4 hours per
+        // connection by the two calls around this send.
+        //
+        // The send is HERE, at the top level, not inside the step.run above.
+        // It used to sit inside it (via a notifyRevokedThrottled helper, which
+        // hid the nesting from a lexical scan). Inngest does not support
+        // nested step tooling: it warns rather than throws, then unwinds the
+        // request so the nested op can be scheduled, leaving the enclosing
+        // step.run unresolved. Its callback then re-ran from the top on the
+        // next pass — re-emitting the integration.sync_failed audit event,
+        // which is an un-deduped insert. Every revocation wrote two audit
+        // rows. See lib/integrations/connection-error-notify.ts.
+        if (notifyConnectionId) {
+          await step.sendEvent(`notify-revoked-${userId}`, {
+            name: 'integration/connection.error',
+            data: {
+              user_id:     userId,
+              org_id:      orgId,
+              provider_id: 'ownerrez',
+              reason:      humanError,
+            },
+          })
+
+          // Its own step, deliberately: a failure here retries just this
+          // write, with the send already memoized, so it can neither
+          // duplicate the notification nor replay the audit event.
+          await step.run(`record-revoked-notified-${userId}`, async () => {
+            const admin = createServiceClient({ system: 'inngest:ownerrez-reviews-sync' })
+            await recordConnectionErrorNotified(admin, {
+              orgId,
+              connectionId: notifyConnectionId,
+              site:         'inngest.ownerrez-reviews-sync.notify-revoked.record',
+            })
+          })
+        }
         return { user_id: userId, status: 'revoked' as const }
       } else {
         // Not a rate-limit or revocation — isolate this connection's
