@@ -52,10 +52,16 @@ describe('fetchAllRows', () => {
     expect(rows.at(-1)!.id).toBe(`row_${String(total - 1).padStart(6, '0')}`)
     expect(new Set(rows.map((r) => r.id)).size).toBe(total)
 
-    // Three requests, each asking for a distinct 1000-row window.
+    // Three requests, each asking for a distinct page-sized window, derived
+    // from the constant rather than hardcoded — the page size is deliberately
+    // BELOW max_rows so a full page proves the server did not clamp.
+    const P = DEFAULT_PAGE_SIZE
     const rangeCalls = supabase.calls.filter((c) => c.method === 'range').map((c) => c.args)
-    expect(rangeCalls).toEqual([[0, 999], [1000, 1999], [2000, 2999]])
-    expect(DEFAULT_PAGE_SIZE).toBe(SUPABASE_MAX_ROWS)
+    expect(rangeCalls).toEqual([[0, P - 1], [P, 2 * P - 1], [2 * P, 3 * P - 1]])
+    expect(
+      DEFAULT_PAGE_SIZE,
+      'a page size at or above max_rows makes a clamped first page look like the last page',
+    ).toBeLessThan(SUPABASE_MAX_ROWS)
   })
 
   it('issues one extra empty-page request when the total is an exact multiple of the page size', async () => {

@@ -1,3 +1,4 @@
+import { DEFAULT_PAGE_SIZE as PAGE } from '@/lib/inngest/paginate'
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 
 vi.mock('@/lib/supabase/server', () => ({
@@ -214,7 +215,7 @@ describe('dailyAssetHealth (dispatcher)', () => {
     })
 
     const ranges = supabase.calls.filter((c) => c.table === 'work_orders' && c.method === 'range')
-    expect(ranges.map((c) => c.args)).toEqual([[0, 999], [1000, 1999], [2000, 2999]])
+    expect(ranges.map((c) => c.args)).toEqual([[0, PAGE - 1], [PAGE, 2 * PAGE - 1], [2 * PAGE, 3 * PAGE - 1]])
 
     // Every page counted: age 14 / lifespan 15 = 0.93, so lateLifeRatio is
     // 1.0 and the nudge is positive.
@@ -389,7 +390,7 @@ describe('assetHealthOrg (per org)', () => {
 
     expect(result).toEqual({ org_id: 'org_1', assets_scored: 1_750 })
     const ranges = supabase.calls.filter((c) => c.table === 'property_assets' && c.method === 'range')
-    expect(ranges.map((c) => c.args)).toEqual([[0, 999], [1000, 1999]])
+    expect(ranges.map((c) => c.args)).toEqual([[0, PAGE - 1], [PAGE, 2 * PAGE - 1]])
   })
 
   // ── The 23502 that ran for sixteen days ───────────────────────────────────

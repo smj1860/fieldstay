@@ -1,3 +1,4 @@
+import { DEFAULT_PAGE_SIZE as PAGE } from '@/lib/inngest/paginate'
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 
 // See ownerrez-incremental-sync.test.ts for the canonical explanation of the
@@ -196,7 +197,7 @@ describe('syncAllIcalFeeds (dispatcher)', () => {
     const [, dispatched] = sentEvent<{ data: { org_id: string } }[]>(step)
     expect(dispatched.at(-1)!.data.org_id).toBe('org_2399')
     expect(supabase.calls.filter((c) => c.method === 'range').map((c) => c.args)).toEqual([
-      [0, 999], [1000, 1999], [2000, 2999],
+      [0, PAGE - 1], [PAGE, 2 * PAGE - 1], [2 * PAGE, 3 * PAGE - 1],
     ])
   })
 })
@@ -438,7 +439,7 @@ describe('syncIcalFeed', () => {
 
     expect(result).toEqual({ feed_id: 'feed_1', newBookings: 0, cancelled: 0 })
     const bookingRanges = supabase.calls.filter((c) => c.table === 'bookings' && c.method === 'range')
-    expect(bookingRanges.map((c) => c.args)).toEqual([[0, 999], [1000, 1999]])
+    expect(bookingRanges.map((c) => c.args)).toEqual([[0, PAGE - 1], [PAGE, 2 * PAGE - 1]])
   })
 
   it('does not re-fire booking/detected for a UID already seen in a prior sync, and cancels (+ cancels turnovers for) a confirmed booking that dropped out of the feed', async () => {

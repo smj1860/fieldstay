@@ -1374,3 +1374,33 @@ not match this page and would silently change every scorecard number:
 Any replacement must reproduce all four, and the page's existing
 `rating_count` / `on_time_sample_size` outputs, or the scorecards change
 meaning without anyone intending it.
+
+---
+
+## 29. The crew Dexie sync pages at exactly its own max_rows
+
+`lib/inngest/paginate.ts`'s `DEFAULT_PAGE_SIZE` was lowered to
+`SUPABASE_MAX_ROWS - 1` because a page size EQUAL to the server cap is
+self-reverting: a full page is then indistinguishable from a clamped one, so
+the drain cannot tell "there is more" from "the server truncated me". At 999,
+reaching a full page proves the server did not clamp.
+
+`lib/dexie/sync/chunked.ts` still has the old shape, and it is a SEPARATE
+constant — its own `const SUPABASE_MAX_ROWS = 1000` at line 40, not an import
+from `paginate.ts` — so the fix above did not reach it and no guardrail
+covers it. `unit/dexie/sync-chunked.test.ts`'s `[[0, 999], [1000, 1999]]` is
+correct for that code today and was deliberately left alone.
+
+Not urgent, and NOT the same severity as the page it was found next to: today
+the two numbers are equal, which still works. The hazard is that it has zero
+margin — if the crew sync's PostgREST cap is ever lowered below 1000 (a
+`supabase/config.toml` change, or a different cap on the crew path), the first
+page comes back short, the drain reads that as "done", and a crew device
+silently syncs a truncated set of turnovers or checklist items with no error
+anywhere. That is the same silent-truncation class as the `max_rows` findings
+in CLAUDE.md, on the one surface where the user is offline and cannot notice.
+
+Fix is the same one-line shape (`- 1`) plus updating that test's expected
+ranges to derive from the constant instead of hardcoding them. Deliberately
+out of scope of the turnovers-pagination change, which was confined to the
+`lib/inngest/paginate.ts` callers.
