@@ -5,14 +5,50 @@ import { haversineKm, proximityScore } from '@/lib/scoring/geo'
 import { computeWorkloadMap, computeFamiliarIds } from '@/lib/scoring/pools'
 import { throwIfAnyQueryFailed, isRealQueryError, unwrapList } from '@/lib/supabase/unwrap'
 
+/**
+ * How far back "has worked this property before" looks.
+ *
+ * Matches the 14-day workload window's philosophy: a rolling window, not the
+ * property's entire lifetime. See the familiarity read for why this is a
+ * deliberate behaviour change rather than only a cost one.
+ */
+const FAMILIARITY_WINDOW_DAYS = 90
+
 export const autoAssignTurnover = inngest.createFunction(
   {
     id: 'auto-assign-turnover', name: 'Auto-Assign Crew to Turnover', retries: 2,
-    // Triggered by turnover/created, which the generator emits as an ARRAY —
-    // one per turnover it just created for a property. This handler runs ~8
-    // queries per invocation, so an uncapped batch is the single largest
-    // multiplier on connection usage in the whole event graph.
-    concurrency: { limit: 10 },
+    concurrency: [
+      // Triggered by turnover/created, which the generator emits as an ARRAY —
+      // one per turnover it just created for a property. This handler runs ~8
+      // queries per invocation, so an uncapped batch is the single largest
+      // multiplier on connection usage in the whole event graph.
+      { limit: 10 },
+
+      // ONE run per turnover at a time.
+      //
+      // The global cap above does not stop two runs for the SAME turnover
+      // overlapping — a duplicate turnover/created, or a retry racing the
+      // original. The `(turnover_id, crew_member_id)` unique index only
+      // catches them picking the SAME crew member; scores shift as workload
+      // changes, so two concurrent runs can pick DIFFERENT top candidates and
+      // both inserts succeed, leaving two crew silently assigned to a
+      // one-person job and turnovers.status flipped twice.
+      //
+      // Serialising per turnover is the whole fix: the second run then loads
+      // context AFTER the first has committed, sees status 'assigned', and
+      // returns early.
+      //
+      // NOT what the audit proposed. It called for an assign_crew_atomic() RPC
+      // enforcing a per-crew-per-day cap — but no such cap exists anywhere in
+      // this product. `capacity_score` is a 0-1 SCORING WEIGHT, not a limit,
+      // and nothing in the schema, the settings, or the UI defines a maximum
+      // number of turnovers per crew per day. A cleaner doing several
+      // turnovers in a day is the normal case, not over-booking. Implementing
+      // that RPC would mean inventing a business rule and making autopilot
+      // silently refuse assignments it makes today — a product decision
+      // wearing a scalability fix's clothes.
+      { limit: 1, key: 'event.data.turnover_id' },
+    ],
   },
   { event: 'turnover/created' },
   async ({ event, step }) => {
@@ -25,23 +61,35 @@ export const autoAssignTurnover = inngest.createFunction(
         { data: org, error: orgError },
         { data: turnover, error: turnoverError },
         { data: property, error: propertyError },
-        { data: crew, error: crewError },
+        crew,
       ] = await Promise.all([
         supabase.from('organizations').select('auto_assign_mode').eq('id', org_id).single(),
         supabase.from('turnovers').select('id, status, is_same_day_turnover').eq('id', turnover_id).eq('org_id', org_id).single(),
         supabase.from('properties').select('id, lat, lng, bedrooms').eq('id', property_id).eq('org_id', org_id).single(),
-        supabase
-          .from('crew_members')
-          .select('id, name, home_lat, home_lng, reliability_score, capacity_score')
-          .eq('org_id', org_id)
-          .eq('is_active', true),
+        // Paginated, like every other read in this function. It was the one
+        // left on a bare .select(), so past 1,000 active crew members the
+        // candidates beyond PostgREST's cap were silently dropped from
+        // scoring — the assignment engine would quietly consider only part of
+        // the roster and report nothing.
+        fetchAllRows<{
+          id: string; name: string; home_lat: number | null; home_lng: number | null
+          reliability_score: number; capacity_score: number
+        }>(
+          (from, to) => supabase
+            .from('crew_members')
+            .select('id, name, home_lat, home_lng, reliability_score, capacity_score')
+            .eq('org_id', org_id)
+            .eq('is_active', true)
+            .order('id')
+            .range(from, to),
+          { label: `auto-assign-turnover.crew[org=${org_id}]` },
+        ),
       ])
       throwIfAnyQueryFailed(
         { site: 'inngest.auto-assign-turnover.load-context', orgId: org_id },
         isRealQueryError(orgError) ? orgError : null,
         isRealQueryError(turnoverError) ? turnoverError : null,
         isRealQueryError(propertyError) ? propertyError : null,
-        crewError,
       )
 
       const mode = (org?.auto_assign_mode ?? 'disabled') as string
@@ -68,44 +116,49 @@ export const autoAssignTurnover = inngest.createFunction(
 
       if (!availableCrew.length) return null
 
-      // Familiarity: which crew have been assigned to this property before.
-      // Paginated: every prior turnover for this property, which grows
-      // without bound over the property's lifetime — same reasoning as the
-      // turnover_assignments read below that consumes these ids.
-      const propertyTurnovers = await fetchAllRows<{ id: string }>(
+      // Familiarity: which crew have worked this property RECENTLY.
+      //
+      // This was two queries — every turnover ever generated for the property,
+      // then every assignment for that whole id set — re-run from scratch for
+      // each new turnover. A bulk iCal re-sync creating K turnovers on a
+      // property with P of history therefore cost O(K x P) reads.
+      //
+      // The sharper problem was the shape, not the volume. Both reads were
+      // correctly paginated, so neither TRUNCATED — but `.in('turnover_id',
+      // pastTurnoverIds)` puts every one of those ids in the QUERY STRING, on
+      // every page. A property with a few thousand past turnovers builds a
+      // ~40-character id list per row into a request line that a gateway
+      // rejects outright, long before row counts matter. Pagination does not
+      // help with that; it repeats it per page.
+      //
+      // One joined, windowed query fixes both. The `!inner` embed filters
+      // assignments by their turnover's property server-side, so no id list
+      // crosses the wire at all, and FAMILIARITY_WINDOW_DAYS bounds the scan
+      // to a rolling window instead of the property's whole lifetime.
+      //
+      // Windowing is a deliberate behaviour change: "has worked here before"
+      // becomes "has worked here in the last 90 days". That is a better signal
+      // for the purpose — a crew member who cleaned this property once, three
+      // years ago, is not meaningfully familiar with it — and it matches the
+      // workload read below, which has always used a 14-day window for the
+      // same reason.
+      const familiarSince = new Date(Date.now() - FAMILIARITY_WINDOW_DAYS * 86_400_000).toISOString()
+
+      const history = await fetchAllRows<{ crew_member_id: string }>(
         (from, to) => supabase
-          .from('turnovers')
-          .select('id')
-          .eq('property_id', property_id)
+          .from('turnover_assignments')
+          .select('crew_member_id, turnovers!inner(property_id, checkout_datetime)')
+          .eq('turnovers.property_id', property_id)
           .eq('org_id', org_id)
-          .neq('id', turnover_id)
-          .order('id')
+          .gte('turnovers.checkout_datetime', familiarSince)
+          .neq('turnover_id', turnover_id)
+          .in('crew_member_id', availableCrew.map((c) => c.id))
+          .order('crew_member_id')
           .range(from, to),
-        { label: 'auto-assign-turnover.property-turnovers' },
+        { label: `auto-assign-turnover.history[property=${property_id}]` },
       )
 
-      const pastTurnoverIds = propertyTurnovers.map((t) => t.id)
-      let familiarCrewIds: string[] = []
-
-      if (pastTurnoverIds.length > 0) {
-        // Paginated: pastTurnoverIds is EVERY prior turnover for this
-        // property, which grows without bound over the property's lifetime,
-        // and assignments fan out further (several crew per turnover). A
-        // truncated history silently narrows "who has worked here before",
-        // which is a direct input to the assignment suggestion.
-        const history = await fetchAllRows<{ crew_member_id: string }>(
-          (from, to) => supabase
-            .from('turnover_assignments')
-            .select('crew_member_id')
-            .in('turnover_id', pastTurnoverIds)
-            .in('crew_member_id', availableCrew.map((c) => c.id))
-            .order('crew_member_id')
-            .range(from, to),
-          { label: 'auto-assign-turnover.history' },
-        )
-
-        familiarCrewIds = computeFamiliarIds(history, (h) => h.crew_member_id)
-      }
+      const familiarCrewIds = computeFamiliarIds(history, (h) => h.crew_member_id)
 
       // Workload: assignments in next 14 days only (not all-time history)
       const windowEnd = new Date()
