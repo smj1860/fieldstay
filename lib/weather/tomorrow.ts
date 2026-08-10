@@ -1,5 +1,6 @@
 import { getRedisIfConfigured } from '@/lib/redis'
 import { WEATHER_TIMEOUT_MS, isTimeoutError } from '@/lib/http/timeout'
+import { fetchWithRetry } from '@/lib/http/retry'
 import { singleFlight } from '@/lib/cache/single-flight'
 
 // Client comes from lib/redis.ts, which reads this project's
@@ -136,13 +137,19 @@ async function fetchAndCacheWeather(
   // "Tomorrow.io said no" are different operational problems.
   let response: Response
   try {
-    response = await fetch(url, {
+    // Retried: a read-only GET, and it already sits behind a single-flight
+    // lock, so the retries are one caller's, not the whole fleet's. Losing
+    // this call means the guest nudge goes out without a weather line — worth
+    // one more attempt on a 5xx, not worth an outage's worth of them.
+    response = await fetchWithRetry(url, {
       headers: {
         // Required per Tomorrow.io OpenAPI spec (accept-encoding: required: true)
         'Accept-Encoding': 'deflate, gzip, br',
       },
-      signal: AbortSignal.timeout(WEATHER_TIMEOUT_MS),
       next: { revalidate: 0 }, // never Next.js cache — Redis handles it
+    }, {
+      timeoutMs: WEATHER_TIMEOUT_MS,
+      label:     'tomorrow-io-realtime',
     })
   } catch (err) {
     if (isTimeoutError(err)) {

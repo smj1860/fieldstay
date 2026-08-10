@@ -1,4 +1,5 @@
 import { GEOCODE_TIMEOUT_MS, isTimeoutError } from '@/lib/http/timeout'
+import { fetchWithRetry } from '@/lib/http/retry'
 import { reportError } from '@/lib/observability/report-error'
 
 export function haversineKm(lat1: number, lng1: number, lat2: number, lng2: number): number {
@@ -37,7 +38,18 @@ export async function geocodeZip(
   const url = `https://api.mapbox.com/geocoding/v5/mapbox.places/${encodeURIComponent(zip)}.json?country=US&types=postcode&limit=1&access_token=${token}`
 
   try {
-    const res = await fetch(url, { signal: AbortSignal.timeout(GEOCODE_TIMEOUT_MS) })
+    // Retried: a GET with no side effects, so a duplicate costs nothing but a
+    // request. Two attempts rather than the default three — this runs inside
+    // createProperty/updateProperty, where the PM is waiting on the save, and
+    // the whole point of the timeout budget is that they are not left holding
+    // it. Failing to geocode is already a soft failure (returns null; the
+    // property saves without coordinates), so spending more of the PM's time
+    // to avoid it is the wrong trade.
+    const res = await fetchWithRetry(url, {}, {
+      attempts:  2,
+      timeoutMs: GEOCODE_TIMEOUT_MS,
+      label:     'mapbox-geocode',
+    })
     if (!res.ok) {
       console.warn('[geocodeZip] Mapbox returned a non-OK response', { zip, status: res.status })
       return null
