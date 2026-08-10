@@ -58,7 +58,7 @@ import { RateLimitError, TokenRevokedError, translateSyncError } from '@/lib/int
 import { logAuditEvent }                from '@/lib/audit'
 import { reportError }                  from '@/lib/observability/report-error'
 import { generateTurnoversForProperty } from '@/lib/turnovers/generator'
-import { createPmNotification }         from '@/lib/inngest/helpers'
+import { createPmNotifications, type CreatePmNotificationInput } from '@/lib/inngest/helpers'
 import { findMaintenanceCandidatesForWindow } from '@/lib/maintenance/vacancy-suggestions'
 import { createGuidebookPropertyConfigsForProperties } from '@/lib/guidebook/sync'
 import { seedPresentAssetsFromAmenities } from '@/lib/asset-discovery/seed-from-amenities'
@@ -495,34 +495,77 @@ async function notifyOwnerBlockOpportunities(
     blockProperties.map((p) => [p.id, p.name as string | null])
   ) as Record<string, string | null>
 
-  await Promise.all(
-    ownerBlocks.map(async (row) => {
-      try {
-        const candidates = await findMaintenanceCandidatesForWindow(
-          supabase, orgId, row.property_id, row.checkin_date, row.checkout_date
-        )
-        if (!candidates.length) return
+  // Bounded concurrency, then ONE insert.
+  //
+  // This was `Promise.all(ownerBlocks.map(...))` with no cap: every block
+  // fired its own candidate query AND its own single-row notification insert,
+  // all at once. For N blocks that is 2N simultaneous round trips from inside
+  // a sync that is already holding connections — and N is driven by the
+  // provider's calendar, not by anything here, so a backlog of owner blocks
+  // decides how hard this hits the pool.
+  //
+  // Two separate fixes, because they are two separate problems:
+  //   * the candidate LOOKUPS are genuinely per-block, so they are capped at
+  //     CANDIDATE_CONCURRENCY rather than run all at once. Deliberately not
+  //     p-limit — that is a new dependency for a bounded chunk loop this
+  //     codebase already writes by hand in several places.
+  //   * the notification WRITES are not per-block at all. They were only
+  //     one-at-a-time because createPmNotification() takes one row.
+  //     createPmNotifications() collapses them to a single statement.
+  const CANDIDATE_CONCURRENCY = 5
+  const pending: CreatePmNotificationInput[] = []
 
-        const items = candidates.map(describeMaintenanceCandidate).join(', ')
-        const window = `${new Date(row.checkin_date).toLocaleDateString()} – ${new Date(row.checkout_date).toLocaleDateString()}`
+  for (let i = 0; i < ownerBlocks.length; i += CANDIDATE_CONCURRENCY) {
+    const slice = ownerBlocks.slice(i, i + CANDIDATE_CONCURRENCY)
 
-        await createPmNotification(supabase, {
-          orgId,
-          type:      'maintenance_opportunity',
-          title:     `Maintenance opportunity — ${propertyNameById[row.property_id] ?? 'Property'} blocked for owner use`,
-          subtitle:  `Blocked ${window}. Candidates: ${items}`,
-          href:      '/maintenance',
-          severity:  'blue',
-          dedupeKey: `ownerrez-maint-opportunity-${row.external_id}`,
-        })
-      } catch (err) {
-        logger.error(
-          `[OwnerRez] Failed to send owner-block notification for booking ${row.external_id}: ${err instanceof Error ? err.message : String(err)}`
-        )
-        reportError(err, { site: 'inngest.ownerrez-incremental-sync.owner-block-notification', orgId })
-      }
-    })
-  )
+    const built = await Promise.all(
+      slice.map(async (row): Promise<CreatePmNotificationInput | null> => {
+        try {
+          const candidates = await findMaintenanceCandidatesForWindow(
+            supabase, orgId, row.property_id, row.checkin_date, row.checkout_date
+          )
+          if (!candidates.length) return null
+
+          const items  = candidates.map(describeMaintenanceCandidate).join(', ')
+          const window = `${new Date(row.checkin_date).toLocaleDateString()} – ${new Date(row.checkout_date).toLocaleDateString()}`
+
+          return {
+            orgId,
+            type:      'maintenance_opportunity',
+            title:     `Maintenance opportunity — ${propertyNameById[row.property_id] ?? 'Property'} blocked for owner use`,
+            subtitle:  `Blocked ${window}. Candidates: ${items}`,
+            href:      '/maintenance',
+            severity:  'blue' as const,
+            dedupeKey: `ownerrez-maint-opportunity-${row.external_id}`,
+          }
+        } catch (err) {
+          // Per-block, as before: one property's candidate lookup failing must
+          // not cost the other blocks their notification.
+          logger.error(
+            `[OwnerRez] Failed to build owner-block notification for booking ${row.external_id}: ${err instanceof Error ? err.message : String(err)}`
+          )
+          reportError(err, { site: 'inngest.ownerrez-incremental-sync.owner-block-notification', orgId })
+          return null
+        }
+      })
+    )
+
+    pending.push(...built.filter((n) => n !== null))
+  }
+
+  if (!pending.length) return
+
+  try {
+    await createPmNotifications(supabase, pending)
+  } catch (err) {
+    // Non-fatal, matching the previous per-row behaviour: the bookings are
+    // already persisted and the cursor still needs to advance. A failed
+    // notification must not make the whole sync retry and re-upsert.
+    logger.error(
+      `[OwnerRez] Failed to persist ${pending.length} owner-block notification(s): ${err instanceof Error ? err.message : String(err)}`
+    )
+    reportError(err, { site: 'inngest.ownerrez-incremental-sync.owner-block-notification', orgId })
+  }
 }
 
 /**

@@ -5,11 +5,23 @@ import { AcceptInviteForm } from './accept-invite-form'
 import { CheckCircle2, AlarmClock } from 'lucide-react'
 import { buttonVariantClass } from '@/components/ui/Button'
 import { crewInviteIsExpired } from '@/lib/crew/invite-expiry'
+import { inviteViewThrottled } from '@/lib/auth/invite-view-throttle'
 
 interface Props { params: Promise<{ token: string }> }
 
 export default async function CrewInvitePage({ params }: Props) {
   const { token } = await params
+
+  // Throttled BEFORE the lookup — see the note in
+  // app/accept-invite/[token]/page.tsx. Same shape: a BYPASS_ROUTES entry
+  // whose POST action is limited inline while the GET page answered "is this
+  // token real?" at unbounded QPS.
+  //
+  // notFound() rather than a distinct throttle screen, matching the
+  // invalid-token path exactly: a bot that can tell "rate limited" from "no
+  // such token" has learned that the token it guessed was real.
+  if (await inviteViewThrottled('page.crew-invite')) notFound()
+
   const supabase  = createServiceClient({ publicSurface: 'crew-invite--token-' })
 
   // A failed read fell into notFound(), telling the crew member their invite

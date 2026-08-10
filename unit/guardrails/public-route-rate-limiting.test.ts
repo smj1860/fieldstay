@@ -134,6 +134,38 @@ describe('guardrail: public token-guessable routes stay rate-limited', () => {
       'app/accept-invite and app/crew-invite are BYPASS_ROUTES (no session required) reachable by a guessable invite token, but rate-limit inline rather than via TOKEN_ROUTES/rateLimiterForPathname (see inviteAcceptRatelimit in lib/rate-limit.ts). One of them lost its inline .limit(...) call.'
     ).toEqual({ acceptInviteLimited: true, crewInviteLimited: true })
   })
+
+  it('the invite VIEW pages are throttled too, not just their POST actions', () => {
+    // The check above uses `.some(file in the directory)`, and that is exactly
+    // how this gap survived: actions.ts limits, so `.some()` was true, while
+    // page.tsx ran an unthrottled org_invites / crew_members lookup on every
+    // render. A token-guessing bot never needs to reach the limited POST —
+    // rendering the page already answers "is this token real?", at unbounded
+    // QPS, and the columns are indexed so it stays cheap for the attacker.
+    //
+    // So this asserts the PAGE specifically, by filename. Directory-level
+    // `.some()` cannot express "every entry point", only "at least one".
+    const pages = [
+      'app/accept-invite/[token]/page.tsx',
+      'app/crew-invite/[token]/page.tsx',
+    ]
+
+    const unthrottled = pages.filter((key) => {
+      const file = collectSourceFiles(['app']).find((f) => rel(f) === key)
+      if (!file) return true                       // missing page is itself a failure
+      return !/inviteViewThrottled\(/.test(read(file))
+    })
+
+    expect(
+      unthrottled,
+      'These invite-token VIEW pages run a DB lookup per request with no throttle:\n' +
+      unthrottled.map((p) => `  - ${p}`).join('\n') +
+      '\n\nThey are BYPASS_ROUTES, so rateLimiterForPathname() gives them nothing, and ' +
+      'the inline limiter on their Server Action does not cover a GET. Call ' +
+      'inviteViewThrottled() from lib/auth/invite-view-throttle.ts BEFORE the lookup — ' +
+      'checking after it leaves the enumeration signal intact and merely hides the HTML.'
+    ).toEqual([])
+  })
 })
 
 // ============================================================================
