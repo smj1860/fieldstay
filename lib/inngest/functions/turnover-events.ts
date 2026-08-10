@@ -180,7 +180,7 @@ async function inventoryCompletionSignal(
 ): Promise<string | null> {
   const { data: turnover, error: turnoverError } = await supabase
     .from('turnovers')
-    .select('property_id, inventory_started_at, inventory_confirmed_complete_at')
+    .select('property_id, completed_at, inventory_started_at, inventory_confirmed_complete_at')
     .eq('id', turnoverId)
     .eq('org_id', orgId)
     .maybeSingle()
@@ -189,11 +189,25 @@ async function inventoryCompletionSignal(
   if (turnover?.inventory_confirmed_complete_at) return turnover.inventory_confirmed_complete_at
   if (!turnover?.inventory_started_at) return null
 
+  // Capped at completed_at so a retried or delayed run of this step cannot
+  // pick up a LATER inventory edit, unrelated to this turnover, and report it
+  // as this turnover's completion signal. The cap is safe to rely on: both
+  // completion paths UPDATE turnovers.completed_at BEFORE sending
+  // turnover/completed (app/api/crew/turnovers/[id]/complete/route.ts and
+  // app/api/work-orders/[token]/complete/helpers.ts), so by the time this
+  // runs the column is written.
+  //
+  // Without it there is no upper bound worth trusting, so the fallback is
+  // skipped rather than left open-ended — a missing signal is "we don't
+  // know", which the caller handles; an unrelated edit is a wrong answer.
+  if (!turnover.completed_at) return null
+
   const { data: lastEdited, error: lastEditedError } = await supabase
     .from('inventory_items')
     .select('updated_at')
     .eq('property_id', turnover.property_id)
     .gt('updated_at', turnover.inventory_started_at)
+    .lte('updated_at', turnover.completed_at)
     .order('updated_at', { ascending: false })
     .limit(1)
     .maybeSingle()
@@ -423,6 +437,18 @@ export const handleTurnoverCompleted = inngest.createFunction(
       const completedAt = timestamps[timestamps.length - 1]!
 
       const durationMinutes = (new Date(completedAt).getTime() - new Date(startedAt).getTime()) / 60_000
+
+      // MAX == MIN is a fabricated 0-minute duration, not a measurement — it
+      // means "we don't know", and persisting it teaches the crew-scoring
+      // learning loop that the job took no time at all.
+      //
+      // Guarded on the SPAN, not on timestamps.length. Counting signals looks
+      // equivalent and is not: checklistCompletionRange() issues two queries,
+      // for the earliest and the latest completed item, so a checklist with a
+      // single completed item returns that one instant TWICE. A `length < 2`
+      // check passes it straight through to a 0-minute write. The span is
+      // what is actually being asserted, so it is what gets tested.
+      if (durationMinutes <= 0) return { skipped: 'insufficient_completion_signals' }
 
       if (durationMinutes > MAX_PLAUSIBLE_DURATION_MINUTES) {
         logger.warn('Anomalous turnover duration detected — skipping', { flag: 'duration_anomaly' })
