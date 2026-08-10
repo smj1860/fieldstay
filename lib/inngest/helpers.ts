@@ -382,6 +382,90 @@ export async function createPmNotification(
 }
 
 /**
+ * Persist MANY notifications in one round trip.
+ *
+ * createPmNotification() above is the right shape for the dominant case —
+ * one event, one row — and stays. This exists for the case it cannot serve:
+ * a single event that legitimately produces N distinct rows, where looping
+ * the single-row API means N inserts. `notifyOwnerBlockOpportunities` in
+ * ownerrez/incremental-sync.ts was doing exactly that, and
+ * docs/PUSH_NOTIFICATIONS.md flags the same risk for planned push fan-out.
+ *
+ * ── Why upsert-ignoreDuplicates rather than catching 23505 ──
+ *
+ * The single-row version catches 23505 because ONE insert either collides or
+ * does not. In a batch, one colliding row aborts the whole statement — so a
+ * single already-delivered notification would silently drop every other row
+ * in the batch. `onConflict: 'dedupe_key', ignoreDuplicates: true` makes the
+ * collision per-row, which is the semantics the single-row catch already
+ * has.
+ *
+ * Rows WITHOUT a dedupe key are inserted separately, because the partial
+ * unique index only covers `dedupe_key IS NOT NULL` — an ON CONFLICT naming
+ * that column cannot arbitrate rows the index does not contain.
+ *
+ * 23503 (org deleted out from under an in-flight step) is skipped with the
+ * same reasoning and the same warning as the single-row path; a batch is no
+ * more able to notify a deleted org than one row is.
+ */
+export async function createPmNotifications(
+  supabase: ServiceClient,
+  inputs:   CreatePmNotificationInput[]
+): Promise<void> {
+  if (!inputs.length) return
+
+  const toRow = (input: CreatePmNotificationInput) => ({
+    org_id:     input.orgId,
+    type:       input.type,
+    title:      input.title,
+    subtitle:   input.subtitle ?? null,
+    href:       input.href,
+    severity:   input.severity ?? 'blue',
+    dedupe_key: input.dedupeKey ?? null,
+  })
+
+  const deduped = inputs.filter((i) => i.dedupeKey)
+  const plain   = inputs.filter((i) => !i.dedupeKey)
+
+  // Chunked: a bulk insert is still one request, and its body grows with the
+  // batch. 500 keeps it well inside any gateway limit while collapsing the
+  // realistic case to a single statement.
+  const CHUNK = 500
+
+  const run = async (rows: ReturnType<typeof toRow>[], upsert: boolean) => {
+    for (let i = 0; i < rows.length; i += CHUNK) {
+      const slice = rows.slice(i, i + CHUNK)
+      // Built first, awaited once. Writing this as
+      // `const { error } = upsert ? await …upsert(…) : await …insert(…)`
+      // buries each await inside a ternary branch, where semgrep's
+      // discarded-result rule can no longer see that the result IS bound —
+      // it reads as two awaited PostgREST calls whose results go nowhere.
+      // The rule is right to be suspicious of that shape; this is clearer
+      // regardless.
+      const table = supabase.from('notifications')
+      const query = upsert
+        ? table.upsert(slice, { onConflict: 'dedupe_key', ignoreDuplicates: true })
+        : table.insert(slice)
+
+      const { error } = await query
+
+      if (error?.code === '23503') {
+        console.warn(
+          `[createPmNotifications] org ${slice[0]?.org_id} no longer exists — skipping ${slice.length} notification(s)`
+        )
+        continue
+      }
+      if (error && error.code !== '23505') {
+        throw new Error(`Failed to create notifications: ${error.message}`)
+      }
+    }
+  }
+
+  await run(deduped.map(toRow), true)
+  await run(plain.map(toRow),   false)
+}
+
+/**
  * "Stay static between days" behavior for digest sections (design b):
  * compares today's computed item-id set against yesterday's stored snapshot
  * for this org+category, returns which ids are net-new, then persists

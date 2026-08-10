@@ -54,6 +54,26 @@ export default async function VendorsPage() {
     .limit(SCORECARD_WO_LIMIT)
   const scorecardWOs = unwrapList(scorecardWOsRes, ctx)
 
+  // NO SILENT CAPS. The ordering above makes a truncated window deterministic
+  // and describable; it does not make it CORRECT. Past the cap, every rating
+  // average and on-time percentage on this page is computed from a subset,
+  // and until now nothing said so — to the PM reading it, or to us.
+  //
+  // A full page is the signal. It is also the trigger for replacing this
+  // client-side aggregation with a server-side one; see FUTURE_REMEDIATION
+  // entry 28, which records the CORRECT semantics to implement, because the
+  // audit's proposed SQL does not match this page (it aggregates on a
+  // `due_date` column work_orders does not have, ignores the completed-only
+  // filter, and drops the >= 3 minimum sample size).
+  const scorecardTruncated = scorecardWOs.length === SCORECARD_WO_LIMIT
+  if (scorecardTruncated) {
+    console.warn(
+      `[page.vendors] org ${membership.org_id} exceeded the ${SCORECARD_WO_LIMIT}-work-order ` +
+      'scorecard window — ratings and on-time percentages are computed from the most recent ' +
+      'slice only. Time to move this aggregation server-side (FUTURE_REMEDIATION 28).'
+    )
+  }
+
   type ScorecardWO = {
     vendor_id: string | null
     vendor_rating: number | null
@@ -109,6 +129,12 @@ export default async function VendorsPage() {
       <div className="page-header">
         <h1 className="page-title">Vendors</h1>
         <p className="page-subtitle">Manage your service vendors and contractor contacts</p>
+        {scorecardTruncated && (
+          <p className="text-xs mt-2" style={{ color: 'var(--accent-amber)' }}>
+            Scorecards reflect your most recent {SCORECARD_WO_LIMIT.toLocaleString()} work
+            orders from the past year, not the full history.
+          </p>
+        )}
       </div>
       <VendorsClient vendors={vendors as unknown as Vendor[]} showComplianceNudge={showComplianceNudge} />
     </div>

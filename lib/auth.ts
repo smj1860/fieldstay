@@ -197,7 +197,23 @@ export async function requireOrgRole(allowedRoles: MemberRole[]) {
  * Redirects to /ops rather than a 404/403 page, so the admin panel's
  * existence isn't signalled to a logged-in non-admin who guesses the URL.
  */
-export async function requirePlatformAdmin() {
+/**
+ * The platform-admin lookup, memoized per request.
+ *
+ * requireAuth()/requireOrgMember() are built on cached getAuthContext() /
+ * getMembershipContext() precisely because the dashboard layout and nearly
+ * every page and action underneath call them in the same render.
+ * requirePlatformAdmin() reused the cached USER but left its
+ * `is_platform_staff_admin` RPC uncached, so /admin paid it once in
+ * app/admin/layout.tsx and again in every page beneath — a redundant round
+ * trip for a result the layout already had.
+ *
+ * redirect() and logAuditEvent() stay OUT of here, for the reason given at the
+ * top of this file: redirect() throws a control-flow error, and caching a
+ * rejected promise replays a stale redirect at a later caller that might have
+ * handled the answer differently. This returns the FACT; the caller decides.
+ */
+const getPlatformAdminContext = cache(async () => {
   const { user, supabase } = await requireAuth()
 
   // unwrap, not a discarded error: a failed RPC used to return `data === null`,
@@ -210,6 +226,13 @@ export async function requirePlatformAdmin() {
   const isAdmin = unwrap(await supabase.rpc('is_platform_staff_admin'), {
     site: 'lib.auth.requirePlatformAdmin',
   })
+
+  return { user, supabase, isAdmin }
+})
+
+export async function requirePlatformAdmin() {
+  const { user, supabase, isAdmin } = await getPlatformAdminContext()
+
   if (!isAdmin) {
     await logAuditEvent({
       actorId:    user.id,

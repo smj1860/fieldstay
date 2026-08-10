@@ -1328,3 +1328,49 @@ When it starts appearing, the synchronous build has outgrown the request
 thread and the async job becomes the right call. Until then it is speculative
 complexity. Do not raise `HISTORY_ROW_CEILING` as the fix — raising it is the
 thing the ceiling exists to prevent someone doing by reflex.
+
+---
+
+## 28. Vendor scorecards aggregate client-side under a 5,000-row cap
+
+**Status:** open by decision, with a runtime trigger and a corrected spec.
+
+**What it is.** `app/(dashboard)/vendors/page.tsx` pulls up to
+`SCORECARD_WO_LIMIT` (5,000) trailing-12-month work orders and computes every
+vendor's average rating and on-time percentage in JavaScript. Scalability audit
+P2-12 proposed replacing that with a server-side SQL aggregate.
+
+**What was already fixed.** The audit's sharper complaint — "no `.order()`, so
+Postgres returns an arbitrary, non-reproducible subset" — is closed. The query
+orders `created_at` descending, so a truncated window is deterministic and
+describable ("the most recent 5,000"), not different on every page load.
+
+**What was added (2026-08-10).** The cap is no longer silent. Hitting it logs a
+warning and renders a line on the page telling the PM their scorecards cover a
+slice rather than the full year. Past the cap the numbers ARE a subset; the
+page now says so instead of presenting them as complete.
+
+**Why the aggregate is not built yet.** Production is at ~200 work orders
+against a 5,000 cap — 25x of headroom — and the change costs a migration
+applied to both projects, a types update and ledger parity, on a page whose
+correctness problem is currently disclosed rather than hidden.
+
+**The trigger.** This log line:
+
+```
+[page.vendors] org <id> exceeded the 5000-work-order scorecard window
+```
+
+**Implement THESE semantics, not the audit's SQL.** The proposed function does
+not match this page and would silently change every scorecard number:
+
+| Audit's SQL | Reality |
+|---|---|
+| `completed_date <= due_date` | `work_orders` has **no `due_date`** — on-time is measured against `scheduled_date` |
+| aggregates all rows | on-time counts only `status = 'completed'` rows with BOTH dates present |
+| `avg(vendor_rating)` over everything | ratings count only `vendor_rating > 0` (null and 0 mean "unrated") |
+| always returns a percentage | `on_time_pct` is NULL below a 3-work-order sample; a 1-of-1 vendor must not show 100% |
+
+Any replacement must reproduce all four, and the page's existing
+`rating_count` / `on_time_sample_size` outputs, or the scorecards change
+meaning without anyone intending it.
