@@ -1289,3 +1289,42 @@ service-role Vault access, not a bearer credential. The decrypted door code it
 points at is already handled correctly — `guidebook-guest-opted-in.ts` decrypts
 it inside the sending step and never returns it, which is the comment that made
 this whole class visible in the first place.
+
+---
+
+## 27. GDPR export still builds synchronously on the request thread
+
+**Status:** open by decision, with a runtime trigger. Not enforced by a test —
+the signal is a log line, deliberately.
+
+**What it is.** `GET /api/gdpr/export` assembles the whole Article 15 payload
+and `JSON.stringify`s it inside the request. Scalability audit P2-14 proposed
+moving it to an Inngest job that writes to Storage and returns a signed URL,
+the same shape as the CPA export.
+
+**Why it is not done.** The audit's own text says the route is "bounded today"
+and the risk is "any future cap increase". Rebuilding it now means a new table,
+a Storage bucket, an Inngest function and a polling/emailed-link UI — and it
+makes every export slower and more failure-prone, for volumes no account is
+near. Production's largest history series is orders of magnitude below the
+ceiling.
+
+**What was done instead (2026-08-10).** The real defect in that route was not
+scale, it was honesty. The series were `.limit(500)` / `.limit(200)`, which
+silently dropped rows from a right-of-access response — "all the personal data
+we hold about you" quietly meaning "the most recent 500 events", with nothing
+in the payload or the logs saying so. They now page to completeness under a
+`HISTORY_ROW_CEILING` of 5,000 per series, and crossing it is disclosed twice:
+a `completeness` block in the payload (always present, not only when it fires,
+so consumers actually build against it) and a `console.warn`.
+
+**The trigger.** That warn line IS the signal to do this work:
+
+```
+[gdpr/export] user <id> hit the 5000/series ceiling — export returned partial and said so
+```
+
+When it starts appearing, the synchronous build has outgrown the request
+thread and the async job becomes the right call. Until then it is speculative
+complexity. Do not raise `HISTORY_ROW_CEILING` as the fix — raising it is the
+thing the ceiling exists to prevent someone doing by reflex.
