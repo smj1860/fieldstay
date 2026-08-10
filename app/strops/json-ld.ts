@@ -45,6 +45,15 @@ export function buildJsonLd(marketingUrl: string) {
           'Maintenance work orders and vendor portal',
           'Owner P&L reporting',
         ],
+        // The price here must also appear, in some human-readable form, on
+        // the rendered page (page.tsx's hero currently says "Starting at
+        // $89/month") -- Google's structured data guidelines don't allow
+        // marking up content that isn't visible to users, and a rich result
+        // can get suppressed over exactly this kind of mismatch. Verified
+        // 2026-08-10 after this page shipped with no visible price at all
+        // for its first several weeks live. unit/pages/strops.test.ts
+        // enforces both halves: this price against PLANS.hosts, and PLANS
+        // .hosts against the visible page text.
         offers: {
           '@type': 'Offer',
           price: '89',

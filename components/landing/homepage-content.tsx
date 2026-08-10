@@ -4,9 +4,51 @@ import { useState } from 'react'
 import Link from 'next/link'
 import { cn } from '@/lib/utils'
 import { MessageSquare, Package, Wrench, BarChart3, Check } from 'lucide-react'
+import { pricingTiers } from '@/components/pricing/plan-tiers'
+import FaqSection from '@/components/faq/FaqSection'
+import RepuGuardWrapper from '@/components/repuguard/RepuGuardWrapper'
+import {
+  MARKETING_OFFLINE_FAQ,
+  MARKETING_TRIAL_FAQ,
+  CREW_VISIBILITY_FAQ,
+  TEAM_ACCESS_FAQ,
+} from '@/lib/faq-content'
+
+// The homepage's own entry-tier bullets -- the only thing that legitimately
+// varies from /ownerrez and /hospitable's entry cards (their first bullet
+// names the PMS they sell against; this page doesn't sell against one).
+// Everything else -- prices, property ranges, every tier above this one --
+// now comes from pricingTiers(), the same source those two pages read from.
+//
+// Before this, the pricing grid below was a hand-written 4-tier array that had
+// drifted: no Hosts tier at all, and Starter labelled "Up to 15 properties"
+// when the real floor moved to 5 the moment Hosts was added beneath it. The
+// fix is not the corrected number, it is that there is no longer a second copy
+// to correct -- unit/stripe/plan-table-consistency.test.ts already holds
+// plan-tiers.ts against lib/stripe/client.ts's PLANS.
+const HOMEPAGE_ENTRY_FEATURES = [
+  'iCal sync (Airbnb, VRBO)',
+  'Turnover board + crew app',
+  'Offline checklist + photo capture',
+  'Inventory with auto purchase orders',
+  'Maintenance + vendor portal',
+  'Owner P&L portal',
+  'Crew email invites',
+  'RepuGuard reputation management',
+] as const
+
+// Reused verbatim from lib/faq-content.ts -- the homepage was the only public
+// landing page shipping without a FAQ, and the answers already existed.
+const HOMEPAGE_FAQ_ITEMS = [
+  { q: MARKETING_OFFLINE_FAQ.question, a: MARKETING_OFFLINE_FAQ.answer },
+  { q: MARKETING_TRIAL_FAQ.question, a: MARKETING_TRIAL_FAQ.answer },
+  { q: CREW_VISIBILITY_FAQ.question, a: CREW_VISIBILITY_FAQ.answer },
+  { q: TEAM_ACCESS_FAQ.question, a: TEAM_ACCESS_FAQ.answer },
+] as const
 
 export function HomepageContent() {
   const [annual, setAnnual] = useState(false)
+  const tiers = pricingTiers(HOMEPAGE_ENTRY_FEATURES)
 
   return (
     <div className="min-h-screen">
@@ -40,7 +82,7 @@ export function HomepageContent() {
         {/* Eyebrow */}
         <div className="inline-flex items-center gap-2 rounded-full px-4 py-1.5 text-xs font-bold
                         uppercase tracking-widest mb-7 bg-gold-300/12 border border-gold-300/25 text-gold-300">
-          For STR Property Managers Running 10–100 Properties
+          For STR Property Managers Running 5–100+ Properties
         </div>
 
         {/* Headline */}
@@ -250,6 +292,32 @@ export function HomepageContent() {
         </div>
       </section>
 
+      {/* ── RepuGuard Live Demo ─────────────────────────────────────────── */}
+      {/* bg-brand-900, not brand-800 -- the Guidebook band and How-it-works
+          sections right after this are both brand-800, and this page already
+          reuses brand-900 for the stats bar higher up. Using it here again
+          breaks up three consecutive navy sections instead of stacking a
+          fourth identical one. */}
+      <section className="px-8 py-20 bg-brand-900">
+        <div className="mx-auto text-center" style={{ maxWidth: 960 }}>
+          <div className="inline-flex items-center justify-center gap-2 mb-4">
+            <div className="bg-gold-300 text-brand-800 text-xs font-bold px-2.5 py-1 rounded-md tracking-wider">
+              REPUGUARD
+            </div>
+            <span className="text-white/46 text-sm">Included with every plan</span>
+          </div>
+          <h2 className="font-display font-bold leading-[1.2] mb-3 tracking-tight text-white"
+              style={{ fontSize: 'clamp(28px, 4vw, 38px)', letterSpacing: '-1px' }}>
+            See RepuGuard in Action
+          </h2>
+          <p className="text-white/46 text-lg mx-auto mb-10" style={{ maxWidth: 520 }}>
+            Choose a review scenario below and watch your built-in reputation
+            engine generate a response in real time.
+          </p>
+          <RepuGuardWrapper />
+        </div>
+      </section>
+
       {/* ── Feature 4 — Guest Guidebook (highlighted band) ───────────────── */}
       <section className="px-8 py-16 bg-brand-800">
         <div className="mx-auto" style={{ maxWidth: 960 }}>
@@ -320,9 +388,11 @@ export function HomepageContent() {
         </div>
       </section>
 
+      <FaqSection items={HOMEPAGE_FAQ_ITEMS} />
+
       {/* ── Pricing ──────────────────────────────────────────────────────── */}
       <section className="px-8 py-20" style={{ background: '#F8F9FA' }}>
-        <div className="mx-auto" style={{ maxWidth: 900 }}>
+        <div className="mx-auto" style={{ maxWidth: 1100 }}>
           <div className="text-center mb-10">
             <h2 className="font-display font-bold leading-[1.2] mb-2 tracking-tight text-brand-800"
                 style={{ fontSize: 'clamp(28px, 4vw, 38px)', letterSpacing: '-1px' }}>
@@ -367,97 +437,39 @@ export function HomepageContent() {
             </span>
           </div>
 
-          {/* Plan cards */}
-          <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-4">
-            {[
-              {
-                name: 'Starter',
-                description: 'For independent managers with a focused portfolio.',
-                props: 'Up to 15 properties',
-                monthly: 199, annual: 1990,
-                highlight: false,
-                features: [
-                  'iCal sync (Airbnb, VRBO)',
-                  'Turnover board + crew app',
-                  'Offline checklist + photo capture',
-                  'Inventory with auto purchase orders',
-                  'Maintenance + vendor portal',
-                  'Owner P&L portal',
-                  'Crew email invites',
-                ],
-                cta: 'Start Free Trial',
-                ctaHref: '/signup',
-              },
-              {
-                name: 'Growth',
-                description: 'For expanding operations that need more scale.',
-                props: '16–50 properties',
-                monthly: 479, annual: 4790,
-                highlight: true,
-                badge: 'Most Popular',
-                features: [
-                  'Everything in Starter',
-                  'Up to 50 properties',
-                  'Priority support',
-                ],
-                cta: 'Start Free Trial',
-                ctaHref: '/signup',
-              },
-              {
-                name: 'Portfolio',
-                description: 'For professional managers running a full operation.',
-                props: '51–100 properties',
-                monthly: 799, annual: 7990,
-                highlight: false,
-                features: [
-                  'Everything in Growth',
-                  'Up to 100 properties',
-                  'Custom onboarding',
-                  'Dedicated account support',
-                ],
-                cta: 'Start Free Trial',
-                ctaHref: '/signup',
-              },
-              {
-                name: 'Enterprise',
-                description: 'For large portfolios and multi-location operations.',
-                props: '100+ properties',
-                monthly: null, annual: null,
-                highlight: false,
-                features: [
-                  'Everything in Portfolio',
-                  'Unlimited properties',
-                  'SLA-backed uptime',
-                  'Volume pricing',
-                ],
-                cta: 'Contact Us',
-                ctaHref: 'mailto:hello@fieldstay.app',
-              },
-            ].map((plan) => (
+          {/* Plan cards — 5 tiers, driven by pricingTiers(). Grid widened to
+              xl:grid-cols-5 to fit the Hosts card without wrapping. The badge
+              and CTA text/href are computed from highlight/monthly rather than
+              carried per-tier: PricingTier has no cta/badge fields, and the
+              expressions below evaluate to exactly what the removed per-item
+              fields held for every tier (Growth is the only highlight: true,
+              Enterprise the only monthly: null). */}
+          <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-5 gap-4">
+            {tiers.map((plan) => (
               <div key={plan.name}
                    className={cn(
-                     'rounded-2xl p-7 flex flex-col bg-white',
+                     'rounded-2xl p-6 flex flex-col bg-white',
                      plan.highlight
                        ? 'border-2 border-brand-800 ring-4 ring-brand-800/7'
                        : 'border-[1.5px] border-gray-200'
                    )}>
-                {plan.badge && (
+                {plan.highlight && (
                   <span className="self-start rounded-full px-3 py-1 text-xs font-black uppercase tracking-wider mb-4 bg-gold-300 text-brand-800">
-                    {plan.badge}
+                    Most Popular
                   </span>
                 )}
                 <p className="font-black mb-1 text-gray-900" style={{ fontSize: 18 }}>
                   {plan.name}
                 </p>
                 <p className="text-xs mb-1 text-gray-500">{plan.description}</p>
-                <p className="text-sm mb-5 text-gray-400">{plan.props}</p>
+                <p className="text-sm mb-5 text-gray-400">{plan.properties}</p>
 
                 {/* Price */}
                 <div className="mb-5">
                   {plan.monthly !== null ? (
                     <>
                       <span className="font-black tracking-tight text-brand-800"
-                            style={{ fontSize: 42, letterSpacing: '-2px', lineHeight: 1 }}>
+                            style={{ fontSize: 38, letterSpacing: '-2px', lineHeight: 1 }}>
                         {annual ? `$${plan.annual!.toLocaleString()}` : `$${plan.monthly}`}
                       </span>
                       <span className="text-sm ml-1 text-gray-400">
@@ -465,12 +477,12 @@ export function HomepageContent() {
                       </span>
                       {!annual && (
                         <p className="text-xs mt-1 text-gray-400">
-                          or ${plan.annual!.toLocaleString()}/yr — save ${(plan.monthly! * 12 - plan.annual!)}
+                          or ${plan.annual!.toLocaleString()}/yr — save ${plan.annualSavings}
                         </p>
                       )}
                     </>
                   ) : (
-                    <span className="font-black text-brand-800" style={{ fontSize: 34, letterSpacing: '-1px' }}>
+                    <span className="font-black text-brand-800" style={{ fontSize: 32, letterSpacing: '-1px' }}>
                       Custom
                     </span>
                   )}
@@ -490,7 +502,7 @@ export function HomepageContent() {
                   ))}
                 </div>
 
-                <Link href={plan.ctaHref}
+                <Link href={plan.monthly === null ? 'mailto:hello@fieldstay.app' : '/signup'}
                       className={cn(
                         'block text-center rounded-lg font-bold text-sm py-3 transition-opacity',
                         plan.highlight
@@ -499,7 +511,7 @@ export function HomepageContent() {
                           ? 'bg-transparent text-brand-800 border-[1.5px] border-gray-200'
                           : 'bg-brand-800 text-white'
                       )}>
-                  {plan.cta}
+                  {plan.monthly === null ? 'Contact Us' : 'Start Free Trial'}
                 </Link>
               </div>
             ))}

@@ -354,6 +354,7 @@ export default async function HospitablePage() {
           </h2>
           <p className="text-[#0a1628]/70 text-lg mb-3">
             It takes about 2 minutes to connect — your properties and bookings show up right after.
+            Cancel with one click if it doesn&apos;t save your team real time in the first week.
           </p>
           <p className="text-[#0a1628]/70 text-sm font-semibold mb-10">
             🔒 First 100 accounts get a 2-year price lock — no extra steps, it&apos;s automatic.

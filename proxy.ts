@@ -166,6 +166,14 @@ const BYPASS_ROUTES = [
   // Branches its own CTA via its own auth check, same as the two above.
   '/strops',
 
+  // Solo-host segment landing page. Same reasoning as /strops directly above,
+  // and the same failure mode if it is left out: the path falls through to the
+  // auth gate and returns 307 -> /login?next=%2Fhosts, so every anonymous
+  // visitor bounces and the sitemap entry hands a crawler a login redirect to
+  // index. Branches its own CTAs via its own auth check, like the three above.
+  // No collision with '/hospitable' — these diverge at the 5th character.
+  '/hosts',
+
   // Next.js internals and static assets
   '/_next',
   '/favicon',

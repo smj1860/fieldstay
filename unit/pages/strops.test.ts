@@ -162,6 +162,18 @@ describe('structured data cannot drift from the visible page', () => {
 
     expect(app.offers.price).toBe(String(PLANS.hosts.monthlyPrice))
   })
+
+  it('the advertised entry price also appears on the visible page, not just in structured data', async () => {
+    // Same principle as the FAQ check above, applied to price. Until this
+    // was added, the JSON-LD named $89 to Google and the rendered page never
+    // said it anywhere -- exactly the "schema that describes copy not on the
+    // page" violation the FAQ test's comment already warns about. Checked
+    // against PLANS directly, not the string '89', so this stays correct if
+    // the Hosts price ever changes and someone forgets to update the hero.
+    const { PLANS } = await import('@/lib/stripe/client')
+    const page = read('app/strops/page.tsx')
+    expect(page).toContain(`$${PLANS.hosts.monthlyPrice}`)
+  })
 })
 
 describe('SEO plumbing', () => {
