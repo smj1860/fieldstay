@@ -48,6 +48,49 @@ const TURNOVER_COLUMNS = `
  */
 const MAX_BOARD_ROWS = 20_000
 
+/**
+ * The tail every board read shares — the `id` tiebreak, the page window, the
+ * label and the ceiling — in one place instead of five.
+ *
+ * Written this way for two reasons, and only one of them is tidiness:
+ *
+ *  - The stable-ordering rule this file exists to fix is now IMPOSSIBLE to
+ *    forget at a call site. Five hand-written copies of
+ *    `.order('id').range(from, to)` are five chances to omit it; the guardrail
+ *    in unit/guardrails/pagination-page-size.test.ts still checks every
+ *    `.range()` in the file, so a read that bypasses this helper is caught
+ *    too, but the helper means the ordinary path cannot go wrong.
+ *  - SonarQube flagged the five expanded blocks at 12% duplication on new
+ *    code (29 of 84 lines, gate is 3%). Its copy-paste detector normalises
+ *    literals, so `.from('properties')` and `.from('crew_members')` are the
+ *    same token sequence to it — five reads differing only in table, columns
+ *    and filters read as one block copied five times, which is a fair
+ *    description of what they were.
+ *
+ * ── Why `.order('id').range()` stays at the CALL SITE and not in here ───────
+ *
+ * The first version of this helper owned the whole tail, so a call site was
+ * just `() => supabase.from(x).select(y).eq(...)`. It typechecked, the
+ * guardrail passed, and it broke the semgrep ratchet: +4 -org-scoped and +1
+ * -in-list. Those rules decide a read is bounded by finding a `.range()` /
+ * `.limit()` in the same expression, and one moved a function call away is
+ * invisible to them — five genuinely-bounded reads started reporting as
+ * unbounded scans.
+ *
+ * That trade is backwards. .semgrep/baseline-counts.json is a no-suppression
+ * gate ("Numbers may only go DOWN", never a nosemgrep) guarding real silent
+ * truncation; the duplication it would have bought off is five reads over
+ * five different tables, which is inherent, not accidental. So the bound stays
+ * where a matcher can see it, and this helper keeps only what is genuinely
+ * shared and genuinely repeated: the label prefix and the row ceiling.
+ */
+function drainBoard<T>(
+  label: string,
+  page: (from: number, to: number) => PromiseLike<{ data: T[] | null; error: { message: string } | null }>,
+): Promise<T[]> {
+  return fetchAllRows<T>(page, { label: `page.turnovers.${label}`, maxRows: MAX_BOARD_ROWS })
+}
+
 export default async function TurnoversPage() {
   const { supabase, membership } = await requireOrgMember()
 
@@ -68,65 +111,34 @@ export default async function TurnoversPage() {
   let turnovers, properties, bookings, crew, crewAvailability, orgResult
   try {
     ;[turnovers, properties, bookings, crew, crewAvailability, orgResult] = await Promise.all([
-      fetchAllRows(
-        (from, to) => supabase
-          .from('turnovers')
-          .select(TURNOVER_COLUMNS)
-          .eq('org_id', membership.org_id)
-          .neq('status', 'cancelled')
-          .gte('checkout_datetime', since.toISOString())
-          .lte('checkout_datetime', until.toISOString())
-          .order('checkout_datetime', { ascending: true })
-          .order('id', { ascending: true })
-          .range(from, to),
-        { label: 'page.turnovers.turnovers', maxRows: MAX_BOARD_ROWS },
-      ),
-      fetchAllRows(
-        (from, to) => supabase
-          .from('properties')
-          .select('id, name, city, state')
-          .eq('org_id', membership.org_id)
-          .eq('is_active', true)
-          .order('name')
-          .order('id', { ascending: true })
-          .range(from, to),
-        { label: 'page.turnovers.properties', maxRows: MAX_BOARD_ROWS },
-      ),
-      fetchAllRows(
-        (from, to) => supabase
-          .from('bookings')
-          .select('id, property_id, checkin_date, checkout_date, guest_name, status, source, stay_type')
-          .eq('org_id', membership.org_id)
-          .gte('checkout_date', rangeStart)
-          .lte('checkin_date',  rangeEnd)
-          .in('status', ['confirmed', 'tentative'])
-          .order('checkin_date', { ascending: true })
-          .order('id', { ascending: true })
-          .range(from, to),
-        { label: 'page.turnovers.bookings', maxRows: MAX_BOARD_ROWS },
-      ),
-      fetchAllRows(
-        (from, to) => supabase
-          .from('crew_members')
-          .select('id, name, phone, email, specialty')
-          .eq('org_id', membership.org_id)
-          .eq('is_active', true)
-          .order('name')
-          .order('id', { ascending: true })
-          .range(from, to),
-        { label: 'page.turnovers.crew_members', maxRows: MAX_BOARD_ROWS },
-      ),
-      fetchAllRows(
-        (from, to) => supabase
-          .from('crew_availability')
-          .select('id, crew_member_id, available_date, is_available')
-          .eq('org_id', membership.org_id)
-          .gte('available_date', rangeStart)
-          .lte('available_date', rangeEnd)
-          .order('id', { ascending: true })
-          .range(from, to),
-        { label: 'page.turnovers.crew_availability', maxRows: MAX_BOARD_ROWS },
-      ),
+      drainBoard('turnovers', (from, to) => supabase
+        .from('turnovers').select(TURNOVER_COLUMNS)
+        .eq('org_id', membership.org_id).neq('status', 'cancelled')
+        .gte('checkout_datetime', since.toISOString()).lte('checkout_datetime', until.toISOString())
+        .order('checkout_datetime', { ascending: true }).order('id', { ascending: true }).range(from, to)),
+
+      drainBoard('properties', (from, to) => supabase
+        .from('properties').select('id, name, city, state')
+        .eq('org_id', membership.org_id).eq('is_active', true)
+        .order('name').order('id', { ascending: true }).range(from, to)),
+
+      drainBoard('bookings', (from, to) => supabase
+        .from('bookings')
+        .select('id, property_id, checkin_date, checkout_date, guest_name, status, source, stay_type')
+        .eq('org_id', membership.org_id).in('status', ['confirmed', 'tentative'])
+        .gte('checkout_date', rangeStart).lte('checkin_date', rangeEnd)
+        .order('checkin_date', { ascending: true }).order('id', { ascending: true }).range(from, to)),
+
+      drainBoard('crew_members', (from, to) => supabase
+        .from('crew_members').select('id, name, phone, email, specialty')
+        .eq('org_id', membership.org_id).eq('is_active', true)
+        .order('name').order('id', { ascending: true }).range(from, to)),
+
+      drainBoard('crew_availability', (from, to) => supabase
+        .from('crew_availability').select('id, crew_member_id, available_date, is_available')
+        .eq('org_id', membership.org_id)
+        .gte('available_date', rangeStart).lte('available_date', rangeEnd)
+        .order('id', { ascending: true }).range(from, to)),
       supabase
         .from('organizations')
         .select('auto_assign_mode')
