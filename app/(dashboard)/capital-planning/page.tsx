@@ -43,9 +43,10 @@ export default async function CapitalPlanningPage({
 
   const priorYear = currentYear - 1
 
-  // Four independent reads that were awaited one after another — four serial
-  // round trips on a page that renders nothing until the last one lands.
-  const [milestoneRes, deprMilestoneRes, propertiesRes, assetStatusesRes] = await Promise.all([
+  // Three independent reads in one wave. The replacement-status read used to
+  // be a fourth here; it moved to a second wave below because it depends on
+  // the capex milestone resolved in this one — see the note there.
+  const [milestoneRes, deprMilestoneRes, propertiesRes] = await Promise.all([
     // CapEx projection
     supabase
       .from('org_milestones')
@@ -71,41 +72,14 @@ export default async function CapitalPlanningPage({
       .order('name')
       .limit(SUPABASE_MAX_ROWS),
 
-    // Replacement statuses — used to enrich projection items.
-    //
-    // Both reads above are now explicitly bounded. They had no `.limit()` at
-    // all, and unlike a cron this is a USER-FACING render: the whole result set
-    // lands in memory inside the page's Promise.all before anything paints. A
-    // portfolio org with tens of thousands of non-`projected` assets was paying
-    // that on every visit to /capital-planning.
-    //
-    // The better shape is to scope this to the assets actually rendered —
-    // `Object.values(projections).flatMap(p => p.items.map(i => i.asset_id))`
-    // and an `.in('id', …)`. That is not done here because the id list comes
-    // out of the capex milestone fetched in THIS Promise.all, so scoping means
-    // resolving the milestone first and serialising a second round trip. Worth
-    // doing when the asset counts justify it; the bound is what stops the
-    // unbounded read today.
-    supabase
-      .from('property_assets')
-      .select('id, replacement_status')
-      .eq('org_id', membership.org_id)
-      .eq('is_active', true)
-      .neq('replacement_status', 'projected')  // only load non-default statuses
-      .limit(SUPABASE_MAX_ROWS),
   ])
 
   // Throws to app/(dashboard)/capital-planning/error.tsx on a failed read, so
   // an outage isn't rendered as "No projection data yet."
   const ctx = { site: 'page.capital-planning', orgId: membership.org_id }
-  const milestone     = unwrap(milestoneRes,          { ...ctx, extra: { query: 'capex_milestone' } })
-  const deprMilestone = unwrap(deprMilestoneRes,      { ...ctx, extra: { query: 'depreciation_milestone' } })
-  const properties    = unwrapList(propertiesRes,     { ...ctx, extra: { query: 'properties' } })
-  const assetStatuses = unwrapList(assetStatusesRes,  { ...ctx, extra: { query: 'property_assets' } })
-
-  const statusByAsset = Object.fromEntries(
-    assetStatuses.map((a) => [a.id, a.replacement_status as string])
-  )
+  const milestone     = unwrap(milestoneRes,      { ...ctx, extra: { query: 'capex_milestone' } })
+  const deprMilestone = unwrap(deprMilestoneRes,  { ...ctx, extra: { query: 'depreciation_milestone' } })
+  const properties    = unwrapList(propertiesRes, { ...ctx, extra: { query: 'properties' } })
 
   const payload     = milestone?.value as CapExProjectionPayload | null
   const projections = payload?.projections ?? {}
@@ -124,6 +98,58 @@ export default async function CapitalPlanningPage({
       items,
     }
   }
+
+  // ── Wave 2: replacement statuses, scoped to what is actually on screen ───
+  //
+  // This read had no bound at all — every non-`projected` asset in the org, on
+  // a USER-FACING render, with the whole result set in memory before anything
+  // paints. An earlier pass bounded it with `.limit(SUPABASE_MAX_ROWS)`, which
+  // stopped the unbounded read but swapped one failure for a worse one:
+  // SUPABASE_MAX_ROWS *is* PostgREST's own cap, so a portfolio org past it got
+  // no error, it got SILENTLY WRONG STATUSES. Any asset beyond the cap misses
+  // `statusByAsset` and renders as the default "Projected" no matter how it was
+  // actually set. A capital plan quietly showing the wrong approval state is
+  // worse than a slow one.
+  //
+  // Scoping to the ids being rendered fixes both: the result set is the size of
+  // the PAGE rather than the size of the portfolio, and it cannot truncate,
+  // because every chunk below is requested explicitly and sized under the cap.
+  //
+  // The cost is one extra round-trip wave — the ids come out of the capex
+  // milestone, so this cannot join the Promise.all above. That is the trade the
+  // earlier pass declined; it is worth making, because for a typical org this
+  // query also gets strictly SMALLER (one row per projected item on screen, not
+  // one per non-projected asset in the portfolio).
+  //
+  // Driven by filteredProjections, not the raw payload: with a property filter
+  // applied, the statuses for other properties are not rendered and must not be
+  // fetched.
+  const renderedAssetIds = Array.from(new Set(
+    Object.values(filteredProjections).flatMap((proj) => proj.items.map((i) => i.asset_id))
+  ))
+
+  // `.in()` puts every id in the query string, so the chunk size is set by URL
+  // length, not by the row cap — same reasoning as cancelTurnoversForBookings.
+  // Chunks are independent reads of one table, so they run concurrently.
+  const STATUS_CHUNK = 200
+  const statusChunkResults = await Promise.all(
+    Array.from(
+      { length: Math.ceil(renderedAssetIds.length / STATUS_CHUNK) },
+      (_, c) => supabase
+        .from('property_assets')
+        .select('id, replacement_status')
+        .eq('org_id', membership.org_id)
+        .in('id', renderedAssetIds.slice(c * STATUS_CHUNK, (c + 1) * STATUS_CHUNK))
+        .limit(STATUS_CHUNK),
+    )
+  )
+
+  const statusByAsset = Object.fromEntries(
+    statusChunkResults.flatMap((res, c) =>
+      unwrapList(res, { ...ctx, extra: { query: 'property_assets', chunk: c } })
+        .map((a) => [a.id, a.replacement_status as string])
+    )
+  )
 
   const years      = Array.from({ length: HORIZON_YEARS }, (_, i) => currentYear + i)
   const maxHigh    = Math.max(...years.map((y) => filteredProjections[y]?.total_high ?? 0), 1)
