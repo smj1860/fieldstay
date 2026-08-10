@@ -115,6 +115,58 @@ export const MARKETING_TRIAL_FAQ = {
 } as const
 
 /**
+ * /hosts — the solo-host landing page's two persona-specific FAQ items.
+ *
+ * Distinct from CREW_VISIBILITY_FAQ / TEAM_ACCESS_FAQ (which assume the
+ * reader is already deciding how to configure a team). These two answer the
+ * question that comes *before* that: "does this even apply to someone
+ * without a team." Kept separate under the same rule STROPS_FAQ documents —
+ * different audience, don't merge just because the underlying facts overlap.
+ *
+ * HOSTS_CREW_REQUIRED_FAQ verified 2026-08-10 against BOTH the schema and the
+ * server action, which do not agree on what a crew member minimally needs:
+ *   - crew_members is its own table, independent of organization_members.
+ *     org_id and name are its only NOT NULL columns without a default;
+ *     user_id and email are nullable and role defaults to 'general'. So at
+ *     the DATABASE level a crew row needs only a name.
+ *   - addCrewMember() (app/(dashboard)/settings/actions.ts) is stricter than
+ *     that: it rejects on `!email && !phone`. A name alone is not actually
+ *     acceptable through the form a customer uses.
+ *   The answer below is worded to the SERVER ACTION, not the schema. The
+ *   first draft said "it's a name and a role" — true of the table, false of
+ *   the product, and a prospect would have hit the validation error inside
+ *   their first minute. The claim that matters here is unaffected: no
+ *   auth.users row, no invite, and no second account are required.
+ *   - Inviting that row to get app/login access ("Invite to App") is a
+ *     separate, later action — see CREW_VISIBILITY_FAQ's own note on the
+ *     two-step Add Crew Member / Invite to App flow this claim is built on.
+ *
+ * HOSTS_REPLACES_PMS_FAQ generalizes the provider-specific "Does FieldStay
+ * replace OwnerRez/Hospitable?" pair (components/ownerrez/faq-section.tsx,
+ * components/hospitable/faq-section.tsx) to cover a visitor who isn't on
+ * either — the more likely case at 1–4 properties. The iCal claim is the
+ * same one homepage-content.tsx's "How it works" step 1 already makes.
+ */
+export const HOSTS_CREW_REQUIRED_FAQ = {
+  question: 'Do I need to run a crew to use this?',
+  answer:
+    'No. Add yourself as your own crew member — a name, a role, and an email or phone number, which takes ' +
+    'under a minute — and you can assign yourself to turnovers, work checklists, and track inventory from ' +
+    'day one. No separate account or invite is involved. You can send yourself an app login, or invite an ' +
+    'actual cleaner, later if you ever need to. Nothing about the Hosts plan requires a team.',
+} as const
+
+export const HOSTS_REPLACES_PMS_FAQ = {
+  question: 'Does FieldStay replace Airbnb, VRBO, or my PMS?',
+  answer:
+    'No. Airbnb, VRBO, OwnerRez, and Hospitable handle bookings, rates, and guest messaging — FieldStay ' +
+    'handles what happens on the ground after a guest books: turnovers, checklists, inventory, vendor work ' +
+    'orders, and your own P&L. If you\'re on OwnerRez or Hospitable, connect it in about 2 minutes and ' +
+    'everything syncs automatically. If you\'re not on either, paste your Airbnb or VRBO iCal link instead — ' +
+    'same result.',
+} as const
+
+/**
  * /strops — the offline SEO landing page.
  *
  * Lives here rather than in app/strops/ because this file is where FAQ content
