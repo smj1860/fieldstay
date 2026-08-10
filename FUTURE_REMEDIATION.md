@@ -1455,3 +1455,38 @@ than a drive-by change.
 authored on predated items 21-29; 21 is now a different, resolved finding
 (`types/database.generated.ts` drift). The content is unchanged and was
 confirmed absent from main before appending — it had never landed.
+
+---
+
+## 31. The Stripe price-drift gate has never been able to run
+
+`scripts/check-stripe-price-drift.mjs` compares `lib/stripe/client.ts`'s
+`PLANS` prices against the real Stripe price objects, so a plan quoted at one
+number on the landing pages and billed at another gets caught. It runs in the
+`db-invariants` CI job on every PR and has been printing a warning instead of
+checking anything (observed on run 31419756914, and it is not new):
+
+```text
+Stripe price drift check cannot run: STRIPE_SECRET_KEY is set but these price
+variables are not — STRIPE_PRICE_STARTER_MONTHLY, STRIPE_PRICE_GROWTH_MONTHLY,
+STRIPE_PRICE_PORTFOLIO_MONTHLY.
+```
+
+`STRIPE_SECRET_KEY` and `STRIPE_PRICE_SPONSOR_MONTHLY` are set as repo
+secrets; the six plan price ids are not, so the check disarms itself rather
+than reporting every price as drifted. `STRIPE_PRICE_DRIFT_REQUIRE_ARMED` is
+`0`, which is what keeps that from failing the build — the sibling
+`DB_INVARIANTS_REQUIRE_ARMED` in the same job is `1`.
+
+**This is repo configuration, not a code change**, which is the only reason
+it is filed here rather than fixed: add the six ids as repo secrets (the same
+values the deployed app already uses), then set the repo variable
+`STRIPE_PRICE_DRIFT_ARMED=1` to make it a real gate, per the script's own
+instructions.
+
+Worth doing rather than deferring indefinitely, for a reason outside CI
+hygiene: `PLANS.hosts` has `STRIPE_PRICE_HOSTS_MONTHLY` / `_ANNUAL`, and
+`priceId()` resolves an unset variable to `null` rather than throwing, so a
+missing id surfaces as a failed checkout at the moment a trial user picks the
+plan. The Hosts tier is now advertised on `/`, `/hosts` and `/strops`'s
+JSON-LD. An armed drift check is what would say so before a customer does.

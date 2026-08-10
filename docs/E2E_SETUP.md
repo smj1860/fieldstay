@@ -20,6 +20,35 @@ matching `[E2E]%` patterns and the seeder flips org billing state.
 
 ## 1. Create the E2E Supabase project
 
+> ✅ **ALREADY DONE — this runbook is now history, not a to-do list.**
+> Project `fieldstay-e2e`, ref `syhthijeqlnltufdawyb`, us-east-1, $10/month.
+> URL: `https://syhthijeqlnltufdawyb.supabase.co`.
+>
+> Steps 2, 3, 4 and 6 are done and are re-proven on every pull request: the
+> `db-invariants` job runs ARMED against this project (`DB_INVARIANTS_REQUIRE_ARMED=1`,
+> i.e. it fails rather than self-disarming if the secrets go missing) and
+> prints its ledger reconciliation each run. Step 5 — whether `e2e` is a
+> *required* status check — is branch-protection config that isn't readable
+> from the repo, so confirm it in Settings → Branches if you need certainty.
+>
+> **Do not quote a migration count here.** An earlier draft of this note said
+> "all 311 migrations applied"; it was already wrong by the time it was
+> written and is now off by ~90. The number moves every week and a stale one
+> reads as authoritative. The invariant, which CI actually enforces, is that
+> local files and ledger rows differ only by the frozen set recorded in
+> `scripts/migration-ledger-baseline.json` — currently 203 pre-existing
+> divergences this project inherited when it was branched from prod. That is
+> what `scripts/check-migration-ledger.mjs` asserts; read its output for the
+> live figures.
+>
+> Bootstrap skips, recorded because they explain part of that divergence:
+> two prod-only data seeds were intentionally not applied
+> (`20260630044714_add_stephen_as_platform_staff` and
+> `20260718010000_seed_room_templates` — both reference production
+> identities, and the app auto-seeds room templates per-org at runtime), and
+> the powersync-publication statements were skipped (that layer never exists
+> on a fresh project and has since been dropped from prod entirely).
+
 Dashboard → New project in the same org, or ask Claude to do it via the
 Supabase MCP. Suggested name: `fieldstay-e2e`, region `us-east-1` (same as
 prod). **Cost: $10/month** on the current org plan.
@@ -29,7 +58,7 @@ No extensions or manual schema work needed — migrations handle everything.
 ## 2. Apply all migrations
 
 ```bash
-supabase link --project-ref <e2e-project-ref>
+supabase link --project-ref syhthijeqlnltufdawyb
 supabase db push
 ```
 
