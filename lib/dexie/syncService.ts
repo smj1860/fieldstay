@@ -1,5 +1,5 @@
 import { createClient } from '@/lib/supabase/client'
-import { getDexieDb, isDexieShutdown, type FieldStayDexie, type MutationRow } from './schema'
+import { getDexieDb, isDexieShutdown, isDatabaseClosedError, type FieldStayDexie, type MutationRow } from './schema'
 import {
   isOnline,
   withTabLock,
@@ -187,6 +187,25 @@ export class SyncEngine {
         this.redrainRequested = false
         await withTabLock(`fieldstay-crew-outbox-${this.userId}`, () => this.drain())
       } while (this.redrainRequested && !this.stopped())
+    } catch (err) {
+      // This method is invoked as `void getSyncEngine(userId).processOutbox()`
+      // at seven call sites (helpers.ts, photo-sync.ts, the reconnect listener,
+      // the retry timer). `void` is a claim that the promise handles its own
+      // errors — it did not. Before this catch, anything escaping the drain
+      // became an UNHANDLED rejection in the crew PWA.
+      //
+      // The routine case is not a defect at all: a sibling tab logging out
+      // latches the shutdown and closes the connection out from under an
+      // in-flight drain (listenForRemoteShutdown in schema.ts closes it
+      // synchronously in the BroadcastChannel handler, by design, so the
+      // deleting tab is not blocked). Dexie rejects the in-flight work with
+      // DatabaseClosedError. That is the mechanism working, so it is
+      // swallowed rather than reported — the drain has nothing left to drain.
+      if (this.stopped() || isDatabaseClosedError(err)) return
+
+      // Anything else is real and was previously invisible.
+      console.error('[sync] outbox drain failed', err)
+      reportError(err, { site: 'dexie.syncService.processOutbox' })
     } finally {
       this.isProcessing = false
     }
