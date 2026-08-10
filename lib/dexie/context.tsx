@@ -387,7 +387,7 @@ export function DexieProvider({ userId: userIdProp, children }: { userId?: strin
       }
 
       // eslint-disable-next-line no-restricted-properties -- load spreading, not security: a predictable offset is fine here, an IDENTICAL one across the fleet is the bug being fixed
-      const offsetMs = Math.random() * SAFETY_POLL_INTERVAL_MS
+      const offsetMs = Math.random() * SAFETY_POLL_INTERVAL_MS // NOSONAR -- timing jitter only, not security-sensitive (see eslint-disable justification above)
 
       safetyPollStagger = setTimeout(() => {
         tick()
