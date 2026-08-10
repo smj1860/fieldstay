@@ -437,6 +437,50 @@ export async function proxy(request: NextRequest) {
   return withCsp(supabaseResponse, nonce)
 }
 
+/**
+ * Which requests run this middleware at all.
+ *
+ * The old pattern excluded `_next/static`, `_next/image`, `favicon.ico` and a
+ * fixed IMAGE extension list — so every other static file under /public had to
+ * be enumerated by hand in BYPASS_ROUTES (`/manifest.json`,
+ * `/dashboard-manifest.json`, `/sw.js`, `/theme-init.js`, `/offline.html`, …).
+ * Today's tree happens to be fully covered, but the safety net was "someone
+ * remembers to add a line". A missed entry means that asset pays the full
+ * session resolution on every request — and, for an anonymous fetch, a 307 to
+ * /login instead of the file.
+ *
+ * `[^/]+\.[a-zA-Z0-9]+$` replaces the allowlist with a structural rule: a
+ * ROOT-LEVEL path with a file extension is a static asset. Every current and
+ * future /public file is exempt with no per-file entry, which is the actual
+ * finding (P3-6).
+ *
+ * ── Why root-level, and not the audit's `.*\.(js|json|css|…)$` ─────────────
+ *
+ * Because middleware is where TOKEN-ROUTE RATE LIMITING lives
+ * (rateLimiterForPathname, applied at the top of proxy()). An unanchored
+ * extension exclusion also matches a dynamic segment that happens to end in
+ * one — `/vendor-connect/<token>.map` would skip middleware entirely and
+ * therefore skip its throttle, on exactly the enumeration-prone surfaces that
+ * throttle exists to protect.
+ *
+ * Every token route is NESTED (`/owner/…`, `/work-orders/…`, `/g/b/…`,
+ * `/vendor-connect/…`), and every /public file here is FLAT, so anchoring the
+ * extension test to a single root segment separates them cleanly. Tokens are
+ * crypto.randomUUID() and contain no dots today — this does not depend on that
+ * staying true, which is the point.
+ *
+ * The nested image exclusion is kept as-is: images may legitimately live in
+ * subdirectories, and they are never a token route.
+ *
+ * BYPASS_ROUTES keeps its static entries. They are now unreachable rather than
+ * load-bearing, and that is deliberate defence in depth — if this pattern is
+ * ever narrowed, the allowlist is what stops those files 307ing to /login.
+ * unit/lib/proxy-matcher.test.ts is what stops the pattern being narrowed
+ * silently.
+ */
+export const MIDDLEWARE_MATCHER =
+  '/((?!_next/static|_next/image|[^/]+\\.[a-zA-Z0-9]+$|.*\\.(?:svg|png|jpg|jpeg|gif|webp)$).*)'
+
 export const config = {
-  matcher: ['/((?!_next/static|_next/image|favicon.ico|.*\\.(?:svg|png|jpg|jpeg|gif|webp)$).*)'],
+  matcher: [MIDDLEWARE_MATCHER],
 }
