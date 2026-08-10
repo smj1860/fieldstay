@@ -435,10 +435,19 @@ export async function createPmNotifications(
   const run = async (rows: ReturnType<typeof toRow>[], upsert: boolean) => {
     for (let i = 0; i < rows.length; i += CHUNK) {
       const slice = rows.slice(i, i + CHUNK)
-      const { error } = upsert
-        ? await supabase.from('notifications')
-            .upsert(slice, { onConflict: 'dedupe_key', ignoreDuplicates: true })
-        : await supabase.from('notifications').insert(slice)
+      // Built first, awaited once. Writing this as
+      // `const { error } = upsert ? await …upsert(…) : await …insert(…)`
+      // buries each await inside a ternary branch, where semgrep's
+      // discarded-result rule can no longer see that the result IS bound —
+      // it reads as two awaited PostgREST calls whose results go nowhere.
+      // The rule is right to be suspicious of that shape; this is clearer
+      // regardless.
+      const table = supabase.from('notifications')
+      const query = upsert
+        ? table.upsert(slice, { onConflict: 'dedupe_key', ignoreDuplicates: true })
+        : table.insert(slice)
+
+      const { error } = await query
 
       if (error?.code === '23503') {
         console.warn(
