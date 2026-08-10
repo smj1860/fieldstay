@@ -14,20 +14,36 @@ interface PmMoreDrawerProps {
   open:    boolean
   onClose: () => void
   role:    MemberRole
+  /** Platform staff. Without it, getVisibleNavItems() filters out every
+   *  `condition: 'staff'` item — which is why Support Inbox was missing from
+   *  this sheet even before the explicit exclusion below was removed. */
+  isStaff: boolean
 }
 
-export function PmMoreDrawer({ open, onClose, role }: Readonly<PmMoreDrawerProps>) {
+export function PmMoreDrawer({ open, onClose, role, isStaff }: Readonly<PmMoreDrawerProps>) {
   const pathname = usePathname()
   const drawerRef = useRef<HTMLDivElement>(null)
 
   // Ops Snapshot, Turnovers, Inventory, and Maintenance are persistent tabs
   // in BottomNav already — everything else management-tier, plus Bookings
-  // (the one ops-tier item with no persistent tab of its own), shows up
-  // here. help/support-inbox aren't reachable from mobile today, so they
-  // stay excluded.
-  const items = getVisibleNavItems(role).filter(
+  // (the one ops-tier item with no persistent tab of its own), shows up here.
+  //
+  // `help` is excluded because DashboardSidebar renders it as its own pinned
+  // block, reachable on mobile through the ☰ drawer.
+  //
+  // Support Inbox USED to be excluded on the same grounds, and the old comment
+  // here claimed neither was "reachable from mobile today" — which was not
+  // true: the ☰ drawer renders the full sidebar, pinned blocks included. The
+  // real problem is that a phone has two nav surfaces and this sheet is the
+  // one a thumb reaches for; an item that exists only behind the hamburger is
+  // effectively missing. It is staff-only, so it appears for nobody else.
+  //
+  // Note the `{ isStaff }` argument: getVisibleNavItems() drops every
+  // `condition: 'staff'` item without it, so passing the flag is what actually
+  // makes this work — removing the id filter alone would have changed nothing.
+  const items = getVisibleNavItems(role, { isStaff }).filter(
     (item) => (item.tier === 'management' || item.id === 'bookings') &&
-      item.id !== 'help' && item.id !== 'support-inbox'
+      item.id !== 'help'
   )
 
   // Focus trap, Escape-to-close, body-scroll lock — same shared hook as

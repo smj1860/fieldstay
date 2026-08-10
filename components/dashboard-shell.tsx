@@ -572,6 +572,7 @@ export function DashboardShell({ role, orgName, userName, userEmail, onboardingC
         open={moreDrawerOpen}
         onClose={() => setMoreDrawerOpen(false)}
         role={role}
+        isStaff={isStaff}
       />
     </div>
   )
