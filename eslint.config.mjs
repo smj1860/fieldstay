@@ -37,7 +37,20 @@ const eslintConfig = [
     // registers the jsx-a11y plugin itself (with a 6-rule subset), so
     // re-spreading flatConfigs.recommended's own `plugins` key here would
     // redefine that same plugin instance and error.
-    rules: jsxA11yWarnRules,
+    rules: {
+      ...jsxA11yWarnRules,
+      // `role` is also FieldStay's MemberRole PROP on several components
+      // (BottomNav, PmMoreDrawer, DashboardShell, CommandPalette). Without
+      // ignoreNonDOM the rule reads `<BottomNav role="admin" />` as a DOM aria
+      // role and reports "not a valid, non-abstract ARIA role" — 8 warnings
+      // today, every one of them false, and every future component test that
+      // passes a role burns another slot in the --max-warnings ratchet.
+      //
+      // ignoreNonDOM scopes the rule to lowercase DOM elements, which is the
+      // only place an aria role can be wrong. Real `<div role="typo">` is
+      // still caught.
+      'jsx-a11y/aria-role': ['warn', { ignoreNonDOM: true }],
+    },
   },
   {
     ignores: [

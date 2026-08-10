@@ -3,6 +3,16 @@ import { createClient }       from '@/lib/supabase/server'
 import { SupportInboxClient } from './support-inbox-client'
 import { unwrap, unwrapList } from '@/lib/supabase/unwrap'
 
+/**
+ * Open escalations shown at once. Far above any plausible simultaneous
+ * backlog — the point is that a conversation asking for a human is never
+ * silently dropped, not that the list is short.
+ */
+const ESCALATION_LIMIT = 500
+
+/** Non-escalated conversations shown for context. */
+const RECENT_CONVERSATION_LIMIT = 100
+
 export default async function SupportInboxPage() {
   const supabase = await createClient()
   const { data: { user } } = await supabase.auth.getUser()
@@ -20,7 +30,17 @@ export default async function SupportInboxPage() {
 
   if (!staff) redirect('/ops')
 
-  const [conversationsRes, feedbackRes] = await Promise.all([
+  // Escalations are fetched SEPARATELY from recent conversations.
+  //
+  // One capped query ordered `needs_human` first does keep escalations at the
+  // top, so they are not pushed off by ordinary traffic — the failure needs
+  // more than RECENT_CONVERSATION_LIMIT escalations OPEN AT ONCE, not more
+  // than that many conversations. But at that point the overflow is invisible
+  // with no signal, and the one thing this page exists to guarantee is that a
+  // conversation asking for a human is seen. Splitting the query removes the
+  // interaction entirely: escalations are bounded by their own, much higher
+  // ceiling and cannot compete with resolved chatter for slots.
+  const [escalatedRes, recentRes, feedbackRes] = await Promise.all([
     supabase
       .from('support_conversations')
       .select(`
@@ -28,9 +48,20 @@ export default async function SupportInboxPage() {
         resolved_at, last_message_at, created_at,
         organizations ( name )
       `)
-      .order('needs_human', { ascending: false })
+      .eq('needs_human', true)
+      .order('escalated_at', { ascending: false })
+      .limit(ESCALATION_LIMIT),
+
+    supabase
+      .from('support_conversations')
+      .select(`
+        id, org_id, status, needs_human, escalation_reason, escalated_at,
+        resolved_at, last_message_at, created_at,
+        organizations ( name )
+      `)
+      .eq('needs_human', false)
       .order('last_message_at', { ascending: false })
-      .limit(100),
+      .limit(RECENT_CONVERSATION_LIMIT),
 
     supabase
       .from('crew_feedback')
@@ -45,7 +76,12 @@ export default async function SupportInboxPage() {
 
   // unwrapList throws on a query failure so the segment error boundary renders
   // a real error state, instead of an empty inbox that looks like a quiet day.
-  const conversations = unwrapList(conversationsRes, { site: 'page.support-inbox.conversations' })
+  // Escalations first, then recent — the order the client renders and the
+  // order the single query used to produce, so nothing downstream changes.
+  const conversations = [
+    ...unwrapList(escalatedRes, { site: 'page.support-inbox.escalations' }),
+    ...unwrapList(recentRes,    { site: 'page.support-inbox.recent' }),
+  ]
   const feedback      = unwrapList(feedbackRes,      { site: 'page.support-inbox.feedback' })
 
   return (

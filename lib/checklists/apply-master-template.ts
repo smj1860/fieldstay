@@ -94,6 +94,9 @@ export interface OrgRoomTemplateData {
  * "Apply to All Properties" run) can fetch this once instead of once per
  * property, which composeSections() used to do internally.
  */
+/** Ceiling on an org's room library — see the note at the query below. */
+const ROOM_TEMPLATE_LIMIT = 500
+
 export async function fetchOrgRoomTemplateData(
   orgId:      string,
   supabase:   SupabaseClient,
@@ -105,10 +108,16 @@ export async function fetchOrgRoomTemplateData(
     .single()
   if (orgErr) console.error('[fetchOrgRoomTemplateData] organizations fetch failed:', orgErr)
 
+  // Explicitly bounded. room_templates is the org's own room library (the
+  // Templates Hub), so it is small by construction — but "small by
+  // construction" is the assumption every one of the eight silently-truncated
+  // crons was also resting on. The cap is far above any real library and makes
+  // the bound a fact rather than a belief.
   const { data: roomTemplates, error: roomsErr } = await supabase
     .from('room_templates')
     .select('id, name, auto_include')
     .eq('org_id', orgId)
+    .limit(ROOM_TEMPLATE_LIMIT)
   if (roomsErr) console.error('[fetchOrgRoomTemplateData] room_templates fetch failed:', roomsErr)
 
   const rooms: RoomTemplateRow[] = (roomTemplates ?? []) as RoomTemplateRow[]

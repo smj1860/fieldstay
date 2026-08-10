@@ -2,6 +2,7 @@ import { NextResponse, type NextRequest } from 'next/server'
 import { updateSession } from '@/lib/supabase/middleware'
 import {
   workOrderRatelimit, vendorConnectRatelimit, ownerPortalRatelimit, guidebookRatelimit,
+  tokenResourceRatelimit,
   oauthCallbackRatelimit, demoRatelimit, unsubscribeRatelimit, webhookRatelimit,
   checkLimit, retryAfterSeconds,
 } from '@/lib/rate-limit'
@@ -300,12 +301,26 @@ async function enforceTokenRouteRateLimit(
   // failure mode, since a per-request unique key would mean no limit at all.
   const ip = extractClientIp(request) ?? '127.0.0.1'
 
-  const decision = await checkLimit(limiter, ip, {
-    onError: 'allow',
-    site:    `proxy:${request.nextUrl.pathname}`,
-  })
+  // TWO buckets, both fail-open. The per-IP one bounds a single client; the
+  // per-resource one bounds the token itself no matter how many clients hit
+  // it. Without the second, N attacker IPs get N x the per-IP allowance
+  // against one unauthenticated URL and the first limiter never fires.
+  const [perIp, perResource] = await Promise.all([
+    checkLimit(limiter, ip, {
+      onError: 'allow',
+      site:    `proxy:${request.nextUrl.pathname}`,
+    }),
+    checkLimit(tokenResourceRatelimit, request.nextUrl.pathname, {
+      onError: 'allow',
+      site:    `proxy:resource:${request.nextUrl.pathname}`,
+    }),
+  ])
 
-  if (decision.allowed) return null
+  if (perIp.allowed && perResource.allowed) return null
+
+  // Report the bucket that actually rejected, so Retry-After tells the caller
+  // when THEY can retry rather than when the other window happens to reset.
+  const decision = perIp.allowed ? perResource : perIp
 
   return withCsp(new NextResponse(
     JSON.stringify({ error: 'Too many requests. Please try again shortly.' }),

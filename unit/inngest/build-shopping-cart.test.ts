@@ -168,8 +168,11 @@ describe('buildShoppingCart', () => {
       'customer_token_y',
     )
 
+    // Keyed on org + day: this is the last of eight steps, and a replay
+    // re-announces a cart that was already built and already reported.
     expect(resend.emails.send).toHaveBeenCalledWith(
       expect.objectContaining({ to: 'pm@test.com', subject: expect.stringContaining('1 items') }),
+      expect.objectContaining({ idempotencyKey: expect.stringMatching(/^cart-ready-org_1-\d{4}-\d{2}-\d{2}$/) }),
     )
     expect(renderShoppingCartReadyEmail).toHaveBeenCalledWith(
       expect.objectContaining({ recipientName: 'PM Name' }),

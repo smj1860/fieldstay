@@ -16,17 +16,55 @@ import { DEMO_ORG_SLUG } from '@/lib/demo/config'
 
 const TTL_MS = 60_000
 
+/**
+ * Hard ceiling on distinct orgs held at once.
+ *
+ * The Map had no eviction path: an entry was overwritten when its TTL lapsed
+ * and a caller asked for that org again, but never removed. On a long-lived
+ * server process the resident set is therefore every org ever seen, not every
+ * org seen in the last minute — an org touched once at 3am is still held at
+ * 6pm. That is not a per-request leak, so nothing would ever surface it; it
+ * just grows with lifetime tenant count.
+ *
+ * Sized well above any plausible concurrent working set so the LRU never
+ * evicts a hot entry in practice, while still being a bound.
+ */
+const MAX_ENTRIES = 5_000
+
 const cache = new Map<string, { isDemo: boolean; expiresAt: number }>()
+
+/**
+ * Insert with LRU eviction. A Map iterates in insertion order, so the first
+ * key is the least recently INSERTED — and re-setting an existing key moves it
+ * to the end, which makes plain `set` an LRU touch as long as every read that
+ * hits also re-sets. Deleting before setting is what guarantees that move.
+ */
+function remember(orgId: string, entry: { isDemo: boolean; expiresAt: number }): void {
+  if (cache.has(orgId)) cache.delete(orgId)
+  cache.set(orgId, entry)
+
+  while (cache.size > MAX_ENTRIES) {
+    const oldest = cache.keys().next()
+    if (oldest.done) break
+    cache.delete(oldest.value)
+  }
+}
 
 /** Test seam — clears the memo so a test can flip the flag between cases. */
 export function __clearDemoOrgCache(): void {
   cache.clear()
 }
 
+/** Test seam — the bound, so a test can assert it without restating the number. */
+export const DEMO_ORG_CACHE_MAX_ENTRIES = MAX_ENTRIES
+
 export async function isDemoOrg(orgId: string): Promise<boolean> {
   const now = Date.now()
   const hit = cache.get(orgId)
-  if (hit && hit.expiresAt > now) return hit.isDemo
+  if (hit && hit.expiresAt > now) {
+    remember(orgId, hit)   // LRU touch — keeps a hot org from aging out
+    return hit.isDemo
+  }
 
   // System context: a boolean flag read on the org row, beneath callers that
   // have already established their own authorization.
@@ -49,7 +87,7 @@ export async function isDemoOrg(orgId: string): Promise<boolean> {
   }
 
   const isDemo = data?.is_demo === true
-  cache.set(orgId, { isDemo, expiresAt: now + TTL_MS })
+  remember(orgId, { isDemo, expiresAt: now + TTL_MS })
   return isDemo
 }
 

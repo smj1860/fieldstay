@@ -111,13 +111,22 @@ function assignedEvent(overrides: Record<string, unknown> = {}) {
 }
 
 function woRow(overrides: Record<string, unknown> = {}) {
+  // No completion_token here any more. fetch-context deliberately does not
+  // select it: a step's return value is persisted as Inngest execution history
+  // in a third-party console, and this token is a bearer credential for the
+  // UNAUTHENTICATED /work-orders/<token> route. It is read inside the steps
+  // that consume it instead (see tokenRow below).
   return {
     id: 'wo_1', wo_number: 'WO-1001', title: 'Fix leaking faucet', description: 'Kitchen faucet',
-    nte_amount: 250, scheduled_date: null, scheduled_time: null,
-    completion_token: null, completion_token_expires_at: null, portal_enabled: true,
+    nte_amount: 250, scheduled_date: null, scheduled_time: null, portal_enabled: true,
     status: 'pending', org_id: 'org_1', property_id: 'prop_1', vendor_id: null, asset_id: null,
     ...overrides,
   }
+}
+
+/** What the token-only reads inside the consuming steps return. */
+function tokenRow(token: string | null) {
+  return { data: { completion_token: token }, error: null }
 }
 
 function vendorRow(overrides: Record<string, unknown> = {}) {
@@ -135,10 +144,17 @@ describe('handleWorkOrderVendorAssigned', () => {
   it('dispatches email + SMS to the vendor and notifies the PM on the happy path', async () => {
     const supabase = makeSupabase({
       work_orders: [
-        { data: woRow({ scheduled_date: '2026-07-25', scheduled_time: '11:00:00' }), error: null }, // fetch-context
-        { error: null }, // ensure-completion-token update
+        { data: woRow({ scheduled_date: '2026-07-25', scheduled_time: '11:00:00' }), error: null }, // fetch-context (no token column)
+        tokenRow(null),        // ensure-completion-token: existing-token read
+        { error: null },       // ensure-completion-token: update
+        tokenRow('tok_abc'),   // send-vendor-email: readPublicUrl
+        tokenRow('tok_abc'),   // send-vendor-sms:   readPublicUrl
       ],
-      vendors: [{ data: vendorRow({ phone: '512-555-1234' }), error: null }],
+      vendors: [
+        { data: vendorRow({ phone: '512-555-1234' }), error: null }, // fetch-context (contact stripped)
+        { data: { email: 'vendor@example.com', phone: '512-555-1234' }, error: null }, // email step
+        { data: { email: 'vendor@example.com', phone: '512-555-1234' }, error: null }, // sms step
+      ],
       properties: [{ data: { id: 'prop_1', name: 'The Lakehouse', address: '1 Lake Dr', timezone: 'America/Chicago' }, error: null }],
       organizations: [{ data: { id: 'org_1', name: 'Lake Martin Delivery' }, error: null }],
       organization_members: [{ data: [{ user_id: 'u1' }], error: null }],
@@ -165,7 +181,61 @@ describe('handleWorkOrderVendorAssigned', () => {
       expect.objectContaining({ orgId: 'org_1', type: 'work_order_dispatched' })
     )
 
-    expect(result).toEqual({ dispatched: true, woNumber: 'WO-1001', vendorEmail: 'vendor@example.com' })
+    // vendorId, not the vendor's email address. A function's return value is
+    // persisted in Inngest's run history, which is a third-party console —
+    // notify-assignment-gap.ts records the same decision for PM recipients.
+    expect(result).toEqual({ dispatched: true, woNumber: 'WO-1001', vendorId: 'v1' })
+  })
+
+  it('never puts the completion token or a contact detail into a step return value', async () => {
+    // The guarantee, asserted on the actual recorded values rather than on the
+    // shape of the source. Every step's resolved return is captured here; the
+    // token, the vendor's email and phone, and the dispatcher's phone must
+    // appear in none of them, because Inngest persists all of them.
+    const stepReturns: unknown[] = []
+    const step = {
+      run: vi.fn(async (_name: string, cb: () => unknown) => {
+        const out = await cb()
+        stepReturns.push(out)
+        return out
+      }),
+    }
+
+    const supabase = makeSupabase({
+      work_orders: [
+        { data: woRow({ scheduled_date: '2026-07-25', scheduled_time: '11:00:00' }), error: null },
+        tokenRow(null),
+        { error: null },
+        tokenRow('tok_secret_abc'),
+        tokenRow('tok_secret_abc'),
+      ],
+      vendors: [
+        { data: vendorRow({ phone: '512-555-1234' }), error: null },
+        { data: { email: 'vendor@example.com', phone: '512-555-1234' }, error: null },
+        { data: { email: 'vendor@example.com', phone: '512-555-1234' }, error: null },
+      ],
+      properties:    [{ data: { id: 'prop_1', name: 'The Lakehouse', address: '1 Lake Dr', timezone: 'America/Chicago' }, error: null }],
+      organizations: [{ data: { id: 'org_1', name: 'Lake Martin Delivery' }, error: null }],
+    })
+    ;(createServiceClient as ReturnType<typeof vi.fn>).mockReturnValue(supabase)
+
+    const result = await invokeHandler(handleWorkOrderVendorAssigned, {
+      event: assignedEvent(), step, logger: makeLogger(),
+    })
+
+    const recorded = JSON.stringify({ stepReturns, result })
+    expect(recorded).not.toContain('tok_secret_abc')       // /work-orders/<token> bearer credential
+    expect(recorded).not.toContain('vendor@example.com')   // vendor PII
+    expect(recorded).not.toContain('512-555-1234')         // vendor PII
+    expect(recorded).not.toContain('+15550001111')         // the dispatcher's (a PM's) phone
+
+    // And the dispatch still actually happened — a function that sends nothing
+    // would pass every assertion above.
+    expect(resend.emails.send).toHaveBeenCalledWith(
+      expect.objectContaining({ to: ['vendor@example.com'] }),
+      expect.anything(),
+    )
+    expect(sendSMS).toHaveBeenCalled()
   })
 
   it('GATE: skips dispatch entirely when the work order has portal_enabled=false', async () => {
@@ -205,9 +275,14 @@ describe('handleWorkOrderVendorAssigned', () => {
   it('idempotency: reuses an existing completion_token instead of minting a new one or re-writing the work order', async () => {
     const supabase = makeSupabase({
       work_orders: [
-        { data: woRow({ completion_token: 'existing-token-123' }), error: null }, // fetch-context — no second entry needed
+        { data: woRow(), error: null },              // fetch-context
+        tokenRow('existing-token-123'),              // ensure-completion-token: already set
+        tokenRow('existing-token-123'),              // send-vendor-email: readPublicUrl
       ],
-      vendors:       [{ data: vendorRow(), error: null }], // no phone — SMS step skipped, keeps this test focused
+      vendors: [
+        { data: vendorRow(), error: null },          // no phone — SMS step skipped, keeps this test focused
+        { data: { email: 'vendor@example.com', phone: null }, error: null },
+      ],
       properties:    [{ data: { id: 'prop_1', name: 'The Lakehouse', address: '1 Lake Dr', timezone: 'America/Chicago' }, error: null }],
       organizations: [{ data: { id: 'org_1', name: 'Lake Martin Delivery' }, error: null }],
       organization_members: [{ data: [], error: null }],

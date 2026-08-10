@@ -61,6 +61,12 @@ export const handleWorkOrderInvoiceSubmitted = inngest.createFunction(
       const fmt = (n: number) =>
         n.toLocaleString('en-US', { style: 'currency', currency: 'USD' })
 
+      // Keyed, like its sibling work-order-invoice-paid.ts. Three queries run
+      // before this send, and `retries: 3` above means a step that succeeds at
+      // the send and then fails to report back to Inngest replays the whole
+      // body — sending the PM a second "invoice ready for payment" for money
+      // they may already have paid. The invoice id is the natural key: one
+      // invoice, one submission notice.
       await resend.emails.send({
         from:    FROM,
         to:      pmEmail,
@@ -76,7 +82,7 @@ export const handleWorkOrderInvoiceSubmitted = inngest.createFunction(
           ctaLabel: 'Review & Pay Invoice →',
           ctaUrl:   invoiceUrl,
         }),
-      })
+      }, { idempotencyKey: `work-order-invoice-submitted-${invoice_id}` })
     })
 
     return { work_order_id, invoice_id, notified: true }

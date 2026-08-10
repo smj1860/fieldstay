@@ -23,6 +23,13 @@ export const CRITICAL_FUNCTION_IDS = new Set([
   'turnover-completed',
   'work-order-completed',
   'purchase-order-approved',
+
+  // The destructive half of account deletion. A terminal failure here leaves a
+  // half-purged organization with no auth user able to re-drive it — the
+  // orphaned-tenant outcome that was actually found in production on
+  // 2026-07-30 (two orgs, 10 properties, 20 bookings carrying guest PII). The
+  // user cannot retry: their session is gone. This alert is the only path back.
+  'account-deletion',
 ])
 
 /**
@@ -75,7 +82,7 @@ export const onFunctionFailure = inngest.createFunction(
           ctaLabel: 'Open FieldStay →',
           ctaUrl:   process.env.NEXT_PUBLIC_APP_URL ?? '',
         }),
-      })
+      }, { idempotencyKey: `critical-job-failed-${run_id}` })
     })
 
     return { function_id, alerted: true }

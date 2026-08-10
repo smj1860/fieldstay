@@ -692,9 +692,40 @@ export interface CancelledTurnoverAssignment {
 /** Matches lib/storage/object-path.ts's guard — see the note in cancelTurnoversForBooking. */
 const BOOKING_ID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
 
+/**
+ * Booking ids per UPDATE.
+ *
+ * Two ceilings, and the smaller one wins. RETURNING is a PostgREST response
+ * like any other and truncates at max_rows = 1000 — but each id also appears
+ * TWICE in the `.or()` filter expression below (once per column), so the URL
+ * grows at ~74 bytes per booking and hits a gateway request-line limit long
+ * before the row cap matters. 100 keeps the filter around 7 KB.
+ */
+const BOOKING_CANCEL_CHUNK = 100
+
 export async function cancelTurnoversForBooking(
   bookingId: string,
   supabase:  DBClient
+): Promise<CancelledTurnoverAssignment[]> {
+  return cancelTurnoversForBookings([bookingId], supabase)
+}
+
+/**
+ * Cancel every pending/assigned turnover hanging off ANY of these bookings,
+ * and report which crew members lost work.
+ *
+ * The set-taking form is the real implementation and the single-booking one
+ * above delegates to it, deliberately: ownerrez's reconciliation sweep called
+ * the single form once per stale booking, so a provider hiccup that orphaned
+ * 400 bookings did 400 sequential round-trips inside one step, on top of 400
+ * more to cancel the bookings themselves. Keeping one implementation is also
+ * the point — a parallel batch version next to a single version is how the two
+ * drift, and this one carries a uuid guard and an error-throws contract that a
+ * copy would have to re-learn.
+ */
+export async function cancelTurnoversForBookings(
+  bookingIds: string[],
+  supabase:   DBClient
 ): Promise<CancelledTurnoverAssignment[]> {
   // `.or()` takes a PostgREST FILTER EXPRESSION, not bound parameters — the
   // string below is parsed server-side, so a value containing a comma or a
@@ -703,49 +734,64 @@ export async function cancelTurnoversForBooking(
   //
   // Not currently exploitable, and worth saying so precisely rather than
   // implying otherwise: all three callers (ical-sync, hospitable's
-  // incremental-sync, ownerrez's reconciliation-handler) pass an id they read
-  // back from OUR bookings table, never a provider-supplied identifier. This
-  // guard exists because nothing in the type system says that — `bookingId:
-  // string` accepts anything — and the next caller to pass an external id
-  // would open it silently. Every other interpolated `.or()` in the codebase
-  // splices a server-derived timestamp or org id; this is the only one taking
-  // a value that travels in from a sync path.
-  if (!BOOKING_ID_RE.test(bookingId)) {
-    throw new Error('cancelTurnoversForBooking: bookingId is not a uuid')
-  }
-
-  // Single atomic UPDATE ... RETURNING (via .update().select()) rather than
-  // a separate SELECT-then-UPDATE — captures who was assigned in the same
-  // statement that flips status, so there's no window for a concurrent
-  // unassignment to slip in between "read who's assigned" and "cancel".
-  // Only turnovers that were actually 'assigned' have any
-  // turnover_assignments rows to embed — a 'pending_assignment' turnover
-  // never had a crew member, regardless of its post-update status here, so
-  // no separate status check is needed on the returned rows.
-  const { data: updated, error } = await supabase
-    .from('turnovers')
-    .update({ status: 'cancelled' })
-    .or(`booking_id.eq.${bookingId},prev_booking_id.eq.${bookingId}`)
-    .in('status', ['pending_assignment', 'assigned'])
-    .select('id, org_id, turnover_assignments(crew_member_id)')
-
-  // A discarded error here returned [] — indistinguishable from "no turnovers
-  // needed cancelling". The booking is cancelled, its turnovers stay
-  // pending_assignment or assigned, and notifyCrewOfCancelledTurnovers is
-  // handed an empty list, so nobody is told. A crew member turns up to clean a
-  // stay that is not happening. Every caller runs this inside step.run(), so
-  // throwing gets the retry this deserves instead of a silent no-op.
-  if (error) {
-    throw new Error(`cancelTurnoversForBooking failed for booking ${bookingId}: ${error.message}`)
+  // incremental-sync, ownerrez's reconciliation-handler) pass ids they read
+  // back from OUR bookings table, never provider-supplied identifiers. This
+  // guard exists because nothing in the type system says that — `string`
+  // accepts anything — and the next caller to pass an external id would open
+  // it silently. It is checked for EVERY id before any query runs, so one bad
+  // element cannot ride along in a chunk with 99 good ones.
+  for (const bookingId of bookingIds) {
+    if (!BOOKING_ID_RE.test(bookingId)) {
+      throw new Error('cancelTurnoversForBooking: bookingId is not a uuid')
+    }
   }
 
   const cancelled: CancelledTurnoverAssignment[] = []
-  for (const t of updated ?? []) {
-    const assignments = unwrapJoinArray<{ crew_member_id: string }>(t.turnover_assignments)
-    for (const a of assignments) {
-      cancelled.push({ turnoverId: t.id, orgId: t.org_id, crewMemberId: a.crew_member_id })
+
+  for (let i = 0; i < bookingIds.length; i += BOOKING_CANCEL_CHUNK) {
+    const chunk = bookingIds.slice(i, i + BOOKING_CANCEL_CHUNK)
+    const ids   = chunk.join(',')
+
+    // Single atomic UPDATE ... RETURNING (via .update().select()) rather than
+    // a separate SELECT-then-UPDATE — captures who was assigned in the same
+    // statement that flips status, so there's no window for a concurrent
+    // unassignment to slip in between "read who's assigned" and "cancel".
+    // Only turnovers that were actually 'assigned' have any
+    // turnover_assignments rows to embed — a 'pending_assignment' turnover
+    // never had a crew member, regardless of its post-update status here, so
+    // no separate status check is needed on the returned rows.
+    //
+    // `in.(…)` rather than a chain of `eq`s: one `or` term per column, not one
+    // per booking, so the expression stays two terms wide no matter how many
+    // bookings a sweep found. A turnover matching both columns is still one
+    // row — `or` is a set union, not a join.
+    const { data: updated, error } = await supabase
+      .from('turnovers')
+      .update({ status: 'cancelled' })
+      .or(`booking_id.in.(${ids}),prev_booking_id.in.(${ids})`)
+      .in('status', ['pending_assignment', 'assigned'])
+      .select('id, org_id, turnover_assignments(crew_member_id)')
+
+    // A discarded error here returned [] — indistinguishable from "no turnovers
+    // needed cancelling". The booking is cancelled, its turnovers stay
+    // pending_assignment or assigned, and notifyCrewOfCancelledTurnovers is
+    // handed an empty list, so nobody is told. A crew member turns up to clean a
+    // stay that is not happening. Every caller runs this inside step.run(), so
+    // throwing gets the retry this deserves instead of a silent no-op.
+    if (error) {
+      throw new Error(
+        `cancelTurnoversForBooking failed for booking ${chunk[0]} (+${chunk.length - 1} more): ${error.message}`
+      )
+    }
+
+    for (const t of updated ?? []) {
+      const assignments = unwrapJoinArray<{ crew_member_id: string }>(t.turnover_assignments)
+      for (const a of assignments) {
+        cancelled.push({ turnoverId: t.id, orgId: t.org_id, crewMemberId: a.crew_member_id })
+      }
     }
   }
+
   return cancelled
 }
 

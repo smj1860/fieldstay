@@ -30,7 +30,11 @@ type QueuedByTable = Record<string, Array<{ data?: unknown; error?: unknown }>>
 
 // See unit/settings/team-actions.test.ts for the pattern this mirrors —
 // extended with .in/.gte/.maybeSingle for this route's queries.
-function makeSupabase(queued: QueuedByTable = {}) {
+function makeSupabase(
+  queued: QueuedByTable = {},
+  rpcApplied?: number,
+  rpcError?: { message: string } | null,
+) {
   const counters: Record<string, number> = {}
   const calls: { table: string; method: string; args: unknown[] }[] = []
 
@@ -66,7 +70,17 @@ function makeSupabase(queued: QueuedByTable = {}) {
     return chain
   })
 
-  return { from, calls }
+  // The counted-quantity apply goes through the shared apply_inventory_counts
+  // RPC (the same one the PM path uses) rather than one UPDATE per item, so
+  // the double needs an rpc() that records its args and reports how many rows
+  // it claims to have touched.
+  const rpc = vi.fn(async (fn: string, args: Record<string, unknown>) => {
+    calls.push({ table: `rpc:${fn}`, method: 'rpc', args: [args] })
+    const counts = (args.p_counts ?? []) as unknown[]
+    return { data: rpcApplied ?? counts.length, error: rpcError ?? null }
+  })
+
+  return { from, rpc, calls }
 }
 
 function mockAuthed(supabase: ReturnType<typeof makeSupabase>) {
@@ -141,11 +155,20 @@ describe('POST /api/crew/inventory-count', () => {
         notes:                'weekly count',
       })
 
-      // The item update must be scoped to the crew member's own org_id —
+      // The quantity apply must be scoped to the crew member's own org_id —
       // an item id belonging to another org's inventory cannot be touched.
-      const updateEq = supabase.calls.filter((c) => c.table === 'inventory_items' && c.method === 'eq')
-      expect(updateEq.some((c) => c.args[0] === 'org_id' && c.args[1] === ORG_ID)).toBe(true)
-      expect(updateEq.some((c) => c.args[0] === 'id' && c.args[1] === ITEM_ID)).toBe(true)
+      // The boundary moved from a per-row `.eq('org_id', …)` into the shared
+      // apply_inventory_counts RPC's own WHERE clause, which is exactly why
+      // that RPC takes p_org_id: the item ids come from the client.
+      const applyCall = supabase.calls.find((c) => c.table === 'rpc:apply_inventory_counts')
+      expect(applyCall, 'the crew path must use the same RPC as the PM path').toBeDefined()
+      const applyArgs = applyCall!.args[0] as { p_org_id: string; p_counts: { item_id: string; qty: number }[] }
+      expect(applyArgs.p_org_id).toBe(ORG_ID)
+      expect(applyArgs.p_counts).toEqual([{ item_id: ITEM_ID, qty: 5 }])
+
+      // ONE call, not one per item — the point of the change.
+      expect(supabase.calls.filter((c) => c.method === 'rpc')).toHaveLength(1)
+      expect(supabase.calls.some((c) => c.table === 'inventory_items' && c.method === 'update')).toBe(false)
 
       expect(logAuditEvents).toHaveBeenCalledWith([
         expect.objectContaining({

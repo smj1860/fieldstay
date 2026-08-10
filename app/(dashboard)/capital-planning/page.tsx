@@ -1,5 +1,6 @@
 import { requireOrgMember }          from '@/lib/auth'
 import { unwrap, unwrapList }        from '@/lib/supabase/unwrap'
+import { SUPABASE_MAX_ROWS }         from '@/lib/inngest/paginate'
 import Link                          from 'next/link'
 import { TriggerLedgerButton }       from './trigger-ledger-button'
 import { TriggerProjectionsButton }  from './trigger-projections-button'
@@ -67,15 +68,31 @@ export default async function CapitalPlanningPage({
       .select('id, name')
       .eq('org_id', membership.org_id)
       .eq('is_active', true)
-      .order('name'),
+      .order('name')
+      .limit(SUPABASE_MAX_ROWS),
 
-    // Replacement statuses — used to enrich projection items
+    // Replacement statuses — used to enrich projection items.
+    //
+    // Both reads above are now explicitly bounded. They had no `.limit()` at
+    // all, and unlike a cron this is a USER-FACING render: the whole result set
+    // lands in memory inside the page's Promise.all before anything paints. A
+    // portfolio org with tens of thousands of non-`projected` assets was paying
+    // that on every visit to /capital-planning.
+    //
+    // The better shape is to scope this to the assets actually rendered —
+    // `Object.values(projections).flatMap(p => p.items.map(i => i.asset_id))`
+    // and an `.in('id', …)`. That is not done here because the id list comes
+    // out of the capex milestone fetched in THIS Promise.all, so scoping means
+    // resolving the milestone first and serialising a second round trip. Worth
+    // doing when the asset counts justify it; the bound is what stops the
+    // unbounded read today.
     supabase
       .from('property_assets')
       .select('id, replacement_status')
       .eq('org_id', membership.org_id)
       .eq('is_active', true)
-      .neq('replacement_status', 'projected'),  // only load non-default statuses
+      .neq('replacement_status', 'projected')  // only load non-default statuses
+      .limit(SUPABASE_MAX_ROWS),
   ])
 
   // Throws to app/(dashboard)/capital-planning/error.tsx on a failed read, so

@@ -178,7 +178,6 @@ const BASELINE: Record<string, number> = {
   // existingConfigs read and its own upsert, and syncGuidebookConfigsFromProperty's
   // configs read now unwrap/unwrapList. The remaining two (the property reads
   // feeding both create/sync passes) are unchanged.
-  'lib/guidebook/sync.ts': 2,
   // 2 -> 0 (entry deleted). Both are scoring signals for a vendor SUGGESTION,
   // so they report rather than throw — a PM accepts or overrides it, and
   // there is deliberately no autopilot mode for vendors. Discarded, though, a

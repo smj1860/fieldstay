@@ -44,6 +44,15 @@ vi.mock('@/lib/stripe/client', () => ({
 vi.mock('@/lib/observability/report-error', () => ({
   reportError: vi.fn(),
 }))
+// The destructive half (org purge + auth-user delete) moved to the
+// account-deletion Inngest function on 2026-08-09 — the cascade is one
+// all-or-nothing statement and this route inherits the platform's default
+// maxDuration, so a large tenant could never finish deleting. What the route
+// owes now is: refuse for every reason it used to, then hand off exactly once
+// with exactly the orgs it validated. That seam is this mock.
+vi.mock('@/lib/inngest/client', () => ({
+  inngest: { send: vi.fn(async () => ({ ids: ['evt_1'] })) },
+}))
 
 import { DELETE } from '@/app/api/account/delete/route'
 import { createServerClient } from '@supabase/ssr'
@@ -52,6 +61,7 @@ import { logAuditEvents } from '@/lib/audit'
 import { revokeIntegrationToken } from '@/lib/integrations/vault'
 import { stripe } from '@/lib/stripe/client'
 import { reportError } from '@/lib/observability/report-error'
+import { inngest } from '@/lib/inngest/client'
 
 const USER_ID = 'user_1'
 const EMAIL   = 'pm@example.com'
@@ -65,7 +75,7 @@ type QueuedByTable = Record<string, Queued[]>
  * un-queued call resolves to { data: null, error: null } (a successful no-op),
  * which is what a DELETE against an empty table looks like.
  */
-function makeAdmin(queued: QueuedByTable = {}, opts: { deleteUserError?: { message: string } } = {}) {
+function makeAdmin(queued: QueuedByTable = {}, opts: { deleteUserError?: { message: string }; signOutError?: { message: string } } = {}) {
   const counters: Record<string, number> = {}
   const calls: { table: string; method: string; args: unknown[] }[] = []
   const order: string[] = []
@@ -100,7 +110,15 @@ function makeAdmin(queued: QueuedByTable = {}, opts: { deleteUserError?: { messa
     return { error: opts.deleteUserError ?? null }
   })
 
-  return { from, calls, order, auth: { admin: { deleteUser } } }
+  // The route no longer deletes the auth user — it revokes the caller's
+  // refresh tokens instead, because the user row now disappears at the END of
+  // the background job and the session would otherwise outlive the click.
+  const signOut = vi.fn(async (_id: string, _scope: string) => {
+    order.push('signOut')
+    return { error: opts.signOutError ?? null }
+  })
+
+  return { from, calls, order, auth: { admin: { deleteUser, signOut } } }
 }
 
 /**
@@ -246,11 +264,18 @@ describe('DELETE /api/account/delete', () => {
       deleteRequest({ ...validBody, userId: 'victim_user_id', id: 'victim_user_id' }),
     )
 
-    expect(res.status).toBe(200)
+    expect(res.status).toBe(202)
     const membershipEq = admin.calls.filter((c) => c.table === 'organization_members' && c.method === 'eq')
     expect(membershipEq.some((c) => c.args[0] === 'user_id' && c.args[1] === USER_ID)).toBe(true)
-    expect(admin.auth.admin.deleteUser).toHaveBeenCalledWith(USER_ID)
-    expect(admin.auth.admin.deleteUser).not.toHaveBeenCalledWith('victim_user_id')
+    // The id the JOB is told to delete comes from the session, never the body.
+    // This is the assertion that matters most now that the deletion happens
+    // out of band: the event payload is the only thing the job trusts.
+    expect(inngest.send).toHaveBeenCalledWith({
+      name: 'account/deletion.requested',
+      data: { user_id: USER_ID, owned_org_ids: [] },
+    })
+    expect(admin.auth.admin.signOut).toHaveBeenCalledWith(USER_ID, 'global')
+    expect(admin.auth.admin.signOut).not.toHaveBeenCalledWith('victim_user_id', expect.anything())
   })
 
   it('blocks deleting an owner account while other org members still exist', async () => {
@@ -377,13 +402,19 @@ describe('DELETE /api/account/delete', () => {
 
     const res = await DELETE(deleteRequest(validBody))
 
-    expect(res.status).toBe(200)
-    expect(admin.auth.admin.deleteUser).toHaveBeenCalledWith(USER_ID)
+    expect(res.status).toBe(202)
+    expect(inngest.send).toHaveBeenCalledTimes(1)
   })
 
-  // ── B3: the organization itself must be deleted ──────────────────────────
+  // ── B3: the organization must still be destroyed — now by the handoff ────
 
-  it('DELETES THE ORGANIZATION for an org the user solely owns — deleting only the auth user orphans every org-scoped table (properties, bookings with guest PII, owner_transactions)', async () => {
+  it('HANDS THE ORGANIZATION OFF for purging when the user solely owns it — the org must not survive the auth user', async () => {
+    // B-3, restated for the async shape. Deleting only the auth user orphans
+    // every org-scoped table (properties, bookings with guest PII,
+    // owner_transactions) behind zero members, unreachable by RLS and never
+    // purged — it happened in production on 2026-07-30. The route no longer
+    // performs that purge, so what it owes is that the org reaches the job
+    // that does.
     vi.mocked(createServerClient).mockReturnValue(
       makeAuthClient({ id: USER_ID, email: EMAIL }) as never,
     )
@@ -399,15 +430,66 @@ describe('DELETE /api/account/delete', () => {
 
     const res = await DELETE(deleteRequest(validBody))
 
-    expect(res.status).toBe(200)
-
-    const orgDelete = admin.calls.find((c) => c.table === 'organizations' && c.method === 'delete')
-    expect(orgDelete).toBeDefined()
-    const orgDeleteEq = admin.calls.filter((c) => c.table === 'organizations' && c.method === 'eq')
-    expect(orgDeleteEq.some((c) => c.args[0] === 'id' && c.args[1] === 'org_1')).toBe(true)
+    expect(res.status).toBe(202)
+    expect(inngest.send).toHaveBeenCalledWith({
+      name: 'account/deletion.requested',
+      data: { user_id: USER_ID, owned_org_ids: ['org_1'] },
+    })
+    // And the route itself destroys nothing any more — the ordering guarantees
+    // that used to live here are asserted against the job, in
+    // unit/inngest/account-deletion.test.ts.
+    expect(admin.order).not.toContain('delete:organizations')
+    expect(admin.auth.admin.deleteUser).not.toHaveBeenCalled()
   })
 
-  it('purges the org-scoped tables that have NO cascade from organizations, before deleting the organization, before deleting the auth user', async () => {
+  it('revokes the caller\'s sessions on handoff — the auth user now outlives the response', async () => {
+    // The user row is deleted at the END of the background job, deliberately:
+    // while it exists the tenant is reachable and the purge is re-drivable,
+    // whereas deleting it first turns a failed purge into an orphan nobody can
+    // find. That leaves a window where the session outlives the click, so the
+    // refresh tokens are revoked here.
+    vi.mocked(createServerClient).mockReturnValue(
+      makeAuthClient({ id: USER_ID, email: EMAIL }) as never,
+    )
+    const admin = makeAdmin({
+      organization_members:    [{ data: [{ org_id: 'org_1', role: 'manager' }], error: null }],
+      integration_connections: [{ data: [], error: null }],
+    })
+    vi.mocked(createServiceClient).mockReturnValue(admin as never)
+
+    await DELETE(deleteRequest(validBody))
+
+    expect(admin.auth.admin.signOut).toHaveBeenCalledWith(USER_ID, 'global')
+  })
+
+  it('still succeeds when the sign-out fails — the job removes the user regardless', async () => {
+    vi.mocked(createServerClient).mockReturnValue(
+      makeAuthClient({ id: USER_ID, email: EMAIL }) as never,
+    )
+    const admin = makeAdmin(
+      {
+        organization_members:    [{ data: [{ org_id: 'org_1', role: 'manager' }], error: null }],
+        integration_connections: [{ data: [], error: null }],
+      },
+      { signOutError: { message: 'gotrue down' } },
+    )
+    vi.mocked(createServiceClient).mockReturnValue(admin as never)
+
+    const res = await DELETE(deleteRequest(validBody))
+
+    // The only person holding that session is the one who just asked for all
+    // of this to be destroyed. Failing the request here would strand a GDPR
+    // deletion on a cosmetic step.
+    expect(res.status).toBe(202)
+    expect(inngest.send).toHaveBeenCalledTimes(1)
+  })
+
+  it('returns 503 and destroys NOTHING when the handoff itself fails', async () => {
+    // The send is the last thing that can fail cheaply, which is exactly why
+    // it sits before the response and before the sign-out. If it throws, the
+    // account is fully intact and fully retryable; if it were fired after
+    // anything irreversible, a queue outage would leave a half-deleted account
+    // with no job coming for it.
     vi.mocked(createServerClient).mockReturnValue(
       makeAuthClient({ id: USER_ID, email: EMAIL }) as never,
     )
@@ -420,34 +502,17 @@ describe('DELETE /api/account/delete', () => {
       integration_connections: [{ data: [], error: null }],
     })
     vi.mocked(createServiceClient).mockReturnValue(admin as never)
+    vi.mocked(inngest.send).mockRejectedValueOnce(new Error('inngest unreachable'))
 
-    await DELETE(deleteRequest(validBody))
+    const res = await DELETE(deleteRequest(validBody))
 
-    // Verified against the live schema 2026-07-30 as the complete set of
-    // org_id-bearing tables with no FK to organizations.
-    const noCascade = [
-      // RESTRICT / NO ACTION edges into the cascade tree (work_order_invoices
-      // -> properties/vendors, work_orders -> crew_members): Postgres does not
-      // order cascade actions, so these abort the organizations DELETE unless
-      // cleared first.
-      'work_order_invoices',
-      'work_orders',
-      'asset_depreciation_entries',
-      'assignment_outcomes',
-      'vendor_assignment_outcomes',
-      'crew_availability',
-      'inventory_templates',
-      'maintenance_schedule_templates',
-      'messages',
-    ]
-    for (const table of noCascade) {
-      expect(admin.order).toContain(`delete:${table}`)
-      expect(admin.order.indexOf(`delete:${table}`)).toBeLessThan(
-        admin.order.indexOf('delete:organizations'),
-      )
-    }
-    expect(admin.order.indexOf('delete:organizations')).toBeLessThan(
-      admin.order.indexOf('deleteUser'),
+    expect(res.status).toBe(503)
+    expect(admin.order).not.toContain('delete:organizations')
+    expect(admin.auth.admin.deleteUser).not.toHaveBeenCalled()
+    expect(admin.auth.admin.signOut).not.toHaveBeenCalled()
+    expect(reportError).toHaveBeenCalledWith(
+      expect.any(Error),
+      expect.objectContaining({ site: 'route.account.delete.enqueue' }),
     )
   })
 
@@ -463,32 +528,14 @@ describe('DELETE /api/account/delete', () => {
 
     const res = await DELETE(deleteRequest(validBody))
 
-    expect(res.status).toBe(200)
-    expect(admin.order).not.toContain('delete:organizations')
-    expect(admin.auth.admin.deleteUser).toHaveBeenCalledWith(USER_ID)
-  })
-
-  it('aborts before deleting the auth user when the org purge itself fails — a retryable account beats an unreachable orphaned tenant', async () => {
-    vi.mocked(createServerClient).mockReturnValue(
-      makeAuthClient({ id: USER_ID, email: EMAIL }) as never,
-    )
-    const admin = makeAdmin({
-      organization_members: [
-        { data: [{ org_id: 'org_1', role: 'owner' }], error: null },
-        { data: null, error: null, count: 0 },
-      ],
-      organizations: [
-        { data: { stripe_subscription_id: null }, error: null },
-        { data: null, error: { message: 'deadlock detected' } },  // the DELETE
-      ],
-      integration_connections: [{ data: [], error: null }],
+    expect(res.status).toBe(202)
+    // The handoff carries an EMPTY owned list — a membership the user does not
+    // own must never reach the purge, which deletes the organizations row
+    // outright. The auth-user cascade is what cleans up their membership row.
+    expect(inngest.send).toHaveBeenCalledWith({
+      name: 'account/deletion.requested',
+      data: { user_id: USER_ID, owned_org_ids: [] },
     })
-    vi.mocked(createServiceClient).mockReturnValue(admin as never)
-
-    const res = await DELETE(deleteRequest(validBody))
-
-    expect(res.status).toBe(500)
-    expect(admin.auth.admin.deleteUser).not.toHaveBeenCalled()
   })
 
   // ── Happy path & remaining behaviours ─────────────────────────────────────
@@ -509,8 +556,10 @@ describe('DELETE /api/account/delete', () => {
 
     const res = await DELETE(deleteRequest(validBody))
 
-    expect(res.status).toBe(200)
-    await expect(res.json()).resolves.toEqual({ ok: true })
+    expect(res.status).toBe(202)
+    // `ok: true` is preserved so the client contract is unchanged (it redirects
+    // to /login?deleted=1); `queued` is what says the work is not finished yet.
+    await expect(res.json()).resolves.toEqual({ ok: true, queued: true })
 
     // Only the core subscription now. organizations.repuguard_stripe_subscription_id
     // was dropped with the standalone RepuGuard product — nothing had created
@@ -530,7 +579,10 @@ describe('DELETE /api/account/delete', () => {
     ])
     expect(revokeIntegrationToken).toHaveBeenCalledWith(USER_ID, 'ownerrez')
     expect(revokeIntegrationToken).toHaveBeenCalledWith(USER_ID, 'kroger')
-    expect(admin.auth.admin.deleteUser).toHaveBeenCalledWith(USER_ID)
+    expect(inngest.send).toHaveBeenCalledWith({
+      name: 'account/deletion.requested',
+      data: { user_id: USER_ID, owned_org_ids: ['org_1'] },
+    })
   })
 
   it('continues the delete flow even when revoking one integration token fails, reporting the error', async () => {
@@ -548,30 +600,12 @@ describe('DELETE /api/account/delete', () => {
 
     const res = await DELETE(deleteRequest(validBody))
 
-    expect(res.status).toBe(200)
+    expect(res.status).toBe(202)
     expect(reportError).toHaveBeenCalledWith(
       expect.any(Error),
       expect.objectContaining({ site: 'route.account.delete.vault_revoke' }),
     )
-    expect(admin.auth.admin.deleteUser).toHaveBeenCalledWith(USER_ID)
-  })
-
-  it('returns 500 when the final auth user deletion itself fails', async () => {
-    vi.mocked(createServerClient).mockReturnValue(
-      makeAuthClient({ id: USER_ID, email: EMAIL }) as never,
-    )
-    const admin = makeAdmin(
-      {
-        organization_members:    [{ data: [{ org_id: 'org_1', role: 'manager' }], error: null }],
-        integration_connections: [{ data: [], error: null }],
-      },
-      { deleteUserError: { message: 'auth service down' } },
-    )
-    vi.mocked(createServiceClient).mockReturnValue(admin as never)
-
-    const res = await DELETE(deleteRequest(validBody))
-
-    expect(res.status).toBe(500)
+    expect(inngest.send).toHaveBeenCalledTimes(1)
   })
 
   it('returns 500 when the initial membership lookup errors', async () => {

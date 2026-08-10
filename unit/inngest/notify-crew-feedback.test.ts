@@ -81,11 +81,15 @@ describe('notifyCrewFeedback', () => {
         ],
       }),
     )
+    // Keyed on the Inngest event id: crew/feedback.submitted carries no
+    // crew_feedback row id, and keying on crew member + text would suppress a
+    // crew member who genuinely sends the same short note twice.
     expect(resend.emails.send).toHaveBeenCalledWith(
       expect.objectContaining({
         to:      'stephen@fieldstay.app',
         subject: 'New crew feedback from Jamie Crew',
       }),
+      expect.objectContaining({ idempotencyKey: expect.stringMatching(/^crew-feedback-/) }),
     )
   })
 
@@ -103,6 +107,7 @@ describe('notifyCrewFeedback', () => {
 
     expect(resend.emails.send).toHaveBeenCalledWith(
       expect.objectContaining({ subject: 'New crew feedback from a crew member' }),
+      expect.objectContaining({ idempotencyKey: expect.stringMatching(/^crew-feedback-/) }),
     )
     expect(renderPmAlert).toHaveBeenCalledWith(
       expect.objectContaining({

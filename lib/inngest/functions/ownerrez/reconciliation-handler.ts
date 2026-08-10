@@ -19,14 +19,21 @@
 // ============================================================
 
 import { fetchAllRows } from '@/lib/inngest/paginate'
+import { unwrap }               from '@/lib/supabase/unwrap'
 import { inngest }             from '@/lib/inngest/client'
 import { createServiceClient } from '@/lib/supabase/server'
 import { OwnerRezApiClient }    from '@/lib/integrations/providers/ownerrez-api'
 import { RateLimitError, TokenRevokedError, translateSyncError } from '@/lib/integrations/types'
-import { cancelTurnoversForBooking, notifyCrewOfCancelledTurnovers, type CancelledTurnoverAssignment } from '@/lib/turnovers/generator'
+import { cancelTurnoversForBookings, notifyCrewOfCancelledTurnovers, type CancelledTurnoverAssignment } from '@/lib/turnovers/generator'
 
 import { reportError } from '@/lib/observability/report-error'
 const PROVIDER = 'ownerrez'
+
+/** Bookings claimed per bulk UPDATE. Below max_rows so the RETURNING clause —
+ *  which drives both the count and the turnover cancellation — is never
+ *  truncated, and matched to cancelTurnoversForBookings's own chunk so the two
+ *  statements in a chunk cover exactly the same set. */
+const CANCEL_CHUNK = 100
 
 export const ownerRezReconciliationHandler = inngest.createFunction(
   {
@@ -156,23 +163,50 @@ export const ownerRezReconciliationHandler = inngest.createFunction(
         (b) => b.external_id !== null && !currentExternalIds.has(b.external_id)
       )
 
+      // Batched, two statements per chunk instead of two per stale booking.
+      //
+      // This ran one UPDATE plus one cancelTurnoversForBooking() per booking,
+      // sequentially, inside a single step. That is fine on the steady-state
+      // shape this sweep expects (a handful of hard deletes a day) and awful on
+      // the shape that actually needs it to work: a property unlinked upstream,
+      // or an OwnerRez account reorganised, orphans hundreds of bookings at
+      // once and the step does 2N round-trips before the platform's execution
+      // limit ends it — at which point Inngest retries from the top and does
+      // the same thing again, never reaching the tail of the list.
+      //
+      // Chunked rather than one statement: RETURNING truncates at
+      // max_rows = 1000, and the count below is built from it.
       let cancelledCount = 0
       const cancelledAssignments: CancelledTurnoverAssignment[] = []
 
-      for (const booking of stale) {
-        const { error: cancelErr } = await supabase
+      for (let i = 0; i < stale.length; i += CANCEL_CHUNK) {
+        const chunk = stale.slice(i, i + CANCEL_CHUNK)
+
+        // Throws rather than logging-and-continuing. The old per-booking
+        // `continue` reported a SMALLER cancelledCount and a clean run, so a
+        // booking that failed to cancel looked exactly like a booking that was
+        // never stale — and nothing revisits it, because the next sweep reads
+        // the same row and tries the same write. A retry here is safe: the
+        // re-read excludes anything already cancelled, and the turnover update
+        // is gated on status, so nothing is cancelled or notified twice.
+        const cancelRes = await supabase
           .from('bookings')
           .update({ status: 'cancelled' })
-          .eq('id', booking.id)
+          .in('id', chunk.map((b) => b.id))
           .eq('org_id', org_id)
+          .select('id')
 
-        if (cancelErr) {
-          logger.error(`[OwnerRez reconciliation] failed to cancel booking ${booking.id}: ${cancelErr.message}`)
-          continue
-        }
+        const cancelledIds = unwrap(cancelRes, {
+          site:  'inngest.ownerrez-reconciliation-handler.cancel-stale-bookings',
+          orgId: org_id,
+        }) ?? []
 
-        cancelledAssignments.push(...(await cancelTurnoversForBooking(booking.id, supabase)))
-        cancelledCount++
+        if (!cancelledIds.length) continue
+
+        cancelledAssignments.push(
+          ...(await cancelTurnoversForBookings(cancelledIds.map((b: { id: string }) => b.id), supabase))
+        )
+        cancelledCount += cancelledIds.length
       }
 
       return { cancelledCount, cancelledAssignments }

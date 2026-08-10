@@ -1,6 +1,7 @@
 import { createServiceClient } from '@/lib/supabase/server'
 import { generateBaseSlug, generateUniqueSlugsForProperties } from '@/lib/guidebook/slug'
 import { unwrap, unwrapList } from '@/lib/supabase/unwrap'
+import { fetchAllRows } from '@/lib/inngest/paginate'
 import type { TablesUpdate } from '@/types/database'
 
 /**
@@ -28,24 +29,44 @@ export async function ensureGuidebookConfiguration(orgId: string): Promise<void>
  * incremental sync's affected set) — omit to cover every active property
  * in the org.
  */
+/** Row shape of the provider-sourced property read below. */
+interface PropertyGuidebookSource {
+  id:                    string
+  wifi_name:             string | null
+  wifi_password:         string | null
+  access_instructions:   string | null
+  house_manual:          string | null
+  checkout_instructions: string | null
+  smoking_allowed:       boolean | null
+  pets_allowed:          boolean | null
+  events_allowed:        boolean | null
+}
+
 export async function createGuidebookPropertyConfigsForProperties(
   orgId: string,
   propertyIds?: string[]
 ): Promise<void> {
   const supabase = createServiceClient({ system: 'lib/guidebook/sync' })
 
-  let propertyQuery = supabase
-    .from('properties')
-    .select('id, name')
-    .eq('org_id', orgId)
-    .eq('is_active', true)
-
-  if (propertyIds?.length) {
-    propertyQuery = propertyQuery.in('id', propertyIds)
-  }
-
-  const { data: allProperties } = await propertyQuery
-  if (!allProperties?.length) return
+  // Paginated AND error-bound. Called from three Inngest sync functions, so
+  // "the org's properties" is a cron-scale read: truncated at max_rows, the
+  // properties past the cap never get a guidebook config and nothing says so.
+  // The error was discarded outright, which made a failed read indistinguishable
+  // from "this org has no active properties" — both produced zero configs and a
+  // clean return. fetchAllRows throws, so the enclosing step retries instead.
+  const allProperties = await fetchAllRows<{ id: string; name: string }>(
+    (from, to) => {
+      let q = supabase
+        .from('properties')
+        .select('id, name')
+        .eq('org_id', orgId)
+        .eq('is_active', true)
+      if (propertyIds?.length) q = q.in('id', propertyIds)
+      return q.order('id', { ascending: true }).range(from, to)
+    },
+    { label: `properties(guidebook-configs)[org=${orgId}]` },
+  )
+  if (!allProperties.length) return
 
   const existingConfigsRes = await supabase
     .from('guidebook_property_configs')
@@ -115,19 +136,23 @@ export async function syncGuidebookConfigsFromProperty(
 ): Promise<void> {
   const supabase = createServiceClient({ system: 'lib/guidebook/sync' })
 
-  let propertyQuery = supabase
-    .from('properties')
-    .select('id, wifi_name, wifi_password, access_instructions, house_manual, checkout_instructions, smoking_allowed, pets_allowed, events_allowed')
-    .eq('org_id', orgId)
-    .eq('external_source', externalSource)
-    .eq('is_active', true)
+  // Same shape, same reasoning as the read above.
+  const sourceProperties = await fetchAllRows<PropertyGuidebookSource>(
+    (from, to) => {
+      let q = supabase
+        .from('properties')
+        .select('id, wifi_name, wifi_password, access_instructions, house_manual, checkout_instructions, smoking_allowed, pets_allowed, events_allowed')
+        .eq('org_id', orgId)
+        .eq('external_source', externalSource)
+        .eq('is_active', true)
+      if (propertyIds?.length) q = q.in('id', propertyIds)
+      return q.order('id', { ascending: true }).range(from, to)
+    },
+    { label: `properties(guidebook-content)[org=${orgId}]` },
+  )
 
-  if (propertyIds?.length) {
-    propertyQuery = propertyQuery.in('id', propertyIds)
-  }
-
-  const { data: props } = await propertyQuery
-  if (!props?.length) return
+  const props = sourceProperties
+  if (!props.length) return
 
   const configsRes = await supabase
     .from('guidebook_property_configs')

@@ -98,11 +98,14 @@ describe('handleWorkOrderInvoiceSubmitted', () => {
         ctaUrl: expect.stringContaining('inv_1'),
       }),
     )
+    // Keyed on the invoice, mirroring work-order-invoice-paid.ts one file
+    // over. Without it a step replay tells the PM twice that money is due.
     expect(resend.emails.send).toHaveBeenCalledWith(
       expect.objectContaining({
         to:      'pm@fieldstay.app',
         subject: expect.stringContaining('INV-100'),
       }),
+      { idempotencyKey: 'work-order-invoice-submitted-inv_1' },
     )
     expect(result).toEqual({ work_order_id: 'wo_1', invoice_id: 'inv_1', notified: true })
   })

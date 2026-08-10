@@ -1050,4 +1050,20 @@ export type FieldStayEvents = {
     }
   }
 
+  // The DESTRUCTIVE half of DELETE /api/account/delete, fired only after every
+  // stage that can still refuse (sole-member check, Stripe cancellation, token
+  // revocation, audit) has passed. Off the request thread because the cascade
+  // this triggers is one all-or-nothing statement whose cost is the tenant's
+  // entire history — see lib/inngest/functions/account-deletion.ts.
+  //
+  // owned_org_ids carries only the orgs the caller OWNS and is the sole member
+  // of; memberships in orgs they merely belong to are cleaned up by the
+  // auth-user cascade, not purged.
+  'account/deletion.requested': {
+    data: {
+      user_id:       string
+      owned_org_ids: string[]
+    }
+  }
+
 }

@@ -44,9 +44,10 @@ function makeStep() {
 }
 
 // Queue-based `.from(table)` mock, same convention as the other tests in
-// this batch. `integration_connections` is queried up to twice per terminal
-// failure (mark-revoked, then the reconnect-email-sent stamp), so order
-// matters.
+// this batch. Since 2026-08-09 there is exactly ONE write per terminal
+// failure: the mark-revoked UPDATE also claims the reconnect email, gated on
+// `reconnect_email_sent_at IS NULL`. It returns a row when this run won the
+// claim and nothing when a previous run already did.
 function makeSupabase(queued: Record<string, { data?: unknown; error?: unknown }[]>) {
   const counters: Record<string, number> = {}
   const calls: { table: string; method: string; args: unknown[] }[] = []
@@ -61,6 +62,7 @@ function makeSupabase(queued: Record<string, { data?: unknown; error?: unknown }
     chain.update = (...a: unknown[]) => record('update', a)
     chain.eq     = (...a: unknown[]) => record('eq', a)
     chain.select = (...a: unknown[]) => record('select', a)
+    chain.is     = (...a: unknown[]) => record('is', a)
 
     const resolveNext = () => {
       const idx = counters[table] ?? 0
@@ -152,7 +154,7 @@ describe('integrationTokenRefreshHandler', () => {
     ;(refreshKrogerToken as ReturnType<typeof vi.fn>).mockRejectedValue(new Error('Kroger 401 unauthorized'))
     const supabase = makeSupabase({
       integration_connections: [
-        { data: { reconnect_email_sent_at: null }, error: null }, // mark-revoked
+        { data: { id: 'conn_1' }, error: null },  // claim won
       ],
     })
     ;(createServiceClient as ReturnType<typeof vi.fn>).mockReturnValue(supabase)
@@ -165,10 +167,17 @@ describe('integrationTokenRefreshHandler', () => {
       }),
     ).rejects.toThrow(NonRetriableError)
 
+    // ONE write. The revoke and the email claim are the same statement, gated
+    // on reconnect_email_sent_at IS NULL — a dedup flag written after the
+    // thing it deduplicates is not a dedup flag (see the source comment).
     const updates = supabase.calls.filter((c) => c.table === 'integration_connections' && c.method === 'update')
-    expect(updates).toHaveLength(2)
-    expect(updates[0].args[0]).toMatchObject({ status: 'revoked' })
-    expect(updates[1].args[0]).toMatchObject({ reconnect_email_sent_at: expect.any(String) })
+    expect(updates).toHaveLength(1)
+    expect(updates[0].args[0]).toMatchObject({
+      status:                  'revoked',
+      reconnect_email_sent_at: expect.any(String),
+    })
+    const isCalls = supabase.calls.filter((c) => c.table === 'integration_connections' && c.method === 'is')
+    expect(isCalls[0].args).toEqual(['reconnect_email_sent_at', null])
 
     expect(getPmEmails).toHaveBeenCalledWith(supabase, 'org_1')
     expect(renderIntegrationErrorEmail).toHaveBeenCalledWith(
@@ -176,14 +185,21 @@ describe('integrationTokenRefreshHandler', () => {
     )
     expect(resend.emails.send).toHaveBeenCalledWith(
       expect.objectContaining({ to: 'pm@example.test', subject: expect.stringContaining('Kroger') }),
+      { idempotencyKey: 'integration-reconnect-kroger-user_1' },
     )
   })
 
   it('does not re-send the reconnect email when one was already sent for this connection (dedup)', async () => {
     ;(refreshHospitableToken as ReturnType<typeof vi.fn>).mockRejectedValue(new NonRetriableError('bad refresh token'))
+    // The claim matches no row, because reconnect_email_sent_at is already
+    // set. This is the case that used to repeat DAILY: the cron re-fires for
+    // this connection every day, the refresh fails every day, and the old code
+    // read a flag that the send step had failed to write — so the PM got the
+    // same "action required" email every morning until that write happened to
+    // land.
     const supabase = makeSupabase({
       integration_connections: [
-        { data: { reconnect_email_sent_at: '2026-07-20T00:00:00.000Z' }, error: null },
+        { data: null, error: null },  // claim lost
       ],
     })
     ;(createServiceClient as ReturnType<typeof vi.fn>).mockReturnValue(supabase)
@@ -197,8 +213,6 @@ describe('integrationTokenRefreshHandler', () => {
     ).rejects.toThrow(NonRetriableError)
 
     expect(resend.emails.send).not.toHaveBeenCalled()
-    // Only the mark-revoked update ran — no second write to re-stamp
-    // reconnect_email_sent_at once it's already set.
     const updates = supabase.calls.filter((c) => c.table === 'integration_connections' && c.method === 'update')
     expect(updates).toHaveLength(1)
   })
@@ -207,7 +221,7 @@ describe('integrationTokenRefreshHandler', () => {
     ;(refreshKrogerToken as ReturnType<typeof vi.fn>).mockRejectedValue(new Error('400 bad request'))
     const supabase = makeSupabase({
       integration_connections: [
-        { data: { reconnect_email_sent_at: null }, error: null },
+        { data: { id: 'conn_1' }, error: null },  // claim won
       ],
     })
     ;(createServiceClient as ReturnType<typeof vi.fn>).mockReturnValue(supabase)
@@ -223,7 +237,7 @@ describe('integrationTokenRefreshHandler', () => {
     expect(getPmEmails).not.toHaveBeenCalled()
     expect(resend.emails.send).not.toHaveBeenCalled()
     const updates = supabase.calls.filter((c) => c.table === 'integration_connections' && c.method === 'update')
-    expect(updates).toHaveLength(1) // mark-revoked only
+    expect(updates).toHaveLength(1) // the combined revoke + claim
   })
 
   it('skips the email when no PM email can be resolved for the org', async () => {
@@ -231,7 +245,7 @@ describe('integrationTokenRefreshHandler', () => {
     ;(getPmEmails as ReturnType<typeof vi.fn>).mockResolvedValueOnce([])
     const supabase = makeSupabase({
       integration_connections: [
-        { data: { reconnect_email_sent_at: null }, error: null },
+        { data: { id: 'conn_1' }, error: null },  // claim won
       ],
     })
     ;(createServiceClient as ReturnType<typeof vi.fn>).mockReturnValue(supabase)
@@ -246,35 +260,45 @@ describe('integrationTokenRefreshHandler', () => {
 
     expect(resend.emails.send).not.toHaveBeenCalled()
     const updates = supabase.calls.filter((c) => c.table === 'integration_connections' && c.method === 'update')
-    expect(updates).toHaveLength(1) // mark-revoked only — no reconnect_email_sent_at stamp
+    expect(updates).toHaveLength(1) // the combined revoke + claim
   })
 
-  it('does not stamp reconnect_email_sent_at when the email send itself fails (non-fatal)', async () => {
+  it('THROWS when the email send fails, rather than swallowing it', async () => {
+    // This used to log and return. It could afford to, because tomorrow's cron
+    // run would try again — which was also the bug: it tried again every day
+    // forever, since the flag that would have stopped it was written by the
+    // very step that failed.
+    //
+    // The claim is taken BEFORE the send now, so a swallowed failure would
+    // mean the PM is never told at all. Throwing spends the function's
+    // remaining retries on the send and, on exhaustion, reaches the
+    // dead-letter handler. Note the error is a plain Error, NOT the
+    // NonRetriableError the terminal path ends with — that distinction is the
+    // retry.
     ;(refreshHospitableToken as ReturnType<typeof vi.fn>).mockRejectedValue(new Error('401 invalid_grant'))
     ;(resend.emails.send as ReturnType<typeof vi.fn>).mockResolvedValueOnce({ data: null, error: { message: 'send failed' } })
     const supabase = makeSupabase({
       integration_connections: [
-        { data: { reconnect_email_sent_at: null }, error: null },
+        { data: { id: 'conn_1' }, error: null },  // claim won
       ],
     })
     ;(createServiceClient as ReturnType<typeof vi.fn>).mockReturnValue(supabase)
 
-    await expect(
-      invokeHandler(integrationTokenRefreshHandler, {
-        event:  refreshEvent({ provider_id: 'hospitable', org_id: 'org_1' }),
-        step:   makeStep(),
-        logger: makeLogger(),
-      }),
-    ).rejects.toThrow(NonRetriableError)
+    const err = await invokeHandler(integrationTokenRefreshHandler, {
+      event:  refreshEvent({ provider_id: 'hospitable', org_id: 'org_1' }),
+      step:   makeStep(),
+      logger: makeLogger(),
+    }).catch((e: unknown) => e)
 
-    const updates = supabase.calls.filter((c) => c.table === 'integration_connections' && c.method === 'update')
-    expect(updates).toHaveLength(1) // only mark-revoked — send failure does not get stamped as sent
+    expect(err).toBeInstanceOf(Error)
+    expect(err).not.toBeInstanceOf(NonRetriableError)
+    expect((err as Error).message).toMatch(/Reconnect email send failed/)
   })
 
   it('an unsupported provider is treated as a terminal failure and still runs the revoke/notify path', async () => {
     const supabase = makeSupabase({
       integration_connections: [
-        { data: { reconnect_email_sent_at: null }, error: null },
+        { data: { id: 'conn_1' }, error: null },  // claim won
       ],
     })
     ;(createServiceClient as ReturnType<typeof vi.fn>).mockReturnValue(supabase)

@@ -32,6 +32,12 @@ export const notifyCrewFeedback = inngest.createFunction(
       const cm  = cmResult.data
       const org = orgResult.data
 
+      // Keyed on the EVENT id, not a domain id: crew/feedback.submitted
+      // carries no crew_feedback row id, and the only other candidate —
+      // crew member plus text — would suppress a crew member who genuinely
+      // sends the same short note twice ("app is slow"). Inngest's event id is
+      // stable across step retries and distinct per submission, which is
+      // exactly the identity wanted here.
       const { error } = await resend.emails.send({
         from:    FROM,
         to:      'stephen@fieldstay.app',
@@ -46,7 +52,7 @@ export const notifyCrewFeedback = inngest.createFunction(
           ctaLabel: 'View in Support Inbox →',
           ctaUrl:   `${process.env.NEXT_PUBLIC_APP_URL}/support-inbox`,
         }),
-      })
+      }, { idempotencyKey: `crew-feedback-${event.id}` })
       if (error) throw new Error(`Resend error: ${JSON.stringify(error)}`)
     })
 

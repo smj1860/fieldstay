@@ -1,4 +1,5 @@
 import { createServiceClient } from '@/lib/supabase/server'
+import { fetchAllRows } from '@/lib/inngest/paginate'
 import { tryUnwrapList } from '@/lib/supabase/unwrap'
 import type { AssetType } from '@/types/database'
 import { assetTypeDisplayName } from '@/lib/asset-discovery/config'
@@ -44,18 +45,24 @@ export async function seedPresentAssetsFromAmenities(
   const supabase     = createServiceClient({ system: 'lib/asset-discovery/seed-from-amenities' })
   const presentTypes = Object.keys(PRESENT_ASSET_AMENITY_MAP) as AssetType[]
 
-  let propertyQuery = supabase
-    .from('properties')
-    .select('id, amenities')
-    .eq('org_id', orgId)
-    .eq('is_active', true)
-    .not('amenities', 'is', null)
+  // Paginated: called from Inngest sync functions, so this is a cron-scale
+  // read of the org's properties. Truncated at max_rows the properties past
+  // the cap simply never get assets discovered, permanently and silently.
+  const amenityProperties = await fetchAllRows<{ id: string; amenities: unknown }>(
+    (from, to) => {
+      let q = supabase
+        .from('properties')
+        .select('id, amenities')
+        .eq('org_id', orgId)
+        .eq('is_active', true)
+        .not('amenities', 'is', null)
+      if (propertyIds?.length) q = q.in('id', propertyIds)
+      return q.order('id', { ascending: true }).range(from, to)
+    },
+    { label: `properties(amenity-seed)[org=${orgId}]` },
+  )
 
-  if (propertyIds?.length) {
-    propertyQuery = propertyQuery.in('id', propertyIds)
-  }
-
-  const { data: propertiesWithAmenities } = await propertyQuery
+  const propertiesWithAmenities = amenityProperties
   if (!propertiesWithAmenities?.length) return { seeded: 0, total: 0 }
 
   let seeded = 0
@@ -152,18 +159,24 @@ export async function seedAbsentOptionalAssetsFromAmenities(
   const supabase      = createServiceClient({ system: 'lib/asset-discovery/seed-from-amenities' })
   const optionalTypes = Object.keys(OPTIONAL_ASSET_AMENITY_MAP) as AssetType[]
 
-  let propertyQuery = supabase
-    .from('properties')
-    .select('id, amenities')
-    .eq('org_id', orgId)
-    .eq('is_active', true)
-    .not('amenities', 'is', null)
+  // Paginated: called from Inngest sync functions, so this is a cron-scale
+  // read of the org's properties. Truncated at max_rows the properties past
+  // the cap simply never get assets discovered, permanently and silently.
+  const amenityProperties = await fetchAllRows<{ id: string; amenities: unknown }>(
+    (from, to) => {
+      let q = supabase
+        .from('properties')
+        .select('id, amenities')
+        .eq('org_id', orgId)
+        .eq('is_active', true)
+        .not('amenities', 'is', null)
+      if (propertyIds?.length) q = q.in('id', propertyIds)
+      return q.order('id', { ascending: true }).range(from, to)
+    },
+    { label: `properties(amenity-seed-absent)[org=${orgId}]` },
+  )
 
-  if (propertyIds?.length) {
-    propertyQuery = propertyQuery.in('id', propertyIds)
-  }
-
-  const { data: propertiesWithAmenities } = await propertyQuery
+  const propertiesWithAmenities = amenityProperties
   if (!propertiesWithAmenities?.length) return { seeded: 0, total: 0 }
 
   let seeded = 0

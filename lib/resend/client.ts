@@ -1,4 +1,5 @@
 import { Resend } from 'resend'
+import { RESEND_TIMEOUT_MS } from '@/lib/http/timeout'
 import { renderTeamInviteEmail }   from '@/emails/team-invite'
 import { renderOwnerPortalEmail } from '@/emails/owner-portal'
 import { renderGuestPreArrivalEmail } from '@/emails/guest-pre-arrival'
@@ -32,6 +33,60 @@ export const resend = new Proxy({} as Resend, {
 
 export const FROM = `${process.env.RESEND_FROM_NAME} <${process.env.RESEND_FROM_EMAIL}>`
 
+/** Raised when a send exceeds RESEND_TIMEOUT_MS — distinct from a Resend API error. */
+export class ResendTimeoutError extends Error {
+  constructor() {
+    super(`Resend send exceeded ${RESEND_TIMEOUT_MS}ms`)
+    this.name = 'ResendTimeoutError'
+  }
+}
+
+/**
+ * Time-box a Resend send.
+ *
+ * Every other outbound integration is timeout-enforced, and
+ * `unit/guardrails/external-fetch-timeout.test.ts` keeps them that way — but it
+ * matches raw `fetch()` calls, and Resend goes through its SDK, so this one
+ * surface was invisible to the guardrail and had no budget at all. A slow
+ * Resend held the enclosing Inngest step open until the PLATFORM timeout killed
+ * the whole function, which is both the slowest possible failure and the one
+ * that takes unrelated work down with it.
+ *
+ * ── Why a race and not an AbortSignal ───────────────────────────────────────
+ *
+ * There is no signal to pass. Resend's `PostOptions` is `{ query?: … }` and the
+ * string "signal" does not appear in the published SDK, so the request cannot
+ * be cancelled — only stopped being waited on. The socket runs to completion in
+ * the background and the send may well succeed after we have given up.
+ *
+ * ── Why abandoning an unknown outcome is safe ───────────────────────────────
+ *
+ * Because the retry is deduplicated at Resend, not here. Resend's
+ * `IdempotentRequest` sends an `Idempotency-Key` header, and this codebase
+ * already passes one on the sends that matter. A timed-out send that actually
+ * landed, retried by Inngest with the same key, is rejected as a duplicate
+ * rather than delivered twice — which is exactly the 409 the daily wrap-up
+ * produces today.
+ *
+ * So: pass an idempotencyKey on anything a duplicate would be visible for. The
+ * timeout narrows the window; the key is what closes it.
+ */
+export async function sendWithTimeout<T>(send: () => Promise<T>): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined
+  try {
+    return await Promise.race([
+      send(),
+      new Promise<never>((_, reject) => {
+        timer = setTimeout(() => reject(new ResendTimeoutError()), RESEND_TIMEOUT_MS)
+      }),
+    ])
+  } finally {
+    // Always cleared, including on the happy path — an uncleared timer keeps
+    // the Node process alive for the full budget after the send resolved.
+    if (timer) clearTimeout(timer)
+  }
+}
+
 export async function sendTeamInviteEmail({
   toEmail,
   inviterEmail,
@@ -46,13 +101,13 @@ export async function sendTeamInviteEmail({
   const acceptUrl = `${process.env.NEXT_PUBLIC_APP_URL}/accept-invite/${inviteToken}`
   const html      = await renderTeamInviteEmail({ inviterEmail, orgName, acceptUrl })
 
-  return resend.emails.send({
+  return sendWithTimeout(() => resend.emails.send({
     from:     FROM,
     to:       toEmail,
     replyTo:  'stephen@fieldstay.app',
     subject:  `You've been invited to join ${orgName} on FieldStay`,
     html,
-  })
+  }))
 }
 
 export async function sendOwnerPortalEmail({
@@ -69,13 +124,13 @@ export async function sendOwnerPortalEmail({
   portalUrl:    string
 }) {
   const html = await renderOwnerPortalEmail({ ownerName, orgName, propertyName, portalUrl })
-  return resend.emails.send({
+  return sendWithTimeout(() => resend.emails.send({
     from:    FROM,
     to:      toEmail,
     replyTo: 'help@fieldstay.app',
     subject: `Your owner portal for ${propertyName} is ready — FieldStay`,
     html,
-  })
+  }))
 }
 
 /**
@@ -105,13 +160,13 @@ export async function sendGuestPreArrivalEmail({
 }) {
   const html = await renderGuestPreArrivalEmail({ guestName, propertyName, optInUrl, guidebookUrl })
 
-  const dispatch = () => resend.emails.send({
+  const dispatch = () => sendWithTimeout(() => resend.emails.send({
     from:    FROM,
     to:      toEmail,
     replyTo: 'help@fieldstay.app',
     subject: `Get your door code by text — ${propertyName}`,
     html,
-  })
+  }))
 
   if (!orgId) return dispatch()
 
@@ -153,13 +208,13 @@ export async function sendGuidebookGracePeriodEmail({
   guidebookUrl:      string
 }) {
   const html = await renderGuidebookGracePeriodEmail({ orgName, activeSponsors, gracePeriodEndsAt, guidebookUrl })
-  return resend.emails.send({
+  return sendWithTimeout(() => resend.emails.send({
     from:    FROM,
     to:      toEmail,
     replyTo: 'help@fieldstay.app',
     subject: `Action needed: your guidebook needs sponsors — FieldStay`,
     html,
-  })
+  }))
 }
 
 export async function sendHospitablePriceLockEmail({
@@ -190,11 +245,11 @@ export async function sendHospitablePriceLockEmail({
     ? `You're locked in, ${organizationName} — FieldStay + Hospitable launch`
     : `Your plan's price-locked, ${organizationName} — thanks for connecting via Hospitable`
 
-  return resend.emails.send({
+  return sendWithTimeout(() => resend.emails.send({
     from:    FROM,
     to:      toEmail,
     replyTo: 'stephen@fieldstay.app',
     subject,
     html,
-  })
+  }))
 }

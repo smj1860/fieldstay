@@ -44,6 +44,7 @@ function makeSupabase(queued: Record<string, { data?: unknown; error?: unknown }
     chain.lte    = (...a: unknown[]) => record('lte', a)
     chain.update = (...a: unknown[]) => record('update', a)
     chain.in     = (...a: unknown[]) => record('in', a)
+    chain.limit  = (...a: unknown[]) => record('limit', a)
 
     const resolveNext = () => {
       const idx = counters[table] ?? 0
@@ -170,6 +171,63 @@ describe('vendorComplianceGraceCheck', () => {
 
     expect(result).toEqual({ grace_period_entries: 0, hard_block_candidates: 1, hard_blocked: 0 })
     expect(logAuditEvents).not.toHaveBeenCalled()
+  })
+
+  it('caps the hard-block backlog per run, oldest expiry first, and says so when it truncates', async () => {
+    // Batching the claim removed the step explosion but left the READ
+    // uncapped — a bulk COI import could put 200k candidates into one
+    // invocation's memory and one run's write path. The sibling cron
+    // (vendor-compliance-expiry-check.ts) has capped itself at
+    // MAX_DOCS_PER_RUN = 200 all along for exactly this reason.
+    const supabase = makeSupabase({
+      vendor_compliance_documents: [
+        { data: [], error: null },
+        { data: [], error: null },
+      ],
+    })
+    ;(createServiceClient as ReturnType<typeof vi.fn>).mockReturnValue(supabase)
+
+    await invokeHandler(vendorComplianceGraceCheck, {
+      event: {}, step: makeStep(), logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
+    })
+
+    const limitCall = supabase.calls.find((c) => c.method === 'limit')
+    expect(limitCall, 'the hard-block read must be explicitly bounded').toBeDefined()
+
+    // Deterministic ordering is what makes a cap resumable rather than a
+    // silent hole: tomorrow's run has to pick up exactly where this one
+    // stopped, and the most overdue documents — the ones a vendor is most
+    // wrongly still assignable on — have to go first.
+    const orders = supabase.calls
+      .filter((c) => c.method === 'order' && c.table === 'vendor_compliance_documents')
+      .map((c) => c.args[0])
+    expect(orders).toContain('expiry_date')
+  })
+
+  it('warns rather than silently truncating when the backlog fills the cap', async () => {
+    const full = Array.from({ length: 2_000 }, (_, i) => ({
+      id: `doc_${i}`, org_id: 'org_1', vendor_id: `v${i}`,
+      document_type: 'coi', expiry_date: '2026-01-01',
+    }))
+    const supabase = makeSupabase({
+      vendor_compliance_documents: [
+        { data: [], error: null },
+        { data: full, error: null },
+        { data: full.slice(0, 500).map((d) => ({ id: d.id })),     error: null },
+        { data: full.slice(500, 1000).map((d) => ({ id: d.id })),  error: null },
+        { data: full.slice(1000, 1500).map((d) => ({ id: d.id })), error: null },
+        { data: full.slice(1500).map((d) => ({ id: d.id })),       error: null },
+      ],
+    })
+    ;(createServiceClient as ReturnType<typeof vi.fn>).mockReturnValue(supabase)
+
+    const logger = { info: vi.fn(), warn: vi.fn(), error: vi.fn() }
+    await invokeHandler(vendorComplianceGraceCheck, { event: {}, step: makeStep(), logger })
+
+    // CLAUDE.md's "no silent caps": a full page means there is more backlog
+    // than one run transitions, which someone needs told rather than left to
+    // infer from a count that happens to equal the ceiling.
+    expect(logger.warn).toHaveBeenCalledWith(expect.stringContaining('ceiling'))
   })
 
   it('claims a large hard-block backlog in bulk batches, not one step per document', async () => {
