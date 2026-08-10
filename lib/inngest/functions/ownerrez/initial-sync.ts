@@ -40,6 +40,10 @@ import {
   syncGuidebookConfigsFromProperty,
 } from '@/lib/guidebook/sync'
 import { mergeIntegrationConnectionMetadata } from '@/lib/integrations/connection-metadata'
+import {
+  shouldNotifyConnectionError,
+  recordConnectionErrorNotified,
+} from '@/lib/integrations/connection-error-notify'
 import type { TablesInsert, TablesUpdate } from '@/types/database'
 
 import { reportError } from '@/lib/observability/report-error'
@@ -673,7 +677,8 @@ export const ownerRezInitialSync = inngest.createFunction(
       )
       reportError(err, { site: 'inngest.ownerrez-initial-sync.fetch-new-turnover-data' })
 
-      await step.run('handle-sync-failure', async () => {
+      // Returns the connection id when a PM notification is DUE, or null.
+      const notifyConnectionId = await step.run('handle-sync-failure', async () => {
         const supabase = createServiceClient({ system: 'inngest:initial-sync' })
         const isRevoked = err instanceof TokenRevokedError
 
@@ -715,55 +720,57 @@ export const ownerRezInitialSync = inngest.createFunction(
           },
         })
 
-        // Fire PM notification — throttled to once per 4 hours per connection.
-        // Revoked tokens are the most important case to notify on: only the PM
-        // can fix them by reconnecting, and they never self-resolve on retry.
-        if (existing?.id) {
-          const milestoneKey = `integration_error_notified:${existing.id}`
-          const recentNotificationRes = await supabase
-            .from('org_milestones')
-            .select('value, achieved_at')
-            .eq('org_id', org_id)
-            .eq('milestone', milestoneKey)
-            .order('achieved_at', { ascending: false })
-            .limit(1)
-            .maybeSingle()
-          const recentNotificationOut = tryUnwrap(recentNotificationRes, {
-            site:  'inngest.ownerrez-initial-sync.handle-sync-failure.throttle',
-            orgId: org_id,
-          })
-          const recentNotification = recentNotificationOut.ok ? recentNotificationOut.data : null
-
-          const lastNotifiedAt = (recentNotification?.value as Record<string, unknown> | null)
-            ?.notified_at
-          const tooSoon = lastNotifiedAt &&
-            Date.now() - new Date(lastNotifiedAt as string).getTime() < 4 * 60 * 60 * 1000
-
-          if (!tooSoon) {
-            await step.sendEvent('notify-connection-error', {
-              name: 'integration/connection.error',
-              data: {
-                user_id:     user_id,
-                org_id:      org_id,
-                provider_id: PROVIDER,
-                reason:      humanError,
-              },
-            })
-            const { error: milestoneUpsertError } = await supabase.from('org_milestones').upsert({
-              org_id:    org_id,
-              milestone: milestoneKey,
-              value:     { notified_at: new Date().toISOString() },
-            }, { onConflict: 'org_id,milestone' })
-            if (milestoneUpsertError) {
-              console.error(`[OwnerRez:${user_id}] failed to record error-notification milestone:`, milestoneUpsertError)
-              reportError(milestoneUpsertError, {
-                site:  'inngest.ownerrez-initial-sync.handle-sync-failure.record-notified',
-                orgId: org_id,
-              })
-            }
-          }
-        }
+        // Decide whether a PM notification is due — throttled to once per 4
+        // hours per connection. Revoked tokens are the most important case to
+        // notify on: only the PM can fix them by reconnecting, and they never
+        // self-resolve on retry.
+        //
+        // Decision ONLY; the send happens at the top level below. See the
+        // block comment there.
+        if (!existing?.id) return null
+        const due = await shouldNotifyConnectionError(supabase, {
+          orgId:        org_id,
+          connectionId: existing.id,
+          site:         'inngest.ownerrez-initial-sync.handle-sync-failure.throttle',
+        })
+        return due ? existing.id : null
       })
+
+      // The send is HERE, at the top level, not inside handle-sync-failure.
+      // It used to sit inside that step.run. Inngest does not support nested
+      // step tooling: it warns rather than throws (NESTING_STEPS), then
+      // unwinds the request so the nested op can be scheduled, which leaves
+      // the enclosing step.run unresolved. Its callback then re-ran from the
+      // top on the next pass — re-emitting the integration.sync_failed audit
+      // event above, an un-deduped insert. Every failed initial sync that
+      // notified wrote two audit rows.
+      //
+      // It also has to run BEFORE the throws below, or the notification the
+      // PM needs most (a revoked token) would never be sent.
+      // See lib/integrations/connection-error-notify.ts.
+      if (notifyConnectionId) {
+        await step.sendEvent('notify-connection-error', {
+          name: 'integration/connection.error',
+          data: {
+            user_id:     user_id,
+            org_id:      org_id,
+            provider_id: PROVIDER,
+            reason:      humanError,
+          },
+        })
+
+        // Its own step, deliberately: a failure here retries just this write,
+        // with the send already memoized, so it can neither duplicate the
+        // notification nor replay the audit event.
+        await step.run('record-connection-error-notified', async () => {
+          const supabase = createServiceClient({ system: 'inngest:initial-sync' })
+          await recordConnectionErrorNotified(supabase, {
+            orgId:        org_id,
+            connectionId: notifyConnectionId,
+            site:         'inngest.ownerrez-initial-sync.handle-sync-failure.record-notified',
+          })
+        })
+      }
 
       // MEDIUM-6: token revocation is permanent — retrying just re-hits the
       // same revoked token, burning all 3 retries for nothing. Throw

@@ -970,6 +970,16 @@ and gated crew counts behind a PM approval that product never wanted.
 ### Inngest constraints
 
 - `step.sleep` at top level only — never nested inside another step
+- **NO step tooling of any kind inside a `step.run()` callback** — not
+  `sendEvent`, `sleep`, `waitForEvent`, `invoke`, or another `run`, and not
+  via a helper that closes over `step` (that indirection is how two of these
+  shipped). The SDK only WARNS on nesting, then unwinds the request to
+  schedule the nested op, leaving the enclosing `step.run` unresolved — its
+  callback re-runs from the top next pass, replaying every side effect
+  written before the nested call. Have the `step.run` return a DECISION and
+  do the step tooling at the function's top level;
+  `lib/integrations/connection-error-notify.ts` is the worked example.
+  Enforced by `unit/guardrails/inngest-nested-steps.test.ts`
 - `createServiceClient()` inside `step.run()` only — never in outer function scope
 - `for...of` inside `step.run()`: use `continue` to skip iterations, never `return` — `return` aborts the entire step and silently skips all remaining iterations
 - Exactly one `serve()` call in the Inngest route file
@@ -1271,6 +1281,15 @@ following them stops being a memory test. Five layers, checked in CI via
      `23505` catch, a `dedup(e)?_key` column, or `createPmNotification()`)
      or a named, justified `EXCEPTIONS` entry — the structural backstop for
      the Inngest Functions section's idempotency rule.
+   - `inngest-nested-steps` — no step tooling inside a `step.run()` callback,
+     checked in BOTH shapes: written there directly, and reached through a
+     same-file helper that closes over `step`. The second shape is the point —
+     it is how `ownerrez-reviews-sync.ts` read as clean to a lexical scan while
+     duplicating an audit row on every connection revocation. Also bans step
+     tooling in shared `lib/` modules outside `lib/inngest/`, so the defect
+     cannot be relocated somewhere a reviewer of the Inngest function will not
+     look. Carries self-check fixtures: the scan is asserted to FIRE on both
+     shapes, since a broken checker and a clean tree both return zero.
    - `sensitive-data-logging` — no `console.log`/`error`/`warn`/`info`,
      `reportError()`, or `logAuditEvent(s)(` call references `actual_cost`,
      a guest phone field, SMS body content, or a Stripe/client-secret token
