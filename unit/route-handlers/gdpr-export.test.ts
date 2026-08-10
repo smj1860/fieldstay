@@ -41,6 +41,11 @@ function makeAdmin(queued: QueuedByTable = {}) {
     chain.eq     = (...a: unknown[]) => record('eq', a)
     chain.order  = (...a: unknown[]) => record('order', a)
     chain.limit  = (...a: unknown[]) => record('limit', a)
+    // audit_events and turnover_assignments now PAGE to completeness with an
+    // explicit ceiling instead of `.limit(500)`/`.limit(200)` — a `.limit()`
+    // silently drops rows, which in an Article 15 right-of-access response is
+    // a compliance defect rather than a tuning choice.
+    chain.range  = (...a: unknown[]) => record('range', a)
 
     const resolveNext = () => {
       const idx = counters[table] ?? 0
@@ -192,5 +197,124 @@ describe('GET /api/gdpr/export', () => {
       expect.objectContaining({ orgId: 'org_1', actorId: USER_ID }),
       expect.objectContaining({ orgId: 'org_2', actorId: USER_ID }),
     ])
+  })
+  // ── Completeness (P2-14) ──────────────────────────────────────────────────
+  //
+  // The history series used to be `.limit(500)` / `.limit(200)`. That is not a
+  // bound on an Article 15 right-of-access response so much as a silent
+  // omission from one: "all the personal data we hold about you" quietly
+  // meaning "the most recent 500 events", with nothing in the payload, the
+  // response or the logs saying so. These pin that the export now pages to
+  // completeness and is honest when it cannot.
+
+  it('pages the history series instead of silently capping them with .limit()', async () => {
+    vi.mocked(createClient).mockResolvedValue(makeAuthClient({ id: USER_ID }) as never)
+    const admin = makeAdmin({
+      organization_members: [{ data: [], error: null }],
+      crew_members:         [{ data: null, error: null }],
+      audit_events:         [{ data: [{ action: 'auth.login', target_type: null, target_id: null, created_at: '2026-01-01T00:00:00Z' }], error: null }],
+    })
+    vi.mocked(createServiceClient).mockReturnValue(admin as never)
+
+    await GET()
+
+    const auditCalls = admin.calls.filter((c) => c.table === 'audit_events')
+    expect(auditCalls.some((c) => c.method === 'range')).toBe(true)
+    expect(auditCalls.some((c) => c.method === 'limit')).toBe(false)
+  })
+
+  it('orders every paged series by a UNIQUE key, not just a timestamp', async () => {
+    // created_at / assigned_at are not unique. Without a tiebreak, ties can
+    // straddle a page boundary and .range() paging repeats or skips them —
+    // which in this route means a data-access response that is quietly wrong
+    // rather than quietly short.
+    vi.mocked(createClient).mockResolvedValue(makeAuthClient({ id: USER_ID }) as never)
+    const admin = makeAdmin({
+      organization_members: [{ data: [], error: null }],
+      crew_members:         [{ data: { id: 'cm_1' }, error: null }],
+    })
+    vi.mocked(createServiceClient).mockReturnValue(admin as never)
+
+    await GET()
+
+    const orderCols = (table: string) =>
+      admin.calls.filter((c) => c.table === table && c.method === 'order').map((c) => c.args[0])
+
+    expect(orderCols('audit_events')).toEqual(['created_at', 'id'])
+    expect(orderCols('turnover_assignments')).toEqual(['assigned_at', 'turnover_id'])
+  })
+
+  it('reports completeness on a normal export, not only when something was cut', async () => {
+    // A field that appears only on the unhappy path is one no consumer builds
+    // against — they have never seen it, so they never check for it.
+    vi.mocked(createClient).mockResolvedValue(makeAuthClient({ id: USER_ID, email: 'pm@example.test' }) as never)
+    const admin = makeAdmin({
+      organization_members: [{ data: [], error: null }],
+      crew_members:         [{ data: null, error: null }],
+      audit_events:         [{ data: [], error: null }],
+    })
+    vi.mocked(createServiceClient).mockReturnValue(admin as never)
+
+    const res = await GET()
+    const body = JSON.parse(await res.text())
+
+    expect(body.completeness).toEqual({
+      complete: true,
+      row_ceiling_per_series: 5000,
+      truncated: { audit_trail: false, crew_assignments: false },
+      note: null,
+    })
+  })
+
+  it('DISCLOSES a truncated series rather than shipping a short export as a complete one', async () => {
+    vi.mocked(createClient).mockResolvedValue(makeAuthClient({ id: USER_ID }) as never)
+
+    // Every page comes back full, so the pager keeps going until the ceiling.
+    const fullPage = Array.from({ length: 500 }, (_, i) => ({
+      action: 'auth.login', target_type: null, target_id: null, created_at: `2026-01-01T00:00:${String(i % 60).padStart(2, '0')}Z`,
+    }))
+    const admin = makeAdmin({
+      organization_members: [{ data: [], error: null }],
+      crew_members:         [{ data: null, error: null }],
+      audit_events:         Array.from({ length: 20 }, () => ({ data: fullPage, error: null })),
+    })
+    vi.mocked(createServiceClient).mockReturnValue(admin as never)
+
+    const res = await GET()
+    const body = JSON.parse(await res.text())
+
+    expect(body.completeness.complete).toBe(false)
+    expect(body.completeness.truncated.audit_trail).toBe(true)
+    expect(body.completeness.note).toMatch(/support@fieldstay\.app/)
+
+    // Cut to exactly the ceiling — not one page over it, which is what a
+    // length check placed after the push would produce.
+    expect(body.audit_trail).toHaveLength(5000)
+  })
+
+  it('never logs the exported CONTENTS when it warns about truncation', async () => {
+    // The whole payload is personal data. The operational signal is the user
+    // id and which series was cut — nothing else may reach the logs.
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    vi.mocked(createClient).mockResolvedValue(makeAuthClient({ id: USER_ID, email: 'pm@example.test' }) as never)
+
+    const fullPage = Array.from({ length: 500 }, () => ({
+      action: 'auth.login', target_type: null, target_id: 'secret-target', created_at: '2026-01-01T00:00:00Z',
+    }))
+    const admin = makeAdmin({
+      organization_members: [{ data: [], error: null }],
+      crew_members:         [{ data: null, error: null }],
+      audit_events:         Array.from({ length: 20 }, () => ({ data: fullPage, error: null })),
+    })
+    vi.mocked(createServiceClient).mockReturnValue(admin as never)
+
+    await GET()
+
+    expect(warn).toHaveBeenCalled()
+    const logged = warn.mock.calls.flat().join(' ')
+    expect(logged).toContain(USER_ID)
+    expect(logged).not.toContain('secret-target')
+    expect(logged).not.toContain('pm@example.test')
+    warn.mockRestore()
   })
 })

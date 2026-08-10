@@ -129,7 +129,11 @@ describe('autoAssignTurnover', () => {
       }],
       crew_availability: [{ data: [{ crew_member_id: 'c1' }], error: null }],
       turnover_assignments: [
-        { data: [], error: null }, // upcoming workload query
+        // Familiarity is now ONE joined read (turnovers!inner) instead of a
+        // turnovers id-list scan feeding an .in() — so it consumes a
+        // turnover_assignments slot that used to belong to the turnovers table.
+        { data: [], error: null }, // familiarity (joined)
+        { data: [], error: null }, // upcoming workload
         { error: null },           // insert (autopilot assignment)
       ],
       assignment_outcomes: [{ error: null }],
@@ -158,7 +162,8 @@ describe('autoAssignTurnover', () => {
       crew_members: [{ data: [{ id: 'c1', name: 'Crew One', home_lat: 30.0, home_lng: -90.0, reliability_score: 1, capacity_score: 1 }], error: null }],
       crew_availability: [{ data: [], error: null }],
       turnover_assignments: [
-        { data: [], error: null },
+        { data: [], error: null }, // familiarity (joined)
+        { data: [], error: null }, // upcoming workload
         { error: { code: '23505', message: 'duplicate key value violates unique constraint' } },
       ],
       assignment_outcomes: [{ error: null }],
@@ -203,5 +208,110 @@ describe('autoAssignTurnover', () => {
 
     const suggestionWrite = supabase.calls.find((c) => c.table === 'turnovers' && c.method === 'update')
     expect(suggestionWrite?.args[0]).toMatchObject({ suggested_crew_ids: ['c1'], suggestion_status: 'pending' })
+  })
+  // ── P3-3 / P3-4 / P3-5: what this function is allowed to cost, and to race ──
+
+  it('serialises per turnover, so two concurrent runs cannot assign two crew to one job', () => {
+    // The global `limit: 10` does NOT stop two runs for the SAME turnover
+    // overlapping (a duplicate turnover/created, or a retry racing the
+    // original). The (turnover_id, crew_member_id) unique index only catches
+    // them picking the SAME crew member — scores shift with workload, so two
+    // runs can pick DIFFERENT top candidates and both inserts succeed.
+    //
+    // Asserted on the function's config rather than by simulating a race,
+    // because the guarantee IS the config: Inngest enforces it, and there is
+    // nothing in this process to observe.
+    const concurrency = (autoAssignTurnover as unknown as {
+      opts: { concurrency: Array<{ limit: number; key?: string }> }
+    }).opts.concurrency
+
+    expect(Array.isArray(concurrency)).toBe(true)
+    expect(concurrency).toContainEqual({ limit: 1, key: 'event.data.turnover_id' })
+    // …without giving up the global cap that keeps a bulk fan-out from
+    // exhausting the connection pool.
+    expect(concurrency).toContainEqual({ limit: 10 })
+  })
+
+  it('pages the crew roster instead of silently scoring only the first 1,000', async () => {
+    const supabase = makeSupabase({
+      organizations: [{ data: { auto_assign_mode: 'suggest' }, error: null }],
+      turnovers: [
+        { data: { id: TURNOVER_ID, status: 'pending_assignment', is_same_day_turnover: false }, error: null },
+        { error: null },
+      ],
+      properties:   [{ data: { id: PROPERTY_ID, lat: 30.0, lng: -90.0, bedrooms: 2 }, error: null }],
+      crew_members: [{ data: [{ id: 'c1', name: 'Crew One', home_lat: 30.0, home_lng: -90.0, reliability_score: 1, capacity_score: 1 }], error: null }],
+      crew_availability: [{ data: [], error: null }],
+      turnover_assignments: [{ data: [], error: null }, { data: [], error: null }],
+    })
+    ;(createServiceClient as ReturnType<typeof vi.fn>).mockReturnValue(supabase)
+
+    await invokeHandler(autoAssignTurnover, { event: baseEvent(), step: makeStep() })
+
+    const crewCalls = supabase.calls.filter((c) => c.table === 'crew_members')
+    expect(crewCalls.some((c) => c.method === 'range')).toBe(true)
+  })
+
+  it('resolves familiarity with a JOIN, never an id list in the query string', async () => {
+    // The old shape read every past turnover id for the property, then passed
+    // the whole set to `.in('turnover_id', …)`. Both reads paginated, so
+    // neither truncated — but `.in()` puts every id in the QUERY STRING, on
+    // every page, so a property with a few thousand turnovers builds a request
+    // line a gateway rejects. Pagination does not help; it repeats it.
+    const supabase = makeSupabase({
+      organizations: [{ data: { auto_assign_mode: 'suggest' }, error: null }],
+      turnovers: [
+        { data: { id: TURNOVER_ID, status: 'pending_assignment', is_same_day_turnover: false }, error: null },
+        { error: null },
+      ],
+      properties:   [{ data: { id: PROPERTY_ID, lat: 30.0, lng: -90.0, bedrooms: 2 }, error: null }],
+      crew_members: [{ data: [{ id: 'c1', name: 'Crew One', home_lat: 30.0, home_lng: -90.0, reliability_score: 1, capacity_score: 1 }], error: null }],
+      crew_availability: [{ data: [], error: null }],
+      turnover_assignments: [{ data: [], error: null }, { data: [], error: null }],
+    })
+    ;(createServiceClient as ReturnType<typeof vi.fn>).mockReturnValue(supabase)
+
+    await invokeHandler(autoAssignTurnover, { event: baseEvent(), step: makeStep() })
+
+    // The property is filtered through the embed, server-side.
+    const selects = supabase.calls.filter((c) => c.table === 'turnover_assignments' && c.method === 'select')
+    expect(selects.some((c) => String(c.args[0]).includes('turnovers!inner'))).toBe(true)
+
+    const eqs = supabase.calls.filter((c) => c.table === 'turnover_assignments' && c.method === 'eq')
+    expect(eqs).toContainEqual(expect.objectContaining({ args: ['turnovers.property_id', PROPERTY_ID] }))
+
+    // And the id-list scan that fed it is gone: no read of `turnovers` that
+    // pages a bare id column.
+    const turnoverIdScan = supabase.calls.filter(
+      (c) => c.table === 'turnovers' && c.method === 'select' && String(c.args[0]).trim() === 'id',
+    )
+    expect(turnoverIdScan).toEqual([])
+  })
+
+  it('windows familiarity rather than scanning the property\'s whole lifetime', async () => {
+    const supabase = makeSupabase({
+      organizations: [{ data: { auto_assign_mode: 'suggest' }, error: null }],
+      turnovers: [
+        { data: { id: TURNOVER_ID, status: 'pending_assignment', is_same_day_turnover: false }, error: null },
+        { error: null },
+      ],
+      properties:   [{ data: { id: PROPERTY_ID, lat: 30.0, lng: -90.0, bedrooms: 2 }, error: null }],
+      crew_members: [{ data: [{ id: 'c1', name: 'Crew One', home_lat: 30.0, home_lng: -90.0, reliability_score: 1, capacity_score: 1 }], error: null }],
+      crew_availability: [{ data: [], error: null }],
+      turnover_assignments: [{ data: [], error: null }, { data: [], error: null }],
+    })
+    ;(createServiceClient as ReturnType<typeof vi.fn>).mockReturnValue(supabase)
+
+    await invokeHandler(autoAssignTurnover, { event: baseEvent(), step: makeStep() })
+
+    const gte = supabase.calls.find(
+      (c) => c.table === 'turnover_assignments' && c.method === 'gte' && c.args[0] === 'turnovers.checkout_datetime',
+    )
+    expect(gte, 'familiarity must be bounded to a rolling window').toBeDefined()
+
+    // ~90 days back, allowing a second of clock drift during the test.
+    const cutoff = new Date(String(gte?.args[1])).getTime()
+    const expected = Date.now() - 90 * 86_400_000
+    expect(Math.abs(cutoff - expected)).toBeLessThan(60_000)
   })
 })

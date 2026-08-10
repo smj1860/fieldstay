@@ -375,6 +375,13 @@ function redirectToLogin(request: NextRequest, pathname: string, nonce: string):
   return withCsp(NextResponse.redirect(url), nonce)
 }
 
+/** Does this request carry ANY Supabase auth cookie, chunked or not? */
+function hasSessionCookie(request: NextRequest): boolean {
+  return request.cookies.getAll().some(
+    (c) => c.name.startsWith('sb-') && c.name.includes('-auth-token')
+  )
+}
+
 export async function proxy(request: NextRequest) {
   const { pathname } = request.nextUrl
 
@@ -394,8 +401,31 @@ export async function proxy(request: NextRequest) {
   if (classification === 'bypass') return bypassResponse(request, pathname, nonce)
   if (classification === 'token')  return withCsp(NextResponse.next({ request }), nonce)
 
-  const { supabaseResponse, user } = await updateSession(request)
   const isPublic = classification === 'public'
+
+  // ANONYMOUS TRAFFIC PAYS NOTHING.
+  //
+  // updateSession() runs Supabase Auth below, and it used to run before this
+  // check — so a visitor with no session at all, landing on /, /login, /signup
+  // or /forgot-password, still triggered auth work on every page view. That
+  // made the entire public-facing site depend on Supabase Auth's availability
+  // and latency, for a request that by definition has no session to validate.
+  //
+  // A request with no session cookie cannot be authenticated, so there is
+  // nothing for updateSession() to refresh and nothing for the two redirects
+  // below to act on: `!user && isPublic` is a no-op, and `user && isPublic`
+  // cannot be true. Skipping is exactly equivalent, minus the work.
+  //
+  // Substring, not endsWith: @supabase/ssr CHUNKS a large session across
+  // `sb-<ref>-auth-token.0`, `.1`, … so an endsWith('-auth-token') test —
+  // which is what the obvious version of this looks like — silently classifies
+  // the users with the biggest sessions as anonymous, and stops redirecting
+  // them away from /login.
+  if (isPublic && !hasSessionCookie(request)) {
+    return withCsp(NextResponse.next({ request }), nonce)
+  }
+
+  const { supabaseResponse, user } = await updateSession(request)
 
   // Unauthenticated user hitting a protected route → redirect to login
   if (!user && !isPublic) return redirectToLogin(request, pathname, nonce)
@@ -407,6 +437,62 @@ export async function proxy(request: NextRequest) {
   return withCsp(supabaseResponse, nonce)
 }
 
+/**
+ * Which requests run this middleware at all.
+ *
+ * The old pattern excluded `_next/static`, `_next/image`, `favicon.ico` and a
+ * fixed IMAGE extension list — so every other static file under /public had to
+ * be enumerated by hand in BYPASS_ROUTES (`/manifest.json`,
+ * `/dashboard-manifest.json`, `/sw.js`, `/theme-init.js`, `/offline.html`, …).
+ * Today's tree happens to be fully covered, but the safety net was "someone
+ * remembers to add a line". A missed entry means that asset pays the full
+ * session resolution on every request — and, for an anonymous fetch, a 307 to
+ * /login instead of the file.
+ *
+ * `[^/]+\.[a-zA-Z0-9]+$` replaces the allowlist with a structural rule: a
+ * ROOT-LEVEL path with a file extension is a static asset. Every current and
+ * future /public file is exempt with no per-file entry, which is the actual
+ * finding (P3-6).
+ *
+ * ── Why root-level, and not the audit's `.*\.(js|json|css|…)$` ─────────────
+ *
+ * Because middleware is where TOKEN-ROUTE RATE LIMITING lives
+ * (rateLimiterForPathname, applied at the top of proxy()). An unanchored
+ * extension exclusion also matches a dynamic segment that happens to end in
+ * one — `/vendor-connect/<token>.map` would skip middleware entirely and
+ * therefore skip its throttle, on exactly the enumeration-prone surfaces that
+ * throttle exists to protect.
+ *
+ * Every token route is NESTED (`/owner/…`, `/work-orders/…`, `/g/b/…`,
+ * `/vendor-connect/…`), and every /public file here is FLAT, so anchoring the
+ * extension test to a single root segment separates them cleanly. Tokens are
+ * crypto.randomUUID() and contain no dots today — this does not depend on that
+ * staying true, which is the point.
+ *
+ * The nested image exclusion is kept as-is: images may legitimately live in
+ * subdirectories, and they are never a token route.
+ *
+ * BYPASS_ROUTES keeps its static entries. They are now unreachable rather than
+ * load-bearing, and that is deliberate defence in depth — if this pattern is
+ * ever narrowed, the allowlist is what stops those files 307ing to /login.
+ * unit/lib/proxy-matcher.test.ts is what stops the pattern being narrowed
+ * silently.
+ */
+// The literal is INLINE, and must stay inline. Next.js statically parses this
+// object at build time and rejects anything it cannot read without evaluating:
+//
+//   Next.js can't recognize the exported `config` field in route.
+//   Entry `matcher[0]` need to be static strings or static objects.
+//
+// A `const MIDDLEWARE_MATCHER = '…'` referenced here type-checks, lints,
+// passes every unit test and every semgrep gate, and then fails `next build`.
+// Nothing in the local verification pass runs a build, so this is invisible
+// until CI — the same class as the 'use server' export rule that
+// unit/guardrails/use-server-exports.test.ts exists for, and now guarded the
+// same way by unit/guardrails/next-static-config.test.ts.
+//
+// Tests read `config.matcher[0]` rather than a second copy of the pattern, so
+// there is exactly one source of truth.
 export const config = {
-  matcher: ['/((?!_next/static|_next/image|favicon.ico|.*\\.(?:svg|png|jpg|jpeg|gif|webp)$).*)'],
+  matcher: ['/((?!_next/static|_next/image|[^/]+\\.[a-zA-Z0-9]+$|.*\\.(?:svg|png|jpg|jpeg|gif|webp)$).*)'],
 }
