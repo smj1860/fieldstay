@@ -29,17 +29,26 @@ function mockSupabaseClient(opts: { user: { id: string } | null; refreshedCookie
     capturedCookies = config.cookies
     return {
       auth: {
-        getUser: vi.fn(async () => {
+        getClaims: vi.fn(async () => {
           // Simulate @supabase/ssr rewriting cookies mid-call when the
           // session token gets refreshed, exactly like the real client does.
+          // getClaims() refreshes a near-expiry token before verifying it, so
+          // the cookie plumbing has to keep working under it — that is the
+          // property the refresh tests below actually guard.
           if (opts.refreshedCookies) {
             capturedCookies?.setAll(opts.refreshedCookies)
           }
-          return { data: { user: opts.user } }
+          return { data: opts.user ? { claims: { sub: opts.user.id } } : null }
         }),
-        // getSession must never be called by this module — see assertions below.
+        // Neither of these may be called. getSession() does no verification at
+        // all (a forged cookie passes); getUser() verifies, but over the
+        // network on every single request — which is the cost this module was
+        // changed to stop paying.
+        getUser: vi.fn(async () => {
+          throw new Error('getUser should never be called — getClaims() verifies locally')
+        }),
         getSession: vi.fn(async () => {
-          throw new Error('getSession should never be called — use getUser()')
+          throw new Error('getSession should never be called — it does not verify')
         }),
       },
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -72,24 +81,35 @@ describe('updateSession', () => {
     )
   })
 
-  it('calls auth.getUser() to validate the session, not getSession()', async () => {
+  it('verifies the JWT LOCALLY via getClaims(), calling neither getUser() nor getSession()', async () => {
+    // The three are not interchangeable:
+    //   getSession() trusts the cookie with no verification — a forged cookie
+    //                passes, so it must never appear here.
+    //   getUser()    verifies, but with a GoTrue network round trip on EVERY
+    //                request, making Auth uptime a dependency of every page.
+    //   getClaims()  verifies the ES256 signature locally against a cached
+    //                JWKS (confirmed asymmetric for this project).
     const getCookies = mockSupabaseClient({ user: { id: 'user_1' } })
     const request = new NextRequest('https://app.fieldstay.test/ops')
 
     await updateSession(request)
 
     const client = vi.mocked(createServerClient).mock.results[0].value
-    expect(client.auth.getUser).toHaveBeenCalledTimes(1)
+    expect(client.auth.getClaims).toHaveBeenCalledTimes(1)
+    expect(client.auth.getUser).not.toHaveBeenCalled()
     expect(client.auth.getSession).not.toHaveBeenCalled()
     expect(getCookies()).toBeDefined()
   })
 
-  it('returns the authenticated user from getUser()', async () => {
+  it('returns { id } taken from the verified `sub` claim', async () => {
     mockSupabaseClient({ user: { id: 'user_42' } })
     const request = new NextRequest('https://app.fieldstay.test/ops')
 
     const { user } = await updateSession(request)
 
+    // Deliberately narrowed to { id }. proxy.ts only tests this for
+    // truthiness, and returning the raw claims would invite a future caller to
+    // treat a locally-verified claim as a full, server-confirmed User.
     expect(user).toEqual({ id: 'user_42' })
   })
 

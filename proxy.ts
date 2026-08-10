@@ -375,6 +375,13 @@ function redirectToLogin(request: NextRequest, pathname: string, nonce: string):
   return withCsp(NextResponse.redirect(url), nonce)
 }
 
+/** Does this request carry ANY Supabase auth cookie, chunked or not? */
+function hasSessionCookie(request: NextRequest): boolean {
+  return request.cookies.getAll().some(
+    (c) => c.name.startsWith('sb-') && c.name.includes('-auth-token')
+  )
+}
+
 export async function proxy(request: NextRequest) {
   const { pathname } = request.nextUrl
 
@@ -394,8 +401,31 @@ export async function proxy(request: NextRequest) {
   if (classification === 'bypass') return bypassResponse(request, pathname, nonce)
   if (classification === 'token')  return withCsp(NextResponse.next({ request }), nonce)
 
-  const { supabaseResponse, user } = await updateSession(request)
   const isPublic = classification === 'public'
+
+  // ANONYMOUS TRAFFIC PAYS NOTHING.
+  //
+  // updateSession() runs Supabase Auth below, and it used to run before this
+  // check — so a visitor with no session at all, landing on /, /login, /signup
+  // or /forgot-password, still triggered auth work on every page view. That
+  // made the entire public-facing site depend on Supabase Auth's availability
+  // and latency, for a request that by definition has no session to validate.
+  //
+  // A request with no session cookie cannot be authenticated, so there is
+  // nothing for updateSession() to refresh and nothing for the two redirects
+  // below to act on: `!user && isPublic` is a no-op, and `user && isPublic`
+  // cannot be true. Skipping is exactly equivalent, minus the work.
+  //
+  // Substring, not endsWith: @supabase/ssr CHUNKS a large session across
+  // `sb-<ref>-auth-token.0`, `.1`, … so an endsWith('-auth-token') test —
+  // which is what the obvious version of this looks like — silently classifies
+  // the users with the biggest sessions as anonymous, and stops redirecting
+  // them away from /login.
+  if (isPublic && !hasSessionCookie(request)) {
+    return withCsp(NextResponse.next({ request }), nonce)
+  }
+
+  const { supabaseResponse, user } = await updateSession(request)
 
   // Unauthenticated user hitting a protected route → redirect to login
   if (!user && !isPublic) return redirectToLogin(request, pathname, nonce)
