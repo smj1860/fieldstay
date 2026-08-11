@@ -7,12 +7,47 @@ import { redirect, unstable_rethrow } from 'next/navigation'
 import { requireOrgRole } from '@/lib/auth'
 import { markStepComplete } from '@/app/(dashboard)/properties/actions'
 import { logAuditEvent } from '@/lib/audit'
+import { inngest } from '@/lib/inngest/client'
 
 import { reportError } from '@/lib/observability/report-error'
 import { throwIfAnyQueryFailed, isRealQueryError } from '@/lib/supabase/unwrap'
 import type { MemberRole } from '@/types/database'
 
 export type DetailsState = { error?: string; success?: boolean }
+
+/** The three property columns resolvePar() reads. A change to any of them
+ *  makes every smart par on the property stale; a change to anything else on
+ *  this form (WiFi, notes, rates) does not, and saveDetails runs on every
+ *  step-save — so an unconditional recompute would queue one for a password
+ *  edit. Compared as Numbers because bathrooms is `numeric` and comes back
+ *  from Postgres as a string. */
+function parInputsChanged(
+  existing: { bedrooms: number | null; bathrooms: number | null; max_guests: number | null } | null,
+  next: { bedrooms: number; bathrooms: number | null; max_guests: number },
+): boolean {
+  return (
+    Number(existing?.bedrooms)   !== Number(next.bedrooms) ||
+    Number(existing?.bathrooms)  !== Number(next.bathrooms) ||
+    Number(existing?.max_guests) !== Number(next.max_guests)
+  )
+}
+
+/** Non-fatal: the property row is already committed by the time this runs. An
+ *  unguarded send makes an Inngest outage fail a save that actually succeeded,
+ *  and the PM sees "Operation failed" for an edit that landed. A missed
+ *  recompute self-heals on the next save or an org-wide run. */
+async function fireParRecompute(orgId: string, propertyId: string): Promise<void> {
+  try {
+    await inngest.send({
+      name: 'inventory/par-recompute-requested',
+      data: { org_id: orgId, property_id: propertyId },
+    })
+  } catch (err) {
+    console.error('[fireParRecompute]', err)
+    reportError(err, { site: 'serverAction.properties.setup.details.saveDetails.parRecompute', orgId })
+  }
+}
+
 
 // Guest access fields (wifi_password/door_code/internal_notes) are
 // secrets — never put their values in audit metadata, just record that
@@ -90,7 +125,7 @@ export async function saveDetails(
 
     const existingRes = await supabase
       .from('properties')
-      .select('wifi_password, door_code_secret_id, internal_notes')
+      .select('wifi_password, door_code_secret_id, internal_notes, bedrooms, bathrooms, max_guests')
       .eq('id', propertyId)
       .eq('org_id', membership.org_id)
       .single()
@@ -129,6 +164,10 @@ export async function saveDetails(
       return {
         error: 'You do not have permission to make this change, or the property no longer exists.',
       }
+    }
+
+    if (parInputsChanged(existing, { bedrooms, bathrooms, max_guests })) {
+      await fireParRecompute(membership.org_id, propertyId)
     }
 
     if (!door_code_unchanged) {

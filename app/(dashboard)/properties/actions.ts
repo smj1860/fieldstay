@@ -329,6 +329,13 @@ export async function createProperty(
       })
     }
 
+    // The items above carry the TEMPLATE's default par — a number computed for
+    // a generic reference property. This resolves them against THIS property's
+    // bedrooms/bathrooms/max_guests. Off the request path deliberately: it is
+    // a whole-property recompute, and a new property showing generic pars for a
+    // few seconds is not worth making the PM wait.
+    await fireParRecompute(membership.org_id, property.id)
+
     await logAuditEvent({
       orgId:      membership.org_id,
       actorId:    user.id,
@@ -528,6 +535,31 @@ export type AssetActionState = { error?: string; success?: boolean }
 // Never throws: this is a non-critical side effect of a successful asset
 // save. A dispatch failure here must not turn into a user-facing "Failed
 // to save asset" error for a save that actually succeeded.
+/**
+ * Resolves this property's smart pars against its own bedrooms/bathrooms/
+ * max_guests. Extracted rather than inlined for the same reason
+ * fireManualLookup is: createProperty is already at the cognitive-complexity
+ * ceiling, and this is a dispatch, not part of the creation logic.
+ *
+ * Non-fatal by design — the property row is committed by the time this runs,
+ * so a failed dispatch must not skip the audit log and the redirect and
+ * surface as "Operation failed" for a property that exists. A missed recompute
+ * self-heals on the next details save or an org-wide run; a duplicate property
+ * does not.
+ */
+async function fireParRecompute(orgId: string, propertyId: string): Promise<void> {
+  try {
+    const { inngest } = await import('@/lib/inngest/client')
+    await inngest.send({
+      name: 'inventory/par-recompute-requested',
+      data: { org_id: orgId, property_id: propertyId },
+    })
+  } catch (err) {
+    console.error('[fireParRecompute]', err)
+    reportError(err, { site: 'serverAction.properties.createProperty.parRecompute', orgId })
+  }
+}
+
 async function fireManualLookup(
   orgId:     string,
   assetType: AssetType,

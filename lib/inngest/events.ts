@@ -1077,4 +1077,16 @@ export type FieldStayEvents = {
     }
   }
 
+  // Recompute smart par levels. property_id scopes it to one property; omit it
+  // (or pass null) to cover every active property in the org. Emitted after a
+  // property is stocked, after the standard template lands on an org, and
+  // whenever a property's bedrooms/bathrooms/max_guests change — all three are
+  // inputs resolvePar() reads.
+  'inventory/par-recompute-requested': {
+    data: {
+      org_id:       string
+      property_id?: string | null
+    }
+  }
+
 }

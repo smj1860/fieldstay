@@ -31,9 +31,11 @@ vi.mock('@/lib/checklists/apply-master-template', () => ({
 }))
 vi.mock('@/lib/geocoding', () => ({ geocodeZip: vi.fn() }))
 vi.mock('@/lib/observability/report-error', () => ({ reportError: vi.fn() }))
+vi.mock('@/lib/inngest/client', () => ({ inngest: { send: vi.fn() } }))
 
 import { requireOrgMember, requireOrgRole } from '@/lib/auth'
 import { logAuditEvent } from '@/lib/audit'
+import { inngest } from '@/lib/inngest/client'
 import { saveDetails } from '@/app/(dashboard)/properties/[id]/setup/details/actions'
 
 import { setupStepRpcStub } from '@/unit/stubs/setup-step-rpc'
@@ -93,8 +95,16 @@ function fd(fields: Record<string, string> = {}) {
 
 // A pristine existing row (no guest-access fields set) so the
 // "guestAccessChanged" branch doesn't fire unless a test opts in.
+//
+// The three size columns hold exactly what a bare fd() parses to — bedrooms
+// and max_guests fall back to 1 and 2, bathrooms to null — so the
+// par-recompute branch also stays quiet unless a test opts in. Getting these
+// wrong makes every test in the file dispatch a recompute silently.
 function pristineExisting() {
-  return { wifi_password: null, door_code_secret_id: null, internal_notes: null }
+  return {
+    wifi_password: null, door_code_secret_id: null, internal_notes: null,
+    bedrooms: 1, bathrooms: null, max_guests: 2,
+  }
 }
 
 // saveDetails gates on requireOrgRole; markStepComplete (called on success)
@@ -120,6 +130,33 @@ describe('properties/[id]/setup/details/actions — saveDetails', () => {
       .rejects.toThrow('REDIRECT:/properties/prop_1/setup/ical')
 
     expect(logAuditEvent).toHaveBeenCalledWith(expect.objectContaining({ action: 'property.rates.updated' }))
+  })
+
+  it('requests a par recompute when a size input changes', async () => {
+    // bedrooms/bathrooms/max_guests are the three columns resolvePar() reads,
+    // so every smart par on the property is stale once one moves.
+    const supabase = makeSupabase({ properties: happyPropertiesQueue() })
+    mockAuthed(supabase)
+
+    await expect(saveDetails('prop_1', null, fd({ max_guests: '8' })))
+      .rejects.toThrow('REDIRECT:/properties/prop_1/setup/ical')
+
+    expect(inngest.send).toHaveBeenCalledWith({
+      name: 'inventory/par-recompute-requested',
+      data: { org_id: 'org_1', property_id: 'prop_1' },
+    })
+  })
+
+  it('does NOT request a recompute when nothing resolvePar reads changed', async () => {
+    // saveDetails runs on every step-save. Dispatching unconditionally would
+    // queue a whole-property recompute for a WiFi password edit.
+    const supabase = makeSupabase({ properties: happyPropertiesQueue() })
+    mockAuthed(supabase)
+
+    await expect(saveDetails('prop_1', null, fd({ wifi_password: 'hunter2' })))
+      .rejects.toThrow('REDIRECT:/properties/prop_1/setup/ical')
+
+    expect(inngest.send).not.toHaveBeenCalled()
   })
 
   it('rejects when the property name is missing', async () => {
