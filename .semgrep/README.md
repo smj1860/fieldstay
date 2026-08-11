@@ -13,7 +13,7 @@ text-scanning guardrail tests — chained call expressions split across lines.
 |---|---|---|
 | Shape | one legitimate owner file | many legitimate owners |
 | Owner named via | `paths.exclude` | n/a |
-| Current findings | **0** | hundreds (see `baseline-counts.json`) |
+| Current findings | **0** | 92 (see `baseline-counts.json`) |
 | CI gate | `--error`, whole tree | `--baseline-commit` (new findings only) + a per-rule count that may only go down |
 
 **Adding a rule:** if the capability has one owner and you can get the count to
@@ -36,6 +36,28 @@ Anthropic call in `build-shopping-cart.ts` given `ANTHROPIC_TIMEOUT_MS`). A
 third, `fieldstay-supabase-unbounded-select-global-table` (tier 2c of the
 severity ladder below), was promoted on 2026-08-07 — see that section for its
 history.
+
+**The Supabase error-handling family was promoted on 2026-08-11**:
+`fieldstay-supabase-discarded-result`, `fieldstay-supabase-read-without-error`
+and `fieldstay-supabase-read-without-error-fan-in`, all three at `ERROR` with
+no `paths.exclude`. Nothing was fixed in that change — the burn-downs that took
+them from 159 + 14 live sites to 0 are the 2026-08-07 and 2026-08-08 entries in
+`baseline-counts.json`. It collected the gate upgrade those burn-downs had
+earned and never taken, which matters because a rule left at 0 in `ratchet.yml`
+gates only on `--baseline-commit`: a finding invisible in the diff view — a
+file moved, a branch cut before the burn-down, a rewrite semgrep attributes to
+neither side — still passes. `--error` across the whole tree has no such hole.
+
+These three are the clearest case of *handling, not ownership*: no file
+legitimately owns "discard a PostgREST error", so there is no owner to name in
+a `paths.exclude`, and every exemption is already expressed as the handling
+constructs themselves (binding the result, destructuring `error`, going through
+`lib/supabase/unwrap.ts`). Fire-checked before promoting, same protocol as tiers
+2 and 2c: a scratch fixture under `lib/` carried one deliberate violation per
+rule **plus a correct control for each**, and semgrep reported exactly the three
+violations and none of the three controls — the controls are the half that
+matters, since a rule that fires on everything also "fires". Then reverted, and
+the whole tree re-run at `--error` to confirm exit 0.
 
 ## Severity inside the ratchet family
 

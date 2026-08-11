@@ -1399,13 +1399,18 @@ following them stops being a memory test. Five layers, checked in CI via
      with no `AbortSignal`, `void` on a lazy PostgREST builder (the request is
      never sent), `getPublicUrl()` on the three private buckets, and the
      `memberships`/`work_order_notes`/`assigned_crew_id` names that do not
-     exist. The last two were PROMOTED from `ratchet.yml` on 2026-08-01 once
-     their counts hit 0 — that promotion is the ratchet's purpose, and it
-     requires deleting the rule's `baseline-counts.json` key in the same
-     change.
+     exist, and — PROMOTED 2026-08-11 — the whole Supabase error-handling
+     family: a discarded write result, `data` destructured without `error`,
+     and the same in a `Promise.all` fan-in. Promotion is the ratchet's
+     purpose, and it requires deleting the rule's `baseline-counts.json` key
+     in the same change plus a fire-check (violation + a correct CONTROL,
+     confirm the rule catches the first and not the second, revert) — a rule
+     at 0 because it is BROKEN looks identical to one at 0 because the tree
+     is clean.
    - `.semgrep/ratchet.yml` — a defect class with many legitimate owners and
-     hundreds of live sites (discarded write results, `data` destructured
-     without `error`, and the unbounded-`.select()` ladder below). Gated on
+     many live sites. As of 2026-08-11 it holds the unbounded-`.select()`
+     ladder below and nothing else (92 findings); everything that ever
+     reached 0 has been promoted out. Gated on
      `--baseline-commit` (only findings NEW vs. the PR base fail) plus
      `.semgrep/baseline-counts.json`, a committed per-rule count that
      `scripts/check-semgrep-ratchet.mjs` allows to move only DOWN. Lock in a

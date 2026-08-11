@@ -106,8 +106,16 @@ The feature's design is sound. Its data-layer plumbing predates the
    org-wide read that truncates at 1000 properties.
 
 3. **Four discarded read/write results.** `discarded-result` and
-   `read-without-error` are both at **0** in `.semgrep/baseline-counts.json`.
-   These push both off zero, which the ratchet forbids outright.
+   `read-without-error` were both at **0** in `.semgrep/baseline-counts.json`,
+   so these pushed both off zero, which the ratchet forbade outright.
+   **This got stricter on 2026-08-11:** both rules — plus
+   `read-without-error-fan-in` — were PROMOTED out of `ratchet.yml` into
+   `.semgrep/chokepoints.yml`, where they gate at `--error` across the whole
+   tree instead of only on findings new vs. the PR base. There is no longer a
+   baseline number to go up; any one of these four sites now fails CI
+   outright, and there is no `nosemgrep` or `paths.exclude` escape (see the
+   "Never silence a ratchet" rule in `.semgrep/README.md`). Fix all four with
+   the `lib/supabase/unwrap.ts` helpers as part of pass 2 — not afterwards.
 
 4. **`PropertyRow` lies about nullability.** It types `bedrooms`/`max_guests`
    as non-null `number` behind an `as PropertyRow[]` cast; both are nullable
