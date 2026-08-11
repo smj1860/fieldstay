@@ -23,10 +23,19 @@ export const recomputeParLevelsFn = inngest.createFunction(
     id:      'recompute-par-levels',
     name:    'Inventory — recompute smart par levels',
     retries: 3,
-    // A property-size edit can fire this repeatedly while a PM is typing.
-    // Collapsing to one run per org+property per minute keeps that from
-    // becoming a queue of identical recomputes.
-    debounce: { key: 'event.data.org_id + "/" + (event.data.property_id ?? "all")', period: '1m' },
+    // NO debounce, deliberately. The first version carried
+    //   debounce: { key: 'event.data.org_id + "/" + (event.data.property_id ?? "all")' }
+    // which is JavaScript, not CEL — Inngest evaluates these keys as CEL, which
+    // has no `??` operator. It was also the only debounce in this codebase, so
+    // the option itself was unproven against this deployment, and a config
+    // Inngest rejects at sync time means the function is never registered and
+    // every event fires into nothing. That is indistinguishable from working
+    // until someone checks whether par_resolved_at moved.
+    //
+    // Nothing is lost by dropping it: resolvePar() is a pure function of
+    // (config, property, stats), so a duplicate run recomputes identical
+    // numbers and the RPC reports zero changed. Debounce here would have been
+    // an optimisation, never a correctness requirement.
   },
   { event: 'inventory/par-recompute-requested' },
   async ({ event, step, logger }) => {
