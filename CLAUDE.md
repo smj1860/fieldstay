@@ -785,6 +785,7 @@ async function geocodeZip(zip: string): Promise<{ lat: number; lng: number } | n
 | Hardcoded colors in components, incl. Tailwind color utilities (`text-red-500`, `hover:text-red-600`) | CSS variables (`var(--text-primary)` etc.) — use the arbitrary-value bracket syntax (`hover:text-[var(--accent-red)]`) if it needs to stay in `className` |
 | Hand-rolling a new tab bar | `components/ui/Tabs.tsx` |
 | Renaming an internal status/lookup key (e.g. `healthDot()`'s `'critical'`/`'offline'` return values) during a copy change | Only rename the display-string helper (`healthLabel()`) and hardcoded JSX text — internal keys are branched on elsewhere and renaming them silently breaks color/variant mapping |
+| Giving a new table a `PRIMARY KEY (a_id, b_id)` where both are FKs to different tables | Make the PK single-column (drop the derivable FK — a child of a property-scoped parent already knows its property). PostgREST reads that shape as a many-to-many JUNCTION and starts offering a second embed path between the two parents, so EVERY pre-existing `.select('*, parent(...)')` between them breaks with HTTP 300 / `PGRST201` — queries that never mention your new table. This shipped on 2026-08-10 and broke four call sites (inventory page, `inventory/actions.ts`, `lib/notifications.ts`, `lib/support/account-tools.ts`); only one had a test. A `UNIQUE` on the same pair is fine — the detection keys on the PRIMARY KEY. Enforced by `scripts/check-db-invariants.mjs` check 10 |
 | Creating a table without RLS | Always `ENABLE ROW LEVEL SECURITY` + policies |
 | Multiple Inngest steps creating same record | Check `source_reference_id` first |
 | `any` type | Explicit interface or generic |
@@ -1399,13 +1400,18 @@ following them stops being a memory test. Five layers, checked in CI via
      with no `AbortSignal`, `void` on a lazy PostgREST builder (the request is
      never sent), `getPublicUrl()` on the three private buckets, and the
      `memberships`/`work_order_notes`/`assigned_crew_id` names that do not
-     exist. The last two were PROMOTED from `ratchet.yml` on 2026-08-01 once
-     their counts hit 0 — that promotion is the ratchet's purpose, and it
-     requires deleting the rule's `baseline-counts.json` key in the same
-     change.
+     exist, and — PROMOTED 2026-08-11 — the whole Supabase error-handling
+     family: a discarded write result, `data` destructured without `error`,
+     and the same in a `Promise.all` fan-in. Promotion is the ratchet's
+     purpose, and it requires deleting the rule's `baseline-counts.json` key
+     in the same change plus a fire-check (violation + a correct CONTROL,
+     confirm the rule catches the first and not the second, revert) — a rule
+     at 0 because it is BROKEN looks identical to one at 0 because the tree
+     is clean.
    - `.semgrep/ratchet.yml` — a defect class with many legitimate owners and
-     hundreds of live sites (discarded write results, `data` destructured
-     without `error`, and the unbounded-`.select()` ladder below). Gated on
+     many live sites. As of 2026-08-11 it holds the unbounded-`.select()`
+     ladder below and nothing else (92 findings); everything that ever
+     reached 0 has been promoted out. Gated on
      `--baseline-commit` (only findings NEW vs. the PR base fail) plus
      `.semgrep/baseline-counts.json`, a committed per-rule count that
      `scripts/check-semgrep-ratchet.mjs` allows to move only DOWN. Lock in a

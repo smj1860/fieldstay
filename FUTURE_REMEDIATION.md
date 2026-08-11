@@ -1490,3 +1490,54 @@ hygiene: `PLANS.hosts` has `STRIPE_PRICE_HOSTS_MONTHLY` / `_ANNUAL`, and
 missing id surfaces as a failed checkout at the moment a trial user picks the
 plan. The Hosts tier is now advertised on `/`, `/hosts` and `/strops`'s
 JSON-LD. An armed drift check is what would say so before a customer does.
+
+---
+
+## 32. Dynamic PAR: replace the flat buffer, and size par to a restock cycle
+
+Deliberate follow-up to the dynamic PAR engine, agreed with the product owner
+2026-08-10 while porting it. The engine as shipped is correct and useful;
+these are upgrades to its *historical* branch only. `static` and
+`smart_formula` are unaffected, so nothing here blocks the feature.
+
+**1. The flat buffer ignores variability.** `historicalPar()` applies a fixed
+`HISTORICAL_BUFFER = 0.20` regardless of how erratic the item's consumption
+is, so a steadily-consumed item and a wildly-varying one get the same 20%.
+Standard safety-stock sizing scales the buffer with the standard deviation of
+demand, not the mean:
+
+```text
+par = mean_demand + Z x sigma        (Z = 1.65 for ~95% service, 2.33 for ~99%)
+```
+
+`inventory_consumption_stats` currently stores only `avg_rate_per_guest_night`
+and `sample_count`, so there is no sigma to use. Welford's online algorithm
+gets it from a running `M2` column without retaining samples — about ten lines
+and one migration adding two columns. No dependency: this is a formula, not a
+library.
+
+**2. A plain mean never forgets.** A count from six months ago weighs the same
+as last week's, so seasonality and a changed guest mix both wash out. An
+exponentially weighted moving average (`new = alpha*obs + (1-alpha)*old`,
+alpha ~ 0.3) tracks them and removes any reason for `sample_count` to grow
+without bound.
+
+**3. Par should cover a restock CYCLE, not one stay.** This is the conceptual
+one, and the product owner's call on the numbers:
+
+- coverage target: **3–4 stays**, not the single average stay
+  `historicalPar()` assumes today
+- restock lead time: **2.5 days**, chosen to err cautious
+
+The classic form is `par = rate x lead_time + Z x sigma x sqrt(lead_time)`.
+FieldStay already knows lead time is real — it has purchase orders and Kroger
+cart automation — so a par that means "enough until I can restock" is
+expressible, whereas "enough for one stay" is what the formula currently
+computes.
+
+**Sequencing.** Do this AFTER the PAR port lands, and consider doing it with
+or after the deferred Pass 4 (per-reservation guest counts): Pass 4 changes
+the guest-night denominator from the `max_guests x avg_stay_length` proxy to
+booking actuals, and changing the denominator changes the distribution whose
+variance item 1 would be measuring. Landing them in the wrong order means
+computing sigma over a proxy and then invalidating it.

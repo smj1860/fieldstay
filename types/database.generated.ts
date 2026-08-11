@@ -1748,6 +1748,7 @@ export type Database = {
       }
       inventory_catalog: {
         Row: {
+          base_qty: number
           category: Database["public"]["Enums"]["inventory_category"]
           created_at: string
           default_par_level: number
@@ -1756,8 +1757,11 @@ export type Database = {
           id: string
           is_active: boolean
           name: string
+          par_mode: Database["public"]["Enums"]["par_mode"]
+          smart_group: Database["public"]["Enums"]["par_smart_group"] | null
         }
         Insert: {
+          base_qty?: number
           category?: Database["public"]["Enums"]["inventory_category"]
           created_at?: string
           default_par_level?: number
@@ -1766,8 +1770,11 @@ export type Database = {
           id?: string
           is_active?: boolean
           name: string
+          par_mode?: Database["public"]["Enums"]["par_mode"]
+          smart_group?: Database["public"]["Enums"]["par_smart_group"] | null
         }
         Update: {
+          base_qty?: number
           category?: Database["public"]["Enums"]["inventory_category"]
           created_at?: string
           default_par_level?: number
@@ -1776,6 +1783,8 @@ export type Database = {
           id?: string
           is_active?: boolean
           name?: string
+          par_mode?: Database["public"]["Enums"]["par_mode"]
+          smart_group?: Database["public"]["Enums"]["par_smart_group"] | null
         }
         Relationships: []
       }
@@ -1814,6 +1823,48 @@ export type Database = {
             columns: ["inventory_item_id"]
             isOneToOne: false
             referencedRelation: "inventory_items"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      inventory_consumption_stats: {
+        Row: {
+          avg_rate_per_guest_night: number
+          inventory_item_id: string
+          last_sample_at: string | null
+          org_id: string
+          sample_count: number
+          updated_at: string
+        }
+        Insert: {
+          avg_rate_per_guest_night?: number
+          inventory_item_id: string
+          last_sample_at?: string | null
+          org_id: string
+          sample_count?: number
+          updated_at?: string
+        }
+        Update: {
+          avg_rate_per_guest_night?: number
+          inventory_item_id?: string
+          last_sample_at?: string | null
+          org_id?: string
+          sample_count?: number
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "inventory_consumption_stats_inventory_item_id_fkey"
+            columns: ["inventory_item_id"]
+            isOneToOne: false
+            referencedRelation: "inventory_items"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "inventory_consumption_stats_org_id_fkey"
+            columns: ["org_id"]
+            isOneToOne: false
+            referencedRelation: "organizations"
             referencedColumns: ["id"]
           },
         ]
@@ -1872,6 +1923,8 @@ export type Database = {
       }
       inventory_items: {
         Row: {
+          auto_adjust: boolean
+          base_qty: number
           catalog_item_id: string | null
           category: Database["public"]["Enums"]["inventory_category"]
           created_at: string
@@ -1884,13 +1937,18 @@ export type Database = {
           notes: string | null
           org_id: string
           par_level: number
+          par_mode: Database["public"]["Enums"]["par_mode"]
+          par_resolved_at: string | null
           preferred_brand: string | null
           property_id: string
+          smart_group: Database["public"]["Enums"]["par_smart_group"] | null
           source_template_id: string | null
           unit: string
           updated_at: string
         }
         Insert: {
+          auto_adjust?: boolean
+          base_qty?: number
           catalog_item_id?: string | null
           category?: Database["public"]["Enums"]["inventory_category"]
           created_at?: string
@@ -1903,13 +1961,18 @@ export type Database = {
           notes?: string | null
           org_id: string
           par_level?: number
+          par_mode?: Database["public"]["Enums"]["par_mode"]
+          par_resolved_at?: string | null
           preferred_brand?: string | null
           property_id: string
+          smart_group?: Database["public"]["Enums"]["par_smart_group"] | null
           source_template_id?: string | null
           unit?: string
           updated_at?: string
         }
         Update: {
+          auto_adjust?: boolean
+          base_qty?: number
           catalog_item_id?: string | null
           category?: Database["public"]["Enums"]["inventory_category"]
           created_at?: string
@@ -1922,8 +1985,11 @@ export type Database = {
           notes?: string | null
           org_id?: string
           par_level?: number
+          par_mode?: Database["public"]["Enums"]["par_mode"]
+          par_resolved_at?: string | null
           preferred_brand?: string | null
           property_id?: string
+          smart_group?: Database["public"]["Enums"]["par_smart_group"] | null
           source_template_id?: string | null
           unit?: string
           updated_at?: string
@@ -1961,40 +2027,49 @@ export type Database = {
       }
       inventory_template_items: {
         Row: {
+          base_qty: number
           catalog_item_id: string | null
           category: string | null
           id: string
           name: string
           notes: string | null
           par_level: number
+          par_mode: Database["public"]["Enums"]["par_mode"]
           par_qty: number
           preferred_brand: string | null
+          smart_group: Database["public"]["Enums"]["par_smart_group"] | null
           sort_order: number
           template_id: string
           unit: string | null
         }
         Insert: {
+          base_qty?: number
           catalog_item_id?: string | null
           category?: string | null
           id?: string
           name: string
           notes?: string | null
           par_level?: number
+          par_mode?: Database["public"]["Enums"]["par_mode"]
           par_qty?: number
           preferred_brand?: string | null
+          smart_group?: Database["public"]["Enums"]["par_smart_group"] | null
           sort_order?: number
           template_id: string
           unit?: string | null
         }
         Update: {
+          base_qty?: number
           catalog_item_id?: string | null
           category?: string | null
           id?: string
           name?: string
           notes?: string | null
           par_level?: number
+          par_mode?: Database["public"]["Enums"]["par_mode"]
           par_qty?: number
           preferred_brand?: string | null
+          smart_group?: Database["public"]["Enums"]["par_smart_group"] | null
           sort_order?: number
           template_id?: string
           unit?: string | null
@@ -2556,6 +2631,7 @@ export type Database = {
       }
       org_inventory_catalog: {
         Row: {
+          base_qty: number
           category: Database["public"]["Enums"]["inventory_category"]
           created_at: string
           default_par_level: number
@@ -2565,10 +2641,13 @@ export type Database = {
           is_active: boolean
           name: string
           org_id: string
+          par_mode: Database["public"]["Enums"]["par_mode"]
           platform_catalog_item_id: string | null
+          smart_group: Database["public"]["Enums"]["par_smart_group"] | null
           updated_at: string
         }
         Insert: {
+          base_qty?: number
           category?: Database["public"]["Enums"]["inventory_category"]
           created_at?: string
           default_par_level?: number
@@ -2578,10 +2657,13 @@ export type Database = {
           is_active?: boolean
           name: string
           org_id: string
+          par_mode?: Database["public"]["Enums"]["par_mode"]
           platform_catalog_item_id?: string | null
+          smart_group?: Database["public"]["Enums"]["par_smart_group"] | null
           updated_at?: string
         }
         Update: {
+          base_qty?: number
           category?: Database["public"]["Enums"]["inventory_category"]
           created_at?: string
           default_par_level?: number
@@ -2591,7 +2673,9 @@ export type Database = {
           is_active?: boolean
           name?: string
           org_id?: string
+          par_mode?: Database["public"]["Enums"]["par_mode"]
           platform_catalog_item_id?: string | null
+          smart_group?: Database["public"]["Enums"]["par_smart_group"] | null
           updated_at?: string
         }
         Relationships: [
@@ -3179,30 +3263,39 @@ export type Database = {
       }
       platform_inventory_template_items: {
         Row: {
+          base_qty: number
           catalog_item_id: string
           created_at: string
           id: string
           par_level: number
+          par_mode: Database["public"]["Enums"]["par_mode"]
           platform_inventory_template_id: string
           preferred_brand: string | null
+          smart_group: Database["public"]["Enums"]["par_smart_group"] | null
           sort_order: number
         }
         Insert: {
+          base_qty?: number
           catalog_item_id: string
           created_at?: string
           id?: string
           par_level?: number
+          par_mode?: Database["public"]["Enums"]["par_mode"]
           platform_inventory_template_id: string
           preferred_brand?: string | null
+          smart_group?: Database["public"]["Enums"]["par_smart_group"] | null
           sort_order?: number
         }
         Update: {
+          base_qty?: number
           catalog_item_id?: string
           created_at?: string
           id?: string
           par_level?: number
+          par_mode?: Database["public"]["Enums"]["par_mode"]
           platform_inventory_template_id?: string
           preferred_brand?: string | null
+          smart_group?: Database["public"]["Enums"]["par_smart_group"] | null
           sort_order?: number
         }
         Relationships: [
@@ -6000,6 +6093,11 @@ export type Database = {
         | "past_due"
         | "cancelled"
         | "paused"
+      par_mode: "static" | "smart"
+      par_smart_group:
+        | "bathroom_essential"
+        | "bedroom_essential"
+        | "guest_consumable"
       po_status:
         | "draft"
         | "sent"
@@ -6307,6 +6405,12 @@ export const Constants = {
         "past_due",
         "cancelled",
         "paused",
+      ],
+      par_mode: ["static", "smart"],
+      par_smart_group: [
+        "bathroom_essential",
+        "bedroom_essential",
+        "guest_consumable",
       ],
       po_status: [
         "draft",
