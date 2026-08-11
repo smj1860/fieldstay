@@ -184,6 +184,28 @@ const ORG_ID_FK_EXCEPTIONS = new Set([
   'maintenance_schedule_templates',
 ])
 
+// ── PostgREST junction-table allowlist (check 10) ──────────────────────────
+// A table whose PRIMARY KEY is exactly two single-column FKs to two different
+// tables is read by PostgREST as a many-to-many JUNCTION, and it then offers a
+// second embedding path between those two parents. Any pre-existing
+// `.select('*, parent(...)')` between them starts returning HTTP 300 /
+// PGRST201 "Could not embed because more than one relationship was found".
+//
+// This is not theoretical: 20260810214329_dynamic_par_engine_schema.sql created
+// inventory_consumption_stats with PRIMARY KEY (property_id, inventory_item_id)
+// and broke four live call sites between inventory_items and properties — the
+// inventory page, inventory/actions.ts, lib/notifications.ts and
+// lib/support/account-tools.ts. One E2E test caught it; the other three were
+// broken in production with every other check green. Fixed by
+// 20260811020000_fix_par_stats_junction_ambiguity.sql.
+//
+// A GENUINE join table belongs here — the shape is correct for it and the
+// many-to-many embed is the point. Everything else is the bug above. EMPTY
+// today, and shrink-only in spirit: adding an entry means "yes, I want
+// PostgREST to treat this as a join table", which is a design decision, not a
+// suppression. Verify the embeds you are making ambiguous before adding one.
+const JUNCTION_TABLE_ALLOWLIST = new Set([])
+
 const res = await fetch(new URL('/rest/v1/rpc/db_invariant_report', url), {
   method: 'POST',
   headers: {
@@ -396,6 +418,60 @@ if (staleOrgFkAllowlist.length > 0) {
   )
 }
 
+// ── 10. Accidental PostgREST junction tables ──────────────────────────────
+// Separate RPC from db_invariant_report() so this gate works against a project
+// that has not yet had the report function extended; a missing function is a
+// hard failure, never a silent skip.
+const junctionRes = await fetch(new URL('/rest/v1/rpc/accidental_junction_tables', url), {
+  method: 'POST',
+  headers: {
+    apikey: key,
+    authorization: `Bearer ${key}`,
+    'content-type': 'application/json',
+  },
+  body: '{}',
+})
+
+if (!junctionRes.ok) {
+  console.error(`accidental_junction_tables RPC failed: HTTP ${junctionRes.status}`)
+  console.error(
+    'Has supabase/migrations/20260811020000_fix_par_stats_junction_ambiguity.sql ' +
+      'been applied to this project?'
+  )
+  process.exit(1)
+}
+
+const junctions = await junctionRes.json()
+if (!Array.isArray(junctions)) {
+  console.error('accidental_junction_tables() did not return a list.')
+  process.exit(1)
+}
+
+const unexpectedJunctions = junctions.filter((j) => !JUNCTION_TABLE_ALLOWLIST.has(j.junction_table))
+const staleJunctionAllowlist = [...JUNCTION_TABLE_ALLOWLIST].filter(
+  (t) => !junctions.some((j) => j.junction_table === t)
+)
+if (unexpectedJunctions.length > 0) {
+  const described = unexpectedJunctions
+    .map((j) => `${j.junction_table} (PK ${(j.pk_columns ?? []).join(' + ')} -> ${(j.parents ?? []).join(', ')})`)
+    .join('; ')
+  failures.push(
+    `Tables PostgREST will read as many-to-many junctions: ${described}\n` +
+      '  A PK of exactly two single-column FKs to two different tables makes ' +
+      "EVERY existing embed between those two parents ambiguous (HTTP 300 / " +
+      'PGRST201), including ones written long before this table existed. If ' +
+      'the second FK column is derivable from the first, drop it and make the ' +
+      'PK single-column. If this really is a join table, add it to ' +
+      'JUNCTION_TABLE_ALLOWLIST in scripts/check-db-invariants.mjs.'
+  )
+}
+if (staleJunctionAllowlist.length > 0) {
+  failures.push(
+    `Stale JUNCTION_TABLE_ALLOWLIST entries (table no longer has that shape, or was dropped): ${staleJunctionAllowlist.join(', ')}\n` +
+      '  Remove them from scripts/check-db-invariants.mjs — the allowlist only shrinks.'
+  )
+}
+
 // ── Verdict ───────────────────────────────────────────────────────────────
 if (failures.length > 0) {
   console.error(`DB invariant check FAILED (${failures.length} finding${failures.length === 1 ? '' : 's'}):\n`)
@@ -407,5 +483,6 @@ console.log(
   'DB invariants OK — RLS on every table, no unexpected deny-all tables, ' +
     'all FK columns indexed, zero anon grants, all dedup-key columns indexed ' +
     'unique, every member-facing policy backed by its GRANT, no memberless ' +
-    'orgs, every storage policy org-scoped, every org_id column FK-backed.'
+    'orgs, every storage policy org-scoped, every org_id column FK-backed, ' +
+    'no accidental PostgREST junction tables.'
 )

@@ -52,6 +52,31 @@ Post-apply verification against production: `par_mode` present on 5 tables,
 `inventory_consumption_stats` exists with RLS enabled, 1 policy, 3 indexes,
 and **0 of 147 catalog rows are non-static** — i.e. no behaviour changed.
 
+> **That verification was not sufficient, and the follow-up migration
+> `20260811020000_fix_par_stats_junction_ambiguity.sql` is why.** It checked
+> that the new objects existed; it did not check what they did to objects that
+> already existed. `inventory_consumption_stats` was created with
+> `PRIMARY KEY (property_id, inventory_item_id)` — two single-column FKs to two
+> different tables, which is exactly PostgREST's signature for a many-to-many
+> JUNCTION table. PostgREST began offering a second path between
+> `inventory_items` and `properties`, so every pre-existing embed between them
+> started returning HTTP 300 / `PGRST201`. Four live call sites: the inventory
+> page, `inventory/actions.ts`, `lib/notifications.ts` and
+> `lib/support/account-tools.ts`. **One** E2E test caught it; the other three
+> were broken in production with every other gate green.
+>
+> **The stats table's grain changed as a result — pass 2 must assume the new
+> shape.** `property_id` is GONE and the PK is `inventory_item_id` alone.
+> Nothing was lost: `inventory_items` is already property-level, so the column
+> was derivable from its sibling and could drift out of agreement with it. A
+> single-column PK also cannot be re-read as a junction, so this can't regress
+> on this table. `org_id` stays — equally derivable, but load-bearing for RLS.
+>
+> A new invariant in `scripts/check-db-invariants.mjs` (check 10, backed by
+> `public.accidental_junction_tables()`) now fails CI on any table with this
+> shape, with an empty allowlist. The rule this encodes generalises past PAR:
+> **adding a table can break queries that never mention it.**
+
 > **The ledger/file parity trap — read before applying the next migration.**
 > There is no Supabase CLI and no `SUPABASE_ACCESS_TOKEN` in the agent
 > environment, so migrations must go through the MCP `apply_migration`. **MCP

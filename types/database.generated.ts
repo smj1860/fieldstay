@@ -1833,7 +1833,6 @@ export type Database = {
           inventory_item_id: string
           last_sample_at: string | null
           org_id: string
-          property_id: string
           sample_count: number
           updated_at: string
         }
@@ -1842,7 +1841,6 @@ export type Database = {
           inventory_item_id: string
           last_sample_at?: string | null
           org_id: string
-          property_id: string
           sample_count?: number
           updated_at?: string
         }
@@ -1851,7 +1849,6 @@ export type Database = {
           inventory_item_id?: string
           last_sample_at?: string | null
           org_id?: string
-          property_id?: string
           sample_count?: number
           updated_at?: string
         }
@@ -1868,13 +1865,6 @@ export type Database = {
             columns: ["org_id"]
             isOneToOne: false
             referencedRelation: "organizations"
-            referencedColumns: ["id"]
-          },
-          {
-            foreignKeyName: "inventory_consumption_stats_property_id_fkey"
-            columns: ["property_id"]
-            isOneToOne: false
-            referencedRelation: "properties"
             referencedColumns: ["id"]
           },
         ]

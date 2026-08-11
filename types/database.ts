@@ -660,8 +660,13 @@ export interface InventoryCatalogItem {
  * why a smart par resolved the way it did. No primary `id`: the PK is the
  * composite (property_id, inventory_item_id).
  */
+// PK is inventory_item_id alone. There is deliberately NO property_id: an
+// inventory_item is already property-level, so the column was derivable, and
+// a PK of (property_id, inventory_item_id) made PostgREST read this table as
+// a many-to-many junction between properties and inventory_items — which broke
+// every pre-existing embed between them with PGRST201. See
+// 20260811020000_fix_par_stats_junction_ambiguity.sql.
 export interface InventoryConsumptionStats {
-  property_id:              string
   inventory_item_id:        string
   org_id:                   string
   avg_rate_per_guest_night: number
