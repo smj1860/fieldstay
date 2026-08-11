@@ -38,7 +38,12 @@ interface Resp { data: unknown; error: unknown }
  */
 function makeSupabase(q: Record<string, Resp[]>, rpcResult: unknown = 1) {
   const idx: Record<string, number> = {}
-  const rpc = vi.fn(() => Promise.resolve({ data: rpcResult, error: null }))
+  // Declared with its real parameters, not `() =>`. A zero-arg mock types
+  // mock.calls[0] as the empty tuple, so the `calls[0][1]` reads below fail
+  // tsc with TS2493 — which vitest does not catch (it never typechecks) and
+  // `next build` does not either (test files are outside the app graph).
+  const rpc = vi.fn((_name: string, _args: unknown) =>
+    Promise.resolve({ data: rpcResult, error: null }))
   const from = vi.fn((table: string) => {
     const i = idx[table] ?? 0
     idx[table] = i + 1
