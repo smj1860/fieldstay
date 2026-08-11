@@ -15,6 +15,7 @@ interface PlatformTemplateRow {
   id:          string
   name:        string
   description: string | null
+  is_default:  boolean
   platform_inventory_template_items: {
     id:              string
     catalog_item_id: string
@@ -34,7 +35,7 @@ export default async function InventoryTemplatesPage() {
       (from, to) => supabase
         .from('platform_inventory_templates')
         .select(`
-          id, name, description,
+          id, name, description, is_default,
           platform_inventory_template_items ( id, catalog_item_id, par_level, preferred_brand, sort_order )
         `)
         .order('name')
@@ -74,6 +75,7 @@ export default async function InventoryTemplatesPage() {
           id:          t.id,
           name:        t.name,
           description: t.description ?? '',
+          is_default:  t.is_default,
           items: [...(t.platform_inventory_template_items ?? [])]
             .sort((a, b) => a.sort_order - b.sort_order)
             .map((item) => ({

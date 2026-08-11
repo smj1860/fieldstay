@@ -154,6 +154,7 @@ export type AuditAction =
   | 'platform_admin.inventory_template.items_saved'
   | 'platform_admin.inventory_template.broadcast_requested'
   | 'platform_admin.inventory_template.broadcast_synced'
+  | 'platform_admin.inventory_template.set_default'
   | 'org_inventory_catalog_item.created'
   | 'org_inventory_catalog_item.updated'
   | 'org_inventory_catalog_item.deleted'

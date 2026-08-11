@@ -1,7 +1,8 @@
 'use client'
 
 import { useMemo, useState, useTransition } from 'react'
-import { Plus, Trash2, ChevronRight, Check, Package, Radio as RadioIcon } from 'lucide-react'
+import { Plus, Trash2, ChevronRight, Check, Package, Radio as RadioIcon, Star } from 'lucide-react'
+import { Badge } from '@/components/ui/Badge'
 import { Button } from '@/components/ui/Button'
 import { Checkbox } from '@/components/ui/Checkbox'
 import { InlineAlert } from '@/components/ui/InlineAlert'
@@ -13,6 +14,7 @@ import {
   deletePlatformInventoryTemplate,
   savePlatformInventoryTemplateItems,
   broadcastPlatformInventoryTemplate,
+  setDefaultPlatformInventoryTemplate,
   listOrgsForBroadcast,
   type PlatformTemplateItemInput,
   type BroadcastTarget,
@@ -36,6 +38,10 @@ interface TemplateState {
   id:          string
   name:        string
   description: string
+  /** At most one template in the list carries this — the partial unique index
+   *  platform_inventory_templates_one_default enforces it server-side, so the
+   *  local clear-the-others below is a display concern, not the guarantee. */
+  is_default:  boolean
   items:       ItemState[]
 }
 
@@ -72,6 +78,14 @@ function updateItemInTemplate(templates: TemplateState[], id: string, itemTempId
   )
 }
 
+/** Exclusivity is enforced server-side by the partial unique index; this only
+ *  keeps the list from briefly rendering two Standard badges. Module-level for
+ *  the same reason as its siblings — inline it and the callback nests five
+ *  deep inside the component. */
+function markDefaultInList(templates: TemplateState[], id: string): TemplateState[] {
+  return templates.map((t) => ({ ...t, is_default: t.id === id }))
+}
+
 function removeTemplateFromList(templates: TemplateState[], id: string): TemplateState[] {
   return templates.filter((t) => t.id !== id)
 }
@@ -95,11 +109,11 @@ export function PlatformInventoryTemplateBuilder({
   initialTemplates,
   catalogItems,
 }: Readonly<{
-  initialTemplates: Array<{ id: string; name: string; description: string; items: Array<{ id: string; catalog_item_id: string; par_level: number; preferred_brand: string }> }>
+  initialTemplates: Array<{ id: string; name: string; description: string; is_default: boolean; items: Array<{ id: string; catalog_item_id: string; par_level: number; preferred_brand: string }> }>
   catalogItems: CatalogItem[]
 }>) {
   const [templates, setTemplates] = useState<TemplateState[]>(() =>
-    initialTemplates.map((t) => ({ id: t.id, name: t.name, description: t.description, items: t.items.map(toItemState) }))
+    initialTemplates.map((t) => ({ id: t.id, name: t.name, description: t.description, is_default: t.is_default, items: t.items.map(toItemState) }))
   )
   const [expanded, setExpanded] = useState<Set<string>>(new Set())
   const [newTemplateName, setNewTemplateName] = useState('')
@@ -127,9 +141,21 @@ export function PlatformInventoryTemplateBuilder({
         setError(result.error ?? 'Failed to create template.')
         return
       }
-      setTemplates((prev) => [...prev, { id: result.id!, name, description: '', items: [] }])
+      setTemplates((prev) => [...prev, { id: result.id!, name, description: '', is_default: false, items: [] }])
       setExpanded((prev) => new Set(prev).add(result.id!))
       setNewTemplateName('')
+      setError(null)
+    })
+  }
+
+  const handleSetDefault = (id: string) => {
+    startCreate(async () => {
+      const result = await setDefaultPlatformInventoryTemplate(id)
+      if (result.error) {
+        setError(result.error)
+        return
+      }
+      setTemplates((prev) => markDefaultInList(prev, id))
       setError(null)
     })
   }
@@ -204,6 +230,7 @@ export function PlatformInventoryTemplateBuilder({
           onUpdateItem={(itemTempId, field, value) => updateItem(template.id, itemTempId, field, value)}
           onSave={(fieldsChanged) => handleSaveTemplate(template, fieldsChanged)}
           onDelete={() => handleDeleteTemplate(template.id)}
+          onSetDefault={() => handleSetDefault(template.id)}
           setError={setError}
         />
       ))}
@@ -243,6 +270,7 @@ function TemplateCard({
   onUpdateItem,
   onSave,
   onDelete,
+  onSetDefault,
   setError,
 }: Readonly<{
   template: TemplateState
@@ -258,6 +286,7 @@ function TemplateCard({
   onUpdateItem: (itemTempId: string, field: keyof ItemState, value: unknown) => void
   onSave: (fieldsChanged: boolean) => void
   onDelete: () => void
+  onSetDefault: () => void
   setError: (msg: string | null) => void
 }>) {
   const [initialName]        = useState(template.name)
@@ -280,6 +309,7 @@ function TemplateCard({
       >
         <ChevronRight className={`w-4 h-4 flex-shrink-0 transition-transform text-muted-themed ${isOpen ? 'rotate-90' : ''}`} />
         <span className="text-sm font-semibold text-primary-themed flex-1">{template.name}</span>
+        {template.is_default && <Badge tone="gold">Standard</Badge>}
         <span className="text-xs text-muted-themed">{template.items.length} item{template.items.length !== 1 ? 's' : ''}</span>
       </button>
 
@@ -391,9 +421,53 @@ function TemplateCard({
             )}
           </div>
 
+          <StandardTemplatePanel isDefault={template.is_default} saving={saving} onSetDefault={onSetDefault} />
+
           <BroadcastPanel templateId={template.id} setError={setError} />
         </div>
       )}
+    </div>
+  )
+}
+
+/**
+ * Designates this template as the platform standard — the one auto-applied at
+ * org signup and property creation, without an admin pressing Broadcast.
+ *
+ * Deliberately NOT a toggle: there is no "un-set the standard" affordance,
+ * because the useful operation is always "make THIS one standard", and a
+ * toggle would let an admin reach the zero-standard state by a stray click
+ * with nothing telling them auto-apply had stopped. Clearing it is possible
+ * (set another, or delete the row) but is not a one-click action.
+ */
+function StandardTemplatePanel({
+  isDefault,
+  saving,
+  onSetDefault,
+}: Readonly<{ isDefault: boolean; saving: boolean; onSetDefault: () => void }>) {
+  if (isDefault) {
+    return (
+      <div className="rounded-lg border border-themed p-3 flex items-center gap-2">
+        <Star className="w-3.5 h-3.5" style={{ color: 'var(--accent-gold)' }} />
+        <span className="text-sm text-primary-themed">
+          This is the standard template — new accounts and new properties get these items automatically.
+        </span>
+      </div>
+    )
+  }
+
+  return (
+    <div className="rounded-lg border border-themed p-3 flex items-center gap-3">
+      <div className="flex-1">
+        <h4 className="text-sm font-semibold text-primary-themed">Standard Template</h4>
+        <p className="text-xs text-muted-themed mt-0.5">
+          Make this the template every new account and property starts from. Replaces the
+          current standard — only one can hold it.
+        </p>
+      </div>
+      <Button variant="secondary" onClick={onSetDefault} disabled={saving} className="text-xs whitespace-nowrap">
+        Make Standard
+      </Button>
     </div>
   )
 }

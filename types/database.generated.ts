@@ -3320,6 +3320,7 @@ export type Database = {
           created_at: string
           description: string | null
           id: string
+          is_default: boolean
           name: string
           updated_at: string
         }
@@ -3327,6 +3328,7 @@ export type Database = {
           created_at?: string
           description?: string | null
           id?: string
+          is_default?: boolean
           name: string
           updated_at?: string
         }
@@ -3334,6 +3336,7 @@ export type Database = {
           created_at?: string
           description?: string | null
           id?: string
+          is_default?: boolean
           name?: string
           updated_at?: string
         }
@@ -5931,6 +5934,10 @@ export type Database = {
       replace_platform_inventory_template_items: {
         Args: { p_items: Json; p_template_id: string }
         Returns: number
+      }
+      set_default_platform_inventory_template: {
+        Args: { p_template_id: string }
+        Returns: undefined
       }
       replace_room_template_items: {
         Args: { p_items: Json; p_room_template_id: string }

@@ -183,6 +183,49 @@ export type BroadcastTarget =
   | { mode: 'all' }
   | { mode: 'selected'; orgIds: string[] }
 
+/**
+ * Marks one platform template as THE standard — the one legs 2 and 3 apply
+ * automatically at org signup and property creation, with no admin in the loop.
+ *
+ * Goes through the set_default_platform_inventory_template RPC rather than
+ * updating the column here. A single UPDATE flipping the old and new rows
+ * together transiently violates the partial unique index depending on physical
+ * scan order (verified: flipping to a lower id raises 23505 and rolls back,
+ * flipping to a higher id succeeds). The RPC clears then sets, as two
+ * statements inside one implicit transaction. See 20260811080000.
+ */
+export async function setDefaultPlatformInventoryTemplate(
+  templateId: string
+): Promise<{ error?: string; ok?: boolean }> {
+  try {
+    const { user, supabase } = await requirePlatformAdmin()
+
+    const { error } = await supabase.rpc('set_default_platform_inventory_template', {
+      p_template_id: templateId,
+    })
+
+    if (error) {
+      console.error('[setDefaultPlatformInventoryTemplate]', error)
+      reportError(error, { site: 'serverAction.admin.inventory-templates.setDefaultPlatformInventoryTemplate' })
+      return { error: 'Operation failed. Please try again.' }
+    }
+
+    await logAuditEvent({
+      actorId:    user.id,
+      action:     'platform_admin.inventory_template.set_default',
+      targetType: 'platform_inventory_template',
+      targetId:   templateId,
+    })
+
+    revalidatePath('/admin/inventory-templates')
+    return { ok: true }
+  } catch (err) {
+    console.error('[setDefaultPlatformInventoryTemplate]', err)
+    reportError(err, { site: 'serverAction.admin.inventory-templates.setDefaultPlatformInventoryTemplate' })
+    return { error: 'Operation failed. Please try again.' }
+  }
+}
+
 export async function broadcastPlatformInventoryTemplate(
   templateId: string,
   target: BroadcastTarget
