@@ -42,8 +42,8 @@ export function NewPropertyForm() {
         />
       </div>
 
-      {/* Type + Beds + Baths */}
-      <div className="grid grid-cols-3 gap-4">
+      {/* Type + Beds + Baths + Guests */}
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
         <div>
           <label htmlFor="property_type" className="label">Type</label>
           <select id="property_type" name="property_type" className="input">
@@ -64,6 +64,18 @@ export function NewPropertyForm() {
           <Input
             id="bathrooms" name="bathrooms" type="number"
             min="0.5" max="20" step="0.5" defaultValue={2}
+          />
+        </div>
+        {/* parsePropertyForm has always read max_guests (defaulting to 2), but
+            this input did not exist — so every property created through the UI
+            started at 2 guests regardless of size. It is one of the three
+            columns resolvePar() scales by, so the standard inventory applied
+            moments later was sized for a couple. */}
+        <div>
+          <label htmlFor="max_guests" className="label">Max Guests</label>
+          <Input
+            id="max_guests" name="max_guests" type="number"
+            min="1" max="50" defaultValue={6}
           />
         </div>
       </div>

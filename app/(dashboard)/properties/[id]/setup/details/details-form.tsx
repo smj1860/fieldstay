@@ -59,7 +59,7 @@ export function DetailsForm({
         <Input id="name" name="name" type="text" required defaultValue={property.name} />
       </div>
 
-      <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
+      <div className="grid grid-cols-2 sm:grid-cols-5 gap-4">
         <div>
           <label htmlFor="property_type" className="label">Type</label>
           <select id="property_type" name="property_type" defaultValue={property.property_type} className="input">
@@ -73,6 +73,16 @@ export function DetailsForm({
         <div>
           <label htmlFor="bathrooms" className="label">Bathrooms</label>
           <Input id="bathrooms" name="bathrooms" type="number" min="0.5" max="20" step="0.5" defaultValue={property.bathrooms ?? ''} />
+        </div>
+        {/* saveDetails has always read max_guests from this form
+            (`parseInt(...) || 2`), but the input was never here — so every
+            save silently reset it to 2 for the whole portfolio. It is also one
+            of the three columns resolvePar() scales guest_consumable items by,
+            which made towels and dinnerware wrong on every property that had
+            ever been saved. */}
+        <div>
+          <label htmlFor="max_guests" className="label">Max Guests</label>
+          <Input id="max_guests" name="max_guests" type="number" min="1" max="50" defaultValue={property.max_guests ?? ''} placeholder="e.g. 6" />
         </div>
         <div>
           <label htmlFor="square_footage" className="label">Sq Footage</label>

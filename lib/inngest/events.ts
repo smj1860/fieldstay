@@ -1066,4 +1066,27 @@ export type FieldStayEvents = {
     }
   }
 
+  // Emitted once by createOrganization, right after the org and its owner
+  // membership are committed. Kept deliberately thin — the handler resolves
+  // everything else itself, so the signup request path never reads the
+  // platform catalog or the standard template just to build this payload.
+  'organization/created': {
+    data: {
+      org_id:  string
+      user_id: string
+    }
+  }
+
+  // Recompute smart par levels. property_id scopes it to one property; omit it
+  // (or pass null) to cover every active property in the org. Emitted after a
+  // property is stocked, after the standard template lands on an org, and
+  // whenever a property's bedrooms/bathrooms/max_guests change — all three are
+  // inputs resolvePar() reads.
+  'inventory/par-recompute-requested': {
+    data: {
+      org_id:       string
+      property_id?: string | null
+    }
+  }
+
 }
