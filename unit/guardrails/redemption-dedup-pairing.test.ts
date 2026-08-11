@@ -42,6 +42,33 @@ function migrationSources(): string {
     .join('\n')
 }
 
+/**
+ * The body of ONE function, bounded to the migration that defines it.
+ *
+ * The function-scoped assertions below used to slice migrationSources() from
+ * the function name to the end of the whole concatenation, which meant they
+ * were really reading every migration that sorts after the defining one. That
+ * is wrong in both directions: a later migration granting EXECUTE to
+ * authenticated for a DIFFERENT function failed the anon-grant assertion (a
+ * false positive — this is what 20260811080000 tripped), and a later migration
+ * happening to contain the right ON CONFLICT text would have satisfied the
+ * arbiter assertions for free (a false pass). Neither depended on the function
+ * this file is about.
+ *
+ * Bounding to the defining file keeps the assertions about the function they
+ * name. Throws rather than returning '' if the function is gone, so deleting
+ * it fails loudly instead of vacuously passing every `not.toMatch`.
+ */
+function functionSource(name: string): string {
+  const files = readdirSync(MIGRATIONS_DIR).filter((f) => f.endsWith('.sql')).sort()
+  for (const f of files) {
+    const sql = readFileSync(join(MIGRATIONS_DIR, f), 'utf8')
+    const at = sql.indexOf(`FUNCTION public.${name}`)
+    if (at !== -1) return sql.slice(at)
+  }
+  throw new Error(`No migration defines FUNCTION public.${name}`)
+}
+
 describe('guidebook redemption dedup — constraint and handler stay paired', () => {
   it('a migration creates the unique index the handler relies on', () => {
     const sql = migrationSources()
@@ -70,14 +97,13 @@ describe('guidebook redemption dedup — constraint and handler stay paired', ()
     // silently loses its conflict target and every open inserts a new row —
     // the exact inflation the index exists to prevent, reintroduced one layer
     // down where the index still looks present.
-    const fn = sql.slice(sql.indexOf(`FUNCTION public.${RPC_NAME}`))
+    const fn = functionSource(RPC_NAME)
     expect(fn).toMatch(/ON CONFLICT[\s\S]{0,200}opened_at AT TIME ZONE 'UTC'/i)
     expect(fn).toMatch(/DO UPDATE SET open_count = [\s\S]{0,80}open_count \+ 1/i)
   })
 
   it('the function is not executable by anon or authenticated', () => {
-    const sql = migrationSources()
-    const fn = sql.slice(sql.indexOf(`FUNCTION public.${RPC_NAME}`))
+    const fn = functionSource(RPC_NAME)
     // Postgres grants EXECUTE to PUBLIC by default, which on Supabase means
     // anon can call it over /rest/v1/rpc/ with the publishable key — writing
     // rows to a tenant table with no session at all. Every anon TABLE grant

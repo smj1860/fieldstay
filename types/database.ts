@@ -1246,6 +1246,13 @@ export interface PlatformInventoryTemplate {
   id:          string
   name:        string
   description: string | null
+  /** At most one row may be true — enforced by the partial unique index
+   *  platform_inventory_templates_one_default, not by application code.
+   *  Zero defaults is valid and means nothing is auto-applied. Repoint it
+   *  through the set_default_platform_inventory_template RPC, never a direct
+   *  UPDATE: see 20260811080000 for why a single-statement flip is
+   *  scan-order dependent. */
+  is_default:  boolean
   created_at:  string
   updated_at:  string
 }
