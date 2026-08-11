@@ -56,19 +56,32 @@ export async function createOrganization(
     const result = data as { org_id: string; created: boolean }
     if (!result.created) redirect('/ops')
 
-    // Fire the onboarding drip — the Inngest function sends the welcome
-    // email immediately and schedules the rest of the sequence
-    await inngest.send({
-      name: 'user/onboarding.drip.started',
-      data: {
-        user_id:    user.id,
-        org_id:     result.org_id,
-        first_name: (user.user_metadata?.full_name as string | undefined)
-          ?.split(' ')[0] ?? 'there',
-        email:      user.email ?? '',
-        org_name:   name,
+    // Both sends in one call so a transient Inngest failure can't leave the
+    // drip scheduled but the inventory bootstrap dropped (or the reverse).
+    //
+    // organization/created carries only ids: bootstrap-new-org-inventory
+    // resolves the standard template and seeds the org's catalog copy itself,
+    // deliberately off this request path. Seeding copies the whole platform
+    // catalog a page at a time, and neither half should be able to fail
+    // account creation — the user is waiting on this redirect.
+    await inngest.send([
+      // Sends the welcome email immediately and schedules the rest.
+      {
+        name: 'user/onboarding.drip.started',
+        data: {
+          user_id:    user.id,
+          org_id:     result.org_id,
+          first_name: (user.user_metadata?.full_name as string | undefined)
+            ?.split(' ')[0] ?? 'there',
+          email:      user.email ?? '',
+          org_name:   name,
+        },
       },
-    })
+      {
+        name: 'organization/created',
+        data: { org_id: result.org_id, user_id: user.id },
+      },
+    ])
 
     return { success: true }
   } catch (err) {

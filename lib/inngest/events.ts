@@ -1066,4 +1066,15 @@ export type FieldStayEvents = {
     }
   }
 
+  // Emitted once by createOrganization, right after the org and its owner
+  // membership are committed. Kept deliberately thin — the handler resolves
+  // everything else itself, so the signup request path never reads the
+  // platform catalog or the standard template just to build this payload.
+  'organization/created': {
+    data: {
+      org_id:  string
+      user_id: string
+    }
+  }
+
 }

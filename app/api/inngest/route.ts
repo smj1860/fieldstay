@@ -105,6 +105,7 @@ import { applyMasterChecklistJob }       from '@/lib/inngest/functions/apply-mas
 
 // Platform inventory template broadcasting
 import { broadcastPlatformInventoryTemplate, syncInventoryTemplateForOrg } from '@/lib/inngest/functions/platform-inventory-template-broadcast'
+import { bootstrapNewOrgInventory } from '@/lib/inngest/functions/bootstrap-new-org-inventory'
 
 // Integration error notifications
 import { notifyIntegrationError }  from '@/lib/inngest/functions/notify-integration-error'
@@ -294,6 +295,7 @@ export const { GET, POST, PUT } = serve({
     // Platform inventory template broadcasting
     broadcastPlatformInventoryTemplate,
     syncInventoryTemplateForOrg,
+    bootstrapNewOrgInventory,
 
     // Integration error notifications
     notifyIntegrationError,

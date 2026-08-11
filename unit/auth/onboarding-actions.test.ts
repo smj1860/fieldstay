@@ -79,7 +79,7 @@ describe('onboarding/actions — createOrganization', () => {
     expect(admin.rpc).not.toHaveBeenCalled()
   })
 
-  it('creates the org via the advisory-locked RPC and fires the onboarding drip on the happy path', async () => {
+  it('creates the org via the advisory-locked RPC and fires BOTH bootstrap events on the happy path', async () => {
     vi.mocked(createClient).mockResolvedValue(
       makeAuthedClient({ id: 'user_1', email: 'pm@example.com', user_metadata: { full_name: 'Jamie Rivera' } }) as never
     )
@@ -93,11 +93,25 @@ describe('onboarding/actions — createOrganization', () => {
       'create_organization_with_owner',
       expect.objectContaining({ p_user_id: 'user_1', p_name: 'Lake Martin Delivery' })
     )
+    // ONE send with BOTH events, not two sends: a transient Inngest failure
+    // between them would otherwise leave the drip scheduled but the inventory
+    // bootstrap dropped (or the reverse), and nothing would notice.
+    expect(inngest.send).toHaveBeenCalledTimes(1)
     expect(inngest.send).toHaveBeenCalledWith(
-      expect.objectContaining({
-        name: 'user/onboarding.drip.started',
-        data: expect.objectContaining({ user_id: 'user_1', org_id: 'org_new_1', org_name: 'Lake Martin Delivery' }),
-      })
+      expect.arrayContaining([
+        expect.objectContaining({
+          name: 'user/onboarding.drip.started',
+          data: expect.objectContaining({ user_id: 'user_1', org_id: 'org_new_1', org_name: 'Lake Martin Delivery' }),
+        }),
+        // Leg 2: seeds the org's inventory catalog copy and syncs the standard
+        // template. Deliberately carries ids only — the handler resolves the
+        // template itself so this request path never reads the platform
+        // catalog just to build a payload.
+        expect.objectContaining({
+          name: 'organization/created',
+          data: { org_id: 'org_new_1', user_id: 'user_1' },
+        }),
+      ])
     )
   })
 
