@@ -15,8 +15,13 @@
  * par_mode = 'static' short-circuits: the stored par_level is returned as-is.
  */
 
-export type ParMode = 'static' | 'smart'
-export type ParSmartGroup = 'bathroom_essential' | 'bedroom_essential' | 'guest_consumable'
+// The two enum unions live in types/database.ts with every other Postgres
+// enum, because scripts/check-type-drift.mjs parses that file to diff them
+// against the live enum labels. Imported back here (type-only, so this module
+// stays runtime-dependency-free) and re-exported, so existing callers that
+// import them from the engine keep working.
+import type { ParMode, ParSmartGroup } from '@/types/database'
+export type { ParMode, ParSmartGroup }
 
 export interface SmartGroupSpec {
   /** properties column the formula scales by */

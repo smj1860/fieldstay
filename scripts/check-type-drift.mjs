@@ -119,6 +119,8 @@ const ENUM_MAP = {
   member_role:          'MemberRole',
   org_plan:             'OrgPlan',
   org_plan_status:      'OrgPlanStatus',
+  par_mode:             'ParMode',
+  par_smart_group:      'ParSmartGroup',
   po_status:            'PoStatus',
   priority_level:       'PriorityLevel',
   property_type:        'PropertyType',
