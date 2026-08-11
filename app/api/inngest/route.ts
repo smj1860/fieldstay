@@ -107,6 +107,7 @@ import { applyMasterChecklistJob }       from '@/lib/inngest/functions/apply-mas
 import { broadcastPlatformInventoryTemplate, syncInventoryTemplateForOrg } from '@/lib/inngest/functions/platform-inventory-template-broadcast'
 import { bootstrapNewOrgInventory } from '@/lib/inngest/functions/bootstrap-new-org-inventory'
 import { recomputeParLevelsFn } from '@/lib/inngest/functions/recompute-par-levels'
+import { recordInventoryConsumption } from '@/lib/inngest/functions/record-inventory-consumption'
 
 // Integration error notifications
 import { notifyIntegrationError }  from '@/lib/inngest/functions/notify-integration-error'
@@ -298,6 +299,7 @@ export const { GET, POST, PUT } = serve({
     syncInventoryTemplateForOrg,
     bootstrapNewOrgInventory,
     recomputeParLevelsFn,
+    recordInventoryConsumption,
 
     // Integration error notifications
     notifyIntegrationError,
