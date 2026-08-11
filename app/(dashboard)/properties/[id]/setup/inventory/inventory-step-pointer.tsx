@@ -17,16 +17,17 @@ export function InventoryStepPointer({ propertyId }: Readonly<{ propertyId: stri
 
   return (
     <div className="flex flex-col items-center px-2 pt-4 pb-8 max-w-md mx-auto text-center">
-      <h2 className="text-xl font-bold text-primary-themed">Inventory Isn&apos;t Set Up Automatically</h2>
+      <h2 className="text-xl font-bold text-primary-themed">Inventory Is Already Started</h2>
       <p className="text-sm text-muted-themed mt-2 max-w-xs">
-        Unlike the turnover checklist, this property&apos;s supply list doesn&apos;t
-        build itself — assign a template and set par levels whenever you get
-        to it, from Templates → Inventory → Par Levels.
+        This property was stocked from your standard inventory template when it
+        was created. Par levels that scale — towels, linens, coffee — are sized
+        from its bedrooms, bathrooms and guest count. Add anything specific to
+        this property, like pool or fire pit supplies, from Par Levels.
       </p>
 
       <Link href="/templates/inventory/par-levels" className="mt-8 w-full">
         <Button className="w-full py-4 rounded-xl text-sm font-semibold">
-          Go to Par Levels →
+          Review Par Levels →
         </Button>
       </Link>
 

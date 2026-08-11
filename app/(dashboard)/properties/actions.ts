@@ -9,6 +9,7 @@ import { calculateHealthScore } from '@/lib/assets/health-score'
 import { isDbEnum, toDbEnum } from '@/lib/db-enums'
 import { doorCodeArgs } from '@/lib/properties/door-code'
 import { logAuditEvent } from '@/lib/audit'
+import { applyStandardInventoryToProperty } from '@/lib/inventory/apply-standard-to-property'
 import { applyMasterChecklistToProperty } from '@/lib/checklists/apply-master-template'
 import { reportError } from '@/lib/observability/report-error'
 import { reportQueryError, unwrapList, isRealQueryError } from '@/lib/supabase/unwrap'
@@ -309,6 +310,21 @@ export async function createProperty(
       console.error('[createProperty] master checklist apply failed', checklistErr)
       reportError(checklistErr, {
         site:  'serverAction.properties.createProperty.checklist',
+        orgId: membership.org_id,
+      })
+    }
+
+    // Same non-fatal treatment, and for the same reason: the property row is
+    // already committed, so an unguarded throw would skip the audit log and the
+    // redirect and surface as "Operation failed" for a property that exists —
+    // the PM retries and creates a duplicate. Inventory can be re-applied from
+    // Templates → Inventory → Par Levels.
+    try {
+      await applyStandardInventoryToProperty(property.id, membership.org_id, supabase)
+    } catch (inventoryErr) {
+      console.error('[createProperty] standard inventory apply failed', inventoryErr)
+      reportError(inventoryErr, {
+        site:  'serverAction.properties.createProperty.inventory',
         orgId: membership.org_id,
       })
     }
