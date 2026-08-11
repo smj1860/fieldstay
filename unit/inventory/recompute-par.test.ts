@@ -24,10 +24,22 @@ import { recomputeParLevels } from '@/lib/inventory/recompute-par'
 
 interface Resp { data: unknown; error: unknown }
 
-function makeSupabase(byTable: Record<string, Resp>, rpcResult: unknown = 3) {
+/**
+ * `byRpc` is keyed by RPC NAME. Two different RPCs are called now — the
+ * stay-length aggregate and the par write — and returning one shared value for
+ * both is how a mock stops modelling reality: the aggregate is set-returning
+ * and the writer returns a scalar count.
+ */
+function makeSupabase(
+  byTable: Record<string, Resp>,
+  rpcResult: unknown = 3,
+  byRpc: Record<string, Resp> = {},
+) {
   const calls: { table: string; method: string; args: unknown[] }[] = []
   const rpc = vi.fn((name: string, args: unknown) => {
     calls.push({ table: '__rpc__', method: name, args: [args] })
+    if (name in byRpc) return Promise.resolve(byRpc[name])
+    if (name === 'derive_property_stay_lengths') return Promise.resolve({ data: [], error: null })
     return Promise.resolve({ data: rpcResult, error: null })
   })
   const from = vi.fn((table: string) => {
@@ -46,8 +58,8 @@ function makeSupabase(byTable: Record<string, Resp>, rpcResult: unknown = 3) {
 
 const ORG = 'org-1'
 const PROPS = [
-  { id: 'p-big',   bedrooms: 4, bathrooms: 3, max_guests: 10, avg_stay_length: null },
-  { id: 'p-small', bedrooms: 1, bathrooms: 1, max_guests: 2,  avg_stay_length: null },
+  { id: 'p-big',   bedrooms: 4, bathrooms: 3, max_guests: 10 },
+  { id: 'p-small', bedrooms: 1, bathrooms: 1, max_guests: 2 },
 ]
 /** Bath Towels: guest_consumable, 2 per guest, +10% buffer. */
 const TOWELS = (propertyId: string, id: string) => ({
@@ -68,7 +80,7 @@ describe('recomputeParLevels', () => {
     const res = await recomputeParLevels(client, { orgId: ORG })
 
     expect(res).toEqual({ properties: 2, resolved: 2, changed: 3 })
-    const rows = (rpc.mock.calls[0][1] as { p_rows: { id: string; par_level: number }[] }).p_rows
+    const rows = (rpc.mock.calls.find((c) => c[0] === 'apply_resolved_par_levels')![1] as { p_rows: { id: string; par_level: number }[] }).p_rows
     // 10 guests: ceil(2 * 10 * 1.10) = 22.   2 guests: ceil(2 * 2 * 1.10) = 5.
     expect(rows).toEqual([{ id: 'i-1', par_level: 22 }, { id: 'i-2', par_level: 5 }])
   })
@@ -101,19 +113,19 @@ describe('recomputeParLevels', () => {
   it('still resolves a property with no size metadata', async () => {
     // 0/null means "nobody filled this in", not "this property sleeps zero".
     const { client, rpc } = makeSupabase({
-      properties: { data: [{ id: 'p-blank', bedrooms: 0, bathrooms: null, max_guests: 0, avg_stay_length: null }], error: null },
+      properties: { data: [{ id: 'p-blank', bedrooms: 0, bathrooms: null, max_guests: 0 }], error: null },
       inventory_items:             { data: [TOWELS('p-blank', 'i-9')], error: null },
       inventory_consumption_stats: { data: [], error: null },
     })
     await recomputeParLevels(client, { orgId: ORG })
-    const rows = (rpc.mock.calls[0][1] as { p_rows: { par_level: number }[] }).p_rows
+    const rows = (rpc.mock.calls.find((c) => c[0] === 'apply_resolved_par_levels')![1] as { p_rows: { par_level: number }[] }).p_rows
     // Falls back to 2 guests: ceil(2 * 2 * 1.10) = 5. Never 0.
     expect(rows[0].par_level).toBe(5)
   })
 
   it('prefers historical consumption once enough samples exist', async () => {
     const { client, rpc } = makeSupabase({
-      properties:      { data: [{ id: 'p-big', bedrooms: 4, bathrooms: 3, max_guests: 10, avg_stay_length: 3 }], error: null },
+      properties:      { data: [{ id: 'p-big', bedrooms: 4, bathrooms: 3, max_guests: 10 }], error: null },
       inventory_items: { data: [TOWELS('p-big', 'i-1')], error: null },
       inventory_consumption_stats: {
         data: [{ inventory_item_id: 'i-1', avg_rate_per_guest_night: 0.5, sample_count: 5 }],
@@ -121,9 +133,106 @@ describe('recomputeParLevels', () => {
       },
     })
     await recomputeParLevels(client, { orgId: ORG })
-    const rows = (rpc.mock.calls[0][1] as { p_rows: { par_level: number }[] }).p_rows
+    const rows = (rpc.mock.calls.find((c) => c[0] === 'apply_resolved_par_levels')![1] as
+      { p_rows: { par_level: number }[] }).p_rows
+    // No qualifying bookings, so 3 nights by default:
     // 0.5 * 10 guests * 3 nights = 15, +20% buffer = 18 — not the formula's 22.
     expect(rows[0].par_level).toBe(18)
+  })
+
+  // ==========================================================================
+  // Stay length is DERIVED from bookings, never read from
+  // properties.avg_stay_length. That column has no editor anywhere in the app
+  // and three code paths write a literal 0 to it — on 2026-08-11 it was 0 on
+  // 17 of 27 live properties, and the only rows holding a "real" 3.0 were the
+  // four with no bookings at all. It was wrong precisely where there was data
+  // to be right.
+  // ==========================================================================
+
+  it('uses the property\'s OWN average stay once it has enough bookings', async () => {
+    const { client, rpc } = makeSupabase({
+      properties:      { data: [{ id: 'p-big', bedrooms: 4, bathrooms: 3, max_guests: 10 }], error: null },
+      inventory_items: { data: [TOWELS('p-big', 'i-1')], error: null },
+      inventory_consumption_stats: {
+        data: [{ inventory_item_id: 'i-1', avg_rate_per_guest_night: 0.5, sample_count: 5 }],
+        error: null,
+      },
+    }, 3, {
+      derive_property_stay_lengths: {
+        data: [{ property_id: 'p-big', avg_nights: '6', sample_count: 4 }], error: null,
+      },
+    })
+    await recomputeParLevels(client, { orgId: ORG })
+    const rows = (rpc.mock.calls.find((c) => c[0] === 'apply_resolved_par_levels')![1] as
+      { p_rows: { par_level: number }[] }).p_rows
+    // 0.5 * 10 guests * 6 nights = 30, +20% = 36. Double the 3-night default's
+    // 18 — which is the whole point: the default was silently halving this.
+    expect(rows[0].par_level).toBe(36)
+  })
+
+  it('IGNORES an average built from too few bookings', async () => {
+    // A live property had exactly one booking, a 12-night stay. Trusting it
+    // would have quadrupled every historical par that property ever resolves.
+    // This is the case a `sample_count >= 1` threshold lets through.
+    const { client, rpc } = makeSupabase({
+      properties:      { data: [{ id: 'p-big', bedrooms: 4, bathrooms: 3, max_guests: 10 }], error: null },
+      inventory_items: { data: [TOWELS('p-big', 'i-1')], error: null },
+      inventory_consumption_stats: {
+        data: [{ inventory_item_id: 'i-1', avg_rate_per_guest_night: 0.5, sample_count: 5 }],
+        error: null,
+      },
+    }, 3, {
+      derive_property_stay_lengths: {
+        data: [{ property_id: 'p-big', avg_nights: '12', sample_count: 1 }], error: null,
+      },
+    })
+    await recomputeParLevels(client, { orgId: ORG })
+    const rows = (rpc.mock.calls.find((c) => c[0] === 'apply_resolved_par_levels')![1] as
+      { p_rows: { par_level: number }[] }).p_rows
+    // Falls back to 3 nights -> 18, not the 12-night 72.
+    expect(rows[0].par_level).toBe(18)
+  })
+
+  it('never selects avg_stay_length — the column is not the source', async () => {
+    const { client, calls } = makeSupabase({
+      properties:                  { data: PROPS, error: null },
+      inventory_items:             { data: [TOWELS('p-big', 'i-1')], error: null },
+      inventory_consumption_stats: { data: [], error: null },
+    })
+    await recomputeParLevels(client, { orgId: ORG })
+
+    const selects = calls.filter((c) => c.table === 'properties' && c.method === 'select')
+    expect(selects.length).toBeGreaterThan(0)
+    for (const s of selects) expect(String(s.args[0])).not.toContain('avg_stay_length')
+  })
+
+  it('still writes pars when the stay-length aggregate fails', async () => {
+    // An auxiliary number with a perfectly good default must never cost the
+    // whole recompute. Every property degrades to the 3-night fallback.
+    const { client, rpc } = makeSupabase({
+      properties:                  { data: PROPS, error: null },
+      inventory_items:             { data: [TOWELS('p-big', 'i-1')], error: null },
+      inventory_consumption_stats: { data: [], error: null },
+    }, 3, {
+      derive_property_stay_lengths: { data: null, error: { message: 'boom' } },
+    })
+    const res = await recomputeParLevels(client, { orgId: ORG })
+    expect(res.resolved).toBe(1)
+    expect(rpc).toHaveBeenCalledWith('apply_resolved_par_levels', expect.any(Object))
+  })
+
+  it('survives a set-returning RPC that comes back scalar', async () => {
+    // `for (const r of 3)` throws "not iterable" — inside an Inngest step that
+    // is a failed recompute, retried three times, for an auxiliary aggregate.
+    const { client, rpc } = makeSupabase({
+      properties:                  { data: PROPS, error: null },
+      inventory_items:             { data: [TOWELS('p-big', 'i-1')], error: null },
+      inventory_consumption_stats: { data: [], error: null },
+    }, 3, {
+      derive_property_stay_lengths: { data: 3, error: null },
+    })
+    await expect(recomputeParLevels(client, { orgId: ORG })).resolves.toMatchObject({ resolved: 1 })
+    expect(rpc).toHaveBeenCalledWith('apply_resolved_par_levels', expect.any(Object))
   })
 
   it('does no work and no write when the org has no properties', async () => {

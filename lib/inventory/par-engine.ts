@@ -46,11 +46,31 @@ export const HISTORICAL_BUFFER = 0.20
 /** Historical par never resolves below this floor. */
 export const HISTORICAL_FLOOR = 2
 
+/**
+ * Nights assumed for a property whose own bookings cannot tell us better.
+ * Only reachable when a property has fewer than STAY_LENGTH_MIN_BOOKINGS
+ * qualifying stays — not a value anyone stores.
+ */
+export const DEFAULT_STAY_LENGTH_NIGHTS = 3
+/**
+ * Bookings a property needs before its OWN average is trusted over the
+ * default. Same reasoning as HISTORICAL_MIN_SAMPLES, and the live data is why
+ * it is not 1: on 2026-08-11 one property's single booking was a 12-night
+ * stay, which would have quadrupled every historical par it ever resolves.
+ */
+export const STAY_LENGTH_MIN_BOOKINGS = 3
+
 export interface ParPropertyContext {
   bathrooms:       number | null
   bedrooms:        number
   max_guests:      number
-  /** properties.avg_stay_length — nights of a typical stay */
+  /**
+   * Nights of a typical stay, DERIVED from the property's own bookings —
+   * NOT properties.avg_stay_length, which has no editor anywhere and is a
+   * literal 0 on most live rows. null means "too few bookings to say", and
+   * resolves to DEFAULT_STAY_LENGTH_NIGHTS. See derive_property_stay_lengths
+   * (migration 20260811210000) and recompute-par.ts.
+   */
   avg_stay_length: number | null
 }
 
@@ -90,7 +110,9 @@ function smartFormulaPar(config: ParItemConfig, property: ParPropertyContext): n
 
 function historicalPar(stats: ParConsumptionStats, property: ParPropertyContext): number {
   const guests = property.max_guests > 0 ? property.max_guests : 2
-  const nights = property.avg_stay_length && property.avg_stay_length > 0 ? property.avg_stay_length : 3
+  const nights = property.avg_stay_length && property.avg_stay_length > 0
+    ? property.avg_stay_length
+    : DEFAULT_STAY_LENGTH_NIGHTS
   const expected = stats.avg_rate_per_guest_night * guests * nights
   return Math.max(Math.ceil(expected * (1 + HISTORICAL_BUFFER)), HISTORICAL_FLOOR)
 }
