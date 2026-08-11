@@ -223,6 +223,18 @@ export default async function PropertyDetailPage({ params }: Props) {
           {property.bathrooms !== null && (
             <DetailRow label="Bathrooms" value={`${property.bathrooms}`} />
           )}
+          {/* Rendered unconditionally, unlike the nullable rows around it: this
+              is what every guest_consumable par (towels, dinnerware, K-cups)
+              scales by, so a missing value is worth seeing rather than hiding.
+              0 or null shows as "Not set" so it reads as an unfilled field
+              instead of a property that sleeps nobody. */}
+          <DetailRow
+            label="Max Guests"
+            value={property.max_guests && property.max_guests > 0 ? `${property.max_guests}` : 'Not set'}
+          />
+          {property.avg_stay_length !== null && (
+            <DetailRow label="Avg Stay" value={`${property.avg_stay_length} nights`} />
+          )}
           {property.square_footage !== null && (
             <DetailRow label="Sq Footage" value={`${property.square_footage.toLocaleString()} sqft`} />
           )}
