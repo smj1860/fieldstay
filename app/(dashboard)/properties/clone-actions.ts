@@ -20,6 +20,7 @@ export async function clonePropertySetup(
       .select('id')
       .eq('org_id', orgId)
       .in('id', [sourcePropertyId, targetPropertyId])
+      .limit(2)
 
     if (propsErr) return { success: false, error: propsErr.message }
     if ((props?.length ?? 0) < 2) {

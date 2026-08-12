@@ -101,7 +101,8 @@ export default async function OpsSnapshotPage() {
       .select('id')
       .eq('org_id', membership.org_id)
       .in('provider_id', REVENUE_AUTOMATION_PROVIDER_IDS)
-      .eq('status', 'active'),
+      .eq('status', 'active')
+      .limit(REVENUE_AUTOMATION_PROVIDER_IDS.length),
   ])
 
   // unwrapList logs + reports and throws, so a failed read renders

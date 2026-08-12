@@ -432,6 +432,9 @@ async function resolveExternalPropertyIdMap(
     .eq('org_id', orgId)
     .eq('external_source', PROVIDER)
     .in('external_id', externalPropertyIds)
+    // One row per external id. A truncated read here leaves bookings
+    // unmapped, and unmapped bookings are dropped.
+    .limit(externalPropertyIds.length)
 
   if (error || !fsProps) {
     console.error(

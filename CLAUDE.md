@@ -1430,7 +1430,8 @@ following them stops being a memory test. Five layers, checked in CI via
      PROMOTED to `chokepoints.yml` 2026-08-12**),
      `-global-table` (the table has no `org_id` column, ERROR, 5 → **0,
      PROMOTED to `chokepoints.yml` 2026-08-07**),
-     `-in-list` (one org but sized by an `.in()` array, WARNING, 46),
+     `-in-list` (one org but sized by an `.in()` array, WARNING, 46 → **0,
+     PROMOTED to `chokepoints.yml` 2026-08-12**),
      `-org-scoped` (one org, one parent — hygiene only, INFO, 113).
      **`-single-parent` reached 0 on 2026-08-12, and this one was a genuine
      burn-down** — all 16 sites bounded, none reclassified. Two were not
@@ -1449,6 +1450,20 @@ following them stops being a memory test. Five layers, checked in CI via
      single-parent read FIRED, a `.limit()`-bounded control did NOT, and an
      org-scoped control landed in `-org-scoped` — confirming both that the rule
      works and that the ladder is still a partition.
+     **`-in-list` reached 0 the same day**, immediately after `-single-parent`.
+     Each `.limit()` is sized by what truncation would corrupt rather than by a
+     uniform number: `.limit(ids.length)` where the read really is one row per
+     id (OwnerRez property resolution, catalog picks, the turnover fan-out), and
+     a real ceiling where the `.in()` is on a STATUS enum — in which case the
+     row count scales with the ORG'S DATA, not with the list, and the tier name
+     misleads. Two were that shape: the maintenance board's open work orders
+     and `lib/notifications.ts`'s vendor-compliance read, both of which would
+     have silently under-reported rather than shown a visibly short list.
+     Fire-checked before promoting, same protocol.
+
+     The ladder is now `-org-scoped` alone (65) — the tier this file already
+     calls hygiene-only, since one org's page rendering one org's rows is the
+     case `max_rows` was designed to permit.
      Tier 1 WAS the burn-down target and reached 0, so it now gates at
      `--error` across the whole tree rather than only on findings new vs. the
      PR base — a single unbounded table read anywhere fails the build. Its

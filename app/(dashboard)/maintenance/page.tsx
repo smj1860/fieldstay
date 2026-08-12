@@ -48,7 +48,11 @@ export default async function MaintenancePage() {
       // detail page (/maintenance/[id]) so the two agree.
       .order('sort_order', { referencedTable: 'work_order_line_items', ascending: true })
       .order('created_at', { referencedTable: 'work_order_line_items', ascending: true })
-      .order('id',         { referencedTable: 'work_order_line_items', ascending: true }),
+      .order('id',         { referencedTable: 'work_order_line_items', ascending: true })
+      // The .in() here is on STATUS, so this is NOT bounded by a four-element
+      // list — it returns every open work order the org has. A truncated read
+      // would drop work orders off the board with no sign they existed.
+      .limit(2000),
 
     supabase
       .from('properties')

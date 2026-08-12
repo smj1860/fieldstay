@@ -181,6 +181,9 @@ export async function createInventoryTemplate(
       .select('id, name, category, default_unit, default_par_level, platform_catalog_item_id')
       .eq('org_id', membership.org_id)
       .in('id', selectedCatalogItemIds)
+      // One row per selected id. Sized by the selection so a truncated read
+      // cannot silently build a template from a subset of what was ticked.
+      .limit(selectedCatalogItemIds.length)
 
     if (catalogError || !catalogItems?.length) {
       console.error('[createInventoryTemplate] catalog fetch', catalogError)

@@ -117,7 +117,7 @@ const EXCEPTIONS: Record<string, string> = {
   // createWorkOrder calls the action.
   'app/(dashboard)/maintenance/actions.ts:589':
     'Per-vendor quote_requests insert (insertQuoteRequests) — each row needs its own randomly generated quote_token before its own Inngest event fires, so batching would mean moving token generation to the caller. Bounded by the vendor count the PM ticked in one dialog, and it is the only RFQ sender in the codebase.',
-  'app/(dashboard)/properties/clone-actions.ts:122':
+  'app/(dashboard)/properties/clone-actions.ts:123':
     'Per-section checklist_template_sections insert — each section needs its own DB-generated id before the child checklist_template_items insert can reference it as section_id. Parent-before-child dependency, not a batchable read.',
   'app/api/work-orders/[token]/photos/route.ts:109':
     'Per-photo storage upload + work_order_photos row — each photo is a distinct uploaded file with its own generated storage path; there is no batched form of a storage upload.',

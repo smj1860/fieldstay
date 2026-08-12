@@ -38,6 +38,7 @@ export default async function OnboardingPmsPage() {
     .select('id, provider_id, status, external_user_id')
     .eq('org_id', membership.org_id)
     .in('provider_id', PMS_PROVIDER_IDS)
+    .limit(PMS_PROVIDER_IDS.length)
 
 
   // Logs + reports, then throws so the segment's error.tsx renders a real

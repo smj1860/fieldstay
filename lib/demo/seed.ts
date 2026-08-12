@@ -326,6 +326,7 @@ export async function seedDemoOrg(opts: SeedOptions = {}): Promise<SeedResult> {
     .eq('org_id', orgId)
     .eq('is_default', true)
     .in('property_id', properties.map((p) => p.id))
+    .limit(properties.length)
 
   if (appliedTemplatesError) {
     throw new Error(`Failed to verify seeded checklist templates: ${appliedTemplatesError.message}`)
