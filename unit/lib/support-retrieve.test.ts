@@ -7,9 +7,13 @@ vi.mock('@/lib/supabase/server', () => ({
 vi.mock('@/lib/support/embed', () => ({
   embedText: vi.fn(),
 }))
+vi.mock('@/lib/observability/report-error', () => ({
+  reportError: vi.fn(),
+}))
 
 import { createServiceClient } from '@/lib/supabase/server'
 import { embedText } from '@/lib/support/embed'
+import { reportError } from '@/lib/observability/report-error'
 import { retrieveContext } from '@/lib/support/retrieve'
 
 type Resp = { data?: unknown; error?: unknown }
@@ -50,7 +54,22 @@ describe('retrieveContext', () => {
     })
   })
 
-  it('falls back to recency-ordered chunks when the RPC call errors', async () => {
+  // ==========================================================================
+  // THERE IS NO RECENCY FALLBACK, DELIBERATELY.
+  //
+  // These three cases previously returned the 5 most recent support_kb_chunks
+  // rows. That is worse than nothing here: seed-support-kb.ts DELETEs every
+  // non-placeholder chunk and re-inserts the whole set, so created_at order is
+  // not "newest help content" — it is whichever of ~299 chunks landed in the
+  // final insert batch. Arbitrary.
+  //
+  // The resulting failure is the dangerous kind. Finn receives five unrelated
+  // topics labelled as relevant context and answers from them fluently, which
+  // reads to a PM exactly like a real answer. Empty context makes it say it
+  // does not know — true, and actionable.
+  // ==========================================================================
+
+  it('returns nothing when the RPC call errors, rather than unrelated chunks', async () => {
     const supabase = makeSupabase({
       rpc:      { data: null, error: { message: 'rpc failed' } },
       fallback: { data: [{ content: 'Fallback chunk 1' }], error: null },
@@ -60,10 +79,13 @@ describe('retrieveContext', () => {
 
     const result = await retrieveContext('a question')
 
-    expect(result).toEqual(['Fallback chunk 1'])
+    expect(result).toEqual([])
+    expect(reportError).toHaveBeenCalled()
   })
 
-  it('falls back to recency-ordered chunks when the RPC returns zero matches above threshold', async () => {
+  it('returns nothing when no chunk clears the similarity threshold', async () => {
+    // The KB genuinely does not cover this question. Saying so beats
+    // answering from whatever happens to be lying around.
     const supabase = makeSupabase({
       rpc:      { data: [], error: null },
       fallback: { data: [{ content: 'Fallback chunk A' }, { content: 'Fallback chunk B' }], error: null },
@@ -73,10 +95,10 @@ describe('retrieveContext', () => {
 
     const result = await retrieveContext('a question with no good matches')
 
-    expect(result).toEqual(['Fallback chunk A', 'Fallback chunk B'])
+    expect(result).toEqual([])
   })
 
-  it('falls back to recency-ordered chunks when embedText itself throws (e.g. OpenAI outage)', async () => {
+  it('returns nothing when embedText throws (e.g. OpenAI outage), and reports it', async () => {
     const supabase = makeSupabase({
       fallback: { data: [{ content: 'Degraded fallback chunk' }], error: null },
     })
@@ -85,8 +107,11 @@ describe('retrieveContext', () => {
 
     const result = await retrieveContext('a question')
 
-    expect(result).toEqual(['Degraded fallback chunk'])
+    expect(result).toEqual([])
     expect(supabase.rpc).not.toHaveBeenCalled()
+    // A silent degradation must surface as an incident, not as a run of
+    // oddly unhelpful support replies.
+    expect(reportError).toHaveBeenCalled()
   })
 
   it('returns an empty array from the fallback when there are no chunks at all', async () => {

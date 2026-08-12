@@ -1,4 +1,3 @@
-import { tryUnwrapList } from '@/lib/supabase/unwrap'
 import 'server-only'
 import { createServiceClient } from '@/lib/supabase/server'
 import { embedText }           from './embed'
@@ -26,34 +25,39 @@ export async function retrieveContext(query: string): Promise<string[]> {
 
     if (error) {
       console.error('[support/retrieve] rpc error:', error)
-      return await fallbackRetrieve(supabase)
+      reportError(error, { site: 'lib.support.retrieve.matchKbChunks' })
+      return []
     }
 
-    if (!data || data.length === 0) {
-      // No matches above threshold — fall back to recency so the prompt
-      // has something rather than nothing
-      return await fallbackRetrieve(supabase)
-    }
+    // No match above the similarity threshold means the KB genuinely does not
+    // cover this question. Returning nothing is the honest answer — see the
+    // note on the removed recency fallback below.
+    if (!data || data.length === 0) return []
 
     return (data as Array<{ content: string }>).map((row) => row.content)
   } catch (err) {
-    console.error('[support/retrieve] embedding failed, using fallback:', err)
+    console.error('[support/retrieve] embedding failed:', err)
     reportError(err, { site: 'lib.support.retrieve.retrieveContext' })
-    return await fallbackRetrieve(supabase)
+    return []
   }
 }
 
-async function fallbackRetrieve(
-  supabase: ReturnType<typeof createServiceClient>
-): Promise<string[]> {
-  // Degrade, don't throw: the support bot should still answer without KB
-  // context. tryUnwrapList still logs and reports the failure.
-  const chunksRes = await supabase
-    .from('support_kb_chunks')
-    .select('content')
-    .order('created_at', { ascending: false })
-    .limit(5)
-
-  const out = tryUnwrapList(chunksRes, { site: 'lib.support.retrieve' })
-  return (out.ok ? out.data : []).map((row) => row.content as string)
-}
+/*
+ * THERE IS DELIBERATELY NO RECENCY FALLBACK.
+ *
+ * This previously answered an embedding failure, an RPC error, or a
+ * below-threshold query by returning the 5 most recent support_kb_chunks rows.
+ * That is worse than returning nothing, for a reason specific to how the KB is
+ * written: scripts/seed-support-kb.ts DELETES every non-placeholder chunk and
+ * re-inserts the whole set, so created_at ordering is not "the newest help
+ * content" — it is whichever of the ~299 chunks happened to land in the final
+ * insert batch. Arbitrary.
+ *
+ * The failure mode that produces is the bad one. Finn receives five unrelated
+ * help topics presented as relevant context and answers from them fluently and
+ * confidently, which reads to a PM exactly like a real answer. An empty context
+ * makes it say it does not know, which is true and which a PM can act on.
+ *
+ * Every path here now reports to Sentry as well, so a silent degradation shows
+ * up as an incident rather than as a run of oddly unhelpful support replies.
+ */

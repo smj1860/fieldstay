@@ -236,18 +236,41 @@ describe('getRecentPurchaseOrders', () => {
 })
 
 describe('ACCOUNT_TOOLS', () => {
-  it('takes no model-supplied input parameters on any tool — orgId is always injected server-side', () => {
+  /**
+   * The property being protected is NOT "no tool takes input" — it is "no
+   * model-supplied value can select or widen SCOPE". orgId is always injected
+   * server-side from the session.
+   *
+   * get_par_level_explanation is the single tool with an argument, and it is
+   * allowed exactly one: an item_name that narrows an already org-scoped
+   * query via .ilike(). Anything resembling an id, org, property or account
+   * selector would let the model choose whose data to read, so the allowlist
+   * is per-tool AND per-parameter rather than a blanket exemption.
+   */
+  const TOOLS_WITH_INPUT: Record<string, string[]> = {
+    get_par_level_explanation: ['item_name'],
+  }
+
+  it('lets no tool take a model-supplied parameter that could select scope', () => {
     for (const tool of ACCOUNT_TOOLS) {
-      expect(tool.input_schema.properties).toEqual({})
+      const allowed = TOOLS_WITH_INPUT[tool.name] ?? []
+      const declared = Object.keys(tool.input_schema.properties ?? {})
+      expect(declared).toEqual(allowed)
+
+      // Belt and braces: even an allowlisted parameter may not be a selector.
+      for (const p of declared) {
+        expect(p).not.toMatch(/(^|_)(id|org|organization|property|account|user|tenant)(_|$)/)
+      }
     }
   })
 
-  it('declares exactly the nine tools callAccountTool knows how to dispatch', () => {
+  it('declares exactly the ten tools callAccountTool knows how to dispatch', () => {
     const names = ACCOUNT_TOOLS.map((t) => t.name).sort()
     expect(names).toEqual([
       'get_below_par_inventory', 'get_billing_details', 'get_crew_roster_status',
-      'get_integration_status', 'get_plan_status', 'get_recent_purchase_orders',
-      'get_recent_turnovers', 'get_vendor_compliance_status', 'get_work_order_status',
+      'get_integration_status', 'get_par_level_explanation', 'get_plan_status',
+      'get_recent_purchase_orders', 'get_recent_turnovers',
+      'get_vendor_compliance_status', 'get_work_order_status',
     ])
   })
 })
