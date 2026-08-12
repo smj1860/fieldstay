@@ -308,14 +308,25 @@ export async function getBelowParInventory(orgId: string) {
 export async function getParLevelExplanation(orgId: string, searchTerm?: string) {
   const supabase = createServiceClient({ system: 'lib/support/account-tools' })
 
-  let query = supabase
+  // Escaped exactly as the vendor lookup in app/actions/work-order-public.ts
+  // does, and for the same reason recorded there: an unescaped '%' matches
+  // every row, so a model emitting one would describe the whole portfolio
+  // while appearing to answer about one item.
+  const term = (searchTerm ?? '').trim().replace(/[\\%_]/g, (ch) => `\\${ch}`)
+
+  // ONE chain, with .ilike() applied unconditionally — an empty term gives
+  // '%%', which matches everything. Building this conditionally and awaiting a
+  // reassigned variable put the .limit() out of the query's lexical scope, so
+  // semgrep's unbounded-select rule could not see the bound and failed CI on a
+  // read that was in fact bounded. Keeping the whole chain in one expression
+  // means the limit is visible to the checker as well as to a reader.
+  const itemsRes = await supabase
     .from('inventory_items')
     .select('id, name, par_level, par_mode, smart_group, base_qty, auto_adjust, property_id, properties ( name, bedrooms, bathrooms, max_guests )')
     .eq('org_id', orgId)
     .eq('is_active', true)
-  if (searchTerm?.trim()) query = query.ilike('name', `%${searchTerm.trim()}%`)
-
-  const itemsRes = await query.limit(PAR_EXPLANATION_LIMIT)
+    .ilike('name', `%${term}%`)
+    .limit(PAR_EXPLANATION_LIMIT)
   if (reportQueryError(itemsRes.error, { site: 'lib.support.accountTools.getParLevelExplanation', orgId })) {
     return { error: 'Could not look up par levels.' }
   }

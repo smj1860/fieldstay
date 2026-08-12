@@ -123,21 +123,38 @@ describe('recomputeParLevels', () => {
     expect(rows[0].par_level).toBe(5)
   })
 
-  it('prefers historical consumption once enough samples exist', async () => {
-    const { client, rpc } = makeSupabase({
+  /**
+   * A property whose items resolve through the HISTORICAL branch — enough
+   * consumption samples that resolvePar stops using the size formula.
+   * `stay` is what derive_property_stay_lengths returns for it.
+   */
+  function historicalScenario(stay?: { avg_nights: string; sample_count: number }) {
+    return makeSupabase({
       properties:      { data: [{ id: 'p-big', bedrooms: 4, bathrooms: 3, max_guests: 10 }], error: null },
       inventory_items: { data: [TOWELS('p-big', 'i-1')], error: null },
       inventory_consumption_stats: {
         data: [{ inventory_item_id: 'i-1', avg_rate_per_guest_night: 0.5, sample_count: 5 }],
         error: null,
       },
-    })
-    await recomputeParLevels(client, { orgId: ORG })
-    const rows = (rpc.mock.calls.find((c) => c[0] === 'apply_resolved_par_levels')![1] as
+    }, 3, stay ? {
+      derive_property_stay_lengths: {
+        data: [{ property_id: 'p-big', ...stay }], error: null,
+      },
+    } : {})
+  }
+
+  /** par_levels from the write RPC — not calls[0], which is the stay aggregate. */
+  function writtenPars(rpc: ReturnType<typeof makeSupabase>['rpc']) {
+    return (rpc.mock.calls.find((c) => c[0] === 'apply_resolved_par_levels')![1] as
       { p_rows: { par_level: number }[] }).p_rows
+  }
+
+  it('prefers historical consumption once enough samples exist', async () => {
+    const { client, rpc } = historicalScenario()
+    await recomputeParLevels(client, { orgId: ORG })
     // No qualifying bookings, so 3 nights by default:
     // 0.5 * 10 guests * 3 nights = 15, +20% buffer = 18 — not the formula's 22.
-    expect(rows[0].par_level).toBe(18)
+    expect(writtenPars(rpc)[0].par_level).toBe(18)
   })
 
   // ==========================================================================
@@ -150,47 +167,21 @@ describe('recomputeParLevels', () => {
   // ==========================================================================
 
   it('uses the property\'s OWN average stay once it has enough bookings', async () => {
-    const { client, rpc } = makeSupabase({
-      properties:      { data: [{ id: 'p-big', bedrooms: 4, bathrooms: 3, max_guests: 10 }], error: null },
-      inventory_items: { data: [TOWELS('p-big', 'i-1')], error: null },
-      inventory_consumption_stats: {
-        data: [{ inventory_item_id: 'i-1', avg_rate_per_guest_night: 0.5, sample_count: 5 }],
-        error: null,
-      },
-    }, 3, {
-      derive_property_stay_lengths: {
-        data: [{ property_id: 'p-big', avg_nights: '6', sample_count: 4 }], error: null,
-      },
-    })
+    const { client, rpc } = historicalScenario({ avg_nights: '6', sample_count: 4 })
     await recomputeParLevels(client, { orgId: ORG })
-    const rows = (rpc.mock.calls.find((c) => c[0] === 'apply_resolved_par_levels')![1] as
-      { p_rows: { par_level: number }[] }).p_rows
     // 0.5 * 10 guests * 6 nights = 30, +20% = 36. Double the 3-night default's
     // 18 — which is the whole point: the default was silently halving this.
-    expect(rows[0].par_level).toBe(36)
+    expect(writtenPars(rpc)[0].par_level).toBe(36)
   })
 
   it('IGNORES an average built from too few bookings', async () => {
     // A live property had exactly one booking, a 12-night stay. Trusting it
     // would have quadrupled every historical par that property ever resolves.
     // This is the case a `sample_count >= 1` threshold lets through.
-    const { client, rpc } = makeSupabase({
-      properties:      { data: [{ id: 'p-big', bedrooms: 4, bathrooms: 3, max_guests: 10 }], error: null },
-      inventory_items: { data: [TOWELS('p-big', 'i-1')], error: null },
-      inventory_consumption_stats: {
-        data: [{ inventory_item_id: 'i-1', avg_rate_per_guest_night: 0.5, sample_count: 5 }],
-        error: null,
-      },
-    }, 3, {
-      derive_property_stay_lengths: {
-        data: [{ property_id: 'p-big', avg_nights: '12', sample_count: 1 }], error: null,
-      },
-    })
+    const { client, rpc } = historicalScenario({ avg_nights: '12', sample_count: 1 })
     await recomputeParLevels(client, { orgId: ORG })
-    const rows = (rpc.mock.calls.find((c) => c[0] === 'apply_resolved_par_levels')![1] as
-      { p_rows: { par_level: number }[] }).p_rows
     // Falls back to 3 nights -> 18, not the 12-night 72.
-    expect(rows[0].par_level).toBe(18)
+    expect(writtenPars(rpc)[0].par_level).toBe(18)
   })
 
   it('never selects avg_stay_length — the column is not the source', async () => {

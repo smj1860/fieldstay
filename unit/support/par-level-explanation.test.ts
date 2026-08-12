@@ -137,10 +137,12 @@ describe('callAccountTool — par explanation dispatch', () => {
 
   it('ignores a non-string item_name instead of coercing it into the query', async () => {
     // The model can emit anything. String(x) on an object gives
-    // "[object Object]", which would silently search for that literal.
+    // "[object Object]", which would silently search for that literal and
+    // return "no items matching" for a question about a real one.
     const calls = mockQuery([ITEM()])
     await callAccountTool('get_par_level_explanation', ORG, { item_name: { nested: true } })
-    expect(calls.some((c) => c.method === 'ilike')).toBe(false)
+    // ilike is always applied — an empty term is '%%', which matches all.
+    expect(calls.find((c) => c.method === 'ilike')!.args[1]).toBe('%%')
   })
 
   it('caps an over-long search term', async () => {
@@ -148,5 +150,14 @@ describe('callAccountTool — par explanation dispatch', () => {
     await callAccountTool('get_par_level_explanation', ORG, { item_name: 'x'.repeat(5000) })
     const ilike = calls.find((c) => c.method === 'ilike')
     expect((ilike!.args[1] as string).length).toBeLessThanOrEqual(102)
+  })
+
+  it('escapes LIKE metacharacters so a lone % cannot match every item', async () => {
+    // Same defect app/actions/work-order-public.ts records: an unescaped '%'
+    // matched every vendor in the org. Here it would describe the whole
+    // portfolio while appearing to answer about one item.
+    const calls = mockQuery([ITEM()])
+    await callAccountTool('get_par_level_explanation', ORG, { item_name: '%' })
+    expect(calls.find((c) => c.method === 'ilike')!.args[1]).toBe('%\\%%')
   })
 })
