@@ -23,11 +23,27 @@ import {
 } from './sync/signals'
 
 // Crew Sync v2 (docs/CREW_SYNC_V2_PHASES.md Phase 3): broadcast signal +
-// delta pull instead of postgres_changes. Ships dormant — the flag defaults
-// off and the v1 path below stays the production behavior until Phase 5.
-// NEXT_PUBLIC_ vars are inlined at build time, so this is a build-time
-// constant, not a runtime toggle.
-const CREW_SYNC_V2 = process.env.NEXT_PUBLIC_CREW_SYNC_V2 === 'true'
+// delta pull instead of postgres_changes.
+//
+// DEFAULT-ON as of 2026-08-12, after the Phase 5b two-device acceptance test
+// passed. `!== 'false'` rather than `=== 'true'`, and the direction is the
+// whole point: absent used to mean v1, so any environment that did not carry
+// the variable — a new preview, a rebuilt environment, a setting lost in a
+// project migration — silently served crew the old sync path with nothing to
+// indicate it. Since NEXT_PUBLIC_ vars are inlined at BUILD time, that state
+// is invisible in config and only observable from behaviour. Now the fallback
+// requires someone to ask for it explicitly.
+//
+// The v1 path below is deliberately still here and still compiling. It is the
+// rollback: set NEXT_PUBLIC_CREW_SYNC_V2=false and rebuild, no code change.
+// Phase 5d deletes it after a green soak week — commenting it out in the
+// meantime would buy nothing (it is already unreachable when the flag is on)
+// while costing type-checking, lint, guardrail coverage, and a one-variable
+// rollback.
+//
+// Build-time constant, not a runtime toggle: changing the variable in Vercel
+// does nothing to an already-built bundle. It takes effect on the next build.
+const CREW_SYNC_V2 = process.env.NEXT_PUBLIC_CREW_SYNC_V2 !== 'false'
 
 /** How often the safety poll runs a full resync — the correctness backstop
  * for missed Realtime events/broadcasts and the only freshness path for

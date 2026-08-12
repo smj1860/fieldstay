@@ -22,6 +22,7 @@ import {
   partitionMappedBookingRows,
   selectOwnerRezBookingsToPostRevenue,
 } from '@/lib/integrations/providers/ownerrez'
+import { upsertBookingsReturningIds } from './upsert-bookings'
 import { logAuditEvent }        from '@/lib/audit'
 import {
   applyMasterChecklistToProperty,
@@ -559,25 +560,20 @@ export const ownerRezInitialSync = inngest.createFunction(
             )
           }
 
-          const { data: upserted, error } = await supabase
-            .from('bookings')
-            .upsert(bookingRows, { onConflict: 'org_id,external_id,external_source' })
-            .select('id, external_id')
-
-          if (error) {
-            logger.error(`[OwnerRez:${user_id}] bookings upsert failed: ${error.message}`)
-            throw new Error(error.message)
-          }
+          // Chunked, and this is the sync where it matters most: it fetches
+          // every booking for every property in one call, so a portfolio with
+          // history clears max_rows = 1000 on its FIRST run — the one whose
+          // job is to get the historical owner ledger right. A truncated
+          // representation there silently omitted revenue for every booking
+          // past the first 1000. See upsert-bookings.ts.
+          const idByExternalId = await upsertBookingsReturningIds(
+            supabase, bookingRows, `OwnerRez:${user_id}`)
 
           logger.info(`[OwnerRez:${user_id}] Upserted ${bookingRows.length} bookings`)
 
           affectedPropertyIds = Array.from(new Set(
             bookingRows.map((b) => b.property_id).filter((id): id is string => id !== null)
           ))
-
-          const idByExternalId = Object.fromEntries(
-            (upserted ?? []).map((row) => [row.external_id, row.id as string])
-          )
 
           bookingsToPostRevenue = selectOwnerRezBookingsToPostRevenue(bookingRows, idByExternalId)
         }

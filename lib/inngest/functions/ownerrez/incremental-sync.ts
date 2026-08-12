@@ -67,6 +67,7 @@ import {
   partitionMappedBookingRows,
   selectOwnerRezBookingsToPostRevenue,
 } from '@/lib/integrations/providers/ownerrez'
+import { upsertBookingsReturningIds } from './upsert-bookings'
 import type { MappedOwnerRezBookingRow } from '@/lib/integrations/providers/ownerrez'
 import { mergeIntegrationConnectionMetadata } from '@/lib/integrations/connection-metadata'
 import { unwrap, unwrapList, isRealQueryError } from '@/lib/supabase/unwrap'
@@ -392,19 +393,14 @@ async function persistBookings(
     return { affectedPropertyIds: [], bookingsToPostRevenue: [], ownerBlocks: [] }
   }
 
-  const { data: upserted, error } = await supabase
-    .from('bookings')
-    .upsert(bookingRows, { onConflict: 'org_id,external_id,external_source' })
-    .select('id, external_id')
-
-  if (error) {
-    logger.error(`[OwnerRez:${conn.user_id}] bookings upsert: ${error.message}`)
-    throw new Error(error.message)
-  }
-
-  const idByExternalId = Object.fromEntries(
-    (upserted ?? []).map((row) => [row.external_id, row.id as string])
-  )
+  // Chunked: an .upsert().select() returns at most max_rows = 1000 rows with
+  // no truncation signal, and a short id map silently drops those bookings
+  // from revenue posting. See upsert-bookings.ts.
+  // No try/catch: the helper's message already carries the connection label,
+  // and the enclosing step.run surfaces the throw. Catching only to re-log and
+  // re-throw would add a log-only catch block for no added context.
+  const idByExternalId = await upsertBookingsReturningIds(
+    supabase, bookingRows, `OwnerRez:${conn.user_id}`)
 
   return {
     affectedPropertyIds: Array.from(new Set(bookingRows.map((b) => b.property_id))),
