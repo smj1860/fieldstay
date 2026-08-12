@@ -1461,9 +1461,22 @@ following them stops being a memory test. Five layers, checked in CI via
      have silently under-reported rather than shown a visibly short list.
      Fire-checked before promoting, same protocol.
 
-     The ladder is now `-org-scoped` alone (65) — the tier this file already
-     calls hygiene-only, since one org's page rendering one org's rows is the
-     case `max_rows` was designed to permit.
+     The ladder is now `-org-scoped` alone, and a site-by-site audit of all 65
+     on 2026-08-12 found that "hygiene-only" was ALMOST right but not entirely.
+     Six were bounded and the rest verified against live per-property ratios
+     rather than assumed. The distinction that matters inside this tier is
+     whether the table grows with the ORG'S SIZE (plan-capped, so safe) or with
+     TIME. Safe: properties, crew_members (1.2/property), vendors (0.6),
+     checklist_template_sections (7.3 — the highest, ~365 at 50 properties),
+     and every template/config table. Also safe once checked: the `bookings`
+     and `turnovers` page reads, which look unbounded but carry date windows.
+     NOT safe, and now bounded: `maintenance_schedules` at ~18 per property
+     (~900 at the 50-property target, crossing `max_rows` at about 56) and
+     `property_assets`, where asset_type_standards' 21 types put a fully
+     catalogued 50-property portfolio at ~1050. Neither is a page-render
+     nicety — a truncated read drops scheduled maintenance and assets off the
+     page silently. Treat a NEW finding in this tier as a prompt to ask which
+     of those two kinds of growth applies, not as automatically ignorable.
      Tier 1 WAS the burn-down target and reached 0, so it now gates at
      `--error` across the whole tree rather than only on findings new vs. the
      PR base — a single unbounded table read anywhere fails the build. Its

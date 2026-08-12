@@ -30,7 +30,12 @@ export default async function AssetsPage() {
       .select('*')
       .eq('org_id', membership.org_id)
       .eq('is_active', true)
-      .order('created_at', { ascending: false }),
+      .order('created_at', { ascending: false })
+      // NOT hygiene, despite the org scope: asset_type_standards carries 21
+      // types, so a fully catalogued 50-property portfolio reaches ~1050 —
+      // past max_rows. Live orgs average 9 per property today; the bound is
+      // sized for the portfolio this product is sold to.
+      .limit(3000),
 
     // Platform catalog (21 rows). Paginated rather than left bare so the read
     // can never silently truncate; at this size it is exactly one request.

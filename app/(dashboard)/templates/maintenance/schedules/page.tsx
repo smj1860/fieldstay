@@ -32,7 +32,12 @@ export default async function MaintenanceSchedulesPage() {
       `)
       .eq('org_id', membership.org_id)
       .eq('is_active', true)
-      .order('next_due_date', { ascending: true, nullsFirst: false }),
+      .order('next_due_date', { ascending: true, nullsFirst: false })
+      // NOT hygiene, despite the org scope: live data shows ~18 active
+      // schedules per property, so a portfolio at the 50-property target sits
+      // near 900 and crosses max_rows at roughly 56 properties. A truncated
+      // read silently drops scheduled maintenance off the page.
+      .limit(2000),
     // Paginated: RLS-scoped to this org plus is_system, small today, but this
     // list drives a picker — a truncated one silently offers fewer templates
     // than exist rather than erroring.

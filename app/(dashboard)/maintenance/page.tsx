@@ -66,7 +66,9 @@ export default async function MaintenancePage() {
       .select('id, name, specialty, lat, lng, email')
       .eq('org_id', membership.org_id)
       .eq('is_active', true)
-      .order('name'),
+      .order('name')
+      // One row per vendor in this org — tens in practice.
+      .limit(1000),
 
     supabase
       .from('maintenance_schedules')
@@ -80,7 +82,12 @@ export default async function MaintenancePage() {
       `)
       .eq('org_id', membership.org_id)
       .eq('is_active', true)
-      .order('next_due_date', { ascending: true, nullsFirst: false }),
+      .order('next_due_date', { ascending: true, nullsFirst: false })
+      // NOT hygiene, despite the org scope: live data shows ~18 active
+      // schedules per property, so a portfolio at the 50-property target sits
+      // near 900 and crosses max_rows at roughly 56 properties. A truncated
+      // read silently drops scheduled maintenance off the page.
+      .limit(2000),
 
     supabase
       .from('crew_members')
@@ -94,7 +101,12 @@ export default async function MaintenancePage() {
       .select('id, name, asset_type, property_id')
       .eq('org_id', membership.org_id)
       .eq('is_active', true)
-      .order('name'),
+      .order('name')
+      // NOT hygiene, despite the org scope: asset_type_standards carries 21
+      // types, so a fully catalogued 50-property portfolio reaches ~1050 —
+      // past max_rows. Live orgs average 9 per property today; the bound is
+      // sized for the portfolio this product is sold to.
+      .limit(3000),
 
     // Bounded rather than left to PostgREST's silent max_rows truncation.
     // One row per vendor in this org, so 1000 is far above the target user's
