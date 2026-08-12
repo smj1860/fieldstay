@@ -36,34 +36,23 @@ anything missed.
 | 2 | Broadcast infrastructure (DB triggers + RLS on `realtime.messages`) | ✅ Done — migration `20260725191358_crew_sync_broadcast_triggers.sql`, merged via PR #508 (2026-07-26), applied to prod **and** e2e project. Deploys dark per design — no client subscribes yet |
 | 3 | Client cutover (single private broadcast channel, behind a flag) | ✅ Done — merged via PR #508 (2026-07-26), `lib/dexie/context.tsx`. Ships dormant: `NEXT_PUBLIC_CREW_SYNC_V2` defaults off (unset in `.env.example`) |
 | 4 | Outbox retry backoff | ✅ Done — merged via PR #508 (2026-07-26), `lib/dexie/syncService.ts`'s `computeNextAttemptAt()` |
-| 5 | Rollout, acceptance test, old-code deletion, convention + guardrail | 🟡 **In progress** — 5e (convention + `unit/guardrails/crew-sync-coverage.test.ts`) done 2026-07-29, `CREW_SYNCED_TABLES`/`LOCAL_ONLY_TABLES` added to `lib/dexie/schema.ts`. 5a-5d (Realtime quota check, flag flip, acceptance test, soak, deletion) still open — see section 5 below |
+| 5 | Rollout, acceptance test, old-code deletion, convention + guardrail | 🟡 **In progress** — 5e (convention + `unit/guardrails/crew-sync-coverage.test.ts`) done 2026-07-29. 5b two-device acceptance test passed 2026-08-12; flag set in Vercel and client default inverted to on the same day, so **v2 is the serving path**. Still open: 5a Realtime quota check, 5c soak, 5d deletion of the v1 path |
 
-> **2026-08-09 — flag flipped, redeploy still required.** `NEXT_PUBLIC_*` is
-> inlined at BUILD time (see the note at `lib/dexie/context.tsx`'s
-> `CREW_SYNC_V2` and `clientInlinedOnly: true` in `lib/env.ts`), so setting the
-> var in Vercel does nothing to a bundle that was already built. v2 turns on at
-> the next **rebuild**, not the next restart. Until then v1 is still serving.
+> **2026-08-12 — v2 is the DEFAULT and is live.** `NEXT_PUBLIC_CREW_SYNC_V2`
+> is set to `true` in Vercel and many builds have shipped since it was set, so
+> v2 has been the serving path for some time — the 2026-08-09 note this
+> replaces ("redeploy still required") was already stale when written against a
+> branch that redeployed on every push.
 >
-> Everything else on the DB side is verified live in production (2026-08-09):
-> migration `20260725191358` in the ledger, `notify_crew_sync` present,
-> 12 broadcast triggers attached, RLS policy `crew_receive_own_sync_broadcasts`
-> on `realtime.messages`, and the trigger's `crew_members.user_id` join matches
-> both the client's `crew:${userId}` topic and the policy's `auth.uid()`.
-> `realtime.send()` was probed end to end and does land a row.
+> The client default is now inverted (`!== 'false'`), so v2 serves even where
+> the variable is absent. That closes a real hole: `NEXT_PUBLIC_*` is inlined
+> at BUILD time, so an environment missing the variable silently served v1 with
+> nothing in config to show it. Rollback is `NEXT_PUBLIC_CREW_SYNC_V2=false`
+> plus a rebuild — still a build-time change, not a runtime toggle.
 >
-> Still open before the soak: 5b (two-device acceptance test — never run), then
-> 5c. Do NOT do 5d yet: the v1 `postgres_changes` code is the rollback path, and
-> rolling back is another rebuild.
->
-> Expect one deliberate behaviour change: v1 had a `postgres_changes` channel on
-> `property_assets`; v2 has no trigger for it (`SAFETY_POLL_ONLY` in
-> `unit/guardrails/crew-sync-coverage.test.ts`). Asset edits reach the device on
-> screen-open or the safety poll rather than in ~2 s.
->
-> Watch the Realtime DB pool (2 → 15, per 5a). Private-channel RLS
-> authorization takes a connection on every join AND every reconnect, v2 is
-> all-private-channel, and the reconnect jitter is 5–35 s — so a Realtime node
-> restart puts the whole fleet through that pool inside 30 seconds.
+> 5b (two-device acceptance test) passed 2026-08-12. Still open: 5a's Realtime
+> quota check, the 5c soak, and 5d deletion of the v1 path — which stays in the
+> tree, compiling and guardrail-covered, until then.
 
 
 ### Phase 1 artifacts you will build on (read these before touching code)
