@@ -1,10 +1,11 @@
 import 'server-only'
 
 import type { SupabaseClient } from '@supabase/supabase-js'
-import { unwrapList } from '@/lib/supabase/unwrap'
+import { unwrapList, tryUnwrap } from '@/lib/supabase/unwrap'
 import { fetchAllRows } from '@/lib/inngest/paginate'
 import {
   resolvePar,
+  STAY_LENGTH_MIN_BOOKINGS,
   type ParPropertyContext,
   type ParItemConfig,
   type ParConsumptionStats,
@@ -23,21 +24,30 @@ import {
  * a real number using the property's own bedrooms / bathrooms / max_guests,
  * and its historical consumption once enough samples exist.
  *
- * SET-BASED, not per-property. Three bounded reads for the whole scope, one
- * RPC to write. The obvious shape — loop properties, query each — is the N+1
- * that unit/guardrails/n-plus-one-loops.test.ts exists to catch, and a
- * 50-property portfolio would make thousands of round trips per recompute.
+ * SET-BASED, not per-property. Three bounded reads plus one aggregate RPC for
+ * the whole scope, one RPC to write. The obvious shape — loop properties,
+ * query each — is the N+1 that unit/guardrails/n-plus-one-loops.test.ts exists
+ * to catch, and a 50-property portfolio would make thousands of round trips
+ * per recompute. Stay length is aggregated in SQL for the same reason it is
+ * not read as rows: a portfolio's bookings run to tens of thousands, and an
+ * unbounded PostgREST select truncates at 1000 silently.
  */
 
 const PROPERTY_CAP = 1000
 const ITEM_CAP     = 20_000
 
 interface PropertyRow {
-  id:              string
-  bedrooms:        number | null
-  bathrooms:       number | null
-  max_guests:      number | null
-  avg_stay_length: number | null
+  id:         string
+  bedrooms:   number | null
+  bathrooms:  number | null
+  max_guests: number | null
+}
+
+/** One row per property from derive_property_stay_lengths(). */
+interface StayLengthRow {
+  property_id:  string
+  avg_nights:   number | string
+  sample_count: number
 }
 
 interface ItemRow {
@@ -73,13 +83,56 @@ export interface RecomputeResult {
  * bedroom count nobody filled in still needs towels. The engine's own
  * multiplier guard (`raw > 0 ? raw : 1`) is the second line of defence.
  */
-function toPropertyContext(p: PropertyRow): ParPropertyContext {
+function toPropertyContext(p: PropertyRow, stayNights: number | null): ParPropertyContext {
   return {
     bedrooms:        p.bedrooms  && p.bedrooms  > 0 ? p.bedrooms  : 1,
     bathrooms:       p.bathrooms && p.bathrooms > 0 ? p.bathrooms : 1,
     max_guests:      p.max_guests && p.max_guests > 0 ? p.max_guests : 2,
-    avg_stay_length: p.avg_stay_length,
+    avg_stay_length: stayNights,
   }
+}
+
+/**
+ * Typical stay nights per property, from its own bookings.
+ *
+ * NOT properties.avg_stay_length. That column has no editor anywhere in the
+ * app and three code paths write a literal 0 to it, so on 2026-08-11 it was 0
+ * on 17 of 27 live properties — and the only rows holding a "real" 3.0 were
+ * the four with no bookings at all. Reading it fed the historical par branch a
+ * number that was wrong precisely where there was data to be right.
+ *
+ * Below STAY_LENGTH_MIN_BOOKINGS the property is left null rather than given
+ * its own average, so the engine falls back to DEFAULT_STAY_LENGTH_NIGHTS. A
+ * single 12-night booking is not evidence that a property's typical stay is
+ * 12 nights, and the historical branch multiplies by this directly.
+ *
+ * A failure here is NOT fatal: every property degrades to the default, which
+ * is exactly the behaviour before this existed. A recompute must not be lost
+ * because an auxiliary aggregate was unavailable.
+ */
+async function fetchStayNights(
+  supabase: SupabaseClient,
+  orgId: string,
+  propertyIds: string[],
+  ctx: { site: string; orgId: string },
+): Promise<Map<string, number>> {
+  const byProperty = new Map<string, number>()
+  const res = await supabase.rpc('derive_property_stay_lengths', {
+    p_org_id: orgId, p_property_ids: propertyIds,
+  })
+  const rows = tryUnwrap<StayLengthRow[]>(res, { ...ctx, extra: { stage: 'stay_lengths' } })
+  // Array.isArray, not a truthiness check: a set-returning RPC that comes back
+  // as anything scalar would make the loop below throw "not iterable" INSIDE an
+  // Inngest step, failing a recompute over an auxiliary number that has a
+  // perfectly good default.
+  if (!rows.ok || !Array.isArray(rows.data)) return byProperty
+
+  for (const r of rows.data) {
+    if (r.sample_count < STAY_LENGTH_MIN_BOOKINGS) continue
+    const nights = Number(r.avg_nights)
+    if (Number.isFinite(nights) && nights > 0) byProperty.set(r.property_id, nights)
+  }
+  return byProperty
 }
 
 export async function recomputeParLevels(
@@ -93,7 +146,7 @@ export async function recomputeParLevels(
     (from, to) => {
       const q = supabase
         .from('properties')
-        .select('id, bedrooms, bathrooms, max_guests, avg_stay_length')
+        .select('id, bedrooms, bathrooms, max_guests')
         .eq('org_id', orgId)
         .eq('is_active', true)
       // Built conditionally rather than with .modify(), which is not a real
@@ -135,7 +188,10 @@ export async function recomputeParLevels(
     .limit(ITEM_CAP)
   const stats = unwrapList<StatsRow>(statsRes, { ...ctx, extra: { stage: 'stats' } })
 
-  const propertyById = new Map(properties.map((p) => [p.id, toPropertyContext(p)]))
+  const stayNights  = await fetchStayNights(supabase, orgId, propertyIds, ctx)
+  const propertyById = new Map(
+    properties.map((p) => [p.id, toPropertyContext(p, stayNights.get(p.id) ?? null)]),
+  )
   const statsByItem   = new Map(stats.map((s) => [s.inventory_item_id, s]))
 
   const rows: { id: string; par_level: number }[] = []

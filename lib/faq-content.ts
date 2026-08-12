@@ -429,6 +429,44 @@ export const FAQ_CATEGORIES: FaqCategory[] = [
       },
     ],
   },
+  /**
+   * Inventory — rewritten 2026-08-12, when par levels stopped being a number
+   * a PM types and became one the system computes per property.
+   *
+   * The previous copy did not merely age out of date, it walked PMs into a
+   * bug: it said "set them at Inventory → [Property Name]", and doing that on
+   * a scaling item wrote a value the next recompute silently overwrote. That
+   * is fixed (an edit now re-bases the item — see rebaseParFromTarget in
+   * lib/inventory/par-engine.ts), and this copy describes the fixed behaviour.
+   *
+   * Each claim below, checked against the code rather than the spec:
+   *   - scales per property        → PAR_SMART_GROUPS maps bathroom_essential /
+   *                                  bedroom_essential / guest_consumable to
+   *                                  bathrooms / bedrooms / max_guests
+   *   - your number is kept        → updateParLevel calls rebaseParFromTarget,
+   *                                  which stores a base_qty reproducing it and
+   *                                  sets auto_adjust = false so the historical
+   *                                  branch cannot supersede it
+   *   - fixed items exist          → par_mode = 'static' short-circuits
+   *                                  resolvePar entirely
+   *   - rescale "within seconds"   → saveDetails/createProperty send
+   *                                  inventory/par-recompute-requested; measured
+   *                                  at ~1.0s and ~1.2s end to end on 2026-08-11
+   *   - learns from real usage     → resolvePar's historical branch, at
+   *                                  HISTORICAL_MIN_SAMPLES (3) counts
+   *   - added catalog items scale  → addInventoryItems inherits par_mode /
+   *                                  smart_group / base_qty from inventory_catalog
+   *   - ask the support chat       → get_par_level_explanation in
+   *                                  lib/support/account-tools.ts
+   *   - re-apply never overwrites  → applyTemplateToProperties inserts only
+   *                                  items absent from the property (deduped on
+   *                                  catalog_item_id AND lowercased name); it
+   *                                  has no update path for existing rows
+   *
+   * DELIBERATELY NOT DESCRIBED: par_mode, smart_group, base_qty, auto_adjust
+   * or the buffer percentages. A PM has no UI for any of them, so naming them
+   * would describe controls that do not exist.
+   */
   {
     id:    'inventory',
     label: 'Inventory & Restocking',
@@ -437,7 +475,25 @@ export const FAQ_CATEGORIES: FaqCategory[] = [
         id:       'inv-par-level',
         question: 'What is a par level and how do I set one?',
         answer:
-          'A par level is the minimum quantity of a supply item you want on hand before it needs restocking — e.g. 4 rolls of paper towels. Set them at Inventory → Templates, or per property at Inventory → [Property Name] if one property needs different levels than the rest.',
+          'A par level is the minimum quantity of a supply item you want on hand before it needs restocking — e.g. 4 rolls of paper towels. Most items set themselves: FieldStay scales them to each property, so a 4-bathroom house gets more towels than a studio without you doing anything. To override one, click the par level at Inventory → [Property Name] and type the number you want. Your number is used as-is, and the item keeps scaling from it if the property changes later.',
+      },
+      {
+        id:       'inv-smart-par',
+        question: 'Why is the same item a different quantity at each property?',
+        answer:
+          'Because most supply items scale with the property. Bathroom items (towels, bath mats, toiletries) scale with the bathroom count, bedroom items (hangers, spare linens) with the bedroom count, and guest consumables (coffee, dinnerware, glasses) with how many guests the property sleeps — each with a small safety buffer on top. So the same catalog item shows a different number at a 1-bathroom condo than at a 4-bathroom lodge. Items that do not vary by size — a plunger, a first aid kit — stay a fixed number everywhere.',
+      },
+      {
+        id:       'inv-par-changed',
+        question: 'My par levels changed on their own — why?',
+        answer:
+          'Editing a property\'s bedrooms, bathrooms or max guests rescales every item that scales with it, within a few seconds. That is expected: it is the same recalculation that sizes a new property. Two things are never touched by it — an item you set yourself, which keeps scaling from your number, and any item marked as a fixed quantity. Once a property has enough inventory counts on record, FieldStay also starts using what that property actually goes through instead of the size estimate. If a number still looks wrong, ask the in-app support chat "why is my [item] par level what it is" and it will explain that specific item at that specific property.',
+      },
+      {
+        id:       'inv-add-own-items',
+        question: 'Can I add my own items, or items only some properties need?',
+        answer:
+          'Yes. Every property starts from the FieldStay standard list, and you add anything else it needs — pool towels, fire pit supplies, a hot tub kit — at Inventory → [Property Name]. Items added from the catalog scale with property size the same way the standard ones do. You can also build your own template from scratch at Inventory → Templates if a group of properties needs a different list entirely.',
       },
       {
         id:       'inv-kroger',
@@ -455,7 +511,7 @@ export const FAQ_CATEGORIES: FaqCategory[] = [
         id:       'inv-template-change',
         question: 'If I edit an inventory template, does it update properties that already use it?',
         answer:
-          'No. Templates are a starting point, not a live link — once applied to a property, that property\'s items and par levels are independent. Editing the template later only affects properties you apply it to afterward.',
+          'No. Templates are a starting point, not a live link — once applied, that property\'s items are independent. Re-applying an edited template to the same property adds any items it does not have yet, but never changes the par levels already there, so a level you adjusted is safe from a re-apply.',
       },
     ],
   },

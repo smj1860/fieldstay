@@ -1788,6 +1788,48 @@ export type Database = {
         }
         Relationships: []
       }
+      inventory_consumption_stats: {
+        Row: {
+          avg_rate_per_guest_night: number
+          inventory_item_id: string
+          last_sample_at: string | null
+          org_id: string
+          sample_count: number
+          updated_at: string
+        }
+        Insert: {
+          avg_rate_per_guest_night?: number
+          inventory_item_id: string
+          last_sample_at?: string | null
+          org_id: string
+          sample_count?: number
+          updated_at?: string
+        }
+        Update: {
+          avg_rate_per_guest_night?: number
+          inventory_item_id?: string
+          last_sample_at?: string | null
+          org_id?: string
+          sample_count?: number
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "inventory_consumption_stats_inventory_item_id_fkey"
+            columns: ["inventory_item_id"]
+            isOneToOne: true
+            referencedRelation: "inventory_items"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "inventory_consumption_stats_org_id_fkey"
+            columns: ["org_id"]
+            isOneToOne: false
+            referencedRelation: "organizations"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       inventory_count_items: {
         Row: {
           count_id: string
@@ -1823,48 +1865,6 @@ export type Database = {
             columns: ["inventory_item_id"]
             isOneToOne: false
             referencedRelation: "inventory_items"
-            referencedColumns: ["id"]
-          },
-        ]
-      }
-      inventory_consumption_stats: {
-        Row: {
-          avg_rate_per_guest_night: number
-          inventory_item_id: string
-          last_sample_at: string | null
-          org_id: string
-          sample_count: number
-          updated_at: string
-        }
-        Insert: {
-          avg_rate_per_guest_night?: number
-          inventory_item_id: string
-          last_sample_at?: string | null
-          org_id: string
-          sample_count?: number
-          updated_at?: string
-        }
-        Update: {
-          avg_rate_per_guest_night?: number
-          inventory_item_id?: string
-          last_sample_at?: string | null
-          org_id?: string
-          sample_count?: number
-          updated_at?: string
-        }
-        Relationships: [
-          {
-            foreignKeyName: "inventory_consumption_stats_inventory_item_id_fkey"
-            columns: ["inventory_item_id"]
-            isOneToOne: false
-            referencedRelation: "inventory_items"
-            referencedColumns: ["id"]
-          },
-          {
-            foreignKeyName: "inventory_consumption_stats_org_id_fkey"
-            columns: ["org_id"]
-            isOneToOne: false
-            referencedRelation: "organizations"
             referencedColumns: ["id"]
           },
         ]
@@ -5682,11 +5682,24 @@ export type Database = {
       }
     }
     Functions: {
+      accidental_junction_tables: {
+        Args: never
+        Returns: {
+          junction_table: string
+          parents: string[]
+          pk_columns: string[]
+        }[]
+      }
+      apply_asset_health_scores: {
+        Args: { p_org_id: string; p_updates: Json }
+        Returns: number
+      }
       apply_crew_score_recompute: { Args: never; Returns: Json }
       apply_inventory_counts: {
         Args: { p_counts: Json; p_org_id: string }
         Returns: number
       }
+      apply_resolved_par_levels: { Args: { p_rows: Json }; Returns: number }
       approve_quote_request: {
         Args: {
           p_completion_token: string
@@ -5793,6 +5806,14 @@ export type Database = {
       db_invariant_report: { Args: never; Returns: Json }
       db_type_shape_report: { Args: never; Returns: Json }
       delete_vault_secret: { Args: { p_secret_id: string }; Returns: undefined }
+      derive_property_stay_lengths: {
+        Args: { p_org_id: string; p_property_ids: string[] }
+        Returns: {
+          avg_nights: number
+          property_id: string
+          sample_count: number
+        }[]
+      }
       disconnect_integration_token: {
         Args: { p_provider_id: string; p_user_id: string }
         Returns: undefined
@@ -5919,6 +5940,7 @@ export type Database = {
         Returns: string
       }
       recompute_vendor_scores: { Args: never; Returns: number }
+      record_consumption_samples: { Args: { p_rows: Json }; Returns: number }
       record_guidebook_offer_open: {
         Args: { p_booking_id?: string; p_org_id: string; p_sponsor_id: string }
         Returns: undefined
@@ -5935,10 +5957,6 @@ export type Database = {
         Args: { p_items: Json; p_template_id: string }
         Returns: number
       }
-      set_default_platform_inventory_template: {
-        Args: { p_template_id: string }
-        Returns: undefined
-      }
       replace_room_template_items: {
         Args: { p_items: Json; p_room_template_id: string }
         Returns: number
@@ -5949,6 +5967,10 @@ export type Database = {
       }
       revoke_integration_token: {
         Args: { p_provider_id: string; p_user_id: string }
+        Returns: undefined
+      }
+      set_default_platform_inventory_template: {
+        Args: { p_template_id: string }
         Returns: undefined
       }
       storage_org_prefix: { Args: { object_name: string }; Returns: string }
@@ -6093,7 +6115,13 @@ export type Database = {
         | "39_year"
         | "section_179"
       member_role: "admin" | "manager" | "crew" | "viewer" | "owner"
-      org_plan: "starter" | "growth" | "pro" | "enterprise" | "portfolio" | "hosts"
+      org_plan:
+        | "starter"
+        | "growth"
+        | "pro"
+        | "enterprise"
+        | "portfolio"
+        | "hosts"
       org_plan_status:
         | "trialing"
         | "active"
@@ -6405,7 +6433,14 @@ export const Constants = {
       ],
       macrs_class: ["5_year", "15_year", "27_5_year", "39_year", "section_179"],
       member_role: ["admin", "manager", "crew", "viewer", "owner"],
-      org_plan: ["starter", "growth", "pro", "enterprise", "portfolio", "hosts"],
+      org_plan: [
+        "starter",
+        "growth",
+        "pro",
+        "enterprise",
+        "portfolio",
+        "hosts",
+      ],
       org_plan_status: [
         "trialing",
         "active",

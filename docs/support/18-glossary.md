@@ -68,7 +68,19 @@ The Guest Guidebook is a personalized, mobile-friendly page delivered to guests 
 
 ## Par Level
 
-A par level is the minimum quantity of a supply item that should be on hand at a property before triggering a restock order. Crew members count inventory during each turnover. Items that fall below par are added to a purchase order automatically — if Kroger is connected, you then click **Build Cart** on the Inventory → Portfolio page to add those items to your Kroger cart yourself; cart-building is a manual step, not an automatic one. Par levels are set per item per property and can be adjusted at any time.
+A par level is the minimum quantity of a supply item that should be on hand at a property before triggering a restock order. Crew members count inventory during each turnover. Items that fall below par are added to a purchase order automatically — if Kroger is connected, you then click **Build Cart** on the Inventory → Portfolio page to add those items to your Kroger cart yourself; cart-building is a manual step, not an automatic one.
+
+Par levels are per item per property. Most set themselves — see Scaling Par Level below — and any of them can be overridden by clicking the number at Inventory → [Property Name].
+
+---
+
+## Scaling Par Level
+
+Most supply items do not carry one fixed quantity across a portfolio; they scale with the size of each property. Bathroom items (towels, bath mats, toiletries) scale with the bathroom count, bedroom items (hangers, spare linens) with the bedroom count, and guest consumables (coffee, dinnerware, glasses) with how many guests the property sleeps — each with a safety buffer on top. This is why the same catalog item shows a different number at a 1-bathroom condo than at a 4-bathroom lodge.
+
+Editing a property's bedrooms, bathrooms or max guests rescales its items within a few seconds. Items that do not vary with property size — a plunger, a first aid kit — stay a fixed quantity everywhere.
+
+If you type your own number for an item, that number is used as-is and the item then scales from yours rather than the FieldStay default.
 
 ---
 

@@ -8,7 +8,9 @@
 
 A template is a reusable list of supply items — paper towels, dish soap, trash bags, toiletries — with par levels and preferred brands. You create one template (or a few for different property types) and apply it to multiple properties.
 
-This means you only set up the list once. When you apply a template to a new property, all the items and par levels copy over automatically.
+This means you only set up the list once. When you apply a template to a property, all the items and par levels copy over automatically.
+
+Note that templates are optional. New properties are stocked from the FieldStay standard list on creation, and most par levels scale to each property by themselves — so you only need a template when a group of properties needs a genuinely different list of items.
 
 ---
 
@@ -30,7 +32,11 @@ Go to **Inventory → Templates → New Template** and:
 
 Go to **Inventory → Templates**, find your template, and click **Apply to Property**. Select the properties where this template applies.
 
-After applying, go to **Inventory → [Property Name]** to review and adjust par levels per property. A 6-bedroom property may need higher par levels than a 2-bedroom. Adjust individual items without changing the template — template changes don't automatically push to already-applied properties.
+You usually do not need to. Every new property is stocked from the FieldStay standard list automatically when you create it — templates are for when a group of properties needs a *different* list, not for initial setup.
+
+You also do not need to adjust par levels for property size. Most items scale on their own: a 6-bedroom property gets higher quantities than a 2-bedroom without you changing anything (see **What Is a Par Level and How Do I Set One**). Go to **Inventory → [Property Name]** to override a specific number or add items that property alone needs.
+
+Template changes don't automatically push to already-applied properties. Re-applying an edited template adds any items the property doesn't have yet, but never changes par levels already there — so a level you adjusted is safe from a re-apply.
 
 ---
 

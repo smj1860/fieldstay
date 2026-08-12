@@ -104,7 +104,11 @@ async function runToolRound(
     toolUseBlocks.map(async (block) => ({
       type:        'tool_result' as const,
       tool_use_id: block.id,
-      content:     JSON.stringify(await callAccountTool(block.name, orgId)),
+      // block.input is whatever the model emitted. Every tool but
+      // get_par_level_explanation ignores it; that one validates it as a
+      // narrowing filter only — orgId is still the session's, never the
+      // model's. See callAccountTool.
+      content:     JSON.stringify(await callAccountTool(block.name, orgId, block.input)),
     }))
   )
 

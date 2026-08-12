@@ -33,7 +33,7 @@ Some checklist items are marked as discovery tasks — things like "note any dam
 Go to **Templates → Inventory**. There are a few connected screens here:
 
 - **Master List** (`Templates → Inventory → Master List`) — your org's own editable copy of the supply catalog (paper towels, dish soap, trash bags, toiletries, coffee pods, cleaning products, and so on). Seeded from FieldStay's platform catalog on first use, then fully yours to edit.
-- **Par Levels** (`Templates → Inventory → Par Levels`) — set default par-level targets per item, applied across your properties.
+- **Par Levels** (`Templates → Inventory → Par Levels`) — set default par-level targets per item, applied across your properties. These are baselines, not final numbers: most items scale from here to each property's own bedrooms, bathrooms or guest capacity, so you are setting the shape rather than a quantity you have to tune per property.
 - **Create / Saved Templates** (`Templates → Inventory → Create` / `Saved`) — you can build more than one named template (e.g. one for smaller units, one for larger houses) and apply whichever one fits a given property.
 
 **Why this matters:** Items below par trigger a restock order automatically. Getting the catalog and par levels right means the restocking engine works without you touching it.
@@ -83,7 +83,8 @@ You can link a scheduled maintenance item to a specific vendor. When the work or
 Before your first real turnover runs through FieldStay:
 
 - [ ] Turnover Checklist room library reviewed and applied to your properties — add property-specific rooms, remove anything that doesn't apply
-- [ ] Inventory master list and par levels set (adjust defaults up for larger properties)
+- [ ] Inventory master list and par levels set (no need to adjust up for larger properties — most items scale to each property's bedrooms, bathrooms and guest capacity on their own)
+- [ ] Every property's bedrooms, bathrooms and max guests filled in — those three numbers are what par levels scale from, so a blank one produces low quantities everywhere
 - [ ] Scheduled maintenance items entered with correct frequencies and realistic next due dates
 - [ ] At least one vendor assigned to recurring maintenance tasks they handle
 

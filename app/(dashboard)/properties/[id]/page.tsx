@@ -16,6 +16,7 @@ import { unwrapJoin } from '@/lib/utils/supabase-joins'
 import type { MaintenanceSchedule, MaintenanceCatalogItem } from '@/types/database'
 import type { Metadata } from 'next'
 import { throwIfAnyQueryFailed } from '@/lib/supabase/unwrap'
+import { STAY_LENGTH_MIN_BOOKINGS } from '@/lib/inventory/par-engine'
 
 const INVOICE_STATUSES = ['pending_payment', 'paid', 'cancelled'] as const
 
@@ -51,6 +52,7 @@ export default async function PropertyDetailPage({ params }: Props) {
     { data: allSchedules, error: allSchedulesError },
     { data: catalogItems, error: catalogItemsError },
     { data: invoiceRows, error: invoiceError },
+    { data: stayRows, error: stayError },
   ] = await Promise.all([
     supabase
       .from('turnovers')
@@ -120,6 +122,16 @@ export default async function PropertyDetailPage({ params }: Props) {
       .eq('org_id', property.org_id)
       .order('submitted_at', { ascending: false })
       .limit(25),
+
+    // Typical stay length, DERIVED from this property's bookings. Not
+    // properties.avg_stay_length — that column has no editor anywhere and is a
+    // literal 0 on most live rows, so displaying it showed "0 nights" on
+    // properties with years of booking history. Same source the par engine
+    // uses (migration 20260811210000), so the number a PM reads here is the
+    // number that scales their historical pars.
+    supabase.rpc('derive_property_stay_lengths', {
+      p_org_id: property.org_id, p_property_ids: [property.id],
+    }),
   ])
 
   // Logs + reports every failure, then throws so the segment's error.tsx
@@ -129,6 +141,16 @@ export default async function PropertyDetailPage({ params }: Props) {
   if (invoiceError) {
     console.error('[PropertyDetailPage] invoice history fetch failed:', invoiceError.message)
   }
+
+  // A display-only aggregate: log it, but never fail the page over it.
+  if (stayError) {
+    console.error('[PropertyDetailPage] stay-length derivation failed:', stayError.message)
+  }
+  const stayRow = Array.isArray(stayRows) ? stayRows[0] : null
+  const avgStayNights =
+    stayRow && stayRow.sample_count >= STAY_LENGTH_MIN_BOOKINGS && Number(stayRow.avg_nights) > 0
+      ? Number(stayRow.avg_nights)
+      : null
 
   // Calculate YTD maintenance spend
   const ytdSpend = (ytdCompletedWOs ?? []).reduce((sum, wo) => {
@@ -232,8 +254,11 @@ export default async function PropertyDetailPage({ params }: Props) {
             label="Max Guests"
             value={property.max_guests && property.max_guests > 0 ? `${property.max_guests}` : 'Not set'}
           />
-          {property.avg_stay_length !== null && (
-            <DetailRow label="Avg Stay" value={`${property.avg_stay_length} nights`} />
+          {/* Derived from bookings, not stored. Hidden entirely below the
+              minimum sample count rather than shown as a default, so it never
+              claims to be a measurement of this property when it isn't. */}
+          {avgStayNights !== null && (
+            <DetailRow label="Avg Stay" value={`${avgStayNights.toFixed(1)} nights`} />
           )}
           {property.square_footage !== null && (
             <DetailRow label="Sq Footage" value={`${property.square_footage.toLocaleString()} sqft`} />

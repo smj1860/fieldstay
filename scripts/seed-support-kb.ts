@@ -70,7 +70,6 @@ async function main() {
   console.log(`Mode: ${DRY_RUN ? 'DRY RUN' : 'LIVE'}`)
 
   const docsDir = join(process.cwd(), 'docs', 'support')
-  const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY! })
   const files   = readdirSync(docsDir).filter(f => f.endsWith('.md')).sort()
 
   console.log(`Found ${files.length} help doc(s): ${files.join(', ')}`)
@@ -93,10 +92,35 @@ async function main() {
     return
   }
 
-  const supabase = createClient(
-    process.env.NEXT_PUBLIC_SUPABASE_URL!,
-    process.env.SUPABASE_SERVICE_ROLE_KEY!
-  )
+  // Constructed AFTER the dry-run return, not before it. The OpenAI client
+  // throws on a missing key at construction, so building it up front made
+  // --dry-run require a key it never spends — which defeats the point of
+  // having a parse-and-chunk check that can run before the destructive delete.
+  const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY! })
+
+  const url = process.env.NEXT_PUBLIC_SUPABASE_URL
+  if (!url || !process.env.SUPABASE_SERVICE_ROLE_KEY) {
+    console.error('NEXT_PUBLIC_SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY are required.')
+    process.exit(1)
+  }
+
+  // Refuse the E2E project — the mirror image of check-type-drift.mjs's refusal
+  // to run against production, and needed for the same reason. CI's
+  // NEXT_PUBLIC_SUPABASE_URL secret IS the E2E project, so a re-seed job that
+  // reuses the ambient CI secrets would rewrite the E2E project's
+  // support_kb_chunks and leave production Finn on whatever it was last
+  // seeded with — succeeding loudly while changing nothing a customer sees.
+  const E2E_PROJECT_REF = 'syhthijeqlnltufdawyb'
+  if (url.includes(E2E_PROJECT_REF)) {
+    console.error(
+      'Refusing to run: NEXT_PUBLIC_SUPABASE_URL points at the E2E project. ' +
+      'The support KB is read by production Finn — seed the PRODUCTION project. ' +
+      'Set NEXT_PUBLIC_SUPABASE_URL/SUPABASE_SERVICE_ROLE_KEY to production values.'
+    )
+    process.exit(1)
+  }
+
+  const supabase = createClient(url, process.env.SUPABASE_SERVICE_ROLE_KEY)
 
   // Remove existing non-placeholder chunks before re-seeding
   const { error: deleteErr } = await supabase

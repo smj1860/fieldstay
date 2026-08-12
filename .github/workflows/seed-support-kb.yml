@@ -1,0 +1,83 @@
+name: Seed support KB
+
+# Re-embeds docs/support/** into support_kb_chunks so Finn's answers reflect
+# the help docs as merged, instead of whatever was last seeded by hand.
+#
+# WHY A SEPARATE WORKFLOW rather than a job in ci.yml: `on.push.paths` filters
+# the whole workflow, so putting a path filter on ci.yml would gate lint, tsc,
+# tests and e2e behind a docs change too. A second file is the only way to have
+# a path filter that applies to this work alone.
+#
+# WHY PUSH-TO-MAIN and not pull_request: seeding writes to the PRODUCTION
+# database. A PR — including one from a fork — must never be able to rewrite
+# what Finn tells live customers.
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'docs/support/**'
+      - 'scripts/seed-support-kb.ts'
+      - '.github/workflows/seed-support-kb.yml'
+  workflow_dispatch:
+
+# One seed at a time. The script DELETEs every non-placeholder chunk before
+# inserting, so two overlapping runs can interleave delete-then-insert and
+# leave the KB missing whichever chunks the loser deleted after the winner
+# inserted them. Not cancel-in-progress: a cancelled run can be cancelled
+# BETWEEN the delete and the insert, which empties the KB entirely.
+concurrency:
+  group: seed-support-kb
+  cancel-in-progress: false
+
+jobs:
+  seed:
+    runs-on: ubuntu-latest
+    env:
+      # PRODUCTION credentials, deliberately under their own secret names.
+      # The ambient CI NEXT_PUBLIC_SUPABASE_URL / SUPABASE_SERVICE_ROLE_KEY
+      # secrets point at the E2E project (check-type-drift.mjs:90 refuses to
+      # run if they ever point at prod), so reusing them here would seed a
+      # database production Finn never reads. seed-support-kb.ts carries the
+      # mirror-image guard and exits non-zero if it is handed the E2E ref.
+      NEXT_PUBLIC_SUPABASE_URL:  ${{ secrets.SUPABASE_PROD_URL }}
+      SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_PROD_SERVICE_ROLE_KEY }}
+      OPENAI_API_KEY:            ${{ secrets.OPENAI_API_KEY }}
+    steps:
+      # Self-disarming, same pattern as ci.yml's e2e and db-invariants jobs: a
+      # repo without these secrets configured gets a warning annotation, not a
+      # permanently red main branch.
+      - name: Detect whether the seed gate is armed
+        id: gate
+        run: |
+          if [ -n "$NEXT_PUBLIC_SUPABASE_URL" ] && [ -n "$SUPABASE_SERVICE_ROLE_KEY" ] && [ -n "$OPENAI_API_KEY" ]; then
+            echo "armed=true" >> "$GITHUB_OUTPUT"
+            echo "Seed gate ARMED — support_kb_chunks will be rebuilt from docs/support/."
+          else
+            echo "armed=false" >> "$GITHUB_OUTPUT"
+            echo "::warning title=Support KB seed UNARMED::SUPABASE_PROD_URL / SUPABASE_PROD_SERVICE_ROLE_KEY / OPENAI_API_KEY are not configured, so docs/support/ changes were NOT embedded. Finn is answering from the last manual seed."
+          fi
+
+      - uses: actions/checkout@v4
+        with:
+          # This job reads the repo and writes to Supabase. It never pushes.
+          persist-credentials: false
+      - uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1
+        if: steps.gate.outputs.armed == 'true'
+      - uses: actions/setup-node@v4
+        if: steps.gate.outputs.armed == 'true'
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile --ignore-scripts
+        if: steps.gate.outputs.armed == 'true'
+
+      # Dry run first: it parses and chunks every doc without touching the DB
+      # or spending an embedding call. A malformed doc fails here, before the
+      # destructive delete, rather than halfway through a rebuild.
+      - name: Chunk docs (dry run)
+        if: steps.gate.outputs.armed == 'true'
+        run: pnpm exec tsx scripts/seed-support-kb.ts --dry-run
+
+      - name: Re-embed and replace support_kb_chunks
+        if: steps.gate.outputs.armed == 'true'
+        run: pnpm exec tsx scripts/seed-support-kb.ts
