@@ -9,7 +9,8 @@ import { reportError } from '@/lib/observability/report-error'
 import { reportQueryError } from '@/lib/supabase/unwrap'
 import { unwrapJoin } from '@/lib/utils/supabase-joins'
 import { fetchAllRows } from '@/lib/inngest/paginate'
-import type { InventoryCategory, PoStatus, TablesInsert, TablesUpdate } from '@/types/database'
+import { rebaseParFromTarget } from '@/lib/inventory/par-engine'
+import type { InventoryCategory, ParMode, ParSmartGroup, PoStatus, TablesInsert, TablesUpdate } from '@/types/database'
 import { Constants } from '@/types/database'
 
 /**
@@ -33,6 +34,105 @@ export type InventoryActionState = { error?: string; success?: boolean }
 
 // ── Update par level ─────────────────────────────────────────────────────────
 
+interface CatalogParRow {
+  id:          string
+  par_mode:    ParMode
+  smart_group: ParSmartGroup | null
+  base_qty:    number
+}
+
+/**
+ * Par config for the catalog items in a bulk add, keyed by catalog id.
+ *
+ * ONE query for every catalog id in the form, not one per row — a per-item
+ * lookup inside the build loop is the N+1 that
+ * unit/guardrails/n-plus-one-loops.test.ts exists to catch, and a bulk add can
+ * carry the whole 157-item catalog.
+ *
+ * Non-fatal: a failure here returns an empty map and every item falls back to
+ * the static default, which is exactly the behaviour before this existed. A PM
+ * must not lose a filled-in bulk-add form over par metadata.
+ */
+async function fetchCatalogParConfig(
+  supabase: Awaited<ReturnType<typeof requireOrgMember>>['supabase'],
+  formData: FormData,
+  itemCount: number,
+): Promise<Map<string, CatalogParRow>> {
+  const ids: string[] = []
+  for (let i = 0; i < itemCount; i++) {
+    const id = (formData.get(`item_${i}_catalog_item_id`) as string) || null
+    if (id) ids.push(id)
+  }
+  if (!ids.length) return new Map()
+
+  const res = await supabase
+    .from('inventory_catalog')
+    .select('id, par_mode, smart_group, base_qty')
+    .in('id', ids)
+    .limit(ids.length)
+  if (reportQueryError(res.error, { site: 'serverAction.inventory.addInventoryItems.parConfig' })) {
+    return new Map()
+  }
+  return new Map((res.data ?? []).map((r) => [r.id, r as CatalogParRow]))
+}
+
+/** The item row updateParLevel reads, with its property's size embedded. */
+interface ParEditRow {
+  par_mode:    ParMode
+  smart_group: ParSmartGroup | null
+  properties:  { bedrooms: number | null; bathrooms: number | null; max_guests: number | null }
+             | { bedrooms: number | null; bathrooms: number | null; max_guests: number | null }[]
+             | null
+}
+
+/**
+ * Turns a typed par level into the columns to write.
+ *
+ * A STATIC item is left alone apart from its number — static is the PM saying
+ * "this exact value", and re-basing it would silently make it scale.
+ *
+ * Extracted rather than inlined because updateParLevel would otherwise carry
+ * the auth read, the embed unwrap, the branch and the write in one body, and
+ * this is the part worth testing directly.
+ */
+function buildParPatch(row: ParEditRow, parLevel: number): TablesUpdate<'inventory_items'> {
+  if (row.par_mode !== 'smart') return { par_level: parLevel }
+
+  // PostgREST embeds come back as arrays even for a to-one relationship.
+  const property = unwrapJoin(row.properties)
+  const rebased  = rebaseParFromTarget(parLevel, { smart_group: row.smart_group }, {
+    bedrooms:        property?.bedrooms   && property.bedrooms   > 0 ? property.bedrooms   : 1,
+    bathrooms:       property?.bathrooms  && property.bathrooms  > 0 ? property.bathrooms  : 1,
+    max_guests:      property?.max_guests && property.max_guests > 0 ? property.max_guests : 2,
+    avg_stay_length: null,   // unused by the smart formula; only the historical branch reads it
+  })
+
+  return {
+    par_mode:        rebased.par_mode,
+    smart_group:     rebased.smart_group,
+    base_qty:        rebased.base_qty,
+    par_level:       rebased.par_level,
+    auto_adjust:     rebased.auto_adjust,
+    par_resolved_at: new Date().toISOString(),
+  }
+}
+
+/**
+ * A PM typing a par level RE-BASES a smart item rather than being overwritten
+ * by it.
+ *
+ * Writing par_level alone was silent data loss. On a smart item par_level is a
+ * cache of resolvePar(), so the PM's number survived only until the next
+ * property edit or consumption sample recomputed it — and the inline editor
+ * renders on every item, with no way to tell smart from static. 267 live items
+ * were exposed to it. rebaseParFromTarget() inverts the smart formula so their
+ * number is exact at the property's current size AND keeps scaling from there
+ * if the property changes.
+ *
+ * The read is scoped by org before the write, and the write repeats the org
+ * filter: the item id comes from the client, so membership alone does not
+ * prove this item belongs to the caller's org.
+ */
 export async function updateParLevel(
   itemId: string,
   parLevel: number
@@ -40,9 +140,22 @@ export async function updateParLevel(
   try {
     const { supabase, membership } = await requireOrgMember()
 
+    const itemRes = await supabase
+      .from('inventory_items')
+      .select('id, par_mode, smart_group, properties(bedrooms, bathrooms, max_guests)')
+      .eq('id', itemId)
+      .eq('org_id', membership.org_id)
+      .maybeSingle()
+    if (reportQueryError(itemRes.error, { site: 'serverAction.inventory.updateParLevel', orgId: membership.org_id })) {
+      return { error: 'Operation failed. Please try again.' }
+    }
+    if (!itemRes.data) return { error: 'Item not found.' }
+
+    const patch = buildParPatch(itemRes.data, parLevel)
+
     const { error } = await supabase
       .from('inventory_items')
-      .update({ par_level: parLevel })
+      .update(patch)
       .eq('id', itemId)
       .eq('org_id', membership.org_id)
 
@@ -96,6 +209,14 @@ export async function addInventoryItems(
     const owned = await verifyPropertyInOrg(supabase, membership.org_id, property_id, 'serverAction.inventory.addInventoryItems')
     if (!owned.ok) return { error: owned.error }
 
+    // Par config for anything being added from the catalog. Without this every
+    // hand-added item lands par_mode = 'static' (the column default) no matter
+    // what its catalog row says — so a PM adding Pool Towels to a property that
+    // has a pool got an item that never scales with bedrooms, bathrooms or
+    // guests, and no UI to promote it. That is the whole add-your-own-items
+    // workflow silently opting out of the par engine.
+    const parByCatalogId = await fetchCatalogParConfig(supabase, formData, itemCount)
+
     const rows = []
     for (let i = 0; i < itemCount; i++) {
       const catalog_item_id = (formData.get(`item_${i}_catalog_item_id`) as string) || null
@@ -106,6 +227,13 @@ export async function addInventoryItems(
       const notes    = (formData.get(`item_${i}_notes`) as string)?.trim() || null
 
       if (!name || !unit) continue
+
+      // A catalog row that is itself static, or a hand-typed custom item, keeps
+      // the static default — inheriting is not the same as forcing.
+      const cat = catalog_item_id ? parByCatalogId.get(catalog_item_id) : undefined
+      const parConfig = cat?.par_mode === 'smart' && cat.smart_group
+        ? { par_mode: 'smart' as ParMode, smart_group: cat.smart_group, base_qty: Number(cat.base_qty) || 1 }
+        : {}
 
       rows.push({
         property_id,
@@ -119,6 +247,7 @@ export async function addInventoryItems(
         low_stock_threshold_pct: 20,
         is_active:              true,
         notes,
+        ...parConfig,
       })
     }
 

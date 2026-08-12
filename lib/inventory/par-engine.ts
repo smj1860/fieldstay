@@ -95,17 +95,29 @@ export interface ResolvedPar {
   source: ParSource
 }
 
+/**
+ * The scaling factor a smart group applies at this property: the property's
+ * own bedroom / bathroom / guest count, times the group's safety buffer.
+ *
+ * Shared by smartFormulaPar and rebaseParFromTarget so the forward and inverse
+ * directions can never drift apart — a re-based base_qty that does not
+ * reproduce the PM's number is the whole failure this helper prevents.
+ */
+export function smartScaleFactor(group: ParSmartGroup, property: ParPropertyContext): number {
+  const spec = PAR_SMART_GROUPS[group]
+  const raw  = property[spec.multiplierKey]
+  // bathrooms is nullable (numeric, half-baths allowed) — a property with no
+  // metadata yet resolves against 1 unit so a template apply never writes 0.
+  const multiplier = typeof raw === 'number' && raw > 0 ? raw : 1
+  return multiplier * (1 + spec.buffer)
+}
+
 function smartFormulaPar(config: ParItemConfig, property: ParPropertyContext): number {
   // The CHECK constraint guarantees smart rows carry a group, but the resolver
   // must still be total: a malformed row degrades to the stored value rather
   // than throwing inside an Inngest step.
   if (!config.smart_group) return Math.max(Math.ceil(config.par_level), 1)
-  const spec = PAR_SMART_GROUPS[config.smart_group]
-  const raw = property[spec.multiplierKey]
-  // bathrooms is nullable (numeric, half-baths allowed) — a property with no
-  // metadata yet resolves against 1 unit so a template apply never writes 0.
-  const multiplier = typeof raw === 'number' && raw > 0 ? raw : 1
-  return Math.max(Math.ceil(config.base_qty * multiplier * (1 + spec.buffer)), 1)
+  return Math.max(Math.ceil(config.base_qty * smartScaleFactor(config.smart_group, property)), 1)
 }
 
 function historicalPar(stats: ParConsumptionStats, property: ParPropertyContext): number {
@@ -129,6 +141,67 @@ export function resolvePar(
     return { par: historicalPar(stats, property), source: 'historical' }
   }
   return { par: smartFormulaPar(config, property), source: 'smart_formula' }
+}
+
+/** The par config a PM's manual edit resolves to. */
+export interface ParRebase {
+  par_mode:    ParMode
+  smart_group: ParSmartGroup | null
+  base_qty:    number
+  par_level:   number
+  auto_adjust: boolean
+}
+
+/**
+ * A PM typed a par level. Turn it into config that KEEPS the item scaling,
+ * with their number as the new baseline.
+ *
+ * Before this existed, the inline editor wrote par_level directly on any item
+ * and the next recompute overwrote it — a smart item's par_level is a cache of
+ * resolvePar(), so the PM's number survived exactly until the next property
+ * edit or consumption sample. Silently. This inverts the formula instead:
+ * store a base_qty that REPRODUCES their number at this property's current
+ * size, so the edit is honoured now and still scales if the property changes.
+ *
+ * THE MIDPOINT IS NOT A ROUNDING PREFERENCE, IT IS THE CORRECT INVERSE.
+ * ceil(x) === target iff target - 1 < x <= target, so any base in
+ * ((target-1)/k, target/k] works in real arithmetic. The obvious endpoint
+ * target/k is exactly representable almost never: 11/1.15*1.15 is
+ * 11.000000000000002, which ceils to 12, so the PM types 11 and sees 12. That
+ * endpoint is wrong for 1337 of 8400 (target, multiplier, group) combinations
+ * actually reachable here. The midpoint (target-0.5)/k absorbs half a unit of
+ * float error and round-trips all 8400.
+ *
+ * auto_adjust is turned OFF. The historical branch ignores base_qty entirely,
+ * so leaving it on would let learned consumption supersede the number the PM
+ * just explicitly set — the same silent-override surprise this function
+ * exists to remove, only slower. auto_adjust is precisely the "let history
+ * take over" switch, and an edit is the only signal the UI can currently send.
+ *
+ * A target below 1 goes STATIC rather than re-basing. Partly arithmetic — the
+ * inverse of 0 is negative — but mostly meaning: "0" is a PM saying they do
+ * not stock this item here, which is a fixed number, not a scaling one.
+ */
+export function rebaseParFromTarget(
+  target: number,
+  config: { smart_group: ParSmartGroup | null },
+  property: ParPropertyContext,
+): ParRebase {
+  const level = Number.isFinite(target) && target > 0 ? target : 0
+
+  // No group means nothing to scale BY, so there is no smart config to write.
+  if (level < 1 || !config.smart_group) {
+    return { par_mode: 'static', smart_group: null, base_qty: 1, par_level: level, auto_adjust: false }
+  }
+
+  const k = smartScaleFactor(config.smart_group, property)
+  return {
+    par_mode:    'smart',
+    smart_group: config.smart_group,
+    base_qty:    (level - 0.5) / k,
+    par_level:   level,
+    auto_adjust: false,
+  }
 }
 
 export interface ParConfigInput {

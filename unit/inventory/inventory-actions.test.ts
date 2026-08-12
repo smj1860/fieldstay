@@ -76,14 +76,68 @@ describe('inventory/actions', () => {
   })
 
   describe('updateParLevel', () => {
+    /** Two inventory_items round trips now: read the item's par config, then write. */
+    function parQueue(item: unknown) {
+      return { inventory_items: [{ data: item, error: null }, { data: null, error: null }] }
+    }
+    const STATIC_ITEM = { id: 'item_1', par_mode: 'static', smart_group: null, properties: null }
+    const SMART_ITEM  = {
+      id: 'item_1', par_mode: 'smart', smart_group: 'bathroom_essential',
+      properties: [{ bedrooms: 1, bathrooms: 2, max_guests: 4 }],
+    }
+
+    /** The update payload, from the second inventory_items chain. */
+    function updatePayload(supabase: ReturnType<typeof makeSupabase>) {
+      const chain = supabase.from.mock.results[1].value
+      return chain.update.mock.calls[0][0]
+    }
+
     it('updates the par level scoped to the caller org', async () => {
-      const supabase = makeSupabase({})
+      const supabase = makeSupabase(parQueue(STATIC_ITEM))
       vi.mocked(requireOrgMember).mockResolvedValue({ supabase, membership } as never)
 
       const result = await updateParLevel('item_1', 5)
 
       expect(result).toEqual({ success: true })
       expect(supabase.from).toHaveBeenCalledWith('inventory_items')
+    })
+
+    it('leaves a STATIC item alone apart from its number', async () => {
+      // Static is the PM saying "this exact value". Re-basing it would silently
+      // make it start scaling.
+      const supabase = makeSupabase(parQueue(STATIC_ITEM))
+      vi.mocked(requireOrgMember).mockResolvedValue({ supabase, membership } as never)
+
+      await updateParLevel('item_1', 5)
+      expect(updatePayload(supabase)).toEqual({ par_level: 5 })
+    })
+
+    it('RE-BASES a smart item so the PM\'s number survives the next recompute', async () => {
+      // The bug this closes: writing par_level alone on a smart item was
+      // overwritten by the next recompute, because par_level is a cache of
+      // resolvePar(). 267 live items were exposed to it.
+      const supabase = makeSupabase(parQueue(SMART_ITEM))
+      vi.mocked(requireOrgMember).mockResolvedValue({ supabase, membership } as never)
+
+      await updateParLevel('item_1', 16)
+      const patch = updatePayload(supabase)
+
+      expect(patch.par_mode).toBe('smart')
+      expect(patch.par_level).toBe(16)
+      expect(patch.auto_adjust).toBe(false)
+      // 2 bathrooms x 1.15 buffer: ceil(base * 2.3) must be exactly 16.
+      expect(Math.ceil(patch.base_qty * 2.3)).toBe(16)
+    })
+
+    it('refuses an item outside the caller\'s org instead of writing blind', async () => {
+      // The item id comes from the client. Org membership proves the caller
+      // belongs to AN org, not that this item is theirs.
+      const supabase = makeSupabase({ inventory_items: [{ data: null, error: null }] })
+      vi.mocked(requireOrgMember).mockResolvedValue({ supabase, membership } as never)
+
+      await expect(updateParLevel('item_from_another_org', 5))
+        .resolves.toEqual({ error: 'Item not found.' })
+      expect(supabase.from.mock.results[0].value.update).not.toHaveBeenCalled()
     })
 
     it('returns a generic error and never touches the DB when the caller is unauthenticated', async () => {
