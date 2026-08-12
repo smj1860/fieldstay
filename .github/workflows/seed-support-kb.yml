@@ -68,7 +68,13 @@ jobs:
         with:
           node-version: 22
           cache: pnpm
-      - run: pnpm install --frozen-lockfile --ignore-scripts
+      # NOT --ignore-scripts: tsx depends on esbuild, whose postinstall fetches
+      # the platform binary. Skipping it leaves `pnpm exec tsx` resolving to
+      # nothing — which is exactly how the first armed run of this job failed
+      # ("Command \"tsx\" not found"), with all three secrets correctly
+      # populated. The other CI jobs can skip scripts because they never
+      # execute a TypeScript file directly.
+      - run: pnpm install --frozen-lockfile
         if: steps.gate.outputs.armed == 'true'
 
       # Dry run first: it parses and chunks every doc without touching the DB
