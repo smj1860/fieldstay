@@ -19,6 +19,7 @@
 import { cookies } from 'next/headers'
 import { createServerClient } from '@supabase/ssr'
 import Link from 'next/link'
+import Image from 'next/image'
 import type { Metadata } from 'next'
 import RepuGuardWrapper from '@/components/repuguard/RepuGuardWrapper'
 import PricingSection from '@/components/hospitable/PricingSection'
@@ -101,9 +102,11 @@ export default async function HospitablePage() {
               needs a light backdrop to be legible. */}
           <div className="flex justify-center mt-6 mb-10">
             <div className="bg-white rounded-full px-5 py-2.5 shadow-lg">
-              <img
+              <Image
                 src="/hospitable-fieldstay-lockup.png"
                 alt="Hospitable and FieldStay partnership"
+                width={700}
+                height={99}
                 className="h-5 w-auto"
               />
             </div>

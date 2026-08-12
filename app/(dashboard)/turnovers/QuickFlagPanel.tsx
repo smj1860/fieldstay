@@ -111,6 +111,9 @@ export function QuickFlagPanel({
           rows={3}
           className="input resize-none w-full text-sm"
           placeholder="Describe the issue…"
+          // Panel is opened by a click; focusing its only field is the
+          // expected behaviour, not page-load focus stealing.
+          // eslint-disable-next-line jsx-a11y/no-autofocus
           autoFocus
         />
 
@@ -126,7 +129,7 @@ export function QuickFlagPanel({
           {flagPhotoPreview ? (
             <div className="relative w-20 h-20 rounded-lg overflow-hidden border border-themed">
               {/* eslint-disable-next-line @next/next/no-img-element */}
-              <img src={flagPhotoPreview} alt="Flag photo" className="w-full h-full object-cover" />
+              <img src={flagPhotoPreview} alt="Attachment for this issue report" className="w-full h-full object-cover" />
               <button
                 onClick={() => { setFlagPhotoPreview(null); setFlagPhotoFile(null) }}
                 className="absolute top-1 right-1 w-5 h-5 bg-black/60 rounded-full flex items-center justify-center"

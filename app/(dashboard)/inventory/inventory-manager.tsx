@@ -191,6 +191,10 @@ function ParLevelEditor({ item }: { item: InventoryItem }) {
         value={value}
         onChange={(e) => setValue(e.target.value)}
         onKeyDown={handleKeyDown}
+        // Opened by the PM clicking this par level. Focusing an input the user
+        // just summoned is correct; the rule guards against stealing focus on
+        // page load, which this is not.
+        // eslint-disable-next-line jsx-a11y/no-autofocus
         autoFocus
         className="py-0.5 px-1.5 w-16 text-sm"
       />

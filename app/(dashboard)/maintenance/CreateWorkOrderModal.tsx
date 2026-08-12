@@ -508,7 +508,7 @@ export function CreateWorkOrderModal({
               {photoFiles.map((file, i) => (
                 <div key={i} className="relative w-16 h-16 rounded-lg overflow-hidden border border-themed">
                   {/* eslint-disable-next-line @next/next/no-img-element */}
-                  <img src={URL.createObjectURL(file)} alt={`Photo ${i + 1}`} className="w-full h-full object-cover" />
+                  <img src={URL.createObjectURL(file)} alt={`Work order attachment ${i + 1}`} className="w-full h-full object-cover" />
                   <button
                     type="button"
                     onClick={() => removePhoto(i)}
