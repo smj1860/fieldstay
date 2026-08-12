@@ -98,9 +98,14 @@ export async function GET() {
     { data: pushSubs, error: pushSubsError },
   ] = await Promise.all([
     admin.from('profiles').select('id, full_name, avatar_url, created_at').eq('id', user.id).single(),
-    admin.from('organization_members').select('org_id, role, invite_accepted_at').eq('user_id', user.id),
+    // Bounded, both here and on push_subscriptions below: an export that
+    // silently omits rows is exactly the "incomplete export shipped as
+    // complete" the check below already guards against for query FAILURES.
+    // A user is far below these bounds; the point is that truncation must not
+    // be able to masquerade as the real answer.
+    admin.from('organization_members').select('org_id, role, invite_accepted_at').eq('user_id', user.id).limit(500),
     admin.from('crew_members').select('id, name, role, reliability_score, capacity_score, created_at').eq('user_id', user.id).maybeSingle(),
-    admin.from('push_subscriptions').select('endpoint, created_at').eq('user_id', user.id),
+    admin.from('push_subscriptions').select('endpoint, created_at').eq('user_id', user.id).limit(500),
   ])
   // A partial failure here must not silently ship an incomplete GDPR export
   // as though it were complete — fail the request instead.

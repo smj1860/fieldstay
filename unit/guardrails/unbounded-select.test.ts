@@ -234,7 +234,6 @@ function findOffenders(): string[] {
 const BASELINE = new Set<string>([
   'lib/inngest/functions/auto-assign-vendor.ts',
   'lib/inngest/functions/crew-assignment.ts',
-  'lib/inngest/functions/hospitable/calendar-sync-handler.ts',
   'lib/inngest/functions/hospitable/teammate-sync-handler.ts',
   'lib/inngest/functions/ownerrez/incremental-sync.ts',
   'lib/inngest/functions/ownerrez/initial-sync.ts',

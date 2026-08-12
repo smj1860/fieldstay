@@ -509,6 +509,9 @@ export async function getWorkOrderPhotoUrls(
       .from('work_order_photos')
       .select('id, storage_path')
       .eq('work_order_id', workOrderId)
+      // One work order's photos. Bounded well above any plausible attachment
+      // count so a truncated gallery cannot pass for a complete one.
+      .limit(500)
 
     if (photosErr) {
       console.error('[getWorkOrderPhotoUrls]', photosErr)

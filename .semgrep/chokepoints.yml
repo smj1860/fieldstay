@@ -430,3 +430,112 @@ rules:
           - pattern: "const [..., { data }, ...] = await Promise.all(...)"
       - pattern-not: "const [..., {..., error, ...}, ...] = await Promise.all(...)"
       - pattern-not: "const [..., {..., error: $E, ...}, ...] = await Promise.all(...)"
+
+  # PROMOTED 2026-08-12 from ratchet.yml, at 0 after bounding all 16 sites.
+  # Gates at --error across the whole tree instead of only on findings new vs.
+  # the PR base. The burn-down was real, not a reclassification: every site got
+  # an explicit .limit(), or pagination where truncation would corrupt rather
+  # than shorten — the crew PWA's assignment-scope read (which bulkDeletes
+  # every cached turnover absent from it), and the OwnerRez booking upsert.
+  # Fire-checked before promoting, per .semgrep/README.md: a deliberately
+  # unbounded single-parent read FIRED, a .limit()-bounded control did NOT, and
+  # an org-scoped control landed in -org-scoped instead — confirming the rule
+  # still works and the ladder is still a partition. Fixture then deleted.
+  - id: fieldstay-supabase-unbounded-select-single-parent
+    languages: [typescript]
+    severity: ERROR
+    message: >-
+      Unbounded .select() scoped to a single parent row (property_id,
+      work_order_id, user_id, …) but with no .eq('org_id', …). Bounded by one
+      parent's children rather than by the platform, so truncation is unlikely
+      — but verify the parent id was itself org-checked before it got here,
+      and add org scope if this table carries one.
+    patterns:
+      - pattern: $S.from($T).select(...)
+      - pattern-inside:
+          patterns:
+            - pattern: $Y.eq($PCOL, ...)
+            - metavariable-regex:
+                metavariable: $PCOL
+                regex: ^["'](?:[A-Za-z_]+\.)?(?!org_id)[A-Za-z_]*_id["']$
+      - pattern-not-inside: $X.limit(...)
+      - pattern-not-inside: $X.range(...)
+      # A paginating callback IS the bound, even when the builder splits the
+      # chain across statements.
+      #
+      # `pattern-not-inside: $X.range(...)` above only sees a SINGLE expression
+      # — `supabase.from(t).select(...)….range(from, to)`. A read that needs a
+      # CONDITIONAL filter cannot be written that way: supabase-js puts
+      # .eq/.in on PostgrestFilterBuilder and .order/.range on
+      # PostgrestTransformBuilder, so filters must precede transforms, and an
+      # optional filter therefore forces
+      #     let q = supabase.from(t).select(…)…
+      #     if (cond) q = q.in('id', ids)
+      #     return q.order('id').range(from, to)
+      # — three statements, .select() in the first, .range() in the third.
+      #
+      # Those reads are bounded, and the ratchet was punishing the fix: two of
+      # them were reported as NEW findings by the very commit that bounded
+      # them. They had been unbounded, they were already counted in the
+      # baseline, and moving them into fetchAllRows() changed their
+      # fingerprints, so `--baseline-commit` saw new findings while the total
+      # for the class went DOWN (76 -> 73).
+      #
+      # `pattern-not-inside`, not `paths.exclude` — the distinction
+      # .semgrep/README.md draws: exclude expresses OWNERSHIP, not-inside
+      # expresses HANDLING. Sitting inside a paginating callback is handling,
+      # exactly as sitting inside `.limit()` is.
+      #
+      # Matched by SHAPE, not by callee name, because the name cannot be
+      # matched here: every real call site is generic
+      # (`fetchAllRows<{ id: string }>(…)`), and a generic type argument makes
+      # both a literal `fetchAllRows(...)` pattern and a `metavariable-regex`
+      # on the callee fail to match at all. Verified against a scratch fixture
+      # before settling on this form.
+      #
+      # Three things must hold together, and none may be relaxed alone:
+      #   1. a two-parameter callback,
+      #   2. whose body RETURNS `<expr>.range($FROM, $TO)` using those same two
+      #      parameters — so the page window is genuinely driven by the wrapper,
+      #   3. and a second argument carrying `label`, i.e. PaginateOptions, the
+      #      contract of fetchAllRows / foldAllRows / fetchDistinctOrgIds.
+      # Dropping (3) exempts any function that happens to take such a callback;
+      # dropping (2) exempts a callback that never paginates — the
+      # over-permissive version of this same exemption, which was caught by
+      # canary in unit/guardrails/unbounded-select.test.ts when the sibling
+      # check there had precisely that hole. A decoy
+      # `notAPaginator((from, to) => { … return q.range(from, to) })` is
+      # correctly NOT exempted.
+      - pattern-not-inside: |
+          $PAGINATE(($FROM, $TO) => { ... return $Q.range($FROM, $TO) }, { ..., label: $LABEL, ... })
+      - pattern-not-inside: $X.single(...)
+      - pattern-not-inside: $X.maybeSingle(...)
+      - pattern-not: "$S.from($T).select($SEL, {..., head: true, ...})"
+      - pattern-not-inside:
+          patterns:
+            - pattern: $X.eq($OCOL, ...)
+            - metavariable-regex:
+                metavariable: $OCOL
+                regex: ^["'](?:[A-Za-z_]+\.)?org_id["']$
+      # A global table wins over parent scope — tier 2c. Without this,
+      # platform_inventory_template_items filtered by
+      # platform_inventory_template_id matched BOTH tiers and inflated the
+      # ladder's total by one. The tiers are mutually exclusive by design.
+      - metavariable-regex:
+          metavariable: $T
+          regex: ^(?!["'](?:asset_type_standards|integration_providers|inventory_catalog|maintenance_catalog_items|oauth_states|pending_integration_links|pending_oauth_authorizations|platform_admins|platform_inventory_template_items|platform_inventory_templates|platform_seed_room_template_items|platform_seed_room_templates|platform_staff|processed_webhooks|profiles|promo_hospitable_launch_counter|stripe_processed_events|support_kb_chunks)["']$)
+
+  # ── Tier 2c (HYGIENE): a table that has no org_id column ─────────────────
+  # Reached 0 on 2026-08-07 and PROMOTED to chokepoints.yml — see that file
+  # for the surviving rule and history. Kept here as a ladder-row marker only,
+  # same treatment as tiers 1 and 2 above.
+
+  # ── Tier 3: one org, but sized by a caller-supplied list ─────────────────
+  # `.eq('org_id', …)` plus `.in(col, array)`. Single-tenant, so it is not a
+  # cross-tenant scan — but the row count scales with the ARRAY, not with a
+  # single parent entity, and the array is caller- or query-derived. Rows can
+  # be a multiple of the list length (one org's inventory_items across 50
+  # properties is ~5,750 rows, well past the cap). Lower severity than tier 2
+  # because the ceiling is a tenant's data rather than the platform's, but
+  # these are real: it is the tier holding the confirmed true positives in
+  # inventory/actions.ts, maintenance/actions.ts and upsert-normalized.ts.

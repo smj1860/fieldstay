@@ -49,6 +49,9 @@ export default async function WorkOrderPage({ params }: Props) {
       .from('work_order_line_items')
       .select('id, work_order_id, line_type, description, quantity, unit, unit_cost, line_total, sort_order, created_at')
       .eq('work_order_id', id)
+      // Bounded: these lines are summed into the work order's cost. A
+      // truncated read does not shorten a list, it understates a total.
+      .limit(1000)
       // created_at + id are stable tiebreakers, not decoration. sort_order used
       // to default to a flat 0 on every hand-entered line, and rows that tie on
       // the sort key come back in whatever order Postgres likes — a different
@@ -63,7 +66,9 @@ export default async function WorkOrderPage({ params }: Props) {
       .from('work_order_photos')
       .select('id, storage_path')
       .eq('work_order_id', id)
-      .order('created_at', { ascending: true }),
+      .order('created_at', { ascending: true })
+      // One work order's photos — same bound as maintenance/actions.ts.
+      .limit(500),
 
     supabase
       .from('vendors')

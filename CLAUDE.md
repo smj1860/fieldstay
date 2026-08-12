@@ -1426,11 +1426,29 @@ following them stops being a memory test. Five layers, checked in CI via
      `chokepoints.yml` 2026-08-01**),
      `-cross-tenant` (no org scope AND no parent row, ERROR, 53 → **0,
      PROMOTED to `chokepoints.yml` 2026-08-02**),
-     `-single-parent` (one non-org parent id, no org scope, WARNING, 47),
+     `-single-parent` (one non-org parent id, no org scope, WARNING, 47 → **0,
+     PROMOTED to `chokepoints.yml` 2026-08-12**),
      `-global-table` (the table has no `org_id` column, ERROR, 5 → **0,
      PROMOTED to `chokepoints.yml` 2026-08-07**),
      `-in-list` (one org but sized by an `.in()` array, WARNING, 46),
      `-org-scoped` (one org, one parent — hygiene only, INFO, 113).
+     **`-single-parent` reached 0 on 2026-08-12, and this one was a genuine
+     burn-down** — all 16 sites bounded, none reclassified. Two were not
+     hygiene. `lib/dexie/sync/turnovers.ts` read a crew member's ENTIRE
+     assignment scope unbounded, and `reconcileRemovedTurnovers` bulkDeletes
+     every cached turnover absent from that set along with its checklists — so
+     past ~1000 lifetime assignments (a cleaner reaches that inside a year) the
+     device would erase turnovers that were still assigned, and with no ORDER BY
+     it would erase a different arbitrary set each sync rather than settling.
+     Paginated via a new `fetchAllPages()` in `lib/dexie/sync/chunked.ts`. The
+     OwnerRez booking upsert is written up separately below. The rest took an
+     explicit `.limit()`, chosen by what truncation would actually corrupt: a
+     total (YTD spend, work-order line items), a legal artifact (the GDPR
+     export, account-deletion's owned-org set), or merely a list. Fire-checked
+     before promoting, same protocol as the tiers before it: an unbounded
+     single-parent read FIRED, a `.limit()`-bounded control did NOT, and an
+     org-scoped control landed in `-org-scoped` — confirming both that the rule
+     works and that the ladder is still a partition.
      Tier 1 WAS the burn-down target and reached 0, so it now gates at
      `--error` across the whole tree rather than only on findings new vs. the
      PR base — a single unbounded table read anywhere fails the build. Its

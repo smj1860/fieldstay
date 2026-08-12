@@ -36,6 +36,9 @@ export function StandardTemplateModal({ propertyId, onComplete, onClose }: Reado
         .select('*')
         .eq('template_id', STANDARD_TEMPLATE_ID)
         .order('sort_order')
+        // The one platform standard template. Bounded so a later expansion
+        // cannot silently show a PM a partial list during onboarding.
+        .limit(500)
 
       if (err || !data) {
         setLoading(false)

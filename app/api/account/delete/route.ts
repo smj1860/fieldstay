@@ -204,6 +204,9 @@ async function revokeIntegrationTokens(
     .from('integration_connections')
     .select('provider_id')
     .eq('user_id', userId)
+    // Bounded: a connection missed here is one never revoked at the provider
+    // during account deletion, which then outlives the account itself.
+    .limit(500)
 
   if (error) {
     console.error('[account/delete] integration_connections lookup failed', error)
@@ -292,6 +295,10 @@ async function prepareOrgsForDeletion(
     .from('organization_members')
     .select('org_id, role')
     .eq('user_id', userId)
+    // Bounded: this set decides which orgs get deleted and which get audited.
+    // A truncated read leaves an org the user owned standing after they asked
+    // for deletion — the one outcome this route exists to prevent.
+    .limit(500)
 
   if (error) {
     console.error('[account/delete] membership lookup', error)
