@@ -64,6 +64,31 @@ async function writeSyncCount(
   })
 }
 
+/**
+ * The NULL-fill patch for one property: OwnerRez's value is written only where
+ * FieldStay currently holds NULL.
+ *
+ * `!== null` on all three, never a falsy check. A falsy check also matches a
+ * legitimate 0 — a studio's bedroom count, a property with no recorded square
+ * footage — and would overwrite a PM's manual correction with whatever
+ * OwnerRez reports, on every re-run of this step. That regression is covered
+ * directly by unit/inngest/ownerrez-initial-sync.test.ts.
+ *
+ * Pure: two plain objects in, a patch out. Extracted from the loop body so the
+ * decision is testable on its own and so patch-property-fields reads as
+ * "fetch, decide, write" rather than carrying the field rules inline.
+ */
+export function buildNullFillPatch(
+  orData:   { bedrooms: number | null; bathrooms: number | null; sqft: number | null },
+  existing: { bedrooms: number | null; bathrooms: number | null; square_footage: number | null },
+): TablesUpdate<'properties'> {
+  const patch: TablesUpdate<'properties'> = {}
+  if (orData.bedrooms  !== null && existing.bedrooms       === null) patch.bedrooms       = orData.bedrooms
+  if (orData.bathrooms !== null && existing.bathrooms      === null) patch.bathrooms      = orData.bathrooms
+  if (orData.sqft      !== null && existing.square_footage === null) patch.square_footage = orData.sqft
+  return patch
+}
+
 export const ownerRezInitialSync = inngest.createFunction(
   {
     id:      'ownerrez-initial-sync',
@@ -186,20 +211,7 @@ export const ownerRezInitialSync = inngest.createFunction(
           const orData = fetchPropsResult.patchData.find((p) => p.externalId === existing.external_id)
           if (!orData) continue
 
-          const patch: TablesUpdate<'properties'> = {}
-
-          // === null (not a falsy check) on all three — a falsy check also
-          // matches a legitimate 0 (e.g. a studio's bedroom count), which
-          // would silently overwrite a PM's manual correction with whatever
-          // OwnerRez reports on every re-run of this step.
-          if (orData.bedrooms  !== null && existing.bedrooms === null)
-            patch.bedrooms = orData.bedrooms
-
-          if (orData.bathrooms !== null && existing.bathrooms === null)
-            patch.bathrooms = orData.bathrooms
-
-          if (orData.sqft !== null && existing.square_footage === null)
-            patch.square_footage = orData.sqft
+          const patch = buildNullFillPatch(orData, existing)
 
           if (Object.keys(patch).length > 0) {
             const { error } = await supabase
