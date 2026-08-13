@@ -56,7 +56,7 @@ export default async function OpsSnapshotPage() {
     supabase
       .from('turnovers')
       .select(`
-        id, property_id, checkout_datetime, checkin_datetime,
+        id, property_id, prev_booking_id, checkout_datetime, checkin_datetime,
         window_minutes, status, priority, notes, completed_at, started_at,
         checklist_template_id,
         turnover_assignments(id, crew_member_id, crew_member:crew_members(id, name))

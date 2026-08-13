@@ -142,12 +142,12 @@ export default function CrewTurnoverPage() {
           >
             {turnover.priority} priority
           </span>
-          {turnover.window_minutes && (
+          {turnover.prev_booking_id && turnover.window_minutes ? (
             <span className="text-sm font-semibold text-secondary-themed">
               {Math.floor(turnover.window_minutes / 60)}h
               {turnover.window_minutes % 60 > 0 ? ` ${turnover.window_minutes % 60}m` : ''} window
             </span>
-          )}
+          ) : null}
         </div>
 
         <div className="mt-2 space-y-1 text-sm">

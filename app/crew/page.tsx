@@ -24,8 +24,11 @@ type TurnoverRow = {
   status:            string
   priority:          string
   checkout_datetime: string
+  /** SYNTHETIC when prev_booking_id is null. */
   checkin_datetime:  string
   window_minutes:    number | null
+  /** Null on a standalone turnover: nothing is booked after this checkout. */
+  prev_booking_id:   string | null
   property_id:       string
 }
 
@@ -99,13 +102,16 @@ function TurnoverCard({ t, property }: { t: TurnoverRow; property?: PropertyRow 
         <span className="text-xs text-secondary-themed">
           {checkout.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })}
         </span>
-        {t.window_minutes && (
+        {/* Only a REAL next booking makes this a window. On a standalone
+            turnover window_minutes is the generator's placeholder 4h, and
+            showing it tells a cleaner to hurry for nobody. */}
+        {t.prev_booking_id && t.window_minutes ? (
           <span className="text-xs text-muted-themed flex items-center gap-0.5">
             <Clock className="w-3 h-3" />
             {Math.floor(t.window_minutes / 60)}h
             {t.window_minutes % 60 > 0 ? ` ${t.window_minutes % 60}m` : ''}
           </span>
-        )}
+        ) : null}
       </div>
     </Link>
   )

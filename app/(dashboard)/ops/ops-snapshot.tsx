@@ -26,8 +26,11 @@ interface Turnover {
   id:                   string
   property_id:          string
   checkout_datetime:    string
+  /** SYNTHETIC when prev_booking_id is null. */
   checkin_datetime:     string
   window_minutes:       number | null
+  /** Null on a standalone turnover: nothing is booked after this checkout. */
+  prev_booking_id:      string | null
   status:               string
   priority:             string
   notes:                string | null
@@ -224,12 +227,14 @@ function TurnoverCard({
           <span>
             {checkout.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })}
           </span>
-          {turnover.window_minutes && (
+          {/* Only a REAL next booking makes this a window. A standalone
+              turnover carries the generator's placeholder checkout + 4h. */}
+          {turnover.prev_booking_id && turnover.window_minutes ? (
             <>
               <span>·</span>
               <span>{Math.floor(turnover.window_minutes / 60)}h window</span>
             </>
-          )}
+          ) : null}
         </div>
 
         <div className="flex items-center justify-between gap-2">
