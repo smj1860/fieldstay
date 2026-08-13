@@ -23,7 +23,7 @@ import {
   selectOwnerRezBookingsToPostRevenue,
 } from '@/lib/integrations/providers/ownerrez'
 import { upsertBookingsReturningIds } from './upsert-bookings'
-import { initialHistoryFrom } from '@/lib/integrations/providers/ownerrez-backfill'
+import { initialHistoryFrom, revenuePostingFloor } from '@/lib/integrations/providers/ownerrez-backfill'
 import { logAuditEvent }        from '@/lib/audit'
 import {
   applyMasterChecklistToProperty,
@@ -639,7 +639,13 @@ export const ownerRezInitialSync = inngest.createFunction(
             bookingRows.map((b) => b.property_id).filter((id): id is string => id !== null)
           ))
 
-          bookingsToPostRevenue = selectOwnerRezBookingsToPostRevenue(bookingRows, idByExternalId)
+          // Revenue floor: current month onward only. The 90-day initial window
+          // has the same problem the backfill does — a stay that completed
+          // before the account connected has no cleaning fee, work order or
+          // restock recorded against it, because none of those happened in
+          // FieldStay. Its revenue alone is not a P&L, it is an overstatement.
+          bookingsToPostRevenue = selectOwnerRezBookingsToPostRevenue(
+            bookingRows, idByExternalId, revenuePostingFloor(new Date()))
         }
 
         try {

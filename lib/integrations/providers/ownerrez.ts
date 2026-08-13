@@ -642,10 +642,34 @@ export function partitionMappedBookingRows(rows: OwnerRezBookingRow[]): {
  */
 export function selectOwnerRezBookingsToPostRevenue(
   rows:           OwnerRezBookingRow[],
-  idByExternalId: Record<string, string>
+  idByExternalId: Record<string, string>,
+  /**
+   * Earliest check-in date eligible for revenue posting (YYYY-MM-DD), or null
+   * for no floor.
+   *
+   * Revenue for a stay that predates FieldStay managing the property is
+   * REVENUE WITHOUT ITS EXPENSES, and that is worse than no data. All three
+   * expense sources on owner_transactions post when something COMPLETES inside
+   * FieldStay — cleaning_fee on turnover completion, wo_completion on a work
+   * order, inventory_purchase on a received PO — and none of those exist for a
+   * stay that happened before the account connected. Those jobs were done on
+   * paper or in another system and cannot be reconstructed.
+   *
+   * So a backfilled month would show full rent and zero costs: an inflated net
+   * income presented to a property owner as their P&L. A missing month is
+   * visibly missing; a wrong month is not.
+   *
+   * The bookings themselves are still imported across the whole backfill —
+   * they feed stay-length derivation for the par engine and occupancy history,
+   * neither of which is distorted by the absent expense side.
+   */
+  minCheckinDate: string | null = null,
 ): { bookingId: string; propertyId: string; actualTotalAmount: number | null }[] {
   return rows
     .filter((b) => b.status === 'confirmed' && b.stay_type === 'guest_stay' && b.property_id !== null)
+    // ISO dates compare correctly as strings: fixed width, zero padded,
+    // most-significant first.
+    .filter((b) => minCheckinDate === null || (b.checkin_date ?? '') >= minCheckinDate)
     .map((b) => ({
       bookingId:         idByExternalId[b.external_id],
       propertyId:        b.property_id as string,
