@@ -14,6 +14,49 @@
 - Errors return JSON with a `messages` array of human-readable strings. Status codes: 400 = bad request / validation, 401 = authentication, 403 = permission, 404 = not found.
 - Prefer the current API (v2). Legacy versions remain documented below but should not be used for new integrations.
 
+## Verified contract details (2026-08-13)
+
+Pulled from `https://api.ownerrez.com/openapi/v2.json` because the orientation
+notes above have no per-endpoint parameter list, and guessing filled the gap
+wrongly once already. Re-verify against the spec before trusting any of this.
+
+### Paging — every list endpoint
+
+The response wrapper (`PageableEnumerableOf*`, used by all 22 list endpoints) is:
+
+```
+{ items: [...], limit: 100, offset: 0, next_page_url: "https://..." | null }
+```
+
+- `next_page_url` is the continuation mechanism. **Null means the collection is
+  finished** — including on a full page. Absent is a different answer from null.
+- There is **no `next_page_token` and no `total_count`.** `lib/integrations/types.ts`
+  declared both; neither string occurs anywhere in the spec. The pager read
+  `next_page_token`, got `undefined`, and stopped after one page — and since it
+  also sent no `limit`, that one page was OwnerRez's default of 20. One
+  production org's first sync imported exactly 20 bookings as a result.
+- `limit` (default 20, max 100) and `offset` are **declared on zero operations**
+  in the spec even though the response echoes both back. They work, but do not
+  assume a requested `limit` was honored — prefer `next_page_url`, and compare
+  short-page checks against the server-reported `page.limit`, not the one you asked for.
+
+### GET /v2/bookings query parameters
+
+| Param | Meaning |
+|---|---|
+| `property_ids` | comma-separated integers |
+| `from` | bookings that **depart on or after** this date (property timezone) |
+| `to` | bookings that **arrive on or before** this date (property timezone) |
+| `since_utc` | created or changed since (UTC) — a **modification-time cursor, not a stay-date filter** |
+| `status` | `Active` \| `Pending` \| `Canceled` |
+| `include_guest`, `include_charges`, `include_tags`, `include_fields`, `include_door_codes`, `include_cancellation_policy`, `include_agreements` | booleans |
+
+`from`/`to` together are an interval **overlap** filter, not containment: a stay
+straddling a window boundary is returned by both adjacent windows. That is what
+makes a progressive historical backfill possible (walk `to` backwards in fixed
+steps); the boundary duplicates are harmless because bookings upsert on the
+OwnerRez booking id.
+
 ## Documentation
 
 - [OpenAPI 3.0 spec](/openapi/v2.json): the full machine-readable contract for v2.

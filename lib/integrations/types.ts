@@ -245,10 +245,26 @@ export interface OwnerRezUser {
   email:    string
 }
 
+// ✅ Confirmed 2026-08-13 against OwnerRez's published OpenAPI 3.0 contract
+// (https://api.ownerrez.com/openapi/v2.json → PageableEnumerableOf*, the
+// wrapper returned by all 22 list endpoints).
+//
+// The previous shape guessed `total_count` and `next_page_token`. NEITHER
+// name appears anywhere in that spec — zero occurrences of either string.
+// The continuation field is `next_page_url`, so `next_page_token` read as
+// undefined on every response and fetchAllPages' `while (nextPageToken)`
+// exited after ONE page, with no `limit` sent so it took OwnerRez's default
+// of 20. Live confirmation: the first OwnerRez sync for one production org
+// created exactly 20 bookings in a single minute — the only burst of that
+// size in the table. Silent: a 200, a well-formed body, no truncation signal.
 export interface OwnerRezPagedResponse<T> {
-  total_count:     number
-  items:           T[]
-  next_page_token?: string | null
+  items:  T[]
+  /** Records per page. Echoed back by OwnerRez; default 20, max 100. */
+  limit?:  number
+  /** Current offset from the start of the collection. */
+  offset?: number
+  /** Absolute URL of the next page. Null/absent means the collection is done. */
+  next_page_url?: string | null
 }
 
 // ✅ Confirmed live 2026-07-15 against a real GET /v2/reviews response
