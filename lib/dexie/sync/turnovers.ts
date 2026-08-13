@@ -39,7 +39,7 @@ import { scopeChanged, rememberScope } from './scope'
 import { reportError } from '@/lib/observability/report-error'
 
 const TURNOVER_COLUMNS =
-  'id, property_id, org_id, checkout_datetime, checkin_datetime, window_minutes, status, priority, notes, ' +
+  'id, property_id, org_id, prev_booking_id, checkout_datetime, checkin_datetime, window_minutes, status, priority, notes, ' +
   'inventory_started_at, inventory_confirmed_complete_at, inventory_confirmed_by_crew_id, completion_notes, ' +
   'pending_checkout_datetime, pending_checkin_datetime, dates_changed_at, dates_change_acknowledged_at, updated_at'
 

@@ -10,7 +10,19 @@ export interface TurnoverRow {
   property_id:       string
   org_id:            string
   checkout_datetime: string
+  /**
+   * SYNTHETIC when prev_booking_id is null — the generator's standalone pass
+   * stores checkout + 4h so the turnover has a working window. No guest is
+   * arriving then. Never render it as an arrival without checking
+   * prev_booking_id first.
+   */
   checkin_datetime:  string
+  /**
+   * The outgoing booking on a paired turnover, null on a standalone one. The
+   * only signal that checkin_datetime above was invented. Non-indexed, so no
+   * Dexie version bump.
+   */
+  prev_booking_id:   string | null
   window_minutes:    number
   status:            string
   priority:          string

@@ -9,7 +9,7 @@ import { reportError } from '@/lib/observability/report-error'
 export const metadata: Metadata = { title: 'Turnovers' }
 
 const TURNOVER_COLUMNS = `
-        id, property_id, booking_id, checkout_datetime, checkin_datetime,
+        id, property_id, booking_id, prev_booking_id, checkout_datetime, checkin_datetime,
         window_minutes, status, priority, notes, completed_at, started_at,
         crew_duration_minutes,
         checklist_template_id, is_same_day_turnover, is_archived,

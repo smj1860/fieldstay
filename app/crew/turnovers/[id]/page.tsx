@@ -157,10 +157,17 @@ export default function CrewTurnoverPage() {
               {formatPropertyDateTime(turnover.checkout_datetime, property?.timezone ?? 'America/Chicago')}
             </span>
           </div>
+          {/* No outgoing booking recorded means this is a standalone turnover:
+              nobody is arriving after this checkout that we know of. The
+              generator still stores checkout + 4h as checkin_datetime so the
+              row has a working window, but showing that as "Next In" tells a
+              cleaner to hurry for a guest who does not exist. */}
           <div className="flex gap-3">
             <span className="text-muted-themed w-20 flex-shrink-0">Next In</span>
             <span className="font-medium text-primary-themed">
-              {formatPropertyDateTime(turnover.checkin_datetime, property?.timezone ?? 'America/Chicago')}
+              {turnover.prev_booking_id
+                ? formatPropertyDateTime(turnover.checkin_datetime, property?.timezone ?? 'America/Chicago')
+                : 'No next booking'}
             </span>
           </div>
         </div>
