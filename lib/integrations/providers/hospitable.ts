@@ -511,8 +511,15 @@ export async function hospFetchProperties(token: string): Promise<HospitableProp
   while (url) {
     pageCount++
     if (pageCount > MAX_PAGES) {
-      console.error(`[Hospitable] properties pagination exceeded ${MAX_PAGES} pages — aborting`)
-      break
+      // THROW rather than break. `break` returned the pages gathered so far as
+      // if they were the complete set, and callers upsert that list and treat
+      // anything missing from it as gone — the same silent-truncation class as
+      // the OwnerRez pager. A loud failure is strictly better than a quietly
+      // short portfolio.
+      throw new Error(
+        `[Hospitable] properties pagination exceeded ${MAX_PAGES} pages ` +
+        `(${properties.length} so far) — refusing to return a partial result`
+      )
     }
 
     const res = await hospitableFetch(url, token)
@@ -631,8 +638,10 @@ export async function fetchReservationsWindow(
   while (page <= lastPage) {
     pageCount++
     if (pageCount > MAX_PAGES) {
-      console.error(`[Hospitable] reservations pagination exceeded ${MAX_PAGES} pages — aborting`)
-      break
+      throw new Error(
+        `[Hospitable] reservations pagination exceeded ${MAX_PAGES} pages ` +
+        `(${reservations.length} so far) — refusing to return a partial result`
+      )
     }
 
     // Build base params via URLSearchParams (handles encoding for all standard params)
@@ -706,8 +715,10 @@ export async function hospFetchReviews(
   while (url) {
     pageCount++
     if (pageCount > MAX_PAGES) {
-      console.error(`[Hospitable] reviews pagination exceeded ${MAX_PAGES} pages for property ${propertyId} — aborting`)
-      break
+      throw new Error(
+        `[Hospitable] reviews pagination exceeded ${MAX_PAGES} pages for property ${propertyId} ` +
+        `(${reviews.length} so far) — refusing to return a partial result`
+      )
     }
 
     const res = await hospitableFetch(url, token)
@@ -799,18 +810,37 @@ export async function hospFetchTeammates(token: string): Promise<HospitableTeamm
   while (url) {
     pageCount++
     if (pageCount > MAX_PAGES) {
-      console.error('[Hospitable] teammates pagination exceeded limit — aborting')
-      break
+      throw new Error(
+        `[Hospitable] teammates pagination exceeded ${MAX_PAGES} pages ` +
+        `(${teammates.length} so far) — refusing to return a partial result`
+      )
     }
 
     const res = await hospitableFetch(url, token)
 
     if (!res.ok) {
       const text = await res.text().catch(() => '')
-      console.warn(
+
+      // 403 is the ONE expected non-ok: a connection predating the
+      // teammate:read scope. Nothing is retriable about it, and teammate sync
+      // is additive, so an empty list is the honest answer. Callers that
+      // reconcile by absence must still guard an empty set — see
+      // teammate-sync-handler's deactivation pass.
+      if (res.status === 403) {
+        console.warn(
+          `[Hospitable] GET /teammates forbidden (missing teammate:read scope): ${text.slice(0, 200)}`
+        )
+        return []
+      }
+
+      // Everything else THROWS. This returned [] for any status at all, from
+      // inside the pagination loop — so a 500 on page two discarded page one
+      // as well and reported "0 teammates" as a successful sync. Combined with
+      // the caller's absence-based deactivation, that is how an org's entire
+      // Hospitable crew roster was deactivated in one run.
+      throw new Error(
         `[Hospitable] GET /teammates failed (${res.status}): ${text.slice(0, 200)}`
       )
-      return []
     }
 
     const data = await res.json() as HospitablePagedTeammates

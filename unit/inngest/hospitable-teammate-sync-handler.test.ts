@@ -13,12 +13,16 @@ vi.mock('@/lib/integrations/providers/hospitable', () => ({
 vi.mock('@/lib/audit', () => ({
   logAuditEvents: vi.fn(),
 }))
+vi.mock('@/lib/observability/report-error', () => ({
+  reportError: vi.fn(),
+}))
 
 import { hospTeammateSyncHandler } from '@/lib/inngest/functions/hospitable/teammate-sync-handler'
 import { createServiceClient } from '@/lib/supabase/server'
 import { getValidHospitableToken } from '@/lib/integrations/providers/hospitable-token'
 import { hospFetchTeammates, hospitableTeammatesToCrewRows } from '@/lib/integrations/providers/hospitable'
 import { logAuditEvents } from '@/lib/audit'
+import { reportError } from '@/lib/observability/report-error'
 import { invokeHandler } from './test-helpers'
 
 function runAllStep() {
@@ -182,3 +186,100 @@ describe('hospTeammateSyncHandler', () => {
     })).rejects.toThrow('Teammates upsert failed: db unavailable')
   })
 })
+
+// ==========================================================================
+// The empty-fresh-set guard.
+//
+// This step reconciles by ABSENCE, and hospFetchTeammates used to return []
+// for ANY non-ok response — including the 403 its own doc comment names as
+// expected for a connection without the teammate:read scope, and including a
+// mid-pagination failure that also discarded the pages already gathered.
+//
+// With an empty set, every active Hospitable crew member is absent, so the
+// deactivation pass removed the org's ENTIRE roster and wrote an audit row for
+// each claiming they were removed from Hospitable.
+//
+// That happened. In production on 2026-07-18 at 09:00 UTC all three of one
+// org's Hospitable crew members were deactivated at the SAME microsecond —
+// one batch, the whole roster, from a single cron run.
+// ==========================================================================
+describe('hospTeammateSyncHandler — empty-result guard', () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+    ;(getValidHospitableToken as ReturnType<typeof vi.fn>).mockResolvedValue('token_abc')
+  })
+
+  it('deactivates NOBODY when Hospitable returns zero teammates', async () => {
+    ;(hospFetchTeammates as ReturnType<typeof vi.fn>).mockResolvedValue([])
+    ;(hospitableTeammatesToCrewRows as ReturnType<typeof vi.fn>).mockReturnValue([])
+
+    const supabase = makeSupabase({
+      crew_members: [
+        // The read that would have supplied the whole roster as "removed".
+        { data: [
+            { id: 'crew_1', external_id: 'tm_1' },
+            { id: 'crew_2', external_id: 'tm_2' },
+            { id: 'crew_3', external_id: 'tm_3' },
+          ], error: null },
+      ],
+    })
+    ;(createServiceClient as ReturnType<typeof vi.fn>).mockReturnValue(supabase)
+
+    const result = await invokeHandler(hospTeammateSyncHandler, {
+      event: { data: EVENT_DATA },
+      step:  runAllStep(),
+      logger: makeLogger(),
+    })
+
+    expect(result).toEqual({ upserted: 0, deactivated: 0 })
+
+    // The two things that made this destructive rather than merely wrong.
+    const update = supabase.calls.find((c) => c.table === 'crew_members' && c.method === 'update')
+    expect(update).toBeUndefined()
+    expect(logAuditEvents).not.toHaveBeenCalled()
+  })
+
+  it('reports the empty result rather than passing it off as a clean run', async () => {
+    // Silence here is the whole problem: a wiped roster looked like a
+    // successful sync in the logs.
+    ;(hospFetchTeammates as ReturnType<typeof vi.fn>).mockResolvedValue([])
+    ;(hospitableTeammatesToCrewRows as ReturnType<typeof vi.fn>).mockReturnValue([])
+    const supabase = makeSupabase({ crew_members: [{ data: [], error: null }] })
+    ;(createServiceClient as ReturnType<typeof vi.fn>).mockReturnValue(supabase)
+
+    const logger = makeLogger()
+    await invokeHandler(hospTeammateSyncHandler, {
+      event: { data: EVENT_DATA }, step: runAllStep(), logger,
+    })
+
+    expect(reportError).toHaveBeenCalledWith(
+      expect.any(Error),
+      expect.objectContaining({ orgId: 'org_1' }),
+    )
+    expect(logger.error).toHaveBeenCalledWith(expect.stringContaining('ZERO teammates'))
+  })
+
+  it('still deactivates normally when the fresh set is non-empty', async () => {
+    // The guard must not have disabled reconciliation altogether — a real
+    // removal still has to be detected.
+    ;(hospFetchTeammates as ReturnType<typeof vi.fn>).mockResolvedValue([{ id: 'tm_1' }])
+    ;(hospitableTeammatesToCrewRows as ReturnType<typeof vi.fn>).mockReturnValue([
+      { org_id: 'org_1', external_id: 'tm_1', external_source: 'hospitable' },
+    ])
+    const supabase = makeSupabase({
+      crew_members: [
+        { error: null },
+        { data: [{ id: 'crew_gone', external_id: 'tm_old' }], error: null },
+        { error: null },
+      ],
+    })
+    ;(createServiceClient as ReturnType<typeof vi.fn>).mockReturnValue(supabase)
+
+    const result = await invokeHandler(hospTeammateSyncHandler, {
+      event: { data: EVENT_DATA }, step: runAllStep(), logger: makeLogger(),
+    })
+
+    expect(result).toEqual({ upserted: 1, deactivated: 1 })
+  })
+})
+
