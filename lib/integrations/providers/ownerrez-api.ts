@@ -401,13 +401,32 @@ export class OwnerRezApiClient {
     return this.fetchAllPages<OwnerRezListing>('/v2/listings', queryParams)
   }
 
+  /**
+   * `from`/`to` are STAY-date bounds and `sinceUtc` is a MODIFICATION-time
+   * cursor — they answer different questions and compose fine together.
+   *
+   *   from — bookings that DEPART on or after this date (property timezone)
+   *   to   — bookings that ARRIVE on or before this date
+   *
+   * Together they select every stay OVERLAPPING the window, not only those
+   * contained in it, so adjacent windows both return a stay that straddles
+   * their shared edge. That is what makes the historical backfill safe to walk
+   * in windows (see lib/integrations/providers/ownerrez-backfill.ts).
+   *
+   * Verified 2026-08-13 against OwnerRez's OpenAPI contract; the parameter
+   * table is recorded in docs/Integrations/ownerrez/api-markdown.md.
+   */
   async getBookings(params: {
     propertyIds?:  number[]
     sinceUtc?:     string
+    from?:         string
+    to?:           string
     includeGuest?: boolean
   }): Promise<OwnerRezBooking[]> {
     const queryParams: Record<string, string | number | undefined> = {}
     if (params.sinceUtc) queryParams['since_utc'] = params.sinceUtc
+    if (params.from)     queryParams['from']      = params.from
+    if (params.to)       queryParams['to']        = params.to
     if (params.propertyIds?.length) {
       queryParams['property_ids'] = params.propertyIds.join(',')
     }

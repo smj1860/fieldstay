@@ -133,10 +133,10 @@ const EXCEPTIONS: Record<string, string> = {
     'Per-section insert (parent-before-child, same reasoning as clone-actions.ts:122) — additionally guarded by a template-signature equality check just above that skips the whole delete-then-recreate rebuild when nothing changed.',
   'lib/inngest/functions/cron/guest-pii-retention.ts:137':
     'Per-secret delete_vault_secret RPC call — each is a distinct external Vault secret; structurally cannot be batched into one call any more than "one API call per distinct external resource" ever can. Bounded since the 2026-07-30 scalability pass: the loop now iterates one BOOKING_BATCH_SIZE page inside a per-batch step, not an org\'s entire un-anonymized booking history.',
-  'lib/inngest/functions/ownerrez/initial-sync.ts:210':
+  'lib/inngest/functions/ownerrez/initial-sync.ts:239':
     'Per-property conditional field patch (bedrooms/bathrooms/square_footage) — each property\'s patch object contains different values, so it is not a uniform batched update. Pre-fetch of existing rows just above IS already batched via .in(\'external_id\', ids).',
   'lib/guidebook/sync.ts:168':
-    'Per-property conditional guidebook-config patch — same shape as ownerrez/initial-sync.ts:210 (differing patch per row); the read side just above is already batched via .in(\'property_id\', ids).',
+    'Per-property conditional guidebook-config patch — same shape as ownerrez/initial-sync.ts:239 (differing patch per row); the read side just above is already batched via .in(\'property_id\', ids).',
   'lib/properties/upsert-normalized.ts:172':
     'Per-property conditional cleaning_cost backfill — same differing-patch-per-row shape as the two entries above.',
   'lib/inngest/functions/turnover-events.ts:354':

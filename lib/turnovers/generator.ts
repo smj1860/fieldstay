@@ -7,6 +7,16 @@ import { fetchAllRows } from '@/lib/inngest/paginate'
 import { reportError } from '@/lib/observability/report-error'
 import { tryUnwrap, unwrap, unwrapList } from '@/lib/supabase/unwrap'
 
+/**
+ * How far back a checkout can be and still produce a turnover.
+ *
+ * Generous on purpose — a turnover from three weeks ago may legitimately still
+ * be open and awaiting completion — but finite, so importing historical
+ * bookings never manufactures work that is already over. See the note at the
+ * booking read in generateTurnoversForProperty.
+ */
+export const TURNOVER_HISTORY_FLOOR_DAYS = 45
+
 export interface GeneratedTurnover {
   id:                string
   property_id:       string
@@ -257,6 +267,26 @@ export async function generateTurnoversForProperty(
   // not unique (two bookings can start the same day across a property's
   // history), and range() over a non-unique sort key can skip or repeat rows
   // across page boundaries.
+  // FLOORED to recent checkouts. A turnover is a unit of WORK — a cleaning job
+  // someone is meant to do — so manufacturing one for a stay that ended months
+  // ago creates a task nobody will ever perform, and it lands in
+  // pending_assignment where it looks like a real backlog. Production already
+  // carried 17 such rows before this floor existed, generated from ordinary
+  // historical bookings arriving through a sync.
+  //
+  // This became load-bearing with OwnerRez's historical backfill: that walk
+  // deliberately imports up to two years of past stays, and every one of them
+  // would otherwise become a retroactive cleaning job the next time anything
+  // regenerated this property. Skipping generation during the backfill alone
+  // would not have worked — this function re-reads ALL of a property's
+  // bookings, so the next ordinary sync would generate them anyway.
+  //
+  // Existing rows are untouched; only new creation is floored. The pair pass
+  // is unaffected in substance: a stay whose checkout predates the floor is
+  // exactly the one whose turnover we do not want.
+  const historyFloor = new Date(Date.now() - TURNOVER_HISTORY_FLOOR_DAYS * 86_400_000)
+    .toISOString().slice(0, 10)
+
   const bookings = await fetchAllRows<{
     id: string; checkin_date: string; checkout_date: string
     checkin_time: string | null; checkout_time: string | null
@@ -267,6 +297,7 @@ export async function generateTurnoversForProperty(
       .eq('property_id', propertyId)
       .eq('is_block', false)
       .in('status', ['confirmed', 'tentative'])
+      .gte('checkout_date', historyFloor)
       .order('checkin_date', { ascending: true })
       .order('id')
       .range(from, to),
