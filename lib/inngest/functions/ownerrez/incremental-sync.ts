@@ -1103,7 +1103,10 @@ async function runHistoricalBackfill(params: {
       orgId: orgId,
     })
 
-    if (!conn || conn.status !== 'active' || !conn.org_id) {
+    // org_id first so the optional chain covers the null-connection case too:
+    // a truthy conn?.org_id already proves conn itself is non-null, which is
+    // what lets conn.status be read plainly on the next clause.
+    if (!conn?.org_id || conn.status !== 'active') {
       return NO_BACKFILL('skipped_inactive')
     }
 

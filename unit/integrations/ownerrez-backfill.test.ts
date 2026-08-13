@@ -89,7 +89,7 @@ describe('the full walk', () => {
     const { windows, state } = walkToCompletion()
     expect(state.complete).toBe(true)
     // (730 - 90) / 90 = 7.1 -> 8 windows, the last one clamped.
-    expect(windows.length).toBe(8)
+    expect(windows).toHaveLength(8)
   })
 
   it('leaves NO GAP in stay-date coverage', () => {
