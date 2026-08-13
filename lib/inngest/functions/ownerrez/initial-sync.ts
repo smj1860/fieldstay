@@ -94,6 +94,27 @@ export const ownerRezInitialSync = inngest.createFunction(
     id:      'ownerrez-initial-sync',
     name:    'OwnerRez Initial Sync',
     retries: 3,
+    // Two caps, and they answer different questions.
+    //
+    // The unkeyed one is capacity: this is the heaviest OwnerRez consumer we
+    // have — it paginates every property, listing and booking for a brand-new
+    // account — and the 300-request/5-minute OwnerRez budget is shared by every
+    // tenant on the same deployment IP. Left uncapped, several signups landing
+    // together would spend that budget on each other and take the incremental
+    // syncs down with them. 3 matches ownerRezConnectionSync's cap for the
+    // same reason.
+    //
+    // The keyed one is correctness: never two initial syncs for one connection
+    // at once. This step chain seeds checklists, generates turnovers and seeds
+    // assets from amenities, and not all of that is safe to interleave with
+    // itself. A reconnect, a double-clicked Connect button, or a re-fired
+    // event would otherwise race. Keyed concurrency QUEUES the second run
+    // rather than dropping it, which is what a genuine reconnect wants —
+    // `idempotency` would silently discard it instead.
+    concurrency: [
+      { limit: 3 },
+      { limit: 1, key: 'event.data.user_id' },
+    ],
   },
   { event: 'integration/ownerrez.connected' as const },
   async ({ event, step, logger }) => {
