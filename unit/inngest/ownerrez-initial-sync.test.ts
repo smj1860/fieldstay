@@ -371,4 +371,82 @@ describe('ownerRezInitialSync', () => {
     expect(auditCall).toBeDefined()
     expect((auditCall?.[0] as { metadata: Record<string, unknown> }).metadata.reason).toBeUndefined()
   })
+
+  // ── Coverage added 2026-08-12, ahead of refactoring fetch-bookings ───────
+  //
+  // The step is 100 lines doing six things and carries a cognitive-complexity
+  // warning, but the reason to touch it is SCALE, not the metric: it fetches
+  // every booking for every property in ONE call, returns a
+  // bookingsToPostRevenue array that grows with the portfolio (and is
+  // serialized as step output for replay), and re-runs the whole API fetch on
+  // any retry. These paths were the untested ones, so they are the ones a
+  // refactor could break silently.
+
+  /** A connection whose OwnerRez account reports no properties. */
+  function noPropertiesMocks() {
+    const mockClient = baseMocks()
+    mockClient.getProperties.mockResolvedValue([])
+    return mockClient
+  }
+
+  it('takes the zero-properties path without calling the bookings API at all', async () => {
+    // Calling getBookings with neither property_ids nor since_utc is the shape
+    // OwnerRez rejects, and burning a rate-limited request to learn that is
+    // worse than not asking.
+    const mockClient = noPropertiesMocks()
+    const supabase = makeSupabase({})
+    ;(createServiceClient as ReturnType<typeof vi.fn>).mockReturnValue(supabase)
+
+    await invokeHandler(ownerRezInitialSync, {
+      event:  { data: { user_id: 'u1', org_id: 'o1' } },
+      step:   makeAllowlistStep(GOLDEN_PATH_STEPS),
+      logger: makeLogger(),
+    })
+
+    expect(mockClient.getBookings).not.toHaveBeenCalled()
+  })
+
+  it('still records bookings_found = 0 on that path', async () => {
+    // writeSyncCount is what the connection card reads. Skipping it on the
+    // empty path would leave a previous run's number on screen.
+    noPropertiesMocks()
+    const supabase = makeSupabase({})
+    ;(createServiceClient as ReturnType<typeof vi.fn>).mockReturnValue(supabase)
+
+    await invokeHandler(ownerRezInitialSync, {
+      event:  { data: { user_id: 'u1', org_id: 'o1' } },
+      step:   makeAllowlistStep(GOLDEN_PATH_STEPS),
+      logger: makeLogger(),
+    })
+
+    expect(findMetadataMergeCall(supabase.rpcSpy, 'bookings_found')).toBeDefined()
+  })
+
+  it('does NOT fail the sync when the bookings_found write fails', async () => {
+    // writeSyncCount is a display counter. An outage writing it must not cost
+    // the customer their entire initial sync — the bookings are the point.
+    // This is the one deliberately swallowed error in the step, so a refactor
+    // that "tidies" the try/catch away turns a cosmetic failure into a fatal
+    // one, silently. That is exactly what this test exists to catch.
+    noPropertiesMocks()
+    const supabase = makeSupabase({})
+    // Scoped to the bookings_found patch ONLY. Failing every metadata merge
+    // also breaks update-last-synced, which is fatal BY DESIGN — losing the
+    // sync cursor means the next incremental run re-pulls from the beginning.
+    // The distinction between the two is the thing under test.
+    supabase.rpc.mockImplementation((fnName: string, args: unknown) => {
+      const patch = (args as { p_patch?: Record<string, unknown> })?.p_patch
+      if (fnName === 'merge_integration_connection_metadata' && patch && 'bookings_found' in patch) {
+        return Promise.reject(new Error('metadata write unavailable'))
+      }
+      return Promise.resolve({ data: {}, error: null })
+    })
+    ;(createServiceClient as ReturnType<typeof vi.fn>).mockReturnValue(supabase)
+
+    await expect(invokeHandler(ownerRezInitialSync, {
+      event:  { data: { user_id: 'u1', org_id: 'o1' } },
+      step:   makeAllowlistStep(GOLDEN_PATH_STEPS),
+      logger: makeLogger(),
+    })).resolves.not.toThrow()
+  })
 })
