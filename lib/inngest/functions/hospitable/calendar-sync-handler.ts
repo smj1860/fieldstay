@@ -107,6 +107,10 @@ export const hospCalendarSyncHandler = inngest.createFunction(
         .neq('status', 'cancelled')
         .lte('checkin_date', endDate)
         .gte('checkout_date', startDate)
+        // One property's blocks inside one sync window — a truncated read here
+        // only leaves a stale Blocked row that the next run clears, but the
+        // bound keeps the intent explicit rather than relying on that.
+        .limit(1000)
 
       if (fetchErr) throw new Error(`Fetching existing blocks failed: ${fetchErr.message}`)
 

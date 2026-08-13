@@ -210,6 +210,10 @@ export function ChecklistView({
                       {openNoteItemId === item.id && (
                         <div className="px-4 pb-3 bg-card-themed border-t border-themed">
                           <textarea
+                            // Revealed by tapping "add note" on this item —
+                            // focusing it is the point of the tap, not
+                            // page-load focus stealing.
+                            // eslint-disable-next-line jsx-a11y/no-autofocus
                             autoFocus
                             value={noteText}
                             onChange={(e) => setNoteText(e.target.value)}

@@ -17,6 +17,8 @@ export default async function IcalPage({ params }: Props) {
     .select('*')
     .eq('property_id', property.id)
     .order('created_at')
+    // One property's calendar feeds — a handful in practice (one per channel).
+    .limit(200)
 
 
   // Logs + reports, then throws so the segment's error.tsx renders a real

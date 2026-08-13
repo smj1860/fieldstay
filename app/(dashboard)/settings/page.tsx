@@ -38,6 +38,8 @@ export default async function SettingsPage() {
     .select('provider_id, status, external_user_id, connected_at, metadata')
     .eq('org_id', membership.org_id)
     .in('status', ['active', 'error'])   // include errored connections so UI can surface them
+    // One org's integration connections — one per provider in practice.
+    .limit(100)
 
 
   // Logs + reports, then throws so the segment's error.tsx renders a real

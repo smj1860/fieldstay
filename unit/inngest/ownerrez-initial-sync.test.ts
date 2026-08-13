@@ -244,7 +244,7 @@ describe('ownerRezInitialSync', () => {
     // deliberately corrected) and would silently overwrite it with whatever
     // OwnerRez reports. bathrooms always used the correct `=== null` check;
     // bedrooms/square_footage must now match it.
-    const mockClient = baseMocks()
+    baseMocks()
     ;(generateTurnoversForProperty as ReturnType<typeof vi.fn>).mockResolvedValue([])
 
     const supabase = makeSupabase({

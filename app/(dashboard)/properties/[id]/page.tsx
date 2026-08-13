@@ -69,7 +69,9 @@ export default async function PropertyDetailPage({ params }: Props) {
     supabase
       .from('ical_feeds')
       .select('id, name, last_synced_at, last_sync_status')
-      .eq('property_id', property.id),
+      .eq('property_id', property.id)
+      // One property's feeds — a handful in practice (one per channel).
+      .limit(200),
 
     // Last 10 WOs for this property (open + completed)
     supabase
@@ -86,7 +88,11 @@ export default async function PropertyDetailPage({ params }: Props) {
       .select('actual_cost, estimated_cost')
       .eq('property_id', property.id)
       .eq('status', 'completed')
-      .gte('completed_date', thisYearStart),
+      .gte('completed_date', thisYearStart)
+      // Bounded: this feeds the YTD Spend figure. Truncation here does not
+      // shorten a list a PM can see is short — it silently understates a
+      // dollar total, which reads as a real number.
+      .limit(1000),
 
     // Upcoming scheduled maintenance (for summary widget)
     supabase
@@ -103,7 +109,9 @@ export default async function PropertyDetailPage({ params }: Props) {
       .select('*')
       .eq('property_id', property.id)
       .eq('is_active', true)
-      .order('next_due_date', { ascending: true }),
+      .order('next_due_date', { ascending: true })
+      // One property's active schedules.
+      .limit(500),
 
     // Catalog for "Add from catalog" modal
     supabase

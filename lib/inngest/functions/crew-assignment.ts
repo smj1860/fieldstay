@@ -49,6 +49,7 @@ export const handleCrewAssigned = inngest.createFunction(
             properties ( name, timezone )
           `)
           .in('id', turnover_ids)
+          .limit(turnover_ids.length)
           .eq('org_id', org_id),
       ])
       throwIfAnyQueryFailed(

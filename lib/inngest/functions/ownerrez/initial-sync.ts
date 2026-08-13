@@ -535,6 +535,8 @@ export const ownerRezInitialSync = inngest.createFunction(
             .eq('org_id', org_id)
             .eq('external_source', PROVIDER)
             .in('external_id', fetchPropsResult.ids.map(String))
+            // One row per external id — same reasoning as incremental-sync.
+            .limit(fetchPropsResult.ids.length)
 
           if (propsLookupError || !fsProps) {
             console.error(

@@ -277,6 +277,9 @@ export async function resolveHospitableOwner(params: {
     .select('org_id')
     .eq('external_id',     externalId)
     .eq('external_source', PROVIDER)
+    // Deliberately cross-org (see above): one row per org holding this
+    // external entity. Bounded by the platform's org count, not unbounded.
+    .limit(1000)
 
   if (localErr) throw new Error(`local owner lookup failed: ${localErr.message}`)
 

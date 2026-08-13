@@ -10,7 +10,7 @@ vi.mock('@/lib/audit', () => ({
 
 import { vendorComplianceGraceCheck } from '@/lib/inngest/functions/cron/vendor-compliance-grace-check'
 import { createServiceClient } from '@/lib/supabase/server'
-import { logAuditEvent, logAuditEvents } from '@/lib/audit'
+import { logAuditEvents } from '@/lib/audit'
 import { invokeHandler } from './test-helpers'
 
 // Cron function — the real event has no meaningful `data` the handler reads

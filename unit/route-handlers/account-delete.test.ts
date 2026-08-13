@@ -88,7 +88,7 @@ function makeAdmin(queued: QueuedByTable = {}, opts: { deleteUserError?: { messa
       if (method === 'delete') order.push(`delete:${table}`)
       return chain
     }
-    for (const m of ['select', 'eq', 'neq', 'is', 'update', 'insert', 'delete'] as const) {
+    for (const m of ['select', 'eq', 'neq', 'is', 'limit', 'update', 'insert', 'delete'] as const) {
       chain[m] = (...a: unknown[]) => record(m, a)
     }
 

@@ -46,6 +46,7 @@ function makeSupabase(queued: QueuedByTable) {
     chain.neq    = (...a: unknown[]) => record('neq', a)
     chain.lte    = (...a: unknown[]) => record('lte', a)
     chain.gte    = (...a: unknown[]) => record('gte', a)
+    chain.limit  = (...a: unknown[]) => record('limit', a)
 
     const resolveNext = () => {
       const idx = counters[table] ?? 0

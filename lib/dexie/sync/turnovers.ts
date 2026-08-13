@@ -33,7 +33,7 @@ import {
   type InventoryItemRow,
 } from '../schema'
 import { getCursor, advanceCursor, partitionByKnown } from './cursors'
-import { fetchInChunks, fetchInChunksPaginated, IN_CHUNK_SIZE } from './chunked'
+import { fetchInChunks, fetchInChunksPaginated, fetchAllPages, IN_CHUNK_SIZE } from './chunked'
 import { bulkPutShadowed } from './shadow'
 import { scopeChanged, rememberScope } from './scope'
 import { reportError } from '@/lib/observability/report-error'
@@ -60,18 +60,38 @@ async function fetchAssignedTurnoverIds(
   supabase: DexieSupabaseClient,
   crewMemberId: string,
 ): Promise<string[] | null> {
-  const { data, error } = await supabase
-    .from('turnover_assignments')
-    .select('turnover_id')
-    .eq('crew_member_id', crewMemberId)
-  if (error) {
-    console.error('[turnoverSync] turnover_assignments fetch failed:', error)
-    reportError(new Error(`turnover_assignments fetch failed: ${error.message}`), {
+  // PAGINATED, and the reason is deletion rather than a short list. This is
+  // the crew member's WHOLE assignment scope, and reconcileRemovedTurnovers
+  // treats every cached turnover absent from it as unassigned — bulkDeleting
+  // the turnover, its checklist instances and its checklist items from the
+  // device. Unbounded, this read truncated at max_rows = 1000 with a 200 and
+  // no signal, so a cleaner past ~1000 lifetime assignments (5 turnovers a day,
+  // 5 days a week, reached inside a year) would have their device start erasing
+  // turnovers that were still genuinely assigned.
+  //
+  // .order('turnover_id') is not decoration either: without an ORDER BY the
+  // 1000 rows that came back were an arbitrary subset that could differ between
+  // syncs, so the device would delete a different set each time and thrash
+  // instead of settling on one wrong answer. Range pagination REQUIRES a stable
+  // sort to page correctly, so the ordering is load-bearing twice over.
+  const rows = await fetchAllPages<{ turnover_id: string }>(async (from, to) => {
+    const res = await supabase
+      .from('turnover_assignments')
+      .select('turnover_id')
+      .eq('crew_member_id', crewMemberId)
+      .order('turnover_id')
+      .range(from, to)
+    return { data: res.data as { turnover_id: string }[] | null, error: res.error }
+  })
+
+  if (rows === null) {
+    console.error('[turnoverSync] turnover_assignments fetch failed')
+    reportError(new Error('turnover_assignments fetch failed'), {
       site: 'dexie.sync.turnovers.assignments',
     })
     return null
   }
-  return [...new Set<string>((data ?? []).map((a: { turnover_id: string }) => a.turnover_id))]
+  return [...new Set<string>(rows.map((a) => a.turnover_id))]
 }
 
 /**

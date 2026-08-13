@@ -8,7 +8,7 @@ import { logAuditEvent } from '@/lib/audit'
 import { reportError } from '@/lib/observability/report-error'
 import { reportQueryError } from '@/lib/supabase/unwrap'
 import { unwrapJoin } from '@/lib/utils/supabase-joins'
-import { fetchAllRows } from '@/lib/inngest/paginate'
+import { fetchAllRows, SUPABASE_MAX_ROWS } from '@/lib/inngest/paginate'
 import { rebaseParFromTarget } from '@/lib/inventory/par-engine'
 import type { InventoryCategory, ParMode, ParSmartGroup, PoStatus, TablesInsert, TablesUpdate } from '@/types/database'
 import { Constants } from '@/types/database'
@@ -619,10 +619,14 @@ export async function applyTemplateToProperties(
     if (!ownership.ok) return { error: ownership.error, applied: 0 }
     const targetPropertyIds = ownership.targetPropertyIds
 
+    // Bounded for the same reason the existing-items read below is paginated:
+    // this set IS what gets written to every selected property, so a truncated
+    // read stocks them with a partial list and reports success.
     const { data: items, error: itemsErr } = await supabase
       .from('inventory_template_items')
       .select('*')
       .eq('template_id', templateId)
+      .limit(SUPABASE_MAX_ROWS)
 
     if (itemsErr || !items?.length) {
       if (itemsErr) {

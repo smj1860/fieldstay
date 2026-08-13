@@ -72,3 +72,31 @@ export async function fetchInChunksPaginated<TId, TRow>(
   }
   return rows
 }
+
+/**
+ * Drain a single filtered read to completion with `.range()`.
+ *
+ * The sibling above chunks an ID LIST; this one has no list to chunk — it is
+ * for a plain `.eq(parent_id, …)` read whose row count has no ceiling.
+ *
+ * Added 2026-08-12 for fetchAssignedTurnoverIds, where the missing ceiling was
+ * not a short list but active deletion: that function returns a crew member's
+ * whole assignment scope, and reconcileRemovedTurnovers bulkDeletes every
+ * cached turnover NOT in it, along with its checklists. Truncated at
+ * max_rows = 1000, a long-tenured cleaner's device would start erasing
+ * turnovers that were still genuinely assigned — and, with no ORDER BY, a
+ * different arbitrary 1000 each sync, so it would thrash rather than settle.
+ */
+export async function fetchAllPages<TRow>(
+  fetchPage: (from: number, to: number) => Promise<{ data: TRow[] | null; error: unknown }>,
+): Promise<TRow[] | null> {
+  const rows: TRow[] = []
+  for (let from = 0; ; from += SUPABASE_MAX_ROWS) {
+    const { data, error } = await fetchPage(from, from + SUPABASE_MAX_ROWS - 1)
+    if (error) return null
+    const page = data ?? []
+    rows.push(...page)
+    if (page.length < SUPABASE_MAX_ROWS) break
+  }
+  return rows
+}

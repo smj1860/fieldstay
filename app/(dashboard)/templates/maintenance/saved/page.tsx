@@ -62,7 +62,12 @@ export default async function SavedMaintenanceTemplatesPage() {
       .select('property_id, source_template_item_id, maintenance_schedule_template_items(template_id)')
       .eq('org_id', membership.org_id)
       .eq('is_active', true)
-      .not('source_template_item_id', 'is', null),
+      .not('source_template_item_id', 'is', null)
+      // NOT hygiene, despite the org scope: live data shows ~18 active
+      // schedules per property, so a portfolio at the 50-property target sits
+      // near 900 and crosses max_rows at roughly 56 properties. A truncated
+      // read silently drops scheduled maintenance off the page.
+      .limit(2000),
     supabase
       .from('properties')
       .select('id, name')

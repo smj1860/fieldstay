@@ -201,7 +201,11 @@ export async function getNotifications(orgId: string): Promise<NotificationFeed>
       .from('vendor_compliance_status')
       .select('vendor_id, vendor_name, compliance_status')
       .eq('org_id', orgId)
-      .in('compliance_status', ['hard_blocked', 'expiring_soon', 'grace_period']),
+      .in('compliance_status', ['hard_blocked', 'expiring_soon', 'grace_period'])
+      // Bounded by the org's VENDOR count, not by the three statuses. A
+      // truncated read silently under-reports compliance problems, which is
+      // the opposite of what this notification exists to do.
+      .limit(1000),
   ])
 
   // Each source degrades independently: one failing query must not blank the

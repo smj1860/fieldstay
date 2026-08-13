@@ -206,24 +206,28 @@ function extractChain(src: string, fromIdx: number): string {
   return src.slice(fromIdx)
 }
 
-function findOffenders(): string[] {
+/** The scan itself, over one source string — extracted so it can be run
+ *  against a synthetic fixture as a POSITIVE CONTROL. See the sanity test. */
+function offendersInSource(src: string, relPath: string): string[] {
   const offenders: string[] = []
-  for (const relPath of inngestReachableFiles()) {
-    const src = read(join(ROOT, relPath))
-    const FROM = /\.from\(\s*['"][a-z_]+['"]\s*\)/g
-    let m: RegExpExecArray | null
-    while ((m = FROM.exec(src))) {
-      const chain = extractChain(src, m.index)
-      const selectIdx = chain.indexOf('.select(')
-      if (selectIdx === -1) continue
-      const beforeSelect = chain.slice(0, selectIdx)
-      if (WRITE_VERBS.some((verb) => beforeSelect.includes(verb))) continue
-      if (BOUNDED.some((token) => chain.includes(token))) continue
-      if (insidePaginatingCall(src, m.index)) continue
-      offenders.push(`${relPath}:${src.slice(0, m.index).split('\n').length}`)
-    }
+  const FROM = /\.from\(\s*['"][a-z_]+['"]\s*\)/g
+  let m: RegExpExecArray | null
+  while ((m = FROM.exec(src))) {
+    const chain = extractChain(src, m.index)
+    const selectIdx = chain.indexOf('.select(')
+    if (selectIdx === -1) continue
+    const beforeSelect = chain.slice(0, selectIdx)
+    if (WRITE_VERBS.some((verb) => beforeSelect.includes(verb))) continue
+    if (BOUNDED.some((token) => chain.includes(token))) continue
+    if (insidePaginatingCall(src, m.index)) continue
+    offenders.push(`${relPath}:${src.slice(0, m.index).split('\n').length}`)
   }
   return offenders
+}
+
+function findOffenders(): string[] {
+  return inngestReachableFiles().flatMap((relPath) =>
+    offendersInSource(read(join(ROOT, relPath)), relPath))
 }
 
 // Files that predate this rule. SHRINK-ONLY — never add an entry. Clearing one
@@ -233,26 +237,38 @@ function findOffenders(): string[] {
 // it with a count/RPC aggregate.
 const BASELINE = new Set<string>([
   'lib/inngest/functions/auto-assign-vendor.ts',
-  'lib/inngest/functions/crew-assignment.ts',
-  'lib/inngest/functions/hospitable/calendar-sync-handler.ts',
   'lib/inngest/functions/hospitable/teammate-sync-handler.ts',
-  'lib/inngest/functions/ownerrez/incremental-sync.ts',
-  'lib/inngest/functions/ownerrez/initial-sync.ts',
 ])
 
 describe('guardrail: no unbounded .select() in lib/inngest/**', () => {
   const offenders = findOffenders()
 
-  it('finds the select population (sanity: the scan is not silently empty)', () => {
-    // Guards against the scan breaking and reading as "all clean". The floor
-    // moves DOWN as files are genuinely fixed — it was 20 until daily-wrapup
-    // and inventory-events were fully bounded, then 12 until platform-
-    // inventory-template-broadcast's four reads were paginated/unwrapped,
-    // then 10 until checklist-broadcast.ts, hospitable-reviews-backfill.ts,
-    // hostaway/initial-sync.ts and ownerrez-reviews-sync.ts were bounded,
-    // which is real cleanup, not a broken matcher. Lower it only alongside a
-    // baseline entry being deleted.
-    expect(offenders.length).toBeGreaterThan(5)
+  // POSITIVE CONTROL, replacing the old "population > N" floor.
+  //
+  // That floor existed to catch the scan breaking and reading as "all clean",
+  // and it worked while the population was large — it was walked down 20 → 12
+  // → 10 → 5 as files were genuinely fixed. But it is self-limiting: with 3
+  // offenders left it would have to become "> 2", then "> 0", and at zero it
+  // cannot distinguish a clean tree from a broken matcher at all — the exact
+  // failure CLAUDE.md names for a semgrep rule sitting at 0.
+  //
+  // Running the scan against a synthetic known-bad source proves it still
+  // fires at ANY population, including none. The negatives matter as much:
+  // if the matcher started flagging bounded reads, the baseline would grow
+  // and this suite would read as a regression rather than a broken scan.
+  it('FIRES on a synthetic unbounded select (the scan is not silently broken)', () => {
+    const bad = `const r = await supabase.from('bookings').select('id').eq('org_id', orgId)`
+    expect(offendersInSource(bad, 'synthetic.ts')).toHaveLength(1)
+  })
+
+  it('does NOT fire on bounded, paginated, or write-returning selects', () => {
+    const limited   = `const r = await supabase.from('bookings').select('id').eq('org_id', o).limit(10)`
+    const single    = `const r = await supabase.from('bookings').select('id').eq('id', i).maybeSingle()`
+    const counted   = `const r = await supabase.from('bookings').select('id', { count: 'exact', head: true })`
+    const writeBack = `const r = await supabase.from('bookings').insert(rows).select('id')`
+    for (const src of [limited, single, counted, writeBack]) {
+      expect(offendersInSource(src, 'synthetic.ts')).toEqual([])
+    }
   })
 
   it('no unbounded .select() outside the grandfathered baseline files', () => {

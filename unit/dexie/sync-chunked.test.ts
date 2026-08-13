@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from 'vitest'
-import { chunkIds, fetchInChunks, fetchInChunksPaginated, IN_CHUNK_SIZE } from '@/lib/dexie/sync/chunked'
+import { chunkIds, fetchInChunks, fetchInChunksPaginated, IN_CHUNK_SIZE, fetchAllPages } from '@/lib/dexie/sync/chunked'
 
 describe('chunkIds', () => {
   it('returns an empty array for zero ids', () => {
@@ -157,5 +157,76 @@ describe('fetchInChunksPaginated', () => {
     const fetchPage = vi.fn()
     expect(await fetchInChunksPaginated([], fetchPage)).toEqual([])
     expect(fetchPage).not.toHaveBeenCalled()
+  })
+})
+
+describe('fetchAllPages', () => {
+  // Drains a single filtered read with .range(). Added with the crew
+  // assignment-scope fix: there the missing ceiling was not a short list but
+  // active deletion — fetchAssignedTurnoverIds returns a crew member's whole
+  // assignment scope, and reconcileRemovedTurnovers bulkDeletes every cached
+  // turnover absent from it, along with its checklists. Truncated at
+  // max_rows = 1000, a cleaner past ~1000 lifetime assignments would have
+  // their device erase turnovers that were still genuinely assigned.
+
+  /** Serves `total` rows through .range()-style paging. */
+  function pager(total: number) {
+    const pages: number[] = []
+    return {
+      pages,
+      fetchPage: (from: number, to: number) => {
+        const slice = Array.from({ length: Math.max(0, Math.min(to, total - 1) - from + 1) },
+          (_, i) => ({ id: `r${from + i}` }))
+        pages.push(slice.length)
+        return Promise.resolve({ data: slice, error: null })
+      },
+    }
+  }
+
+  it('returns EVERY row past the 1000-row page cap', async () => {
+    const { fetchPage, pages } = pager(2_500)
+    const rows = await fetchAllPages<{ id: string }>(fetchPage)
+    expect(rows).toHaveLength(2_500)
+    expect(rows![0].id).toBe('r0')
+    expect(rows![2_499].id).toBe('r2499')      // the row a single read lost
+    expect(pages).toEqual([1000, 1000, 500])   // stops on the short page
+  })
+
+  it('makes exactly one request when the first page is short', async () => {
+    const { fetchPage, pages } = pager(12)
+    await expect(fetchAllPages<{ id: string }>(fetchPage)).resolves.toHaveLength(12)
+    expect(pages).toEqual([12])
+  })
+
+  it('stops after one request for an empty result', async () => {
+    const { fetchPage, pages } = pager(0)
+    await expect(fetchAllPages<{ id: string }>(fetchPage)).resolves.toEqual([])
+    expect(pages).toEqual([0])
+  })
+
+  it('returns null on error rather than a partial set', async () => {
+    // A partial assignment scope is worse than none: the caller would treat
+    // every missing turnover as unassigned and delete it. Null makes the
+    // caller bail instead.
+    let call = 0
+    const rows = await fetchAllPages<{ id: string }>(() => {
+      call++
+      if (call === 2) return Promise.resolve({ data: null, error: { message: 'boom' } })
+      return Promise.resolve({ data: Array.from({ length: 1000 }, (_, i) => ({ id: `r${i}` })), error: null })
+    })
+    expect(rows).toBeNull()
+  })
+
+  it('does not loop forever when a full page repeats', async () => {
+    // Defensive: a page that never shortens would spin. Bounded by asserting
+    // the helper advances `from` — a mock ignoring range would repeat.
+    const seen: number[] = []
+    const rows = await fetchAllPages<{ id: string }>((from) => {
+      seen.push(from)
+      if (seen.length > 5) return Promise.resolve({ data: [], error: null })
+      return Promise.resolve({ data: Array.from({ length: 1000 }, (_, i) => ({ id: `r${from + i}` })), error: null })
+    })
+    expect(rows).not.toBeNull()
+    expect(seen).toEqual([0, 1000, 2000, 3000, 4000, 5000])
   })
 })

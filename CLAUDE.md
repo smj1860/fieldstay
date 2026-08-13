@@ -1426,11 +1426,57 @@ following them stops being a memory test. Five layers, checked in CI via
      `chokepoints.yml` 2026-08-01**),
      `-cross-tenant` (no org scope AND no parent row, ERROR, 53 → **0,
      PROMOTED to `chokepoints.yml` 2026-08-02**),
-     `-single-parent` (one non-org parent id, no org scope, WARNING, 47),
+     `-single-parent` (one non-org parent id, no org scope, WARNING, 47 → **0,
+     PROMOTED to `chokepoints.yml` 2026-08-12**),
      `-global-table` (the table has no `org_id` column, ERROR, 5 → **0,
      PROMOTED to `chokepoints.yml` 2026-08-07**),
-     `-in-list` (one org but sized by an `.in()` array, WARNING, 46),
+     `-in-list` (one org but sized by an `.in()` array, WARNING, 46 → **0,
+     PROMOTED to `chokepoints.yml` 2026-08-12**),
      `-org-scoped` (one org, one parent — hygiene only, INFO, 113).
+     **`-single-parent` reached 0 on 2026-08-12, and this one was a genuine
+     burn-down** — all 16 sites bounded, none reclassified. Two were not
+     hygiene. `lib/dexie/sync/turnovers.ts` read a crew member's ENTIRE
+     assignment scope unbounded, and `reconcileRemovedTurnovers` bulkDeletes
+     every cached turnover absent from that set along with its checklists — so
+     past ~1000 lifetime assignments (a cleaner reaches that inside a year) the
+     device would erase turnovers that were still assigned, and with no ORDER BY
+     it would erase a different arbitrary set each sync rather than settling.
+     Paginated via a new `fetchAllPages()` in `lib/dexie/sync/chunked.ts`. The
+     OwnerRez booking upsert is written up separately below. The rest took an
+     explicit `.limit()`, chosen by what truncation would actually corrupt: a
+     total (YTD spend, work-order line items), a legal artifact (the GDPR
+     export, account-deletion's owned-org set), or merely a list. Fire-checked
+     before promoting, same protocol as the tiers before it: an unbounded
+     single-parent read FIRED, a `.limit()`-bounded control did NOT, and an
+     org-scoped control landed in `-org-scoped` — confirming both that the rule
+     works and that the ladder is still a partition.
+     **`-in-list` reached 0 the same day**, immediately after `-single-parent`.
+     Each `.limit()` is sized by what truncation would corrupt rather than by a
+     uniform number: `.limit(ids.length)` where the read really is one row per
+     id (OwnerRez property resolution, catalog picks, the turnover fan-out), and
+     a real ceiling where the `.in()` is on a STATUS enum — in which case the
+     row count scales with the ORG'S DATA, not with the list, and the tier name
+     misleads. Two were that shape: the maintenance board's open work orders
+     and `lib/notifications.ts`'s vendor-compliance read, both of which would
+     have silently under-reported rather than shown a visibly short list.
+     Fire-checked before promoting, same protocol.
+
+     The ladder is now `-org-scoped` alone, and a site-by-site audit of all 65
+     on 2026-08-12 found that "hygiene-only" was ALMOST right but not entirely.
+     Six were bounded and the rest verified against live per-property ratios
+     rather than assumed. The distinction that matters inside this tier is
+     whether the table grows with the ORG'S SIZE (plan-capped, so safe) or with
+     TIME. Safe: properties, crew_members (1.2/property), vendors (0.6),
+     checklist_template_sections (7.3 — the highest, ~365 at 50 properties),
+     and every template/config table. Also safe once checked: the `bookings`
+     and `turnovers` page reads, which look unbounded but carry date windows.
+     NOT safe, and now bounded: `maintenance_schedules` at ~18 per property
+     (~900 at the 50-property target, crossing `max_rows` at about 56) and
+     `property_assets`, where asset_type_standards' 21 types put a fully
+     catalogued 50-property portfolio at ~1050. Neither is a page-render
+     nicety — a truncated read drops scheduled maintenance and assets off the
+     page silently. Treat a NEW finding in this tier as a prompt to ask which
+     of those two kinds of growth applies, not as automatically ignorable.
      Tier 1 WAS the burn-down target and reached 0, so it now gates at
      `--error` across the whole tree rather than only on findings new vs. the
      PR base — a single unbounded table read anywhere fails the build. Its
