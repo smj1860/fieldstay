@@ -99,6 +99,34 @@ function getStockStatus(item: InventoryItem): StockStatus {
   return 'healthy'
 }
 
+/**
+ * Background tint for a count row. Extracted from a nested ternary inside the
+ * style prop: as an expression it called getStockStatus twice per render per
+ * row and read as one unit, so a future third status would be appended to a
+ * chain rather than added to a table.
+ */
+function rowTint(item: InventoryItem): string | undefined {
+  switch (getStockStatus(item)) {
+    case 'critical': return 'var(--accent-red-dim)'
+    case 'low':      return 'var(--accent-amber-dim)'
+    default:         return undefined
+  }
+}
+
+/** Label for the add-items submit button. */
+function addItemsLabel(pending: boolean, count: number): string {
+  if (pending)     return 'Adding…'
+  if (count === 0) return 'Select items above'
+  return `Add ${count} item${count !== 1 ? 's' : ''}`
+}
+
+/** Label for the save-count button across its three states. */
+function saveCountLabel(isSaving: boolean, justSaved: boolean): string {
+  if (isSaving)   return 'Saving…'
+  if (justSaved)  return 'Saved'
+  return 'Save Count'
+}
+
 function StockBadge({ item }: { item: InventoryItem }) {
   const status = getStockStatus(item)
   if (status === 'uncounted') return <Badge tone="slate">Needs Count</Badge>
@@ -310,11 +338,7 @@ function AddItemsModal({
         disabled={pending || selectedArray.length === 0}
         className="flex-1 disabled:opacity-50"
       >
-        {pending
-          ? 'Adding…'
-          : selectedArray.length === 0
-          ? 'Select items above'
-          : `Add ${selectedArray.length} item${selectedArray.length !== 1 ? 's' : ''}`}
+        {addItemsLabel(pending, selectedArray.length)}
       </Button>
       <Button variant="ghost" type="button" onClick={onClose}>Cancel</Button>
     </form>
@@ -706,9 +730,7 @@ function CategoryRows({
                 key={item.id}
                 className="grid grid-cols-[1fr_72px_72px_90px_110px] gap-2 px-5 py-2.5 items-center text-sm"
                 style={{
-                  background: getStockStatus(item) === 'critical' ? 'var(--accent-red-dim)'
-                            : getStockStatus(item) === 'low'      ? 'var(--accent-amber-dim)'
-                            : undefined,
+                  background: rowTint(item),
                 }}
               >
                 <div className="min-w-0">
@@ -823,7 +845,7 @@ function PropertyInventoryDetail({
             className="text-xs px-3 py-1.5 disabled:opacity-50"
           >
             <Save className="w-3.5 h-3.5" />
-            {isSaving ? 'Saving…' : justSaved ? 'Saved' : 'Save Count'}
+            {saveCountLabel(isSaving, justSaved)}
           </Button>
           <Button
             variant="secondary"
