@@ -399,7 +399,7 @@ describe('ownerRezConnectionSync (per-connection handler)', () => {
     expect(patch.sync_cursor).not.toBe(patch.last_synced_at)
 
     expect(generateTurnoversForProperty).toHaveBeenCalledWith('prop_1', 'org_1', supabase)
-    expect(result).toEqual({ connectionId: 'conn_1', synced: true })
+    expect(result).toEqual({ connectionId: 'conn_1', synced: true, backfill: 'skipped' })
 
     vi.useRealTimers()
   })
@@ -415,7 +415,7 @@ describe('ownerRezConnectionSync (per-connection handler)', () => {
     const result = await invokeHandler(ownerRezConnectionSync, { event: SYNC_EVENT, step, logger: makeLogger() })
 
     expect(supabase.upsertSpy).not.toHaveBeenCalled()
-    expect(result).toEqual({ connectionId: 'conn_1', synced: false })
+    expect(result).toEqual({ connectionId: 'conn_1', synced: false, backfill: 'skipped' })
   })
 
   it('skips the bookings upsert entirely when the property lookup query fails, instead of overwriting property_id with null', async () => {
@@ -440,7 +440,7 @@ describe('ownerRezConnectionSync (per-connection handler)', () => {
     // a failed lookup must not silently mark this run as synced.
     expect(supabase.updateSpy).not.toHaveBeenCalled()
     expect(supabase.rpc).not.toHaveBeenCalled()
-    expect(result).toEqual({ connectionId: 'conn_1', synced: false })
+    expect(result).toEqual({ connectionId: 'conn_1', synced: false, backfill: 'skipped' })
   })
 
   it('marks the connection revoked, fires integration/connection.error, and surfaces a non-retriable failure', async () => {
@@ -605,3 +605,143 @@ describe('ownerRezIncrementalSync — Upstash not configured (preview)', () => {
   })
 })
 
+
+// ============================================================================
+// Progressive historical backfill.
+//
+// The initial sync deliberately fetches only a recent window (it used to ask
+// for a portfolio's entire history in one step, which was survivable only
+// because the pager stopped at 20 records). This walks the rest backwards, one
+// stay-date window per run, using OwnerRez's from/to bounds.
+//
+// The planner's arithmetic is covered in unit/integrations/ownerrez-backfill.test.ts;
+// what is checked HERE is the wiring — that a window actually reaches
+// getBookings as from/to, that progress is persisted so the next run advances,
+// and that a failure cannot either fail the live sync or skip a window silently.
+// ============================================================================
+describe('ownerRezConnectionSync — historical backfill', () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-08-13T12:00:00.000Z'))
+  })
+  afterEach(() => vi.useRealTimers())
+
+  const backfillStep = () => makeAllowlistStep([
+    'check-circuit-breaker',
+    'sync-connection',
+    'backfill-history',
+  ])
+
+  /** Connection rows: one for the live sync's reload, one for the backfill's. */
+  const connRows = (metadata: Record<string, unknown>) => ([
+    { data: { ...CONN_ROW, metadata }, error: null },
+    { data: { ...CONN_ROW, metadata }, error: null },
+  ])
+
+  it('asks OwnerRez for a STAY-DATE window, not a modification-time cursor', async () => {
+    // since_utc cannot reach back through history at all — an old booking that
+    // never changed has no recent modification time. This is the whole reason
+    // the backfill exists as a separate call.
+    const mockClient = baseMocks()
+    const supabase = makeSupabase({
+      integration_connections: connRows({ sync_cursor: '2026-08-01T00:00:00.000Z' }),
+      properties:              [
+        { data: [{ external_id: '777' }], error: null },
+        { data: [{ external_id: '777' }], error: null },
+      ],
+      bookings:                [{ data: [], error: null }],
+    })
+    ;(createServiceClient as ReturnType<typeof vi.fn>).mockReturnValue(supabase)
+
+    await invokeHandler(ownerRezConnectionSync, {
+      event: SYNC_EVENT, step: backfillStep(), logger: makeLogger(),
+    })
+
+    const backfillCall = mockClient.getBookings.mock.calls
+      .map((c) => c[0] as Record<string, unknown>)
+      .find((a) => a.from !== undefined)
+
+    expect(backfillCall).toBeDefined()
+    // 90 days of history from the initial sync, then the next 90 back.
+    expect(backfillCall).toMatchObject({ to: '2026-05-15', from: '2026-02-14' })
+    expect(backfillCall?.sinceUtc).toBeUndefined()
+  })
+
+  it('persists progress so the next run claims an OLDER window', async () => {
+    // Without this write the walk re-fetches the same window forever.
+    const supabase = makeSupabase({
+      integration_connections: connRows({
+        sync_cursor: '2026-08-01T00:00:00.000Z',
+        backfill_oldest_covered: '2026-02-14',
+      }),
+      properties: [
+        { data: [{ external_id: '777' }], error: null },
+        { data: [{ external_id: '777' }], error: null },
+      ],
+      bookings:   [{ data: [], error: null }],
+    })
+    baseMocks()
+    ;(createServiceClient as ReturnType<typeof vi.fn>).mockReturnValue(supabase)
+
+    await invokeHandler(ownerRezConnectionSync, {
+      event: SYNC_EVENT, step: backfillStep(), logger: makeLogger(),
+    })
+
+    const merge = findMetadataMergeCall(supabase.rpc, 'backfill_oldest_covered')
+    expect(merge).toBeDefined()
+    const patch = (merge?.[1] as { p_patch: Record<string, unknown> }).p_patch
+    expect(patch.backfill_oldest_covered).toBe('2025-11-16')
+    expect(patch.backfill_complete).toBe(false)
+  })
+
+  it('stops for good once the walk is marked complete', async () => {
+    const mockClient = baseMocks()
+    const supabase = makeSupabase({
+      integration_connections: connRows({
+        sync_cursor: '2026-08-01T00:00:00.000Z',
+        backfill_complete: true,
+      }),
+      properties: [{ data: [{ external_id: '777' }], error: null }],
+      bookings:   [{ data: [], error: null }],
+    })
+    ;(createServiceClient as ReturnType<typeof vi.fn>).mockReturnValue(supabase)
+
+    const result = await invokeHandler(ownerRezConnectionSync, {
+      event: SYNC_EVENT, step: backfillStep(), logger: makeLogger(),
+    })
+
+    expect(result).toMatchObject({ backfill: 'complete' })
+    expect(mockClient.getBookings.mock.calls.every((c) => (c[0] as Record<string, unknown>).from === undefined))
+      .toBe(true)
+  })
+
+  it('does NOT advance progress when the window fetch fails', async () => {
+    // Advancing on failure would skip that window permanently — nothing
+    // revisits it. Retrying the same window next hour is the correct cost.
+    const mockClient = baseMocks()
+    mockClient.getBookings.mockImplementation(async (args: Record<string, unknown>) => {
+      if (args?.from) throw new Error('OwnerRez 500')
+      return []
+    })
+    const supabase = makeSupabase({
+      integration_connections: connRows({ sync_cursor: '2026-08-01T00:00:00.000Z' }),
+      properties: [
+        { data: [{ external_id: '777' }], error: null },
+        { data: [{ external_id: '777' }], error: null },
+      ],
+      bookings:   [{ data: [], error: null }],
+    })
+    ;(createServiceClient as ReturnType<typeof vi.fn>).mockReturnValue(supabase)
+
+    const result = await invokeHandler(ownerRezConnectionSync, {
+      event: SYNC_EVENT, step: backfillStep(), logger: makeLogger(),
+    })
+
+    expect(findMetadataMergeCall(supabase.rpc, 'backfill_oldest_covered')).toBeUndefined()
+    // And the LIVE sync still succeeded — backfill is catch-up work behind it,
+    // never a reason to turn an otherwise-healthy hourly run red.
+    expect(result).toMatchObject({ synced: true, backfill: 'failed' })
+    expect(reportError).toHaveBeenCalled()
+  })
+})

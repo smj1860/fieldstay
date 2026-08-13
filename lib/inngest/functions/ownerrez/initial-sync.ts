@@ -23,6 +23,7 @@ import {
   selectOwnerRezBookingsToPostRevenue,
 } from '@/lib/integrations/providers/ownerrez'
 import { upsertBookingsReturningIds } from './upsert-bookings'
+import { initialHistoryFrom } from '@/lib/integrations/providers/ownerrez-backfill'
 import { logAuditEvent }        from '@/lib/audit'
 import {
   applyMasterChecklistToProperty,
@@ -51,6 +52,13 @@ import { reportError } from '@/lib/observability/report-error'
 import { fetchAllRows } from '@/lib/inngest/paginate'
 import { tryUnwrap, unwrapList } from '@/lib/supabase/unwrap'
 const PROVIDER = 'ownerrez'
+
+/**
+ * Bookings per booking/confirmed sendEvent step. Sized to keep one step's
+ * payload comfortably small while making the step count independent of
+ * portfolio size — see the batching note at the call site.
+ */
+const REVENUE_EVENT_CHUNK = 200
 
 async function writeSyncCount(
   user_id: string,
@@ -94,6 +102,27 @@ export const ownerRezInitialSync = inngest.createFunction(
     id:      'ownerrez-initial-sync',
     name:    'OwnerRez Initial Sync',
     retries: 3,
+    // Two caps, and they answer different questions.
+    //
+    // The unkeyed one is capacity: this is the heaviest OwnerRez consumer we
+    // have — it paginates every property, listing and booking for a brand-new
+    // account — and the 300-request/5-minute OwnerRez budget is shared by every
+    // tenant on the same deployment IP. Left uncapped, several signups landing
+    // together would spend that budget on each other and take the incremental
+    // syncs down with them. 3 matches ownerRezConnectionSync's cap for the
+    // same reason.
+    //
+    // The keyed one is correctness: never two initial syncs for one connection
+    // at once. This step chain seeds checklists, generates turnovers and seeds
+    // assets from amenities, and not all of that is safe to interleave with
+    // itself. A reconnect, a double-clicked Connect button, or a re-fired
+    // event would otherwise race. Keyed concurrency QUEUES the second run
+    // rather than dropping it, which is what a genuine reconnect wants —
+    // `idempotency` would silently discard it instead.
+    concurrency: [
+      { limit: 3 },
+      { limit: 1, key: 'event.data.user_id' },
+    ],
   },
   { event: 'integration/ownerrez.connected' as const },
   async ({ event, step, logger }) => {
@@ -515,6 +544,7 @@ export const ownerRezInitialSync = inngest.createFunction(
             cursor: new Date().toISOString(), count: 0,
             affectedPropertyIds: [] as string[],
             bookingsToPostRevenue: [] as { bookingId: string; propertyId: string; actualTotalAmount: number | null }[],
+            historyFrom: initialHistoryFrom(new Date()),
           }
         }
 
@@ -525,8 +555,28 @@ export const ownerRezInitialSync = inngest.createFunction(
 
         let bookings: OwnerRezBooking[]
 
+        // BOUNDED to a recent window, plus everything upcoming.
+        //
+        // This call used to pass no date bounds at all, i.e. "every booking
+        // this account has ever had". That was harmless only because the pager
+        // was broken and stopped at 20 records; with pagination fixed it became
+        // a request to page through a portfolio's entire history — thousands of
+        // rows against a request budget shared by every tenant — before the PM
+        // sees anything. Older history is walked backwards afterwards, one
+        // window per incremental sync (ownerrez-backfill.ts).
+        //
+        // `from` with no `to` is the important shape: `from` means "departs on
+        // or after", so every FUTURE booking is still included. Bounding the
+        // upper end would drop upcoming stays, which are the whole point of a
+        // first sync.
+        const historyFrom = initialHistoryFrom(new Date(fetchStartedAt))
+
         try {
-          bookings = await client.getBookings({ propertyIds: fetchPropsResult.ids, includeGuest: true })
+          bookings = await client.getBookings({
+            propertyIds:  fetchPropsResult.ids,
+            from:         historyFrom,
+            includeGuest: true,
+          })
         } catch (err) {
           if (err instanceof RateLimitError) {
             throw err
@@ -601,7 +651,7 @@ export const ownerRezInitialSync = inngest.createFunction(
           reportError(countErr, { site: 'inngest.ownerrez-initial-sync.fetch-bookings' })
         }
 
-        return { cursor: fetchStartedAt, count: bookings.length, affectedPropertyIds, bookingsToPostRevenue }  // MEDIUM-3: pre-fetch timestamp
+        return { cursor: fetchStartedAt, count: bookings.length, affectedPropertyIds, bookingsToPostRevenue, historyFrom }  // MEDIUM-3: pre-fetch timestamp
       })
 
       // ── Post booking revenue for newly-confirmed guest-stay bookings ───────
@@ -612,17 +662,30 @@ export const ownerRezInitialSync = inngest.createFunction(
       // 2026-07-15; booking-events.ts's handleBookingConfirmed still falls
       // back to the avg_nightly_rate estimate whenever this is null (e.g. a
       // booking whose charges genuinely didn't resolve to a positive total).
-      for (const b of fetchBookingsResult.bookingsToPostRevenue) {
-        await step.sendEvent(`post-booking-revenue-${b.bookingId}`, {
-          name: 'booking/confirmed' as const,
-          data: {
-            booking_id:          b.bookingId,
-            property_id:         b.propertyId,
-            org_id,
-            source:              'ownerrez' as const,
-            actual_total_amount: b.actualTotalAmount,
-          },
-        })
+      // BATCHED, one step per chunk rather than one step per booking.
+      //
+      // This was `for (const b of ...) await step.sendEvent(...)`, which makes
+      // a distinct Inngest step — with its own memoized state carried for the
+      // rest of the run — for every single booking. At 20 bookings that was
+      // invisible; bounded to a 90-day window it is hundreds, and unbounded it
+      // would have been thousands once pagination started working. step.sendEvent
+      // takes an array, so a chunk costs one step regardless of its size.
+      const revenueEvents = fetchBookingsResult.bookingsToPostRevenue.map((b) => ({
+        name: 'booking/confirmed' as const,
+        data: {
+          booking_id:          b.bookingId,
+          property_id:         b.propertyId,
+          org_id,
+          source:              'ownerrez' as const,
+          actual_total_amount: b.actualTotalAmount,
+        },
+      }))
+
+      for (let i = 0; i < revenueEvents.length; i += REVENUE_EVENT_CHUNK) {
+        const chunk = revenueEvents.slice(i, i + REVENUE_EVENT_CHUNK)
+        // Chunk index, not booking id: the step id must stay stable across
+        // retries, and it does because the source list is memoized upstream.
+        await step.sendEvent(`post-booking-revenue-${i / REVENUE_EVENT_CHUNK}`, chunk)
       }
 
       // ── Step 3: Update sync metadata ────────────────────────────────────────
@@ -639,6 +702,13 @@ export const ownerRezInitialSync = inngest.createFunction(
               last_sync_status: 'success',
               last_sync_error:  null,
               last_sync_count:  fetchBookingsResult.count,
+              // Seeds the historical backfill walk at the exact lower edge of
+              // the window this run actually fetched — NOT at "90 days before
+              // whenever the first backfill happens to run". Recomputing it
+              // later would open a gap the width of the delay between the two,
+              // and nothing ever revisits a skipped window.
+              backfill_oldest_covered: fetchBookingsResult.historyFrom,
+              backfill_complete:       false,
             },
           })
         } catch (err) {

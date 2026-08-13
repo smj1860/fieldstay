@@ -53,6 +53,11 @@ import type { GetStepTools }            from 'inngest'
 import { createServiceClient }          from '@/lib/supabase/server'
 import { fetchTurnoverCreatedEvents } from '@/lib/inngest/turnover-created-events'
 import { OwnerRezApiClient }  from '@/lib/integrations/providers/ownerrez-api'
+import {
+  planBackfillWindow,
+  advanceBackfill,
+  readBackfillState,
+} from '@/lib/integrations/providers/ownerrez-backfill'
 import { getRedis, upstashConfigured } from '@/lib/redis'
 import { RateLimitError, TokenRevokedError, translateSyncError } from '@/lib/integrations/types'
 import { logAuditEvent }                from '@/lib/audit'
@@ -996,9 +1001,171 @@ export const ownerRezConnectionSync = inngest.createFunction(
     await runPostSyncFanOut(step, { orgId, userId, affectedIds, logger })
 
     const synced = Boolean(syncResult && 'affectedPropertyIds' in syncResult)
-    return { connectionId, synced }
+
+    // ── Historical backfill: one older stay-date window per run ──────────────
+    //
+    // The initial sync deliberately takes only a recent window so a new PM is
+    // not kept waiting on years of history (see ownerrez-backfill.ts). This
+    // walks the rest backwards, one window per incremental run, until it
+    // reaches the horizon and stops for good.
+    //
+    // Gated on `synced`: if the live sync just skipped or failed, the
+    // connection is inactive, rate limited or degraded, and adding a second
+    // multi-page fetch on top of that helps nobody. It simply waits an hour.
+    const backfill = await runBackfillPhase(step, { connectionId, userId, orgId, synced, logger })
+
+    return { connectionId, synced, backfill }
   }
 )
+
+interface BackfillOutcome {
+  outcome:               string
+  bookingsToPostRevenue: SyncSuccess['bookingsToPostRevenue']
+}
+
+/**
+ * The backfill phase: claim one historical window, then post revenue for
+ * whatever it imported. Structured like runPostSyncFanOut — step tooling stays
+ * at the function's top level, never inside a step.run callback.
+ *
+ * Revenue for backfilled stays IS posted; historical owner P&L is the reason to
+ * import them at all. Turnovers deliberately are NOT — those are units of WORK,
+ * and generateTurnoversForProperty's own history floor is what stops a two-year
+ * import from manufacturing retroactive cleaning jobs. Backfilled properties
+ * therefore never enter runPostSyncFanOut.
+ */
+async function runBackfillPhase(
+  step: GetStepTools<typeof inngest>,
+  ctx:  { connectionId: string; userId: string; orgId: string | null
+          synced: boolean; logger: SyncLogger }
+): Promise<string> {
+  const backfill = await step.run('backfill-history', () => runHistoricalBackfill(ctx))
+
+  // Optional-chained for the same reason `syncResult &&` is, at the call site:
+  // a step's result is only as present as the step that produced it.
+  const revenue = backfill?.bookingsToPostRevenue ?? []
+
+  if (revenue.length > 0 && ctx.orgId) {
+    await step.sendEvent(
+      'post-backfill-revenue',
+      revenue.map((b) => ({
+        name: 'booking/confirmed' as const,
+        data: {
+          booking_id:          b.bookingId,
+          property_id:         b.propertyId,
+          org_id:              ctx.orgId as string,
+          source:              'ownerrez' as const,
+          actual_total_amount: b.actualTotalAmount,
+        },
+      }))
+    )
+  }
+
+  return backfill?.outcome ?? 'skipped'
+}
+
+const NO_BACKFILL = (outcome: string): BackfillOutcome =>
+  ({ outcome, bookingsToPostRevenue: [] })
+
+/**
+ * Claims and persists ONE historical stay-date window for a connection.
+ *
+ * Never throws. The backfill is strictly best-effort catch-up work running
+ * behind a live sync that already succeeded — letting a rate limit or a bad
+ * page here fail the whole run would turn "we did not fetch some 2024 bookings
+ * this hour" into "this connection's hourly sync is red", and Inngest would
+ * retry the entire function including the live sync that was already fine.
+ * Progress only advances on success, so a swallowed failure simply retries the
+ * same window next hour.
+ */
+async function runHistoricalBackfill(params: {
+  connectionId: string
+  userId:       string
+  orgId:        string | null
+  synced:       boolean
+  logger:       SyncLogger
+}): Promise<BackfillOutcome> {
+  const { connectionId, userId, orgId, synced, logger } = params
+
+  if (!synced || !orgId) return NO_BACKFILL('skipped_not_synced')
+
+  try {
+    const supabase = createServiceClient({ system: 'inngest:ownerrez-backfill' })
+
+    const connRes = await supabase
+      .from('integration_connections')
+      .select('id, user_id, org_id, external_user_id, metadata, status')
+      .eq('id', connectionId)
+      .maybeSingle()
+
+    const conn = unwrap(connRes, {
+      site:  'inngest.ownerrez-connection-sync.backfill-reload',
+      orgId: orgId,
+    })
+
+    // org_id first so the optional chain covers the null-connection case too:
+    // a truthy conn?.org_id already proves conn itself is non-null, which is
+    // what lets conn.status be read plainly on the next clause.
+    if (!conn?.org_id || conn.status !== 'active') {
+      return NO_BACKFILL('skipped_inactive')
+    }
+
+    const window = planBackfillWindow(readBackfillState(conn.metadata), new Date())
+    if (!window) return NO_BACKFILL('complete')
+
+    // property_ids is required alongside the date bounds for the same reason
+    // the live sync needs it: OwnerRez wants at least one scoping parameter,
+    // and this keeps the window to properties FieldStay actually knows about.
+    const propertyIds = await loadConnectedPropertyIds(supabase, conn.org_id)
+    if (!propertyIds.length) return NO_BACKFILL('skipped_no_properties')
+
+    const bookings = await new OwnerRezApiClient(userId).getBookings({
+      propertyIds,
+      from:         window.from,
+      to:           window.to,
+      includeGuest: true,
+    })
+
+    const activeConn: ActiveConnection = { ...conn, org_id: conn.org_id }
+    const persisted = await persistBookings(supabase, activeConn, bookings, logger)
+
+    // Property lookup failed. Do NOT advance the cursor — the same reasoning as
+    // the live sync's bail-out, plus advancing here would skip this window
+    // permanently since nothing revisits it.
+    if (!persisted) return NO_BACKFILL('persist_failed')
+
+    const advanced = advanceBackfill(window, new Date())
+    await mergeIntegrationConnectionMetadata({
+      userId,
+      providerId: PROVIDER,
+      patch: {
+        backfill_oldest_covered: advanced.oldestCovered,
+        backfill_complete:       advanced.complete,
+      },
+    })
+
+    logger.info(
+      `[OwnerRez:${userId}] backfilled ${window.from}..${window.to} — ` +
+      `${bookings.length} booking(s)${advanced.complete ? ', walk complete' : ''}`
+    )
+
+    return {
+      outcome:               advanced.complete ? 'window_done_complete' : 'window_done',
+      bookingsToPostRevenue: persisted.bookingsToPostRevenue,
+    }
+  } catch (err) {
+    logger.warn(
+      `[OwnerRez:${userId}] historical backfill failed, will retry next run: ` +
+      (err instanceof Error ? err.message : String(err))
+    )
+    reportError(err, {
+      site:  'inngest.ownerrez-connection-sync.backfill-history',
+      orgId: orgId ?? undefined,
+      extra: { connection_id: connectionId },
+    })
+    return NO_BACKFILL('failed')
+  }
+}
 
 /**
  * Fire a PM notification about a broken connection — throttled to once per

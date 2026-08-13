@@ -30,6 +30,16 @@ import { getRedis, upstashConfigured } from '@/lib/redis'
 const BASE_URL   = 'https://api.ownerrez.com'
 const PROVIDER   = 'ownerrez'
 
+// OwnerRez list endpoints default to 20 records per page and cap at 100.
+// Sending nothing takes the default, which is how one production org's first
+// sync imported exactly 20 bookings and stopped.
+const PAGE_SIZE = 100
+
+// A loop guard, not a coverage ceiling: 1000 × 100 = 100,000 records, well past
+// any real account, and the shared 270-request/5-min IP budget throws long
+// before this does. Exceeding it means pagination is not terminating.
+const MAX_PAGES = 1000
+
 // ── Shared IP rate-limit budget tracker ──────────────────────────────────────
 //
 // OwnerRez limits 300 requests per 5-minute rolling window per IP address —
@@ -105,6 +115,28 @@ export class OwnerRezApiClient {
     params?: Record<string, string | number | undefined>,
     options?: { method?: string; body?: string }
   ): Promise<T> {
+    const url = new URL(`${BASE_URL}${path}`)
+    if (params) {
+      for (const [k, v] of Object.entries(params)) {
+        if (v !== undefined) url.searchParams.set(k, String(v))
+      }
+    }
+    return this.fetchUrl<T>(url, path, options)
+  }
+
+  /**
+   * The transport half of fetch(), split out so fetchAllPages can follow the
+   * absolute `next_page_url` OwnerRez returns without rebuilding it from parts.
+   *
+   * `url` MUST already be origin-checked by the caller — see assertOwnerRezUrl.
+   * `label` is the path used in log/error messages only; it never affects the
+   * request, and exists so a followed page URL still reports as its endpoint.
+   */
+  private async fetchUrl<T>(
+    url: URL,
+    label: string,
+    options?: { method?: string; body?: string }
+  ): Promise<T> {
     // HIGH-2: check shared IP budget before making the request.
     // Throws RateLimitError proactively at 270/300 to prevent exhausting the pool
     // shared by all tenants on the same Vercel deployment IP, and enforces the
@@ -119,12 +151,7 @@ export class OwnerRezApiClient {
       throw new TokenRevokedError(this.userId)
     }
 
-    const url = new URL(`${BASE_URL}${path}`)
-    if (params) {
-      for (const [k, v] of Object.entries(params)) {
-        if (v !== undefined) url.searchParams.set(k, String(v))
-      }
-    }
+    const path = label
 
     const res = await globalThis.fetch(url.toString(), {
       method:  options?.method ?? 'GET',
@@ -231,27 +258,106 @@ export class OwnerRezApiClient {
     params?: Record<string, string | number | undefined>
   ): Promise<T[]> {
     const results: T[] = []
-    let nextPageToken: string | null | undefined = undefined
     let pageCount = 0
-    const MAX_PAGES = 200  // 200 × 100 items = 20,000 results — generous ceiling
 
-    do {
+    // First page: BASE_URL + path + caller params, plus our page size. Every
+    // page after it comes from the server's own next_page_url.
+    let url: URL | null = new URL(`${BASE_URL}${path}`)
+    if (params) {
+      for (const [k, v] of Object.entries(params)) {
+        if (v !== undefined) url.searchParams.set(k, String(v))
+      }
+    }
+    if (!url.searchParams.has('limit')) {
+      url.searchParams.set('limit', String(PAGE_SIZE))
+    }
+
+    while (url) {
       pageCount++
       if (pageCount > MAX_PAGES) {
-        console.error(`[OwnerRez] fetchAllPages: exceeded ${MAX_PAGES} pages — aborting to prevent infinite loop`)
-        break
+        // THROW, never return what we have. Returning a partial list as if it
+        // were complete is the same silent-truncation failure this function was
+        // fixed for — callers upsert the result and treat anything absent from
+        // it as deleted, so a quiet short read is worse than a loud failure.
+        throw new Error(
+          `[OwnerRez:${this.userId}] ${path}: pagination exceeded ${MAX_PAGES} pages ` +
+          `(${results.length} records) — refusing to return a partial result`
+        )
       }
 
-      const pageParams = { ...params } as Record<string, string | number | undefined>
-      if (nextPageToken) pageParams['page_token'] = nextPageToken
-
-      const page = await this.fetch<OwnerRezPagedResponse<T>>(path, pageParams)
+      const page: OwnerRezPagedResponse<T> = await this.fetchUrl<OwnerRezPagedResponse<T>>(url, path)
       const items = Array.isArray(page?.items) ? page.items : []
       results.push(...items)
-      nextPageToken = page?.next_page_token ?? null
-    } while (nextPageToken)
+
+      url = this.nextPageUrl(page, url, items.length, path)
+    }
 
     return results
+  }
+
+  /**
+   * Resolves the next page URL, or null when the collection is exhausted.
+   *
+   * `next_page_url` is OwnerRez's documented mechanism and is authoritative
+   * when present — critically, it works even if `limit` is ignored, which
+   * matters because OwnerRez's OpenAPI spec declares `limit`/`offset` on ZERO
+   * operations even though the response echoes both back. If we trusted our
+   * requested page size instead, a server that quietly capped us at 20 while
+   * we asked for 100 would look like a short final page and we would stop
+   * early — the exact bug this replaces, in a new disguise.
+   *
+   * The offset fallback covers the other direction: a response that omits
+   * next_page_url but is clearly full. Over-fetching one duplicate page is
+   * harmless (every caller upserts by OwnerRez id); stopping early is not.
+   */
+  private nextPageUrl<T>(
+    page: OwnerRezPagedResponse<T>,
+    current: URL,
+    received: number,
+    path: string
+  ): URL | null {
+    // ABSENT and explicitly NULL are different answers, and collapsing them is
+    // a bug (caught by this function's own test): OwnerRez documents null as
+    // "there are no more pages", so a null on a FULL page still ends the
+    // collection. Only a field that is missing entirely means "this server
+    // doesn't tell me", which is what the offset fallback below is for.
+    if (page?.next_page_url !== undefined) {
+      return page.next_page_url ? this.assertOwnerRezUrl(page.next_page_url, path) : null
+    }
+
+    // No continuation field at all: only keep going if the page came back full.
+    // Note the `?? PAGE_SIZE` sits INSIDE Number() — Number(null) is 0, which
+    // ?? would happily accept, and a pageSize of 0 makes `received < pageSize`
+    // permanently false and the loop unbounded.
+    const requested = Number(current.searchParams.get('limit') ?? PAGE_SIZE)
+    const pageSize  = page?.limit ?? (requested > 0 ? requested : PAGE_SIZE)
+    if (received === 0 || received < pageSize) return null
+
+    const offset = (page?.offset ?? Number(current.searchParams.get('offset') ?? 0)) + received
+    const next = new URL(current.toString())
+    next.searchParams.set('offset', String(offset))
+    return next
+  }
+
+  /**
+   * A URL taken from a response body is attacker-influenced in principle, and
+   * fetchUrl attaches this tenant's OAuth bearer token to whatever it is given.
+   * A next_page_url pointing off-host would therefore hand that token to a third
+   * party, so the origin is checked before it is ever followed.
+   */
+  private assertOwnerRezUrl(candidate: string, path: string): URL {
+    let parsed: URL
+    try {
+      parsed = new URL(candidate, BASE_URL)
+    } catch {
+      throw new Error(`[OwnerRez:${this.userId}] ${path}: unparseable next_page_url`)
+    }
+    if (parsed.origin !== BASE_URL) {
+      throw new Error(
+        `[OwnerRez:${this.userId}] ${path}: next_page_url points off-host (${parsed.origin}) — refusing to follow`
+      )
+    }
+    return parsed
   }
 
   // ── Public methods ─────────────────────────────────────────────────────────
@@ -295,13 +401,32 @@ export class OwnerRezApiClient {
     return this.fetchAllPages<OwnerRezListing>('/v2/listings', queryParams)
   }
 
+  /**
+   * `from`/`to` are STAY-date bounds and `sinceUtc` is a MODIFICATION-time
+   * cursor — they answer different questions and compose fine together.
+   *
+   *   from — bookings that DEPART on or after this date (property timezone)
+   *   to   — bookings that ARRIVE on or before this date
+   *
+   * Together they select every stay OVERLAPPING the window, not only those
+   * contained in it, so adjacent windows both return a stay that straddles
+   * their shared edge. That is what makes the historical backfill safe to walk
+   * in windows (see lib/integrations/providers/ownerrez-backfill.ts).
+   *
+   * Verified 2026-08-13 against OwnerRez's OpenAPI contract; the parameter
+   * table is recorded in docs/Integrations/ownerrez/api-markdown.md.
+   */
   async getBookings(params: {
     propertyIds?:  number[]
     sinceUtc?:     string
+    from?:         string
+    to?:           string
     includeGuest?: boolean
   }): Promise<OwnerRezBooking[]> {
     const queryParams: Record<string, string | number | undefined> = {}
     if (params.sinceUtc) queryParams['since_utc'] = params.sinceUtc
+    if (params.from)     queryParams['from']      = params.from
+    if (params.to)       queryParams['to']        = params.to
     if (params.propertyIds?.length) {
       queryParams['property_ids'] = params.propertyIds.join(',')
     }
