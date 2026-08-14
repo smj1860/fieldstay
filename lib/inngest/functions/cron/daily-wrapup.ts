@@ -84,6 +84,19 @@ export const dailyWrapUp = inngest.createFunction(
  * with tenant count. Concurrency is capped globally to keep the 23:00 UTC
  * burst from stampeding Supabase/Resend.
  */
+/**
+ * Resend's 409 `invalid_idempotent_request`: this Idempotency-Key was used
+ * within the last 24 hours with a DIFFERENT request body.
+ *
+ * Narrow on purpose — statusCode AND name — so an unrelated 409 is not
+ * mistaken for a successful send.
+ */
+function isIdempotencyConflict(error: unknown): boolean {
+  if (error === null || typeof error !== 'object') return false
+  const e = error as { statusCode?: unknown; name?: unknown }
+  return e.statusCode === 409 && e.name === 'invalid_idempotent_request'
+}
+
 export const dailyWrapUpOrg = inngest.createFunction(
   {
     id:   'daily-wrapup-org',
@@ -568,7 +581,34 @@ export const dailyWrapUpOrg = inngest.createFunction(
         { from: FROM, to: pmEmail, subject: `Your FieldStay daily wrap-up`, html },
         { idempotencyKey: `daily-wrapup-${orgId}-${now.toISOString().split('T')[0]}` }
       )
-      if (error) throw new Error(`Resend error: ${JSON.stringify(error)}`)
+
+      // A 409 idempotency conflict is the KEY DOING ITS JOB, not a failure.
+      //
+      // The key is org + date, so Resend rejecting it means today's wrap-up for
+      // this org has already been accepted. Throwing here made the correct
+      // outcome look like a broken one: every retry re-sent the same key, got
+      // the same 409, and the function exhausted its retries and reported as
+      // failed — while the PM had the email in their inbox the whole time.
+      //
+      // The body mismatch that triggers the 409 is expected rather than
+      // exceptional. The key is stable for the day but the rendered HTML is
+      // not: any deploy that touches the template or a section renderer changes
+      // it, and a retry after such a deploy sends the same key with different
+      // bytes. lib/resend/client.ts already names this exact 409 as the
+      // deduplication working; this is the call site catching up to that.
+      //
+      // Only THIS shape is swallowed. Every other Resend error still throws, so
+      // a genuine send failure is still retried and still surfaces.
+      const alreadySentToday = isIdempotencyConflict(error)
+
+      if (error && !alreadySentToday) {
+        throw new Error(`Resend error: ${JSON.stringify(error)}`)
+      }
+
+      if (alreadySentToday) {
+        // orgId only — never the recipient address.
+        console.warn(`[daily-wrapup] org ${orgId}: wrap-up already sent today, skipping duplicate`)
+      }
 
       // Mark today's aggregated POs as sent, same as the retired
       // inventory-order-email-cron.ts used to do.
@@ -579,7 +619,9 @@ export const dailyWrapUpOrg = inngest.createFunction(
           .in('id', wrapup.pendingPOIds)
       }
 
-      return { orgId, sent: true }
+      return alreadySentToday
+        ? { orgId, sent: false, reason: 'already_sent_today' }
+        : { orgId, sent: true }
     })
   }
 )
