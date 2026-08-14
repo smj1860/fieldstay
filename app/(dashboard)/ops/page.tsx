@@ -1,7 +1,8 @@
 import { requireOrgMember } from '@/lib/auth'
 import { createServiceClient } from '@/lib/supabase/server'
 import { unwrapList, type PostgrestResult } from '@/lib/supabase/unwrap'
-import { OpsSnapshot } from './ops-snapshot'
+import { OpsSnapshot, type OpsTurnover } from './ops-snapshot'
+import { fetchAllRows } from '@/lib/inngest/paginate'
 import { addDays, subDays, startOfDay, endOfDay } from 'date-fns'
 import type { Metadata } from 'next'
 
@@ -53,19 +54,39 @@ export default async function OpsSnapshotPage() {
     monthBookingsRes,
     pmsConnectionsRes,
   ] = await Promise.all([
-    supabase
-      .from('turnovers')
-      .select(`
-        id, property_id, prev_booking_id, checkout_datetime, checkin_datetime,
-        window_minutes, status, priority, notes, completed_at, started_at,
-        checklist_template_id,
-        turnover_assignments(id, crew_member_id, crew_member:crew_members(id, name))
-      `)
-      .eq('org_id', membership.org_id)
-      .neq('status', 'cancelled')
-      .gte('checkout_datetime', rangeStart.toISOString())
-      .lte('checkout_datetime', rangeEnd.toISOString())
-      .order('checkout_datetime', { ascending: true }),
+    // DRAINED, not a single .select(), matching turnovers/page.tsx.
+    //
+    // The 31-day window looks like it bounds this, and for a small org it does
+    // — but the ceiling is properties x turnovers-per-property-per-month, and
+    // at the 50-property target a busy calendar clears PostgREST's
+    // max_rows = 1000 inside one window. A .limit() would not have helped:
+    // max_rows caps the response regardless of what the query asks for, so the
+    // page would silently lose the far end of its own date range and report
+    // KPIs over a partial month with a 200 and no signal.
+    //
+    // .order('id') is the load-bearing half. .range() is OFFSET pagination, so
+    // the sort must be TOTAL or consecutive pages answer different questions —
+    // and checkout_datetime is emphatically not unique, since a portfolio
+    // shares 10am checkouts across every property. Same reasoning as the
+    // header comment on turnovers/page.tsx.
+    fetchAllRows<OpsTurnover>(
+      (from, to) => supabase
+        .from('turnovers')
+        .select(`
+          id, property_id, prev_booking_id, checkout_datetime, checkin_datetime,
+          window_minutes, status, priority, notes, completed_at, started_at,
+          checklist_template_id,
+          turnover_assignments(id, crew_member_id, crew_member:crew_members(id, name))
+        `)
+        .eq('org_id', membership.org_id)
+        .neq('status', 'cancelled')
+        .gte('checkout_datetime', rangeStart.toISOString())
+        .lte('checkout_datetime', rangeEnd.toISOString())
+        .order('checkout_datetime', { ascending: true })
+        .order('id')
+        .range(from, to),
+      { label: `turnovers(ops-snapshot)[org=${membership.org_id}]` },
+    ),
 
     supabase
       .from('properties')
@@ -109,7 +130,9 @@ export default async function OpsSnapshotPage() {
   // app/(dashboard)/ops/error.tsx — a real error state, not a dashboard of
   // reassuring zeroes.
   const ctx = { site: 'page.ops', orgId: membership.org_id }
-  const allTurnovers   = unwrapList(turnoversRes,      { ...ctx, extra: { query: 'turnovers' } })
+  // fetchAllRows already logs, reports and throws on a failed page, so this
+  // one is a plain array rather than a PostgrestResult to unwrap.
+  const allTurnovers   = turnoversRes
   const properties     = unwrapList(propertiesRes,     { ...ctx, extra: { query: 'properties' } })
   const openWorkOrders = unwrapList(openWOsRes,        { ...ctx, extra: { query: 'work_orders' } })
   const lowStockItems  = unwrapList(belowParRes as PostgrestResult<BelowParRow[]>, { ...ctx, extra: { query: 'below_par' } })
