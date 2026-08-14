@@ -17,6 +17,7 @@ import { syncWorkOrders } from './work-orders'
 import { computeAssignedPropertyIds, syncPropertyAssets } from './assets'
 import { resetAllCursors, recordSyncSuccess } from './cursors'
 import { pruneLocalCache } from '../prune'
+import { warmCrewRouteCache } from './warm-routes'
 
 /**
  * Which sync function covers each Dexie table in
@@ -69,6 +70,13 @@ export async function fullCrewResync(
   // assigned to you" apart from "this device has never synced", which it
   // previously rendered identically.
   await recordSyncSuccess(userId)
+
+  // The DATA is offline-ready the moment the pulls above land. The page
+  // DOCUMENT for /crew/turnovers/<id> is not — sw.js only caches a URL that
+  // has actually been navigated to, and that URL is first visited at the
+  // property, which is exactly where the signal isn't. Warm it here, where we
+  // know both the assignment scope and that the network is currently up.
+  await warmCrewRouteCache(userId)
 }
 
 /**
