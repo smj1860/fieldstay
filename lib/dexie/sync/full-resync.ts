@@ -15,7 +15,7 @@ import type { DexieSupabaseClient } from './types'
 import { syncAssignedTurnovers } from './turnovers'
 import { syncWorkOrders } from './work-orders'
 import { computeAssignedPropertyIds, syncPropertyAssets } from './assets'
-import { resetAllCursors } from './cursors'
+import { resetAllCursors, recordSyncSuccess } from './cursors'
 import { pruneLocalCache } from '../prune'
 
 /**
@@ -63,6 +63,12 @@ export async function fullCrewResync(
   await syncPropertyAssets(supabase, userId, propertyIds)
 
   await pruneLocalCache(userId)
+
+  // Only here — after every entity landed and the prune ran — does a resync
+  // count as successful. The crew home screen reads this to tell "nothing is
+  // assigned to you" apart from "this device has never synced", which it
+  // previously rendered identically.
+  await recordSyncSuccess(userId)
 }
 
 /**

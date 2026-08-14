@@ -16,6 +16,7 @@ import { syncAssignedTurnovers, pullChecklistsForTurnovers, pullTurnoversOnly } 
 import { syncWorkOrders } from './sync/work-orders'
 import { computeAssignedPropertyIds, syncPropertyAssets } from './sync/assets'
 import { fullCrewResync } from './sync/full-resync'
+import { recordSyncFailure } from './sync/cursors'
 import {
   createSyncSignalHandler,
   reconnectDelayWithJitterMs,
@@ -361,7 +362,13 @@ export function DexieProvider({ userId: userIdProp, children }: { userId?: strin
         return
       }
       resyncInFlight = run()
-        .catch((err) => console.error(`[DexieProvider] ${label} failed:`, err))
+        .catch(async (err) => {
+          console.error(`[DexieProvider] ${label} failed:`, err)
+          // Persisted, not just logged: a console line is gone the moment the
+          // PWA is backgrounded, and this is the only record a crew member's
+          // device keeps of why its screen is empty.
+          await recordSyncFailure(userId!, err).catch(() => {})
+        })
         .finally(() => {
           resyncInFlight = null
           if (cancelled || !resyncQueued) return
