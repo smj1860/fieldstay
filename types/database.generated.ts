@@ -286,6 +286,8 @@ export type Database = {
           vendor_specialty_default:
             | Database["public"]["Enums"]["vendor_specialty"]
             | null
+          weibull_shape: number | null
+          weibull_shape_updated_at: string | null
           weight_updated_at: string | null
         }
         Insert: {
@@ -302,6 +304,8 @@ export type Database = {
           vendor_specialty_default?:
             | Database["public"]["Enums"]["vendor_specialty"]
             | null
+          weibull_shape?: number | null
+          weibull_shape_updated_at?: string | null
           weight_updated_at?: string | null
         }
         Update: {
@@ -318,6 +322,8 @@ export type Database = {
           vendor_specialty_default?:
             | Database["public"]["Enums"]["vendor_specialty"]
             | null
+          weibull_shape?: number | null
+          weibull_shape_updated_at?: string | null
           weight_updated_at?: string | null
         }
         Relationships: []
@@ -3047,6 +3053,7 @@ export type Database = {
           bathroom_room_template_id: string | null
           bedroom_room_template_id: string | null
           billing_email: string | null
+          capex_inflation_rate_pct: number
           comms_log_retention_days: number
           created_at: string
           default_room_templates_seeded_at: string | null
@@ -3076,6 +3083,7 @@ export type Database = {
           bathroom_room_template_id?: string | null
           bedroom_room_template_id?: string | null
           billing_email?: string | null
+          capex_inflation_rate_pct?: number
           comms_log_retention_days?: number
           created_at?: string
           default_room_templates_seeded_at?: string | null
@@ -3105,6 +3113,7 @@ export type Database = {
           bathroom_room_template_id?: string | null
           bedroom_room_template_id?: string | null
           billing_email?: string | null
+          capex_inflation_rate_pct?: number
           comms_log_retention_days?: number
           created_at?: string
           default_room_templates_seeded_at?: string | null
@@ -3794,6 +3803,7 @@ export type Database = {
           placed_in_service_date: string | null
           property_id: string
           purchase_price: number | null
+          replaced_at: string | null
           replaced_by_asset_id: string | null
           replacement_status: string
           salvage_value: number | null
@@ -3804,6 +3814,7 @@ export type Database = {
           warranty_expiry_date: string | null
           warranty_notes: string | null
           warranty_provider: string | null
+          warranty_warned_at: string | null
         }
         Insert: {
           asset_type: Database["public"]["Enums"]["asset_type"]
@@ -3828,6 +3839,7 @@ export type Database = {
           placed_in_service_date?: string | null
           property_id: string
           purchase_price?: number | null
+          replaced_at?: string | null
           replaced_by_asset_id?: string | null
           replacement_status?: string
           salvage_value?: number | null
@@ -3838,6 +3850,7 @@ export type Database = {
           warranty_expiry_date?: string | null
           warranty_notes?: string | null
           warranty_provider?: string | null
+          warranty_warned_at?: string | null
         }
         Update: {
           asset_type?: Database["public"]["Enums"]["asset_type"]
@@ -3862,6 +3875,7 @@ export type Database = {
           placed_in_service_date?: string | null
           property_id?: string
           purchase_price?: number | null
+          replaced_at?: string | null
           replaced_by_asset_id?: string | null
           replacement_status?: string
           salvage_value?: number | null
@@ -3872,6 +3886,7 @@ export type Database = {
           warranty_expiry_date?: string | null
           warranty_notes?: string | null
           warranty_provider?: string | null
+          warranty_warned_at?: string | null
         }
         Relationships: [
           {
@@ -6081,6 +6096,10 @@ export type Database = {
         Args: { p_items: Json; p_template_id: string }
         Returns: number
       }
+      replace_property_asset: {
+        Args: { p_new_asset: Json; p_old_asset_id: string; p_org_id: string }
+        Returns: Json
+      }
       replace_room_template_items: {
         Args: { p_items: Json; p_room_template_id: string }
         Returns: number
@@ -6679,3 +6698,4 @@ export const Constants = {
     },
   },
 } as const
+

@@ -185,3 +185,59 @@ export async function advanceCursor(
     await db.sync_meta.put({ key, value: next })
   }
 }
+
+// ── Sync health ─────────────────────────────────────────────────────────────
+//
+// The crew home screen renders "You're all caught up — no active assignments."
+// whenever the local cache is empty. That sentence is true for a cleaner with
+// nothing booked and equally true for a device whose sync has never once
+// succeeded, and the two are indistinguishable on screen — the exact collapse
+// of "zero rows" into "the query errored" that CLAUDE.md's silent-failure rule
+// exists to prevent.
+//
+// It cost a real diagnosis: a crew member assigned to a turnover six days out
+// saw an empty Upcoming, and nothing anywhere — screen, log, or cache — could
+// say whether the assignment was missing or the sync had simply never run.
+//
+// Stored in sync_meta rather than React state so it survives a reload and is
+// readable straight out of IndexedDB when someone is looking at a real device.
+
+const LAST_SYNC_OK_KEY    = 'sync:last_ok_at'
+const LAST_SYNC_ERROR_KEY = 'sync:last_error'
+
+export interface CrewSyncHealth {
+  /** ISO timestamp of the last fully successful resync, null if never. */
+  lastOkAt:    string | null
+  /** Message from the most recent failed resync, null if none since. */
+  lastError:   string | null
+  /** False until a resync has completed end to end at least once. */
+  everSynced:  boolean
+}
+
+export async function recordSyncSuccess(userId: string): Promise<void> {
+  const db = getDexieDb(userId)
+  await db.sync_meta.put({ key: LAST_SYNC_OK_KEY, value: new Date().toISOString() })
+  await db.sync_meta.delete(LAST_SYNC_ERROR_KEY)
+}
+
+export async function recordSyncFailure(userId: string, err: unknown): Promise<void> {
+  const message = err instanceof Error ? err.message : String(err)
+  await getDexieDb(userId).sync_meta.put({
+    key:   LAST_SYNC_ERROR_KEY,
+    // Bounded: this is surfaced in the UI and stored on the device.
+    value: message.slice(0, 300),
+  })
+}
+
+export async function readSyncHealth(userId: string): Promise<CrewSyncHealth> {
+  const db = getDexieDb(userId)
+  const [ok, error] = await Promise.all([
+    db.sync_meta.get(LAST_SYNC_OK_KEY),
+    db.sync_meta.get(LAST_SYNC_ERROR_KEY),
+  ])
+  return {
+    lastOkAt:   ok?.value ?? null,
+    lastError:  error?.value ?? null,
+    everSynced: Boolean(ok?.value),
+  }
+}

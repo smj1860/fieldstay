@@ -2,7 +2,8 @@
 
 import { useState, useMemo, useSyncExternalStore }  from 'react'
 import { useLiveQuery }   from 'dexie-react-hooks'
-import { useDexieDb }     from '@/lib/dexie/context'
+import { useDexieDb, useDexieUserId } from '@/lib/dexie/context'
+import { readSyncHealth }               from '@/lib/dexie/sync/cursors'
 
 import Link                              from 'next/link'
 import { AlertCircle, MapPin, Clock, MessageCircle, PartyPopper } from 'lucide-react'
@@ -212,6 +213,29 @@ function todayAndWeekOutDates(): { today: string; weekOut: string } {
 
 const noopSubscribe = () => () => {}
 
+/**
+ * The welcome banner's line, which must not claim "all caught up" for a device
+ * that has never completed a sync.
+ *
+ * syncHealth is undefined only while its own live query is still resolving —
+ * treated as "don't claim anything yet" rather than as a failure.
+ */
+function buildBannerMessage(
+  activeCount: number,
+  health: { everSynced: boolean; lastError: string | null } | undefined,
+): string {
+  if (activeCount > 0) {
+    return `You have ${activeCount} active assignment${activeCount !== 1 ? 's' : ''}.`
+  }
+  if (!health) return 'Loading your assignments…'
+  if (!health.everSynced) {
+    return health.lastError
+      ? "Couldn't load your assignments — check your connection and pull to refresh."
+      : 'Loading your assignments…'
+  }
+  return "You're all caught up — no active assignments."
+}
+
 export default function CrewDashboardPage() {
   // Only true after the client has mounted — gates hydration-sensitive UI
   // (local Dexie data isn't available during SSR).
@@ -224,6 +248,7 @@ export default function CrewDashboardPage() {
   const { today, weekOut } = todayAndWeekOutDates()
 
   const db           = useDexieDb()
+  const dexieUserId  = useDexieUserId()
   const allTurnovers = useLiveQuery(
     () => db.turnovers
       .filter((t) =>
@@ -263,6 +288,13 @@ export default function CrewDashboardPage() {
 
   const propertyMap = Object.fromEntries(propertiesArr.map((p) => [p.id, p]))
 
+  // "Nothing is assigned to you" and "this device has never synced" produced
+  // the SAME screen — an empty list under "You're all caught up". A crew member
+  // assigned to a real turnover saw that message and had no way to tell, and
+  // neither did anyone helping them. Sync health is recorded in sync_meta by
+  // fullCrewResync, so it survives a reload and is readable off the device.
+  const syncHealth = useLiveQuery(() => readSyncHealth(dexieUserId), [dexieUserId])
+
   const todayStr    = new Date().toDateString()
   const todayTurnovers    = (allTurnovers as TurnoverRow[]).filter(
     (t) => new Date(t.checkout_datetime).toDateString() === todayStr
@@ -282,6 +314,12 @@ export default function CrewDashboardPage() {
 
   const travelSummary = calcTravelSummary(todayTurnovers, propertyMap as Record<string, PropertyRow>)
 
+  // Three distinct states, where there used to be two. `everSynced` false with
+  // an empty list is NOT "all caught up" — it is "we never managed to load your
+  // work", and saying so is what turns a silent failure into a report.
+  const activeCount   = allTurnovers.length + allWorkOrders.length
+  const bannerMessage = buildBannerMessage(activeCount, syncHealth)
+
   if (!isMounted) return <CrewPageSkeleton />
 
   return (
@@ -296,9 +334,7 @@ export default function CrewDashboardPage() {
           Welcome, {firstName}
         </p>
         <p className="text-xs text-brand-800 mt-0.5">
-          {allTurnovers.length + allWorkOrders.length === 0
-            ? "You're all caught up — no active assignments."
-            : `You have ${allTurnovers.length + allWorkOrders.length} active assignment${allTurnovers.length + allWorkOrders.length !== 1 ? 's' : ''}.`}
+          {bannerMessage}
         </p>
       </div>
 
