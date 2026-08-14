@@ -91,6 +91,17 @@ export const SCAN_REQUEST_TIMEOUT_MS = 10_000
 export const CREW_OUTBOX_TIMEOUT_MS = 15_000
 
 /**
+ * Pre-caching a crew page document (lib/dexie/sync/warm-routes.ts).
+ *
+ * Short on purpose. This is opportunistic work awaited at the tail of
+ * fullCrewResync, and the connection it runs on is by definition the marginal
+ * one — a cleaner in a driveway with one bar. An untimed fetch there would
+ * hang and stall the sync it is riding on; better to skip the warm and let the
+ * next sync retry it.
+ */
+export const ROUTE_WARM_TIMEOUT_MS = 8_000
+
+/**
  * Stripe SDK calls. The SDK's own default is 80s — longer than the function
  * budget, so a slow call inside the webhook handler gets the whole invocation
  * killed by the platform. That skips the `catch` that releases the dedup

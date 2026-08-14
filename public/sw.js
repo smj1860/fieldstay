@@ -1,7 +1,7 @@
 // Cache version — bump both on any change to what gets cached, so
 // `activate` cleans up the old entries instead of leaving them orphaned.
-const SHELL_CACHE     = 'fieldstay-shell-v1'
-const ASSET_CACHE     = 'fieldstay-assets-v1'
+const SHELL_CACHE     = 'fieldstay-shell-v2'
+const ASSET_CACHE     = 'fieldstay-assets-v2'
 const OFFLINE_URL     = '/offline.html'
 const CURRENT_CACHES  = [SHELL_CACHE, ASSET_CACHE]
 
@@ -45,12 +45,24 @@ self.addEventListener('fetch', (event) => {
     event.respondWith(
       fetch(request)
         .then((response) => {
-          const copy = response.clone()
-          caches.open(SHELL_CACHE).then((cache) => cache.put(request, copy))
+          // Only cache a real page. Caching a redirect to /login (session
+          // expired mid-flight) would strand the crew member on a login screen
+          // at a property with no signal, with no way to get past it.
+          if (response.ok && !response.redirected) {
+            const copy = response.clone()
+            caches.open(SHELL_CACHE).then((cache) => cache.put(request, copy))
+          }
           return response
         })
         .catch(() =>
-          caches.match(request).then((cached) => cached ?? caches.match(OFFLINE_URL))
+          // ignoreVary is load-bearing, not defensive. Next.js serves page
+          // documents with `Vary: RSC, Next-Router-State-Tree, ...`, and a
+          // navigation request carries none of those headers — so a strict
+          // match against an entry stored by warmCrewRouteCache's plain
+          // fetch() MISSES, and every warmed route would fall through to the
+          // offline page as if it had never been warmed at all.
+          caches.match(request, { ignoreVary: true })
+            .then((cached) => cached ?? caches.match(OFFLINE_URL))
         )
     )
     return
@@ -80,14 +92,49 @@ self.addEventListener('push', (event) => {
   let data = {}
   try { data = event.data.json() } catch { return }
 
-  event.waitUntil(
+  const target = typeof data.url === 'string' && data.url.startsWith('/') && !data.url.startsWith('//')
+    ? data.url
+    : '/crew'
+
+  event.waitUntil(Promise.all([
     self.registration.showNotification(data.title ?? 'FieldStay', {
       body:    data.body  ?? 'You have a new assignment.',
-      data:    { url: data.url ?? '/crew' },
+      data:    { url: target },
       vibrate: [200, 100, 200],
-    })
-  )
+    }),
+    // Warm the page this notification points at, WITH THE APP CLOSED.
+    //
+    // The in-app warm (lib/dexie/sync/warm-routes.ts) only runs while the crew
+    // member has the app open. A turnover assigned overnight would not be
+    // cached by it until they next opened the app — and if that first open
+    // happens at the property, there is no signal to fetch it with.
+    //
+    // A push wakes the service worker without the app running, so the document
+    // for the assignment being announced can be cached at the moment it is
+    // announced. By the time they tap the notification at the house, it is
+    // already on the device.
+    warmRoute(target),
+  ]))
 })
+
+/**
+ * Fetches one page document into the shell cache. Best-effort by design: a
+ * failed warm must never stop a notification from being shown.
+ *
+ * Skips non-2xx and redirects for the same reason the fetch handler does —
+ * caching a redirect to /login would strand a crew member on a login screen at
+ * a property with no signal, with no way past it.
+ */
+async function warmRoute(path) {
+  try {
+    const res = await fetch(path, { credentials: 'same-origin' })
+    if (!res.ok || res.redirected) return
+    const cache = await caches.open(SHELL_CACHE)
+    await cache.put(path, res.clone())
+  } catch {
+    // Offline, or the session expired — the in-app warm will retry.
+  }
+}
 
 self.addEventListener('notificationclick', (event) => {
   event.notification.close()

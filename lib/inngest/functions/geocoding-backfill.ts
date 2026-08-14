@@ -21,9 +21,30 @@ async function sleep(ms: number) {
 // from internal admin tooling that bypasses normal org auth (e.g. a one-off ops script
 // or a service-role-gated route). If this function is ever extended to read or expose
 // fields beyond id/zip/lat/lng, it must be re-scoped to a single org_id first.
+// SCHEDULED, not only event-triggered. This function was registered, its event
+// was declared in events.ts — and NOTHING IN THE CODEBASE EVER SENT THAT EVENT.
+// It had therefore never run once. That was invisible precisely because a
+// registered function with a declared event looks identical to a working one,
+// and the symptom (properties with null lat/lng) surfaces as degraded
+// auto-assign rather than as an error.
+//
+// 04:00 UTC is deliberately clear of the cron cluster documented in CLAUDE.md
+// (09:00/09:30 Hospitable, 10:00 OwnerRez property diff, 11:00 OwnerRez
+// reconciliation, 13:00-14:00 daily group), so a Mapbox-bound scan is not
+// competing with the PMS syncs that create the rows it fixes.
+//
+// The event trigger stays: it is how ops tooling forces a run without waiting
+// for the schedule.
 export const geocodingBackfill = inngest.createFunction(
-  { id: 'geocoding-backfill', name: 'Backfill Property & Vendor Geocodes', retries: 1 },
-  { event: 'geocoding/backfill-requested' },
+  {
+    id: 'geocoding-backfill', name: 'Backfill Property & Vendor Geocodes', retries: 1,
+    // One platform-wide scan at a time — see the cross-tenant note above.
+    concurrency: { limit: 1, key: '"geocoding-backfill"' },
+  },
+  [
+    { cron: '0 4 * * *' },
+    { event: 'geocoding/backfill-requested' },
+  ],
   async ({ step }) => {
 
     const propertiesResult = await step.run('geocode-properties', async (): Promise<{ geocoded: number; skipped: number }> => {

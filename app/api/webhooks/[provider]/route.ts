@@ -22,6 +22,7 @@ import { NextResponse, type NextRequest }            from 'next/server'
 import { createHash }                                from 'crypto'
 import { getProvider }                               from '@/lib/integrations/registry'
 import { canonicalJson, PayloadTooDeepError }        from '@/lib/integrations/canonical-json'
+import { extractClientIp }                            from '@/lib/integrations/webhook-verification'
 import { revokeIntegrationToken } from '@/lib/integrations/vault'
 import { logAuditEvent }                             from '@/lib/audit'
 import { createServiceClient }                       from '@/lib/supabase/server'
@@ -221,10 +222,32 @@ export async function POST(
   }
 
   if (!verification.valid) {
+    // The IP the CHECK actually used, not the raw x-forwarded-for header.
+    // extractClientIp prefers x-vercel-forwarded-for / x-real-ip, so logging
+    // the raw header could name a different address than the one an allowlist
+    // rejected — which sends whoever is debugging after the wrong value.
+    const checkedIp = extractClientIp(request) ?? 'unknown'
+
     console.warn(
-      `[Webhook:${providerId}] Rejected request from IP ` +
-      `${request.headers.get('x-forwarded-for') ?? 'unknown'}: ${verification.reason ?? 'no reason given'}`
+      `[Webhook:${providerId}] Rejected request from IP ${checkedIp}: ` +
+      `${verification.reason ?? 'no reason given'}`
     )
+
+    // REPORTED, not just logged. A provider whose webhooks are 100% rejected
+    // looks identical to a provider that simply is not sending any: nothing
+    // reaches processed_webhooks either way, no sync breaks loudly, and the
+    // only trace is a console line nobody is watching. Hospitable's webhooks
+    // were rejected from the day they were configured and it surfaced only
+    // when the provider's own portal started reporting the integration as
+    // disconnected — which is the provider telling US about our outage.
+    //
+    // The reason string is ours (a fixed set from validateWebhook), never the
+    // signature or the body, so this carries no secret material.
+    reportError(new Error(`Webhook rejected: ${verification.reason ?? 'unknown reason'}`), {
+      site:  'webhook.provider.rejected',
+      extra: { provider: providerId, reason: verification.reason ?? null, clientIp: checkedIp },
+    })
+
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
   }
 
