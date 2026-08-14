@@ -40,6 +40,82 @@ export type Database = {
   }
   public: {
     Tables: {
+      asset_capex_recommendations: {
+        Row: {
+          asset_id: string
+          computed_at: string
+          created_at: string
+          id: string
+          notified_at: string | null
+          org_id: string
+          property_id: string
+          reasoning: string[]
+          recommendation: string
+          remaining_book_value: number | null
+          repair_cost_prior_12mo: number
+          repair_cost_trailing_12mo: number
+          repair_trend_pct: number | null
+          replacement_cost_estimate: number
+          updated_at: string
+        }
+        Insert: {
+          asset_id: string
+          computed_at: string
+          created_at?: string
+          id?: string
+          notified_at?: string | null
+          org_id: string
+          property_id: string
+          reasoning?: string[]
+          recommendation: string
+          remaining_book_value?: number | null
+          repair_cost_prior_12mo?: number
+          repair_cost_trailing_12mo?: number
+          repair_trend_pct?: number | null
+          replacement_cost_estimate: number
+          updated_at?: string
+        }
+        Update: {
+          asset_id?: string
+          computed_at?: string
+          created_at?: string
+          id?: string
+          notified_at?: string | null
+          org_id?: string
+          property_id?: string
+          reasoning?: string[]
+          recommendation?: string
+          remaining_book_value?: number | null
+          repair_cost_prior_12mo?: number
+          repair_cost_trailing_12mo?: number
+          repair_trend_pct?: number | null
+          replacement_cost_estimate?: number
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "asset_capex_recommendations_asset_id_fkey"
+            columns: ["asset_id"]
+            isOneToOne: true
+            referencedRelation: "property_assets"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "asset_capex_recommendations_org_id_fkey"
+            columns: ["org_id"]
+            isOneToOne: false
+            referencedRelation: "organizations"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "asset_capex_recommendations_property_id_fkey"
+            columns: ["property_id"]
+            isOneToOne: false
+            referencedRelation: "properties"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       asset_depreciation_entries: {
         Row: {
           asset_id: string
@@ -93,6 +169,54 @@ export type Database = {
           },
           {
             foreignKeyName: "asset_depreciation_entries_org_id_fkey"
+            columns: ["org_id"]
+            isOneToOne: false
+            referencedRelation: "organizations"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      asset_health_score_history: {
+        Row: {
+          age_score: number
+          asset_id: string
+          condition_score: number
+          created_at: string
+          health_score: number
+          id: string
+          org_id: string
+          recorded_date: string
+        }
+        Insert: {
+          age_score: number
+          asset_id: string
+          condition_score: number
+          created_at?: string
+          health_score: number
+          id?: string
+          org_id: string
+          recorded_date: string
+        }
+        Update: {
+          age_score?: number
+          asset_id?: string
+          condition_score?: number
+          created_at?: string
+          health_score?: number
+          id?: string
+          org_id?: string
+          recorded_date?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "asset_health_score_history_asset_id_fkey"
+            columns: ["asset_id"]
+            isOneToOne: false
+            referencedRelation: "property_assets"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "asset_health_score_history_org_id_fkey"
             columns: ["org_id"]
             isOneToOne: false
             referencedRelation: "organizations"

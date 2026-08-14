@@ -3,19 +3,39 @@ import type { TablesInsert } from '@/types/database'
 import { inngest } from '@/lib/inngest/client'
 import { createServiceClient } from '@/lib/supabase/server'
 import { logAuditEvents } from '@/lib/audit'
+import { createPmNotifications, type CreatePmNotificationInput } from '@/lib/inngest/helpers'
 import { unwrapJoin } from '@/lib/utils/supabase-joins'
 import { fetchAllRows, foldAllRows, fetchDistinctOrgIds } from '@/lib/inngest/paginate'
+import { healthLabel } from '@/lib/assets/health-score'
+import { bucketRepairCostWindows } from '@/lib/assets/repair-vs-replace'
 import {
   scoreAssets,
   persistScores,
   computeWeightNudge,
+  persistHealthHistory,
+  persistCapexRecommendations,
+  buildRecommendationRows,
   type AssetRow,
   type AssetStandardRow,
   type RepairSummary,
   type NudgeRepairCounts,
+  type ScoreCrossing,
   lifespanYears,
   isLateLifeRepair,
 } from './asset-health-helpers'
+
+interface CapexAlertNotice {
+  asset_id:   string
+  asset_name: string
+  reasoning:  string[]
+}
+
+/** Notification severity for a threshold crossing — same bands as healthDot()/healthColor() in health-score.ts. */
+function crossingSeverity(newScore: number): 'red' | 'amber' | 'blue' {
+  if (newScore <= 20) return 'red'
+  if (newScore <= 40) return 'amber'
+  return 'blue'
+}
 
 /**
  * Repair history older than this contributes nothing meaningful to a current
@@ -251,14 +271,14 @@ export const assetHealthOrg = inngest.createFunction(
   async ({ event, step, logger }) => {
     const orgId = event.data.org_id
 
-    const scored = await step.run('score-and-persist-org-assets', async () => {
+    const { scored, crossings, capexAlerts } = await step.run('score-and-persist-org-assets', async () => {
       const supabase = createServiceClient({ system: 'inngest:asset-health' })
 
       const activeAssets = await fetchAllRows<AssetRow>(
         (from, to) => supabase
           .from('property_assets')
           .select(`
-            id, org_id, property_id, asset_type,
+            id, org_id, property_id, name, asset_type,
             installation_date, expected_lifespan_years,
             estimated_replacement_cost, health_score
           `)
@@ -269,7 +289,9 @@ export const assetHealthOrg = inngest.createFunction(
         { label: `property_assets[org=${orgId}]` }
       )
 
-      if (!activeAssets.length) return 0
+      if (!activeAssets.length) {
+        return { scored: 0, crossings: [] as ScoreCrossing[], capexAlerts: [] as CapexAlertNotice[] }
+      }
 
       const standards = unwrapList(
         await supabase
@@ -277,6 +299,9 @@ export const assetHealthOrg = inngest.createFunction(
           .select('asset_type, lifespan_min_years, lifespan_max_years, avg_replacement_cost_high, age_weight, condition_weight')
           .limit(ASSET_TYPE_STANDARDS_LIMIT),
         { site: 'inngest.asset-health.score-org.standards', orgId },
+      )
+      const standardsByType = new Map(
+        ((standards ?? []) as AssetStandardRow[]).map((s) => [s.asset_type, s])
       )
 
       const windowStart = new Date(Date.now() - REPAIR_HISTORY_WINDOW_DAYS * 86_400_000)
@@ -319,7 +344,7 @@ export const assetHealthOrg = inngest.createFunction(
         }
       }
 
-      const { updates } = scoreAssets(
+      const { updates, crossings } = scoreAssets(
         activeAssets,
         (standards ?? []) as AssetStandardRow[],
         repairByAsset,
@@ -340,10 +365,95 @@ export const assetHealthOrg = inngest.createFunction(
         )
       }
 
-      return persisted
+      // ── History log (feeds a future RUL curve fit) ──────────────────────
+      const todayDateStr = new Date().toISOString().split('T')[0]!
+      await persistHealthHistory(supabase, updates.map((u) => ({
+        org_id:          orgId,
+        asset_id:        u.id,
+        recorded_date:   todayDateStr,
+        health_score:    u.health_score,
+        age_score:       u.age_score,
+        condition_score: u.condition_score,
+      })))
+
+      // ── Repair-vs-Replace ────────────────────────────────────────────────
+      const assetById       = new Map(activeAssets.map((a) => [a.id, a]))
+      const newScoreByAsset = new Map(updates.map((u) => [u.id, u.health_score]))
+      const repairWindows   = bucketRepairCostWindows(repairWOs, new Date())
+
+      const recommendationRows = await buildRecommendationRows(
+        supabase, orgId, activeAssets, standardsByType, repairWindows, newScoreByAsset
+      )
+      const newAlerts   = await persistCapexRecommendations(supabase, orgId, recommendationRows)
+      const capexAlerts = newAlerts.map((alert) => ({
+        asset_id:   alert.asset_id,
+        asset_name: assetById.get(alert.asset_id)?.name ?? 'Asset',
+        reasoning:  alert.reasoning,
+      }))
+
+      return { scored: persisted, crossings, capexAlerts }
     })
 
-    logger.info(`Asset health: scored ${scored} asset(s) for org ${orgId}`)
-    return { org_id: orgId, assets_scored: scored }
+    // Separate step: a retry of scoring must never re-send an alert already
+    // delivered, and a retry of notifying must never re-score. Threshold
+    // crossings are date-scoped (a genuine re-crossing on a later day is a
+    // new event); the CapEx alert instead claims notified_at atomically so
+    // it can only ever fire once per asset, mirroring
+    // vendor-compliance-expiry-check.ts's first_warned_at gate. Both claim
+    // and notify happen as ONE round trip each across every alert in this
+    // org's run (not one query per asset) — see createPmNotifications.
+    if (crossings.length || capexAlerts.length) {
+      await step.run('notify-asset-health-alerts', async () => {
+        const supabase     = createServiceClient({ system: 'inngest:asset-health' })
+        const todayDateStr = new Date().toISOString().split('T')[0]!
+
+        const crossingNotifications: CreatePmNotificationInput[] = crossings.map((crossing) => ({
+          orgId,
+          type:      'asset_health_crossing',
+          title:     `${crossing.asset_name} health dropped to ${healthLabel(crossing.newScore)}`,
+          subtitle:  `${crossing.newScore}/100 (was ${crossing.oldScore}/100)`,
+          href:      '/assets',
+          severity:  crossingSeverity(crossing.newScore),
+          dedupeKey: `asset-health-crossing-${crossing.asset_id}-${todayDateStr}`,
+        }))
+
+        let capexNotifications: CreatePmNotificationInput[] = []
+        if (capexAlerts.length) {
+          // Claims every still-un-notified alert in this org's batch in one
+          // update — a retry of this step matches nothing the first run
+          // already claimed, same guarantee as the per-row .is(null) guard,
+          // without a query per asset.
+          const claimRes = await supabase
+            .from('asset_capex_recommendations')
+            .update({ notified_at: new Date().toISOString() })
+            .eq('org_id', orgId)
+            .in('asset_id', capexAlerts.map((a) => a.asset_id))
+            .is('notified_at', null)
+            .select('asset_id')
+
+          const claimedIds = new Set((claimRes.data ?? []).map((r: { asset_id: string }) => r.asset_id))
+          capexNotifications = capexAlerts
+            .filter((alert) => claimedIds.has(alert.asset_id))
+            .map((alert) => ({
+              orgId,
+              type:      'asset_capex_recommendation',
+              title:     `${alert.asset_name} — replacement recommended`,
+              subtitle:  alert.reasoning[0] ?? 'Repair costs and health trend suggest replacement.',
+              href:      '/capital-planning',
+              severity:  'amber' as const,
+              dedupeKey: `asset-capex-replace-${alert.asset_id}`,
+            }))
+        }
+
+        await createPmNotifications(supabase, [...crossingNotifications, ...capexNotifications])
+        return null
+      })
+    }
+
+    logger.info(
+      `Asset health: scored ${scored} asset(s), ${crossings.length} crossing(s), ` +
+      `${capexAlerts.length} new replace alert(s) for org ${orgId}`
+    )
+    return { org_id: orgId, assets_scored: scored, crossings: crossings.length, capex_alerts: capexAlerts.length }
   }
 )
