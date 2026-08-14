@@ -97,6 +97,119 @@ export function buildNullFillPatch(
   return patch
 }
 
+type StepLogger = { info: (msg: string) => void; warn: (msg: string) => void }
+
+interface BookingRevenueTarget {
+  bookingId:         string
+  propertyId:        string
+  actualTotalAmount: number | null
+}
+
+interface FetchBookingsResult {
+  cursor:                string
+  count:                 number
+  affectedPropertyIds:   string[]
+  bookingsToPostRevenue: BookingRevenueTarget[]
+  historyFrom:           string
+}
+
+/**
+ * writeSyncCount plus its non-fatal failure handling, which both exits of
+ * fetch-bookings need.
+ *
+ * The count is a progress figure the connect screen polls; failing to record it
+ * must not fail a sync whose bookings already landed. It was open-coded
+ * identically on both paths, and a swallowed error is exactly the kind of thing
+ * that drifts between two copies.
+ */
+async function recordBookingsFound(
+  userId: string,
+  count:  number,
+  logger: StepLogger,
+): Promise<void> {
+  try {
+    await writeSyncCount(userId, 'bookings_found', count)
+  } catch (countErr) {
+    logger.warn(
+      `[OwnerRez:${userId}] writeSyncCount bookings_found failed: ${countErr instanceof Error ? countErr.message : String(countErr)}`
+    )
+    reportError(countErr, { site: 'inngest.ownerrez-initial-sync.fetch-bookings' })
+  }
+}
+
+/**
+ * Maps OwnerRez bookings onto FieldStay property ids and upserts them.
+ *
+ * Extracted whole because it is the one part of fetch-bookings that can fail in
+ * a way the caller must not paper over: if the property lookup fails, every row
+ * would carry property_id null and the upsert would overwrite good rows with
+ * nulls. That throw is the point of the function, so it reads better as its own
+ * unit than as the deep branch of a step callback.
+ */
+async function persistInitialBookings(params: {
+  orgId:       string
+  userId:      string
+  bookings:    OwnerRezBooking[]
+  externalIds: number[]
+  logger:      StepLogger
+}): Promise<{ affectedPropertyIds: string[]; bookingsToPostRevenue: BookingRevenueTarget[] }> {
+  const { orgId, userId, bookings, externalIds, logger } = params
+  const supabase = createServiceClient({ system: 'inngest:initial-sync' })
+
+  const { data: fsProps, error: propsLookupError } = await supabase
+    .from('properties')
+    .select('id, external_id')
+    .eq('org_id', orgId)
+    .eq('external_source', PROVIDER)
+    .in('external_id', externalIds.map(String))
+    // One row per external id — same reasoning as incremental-sync.
+    .limit(externalIds.length)
+
+  if (propsLookupError || !fsProps) {
+    console.error(
+      `[OwnerRez sync] Property lookup failed for org ${orgId} — ` +
+      `skipping booking upsert to prevent property_id null overwrite`,
+      propsLookupError?.message
+    )
+    throw new Error(
+      `Property lookup failed for org ${orgId}: ${propsLookupError?.message ?? 'unknown error'}`
+    )
+  }
+
+  const externalToFsId = Object.fromEntries(fsProps.map((p) => [p.external_id, p.id]))
+
+  const builtRows = bookings.map((b) => buildOwnerRezBookingRow(orgId, b, externalToFsId))
+  const { mapped: bookingRows, unmappedCount } = partitionMappedBookingRows(builtRows)
+
+  if (unmappedCount) {
+    logger.warn(
+      `[OwnerRez:${userId}] skipping ${unmappedCount} booking(s) whose OwnerRez property has no FieldStay property`
+    )
+  }
+
+  // Chunked, and this is the sync where it matters most: a portfolio with
+  // history clears max_rows = 1000 on its FIRST run — the one whose job is to
+  // get the historical owner ledger right. A truncated representation there
+  // silently omitted revenue for every booking past the first 1000. See
+  // upsert-bookings.ts.
+  const idByExternalId = await upsertBookingsReturningIds(
+    supabase, bookingRows, `OwnerRez:${userId}`)
+
+  logger.info(`[OwnerRez:${userId}] Upserted ${bookingRows.length} bookings`)
+
+  return {
+    affectedPropertyIds: Array.from(new Set(
+      bookingRows.map((b) => b.property_id).filter((id): id is string => id !== null)
+    )),
+    // Revenue floor: current month onward only. A stay that completed before
+    // the account connected has no cleaning fee, work order or restock recorded
+    // against it, because none of those happened in FieldStay. Its revenue
+    // alone is not a P&L, it is an overstatement.
+    bookingsToPostRevenue: selectOwnerRezBookingsToPostRevenue(
+      bookingRows, idByExternalId, revenuePostingFloor(new Date())),
+  }
+}
+
 export const ownerRezInitialSync = inngest.createFunction(
   {
     id:      'ownerrez-initial-sync',
@@ -530,135 +643,59 @@ export const ownerRezInitialSync = inngest.createFunction(
 
       // ── Step 2: Fetch and upsert bookings ───────────────────────────────────
 
-      const fetchBookingsResult = await step.run('fetch-bookings', async () => {
-        if (!fetchPropsResult.ids.length) {
-          try {
-            await writeSyncCount(user_id, 'bookings_found', 0)
-          } catch (countErr) {
-            logger.warn(
-              `[OwnerRez:${user_id}] writeSyncCount bookings_found failed: ${countErr instanceof Error ? countErr.message : String(countErr)}`
-            )
-            reportError(countErr, { site: 'inngest.ownerrez-initial-sync.fetch-bookings' })
+      const fetchBookingsResult: FetchBookingsResult =
+        await step.run('fetch-bookings', async () => {
+          // No properties means nothing to ask OwnerRez about. Still record the
+          // zero so the connect screen stops waiting on a count that never comes.
+          if (!fetchPropsResult.ids.length) {
+            await recordBookingsFound(user_id, 0, logger)
+            return {
+              cursor:                new Date().toISOString(),
+              count:                 0,
+              affectedPropertyIds:   [],
+              bookingsToPostRevenue: [],
+              historyFrom:           initialHistoryFrom(new Date()),
+            }
           }
-          return {
-            cursor: new Date().toISOString(), count: 0,
-            affectedPropertyIds: [] as string[],
-            bookingsToPostRevenue: [] as { bookingId: string; propertyId: string; actualTotalAmount: number | null }[],
-            historyFrom: initialHistoryFrom(new Date()),
-          }
-        }
 
-        // MEDIUM-3: capture pre-fetch timestamp as cursor value.
-        // Using post-fetch time would miss bookings modified during the fetch window
-        // (which can be 30-90 seconds for large tenant histories).
-        const fetchStartedAt = new Date().toISOString()
+          // MEDIUM-3: capture the cursor BEFORE the fetch. A post-fetch
+          // timestamp would skip anything modified during the fetch window,
+          // which runs 30-90 seconds for a large tenant.
+          const fetchStartedAt = new Date().toISOString()
 
-        let bookings: OwnerRezBooking[]
+          // BOUNDED to a recent window, plus everything upcoming.
+          //
+          // This call used to pass no date bounds at all — "every booking this
+          // account has ever had" — which was survivable only because the pager
+          // stopped at 20 records. Older history is walked backwards afterwards,
+          // one window per incremental sync (ownerrez-backfill.ts).
+          //
+          // `from` with no `to` is the important shape: `from` means "departs on
+          // or after", so every FUTURE booking is still included. Bounding the
+          // upper end would drop upcoming stays, which are the whole point of a
+          // first sync.
+          const historyFrom = initialHistoryFrom(new Date(fetchStartedAt))
 
-        // BOUNDED to a recent window, plus everything upcoming.
-        //
-        // This call used to pass no date bounds at all, i.e. "every booking
-        // this account has ever had". That was harmless only because the pager
-        // was broken and stopped at 20 records; with pagination fixed it became
-        // a request to page through a portfolio's entire history — thousands of
-        // rows against a request budget shared by every tenant — before the PM
-        // sees anything. Older history is walked backwards afterwards, one
-        // window per incremental sync (ownerrez-backfill.ts).
-        //
-        // `from` with no `to` is the important shape: `from` means "departs on
-        // or after", so every FUTURE booking is still included. Bounding the
-        // upper end would drop upcoming stays, which are the whole point of a
-        // first sync.
-        const historyFrom = initialHistoryFrom(new Date(fetchStartedAt))
-
-        try {
-          bookings = await client.getBookings({
+          const bookings = await client.getBookings({
             propertyIds:  fetchPropsResult.ids,
             from:         historyFrom,
             includeGuest: true,
           })
-        } catch (err) {
-          if (err instanceof RateLimitError) {
-            throw err
-          }
-          throw err
-        }
 
-        let affectedPropertyIds: string[] = []
-        let bookingsToPostRevenue: { bookingId: string; propertyId: string; actualTotalAmount: number | null }[] = []
+          const persisted = bookings.length
+            ? await persistInitialBookings({
+                orgId:       org_id,
+                userId:      user_id,
+                bookings,
+                externalIds: fetchPropsResult.ids,
+                logger,
+              })
+            : { affectedPropertyIds: [], bookingsToPostRevenue: [] }
 
-        if (bookings.length) {
-          const supabase   = createServiceClient({ system: 'inngest:initial-sync' })
+          await recordBookingsFound(user_id, bookings.length, logger)
 
-          // Resolve FieldStay property IDs from external IDs
-          const { data: fsProps, error: propsLookupError } = await supabase
-            .from('properties')
-            .select('id, external_id')
-            .eq('org_id', org_id)
-            .eq('external_source', PROVIDER)
-            .in('external_id', fetchPropsResult.ids.map(String))
-            // One row per external id — same reasoning as incremental-sync.
-            .limit(fetchPropsResult.ids.length)
-
-          if (propsLookupError || !fsProps) {
-            console.error(
-              `[OwnerRez sync] Property lookup failed for org ${org_id} — ` +
-              `skipping booking upsert to prevent property_id null overwrite`,
-              propsLookupError?.message
-            )
-            throw new Error(
-              `Property lookup failed for org ${org_id}: ${propsLookupError?.message ?? 'unknown error'}`
-            )
-          }
-
-          const externalToFsId = Object.fromEntries(
-            fsProps.map((p) => [p.external_id, p.id])
-          )
-
-          const builtRows = bookings.map((b) => buildOwnerRezBookingRow(org_id, b, externalToFsId))
-          const { mapped: bookingRows, unmappedCount } = partitionMappedBookingRows(builtRows)
-
-          if (unmappedCount) {
-            logger.warn(
-              `[OwnerRez:${user_id}] skipping ${unmappedCount} booking(s) whose OwnerRez property has no FieldStay property`
-            )
-          }
-
-          // Chunked, and this is the sync where it matters most: it fetches
-          // every booking for every property in one call, so a portfolio with
-          // history clears max_rows = 1000 on its FIRST run — the one whose
-          // job is to get the historical owner ledger right. A truncated
-          // representation there silently omitted revenue for every booking
-          // past the first 1000. See upsert-bookings.ts.
-          const idByExternalId = await upsertBookingsReturningIds(
-            supabase, bookingRows, `OwnerRez:${user_id}`)
-
-          logger.info(`[OwnerRez:${user_id}] Upserted ${bookingRows.length} bookings`)
-
-          affectedPropertyIds = Array.from(new Set(
-            bookingRows.map((b) => b.property_id).filter((id): id is string => id !== null)
-          ))
-
-          // Revenue floor: current month onward only. The 90-day initial window
-          // has the same problem the backfill does — a stay that completed
-          // before the account connected has no cleaning fee, work order or
-          // restock recorded against it, because none of those happened in
-          // FieldStay. Its revenue alone is not a P&L, it is an overstatement.
-          bookingsToPostRevenue = selectOwnerRezBookingsToPostRevenue(
-            bookingRows, idByExternalId, revenuePostingFloor(new Date()))
-        }
-
-        try {
-          await writeSyncCount(user_id, 'bookings_found', bookings.length)
-        } catch (countErr) {
-          logger.warn(
-            `[OwnerRez:${user_id}] writeSyncCount bookings_found failed: ${countErr instanceof Error ? countErr.message : String(countErr)}`
-          )
-          reportError(countErr, { site: 'inngest.ownerrez-initial-sync.fetch-bookings' })
-        }
-
-        return { cursor: fetchStartedAt, count: bookings.length, affectedPropertyIds, bookingsToPostRevenue, historyFrom }  // MEDIUM-3: pre-fetch timestamp
-      })
+          return { cursor: fetchStartedAt, count: bookings.length, historyFrom, ...persisted }
+        })
 
       // ── Post booking revenue for newly-confirmed guest-stay bookings ───────
       // Mirrors Hospitable's incremental-sync pattern: sendEvent happens in the
