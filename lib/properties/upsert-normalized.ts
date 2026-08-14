@@ -1,5 +1,6 @@
 import { createServiceClient } from '@/lib/supabase/server'
 import { fetchAllRows } from '@/lib/inngest/paginate'
+import { geocodeZip } from '@/lib/geocoding'
 import { reportError } from '@/lib/observability/report-error'
 import { logAuditEvents } from '@/lib/audit'
 import {
@@ -152,8 +153,100 @@ export async function upsertNormalizedProperties(
   )
 
   await backfillCleaningCost(supabase, normalized, idMap)
+  await geocodeMissingCoordinates(supabase, orgId, provider, normalized)
 
   return idMap
+}
+
+/**
+ * Unique ZIPs geocoded per import pass.
+ *
+ * Coordinates dedupe hard — a portfolio in one market is often one or two
+ * ZIPs — so this bounds the Mapbox calls without bounding the properties
+ * covered. Anything past the cap is left for geocodingBackfill, which is a
+ * real safety net now that it has a schedule.
+ */
+const IMPORT_GEOCODE_ZIP_LIMIT = 50
+
+/**
+ * Resolves lat/lng for freshly-imported PMS properties.
+ *
+ * PMS imports arrived with NO COORDINATES AT ALL. Neither the Hospitable nor
+ * the Hostaway normalizer carries lat/lng, this shared upsert never wrote
+ * them, and the geocodingBackfill function that was supposed to catch it is
+ * triggered by an event NOTHING SENDS — so the gap was permanent rather than
+ * eventual. Only the OwnerRez path geocoded, because it does so inline in its
+ * own server action.
+ *
+ * It is not cosmetic. auto-assign-turnover.ts scores crew proximity only when
+ * BOTH the property and the crew member have coordinates, so a
+ * coordinate-less property silently drops the distance signal and assigns on
+ * reliability and capacity alone — with nothing on screen saying so. The first
+ * live Hospitable org hit exactly this: one property, no coordinates,
+ * auto-assign in autopilot mode.
+ *
+ * Never throws, and never blocks the import: geocodeZip already returns null
+ * for every failure mode, and a property without coordinates is the status quo
+ * this is improving on, not a regression.
+ */
+async function geocodeMissingCoordinates(
+  supabase:   ReturnType<typeof createServiceClient>,
+  orgId:      string,
+  provider:   string,
+  normalized: NormalizedProperty[]
+): Promise<void> {
+  try {
+    const externalIds = normalized.filter((n) => n.zip).map((n) => n.external_id)
+    if (!externalIds.length) return
+
+    // Only rows STILL missing coordinates. The upsert above does not write
+    // lat/lng, so a property geocoded on an earlier sync (or corrected by hand
+    // by the PM) keeps what it has — re-geocoding it would overwrite a better
+    // value with a ZIP centroid.
+    const { data: missing, error } = await supabase
+      .from('properties')
+      .select('id, zip')
+      .eq('org_id', orgId)
+      .eq('external_source', provider)
+      .in('external_id', externalIds)
+      .is('lat', null)
+      .not('zip', 'is', null)
+      .limit(externalIds.length)
+
+    if (error || !missing?.length) return
+
+    const uniqueZips = [...new Set(missing.map((p) => p.zip as string))]
+      .slice(0, IMPORT_GEOCODE_ZIP_LIMIT)
+
+    const coordsByZip = new Map<string, { lat: number; lng: number } | null>()
+    for (const zip of uniqueZips) {
+      coordsByZip.set(zip, await geocodeZip(zip))
+    }
+
+    // Grouped by resolved coordinate so properties sharing a ZIP write in one
+    // statement, the same shape geocodingBackfill uses.
+    const idsByCoord = new Map<string, { lat: number; lng: number; ids: string[] }>()
+    for (const prop of missing) {
+      const coords = coordsByZip.get(prop.zip as string)
+      if (!coords) continue
+      const key = `${coords.lat},${coords.lng}`
+      const entry = idsByCoord.get(key) ?? { ...coords, ids: [] }
+      entry.ids.push(prop.id as string)
+      idsByCoord.set(key, entry)
+    }
+
+    for (const { lat, lng, ids } of idsByCoord.values()) {
+      const { error: updateError } = await supabase
+        .from('properties').update({ lat, lng }).in('id', ids)
+      if (updateError) {
+        console.warn('[upsertNormalizedProperties] geocode write failed', updateError.message)
+      }
+    }
+  } catch (err) {
+    // A geocoding failure must never fail a property import.
+    console.error('[upsertNormalizedProperties] geocode pass failed', err)
+    reportError(err, { site: 'lib.properties.upsert-normalized.geocode', orgId })
+  }
 }
 
 /**
