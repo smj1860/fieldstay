@@ -143,6 +143,12 @@ export interface Organization {
    * one-tap reset. NOT NULL DEFAULT false, so non-null here.
    */
   is_demo:                      boolean
+  /**
+   * Annual inflation assumption for Capital Planning's What-If projections
+   * (20260814142509). NOT NULL DEFAULT 4.0, CHECK-bounded 0-25, so non-null
+   * here.
+   */
+  capex_inflation_rate_pct:     number
   created_at:                   string
   updated_at:                   string
 }
@@ -1591,6 +1597,17 @@ export interface PropertyAsset {
   replacement_status:         'projected' | 'budgeted' | 'approved' | 'deferred'
   is_active:                  boolean
   replaced_by_asset_id:       string | null
+  /**
+   * When this asset was actually replaced — the ground truth the RUL curve
+   * needs to learn age-at-failure. Set once, by replace_property_asset() only
+   * (20260814142502). Null on every asset still in service.
+   */
+  replaced_at:                string | null
+  /**
+   * "Warn once" gate for the warranty-expiry cron, mirroring
+   * vendor_compliance_documents.first_warned_at. Null until the first warning.
+   */
+  warranty_warned_at:         string | null
   notes:                      string | null
   photo_url:                  string | null
   is_na:                      boolean
@@ -1630,6 +1647,15 @@ export interface AssetTypeStandard {
   age_weight:                number  // default 60, range 30-70
   condition_weight:          number  // default 40, range 30-70
   weight_updated_at:         string | null
+  /**
+   * Learned Weibull shape parameter, fit per asset type from real
+   * age-at-replacement data (20260814142439). NULL until a fit job has enough
+   * samples — health-score.ts falls back to the shared WEIBULL_SHAPE constant.
+   * CHECK-bounded 1.0-8.0 so a fit off a tiny or noisy sample cannot push the
+   * curve somewhere pathological.
+   */
+  weibull_shape:             number | null
+  weibull_shape_updated_at:  string | null
 }
 
 // ── Asset Depreciation ────────────────────────────────────────────────────────
