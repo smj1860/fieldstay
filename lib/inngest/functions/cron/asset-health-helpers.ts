@@ -1,6 +1,8 @@
 import type { SupabaseClient } from '@supabase/supabase-js'
-import { calculateHealthScore } from '@/lib/assets/health-score'
+import { calculateHealthScoreBreakdown } from '@/lib/assets/health-score'
 import { unwrap, type PostgrestResult } from '@/lib/supabase/unwrap'
+import { fetchAllRows } from '@/lib/inngest/paginate'
+import { buildCapexRecommendation, type CapexRecommendation, type RepairCostWindows } from '@/lib/assets/repair-vs-replace'
 
 /**
  * Helpers for dailyAssetHealth's per-org scoring step and the Bayesian
@@ -19,6 +21,7 @@ export interface AssetRow {
   id:                          string
   org_id:                      string
   property_id:                 string
+  name:                        string
   asset_type:                  string
   installation_date:           string | null
   expected_lifespan_years:     number | null
@@ -45,9 +48,13 @@ export interface ScoreUpdate {
   id:                      string
   health_score:            number
   health_score_updated_at: string
+  age_score:               number
+  condition_score:         number
 }
 
 export interface ScoreCrossing {
+  asset_id:    string
+  asset_name:  string
   asset_type:  string
   property_id: string
   oldScore:    number
@@ -72,7 +79,7 @@ export function scoreAssets(
       total_repairs: 0, total_repair_cost: 0, last_serviced_at: null,
     }
 
-    const newScore = calculateHealthScore(
+    const { ageScore, conditionScore, total: newScore } = calculateHealthScoreBreakdown(
       {
         installation_date:          asset.installation_date,
         expected_lifespan_years:    asset.expected_lifespan_years,
@@ -83,7 +90,13 @@ export function scoreAssets(
       { age: std.age_weight, condition: std.condition_weight }
     )
 
-    updates.push({ id: asset.id, health_score: newScore, health_score_updated_at: now })
+    updates.push({
+      id:                      asset.id,
+      health_score:            newScore,
+      health_score_updated_at: now,
+      age_score:               ageScore,
+      condition_score:         conditionScore,
+    })
 
     // detect threshold crossings (old > threshold >= new)
     const oldScore = asset.health_score
@@ -91,6 +104,8 @@ export function scoreAssets(
       for (const threshold of [60, 40, 20]) {
         if (oldScore > threshold && newScore <= threshold) {
           crossings.push({
+            asset_id:    asset.id,
+            asset_name:  asset.name,
             asset_type:  asset.asset_type,
             property_id: asset.property_id,
             oldScore,
@@ -240,4 +255,206 @@ export function computeWeightNudge(
     age_weight:       Math.round(newAgeWeight * 10) / 10,
     condition_weight: Math.round(newCondWeight * 10) / 10,
   }
+}
+
+// ── Health score history ─────────────────────────────────────────────────────
+
+export interface HealthHistoryRow {
+  org_id:          string
+  asset_id:        string
+  recorded_date:   string
+  health_score:    number
+  age_score:       number
+  condition_score: number
+}
+
+/**
+ * Upserts one day's health-score history rows. Every row supplies every
+ * NOT NULL column regardless of insert-vs-update branch, so this cannot hit
+ * the missing-column NOT NULL trap documented on persistScores above — that
+ * bug came from a payload that omitted a NOT NULL column on the UPDATE arm,
+ * not from upserting in general.
+ */
+export async function persistHealthHistory(
+  supabase: SupabaseClient,
+  rows:     HealthHistoryRow[],
+): Promise<void> {
+  if (!rows.length) return
+
+  const { error } = await supabase
+    .from('asset_health_score_history')
+    .upsert(rows, { onConflict: 'asset_id,recorded_date' })
+
+  if (error) {
+    throw new Error(`asset_health_score_history upsert failed: ${error.message}`)
+  }
+}
+
+// ── Repair-vs-Replace ─────────────────────────────────────────────────────────
+
+export interface CapexRecommendationRow {
+  org_id:                    string
+  asset_id:                  string
+  property_id:               string
+  recommendation:            CapexRecommendation
+  repair_cost_trailing_12mo: number
+  repair_cost_prior_12mo:    number
+  repair_trend_pct:          number | null
+  replacement_cost_estimate: number
+  remaining_book_value:      number | null
+  reasoning:                 string[]
+  computed_at:               string
+}
+
+export interface CapexAlert {
+  asset_id:  string
+  reasoning: string[]
+}
+
+/**
+ * Upserts this org's repair-vs-replace recommendations, preserving each
+ * asset's existing `notified_at` so a routine rescoring never resets the
+ * "already alerted" gate (mirrors vendor_compliance_documents.first_warned_at
+ * — see the migration comment on this table). Returns the assets that just
+ * reached 'replace' for the first time (still un-notified), for the caller's
+ * separate notify step.
+ */
+export async function persistCapexRecommendations(
+  supabase: SupabaseClient,
+  orgId:    string,
+  rows:     CapexRecommendationRow[],
+): Promise<CapexAlert[]> {
+  if (!rows.length) return []
+
+  // One row per asset — bounded by this org's own asset count, same as the
+  // activeAssets read in assetHealthOrg.
+  const existing = await fetchAllRows<{ asset_id: string; notified_at: string | null }>(
+    (from, to) => supabase
+      .from('asset_capex_recommendations')
+      .select('asset_id, notified_at')
+      .eq('org_id', orgId)
+      .order('asset_id', { ascending: true })
+      .range(from, to),
+    { label: `asset_capex_recommendations[org=${orgId}]` }
+  )
+  const notifiedAtByAsset = new Map(existing.map((r) => [r.asset_id, r.notified_at]))
+
+  const payload = rows.map((r) => ({
+    ...r,
+    notified_at: notifiedAtByAsset.get(r.asset_id) ?? null,
+  }))
+
+  const { error } = await supabase
+    .from('asset_capex_recommendations')
+    .upsert(payload, { onConflict: 'asset_id' })
+
+  if (error) {
+    throw new Error(`asset_capex_recommendations upsert failed for org ${orgId}: ${error.message}`)
+  }
+
+  return rows
+    .filter((r) => r.recommendation === 'replace' && !notifiedAtByAsset.get(r.asset_id))
+    .map((r) => ({ asset_id: r.asset_id, reasoning: r.reasoning }))
+}
+
+/**
+ * Latest (max tax_year) ending_adjusted_basis per asset, for the small
+ * subset of assets a recommendation run just flagged 'replace' — NOT read
+ * for every asset every night, only for the ones that need the
+ * informational book-value note in their reasoning.
+ */
+export async function fetchLatestBookValues(
+  supabase: SupabaseClient,
+  orgId:    string,
+  assetIds: string[],
+): Promise<Map<string, number>> {
+  if (!assetIds.length) return new Map()
+
+  const entries = await fetchAllRows<{ asset_id: string; tax_year: number; ending_adjusted_basis: number }>(
+    (from, to) => supabase
+      .from('asset_depreciation_entries')
+      .select('asset_id, tax_year, ending_adjusted_basis')
+      .eq('org_id', orgId)
+      .in('asset_id', assetIds)
+      .order('tax_year', { ascending: false })
+      .range(from, to),
+    { label: `asset_depreciation_entries(latest)[org=${orgId}]` }
+  )
+
+  const latestByAsset = new Map<string, number>()
+  for (const entry of entries) {
+    // Ordered tax_year DESC, so the first row seen per asset is its latest.
+    if (!latestByAsset.has(entry.asset_id)) {
+      latestByAsset.set(entry.asset_id, entry.ending_adjusted_basis)
+    }
+  }
+  return latestByAsset
+}
+
+/**
+ * Builds one recommendation row per asset (including the remaining-book-value
+ * enrichment pass for whatever came out 'replace') — extracted out of
+ * assetHealthOrg's scoring step so that step's own cognitive complexity stays
+ * under the CLAUDE.md ceiling. Fetches book values itself, scoped to only the
+ * assets that need one (see fetchLatestBookValues).
+ */
+export async function buildRecommendationRows(
+  supabase:        SupabaseClient,
+  orgId:           string,
+  activeAssets:    AssetRow[],
+  standardsByType: Map<string, AssetStandardRow>,
+  repairWindows:   Record<string, RepairCostWindows>,
+  newScoreByAsset: Map<string, number>,
+): Promise<CapexRecommendationRow[]> {
+  const nowIso = new Date().toISOString()
+
+  const rows: CapexRecommendationRow[] = activeAssets.map((asset) => {
+    const std     = standardsByType.get(asset.asset_type)
+    const windows = repairWindows[asset.id] ?? { trailing12mo: 0, prior12mo: 0 }
+    const result  = buildCapexRecommendation({
+      repairCosts:             windows,
+      replacementCostEstimate: asset.estimated_replacement_cost ?? std?.avg_replacement_cost_high ?? null,
+      healthScore:             newScoreByAsset.get(asset.id) ?? asset.health_score,
+    })
+    return {
+      org_id:                     orgId,
+      asset_id:                   asset.id,
+      property_id:                asset.property_id,
+      recommendation:             result.recommendation,
+      repair_cost_trailing_12mo:  windows.trailing12mo,
+      repair_cost_prior_12mo:     windows.prior12mo,
+      repair_trend_pct:           result.repairTrendPct,
+      replacement_cost_estimate:  result.replacementCostEstimate,
+      remaining_book_value:       null,
+      reasoning:                  result.reasoning,
+      computed_at:                nowIso,
+    }
+  })
+
+  // Remaining book value is informational only (see repair-vs-replace.ts) and
+  // only worth a query for the small subset an asset just got flagged
+  // 'replace' — not fetched for every asset every night.
+  const replaceCandidateIds = rows.filter((r) => r.recommendation === 'replace').map((r) => r.asset_id)
+  const bookValueByAsset    = await fetchLatestBookValues(supabase, orgId, replaceCandidateIds)
+  if (!bookValueByAsset.size) return rows
+
+  const assetById = new Map(activeAssets.map((a) => [a.id, a]))
+  for (const row of rows) {
+    const bookValue = bookValueByAsset.get(row.asset_id)
+    if (row.recommendation !== 'replace' || bookValue === undefined) continue
+
+    const asset   = assetById.get(row.asset_id)
+    const std     = asset ? standardsByType.get(asset.asset_type) : undefined
+    const windows = repairWindows[row.asset_id] ?? { trailing12mo: 0, prior12mo: 0 }
+    const result  = buildCapexRecommendation({
+      repairCosts:              windows,
+      replacementCostEstimate:  row.replacement_cost_estimate ?? std?.avg_replacement_cost_high ?? null,
+      healthScore:              newScoreByAsset.get(row.asset_id) ?? asset?.health_score ?? null,
+      remainingBookValue:       bookValue,
+    })
+    row.remaining_book_value = bookValue
+    row.reasoning            = result.reasoning
+  }
+
+  return rows
 }

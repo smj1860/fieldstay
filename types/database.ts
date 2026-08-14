@@ -1649,6 +1649,37 @@ export interface AssetDepreciationEntry {
   generated_at:                  string
 }
 
+// ── Asset Health History & Repair-vs-Replace ──────────────────────────────────
+
+export interface AssetHealthScoreHistory {
+  id:              string
+  org_id:          string
+  asset_id:        string
+  recorded_date:   string
+  health_score:    number
+  age_score:       number
+  condition_score: number
+  created_at:      string
+}
+
+export interface AssetCapexRecommendation {
+  id:                        string
+  org_id:                    string
+  asset_id:                  string
+  property_id:               string
+  recommendation:            'monitor' | 'repair' | 'replace'
+  repair_cost_trailing_12mo: number
+  repair_cost_prior_12mo:    number
+  repair_trend_pct:          number | null
+  replacement_cost_estimate: number
+  remaining_book_value:      number | null
+  reasoning:                 string[]
+  notified_at:               string | null
+  computed_at:               string
+  created_at:                string
+  updated_at:                string
+}
+
 // ── Vendor Compliance ─────────────────────────────────────────────────────────
 
 export interface VendorComplianceDocument {
@@ -1928,6 +1959,8 @@ export interface HandWrittenRowMap {
   property_assets:                     PropertyAsset
   asset_type_standards:                AssetTypeStandard
   asset_depreciation_entries:          AssetDepreciationEntry
+  asset_health_score_history:          AssetHealthScoreHistory
+  asset_capex_recommendations:         AssetCapexRecommendation
   asset_manuals:                       AssetManual
   vendor_compliance_documents:         VendorComplianceDocument
   integration_providers:               IntegrationProvider
