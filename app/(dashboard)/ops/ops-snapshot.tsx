@@ -17,17 +17,20 @@ const AVG_DRIVE_SPEED_MPH = 30
 
 // ── Types ──────────────────────────────────────────────────────
 
-interface TurnoverAssignment {
+export interface TurnoverAssignment {
   id:           string
   crew_member: { id: string; name: string } | { id: string; name: string }[] | null
 }
 
-interface Turnover {
+export interface OpsTurnover {
   id:                   string
   property_id:          string
   checkout_datetime:    string
+  /** SYNTHETIC when prev_booking_id is null. */
   checkin_datetime:     string
   window_minutes:       number | null
+  /** Null on a standalone turnover: nothing is booked after this checkout. */
+  prev_booking_id:      string | null
   status:               string
   priority:             string
   notes:                string | null
@@ -185,7 +188,7 @@ function TurnoverCard({
   turnover,
   propertyName,
 }: Readonly<{
-  turnover:     Turnover
+  turnover:     OpsTurnover
   propertyName: string
 }>) {
   const assignments = unwrapJoinArray(turnover.turnover_assignments)
@@ -224,12 +227,14 @@ function TurnoverCard({
           <span>
             {checkout.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })}
           </span>
-          {turnover.window_minutes && (
+          {/* Only a REAL next booking makes this a window. A standalone
+              turnover carries the generator's placeholder checkout + 4h. */}
+          {turnover.prev_booking_id && turnover.window_minutes ? (
             <>
               <span>·</span>
               <span>{Math.floor(turnover.window_minutes / 60)}h window</span>
             </>
-          )}
+          ) : null}
         </div>
 
         <div className="flex items-center justify-between gap-2">
@@ -277,7 +282,7 @@ function DayAccordion({
 }: Readonly<{
   label:       string
   isToday:     boolean
-  turnovers:   Turnover[]
+  turnovers:   OpsTurnover[]
   propertyMap: Record<string, string>
   crewTravel?: CrewTravelSummary[]
   defaultOpen: boolean
@@ -386,7 +391,7 @@ function getDayLabel(day: string, todayDate: string): string {
 
 // ── Urgency sort ─────────────────────────────────────────────────
 
-function urgencyRank(t: Turnover): number {
+function urgencyRank(t: OpsTurnover): number {
   const unassigned = t.status === 'pending_assignment'
   const urgent     = t.priority === 'urgent' || t.priority === 'high'
   if (unassigned && urgent) return 0
@@ -398,10 +403,10 @@ function urgencyRank(t: Turnover): number {
 // ── Crew travel summary ─────────────────────────────────────────
 
 function getCrewTravelSummaries(
-  turnovers:    Turnover[],
+  turnovers:    OpsTurnover[],
   propertyById: Record<string, Property>
 ): CrewTravelSummary[] {
-  const byCrew: Record<string, { name: string; turnovers: Turnover[] }> = {}
+  const byCrew: Record<string, { name: string; turnovers: OpsTurnover[] }> = {}
 
   for (const t of turnovers) {
     const assignments = unwrapJoinArray(t.turnover_assignments)
@@ -447,7 +452,7 @@ export function OpsSnapshot({
   metrics,
   showPmsRevenueNudge = false,
 }: Readonly<{
-  turnovers:      Turnover[]
+  turnovers:      OpsTurnover[]
   properties:     Property[]
   openWorkOrders: WorkOrder[]
   lowStockItems:  LowStockItem[]

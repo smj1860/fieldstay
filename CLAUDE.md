@@ -1321,6 +1321,18 @@ following them stops being a memory test. Five layers, checked in CI via
      `information_schema.columns.is_generated`, NOT against
      `supabase/schema_reference.sql`, which renders generated columns as plain
      `DEFAULT`s and is exactly why this class shipped twice.
+   - `absence-reconciliation` — every "delete/cancel/deactivate every local row
+     missing from the fetched list" site is registered with HOW it survives an
+     empty fetch, and no provider fetch returns `[]` from an error branch.
+     Empty is the degenerate input of reconcile-by-absence: it makes every row
+     absent. On 2026-07-18 one org's entire Hospitable crew roster was
+     deactivated at the same microsecond because `hospFetchTeammates` returned
+     `[]` on a non-ok response and the deactivation pass had no guard. The two
+     valid protections are NOT interchangeable — `fetch-fails-loud` where empty
+     is a legitimate steady state (no calendar blocks, no assignments; a guard
+     there would make the LAST one unclearable), `empty-set-guard` where empty
+     is implausible and the fetch can't be trusted. Carries a self-check that
+     the scan still fires.
    - `public-route-rate-limiting` — every prefix in `proxy.ts`'s
      `TOKEN_ROUTES` has a matching branch in `rateLimiterForPathname()`,
      and the two guessable-invite-token `BYPASS_ROUTES` entries

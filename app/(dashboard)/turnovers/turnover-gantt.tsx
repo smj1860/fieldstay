@@ -10,8 +10,11 @@ interface Turnover {
   id:                string
   property_id:       string
   checkout_datetime: string
+  /** SYNTHETIC when prev_booking_id is null — see the bar render below. */
   checkin_datetime:  string
   window_minutes:    number | null
+  /** Null on a standalone turnover: nothing is booked after this checkout. */
+  prev_booking_id:   string | null
   status:            string
   priority:          string
 }
@@ -332,12 +335,27 @@ export function TurnoverGantt({ turnovers, properties, bookings }: Props) {
 
                       if (colIdx < 0 || colIdx >= TOTAL_DAYS) return null
 
-                      // Tight window detection
+                      // Tight window detection. A standalone turnover
+                      // (prev_booking_id null) has NO next booking — the
+                      // generator stores checkout + 4h so the row has a working
+                      // window, but printing "4h" on the bar reads as a
+                      // four-hour deadline, and it is the tightest-looking bar
+                      // on the chart precisely when there is no pressure at all.
+                      const hasRealCheckin = turnover.prev_booking_id !== null
                       const windowMinutes = turnover.window_minutes ?? 0
                       const windowMs  = windowMinutes * 60_000
                       const checkinDT = new Date(turnover.checkin_datetime)
                       const gapMs     = checkinDT.getTime() - checkoutDT.getTime()
-                      const isTight   = gapMs > 0 && gapMs < windowMs
+                      const isTight   = hasRealCheckin && gapMs > 0 && gapMs < windowMs
+                      const windowHours = Math.round(windowMinutes / 60 * 10) / 10
+
+                      // Built here rather than inline: the tight-window prefix
+                      // nests a second ternary inside the has-a-checkin one.
+                      let barTitle = `${turnover.status} · no next booking`
+                      if (hasRealCheckin) {
+                        const prefix = isTight ? 'Tight window — ' : ''
+                        barTitle = `${prefix}${turnover.status} · ${windowHours}h window`
+                      }
 
                       const colors = turnoverColors(turnover.status, isTight)
                       const leftPx = colIdx * COL_W + 2
@@ -358,9 +376,12 @@ export function TurnoverGantt({ turnovers, properties, bookings }: Props) {
                             color:      colors.fg,
                             border:     `1px solid ${colors.border}`,
                           }}
-                          title={`${isTight ? 'Tight window — ' : ''}${turnover.status} · ${Math.round(windowMinutes / 60 * 10) / 10}h window`}
+                          title={barTitle}
                         >
-                          {isTight ? <AlertTriangle className="w-2.5 h-2.5 flex-shrink-0" /> : <Sparkle className="w-2.5 h-2.5 flex-shrink-0" />} {Math.round(windowMinutes / 60 * 10) / 10}h
+                          {isTight
+                            ? <AlertTriangle className="w-2.5 h-2.5 flex-shrink-0" />
+                            : <Sparkle className="w-2.5 h-2.5 flex-shrink-0" />}
+                          {' '}{hasRealCheckin ? `${windowHours}h` : '—'}
                         </Link>
                       )
                     })}

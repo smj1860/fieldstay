@@ -57,6 +57,7 @@ import {
   planBackfillWindow,
   advanceBackfill,
   readBackfillState,
+  revenuePostingFloor,
 } from '@/lib/integrations/providers/ownerrez-backfill'
 import { getRedis, upstashConfigured } from '@/lib/redis'
 import { RateLimitError, TokenRevokedError, translateSyncError } from '@/lib/integrations/types'
@@ -409,7 +410,12 @@ async function persistBookings(
 
   return {
     affectedPropertyIds: Array.from(new Set(bookingRows.map((b) => b.property_id))),
-    bookingsToPostRevenue: selectOwnerRezBookingsToPostRevenue(bookingRows, idByExternalId),
+    // Revenue floor: only stays in the current month or later. A stay that
+    // predates FieldStay managing the property has no recoverable expense side,
+    // so posting its revenue alone overstates that month's net income. See
+    // revenuePostingFloor.
+    bookingsToPostRevenue: selectOwnerRezBookingsToPostRevenue(
+      bookingRows, idByExternalId, revenuePostingFloor(new Date())),
     // Blocks never generate turnovers (filtered at the generator query level),
     // but a known vacancy window is the best signal for scheduling maintenance.
     ownerBlocks: bookingRows.filter((r) => Boolean(r.is_block)),

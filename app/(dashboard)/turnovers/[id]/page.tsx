@@ -21,7 +21,7 @@ export default async function TurnoverDetailPage({ params }: Props) {
   const { data: turnover, error: turnoverError } = await supabase
     .from('turnovers')
     .select(`
-      id, property_id, checkout_datetime, checkin_datetime,
+      id, property_id, prev_booking_id, checkout_datetime, checkin_datetime,
       window_minutes, status, priority, notes, completion_notes,
       completed_at, auto_generated, checklist_template_id,
       bookings!booking_id ( guest_name, checkin_date, checkout_date, source ),
@@ -134,9 +134,13 @@ export default async function TurnoverDetailPage({ params }: Props) {
               <p className="text-muted-themed text-xs">Checkout</p>
               <p className="font-semibold text-primary-themed">{formatDateTime(turnover.checkout_datetime)}</p>
             </div>
+            {/* Standalone turnover (no outgoing booking): checkin_datetime is
+                the generator's invented checkout + 4h, not a real arrival. */}
             <div>
               <p className="text-muted-themed text-xs">Next Check-in</p>
-              <p className="font-semibold text-primary-themed">{formatDateTime(turnover.checkin_datetime)}</p>
+              <p className="font-semibold text-primary-themed">
+                {turnover.prev_booking_id ? formatDateTime(turnover.checkin_datetime) : 'No next booking'}
+              </p>
             </div>
             <div className="flex items-center gap-2 pt-1 border-t border-themed">
               <Clock className="w-4 h-4 text-muted-themed" />

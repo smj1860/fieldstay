@@ -71,7 +71,18 @@ interface Turnover {
   // `=== 'owner_stay'` check below is unaffected by the wider type.
   stay_type: string | null
   checkout_datetime: string
+  /**
+   * SYNTHETIC when prev_booking_id is null — see the render below. The
+   * generator's standalone pass invents checkout + 4h so the turnover has a
+   * working window; there is no guest arriving at that time.
+   */
   checkin_datetime: string
+  /**
+   * The OUTGOING booking on a paired turnover, and null on a standalone one.
+   * That null is the only signal that checkin_datetime was invented rather
+   * than read off a real arrival.
+   */
+  prev_booking_id: string | null
   window_minutes: number | null
   status: string
   priority: string
@@ -346,6 +357,14 @@ function TurnoverCard({
   const isOverdue    = isPast(checkout) && turnover.status !== 'completed' && turnover.status !== 'in_progress'
   const windowMins   = turnover.window_minutes ?? 0
   const windowColor  = windowUrgencyColor(windowMins)
+
+  // A turnover with no OUTGOING booking recorded is a standalone: nobody is
+  // arriving after this checkout that we know of. generator.ts's standalone
+  // pass still stores a checkin_datetime of checkout + 4h so the row has a
+  // usable working window, but that time is INVENTED. Rendering it as "In:
+  // 2:00 PM — 4h" states an arrival that does not exist, and a PM reading it
+  // schedules crew against a deadline nothing imposed.
+  const hasRealCheckin = turnover.prev_booking_id !== null
   const urgencyTone  = turnoverUrgencyTone(isOverdue, turnover.priority)
 
   const duration = formatDurationMinutes(turnover.crew_duration_minutes)
@@ -437,20 +456,26 @@ function TurnoverCard({
               {checkout.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' })}{' '}
               {checkout.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })}
             </span>
-            <span className="text-muted-themed">→</span>
-            <span>
-              <span className="font-medium text-secondary-themed">In:</span>{' '}
-              {checkin.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })}
-              {checkin.toDateString() !== checkout.toDateString() && (
-                <span className="text-muted-themed ml-1">
-                  ({checkin.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })})
+            {hasRealCheckin ? (
+              <>
+                <span className="text-muted-themed">→</span>
+                <span>
+                  <span className="font-medium text-secondary-themed">In:</span>{' '}
+                  {checkin.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })}
+                  {checkin.toDateString() !== checkout.toDateString() && (
+                    <span className="text-muted-themed ml-1">
+                      ({checkin.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })})
+                    </span>
+                  )}
                 </span>
-              )}
-            </span>
-            <span className={cn('font-semibold flex items-center gap-0.5', windowColor)}>
-              <Clock className="w-3 h-3" />
-              {formatWindow(windowMins)}
-            </span>
+                <span className={cn('font-semibold flex items-center gap-0.5', windowColor)}>
+                  <Clock className="w-3 h-3" />
+                  {formatWindow(windowMins)}
+                </span>
+              </>
+            ) : (
+              <span className="text-muted-themed">No next booking</span>
+            )}
           </div>
 
           {/* Auto-assignment suggestion banner */}

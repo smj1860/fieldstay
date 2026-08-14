@@ -69,6 +69,25 @@ export interface BackfillWindow {
   to:   string
 }
 
+/**
+ * First day of the current month — the floor for posting booking revenue to
+ * owner_transactions.
+ *
+ * A stay that ended before FieldStay was managing the property has no
+ * recoverable expense side: cleaning_fee posts on turnover completion,
+ * wo_completion on a work order, inventory_purchase on a received PO, and none
+ * of those exist for work done in another system. Posting its revenue anyway
+ * produces a month showing full rent against zero costs — an owner-facing P&L
+ * that is not merely incomplete but overstated.
+ *
+ * The current month is the boundary rather than the connection date because it
+ * is the one an operator can state plainly: "your FieldStay ledger starts this
+ * month." Anything earlier is visibly absent rather than quietly wrong.
+ */
+export function revenuePostingFloor(now: Date): string {
+  return `${now.toISOString().slice(0, 7)}-01`
+}
+
 /** Calendar date in UTC, as OwnerRez's date-only bounds expect. */
 export function isoDate(d: Date): string {
   return d.toISOString().slice(0, 10)

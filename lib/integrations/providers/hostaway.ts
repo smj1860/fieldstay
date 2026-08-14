@@ -161,8 +161,13 @@ export async function hostawayFetchListings(
   while (true) {
     pageCount++
     if (pageCount > MAX_PAGES) {
-      console.error(`[Hostaway] listings pagination exceeded ${MAX_PAGES} pages — aborting`)
-      break
+      // THROW rather than break — see the note on hospFetchProperties. A
+      // partial listing set returned as complete is indistinguishable from a
+      // shrunken portfolio to everything downstream.
+      throw new Error(
+        `[Hostaway] listings pagination exceeded ${MAX_PAGES} pages ` +
+        `(${listings.length} so far) — refusing to return a partial result`
+      )
     }
 
     const res = await fetch(
@@ -206,8 +211,10 @@ export async function hostawayFetchReservations(
   while (true) {
     pageCount++
     if (pageCount > MAX_PAGES) {
-      console.error(`[Hostaway] reservations pagination exceeded ${MAX_PAGES} pages — aborting`)
-      break
+      throw new Error(
+        `[Hostaway] reservations pagination exceeded ${MAX_PAGES} pages ` +
+        `(${reservations.length} so far) — refusing to return a partial result`
+      )
     }
 
     const params = new URLSearchParams({

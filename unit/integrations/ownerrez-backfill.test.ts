@@ -5,6 +5,7 @@ import {
   advanceBackfill,
   initialHistoryFrom,
   readBackfillState,
+  revenuePostingFloor,
   isoDate,
   INITIAL_HISTORY_DAYS,
   BACKFILL_WINDOW_DAYS,
@@ -175,5 +176,56 @@ describe('readBackfillState', () => {
     // A truthy-but-not-true value must not silently end the walk.
     expect(readBackfillState({ backfill_complete: 'yes' }).complete).toBe(false)
     expect(readBackfillState({ backfill_complete: 1 }).complete).toBe(false)
+  })
+})
+
+// ============================================================================
+// The revenue-posting floor.
+//
+// Backfilled bookings are imported across the whole two-year walk — they feed
+// stay-length derivation and occupancy history. Their REVENUE is not posted,
+// because the expense side cannot be reconstructed: cleaning_fee posts on
+// turnover completion, wo_completion on a work order, inventory_purchase on a
+// received PO, and none of those exist for work done before the account
+// connected, on paper or in another system.
+//
+// A backfilled month would therefore show full rent against zero costs — an
+// owner-facing P&L that is overstated rather than merely incomplete. A missing
+// month is visibly missing; a wrong month is not.
+// ============================================================================
+describe('revenuePostingFloor', () => {
+  it('is the first of the current month', () => {
+    expect(revenuePostingFloor(new Date('2026-08-13T12:00:00.000Z'))).toBe('2026-08-01')
+  })
+
+  it('holds on the first of the month — that day is inside the window, not before it', () => {
+    const floor = revenuePostingFloor(new Date('2026-08-01T00:00:00.000Z'))
+    expect(floor).toBe('2026-08-01')
+    expect('2026-08-01' >= floor).toBe(true)
+  })
+
+  it('holds on the last instant of a month without rolling forward', () => {
+    expect(revenuePostingFloor(new Date('2026-08-31T23:59:59.999Z'))).toBe('2026-08-01')
+  })
+
+  it('zero-pads single-digit months so string comparison stays chronological', () => {
+    // The floor is compared against checkin_date as a STRING. '2026-9-01'
+    // would sort after '2026-10-01' and silently admit the wrong bookings.
+    expect(revenuePostingFloor(new Date('2026-01-15T00:00:00.000Z'))).toBe('2026-01-01')
+    expect(revenuePostingFloor(new Date('2026-09-15T00:00:00.000Z'))).toBe('2026-09-01')
+  })
+
+  it('excludes every window the backfill walks', () => {
+    // The guarantee that matters: no window the historical walk produces can
+    // contain a stay eligible for revenue posting.
+    const now = new Date('2026-08-13T12:00:00.000Z')
+    const floor = revenuePostingFloor(now)
+    let state = { oldestCovered: null as string | null, complete: false }
+    for (let i = 0; i < 100; i++) {
+      const w = planBackfillWindow(state, now)
+      if (!w) break
+      expect(w.to < floor).toBe(true)
+      state = advanceBackfill(w, now)
+    }
   })
 })

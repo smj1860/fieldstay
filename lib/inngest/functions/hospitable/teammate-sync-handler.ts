@@ -21,6 +21,7 @@ import { createServiceClient }     from '@/lib/supabase/server'
 import { getValidHospitableToken } from '@/lib/integrations/providers/hospitable-token'
 import { hospFetchTeammates, hospitableTeammatesToCrewRows } from '@/lib/integrations/providers/hospitable'
 import { logAuditEvents } from '@/lib/audit'
+import { reportError }    from '@/lib/observability/report-error'
 
 const PROVIDER = 'hospitable'
 
@@ -66,6 +67,37 @@ export const hospTeammateSyncHandler = inngest.createFunction(
     const deactivatedCount = await step.run('deactivate-removed-teammates', async () => {
       const supabase = createServiceClient({ system: 'inngest:teammate-sync-handler' })
       const freshExternalIds = new Set(teammates.map((t) => t.id))
+
+      // An EMPTY fresh set is not "every teammate was removed upstream".
+      //
+      // This step reconciles by absence, which is the only way a removal is
+      // ever detectable — but absence-as-signal has one degenerate input, and
+      // hospFetchTeammates hands it to us readily: it returns [] on ANY non-ok
+      // response, including the 403 its own doc comment names as expected for a
+      // connection lacking the teammate:read scope. With an empty set every
+      // active Hospitable crew member is absent, so this deactivated the org's
+      // ENTIRE roster and wrote an audit row for each saying they were removed
+      // from Hospitable.
+      //
+      // That is not hypothetical. In production on 2026-07-18 at 09:00 UTC all
+      // three of one org's Hospitable crew members were deactivated at the same
+      // microsecond — one batch, the whole roster, from a single cron run.
+      //
+      // The asymmetry decides it, exactly as in ownerrez/reconciliation-handler
+      // and ical-sync: declining to deactivate leaves a stale crew row for one
+      // more day, while deactivating wrongly removes real people from
+      // scheduling and assignment.
+      if (freshExternalIds.size === 0) {
+        logger.error(
+          `[Hospitable teammate-sync] org ${org_id}: ZERO teammates returned — ` +
+          `skipping the deactivation pass rather than deactivating every crew member`
+        )
+        reportError(new Error('Hospitable teammate sync returned zero teammates'), {
+          site:  'inngest.hospitable-teammate-sync-handler.empty-result-guard',
+          orgId: org_id,
+        })
+        return 0
+      }
 
       const { data: existingActive, error: fetchErr } = await supabase
         .from('crew_members')
