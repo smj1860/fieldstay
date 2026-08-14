@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, afterEach } from 'vitest'
 import {
   calculateHealthScore,
+  weibullSurvivalFraction,
   healthLabel,
   healthColor,
   healthDot,
@@ -45,12 +46,12 @@ describe('calculateHealthScore', () => {
       estimated_replacement_cost: 1000,
     }
     const score = calculateHealthScore(asset, standards, noRepairs)
-    // ageYears = 0 -> agePct = 0 -> ageScore = weights.age (60)
+    // ageYears = 0 -> Weibull survival = 1 -> ageScore = weights.age (60)
     // conditionScore = weights.condition (40) - 0 - 0 + 0 (no recency bonus, never serviced)
     expect(score).toBe(100)
   })
 
-  it('caps age contribution at 0 for an asset older than its full expected lifespan', () => {
+  it('drives age contribution toward 0 for an asset well past its full expected lifespan', () => {
     vi.useFakeTimers()
     vi.setSystemTime(NOW)
     const asset = {
@@ -59,7 +60,8 @@ describe('calculateHealthScore', () => {
       estimated_replacement_cost: 1000,
     }
     const score = calculateHealthScore(asset, standards, noRepairs)
-    // agePct clamped to 1.0 -> ageScore = 0. conditionScore = 40 (no repairs).
+    // t/eta = 2.0 -> Weibull survival ~0.35% -> ageScore rounds to 0.
+    // conditionScore = 40 (no repairs).
     expect(score).toBe(40)
   })
 
@@ -71,11 +73,10 @@ describe('calculateHealthScore', () => {
       expected_lifespan_years:    null,
       estimated_replacement_cost: 1000,
     }
-    // midpoint of 10-15 = 12.5 -> rounds to 13 (banker's? Math.round(12.5) = 13)
+    // midpoint of 10-15 = 12.5 -> rounds to 13 (Math.round(12.5) = 13)
     const score = calculateHealthScore(asset, standards, noRepairs)
     const lifespan = Math.round((10 + 15) / 2) // 13
-    const agePct = Math.min(6 / lifespan, 1.0)
-    const ageScore = Math.round((1 - agePct) * 60)
+    const ageScore = Math.round(weibullSurvivalFraction(6, lifespan) * 60)
     expect(score).toBe(ageScore + 40)
   })
 
@@ -89,8 +90,8 @@ describe('calculateHealthScore', () => {
     }
     const zeroStandards = { lifespan_min_years: 0, lifespan_max_years: 0, avg_replacement_cost_high: 4000 }
     const score = calculateHealthScore(asset, zeroStandards, noRepairs)
-    // lifespan falls back to 10 -> agePct = 5/10 = 0.5 -> ageScore = round(0.5 * 60) = 30
-    expect(score).toBe(30 + 40)
+    // lifespan falls back to 10 -> t/eta = 0.5 -> Weibull survival ~83.8% -> ageScore = round(0.8380 * 60) = 50
+    expect(score).toBe(50 + 40)
   })
 
   it('applies a repair-frequency penalty proportional to repairs per year', () => {
@@ -107,11 +108,11 @@ describe('calculateHealthScore', () => {
       last_serviced_at:  null,
     }
     const score = calculateHealthScore(asset, standards, repairs)
-    // ageYears=2, agePct=0.2, ageScore=round(0.8*60)=48
+    // ageYears=2, t/eta=0.2 -> Weibull survival ~98.2% -> ageScore=round(0.9823*60)=59
     // repairsPerYear = 2 -> repairFreqPenalty = min(20, round(20)) = 20
     // repairCostPenalty = 0
     // conditionScore = max(0, 40 - 20 - 0 + 0) = 20
-    expect(score).toBe(48 + 20)
+    expect(score).toBe(59 + 20)
   })
 
   it('caps the repair-frequency penalty at 0.5 * weights.condition even with very high repair frequency', () => {
@@ -128,10 +129,10 @@ describe('calculateHealthScore', () => {
       last_serviced_at:  null,
     }
     const score = calculateHealthScore(asset, standards, repairs)
-    // ageYears=1, agePct=0.1, ageScore=round(0.9*60)=54
+    // ageYears=1, t/eta=0.1 -> Weibull survival ~99.7% -> ageScore=round(0.9968*60)=60
     // repairFreqPenalty capped at 0.5*40=20
     // conditionScore = max(0, 40-20-0+0)=20
-    expect(score).toBe(54 + 20)
+    expect(score).toBe(60 + 20)
   })
 
   it('applies a repair-cost penalty proportional to cost as a fraction of replacement cost', () => {
@@ -148,11 +149,11 @@ describe('calculateHealthScore', () => {
       last_serviced_at:  null,
     }
     const score = calculateHealthScore(asset, standards, repairs)
-    // ageScore = 48 (as above)
+    // ageScore = 59 (2 years old, as above)
     // repairsPerYear=0 -> repairFreqPenalty=0
     // repairCostPct = 100/1000 = 0.1 -> repairCostPenalty = min(15, round(10)) = 10
     // conditionScore = max(0, 40-0-10+0)=30
-    expect(score).toBe(48 + 30)
+    expect(score).toBe(59 + 30)
   })
 
   it('caps the repair-cost penalty at 0.375 * weights.condition even with cost exceeding replacement value', () => {
@@ -169,9 +170,10 @@ describe('calculateHealthScore', () => {
       last_serviced_at:  null,
     }
     const score = calculateHealthScore(asset, standards, repairs)
+    // ageScore = 59 (2 years old)
     // repairCostPenalty capped at 0.375*40=15
     // conditionScore = max(0, 40-0-15+0)=25
-    expect(score).toBe(48 + 25)
+    expect(score).toBe(59 + 25)
   })
 
   it('falls back to a $5000 replacement cost when both asset and standard costs are missing', () => {
@@ -186,8 +188,8 @@ describe('calculateHealthScore', () => {
     const repairs: AssetRepairSummary = { total_repairs: 0, total_repair_cost: 500, last_serviced_at: null }
     const score = calculateHealthScore(asset, noCostStandards, repairs)
     // repairCostPct = 500/5000 = 0.1 -> repairCostPenalty = min(15, round(10))=10
-    // ageScore=48, conditionScore=max(0,40-0-10+0)=30
-    expect(score).toBe(48 + 30)
+    // ageScore=59 (2 years old), conditionScore=max(0,40-0-10+0)=30
+    expect(score).toBe(59 + 30)
   })
 
   it('awards a +5 recency bonus when serviced within the last 6 months', () => {
@@ -204,8 +206,8 @@ describe('calculateHealthScore', () => {
       last_serviced_at:  '2026-06-01', // ~1.7 months ago
     }
     const score = calculateHealthScore(asset, standards, repairs)
-    // ageScore=48, conditionScore = max(0, 40-0-0+5) = 45, but conditionScore capped by min(100,...) overall not per-component
-    expect(score).toBe(48 + 45)
+    // ageScore=59, conditionScore = max(0, 40-0-0+5) = 45 -> 59+45=104, capped at 100 overall (not per-component)
+    expect(score).toBe(100)
   })
 
   it('awards a +2 recency bonus when serviced 6-12 months ago', () => {
@@ -222,7 +224,8 @@ describe('calculateHealthScore', () => {
       last_serviced_at:  '2026-01-10', // ~6.4 months ago
     }
     const score = calculateHealthScore(asset, standards, repairs)
-    expect(score).toBe(48 + 42)
+    // ageScore=59, conditionScore=42 -> 59+42=101, capped at 100 overall
+    expect(score).toBe(100)
   })
 
   it('awards no recency bonus when serviced more than 12 months ago', () => {
@@ -239,7 +242,8 @@ describe('calculateHealthScore', () => {
       last_serviced_at:  '2024-01-01', // well over a year ago
     }
     const score = calculateHealthScore(asset, standards, repairs)
-    expect(score).toBe(48 + 40)
+    // ageScore=59, conditionScore=40 (no bonus)
+    expect(score).toBe(59 + 40)
   })
 
   it('awards no recency bonus when never serviced (null last_serviced_at treated as overdue)', () => {
@@ -251,7 +255,8 @@ describe('calculateHealthScore', () => {
       estimated_replacement_cost: 1000,
     }
     const score = calculateHealthScore(asset, standards, noRepairs)
-    expect(score).toBe(48 + 40)
+    // ageScore=59, conditionScore=40 (never serviced treated as overdue -> no bonus)
+    expect(score).toBe(59 + 40)
   })
 
   it('floors at the minimum permitted score for an asset past its max lifespan with extreme repair history', () => {
@@ -306,6 +311,38 @@ describe('calculateHealthScore', () => {
     const score = calculateHealthScore(asset, standards, noRepairs, { age: 70, condition: 30 })
     // ageScore = round((1-0)*70) = 70, conditionScore = 30 - 0 - 0 + 0 = 30
     expect(score).toBe(100)
+  })
+})
+
+describe('weibullSurvivalFraction', () => {
+  it('is 1 at age 0 (as-new)', () => {
+    expect(weibullSurvivalFraction(0, 10)).toBe(1)
+  })
+
+  it('sits at e^-1 (~36.8%) at the characteristic life, by definition', () => {
+    expect(weibullSurvivalFraction(10, 10)).toBeCloseTo(Math.exp(-1), 6)
+  })
+
+  it('ages slower than a linear model through the first half of expected life', () => {
+    // A linear 1 - t/eta model would put half-life remaining value at exactly
+    // 0.5. The Weibull curve (kappa > 1) stays well above that at the
+    // midpoint — this is the "ages slowly at first" behavior the curve
+    // exists to model.
+    expect(weibullSurvivalFraction(5, 10)).toBeGreaterThan(0.5)
+  })
+
+  it('falls off faster than a linear model past expected life (the "cliff")', () => {
+    // A linear model floors at exactly 0 the moment age reaches eta and stays
+    // there. The Weibull curve keeps falling past that point instead of
+    // going flat, and does so steeply — well below what linear decay alone
+    // would predict for the same overshoot.
+    const atLifespan     = weibullSurvivalFraction(10, 10)
+    const pastLifespan   = weibullSurvivalFraction(15, 10)
+    expect(pastLifespan).toBeLessThan(atLifespan * 0.2)
+  })
+
+  it('returns 0 for a non-positive characteristic life instead of dividing by zero', () => {
+    expect(weibullSurvivalFraction(5, 0)).toBe(0)
   })
 })
 

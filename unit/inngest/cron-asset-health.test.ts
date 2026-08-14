@@ -286,7 +286,7 @@ describe('assetHealthOrg (per org)', () => {
       logger: { info: vi.fn(), error: vi.fn(), warn: vi.fn() },
     })
 
-    expect(result).toEqual({ org_id: 'org_1', assets_scored: 1 })
+    expect(result).toEqual({ org_id: 'org_1', assets_scored: 1, crossings: 0, capex_alerts: 0 })
 
     // Scores go through apply_asset_health_scores, NOT an upsert. The upsert
     // could never succeed: PostgREST emits INSERT ... ON CONFLICT DO UPDATE and
@@ -322,7 +322,7 @@ describe('assetHealthOrg (per org)', () => {
       logger: { info: vi.fn(), error: vi.fn(), warn: vi.fn() },
     })
 
-    expect(result).toEqual({ org_id: 'org_1', assets_scored: 0 })
+    expect(result).toEqual({ org_id: 'org_1', assets_scored: 0, crossings: 0, capex_alerts: 0 })
     // Nothing to score means the standards/repair-history queries never run.
     expect(supabase.from).toHaveBeenCalledTimes(1)
   })
@@ -357,7 +357,7 @@ describe('assetHealthOrg (per org)', () => {
     // assets_scored now reports assets actually SCORED (updates.length), not
     // assets merely found — the pre-split version returned the candidate count,
     // which reported 1 for an asset it had in fact skipped.
-    expect(result).toEqual({ org_id: 'org_1', assets_scored: 0 })
+    expect(result).toEqual({ org_id: 'org_1', assets_scored: 0, crossings: 0, capex_alerts: 0 })
     // Nothing scored means no write at all — not an empty one.
     expect(supabase.rpc).not.toHaveBeenCalled()
   })
@@ -388,7 +388,7 @@ describe('assetHealthOrg (per org)', () => {
       logger: { info: vi.fn(), error: vi.fn(), warn: vi.fn() },
     })
 
-    expect(result).toEqual({ org_id: 'org_1', assets_scored: 1_750 })
+    expect(result).toEqual({ org_id: 'org_1', assets_scored: 1_750, crossings: 0, capex_alerts: 0 })
     const ranges = supabase.calls.filter((c) => c.table === 'property_assets' && c.method === 'range')
     expect(ranges.map((c) => c.args)).toEqual([[0, PAGE - 1], [PAGE, 2 * PAGE - 1]])
   })
@@ -468,7 +468,7 @@ describe('assetHealthOrg (per org)', () => {
 
     // Reports what was actually WRITTEN, not what was attempted. Returning the
     // attempt count is how a total write failure looked like a healthy run.
-    expect(result).toEqual({ org_id: 'org_1', assets_scored: 1 })
+    expect(result).toEqual({ org_id: 'org_1', assets_scored: 1, crossings: 0, capex_alerts: 0 })
     expect(warn).toHaveBeenCalledWith(expect.stringContaining('attempted 2 score update(s), 1 row(s) matched'))
   })
 

@@ -1,5 +1,6 @@
 import { requireOrgMember }          from '@/lib/auth'
 import { unwrap, unwrapList }        from '@/lib/supabase/unwrap'
+import { unwrapJoin }                from '@/lib/utils/supabase-joins'
 import { SUPABASE_MAX_ROWS }         from '@/lib/inngest/paginate'
 import Link                          from 'next/link'
 import { TriggerLedgerButton }       from './trigger-ledger-button'
@@ -13,6 +14,16 @@ import type {
   CapExProjectionPayload,
   CapExProjectionItem,
 } from '@/lib/inngest/functions/capex-projections'
+
+interface RepairVsReplaceRow {
+  asset_id:                  string
+  property_id:               string
+  repair_cost_trailing_12mo: number
+  replacement_cost_estimate: number
+  reasoning:                 string[]
+  asset:                     { name: string } | { name: string }[] | null
+  property:                  { name: string } | { name: string }[] | null
+}
 
 export const metadata: Metadata = { title: 'Capital Planning' }
 
@@ -43,10 +54,10 @@ export default async function CapitalPlanningPage({
 
   const priorYear = currentYear - 1
 
-  // Three independent reads in one wave. The replacement-status read used to
-  // be a fourth here; it moved to a second wave below because it depends on
+  // Four independent reads in one wave. The replacement-status read used to
+  // be a fifth here; it moved to a second wave below because it depends on
   // the capex milestone resolved in this one — see the note there.
-  const [milestoneRes, deprMilestoneRes, propertiesRes] = await Promise.all([
+  const [milestoneRes, deprMilestoneRes, propertiesRes, repairVsReplaceRes] = await Promise.all([
     // CapEx projection
     supabase
       .from('org_milestones')
@@ -72,14 +83,29 @@ export default async function CapitalPlanningPage({
       .order('name')
       .limit(SUPABASE_MAX_ROWS),
 
+    // Repair-vs-Replace: assets the nightly asset-health cron currently
+    // recommends replacing, independent of the age-based 10-year forecast
+    // above — an asset with heavy recent repair spend can surface here long
+    // before it would age into the projection.
+    supabase
+      .from('asset_capex_recommendations')
+      .select('asset_id, property_id, repair_cost_trailing_12mo, replacement_cost_estimate, reasoning, asset:property_assets(name), property:properties(name)')
+      .eq('org_id', membership.org_id)
+      .eq('recommendation', 'replace')
+      .order('computed_at', { ascending: false })
+      .limit(SUPABASE_MAX_ROWS),
   ])
 
   // Throws to app/(dashboard)/capital-planning/error.tsx on a failed read, so
   // an outage isn't rendered as "No projection data yet."
   const ctx = { site: 'page.capital-planning', orgId: membership.org_id }
-  const milestone     = unwrap(milestoneRes,      { ...ctx, extra: { query: 'capex_milestone' } })
-  const deprMilestone = unwrap(deprMilestoneRes,  { ...ctx, extra: { query: 'depreciation_milestone' } })
-  const properties    = unwrapList(propertiesRes, { ...ctx, extra: { query: 'properties' } })
+  const milestone       = unwrap(milestoneRes,          { ...ctx, extra: { query: 'capex_milestone' } })
+  const deprMilestone   = unwrap(deprMilestoneRes,      { ...ctx, extra: { query: 'depreciation_milestone' } })
+  const properties      = unwrapList(propertiesRes,     { ...ctx, extra: { query: 'properties' } })
+  const repairVsReplace = unwrapList<RepairVsReplaceRow>(
+    repairVsReplaceRes,
+    { ...ctx, extra: { query: 'repair_vs_replace' } },
+  )
 
   const payload     = milestone?.value as CapExProjectionPayload | null
   const projections = payload?.projections ?? {}
@@ -169,6 +195,10 @@ export default async function CapitalPlanningPage({
 
   const selectedProperty = properties.find((p) => p.id === selectedPropertyId) ?? null
 
+  const visibleRepairVsReplace = selectedPropertyId
+    ? repairVsReplace.filter((r) => r.property_id === selectedPropertyId)
+    : repairVsReplace
+
   return (
     <div className="max-w-4xl">
       <div className="page-header">
@@ -257,6 +287,45 @@ export default async function CapitalPlanningPage({
                   >
                     {STATUS_LABELS[status] ?? status}
                   </span>
+                </div>
+              )
+            })}
+          </div>
+        </Card>
+      )}
+
+      {/* Repair-vs-Replace signals */}
+      {visibleRepairVsReplace.length > 0 && (
+        <Card
+          className="mb-6 border-l-4"
+          style={{ borderLeftColor: 'var(--accent-red)' }}
+        >
+          <div className="mb-3">
+            <h3 className="font-semibold text-primary-themed">Repair vs. Replace Signals</h3>
+            <p className="text-xs text-muted-themed mt-0.5">
+              Flagged from recent repair spend and health score — independent of the age-based
+              forecast below, so an asset can surface here before it ages into that projection.
+            </p>
+          </div>
+          <div className="divide-y divide-themed">
+            {visibleRepairVsReplace.map((item) => {
+              const assetName    = unwrapJoin(item.asset)?.name ?? 'Asset'
+              const propertyName = unwrapJoin(item.property)?.name ?? 'Property'
+              return (
+                <div key={item.asset_id} className="py-2.5 text-sm">
+                  <div className="flex items-center justify-between gap-3">
+                    <div className="min-w-0">
+                      <span className="font-medium text-primary-themed">{assetName}</span>
+                      <span className="text-muted-themed text-xs ml-2">{propertyName}</span>
+                    </div>
+                    <span className="text-sm font-semibold flex-shrink-0" style={{ color: 'var(--accent-red)' }}>
+                      ${Math.round(item.repair_cost_trailing_12mo).toLocaleString()} repaired
+                      {' '}vs. ${Math.round(item.replacement_cost_estimate).toLocaleString()} new
+                    </span>
+                  </div>
+                  {item.reasoning[0] && (
+                    <p className="text-xs text-muted-themed mt-1">{item.reasoning[0]}</p>
+                  )}
                 </div>
               )
             })}
