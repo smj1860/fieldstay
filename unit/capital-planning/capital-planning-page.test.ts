@@ -45,6 +45,7 @@ function makeSupabase(rows: Record<string, unknown[]>) {
     }
     const settle = () => Promise.resolve({ data: rows[table] ?? [], error: null })
     chain.maybeSingle = () => Promise.resolve({ data: (rows[table] ?? [])[0] ?? null, error: null })
+    chain.single = () => Promise.resolve({ data: (rows[table] ?? [])[0] ?? null, error: null })
     chain.then = (res: (v: unknown) => unknown, rej?: (e: unknown) => unknown) => settle().then(res, rej)
     return chain
   })

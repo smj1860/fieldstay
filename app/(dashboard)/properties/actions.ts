@@ -14,7 +14,7 @@ import { applyMasterChecklistToProperty } from '@/lib/checklists/apply-master-te
 import { reportError } from '@/lib/observability/report-error'
 import { reportQueryError, unwrapList, isRealQueryError } from '@/lib/supabase/unwrap'
 import { parseMoneyAmount } from '@/lib/schemas/money'
-import type { AssetType, Enums, MemberRole, TablesInsert } from '@/types/database'
+import type { AssetType, AssetTypeStandard, Enums, MemberRole, TablesInsert } from '@/types/database'
 
 // properties/property_assets both gate writes on
 // is_org_member(org_id, ARRAY['admin','manager']) at the RLS layer, and
@@ -616,6 +616,86 @@ function parseAssetNumericFields(formData: FormData):
   }
 }
 
+/**
+ * Confirms `propertyId` exists and belongs to `orgId`. Shared by createAsset
+ * and replaceAsset — factored out so each stays under the cognitive-complexity
+ * limit rather than repeating the same query-error/not-found branch twice.
+ */
+async function validateAssetProperty(
+  supabase:   ActionSupabase,
+  propertyId: string,
+  orgId:      string,
+  actionSite: string,
+): Promise<{ error: string } | { ok: true }> {
+  const { data: property, error: propertyError } = await supabase
+    .from('properties')
+    .select('id')
+    .eq('id', propertyId)
+    .eq('org_id', orgId)
+    .single()
+
+  if (isRealQueryError(propertyError)) {
+    console.error(`[${actionSite}] property read failed`, propertyError)
+    reportError(propertyError, { site: `serverAction.properties.${actionSite}.property`, orgId })
+    return { error: 'Failed to save asset' }
+  }
+  if (!property) return { error: 'Property not found' }
+
+  return { ok: true }
+}
+
+/**
+ * Loads asset_type_standards for `assetType` and derives the lifespan/health
+ * score an insert or the replace RPC should carry. Shared by createAsset and
+ * replaceAsset for the same reason as validateAssetProperty above — this is
+ * the exact TypeScript computation replaceAsset's own comment already
+ * describes as "kept in TypeScript rather than duplicated in the RPC" — it
+ * was duplicated in THIS file instead, which is the piece this closes.
+ */
+async function resolveAssetStandardsAndHealth(
+  supabase:                   ActionSupabase,
+  assetType:                  AssetType,
+  installationDate:           string | null,
+  expectedLifespanYearsInput: number | null,
+  estimatedReplacementCost:   number | null,
+  orgId:                      string,
+  actionSite:                 string,
+): Promise<
+  | { error: string }
+  | { standards: Pick<AssetTypeStandard, 'lifespan_min_years' | 'lifespan_max_years' | 'avg_replacement_cost_high' | 'macrs_class_default' | 'weibull_shape'> | null
+      lifespan: number | null
+      health_score: number | null }
+> {
+  const { data: standards, error: standardsError } = await supabase
+    .from('asset_type_standards')
+    .select('lifespan_min_years, lifespan_max_years, avg_replacement_cost_high, macrs_class_default, weibull_shape')
+    .eq('asset_type', assetType)
+    .single()
+
+  if (standardsError && standardsError.code !== 'PGRST116') {
+    console.error(`[${actionSite}] asset_type_standards read failed`, standardsError)
+    reportError(standardsError, { site: `serverAction.properties.${actionSite}.standards`, orgId })
+    return { error: 'Could not load asset defaults. Please try again.' }
+  }
+
+  const lifespan = expectedLifespanYearsInput ?? (
+    standards
+      ? Math.round((standards.lifespan_min_years + standards.lifespan_max_years) / 2)
+      : null
+  )
+
+  let health_score: number | null = null
+  if (standards && installationDate) {
+    health_score = calculateHealthScore(
+      { installation_date: installationDate, expected_lifespan_years: lifespan, estimated_replacement_cost: estimatedReplacementCost },
+      standards,
+      { total_repairs: 0, total_repair_cost: 0, last_serviced_at: null },
+    )
+  }
+
+  return { standards, lifespan, health_score }
+}
+
 export async function createAsset(
   propertyId: string,
   _prev: AssetActionState | null,
@@ -648,53 +728,19 @@ export async function createAsset(
     }
     const asset_type: AssetType = asset_type_raw
 
-    const { data: property, error: propertyError } = await supabase
-      .from('properties')
-      .select('id')
-      .eq('id', propertyId)
-      .eq('org_id', membership.org_id)
-      .single()
-
-    if (isRealQueryError(propertyError)) {
-      console.error('[createAsset] property read failed', propertyError)
-      reportError(propertyError, { site: 'serverAction.properties.createAsset.property', orgId: membership.org_id })
-      return { error: 'Failed to save asset' }
-    }
-    if (!property) return { error: 'Property not found' }
+    const propertyCheck = await validateAssetProperty(supabase, propertyId, membership.org_id, 'createAsset')
+    if ('error' in propertyCheck) return { error: propertyCheck.error }
 
     // Error bound, not discarded: this read decides the asset's MACRS class,
     // its lifespan and its health score. Treating a failed read as "no
     // standards" wrote a DIFFERENT tax class (the '5_year' fallback) and no
     // health score, recorded as though those were the chosen values.
-    const { data: standards, error: standardsError } = await supabase
-      .from('asset_type_standards')
-      .select('lifespan_min_years, lifespan_max_years, avg_replacement_cost_high, macrs_class_default')
-      .eq('asset_type', asset_type)
-      .single()
-
-    if (standardsError && standardsError.code !== 'PGRST116') {
-      console.error('[createAsset] asset_type_standards read failed', standardsError)
-      reportError(standardsError, {
-        site:  'serverAction.properties.createAsset.standards',
-        orgId: membership.org_id,
-      })
-      return { error: 'Could not load asset defaults. Please try again.' }
-    }
-
-    const lifespan = expected_lifespan_years ?? (
-      standards
-        ? Math.round((standards.lifespan_min_years + standards.lifespan_max_years) / 2)
-        : null
+    const resolved = await resolveAssetStandardsAndHealth(
+      supabase, asset_type, installation_date, expected_lifespan_years,
+      estimated_replacement_cost, membership.org_id, 'createAsset',
     )
-
-    let health_score: number | null = null
-    if (standards && installation_date) {
-      health_score = calculateHealthScore(
-        { installation_date, expected_lifespan_years: lifespan, estimated_replacement_cost },
-        standards,
-        { total_repairs: 0, total_repair_cost: 0, last_serviced_at: null },
-      )
-    }
+    if ('error' in resolved) return { error: resolved.error }
+    const { standards, lifespan, health_score } = resolved
 
     const { data: asset, error } = await supabase
       .from('property_assets')
@@ -744,6 +790,111 @@ export async function createAsset(
   } catch (err) {
     console.error('[createAsset]', err)
     reportError(err, { site: 'serverAction.properties.createAsset' })
+    return { error: 'Failed to save asset' }
+  }
+}
+
+/**
+ * Replaces an asset: creates the new unit and marks the old one
+ * is_active=false / replaced_by_asset_id / replaced_at, in one transaction
+ * (replace_property_asset RPC — see its migration for why two separate
+ * writes here was not acceptable). This is also the only place
+ * property_assets.replaced_at is ever set — it's the ground truth a future
+ * pass can fit a real per-asset-type Weibull shape against (see
+ * asset-weibull-shape-fit.ts), so a partially-applied replace (new asset
+ * created, old one never linked) would quietly corrupt that data forever.
+ */
+export async function replaceAsset(
+  oldAssetId: string,
+  propertyId: string,
+  _prev: AssetActionState | null,
+  formData: FormData
+): Promise<AssetActionState> {
+  try {
+    const { supabase, membership, user } = await requireOrgRole(PROPERTY_WRITE_ROLES)
+
+    const name              = (formData.get('name') as string)?.trim()
+    const asset_type_raw    = formData.get('asset_type') as string | null
+    const make              = (formData.get('make') as string)?.trim() || null
+    const model              = (formData.get('model') as string)?.trim() || null
+    const serial_number     = (formData.get('serial_number') as string)?.trim() || null
+    const installation_date = (formData.get('installation_date') as string) || null
+    const warranty_expiry_date = (formData.get('warranty_expiry_date') as string) || null
+    const warranty_provider    = (formData.get('warranty_provider') as string)?.trim() || null
+    const notes                = (formData.get('notes') as string)?.trim() || null
+
+    if (!name)           return { error: 'Asset name is required' }
+    if (!asset_type_raw) return { error: 'Asset type is required' }
+
+    const numbers = parseAssetNumericFields(formData)
+    if ('error' in numbers) return { error: numbers.error }
+    const { purchase_price, estimated_replacement_cost, expected_lifespan_years } = numbers.fields
+
+    if (!isDbEnum('asset_type', asset_type_raw)) {
+      return { error: `Unrecognized asset type: ${asset_type_raw}` }
+    }
+    const asset_type: AssetType = asset_type_raw
+
+    const propertyCheck = await validateAssetProperty(supabase, propertyId, membership.org_id, 'replaceAsset')
+    if ('error' in propertyCheck) return { error: propertyCheck.error }
+
+    // Same standards read + health-score compute as createAsset — kept in
+    // TypeScript rather than duplicated in the RPC's PL/pgSQL body.
+    const resolved = await resolveAssetStandardsAndHealth(
+      supabase, asset_type, installation_date, expected_lifespan_years,
+      estimated_replacement_cost, membership.org_id, 'replaceAsset',
+    )
+    if ('error' in resolved) return { error: resolved.error }
+    const { standards, lifespan, health_score } = resolved
+
+    const { data: rpcData, error: rpcError } = await supabase.rpc('replace_property_asset', {
+      p_org_id:       membership.org_id,
+      p_old_asset_id: oldAssetId,
+      p_new_asset: {
+        property_id: propertyId,
+        name, make, model, serial_number,
+        asset_type,
+        installation_date,
+        purchase_price,
+        estimated_replacement_cost,
+        expected_lifespan_years: lifespan,
+        warranty_expiry_date, warranty_provider, notes,
+        health_score,
+        macrs_class: standards?.macrs_class_default ?? '5_year',
+      },
+    })
+
+    if (rpcError) {
+      console.error('[replaceAsset]', rpcError)
+      reportError(rpcError, { site: 'serverAction.properties.replaceAsset.rpc', orgId: membership.org_id })
+      return { error: 'Operation failed. Please try again.' }
+    }
+
+    const result = rpcData as { ok: boolean; reason?: string; new_asset_id?: string }
+    if (!result.ok) {
+      return {
+        error: result.reason === 'already_replaced_or_inactive'
+          ? 'This asset has already been replaced or deactivated.'
+          : 'Asset not found.',
+      }
+    }
+
+    await logAuditEvent({
+      orgId:      membership.org_id,
+      actorId:    user.id,
+      action:     'asset.replaced',
+      targetType: 'property_asset',
+      targetId:   oldAssetId,
+      metadata:   { new_asset_id: result.new_asset_id, property_id: propertyId, asset_type },
+    })
+
+    await fireManualLookup(membership.org_id, asset_type, make, model)
+
+    revalidatePath('/assets')
+    return { success: true }
+  } catch (err) {
+    console.error('[replaceAsset]', err)
+    reportError(err, { site: 'serverAction.properties.replaceAsset' })
     return { error: 'Failed to save asset' }
   }
 }

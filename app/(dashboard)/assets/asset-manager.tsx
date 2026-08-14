@@ -4,10 +4,10 @@ import { useState, useTransition, useActionState, useRef, useEffect, type ReactN
 import { useRouter } from 'next/navigation'
 import {
   Plus, X, Pencil, Loader2, Camera, Upload, Info, AlertTriangle, Check,
-  Package, BarChart2,
+  Package, BarChart2, Repeat,
 } from 'lucide-react'
 import {
-  createAsset, updateAsset, deactivateAsset, bulkImportAssets,
+  createAsset, updateAsset, deactivateAsset, replaceAsset, bulkImportAssets,
   type AssetActionState,
 } from '../properties/actions'
 import { healthLabel, healthColor, healthDot, healthBgStyle } from '@/lib/assets/health-score'
@@ -83,26 +83,70 @@ interface ScanResult {
   confidence:       'high' | 'medium' | 'low'
 }
 
+// ── Asset form mode ──────────────────────────────────────────────────────────
+// Extracted to named lookups/functions (rather than inline ternaries in
+// AssetForm) so the create/edit/replace three-way branch is expressed once,
+// outside the component's own cognitive-complexity budget.
+
+type AssetFormMode = 'replace' | 'edit' | 'create'
+
+function assetFormMode(isReplace: boolean, isEdit: boolean): AssetFormMode {
+  if (isReplace) return 'replace'
+  if (isEdit) return 'edit'
+  return 'create'
+}
+
+const ASSET_FORM_ID: Record<AssetFormMode, string> = {
+  replace: 'replace-asset-form',
+  edit:    'edit-asset-form',
+  create:  'add-asset-form',
+}
+
+const ASSET_FORM_SUBMIT_LABEL: Record<AssetFormMode, string> = {
+  replace: 'Replace Asset',
+  edit:    'Save Changes',
+  create:  'Add Asset',
+}
+
+function assetFormTitle(mode: AssetFormMode, replacingName?: string): string {
+  if (mode === 'replace') return `Replace ${replacingName}`
+  if (mode === 'edit') return 'Edit Asset'
+  return 'Add Asset'
+}
+
 // ── Asset form ────────────────────────────────────────────────────────────────
 
 function AssetForm({
   propertyId,
   standards,
   asset,
+  replacing,
   onClose,
 }: {
   propertyId: string
   standards:  AssetTypeStandard[]
   asset?:     PropertyAsset
+  /** The OLD asset being replaced — renders the same "new asset" fields as create, but submits to replaceAsset(). */
+  replacing?: PropertyAsset
   onClose:    () => void
 }) {
-  const isEdit = Boolean(asset)
+  const isEdit    = Boolean(asset)
+  const isReplace = Boolean(replacing)
+  const mode      = assetFormMode(isReplace, isEdit)
 
-  const boundCreate = createAsset.bind(null, propertyId)
-  const boundUpdate = asset ? updateAsset.bind(null, asset.id, propertyId) : boundCreate
+  const boundCreate  = createAsset.bind(null, propertyId)
+  const boundUpdate  = asset     ? updateAsset.bind(null, asset.id, propertyId)         : boundCreate
+  const boundReplace = replacing ? replaceAsset.bind(null, replacing.id, propertyId)    : boundCreate
+
+  const ACTION_BY_MODE: Record<AssetFormMode, typeof boundCreate> = {
+    replace: boundReplace,
+    edit:    boundUpdate,
+    create:  boundCreate,
+  }
+  const action = ACTION_BY_MODE[mode]
 
   const [state, formAction, pending] = useActionState(
-    isEdit ? boundUpdate : boundCreate,
+    action,
     null as AssetActionState | null
   )
 
@@ -113,7 +157,7 @@ function AssetForm({
   const fileInputRef = useRef<HTMLInputElement>(null)
 
   // Section 179 detection — infer from selected asset type + installation year
-  const [selectedType, setSelectedType] = useState<string>(asset?.asset_type ?? '')
+  const [selectedType, setSelectedType] = useState<string>(asset?.asset_type ?? replacing?.asset_type ?? '')
   const currentYear   = new Date().getFullYear()
   const defaultMacrs  = standards.find((s) => s.asset_type === selectedType)?.macrs_class_default
   const isSection179  = defaultMacrs === '5_year' && (
@@ -160,20 +204,17 @@ function AssetForm({
     }
   }
 
-  let submitButtonLabel: ReactNode
-  if (pending) {
-    submitButtonLabel = <><Loader2 className="w-4 h-4 animate-spin" /> Saving…</>
-  } else {
-    submitButtonLabel = isEdit ? 'Save Changes' : 'Add Asset'
-  }
+  const submitButtonLabel: ReactNode = pending
+    ? <><Loader2 className="w-4 h-4 animate-spin" /> Saving…</>
+    : ASSET_FORM_SUBMIT_LABEL[mode]
 
-  const formId = isEdit ? 'edit-asset-form' : 'add-asset-form'
+  const formId = ASSET_FORM_ID[mode]
 
   return (
     <Dialog
       open
       onClose={onClose}
-      title={isEdit ? 'Edit Asset' : 'Add Asset'}
+      title={assetFormTitle(mode, replacing?.name)}
       maxWidthClassName="max-w-2xl"
       footer={
         <>
@@ -265,7 +306,7 @@ function AssetForm({
                 name="name"
                 type="text"
                 required
-                defaultValue={asset?.name ?? ''}
+                defaultValue={asset?.name ?? replacing?.name ?? ''}
                 placeholder='e.g. "Main HVAC Unit", "Master Bath Water Heater"'
               />
             </div>
@@ -546,10 +587,12 @@ function AssetRow({
   asset,
   standards,
   onEdit,
+  onReplace,
 }: {
   asset:     PropertyAsset
   standards: AssetTypeStandard[]
   onEdit:    (a: PropertyAsset) => void
+  onReplace: (a: PropertyAsset) => void
 }) {
   const [removing, startRemove] = useTransition()
 
@@ -595,6 +638,9 @@ function AssetRow({
         <Button variant="ghost" onClick={() => onEdit(asset)} className="p-1.5" title="Edit asset">
           <Pencil className="w-3.5 h-3.5" />
         </Button>
+        <Button variant="ghost" onClick={() => onReplace(asset)} className="p-1.5" title="Replace asset">
+          <Repeat className="w-3.5 h-3.5" />
+        </Button>
         <Button
           variant="ghost"
           onClick={() => startRemove(async () => {
@@ -630,6 +676,7 @@ function PropertyAssetDetail({
   const [showAdd,    setShowAdd]    = useState(false)
   const [showImport, setShowImport] = useState(false)
   const [editing,    setEditing]    = useState<PropertyAsset | null>(null)
+  const [replacing,  setReplacing]  = useState<PropertyAsset | null>(null)
 
   const goodCount     = assets.filter((a) => (a.health_score ?? 0) >= 80).length
   const fairCount     = assets.filter((a) => { const s = a.health_score ?? 0; return s >= 60 && s < 80 }).length
@@ -711,6 +758,7 @@ function PropertyAssetDetail({
                       asset={a}
                       standards={standards}
                       onEdit={setEditing}
+                      onReplace={setReplacing}
                     />
                   ))}
                 </div>
@@ -726,6 +774,9 @@ function PropertyAssetDetail({
       )}
       {editing && (
         <AssetForm propertyId={property.id} standards={standards} asset={editing} onClose={() => setEditing(null)} />
+      )}
+      {replacing && (
+        <AssetForm propertyId={property.id} standards={standards} replacing={replacing} onClose={() => setReplacing(null)} />
       )}
       {showImport && (
         <CsvImportModal propertyId={property.id} standards={standards} onClose={() => setShowImport(false)} />

@@ -68,7 +68,11 @@ export interface HealthScoreBreakdown {
  */
 export function calculateHealthScoreBreakdown(
   asset:         Pick<PropertyAsset, 'installation_date' | 'expected_lifespan_years' | 'estimated_replacement_cost'>,
-  standards:     Pick<AssetTypeStandard, 'lifespan_min_years' | 'lifespan_max_years' | 'avg_replacement_cost_high'>,
+  standards:     Pick<AssetTypeStandard, 'lifespan_min_years' | 'lifespan_max_years' | 'avg_replacement_cost_high'>
+                 // Learned per-type shape (see asset-weibull-shape-fit.ts) — optional so
+                 // existing callers that don't carry it still satisfy this type; falls back
+                 // to the shared WEIBULL_SHAPE constant via weibullSurvivalFraction's default.
+                 & { weibull_shape?: number | null },
   repairHistory: AssetRepairSummary,
   weights:       ScoringWeights = DEFAULT_WEIGHTS,
 ): HealthScoreBreakdown {
@@ -86,7 +90,9 @@ export function calculateHealthScoreBreakdown(
     ?? Math.round((standards.lifespan_min_years + standards.lifespan_max_years) / 2))
     || 10  // guard against 0/0 standard ranges to prevent division by zero
 
-  const ageScore = Math.round(weibullSurvivalFraction(ageYears, lifespan) * weights.age)
+  const ageScore = Math.round(
+    weibullSurvivalFraction(ageYears, lifespan, standards.weibull_shape ?? undefined) * weights.age
+  )
 
   const repairsPerYear    = repairHistory.total_repairs / Math.max(ageYears, 1)
   // Penalty caps are proportional to weights.condition (0.5 × 40 = 20, 0.375 × 40 = 15
@@ -119,7 +125,8 @@ export function calculateHealthScoreBreakdown(
 
 export function calculateHealthScore(
   asset:         Pick<PropertyAsset, 'installation_date' | 'expected_lifespan_years' | 'estimated_replacement_cost'>,
-  standards:     Pick<AssetTypeStandard, 'lifespan_min_years' | 'lifespan_max_years' | 'avg_replacement_cost_high'>,
+  standards:     Pick<AssetTypeStandard, 'lifespan_min_years' | 'lifespan_max_years' | 'avg_replacement_cost_high'>
+                 & { weibull_shape?: number | null },
   repairHistory: AssetRepairSummary,
   weights:       ScoringWeights = DEFAULT_WEIGHTS,
 ): number {

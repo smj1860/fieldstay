@@ -16,6 +16,8 @@ import { handleCrewTurnoverCancelled } from '@/lib/inngest/functions/crew-turnov
 import { dailyMaintenanceScheduleCheck, maintenanceSchedulesOrg } from '@/lib/inngest/functions/cron/maintenance-schedules'
 import { dailyWorkOrderOps, workOrderOpsOrg } from '@/lib/inngest/functions/cron/work-order-ops'
 import { dailyAssetHealth, assetHealthOrg }   from '@/lib/inngest/functions/cron/asset-health'
+import { assetWeibullShapeFit }               from '@/lib/inngest/functions/cron/asset-weibull-shape-fit'
+import { assetWarrantyExpiryCheck }           from '@/lib/inngest/functions/cron/asset-warranty-expiry-check'
 import { dailyCommsRetention, commsRetentionOrg } from '@/lib/inngest/functions/cron/comms-retention'
 import { dailyGuestPiiRetention, guestPiiRetentionOrg } from '@/lib/inngest/functions/cron/guest-pii-retention'
 import { auditRetentionCron }            from '@/lib/inngest/functions/cron/audit-retention'
@@ -204,6 +206,8 @@ export const { GET, POST, PUT } = serve({
     workOrderOpsOrg,
     dailyAssetHealth,
     assetHealthOrg,
+    assetWeibullShapeFit,
+    assetWarrantyExpiryCheck,
     dailyCommsRetention,
     commsRetentionOrg,
     dailyGuestPiiRetention,
