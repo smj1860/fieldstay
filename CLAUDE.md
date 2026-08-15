@@ -1019,9 +1019,13 @@ and refactors. Violations will appear as SonarQube findings on the next scan.
 ### Complexity & Structure
 - **Cognitive complexity ≤ 15** per function — extract named helper functions,
   custom hooks, or named predicates to reduce branching. ESLint-enforced
-  (`sonarjs/cognitive-complexity`, `eslint.config.mjs`) — currently `warn`
-  while the 236 pre-existing violations surfaced at rollout get cleared,
-  same pattern as the jsx-a11y block; new code should not add to that count
+  (`sonarjs/cognitive-complexity`, `eslint.config.mjs`) at `warn` while the
+  pre-existing violations get cleared (236 at rollout, 36 as of 2026-08-15),
+  and ratcheted per-file by `npm run check:complexity` — new code at over 15
+  fails CI outright, and an already-complex function may not get worse. The
+  `--max-warnings` total does NOT cover this: it is fungible, and
+  `no-nested-conditional` alone is 92 of the 165 warnings, so there is ample
+  currency to pay for a complexity regression with
 - **Nesting depth ≤ 4** — use guard clauses and early returns to flatten nested
   `if`/`for`/`while`/`switch`/`try` blocks rather than indenting further, and
   extract named sibling functions rather than nesting closures more than 4
@@ -1351,6 +1355,16 @@ following them stops being a memory test. Five layers, checked in CI via
      15 already dead when it was written; never add to it.
 
 3. **`check:ui-classes`** — the raw `btn-*`/`badge-*`/`card` class grep.
+
+   **`check:complexity`** (`scripts/check-complexity-ratchet.mjs`, same
+   `checks` job) — per-file ratchet for `sonarjs/cognitive-complexity`, against
+   the shrink-only `scripts/complexity-baseline.json`. An unbaselined file may
+   have NO violation; a baselined file may not gain one; a baselined function
+   may not get WORSE (a count-only check cannot see 45 → 60); and an
+   improvement fails too, so the burn-down lands in the baseline diff instead
+   of leaving headroom a later regression grows back into. Seed with `--init`,
+   lock in a burn-down with `--update` (which refuses to grow the set). Kept
+   armed by `unit/guardrails/ci-gating.test.ts`.
 
 4. **DB invariant gate** (`scripts/check-db-invariants.mjs`, CI
    `db-invariants` job) — the live-schema invariants no code-side check can

@@ -83,6 +83,11 @@ jobs:
       - run: pnpm run check:ui-classes
       - run: pnpm exec tsc --noEmit
       - run: pnpm run lint
+      # Per-file cognitive-complexity ratchet. Separate from `lint` on purpose:
+      # --max-warnings bounds the TOTAL warning count, but that budget is
+      # fungible — a new function at complexity 40 passes it as long as the same
+      # PR cleared a nested ternary. This gates the per-file delta.
+      - run: pnpm run check:complexity
       - run: pnpm test
       - run: pnpm run build
 
