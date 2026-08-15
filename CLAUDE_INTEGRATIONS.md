@@ -395,6 +395,34 @@ OAuth2, same generic pattern. `lib/integrations/providers/hospitable.ts` /
 (`initial-sync.ts`, `incremental-sync.ts`, plus its own token-refresh cron/handler
 pair mirroring Kroger's).
 
+**Reservations are webhook-primary with a DAILY reconcile backstop.**
+`incremental-sync.ts` is an entity ROUTER — it fires only from
+`integration/hospitable.sync.requested`, sent only by the webhook path, and
+dispatches on `entity_id`/`entity_type`. So until 2026-08-15 reservation
+history was pulled exactly once, by `initial-sync.ts` on connect, and anything
+created while webhook delivery was broken never arrived and nothing noticed.
+(A rotated webhook secret produced exactly that window on a live customer.)
+`reservation-reconcile-cron.ts` (daily, 10:00 UTC) now dispatches one
+`integration/hospitable.reservation_reconcile.requested` per active connection
+and `reservation-reconcile-handler.ts` re-sweeps that connection's reservations
+— the same missed-webhook backstop OwnerRez has as the hourly leg of
+`ownerRezIncrementalSync`'s trigger array.
+
+Both the initial sync and the reconcile run the SAME pipeline, via
+`reservation-sync.ts`'s `syncHospitableReservations()` — fetch windows → upsert
+bookings → post revenue → regenerate turnovers. Do not re-roll it in a third
+caller: the org scoping, the two silent-drop guards (unmapped property, NULL
+stay dates) and the revenue-eligibility predicate all live there. The one knob
+that differs is `revenueMode` — `'all'` for connect/manual resync (idempotent,
+and firing broadly is what REPAIRS an org whose revenue post failed), and
+`'new-only'` for the daily reconcile (`'all'` there would fire one
+`booking/confirmed` per confirmed booking per org per day forever).
+
+The two other Hospitable crons cover neither reservations nor each other:
+`calendar-sync-cron.ts` (09:30 UTC) syncs calendar BLOCKS, which Hospitable's
+`/reservations` endpoint never represents, and `teammate-sync-cron.ts`
+(09:00 UTC) syncs crew.
+
 ---
 
 ## Inngest

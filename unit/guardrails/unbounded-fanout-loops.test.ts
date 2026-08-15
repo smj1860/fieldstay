@@ -281,10 +281,13 @@ function findOffenders(): string[] {
 // cron/comms-retention and cron/guest-pii-retention. Each entry states why the
 // iteration count is bounded by something the defining expression cannot show.
 const EXCEPTIONS: Record<string, string> = {
-  'lib/inngest/functions/hospitable/initial-sync.ts:136':
+  'lib/inngest/functions/hospitable/initial-sync.ts:131':
     'Bounded by one org\'s property count — this whole function is already per-org (`event.data.org_id`), and `propertyIds` comes from that org\'s just-synced properties (10-50 per CLAUDE.md\'s target user). The org scope lives on the function trigger rather than in the collection\'s defining expression, which is why the scan cannot see it.',
-  'lib/inngest/functions/hospitable/initial-sync.ts:218':
-    'Bounded by INITIAL_SYNC_LOOKAHEAD_MONTHS — `windows` is a fixed-length list of reservation date windows computed from a constant, not a query result. One step per window is the intended per-window retry boundary.',
+  // Moved out of initial-sync.ts on 2026-08-15, when the reservation pipeline
+  // was extracted so the new daily reconcile cron shares it rather than
+  // carrying a copy. Same loop, same justification, new home.
+  'lib/inngest/functions/hospitable/reservation-sync.ts:122':
+    'Bounded by the caller\'s lookaheadMonths — `windows` is a fixed-length list of reservation date windows computed from a constant (3 months at 7-day steps for both callers), not a query result. One step per window is the intended per-window retry boundary.',
   // The two REAL GAP entries that used to sit here (capex-projections.ts and
   // depreciation-ledger.ts, both one step.run per org over a platform-wide
   // scan) were deleted because the code was fixed, not because the check was

@@ -704,6 +704,18 @@ export type FieldStayEvents = {
     }
   }
 
+  // Daily missed-webhook backstop for reservations. Dispatched one per active
+  // connection by hospReservationReconcileCron; handled by
+  // hospReservationReconcileHandler. Hospitable reservations arrive ONLY via
+  // webhook otherwise — see the cron's header.
+  'integration/hospitable.reservation_reconcile.requested': {
+    data: {
+      user_id:          string
+      org_id:           string
+      external_user_id: string
+    }
+  }
+
   // ----------------------------------------------------------
   // Proactive token refresh (all OAuth providers)
   // ----------------------------------------------------------
