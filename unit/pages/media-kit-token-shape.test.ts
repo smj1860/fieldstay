@@ -6,10 +6,14 @@ vi.mock('next/navigation', () => ({
 vi.mock('@/lib/supabase/server', () => ({
   createServiceClient: vi.fn(),
 }))
-// next/font/google runs a real font fetch at import time in this environment.
-vi.mock('next/font/google', () => ({
-  Archivo:        () => ({ variable: 'archivo' }),
-  Source_Serif_4: () => ({ variable: 'serif' }),
+// next/font/local is a build-time macro the bundler rewrites; imported straight
+// into vitest it resolves to a stub that throws. (This mocked next/font/google
+// until 2026-08-15, when the fonts were self-hosted to stop the Google fetch
+// taking down production builds — the pages no longer import that module at
+// all, so the old mock silently stopped covering anything and this file failed
+// to load.)
+vi.mock('next/font/local', () => ({
+  default: () => ({ variable: 'font' }),
 }))
 vi.mock('@/app/g/kit/[media_kit_token]/media-kit-client', () => ({
   MediaKitClient: () => null,

@@ -1,16 +1,40 @@
 import type { Metadata, Viewport } from 'next'
 import { headers }                   from 'next/headers'
 import Script                        from 'next/script'
-import { Inter } from 'next/font/google'
+import localFont from 'next/font/local'
 import { Analytics } from '@vercel/analytics/next'
 import { SessionRefreshGuard } from '@/components/session-refresh-guard'
 import { CookieNotice } from '@/components/cookie-notice'
 import './globals.css'
 
-const inter = Inter({
-  subsets:  ['latin'],
+// SELF-HOSTED, not next/font/google.
+//
+// next/font/google downloads the font at BUILD time. When that fetch fails or
+// is throttled, Next still emits a CSS module referencing files it never
+// fetched, and the build dies with "Module not found:
+// [next]/internal/font/google/<font>.module.css". That took down two PRODUCTION
+// deploys on 2026-08-14 alone, both fixed by redeploying the identical commit —
+// the signature of a flaky third-party dependency sitting in the critical path
+// of every build.
+//
+// The woff2 files live in app/fonts/ and are the LATIN subset of each
+// family's VARIABLE font, so one file covers every weight the app uses.
+// Regenerate by fetching the family's css2 URL with a modern browser UA and
+// downloading the woff2 named under the `/* latin */` block.
+//
+// NOT public/. next/font/local hands the file to the bundler, which emits a
+// content-hashed copy under /_next/static/media and rewrites the @font-face to
+// point there — so a copy in public/ is never fetched by anything. It would
+// only be a second, unhashed, cache-bustable copy of the same bytes served on
+// a path the middleware matcher does not exclude for nested files, which is
+// what unit/lib/proxy-matcher.test.ts caught.
+const inter = localFont({
+  src:      './fonts/inter-latin-var.woff2',
   variable: '--font-inter',
   display:  'swap',
+  // The variable font's full axis range. next/font/local cannot infer this
+  // from the file, and omitting it makes every weight render at 400.
+  weight:   '100 900',
 })
 
 export const metadata: Metadata = {
