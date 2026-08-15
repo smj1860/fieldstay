@@ -54,6 +54,8 @@ Every asset with an installation date gets a health score from 0–100, shown as
 
 The score is calculated from the asset's age relative to its expected lifespan for that asset type, and adjusted based on its actual repair history (work orders logged against it) — an asset with a heavier repair history scores lower than an identical-age asset with a clean record. Scores recalculate automatically as time passes and as new work orders are linked to the asset; there's nothing to trigger manually.
 
+The age portion of the score doesn't decline in a straight line — it holds up for most of an asset's expected life and then falls off faster as it nears the end of that range, closer to how equipment actually tends to wear out. FieldStay periodically refines this curve per asset type using real replacement data collected across the platform (see Replacing an Asset below), so scoring gets more accurate for a given asset type over time as more of that data accumulates.
+
 An asset with no installation date on file shows as **Unknown** rather than a score, since there's nothing to calculate age from.
 
 Assets in Poor or End of Life condition are flagged with a warning banner on the property's asset view, and count toward the "needs attention" badge shown on the Assets page and property card.
@@ -78,13 +80,30 @@ When a 5-year MACRS asset is placed in service in the current tax year, you'll s
 
 ## Replacement Budgeting
 
-Because every asset has an estimated replacement cost and a health score, the Portfolio view lets you see, at a glance, how much capital spending is coming across your whole portfolio in the near term — useful when budgeting for next year or having a conversation with an owner about an upcoming replacement.
+Because every asset has an estimated replacement cost and a health score, the Portfolio view lets you see, at a glance, how much capital spending is coming across your whole portfolio in the near term. For the full 10-year forecast, a reserve-fund savings target, inflation-adjusted projections, and repair-vs-replace recommendations based on actual repair spend, see **Capital Planning**.
+
+---
+
+## Replacing an Asset
+
+When an asset actually gets swapped out — not just removed, but replaced with a new unit — click the **Replace** button (the circular arrows icon) on its row instead of adding a new asset separately and deactivating the old one by hand. This opens the same form as adding a new asset, but on save it does two things together automatically:
+
+- Creates the new asset record with the details you entered
+- Marks the old asset replaced and inactive, and links the two records together
+
+Doing this as one step (rather than adding a new asset and separately deactivating the old one) is what lets FieldStay capture how old an asset actually was when it was replaced — which is also the real-world data referenced above that improves health scoring for that asset type over time.
+
+---
+
+## Warranty Alerts
+
+If you've entered a **warranty expiry date** on an asset, FieldStay checks daily for warranties expiring within the next 30 days and sends a one-time notification (via the bell icon) when one crosses into that window, naming the asset and its warranty provider so you know before coverage lapses. You won't get a second alert for the same warranty once it's fired.
 
 ---
 
 ## Removing an Asset
 
-If an asset is replaced or removed from a property, click the **X** on its row to deactivate it rather than deleting your history — deactivated assets stop showing up in health tracking but the record (and its depreciation history, if any) is preserved.
+If an asset is being retired without a direct replacement — removed from service rather than swapped for a new unit — click the **X** on its row to deactivate it rather than deleting your history. Deactivated assets stop showing up in health tracking but the record (and its depreciation history, if any) is preserved. If the asset IS being swapped for a new one, use **Replacing an Asset** above instead — it keeps the age-at-replacement data FieldStay uses to improve scoring, which a plain deactivate-then-add-new does not.
 
 ---
 

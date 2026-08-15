@@ -16,7 +16,7 @@ The bell icon in the dashboard header shows two kinds of items mixed together:
 
 These aren't "read" or "dismissed" individually — assign the turnover, resolve the work order, restock the item, or fix the vendor's compliance document, and the alert clears itself because the underlying condition is no longer true.
 
-**Event notifications** — one-time things that already happened (a work order was completed, a vendor was dispatched, etc.). These stay in the list until you open them, at which point they're marked read. Unlike the live alerts above, these don't resolve themselves — they're a log of what occurred.
+**Event notifications** — one-time things that already happened, or a heads-up about something coming up (a work order was completed, a vendor was dispatched, an asset's warranty is expiring within 30 days, etc.). These stay in the list until you open them, at which point they're marked read. Unlike the live alerts above, these don't resolve themselves — they're a log of what occurred, not a condition that clears on its own.
 
 Each notification links directly to the relevant turnover, work order, or page — click it to go straight there.
 
