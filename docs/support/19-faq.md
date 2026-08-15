@@ -74,6 +74,30 @@ For reviews on Google, Booking.com, or platforms that don't sync through your PM
 
 ---
 
+## What's the difference between deactivating an asset and replacing it?
+
+Deactivating (the **X** button on an asset row) is for retiring something without a direct swap-in — it stops the asset from showing up in health tracking but keeps its history. Replacing (the circular-arrows **Replace** button) is for when a new unit is actually taking an old one's place: it creates the new asset and marks the old one replaced in a single step, which is also what lets FieldStay record how old the old one actually was when it went out of service. If you add a new asset separately and just deactivate the old one by hand instead of using Replace, that age-at-replacement data isn't captured.
+
+---
+
+## Does FieldStay warn me before an asset's warranty expires?
+
+Yes, if you've entered a warranty expiry date on the asset. FieldStay checks daily and sends a one-time notification through the bell icon when a warranty is within 30 days of expiring, naming the asset and its warranty provider. It won't notify you a second time for the same warranty once that first alert has gone out.
+
+---
+
+## How does FieldStay decide whether to recommend repairing or replacing something?
+
+On the Capital Planning page, FieldStay flags an asset for replacement when its trailing 12-month repair spending (plus an estimate for lost booking revenue if a repair kept the property offline) reaches roughly half of its estimated replacement cost, or when repair costs are climbing sharply year over year while the asset's health score is already below "Good." This runs off actual repair history, so it's independent of the age-based 10-year forecast — a newer asset with a rough repair record can get flagged before an older, well-maintained one ever would.
+
+---
+
+## What is Capital Planning?
+
+Capital Planning is the budgeting view built on top of your asset data: a 10-year replacement cost forecast, a recommended monthly reserve fund, repair-vs-replace flags, and a What-If tool that shows the real-dollar cost of inflation and of deferring a replacement. Find it in the sidebar under Portfolio (Admins and Managers). It's included on every plan.
+
+---
+
 ## How do I get help with something not covered here?
 
 Use the chat widget in the bottom right corner of your dashboard for immediate questions. For issues that need account-level investigation, email **support@fieldstay.app** with your organization name, which property is affected, and a description of the issue.
