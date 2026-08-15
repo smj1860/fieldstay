@@ -1,23 +1,28 @@
 import { notFound } from 'next/navigation'
-import { Archivo, Source_Serif_4 } from 'next/font/google'
+import localFont from 'next/font/local'
 import { createServiceClient } from '@/lib/supabase/server'
 import { isUuid } from '@/lib/validation/uuid'
 import { unwrap } from '@/lib/supabase/unwrap'
 import { PrintKit } from './print-kit'
 import type { GuidebookSponsor } from '@/types/database'
 
-const archivo = Archivo({
-  subsets: ['latin'],
-  weight:  ['500', '600', '700', '800', '900'],
+// Self-hosted — see the note in app/layout.tsx for why these are not
+// next/font/google. Latin subset of each VARIABLE font, so one file covers
+// every weight this page asks for.
+const archivo = localFont({
+  src:      '../../../../fonts/archivo-latin-var.woff2',
   variable: '--font-archivo',
-  display: 'swap',
+  display:  'swap',
+  // Covers the 500-900 range this page uses; the file is the full axis.
+  weight:   '100 900',
 })
 
-const sourceSerif4 = Source_Serif_4({
-  subsets: ['latin'],
-  weight:  ['400', '600'],
+const sourceSerif4 = localFont({
+  src:      '../../../../fonts/source-serif-4-latin-var.woff2',
   variable: '--font-source-serif',
-  display: 'swap',
+  display:  'swap',
+  // Covers the 400/600 this page uses.
+  weight:   '200 900',
 })
 
 export default async function PrintKitPage({
