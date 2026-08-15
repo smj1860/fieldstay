@@ -12,6 +12,7 @@ import { fetchAllRows, SUPABASE_MAX_ROWS } from '@/lib/inngest/paginate'
 import { rebaseParFromTarget } from '@/lib/inventory/par-engine'
 import type { InventoryCategory, ParMode, ParSmartGroup, PoStatus, TablesInsert, TablesUpdate } from '@/types/database'
 import { Constants } from '@/types/database'
+import { parseQuantityInput } from '@/lib/inventory/quantity'
 
 /**
  * Deterministic, locale-independent string ordering for CANONICALISATION.
@@ -375,8 +376,12 @@ export async function submitInventoryCount(
     for (const [key, value] of formData.entries()) {
       if (!key.startsWith('item_')) continue
       const itemId = key.slice('item_'.length)
-      const qty    = parseInt(value as string, 10)
-      if (isNaN(qty) || qty < 0) continue
+      // parseQuantityInput, not parseInt: the counts are numeric(12,2) and
+      // parseInt('2.5') is 2 — a half-case count silently recorded as a whole
+      // one. Returns null for empty/unparseable/negative, which this skips the
+      // same way the old isNaN guard did.
+      const qty    = parseQuantityInput(value as string)
+      if (qty === null) continue
 
       countItems.push({
         count_id:           count.id,

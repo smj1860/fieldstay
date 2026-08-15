@@ -18,6 +18,7 @@ import { orgScopedStoragePath } from '@/lib/storage/object-path'
 import { invalidateScope } from '@/lib/dexie/sync/scope'
 
 import { reportError } from '@/lib/observability/report-error'
+import { quantizeQuantity } from '@/lib/inventory/quantity'
 function isAssetDiscovered(asset: Pick<PropertyAssetRow, 'make' | 'model' | 'is_na' | 'photo_url'>): boolean {
   return asset.is_na === 1 || asset.make !== '' || asset.model !== '' || asset.photo_url !== ''
 }
@@ -363,7 +364,12 @@ export function useTurnoverActions(id: string) {
 
     const next: TurnoverInventoryCounts = { ...counts }
     if (newQty === null) delete next[itemId]
-    else next[itemId] = Math.max(0, newQty)
+    // Quantized HERE because this is the one chokepoint every crew count
+    // passes through — the typed input and both +/- buttons. The buttons do
+    // arithmetic on a fractional count (2.5 - 1), and JS arithmetic produces
+    // values numeric(12,2) cannot hold; unrounded, a 0.30000000000000004
+    // reaches the submit payload and the route rejects the whole count.
+    else next[itemId] = quantizeQuantity(Math.max(0, newQty))
 
     setStagedCounts({ turnoverId: id, values: next })
     if (!turnover?.inventory_started_at) {

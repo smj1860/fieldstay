@@ -3,6 +3,7 @@
 import { useState } from 'react'
 import { Minus, Plus, StickyNote } from 'lucide-react'
 import { Badge } from '@/components/ui/Badge'
+import { parseQuantityInput, QUANTITY_INPUT_STEP } from '@/lib/inventory/quantity'
 
 type StockStatus = 'uncounted' | 'critical' | 'low' | 'healthy'
 type BadgeTone = 'slate' | 'red' | 'amber' | 'green'
@@ -83,7 +84,9 @@ export function InventoryItemCard({
   }
 
   const handleInput = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const next = Math.max(0, parseInt(e.target.value) || 0)
+    // parseInt('2.5') is 2. Counts are numeric(12,2), so parse as a decimal
+    // and treat unparseable input as 0 exactly as the `|| 0` did.
+    const next = parseQuantityInput(e.target.value) ?? 0
     setQty(next)
     onQuantityChange?.(id, next)
   }
@@ -165,6 +168,10 @@ export function InventoryItemCard({
           <input
             type="number"
             min={0}
+            // Without an explicit step the implied step of 1 makes 2.5 fail
+            // HTML validation on a field whose column is numeric(12,2).
+            step={QUANTITY_INPUT_STEP}
+            inputMode="decimal"
             value={qty}
             onChange={handleInput}
             onKeyDown={handleKeyDown}
