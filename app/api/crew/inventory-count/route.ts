@@ -5,6 +5,7 @@ import { logAuditEvents } from '@/lib/audit'
 import { reportQueryError, unwrapList } from '@/lib/supabase/unwrap'
 import { fetchAllRows } from '@/lib/inngest/paginate'
 import { UUID_RE } from '@/lib/validation/uuid'
+import { isStorableQuantity } from '@/lib/inventory/quantity'
 
 /**
  * POST /api/crew/inventory-count
@@ -50,9 +51,10 @@ const MAX_COUNT_ITEMS = 1000
  * `counts` arrives as `Record<string, number>` — a TypeScript assertion over
  * `await request.json()`, which is not a runtime check of anything.
  *
- * inventory_count_items.quantity_counted is `integer NOT NULL`, so a float, a
- * string, a NaN or an Infinity does not get rejected at the boundary: it
- * reaches Postgres, raises 22P02/22003, and the route answers 500. lib/dexie/
+ * inventory_count_items.quantity_counted is `numeric(12,2) NOT NULL`, so a
+ * string, a NaN, an Infinity or a negative does not get rejected at the
+ * boundary: it reaches Postgres, raises 22P02/22003, and the route answers 500.
+ * (Fractions ARE storable now — see 20260815152007.) lib/dexie/
  * net.ts treats >=500 as TRANSIENT, so that submission then retries FOREVER —
  * a poison pill that never drains, keeps the logout "unsynced work" warning
  * armed permanently, and is invisible because a transport failure never sets
@@ -70,9 +72,11 @@ function invalidCountsReason(counts: unknown): string | null {
 
   for (const [itemId, qty] of entries) {
     if (!UUID_RE.test(itemId)) return 'Malformed count payload'
-    if (typeof qty !== 'number' || !Number.isInteger(qty) || qty < 0) {
-      return 'Malformed count payload'
-    }
+    // Fractional counts are VALID as of 20260815152007 — the column is
+    // numeric(12,2) and the RPC's jsonb_to_recordset cast is `qty numeric`.
+    // What stays terminal is what Postgres still cannot store: a non-number, a
+    // NaN, an Infinity, a negative, or a value past the column's range.
+    if (!isStorableQuantity(qty)) return 'Malformed count payload'
   }
   return null
 }

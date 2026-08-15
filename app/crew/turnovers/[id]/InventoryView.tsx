@@ -5,6 +5,7 @@ import { Button } from '@/components/ui/Button'
 import { retryFailedMutation } from '@/lib/dexie/helpers'
 import type { TurnoverRow } from '@/lib/dexie/schema'
 import type { TurnoverActions } from './use-turnover-actions'
+import { parseQuantityInput, QUANTITY_INPUT_STEP } from '@/lib/inventory/quantity'
 
 export function InventoryView({
   turnover,
@@ -69,16 +70,29 @@ export function InventoryView({
                           <input
                             type="number"
                             min={0}
+                            // Counts are numeric(12,2) — half a case, 1.5
+                            // gallons. Without an explicit step the input's
+                            // implied step of 1 makes "2.5" fail HTML
+                            // validation, so the field would look like it
+                            // accepts decimals and then refuse them.
+                            step={QUANTITY_INPUT_STEP}
+                            // Decimal keypad on phones — this is the crew's
+                            // primary surface and it is used one-handed at a
+                            // property.
+                            inputMode="decimal"
                             // Empty, not 0, until it is actually counted — and
                             // clearing the field returns it to uncounted
                             // rather than asserting a zero.
                             value={qty ?? ''}
                             placeholder="—"
                             onChange={(e) => {
-                              const raw = e.target.value.trim()
-                              if (raw === '') return void handleCountChange(item.id, null)
-                              const parsed = Number.parseInt(raw, 10)
-                              if (!Number.isNaN(parsed)) void handleCountChange(item.id, parsed)
+                              const raw = e.target.value
+                              if (raw.trim() === '') return void handleCountChange(item.id, null)
+                              // parseQuantityInput, not parseInt: parseInt('2.5')
+                              // is 2, so a half-case count was silently recorded
+                              // as a whole one with nothing reporting it.
+                              const parsed = parseQuantityInput(raw)
+                              if (parsed !== null) void handleCountChange(item.id, parsed)
                             }}
                             onKeyDown={(e) => {
                               if (e.key !== 'Enter') return

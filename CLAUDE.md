@@ -236,8 +236,17 @@ org_inventory_catalog       — Templates Hub: org's own editable copy of invent
 inventory_templates         — org-level inventory template. Since 2026-07-21, an org can
                               have more than one (unique on (org_id, name), not just org_id)
 inventory_template_items    — Has preferred_brand column
-inventory_items             — property-level. Has preferred_brand (overrides template brand)
+inventory_items             — property-level. Has preferred_brand (overrides template brand).
+                              current_quantity is numeric(12,2), NOT integer (20260815152007) —
+                              real stock is fractional (half a case, 1.5 gallons). par_level was
+                              already numeric. Parse every quantity input through
+                              lib/inventory/quantity.ts: parseInt('2.5') is 2, which is how a
+                              half-case count silently became a whole one
 inventory_counts            — periodic count sessions
+inventory_count_items       — quantity_counted is numeric(12,2) (20260815152007). The
+                              apply_inventory_counts RPC casts it as `qty numeric` in its
+                              jsonb_to_recordset — that cast, not the column type, is what
+                              rejects a fraction, so the two must change together
 purchase_orders             — Has po_status: draft|sent|acknowledged|ordered|received|cancelled
 purchase_order_items
 ```

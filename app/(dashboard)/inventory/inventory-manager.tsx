@@ -24,6 +24,7 @@ import { Input } from '@/components/ui/Input'
 import { Tabs, type TabItem } from '@/components/ui/Tabs'
 import { InlineAlert } from '@/components/ui/InlineAlert'
 import type { CartBuildResult } from '@/lib/kroger/types'
+import { parseQuantityInput, QUANTITY_INPUT_STEP } from '@/lib/inventory/quantity'
 
 // ── Local types ───────────────────────────────────────────────────────────────
 
@@ -215,7 +216,7 @@ function ParLevelEditor({ item }: { item: InventoryItem }) {
       <Input
         type="number"
         min={0}
-        step={0.5}
+        step={QUANTITY_INPUT_STEP}
         value={value}
         onChange={(e) => setValue(e.target.value)}
         onKeyDown={handleKeyDown}
@@ -473,7 +474,7 @@ function AddItemsModal({
                             id={`par-level-${catalogItem.id}`}
                             type="number"
                             min={0}
-                            step={0.5}
+                            step={QUANTITY_INPUT_STEP}
                             value={parLevel}
                             onChange={(e) => updateSelected(catalogItem.id, 'parLevel', e.target.value)}
                             className="py-1.5 px-2 text-sm w-full"
@@ -528,7 +529,7 @@ function AddItemsModal({
                   id="custom-par-level"
                   type="number"
                   min={0}
-                  step={0.5}
+                  step={QUANTITY_INPUT_STEP}
                   value={customParLevel}
                   onChange={(e) => setCustomParLevel(e.target.value)}
                 />
@@ -642,6 +643,8 @@ function RunCountModal({
                           name={`item_${item.id}`}
                           type="number"
                           min={0}
+                          step={QUANTITY_INPUT_STEP}
+                          inputMode="decimal"
                           defaultValue={item.current_quantity}
                           className="py-1 px-2 text-sm w-20 text-right"
                         />
@@ -743,8 +746,10 @@ function CategoryRows({
                   <Input
                     type="number"
                     min={0}
+                    step={QUANTITY_INPUT_STEP}
+                    inputMode="decimal"
                     value={pendingCounts[item.id] ?? item.current_quantity}
-                    onChange={(e) => onQuantityEdit(item.id, Math.max(0, parseInt(e.target.value, 10) || 0))}
+                    onChange={(e) => onQuantityEdit(item.id, parseQuantityInput(e.target.value) ?? 0)}
                     aria-label={`${item.name} current count`}
                     className="py-0.5 px-1.5 w-14 text-sm text-right tabular-nums font-medium"
                   />

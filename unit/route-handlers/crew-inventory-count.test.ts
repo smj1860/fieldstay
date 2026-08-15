@@ -212,8 +212,9 @@ describe('POST /api/crew/inventory-count', () => {
     })
 
     // `counts` is `Record<string, number>` only as a TypeScript assertion over
-    // request.json(). quantity_counted is `integer NOT NULL`, so anything else
-    // reached Postgres, raised 22P02/22003, and earned a 500 — which
+    // request.json(). quantity_counted is `numeric(12,2) NOT NULL`, so a value
+    // Postgres cannot store still
+    // reaches Postgres, raises 22P02/22003, and earns a 500 — which
     // lib/dexie/net.ts treats as TRANSIENT, so the submission retried FOREVER.
     // A poison pill that never drains, keeps the logout "unsynced work"
     // warning armed permanently, and is invisible to the dead-letter banner
@@ -221,9 +222,9 @@ describe('POST /api/crew/inventory-count', () => {
     it.each([
       ['a non-uuid item id',   { not_a_uuid: 5 }],
       ['a string quantity',    { '3f2504e0-4f89-41d3-9a0c-0305e82c3301': '5' }],
-      ['a fractional quantity',{ '3f2504e0-4f89-41d3-9a0c-0305e82c3301': 2.5 }],
       ['a negative quantity',  { '3f2504e0-4f89-41d3-9a0c-0305e82c3301': -1 }],
       ['NaN',                  { '3f2504e0-4f89-41d3-9a0c-0305e82c3301': Number.NaN }],
+      ['Infinity',             { '3f2504e0-4f89-41d3-9a0c-0305e82c3301': Number.POSITIVE_INFINITY }],
       ['an array',             [] as unknown],
     ])('rejects %s with a terminal 400 rather than a 500 the outbox retries forever', async (_label, counts) => {
       const supabase = makeSupabase({ properties: [{ data: { id: PROP_ID }, error: null }] })
@@ -234,6 +235,32 @@ describe('POST /api/crew/inventory-count', () => {
       expect(res.status).toBe(400)
       expect(supabase.calls.some((c) => c.table === 'inventory_counts')).toBe(false)
       expect(inngest.send).not.toHaveBeenCalled()
+    })
+
+    // Counts became numeric(12,2) in 20260815152007 — real stock is not always
+    // whole (half a case, 1.5 gallons). Before that this exact payload earned a
+    // terminal 400 from the boundary check, so this test is the inversion of a
+    // rule that used to be enforced here rather than new ground.
+    it('accepts a fractional count and stores it unrounded', async () => {
+      const supabase = makeSupabase({
+        properties:            [{ data: { id: PROP_ID }, error: null }],
+        inventory_counts:      [{ data: null, error: null }, { data: { id: 'count_1' }, error: null }],
+        inventory_count_items: [{ data: null, error: null }],
+        inventory_items:       [{ data: [{ id: ITEM_ID }], error: null }, { data: null, error: null }],
+      })
+      mockAuthed(supabase)
+
+      const res = await POST(
+        postRequest({ propertyId: PROP_ID, counts: { [ITEM_ID]: 2.5 }, notes: '' }),
+      )
+
+      expect(res.status).toBe(200)
+      const itemsInsert = supabase.calls.find(
+        (c) => c.table === 'inventory_count_items' && c.method === 'insert',
+      )
+      expect(itemsInsert!.args[0]).toEqual([
+        { count_id: 'count_1', inventory_item_id: ITEM_ID, quantity_counted: 2.5 },
+      ])
     })
 
     // inventory_count_items.inventory_item_id carries a real FK, so an id the
