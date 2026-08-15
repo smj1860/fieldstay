@@ -88,7 +88,14 @@ export const jobRunRecorder = inngest.createFunction(
             function_id:   bareId,
             function_name: bareId,
             run_id:        runId,
-            status:        error ? 'failed' : 'completed',
+            // 'succeeded', NOT 'completed'. system_job_runs_status_check
+            // allows exactly ('started','succeeded','failed'), and the wrong
+            // literal is rejected per-row with 23514 — which this function
+            // logs rather than throws, so it failed SILENTLY in production
+            // for 47 minutes and left the ledger empty while the recorder
+            // looked healthy. A mocked Supabase cannot enforce a CHECK
+            // constraint, so the unit test passed on 'completed' too.
+            status:        error ? 'failed' : 'succeeded',
             attempt:       0,
             started_at:    new Date().toISOString(),
             finished_at:   new Date().toISOString(),

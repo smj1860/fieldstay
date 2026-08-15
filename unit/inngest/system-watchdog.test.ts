@@ -323,7 +323,10 @@ describe('jobRunRecorder', () => {
 
     const row = writes[0]!.rows as { function_id: string; status: string }
     expect(row.function_id).toBe('cron-daily-wrapup')
-    expect(row.status).toBe('completed')
+    // 'succeeded' is one of the three values system_job_runs_status_check
+    // permits. This assertion is the only thing in the suite pinning it —
+    // the mocked client happily accepted the wrong literal.
+    expect(row.status).toBe('succeeded')
     expect(WATCHED_JOBS.some((j) => j.id === row.function_id)).toBe(true)
   })
 
