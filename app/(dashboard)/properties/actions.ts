@@ -616,6 +616,60 @@ function parseAssetNumericFields(formData: FormData):
   }
 }
 
+interface ParsedAssetFormFields {
+  name:                       string
+  asset_type:                 AssetType
+  make:                       string | null
+  model:                      string | null
+  serial_number:              string | null
+  installation_date:          string | null
+  warranty_expiry_date:       string | null
+  warranty_provider:          string | null
+  notes:                      string | null
+  purchase_price:             number | null
+  estimated_replacement_cost: number | null
+  expected_lifespan_years:    number | null
+}
+
+/**
+ * Parses and validates the asset form fields shared by createAsset and
+ * replaceAsset — both forms carry the same "new asset" fields, since
+ * replaceAsset's form is the create form in disguise (see AssetForm's
+ * isReplace mode in asset-manager.tsx). Factored out to remove the
+ * duplicate parsing block SonarCloud flagged between the two actions.
+ */
+function parseAssetFormFields(formData: FormData): { fields: ParsedAssetFormFields } | { error: string } {
+  const name              = (formData.get('name') as string)?.trim()
+  const asset_type_raw    = formData.get('asset_type') as string | null
+  const make              = (formData.get('make') as string)?.trim() || null
+  const model              = (formData.get('model') as string)?.trim() || null
+  const serial_number     = (formData.get('serial_number') as string)?.trim() || null
+  const installation_date = (formData.get('installation_date') as string) || null
+  const warranty_expiry_date = (formData.get('warranty_expiry_date') as string) || null
+  const warranty_provider    = (formData.get('warranty_provider') as string)?.trim() || null
+  const notes                = (formData.get('notes') as string)?.trim() || null
+
+  if (!name)           return { error: 'Asset name is required' }
+  if (!asset_type_raw) return { error: 'Asset type is required' }
+
+  const numbers = parseAssetNumericFields(formData)
+  if ('error' in numbers) return { error: numbers.error }
+
+  // property_assets.asset_type is an enum with no default, so there is no
+  // safe value to fall back to — reject rather than coerce.
+  if (!isDbEnum('asset_type', asset_type_raw)) {
+    return { error: `Unrecognized asset type: ${asset_type_raw}` }
+  }
+
+  return {
+    fields: {
+      name, asset_type: asset_type_raw, make, model, serial_number,
+      installation_date, warranty_expiry_date, warranty_provider, notes,
+      ...numbers.fields,
+    },
+  }
+}
+
 /**
  * Confirms `propertyId` exists and belongs to `orgId`. Shared by createAsset
  * and replaceAsset — factored out so each stays under the cognitive-complexity
@@ -704,29 +758,13 @@ export async function createAsset(
   try {
     const { supabase, membership, user } = await requireOrgRole(PROPERTY_WRITE_ROLES)
 
-    const name              = (formData.get('name') as string)?.trim()
-    const asset_type_raw    = formData.get('asset_type') as string | null
-    const make              = (formData.get('make') as string)?.trim() || null
-    const model             = (formData.get('model') as string)?.trim() || null
-    const serial_number     = (formData.get('serial_number') as string)?.trim() || null
-    const installation_date = (formData.get('installation_date') as string) || null
-    const warranty_expiry_date = (formData.get('warranty_expiry_date') as string) || null
-    const warranty_provider    = (formData.get('warranty_provider') as string)?.trim() || null
-    const notes                = (formData.get('notes') as string)?.trim() || null
-
-    if (!name)           return { error: 'Asset name is required' }
-    if (!asset_type_raw) return { error: 'Asset type is required' }
-
-    const numbers = parseAssetNumericFields(formData)
-    if ('error' in numbers) return { error: numbers.error }
-    const { purchase_price, estimated_replacement_cost, expected_lifespan_years } = numbers.fields
-
-    // property_assets.asset_type is an enum with no default, so there is no
-    // safe value to fall back to — reject rather than coerce.
-    if (!isDbEnum('asset_type', asset_type_raw)) {
-      return { error: `Unrecognized asset type: ${asset_type_raw}` }
-    }
-    const asset_type: AssetType = asset_type_raw
+    const parsed = parseAssetFormFields(formData)
+    if ('error' in parsed) return { error: parsed.error }
+    const {
+      name, asset_type, make, model, serial_number, installation_date,
+      warranty_expiry_date, warranty_provider, notes,
+      purchase_price, estimated_replacement_cost, expected_lifespan_years,
+    } = parsed.fields
 
     const propertyCheck = await validateAssetProperty(supabase, propertyId, membership.org_id, 'createAsset')
     if ('error' in propertyCheck) return { error: propertyCheck.error }
@@ -813,27 +851,13 @@ export async function replaceAsset(
   try {
     const { supabase, membership, user } = await requireOrgRole(PROPERTY_WRITE_ROLES)
 
-    const name              = (formData.get('name') as string)?.trim()
-    const asset_type_raw    = formData.get('asset_type') as string | null
-    const make              = (formData.get('make') as string)?.trim() || null
-    const model              = (formData.get('model') as string)?.trim() || null
-    const serial_number     = (formData.get('serial_number') as string)?.trim() || null
-    const installation_date = (formData.get('installation_date') as string) || null
-    const warranty_expiry_date = (formData.get('warranty_expiry_date') as string) || null
-    const warranty_provider    = (formData.get('warranty_provider') as string)?.trim() || null
-    const notes                = (formData.get('notes') as string)?.trim() || null
-
-    if (!name)           return { error: 'Asset name is required' }
-    if (!asset_type_raw) return { error: 'Asset type is required' }
-
-    const numbers = parseAssetNumericFields(formData)
-    if ('error' in numbers) return { error: numbers.error }
-    const { purchase_price, estimated_replacement_cost, expected_lifespan_years } = numbers.fields
-
-    if (!isDbEnum('asset_type', asset_type_raw)) {
-      return { error: `Unrecognized asset type: ${asset_type_raw}` }
-    }
-    const asset_type: AssetType = asset_type_raw
+    const parsed = parseAssetFormFields(formData)
+    if ('error' in parsed) return { error: parsed.error }
+    const {
+      name, asset_type, make, model, serial_number, installation_date,
+      warranty_expiry_date, warranty_provider, notes,
+      purchase_price, estimated_replacement_cost, expected_lifespan_years,
+    } = parsed.fields
 
     const propertyCheck = await validateAssetProperty(supabase, propertyId, membership.org_id, 'replaceAsset')
     if ('error' in propertyCheck) return { error: propertyCheck.error }
