@@ -7,6 +7,7 @@ import { TriggerLedgerButton }       from './trigger-ledger-button'
 import { TriggerProjectionsButton }  from './trigger-projections-button'
 import { StatusDropdown }            from './status-dropdown'
 import { PropertyFilterSelect }      from './property-filter-select'
+import { WhatIfPanel }               from './what-if-panel'
 import { Card }                      from '@/components/ui/Card'
 import { buttonVariantClass }        from '@/components/ui/Button'
 import type { Metadata }             from 'next'
@@ -57,7 +58,7 @@ export default async function CapitalPlanningPage({
   // Four independent reads in one wave. The replacement-status read used to
   // be a fifth here; it moved to a second wave below because it depends on
   // the capex milestone resolved in this one — see the note there.
-  const [milestoneRes, deprMilestoneRes, propertiesRes, repairVsReplaceRes] = await Promise.all([
+  const [milestoneRes, deprMilestoneRes, propertiesRes, repairVsReplaceRes, orgSettingsRes] = await Promise.all([
     // CapEx projection
     supabase
       .from('org_milestones')
@@ -94,6 +95,13 @@ export default async function CapitalPlanningPage({
       .eq('recommendation', 'replace')
       .order('computed_at', { ascending: false })
       .limit(SUPABASE_MAX_ROWS),
+
+    // Default inflation rate for the What-If panel.
+    supabase
+      .from('organizations')
+      .select('capex_inflation_rate_pct')
+      .eq('id', membership.org_id)
+      .single(),
   ])
 
   // Throws to app/(dashboard)/capital-planning/error.tsx on a failed read, so
@@ -106,6 +114,7 @@ export default async function CapitalPlanningPage({
     repairVsReplaceRes,
     { ...ctx, extra: { query: 'repair_vs_replace' } },
   )
+  const orgSettings = unwrap(orgSettingsRes, { ...ctx, extra: { query: 'org_settings' } })
 
   const payload     = milestone?.value as CapExProjectionPayload | null
   const projections = payload?.projections ?? {}
@@ -356,6 +365,15 @@ export default async function CapitalPlanningPage({
             {selectedProperty ? ` for ${selectedProperty.name}` : ' across all properties'}.
           </p>
         </Card>
+      )}
+
+      {/* What-If: inflation + deferral scenario modeling */}
+      {payload && Object.keys(filteredProjections).length > 0 && (
+        <WhatIfPanel
+          projections={filteredProjections}
+          currentYear={currentYear}
+          initialInflationRatePct={orgSettings?.capex_inflation_rate_pct ?? 4.0}
+        />
       )}
 
       {/* 10-year bar chart */}

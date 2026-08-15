@@ -106,3 +106,43 @@ export async function updateReplacementStatus(
     return { error: 'Update failed' }
   }
 }
+
+// ── What-If scenario: default inflation rate ────────────────────────────────
+
+export async function updateCapexInflationRate(ratePct: number): Promise<{ error?: string }> {
+  try {
+    const { supabase, membership, user } = await requireOrgMember()
+
+    // Mirrors the DB CHECK (0-25) — validated here too so a bad value fails
+    // with a real message instead of a raw constraint-violation error.
+    if (!Number.isFinite(ratePct) || ratePct < 0 || ratePct > 25) {
+      return { error: 'Inflation rate must be between 0% and 25%.' }
+    }
+
+    const { error } = await supabase
+      .from('organizations')
+      .update({ capex_inflation_rate_pct: ratePct })
+      .eq('id', membership.org_id)
+
+    if (error) {
+      console.error('[updateCapexInflationRate]', error)
+      return { error: 'Update failed' }
+    }
+
+    await logAuditEvent({
+      orgId:      membership.org_id,
+      actorId:    user.id,
+      action:     'asset.capex_inflation_rate.updated',
+      targetType: 'org',
+      targetId:   membership.org_id,
+      metadata:   { capex_inflation_rate_pct: ratePct },
+    })
+
+    revalidatePath('/capital-planning')
+    return {}
+  } catch (err) {
+    console.error('[updateCapexInflationRate]', err)
+    reportError(err, { site: 'serverAction.capital-planning.updateCapexInflationRate' })
+    return { error: 'Update failed' }
+  }
+}

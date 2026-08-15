@@ -36,6 +36,7 @@ export interface AssetStandardRow {
   avg_replacement_cost_high: number
   age_weight:                number
   condition_weight:          number
+  weibull_shape:             number | null
 }
 
 export interface RepairSummary {
@@ -399,14 +400,27 @@ export async function fetchLatestBookValues(
  * assets that need one (see fetchLatestBookValues).
  */
 export async function buildRecommendationRows(
-  supabase:        SupabaseClient,
-  orgId:           string,
-  activeAssets:    AssetRow[],
-  standardsByType: Map<string, AssetStandardRow>,
-  repairWindows:   Record<string, RepairCostWindows>,
-  newScoreByAsset: Map<string, number>,
+  supabase:                     SupabaseClient,
+  orgId:                        string,
+  activeAssets:                 AssetRow[],
+  standardsByType:              Map<string, AssetStandardRow>,
+  repairWindows:                Record<string, RepairCostWindows>,
+  newScoreByAsset:              Map<string, number>,
+  // Raw ingredients for the downtime-loss estimate (see repair-vs-replace.ts's
+  // header comment) — multiplied together per-asset below rather than
+  // pre-computed by the caller, since both are keyed differently (one per
+  // asset, one per property) and neither means anything alone.
+  avgRepairDurationDaysByAsset: Record<string, number>,
+  avgNightlyRateByProperty:    Record<string, number>,
 ): Promise<CapexRecommendationRow[]> {
   const nowIso = new Date().toISOString()
+
+  const estimatedDowntimeLossFor = (asset: AssetRow): number | null => {
+    const durationDays = avgRepairDurationDaysByAsset[asset.id]
+    const nightlyRate  = avgNightlyRateByProperty[asset.property_id]
+    if (!durationDays || !nightlyRate) return null
+    return durationDays * nightlyRate
+  }
 
   const rows: CapexRecommendationRow[] = activeAssets.map((asset) => {
     const std     = standardsByType.get(asset.asset_type)
@@ -415,6 +429,7 @@ export async function buildRecommendationRows(
       repairCosts:             windows,
       replacementCostEstimate: asset.estimated_replacement_cost ?? std?.avg_replacement_cost_high ?? null,
       healthScore:             newScoreByAsset.get(asset.id) ?? asset.health_score,
+      estimatedDowntimeLoss:   estimatedDowntimeLossFor(asset),
     })
     return {
       org_id:                     orgId,
@@ -451,6 +466,7 @@ export async function buildRecommendationRows(
       replacementCostEstimate:  row.replacement_cost_estimate ?? std?.avg_replacement_cost_high ?? null,
       healthScore:              newScoreByAsset.get(row.asset_id) ?? asset?.health_score ?? null,
       remainingBookValue:       bookValue,
+      estimatedDowntimeLoss:    asset ? estimatedDowntimeLossFor(asset) : null,
     })
     row.remaining_book_value = bookValue
     row.reasoning            = result.reasoning

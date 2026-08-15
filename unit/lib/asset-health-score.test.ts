@@ -312,6 +312,38 @@ describe('calculateHealthScore', () => {
     // ageScore = round((1-0)*70) = 70, conditionScore = 30 - 0 - 0 + 0 = 30
     expect(score).toBe(100)
   })
+
+  it('prefers a learned per-type weibull_shape over the shared default when present', () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(NOW)
+    // Past its expected lifespan (t/eta = 1.5): a steeper learned shape falls
+    // off the "cliff" harder here. Below the characteristic life a steeper
+    // shape actually holds HIGHER (decays slower) — the direction flips at
+    // t = eta, which is the entire point of the curve — so this asset must be
+    // past its lifespan for "steeper => lower score" to hold.
+    const asset = {
+      installation_date:          '2011-07-22', // 15 years old
+      expected_lifespan_years:    10,
+      estimated_replacement_cost: 1000,
+    }
+    const defaultScore = calculateHealthScore(asset, { ...standards, weibull_shape: null }, noRepairs)
+    const learnedScore = calculateHealthScore(asset, { ...standards, weibull_shape: 6 }, noRepairs)
+    expect(learnedScore).toBeLessThan(defaultScore)
+  })
+
+  it('falls back to the shared default when weibull_shape is absent from standards entirely', () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(NOW)
+    const asset = {
+      installation_date:          '2021-07-22',
+      expected_lifespan_years:    10,
+      estimated_replacement_cost: 1000,
+    }
+    // `standards` here has no weibull_shape key at all — existing callers that
+    // never learned to pass it must keep working exactly as before.
+    const score = calculateHealthScore(asset, standards, noRepairs)
+    expect(score).toBe(50 + 40) // matches the "guards against a 0/0 standard range" case's t=5,eta=10 age score
+  })
 })
 
 describe('weibullSurvivalFraction', () => {

@@ -7,7 +7,7 @@ import { createPmNotifications, type CreatePmNotificationInput } from '@/lib/inn
 import { unwrapJoin } from '@/lib/utils/supabase-joins'
 import { fetchAllRows, foldAllRows, fetchDistinctOrgIds } from '@/lib/inngest/paginate'
 import { healthLabel } from '@/lib/assets/health-score'
-import { bucketRepairCostWindows } from '@/lib/assets/repair-vs-replace'
+import { bucketRepairCostWindows, averageRepairDurationDays } from '@/lib/assets/repair-vs-replace'
 import {
   scoreAssets,
   persistScores,
@@ -296,7 +296,7 @@ export const assetHealthOrg = inngest.createFunction(
       const standards = unwrapList(
         await supabase
           .from('asset_type_standards')
-          .select('asset_type, lifespan_min_years, lifespan_max_years, avg_replacement_cost_high, age_weight, condition_weight')
+          .select('asset_type, lifespan_min_years, lifespan_max_years, avg_replacement_cost_high, age_weight, condition_weight, weibull_shape')
           .limit(ASSET_TYPE_STANDARDS_LIMIT),
         { site: 'inngest.asset-health.score-org.standards', orgId },
       )
@@ -312,10 +312,11 @@ export const assetHealthOrg = inngest.createFunction(
         actual_cost: number | null
         estimated_cost: number | null
         completed_date: string | null
+        created_at: string | null
       }>(
         (from, to) => supabase
           .from('work_orders')
-          .select('asset_id, actual_cost, estimated_cost, completed_date')
+          .select('asset_id, actual_cost, estimated_cost, completed_date, created_at')
           .eq('org_id', orgId)
           .not('asset_id', 'is', null)
           .eq('status', 'completed')
@@ -323,6 +324,22 @@ export const assetHealthOrg = inngest.createFunction(
           .order('id', { ascending: true })
           .range(from, to),
         { label: `work_orders(repair-history)[org=${orgId}]` }
+      )
+
+      // properties.avg_nightly_rate — the other half of the downtime-loss
+      // estimate (see repair-vs-replace.ts). Bounded by this org's own
+      // property count, same as the assets/standards reads above.
+      const properties = await fetchAllRows<{ id: string; avg_nightly_rate: number | null }>(
+        (from, to) => supabase
+          .from('properties')
+          .select('id, avg_nightly_rate')
+          .eq('org_id', orgId)
+          .order('id', { ascending: true })
+          .range(from, to),
+        { label: `properties(downtime-loss)[org=${orgId}]` }
+      )
+      const avgNightlyRateByProperty = Object.fromEntries(
+        properties.filter((p) => p.avg_nightly_rate !== null).map((p) => [p.id, p.avg_nightly_rate!])
       )
 
       const repairByAsset: Record<string, RepairSummary> = {}
@@ -380,9 +397,11 @@ export const assetHealthOrg = inngest.createFunction(
       const assetById       = new Map(activeAssets.map((a) => [a.id, a]))
       const newScoreByAsset = new Map(updates.map((u) => [u.id, u.health_score]))
       const repairWindows   = bucketRepairCostWindows(repairWOs, new Date())
+      const repairDurations = averageRepairDurationDays(repairWOs)
 
       const recommendationRows = await buildRecommendationRows(
-        supabase, orgId, activeAssets, standardsByType, repairWindows, newScoreByAsset
+        supabase, orgId, activeAssets, standardsByType, repairWindows, newScoreByAsset,
+        repairDurations, avgNightlyRateByProperty,
       )
       const newAlerts   = await persistCapexRecommendations(supabase, orgId, recommendationRows)
       const capexAlerts = newAlerts.map((alert) => ({

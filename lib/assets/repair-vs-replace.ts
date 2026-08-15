@@ -10,15 +10,18 @@
  *
  * Deliberately NOT a TCO subtraction of "purchase price + install − salvage
  * value − remaining book value" into one number: remaining book value is a
- * tax-timing question, not an operating cost, and estimated downtime loss
- * has no real data source anywhere in this app today (no property carries a
- * per-night rate, no work order carries a "property was unbookable" flag).
- * Fabricating a downtime-cost assumption to plug into a formula would make
- * the number LESS trustworthy than leaving it out — see CLAUDE.md's rule
- * against error handling/inputs for scenarios that can't happen, applied
- * here to "don't invent data that doesn't exist." What's below uses only
- * numbers the app actually has: repair cost history and a replacement cost
- * estimate, with book value surfaced as a separate informational note.
+ * tax-timing question, not an operating cost, so it stays a separate
+ * informational note rather than netted into the repair-vs-replace ratio.
+ *
+ * estimatedDowntimeLoss IS folded into the ratio (unlike book value), but it
+ * is computed by the caller from two REAL numbers — properties.avg_nightly_rate
+ * and the asset's own historical average work-order duration
+ * (averageRepairDurationDays below), not a per-asset-type guess. It is a
+ * proxy (a work order being open isn't the same as a property being
+ * unbookable) rather than a measured "property was unbookable" flag, which
+ * this app still does not have — the reasoning text says so explicitly
+ * whenever it's a nonzero contributor, rather than presenting it as more
+ * precise than it is.
  */
 
 export type CapexRecommendation = 'monitor' | 'repair' | 'replace'
@@ -36,6 +39,14 @@ export interface CapexRecommendationInput {
   healthScore:              number | null
   /** asset_depreciation_entries.ending_adjusted_basis for the most recent tax year, if any. */
   remainingBookValue?:      number | null
+  /**
+   * properties.avg_nightly_rate × the asset's historical average work-order
+   * duration (see averageRepairDurationDays) — a proxy for lost booking
+   * revenue while a repair is open, not a measured guest-displacement figure.
+   * Folded into the trailing-12mo side of the repair-vs-replace ratio, same
+   * as TCO_repair = repair costs + downtime loss.
+   */
+  estimatedDowntimeLoss?:   number | null
 }
 
 export interface CapexRecommendationResult {
@@ -72,6 +83,13 @@ function formatMoney(n: number): string {
   return `$${Math.round(n).toLocaleString()}`
 }
 
+/** The parenthetical downtime-loss aside for the 'replace' reasoning message, or '' when there's no downtime signal to report. */
+function formatDowntimeNote(trailing12mo: number, downtimeLoss: number): string {
+  if (downtimeLoss <= 0) return ''
+  return ` (${formatMoney(trailing12mo)} in repairs plus an estimated ${formatMoney(downtimeLoss)} in ` +
+    `lost booking revenue from this asset's typical repair downtime)`
+}
+
 export function buildCapexRecommendation(input: CapexRecommendationInput): CapexRecommendationResult {
   const { repairCosts, healthScore } = input
   const replacementCostEstimate = input.replacementCostEstimate ?? 0
@@ -91,7 +109,9 @@ export function buildCapexRecommendation(input: CapexRecommendationInput): Capex
     }
   }
 
-  const repairRatio = repairCosts.trailing12mo / replacementCostEstimate
+  const downtimeLoss = input.estimatedDowntimeLoss ?? 0
+  const tcoRepair    = repairCosts.trailing12mo + downtimeLoss
+  const repairRatio  = tcoRepair / replacementCostEstimate
   const risingTrend  = repairTrendPct !== null && repairTrendPct >= RISING_TREND_PCT && repairCosts.trailing12mo > 0
   const poorHealth   = healthScore !== null && healthScore < POOR_HEALTH_THRESHOLD
   const fairHealth   = healthScore !== null && healthScore < FAIR_HEALTH_THRESHOLD
@@ -100,8 +120,9 @@ export function buildCapexRecommendation(input: CapexRecommendationInput): Capex
 
   if (repairRatio >= REPLACE_REPAIR_RATIO) {
     recommendation = 'replace'
+    const downtimeNote = formatDowntimeNote(repairCosts.trailing12mo, downtimeLoss)
     reasoning.push(
-      `Trailing 12-month repair spend (${formatMoney(repairCosts.trailing12mo)}) is ` +
+      `Trailing 12-month repair cost${downtimeNote} totals ${formatMoney(tcoRepair)}, ` +
       `${Math.round(repairRatio * 100)}% of the estimated replacement cost ` +
       `(${formatMoney(replacementCostEstimate)}) — at or above the ${Math.round(REPLACE_REPAIR_RATIO * 100)}% ` +
       `repair-vs-replace threshold.`
@@ -176,4 +197,38 @@ export function bucketRepairCostWindows(
   }
 
   return windows
+}
+
+/**
+ * Average work-order duration (created_at → completed_date, in days) per
+ * asset, over whatever completed-repair history the caller passes in — the
+ * historical-duration proxy for downtime loss described in this file's
+ * header comment. A work order being open is not the same as a property
+ * being unbookable for that whole span, which is why this is a proxy and
+ * the reasoning text says so, not a claim of measured guest-displacement.
+ */
+export function averageRepairDurationDays(
+  repairWorkOrders: Array<{ asset_id: string | null; created_at: string | null; completed_date: string | null }>,
+): Record<string, number> {
+  const totals: Record<string, { sumDays: number; count: number }> = {}
+
+  for (const wo of repairWorkOrders) {
+    if (!wo.asset_id || !wo.created_at || !wo.completed_date) continue
+    const days = (new Date(wo.completed_date).getTime() - new Date(wo.created_at).getTime()) / 86_400_000
+    // A negative or zero span is a data artifact (completed_date predating
+    // created_at, or a same-instant backfill), not a real same-day repair
+    // duration worth averaging in.
+    if (days <= 0) continue
+
+    const entry = totals[wo.asset_id] ?? { sumDays: 0, count: 0 }
+    entry.sumDays += days
+    entry.count   += 1
+    totals[wo.asset_id] = entry
+  }
+
+  const result: Record<string, number> = {}
+  for (const [assetId, { sumDays, count }] of Object.entries(totals)) {
+    result[assetId] = sumDays / count
+  }
+  return result
 }
