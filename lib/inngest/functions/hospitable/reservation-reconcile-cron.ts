@@ -35,9 +35,8 @@
 // this only has to bound how long a missed reservation can stay missing.
 // ============================================================
 
-import { inngest }             from '@/lib/inngest/client'
-import { fetchAllRows }        from '@/lib/inngest/paginate'
-import { createServiceClient } from '@/lib/supabase/server'
+import { inngest } from '@/lib/inngest/client'
+import { dispatchPerHospitableConnection } from './connection-dispatch'
 
 export const hospReservationReconcileCron = inngest.createFunction(
   {
@@ -47,48 +46,14 @@ export const hospReservationReconcileCron = inngest.createFunction(
     concurrency: { limit: 1, key: '"hospitable-reservation-reconcile-cron"' },
   },
   { cron: '0 10 * * *' },
-  async ({ step, logger }) => {
-
-    const connections = await step.run('fetch-active-connections', async () => {
-      const supabase = createServiceClient({ system: 'inngest:hospitable-reservation-reconcile-cron' })
-
-      // PLATFORM-WIDE scan — every org with a live Hospitable connection, not
-      // one tenant's. At max_rows = 1000 PostgREST returns the first 1000 with
-      // a 200 and no truncation signal, so every connection past that would
-      // stop being reconciled while the cron still reported success.
-      //
-      // org_id NOT NULL is required, not merely tidy: the handler scopes every
-      // read and write by it, and a connection without one has nothing to
-      // reconcile against.
-      return await fetchAllRows<{ user_id: string; org_id: string | null; external_user_id: string | null }>(
-        (from, to) => supabase
-          .from('integration_connections')
-          .select('user_id, org_id, external_user_id')
-          .eq('provider_id', 'hospitable')
-          .eq('status',      'active')
-          .not('org_id',     'is', null)
-          .order('user_id')
-          .range(from, to),
-        { label: 'hospitable-reservation-reconcile-cron.connections' },
-      )
+  async ({ step, logger }) =>
+    dispatchPerHospitableConnection({
+      step,
+      logger,
+      system:         'inngest:hospitable-reservation-reconcile-cron',
+      label:          'hospitable-reservation-reconcile-cron.connections',
+      dispatchStepId: 'dispatch-reconcile-events',
+      eventName:      'integration/hospitable.reservation_reconcile.requested',
+      logPrefix:      '[Hospitable reconcile cron]',
     })
-
-    logger.info(`[Hospitable reconcile cron] Dispatching for ${connections.length} connections`)
-
-    if (connections.length === 0) return { dispatched: 0 }
-
-    await step.sendEvent(
-      'dispatch-reconcile-events',
-      connections.map((c) => ({
-        name: 'integration/hospitable.reservation_reconcile.requested' as const,
-        data: {
-          user_id:          c.user_id,
-          org_id:           c.org_id!,
-          external_user_id: c.external_user_id ?? '',
-        },
-      }))
-    )
-
-    return { dispatched: connections.length }
-  }
 )
