@@ -55,6 +55,8 @@ import { hospTeammateSyncHandler }      from '@/lib/inngest/functions/hospitable
 import { hospCalendarSyncCron }         from '@/lib/inngest/functions/hospitable/calendar-sync-cron'
 import { hospCalendarSyncHandler }      from '@/lib/inngest/functions/hospitable/calendar-sync-handler'
 import { hospReservationReconcileCron }    from '@/lib/inngest/functions/hospitable/reservation-reconcile-cron'
+import { jobRunRecorder }               from '@/lib/inngest/functions/cron/job-run-recorder'
+import { systemWatchdog }               from '@/lib/inngest/functions/cron/watchdog'
 import { hospReservationReconcileHandler } from '@/lib/inngest/functions/hospitable/reservation-reconcile-handler'
 
 // Proactive token refresh — unified cron covering all OAuth providers
@@ -251,6 +253,8 @@ export const { GET, POST, PUT } = serve({
     hospCalendarSyncCron,
     hospCalendarSyncHandler,
     hospReservationReconcileCron,
+    jobRunRecorder,
+    systemWatchdog,
     hospReservationReconcileHandler,
 
     // Proactive token refresh — all OAuth providers

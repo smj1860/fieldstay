@@ -708,6 +708,20 @@ export type FieldStayEvents = {
   // connection by hospReservationReconcileCron; handled by
   // hospReservationReconcileHandler. Hospitable reservations arrive ONLY via
   // webhook otherwise — see the cron's header.
+  // Emitted by INNGEST ITSELF for every run that reaches a terminal state —
+  // not something this codebase sends. Declared here because the client uses
+  // EventSchemas().fromRecord<FieldStayEvents>(), so a trigger on an
+  // undeclared name will not type-check. Consumed by jobRunRecorder, which is
+  // how system_job_runs gets populated without touching ~37 crons.
+  'inngest/function.finished': {
+    data: {
+      function_id: string
+      run_id:      string
+      error?:      { message?: string; name?: string; stack?: string }
+      result?:     unknown
+    }
+  }
+
   'integration/hospitable.reservation_reconcile.requested': {
     data: {
       user_id:          string

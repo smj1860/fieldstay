@@ -259,7 +259,7 @@ describe('guardrail: migration ledger baseline is shrink-only', () => {
   const baseline = JSON.parse(
     readFileSync(join(ROOT, 'scripts/migration-ledger-baseline.json'), 'utf8'),
   ) as {
-    projects: Record<string, { label?: string; localOnly: string[]; ledgerOnly: string[] }>
+    projects: Record<string, { label?: string; localOnly: string[]; ledgerOnly: string[]; contentDrift?: string[] }>
   }
 
   it('production carries NO grandfathered divergence', () => {
@@ -303,5 +303,16 @@ describe('guardrail: migration ledger baseline is shrink-only', () => {
       for (const v of entry.ledgerOnly) if (local.has(v)) overlaps.push(`${ref}: ${v}`)
     }
     expect(overlaps).toEqual([])
+  })
+
+  it('production contentDrift is a shrink-only ratchet', () => {
+    // Seeded 2026-08-15 at 25: migrations whose committed SQL is not the SQL
+    // that ran. The version matches on both sides, so localOnly/ledgerOnly are
+    // both empty and clean while these files still fail to describe the
+    // database. LOWER this as they are reconciled; never raise it.
+    const CEILING = 25
+    const prod = baseline.projects[PROD_REF]
+    expect(prod?.contentDrift ?? [], 'production must carry a contentDrift entry').toBeInstanceOf(Array)
+    expect((prod?.contentDrift ?? []).length).toBeLessThanOrEqual(CEILING)
   })
 })

@@ -120,7 +120,7 @@ if (url.includes(PROD_PROJECT_REF) && !allowProd) {
       'Supabase project. CI must use the dedicated E2E project — see ' +
       'docs/E2E_SETUP.md.\n' +
       'If you MEANT to verify production (this check is read-only — ' +
-      'migration_ledger_versions() performs no DDL or DML), re-run with ' +
+      'migration_ledger_digests() performs no DDL or DML), re-run with ' +
       'DB_INVARIANTS_ALLOW_PROD=1, or use: pnpm run check:migration-ledger:prod'
   )
   process.exit(1)
@@ -134,6 +134,7 @@ const projectRef = new URL(url).hostname.split('.')[0] ?? ''
 // and version uniqueness, so a plain 14-char slice is safe here.
 const localFiles = readdirSync(MIGRATIONS_DIR).filter((f) => f.endsWith('.sql'))
 const localVersions = new Set(localFiles.map((f) => f.slice(0, 14)))
+const fileByVersionEarly = new Map(localFiles.map((f) => [f.slice(0, 14), f]))
 
 // ── Live ledger ───────────────────────────────────────────────────────────
 // An unreachable host (bad URL, DNS, network) otherwise surfaces as an
@@ -141,7 +142,7 @@ const localVersions = new Set(localFiles.map((f) => f.slice(0, 14)))
 // fails closed, but the message has to say which check broke and why.
 let res
 try {
-  res = await fetch(new URL('/rest/v1/rpc/migration_ledger_versions', url), {
+  res = await fetch(new URL('/rest/v1/rpc/migration_ledger_digests', url), {
     method: 'POST',
     headers: {
       apikey: key,
@@ -165,9 +166,9 @@ try {
 if (!res.ok) {
   // Status only — the response body is network-controlled data and doesn't
   // belong in CI logs (Sonar S5145 log-injection rule).
-  console.error(`migration_ledger_versions RPC failed: HTTP ${res.status}`)
+  console.error(`migration_ledger_digests RPC failed: HTTP ${res.status}`)
   console.error(
-    'Has supabase/migrations/20260804040355_migration_ledger_versions.sql been ' +
+    'Has supabase/migrations/20260815180332_audit_introspection_rpcs.sql been ' +
       'applied to this project?'
   )
   process.exit(1)
@@ -175,15 +176,76 @@ if (!res.ok) {
 
 const ledger = await res.json()
 if (!Array.isArray(ledger)) {
-  console.error('migration_ledger_versions() did not return an array of versions.')
+  console.error('migration_ledger_digests() did not return an array.')
   process.exit(1)
 }
-const ledgerVersions = new Set(ledger.map(String))
+const ledgerVersions = new Set(ledger.map((r) => String(r.version)))
+const ledgerSqlByVersion = new Map(ledger.map((r) => [String(r.version), String(r.sql ?? '')]))
+
+/**
+ * Normalizes SQL for CONTENT comparison.
+ *
+ * Applied identically to both sides, which is the whole reason it lives here
+ * and not in the RPC: two normalizers — one in SQL, one in JS — can disagree,
+ * and a disagreement would be frozen into the baseline as if it were real
+ * drift. It does NOT need to be a correct SQL parser; it needs to be
+ * deterministic, because any distortion it introduces is applied to both sides
+ * equally and cancels out.
+ *
+ * Comments are stripped rather than compared. The gate's question is "can the
+ * repo reproduce this database", and a reworded header cannot change the
+ * answer — while flagging one would bury real DDL drift in noise. (The
+ * inventory-decimals migration on 2026-08-15 is exactly that case: its ~50-line
+ * file header was never passed to apply_migration, so the file and the ledger
+ * differ by prose and by nothing else.)
+ */
+function normalizeSql(sql) {
+  return sql
+    .replace(/\/\*[\s\S]*?\*\//g, ' ')   // block comments
+    .replace(/--[^\n]*/g, ' ')            // line comments
+    .replace(/\s+/g, ' ')                 // all whitespace runs
+    .trim()
+}
 
 // ── Divergence ────────────────────────────────────────────────────────────
 const sorted = (s) => [...s].sort((a, b) => a.localeCompare(b))
 const localOnly = sorted(new Set([...localVersions].filter((v) => !ledgerVersions.has(v))))
 const ledgerOnly = sorted(new Set([...ledgerVersions].filter((v) => !localVersions.has(v))))
+
+// ── Content drift ─────────────────────────────────────────────────────────
+//
+// Versions present on BOTH sides where the committed SQL is not the SQL that
+// ran. Neither localOnly nor ledgerOnly can see this: the version matches, so
+// the set diff is clean while the file and the database disagree about what
+// the migration contains.
+//
+// PRODUCTION-SCOPED, deliberately. The property being protected is "the repo
+// can reproduce THIS database", and that question is only load-bearing for
+// production. It is also the only project where the comparison has real
+// coverage: the E2E project records statements for 99 of its 416 ledger rows,
+// so gating there would compare an arbitrary quarter of the history and report
+// it as a pass. Rows with no recorded statements are counted and reported
+// rather than silently skipped, so the coverage is visible instead of assumed.
+const CONTENT_CHECKED_PROJECTS = new Set([PROD_PROJECT_REF])
+const contentChecked = CONTENT_CHECKED_PROJECTS.has(projectRef)
+
+let uncomparable = 0
+const contentDrift = !contentChecked ? [] : sorted(
+  new Set(
+    [...localVersions]
+      .filter((v) => ledgerVersions.has(v))
+      .filter((v) => {
+        const file = fileByVersionEarly.get(v)
+        if (!file) return false
+        const ledgerSql = ledgerSqlByVersion.get(v) ?? ''
+        // `supabase migration repair` and older MCP applies record a version
+        // with no statements at all. That is not agreement — it is the ledger
+        // having nothing to compare, which must not read as a pass.
+        if (normalizeSql(ledgerSql) === '') { uncomparable++; return false }
+        return normalizeSql(readFileSync(join(MIGRATIONS_DIR, file), 'utf8')) !== normalizeSql(ledgerSql)
+      }),
+  ),
+)
 
 const baseline = JSON.parse(readFileSync(BASELINE_PATH, 'utf8'))
 // An unknown project gets NO grandfathering — strict parity is the right
@@ -192,6 +254,7 @@ const recorded = baseline.projects?.[projectRef]
 const frozen = recorded ?? { label: projectRef, localOnly: [], ledgerOnly: [] }
 const frozenLocalOnly = new Set(frozen.localOnly ?? [])
 const frozenLedgerOnly = new Set(frozen.ledgerOnly ?? [])
+const frozenContentDrift = new Set(frozen.contentDrift ?? [])
 
 if (seeding) {
   if (recorded) {
@@ -202,7 +265,7 @@ if (seeding) {
     process.exit(1)
   }
   baseline.projects ??= {}
-  baseline.projects[projectRef] = { label: projectRef, localOnly, ledgerOnly }
+  baseline.projects[projectRef] = { label: projectRef, localOnly, ledgerOnly, contentDrift }
   writeFileSync(BASELINE_PATH, `${JSON.stringify(baseline, null, 2)}\n`)
   console.log(
     `Seeded baseline for ${projectRef}: ${localOnly.length} local-only, ` +
@@ -216,6 +279,7 @@ if (updating) {
   const grew = [
     ...localOnly.filter((v) => !frozenLocalOnly.has(v)),
     ...ledgerOnly.filter((v) => !frozenLedgerOnly.has(v)),
+    ...contentDrift.filter((v) => !frozenContentDrift.has(v)),
   ]
   if (grew.length > 0) {
     console.error(
@@ -227,7 +291,7 @@ if (updating) {
     process.exit(1)
   }
   baseline.projects ??= {}
-  baseline.projects[projectRef] = { label: frozen.label ?? projectRef, localOnly, ledgerOnly }
+  baseline.projects[projectRef] = { label: frozen.label ?? projectRef, localOnly, ledgerOnly, contentDrift }
   writeFileSync(BASELINE_PATH, `${JSON.stringify(baseline, null, 2)}\n`)
   console.log(
     `Baseline updated for ${projectRef}: ${localOnly.length} local-only, ${ledgerOnly.length} ledger-only.`
@@ -276,11 +340,30 @@ if (newLedgerOnly.length > 0) {
   )
 }
 
-if (staleLocalOnly.length > 0 || staleLedgerOnly.length > 0) {
+const newContentDrift = contentDrift.filter((v) => !frozenContentDrift.has(v))
+const staleContentDrift = sorted([...frozenContentDrift].filter((v) => !contentDrift.includes(v)))
+
+if (newContentDrift.length > 0) {
+  failures.push(
+    `Migration files whose SQL is NOT the SQL that ran (${projectRef}):\n` +
+      newContentDrift.map((v) => `  ${fileFor(v)}`).join('\n') +
+      '\n  The version matches on both sides, so the parity check above is ' +
+      'clean — and the committed file still does not describe this database. ' +
+      'A fresh environment built from supabase/migrations/ would end up with ' +
+      'different schema.\n' +
+      '  Comments and whitespace are normalized away before comparing, so this ' +
+      'is a real difference in DDL. Usual cause: MCP apply_migration was given ' +
+      'a query that differs from the file written alongside it. Recover the ' +
+      'applied SQL from supabase_migrations.schema_migrations.statements and ' +
+      'reconcile the file against it.'
+  )
+}
+
+if (staleLocalOnly.length > 0 || staleLedgerOnly.length > 0 || staleContentDrift.length > 0) {
   failures.push(
     `Stale entries in scripts/migration-ledger-baseline.json for ${projectRef} ` +
       '(these versions are now at parity):\n' +
-      [...staleLocalOnly, ...staleLedgerOnly].map((v) => `  ${v}`).join('\n') +
+      [...staleLocalOnly, ...staleLedgerOnly, ...staleContentDrift].map((v) => `  ${v}`).join('\n') +
       '\n  Remove them — the frozen set only shrinks. Lock the burn-down in with:\n' +
       '    node scripts/check-migration-ledger.mjs --update'
   )
@@ -292,6 +375,20 @@ if (failures.length > 0) {
   )
   for (const f of failures) console.error(`✗ ${f}\n`)
   process.exit(1)
+}
+
+if (contentChecked && uncomparable > 0) {
+  console.log(
+    `Note: ${uncomparable} version(s) have no statements recorded in the ledger, ` +
+      'so their content could not be compared. `supabase migration repair` and ' +
+      'older MCP applies record a version with no SQL — that is missing evidence, ' +
+      'not agreement.'
+  )
+} else if (!contentChecked) {
+  console.log(
+    `Note: content drift NOT checked for ${projectRef} — see ` +
+      'CONTENT_CHECKED_PROJECTS in scripts/check-migration-ledger.mjs.'
+  )
 }
 
 const frozenTotal = frozenLocalOnly.size + frozenLedgerOnly.size

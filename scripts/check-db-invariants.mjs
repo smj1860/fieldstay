@@ -472,6 +472,136 @@ if (staleJunctionAllowlist.length > 0) {
   )
 }
 
+// ── 11-13. RLS POLICY SEMANTICS ───────────────────────────────────────────
+//
+// Checks 1 and 2 above prove RLS is ENABLED and that a table HAS a policy.
+// Neither says the policy is CORRECT, and the gap between "has a policy" and
+// "the policy expresses the right rule" is exactly where a cross-tenant leak
+// lives. These three close the highest-value part of that gap without needing
+// fixtures or a live session.
+//
+// Deliberately NOT a full authorization proof: that needs a probe harness that
+// authenticates as each role and attempts real reads. These catch the shapes
+// that are wrong on their face.
+const policyRes = await fetch(new URL('/rest/v1/rpc/rls_policy_report', url), {
+  method: 'POST',
+  headers: { apikey: key, authorization: `Bearer ${key}`, 'content-type': 'application/json' },
+  body: '{}',
+  signal: AbortSignal.timeout(30_000),
+})
+
+if (!policyRes.ok) {
+  console.error(`rls_policy_report RPC failed: HTTP ${policyRes.status}`)
+  console.error('Has supabase/migrations/20260815180332_audit_introspection_rpcs.sql been applied to this project?')
+  process.exit(1)
+}
+
+const policies = await policyRes.json()
+if (!Array.isArray(policies)) {
+  console.error('rls_policy_report() did not return an array.')
+  process.exit(1)
+}
+
+/** service_role bypasses RLS entirely, so its policies constrain nothing. */
+const isServiceRoleOnly = (p) => Array.isArray(p.roles) && p.roles.length === 1 && p.roles[0] === 'service_role'
+
+const expr = (p) => `${p.qual ?? ''} ${p.with_check ?? ''}`
+
+/**
+ * Tables that are GLOBAL by design — no tenant dimension, so a blanket-true
+ * read policy is the intent rather than a leak. Shrink-only: never add a table
+ * that has an org_id.
+ */
+const GLOBAL_READABLE_TABLES = new Set([
+  'inventory_catalog',    // 115-item platform seed catalog
+  'support_kb_chunks',    // support knowledge base, same for every tenant
+  'maintenance_catalog_items',
+])
+
+// 11. A PERMISSIVE blanket-true policy reachable by a non-service role.
+//     Permissive policies are OR-ed, so ONE of these defeats every other
+//     policy on the table no matter how carefully the others are written.
+const blanketTrue = policies.filter(
+  (p) =>
+    p.permissive === true &&
+    !isServiceRoleOnly(p) &&
+    String(p.qual ?? '').trim() === 'true' &&
+    !GLOBAL_READABLE_TABLES.has(p.table_name),
+)
+if (blanketTrue.length > 0) {
+  failures.push(
+    `Blanket USING (true) policies reachable by a non-service role: ${
+      blanketTrue.map((p) => `${p.table_name}.${p.policy_name} [${(p.roles ?? []).join(',')}]`).join(', ')
+    }\n  Permissive policies are OR-ed, so one of these grants every row on the ` +
+      'table regardless of what the other policies say. Scope it, or — if the ' +
+      'table genuinely has no tenant dimension — add it to ' +
+      'GLOBAL_READABLE_TABLES in scripts/check-db-invariants.mjs.'
+  )
+}
+
+// 12. An org-scoped table whose non-service policy scopes by NOTHING.
+//
+//     Two shapes are legitimately not org-scoped and must not be flagged, both
+//     found by running this check against production before it shipped:
+//
+//       - a DENY policy. `USING (false)` is the familiar form, but an INSERT
+//         policy has no USING at all — it denies with `WITH CHECK (false)` and
+//         a NULL qual (integration_connections_deny_insert, gc_restrict_insert).
+//         Testing only `qual` reported both as unscoped.
+//       - a USER-scoped policy. `auth.uid()` is STRICTER than org scoping, not
+//         weaker: it admits one person, not one tenant. messages_select,
+//         messages_mark_read, push_subscriptions_manage and
+//         platform_admins_can_view_job_runs are all correctly scoped this way,
+//         and demanding an org predicate on top would be demanding a wider one.
+//
+//     What remains is the real defect: a policy on an org-scoped table that
+//     names neither the tenant nor the user, and does not deny.
+const isDeny = (p) =>
+  String(p.qual ?? '').trim() === 'false' || String(p.with_check ?? '').trim() === 'false'
+
+const isUserScoped = (p) => expr(p).includes('auth.uid()')
+
+const unscoped = policies.filter(
+  (p) =>
+    p.has_org_id === true &&
+    !isServiceRoleOnly(p) &&
+    !expr(p).includes('org_id') &&
+    !isUserScoped(p) &&
+    !isDeny(p),
+)
+if (unscoped.length > 0) {
+  failures.push(
+    `Policies on org-scoped tables with no org_id predicate: ${
+      unscoped.map((p) => `${p.table_name}.${p.policy_name} (${p.cmd})`).join(', ')
+    }\n  The table carries org_id but this policy scopes by neither org_id ` +
+      'nor auth.uid(), and does not deny — so it is not scoped to anything. ' +
+      'Add the tenant predicate.'
+  )
+}
+
+// 13. UPDATE (or ALL) with USING but no WITH CHECK.
+//     USING decides which rows are VISIBLE to the update; WITH CHECK decides
+//     what they may be changed TO. Without it a caller can read their own row
+//     and write another org's id into it — CLAUDE.md states both are required.
+const noWithCheck = policies.filter(
+  (p) =>
+    (p.cmd === 'UPDATE' || p.cmd === 'ALL') &&
+    !isServiceRoleOnly(p) &&
+    p.qual !== null &&
+    p.with_check === null &&
+    String(p.qual ?? '').trim() !== 'false',   // a deny-all USING (false) admits no rows
+)
+
+if (noWithCheck.length > 0) {
+  failures.push(
+    `UPDATE/ALL policies with USING but no WITH CHECK: ${
+      noWithCheck.map((p) => `${p.table_name}.${p.policy_name}`).join(', ')
+    }\n  USING selects which rows may be updated; WITH CHECK constrains what ` +
+      'they may be updated TO. Without it a row can be written to a value the ' +
+      'policy would never have selected — including another org\'s id.'
+  )
+}
+
 // ── Verdict ───────────────────────────────────────────────────────────────
 if (failures.length > 0) {
   console.error(`DB invariant check FAILED (${failures.length} finding${failures.length === 1 ? '' : 's'}):\n`)
@@ -484,5 +614,6 @@ console.log(
     'all FK columns indexed, zero anon grants, all dedup-key columns indexed ' +
     'unique, every member-facing policy backed by its GRANT, no memberless ' +
     'orgs, every storage policy org-scoped, every org_id column FK-backed, ' +
-    'no accidental PostgREST junction tables.'
+    'no accidental PostgREST junction tables, no blanket-true or unscoped or ' +
+    'WITH CHECK-less policies.'
 )
