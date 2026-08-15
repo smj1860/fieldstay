@@ -288,6 +288,16 @@ reviews / review_responses  — guest reviews + PM responses
 
 ### Supporting
 ```
+system_job_runs             — Inngest run ledger. Written ONLY by
+                              lib/inngest/functions/cron/job-run-recorder.ts, which
+                              subscribes to Inngest's built-in
+                              `inngest/function.finished` (once per run, guaranteed —
+                              the middleware `finished` hook is NOT). Read by
+                              cron/watchdog.ts to detect jobs that have gone silent.
+                              Unique on (run_id, function_id), NOT run_id alone.
+                              function_id is stored BARE (`cron-daily-wrapup`), with
+                              Inngest's `fieldstay-` prefix stripped — WATCHED_JOBS
+                              is written in bare ids and the two must agree
 org_milestones              — key-value store for org state flags + async job results
                               Polled by the UI to surface Inngest job completions
 audit_events                — append-only audit log
