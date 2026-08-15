@@ -74,12 +74,49 @@ describe('guardrail: lint warning ratchet', () => {
   })
 })
 
+describe('guardrail: the cognitive-complexity ratchet stays armed', () => {
+  // --max-warnings is a TOTAL, and totals are fungible: a new function at
+  // complexity 40 passes it as long as the same PR cleared a nested ternary
+  // somewhere else. That is not a hypothetical trade — no-nested-conditional
+  // alone is 92 of the 165 warnings, so there is ample currency to pay for a
+  // complexity regression with. scripts/check-complexity-ratchet.mjs gates the
+  // per-FILE delta instead; these assertions are what stop it being unwired.
+  const baseline = JSON.parse(
+    readFileSync(join(ROOT, 'scripts', 'complexity-baseline.json'), 'utf8'),
+  ) as Record<string, number[]>
+
+  it('the check:complexity script exists and points at the ratchet', () => {
+    expect(pkg.scripts['check:complexity'] ?? '').toContain('check-complexity-ratchet.mjs')
+  })
+
+  it('the baseline is a ratchet that only moves down', () => {
+    // Seeded 2026-08-15: 36 violations across 31 files, worst at 45
+    // (app/crew/turnovers/[id]/ChecklistView.tsx).
+    // LOWER these when violations are cleared; never raise them.
+    const FILE_CEILING  = 31
+    const TOTAL_CEILING = 36
+
+    const total = Object.values(baseline).reduce((n, scores) => n + scores.length, 0)
+    expect(Object.keys(baseline).length).toBeLessThanOrEqual(FILE_CEILING)
+    expect(total).toBeLessThanOrEqual(TOTAL_CEILING)
+  })
+
+  it('no baselined score is at or under the limit — those entries are dead weight', () => {
+    // A baselined 15 or lower means the rule no longer fires there, so the
+    // entry grants silent headroom back up to its recorded value.
+    const stale = Object.entries(baseline)
+      .flatMap(([file, scores]) => scores.filter((s) => s <= 15).map((s) => `${file}:${s}`))
+    expect(stale, 'run `node scripts/check-complexity-ratchet.mjs --update`').toEqual([])
+  })
+})
+
 describe('guardrail: CI runs every gate', () => {
   it('the checks job runs the full verification pass', () => {
     for (const step of [
       'pnpm run check:ui-classes',
       'pnpm exec tsc --noEmit',
       'pnpm run lint',
+      'pnpm run check:complexity',
       'pnpm test',
       'pnpm run build',
     ]) {
