@@ -107,6 +107,14 @@ interface ConnRow    {
   updated_at: string | null
 }
 
+/** A watched job that is past its silence budget. */
+interface SilentJob {
+  id: string
+  maxSilentHours: number
+  /** null when the job has never been recorded at all, vs. recorded then stopped. */
+  silentForHours: number | null
+}
+
 /** Most recent recorded run per watched job. */
 function latestByFunction(rows: JobRunRow[]): Map<string, number> {
   const latest = new Map<string, number>()
@@ -150,12 +158,59 @@ export const systemWatchdog = inngest.createFunction(
 
       const latest = latestByFunction(rows)
 
-      return WATCHED_JOBS.flatMap(({ id, maxSilentHours }) => {
+      // COLD START.
+      //
+      // "No run recorded" and "never ran" are the same observation, and on the
+      // first deploy they are indistinguishable — the table is empty because
+      // recording just began, not because ten crons are broken. Without this,
+      // the first run reports every watched job as silent, and the seven daily
+      // ones keep reporting hourly until each fires, up to a day later. That
+      // is ~24h of alerts naming healthy crons, which is exactly how an
+      // operator learns to ignore this channel.
+      //
+      // The oldest row is the proxy for when recording started, so a job with
+      // NO recorded run is only reported once recording has been live longer
+      // than that job's own budget. A job that recorded and then STOPPED is
+      // unaffected — that path never consults this.
+      //
+      // Read separately because the window above is capped at 31h and this
+      // needs the true oldest row.
+      const oldest = await supabase
+        .from('system_job_runs')
+        .select('started_at')
+        .order('started_at', { ascending: true })
+        .limit(1)
+        .maybeSingle()
+
+      const recordingSince = oldest.data?.started_at ? Date.parse(oldest.data.started_at) : null
+      const recordingAgeMs = recordingSince === null ? 0 : now - recordingSince
+
+      return WATCHED_JOBS.flatMap<SilentJob>(({ id, maxSilentHours }) => {
         const last = latest.get(id)
-        const silentFor = last === undefined ? null : Math.round((now - last) / HOUR_MS)
-        if (last !== undefined && now - last <= maxSilentHours * HOUR_MS) return []
-        return [{ id, maxSilentHours, silentForHours: silentFor }]
+
+        if (last === undefined) {
+          // Not yet observable: recording has not been running long enough for
+          // this job's absence to mean anything.
+          if (recordingAgeMs <= maxSilentHours * HOUR_MS) return []
+          return [{ id, maxSilentHours, silentForHours: null }]
+        }
+
+        if (now - last <= maxSilentHours * HOUR_MS) return []
+        return [{ id, maxSilentHours, silentForHours: Math.round((now - last) / HOUR_MS) }]
       })
+    })
+
+    // An entirely empty ledger is its own finding, not ten of them. It is
+    // expected exactly once — on the very first run, before this watchdog's own
+    // completion has been recorded — and after that it means the recorder is
+    // not working, which is worth knowing precisely because every other check
+    // here depends on it.
+    const noRunsRecorded = await step.run('check-recording-alive', async () => {
+      const supabase = createServiceClient({ system: 'inngest:system-watchdog' })
+      const { count } = await supabase
+        .from('system_job_runs')
+        .select('*', { count: 'exact', head: true })
+      return (count ?? 0) === 0
     })
 
     // ── 2. Active integrations that have gone quiet ─────────────────────────
@@ -228,10 +283,18 @@ export const systemWatchdog = inngest.createFunction(
       })
     }
 
-    if (silent.length === 0 && quiet.length === 0) {
+    if (noRunsRecorded) {
+      logger.error('[watchdog] system_job_runs is EMPTY — no job runs are being recorded at all')
+      reportError(
+        new Error('Watchdog: system_job_runs is empty — jobRunRecorder is not recording runs'),
+        { site: 'inngest.system-watchdog.recording-dead' },
+      )
+    }
+
+    if (silent.length === 0 && quiet.length === 0 && !noRunsRecorded) {
       logger.info(`[watchdog] OK — ${WATCHED_JOBS.length} jobs within budget, all active integrations recently seen`)
     }
 
-    return { silentJobs: silent.length, quietIntegrations: quiet.length }
+    return { silentJobs: silent.length, quietIntegrations: quiet.length, noRunsRecorded }
   }
 )

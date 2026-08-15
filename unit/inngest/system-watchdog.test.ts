@@ -39,18 +39,36 @@ function makeLogger() {
 
 interface Queued { [table: string]: { data?: unknown; error?: unknown }[] }
 
-function makeSupabase(queued: Queued, writes: { table: string; rows: unknown }[] = []) {
+interface SupaOpts {
+  /** Oldest row in system_job_runs — the watchdog's proxy for "recording started". */
+  oldestStartedAt?: string | null
+  /** Total rows in system_job_runs, for the empty-ledger check. */
+  jobRunCount?: number
+}
+
+function makeSupabase(
+  queued: Queued,
+  writes: { table: string; rows: unknown }[] = [],
+  opts: SupaOpts = {},
+) {
   const counters: Record<string, number> = {}
   const from = vi.fn((table: string) => {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const chain: any = {}
-    chain.select = () => chain
+    let head = false
+    chain.select = (_sel?: string, o?: { head?: boolean }) => { if (o?.head) head = true; return chain }
     chain.eq = () => chain
     chain.gte = () => chain
     chain.order = vi.fn(() => chain)
     chain.range = vi.fn(() => chain)
+    chain.limit = vi.fn(() => chain)
+    chain.maybeSingle = vi.fn(() => Promise.resolve({
+      data: opts.oldestStartedAt ? { started_at: opts.oldestStartedAt } : null,
+      error: null,
+    }))
     chain.upsert = vi.fn((rows: unknown) => { writes.push({ table, rows }); return Promise.resolve({ error: null }) })
     const next = () => {
+      if (head) return Promise.resolve({ count: opts.jobRunCount ?? 1, data: null, error: null })
       const i = counters[table] ?? 0
       counters[table] = i + 1
       return Promise.resolve(queued[table]?.[i] ?? { data: [], error: null })
@@ -60,6 +78,9 @@ function makeSupabase(queued: Queued, writes: { table: string; rows: unknown }[]
   })
   return { from }
 }
+
+/** Recording has been live for ages — the steady state the old tests assumed. */
+const RECORDING_MATURE = { oldestStartedAt: hoursAgo(200), jobRunCount: 50 }
 
 /** Every watched job reporting a run 1h ago — the healthy baseline. */
 const allJobsHealthy = () =>
@@ -77,7 +98,7 @@ describe('systemWatchdog — silent jobs', () => {
     // The core case: hourly job, nothing recorded inside its budget.
     const runs = allJobsHealthy().filter((r) => r.function_id !== 'ownerrez-incremental-sync')
     ;(createServiceClient as ReturnType<typeof vi.fn>).mockReturnValue(
-      makeSupabase({ system_job_runs: [{ data: runs, error: null }], integration_connections: [{ data: [], error: null }] }),
+      makeSupabase({ system_job_runs: [{ data: runs, error: null }], integration_connections: [{ data: [], error: null }] }, [], RECORDING_MATURE),
     )
 
     const res = await invokeHandler(systemWatchdog, {
@@ -96,7 +117,7 @@ describe('systemWatchdog — silent jobs', () => {
     const runs = allJobsHealthy().map((r) =>
       r.function_id === 'cron-daily-wrapup' ? { ...r, started_at: hoursAgo(20) } : r)
     ;(createServiceClient as ReturnType<typeof vi.fn>).mockReturnValue(
-      makeSupabase({ system_job_runs: [{ data: runs, error: null }], integration_connections: [{ data: [], error: null }] }),
+      makeSupabase({ system_job_runs: [{ data: runs, error: null }], integration_connections: [{ data: [], error: null }] }, [], RECORDING_MATURE),
     )
 
     const res = await invokeHandler(systemWatchdog, {
@@ -111,7 +132,7 @@ describe('systemWatchdog — silent jobs', () => {
     // The geocoding backfill shape: not "ran and stopped" but "never ran",
     // which a last-run-timestamp check misses if it only inspects rows present.
     ;(createServiceClient as ReturnType<typeof vi.fn>).mockReturnValue(
-      makeSupabase({ system_job_runs: [{ data: [], error: null }], integration_connections: [{ data: [], error: null }] }),
+      makeSupabase({ system_job_runs: [{ data: [], error: null }], integration_connections: [{ data: [], error: null }] }, [], RECORDING_MATURE),
     )
 
     const res = await invokeHandler(systemWatchdog, {
@@ -119,6 +140,101 @@ describe('systemWatchdog — silent jobs', () => {
     }) as { silentJobs: number }
 
     expect(res.silentJobs).toBe(WATCHED_JOBS.length)
+  })
+})
+
+describe('systemWatchdog — cold start', () => {
+  // The defect this closes, caught by reasoning about the first deploy rather
+  // than by a test failing. system_job_runs starts empty, and "no recorded run"
+  // is the same observation as "never ran". Without a guard the first run
+  // reports all 10 watched jobs, and the 7 DAILY ones keep reporting every hour
+  // until each fires — up to a day of alerts naming healthy crons. That is
+  // precisely how an operator learns to ignore the channel, which would have
+  // made the whole watchdog worse than not shipping it.
+
+  it('stays silent about jobs never recorded when recording only just began', async () => {
+    // Recording live for 2h. Every daily job (30h budget) is unobservable —
+    // it simply has not been due yet.
+    ;(createServiceClient as ReturnType<typeof vi.fn>).mockReturnValue(
+      makeSupabase(
+        { system_job_runs: [{ data: [], error: null }], integration_connections: [{ data: [], error: null }] },
+        [],
+        { oldestStartedAt: hoursAgo(2), jobRunCount: 5 },
+      ),
+    )
+
+    const res = await invokeHandler(systemWatchdog, {
+      event: {}, step: runAllStep(), logger: makeLogger(),
+    }) as { silentJobs: number }
+
+    // Nothing: even the 3h-budget jobs are inside the 2h recording window.
+    expect(res.silentJobs).toBe(0)
+    expect(reportError).not.toHaveBeenCalled()
+  })
+
+  it('starts reporting a never-recorded job once recording outlives its budget', async () => {
+    // 5h of recording: the three 3h-budget jobs are now genuinely overdue,
+    // while the seven daily ones remain unobservable. The guard must be
+    // PER-JOB, not a global mute — a blanket warm-up would hide a real outage
+    // in a frequent job for a full day.
+    ;(createServiceClient as ReturnType<typeof vi.fn>).mockReturnValue(
+      makeSupabase(
+        { system_job_runs: [{ data: [], error: null }], integration_connections: [{ data: [], error: null }] },
+        [],
+        { oldestStartedAt: hoursAgo(5), jobRunCount: 20 },
+      ),
+    )
+
+    const res = await invokeHandler(systemWatchdog, {
+      event: {}, step: runAllStep(), logger: makeLogger(),
+    }) as { silentJobs: number }
+
+    const shortBudget = WATCHED_JOBS.filter((j) => j.maxSilentHours < 5).length
+    expect(shortBudget).toBeGreaterThan(0)
+    expect(res.silentJobs).toBe(shortBudget)
+  })
+
+  it('a job that recorded and then STOPPED is reported regardless of recording age', async () => {
+    // The guard must not become a way for a real outage to hide. This job has
+    // a recorded run, so the cold-start path never applies to it.
+    const runs = [{ function_id: 'ownerrez-incremental-sync', started_at: hoursAgo(10) }]
+    ;(createServiceClient as ReturnType<typeof vi.fn>).mockReturnValue(
+      makeSupabase(
+        { system_job_runs: [{ data: runs, error: null }], integration_connections: [{ data: [], error: null }] },
+        [],
+        { oldestStartedAt: hoursAgo(10), jobRunCount: 1 },
+      ),
+    )
+
+    const res = await invokeHandler(systemWatchdog, {
+      event: {}, step: runAllStep(), logger: makeLogger(),
+    }) as { silentJobs: number }
+
+    const msg = String((reportError as ReturnType<typeof vi.fn>).mock.calls[0][0])
+    expect(msg).toContain('ownerrez-incremental-sync')
+    expect(res.silentJobs).toBeGreaterThanOrEqual(1)
+  })
+
+  it('reports an ENTIRELY empty ledger as one finding, not ten', async () => {
+    // Expected exactly once, on the very first run before this watchdog's own
+    // completion is recorded. After that an empty table means the recorder is
+    // dead — worth knowing precisely because every other check depends on it.
+    ;(createServiceClient as ReturnType<typeof vi.fn>).mockReturnValue(
+      makeSupabase(
+        { system_job_runs: [{ data: [], error: null }], integration_connections: [{ data: [], error: null }] },
+        [],
+        { oldestStartedAt: null, jobRunCount: 0 },
+      ),
+    )
+
+    const res = await invokeHandler(systemWatchdog, {
+      event: {}, step: runAllStep(), logger: makeLogger(),
+    }) as { silentJobs: number; noRunsRecorded: boolean }
+
+    expect(res.noRunsRecorded).toBe(true)
+    expect(res.silentJobs).toBe(0)
+    expect(reportError).toHaveBeenCalledTimes(1)
+    expect(String((reportError as ReturnType<typeof vi.fn>).mock.calls[0][0])).toContain('empty')
   })
 })
 
@@ -134,7 +250,7 @@ describe('systemWatchdog — quiet integrations', () => {
       makeSupabase({
         system_job_runs:         [{ data: allJobsHealthy(), error: null }],
         integration_connections: [{ data: [conn({ last_used_at: hoursAgo(72), updated_at: hoursAgo(72) })], error: null }],
-      }),
+      }, [], RECORDING_MATURE),
     )
 
     const res = await invokeHandler(systemWatchdog, {
@@ -151,7 +267,7 @@ describe('systemWatchdog — quiet integrations', () => {
       makeSupabase({
         system_job_runs:         [{ data: allJobsHealthy(), error: null }],
         integration_connections: [{ data: [conn()], error: null }],
-      }),
+      }, [], RECORDING_MATURE),
     )
     const res = await invokeHandler(systemWatchdog, {
       event: {}, step: runAllStep(), logger: makeLogger(),
@@ -167,7 +283,7 @@ describe('systemWatchdog — quiet integrations', () => {
       makeSupabase({
         system_job_runs:         [{ data: allJobsHealthy(), error: null }],
         integration_connections: [{ data: [conn({ connected_at: hoursAgo(1), last_used_at: null, updated_at: null })], error: null }],
-      }),
+      }, [], RECORDING_MATURE),
     )
     const res = await invokeHandler(systemWatchdog, {
       event: {}, step: runAllStep(), logger: makeLogger(),
