@@ -750,6 +750,49 @@ async function resolveAssetStandardsAndHealth(
   return { standards, lifespan, health_score }
 }
 
+interface ResolvedAssetInputs {
+  fields:       ParsedAssetFormFields
+  standards:    Pick<AssetTypeStandard, 'lifespan_min_years' | 'lifespan_max_years' | 'avg_replacement_cost_high' | 'macrs_class_default' | 'weibull_shape'> | null
+  lifespan:     number | null
+  health_score: number | null
+}
+
+/**
+ * The full parse → validate property → resolve standards/health pipeline,
+ * identical for createAsset and replaceAsset up to the point each does its
+ * own write (insert vs. the replace RPC). Combining the three steps into one
+ * call — rather than each action calling the three helpers above in the same
+ * sequence — is what actually removes the duplication SonarCloud flagged:
+ * two near-identical CALL SEQUENCES to shared helpers are still duplicated
+ * tokens even though the underlying logic isn't copy-pasted.
+ */
+async function resolveAssetInputs(
+  supabase:   ActionSupabase,
+  formData:   FormData,
+  propertyId: string,
+  orgId:      string,
+  actionSite: string,
+): Promise<{ error: string } | ResolvedAssetInputs> {
+  const parsed = parseAssetFormFields(formData)
+  if ('error' in parsed) return { error: parsed.error }
+
+  const propertyCheck = await validateAssetProperty(supabase, propertyId, orgId, actionSite)
+  if ('error' in propertyCheck) return { error: propertyCheck.error }
+
+  // Error bound, not discarded: this read decides the asset's MACRS class,
+  // its lifespan and its health score. Treating a failed read as "no
+  // standards" wrote a DIFFERENT tax class (the '5_year' fallback) and no
+  // health score, recorded as though those were the chosen values.
+  const resolved = await resolveAssetStandardsAndHealth(
+    supabase, parsed.fields.asset_type, parsed.fields.installation_date,
+    parsed.fields.expected_lifespan_years, parsed.fields.estimated_replacement_cost,
+    orgId, actionSite,
+  )
+  if ('error' in resolved) return { error: resolved.error }
+
+  return { fields: parsed.fields, ...resolved }
+}
+
 export async function createAsset(
   propertyId: string,
   _prev: AssetActionState | null,
@@ -758,27 +801,14 @@ export async function createAsset(
   try {
     const { supabase, membership, user } = await requireOrgRole(PROPERTY_WRITE_ROLES)
 
-    const parsed = parseAssetFormFields(formData)
-    if ('error' in parsed) return { error: parsed.error }
+    const resolved = await resolveAssetInputs(supabase, formData, propertyId, membership.org_id, 'createAsset')
+    if ('error' in resolved) return { error: resolved.error }
+    const { standards, lifespan, health_score } = resolved
     const {
       name, asset_type, make, model, serial_number, installation_date,
       warranty_expiry_date, warranty_provider, notes,
-      purchase_price, estimated_replacement_cost, expected_lifespan_years,
-    } = parsed.fields
-
-    const propertyCheck = await validateAssetProperty(supabase, propertyId, membership.org_id, 'createAsset')
-    if ('error' in propertyCheck) return { error: propertyCheck.error }
-
-    // Error bound, not discarded: this read decides the asset's MACRS class,
-    // its lifespan and its health score. Treating a failed read as "no
-    // standards" wrote a DIFFERENT tax class (the '5_year' fallback) and no
-    // health score, recorded as though those were the chosen values.
-    const resolved = await resolveAssetStandardsAndHealth(
-      supabase, asset_type, installation_date, expected_lifespan_years,
-      estimated_replacement_cost, membership.org_id, 'createAsset',
-    )
-    if ('error' in resolved) return { error: resolved.error }
-    const { standards, lifespan, health_score } = resolved
+      purchase_price, estimated_replacement_cost,
+    } = resolved.fields
 
     const { data: asset, error } = await supabase
       .from('property_assets')
@@ -851,25 +881,14 @@ export async function replaceAsset(
   try {
     const { supabase, membership, user } = await requireOrgRole(PROPERTY_WRITE_ROLES)
 
-    const parsed = parseAssetFormFields(formData)
-    if ('error' in parsed) return { error: parsed.error }
+    const resolved = await resolveAssetInputs(supabase, formData, propertyId, membership.org_id, 'replaceAsset')
+    if ('error' in resolved) return { error: resolved.error }
+    const { standards, lifespan, health_score } = resolved
     const {
       name, asset_type, make, model, serial_number, installation_date,
       warranty_expiry_date, warranty_provider, notes,
-      purchase_price, estimated_replacement_cost, expected_lifespan_years,
-    } = parsed.fields
-
-    const propertyCheck = await validateAssetProperty(supabase, propertyId, membership.org_id, 'replaceAsset')
-    if ('error' in propertyCheck) return { error: propertyCheck.error }
-
-    // Same standards read + health-score compute as createAsset — kept in
-    // TypeScript rather than duplicated in the RPC's PL/pgSQL body.
-    const resolved = await resolveAssetStandardsAndHealth(
-      supabase, asset_type, installation_date, expected_lifespan_years,
-      estimated_replacement_cost, membership.org_id, 'replaceAsset',
-    )
-    if ('error' in resolved) return { error: resolved.error }
-    const { standards, lifespan, health_score } = resolved
+      purchase_price, estimated_replacement_cost,
+    } = resolved.fields
 
     const { data: rpcData, error: rpcError } = await supabase.rpc('replace_property_asset', {
       p_org_id:       membership.org_id,
