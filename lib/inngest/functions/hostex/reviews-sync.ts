@@ -95,8 +95,17 @@ export async function syncHostexReviews(
     // key — property + check-in + check-out — because the review carries no
     // stay_code and bookings.external_id IS the stay_code. One bounded read,
     // rather than leaving every Hostex review anonymous in the UI.
-    const propertyIds  = [...new Set(Object.values(propertyIdMap))]
-    const checkoutDates = normalized.map((r) => r.checkout_date).filter(Boolean)
+    const propertyIds = [...new Set(Object.values(propertyIdMap))]
+
+    // ISO-8601 dates sort lexicographically, so a plain sort gives the range
+    // bounds. Deliberately NOT Math.min/Math.max, which SonarQube suggests for
+    // the equivalent ternary reduce: these are STRINGS, and Math.min coerces
+    // them to NaN — the query would then bound on NaN and silently match
+    // nothing, taking every guest name with it.
+    const checkoutDates = normalized
+      .map((r) => r.checkout_date)
+      .filter(Boolean)
+      .sort((a, b) => a.localeCompare(b))
 
     const bookings = checkoutDates.length
       ? await fetchAllRows<{ property_id: string; checkin_date: string; checkout_date: string; guest_name: string | null }>(
@@ -106,8 +115,8 @@ export async function syncHostexReviews(
             .eq('org_id', orgId)
             .eq('external_source', PROVIDER)
             .in('property_id', propertyIds)
-            .gte('checkout_date', checkoutDates.reduce((a, b) => (a < b ? a : b)))
-            .lte('checkout_date', checkoutDates.reduce((a, b) => (a > b ? a : b)))
+            .gte('checkout_date', checkoutDates[0]!)
+            .lte('checkout_date', checkoutDates.at(-1)!)
             .order('property_id', { ascending: true })
             .range(from, to),
           { label: `hostex-reviews.guest-names[org=${orgId}]` },
