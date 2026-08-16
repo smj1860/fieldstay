@@ -172,6 +172,69 @@ export interface HostexReviewsData {
   reviews: HostexReview[]
 }
 
+// ── Staff & Tasks ────────────────────────────────────────────────────────────
+// ✅ Confirmed against the published OpenAPI for GET /staffs and GET /tasks.
+//
+// NOTE WHAT A STAFF DOES NOT CARRY: there is no role, type, position or
+// category field, on the query endpoint OR the create endpoint. Hostex's own
+// prose describes staff as "cleaners / operators / receptionists", but the
+// schema gives no way to tell them apart. The only signal available is what
+// each staff is actually ASSIGNED — hence the task-type inference in
+// hostex.mappers.ts. Do not go looking for a role field; it is not there.
+
+export interface HostexStaff {
+  id:         number
+  name:       string
+  mobile?:    string | null
+  email?:     string | null
+  note?:      string | null
+  is_active:  boolean
+}
+
+export interface HostexStaffsData {
+  staffs: HostexStaff[]
+  total?: number
+}
+
+/** What kind of work a task represents. Hostex's own enum, verbatim. */
+export type HostexTaskType =
+  | 'cleaning'
+  | 'maintenance'
+  | 'reception'
+  | 'room_service'
+  | 'other'
+
+export type HostexTaskStatus = 'pending' | 'in_progress' | 'completed' | 'cancelled'
+
+/**
+ * A scheduled job, NOT a template. Carries no checklist of any kind — which is
+ * why Hostex tasks cannot be imported as FieldStay turnover templates: a
+ * template is sections-and-items, and a task has neither.
+ *
+ * What it IS good for: `staff_id` + `type` infers who someone is, and `fee` is
+ * a real per-property cleaning cost that Hostex exposes nowhere else.
+ */
+export interface HostexTask {
+  id:              number
+  type:            HostexTaskType
+  status:          HostexTaskStatus
+  property_id?:    number | null
+  property_title?: string | null
+  stay_code?:      string | null
+  staff_id?:       number | null
+  staff_name?:     string | null
+  expected_date?:  string | null
+  level?:          'standard' | 'simple' | 'advanced' | null
+  fee?:            number | null
+  currency?:       string | null
+  note?:           string | null
+}
+
+export interface HostexTasksData {
+  tasks:  HostexTask[]
+  total?: number
+}
+
 // ── Webhooks ─────────────────────────────────────────────────────────────────
 // ✅ Confirmed against the published OpenAPI for GET/POST /webhooks.
 

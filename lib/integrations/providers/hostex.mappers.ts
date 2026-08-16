@@ -8,11 +8,15 @@ import type { NormalizedProperty } from '@/lib/properties/normalize'
 import type { NormalizedBooking } from '@/lib/bookings/normalize'
 import { unmappedBookingStatus } from '@/lib/bookings/normalize'
 import { resolveHospitableTimezone } from '@/lib/integrations/providers/hospitable.mappers'
+import type { CrewRole } from '@/types/database'
 import type {
   HostexProperty,
   HostexReservation,
   HostexReservationStatus,
   HostexReview,
+  HostexStaff,
+  HostexTask,
+  HostexTaskType,
 } from './hostex.types'
 
 // ── Address ──────────────────────────────────────────────────────────────────
@@ -345,4 +349,129 @@ export function hostexReviewToNormalized(review: HostexReview): NormalizedReview
     checkin_date:         review.check_in_date,
     checkout_date:        review.check_out_date,
   }
+}
+
+// ── Staff ────────────────────────────────────────────────────────────────────
+
+/**
+ * What a Hostex task type says about the person doing it.
+ *
+ * FieldStay's crew_role enum is cleaning | landscaping | maintenance | general
+ * — there is no `reception` member — so reception and room_service land on
+ * 'general'. That is not a shrug: 'general' plus a specialty of "Reception" is
+ * precisely the state a PM should see before deciding whether that person
+ * belongs on the crew roster at all or should be invited as a team member.
+ */
+const TASK_TYPE_TO_ROLE: Record<HostexTaskType, CrewRole> = {
+  cleaning:     'cleaning',
+  maintenance:  'maintenance',
+  reception:    'general',
+  room_service: 'general',
+  other:        'general',
+}
+
+/** Human-readable job title per task type, preserved in crew_members.specialty. */
+const TASK_TYPE_LABEL: Record<HostexTaskType, string> = {
+  cleaning:     'Cleaning',
+  maintenance:  'Maintenance',
+  reception:    'Reception',
+  room_service: 'Room service',
+  other:        'Other',
+}
+
+export interface HostexStaffRole {
+  role:      CrewRole
+  /** e.g. "Cleaning, Maintenance" — null when the staff has no tasks at all. */
+  specialty: string | null
+}
+
+/**
+ * Infer what a staff member DOES from the tasks they are assigned.
+ *
+ * Necessary because Hostex staff carry no role field — not on /staffs, not on
+ * the create endpoint. Hostex's prose calls them "cleaners / operators /
+ * receptionists"; its schema offers nothing to tell them apart. Task
+ * assignments are the only evidence the API provides.
+ *
+ * Ranked, not first-wins: someone who does both cleaning and reception is a
+ * cleaner for scheduling purposes, because that is the role FieldStay would
+ * actually dispatch them for. Both labels survive in `specialty` so the PM can
+ * see the full picture and override.
+ *
+ * A staff with no tasks in the window returns 'general' with a NULL specialty —
+ * deliberately distinguishable from one whose tasks were all "other", which
+ * gets the "Other" label. Absence of evidence is not evidence of a generalist.
+ */
+export function inferHostexStaffRole(tasks: HostexTask[]): HostexStaffRole {
+  const types = new Set(tasks.map((t) => t.type).filter(Boolean))
+  if (!types.size) return { role: 'general', specialty: null }
+
+  // Most-specific-wins order. Maintenance before cleaning is arbitrary only in
+  // the sense that nobody is both full-time; the ranking exists so the result
+  // is deterministic rather than dependent on task order.
+  const RANK: HostexTaskType[] = ['cleaning', 'maintenance', 'reception', 'room_service', 'other']
+  const primary = RANK.find((t) => types.has(t)) ?? 'other'
+
+  const specialty = RANK.filter((t) => types.has(t)).map((t) => TASK_TYPE_LABEL[t]).join(', ')
+
+  return { role: TASK_TYPE_TO_ROLE[primary], specialty }
+}
+
+export interface HostexCrewMemberRow {
+  org_id:            string
+  name:              string
+  email:             string | null
+  phone:             string | null
+  role:              CrewRole
+  is_active:         boolean
+  reliability_score: number
+  capacity_score:    number
+  specialty:         string | null
+  notes:             string | null
+  external_id:       string
+  external_source:   'hostex'
+}
+
+/**
+ * Maps Hostex staff onto crew_members rows.
+ *
+ * Everyone lands in crew_members, INCLUDING the ones the role inference marks
+ * as reception. Nobody is auto-created as an organization_member: that would
+ * mean writing an org_invite and SENDING A REAL EMAIL to a real person as a
+ * side effect of a background sync, which is not a thing a sync gets to
+ * decide. The PM promotes them through the existing invite flow, using the
+ * specialty label as the cue.
+ *
+ * A staff with no usable name is dropped rather than written as '' — same
+ * guard as hospitableTeammatesToCrewRows.
+ */
+export function hostexStaffToCrewRows(
+  orgId:        string,
+  staffs:       HostexStaff[],
+  tasksByStaff: Map<number, HostexTask[]>,
+): HostexCrewMemberRow[] {
+  return staffs
+    .filter((s) => s.name?.trim())
+    .map((s) => {
+      const { role, specialty } = inferHostexStaffRole(tasksByStaff.get(s.id) ?? [])
+
+      return {
+        org_id:            orgId,
+        name:              s.name.trim(),
+        email:             s.email?.trim() || null,
+        phone:             s.mobile?.trim() || null,
+        role,
+        // Mirrors Hostex rather than forcing true: a staff Hostex deactivated
+        // must arrive deactivated, not look deleted.
+        is_active:         s.is_active !== false,
+        // 0–1 scale, NOT NULL — 1.0 matches the column DEFAULT and is the
+        // neutral starting score auto-assign-turnover expects.
+        reliability_score: 1.0,
+        capacity_score:    1.0,
+        specialty,
+        notes:             s.note?.trim() || null,
+        external_id:       String(s.id),
+        external_source:   'hostex' as const,
+      }
+    })
 }

@@ -33,6 +33,7 @@ import { getValidHostexToken } from '@/lib/integrations/providers/hostex-token'
 import { runProviderReconcile } from '../shared/reconcile-shell'
 import { syncHostexReservations } from './reservation-sync'
 import { syncHostexReviews } from './reviews-sync'
+import { syncHostexStaff } from './staff-sync'
 
 const PROVIDER = 'hostex' as const
 const SYSTEM   = 'inngest:hostex-reservation-reconcile'
@@ -117,6 +118,16 @@ export const hostexReservationReconcileHandler = inngest.createFunction(
           fetchMode:     { kind: 'window', historyMonths: RECONCILE_REVIEW_HISTORY_MONTHS },
           system:        SYSTEM,
           stepPrefix:    'reconcile',
+        })
+
+        // Staff rides the same daily pass. Hostex has no staff webhook, so
+        // this is the ONLY way a hire or a departure ever reaches FieldStay.
+        await syncHostexStaff({
+          step, logger, token,
+          orgId:      org_id,
+          userId:     user_id,
+          system:     SYSTEM,
+          stepPrefix: 'reconcile',
         })
 
         return result
