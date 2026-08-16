@@ -377,6 +377,56 @@ describe('properties/actions', () => {
       })
     })
 
+    it('stores the nameplate year as manufacture_date, NOT as an in-service date', async () => {
+      // The form used to pre-fill Installation Date from the scan's
+      // manufacture_year, so an OCR guess landed in installation_date AND
+      // placed_in_service_date — a tax field — indistinguishable from a date
+      // the PM recorded. The year has its own column now; depreciation falls
+      // back to it on its own and labels the entry when it does.
+      const supabase = makeSupabase({
+        properties:           [{ data: { id: 'prop_1' } }],
+        asset_type_standards: [{ data: null }],
+        property_assets:      [{ data: { id: 'asset_1' } }],
+      })
+      mockAuthed(supabase)
+
+      await createAsset('prop_1', null, buildAssetForm({ manufacture_year: '2015' }))
+
+      const insert = supabase.calls.find((c) => c.table === 'property_assets' && c.method === 'insert')
+      expect(insert!.args[0]).toEqual(expect.objectContaining({
+        manufacture_date:       '2015-01-01',
+        installation_date:      null,
+        placed_in_service_date: null,
+      }))
+    })
+
+    it('rejects an implausible manufacture year rather than clamping it', async () => {
+      // A clamped typo is a wrong number nobody is told about, and this value
+      // reaches age scoring and, as a last resort, depreciation.
+      const supabase = makeSupabase({})
+      mockAuthed(supabase)
+
+      const result = await createAsset('prop_1', null, buildAssetForm({ manufacture_year: '215' }))
+
+      expect(result.error).toMatch(/Manufacture year must be between 1900 and \d{4}/)
+      expect(supabase.from).not.toHaveBeenCalled()
+    })
+
+    it('accepts a blank manufacture year as simply absent', async () => {
+      const supabase = makeSupabase({
+        properties:           [{ data: { id: 'prop_1' } }],
+        asset_type_standards: [{ data: null }],
+        property_assets:      [{ data: { id: 'asset_1' } }],
+      })
+      mockAuthed(supabase)
+
+      const result = await createAsset('prop_1', null, buildAssetForm({ manufacture_year: '' }))
+
+      expect(result).toEqual({ success: true })
+      const insert = supabase.calls.find((c) => c.table === 'property_assets' && c.method === 'insert')
+      expect(insert!.args[0]).toEqual(expect.objectContaining({ manufacture_date: null }))
+    })
+
     it('rejects a property id that does not belong to the caller org (IDOR check)', async () => {
       const supabase = makeSupabase({ properties: [{ data: null }] })
       mockAuthed(supabase)
@@ -530,7 +580,7 @@ describe('properties/actions', () => {
   describe('bulkImportAssets', () => {
     const rows: CsvAssetRow[] = [{
       name: 'Fridge', asset_type: 'refrigerator', make: null, model: null,
-      serial_number: null, installation_date: null, purchase_price: null,
+      serial_number: null, installation_date: null, manufacture_date: null, purchase_price: null,
       estimated_replacement_cost: null, warranty_expiry_date: null,
       warranty_provider: null, notes: null,
     }]

@@ -124,6 +124,28 @@ export function parseCsvLine(line: string): string[] {
   return cells.map((c) => c.trim())
 }
 
+/** Oldest plausible nameplate year — below this it is a typo, not an appliance. */
+const MIN_MANUFACTURE_YEAR = 1900
+
+/**
+ * The CSV's `manufacture_year` column as a `YYYY-01-01` date, matching what
+ * asset-scan.ts and the asset form both store for the same fact. A year is
+ * what a nameplate carries, and a year is what a PM has to hand when bulk-
+ * importing from a prior system — install dates usually did not come across.
+ *
+ * An out-of-range or non-numeric value becomes null rather than an error: one
+ * bad cell must not reject a 200-row import, and an asset with no manufacture
+ * year is simply an asset the age fallback cannot help.
+ */
+function manufactureDateFromYear(raw: string): string | null {
+  const year = Number(raw.trim())
+  const maxYear = new Date().getFullYear() + 1
+  if (!raw.trim() || !Number.isInteger(year) || year < MIN_MANUFACTURE_YEAR || year > maxYear) {
+    return null
+  }
+  return `${year}-01-01`
+}
+
 export type ParseAssetCsvResult =
   | { ok: true; rows: ParsedAssetCsvRow[]; error: null }
   | { ok: false; rows: null; error: string }
@@ -153,6 +175,7 @@ export function parseAssetCsvText(text: string, knownTypes: readonly AssetType[]
       model:                      get('model') || null,
       serial_number:              get('serial_number') || null,
       installation_date:          get('installation_date') || null,
+      manufacture_date:           manufactureDateFromYear(get('manufacture_year')),
       purchase_price:             get('purchase_price') ? parseFloat(get('purchase_price')) : null,
       estimated_replacement_cost: get('estimated_replacement_cost') ? parseFloat(get('estimated_replacement_cost')) : null,
       warranty_expiry_date:       get('warranty_expiry_date') || null,
