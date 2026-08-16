@@ -59,14 +59,49 @@ describe('calculateAnnualDepreciation', () => {
     id:                     'asset_1',
     org_id:                 'org_1',
     placed_in_service_date: '2020-01-01',
+    installation_date:      null,
+    manufacture_date:       null,
     purchase_price:         10000,
     salvage_value:          0,
     macrs_class:            '5_year' as MacrsClass,
   }
 
-  it('returns null when placed_in_service_date is missing', () => {
+  it('returns null when no service date can be resolved at all', () => {
     const asset = { ...baseAsset, placed_in_service_date: null }
     expect(calculateAnnualDepreciation(asset, 2020, 0)).toBeNull()
+  })
+
+  it('depreciates from the nameplate manufacture year when nothing better exists', () => {
+    // The scanned-asset case: FieldStay read 2020 off the data plate and
+    // nothing else dates the asset. This used to generate no entry at all.
+    const asset = { ...baseAsset, placed_in_service_date: null, manufacture_date: '2020-01-01' }
+    const entry = calculateAnnualDepreciation(asset, 2020, 0)
+
+    expect(entry?.current_year_depreciation).toBe(2000)   // year 1 of 5-year MACRS
+    // The inference is recorded on the row a CPA reads, never laundered into
+    // looking like a date someone entered.
+    expect(entry?.notes).toContain('estimated from the nameplate manufacture year')
+  })
+
+  it('leaves notes null when the service date was actually recorded', () => {
+    expect(calculateAnnualDepreciation(baseAsset, 2020, 0)?.notes).toBeNull()
+    expect(calculateAnnualDepreciation(
+      { ...baseAsset, placed_in_service_date: null, installation_date: '2020-01-01' }, 2020, 0,
+    )?.notes).toBeNull()
+  })
+
+  it('prefers placed_in_service_date over both physical dates', () => {
+    // A PM (or their CPA) who sets the tax date deliberately overrides the
+    // fallback entirely — including a manufacture year that would date the
+    // asset years earlier.
+    const asset = {
+      ...baseAsset,
+      placed_in_service_date: '2020-01-01',
+      installation_date:      '2018-01-01',
+      manufacture_date:       '2016-01-01',
+    }
+    expect(calculateAnnualDepreciation(asset, 2019, 0)).toBeNull()   // before service year
+    expect(calculateAnnualDepreciation(asset, 2020, 0)?.current_year_depreciation).toBe(2000)
   })
 
   it('returns null when purchase_price is missing', () => {

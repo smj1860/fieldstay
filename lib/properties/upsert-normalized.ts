@@ -14,6 +14,10 @@ import {
  * the overwrite diff below. A type alias rather than an interface on purpose:
  * only an alias gets the implicit index signature that makes it assignable to
  * logContentOverwrites' `Record<string, unknown>` parameter.
+ *
+ * Carries the three room counts too. Those are NOT part of the content diff —
+ * they are what a null from the provider falls back to, so that a PMS with no
+ * bedroom field cannot re-assert a default over the PM's correction.
  */
 type ExistingContentRow = {
   external_id:         string | null
@@ -21,6 +25,9 @@ type ExistingContentRow = {
   wifi_password:       string | null
   access_instructions: string | null
   house_manual:        string | null
+  bedrooms:            number | null
+  bathrooms:           number | null
+  max_guests:          number | null
 }
 
 /**
@@ -31,13 +38,18 @@ type ExistingContentRow = {
  * which has its own multi-stage flow but can still call
  * logContentOverwrites() directly for the same audit behavior.
  *
- * The PMS is always the source of truth: every field is overwritten on
- * every sync, including the four PM-editable content fields (wifi_name,
- * wifi_password, access_instructions, house_manual). Before overwriting,
- * logContentOverwrites() compares against the existing row and writes an
- * audit_events entry for any content field whose value is about to change
- * from a real, existing, non-null value — a recoverability trail, not a
- * block on the overwrite itself.
+ * The PMS is the source of truth for every field it actually carries, and
+ * those are overwritten on every sync, including the four PM-editable content
+ * fields (wifi_name, wifi_password, access_instructions, house_manual).
+ * Before overwriting, logContentOverwrites() compares against the existing
+ * row and writes an audit_events entry for any content field whose value is
+ * about to change from a real, existing, non-null value — a recoverability
+ * trail, not a block on the overwrite itself.
+ *
+ * A null room count is the one exception, and it is not a carve-out from that
+ * policy but the policy read literally: null means the PMS has no such field,
+ * so there is nothing for it to be the source of truth about. See roomCounts()
+ * below.
  *
  * Returns a map of external_id → FieldStay property UUID.
  */
@@ -51,11 +63,14 @@ export async function upsertNormalizedProperties(
 
   const supabase = createServiceClient({ system: 'lib/properties/upsert-normalized' })
 
-  // Fetch existing content field values BEFORE the upsert, so we can diff
-  // against what's about to be written.
-  // Degrade, don't throw: these rows feed the content-overwrite audit log
-  // below, not the upsert itself, so a failure costs the log entry rather
-  // than the sync. tryUnwrap still records that it happened.
+  // Fetch existing values BEFORE the upsert, so we can diff against what's
+  // about to be written.
+  //
+  // Fails loud, where this used to degrade. It was audit-only once — a failure
+  // cost a log entry, not the sync — but these rows now also decide whether a
+  // provider's null leaves the PM's room counts alone. Guessing there is not a
+  // missing log line, it is silently overwriting the counts with a default, so
+  // a sync that cannot read current state retries instead.
   //
   // Paginated because the result is sized by the `.in()` list, not by a single
   // parent row: a PMS sync passes every property in the org at once, so a
@@ -65,7 +80,7 @@ export async function upsertNormalizedProperties(
     existingRows = await fetchAllRows<ExistingContentRow>(
       (from, to) => supabase
         .from('properties')
-        .select('external_id, wifi_name, wifi_password, access_instructions, house_manual')
+        .select('external_id, wifi_name, wifi_password, access_instructions, house_manual, bedrooms, bathrooms, max_guests')
         .eq('org_id', orgId)
         .eq('external_source', provider)
         .in('external_id', normalized.map((n) => n.external_id))
@@ -74,10 +89,9 @@ export async function upsertNormalizedProperties(
       { label: 'lib.properties.upsert-normalized.existing' },
     )
   } catch (err) {
-    // Degrade, don't throw — see above. fetchAllRows throws on failure, so the
-    // catch is what makes it non-fatal; reportError keeps it visible.
-    console.error('[upsertNormalizedProperties] existing-content read failed', err)
+    console.error('[upsertNormalizedProperties] existing-property read failed', err)
     reportError(err, { site: 'lib.properties.upsert-normalized.existing', orgId })
+    throw err
   }
 
   const existingByExternalId = new Map(
@@ -98,6 +112,26 @@ export async function upsertNormalizedProperties(
   const hasCoords = (n: NormalizedProperty): n is GeolocatedProperty =>
     typeof n.lat === 'number' && typeof n.lng === 'number'
 
+  // A room count the provider does not carry (null) keeps whatever FieldStay
+  // already holds, and only falls back to FieldStay's own default for a row
+  // that does not exist yet — the same defaults readPropertyDefaults applies
+  // on read (lib/properties/defaults.ts).
+  //
+  // Deliberately narrower than the always-overwrite policy in the doc comment
+  // above, and for the reason that policy assumes: "the PMS is the source of
+  // truth" holds only for a field the PMS actually has. Hostex exposes no
+  // bedroom, bathroom or occupancy count, so writing one on every sync meant a
+  // fabricated default beating the only real number in the system. A provider
+  // that DOES report a count still overwrites, unchanged.
+  const roomCounts = (n: NormalizedProperty) => {
+    const existing = existingByExternalId.get(n.external_id)
+    return {
+      bedrooms:   n.bedrooms   ?? existing?.bedrooms   ?? 1,
+      bathrooms:  n.bathrooms  ?? existing?.bathrooms  ?? 1,
+      max_guests: n.max_guests ?? existing?.max_guests ?? 2,
+    }
+  }
+
   const buildRow = (n: NormalizedProperty) => ({
     org_id:                  orgId,
     external_id:             n.external_id,
@@ -107,9 +141,7 @@ export async function upsertNormalizedProperties(
     city:                    n.city,
     state:                   n.state,
     zip:                     n.zip,
-    bedrooms:                n.bedrooms,
-    bathrooms:               n.bathrooms,
-    max_guests:              n.max_guests,
+    ...roomCounts(n),
     checkin_time:            n.checkin_time,
     checkout_time:           n.checkout_time,
     timezone:                n.timezone,

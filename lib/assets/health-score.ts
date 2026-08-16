@@ -1,5 +1,6 @@
 import type { PropertyAsset, AssetTypeStandard } from '@/types/database'
 import type { StatusDotStatus } from '@/components/ui/StatusDot'
+import { assetAgeBasis } from '@/lib/assets/age-basis'
 
 export interface AssetRepairSummary {
   total_repairs:     number
@@ -67,7 +68,7 @@ export interface HealthScoreBreakdown {
  * component on its own.
  */
 export function calculateHealthScoreBreakdown(
-  asset:         Pick<PropertyAsset, 'installation_date' | 'expected_lifespan_years' | 'estimated_replacement_cost'>,
+  asset:         Pick<PropertyAsset, 'installation_date' | 'manufacture_date' | 'expected_lifespan_years' | 'estimated_replacement_cost'>,
   standards:     Pick<AssetTypeStandard, 'lifespan_min_years' | 'lifespan_max_years' | 'avg_replacement_cost_high'>
                  // Learned per-type shape (see asset-weibull-shape-fit.ts) — optional so
                  // existing callers that don't carry it still satisfy this type; falls back
@@ -76,14 +77,20 @@ export function calculateHealthScoreBreakdown(
   repairHistory: AssetRepairSummary,
   weights:       ScoringWeights = DEFAULT_WEIGHTS,
 ): HealthScoreBreakdown {
-  if (!asset.installation_date) {
+  // Falls back to the nameplate manufacture year when no installation date
+  // was recorded — see lib/assets/age-basis.ts. A scanned asset used to score
+  // a flat 50 forever despite FieldStay having read a real year off its data
+  // plate.
+  const ageBasis = assetAgeBasis(asset)
+
+  if (!ageBasis) {
     // Split proportionally to whatever weights were passed so ageScore +
     // conditionScore always sums to the same 50 the old flat "Unknown"
     // score returned, regardless of a type's actual age/condition split.
     return { ageScore: weights.age / 2, conditionScore: weights.condition / 2, total: 50 }
   }
 
-  const installYear = new Date(asset.installation_date).getFullYear()
+  const installYear = new Date(ageBasis.date).getFullYear()
   const currentYear = new Date().getFullYear()
   const ageYears    = Math.max(currentYear - installYear, 0)
   const lifespan    = (asset.expected_lifespan_years
@@ -124,7 +131,7 @@ export function calculateHealthScoreBreakdown(
 }
 
 export function calculateHealthScore(
-  asset:         Pick<PropertyAsset, 'installation_date' | 'expected_lifespan_years' | 'estimated_replacement_cost'>,
+  asset:         Pick<PropertyAsset, 'installation_date' | 'manufacture_date' | 'expected_lifespan_years' | 'estimated_replacement_cost'>,
   standards:     Pick<AssetTypeStandard, 'lifespan_min_years' | 'lifespan_max_years' | 'avg_replacement_cost_high'>
                  & { weibull_shape?: number | null },
   repairHistory: AssetRepairSummary,

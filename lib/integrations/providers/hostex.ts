@@ -36,10 +36,12 @@
 //     cycle) or a failed API call during sync. Expect Hostex disconnections
 //     to surface days later than Hospitable/OwnerRez ones — an inherent
 //     Hostex API limitation, not something to fix in code.
-//   - PHASE 1 ONLY: validateWebhook/handleWebhookEvent are stubs. Real
-//     implementation lands in Phase 2, once onConnect exists to sync
-//     properties before registering the webhook (property_id-based owner
-//     resolution).
+//   - Hostex webhooks do NOT go through the generic /api/webhooks/[provider]
+//     route, so this adapter's validateWebhook/handleWebhookEvent are not the
+//     live path. Hostex identifies the target account by a per-connection
+//     token in the URL — see app/api/webhooks/hostex/[token]/route.ts and
+//     hostex-webhook.ts. The two methods below stay as fail-closed rejections
+//     because the IntegrationProvider interface requires them.
 //
 // Type definitions live in hostex.types.ts, re-exported below so
 // `import { HostexProperty } from '@/lib/integrations/providers/hostex'`
@@ -342,21 +344,27 @@ export const hostexProvider: IntegrationProvider = {
     }
   },
 
-  // PHASE 1 STUB. No webhook is ever registered with Hostex yet (that's
-  // Phase 2's onConnect), so nothing should reach this in practice — it
-  // exists only to satisfy the IntegrationProvider interface, which does not
-  // mark validateWebhook/handleWebhookEvent optional the way it does the
-  // OAuth methods. Fails closed (returns invalid) rather than throwing, so
-  // an unexpected inbound request gets a clean rejection from the generic
-  // route instead of a 500.
+  // NOT the live webhook path — see the note in this file's header. Hostex
+  // deliveries land on app/api/webhooks/hostex/[token], which resolves the
+  // connection from the URL token; nothing registers Hostex against the
+  // generic /api/webhooks/[provider] route. These two exist only to satisfy
+  // the IntegrationProvider interface, which does not mark them optional the
+  // way it does the OAuth methods.
+  //
+  // Fails closed rather than throwing, so a request that somehow reaches the
+  // generic route gets a clean rejection instead of a 500. Do NOT implement
+  // them here as a second entry point: the token route is what carries the
+  // trust-on-first-use secret claim, and a second unauthenticated path into
+  // the same handler would bypass it.
   async validateWebhook(_request: Request): Promise<WebhookVerificationResult> {
-    return fail('Hostex webhook handling not implemented yet (Phase 2)')
+    return fail('Hostex webhooks are handled at /api/webhooks/hostex/[token], not this route')
   },
 
   async handleWebhookEvent(): Promise<void> {
     console.warn(
-      '[Hostex] handleWebhookEvent invoked before Phase 2 webhook support exists. ' +
-      'This should be unreachable in Phase 1 — no Hostex webhook is ever registered yet.'
+      '[Hostex] handleWebhookEvent invoked on the generic provider route. ' +
+      'Hostex deliveries belong at /api/webhooks/hostex/[token] — this is unreachable ' +
+      'in normal operation and does nothing on purpose.'
     )
   },
 }

@@ -11,6 +11,7 @@ import {
   type AssetActionState,
 } from '../properties/actions'
 import { healthLabel, healthColor, healthDot, healthBgStyle } from '@/lib/assets/health-score'
+import { assetAgeBasis, assetAgeYears } from '@/lib/assets/age-basis'
 import { missingAssetTypesFromDiscoveredSet } from '@/lib/asset-discovery/config'
 import { PortfolioAssetView } from './portfolio-view'
 import { Tabs } from '@/components/ui/Tabs'
@@ -43,6 +44,21 @@ const ASSET_TYPES: AssetType[] = [
 ]
 
 // ── Health score pill ─────────────────────────────────────────────────────────
+
+/** Upper bound on the manufacture-year input — next year, for a new-build unit. */
+const CURRENT_YEAR = new Date().getFullYear()
+
+/**
+ * The stored manufacture_date as a year for the form's number input.
+ * asset-scan.ts writes the nameplate year as `YYYY-01-01`, so the day and
+ * month carry no information and showing a date picker would invite the PM to
+ * "correct" a precision the data never had.
+ */
+function manufactureYearOf(asset: Pick<PropertyAsset, 'manufacture_date'> | null | undefined): number | null {
+  if (!asset?.manufacture_date) return null
+  const year = new Date(asset.manufacture_date).getFullYear()
+  return Number.isFinite(year) ? year : null
+}
 
 function HealthPill({ score }: { score: number | null }) {
   if (score === null) return <Badge tone="slate">Unknown</Badge>
@@ -347,23 +363,47 @@ function AssetForm({
               />
             </div>
 
-            {/* Installation Date */}
+            {/* Installation Date — deliberately NOT prefilled from the scan.
+                It used to default to `${scanResult.manufacture_year}-01-01`,
+                which wrote an OCR guess into installation_date AND (via
+                createAsset) into placed_in_service_date, where nothing
+                downstream could tell it from a date the PM actually recorded.
+                The nameplate year has its own field below now, and
+                lib/assets/age-basis.ts marks everything derived from it. */}
             <div>
               <label htmlFor="asset-installation-date" className="label">Installation Date</label>
               <Input
                 id="asset-installation-date"
-                key={scanResult?.manufacture_year}
                 name="installation_date"
                 type="date"
-                defaultValue={
-                  scanResult?.manufacture_year
-                    ? `${scanResult.manufacture_year}-01-01`
-                    : (asset?.installation_date ?? '')
-                }
+                defaultValue={asset?.installation_date ?? ''}
               />
               <p className="text-xs text-muted-themed mt-1">
                 Also used as the placed-in-service date for tax depreciation. Edit
                 separately if your actual in-service date differs.
+              </p>
+            </div>
+
+            {/* Manufacture Year — prefilled from the scan */}
+            <div>
+              <label htmlFor="asset-manufacture-year" className="label">Manufacture Year</label>
+              <Input
+                id="asset-manufacture-year"
+                key={scanResult?.manufacture_year}
+                name="manufacture_year"
+                type="number"
+                min={1900}
+                max={CURRENT_YEAR + 1}
+                step={1}
+                placeholder="e.g. 2015"
+                defaultValue={
+                  scanResult?.manufacture_year ?? manufactureYearOf(asset) ?? ''
+                }
+              />
+              <p className="text-xs text-muted-themed mt-1">
+                Off the nameplate. Used to estimate age, health and replacement
+                timing when no installation date is recorded — always marked as an
+                estimate where it appears.
               </p>
               {scanResult?.capacity && (
                 <p className="text-xs mt-1 text-muted-themed">Capacity: {scanResult.capacity}</p>
@@ -513,7 +553,7 @@ function CsvImportModal({
         {rows.length === 0 ? (
           <>
             <p className="text-sm text-muted-themed mb-4">
-              CSV columns: <code className="text-xs bg-raised-themed px-1 rounded">name, asset_type, make, model, serial_number, installation_date, purchase_price, estimated_replacement_cost, warranty_expiry_date, warranty_provider, notes</code>
+              CSV columns: <code className="text-xs bg-raised-themed px-1 rounded">name, asset_type, make, model, serial_number, installation_date, manufacture_year, purchase_price, estimated_replacement_cost, warranty_expiry_date, warranty_provider, notes</code>
             </p>
             <p className="text-xs text-muted-themed mb-4">
               <strong>asset_type</strong> values: hvac, water_heater, roof, refrigerator, washer, dryer, dishwasher, microwave, oven_range, pool_pump, hot_tub, garage_door, smart_lock, deck_structure, electrical_panel, plumbing_system, septic_system, well_pump, generator, solar_system, other
@@ -598,9 +638,10 @@ function AssetRow({
 
   const std      = standards.find((s) => s.asset_type === asset.asset_type)
   const typeName = std?.display_name ?? asset.asset_type.replace(/_/g, ' ')
-  const ageYears = asset.installation_date
-    ? new Date().getFullYear() - new Date(asset.installation_date).getFullYear()
-    : null
+  // Falls back to the nameplate manufacture year, marked with a tilde — see
+  // lib/assets/age-basis.ts. A scanned asset used to show no age at all.
+  const ageYears     = assetAgeYears(asset)
+  const ageEstimated = assetAgeBasis(asset)?.estimated ?? false
 
   // Section 179: 5-year MACRS asset placed in service this year
   const currentYear    = new Date().getFullYear()
@@ -615,8 +656,13 @@ function AssetRow({
         <div className="flex items-center gap-2 flex-wrap">
           <span className="text-sm font-medium text-primary-themed">{asset.name}</span>
           <Badge tone="slate" className="text-xs">{typeName}</Badge>
-          {ageYears != null && (
-            <span className="text-xs text-muted-themed">{ageYears}y old</span>
+          {ageYears !== null && (
+            <span
+              className="text-xs text-muted-themed"
+              title={ageEstimated ? 'Estimated from the nameplate manufacture year' : undefined}
+            >
+              {ageEstimated ? '~' : ''}{ageYears}y old
+            </span>
           )}
           {showSection179 && (
             <span

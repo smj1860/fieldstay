@@ -623,12 +623,41 @@ interface ParsedAssetFormFields {
   model:                      string | null
   serial_number:              string | null
   installation_date:          string | null
+  manufacture_date:           string | null
   warranty_expiry_date:       string | null
   warranty_provider:          string | null
   notes:                      string | null
   purchase_price:             number | null
   estimated_replacement_cost: number | null
   expected_lifespan_years:    number | null
+}
+
+/** Oldest plausible nameplate year — below this it is an OCR misread, not an appliance. */
+const MIN_MANUFACTURE_YEAR = 1900
+
+/**
+ * The form's "Manufacture Year" input as a `YYYY-01-01` date, matching what
+ * asset-scan.ts writes for the same fact. Only the year is meaningful — the
+ * nameplate carries no month — so the column stores the year's first day and
+ * the form shows a year, never a date picker.
+ *
+ * Bounded because this feeds age scoring and, as a last resort, depreciation:
+ * a year ahead of next year makes an asset negatively aged, and a stray digit
+ * makes a dishwasher a century old. Rejected rather than clamped — a clamped
+ * typo is a wrong number nobody is told about.
+ */
+function parseManufactureYear(formData: FormData): { value: string | null } | { error: string } {
+  const raw = (formData.get('manufacture_year') as string | null)?.trim()
+  if (!raw) return { value: null }
+
+  const year = Number(raw)
+  const maxYear = new Date().getFullYear() + 1
+
+  if (!Number.isInteger(year) || year < MIN_MANUFACTURE_YEAR || year > maxYear) {
+    return { error: `Manufacture year must be between ${MIN_MANUFACTURE_YEAR} and ${maxYear}` }
+  }
+
+  return { value: `${year}-01-01` }
 }
 
 /**
@@ -652,6 +681,9 @@ function parseAssetFormFields(formData: FormData): { fields: ParsedAssetFormFiel
   if (!name)           return { error: 'Asset name is required' }
   if (!asset_type_raw) return { error: 'Asset type is required' }
 
+  const manufacture = parseManufactureYear(formData)
+  if ('error' in manufacture) return { error: manufacture.error }
+
   const numbers = parseAssetNumericFields(formData)
   if ('error' in numbers) return { error: numbers.error }
 
@@ -664,7 +696,8 @@ function parseAssetFormFields(formData: FormData): { fields: ParsedAssetFormFiel
   return {
     fields: {
       name, asset_type: asset_type_raw, make, model, serial_number,
-      installation_date, warranty_expiry_date, warranty_provider, notes,
+      installation_date, manufacture_date: manufacture.value,
+      warranty_expiry_date, warranty_provider, notes,
       ...numbers.fields,
     },
   }
@@ -741,7 +774,16 @@ async function resolveAssetStandardsAndHealth(
   let health_score: number | null = null
   if (standards && installationDate) {
     health_score = calculateHealthScore(
-      { installation_date: installationDate, expected_lifespan_years: lifespan, estimated_replacement_cost: estimatedReplacementCost },
+      {
+        installation_date: installationDate,
+        // Always null at creation: the asset form has no manufacture-date
+        // field, and the data-plate scan that produces one runs after the row
+        // exists. The nightly asset-health cron rescores from whatever the
+        // scan found — see lib/assets/age-basis.ts.
+        manufacture_date:  null,
+        expected_lifespan_years:    lifespan,
+        estimated_replacement_cost: estimatedReplacementCost,
+      },
       standards,
       { total_repairs: 0, total_repair_cost: 0, last_serviced_at: null },
     )
@@ -806,7 +848,7 @@ export async function createAsset(
     const { standards, lifespan, health_score } = resolved
     const {
       name, asset_type, make, model, serial_number, installation_date,
-      warranty_expiry_date, warranty_provider, notes,
+      manufacture_date, warranty_expiry_date, warranty_provider, notes,
       purchase_price, estimated_replacement_cost,
     } = resolved.fields
 
@@ -821,6 +863,12 @@ export async function createAsset(
         model,
         serial_number,
         installation_date,
+        manufacture_date,
+        // Still installation_date only, never the nameplate year: this is a
+        // tax election, and a scanned guess must not arrive in the ledger
+        // looking like one the PM made. Depreciation falls back to
+        // manufacture_date on its own, and labels the entry when it does —
+        // see lib/assets/age-basis.ts.
         placed_in_service_date:    installation_date,
         purchase_price,
         estimated_replacement_cost,
@@ -886,7 +934,7 @@ export async function replaceAsset(
     const { standards, lifespan, health_score } = resolved
     const {
       name, asset_type, make, model, serial_number, installation_date,
-      warranty_expiry_date, warranty_provider, notes,
+      manufacture_date, warranty_expiry_date, warranty_provider, notes,
       purchase_price, estimated_replacement_cost,
     } = resolved.fields
 
@@ -898,6 +946,7 @@ export async function replaceAsset(
         name, make, model, serial_number,
         asset_type,
         installation_date,
+        manufacture_date,
         purchase_price,
         estimated_replacement_cost,
         expected_lifespan_years: lifespan,
@@ -962,6 +1011,9 @@ export async function updateAsset(
 
     if (!name) return { error: 'Asset name is required' }
 
+    const manufacture = parseManufactureYear(formData)
+    if ('error' in manufacture) return { error: manufacture.error }
+
     const numbers = parseAssetNumericFields(formData)
     if ('error' in numbers) return { error: numbers.error }
     const { purchase_price, estimated_replacement_cost, expected_lifespan_years } = numbers.fields
@@ -970,6 +1022,7 @@ export async function updateAsset(
       .from('property_assets')
       .update({
         name, make, model, serial_number,
+        manufacture_date: manufacture.value,
         installation_date, placed_in_service_date: installation_date,
         purchase_price, estimated_replacement_cost,
         expected_lifespan_years, warranty_expiry_date, warranty_provider, notes,
@@ -1060,6 +1113,8 @@ export interface CsvAssetRow {
   model:                     string | null
   serial_number:             string | null
   installation_date:         string | null
+  /** `YYYY-01-01` from the CSV's manufacture_year column — see parseAssetCsv. */
+  manufacture_date:          string | null
   purchase_price:            number | null
   estimated_replacement_cost: number | null
   warranty_expiry_date:      string | null
@@ -1166,6 +1221,9 @@ export async function bulkImportAssets(
         model:                      row.model,
         serial_number:              row.serial_number,
         installation_date:          row.installation_date,
+        manufacture_date:           row.manufacture_date,
+        // installation_date only — the nameplate year is not a tax election.
+        // Depreciation falls back to it on its own and labels the entry.
         placed_in_service_date:     row.installation_date,
         purchase_price:             row.purchase_price,
         estimated_replacement_cost: row.estimated_replacement_cost,

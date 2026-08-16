@@ -1,12 +1,10 @@
 // lib/integrations/providers/hostex.types.ts
 // ============================================================================
-// Hostex API response shapes — Phase 1 subset only (OAuth + the minimal
-// Property shape needed to derive a proxy externalUserId; see hostex.ts).
-//
-// Full Reservation/Transaction/Review/Task shapes deferred to Phase 3 (sync
-// functions), where they'll be added alongside the mapper functions that
-// consume them — following the same file-organization pattern as
-// hospitable.types.ts / hospitable.mappers.ts.
+// Hostex API response shapes: the OAuth envelope plus every endpoint the
+// integration reads — properties, reservations, reviews, staff, tasks and
+// webhooks. Mappers that consume them live in hostex.mappers.ts, following
+// the same file-organization pattern as hospitable.types.ts /
+// hospitable.mappers.ts.
 // ============================================================================
 
 // Every Hostex v3 response wraps its payload in this envelope. HTTP status is

@@ -17,6 +17,8 @@ import { describe, it, expect } from 'vitest'
 
 import {
   inferHostexStaffRole,
+  deriveHostexStaffRoles,
+  deriveHostexCleaningFees,
   hostexStaffToCrewRows,
 } from '@/lib/integrations/providers/hostex.mappers'
 import type { HostexStaff, HostexTask } from '@/lib/integrations/providers/hostex.types'
@@ -64,10 +66,10 @@ describe('inferHostexStaffRole', () => {
 })
 
 describe('hostexStaffToCrewRows', () => {
-  const tasksByStaff = new Map<number, HostexTask[]>([[1, [task('cleaning')]]])
+  const roles = deriveHostexStaffRoles([task('cleaning', 1)])
 
   it('maps a staff onto a crew row with a neutral starting score', () => {
-    const [row] = hostexStaffToCrewRows('org1', [staff({ mobile: '+1 555 0100', email: 'a@x.com' })], tasksByStaff)
+    const [row] = hostexStaffToCrewRows('org1', [staff({ mobile: '+1 555 0100', email: 'a@x.com' })], roles)
 
     expect(row).toMatchObject({
       org_id:          'org1',
@@ -89,22 +91,72 @@ describe('hostexStaffToCrewRows', () => {
   it("MIRRORS Hostex's is_active rather than forcing everyone active", () => {
     // A staff Hostex deactivated must arrive deactivated. Forcing true would
     // make them look present, and the absence guard would never see them.
-    const [row] = hostexStaffToCrewRows('org1', [staff({ is_active: false })], tasksByStaff)
+    const [row] = hostexStaffToCrewRows('org1', [staff({ is_active: false })], roles)
     expect(row!.is_active).toBe(false)
   })
 
   it('drops a staff with no usable name rather than writing an empty string', () => {
-    expect(hostexStaffToCrewRows('org1', [staff({ name: '   ' })], tasksByStaff)).toHaveLength(0)
+    expect(hostexStaffToCrewRows('org1', [staff({ name: '   ' })], roles)).toHaveLength(0)
   })
 
   it('handles a staff with no tasks at all', () => {
-    const [row] = hostexStaffToCrewRows('org1', [staff({ id: 99 })], new Map())
+    const [row] = hostexStaffToCrewRows('org1', [staff({ id: 99 })], {})
     expect(row!.role).toBe('general')
     expect(row!.specialty).toBeNull()
   })
 
   it('carries the Hostex note across as crew notes', () => {
-    const [row] = hostexStaffToCrewRows('org1', [staff({ note: 'Has keys to 4 units' })], tasksByStaff)
+    const [row] = hostexStaffToCrewRows('org1', [staff({ note: 'Has keys to 4 units' })], roles)
     expect(row!.notes).toBe('Has keys to 4 units')
+  })
+})
+
+describe('deriveHostexCleaningFees', () => {
+  function cleaning(propertyId: number, fee: number, level?: HostexTask['level']): HostexTask {
+    return { id: propertyId * 100 + fee, type: 'cleaning', status: 'completed', property_id: propertyId, fee, level }
+  }
+
+  it('takes the median so one outlier deep-clean cannot skew the price', () => {
+    // Mean of these is 150; median is 100, which is what the turnover
+    // actually costs.
+    const fees = deriveHostexCleaningFees([
+      cleaning(1, 100), cleaning(1, 100), cleaning(1, 100), cleaning(1, 300),
+    ])
+    expect(fees['1']).toBe(100)
+  })
+
+  it('prefers standard-level cleans when the account labels them', () => {
+    // An `advanced` clean is by definition not the turnover baseline.
+    const fees = deriveHostexCleaningFees([
+      cleaning(1, 100, 'standard'),
+      cleaning(1, 400, 'advanced'),
+      cleaning(1, 420, 'advanced'),
+    ])
+    expect(fees['1']).toBe(100)
+  })
+
+  it('falls back to all cleans when the account never sets a level', () => {
+    expect(deriveHostexCleaningFees([cleaning(1, 120), cleaning(1, 140)])['1']).toBe(130)
+  })
+
+  it('ignores non-cleaning tasks — a maintenance fee is not a turnover cost', () => {
+    const fees = deriveHostexCleaningFees([
+      { id: 1, type: 'maintenance', status: 'completed', property_id: 1, fee: 500 },
+      cleaning(1, 90),
+    ])
+    expect(fees['1']).toBe(90)
+  })
+
+  it('ignores zero, negative and missing fees rather than pricing a clean at 0', () => {
+    const fees = deriveHostexCleaningFees([
+      cleaning(1, 0), cleaning(1, -5),
+      { id: 9, type: 'cleaning', status: 'completed', property_id: 1 },
+    ])
+    expect(fees['1']).toBeUndefined()
+  })
+
+  it('keys by property so a portfolio prices per property, not in aggregate', () => {
+    const fees = deriveHostexCleaningFees([cleaning(1, 100), cleaning(2, 250)])
+    expect(fees).toEqual({ '1': 100, '2': 250 })
   })
 })

@@ -87,12 +87,13 @@ async function writeSyncCount(
  * "fetch, decide, write" rather than carrying the field rules inline.
  */
 export function buildNullFillPatch(
-  orData:   { bedrooms: number | null; bathrooms: number | null; sqft: number | null },
-  existing: { bedrooms: number | null; bathrooms: number | null; square_footage: number | null },
+  orData:   { bedrooms: number | null; bathrooms: number | null; maxGuests: number | null; sqft: number | null },
+  existing: { bedrooms: number | null; bathrooms: number | null; max_guests: number | null; square_footage: number | null },
 ): TablesUpdate<'properties'> {
   const patch: TablesUpdate<'properties'> = {}
   if (orData.bedrooms  !== null && existing.bedrooms       === null) patch.bedrooms       = orData.bedrooms
   if (orData.bathrooms !== null && existing.bathrooms      === null) patch.bathrooms      = orData.bathrooms
+  if (orData.maxGuests !== null && existing.max_guests     === null) patch.max_guests     = orData.maxGuests
   if (orData.sqft      !== null && existing.square_footage === null) patch.square_footage = orData.sqft
   return patch
 }
@@ -284,6 +285,7 @@ export const ownerRezInitialSync = inngest.createFunction(
           externalId: String(p.id),
           bedrooms:   p.bedrooms,
           bathrooms:  p.bathrooms,
+          maxGuests:  p.max_occupancy,
           // ✅ Confirmed live 2026-07-15 — living_area is the real field;
           // the previous sqft/square_feet/size fallback chain was never
           // real and always resolved to null.
@@ -291,12 +293,16 @@ export const ownerRezInitialSync = inngest.createFunction(
         }))
 
         const supabase = createServiceClient({ system: 'inngest:initial-sync' })
+        // bedrooms/bathrooms/max_guests are deliberately absent: patch-property-
+        // fields (step 1b, immediately below) writes them, and writes them ONLY
+        // where FieldStay currently holds null. Naming them here re-asserted
+        // OwnerRez's value on every re-run and silently undid a PM's manual
+        // correction one step before buildNullFillPatch declined to — the
+        // regression that function's `!== null` checks were written to prevent
+        // was being caused upstream of it.
         const rows: TablesInsert<'properties'>[] = properties.map((p) => ({
           org_id,
           name:            p.name,
-          bedrooms:        p.bedrooms,
-          bathrooms:       p.bathrooms,
-          max_guests:      p.max_occupancy,
           external_id:     String(p.id),
           external_source: PROVIDER,
           // Required fields with defaults
@@ -334,7 +340,7 @@ export const ownerRezInitialSync = inngest.createFunction(
 
         const existingPropsRes = await supabase
           .from('properties')
-          .select('id, external_id, bedrooms, bathrooms, square_footage')
+          .select('id, external_id, bedrooms, bathrooms, max_guests, square_footage')
           .eq('org_id', org_id)
           .eq('external_source', PROVIDER)
           .in('external_id', externalIds)

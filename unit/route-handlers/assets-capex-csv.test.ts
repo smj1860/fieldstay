@@ -75,7 +75,7 @@ describe('GET /api/assets/capex-csv', () => {
     expect(res.headers.get('Content-Type')).toBe('text/csv')
     expect(res.headers.get('Content-Disposition')).toBe('attachment; filename="capex-forecast-2025.csv"')
     expect(csv.trim()).toBe(
-      'Replacement Year,Property,Asset,Asset Type,Age (Years),% of Lifespan,Health Score,Cost Low,Cost High'
+      'Replacement Year,Property,Asset,Asset Type,Age (Years),Age Estimated,% of Lifespan,Health Score,Cost Low,Cost High'
     )
   })
 
@@ -113,6 +113,7 @@ describe('GET /api/assets/capex-csv', () => {
             property_name: 'Lakeview "Cabin"', asset_type: 'roof',
             replacement_year: 2027, cost_low: 500, cost_high: 800,
             health_score: 40, age_years: 20, pct_of_lifespan: 90,
+        age_estimated: false,
           }],
         },
         2025: {
@@ -122,6 +123,7 @@ describe('GET /api/assets/capex-csv', () => {
             property_name: 'Lakeview Cabin', asset_type: 'hvac',
             replacement_year: 2025, cost_low: 100, cost_high: 200,
             health_score: null, age_years: 15, pct_of_lifespan: 95,
+        age_estimated: false,
           }],
         },
       },
@@ -133,8 +135,8 @@ describe('GET /api/assets/capex-csv', () => {
     const rows = (await res.text()).trim().split('\n')
 
     // 2025 (lower year) sorts before 2027, regardless of object key insertion order
-    expect(rows[1]).toBe('2025,"Lakeview Cabin","HVAC Unit",hvac,15,95%,,100,200')
+    expect(rows[1]).toBe('2025,"Lakeview Cabin","HVAC Unit",hvac,15,no,95%,,100,200')
     // Embedded double-quote in the property name is escaped per RFC 4180
-    expect(rows[2]).toBe('2027,"Lakeview ""Cabin""","Roof",roof,20,90%,40,500,800')
+    expect(rows[2]).toBe('2027,"Lakeview ""Cabin""","Roof",roof,20,no,90%,40,500,800')
   })
 })

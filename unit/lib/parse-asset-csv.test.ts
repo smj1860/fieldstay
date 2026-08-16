@@ -116,6 +116,50 @@ describe('parseAssetCsvText', () => {
     })
   })
 
+  it('reads manufacture_year into manufacture_date as YYYY-01-01', () => {
+    // The bulk-import case this exists for: a PM moving off another system has
+    // model years from the nameplate and almost never has install dates.
+    const csv = [
+      `${HEADER},manufacture_year`,
+      'Fridge,refrigerator,,,,,,,,,,2015',
+    ].join('\n')
+
+    const result = parseAssetCsvText(csv, KNOWN_TYPES)
+
+    expect(result.ok).toBe(true)
+    if (!result.ok) throw new Error('expected ok result')
+    expect(result.rows[0]).toMatchObject({ manufacture_date: '2015-01-01', installation_date: null })
+  })
+
+  it('drops a nonsense manufacture_year instead of failing the whole import', () => {
+    // One bad cell must not reject a 200-row file. An asset with no
+    // manufacture year is just one the age fallback cannot help.
+    const csv = [
+      `${HEADER},manufacture_year`,
+      'Fridge,refrigerator,,,,,,,,,,215',
+      'Oven,oven_range,,,,,,,,,,not-a-year',
+      'Washer,washer,,,,,,,,,,3020',
+    ].join('\n')
+
+    const result = parseAssetCsvText(csv, KNOWN_TYPES)
+
+    expect(result.ok).toBe(true)
+    if (!result.ok) throw new Error('expected ok result')
+    expect(result.rows.map((r) => r.manufacture_date)).toEqual([null, null, null])
+    expect(result.rows.every((r) => r._valid)).toBe(true)
+  })
+
+  it('leaves manufacture_date null when the column is absent entirely', () => {
+    // Every CSV written before this column existed.
+    const csv = [HEADER, 'Roof,roof,,,,,,,,,'].join('\n')
+
+    const result = parseAssetCsvText(csv, KNOWN_TYPES)
+
+    expect(result.ok).toBe(true)
+    if (!result.ok) throw new Error('expected ok result')
+    expect(result.rows[0]!.manufacture_date).toBeNull()
+  })
+
   it('flags a row with an unrecognized asset_type as invalid but still returns it', () => {
     const csv = [HEADER, 'Space Heater,space heater,,,,,,,,,'].join('\n')
 

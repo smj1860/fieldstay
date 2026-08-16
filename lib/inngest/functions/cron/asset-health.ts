@@ -7,6 +7,7 @@ import { createPmNotifications, type CreatePmNotificationInput } from '@/lib/inn
 import { unwrapJoin } from '@/lib/utils/supabase-joins'
 import { fetchAllRows, foldAllRows, fetchDistinctOrgIds } from '@/lib/inngest/paginate'
 import { healthLabel } from '@/lib/assets/health-score'
+import { assetAgeBasis } from '@/lib/assets/age-basis'
 import { bucketRepairCostWindows, averageRepairDurationDays } from '@/lib/assets/repair-vs-replace'
 import {
   scoreAssets,
@@ -109,12 +110,16 @@ export const dailyAssetHealth = inngest.createFunction(
       const windowStart = new Date(Date.now() - REPAIR_HISTORY_WINDOW_DAYS * 86_400_000)
         .toISOString().split('T')[0]!
 
+      type NudgeAsset = {
+        asset_type:        string
+        installation_date: string | null
+        manufacture_date:  string | null
+      }
+
       type NudgeRow = {
         asset_id: string | null
         completed_date: string | null
-        assets: { asset_type: string; installation_date: string | null }
-              | { asset_type: string; installation_date: string | null }[]
-              | null
+        assets: NudgeAsset | NudgeAsset[] | null
       }
 
       // Standards FIRST, because the late-life test needs each type's lifespan
@@ -149,7 +154,7 @@ export const dailyAssetHealth = inngest.createFunction(
       const byType = await foldAllRows<NudgeRow, Map<string, NudgeRepairCounts>>(
         (from, to) => supabase
           .from('work_orders')
-          .select('asset_id, completed_date, assets:property_assets!asset_id(asset_type, installation_date)')
+          .select('asset_id, completed_date, assets:property_assets!asset_id(asset_type, installation_date, manufacture_date)')
           .not('asset_id', 'is', null)
           .eq('status', 'completed')
           .gte('completed_date', windowStart)
@@ -159,7 +164,13 @@ export const dailyAssetHealth = inngest.createFunction(
         (acc, page) => {
           for (const wo of page) {
             const assetInfo = unwrapJoin(wo.assets)
-            if (!assetInfo?.asset_type || !assetInfo.installation_date || !wo.completed_date) continue
+            if (!assetInfo?.asset_type || !wo.completed_date) continue
+
+            // Nameplate manufacture year stands in for a missing installation
+            // date — see lib/assets/age-basis.ts. Without it every scanned
+            // asset's repairs were dropped from the late-life signal.
+            const ageBasis = assetAgeBasis(assetInfo)
+            if (!ageBasis) continue
 
             // A repair whose asset type has no standard row was collected and
             // then dropped at `if (!std) continue` below; dropping it here is
@@ -169,7 +180,7 @@ export const dailyAssetHealth = inngest.createFunction(
             const lifespan = lifespanByType.get(assetInfo.asset_type)
             if (lifespan === undefined) continue
 
-            const installYear = new Date(assetInfo.installation_date).getFullYear()
+            const installYear = new Date(ageBasis.date).getFullYear()
             const repairYear  = new Date(wo.completed_date).getFullYear()
             const ageAtRepair = Math.max(0, repairYear - installYear)
 
@@ -279,7 +290,7 @@ export const assetHealthOrg = inngest.createFunction(
           .from('property_assets')
           .select(`
             id, org_id, property_id, name, asset_type,
-            installation_date, expected_lifespan_years,
+            installation_date, manufacture_date, expected_lifespan_years,
             estimated_replacement_cost, health_score
           `)
           .eq('org_id', orgId)

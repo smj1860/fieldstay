@@ -124,10 +124,14 @@ export const hostexReservationReconcileHandler = inngest.createFunction(
         // this is the ONLY way a hire or a departure ever reaches FieldStay.
         await syncHostexStaff({
           step, logger, token,
-          orgId:      org_id,
-          userId:     user_id,
-          system:     SYSTEM,
-          stepPrefix: 'reconcile',
+          orgId:         org_id,
+          userId:        user_id,
+          system:        SYSTEM,
+          stepPrefix:    'reconcile',
+          // Same fetch, same two derivations — a property whose cleaning_cost
+          // is still null picks one up as soon as Hostex has priced a clean
+          // for it.
+          propertyIdMap,
         })
 
         return result

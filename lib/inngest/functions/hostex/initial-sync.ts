@@ -142,10 +142,14 @@ export const hostexInitialSync = inngest.createFunction(
       try {
         ;({ crewCount } = await syncHostexStaff({
           step, logger, token,
-          orgId:      org_id,
-          userId:     user_id,
-          system:     SYSTEM,
-          stepPrefix: 'initial',
+          orgId:         org_id,
+          userId:        user_id,
+          system:        SYSTEM,
+          stepPrefix:    'initial',
+          // Enables the cleaning-cost backfill: the tasks fetched for role
+          // inference also carry each property's cleaning `fee`, the only
+          // per-property money Hostex exposes anywhere.
+          propertyIdMap: propertyIdMap as Record<string, string>,
         }))
       } catch (err) {
         logger.error(`[Hostex:${user_id}] staff import failed: ${err instanceof Error ? err.message : String(err)}`)

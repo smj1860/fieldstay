@@ -6,11 +6,22 @@
 // has no staff webhook, so the daily pass is how a hire or a departure ever
 // arrives.
 //
-// WHY THIS FETCHES TASKS TOO. Hostex staff carry NO ROLE — not on /staffs, not
-// on the create endpoint. Its docs call them "cleaners / operators /
-// receptionists"; its schema gives nothing to tell them apart. The only
-// evidence the API offers is what each person is actually assigned, so the
-// task list is read purely to infer that. See inferHostexStaffRole.
+// WHY THIS FETCHES TASKS TOO — for two things, from one request.
+//
+//   1. ROLES. Hostex staff carry NO ROLE — not on /staffs, not on the create
+//      endpoint. Its docs call them "cleaners / operators / receptionists";
+//      its schema gives nothing to tell them apart. What each person is
+//      ASSIGNED is the only evidence the API offers. See inferHostexStaffRole.
+//
+//   2. CLEANING COST. A cleaning task's `fee` is the only per-property money
+//      Hostex exposes anywhere — /properties has no fee field — so without it
+//      every imported property keeps FieldStay's default cleaning_cost, which
+//      then feeds owner P&L and turnover costing as a guess.
+//
+// Both are DERIVED INSIDE THE FETCH STEP and only the small maps are returned.
+// Inngest persists each step's return value and re-sends it on every later
+// step; 90 days of tasks for a real portfolio is megabytes, the two maps are
+// hundreds of bytes.
 //
 // NOBODY IS AUTO-INVITED. Reception and room-service staff land in
 // crew_members with role 'general' and a specialty naming what they do, not as
@@ -30,18 +41,22 @@ import {
   hostexFetchTasks,
   hostexTaskWindow,
 } from '@/lib/integrations/providers/hostex-api'
-import { hostexStaffToCrewRows } from '@/lib/integrations/providers/hostex.mappers'
-import type { HostexTask } from '@/lib/integrations/providers/hostex.types'
+import {
+  hostexStaffToCrewRows,
+  deriveHostexStaffRoles,
+  deriveHostexCleaningFees,
+} from '@/lib/integrations/providers/hostex.mappers'
 import type { SyncLogger } from '../shared/reservation-pipeline'
 
 const PROVIDER = 'hostex'
 
 /**
- * How far back to read tasks when inferring roles. Wide enough that a cleaner
- * who was off last week still reads as a cleaner, narrow enough that a role
- * someone stopped doing months ago stops counting.
+ * How far back to read tasks. Wide enough that a cleaner who was off last week
+ * still reads as a cleaner and that a property has several cleans to take a
+ * median fee from; narrow enough that a role someone stopped doing months ago,
+ * or last year's pricing, stops counting.
  */
-const ROLE_INFERENCE_WINDOW_DAYS = 90
+const TASK_WINDOW_DAYS = 90
 
 type SyncStep = GetStepTools<typeof inngest>
 
@@ -54,41 +69,48 @@ export interface HostexStaffSyncParams {
   system: string
   /** Distinguishes this call's Inngest step ids from a sibling call's. */
   stepPrefix: string
+  /**
+   * Hostex property id → FieldStay properties.id. When supplied, cleaning
+   * fees derived from the same task fetch are backfilled onto those
+   * properties. Omit to sync staff only.
+   */
+  propertyIdMap?: Record<string, string>
 }
 
 export async function syncHostexStaff(
   params: HostexStaffSyncParams,
-): Promise<{ crewCount: number; deactivated: number }> {
-  const { step, logger, token, orgId, userId, system, stepPrefix } = params
+): Promise<{ crewCount: number; deactivated: number; pricedProperties: number }> {
+  const { step, logger, token, orgId, userId, system, stepPrefix, propertyIdMap } = params
 
-  // ── 1. Fetch staff + the tasks that reveal their roles ───────────────────
-  const { staffs, tasks } = await step.run(`${stepPrefix}-fetch-staff`, async () => {
+  const wantsFees = Boolean(propertyIdMap && Object.keys(propertyIdMap).length)
+
+  // ── 1. Fetch staff + tasks, return only what they imply ──────────────────
+  const { staffs, roles, cleaningFees } = await step.run(`${stepPrefix}-fetch-staff`, async () => {
     const fetchedStaffs = await hostexFetchStaffs(token, userId)
 
-    // Skipped entirely when there is no one to classify — the task sweep is
-    // only ever a means to a role, never an end in itself.
-    const fetchedTasks: HostexTask[] = fetchedStaffs.length
-      ? await hostexFetchTasks(token, userId, hostexTaskWindow(ROLE_INFERENCE_WINDOW_DAYS))
+    // Skipped only when there is nothing either derivation could use.
+    const needTasks = fetchedStaffs.length > 0 || wantsFees
+    const tasks = needTasks
+      ? await hostexFetchTasks(token, userId, hostexTaskWindow(TASK_WINDOW_DAYS))
       : []
 
-    return { staffs: fetchedStaffs, tasks: fetchedTasks }
+    return {
+      staffs:       fetchedStaffs,
+      roles:        deriveHostexStaffRoles(tasks),
+      cleaningFees: wantsFees ? deriveHostexCleaningFees(tasks) : {},
+    }
   })
 
-  logger.info(`[Hostex:${userId}] Fetched ${staffs.length} staff, ${tasks.length} tasks for role inference`)
+  logger.info(
+    `[Hostex:${userId}] Fetched ${staffs.length} staff; ` +
+    `roles for ${Object.keys(roles).length}, cleaning fees for ${Object.keys(cleaningFees).length} properties`
+  )
 
   // ── 2. Upsert as crew members ────────────────────────────────────────────
   const crewCount = await step.run(`${stepPrefix}-upsert-crew`, async () => {
     if (!staffs.length) return 0
 
-    const tasksByStaff = new Map<number, HostexTask[]>()
-    for (const task of tasks) {
-      if (task.staff_id === null || task.staff_id === undefined) continue
-      const existing = tasksByStaff.get(task.staff_id)
-      if (existing) existing.push(task)
-      else tasksByStaff.set(task.staff_id, [task])
-    }
-
-    const rows = hostexStaffToCrewRows(orgId, staffs, tasksByStaff)
+    const rows = hostexStaffToCrewRows(orgId, staffs, roles)
     if (!rows.length) return 0
 
     const supabase = createServiceClient({ system })
@@ -174,5 +196,58 @@ export async function syncHostexStaff(
     logger.info(`[Hostex:${userId}] Deactivated ${deactivated} crew member(s) no longer in Hostex`)
   }
 
-  return { crewCount, deactivated }
+  // ── 4. Backfill cleaning cost from the same task fetch ───────────────────
+  const pricedProperties = await step.run(`${stepPrefix}-backfill-cleaning-cost`, async () => {
+    const entries = Object.entries(cleaningFees)
+      .map(([hostexPropertyId, fee]) => [propertyIdMap?.[hostexPropertyId], fee] as const)
+      .filter((e): e is readonly [string, number] => Boolean(e[0]))
+
+    if (!entries.length) return 0
+
+    const supabase = createServiceClient({ system })
+
+    // Grouped by fee so this is one UPDATE per distinct price rather than one
+    // per property — a portfolio usually prices in a handful of tiers. The
+    // per-property alternative is the shape n-plus-one-loops.test.ts exists to
+    // catch, and the same grouping trick geocodeMissingCoordinates uses.
+    const idsByFee = new Map<number, string[]>()
+    for (const [propertyId, fee] of entries) {
+      const ids = idsByFee.get(fee)
+      if (ids) ids.push(propertyId)
+      else idsByFee.set(fee, [propertyId])
+    }
+
+    let priced = 0
+    for (const [fee, ids] of idsByFee) {
+      // BACKFILL ONLY — `.is('cleaning_cost', null)` is load-bearing. A PM's
+      // own cleaning_cost is what FieldStay actually pays a cleaner and can
+      // legitimately differ from what Hostex bills; overwriting it every day
+      // would silently replace their number with the provider's. Same
+      // contract as backfillCleaningCost() in lib/properties/upsert-normalized.
+      const { data, error } = await supabase
+        .from('properties')
+        .update({ cleaning_cost: fee })
+        .in('id', ids)
+        .is('cleaning_cost', null)
+        .select('id')
+
+      if (error) {
+        // Non-fatal: a missing cleaning cost degrades an estimate, it does not
+        // break the sync that just imported the crew.
+        logger.error(`[Hostex:${userId}] cleaning_cost backfill failed: ${error.message}`)
+        reportError(error, { site: 'inngest.hostex-staff-sync.backfill-cleaning-cost', orgId })
+        continue
+      }
+
+      priced += (data ?? []).length
+    }
+
+    return priced
+  })
+
+  if (pricedProperties > 0) {
+    logger.info(`[Hostex:${userId}] Backfilled cleaning cost on ${pricedProperties} property(ies)`)
+  }
+
+  return { crewCount, deactivated, pricedProperties }
 }

@@ -24,6 +24,7 @@ export interface AssetRow {
   name:                        string
   asset_type:                  string
   installation_date:           string | null
+  manufacture_date:            string | null
   expected_lifespan_years:     number | null
   estimated_replacement_cost:  number | null
   health_score:                number | null
@@ -83,6 +84,7 @@ export function scoreAssets(
     const { ageScore, conditionScore, total: newScore } = calculateHealthScoreBreakdown(
       {
         installation_date:          asset.installation_date,
+        manufacture_date:           asset.manufacture_date,
         expected_lifespan_years:    asset.expected_lifespan_years,
         estimated_replacement_cost: asset.estimated_replacement_cost,
       },

@@ -8,6 +8,7 @@ import { StatusDot } from '@/components/ui/StatusDot'
 import { Card } from '@/components/ui/Card'
 import { Badge } from '@/components/ui/Badge'
 import type { AssetType, AssetTypeStandard, PropertyAsset } from '@/types/database'
+import { assetAgeBasis, assetAgeYears } from '@/lib/assets/age-basis'
 
 interface Property { id: string; name: string; city: string | null; state: string | null }
 
@@ -25,10 +26,23 @@ function missingTypesForProperty(propertyId: string, assets: PropertyAsset[]): A
   return missingAssetTypesFromDiscoveredSet(discoveredTypes)
 }
 
-function assetAgeYears(asset: Pick<PropertyAsset, 'installation_date'>): number | null {
-  return asset.installation_date
-    ? new Date().getFullYear() - new Date(asset.installation_date).getFullYear()
-    : null
+/**
+ * "4y", or "~4y" when the age rests on the nameplate manufacture year rather
+ * than a recorded installation date — see lib/assets/age-basis.ts. The tilde
+ * is the whole marker: an age the PM never entered should not read as one they
+ * did, and an asset scanned off its data plate now HAS an age where it used to
+ * show a dash.
+ */
+function AgeCell({ asset }: Readonly<{ asset: Pick<PropertyAsset, 'installation_date' | 'manufacture_date'> }>) {
+  const years = assetAgeYears(asset)
+  if (years === null) return <>—</>
+
+  const estimated = assetAgeBasis(asset)?.estimated ?? false
+  return (
+    <span title={estimated ? 'Estimated from the nameplate manufacture year' : undefined}>
+      {estimated ? '~' : ''}{years}y
+    </span>
+  )
 }
 
 function assetHealthDisplay(asset: Pick<PropertyAsset, 'health_score'>) {
@@ -144,7 +158,6 @@ export function PortfolioAssetView({
               </thead>
               <tbody className="divide-y divide-themed">
                 {realAssets.map((asset) => {
-                  const ageYears = assetAgeYears(asset)
                   const { color, bg, dot, label, score } = assetHealthDisplay(asset)
 
                   return (
@@ -160,7 +173,7 @@ export function PortfolioAssetView({
                         {[asset.make, asset.model].filter(Boolean).join(' · ') || '—'}
                       </td>
                       <td className="px-4 py-3 text-muted-themed">
-                        {ageYears !== null ? `${ageYears}y` : '—'}
+                        <AgeCell asset={asset} />
                       </td>
                       <td className="px-4 py-3">
                         {score !== null ? (
@@ -215,7 +228,6 @@ function AssetCard({
   typeLabel:    string
   propertyName: string
 }>) {
-  const ageYears = assetAgeYears(asset)
   const { color, bg, dot, label, score } = assetHealthDisplay(asset)
   const makeModel = [asset.make, asset.model].filter(Boolean).join(' · ')
 
@@ -240,7 +252,9 @@ function AssetCard({
       <div className="flex items-center gap-1.5 flex-wrap mt-2 text-xs text-muted-themed">
         <span>{propertyName}</span>
         {makeModel && <><span>·</span><span>{makeModel}</span></>}
-        {ageYears !== null && <><span>·</span><span>{ageYears}y old</span></>}
+        {assetAgeYears(asset) !== null && (
+          <><span>·</span><span><AgeCell asset={asset} /> old</span></>
+        )}
       </div>
     </div>
   )

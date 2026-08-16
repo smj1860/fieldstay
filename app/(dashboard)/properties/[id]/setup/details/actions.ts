@@ -9,6 +9,7 @@ import { markStepComplete } from '@/app/(dashboard)/properties/actions'
 import { logAuditEvent } from '@/lib/audit'
 import { inngest } from '@/lib/inngest/client'
 
+import { syncChecklistRoomCounts } from '@/lib/checklists/sync-room-counts'
 import { reportError } from '@/lib/observability/report-error'
 import { throwIfAnyQueryFailed, isRealQueryError } from '@/lib/supabase/unwrap'
 import type { MemberRole } from '@/types/database'
@@ -16,11 +17,13 @@ import type { MemberRole } from '@/types/database'
 export type DetailsState = { error?: string; success?: boolean }
 
 /** The three property columns resolvePar() reads. A change to any of them
- *  makes every smart par on the property stale; a change to anything else on
- *  this form (WiFi, notes, rates) does not, and saveDetails runs on every
- *  step-save — so an unconditional recompute would queue one for a password
- *  edit. Compared as Numbers because bathrooms is `numeric` and comes back
- *  from Postgres as a string. */
+ *  makes every smart par on the property stale — and, since bedrooms and
+ *  bathrooms also decide how many counted checklist sections the property
+ *  should have, a stale checklist too. A change to anything else on this form
+ *  (WiFi, notes, rates) does neither, and saveDetails runs on every step-save,
+ *  so an unconditional recompute would queue one for a password edit. Compared
+ *  as Numbers because bathrooms is `numeric` and comes back from Postgres as a
+ *  string. */
 function parInputsChanged(
   existing: { bedrooms: number | null; bathrooms: number | null; max_guests: number | null } | null,
   next: { bedrooms: number; bathrooms: number | null; max_guests: number },
@@ -168,6 +171,13 @@ export async function saveDetails(
 
     if (parInputsChanged(existing, { bedrooms, bathrooms, max_guests })) {
       await fireParRecompute(membership.org_id, propertyId)
+
+      // Bring the checklist's counted sections up to the new counts. Smart
+      // pars already recomputed from these same three columns; the checklist
+      // did not, so a property imported with the wrong bedroom count kept a
+      // checklist built for the wrong bedroom count forever. Additive only,
+      // and never throws — see lib/checklists/sync-room-counts.ts.
+      await syncChecklistRoomCounts(propertyId, membership.org_id, supabase, { bedrooms, bathrooms })
     }
 
     if (!door_code_unchanged) {

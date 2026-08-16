@@ -18,6 +18,7 @@ import { createServiceClient } from '@/lib/supabase/server'
 import { logAuditEvents }      from '@/lib/audit'
 import { unwrapList }          from '@/lib/supabase/unwrap'
 import { foldAllRows }         from '@/lib/inngest/paginate'
+import { assetAgeBasis }       from '@/lib/assets/age-basis'
 import { fitWeibullShape }     from '@/lib/assets/weibull-fit'
 import type { TablesInsert }   from '@/types/database'
 
@@ -41,22 +42,26 @@ export const assetWeibullShapeFit = inngest.createFunction(
       // repair-history scan: this needs ages-at-replacement per type, not
       // every replaced asset's full row, and it is platform-wide.
       const agesByType = await foldAllRows<
-        { asset_type: string; installation_date: string | null; replaced_at: string | null },
+        { asset_type: string; installation_date: string | null; manufacture_date: string | null; replaced_at: string | null },
         Map<string, number[]>
       >(
         (from, to) => supabase
           .from('property_assets')
-          .select('asset_type, installation_date, replaced_at')
+          .select('asset_type, installation_date, manufacture_date, replaced_at')
           .not('replaced_at', 'is', null)
-          .not('installation_date', 'is', null)
+          // Either date dates the asset — see lib/assets/age-basis.ts. The
+          // fold below still drops a row with neither, so this cannot admit
+          // an undated one; it stops discarding the scanned ones.
+          .or('installation_date.not.is.null,manufacture_date.not.is.null')
           .order('id', { ascending: true })
           .range(from, to),
         new Map<string, number[]>(),
         (acc, page) => {
           for (const row of page) {
-            if (!row.installation_date || !row.replaced_at) continue
+            const ageBasis = assetAgeBasis(row)
+            if (!ageBasis || !row.replaced_at) continue
             const ageYears = (
-              new Date(row.replaced_at).getTime() - new Date(row.installation_date).getTime()
+              new Date(row.replaced_at).getTime() - new Date(ageBasis.date).getTime()
             ) / MS_PER_YEAR
             const ages = acc.get(row.asset_type) ?? []
             ages.push(ageYears)
