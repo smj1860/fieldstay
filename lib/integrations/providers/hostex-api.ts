@@ -20,13 +20,23 @@
 //      a Retry-After header, not a 429 status. That is why the reactive
 //      rate-limit branch below reads the envelope, not the status line.
 //
+//   3. MOST FAILURES ARE PERMANENT. Hostex's error codes mirror HTTP
+//      semantics, and its Errors page marks 400/401/403/404/409/420/422/501
+//      "do not retry" — only 5xx is worth another attempt. Throwing a plain
+//      Error for all of them made Inngest retry every one three times. That
+//      is not merely wasted quota: error_code 420 means the host's
+//      subscription lapsed, which no number of retries can fix and which the
+//      host must be told about, and 401 means the token is dead.
+//
 // Pagination is offset/limit with a documented max limit of 100.
 // ============================================================================
 
 import 'server-only'
 
+import { NonRetriableError } from 'inngest'
+
 import { RateLimitError } from '@/lib/integrations/types'
-import { checkLimit, hostexApiLimiter } from '@/lib/rate-limit'
+import { checkLimit, hostexApiLimiter, hostexApiHourlyLimiter } from '@/lib/rate-limit'
 import { PMS_API_TIMEOUT_MS } from '@/lib/http/timeout'
 import {
   hostexProvider,
@@ -64,6 +74,76 @@ const PAGE_SIZE = 100
 const MAX_PAGES = 500
 
 /**
+ * Hostex error codes that no retry can clear, from its Errors reference.
+ * Everything absent from this set — 500, 502, 503, 504, and any code Hostex
+ * adds later — stays retryable, so an unknown failure errs toward trying
+ * again rather than toward silently giving up.
+ */
+const HOSTEX_TERMINAL_CODES = new Set([
+  400,   // malformed request — will be malformed next time too
+  401,   // token missing/invalid/revoked, or wrong scope
+  403,   // authenticated, but the resource belongs to another operator
+  404,   // no such id
+  409,   // would duplicate an existing record
+  420,   // subscription expired / Basic edition / account suspended
+  422,   // failed validation
+  501,   // endpoint disabled for this account
+])
+
+/**
+ * Hostex's rate-limit guidance asks for the `Retry-After` value plus ±25%
+ * random jitter, to stop every throttled caller retrying into the same
+ * instant of the next window. That matters more here than for a single-tenant
+ * client: one FieldStay deploy runs every org's syncs, so a platform-wide
+ * cron that throttles throttles many connections at once, and an unjittered
+ * backoff marches all of them into the next window together.
+ *
+ * Rounded up to at least 1s — a jittered 0 would retry immediately.
+ */
+function withRetryJitter(seconds: number): number {
+  // eslint-disable-next-line no-restricted-properties -- backoff jitter, not an id or a token; crypto randomness would be pointless here
+  const factor = 0.75 + Math.random() * 0.5
+  return Math.max(1, Math.ceil(seconds * factor))
+}
+
+/**
+ * A non-success Hostex envelope, carrying the code so a caller can branch
+ * without parsing `error_msg` — which Hostex explicitly documents as
+ * human-readable English that must not be matched on programmatically.
+ */
+export class HostexApiError extends Error {
+  constructor(
+    readonly errorCode: number,
+    readonly path:      string,
+    errorMsg:           string,
+  ) {
+    super(`Hostex ${path} failed: error_code ${errorCode} — ${errorMsg}`)
+    this.name = 'HostexApiError'
+  }
+}
+
+/**
+ * The subset the HOST has to act on, and which therefore must not be buried
+ * in a step-failure log. 420 is the one Hostex's docs are emphatic about —
+ * "only they can fix it in the portal" — and 401 means the connection needs
+ * re-authorizing.
+ */
+export const HOSTEX_ACCOUNT_ACTION_CODES = new Set([401, 420])
+
+/**
+ * True when `err` is a Hostex failure the host must resolve themselves.
+ *
+ * Unwraps `cause` as well as testing `err` directly, because both of these
+ * codes are ALSO terminal — so they always reach a caller wrapped in a
+ * NonRetriableError, never bare. A check that only tested `err` would match
+ * exactly none of the cases it exists for.
+ */
+export function isHostexAccountActionError(err: unknown): boolean {
+  const inner = err instanceof HostexApiError ? err : (err as { cause?: unknown })?.cause
+  return inner instanceof HostexApiError && HOSTEX_ACCOUNT_ACTION_CODES.has(inner.errorCode)
+}
+
+/**
  * One authenticated Hostex GET, returning the unwrapped `data` payload.
  *
  * @throws RateLimitError when Hostex throttles (in-band, see the header).
@@ -76,17 +156,27 @@ export async function hostexFetch<T>(
   userId: string,
   init?:  { method?: 'GET' | 'POST'; body?: unknown },
 ): Promise<T> {
-  // Fails CLOSED: this budget exists to throw before Hostex throttles us. If
-  // the budget itself cannot be consulted we must not blow through the
-  // provider's ceiling — Inngest's step retry handles the backoff.
-  const budget = await checkLimit(hostexApiLimiter, `hostex-api:${userId}`, {
-    onError: 'deny',
-    site:    'lib.integrations.hostex-api.hostexFetch',
-  })
+  // Fails CLOSED: these budgets exist to throw before Hostex throttles us. If
+  // a budget cannot be consulted we must not blow through the provider's
+  // ceiling — Inngest's step retry handles the backoff.
+  //
+  // Both windows, because Hostex enforces both and the minute one does not
+  // imply the hour — see the note above hostexApiLimiter. Sequential rather
+  // than concurrent so a burst that is already over the minute does not also
+  // spend an hourly token it will not use.
+  for (const [limiter, label] of [
+    [hostexApiLimiter,       'minute'] as const,
+    [hostexApiHourlyLimiter, 'hourly'] as const,
+  ]) {
+    const budget = await checkLimit(limiter, `hostex-api:${userId}`, {
+      onError: 'deny',
+      site:    `lib.integrations.hostex-api.hostexFetch.${label}`,
+    })
 
-  if (!budget.allowed) {
-    const baseSeconds = Math.max(1, Math.ceil((budget.reset - Date.now()) / 1000))
-    throw new RateLimitError(baseSeconds)
+    if (!budget.allowed) {
+      const baseSeconds = Math.max(1, Math.ceil((budget.reset - Date.now()) / 1000))
+      throw new RateLimitError(withRetryJitter(baseSeconds))
+    }
   }
 
   const res = await fetch(`${HOSTEX_API_BASE}${path}`, {
@@ -107,12 +197,21 @@ export async function hostexFetch<T>(
 
   if (envelope.error_code === HOSTEX_RATE_LIMITED_CODE) {
     const retryAfter = Number.parseInt(res.headers.get('Retry-After') ?? '60', 10)
-    throw new RateLimitError(Number.isFinite(retryAfter) ? retryAfter : 60)
+    throw new RateLimitError(withRetryJitter(Number.isFinite(retryAfter) ? retryAfter : 60))
   }
 
   if (!isHostexSuccess(envelope.error_code)) {
     // error_msg is Hostex's own parsed message, never raw response text.
-    throw new Error(`Hostex ${path} failed: error_code ${envelope.error_code} — ${envelope.error_msg}`)
+    const failure = new HostexApiError(envelope.error_code, path, envelope.error_msg)
+
+    // NonRetriableError stops Inngest at the first attempt. Wrapped rather
+    // than thrown directly so the code survives for the caller to branch on:
+    // `cause` is what isHostexAccountActionError reads.
+    if (HOSTEX_TERMINAL_CODES.has(envelope.error_code)) {
+      throw new NonRetriableError(failure.message, { cause: failure })
+    }
+
+    throw failure
   }
 
   return envelope.data

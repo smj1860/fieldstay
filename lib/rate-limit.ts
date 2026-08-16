@@ -188,11 +188,40 @@ export const hospitableApiLimiter = new Ratelimit({
 // signals throttling IN-BAND (HTTP 200 with error_code 429 plus a Retry-After
 // header), so the reactive half of that pair lives in hostexFetch's envelope
 // check rather than in a res.status === 429 branch.
+//
+// THE MINUTE BUDGET ALONE IS NOT ENOUGH, which is why there is a second one
+// below. Hostex enforces four windows per endpoint in parallel — 600/min,
+// 6,000/5min, 10,000/hour, 50,000/day — and they are not proportional to each
+// other. Spending the minute budget at its ceiling reaches 32,400 in an hour,
+// three times the hourly cap. A minute-only limiter therefore says "allowed"
+// for the whole of the hour in which Hostex has already started rejecting
+// every call, and the throttling arrives as an in-band 429 the sync can only
+// react to. Bursty traffic never notices; a large first-connect backfill
+// (reviews alone are chunked into 179-day windows, each paginated) is exactly
+// the shape that does.
 export const hostexApiLimiter = new Ratelimit({
   redis,
   limiter:   Ratelimit.slidingWindow(540, '60 s'),
   analytics: true,
   prefix:    'hostex-api',
+})
+
+// The hourly companion: 9,000 is 90% of Hostex's 10,000/hour per-endpoint
+// ceiling, same headroom convention as the minute bucket. Checked alongside
+// it, never instead of it — a caller can be inside the hour and still be
+// bursting past the minute.
+//
+// Deliberately no 5-minute or 24-hour bucket. 6,000/5min is unreachable
+// without first breaching this one (9,000/hour caps a 5-minute stretch well
+// under 6,000 in any sustained pattern), and 50,000/day is unreachable
+// without breaching it for five straight hours — at which point the hourly
+// rejection is already the signal. Two buckets that bind beat four that mostly
+// duplicate each other's Redis round-trips.
+export const hostexApiHourlyLimiter = new Ratelimit({
+  redis,
+  limiter:   Ratelimit.slidingWindow(9_000, '1 h'),
+  analytics: true,
+  prefix:    'hostex-api-hourly',
 })
 
 // Proactive outbound budget for our own calls TO Kroger's API — same
