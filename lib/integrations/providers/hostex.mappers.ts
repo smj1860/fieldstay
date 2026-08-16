@@ -19,6 +19,9 @@ import type {
 /** "AL 35010" or "AL 35010-1234" — matched against ONE comma-free segment. */
 const STATE_ZIP = /^([A-Z]{2})\s+(\d{5})(?:-\d{4})?$/
 
+/** Trailing country segment Hostex sometimes appends. */
+const COUNTRY_SUFFIX = /^(United States|USA|US)$/i
+
 /**
  * Hostex gives ONE free-form `address` string — no structured city/state/zip.
  *
@@ -49,21 +52,17 @@ export function parseHostexAddress(raw: string | null | undefined): {
 
   // The trailing country segment Hostex sometimes appends is dropped.
   const segments = trimmed.split(',').map((s) => s.trim()).filter(Boolean)
-  if (segments.length && /^(United States|USA|US)$/i.test(segments[segments.length - 1]!)) {
-    segments.pop()
-  }
+  if (COUNTRY_SUFFIX.test(segments.at(-1) ?? '')) segments.pop()
 
   // Need at least "<street>, <city>, <ST ZIP>".
   if (segments.length < 3) return unparsed
 
-  const match = STATE_ZIP.exec(segments[segments.length - 1]!)
+  const match = STATE_ZIP.exec(segments.at(-1) ?? '')
   if (!match) return unparsed
 
-  const street = segments.slice(0, -2).join(', ')
-
   return {
-    address: street || null,
-    city:    segments[segments.length - 2] || null,
+    address: segments.slice(0, -2).join(', ') || null,
+    city:    segments.at(-2) ?? null,
     state:   match[1]!,
     zip:     match[2]!,
   }
