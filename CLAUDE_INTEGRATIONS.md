@@ -423,11 +423,25 @@ Hospitable/OwnerRez, not bugs:
 - Access tokens live 7 days and the refresh token rotates on every use.
   `hostex-token.ts` owns both paths: `getValidHostexToken()` (lock-wrapped, for
   syncs) and `refreshHostexToken()` (unlocked, for the cron).
-- **No webhooks at all** — not implemented, and Hostex has no revocation event
-  even in principle. `hostexReservationReconcileCron` (daily, 08:00 UTC) is
-  therefore the ONLY ongoing sync, not a missed-webhook backstop the way
-  Hospitable's and OwnerRez's reconciles are. A dead connection likewise only
-  surfaces reactively, via a failed refresh or a failed API call.
+- **Webhooks: registered programmatically, authenticated by TOFU, 3s / NO
+  RETRY.** `POST /webhooks` registers a PER-CONNECTION url
+  (`/api/webhooks/hostex/<webhook_token>`) — per-connection because the payload
+  carries only a `property_id`, and resolving a TENANT from a provider-side
+  object id means trusting ids never collide across accounts. Hostex returns
+  the webhook secret from NO api, so the `Hostex-Webhook-Secret-Token` header on
+  the FIRST delivery is captured (hashed) and every later one must match it.
+  Hostex allows **3 seconds** to acknowledge and **never retries**, so the route
+  only resolves → authenticates → enqueues; all work is in
+  `hostexWebhookHandler`. There is no `processed_webhooks` claim, deliberately:
+  that pattern absorbs retries the provider does not perform, and it would
+  spend part of the 3s budget plus carry the claim-then-throw hazard.
+  Deliveries are a PING — Hostex's own guidance is that the payload "only
+  confirms THAT the reservation changed" — so the handler re-reads by
+  `reservation_code`.
+- `hostexReservationReconcileCron` (daily, 08:00 UTC) is the backstop for a
+  delivery that was lost, since the provider will not resend it. A dead
+  connection still only surfaces reactively (failed refresh or failed API
+  call) — Hostex has no revocation event even in principle.
 - **`/properties` returns id, title, address, latitude, longitude, channels,
   groups, tags — and nothing else.** No bedrooms, bathrooms, occupancy,
   check-in/out times, amenities or guest-facing content. `/room_types` was

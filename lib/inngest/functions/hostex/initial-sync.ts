@@ -7,8 +7,9 @@
 //   2. fetch-and-upsert-properties   — hostexFetchProperties → properties
 //   3. seed-room-templates / apply-master-checklist-<id> — per new property
 //   4. reservations → bookings → revenue → turnovers (shared pipeline)
-//   5. guidebook config sync
-//   6. mark-complete
+//   5. register-webhook            — ensure Hostex pushes changes to us
+//   6. guidebook config sync
+//   7. mark-complete
 //
 // Deliberately NOT here, with reasons, so the absences don't read as
 // oversights:
@@ -22,25 +23,15 @@
 
 import { inngest }             from '@/lib/inngest/client'
 import { NonRetriableError }   from 'inngest'
-import { createServiceClient } from '@/lib/supabase/server'
 import { translateSyncError }  from '@/lib/integrations/types'
 import { reportError }         from '@/lib/observability/report-error'
 import { mergeIntegrationConnectionMetadata } from '@/lib/integrations/connection-metadata'
 import { getValidHostexToken } from '@/lib/integrations/providers/hostex-token'
 import { hostexFetchProperties } from '@/lib/integrations/providers/hostex-api'
+import { ensureHostexWebhookRegistration } from '@/lib/integrations/providers/hostex-webhook'
 import { hostexPropertyToNormalized } from '@/lib/integrations/providers/hostex.mappers'
 import { upsertNormalizedProperties } from '@/lib/properties/upsert-normalized'
-import {
-  applyMasterChecklistToProperty,
-  fetchOrgRoomTemplateData,
-  type OrgRoomTemplateData,
-} from '@/lib/checklists/apply-master-template'
-import { seedDefaultRoomTemplatesIfNeeded } from '@/lib/checklists/seed-default-room-templates'
-import {
-  ensureGuidebookConfiguration,
-  createGuidebookPropertyConfigsForProperties,
-  syncGuidebookConfigsFromProperty,
-} from '@/lib/guidebook/sync'
+import { applyChecklistsToProperties, syncGuidebookForOrg } from '../shared/property-onboarding'
 import { syncHostexReservations } from './reservation-sync'
 
 const PROVIDER = 'hostex'
@@ -101,31 +92,7 @@ export const hostexInitialSync = inngest.createFunction(
       const propertyIds = Object.values(propertyIdMap as Record<string, string>)
 
       // ── 3. Checklists for the new properties ──────────────────────────────
-      // Seeded and fetched once for the whole run rather than once per
-      // property — applyMasterChecklistToProperty otherwise re-reads identical
-      // org-level data for every property in the loop.
-      let orgRoomData: OrgRoomTemplateData | undefined
-
-      if (propertyIds.length > 0) {
-        await step.run('seed-room-templates', async () => {
-          await seedDefaultRoomTemplatesIfNeeded(org_id)
-        })
-
-        orgRoomData = await step.run('fetch-room-template-data', async () => {
-          const supabase = createServiceClient({ system: SYSTEM })
-          return fetchOrgRoomTemplateData(org_id, supabase)
-        })
-      }
-
-      for (const propertyId of propertyIds) {
-        await step.run(`apply-master-checklist-${propertyId}`, async () => {
-          const supabase = createServiceClient({ system: SYSTEM })
-          await applyMasterChecklistToProperty(propertyId, org_id, supabase, {
-            orgRoomData,
-            skipSeed: true,
-          })
-        })
-      }
+      await applyChecklistsToProperties(step, org_id, propertyIds, SYSTEM)
 
       // ── 4. Reservations → bookings → revenue → turnovers ──────────────────
       // revenueMode 'all': the post is idempotent, and firing broadly is what
@@ -136,33 +103,50 @@ export const hostexInitialSync = inngest.createFunction(
         token,
         orgId:           org_id,
         userId:          user_id,
-        propertyIdMap:   propertyIdMap as Record<string, string>,
-        historyMonths:   INITIAL_SYNC_HISTORY_MONTHS,
-        lookaheadMonths: INITIAL_SYNC_LOOKAHEAD_MONTHS,
-        system:          SYSTEM,
-        revenueMode:     'all',
+        propertyIdMap: propertyIdMap as Record<string, string>,
+        fetchMode: {
+          kind:            'window',
+          historyMonths:   INITIAL_SYNC_HISTORY_MONTHS,
+          lookaheadMonths: INITIAL_SYNC_LOOKAHEAD_MONTHS,
+        },
+        system:      SYSTEM,
+        revenueMode: 'all',
       })
 
-      // ── 5. Guidebook ──────────────────────────────────────────────────────
-      await step.run('create-guidebook-org-config', async () => {
-        await ensureGuidebookConfiguration(org_id)
-      })
-
-      await step.run('create-guidebook-property-configs', async () => {
+      // ── 5. Register the inbound webhook ───────────────────────────────────
+      // AFTER properties, deliberately. A delivery that arrives before the
+      // property map exists is skipped as unknown_property, so registering
+      // first would guarantee a window where real reservation events are
+      // dropped on the floor.
+      //
+      // Non-fatal: a failure here costs real-time updates, not correctness —
+      // hostexReservationReconcileCron still sweeps daily. Failing the whole
+      // sync over it would throw away the properties and bookings already
+      // imported.
+      await step.run('register-webhook', async () => {
         try {
-          await createGuidebookPropertyConfigsForProperties(org_id)
+          const { attempted, created } = await ensureHostexWebhookRegistration(user_id, token)
+
+          if (!attempted) {
+            logger.warn(`[Hostex:${user_id}] NEXT_PUBLIC_APP_URL unset — skipping webhook registration`)
+            return { registered: false }
+          }
+
+          logger.info(`[Hostex:${user_id}] Webhook ${created ? 'registered' : 'already registered'}`)
+          // A summary, never the token — Inngest persists step return values.
+          return { registered: true, created }
         } catch (err) {
-          logger.error(`[Hostex:${user_id}] guidebook config creation failed: ${err instanceof Error ? err.message : String(err)}`)
-          reportError(err, { site: 'inngest.hostex-initial-sync.create-guidebook-property-configs' })
-          // Non-fatal — don't block the sync.
+          logger.error(`[Hostex:${user_id}] webhook registration failed: ${err instanceof Error ? err.message : String(err)}`)
+          reportError(err, { site: 'inngest.hostex-initial-sync.register-webhook', orgId: org_id })
+          // Non-fatal — see above.
+          return { registered: false }
         }
       })
 
-      await step.run('sync-guidebook-configs-from-property', async () => {
-        await syncGuidebookConfigsFromProperty(org_id, PROVIDER)
-      })
+      // ── 6. Guidebook ──────────────────────────────────────────────────────
+      await syncGuidebookForOrg(step, logger, org_id, PROVIDER, `[Hostex:${user_id}]`)
 
-      // ── 6. Mark complete ──────────────────────────────────────────────────
+      // ── 7. Mark complete ──────────────────────────────────────────────────
       await step.run('mark-complete', async () => {
         await mergeIntegrationConnectionMetadata({
           userId:     user_id,

@@ -1751,6 +1751,8 @@ export type Database = {
           org_id: string | null
           provider_id: string
           reconnect_email_sent_at: string | null
+          webhook_secret_hash: string | null
+          webhook_token: string | null
           refresh_token_vault_secret_id: string | null
           scope: string | null
           status: string
@@ -1769,6 +1771,8 @@ export type Database = {
           org_id?: string | null
           provider_id: string
           reconnect_email_sent_at?: string | null
+          webhook_secret_hash?: string | null
+          webhook_token?: string | null
           refresh_token_vault_secret_id?: string | null
           scope?: string | null
           status?: string
@@ -1787,6 +1791,8 @@ export type Database = {
           org_id?: string | null
           provider_id?: string
           reconnect_email_sent_at?: string | null
+          webhook_secret_hash?: string | null
+          webhook_token?: string | null
           refresh_token_vault_secret_id?: string | null
           scope?: string | null
           status?: string

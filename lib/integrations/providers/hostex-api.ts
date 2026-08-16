@@ -39,6 +39,9 @@ import type {
   HostexPropertiesData,
   HostexReservation,
   HostexReservationsData,
+  HostexRegisteredWebhook,
+  HostexWebhooksData,
+  HostexWebhookEvent,
 } from '@/lib/integrations/providers/hostex.types'
 
 const HOSTEX_API_BASE = 'https://api.hostex.io/v3'
@@ -65,6 +68,7 @@ export async function hostexFetch<T>(
   token:  string,
   /** The connection this call is spent against — Hostex quotas are per-token. */
   userId: string,
+  init?:  { method?: 'GET' | 'POST'; body?: unknown },
 ): Promise<T> {
   // Fails CLOSED: this budget exists to throw before Hostex throttles us. If
   // the budget itself cannot be consulted we must not blow through the
@@ -80,7 +84,9 @@ export async function hostexFetch<T>(
   }
 
   const res = await fetch(`${HOSTEX_API_BASE}${path}`, {
+    method:  init?.method ?? 'GET',
     headers: hostexProvider.getApiHeaders(token),
+    body:    init?.body === undefined ? undefined : JSON.stringify(init.body),
     signal:  AbortSignal.timeout(PMS_API_TIMEOUT_MS),
   })
 
@@ -187,6 +193,70 @@ export async function hostexFetchReservations(
     (data) => (data as HostexReservationsData)?.reservations,
     `reservations[${window.startCheckOutDate}..${window.endCheckOutDate}]`,
   )
+}
+
+/**
+ * One reservation by its code.
+ *
+ * What a webhook delivery needs: Hostex's payload is a ping carrying only
+ * identifiers, and its own guidance is to call the API for current state
+ * rather than infer it. Returns null when the code matches nothing — a
+ * reservation that was hard-deleted between the delivery and this read is a
+ * legitimate outcome, not an error to retry.
+ */
+export async function hostexFetchReservationByCode(
+  token:  string,
+  userId: string,
+  reservationCode: string,
+): Promise<HostexReservation | null> {
+  const qs   = new URLSearchParams({ reservation_code: reservationCode, limit: '1' })
+  const data = await hostexFetch<HostexReservationsData>(`/reservations?${qs.toString()}`, token, userId)
+  return data?.reservations?.[0] ?? null
+}
+
+// ── Webhook registration ─────────────────────────────────────────────────────
+
+export async function hostexListWebhooks(token: string, userId: string): Promise<HostexRegisteredWebhook[]> {
+  const data = await hostexFetch<HostexWebhooksData>('/webhooks', token, userId)
+  return data?.webhooks ?? []
+}
+
+/**
+ * The events FieldStay actually acts on.
+ *
+ * Deliberately NOT the default (omitting `events` subscribes to all ten).
+ * Every unwanted delivery still costs a verified, rate-limited request that
+ * the handler then discards — and `message_created` in particular would put
+ * guest message traffic through an endpoint that has no reason to see it.
+ */
+export const HOSTEX_SUBSCRIBED_EVENTS: HostexWebhookEvent[] = [
+  'reservation_created',
+  'reservation_updated',
+]
+
+/**
+ * Register `url` for this connection, idempotently.
+ *
+ * Idempotency is by URL rather than by a stored webhook id: the id would be a
+ * second piece of state to keep in step with Hostex's side, and the URL is
+ * already unique per connection. Returns whether a registration was created,
+ * so the caller can log the difference between "set up" and "already fine"
+ * instead of reporting both as success.
+ */
+export async function hostexEnsureWebhook(
+  token:  string,
+  userId: string,
+  url:    string,
+): Promise<{ created: boolean }> {
+  const existing = await hostexListWebhooks(token, userId)
+  if (existing.some((w) => w.url === url)) return { created: false }
+
+  await hostexFetch<unknown>('/webhooks', token, userId, {
+    method: 'POST',
+    body:   { url, events: HOSTEX_SUBSCRIBED_EVENTS },
+  })
+
+  return { created: true }
 }
 
 /**

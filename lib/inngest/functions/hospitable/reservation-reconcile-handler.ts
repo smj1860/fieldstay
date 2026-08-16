@@ -31,14 +31,17 @@
 // obscures the real ones. It does NOT flip the connection to 'error' — that
 // is integration-token-refresh-handler's job, which owns the reconnect email
 // and its dedup flag; a daily cron racing it would send duplicates.
+//
+// The shell around all of that (token, property map, empty-skip, log,
+// report-and-rethrow) moved to runProviderReconcile on 2026-08-16, when the
+// Hostex handler landed as a near-copy of it. What stays here is what actually
+// differs between the two: the lookahead and the revenue mode.
 // ============================================================
 
 import { inngest }              from '@/lib/inngest/client'
 import { NonRetriableError }    from 'inngest'
-import { fetchAllRows }         from '@/lib/inngest/paginate'
-import { createServiceClient }  from '@/lib/supabase/server'
 import { readIntegrationToken } from '@/lib/integrations/vault'
-import { reportError }          from '@/lib/observability/report-error'
+import { runProviderReconcile } from '../shared/reconcile-shell'
 import { syncHospitableReservations } from './reservation-sync'
 
 const PROVIDER = 'hospitable'
@@ -76,48 +79,20 @@ export const hospReservationReconcileHandler = inngest.createFunction(
   async ({ event, step, logger }) => {
     const { user_id, org_id } = event.data
 
-    try {
-      const token = await step.run('read-token', async () => {
+    return runProviderReconcile({
+      step,
+      logger,
+      provider: PROVIDER,
+      label:    'Hospitable',
+      userId:   user_id,
+      orgId:    org_id,
+      system:   SYSTEM,
+      readToken: async () => {
         const t = await readIntegrationToken(user_id, PROVIDER)
         if (!t) throw new NonRetriableError('No Hospitable token found — reconnect required')
         return t
-      })
-
-      // Hospitable property external_id → FieldStay properties.id, read from
-      // our own rows. Paginated: this is per-org and properties are plan-
-      // capped, but lib/inngest/** reads are bounded on principle — an
-      // unbounded one truncates at 1000 with a 200 and no signal, and a
-      // truncated map here silently drops every reservation on the missing
-      // properties via the unmapped-property guard.
-      const propertyIdMap = await step.run('fetch-property-map', async () => {
-        const supabase = createServiceClient({ system: SYSTEM })
-
-        const rows = await fetchAllRows<{ id: string; external_id: string | null }>(
-          (from, to) => supabase
-            .from('properties')
-            .select('id, external_id')
-            .eq('org_id', org_id)
-            .eq('external_source', PROVIDER)
-            .eq('is_active', true)
-            .not('external_id', 'is', null)
-            .order('id', { ascending: true })
-            .range(from, to),
-          { label: `hospitable-reconcile.properties[org=${org_id}]` },
-        )
-
-        const map: Record<string, string> = {}
-        for (const r of rows) if (r.external_id) map[r.external_id] = r.id
-        return map
-      })
-
-      if (!Object.keys(propertyIdMap).length) {
-        // Not an error: a connection with no synced properties yet (the
-        // initial sync may still be running) has nothing to reconcile.
-        logger.info(`[Hospitable:${user_id}] Reconcile skipped — no active Hospitable properties`)
-        return { skipped: true, reason: 'no_properties' }
-      }
-
-      const { reservationCount, newTurnoverIds } = await syncHospitableReservations({
+      },
+      sync: (token, propertyIdMap) => syncHospitableReservations({
         step,
         logger,
         token,
@@ -127,27 +102,7 @@ export const hospReservationReconcileHandler = inngest.createFunction(
         lookaheadMonths: RECONCILE_LOOKAHEAD_MONTHS,
         system:          SYSTEM,
         revenueMode:     'new-only',
-      })
-
-      logger.info(
-        `[Hospitable:${user_id}] Reservation reconcile complete — ` +
-        `${Object.keys(propertyIdMap).length} properties, ${reservationCount} reservations, ` +
-        `${newTurnoverIds.length} new turnovers`
-      )
-
-      return {
-        properties:   Object.keys(propertyIdMap).length,
-        reservations: reservationCount,
-        turnovers:    newTurnoverIds.length,
-      }
-    } catch (err) {
-      // Report and rethrow. A reconcile that fails must surface and retry —
-      // swallowing it here would recreate the exact silence this whole
-      // function exists to end.
-      const msg = err instanceof Error ? err.message : String(err)
-      logger.error(`[Hospitable:${user_id}] reservation reconcile failed: ${msg}`)
-      reportError(err, { site: 'inngest.hospitable-reservation-reconcile-handler' })
-      throw err
-    }
+      }),
+    })
   }
 )

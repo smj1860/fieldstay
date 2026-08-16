@@ -29,17 +29,7 @@ import {
 } from '@/lib/integrations/providers/hospitable'
 import { syncHospitableReservations } from './reservation-sync'
 import { upsertNormalizedProperties } from '@/lib/properties/upsert-normalized'
-import {
-  applyMasterChecklistToProperty,
-  fetchOrgRoomTemplateData,
-  type OrgRoomTemplateData,
-} from '@/lib/checklists/apply-master-template'
-import { seedDefaultRoomTemplatesIfNeeded } from '@/lib/checklists/seed-default-room-templates'
-import {
-  ensureGuidebookConfiguration,
-  createGuidebookPropertyConfigsForProperties,
-  syncGuidebookConfigsFromProperty,
-} from '@/lib/guidebook/sync'
+import { applyChecklistsToProperties, syncGuidebookForOrg } from '../shared/property-onboarding'
 import {
   seedPresentAssetsFromAmenities,
   seedAbsentOptionalAssetsFromAmenities,
@@ -109,34 +99,10 @@ export const hospInitialSync = inngest.createFunction(
       // ── 3. Apply master checklist to new properties ───────────────────────
       const propertyIds = Object.values(propertyIdMap as Record<string, string>)
 
-      // Seeded + fetched once for the whole sync run, not once per
-      // property — applyMasterChecklistToProperty's default behavior is
-      // to re-fetch the org's seed-check/mapping/room-templates/items on
-      // every call, which is identical data for every property being
-      // synced here. Only bothers with either step when there's actually
-      // at least one property that needs it.
-      let hospitableOrgRoomData: OrgRoomTemplateData | undefined
-
-      if (propertyIds.length > 0) {
-        await step.run('seed-room-templates', async () => {
-          await seedDefaultRoomTemplatesIfNeeded(org_id)
-        })
-
-        hospitableOrgRoomData = await step.run('fetch-room-template-data', async () => {
-          const supabase = createServiceClient({ system: 'inngest:initial-sync' })
-          return fetchOrgRoomTemplateData(org_id, supabase)
-        })
-      }
-
-      for (const propertyId of propertyIds) {
-        await step.run(`apply-master-checklist-${propertyId}`, async () => {
-          const supabase = createServiceClient({ system: 'inngest:initial-sync' })
-          await applyMasterChecklistToProperty(propertyId, org_id, supabase, {
-            orgRoomData: hospitableOrgRoomData,
-            skipSeed:    true,
-          })
-        })
-      }
+      // Shared with hostexInitialSync — see applyChecklistsToProperties for
+      // why the org-level seed and template read happen once per run rather
+      // than once per property.
+      await applyChecklistsToProperties(step, org_id, propertyIds, 'inngest:initial-sync')
 
       // ── 3b. Seed confirmed-present assets from amenity data ─────────────────
       // Creates bare-stub, active property_assets rows for washer/dryer/
@@ -227,24 +193,7 @@ export const hospInitialSync = inngest.createFunction(
       // copy the WiFi/house-manual/access-instructions staged onto
       // `properties` above into the guidebook config — but only where the
       // PM hasn't already entered their own value.
-      await step.run('create-guidebook-org-config', async () => {
-        await ensureGuidebookConfiguration(org_id)
-      })
-
-      await step.run('create-guidebook-property-configs', async () => {
-        try {
-          await createGuidebookPropertyConfigsForProperties(org_id)
-        } catch (err) {
-          logger.error(`[Hospitable:${user_id}] guidebook config creation failed: ${err instanceof Error ? err.message : String(err)}`)
-          reportError(err, { site: 'inngest.hospitable-initial-sync.create-guidebook-property-configs' })
-          // Non-fatal — don't throw, don't block the sync
-        }
-      })
-
-      await step.run('sync-guidebook-configs-from-property', async () => {
-        await syncGuidebookConfigsFromProperty(org_id, PROVIDER)
-        logger.info(`[Hospitable:${user_id}] Synced guidebook configs for org ${org_id}`)
-      })
+      await syncGuidebookForOrg(step, logger, org_id, PROVIDER, `[Hospitable:${user_id}]`)
 
       // ── 8. Mark sync complete ─────────────────────────────────────────────
       await step.run('mark-complete', async () => {

@@ -1357,6 +1357,19 @@ export interface IntegrationConnection {
   expires_at:       string | null
   /** Set when a reconnect-required email was sent after a proactive refresh failure. Cleared on next successful token store. */
   reconnect_email_sent_at: string | null
+  /**
+   * Path segment of the per-connection inbound webhook URL
+   * (/api/webhooks/<provider>/<token>). NULL for providers that use one shared
+   * webhook endpoint. Currently Hostex only — see the migration's comment for
+   * why a per-connection URL is the only sound tenant resolution there.
+   */
+  webhook_token: string | null
+  /**
+   * SHA-256 of the provider's per-connection webhook secret, captured on the
+   * first inbound delivery (trust-on-first-use). NULL until then. Never the
+   * plaintext secret — verification only ever compares.
+   */
+  webhook_secret_hash: string | null
 }
 
 export interface OAuthState {

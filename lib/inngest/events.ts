@@ -660,6 +660,20 @@ export type FieldStayEvents = {
   // action. Unlike Hospitable's equivalent this is not a missed-webhook
   // backstop — FieldStay registers no Hostex webhook, so this is the only
   // ongoing sync a Hostex connection gets.
+  // One inbound Hostex webhook delivery, already authenticated and narrowed to
+  // an actionable reservation event by app/api/webhooks/hostex/[token]. The
+  // route does nothing beyond enqueueing this — Hostex allows 3 seconds and
+  // never retries, so all real work has to happen out of band.
+  'integration/hostex.webhook.received': {
+    data: {
+      user_id:          string
+      org_id:           string
+      event:            string
+      reservation_code: string
+      property_id:      string | null
+    }
+  }
+
   'integration/hostex.reservation_reconcile.requested': {
     data: {
       user_id:          string

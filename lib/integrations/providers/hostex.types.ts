@@ -126,3 +126,57 @@ export interface HostexReservationsData {
   reservations: HostexReservation[]
   total?:       number
 }
+
+// ── Webhooks ─────────────────────────────────────────────────────────────────
+// ✅ Confirmed against the published OpenAPI for GET/POST /webhooks.
+
+/** Every event Hostex can emit. FieldStay acts on the two reservation ones. */
+export type HostexWebhookEvent =
+  | 'reservation_created'
+  | 'reservation_updated'
+  | 'property_availability_updated'
+  | 'listing_calendar_updated'
+  | 'message_created'
+  | 'review_created'
+  | 'review_updated'
+  | 'transaction_created'
+  | 'transaction_updated'
+  | 'transaction_deleted'
+
+export interface HostexRegisteredWebhook {
+  id:         number
+  url:        string
+  events:     HostexWebhookEvent[]
+  /** Only a manageable webhook may be deleted by us. */
+  manageable: boolean
+  created_at: string
+}
+
+export interface HostexWebhooksData {
+  webhooks: HostexRegisteredWebhook[]
+}
+
+/**
+ * The inbound delivery body.
+ *
+ * A FLAT object — `event`, a few identifiers, and `timestamp`. There is no
+ * nested `data`. Critically it is a PING, not a record: Hostex's own guidance
+ * is that "the payload only confirms THAT the reservation changed", so the
+ * handler must re-read the reservation from the API rather than infer state
+ * from these fields.
+ *
+ * Typed loosely on purpose beyond the fields we use — Hostex explicitly warns
+ * that payloads may gain parameters and that consumers must ignore unexpected
+ * ones rather than reject the notification.
+ */
+export interface HostexWebhookPayload {
+  event:             string
+  /** Present on reservation_* events. The reservation's identity. */
+  reservation_code?: string
+  /** Multi-room bookings fire one event per stay: same code, distinct stay_code. */
+  stay_code?:        string
+  property_id?:      number
+  /** reservation_updated only — names the kind of change (rates_updated, …). */
+  sub_event?:        string
+  timestamp?:        string
+}
