@@ -455,8 +455,22 @@ Hospitable/OwnerRez, not bugs:
 - **Hostex tasks cannot become FieldStay turnover templates.** A template is
   sections-and-items; a Hostex task is one scheduled job with `type`, `level`,
   `fee` and a free-text note, and NO checklist of any kind. Importing them
-  yields templates with zero items. The genuinely useful field there is `fee`
-  (a real per-property cleaning cost Hostex exposes nowhere else) — not built.
+  yields templates with zero items.
+- **A cleaning task's `fee` IS imported**, as `properties.cleaning_cost` — the
+  only per-property money Hostex exposes anywhere. Median rather than mean or
+  latest (one deep clean at 3x would drag a mean), preferring `level:
+  'standard'` when the account labels its cleans. BACKFILL ONLY, via
+  `.is('cleaning_cost', null)`: a PM's own figure is what FieldStay pays a
+  cleaner and can legitimately differ from what Hostex bills, so the daily
+  sync must never overwrite it. Derived from the SAME `/tasks` fetch the staff
+  role inference uses; only the derived maps cross an Inngest step boundary,
+  since step output is persisted and 90 days of tasks is megabytes.
+- **Not seeded for capital planning.** `seedPresentAssetsFromAmenities` is
+  amenity-driven and Hostex returns no amenities, so a Hostex property enters
+  capex projections with ZERO assets until crew asset-discovery or manual
+  entry fills them in. Guidebook configs ARE created (that pass is
+  provider-agnostic) but arrive EMPTY, since Hostex exposes no WiFi, check-in,
+  house-manual or checkout content to copy.
 - `hostexReservationReconcileCron` (daily, 08:00 UTC) is the backstop for a
   delivery that was lost, since the provider will not resend it. A dead
   connection still only surfaces reactively (failed refresh or failed API

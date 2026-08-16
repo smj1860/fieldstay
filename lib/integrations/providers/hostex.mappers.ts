@@ -417,6 +417,89 @@ export function inferHostexStaffRole(tasks: HostexTask[]): HostexStaffRole {
   return { role: TASK_TYPE_TO_ROLE[primary], specialty }
 }
 
+/** staff id → inferred role, derived once from a whole task list. */
+export type HostexStaffRoles = Record<string, HostexStaffRole>
+
+/**
+ * Group tasks by staff and infer each one's role.
+ *
+ * Returns a compact map rather than the caller keeping raw tasks around:
+ * Inngest PERSISTS every step's return value and re-sends it on each
+ * subsequent step, and 90 days of tasks for a real portfolio is megabytes.
+ * The derived map is a few hundred bytes.
+ */
+export function deriveHostexStaffRoles(tasks: HostexTask[]): HostexStaffRoles {
+  const byStaff = new Map<number, HostexTask[]>()
+
+  for (const task of tasks) {
+    if (task.staff_id === null || task.staff_id === undefined) continue
+    const existing = byStaff.get(task.staff_id)
+    if (existing) existing.push(task)
+    else byStaff.set(task.staff_id, [task])
+  }
+
+  const roles: HostexStaffRoles = {}
+  for (const [staffId, staffTasks] of byStaff) {
+    roles[String(staffId)] = inferHostexStaffRole(staffTasks)
+  }
+  return roles
+}
+
+/** hostex property id → the fee that property's cleans typically cost. */
+export type HostexCleaningFees = Record<string, number>
+
+/** Middle value — robust to one outlier deep-clean in either direction. */
+function median(values: number[]): number {
+  const sorted = [...values].sort((a, b) => a - b)
+  const mid    = Math.floor(sorted.length / 2)
+  return sorted.length % 2 === 0 ? (sorted[mid - 1]! + sorted[mid]!) / 2 : sorted[mid]!
+}
+
+/**
+ * What a clean costs per property, from the `fee` on its cleaning tasks.
+ *
+ * This is the only place Hostex exposes real per-property money — /properties
+ * has no fee of any kind — so without it every imported property falls back to
+ * FieldStay's default cleaning_cost.
+ *
+ * MEDIAN, not mean or latest: a single deep clean billed at 3x would drag a
+ * mean, and "latest" is hostage to whichever task happened to be last in an
+ * unordered page. Standard-level cleans are preferred when the account labels
+ * them, since an `advanced` clean is by definition not the turnover baseline;
+ * accounts that never set `level` fall back to all cleaning tasks.
+ *
+ * Currency is deliberately ignored: FieldStay has no currency column anywhere,
+ * and its target user is a US operator. An account billing in mixed currencies
+ * would need a schema change before this could be made correct, not a tweak
+ * here.
+ */
+export function deriveHostexCleaningFees(tasks: HostexTask[]): HostexCleaningFees {
+  const byProperty = new Map<string, { standard: number[]; all: number[] }>()
+
+  for (const task of tasks) {
+    if (task.type !== 'cleaning') continue
+    if (task.property_id === null || task.property_id === undefined) continue
+
+    const fee = task.fee
+    if (typeof fee !== 'number' || !Number.isFinite(fee) || fee <= 0) continue
+
+    const key    = String(task.property_id)
+    const bucket = byProperty.get(key) ?? { standard: [], all: [] }
+    bucket.all.push(fee)
+    if (task.level === 'standard' || task.level === null || task.level === undefined) {
+      bucket.standard.push(fee)
+    }
+    byProperty.set(key, bucket)
+  }
+
+  const fees: HostexCleaningFees = {}
+  for (const [propertyId, bucket] of byProperty) {
+    const sample = bucket.standard.length ? bucket.standard : bucket.all
+    if (sample.length) fees[propertyId] = median(sample)
+  }
+  return fees
+}
+
 export interface HostexCrewMemberRow {
   org_id:            string
   name:              string
@@ -446,14 +529,14 @@ export interface HostexCrewMemberRow {
  * guard as hospitableTeammatesToCrewRows.
  */
 export function hostexStaffToCrewRows(
-  orgId:        string,
-  staffs:       HostexStaff[],
-  tasksByStaff: Map<number, HostexTask[]>,
+  orgId:  string,
+  staffs: HostexStaff[],
+  roles:  HostexStaffRoles,
 ): HostexCrewMemberRow[] {
   return staffs
     .filter((s) => s.name?.trim())
     .map((s) => {
-      const { role, specialty } = inferHostexStaffRole(tasksByStaff.get(s.id) ?? [])
+      const { role, specialty } = roles[String(s.id)] ?? { role: 'general' as const, specialty: null }
 
       return {
         org_id:            orgId,
