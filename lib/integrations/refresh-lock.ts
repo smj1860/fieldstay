@@ -35,7 +35,7 @@ import { acquireLock, releaseLock } from '@/lib/cache/single-flight'
 /** Long enough for one token exchange, short enough that a crash self-heals. */
 const LOCK_TTL_SECONDS = 15
 
-export type RefreshLockProvider = 'hospitable' | 'kroger' | 'ownerrez'
+export type RefreshLockProvider = 'hospitable' | 'kroger' | 'ownerrez' | 'hostex'
 
 function lockKey(provider: RefreshLockProvider, userId: string): string {
   return `${provider}:refresh-lock:${userId}`

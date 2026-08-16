@@ -18,6 +18,7 @@ import { krogerProvider } from './providers/kroger'
 // lib/integrations/providers/hostaway.ts.
 // import { hostawayProvider }   from './providers/hostaway'
 import { hospitableProvider } from './providers/hospitable'
+import { hostexProvider } from './providers/hostex'
 // Future: import { guestyProvider } from './providers/guesty'
 
 const providers = new Map<string, IntegrationProvider>([
@@ -28,6 +29,10 @@ const providers = new Map<string, IntegrationProvider>([
   // lib/integrations/providers/hostaway.ts.
   // ['hostaway',   hostawayProvider],
   ['hospitable', hospitableProvider],
+  // Registered but integration_providers.hostex.is_active = false (see
+  // supabase/migrations/20260816092239_hostex_integration_provider.sql) —
+  // Phase 1 only supports the OAuth connect flow, no webhooks/sync yet.
+  ['hostex',     hostexProvider],
   // ['guesty',   guestyProvider],
 ])
 

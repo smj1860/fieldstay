@@ -267,6 +267,10 @@ export const ENV_SPEC: Readonly<Record<string, VarSpec>> = {
   HOSPITABLE_CLIENT_ID:      { tier: 'optional', schema: nonEmpty, why: 'Hospitable OAuth' },
   HOSPITABLE_CLIENT_SECRET:  { tier: 'optional', schema: nonEmpty, why: 'Hospitable OAuth' },
   HOSPITABLE_WEBHOOK_SECRET: { tier: 'optional', schema: nonEmpty, why: 'Hospitable webhook signature verification' },
+  // No HOSTEX_WEBHOOK_SECRET: unlike Hospitable, Hostex's webhook secret is
+  // per-connection, captured into Vault/DB in Phase 2 — never a global env var.
+  HOSTEX_CLIENT_ID:          { tier: 'optional', schema: nonEmpty, why: 'Hostex OAuth' },
+  HOSTEX_CLIENT_SECRET:      { tier: 'optional', schema: nonEmpty, why: 'Hostex OAuth' },
   TOMORROW_IO_API_KEY:       { tier: 'optional', schema: nonEmpty, why: 'weather signals for contextual guest SMS; throws when called unset' },
   ANTHROPIC_API_KEY:         { tier: 'optional', schema: prefixed('sk-ant-'), why: 'data-plate OCR and RepuGuard generation' },
   REPUGUARD_MODEL:           { tier: 'optional', schema: nonEmpty, why: 'RepuGuard model id; falls back to a hardcoded default' },

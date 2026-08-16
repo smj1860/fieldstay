@@ -40,6 +40,12 @@ OWNERREZ_WEBHOOK_USER=
 OWNERREZ_WEBHOOK_PASSWORD=
 
 # Hostaway (API key — not OAuth)
+# Hostex (OAuth2 — Phase 1: connect/callback only)
+HOSTEX_CLIENT_ID=
+HOSTEX_CLIENT_SECRET=
+# NO HOSTEX_WEBHOOK_SECRET — Hostex's webhook secret is per-connection, not
+# global. See the Hostex Integration section below.
+
 # Hospitable (OAuth2) — HOSPITABLE_CLIENT_ID / HOSPITABLE_CLIENT_SECRET /
 # HOSPITABLE_WEBHOOK_SECRET ARE global env vars (see .env.example); every
 # org's OAuth flow uses the same registered app. lib/integrations/providers/
@@ -387,6 +393,44 @@ rather than leave a half-wired integration reachable by URL.
    automation works the same way it does for OwnerRez/Hospitable, then add
    `'hostaway'` to `REVENUE_AUTOMATION_PROVIDER_IDS` in
    `app/(dashboard)/ops/page.tsx`.
+
+## Hostex Integration
+
+OAuth2. **Phase 1 only as of this writing: connect/callback works
+(`lib/integrations/providers/hostex.ts`), `integration_providers.hostex.is_active =
+false`, no webhooks, no sync functions.** Real differences from Hospitable/OwnerRez,
+not bugs:
+- Token endpoint (`POST https://api.hostex.io/v3/oauth/authorizations`) handles both
+  obtain and refresh via `grant_type`, not separate endpoints, and takes NO
+  `redirect_uri` in its body. Access tokens expire every 7 days (vs. Hospitable's 12
+  hours). The AUTHORIZE url, by contrast, does require `redirect_uri` as an explicit
+  query param — the opposite of Hospitable, where it is portal-configured.
+- Every v3 endpoint returns HTTP 200 even on failure and wraps its payload in
+  `{ request_id, error_code, error_msg, data }` — branch on `error_code`, never on
+  `response.ok` alone. Whether the OAuth token endpoint itself uses that envelope is
+  UNCONFIRMED; `parseHostexTokenResponse()` handles both shapes and logs which one
+  fired, so the dead branch can be deleted after the first real connect.
+- No account-identity endpoint exists anywhere in Hostex's API — `externalUserId` is
+  derived from the connected account's first property id as a proxy, not a true
+  operator ID, and is `''` for an account with zero properties. See
+  `deriveHostexExternalUserId()` in `hostex.ts`.
+- No webhook-driven revocation event exists at all. Hostex connections can only be
+  marked `revoked`/`error` reactively, via a failed refresh or failed API call —
+  never proactively via webhook the way Hospitable/OwnerRez are. Expect Hostex
+  disconnections to surface later than other providers'.
+- Webhook secrets (Phase 2, not yet built) are per-connection, captured from the
+  first inbound delivery — not a single global env var like
+  `HOSPITABLE_WEBHOOK_SECRET`.
+- `is_active = false` alone is sufficient to keep Hostex out of both PM-facing
+  surfaces — RESOLVED, no `HIDDEN_PROVIDER_IDS` entry needed (unlike Hostaway).
+  Settings -> Integrations filters `.eq('is_active', true)`; Setup -> PMS also
+  filters `.in('id', PMS_PROVIDER_IDS)`, which does not list `hostex`. The
+  connect/callback ROUTES never consult `is_active` — they resolve the adapter
+  from `lib/integrations/registry.ts` — so `/api/integrations/hostex/connect`
+  stays reachable by direct URL for testing while the UI stays clean.
+- `revokeAccessToken` is deliberately not implemented yet (`POST /oauth/revoke`'s
+  body shape is unconfirmed). It is optional on `IntegrationProvider`; local
+  revocation via `revokeIntegrationToken()` works fully without it.
 
 ## Hospitable Integration
 
