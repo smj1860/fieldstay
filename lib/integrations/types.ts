@@ -74,9 +74,17 @@ export interface IntegrationProvider {
    * Revoke an access token on the provider's side.
    * Called when a user disconnects FieldStay from within our app.
    * The caller is responsible for also deleting the token from Vault.
+   *
+   * `refreshToken` is passed when one exists and the provider treats it as a
+   * SEPARATELY revocable credential — Hostex does, and revoking only the
+   * access token there would leave a live refresh token able to mint new ones
+   * after the user has disconnected. A provider that revokes the whole grant
+   * from either token (or has no refresh tokens at all, like OwnerRez) simply
+   * ignores it.
    */
   revokeAccessToken?(params: {
-    token: string
+    token:         string
+    refreshToken?: string
   }): Promise<void>
 
   // ── Universal methods (all providers) ───────────────────────────────────

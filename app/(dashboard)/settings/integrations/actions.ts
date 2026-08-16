@@ -3,7 +3,7 @@
 import { revalidatePath }                from 'next/cache'
 import { requireOrgMember }              from '@/lib/auth'
 import { createServiceClient }           from '@/lib/supabase/server'
-import { readIntegrationToken, disconnectIntegrationToken } from '@/lib/integrations/vault'
+import { readIntegrationToken, readIntegrationRefreshToken, disconnectIntegrationToken } from '@/lib/integrations/vault'
 import { getProvider }                   from '@/lib/integrations/registry'
 import { logAuditEvent }                 from '@/lib/audit'
 import { reportError } from '@/lib/observability/report-error'
@@ -57,6 +57,34 @@ export async function getSyncProgress(providerId: string): Promise<{
     reportError(err, { site: 'serverAction.settings.integrations.getSyncProgress' })
     return null
   }
+}
+
+/**
+ * Both credentials a provider might need to revoke, read from Vault.
+ *
+ * The refresh token comes along because some providers revoke the two
+ * SEPARATELY — Hostex does, and revoking only the access token there leaves a
+ * live refresh token able to mint new ones for an account the user has just
+ * disconnected. A provider with none stored simply has none to revoke.
+ *
+ * Failing to READ the refresh token is never a reason to abandon a disconnect
+ * the user asked for, so that read degrades to null. Extracted from
+ * disconnectIntegration to keep it under the cognitive-complexity ceiling.
+ */
+async function readRevocableCredentials(
+  connectionUserId: string,
+  providerId:       string,
+): Promise<{ accessToken: string | null; refreshToken: string | null }> {
+  const accessToken = await readIntegrationToken(connectionUserId, providerId)
+
+  let refreshToken: string | null = null
+  try {
+    refreshToken = await readIntegrationRefreshToken(connectionUserId, providerId)
+  } catch (err) {
+    console.warn(`[disconnect:${providerId}] refresh-token read failed; revoking access token only`, err)
+  }
+
+  return { accessToken, refreshToken }
 }
 
 /**
@@ -293,15 +321,18 @@ export async function disconnectIntegration(
 
     const connectionUserId = connection.user_id
 
-    // 1. Retrieve the token from Vault (keyed to the connection's owner)
-    const accessToken = await readIntegrationToken(connectionUserId, providerId)
+    // 1. Retrieve the tokens from Vault (keyed to the connection's owner).
+    const { accessToken, refreshToken } = await readRevocableCredentials(connectionUserId, providerId)
 
     // 2. Revoke at the provider (best-effort)
     if (accessToken) {
       try {
         const provider = getProvider(providerId)
         if (provider?.revokeAccessToken) {
-          await provider.revokeAccessToken({ token: accessToken })
+          await provider.revokeAccessToken({
+            token:        accessToken,
+            refreshToken: refreshToken ?? undefined,
+          })
         }
       } catch (err) {
         console.error(`[disconnect:${providerId}] Provider revocation failed:`, err instanceof Error ? err.message : err)
