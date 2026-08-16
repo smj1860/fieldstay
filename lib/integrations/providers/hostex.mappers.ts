@@ -12,6 +12,7 @@ import type {
   HostexProperty,
   HostexReservation,
   HostexReservationStatus,
+  HostexReview,
 } from './hostex.types'
 
 // ── Address ──────────────────────────────────────────────────────────────────
@@ -248,5 +249,66 @@ export function hostexReservationToNormalized(res: HostexReservation): Normalize
     stay_type:   'guest_stay',
 
     actual_total_amount: extractHostexActualTotal(res),
+  }
+}
+
+// ── Reviews ──────────────────────────────────────────────────────────────────
+
+/** The `reviews` row shape this mapper produces, minus org/property linkage. */
+export interface NormalizedReview {
+  external_id:     string
+  external_source: 'hostex'
+  external_url:    null
+  /** Hostex property id as a string, for the caller to resolve to a UUID. */
+  property_external_id: string
+  guest_name:      string | null
+  rating:          number
+  review_text:     string
+  review_date:     string | null
+  response_status: 'pending' | 'posted'
+}
+
+/**
+ * Maps a Hostex review record into a FieldStay `reviews` row.
+ *
+ * Returns null when there is nothing to store — which is the common case, not
+ * an error. Hostex returns one record per RESERVATION carrying up to three
+ * things, and only one of them is a review of the property:
+ *
+ *   - `guest_review`  the guest reviewing the stay      → this is the row
+ *   - `host_review`   the host reviewing the GUEST      → deliberately dropped;
+ *                     FieldStay has nowhere to put it, and storing it as a
+ *                     property review would corrupt the rating average with
+ *                     scores that are not about the property at all
+ *   - `host_reply`    the host's reply to the guest     → not content, but it
+ *                     does tell us the PM already answered
+ *
+ * `reviews.rating` and `reviews.review_text` are both NOT NULL, so a record
+ * whose guest_review is absent or contentless is skipped rather than written
+ * with a fabricated zero — the same reason ownerrez's mapper guards `stars`.
+ *
+ * response_status is 'posted' when Hostex reports a host_reply. That is what
+ * stops FieldStay's review queue nagging a PM to answer a review they already
+ * answered inside Hostex.
+ */
+export function hostexReviewToNormalized(review: HostexReview): NormalizedReview | null {
+  const guest = review.guest_review
+  if (!guest) return null
+
+  const rating = typeof guest.score === 'number' && Number.isFinite(guest.score) ? guest.score : null
+  if (rating === null) return null
+
+  return {
+    // No review id exists on this endpoint — the reservation IS the identity.
+    external_id:          review.reservation_code,
+    external_source:      'hostex',
+    external_url:         null,
+    property_external_id: String(review.property_id),
+    // Not on the review payload; the caller backfills it from the booking.
+    guest_name:           null,
+    rating,
+    review_text:          guest.content ?? '',
+    review_date:          guest.created_at ?? null,
+    response_status:      review.host_reply ? 'posted' : 'pending',
   }
 }

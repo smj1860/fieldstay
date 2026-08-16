@@ -7,6 +7,7 @@
 //   2. fetch-and-upsert-properties   — hostexFetchProperties → properties
 //   3. seed-room-templates / apply-master-checklist-<id> — per new property
 //   4. reservations → bookings → revenue → turnovers (shared pipeline)
+//   4b. reviews backfill           — chunked into Hostex's <180-day windows
 //   5. register-webhook            — ensure Hostex pushes changes to us
 //   6. guidebook config sync
 //   7. mark-complete
@@ -33,6 +34,7 @@ import { hostexPropertyToNormalized } from '@/lib/integrations/providers/hostex.
 import { upsertNormalizedProperties } from '@/lib/properties/upsert-normalized'
 import { applyChecklistsToProperties, syncGuidebookForOrg } from '../shared/property-onboarding'
 import { syncHostexReservations } from './reservation-sync'
+import { syncHostexReviews } from './reviews-sync'
 
 const PROVIDER = 'hostex'
 const SYSTEM   = 'inngest:hostex-initial-sync'
@@ -113,6 +115,22 @@ export const hostexInitialSync = inngest.createFunction(
         revenueMode: 'all',
       })
 
+      // ── 4b. Reviews ───────────────────────────────────────────────────────
+      // After reservations, because the guest-name backfill reads the bookings
+      // this org just imported — run first, every Hostex review would be
+      // anonymous until the next sweep.
+      const { reviewCount } = await syncHostexReviews({
+        step,
+        logger,
+        token,
+        orgId:         org_id,
+        userId:        user_id,
+        propertyIdMap: propertyIdMap as Record<string, string>,
+        fetchMode:     { kind: 'window', historyMonths: INITIAL_SYNC_HISTORY_MONTHS },
+        system:        SYSTEM,
+        stepPrefix:    'initial',
+      })
+
       // ── 5. Register the inbound webhook ───────────────────────────────────
       // AFTER properties, deliberately. A delivery that arrives before the
       // property map exists is skipped as unknown_property, so registering
@@ -158,6 +176,7 @@ export const hostexInitialSync = inngest.createFunction(
             last_sync_count:   reservationCount,
             properties_found:  propertyIds.length,
             bookings_found:    reservationCount,
+            reviews_found:     reviewCount,
             external_user_id,
           },
         })
@@ -165,10 +184,10 @@ export const hostexInitialSync = inngest.createFunction(
 
       logger.info(
         `[Hostex:${user_id}] Initial sync complete — ` +
-        `${propertyIds.length} properties, ${reservationCount} bookings`
+        `${propertyIds.length} properties, ${reservationCount} bookings, ${reviewCount} reviews`
       )
 
-      return { properties: propertyIds.length, reservations: reservationCount }
+      return { properties: propertyIds.length, reservations: reservationCount, reviews: reviewCount }
     } catch (err) {
       const msg         = err instanceof Error ? err.message : String(err)
       const friendlyMsg = translateSyncError(err, 'Hostex')

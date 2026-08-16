@@ -7,10 +7,14 @@
 // only resolve → authenticate → enqueue, and the actual work lands here.
 //
 // Hostex's delivery is a PING, not a record — its own guidance is that "the
-// payload only confirms THAT the reservation changed" — so this re-reads the
-// reservation from the API and runs it through the same pipeline the sweeps
-// use, in 'codes' mode. No second copy of the upsert, the guards, the revenue
-// post or the turnover regeneration.
+// payload only confirms THAT the reservation changed" — so this re-reads from
+// the API and runs the result through the same pipelines the sweeps use. No
+// second copy of the upsert, the guards, the revenue post or the turnover
+// regeneration.
+//
+// Four event types arrive here, and they split two ways. reservation_* re-reads
+// the reservation; review_* re-reads the review. Both are keyed by
+// reservation_code, because a Hostex review has no id of its own.
 //
 // A delivery for an unknown property is a SKIP, not a failure: the property
 // was added in Hostex after our last property sync, and reservations for it
@@ -23,6 +27,7 @@ import { reportError }       from '@/lib/observability/report-error'
 import { getValidHostexToken } from '@/lib/integrations/providers/hostex-token'
 import { fetchProviderPropertyIdMap } from '../shared/reservation-pipeline'
 import { syncHostexReservations } from './reservation-sync'
+import { syncHostexReviews } from './reviews-sync'
 
 const PROVIDER = 'hostex' as const
 const SYSTEM   = 'inngest:hostex-webhook-handler'
@@ -46,7 +51,11 @@ export const hostexWebhookHandler = inngest.createFunction(
     // moments — each would otherwise cost a full read + upsert + turnover
     // regeneration to arrive at the identical end state.
     debounce: {
-      key:    'event.data.user_id + ":" + event.data.reservation_code',
+      // Keyed on the EVENT too, not just the reservation: a review_created and
+      // a reservation_updated can land for the same reservation moments apart
+      // (a guest reviews, the stay is finalised), and collapsing them would
+      // silently drop whichever arrived second.
+      key:    'event.data.user_id + ":" + event.data.event + ":" + event.data.reservation_code',
       period: '10s',
     },
   },
@@ -85,6 +94,23 @@ export const hostexWebhookHandler = inngest.createFunction(
       if (!Object.keys(scopedMap).length) {
         logger.info(`[Hostex:${user_id}] ${hostexEvent} but no active Hostex properties — skipping`)
         return { skipped: true, reason: 'no_properties' }
+      }
+
+      if (hostexEvent === 'review_created' || hostexEvent === 'review_updated') {
+        const { reviewCount } = await syncHostexReviews({
+          step,
+          logger,
+          token,
+          orgId:         org_id,
+          userId:        user_id,
+          propertyIdMap: scopedMap,
+          fetchMode:     { kind: 'reservation', reservationCode: reservation_code },
+          system:        SYSTEM,
+          stepPrefix:    'webhook',
+        })
+
+        logger.info(`[Hostex:${user_id}] ${hostexEvent} ${reservation_code} processed — ${reviewCount} review(s)`)
+        return { reviews: reviewCount }
       }
 
       const { reservationCount, newTurnoverIds } = await syncHostexReservations({

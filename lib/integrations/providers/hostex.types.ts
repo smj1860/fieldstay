@@ -127,6 +127,51 @@ export interface HostexReservationsData {
   total?:       number
 }
 
+// ── Reviews ──────────────────────────────────────────────────────────────────
+// ✅ Confirmed against the published OpenAPI for GET /reviews.
+//
+// There is NO review id. One record per reservation, keyed by
+// reservation_code — the same identity the reservation itself uses.
+//
+// Both directions of review are returned. `guest_review` is the guest
+// reviewing the STAY, which is what FieldStay's reviews table holds;
+// `host_review` is the host reviewing the GUEST, which FieldStay has no place
+// for and deliberately does not import.
+
+export interface HostexReviewSubScore {
+  category: string
+  /** 1–5 for Airbnb, 1–10 for Booking.com — scale differs BY CHANNEL. */
+  rating:   number
+  review_category_tags?: string[] | null
+}
+
+export interface HostexReviewSide {
+  /** 0–5. */
+  score:      number
+  sub_score?: HostexReviewSubScore[] | null
+  content:    string
+  created_at: string
+}
+
+export interface HostexReview {
+  reservation_code: string
+  property_id:      number
+  channel_type:     string
+  listing_id:       string
+  check_in_date:    string
+  check_out_date:   string
+  /** The host reviewing the guest. Not imported — see above. */
+  host_review?:  HostexReviewSide | null
+  /** The guest reviewing the stay. This is the one FieldStay stores. */
+  guest_review?: HostexReviewSide | null
+  /** Present once the host has replied on the channel. */
+  host_reply?: { content: string; created_at: string } | null
+}
+
+export interface HostexReviewsData {
+  reviews: HostexReview[]
+}
+
 // ── Webhooks ─────────────────────────────────────────────────────────────────
 // ✅ Confirmed against the published OpenAPI for GET/POST /webhooks.
 

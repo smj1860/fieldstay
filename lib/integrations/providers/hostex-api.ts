@@ -42,6 +42,8 @@ import type {
   HostexRegisteredWebhook,
   HostexWebhooksData,
   HostexWebhookEvent,
+  HostexReview,
+  HostexReviewsData,
 } from '@/lib/integrations/providers/hostex.types'
 
 const HOSTEX_API_BASE = 'https://api.hostex.io/v3'
@@ -214,6 +216,98 @@ export async function hostexFetchReservationByCode(
   return data?.reservations?.[0] ?? null
 }
 
+// ── Reviews ──────────────────────────────────────────────────────────────────
+
+/**
+ * Hostex REJECTS a /reviews range of 180 days or more: `end_check_out_date`
+ * must be "Less than 180 days from start_check_out_date". 179 keeps a day of
+ * margin against boundary arithmetic.
+ *
+ * This constraint does NOT apply to /reservations, which is why the two have
+ * separate window builders instead of sharing one.
+ */
+const REVIEW_WINDOW_DAYS = 179
+
+export interface HostexReviewWindow {
+  startCheckOutDate: string
+  endCheckOutDate:   string
+}
+
+/**
+ * Split `historyMonths` of history into legal (<180 day) review windows,
+ * newest first.
+ *
+ * Newest first because a backfill that dies partway is far more useful having
+ * imported this quarter's reviews than the ones from a year ago.
+ */
+export function hostexReviewWindows(historyMonths: number, now: Date = new Date()): HostexReviewWindow[] {
+  const oldest = new Date(now)
+  oldest.setMonth(oldest.getMonth() - historyMonths)
+
+  const windows: HostexReviewWindow[] = []
+  let end = new Date(now)
+
+  while (end > oldest && windows.length < 24) {
+    const start = new Date(end)
+    start.setDate(start.getDate() - REVIEW_WINDOW_DAYS)
+
+    windows.push({
+      startCheckOutDate: (start < oldest ? oldest : start).toISOString().slice(0, 10),
+      endCheckOutDate:   end.toISOString().slice(0, 10),
+    })
+
+    end = new Date(start)
+    end.setDate(end.getDate() - 1)
+  }
+
+  return windows
+}
+
+/**
+ * Completed reviews whose reservation checked out inside the window.
+ *
+ * `review_status` is left at its `reviewed` default deliberately: a
+ * pending_guest_review row has no review content to store, and importing one
+ * would create a review with an empty body and no rating.
+ */
+export async function hostexFetchReviews(
+  token:  string,
+  userId: string,
+  window: HostexReviewWindow,
+): Promise<HostexReview[]> {
+  const qs = new URLSearchParams({
+    start_check_out_date: window.startCheckOutDate,
+    end_check_out_date:   window.endCheckOutDate,
+  })
+
+  return fetchAllPages<HostexReview>(
+    (offset, limit) => `/reviews?${qs.toString()}&offset=${offset}&limit=${limit}`,
+    token,
+    userId,
+    (data) => (data as HostexReviewsData)?.reviews,
+    `reviews[${window.startCheckOutDate}..${window.endCheckOutDate}]`,
+  )
+}
+
+/**
+ * The review record for one reservation — what a review_created/updated
+ * webhook needs, since its payload names the reservation and nothing else.
+ *
+ * No explicit date window: filtered by reservation_code, Hostex applies its
+ * own default range, and any wider range we could pass would be illegal
+ * anyway. A review for a stay that checked out more than ~180 days ago is
+ * therefore not reachable this way — the windowed backfill is what covers it.
+ */
+export async function hostexFetchReviewByReservation(
+  token:  string,
+  userId: string,
+  reservationCode: string,
+): Promise<HostexReview | null> {
+  const qs   = new URLSearchParams({ reservation_code: reservationCode, offset: '0', limit: '1' })
+  const data = await hostexFetch<HostexReviewsData>(`/reviews?${qs.toString()}`, token, userId)
+  return data?.reviews?.[0] ?? null
+}
+
 // ── Webhook registration ─────────────────────────────────────────────────────
 
 export async function hostexListWebhooks(token: string, userId: string): Promise<HostexRegisteredWebhook[]> {
@@ -232,6 +326,8 @@ export async function hostexListWebhooks(token: string, userId: string): Promise
 export const HOSTEX_SUBSCRIBED_EVENTS: HostexWebhookEvent[] = [
   'reservation_created',
   'reservation_updated',
+  'review_created',
+  'review_updated',
 ]
 
 /**

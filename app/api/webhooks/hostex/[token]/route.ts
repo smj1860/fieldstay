@@ -46,8 +46,21 @@ import type { HostexWebhookPayload } from '@/lib/integrations/providers/hostex.t
 /** Hostex's own header name for the per-webhook-URL secret. */
 const SECRET_HEADER = 'Hostex-Webhook-Secret-Token'
 
-/** Events worth waking a function for. Anything else is acknowledged and dropped. */
-const ACTIONABLE_EVENTS = new Set(['reservation_created', 'reservation_updated'])
+/**
+ * Events worth waking a function for. Anything else is acknowledged and
+ * dropped — Hostex requires consumers to ignore what they do not recognise
+ * rather than reject the delivery.
+ *
+ * All four carry `reservation_code` and `property_id` and nothing else of
+ * substance: even a review event names the reservation, not a review, because
+ * Hostex's review records have no id of their own.
+ */
+const ACTIONABLE_EVENTS = new Set([
+  'reservation_created',
+  'reservation_updated',
+  'review_created',
+  'review_updated',
+])
 
 function sha256(value: string): string {
   return createHash('sha256').update(value).digest('hex')
