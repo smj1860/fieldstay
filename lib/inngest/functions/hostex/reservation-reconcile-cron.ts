@@ -3,11 +3,11 @@
 // Daily cron — dispatches one reservation-reconcile event per active Hostex
 // connection.
 //
-// THIS IS THE ONLY ONGOING SYNC HOSTEX HAS, which is why it is daily rather
-// than a weekly backstop. Hospitable and OwnerRez are webhook-primary and use
-// their reconcile crons purely to catch missed deliveries; FieldStay registers
-// no Hostex webhook at all (Phase 2, not built), so without this the initial
-// sync on connect would be the ONLY time a Hostex PM's bookings ever arrived.
+// Daily rather than the weekly backstop Hospitable and OwnerRez run, because
+// Hostex webhooks are strictly less reliable than theirs: Hostex allows a
+// 3-second ack and then NEVER RETRIES a failed delivery (see
+// app/api/webhooks/hostex/[token]/route.ts). A missed delivery is missed for
+// good, so the sweep that recovers it has to run often.
 //
 // Same dispatch-per-connection shape as the Hospitable crons: this function
 // only FINDS connections, and one run per connection does the work under its

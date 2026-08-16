@@ -29,9 +29,8 @@ const providers = new Map<string, IntegrationProvider>([
   // lib/integrations/providers/hostaway.ts.
   // ['hostaway',   hostawayProvider],
   ['hospitable', hospitableProvider],
-  // Registered but integration_providers.hostex.is_active = false (see
-  // supabase/migrations/20260816092239_hostex_integration_provider.sql) —
-  // Phase 1 only supports the OAuth connect flow, no webhooks/sync yet.
+  // Live: integration_providers.hostex.is_active flipped to true by
+  // 20260816122829_activate_hostex_provider.sql once sync and webhooks shipped.
   ['hostex',     hostexProvider],
   // ['guesty',   guestyProvider],
 ])

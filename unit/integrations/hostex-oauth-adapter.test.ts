@@ -247,10 +247,20 @@ describe('hostexProvider.refreshAccessToken', () => {
   })
 })
 
-describe('hostexProvider — Phase 1 webhook stubs fail closed', () => {
+describe('hostexProvider — the generic webhook route stays closed', () => {
+  // Hostex deliveries land on /api/webhooks/hostex/[token], which resolves the
+  // connection from the URL token and carries the trust-on-first-use secret
+  // claim. The generic /api/webhooks/[provider] route must NEVER become a
+  // second way in: it has no token, so it would bypass that claim entirely.
   it('rejects any inbound webhook with a reason instead of throwing', async () => {
     const result = await hostexProvider.validateWebhook(new Request('https://app.fieldstay.app/api/webhooks/hostex'))
     expect(result.valid).toBe(false)
-    expect(result.reason).toMatch(/Phase 2/)
+    expect(result.reason).toMatch(/\/api\/webhooks\/hostex\/\[token\]/)
+  })
+
+  it('does nothing if handleWebhookEvent is somehow reached', async () => {
+    await expect(hostexProvider.handleWebhookEvent!(
+      {} as Parameters<NonNullable<typeof hostexProvider.handleWebhookEvent>>[0],
+    )).resolves.toBeUndefined()
   })
 })
