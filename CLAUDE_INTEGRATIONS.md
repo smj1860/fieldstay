@@ -437,22 +437,61 @@ Hospitable/OwnerRez, not bugs:
   spend part of the 3s budget plus carry the claim-then-throw hazard.
   Deliveries are a PING — Hostex's own guidance is that the payload "only
   confirms THAT the reservation changed" — so the handler re-reads by
-  `reservation_code`.
+  `reservation_code`. Subscribed events: `reservation_created`,
+  `reservation_updated`, `review_created`, `review_updated`. All four carry
+  only `reservation_code`/`property_id`; even a review event names the
+  reservation, because a Hostex review has no id.
+- **No crew/teammate endpoint exists**, so there is no crew import — unlike
+  Hospitable. This one really is absent from the API surface.
 - `hostexReservationReconcileCron` (daily, 08:00 UTC) is the backstop for a
   delivery that was lost, since the provider will not resend it. A dead
   connection still only surfaces reactively (failed refresh or failed API
   call) — Hostex has no revocation event even in principle.
 - **`/properties` returns id, title, address, latitude, longitude, channels,
   groups, tags — and nothing else.** No bedrooms, bathrooms, occupancy,
-  check-in/out times, amenities or guest-facing content. `/room_types` was
-  checked and has none either. Those fields take FieldStay defaults on import
+  check-in/out times, amenities or guest-facing content.
+
+  All four candidate endpoints were checked against their OpenAPI contracts and
+  NONE carries a bedroom count — do not go looking again:
+  - `/room_types` groups interchangeable properties for inventory selling (the
+    hotel model, "5 identical studios"); its `properties[]` are whole
+    properties with only `id`/`title`, not rooms inside one.
+  - `/listings` has no dedicated fields, only a `metadata` passthrough its own
+    docs call "best-effort" with "no guaranteed structure across channels".
+  - `/listings/airbnb/price_and_rules` has `max_guests`, and it is a TRAP: it
+    means "the number of guests included in the base price", a pricing
+    threshold, not capacity. A property sleeping 8 may include 2 in the base
+    rate. Mapping it to `properties.max_guests` would look correct and be
+    wrong — and it is Airbnb-only and one call per listing besides. Those fields take FieldStay defaults on import
   for the PM to correct, rather than being guessed: bedrooms drives cleaning
   cost and checklist seeding. Hostex does give exact coordinates, which is why
   `NormalizedProperty` grew optional `lat`/`lng` — there is often no parseable
   ZIP to geocode from in its single free-form address string.
-- **Reservations have no `id`** — `reservation_code` is the identity and the
-  `external_id`. Amounts are MAJOR UNITS, not Hospitable's integer cents.
-  Revenue is `rates.total_rate` minus `rates.total_commission`.
+- **Reservations have no `id`, and `reservation_code` is NOT unique.** Hostex
+  returns ONE OBJECT PER STAY, and its docs state that multiple stays "share
+  the same reservation code" — so `bookings.external_id` is the **`stay_code`**.
+  Keying on reservation_code put duplicate conflict keys into one bulk upsert,
+  which Postgres rejects outright ("ON CONFLICT DO UPDATE command cannot affect
+  row a second time"): the WHOLE batch fails, so a single multi-stay
+  reservation would have broken that org's entire reservation sync on every
+  run. A review exposes no stay_code, so `reviews.external_id` is
+  `<reservation_code>:<property_id>` for the same reason.
+  Amounts are MAJOR UNITS, not Hospitable's integer cents. Revenue is
+  `rates.total_rate` minus `rates.total_commission`.
+- **Custom fields** (`custom_fields`) come back INLINE on `/reservations` —
+  the per-stay `GET /reservations/{stay_code}/custom_fields` endpoint is one
+  call per stay for data already in the list response. Not synced: the field is
+  an unstructured, operator-defined object (`nullable, type: object`, no
+  schema) whose contents vary per org.
+- **Reviews ARE available** (`GET /reviews`), and are synced. Three traps:
+  a date range must be UNDER 180 days, so a backfill is chunked
+  (`hostexReviewWindows`); there is no review id, so `external_id` is the
+  `reservation_code`; and one record carries BOTH directions — `guest_review`
+  (the guest reviewing the stay, which is what `reviews` stores) and
+  `host_review` (the host reviewing the GUEST, deliberately dropped, since
+  importing it would pollute the property's rating average). A `host_reply`
+  means the PM already answered inside Hostex, so the row lands as
+  `response_status = 'posted'` rather than nagging them again.
 - No account-identity endpoint exists — `externalUserId` is the first
   property's id as a proxy. See `deriveHostexExternalUserId()`.
 - `revokeAccessToken` is still not implemented (`POST /oauth/revoke`'s body

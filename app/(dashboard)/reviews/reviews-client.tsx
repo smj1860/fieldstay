@@ -52,6 +52,7 @@ interface Props {
 const REVIEW_SOURCE_LABELS: Record<string, string> = {
   ownerrez:   'OwnerRez',
   hospitable: 'Hospitable',
+  hostex:     'Hostex',
 }
 
 // Only OwnerRez has a confirmed working fallback URL when the sync didn't

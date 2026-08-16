@@ -32,6 +32,7 @@ import { NonRetriableError }   from 'inngest'
 import { getValidHostexToken } from '@/lib/integrations/providers/hostex-token'
 import { runProviderReconcile } from '../shared/reconcile-shell'
 import { syncHostexReservations } from './reservation-sync'
+import { syncHostexReviews } from './reviews-sync'
 
 const PROVIDER = 'hostex' as const
 const SYSTEM   = 'inngest:hostex-reservation-reconcile'
@@ -42,6 +43,14 @@ const SYSTEM   = 'inngest:hostex-reservation-reconcile'
  * every day.
  */
 const RECONCILE_HISTORY_MONTHS = 1
+
+/**
+ * Reviews sweep further back than reservations — a guest can review weeks
+ * after checkout, and a host_reply posted inside Hostex changes an existing
+ * row's response_status. Still one legal window (<180 days), so one request
+ * per page rather than a chunked backfill.
+ */
+const RECONCILE_REVIEW_HISTORY_MONTHS = 5
 
 /**
  * Six months forward, matching INITIAL_SYNC_LOOKAHEAD_MONTHS. A sweep that
@@ -77,21 +86,41 @@ export const hostexReservationReconcileHandler = inngest.createFunction(
         if (!t) throw new NonRetriableError('No Hostex token found — reconnect required')
         return t
       },
-      sync: (token, propertyIdMap) => syncHostexReservations({
-        step,
-        logger,
-        token,
-        orgId:         org_id,
-        userId:        user_id,
-        propertyIdMap,
-        fetchMode: {
-          kind:            'window',
-          historyMonths:   RECONCILE_HISTORY_MONTHS,
-          lookaheadMonths: RECONCILE_LOOKAHEAD_MONTHS,
-        },
-        system:      SYSTEM,
-        revenueMode: 'new-only',
-      }),
+      sync: async (token, propertyIdMap) => {
+        const result = await syncHostexReservations({
+          step,
+          logger,
+          token,
+          orgId:         org_id,
+          userId:        user_id,
+          propertyIdMap,
+          fetchMode: {
+            kind:            'window',
+            historyMonths:   RECONCILE_HISTORY_MONTHS,
+            lookaheadMonths: RECONCILE_LOOKAHEAD_MONTHS,
+          },
+          system:      SYSTEM,
+          revenueMode: 'new-only',
+        })
+
+        // Reviews ride the same daily pass rather than getting their own cron:
+        // they need the same token and the same property map, and Hostex's
+        // quota is per-connection, so a second cron would only add a second
+        // place for the connection to be resolved.
+        await syncHostexReviews({
+          step,
+          logger,
+          token,
+          orgId:         org_id,
+          userId:        user_id,
+          propertyIdMap,
+          fetchMode:     { kind: 'window', historyMonths: RECONCILE_REVIEW_HISTORY_MONTHS },
+          system:        SYSTEM,
+          stepPrefix:    'reconcile',
+        })
+
+        return result
+      },
     })
   }
 )

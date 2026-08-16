@@ -12,6 +12,7 @@ import type {
   HostexProperty,
   HostexReservation,
   HostexReservationStatus,
+  HostexReview,
 } from './hostex.types'
 
 // ── Address ──────────────────────────────────────────────────────────────────
@@ -221,8 +222,23 @@ export function extractHostexActualTotal(res: HostexReservation): number | null 
 /**
  * Maps a Hostex reservation into the shared NormalizedBooking shape.
  *
- * external_id is `reservation_code` — Hostex reservations have no `id` field
- * at all, so there is no more obvious candidate to be wrong about.
+ * external_id is `stay_code`, NOT `reservation_code`, and the difference is
+ * load-bearing. Hostex returns ONE OBJECT PER STAY, and its own docs say
+ * "Multiple stays are allowed for the same reservation. In the case of
+ * multiple stays, all stays will share the same reservation code" — so a
+ * room-type or multi-property booking yields several objects carrying the
+ * SAME reservation_code and different stay_codes.
+ *
+ * Keying on reservation_code put rows with an identical conflict key
+ * (org_id, external_id, external_source) into a single bulk upsert, and
+ * Postgres rejects that outright: "ON CONFLICT DO UPDATE command cannot
+ * affect row a second time". Not last-write-wins — the WHOLE batch fails, so
+ * one multi-stay reservation anywhere in the window would have failed that
+ * org's entire reservation sync on every run.
+ *
+ * Falls back to reservation_code only if stay_code is absent, which the schema
+ * says should not happen; a booking with neither is unidentifiable and is
+ * dropped by the pipeline's own guard rather than written under ''.
  *
  * is_block is always false and stay_type always 'guest_stay': Hostex has no
  * owner-stay concept and no block ever appears through /reservations (blocks
@@ -230,7 +246,7 @@ export function extractHostexActualTotal(res: HostexReservation): number | null 
  */
 export function hostexReservationToNormalized(res: HostexReservation): NormalizedBooking {
   return {
-    external_id:          res.reservation_code,
+    external_id:          res.stay_code || res.reservation_code,
     property_external_id: res.property_id !== undefined && res.property_id !== null
       ? String(res.property_id)
       : null,
@@ -248,5 +264,85 @@ export function hostexReservationToNormalized(res: HostexReservation): Normalize
     stay_type:   'guest_stay',
 
     actual_total_amount: extractHostexActualTotal(res),
+  }
+}
+
+// ── Reviews ──────────────────────────────────────────────────────────────────
+
+/** The `reviews` row shape this mapper produces, minus org/property linkage. */
+export interface NormalizedReview {
+  external_id:     string
+  external_source: 'hostex'
+  external_url:    null
+  /** Hostex property id as a string, for the caller to resolve to a UUID. */
+  property_external_id: string
+  guest_name:      string | null
+  rating:          number
+  review_text:     string
+  review_date:     string | null
+  response_status: 'pending' | 'posted'
+  /** Natural key back to the stay, for the guest-name join. */
+  checkin_date:    string
+  checkout_date:   string
+}
+
+/**
+ * Review identity: `<reservation_code>:<property_id>`.
+ *
+ * A review record exposes no stay_code, so for a reservation spanning several
+ * properties the reservation_code alone is not unique — and a duplicate
+ * conflict key inside one bulk upsert fails the whole statement, exactly as it
+ * did for bookings. The pair is unique whether or not Hostex emits per-stay
+ * review records, which is the point: it costs nothing and does not depend on
+ * a behaviour that is unconfirmed either way.
+ */
+export function hostexReviewExternalId(reservationCode: string, propertyId: number | string): string {
+  return `${reservationCode}:${propertyId}`
+}
+
+/**
+ * Maps a Hostex review record into a FieldStay `reviews` row.
+ *
+ * Returns null when there is nothing to store — which is the common case, not
+ * an error. Hostex returns one record per RESERVATION carrying up to three
+ * things, and only one of them is a review of the property:
+ *
+ *   - `guest_review`  the guest reviewing the stay      → this is the row
+ *   - `host_review`   the host reviewing the GUEST      → deliberately dropped;
+ *                     FieldStay has nowhere to put it, and storing it as a
+ *                     property review would corrupt the rating average with
+ *                     scores that are not about the property at all
+ *   - `host_reply`    the host's reply to the guest     → not content, but it
+ *                     does tell us the PM already answered
+ *
+ * `reviews.rating` and `reviews.review_text` are both NOT NULL, so a record
+ * whose guest_review is absent or contentless is skipped rather than written
+ * with a fabricated zero — the same reason ownerrez's mapper guards `stars`.
+ *
+ * response_status is 'posted' when Hostex reports a host_reply. That is what
+ * stops FieldStay's review queue nagging a PM to answer a review they already
+ * answered inside Hostex.
+ */
+export function hostexReviewToNormalized(review: HostexReview): NormalizedReview | null {
+  const guest = review.guest_review
+  if (!guest) return null
+
+  const rating = typeof guest.score === 'number' && Number.isFinite(guest.score) ? guest.score : null
+  if (rating === null) return null
+
+  return {
+    // No review id exists on this endpoint — see hostexReviewExternalId.
+    external_id:          hostexReviewExternalId(review.reservation_code, review.property_id),
+    external_source:      'hostex',
+    external_url:         null,
+    property_external_id: String(review.property_id),
+    // Not on the review payload; the caller backfills it from the booking.
+    guest_name:           null,
+    rating,
+    review_text:          guest.content ?? '',
+    review_date:          guest.created_at ?? null,
+    response_status:      review.host_reply ? 'posted' : 'pending',
+    checkin_date:         review.check_in_date,
+    checkout_date:        review.check_out_date,
   }
 }
