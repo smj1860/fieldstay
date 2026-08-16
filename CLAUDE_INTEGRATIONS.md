@@ -449,8 +449,20 @@ Hospitable/OwnerRez, not bugs:
   call) — Hostex has no revocation event even in principle.
 - **`/properties` returns id, title, address, latitude, longitude, channels,
   groups, tags — and nothing else.** No bedrooms, bathrooms, occupancy,
-  check-in/out times, amenities or guest-facing content. `/room_types` was
-  checked and has none either. Those fields take FieldStay defaults on import
+  check-in/out times, amenities or guest-facing content.
+
+  All four candidate endpoints were checked against their OpenAPI contracts and
+  NONE carries a bedroom count — do not go looking again:
+  - `/room_types` groups interchangeable properties for inventory selling (the
+    hotel model, "5 identical studios"); its `properties[]` are whole
+    properties with only `id`/`title`, not rooms inside one.
+  - `/listings` has no dedicated fields, only a `metadata` passthrough its own
+    docs call "best-effort" with "no guaranteed structure across channels".
+  - `/listings/airbnb/price_and_rules` has `max_guests`, and it is a TRAP: it
+    means "the number of guests included in the base price", a pricing
+    threshold, not capacity. A property sleeping 8 may include 2 in the base
+    rate. Mapping it to `properties.max_guests` would look correct and be
+    wrong — and it is Airbnb-only and one call per listing besides. Those fields take FieldStay defaults on import
   for the PM to correct, rather than being guessed: bedrooms drives cleaning
   cost and checklist seeding. Hostex does give exact coordinates, which is why
   `NormalizedProperty` grew optional `lat`/`lng` — there is often no parseable
