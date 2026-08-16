@@ -167,6 +167,107 @@ describe('guardrail: CI runs every gate', () => {
   })
 })
 
+// ============================================================================
+// The dynamic cross-tenant isolation probe.
+//
+// Every other DB check reads the schema: RLS is enabled, policies exist, none
+// of them is blanket-true or unscoped. All of that is SHAPE. A policy can be
+// perfectly well-formed and express the wrong rule — scoped to the wrong
+// column, joined through the wrong relation — and pass all of it. The probe is
+// the only thing that asks the database what an authenticated user can
+// actually SEE.
+//
+// It is bash + psql rather than another .mjs, so it is deliberately NOT in
+// INSTALL_FREE_SCRIPTS: it needs a session-mode connection that can hold a
+// transaction across a SET ROLE, which PostgREST cannot do.
+//
+// These assertions need no database, so they run on a fork and in every local
+// `pnpm test` — which matters, because the probe itself is opt-in armed and
+// will warn-and-pass until the SUPABASE_E2E_DB_URL secret exists.
+// ============================================================================
+describe('guardrail: the RLS isolation probe stays wired', () => {
+  const probeSql = readFileSync(join(ROOT, 'scripts/rls-isolation-probe.sql'), 'utf8')
+  const runner   = readFileSync(join(ROOT, 'scripts/run-rls-probe.sh'), 'utf8')
+
+  it('CI runs it', () => {
+    expect(ciDirectives, 'ci.yml no longer runs scripts/run-rls-probe.sh').toContain(
+      'bash scripts/run-rls-probe.sh',
+    )
+    expect(pkg.scripts['check:rls-isolation'] ?? '').toContain('run-rls-probe.sh')
+  })
+
+  it('the db-invariants job passes RLS_PROBE_REQUIRE_ARMED', () => {
+    expect(
+      ciDirectives,
+      'Without RLS_PROBE_REQUIRE_ARMED the probe falls back to warn-and-pass and the gate goes green without running.',
+    ).toMatch(/RLS_PROBE_REQUIRE_ARMED:/)
+  })
+
+  it('the runner self-disarms, but fails when armedness is REQUIRED', () => {
+    expect(runner).toMatch(/::warning title=.*UNARMED/)
+    // The require-armed branch must EXIT NON-ZERO, not merely log — the same
+    // assertion the three .mjs checks carry, and for the same reason: a
+    // version that logged and carried on would match the env var name alone.
+    expect(
+      runner,
+      "run-rls-probe.sh's RLS_PROBE_REQUIRE_ARMED branch must exit 1, not just log.",
+    ).toMatch(/RLS_PROBE_REQUIRE_ARMED[\s\S]{0,400}?exit 1/)
+  })
+
+  it('the runner refuses production unless opted in, and never echoes the URI', () => {
+    expect(runner).toMatch(/DB_INVARIANTS_ALLOW_PROD/)
+    expect(pkg.scripts['check:rls-isolation:prod']).toBeDefined()
+    // The connection string holds the database password. Any construct that
+    // prints it — echo, printf, set -x — puts a live credential in a public
+    // CI log.
+    expect(
+      /(echo|printf)[^\n]*\$\{?SUPABASE_DB_URL/.test(runner),
+      'run-rls-probe.sh must never print SUPABASE_DB_URL — it contains the database password.',
+    ).toBe(false)
+    expect(runner).not.toMatch(/^\s*set -x\s*$/m)
+  })
+
+  it('psql runs with ON_ERROR_STOP, or every failure exits 0', () => {
+    // Without it psql reports the error, continues to the next statement, and
+    // exits 0 — so a detected leak would render as a passing check. Every
+    // failure mode in the .sql is a RAISE EXCEPTION, which makes this flag the
+    // single thing converting the probe into a gate.
+    expect(runner).toMatch(/ON_ERROR_STOP=1/)
+  })
+
+  it('the probe seeds its own foreign tenant rather than hoping one exists', () => {
+    // A count of 0 is the passing answer AND the answer a single-tenant
+    // database gives for reasons unrelated to RLS. The E2E project has exactly
+    // one organization, so without the seed this gate would have been green
+    // from the day it was added while proving nothing.
+    expect(probeSql).toMatch(/INSERT INTO organizations/)
+    expect(
+      probeSql,
+      'the ground-truth loop must abort when a probed table has no foreign rows',
+    ).toMatch(/PROBE ABORTED: no foreign rows exist/)
+  })
+
+  it('the probe carries a canary, so a blind run cannot pass', () => {
+    // A failed role switch, a missing GRANT, or a WHERE that matches nothing
+    // all produce the same clean row of zeros as a genuine pass. The canary is
+    // a throwaway table with a deliberately blanket-true policy that the probe
+    // must be able to SEE.
+    expect(probeSql).toMatch(/rls_probe_canary/)
+    expect(probeSql).toMatch(/USING \(true\)/)
+    expect(probeSql).toMatch(/the probe is BLIND|probe is BLIND/i)
+  })
+
+  it('the probe ends in ROLLBACK and never COMMITs', () => {
+    // It creates a table in public, seeds a whole foreign org, and switches
+    // role. Exactly one thing keeps that safe to point at production.
+    expect(probeSql.trimEnd().endsWith('ROLLBACK;')).toBe(true)
+    expect(
+      /^\s*COMMIT\s*;/mi.test(probeSql),
+      'rls-isolation-probe.sql must never COMMIT — it seeds a foreign org and creates a blanket-true canary table.',
+    ).toBe(false)
+  })
+})
+
 describe('guardrail: install-free CI scripts stay install-free', () => {
   it.each(INSTALL_FREE_SCRIPTS)('%s imports only Node builtins', (script) => {
     const src = readFileSync(join(ROOT, script), 'utf8')
