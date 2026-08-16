@@ -204,6 +204,31 @@ function normalizeSql(sql) {
     .replace(/\/\*[\s\S]*?\*\//g, ' ')   // block comments
     .replace(/--[^\n]*/g, ' ')            // line comments
     .replace(/\s+/g, ' ')                 // all whitespace runs
+    // Adjacent string literals, folded into one.
+    //
+    // Postgres concatenates two string constants separated by whitespace
+    // containing at least one newline, so a COMMENT wrapped across lines —
+    //
+    //     COMMENT ON FUNCTION f IS
+    //       'so the caller can enforce a minimum before trusting '
+    //       'the average.';
+    //
+    // is ONE literal. The ledger stores it already folded; the file keeps the
+    // author's line breaks. After the whitespace collapse above those read as
+    // `trusting the average.'` and `trusting ' 'the average.'` — a difference
+    // in nothing at all.
+    //
+    // This is why it is SAFE rather than merely convenient: on the same line,
+    // `'a' 'b'` is a SYNTAX ERROR in Postgres, not concatenation. So in SQL
+    // that demonstrably ran, a quote/whitespace/quote sequence can only ever
+    // have been a line-wrapped literal — there is no valid construct this
+    // could destroy. A comma (`'a', 'b'`) does not match and is untouched.
+    //
+    // Found 2026-08-15 while sizing the 25 baselined drifts: 11 of them were
+    // this and nothing else. Left unfolded, the baseline would have
+    // grandfathered a dozen files as "the repo cannot reproduce this database"
+    // when they reproduce it exactly.
+    .replace(/'\s+'/g, '')
     .trim()
 }
 

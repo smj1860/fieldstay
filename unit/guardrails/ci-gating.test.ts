@@ -306,11 +306,14 @@ describe('guardrail: migration ledger baseline is shrink-only', () => {
   })
 
   it('production contentDrift is a shrink-only ratchet', () => {
-    // Seeded 2026-08-15 at 25: migrations whose committed SQL is not the SQL
-    // that ran. The version matches on both sides, so localOnly/ledgerOnly are
-    // both empty and clean while these files still fail to describe the
-    // database. LOWER this as they are reconciled; never raise it.
-    const CEILING = 25
+    // Migrations whose committed SQL is not the SQL that ran. The version
+    // matches on both sides, so localOnly/ledgerOnly are both empty and clean
+    // while these files still fail to describe the database.
+    //
+    // Seeded at 25, burned down to 20 the same day once the normalizer learned
+    // to fold adjacent string literals — those five were never drift. LOWER
+    // this as more are reconciled; never raise it.
+    const CEILING = 20
     const prod = baseline.projects[PROD_REF]
     expect(prod?.contentDrift ?? [], 'production must carry a contentDrift entry').toBeInstanceOf(Array)
     expect((prod?.contentDrift ?? []).length).toBeLessThanOrEqual(CEILING)
