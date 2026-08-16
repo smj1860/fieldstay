@@ -49,6 +49,14 @@ const OAUTH_CONNECTED_EVENTS: Partial<Record<string, (ctx: OAuthConnectedContext
     name: 'integration/hospitable.connected',
     data: { user_id: ctx.userId, org_id: ctx.orgId, external_user_id: ctx.externalUserId },
   }),
+  // Phase 1: no Inngest function subscribes to this yet, so it is recorded
+  // and nothing runs. Wired now so the connect path is complete when Phase 3
+  // adds the sync function — and so the event shows up in the Inngest
+  // dashboard as proof the connect actually reached this point.
+  hostex: (ctx) => inngest.send({
+    name: 'integration/hostex.connected',
+    data: { user_id: ctx.userId, org_id: ctx.orgId, external_user_id: ctx.externalUserId },
+  }),
 }
 
 /**

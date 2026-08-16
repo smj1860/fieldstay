@@ -69,6 +69,7 @@ const PROVIDER_DESCRIPTIONS: Record<string, string> = {
   // hostaway: 'Connects your Hostaway account to sync all listings and reservations in real time.',
   // Guesty is not yet wired — hidden until the integration is live.
   // guesty:   'Connects your Guesty account to sync all listings and reservations in real time.',
+  hostex:     'Authorization only for now — property and booking sync are not live yet.',
   kroger:     "Builds Kroger grocery carts automatically from below-par inventory items. Works with any nearby Kroger-owned store — Kroger, Ralphs, Fred Meyer, King Soopers, Smith's, Fry's, QFC, City Market, Dillons, Baker's, Gerbes, Harris Teeter, Mariano's, Pick 'n Save, Metro Market, Food 4 Less, and Foods Co.",
 }
 
@@ -134,7 +135,13 @@ export function IntegrationsClient({
 
   return (
     <div className="space-y-4">
-      {providers.filter((provider) => !HIDDEN_PROVIDER_IDS.has(provider.id)).map((provider) => {
+      {providers.filter((provider) => (
+        // Hidden providers stay hidden UNLESS this org holds a connection to
+        // one — an existing connection must always be visible and removable,
+        // whatever the provider's rollout state. Same reasoning as the
+        // is_active widening in page.tsx.
+        !HIDDEN_PROVIDER_IDS.has(provider.id) || connectionsByProvider[provider.id]
+      )).map((provider) => {
         const connection = connectionsByProvider[provider.id]
         return (
           <IntegrationCard
@@ -342,7 +349,11 @@ const SYNC_TIMEOUT_MS = 10 * 60 * 1000
  * yet. Starts immediately after the OAuth redirect (metadata has no
  * last_sync_status yet) and also picks up if the user navigates here mid-sync.
  */
-function useSyncProgress(providerId: string, connection: Connection | null): SyncState {
+function useSyncProgress(
+  providerId: string,
+  connection: Connection | null,
+  enabled:    boolean,
+): SyncState {
   const initialMeta       = asJsonObject(connection?.metadata) ?? {}
   const initialSyncStatus = typeof initialMeta.last_sync_status === 'string'
     ? initialMeta.last_sync_status
@@ -360,7 +371,11 @@ function useSyncProgress(providerId: string, connection: Connection | null): Syn
     ?? (typeof initialMeta.bookings_found === 'number' ? initialMeta.bookings_found : null)
 
   const isTerminal = status === 'success' || status === 'error'
-  const shouldPoll = connection?.status === 'active' && !initiallyTerminal && !isTerminal && !syncTimedOut
+  // `enabled` is false for a manage-only provider: it has no sync to report
+  // progress on, so the poll would run every 2.5s for the full 10-minute
+  // SYNC_TIMEOUT_MS and then render a timeout error for a connection that is
+  // behaving exactly as intended.
+  const shouldPoll = enabled && connection?.status === 'active' && !initiallyTerminal && !isTerminal && !syncTimedOut
 
   useEffect(() => {
     if (!shouldPoll) return
@@ -400,7 +415,7 @@ function useSyncProgress(providerId: string, connection: Connection | null): Syn
 
     return () => clearInterval(intervalId)
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [connection?.status, initiallyTerminal, providerId])
+  }, [connection?.status, initiallyTerminal, providerId, enabled])
 
   return { status, propertiesFound, bookingsFound, isTerminal, timedOut: syncTimedOut, pollError }
 }
@@ -480,11 +495,13 @@ function ConnectedActions({
 }: Readonly<{
   resyncing: boolean
   canDisconnect: boolean
-  onResync: () => void
+  /** Omitted for a provider with no sync — the button is not rendered at all. */
+  onResync: (() => void) | null
   onDisconnectClick: () => void
 }>) {
   return (
     <div className="flex items-center gap-2">
+      {onResync && (
       <Button
         variant="ghost"
         onClick={onResync}
@@ -498,6 +515,7 @@ function ConnectedActions({
           : <RefreshCw className="w-3.5 h-3.5" />}
         Trigger Resync
       </Button>
+      )}
       {canDisconnect && (
         <Button
           variant="ghost"
@@ -544,6 +562,7 @@ function IntegrationDetails({
   error,
   resyncMessage,
   pollError,
+  manageOnly,
 }: Readonly<{
   provider: Provider
   connection: Connection | null
@@ -551,6 +570,7 @@ function IntegrationDetails({
   error: string | null
   resyncMessage: string | null
   pollError: string | null
+  manageOnly: boolean
 }>) {
   return (
     <div className="flex-1 min-w-0">
@@ -558,7 +578,8 @@ function IntegrationDetails({
         <h3 className="font-semibold text-base" style={{ color: 'var(--text-primary)' }}>
           {provider.display_name}
         </h3>
-        {status.isConnected && <Badge tone="green" className="text-xs">Connected</Badge>}
+        {!manageOnly && status.isConnected && <Badge tone="green" className="text-xs">Connected</Badge>}
+        {manageOnly  && connection          && <Badge tone="slate" className="text-xs">Authorized</Badge>}
         {status.isError     && <Badge tone="red"   className="text-xs">Error</Badge>}
       </div>
 
@@ -566,7 +587,7 @@ function IntegrationDetails({
         {PROVIDER_DESCRIPTIONS[provider.id] ?? ''}
       </p>
 
-      {status.isConnected && connection && (
+      {(status.isConnected || manageOnly) && connection && (
         <div className="text-xs space-y-0.5 mt-1.5" style={{ color: 'var(--text-muted)' }}>
           {connection.external_user_id && <p>Account ID: {connection.external_user_id}</p>}
           <p>Connected {formatDate(connection.created_at)}</p>
@@ -618,7 +639,14 @@ function IntegrationCard({
   const [resyncing, startResync]         = useTransition()
   const [resyncMessage, setResyncMessage] = useState<string | null>(null)
 
-  const sync   = useSyncProgress(provider.id, connection)
+  // A provider this org is connected to but that is not offered for new
+  // connections — is_active = false (Hostex during its phased rollout) or on
+  // HIDDEN_PROVIDER_IDS. page.tsx only sends one of these when a connection
+  // exists, so the card's whole job here is to make that connection visible
+  // and removable: no Connect, no Resync, no sync-progress poll.
+  const manageOnly = !provider.is_active || HIDDEN_PROVIDER_IDS.has(provider.id)
+
+  const sync   = useSyncProgress(provider.id, connection, !manageOnly)
   const status = deriveCardStatus(connection, sync.status)
 
   const handleDisconnect = () => {
@@ -640,6 +668,28 @@ function IntegrationCard({
   const needsConnect = !connection || status.isError || status.isDisconnected
 
   const renderActions = () => {
+    // Checked before everything else. Without sync progress this connection
+    // never reaches isConnected, so it would otherwise fall into
+    // isSyncInProgress and spin for ten minutes before showing a timeout.
+    if (manageOnly) {
+      if (confirming) {
+        return (
+          <DisconnectConfirm
+            disconnecting={disconnecting}
+            onConfirm={handleDisconnect}
+            onCancel={() => setConfirming(false)}
+          />
+        )
+      }
+      return (
+        <ConnectedActions
+          resyncing={false}
+          canDisconnect={canDisconnect}
+          onResync={null}
+          onDisconnectClick={() => setConfirming(true)}
+        />
+      )
+    }
     if (status.isSyncInProgress) return <SyncInProgress sync={sync} />
     if (needsConnect) {
       return (
@@ -679,6 +729,7 @@ function IntegrationCard({
           error={error}
           resyncMessage={resyncMessage}
           pollError={sync.pollError}
+          manageOnly={manageOnly}
         />
         <div className="flex-shrink-0">{renderActions()}</div>
       </div>

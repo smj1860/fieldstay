@@ -18,17 +18,8 @@ export default async function IntegrationsPage() {
 
   const admin = createServiceClient({ authorizedBy: membership })
 
-  const { data: providers, error: providersError } = await admin
-    .from('integration_providers')
-    .select('id, display_name, auth_type, is_active')
-    .eq('is_active', true)
-    .order('display_name')
-    .limit(INTEGRATION_PROVIDERS_LIMIT)
-
-
-  // Logs + reports, then throws so the segment's error.tsx renders a real
-  // error state — a failed read must not render as an empty page.
-  throwIfAnyQueryFailed({ site: 'page.settings.integrations', orgId: membership.org_id }, providersError)
+  // Read BEFORE the provider registry: which providers this org is connected
+  // to decides which provider rows the page needs.
   const { data: connections, error: connectionsError } = await admin
     .from('integration_connections')
     .select('id, provider_id, status, external_user_id, created_at, metadata')
@@ -38,6 +29,37 @@ export default async function IntegrationsPage() {
   // Logs + reports, then throws so the segment's error.tsx renders a real
   // error state — a failed read must not render as an empty page.
   throwIfAnyQueryFailed({ site: 'page.settings.integrations', orgId: membership.org_id }, connectionsError)
+
+  // Active providers, PLUS any provider this org actually holds a connection
+  // to even if it is no longer offered for new connections.
+  //
+  // Filtering on is_active alone made an existing connection to a deactivated
+  // provider invisible AND unmanageable: no card renders, so there is no
+  // Disconnect button, and the only way to remove a live Vault-backed
+  // connection is direct DB access. Hostex hit this immediately — it ships
+  // is_active = false while its sync is built, but its OAuth route works and
+  // is reachable by direct URL. Guesty and Hostaway have the same shape.
+  //
+  // is_active still governs what can be CONNECTED — the client renders no
+  // Connect button for an inactive provider. This only governs visibility.
+  const connectedProviderIds = [...new Set((connections ?? []).map((c) => c.provider_id))]
+
+  const providersQuery = admin
+    .from('integration_providers')
+    .select('id, display_name, auth_type, is_active')
+    .order('display_name')
+    .limit(INTEGRATION_PROVIDERS_LIMIT)
+
+  // PostgREST .or() takes an unquoted comma-joined list for in.(); provider
+  // ids are our own slugs (registry keys), never user input.
+  const { data: providers, error: providersError } = connectedProviderIds.length
+    ? await providersQuery.or(`is_active.eq.true,id.in.(${connectedProviderIds.join(',')})`)
+    : await providersQuery.eq('is_active', true)
+
+
+  // Logs + reports, then throws so the segment's error.tsx renders a real
+  // error state — a failed read must not render as an empty page.
+  throwIfAnyQueryFailed({ site: 'page.settings.integrations', orgId: membership.org_id }, providersError)
   const { data: icalFeeds, error: icalFeedsError } = await admin
     .from('ical_feeds')
     .select('id, property_id, name, source, last_synced_at, last_sync_status, last_sync_error, properties ( name )')

@@ -53,7 +53,12 @@ import { reportError } from '@/lib/observability/report-error'
 // (never raw response text) — safe to surface to the user via the
 // /connect/error `detail` query param. kroger.ts is deliberately excluded;
 // see the token-exchange catch block below.
-const SAFE_DETAIL_PROVIDERS = new Set(['hospitable', 'ownerrez'])
+// hostex.ts qualifies on the same terms: every branch of
+// parseHostexTokenResponse throws either Hostex's own parsed error_msg
+// (HostexOAuthError) or a fixed internal string. The one branch that used to
+// interpolate raw response content — the unrecognized-shape case — now logs
+// the key names and throws a fixed message instead.
+const SAFE_DETAIL_PROVIDERS = new Set(['hospitable', 'ownerrez', 'hostex'])
 
 export async function GET(
   request: NextRequest,

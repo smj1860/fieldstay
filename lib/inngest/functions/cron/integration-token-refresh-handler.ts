@@ -17,10 +17,12 @@ import { renderIntegrationErrorEmail }  from '@/lib/resend/emails/integration-er
 import { getPmEmails }                  from '@/lib/inngest/helpers'
 import { refreshHospitableToken }       from '@/lib/integrations/providers/hospitable-token'
 import { refreshKrogerToken }           from '@/lib/integrations/providers/kroger-token'
+import { refreshHostexToken }           from '@/lib/integrations/providers/hostex-token'
 
 const PROVIDER_LABELS: Record<string, string> = {
   hospitable: 'Hospitable',
   kroger:     'Kroger',
+  hostex:     'Hostex',
 }
 
 export const integrationTokenRefreshHandler = inngest.createFunction(
@@ -53,6 +55,14 @@ export const integrationTokenRefreshHandler = inngest.createFunction(
 
         if (provider_id === 'kroger') {
           await refreshKrogerToken(user_id)
+          return
+        }
+
+        // 7-day access tokens, refresh token rotated on every use.
+        // refreshHostexToken throws NonRetriableError itself when Hostex
+        // rejects the grant, which the catch below reads as terminal.
+        if (provider_id === 'hostex') {
+          await refreshHostexToken(user_id, external_user_id ?? '')
           return
         }
 

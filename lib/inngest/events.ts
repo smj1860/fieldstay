@@ -640,6 +640,19 @@ export type FieldStayEvents = {
     }
   }
 
+  // Fired by finalize-connection.ts the moment a Hostex OAuth connect
+  // completes. NOTHING SUBSCRIBES TO IT YET — Phase 3's hostex initial-sync
+  // is the intended consumer. Inngest records an event with no matching
+  // function without error, so this is a live no-op that makes the connect
+  // path complete now rather than needing a second edit later.
+  'integration/hostex.connected': {
+    data: {
+      user_id:          string
+      org_id:           string
+      external_user_id: string
+    }
+  }
+
   'integration/hospitable.sync.requested': {
     data: {
       provider_id:  string
