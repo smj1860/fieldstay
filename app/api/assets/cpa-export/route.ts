@@ -11,6 +11,7 @@ import { requireOrgMember }   from '@/lib/auth'
 import { dataExportLimiter, checkLimit } from '@/lib/rate-limit'
 import { PDFDocument, PDFFont, StandardFonts, rgb } from 'pdf-lib'
 import { MACRS_LABELS } from '@/lib/assets/depreciation'
+import { assetServiceBasis, formatBasisDate, ESTIMATED_DATE_MARKER } from '@/lib/assets/age-basis'
 import { unwrapJoin } from '@/lib/utils/supabase-joins'
 import { unwrap } from '@/lib/supabase/unwrap'
 import { fetchAllRows } from '@/lib/inngest/paginate'
@@ -54,6 +55,78 @@ const COLS = {
 
 function fmt$(n: number) {
   return `$${n.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+}
+
+/** The asset columns the service-date resolution needs, as they arrive joined. */
+type JoinedLedgerAsset = {
+  placed_in_service_date: string | null
+  installation_date:      string | null
+  manufacture_date:       string | null
+} | null
+
+/**
+ * The in-service date to print, marked when it was inferred from the nameplate
+ * manufacture year — see lib/assets/age-basis.ts. Printing
+ * placed_in_service_date alone showed "—" next to a real depreciation figure
+ * for exactly the assets whose basis came from a fallback.
+ */
+function serviceDateText(asset: JoinedLedgerAsset): string {
+  return formatBasisDate(asset ? assetServiceBasis(asset) : null)
+}
+
+/**
+ * Whether ANY row rests on an inferred date, which is what decides if the
+ * closing note is rendered at all. Computed over the whole set up front rather
+ * than accumulated inside the per-property/per-row loops — those are already
+ * at the complexity ceiling, and a flag mutated three levels deep is harder to
+ * follow than one derived here.
+ */
+function hasEstimatedServiceDate(rows: Array<{ property_assets: unknown }>): boolean {
+  for (const row of rows) {
+    const asset = unwrapJoin(row.property_assets) as JoinedLedgerAsset
+    if (asset && assetServiceBasis(asset)?.estimated) return true
+  }
+  return false
+}
+
+/**
+ * A closing page explaining the `*` on an in-service date, appended only when
+ * at least one row carries one — a fully-documented schedule gets no extra
+ * caveat.
+ *
+ * A CPA has to be able to tell which dates were recorded and which FieldStay
+ * inferred from a nameplate photo — see lib/assets/age-basis.ts. The
+ * needs-it-at-all test lives here rather than at the call site so the handler,
+ * which is already at the cognitive-complexity ceiling, gains no branch.
+ */
+function drawEstimatedDateNote(
+  doc:      PDFDocument,
+  font:     PDFFont,
+  boldFont: PDFFont,
+  rows:     Array<{ property_assets: unknown }>,
+): void {
+  if (!hasEstimatedServiceDate(rows)) return
+
+  const page = doc.addPage([W, H])
+  page.drawText('Note on estimated in-service dates', {
+    x: ML, y: H - MT, size: 12, font: boldFont, color: GRAY_DARK,
+  })
+
+  const lines = [
+    `A date marked ${ESTIMATED_DATE_MARKER} was estimated from the equipment nameplate's manufacture year,`,
+    'because no installation or placed-in-service date was recorded for that asset.',
+    'Manufacture precedes installation, so an estimated date is at or before the true',
+    'in-service date and the resulting deduction begins no later than it should.',
+    '',
+    'Confirm each marked asset with your client and record the actual placed-in-service',
+    'date in FieldStay; a recorded date takes precedence and the schedule regenerates from it.',
+  ]
+
+  let y = H - MT - 26
+  for (const line of lines) {
+    page.drawText(line, { x: ML, y, size: 9, font, color: GRAY_MED })
+    y -= 14
+  }
 }
 
 function drawTableHeader(page: ReturnType<PDFDocument['addPage']>, y: number, boldFont: PDFFont, doc: PDFDocument) {
@@ -175,7 +248,7 @@ export async function GET(req: Request) {
         current_year_depreciation, ending_adjusted_basis,
         depreciation_rate,
         property_assets (
-          name, placed_in_service_date, property_id,
+          name, placed_in_service_date, installation_date, manufacture_date, property_id,
           properties ( name )
         )
       `)
@@ -295,7 +368,7 @@ export async function GET(req: Request) {
 
       const asset = unwrapJoin(entry.property_assets)
       const assetName   = asset?.name ?? '—'
-      const placedDate  = asset?.placed_in_service_date?.slice(0, 10) ?? '—'
+      const placedDate  = serviceDateText(asset)
       const macrsLabel  = MACRS_LABELS[entry.macrs_class as MacrsClass] ?? String(entry.macrs_class)
 
       const cells = [
@@ -349,6 +422,8 @@ export async function GET(req: Request) {
   lastPage.drawText(fmt$(grandTotal), {
     x: W - MR - 120, y: MB + 5, size: 11, font: boldFont, color: GOLD,
   })
+
+  drawEstimatedDateNote(pdfDoc, font, boldFont, entries)
 
   // ── Serialize ───────────────────────────────────────────────────────────────
 

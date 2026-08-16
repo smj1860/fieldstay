@@ -11,6 +11,7 @@ import {
   type AssetActionState,
 } from '../properties/actions'
 import { healthLabel, healthColor, healthDot, healthBgStyle } from '@/lib/assets/health-score'
+import { assetAgeBasis, assetAgeYears } from '@/lib/assets/age-basis'
 import { missingAssetTypesFromDiscoveredSet } from '@/lib/asset-discovery/config'
 import { PortfolioAssetView } from './portfolio-view'
 import { Tabs } from '@/components/ui/Tabs'
@@ -598,9 +599,10 @@ function AssetRow({
 
   const std      = standards.find((s) => s.asset_type === asset.asset_type)
   const typeName = std?.display_name ?? asset.asset_type.replace(/_/g, ' ')
-  const ageYears = asset.installation_date
-    ? new Date().getFullYear() - new Date(asset.installation_date).getFullYear()
-    : null
+  // Falls back to the nameplate manufacture year, marked with a tilde — see
+  // lib/assets/age-basis.ts. A scanned asset used to show no age at all.
+  const ageYears     = assetAgeYears(asset)
+  const ageEstimated = assetAgeBasis(asset)?.estimated ?? false
 
   // Section 179: 5-year MACRS asset placed in service this year
   const currentYear    = new Date().getFullYear()
@@ -615,8 +617,13 @@ function AssetRow({
         <div className="flex items-center gap-2 flex-wrap">
           <span className="text-sm font-medium text-primary-themed">{asset.name}</span>
           <Badge tone="slate" className="text-xs">{typeName}</Badge>
-          {ageYears != null && (
-            <span className="text-xs text-muted-themed">{ageYears}y old</span>
+          {ageYears !== null && (
+            <span
+              className="text-xs text-muted-themed"
+              title={ageEstimated ? 'Estimated from the nameplate manufacture year' : undefined}
+            >
+              {ageEstimated ? '~' : ''}{ageYears}y old
+            </span>
           )}
           {showSection179 && (
             <span

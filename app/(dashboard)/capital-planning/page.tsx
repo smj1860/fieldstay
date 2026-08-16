@@ -461,7 +461,12 @@ export default async function CapitalPlanningPage({
                           </p>
                         </div>
                         <div className="text-xs text-muted-themed text-right flex-shrink-0">
-                          <p>{item.age_years}y · {item.pct_of_lifespan}% lifespan</p>
+                          {/* Tilde marks an age derived from the nameplate
+                              manufacture year rather than a recorded install
+                              date — see lib/assets/age-basis.ts. */}
+                          <p title={item.age_estimated ? 'Age estimated from the nameplate manufacture year' : undefined}>
+                            {item.age_estimated ? '~' : ''}{item.age_years}y · {item.pct_of_lifespan}% lifespan
+                          </p>
                           {item.health_score !== null && (
                             <p className="mt-0.5">Score: {item.health_score}/100</p>
                           )}

@@ -17,6 +17,7 @@
 
 import type { SupabaseClient } from '@supabase/supabase-js'
 import { fetchAllRows } from '@/lib/inngest/paginate'
+import { assetAgeBasis } from '@/lib/assets/age-basis'
 
 export interface CapExProjectionItem {
   asset_id:         string
@@ -30,6 +31,13 @@ export interface CapExProjectionItem {
   health_score:     number | null
   age_years:        number
   pct_of_lifespan:  number
+  /**
+   * True when age_years was derived from the nameplate manufacture year
+   * rather than a recorded installation date — see lib/assets/age-basis.ts.
+   * Surfaced so a projected replacement year built on an inference can be
+   * labelled as one wherever the plan is read.
+   */
+  age_estimated:    boolean
 }
 
 export interface CapExProjectionYear {
@@ -65,6 +73,7 @@ export interface ProjectionAssetRow {
   asset_type:                  string
   property_id:                 string
   installation_date:           string | null
+  manufacture_date:            string | null
   expected_lifespan_years:     number | null
   estimated_replacement_cost:  number | null
   health_score:                number | null
@@ -98,10 +107,14 @@ export function buildProjections(
   const projections: Record<number, CapExProjectionYear> = {}
 
   for (const asset of assets) {
-    if (!asset.installation_date) continue
+    // Nameplate manufacture year stands in for a missing installation date.
+    // Every scanned asset used to be dropped here and never appear in the
+    // plan at all, despite FieldStay holding a real year for it.
+    const ageBasis = assetAgeBasis(asset)
+    if (!ageBasis) continue
 
     const std       = standardsMap[asset.asset_type]
-    const ageYears  = currentYear - new Date(asset.installation_date).getFullYear()
+    const ageYears  = currentYear - new Date(ageBasis.date).getFullYear()
     const lifespan  = asset.expected_lifespan_years
       ?? (std ? Math.round((std.lifespan_min_years + std.lifespan_max_years) / 2) : DEFAULT_LIFESPAN_YEARS)
     const yearsLeft = lifespan - ageYears
@@ -130,6 +143,7 @@ export function buildProjections(
       health_score:     asset.health_score,
       age_years:        ageYears,
       pct_of_lifespan:  pctOfLifespan,
+      age_estimated:    ageBasis.estimated,
     } satisfies CapExProjectionItem)
   }
 
@@ -158,10 +172,14 @@ export async function runCapexProjectionForOrg(
     fetchAllRows<ProjectionAssetRow>(
       (from, to) => supabase
         .from('property_assets')
-        .select('id, name, asset_type, property_id, installation_date, expected_lifespan_years, estimated_replacement_cost, health_score')
+        .select('id, name, asset_type, property_id, installation_date, manufacture_date, expected_lifespan_years, estimated_replacement_cost, health_score')
         .eq('org_id', orgId)
         .eq('is_active', true)
-        .not('installation_date', 'is', null)
+        // Either date qualifies. `.or()` and not two `.not()`s: the previous
+        // installation-date-only filter excluded every asset whose age is
+        // known solely from its data plate. buildProjections still drops a row
+        // with neither, so the looser filter cannot admit an undated asset.
+        .or('installation_date.not.is.null,manufacture_date.not.is.null')
         .order('id', { ascending: true })
         .range(from, to),
       { label: `property_assets(capex)[org=${orgId}]` },

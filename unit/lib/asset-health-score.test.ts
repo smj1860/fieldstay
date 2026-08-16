@@ -30,11 +30,47 @@ describe('calculateHealthScore', () => {
 
   it('returns the neutral default of 50 when installation_date is missing', () => {
     const score = calculateHealthScore(
-      { installation_date: null, expected_lifespan_years: 10, estimated_replacement_cost: 1000 },
+      { installation_date: null,
+      manufacture_date: null, expected_lifespan_years: 10, estimated_replacement_cost: 1000 },
       standards,
       noRepairs,
     )
     expect(score).toBe(50)
+  })
+
+  it('scores from the nameplate manufacture year rather than defaulting to 50', () => {
+    // The scanned-asset case. FieldStay read a real year off the data plate;
+    // returning the neutral 50 meant the asset could never be flagged.
+    vi.useFakeTimers()
+    vi.setSystemTime(NOW)
+    const score = calculateHealthScore(
+      {
+        installation_date:          null,
+        manufacture_date:           '2006-01-01',
+        expected_lifespan_years:    10,
+        estimated_replacement_cost: 1000,
+      },
+      standards,
+      noRepairs,
+    )
+    // 20 years against a 10-year lifespan — well past end of life, and nothing
+    // like the flat 50 an undated asset gets.
+    expect(score).toBeLessThan(50)
+  })
+
+  it('still prefers a recorded installation date over the nameplate year', () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(NOW)
+    const common = { expected_lifespan_years: 10, estimated_replacement_cost: 1000 }
+    const recorded = calculateHealthScore(
+      { installation_date: '2026-07-22', manufacture_date: '2006-01-01', ...common },
+      standards, noRepairs,
+    )
+    const nameplateOnly = calculateHealthScore(
+      { installation_date: null, manufacture_date: '2006-01-01', ...common },
+      standards, noRepairs,
+    )
+    expect(recorded).toBeGreaterThan(nameplateOnly)
   })
 
   it('scores a brand-new asset (zero age, no repairs) at 100', () => {
@@ -42,6 +78,7 @@ describe('calculateHealthScore', () => {
     vi.setSystemTime(NOW)
     const asset = {
       installation_date:          '2026-07-22',
+      manufacture_date:          null,
       expected_lifespan_years:    10,
       estimated_replacement_cost: 1000,
     }
@@ -55,7 +92,8 @@ describe('calculateHealthScore', () => {
     vi.useFakeTimers()
     vi.setSystemTime(NOW)
     const asset = {
-      installation_date:          '2006-07-22', // 20 years old
+      installation_date:          '2006-07-22',
+      manufacture_date:          null, // 20 years old
       expected_lifespan_years:    10,            // well past lifespan
       estimated_replacement_cost: 1000,
     }
@@ -69,7 +107,8 @@ describe('calculateHealthScore', () => {
     vi.useFakeTimers()
     vi.setSystemTime(NOW)
     const asset = {
-      installation_date:          '2020-07-22', // 6 years old
+      installation_date:          '2020-07-22',
+      manufacture_date:          null, // 6 years old
       expected_lifespan_years:    null,
       estimated_replacement_cost: 1000,
     }
@@ -84,7 +123,8 @@ describe('calculateHealthScore', () => {
     vi.useFakeTimers()
     vi.setSystemTime(NOW)
     const asset = {
-      installation_date:          '2021-07-22', // 5 years old
+      installation_date:          '2021-07-22',
+      manufacture_date:          null, // 5 years old
       expected_lifespan_years:    null,
       estimated_replacement_cost: 1000,
     }
@@ -98,7 +138,8 @@ describe('calculateHealthScore', () => {
     vi.useFakeTimers()
     vi.setSystemTime(NOW)
     const asset = {
-      installation_date:          '2024-07-22', // 2 years old
+      installation_date:          '2024-07-22',
+      manufacture_date:          null, // 2 years old
       expected_lifespan_years:    10,
       estimated_replacement_cost: 1000,
     }
@@ -119,7 +160,8 @@ describe('calculateHealthScore', () => {
     vi.useFakeTimers()
     vi.setSystemTime(NOW)
     const asset = {
-      installation_date:          '2025-07-22', // 1 year old
+      installation_date:          '2025-07-22',
+      manufacture_date:          null, // 1 year old
       expected_lifespan_years:    10,
       estimated_replacement_cost: 1000,
     }
@@ -139,7 +181,8 @@ describe('calculateHealthScore', () => {
     vi.useFakeTimers()
     vi.setSystemTime(NOW)
     const asset = {
-      installation_date:          '2024-07-22', // 2 years old
+      installation_date:          '2024-07-22',
+      manufacture_date:          null, // 2 years old
       expected_lifespan_years:    10,
       estimated_replacement_cost: 1000,
     }
@@ -160,7 +203,8 @@ describe('calculateHealthScore', () => {
     vi.useFakeTimers()
     vi.setSystemTime(NOW)
     const asset = {
-      installation_date:          '2024-07-22', // 2 years old
+      installation_date:          '2024-07-22',
+      manufacture_date:          null, // 2 years old
       expected_lifespan_years:    10,
       estimated_replacement_cost: 1000,
     }
@@ -181,6 +225,7 @@ describe('calculateHealthScore', () => {
     vi.setSystemTime(NOW)
     const asset = {
       installation_date:          '2024-07-22',
+      manufacture_date:          null,
       expected_lifespan_years:    10,
       estimated_replacement_cost: null,
     }
@@ -196,7 +241,8 @@ describe('calculateHealthScore', () => {
     vi.useFakeTimers()
     vi.setSystemTime(NOW)
     const asset = {
-      installation_date:          '2024-07-22', // 2 years old
+      installation_date:          '2024-07-22',
+      manufacture_date:          null, // 2 years old
       expected_lifespan_years:    10,
       estimated_replacement_cost: 1000,
     }
@@ -215,6 +261,7 @@ describe('calculateHealthScore', () => {
     vi.setSystemTime(NOW)
     const asset = {
       installation_date:          '2024-07-22',
+      manufacture_date:          null,
       expected_lifespan_years:    10,
       estimated_replacement_cost: 1000,
     }
@@ -233,6 +280,7 @@ describe('calculateHealthScore', () => {
     vi.setSystemTime(NOW)
     const asset = {
       installation_date:          '2024-07-22',
+      manufacture_date:          null,
       expected_lifespan_years:    10,
       estimated_replacement_cost: 1000,
     }
@@ -251,6 +299,7 @@ describe('calculateHealthScore', () => {
     vi.setSystemTime(NOW)
     const asset = {
       installation_date:          '2024-07-22',
+      manufacture_date:          null,
       expected_lifespan_years:    10,
       estimated_replacement_cost: 1000,
     }
@@ -263,7 +312,8 @@ describe('calculateHealthScore', () => {
     vi.useFakeTimers()
     vi.setSystemTime(NOW)
     const asset = {
-      installation_date:          '2000-07-22', // very old, past lifespan
+      installation_date:          '2000-07-22',
+      manufacture_date:          null, // very old, past lifespan
       expected_lifespan_years:    5,
       estimated_replacement_cost: 100,
     }
@@ -286,7 +336,8 @@ describe('calculateHealthScore', () => {
     vi.useFakeTimers()
     vi.setSystemTime(NOW)
     const asset = {
-      installation_date:          '2026-07-22', // zero age
+      installation_date:          '2026-07-22',
+      manufacture_date:          null, // zero age
       expected_lifespan_years:    10,
       estimated_replacement_cost: 1000,
     }
@@ -304,7 +355,8 @@ describe('calculateHealthScore', () => {
     vi.useFakeTimers()
     vi.setSystemTime(NOW)
     const asset = {
-      installation_date:          '2026-07-22', // zero age
+      installation_date:          '2026-07-22',
+      manufacture_date:          null, // zero age
       expected_lifespan_years:    10,
       estimated_replacement_cost: 1000,
     }
@@ -322,7 +374,8 @@ describe('calculateHealthScore', () => {
     // t = eta, which is the entire point of the curve — so this asset must be
     // past its lifespan for "steeper => lower score" to hold.
     const asset = {
-      installation_date:          '2011-07-22', // 15 years old
+      installation_date:          '2011-07-22',
+      manufacture_date:          null, // 15 years old
       expected_lifespan_years:    10,
       estimated_replacement_cost: 1000,
     }
@@ -336,6 +389,7 @@ describe('calculateHealthScore', () => {
     vi.setSystemTime(NOW)
     const asset = {
       installation_date:          '2021-07-22',
+      manufacture_date:          null,
       expected_lifespan_years:    10,
       estimated_replacement_cost: 1000,
     }

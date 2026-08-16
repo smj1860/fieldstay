@@ -741,7 +741,16 @@ async function resolveAssetStandardsAndHealth(
   let health_score: number | null = null
   if (standards && installationDate) {
     health_score = calculateHealthScore(
-      { installation_date: installationDate, expected_lifespan_years: lifespan, estimated_replacement_cost: estimatedReplacementCost },
+      {
+        installation_date: installationDate,
+        // Always null at creation: the asset form has no manufacture-date
+        // field, and the data-plate scan that produces one runs after the row
+        // exists. The nightly asset-health cron rescores from whatever the
+        // scan found — see lib/assets/age-basis.ts.
+        manufacture_date:  null,
+        expected_lifespan_years:    lifespan,
+        estimated_replacement_cost: estimatedReplacementCost,
+      },
       standards,
       { total_repairs: 0, total_repair_cost: 0, last_serviced_at: null },
     )

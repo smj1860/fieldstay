@@ -39,7 +39,10 @@ export async function GET(req: Request) {
   const payload = milestone?.value as CapExProjectionPayload | null
 
   const rows: string[] = [
-    'Replacement Year,Property,Asset,Asset Type,Age (Years),% of Lifespan,Health Score,Cost Low,Cost High',
+    // "Age Estimated" is its own column rather than a marker inside Age
+    // (Years) — this CSV is opened in a spreadsheet and summed, and a "~4"
+    // would not be a number there.
+    'Replacement Year,Property,Asset,Asset Type,Age (Years),Age Estimated,% of Lifespan,Health Score,Cost Low,Cost High',
   ]
 
   if (payload) {
@@ -52,6 +55,7 @@ export async function GET(req: Request) {
           `"${item.asset_name.replace(/"/g, '""')}"`,
           item.asset_type.replace(/_/g, ' '),
           item.age_years,
+          item.age_estimated ? 'yes' : 'no',
           `${item.pct_of_lifespan}%`,
           item.health_score ?? '',
           item.cost_low,

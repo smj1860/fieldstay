@@ -1,4 +1,5 @@
 import type { PropertyAsset, MacrsClass, AssetDepreciationEntry } from '@/types/database'
+import { assetServiceBasis, ESTIMATED_BASIS_NOTE } from '@/lib/assets/age-basis'
 
 // IRS Publication 946 — half-year convention
 // Table A-1 (200% DB) for 5-year, Table A-1 (150% DB) for 15-year
@@ -31,14 +32,26 @@ export function getMacrsRate(macrsClass: MacrsClass, yearOfService: number): num
   return rates[yearOfService - 1]!
 }
 
+/**
+ * Depreciates from placed_in_service_date, falling back to the recorded
+ * installation date and then to the nameplate manufacture year — see
+ * lib/assets/age-basis.ts for the precedence and why manufacture year is last.
+ *
+ * A fallback basis is NOT laundered into a recorded one. The entry's `notes`
+ * carries ESTIMATED_BASIS_NOTE whenever the year came off a data plate, so the
+ * ledger and the CPA export both show which rows rest on an inference. A PM or
+ * their accountant who sets placed_in_service_date deliberately overrides all
+ * of this on the next run, because that column wins the precedence.
+ */
 export function calculateAnnualDepreciation(
-  asset:           Pick<PropertyAsset, 'id' | 'org_id' | 'placed_in_service_date' | 'purchase_price' | 'salvage_value' | 'macrs_class'>,
+  asset:           Pick<PropertyAsset, 'id' | 'org_id' | 'placed_in_service_date' | 'installation_date' | 'manufacture_date' | 'purchase_price' | 'salvage_value' | 'macrs_class'>,
   taxYear:         number,
   priorCumulative: number,
 ): AssetDepreciationEntry | null {
-  if (!asset.placed_in_service_date || !asset.purchase_price) return null
+  const serviceBasis = assetServiceBasis(asset)
+  if (!serviceBasis || !asset.purchase_price) return null
 
-  const serviceYear   = new Date(asset.placed_in_service_date).getFullYear()
+  const serviceYear   = new Date(serviceBasis.date).getFullYear()
   const yearOfService = taxYear - serviceYear + 1
 
   if (yearOfService < 1) return null
@@ -62,7 +75,7 @@ export function calculateAnnualDepreciation(
     current_year_depreciation:     currentDepr,
     ending_adjusted_basis:         endingBasis,
     depreciation_rate:             rate,
-    notes:                         null,
+    notes:                         serviceBasis.estimated ? ESTIMATED_BASIS_NOTE : null,
     generated_at:                  new Date().toISOString(),
   }
 }

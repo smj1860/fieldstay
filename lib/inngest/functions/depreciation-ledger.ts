@@ -42,8 +42,8 @@ import { logAuditEvent }                from '@/lib/audit'
 import { fetchAllRows, fetchDistinctOrgIds } from '@/lib/inngest/paginate'
 
 // Mirrors the SELECT below against the live column nullability. The query
-// filters placed_in_service_date and purchase_price NOT NULL, but a
-// `.not(...)` filter narrows rows, not types — the loop below re-checks them.
+// filters purchase_price and the date columns, but a `.not(...)`/`.or(...)`
+// filter narrows rows, not types — the loop below re-checks them.
 interface LedgerAssetRow {
   id:                     string
   org_id:                 string
@@ -51,6 +51,8 @@ interface LedgerAssetRow {
   name:                   string
   asset_type:             Enums<'asset_type'>
   placed_in_service_date: string | null
+  installation_date:      string | null
+  manufacture_date:       string | null
   purchase_price:         number | null
   salvage_value:          number | null
   macrs_class:            Enums<'macrs_class'> | null
@@ -86,7 +88,10 @@ export const generateDepreciationLedger = inngest.createFunction(
           .from('property_assets')
           .select('org_id')
           .eq('is_active', true)
-          .not('placed_in_service_date', 'is', null)
+          // Any of the three dates qualifies — see lib/assets/age-basis.ts.
+          // placed_in_service_date alone skipped every org whose assets are
+          // dated only by a recorded install or a scanned nameplate.
+          .or('placed_in_service_date.not.is.null,installation_date.not.is.null,manufacture_date.not.is.null')
           .not('purchase_price', 'is', null)
           .order('org_id', { ascending: true })
           .range(from, to),
@@ -132,10 +137,10 @@ export const depreciationLedgerOrg = inngest.createFunction(
       const assets = await fetchAllRows<LedgerAssetRow>(
         (from, to) => supabase
           .from('property_assets')
-          .select('id, org_id, property_id, name, asset_type, placed_in_service_date, purchase_price, salvage_value, macrs_class')
+          .select('id, org_id, property_id, name, asset_type, placed_in_service_date, installation_date, manufacture_date, purchase_price, salvage_value, macrs_class')
           .eq('org_id', orgId)
           .eq('is_active', true)
-          .not('placed_in_service_date', 'is', null)
+          .or('placed_in_service_date.not.is.null,installation_date.not.is.null,manufacture_date.not.is.null')
           .not('purchase_price', 'is', null)
           .order('id', { ascending: true })
           .range(from, to),
@@ -168,20 +173,20 @@ export const depreciationLedgerOrg = inngest.createFunction(
 
       const entries = []
       for (const asset of assets) {
-        // The query filters both of these NOT NULL; re-checked here because a
-        // row filter is not a type narrowing, and depreciation is meaningless
-        // without an in-service date and a cost basis. macrs_class falls back
-        // to the column's own DEFAULT.
-        if (asset.placed_in_service_date === null || asset.purchase_price === null) continue
+        // The query filters these; re-checked here because a row filter is not
+        // a type narrowing, and depreciation is meaningless without a cost
+        // basis. calculateAnnualDepreciation resolves the service date across
+        // the three columns and returns null when none of them is set.
+        // macrs_class falls back to the column's own DEFAULT.
+        if (asset.purchase_price === null) continue
 
         const prior = priorCumulativeMap[asset.id] ?? 0
         const entry = calculateAnnualDepreciation(
           {
             ...asset,
-            placed_in_service_date: asset.placed_in_service_date,
-            purchase_price:         asset.purchase_price,
-            macrs_class:            asset.macrs_class ?? '5_year',
-            salvage_value:          asset.salvage_value ?? 0,
+            purchase_price: asset.purchase_price,
+            macrs_class:    asset.macrs_class ?? '5_year',
+            salvage_value:  asset.salvage_value ?? 0,
           },
           taxYear,
           prior,
