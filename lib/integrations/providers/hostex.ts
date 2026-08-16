@@ -63,6 +63,25 @@ const HOSTEX_API_BASE      = 'https://api.hostex.io/v3'
 // behaviour issues" — cheap to add, directly grounded in their docs.
 const HOSTEX_USER_AGENT = 'FieldStay/1.0 (stephen@fieldstay.app)'
 
+/**
+ * A business-level rejection from Hostex's OAuth endpoint: HTTP 200 with a
+ * non-zero `error_code` in the body.
+ *
+ * Typed rather than a bare Error because the token-refresh handler has to tell
+ * "this grant is dead, stop retrying and tell the PM to reconnect" apart from
+ * "the network blipped, retry". For every other provider that distinction is
+ * carried by the HTTP status, and the handler classifies on a '400'/'401'
+ * substring in the message. Hostex always answers 200, so that check would be
+ * decided by whether the error_code's DIGITS happen to contain 400 — true for
+ * 40001, false for 10002. An instanceof is not a coincidence.
+ */
+export class HostexOAuthError extends Error {
+  constructor(public readonly errorCode: number, errorMsg: string) {
+    super(`Hostex OAuth error ${errorCode}: ${errorMsg}`)
+    this.name = 'HostexOAuthError'
+  }
+}
+
 /** Both credentials or a typed misconfiguration — never a half-built request. */
 function hostexCredentials(): { clientId: string; clientSecret: string } {
   const clientId     = process.env.HOSTEX_CLIENT_ID
@@ -94,7 +113,7 @@ function parseHostexTokenResponse(body: unknown): HostexTokenData {
   if (typeof obj.error_code === 'number') {
     const envelope = obj as unknown as HostexEnvelope<HostexTokenData>
     if (envelope.error_code !== 0) {
-      throw new Error(`Hostex OAuth error ${envelope.error_code}: ${envelope.error_msg}`)
+      throw new HostexOAuthError(envelope.error_code, envelope.error_msg)
     }
     if (!envelope.data?.access_token) {
       throw new Error('Hostex token response (enveloped) missing data.access_token')
@@ -109,9 +128,16 @@ function parseHostexTokenResponse(body: unknown): HostexTokenData {
     return obj as unknown as HostexTokenData
   }
 
-  throw new Error(
-    `Hostex token response matched neither known shape. Keys present: ${Object.keys(obj).join(', ')}`
+  // Keys go to the log, not to the thrown message: 'hostex' is in the OAuth
+  // callback's SAFE_DETAIL_PROVIDERS, so this message can reach an
+  // unauthenticated visitor on /connect/error. Every other branch here throws
+  // either a provider-parsed error_msg or a fixed string; this one used to
+  // interpolate whatever key names Hostex happened to send.
+  console.error(
+    '[Hostex] token response matched neither known shape. Keys present:',
+    Object.keys(obj).join(', '),
   )
+  throw new Error('Hostex returned an unrecognized token response')
 }
 
 /**

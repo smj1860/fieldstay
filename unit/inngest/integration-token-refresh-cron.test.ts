@@ -169,7 +169,7 @@ describe('integrationTokenRefreshCron', () => {
       expect(lteCall?.args[1]).toBe('2026-07-22T01:30:00.000Z')
     })
 
-    it('only queries the two providers with expiring access tokens (OwnerRez tokens never expire)', async () => {
+    it('queries only the providers with expiring access tokens (OwnerRez tokens never expire)', async () => {
       const supabase = makeSupabase({
         integration_connections: [{ data: [], error: null }],
       })
@@ -184,7 +184,13 @@ describe('integrationTokenRefreshCron', () => {
       const inCall = supabase.calls.find(
         (c) => c.table === 'integration_connections' && c.method === 'in' && c.args[0] === 'provider_id',
       )
-      expect(inCall?.args[1]).toEqual(['hospitable', 'kroger'])
+      // Hostex joined the scan when its 7-day tokens got a refresh
+      // implementation (lib/integrations/providers/hostex-token.ts). The
+      // load-bearing half of this assertion is the EXCLUSION: OwnerRez tokens
+      // never expire, so scanning for its expiring connections would find
+      // nothing forever, and Kroger/Hospitable/Hostex are the three that do.
+      expect(inCall?.args[1]).toEqual(['hospitable', 'kroger', 'hostex'])
+      expect(inCall?.args[1]).not.toContain('ownerrez')
     })
   })
 })

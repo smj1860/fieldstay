@@ -1,13 +1,20 @@
 // lib/inngest/functions/cron/integration-token-refresh.ts
 // Unified proactive token refresh cron — runs every 2 hours.
-// Covers all OAuth providers whose access tokens expire: Hospitable (12hr)
-// and Kroger (30min). OwnerRez tokens never expire and are excluded.
+// Covers all OAuth providers whose access tokens expire: Hospitable (12hr),
+// Kroger (30min) and Hostex (7 days). OwnerRez tokens never expire and are
+// excluded.
+//
+// A provider listed here MUST have a refresh branch in
+// integration-token-refresh-handler.ts. The handler's fallthrough throws
+// NonRetriableError, which it classifies as a TERMINAL failure — so adding an
+// id here without the implementation does not no-op, it marks every one of
+// that provider's connections 'revoked' and emails each PM to reconnect.
 
 import { inngest }             from '@/lib/inngest/client'
 import { fetchAllRows }        from '@/lib/inngest/paginate'
 import { createServiceClient } from '@/lib/supabase/server'
 
-const OAUTH_PROVIDERS = ['hospitable', 'kroger'] as const
+const OAUTH_PROVIDERS = ['hospitable', 'kroger', 'hostex'] as const
 
 export const integrationTokenRefreshCron = inngest.createFunction(
   {

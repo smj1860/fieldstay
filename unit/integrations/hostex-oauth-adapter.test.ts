@@ -27,7 +27,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 
 vi.mock('@/lib/observability/report-error', () => ({ reportError: vi.fn() }))
 
-import { hostexProvider } from '@/lib/integrations/providers/hostex'
+import { hostexProvider, HostexOAuthError } from '@/lib/integrations/providers/hostex'
 import { IntegrationMisconfiguredError } from '@/lib/integrations/types'
 
 const TOKEN_URL      = 'https://api.hostex.io/v3/oauth/authorizations'
@@ -143,11 +143,30 @@ describe('hostexProvider.exchangeCodeForToken — token envelope shapes', () => 
       .rejects.toThrow(/40001|invalid code/)
   })
 
-  it('names the keys it saw when the response matches neither shape', async () => {
+  it('throws a HostexOAuthError carrying the code, so a dead grant is classifiable', async () => {
+    // The refresh handler classifies terminal-vs-transient on this type.
+    // A substring check for '400'/'401' — how every other provider is
+    // classified — would be decided by the error code's digits here.
+    mockFetch({
+      [TOKEN_URL]: { body: { request_id: 'r', error_code: 10_002, error_msg: 'refresh token expired', data: null } },
+    })
+
+    await expect(hostexProvider.exchangeCodeForToken!({ code: 'c', redirectUri: 'https://x/cb' }))
+      .rejects.toBeInstanceOf(HostexOAuthError)
+  })
+
+  it('logs the keys but keeps them OUT of the thrown message when the shape is unknown', async () => {
+    // 'hostex' is in the callback's SAFE_DETAIL_PROVIDERS, so this message can
+    // reach an unauthenticated visitor via /connect/error?detail=. The
+    // diagnostic belongs in the log, not the redirect.
+    const errorLog = vi.spyOn(console, 'error').mockImplementation(() => {})
     mockFetch({ [TOKEN_URL]: { body: { token: 'nope', ttl: 1 } } })
 
     await expect(hostexProvider.exchangeCodeForToken!({ code: 'c', redirectUri: 'https://x/cb' }))
-      .rejects.toThrow(/neither known shape[\s\S]*token, ttl/)
+      .rejects.toThrow('Hostex returned an unrecognized token response')
+
+    expect(errorLog).toHaveBeenCalledWith(expect.stringContaining('neither known shape'), 'token, ttl')
+    errorLog.mockRestore()
   })
 
   it('throws a status-carrying error on a non-JSON body', async () => {
