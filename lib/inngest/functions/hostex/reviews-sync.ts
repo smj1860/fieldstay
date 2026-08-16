@@ -11,9 +11,12 @@
 //   1. A /reviews date range must be UNDER 180 days. A 12-month backfill is
 //      therefore several requests, not one — see hostexReviewWindows.
 //
-//   2. There is no review id. The record is keyed by reservation_code, which
-//      is also the bookings.external_id, and that is what makes the guest-name
-//      backfill below a cheap local join rather than another API call.
+//   2. There is no review id, and no stay_code either — so a review is keyed
+//      by (reservation_code, property_id). bookings are keyed by STAY_CODE,
+//      which a review never carries, so the guest-name backfill joins on the
+//      natural key the review does carry: property + check-in + check-out.
+//      That triple identifies the stay exactly, and unlike a code join it
+//      cannot be broken by the two endpoints disagreeing about identity.
 // ============================================================================
 
 import type { GetStepTools } from 'inngest'
@@ -88,24 +91,34 @@ export async function syncHostexReviews(
 
     const supabase = createServiceClient({ system })
 
-    // Guest names are not on the review payload, but the reservation_code IS
-    // the booking's external_id — so one bounded read fills them in rather
-    // than leaving every Hostex review anonymous in the UI.
-    const codes = normalized.map((r) => r.external_id)
-    const bookings = await fetchAllRows<{ external_id: string | null; guest_name: string | null }>(
-      (from, to) => supabase
-        .from('bookings')
-        .select('external_id, guest_name')
-        .eq('org_id', orgId)
-        .eq('external_source', PROVIDER)
-        .in('external_id', codes)
-        .order('external_id', { ascending: true })
-        .range(from, to),
-      { label: `hostex-reviews.guest-names[org=${orgId}]` },
-    )
+    // Guest names are not on the review payload. Joined on the stay's natural
+    // key — property + check-in + check-out — because the review carries no
+    // stay_code and bookings.external_id IS the stay_code. One bounded read,
+    // rather than leaving every Hostex review anonymous in the UI.
+    const propertyIds  = [...new Set(Object.values(propertyIdMap))]
+    const checkoutDates = normalized.map((r) => r.checkout_date).filter(Boolean)
 
-    const guestNameByCode = new Map(
-      bookings.filter((b) => b.external_id).map((b) => [b.external_id!, b.guest_name]),
+    const bookings = checkoutDates.length
+      ? await fetchAllRows<{ property_id: string; checkin_date: string; checkout_date: string; guest_name: string | null }>(
+          (from, to) => supabase
+            .from('bookings')
+            .select('property_id, checkin_date, checkout_date, guest_name')
+            .eq('org_id', orgId)
+            .eq('external_source', PROVIDER)
+            .in('property_id', propertyIds)
+            .gte('checkout_date', checkoutDates.reduce((a, b) => (a < b ? a : b)))
+            .lte('checkout_date', checkoutDates.reduce((a, b) => (a > b ? a : b)))
+            .order('property_id', { ascending: true })
+            .range(from, to),
+          { label: `hostex-reviews.guest-names[org=${orgId}]` },
+        )
+      : []
+
+    const stayKey = (propertyId: string, checkin: string, checkout: string) =>
+      `${propertyId}|${checkin}|${checkout}`
+
+    const guestNameByStay = new Map(
+      bookings.map((b) => [stayKey(b.property_id, b.checkin_date, b.checkout_date), b.guest_name]),
     )
 
     const rows = normalized
@@ -130,7 +143,7 @@ export async function syncHostexReviews(
           external_id:     r.external_id,
           external_source: r.external_source,
           external_url:    r.external_url,
-          guest_name:      guestNameByCode.get(r.external_id) ?? null,
+          guest_name:      guestNameByStay.get(stayKey(propertyId, r.checkin_date, r.checkout_date)) ?? null,
           rating:          r.rating,
           review_text:     r.review_text,
           review_date:     r.review_date,

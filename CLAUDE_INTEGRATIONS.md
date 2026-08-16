@@ -467,9 +467,22 @@ Hospitable/OwnerRez, not bugs:
   cost and checklist seeding. Hostex does give exact coordinates, which is why
   `NormalizedProperty` grew optional `lat`/`lng` — there is often no parseable
   ZIP to geocode from in its single free-form address string.
-- **Reservations have no `id`** — `reservation_code` is the identity and the
-  `external_id`. Amounts are MAJOR UNITS, not Hospitable's integer cents.
-  Revenue is `rates.total_rate` minus `rates.total_commission`.
+- **Reservations have no `id`, and `reservation_code` is NOT unique.** Hostex
+  returns ONE OBJECT PER STAY, and its docs state that multiple stays "share
+  the same reservation code" — so `bookings.external_id` is the **`stay_code`**.
+  Keying on reservation_code put duplicate conflict keys into one bulk upsert,
+  which Postgres rejects outright ("ON CONFLICT DO UPDATE command cannot affect
+  row a second time"): the WHOLE batch fails, so a single multi-stay
+  reservation would have broken that org's entire reservation sync on every
+  run. A review exposes no stay_code, so `reviews.external_id` is
+  `<reservation_code>:<property_id>` for the same reason.
+  Amounts are MAJOR UNITS, not Hospitable's integer cents. Revenue is
+  `rates.total_rate` minus `rates.total_commission`.
+- **Custom fields** (`custom_fields`) come back INLINE on `/reservations` —
+  the per-stay `GET /reservations/{stay_code}/custom_fields` endpoint is one
+  call per stay for data already in the list response. Not synced: the field is
+  an unstructured, operator-defined object (`nullable, type: object`, no
+  schema) whose contents vary per org.
 - **Reviews ARE available** (`GET /reviews`), and are synced. Three traps:
   a date range must be UNDER 180 days, so a backfill is chunked
   (`hostexReviewWindows`); there is no review id, so `external_id` is the

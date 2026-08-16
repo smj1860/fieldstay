@@ -216,7 +216,28 @@ describe('extractHostexActualTotal', () => {
 })
 
 describe('hostexReservationToNormalized', () => {
-  it('uses reservation_code as external_id — Hostex reservations have no id', () => {
+  it('uses stay_code as external_id, NOT reservation_code', () => {
+    // Hostex returns one object PER STAY, and its docs state that multiple
+    // stays "share the same reservation code". Keying on reservation_code put
+    // duplicate conflict keys into one bulk upsert, which Postgres rejects
+    // outright ("cannot affect row a second time") — failing the entire
+    // booking batch, not just the duplicate.
+    const n = hostexReservationToNormalized(reservation({ stay_code: '0-1234567-abcdef' }))
+    expect(n.external_id).toBe('0-1234567-abcdef')
+  })
+
+  it('gives each stay of a multi-stay reservation a DISTINCT external_id', () => {
+    // The regression that matters. Both stays share HX-001; only stay_code
+    // separates them, and without that the upsert batch dies.
+    const stays = [
+      reservation({ stay_code: '0-1234567-abcdef',   property_id: 1 }),
+      reservation({ stay_code: '0-1234567_1-abcdef', property_id: 2 }),
+    ].map(hostexReservationToNormalized)
+
+    expect(new Set(stays.map((s) => s.external_id)).size).toBe(2)
+  })
+
+  it('falls back to reservation_code when stay_code is absent', () => {
     expect(hostexReservationToNormalized(reservation()).external_id).toBe('HX-001')
   })
 

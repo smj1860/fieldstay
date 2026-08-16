@@ -77,7 +77,7 @@ describe('hostexReviewWindows', () => {
 describe('hostexReviewToNormalized', () => {
   it('maps a guest review onto the reviews row', () => {
     const n = hostexReviewToNormalized(review({ guest_review: GUEST }))!
-    expect(n.external_id).toBe('HX-1')      // the reservation IS the identity
+    expect(n.external_id).toBe('HX-1:4242') // reservation + property, see below
     expect(n.external_source).toBe('hostex')
     expect(n.property_external_id).toBe('4242')
     expect(n.rating).toBe(4.5)
@@ -114,6 +114,25 @@ describe('hostexReviewToNormalized', () => {
 
   it("marks an unanswered review 'pending'", () => {
     expect(hostexReviewToNormalized(review({ guest_review: GUEST }))!.response_status).toBe('pending')
+  })
+
+  it('keys on reservation AND property, so a multi-property reservation cannot collide', () => {
+    // A review exposes no stay_code, so reservation_code alone is not unique
+    // across a reservation spanning several properties — and a duplicate
+    // conflict key inside one bulk upsert fails the whole statement, exactly
+    // as it did for bookings.
+    const ids = [
+      review({ guest_review: GUEST, property_id: 1 }),
+      review({ guest_review: GUEST, property_id: 2 }),
+    ].map((r) => hostexReviewToNormalized(r)!.external_id)
+
+    expect(new Set(ids).size).toBe(2)
+  })
+
+  it('carries the stay dates through for the guest-name join', () => {
+    const n = hostexReviewToNormalized(review({ guest_review: GUEST }))!
+    expect(n.checkin_date).toBe('2026-07-01')
+    expect(n.checkout_date).toBe('2026-07-05')
   })
 
   it('skips a record with no guest review at all', () => {
