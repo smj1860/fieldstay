@@ -30,98 +30,109 @@
 -- find proves nothing at all. Only SELECT count(*) runs, and only counts come
 -- back — never a row, never a column value.
 --
--- WHY THIS IS A SCRIPT AND NOT A MIGRATION + CI GATE
+-- WHY A SCRIPT AND NOT AN RPC + CI GATE
 --
--- Two Postgres constraints, both found the hard way rather than assumed:
+-- Two Postgres constraints, both found by hitting them rather than assuming:
 --
---   1. `SET ROLE` is REJECTED inside a SECURITY DEFINER function
---      ("cannot set parameter role within security-definer function"), so the
---      probe cannot be packaged as an RPC that switches role itself.
---   2. Making the function SECURITY DEFINER owned by `authenticated` instead
---      (so ownership does the role switch) fails at creation: `authenticated`
---      has no CREATE on schema public, and granting it that to enable a test
---      harness would be a real privilege escalation. Not worth it.
+--   1. SET ROLE is REJECTED inside a SECURITY DEFINER function ("cannot set
+--      parameter role within security-definer function"), so the probe cannot
+--      package itself as an RPC that switches role.
+--   2. Owning that function as `authenticated` instead, so ownership does the
+--      switch, fails at creation: `authenticated` has no CREATE on schema
+--      public, and granting it that to enable a test harness would be a real
+--      privilege escalation.
 --
 -- So the role switch has to happen in the SESSION, which needs a transport
--- that holds a transaction across statements — psql or a direct Postgres
--- connection. The db-invariants CI job talks to PostgREST, which cannot.
--- Wiring this into CI therefore needs a direct-connection step; until then it
--- is a documented manual audit, which is still strictly more than the zero
--- dynamic coverage that existed before.
+-- that holds a transaction across statements. The db-invariants CI job talks
+-- to PostgREST, which cannot. Gating this needs a direct-connection CI step;
+-- until then it is a documented manual audit, which is still strictly more
+-- than the zero dynamic coverage that came before.
 --
 -- USAGE
 --   1. Pick a user and their org:
 --        SELECT om.user_id, om.org_id FROM organization_members om
 --         WHERE om.invite_accepted_at IS NOT NULL LIMIT 1;
---   2. Substitute both below and run the whole file in one session.
---   3. Read the CONTROL row first — see below.
+--   2. Put both in the probe_target INSERT below — the ONLY place they appear.
+--   3. Run the whole file in ONE session/transaction.
+--
+-- Deliberately plain SQL: no psql \set or :'var' meta-commands, so this runs
+-- in any client that can hold a transaction, and the two ids are defined
+-- exactly once instead of being repeated per query.
 --
 -- READING THE RESULT
 --
--- A row of zeros means nothing on its own: an impersonation that silently
--- failed, a missing GRANT, or an empty database all produce zeros too. The
--- CONTROL query is what makes the zeros mean something. It must show:
+-- A row of zeros means NOTHING on its own: a failed impersonation, a missing
+-- GRANT, or an empty database all produce zeros too. Two other outputs are
+-- what make the zeros mean something, and both must be checked first.
 --
---   running_as     = authenticated   (the role switch took)
---   auth_uid_sees  = the user's id   (the claims took, so policies can match)
---   own_* > 0                        (the user can see their OWN rows, so a
---                                     zero elsewhere is RLS working and not a
---                                     denied grant or a blind query)
---
--- and the GROUND TRUTH query must show foreign rows actually exist to be
--- found. Only with all three does foreign_* = 0 mean isolation.
+--   CONTROL must show   running_as = authenticated
+--                       auth_uid   = the user's id (so policies can match)
+--                       own_* > 0  (the user sees their OWN rows, so a zero
+--                                   elsewhere is RLS working — not a denied
+--                                   grant and not a blind query)
+--   GROUND TRUTH must show foreign rows actually EXIST to be found. A table
+--   with 0 there is UNTESTED by this probe, not passing.
 --
 -- Last run 2026-08-15 against production: control passed (own_properties 6,
 -- own_turnovers 11, own_bookings 11), ground truth showed 22 foreign
--- properties / 58 turnovers / 49 work_orders / 49 bookings existed, and every
+-- properties / 58 turnovers / 49 bookings / 29 work_orders existed, and every
 -- foreign count came back 0. First dynamic confirmation of tenant isolation in
 -- this codebase.
 -- ============================================================================
 
-\set probe_user  'b07cb2b8-bb72-41ad-bd55-8a1c8268c42e'
-\set probe_org   '1125e49b-32e8-41a7-8200-e85d4b2f0d25'
-
 BEGIN;
 
--- ── GROUND TRUTH (as the connecting role, RLS bypassed) ─────────────────────
--- How many foreign-org rows exist at all? A table with none is UNTESTED by the
--- probe below, not passing.
-SELECT 'GROUND TRUTH' AS phase, 'properties'  AS tbl, count(*) AS foreign_rows_existing
-  FROM properties  WHERE org_id <> :'probe_org'::uuid
-UNION ALL SELECT 'GROUND TRUTH','bookings',    count(*) FROM bookings    WHERE org_id <> :'probe_org'::uuid
-UNION ALL SELECT 'GROUND TRUTH','turnovers',   count(*) FROM turnovers   WHERE org_id <> :'probe_org'::uuid
-UNION ALL SELECT 'GROUND TRUTH','work_orders', count(*) FROM work_orders WHERE org_id <> :'probe_org'::uuid
+-- The probe identity, defined ONCE. Everything below reads it from here.
+CREATE TEMP TABLE probe_target AS
+SELECT 'b07cb2b8-bb72-41ad-bd55-8a1c8268c42e'::uuid AS usr,
+       '1125e49b-32e8-41a7-8200-e85d4b2f0d25'::uuid AS org;
+
+-- Required: after SET ROLE below, the session can no longer read its own temp
+-- table without this ("permission denied for table probe_target"). Temp
+-- schema, so it disappears with the session.
+GRANT SELECT ON probe_target TO authenticated;
+
+-- ── GROUND TRUTH (still the connecting role, RLS bypassed) ──────────────────
+-- How many foreign-org rows exist at all? This is what makes a 0 below
+-- meaningful rather than vacuous.
+SELECT 'GROUND TRUTH' AS phase, 'properties' AS tbl,
+       count(*) AS foreign_rows_existing
+  FROM properties WHERE org_id <> (SELECT org FROM probe_target)
+UNION ALL SELECT 'GROUND TRUTH','bookings',    count(*) FROM bookings    WHERE org_id <> (SELECT org FROM probe_target)
+UNION ALL SELECT 'GROUND TRUTH','turnovers',   count(*) FROM turnovers   WHERE org_id <> (SELECT org FROM probe_target)
+UNION ALL SELECT 'GROUND TRUTH','work_orders', count(*) FROM work_orders WHERE org_id <> (SELECT org FROM probe_target)
 ORDER BY 3 DESC;
 
--- ── IMPERSONATE ────────────────────────────────────────────────────────────
+-- ── IMPERSONATE ─────────────────────────────────────────────────────────────
 SET LOCAL ROLE authenticated;
 SELECT set_config(
   'request.jwt.claims',
-  json_build_object('sub', :'probe_user', 'role', 'authenticated')::text,
+  json_build_object('sub', (SELECT usr FROM probe_target), 'role', 'authenticated')::text,
   true);
 
 -- ── CONTROL — read this BEFORE trusting any zero below ──────────────────────
 SELECT current_user        AS running_as,
        (SELECT auth.uid()) AS auth_uid_sees,
-       (SELECT count(*) FROM properties WHERE org_id  = :'probe_org'::uuid) AS own_properties,
-       (SELECT count(*) FROM turnovers  WHERE org_id  = :'probe_org'::uuid) AS own_turnovers,
-       (SELECT count(*) FROM bookings   WHERE org_id  = :'probe_org'::uuid) AS own_bookings;
+       (SELECT count(*) FROM properties WHERE org_id = (SELECT org FROM probe_target)) AS own_properties,
+       (SELECT count(*) FROM turnovers  WHERE org_id = (SELECT org FROM probe_target)) AS own_turnovers,
+       (SELECT count(*) FROM bookings   WHERE org_id = (SELECT org FROM probe_target)) AS own_bookings;
 
 -- ── THE PROBE — every count here must be 0 ──────────────────────────────────
-SELECT 'properties' AS tbl, count(*) AS foreign_rows_visible FROM properties WHERE org_id <> :'probe_org'::uuid
-UNION ALL SELECT 'bookings',             count(*) FROM bookings             WHERE org_id <> :'probe_org'::uuid
-UNION ALL SELECT 'turnovers',            count(*) FROM turnovers            WHERE org_id <> :'probe_org'::uuid
-UNION ALL SELECT 'work_orders',          count(*) FROM work_orders          WHERE org_id <> :'probe_org'::uuid
-UNION ALL SELECT 'owner_transactions',   count(*) FROM owner_transactions   WHERE org_id <> :'probe_org'::uuid
-UNION ALL SELECT 'inventory_items',      count(*) FROM inventory_items      WHERE org_id <> :'probe_org'::uuid
-UNION ALL SELECT 'crew_members',         count(*) FROM crew_members         WHERE org_id <> :'probe_org'::uuid
-UNION ALL SELECT 'vendors',              count(*) FROM vendors              WHERE org_id <> :'probe_org'::uuid
-UNION ALL SELECT 'property_owners',      count(*) FROM property_owners      WHERE org_id <> :'probe_org'::uuid
-UNION ALL SELECT 'organization_members', count(*) FROM organization_members WHERE org_id <> :'probe_org'::uuid
-UNION ALL SELECT 'notifications',        count(*) FROM notifications        WHERE org_id <> :'probe_org'::uuid
-UNION ALL SELECT 'audit_events',         count(*) FROM audit_events         WHERE org_id <> :'probe_org'::uuid
+SELECT 'properties' AS tbl, count(*) AS foreign_rows_visible
+  FROM properties WHERE org_id <> (SELECT org FROM probe_target)
+UNION ALL SELECT 'bookings',             count(*) FROM bookings             WHERE org_id <> (SELECT org FROM probe_target)
+UNION ALL SELECT 'turnovers',            count(*) FROM turnovers            WHERE org_id <> (SELECT org FROM probe_target)
+UNION ALL SELECT 'work_orders',          count(*) FROM work_orders          WHERE org_id <> (SELECT org FROM probe_target)
+UNION ALL SELECT 'owner_transactions',   count(*) FROM owner_transactions   WHERE org_id <> (SELECT org FROM probe_target)
+UNION ALL SELECT 'inventory_items',      count(*) FROM inventory_items      WHERE org_id <> (SELECT org FROM probe_target)
+UNION ALL SELECT 'crew_members',         count(*) FROM crew_members         WHERE org_id <> (SELECT org FROM probe_target)
+UNION ALL SELECT 'vendors',              count(*) FROM vendors              WHERE org_id <> (SELECT org FROM probe_target)
+UNION ALL SELECT 'property_owners',      count(*) FROM property_owners      WHERE org_id <> (SELECT org FROM probe_target)
+UNION ALL SELECT 'organization_members', count(*) FROM organization_members WHERE org_id <> (SELECT org FROM probe_target)
+UNION ALL SELECT 'notifications',        count(*) FROM notifications        WHERE org_id <> (SELECT org FROM probe_target)
+UNION ALL SELECT 'audit_events',         count(*) FROM audit_events         WHERE org_id <> (SELECT org FROM probe_target)
 ORDER BY 2 DESC, 1;
 
--- Nothing is written, but roll back anyway so the role switch and the claims
--- cannot outlive the probe on a pooled connection.
+-- Nothing is written, but roll back anyway so the role switch, the claims and
+-- the temp grant cannot outlive the probe on a pooled connection.
 ROLLBACK;
