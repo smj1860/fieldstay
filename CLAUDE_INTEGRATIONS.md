@@ -441,8 +441,22 @@ Hospitable/OwnerRez, not bugs:
   `reservation_updated`, `review_created`, `review_updated`. All four carry
   only `reservation_code`/`property_id`; even a review event names the
   reservation, because a Hostex review has no id.
-- **No crew/teammate endpoint exists**, so there is no crew import — unlike
-  Hospitable. This one really is absent from the API surface.
+- **Crew IS imported, from `/staffs`** — and note what that endpoint does NOT
+  carry: there is no role/type/position field, on the query endpoint OR the
+  create endpoint. Hostex's prose calls staff "cleaners / operators /
+  receptionists"; its schema gives nothing to tell them apart. So the role is
+  inferred from the TASK TYPES each staff is assigned (`/tasks` carries
+  `staff_id` + `type`), ranked deterministically, with every label preserved in
+  `crew_members.specialty`. `crew_role` has no `reception` member, so reception
+  and room-service staff land on `general` with the job title in specialty.
+  Everyone becomes a crew_member; nobody is auto-created as an
+  organization_member, because that means writing an org_invite and SENDING A
+  REAL EMAIL as a side effect of a background sync.
+- **Hostex tasks cannot become FieldStay turnover templates.** A template is
+  sections-and-items; a Hostex task is one scheduled job with `type`, `level`,
+  `fee` and a free-text note, and NO checklist of any kind. Importing them
+  yields templates with zero items. The genuinely useful field there is `fee`
+  (a real per-property cleaning cost Hostex exposes nowhere else) — not built.
 - `hostexReservationReconcileCron` (daily, 08:00 UTC) is the backstop for a
   delivery that was lost, since the provider will not resend it. A dead
   connection still only surfaces reactively (failed refresh or failed API

@@ -8,13 +8,15 @@
 //   3. seed-room-templates / apply-master-checklist-<id> — per new property
 //   4. reservations → bookings → revenue → turnovers (shared pipeline)
 //   4b. reviews backfill           — chunked into Hostex's <180-day windows
+//   4c. staff → crew_members       — roles inferred from assigned task types
 //   5. register-webhook            — ensure Hostex pushes changes to us
 //   6. guidebook config sync
 //   7. mark-complete
 //
 // Deliberately NOT here, with reasons, so the absences don't read as
 // oversights:
-//   - No teammate/crew import. Hostex has no teammate endpoint.
+//   - Crew IS imported, from /staffs — with roles inferred from /tasks, since
+//     Hostex staff carry no role field of their own. See staff-sync.ts.
 //   - No amenity-driven asset seeding. Hostex's /properties returns no
 //     amenities at all, so seedPresentAssetsFromAmenities would run over an
 //     empty set for every property — a step that can only ever no-op.
@@ -35,6 +37,7 @@ import { upsertNormalizedProperties } from '@/lib/properties/upsert-normalized'
 import { applyChecklistsToProperties, syncGuidebookForOrg } from '../shared/property-onboarding'
 import { syncHostexReservations } from './reservation-sync'
 import { syncHostexReviews } from './reviews-sync'
+import { syncHostexStaff } from './staff-sync'
 
 const PROVIDER = 'hostex'
 const SYSTEM   = 'inngest:hostex-initial-sync'
@@ -131,6 +134,24 @@ export const hostexInitialSync = inngest.createFunction(
         stepPrefix:    'initial',
       })
 
+      // ── 4c. Staff → crew members ──────────────────────────────────────────
+      // Non-fatal: a PM whose crew fails to import still has properties,
+      // bookings and reviews, and the daily reconcile retries. Failing the
+      // whole sync here would throw all of that away.
+      let crewCount = 0
+      try {
+        ;({ crewCount } = await syncHostexStaff({
+          step, logger, token,
+          orgId:      org_id,
+          userId:     user_id,
+          system:     SYSTEM,
+          stepPrefix: 'initial',
+        }))
+      } catch (err) {
+        logger.error(`[Hostex:${user_id}] staff import failed: ${err instanceof Error ? err.message : String(err)}`)
+        reportError(err, { site: 'inngest.hostex-initial-sync.staff', orgId: org_id })
+      }
+
       // ── 5. Register the inbound webhook ───────────────────────────────────
       // AFTER properties, deliberately. A delivery that arrives before the
       // property map exists is skipped as unknown_property, so registering
@@ -177,6 +198,7 @@ export const hostexInitialSync = inngest.createFunction(
             properties_found:  propertyIds.length,
             bookings_found:    reservationCount,
             reviews_found:     reviewCount,
+            crew_found:        crewCount,
             external_user_id,
           },
         })
@@ -184,10 +206,16 @@ export const hostexInitialSync = inngest.createFunction(
 
       logger.info(
         `[Hostex:${user_id}] Initial sync complete — ` +
-        `${propertyIds.length} properties, ${reservationCount} bookings, ${reviewCount} reviews`
+        `${propertyIds.length} properties, ${reservationCount} bookings, ` +
+        `${reviewCount} reviews, ${crewCount} crew`
       )
 
-      return { properties: propertyIds.length, reservations: reservationCount, reviews: reviewCount }
+      return {
+        properties:   propertyIds.length,
+        reservations: reservationCount,
+        reviews:      reviewCount,
+        crew:         crewCount,
+      }
     } catch (err) {
       const msg         = err instanceof Error ? err.message : String(err)
       const friendlyMsg = translateSyncError(err, 'Hostex')

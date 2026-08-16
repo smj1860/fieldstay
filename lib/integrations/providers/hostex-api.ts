@@ -44,6 +44,10 @@ import type {
   HostexWebhookEvent,
   HostexReview,
   HostexReviewsData,
+  HostexStaff,
+  HostexStaffsData,
+  HostexTask,
+  HostexTasksData,
 } from '@/lib/integrations/providers/hostex.types'
 
 const HOSTEX_API_BASE = 'https://api.hostex.io/v3'
@@ -214,6 +218,59 @@ export async function hostexFetchReservationByCode(
   const qs   = new URLSearchParams({ reservation_code: reservationCode, limit: '1' })
   const data = await hostexFetch<HostexReservationsData>(`/reservations?${qs.toString()}`, token, userId)
   return data?.reservations?.[0] ?? null
+}
+
+// ── Staff & Tasks ────────────────────────────────────────────────────────────
+
+/**
+ * Every staff on the connected account, active and inactive.
+ *
+ * Inactive ones are fetched deliberately rather than filtered with
+ * `is_active=1`: the sync mirrors Hostex's own state, so a staff Hostex has
+ * deactivated must arrive in order to be deactivated here too. Filtering them
+ * out would make them look DELETED instead, and a deleted-vs-deactivated
+ * confusion is what the absence-reconciliation guard exists to prevent.
+ */
+export async function hostexFetchStaffs(token: string, userId: string): Promise<HostexStaff[]> {
+  return fetchAllPages<HostexStaff>(
+    (offset, limit) => `/staffs?offset=${offset}&limit=${limit}`,
+    token,
+    userId,
+    (data) => (data as HostexStaffsData)?.staffs,
+    'staffs',
+  )
+}
+
+/**
+ * Tasks in a date window.
+ *
+ * Fetched for what it says about PEOPLE, not about work: Hostex staff carry no
+ * role, so the types of task a staff is assigned is the only available signal
+ * for whether they are a cleaner, a maintenance tech or a receptionist.
+ *
+ * `start_date`/`end_date` must be supplied together.
+ */
+export async function hostexFetchTasks(
+  token:  string,
+  userId: string,
+  window: { startDate: string; endDate: string },
+): Promise<HostexTask[]> {
+  const qs = new URLSearchParams({ start_date: window.startDate, end_date: window.endDate })
+
+  return fetchAllPages<HostexTask>(
+    (offset, limit) => `/tasks?${qs.toString()}&offset=${offset}&limit=${limit}`,
+    token,
+    userId,
+    (data) => (data as HostexTasksData)?.tasks,
+    `tasks[${window.startDate}..${window.endDate}]`,
+  )
+}
+
+/** A date window ending today and reaching `days` back. */
+export function hostexTaskWindow(days: number, now: Date = new Date()): { startDate: string; endDate: string } {
+  const start = new Date(now)
+  start.setDate(start.getDate() - days)
+  return { startDate: start.toISOString().slice(0, 10), endDate: now.toISOString().slice(0, 10) }
 }
 
 // ── Reviews ──────────────────────────────────────────────────────────────────
