@@ -39,8 +39,9 @@ export default async function OpsSnapshotPage() {
   // lib/inngest/functions/booking-events.ts) — i.e. the ones the automation
   // this nudge advertises actually works for. Hostaway/Guesty connections
   // don't post revenue automatically yet, so connecting one of those
-  // shouldn't suppress the nudge.
-  const REVENUE_AUTOMATION_PROVIDER_IDS = ['ownerrez', 'hospitable']
+  // shouldn't suppress the nudge. Hostex joined when its reservation sync
+  // started firing booking/confirmed (hostex/reservation-sync.ts).
+  const REVENUE_AUTOMATION_PROVIDER_IDS = ['ownerrez', 'hospitable', 'hostex']
   const admin = createServiceClient({ authorizedBy: membership })
 
   // All six reads are independent — the bookings and integration_connections

@@ -69,7 +69,7 @@ const PROVIDER_DESCRIPTIONS: Record<string, string> = {
   // hostaway: 'Connects your Hostaway account to sync all listings and reservations in real time.',
   // Guesty is not yet wired — hidden until the integration is live.
   // guesty:   'Connects your Guesty account to sync all listings and reservations in real time.',
-  hostex:     'Authorization only for now — property and booking sync are not live yet.',
+  hostex:     'Syncs properties and reservations from your Hostex account. Posts booking revenue to owner ledgers automatically.',
   kroger:     "Builds Kroger grocery carts automatically from below-par inventory items. Works with any nearby Kroger-owned store — Kroger, Ralphs, Fred Meyer, King Soopers, Smith's, Fry's, QFC, City Market, Dillons, Baker's, Gerbes, Harris Teeter, Mariano's, Pick 'n Save, Metro Market, Food 4 Less, and Foods Co.",
 }
 

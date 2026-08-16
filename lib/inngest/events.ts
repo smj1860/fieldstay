@@ -36,11 +36,13 @@ export type FieldStayEvents = {
       booking_id:  string
       property_id: string
       org_id:      string
-      source:      'ownerrez' | 'uplisting' | 'hospitable'
+      source:      'ownerrez' | 'uplisting' | 'hospitable' | 'hostex'
       // Real total booking revenue, when the PMS reports one — populated
-      // for 'hospitable' (📄 spec, pending financials:read) and 'ownerrez'
+      // for 'hospitable' (📄 spec, pending financials:read), 'ownerrez'
       // (✅ confirmed live 2026-07-15, via charges[].owner_amount /
-      // total_amount). Absent/null falls back to the existing
+      // total_amount) and 'hostex' (✅ confirmed against the /reservations
+      // schema, via rates.total_rate minus rates.total_commission).
+      // Absent/null falls back to the existing
       // nights * avg_nightly_rate estimate in booking-events.ts.
       actual_total_amount?: number | null
     }
@@ -646,6 +648,33 @@ export type FieldStayEvents = {
   // function without error, so this is a live no-op that makes the connect
   // path complete now rather than needing a second edit later.
   'integration/hostex.connected': {
+    data: {
+      user_id:          string
+      org_id:           string
+      external_user_id: string
+    }
+  }
+
+  // Per-connection reservation sync. Dispatched daily by
+  // hostexReservationReconcileCron and by the Settings "Trigger Resync"
+  // action. Unlike Hospitable's equivalent this is not a missed-webhook
+  // backstop — FieldStay registers no Hostex webhook, so this is the only
+  // ongoing sync a Hostex connection gets.
+  // One inbound Hostex webhook delivery, already authenticated and narrowed to
+  // an actionable reservation event by app/api/webhooks/hostex/[token]. The
+  // route does nothing beyond enqueueing this — Hostex allows 3 seconds and
+  // never retries, so all real work has to happen out of band.
+  'integration/hostex.webhook.received': {
+    data: {
+      user_id:          string
+      org_id:           string
+      event:            string
+      reservation_code: string
+      property_id:      string | null
+    }
+  }
+
+  'integration/hostex.reservation_reconcile.requested': {
     data: {
       user_id:          string
       org_id:           string

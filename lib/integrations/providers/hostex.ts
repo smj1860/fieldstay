@@ -12,10 +12,16 @@
 //   - Access tokens expire every 7 days (confirmed in Hostex's own
 //     Authorization Workflow doc) — much longer than Hospitable's 12 hours
 //   - API base: https://api.hostex.io/v3
-//   - Every v3 response (confirmed across every endpoint reviewed, OAuth
-//     token endpoint's exact shape UNCONFIRMED — see below) uses the
-//     envelope { request_id, error_code, error_msg, data }, HTTP status
-//     ALWAYS 200 even on failure — branch on error_code, not response.ok
+//   - Every v3 response uses the envelope { request_id, error_code,
+//     error_msg, data }, HTTP status ALWAYS 200 even on failure — branch on
+//     error_code, not response.ok. That includes rate limiting: a throttled
+//     request is HTTP 200 with error_code 429 and a Retry-After header.
+//   - Auth header is 'Hostex-Access-Token', NOT 'Authorization: Bearer' —
+//     confirmed from the OpenAPI securityScheme
+//     ({ name: 'Hostex-Access-Token', in: 'header' }) that every v3 endpoint
+//     declares. Phase 1 shipped Bearer on an assumption; every API call would
+//     have 401'd, which was invisible only because the one Phase 1 call site
+//     (deriveHostexExternalUserId) degrades to '' on failure by design.
 //   - No account-identity endpoint exists (no /user, /me, /account
 //     equivalent anywhere in the confirmed API surface) — externalUserId is
 //     derived from the first property's id as a proxy; see
@@ -62,6 +68,41 @@ const HOSTEX_API_BASE      = 'https://api.hostex.io/v3'
 // bypass IP-level bot defences and lets the on-call team contact you about
 // behaviour issues" — cheap to add, directly grounded in their docs.
 const HOSTEX_USER_AGENT = 'FieldStay/1.0 (stephen@fieldstay.app)'
+
+// Hostex's own OpenAPI securityScheme: { name: 'Hostex-Access-Token',
+// in: 'header' }. Not an Authorization header, and not a Bearer scheme.
+export const HOSTEX_AUTH_HEADER = 'Hostex-Access-Token'
+
+/**
+ * Which envelope error_code values mean success.
+ *
+ * The two sources disagree and BOTH cannot be dismissed: Hostex's own
+ * error_code field description says "A value of 200 indicates success", while
+ * the integration brief this adapter was written from says 0. Picking one and
+ * being wrong fails 100% of calls — a success read as an error, on every
+ * request — so both are accepted and the observed value is logged once so the
+ * loser can be deleted. Same reasoning as the two token-envelope branches
+ * below; this is a live-verification question, not a taste question.
+ *
+ * Not a blanket "any code is fine": a genuine failure code (429, 40001, …)
+ * must still be rejected, which is the entire point of branching on the
+ * envelope rather than on response.ok.
+ */
+const HOSTEX_SUCCESS_CODES: ReadonlySet<number> = new Set([0, 200])
+
+let loggedSuccessCode = false
+
+export function isHostexSuccess(errorCode: number): boolean {
+  const ok = HOSTEX_SUCCESS_CODES.has(errorCode)
+  if (ok && !loggedSuccessCode) {
+    loggedSuccessCode = true
+    console.log(`[Hostex] envelope success error_code observed live: ${errorCode} — delete the other from HOSTEX_SUCCESS_CODES`)
+  }
+  return ok
+}
+
+/** Hostex signals throttling in-band: HTTP 200, error_code 429, Retry-After. */
+export const HOSTEX_RATE_LIMITED_CODE = 429
 
 /**
  * A business-level rejection from Hostex's OAuth endpoint: HTTP 200 with a
@@ -112,7 +153,7 @@ function parseHostexTokenResponse(body: unknown): HostexTokenData {
   // Branch 1: enveloped, matching every other confirmed Hostex v3 response.
   if (typeof obj.error_code === 'number') {
     const envelope = obj as unknown as HostexEnvelope<HostexTokenData>
-    if (envelope.error_code !== 0) {
+    if (!isHostexSuccess(envelope.error_code)) {
       throw new HostexOAuthError(envelope.error_code, envelope.error_msg)
     }
     if (!envelope.data?.access_token) {
@@ -215,12 +256,7 @@ async function deriveHostexExternalUserId(accessToken: string): Promise<string> 
   try {
     const res = await fetch(`${HOSTEX_API_BASE}/properties?limit=1`, {
       signal:  AbortSignal.timeout(PMS_API_TIMEOUT_MS),
-      headers: {
-        'Authorization': `Bearer ${accessToken}`,
-        'Accept':        'application/json',
-        'Content-Type':  'application/json',
-        'User-Agent':    HOSTEX_USER_AGENT,
-      },
+      headers: hostexProvider.getApiHeaders(accessToken),
     })
 
     if (!res.ok) {
@@ -229,7 +265,7 @@ async function deriveHostexExternalUserId(accessToken: string): Promise<string> 
     }
 
     const envelope = await res.json() as HostexEnvelope<HostexPropertiesData>
-    if (envelope.error_code !== 0) {
+    if (!isHostexSuccess(envelope.error_code)) {
       console.warn(`[Hostex] properties fetch for externalUserId derivation returned error_code ${envelope.error_code}: ${envelope.error_msg}`)
       return ''
     }
@@ -296,12 +332,13 @@ export const hostexProvider: IntegrationProvider = {
 
   getApiHeaders(token: string): Record<string, string> {
     return {
-      'Authorization': `Bearer ${token}`,
-      'Content-Type':  'application/json',
-      'Accept':        'application/json',
+      // NOT Authorization: Bearer — see HOSTEX_AUTH_HEADER above.
+      [HOSTEX_AUTH_HEADER]: token,
+      'Content-Type':       'application/json',
+      'Accept':             'application/json',
       // Hostex's own Rate Limits doc explicitly recommends a meaningful
       // User-Agent — see the constant's comment above.
-      'User-Agent':    HOSTEX_USER_AGENT,
+      'User-Agent':         HOSTEX_USER_AGENT,
     }
   },
 

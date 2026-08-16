@@ -49,13 +49,14 @@ function isManualBooking(b: BookingRow): boolean {
   return b.ical_feed_id === null && b.external_source === null
 }
 
-// Which system synced this booking in (Hospitable / OwnerRez / iCal) —
+// Which system synced this booking in (Hospitable / OwnerRez / Hostex / iCal) —
 // distinct from `source` above, which is the OTA/channel the guest booked
 // through. Mirrors bookings-client.tsx's getSyncOriginLabel(). Returns
 // null for a booking FieldStay owns directly (isManualBooking(b) === true).
 function getSyncOriginLabel(b: Pick<BookingRow, 'external_source' | 'ical_feed_id'>): string | null {
   if (b.external_source === 'hospitable') return 'Hospitable'
   if (b.external_source === 'ownerrez')   return 'OwnerRez'
+  if (b.external_source === 'hostex')     return 'Hostex'
   if (b.ical_feed_id !== null)            return 'iCal'
   return null
 }

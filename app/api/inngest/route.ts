@@ -58,6 +58,10 @@ import { hospReservationReconcileCron }    from '@/lib/inngest/functions/hospita
 import { jobRunRecorder }               from '@/lib/inngest/functions/cron/job-run-recorder'
 import { systemWatchdog }               from '@/lib/inngest/functions/cron/watchdog'
 import { hospReservationReconcileHandler } from '@/lib/inngest/functions/hospitable/reservation-reconcile-handler'
+import { hostexInitialSync }                from '@/lib/inngest/functions/hostex/initial-sync'
+import { hostexReservationReconcileCron }    from '@/lib/inngest/functions/hostex/reservation-reconcile-cron'
+import { hostexReservationReconcileHandler } from '@/lib/inngest/functions/hostex/reservation-reconcile-handler'
+import { hostexWebhookHandler }              from '@/lib/inngest/functions/hostex/webhook-handler'
 
 // Proactive token refresh — unified cron covering all OAuth providers
 // (Hospitable, Kroger)
@@ -256,6 +260,13 @@ export const { GET, POST, PUT } = serve({
     jobRunRecorder,
     systemWatchdog,
     hospReservationReconcileHandler,
+
+    // Hostex — initial sync on connect, plus the daily reconcile that is its
+    // ONLY ongoing sync (no webhook path exists for this provider).
+    hostexInitialSync,
+    hostexReservationReconcileCron,
+    hostexReservationReconcileHandler,
+    hostexWebhookHandler,
 
     // Proactive token refresh — all OAuth providers
     integrationTokenRefreshCron,

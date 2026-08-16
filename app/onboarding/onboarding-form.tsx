@@ -39,6 +39,16 @@ const PMS_OPTIONS = [
     connectUrl:  '/api/integrations/hospitable/connect',
     authType:    'oauth2' as const,
   },
+  {
+    id:          'hostex',
+    name:        'Hostex',
+    // Deliberately narrower than the other two: Hostex's API exposes no crew
+    // roster and no reviews, so promising either here would be a lie the
+    // sync cannot keep.
+    description: 'Bookings and properties',
+    connectUrl:  '/api/integrations/hostex/connect',
+    authType:    'oauth2' as const,
+  },
   // Guesty is not yet wired — hidden until the integration is live.
   // {
   //   id:          'guesty',
