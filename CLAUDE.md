@@ -1628,6 +1628,16 @@ meta-rule, prose is for judgment calls only.
 
 ### Security & Isolation
 
+- **Cross-tenant isolation — dynamic proof.** PARTIALLY closed 2026-08-15.
+  `check-db-invariants.mjs` checks 11-13 read policy SHAPE (blanket-true,
+  unscoped, missing WITH CHECK) and cannot catch a well-formed policy that
+  expresses the WRONG rule. `scripts/rls-isolation-probe.sql` closes that by
+  impersonating a real authenticated user (SET ROLE + request.jwt.claims) and
+  counting how many foreign-org rows are visible — always 0 if RLS is right.
+  Run manually; it cannot be an RPC because Postgres rejects `SET ROLE` inside
+  a SECURITY DEFINER function, and cannot run in the db-invariants CI job
+  because PostgREST cannot hold a transaction across the role switch. Read its
+  header before running: the CONTROL query is what makes a zero mean anything.
 - **IDOR (authorization by object ID).** Whether a specific ID-keyed lookup
   re-verifies ownership (vs. just org membership) requires understanding
   what the ID refers to and where it came from — this is exactly the class
