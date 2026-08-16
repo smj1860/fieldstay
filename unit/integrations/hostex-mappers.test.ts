@@ -60,6 +60,29 @@ describe('parseHostexAddress', () => {
   it('handles an absent address', () => {
     expect(parseHostexAddress(null)).toEqual({ address: null, city: null, state: null, zip: null })
   })
+
+  it('keeps a multi-comma street intact', () => {
+    expect(parseHostexAddress('Unit 4, 123 Lake Rd, Alexander City, AL 35010')).toEqual({
+      address: 'Unit 4, 123 Lake Rd', city: 'Alexander City', state: 'AL', zip: '35010',
+    })
+  })
+
+  it('stays linear on a pathological comma-heavy input (ReDoS guard)', () => {
+    // The natural regex for this shape starts `^(.*),\s*...`, and that greedy
+    // prefix backtracks super-linearly against a later comma alternation —
+    // SonarQube S8786. The input is PROVIDER-supplied text reaching an Inngest
+    // step, so a hang here is reachable, not theoretical. A time bound is the
+    // only assertion that can tell the two implementations apart: both return
+    // the same value, one of them just takes exponentially longer.
+    const evil = `${'a,'.repeat(2_000)}b`
+
+    const started = Date.now()
+    const result  = parseHostexAddress(evil)
+    const elapsed = Date.now() - started
+
+    expect(result.state).toBeNull()
+    expect(elapsed).toBeLessThan(1_000)
+  })
 })
 
 describe('hostexPropertyToNormalized', () => {

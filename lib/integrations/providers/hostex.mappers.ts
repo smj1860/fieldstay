@@ -16,6 +16,9 @@ import type {
 
 // ── Address ──────────────────────────────────────────────────────────────────
 
+/** "AL 35010" or "AL 35010-1234" — matched against ONE comma-free segment. */
+const STATE_ZIP = /^([A-Z]{2})\s+(\d{5})(?:-\d{4})?$/
+
 /**
  * Hostex gives ONE free-form `address` string — no structured city/state/zip.
  *
@@ -24,6 +27,14 @@ import type {
  * nulls for city/state/zip and the whole string as the address, rather than a
  * guess: a mis-parsed state or ZIP is worse than an absent one, because zip
  * feeds geocoding and state feeds timezone resolution.
+ *
+ * SPLIT FIRST, then match one segment — deliberately not a single regex over
+ * the whole string. The obvious pattern for this shape starts `^(.*),\s*...`,
+ * and that greedy prefix against a later comma-and-space alternation
+ * backtracks super-linearly: an attacker-supplied address of many commas
+ * hangs the sync step. The input is provider-controlled text, so that is
+ * reachable. Splitting is linear, and the surviving regex can only ever see a
+ * single comma-free segment.
  */
 export function parseHostexAddress(raw: string | null | undefined): {
   address: string | null
@@ -34,18 +45,27 @@ export function parseHostexAddress(raw: string | null | undefined): {
   const trimmed = raw?.trim()
   if (!trimmed) return { address: null, city: null, state: null, zip: null }
 
-  // "<street…>, <city>, <ST> <ZIP>[-1234]" — the trailing country segment
-  // Hostex sometimes appends (", United States") is tolerated and dropped.
-  const withoutCountry = trimmed.replace(/,\s*(United States|USA|US)\s*$/i, '')
-  const match = /^(.*),\s*([^,]+),\s*([A-Z]{2})\s+(\d{5})(?:-\d{4})?$/.exec(withoutCountry)
+  const unparsed = { address: trimmed, city: null, state: null, zip: null }
 
-  if (!match) return { address: trimmed, city: null, state: null, zip: null }
+  // The trailing country segment Hostex sometimes appends is dropped.
+  const segments = trimmed.split(',').map((s) => s.trim()).filter(Boolean)
+  if (segments.length && /^(United States|USA|US)$/i.test(segments[segments.length - 1]!)) {
+    segments.pop()
+  }
+
+  // Need at least "<street>, <city>, <ST ZIP>".
+  if (segments.length < 3) return unparsed
+
+  const match = STATE_ZIP.exec(segments[segments.length - 1]!)
+  if (!match) return unparsed
+
+  const street = segments.slice(0, -2).join(', ')
 
   return {
-    address: match[1]!.trim() || null,
-    city:    match[2]!.trim() || null,
-    state:   match[3]!,
-    zip:     match[4]!,
+    address: street || null,
+    city:    segments[segments.length - 2] || null,
+    state:   match[1]!,
+    zip:     match[2]!,
   }
 }
 

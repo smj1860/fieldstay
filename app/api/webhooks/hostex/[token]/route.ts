@@ -35,7 +35,7 @@
 // ============================================================================
 
 import { NextResponse, type NextRequest } from 'next/server'
-import { createHash, timingSafeEqual as nodeTimingSafeEqual } from 'crypto'
+import { createHash, timingSafeEqual as nodeTimingSafeEqual } from 'node:crypto'
 
 import { createServiceClient } from '@/lib/supabase/server'
 import { inngest }             from '@/lib/inngest/client'
@@ -94,7 +94,7 @@ export async function POST(
 
   const connection = unwrap(connRes, { site: 'webhook.hostex.resolve-connection' })
 
-  if (!connection || connection.status !== 'active' || !connection.org_id) {
+  if (connection?.status !== 'active' || !connection.org_id) {
     // Includes the revoked/disconnected case: Hostex has no way for us to
     // deregister on their side reliably, so deliveries can outlive a
     // disconnect. Rejecting is correct; it is not worth reporting.

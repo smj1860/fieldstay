@@ -12,7 +12,7 @@
 
 import 'server-only'
 
-import { randomBytes } from 'crypto'
+import { randomBytes } from 'node:crypto'
 
 import { createServiceClient } from '@/lib/supabase/server'
 import { unwrap } from '@/lib/supabase/unwrap'

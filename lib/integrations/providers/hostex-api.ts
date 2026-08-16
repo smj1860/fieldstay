@@ -100,7 +100,7 @@ export async function hostexFetch<T>(
   }
 
   if (envelope.error_code === HOSTEX_RATE_LIMITED_CODE) {
-    const retryAfter = parseInt(res.headers.get('Retry-After') ?? '60', 10)
+    const retryAfter = Number.parseInt(res.headers.get('Retry-After') ?? '60', 10)
     throw new RateLimitError(Number.isFinite(retryAfter) ? retryAfter : 60)
   }
 
