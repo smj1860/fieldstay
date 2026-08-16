@@ -172,6 +172,29 @@ export const hospitableApiLimiter = new Ratelimit({
   prefix:    'hospitable-api',
 })
 
+// Proactive outbound budget for our own calls TO Hostex's API.
+//
+// Unlike hospitableApiLimiter, this is deliberately keyed PER CONNECTION, not
+// platform-wide. Hostex's documented limits are per access token — 1,200
+// req/min across all v3 endpoints and 600 req/min per endpoint (confirmed at
+// api-doc.hostex.io/reference/rate-limits) — and every FieldStay org holds its
+// own OAuth token, so one org's initial sync cannot consume another's quota.
+// A shared bucket would invent contention Hostex does not impose. Call it as
+// checkLimit(hostexApiLimiter, `hostex-api:${userId}`, …).
+//
+// 540/60 is 90% of the tighter per-endpoint ceiling — the same 10% headroom
+// convention as hospitableApiLimiter (54/60) and OwnerRez (270/300) — so
+// FieldStay throws its own RateLimitError before Hostex throttles. Hostex
+// signals throttling IN-BAND (HTTP 200 with error_code 429 plus a Retry-After
+// header), so the reactive half of that pair lives in hostexFetch's envelope
+// check rather than in a res.status === 429 branch.
+export const hostexApiLimiter = new Ratelimit({
+  redis,
+  limiter:   Ratelimit.slidingWindow(540, '60 s'),
+  analytics: true,
+  prefix:    'hostex-api',
+})
+
 // Proactive outbound budget for our own calls TO Kroger's API — same
 // rationale as hospitableApiLimiter/OwnerRez's per-IP tracker above: all
 // FieldStay tenants share one Vercel deployment's outbound identity (one

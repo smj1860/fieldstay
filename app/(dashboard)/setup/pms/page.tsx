@@ -15,7 +15,7 @@ import { throwIfAnyQueryFailed } from '@/lib/supabase/unwrap'
 // ops/page.tsx's REVENUE_AUTOMATION_PROVIDER_IDS comment), so a connected org
 // would get properties/bookings synced in with no automatic revenue posting.
 // Re-add once lib/inngest/functions/hostaway/initial-sync.ts posts revenue.
-const PMS_PROVIDER_IDS = ['ownerrez', 'hospitable' /* , 'hostaway', 'guesty' */] as const
+const PMS_PROVIDER_IDS = ['ownerrez', 'hospitable', 'hostex' /* , 'hostaway', 'guesty' */] as const
 
 export default async function OnboardingPmsPage() {
   const { membership } = await requireOrgMember()

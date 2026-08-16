@@ -84,7 +84,21 @@ export async function upsertNormalizedProperties(
     existingRows.map((row) => [row.external_id as string, row])
   )
 
-  const rows = normalized.map((n) => ({
+  // Provider-supplied coordinates are written in the same upsert, but only
+  // for the rows that HAVE them, as a separate batch.
+  //
+  // Not one batch with `lat: n.lat ?? null`: a bulk upsert sends the union of
+  // every row's keys, so a single row carrying lat would add the column to the
+  // statement for ALL of them and write NULL into the rest — clobbering
+  // coordinates an earlier sync or the geocode pass below had already
+  // resolved. That is the exact `?? null`-on-a-partial-payload defect
+  // unit/guardrails/upload-payload-null-fields.test.ts exists for, and it is
+  // no less real on the server side.
+  type GeolocatedProperty = NormalizedProperty & { lat: number; lng: number }
+  const hasCoords = (n: NormalizedProperty): n is GeolocatedProperty =>
+    typeof n.lat === 'number' && typeof n.lng === 'number'
+
+  const buildRow = (n: NormalizedProperty) => ({
     org_id:                  orgId,
     external_id:             n.external_id,
     external_source:         provider,
@@ -112,15 +126,34 @@ export async function upsertNormalizedProperties(
     avg_turnovers_per_month: 0,
     setup_steps_completed:   {} as Record<string, boolean>,
     is_active:               true,
-  }))
+  })
 
-  const { error: upsertError } = await supabase
-    .from('properties')
-    .upsert(rows, { onConflict: 'org_id,external_id,external_source' })
+  const withCoords    = normalized.filter(hasCoords)
+  const withoutCoords = normalized.filter((n) => !hasCoords(n))
 
-  if (upsertError) {
-    throw new Error(`Properties upsert failed: ${upsertError.message}`)
+  // Two key-consistent batches instead of one mixed one. Each is skipped when
+  // empty, so a provider that supplies coordinates for every property (Hostex)
+  // and one that supplies none (Hospitable, OwnerRez) both issue exactly one
+  // upsert, unchanged from before.
+  type PropertyUpsertRow = ReturnType<typeof buildRow> & { lat?: number; lng?: number }
+
+  // Written as two explicit calls rather than a loop over a batch array: the
+  // loop shape reads as an N+1 to unit/guardrails/n-plus-one-loops.test.ts and
+  // would need an exception entry, when the truth is simply that there are at
+  // most two statements here.
+  const upsertBatch = async (batch: PropertyUpsertRow[]): Promise<void> => {
+    if (!batch.length) return
+    const { error: upsertError } = await supabase
+      .from('properties')
+      .upsert(batch, { onConflict: 'org_id,external_id,external_source' })
+
+    if (upsertError) {
+      throw new Error(`Properties upsert failed: ${upsertError.message}`)
+    }
   }
+
+  await upsertBatch(withoutCoords.map(buildRow))
+  await upsertBatch(withCoords.map((n) => ({ ...buildRow(n), lat: n.lat, lng: n.lng })))
 
   // Bounded by the batch that was just upserted, not left open. This read maps
   // external_id -> id for the rows written immediately above, so a truncation

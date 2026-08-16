@@ -54,6 +54,18 @@ export type NormalizedProperty = NormalizedPropertyFacts & NormalizedPropertyCon
   // replace an existing one — see backfillCleaningCost() in
   // upsert-normalized.ts.
   cleaning_cost?: number | null
+  /**
+   * Exact coordinates, when the PMS supplies them directly (Hostex's
+   * /properties returns latitude/longitude on every property).
+   *
+   * Preferred over the ZIP geocode fallback in upsert-normalized: it is more
+   * precise, costs no Mapbox call, and — for a provider like Hostex that
+   * returns one free-form address string rather than structured fields — it
+   * is the ONLY way a property gets coordinates at all, since there may be no
+   * parseable ZIP to geocode from. Omit (or null) when the provider has none.
+   */
+  lat?: number | null
+  lng?: number | null
 }
 
 // Field names in NormalizedPropertyContent that logContentOverwrites()

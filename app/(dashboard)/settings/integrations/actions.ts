@@ -177,6 +177,25 @@ export async function triggerResync(
       })
       break
 
+    case 'hostex':
+      // integration/hostex.connected, not the daily reconcile event: a manual
+      // resync should re-read PROPERTIES too (a renamed or newly-added
+      // listing), and re-post revenue for every confirmed stay rather than
+      // only new ones. hostexInitialSync is idempotent — properties upsert on
+      // (org_id, external_id, external_source), bookings the same, and
+      // handleBookingConfirmed dedups on source_reference_id — so "resync" is
+      // genuinely re-runnable and is what REPAIRS an org whose first sync
+      // failed partway.
+      await inngest.send({
+        name: 'integration/hostex.connected',
+        data: {
+          user_id:          connection.user_id,
+          org_id:           connection.org_id ?? membership.org_id,
+          external_user_id: connection.external_user_id ?? '',
+        },
+      })
+      break
+
     // Hostaway is not fully implemented yet — see connectWithApiKey below.
     // case 'hostaway':
     //   await inngest.send({

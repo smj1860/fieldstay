@@ -396,41 +396,54 @@ rather than leave a half-wired integration reachable by URL.
 
 ## Hostex Integration
 
-OAuth2. **Phase 1 only as of this writing: connect/callback works
-(`lib/integrations/providers/hostex.ts`), `integration_providers.hostex.is_active =
-false`, no webhooks, no sync functions.** Real differences from Hospitable/OwnerRez,
-not bugs:
-- Token endpoint (`POST https://api.hostex.io/v3/oauth/authorizations`) handles both
-  obtain and refresh via `grant_type`, not separate endpoints, and takes NO
-  `redirect_uri` in its body. Access tokens expire every 7 days (vs. Hospitable's 12
-  hours). The AUTHORIZE url, by contrast, does require `redirect_uri` as an explicit
-  query param — the opposite of Hospitable, where it is portal-configured.
-- Every v3 endpoint returns HTTP 200 even on failure and wraps its payload in
-  `{ request_id, error_code, error_msg, data }` — branch on `error_code`, never on
-  `response.ok` alone. Whether the OAuth token endpoint itself uses that envelope is
-  UNCONFIRMED; `parseHostexTokenResponse()` handles both shapes and logs which one
-  fired, so the dead branch can be deleted after the first real connect.
-- No account-identity endpoint exists anywhere in Hostex's API — `externalUserId` is
-  derived from the connected account's first property id as a proxy, not a true
-  operator ID, and is `''` for an account with zero properties. See
-  `deriveHostexExternalUserId()` in `hostex.ts`.
-- No webhook-driven revocation event exists at all. Hostex connections can only be
-  marked `revoked`/`error` reactively, via a failed refresh or failed API call —
-  never proactively via webhook the way Hospitable/OwnerRez are. Expect Hostex
-  disconnections to surface later than other providers'.
-- Webhook secrets (Phase 2, not yet built) are per-connection, captured from the
-  first inbound delivery — not a single global env var like
-  `HOSPITABLE_WEBHOOK_SECRET`.
-- `is_active = false` alone is sufficient to keep Hostex out of both PM-facing
-  surfaces — RESOLVED, no `HIDDEN_PROVIDER_IDS` entry needed (unlike Hostaway).
-  Settings -> Integrations filters `.eq('is_active', true)`; Setup -> PMS also
-  filters `.in('id', PMS_PROVIDER_IDS)`, which does not list `hostex`. The
-  connect/callback ROUTES never consult `is_active` — they resolve the adapter
-  from `lib/integrations/registry.ts` — so `/api/integrations/hostex/connect`
-  stays reachable by direct URL for testing while the UI stays clean.
-- `revokeAccessToken` is deliberately not implemented yet (`POST /oauth/revoke`'s
-  body shape is unconfirmed). It is optional on `IntegrationProvider`; local
-  revocation via `revokeIntegrationToken()` works fully without it.
+OAuth2. **Fully synced as of this writing**: connect/callback, property import,
+reservation import, automatic owner-ledger revenue posting, and a daily
+reconcile. `lib/integrations/providers/hostex{,.types,.mappers,-api,-token}.ts`,
+sync functions in `lib/inngest/functions/hostex/`. Real differences from
+Hospitable/OwnerRez, not bugs:
+
+- **Auth header is `Hostex-Access-Token`, NOT `Authorization: Bearer`** —
+  from the OpenAPI securityScheme every v3 endpoint declares.
+- **HTTP status is ALWAYS 200.** A bad token, a validation error and a throttle
+  all arrive as 200; the outcome lives in the envelope's `error_code`. Never
+  branch on `res.ok` for Hostex — it returns `undefined` payloads that read
+  downstream as "this account has no properties".
+- **Throttling is in-band**: 200 + `error_code` 429 + `Retry-After`. A
+  `res.status === 429` branch never fires. Handled once in `hostexFetch`.
+- **Success `error_code` is 200 or 0 — both accepted deliberately.** Hostex's
+  own field description says 200; the integration brief said 0. Picking one and
+  being wrong fails 100% of calls, so `HOSTEX_SUCCESS_CODES` holds both and
+  logs the value seen live. Delete the loser once a real call confirms it.
+- Rate limits are **per access token** (1,200/min overall, 600/min per
+  endpoint), not per app — so `hostexApiLimiter` is keyed per connection, unlike
+  `hospitableApiLimiter`'s shared platform bucket.
+- Token endpoint (`POST /oauth/authorizations`) handles both obtain and refresh
+  via `grant_type` and takes NO `redirect_uri`. The AUTHORIZE url does require
+  `redirect_uri` as a query param — the opposite of Hospitable.
+- Access tokens live 7 days and the refresh token rotates on every use.
+  `hostex-token.ts` owns both paths: `getValidHostexToken()` (lock-wrapped, for
+  syncs) and `refreshHostexToken()` (unlocked, for the cron).
+- **No webhooks at all** — not implemented, and Hostex has no revocation event
+  even in principle. `hostexReservationReconcileCron` (daily, 08:00 UTC) is
+  therefore the ONLY ongoing sync, not a missed-webhook backstop the way
+  Hospitable's and OwnerRez's reconciles are. A dead connection likewise only
+  surfaces reactively, via a failed refresh or a failed API call.
+- **`/properties` returns id, title, address, latitude, longitude, channels,
+  groups, tags — and nothing else.** No bedrooms, bathrooms, occupancy,
+  check-in/out times, amenities or guest-facing content. `/room_types` was
+  checked and has none either. Those fields take FieldStay defaults on import
+  for the PM to correct, rather than being guessed: bedrooms drives cleaning
+  cost and checklist seeding. Hostex does give exact coordinates, which is why
+  `NormalizedProperty` grew optional `lat`/`lng` — there is often no parseable
+  ZIP to geocode from in its single free-form address string.
+- **Reservations have no `id`** — `reservation_code` is the identity and the
+  `external_id`. Amounts are MAJOR UNITS, not Hospitable's integer cents.
+  Revenue is `rates.total_rate` minus `rates.total_commission`.
+- No account-identity endpoint exists — `externalUserId` is the first
+  property's id as a proxy. See `deriveHostexExternalUserId()`.
+- `revokeAccessToken` is still not implemented (`POST /oauth/revoke`'s body
+  shape is unconfirmed). Optional on `IntegrationProvider`; local revocation
+  works without it.
 
 ## Hospitable Integration
 

@@ -123,6 +123,7 @@ const SOURCE_COLORS: Record<BookingSource, BadgeTone> = {
 function getSyncOriginLabel(booking: Pick<BookingRow, 'external_source' | 'ical_feed_id'>): string | null {
   if (booking.external_source === 'hospitable') return 'Hospitable'
   if (booking.external_source === 'ownerrez')   return 'OwnerRez'
+  if (booking.external_source === 'hostex')     return 'Hostex'
   if (booking.ical_feed_id !== null)            return 'iCal'
   return null
 }

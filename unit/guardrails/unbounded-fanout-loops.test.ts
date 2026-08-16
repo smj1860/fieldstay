@@ -283,6 +283,8 @@ function findOffenders(): string[] {
 const EXCEPTIONS: Record<string, string> = {
   'lib/inngest/functions/hospitable/initial-sync.ts:131':
     'Bounded by one org\'s property count — this whole function is already per-org (`event.data.org_id`), and `propertyIds` comes from that org\'s just-synced properties (10-50 per CLAUDE.md\'s target user). The org scope lives on the function trigger rather than in the collection\'s defining expression, which is why the scan cannot see it.',
+  'lib/inngest/functions/hostex/initial-sync.ts:120':
+    'Bounded by one org\'s property count — exact twin of the hospitable/initial-sync.ts entry above: the function is per-org (`event.data.org_id`) and `propertyIds` is that org\'s just-synced properties (10-50 per CLAUDE.md\'s target user). The org scope lives on the function trigger, not in the collection\'s defining expression, which is why the scan cannot see it.',
   // Moved out of initial-sync.ts on 2026-08-15, when the reservation pipeline
   // was extracted so the new daily reconcile cron shares it rather than
   // carrying a copy. Same loop, same justification, new home.

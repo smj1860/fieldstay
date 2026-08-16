@@ -26,7 +26,10 @@ import { NonRetriableError } from 'inngest'
 
 import { createServiceClient } from '@/lib/supabase/server'
 import { reportError }         from '@/lib/observability/report-error'
+import { unwrap }              from '@/lib/supabase/unwrap'
+import { acquireRefreshLock, releaseRefreshLock } from '@/lib/integrations/refresh-lock'
 import {
+  readIntegrationToken,
   readIntegrationRefreshToken,
   storeIntegrationToken,
   storeIntegrationRefreshToken,
@@ -36,15 +39,104 @@ import { hostexProvider, HostexOAuthError } from '@/lib/integrations/providers/h
 const HOSTEX_PROVIDER_ID = 'hostex'
 
 /**
+ * Refresh this far ahead of expiry. Generous relative to Hospitable's 30
+ * minutes because the token lives 7 days: a sync that starts just inside the
+ * window should never have the token die mid-run.
+ */
+const REFRESH_WINDOW_MINUTES = 120
+
+const REFRESH_LOCK_WAIT_MS   = 250
+const REFRESH_LOCK_MAX_WAITS = 60   // ~15s ceiling
+
+function shouldRefresh(expiresAt: string | null): boolean {
+  if (!expiresAt) return true
+  return Date.now() >= new Date(expiresAt).getTime() - REFRESH_WINDOW_MINUTES * 60 * 1_000
+}
+
+/**
+ * A valid Hostex access token for `userId`, refreshing first if it is expired
+ * or close to it. This is what the sync functions call — never
+ * readIntegrationToken() directly, which returns whatever is in Vault
+ * including a token that expired days ago.
+ *
+ * Lock-wrapped, unlike the cron path: several sync steps can run for one
+ * connection at once, and Hostex ROTATES the refresh token on every use, so
+ * two interleaved exchanges leave the loser's superseded token in Vault and
+ * the connection dies at the next refresh. A caller that loses the race polls
+ * the connection row rather than starting a second exchange.
+ */
+export async function getValidHostexToken(userId: string): Promise<string> {
+  const admin = createServiceClient({ system: 'lib/integrations/providers/hostex-token' })
+
+  const connRes = await admin
+    .from('integration_connections')
+    .select('expires_at, external_user_id')
+    .eq('user_id',     userId)
+    .eq('provider_id', HOSTEX_PROVIDER_ID)
+    .eq('status',      'active')
+    .maybeSingle()
+
+  const connection = unwrap(connRes, { site: 'lib.integrations.hostex-token.connection' })
+
+  if (!connection) {
+    throw new NonRetriableError(`[Hostex] No active connection for user ${userId}. Reconnect required.`)
+  }
+
+  const externalUserId = connection.external_user_id ?? ''
+
+  if (!shouldRefresh(connection.expires_at)) {
+    const token = await readIntegrationToken(userId, HOSTEX_PROVIDER_ID)
+    if (token) return token
+    // Connection row exists but the Vault secret is gone — treat as expired.
+  }
+
+  return refreshHostexTokenLocked(userId, externalUserId)
+}
+
+async function refreshHostexTokenLocked(userId: string, externalUserId: string): Promise<string> {
+  const acquired = await acquireRefreshLock('hostex', userId)
+
+  if (acquired) {
+    try {
+      return await refreshHostexToken(userId, externalUserId)
+    } finally {
+      await releaseRefreshLock('hostex', userId)
+    }
+  }
+
+  const admin = createServiceClient({ system: 'lib/integrations/providers/hostex-token' })
+
+  for (let i = 0; i < REFRESH_LOCK_MAX_WAITS; i++) {
+    await new Promise((resolve) => setTimeout(resolve, REFRESH_LOCK_WAIT_MS))
+
+    const connRes = await admin
+      .from('integration_connections')
+      .select('expires_at')
+      .eq('user_id',     userId)
+      .eq('provider_id', HOSTEX_PROVIDER_ID)
+      .eq('status',      'active')
+      .maybeSingle()
+
+    const connection = unwrap(connRes, { site: 'lib.integrations.hostex-token.expiry' })
+
+    if (connection && !shouldRefresh(connection.expires_at)) {
+      const token = await readIntegrationToken(userId, HOSTEX_PROVIDER_ID)
+      if (token) return token
+    }
+  }
+
+  console.warn(`[Hostex] refresh lock wait ceiling hit for user ${userId} — lock holder likely died, proceeding unlocked`)
+  return refreshHostexToken(userId, externalUserId)
+}
+
+/**
  * Force-refresh the Hostex access + refresh token pair for `userId`.
  *
- * Called by integrationTokenRefreshHandler. Not lock-wrapped, matching
- * hospitable-token.ts's cron path: the handler already serializes on
- * (user_id, provider_id) via its concurrency key, and the cron is the only
- * caller today. Phase 3's getValidHostexToken() — the sync-side accessor that
- * can genuinely race itself — is what should wrap this in
- * acquireRefreshLock('hostex', userId); that union member already exists in
- * lib/integrations/refresh-lock.ts for exactly that.
+ * Called by integrationTokenRefreshHandler directly (unlocked, matching
+ * hospitable-token.ts's cron path — the handler already serializes on
+ * (user_id, provider_id) via its concurrency key) and by
+ * getValidHostexToken() through refreshHostexTokenLocked(), which DOES take
+ * the lock because several sync steps can race for one connection.
  *
  * @param userId          FieldStay user UUID
  * @param externalUserId  the stored Hostex identity proxy. Passed through
