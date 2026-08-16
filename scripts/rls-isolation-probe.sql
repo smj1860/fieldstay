@@ -95,13 +95,12 @@ GRANT SELECT ON probe_target TO authenticated;
 -- ── GROUND TRUTH (still the connecting role, RLS bypassed) ──────────────────
 -- How many foreign-org rows exist at all? This is what makes a 0 below
 -- meaningful rather than vacuous.
-SELECT 'GROUND TRUTH' AS phase, 'properties' AS tbl,
-       count(*) AS foreign_rows_existing
+SELECT 'properties' AS tbl, count(*) AS foreign_rows_existing
   FROM properties WHERE org_id <> (SELECT org FROM probe_target)
-UNION ALL SELECT 'GROUND TRUTH','bookings',    count(*) FROM bookings    WHERE org_id <> (SELECT org FROM probe_target)
-UNION ALL SELECT 'GROUND TRUTH','turnovers',   count(*) FROM turnovers   WHERE org_id <> (SELECT org FROM probe_target)
-UNION ALL SELECT 'GROUND TRUTH','work_orders', count(*) FROM work_orders WHERE org_id <> (SELECT org FROM probe_target)
-ORDER BY 3 DESC;
+UNION ALL SELECT 'bookings',    count(*) FROM bookings    WHERE org_id <> (SELECT org FROM probe_target)
+UNION ALL SELECT 'turnovers',   count(*) FROM turnovers   WHERE org_id <> (SELECT org FROM probe_target)
+UNION ALL SELECT 'work_orders', count(*) FROM work_orders WHERE org_id <> (SELECT org FROM probe_target)
+ORDER BY foreign_rows_existing DESC, tbl ASC;
 
 -- ── IMPERSONATE ─────────────────────────────────────────────────────────────
 SET LOCAL ROLE authenticated;
@@ -131,7 +130,7 @@ UNION ALL SELECT 'property_owners',      count(*) FROM property_owners      WHER
 UNION ALL SELECT 'organization_members', count(*) FROM organization_members WHERE org_id <> (SELECT org FROM probe_target)
 UNION ALL SELECT 'notifications',        count(*) FROM notifications        WHERE org_id <> (SELECT org FROM probe_target)
 UNION ALL SELECT 'audit_events',         count(*) FROM audit_events         WHERE org_id <> (SELECT org FROM probe_target)
-ORDER BY 2 DESC, 1;
+ORDER BY foreign_rows_visible DESC, tbl ASC;
 
 -- Nothing is written, but roll back anyway so the role switch, the claims and
 -- the temp grant cannot outlive the probe on a pooled connection.
