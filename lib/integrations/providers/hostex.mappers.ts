@@ -91,7 +91,10 @@ function parseCoordinate(raw: string | null | undefined): number | null {
  * to correct. They are deliberately NOT guessed:
  *
  *   - bedrooms drives cleaning-cost estimates and checklist room seeding, so a
- *     fabricated count produces wrong money and wrong work, silently.
+ *     fabricated count produces wrong money and wrong work, silently. Mapped
+ *     to null rather than to the default itself, so that the default applies
+ *     ONCE at creation instead of being re-asserted over the PM's correction
+ *     on every re-sync.
  *   - the four content fields (wifi_name, wifi_password, access_instructions,
  *     house_manual) are PM-EDITABLE and overwritten on every sync by
  *     upsert-normalized. Mapping them to null would wipe whatever the PM typed
@@ -113,10 +116,14 @@ export function hostexPropertyToNormalized(prop: HostexProperty): NormalizedProp
     state:       addr.state,
     zip:         addr.zip,
 
-    // Not exposed by Hostex — see the doc comment above.
-    bedrooms:      1,
-    bathrooms:     1,
-    max_guests:    2,
+    // Not exposed by Hostex — see the doc comment above. null, not a guessed
+    // count: upsert-normalized reads null as "this PMS has no opinion" and
+    // leaves whatever FieldStay already holds, so a PM who corrects a
+    // 1-bedroom default to four keeps it across every later re-sync. A new
+    // property still lands on FieldStay's own defaults there.
+    bedrooms:      null,
+    bathrooms:     null,
+    max_guests:    null,
     checkin_time:  '15:00',
     checkout_time: '11:00',
 

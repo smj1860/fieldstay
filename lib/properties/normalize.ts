@@ -19,9 +19,15 @@ export interface NormalizedPropertyFacts {
   city:            string | null
   state:           string | null
   zip:             string | null
-  bedrooms:        number
+  // null means "this PMS has no such field", NOT "zero". Hostex's /properties
+  // exposes no bedroom, bathroom or occupancy count at all, and a mapper that
+  // invented one re-wrote it over the PM's correction on every re-sync — the
+  // provider's fabricated default beating the only real number in the system.
+  // upsert-normalized.ts writes a null through as "leave the existing value
+  // alone", falling back to FieldStay's own defaults only for a brand-new row.
+  bedrooms:        number | null
   bathrooms:       number | null
-  max_guests:      number
+  max_guests:      number | null
   checkin_time:    string
   checkout_time:   string
   timezone:        string

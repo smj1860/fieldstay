@@ -214,11 +214,24 @@ describe('ownerRezInitialSync', () => {
       'properties',
       expect.arrayContaining([
         expect.objectContaining({
-          org_id: 'org_1', external_id: '42', external_source: 'ownerrez', name: 'Lake House', max_guests: 6,
+          org_id: 'org_1', external_id: '42', external_source: 'ownerrez', name: 'Lake House',
         }),
       ]),
       { onConflict: 'org_id,external_id,external_source' },
     )
+
+    // The room counts are NOT in this upsert. patch-property-fields writes
+    // them, and only where FieldStay holds null — naming them here re-asserted
+    // OwnerRez's value on every re-run, undoing a PM's correction one step
+    // before buildNullFillPatch declined to.
+    const propertyRows = supabase.upsertSpy.mock.calls
+      .filter((call: unknown[]) => call[0] === 'properties')
+      .flatMap((call: unknown[]) => call[1] as Record<string, unknown>[])
+    for (const row of propertyRows) {
+      expect('bedrooms'   in row).toBe(false)
+      expect('bathrooms'  in row).toBe(false)
+      expect('max_guests' in row).toBe(false)
+    }
 
     expect(supabase.upsertSpy).toHaveBeenCalledWith(
       'bookings',
