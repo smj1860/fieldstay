@@ -31,7 +31,7 @@ If you need an export, request it before the 30-day window closes.
 Account deletion is a separate, more permanent action than cancelling a subscription. Deleting your account:
 
 - Immediately cancels any active subscriptions (including Guidebook sponsor billing if applicable)
-- Revokes all connected integrations (OwnerRez, Hospitable, Kroger — Hostaway isn't a live integration yet, so there's nothing to revoke there)
+- Revokes all connected integrations (OwnerRez, Hospitable, Hostex, Kroger — Hostaway isn't a live integration yet, so there's nothing to revoke there)
 - Removes your access to FieldStay
 - Permanently deletes all associated data
 
@@ -67,7 +67,7 @@ If any organization's subscription cannot be cancelled (for example, a temporary
 
 ## Your Data and Third Parties
 
-FieldStay does not sell or share your data with third parties for marketing purposes. Data shared with integration partners (OwnerRez, Hospitable, Stripe, Telnyx, Kroger) is limited to what's required for those specific integrations to function, governed by each partner's own data handling terms.
+FieldStay does not sell or share your data with third parties for marketing purposes. Data shared with integration partners (OwnerRez, Hospitable, Hostex, Stripe, Telnyx, Kroger) is limited to what's required for those specific integrations to function, governed by each partner's own data handling terms.
 
 ---
 

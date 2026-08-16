@@ -6,11 +6,11 @@ New to FieldStay? Here's the order that gets you up and running fastest, with ea
 
 ## Step 1 — Connect Your PMS
 
-Start here. Go to **Settings → Integrations** (or the Connect PMS step during onboarding) and connect OwnerRez or Hospitable, whichever you use. This pulls in your properties, bookings, and guest data automatically — everything after this step depends on having that data in FieldStay.
+Start here. Go to **Settings → Integrations** (or the Connect PMS step during onboarding) and connect OwnerRez, Hospitable, or Hostex, whichever you use. This pulls in your properties, bookings, and guest data automatically — everything after this step depends on having that data in FieldStay.
 
 If you don't use either, you can skip this and add properties manually, but most of the automation in FieldStay (turnovers, guidebook pre-population, revenue tracking) is designed around having a PMS connection.
 
-See: **Connecting OwnerRez to FieldStay** or **Connecting Hospitable to FieldStay**
+See: **Connecting OwnerRez to FieldStay**, **Connecting Hospitable to FieldStay**, or **Connecting Hostex to FieldStay**
 
 ---
 

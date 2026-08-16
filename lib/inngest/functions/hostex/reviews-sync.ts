@@ -175,5 +175,26 @@ export async function syncHostexReviews(
     return rows.length
   })
 
+  // A synced review that never gets a draft is a review the PM has to notice
+  // and click Generate on. Hospitable's incremental sync has fired this since
+  // it shipped; Hostex reviews landed in the table and stopped there, so
+  // RepuGuard silently did nothing for a whole provider.
+  //
+  // Fired HERE rather than at each of the three call sites (initial sync,
+  // daily reconcile, review webhook) so a fourth caller cannot forget it.
+  // Top-level step tooling, never inside the step.run above — see the Inngest
+  // constraints in CLAUDE.md.
+  //
+  // Safe to fire per sync: repuguardBatchGenerate is serialised per org
+  // (concurrency limit 1 keyed on org_id) and selects only rows still at
+  // response_status = 'pending', so a reconcile that re-upserts unchanged
+  // reviews costs one no-op run rather than a duplicate completion.
+  if (reviewCount > 0) {
+    await step.sendEvent(`${stepPrefix}-trigger-repuguard`, {
+      name: 'repuguard/batch_generate.requested' as const,
+      data: { org_id: orgId, requested_by: `hostex-${stepPrefix}` },
+    })
+  }
+
   return { reviewCount }
 }

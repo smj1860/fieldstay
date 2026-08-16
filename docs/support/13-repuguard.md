@@ -6,7 +6,7 @@
 
 ## How It Works
 
-When a guest leaves a review in your connected PMS — OwnerRez or Hospitable — FieldStay syncs it automatically and queues a response draft. RepuGuard uses Claude AI to generate a response tailored to the review content, your property, and the guest's name.
+When a guest leaves a review in your connected PMS — OwnerRez, Hospitable, or Hostex — FieldStay syncs it automatically and queues a response draft. RepuGuard uses Claude AI to generate a response tailored to the review content, your property, and the guest's name.
 
 You review the draft and edit it if needed. Posting the response is not an automatic API round-trip today — see **Editing and Approving a Draft** below for exactly what that step looks like.
 
@@ -36,7 +36,7 @@ The draft appears in an editable text field. Read it carefully and:
 When you're happy with the response, click **Mark as Ready** to save it. What comes next depends on where the review came from:
 
 - **OwnerRez reviews** — click **Post to OwnerRez**. This opens the review directly on OwnerRez's site in a new tab so you can paste in your response there (FieldStay does not post it via API on your behalf). Once you've posted it, come back and confirm **Yes, mark as posted** so FieldStay's status reflects reality.
-- **Hospitable and manually-added reviews** — there's no direct link back to the original platform yet, so click **Mark as Posted**, post your response wherever the review actually lives (Hospitable, Google, Booking.com, etc.), and confirm once you've done so.
+- **Hospitable, Hostex, and manually-added reviews** — there's no direct link back to the original platform yet, so click **Mark as Posted**, post your response wherever the review actually lives (Hospitable, Hostex, Google, Booking.com, etc.), and confirm once you've done so.
 
 Either way, the response text itself only ever lives in FieldStay until you paste or type it into the review platform — nothing is sent automatically.
 
@@ -44,7 +44,7 @@ Either way, the response text itself only ever lives in FieldStay until you past
 
 ## Regenerating a Response
 
-If the first draft misses the mark, click **Regenerate**. For a review that synced in automatically from OwnerRez or Hospitable, you have up to 2 regenerations. After 2, edit the response manually — at that point you know better than the AI what you want to say.
+If the first draft misses the mark, click **Regenerate**. For a review that synced in automatically from OwnerRez, Hospitable, or Hostex, you have up to 2 regenerations. After 2, edit the response manually — at that point you know better than the AI what you want to say.
 
 **Manually-added reviews work differently: they can't be regenerated at all.** If you added a review yourself (see below), you get the one draft RepuGuard generates and edit it by hand from there — clicking Regenerate on a manual review returns an error rather than a new draft.
 
@@ -64,7 +64,7 @@ Flags don't block you from posting — they're advisory. Read flagged content ca
 
 ## Adding Reviews Manually
 
-Reviews sync automatically from OwnerRez and Hospitable. If you receive a review on Airbnb, Vrbo, Google, or Booking.com outside those, and you'd like a draft response for it, you can add it manually.
+Reviews sync automatically from OwnerRez, Hospitable, and Hostex. If you receive a review on Airbnb, Vrbo, Google, or Booking.com outside those, and you'd like a draft response for it, you can add it manually.
 
 Go to **Reviews → Add Review Manually** and enter the review text, star rating, guest name, and platform. RepuGuard generates a response immediately.
 
