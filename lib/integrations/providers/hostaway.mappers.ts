@@ -21,7 +21,7 @@ import type { NormalizedProperty } from '@/lib/properties/normalize'
 import type { NormalizedBooking } from '@/lib/bookings/normalize'
 import { unmappedBookingStatus } from '@/lib/bookings/normalize'
 import { resolveHospitableTimezone } from '@/lib/integrations/providers/hospitable.mappers'
-import type { HostawayListing, HostawayReservation } from './hostaway'
+import type { HostawayListing, HostawayReservation, HostawayReview } from './hostaway'
 
 // ── Properties ───────────────────────────────────────────────────────────────
 
@@ -210,5 +210,86 @@ export function hostawayReservationToNormalized(res: HostawayReservation): Norma
     stay_type:   'guest_stay',
 
     actual_total_amount: extractHostawayActualTotal(res),
+  }
+}
+
+// ── Reviews ──────────────────────────────────────────────────────────────────
+
+/** The `reviews` row this mapper produces, minus org/property linkage. */
+export interface NormalizedHostawayReview {
+  external_id:     string
+  external_source: 'hostaway'
+  /** Hostaway listing id as a string, for the caller to resolve to a UUID. */
+  property_external_id: string
+  guest_name:      string | null
+  rating:          number
+  review_text:     string
+  review_date:     string | null
+  response_status: 'pending' | 'posted'
+  external_url:    null
+}
+
+/**
+ * Hostaway's 'YYYY-MM-DD HH:MM:SS' to an ISO timestamp.
+ *
+ * The API returns NO timezone offset, so the zone is an assumption. UTC is the
+ * one made here, and the error it can introduce is bounded at under a day —
+ * enough to shift which calendar date a review displays under in an extreme
+ * zone, never enough to reorder reviews meaningfully. Returning null instead
+ * would lose the date entirely, which is worse for a column the reviews list
+ * sorts by.
+ */
+function hostawayDateToIso(value: string | null | undefined): string | null {
+  if (!value) return null
+  const iso = value.trim().replace(' ', 'T')
+  const parsed = new Date(`${iso}Z`)
+  return Number.isNaN(parsed.getTime()) ? null : parsed.toISOString()
+}
+
+/**
+ * Maps a Hostaway review into a `reviews` row, or null when it cannot be one.
+ *
+ * NULL IS THE COMMON CASE AND NOT AN ERROR. `reviews.rating` and
+ * `reviews.review_text` are both NOT NULL, and Hostaway returns a review row
+ * from the moment one is SCHEDULED — status 'awaiting' or 'pending', with
+ * rating and publicReview both null. Those are placeholders for a review that
+ * may never be written. Storing them would need invented values, and a
+ * fabricated 0-star review with empty text would then be handed to RepuGuard
+ * to draft a public reply to.
+ *
+ * So the guard is on the CONTENT, not the status name — a status list would
+ * have to be guessed and would fail silently the first time Hostaway added one.
+ *
+ * Cancelled reviews are dropped for the same reason: a retracted review is not
+ * something to reply to.
+ *
+ * response_status comes from `revieweeResponse` — the host's reply. Present
+ * means the PM has already answered, which is what keeps RepuGuard from
+ * drafting over the top of a reply that exists.
+ */
+export function hostawayReviewToNormalized(review: HostawayReview): NormalizedHostawayReview | null {
+  if (review.isCancelled) return null
+  if (review.type !== 'guest-to-host') return null
+
+  const rating = typeof review.rating === 'number' && Number.isFinite(review.rating)
+    ? review.rating
+    : null
+  const text = review.publicReview?.trim()
+
+  if (rating === null || !text) return null
+
+  return {
+    external_id:          String(review.id),
+    external_source:      'hostaway',
+    property_external_id: String(review.listingMapId),
+    guest_name:           optionalText(review.guestName ?? undefined),
+    rating:               Math.round(rating),
+    review_text:          text,
+    review_date:          hostawayDateToIso(review.departureDate),
+    response_status:      review.revieweeResponse?.trim() ? 'posted' : 'pending',
+    // No confirmed per-review URL on Hostaway. Fabricating one would put a
+    // dead link in the reviews list — the same reason reviews-client.tsx only
+    // synthesises a fallback for OwnerRez.
+    external_url:         null,
   }
 }

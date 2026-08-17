@@ -1,18 +1,9 @@
 // lib/integrations/providers/hostaway.ts
 // ============================================================
-// DISABLED — not ready for launch (product decision, 2026-07-25). This
-// implementation is intact and functional; it is simply unreachable:
-//   - Not registered in lib/integrations/registry.ts (hostawayProvider
-//     import + map entry are commented out there)
-//   - Its Inngest sync job (lib/inngest/functions/hostaway/initial-sync.ts)
-//     is not registered in app/api/inngest/route.ts's serve() call
-//   - Every UI/server-action connect entry point (settings/integrations,
-//     setup/pms) already excludes 'hostaway' from its provider list
-// To re-enable: uncomment the registry entry and the Inngest route
-// registration, then re-add the connect UI/actions (see the "Hostaway is
-// not fully implemented yet" comments in
-// app/(dashboard)/settings/integrations/actions.ts and
-// app/(dashboard)/settings/integrations/integrations-client.tsx).
+// LIVE since 2026-08-17. This header said "DISABLED — not ready for launch
+// (product decision, 2026-07-25)" and listed the four places that made it
+// unreachable; all four are now wired. Left as a note rather than deleted
+// because the disable comments elsewhere pointed here.
 // ============================================================
 // Hostaway API-key provider adapter.
 //
@@ -63,6 +54,39 @@ export interface HostawayReservation {
   children?:      number
   createdAt?:     string
   updatedAt?:     string
+}
+
+// Exact field names from Hostaway API GET /v1/reviews response.
+export interface HostawayReview {
+  id:               number
+  accountId?:       number
+  /**
+   * The listing this review is about.
+   *
+   * NOTE the name: reviews say `listingMapId` where GET /reservations says
+   * `listingId`. Both identify the same listing — Hostaway is inconsistent
+   * across endpoints, not describing two different things — and both are
+   * matched against `properties.external_id`, which the initial sync writes
+   * from `HostawayListing.id`.
+   */
+  listingMapId:     number
+  reservationId?:   number | null
+  channelId?:       number | null
+  /** 'guest-to-host' is a review OF us; 'host-to-guest' is one BY us. */
+  type:             'guest-to-host' | 'host-to-guest'
+  status:           'awaiting' | 'pending' | 'scheduled' | 'submitted' | 'published' | 'expired'
+  rating:           number | null
+  /** The review body. Null until the guest actually submits one. */
+  publicReview:     string | null
+  privateFeedback?: string | null
+  /** The host's reply, when one has been posted. */
+  revieweeResponse: string | null
+  isCancelled?:     number | null
+  /** 'YYYY-MM-DD HH:MM:SS', no timezone offset. */
+  departureDate:    string | null
+  arrivalDate?:     string | null
+  listingName?:     string | null
+  guestName:        string | null
 }
 
 const BASE_URL = 'https://api.hostaway.com/v1'
@@ -257,4 +281,75 @@ export async function hostawayFetchReservations(
   }
 
   return reservations
+}
+
+/**
+ * Fetch reviews, paginated.
+ *
+ * `type=guest-to-host` is applied SERVER-side, and it is not an optimisation:
+ * the other direction is us reviewing the guest. Importing those would put our
+ * own words in the reviews table and hand RepuGuard our review to draft a
+ * reply to.
+ *
+ * Status is deliberately NOT filtered server-side even though the endpoint
+ * accepts `statuses[]`. `reviews.rating` and `reviews.review_text` are both
+ * NOT NULL, so what actually matters is whether a review HAS a rating and a
+ * body — and that is a property of the row, not reliably of its status name.
+ * The mapper drops the ones that don't; guessing which statuses carry content
+ * would fail silently the first time Hostaway added one.
+ *
+ * @param since 'YYYY-MM-DD' — lower bound on departureDate.
+ */
+export async function hostawayFetchReviews(
+  token: string,
+  since: string,
+): Promise<HostawayReview[]> {
+  const reviews: HostawayReview[] = []
+  const LIMIT = 100
+  let offset = 0
+  let pageCount = 0
+  const MAX_PAGES = 200
+
+  while (true) {
+    pageCount++
+    if (pageCount > MAX_PAGES) {
+      // THROW rather than break — same reasoning as the listings and
+      // reservations fetchers. A partial set returned as complete is
+      // indistinguishable from a shrunken one to everything downstream.
+      throw new Error(
+        `[Hostaway] reviews pagination exceeded ${MAX_PAGES} pages ` +
+        `(${reviews.length} so far) — refusing to return a partial result`
+      )
+    }
+
+    const params = new URLSearchParams({
+      limit:              String(LIMIT),
+      offset:             String(offset),
+      type:               'guest-to-host',
+      departureDateStart: since,
+      // Stable order across pages. Without it an offset walk over a set the
+      // API is free to reorder can repeat and skip rows in the same sweep.
+      sortBy:             'id',
+      sortOrder:          'asc',
+    })
+
+    const res = await fetch(`${BASE_URL}/reviews?${params}`, {
+      signal:  AbortSignal.timeout(PMS_API_TIMEOUT_MS),
+      headers: hostawayProvider.getApiHeaders(token),
+    })
+
+    if (!res.ok) {
+      const text = await res.text().catch(() => '')
+      throw new Error(`Hostaway reviews fetch failed (${res.status}): ${text.slice(0, 200)}`)
+    }
+
+    const data = (await res.json()) as { status: string; result: HostawayReview[] | null }
+    const page = data.result ?? []
+
+    reviews.push(...page)
+    if (page.length < LIMIT) break
+    offset += LIMIT
+  }
+
+  return reviews
 }

@@ -57,6 +57,7 @@ import { hostawayListingToNormalized } from '@/lib/integrations/providers/hostaw
 import { upsertNormalizedProperties } from '@/lib/properties/upsert-normalized'
 import { applyChecklistsToProperties, syncGuidebookForOrg } from '../shared/property-onboarding'
 import { syncHostawayReservations } from './reservation-sync'
+import { syncHostawayReviews } from './reviews-sync'
 
 const PROVIDER = 'hostaway'
 const SYSTEM   = 'inngest:hostaway-initial-sync'
@@ -135,6 +136,33 @@ export const hostawayInitialSync = inngest.createFunction(
         revenueMode:   'all',
       })
 
+      // ── 4b. Reviews ─────────────────────────────────────────────────────────
+      // After reservations rather than before, matching Hostex — not for a
+      // guest-name backfill (Hostaway reviews carry guestName directly) but
+      // because a review whose listing was not imported is dropped, and the
+      // property map has to be settled first.
+      //
+      // Non-fatal: a PM whose reviews fail to import still has properties,
+      // bookings and turnovers, and the daily reconcile retries. Failing the
+      // whole sync here would throw all of that away.
+      let reviewCount = 0
+      try {
+        ;({ reviewCount } = await syncHostawayReviews({
+          step,
+          logger,
+          token,
+          orgId:         org_id,
+          userId:        user_id,
+          propertyIdMap: propertyIdMap as Record<string, string>,
+          historyMonths: INITIAL_SYNC_HISTORY_MONTHS,
+          system:        SYSTEM,
+          stepPrefix:    'initial',
+        }))
+      } catch (err) {
+        logger.error(`[Hostaway:${user_id}] reviews import failed: ${err instanceof Error ? err.message : String(err)}`)
+        reportError(err, { site: 'inngest.hostaway-initial-sync.reviews', orgId: org_id })
+      }
+
       // ── 5. Guidebook ────────────────────────────────────────────────────────
       await syncGuidebookForOrg(step, logger, org_id, PROVIDER, `[Hostaway:${user_id}]`)
 
@@ -150,18 +178,21 @@ export const hostawayInitialSync = inngest.createFunction(
             last_sync_count:  reservationCount,
             properties_found: propertyIds.length,
             bookings_found:   reservationCount,
+            reviews_found:    reviewCount,
           },
         })
       })
 
       logger.info(
         `[Hostaway:${user_id}] Initial sync complete — ` +
-        `${propertyIds.length} properties, ${reservationCount} bookings`
+        `${propertyIds.length} properties, ${reservationCount} bookings, ` +
+        `${reviewCount} reviews`
       )
 
       return {
         properties:   propertyIds.length,
         reservations: reservationCount,
+        reviews:      reviewCount,
       }
     } catch (err) {
       const msg         = err instanceof Error ? err.message : String(err)

@@ -34,6 +34,9 @@ Decisions taken 2026-08-16:
    are the closest template.
 4. **Every feature.** Including reviews → RepuGuard.
 
+All four are now built. What remains is webhooks (fully specified, not yet
+written) and netting owner revenue (needs a live payload).
+
 ---
 
 ## What already exists
@@ -208,15 +211,32 @@ interval, which is what OwnerRez lives with.
 ### Phase 4 — re-enable
 Work the 16-row table above. Add `RLS`-irrelevant; all UI/registry edits.
 
-### Phase 5 — reviews → RepuGuard
-Mirror `ownerrez-reviews-sync.ts` or `hostex/reviews-sync.ts`. Required by
-"every feature".
+### Phase 5 — reviews → RepuGuard ✅ DONE
 
-**Blocked on a shape.** The reviews endpoints are not in the API documentation
-that was reachable, and `hostaway.ts` types no review object. Everything built
-so far derives from shapes that file already carried, written from Hostaway's
-docs; inventing a review type would be the one place in this integration where
-the mapping was guessed. Needs their reviews reference or one live payload.
+Unblocked by the `GET /v1/reviews` reference. `hostawayFetchReviews` +
+`hostawayReviewToNormalized` + `hostaway/reviews-sync.ts`, wired into both the
+initial sync and the daily reconcile, firing `repuguard/batch_generate.requested`
+from inside the sync so a third caller cannot forget it.
+
+Simpler than the Hostex equivalent in two ways: a Hostaway review has a real
+`id` (so `external_id` is that id, where Hostex has to key on
+`(reservation_code, property_id)`), and carries `guestName` directly (where
+Hostex back-fills it by joining bookings on property + check-in + check-out).
+
+**The mapper drops most of what comes back, and that is the normal case.**
+`reviews.rating` and `reviews.review_text` are both NOT NULL, and Hostaway
+returns a row from the moment a review is SCHEDULED — status `awaiting`, rating
+and `publicReview` both null. Storing those needs invented values, and a
+fabricated 0-star review with empty text would then be handed to RepuGuard to
+draft a public reply to. So the guard is on CONTENT, not on the status name: a
+status allowlist would have to be guessed and would silently start dropping real
+reviews the first time Hostaway added one.
+
+Also dropped: `host-to-guest` (that is us reviewing the guest — importing it
+would ask RepuGuard to reply to ourselves) and cancelled reviews.
+
+One naming trap worth knowing: reviews say **`listingMapId`** where
+`/reservations` says **`listingId`**. Same listing, inconsistent API.
 
 ### Netting owner revenue (task #21)
 

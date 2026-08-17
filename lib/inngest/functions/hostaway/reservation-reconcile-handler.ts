@@ -36,11 +36,12 @@
 // providers — its token cannot be refreshed at all (the API key is discarded
 // after the one-time exchange), so "gone" here means gone until a human acts.
 //
-// It does NOT flip the connection to 'error'. For the OAuth providers that is
-// integration-token-refresh-handler's job, which owns the reconnect email and
-// its dedup flag. Hostaway is not in that cron's scope — see the
-// token-expiry task in docs/HOSTAWAY_ENABLEMENT.md — so today nothing emails
-// the PM. Adding a send here would give it no dedup and one message per day.
+// It does NOT flip the connection to 'error', and does not email anyone. That
+// is integration-token-refresh-handler's job — it owns the reconnect email and
+// its claim-before-send dedup flag, and Hostaway now reaches it via
+// NON_REFRESHABLE_PROVIDERS in cron/integration-token-refresh.ts. A send from
+// here would have no dedup and would fire once per day for as long as the
+// credential stayed dead.
 // ============================================================================
 
 import { inngest }              from '@/lib/inngest/client'
@@ -48,6 +49,7 @@ import { NonRetriableError }    from 'inngest'
 import { readIntegrationToken } from '@/lib/integrations/vault'
 import { runProviderReconcile } from '../shared/reconcile-shell'
 import { syncHostawayReservations } from './reservation-sync'
+import { syncHostawayReviews } from './reviews-sync'
 
 const PROVIDER = 'hostaway' as const
 const SYSTEM   = 'inngest:hostaway-reservation-reconcile'
@@ -63,6 +65,14 @@ const SYSTEM   = 'inngest:hostaway-reservation-reconcile'
  * reachable only by a webhook that does not exist yet.
  */
 const RECONCILE_HISTORY_MONTHS = 1
+
+/**
+ * Reviews sweep further back than reservations, for two reasons reservations
+ * do not have: a guest can review weeks after checkout, and a reply posted
+ * inside Hostaway flips an existing row's response_status — which only a
+ * re-read notices. One month would miss both.
+ */
+const RECONCILE_REVIEW_HISTORY_MONTHS = 5
 
 export const hostawayReservationReconcileHandler = inngest.createFunction(
   {
@@ -91,17 +101,38 @@ export const hostawayReservationReconcileHandler = inngest.createFunction(
         if (!t) throw new NonRetriableError('No Hostaway token found — reconnect required')
         return t
       },
-      sync: (token, propertyIdMap) => syncHostawayReservations({
-        step,
-        logger,
-        token,
-        orgId:         org_id,
-        userId:        user_id,
-        propertyIdMap,
-        fetchMode:     { kind: 'window', historyMonths: RECONCILE_HISTORY_MONTHS },
-        system:        SYSTEM,
-        revenueMode:   'new-only',
-      }),
+      sync: async (token, propertyIdMap) => {
+        const result = await syncHostawayReservations({
+          step,
+          logger,
+          token,
+          orgId:         org_id,
+          userId:        user_id,
+          propertyIdMap,
+          fetchMode:     { kind: 'window', historyMonths: RECONCILE_HISTORY_MONTHS },
+          system:        SYSTEM,
+          revenueMode:   'new-only',
+        })
+
+        // Reviews ride the same daily pass rather than getting their own cron:
+        // they need the same token and the same property map, and Hostaway
+        // rate-limits per account token, so a second cron would only add a
+        // second place for the connection to be resolved and a second claim on
+        // the same quota.
+        await syncHostawayReviews({
+          step,
+          logger,
+          token,
+          orgId:         org_id,
+          userId:        user_id,
+          propertyIdMap,
+          historyMonths: RECONCILE_REVIEW_HISTORY_MONTHS,
+          system:        SYSTEM,
+          stepPrefix:    'reconcile',
+        })
+
+        return result
+      },
     })
   }
 )
