@@ -400,9 +400,16 @@ export async function createPmNotification(
  * collision per-row, which is the semantics the single-row catch already
  * has.
  *
- * Rows WITHOUT a dedupe key are inserted separately, because the partial
- * unique index only covers `dedupe_key IS NOT NULL` — an ON CONFLICT naming
- * that column cannot arbitrate rows the index does not contain.
+ * Rows WITHOUT a dedupe key are inserted separately. The reason has changed:
+ * the index used to be PARTIAL (`WHERE dedupe_key IS NOT NULL`), and this
+ * comment reasoned that ON CONFLICT could not arbitrate rows the index did not
+ * contain. True — but it also could not arbitrate the rows it DID contain,
+ * because Postgres accepts a partial index as an arbiter only when the
+ * statement repeats its predicate, and `onConflict` cannot express one. So this
+ * upsert raised 42P10 on every batch until
+ * 20260817172700_notifications_dedupe_key_plain_unique_index.sql made the index
+ * plain. The split still stands on its own merit — a NULL dedupe key has no
+ * collision to ignore, so those rows may as well take the cheaper insert.
  *
  * 23503 (org deleted out from under an in-flight step) is skipped with the
  * same reasoning and the same warning as the single-row path; a batch is no

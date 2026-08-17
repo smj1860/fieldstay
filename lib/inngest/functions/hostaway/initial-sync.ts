@@ -1,260 +1,184 @@
-/**
- * DISABLED — not ready for launch (product decision, 2026-07-25). This
- * function is intact and functional; it is simply unregistered so it can
- * never run:
- *   - Not registered in app/api/inngest/route.ts's serve() functions array
- *     (the `hostawayInitialSync` import + array entry are commented out there)
- *   - Its provider adapter (lib/integrations/providers/hostaway.ts) is not
- *     registered in lib/integrations/registry.ts either
- *   - Nothing sends the triggering event — connectWithApiKey() in
- *     app/(dashboard)/settings/integrations/actions.ts (the only place that
- *     used to send it) has its Hostaway credential-exchange path commented out
- * To re-enable: uncomment the registry entry, the Inngest route
- * registration, and the connect entry points (see hostaway.ts's top-of-file
- * comment for the full list).
- *
- * Hostaway Initial Sync
- *
- * Triggered by: integration/hostaway.sync.requested
- * Steps (each independently retried):
- *  1. read-token          — pull the Bearer token from Vault
- *  2. fetch-listings       — hostawayFetchListings(), upsert into public.properties
- *  3. fetch-reservations   — hostawayFetchReservations(), upsert into public.bookings
- *  4. generate-turnovers   — generateTurnoversForProperty() per affected property
- *  5. mark-complete        — write last_sync_status to integration_connections
- */
+// lib/inngest/functions/hostaway/initial-sync.ts
+// ============================================================================
+// Triggered by: integration/hostaway.sync.requested
+//
+// Steps:
+//   1. read-token                    — the Bearer token from Vault
+//   2. fetch-and-upsert-properties   — hostawayFetchListings → properties
+//   3. seed-room-templates / apply-master-checklist-<id> — per new property
+//   4. reservations → bookings → revenue → turnovers (shared pipeline)
+//   5. guidebook config sync
+//   6. mark-complete
+//
+// STILL DISABLED — not registered in app/api/inngest/route.ts's serve() array,
+// and the provider is not in lib/integrations/registry.ts, so nothing can
+// trigger this. See docs/HOSTAWAY_ENABLEMENT.md for the remaining phases.
+//
+// This is a REWRITE of the 2026-07-25 version, not a patch. That version
+// hand-rolled its own `properties` upsert and its own booking upsert, and in
+// doing so it:
+//
+//   - never emitted `booking/confirmed`, so no revenue reached
+//     owner_transactions — the documented reason it was switched off;
+//   - invented room counts (`bedrooms: listing.bedrooms ?? 1`), overwriting a
+//     PM's correction on every sync;
+//   - kept no audit trail when it overwrote the four PM-editable content
+//     fields;
+//   - seeded no room templates, checklists or guidebook config, so a Hostaway
+//     org's imported properties arrived inert.
+//
+// All four are properties of NOT going through the shared writers. Going
+// through them is the fix, so the mapping moved to
+// lib/integrations/providers/hostaway.mappers.ts and everything else is now
+// upsertNormalizedProperties + runReservationPipeline + the shared onboarding
+// helpers — the same spine Hostex and Hospitable use.
+//
+// Deliberately NOT here, with reasons, so the absences don't read as
+// oversights:
+//   - No calendar-block sync. Manually-blocked owner time does not appear
+//     through /reservations; it lives on Hostaway's calendar endpoints. Same
+//     position Hostex shipped with.
+//   - No crew import. Hostaway has no staff/teammate concept equivalent to
+//     Hostex's /staffs or Hospitable's teammates.
+//   - No reviews yet, and no webhook registration yet — both are later phases
+//     with working Hostex templates to mirror.
+//   - No amenity-driven asset seeding: GET /listings with includeResources=0,
+//     which is what the fetcher requests, returns no amenities at all.
+// ============================================================================
 
-import { asJsonObject } from '@/lib/json'
-import type { Json } from '@/types/database'
 import { inngest }              from '@/lib/inngest/client'
-import { createServiceClient }  from '@/lib/supabase/server'
-import { fetchTurnoverCreatedEvents } from '@/lib/inngest/turnover-created-events'
+import { NonRetriableError }    from 'inngest'
+import { translateSyncError }   from '@/lib/integrations/types'
+import { reportError }          from '@/lib/observability/report-error'
+import { mergeIntegrationConnectionMetadata } from '@/lib/integrations/connection-metadata'
 import { readIntegrationToken } from '@/lib/integrations/vault'
-import {
-  hostawayFetchListings,
-  hostawayFetchReservations,
-  type HostawayReservation,
-} from '@/lib/integrations/providers/hostaway'
-import { generateTurnoversForProperty } from '@/lib/turnovers/generator'
-import { unmappedBookingStatus }        from '@/lib/bookings/normalize'
+import { hostawayFetchListings } from '@/lib/integrations/providers/hostaway'
+import { hostawayListingToNormalized } from '@/lib/integrations/providers/hostaway.mappers'
+import { upsertNormalizedProperties } from '@/lib/properties/upsert-normalized'
+import { applyChecklistsToProperties, syncGuidebookForOrg } from '../shared/property-onboarding'
+import { syncHostawayReservations } from './reservation-sync'
 
-import { reportError } from '@/lib/observability/report-error'
-import { unwrap, unwrapList } from '@/lib/supabase/unwrap'
 const PROVIDER = 'hostaway'
+const SYSTEM   = 'inngest:hostaway-initial-sync'
+
+/**
+ * How much history the first sync pulls back, in months.
+ *
+ * Hostaway's GET /reservations defaults to 90 days when no `dateFrom` is sent,
+ * so anything older only exists if it is asked for. 12 months matches Hostex
+ * and is what makes an owner's first-year P&L meaningful.
+ */
+const INITIAL_SYNC_HISTORY_MONTHS = 12
 
 export const hostawayInitialSync = inngest.createFunction(
   {
     id:      'hostaway-initial-sync',
     name:    'Hostaway: Initial Sync',
-    retries: 2,
-    // One sync per org at a time — avoids racing the same properties/bookings rows
-    concurrency: { limit: 1, key: 'event.data.org_id' },
+    retries: 4,
+    // Per-org serialization plus a platform cap. Hostaway rate limits per
+    // account token, so orgs do not starve each other, but the cap still
+    // bounds how much of the function budget one wave of connects can take.
+    concurrency: [
+      { limit: 4 },
+      { limit: 1, key: 'event.data.org_id' },
+    ],
   },
   { event: 'integration/hostaway.sync.requested' },
   async ({ event, step, logger }) => {
-    const { user_id, org_id, since } = event.data
+    const { user_id, org_id } = event.data
 
     try {
-      // ── 1. Read token from Vault ──────────────────────────────────────
+      // ── 1. Token ────────────────────────────────────────────────────────────
+      // readIntegrationToken, NOT a getValid*Token wrapper like Hostex's:
+      // Hostaway issues a ~6-month Bearer token from an Account ID + API Key
+      // exchange and there is no refresh grant, so there is nothing to refresh
+      // toward. An expired token surfaces as a 401 from the first fetch below
+      // and is translated for the PM by translateSyncError.
+      //
+      // NonRetriableError on absence: a missing token cannot be fixed by
+      // retrying, only by reconnecting.
       const token = await step.run('read-token', async () => {
         const t = await readIntegrationToken(user_id, PROVIDER)
-        if (!t) throw new Error('No Hostaway token found — reconnect required')
+        if (!t) throw new NonRetriableError('No Hostaway token found — reconnect required')
         return t
       })
 
-      // ── 2. Fetch listings, upsert properties ──────────────────────────
+      // ── 2. Properties ───────────────────────────────────────────────────────
       const propertyIdMap = await step.run('fetch-and-upsert-properties', async () => {
         const listings = await hostawayFetchListings(token)
         logger.info(`[Hostaway:${user_id}] Fetched ${listings.length} listings`)
 
-        const supabase = createServiceClient({ system: 'inngest:initial-sync' })
-        const idMap: Record<number, string> = {}  // hostaway listing id → fieldstay property uuid
+        if (!listings.length) return {}
 
-        if (listings.length) {
-          const rows = listings.map((listing) => ({
-            org_id,
-            name:                    listing.externalListingName ?? listing.name,
-            address:                 listing.address ?? null,
-            city:                    listing.city ?? null,
-            state:                   listing.state ?? null,
-            zip:                     listing.zipcode ?? null,
-            lat:                     listing.lat ?? null,
-            lng:                     listing.lng ?? null,
-            bedrooms:                listing.bedrooms ?? 1,
-            bathrooms:               listing.bathrooms ?? 1,
-            max_guests:              listing.maxGuests ?? 2,
-            external_id:             String(listing.id),
-            external_source:         PROVIDER,
-            property_type:           'other' as const,
-            avg_stay_length:         0,
-            avg_turnovers_per_month: 0,
-            checkout_time:           '11:00',
-            checkin_time:            '15:00',
-            setup_steps_completed:   {},
-            is_active:               true,
-          }))
-
-          const { error } = await supabase
-            .from('properties')
-            .upsert(rows, { onConflict: 'org_id,external_id,external_source' })
-
-          if (error) {
-            logger.error(`[Hostaway:${user_id}] properties upsert failed: ${error.message}`)
-            throw new Error(error.message)
-          }
-
-          const fsPropsRes = await supabase
-            .from('properties')
-            .select('id, external_id')
-            .eq('org_id', org_id)
-            .eq('external_source', PROVIDER)
-            .in('external_id', listings.map((l) => String(l.id)))
-            .limit(listings.length)
-          const fsProps = unwrapList(fsPropsRes, {
-            site:  'inngest.hostaway-initial-sync.fetch-and-upsert-properties',
-            orgId: org_id,
-          })
-
-          // O(1) lookups instead of an O(n²) .find() inside the loop
-          const listingById = new Map(listings.map((l) => [String(l.id), l]))
-
-          for (const p of fsProps) {
-            // properties.external_id is nullable — a property never synced
-            // from Hostaway has nothing to look up.
-            if (p.external_id === null) continue
-            const hostawayId = listingById.get(p.external_id)?.id
-            if (hostawayId !== undefined) idMap[hostawayId] = p.id
-          }
-        }
-
-        logger.info(`[Hostaway:${user_id}] Upserted ${Object.keys(idMap).length} properties`)
-
-        await updateConnectionMetadata(user_id, { properties_found: listings.length })
-
-        return idMap
+        return upsertNormalizedProperties(org_id, PROVIDER, listings.map(hostawayListingToNormalized))
       })
 
-      // ── 3. Fetch reservations, upsert bookings ────────────────────────
-      const { reservationCount, affectedPropertyIds } = await step.run(
-        'fetch-and-upsert-bookings',
-        async () => {
-          const reservations = await hostawayFetchReservations(token, since)
-          logger.info(`[Hostaway:${user_id}] Fetched ${reservations.length} reservations`)
+      const propertyIds = Object.values(propertyIdMap as Record<string, string>)
 
-          const supabase = createServiceClient({ system: 'inngest:initial-sync' })
-          const touched   = new Set<string>()
-          const bookingRows = reservations
-            .map((res: HostawayReservation) => {
-              const propertyId = propertyIdMap[res.listingId]
-              if (!propertyId) return null  // skip if we don't have this property
-              touched.add(propertyId)
-              return {
-                org_id,
-                property_id:     propertyId,
-                external_id:     String(res.id),
-                external_source: PROVIDER,
-                guest_name:      res.guestName ?? null,
-                guest_email:     res.guestEmail ?? null,
-                checkin_date:    res.arrivalDate,
-                checkout_date:   res.departureDate,
-                status:          mapHostawayStatus(res.status),
-                source:          mapHostawayChannel(res.channelName),
-                // ⚠️ Unconfirmed: HostawayReservation.status ('new' |
-                // 'modified' | 'cancelled' | 'confirmed' | 'inquiry' |
-                // 'tentative') has no documented blocked-time value —
-                // hardcoded false until Hostaway's docs or a live payload
-                // show how manually-blocked calendar time surfaces here (if
-                // it does at all via this endpoint).
-                is_block:        false,
-              }
-            })
-            .filter((row): row is NonNullable<typeof row> => row !== null)
+      // ── 3. Checklists for the new properties ────────────────────────────────
+      await applyChecklistsToProperties(step, org_id, propertyIds, SYSTEM)
 
-          if (bookingRows.length) {
-            const { error } = await supabase
-              .from('bookings')
-              .upsert(bookingRows, { onConflict: 'org_id,external_id,external_source' })
-
-            if (error) {
-              logger.error(`[Hostaway:${user_id}] bookings upsert failed: ${error.message}`)
-              throw new Error(error.message)
-            }
-          }
-
-          logger.info(`[Hostaway:${user_id}] Upserted ${bookingRows.length} bookings`)
-
-          await updateConnectionMetadata(user_id, { bookings_found: reservations.length })
-
-          return { reservationCount: reservations.length, affectedPropertyIds: [...touched] }
-        }
-      )
-
-      // ── 4. Generate turnovers for affected properties ────────────────
-      const newTurnoverIds = await step.run('generate-turnovers', async () => {
-        if (!affectedPropertyIds.length) return []
-        const supabase = createServiceClient({ system: 'inngest:initial-sync' })
-        const ids: string[] = []
-        for (const propertyId of affectedPropertyIds) {
-          try {
-            const newIds = await generateTurnoversForProperty(propertyId, org_id, supabase)
-            ids.push(...newIds)
-          } catch (err) {
-            logger.error(`[Hostaway:${user_id}] Turnover generation failed for ${propertyId}: ${err}`)
-            reportError(err, { site: 'inngest.hostaway-initial-sync.generate-turnovers' })
-            // Don't let one property's failure block the others
-          }
-        }
-        return ids
+      // ── 4. Reservations → bookings → revenue → turnovers ────────────────────
+      // revenueMode 'all': the post is idempotent (booking-events.ts upserts
+      // ON CONFLICT (source_reference_id, source) DO NOTHING), and firing
+      // broadly is what lets a manual resync REPAIR an org whose revenue post
+      // failed earlier.
+      const { reservationCount } = await syncHostawayReservations({
+        step,
+        logger,
+        token,
+        orgId:         org_id,
+        userId:        user_id,
+        propertyIdMap: propertyIdMap as Record<string, string>,
+        fetchMode:     { kind: 'window', historyMonths: INITIAL_SYNC_HISTORY_MONTHS },
+        system:        SYSTEM,
+        revenueMode:   'all',
       })
 
-      if (newTurnoverIds.length > 0) {
-        const turnoverEvents = await step.run('fetch-new-turnover-data', async () => {
-        const supabase = createServiceClient({ system: 'inngest:initial-sync' })
-        return fetchTurnoverCreatedEvents(supabase, newTurnoverIds, org_id)
-      })
+      // ── 5. Guidebook ────────────────────────────────────────────────────────
+      await syncGuidebookForOrg(step, logger, org_id, PROVIDER, `[Hostaway:${user_id}]`)
 
-        if (turnoverEvents.length > 0) {
-          await step.sendEvent('fire-turnover-created-events', turnoverEvents)
-        }
-      }
-
-      // ── 5. Mark sync as complete ──────────────────────────────────────
+      // ── 6. Mark complete ────────────────────────────────────────────────────
       await step.run('mark-complete', async () => {
-        await updateConnectionMetadata(user_id, {
-          last_sync_status: 'success',
-          last_sync_error:  null,
-          last_synced_at:   new Date().toISOString(),
-          last_sync_count:  reservationCount,
+        await mergeIntegrationConnectionMetadata({
+          userId:     user_id,
+          providerId: PROVIDER,
+          patch: {
+            last_sync_status: 'success',
+            last_sync_error:  null,
+            last_synced_at:   new Date().toISOString(),
+            last_sync_count:  reservationCount,
+            properties_found: propertyIds.length,
+            bookings_found:   reservationCount,
+          },
         })
       })
 
+      logger.info(
+        `[Hostaway:${user_id}] Initial sync complete — ` +
+        `${propertyIds.length} properties, ${reservationCount} bookings`
+      )
+
       return {
-        properties:    Object.keys(propertyIdMap).length,
-        reservations:  reservationCount,
-        turnovers_for: affectedPropertyIds.length,
+        properties:   propertyIds.length,
+        reservations: reservationCount,
       }
     } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err)
+      const msg         = err instanceof Error ? err.message : String(err)
+      const friendlyMsg = translateSyncError(err, 'Hostaway')
       logger.error(`[Hostaway:${user_id}] initial sync failed: ${msg}`)
-      reportError(err, { site: 'inngest.hostaway-initial-sync.mark-complete' })
+      reportError(err, { site: 'inngest.hostaway-initial-sync' })
 
-      await step.run('handle-sync-failure', async () => {
-        const supabase = createServiceClient({ system: 'inngest:initial-sync' })
-        const { error: statusUpdateError } = await supabase
-          .from('integration_connections')
-          .update({ status: 'error' })
-          .eq('user_id', user_id)
-          .eq('provider_id', PROVIDER)
-
-        if (statusUpdateError) {
-          logger.error(`[Hostaway:${user_id}] failed to mark connection status error: ${statusUpdateError.message}`)
-          reportError(statusUpdateError, { site: 'inngest.hostaway-initial-sync.handle-sync-failure', orgId: org_id })
-        }
-
-        await updateConnectionMetadata(user_id, {
-          last_sync_status: 'error',
-          last_sync_error:  msg,
-          last_synced_at:   new Date().toISOString(),
+      await step.run('handle-failure', async () => {
+        await mergeIntegrationConnectionMetadata({
+          userId:     user_id,
+          providerId: PROVIDER,
+          status:     'error',
+          patch: {
+            last_sync_status: 'error',
+            last_sync_error:  friendlyMsg,
+            last_synced_at:   new Date().toISOString(),
+          },
         })
       })
 
@@ -262,58 +186,3 @@ export const hostawayInitialSync = inngest.createFunction(
     }
   }
 )
-
-// ── Helpers ────────────────────────────────────────────────────────────────
-
-async function updateConnectionMetadata(
-  userId: string,
-  patch:  Record<string, Json>
-): Promise<void> {
-  const supabase = createServiceClient({ system: 'inngest:initial-sync' })
-  const existingRes = await supabase
-    .from('integration_connections')
-    .select('metadata')
-    .eq('user_id', userId)
-    .eq('provider_id', PROVIDER)
-    .maybeSingle()
-  const existing = unwrap(existingRes, {
-    site:  'inngest.hostaway-initial-sync.updateConnectionMetadata',
-    extra: { user_id: userId },
-  })
-
-  const existingMeta = asJsonObject(existing?.metadata) ?? {}
-
-  const { error } = await supabase
-    .from('integration_connections')
-    .update({ metadata: { ...existingMeta, ...patch } })
-    .eq('user_id', userId)
-    .eq('provider_id', PROVIDER)
-
-  if (error) {
-    console.error(`[Hostaway] connection metadata update failed for ${userId}:`, error)
-    reportError(error, { site: 'inngest.hostaway-initial-sync.updateConnectionMetadata', extra: { user_id: userId } })
-    throw new Error(error.message)
-  }
-}
-
-function mapHostawayStatus(status: string): 'confirmed' | 'tentative' | 'cancelled' {
-  switch (status) {
-    case 'confirmed':
-    case 'modified':   return 'confirmed'
-    case 'tentative':
-    case 'new':
-    case 'inquiry':     return 'tentative'
-    case 'cancelled':   return 'cancelled'
-    default:            return unmappedBookingStatus('hostaway', status)
-  }
-}
-
-function mapHostawayChannel(channel?: string): 'airbnb' | 'vrbo' | 'booking_com' | 'direct' | 'other' {
-  if (!channel) return 'other'
-  const c = channel.toLowerCase()
-  if (c.includes('airbnb'))                          return 'airbnb'
-  if (c.includes('vrbo') || c.includes('homeaway'))  return 'vrbo'
-  if (c.includes('booking'))                         return 'booking_com'
-  if (c.includes('direct'))                          return 'direct'
-  return 'other'
-}

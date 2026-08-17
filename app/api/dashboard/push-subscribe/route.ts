@@ -1,4 +1,4 @@
-import { tryUnwrap } from '@/lib/supabase/unwrap'
+import { tryUnwrap, reportQueryError } from '@/lib/supabase/unwrap'
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient }              from '@/lib/supabase/server'
 
@@ -45,8 +45,13 @@ export async function POST(request: NextRequest) {
       { onConflict: 'user_id,endpoint' }
     )
 
-  if (error) {
-    console.error('[push-subscribe] upsert failed:', error.message)
+  // reportQueryError, not console.error. This route carried the SAME 42P10
+  // upsert defect as the crew route from 2026-06-20 to 2026-08-17, and only the
+  // crew one ever raised a Sentry issue — because that one reports and this one
+  // logged to a console nobody reads. Two months of PM-side push opt-in failing
+  // with no signal anywhere. The bug was in the index; the two-month delay in
+  // finding it was here.
+  if (reportQueryError(error, { site: 'route.dashboard.pushSubscribe', orgId: membership.org_id })) {
     return NextResponse.json({ error: 'Failed to save subscription' }, { status: 500 })
   }
 

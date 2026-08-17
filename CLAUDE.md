@@ -1433,34 +1433,35 @@ following them stops being a memory test. Five layers, checked in CI via
    enforces the empty-prod and ceiling rules with no DB access.
 
    **Cross-tenant isolation probe** (`scripts/rls-isolation-probe.sql` via
-   `scripts/run-rls-probe.sh`, same `db-invariants` CI job, fourth step) — the
-   only check anywhere that measures what an authenticated user can actually
-   SEE, rather than what the schema says. Checks 11-13 above read policy
-   SHAPE; a policy scoped to the wrong column or joined through the wrong
-   relation is well-formed and passes all of them. This impersonates a real
-   user the way PostgREST does (`SET ROLE authenticated` +
-   `request.jwt.claims`, which is what `auth.uid()` reads) and counts foreign-
-   org rows visible across 12 tables. Always 0 if RLS is right.
-   **Three things make a zero mean something, and all three are asserted, not
-   printed for a human to notice:** it SEEDS its own foreign tenant rather
+   `scripts/run-rls-probe.sh`) — a MANUAL audit, deliberately NOT a CI gate.
+   Listed here because it is the only thing anywhere that measures what an
+   authenticated user can actually SEE rather than what the schema says: checks
+   11-13 read policy SHAPE, and a policy scoped to the wrong column or joined
+   through the wrong relation is well-formed and passes all of them. It
+   impersonates a real user the way PostgREST does (`SET ROLE authenticated` +
+   `request.jwt.claims`, which is what `auth.uid()` reads) and counts
+   foreign-org rows across 12 tables. Always 0 if RLS is right; last run
+   2026-08-17 against production, 1079 foreign rows present, 0 visible.
+   **Three things make a zero mean something, and all three are asserted rather
+   than printed for a human to notice:** it SEEDS its own foreign tenant rather
    than hoping one exists (the E2E project has exactly ONE org — without the
-   seed this gate would have been green from day one while proving nothing);
-   it seeds a row in the user's OWN org and requires it to be visible (the
-   E2E project's ambient tenant data is created and torn down by the
-   Playwright suite, so an assertion on it went 1 → 0 within a minute); and it
-   plants a CANARY — a throwaway table with a deliberately blanket-true policy
-   that the probe must be able to see, because a blind probe and a passing one
-   produce the same row of zeros. Everything is inside one transaction that
-   ends in `ROLLBACK`, which is what makes it safe to point at production
-   (`pnpm run check:rls-isolation:prod`). It is bash + psql rather than
-   another `.mjs` because it needs a session that can hold a transaction
-   across the role switch, which PostgREST cannot do, and an RPC cannot do
-   either — Postgres rejects `SET ROLE` inside a `SECURITY DEFINER` function,
-   and owning that function as `authenticated` fails at creation since that
-   role has no CREATE on schema `public`. Opt-in armed via the
-   `SUPABASE_E2E_DB_URL` secret plus the `RLS_PROBE_ARMED=1` repo variable
-   (see `docs/E2E_SETUP.md` §4a); kept wired by
-   `unit/guardrails/ci-gating.test.ts`.
+   seed it would report all-zero while proving nothing); it seeds a row in the
+   user's OWN org and requires it to be visible (E2E's ambient tenant data is
+   created and torn down by the Playwright suite, so an assertion on it went
+   1 → 0 within a minute); and it plants a CANARY — a throwaway table with a
+   deliberately blanket-true policy the probe must be able to see, because a
+   blind probe and a passing one produce the same row of zeros. Everything is
+   inside one transaction ending in `ROLLBACK`, which is what makes
+   `pnpm run check:rls-isolation:prod` safe. bash + psql rather than another
+   `.mjs` because it needs a session that can hold a transaction across the
+   role switch: PostgREST cannot, and an RPC cannot either — Postgres rejects
+   `SET ROLE` inside a `SECURITY DEFINER` function, and owning that function as
+   `authenticated` fails at creation since that role has no CREATE on schema
+   `public`. **It was a CI step for a few hours on 2026-08-17 and was removed**:
+   the session connection is a second secret, the gate got armed before that
+   secret existed, and the job then failed three consecutive runs for a reason
+   no code change could fix. If you re-wire it, add the secret BEFORE arming
+   anything — see `docs/E2E_SETUP.md` §4a.
 
 5. **Semgrep rules** (`.semgrep/`, CI `semgrep` job) — real TypeScript AST
    matching, so a rule survives reformatting, renamed intermediates, and

@@ -76,6 +76,12 @@
  *   failure instead.
  */
 
+// Node builtins only — this script runs in the db-invariants CI job, which has
+// no `pnpm install` step. Enforced by unit/guardrails/ci-gating.test.ts, which
+// fails locally on any bare-specifier import here.
+import { readdirSync, readFileSync } from 'node:fs'
+import { join } from 'node:path'
+
 const url = process.env.NEXT_PUBLIC_SUPABASE_URL
 const key = process.env.SUPABASE_SERVICE_ROLE_KEY
 
@@ -101,6 +107,31 @@ if (!url || !key) {
       'Follow docs/E2E_SETUP.md to arm the gate.'
   )
   process.exit(0)
+}
+
+/**
+ * Calls a read-only introspection RPC and returns its rows, or null when the
+ * function is not deployed on the target project (so the caller can fail with a
+ * message naming the migration rather than a TypeError).
+ *
+ * Status code only in the log — the response body is network-controlled data and
+ * does not belong in CI output (Sonar S5145).
+ */
+async function rpc(fn) {
+  const r = await fetch(new URL(`/rest/v1/rpc/${fn}`, url), {
+    method: 'POST',
+    headers: {
+      apikey: key,
+      authorization: `Bearer ${key}`,
+      'content-type': 'application/json',
+    },
+    body: '{}',
+  })
+  if (!r.ok) {
+    console.error(`${fn}() RPC failed: HTTP ${r.status}`)
+    return null
+  }
+  return r.json()
 }
 
 const PROD_PROJECT_REF = 'vpmznjktllhmmbfnxuvk'
@@ -600,6 +631,152 @@ if (noWithCheck.length > 0) {
       'they may be updated TO. Without it a row can be written to a value the ' +
       'policy would never have selected — including another org\'s id.'
   )
+}
+
+// 14. Every `.upsert(..., { onConflict: 'a,b' })` must name an arbiter that
+//     Postgres can actually resolve.
+//
+//     This exists because it already shipped and cost a feature outright. On
+//     2026-06-20 a migration replaced push_subscriptions' plain unique
+//     constraint with two PARTIAL unique indexes. Postgres can only use a
+//     partial index as an ON CONFLICT arbiter when the statement supplies the
+//     matching predicate (`ON CONFLICT (cols) WHERE ...`), and Supabase JS's
+//     `onConflict` takes a column list with no way to express one — so both
+//     push-subscribe routes raised 42P10 on every request. push_subscriptions
+//     held ZERO rows for two months: nobody, crew or PM, had ever successfully
+//     subscribed to a push notification.
+//
+//     An EXPRESSION index (e.g. `(org_id, lower(email))`) is unnamable for the
+//     same reason, which is why has_expression is checked too.
+//
+//     Not a text-only guardrail: the source says `onConflict: 'a,b'` and only
+//     the live catalog knows whether an index matching those columns exists and
+//     is plain. That split is exactly why nothing caught this in June.
+const UPSERT_ARBITER_ALLOWLIST = new Set([
+  // SHRINK-ONLY, and every entry is a live bug rather than an exemption.
+  //
+  // vendors.(org_id,email) — app/actions/work-order-public.ts. The only
+  // matching unique index is `(org_id, lower(email)) WHERE email IS NOT NULL`:
+  // partial AND an expression, so the upsert throws 42P10 the same way the push
+  // routes did. Counted rather than suppressed because the remedy is not a
+  // like-for-like index swap — lower(email) is deliberate case-insensitivity,
+  // so fixing it means normalizing email on write (and backfilling) or moving
+  // the write into an RPC that can spell the predicate. Doing that inside a
+  // production hotfix for an unrelated table was the wrong trade.
+  'vendors:org_id,email',
+
+  // checklist_templates.(property_id,org_id) — lib/inngest/functions/
+  // checklist-broadcast.ts. There is NO unique index on that pair at all, and
+  // adding one would be wrong: a property is meant to have several named
+  // templates with one default (which is what the existing partial
+  // uniq_checklist_templates_one_default_per_property enforces). A unique on
+  // (property_id, org_id) would cap it at one template per property. So the
+  // onConflict is the defect here, not a missing index, and the fix is a code
+  // change to that broadcast — out of scope for a production hotfix.
+  'checklist_templates:property_id,org_id',
+])
+
+const ONCONFLICT_RE = /onConflict:\s*'([^']+)'/g
+const FROM_TABLE_RE = /\.from\(\s*'([a-z_][a-z0-9_]*)'\s*\)/g
+
+/** Every `.tsx?` file under `dir`, recursively. */
+function sourceFilesUnder(dir) {
+  let entries
+  try {
+    entries = readdirSync(dir, { withFileTypes: true })
+  } catch {
+    // A root that does not exist is not a failure — this script also runs from
+    // a checkout where `components/` may be absent. Anything else here would be
+    // a permissions problem the very next read would surface anyway.
+    return []
+  }
+
+  return entries.flatMap((entry) => {
+    const path = join(dir, entry.name)
+    if (entry.isDirectory()) return entry.name === 'node_modules' ? [] : sourceFilesUnder(path)
+    return /\.tsx?$/.test(entry.name) ? [path] : []
+  })
+}
+
+/**
+ * Each `onConflict: 'a,b'` in a file, paired with the nearest PRECEDING
+ * `.from('table')` — which is how every one of these chains is written.
+ */
+function onConflictSitesIn(file) {
+  const src = readFileSync(file, 'utf8')
+  if (!src.includes('onConflict')) return []
+
+  return [...src.matchAll(ONCONFLICT_RE)].flatMap((match) => {
+    const preceding = [...src.slice(0, match.index).matchAll(FROM_TABLE_RE)]
+    const table = preceding.at(-1)?.[1]
+    if (!table) return []
+    return [{ file, table, columns: match[1].split(',').map((c) => c.trim()) }]
+  })
+}
+
+const onConflictSites = ['app', 'lib', 'components']
+  .flatMap(sourceFilesUnder)
+  .flatMap(onConflictSitesIn)
+
+const shapesRes = await rpc('unique_index_shapes')
+if (shapesRes === null) {
+  failures.push(
+    'unique_index_shapes() RPC is missing — has ' +
+      'supabase/migrations/20260817172241_push_subscriptions_plain_unique_indexes.sql ' +
+      'been applied to this project?'
+  )
+} else {
+  /**
+   * Do two column lists name the same columns, order-independent?
+   *
+   * ON CONFLICT does not care about key order — `(a, b)` and `(b, a)` name the
+   * same arbiter — so this compares as sets.
+   *
+   * Set membership rather than sort-and-join, which is what this was. Sorting
+   * without a comparator is Sonar S2871 (a CRITICAL bug, because the default
+   * sort stringifies its elements), and the usual fix of passing a comparator
+   * would only be satisfying the rule: these are index key columns, so they are
+   * unique by definition and there was never anything for an ORDER to mean.
+   * Membership says what is actually being asked, and is O(n) rather than
+   * O(n log n) besides.
+   */
+  const sameSet = (a, b) => {
+    if (a.length !== b.length) return false
+    const inA = new Set(a)
+    return b.every((column) => inA.has(column))
+  }
+
+  const unnamable = []
+
+  for (const site of onConflictSites) {
+    const key = `${site.table}:${site.columns.join(',')}`
+    if (UPSERT_ARBITER_ALLOWLIST.has(key)) continue
+
+    const candidates = shapesRes.filter((s) => s.table_name === site.table)
+    const usable = candidates.some(
+      (s) => !s.is_partial && !s.has_expression && sameSet(s.key_columns ?? [], site.columns),
+    )
+    if (!usable) {
+      const near = candidates
+        .filter((s) => sameSet(s.key_columns ?? [], site.columns))
+        .map((s) => `${s.index_name}${s.is_partial ? ' [PARTIAL]' : ''}${s.has_expression ? ' [EXPRESSION]' : ''}`)
+      unnamable.push(
+        `${site.file}: .from('${site.table}') onConflict '${site.columns.join(',')}'` +
+          (near.length ? ` — matching index is unusable as an arbiter: ${near.join(', ')}` : ' — no unique index on those columns'),
+      )
+    }
+  }
+
+  if (unnamable.length > 0) {
+    failures.push(
+      `upsert onConflict targets with no resolvable arbiter:\n  ${unnamable.join('\n  ')}\n` +
+        '  Postgres raises 42P10 at RUNTIME for each of these — the upsert never ' +
+        'succeeds. A PARTIAL index needs `ON CONFLICT (cols) WHERE <predicate>`, ' +
+        'and an EXPRESSION index cannot be named by a column list at all; ' +
+        "Supabase JS's onConflict can express neither. Either make the unique " +
+        'index plain, or move the write into an RPC that spells the predicate.'
+    )
+  }
 }
 
 // ── Verdict ───────────────────────────────────────────────────────────────
