@@ -1,31 +1,66 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
+import { NonRetriableError } from 'inngest'
 
-vi.mock('@/lib/supabase/server', () => ({
-  createServiceClient: vi.fn(),
-}))
+// ============================================================================
+// hostawayInitialSync is now ORCHESTRATION: read a token, map listings through
+// upsertNormalizedProperties, seed checklists, hand reservations to the shared
+// pipeline, sync the guidebook, mark complete. The mapping judgment lives in
+// unit/integrations/hostaway-mappers.test.ts and the write behaviour is covered
+// where the shared writers are tested.
+//
+// So this file asserts the things only the orchestration can get wrong — the
+// ones that would compile perfectly and still be defects:
+//
+//   - going through the SHARED property writer rather than a raw upsert (the
+//     2026-07-25 version's hand-rolled one invented room counts and kept no
+//     content-overwrite audit trail)
+//   - revenueMode 'all', without which no revenue reaches owner_transactions —
+//     the documented reason Hostaway was switched off
+//   - 12 months of history, since Hostaway's /reservations defaults to 90 days
+//   - a missing token failing NON-retriably
+//   - a failure still recording last_sync_error for the PM
+// ============================================================================
+
 vi.mock('@/lib/integrations/vault', () => ({
   readIntegrationToken: vi.fn(),
 }))
 vi.mock('@/lib/integrations/providers/hostaway', () => ({
-  hostawayFetchListings:     vi.fn(),
-  hostawayFetchReservations: vi.fn(),
+  hostawayFetchListings: vi.fn(),
 }))
-vi.mock('@/lib/turnovers/generator', () => ({
-  generateTurnoversForProperty: vi.fn(),
+vi.mock('@/lib/properties/upsert-normalized', () => ({
+  upsertNormalizedProperties: vi.fn(),
+}))
+vi.mock('@/lib/inngest/functions/shared/property-onboarding', () => ({
+  applyChecklistsToProperties: vi.fn(),
+  syncGuidebookForOrg:        vi.fn(),
+}))
+vi.mock('@/lib/inngest/functions/hostaway/reservation-sync', () => ({
+  syncHostawayReservations: vi.fn(),
+}))
+vi.mock('@/lib/integrations/connection-metadata', () => ({
+  mergeIntegrationConnectionMetadata: vi.fn(),
+}))
+vi.mock('@/lib/observability/report-error', () => ({
+  reportError: vi.fn(),
 }))
 
 import { hostawayInitialSync } from '@/lib/inngest/functions/hostaway/initial-sync'
-import { createServiceClient } from '@/lib/supabase/server'
 import { readIntegrationToken } from '@/lib/integrations/vault'
-import { hostawayFetchListings, hostawayFetchReservations } from '@/lib/integrations/providers/hostaway'
-import { generateTurnoversForProperty } from '@/lib/turnovers/generator'
+import { hostawayFetchListings } from '@/lib/integrations/providers/hostaway'
+import { upsertNormalizedProperties } from '@/lib/properties/upsert-normalized'
+import { applyChecklistsToProperties, syncGuidebookForOrg } from '@/lib/inngest/functions/shared/property-onboarding'
+import { syncHostawayReservations } from '@/lib/inngest/functions/hostaway/reservation-sync'
+import { mergeIntegrationConnectionMetadata } from '@/lib/integrations/connection-metadata'
 import { invokeHandler } from './test-helpers'
 
-// Vault and the Hostaway HTTP client are mocked at the module boundary;
-// every other read/write in this function goes directly through Supabase
-// (there's no separate normalizer module to mock the way Hospitable has),
-// so the step stub below runs every step.run() for real and the Supabase
-// mock queue drives the rest.
+const EVENT_DATA = {
+  user_id:     'user_1',
+  org_id:      'org_1',
+  provider_id: 'hostaway',
+  full_sync:   true,
+}
+
+/** Runs every step.run() body for real; the module mocks drive the rest. */
 function makeRunAllStep() {
   return {
     run:       vi.fn((_name: string, cb: () => unknown) => cb()),
@@ -34,157 +69,124 @@ function makeRunAllStep() {
   }
 }
 
-// HandlerContext's logger type only declares info/error; returning it from
-// a function (rather than a literal at the call site) sidesteps TS's
-// excess-property check so this stub can still safely absorb a stray
-// logger.warn call from the real function if one is ever added.
 function makeLogger() {
   return { info: vi.fn(), warn: vi.fn(), error: vi.fn() }
 }
 
-interface QueuedByTable { [table: string]: unknown[] }
+const mock = (fn: unknown) => fn as ReturnType<typeof vi.fn>
 
-function makeSupabase(queued: QueuedByTable) {
-  const counters: Record<string, number> = {}
-  const calls: { table: string; method: string; args: unknown[] }[] = []
-
-  const from = vi.fn((table: string) => {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const chain: any = {}
-    const record = (method: string, args: unknown[]) => {
-      calls.push({ table, method, args })
-      return chain
-    }
-    chain.select = (...a: unknown[]) => record('select', a)
-    chain.update = (...a: unknown[]) => record('update', a)
-    chain.upsert = (...a: unknown[]) => record('upsert', a)
-    chain.eq     = (...a: unknown[]) => record('eq', a)
-    chain.in     = (...a: unknown[]) => record('in', a)
-    chain.limit  = (...a: unknown[]) => record('limit', a)
-
-    const resolveNext = () => {
-      const idx = counters[table] ?? 0
-      counters[table] = idx + 1
-      const result = queued[table]?.[idx] ?? { data: null, error: null }
-      return Promise.resolve(result)
-    }
-
-    chain.single      = () => resolveNext()
-    chain.maybeSingle = () => resolveNext()
-    chain.then = (resolve: (v: unknown) => unknown, reject?: (e: unknown) => unknown) =>
-      resolveNext().then(resolve, reject)
-    return chain
+function run() {
+  return invokeHandler(hostawayInitialSync, {
+    event:  { data: EVENT_DATA },
+    step:   makeRunAllStep(),
+    logger: makeLogger(),
   })
-
-  return { from, calls }
 }
 
-const EVENT_DATA = { user_id: 'user_1', org_id: 'org_1', provider_id: 'hostaway', full_sync: true }
-
-function listing(id: number) {
-  return {
-    id, name: `Listing ${id}`, externalListingName: `Listing ${id}`,
-    address: null, city: null, state: null, zipcode: null, lat: null, lng: null,
-    bedrooms: 2, bathrooms: 1, maxGuests: 4,
-  }
-}
+beforeEach(() => {
+  vi.clearAllMocks()
+  mock(readIntegrationToken).mockResolvedValue('token_abc')
+  mock(hostawayFetchListings).mockResolvedValue([
+    { id: 101, name: 'A' },
+    { id: 102, name: 'B' },
+  ])
+  mock(upsertNormalizedProperties).mockResolvedValue({ '101': 'uuid-101', '102': 'uuid-102' })
+  mock(syncHostawayReservations).mockResolvedValue({ reservationCount: 7, newTurnoverIds: [] })
+  mock(mergeIntegrationConnectionMetadata).mockResolvedValue({})
+})
 
 describe('hostawayInitialSync', () => {
-  beforeEach(() => {
-    vi.clearAllMocks()
+  it('imports properties through the SHARED normalized writer', async () => {
+    await run()
+
+    expect(upsertNormalizedProperties).toHaveBeenCalledTimes(1)
+    const [orgId, provider, normalized] = mock(upsertNormalizedProperties).mock.calls[0]
+    expect(orgId).toBe('org_1')
+    expect(provider).toBe('hostaway')
+    // Mapped, not raw listings — the raw shape has `id`, the normalized one
+    // has `external_id` and nullable room counts.
+    expect(normalized).toHaveLength(2)
+    expect(normalized[0]).toMatchObject({ external_id: '101', bedrooms: null })
   })
 
-  it('upserts properties and bookings with the idempotent conflict target, regenerating turnovers only for touched properties', async () => {
-    const supabase = makeSupabase({
-      properties: [
-        { error: null }, // fetch-and-upsert-properties: upsert ack
-        {
-          data: [
-            { id: 'prop_uuid_101', external_id: '101' },
-            { id: 'prop_uuid_102', external_id: '102' },
-            { id: 'prop_uuid_103', external_id: '103' },
-          ],
-          error: null,
-        }, // fetch-and-upsert-properties: re-select
-      ],
-      bookings: [{ error: null }], // fetch-and-upsert-bookings: upsert ack
-      integration_connections: [
-        { data: { metadata: {} }, error: null }, { error: null }, // updateConnectionMetadata (properties_found)
-        { data: { metadata: {} }, error: null }, { error: null }, // updateConnectionMetadata (bookings_found)
-        { data: { metadata: {} }, error: null }, { error: null }, // mark-complete
-      ],
-    })
-    ;(createServiceClient as ReturnType<typeof vi.fn>).mockReturnValue(supabase)
-    ;(readIntegrationToken as ReturnType<typeof vi.fn>).mockResolvedValue('token_abc')
-    ;(hostawayFetchListings as ReturnType<typeof vi.fn>).mockResolvedValue([listing(101), listing(102), listing(103)])
-    ;(hostawayFetchReservations as ReturnType<typeof vi.fn>).mockResolvedValue([
-      { id: 5001, listingId: 101, guestName: 'Jane', guestEmail: 'jane@x.com', arrivalDate: '2026-08-01', departureDate: '2026-08-05', status: 'confirmed', channelName: 'Airbnb' },
-      { id: 5002, listingId: 999, guestName: 'Nowhere', guestEmail: null, arrivalDate: '2026-08-02', departureDate: '2026-08-04', status: 'confirmed', channelName: 'Vrbo' }, // unmatched listing — must be skipped
-      { id: 5003, listingId: 102, guestName: 'Bob', guestEmail: null, arrivalDate: '2026-08-06', departureDate: '2026-08-09', status: 'new', channelName: 'direct' },
-    ])
-    ;(generateTurnoversForProperty as ReturnType<typeof vi.fn>).mockResolvedValue([])
+  it("posts revenue with revenueMode 'all' — the reason it was switched off", async () => {
+    await run()
 
-    const step = makeRunAllStep()
-    const result = await invokeHandler(hostawayInitialSync, {
-      event:  { data: EVENT_DATA },
-      step,
-      logger: makeLogger(),
-    })
-
-    expect(result).toEqual({ properties: 3, reservations: 3, turnovers_for: 2 })
-
-    const propertiesUpsert = supabase.calls.find((c) => c.table === 'properties' && c.method === 'upsert')
-    expect(propertiesUpsert?.args[1]).toEqual({ onConflict: 'org_id,external_id,external_source' })
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    expect((propertiesUpsert?.args[0] as any[]).map((r) => r.external_id).sort()).toEqual(['101', '102', '103'])
-
-    const bookingsUpsert = supabase.calls.find((c) => c.table === 'bookings' && c.method === 'upsert')
-    expect(bookingsUpsert?.args[1]).toEqual({ onConflict: 'org_id,external_id,external_source' })
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const bookingRows = bookingsUpsert?.args[0] as any[]
-    expect(bookingRows).toHaveLength(2)
-    expect(bookingRows.map((r) => r.external_id).sort()).toEqual(['5001', '5003'])
-    expect(bookingRows.find((r) => r.external_id === '5001')?.status).toBe('confirmed')
-    expect(bookingRows.find((r) => r.external_id === '5003')?.status).toBe('tentative') // 'new' maps to tentative
-
-    // Turnovers are only regenerated for properties that actually received a
-    // booking (101, 102) — property 103 was synced but never touched.
-    expect(generateTurnoversForProperty).toHaveBeenCalledTimes(2)
-    expect(generateTurnoversForProperty).toHaveBeenCalledWith('prop_uuid_101', 'org_1', supabase)
-    expect(generateTurnoversForProperty).toHaveBeenCalledWith('prop_uuid_102', 'org_1', supabase)
-    expect(generateTurnoversForProperty).not.toHaveBeenCalledWith('prop_uuid_103', 'org_1', supabase)
+    expect(syncHostawayReservations).toHaveBeenCalledTimes(1)
+    const params = mock(syncHostawayReservations).mock.calls[0][0]
+    // 'all' rather than 'new-only': the post is idempotent, and firing broadly
+    // is what lets a manual resync REPAIR an org whose revenue post failed.
+    expect(params.revenueMode).toBe('all')
+    expect(params.propertyIdMap).toEqual({ '101': 'uuid-101', '102': 'uuid-102' })
   })
 
-  it('completes cleanly with no writes when the org has no listings or reservations yet', async () => {
-    const supabase = makeSupabase({
-      integration_connections: [
-        { data: { metadata: {} }, error: null }, { error: null }, // properties_found
-        { data: { metadata: {} }, error: null }, { error: null }, // bookings_found
-        { data: { metadata: {} }, error: null }, { error: null }, // mark-complete
-      ],
-    })
-    ;(createServiceClient as ReturnType<typeof vi.fn>).mockReturnValue(supabase)
-    ;(readIntegrationToken as ReturnType<typeof vi.fn>).mockResolvedValue('token_abc')
-    ;(hostawayFetchListings as ReturnType<typeof vi.fn>).mockResolvedValue([])
-    ;(hostawayFetchReservations as ReturnType<typeof vi.fn>).mockResolvedValue([])
+  it('asks for 12 months of history, not Hostaway\'s 90-day default', async () => {
+    await run()
 
-    const step = makeRunAllStep()
-    const result = await invokeHandler(hostawayInitialSync, {
-      event:  { data: EVENT_DATA },
-      step,
-      logger: makeLogger(),
-    })
+    const params = mock(syncHostawayReservations).mock.calls[0][0]
+    expect(params.fetchMode).toEqual({ kind: 'window', historyMonths: 12 })
+  })
 
-    expect(result).toEqual({ properties: 0, reservations: 0, turnovers_for: 0 })
-    expect(supabase.calls.some((c) => c.table === 'properties')).toBe(false)
-    expect(supabase.calls.some((c) => c.table === 'bookings')).toBe(false)
-    expect(generateTurnoversForProperty).not.toHaveBeenCalled()
+  it('seeds checklists and guidebook config so imported properties are not inert', async () => {
+    await run()
 
-    const lastMetaUpdate = [...supabase.calls].reverse().find(
-      (c) => c.table === 'integration_connections' && c.method === 'update'
+    expect(applyChecklistsToProperties).toHaveBeenCalledWith(
+      expect.anything(), 'org_1', ['uuid-101', 'uuid-102'], expect.any(String),
     )
-    const metadata = (lastMetaUpdate?.args[0] as { metadata: Record<string, unknown> }).metadata
-    expect(metadata.last_sync_status).toBe('success')
-    expect(metadata.last_sync_count).toBe(0)
+    expect(syncGuidebookForOrg).toHaveBeenCalledTimes(1)
+  })
+
+  it('records success metadata with the counts the PM sees', async () => {
+    const result = await run()
+
+    expect(result).toEqual({ properties: 2, reservations: 7 })
+    expect(mergeIntegrationConnectionMetadata).toHaveBeenCalledWith(
+      expect.objectContaining({
+        userId:     'user_1',
+        providerId: 'hostaway',
+        patch: expect.objectContaining({
+          last_sync_status: 'success',
+          last_sync_error:  null,
+          properties_found: 2,
+          bookings_found:   7,
+        }),
+      }),
+    )
+  })
+
+  it('skips the property writer entirely when the account has no listings', async () => {
+    mock(hostawayFetchListings).mockResolvedValue([])
+
+    const result = await run()
+
+    expect(upsertNormalizedProperties).not.toHaveBeenCalled()
+    expect(result).toEqual({ properties: 0, reservations: 7 })
+  })
+
+  it('fails NON-retriably when there is no token', async () => {
+    mock(readIntegrationToken).mockResolvedValue(null)
+
+    // The TYPE is the assertion, not the message. Retrying cannot conjure a
+    // token — only reconnecting can — so this function is configured with
+    // retries: 4 and must opt out for this one case. A plain Error satisfies
+    // any message matcher while still burning all four retries, which is
+    // exactly what a message-only assertion here failed to catch.
+    await expect(run()).rejects.toBeInstanceOf(NonRetriableError)
+    expect(hostawayFetchListings).not.toHaveBeenCalled()
+  })
+
+  it('records last_sync_error and rethrows when the fetch fails', async () => {
+    mock(hostawayFetchListings).mockRejectedValue(new Error('Hostaway listings fetch failed (401)'))
+
+    await expect(run()).rejects.toThrow(/401/)
+
+    // The PM-visible half: without this the connection looks healthy while
+    // nothing syncs.
+    expect(mergeIntegrationConnectionMetadata).toHaveBeenCalledWith(
+      expect.objectContaining({
+        status: 'error',
+        patch:  expect.objectContaining({ last_sync_status: 'error' }),
+      }),
+    )
   })
 })

@@ -70,7 +70,19 @@ export interface SyncLogger {
 export type RevenueMode = 'all' | 'new-only'
 
 /** The providers whose reservations flow through here. */
-export type ReservationProvider = 'hospitable' | 'hostex'
+export type ReservationProvider = 'hospitable' | 'hostex' | 'hostaway'
+
+/**
+ * Log-line prefix per provider. A lookup rather than a ternary chain: with
+ * three providers the chain's fallback silently mislabels any new member as
+ * the last branch, which is how a Hostaway sync would have logged itself as
+ * `[Hospitable:<id>]` and sent someone reading the logs to the wrong file.
+ */
+const PROVIDER_LABELS: Record<ReservationProvider, string> = {
+  hospitable: 'Hospitable',
+  hostex:     'Hostex',
+  hostaway:   'Hostaway',
+}
 
 export interface ReservationPipelineParams {
   step:     SyncStep
@@ -105,7 +117,7 @@ export async function runReservationPipeline(
 ): Promise<ReservationPipelineResult> {
   const { step, logger, provider, orgId, userId, propertyIdMap, reservations, system, revenueMode } = params
 
-  const label            = `[${provider === 'hostex' ? 'Hostex' : 'Hospitable'}:${userId}]`
+  const label            = `[${PROVIDER_LABELS[provider]}:${userId}]`
   const providerPropIds  = Object.keys(propertyIdMap)
 
   // ── 1. Upsert as bookings ────────────────────────────────────────────────

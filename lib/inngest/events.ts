@@ -36,12 +36,17 @@ export type FieldStayEvents = {
       booking_id:  string
       property_id: string
       org_id:      string
-      source:      'ownerrez' | 'uplisting' | 'hospitable' | 'hostex'
+      source:      'ownerrez' | 'uplisting' | 'hospitable' | 'hostex' | 'hostaway'
       // Real total booking revenue, when the PMS reports one — populated
       // for 'hospitable' (📄 spec, pending financials:read), 'ownerrez'
       // (✅ confirmed live 2026-07-15, via charges[].owner_amount /
-      // total_amount) and 'hostex' (✅ confirmed against the /reservations
-      // schema, via rates.total_rate minus rates.total_commission).
+      // total_amount), 'hostex' (✅ confirmed against the /reservations
+      // schema, via rates.total_rate minus rates.total_commission) and
+      // 'hostaway' (⚠️ GROSS — reservations.totalPrice is the guest-facing
+      // total and the shape typed in hostaway.ts carries no commission or
+      // payout field to net it against, so this OVERSTATES owner revenue by
+      // the channel's cut. See extractHostawayActualTotal in
+      // hostaway.mappers.ts for why gross still beats the estimate below).
       // Absent/null falls back to the existing
       // nights * avg_nightly_rate estimate in booking-events.ts.
       actual_total_amount?: number | null

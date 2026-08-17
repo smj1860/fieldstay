@@ -1,5 +1,25 @@
 # Hostaway Enablement
 
+> **REVISED 2026-08-16, after Hostex shipped.** The original version of this
+> plan sized Phase 2 at "3–5 days mirroring OwnerRez's 1240-line and
+> Hospitable's 804-line incremental syncs." That is no longer the shape of the
+> work. Hostex went live end to end in the 24 hours this was written, and in
+> doing so extracted three shared modules that did not exist before:
+> `shared/reservation-pipeline.ts`, `shared/property-onboarding.ts` and
+> `shared/reconcile-shell.ts`. Hostex's own reservation sync is **103 lines**
+> because everything after "fetch and map" is now provider-agnostic.
+>
+> So Hostaway is being **rebuilt on the Hostex skeleton**, not repaired. The
+> 2026-07-25 implementation's four defects (below) are all consequences of
+> bypassing shared writers that now exist, so going through them is the fix.
+>
+> One correction to the original text: it claimed Hostaway "imports properties
+> with no lat/lng." That was wrong — the hand-rolled upsert did write
+> `lat: listing.lat ?? null`, and Hostaway is in fact the best-supplied of the
+> three providers, returning structured address fields AND coordinates. The
+> claim came from a comment in `upsert-normalized.ts` about *normalizers*, and
+> Hostaway had none. The real property-side defect is the invented room count.
+
 Hostaway was built and then deliberately switched off (product decision,
 2026-07-25). This is the plan to switch it on with **full feature parity** — a
 Hostaway org must be able to use every FieldStay feature an OwnerRez or
@@ -111,24 +131,53 @@ Hostaway has no browser redirect.
 Phase 4 is deliberately last: every surface it re-enables is a way for a
 customer to reach Phases 1–3.
 
-### Phase 1 — make the existing sync correct
-- Add `'hostaway'` to `booking/confirmed.source`
-- Emit `booking/confirmed`, batched (see `ownerrez/initial-sync.ts` for the
-  chunk sizing) with a revenue mode (`hospitable/reservation-sync.ts` already
-  solved `'all' | 'new-only'`), passing `actual_total_amount` from `totalPrice`
-- Replace the hand-rolled property upsert with `upsertNormalizedProperties()`
-- Resolve `is_block` against Hostaway's calendar endpoint
-- Token-expiry warning + reconnect email (no refresh is possible)
+### Phase 1 — rebuild the sync path on the shared spine ✅ DONE
+- `lib/integrations/providers/hostaway.mappers.ts` — the mapping judgment,
+  extracted from the old sync. Room counts nullable (no more `?? 1`),
+  coordinates passed through, 0/0 rejected, blank strings normalized to null.
+- `'hostaway'` added to `ReservationProvider` and `booking/confirmed.source`.
+  The provider label in `reservation-pipeline.ts` became a lookup instead of a
+  ternary chain — with three providers the chain's fallback would have logged
+  every Hostaway sync as `[Hospitable:…]`.
+- `hostaway/reservation-sync.ts` — fetch + map, then `runReservationPipeline`.
+  Discriminated `HostawayFetchMode` (`window` | `ids`) so a webhook run and a
+  cron run cannot be half-specified.
+- `hostaway/initial-sync.ts` — rewritten, not patched: shared property writer,
+  shared checklist/guidebook onboarding, `revenueMode: 'all'`, 12 months of
+  history (Hostaway's endpoint defaults to 90 days).
+- Tests: 39, split so the judgment is tested where it lives — pure mapper tests
+  plus orchestration assertions. Six regression guards canaried by breaking
+  what they protect.
+
+**`is_block` resolved by precedent, not investigation.** It stays `false`,
+documented the way Hostex documents the same absence: manually-blocked owner
+time does not surface through `/reservations` at all — it lives on the calendar
+endpoints — and syncing those is a later phase for both providers. This
+replaces the old `⚠️ Unconfirmed` comment with a decision.
+
+**Still open from Phase 1:** the token-expiry warning + reconnect path. No
+refresh grant exists, so there is no Hostex template for it.
+
+**Known caveat, deliberately shipped:** `actual_total_amount` is Hostaway's
+`totalPrice`, which is the GUEST-FACING GROSS. Hostex nets commission off;
+Hostaway's typed shape has no commission or payout field to subtract. This
+overstates owner revenue by the channel's cut (~3% Airbnb, up to ~15%
+Booking.com). Gross still beats the `nights * avg_nightly_rate` fallback, which
+is unanchored rather than merely high — so it ships named in
+`extractHostawayActualTotal()`, flagged in `events.ts`, and asserted in a test
+that will fail when someone types the payout field.
 
 ### Phase 2 — keep it in sync
-- `incremental-sync.ts` using Hostaway's `updatedAt` filter. Reference sizes:
-  OwnerRez 1240 lines, Hospitable 804. Hostaway's should be smaller.
-- Reconciliation cron + handler (OwnerRez ~290, Hospitable ~210 lines)
+- `reservation-sync.ts` already handles both fetch modes, so this is the
+  reconcile **cron + handler** via `shared/reconcile-shell.ts`. Reference:
+  `hostex/reservation-reconcile-cron.ts` (86 lines) and its handler (141).
 - Register the reconcile-by-absence pass in
   `unit/guardrails/absence-reconciliation.test.ts`. It qualifies for
   `fetch-fails-loud` as written — `hostawayFetchReservations` already throws on
   a non-ok response rather than returning `[]`, which is the exact defect that
   deactivated a Hospitable org's whole crew roster on 2026-07-18.
+- No separate `incremental-sync.ts`: that file only exists for OwnerRez and
+  Hospitable because they predate the shared pipeline.
 
 ### Phase 3 — webhooks
 `validateWebhook()` currently rejects everything (`fail('no webhook signing
