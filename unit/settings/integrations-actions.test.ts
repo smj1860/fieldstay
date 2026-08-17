@@ -13,8 +13,11 @@ vi.mock('@/lib/audit', () => ({
   logAuditEvent: vi.fn(),
 }))
 vi.mock('@/lib/integrations/vault', () => ({
-  readIntegrationToken:       vi.fn(),
-  disconnectIntegrationToken: vi.fn(),
+  readIntegrationToken:        vi.fn(),
+  // Read alongside the access token so a provider that revokes the two
+  // separately (Hostex) can revoke both — see revokeAccessToken's contract.
+  readIntegrationRefreshToken: vi.fn(),
+  disconnectIntegrationToken:  vi.fn(),
 }))
 vi.mock('@/lib/integrations/registry', () => ({
   getProvider: vi.fn(),
@@ -48,7 +51,7 @@ import {
 import { requireOrgMember } from '@/lib/auth'
 import { createServiceClient } from '@/lib/supabase/server'
 import { logAuditEvent } from '@/lib/audit'
-import { readIntegrationToken, disconnectIntegrationToken } from '@/lib/integrations/vault'
+import { readIntegrationToken, readIntegrationRefreshToken, disconnectIntegrationToken } from '@/lib/integrations/vault'
 import { getProvider } from '@/lib/integrations/registry'
 
 import { inngest } from '@/lib/inngest/client'
@@ -266,6 +269,44 @@ describe('settings/integrations/actions', () => {
   })
 
   describe('disconnectIntegration', () => {
+    it('hands the provider BOTH credentials so a separately-revocable refresh token is not left live', async () => {
+      // Hostex issues the two as independent secrets and revokes one per
+      // call, so passing only the access token would leave a refresh token
+      // able to mint new ones for an account the user just disconnected.
+      mockAuthed('admin')
+      const supabase = makeSupabase({
+        integration_connections: [{ data: { user_id: USER_ID }, error: null }],
+      })
+      vi.mocked(createServiceClient).mockReturnValue(supabase as never)
+      vi.mocked(readIntegrationToken).mockResolvedValue('at1')
+      vi.mocked(readIntegrationRefreshToken).mockResolvedValue('rt1')
+      const revokeAccessToken = vi.fn()
+      vi.mocked(getProvider).mockReturnValue({ revokeAccessToken } as never)
+
+      await disconnectIntegration('hostex')
+
+      expect(revokeAccessToken).toHaveBeenCalledWith({ token: 'at1', refreshToken: 'rt1' })
+    })
+
+    it('still disconnects when the refresh-token read itself fails', async () => {
+      // Not a reason to abandon a disconnect the user asked for.
+      mockAuthed('admin')
+      const supabase = makeSupabase({
+        integration_connections: [{ data: { user_id: USER_ID }, error: null }],
+      })
+      vi.mocked(createServiceClient).mockReturnValue(supabase as never)
+      vi.mocked(readIntegrationToken).mockResolvedValue('at1')
+      vi.mocked(readIntegrationRefreshToken).mockRejectedValue(new Error('vault down'))
+      const revokeAccessToken = vi.fn()
+      vi.mocked(getProvider).mockReturnValue({ revokeAccessToken } as never)
+
+      const result = await disconnectIntegration('hostex')
+
+      expect(result).toEqual({})
+      expect(revokeAccessToken).toHaveBeenCalledWith({ token: 'at1', refreshToken: undefined })
+      expect(disconnectIntegrationToken).toHaveBeenCalled()
+    })
+
     it('does not touch the vault when requireOrgMember rejects', async () => {
       vi.mocked(requireOrgMember).mockRejectedValue(new Error('REDIRECT:/login'))
 

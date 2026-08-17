@@ -6,13 +6,13 @@ Common questions about FieldStay that don't fit neatly into a single feature gui
 
 ## Does FieldStay work with the PMS I already use?
 
-FieldStay integrates with OwnerRez and Hospitable today — connect either one from onboarding to sync properties, bookings, and reviews automatically. We are always looking to add more integrations. If you use another PMS, let us know what you use.
+FieldStay integrates with OwnerRez, Hospitable, and Hostex today — connect any one of them from onboarding to sync properties, bookings, and reviews automatically. We are always looking to add more integrations. If you use another PMS, let us know what you use.
 
 ---
 
-## Can I use FieldStay without connecting OwnerRez?
+## Can I use FieldStay without connecting a PMS?
 
-Yes. OwnerRez integration automates the data entry for properties and bookings, but it is not required. You can manually create properties, add bookings, and manage turnovers without a PMS connection. The integration simply eliminates the manual work.
+Yes. A PMS integration automates the data entry for properties and bookings, but it is not required. You can manually create properties, add bookings, and manage turnovers without a PMS connection. The integration simply eliminates the manual work.
 
 ---
 
@@ -40,9 +40,9 @@ Yes. FieldStay is built with security as a core design principle:
 
 ---
 
-## Does FieldStay store my OwnerRez password?
+## Does FieldStay store my PMS password?
 
-No. OwnerRez connection uses OAuth 2.0 — FieldStay receives an access token, not your password. You authorize the connection through OwnerRez's own login screen. FieldStay never sees or stores your OwnerRez credentials.
+No. Every PMS connection — OwnerRez, Hospitable, and Hostex — uses OAuth 2.0, so FieldStay receives an access token, not your password. You authorize through your PMS's own login screen. FieldStay never sees or stores those credentials.
 
 ---
 
@@ -60,17 +60,17 @@ Owners cannot see crew assignments, work order details, inventory counts, or any
 
 ---
 
-## How does FieldStay handle cancellations from OwnerRez?
+## How does FieldStay handle cancellations from my PMS?
 
-When a booking is cancelled in OwnerRez, the webhook fires and FieldStay automatically cancels the associated turnover. The turnover is removed from the active board. Any crew assignments associated with that turnover are cleared. Financial entries already posted for that booking remain in the ledger for your records.
+When a booking is cancelled in your PMS, the webhook fires and FieldStay automatically cancels the associated turnover. The turnover is removed from the active board. Any crew assignments associated with that turnover are cleared. Financial entries already posted for that booking remain in the ledger for your records.
 
 ---
 
 ## Does RepuGuard work with Google or Airbnb reviews?
 
-RepuGuard automatically syncs reviews from your connected PMS — OwnerRez or Hospitable. Both aggregate reviews from multiple channels, so most Airbnb and Vrbo reviews appear automatically.
+RepuGuard automatically syncs reviews from your connected PMS — OwnerRez, Hospitable, or Hostex. All three aggregate reviews from multiple channels, so most Airbnb and Vrbo reviews appear automatically.
 
-For reviews on Google, Booking.com, or platforms that don't sync through your PMS, you can add them manually using the **Add Review Manually** feature (2 per week per organization). RepuGuard generates a response draft immediately after you paste the review text. Note that posting the response back isn't a one-click API submission — for OwnerRez reviews FieldStay links you to the review on OwnerRez's site to paste your response there; for Hospitable and manually-added reviews you post it wherever the review lives and then mark it posted in FieldStay.
+For reviews on Google, Booking.com, or platforms that don't sync through your PMS, you can add them manually using the **Add Review Manually** feature (2 per week per organization). RepuGuard generates a response draft immediately after you paste the review text. Note that posting the response back isn't a one-click API submission — for OwnerRez reviews FieldStay links you to the review on OwnerRez's site to paste your response there; for Hospitable, Hostex, and manually-added reviews you post it wherever the review lives and then mark it posted in FieldStay.
 
 ---
 
@@ -130,9 +130,11 @@ If a crew member's Start Turnover button seems to have "done nothing," it almost
 
 ---
 
-## How often does OwnerRez sync?
+## How often does my PMS sync?
 
-Bookings sync in real time via webhooks — when a booking is confirmed, modified, or cancelled in OwnerRez, FieldStay processes the change within seconds.
+Bookings sync in real time via webhooks — when a booking is confirmed, modified, or cancelled in your PMS, FieldStay processes the change within seconds.
+
+Hostex is the one exception worth knowing about: it sends each webhook once and never retries a delivery that fails. FieldStay runs a full reservation sweep every morning to catch anything a missed delivery would have lost, so the worst case for a Hostex booking is that it appears by the next morning rather than within seconds. **Trigger Resync** pulls it in immediately.
 
 Property data (WiFi, amenities, instructions) syncs during the initial connection and can be manually refreshed anytime by clicking **Sync** on the Turnovers dashboard.
 

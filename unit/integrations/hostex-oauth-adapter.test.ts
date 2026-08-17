@@ -264,3 +264,85 @@ describe('hostexProvider — the generic webhook route stays closed', () => {
     )).resolves.toBeUndefined()
   })
 })
+
+// ============================================================================
+// Token revocation. Hostex issues the access and refresh tokens as SEPARATELY
+// revocable secrets and /oauth/revoke takes one `token` per call, so revoking
+// only the access token leaves a live refresh token able to mint new ones for
+// an account the user has just disconnected — and that one has no 7-day
+// expiry to eventually close the hole.
+// ============================================================================
+
+describe('hostexProvider.revokeAccessToken', () => {
+  const OK = { request_id: 'RT1', error_code: 200, error_msg: 'Done.' }
+
+  beforeEach(() => {
+    vi.stubEnv('HOSTEX_CLIENT_ID', 'cid')
+    vi.stubEnv('HOSTEX_CLIENT_SECRET', 'csecret')
+  })
+  afterEach(() => {
+    vi.unstubAllEnvs()
+    vi.unstubAllGlobals()
+  })
+
+  function stubRevoke(...responses: Array<{ error_code: number; error_msg?: string }>) {
+    const calls: Array<Record<string, unknown>> = []
+    let i = 0
+    vi.stubGlobal('fetch', vi.fn(async (_url: string, init: RequestInit) => {
+      calls.push(JSON.parse(init.body as string))
+      const body = responses[Math.min(i++, responses.length - 1)]
+      return { ok: true, status: 200, json: async () => body }
+    }))
+    return calls
+  }
+
+  it('revokes BOTH tokens, one call each, with the client credentials', async () => {
+    const calls = stubRevoke(OK)
+
+    await hostexProvider.revokeAccessToken!({ token: 'at1', refreshToken: 'rt1' })
+
+    expect(calls).toHaveLength(2)
+    expect(calls.map((c) => c.token)).toEqual(['at1', 'rt1'])
+    for (const call of calls) {
+      expect(call.client_id).toBeTruthy()
+      expect(call.client_secret).toBeTruthy()
+    }
+  })
+
+  it('revokes just the access token when no refresh token was stored', async () => {
+    const calls = stubRevoke(OK)
+    await hostexProvider.revokeAccessToken!({ token: 'at1' })
+    expect(calls).toHaveLength(1)
+  })
+
+  it('treats an already-invalid token as revoked', async () => {
+    // The usual reason a user disconnects is that the connection already
+    // broke. "This token is not valid" is the outcome we wanted.
+    for (const code of [401, 404]) {
+      stubRevoke({ error_code: code, error_msg: 'Invalid token' })
+      await expect(hostexProvider.revokeAccessToken!({ token: 'dead' })).resolves.toBeUndefined()
+    }
+  })
+
+  it('accepts error_code 0 as well as the documented 200', async () => {
+    stubRevoke({ error_code: 0 })
+    await expect(hostexProvider.revokeAccessToken!({ token: 'at1' })).resolves.toBeUndefined()
+  })
+
+  it('still revokes the refresh token when the access token call fails', async () => {
+    // The access token is usually the dead one. Aborting on it would leave the
+    // longer-lived credential in place — the exact hole this closes.
+    const calls = stubRevoke({ error_code: 500, error_msg: 'boom' }, OK)
+
+    await expect(hostexProvider.revokeAccessToken!({ token: 'at1', refreshToken: 'rt1' }))
+      .rejects.toThrow(/access: /)
+
+    expect(calls.map((c) => c.token)).toEqual(['at1', 'rt1'])
+  })
+
+  it('names which credential failed', async () => {
+    stubRevoke({ error_code: 500, error_msg: 'boom' })
+    await expect(hostexProvider.revokeAccessToken!({ token: 'at1' }))
+      .rejects.toThrow(/error_code 500/)
+  })
+})

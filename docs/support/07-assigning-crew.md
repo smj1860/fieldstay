@@ -6,7 +6,7 @@
 
 ## How Assignment Works
 
-When FieldStay creates a turnover from a booking (OwnerRez or Hospitable), it starts in **Pending Assignment** status with no crew assigned. What happens next depends on your org's Crew Auto-Assignment setting (Settings → Crew Auto-Assignment): **Suggest** scores every available crew member on proximity, reliability, workload, and past familiarity with the property and shows the best match right on the turnover card for a one-click assign; **Autopilot** assigns that best match automatically; **Off** leaves it fully manual.
+When FieldStay creates a turnover from a booking (OwnerRez, Hospitable, or Hostex), it starts in **Pending Assignment** status with no crew assigned. What happens next depends on your org's Crew Auto-Assignment setting (Settings → Crew Auto-Assignment): **Suggest** scores every available crew member on proximity, reliability, workload, and past familiarity with the property and shows the best match right on the turnover card for a one-click assign; **Autopilot** assigns that best match automatically; **Off** leaves it fully manual.
 
 ---
 
@@ -26,7 +26,7 @@ To assign the same crew member to multiple turnovers at once:
 1. Check the boxes on multiple turnover cards
 2. In the action bar that appears at the bottom, use the **Assign to:** dropdown and choose a crew member
 
-The assignment applies as soon as you pick a name — there's no separate Apply step. This is useful after a sync with OwnerRez that generates a batch of new turnovers.
+The assignment applies as soon as you pick a name — there's no separate Apply step. This is useful after a PMS sync that generates a batch of new turnovers.
 
 ---
 

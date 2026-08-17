@@ -42,6 +42,11 @@
 //     token in the URL — see app/api/webhooks/hostex/[token]/route.ts and
 //     hostex-webhook.ts. The two methods below stay as fail-closed rejections
 //     because the IntegrationProvider interface requires them.
+//   - The access and refresh tokens are SEPARATELY revocable, and
+//     /oauth/revoke takes one per call — so revokeAccessToken below makes two.
+//     Note this is the outbound direction only, and does not soften the
+//     no-revocation-webhook limitation above: we can tell Hostex we are done,
+//     but Hostex cannot tell us the host revoked us.
 //
 // Type definitions live in hostex.types.ts, re-exported below so
 // `import { HostexProperty } from '@/lib/integrations/providers/hostex'`
@@ -64,6 +69,9 @@ export * from './hostex.types'
 
 const HOSTEX_AUTHORIZE_URL = 'https://hostex.io/app/authorization'
 const HOSTEX_TOKEN_URL     = 'https://api.hostex.io/v3/oauth/authorizations'
+// Distinct path from the token endpoint above — /oauth/revoke, not a DELETE
+// against /oauth/authorizations.
+const HOSTEX_REVOKE_URL    = 'https://api.hostex.io/v3/oauth/revoke'
 const HOSTEX_API_BASE      = 'https://api.hostex.io/v3'
 
 // Hostex's own Rate Limits doc explicitly recommends this: "helps Hostex
@@ -224,6 +232,53 @@ async function requestHostexToken(
   return parseHostexTokenResponse(body)
 }
 
+/**
+ * Revoke ONE Hostex token. Separate from requestHostexToken despite the shared
+ * credential fields: this endpoint returns no token to parse, and routing it
+ * through parseHostexTokenResponse would fail on a perfectly successful
+ * revocation that carries only an envelope.
+ *
+ * A token Hostex no longer recognizes is a SUCCESS here, not a failure. The
+ * common reason a user disconnects is that the connection already broke, and
+ * treating "already gone" as an error would turn the expected case into a
+ * reported one — the same reasoning as OwnerRez's 404 branch.
+ */
+async function revokeHostexToken(token: string): Promise<void> {
+  const { clientId, clientSecret } = hostexCredentials()
+
+  const response = await fetch(HOSTEX_REVOKE_URL, {
+    signal: AbortSignal.timeout(PMS_API_TIMEOUT_MS),
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'Accept':       'application/json',
+      'User-Agent':   HOSTEX_USER_AGENT,
+    },
+    body: JSON.stringify({ client_id: clientId, client_secret: clientSecret, token }),
+  })
+
+  let body: unknown
+  try {
+    body = await response.json()
+  } catch {
+    throw new Error(`Hostex token revocation returned non-JSON body: HTTP ${response.status}`)
+  }
+
+  const envelope = body as { error_code?: number; error_msg?: string }
+  const code     = envelope.error_code
+
+  // The documented success example for THIS endpoint returns error_code 200
+  // with error_msg "Done." — the same 0-or-200 ambiguity isHostexSuccess
+  // exists for, so it is reused rather than re-decided here.
+  if (code === undefined || isHostexSuccess(code)) return
+
+  // 401 is "this token is not valid", which for a revocation is the outcome
+  // we wanted. 404 likewise.
+  if (code === 401 || code === 404) return
+
+  throw new Error(`error_code ${code} — ${envelope.error_msg ?? 'no message'}`)
+}
+
 /** Shared shape for both grants: the token plus whatever expiry Hostex sent. */
 function toTokenResponse(data: HostexTokenData, externalUserId: string): TokenResponse {
   const result: TokenResponse = {
@@ -327,10 +382,43 @@ export const hostexProvider: IntegrationProvider = {
     return toTokenResponse(data, '')
   },
 
-  // revokeAccessToken deliberately omitted this phase — Hostex's
-  // POST /oauth/revoke exists but its request body shape is unconfirmed.
-  // Optional on the IntegrationProvider interface; local revocation
-  // (revokeIntegrationToken()) still works fully without it.
+  /**
+   * POST /oauth/revoke — { client_id, client_secret, token }, all three
+   * required (confirmed against api-doc.hostex.io/reference/revoke-token).
+   *
+   * REVOKES BOTH CREDENTIALS, one call each. The endpoint takes a single
+   * `token` and Hostex issues the access and refresh tokens as separately
+   * revocable secrets, so revoking only the access token would leave a live
+   * refresh token — one that can mint fresh access tokens for an account the
+   * user has just disconnected. The refresh token is the more dangerous of
+   * the two to leave behind: it outlives the 7-day access token indefinitely.
+   *
+   * Best-effort per token. The caller (disconnectIntegration) already treats
+   * a throw as non-fatal and proceeds with local cleanup, but that is
+   * all-or-nothing at the call site — doing it here means a refresh token
+   * still gets revoked when the access token is already dead, which is the
+   * common case for a connection the user is disconnecting BECAUSE it stopped
+   * working.
+   */
+  async revokeAccessToken({ token, refreshToken }) {
+    const failures: string[] = []
+
+    for (const [credential, label] of [
+      [token,        'access']  as const,
+      [refreshToken, 'refresh'] as const,
+    ]) {
+      if (!credential) continue
+      try {
+        await revokeHostexToken(credential)
+      } catch (err) {
+        failures.push(`${label}: ${err instanceof Error ? err.message : String(err)}`)
+      }
+    }
+
+    if (failures.length) {
+      throw new Error(`Hostex token revocation failed — ${failures.join('; ')}`)
+    }
+  },
 
   getApiHeaders(token: string): Record<string, string> {
     return {

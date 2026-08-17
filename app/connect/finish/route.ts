@@ -52,7 +52,7 @@ export async function GET(request: NextRequest) {
   // route. Closes FUTURE_REMEDIATION.md #7 (cleanup function existed but was
   // never invoked from anywhere).
   // eslint-disable-next-line no-restricted-properties -- probabilistic sampling to amortise cleanup, not id/token generation
-  if (Math.random() < 0.05) {
+  if (Math.random() < 0.05) { // NOSONAR -- probabilistic sampling only, not security-sensitive (see eslint-disable justification above)
     void cleanupExpiredPendingIntegrationArtifacts()
   }
 

@@ -9,7 +9,7 @@
 The owner portal is a separate, tokenized link that shows only data for the owner's specific property or properties. Owners do not have FieldStay accounts — they access the portal through a secure link you share with them.
 
 The portal shows:
-- **Revenue** — booking income posted automatically from your connected PMS (OwnerRez or Hospitable)
+- **Revenue** — booking income posted automatically from your connected PMS (OwnerRez, Hospitable, or Hostex)
 - **Expenses** — cleaning fees, maintenance costs, inventory purchases
 - **Net income** — revenue minus expenses for any date range they select
 - **Individual line items** — each transaction with a description and date

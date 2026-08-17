@@ -46,6 +46,8 @@ import {
   deriveHostexStaffRoles,
   deriveHostexCleaningFees,
 } from '@/lib/integrations/providers/hostex.mappers'
+import type { HostexCrewMemberRow } from '@/lib/integrations/providers/hostex.mappers'
+import { unwrapList } from '@/lib/supabase/unwrap'
 import type { SyncLogger } from '../shared/reservation-pipeline'
 
 const PROVIDER = 'hostex'
@@ -75,6 +77,57 @@ export interface HostexStaffSyncParams {
    * properties. Omit to sync staff only.
    */
   propertyIdMap?: Record<string, string>
+}
+
+/**
+ * Replace each row's inferred role with the one already stored, whatever it
+ * is. See the call site for why the role is treated differently from every
+ * other synced column.
+ *
+ * One read for the whole batch, keyed by external_id — never a lookup per
+ * staff member (unit/guardrails/n-plus-one-loops.test.ts).
+ */
+async function preserveManualCrewRoles(
+  supabase: ReturnType<typeof createServiceClient>,
+  orgId:    string,
+  rows:     HostexCrewMemberRow[],
+): Promise<HostexCrewMemberRow[]> {
+  const externalIds = rows.map((r) => r.external_id)
+
+  const existingRes = await supabase
+    .from('crew_members')
+    .select('external_id, role')
+    .eq('org_id', orgId)
+    .eq('external_source', PROVIDER)
+    .in('external_id', externalIds)
+    // Bounded by the write being read back, so this can never be the thing
+    // that truncates — same convention as upsert-normalized's re-select.
+    .limit(externalIds.length)
+
+  // A failed read must not silently fall through to overwriting every role:
+  // that is the exact behaviour being fixed. unwrapList throws, and the
+  // enclosing step retries.
+  const existing = unwrapList(existingRes, {
+    site:  'inngest.hostex-staff-sync.existing-roles',
+    orgId,
+  })
+
+  const roleByExternalId = new Map(
+    (existing ?? []).map((row) => [row.external_id as string, row.role as string]),
+  )
+
+  return rows.map((row) => {
+    const stored = roleByExternalId.get(row.external_id)
+    // `has`, not truthiness: the test is whether FieldStay already holds a row
+    // for this staff member at all, not whether its role looks interesting.
+    // 'general' is a real, selectable role a PM can choose deliberately, and
+    // treating it as "unset" is what would re-open the bug for exactly the
+    // people most likely to be edited — the operators and receptionists that
+    // land there by default.
+    return roleByExternalId.has(row.external_id)
+      ? { ...row, role: stored as typeof row.role }
+      : row
+  })
 }
 
 export async function syncHostexStaff(
@@ -115,9 +168,34 @@ export async function syncHostexStaff(
 
     const supabase = createServiceClient({ system })
 
+    // ROLE IS OURS, NOT HOSTEX'S — so it is written ONCE, at insert, and never
+    // again. Every other column here is overwritten on every sync, and should
+    // be: name, email, phone and is_active are things Hostex actually reports.
+    //
+    // Hostex staff records carry no role field at all; the role in `rows` is
+    // INFERRED from each person's scheduled task types. This step runs on the
+    // daily reconcile, so writing that inference unconditionally meant a PM
+    // who corrected a receptionist from General to Cleaning got it reverted
+    // the next morning, every morning.
+    //
+    // The stored role wins unconditionally — not just when it looks more
+    // specific than our guess. An earlier version preserved anything except
+    // 'general', on the theory that 'general' means "not yet known" and the
+    // inference improves once someone has a task history. But 'general' is a
+    // role a PM can deliberately choose, and it is the DEFAULT landing spot
+    // for operators and receptionists — precisely the people whose role gets
+    // corrected. Treating it as unset re-opened the bug for the exact
+    // population the fix was for.
+    //
+    // The cost is real and accepted: a staff member who had no tasks at their
+    // first sync stays General until someone sets them. Recovering that
+    // automatically needs a column recording whether the role was inferred or
+    // chosen, which is the only thing that can tell those two apart.
+    const preserved = await preserveManualCrewRoles(supabase, orgId, rows)
+
     const { error } = await supabase
       .from('crew_members')
-      .upsert(rows, { onConflict: 'org_id,external_id,external_source', ignoreDuplicates: false })
+      .upsert(preserved, { onConflict: 'org_id,external_id,external_source', ignoreDuplicates: false })
 
     if (error) {
       logger.error(`[Hostex:${userId}] crew_members upsert failed: ${error.message}`)

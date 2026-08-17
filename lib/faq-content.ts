@@ -159,10 +159,11 @@ export const HOSTS_CREW_REQUIRED_FAQ = {
 export const HOSTS_REPLACES_PMS_FAQ = {
   question: 'Does FieldStay replace Airbnb, VRBO, or my PMS?',
   answer:
-    'No. Airbnb, VRBO, OwnerRez, and Hospitable handle bookings, rates, and guest messaging — FieldStay ' +
+    'No. Airbnb, VRBO, OwnerRez, Hospitable, and Hostex handle bookings, rates, and guest messaging — FieldStay ' +
     'handles what happens on the ground after a guest books: turnovers, checklists, inventory, vendor work ' +
-    'orders, and your own P&L. If you\'re on OwnerRez or Hospitable, connect it in about 2 minutes and ' +
-    'everything syncs automatically. If you\'re not on either, paste your Airbnb or VRBO iCal link instead — ' +
+    'orders, and your own P&L. If you\'re on OwnerRez, Hospitable, or Hostex, connect it in about 2 minutes ' +
+    'and everything syncs automatically. If you\'re on none of them, paste your Airbnb or VRBO iCal link ' +
+    'instead — ' +
     'same result.',
 } as const
 
@@ -273,7 +274,7 @@ export const FAQ_CATEGORIES: FaqCategory[] = [
         id:       'or-connect',
         question: 'How do I connect my PMS to FieldStay?',
         answer:
-          'Go to Settings → Integrations and click "Connect" next to OwnerRez or Hospitable — whichever you use. You\'ll be redirected to authorize the connection with your PMS. Once approved, your properties and upcoming bookings sync automatically within a few minutes.',
+          'Go to Settings → Integrations and click "Connect" next to OwnerRez, Hospitable, or Hostex — whichever you use. You\'ll be redirected to authorize the connection with your PMS. Once approved, your properties and upcoming bookings sync automatically within a few minutes.',
       },
       {
         id:       'or-sync-time',
@@ -371,7 +372,7 @@ export const FAQ_CATEGORIES: FaqCategory[] = [
         id:       'billing-property-count',
         question: 'What counts as a property for billing?',
         answer:
-          'Each unique property unit synced from your connected PMS (OwnerRez or Hospitable) counts as one property. A multi-unit building with 4 apartment units counts as 4. Archived or removed properties do not count toward your billing total.',
+          'Each unique property unit synced from your connected PMS (OwnerRez, Hospitable, or Hostex) counts as one property. A multi-unit building with 4 apartment units counts as 4. Archived or removed properties do not count toward your billing total.',
       },
       {
         id:       'billing-crew-seats',
@@ -419,7 +420,7 @@ export const FAQ_CATEGORIES: FaqCategory[] = [
         id:       'tech-security',
         question: 'Is my data secure?',
         answer:
-          'Yes. All data is encrypted in transit and at rest. Row-level security policies in the database enforce strict tenant isolation — no user can ever access another organization\'s data. PMS access tokens (OwnerRez, Hospitable) are stored in an encrypted vault, never in the application database.',
+          'Yes. All data is encrypted in transit and at rest. Row-level security policies in the database enforce strict tenant isolation — no user can ever access another organization\'s data. PMS access tokens (OwnerRez, Hospitable, Hostex) are stored in an encrypted vault, never in the application database.',
       },
       {
         id:       'tech-password',
@@ -553,13 +554,13 @@ export const FAQ_CATEGORIES: FaqCategory[] = [
         id:       'rg-how',
         question: 'How does RepuGuard work?',
         answer:
-          'When a guest review syncs in from OwnerRez or Hospitable, RepuGuard generates a draft response using AI, tailored to the review and your property. Go to Reviews to read, edit, and approve any draft before it goes anywhere.',
+          'When a guest review syncs in from OwnerRez, Hospitable, or Hostex, RepuGuard generates a draft response using AI, tailored to the review and your property. Go to Reviews to read, edit, and approve any draft before it goes anywhere.',
       },
       {
         id:       'rg-post',
         question: 'Does RepuGuard post my response automatically?',
         answer:
-          'No — approving a draft doesn\'t submit it anywhere by itself. For OwnerRez reviews, clicking "Post to OwnerRez" opens the review on OwnerRez\'s site so you can paste your response there. For Hospitable and manually-added reviews, you post the response wherever the review actually lives, then click "Mark as Posted" in FieldStay so the status reflects reality.',
+          'No — approving a draft doesn\'t submit it anywhere by itself. For OwnerRez reviews, clicking "Post to OwnerRez" opens the review on OwnerRez\'s site so you can paste your response there. For Hospitable, Hostex, and manually-added reviews, you post the response wherever the review actually lives, then click "Mark as Posted" in FieldStay so the status reflects reality.',
       },
       {
         id:       'rg-manual',

@@ -6,7 +6,7 @@ This document covers the most common issues reported by property managers and ho
 
 ## Turnovers Not Generating After a Booking Syncs
 
-**Symptom:** A new booking appeared in OwnerRez or Hospitable but no turnover was created in FieldStay.
+**Symptom:** A new booking appeared in your PMS but no turnover was created in FieldStay.
 
 **Check first:**
 - Is the booking status "Confirmed" (OwnerRez) or otherwise a real reservation, not a block/owner hold? Tentative, unconfirmed, and block bookings are filtered out and do not generate turnovers.
@@ -21,7 +21,7 @@ If it still doesn't appear, use **Trigger Resync** next to your PMS in Settings 
 
 ## A Guest Changed Their Dates — Will the Turnover Update?
 
-**Symptom:** A guest extended or shortened their stay in OwnerRez or Hospitable, and you're not sure whether FieldStay's turnover reflects the new dates.
+**Symptom:** A guest extended or shortened their stay in your PMS, and you're not sure whether FieldStay's turnover reflects the new dates.
 
 **What happens:** FieldStay refreshes the turnover's checkout/check-in window automatically the next time the booking change syncs in — usually within a minute or two via webhook, or immediately if you click **Sync** on the Turnovers dashboard. You don't need to delete and recreate anything.
 
@@ -71,16 +71,16 @@ Publish the guidebook from Guidebook → [Property Name] → toggle Published. F
 
 ---
 
-## OwnerRez or Hospitable Sync Showing Stale Data
+## PMS Sync Showing Stale Data
 
 **Symptom:** Changes made in your PMS (updated booking dates, new properties) are not reflecting in FieldStay.
 
 **Check first:**
 - Was the change made recently? Webhook events can take a few minutes to process.
-- Is the integration still connected? Go to Settings → Integrations and confirm OwnerRez or Hospitable shows as Connected.
+- Is the integration still connected? Go to Settings → Integrations and confirm your PMS shows as Connected.
 
 **Fix:**
-Click **Sync** on the Turnovers dashboard to trigger an immediate re-sync. If the integration shows as disconnected, reconnect from Settings → Integrations — for OwnerRez this happens when the password is changed or access is revoked; for Hospitable this happens when access is revoked from the Hospitable side.
+Click **Sync** on the Turnovers dashboard to trigger an immediate re-sync. If the integration shows as disconnected, reconnect from Settings → Integrations — for OwnerRez this happens when the password is changed or access is revoked; for Hospitable this happens when access is revoked from the Hospitable side. Hostex is the exception worth knowing about: it has no way to tell FieldStay that access was revoked, so a Hostex connection can keep showing as Connected for up to a week after it stopped working. Use **Trigger Resync** to find out immediately.
 
 ---
 
