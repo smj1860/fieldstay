@@ -18,6 +18,8 @@
     "check:stripe-prices": "node scripts/check-stripe-price-drift.mjs",
     "check:migration-ledger": "node scripts/check-migration-ledger.mjs",
     "check:migration-ledger:prod": "DB_INVARIANTS_ALLOW_PROD=1 node scripts/check-migration-ledger.mjs",
+    "check:rls-isolation": "bash scripts/run-rls-probe.sh",
+    "check:rls-isolation:prod": "DB_INVARIANTS_ALLOW_PROD=1 bash scripts/run-rls-probe.sh",
     "inngest:dev": "npx inngest-cli@latest dev",
     "types:supabase": "supabase gen types typescript --project-id vpmznjktllhmmbfnxuvk > types/database.generated.ts",
     "e2e": "playwright test",

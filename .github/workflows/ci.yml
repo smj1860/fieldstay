@@ -281,8 +281,15 @@ jobs:
   # nowhere else. Add an install step here if such a dependency is ever
   # genuinely needed.
   #
-  # See scripts/check-db-invariants.mjs, scripts/check-type-drift.mjs and
-  # scripts/check-migration-ledger.mjs for the check details.
+  # The RLS isolation probe is the exception to both paragraphs above: it is
+  # bash + psql rather than Node, and it needs a session-mode DB connection
+  # rather than PostgREST, because it works by holding a transaction open
+  # across a SET ROLE. It is the only check here that measures what an
+  # authenticated user can actually SEE, rather than what the schema says.
+  #
+  # See scripts/check-db-invariants.mjs, scripts/check-type-drift.mjs,
+  # scripts/check-migration-ledger.mjs and scripts/rls-isolation-probe.sql for
+  # the check details.
   db-invariants:
     runs-on: ubuntu-latest
     env:
@@ -332,11 +339,25 @@ jobs:
       STRIPE_PRICE_PORTFOLIO_ANNUAL:  ${{ vars.STRIPE_PRICE_PORTFOLIO_ANNUAL  || secrets.STRIPE_PRICE_PORTFOLIO_ANNUAL }}
       STRIPE_PRICE_SPONSOR_MONTHLY:   ${{ vars.STRIPE_PRICE_SPONSOR_MONTHLY   || secrets.STRIPE_PRICE_SPONSOR_MONTHLY }}
       STRIPE_PRICE_DRIFT_REQUIRE_ARMED: ${{ (vars.STRIPE_PRICE_DRIFT_ARMED == '1' && !github.event.pull_request.head.repo.fork) && '1' || '0' }}
+      # Dynamic cross-tenant isolation probe. Needs a SESSION-mode pooler URI
+      # (port 5432 — see scripts/run-rls-probe.sh), not the PostgREST endpoint
+      # the three checks above use: its method is a transaction that seeds a
+      # foreign tenant, switches role, counts, and rolls back, and PostgREST
+      # cannot hold a transaction across statements.
+      SUPABASE_DB_URL: ${{ secrets.SUPABASE_E2E_DB_URL }}
+      # OPT-IN, like the Stripe gate above and unlike the Supabase one — the
+      # SUPABASE_E2E_DB_URL secret does not exist on this repo yet. Until it
+      # does the probe warns and passes, so the step is visible in the log
+      # without turning a brand-new check permanently red, which is the fastest
+      # way to teach people to ignore it. Set the repo VARIABLE
+      # RLS_PROBE_ARMED=1 once the secret is in place and an unarmed run starts
+      # failing loudly.
+      RLS_PROBE_REQUIRE_ARMED: ${{ (vars.RLS_PROBE_ARMED == '1' && !github.event.pull_request.head.repo.fork) && '1' || '0' }}
     steps:
       - uses: actions/checkout@v4
         with:
-          # This job only reads the repo and runs four scripts — no reason to
-          # leave the checkout token on disk.
+          # This job only reads the repo and runs the checks below — no reason
+          # to leave the checkout token on disk.
           persist-credentials: false
       - uses: actions/setup-node@v4
         with:
@@ -345,3 +366,7 @@ jobs:
       - run: node scripts/check-type-drift.mjs
       - run: node scripts/check-migration-ledger.mjs
       - run: node scripts/check-stripe-price-drift.mjs
+      # The one check here that is not a .mjs and not over PostgREST. psql is
+      # preinstalled on the GitHub-hosted runner images; the script fails
+      # loudly rather than silently skipping if it ever is not.
+      - run: bash scripts/run-rls-probe.sh
