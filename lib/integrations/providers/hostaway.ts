@@ -81,11 +81,25 @@ export const hostawayProvider: IntegrationProvider = {
   },
 
   async validateWebhook() {
-    // Hostaway unified webhooks use HMAC-SHA256 signature verification.
-    // The signing secret is set when registering the webhook endpoint.
-    // Implement when webhook support is added — for now reject all inbound
-    // webhooks since there is no registered endpoint or secret to verify yet.
-    return fail('no webhook signing secret registered yet')
+    // CORRECTION (2026-08-17, checked against api.hostaway.com/documentation):
+    // this comment used to say "Hostaway unified webhooks use HMAC-SHA256
+    // signature verification, the signing secret is set when registering the
+    // endpoint". That is WRONG, and it was load-bearing wrong — it is what
+    // docs/HOSTAWAY_ENABLEMENT.md sized the webhook phase against.
+    //
+    // Hostaway's unified webhook registration takes URL (mandatory) plus
+    // Login and Password (optional), and deliveries carry them in the request's
+    // authentication header. So it is HTTP Basic Auth with credentials WE
+    // choose at registration — the same model OwnerRez uses, which means
+    // ownerRezProvider.validateWebhook is the template (constant-time compare
+    // of a user/pass pair from env, plus an optional source-IP allowlist), and
+    // the per-connection-secret column that phase was scoped to need does not
+    // exist. One platform-wide HOSTAWAY_WEBHOOK_USER/PASSWORD covers every
+    // tenant, because we supply the same pair on every registration.
+    //
+    // Still rejecting everything until that lands: no endpoint is registered
+    // with Hostaway, so any delivery arriving here is unsolicited.
+    return fail('no webhook endpoint registered with Hostaway yet')
   },
 
   async handleWebhookEvent({ action, payload }) {

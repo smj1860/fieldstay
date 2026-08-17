@@ -7,7 +7,15 @@ interface Props {
   orgName:           string
   trialEndDate:      string
   propertyCount:     number
-  ownerRezConnected: boolean
+  /**
+   * Display name of the PMS this org has connected, or null if none.
+   *
+   * Was `ownerRezConnected: boolean`, which forced the copy below to name
+   * OwnerRez — so a Hospitable org that HAD connected still read "if you
+   * haven't had a chance to connect OwnerRez yet". The name has to travel with
+   * the flag, or the two can never agree.
+   */
+  connectedPmsName:  string | null
   subscribeUrl:      string
 }
 
@@ -16,7 +24,7 @@ export function TrialExpiringEmail({
   orgName,
   trialEndDate,
   propertyCount,
-  ownerRezConnected,
+  connectedPmsName,
   subscribeUrl,
 }: Props) {
   return (
@@ -35,20 +43,20 @@ export function TrialExpiringEmail({
         Your FieldStay trial ends on <strong>{trialEndDate}</strong>.
       </Text>
 
-      {ownerRezConnected && propertyCount > 0 ? (
+      {connectedPmsName && propertyCount > 0 ? (
         <Section style={highlightBox}>
           <Text style={highlightText}>
             You have <strong>{propertyCount}{' '}{propertyCount === 1 ? 'property' : 'properties'}</strong>{' '}syncing
-            from OwnerRez and your turnovers are running. Subscribe to keep
+            from {connectedPmsName} and your turnovers are running. Subscribe to keep
             everything working without interruption.
           </Text>
         </Section>
       ) : (
         <Section style={highlightBox}>
           <Text style={highlightText}>
-            If you haven&apos;t had a chance to connect OwnerRez yet, now is
-            the right time. Subscribe and connect to see FieldStay at
-            full value for your operation.
+            If you haven&apos;t had a chance to connect your booking calendar
+            yet, now is the right time. Subscribe and connect to see FieldStay
+            at full value for your operation.
           </Text>
         </Section>
       )}

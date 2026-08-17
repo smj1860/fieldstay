@@ -13,10 +13,7 @@
 import type { IntegrationProvider } from './types'
 import { ownerRezProvider } from './providers/ownerrez'
 import { krogerProvider } from './providers/kroger'
-// Hostaway disabled — not ready for launch. Re-enable by uncommenting this
-// import and the 'hostaway' map entry below. Do not delete
-// lib/integrations/providers/hostaway.ts.
-// import { hostawayProvider }   from './providers/hostaway'
+import { hostawayProvider } from './providers/hostaway'
 import { hospitableProvider } from './providers/hospitable'
 import { hostexProvider } from './providers/hostex'
 // Future: import { guestyProvider } from './providers/guesty'
@@ -24,16 +21,52 @@ import { hostexProvider } from './providers/hostex'
 const providers = new Map<string, IntegrationProvider>([
   ['ownerrez',   ownerRezProvider],
   ['kroger',     krogerProvider],
-  // Hostaway disabled — not ready for launch. Re-enable by uncommenting this
-  // line and the import above. Do not delete
-  // lib/integrations/providers/hostaway.ts.
-  // ['hostaway',   hostawayProvider],
+  // Live: sync posts booking revenue and the daily reconcile keeps it current.
+  // Its validateWebhook() still rejects every delivery — no webhook endpoint is
+  // registered with Hostaway — so inbound webhooks are refused rather than
+  // trusted, which is the correct posture until that phase lands.
+  ['hostaway',   hostawayProvider],
   ['hospitable', hospitableProvider],
   // Live: integration_providers.hostex.is_active flipped to true by
   // 20260816122829_activate_hostex_provider.sql once sync and webhooks shipped.
   ['hostex',     hostexProvider],
   // ['guesty',   guestyProvider],
 ])
+
+/**
+ * The property-management systems, as opposed to the other things in the map
+ * above (Kroger is a grocery retailer, not a PMS).
+ *
+ * ONE list, because there were three and they had already drifted. Each copy
+ * answered "is this org synced from a PMS?" for a different surface and each
+ * was updated at a different time: setup/pms had ownerrez + hospitable +
+ * hostex, ops/page.tsx's revenue nudge had the same three, and
+ * email-trial-lifecycle.tsx checked ONLY ownerrez — so every Hospitable and
+ * Hostex org has been receiving a trial email telling them to go connect a
+ * PMS they had already connected. That is the drift a per-surface list
+ * produces; adding a fourth provider is what surfaced it.
+ *
+ * Ordered most-established first, which is the order the connect surfaces
+ * render them in.
+ */
+export const PMS_PROVIDER_IDS = ['ownerrez', 'hospitable', 'hostex', 'hostaway'] as const
+
+export type PmsProviderId = typeof PMS_PROVIDER_IDS[number]
+
+/**
+ * Human-readable name for a PMS id, for UI and email copy.
+ *
+ * Accepts null/undefined because every caller passes a value straight off a
+ * database row. A required `string` here typechecks and then throws on
+ * `.toLowerCase()` the first time a column is null — inside an email step,
+ * where the cost is the email not being sent.
+ */
+export function pmsDisplayName(id: string | null | undefined): string | null {
+  if (!id) return null
+  const key = id.toLowerCase()
+  if (!(PMS_PROVIDER_IDS as readonly string[]).includes(key)) return null
+  return providers.get(key)?.displayName ?? null
+}
 
 /**
  * Look up a provider by its ID string.

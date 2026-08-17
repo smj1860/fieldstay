@@ -60,6 +60,60 @@ const OAUTH_CONNECTED_EVENTS: Partial<Record<string, (ctx: OAuthConnectedContext
 }
 
 /**
+ * Claim an integration connection row for an org, without ever stealing one.
+ *
+ * The `.or()` is the tenant boundary and the reason this is a shared function
+ * rather than two copies: it matches a row with NO org yet (first connect,
+ * since store_integration_token does not set one) or one ALREADY owned by this
+ * org (reconnect), and nothing else. A connection belonging to a different org
+ * the same user also belongs to matches zero rows and is left alone.
+ *
+ * Both connect paths need it — the OAuth callback below and
+ * connectWithApiKey() for Hostaway — and they used to carry the same statement
+ * twice, with a comment in each saying it mirrored the other. That is a
+ * tenant-isolation rule maintained in two places by convention, which is how
+ * one of them eventually stops mirroring.
+ *
+ * Returns true when a row was claimed, false when it belongs to someone else.
+ * Throws on a real write error: the token is already stored by this point, so
+ * a failed link is a partial failure the caller must not treat as success.
+ */
+export async function linkConnectionToOrg(params: {
+  admin:      ReturnType<typeof createServiceClient>
+  userId:     string
+  providerId: string
+  orgId:      string
+  /** Set alongside org_id when the provider reports one (Hostaway). */
+  expiresAt?: string
+}): Promise<boolean> {
+  const { admin, userId, providerId, orgId, expiresAt } = params
+
+  // (user_id, provider_id) is UNIQUE on integration_connections, so this
+  // targets at most one row — maybeSingle() both bounds the read and lets a
+  // 0-row result be told apart from a failed write.
+  const { data: linked, error: linkError } = await admin
+    .from('integration_connections')
+    .update(expiresAt ? { org_id: orgId, expires_at: expiresAt } : { org_id: orgId })
+    .eq('user_id', userId)
+    .eq('provider_id', providerId)
+    .or(`org_id.is.null,org_id.eq.${orgId}`)
+    .select('id')
+    .maybeSingle()
+
+  if (linkError) {
+    console.error('[linkConnectionToOrg] org link failed', linkError)
+    reportError(linkError, {
+      site:  'lib.integrations.linkConnectionToOrg',
+      orgId,
+      extra: { provider_id: providerId },
+    })
+    throw new Error('Failed to link integration connection to organization')
+  }
+
+  return !!linked
+}
+
+/**
  * Store an exchanged token against a real FieldStay user, link it to their
  * org, and kick off the provider's initial sync. Throws on Vault/storage
  * failure — callers map that to their own storage_failed redirect.
@@ -122,31 +176,13 @@ export async function finalizeIntegrationConnection(params: {
     // 0-row result be told apart from a failed write. The error used to be
     // discarded entirely: a failed link left the connection org-less and the
     // sync silently never ran, with nothing logged.
-    const { data: linked, error: linkError } = await admin
-      .from('integration_connections')
-      .update({ org_id: membership.org_id })
-      .eq('user_id', userId)
-      .eq('provider_id', providerId)
-      // Only update rows with no org yet (first connect) or already belonging
-      // to this org (reconnect). Never silently repoint a connection owned by
-      // a different org the user is also a member of. Mirrors connectWithApiKey.
-      .or(`org_id.is.null,org_id.eq.${membership.org_id}`)
-      .select('id')
-      .maybeSingle()
-
-    if (linkError) {
-      // The token IS stored at this point, so this is a partial failure. Throw
-      // rather than return a half-linked connection: callers map it to their
-      // storage_failed redirect, and a retry is idempotent
-      // (store_integration_token updates the existing row).
-      console.error('[finalizeIntegrationConnection] org link failed', linkError)
-      reportError(linkError, {
-        site:  'lib.integrations.finalizeIntegrationConnection.link',
-        orgId: membership.org_id,
-        extra: { provider_id: providerId },
-      })
-      throw new Error('Failed to link integration connection to organization')
-    }
+    // Throws on a write error rather than returning a half-linked connection:
+    // the token IS stored by this point, so callers map it to their
+    // storage_failed redirect, and a retry is idempotent
+    // (store_integration_token updates the existing row).
+    const linked = await linkConnectionToOrg({
+      admin, userId, providerId, orgId: membership.org_id,
+    })
 
     if (linked) {
       linkedOrgId = membership.org_id

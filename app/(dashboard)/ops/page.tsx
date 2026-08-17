@@ -1,3 +1,4 @@
+import { PMS_PROVIDER_IDS } from '@/lib/integrations/registry'
 import { requireOrgMember } from '@/lib/auth'
 import { createServiceClient } from '@/lib/supabase/server'
 import { unwrapList, type PostgrestResult } from '@/lib/supabase/unwrap'
@@ -37,11 +38,12 @@ export default async function OpsSnapshotPage() {
 
   // Providers whose sync actually fires booking/confirmed (see
   // lib/inngest/functions/booking-events.ts) — i.e. the ones the automation
-  // this nudge advertises actually works for. Hostaway/Guesty connections
-  // don't post revenue automatically yet, so connecting one of those
-  // shouldn't suppress the nudge. Hostex joined when its reservation sync
-  // started firing booking/confirmed (hostex/reservation-sync.ts).
-  const REVENUE_AUTOMATION_PROVIDER_IDS = ['ownerrez', 'hospitable', 'hostex']
+  // this nudge advertises actually works for. Every PMS in the registry now
+  // routes revenue through booking/confirmed — OwnerRez and Hospitable
+  // directly, Hostex and Hostaway through the shared reservation pipeline — so
+  // the list is exactly PMS_PROVIDER_IDS rather than a fourth hand-maintained
+  // copy of it. If a future PMS lands WITHOUT revenue posting, that is the
+  // moment this needs to diverge again, deliberately and with a comment.
   const admin = createServiceClient({ authorizedBy: membership })
 
   // All six reads are independent — the bookings and integration_connections
@@ -122,9 +124,9 @@ export default async function OpsSnapshotPage() {
       .from('integration_connections')
       .select('id')
       .eq('org_id', membership.org_id)
-      .in('provider_id', REVENUE_AUTOMATION_PROVIDER_IDS)
+      .in('provider_id', PMS_PROVIDER_IDS)
       .eq('status', 'active')
-      .limit(REVENUE_AUTOMATION_PROVIDER_IDS.length),
+      .limit(PMS_PROVIDER_IDS.length),
   ])
 
   // unwrapList logs + reports and throws, so a failed read renders

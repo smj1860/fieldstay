@@ -180,29 +180,56 @@ that will fail when someone types the payout field.
   Hospitable because they predate the shared pipeline.
 
 ### Phase 3 — webhooks
-`validateWebhook()` currently rejects everything (`fail('no webhook signing
-secret registered yet')`). Hostaway unified webhooks use HMAC-SHA256 with a
-secret set at registration.
 
-**Design question to settle against Hostaway's docs first:** OwnerRez verifies
-with a single platform-wide credential from env
-(`OWNERREZ_WEBHOOK_USER`/`PASSWORD`) plus an IP CIDR allowlist, because we
-register one endpoint for one OAuth app. Hostaway registers per account, using
-that account's own token. If Hostaway lets us choose the secret at
-registration, we can use one platform-wide `HOSTAWAY_WEBHOOK_SECRET` and
-**Phase 3 needs no migration at all**. If the secret is server-generated per
-webhook, it needs a column → migration → `types/database.ts` in the same commit
-→ and applying to the E2E project in the same sitting, or `check-type-drift`
-fails looking like a types problem.
+**The scoping question is settled, and the answer overturns what this doc
+originally said.** It claimed Hostaway uses HMAC-SHA256 with a secret set at
+registration, and flagged "per-connection secret vs platform-wide" as the open
+question that decided whether a migration was needed. That came from a comment
+in `hostaway.ts` which was simply wrong.
 
-Not shipping Phase 3 is survivable: sync latency then equals the cron interval,
-which is what OwnerRez lives with today.
+Checked against api.hostaway.com/documentation on 2026-08-17: unified webhook
+registration takes **URL (mandatory), Login (optional), Password (optional)**,
+and deliveries carry those in the request's authentication header. It is HTTP
+Basic Auth with credentials **we choose**. Consequences:
+
+- `ownerRezProvider.validateWebhook` is the template, near-verbatim —
+  constant-time compare of a user/pass pair from env, with an optional
+  source-IP allowlist in front of it.
+- **No migration.** One platform-wide `HOSTAWAY_WEBHOOK_USER` /
+  `HOSTAWAY_WEBHOOK_PASSWORD` covers every tenant, because the same pair is
+  supplied on every registration. Both must be declared in `lib/env.ts`.
+- `handleWebhookEvent` maps reservation created/modified/cancelled onto
+  `syncHostawayReservations` with `fetchMode: { kind: 'ids', ... }`, which
+  already exists.
+
+Not shipping it remains survivable: sync latency is then the 24-hour reconcile
+interval, which is what OwnerRez lives with.
 
 ### Phase 4 — re-enable
 Work the 16-row table above. Add `RLS`-irrelevant; all UI/registry edits.
 
 ### Phase 5 — reviews → RepuGuard
-Mirror `ownerrez-reviews-sync.ts`. Required by "every feature".
+Mirror `ownerrez-reviews-sync.ts` or `hostex/reviews-sync.ts`. Required by
+"every feature".
+
+**Blocked on a shape.** The reviews endpoints are not in the API documentation
+that was reachable, and `hostaway.ts` types no review object. Everything built
+so far derives from shapes that file already carried, written from Hostaway's
+docs; inventing a review type would be the one place in this integration where
+the mapping was guessed. Needs their reviews reference or one live payload.
+
+### Netting owner revenue (task #21)
+
+`extractHostawayActualTotal` returns `totalPrice`, the guest-facing GROSS, and
+the caveat in `events.ts` says the typed shape carries nothing to net against.
+That is now only half true: the API changelog names `hostChannelFee`,
+`guestChannelFee`, `otaPaymentProcessingFee`, `paymentServiceProcessingFee`,
+`cancellationPayout` and `airbnbPayoutSum`. The NAMES are confirmed; their exact
+semantics are not, and an owner statement is the wrong place to guess which
+subset makes up the host's net. Type them against a live reservation payload,
+then subtract — the test in `unit/integrations/hostaway-mappers.test.ts` pins
+the current gross behaviour and will fail when that happens, which is the
+point.
 
 ---
 

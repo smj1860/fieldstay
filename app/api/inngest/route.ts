@@ -39,10 +39,9 @@ import { ownerRezReconciliationCron }    from '@/lib/inngest/functions/ownerrez/
 import { ownerRezReconciliationHandler } from '@/lib/inngest/functions/ownerrez/reconciliation-handler'
 
 // Hostaway integration
-// Disabled — not ready for launch. Re-enable by uncommenting this import and
-// the hostawayInitialSync entry in the serve() functions array below. Do not
-// delete lib/inngest/functions/hostaway/initial-sync.ts.
-// import { hostawayInitialSync } from '@/lib/inngest/functions/hostaway/initial-sync'
+import { hostawayInitialSync }                from '@/lib/inngest/functions/hostaway/initial-sync'
+import { hostawayReservationReconcileCron }    from '@/lib/inngest/functions/hostaway/reservation-reconcile-cron'
+import { hostawayReservationReconcileHandler } from '@/lib/inngest/functions/hostaway/reservation-reconcile-handler'
 
 // Hospitable integration
 import { hospInitialSync }              from '@/lib/inngest/functions/hospitable/initial-sync'
@@ -242,9 +241,9 @@ export const { GET, POST, PUT } = serve({
     ownerRezReconciliationHandler,
 
     // Hostaway sync
-    // Disabled — not ready for launch. Re-enable by uncommenting this line
-    // and the import above.
-    // hostawayInitialSync,
+    hostawayInitialSync,
+    hostawayReservationReconcileCron,
+    hostawayReservationReconcileHandler,
 
     // Hospitable sync
     hospInitialSync,

@@ -33,6 +33,12 @@ function makeSupabase(queued: Record<string, { data?: unknown; error?: unknown }
     const chain: any = {}
     chain.select = () => chain
     chain.eq     = () => chain
+    // The PMS lookup filters `.in('provider_id', PMS_PROVIDER_IDS)` and orders
+    // + limits so the name shown is deterministic when an org has connected
+    // two. Chainable no-ops here — the queue decides what comes back.
+    chain.in     = () => chain
+    chain.order  = () => chain
+    chain.limit  = () => chain
 
     const resolveNext = () => {
       const idx = counters[table] ?? 0
@@ -94,7 +100,7 @@ describe('handleTrialLifecycle', () => {
   it('runs the full sequence and sends all three emails when the org never subscribes', async () => {
     const supabase = makeSupabase({
       organizations: [trialingOrg, trialingOrg, trialingOrg],
-      integration_connections: [{ data: { id: 'conn_1' }, error: null }],
+      integration_connections: [{ data: { provider_id: 'ownerrez' }, error: null }],
       properties: [{ data: null, error: null, count: 4 } as unknown as { data: unknown; error: unknown }],
       profiles: [churnOptedIn],
     })
@@ -128,7 +134,7 @@ describe('handleTrialLifecycle', () => {
     )
 
     expect(renderTrialExpiringEmail).toHaveBeenCalledWith(
-      expect.objectContaining({ firstName: 'Jamie', orgName: 'Lakeview Rentals', propertyCount: 4, ownerRezConnected: true }),
+      expect.objectContaining({ firstName: 'Jamie', orgName: 'Lakeview Rentals', propertyCount: 4, connectedPmsName: 'OwnerRez' }),
     )
   })
 
@@ -167,7 +173,7 @@ describe('handleTrialLifecycle', () => {
     expect(renderTrialExpiredEmail).not.toHaveBeenCalled()
     // Missing integration/property-count rows fall back to safe defaults.
     expect(renderTrialExpiringEmail).toHaveBeenCalledWith(
-      expect.objectContaining({ propertyCount: 0, ownerRezConnected: false }),
+      expect.objectContaining({ propertyCount: 0, connectedPmsName: null }),
     )
   })
 
