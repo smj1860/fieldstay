@@ -17,8 +17,8 @@
 // keeps working unchanged.
 // ============================================================
 
-import { RateLimitError, IntegrationMisconfiguredError, type IntegrationProvider, type TokenResponse } from '@/lib/integrations/types'
-import { hospitableApiLimiter, checkLimit } from '@/lib/rate-limit'
+import { RateLimitError, ProviderAuthError, IntegrationMisconfiguredError, type IntegrationProvider, type TokenResponse } from '@/lib/integrations/types'
+import { hospitableApiLimiter, checkLimit, outboundBackoffSeconds } from '@/lib/rate-limit'
 import { ok, fail, timingSafeEqual, extractClientIp, isIpInCidr } from '@/lib/integrations/webhook-verification'
 import { unwrapJoin } from '@/lib/utils/supabase-joins'
 import { reportError } from '@/lib/observability/report-error'
@@ -460,40 +460,63 @@ export const hospitableProvider: IntegrationProvider = {
  * back to reactive handling if a real 429 comes back anyway — parses
  * Retry-After and throws RateLimitError with that exact wait time. Every
  * call site should use this instead of calling fetch() directly so both
- * layers apply uniformly. Inngest's own step retry handles backing off and
- * re-attempting — see translateSyncError() for the PM-facing message.
+ * layers apply uniformly.
+ *
+ * ⚠️ The proactive budget CANNOT prevent every 429, and production proved it
+ * on 2026-08-17: Hospitable's partner API log showed a real 429 on
+ * GET /v2/reservations/{uuid} bracketed by 200s nine seconds either side,
+ * while the platform-wide 54/60 budget was nowhere near spent. Hospitable
+ * enforces PER-ENTITY limits far tighter than the general one (the messages
+ * endpoint is documented at 2 req/min per reservation), and a platform-wide
+ * counter is structurally blind to those. The reactive branch below is
+ * therefore the load-bearing one, not the fallback — which is why callers must
+ * honour its retryAfter rather than leaving it to Inngest's generic backoff.
  */
 export async function hospitableFetch(url: string, token: string): Promise<Response> {
   // Outbound quota against Hospitable's own 60/min ceiling → fails CLOSED:
   // this exists so we throw RateLimitError before Hospitable 429s us. If the
-  // budget check itself is unavailable we must not blow through their limit;
-  // Inngest's step retry handles backing off.
+  // budget check itself is unavailable we must not blow through their limit.
   const budget = await checkLimit(hospitableApiLimiter, 'hospitable-api', {
     onError: 'deny',
     site:    'lib.integrations.hospitable.hospitableFetch',
   })
-  const reset = budget.reset
   if (!budget.allowed) {
-    // Jitter (1.0-1.5x) on top of the exact window reset. Without it, every
-    // caller blocked by the same sliding window computes an IDENTICAL
-    // retry-after and they all re-enter the budget on the same tick — a
-    // thundering herd that re-exhausts it instantly. Matters most when
-    // several orgs' initial syncs collide.
-    // eslint-disable-next-line no-restricted-properties -- retry jitter to de-synchronise blocked callers, not id/token generation
-    const jitter            = 1 + Math.random() * 0.5 // NOSONAR -- timing jitter only, not security-sensitive (see eslint-disable justification above)
-    const baseSeconds       = Math.max(1, Math.ceil((reset - Date.now()) / 1000))
-    const retryAfterSeconds = Math.ceil(baseSeconds * jitter)
-    throw new RateLimitError(retryAfterSeconds)
+    // Jittered, and a real backoff rather than ~1s when the limiter itself
+    // errored — see outboundBackoffSeconds' doc comment for both.
+    throw new RateLimitError(outboundBackoffSeconds(budget))
   }
 
   const res = await fetch(url, { headers: hospitableProvider.getApiHeaders(token), signal: AbortSignal.timeout(PMS_API_TIMEOUT_MS) })
 
   if (res.status === 429) {
-    const retryAfter = parseInt(res.headers.get('Retry-After') ?? '60', 10)
-    throw new RateLimitError(retryAfter)
+    throw new RateLimitError(parseRetryAfterSeconds(res.headers.get('Retry-After')))
   }
 
   return res
+}
+
+/**
+ * Retry-After → whole seconds, floored at 1.
+ *
+ * RFC 7231 permits BOTH `delay-seconds` and an HTTP-date, and a bare
+ * parseInt() on the date form yields NaN. That NaN reached RateLimitError's
+ * message as "retry after NaNs" and would reach step.sleep() as the duration
+ * string `NaNs`, which Inngest cannot parse — turning a routine throttle into
+ * a hard function failure. Both forms are handled here, and anything
+ * unparseable falls back to the same 60s an absent header gets.
+ */
+export function parseRetryAfterSeconds(header: string | null): number {
+  if (!header) return 60
+
+  const trimmed = header.trim()
+
+  const seconds = Number(trimmed)
+  if (Number.isFinite(seconds)) return Math.max(1, Math.ceil(seconds))
+
+  const dateMs = Date.parse(trimmed)
+  if (Number.isFinite(dateMs)) return Math.max(1, Math.ceil((dateMs - Date.now()) / 1000))
+
+  return 60
 }
 
 export async function hospFetchProperties(token: string): Promise<HospitableProperty[]> {
@@ -769,11 +792,17 @@ export async function hospFetchCalendar(
 // GET /reservations/{uuid}/messages — rate-limited by Hospitable to 2
 // requests/minute PER RESERVATION, much tighter than the general API budget
 // hospitableApiLimiter enforces. Deliberately not given its own proactive
-// limiter (would need a per-reservation key, adding real complexity for an
-// endpoint the Inngest concurrency limit — { limit: 2, key: 'entity_id' } in
-// incremental-sync.ts — already throttles per reservation); relies on
-// hospitableFetch's reactive 429 handling (Retry-After header) plus
-// Inngest's built-in step retries to absorb bursts instead.
+// limiter (that would need a per-reservation key, real complexity for one
+// endpoint); relies on hospitableFetch's reactive 429 handling plus the
+// caller HONOURING the returned Retry-After.
+//
+// This comment used to claim incremental-sync.ts's per-entity Inngest
+// concurrency "already throttles per reservation". It does not, and the
+// difference caused a production incident: the limit was { limit: 2, key:
+// 'entity_id' }, which ALLOWS two simultaneous invocations for one
+// reservation. Two concurrent calls is the entire per-minute budget for this
+// endpoint spent at once, before any retry. It is now limit 1 — see the
+// concurrency block in incremental-sync.ts.
 export async function hospFetchReservationMessages(
   token:         string,
   reservationId: string
@@ -784,6 +813,16 @@ export async function hospFetchReservationMessages(
   )
 
   if (res.status === 404) return []
+
+  // 401/403 are TERMINAL — most likely this connection predates the scope that
+  // covers guest messaging. Retrying cannot grant a scope, and this exact call
+  // burned all 5 of the function's retries in production on 2026-08-17 while
+  // Hospitable was concurrently 429ing us. Thrown as a typed error so the
+  // caller can stop rather than back off. See ProviderAuthError.
+  if (res.status === 401 || res.status === 403) {
+    const text = await res.text().catch(() => '')
+    throw new ProviderAuthError('Hospitable', res.status, 'GET /reservations/{id}/messages', text.slice(0, 200))
+  }
 
   if (!res.ok) {
     const text = await res.text().catch(() => '')

@@ -8,7 +8,7 @@ import {
   krogerLocationsApiLimiter,
   krogerCartApiLimiter,
   checkLimit,
-  retryAfterSeconds,
+  outboundBackoffSeconds,
 } from '@/lib/rate-limit'
 import { RateLimitError } from '@/lib/integrations/types'
 import type {
@@ -66,10 +66,11 @@ async function krogerFetch(
     site:    `lib.kroger.client.krogerFetch.${identifier}`,
   })
   if (!decision.allowed) {
-    // On an errored decision there is no real window to wait for (reset is
-    // Date.now()), and retryAfterSeconds would floor to 1s — back off a full
-    // minute instead so a Redis outage isn't hammered by immediate retries.
-    throw new RateLimitError(decision.errored ? 60 : retryAfterSeconds(decision))
+    // This module's `decision.errored ? 60 : …` is now outboundBackoffSeconds,
+    // shared with hospitableFetch and hostexFetch — both of which had the bug
+    // this line was written to avoid. jitter:false preserves the exact
+    // behaviour this call site already had.
+    throw new RateLimitError(outboundBackoffSeconds(decision, { jitter: false }))
   }
 
   // Circuit breaker, checked BEFORE the fetch. The rate limiter above bounds

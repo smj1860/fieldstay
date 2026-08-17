@@ -37,6 +37,13 @@ vi.mock('@/lib/rate-limit', () => ({
   checkLimit:                (...args: unknown[]) => checkLimitMock(...args),
   retryAfterSeconds:         (d: { reset: number }) =>
     Math.max(1, Math.ceil((d.reset - Date.now()) / 1000)),
+  // Mirrors the real helper: an ERRORED decision has no real window to wait
+  // for (checkLimit sets reset to Date.now()), so it backs off a full minute
+  // rather than the ~1s that subtraction would floor to. jitter is off at
+  // every krogerFetch call site, so this mock does not model it.
+  ERRORED_BUDGET_BACKOFF_SECONDS: 60,
+  outboundBackoffSeconds:    (d: { reset: number; errored: boolean }) =>
+    d.errored ? 60 : Math.max(1, Math.ceil((d.reset - Date.now()) / 1000)),
 }))
 
 import { searchProducts, addItemsToKrogerCart, findNearestKrogerStore } from '@/lib/kroger/client'

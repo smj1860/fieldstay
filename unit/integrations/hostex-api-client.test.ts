@@ -24,6 +24,12 @@ vi.mock('@/lib/rate-limit', () => ({
   // to each other; hostexFetch consults both — see the note above
   // hostexApiLimiter in lib/rate-limit.ts.
   hostexApiHourlyLimiter: { limit: vi.fn() },
+  // Mirrors the real helper: an ERRORED decision carries no usable window
+  // (checkLimit sets reset to Date.now()), so it backs off a full minute
+  // instead of the ~1s that subtraction floors to. hostexFetch applies its own
+  // withRetryJitter on top, so this is deliberately un-jittered.
+  outboundBackoffSeconds: (d: { reset: number; errored: boolean }) =>
+    d.errored ? 60 : Math.max(1, Math.ceil((d.reset - Date.now()) / 1000)),
 }))
 
 import {
