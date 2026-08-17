@@ -109,49 +109,47 @@ Settings → Secrets and variables → Actions. All Supabase values are the
 `NEXT_PUBLIC_SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`, and `E2E_PM_EMAIL`
 are all present. Adding them is the "go live" action.
 
-### 4a. Arm the RLS isolation probe (separate secret, separate switch)
+### 4a. The RLS isolation probe — a MANUAL audit, not a CI gate
 
-`scripts/rls-isolation-probe.sql` runs in the `db-invariants` job and is the
-only check that measures what an authenticated user can actually **see**,
-rather than what the schema says. It impersonates a real user, seeds a
-throwaway foreign tenant, counts what leaks across the boundary, and rolls
-everything back.
+`scripts/rls-isolation-probe.sql` is the only check that measures what an
+authenticated user can actually **see**, rather than what the schema says. It
+impersonates a real user, seeds a throwaway foreign tenant, counts what leaks
+across the boundary, and rolls everything back.
 
-It needs its own secret because it cannot go through PostgREST like the other
-three checks in that job — its method is a transaction held open across a
-`SET ROLE`, and PostgREST cannot hold a transaction across statements.
+**It is deliberately not wired into CI.** It was a step in the `db-invariants`
+job for a few hours on 2026-08-17 and was removed. Every other check in that
+job talks to PostgREST, which the job already holds credentials for; the probe
+needs a session-mode Postgres connection, because its method is a transaction
+held open across a `SET ROLE` and PostgREST cannot hold a transaction across
+statements. That means a second secret — and the gate was armed before that
+secret existed, so the job failed three runs running for a reason no code
+change could fix. Not worth it for a check that has never yet found a problem.
 
-| Secret | Value |
-|---|---|
-| `SUPABASE_E2E_DB_URL` | The E2E project's **session-mode pooler** URI |
+Run it by hand instead. Safe against production: everything is inside one
+transaction that ends in `ROLLBACK`.
 
-Supabase dashboard → Project Settings → Database → Connection string →
-**Session pooler**. It looks like:
+```bash
+SUPABASE_DB_URL='<session pooler URI>' pnpm run check:rls-isolation        # E2E
+SUPABASE_DB_URL='<session pooler URI>' pnpm run check:rls-isolation:prod   # production
+```
+
+The URI comes from Supabase dashboard → Project Settings → Database →
+Connection string → **Session pooler**:
 
 ```
-postgresql://postgres.<e2e-ref>:<password>@aws-0-<region>.pooler.supabase.com:5432/postgres
+postgresql://postgres.<ref>:<password>@aws-0-<region>.pooler.supabase.com:5432/postgres
 ```
 
-Three ways to get this wrong, all of which fail at connect time rather than
+Three ways to get it wrong, all of which fail at connect time rather than
 silently:
 
 - **Port 6543** is the transaction pooler. Use **5432** (session).
-- **`db.<ref>.supabase.co`** is the direct connection and is IPv6-only;
-  GitHub runners are IPv4.
-- **The production ref.** The runner refuses a production URI outright unless
-  `DB_INVARIANTS_ALLOW_PROD=1` is set deliberately.
+- **`db.<ref>.supabase.co`** is the direct connection and is IPv6-only.
+- **A production ref** is refused outright unless `DB_INVARIANTS_ALLOW_PROD=1`
+  is set deliberately — which `check:rls-isolation:prod` does for you.
 
-Then set the repo **variable** (Settings → Secrets and variables → Actions →
-Variables) `RLS_PROBE_ARMED=1`. Until you do, the probe warns and passes —
-deliberately, so a brand-new check isn't permanently red before its secret
-exists. After you do, an unarmed run fails loudly like every other gate.
-
-Run it by hand against production any time — it is safe, everything rolls
-back:
-
-```bash
-SUPABASE_DB_URL='<prod session pooler URI>' pnpm run check:rls-isolation:prod
-```
+To put it back in CI later: add the step to the `db-invariants` job, feed
+`SUPABASE_DB_URL` from a secret, and **add the secret before arming anything**.
 
 ## 5. Make it a required check (the actual gate)
 
