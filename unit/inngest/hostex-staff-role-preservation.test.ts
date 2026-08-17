@@ -11,10 +11,11 @@ import { describe, it, expect, vi, beforeEach } from 'vitest'
 // after. Same class as the property room-count clobber: a value we guessed
 // overwriting a value a human set.
 //
-// The rule is upgrade-only, not never-touch. 'general' is our "not yet known"
-// fallback (a staff member with no tasks yet lands there) and the inference
-// genuinely improves once they have a history, so 'general' may be replaced.
-// Any more specific role already on the row always wins.
+// The stored role wins unconditionally. An earlier version of this fix
+// preserved anything EXCEPT 'general', treating that as "not yet known" so the
+// inference could still improve — but 'general' is a role a PM can choose, and
+// it is where operators and receptionists land by default, so that carve-out
+// re-opened the bug for exactly the people whose role gets corrected.
 // ============================================================================
 
 vi.mock('@/lib/supabase/server', () => ({ createServiceClient: vi.fn() }))
@@ -102,15 +103,25 @@ describe('Hostex staff sync — crew role preservation', () => {
     expect(byId['2']).toBe('general')
   })
 
-  it("treats a stored 'general' as not-yet-known and lets the inference improve it", async () => {
-    // A staff member with no tasks at connect time lands on 'general'. Once
-    // they have a cleaning history, freezing that first guess forever would be
-    // its own bug.
+  it("keeps a stored 'general' even when the inference now says otherwise", async () => {
+    // The regression this file exists for. 'general' is where every
+    // receptionist and operator lands by default, so a PM who reviewed one and
+    // left it as General must not have that undone the next morning — and
+    // nothing in the row can tell "PM chose General" from "we guessed General".
     vi.mocked(hostexFetchTasks).mockResolvedValue([task('cleaning', 1)])
 
     const rows = await run([{ external_id: '1', role: 'general' }])
 
-    expect(rows.find((r) => r.external_id === '1')?.role).toBe('cleaning')
+    expect(rows.find((r) => r.external_id === '1')?.role).toBe('general')
+  })
+
+  it('preserves a role even when the PM moved it the other way', async () => {
+    // Cleaner → General is as much an edit as General → Cleaner.
+    vi.mocked(hostexFetchTasks).mockResolvedValue([task('cleaning', 1)])
+
+    const rows = await run([{ external_id: '1', role: 'landscaping' }])
+
+    expect(rows.find((r) => r.external_id === '1')?.role).toBe('landscaping')
   })
 
   it('still overwrites the fields Hostex actually reports', async () => {

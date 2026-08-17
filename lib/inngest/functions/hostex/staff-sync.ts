@@ -80,9 +80,9 @@ export interface HostexStaffSyncParams {
 }
 
 /**
- * Replace each row's inferred role with the one already stored, wherever the
- * stored one is more specific than 'general'. See the call site for why the
- * role is treated differently from every other synced column.
+ * Replace each row's inferred role with the one already stored, whatever it
+ * is. See the call site for why the role is treated differently from every
+ * other synced column.
  *
  * One read for the whole batch, keyed by external_id — never a lookup per
  * staff member (unit/guardrails/n-plus-one-loops.test.ts).
@@ -118,7 +118,15 @@ async function preserveManualCrewRoles(
 
   return rows.map((row) => {
     const stored = roleByExternalId.get(row.external_id)
-    return stored && stored !== 'general' ? { ...row, role: stored as typeof row.role } : row
+    // `has`, not truthiness: the test is whether FieldStay already holds a row
+    // for this staff member at all, not whether its role looks interesting.
+    // 'general' is a real, selectable role a PM can choose deliberately, and
+    // treating it as "unset" is what would re-open the bug for exactly the
+    // people most likely to be edited — the operators and receptionists that
+    // land there by default.
+    return roleByExternalId.has(row.external_id)
+      ? { ...row, role: stored as typeof row.role }
+      : row
   })
 }
 
@@ -160,23 +168,29 @@ export async function syncHostexStaff(
 
     const supabase = createServiceClient({ system })
 
-    // ROLE IS OURS, NOT HOSTEX'S — so it does not get overwritten like the
-    // rest of the row does.
+    // ROLE IS OURS, NOT HOSTEX'S — so it is written ONCE, at insert, and never
+    // again. Every other column here is overwritten on every sync, and should
+    // be: name, email, phone and is_active are things Hostex actually reports.
     //
     // Hostex staff records carry no role field at all; the role in `rows` is
     // INFERRED from each person's scheduled task types. This step runs on the
     // daily reconcile, so writing that inference unconditionally meant a PM
     // who corrected a receptionist from General to Cleaning got it reverted
-    // the next morning, every morning. Name, email, phone and is_active are
-    // still overwritten, and should be: those Hostex actually reports.
+    // the next morning, every morning.
     //
-    // Upgrade-only, rather than never-touch. A staff member with no tasks yet
-    // lands on 'general', and the inference genuinely improves once they have
-    // a history — freezing the first guess forever would be its own bug. So a
-    // specific role already on the row always wins, and 'general' is treated
-    // as "not yet known" and may be replaced. The one case this gets wrong is
-    // a PM who deliberately chose General; they may see it change once, which
-    // is a far smaller loss than every correction being erased nightly.
+    // The stored role wins unconditionally — not just when it looks more
+    // specific than our guess. An earlier version preserved anything except
+    // 'general', on the theory that 'general' means "not yet known" and the
+    // inference improves once someone has a task history. But 'general' is a
+    // role a PM can deliberately choose, and it is the DEFAULT landing spot
+    // for operators and receptionists — precisely the people whose role gets
+    // corrected. Treating it as unset re-opened the bug for the exact
+    // population the fix was for.
+    //
+    // The cost is real and accepted: a staff member who had no tasks at their
+    // first sync stays General until someone sets them. Recovering that
+    // automatically needs a column recording whether the role was inferred or
+    // chosen, which is the only thing that can tell those two apart.
     const preserved = await preserveManualCrewRoles(supabase, orgId, rows)
 
     const { error } = await supabase

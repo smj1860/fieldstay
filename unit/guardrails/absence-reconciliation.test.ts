@@ -62,7 +62,7 @@ const RECONCILERS: Record<string, Reconciler> = {
     protection: 'empty-set-guard',
     why: 'Deactivates crew members absent from Hospitable. THE SITE THAT FIRED: hospFetchTeammates returned [] for any non-ok response, including the 403 expected for a connection without teammate:read, and did so from inside its pagination loop. Both halves are fixed, and the guard stays as the backstop because the caller cannot verify how the fetch failed.',
   },
-  'lib/inngest/functions/hostex/staff-sync.ts:234': {
+  'lib/inngest/functions/hostex/staff-sync.ts:248': {
     protection: 'empty-set-guard',
     why: 'Deactivates crew members absent from Hostex /staffs. Same shape as the Hospitable teammate site above, and guarded the same way for the same reason: an account holding a Hostex connection and zero staff has nothing to reconcile anyway, so an empty fetch is far likelier to be a failure than a real state. Deactivating wrongly takes a whole roster out of auto-assign, which selects on is_active.',
   },

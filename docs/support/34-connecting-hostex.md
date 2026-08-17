@@ -56,7 +56,9 @@ Your Hostex schedule staff — cleaners, operators, receptionists, and anyone el
 
 Hostex staff records carry no role field, so FieldStay infers each person's role from the work they're actually scheduled for: someone whose tasks are mostly cleaning comes across as Cleaning, mostly maintenance as Maintenance, and so on. Anyone whose work doesn't map to a FieldStay role — a receptionist, for example — comes across as General, with what they actually do recorded in their **Specialty** field so nothing is lost.
 
-Staff with no scheduled tasks yet come across as General. You can change any role in **Settings → Crew** at any time, and the daily sync will not overwrite it — a role you set specifically always wins over the inference. The one exception is General itself, which FieldStay treats as "not known yet": if someone lands on General and later builds up a cleaning history, the sync will upgrade them to Cleaning. Set them to any specific role and it sticks.
+Staff with no scheduled tasks yet come across as General.
+
+**A role you set is permanent.** Change anyone's role in **Settings → Crew** and the daily sync will never touch it again — including changing someone to General, or leaving them there deliberately. FieldStay only infers a role the first time it sees a staff member; after that, your choice is the answer. The trade is that someone who had no tasks at their first sync stays General until you set them, so it's worth a quick pass over your crew list after connecting.
 
 ### Turnover Checklists
 
@@ -113,7 +115,7 @@ Hostex has no way to notify FieldStay that a host revoked access on their side �
 Check the date range on your bookings page first — the default view shows upcoming bookings only. If it's upcoming and still missing, it may have been a missed webhook; use **Trigger Resync** rather than waiting for the daily sweep.
 
 **My Hostex staff came in with the wrong role.**
-Roles are inferred from scheduled tasks, so a staff member with no tasks yet, or with a mix, may land on General. Change the role in **Settings → Crew** and it sticks — the next sync won't revert it.
+Roles are inferred from scheduled tasks, so a staff member with no tasks yet, or with a mix, may land on General. Change the role in **Settings → Crew** and it sticks permanently — the sync never revisits a role once it's been set.
 
 ---
 

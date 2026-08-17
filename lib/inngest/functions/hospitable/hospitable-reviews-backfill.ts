@@ -142,6 +142,22 @@ export const hospReviewsBackfill = inngest.createFunction(
         return reviewRows.length
       })
 
+      // RepuGuard draft generation. Hospitable's WEBHOOK path has fired this
+      // since it shipped, but this backfill — the historical pull on first
+      // connect — never did, so a new customer's entire review history landed
+      // at response_status = 'pending' with no drafts against it. The bulk
+      // import is the case where automatic drafting is worth the most.
+      //
+      // Top-level step tooling, outside the upsert step: a sendEvent nested in
+      // a step.run replays that callback (CLAUDE.md's Inngest constraints),
+      // which here would re-upsert every review.
+      if (reviewCount > 0) {
+        await step.sendEvent('trigger-repuguard', {
+          name: 'repuguard/batch_generate.requested' as const,
+          data: { org_id, requested_by: 'hospitable-reviews-backfill' },
+        })
+      }
+
       await step.run('record-backfill-success', async () => {
         await updateConnectionMeta(user_id, {
           last_reviews_backfill_status: 'success',

@@ -342,6 +342,27 @@ export const ownerRezReviewsSyncConnection = inngest.createFunction(
         }
       })
 
+      // RepuGuard draft generation. OwnerRez was the last of the three PMS
+      // integrations not firing this: a synced review sat at
+      // response_status = 'pending' until a PM noticed and clicked Generate,
+      // so the "drafts appear automatically" promise held for Hospitable only.
+      //
+      // Top-level step tooling, deliberately AFTER the upsert step and outside
+      // it — nesting a sendEvent inside a step.run replays the enclosing
+      // callback (see CLAUDE.md's Inngest constraints), which here would mean
+      // re-upserting every review.
+      //
+      // Gated on there being reviews at all. repuguardBatchGenerate is
+      // serialised per org and only selects rows still pending, so a re-run
+      // over unchanged reviews is a cheap no-op rather than a duplicate
+      // completion — but firing for a sync that found nothing is pure noise.
+      if (reviews.length > 0) {
+        await step.sendEvent(`trigger-repuguard-${userId}`, {
+          name: 'repuguard/batch_generate.requested' as const,
+          data: { org_id: orgId, requested_by: 'ownerrez-reviews-sync' },
+        })
+      }
+
       await step.run(`update-reviews-cursor-${userId}`, async () => {
         try {
           await mergeIntegrationConnectionMetadata({

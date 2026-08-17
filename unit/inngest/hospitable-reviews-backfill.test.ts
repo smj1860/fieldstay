@@ -20,8 +20,13 @@ import { invokeHandler } from './test-helpers'
 
 function runAllStep() {
   return {
-    run:   vi.fn((_name: string, cb: () => unknown) => cb()),
-    sleep: vi.fn(async () => undefined),
+    run:       vi.fn((_name: string, cb: () => unknown) => cb()),
+    sleep:     vi.fn(async () => undefined),
+    // The backfill fires repuguard/batch_generate.requested once the reviews
+    // land — without it a new customer's entire imported review history sits
+    // at 'pending' with no drafts. See
+    // unit/guardrails/review-sync-repuguard-coverage.test.ts.
+    sendEvent: vi.fn(async () => undefined),
   }
 }
 
@@ -156,6 +161,55 @@ describe('hospReviewsBackfill', () => {
 
     expect(result).toEqual({ reviews: 0 })
     expect(supabase.calls.some((c) => c.table === 'reviews')).toBe(false)
+  })
+
+  it('fires RepuGuard draft generation once the imported reviews land', async () => {
+    // The backfill is the bulk import — a new customer's whole review history.
+    // It used to upsert them all at response_status = 'pending' and stop,
+    // so no draft appeared until someone clicked Generate.
+    ;(hospFetchReviews as ReturnType<typeof vi.fn>).mockResolvedValue([RAW_REVIEW])
+    const supabase = makeSupabase({
+      properties: [{ data: [{ id: 'prop_1', external_id: 'hosp_prop_1' }], error: null }],
+      reviews:    [{ error: null }],
+      integration_connections: [
+        { data: { metadata: {} }, error: null },
+        { error: null },
+      ],
+    })
+    ;(createServiceClient as ReturnType<typeof vi.fn>).mockReturnValue(supabase)
+
+    const step = runAllStep()
+    await invokeHandler(hospReviewsBackfill, {
+      event: { data: EVENT_DATA },
+      step,
+      logger: makeLogger(),
+    })
+
+    expect(step.sendEvent).toHaveBeenCalledWith('trigger-repuguard', {
+      name: 'repuguard/batch_generate.requested',
+      data: { org_id: 'org_1', requested_by: 'hospitable-reviews-backfill' },
+    })
+  })
+
+  it('does not fire draft generation for a sync that imported nothing', async () => {
+    ;(hospFetchReviews as ReturnType<typeof vi.fn>).mockResolvedValue([])
+    const supabase = makeSupabase({
+      properties: [{ data: [{ id: 'prop_1', external_id: 'hosp_prop_1' }], error: null }],
+      integration_connections: [
+        { data: { metadata: {} }, error: null },
+        { error: null },
+      ],
+    })
+    ;(createServiceClient as ReturnType<typeof vi.fn>).mockReturnValue(supabase)
+
+    const step = runAllStep()
+    await invokeHandler(hospReviewsBackfill, {
+      event: { data: EVENT_DATA },
+      step,
+      logger: makeLogger(),
+    })
+
+    expect(step.sendEvent).not.toHaveBeenCalled()
   })
 
   it('sleeps and retries once on a rate limit before giving up, rather than treating the first 429 as a hard failure', async () => {
