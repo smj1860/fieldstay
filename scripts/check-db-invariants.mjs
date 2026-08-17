@@ -726,7 +726,26 @@ if (shapesRes === null) {
       'been applied to this project?'
   )
 } else {
-  const sameSet = (a, b) => a.length === b.length && [...a].sort().join() === [...b].sort().join()
+  /**
+   * Do two column lists name the same columns, order-independent?
+   *
+   * ON CONFLICT does not care about key order — `(a, b)` and `(b, a)` name the
+   * same arbiter — so this compares as sets.
+   *
+   * Set membership rather than sort-and-join, which is what this was. Sorting
+   * without a comparator is Sonar S2871 (a CRITICAL bug, because the default
+   * sort stringifies its elements), and the usual fix of passing a comparator
+   * would only be satisfying the rule: these are index key columns, so they are
+   * unique by definition and there was never anything for an ORDER to mean.
+   * Membership says what is actually being asked, and is O(n) rather than
+   * O(n log n) besides.
+   */
+  const sameSet = (a, b) => {
+    if (a.length !== b.length) return false
+    const inA = new Set(a)
+    return b.every((column) => inA.has(column))
+  }
+
   const unnamable = []
 
   for (const site of onConflictSites) {
