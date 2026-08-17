@@ -121,7 +121,7 @@ export async function GET(
   // runs on ~5% of arrivals to amortise cleanup cost without a dedicated
   // cron. Same pattern as cleanup_webhook_dedup() in the webhook route.
   // eslint-disable-next-line no-restricted-properties -- probabilistic sampling to amortise cleanup, not id/token generation
-  if (Math.random() < 0.05) {
+  if (Math.random() < 0.05) { // NOSONAR -- probabilistic sampling only, not security-sensitive (see eslint-disable justification above)
     void cleanupExpiredPendingIntegrationArtifacts()
   }
 

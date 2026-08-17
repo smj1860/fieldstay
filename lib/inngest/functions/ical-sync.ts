@@ -195,7 +195,7 @@ export const syncOrgIcalFeeds = inngest.createFunction(
           ? Math.floor((index / (feeds.length - 1)) * JITTER_WINDOW_MS)
           : 0
         // eslint-disable-next-line no-restricted-properties -- schedule jitter to spread feed fetches, not id/token generation
-        const randomJitter = Math.floor(Math.random() * 30_000)
+        const randomJitter = Math.floor(Math.random() * 30_000) // NOSONAR -- schedule jitter only, not security-sensitive (see eslint-disable justification above)
 
         return {
           name: 'ical/sync.requested' as const,

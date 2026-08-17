@@ -102,7 +102,7 @@ const HOSTEX_TERMINAL_CODES = new Set([
  */
 function withRetryJitter(seconds: number): number {
   // eslint-disable-next-line no-restricted-properties -- backoff jitter, not an id or a token; crypto randomness would be pointless here
-  const factor = 0.75 + Math.random() * 0.5
+  const factor = 0.75 + Math.random() * 0.5 // NOSONAR -- timing jitter only, not security-sensitive (see eslint-disable justification above)
   return Math.max(1, Math.ceil(seconds * factor))
 }
 
