@@ -40,17 +40,17 @@ PROD_REF='vpmznjktllhmmbfnxuvk'
 # because a permanently red required check is one nobody looks at. On the
 # canonical repo an absent secret is a misconfiguration instead, and
 # RLS_PROBE_REQUIRE_ARMED is what tells the two apart.
-if [ -z "${SUPABASE_DB_URL:-}" ]; then
-  if [ "${RLS_PROBE_REQUIRE_ARMED:-0}" = '1' ]; then
-    echo "::error title=RLS isolation probe UNARMED::SUPABASE_DB_URL is not set but RLS_PROBE_REQUIRE_ARMED=1. Cross-tenant isolation was NOT verified."
+if [[ -z "${SUPABASE_DB_URL:-}" ]]; then
+  if [[ "${RLS_PROBE_REQUIRE_ARMED:-0}" == '1' ]]; then
+    echo "::error title=RLS isolation probe UNARMED::SUPABASE_DB_URL is not set but RLS_PROBE_REQUIRE_ARMED=1. Cross-tenant isolation was NOT verified." >&2
     exit 1
   fi
-  echo "::warning title=RLS isolation probe UNARMED::SUPABASE_DB_URL is not set, so cross-tenant isolation was NOT dynamically verified. A well-formed policy expressing the wrong rule would not be caught. See scripts/rls-isolation-probe.sql."
+  echo "::warning title=RLS isolation probe UNARMED::SUPABASE_DB_URL is not set, so cross-tenant isolation was NOT dynamically verified. A well-formed policy expressing the wrong rule would not be caught. See scripts/rls-isolation-probe.sql." >&2
   exit 0
 fi
 
 if ! command -v psql >/dev/null 2>&1; then
-  echo "::error title=RLS isolation probe cannot run::psql is not installed. Install postgresql-client."
+  echo "::error title=RLS isolation probe cannot run::psql is not installed. Install postgresql-client." >&2
   exit 1
 fi
 
@@ -58,8 +58,8 @@ fi
 # database password.
 case "$SUPABASE_DB_URL" in
   *"$PROD_REF"*)
-    if [ "${DB_INVARIANTS_ALLOW_PROD:-0}" != '1' ]; then
-      echo "::error title=RLS isolation probe refused::SUPABASE_DB_URL points at PRODUCTION. Re-run with DB_INVARIANTS_ALLOW_PROD=1 if that is deliberate."
+    if [[ "${DB_INVARIANTS_ALLOW_PROD:-0}" != '1' ]]; then
+      echo "::error title=RLS isolation probe refused::SUPABASE_DB_URL points at PRODUCTION. Re-run with DB_INVARIANTS_ALLOW_PROD=1 if that is deliberate." >&2
       exit 1
     fi
     echo "Running against PRODUCTION by explicit opt-in (DB_INVARIANTS_ALLOW_PROD=1)."
@@ -68,7 +68,7 @@ esac
 
 # Pin a specific tenant when investigating one. Unset, the probe picks the org
 # with the most properties — see the file's probe_target block.
-if [ -n "${FIELDSTAY_PROBE_USER:-}" ]; then
+if [[ -n "${FIELDSTAY_PROBE_USER:-}" ]]; then
   export PGOPTIONS="-c fieldstay.probe_user=${FIELDSTAY_PROBE_USER}"
   echo "Probing as pinned user ${FIELDSTAY_PROBE_USER}."
 fi
@@ -84,6 +84,6 @@ if psql "$SUPABASE_DB_URL" \
      --file "$SQL_FILE"; then
   echo "RLS isolation probe PASSED — no foreign-org rows visible to an authenticated user."
 else
-  echo "::error title=Cross-tenant isolation FAILED::scripts/rls-isolation-probe.sql reported a leak or could not verify isolation. Read the psql output above — an ABORTED message means the probe could not measure, a LEAK message means it did."
+  echo "::error title=Cross-tenant isolation FAILED::scripts/rls-isolation-probe.sql reported a leak or could not verify isolation. Read the psql output above — an ABORTED message means the probe could not measure, a LEAK message means it did." >&2
   exit 1
 fi

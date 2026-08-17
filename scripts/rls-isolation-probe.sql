@@ -171,7 +171,7 @@ INSERT INTO bookings (property_id, org_id, checkin_date, checkout_date)
 SELECT prop, org, current_date, current_date + 1 FROM probe_foreign;
 
 INSERT INTO turnovers (property_id, org_id, checkout_datetime, checkin_datetime)
-SELECT prop, org, now(), now() + interval '1 day' FROM probe_foreign;
+SELECT prop, org, now(), now() + '1 day'::interval FROM probe_foreign;
 
 INSERT INTO work_orders (property_id, org_id, title)
 SELECT prop, org, 'rls-probe foreign work order' FROM probe_foreign;
