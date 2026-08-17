@@ -208,10 +208,17 @@ describe('guardrail: the RLS isolation probe stays wired', () => {
     // The require-armed branch must EXIT NON-ZERO, not merely log — the same
     // assertion the three .mjs checks carry, and for the same reason: a
     // version that logged and carried on would match the env var name alone.
+    //
+    // The character window is a PROXIMITY HEURISTIC, not a semantic check: it
+    // says "an exit 1 follows closely enough to plausibly be this branch's".
+    // It was 400 and fired on a change that only made the error MESSAGE longer
+    // and more actionable — a false positive, but the cheap kind, since the
+    // alternative (parsing shell control flow in a regex) is worse. Widen it
+    // when a legitimately longer message trips it; do not delete it.
     expect(
       runner,
       "run-rls-probe.sh's RLS_PROBE_REQUIRE_ARMED branch must exit 1, not just log.",
-    ).toMatch(/RLS_PROBE_REQUIRE_ARMED[\s\S]{0,400}?exit 1/)
+    ).toMatch(/RLS_PROBE_REQUIRE_ARMED[\s\S]{0,800}?exit 1/)
   })
 
   it('the runner refuses production unless opted in, and never echoes the URI', () => {

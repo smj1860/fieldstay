@@ -42,7 +42,10 @@ PROD_REF='vpmznjktllhmmbfnxuvk'
 # RLS_PROBE_REQUIRE_ARMED is what tells the two apart.
 if [[ -z "${SUPABASE_DB_URL:-}" ]]; then
   if [[ "${RLS_PROBE_REQUIRE_ARMED:-0}" == '1' ]]; then
-    echo "::error title=RLS isolation probe UNARMED::SUPABASE_DB_URL is not set but RLS_PROBE_REQUIRE_ARMED=1. Cross-tenant isolation was NOT verified." >&2
+    # Names the SECRET, not just the env var. In CI this variable is fed by the
+    # repo secret SUPABASE_E2E_DB_URL, so an operator who reads only the env
+    # name adds a secret called SUPABASE_DB_URL and nothing changes.
+    echo "::error title=RLS isolation probe UNARMED::RLS_PROBE_ARMED=1 is set but the SUPABASE_E2E_DB_URL secret is missing, so cross-tenant isolation was NOT verified. Add that secret (Settings -> Secrets and variables -> Actions -> Secrets) with the E2E project's SESSION-mode pooler URI, port 5432 — see docs/E2E_SETUP.md section 4a. To stand the gate down instead, remove the RLS_PROBE_ARMED repo variable." >&2
     exit 1
   fi
   echo "::warning title=RLS isolation probe UNARMED::SUPABASE_DB_URL is not set, so cross-tenant isolation was NOT dynamically verified. A well-formed policy expressing the wrong rule would not be caught. See scripts/rls-isolation-probe.sql." >&2

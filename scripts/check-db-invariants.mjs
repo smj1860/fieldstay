@@ -676,33 +676,47 @@ const UPSERT_ARBITER_ALLOWLIST = new Set([
   'checklist_templates:property_id,org_id',
 ])
 
-const onConflictSites = []
-{
-  const roots = ['app', 'lib', 'components']
-  /** @param {string} dir */
-  const walk = (dir) => {
-    let entries = []
-    try { entries = readdirSync(dir, { withFileTypes: true }) } catch { return }
-    for (const e of entries) {
-      const p = join(dir, e.name)
-      if (e.isDirectory()) { if (e.name !== 'node_modules') walk(p); continue }
-      if (!/\.tsx?$/.test(e.name)) continue
-      const src = readFileSync(p, 'utf8')
-      if (!src.includes('onConflict')) continue
-      // Pair each onConflict with the nearest PRECEDING .from('table'), which is
-      // how these chains are always written.
-      const re = /onConflict:\s*'([^']+)'/g
-      let m
-      while ((m = re.exec(src)) !== null) {
-        const before = src.slice(0, m.index)
-        const froms = [...before.matchAll(/\.from\(\s*'([a-z_][a-z0-9_]*)'\s*\)/g)]
-        const table = froms.length ? froms[froms.length - 1][1] : null
-        if (table) onConflictSites.push({ file: p, table, columns: m[1].split(',').map((c) => c.trim()) })
-      }
-    }
+const ONCONFLICT_RE = /onConflict:\s*'([^']+)'/g
+const FROM_TABLE_RE = /\.from\(\s*'([a-z_][a-z0-9_]*)'\s*\)/g
+
+/** Every `.tsx?` file under `dir`, recursively. */
+function sourceFilesUnder(dir) {
+  let entries
+  try {
+    entries = readdirSync(dir, { withFileTypes: true })
+  } catch {
+    // A root that does not exist is not a failure — this script also runs from
+    // a checkout where `components/` may be absent. Anything else here would be
+    // a permissions problem the very next read would surface anyway.
+    return []
   }
-  for (const r of roots) walk(r)
+
+  return entries.flatMap((entry) => {
+    const path = join(dir, entry.name)
+    if (entry.isDirectory()) return entry.name === 'node_modules' ? [] : sourceFilesUnder(path)
+    return /\.tsx?$/.test(entry.name) ? [path] : []
+  })
 }
+
+/**
+ * Each `onConflict: 'a,b'` in a file, paired with the nearest PRECEDING
+ * `.from('table')` — which is how every one of these chains is written.
+ */
+function onConflictSitesIn(file) {
+  const src = readFileSync(file, 'utf8')
+  if (!src.includes('onConflict')) return []
+
+  return [...src.matchAll(ONCONFLICT_RE)].flatMap((match) => {
+    const preceding = [...src.slice(0, match.index).matchAll(FROM_TABLE_RE)]
+    const table = preceding.at(-1)?.[1]
+    if (!table) return []
+    return [{ file, table, columns: match[1].split(',').map((c) => c.trim()) }]
+  })
+}
+
+const onConflictSites = ['app', 'lib', 'components']
+  .flatMap(sourceFilesUnder)
+  .flatMap(onConflictSitesIn)
 
 const shapesRes = await rpc('unique_index_shapes')
 if (shapesRes === null) {
