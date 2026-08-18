@@ -3,13 +3,12 @@
 import { revalidatePath }                from 'next/cache'
 import { requireOrgMember }              from '@/lib/auth'
 import { createServiceClient }           from '@/lib/supabase/server'
-import { readIntegrationToken, readIntegrationRefreshToken, disconnectIntegrationToken } from '@/lib/integrations/vault'
+import { readIntegrationToken, readIntegrationRefreshToken, disconnectIntegrationToken, storeIntegrationToken } from '@/lib/integrations/vault'
 import { getProvider }                   from '@/lib/integrations/registry'
 import { linkConnectionToOrg }           from '@/lib/integrations/finalize-connection'
 import { logAuditEvent }                 from '@/lib/audit'
 import { reportError } from '@/lib/observability/report-error'
 import { tryUnwrap, reportQueryError } from '@/lib/supabase/unwrap'
-import { storeIntegrationToken }       from '@/lib/integrations/vault'
 import { hostawayExchangeCredentials } from '@/lib/integrations/providers/hostaway'
 
 export async function getSyncProgress(providerId: string): Promise<{
