@@ -36,7 +36,7 @@
 // ============================================================
 
 import { inngest } from '@/lib/inngest/client'
-import { dispatchPerHospitableConnection } from './connection-dispatch'
+import { dispatchPerProviderConnection } from '../shared/connection-dispatch'
 
 export const hospReservationReconcileCron = inngest.createFunction(
   {
@@ -47,9 +47,10 @@ export const hospReservationReconcileCron = inngest.createFunction(
   },
   { cron: '0 10 * * *' },
   async ({ step, logger }) =>
-    dispatchPerHospitableConnection({
+    dispatchPerProviderConnection({
       step,
       logger,
+      provider:       'hospitable',
       system:         'inngest:hospitable-reservation-reconcile-cron',
       label:          'hospitable-reservation-reconcile-cron.connections',
       dispatchStepId: 'dispatch-reconcile-events',

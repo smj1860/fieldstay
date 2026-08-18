@@ -23,6 +23,7 @@ import type { GetStepTools } from 'inngest'
 import { inngest }            from '@/lib/inngest/client'
 import { fetchAllRows }       from '@/lib/inngest/paginate'
 import { createServiceClient } from '@/lib/supabase/server'
+import { persistNormalizedReviews, triggerRepuGuardForReviews } from '../shared/reviews-persist'
 import {
   hostexFetchReviews,
   hostexFetchReviewByReservation,
@@ -130,71 +131,28 @@ export async function syncHostexReviews(
       bookings.map((b) => [stayKey(b.property_id, b.checkin_date, b.checkout_date), b.guest_name]),
     )
 
-    const rows = normalized
-      .map((r) => {
-        const propertyId = propertyIdMap[r.property_external_id]
-
-        // A review for a property we have not imported. Skipped loudly, same
-        // as the reservation pipeline's unmapped-property guard — reviews.
-        // property_id is nullable, but a review floating free of its property
-        // is invisible in a UI that lists per property.
-        if (!propertyId) {
-          logger.warn(
-            `[Hostex:${userId}] Skipping review for reservation ${r.external_id} — ` +
-            `no FieldStay property for Hostex property ${r.property_external_id}`
-          )
-          return null
-        }
-
-        return {
-          org_id:          orgId,
-          property_id:     propertyId,
-          external_id:     r.external_id,
-          external_source: r.external_source,
-          external_url:    r.external_url,
-          guest_name:      guestNameByStay.get(stayKey(propertyId, r.checkin_date, r.checkout_date)) ?? null,
-          rating:          r.rating,
-          review_text:     r.review_text,
-          review_date:     r.review_date,
-          response_status: r.response_status,
-        }
-      })
-      .filter((row): row is NonNullable<typeof row> => row !== null)
-
-    if (!rows.length) return 0
-
-    const { error } = await supabase
-      .from('reviews')
-      .upsert(rows, { onConflict: 'org_id,external_id,external_source', ignoreDuplicates: false })
-
-    if (error) {
-      logger.error(`[Hostex:${userId}] reviews upsert failed: ${error.message}`)
-      throw new Error(`Reviews upsert failed: ${error.message}`)
-    }
-
-    return rows.length
+    return persistNormalizedReviews({
+      supabase, logger, orgId, userId,
+      label: 'Hostex',
+      propertyIdMap,
+      normalized,
+      // Hostex reviews carry no guest name — it comes from the bookings join
+      // above, keyed on the stay's natural key. See shared/reviews-persist.ts
+      // for why this is a hook rather than a `guest_name` field.
+      resolveGuestName: (r, propertyId) =>
+        guestNameByStay.get(stayKey(propertyId, r.checkin_date, r.checkout_date)) ?? null,
+    })
   })
 
-  // A synced review that never gets a draft is a review the PM has to notice
-  // and click Generate on. Hospitable's incremental sync has fired this since
-  // it shipped; Hostex reviews landed in the table and stopped there, so
-  // RepuGuard silently did nothing for a whole provider.
-  //
-  // Fired HERE rather than at each of the three call sites (initial sync,
-  // daily reconcile, review webhook) so a fourth caller cannot forget it.
   // Top-level step tooling, never inside the step.run above — see the Inngest
   // constraints in CLAUDE.md.
-  //
-  // Safe to fire per sync: repuguardBatchGenerate is serialised per org
-  // (concurrency limit 1 keyed on org_id) and selects only rows still at
-  // response_status = 'pending', so a reconcile that re-upserts unchanged
-  // reviews costs one no-op run rather than a duplicate completion.
-  if (reviewCount > 0) {
-    await step.sendEvent(`${stepPrefix}-trigger-repuguard`, {
-      name: 'repuguard/batch_generate.requested' as const,
-      data: { org_id: orgId, requested_by: `hostex-${stepPrefix}` },
-    })
-  }
+  await triggerRepuGuardForReviews({
+    step,
+    stepId:      `${stepPrefix}-trigger-repuguard`,
+    orgId,
+    requestedBy: `hostex-${stepPrefix}`,
+    reviewCount,
+  })
 
   return { reviewCount }
 }

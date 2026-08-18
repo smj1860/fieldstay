@@ -20,18 +20,8 @@
 // everyone's slow provider.
 // ============================================================================
 
-import { inngest }             from '@/lib/inngest/client'
-import { fetchAllRows }        from '@/lib/inngest/paginate'
-import { createServiceClient } from '@/lib/supabase/server'
-
-const PROVIDER = 'hostaway'
-const SYSTEM   = 'inngest:hostaway-reservation-reconcile-cron'
-
-interface HostawayConnectionRow {
-  user_id:          string
-  org_id:           string | null
-  external_user_id: string | null
-}
+import { inngest } from '@/lib/inngest/client'
+import { dispatchPerProviderConnection } from '../shared/connection-dispatch'
 
 export const hostawayReservationReconcileCron = inngest.createFunction(
   {
@@ -41,46 +31,15 @@ export const hostawayReservationReconcileCron = inngest.createFunction(
     concurrency: { limit: 1, key: '"hostaway-reservation-reconcile-cron"' },
   },
   { cron: '30 7 * * *' },
-  async ({ step, logger }) => {
-    const connections = await step.run('fetch-active-connections', async () => {
-      const supabase = createServiceClient({ system: SYSTEM })
-
-      // PLATFORM-WIDE scan — every org with a live Hostaway connection. At
-      // max_rows = 1000 PostgREST returns the first 1000 with a 200 and no
-      // truncation signal, so every connection past that would silently stop
-      // syncing while the cron still reported success.
-      //
-      // org_id NOT NULL is load-bearing, not tidiness: the handler scopes every
-      // read and write by it.
-      return fetchAllRows<HostawayConnectionRow>(
-        (from, to) => supabase
-          .from('integration_connections')
-          .select('user_id, org_id, external_user_id')
-          .eq('provider_id', PROVIDER)
-          .eq('status',      'active')
-          .not('org_id',     'is', null)
-          .order('user_id')
-          .range(from, to),
-        { label: 'hostaway-reservation-reconcile-cron.connections' },
-      )
+  async ({ step, logger }) =>
+    dispatchPerProviderConnection({
+      step,
+      logger,
+      provider:       'hostaway',
+      system:         'inngest:hostaway-reservation-reconcile-cron',
+      label:          'hostaway-reservation-reconcile-cron.connections',
+      dispatchStepId: 'dispatch-reconcile-events',
+      eventName:      'integration/hostaway.reservation_reconcile.requested',
+      logPrefix:      '[Hostaway reconcile cron]',
     })
-
-    logger.info(`[Hostaway reconcile cron] Dispatching for ${connections.length} connections`)
-
-    if (connections.length === 0) return { dispatched: 0 }
-
-    await step.sendEvent(
-      'dispatch-reconcile-events',
-      connections.map((c) => ({
-        name: 'integration/hostaway.reservation_reconcile.requested' as const,
-        data: {
-          user_id:          c.user_id,
-          org_id:           c.org_id!,
-          external_user_id: c.external_user_id ?? '',
-        },
-      })),
-    )
-
-    return { dispatched: connections.length }
-  }
 )

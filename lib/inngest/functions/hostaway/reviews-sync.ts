@@ -22,6 +22,7 @@
 import type { GetStepTools } from 'inngest'
 import { inngest }             from '@/lib/inngest/client'
 import { createServiceClient } from '@/lib/supabase/server'
+import { persistNormalizedReviews, triggerRepuGuardForReviews } from '../shared/reviews-persist'
 import { hostawayFetchReviews } from '@/lib/integrations/providers/hostaway'
 import { hostawayReviewToNormalized } from '@/lib/integrations/providers/hostaway.mappers'
 import type { SyncLogger } from '../shared/reservation-pipeline'
@@ -68,70 +69,26 @@ export async function syncHostawayReviews(
 
     const supabase = createServiceClient({ system })
 
-    const rows = normalized
-      .map((r) => {
-        const propertyId = propertyIdMap[r.property_external_id]
-
-        // A review for a listing we never imported. Skipped LOUDLY, the same
-        // as the reservation pipeline's unmapped-property guard:
-        // reviews.property_id is nullable, but a review floating free of its
-        // property is invisible in a UI that lists per property.
-        if (!propertyId) {
-          logger.warn(
-            `[Hostaway:${userId}] Skipping review ${r.external_id} — ` +
-            `no FieldStay property for Hostaway listing ${r.property_external_id}`
-          )
-          return null
-        }
-
-        return {
-          org_id:          orgId,
-          property_id:     propertyId,
-          external_id:     r.external_id,
-          external_source: r.external_source,
-          external_url:    r.external_url,
-          guest_name:      r.guest_name,
-          rating:          r.rating,
-          review_text:     r.review_text,
-          review_date:     r.review_date,
-          response_status: r.response_status,
-        }
-      })
-      .filter((row): row is NonNullable<typeof row> => row !== null)
-
-    if (!rows.length) return 0
-
-    const { error } = await supabase
-      .from('reviews')
-      .upsert(rows, { onConflict: 'org_id,external_id,external_source', ignoreDuplicates: false })
-
-    if (error) {
-      logger.error(`[Hostaway:${userId}] reviews upsert failed: ${error.message}`)
-      throw new Error(`Reviews upsert failed: ${error.message}`)
-    }
-
-    return rows.length
+    return persistNormalizedReviews({
+      supabase, logger, orgId, userId,
+      label: 'Hostaway',
+      propertyIdMap,
+      normalized,
+      // Hostaway puts the guest name on the review payload itself — no join,
+      // unlike Hostex. See shared/reviews-persist.ts for why this is a hook.
+      resolveGuestName: (r) => r.guest_name,
+    })
   })
 
-  // A synced review that never gets a draft is a review the PM has to notice
-  // and click Generate on. Fired HERE rather than at each call site so a third
-  // caller cannot forget it — the same reasoning, and the same defect history,
-  // as hostex/reviews-sync.ts, where reviews landed in the table and stopped
-  // there and RepuGuard silently did nothing for a whole provider.
-  //
   // Top-level step tooling, never inside the step.run above — see the Inngest
   // constraints in CLAUDE.md.
-  //
-  // Safe to fire per sync: repuguardBatchGenerate is serialised per org
-  // (concurrency limit 1 keyed on org_id) and selects only rows still at
-  // response_status = 'pending', so a reconcile that re-upserts unchanged
-  // reviews costs one no-op run rather than duplicate drafts.
-  if (reviewCount > 0) {
-    await step.sendEvent(`${stepPrefix}-trigger-repuguard`, {
-      name: 'repuguard/batch_generate.requested' as const,
-      data: { org_id: orgId, requested_by: `hostaway-${stepPrefix}` },
-    })
-  }
+  await triggerRepuGuardForReviews({
+    step,
+    stepId:      `${stepPrefix}-trigger-repuguard`,
+    orgId,
+    requestedBy: `hostaway-${stepPrefix}`,
+    reviewCount,
+  })
 
   return { reviewCount }
 }
