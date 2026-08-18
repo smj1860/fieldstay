@@ -22,7 +22,7 @@ import type { GetStepTools }       from 'inngest'
 import { NonRetriableError }       from 'inngest'
 import { fetchTurnoverCreatedEvents } from '@/lib/inngest/turnover-created-events'
 import { createServiceClient }     from '@/lib/supabase/server'
-import { resolveHospitableOwner }  from '@/lib/integrations/providers/hospitable-owner'
+import { resolveHospitableOwner, type HospitableEntityKind } from '@/lib/integrations/providers/hospitable-owner'
 import { createHash } from 'crypto'
 import {
   hospitableFetch,
@@ -120,6 +120,47 @@ async function withProviderCall<T>(
   if (!isRateLimited(second)) return second
 
   throw new RateLimitError(second.retryAfter)
+}
+
+/** The shape every branch's skip path returns. */
+function noActiveConnection(entityId: string) {
+  return { skipped: true, reason: 'no_active_connection', entity_id: entityId }
+}
+
+/**
+ * Resolves the org and a token for one entity, or null when no connected
+ * account owns it.
+ *
+ * The reservation and review branches had this written out identically — 18
+ * duplicated lines differing only in `entityKind` and one word of the log
+ * message (SonarQube flagged it as self-duplication within this file). That is
+ * three places for one contract to drift: "no owner resolved" must SKIP, never
+ * fall through to a fetch with an arbitrary connection's token, which is the
+ * misattribution hazard resolveHospitableOwner exists to prevent.
+ *
+ * syncProperty keeps its own copy on purpose — it additionally computes
+ * isNewProperty against the resolved org inside the same step, and folding
+ * that in would mean a parameter that only one caller ever uses.
+ */
+async function resolveOwnerOrSkip(
+  step:           SyncStep,
+  logger:         SyncLogger,
+  entityKind:     HospitableEntityKind,
+  entityId:       string,
+  externalUserId: string | undefined,
+): Promise<{ orgId: string; token: string } | null> {
+  const resolved = await withProviderCall(step, 'resolve-org-and-token', async () => {
+    const owner = await resolveHospitableOwner({ entityKind, externalId: entityId, externalUserId })
+    if (!owner) return { skipped: true as const }
+    return { skipped: false as const, orgId: owner.orgId, token: owner.token }
+  })
+
+  if (resolved.skipped) {
+    logger.info(`[Hospitable incremental] Skipping ${entityKind} ${entityId} — no active Hospitable connection`)
+    return null
+  }
+
+  return { orgId: resolved.orgId, token: resolved.token }
 }
 
 // Reservation `triggers` values that don't correspond to anything
@@ -241,22 +282,8 @@ async function syncReservation(
   // active connection here. Hospitable's webhooks carry no account id, so
   // "any active connection" silently misattributes every new reservation
   // once a second org is connected. See hospitable-owner.ts.
-  const resolved = await withProviderCall(step, 'resolve-org-and-token', async () => {
-    const owner = await resolveHospitableOwner({
-      entityKind:     'reservation',
-      externalId:     entityId,
-      externalUserId,
-    })
-
-    if (!owner) return { skipped: true as const }
-
-    return { skipped: false as const, orgId: owner.orgId, token: owner.token }
-  })
-
-  if (resolved.skipped) {
-    logger.info(`[Hospitable incremental] Skipping reservation ${entityId} — no active Hospitable connection`)
-    return { skipped: true, reason: 'no_active_connection', entity_id: entityId }
-  }
+  const resolved = await resolveOwnerOrSkip(step, logger, 'reservation', entityId, externalUserId)
+  if (!resolved) return noActiveConnection(entityId)
 
   const { orgId, token } = resolved
 
@@ -671,22 +698,8 @@ async function syncReview(
   // resolveHospitableOwner(), never from an arbitrary active connection.
   // The downstream property_id resolution already scopes to this orgId,
   // so a correct org here is load-bearing for review attribution too.
-  const resolved = await withProviderCall(step, 'resolve-org-and-token', async () => {
-    const owner = await resolveHospitableOwner({
-      entityKind:     'review',
-      externalId:     entityId,
-      externalUserId,
-    })
-
-    if (!owner) return { skipped: true as const }
-
-    return { skipped: false as const, orgId: owner.orgId, token: owner.token }
-  })
-
-  if (resolved.skipped) {
-    logger.info(`[Hospitable incremental] Skipping review ${entityId} — no active Hospitable connection`)
-    return { skipped: true, reason: 'no_active_connection', entity_id: entityId }
-  }
+  const resolved = await resolveOwnerOrSkip(step, logger, 'review', entityId, externalUserId)
+  if (!resolved) return noActiveConnection(entityId)
 
   const { orgId, token } = resolved
 
