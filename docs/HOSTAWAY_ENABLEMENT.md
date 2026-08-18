@@ -34,8 +34,12 @@ Decisions taken 2026-08-16:
    are the closest template.
 4. **Every feature.** Including reviews → RepuGuard.
 
-All four are now built. What remains is webhooks (fully specified, not yet
-written) and netting owner revenue (needs a live payload).
+All four are now built. What remains is the webhook ROUTING half (auth is
+live; tenant attribution needs one real delivery body) and netting owner
+revenue — which needs a live payload too, and now has a second reason to:
+Hostaway documents webhook payloads as omitting data that "comes in later",
+which is exactly what financial fields are, so netting has to come from an API
+re-fetch regardless of what a delivery happens to contain.
 
 ---
 
@@ -205,8 +209,34 @@ Basic Auth with credentials **we choose**. Consequences:
   `syncHostawayReservations` with `fetchMode: { kind: 'ids', ... }`, which
   already exists.
 
-Not shipping it remains survivable: sync latency is then the 24-hour reconcile
-interval, which is what OwnerRez lives with.
+**Shipped 2026-08-18: the AUTH half.** `hostawayProvider.validateWebhook` is
+live, on a `validateBasicAuthWebhook` helper now shared with OwnerRez (extracted
+rather than copied — it is ~30 lines of security code where a copy is a place
+for one half of a credential pair to drift). `HOSTAWAY_WEBHOOK_USER` /
+`_PASSWORD` / `_IP_CIDRS` are declared in `lib/env.ts`. 14 tests, with the two
+rules that pass a naive test canaried: the first-colon parse (a `split(':', 2)`
+truncates a colon-containing password and then compares equal against its own
+prefix) and the empty-allowlist default (empty must mean "no IP restriction",
+never "reject everything").
+
+**Still blocked: which TENANT a delivery belongs to.** The generic route
+attributes by `payload.user_id` / `payload.account_id` / `payload.data.user.id`
+— all snake_case, while Hostaway's API is uniformly camelCase, so none is
+likely to match. Guessing is not a small risk here: falling back to an
+arbitrary active connection is the cross-tenant misattribution
+`hospitable-owner.ts` exists to prevent. **One real delivery body settles it.**
+
+Two things Hostaway's own notes settle in the meantime (2026-08-18):
+
+- Payloads are INCOMPLETE BY DESIGN — "data that come in later are not
+  provided" — and Hostaway explicitly recommends calling the API afterward for
+  details not in the webhook. Our `fetchMode: { kind: 'ids' }` re-fetch is
+  therefore the correct shape, not merely a convenient one.
+- Only events ticked in the webhook configuration fire, so registration must
+  select the reservation events.
+
+Not shipping the routing half remains survivable: sync latency is then the
+24-hour reconcile interval, which is what OwnerRez lives with.
 
 ### Phase 4 — re-enable
 Work the 16-row table above. Add `RLS`-irrelevant; all UI/registry edits.

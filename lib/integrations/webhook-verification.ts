@@ -128,3 +128,81 @@ export function isIpInCidr(ip: string, cidr: string): boolean {
   const mask = bits === 0 ? 0 : (0xFFFFFFFF << (32 - bits)) >>> 0
   return (ipInt & mask) === (rangeInt & mask)
 }
+
+/**
+ * Parses a comma-separated CIDR allowlist from an env var value.
+ *
+ * Shared so the "empty means no IP restriction" convention is decided once.
+ * That default matters: a typo'd env var name yields an empty list, and an
+ * empty list must not be read as "allow nothing" (every delivery rejected,
+ * silently, until someone notices bookings stopped arriving).
+ */
+export function parseCidrAllowlist(value: string | undefined): string[] {
+  return (value ?? '')
+    .split(',')
+    .map((c) => c.trim())
+    .filter((c) => c.length > 0)
+}
+
+/**
+ * Validates an HTTP Basic Auth webhook delivery against a credential pair we
+ * chose, with an optional source-IP allowlist checked first.
+ *
+ * Shared by every provider whose webhook auth is "credentials the consumer
+ * supplies at registration" rather than a provider-signed HMAC — OwnerRez and
+ * Hostaway today. Extracted rather than copied: this is ~30 lines of security
+ * code where a copy is a place for one half of a pair to drift, and it carries
+ * two corrections that took a bug each to find.
+ *
+ * ⚠️ THE COLON RULE. `decoded.split(':', 2)` looks right and is not: JS splits
+ * on EVERY colon and then truncates the array to two entries, so a password
+ * containing a colon is silently cut off at its own first colon — and the
+ * comparison then succeeds against a prefix. RFC 7617 makes only the FIRST
+ * colon a delimiter, which is what the index split below implements.
+ *
+ * ⚠️ BOTH comparisons always run. Returning early on a user mismatch leaks,
+ * through timing, whether the username was right — so the password compare is
+ * not short-circuited, and both use a constant-time comparison.
+ *
+ * Throws (rather than returning fail()) when the expected credentials are
+ * unset: that is an operator misconfiguration, not a bad delivery, and
+ * answering "unauthorized" to a legitimate provider while the real problem is
+ * a missing env var is how an integration looks broken for a day.
+ */
+export function validateBasicAuthWebhook(params: {
+  request:       Request
+  expectedUser:  string | undefined
+  expectedPass:  string | undefined
+  /** Empty means no IP restriction — see parseCidrAllowlist. */
+  allowedCidrs:  string[]
+  /** Names the env vars in the thrown message, e.g. 'HOSTAWAY_WEBHOOK'. */
+  envPrefix:     string
+}): WebhookVerificationResult {
+  const { request, expectedUser, expectedPass, allowedCidrs, envPrefix } = params
+
+  // Cheap rejection before spending a base64 decode and two constant-time
+  // comparisons.
+  if (allowedCidrs.length > 0) {
+    const clientIp = extractClientIp(request)
+    if (!clientIp || !allowedCidrs.some((cidr) => isIpInCidr(clientIp, cidr))) {
+      return fail(`source IP not in ${envPrefix}_IP_CIDRS: ${clientIp ?? 'unknown'}`)
+    }
+  }
+
+  const authHeader = request.headers.get('Authorization')
+  if (!authHeader?.startsWith('Basic ')) return fail('missing or malformed Authorization header')
+
+  const decoded  = Buffer.from(authHeader.slice(6), 'base64').toString('utf-8')
+  const sepIndex = decoded.indexOf(':')
+  const user = sepIndex === -1 ? decoded : decoded.slice(0, sepIndex)
+  const pass = sepIndex === -1 ? ''      : decoded.slice(sepIndex + 1)
+
+  if (!expectedUser || !expectedPass) {
+    throw new Error(`Missing ${envPrefix}_USER or ${envPrefix}_PASSWORD environment variables`)
+  }
+
+  const userMatch = timingSafeEqual(user, expectedUser)
+  const passMatch = timingSafeEqual(pass, expectedPass)
+
+  return (userMatch && passMatch) ? ok() : fail('credential mismatch')
+}

@@ -264,6 +264,15 @@ export const ENV_SPEC: Readonly<Record<string, VarSpec>> = {
   OWNERREZ_WEBHOOK_USER:     { tier: 'optional', schema: nonEmpty, why: 'OwnerRez webhook basic auth' },
   OWNERREZ_WEBHOOK_PASSWORD: { tier: 'optional', schema: nonEmpty, why: 'OwnerRez webhook basic auth' },
   OWNERREZ_WEBHOOK_IP_CIDRS: { tier: 'optional', schema: nonEmpty, why: 'optional source-IP allowlist for the OwnerRez webhook' },
+  // Hostaway registers webhooks with a Login/Password WE choose, so — unlike
+  // Hospitable's provider-issued signing secret — one platform-wide pair covers
+  // every tenant and no per-connection column is needed. Optional tier because
+  // the endpoint is only registered once a Hostaway customer exists; until then
+  // validateWebhook throws on a delivery rather than accepting an unauthenticated
+  // one, which is the correct failure.
+  HOSTAWAY_WEBHOOK_USER:     { tier: 'optional', schema: nonEmpty, why: 'Hostaway webhook basic auth' },
+  HOSTAWAY_WEBHOOK_PASSWORD: { tier: 'optional', schema: nonEmpty, why: 'Hostaway webhook basic auth' },
+  HOSTAWAY_WEBHOOK_IP_CIDRS: { tier: 'optional', schema: nonEmpty, why: 'optional source-IP allowlist for the Hostaway webhook' },
   HOSPITABLE_CLIENT_ID:      { tier: 'optional', schema: nonEmpty, why: 'Hospitable OAuth' },
   HOSPITABLE_CLIENT_SECRET:  { tier: 'optional', schema: nonEmpty, why: 'Hospitable OAuth' },
   HOSPITABLE_WEBHOOK_SECRET: { tier: 'optional', schema: nonEmpty, why: 'Hospitable webhook signature verification' },
