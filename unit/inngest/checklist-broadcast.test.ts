@@ -15,9 +15,26 @@ import { invokeHandler } from './test-helpers'
 // per target property (existing-select, delete, per-section insert) so a
 // fixed per-table canned response (as in the simpler reference tests)
 // isn't enough here — order matters.
-function makeSupabase(queued: Record<string, { data?: unknown; error?: unknown }[]>) {
+function makeSupabase(
+  queued: Record<string, { data?: unknown; error?: unknown }[]>,
+  // The default-template write goes through the upsert_default_checklist_template
+  // RPC, not `.from('checklist_templates').upsert(...)` — the partial index it
+  // arbitrates on ((property_id) WHERE is_default) cannot be named by
+  // PostgREST's column-list onConflict, and the old spelling threw 42P10 on
+  // every target. Queued per call so a test can hand back a different template
+  // id per target property.
+  rpcQueued: Record<string, { data?: unknown; error?: unknown }[]> = {},
+) {
   const counters: Record<string, number> = {}
+  const rpcCounters: Record<string, number> = {}
   const calls: { table: string; method: string; args: unknown[] }[] = []
+
+  const rpc = vi.fn((fn: string, args: unknown) => {
+    calls.push({ table: `rpc:${fn}`, method: 'rpc', args: [args] })
+    const idx = rpcCounters[fn] ?? 0
+    rpcCounters[fn] = idx + 1
+    return Promise.resolve(rpcQueued[fn]?.[idx] ?? { data: null, error: null })
+  })
 
   const from = vi.fn((table: string) => {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -45,7 +62,7 @@ function makeSupabase(queued: Record<string, { data?: unknown; error?: unknown }
     return chain
   })
 
-  return { from, calls }
+  return { from, rpc, calls }
 }
 
 function runAllStep() {
@@ -113,11 +130,13 @@ describe('broadcastChecklistTemplateJob', () => {
     const supabase = makeSupabase({
       checklist_templates: [
         { data: sourceTemplate, error: null },              // load-source-template
-        { data: { id: 'tmpl_new' }, error: null },           // per-target upsert().select().single()
       ],
       checklist_template_sections: [
         { data: matchingExistingSections, error: null },     // existing-sections select — matches signature
       ],
+    }, {
+      // The RPC returns the template id as a bare scalar, not a row.
+      upsert_default_checklist_template: [{ data: 'tmpl_new', error: null }],
     })
     ;(createServiceClient as ReturnType<typeof vi.fn>).mockReturnValue(supabase)
 
@@ -139,7 +158,6 @@ describe('broadcastChecklistTemplateJob', () => {
     const supabase = makeSupabase({
       checklist_templates: [
         { data: sourceTemplate, error: null },
-        { data: { id: 'tmpl_new' }, error: null },
       ],
       checklist_template_sections: [
         { data: [], error: null },                    // no existing sections — mismatch
@@ -149,6 +167,8 @@ describe('broadcastChecklistTemplateJob', () => {
       checklist_template_items: [
         { data: null, error: null },                  // insert items
       ],
+    }, {
+      upsert_default_checklist_template: [{ data: 'tmpl_new', error: null }],
     })
     ;(createServiceClient as ReturnType<typeof vi.fn>).mockReturnValue(supabase)
 

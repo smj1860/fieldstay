@@ -46,8 +46,27 @@ function makeSupabase(queue: Record<string, Resp[]>) {
   // so the payloads have to be asserted explicitly instead.
   const updates: Array<{ table: string; payload: Record<string, unknown> }> = []
   // Dispatch creates a vendor when the PM types an address that is not on
-  // file, so the upsert payload has to be assertable too.
+  // file, so the write payload has to be assertable too. That write is the
+  // upsert_vendor_by_email RPC rather than `.from('vendors').upsert(...)`: the
+  // arbiter index is (org_id, lower(email)) WHERE email IS NOT NULL — an
+  // expression index AND a partial one — so PostgREST's column-list onConflict
+  // could not name it and the old spelling threw 42P10 on every call, breaking
+  // dispatch to any vendor not already on file. Recorded into the same
+  // `upserts` array so existing payload assertions keep working.
   const upserts: Array<{ table: string; payload: Record<string, unknown> }> = []
+  const rpc = vi.fn((fn: string, args: Record<string, unknown>) => {
+    upserts.push({ table: `rpc:${fn}`, payload: args })
+    const q = queue[`rpc:${fn}`]
+    const result: Resp = q?.length ? q.shift()! : { data: null, error: null }
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const chain: any = {
+      select:      vi.fn(() => chain),
+      single:      vi.fn(() => Promise.resolve(result)),
+      maybeSingle: vi.fn(() => Promise.resolve(result)),
+      then:        (resolve: (v: unknown) => unknown) => Promise.resolve(result).then(resolve),
+    }
+    return chain
+  })
   const from = vi.fn((table: string) => {
     const q = queue[table]
     const result: Resp = q?.length ? q.shift()! : { data: null, error: null }
@@ -70,7 +89,7 @@ function makeSupabase(queue: Record<string, Resp[]>) {
     return chain
   })
   const storage = { from: vi.fn(() => ({ upload: uploadMock })) }
-  return { from, storage, uploadMock, updates, upserts }
+  return { from, rpc, storage, uploadMock, updates, upserts }
 }
 
 /** work_orders.completion_token is `uuid` — anything else takes a 22P02. */
@@ -359,7 +378,10 @@ describe('actions/work-order-public', () => {
         vendor_compliance_status: [{ data: { compliance_status: 'compliant' } }],
         vendors:     [
           { data: null, error: null },                                     // lookup: not on file
-          { data: { id: 'ven_new', name: 'One-Off Plumbing', email: 'newcontractor@example.com', phone: null }, error: null },  // upsert
+        ],
+        // The create goes through the RPC now, not a second .from('vendors').
+        'rpc:upsert_vendor_by_email': [
+          { data: { id: 'ven_new', name: 'One-Off Plumbing', email: 'newcontractor@example.com', phone: null }, error: null },
         ],
         profiles:    [{ data: { full_name: 'Sam Jones', phone: null } }],
         organizations: [{ data: { name: 'Lake Martin Delivery' } }],
@@ -376,9 +398,12 @@ describe('actions/work-order-public', () => {
       expect(result.success).toBe(true)
       expect(result.vendorCreated).toBe(true)
 
-      const created = supabase.upserts.find((u) => u.table === 'vendors')
+      // org_id comes from the caller's membership, never from the request —
+      // the tenant boundary this action depends on. is_active is no longer
+      // asserted here because the RPC sets it, not the caller.
+      const created = supabase.upserts.find((u) => u.table === 'rpc:upsert_vendor_by_email')
       expect(created?.payload).toMatchObject({
-        org_id: 'org_1', email: 'newcontractor@example.com', name: 'One-Off Plumbing', is_active: true,
+        p_org_id: 'org_1', p_email: 'newcontractor@example.com', p_name: 'One-Off Plumbing',
       })
 
       // Still the vendor ROW's contact details, not the caller's: vendorPhone
