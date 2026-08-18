@@ -85,7 +85,7 @@ describe('ownerRezReconciliationCron', () => {
     expect(result).toEqual({ dispatched: 0 })
   })
 
-  it('scopes the connection query to active OwnerRez connections with a non-null org_id — excludes revoked connections and connections never assigned an org', async () => {
+  it('scopes to SYNCABLE OwnerRez connections with a non-null org_id — includes errored ones, still excludes revoked', async () => {
     const supabase = makeSupabase({
       integration_connections: [{ data: [{ user_id: 'user_1', org_id: 'org_1' }], error: null }],
     })
@@ -98,7 +98,21 @@ describe('ownerRezReconciliationCron', () => {
     })
 
     expect(supabase.eqSpy).toHaveBeenCalledWith('integration_connections', 'provider_id', 'ownerrez')
-    expect(supabase.eqSpy).toHaveBeenCalledWith('integration_connections', 'status', 'active')
+
+    // 'error' is IN the set on purpose. OwnerRez tokens never expire, so there
+    // is no refresh path to heal a connection — this daily sweep IS the
+    // recovery. When this filtered to 'active' alone, one failed sync removed
+    // a tenant from it permanently while the UI said "will retry
+    // automatically"; three connections sat dead for three weeks (2026-08-18).
+    const statusCall = supabase.inSpy.mock.calls.find(
+      (c) => c[0] === 'integration_connections' && c[1] === 'status',
+    )
+    expect(statusCall, 'no .in() status filter on integration_connections').toBeDefined()
+    expect(statusCall![2]).toContain('active')
+    expect(statusCall![2]).toContain('error')
+    // 'revoked' genuinely needs a human — the token is gone.
+    expect(statusCall![2]).not.toContain('revoked')
+
     expect(supabase.notSpy).toHaveBeenCalledWith('integration_connections', 'org_id', 'is', null)
   })
 })

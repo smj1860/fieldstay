@@ -25,6 +25,7 @@ import 'server-only'
 import { NonRetriableError } from 'inngest'
 
 import { createServiceClient } from '@/lib/supabase/server'
+import { SYNCABLE_CONNECTION_STATUSES } from '@/lib/integrations/connection-metadata'
 import { reportError }         from '@/lib/observability/report-error'
 import { unwrap }              from '@/lib/supabase/unwrap'
 import { acquireRefreshLock, releaseRefreshLock } from '@/lib/integrations/refresh-lock'
@@ -73,7 +74,13 @@ export async function getValidHostexToken(userId: string): Promise<string> {
     .select('expires_at, external_user_id')
     .eq('user_id',     userId)
     .eq('provider_id', HOSTEX_PROVIDER_ID)
-    .eq('status',      'active')
+    // Includes 'error'. A failed refresh sets status='error', and this lookup
+    // used to filter to 'active' — so the very next call threw "No active
+    // connection ... Reconnect required" and NOTHING ever attempted the refresh
+    // that would have healed it (store_integration_token sets status back to
+    // 'active' on success). One transient refresh failure was therefore
+    // permanent. 'revoked' stays excluded: that one really does need a human.
+    .in('status',      [...SYNCABLE_CONNECTION_STATUSES])
     .maybeSingle()
 
   const connection = unwrap(connRes, { site: 'lib.integrations.hostex-token.connection' })
@@ -114,7 +121,13 @@ async function refreshHostexTokenLocked(userId: string, externalUserId: string):
       .select('expires_at')
       .eq('user_id',     userId)
       .eq('provider_id', HOSTEX_PROVIDER_ID)
-      .eq('status',      'active')
+      // Includes 'error'. A failed refresh sets status='error', and this lookup
+    // used to filter to 'active' — so the very next call threw "No active
+    // connection ... Reconnect required" and NOTHING ever attempted the refresh
+    // that would have healed it (store_integration_token sets status back to
+    // 'active' on success). One transient refresh failure was therefore
+    // permanent. 'revoked' stays excluded: that one really does need a human.
+    .in('status',      [...SYNCABLE_CONNECTION_STATUSES])
       .maybeSingle()
 
     const connection = unwrap(connRes, { site: 'lib.integrations.hostex-token.expiry' })

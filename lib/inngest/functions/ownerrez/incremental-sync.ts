@@ -60,7 +60,7 @@ import {
   revenuePostingFloor,
 } from '@/lib/integrations/providers/ownerrez-backfill'
 import { getRedis, upstashConfigured } from '@/lib/redis'
-import { RateLimitError, TokenRevokedError, translateSyncError } from '@/lib/integrations/types'
+import { RateLimitError, TokenRevokedError, translateSyncError, syncErrorDetail } from '@/lib/integrations/types'
 import { logAuditEvent }                from '@/lib/audit'
 import { reportError }                  from '@/lib/observability/report-error'
 import { generateTurnoversForProperty } from '@/lib/turnovers/generator'
@@ -75,7 +75,7 @@ import {
 } from '@/lib/integrations/providers/ownerrez'
 import { upsertBookingsReturningIds } from './upsert-bookings'
 import type { MappedOwnerRezBookingRow } from '@/lib/integrations/providers/ownerrez'
-import { mergeIntegrationConnectionMetadata } from '@/lib/integrations/connection-metadata'
+import { mergeIntegrationConnectionMetadata, SYNCABLE_CONNECTION_STATUSES } from '@/lib/integrations/connection-metadata'
 import { unwrap, unwrapList, isRealQueryError } from '@/lib/supabase/unwrap'
 
 const PROVIDER = 'ownerrez'
@@ -248,7 +248,9 @@ export const ownerRezIncrementalSync = inngest.createFunction(
             .from('integration_connections')
             .select('id, user_id, org_id, external_user_id')
             .eq('provider_id', PROVIDER)
-            .eq('status', 'active')
+            // Includes 'error' — see SYNCABLE_CONNECTION_STATUSES for why excluding
+            // it made a transient failure permanent.
+            .in('status', [...SYNCABLE_CONNECTION_STATUSES])
 
           if (scopedUserId) query = query.eq('user_id', scopedUserId)
 
@@ -599,8 +601,16 @@ async function updateSyncCursor(
         last_synced_at:   new Date().toISOString(),
         last_sync_status: 'success',
         last_sync_error:  null,
+        last_sync_detail: null,
         last_sync_count:  bookingCount,
       },
+      // The OTHER half of making 'error' recoverable. Widening the connection
+      // scans to include errored connections gets a sync to RUN again; without
+      // this the row stays labelled 'error' forever afterwards, so the PM's
+      // integrations page shows a broken connection that is in fact syncing
+      // fine, and any future code that filters on 'active' silently re-breaks
+      // it. A sync that just succeeded is by definition active.
+      status: 'active',
     })
   } catch (err) {
     logger.error(`[OwnerRez:${conn.user_id}] cursor update failed: ${err instanceof Error ? err.message : String(err)}`)
@@ -683,6 +693,19 @@ async function handleConnectionSyncFailure(
     patch: {
       last_sync_status: 'error',
       last_sync_error:  humanError,
+      // The TECHNICAL cause, alongside the PM-facing sentence.
+      //
+      // translateSyncError falls through to "Sync failed — will retry
+      // automatically" for anything it does not recognise, and that generic
+      // string was the ONLY record kept. Three connections sat in it for three
+      // weeks and there was no way — from the row, the UI, or a support
+      // session — to learn what had actually failed. Now the raw message is
+      // kept too, truncated and never in place of the friendly one.
+      //
+      // Safe to store: this is a provider error string, not a payload. The
+      // adapters throw messages built from status code + a truncated response
+      // body, and no OwnerRez credential is interpolated into any of them.
+      last_sync_detail: syncErrorDetail(err),
       last_synced_at:   new Date().toISOString(),
     },
     status: 'error',

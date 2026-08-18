@@ -5,7 +5,7 @@ import { OwnerRezApiClient }   from '@/lib/integrations/providers/ownerrez-api'
 import { RateLimitError, TokenRevokedError, translateSyncError } from '@/lib/integrations/types'
 import type { OwnerRezReview } from '@/lib/integrations/types'
 import { logAuditEvent }       from '@/lib/audit'
-import { mergeIntegrationConnectionMetadata } from '@/lib/integrations/connection-metadata'
+import { mergeIntegrationConnectionMetadata, SYNCABLE_CONNECTION_STATUSES } from '@/lib/integrations/connection-metadata'
 import { asJsonObject } from '@/lib/json'
 import {
   shouldNotifyConnectionError,
@@ -66,7 +66,8 @@ export const ownerRezReviewsSync = inngest.createFunction(
           .from('integration_connections')
           .select('user_id, org_id')
           .eq('provider_id', 'ownerrez')
-          .eq('status', 'active')
+          // Includes 'error' — see SYNCABLE_CONNECTION_STATUSES.
+          .in('status', [...SYNCABLE_CONNECTION_STATUSES])
           .order('user_id')
           .range(from, to),
         { label: 'ownerrez-reviews-sync.connections' },
