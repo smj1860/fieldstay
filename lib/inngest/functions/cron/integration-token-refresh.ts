@@ -27,6 +27,7 @@
 import { inngest }             from '@/lib/inngest/client'
 import { fetchAllRows }        from '@/lib/inngest/paginate'
 import { createServiceClient } from '@/lib/supabase/server'
+import { SYNCABLE_CONNECTION_STATUSES } from '@/lib/integrations/connection-metadata'
 
 const OAUTH_PROVIDERS = ['hospitable', 'kroger', 'hostex'] as const
 
@@ -87,7 +88,15 @@ export const integrationTokenRefreshCron = inngest.createFunction(
           .from('integration_connections')
           .select('user_id, org_id, provider_id, external_user_id, expires_at')
           .in('provider_id', OAUTH_PROVIDERS)
-          .eq('status', 'active')
+          // Includes 'error'. This scan is the only thing that can HEAL a
+          // connection that a failed refresh flagged: store_integration_token
+          // sets status back to 'active', but only if a refresh is actually
+          // attempted. Filtering to 'active' here meant one failed refresh
+          // deadlocked the connection permanently — the cron skipped it, and
+          // getValidHospitableToken/getValidHostexToken skipped it too and
+          // threw "No active connection ... Reconnect required" forever after.
+          // 'revoked' stays out: that one genuinely needs a human.
+          .in('status', [...SYNCABLE_CONNECTION_STATUSES])
           .not('expires_at', 'is', null)
           .lte('expires_at', windowEdge)
           .not('refresh_token_vault_secret_id', 'is', null)
@@ -108,7 +117,8 @@ export const integrationTokenRefreshCron = inngest.createFunction(
           .from('integration_connections')
           .select('user_id, org_id, provider_id, external_user_id, expires_at')
           .in('provider_id', NON_REFRESHABLE_PROVIDERS)
-          .eq('status', 'active')
+          // Same reasoning as the scan above — see SYNCABLE_CONNECTION_STATUSES.
+          .in('status', [...SYNCABLE_CONNECTION_STATUSES])
           .not('expires_at', 'is', null)
           .lte('expires_at', windowEdge)
           .order('id')

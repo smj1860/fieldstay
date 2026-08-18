@@ -44,3 +44,25 @@ export async function mergeIntegrationConnectionMetadata(params: {
   // The column is jsonb, so the RPC's return is only an object by convention.
   return data !== null && typeof data === 'object' && !Array.isArray(data) ? data : {}
 }
+
+/**
+ * The connection statuses a sync may still run against.
+ *
+ * `error` IS included, and that is the entire point. It used to be excluded
+ * everywhere — every OwnerRez read path filtered `.eq('status', 'active')` —
+ * while the failure handler set `status: 'error'` and NOTHING anywhere ever set
+ * it back. One transient blip (a 500, a timeout, a rate-limit) therefore
+ * removed a tenant from every sync path permanently, and the PM-facing message
+ * said "Sync failed — will retry automatically". It never did. Three
+ * connections sat dead for three weeks that way before anyone looked
+ * (2026-08-18).
+ *
+ * `revoked` stays excluded because it is genuinely terminal: the token is gone,
+ * and only a reconnect can produce a new one. That distinction — transient vs.
+ * terminal — is what the status column is FOR, and collapsing the two is what
+ * made a retryable state unrecoverable.
+ *
+ * Use this everywhere a sync selects connections. A bare `.eq('status',
+ * 'active')` in a sync path is the bug.
+ */
+export const SYNCABLE_CONNECTION_STATUSES = ['active', 'error'] as const

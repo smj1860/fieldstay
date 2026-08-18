@@ -37,6 +37,7 @@ import type { GetStepTools } from 'inngest'
 import { inngest }            from '@/lib/inngest/client'
 import { fetchAllRows }       from '@/lib/inngest/paginate'
 import { createServiceClient } from '@/lib/supabase/server'
+import { SYNCABLE_CONNECTION_STATUSES } from '@/lib/integrations/connection-metadata'
 
 type CronStep = GetStepTools<typeof inngest>
 
@@ -109,7 +110,14 @@ export async function dispatchPerProviderConnection(
         .from('integration_connections')
         .select('user_id, org_id, external_user_id')
         .eq('provider_id', provider)
-        .eq('status',      'active')
+        // Includes 'error'. This dispatches the daily reconcile — the sweep
+        // that RECOVERS a connection whose webhooks or incremental sync have
+        // been failing — so excluding errored rows would mean the one thing
+        // able to catch a tenant up is the one thing that stops running for
+        // them. Hostaway matters most here: its API key cannot be refreshed, so
+        // there is no token-refresh path to heal it separately. 'revoked' stays
+        // out. See SYNCABLE_CONNECTION_STATUSES.
+        .in('status',      [...SYNCABLE_CONNECTION_STATUSES])
         .not('org_id',     'is', null)
         .order('user_id')
         .range(from, to),

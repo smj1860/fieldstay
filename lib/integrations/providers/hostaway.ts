@@ -15,7 +15,7 @@
 // ============================================================
 
 import type { IntegrationProvider } from '@/lib/integrations/types'
-import { fail } from '@/lib/integrations/webhook-verification'
+import { parseCidrAllowlist, validateBasicAuthWebhook } from '@/lib/integrations/webhook-verification'
 import { PMS_API_TIMEOUT_MS } from '@/lib/http/timeout'
 
 // Exact field names from Hostaway API GET /v1/listings response
@@ -104,32 +104,63 @@ export const hostawayProvider: IntegrationProvider = {
     }
   },
 
-  async validateWebhook() {
+  async validateWebhook(request: Request) {
+    // HTTP Basic Auth with credentials WE choose at webhook registration.
+    //
     // CORRECTION (2026-08-17, checked against api.hostaway.com/documentation):
-    // this comment used to say "Hostaway unified webhooks use HMAC-SHA256
-    // signature verification, the signing secret is set when registering the
-    // endpoint". That is WRONG, and it was load-bearing wrong — it is what
-    // docs/HOSTAWAY_ENABLEMENT.md sized the webhook phase against.
+    // this used to claim HMAC-SHA256 with a provider-issued signing secret, and
+    // that error was load-bearing — docs/HOSTAWAY_ENABLEMENT.md sized this
+    // whole phase around needing a per-connection secret COLUMN, i.e. a
+    // migration. Hostaway's unified webhook registration takes URL (mandatory)
+    // plus Login and Password (optional), delivered in the authentication
+    // header. So one platform-wide pair covers every tenant — the same pair is
+    // supplied on every registration — and no schema change is involved.
     //
-    // Hostaway's unified webhook registration takes URL (mandatory) plus
-    // Login and Password (optional), and deliveries carry them in the request's
-    // authentication header. So it is HTTP Basic Auth with credentials WE
-    // choose at registration — the same model OwnerRez uses, which means
-    // ownerRezProvider.validateWebhook is the template (constant-time compare
-    // of a user/pass pair from env, plus an optional source-IP allowlist), and
-    // the per-connection-secret column that phase was scoped to need does not
-    // exist. One platform-wide HOSTAWAY_WEBHOOK_USER/PASSWORD covers every
-    // tenant, because we supply the same pair on every registration.
-    //
-    // Still rejecting everything until that lands: no endpoint is registered
-    // with Hostaway, so any delivery arriving here is unsolicited.
-    return fail('no webhook endpoint registered with Hostaway yet')
+    // Shared with OwnerRez, which registers webhooks identically. See
+    // validateBasicAuthWebhook for the first-colon parsing rule and the
+    // no-short-circuit timing rule it carries.
+    return validateBasicAuthWebhook({
+      request,
+      expectedUser: process.env.HOSTAWAY_WEBHOOK_USER,
+      expectedPass: process.env.HOSTAWAY_WEBHOOK_PASSWORD,
+      allowedCidrs: parseCidrAllowlist(process.env.HOSTAWAY_WEBHOOK_IP_CIDRS),
+      envPrefix:    'HOSTAWAY_WEBHOOK',
+    })
   },
 
   async handleWebhookEvent({ action, payload }) {
-    // Hostaway sends reservation.created, reservation.modified,
-    // reservation.cancelled events. Wire to incremental sync in a future phase.
-    console.log('[Hostaway] webhook received:', action, typeof payload)
+    // NOT YET ROUTED — deliberately, and this is the whole of what remains.
+    //
+    // What is settled (Hostaway's own unified-webhook notes, 2026-08-18):
+    //
+    //   * "The webhook will trigger as soon as the most relevant data is ready.
+    //     In some cases you may see that complex fields and data that come in
+    //     later are not provided." The payload is INCOMPLETE BY DESIGN.
+    //   * "When using universal webhooks in combination with a public API,
+    //     consider calling the API afterward to retrieve updated details not
+    //     included in the webhook."
+    //
+    // So a delivery is a TRIGGER, never a source of truth — which is exactly
+    // what syncHostawayReservations' fetchMode { kind: 'ids' } already does,
+    // and it is why money must never be read off a webhook body (see
+    // extractHostawayActualTotal: financials are precisely the "data that comes
+    // in later"). Also: only the events ticked in the webhook configuration
+    // fire at all, so registration has to select the reservation ones.
+    //
+    // What is NOT settled, and blocks this: WHICH TENANT a delivery belongs to.
+    // The generic route resolves that from payload.user_id / payload.account_id
+    // / payload.data.user.id — all snake_case, while Hostaway's API is
+    // uniformly camelCase (listingMapId, arrivalDate, totalPrice), so none of
+    // them is likely to match. Guessing a field name here is not a small risk:
+    // picking an arbitrary active connection when attribution fails is the
+    // cross-tenant misattribution that lib/integrations/providers/
+    // hospitable-owner.ts exists to prevent, and with two Hostaway orgs
+    // connected every reservation would land in whichever was queried first.
+    //
+    // ONE real delivery body settles it. Until then this logs and drops, and
+    // hostawayReservationReconcileCron covers every change within 24 hours —
+    // the same latency OwnerRez shipped with, so nothing is lost meanwhile.
+    console.log('[Hostaway] webhook received (not routed):', action, typeof payload)
   },
 }
 
@@ -233,18 +264,31 @@ export async function hostawayFetchListings(
  * Fetch all reservations from Hostaway with pagination.
  * Fetches from 90 days ago through far future to capture recent history.
  */
+/**
+ * What to filter GET /reservations by. A discriminated union because the two
+ * ask genuinely different questions and must not be confused:
+ *
+ *   arrivalFrom   — "stays arriving on or after D". Backfill and the daily
+ *                   reconcile: the axis an owner P&L and a turnover schedule
+ *                   are built along.
+ *   activitySince — "reservations CHANGED on or after D". The incremental
+ *                   sync: a cancellation of a stay six months out is invisible
+ *                   to an arrival filter anchored near today, and that is
+ *                   exactly the change worth hearing about within the hour.
+ */
+export type HostawayReservationFilter =
+  | { kind: 'arrivalFrom';   date: string }
+  | { kind: 'activitySince'; date: string }
+
 export async function hostawayFetchReservations(
-  token: string,
-  since?: string   // ISO date string — for incremental sync
+  token:  string,
+  filter: HostawayReservationFilter,
 ): Promise<HostawayReservation[]> {
   const reservations: HostawayReservation[] = []
   const LIMIT  = 100
   let   offset = 0
   let pageCount = 0
   const MAX_PAGES = 200
-
-  const fromDate = since
-    ?? new Date(Date.now() - 90 * 86_400_000).toISOString().split('T')[0]
 
   while (true) {
     pageCount++
@@ -255,11 +299,25 @@ export async function hostawayFetchReservations(
       )
     }
 
+    // ⚠️ `dateFrom` was what this sent, and it is NOT a parameter Hostaway's
+    // GET /reservations accepts — the documented filters are arrivalStartDate /
+    // arrivalEndDate, departureStartDate / departureEndDate and
+    // latestActivityStart / latestActivityEnd. An unrecognised query parameter
+    // is ignored, not rejected, so every call silently fetched the endpoint's
+    // DEFAULT set: the initial sync's "12 months of history" and the reconcile's
+    // "1 month back" were both fictions, and the reconcile re-read the whole
+    // account daily. Nothing broke visibly because the error direction was MORE
+    // data than asked for — until MAX_PAGES, where it becomes a hard failure on
+    // a large account.
     const params = new URLSearchParams({
       limit:     String(LIMIT),
       offset:    String(offset),
-      sortOrder: 'arrivalDate',
-      dateFrom:  fromDate!,
+      ...(filter.kind === 'arrivalFrom'
+        ? { sortOrder: 'arrivalDate', arrivalStartDate:    filter.date }
+        // sortOrder=updatedOn pairs with the activity filter so a truncated
+        // run still carries the OLDEST unseen changes rather than an arbitrary
+        // slice — the cursor then advances safely over what was seen.
+        : { sortOrder: 'updatedOn',   latestActivityStart: filter.date }),
     })
 
     const res = await fetch(`${BASE_URL}/reservations?${params}`, {

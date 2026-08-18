@@ -369,6 +369,33 @@ export class IntegrationMisconfiguredError extends Error {
 // which sync wrote it. Pass the provider's display name; defaults to
 // 'OwnerRez' so existing call sites that don't pass one are unaffected.
 
+/**
+ * The TECHNICAL cause of a sync failure, for the connection row — alongside,
+ * never instead of, translateSyncError's PM-facing sentence.
+ *
+ * translateSyncError falls through to "Sync failed — will retry automatically"
+ * for anything it does not recognise, and that generic string used to be the
+ * only record kept anywhere. Three OwnerRez connections sat in exactly that
+ * state for three weeks (2026-08-18) and neither the row, the UI, nor a support
+ * session could say what had actually failed.
+ *
+ * Truncated to 300 characters: enough to carry a status code and the head of a
+ * provider response, short enough that a huge error body cannot bloat every
+ * connection row.
+ *
+ * ⚠️ This lands in integration_connections.metadata, which staff read. Provider
+ * error strings in this codebase are built from a status code plus a truncated
+ * response body and never interpolate a credential — but if you add an adapter
+ * that puts a token or a key in its Error message, it will arrive here. Mask it
+ * at the throw site, not by dropping this field.
+ */
+export function syncErrorDetail(err: unknown): string {
+  const raw = err instanceof Error
+    ? `${err.name}: ${err.message}`
+    : String(err)
+  return raw.slice(0, 300)
+}
+
 export function translateSyncError(err: unknown, providerLabel: string = 'OwnerRez'): string {
   if (err instanceof RateLimitError) {
     return `${providerLabel} sync paused due to rate limiting — will retry automatically`

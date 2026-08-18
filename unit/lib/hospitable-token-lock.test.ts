@@ -61,6 +61,12 @@ function makeSupabase(state: ReturnType<typeof makeConnectionState>) {
     chain.select = () => chain
     chain.update = () => chain
     chain.eq     = () => chain
+    // .in(), because the connection lookup selects on
+    // SYNCABLE_CONNECTION_STATUSES ('active' + 'error') rather than
+    // .eq('status','active'). A refresh failure sets status='error', and an
+    // active-only lookup could then never find the connection to retry it —
+    // the deadlock fixed 2026-08-18.
+    chain.in     = () => chain
     chain.single = () => {
       if (table !== 'integration_connections') return Promise.resolve({ data: null, error: null })
       return Promise.resolve({

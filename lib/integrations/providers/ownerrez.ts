@@ -24,7 +24,7 @@ import { IntegrationMisconfiguredError } from '../types'
 import type { NormalizedBooking } from '@/lib/bookings/normalize'
 import { unmappedBookingStatus } from '@/lib/bookings/normalize'
 import type { Enums, TablesUpdate } from '@/types/database'
-import { ok, fail, timingSafeEqual, extractClientIp, isIpInCidr } from '../webhook-verification'
+import { parseCidrAllowlist, validateBasicAuthWebhook } from '../webhook-verification'
 import { PMS_API_TIMEOUT_MS } from '@/lib/http/timeout'
 
 // ── OwnerRez webhook source-IP allowlist (audit 2026-07-30, L-4) ────────────
@@ -55,10 +55,7 @@ import { PMS_API_TIMEOUT_MS } from '@/lib/http/timeout'
 // authority of its own, it only tells us an entity changed, and every
 // downstream handler re-reads the entity from OwnerRez's API before acting.
 function ownerrezAllowedCidrs(): string[] {
-  return (process.env.OWNERREZ_WEBHOOK_IP_CIDRS ?? '')
-    .split(',')
-    .map((c) => c.trim())
-    .filter((c) => c.length > 0)
+  return parseCidrAllowlist(process.env.OWNERREZ_WEBHOOK_IP_CIDRS)
 }
 
 // ── Constants ────────────────────────────────────────────────────────────────
@@ -225,44 +222,17 @@ export const ownerRezProvider: IntegrationProvider = {
   // configured — the optional source-IP allowlist above. See the
   // ownerrezAllowedCidrs() comment for the accepted residual risk.
   async validateWebhook(request: Request) {
-    // Cheap rejection before spending a base64 decode + two constant-time
-    // comparisons, same ordering rationale as Hospitable's IP check.
-    const allowedCidrs = ownerrezAllowedCidrs()
-    if (allowedCidrs.length > 0) {
-      const clientIp = extractClientIp(request)
-      if (!clientIp || !allowedCidrs.some((cidr) => isIpInCidr(clientIp, cidr))) {
-        return fail(`source IP not in OWNERREZ_WEBHOOK_IP_CIDRS: ${clientIp ?? 'unknown'}`)
-      }
-    }
-
-    const authHeader = request.headers.get('Authorization')
-
-    if (!authHeader?.startsWith('Basic ')) return fail('missing or malformed Authorization header')
-
-    const decoded = Buffer.from(authHeader.slice(6), 'base64').toString('utf-8')
-    // String.split(':', 2) does NOT split on the first colon only — it splits
-    // on every colon, then truncates the resulting array to 2 entries, so a
-    // password containing a colon gets silently cut off after its own first
-    // colon. Split on the first colon by index instead, matching HTTP Basic
-    // Auth's actual "user:pass, only the first colon is a delimiter" spec.
-    const sepIndex = decoded.indexOf(':')
-    const user = sepIndex === -1 ? decoded : decoded.slice(0, sepIndex)
-    const pass = sepIndex === -1 ? ''      : decoded.slice(sepIndex + 1)
-
-    const expectedUser = process.env.OWNERREZ_WEBHOOK_USER
-    const expectedPass = process.env.OWNERREZ_WEBHOOK_PASSWORD
-
-    if (!expectedUser || !expectedPass) {
-      throw new Error(
-        'Missing OWNERREZ_WEBHOOK_USER or OWNERREZ_WEBHOOK_PASSWORD environment variables'
-      )
-    }
-
-    // Constant-time comparison to prevent timing attacks
-    const userMatch = timingSafeEqual(user, expectedUser)
-    const passMatch = timingSafeEqual(pass, expectedPass)
-
-    return (userMatch && passMatch) ? ok() : fail('credential mismatch')
+    // Basic Auth with credentials WE chose at registration, plus an optional
+    // source-IP allowlist. The implementation is shared with Hostaway, which
+    // registers webhooks the same way — see validateBasicAuthWebhook for the
+    // first-colon and constant-time rules it carries.
+    return validateBasicAuthWebhook({
+      request,
+      expectedUser: process.env.OWNERREZ_WEBHOOK_USER,
+      expectedPass: process.env.OWNERREZ_WEBHOOK_PASSWORD,
+      allowedCidrs: ownerrezAllowedCidrs(),
+      envPrefix:    'OWNERREZ_WEBHOOK',
+    })
   },
 
   // Handles OwnerRez-specific webhook events beyond the generic revocation.

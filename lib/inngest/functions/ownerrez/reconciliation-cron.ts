@@ -16,6 +16,7 @@
 import { inngest }             from '@/lib/inngest/client'
 import { fetchAllRows }       from '@/lib/inngest/paginate'
 import { createServiceClient } from '@/lib/supabase/server'
+import { SYNCABLE_CONNECTION_STATUSES } from '@/lib/integrations/connection-metadata'
 
 export const ownerRezReconciliationCron = inngest.createFunction(
   {
@@ -39,7 +40,9 @@ export const ownerRezReconciliationCron = inngest.createFunction(
           .from('integration_connections')
           .select('user_id, org_id')
           .eq('provider_id', 'ownerrez')
-          .eq('status',      'active')
+          // Includes 'error': a failed sync is retryable, and excluding it is what
+          // made one blip permanent. See SYNCABLE_CONNECTION_STATUSES.
+          .in('status',      [...SYNCABLE_CONNECTION_STATUSES])
           .not('org_id',     'is', null)
           .order('user_id')
           .range(from, to),

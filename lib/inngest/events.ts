@@ -820,6 +820,24 @@ export type FieldStayEvents = {
     }
   }
 
+  /**
+   * One per active connection, dispatched hourly by
+   * hostawayIncrementalSyncCron.
+   *
+   * Hostaway has no webhook we can build against (its public API reference
+   * documents no unified-webhook endpoint and no payload shape), so this is
+   * what keeps a Hostaway org current between daily reconciles. It sweeps by
+   * latestActivityStart — everything CHANGED since the last cursor — which is
+   * the only filter that can see a cancellation of a stay months out.
+   */
+  'integration/hostaway.incremental_sync.requested': {
+    data: {
+      user_id:          string
+      org_id:           string
+      external_user_id: string
+    }
+  }
+
   // ----------------------------------------------------------
   // Work Order Invoices (CLAUDE_58_0)
   // ----------------------------------------------------------

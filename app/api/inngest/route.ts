@@ -40,6 +40,8 @@ import { ownerRezReconciliationHandler } from '@/lib/inngest/functions/ownerrez/
 
 // Hostaway integration
 import { hostawayInitialSync }                from '@/lib/inngest/functions/hostaway/initial-sync'
+import { hostawayIncrementalSyncCron }        from '@/lib/inngest/functions/hostaway/incremental-sync-cron'
+import { hostawayIncrementalSyncHandler }     from '@/lib/inngest/functions/hostaway/incremental-sync-handler'
 import { hostawayReservationReconcileCron }    from '@/lib/inngest/functions/hostaway/reservation-reconcile-cron'
 import { hostawayReservationReconcileHandler } from '@/lib/inngest/functions/hostaway/reservation-reconcile-handler'
 
@@ -242,6 +244,8 @@ export const { GET, POST, PUT } = serve({
 
     // Hostaway sync
     hostawayInitialSync,
+    hostawayIncrementalSyncCron,
+    hostawayIncrementalSyncHandler,
     hostawayReservationReconcileCron,
     hostawayReservationReconcileHandler,
 

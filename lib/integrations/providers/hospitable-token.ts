@@ -17,6 +17,7 @@
 import { unwrap } from '@/lib/supabase/unwrap'
 import { reportError } from '@/lib/observability/report-error'
 import { createServiceClient }         from '@/lib/supabase/server'
+import { SYNCABLE_CONNECTION_STATUSES } from '@/lib/integrations/connection-metadata'
 import { acquireRefreshLock, releaseRefreshLock } from '@/lib/integrations/refresh-lock'
 import { PMS_API_TIMEOUT_MS } from '@/lib/http/timeout'
 import {
@@ -58,7 +59,13 @@ export async function getValidHospitableToken(userId: string): Promise<string> {
     .select('expires_at, external_user_id')
     .eq('user_id',     userId)
     .eq('provider_id', HOSPITABLE_PROVIDER_ID)
-    .eq('status',      'active')
+    // Includes 'error'. A failed refresh sets status='error', and this lookup
+    // used to filter to 'active' — so the very next call threw "No active
+    // connection ... Reconnect required" and NOTHING ever attempted the refresh
+    // that would have healed it (store_integration_token sets status back to
+    // 'active' on success). One transient refresh failure was therefore
+    // permanent. 'revoked' stays excluded: that one really does need a human.
+    .in('status',      [...SYNCABLE_CONNECTION_STATUSES])
     .single()
 
   if (connErr || !connection) {
@@ -115,7 +122,13 @@ async function refreshHospitableTokenLocked(
       .select('expires_at')
       .eq('user_id',     userId)
       .eq('provider_id', HOSPITABLE_PROVIDER_ID)
-      .eq('status',      'active')
+      // Includes 'error'. A failed refresh sets status='error', and this lookup
+    // used to filter to 'active' — so the very next call threw "No active
+    // connection ... Reconnect required" and NOTHING ever attempted the refresh
+    // that would have healed it (store_integration_token sets status back to
+    // 'active' on success). One transient refresh failure was therefore
+    // permanent. 'revoked' stays excluded: that one really does need a human.
+    .in('status',      [...SYNCABLE_CONNECTION_STATUSES])
       .maybeSingle()
 
     const connection = unwrap(connectionRes, {

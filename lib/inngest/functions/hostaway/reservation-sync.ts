@@ -39,6 +39,15 @@ type SyncStep = GetStepTools<typeof inngest>
 export type HostawayFetchMode =
   /** History depth in months — initial sync and the daily reconcile. */
   | { kind: 'window'; historyMonths: number }
+  /**
+   * Everything CHANGED since an ISO date — the hourly incremental sweep.
+   *
+   * A different question from `window`, not a narrower one. An arrival-date
+   * filter anchored near today cannot see a cancellation of a stay six months
+   * out; `latestActivityStart` can, and that is the change most worth hearing
+   * about inside the hour rather than at tomorrow's reconcile.
+   */
+  | { kind: 'activitySince'; since: string }
   /** Specific reservation ids — a webhook delivery naming one. */
   | { kind: 'ids'; reservationIds: string[] }
 
@@ -59,12 +68,17 @@ export interface HostawayReservationSyncParams {
 }
 
 /**
- * `dateFrom` for GET /reservations, N months back from today.
+ * `arrivalStartDate` for GET /reservations, N months back from today.
  *
- * Hostaway's endpoint takes a date, not a month count, and defaults to 90 days
- * of history when none is sent — so history beyond a quarter only exists if it
- * is asked for. 12 months on first sync is what makes an owner's first-year
- * P&L meaningful, which is the whole reason for importing past stays.
+ * Hostaway's endpoint takes a date, not a month count. 12 months on first sync
+ * is what makes an owner's first-year P&L meaningful, which is the whole
+ * reason for importing past stays.
+ *
+ * The claim that used to sit here — that the endpoint "defaults to 90 days of
+ * history when none is sent" — was unverifiable and is removed: the parameter
+ * this function fed was `dateFrom`, which Hostaway does not accept, so no
+ * window was ever actually requested and the 90-day figure described nothing
+ * that happened.
  *
  * Deliberately no lookahead bound: unlike Hostex's window, Hostaway's
  * pagination is driven by `dateFrom` alone and future reservations are what a
@@ -74,8 +88,7 @@ export interface HostawayReservationSyncParams {
 export function hostawayHistoryCutoff(historyMonths: number): string {
   const from = new Date()
   from.setMonth(from.getMonth() - historyMonths)
-  // YYYY-MM-DD — what the API expects, and what hostawayFetchReservations
-  // interpolates into its dateFrom param.
+  // YYYY-MM-DD — what the API expects.
   return from.toISOString().slice(0, 10)
 }
 
@@ -101,11 +114,21 @@ export async function syncHostawayReservations(
       // has no id-list parameter; the window is already bounded to recent
       // history, which is where a webhook's subject always lives.
       const wanted = new Set(fetchMode.reservationIds)
-      const recent = await hostawayFetchReservations(token, hostawayHistoryCutoff(1))
+      const recent = await hostawayFetchReservations(token, {
+        kind: 'arrivalFrom', date: hostawayHistoryCutoff(1),
+      })
       return recent.filter((r) => wanted.has(String(r.id)))
     }
 
-    return hostawayFetchReservations(token, hostawayHistoryCutoff(fetchMode.historyMonths))
+    if (fetchMode.kind === 'activitySince') {
+      return hostawayFetchReservations(token, {
+        kind: 'activitySince', date: fetchMode.since,
+      })
+    }
+
+    return hostawayFetchReservations(token, {
+      kind: 'arrivalFrom', date: hostawayHistoryCutoff(fetchMode.historyMonths),
+    })
   })
 
   logger.info(`[Hostaway:${userId}] Fetched ${reservations.length} reservations`)
