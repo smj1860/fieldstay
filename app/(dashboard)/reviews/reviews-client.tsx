@@ -8,6 +8,11 @@ import { Dialog } from '@/components/ui/Dialog'
 import { Button } from '@/components/ui/Button'
 import { Input } from '@/components/ui/Input'
 import { Star, Flag, Check } from 'lucide-react'
+// TYPE-ONLY, deliberately: this is a client component and lib/integrations/
+// registry.ts pulls in every provider adapter (API clients, webhook
+// verification, node crypto). A type import is erased at compile time, so the
+// exhaustiveness check below costs nothing in the browser bundle.
+import type { PmsProviderId } from '@/lib/integrations/registry'
 
 interface ReviewResponseRow {
   id: string
@@ -49,10 +54,30 @@ interface Props {
   manualUsedThisWeek: number
 }
 
-const REVIEW_SOURCE_LABELS: Record<string, string> = {
+// Keyed by PmsProviderId rather than string ON PURPOSE. Hostaway reviews have
+// been syncing since Phase 5 and landed here with no label at all, so a PM saw
+// "Response posted" where every other provider says "Posted to <PMS>" — the
+// hand-maintained-copy drift that PMS_PROVIDER_IDS was consolidated to stop,
+// arriving in the one surface that still kept its own list. Typed this way the
+// NEXT provider added to PMS_PROVIDER_IDS fails the build here instead.
+const REVIEW_SOURCE_LABELS: Record<PmsProviderId, string> = {
   ownerrez:   'OwnerRez',
   hospitable: 'Hospitable',
   hostex:     'Hostex',
+  hostaway:   'Hostaway',
+}
+
+/**
+ * Display name for a review's source, or null when there isn't one.
+ *
+ * Null is a real case, not a gap: `manual` entries have no PMS behind them, and
+ * the UI deliberately says "Response posted" rather than naming a platform for
+ * those. The widening cast is sound — it only loosens the key type for lookup,
+ * and an unrecognised source falls through to null.
+ */
+function reviewSourceLabel(source: string | null | undefined): string | null {
+  if (!source) return null
+  return (REVIEW_SOURCE_LABELS as Record<string, string>)[source] ?? null
 }
 
 // Only OwnerRez has a confirmed working fallback URL when the sync didn't
@@ -282,7 +307,7 @@ export function ReviewsClient({ reviews: initialReviews, manualUsedThisWeek }: P
 
   // Post-to-PMS state for the selected review
   const postUrl     = selected ? getReviewPostUrl(selected) : null
-  const sourceLabel = selected ? REVIEW_SOURCE_LABELS[selected.external_source] ?? null : null
+  const sourceLabel = reviewSourceLabel(selected?.external_source)
 
   return (
     <div className="relative">
