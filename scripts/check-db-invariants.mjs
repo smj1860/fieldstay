@@ -653,27 +653,24 @@ if (noWithCheck.length > 0) {
 //     the live catalog knows whether an index matching those columns exists and
 //     is plain. That split is exactly why nothing caught this in June.
 const UPSERT_ARBITER_ALLOWLIST = new Set([
-  // SHRINK-ONLY, and every entry is a live bug rather than an exemption.
+  // SHRINK-ONLY. EMPTY as of 2026-08-18, which makes this a hard gate: any
+  // `onConflict` naming columns with no plain unique index behind them now
+  // fails CI outright.
   //
-  // vendors.(org_id,email) — app/actions/work-order-public.ts. The only
-  // matching unique index is `(org_id, lower(email)) WHERE email IS NOT NULL`:
-  // partial AND an expression, so the upsert throws 42P10 the same way the push
-  // routes did. Counted rather than suppressed because the remedy is not a
-  // like-for-like index swap — lower(email) is deliberate case-insensitivity,
-  // so fixing it means normalizing email on write (and backfilling) or moving
-  // the write into an RPC that can spell the predicate. Doing that inside a
-  // production hotfix for an unrelated table was the wrong trade.
-  'vendors:org_id,email',
-
-  // checklist_templates.(property_id,org_id) — lib/inngest/functions/
-  // checklist-broadcast.ts. There is NO unique index on that pair at all, and
-  // adding one would be wrong: a property is meant to have several named
-  // templates with one default (which is what the existing partial
-  // uniq_checklist_templates_one_default_per_property enforces). A unique on
-  // (property_id, org_id) would cap it at one template per property. So the
-  // onConflict is the defect here, not a missing index, and the fix is a code
-  // change to that broadcast — out of scope for a production hotfix.
-  'checklist_templates:property_id,org_id',
+  // It held two entries, both live bugs rather than exemptions, and both are
+  // now fixed by 20260818012532_upsert_rpcs_for_partial_expression_indexes.sql:
+  //
+  //   vendors:(org_id,email) — the matching index is
+  //   (org_id, lower(email)) WHERE email IS NOT NULL, an expression index AND a
+  //   partial one. Now written through upsert_vendor_by_email().
+  //
+  //   checklist_templates:(property_id,org_id) — no unique index on that pair
+  //   exists, and adding one would cap a property at a single template. The
+  //   real invariant is the partial (property_id) WHERE is_default. Now written
+  //   through upsert_default_checklist_template().
+  //
+  // Neither could be fixed by matching the code with a new plain index — see
+  // that migration's header. Do not add entries here; fix the site.
 ])
 
 const ONCONFLICT_RE = /onConflict:\s*'([^']+)'/g
@@ -699,11 +696,46 @@ function sourceFilesUnder(dir) {
 }
 
 /**
+ * Blanks out WHOLE-LINE comments (and block-comment bodies), so prose that
+ * quotes an `onConflict:` is not scanned as a call site.
+ *
+ * This is not hypothetical tidiness: the fix that emptied the allowlist above
+ * documents, in a comment at each repaired call site, the exact broken spelling
+ * it replaced — and that comment matched this scanner, so the check failed on
+ * the very change that fixed it.
+ *
+ * Deliberately conservative. Only lines whose first non-space character starts
+ * a comment are cleared; a trailing `//` is NOT stripped, because a string
+ * literal containing one (`'https://…'`) would truncate the rest of a real line
+ * and turn a live bug into a silent pass. Over-scanning is recoverable; a false
+ * negative in a gate is not.
+ *
+ * Lines are replaced by an empty line rather than deleted so that anything
+ * keyed on position still lines up.
+ */
+function stripCommentLines(src) {
+  let inBlock = false
+  return src.split('\n').map((line) => {
+    const trimmed = line.trim()
+    if (inBlock) {
+      if (trimmed.includes('*/')) inBlock = false
+      return ''
+    }
+    if (trimmed.startsWith('/*')) {
+      if (!trimmed.includes('*/')) inBlock = true
+      return ''
+    }
+    if (trimmed.startsWith('//') || trimmed.startsWith('*')) return ''
+    return line
+  }).join('\n')
+}
+
+/**
  * Each `onConflict: 'a,b'` in a file, paired with the nearest PRECEDING
  * `.from('table')` — which is how every one of these chains is written.
  */
 function onConflictSitesIn(file) {
-  const src = readFileSync(file, 'utf8')
+  const src = stripCommentLines(readFileSync(file, 'utf8'))
   if (!src.includes('onConflict')) return []
 
   return [...src.matchAll(ONCONFLICT_RE)].flatMap((match) => {

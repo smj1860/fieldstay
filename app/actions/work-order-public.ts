@@ -110,22 +110,26 @@ async function resolveOrCreateDispatchVendor(
     }
   }
 
-  // Not on file — add them. upsert on the (org_id, lower(email)) unique index
-  // rather than insert: a double-click or a retry after a slow response would
-  // otherwise create a second vendor row for the same contractor, and each row
-  // carries its own stripe_connect_token, so each would earn its own Stripe
-  // Connect account and its own onboarding email.
+  // Not on file — add them. Insert-or-fetch keyed on (org_id, lower(email))
+  // rather than a plain insert: a double-click or a retry after a slow response
+  // would otherwise create a second vendor row for the same contractor, and
+  // each row carries its own stripe_connect_token, so each would earn its own
+  // Stripe Connect account and its own onboarding email.
+  //
+  // Through an RPC, not `.upsert({ onConflict: 'org_id,email' })`, which is
+  // what this was and which threw 42P10 on EVERY call — so "Send to Vendor"
+  // failed outright for any vendor not already on file, and the PM saw the
+  // generic "Could not add that vendor" below. The matching index is
+  // (org_id, lower(email)) WHERE email IS NOT NULL: an expression index AND a
+  // partial one, and PostgREST's onConflict takes a bare column list, so it
+  // cannot name that index at any spelling. See the migration for why matching
+  // the code with a plain index would be the wrong repair.
   const createdRes = await supabase
-    .from('vendors')
-    .upsert(
-      {
-        org_id:    orgId,
-        name:      rawName.trim() || vendorNameFromEmail(wantedEmail),
-        email:     wantedEmail,
-        is_active: true,
-      },
-      { onConflict: 'org_id,email', ignoreDuplicates: false },
-    )
+    .rpc('upsert_vendor_by_email', {
+      p_org_id: orgId,
+      p_name:   rawName.trim() || vendorNameFromEmail(wantedEmail),
+      p_email:  wantedEmail,
+    })
     .select('id, name, email, phone')
     .maybeSingle()
 

@@ -1751,14 +1751,14 @@ export type Database = {
           org_id: string | null
           provider_id: string
           reconnect_email_sent_at: string | null
-          webhook_secret_hash: string | null
-          webhook_token: string | null
           refresh_token_vault_secret_id: string | null
           scope: string | null
           status: string
           updated_at: string
           user_id: string
           vault_secret_id: string | null
+          webhook_secret_hash: string | null
+          webhook_token: string | null
         }
         Insert: {
           connected_at?: string
@@ -1771,14 +1771,14 @@ export type Database = {
           org_id?: string | null
           provider_id: string
           reconnect_email_sent_at?: string | null
-          webhook_secret_hash?: string | null
-          webhook_token?: string | null
           refresh_token_vault_secret_id?: string | null
           scope?: string | null
           status?: string
           updated_at?: string
           user_id: string
           vault_secret_id?: string | null
+          webhook_secret_hash?: string | null
+          webhook_token?: string | null
         }
         Update: {
           connected_at?: string
@@ -1791,14 +1791,14 @@ export type Database = {
           org_id?: string | null
           provider_id?: string
           reconnect_email_sent_at?: string | null
-          webhook_secret_hash?: string | null
-          webhook_token?: string | null
           refresh_token_vault_secret_id?: string | null
           scope?: string | null
           status?: string
           updated_at?: string
           user_id?: string
           vault_secret_id?: string | null
+          webhook_secret_hash?: string | null
+          webhook_token?: string | null
         }
         Relationships: [
           {
@@ -6064,6 +6064,7 @@ export type Database = {
           status: string
         }[]
       }
+      migration_ledger_digests: { Args: never; Returns: Json }
       migration_ledger_versions: { Args: never; Returns: Json }
       next_wo_number: { Args: { p_org_id: string }; Returns: string }
       next_work_order_invoice_seq: { Args: never; Returns: number }
@@ -6118,6 +6119,7 @@ export type Database = {
         Args: { p_provider_id: string; p_user_id: string }
         Returns: undefined
       }
+      rls_policy_report: { Args: never; Returns: Json }
       set_default_platform_inventory_template: {
         Args: { p_template_id: string }
         Returns: undefined
@@ -6160,6 +6162,16 @@ export type Database = {
         Args: { p_landing_page_cookie_present?: boolean; p_org_id: string }
         Returns: undefined
       }
+      unique_index_shapes: {
+        Args: never
+        Returns: {
+          has_expression: boolean
+          index_name: string
+          is_partial: boolean
+          key_columns: string[]
+          table_name: string
+        }[]
+      }
       update_organization_subscription_from_stripe: {
         Args: {
           p_customer_id: string
@@ -6175,6 +6187,19 @@ export type Database = {
           org_id: string
           org_name: string
           previous_plan: Database["public"]["Enums"]["org_plan"]
+        }[]
+      }
+      upsert_default_checklist_template: {
+        Args: { p_name: string; p_org_id: string; p_property_id: string }
+        Returns: string
+      }
+      upsert_vendor_by_email: {
+        Args: { p_email: string; p_name: string; p_org_id: string }
+        Returns: {
+          email: string
+          id: string
+          name: string
+          phone: string
         }[]
       }
     }
@@ -6704,4 +6729,3 @@ export const Constants = {
     },
   },
 } as const
-

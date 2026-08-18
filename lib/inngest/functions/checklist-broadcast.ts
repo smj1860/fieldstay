@@ -72,16 +72,20 @@ export const broadcastChecklistTemplateJob = inngest.createFunction(
       const applied = await step.run(`broadcast-to-${targetId}`, async () => {
         const supabase = createServiceClient({ system: 'inngest:checklist-broadcast' })
 
-        const { data: newTemplate, error: newTemplateError } = await supabase
-          .from('checklist_templates')
-          .upsert({
-            property_id: targetId,
-            org_id,
-            name:        sourceTemplate.name,
-            is_default:  true,
-          }, { onConflict: 'property_id,org_id' })
-          .select('id')
-          .single()
+        // Through an RPC, not `.upsert({ onConflict: 'property_id,org_id' })`,
+        // which is what this was and which threw 42P10 on EVERY target — so
+        // broadcasting a checklist template never worked at all. There is no
+        // unique index on that pair, and adding one would be wrong: a property
+        // is MEANT to hold several named templates with one default. The real
+        // invariant is the PARTIAL index (property_id) WHERE is_default, which
+        // PostgREST's column-list onConflict cannot name. The RPC is the only
+        // place that predicate can be spelled — see the migration.
+        const { data: newTemplateId, error: newTemplateError } = await supabase
+          .rpc('upsert_default_checklist_template', {
+            p_org_id:      org_id,
+            p_property_id: targetId,
+            p_name:        sourceTemplate.name,
+          })
 
         if (newTemplateError) {
           throwIfAnyQueryFailed(
@@ -90,7 +94,8 @@ export const broadcastChecklistTemplateJob = inngest.createFunction(
           )
         }
 
-        if (!newTemplate) return false
+        if (!newTemplateId) return false
+        const newTemplate = { id: newTemplateId as string }
 
         const { data: existingSections, error: existingSectionsError } = await supabase
           .from('checklist_template_sections')
