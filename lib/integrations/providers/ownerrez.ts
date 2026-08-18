@@ -26,6 +26,7 @@ import { unmappedBookingStatus } from '@/lib/bookings/normalize'
 import type { Enums, TablesUpdate } from '@/types/database'
 import { parseCidrAllowlist, validateBasicAuthWebhook } from '../webhook-verification'
 import { PMS_API_TIMEOUT_MS } from '@/lib/http/timeout'
+import { SYNCABLE_CONNECTION_STATUSES } from '@/lib/integrations/connection-metadata'
 
 // ── OwnerRez webhook source-IP allowlist (audit 2026-07-30, L-4) ────────────
 //
@@ -119,7 +120,11 @@ async function resolveOwnerRezWebhookConnection(
     .select('user_id, org_id')
     .eq('provider_id', 'ownerrez')
     .eq('external_user_id', externalUserId)
-    .eq('status', 'active')
+    // Includes 'error'. An errored connection is precisely the one a webhook
+    // should be allowed to wake: narrowing to 'active' sent it to the full
+    // platform sweep instead, which until 2026-08-18 skipped it for the same
+    // reason. See SYNCABLE_CONNECTION_STATUSES.
+    .in('status', [...SYNCABLE_CONNECTION_STATUSES])
     .maybeSingle()
 
   const connOut = tryUnwrap(connRes, { site: 'lib.integrations.ownerrez.webhook-scope' })
