@@ -32,6 +32,7 @@
 
 import { inngest }             from '@/lib/inngest/client'
 import { createServiceClient } from '@/lib/supabase/server'
+import { runIdStartedAt, runDurationMs } from '@/lib/inngest/run-id'
 
 /**
  * Loop breaker.
@@ -81,6 +82,27 @@ export const jobRunRecorder = inngest.createFunction(
       const error = data.error as { message?: string; stack?: string } | undefined
       const runId = String(data.run_id ?? '')
 
+      // TIMESTAMPS, from the only two sources that actually carry them.
+      //
+      // `inngest/function.finished` has no timestamp fields at all (see
+      // FinishedEventPayload: function_id, run_id, correlation_id, and either
+      // error or result). This used to stamp BOTH started_at and finished_at
+      // with `new Date()` — the moment the RECORDER ran — so every row had
+      // started_at === finished_at, duration_ms was never written, and the
+      // ledger could say a job ran but never how long it took. A watchdog
+      // cannot flag a job that has gone slow if nothing records slowness.
+      //
+      //   started_at  — decoded from the run id, which is a ULID whose first
+      //                 10 chars are a millisecond timestamp. Verified against
+      //                 production: hourly crons decode to exactly :00:00.000.
+      //   finished_at — the finished event's own `ts`, i.e. when Inngest
+      //                 emitted it. Falls back to now() when absent, which is
+      //                 close enough (this handler runs seconds later) and is
+      //                 what the column held before regardless.
+      const finishedAt = new Date(typeof event.ts === 'number' ? event.ts : Date.now())
+      const startedAt  = runIdStartedAt(runId, finishedAt.getTime())
+      const durationMs = runDurationMs(startedAt, finishedAt)
+
       const { error: insertError } = await supabase
         .from('system_job_runs')
         .upsert(
@@ -97,8 +119,13 @@ export const jobRunRecorder = inngest.createFunction(
             // constraint, so the unit test passed on 'completed' too.
             status:        error ? 'failed' : 'succeeded',
             attempt:       0,
-            started_at:    new Date().toISOString(),
-            finished_at:   new Date().toISOString(),
+            // startedAt is null for a run id that is not a decodable ULID.
+            // Falling back to finishedAt keeps the NOT NULL column satisfied
+            // and makes the degenerate case look exactly like the old
+            // behaviour (zero-length run) rather than inventing a duration.
+            started_at:    (startedAt ?? finishedAt).toISOString(),
+            finished_at:   finishedAt.toISOString(),
+            duration_ms:   durationMs,
             // Truncated: this column is read by a human triaging an outage,
             // and a full stack per row would make the table the outage.
             error_message: error?.message ? String(error.message).slice(0, 1000) : null,

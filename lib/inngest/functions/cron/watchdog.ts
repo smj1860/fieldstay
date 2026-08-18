@@ -97,7 +97,12 @@ const INTEGRATION_QUIET_HOURS = 48
  */
 const NEW_CONNECTION_GRACE_HOURS = 50
 
-interface JobRunRow  { function_id: string; started_at: string }
+interface JobRunRow  {
+  function_id: string
+  started_at:  string
+  /** null for runs recorded before the recorder learned to compute it. */
+  duration_ms: number | null
+}
 interface ConnRow    {
   id: string
   provider_id: string
@@ -113,6 +118,81 @@ interface SilentJob {
   maxSilentHours: number
   /** null when the job has never been recorded at all, vs. recorded then stopped. */
   silentForHours: number | null
+}
+
+/** A watched job whose most recent run took far longer than its own norm. */
+interface SlowJob {
+  id: string
+  latestMs: number
+  medianMs: number
+}
+
+/**
+ * Slow-run detection is RELATIVE TO EACH JOB'S OWN NORM, not an absolute
+ * duration ceiling.
+ *
+ * An absolute ceiling is the obvious design and it is wrong here: an Inngest
+ * run's wall-clock includes any `step.sleep`, and several functions sleep
+ * deliberately — withProviderCall sleeps for a provider's Retry-After, the
+ * reviews backfill sleeps between rate-limited pages. A "longer than 10
+ * minutes is slow" rule would fire on those every time they did exactly what
+ * they were designed to do, and an alarm that fires on correct behaviour is
+ * one an operator learns to close unread.
+ *
+ * A job's median over the window is a baseline that already accounts for its
+ * own sleeps, so the comparison catches what actually matters: a step CHANGE.
+ * The job that ran in 4 seconds all week and now takes six minutes.
+ *
+ * ⚠️ KNOWN BLIND SPOT, stated rather than papered over: this cannot see
+ * GRADUAL drift, because the baseline drifts with it. A job creeping from 10s
+ * to 5 minutes over a month never trips a multiple of its own recent median.
+ * Catching that needs history longer than this watchdog's 31-hour window and
+ * is a different tool; duration_ms is now recorded, so the data for it exists.
+ */
+const SLOW_FLOOR_MS      = 60_000
+const SLOW_MULTIPLE      = 3
+const SLOW_MIN_SAMPLES   = 5
+
+/** Median of a non-empty numeric list. */
+function median(values: number[]): number {
+  const sorted = [...values].sort((a, b) => a - b)
+  const mid = Math.floor(sorted.length / 2)
+  return sorted.length % 2 === 0
+    ? (sorted[mid - 1]! + sorted[mid]!) / 2
+    : sorted[mid]!
+}
+
+/**
+ * Watched jobs whose latest run is an outlier against their own median.
+ *
+ * Requires SLOW_MIN_SAMPLES runs before judging anything: a median of two
+ * samples is not a norm, and a daily cron simply will not have enough history
+ * in a 31-hour window — which is correct, not a gap. Those are the jobs whose
+ * silence the watchdog already covers.
+ */
+function findSlowJobs(rows: JobRunRow[], watched: readonly string[]): SlowJob[] {
+  const byFunction = new Map<string, { at: number; ms: number }[]>()
+
+  for (const row of rows) {
+    if (row.duration_ms === null || row.duration_ms === undefined) continue
+    const at = Date.parse(row.started_at)
+    if (Number.isNaN(at)) continue
+    const list = byFunction.get(row.function_id) ?? []
+    list.push({ at, ms: row.duration_ms })
+    byFunction.set(row.function_id, list)
+  }
+
+  return watched.flatMap<SlowJob>((id) => {
+    const runs = byFunction.get(id)
+    if (!runs || runs.length < SLOW_MIN_SAMPLES) return []
+
+    const latest = runs.reduce((a, b) => (b.at > a.at ? b : a))
+    const baseline = median(runs.map((r) => r.ms))
+    const threshold = Math.max(SLOW_FLOOR_MS, baseline * SLOW_MULTIPLE)
+
+    if (latest.ms < threshold) return []
+    return [{ id, latestMs: latest.ms, medianMs: Math.round(baseline) }]
+  })
 }
 
 /** Most recent recorded run per watched job. */
@@ -139,7 +219,7 @@ export const systemWatchdog = inngest.createFunction(
     const now = Date.now()
 
     // ── 1. Jobs that have gone silent ───────────────────────────────────────
-    const silent = await step.run('check-silent-jobs', async () => {
+    const silentAndSlow = await step.run('check-silent-jobs', async () => {
       const supabase = createServiceClient({ system: 'inngest:system-watchdog' })
 
       // Bounded by the widest budget in the registry, so this reads a day and a
@@ -149,7 +229,7 @@ export const systemWatchdog = inngest.createFunction(
       const rows = await fetchAllRows<JobRunRow>(
         (from, to) => supabase
           .from('system_job_runs')
-          .select('function_id, started_at')
+          .select('function_id, started_at, duration_ms')
           .gte('started_at', since)
           .order('started_at', { ascending: false })
           .range(from, to),
@@ -185,7 +265,7 @@ export const systemWatchdog = inngest.createFunction(
       const recordingSince = oldest.data?.started_at ? Date.parse(oldest.data.started_at) : null
       const recordingAgeMs = recordingSince === null ? 0 : now - recordingSince
 
-      return WATCHED_JOBS.flatMap<SilentJob>(({ id, maxSilentHours }) => {
+      const silentJobs = WATCHED_JOBS.flatMap<SilentJob>(({ id, maxSilentHours }) => {
         const last = latest.get(id)
 
         if (last === undefined) {
@@ -198,7 +278,16 @@ export const systemWatchdog = inngest.createFunction(
         if (now - last <= maxSilentHours * HOUR_MS) return []
         return [{ id, maxSilentHours, silentForHours: Math.round((now - last) / HOUR_MS) }]
       })
+
+      // Same rows, no second query: silence and slowness are two readings of
+      // one scan.
+      const slowJobs = findSlowJobs(rows, WATCHED_JOBS.map((j) => j.id))
+
+      return { silentJobs, slowJobs }
     })
+
+    const silent = silentAndSlow.silentJobs
+    const slow   = silentAndSlow.slowJobs
 
     // An entirely empty ledger is its own finding, not ten of them. It is
     // expected exactly once — on the very first run, before this watchdog's own
@@ -271,6 +360,20 @@ export const systemWatchdog = inngest.createFunction(
       })
     }
 
+    if (slow.length > 0) {
+      // A WARNING, not an error: a job that is slow is still running, which is
+      // a materially different situation from one that has stopped. Reported
+      // so a step change is visible before it becomes a timeout or an overlap
+      // with the job's own next tick.
+      const summary = slow
+        .map((j) => `${j.id} (${Math.round(j.latestMs / 1000)}s vs ${Math.round(j.medianMs / 1000)}s median)`)
+        .join('; ')
+      logger.warn(`[watchdog] ${slow.length} job(s) slower than their norm: ${summary}`)
+      reportError(new Error(`Watchdog: ${slow.length} scheduled job(s) slow — ${summary}`), {
+        site: 'inngest.system-watchdog.slow-jobs',
+      })
+    }
+
     if (quiet.length > 0) {
       // org_id and provider only — never a token, and nothing about the
       // provider account beyond which integration it is.
@@ -295,6 +398,6 @@ export const systemWatchdog = inngest.createFunction(
       logger.info(`[watchdog] OK — ${WATCHED_JOBS.length} jobs within budget, all active integrations recently seen`)
     }
 
-    return { silentJobs: silent.length, quietIntegrations: quiet.length, noRunsRecorded }
+    return { silentJobs: silent.length, slowJobs: slow.length, quietIntegrations: quiet.length, noRunsRecorded }
   }
 )

@@ -344,3 +344,123 @@ describe('jobRunRecorder', () => {
     expect(row.error_message).toBe('boom')
   })
 })
+
+describe('systemWatchdog — slow jobs', () => {
+  const TARGET = 'ownerrez-incremental-sync'
+
+  /**
+   * `count` healthy runs of TARGET at `normalMs`, plus every other watched job
+   * once so nothing reports silent and muddies the assertion.
+   */
+  function runsWithDurations(durations: number[]) {
+    const others = WATCHED_JOBS
+      .filter((j) => j.id !== TARGET)
+      .map((j) => ({ function_id: j.id, started_at: hoursAgo(1), duration_ms: 1_000 }))
+
+    const target = durations.map((ms, i) => ({
+      function_id: TARGET,
+      started_at:  hoursAgo(durations.length - i),
+      duration_ms: ms,
+    }))
+
+    return [...others, ...target]
+  }
+
+  function run(rows: unknown[]) {
+    ;(createServiceClient as ReturnType<typeof vi.fn>).mockReturnValue(
+      makeSupabase(
+        { system_job_runs: [{ data: rows, error: null }], integration_connections: [{ data: [], error: null }] },
+        [], RECORDING_MATURE,
+      ),
+    )
+    return invokeHandler(systemWatchdog, {
+      event: {}, step: runAllStep(), logger: makeLogger(),
+    }) as Promise<{ slowJobs: number; silentJobs: number }>
+  }
+
+  it('reports a job whose latest run is a step change against its own median', async () => {
+    // The actionable case: steady for hours, then one run takes minutes. That
+    // is the shape of a job about to start timing out or overlapping its own
+    // next tick.
+    const res = await run(runsWithDurations([4_000, 4_200, 3_900, 4_100, 4_050, 400_000]))
+
+    expect(res.slowJobs).toBe(1)
+    expect(reportError).toHaveBeenCalledWith(
+      expect.objectContaining({ message: expect.stringContaining('slow') }),
+      expect.objectContaining({ site: 'inngest.system-watchdog.slow-jobs' }),
+    )
+  })
+
+  it('reports on the MULTIPLE, not just the absolute floor', async () => {
+    // The step-change case above is caught by the 60s floor alone. This one is
+    // above the floor throughout, so only the 3x-median rule can catch it —
+    // which is what makes the rule self-calibrating rather than a disguised
+    // fixed threshold.
+    const res = await run(runsWithDurations([100_000, 100_000, 100_000, 100_000, 100_000, 400_000]))
+    expect(res.slowJobs).toBe(1)
+  })
+
+  it('stays quiet for a job running at its normal speed', async () => {
+    const res = await run(runsWithDurations([4_000, 4_200, 3_900, 4_100, 4_050, 4_300]))
+    expect(res.slowJobs).toBe(0)
+  })
+
+  it('does NOT report a fast job that tripled — the floor', async () => {
+    // 20ms to 60ms is a tripling and is noise. Without a floor every trivial
+    // job would alarm on ordinary jitter, and an alarm that fires constantly
+    // is one an operator mutes.
+    const res = await run(runsWithDurations([20, 20, 20, 20, 20, 5_000]))
+    expect(res.slowJobs).toBe(0)
+  })
+
+  it('does NOT judge a job with too little history', async () => {
+    // A median of two samples is not a norm. Daily crons simply will not have
+    // enough runs inside the 31h window — which is correct, not a gap: their
+    // silence is already covered.
+    // Three samples, not two: with exactly two the median sits between them and
+    // the latest can never reach 3x it, so a two-sample fixture would pass no
+    // matter what SLOW_MIN_SAMPLES was — asserting nothing. These three WOULD
+    // be flagged if the minimum were lowered.
+    const res = await run(runsWithDurations([4_000, 4_000, 400_000]))
+    expect(res.slowJobs).toBe(0)
+  })
+
+  it('ignores rows with a null duration rather than treating them as zero', async () => {
+    // Every row written before the recorder learned to compute duration has
+    // duration_ms null. Counting those as 0ms would drag every median to zero
+    // and make the next normal run look like an infinite slowdown — i.e. the
+    // whole fleet alarms the moment this ships.
+    // Sized so the bug is visible: 5 real samples (enough to judge) plus 8
+    // null ones. Counted as zero, the nulls become the MAJORITY and drag the
+    // median to 0 — so the threshold collapses to the floor and a perfectly
+    // normal 100s run is reported as a slowdown. Left out, the median is the
+    // real 100s and nothing fires.
+    const real = runsWithDurations([100_000, 100_000, 100_000, 100_000, 100_000])
+    const nulls = Array.from({ length: 8 }, (_, i) => ({
+      function_id: TARGET, started_at: hoursAgo(20 + i), duration_ms: null,
+    }))
+
+    const res = await run([...real, ...nulls])
+    expect(res.slowJobs).toBe(0)
+  })
+
+  it('is a WARNING path — a slow job is still a running job', async () => {
+    // Distinct from silence: slow means degraded, silent means stopped. They
+    // are reported under different sites so one cannot be mistaken for the
+    // other in triage.
+    const logger = makeLogger()
+    ;(createServiceClient as ReturnType<typeof vi.fn>).mockReturnValue(
+      makeSupabase(
+        {
+          system_job_runs: [{ data: runsWithDurations([4_000, 4_200, 3_900, 4_100, 4_050, 400_000]), error: null }],
+          integration_connections: [{ data: [], error: null }],
+        },
+        [], RECORDING_MATURE,
+      ),
+    )
+
+    await invokeHandler(systemWatchdog, { event: {}, step: runAllStep(), logger })
+
+    expect(logger.warn).toHaveBeenCalledWith(expect.stringContaining('slower than their norm'))
+  })
+})
