@@ -48,7 +48,22 @@ export interface HostawayReservation {
   departureDate:  string  // YYYY-MM-DD
   status:         'new' | 'modified' | 'cancelled' | 'confirmed' | 'inquiry' | 'tentative'
   channelName?:   string  // 'airbnb', 'vrbo', 'booking.com', 'direct', etc.
+  /** What the GUEST is charged, gross. Not the owner's payout — see below. */
   totalPrice?:    number
+  /**
+   * "The commission the channels charge you" (Hostaway financial reporting).
+   * Deducted from the HOST payout, so this is what nets owner revenue.
+   */
+  hostChannelFee?:  number
+  /**
+   * A separate line in the GUEST's price breakdown, paid by the guest.
+   *
+   * Typed alongside hostChannelFee deliberately, and deliberately unused:
+   * the two names differ by one word and mean opposite things, so leaving
+   * this one absent from the type is what makes reaching for the wrong one
+   * easy. extractHostawayActualTotal subtracts hostChannelFee ONLY.
+   */
+  guestChannelFee?: number
   currency?:      string
   adults?:        number
   children?:      number
