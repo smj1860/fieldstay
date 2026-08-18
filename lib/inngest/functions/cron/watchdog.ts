@@ -186,7 +186,17 @@ function findSlowJobs(rows: JobRunRow[], watched: readonly string[]): SlowJob[] 
     const runs = byFunction.get(id)
     if (!runs || runs.length < SLOW_MIN_SAMPLES) return []
 
-    const latest = runs.reduce((a, b) => (b.at > a.at ? b : a))
+    // An explicit scan rather than reduce(). A no-initial-value reduce throws
+    // TypeError on an empty array, and while the length guard above makes that
+    // unreachable TODAY, the guard is three lines away and someone relaxing
+    // SLOW_MIN_SAMPLES to 0 would turn the watchdog itself into the thing that
+    // crashes — which is the one function that must not. Seeding the reduce
+    // with runs[0] would satisfy the linter while still reading as if the empty
+    // case were handled; this cannot be misread.
+    let latest = runs[0]!
+    for (const run of runs) {
+      if (run.at > latest.at) latest = run
+    }
     const baseline = median(runs.map((r) => r.ms))
     const threshold = Math.max(SLOW_FLOOR_MS, baseline * SLOW_MULTIPLE)
 
