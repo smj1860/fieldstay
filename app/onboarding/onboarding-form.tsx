@@ -49,6 +49,19 @@ const PMS_OPTIONS = [
     connectUrl:  '/api/integrations/hostex/connect',
     authType:    'oauth2' as const,
   },
+  {
+    id:          'hostaway',
+    name:        'Hostaway',
+    // Narrower than OwnerRez/Hospitable for the same reason Hostex's is:
+    // Hostaway's sync covers listings and reservations. No crew roster and no
+    // reviews yet, so promising either here would be a lie the sync cannot keep.
+    description: 'Bookings and properties',
+    // api_key, so there is no OAuth redirect to send them to — the branch below
+    // routes this to /settings/integrations?connect=hostaway, which auto-opens
+    // the credential modal.
+    connectUrl:  null,
+    authType:    'api_key' as const,
+  },
   // Guesty is not yet wired — hidden until the integration is live.
   // {
   //   id:          'guesty',

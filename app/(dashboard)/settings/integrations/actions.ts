@@ -3,16 +3,13 @@
 import { revalidatePath }                from 'next/cache'
 import { requireOrgMember }              from '@/lib/auth'
 import { createServiceClient }           from '@/lib/supabase/server'
-import { readIntegrationToken, readIntegrationRefreshToken, disconnectIntegrationToken } from '@/lib/integrations/vault'
+import { readIntegrationToken, readIntegrationRefreshToken, disconnectIntegrationToken, storeIntegrationToken } from '@/lib/integrations/vault'
 import { getProvider }                   from '@/lib/integrations/registry'
+import { linkConnectionToOrg }           from '@/lib/integrations/finalize-connection'
 import { logAuditEvent }                 from '@/lib/audit'
 import { reportError } from '@/lib/observability/report-error'
 import { tryUnwrap, reportQueryError } from '@/lib/supabase/unwrap'
-// Hostaway is not fully implemented yet (see connectWithApiKey below) —
-// storeIntegrationToken and hostawayExchangeCredentials are unused while
-// it's disabled. Re-add both imports when re-enabling.
-// import { storeIntegrationToken }       from '@/lib/integrations/vault'
-// import { hostawayExchangeCredentials } from '@/lib/integrations/providers/hostaway'
+import { hostawayExchangeCredentials } from '@/lib/integrations/providers/hostaway'
 
 export async function getSyncProgress(providerId: string): Promise<{
   propertiesFound: number | null
@@ -224,18 +221,20 @@ export async function triggerResync(
       })
       break
 
-    // Hostaway is not fully implemented yet — see connectWithApiKey below.
-    // case 'hostaway':
-    //   await inngest.send({
-    //     name: 'integration/hostaway.sync.requested',
-    //     data: {
-    //       user_id:     connection.user_id,
-    //       org_id:      connection.org_id ?? membership.org_id,
-    //       provider_id: providerId,
-    //       full_sync:   true,
-    //     },
-    //   })
-    //   break
+    case 'hostaway':
+      // Re-reads listings as well as reservations, which the daily reconcile
+      // deliberately does not — that is the difference between "resync" and
+      // the nightly sweep.
+      await inngest.send({
+        name: 'integration/hostaway.sync.requested',
+        data: {
+          user_id:     connection.user_id,
+          org_id:      connection.org_id ?? membership.org_id,
+          provider_id: providerId,
+          full_sync:   true,
+        },
+      })
+      break
 
     case 'kroger':
       // Kroger has no property/booking sync — this re-runs the nearest-store
@@ -368,94 +367,106 @@ export async function disconnectIntegration(
 }
 
 /**
- * Credential-entry connect flow for API-key-based providers (e.g. Hostaway).
- * Unlike OAuth providers, this exchanges PM-entered credentials for a token
- * directly from a server action — no browser redirect involved.
+ * Credential-entry connect flow for API-key-based providers (Hostaway).
  *
- * Hostaway is not fully implemented yet — its sync never fires
- * booking/confirmed (see lib/inngest/functions/hostaway/initial-sync.ts and
- * ops/page.tsx's REVENUE_AUTOMATION_PROVIDER_IDS comment), so a connected
- * org would get properties/bookings synced in with no automatic revenue
- * posting. Disabled at every connect entry point (this action, the
- * settings/integrations UI, and setup/pms) until that lands — uncomment the
- * block below (and the storeIntegrationToken/hostawayExchangeCredentials
- * imports at the top of this file) to re-enable.
+ * Unlike the OAuth providers there is no browser redirect: the PM pastes an
+ * Account ID and API Key, and this exchanges them for a Bearer token server-
+ * side. Hostaway is the only provider on this path, so the finalize-connection
+ * helper the OAuth callback uses does not fit — that helper starts from an
+ * authorization code and a pending link row, neither of which exists here.
+ *
+ * The RAW API KEY IS NEVER STORED. hostawayExchangeCredentials trades it once
+ * for a ~6-month Bearer token and only that token reaches the Vault, so a
+ * database compromise cannot mint fresh tokens. The cost is that expiry needs a
+ * human — see NON_REFRESHABLE_PROVIDERS in cron/integration-token-refresh.ts,
+ * which emails the PM to reconnect rather than attempting a refresh that has
+ * nothing to refresh from.
  */
 export async function connectWithApiKey(
   providerId:  string,
-  _credentials: Record<string, string>
+  credentials: Record<string, string>
 ): Promise<{ success?: boolean; error?: string; externalUserId?: string }> {
-  await requireOrgMember()
+  const { user, membership } = await requireOrgMember()
 
-  // const { user, membership } = await requireOrgMember()
-  //
-  // try {
-  //   let accessToken:    string
-  //   let expiresAt:      string
-  //   let externalUserId: string
-  //
-  //   // ── Provider-specific credential exchange ──────────────────────────
-  //   if (providerId === 'hostaway') {
-  //     const { accountId, apiKey } = credentials
-  //     if (!accountId?.trim() || !apiKey?.trim()) {
-  //       return { error: 'Account ID and API Key are both required' }
-  //     }
-  //     const result = await hostawayExchangeCredentials(accountId.trim(), apiKey.trim())
-  //     accessToken    = result.accessToken
-  //     expiresAt      = result.expiresAt
-  //     externalUserId = result.externalUserId
-  //   } else {
-  //     return { error: `Unsupported provider for credential-based connect: ${providerId}` }
-  //   }
-  //
-  //   // ── Store token in Vault + upsert the connection row ────────────────
-  //   await storeIntegrationToken({
-  //     userId:         user.id,
-  //     providerId,
-  //     accessToken,
-  //     externalUserId,
-  //     metadata:       { last_sync_status: 'pending' },
-  //   })
-  //
-  //   // Link to the org and record expiry — storeIntegrationToken doesn't
-  //   // know about org_id or expires_at, so patch them in after.
-  //   const admin = createServiceClient({ authorizedBy: membership })
-  //   // Scope to rows with no org_id yet (first connect — storeIntegrationToken
-  //   // doesn't set org_id on insert) or already matching this org (reconnect).
-  //   // Never let this silently repoint a connection that belongs to a
-  //   // different org the user is also a member of.
-  //   const { error: linkErr } = await admin
-  //     .from('integration_connections')
-  //     .update({ org_id: membership.org_id, expires_at: expiresAt })
-  //     .eq('user_id', user.id)
-  //     .eq('provider_id', providerId)
-  //     .or(`org_id.is.null,org_id.eq.${membership.org_id}`)
-  //
-  //   if (linkErr) throw new Error(linkErr.message)
-  //
-  //   // ── Fire Inngest initial sync ──────────────────────────────────────
-  //   const { inngest } = await import('@/lib/inngest/client')
-  //   await inngest.send({
-  //     name: 'integration/hostaway.sync.requested',
-  //     data: {
-  //       user_id:     user.id,
-  //       org_id:      membership.org_id,
-  //       provider_id: providerId,
-  //       full_sync:   true,
-  //     },
-  //   })
-  //
-  //   revalidatePath('/settings/integrations')
-  //   return { success: true, externalUserId }
-  // } catch (err) {
-  //   const msg = err instanceof Error ? err.message : 'Connection failed'
-  //   // Don't expose provider error details to client — log server-side only
-  //   console.error(`[connectWithApiKey:${providerId}]`, msg)
-  //   if (msg.toLowerCase().includes('401') || msg.toLowerCase().includes('invalid')) {
-  //     return { error: 'Invalid credentials — check your Account ID and API Key.' }
-  //   }
-  //   return { error: 'Connection failed. Please try again or contact support.' }
-  // }
+  // Allowlist, not a fallthrough. This action takes a provider id from the
+  // client, and every id that reaches the exchange below must be one we
+  // deliberately support on this path — an OAuth provider arriving here should
+  // be refused, not handed PM-entered credentials.
+  if (providerId !== 'hostaway') {
+    return { error: `${providerId} isn't available to connect yet.` }
+  }
 
-  return { error: `${providerId} isn't available to connect yet.` }
+  try {
+    const accountId = credentials.accountId?.trim()
+    const apiKey    = credentials.apiKey?.trim()
+    if (!accountId || !apiKey) {
+      return { error: 'Account ID and API Key are both required' }
+    }
+
+    const { accessToken, expiresAt, externalUserId } =
+      await hostawayExchangeCredentials(accountId, apiKey)
+
+    await storeIntegrationToken({
+      userId:         user.id,
+      providerId,
+      accessToken,
+      externalUserId,
+      metadata:       { last_sync_status: 'pending' },
+    })
+
+    // Link to the org and record expiry — storeIntegrationToken knows about
+    // neither. linkConnectionToOrg owns the tenant boundary (it can claim an
+    // unowned or already-ours row and never one belonging to a different org
+    // this user also belongs to), shared with the OAuth callback so the rule
+    // lives in one place rather than being mirrored here by convention.
+    const admin  = createServiceClient({ authorizedBy: membership })
+    const linked = await linkConnectionToOrg({
+      admin,
+      userId:     user.id,
+      providerId,
+      orgId:      membership.org_id,
+      expiresAt,
+    })
+
+    if (!linked) {
+      // The row exists and belongs to another org this user is also a member
+      // of. Do NOT fire a sync attributed to this org — it would look for a
+      // token the connection does not hold.
+      return { error: 'That Hostaway account is already connected to a different organization.' }
+    }
+
+    // provider_id only — never the Account ID, and obviously never the key.
+    // Audit rows are meant to be readable by staff investigating an incident,
+    // not a second home for a credential.
+    await logAuditEvent({
+      orgId:    membership.org_id,
+      actorId:  user.id,
+      action:   'integration.connected',
+      metadata: { provider_id: providerId },
+    })
+
+    const { inngest } = await import('@/lib/inngest/client')
+    await inngest.send({
+      name: 'integration/hostaway.sync.requested',
+      data: {
+        user_id:     user.id,
+        org_id:      membership.org_id,
+        provider_id: providerId,
+        full_sync:   true,
+      },
+    })
+
+    revalidatePath('/settings/integrations')
+    return { success: true, externalUserId }
+  } catch (err) {
+    // Never surface the provider's error text: hostawayExchangeCredentials
+    // includes the response body in its message, and that body is echoed
+    // credentials often enough to matter.
+    const msg = err instanceof Error ? err.message : 'Connection failed'
+    reportError(err, { site: 'serverAction.settings.integrations.connectWithApiKey', orgId: membership.org_id })
+    if (msg.includes('401') || msg.includes('403') || msg.toLowerCase().includes('invalid')) {
+      return { error: 'Invalid credentials — check your Account ID and API Key.' }
+    }
+    return { error: 'Connection failed. Please try again or contact support.' }
+  }
 }

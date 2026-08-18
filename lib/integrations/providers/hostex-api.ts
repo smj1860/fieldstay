@@ -36,7 +36,7 @@ import 'server-only'
 import { NonRetriableError } from 'inngest'
 
 import { RateLimitError } from '@/lib/integrations/types'
-import { checkLimit, hostexApiLimiter, hostexApiHourlyLimiter } from '@/lib/rate-limit'
+import { checkLimit, hostexApiLimiter, hostexApiHourlyLimiter, outboundBackoffSeconds } from '@/lib/rate-limit'
 import { PMS_API_TIMEOUT_MS } from '@/lib/http/timeout'
 import {
   hostexProvider,
@@ -174,8 +174,16 @@ export async function hostexFetch<T>(
     })
 
     if (!budget.allowed) {
-      const baseSeconds = Math.max(1, Math.ceil((budget.reset - Date.now()) / 1000))
-      throw new RateLimitError(withRetryJitter(baseSeconds))
+      // outboundBackoffSeconds rather than a bare `reset` subtraction: when the
+      // limiter itself ERRORS, checkLimit sets reset to Date.now(), so that
+      // subtraction floors to 1s and we would retry a provider immediately
+      // during the very outage that made the budget unreadable. Same fix as
+      // hospitableFetch and krogerFetch — see that helper's doc comment.
+      //
+      // jitter:false because withRetryJitter below is this module's own spread
+      // (0.75-1.25x, deliberately different from the shared 1.0-1.5x) and
+      // applying both would compound them.
+      throw new RateLimitError(withRetryJitter(outboundBackoffSeconds(budget, { jitter: false })))
     }
   }
 

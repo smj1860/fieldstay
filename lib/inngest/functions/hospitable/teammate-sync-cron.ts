@@ -15,7 +15,7 @@
 // ============================================================
 
 import { inngest } from '@/lib/inngest/client'
-import { dispatchPerHospitableConnection } from './connection-dispatch'
+import { dispatchPerProviderConnection } from '../shared/connection-dispatch'
 
 export const hospTeammateSyncCron = inngest.createFunction(
   {
@@ -31,9 +31,10 @@ export const hospTeammateSyncCron = inngest.createFunction(
   // changed. Step ids ('fetch-active-connections', 'dispatch-teammate-sync-
   // events') are unchanged, so a run in flight across the deploy resumes.
   async ({ step, logger }) =>
-    dispatchPerHospitableConnection({
+    dispatchPerProviderConnection({
       step,
       logger,
+      provider:       'hospitable',
       system:         'inngest:teammate-sync-cron',
       label:          'hospitable-teammate-sync-cron.connections',
       dispatchStepId: 'dispatch-teammate-sync-events',

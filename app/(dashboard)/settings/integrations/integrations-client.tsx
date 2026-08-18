@@ -21,26 +21,22 @@ const API_KEY_PROVIDER_FIELDS: Record<string, {
   description: string
   fields: Array<{ key: string; label: string; placeholder: string; sensitive?: boolean }>
 }> = {
-  // Hostaway is not fully implemented yet — its sync never fires
-  // booking/confirmed (see ops/page.tsx's REVENUE_AUTOMATION_PROVIDER_IDS
-  // comment), so a connected org would get properties/bookings synced in
-  // with no automatic revenue posting. Hidden until that lands.
-  // hostaway: {
-  //   description: 'Syncs your Hostaway listings and reservations automatically.',
-  //   fields: [
-  //     {
-  //       key:         'accountId',
-  //       label:       'Account ID',
-  //       placeholder: 'Find in Settings → Hostaway API',
-  //     },
-  //     {
-  //       key:         'apiKey',
-  //       label:       'API Key',
-  //       placeholder: 'Your Hostaway secret API key',
-  //       sensitive:   true,
-  //     },
-  //   ],
-  // },
+  hostaway: {
+    description: 'Syncs your Hostaway listings and reservations, and posts booking revenue to owner ledgers automatically.',
+    fields: [
+      {
+        key:         'accountId',
+        label:       'Account ID',
+        placeholder: 'Find in Settings → Hostaway API',
+      },
+      {
+        key:         'apiKey',
+        label:       'API Key',
+        placeholder: 'Your Hostaway secret API key',
+        sensitive:   true,
+      },
+    ],
+  },
   // Guesty is not yet wired — hidden until the integration is live.
   // guesty: {
   //   description: 'Syncs your Guesty listings and reservations automatically.',
@@ -64,20 +60,15 @@ const API_KEY_PROVIDER_FIELDS: Record<string, {
 const PROVIDER_DESCRIPTIONS: Record<string, string> = {
   ownerrez:   'Syncs bookings, properties, and guest reviews. Enables automatic revenue posting to owner ledgers.',
   hospitable: 'Syncs properties, reservations, and crew from your Hospitable account.',
-  // Hostaway is not fully implemented yet — hidden until it posts revenue
-  // automatically like the other PMS integrations. See HIDDEN_PROVIDER_IDS.
-  // hostaway: 'Connects your Hostaway account to sync all listings and reservations in real time.',
+  hostaway:   'Syncs properties, reservations and booking revenue from your Hostaway account. Updates once daily — Hostaway webhooks are not wired yet, so a change made there can take up to 24 hours to appear.',
   // Guesty is not yet wired — hidden until the integration is live.
   // guesty:   'Connects your Guesty account to sync all listings and reservations in real time.',
   hostex:     'Syncs properties and reservations from your Hostex account. Posts booking revenue to owner ledgers automatically.',
   kroger:     "Builds Kroger grocery carts automatically from below-par inventory items. Works with any nearby Kroger-owned store — Kroger, Ralphs, Fred Meyer, King Soopers, Smith's, Fry's, QFC, City Market, Dillons, Baker's, Gerbes, Harris Teeter, Mariano's, Pick 'n Save, Metro Market, Food 4 Less, and Foods Co.",
 }
 
-// Providers not yet wired (or not fully implemented) — excluded from the
-// rendered list until live. Hostaway's sync never fires booking/confirmed
-// (see ops/page.tsx's REVENUE_AUTOMATION_PROVIDER_IDS comment) — hidden so
-// nobody connects it expecting automatic revenue posting.
-const HIDDEN_PROVIDER_IDS = new Set<string>(['guesty', 'hostaway'])
+// Providers not yet wired — excluded from the rendered list until live.
+const HIDDEN_PROVIDER_IDS = new Set<string>(['guesty'])
 
 interface Provider {
   id:           string
@@ -288,14 +279,13 @@ function CredentialModalContent({
       </div>
 
       {/* Where to find credentials — provider-specific help text */}
-      {/* Hostaway is not fully implemented yet — hidden until it posts
-      revenue automatically like the other PMS integrations.
       {providerId === 'hostaway' && (
         <p className="text-xs mt-4" style={{ color: 'var(--text-muted)' }}>
           Find these in your Hostaway dashboard under{' '}
           <strong>Settings → Hostaway API → Create</strong>. The key is only shown once — save it securely.
+          FieldStay exchanges it once for an access token and never stores the key itself.
         </p>
-      )} */}
+      )}
       {/* Guesty is not yet wired — hidden until the integration is live.
       {providerId === 'guesty' && (
         <p className="text-xs mt-4" style={{ color: 'var(--text-muted)' }}>

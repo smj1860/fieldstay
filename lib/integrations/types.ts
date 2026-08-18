@@ -312,6 +312,41 @@ export class RateLimitError extends Error {
 }
 
 /**
+ * A provider answered 401/403 on a data endpoint: the credential is not
+ * entitled to what we asked for. TERMINAL — retrying cannot change the answer,
+ * only a reconnect can.
+ *
+ * Distinct from TokenRevokedError, which means the whole grant is gone. This
+ * one is per-ENDPOINT and its most common cause is a missing SCOPE: Hospitable
+ * (and OwnerRez) configure scopes in the partner portal rather than in the
+ * authorize URL, so a connection created before a scope was added keeps working
+ * everywhere except the endpoints that scope covers. hospFetchTeammates already
+ * open-coded exactly this case for 403 + teammate:read.
+ *
+ * Why it exists as a type rather than a string check: on 2026-08-17 a 401 from
+ * GET /reservations/{uuid}/messages was thrown as a plain Error, so Inngest
+ * burned all 5 retries on a call that could never succeed and then reported
+ * "exhausted all retries" to Sentry. Five doomed calls against an API that was
+ * ALREADY 429ing us (confirmed in Hospitable's own partner API log the same
+ * hour) — the retry storm was feeding the rate limiting it was tangled up with.
+ */
+export class ProviderAuthError extends Error {
+  constructor(
+    public readonly providerLabel: string,
+    public readonly status:        number,
+    public readonly endpoint:      string,
+    detail:                        string = '',
+  ) {
+    super(
+      `${providerLabel} denied ${endpoint} (${status})` +
+      (detail ? `: ${detail}` : '') +
+      ' — the connection is missing a required scope or its access was revoked; reconnect required'
+    )
+    this.name = 'ProviderAuthError'
+  }
+}
+
+/**
  * Thrown when a provider adapter can't even attempt a call because our own
  * server-side credentials (CLIENT_ID/CLIENT_SECRET env vars) are missing —
  * an operational misconfiguration, never something the end user caused or
@@ -340,6 +375,12 @@ export function translateSyncError(err: unknown, providerLabel: string = 'OwnerR
   }
   if (err instanceof TokenRevokedError) {
     return `${providerLabel} authorization expired — reconnect your account to resume syncing`
+  }
+  if (err instanceof ProviderAuthError) {
+    // Named before the generic '401'/'403' substring checks below so the
+    // endpoint-specific wording survives; those checks stay for the many
+    // adapters still throwing plain Errors.
+    return `${providerLabel} denied access to part of your account — reconnect your account to resume syncing`
   }
   const msg = err instanceof Error ? err.message : String(err)
   const lower = msg.toLowerCase()

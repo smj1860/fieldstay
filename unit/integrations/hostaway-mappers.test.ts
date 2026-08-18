@@ -5,8 +5,9 @@ import {
   mapHostawayStatus,
   mapHostawayChannel,
   extractHostawayActualTotal,
+  hostawayReviewToNormalized,
 } from '@/lib/integrations/providers/hostaway.mappers'
-import type { HostawayListing, HostawayReservation } from '@/lib/integrations/providers/hostaway'
+import type { HostawayListing, HostawayReservation, HostawayReview } from '@/lib/integrations/providers/hostaway'
 
 // ============================================================================
 // The Hostaway mappers carry every judgment call in that integration. The sync
@@ -242,5 +243,93 @@ describe('hostawayReservationToNormalized', () => {
     const n = hostawayReservationToNormalized(reservation({ guestName: '  ', guestEmail: '' }))
     expect(n.guest_name).toBeNull()
     expect(n.guest_email).toBeNull()
+  })
+})
+
+// ── Reviews ──────────────────────────────────────────────────────────────────
+
+function review(over: Partial<HostawayReview> = {}): HostawayReview {
+  return {
+    id:               77,
+    listingMapId:     101,
+    type:             'guest-to-host',
+    status:           'published',
+    rating:           5,
+    publicReview:     'Spotless and easy check-in.',
+    revieweeResponse: null,
+    departureDate:    '2026-05-11 22:00:00',
+    guestName:        'Andrew Peterson',
+    ...over,
+  }
+}
+
+describe('hostawayReviewToNormalized: what is NOT storable', () => {
+  // reviews.rating and reviews.review_text are both NOT NULL, and Hostaway
+  // returns a row from the moment a review is SCHEDULED — rating and
+  // publicReview both null. Storing those needs invented values, and a
+  // fabricated 0-star review with empty text then gets handed to RepuGuard to
+  // draft a public reply to.
+  it('drops a scheduled review that has no rating or text yet', () => {
+    expect(hostawayReviewToNormalized(review({ status: 'awaiting', rating: null, publicReview: null }))).toBeNull()
+    expect(hostawayReviewToNormalized(review({ rating: null }))).toBeNull()
+    expect(hostawayReviewToNormalized(review({ publicReview: null }))).toBeNull()
+    expect(hostawayReviewToNormalized(review({ publicReview: '   ' }))).toBeNull()
+  })
+
+  it('guards on CONTENT rather than on the status name', () => {
+    // A status allowlist would have to be guessed, and would silently start
+    // dropping real reviews the first time Hostaway added a status. Anything
+    // carrying a rating and a body is storable whatever it is called.
+    const odd = hostawayReviewToNormalized(review({ status: 'expired' as never }))
+    expect(odd).not.toBeNull()
+    expect(odd!.review_text).toBe('Spotless and easy check-in.')
+  })
+
+  it('drops our own reviews of the guest', () => {
+    // host-to-guest is us reviewing them. Importing it would put our words in
+    // the reviews table and ask RepuGuard to reply to ourselves.
+    expect(hostawayReviewToNormalized(review({ type: 'host-to-guest' }))).toBeNull()
+  })
+
+  it('drops a cancelled review', () => {
+    expect(hostawayReviewToNormalized(review({ isCancelled: 1 }))).toBeNull()
+  })
+})
+
+describe('hostawayReviewToNormalized: mapping', () => {
+  it('keys on the review id and the listing it is about', () => {
+    const n = hostawayReviewToNormalized(review({ id: 77, listingMapId: 101 }))!
+    expect(n.external_id).toBe('77')
+    // reviews say listingMapId where reservations say listingId; both are the
+    // listing id that properties.external_id was written from.
+    expect(n.property_external_id).toBe('101')
+    expect(n.external_source).toBe('hostaway')
+  })
+
+  it("treats the host's reply as already-answered", () => {
+    // Keeps RepuGuard from drafting over a reply that already exists.
+    expect(hostawayReviewToNormalized(review())!.response_status).toBe('pending')
+    expect(hostawayReviewToNormalized(review({ revieweeResponse: 'Thanks!' }))!.response_status).toBe('posted')
+    expect(hostawayReviewToNormalized(review({ revieweeResponse: '  ' }))!.response_status).toBe('pending')
+  })
+
+  it("converts Hostaway's offset-less datetime to an ISO timestamp", () => {
+    const n = hostawayReviewToNormalized(review({ departureDate: '2026-05-11 22:00:00' }))!
+    expect(n.review_date).toBe('2026-05-11T22:00:00.000Z')
+  })
+
+  it('survives a missing or unparseable date rather than dropping the review', () => {
+    expect(hostawayReviewToNormalized(review({ departureDate: null }))!.review_date).toBeNull()
+    expect(hostawayReviewToNormalized(review({ departureDate: 'not a date' }))!.review_date).toBeNull()
+  })
+
+  it('never fabricates a review URL', () => {
+    // Hostaway has no confirmed per-review URL. A synthesised one would be a
+    // dead link in the reviews list.
+    expect(hostawayReviewToNormalized(review())!.external_url).toBeNull()
+  })
+
+  it('rounds a fractional rating, since reviews.rating is an integer column', () => {
+    expect(hostawayReviewToNormalized(review({ rating: 4.6 }))!.rating).toBe(5)
   })
 })

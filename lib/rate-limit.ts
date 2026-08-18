@@ -129,6 +129,49 @@ export function retryAfterSeconds(decision: LimitDecision): number {
   return Math.max(1, Math.ceil((decision.reset - Date.now()) / 1000))
 }
 
+/**
+ * How long an OUTBOUND provider call should wait after a denied budget check.
+ *
+ * Not the same question as retryAfterSeconds(), which answers "when does the
+ * window reset" for an inbound Retry-After header. Here the caller is about to
+ * back off a paid/limited third-party API, and the errored case is the one that
+ * matters: checkLimit() sets `reset` to Date.now() when the limiter THREW, so
+ * retryAfterSeconds() floors to 1 and the caller retries essentially
+ * immediately — hammering a provider during the exact outage that made the
+ * budget unreadable, with a fabricated retry-after that reads in logs like a
+ * real provider signal ("retry after 1s").
+ *
+ * So an errored decision gets a real, deliberate backoff instead. A genuinely
+ * exhausted window still gets its true remaining time.
+ *
+ * `jitter` (default true) spreads callers blocked by the SAME window so they
+ * don't all re-enter the budget on one tick and re-exhaust it instantly — the
+ * thundering herd that matters most when several orgs' syncs collide on a
+ * platform-wide budget. Pass false where the caller is already per-connection
+ * and the herd cannot form.
+ *
+ * Extracted from lib/kroger/client.ts, which was the ONLY one of the four
+ * outbound budgets to handle `errored` at all; hospitableFetch and hostexFetch
+ * both computed ~1s from the errored `reset` and are the reason this is shared
+ * rather than inlined a fifth time.
+ */
+export const ERRORED_BUDGET_BACKOFF_SECONDS = 60
+
+export function outboundBackoffSeconds(
+  decision: LimitDecision,
+  options:  { jitter?: boolean } = {},
+): number {
+  const base = decision.errored
+    ? ERRORED_BUDGET_BACKOFF_SECONDS
+    : retryAfterSeconds(decision)
+
+  if (options.jitter === false) return base
+
+  // eslint-disable-next-line no-restricted-properties -- retry jitter to de-synchronise blocked callers, not id/token generation
+  const factor = 1 + Math.random() * 0.5 // NOSONAR -- timing jitter only, not security-sensitive
+  return Math.ceil(base * factor)
+}
+
 export const repuguardLimiter = new Ratelimit({
   redis,
   limiter:   Ratelimit.slidingWindow(50, '24 h'),

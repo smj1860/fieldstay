@@ -37,6 +37,9 @@ vi.mock('@/lib/inngest/functions/shared/property-onboarding', () => ({
 vi.mock('@/lib/inngest/functions/hostaway/reservation-sync', () => ({
   syncHostawayReservations: vi.fn(),
 }))
+vi.mock('@/lib/inngest/functions/hostaway/reviews-sync', () => ({
+  syncHostawayReviews: vi.fn(),
+}))
 vi.mock('@/lib/integrations/connection-metadata', () => ({
   mergeIntegrationConnectionMetadata: vi.fn(),
 }))
@@ -50,6 +53,7 @@ import { hostawayFetchListings } from '@/lib/integrations/providers/hostaway'
 import { upsertNormalizedProperties } from '@/lib/properties/upsert-normalized'
 import { applyChecklistsToProperties, syncGuidebookForOrg } from '@/lib/inngest/functions/shared/property-onboarding'
 import { syncHostawayReservations } from '@/lib/inngest/functions/hostaway/reservation-sync'
+import { syncHostawayReviews } from '@/lib/inngest/functions/hostaway/reviews-sync'
 import { mergeIntegrationConnectionMetadata } from '@/lib/integrations/connection-metadata'
 import { invokeHandler } from './test-helpers'
 
@@ -92,6 +96,7 @@ beforeEach(() => {
   ])
   mock(upsertNormalizedProperties).mockResolvedValue({ '101': 'uuid-101', '102': 'uuid-102' })
   mock(syncHostawayReservations).mockResolvedValue({ reservationCount: 7, newTurnoverIds: [] })
+  mock(syncHostawayReviews).mockResolvedValue({ reviewCount: 3 })
   mock(mergeIntegrationConnectionMetadata).mockResolvedValue({})
 })
 
@@ -139,7 +144,7 @@ describe('hostawayInitialSync', () => {
   it('records success metadata with the counts the PM sees', async () => {
     const result = await run()
 
-    expect(result).toEqual({ properties: 2, reservations: 7 })
+    expect(result).toEqual({ properties: 2, reservations: 7, reviews: 3 })
     expect(mergeIntegrationConnectionMetadata).toHaveBeenCalledWith(
       expect.objectContaining({
         userId:     'user_1',
@@ -149,8 +154,31 @@ describe('hostawayInitialSync', () => {
           last_sync_error:  null,
           properties_found: 2,
           bookings_found:   7,
+          reviews_found:    3,
         }),
       }),
+    )
+  })
+
+  it('sweeps reviews over the same 12-month window as reservations', async () => {
+    await run()
+
+    const params = mock(syncHostawayReviews).mock.calls[0][0]
+    expect(params.historyMonths).toBe(12)
+    expect(params.propertyIdMap).toEqual({ '101': 'uuid-101', '102': 'uuid-102' })
+  })
+
+  it('still completes when the reviews import fails', async () => {
+    // Non-fatal on purpose: a PM whose reviews fail to import still has
+    // properties, bookings and turnovers, and the daily reconcile retries.
+    // Failing the whole sync here would throw all of that away.
+    mock(syncHostawayReviews).mockRejectedValue(new Error('Hostaway reviews fetch failed (500)'))
+
+    const result = await run()
+
+    expect(result).toEqual({ properties: 2, reservations: 7, reviews: 0 })
+    expect(mergeIntegrationConnectionMetadata).toHaveBeenCalledWith(
+      expect.objectContaining({ patch: expect.objectContaining({ last_sync_status: 'success' }) }),
     )
   })
 
@@ -160,7 +188,7 @@ describe('hostawayInitialSync', () => {
     const result = await run()
 
     expect(upsertNormalizedProperties).not.toHaveBeenCalled()
-    expect(result).toEqual({ properties: 0, reservations: 7 })
+    expect(result).toEqual({ properties: 0, reservations: 7, reviews: 3 })
   })
 
   it('fails NON-retriably when there is no token', async () => {

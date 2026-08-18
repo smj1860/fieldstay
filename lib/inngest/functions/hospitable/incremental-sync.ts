@@ -22,7 +22,7 @@ import type { GetStepTools }       from 'inngest'
 import { NonRetriableError }       from 'inngest'
 import { fetchTurnoverCreatedEvents } from '@/lib/inngest/turnover-created-events'
 import { createServiceClient }     from '@/lib/supabase/server'
-import { resolveHospitableOwner }  from '@/lib/integrations/providers/hospitable-owner'
+import { resolveHospitableOwner, type HospitableEntityKind } from '@/lib/integrations/providers/hospitable-owner'
 import { createHash } from 'crypto'
 import {
   hospitableFetch,
@@ -45,8 +45,123 @@ import {
 
 import { reportError } from '@/lib/observability/report-error'
 import { unwrap } from '@/lib/supabase/unwrap'
+import { RateLimitError, ProviderAuthError } from '@/lib/integrations/types'
 const HOSPITABLE_API_BASE = 'https://public.api.hospitable.com/v2'
 const PROVIDER            = 'hospitable'
+
+/** What a throttled attempt returns instead of throwing. See withProviderCall. */
+interface RateLimitedOutcome { __rateLimited: true; retryAfter: number }
+
+function isRateLimited(value: unknown): value is RateLimitedOutcome {
+  return typeof value === 'object' && value !== null && '__rateLimited' in value
+}
+
+/**
+ * Runs one provider-touching step with the two failure modes Hospitable
+ * actually produces handled explicitly, instead of both falling through to
+ * Inngest's generic retry policy.
+ *
+ * Background — the 2026-08-17 incident. Three separate comments in
+ * hospitable.ts and hospitable-owner.ts ASSERTED this function already did
+ * this ("the caller ... is set up to step.sleep and retry"). It did not: there
+ * was no RateLimitError handling and no step.sleep anywhere in this file. So:
+ *
+ *   - A 429 became a step failure, retried on Inngest's exponential backoff,
+ *     which is not aligned to Retry-After and re-runs the WHOLE step —
+ *     including, for the resolution step, re-probing EVERY candidate
+ *     connection. A rate-limit failure therefore issued MORE provider calls on
+ *     retry than the attempt that failed. Hospitable's own partner API log
+ *     showed the result: three GETs on one reservation inside 48 seconds, the
+ *     middle one a 429.
+ *   - A 401 on the messages endpoint burned all 5 retries and surfaced as
+ *     "exhausted all retries" in Sentry, five doomed calls against an API that
+ *     was rate-limiting us in the same minute.
+ *
+ * Both are fixed at the same place because they were the same mistake — letting
+ * the retry policy decide something the error type already knew.
+ *
+ * ⚠️ Why RateLimitError is RETURNED rather than thrown and caught outside:
+ * Inngest surfaces a step's error to surrounding code only AFTER that step has
+ * exhausted the function's retries. A try/catch around step.run therefore
+ * cannot prevent the retry storm — it observes it after the fact. Returning a
+ * decision from inside the step and doing the step tooling at the top level is
+ * the pattern CLAUDE.md prescribes for exactly this reason, and it is what
+ * makes the sleep happen INSTEAD of the retries rather than after them.
+ * (hospitable-reviews-backfill.ts's outer-catch version has the same latent
+ * gap; it is not on this incident's path and is left for its own change.)
+ *
+ * One extra attempt, not a loop: if honouring the provider's own interval still
+ * isn't enough, the budget is genuinely gone and Inngest's retries are the
+ * right next layer — so the second throttle is rethrown.
+ */
+async function withProviderCall<T>(
+  step: SyncStep,
+  id:   string,
+  run:  () => Promise<T>,
+): Promise<T> {
+  const attempt = async (): Promise<T | RateLimitedOutcome> => {
+    try {
+      return await run()
+    } catch (err) {
+      // Terminal: a missing scope or a revoked grant. Retrying cannot change
+      // the answer, so opt this step out of the retry policy entirely.
+      if (err instanceof ProviderAuthError) throw new NonRetriableError(err.message)
+      if (err instanceof RateLimitError)    return { __rateLimited: true, retryAfter: err.retryAfter }
+      throw err
+    }
+  }
+
+  const first = await step.run(id, attempt) as T | RateLimitedOutcome
+  if (!isRateLimited(first)) return first
+
+  await step.sleep(`${id}-rate-limit-sleep`, `${first.retryAfter}s`)
+
+  const second = await step.run(`${id}-retry`, attempt) as T | RateLimitedOutcome
+  if (!isRateLimited(second)) return second
+
+  throw new RateLimitError(second.retryAfter)
+}
+
+/** The shape every branch's skip path returns. */
+function noActiveConnection(entityId: string) {
+  return { skipped: true, reason: 'no_active_connection', entity_id: entityId }
+}
+
+/**
+ * Resolves the org and a token for one entity, or null when no connected
+ * account owns it.
+ *
+ * The reservation and review branches had this written out identically — 18
+ * duplicated lines differing only in `entityKind` and one word of the log
+ * message (SonarQube flagged it as self-duplication within this file). That is
+ * three places for one contract to drift: "no owner resolved" must SKIP, never
+ * fall through to a fetch with an arbitrary connection's token, which is the
+ * misattribution hazard resolveHospitableOwner exists to prevent.
+ *
+ * syncProperty keeps its own copy on purpose — it additionally computes
+ * isNewProperty against the resolved org inside the same step, and folding
+ * that in would mean a parameter that only one caller ever uses.
+ */
+async function resolveOwnerOrSkip(
+  step:           SyncStep,
+  logger:         SyncLogger,
+  entityKind:     HospitableEntityKind,
+  entityId:       string,
+  externalUserId: string | undefined,
+): Promise<{ orgId: string; token: string } | null> {
+  const resolved = await withProviderCall(step, 'resolve-org-and-token', async () => {
+    const owner = await resolveHospitableOwner({ entityKind, externalId: entityId, externalUserId })
+    if (!owner) return { skipped: true as const }
+    return { skipped: false as const, orgId: owner.orgId, token: owner.token }
+  })
+
+  if (resolved.skipped) {
+    logger.info(`[Hospitable incremental] Skipping ${entityKind} ${entityId} — no active Hospitable connection`)
+    return null
+  }
+
+  return { orgId: resolved.orgId, token: resolved.token }
+}
 
 // Reservation `triggers` values that don't correspond to anything
 // NormalizedBooking/the `bookings` table stores:
@@ -80,11 +195,22 @@ export const hospIncrementalSync = inngest.createFunction(
     // exhausting the budget must not permanently drop a real webhook.
     retries:     5,
     // Per-entity concurrency prevents duplicate work on the same id. The
-    // second, unkeyed limit is a PLATFORM cap: without it, 100 orgs' webhooks
+    // first, unkeyed limit is a PLATFORM cap: without it, 100 orgs' webhooks
     // fan out unbounded against one shared Hospitable rate-limit budget.
+    //
+    // The per-entity limit is 1, not 2. At 2 this comment was simply false —
+    // two invocations for ONE reservation ran simultaneously, each doing its
+    // own ownership probe and its own fetch. GET /reservations/{id}/messages
+    // is capped by Hospitable at 2 requests/minute PER RESERVATION, so a
+    // single pair of concurrent invocations could spend that entire minute's
+    // budget before any retry was involved, and duplicate work was exactly
+    // what the second slot bought. Hospitable's partner API log on 2026-08-17
+    // showed three GETs on one reservation inside 48 seconds with a 429 in the
+    // middle. There is no throughput argument for the second slot: the two
+    // invocations are racing to write the same row.
     concurrency: [
       { limit: 8 },
-      { limit: 2, key: 'event.data.entity_id' },
+      { limit: 1, key: 'event.data.entity_id' },
     ],
   },
   { event: 'integration/hospitable.sync.requested' as const },
@@ -156,26 +282,12 @@ async function syncReservation(
   // active connection here. Hospitable's webhooks carry no account id, so
   // "any active connection" silently misattributes every new reservation
   // once a second org is connected. See hospitable-owner.ts.
-  const resolved = await step.run('resolve-org-and-token', async () => {
-    const owner = await resolveHospitableOwner({
-      entityKind:     'reservation',
-      externalId:     entityId,
-      externalUserId,
-    })
-
-    if (!owner) return { skipped: true as const }
-
-    return { skipped: false as const, orgId: owner.orgId, token: owner.token }
-  })
-
-  if (resolved.skipped) {
-    logger.info(`[Hospitable incremental] Skipping reservation ${entityId} — no active Hospitable connection`)
-    return { skipped: true, reason: 'no_active_connection', entity_id: entityId }
-  }
+  const resolved = await resolveOwnerOrSkip(step, logger, 'reservation', entityId, externalUserId)
+  if (!resolved) return noActiveConnection(entityId)
 
   const { orgId, token } = resolved
 
-  const reservation = await step.run('fetch-reservation', async () => {
+  const reservation = await withProviderCall(step, 'fetch-reservation', async () => {
     // financials is speculative — gated on the not-yet-granted
     // financials:read scope, see HospitableReservation.financials.
     const res = await hospitableFetch(
@@ -412,7 +524,7 @@ async function syncProperty(
 
   // See the reservation branch — ownership must come from
   // resolveHospitableOwner(), never from an arbitrary active connection.
-  const resolved = await step.run('resolve-org-and-token', async () => {
+  const resolved = await withProviderCall(step, 'resolve-org-and-token', async () => {
     const owner = await resolveHospitableOwner({
       entityKind:     'property',
       externalId:     entityId,
@@ -459,7 +571,7 @@ async function syncProperty(
 
   const { orgId, token, isNewProperty } = resolved
 
-  const fetchAndUpsertResult = await step.run('fetch-and-upsert-property', async () => {
+  const fetchAndUpsertResult = await withProviderCall(step, 'fetch-and-upsert-property', async () => {
     // bookings is speculative — see HospitableProperty.bookings.
     const res = await hospitableFetch(
       `${HOSPITABLE_API_BASE}/properties/${entityId}?include=details,bookings`,
@@ -586,28 +698,14 @@ async function syncReview(
   // resolveHospitableOwner(), never from an arbitrary active connection.
   // The downstream property_id resolution already scopes to this orgId,
   // so a correct org here is load-bearing for review attribution too.
-  const resolved = await step.run('resolve-org-and-token', async () => {
-    const owner = await resolveHospitableOwner({
-      entityKind:     'review',
-      externalId:     entityId,
-      externalUserId,
-    })
-
-    if (!owner) return { skipped: true as const }
-
-    return { skipped: false as const, orgId: owner.orgId, token: owner.token }
-  })
-
-  if (resolved.skipped) {
-    logger.info(`[Hospitable incremental] Skipping review ${entityId} — no active Hospitable connection`)
-    return { skipped: true, reason: 'no_active_connection', entity_id: entityId }
-  }
+  const resolved = await resolveOwnerOrSkip(step, logger, 'review', entityId, externalUserId)
+  if (!resolved) return noActiveConnection(entityId)
 
   const { orgId, token } = resolved
 
   // Fetch review and upsert using live reviews table schema:
   //   guest_name, review_text, rating (NOT NULL), review_date, property_id (UUID FK)
-  const upsertResult = await step.run('fetch-and-upsert-review', async () => {
+  const upsertResult = await withProviderCall(step, 'fetch-and-upsert-review', async () => {
     const res = await hospitableFetch(
       `${HOSPITABLE_API_BASE}/reviews/${entityId}`,
       token
@@ -724,7 +822,7 @@ async function syncMessages(
   // entityId here is the RESERVATION id (see handleWebhookEvent's
   // message.created case), so ownership resolves as a reservation. Same
   // rule as every other branch: never pick an arbitrary active connection.
-  const resolved = await step.run('resolve-org-booking-and-token', async () => {
+  const resolved = await withProviderCall(step, 'resolve-org-booking-and-token', async () => {
     const owner = await resolveHospitableOwner({
       entityKind:     'reservation',
       externalId:     entityId,
@@ -764,7 +862,7 @@ async function syncMessages(
     return { skipped: true, reason: 'no_active_connection', entity_id: entityId }
   }
 
-  const upsertCount = await step.run('fetch-and-upsert-messages', async () => {
+  const upsertCount = await withProviderCall(step, 'fetch-and-upsert-messages', async () => {
     const messages = await hospFetchReservationMessages(resolved.token, entityId)
     if (messages.length === 0) return 0
 

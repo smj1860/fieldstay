@@ -5,6 +5,7 @@ import { renderTrialExpiringEmail } from '@/emails/trial-expiring'
 import { renderTrialExpiredEmail }  from '@/emails/trial-expired'
 import { resolveEmailAudience, commercialPostalAddress } from '@/lib/email/unsubscribe'
 import { tryUnwrap, unwrap } from '@/lib/supabase/unwrap'
+import { PMS_PROVIDER_IDS, pmsDisplayName } from '@/lib/integrations/registry'
 
 /**
  * Has this org stopped being a trial? If so the rest of the sequence must not
@@ -73,17 +74,27 @@ export const handleTrialLifecycle = inngest.createFunction(
     await step.run('send-trial-expiring-email', async () => {
       const supabase = createServiceClient({ system: 'inngest:email-trial-lifecycle' })
 
+      // ANY connected PMS, not just OwnerRez. This read used to be
+      // `.eq('provider_id', 'ownerrez')`, so every Hospitable and Hostex org
+      // was told in this email to go connect a PMS they had already connected
+      // — and the copy named the wrong product while doing it. Ordered so the
+      // name shown is deterministic when an org has connected two.
       const integrationRes = await supabase
         .from('integration_connections')
-        .select('id')
+        .select('provider_id')
         .eq('org_id', org_id)
-        .eq('provider_id', 'ownerrez')
+        .eq('status', 'active')
+        .in('provider_id', PMS_PROVIDER_IDS)
+        .order('provider_id')
+        .limit(1)
         .maybeSingle()
       const integrationOut = tryUnwrap(integrationRes, {
         site:  'inngest.email-trial-lifecycle.send-trial-expiring-email',
         orgId: org_id,
       })
-      const integration = integrationOut.ok ? integrationOut.data : null
+      const connectedPmsName = integrationOut.ok && integrationOut.data
+        ? pmsDisplayName(integrationOut.data.provider_id)
+        : null
 
       const { count: propertyCount } = await supabase
         .from('properties')
@@ -98,7 +109,7 @@ export const handleTrialLifecycle = inngest.createFunction(
           month: 'long', day: 'numeric', year: 'numeric',
         }),
         propertyCount:     propertyCount ?? 0,
-        ownerRezConnected: !!integration,
+        connectedPmsName,
         subscribeUrl:      `${appUrl}/settings?tab=billing`,
       })
 

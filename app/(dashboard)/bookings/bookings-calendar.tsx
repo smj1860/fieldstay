@@ -57,6 +57,7 @@ function getSyncOriginLabel(b: Pick<BookingRow, 'external_source' | 'ical_feed_i
   if (b.external_source === 'hospitable') return 'Hospitable'
   if (b.external_source === 'ownerrez')   return 'OwnerRez'
   if (b.external_source === 'hostex')     return 'Hostex'
+  if (b.external_source === 'hostaway')   return 'Hostaway'
   if (b.ical_feed_id !== null)            return 'iCal'
   return null
 }

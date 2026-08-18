@@ -18,6 +18,13 @@ vi.mock('@/lib/integrations/vault', () => ({
   // separately (Hostex) can revoke both — see revokeAccessToken's contract.
   readIntegrationRefreshToken: vi.fn(),
   disconnectIntegrationToken:  vi.fn(),
+  storeIntegrationToken:       vi.fn(),
+}))
+vi.mock('@/lib/integrations/providers/hostaway', () => ({
+  hostawayExchangeCredentials: vi.fn(),
+}))
+vi.mock('@/lib/integrations/finalize-connection', () => ({
+  linkConnectionToOrg: vi.fn(async () => true),
 }))
 vi.mock('@/lib/integrations/registry', () => ({
   getProvider: vi.fn(),
@@ -48,6 +55,7 @@ import {
   disconnectIntegration,
   connectWithApiKey,
 } from '@/app/(dashboard)/settings/integrations/actions'
+import { hostawayExchangeCredentials } from '@/lib/integrations/providers/hostaway'
 import { requireOrgMember } from '@/lib/auth'
 import { createServiceClient } from '@/lib/supabase/server'
 import { logAuditEvent } from '@/lib/audit'
@@ -255,6 +263,22 @@ describe('settings/integrations/actions', () => {
     })
 
     it('returns an error for an unsupported provider without touching Inngest', async () => {
+      // 'guesty' rather than 'hostaway': Hostaway IS supported now, and a test
+      // asserting otherwise would pass forever by naming a provider that had
+      // simply been implemented since. Guesty is the current unwired one.
+      mockAuthed('admin')
+      const supabase = makeSupabase({
+        integration_connections: [{ data: { user_id: USER_ID, org_id: ORG_ID, external_user_id: null, status: 'connected' }, error: null }],
+      })
+      vi.mocked(createServiceClient).mockReturnValue(supabase as never)
+
+      const result = await triggerResync('guesty')
+
+      expect(result).toEqual({ error: "Resync isn't supported for guesty yet." })
+      expect(inngest.send).not.toHaveBeenCalled()
+    })
+
+    it('re-fires the Hostaway initial sync, which re-reads listings as well as reservations', async () => {
       mockAuthed('admin')
       const supabase = makeSupabase({
         integration_connections: [{ data: { user_id: USER_ID, org_id: ORG_ID, external_user_id: null, status: 'connected' }, error: null }],
@@ -263,8 +287,11 @@ describe('settings/integrations/actions', () => {
 
       const result = await triggerResync('hostaway')
 
-      expect(result).toEqual({ error: "Resync isn't supported for hostaway yet." })
-      expect(inngest.send).not.toHaveBeenCalled()
+      expect(result).toEqual({ success: true })
+      expect(inngest.send).toHaveBeenCalledWith({
+        name: 'integration/hostaway.sync.requested',
+        data: { user_id: USER_ID, org_id: ORG_ID, provider_id: 'hostaway', full_sync: true },
+      })
     })
   })
 
@@ -440,12 +467,39 @@ describe('settings/integrations/actions', () => {
       await expect(connectWithApiKey('hostaway', { accountId: '1', apiKey: 'k' })).rejects.toThrow('REDIRECT:/login')
     })
 
-    it('is disabled for every provider — Hostaway credential exchange is commented out pending initial-sync support', async () => {
+    it('refuses any provider other than Hostaway, without attempting an exchange', async () => {
+      // An allowlist, not a fallthrough: this action takes a provider id from
+      // the client, and an OAuth provider arriving here must be refused rather
+      // than handed PM-entered credentials.
       mockAuthed('admin')
+
+      const result = await connectWithApiKey('hospitable', { accountId: '1', apiKey: 'k' })
+
+      expect(result).toEqual({ error: "hospitable isn't available to connect yet." })
+      expect(hostawayExchangeCredentials).not.toHaveBeenCalled()
+    })
+
+    it('rejects missing credentials before calling Hostaway', async () => {
+      mockAuthed('admin')
+
+      const result = await connectWithApiKey('hostaway', { accountId: '  ', apiKey: '' })
+
+      expect(result).toEqual({ error: 'Account ID and API Key are both required' })
+      expect(hostawayExchangeCredentials).not.toHaveBeenCalled()
+    })
+
+    it('never leaks the provider error text to the client', async () => {
+      // hostawayExchangeCredentials puts the response body in its message, and
+      // that body echoes the submitted credentials often enough to matter.
+      mockAuthed('admin')
+      vi.mocked(hostawayExchangeCredentials).mockRejectedValue(
+        new Error('Hostaway token exchange failed (401): {"client_secret":"sk_live_abcdef"}'),
+      )
 
       const result = await connectWithApiKey('hostaway', { accountId: '1', apiKey: 'k' })
 
-      expect(result).toEqual({ error: "hostaway isn't available to connect yet." })
+      expect(result).toEqual({ error: 'Invalid credentials — check your Account ID and API Key.' })
+      expect(JSON.stringify(result)).not.toContain('sk_live_abcdef')
     })
   })
 })

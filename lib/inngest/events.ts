@@ -804,6 +804,22 @@ export type FieldStayEvents = {
     }
   }
 
+  /**
+   * One per active connection, dispatched by hostawayReservationReconcileCron.
+   *
+   * org_id is REQUIRED, not optional: the handler scopes every read and write
+   * by it, and the cron already filters `org_id IS NOT NULL` so a connection
+   * without one is never dispatched rather than arriving here as an empty
+   * string to be discovered later.
+   */
+  'integration/hostaway.reservation_reconcile.requested': {
+    data: {
+      user_id:          string
+      org_id:           string
+      external_user_id: string
+    }
+  }
+
   // ----------------------------------------------------------
   // Work Order Invoices (CLAUDE_58_0)
   // ----------------------------------------------------------

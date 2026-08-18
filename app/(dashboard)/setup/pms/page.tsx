@@ -1,3 +1,4 @@
+import { PMS_PROVIDER_IDS } from '@/lib/integrations/registry'
 import { Check }                from 'lucide-react'
 import { requireOrgMember }    from '@/lib/auth'
 import { createServiceClient } from '@/lib/supabase/server'
@@ -7,15 +8,13 @@ import { Badge }                from '@/components/ui/Badge'
 import { Button, buttonVariantClass } from '@/components/ui/Button'
 import { throwIfAnyQueryFailed } from '@/lib/supabase/unwrap'
 
-// All PMS provider IDs — excludes non-PMS integrations (e.g. kroger, repuguard)
-// 'guesty' is commented out: it's registered as oauth2 in integration_providers but
-// not yet wired into lib/integrations/registry.ts or connectWithApiKey() — the
-// Connect button would 404. Re-add once that backend support lands.
-// 'hostaway' is commented out: its sync never fires booking/confirmed (see
-// ops/page.tsx's REVENUE_AUTOMATION_PROVIDER_IDS comment), so a connected org
-// would get properties/bookings synced in with no automatic revenue posting.
-// Re-add once lib/inngest/functions/hostaway/initial-sync.ts posts revenue.
-const PMS_PROVIDER_IDS = ['ownerrez', 'hospitable', 'hostex' /* , 'hostaway', 'guesty' */] as const
+// Sourced from lib/integrations/registry.ts rather than redeclared. This file
+// used to keep its own copy, as did ops/page.tsx and email-trial-lifecycle.tsx,
+// and the three had drifted — see the comment on PMS_PROVIDER_IDS there.
+//
+// 'guesty' is deliberately absent from that list: it is registered as oauth2 in
+// integration_providers but is not in the registry map, so a Connect button
+// would 404.
 
 export default async function OnboardingPmsPage() {
   const { membership } = await requireOrgMember()

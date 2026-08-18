@@ -153,7 +153,8 @@ async function rememberOwner(
  * from resolveHospitableOwner() to keep its own cognitive complexity down;
  * candidate order is the caller's job (most-likely-owner first).
  *
- * @throws RateLimitError  propagated so the caller can step.sleep and retry.
+ * @throws RateLimitError  propagated so the caller can step.sleep and retry
+ *                         (hospIncrementalSync does this via withProviderCall).
  */
 async function probeConnections(
   entityKind: HospitableEntityKind,
@@ -174,10 +175,18 @@ async function probeConnections(
     try {
       res = await hospitableFetch(probeUrl(entityKind, externalId), token)
     } catch (err) {
-      // RateLimitError must still bubble — the caller (resolveHospitableOwner's
-      // caller, hospIncrementalSync) is set up to step.sleep and retry the
-      // whole resolution on it, which is correct: a genuine budget exhaustion
-      // affects every candidate equally, so skipping ahead wouldn't help.
+      // RateLimitError must still bubble — hospIncrementalSync's
+      // withProviderCall() sleeps for the provider's own Retry-After and
+      // retries the whole resolution, which is correct: a genuine budget
+      // exhaustion affects every candidate equally, so skipping ahead wouldn't
+      // help.
+      //
+      // ⚠️ That handling did NOT exist when this comment was first written,
+      // and the gap cost a production incident on 2026-08-17 — see
+      // withProviderCall's header. Re-probing every candidate is precisely
+      // what makes a rate-limited retry more expensive than the attempt that
+      // failed, so this comment is load-bearing: if the caller ever stops
+      // honouring Retry-After, this throw becomes an amplifier again.
       throw err
     }
 
@@ -212,7 +221,8 @@ async function probeConnections(
  * entity. Returns null when no connected account owns it (disconnected org,
  * entity belongs to a non-customer, or entity was deleted provider-side).
  *
- * @throws RateLimitError  propagated so the caller can step.sleep and retry.
+ * @throws RateLimitError  propagated so the caller can step.sleep and retry
+ *                         (hospIncrementalSync does this via withProviderCall).
  * @throws Error           on unexpected provider/database failure — the caller
  *                         MUST let Inngest retry rather than guessing an org.
  */
