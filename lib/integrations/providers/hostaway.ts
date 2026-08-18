@@ -264,18 +264,31 @@ export async function hostawayFetchListings(
  * Fetch all reservations from Hostaway with pagination.
  * Fetches from 90 days ago through far future to capture recent history.
  */
+/**
+ * What to filter GET /reservations by. A discriminated union because the two
+ * ask genuinely different questions and must not be confused:
+ *
+ *   arrivalFrom   — "stays arriving on or after D". Backfill and the daily
+ *                   reconcile: the axis an owner P&L and a turnover schedule
+ *                   are built along.
+ *   activitySince — "reservations CHANGED on or after D". The incremental
+ *                   sync: a cancellation of a stay six months out is invisible
+ *                   to an arrival filter anchored near today, and that is
+ *                   exactly the change worth hearing about within the hour.
+ */
+export type HostawayReservationFilter =
+  | { kind: 'arrivalFrom';   date: string }
+  | { kind: 'activitySince'; date: string }
+
 export async function hostawayFetchReservations(
-  token: string,
-  since?: string   // ISO date string — for incremental sync
+  token:  string,
+  filter: HostawayReservationFilter,
 ): Promise<HostawayReservation[]> {
   const reservations: HostawayReservation[] = []
   const LIMIT  = 100
   let   offset = 0
   let pageCount = 0
   const MAX_PAGES = 200
-
-  const fromDate = since
-    ?? new Date(Date.now() - 90 * 86_400_000).toISOString().split('T')[0]
 
   while (true) {
     pageCount++
@@ -286,11 +299,25 @@ export async function hostawayFetchReservations(
       )
     }
 
+    // ⚠️ `dateFrom` was what this sent, and it is NOT a parameter Hostaway's
+    // GET /reservations accepts — the documented filters are arrivalStartDate /
+    // arrivalEndDate, departureStartDate / departureEndDate and
+    // latestActivityStart / latestActivityEnd. An unrecognised query parameter
+    // is ignored, not rejected, so every call silently fetched the endpoint's
+    // DEFAULT set: the initial sync's "12 months of history" and the reconcile's
+    // "1 month back" were both fictions, and the reconcile re-read the whole
+    // account daily. Nothing broke visibly because the error direction was MORE
+    // data than asked for — until MAX_PAGES, where it becomes a hard failure on
+    // a large account.
     const params = new URLSearchParams({
       limit:     String(LIMIT),
       offset:    String(offset),
-      sortOrder: 'arrivalDate',
-      dateFrom:  fromDate!,
+      ...(filter.kind === 'arrivalFrom'
+        ? { sortOrder: 'arrivalDate', arrivalStartDate:    filter.date }
+        // sortOrder=updatedOn pairs with the activity filter so a truncated
+        // run still carries the OLDEST unseen changes rather than an arbitrary
+        // slice — the cursor then advances safely over what was seen.
+        : { sortOrder: 'updatedOn',   latestActivityStart: filter.date }),
     })
 
     const res = await fetch(`${BASE_URL}/reservations?${params}`, {
