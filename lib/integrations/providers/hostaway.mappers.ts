@@ -149,32 +149,58 @@ export function mapHostawayChannel(channel: string | null | undefined): Normaliz
   return 'other'
 }
 
+/** A positive, finite money amount, or null. Blank/zero/garbage all collapse to null. */
+function optionalAmount(value: number | undefined | null): number | null {
+  if (typeof value !== 'number' || !Number.isFinite(value) || value <= 0) return null
+  return value
+}
+
 /**
- * The money for this stay.
+ * The owner-facing money for this stay: what the guest paid, LESS the
+ * commission the channel takes out of the host's payout.
  *
- * ⚠️ GROSS, not net — and this is the one number in this file that should be
- * revisited against a live Hostaway payload before an owner statement is
- * trusted.
+ * ── Which fee is subtracted, and why only that one ──────────────────────────
  *
- * `totalPrice` is what the GUEST is charged. Hostex's equivalent helper
- * deliberately returns total_rate MINUS total_commission, because the
- * owner-facing figure is the payout, and Hospitable's prefers host.revenue
- * over guest.total_price for the same reason. Hostaway's reservation object
- * very likely carries the corresponding commission/payout fields — the shape
- * typed in hostaway.ts was written from their docs and does not include them,
- * so there is nothing to subtract yet.
+ * Hostaway carries two channel-fee fields and they point in opposite
+ * directions. Per Hostaway's own financial-reporting documentation:
  *
- * Passing gross overstates owner revenue by the channel's cut: roughly 3% on
- * Airbnb, up to ~15% on Booking.com. Passing null instead is not obviously
- * better — booking-events.ts then falls back to a nights * avg_nightly_rate
- * estimate, which is unanchored rather than merely high. So gross ships, named
- * and documented here rather than buried in a mapper expression, and the
- * follow-up is to type Hostaway's payout field and subtract.
+ *   * `hostChannelFee`  — "the commission the channels charge you". Comes OUT
+ *                         of the host payout. This is the one to subtract.
+ *   * `guestChannelFee` — a separate line in the guest's price breakdown, paid
+ *                         BY the guest. Subtracting it would understate owner
+ *                         revenue by money the owner never lost.
+ *
+ * Both were reclassified from type `fee` to type `commissions` in Hostaway's
+ * 2024-04-17 / 2024-05-15 changelog entries, which is where the exact spelling
+ * of each name comes from. Getting the two the wrong way round is not a
+ * rounding error — on Booking.com it is a double-digit percentage of the
+ * statement, in the wrong direction.
+ *
+ * ── Why this is written to tolerate the field being absent ──────────────────
+ *
+ * There is no Hostaway account connected to production, so this could NOT be
+ * checked against a live payload — only against the published field list. An
+ * absent `hostChannelFee` therefore returns gross, exactly what shipped
+ * before, rather than a null that would be read as "no revenue". The netting
+ * turns itself on when the field actually arrives, and until then the
+ * behaviour is unchanged rather than speculatively different.
+ *
+ * A fee at or above the gross is treated as absent for the same reason Hostex's
+ * equivalent guards `net > 0`: a non-positive payout is data we do not
+ * understand, and gross is at least anchored to a real number. Returning null
+ * would be worse than merely high — booking-events.ts then falls back to a
+ * nights * avg_nightly_rate estimate, which is anchored to nothing.
  */
 export function extractHostawayActualTotal(res: HostawayReservation): number | null {
-  const gross = res.totalPrice
-  if (typeof gross === 'number' && Number.isFinite(gross) && gross > 0) return gross
-  return null
+  const gross = optionalAmount(res.totalPrice)
+  if (gross === null) return null
+
+  // NOT guestChannelFee — see above.
+  const hostFee = optionalAmount(res.hostChannelFee)
+  if (hostFee === null) return gross
+
+  const net = gross - hostFee
+  return net > 0 ? net : gross
 }
 
 /**

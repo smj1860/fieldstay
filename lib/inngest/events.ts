@@ -42,11 +42,12 @@ export type FieldStayEvents = {
       // (✅ confirmed live 2026-07-15, via charges[].owner_amount /
       // total_amount), 'hostex' (✅ confirmed against the /reservations
       // schema, via rates.total_rate minus rates.total_commission) and
-      // 'hostaway' (⚠️ GROSS — reservations.totalPrice is the guest-facing
-      // total and the shape typed in hostaway.ts carries no commission or
-      // payout field to net it against, so this OVERSTATES owner revenue by
-      // the channel's cut. See extractHostawayActualTotal in
-      // hostaway.mappers.ts for why gross still beats the estimate below).
+      // 'hostaway' (📄 per Hostaway's published financial-reporting field
+      // list, via totalPrice minus hostChannelFee — the commission the
+      // channel takes out of the HOST payout, NOT guestChannelFee, which
+      // the guest pays. Not yet confirmed against a live payload: no
+      // Hostaway account is connected, so extractHostawayActualTotal falls
+      // back to gross when the fee field is absent rather than assuming it).
       // Absent/null falls back to the existing
       // nights * avg_nightly_rate estimate in booking-events.ts.
       actual_total_amount?: number | null

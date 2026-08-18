@@ -59,7 +59,35 @@ const RECOVERY_PATHS = [
   'lib/inngest/functions/ownerrez/ownerrez-reviews-sync.ts',
 ]
 
-const ACTIVE_ONLY = /\.eq\(\s*['"]status['"]\s*,\s*['"]active['"]\s*\)/
+/**
+ * The two spellings of "active only", and why both must be scanned.
+ *
+ * The first version of this file checked ONLY the query form. It passed —
+ * green, in CI, on the very commit that widened the OwnerRez dispatcher —
+ * while the same file carried two `conn.status !== 'active'` comparisons on
+ * the reloaded row, 680 lines below the widened SELECT.
+ *
+ * So every errored connection was dispatched by the widened filter, skipped by
+ * the narrow one, and recorded as a SUCCESSFUL run. Production wrote no
+ * OwnerRez booking between 2026-07-30 and 2026-08-18 while
+ * `ownerrez-incremental-sync` logged 358 consecutive successes and the watchdog
+ * saw a healthy job. Widening the SELECT is not the fix if the worker it feeds
+ * re-narrows it — which is exactly the "half-fixed" shape the second assertion
+ * below was written to catch and could not see.
+ */
+const ACTIVE_ONLY_PATTERNS = [
+  // .eq('status', 'active') — the query-filter form.
+  /\.eq\(\s*['"]status['"]\s*,\s*['"]active['"]\s*\)/,
+  // x.status !== 'active' / === 'active' — the in-code comparison form, on a
+  // row already loaded. Use isSyncableConnectionStatus() instead.
+  /\.status\s*[!=]==\s*['"]active['"]/,
+  // ...and the same comparison written the other way round.
+  /['"]active['"]\s*[!=]==\s*\w+\.status\b/,
+]
+
+const ACTIVE_ONLY = {
+  test: (src: string) => ACTIVE_ONLY_PATTERNS.some((p) => p.test(src)),
+}
 
 /**
  * Whole-line comments are blanked before scanning.
@@ -114,17 +142,46 @@ describe('guardrail: an errored connection stays reachable by what can heal it',
     ].join('\n')).toEqual([])
   })
 
-  it('no recovery path ALSO carries a bare active-only filter', () => {
+  it('no recovery path ALSO narrows back to active-only, in either spelling', () => {
     // Belt to the braces above: referencing the constant somewhere in the file
-    // is not the same as every connection read in it using the constant. A file
-    // that imports it and still has an `.eq('status','active')` on a second
-    // query is half-fixed, which is the shape a partial revert would take.
+    // is not the same as every connection check in it using the constant. A
+    // file that imports it and still narrows on a second query — or on a row it
+    // re-loaded — is half-fixed, which is both the shape a partial revert takes
+    // and the shape that shipped on 2026-08-18.
     const halfFixed = RECOVERY_PATHS.filter((path) => {
       const src = sourceFor(path)
       return src !== null && ACTIVE_ONLY.test(stripCommentLines(src))
     })
 
-    expect(halfFixed, 'recovery paths still containing a bare active-only filter').toEqual([])
+    expect(halfFixed, [
+      'A recovery path narrows back to active-only.',
+      '',
+      'A widened SELECT is not the fix if the worker it dispatches to re-checks',
+      "`conn.status !== 'active'` on the row it reloaded: the connection is",
+      'fanned out, skipped, and the run reports SUCCESS — invisible to the ledger,',
+      'the watchdog and Sentry alike.',
+      '',
+      'Use isSyncableConnectionStatus(status) for a status already in hand, and',
+      ".in('status', [...SYNCABLE_CONNECTION_STATUSES]) for a query filter.",
+    ].join('\n')).toEqual([])
+  })
+
+  it('SELF-CHECK: the scan fires on both spellings, and not on the fix', () => {
+    // A guardrail at zero because it is BLIND looks exactly like one at zero
+    // because the tree is clean — and this file spent a commit in the first
+    // state. These fixtures are the difference.
+    expect(ACTIVE_ONLY.test(".eq('status', 'active')")).toBe(true)
+    expect(ACTIVE_ONLY.test("if (conn.status !== 'active') return")).toBe(true)
+    expect(ACTIVE_ONLY.test("if (row.status === 'active') sync()")).toBe(true)
+    expect(ACTIVE_ONLY.test("if ('active' !== conn.status) return")).toBe(true)
+
+    // CONTROLS — the correct spellings must NOT trip it, or the guardrail
+    // becomes a reason to work around itself.
+    expect(ACTIVE_ONLY.test(".in('status', [...SYNCABLE_CONNECTION_STATUSES])")).toBe(false)
+    expect(ACTIVE_ONLY.test('if (!isSyncableConnectionStatus(conn.status)) return')).toBe(false)
+    // A DIFFERENT column that happens to hold 'active' is not this bug.
+    expect(ACTIVE_ONLY.test(".eq('plan_status', 'active')")).toBe(false)
+    expect(ACTIVE_ONLY.test("org.plan_status === 'active'")).toBe(false)
   })
 
   it('SYNCABLE_CONNECTION_STATUSES includes error and excludes revoked', () => {

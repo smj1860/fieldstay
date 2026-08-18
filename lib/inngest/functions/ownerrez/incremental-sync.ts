@@ -75,7 +75,11 @@ import {
 } from '@/lib/integrations/providers/ownerrez'
 import { upsertBookingsReturningIds } from './upsert-bookings'
 import type { MappedOwnerRezBookingRow } from '@/lib/integrations/providers/ownerrez'
-import { mergeIntegrationConnectionMetadata, SYNCABLE_CONNECTION_STATUSES } from '@/lib/integrations/connection-metadata'
+import {
+  mergeIntegrationConnectionMetadata,
+  SYNCABLE_CONNECTION_STATUSES,
+  isSyncableConnectionStatus,
+} from '@/lib/integrations/connection-metadata'
 import { unwrap, unwrapList, isRealQueryError } from '@/lib/supabase/unwrap'
 
 const PROVIDER = 'ownerrez'
@@ -930,8 +934,13 @@ export const ownerRezConnectionSync = inngest.createFunction(
           orgId: orgId ?? undefined,
         })
 
-        if (!conn || conn.status !== 'active') {
-          return { skipped: true, reason: 'connection_not_active' }
+        // MUST match the dispatcher's filter above. When this read
+        // `conn.status !== 'active'` while the dispatch query already included
+        // 'error', every errored connection was fanned out, skipped here, and
+        // recorded as a SUCCESSFUL run — 19 days of no OwnerRez bookings behind
+        // 358 green ticks. See isSyncableConnectionStatus.
+        if (!conn || !isSyncableConnectionStatus(conn.status)) {
+          return { skipped: true, reason: 'connection_not_syncable' }
         }
 
         // org_id is nullable on integration_connections. A connection not
@@ -1135,7 +1144,9 @@ async function runHistoricalBackfill(params: {
     // org_id first so the optional chain covers the null-connection case too:
     // a truthy conn?.org_id already proves conn itself is non-null, which is
     // what lets conn.status be read plainly on the next clause.
-    if (!conn?.org_id || conn.status !== 'active') {
+    // Same rule as the live sync above — an errored connection's backfill must
+    // resume with it, not stay frozen at whatever window it stopped on.
+    if (!conn?.org_id || !isSyncableConnectionStatus(conn.status)) {
       return NO_BACKFILL('skipped_inactive')
     }
 

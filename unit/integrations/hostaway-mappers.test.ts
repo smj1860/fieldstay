@@ -191,15 +191,57 @@ describe('extractHostawayActualTotal', () => {
     expect(extractHostawayActualTotal(reservation({ totalPrice: Number.NaN }))).toBeNull()
   })
 
-  it('is GROSS — documented, and asserted so the caveat cannot be lost silently', () => {
-    // totalPrice is what the guest pays. Hostex's equivalent returns
-    // total_rate MINUS total_commission because the owner-facing figure is the
-    // payout; the Hostaway shape typed in hostaway.ts carries no commission or
-    // payout field to net against. This assertion exists so that when someone
-    // DOES type that field, this test fails and forces the caveat in
-    // events.ts's booking/confirmed comment to be updated with it.
+  it('nets hostChannelFee out of the guest total', () => {
+    // hostChannelFee is "the commission the channels charge you" — it comes out
+    // of the host payout, so the owner-facing number is gross minus it. This is
+    // what Hostex's extractHostexActualTotal already does with total_commission
+    // and Hospitable's does by preferring host.revenue over guest.total_price.
+    expect(extractHostawayActualTotal(reservation({ totalPrice: 1000, hostChannelFee: 150 })))
+      .toBe(850)
+  })
+
+  it('does NOT net guestChannelFee — the guest paid that, not the owner', () => {
+    // THE FAILURE THIS PREVENTS. The two field names differ by one word and
+    // point in opposite directions: guestChannelFee is a separate line in the
+    // GUEST's price breakdown. Subtracting it would understate every owner
+    // statement by money the owner never lost — and on Booking.com that is a
+    // double-digit percentage, not a rounding error.
+    expect(extractHostawayActualTotal(reservation({ totalPrice: 1000, guestChannelFee: 150 })))
+      .toBe(1000)
+  })
+
+  it('subtracts only the host fee when both are present', () => {
+    expect(extractHostawayActualTotal(
+      reservation({ totalPrice: 1000, hostChannelFee: 120, guestChannelFee: 80 }),
+    )).toBe(880)
+  })
+
+  it('falls back to gross when hostChannelFee is absent or unusable', () => {
+    // Deliberate: there is no Hostaway account connected to production, so the
+    // field names come from Hostaway's published financial-reporting list and
+    // NOT from a live payload. An absent fee must therefore behave exactly as
+    // it did before netting existed — unchanged, never null, which downstream
+    // would read as "no revenue".
     const gross = 1000
     expect(extractHostawayActualTotal(reservation({ totalPrice: gross }))).toBe(gross)
+    expect(extractHostawayActualTotal(reservation({ totalPrice: gross, hostChannelFee: 0 })))
+      .toBe(gross)
+    expect(extractHostawayActualTotal(reservation({ totalPrice: gross, hostChannelFee: -50 })))
+      .toBe(gross)
+    expect(extractHostawayActualTotal(
+      reservation({ totalPrice: gross, hostChannelFee: Number.NaN }),
+    )).toBe(gross)
+  })
+
+  it('falls back to gross rather than posting a non-positive payout', () => {
+    // A fee at or above the gross is data we do not understand. Gross is at
+    // least anchored to a real number; null would send booking-events.ts to a
+    // nights * avg_nightly_rate estimate anchored to nothing, and a negative
+    // would post an owner_transactions row that reads as a charge to the owner.
+    expect(extractHostawayActualTotal(reservation({ totalPrice: 1000, hostChannelFee: 1000 })))
+      .toBe(1000)
+    expect(extractHostawayActualTotal(reservation({ totalPrice: 1000, hostChannelFee: 1200 })))
+      .toBe(1000)
   })
 })
 

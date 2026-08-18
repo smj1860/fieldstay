@@ -165,14 +165,11 @@ replaces the old `⚠️ Unconfirmed` comment with a decision.
 **Still open from Phase 1:** the token-expiry warning + reconnect path. No
 refresh grant exists, so there is no Hostex template for it.
 
-**Known caveat, deliberately shipped:** `actual_total_amount` is Hostaway's
-`totalPrice`, which is the GUEST-FACING GROSS. Hostex nets commission off;
-Hostaway's typed shape has no commission or payout field to subtract. This
-overstates owner revenue by the channel's cut (~3% Airbnb, up to ~15%
-Booking.com). Gross still beats the `nights * avg_nightly_rate` fallback, which
-is unanchored rather than merely high — so it ships named in
-`extractHostawayActualTotal()`, flagged in `events.ts`, and asserted in a test
-that will fail when someone types the payout field.
+**Known caveat, since narrowed (see "Netting owner revenue" below):**
+`actual_total_amount` was Hostaway's `totalPrice` — the GUEST-FACING GROSS —
+because the typed shape carried no commission field to subtract. It now nets
+`hostChannelFee`, the channel commission taken out of the host payout, and
+falls back to gross when that field is absent.
 
 ### Phase 2 — keep it in sync
 - `reservation-sync.ts` already handles both fetch modes, so this is the
@@ -302,16 +299,38 @@ One naming trap worth knowing: reviews say **`listingMapId`** where
 
 ### Netting owner revenue (task #21)
 
-`extractHostawayActualTotal` returns `totalPrice`, the guest-facing GROSS, and
-the caveat in `events.ts` says the typed shape carries nothing to net against.
-That is now only half true: the API changelog names `hostChannelFee`,
-`guestChannelFee`, `otaPaymentProcessingFee`, `paymentServiceProcessingFee`,
-`cancellationPayout` and `airbnbPayoutSum`. The NAMES are confirmed; their exact
-semantics are not, and an owner statement is the wrong place to guess which
-subset makes up the host's net. Type them against a live reservation payload,
-then subtract — the test in `unit/integrations/hostaway-mappers.test.ts` pins
-the current gross behaviour and will fail when that happens, which is the
-point.
+**Done, partially and deliberately so.** `extractHostawayActualTotal` now
+returns `totalPrice` minus `hostChannelFee`.
+
+`hostChannelFee` was singled out because it is the one fee whose semantics
+Hostaway's own financial-reporting documentation states plainly: *"the
+commission the channels charge you."* It comes out of the host payout, so it
+is the figure that turns a guest-facing gross into an owner-facing net — the
+same thing Hostex's `total_commission` and Hospitable's `host.revenue` do.
+
+`guestChannelFee` is typed **and deliberately not subtracted.** It is a
+separate line in the guest's price breakdown, paid by the guest. The two names
+differ by one word and point in opposite directions, so both are typed: leaving
+the wrong one absent from the interface is what would make reaching for it
+easy. Two unit tests pin the distinction.
+
+The changelog also names `otaPaymentProcessingFee`,
+`paymentServiceProcessingFee`, `cancellationPayout` and `airbnbPayoutSum`.
+These are **still not netted**, and that is the remaining half of this task.
+Their exact semantics are not documented anywhere public, and an owner
+statement is the wrong place to guess which subset makes up the host's net —
+so the netting is currently partial and errs high rather than being wrong in an
+unknown direction.
+
+**What could not be verified, and how the code accounts for it:** there is no
+Hostaway account connected to production, so none of this was checked against a
+live payload — only against Hostaway's published field list. The code therefore
+treats an absent `hostChannelFee` as "unchanged from before", returning gross
+rather than a null that downstream would read as no revenue, and treats a fee
+at or above the gross the same way. The netting switches itself on when the
+field actually arrives. First live connection: pull one reservation payload,
+confirm the field is present and the remaining four fees' semantics, and finish
+the subtraction.
 
 ---
 

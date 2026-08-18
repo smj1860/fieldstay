@@ -18,8 +18,13 @@ function makeSupabase(connectionRow: { user_id: string; org_id: string } | null)
   const chain: any = {}
   chain.select      = vi.fn(() => chain)
   chain.eq          = vi.fn(() => chain)
+  // `.in` is here because the status filter is `.in('status',
+  // SYNCABLE_CONNECTION_STATUSES)`, not `.eq('status','active')`. An errored
+  // connection is exactly the one a webhook should be able to wake; narrowing
+  // to 'active' sent it to the full platform sweep, which had the same gate.
+  chain.in          = vi.fn(() => chain)
   chain.maybeSingle = vi.fn(() => Promise.resolve({ data: connectionRow, error: null }))
-  return { from: vi.fn(() => chain) }
+  return { from: vi.fn(() => chain), __chain: chain }
 }
 
 describe('ownerRezProvider.handleWebhookEvent — connection scoping', () => {
@@ -48,6 +53,34 @@ describe('ownerRezProvider.handleWebhookEvent — connection scoping', () => {
         org_id:      'org_1',
       }),
     })
+  })
+
+  it('scopes the connection lookup to the SYNCABLE statuses, not active-only', async () => {
+    // The webhook must be able to wake an ERRORED connection. Narrowing this to
+    // 'active' silently downgraded a scoped sync into a full platform sweep,
+    // which carried the identical gate — so the connection was skipped twice
+    // and the run still reported success.
+    const supabase = makeSupabase({ user_id: 'user_1', org_id: 'org_1' })
+    ;(createServiceClient as ReturnType<typeof vi.fn>).mockReturnValue(supabase)
+
+    await ownerRezProvider.handleWebhookEvent({
+      action:         'entity_update',
+      payload:        { entity_type: 'booking', entity_id: '555', user_id: '9001' },
+      externalUserId: '9001',
+      correlationId:  'corr_status',
+    })
+
+    expect(supabase.__chain.in).toHaveBeenCalledWith(
+      'status',
+      expect.arrayContaining(['active', 'error']),
+    )
+    // 'revoked' is genuinely terminal — only a reconnect produces a new token —
+    // so it must stay OUT, or the sweep retries something that cannot succeed.
+    const statuses = supabase.__chain.in.mock.calls[0][1] as string[]
+    expect(statuses).not.toContain('revoked')
+
+    // And no query in this path may re-narrow with an active-only equality.
+    expect(supabase.__chain.eq).not.toHaveBeenCalledWith('status', 'active')
   })
 
   it('omits user_id/org_id when the connection lookup misses, so the sync function falls back to a full sweep', async () => {
