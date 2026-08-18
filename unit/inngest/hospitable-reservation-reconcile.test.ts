@@ -3,6 +3,14 @@ import { describe, it, expect, vi, beforeEach } from 'vitest'
 vi.mock('@/lib/supabase/server', () => ({
   createServiceClient: vi.fn(),
 }))
+vi.mock('@/lib/integrations/providers/hospitable-token', () => ({
+  // The refresh-AWARE getter, which is what both of these paths must use.
+  // A raw readIntegrationToken returns whatever is in Vault without checking
+  // expiry, and Hospitable access tokens live 12 hours — that produced a live
+  // 401 on 2026-08-18 when the reconcile cron (10:00 UTC) read a token that
+  // expired at 10:00:06.
+  getValidHospitableToken: vi.fn(async () => 'tok_live'),
+}))
 vi.mock('@/lib/integrations/vault', () => ({
   readIntegrationToken: vi.fn(async () => 'tok_live'),
 }))
@@ -29,7 +37,7 @@ vi.mock('@/lib/integrations/providers/hospitable', async () => {
 import { hospReservationReconcileCron }    from '@/lib/inngest/functions/hospitable/reservation-reconcile-cron'
 import { hospReservationReconcileHandler } from '@/lib/inngest/functions/hospitable/reservation-reconcile-handler'
 import { createServiceClient }   from '@/lib/supabase/server'
-import { readIntegrationToken }  from '@/lib/integrations/vault'
+import { getValidHospitableToken } from '@/lib/integrations/providers/hospitable-token'
 import { fetchReservationsWindow } from '@/lib/integrations/providers/hospitable'
 import { invokeHandler } from './test-helpers'
 
@@ -98,7 +106,7 @@ function makeSupabase(queued: QueuedByTable, upserts: Recorded[] = []) {
 
 beforeEach(() => {
   vi.clearAllMocks()
-  ;(readIntegrationToken as ReturnType<typeof vi.fn>).mockResolvedValue('tok_live')
+  ;(getValidHospitableToken as ReturnType<typeof vi.fn>).mockResolvedValue('tok_live')
   ;(fetchReservationsWindow as ReturnType<typeof vi.fn>).mockResolvedValue([])
 })
 
@@ -206,8 +214,25 @@ describe('hospReservationReconcileHandler', () => {
     expect(fetchReservationsWindow).not.toHaveBeenCalled()
   })
 
+  it('reads the token through the REFRESH-AWARE getter, never the raw Vault read', async () => {
+    // THE 2026-08-18 401. This handler used readIntegrationToken, which returns
+    // whatever is stored without checking expiry. Hospitable access tokens live
+    // 12 hours; the cron fires at 10:00 UTC, and one connection's token expired
+    // at 10:00:06 — the refresh cron renewed it six seconds AFTER this handler
+    // had already read the stale one. GET /reservations answered
+    // {"message":"Unauthenticated."} and all three retries burned on a token
+    // that was dead before the first attempt.
+    ;(createServiceClient as ReturnType<typeof vi.fn>).mockReturnValue(makeSupabase({}))
+
+    await invokeHandler(hospReservationReconcileHandler, {
+      event: EVENT, step: runAllStep(), logger: makeLogger(),
+    })
+
+    expect(getValidHospitableToken).toHaveBeenCalledWith('u1')
+  })
+
   it('is non-retriable when the token is gone — a dead credential needs a reconnect, not 3 retries a day', async () => {
-    ;(readIntegrationToken as ReturnType<typeof vi.fn>).mockResolvedValue(null)
+    ;(getValidHospitableToken as ReturnType<typeof vi.fn>).mockResolvedValue(null)
     ;(createServiceClient as ReturnType<typeof vi.fn>).mockReturnValue(makeSupabase({}))
 
     await expect(

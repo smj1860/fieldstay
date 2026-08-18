@@ -3,6 +3,14 @@ import { describe, it, expect, vi, beforeEach } from 'vitest'
 vi.mock('@/lib/supabase/server', () => ({
   createServiceClient: vi.fn(),
 }))
+vi.mock('@/lib/integrations/providers/hospitable-token', () => ({
+  // The refresh-AWARE getter, which is what both of these paths must use.
+  // A raw readIntegrationToken returns whatever is in Vault without checking
+  // expiry, and Hospitable access tokens live 12 hours — that produced a live
+  // 401 on 2026-08-18 when the reconcile cron (10:00 UTC) read a token that
+  // expired at 10:00:06.
+  getValidHospitableToken: vi.fn(async () => 'tok_live'),
+}))
 vi.mock('@/lib/integrations/vault', () => ({
   readIntegrationToken: vi.fn(),
 }))
@@ -40,7 +48,7 @@ vi.mock('@/lib/asset-discovery/seed-from-amenities', () => ({
 
 import { hospInitialSync } from '@/lib/inngest/functions/hospitable/initial-sync'
 import { createServiceClient } from '@/lib/supabase/server'
-import { readIntegrationToken } from '@/lib/integrations/vault'
+import { getValidHospitableToken } from '@/lib/integrations/providers/hospitable-token'
 import {
   hospFetchProperties,
   hospReservationWindows,
@@ -162,7 +170,7 @@ describe('hospInitialSync', () => {
       ],
     })
     ;(createServiceClient as ReturnType<typeof vi.fn>).mockReturnValue(supabase)
-    ;(readIntegrationToken as ReturnType<typeof vi.fn>).mockResolvedValue('token_abc')
+    ;(getValidHospitableToken as ReturnType<typeof vi.fn>).mockResolvedValue('token_abc')
 
     ;(hospFetchProperties as ReturnType<typeof vi.fn>).mockResolvedValue([{ id: 'hosp_p1', name: 'Lakehouse' }])
     ;(hospitablePropertyToNormalized as ReturnType<typeof vi.fn>).mockImplementation(
@@ -221,7 +229,7 @@ describe('hospInitialSync', () => {
   it('marks the connection errored and stamps the metadata in ONE atomic write', async () => {
     const supabase = makeSupabase({})
     ;(createServiceClient as ReturnType<typeof vi.fn>).mockReturnValue(supabase)
-    ;(readIntegrationToken as ReturnType<typeof vi.fn>).mockResolvedValue(null)
+    ;(getValidHospitableToken as ReturnType<typeof vi.fn>).mockResolvedValue(null)
 
     const step = makeRunAllStep()
 
@@ -286,7 +294,7 @@ describe('hospInitialSync', () => {
       ],
     })
     ;(createServiceClient as ReturnType<typeof vi.fn>).mockReturnValue(supabase)
-    ;(readIntegrationToken as ReturnType<typeof vi.fn>).mockResolvedValue('token_abc')
+    ;(getValidHospitableToken as ReturnType<typeof vi.fn>).mockResolvedValue('token_abc')
 
     ;(hospFetchProperties as ReturnType<typeof vi.fn>).mockResolvedValue([{ id: 'hosp_p1', name: 'Lakehouse' }])
     ;(hospitablePropertyToNormalized as ReturnType<typeof vi.fn>).mockImplementation(

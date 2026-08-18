@@ -40,7 +40,7 @@
 
 import { inngest }              from '@/lib/inngest/client'
 import { NonRetriableError }    from 'inngest'
-import { readIntegrationToken } from '@/lib/integrations/vault'
+import { getValidHospitableToken } from '@/lib/integrations/providers/hospitable-token'
 import { runProviderReconcile } from '../shared/reconcile-shell'
 import { syncHospitableReservations } from './reservation-sync'
 
@@ -88,7 +88,24 @@ export const hospReservationReconcileHandler = inngest.createFunction(
       orgId:    org_id,
       system:   SYSTEM,
       readToken: async () => {
-        const t = await readIntegrationToken(user_id, PROVIDER)
+        // getValidHospitableToken, NOT readIntegrationToken. The raw Vault read
+        // returns whatever is stored WITHOUT checking expiry or refreshing, and
+        // Hospitable access tokens live 12 hours.
+        //
+        // That produced a live 401 on 2026-08-18: this cron fires at 10:00 UTC,
+        // and one connection's token expired at 10:00:06 — the refresh cron
+        // renewed it six seconds AFTER this handler had already read the stale
+        // one. GET /reservations answered {"message":"Unauthenticated."} and the
+        // handler burned all three retries on a token that was dead before the
+        // first attempt.
+        //
+        // The refresh-aware getter closes both halves: it renews inside a
+        // 30-minute window rather than waiting for expiry, and it takes the
+        // refresh lock so it cannot race a concurrent renewal. Hostex's
+        // equivalent handler already used its own getValidHostexToken; only
+        // Hospitable was reading raw. (Hostaway legitimately reads raw — its
+        // API key cannot be refreshed at all.)
+        const t = await getValidHospitableToken(user_id)
         if (!t) throw new NonRetriableError('No Hospitable token found — reconnect required')
         return t
       },

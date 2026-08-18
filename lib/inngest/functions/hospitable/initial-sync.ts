@@ -19,7 +19,7 @@
 import { inngest }             from '@/lib/inngest/client'
 import { NonRetriableError }   from 'inngest'
 import { createServiceClient } from '@/lib/supabase/server'
-import { readIntegrationToken } from '@/lib/integrations/vault'
+import { getValidHospitableToken } from '@/lib/integrations/providers/hospitable-token'
 import { translateSyncError } from '@/lib/integrations/types'
 import {
   hospFetchProperties,
@@ -73,7 +73,12 @@ export const hospInitialSync = inngest.createFunction(
     try {
       // ── 1. Read token from Vault ─────────────────────────────────────────
       const token = await step.run('read-token', async () => {
-        const t = await readIntegrationToken(user_id, PROVIDER)
+        // Refresh-aware, for the same reason as the reconcile handler — see its
+        // readToken comment. Less likely to matter here (the token was minted
+        // moments ago by the OAuth callback) but not impossible: an Inngest
+        // retry hours later, or a manual resync, both re-enter this step, and
+        // reading a raw expired token then fails the whole first import.
+        const t = await getValidHospitableToken(user_id)
         if (!t) throw new NonRetriableError('No Hospitable token found — reconnect required')
         return t
       })
