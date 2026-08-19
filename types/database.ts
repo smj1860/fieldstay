@@ -464,6 +464,8 @@ export interface OrgInventoryCatalogItem {
   base_qty:                  number
   description:               string | null
   is_active:                 boolean
+  /** False for equipment/linens — see lib/inventory/stock-status.ts. */
+  is_consumable:             boolean
   created_at:                string
   updated_at:                string
 }
@@ -655,6 +657,8 @@ export interface InventoryCatalogItem {
   base_qty:          number
   description:       string | null
   is_active:         boolean
+  /** False for equipment/linens — see lib/inventory/stock-status.ts. */
+  is_consumable:     boolean
   created_at:        string
 }
 
@@ -699,6 +703,12 @@ export interface InventoryItem {
   current_quantity:        number
   low_stock_threshold_pct: number
   is_active:               boolean
+  /**
+   * False for equipment/linens — par is a complete set, not a reorder point,
+   * so at-par is green rather than yellow. See lib/inventory/stock-status.ts.
+   * Denormalised from the catalog because catalog_item_id is nullable.
+   */
+  is_consumable:           boolean
   preferred_brand:         string | null
   notes:                   string | null
   first_count_recorded_at: string | null

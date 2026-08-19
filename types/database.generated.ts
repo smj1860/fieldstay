@@ -1892,6 +1892,7 @@ export type Database = {
           description: string | null
           id: string
           is_active: boolean
+          is_consumable: boolean
           name: string
           par_mode: Database["public"]["Enums"]["par_mode"]
           smart_group: Database["public"]["Enums"]["par_smart_group"] | null
@@ -1905,6 +1906,7 @@ export type Database = {
           description?: string | null
           id?: string
           is_active?: boolean
+          is_consumable?: boolean
           name: string
           par_mode?: Database["public"]["Enums"]["par_mode"]
           smart_group?: Database["public"]["Enums"]["par_smart_group"] | null
@@ -1918,6 +1920,7 @@ export type Database = {
           description?: string | null
           id?: string
           is_active?: boolean
+          is_consumable?: boolean
           name?: string
           par_mode?: Database["public"]["Enums"]["par_mode"]
           smart_group?: Database["public"]["Enums"]["par_smart_group"] | null
@@ -2068,6 +2071,7 @@ export type Database = {
           first_count_recorded_at: string | null
           id: string
           is_active: boolean
+          is_consumable: boolean
           low_stock_threshold_pct: number
           name: string
           notes: string | null
@@ -2092,6 +2096,7 @@ export type Database = {
           first_count_recorded_at?: string | null
           id?: string
           is_active?: boolean
+          is_consumable?: boolean
           low_stock_threshold_pct?: number
           name: string
           notes?: string | null
@@ -2116,6 +2121,7 @@ export type Database = {
           first_count_recorded_at?: string | null
           id?: string
           is_active?: boolean
+          is_consumable?: boolean
           low_stock_threshold_pct?: number
           name?: string
           notes?: string | null
@@ -2775,6 +2781,7 @@ export type Database = {
           description: string | null
           id: string
           is_active: boolean
+          is_consumable: boolean
           name: string
           org_id: string
           par_mode: Database["public"]["Enums"]["par_mode"]
@@ -2791,6 +2798,7 @@ export type Database = {
           description?: string | null
           id?: string
           is_active?: boolean
+          is_consumable?: boolean
           name: string
           org_id: string
           par_mode?: Database["public"]["Enums"]["par_mode"]
@@ -2807,6 +2815,7 @@ export type Database = {
           description?: string | null
           id?: string
           is_active?: boolean
+          is_consumable?: boolean
           name?: string
           org_id?: string
           par_mode?: Database["public"]["Enums"]["par_mode"]

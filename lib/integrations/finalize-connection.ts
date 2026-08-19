@@ -21,6 +21,7 @@ import 'server-only'
 
 import { createServiceClient } from '@/lib/supabase/server'
 import { storeIntegrationToken, storeIntegrationRefreshToken } from '@/lib/integrations/vault'
+import { mergeIntegrationConnectionMetadata } from '@/lib/integrations/connection-metadata'
 import { inngest } from '@/lib/inngest/client'
 import { reportError } from '@/lib/observability/report-error'
 import type { TokenResponse } from '@/lib/integrations/types'
@@ -132,6 +133,40 @@ export async function finalizeIntegrationConnection(params: {
     externalUserId: tokenData.externalUserId,
     scope:          tokenData.scope,
     metadata:       tokenData.metadata,
+  })
+
+  // ── Clear the PREVIOUS connection's sync result ───────────────────────────
+  //
+  // THE RECONNECT LOOP THIS FIXES. store_integration_token sets
+  // status='active' but merges metadata with `||`, which is shallow — and the
+  // token payload carries none of the sync keys, so `last_sync_status: 'error'`
+  // from the failure that caused the disconnect SURVIVES a successful
+  // reconnect. The integrations card then reads:
+  //
+  //   isError     = status==='error' || status==='revoked' || syncStatus==='error'
+  //   isConnected = status==='active' && syncStatus==='success'
+  //
+  // so a freshly-reconnected connection renders as Error with a Reconnect
+  // button. Worse, useSyncProgress treats a stale 'error' as a TERMINAL result
+  // and therefore never starts polling — so the card cannot recover when the
+  // new sync succeeds, and the PM reconnects again, and again, each attempt
+  // working perfectly and appearing to fail.
+  //
+  // A connection that has just been established has no sync result yet. Null,
+  // not the last one's.
+  //
+  // Ordered BEFORE the initial-sync event is fired at the end of this function,
+  // so it cannot clobber the fresh sync's own status write.
+  await mergeIntegrationConnectionMetadata({
+    userId,
+    providerId,
+    patch: {
+      last_sync_status:         null,
+      last_sync_error:          null,
+      last_sync_detail:         null,
+      last_reviews_sync_status: null,
+      last_reviews_sync_error:  null,
+    },
   })
 
   // Refresh token (if the provider returned one) goes into its own Vault

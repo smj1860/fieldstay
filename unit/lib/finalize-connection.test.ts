@@ -12,11 +12,15 @@ vi.mock('@/lib/integrations/vault', () => ({
   storeIntegrationRefreshToken: vi.fn(),
 }))
 vi.mock('@/lib/inngest/client', () => ({ inngest: { send: vi.fn() } }))
+vi.mock('@/lib/integrations/connection-metadata', () => ({
+  mergeIntegrationConnectionMetadata: vi.fn(async () => ({})),
+}))
 vi.mock('@/lib/observability/report-error', () => ({ reportError: vi.fn() }))
 
 import { createServiceClient } from '@/lib/supabase/server'
 import { inngest } from '@/lib/inngest/client'
 import { reportError } from '@/lib/observability/report-error'
+import { mergeIntegrationConnectionMetadata } from '@/lib/integrations/connection-metadata'
 import { finalizeIntegrationConnection } from '@/lib/integrations/finalize-connection'
 import type { TokenResponse } from '@/lib/integrations/types'
 
@@ -104,6 +108,84 @@ describe('finalizeIntegrationConnection — org link', () => {
 
     expect(result).toEqual({ orgId: null })
     expect(admin.from).not.toHaveBeenCalledWith('integration_connections')
+    expect(inngest.send).not.toHaveBeenCalled()
+  })
+})
+
+// ============================================================================
+// THE RECONNECT LOOP.
+//
+// store_integration_token sets status='active' but merges metadata with `||`,
+// which is SHALLOW — and the token payload carries none of the sync keys. So
+// `last_sync_status: 'error'` from the failure that caused the disconnect
+// survives a perfectly successful reconnect, and the integrations card reads:
+//
+//   isError     = status==='error' || status==='revoked' || syncStatus==='error'
+//   isConnected = status==='active' && syncStatus==='success'
+//
+// A freshly reconnected integration therefore renders as Error with a
+// Reconnect button. Worse, useSyncProgress treats a stale 'error' as a
+// TERMINAL result, so it never starts polling — the card cannot recover when
+// the new sync succeeds, and the PM reconnects again, and again, every attempt
+// working and every one appearing to fail.
+//
+// Observed live on 2026-08-19: a reconnected OwnerRez connection sat at
+// status='active' still carrying last_reviews_sync_status='error' from before
+// the reconnect, because nothing had overwritten that particular key yet.
+// ============================================================================
+describe('finalizeIntegrationConnection — stale sync state', () => {
+  beforeEach(() => vi.clearAllMocks())
+
+  it('clears the previous connection sync result', async () => {
+    const admin = makeAdmin({ data: { org_id: 'org_1' } }, { data: { id: 'conn_1' }, error: null })
+    vi.mocked(createServiceClient).mockReturnValue(admin as never)
+
+    await finalizeIntegrationConnection({ userId: 'u1', providerId: 'ownerrez', tokenData })
+
+    expect(mergeIntegrationConnectionMetadata).toHaveBeenCalledWith(
+      expect.objectContaining({
+        userId:     'u1',
+        providerId: 'ownerrez',
+        patch: {
+          last_sync_status:         null,
+          last_sync_error:          null,
+          last_sync_detail:         null,
+          last_reviews_sync_status: null,
+          last_reviews_sync_error:  null,
+        },
+      }),
+    )
+  })
+
+  it('clears BEFORE firing the initial sync, so it cannot clobber the new result', async () => {
+    // Ordering is the whole correctness argument. Clearing after the sync
+    // event could wipe a status the fresh sync had already written, which
+    // would reintroduce the same blank-then-wrong state from the other side.
+    const order: string[] = []
+    vi.mocked(mergeIntegrationConnectionMetadata).mockImplementation(async () => {
+      order.push('clear'); return {}
+    })
+    vi.mocked(inngest.send).mockImplementation(async () => {
+      order.push('sync'); return { ids: [] } as never
+    })
+    const admin = makeAdmin({ data: { org_id: 'org_1' } }, { data: { id: 'conn_1' }, error: null })
+    vi.mocked(createServiceClient).mockReturnValue(admin as never)
+
+    await finalizeIntegrationConnection({ userId: 'u1', providerId: 'ownerrez', tokenData })
+
+    expect(order).toEqual(['clear', 'sync'])
+  })
+
+  it('clears even when the user has no org yet, so a later sync starts clean', async () => {
+    // No org means no initial sync fires — but the connection is still
+    // established, and leaving a previous failure attached to it would show
+    // the same false Error on the card.
+    const admin = makeAdmin({ data: null }, { data: null, error: null })
+    vi.mocked(createServiceClient).mockReturnValue(admin as never)
+
+    await finalizeIntegrationConnection({ userId: 'u1', providerId: 'ownerrez', tokenData })
+
+    expect(mergeIntegrationConnectionMetadata).toHaveBeenCalledTimes(1)
     expect(inngest.send).not.toHaveBeenCalled()
   })
 })

@@ -79,7 +79,17 @@ function makeAdmin(queued: QueuedByTable = {}) {
     return chain
   })
 
-  return { from, calls }
+  // finalizeIntegrationConnection clears the previous connection's sync result
+  // via the merge_integration_connection_metadata RPC — without which a stale
+  // `last_sync_status: 'error'` survives a successful reconnect and the
+  // integrations card renders the fresh connection as Error. Recorded like a
+  // table call so a test can assert the clear happened on this path too.
+  const rpc = vi.fn((fn: string, args: unknown) => {
+    calls.push({ table: `rpc:${fn}`, method: 'rpc', args: [args] })
+    return Promise.resolve({ data: {}, error: null })
+  })
+
+  return { from, rpc, calls }
 }
 
 function oauthProvider(overrides: Partial<IntegrationProvider> = {}): IntegrationProvider {
@@ -625,6 +635,21 @@ describe('GET /api/integrations/[provider]/callback (OAuth CSRF state validation
     expect(logAuditEvent).toHaveBeenCalledWith(
       expect.objectContaining({ actorId: 'session_user', action: 'integration.connected', targetId: 'ownerrez' }),
     )
+
+    // The reconnect path end to end. store_integration_token sets
+    // status='active' but merges metadata with `||`, so a previous
+    // `last_sync_status: 'error'` survives the reconnect — and the integrations
+    // card reads a connection as Error whenever syncStatus is 'error',
+    // regardless of status. It also treats that stale value as TERMINAL and
+    // stops polling, so the card can never recover when the new sync succeeds.
+    // The PM reconnects, it works, and it still says not connected.
+    const clear = admin.calls.find((c) => c.table === 'rpc:merge_integration_connection_metadata')
+    expect(clear, 'reconnect must clear the previous sync result').toBeDefined()
+    expect(clear!.args[0]).toMatchObject({
+      p_user_id:     'session_user',
+      p_provider_id: 'ownerrez',
+      p_patch: expect.objectContaining({ last_sync_status: null, last_sync_error: null }),
+    })
   })
 
   it('clears the one-time oauth_state cookie on every exit path, including error redirects', async () => {
