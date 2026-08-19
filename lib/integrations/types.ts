@@ -297,9 +297,47 @@ export interface OwnerRezReview {
 
 // ── Error classes ─────────────────────────────────────────────────────────────
 
+/**
+ * WHY the credential could not be used. Same remediation, different diagnosis.
+ *
+ *   'no_stored_credential' — readIntegrationToken returned null. There is
+ *                            nothing in Vault at all: the OAuth flow never
+ *                            completed, the secret was deleted, or the row was
+ *                            restored without it.
+ *   'provider_rejected'    — the provider answered 401 to a credential we DO
+ *                            hold. The grant was revoked on their side, or the
+ *                            token expired with no refresh path.
+ */
+export type TokenRevokedReason = 'no_stored_credential' | 'provider_rejected'
+
+/**
+ * The credential cannot be used and only a reconnect will fix it.
+ *
+ * ── Why `reason` is required rather than defaulted ──────────────────────────
+ *
+ * Both cases used to raise the same sentence — "Access token revoked for user
+ * X" — which is actively misleading for half of them: nothing was revoked when
+ * the token was simply never stored. On 2026-08-18 three OwnerRez connections
+ * reported exactly that while Vault held no secret for any of them, and the
+ * message sent the investigation looking for a revocation on OwnerRez's side
+ * that had never happened.
+ *
+ * The remediation is identical (reconnect), which is why this stays ONE error
+ * class rather than two — every `instanceof TokenRevokedError` handler is still
+ * correct and still needs no change. Only the diagnosis differs, so the
+ * discriminator is a field. Required, so a new throw site must state which case
+ * it is instead of inheriting whichever default happened to be chosen.
+ */
 export class TokenRevokedError extends Error {
-  constructor(public readonly userId: string) {
-    super(`Access token revoked for user ${userId}`)
+  constructor(
+    public readonly userId: string,
+    public readonly reason: TokenRevokedReason,
+  ) {
+    super(
+      reason === 'no_stored_credential'
+        ? `No stored credential for user ${userId} — nothing in Vault to authenticate with; reconnect required`
+        : `Access token rejected by provider for user ${userId} (401) — reconnect required`
+    )
     this.name = 'TokenRevokedError'
   }
 }

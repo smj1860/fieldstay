@@ -445,7 +445,7 @@ describe('ownerRezConnectionSync (per-connection handler)', () => {
 
   it('marks the connection revoked, fires integration/connection.error, and surfaces a non-retriable failure', async () => {
     const mockClient = baseMocks()
-    mockClient.getBookings.mockRejectedValue(new TokenRevokedError('user_1'))
+    mockClient.getBookings.mockRejectedValue(new TokenRevokedError('user_1', 'provider_rejected'))
 
     const supabase = makeSupabase({
       integration_connections: [{ data: CONN_ROW, error: null }],
