@@ -149,7 +149,7 @@ describe('ownerRezReviewsSync', () => {
 
   it('marks the connection revoked, logs the audit event, and fires a throttle-eligible PM notification', async () => {
     baseMocks(async (userId) => {
-      if (userId === 'user_1') throw new TokenRevokedError(userId)
+      if (userId === 'user_1') throw new TokenRevokedError(userId, 'provider_rejected')
       return []
     })
 
@@ -214,7 +214,7 @@ describe('ownerRezReviewsSync', () => {
     vi.setSystemTime(now)
     const recentNotifiedAt = new Date(now.getTime() - 60 * 60 * 1000).toISOString() // 1h ago
 
-    baseMocks(async () => { throw new TokenRevokedError('user_1') })
+    baseMocks(async () => { throw new TokenRevokedError('user_1', 'provider_rejected') })
 
     const supabase = makeSupabase({
       integration_connections: [

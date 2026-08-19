@@ -148,7 +148,12 @@ export class OwnerRezApiClient {
 
     const token = await readIntegrationToken(this.userId, PROVIDER)
     if (!token) {
-      throw new TokenRevokedError(this.userId)
+      // NOT a revocation — there is nothing in Vault at all. The distinction
+      // is the whole reason TokenRevokedError carries a reason: three
+      // connections sat in exactly this state on 2026-08-18 while the logs
+      // said "access token revoked", which sent the investigation looking for
+      // a revocation on OwnerRez's side that had never happened.
+      throw new TokenRevokedError(this.userId, 'no_stored_credential')
     }
 
     const path = label
@@ -166,12 +171,13 @@ export class OwnerRezApiClient {
     })
 
     if (res.status === 401) {
-      // Token has been revoked (or rejected) — capture OwnerRez's reason before
-      // marking the connection as error, since the token itself is never logged
+      // A credential we DO hold was rejected — the grant was revoked on
+      // OwnerRez's side, or the token expired. Capture their reason before
+      // marking the connection, since the token itself is never logged.
       const body = await res.text().catch(() => '')
       console.error(`[OwnerRez:${this.userId}] 401 on ${path}: ${body}`)
       await this.markConnectionError()
-      throw new TokenRevokedError(this.userId)
+      throw new TokenRevokedError(this.userId, 'provider_rejected')
     }
 
     if (res.status === 429) {

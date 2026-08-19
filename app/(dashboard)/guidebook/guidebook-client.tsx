@@ -84,6 +84,12 @@ export function GuidebookClient({
   const hasAccess      = inTrial || activeSponsorCount >= 3
   const sponsorsNeeded = Math.max(0, 3 - activeSponsorCount)
 
+  const publishLockReason = publishLockReasonFor({
+    isActive:          isGuidebookActive,
+    gracePeriodEndsAt: config?.grace_period_ends_at ?? null,
+    sponsorsNeeded,
+  })
+
   const checkCelebration = useCallback(
     (newCount: number, prevCount: number) => {
       const storageKey = 'guidebook_celebration_shown'
@@ -436,6 +442,7 @@ export function GuidebookClient({
               orgId={orgId}
               appUrl={appUrl}
               isGuidebookActive={isGuidebookActive}
+              publishLockReason={publishLockReason}
             />
           ))}
         </div>
@@ -458,16 +465,58 @@ export function GuidebookClient({
   )
 }
 
+/**
+ * Why the per-property Publish checkbox is unavailable, or null when it is not.
+ *
+ * THE BUG THIS FIXES. That checkbox is `disabled={!isGuidebookActive}` and
+ * carried no explanation of its own — so clicking it did nothing, silently,
+ * with the only clue a status banner far above it and outside the expanded
+ * property form. Reported as "I click publish and nothing happens".
+ *
+ * Made worse by Save NOT being disabled: the PM ticks a dead checkbox, hits
+ * Save, gets a green "Saved", and reads that as published. The save is real —
+ * it just wrote is_published: false, because the checkbox never moved. And
+ * publishing would not have made the URL live anyway: both public routes
+ * require `is_published AND guidebook_configurations.is_active`, so the real
+ * blocker was always the sponsor gate rather than the checkbox.
+ *
+ * A free function, not inline in the component: it is pure, it is the one
+ * place this copy lives, and inlining it pushed the parent past the cognitive
+ * complexity ratchet.
+ */
+export function publishLockReasonFor({
+  isActive,
+  gracePeriodEndsAt,
+  sponsorsNeeded,
+}: {
+  isActive:          boolean
+  gracePeriodEndsAt: string | null
+  sponsorsNeeded:    number
+}): string | null {
+  if (isActive) return null
+
+  if (gracePeriodEndsAt) {
+    const by = new Date(gracePeriodEndsAt).toLocaleDateString()
+    return `Publishing is paused — fill your open sponsor slot before ${by} to keep your guidebook.`
+  }
+
+  const plural = sponsorsNeeded !== 1 ? 's' : ''
+  return `Publishing is locked until the guidebook is active — add ${sponsorsNeeded} more sponsor${plural} to unlock it.`
+}
+
 function PropertyGuidebookRow({
   property,
   orgId,
   appUrl,
   isGuidebookActive,
+  publishLockReason,
 }: {
   property: Property
   orgId: string
   appUrl: string
   isGuidebookActive: boolean
+  /** Why publishing is unavailable, shown AT the control. Null when it is available. */
+  publishLockReason: string | null
 }) {
   const [expanded, setExpanded] = useState(false)
 
@@ -494,7 +543,13 @@ function PropertyGuidebookRow({
       </button>
 
       {expanded && (
-        <PropertyGuidebookForm property={property} orgId={orgId} appUrl={appUrl} isGuidebookActive={isGuidebookActive} />
+        <PropertyGuidebookForm
+          property={property}
+          orgId={orgId}
+          appUrl={appUrl}
+          isGuidebookActive={isGuidebookActive}
+          publishLockReason={publishLockReason}
+        />
       )}
     </div>
   )
@@ -509,11 +564,14 @@ function PropertyGuidebookForm({
   orgId,
   appUrl,
   isGuidebookActive,
+  publishLockReason,
 }: {
   property: Property
   orgId:    string
   appUrl:   string
   isGuidebookActive: boolean
+  /** Why publishing is unavailable, shown AT the control. Null when it is available. */
+  publishLockReason: string | null
 }) {
   const supabase = createClient()
   const [config, setConfig] = useState<{
@@ -863,21 +921,50 @@ function PropertyGuidebookForm({
         </div>
 
         <div style={{ gridColumn: '1 / -1', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-          <label style={{ display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer' }} htmlFor={`guidebook-publish-${property.id}`}>
-            <input
-              id={`guidebook-publish-${property.id}`}
-              type="checkbox"
-              checked={config.isPublished}
-              onChange={(e) => setConfig((c) => c && ({ ...c, isPublished: e.target.checked }))}
-              disabled={!isGuidebookActive}
-            />
-            <span style={{ fontSize: '13px', color: 'var(--text-secondary)' }}>
-              Publish (guests can access the guidebook URL)
-            </span>
-          </label>
+          <div>
+            <label
+              style={{
+                display: 'flex', alignItems: 'center', gap: '8px',
+                // A pointer cursor on a control that cannot be clicked is part
+                // of what made this read as broken rather than unavailable.
+                cursor:  isGuidebookActive ? 'pointer' : 'not-allowed',
+                opacity: isGuidebookActive ? 1 : 0.6,
+              }}
+              htmlFor={`guidebook-publish-${property.id}`}
+            >
+              <input
+                id={`guidebook-publish-${property.id}`}
+                type="checkbox"
+                checked={config.isPublished}
+                onChange={(e) => setConfig((c) => c && ({ ...c, isPublished: e.target.checked }))}
+                disabled={!isGuidebookActive}
+                // Names the reason for a screen reader too, which otherwise
+                // announces only "disabled" with no way to find out why.
+                aria-describedby={publishLockReason ? `guidebook-publish-lock-${property.id}` : undefined}
+              />
+              <span style={{ fontSize: '13px', color: 'var(--text-secondary)' }}>
+                Publish (guests can access the guidebook URL)
+              </span>
+            </label>
+            {publishLockReason && (
+              <p
+                id={`guidebook-publish-lock-${property.id}`}
+                style={{ fontSize: '11px', color: 'var(--accent-amber)', margin: '4px 0 0' }}
+              >
+                {publishLockReason}
+              </p>
+            )}
+          </div>
           <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
             {error && <span style={{ fontSize: '13px', color: 'var(--accent-red)' }}>{error}</span>}
-            {saved && <span style={{ fontSize: '13px', color: 'var(--accent-green)' }}>Saved</span>}
+            {saved && (
+              // Says what actually happened. A bare green "Saved" while the
+              // guidebook is locked reads as "published" — the save is real,
+              // it just wrote is_published: false, and the URL stays dark.
+              <span style={{ fontSize: '13px', color: isGuidebookActive ? 'var(--accent-green)' : 'var(--accent-amber)' }}>
+                {isGuidebookActive ? 'Saved' : 'Saved — still unpublished'}
+              </span>
+            )}
             <button
               onClick={handleSave}
               disabled={saving}

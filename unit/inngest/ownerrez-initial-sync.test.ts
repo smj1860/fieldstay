@@ -298,7 +298,7 @@ describe('ownerRezInitialSync', () => {
 
   it('marks the connection revoked, notifies the PM, and throws NonRetriableError when OwnerRez reports a revoked token on the very first fetch', async () => {
     const mockClient = baseMocks()
-    mockClient.getProperties.mockRejectedValue(new TokenRevokedError('user_1'))
+    mockClient.getProperties.mockRejectedValue(new TokenRevokedError('user_1', 'provider_rejected'))
 
     const supabase = makeSupabase({
       integration_connections: [
