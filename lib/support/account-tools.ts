@@ -4,6 +4,7 @@ import { unwrapJoin } from '@/lib/utils/supabase-joins'
 import { stripe } from '@/lib/stripe/client'
 import { reportError } from '@/lib/observability/report-error'
 import { reportQueryError, tryUnwrapList } from '@/lib/supabase/unwrap'
+import { needsRestock } from '@/lib/inventory/stock-status'
 import {
   resolvePar,
   DEFAULT_STAY_LENGTH_NIGHTS,
@@ -261,10 +262,12 @@ export async function getBelowParInventory(orgId: string) {
 
   if (error) return { error: 'Could not fetch inventory.' }
 
-  // supabase.raw() doesn't exist on this client — column-to-column
-  // comparison (current_quantity < par_level) has to happen in JS, not SQL.
+  // supabase.raw() doesn't exist on this client, so the column-to-column
+  // comparison happens in JS. It goes through needsRestock so this agrees with
+  // the inventory page and the Ops Snapshot by construction rather than by
+  // three files happening to have been written the same way.
   const belowPar = (data ?? [])
-    .filter((i) => i.first_count_recorded_at && i.current_quantity < i.par_level)
+    .filter(needsRestock)
     .slice(0, 20)
 
   return {

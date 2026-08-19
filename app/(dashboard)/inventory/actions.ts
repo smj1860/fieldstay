@@ -13,6 +13,7 @@ import { rebaseParFromTarget } from '@/lib/inventory/par-engine'
 import type { InventoryCategory, ParMode, ParSmartGroup, PoStatus, TablesInsert, TablesUpdate } from '@/types/database'
 import { Constants } from '@/types/database'
 import { parseQuantityInput } from '@/lib/inventory/quantity'
+import { needsRestock, restockQuantity } from '@/lib/inventory/stock-status'
 
 /**
  * Deterministic, locale-independent string ordering for CANONICALISATION.
@@ -785,14 +786,25 @@ export async function generateAggregatedPurchaseList(): Promise<{ items: Aggrega
 
     const grouped: Record<string, AggregatedItem> = {}
     for (const item of allItems) {
-      if (!item.first_count_recorded_at) continue
-      if ((item.current_quantity ?? 0) > (item.par_level ?? 0)) continue
+      // STRICTLY below par. This was `> par → continue`, which let an AT-PAR
+      // item through — and its `needed` is then par - qty = 0, so every at-par
+      // item landed on the purchase list as a zero-quantity line, with a
+      // zero-quantity row under each property. One org had 69 of them.
+      if (!needsRestock({
+        current_quantity:        item.current_quantity ?? 0,
+        par_level:               item.par_level ?? 0,
+        first_count_recorded_at: item.first_count_recorded_at,
+      })) continue
 
       const key = item.name.toLowerCase()
       if (!grouped[key]) {
         grouped[key] = { name: item.name, unit: item.unit, totalNeeded: 0, properties: [] }
       }
-      const needed = Math.max(0, (item.par_level ?? 0) - (item.current_quantity ?? 0))
+      const needed = restockQuantity({
+        current_quantity: item.current_quantity ?? 0,
+        par_level:        item.par_level ?? 0,
+        first_count_recorded_at: item.first_count_recorded_at,
+      })
       grouped[key]!.totalNeeded += needed
       const pName = unwrapJoin(item.property as { name: string } | { name: string }[] | null)?.name ?? '—'
       grouped[key]!.properties.push({ name: pName, needed })

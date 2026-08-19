@@ -6,6 +6,7 @@ import { retryFailedMutation } from '@/lib/dexie/helpers'
 import type { TurnoverRow } from '@/lib/dexie/schema'
 import type { TurnoverActions } from './use-turnover-actions'
 import { parseQuantityInput, QUANTITY_INPUT_STEP } from '@/lib/inventory/quantity'
+import { needsRestock } from '@/lib/inventory/stock-status'
 
 export function InventoryView({
   turnover,
@@ -45,8 +46,18 @@ export function InventoryView({
                   {catItems.map((item) => {
                     const qty = getCount(item)
                     // Only a real count can be low. An item nobody has counted
-                    // yet is unknown, not well-stocked and not short.
-                    const isLow = qty !== undefined && qty < item.par_level
+                    // yet is unknown, not well-stocked and not short — which is
+                    // what the null first_count_recorded_at expresses here.
+                    //
+                    // Through the shared helper so the crew's idea of "short"
+                    // cannot drift from the PM's: it already had `< par` while
+                    // the PM page used `<= par`, so the same item read short on
+                    // one screen and fine on the other.
+                    const isLow = needsRestock({
+                      current_quantity:        qty ?? 0,
+                      par_level:               item.par_level,
+                      first_count_recorded_at: qty === undefined ? null : 'counted',
+                    })
                     return (
                       <div key={item.id} className="flex items-center gap-3 px-4 py-2.5">
                         <div className="flex-1 min-w-0">

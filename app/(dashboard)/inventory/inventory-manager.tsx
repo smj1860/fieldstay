@@ -25,6 +25,7 @@ import { Tabs, type TabItem } from '@/components/ui/Tabs'
 import { InlineAlert } from '@/components/ui/InlineAlert'
 import type { CartBuildResult } from '@/lib/kroger/types'
 import { parseQuantityInput, QUANTITY_INPUT_STEP } from '@/lib/inventory/quantity'
+import { stockStatus, stockStatusLabel } from '@/lib/inventory/stock-status'
 
 // ── Local types ───────────────────────────────────────────────────────────────
 
@@ -69,6 +70,8 @@ interface PortfolioItem {
   preferred_brand: string | null
   property: { name: string } | null
   first_count_recorded_at: string | null
+  /** False for equipment/linens — see lib/inventory/stock-status.ts. */
+  is_consumable: boolean
 }
 
 interface PurchaseOrderItem {
@@ -91,26 +94,21 @@ interface PurchaseOrder {
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
-type StockStatus = 'uncounted' | 'critical' | 'low' | 'healthy'
-
-function getStockStatus(item: InventoryItem): StockStatus {
-  if (!item.first_count_recorded_at) return 'uncounted'
-  if (item.current_quantity <= item.par_level) return 'critical'
-  if (item.current_quantity <= item.par_level * 1.2) return 'low'
-  return 'healthy'
-}
-
 /**
  * Background tint for a count row. Extracted from a nested ternary inside the
- * style prop: as an expression it called getStockStatus twice per render per
+ * style prop: as an expression it called the status helper twice per render per
  * row and read as one unit, so a future third status would be appended to a
  * chain rather than added to a table.
+ *
+ * Green gets NO tint on purpose. Tinting every correctly-stocked row would make
+ * the table a wall of colour and cost the red rows the contrast that is the
+ * whole point of tinting one.
  */
 function rowTint(item: InventoryItem): string | undefined {
-  switch (getStockStatus(item)) {
-    case 'critical': return 'var(--accent-red-dim)'
-    case 'low':      return 'var(--accent-amber-dim)'
-    default:         return undefined
+  switch (stockStatus(item)) {
+    case 'red':    return 'var(--accent-red-dim)'
+    case 'yellow': return 'var(--accent-amber-dim)'
+    default:       return undefined
   }
 }
 
@@ -129,11 +127,11 @@ function saveCountLabel(isSaving: boolean, justSaved: boolean): string {
 }
 
 function StockBadge({ item }: { item: InventoryItem }) {
-  const status = getStockStatus(item)
-  if (status === 'uncounted') return <Badge tone="slate">Needs Count</Badge>
-  if (status === 'critical')  return <Badge tone="red">At/Below Par</Badge>
-  if (status === 'low')       return <Badge tone="amber">Low</Badge>
-  return <Badge tone="green">Healthy</Badge>
+  const status = stockStatus(item)
+  if (status === 'red')    return <Badge tone="red">{stockStatusLabel(status)}</Badge>
+  if (status === 'yellow') return <Badge tone="amber">{stockStatusLabel(status)}</Badge>
+  if (status === 'green')  return <Badge tone="green">{stockStatusLabel(status)}</Badge>
+  return <Badge tone="slate">{stockStatusLabel(status)}</Badge>
 }
 
 type BadgeTone = 'green' | 'amber' | 'red' | 'blue' | 'gold' | 'purple' | 'slate'
@@ -1079,9 +1077,9 @@ function PropertyInventoryCard({
   items: InventoryItem[]
   onSelect: () => void
 }) {
-  const criticalCount  = items.filter((i) => getStockStatus(i) === 'critical').length
-  const lowCount       = items.filter((i) => getStockStatus(i) === 'low').length
-  const uncountedCount = items.filter((i) => getStockStatus(i) === 'uncounted').length
+  const belowParCount  = items.filter((i) => stockStatus(i) === 'red').length
+  const atParCount     = items.filter((i) => stockStatus(i) === 'yellow').length
+  const uncountedCount = items.filter((i) => stockStatus(i) === 'uncounted').length
 
   return (
     <Card className="flex flex-col gap-4 hover:shadow-card-md transition-shadow">
@@ -1101,18 +1099,18 @@ function PropertyInventoryCard({
       {/* Stock summary badges */}
       <div className="flex items-center gap-2 flex-wrap">
         <Badge tone="slate">{items.length} item{items.length !== 1 ? 's' : ''}</Badge>
-        {criticalCount > 0 && (
+        {belowParCount > 0 && (
           <Badge tone="red" className="flex items-center gap-0.5">
-            <AlertTriangle className="w-3 h-3" /> {criticalCount} critical
+            <AlertTriangle className="w-3 h-3" /> {belowParCount} below par
           </Badge>
         )}
-        {lowCount > 0 && criticalCount === 0 && (
-          <Badge tone="amber">{lowCount} low</Badge>
+        {atParCount > 0 && belowParCount === 0 && (
+          <Badge tone="amber">{atParCount} at par</Badge>
         )}
         {uncountedCount > 0 && (
           <Badge tone="slate">{uncountedCount} needs count</Badge>
         )}
-        {criticalCount === 0 && lowCount === 0 && uncountedCount === 0 && items.length > 0 && (
+        {belowParCount === 0 && atParCount === 0 && uncountedCount === 0 && items.length > 0 && (
           <Badge tone="green">All healthy</Badge>
         )}
         {items.length === 0 && (
@@ -1187,9 +1185,9 @@ export function InventoryManager({
   }, [cartData])
 
   const totalItems     = items.length
-  const totalCritical  = items.filter((i) => getStockStatus(i) === 'critical').length
-  const totalLow       = items.filter((i) => getStockStatus(i) === 'low').length
-  const totalUncounted = items.filter((i) => getStockStatus(i) === 'uncounted').length
+  const totalBelowPar  = items.filter((i) => stockStatus(i) === 'red').length
+  const totalAtPar     = items.filter((i) => stockStatus(i) === 'yellow').length
+  const totalUncounted = items.filter((i) => stockStatus(i) === 'uncounted').length
 
   const selectedProperty = properties.find((p) => p.id === selectedPropertyId) ?? null
 
@@ -1214,13 +1212,13 @@ export function InventoryManager({
           <h1 className="page-title">Inventory</h1>
           <div className="flex items-center gap-2 mt-1 flex-wrap">
             <p className="page-subtitle">{totalItems} items across {properties.length} propert{properties.length !== 1 ? 'ies' : 'y'}</p>
-            {totalCritical > 0 && (
+            {totalBelowPar > 0 && (
               <Badge tone="red" className="flex items-center gap-1">
-                <AlertTriangle className="w-3 h-3" /> {totalCritical} critical
+                <AlertTriangle className="w-3 h-3" /> {totalBelowPar} below par
               </Badge>
             )}
-            {totalLow > 0 && (
-              <Badge tone="amber">{totalLow} low</Badge>
+            {totalAtPar > 0 && (
+              <Badge tone="amber">{totalAtPar} at par</Badge>
             )}
             {totalUncounted > 0 && (
               <Badge tone="slate">{totalUncounted} needs count</Badge>

@@ -1,6 +1,7 @@
 import { createClient } from '@/lib/supabase/server'
 import { unwrapJoin } from '@/lib/utils/supabase-joins'
 import { tryUnwrapList, type QueryOutcome } from '@/lib/supabase/unwrap'
+import { needsRestock } from '@/lib/inventory/stock-status'
 
 export interface NotificationItem {
   id:       string
@@ -139,7 +140,7 @@ function workOrderItems(rows: WorkOrderAlertRow[]): NotificationItem[] {
  */
 function belowParItems(rows: InventoryAlertRow[]): NotificationItem[] {
   return rows
-    .filter((i) => i.first_count_recorded_at && i.current_quantity < i.par_level)
+    .filter(needsRestock)
     .slice(0, 5)
     .map((item) => ({
       id:       `inventory-${item.id}`,
