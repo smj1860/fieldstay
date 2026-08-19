@@ -102,6 +102,8 @@ interface JobRunRow  {
   started_at:  string
   /** null for runs recorded before the recorder learned to compute it. */
   duration_ms: number | null
+  /** ULID. Its first 10 characters are the creation millisecond — see run-id.ts. */
+  run_id:      string
 }
 interface ConnRow    {
   id: string
@@ -125,6 +127,17 @@ interface SlowJob {
   id: string
   latestMs: number
   medianMs: number
+}
+
+/** A cron whose single scheduler tick is being executed more than once. */
+interface DuplicatedCron {
+  id: string
+  /** Distinct scheduler ticks seen in the window. */
+  ticks: number
+  /** Total runs across those ticks. */
+  runs: number
+  /** Worst observed executions of ONE tick — i.e. how many syncs it reached. */
+  worstFanout: number
 }
 
 /**
@@ -205,6 +218,89 @@ function findSlowJobs(rows: JobRunRow[], watched: readonly string[]): SlowJob[] 
   })
 }
 
+/**
+ * How many ticks must show duplication before it is reported.
+ *
+ * Two, not one. A single duplicated tick is the shape of a one-off — a deploy
+ * landing mid-tick, a sync being registered at that moment — and reporting it
+ * would make this alarm flap during every deployment. A SECOND duplicated tick
+ * means a duplicate registration is sitting there persistently, which is the
+ * only version of this worth waking anyone for.
+ */
+const DUPLICATE_MIN_TICKS = 2
+
+/** ULID timestamp length — the run's creation millisecond. See run-id.ts. */
+const TICK_PREFIX_LEN = 10
+
+/**
+ * Crons whose ONE scheduler tick is being executed more than once.
+ *
+ * ── What this catches, and why nothing else did ─────────────────────────────
+ *
+ * An Inngest app can carry several SYNCS — one per deployment URL that has
+ * registered itself. Every sync receives every scheduler tick, so a stale
+ * preview deployment that nobody deleted keeps executing the full cron suite
+ * forever. On 2026-08-18 every cron here was running SIX times an hour that
+ * way, and the whole system read as healthy: each duplicate run succeeded, so
+ * CI was green, Sentry was quiet, the silence check was satisfied by definition
+ * (the job was anything but silent), and the run ledger showed nothing but
+ * successes. It was only visible by noticing that six runs shared one ULID
+ * millisecond prefix.
+ *
+ * That prefix is the whole trick. A ULID's first 10 characters are its creation
+ * millisecond, so runs of the SAME function created in the SAME millisecond are
+ * one scheduler tick fanned across N syncs — they cannot be N genuine ticks,
+ * because no cron schedule has millisecond granularity.
+ *
+ * ── Why only WATCHED_JOBS ───────────────────────────────────────────────────
+ *
+ * Every entry in WATCHED_JOBS is cron-triggered, and that is exactly the set
+ * for which one tick must mean one run. Event-driven fan-out handlers legitimately
+ * produce many same-millisecond runs — `daily-wrapup-org` fires once per org and
+ * `ownerrez-connection-sync` once per connection, both dispatched in a single
+ * `step.sendEvent`. Scanning those would report the system's normal behaviour
+ * as a fault, every hour.
+ *
+ * Distinct run_ids are counted rather than rows, so a retry — which keeps its
+ * run_id, and which the (run_id, function_id) unique index deduplicates anyway
+ * — can never be mistaken for a duplicate execution.
+ */
+function findDuplicatedCrons(rows: JobRunRow[], watched: readonly string[]): DuplicatedCron[] {
+  // function_id -> tick prefix -> distinct run ids in that tick
+  const byFunction = new Map<string, Map<string, Set<string>>>()
+
+  for (const row of rows) {
+    if (typeof row.run_id !== 'string' || row.run_id.length < TICK_PREFIX_LEN) continue
+    const tick = row.run_id.slice(0, TICK_PREFIX_LEN)
+
+    const ticks = byFunction.get(row.function_id) ?? new Map<string, Set<string>>()
+    const runs  = ticks.get(tick) ?? new Set<string>()
+    runs.add(row.run_id)
+    ticks.set(tick, runs)
+    byFunction.set(row.function_id, ticks)
+  }
+
+  return watched.flatMap<DuplicatedCron>((id) => {
+    const ticks = byFunction.get(id)
+    if (!ticks) return []
+
+    let duplicatedTicks = 0
+    let worstFanout     = 0
+    let totalRuns       = 0
+
+    for (const runs of ticks.values()) {
+      totalRuns += runs.size
+      if (runs.size > 1) {
+        duplicatedTicks += 1
+        if (runs.size > worstFanout) worstFanout = runs.size
+      }
+    }
+
+    if (duplicatedTicks < DUPLICATE_MIN_TICKS) return []
+    return { id, ticks: ticks.size, runs: totalRuns, worstFanout }
+  })
+}
+
 /** Most recent recorded run per watched job. */
 function latestByFunction(rows: JobRunRow[]): Map<string, number> {
   const latest = new Map<string, number>()
@@ -239,7 +335,7 @@ export const systemWatchdog = inngest.createFunction(
       const rows = await fetchAllRows<JobRunRow>(
         (from, to) => supabase
           .from('system_job_runs')
-          .select('function_id, started_at, duration_ms')
+          .select('function_id, started_at, duration_ms, run_id')
           .gte('started_at', since)
           .order('started_at', { ascending: false })
           .range(from, to),
@@ -291,13 +387,19 @@ export const systemWatchdog = inngest.createFunction(
 
       // Same rows, no second query: silence and slowness are two readings of
       // one scan.
-      const slowJobs = findSlowJobs(rows, WATCHED_JOBS.map((j) => j.id))
+      const watchedIds = WATCHED_JOBS.map((j) => j.id)
+      const slowJobs   = findSlowJobs(rows, watchedIds)
+      // Third reading of the same scan. Duplication is invisible to the other
+      // two by construction: a duplicated job is not silent, and each of its
+      // runs is individually a normal duration.
+      const duplicatedCrons = findDuplicatedCrons(rows, watchedIds)
 
-      return { silentJobs, slowJobs }
+      return { silentJobs, slowJobs, duplicatedCrons }
     })
 
-    const silent = silentAndSlow.silentJobs
-    const slow   = silentAndSlow.slowJobs
+    const silent     = silentAndSlow.silentJobs
+    const slow       = silentAndSlow.slowJobs
+    const duplicated = silentAndSlow.duplicatedCrons
 
     // An entirely empty ledger is its own finding, not ten of them. It is
     // expected exactly once — on the very first run, before this watchdog's own
@@ -384,6 +486,26 @@ export const systemWatchdog = inngest.createFunction(
       })
     }
 
+    if (duplicated.length > 0) {
+      // An ERROR, not a warning. Every duplicate run is a full second execution
+      // of the job: doubled provider API spend against shared rate limits,
+      // doubled compute, and doubled side effects for anything not perfectly
+      // idempotent. It also degrades silently — the runs all succeed, so this
+      // is the only place it can surface.
+      const summary = duplicated
+        .map((d) => `${d.id} (${d.worstFanout}x per tick, ${d.runs} runs over ${d.ticks} ticks)`)
+        .join('; ')
+      logger.error(`[watchdog] ${duplicated.length} cron(s) running more than once per tick: ${summary}`)
+      reportError(
+        new Error(
+          `Watchdog: ${duplicated.length} cron(s) executing more than once per scheduler tick — ${summary}. ` +
+          'Usually a stale Inngest sync: an old deployment URL still registered against the app receives ' +
+          'every tick alongside production. Archive the extra sync, or delete the deployment that registered it.'
+        ),
+        { site: 'inngest.system-watchdog.duplicated-crons' },
+      )
+    }
+
     if (quiet.length > 0) {
       // org_id and provider only — never a token, and nothing about the
       // provider account beyond which integration it is.
@@ -404,10 +526,16 @@ export const systemWatchdog = inngest.createFunction(
       )
     }
 
-    if (silent.length === 0 && quiet.length === 0 && !noRunsRecorded) {
+    if (silent.length === 0 && quiet.length === 0 && duplicated.length === 0 && !noRunsRecorded) {
       logger.info(`[watchdog] OK — ${WATCHED_JOBS.length} jobs within budget, all active integrations recently seen`)
     }
 
-    return { silentJobs: silent.length, slowJobs: slow.length, quietIntegrations: quiet.length, noRunsRecorded }
+    return {
+      silentJobs:       silent.length,
+      slowJobs:         slow.length,
+      duplicatedCrons:  duplicated.length,
+      quietIntegrations: quiet.length,
+      noRunsRecorded,
+    }
   }
 )

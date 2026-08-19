@@ -464,3 +464,159 @@ describe('systemWatchdog — slow jobs', () => {
     expect(logger.warn).toHaveBeenCalledWith(expect.stringContaining('slower than their norm'))
   })
 })
+
+// ============================================================================
+// DUPLICATED CRON TICKS.
+//
+// An Inngest app can carry several SYNCS — one per deployment URL that has
+// registered itself — and every sync receives every scheduler tick. A stale
+// preview deployment nobody deleted therefore keeps executing the entire cron
+// suite forever.
+//
+// On 2026-08-18 every cron in this system was running SIX times an hour that
+// way, for weeks, and nothing noticed: each duplicate run SUCCEEDED, so CI was
+// green, Sentry was quiet, the run ledger showed only successes, and the
+// silence check was satisfied by definition — a job running six times over is
+// the opposite of silent. The slow-job check could not see it either, since
+// each individual run was a perfectly normal duration.
+//
+// The tell is the ULID. A run id's first 10 characters are its creation
+// millisecond, so N runs of one function sharing one prefix are ONE tick fanned
+// across N syncs — they cannot be N genuine ticks, because no cron schedule has
+// millisecond granularity.
+// ============================================================================
+describe('systemWatchdog — duplicated cron ticks', () => {
+  const TARGET = 'ownerrez-incremental-sync'
+
+  /** A run id in the real shape: 10-char tick prefix + 16 chars of entropy. */
+  const runId = (tick: string, entropy: string) => `${tick}${entropy.padEnd(16, '0')}`
+
+  /**
+   * `ticks` scheduler ticks for TARGET, each executed `fanout` times, plus
+   * every other watched job once so nothing reports silent.
+   */
+  function runsWithFanout(ticks: number, fanout: number) {
+    const others = WATCHED_JOBS
+      .filter((j) => j.id !== TARGET)
+      .map((j, i) => ({
+        function_id: j.id,
+        started_at:  hoursAgo(1),
+        duration_ms: 1_000,
+        run_id:      runId('01M0AJQZR0', `OTHER${i}`),
+      }))
+
+    const target = Array.from({ length: ticks }).flatMap((_, t) =>
+      Array.from({ length: fanout }).map((__, f) => ({
+        function_id: TARGET,
+        started_at:  hoursAgo(ticks - t),
+        duration_ms: 1_000,
+        // Same prefix within a tick, different entropy per execution — exactly
+        // what one tick delivered to several syncs produces.
+        run_id: runId(`01M0AJQZ${String(t).padStart(2, 'A')}`, `SYNC${f}`),
+      })),
+    )
+
+    return [...others, ...target]
+  }
+
+  function run(rows: unknown[]) {
+    ;(createServiceClient as ReturnType<typeof vi.fn>).mockReturnValue(
+      makeSupabase(
+        { system_job_runs: [{ data: rows, error: null }], integration_connections: [{ data: [], error: null }] },
+        [], RECORDING_MATURE,
+      ),
+    )
+    return invokeHandler(systemWatchdog, {
+      event: {}, step: runAllStep(), logger: makeLogger(),
+    }) as Promise<{ duplicatedCrons: number; slowJobs: number; silentJobs: number }>
+  }
+
+  it('reports a cron whose every tick is executed twice', async () => {
+    const res = await run(runsWithFanout(4, 2))
+
+    expect(res.duplicatedCrons).toBe(1)
+    expect(reportError).toHaveBeenCalledWith(
+      expect.objectContaining({ message: expect.stringContaining('2x per tick') }),
+      expect.objectContaining({ site: 'inngest.system-watchdog.duplicated-crons' }),
+    )
+  })
+
+  it('names the worst fanout, so a 6x is not reported as a 2x', async () => {
+    // The real incident. The number is the whole actionable content: it says
+    // how many stale syncs are registered.
+    const res = await run(runsWithFanout(3, 6))
+    expect(res.duplicatedCrons).toBe(1)
+    expect(reportError).toHaveBeenCalledWith(
+      expect.objectContaining({ message: expect.stringContaining('6x per tick') }),
+      expect.anything(),
+    )
+  })
+
+  it('stays quiet when every tick ran exactly once', async () => {
+    const res = await run(runsWithFanout(6, 1))
+    expect(res.duplicatedCrons).toBe(0)
+  })
+
+  it('does NOT report a SINGLE duplicated tick — that is deploy noise', async () => {
+    // A deployment landing mid-tick briefly has two syncs live. Reporting one
+    // occurrence would make this alarm flap on every deploy, and an alarm that
+    // fires during normal operations is one an operator mutes.
+    const rows = [
+      ...runsWithFanout(5, 1),
+      { function_id: TARGET, started_at: hoursAgo(1), duration_ms: 1_000, run_id: runId('01M0AJQZ00', 'SYNC0') },
+      { function_id: TARGET, started_at: hoursAgo(1), duration_ms: 1_000, run_id: runId('01M0AJQZ00', 'SYNC1') },
+    ]
+    const res = await run(rows)
+    expect(res.duplicatedCrons).toBe(0)
+  })
+
+  it('does NOT treat a repeated run_id as a duplicate execution', async () => {
+    // A retry keeps its run_id, and (run_id, function_id) is unique in the
+    // ledger anyway — so counting ROWS rather than DISTINCT run ids would
+    // invent duplicates out of retries.
+    // TWO ticks, each with its run id repeated — enough to clear
+    // DUPLICATE_MIN_TICKS if rows were counted instead of distinct ids. With
+    // three identical rows in a SINGLE tick the threshold masks the bug and
+    // this test passes either way, which is what it did before it was fixed.
+    const dupA = { function_id: TARGET, started_at: hoursAgo(2), duration_ms: 1_000, run_id: runId('01M0AJQZ00', 'SAMEA') }
+    const dupB = { function_id: TARGET, started_at: hoursAgo(1), duration_ms: 1_000, run_id: runId('01M0AJQZ01', 'SAMEB') }
+    const res = await run([...runsWithFanout(5, 1), dupA, dupA, dupA, dupB, dupB])
+    expect(res.duplicatedCrons).toBe(0)
+  })
+
+  it('ignores rows with a missing or truncated run id rather than grouping them', async () => {
+    // Runs recorded before the id was captured must not all collapse into one
+    // "tick" and report every job as massively duplicated.
+    const rows = [
+      ...runsWithFanout(5, 1),
+      { function_id: TARGET, started_at: hoursAgo(1), duration_ms: 1_000, run_id: '' },
+      { function_id: TARGET, started_at: hoursAgo(1), duration_ms: 1_000, run_id: '01M0' },
+      { function_id: TARGET, started_at: hoursAgo(1), duration_ms: 1_000, run_id: null },
+    ]
+    const res = await run(rows)
+    expect(res.duplicatedCrons).toBe(0)
+  })
+
+  it('does not scan event-driven fan-out handlers, whose same-ms runs are correct', async () => {
+    // daily-wrapup-org fires once per org and ownerrez-connection-sync once per
+    // connection, both dispatched in a single step.sendEvent — so they SHOULD
+    // show many runs in one millisecond. Only WATCHED_JOBS (all cron-triggered)
+    // are scanned, which is what keeps this from reporting normal behaviour.
+    const rows = [
+      ...runsWithFanout(5, 1),
+      // THREE separate dispatches of 8 orgs each. One dispatch would sit below
+      // DUPLICATE_MIN_TICKS and pass even if handlers were scanned — the
+      // threshold, not the scope rule, would be doing the work.
+      ...['01M0AJQZZA', '01M0AJQZZB', '01M0AJQZZC'].flatMap((tick) =>
+        Array.from({ length: 8 }).map((_, i) => ({
+          function_id: 'daily-wrapup-org',
+          started_at:  hoursAgo(1),
+          duration_ms: 1_000,
+          run_id:      runId(tick, `ORG${i}`),
+        })),
+      ),
+    ]
+    const res = await run(rows)
+    expect(res.duplicatedCrons).toBe(0)
+  })
+})
