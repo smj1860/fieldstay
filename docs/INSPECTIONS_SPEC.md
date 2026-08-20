@@ -45,6 +45,8 @@ and it is what gives the overdue nudge its force.
 | Offline | **In-app**, on the PM dashboard PWA. Not the crew PWA. |
 | Offline scope | **Inspections only.** Nothing else in the dashboard goes offline. |
 | Which forms | Exactly three: **Property Safety & Risk Mitigation**, **Outdoor Property**, **Indoor Property**. |
+| Editable by orgs? | **No.** These are FIXED FORMS, not templates. Only the platform changes them. No per-org copy, no editing UI, no Templates Hub. |
+| Where it lives | Under **Maintenance** — a tab on the Maintenance page, backed by its own route. Not a top-level nav item, not Templates. |
 | Frequency | Set in **onboarding**, changeable later in the Inspections tab. Safety: 1× or 2× a year. Outdoor and Indoor: quarterly or 2× a year. The PM picks the **month(s)** — for quarterly, the month the cycle starts in. |
 | Photos | Required on **every failure**, plus specific items that are photographed even when passing (fire-extinguisher tags). |
 | Draft lifetime | **24 hours from start.** Past that a new inspection must be started. |
@@ -122,16 +124,15 @@ guardrails keep meaning what they say.
 ## 5. Data model
 
 ```
-inspection_templates            org-level form definition
-  id, org_id, name, kind, description,
-  platform_template_id (nullable),   -- seeded-then-editable, like org_inventory_catalog
-  default_frequency, is_active
+inspection_forms                PLATFORM-owned form definition. No org_id.
+  id, key, name, kind, description,   -- key: 'safety' | 'indoor' | 'outdoor'
+  version, is_active
 
-inspection_template_sections    grouping within a form
-  id, template_id, name, sort_order
+inspection_form_sections        grouping within a form
+  id, form_id, name, sort_order
 
-inspection_template_items       ONE question
-  id, section_id, prompt, sort_order,
+inspection_form_items           ONE question
+  id, section_id, key,   -- stable: 'safety.fire.smoke_present' prompt, sort_order,
   is_required, photo_required,
   response_type       'yes_no' | 'count' | 'date' | 'text' | 'photo'
   failing_answer      'no' | 'yes'      -- DEFAULT 'no'; see below
@@ -149,36 +150,39 @@ inspection_template_items       ONE question
 
 inspections                     ONE performance of a form, per property
   id, org_id, property_id,
-  template_id, template_snapshot jsonb,   -- snapshot: the form as it was THEN
+  form_id, form_snapshot jsonb,           -- snapshot: the form as it was THEN
   assigned_to_user_id,
   scheduled_for date, started_at, completed_at, completed_by_user_id,
   source_schedule_id (nullable)           -- which schedule generated it
 
 inspection_items                ONE answer
   id, inspection_id, org_id,
-  template_item_id, prompt_snapshot,
+  form_item_id, prompt_snapshot,
   result 'pass' | 'fail' | 'na',
   note, photo_path,
   asset_id (nullable),
   answered_at
 ```
 
-`template_snapshot` matters for the same reason `checklist_instances` has one:
-editing a template must not retroactively change what a completed inspection
-says it asked.
+`form_snapshot` matters for the same reason `checklist_instances` has one:
+re-seeding a form must not retroactively change what a completed inspection
+says it asked. Orgs cannot edit these forms, but WE can, and a reworded item
+shipping in March must not silently rewrite what January's report claims to
+have asked.
 
-### Four things the form shapes forced, and why each is not a nicety
+### Three things the form shapes forced, and one I argued for and withdraw
 
-**`failing_answer`, defaulting to `'no'`.** The rule is "a No creates a work
-order or a purchase order", and every item in the Safety form is written so No
-is the bad answer. But the phrasing is the author's choice, not a law: *"Any
-exposed wiring?"* fails on **Yes**. An org editing its own template — which the
-Templates Hub explicitly allows — can write that sentence on any Tuesday, and
-nothing about the answer itself says which way round it goes. Without this
-column that item silently generates a work order every time the property is
-fine, and none when it is not. A default of `'no'` means the three seeded forms
-need no per-item thought; the column exists for the day someone writes the
-fourth.
+**WITHDRAWN — `failing_answer`.** I argued for this column on the grounds that
+an org editing its own template could write *"Any exposed wiring?"*, which
+fails on **Yes**, and silently invert the work-order rule. Orgs cannot edit
+these forms. The only author is us, the phrasing is fixed in the seed, and the
+column would be defending against a mistake by the same people who would set
+its value — which is not a defence, it is a comment with a `DEFAULT`. Dropped.
+
+The underlying hazard is real and does not disappear; it just moves from
+runtime to review. **Every item is phrased so that No is the failure**, and
+that is a rule for whoever writes the next item, enforced by the seed test in
+§10 rather than by a column.
 
 **`parent_item_id` + `show_when`.** "Present in all bedrooms and hallways?
 [Y/N] → *if no*, which room needs one?" is two questions where the second only
@@ -294,12 +298,12 @@ even when the March one is still sitting open, unstarted.
 Quarterly inspections make this the normal case rather than a rare one, and the
 symptom is a maintenance board that accumulates duplicates until a PM stops
 trusting it. Before creating, look for an **open** work order on the same
-`(property_id, template_item_id)`; when one exists, attach the new finding to it
+`(property_id, form_item_id)`; when one exists, attach the new finding to it
 (a `work_order_updates` row plus the new photo) instead of opening a second.
 The finding is still recorded immutably either way — what is deduplicated is
 the *task*, not the *evidence*.
 
-`template_item_id` rather than `wo_category` is the key: two different failures
+`form_item_id` rather than `wo_category` is the key: two different failures
 that both happen to be `wo_category = 'general'` are genuinely two jobs.
 
 ---
@@ -310,7 +314,7 @@ Reuse `maintenance_schedules` with a discriminator:
 
 ```
 creates               'work_order' | 'inspection'    (default 'work_order')
-inspection_template_id (nullable)
+inspection_form_id     (nullable)
 assigned_to_user_id    (nullable)
 anchor_months          smallint[]  (nullable)        -- 1-12, see below
 ```
@@ -430,9 +434,62 @@ server-verified identity or timestamp.
   `addDays(today, 29)`. Overdue stays visible and is styled as overdue.
 - **Owner portal** — posts on completion, failures included, each with its
   linked WO/PO and that record's current status.
-- **Templates Hub** — the three forms live at `/templates`, following the
-  seeded-then-editable pattern already used by `inventory_catalog` →
-  `org_inventory_catalog`.
+- **Maintenance** — where inspections are started, filled and reviewed. See
+  §9a; this is a real nested route rendered as a tab, not a query parameter.
+
+### 9a. Where it lives, and why the URL is not a detail
+
+Under **Maintenance**. Not Templates — nothing here is a template — and not a
+top-level nav item.
+
+**A real nested route, `/maintenance/inspections`, rendered as a tab.** The
+choice between "a tab" and "a submenu item" looks cosmetic and is not, for one
+reason: this is the only offline surface in the dashboard PWA, and **service
+worker scope is path-based**. A service worker can be registered for
+`/maintenance/inspections` and control exactly that subtree. It cannot be
+scoped to `/maintenance?tab=inspections`, because a query string is not part of
+the scope — so a tab implemented as a parameter would either take the whole
+Maintenance page offline or nothing at all. §8's "scoped SW, inspections only"
+decision is what forces a path here.
+
+So: a real route, presented in a `Tabs` bar on the Maintenance page. Visually a
+tab, structurally a path. It also gets back/forward, bookmarking, and a link the
+overdue email can point at, none of which a parameter tab gives for free.
+
+`components/ui/Tabs.tsx` exists and already carries `role="tablist"`,
+`aria-selected` and a focus ring — Maintenance has no tab bar today, so this
+adds the first one and must use that primitive rather than hand-rolling
+(CLAUDE.md, and `check:ui-classes` will not catch a hand-rolled equivalent).
+
+**No nav change.** `NavItem` in `lib/navigation.ts` is a flat list with no
+children, so a genuine sidebar submenu would mean adding nesting to the sidebar
+renderer for a single entry. A tab needs nothing.
+
+### Where the form definition lives
+
+The three forms are platform-owned data with no org copy. Two candidate homes,
+and this repo has already answered the question twice.
+
+`inventory_catalog` and `asset_type_standards` are global seed tables — rows in
+Postgres, no `org_id`, written by migration. That is the precedent for shape.
+But wording changes to an inspection item are frequent early and a migration
+per typo is a bad trade.
+
+`scripts/seed-support-kb.ts` is the precedent for *process*: the content lives
+in the repo, a script projects it into the database, and
+`.github/workflows/seed-support-kb.yml` re-runs it when the source file
+changes. Reviewable in a pull request, versioned in git, and still real rows
+with real foreign keys at the other end.
+
+**Both.** Definition in the repo as the source of truth; a seed script projects
+it into `inspection_forms` / `_sections` / `_items`; CI re-seeds on change. That
+keeps the `form_item_id` foreign key that the repeat-visit dedup (§6) and any
+"this item has failed three quarters running" report depend on, without a
+migration to change a comma.
+
+The seed is **upsert by `key`**, never delete-and-recreate: `inspection_items`
+reference these rows, and re-creating them with new ids would orphan every
+answer ever recorded. `key` is the stable identity; the row id is not.
 
 ### Overdue email — wording is the owner's call
 
@@ -453,8 +510,8 @@ motivating force, no exposure. **This copy must be written or approved by
 | # | Phase | Contents |
 |---|---|---|
 | 1 | Schema + immutability | Tables, completion lock, retention exclusion + guardrail, `assigned_to_user_id` |
-| 2 | The three forms | Platform-seeded, org-editable, in the Templates Hub |
-| 3 | Fill + complete | Tablet UI, scoped SW, draft store, photos |
+| 2 | The three forms | Definition in the repo, seed script + CI re-seed, upsert by `key`. Includes the seed test: every item phrased so No is the failure, every item has a WO/PO/— decision, no two forms ask the same thing |
+| 3 | Fill + complete | Tablet UI at `/maintenance/inspections`, SW scoped to that path, draft store, photos |
 | 4 | Remediation | fail → WO/PO with partial-unique idempotency |
 | 5 | Scheduling | `maintenance_schedules` discriminator |
 | 6 | Surfacing | 30-day dashboard section, overdue email, owner portal |
@@ -502,10 +559,25 @@ reader of the spec can settle.
 5. **What "Indoor" and "Outdoor" must not both contain.** Two of the three
    forms run on the same cadence over the same property. Anything appearing in
    both gets inspected twice and, on a No, generates two work orders for one
-   fault — the repeat-visit dedup in §6 keys on `template_item_id`, so the same
-   physical problem asked twice in two templates is two different keys and it
-   will not catch it. Worth a deliberate pass for overlap when the other two
-   forms land.
+   fault — the repeat-visit dedup in §6 keys on `form_item_id`, so the same
+   physical problem asked in two forms is two different keys and it will not
+   catch it.
+
+   Now that the forms are fixed and platform-authored, this stops being a
+   runtime problem and becomes an **authoring** one, which is strictly easier:
+   it is checkable once, by us, before the seed ships. A test asserting no two
+   forms carry the same `asset_type` + prompt shape is a crude proxy; reading
+   the two forms side by side is the real check. Worth doing when the other two
+   land, not after.
+
+6. **Versioning a fixed form.** `inspection_forms.version` is in the model
+   because the forms will change — an item added, a prompt reworded. Two
+   questions that only matter once the first change lands: does an inspection
+   already in draft when a new version seeds keep the old form (it must — the
+   inspector answered those questions), and does the owner-portal history show
+   which version each past inspection used? The `form_snapshot` on the
+   inspection already makes both answerable; what is undecided is whether the
+   report *says so*, and for an insurance artifact I would argue it should.
 
 ---
 
