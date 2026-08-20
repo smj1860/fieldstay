@@ -442,17 +442,67 @@ retrofitted, because the version that "works" without it looks identical.
 
 ### Service worker scope
 
-**The dashboard PWA has no service worker today.** `app/(dashboard)/layout.tsx`
-links `dashboard-manifest.json` so it is installable, but only
-`app/crew/crew-shell.tsx` and the work-order token page call
-`register('/sw.js')`. That default is what has to be preserved for everything
-outside `/maintenance`.
+### CORRECTION — the dashboard already has a service worker, at root scope
 
-A bad service worker is the worst kind of bug in a PWA: it is sticky, it
-survives a redeploy, and it can make the app unloadable for a user who cannot
-be reached to fix it. Scoping to `/maintenance` is what bounds the blast radius
-— dashboard-wide registration would put every page one bad cache entry away
-from that.
+An earlier draft of this section said "the dashboard PWA has no service worker
+today" and warned against registering one dashboard-wide. **Both halves were
+wrong, and the thing they warned about is already live.**
+
+`components/dashboard-shell.tsx` wraps the entire dashboard and calls
+`useDashboardPushNotifications()`. That hook calls
+`navigator.serviceWorker.register('/sw.js')` **on mount, unconditionally** —
+before any permission prompt, before any opt-in, for every PM who loads any
+page. There is no `scope` option, so the scope defaults to the script's
+location: **`/`**. The whole origin.
+
+And `/sw.js`'s navigate handler has no path allowlist:
+
+```js
+if (request.mode === 'navigate') {
+  fetch(request).then((response) => {
+    if (response.ok && !response.redirected) cache.put(request, copy)   // every page
+  }).catch(() => caches.match(request, { ignoreVary: true }))           // served when offline
+}
+```
+
+So every dashboard page a PM has ever loaded is cached and is served back to
+them when the network fails. `Cache-Control: private, no-cache, no-store` does
+not prevent it — the Cache API is not the HTTP cache and `cache.put()` ignores
+those headers.
+
+**The consequence is exactly the failure this section was written to prevent:**
+a PM at a property with no signal opens `/ops` and gets yesterday's board
+rendered as if it were current, with nothing saying otherwise. Not
+hypothetical, not a risk of the inspections work — today's behaviour, arriving
+as a side effect of push notifications.
+
+### What that changes about the plan
+
+The job is **not** to add a service worker to the dashboard. It is to replace an
+accidental, unscoped one with a deliberate one — which is a smaller and more
+honest piece of work, and it comes with a bug fix attached.
+
+**One worker, with an explicit path allowlist.** Not two registrations:
+
+- Two workers cannot both control a page, and a registration is keyed by
+  **scope**. Registering a second script at scope `/` would not sit alongside
+  `/sw.js` — it would REPLACE it. On a device with both the crew PWA and the
+  dashboard installed (a PM who also cleans), the two would overwrite each
+  other's registration on alternate loads.
+- The push subscription lives on a registration. Churning the registration
+  churns the subscription.
+
+So `/sw.js` stays the single origin-wide worker and gains a rule it should
+always have had: **offline-capable only under an explicit allowlist —
+`/crew` and `/maintenance` — and network-only everywhere else, with no cache
+fallback.** Everything outside the allowlist then fails visibly offline instead
+of silently serving yesterday.
+
+That single change both enables the feature and closes the staleness bug.
+
+A bad service worker remains the worst kind of bug in a PWA — sticky, surviving
+a redeploy, able to make the app unloadable for a user who cannot be reached.
+The allowlist is what bounds the blast radius now that scope cannot.
 
 **This weakens an argument I made earlier.** §9a justified a real
 `/maintenance/inspections` route partly because a service worker cannot be
@@ -474,11 +524,12 @@ a PM at a property with no signal opens `/ops` and gets yesterday's turnover
 board rendered as current. Silent staleness, arriving as a side effect of a
 feature that never asked for it.
 
-**Instead:** a separate `/maintenance-sw.js` registered with
-`{ scope: '/maintenance/' }`. Narrower than its own location, so permitted, and
-the most-specific registration wins if crew's root-scoped worker is also on the
-device. Everything outside that path stays uncontrolled and fails visibly
-offline.
+**Rejected alternative:** a separate `/maintenance-sw.js` scoped to
+`/maintenance/`. It reads cleanly — narrower than its own location, so
+permitted, and most-specific scope wins — but it leaves `/sw.js` still
+root-scoped and still caching every other dashboard page, so the staleness bug
+survives the fix. Two workers to solve a problem one worker caused is the wrong
+shape.
 
 ### Local store — one mechanism, not two
 
@@ -616,7 +667,8 @@ motivating force, no exposure. **This copy must be written or approved by
 |---|---|---|
 | 1 | Schema + immutability | Tables, completion lock, retention exclusion + guardrail, `assigned_to_user_id` |
 | 2 | The three forms | Definition in the repo, seed script + CI re-seed, upsert by `key`. Includes the seed test: every item phrased so No is the failure, every item has a WO/PO/— decision, no two forms ask the same thing |
-| 2a | Offline foundation | Generalize `lib/dexie` beyond the crew PWA; `/maintenance`-scoped SW; per-user+org cache with sign-out and org-switch clearing; extend the dead-letter and sync-coverage guardrails to the new surface |
+| 0 | SW allowlist | Give `/sw.js` an explicit offline allowlist (`/crew`, `/maintenance`), network-only elsewhere. **Standalone bug fix — ships before and independently of everything below**, because the unscoped worker is live today |
+| 2a | Offline foundation | Generalize `lib/dexie` beyond the crew PWA; per-user+org cache with sign-out and org-switch clearing; extend the dead-letter and sync-coverage guardrails to the new surface |
 | 3 | Fill + complete | Tablet UI at `/maintenance/inspections`, offline WO create, photos |
 | 4 | Remediation | fail → WO/PO with partial-unique idempotency |
 | 5 | Scheduling | `maintenance_schedules` discriminator |
