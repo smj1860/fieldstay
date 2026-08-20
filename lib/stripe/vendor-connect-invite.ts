@@ -26,7 +26,14 @@ const CLAIM_STALE_AFTER_MS = 2 * 60 * 1000
  */
 type VendorConnectClaim =
   | { claimed: false }
-  | { claimed: true; claimedAt: string; accountId: string | null; alreadySent: boolean }
+  | {
+      claimed: true
+      claimedAt: string
+      accountId: string | null
+      alreadySent: boolean
+      /** Durable delivery reference from a previous attempt, if one exists. */
+      deliveryRef: string | null
+    }
 
 async function claimVendorConnectInvite(
   supabase: ServiceClient,
@@ -44,7 +51,7 @@ async function claimVendorConnectInvite(
     .eq('id', vendorId)
     .eq('org_id', orgId)
     .or(`stripe_connect_invite_claimed_at.is.null,stripe_connect_invite_claimed_at.lt.${staleBefore}`)
-    .select('stripe_connect_account_id, stripe_connect_invite_sent_at')
+    .select('stripe_connect_account_id, stripe_connect_invite_sent_at, stripe_connect_invite_delivery_ref')
     .maybeSingle()
 
   const claimed = unwrap(claimedRes, { site: 'lib.stripe.vendor-connect-invite.claim', orgId })
@@ -56,6 +63,7 @@ async function claimVendorConnectInvite(
     claimedAt:   now,
     accountId:   claimed.stripe_connect_account_id,
     alreadySent: !!claimed.stripe_connect_invite_sent_at,
+    deliveryRef: claimed.stripe_connect_invite_delivery_ref,
   }
 }
 
@@ -145,10 +153,96 @@ async function getOrCreateVendorStripeAccount(
 }
 
 /**
+ * The durable reference identifying ONE invite delivery, reused across
+ * attempts so a retry cannot deliver a second email.
+ *
+ * ── The defect this closes (GitHub #574) ────────────────────────────────────
+ *
+ * markVendorConnectInviteSent() is deliberately non-fatal: the email has
+ * already gone out by the time it runs, so throwing would not un-send it. But
+ * when that write fails, the only durable record that delivery happened is
+ * lost — and the next cron tick, work-order dispatch, or PM resend sees an
+ * unsent invite and emails the vendor again. The claim does not help: it is
+ * released in a `finally` and goes stale after two minutes by design.
+ *
+ * ── Why the reference is STORED rather than derived ─────────────────────────
+ *
+ * Resend deduplicates on an Idempotency-Key header, but only if the retry
+ * presents the SAME key. Deriving one from the vendor id would make it stable
+ * forever, which would permanently break the PM's "Resend" button — whose
+ * whole purpose is to deliver another email. Storing it lets the two paths
+ * differ: the automatic senders reuse, the PM resend rotates.
+ *
+ * `reuse: false` forces a fresh reference — that is the resend path.
+ */
+async function claimInviteDeliveryRef(
+  supabase: ServiceClient,
+  vendorId: string,
+  orgId: string,
+  existing: string | null,
+  opts: { reuse: boolean },
+  site: string
+): Promise<string> {
+  if (opts.reuse && existing) return existing
+
+  // crypto.randomUUID, not Math.random — this is an idempotency key, and a
+  // predictable one lets an unrelated delivery collide with this vendor's.
+  const ref = crypto.randomUUID()
+
+  const res = await supabase
+    .from('vendors')
+    .update({ stripe_connect_invite_delivery_ref: ref })
+    .eq('id', vendorId)
+    .eq('org_id', orgId)
+    .select('id')
+    .maybeSingle()
+
+  // Same zero-row reasoning as the account persist: an UPDATE matching nothing
+  // resolves { data: null, error: null }, and sending against a reference the
+  // database never stored is the exact hole this function exists to close —
+  // the retry would generate a different one and deduplicate against nothing.
+  const persisted = unwrap(res, { site, orgId })
+  if (!persisted) {
+    throw new Error(
+      `Vendor ${vendorId} matched zero rows while persisting its invite delivery reference — refusing to send an invite that cannot be deduplicated on retry.`
+    )
+  }
+
+  return ref
+}
+
+/**
+ * Drops the stored reference after a send that THREW.
+ *
+ * A throw means the email was not delivered, so the next attempt must be a
+ * genuinely new delivery. Keeping the reference would make that attempt
+ * present a key Resend may already have seen, and the retry of a FAILED send
+ * would be silently deduplicated into never being sent at all — turning a
+ * transient Resend error into a permanently missing invite.
+ */
+async function clearInviteDeliveryRef(
+  supabase: ServiceClient,
+  vendorId: string,
+  orgId: string,
+  site: string
+): Promise<void> {
+  const { error } = await supabase
+    .from('vendors')
+    .update({ stripe_connect_invite_delivery_ref: null })
+    .eq('id', vendorId)
+    .eq('org_id', orgId)
+
+  // Non-fatal: the send already failed and that error is the one worth
+  // surfacing. Reported rather than swallowed, because a reference left behind
+  // makes the NEXT attempt a no-op and that is invisible from the outside.
+  reportQueryError(error, { site, orgId })
+}
+
+/**
  * Marks the invite as sent. The email has already gone out by the time this
  * is called, so a failure here is logged rather than thrown — losing it only
- * means the next attempt re-sends an invite that was already delivered, not
- * that nothing happened.
+ * means the next attempt RE-RUNS, and the stored delivery reference is what
+ * stops that re-run from delivering a second email.
  */
 async function markVendorConnectInviteSent(
   supabase: ServiceClient,
@@ -218,20 +312,38 @@ export async function ensureVendorConnectInvited(
       'lib.stripe.vendor-connect-invite.persist-account'
     )
 
+    // REUSED, not rotated. This is the automatic path — cron and work-order
+    // dispatch — so a run reaching here with a reference already stored means
+    // a previous attempt sent the email and failed to record it. Presenting
+    // that same key is what makes this run a no-op at Resend instead of a
+    // second email to the vendor.
+    const deliveryRef = await claimInviteDeliveryRef(
+      supabase, params.vendorId, params.orgId, claim.deliveryRef, { reuse: true },
+      'lib.stripe.vendor-connect-invite.delivery-ref'
+    )
+
     const onboardingUrl = `${process.env.NEXT_PUBLIC_APP_URL}/api/vendor-connect/${params.vendorConnectToken}/onboard`
 
-    await resend.emails.send({
-      from:    FROM,
-      to:      params.vendorEmail,
-      subject: `${params.orgName} pays invoices via Stripe Connect — set up your payout account`,
-      html:    await renderVendorConnectInviteEmail({
-        vendorName:    params.vendorName,
-        orgName:       params.orgName,
-        pmName:        params.pmName ?? null,
-        woNumber:      params.woNumber ?? null,
-        onboardingUrl,
-      }),
-    })
+    try {
+      await resend.emails.send({
+        from:    FROM,
+        to:      params.vendorEmail,
+        subject: `${params.orgName} pays invoices via Stripe Connect — set up your payout account`,
+        html:    await renderVendorConnectInviteEmail({
+          vendorName:    params.vendorName,
+          orgName:       params.orgName,
+          pmName:        params.pmName ?? null,
+          woNumber:      params.woNumber ?? null,
+          onboardingUrl,
+        }),
+      }, { idempotencyKey: `vendor-connect-invite-${deliveryRef}` })
+    } catch (err) {
+      await clearInviteDeliveryRef(
+        supabase, params.vendorId, params.orgId,
+        'lib.stripe.vendor-connect-invite.clear-delivery-ref'
+      )
+      throw err
+    }
 
     await markVendorConnectInviteSent(
       supabase,
@@ -287,20 +399,38 @@ export async function resendVendorConnectInvite(
       'lib.stripe.vendor-connect-invite.resend-persist-account'
     )
 
+    // ROTATED, not reused — the opposite of the automatic path above. A PM
+    // clicking "Resend" is asking for another email on purpose; presenting the
+    // previous delivery's key would have Resend deduplicate it away and the
+    // button would silently do nothing, which is the same class of defect as
+    // the duplicate it is guarding against, just pointing the other way.
+    const deliveryRef = await claimInviteDeliveryRef(
+      supabase, params.vendorId, params.orgId, claim.deliveryRef, { reuse: false },
+      'lib.stripe.vendor-connect-invite.resend-delivery-ref'
+    )
+
     const onboardingUrl = `${process.env.NEXT_PUBLIC_APP_URL}/api/vendor-connect/${params.vendorConnectToken}/onboard`
 
-    await resend.emails.send({
-      from:    FROM,
-      to:      params.vendorEmail,
-      subject: `Reminder: set up your Stripe payout account for ${params.orgName}`,
-      html:    await renderVendorConnectInviteEmail({
-        vendorName: params.vendorName,
-        orgName:    params.orgName,
-        pmName:     null,
-        woNumber:   null,
-        onboardingUrl,
-      }),
-    })
+    try {
+      await resend.emails.send({
+        from:    FROM,
+        to:      params.vendorEmail,
+        subject: `Reminder: set up your Stripe payout account for ${params.orgName}`,
+        html:    await renderVendorConnectInviteEmail({
+          vendorName: params.vendorName,
+          orgName:    params.orgName,
+          pmName:     null,
+          woNumber:   null,
+          onboardingUrl,
+        }),
+      }, { idempotencyKey: `vendor-connect-invite-${deliveryRef}` })
+    } catch (err) {
+      await clearInviteDeliveryRef(
+        supabase, params.vendorId, params.orgId,
+        'lib.stripe.vendor-connect-invite.resend-clear-delivery-ref'
+      )
+      throw err
+    }
 
     await markVendorConnectInviteSent(
       supabase,
