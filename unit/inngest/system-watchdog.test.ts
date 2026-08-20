@@ -552,6 +552,64 @@ describe('systemWatchdog — duplicated cron ticks', () => {
     )
   })
 
+  /**
+   * TARGET's ticks with a per-tick fanout, oldest first. `fanouts[i]` is how
+   * many times tick i executed, so [2,2,1,1] reads "it was duplicated and then
+   * stopped being duplicated".
+   */
+  function runsWithFanoutSequence(fanouts: number[]) {
+    const others = WATCHED_JOBS
+      .filter((j) => j.id !== TARGET)
+      .map((j, i) => ({
+        function_id: j.id,
+        started_at:  hoursAgo(1),
+        duration_ms: 1_000,
+        run_id:      runId('01M0AJQZR0', `OTHER${i}`),
+      }))
+
+    const target = fanouts.flatMap((fanout, t) =>
+      Array.from({ length: fanout }).map((__, f) => ({
+        function_id: TARGET,
+        started_at:  hoursAgo(fanouts.length - t),
+        duration_ms: 1_000,
+        run_id: runId(`01M0AJQZ${String(t).padStart(2, 'A')}`, `SYNC${f}`),
+      })),
+    )
+
+    return [...others, ...target]
+  }
+
+  it('goes QUIET once the duplication stops, instead of reporting history', async () => {
+    // 2026-08-20, production. The duplicate sync was removed around 01:00 and
+    // the ledger showed zero duplicated ticks for the next fourteen hours — but
+    // the scan reads a 31-hour window, so this alarm kept arriving every hour
+    // and would have gone on until 08:00 the following day.
+    //
+    // Every one of those alerts was indistinguishable from a live one. An alarm
+    // that cannot go out trains its reader to close it unread, which is fatal
+    // for a check whose entire job is to be believed on a day when nothing else
+    // notices.
+    const res = await run(runsWithFanoutSequence([2, 2, 2, 2, 1, 1]))
+
+    expect(res.duplicatedCrons, 'four historical duplicated ticks, but the recent ones are clean').toBe(0)
+  })
+
+  it('still reports duplication that is happening NOW', async () => {
+    // The other half of the same property: going quiet on a fixed problem must
+    // not mean going quiet on a live one.
+    const res = await run(runsWithFanoutSequence([1, 1, 2, 2, 2, 2]))
+    expect(res.duplicatedCrons).toBe(1)
+  })
+
+  it('is not silenced by a single clean latest tick', async () => {
+    // Why the recency window is TWO ticks and not one: a run still in flight
+    // when the watchdog fires records one row, not two, so its tick looks
+    // clean. A one-tick window would let a long-running duplicated cron mask
+    // itself forever.
+    const res = await run(runsWithFanoutSequence([2, 2, 2, 2, 2, 1]))
+    expect(res.duplicatedCrons).toBe(1)
+  })
+
   it('stays quiet when every tick ran exactly once', async () => {
     const res = await run(runsWithFanout(6, 1))
     expect(res.duplicatedCrons).toBe(0)
