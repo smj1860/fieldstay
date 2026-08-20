@@ -43,7 +43,7 @@ and it is what gives the overdue nudge its force.
 | Overdue | Email the assignee. No escalation path — they are the responsible party. |
 | Device | **Tablet/iPad first.** |
 | Offline | **In-app**, on the PM dashboard PWA. Not the crew PWA. |
-| Offline scope | **Inspections only.** Nothing else in the dashboard goes offline. |
+| Offline scope | **Maintenance.** Inspections plus creating a work order — a PM at a property with no signal is doing both on the same visit. Read-only for everything else on the page; see §8. Nothing outside `/maintenance` goes offline. |
 | Which forms | Exactly three: **Property Safety & Risk Mitigation**, **Outdoor Property**, **Indoor Property**. |
 | Editable by orgs? | **No.** These are FIXED FORMS, not templates. Only the platform changes them. No per-org copy, no editing UI, no Templates Hub. |
 | Where it lives | Under **Maintenance** — a tab on the Maintenance page, backed by its own route. Not a top-level nav item, not Templates. |
@@ -371,11 +371,96 @@ thirty hours is worth less to an insurer than one that took four. That argument
 supports blocking the submission. It does not support throwing the data away.
 
 
+### Widened from inspections to Maintenance — 2026-08-20
+
+The original scope was inspections alone. It is now the Maintenance page,
+because the two are the same trip: a PM standing at a property with no signal
+who notices a broken handrail wants to raise a work order, and telling them
+"the inspection works offline but the work order does not" is an arbitrary
+line drawn by our architecture rather than by their job.
+
+This makes one thing simpler and one thing bigger, and both are worth being
+explicit about.
+
+**Simpler:** the bespoke inspection draft store below stops being justified. If
+there is an outbox for offline work orders anyway, inspections should use the
+same one. Two offline mechanisms in one page is how they drift.
+
+**Bigger:** it is a second sync layer. `lib/dexie/*` is scoped to the crew PWA
+and every guardrail around it is crew-shaped — `CREW_SYNCED_TABLES`,
+`crew-sync-coverage`, and `crew-dead-letter-coverage`, which enforces that every
+member of the `MutationTable` union has a retry affordance in
+`app/crew/_components/failed-sync-banner.tsx`. A dashboard outbox built
+alongside would be **unguarded by all of them**, which is precisely the "a
+mutation that dead-letters where nobody can see it is work silently thrown
+away" failure that guardrail exists to prevent.
+
+So: **generalize `lib/dexie` to serve both surfaces, do not fork it.** The
+hard-won rules in CLAUDE.md — write and outbox row in ONE transaction, `failed`
+as `0 | 1` not boolean, `'x' in payload` presence checks, cursor invalidation on
+discard, bounded caches — were each paid for with a production bug. Writing a
+second outbox means paying for them twice.
+
+### Offline WRITES are CREATE ONLY
+
+The line that keeps this affordable, and it is not a limitation of effort:
+
+- **Create a work order offline** — safe. It is a new row nobody else can be
+  touching, so there is no conflict to resolve. Queue it, push it on reconnect.
+- **Edit or complete an existing work order offline** — NOT in scope. The
+  maintenance board is shared: a PM, a second PM and a vendor portal can all
+  touch one work order. Last-write-wins across a six-hour offline gap silently
+  reverts whatever happened while the tablet was in a basement, and neither
+  party ever learns. The crew PWA avoids this because a crew member effectively
+  owns their turnover; nobody owns a work order.
+
+Everything else on the page is **readable** offline and visibly read-only. A
+disabled control with "needs a connection" is a fine answer; a control that
+appears to work and silently loses the change is not.
+
+### Work-order numbers cannot be assigned offline
+
+`wo_number_counters` is a per-org server-side sequence. A device cannot draw
+from it while offline, and pre-allocating blocks per device buys gaps and
+complexity for nothing.
+
+The number is assigned **at sync**. Until then the local record shows no
+number — not a provisional one. A number that changes after the fact is worse
+than no number: it is the identifier a PM reads down the phone to a vendor.
+
+### IndexedDB outlives the session
+
+Caching dashboard data client-side is new, and the dashboard holds more than
+the crew PWA does — costs, vendor contacts, owner-adjacent detail. IndexedDB
+survives sign-out unless something explicitly clears it, so a PM removed from an
+org keeps a readable copy of that org's maintenance board on their tablet
+indefinitely.
+
+The cache is therefore keyed per user AND per org, cleared on sign-out, and
+cleared on org switch. This needs to be built in phase 1 rather than
+retrofitted, because the version that "works" without it looks identical.
+
+### Service worker scope
+
 **The dashboard PWA has no service worker today.** `app/(dashboard)/layout.tsx`
 links `dashboard-manifest.json` so it is installable, but only
 `app/crew/crew-shell.tsx` and the work-order token page call
-`register('/sw.js')`. "Inspections only" is true right now by default. The job
-is to preserve it.
+`register('/sw.js')`. That default is what has to be preserved for everything
+outside `/maintenance`.
+
+A bad service worker is the worst kind of bug in a PWA: it is sticky, it
+survives a redeploy, and it can make the app unloadable for a user who cannot
+be reached to fix it. Scoping to `/maintenance` is what bounds the blast radius
+— dashboard-wide registration would put every page one bad cache entry away
+from that.
+
+**This weakens an argument I made earlier.** §9a justified a real
+`/maintenance/inspections` route partly because a service worker cannot be
+scoped to a query parameter. With the whole of `/maintenance` scoped, a
+`?tab=` would in fact be covered. The route is still the right call — back and
+forward, bookmarks, and a URL the overdue email can link to — but that is a
+weaker set of reasons than the one I gave, and the earlier framing should not
+be read as still load-bearing.
 
 **Do not register the existing `/sw.js` on the dashboard.** Its navigate
 handler caches every page returning 200, with no path scoping:
@@ -389,31 +474,49 @@ a PM at a property with no signal opens `/ops` and gets yesterday's turnover
 board rendered as current. Silent staleness, arriving as a side effect of a
 feature that never asked for it.
 
-**Instead:** a separate `/inspections-sw.js` registered with
-`{ scope: '/inspections/' }`. Narrower than its own location, so permitted, and
+**Instead:** a separate `/maintenance-sw.js` registered with
+`{ scope: '/maintenance/' }`. Narrower than its own location, so permitted, and
 the most-specific registration wins if crew's root-scoped worker is also on the
 device. Everything outside that path stays uncontrolled and fails visibly
 offline.
 
-### Draft store
+### Local store — one mechanism, not two
 
-Self-contained, outside `lib/dexie/*`. No outbox, no cursors, no
-reconciliation — an inspection commits atomically, so none of that machinery
-applies.
+**SUPERSEDED.** This section originally specified a self-contained draft store
+outside `lib/dexie/*`, on the reasoning that an inspection commits atomically
+and therefore needs no outbox, cursors or reconciliation. That was correct for
+inspections alone. It is not correct now: offline work-order creation needs a
+real outbox, and running a bespoke draft store beside it would mean two
+offline mechanisms on one page, two dead-letter surfaces, and two places to
+get the same transaction rule wrong.
 
-- Answers and photo blobs held locally, keyed by inspection id.
-- Survives reload and app restart.
-- Submitted as **one** atomic completion.
-- Photos upload opportunistically when online; otherwise held locally and
-  flushed at submit.
+Inspections use the same outbox. What was going to be a special case becomes
+one more mutation type:
+
+- Cached for reading: properties, vendors, assets, maintenance schedules, open
+  work orders. All bounded by the org's plan-capped property count — at 50
+  properties that is roughly 1,050 assets and 900 schedules, which is
+  comfortable for IndexedDB, and both figures come from the live per-property
+  ratios measured during the `-org-scoped` semgrep audit rather than a guess.
+- Queued for writing: a new work order, and an inspection submission.
+- Photo blobs go through the `pending_photo_uploads` pattern the crew PWA
+  already has, for both.
+- An inspection still submits as **one** atomic completion. That property is
+  about the inspection's own semantics and survives the change of mechanism.
 
 ### iOS risk, stated rather than buried
 
 Safari can evict storage from installed PWAs under pressure. The UI must show
 clearly and continuously when work is **held on this device** versus
-**submitted**, and the draft must be genuinely durable. This is the single
-biggest technical risk in the feature and the thing most likely to force a
-rethink after real-hardware testing.
+**submitted**, and the local store must be genuinely durable. This is the
+single biggest technical risk in the feature and the thing most likely to force
+a rethink after real-hardware testing.
+
+Widening the scope to work orders raises the stakes rather than changing them.
+An evicted inspection draft is a wasted visit; an evicted work order is a
+repair nobody knows was requested. Both need the same treatment — visible
+held-on-device state, and a dead-letter surface a PM can actually reach — which
+is the argument for one outbox with one banner rather than two.
 
 ### The blank PDF still exists
 
@@ -449,8 +552,10 @@ worker scope is path-based**. A service worker can be registered for
 `/maintenance/inspections` and control exactly that subtree. It cannot be
 scoped to `/maintenance?tab=inspections`, because a query string is not part of
 the scope — so a tab implemented as a parameter would either take the whole
-Maintenance page offline or nothing at all. §8's "scoped SW, inspections only"
-decision is what forces a path here.
+Maintenance page offline or nothing at all. §8's scoped-service-worker
+decision was what forced a path here — see the note at the end of §8: once the
+whole of `/maintenance` is scoped, that argument no longer holds and the route
+survives on its weaker reasons.
 
 So: a real route, presented in a `Tabs` bar on the Maintenance page. Visually a
 tab, structurally a path. It also gets back/forward, bookmarking, and a link the
@@ -511,7 +616,8 @@ motivating force, no exposure. **This copy must be written or approved by
 |---|---|---|
 | 1 | Schema + immutability | Tables, completion lock, retention exclusion + guardrail, `assigned_to_user_id` |
 | 2 | The three forms | Definition in the repo, seed script + CI re-seed, upsert by `key`. Includes the seed test: every item phrased so No is the failure, every item has a WO/PO/— decision, no two forms ask the same thing |
-| 3 | Fill + complete | Tablet UI at `/maintenance/inspections`, SW scoped to that path, draft store, photos |
+| 2a | Offline foundation | Generalize `lib/dexie` beyond the crew PWA; `/maintenance`-scoped SW; per-user+org cache with sign-out and org-switch clearing; extend the dead-letter and sync-coverage guardrails to the new surface |
+| 3 | Fill + complete | Tablet UI at `/maintenance/inspections`, offline WO create, photos |
 | 4 | Remediation | fail → WO/PO with partial-unique idempotency |
 | 5 | Scheduling | `maintenance_schedules` discriminator |
 | 6 | Surfacing | 30-day dashboard section, overdue email, owner portal |
