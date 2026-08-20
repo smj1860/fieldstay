@@ -172,12 +172,10 @@ function CheckDot() {
 // proxy.ts already made this argument at the middleware layer, under the
 // heading "ANONYMOUS TRAFFIC PAYS NOTHING". The pages did the work anyway.
 export default function HostsPage() {
-  const isLoggedIn = false
-
   // Absolute against the APP origin -- see /strops's identical comment.
   // Supabase's cookie writer sets no `domain`, so a relative /signup here
   // would create a session the app subdomain never sees.
-  const ctaHref   = isLoggedIn ? appUrl('/ops') : appUrl('/signup?next=/onboarding')
+  const ctaHref   = appUrl('/signup?next=/onboarding')
   const loginHref = appUrl('/login')
 
   return (
@@ -199,10 +197,10 @@ export default function HostsPage() {
                 children live at the root (/ops, /turnovers, ...). /ownerrez's
                 nav links to /dashboard and 404s; not repeating that here. */}
             <Link
-              href={isLoggedIn ? appUrl('/ops') : loginHref}
+              href={loginHref}
               className="text-sm text-white/58 hover:text-white transition-colors"
             >
-              {isLoggedIn ? 'Dashboard' : 'Log In'}
+              Log In
             </Link>
           </nav>
 
@@ -479,14 +477,12 @@ export default function HostsPage() {
             >
               Start Your Free 14-Day Trial
             </Link>
-            {!isLoggedIn && (
-              <p className="text-sm text-[var(--mkt-ink)]/60">
-                Already have an account?{' '}
-                <Link href={loginHref} className="text-[var(--mkt-ink)] font-semibold underline hover:no-underline transition-all">
-                  Log in
-                </Link>
-              </p>
-            )}
+            <p className="text-sm text-[var(--mkt-ink)]/60">
+              Already have an account?{' '}
+              <Link href={loginHref} className="text-[var(--mkt-ink)] font-semibold underline hover:no-underline transition-all">
+                Log in
+              </Link>
+            </p>
           </div>
 
           <p className="mt-10 text-sm text-[var(--mkt-ink)]/50">

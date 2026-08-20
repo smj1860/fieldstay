@@ -11,25 +11,43 @@ import type { Ratelimit } from '@upstash/ratelimit'
 
 // ── Content Security Policy ────────────────────────────────────────────────
 // Generated fresh per request so script-src can carry a per-request nonce
-// instead of a blanket 'unsafe-inline' — Next.js automatically stamps that
-// nonce onto the inline <script>self.__next_f.push()</script> tags it uses
-// in production to stream the RSC/hydration payload, once it sees a
-// 'nonce-...' source in the response's CSP header. This must be the only
-// place the app sets this header — a second static CSP (e.g. in
-// next.config.ts) would make the browser enforce the *intersection* of both,
-// silently dropping the nonce and reintroducing the hydration breakage this
-// replaces.
-function buildCsp(nonce: string, isDev: boolean) {
+// instead of a blanket 'unsafe-inline'. Next.js stamps that nonce onto the
+// inline <script>self.__next_f.push()</script> tags it uses in production to
+// stream the RSC/hydration payload.
+//
+// It reads the nonce from the REQUEST's Content-Security-Policy header, not
+// the response's — see getScriptNonceFromHeader() in
+// node_modules/next/dist/server/app-render/app-render.js. This comment used to
+// say "the response's CSP header", which mattered: it made the headers() call
+// in app/layout.tsx look load-bearing for those 13 inline scripts, when in
+// fact that call only ever nonced one <Script src=...> tag and cost the whole
+// app static rendering. Verified against production HTML on 2026-08-20 (13
+// inline scripts, all nonced, matching the response header's nonce).
+//
+// This must be the only place the app sets this header — a second static CSP
+// (e.g. in next.config.ts) would make the browser enforce the *intersection*
+// of both, silently dropping the nonce and reintroducing the hydration
+// breakage this replaces.
+function buildCsp(nonce: string | null, isDev: boolean) {
+  // A PRERENDERED page's inline scripts carry no nonce and never can: the
+  // HTML is built once, before any request exists, so there is nothing for
+  // Next to stamp them with. Serving such a page under `'nonce-...'` blocks
+  // all ~15 of its inline RSC payload scripts and the page never hydrates.
+  // Measured against .next/server/app/dpa.html on 2026-08-20: 15 inline
+  // script tags, 0 with a nonce. See PRERENDERED_ROUTES below.
+  const inlineScripts = nonce ? `'nonce-${nonce}'` : "'unsafe-inline'"
+
   return [
     // Locked-down default — no blanket https: source
     "default-src 'self'",
 
-    // Scripts: nonce covers Next.js's own inline hydration scripts;
-    // wasm-unsafe-eval required by Supabase JS client. Dev mode additionally
-    // needs 'unsafe-eval' for Turbopack's eval()-based module wrapping/HMR.
+    // Scripts: nonce (or 'unsafe-inline' on prerendered paths) covers
+    // Next.js's own inline hydration scripts; wasm-unsafe-eval required by
+    // the Supabase JS client. Dev mode additionally needs 'unsafe-eval' for
+    // Turbopack's eval()-based module wrapping/HMR.
     isDev
-      ? `script-src 'self' 'nonce-${nonce}' 'unsafe-eval' 'wasm-unsafe-eval'`
-      : `script-src 'self' 'nonce-${nonce}' 'wasm-unsafe-eval'`,
+      ? `script-src 'self' ${inlineScripts} 'unsafe-eval' 'wasm-unsafe-eval'`
+      : `script-src 'self' ${inlineScripts} 'wasm-unsafe-eval'`,
 
     // Styles: 'unsafe-inline' required for the codebase's established
     // style={{ ... }} convention with CSS variables. Inline styles are CSS,
@@ -65,8 +83,46 @@ function buildCsp(nonce: string, isDev: boolean) {
   ].join('; ')
 }
 
-function withCsp(response: NextResponse, nonce: string) {
-  response.headers.set('Content-Security-Policy', buildCsp(nonce, process.env.NODE_ENV !== 'production'))
+// ── Prerendered routes ─────────────────────────────────────────────────────
+// Exactly the pages that `next build` reports as ○ (Static): pure marketing
+// and legal content compiled from constants in this repo, with no dynamic API
+// anywhere in their tree. Their HTML is built once and served from the CDN,
+// so their inline scripts cannot carry a per-request nonce and they need the
+// nonce-free CSP variant (see buildCsp).
+//
+// EXACT match, not prefix. `/hosts/anything` is a 404, which renders the
+// dynamic not-found page — that one still gets a real nonce, and should.
+//
+// Two failure modes this list has, in opposite directions:
+//   - a path listed here that is NOT actually prerendered gets
+//     `'unsafe-inline'` for nothing: a security relaxation buying zero.
+//   - a path prerendered but NOT listed here gets a nonced CSP its nonce-less
+//     HTML cannot satisfy: the page renders and never hydrates.
+// Both are silent in CI and invisible until a browser loads the page, which is
+// why unit/guardrails/marketing-pages-crawlable.test.ts cross-checks this list
+// against the page files and against app/layout.tsx staying static.
+const PRERENDERED_ROUTES = new Set([
+  '/',
+  '/dpa',
+  '/hosts',
+  '/strops',
+  '/ownerrez',
+  '/hospitable',
+  '/privacy',
+  '/terms',
+])
+
+export function isPrerenderedRoute(pathname: string): boolean {
+  return PRERENDERED_ROUTES.has(pathname)
+}
+
+function withCsp(response: NextResponse, nonce: string, pathname?: string) {
+  // `pathname` omitted → keep the nonce. Every redirect and throttle response
+  // is generated per request and carries no prerendered HTML, so the strict
+  // variant is always correct for them; defaulting the other way would hand
+  // out 'unsafe-inline' on paths nobody audited.
+  const effectiveNonce = pathname !== undefined && isPrerenderedRoute(pathname) ? null : nonce
+  response.headers.set('Content-Security-Policy', buildCsp(effectiveNonce, process.env.NODE_ENV !== 'production'))
   return response
 }
 
@@ -360,7 +416,7 @@ async function enforceTokenRouteRateLimit(
 }
 
 function bypassResponse(request: NextRequest, pathname: string, nonce: string): NextResponse {
-  const response = withCsp(NextResponse.next({ request }), nonce)
+  const response = withCsp(NextResponse.next({ request }), nonce, pathname)
 
   // Hospitable launch promo attribution — set on every /hospitable visit so
   // createCheckoutSession() can later tell a landing-page-driven signup
@@ -421,7 +477,7 @@ export async function proxy(request: NextRequest) {
   const classification = classifyRoute(pathname)
 
   if (classification === 'bypass') return bypassResponse(request, pathname, nonce)
-  if (classification === 'token')  return withCsp(NextResponse.next({ request }), nonce)
+  if (classification === 'token')  return withCsp(NextResponse.next({ request }), nonce, pathname)
 
   const isPublic = classification === 'public'
 
@@ -444,7 +500,7 @@ export async function proxy(request: NextRequest) {
   // the users with the biggest sessions as anonymous, and stops redirecting
   // them away from /login.
   if (isPublic && !hasSessionCookie(request)) {
-    return withCsp(NextResponse.next({ request }), nonce)
+    return withCsp(NextResponse.next({ request }), nonce, pathname)
   }
 
   const { supabaseResponse, user } = await updateSession(request)
@@ -456,7 +512,7 @@ export async function proxy(request: NextRequest) {
 
   supabaseResponse.headers.set('x-pathname', pathname)
 
-  return withCsp(supabaseResponse, nonce)
+  return withCsp(supabaseResponse, nonce, pathname)
 }
 
 /**

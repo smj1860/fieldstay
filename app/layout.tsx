@@ -1,5 +1,4 @@
 import type { Metadata, Viewport } from 'next'
-import { headers }                   from 'next/headers'
 import Script                        from 'next/script'
 import localFont from 'next/font/local'
 import { Analytics } from '@vercel/analytics/next'
@@ -54,37 +53,61 @@ export const viewport: Viewport = {
   themeColor:   '#0a1628',
 }
 
-export const dynamic = 'force-dynamic'
+// THIS LAYOUT MUST NOT BE DYNAMIC, AND MUST NOT READ THE NONCE.
+//
+// It used to do both — `export const dynamic = 'force-dynamic'` plus
+// `(await headers()).get('x-nonce')`. Either one alone makes EVERY route in
+// the app `ƒ (Dynamic)`, because segment config and dynamic-API usage in a
+// layout apply to the whole subtree and a child cannot opt back in
+// (`export const dynamic = 'force-static'` on app/dpa/page.tsx was tried
+// against a real build on 2026-08-20: still ƒ).
+//
+// So all seven marketing and legal pages were server-rendered on every
+// request and returned `cache-control: private, no-cache, no-store` —
+// verified live. Nothing in them is per-request; they are compiled from
+// constants in this repo.
+//
+// Neither call was buying anything:
+//
+//   - `headers()` was NOT what nonces Next's own inline hydration scripts.
+//     Next reads the nonce itself, from the REQUEST's Content-Security-Policy
+//     header (node_modules/next/dist/server/app-render/app-render.js —
+//     `getScriptNonceFromHeader(headers['content-security-policy'])`). That
+//     path is untouched by this file.
+//   - the `nonce` prop below only ever covered the ONE <Script src=...> tag,
+//     and the comment on it already conceded that `'self'` permits a
+//     same-origin external script without a nonce.
+//
+// What DOES depend on this: a prerendered page's inline scripts carry no
+// nonce (the HTML predates the request), so proxy.ts serves those paths a
+// CSP with `'unsafe-inline'` and no nonce instead. If `force-dynamic` or a
+// dynamic API comes back here, those pages go dynamic again and that CSP
+// relaxation becomes a pure security loss with nothing bought. That is why
+// unit/guardrails/marketing-pages-crawlable.test.ts asserts the ABSENCE of
+// both in this file.
 
-export default async function RootLayout({
+export default function RootLayout({
   children,
 }: Readonly<{
   children: React.ReactNode
 }>) {
-  // Read the per-request nonce the middleware (proxy.ts) generates and
-  // sets on the x-nonce request header. Calling headers() here is what
-  // signals Next.js to apply this same nonce to its own internally
-  // injected scripts (the streaming/hydration scripts CSP was blocking).
-  // This call is also itself a dynamic API — it forces this layout, and
-  // everything under it, out of static rendering on its own.
-  const nonce = (await headers()).get('x-nonce') ?? undefined
-
   return (
     <html lang="en" suppressHydrationWarning
           className={inter.variable}>
       <head>
         {/*
-          Theme init — loaded from static file to avoid requiring
-          'unsafe-inline' on script-src in the Content Security Policy.
+          Theme init — loaded from a static file rather than written inline,
+          so script-src never needs 'unsafe-inline' for it.
           strategy="beforeInteractive" guarantees it runs before paint,
           preventing a flash of the wrong theme.
 
-          nonce is added defensively here even though 'self' already
-          permits this same-origin external file under the current CSP —
-          see self-audit for why this one prop isn't fully confirmed
-          necessary, unlike everything else in this file.
+          No nonce: this is an EXTERNAL same-origin script, which `'self'`
+          already permits under every CSP variant proxy.ts emits. The nonce
+          prop that used to be here was described in its own comment as
+          defensive and unconfirmed, and it cost a headers() call that made
+          the entire app dynamic — see the block above.
         */}
-        <Script src="/theme-init.js" strategy="beforeInteractive" nonce={nonce} />
+        <Script src="/theme-init.js" strategy="beforeInteractive" />
       </head>
       <body suppressHydrationWarning>
         <SessionRefreshGuard />

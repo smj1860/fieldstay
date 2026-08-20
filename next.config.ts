@@ -9,6 +9,31 @@ const nextConfig: NextConfig = {
         destination: '/crew-invite/:token',
         permanent: false,
       },
+
+      // www → apex, 308.
+      //
+      // www.fieldstay.app was a live alias returning 200, not a redirect —
+      // verified 2026-08-20. Every marketing page therefore existed at two
+      // https URLs with identical content, and consolidation rested entirely
+      // on the canonical tag. Google reported exactly that for the homepage:
+      // "Alternate page with proper canonical tag — https://www.fieldstay.app/".
+      // That status is benign, but a canonical tag is a HINT; a 308 is not.
+      //
+      // Scoped by host so it cannot touch app.fieldstay.app (the app origin,
+      // where the session cookie lives) or fieldstay.app itself. The apex is
+      // the canonical everywhere in this repo — see marketingUrl() in
+      // lib/marketing.ts and app/sitemap.ts.
+      //
+      // Vercel's domain settings can do this at the edge without a function
+      // invocation, which is marginally cheaper; this lives in the repo so the
+      // behaviour is versioned and reviewable rather than a dashboard toggle
+      // nobody can see in a diff.
+      {
+        source:      '/:path*',
+        has:         [{ type: 'host', value: 'www.fieldstay.app' }],
+        destination: 'https://fieldstay.app/:path*',
+        permanent:   true,
+      },
     ]
   },
 

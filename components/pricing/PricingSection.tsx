@@ -24,8 +24,7 @@ import Link from "next/link";
 import { pricingTiers } from "./plan-tiers";
 
 interface PricingSectionProps {
-  isLoggedIn: boolean;
-  /** Drives the connect/signup hrefs. */
+  /** Drives the signup href. */
   provider: "ownerrez" | "hospitable";
   /**
    * Feature bullets for the ENTRY tier, which carries the complete list —
@@ -36,14 +35,18 @@ interface PricingSectionProps {
   entryFeatures: readonly string[];
 }
 
-export default function PricingSection({ isLoggedIn, provider, entryFeatures }: Readonly<PricingSectionProps>) {
+export default function PricingSection({ provider, entryFeatures }: Readonly<PricingSectionProps>) {
   const [annual, setAnnual] = useState(false);
 
   const tiers = pricingTiers(entryFeatures);
 
-  const ctaHref = isLoggedIn
-    ? `/api/integrations/${provider}/connect`
-    : `/signup?provider=${provider}&next=/onboarding`;
+  // Always the signup href. The logged-in `/api/integrations/{provider}/connect`
+  // branch was unreachable: the pages that render this stopped resolving a
+  // session on 2026-08-19 (it forced dynamic rendering on a page whose whole
+  // job is to be fetched by strangers), so the prop arrived hardcoded false.
+  // A signed-in visitor following this lands on /signup, which proxy.ts
+  // redirects to /ops — so nothing is lost but a shortcut.
+  const ctaHref = `/signup?provider=${provider}&next=/onboarding`;
 
   return (
     <div>
