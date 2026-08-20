@@ -229,6 +229,27 @@ function findSlowJobs(rows: JobRunRow[], watched: readonly string[]): SlowJob[] 
  */
 const DUPLICATE_MIN_TICKS = 2
 
+/**
+ * How many of the MOST RECENT ticks the duplication must still be visible in.
+ *
+ * Without this the check reports history, not state. The scan reads a 31-hour
+ * window, so a duplication that was fixed at 01:00 kept firing this alarm every
+ * hour until 08:00 the FOLLOWING day — thirty-one hours of alerts about a
+ * resolved problem, each one indistinguishable from a live one. That happened
+ * on 2026-08-20: the duplicate sync was removed, the ledger showed zero
+ * duplicated ticks for the next fourteen hours, and the alarm kept arriving.
+ *
+ * An alarm that cannot go out is worse than no alarm, because it trains its
+ * reader to close it unread — and this one exists precisely to be believed on
+ * a day when nothing else notices.
+ *
+ * TWO, not one, so a tick that is merely still in flight when the watchdog runs
+ * cannot silence a live duplication. Both runs of a duplicated tick finish
+ * within a minute of each other in practice, but a long run outliving the
+ * hourly watchdog would otherwise mask itself forever.
+ */
+const DUPLICATE_RECENT_TICKS = 2
+
 /** ULID timestamp length — the run's creation millisecond. See run-id.ts. */
 const TICK_PREFIX_LEN = 10
 
@@ -297,6 +318,16 @@ function findDuplicatedCrons(rows: JobRunRow[], watched: readonly string[]): Dup
     }
 
     if (duplicatedTicks < DUPLICATE_MIN_TICKS) return []
+
+    // PERSISTENT (above) *and* CURRENT (here). A ULID prefix sorts
+    // lexicographically in time order — same length, same alphabet, most
+    // significant digit first — so the newest ticks are simply the last ones.
+    const stillHappening = [...ticks.entries()]
+      .sort(([a], [b]) => (a < b ? 1 : -1))
+      .slice(0, DUPLICATE_RECENT_TICKS)
+      .some(([, runs]) => runs.size > 1)
+
+    if (!stillHappening) return []
     return { id, ticks: ticks.size, runs: totalRuns, worstFanout }
   })
 }
