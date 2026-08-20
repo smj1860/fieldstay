@@ -103,8 +103,18 @@ describe('/hosts SEO plumbing', () => {
 describe('/hosts links cross into the app correctly', () => {
   it('sends every authenticated-flow link to the APP origin absolutely', () => {
     expect(page).toContain("appUrl('/signup?next=/onboarding')")
-    expect(page).toContain("appUrl('/ops')")
     expect(page).toContain("appUrl('/login')")
+
+    // appUrl('/ops') is deliberately ABSENT now. It was the logged-in half of
+    // a ternary on a `const isLoggedIn = false` that had been hardcoded since
+    // 2026-08-19, when the page stopped resolving a session — so the branch
+    // could not render and the nav always said "Log In". Removed 2026-08-20
+    // along with the same dead branch on /ownerrez and /hospitable.
+    //
+    // Asserting its absence is stronger than asserting its presence was: it
+    // pins that this page does no auth-dependent rendering, which is what lets
+    // it prerender at all (see unit/guardrails/marketing-pages-crawlable).
+    expect(page).not.toContain("appUrl('/ops')")
   })
 
   it('has no relative /signup or /login left anywhere', () => {

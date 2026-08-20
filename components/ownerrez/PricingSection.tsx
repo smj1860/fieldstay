@@ -17,10 +17,9 @@ const ENTRY_FEATURES = [
   "RepuGuard reputation management",
 ] as const;
 
-export default function PricingSection({ isLoggedIn }: Readonly<{ isLoggedIn: boolean }>) {
+export default function PricingSection() {
   return (
     <SharedPricingSection
-      isLoggedIn={isLoggedIn}
       provider="ownerrez"
       entryFeatures={ENTRY_FEATURES}
     />

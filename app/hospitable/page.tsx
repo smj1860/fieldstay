@@ -66,8 +66,6 @@ export const metadata: Metadata = {
 // proxy.ts already made this argument at the middleware layer, under the
 // heading "ANONYMOUS TRAFFIC PAYS NOTHING". The pages did the work anyway.
 export default function HospitablePage() {
-  const isLoggedIn = false
-
   return (
     <div className="min-h-screen">
 
@@ -98,18 +96,12 @@ export default function HospitablePage() {
               <span className="text-white">Field</span>
               <span className="text-gold-300">Stay</span>
             </span>
-            {isLoggedIn ? (
-              <Link href="/dashboard" className="text-sm text-white/58 hover:text-white transition-colors">
-                Dashboard
-              </Link>
-            ) : (
-              <Link
-                href="/login?next=/api/integrations/hospitable/connect"
-                className="text-sm text-white/58 hover:text-white transition-colors"
-              >
-                Log In
-              </Link>
-            )}
+            <Link
+              href="/login?next=/api/integrations/hospitable/connect"
+              className="text-sm text-white/58 hover:text-white transition-colors"
+            >
+              Log In
+            </Link>
           </nav>
 
           {/* Hospitable Partner Badge — small white pill, true badge scale.
@@ -243,7 +235,7 @@ export default function HospitablePage() {
       ══════════════════════════════════════════ */}
       <div className="bg-white">
         <div className="max-w-6xl mx-auto px-6 py-20">
-          <PricingSection isLoggedIn={isLoggedIn} />
+          <PricingSection />
         </div>
       </div>
 
@@ -379,42 +371,23 @@ export default function HospitablePage() {
             🔒 First 100 accounts get a 2-year price lock — no extra steps, it&apos;s automatic.
           </p>
 
-          {isLoggedIn ? (
-            <div className="flex flex-col items-center gap-3">
-              {/* Plain <a>, not <Link> — this route 302s straight to Hospitable's
-                  OAuth authorize URL. Link prefetches visible hrefs via
-                  fetch() on mount, which follows the redirect into a
-                  connect-src CSP violation and crashes the page on load.
-                  (Same fix as app/ownerrez/page.tsx — carried forward here.) */}
-              <a
-                href="/api/integrations/hospitable/connect"
-                className="inline-block bg-brand-800 text-white font-bold px-10 py-4 rounded-xl hover:bg-[#162a4a] transition-colors text-lg"
-              >
-                Connect Hospitable →
-              </a>
-              <p className="text-sm text-[#0a1628]/60">
-                You&apos;re already signed in. One click to connect.
-              </p>
-            </div>
-          ) : (
-            <div className="max-w-sm mx-auto">
+          <div className="max-w-sm mx-auto">
+            <Link
+              href="/signup?provider=hospitable&next=/onboarding"
+              className="block w-full bg-brand-800 text-white font-bold px-8 py-4 rounded-xl hover:bg-[#162a4a] transition-colors text-lg text-center mb-4"
+            >
+              Create your FieldStay account
+            </Link>
+            <p className="text-sm text-[#0a1628]/60">
+              Already have an account?{' '}
               <Link
-                href="/signup?provider=hospitable&next=/onboarding"
-                className="block w-full bg-brand-800 text-white font-bold px-8 py-4 rounded-xl hover:bg-[#162a4a] transition-colors text-lg text-center mb-4"
+                href="/login"
+                className="text-[#0a1628] font-semibold underline hover:no-underline transition-all"
               >
-                Create your FieldStay account
+                Log in
               </Link>
-              <p className="text-sm text-[#0a1628]/60">
-                Already have an account?{' '}
-                <Link
-                  href="/login"
-                  className="text-[#0a1628] font-semibold underline hover:no-underline transition-all"
-                >
-                  Log in
-                </Link>
-              </p>
-            </div>
-          )}
+            </p>
+          </div>
 
           <p className="mt-10 text-sm text-[#0a1628]/50">
             Questions?{' '}

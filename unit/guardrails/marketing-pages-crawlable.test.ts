@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest'
 import { readFileSync, existsSync } from 'node:fs'
 import { join } from 'node:path'
-import { classifyRoute } from '@/proxy'
+import { classifyRoute, isPrerenderedRoute } from '@/proxy'
 
 // ============================================================================
 // EVERY PUBLIC MARKETING AND LEGAL PAGE MUST BE ANONYMOUSLY REACHABLE, AND
@@ -47,6 +47,7 @@ import { classifyRoute } from '@/proxy'
  * render.
  */
 const PUBLIC_MARKETING_PAGES = [
+  '/',
   '/hosts',
   '/strops',
   '/ownerrez',
@@ -56,7 +57,30 @@ const PUBLIC_MARKETING_PAGES = [
   '/dpa',
 ] as const
 
-const pageFile = (route: string) => join(process.cwd(), 'app', route.slice(1), 'page.tsx')
+const pageFile = (route: string) =>
+  join(process.cwd(), 'app', route === '/' ? '' : route.slice(1), 'page.tsx')
+
+/**
+ * Source with its comments removed, so a scan cannot read an explanation as a
+ * live call site.
+ *
+ * Block comments are stripped FIRST and as a whole, not line-by-line on a `*`
+ * prefix. A line-prefix filter misses the interior of a `{/* ... *\/}` JSX
+ * comment, whose lines begin with ordinary prose — which is precisely how the
+ * first version of the layout check below failed: app/layout.tsx explains, in
+ * a JSX comment, that the removed `nonce` prop "cost a headers() call", and
+ * the scan matched its own documentation.
+ *
+ * `//` is only honoured at the start of a trimmed line, so a URL keeps its
+ * scheme.
+ */
+function stripComments(src: string): string {
+  return src
+    .replace(/\/\*[\s\S]*?\*\//g, '')
+    .split('\n')
+    .filter((l) => !l.trim().startsWith('//'))
+    .join('\n')
+}
 
 describe('guardrail: public marketing and legal pages are crawlable', () => {
   it('every one has a page file — the list cannot rot into naming pages that do not exist', () => {
@@ -90,18 +114,11 @@ describe('guardrail: public marketing and legal pages are crawlable', () => {
     // A single cookies() call forces dynamic rendering, so the page can never
     // be statically generated or CDN-cached no matter what else is done to it.
     const dynamic = PUBLIC_MARKETING_PAGES.filter((route) => {
-      const src = readFileSync(pageFile(route), 'utf8')
-      // Comments are stripped: these files now DOCUMENT the removed call, and
-      // a naive scan reads that prose as a live call site — the trap that has
+      // Comments stripped: these files now DOCUMENT the removed call, and a
+      // naive scan reads that prose as a live call site — the trap that has
       // already made two guardrails in this directory fail on the very change
-      // that fixed them.
-      const code = src
-        .split('\n')
-        .filter((l) => {
-          const t = l.trim()
-          return !t.startsWith('//') && !t.startsWith('*') && !t.startsWith('/*')
-        })
-        .join('\n')
+      // that fixed them, and that this file's own layout check hit again.
+      const code = stripComments(readFileSync(pageFile(route), 'utf8'))
       return /auth\.getUser\s*\(/.test(code) || /\bcookies\s*\(\s*\)/.test(code)
     })
 
@@ -116,6 +133,67 @@ describe('guardrail: public marketing and legal pages are crawlable', () => {
       'Swapping a CTA for logged-in visitors is NOT a reason: proxy.ts already',
       'redirects an authenticated visitor away from /login and /signup to /ops,',
       'so the logged-out CTA lands them in the app regardless.',
+    ].join('\n')).toEqual([])
+  })
+
+  // ── 3. Prerendering, and the CSP that depends on it ───────────────────────
+  //
+  // Added 2026-08-20. The two fixes above stopped the pages doing auth work,
+  // but a build proved every route in the app was still `ƒ (Dynamic)` and
+  // returning `cache-control: private, no-cache, no-store` — because
+  // app/layout.tsx carried BOTH `export const dynamic = 'force-dynamic'` and
+  // an `await headers()` call, either of which forces the whole subtree
+  // dynamic. A child cannot opt back in: `export const dynamic =
+  // 'force-static'` on app/dpa/page.tsx was tried against a real build and
+  // the route stayed ƒ.
+  //
+  // Removing both makes exactly these pages prerender. That in turn REQUIRES
+  // proxy.ts to serve them a nonce-free CSP, because prerendered HTML's
+  // inline RSC scripts carry no nonce (measured: .next/server/app/dpa.html
+  // has 15 inline script tags, 0 nonced) and a nonced CSP blocks all of them.
+  //
+  // The two halves are a matched pair, and breaking either one alone is
+  // SILENT — CI stays green, and you find out from a browser console or from
+  // a response header nobody checks. So both are asserted here.
+
+  it('the root layout stays static — the thing that makes prerendering possible', () => {
+    // Comments stripped: this file DOCUMENTS both removed calls at length,
+    // including inside a JSX comment. See stripComments.
+    const code = stripComments(readFileSync(join(process.cwd(), 'app', 'layout.tsx'), 'utf8'))
+
+    expect(code, [
+      'app/layout.tsx sets `dynamic` again.',
+      '',
+      'Segment config on the ROOT layout applies to every route in the app, and',
+      'a child cannot override it. This single line turns all eight prerendered',
+      'marketing pages back into per-request server renders -- and worse than',
+      'undoing the win, it makes proxy.ts\'s `unsafe-inline` CSP for those paths',
+      'a pure security relaxation buying nothing at all.',
+    ].join('\n')).not.toMatch(/export\s+const\s+dynamic\s*=/)
+
+    expect(code, [
+      'app/layout.tsx uses a dynamic API (headers/cookies/draftMode).',
+      '',
+      'Same blast radius as `dynamic` above: one call in the root layout makes',
+      'every route in the app dynamic.',
+      '',
+      'If this is back for the CSP nonce, it is not needed. Next.js reads the',
+      'nonce itself from the REQUEST Content-Security-Policy header --',
+      'getScriptNonceFromHeader() in next/dist/server/app-render/app-render.js',
+      '-- and stamps its own inline scripts without any help from this file.',
+    ].join('\n')).not.toMatch(/\b(headers|cookies|draftMode)\s*\(\s*\)/)
+  })
+
+  it('every page that prerenders is in proxy.ts PRERENDERED_ROUTES', () => {
+    const missing = PUBLIC_MARKETING_PAGES.filter((route) => !isPrerenderedRoute(route))
+
+    expect(missing, [
+      'A prerendered marketing page is missing from PRERENDERED_ROUTES in proxy.ts.',
+      '',
+      'It will be served a CSP carrying a per-request nonce, while its HTML was',
+      'built long before the request and carries no nonce on any of its ~15',
+      'inline RSC scripts. Every one is blocked: the page renders, looks fine to',
+      'a crawler, and never hydrates. Nothing in CI sees this.',
     ].join('\n')).toEqual([])
   })
 
