@@ -17,7 +17,8 @@
 // keeps working unchanged.
 // ============================================================
 
-import { RateLimitError, ProviderAuthError, IntegrationMisconfiguredError, type IntegrationProvider, type TokenResponse } from '@/lib/integrations/types'
+import { RateLimitError, ProviderAuthError, ProviderRequestError, IntegrationMisconfiguredError, type IntegrationProvider, type TokenResponse } from '@/lib/integrations/types'
+import { isUuid } from '@/lib/validation/uuid'
 import { hospitableApiLimiter, checkLimit, outboundBackoffSeconds } from '@/lib/rate-limit'
 import { ok, fail, timingSafeEqual, extractClientIp, isIpInCidr } from '@/lib/integrations/webhook-verification'
 import { unwrapJoin } from '@/lib/utils/supabase-joins'
@@ -52,6 +53,30 @@ const HOSPITABLE_API_BASE      = 'https://public.api.hospitable.com/v2'
 // the primary control — an out-of-range request is rejected before it's
 // worth spending a crypto comparison on.
 const HOSPITABLE_WEBHOOK_IP_CIDR = '38.80.170.0/24'
+
+/**
+ * Renders what a webhook payload's `data` object LOOKS like, for a log line,
+ * without rendering anything that is in it.
+ *
+ * The whole reason the 2026-08-20 message-webhook drop is hard to diagnose is
+ * that nobody knows which field carried 1262483200 — but a message payload
+ * carries guest message content, so "just log the payload" is not available
+ * (CLAUDE.md: never log guest phone numbers or SMS/message body content, and
+ * unit/guardrails/sensitive-data-logging.test.ts enforces it). Field names are
+ * not content; the `typeof` of a named field is not content either. Values are
+ * never included, for any field.
+ */
+function describePayloadShape(
+  data:   Record<string, unknown> | undefined,
+  probes: readonly string[],
+): string {
+  if (!data) return 'data: absent'
+  const probed = probes
+    .map((field) => `${field}:${field in data ? typeof data[field] : 'absent'}`)
+    .join(', ')
+  // A string, not an object: reportError's `extra` bag is typed to primitives.
+  return `${probed} | keys=[${Object.keys(data).join(',')}]`
+}
 
 // ── Provider adapter ─────────────────────────────────────────────────────────
 
@@ -405,18 +430,44 @@ export const hospitableProvider: IntegrationProvider = {
       // "Messages: when a new message is created"). Like reservation.changed,
       // this is expected to be a partial payload — an id/reservation
       // reference only, not the message body itself — so this just kicks
-      // off the same fetch-then-upsert flow via Inngest. Tries the field
-      // names used by every other Hospitable webhook before giving up.
+      // off the same fetch-then-upsert flow via Inngest.
+      //
+      // The ONLY usable identifier is a reservation UUID: the downstream flow
+      // has exactly one way to read a message, GET /reservations/{uuid}/messages.
+      //
+      // This used to fall back to `entityId` (= data.data.id, the MESSAGE's own
+      // id) and then to `data.id`. Neither identifies a reservation — the
+      // reservation.changed case forty lines up already documents data.id as
+      // the webhook DELIVERY's id — and neither is even guaranteed to be a
+      // string. The `as string | undefined` casts said otherwise and nothing
+      // checked. On 2026-08-20 that dispatched entity_id 1262483200, a numeric
+      // platform id, straight into the URL path; Hospitable answered
+      // {"status_code":400,"reason_phrase":"Invalid resource uuid provided."}
+      // and the run retried it for 10m41s. Twice.
+      //
+      // So: take the reservation id or take nothing. A payload that carries no
+      // reservation UUID cannot be acted on, and saying so once is strictly
+      // better than dispatching a run that cannot succeed.
       case 'message.created':
       case 'message.updated': {
-        const messageReservationId =
-          (entityData?.reservation_id as string | undefined)
-          ?? entityId
-          ?? (data.reservation_id as string | undefined)
-          ?? (data.id as string | undefined)
+        const messageReservationId = [entityData?.reservation_id, data.reservation_id].find(isUuid)
 
         if (!messageReservationId) {
-          console.warn('[Hospitable webhook] message event missing reservation_id (checked data.reservation_id, data.id, payload.id):', { action, keys: Object.keys(data) })
+          // Field NAMES and TYPES only. A message webhook payload carries guest
+          // message content, which must never reach a log.
+          const shape = describePayloadShape(entityData, ['reservation_id', 'id', 'conversation_id'])
+          console.warn(
+            '[Hospitable webhook] message event carries no reservation UUID — dropping. ' +
+            'Checked data.data.reservation_id and data.reservation_id.',
+            { action, topLevelKeys: Object.keys(data), dataShape: shape },
+          )
+          reportError(
+            new Error('Hospitable message webhook has no reservation UUID'),
+            {
+              site: 'lib.integrations.providers.hospitable.handleWebhookEvent',
+              extra: { action, dataShape: shape },
+            },
+          )
           break
         }
 
@@ -807,6 +858,21 @@ export async function hospFetchReservationMessages(
   token:         string,
   reservationId: string
 ): Promise<HospitableMessage[]> {
+  // Checked HERE and not only at the webhook boundary, because this function is
+  // the thing that knows the path segment is a `{uuid}` — a second caller added
+  // later would have no reason to guess that. Costs one regex against an id we
+  // are about to spend an HTTP round trip and a rate-limit token on.
+  if (!isUuid(reservationId)) {
+    throw new ProviderRequestError(
+      'Hospitable', 400, 'GET /reservations/{uuid}/messages',
+      // The id itself is safe to name — it is an opaque external identifier,
+      // and the not-ok branch below already interpolates it. Its TYPE is the
+      // part that mattered on 2026-08-20: a number, cast to string by the
+      // template literal at the call site that built the URL.
+      `reservation id is not a UUID: ${typeof reservationId} ${JSON.stringify(reservationId)}`,
+    )
+  }
+
   const res = await hospitableFetch(
     `${HOSPITABLE_API_BASE}/reservations/${reservationId}/messages`,
     token
@@ -822,6 +888,15 @@ export async function hospFetchReservationMessages(
   if (res.status === 401 || res.status === 403) {
     const text = await res.text().catch(() => '')
     throw new ProviderAuthError('Hospitable', res.status, 'GET /reservations/{id}/messages', text.slice(0, 200))
+  }
+
+  // 400/422 are TERMINAL for the opposite reason to 401/403: the credential is
+  // fine and the REQUEST is wrong, so the retry sends the identical bytes and
+  // gets the identical answer. Same class of waste the 401 comment above
+  // describes, and it happened three days later — see ProviderRequestError.
+  if (res.status === 400 || res.status === 422) {
+    const text = await res.text().catch(() => '')
+    throw new ProviderRequestError('Hospitable', res.status, 'GET /reservations/{id}/messages', text.slice(0, 200))
   }
 
   if (!res.ok) {

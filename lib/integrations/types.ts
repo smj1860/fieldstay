@@ -385,6 +385,42 @@ export class ProviderAuthError extends Error {
 }
 
 /**
+ * A provider rejected the REQUEST ITSELF as malformed — 400/422, not 401/403.
+ * TERMINAL for the same reason ProviderAuthError is, but for the opposite
+ * reason: the credential is fine, the bytes we sent are wrong, and the retry
+ * sends the identical bytes.
+ *
+ * Why this is a separate type rather than folding 400 into ProviderAuthError:
+ * the class name is what appears in Sentry and in system_job_runs, and
+ * "denied ... reconnect required" would send the reader to the OAuth
+ * connection for a bug that lives in our own URL construction. On 2026-08-20
+ * that distinction was the whole finding — the connection was healthy.
+ *
+ * Retrying a 400 is not merely useless, it is actively harmful on a
+ * rate-limited API: hospitable-incremental-sync burned 5 retries × 2
+ * withProviderCall attempts on
+ *   GET /reservations/1262483200/messages
+ *   → {"reason_phrase":"Invalid resource uuid provided."}
+ * holding one of the function's 8 concurrency slots for 10m41s per event,
+ * twice, while spending the shared Hospitable API budget every attempt.
+ */
+export class ProviderRequestError extends Error {
+  constructor(
+    public readonly providerLabel: string,
+    public readonly status:        number,
+    public readonly endpoint:      string,
+    detail:                        string = '',
+  ) {
+    super(
+      `${providerLabel} rejected ${endpoint} as malformed (${status})` +
+      (detail ? `: ${detail}` : '') +
+      ' — the request we sent is wrong; retrying sends the same request'
+    )
+    this.name = 'ProviderRequestError'
+  }
+}
+
+/**
  * Thrown when a provider adapter can't even attempt a call because our own
  * server-side credentials (CLIENT_ID/CLIENT_SECRET env vars) are missing —
  * an operational misconfiguration, never something the end user caused or

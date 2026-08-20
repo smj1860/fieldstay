@@ -4296,7 +4296,7 @@ export type Database = {
       reservation_messages: {
         Row: {
           attachments: Json | null
-          body: string
+          body: string | null
           booking_id: string | null
           content_type: string | null
           conversation_id: string | null
@@ -4314,7 +4314,7 @@ export type Database = {
         }
         Insert: {
           attachments?: Json | null
-          body: string
+          body?: string | null
           booking_id?: string | null
           content_type?: string | null
           conversation_id?: string | null
@@ -4332,7 +4332,7 @@ export type Database = {
         }
         Update: {
           attachments?: Json | null
-          body?: string
+          body?: string | null
           booking_id?: string | null
           content_type?: string | null
           conversation_id?: string | null

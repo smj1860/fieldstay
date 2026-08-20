@@ -126,8 +126,8 @@ function jsonResponse(body: unknown, status = 200) {
 }
 
 const NORMALIZED_RESERVATION_BASE = {
-  external_id:          'res_1',
-  property_external_id: 'hosp_prop_1',
+  external_id:          '11111111-1111-4111-8111-111111111111',
+  property_external_id: '55555555-5555-4555-8555-555555555555',
   checkin_time:         '16:00',
   checkout_time:        '10:00',
   status:                'confirmed',
@@ -140,8 +140,8 @@ const NORMALIZED_RESERVATION_BASE = {
 }
 
 const RAW_RESERVATION = {
-  id:         'res_1',
-  properties: [{ id: 'hosp_prop_1', name: 'Lakehouse', public_name: 'Lakehouse' }],
+  id:         '11111111-1111-4111-8111-111111111111',
+  properties: [{ id: '55555555-5555-4555-8555-555555555555', name: 'Lakehouse', public_name: 'Lakehouse' }],
 }
 
 const RESOLVED_OWNER = { orgId: 'org_1', userId: 'user_1', token: 'token_abc' }
@@ -179,18 +179,18 @@ describe('hospIncrementalSync', () => {
 
     const step = makeRunAllStep()
     const result = await invokeHandler(hospIncrementalSync, {
-      event: { data: { provider_id: 'hospitable', event_type: 'reservation.updated', entity_type: 'reservation', entity_id: 'res_1', triggers: ['dates_changed'] } },
+      event: { data: { provider_id: 'hospitable', event_type: 'reservation.updated', entity_type: 'reservation', entity_id: '11111111-1111-4111-8111-111111111111', triggers: ['dates_changed'] } },
       step,
       logger: makeLogger(),
     })
 
-    expect(result).toEqual({ action: 'upserted', entity_id: 'res_1', datesChanged: true })
-    expect(resolveHospitableOwner).toHaveBeenCalledWith({ entityKind: 'reservation', externalId: 'res_1', externalUserId: undefined })
+    expect(result).toEqual({ action: 'upserted', entity_id: '11111111-1111-4111-8111-111111111111', datesChanged: true })
+    expect(resolveHospitableOwner).toHaveBeenCalledWith({ entityKind: 'reservation', externalId: '11111111-1111-4111-8111-111111111111', externalUserId: undefined })
 
     const bookingUpsert = supabase.calls.find((c) => c.table === 'bookings' && c.method === 'upsert')
     expect(bookingUpsert?.args[1]).toEqual({ onConflict: 'org_id,external_id,external_source' })
     expect(bookingUpsert?.args[0]).toMatchObject({
-      org_id: 'org_1', property_id: 'prop_1', external_id: 'res_1', external_source: 'hospitable',
+      org_id: 'org_1', property_id: 'prop_1', external_id: '11111111-1111-4111-8111-111111111111', external_source: 'hospitable',
       checkin_date: '2026-08-10', checkout_date: '2026-08-14',
     })
 
@@ -220,12 +220,12 @@ describe('hospIncrementalSync', () => {
 
     const step = makeRunAllStep()
     const result = await invokeHandler(hospIncrementalSync, {
-      event: { data: { provider_id: 'hospitable', event_type: 'reservation.updated', entity_type: 'reservation', entity_id: 'res_1', triggers: ['status_changed'] } },
+      event: { data: { provider_id: 'hospitable', event_type: 'reservation.updated', entity_type: 'reservation', entity_id: '11111111-1111-4111-8111-111111111111', triggers: ['status_changed'] } },
       step,
       logger: makeLogger(),
     })
 
-    expect(result).toEqual({ action: 'upserted', entity_id: 'res_1', datesChanged: false })
+    expect(result).toEqual({ action: 'upserted', entity_id: '11111111-1111-4111-8111-111111111111', datesChanged: false })
     expect(generateTurnoversForProperty).not.toHaveBeenCalled()
     expect(step.sendEvent).not.toHaveBeenCalledWith('fire-turnover-events', expect.anything())
   })
@@ -240,10 +240,10 @@ describe('hospIncrementalSync', () => {
     ;(createServiceClient as ReturnType<typeof vi.fn>).mockReturnValue(supabase)
     ;(resolveHospitableOwner as ReturnType<typeof vi.fn>).mockResolvedValue(RESOLVED_OWNER)
     ;(hospitableFetch as ReturnType<typeof vi.fn>).mockResolvedValue(
-      jsonResponse({ data: { id: 'hosp_prop_2', name: 'Cabin' } })
+      jsonResponse({ data: { id: '66666666-6666-4666-8666-666666666666', name: 'Cabin' } })
     )
-    ;(hospitablePropertyToNormalized as ReturnType<typeof vi.fn>).mockReturnValue({ external_id: 'hosp_prop_2', name: 'Cabin' })
-    ;(upsertNormalizedProperties as ReturnType<typeof vi.fn>).mockResolvedValue({ hosp_prop_2: 'prop_uuid_2' })
+    ;(hospitablePropertyToNormalized as ReturnType<typeof vi.fn>).mockReturnValue({ external_id: '66666666-6666-4666-8666-666666666666', name: 'Cabin' })
+    ;(upsertNormalizedProperties as ReturnType<typeof vi.fn>).mockResolvedValue({ ['66666666-6666-4666-8666-666666666666']: 'prop_uuid_2' })
 
     const { seedPresentAssetsFromAmenities, seedAbsentOptionalAssetsFromAmenities } =
       await import('@/lib/asset-discovery/seed-from-amenities')
@@ -252,14 +252,14 @@ describe('hospIncrementalSync', () => {
 
     const step = makeRunAllStep()
     const result = await invokeHandler(hospIncrementalSync, {
-      event: { data: { provider_id: 'hospitable', event_type: 'property.updated', entity_type: 'property', entity_id: 'hosp_prop_2' } },
+      event: { data: { provider_id: 'hospitable', event_type: 'property.updated', entity_type: 'property', entity_id: '66666666-6666-4666-8666-666666666666' } },
       step,
       logger: makeLogger(),
     })
 
-    expect(result).toEqual({ action: 'synced', entity_id: 'hosp_prop_2' })
-    expect(resolveHospitableOwner).toHaveBeenCalledWith({ entityKind: 'property', externalId: 'hosp_prop_2', externalUserId: undefined })
-    expect(upsertNormalizedProperties).toHaveBeenCalledWith('org_1', 'hospitable', [{ external_id: 'hosp_prop_2', name: 'Cabin' }])
+    expect(result).toEqual({ action: 'synced', entity_id: '66666666-6666-4666-8666-666666666666' })
+    expect(resolveHospitableOwner).toHaveBeenCalledWith({ entityKind: 'property', externalId: '66666666-6666-4666-8666-666666666666', externalUserId: undefined })
+    expect(upsertNormalizedProperties).toHaveBeenCalledWith('org_1', 'hospitable', [{ external_id: '66666666-6666-4666-8666-666666666666', name: 'Cabin' }])
     // Routing proof: the reservation-only normalizer must never be invoked for a property webhook
     expect(hospitableReservationToNormalized).not.toHaveBeenCalled()
     expect(generateTurnoversForProperty).not.toHaveBeenCalled()
@@ -278,25 +278,25 @@ describe('hospIncrementalSync', () => {
       data: {
         public:       { rating: 5, review: 'Great stay' },
         guest:        { first_name: 'Jane', last_name: 'G' },
-        property:     { id: 'hosp_prop_1' },
+        property:     { id: '55555555-5555-4555-8555-555555555555' },
         reviewed_at:  '2026-07-01',
       },
     }))
 
     const step = makeRunAllStep()
     const result = await invokeHandler(hospIncrementalSync, {
-      event: { data: { provider_id: 'hospitable', event_type: 'review.created', entity_type: 'review', entity_id: 'rev_1' } },
+      event: { data: { provider_id: 'hospitable', event_type: 'review.created', entity_type: 'review', entity_id: '44444444-4444-4444-8444-444444444444' } },
       step,
       logger: makeLogger(),
     })
 
-    expect(result).toEqual({ action: 'synced', entity_id: 'rev_1' })
-    expect(resolveHospitableOwner).toHaveBeenCalledWith({ entityKind: 'review', externalId: 'rev_1', externalUserId: undefined })
+    expect(result).toEqual({ action: 'synced', entity_id: '44444444-4444-4444-8444-444444444444' })
+    expect(resolveHospitableOwner).toHaveBeenCalledWith({ entityKind: 'review', externalId: '44444444-4444-4444-8444-444444444444', externalUserId: undefined })
 
     const reviewUpsert = supabase.calls.find((c) => c.table === 'reviews' && c.method === 'upsert')
     expect(reviewUpsert?.args[1]).toEqual({ onConflict: 'org_id,external_id,external_source' })
     expect(reviewUpsert?.args[0]).toMatchObject({
-      org_id: 'org_1', external_id: 'rev_1', rating: 5, review_text: 'Great stay', guest_name: 'Jane G',
+      org_id: 'org_1', external_id: '44444444-4444-4444-8444-444444444444', rating: 5, review_text: 'Great stay', guest_name: 'Jane G',
     })
 
     expect(step.sendEvent).toHaveBeenCalledWith('trigger-repuguard', {
@@ -330,7 +330,7 @@ describe('hospIncrementalSync', () => {
       event: {
         data: {
           provider_id: 'hospitable', event_type: 'reservation.created', entity_type: 'reservation',
-          entity_id: 'res_1', external_user_id: 'hosp_user_42',
+          entity_id: '11111111-1111-4111-8111-111111111111', external_user_id: 'hosp_user_42',
         },
       },
       step,
@@ -338,7 +338,7 @@ describe('hospIncrementalSync', () => {
     })
 
     expect(resolveHospitableOwner).toHaveBeenCalledWith({
-      entityKind: 'reservation', externalId: 'res_1', externalUserId: 'hosp_user_42',
+      entityKind: 'reservation', externalId: '11111111-1111-4111-8111-111111111111', externalUserId: 'hosp_user_42',
     })
   })
 
@@ -349,12 +349,12 @@ describe('hospIncrementalSync', () => {
 
     const step = makeRunAllStep()
     const result = await invokeHandler(hospIncrementalSync, {
-      event: { data: { provider_id: 'hospitable', event_type: 'reservation.created', entity_type: 'reservation', entity_id: 'res_2' } },
+      event: { data: { provider_id: 'hospitable', event_type: 'reservation.created', entity_type: 'reservation', entity_id: '22222222-2222-4222-8222-222222222222' } },
       step,
       logger: makeLogger(),
     })
 
-    expect(result).toEqual({ skipped: true, reason: 'no_active_connection', entity_id: 'res_2' })
+    expect(result).toEqual({ skipped: true, reason: 'no_active_connection', entity_id: '22222222-2222-4222-8222-222222222222' })
     // Never got far enough to hit the Hospitable API
     expect(hospitableFetch).not.toHaveBeenCalled()
   })
@@ -372,12 +372,38 @@ describe('hospIncrementalSync', () => {
 
     const step = makeRunAllStep()
     const result = await invokeHandler(hospIncrementalSync, {
-      event: { data: { provider_id: 'hospitable', event_type: 'reservation.changed', entity_type: 'reservation', entity_id: 'res_3', triggers: ['status_changed'] } },
+      event: { data: { provider_id: 'hospitable', event_type: 'reservation.changed', entity_type: 'reservation', entity_id: '33333333-3333-4333-8333-333333333333', triggers: ['status_changed'] } },
       step,
       logger: makeLogger(),
     })
 
-    expect(result).toEqual({ skipped: true, reason: 'no_active_connection', entity_id: 'res_3' })
+    expect(result).toEqual({ skipped: true, reason: 'no_active_connection', entity_id: '33333333-3333-4333-8333-333333333333' })
+    expect(hospitableFetch).not.toHaveBeenCalled()
+  })
+
+  it('refuses a non-UUID entity_id without touching the resolver or the API', async () => {
+    // 2026-08-20, production. The message.created webhook dispatched
+    // entity_id 1262483200 — a numeric platform id, not a Hospitable
+    // reservation UUID — and every layer below happily used it:
+    //
+    //   resolveHospitableOwner() matched on the webhook's own user.id and
+    //   CACHED it into integration_entity_owners as a real reservation, then
+    //   GET /v2/reservations/1262483200/messages returned
+    //   {"reason_phrase":"Invalid resource uuid provided."} and the plain
+    //   Error was retried for 10m41s, holding one of eight concurrency slots.
+    //
+    // The resolver's cache write is why this is checked in the ROUTER rather
+    // than in each handler: by the time a handler notices, a row exists.
+    const supabase = makeSupabase({})
+    ;(createServiceClient as ReturnType<typeof vi.fn>).mockReturnValue(supabase)
+
+    await expect(invokeHandler(hospIncrementalSync, {
+      event: { data: { provider_id: 'hospitable', event_type: 'message.created', entity_type: 'message', entity_id: '1262483200' } },
+      step:   makeRunAllStep(),
+      logger: makeLogger(),
+    })).rejects.toThrow(/not a UUID/)
+
+    expect(resolveHospitableOwner, 'the resolver writes an ownership cache row before validating anything').not.toHaveBeenCalled()
     expect(hospitableFetch).not.toHaveBeenCalled()
   })
 })

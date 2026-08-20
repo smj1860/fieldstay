@@ -317,7 +317,11 @@ export interface HospitableMessage {
   conversation_id:   string
   reservation_id:    string | null
   content_type:      string
-  body:              string
+  // Nullable: an attachment-only message (image/file, no text) sends
+  // body: null. Typed `string` until 2026-08-20, which is why the sync wrote
+  // it straight into a NOT NULL column and took a whole reservation's
+  // conversation down with the batch. See 20260820061500.
+  body:              string | null
   attachments:       Json[] | null
   sender_type:       'host' | 'guest'
   sender_role:       string | null
