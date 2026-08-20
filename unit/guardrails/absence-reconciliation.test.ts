@@ -87,9 +87,10 @@ const RECONCILERS: Record<string, Reconciler> = {
  * the empty result is semantically true, not merely convenient.
  */
 const FAIL_SOFT_EMPTY_RETURNS: Record<string, string> = {
-  'lib/integrations/providers/hospitable.ts:881':
-    'hospFetchReservationMessages: 404 means the reservation has no message thread. Semantically empty, not a failure — and message sync is additive, never reconciled by absence.',
-  'lib/integrations/providers/hospitable.ts:947':
+  // hospFetchReservationMessages' 404-returns-[] entry was here until
+  // 2026-08-20. The function is gone: the message webhook carries the whole
+  // message, so nothing fetches a thread any more.
+  'lib/integrations/providers/hospitable.ts:811':
     'hospFetchTeammates: 403 is the one expected non-ok — a connection predating the teammate:read scope. Nothing about it is retriable. Every OTHER status now throws, and the sole absence-based consumer carries an empty-set guard.',
 }
 

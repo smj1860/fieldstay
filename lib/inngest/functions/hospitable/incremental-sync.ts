@@ -23,12 +23,10 @@ import { NonRetriableError }       from 'inngest'
 import { fetchTurnoverCreatedEvents } from '@/lib/inngest/turnover-created-events'
 import { createServiceClient }     from '@/lib/supabase/server'
 import { resolveHospitableOwner, type HospitableEntityKind } from '@/lib/integrations/providers/hospitable-owner'
-import { createHash } from 'crypto'
 import {
   hospitableFetch,
   hospitablePropertyToNormalized,
   hospitableReservationToNormalized,
-  hospFetchReservationMessages,
   type HospitableReservation,
   type HospitableProperty,
 } from '@/lib/integrations/providers/hospitable'
@@ -250,7 +248,12 @@ export const hospIncrementalSync = inngest.createFunction(
     if (entity_type === 'reservation') return syncReservation({ ...ctx, triggers })
     if (entity_type === 'property')    return syncProperty(ctx)
     if (entity_type === 'review')      return syncReview(ctx)
-    if (entity_type === 'message')     return syncMessages(ctx)
+    // 'message' is gone: the webhook now writes the row itself, because its
+    // payload already contains the whole message (see
+    // lib/integrations/providers/hospitable-message-store.ts). An in-flight
+    // event from before that change lands in the unhandled branch below and is
+    // logged — it cannot be usefully replayed anyway, since the fetch it
+    // wanted is what was broken.
 
     logger.warn(`[Hospitable incremental] Unhandled entity_type: ${entity_type}`)
     return { skipped: true, reason: `unknown_entity_type:${entity_type}` }
@@ -831,101 +834,3 @@ async function syncReview(
   return { action: 'synced', entity_id: entityId }
 }
 
-/**
- * Message: entity_id is the RESERVATION id (see the note above), so the whole
- * thread is re-fetched and upserted; reservation_messages' (org_id, dedup_key)
- * unique index makes re-fetching already-stored messages a no-op.
- */
-async function syncMessages(
-  { step, logger, entityId, externalUserId }: EntityContext
-) {
-
-  // entityId here is the RESERVATION id (see handleWebhookEvent's
-  // message.created case), so ownership resolves as a reservation. Same
-  // rule as every other branch: never pick an arbitrary active connection.
-  const resolved = await withProviderCall(step, 'resolve-org-booking-and-token', async () => {
-    const owner = await resolveHospitableOwner({
-      entityKind:     'reservation',
-      externalId:     entityId,
-      externalUserId,
-    })
-
-    if (!owner) return { skipped: true as const }
-
-    // bookingId is scoped to the resolved org — an unscoped lookup would
-    // return a co-hosted twin belonging to a different customer.
-    const supabase = createServiceClient({ system: 'inngest:incremental-sync' })
-    // Unwrapped: same shape as the review lookup — a failed read stored the
-    // guest messages with a null booking_id, unattached to the stay they
-    // belong to, and nothing re-links them afterwards.
-    const bookingRes = await supabase
-      .from('bookings')
-      .select('id')
-      .eq('org_id',          owner.orgId)
-      .eq('external_id',     entityId)
-      .eq('external_source', PROVIDER)
-      .maybeSingle()
-
-    const booking = unwrap(bookingRes, {
-      site: 'inngest.hospitable-incremental.message-booking', orgId: owner.orgId,
-    })
-
-    return {
-      skipped:   false as const,
-      orgId:     owner.orgId,
-      bookingId: booking?.id ?? null,
-      token:     owner.token,
-    }
-  })
-
-  if (resolved.skipped) {
-    logger.info(`[Hospitable incremental] Skipping message ${entityId} — no active Hospitable connection`)
-    return { skipped: true, reason: 'no_active_connection', entity_id: entityId }
-  }
-
-  const upsertCount = await withProviderCall(step, 'fetch-and-upsert-messages', async () => {
-    const messages = await hospFetchReservationMessages(resolved.token, entityId)
-    if (messages.length === 0) return 0
-
-    const rows = messages.map((m) => {
-      // Pinned rather than left to the template's own stringification, now
-      // that body is nullable (20260820061500) and a missing body actually
-      // reaches here. `${undefined}` and `${null}` produce different strings,
-      // so an absent field and an explicit null would hash to different keys
-      // for the same message — the one thing a dedup key may never do.
-      // NUL is the sentinel because Postgres text cannot contain one, so no
-      // real body can collide with it; '' would collide with an empty body.
-      const bodyForDedup = m.body ?? '\u0000attachment-only'
-      const dedupSource = `${m.conversation_id}|${m.created_at}|${m.sender_type}|${bodyForDedup}`
-      const dedupKey    = createHash('sha256').update(dedupSource).digest('hex').slice(0, 32)
-
-      return {
-        org_id:                   resolved.orgId,
-        booking_id:               resolved.bookingId,
-        external_reservation_id:  entityId,
-        external_source:          PROVIDER,
-        conversation_id:          m.conversation_id,
-        platform:                 m.platform,
-        sender_type:              m.sender_type,
-        sender_name:              m.sender?.full_name ?? m.sender?.first_name ?? null,
-        content_type:             m.content_type,
-        body:                     m.body,
-        attachments:              m.attachments,
-        source:                   m.source,
-        message_created_at:       m.created_at,
-        dedup_key:                dedupKey,
-      }
-    })
-
-    const supabase = createServiceClient({ system: 'inngest:incremental-sync' })
-    const { error } = await supabase
-      .from('reservation_messages')
-      .upsert(rows, { onConflict: 'org_id,dedup_key', ignoreDuplicates: true })
-
-    if (error) throw new Error(`reservation_messages upsert failed: ${error.message}`)
-
-    return rows.length
-  })
-
-  return { action: 'synced', entity_id: entityId, messageCount: upsertCount }
-}
