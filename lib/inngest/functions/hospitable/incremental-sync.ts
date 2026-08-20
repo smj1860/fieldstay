@@ -45,7 +45,8 @@ import {
 
 import { reportError } from '@/lib/observability/report-error'
 import { unwrap } from '@/lib/supabase/unwrap'
-import { RateLimitError, ProviderAuthError } from '@/lib/integrations/types'
+import { RateLimitError, ProviderAuthError, ProviderRequestError } from '@/lib/integrations/types'
+import { isUuid } from '@/lib/validation/uuid'
 const HOSPITABLE_API_BASE = 'https://public.api.hospitable.com/v2'
 const PROVIDER            = 'hospitable'
 
@@ -106,6 +107,9 @@ async function withProviderCall<T>(
       // Terminal: a missing scope or a revoked grant. Retrying cannot change
       // the answer, so opt this step out of the retry policy entirely.
       if (err instanceof ProviderAuthError) throw new NonRetriableError(err.message)
+      // Terminal for the mirror-image reason: a malformed request. The retry
+      // rebuilds the same URL from the same event payload.
+      if (err instanceof ProviderRequestError) throw new NonRetriableError(err.message)
       if (err instanceof RateLimitError)    return { __rateLimited: true, retryAfter: err.retryAfter }
       throw err
     }
@@ -223,6 +227,23 @@ export const hospIncrementalSync = inngest.createFunction(
     }
 
     logger.info(`[Hospitable incremental] ${event_type} / ${entity_type} / ${entity_id}`)
+
+    // Every entity Hospitable exposes is keyed by a UUID, and every branch
+    // below spends it in two places: a resolveHospitableOwner() call and a
+    // /v2/{collection}/{uuid} URL. A non-UUID makes both meaningless, and the
+    // resolver reaches the SECOND one only after the first has already written
+    // a row — resolveHospitableOwner's step-0 direct attribution (the webhook
+    // carries the account's own user.id) calls rememberOwner() unconditionally,
+    // so a bogus id is CACHED as a real reservation before anything validates
+    // it. Two such rows were left in integration_entity_owners on 2026-08-20.
+    //
+    // NonRetriableError rather than a returned skip: the event is malformed at
+    // rest, so every one of the 5 retries would re-derive the same verdict.
+    if (!isUuid(entity_id)) {
+      const detail = `${entity_type} id is not a UUID (${typeof entity_id}): ${JSON.stringify(entity_id)}`
+      logger.error(`[Hospitable incremental] Dropping ${event_type} — ${detail}`)
+      throw new NonRetriableError(`[Hospitable incremental] ${detail}`)
+    }
 
     const ctx = { step, logger, entityId: entity_id, externalUserId: external_user_id }
 
@@ -867,7 +888,15 @@ async function syncMessages(
     if (messages.length === 0) return 0
 
     const rows = messages.map((m) => {
-      const dedupSource = `${m.conversation_id}|${m.created_at}|${m.sender_type}|${m.body}`
+      // Pinned rather than left to the template's own stringification, now
+      // that body is nullable (20260820061500) and a missing body actually
+      // reaches here. `${undefined}` and `${null}` produce different strings,
+      // so an absent field and an explicit null would hash to different keys
+      // for the same message — the one thing a dedup key may never do.
+      // NUL is the sentinel because Postgres text cannot contain one, so no
+      // real body can collide with it; '' would collide with an empty body.
+      const bodyForDedup = m.body ?? '\u0000attachment-only'
+      const dedupSource = `${m.conversation_id}|${m.created_at}|${m.sender_type}|${bodyForDedup}`
       const dedupKey    = createHash('sha256').update(dedupSource).digest('hex').slice(0, 32)
 
       return {

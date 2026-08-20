@@ -1134,7 +1134,7 @@ export interface ReservationMessage {
   sender_type:             'host' | 'guest'
   sender_name:             string | null
   content_type:            string | null
-  body:                    string
+  body:                    string | null   // NULL for an attachment-only message — 20260820061500
   attachments:             Record<string, unknown>[] | null
   source:                  string | null
   message_created_at:      string
