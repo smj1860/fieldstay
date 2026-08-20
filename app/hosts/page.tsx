@@ -48,8 +48,6 @@
 // never sees. /ownerrez has relative links here and is left alone; this page
 // does not inherit that.
 
-import { cookies } from 'next/headers'
-import { createServerClient } from '@supabase/ssr'
 import Link from 'next/link'
 import type { Metadata } from 'next'
 import RepuGuardWrapper from '@/components/repuguard/RepuGuardWrapper'
@@ -147,15 +145,34 @@ function CheckDot() {
   )
 }
 
-export default async function HostsPage() {
-  const cookieStore = await cookies()
-  const supabase = createServerClient(
-    process.env.NEXT_PUBLIC_SUPABASE_URL!,
-    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
-    { cookies: { getAll: () => cookieStore.getAll() } },
-  )
-  const { data: { user } } = await supabase.auth.getUser()
-  const isLoggedIn = !!user
+// ── NO AUTH CHECK HERE, ON PURPOSE ──────────────────────────────────────────
+//
+// This page used to call cookies() + supabase.auth.getUser() to swap the CTA
+// between "Sign up" and "Go to dashboard". That cost far more than it was
+// worth: cookies() forces DYNAMIC rendering (no static generation, no CDN
+// cache, a cold server render on every request including every crawl), and
+// getUser() is a network round trip to Supabase Auth with no timeout, on a
+// page whose whole purpose is to be fetched by strangers. For a crawler the
+// answer is ALWAYS "no user".
+//
+// Measured against production 2026-08-19: these pages intermittently failed to
+// respond at all — connection hang to timeout, /hosts on 3 of 8 requests —
+// while example.com / google.com / vercel.com were 12 of 12 clean. Google
+// reported all seven marketing and legal URLs as "Discovered - currently not
+// indexed", "Last crawled: N/A": the signature of Google throttling a host it
+// cannot reliably fetch.
+//
+// The branch was also REDUNDANT. proxy.ts already redirects an authenticated
+// visitor away from /login and /signup to /ops
+// (redirectAuthenticatedAwayFromPublic), so a logged-in reader clicking the
+// logged-out CTA still lands in the app. All that is lost is a nav label
+// reading "Log In" rather than "Dashboard" for a logged-in visitor on an
+// acquisition page — not who these pages are for.
+//
+// proxy.ts already made this argument at the middleware layer, under the
+// heading "ANONYMOUS TRAFFIC PAYS NOTHING". The pages did the work anyway.
+export default function HostsPage() {
+  const isLoggedIn = false
 
   // Absolute against the APP origin -- see /strops's identical comment.
   // Supabase's cookie writer sets no `domain`, so a relative /signup here

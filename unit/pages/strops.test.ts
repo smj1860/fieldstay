@@ -216,8 +216,25 @@ describe('SEO plumbing', () => {
     // the visitor up on the marketing host and land them logged OUT.
     const page = read('app/strops/page.tsx')
     expect(page).toContain("appUrl('/signup?next=/onboarding')")
-    expect(page).toContain("appUrl('/ops')")
-    expect(page).not.toMatch(/ctaHref = user \? '\/ops'/)
+
+    // The logged-in `appUrl('/ops')` branch was REMOVED, not broken: deciding
+    // it needed cookies(), which forced dynamic rendering and made the page
+    // intermittently unfetchable by Googlebot (2026-08-19). It was redundant
+    // anyway — proxy.ts redirects an authenticated visitor away from /signup
+    // to /ops, so the single CTA lands them in the app regardless.
+    //
+    // Asserting the ABSENCE of any auth-derived CTA is strictly stronger than
+    // the old check that both branches existed: it pins the property that
+    // actually matters (this page renders statically) rather than the shape of
+    // a branch that should not come back.
+    expect(page).not.toMatch(/ctaHref\s*=\s*\w+\s*\?/)
+
+    // The "no auth work at request time" half is asserted in
+    // unit/guardrails/marketing-pages-crawlable.test.ts, not here, and for ALL
+    // the marketing pages rather than this one. It has to strip comments
+    // first: this file now DOCUMENTS the removed getUser() call, and a raw
+    // text scan reads that prose as a live call site. A weaker duplicate here
+    // that trips over its own explanation is worse than no duplicate.
   })
 
   it('is reachable without a session — or a crawler indexes the login redirect', () => {

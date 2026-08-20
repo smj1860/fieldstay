@@ -174,6 +174,20 @@ const BYPASS_ROUTES = [
   // No collision with '/hospitable' — these diverge at the 5th character.
   '/hosts',
 
+  // Data Processing Agreement. BYPASS rather than PUBLIC on purpose, and the
+  // distinction matters for legal documents specifically: a public route
+  // bounces AUTHENTICATED users away (`user && isPublic` → redirect), so a
+  // customer following a DPA link from inside the app would land on the
+  // dashboard instead of the agreement. Both audiences must be able to read it.
+  //
+  // It was in NEITHER list, so it fell through to the auth gate and returned
+  // 307 -> /login?next=%2Fdpa — verified live against production 2026-08-19.
+  // That is the failure documented on /strops and /hosts above, arriving a
+  // third time; it is also worse here than for a landing page, because a
+  // prospect had to create an account to read the agreement they were being
+  // asked to sign. Google reported it as "Discovered - currently not indexed".
+  '/dpa',
+
   // Next.js internals and static assets
   '/_next',
   '/favicon',

@@ -19,8 +19,6 @@
 
 import type { Metadata } from 'next'
 import Link from 'next/link'
-import { cookies } from 'next/headers'
-import { createServerClient } from '@supabase/ssr'
 
 import {
   LOADS_OFFLINE,
@@ -100,20 +98,42 @@ function CapabilityList({ items }: Readonly<{ items: Capability[] }>) {
   )
 }
 
-export default async function OfflineTurnoverAppPage() {
-  const cookieStore = await cookies()
-  const supabase = createServerClient(
-    process.env.NEXT_PUBLIC_SUPABASE_URL!,
-    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
-    { cookies: { getAll: () => cookieStore.getAll() } },
-  )
-  const { data: { user } } = await supabase.auth.getUser()
-
+// ── NO AUTH CHECK HERE, ON PURPOSE ──────────────────────────────────────────
+//
+// This page used to call cookies() + supabase.auth.getUser() to decide whether
+// the CTA said "Sign up" or "Go to dashboard". That cost far more than it was
+// worth:
+//
+//   * cookies() forces DYNAMIC rendering — no static generation, no CDN cache,
+//     a cold server render on every single request including every crawl.
+//   * getUser() is a network round trip to Supabase Auth, with no timeout, on
+//     a page whose entire purpose is to be fetched by strangers.
+//   * For a crawler the answer is ALWAYS "no user" — a guaranteed-useless call
+//     that made the page uncacheable and unreliable.
+//
+// Measured against production 2026-08-19: these pages intermittently failed to
+// respond at all (connection hang to timeout, /hosts 3 of 8 requests), while
+// example.com / google.com / vercel.com were 12 of 12 clean. Google reported
+// all seven marketing and legal URLs as "Discovered - currently not indexed"
+// with "Last crawled: N/A" — the signature of Google throttling a host it
+// cannot reliably fetch.
+//
+// The branch was also REDUNDANT. proxy.ts already redirects an authenticated
+// visitor away from /login and /signup to /ops
+// (redirectAuthenticatedAwayFromPublic), so a logged-in reader who clicks the
+// logged-out CTA still lands in the app. The only thing lost is a nav label
+// reading "Log In" instead of "Dashboard" for a logged-in visitor on an
+// acquisition page — which is not who these pages are for.
+//
+// proxy.ts already made this argument at the middleware layer, under the
+// heading "ANONYMOUS TRAFFIC PAYS NOTHING". The page components were doing the
+// work anyway.
+export default function OfflineTurnoverAppPage() {
   // Absolute against the APP origin, not relative. Supabase sets host-only
   // auth cookies (no `domain` in lib/supabase/server.ts), so signing up at
   // fieldstay.app/signup would create a session the app at app.fieldstay.app
   // never sees — the visitor would arrive logged out.
-  const ctaHref = user ? appUrl('/ops') : appUrl('/signup?next=/onboarding')
+  const ctaHref = appUrl('/signup?next=/onboarding')
 
   return (
     <div className="min-h-screen bg-white">
