@@ -118,7 +118,19 @@ test.describe('Vendor compliance hard-block', () => {
     await expect(page.getByText(/expired recently \(grace period\)/i)).toBeVisible({ timeout: 5_000 })
 
     // Grace period still allows assignment — the WO can be created.
-    await page.fill('[name="title"]', '[E2E] Grace Period Vendor WO')
+    //
+    // UNIQUE PER ATTEMPT, and that is not cosmetic: this title was a fixed
+    // string, so a failed attempt left its row behind and every RETRY then
+    // died on a strict-mode violation instead of re-testing anything. CI run
+    // 32352260722 shows the whole progression — attempt 1 timed out waiting
+    // for the dialog, retry 1 found 2 matching rows, retry 2 found 3. The
+    // retries were not just useless, they could never pass. One slow moment
+    // was therefore an unrecoverable CI failure, which is the opposite of
+    // what `retries` is for.
+    //
+    // The vendor name one screen up already did this; the title did not.
+    const woTitle = `[E2E] Grace Period Vendor WO ${Date.now()}`
+    await page.fill('[name="title"]', woTitle)
     await page.click('button[type="submit"]')
 
     // Not waitForURL — the Server Action never navigates, it just
@@ -130,11 +142,19 @@ test.describe('Vendor compliance hard-block', () => {
     // stale read. Wait for the dialog to actually close first — that's the
     // real signal the mutation (including its await'd inngest.send() call)
     // has finished — before doing any reload.
-    await expect(page.getByRole('dialog')).not.toBeVisible({ timeout: 10_000 })
+    //
+    // 25s, not 10s. The wait spans a Server Action that AWAITS an outbound
+    // inngest.send() — a real HTTPS round trip in CI, where INNGEST_EVENT_KEY
+    // is set — so this budget is bounded by a third party, not by our own
+    // render. It timed out at 10s in run 32352260722 while both retries
+    // completed fine, i.e. the mutation was working and the ceiling was
+    // simply too tight. A generous ceiling on a wait that has a definite end
+    // costs nothing when it passes.
+    await expect(page.getByRole('dialog')).not.toBeVisible({ timeout: 25_000 })
     await page.reload()
 
     try {
-      await expect(page.getByText('[E2E] Grace Period Vendor WO')).toBeVisible({ timeout: 10_000 })
+      await expect(page.getByText(woTitle)).toBeVisible({ timeout: 10_000 })
     } catch (uiErr) {
       // Same diagnostic as 05-work-orders.spec.ts — the dialog closing
       // proves createWorkOrder returned success, and this reload() is a
@@ -147,7 +167,7 @@ test.describe('Vendor compliance hard-block', () => {
         .from('work_orders')
         .select('id, title, status, org_id, property_id, vendor_id, created_at')
         .eq('org_id', ctx.orgId)
-        .like('title', '[E2E] Grace Period Vendor WO%')
+        .eq('title', woTitle)
       console.error(
         '[24-vendor-compliance-block diagnostic] DB rows for this org/title after UI assertion failed:',
         JSON.stringify({ rows, dbErr }),

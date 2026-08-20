@@ -143,8 +143,22 @@ test.describe('Owner portal token lifecycle', () => {
     // it does call notFound() when no token row matches). Assert on the
     // rendered content instead, since that's what actually guards against
     // leaking owner data to a bogus token.
-    await expect(publicPage.getByRole('heading', { name: '404' })).toBeVisible({ timeout: 10_000 })
-    await expect(publicPage.getByRole('heading', { name: 'This page could not be found.' })).toBeVisible()
+    //
+    // Asserted against app/not-found.tsx, the app's own 404. Until 2026-08-20
+    // this route fell through to Next's UNSTYLED built-in ("404" / "This page
+    // could not be found."), and this test pinned that copy. The root
+    // not-found page exists now because removing `force-dynamic` from
+    // app/layout.tsx made Next's built-in one PRERENDER, and prerendered HTML
+    // carries no CSP nonce — see the comment at the top of that file.
+    await expect(publicPage.getByRole('heading', { name: /couldn.t find that page/i }))
+      .toBeVisible({ timeout: 10_000 })
+
+    // The half that is the actual security assertion, and that no copy change
+    // can weaken: none of the owner portal rendered. Pinning only the 404
+    // wording would keep passing if the not-found page were restyled AND the
+    // portal leaked underneath it.
+    await expect(publicPage.getByRole('heading', { name: 'Access Revoked' })).not.toBeVisible()
+    await expect(publicPage.getByText(/Owner Portal|Net to Owner|Transactions/i)).not.toBeVisible()
 
     await publicContext.close()
   })
