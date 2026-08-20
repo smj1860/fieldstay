@@ -387,6 +387,7 @@ export interface Vendor {
   updated_at:           string
   stripe_connect_token:           string
   stripe_connect_account_id:      string | null
+  stripe_connect_account_pending_at: string | null   // 20260820180000 — GitHub #573
   stripe_connect_charges_enabled: boolean
   stripe_connect_onboarded_at:    string | null
   stripe_connect_invite_sent_at:  string | null

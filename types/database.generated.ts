@@ -5233,6 +5233,7 @@ export type Database = {
           specialty: Database["public"]["Enums"]["vendor_specialty"] | null
           state: string | null
           stripe_connect_account_id: string | null
+          stripe_connect_account_pending_at: string | null
           stripe_connect_charges_enabled: boolean
           stripe_connect_invite_claimed_at: string | null
           stripe_connect_invite_delivery_ref: string | null
@@ -5266,6 +5267,7 @@ export type Database = {
           specialty?: Database["public"]["Enums"]["vendor_specialty"] | null
           state?: string | null
           stripe_connect_account_id?: string | null
+          stripe_connect_account_pending_at?: string | null
           stripe_connect_charges_enabled?: boolean
           stripe_connect_invite_claimed_at?: string | null
           stripe_connect_invite_delivery_ref?: string | null
@@ -5299,6 +5301,7 @@ export type Database = {
           specialty?: Database["public"]["Enums"]["vendor_specialty"] | null
           state?: string | null
           stripe_connect_account_id?: string | null
+          stripe_connect_account_pending_at?: string | null
           stripe_connect_charges_enabled?: boolean
           stripe_connect_invite_claimed_at?: string | null
           stripe_connect_invite_delivery_ref?: string | null

@@ -30,6 +30,11 @@ type VendorConnectClaim =
       claimed: true
       claimedAt: string
       accountId: string | null
+      /**
+       * Non-null with a null accountId means a previous attempt reached Stripe
+       * and may have orphaned an Express account. See GitHub #573.
+       */
+      accountPendingAt: string | null
       alreadySent: boolean
       /** Durable delivery reference from a previous attempt, if one exists. */
       deliveryRef: string | null
@@ -51,7 +56,7 @@ async function claimVendorConnectInvite(
     .eq('id', vendorId)
     .eq('org_id', orgId)
     .or(`stripe_connect_invite_claimed_at.is.null,stripe_connect_invite_claimed_at.lt.${staleBefore}`)
-    .select('stripe_connect_account_id, stripe_connect_invite_sent_at, stripe_connect_invite_delivery_ref')
+    .select('stripe_connect_account_id, stripe_connect_account_pending_at, stripe_connect_invite_sent_at, stripe_connect_invite_delivery_ref')
     .maybeSingle()
 
   const claimed = unwrap(claimedRes, { site: 'lib.stripe.vendor-connect-invite.claim', orgId })
@@ -61,8 +66,9 @@ async function claimVendorConnectInvite(
   return {
     claimed:     true,
     claimedAt:   now,
-    accountId:   claimed.stripe_connect_account_id,
-    alreadySent: !!claimed.stripe_connect_invite_sent_at,
+    accountId:        claimed.stripe_connect_account_id,
+    accountPendingAt: claimed.stripe_connect_account_pending_at,
+    alreadySent:      !!claimed.stripe_connect_invite_sent_at,
     deliveryRef: claimed.stripe_connect_invite_delivery_ref,
   }
 }
@@ -110,25 +116,103 @@ async function releaseVendorConnectInviteClaim(
  */
 async function getOrCreateVendorStripeAccount(
   supabase: ServiceClient,
-  claim: { accountId: string | null },
+  claim: { accountId: string | null; accountPendingAt: string | null },
   params: { vendorId: string; orgId: string; vendorEmail: string },
   site: string
 ): Promise<string> {
   if (claim.accountId) return claim.accountId
 
-  const account = await stripe.accounts.create({
-    type:  'express',
-    email: params.vendorEmail,
-    metadata: {
-      vendor_id: params.vendorId,
-      org_id:    params.orgId,
-    },
-    capabilities: {
-      card_payments: { requested: true },
-      transfers:     { requested: true },
-    },
-  })
+  // A previous attempt got as far as Stripe and did not finish persisting.
+  // Look for what it may have left behind before making another one.
+  if (claim.accountPendingAt) {
+    const orphan = await findOrphanedVendorAccount(params.vendorId)
+    if (orphan) {
+      await persistVendorStripeAccount(supabase, orphan, params, site)
+      return orphan
+    }
+  }
 
+  // WRITTEN BEFORE THE STRIPE CALL, and that ordering is the whole mechanism.
+  // If this write fails we have not created anything yet; if the call after it
+  // fails we have a durable record that it might have succeeded.
+  const markRes = await supabase
+    .from('vendors')
+    .update({ stripe_connect_account_pending_at: new Date().toISOString() })
+    .eq('id', params.vendorId)
+    .eq('org_id', params.orgId)
+    .select('id')
+    .maybeSingle()
+
+  if (!unwrap(markRes, { site, orgId: params.orgId })) {
+    throw new Error(
+      `Vendor ${params.vendorId} matched zero rows while marking a Stripe account creation as pending — refusing to create an account we could not record the intent for.`
+    )
+  }
+
+  const account = await createVendorStripeAccount(params)
+  await persistVendorStripeAccount(supabase, account, params, site)
+  return account
+}
+
+/**
+ * Creates the Express account, keyed so a retry inside Stripe's window
+ * replays rather than duplicates.
+ *
+ * The key is derived from the VENDOR, not from the attempt: two attempts for
+ * one vendor must collide, which is the entire point. Stripe retains
+ * idempotency keys for 24 HOURS — a retry inside that window returns the
+ * original account object, one outside it would create a duplicate. That
+ * remaining window is what stripe_connect_account_pending_at covers, so the
+ * two mechanisms are complementary rather than redundant: the key handles the
+ * common transient retry cheaply, the marker handles everything slower.
+ *
+ * A same-key-different-parameters call is an error at Stripe, not a silent
+ * duplicate — it happens when the vendor's email is edited between attempts.
+ * Reconciling is the correct response: the account that already exists is the
+ * one we want, whatever address it was opened with.
+ */
+async function createVendorStripeAccount(
+  params: { vendorId: string; orgId: string; vendorEmail: string }
+): Promise<string> {
+  try {
+    const account = await stripe.accounts.create({
+      type:  'express',
+      email: params.vendorEmail,
+      metadata: {
+        // The only handle reconciliation has. accounts.list offers no metadata
+        // filter and Stripe's Search API does not cover Connect accounts, so
+        // an account created without this is unfindable.
+        vendor_id: params.vendorId,
+        org_id:    params.orgId,
+      },
+      capabilities: {
+        card_payments: { requested: true },
+        transfers:     { requested: true },
+      },
+    }, { idempotencyKey: `fs-vendor-acct-${params.vendorId}` })
+
+    return account.id
+  } catch (err) {
+    if ((err as { type?: string }).type !== 'idempotency_error') throw err
+
+    const orphan = await findOrphanedVendorAccount(params.vendorId)
+    if (orphan) return orphan
+
+    throw new Error(
+      `Stripe rejected the account-creation key for vendor ${params.vendorId} as reused with different parameters, ` +
+      `but no account carrying that vendor_id could be found to reconcile against.`,
+      { cause: err },
+    )
+  }
+}
+
+/** Persists the account id, failing loudly rather than returning it unsaved. */
+async function persistVendorStripeAccount(
+  supabase: ServiceClient,
+  accountId: string,
+  params: { vendorId: string; orgId: string },
+  site: string
+): Promise<void> {
   // .select().maybeSingle() rather than a bare .update(): an UPDATE that
   // matches zero rows (the vendor was deleted/reassigned after the claim)
   // resolves with { data: null, error: null } — no error at all — so a bare
@@ -136,20 +220,63 @@ async function getOrCreateVendorStripeAccount(
   // never actually saved anywhere.
   const persistAccountRes = await supabase
     .from('vendors')
-    .update({ stripe_connect_account_id: account.id })
+    .update({
+      stripe_connect_account_id: accountId,
+      // Cleared in the SAME statement that stores the id. Two statements would
+      // leave a window where both are set, and a crash inside it would send
+      // the next attempt down the reconciliation path for an account we had
+      // already recorded — wasteful, not wrong, but avoidable for free.
+      stripe_connect_account_pending_at: null,
+    })
     .eq('id', params.vendorId)
     .eq('org_id', params.orgId)
     .select('id')
     .maybeSingle()
-  const persisted = unwrap(persistAccountRes, { site, orgId: params.orgId })
 
-  if (!persisted) {
+  if (!unwrap(persistAccountRes, { site, orgId: params.orgId })) {
     throw new Error(
-      `Vendor ${params.vendorId} matched zero rows while persisting its new Stripe Connect account ${account.id} — the account exists in Stripe but was not saved.`
+      `Vendor ${params.vendorId} matched zero rows while persisting its Stripe Connect account ${accountId} — the account exists in Stripe but was not saved.`
     )
   }
+}
 
-  return account.id
+/**
+ * Finds an Express account this platform created for `vendorId` that our
+ * database has no record of.
+ *
+ * Listing and filtering client-side is the only option: accounts.list takes no
+ * metadata filter and Stripe's Search API does not support Connect accounts.
+ * That is why this runs ONLY when stripe_connect_account_pending_at says an
+ * attempt reached Stripe, never on the ordinary first invite.
+ *
+ * Bounded, and it THROWS rather than returning null when the bound is hit.
+ * Returning null there would read as "no orphan exists" and create a second
+ * account — reintroducing the exact defect this function was added to prevent,
+ * in the one situation where an orphan is most likely.
+ */
+const ORPHAN_SCAN_MAX_PAGES = 20
+
+async function findOrphanedVendorAccount(vendorId: string): Promise<string | null> {
+  let startingAfter: string | undefined
+  let pages = 0
+
+  while (pages < ORPHAN_SCAN_MAX_PAGES) {
+    pages++
+    const page = await stripe.accounts.list(
+      startingAfter ? { limit: 100, starting_after: startingAfter } : { limit: 100 }
+    )
+
+    const match = page.data.find((a) => a.metadata?.vendor_id === vendorId)
+    if (match) return match.id
+
+    if (!page.has_more || page.data.length === 0) return null
+    startingAfter = page.data[page.data.length - 1]!.id
+  }
+
+  throw new Error(
+    `Scanned ${ORPHAN_SCAN_MAX_PAGES} pages of Stripe accounts without reaching the end while reconciling vendor ${vendorId}. ` +
+    `Refusing to create a new Express account — doing so risks the duplicate this scan exists to prevent.`
+  )
 }
 
 /**
