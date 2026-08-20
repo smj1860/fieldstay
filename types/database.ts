@@ -1127,7 +1127,7 @@ export interface ReservationMessage {
   id:                      string
   org_id:                  string
   booking_id:              string | null
-  external_reservation_id: string
+  external_reservation_id: string | null   // NULL for a pre-booking inquiry — 20260820163000
   external_source:         string
   conversation_id:         string | null
   platform:                string | null

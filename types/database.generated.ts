@@ -4302,7 +4302,7 @@ export type Database = {
           conversation_id: string | null
           created_at: string
           dedup_key: string
-          external_reservation_id: string
+          external_reservation_id: string | null
           external_source: string
           id: string
           message_created_at: string
@@ -4320,7 +4320,7 @@ export type Database = {
           conversation_id?: string | null
           created_at?: string
           dedup_key: string
-          external_reservation_id: string
+          external_reservation_id: string | null
           external_source?: string
           id?: string
           message_created_at: string
@@ -4338,7 +4338,7 @@ export type Database = {
           conversation_id?: string | null
           created_at?: string
           dedup_key?: string
-          external_reservation_id?: string
+          external_reservation_id?: string | null
           external_source?: string
           id?: string
           message_created_at?: string

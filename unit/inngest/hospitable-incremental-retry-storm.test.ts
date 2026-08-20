@@ -36,7 +36,6 @@ vi.mock('@/lib/integrations/providers/hospitable', () => ({
   hospitableFetch:                   vi.fn(),
   hospitablePropertyToNormalized:    vi.fn(),
   hospitableReservationToNormalized: vi.fn(),
-  hospFetchReservationMessages:      vi.fn(),
 }))
 vi.mock('@/lib/properties/upsert-normalized', () => ({ upsertNormalizedProperties: vi.fn() }))
 vi.mock('@/lib/turnovers/generator', () => ({
@@ -56,7 +55,7 @@ vi.mock('@/lib/asset-discovery/seed-from-amenities', () => ({
 import { hospIncrementalSync } from '@/lib/inngest/functions/hospitable/incremental-sync'
 import { createServiceClient } from '@/lib/supabase/server'
 import { resolveHospitableOwner } from '@/lib/integrations/providers/hospitable-owner'
-import { hospFetchReservationMessages } from '@/lib/integrations/providers/hospitable'
+import { hospitableFetch } from '@/lib/integrations/providers/hospitable'
 import { RateLimitError, ProviderAuthError } from '@/lib/integrations/types'
 import { invokeHandler } from './test-helpers'
 
@@ -75,7 +74,7 @@ function makeLogger() {
   return { info: vi.fn(), warn: vi.fn(), error: vi.fn() }
 }
 
-/** Minimal Supabase stub — the message branch only reads `bookings` then upserts. */
+/** Minimal Supabase stub — the reservation branch reads then updates `bookings`. */
 function makeSupabase() {
   const calls: { table: string; method: string; args: unknown[] }[] = []
   const from = vi.fn((table: string) => {
@@ -87,8 +86,12 @@ function makeSupabase() {
     }
     chain.select      = (...a: unknown[]) => record('select', a)
     chain.upsert      = (...a: unknown[]) => record('upsert', a)
+    chain.update      = (...a: unknown[]) => record('update', a)
     chain.eq          = (...a: unknown[]) => record('eq', a)
-    chain.maybeSingle = () => Promise.resolve({ data: { id: 'booking_1' }, error: null })
+    // null, not a row: the 404 branch these tests take must find no booking to
+    // cancel, so the run ends at the resolution/fetch pair under test rather
+    // than continuing into turnover cancellation and crew notification.
+    chain.maybeSingle = () => Promise.resolve({ data: null, error: null })
     chain.then = (resolve: (v: unknown) => unknown) =>
       Promise.resolve({ data: null, error: null }).then(resolve)
     return chain
@@ -96,27 +99,46 @@ function makeSupabase() {
   return { from, calls }
 }
 
-const MESSAGE_EVENT = {
+// RETARGETED 2026-08-20, from the messages fetch to the RESOLUTION step.
+//
+// The incident arrived through GET /reservations/{uuid}/messages, and this
+// suite drove every case through it. That fetch is gone — the message webhook
+// carries the whole message, so nothing fetches it any more (see
+// lib/integrations/providers/hospitable-message-store.ts).
+//
+// The behaviours are not gone, though. They live in withProviderCall, which
+// every remaining entity branch still routes through, and resolveHospitableOwner
+// is a real caller of it on all three. Deleting this file with the endpoint
+// would have thrown away the regression coverage for a bug that is still
+// reachable; retargeting keeps it pointed at the code that actually holds the
+// contract.
+const RESERVATION_EVENT = {
   provider_id: 'hospitable',
-  event_type:  'message.created',
-  entity_type: 'message',
+  event_type:  'reservation.created',
+  entity_type: 'reservation',
   entity_id:   'db0dca2d-1a35-42fa-84ad-606bb1b0c021', // the reservation from the incident
 }
 
-function runMessageSync(step: ReturnType<typeof makeStep>) {
+function runSync(step: ReturnType<typeof makeStep>) {
   return invokeHandler(hospIncrementalSync, {
-    event:  { data: MESSAGE_EVENT },
+    event:  { data: RESERVATION_EVENT },
     step,
     logger: makeLogger(),
   })
 }
 
-beforeEach(() => {
-  vi.clearAllMocks()
-  mock(createServiceClient).mockReturnValue(makeSupabase())
+/** A clean resolution that then finds no reservation provider-side (404). */
+function resolvesCleanly() {
   mock(resolveHospitableOwner).mockResolvedValue({
     orgId: 'org_1', userId: 'user_1', token: 'token_abc',
   })
+  mock(hospitableFetch).mockResolvedValue({ ok: false, status: 404 })
+}
+
+beforeEach(() => {
+  vi.clearAllMocks()
+  mock(createServiceClient).mockReturnValue(makeSupabase())
+  resolvesCleanly()
 })
 
 describe('hospIncrementalSync — terminal auth failures', () => {
@@ -126,25 +148,25 @@ describe('hospIncrementalSync — terminal auth failures', () => {
     // "exhausted all retries". The TYPE is the assertion: a plain Error
     // satisfies any message matcher while still being fully retriable, which
     // is exactly the distinction that was missing.
-    mock(hospFetchReservationMessages).mockRejectedValue(
+    mock(resolveHospitableOwner).mockRejectedValue(
       new ProviderAuthError('Hospitable', 401, 'GET /reservations/{id}/messages', '{"message":"Unauthenticated."}'),
     )
 
-    await expect(runMessageSync(makeStep())).rejects.toBeInstanceOf(NonRetriableError)
+    await expect(runSync(makeStep())).rejects.toBeInstanceOf(NonRetriableError)
   })
 
   it('does not re-call the provider after a terminal auth failure', async () => {
     // The rate-limit path retries once after sleeping. A terminal auth failure
     // must NOT borrow that second attempt — retrying a missing scope is the
     // amplification this whole change exists to remove.
-    mock(hospFetchReservationMessages).mockRejectedValue(
+    mock(resolveHospitableOwner).mockRejectedValue(
       new ProviderAuthError('Hospitable', 403, 'GET /reservations/{id}/messages'),
     )
 
     const step = makeStep()
-    await expect(runMessageSync(step)).rejects.toBeInstanceOf(NonRetriableError)
+    await expect(runSync(step)).rejects.toBeInstanceOf(NonRetriableError)
 
-    expect(hospFetchReservationMessages).toHaveBeenCalledTimes(1)
+    expect(resolveHospitableOwner).toHaveBeenCalledTimes(1)
     expect(step.sleep).not.toHaveBeenCalled()
   })
 })
@@ -155,12 +177,12 @@ describe('hospIncrementalSync — rate limiting', () => {
     // in incremental-sync.ts — despite three comments in two other files
     // asserting this exact behaviour existed. The 429 became a step failure
     // and Inngest retried on its own backoff instead.
-    mock(hospFetchReservationMessages)
+    mock(resolveHospitableOwner)
       .mockRejectedValueOnce(new RateLimitError(2))
-      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce({ orgId: 'org_1', userId: 'user_1', token: 'token_abc' })
 
     const step = makeStep()
-    const result = await runMessageSync(step)
+    const result = await runSync(step)
 
     // '2s' is Hospitable's number, not one we invented — the whole point of
     // honouring Retry-After rather than backing off generically.
@@ -168,8 +190,8 @@ describe('hospIncrementalSync — rate limiting', () => {
       expect.stringContaining('rate-limit-sleep'),
       '2s',
     )
-    expect(hospFetchReservationMessages).toHaveBeenCalledTimes(2)
-    expect(result).toMatchObject({ action: 'synced' })
+    expect(resolveHospitableOwner).toHaveBeenCalledTimes(2)
+    expect(result).toMatchObject({ action: 'cancelled' })
   })
 
   it('hands off to Inngest only after honouring one full Retry-After', async () => {
@@ -178,30 +200,31 @@ describe('hospIncrementalSync — rate limiting', () => {
     // retries are the correct next layer. Asserting the CALL COUNT is what
     // stops a future change turning this into an unbounded in-step retry loop
     // that would hold an Inngest step open indefinitely.
-    mock(hospFetchReservationMessages).mockRejectedValue(new RateLimitError(5))
+    mock(resolveHospitableOwner).mockRejectedValue(new RateLimitError(5))
 
     const step = makeStep()
-    await expect(runMessageSync(step)).rejects.toBeInstanceOf(RateLimitError)
+    await expect(runSync(step)).rejects.toBeInstanceOf(RateLimitError)
 
-    expect(hospFetchReservationMessages).toHaveBeenCalledTimes(2)
+    expect(resolveHospitableOwner).toHaveBeenCalledTimes(2)
     expect(step.sleep).toHaveBeenCalledTimes(1)
   })
 
   it('does not sleep at all on a clean call', async () => {
-    mock(hospFetchReservationMessages).mockResolvedValue([])
+    resolvesCleanly()
 
     const step = makeStep()
-    await runMessageSync(step)
+    await runSync(step)
 
     expect(step.sleep).not.toHaveBeenCalled()
-    expect(hospFetchReservationMessages).toHaveBeenCalledTimes(1)
+    expect(resolveHospitableOwner).toHaveBeenCalledTimes(1)
   })
 })
 
 describe('hospIncrementalSync — per-entity concurrency', () => {
   it('allows only ONE in-flight invocation per entity id', () => {
-    // GET /reservations/{id}/messages is capped by Hospitable at 2 req/min PER
-    // RESERVATION. The limit was 2, which let a single pair of concurrent
+    // GET /reservations/{id}/messages was capped by Hospitable at 2 req/min
+    // PER RESERVATION. That endpoint is no longer called, but the cap this
+    // limit protects is the SHARED platform budget every branch spends. The limit was 2, which let a single pair of concurrent
     // invocations spend that entire minute's budget before any retry — while
     // the code comment claimed it "prevents duplicate work on the same id",
     // which a limit of 2 does not do. There is no throughput argument for a

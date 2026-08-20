@@ -216,21 +216,29 @@ async function probeConnections(
   return null
 }
 
-/**
- * Resolves the org, connection user, and a valid access token for a Hospitable
- * entity. Returns null when no connected account owns it (disconnected org,
- * entity belongs to a non-customer, or entity was deleted provider-side).
- *
- * @throws RateLimitError  propagated so the caller can step.sleep and retry
- *                         (hospIncrementalSync does this via withProviderCall).
- * @throws Error           on unexpected provider/database failure — the caller
- *                         MUST let Inngest retry rather than guessing an org.
- */
-export async function resolveHospitableOwner(params: {
+export interface ResolveOwnerParams {
   entityKind:      HospitableEntityKind
   externalId:      string
   externalUserId?: string
-}): Promise<ResolvedHospitableOwner | null> {
+}
+
+/**
+ * ATTRIBUTION ONLY — which org owns this entity, and through which connection.
+ * No access token is fetched.
+ *
+ * Split out of resolveHospitableOwner on 2026-08-20 for the message-webhook
+ * path, which writes a row and calls no Hospitable API. Making a pure DB write
+ * depend on a credential means a Vault read per inbound webhook, and — worse —
+ * a message that cannot be stored while a token is merely unhealthy. Neither
+ * cost buys anything when nothing is going to be sent.
+ *
+ * Deliberately a SPLIT rather than a second resolver. "Never pick an active
+ * connection directly" is the rule this module exists to enforce, and two
+ * resolution paths is how that rule rots.
+ */
+export async function resolveHospitableOrg(
+  params: ResolveOwnerParams,
+): Promise<{ orgId: string; userId: string } | null> {
   const { entityKind, externalId, externalUserId } = params
   const supabase = createServiceClient({ system: 'lib/integrations/providers/hospitable-owner' })
 
@@ -239,10 +247,9 @@ export async function resolveHospitableOwner(params: {
 
   const byOrg = new Map(connections.map((c) => [c.org_id, c]))
 
-  const finish = async (conn: ActiveConnection): Promise<ResolvedHospitableOwner> => ({
+  const finish = async (conn: ActiveConnection) => ({
     orgId:  conn.org_id,
     userId: conn.user_id,
-    token:  await getValidHospitableToken(conn.user_id),
   })
 
   // ── 0. Direct attribution from the webhook payload's own user id ───────────
@@ -319,5 +326,31 @@ export async function resolveHospitableOwner(params: {
   if (!probed) return null
 
   await rememberOwner(supabase, entityKind, externalId, probed.conn.org_id, 'probe')
-  return { orgId: probed.conn.org_id, userId: probed.conn.user_id, token: probed.token }
+  return { orgId: probed.conn.org_id, userId: probed.conn.user_id }
+}
+
+/**
+ * Resolves the org, connection user, AND a valid access token for a Hospitable
+ * entity. Returns null when no connected account owns it (disconnected org,
+ * entity belongs to a non-customer, or entity was deleted provider-side).
+ *
+ * Use this when you are about to CALL Hospitable. When you only need to know
+ * whose row this is, use resolveHospitableOrg above.
+ *
+ * @throws RateLimitError  propagated so the caller can step.sleep and retry
+ *                         (hospIncrementalSync does this via withProviderCall).
+ * @throws Error           on unexpected provider/database failure — the caller
+ *                         MUST let Inngest retry rather than guessing an org.
+ */
+export async function resolveHospitableOwner(
+  params: ResolveOwnerParams,
+): Promise<ResolvedHospitableOwner | null> {
+  const org = await resolveHospitableOrg(params)
+  if (!org) return null
+
+  // On the probe path this is the second Vault read for the same user — the
+  // probe had to hold a token to prove ownership. That path is the rare one
+  // (steps 0-2 answer almost every call), and paying for it here is what
+  // keeps a single resolution chain instead of two.
+  return { ...org, token: await getValidHospitableToken(org.userId) }
 }
