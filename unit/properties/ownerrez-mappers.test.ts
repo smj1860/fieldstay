@@ -12,21 +12,50 @@ import type {
 } from '@/lib/integrations/types'
 
 describe('mapOwnerRezBookingStatus', () => {
-  it('maps confirmed', () => {
-    expect(mapOwnerRezBookingStatus('Confirmed')).toBe('confirmed')
+  // THE PROVIDER'S ACTUAL VOCABULARY, and the reason this block was rewritten.
+  //
+  // GET /v2/bookings documents exactly three values: active | canceled |
+  // pending. It has never sent "Confirmed" or "Tentative" — but this suite
+  // asserted both, and passed, while the mapper matched them and nothing else.
+  // Every live reservation therefore fell through to the unknown-status default
+  // and was written as `tentative`: production held 28 OwnerRez bookings and
+  // zero confirmed ones, and only `canceled` ever mapped correctly.
+  //
+  // A green suite over invented inputs is worse than no suite — it is evidence
+  // pointing the wrong way. These cases are the documented strings.
+  it("maps 'active' to confirmed — the value a live OwnerRez reservation carries", () => {
+    expect(mapOwnerRezBookingStatus('active')).toBe('confirmed')
+    expect(mapOwnerRezBookingStatus('Active')).toBe('confirmed')
   })
 
-  it('maps cancelled and canceled (both spellings)', () => {
+  it("maps 'pending' to tentative — genuinely not yet confirmed", () => {
+    expect(mapOwnerRezBookingStatus('pending')).toBe('tentative')
+  })
+
+  it("maps 'canceled', and the British spelling it never sends", () => {
+    expect(mapOwnerRezBookingStatus('canceled')).toBe('cancelled')
     expect(mapOwnerRezBookingStatus('Cancelled')).toBe('cancelled')
-    expect(mapOwnerRezBookingStatus('Canceled')).toBe('cancelled')
   })
 
-  it('maps tentative', () => {
+  it('still tolerates the obvious synonyms without depending on them', () => {
+    // Kept so a provider that starts sending the plain word does not regress
+    // to tentative. These are aliases, NOT the contract — the three cases
+    // above are.
+    expect(mapOwnerRezBookingStatus('Confirmed')).toBe('confirmed')
     expect(mapOwnerRezBookingStatus('Tentative')).toBe('tentative')
   })
 
   it('defaults unknown statuses to tentative (fails toward caution)', () => {
     expect(mapOwnerRezBookingStatus('hold')).toBe('tentative')
+  })
+
+  it('NEVER silently drops a real booking out of confirmed', () => {
+    // The single assertion that would have caught the original bug: whatever
+    // the provider calls a live reservation, it must reach 'confirmed'.
+    // Revenue posting, pre-arrival email, gap-night offers, conflict detection
+    // and par learning all filter on that value; turnover generation does not,
+    // which is exactly why the failure was invisible.
+    expect(mapOwnerRezBookingStatus('active')).not.toBe('tentative')
   })
 })
 

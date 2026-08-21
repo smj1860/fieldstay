@@ -331,10 +331,47 @@ export const ownerRezProvider: IntegrationProvider = {
 // ownerrez/incremental-sync.ts — consolidated here as the single source of
 // truth, mirroring where Hospitable's equivalent mappers live.
 
+/**
+ * OwnerRez booking status -> our enum.
+ *
+ * THE DOCUMENTED VALUES ARE `active` | `canceled` | `pending`. Nothing else.
+ * Verified 2026-08-21 against api.ownerrez.com/help/v2/bookings/get-bookings.
+ *
+ * This mapper previously matched `'confirmed'` and `'tentative'` — two strings
+ * OwnerRez has never sent — so every live reservation fell through to
+ * unmappedBookingStatus() and was written as `tentative`. Production held 28
+ * OwnerRez bookings and ZERO confirmed ones, while Hospitable in the same
+ * table mapped normally; `canceled` was the only value that ever matched,
+ * which is why 2 of 30 looked right.
+ *
+ * What that cost, measured rather than assumed:
+ *   - Owner ledgers. Revenue posts behind `status === 'confirmed'` (line ~644
+ *     here, and reservation-pipeline.ts). 5 of 28 OwnerRez bookings carrying a
+ *     dollar amount had posted revenue; Hospitable was 10 of 10.
+ *   - Guest messaging. guidebook-pre-arrival-email-cron and
+ *     guidebook-stay-extension-cron both filter .eq('status','confirmed') —
+ *     no pre-arrival email, no gap-night offer, ever.
+ *   - Double-booking detection (ical/conflict-detection.ts) and the par
+ *     learning engine (inventory/record-consumption.ts) skip them too.
+ *
+ * Turnovers were NOT affected: lib/turnovers/generator.ts accepts
+ * ['confirmed','tentative'], which is why the integration looked healthy —
+ * cleans were scheduled, so the visible surface worked while the ledger and
+ * every guest-facing automation silently did nothing.
+ *
+ * `pending` -> 'tentative' is deliberate and is the one case the old default
+ * happened to get right: a pending OwnerRez booking is genuinely not confirmed.
+ */
 export function mapOwnerRezBookingStatus(status: string): Enums<'booking_status'> {
   const s = status.toLowerCase()
+  // The real OwnerRez vocabulary.
+  if (s === 'active')  return 'confirmed'
+  if (s === 'pending') return 'tentative'
+  if (s === 'canceled' || s === 'cancelled') return 'cancelled'
+  // Kept as tolerated aliases, not as the contract: they cost nothing, and a
+  // provider that starts sending the obvious word should not regress to
+  // tentative while someone reads this file.
   if (s === 'confirmed') return 'confirmed'
-  if (s === 'cancelled' || s === 'canceled') return 'cancelled'
   if (s === 'tentative') return 'tentative'
   return unmappedBookingStatus('ownerrez', status)
 }
