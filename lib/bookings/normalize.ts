@@ -36,11 +36,38 @@ export interface NormalizedBooking {
 
 /**
  * Fallback for a booking-status value a provider mapper doesn't recognize.
- * Defaults to 'tentative' rather than 'confirmed' — an ambiguous/unforeseen
- * status should fail toward caution, since 'confirmed' is what schedules a
- * real turnover and dispatches crew.
+ *
+ * Still defaults to 'tentative' rather than 'confirmed' — an unforeseen status
+ * should fail toward caution, since 'confirmed' schedules a real turnover and
+ * dispatches crew.
+ *
+ * REPORTS, rather than only warning. This used to be a bare console.warn, and
+ * that is precisely how the OwnerRez status mapper stayed broken: it matched
+ * `'confirmed'`, a string OwnerRez has never sent (its vocabulary is
+ * `active`/`canceled`/`pending`), so EVERY live reservation landed here and was
+ * written as tentative. Production ran that way for weeks with 28 tentative
+ * OwnerRez bookings and zero confirmed ones — no alert, because the only
+ * signal was a warn line in a serverless log nobody greps.
+ *
+ * A single unrecognized status is not noise: a provider's status vocabulary is
+ * a closed set, so hitting this means the mapper disagrees with the provider,
+ * and that disagreement applies to EVERY booking it touches, not one. Silently
+ * degrading them all to tentative removes them from owner-ledger revenue,
+ * pre-arrival guest email, gap-night offers, conflict detection and par
+ * learning — all of which filter on 'confirmed' — while turnover generation
+ * keeps working, so the integration still looks alive.
  */
 export function unmappedBookingStatus(provider: string, rawStatus: string): 'tentative' {
   console.warn(`[${provider}] unrecognized booking status "${rawStatus}" — defaulting to tentative`)
+
+  // Imported lazily so this module stays dependency-light for the pure mappers
+  // that import it, and so a reporting failure can never break a sync.
+  void import('@/lib/observability/report-error')
+    .then(({ reportError }) => reportError(
+      new Error(`[${provider}] unrecognized booking status "${rawStatus}" — defaulted to tentative`),
+      { site: 'lib.bookings.normalize.unmappedBookingStatus' },
+    ))
+    .catch(() => { /* reporting must never fail a sync */ })
+
   return 'tentative'
 }
