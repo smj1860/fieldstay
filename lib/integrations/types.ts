@@ -87,6 +87,31 @@ export interface IntegrationProvider {
     refreshToken?: string
   }): Promise<void>
 
+  /**
+   * Tear down provider-side state that outlives the token, BEFORE it is
+   * revoked. Optional; implement only when there is such state.
+   *
+   * Revoking a token stops us calling THEM. It does not stop them calling US:
+   * a provider that pushes to a per-connection URL keeps pushing to it after a
+   * disconnect, and the registration can only be removed with a credential
+   * that is about to be destroyed. Hence "before".
+   *
+   * Hostex is the current and only implementor — it registers an inbound
+   * webhook per connection and exposes DELETE /webhooks/{id}. Without this the
+   * PM disconnects, our route answers 401 to every delivery forever, and their
+   * portal still lists a FieldStay webhook for an integration the operator
+   * believes they removed.
+   *
+   * Best-effort by contract: the caller logs a failure and proceeds with local
+   * teardown regardless. A provider-side registration we could not delete is a
+   * wart; a disconnect that refuses to complete because of one is a live
+   * credential the PM asked us to destroy and we did not.
+   */
+  cleanupBeforeRevoke?(params: {
+    token:  string
+    userId: string
+  }): Promise<void>
+
   // ── Universal methods (all providers) ───────────────────────────────────
 
   /**

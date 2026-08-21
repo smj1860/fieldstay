@@ -16,7 +16,7 @@ import { randomBytes } from 'node:crypto'
 
 import { createServiceClient } from '@/lib/supabase/server'
 import { unwrap } from '@/lib/supabase/unwrap'
-import { hostexEnsureWebhook } from '@/lib/integrations/providers/hostex-api'
+import { hostexDeleteWebhook, hostexEnsureWebhook } from '@/lib/integrations/providers/hostex-api'
 
 const PROVIDER = 'hostex'
 
@@ -79,4 +79,47 @@ export async function ensureHostexWebhookRegistration(
   )
 
   return { attempted: true, created }
+}
+
+/**
+ * Remove this connection's registration from Hostex, on disconnect.
+ *
+ * Called via hostexProvider.cleanupBeforeRevoke, i.e. while the access token is
+ * still valid — DELETE /webhooks/{id} needs it, and the disconnect flow is
+ * about to destroy it.
+ *
+ * Deliberately does NOT clear `webhook_token`. The column is the routing key,
+ * and keeping it means a later reconnect re-registers the SAME URL rather than
+ * minting a second one; a rotated token would leave whatever we failed to
+ * delete pointing at an address that will never be valid again. The inbound
+ * secret IS cleared, but by the teardown RPC rather than here, so that it
+ * happens on the involuntary path too (see
+ * 20260821174709_clear_webhook_secret_on_disconnect.sql).
+ *
+ * Returns quietly when there is nothing to do — no token minted yet, no app URL
+ * configured. Both mean no registration can exist.
+ */
+export async function removeHostexWebhookRegistration(
+  userId:      string,
+  accessToken: string,
+): Promise<{ deleted: number }> {
+  const appUrl = process.env.NEXT_PUBLIC_APP_URL
+  if (!appUrl) return { deleted: 0 }
+
+  const admin = createServiceClient({ system: 'lib/integrations/providers/hostex-webhook' })
+
+  const existingRes = await admin
+    .from('integration_connections')
+    .select('webhook_token')
+    .eq('user_id', userId)
+    .eq('provider_id', PROVIDER)
+    .maybeSingle()
+
+  const webhookToken = unwrap(existingRes, {
+    site: 'lib.integrations.hostex-webhook.read-token-for-delete',
+  })?.webhook_token
+
+  if (!webhookToken) return { deleted: 0 }
+
+  return hostexDeleteWebhook(accessToken, userId, `${appUrl}/api/webhooks/hostex/${webhookToken}`)
 }

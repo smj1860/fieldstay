@@ -274,7 +274,7 @@ describe('hostexProvider — the generic webhook route stays closed', () => {
 // ============================================================================
 
 describe('hostexProvider.revokeAccessToken', () => {
-  const OK = { request_id: 'RT1', error_code: 200, error_msg: 'Done.' }
+  const OK = { request_id: 'RT1', error_code: 0, error_msg: 'Done.' }
 
   beforeEach(() => {
     vi.stubEnv('HOSTEX_CLIENT_ID', 'cid')

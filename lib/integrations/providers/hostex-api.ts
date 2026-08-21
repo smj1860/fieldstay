@@ -154,7 +154,7 @@ export async function hostexFetch<T>(
   token:  string,
   /** The connection this call is spent against — Hostex quotas are per-token. */
   userId: string,
-  init?:  { method?: 'GET' | 'POST'; body?: unknown },
+  init?:  { method?: 'GET' | 'POST' | 'DELETE'; body?: unknown },
 ): Promise<T> {
   // Fails CLOSED: these budgets exist to throw before Hostex throttles us. If
   // a budget cannot be consulted we must not blow through the provider's
@@ -517,6 +517,40 @@ export async function hostexEnsureWebhook(
   })
 
   return { created: true }
+}
+
+/**
+ * Remove this connection's registration, by URL.
+ *
+ * DELETE /webhooks/{id} — confirmed against
+ * api-doc.hostex.io/reference/delete-webhook. Hostex only permits deleting a
+ * webhook your own app created AND that is `manageable`; anything else answers
+ * 403, which is why the filter below checks both rather than URL alone. A 403
+ * from someone else's registration would be terminal and would fail the
+ * disconnect for a reason the PM cannot act on.
+ *
+ * Without this, a disconnected PM leaves Hostex pushing to a URL that answers
+ * 401 forever. Our side is safe — the route rejects on connection status — but
+ * it is their infrastructure retrying into a wall indefinitely, and it means an
+ * operator inspecting their Hostex portal sees a FieldStay webhook for an
+ * integration they believe they removed.
+ *
+ * Returns how many were deleted so the caller can distinguish "cleaned up" from
+ * "there was nothing registered", rather than reporting both as success.
+ */
+export async function hostexDeleteWebhook(
+  token:  string,
+  userId: string,
+  url:    string,
+): Promise<{ deleted: number }> {
+  const existing = await hostexListWebhooks(token, userId)
+  const ours     = existing.filter((w) => w.url === url && w.manageable)
+
+  for (const hook of ours) {
+    await hostexFetch<unknown>(`/webhooks/${hook.id}`, token, userId, { method: 'DELETE' })
+  }
+
+  return { deleted: ours.length }
 }
 
 /**

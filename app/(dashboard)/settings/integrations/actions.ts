@@ -266,6 +266,57 @@ export async function triggerResync(
   return { success: true }
 }
 
+/**
+ * Undo everything on the PROVIDER's side, in the order the credential allows.
+ *
+ * Two halves, each independently best-effort, and the ordering is forced rather
+ * than stylistic:
+ *
+ *   1. cleanupBeforeRevoke — provider-side state that outlives the token and
+ *      needs the token to remove. Today that is Hostex's inbound webhook
+ *      registration (DELETE /webhooks/{id}); leave it and Hostex pushes to a
+ *      URL our route 401s forever, while the operator's portal still lists a
+ *      FieldStay webhook for an integration they believe they removed.
+ *   2. revokeAccessToken — destroys the credential.
+ *
+ * SEPARATE try blocks on purpose. One shared block would let a failed webhook
+ * delete jump straight to the catch, skipping the revocation entirely — turning
+ * a cosmetic leftover into a live token the PM explicitly asked us to destroy.
+ * The cheap half must never be able to abort the half that matters.
+ *
+ * Never throws: local teardown (Vault, connection status, audit) has to run
+ * regardless of what the provider's API did.
+ */
+async function tearDownAtProvider(
+  providerId:       string,
+  connectionUserId: string,
+  accessToken:      string,
+  refreshToken:     string | null,
+): Promise<void> {
+  const provider = getProvider(providerId)
+
+  if (provider?.cleanupBeforeRevoke) {
+    try {
+      await provider.cleanupBeforeRevoke({ token: accessToken, userId: connectionUserId })
+    } catch (err) {
+      console.error(`[disconnect:${providerId}] Provider cleanup failed:`, err instanceof Error ? err.message : err)
+      reportError(err, { site: 'serverAction.settings.integrations.disconnectIntegration.cleanup' })
+    }
+  }
+
+  if (provider?.revokeAccessToken) {
+    try {
+      await provider.revokeAccessToken({
+        token:        accessToken,
+        refreshToken: refreshToken ?? undefined,
+      })
+    } catch (err) {
+      console.error(`[disconnect:${providerId}] Provider revocation failed:`, err instanceof Error ? err.message : err)
+      reportError(err, { site: 'serverAction.settings.integrations.disconnectIntegration' })
+    }
+  }
+}
+
 export async function disconnectIntegration(
   providerId: string
 ): Promise<{ error?: string }> {
@@ -323,21 +374,9 @@ export async function disconnectIntegration(
     // 1. Retrieve the tokens from Vault (keyed to the connection's owner).
     const { accessToken, refreshToken } = await readRevocableCredentials(connectionUserId, providerId)
 
-    // 2. Revoke at the provider (best-effort)
+    // 2. Tear down at the provider (best-effort, both halves)
     if (accessToken) {
-      try {
-        const provider = getProvider(providerId)
-        if (provider?.revokeAccessToken) {
-          await provider.revokeAccessToken({
-            token:        accessToken,
-            refreshToken: refreshToken ?? undefined,
-          })
-        }
-      } catch (err) {
-        console.error(`[disconnect:${providerId}] Provider revocation failed:`, err instanceof Error ? err.message : err)
-        reportError(err, { site: 'serverAction.settings.integrations.disconnectIntegration' })
-        // Non-fatal — continue with local cleanup
-      }
+      await tearDownAtProvider(providerId, connectionUserId, accessToken, refreshToken)
     }
 
     // 3. Disconnect in Vault (marks connection 'disconnected' + deletes secret —
