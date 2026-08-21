@@ -18,58 +18,18 @@ import { Dialog }                   from '@/components/ui/Dialog'
 import { MULTI_CREW_START_FAQ }     from '@/lib/faq-content'
 
 import { reportError } from '@/lib/observability/report-error'
-function urlBase64ToUint8Array(base64String: string) {
-  const padding = '='.repeat((4 - (base64String.length % 4)) % 4)
-  const base64  = (base64String + padding).replace(/-/g, '+').replace(/_/g, '/')
-  const rawData = globalThis.atob(base64)
-  return Uint8Array.from([...rawData].map((char) => char.charCodeAt(0)))
-}
-
+import { registerAndSyncPush, subscribeToPush } from '@/lib/push/subscribe-client'
 /**
- * Registers a push subscription with OUR server.
+ * Push subscription lives in lib/push/subscribe-client.ts, shared with the PM
+ * dashboard.
  *
- * Every failure here used to be silent. `fetch` resolves on a 4xx/5xx rather
- * than rejecting, so the response was discarded: a 500 from the route, or a
- * 401 from an expired session, looked exactly like success. And the browser
- * subscription had ALREADY been created locally by that point, so the next
- * mount's `getSubscription()` found it, took the "already subscribed" early
- * return, and never retried — one failed POST disabled push permanently for
- * that device, with nothing logged and nothing shown. Push is how a crew
- * member learns they have a new assignment or that one was cancelled.
- *
- * The route upserts on (crew_member_id, endpoint), so re-sending a
- * subscription the server already has is a cheap no-op. That is what makes it
- * safe to call this on every mount, and it is what lets a failed registration
- * heal itself.
+ * It was local to this file, and the dashboard had its own near-identical copy
+ * that never received any of the fixes this one accumulated — the missing
+ * `res.ok` check, the keys check that returned instead of throwing, and the
+ * `if (existing) return` that meant a device already subscribed here never
+ * registered its PM row at all. One copy now, so the next fix lands once.
  */
-export async function syncSubscriptionToServer(sub: PushSubscription): Promise<void> {
-  const json = sub.toJSON()
-  // Previously `if (!json.keys) return` — a silent success for a subscription
-  // that could never receive anything.
-  if (!json.keys?.p256dh || !json.keys.auth) {
-    throw new Error('Push subscription is missing its encryption keys')
-  }
-  const res = await fetch('/api/crew/push-subscribe', {
-    method:  'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body:    JSON.stringify({
-      endpoint: json.endpoint,
-      p256dh:   json.keys.p256dh,
-      auth:     json.keys.auth,
-    }),
-  })
-  if (!res.ok) {
-    throw new Error(`push-subscribe failed with ${res.status}`)
-  }
-}
-
-async function subscribeToPush(reg: ServiceWorkerRegistration): Promise<void> {
-  const sub = await reg.pushManager.subscribe({
-    userVisibleOnly:      true,
-    applicationServerKey: urlBase64ToUint8Array(process.env.NEXT_PUBLIC_VAPID_PUBLIC_KEY!),
-  })
-  await syncSubscriptionToServer(sub)
-}
+const PUSH_ENDPOINT = '/api/crew/push-subscribe' as const
 
 export function CrewShell({
   crewName,
@@ -223,43 +183,18 @@ export function CrewShell({
     if (typeof globalThis.window === 'undefined') return
     if (!('serviceWorker' in navigator) || !('PushManager' in globalThis)) return
 
-    const register = async () => {
+    const run = async () => {
       try {
-        const reg      = await navigator.serviceWorker.register('/sw.js')
-        setSwReg(reg)
-
-        const existing = await reg.pushManager.getSubscription()
-        if (existing) {
-          // NOT an early return any more. A local browser subscription is not
-          // evidence the server has the row — those are two different systems,
-          // and the POST that links them is exactly the step that can fail.
-          // Re-sending is an idempotent upsert, so this costs one request per
-          // app open and is the only thing that recovers a device whose
-          // original registration failed.
-          //
-          // Gated on isOnline() because this is a PWA that is expected to be
-          // offline: without the gate, every app open in a basement or a dead
-          // zone would throw here and report to Sentry, turning a real signal
-          // into noise. Skipping is free — the next online mount re-sends.
-          if (isOnline()) await syncSubscriptionToServer(existing)
-          return
-        }
-
-        const permission = Notification.permission
-        if (permission === 'default') {
-          setNotifVisible(true) // Show "Enable Notifications" prompt
-        } else if (permission === 'granted') {
-          // Previously granted but subscription was lost — resubscribe silently
-          await subscribeToPush(reg)
-        }
-        // 'denied' — respect the user's choice, don't prompt
+        const { registration, shouldPrompt } = await registerAndSyncPush(PUSH_ENDPOINT)
+        setSwReg(registration)
+        if (shouldPrompt) setNotifVisible(true)
       } catch (err) {
         console.error('[sw] registration failed:', err)
         reportError(err, { site: 'page.crew.crew-shell.sw' })
       }
     }
 
-    register()
+    run()
   }, [])
 
   // Request persistent storage so the browser is less likely to evict
@@ -284,7 +219,7 @@ export function CrewShell({
     }
     setNotifError(null)
     try {
-      await subscribeToPush(swReg)
+      await subscribeToPush(swReg, PUSH_ENDPOINT)
       setNotifVisible(false)
     } catch (err) {
       // The prompt deliberately STAYS open: the crew member asked for
