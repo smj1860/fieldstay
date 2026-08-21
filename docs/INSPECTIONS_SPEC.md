@@ -43,7 +43,15 @@ and it is what gives the overdue nudge its force.
 | Overdue | Email the assignee. No escalation path — they are the responsible party. |
 | Device | **Tablet/iPad first.** |
 | Offline | **In-app**, on the PM dashboard PWA. Not the crew PWA. |
-| Offline scope | **Inspections only.** Nothing else in the dashboard goes offline. |
+| Offline scope | **Maintenance.** Inspections plus creating a work order — a PM at a property with no signal is doing both on the same visit. Read-only for everything else on the page; see §8. Nothing outside `/maintenance` goes offline. |
+| Which forms | Exactly three: **Property Safety & Risk Mitigation**, **Outdoor Property**, **Indoor Property**. |
+| Editable by orgs? | **No.** These are FIXED FORMS, not templates. Only the platform changes them. No per-org copy, no editing UI, no Templates Hub. |
+| Where it lives | Under **Maintenance** — a tab on the Maintenance page, backed by its own route. Not a top-level nav item, not Templates. |
+| Frequency | Set in **onboarding**, changeable later in the Inspections tab. Safety: 1× or 2× a year. Outdoor and Indoor: quarterly or 2× a year. The PM picks the **month(s)** — for quarterly, the month the cycle starts in. |
+| Photos | Required on **every failure**, plus specific items that are photographed even when passing (fire-extinguisher tags). |
+| Draft lifetime | **24 hours from start.** Past that a new inspection must be started. |
+| N/A | Needs a reason. Auto-filled as "property does not have &lt;the thing&gt;" where the item defines one; otherwise the PM writes it. |
+| Multi-property | **One property per inspection.** Never batched. |
 
 ---
 
@@ -116,17 +124,23 @@ guardrails keep meaning what they say.
 ## 5. Data model
 
 ```
-inspection_templates            org-level form definition
-  id, org_id, name, kind, description,
-  platform_template_id (nullable),   -- seeded-then-editable, like org_inventory_catalog
-  default_frequency, is_active
+inspection_forms                PLATFORM-owned form definition. No org_id.
+  id, key, name, kind, description,   -- key: 'safety' | 'indoor' | 'outdoor'
+  version, is_active
 
-inspection_template_sections    grouping within a form
-  id, template_id, name, sort_order
+inspection_form_sections        grouping within a form
+  id, form_id, name, sort_order
 
-inspection_template_items       ONE question
-  id, section_id, prompt, sort_order,
+inspection_form_items           ONE question
+  id, section_id, key,   -- stable: 'safety.fire.smoke_present' prompt, sort_order,
   is_required, photo_required,
+  response_type       'yes_no' | 'count' | 'date' | 'text' | 'photo'
+  failing_answer      'no' | 'yes'      -- DEFAULT 'no'; see below
+  parent_item_id      (nullable)        -- shown only when the parent answers <show_when>
+  show_when           (nullable)        -- 'fail' | 'pass'
+  repeat_source_item_id (nullable)      -- render one row per unit counted there
+  na_reason_template  (nullable)        -- "property does not have a pool"
+  na_asset_type       (nullable)        -- verify that claim against property_assets
   asset_type          (nullable) -- links the answer to a property_assets row
   remediation         'none' | 'work_order' | 'purchase_order'
   wo_category         (nullable) -- default for a generated WO
@@ -136,23 +150,65 @@ inspection_template_items       ONE question
 
 inspections                     ONE performance of a form, per property
   id, org_id, property_id,
-  template_id, template_snapshot jsonb,   -- snapshot: the form as it was THEN
+  form_id, form_snapshot jsonb,           -- snapshot: the form as it was THEN
   assigned_to_user_id,
   scheduled_for date, started_at, completed_at, completed_by_user_id,
   source_schedule_id (nullable)           -- which schedule generated it
 
 inspection_items                ONE answer
   id, inspection_id, org_id,
-  template_item_id, prompt_snapshot,
+  form_item_id, prompt_snapshot,
   result 'pass' | 'fail' | 'na',
   note, photo_path,
   asset_id (nullable),
   answered_at
 ```
 
-`template_snapshot` matters for the same reason `checklist_instances` has one:
-editing a template must not retroactively change what a completed inspection
-says it asked.
+`form_snapshot` matters for the same reason `checklist_instances` has one:
+re-seeding a form must not retroactively change what a completed inspection
+says it asked. Orgs cannot edit these forms, but WE can, and a reworded item
+shipping in March must not silently rewrite what January's report claims to
+have asked.
+
+### Three things the form shapes forced, and one I argued for and withdraw
+
+**WITHDRAWN — `failing_answer`.** I argued for this column on the grounds that
+an org editing its own template could write *"Any exposed wiring?"*, which
+fails on **Yes**, and silently invert the work-order rule. Orgs cannot edit
+these forms. The only author is us, the phrasing is fixed in the seed, and the
+column would be defending against a mistake by the same people who would set
+its value — which is not a defence, it is a comment with a `DEFAULT`. Dropped.
+
+The underlying hazard is real and does not disappear; it just moves from
+runtime to review. **Every item is phrased so that No is the failure**, and
+that is a rule for whoever writes the next item, enforced by the seed test in
+§10 rather than by a column.
+
+**`parent_item_id` + `show_when`.** "Present in all bedrooms and hallways?
+[Y/N] → *if no*, which room needs one?" is two questions where the second only
+exists because the first failed. Modelling it as a conditional child rather
+than a free-text note keeps the answer STRUCTURED, which is what lets the
+generated work order say *"install smoke detector — upstairs hallway"* instead
+of pasting a sentence a human has to read.
+
+**`repeat_source_item_id`.** The draft form asks for an extinguisher count and
+then lists an expiry date *"3 times in case there are multiple dates"*. Three
+is an arbitrary cap that is wrong in both directions — it wastes two rows at
+most properties and silently loses the fourth extinguisher at a large one. The
+count answer drives the rows instead: `N` extinguishers renders `N` groups of
+{location, charged?, expiry, photo}. Same effort to fill, no cap, and each
+extinguisher becomes its own auditable line with its own tag photo rather than
+a date floating loose from the unit it belongs to.
+
+**`na_asset_type`.** "N/A — no pool at this property" is exactly the assertion
+an insurer is entitled to be sceptical of, because the person who benefits from
+skipping the pool section is the one making it. FieldStay already knows: pools
+and hot tubs are rows in `property_assets`. Where an N/A reason names a thing we
+track, the report can say *"N/A — no pool recorded at this property"* and mean
+it, and the N/A can be **rejected** at fill time when the ledger disagrees.
+That is a materially stronger artifact than free text for the cost of one
+nullable column, and it is the whole reason the insurance angle is worth
+anything.
 
 ### Immutability
 
@@ -216,6 +272,40 @@ extinguisher and an HVAC filter wants one order, not three.
 Generated via Inngest on `inspection/completed` so a partial failure retries
 without duplicating — the partial unique indexes are what make the retry safe.
 
+### ON COMPLETION, not on the tick
+
+"A No creates the work order" is the rule, but *when* it fires is a separate
+decision and the obvious reading is the wrong one.
+
+An inspector ticks No on a loose handrail, tightens it while standing there,
+and changes the answer to Yes. Fire-on-tick has already created the work order,
+and now someone has to close it as not-a-thing. Across a form with sixty items
+and a 24-hour draft window, that is not an edge case — it is Tuesday. It also
+contradicts the owner-portal decision, which is that an inspection publishes
+**the day it is completed**: work orders appearing hours before the report they
+came from is the wrong story to tell an owner.
+
+So remediation reads the **submitted** answers. Nothing is created while a
+draft is open.
+
+### The repeat-visit duplicate, which the partial index does NOT stop
+
+`UNIQUE (source_inspection_item_id)` makes the *retry* safe. It does nothing
+about the *next inspection*: a handrail that fails in March and again in June
+produces two `inspection_items` with two different ids, so two work orders —
+even when the March one is still sitting open, unstarted.
+
+Quarterly inspections make this the normal case rather than a rare one, and the
+symptom is a maintenance board that accumulates duplicates until a PM stops
+trusting it. Before creating, look for an **open** work order on the same
+`(property_id, form_item_id)`; when one exists, attach the new finding to it
+(a `work_order_updates` row plus the new photo) instead of opening a second.
+The finding is still recorded immutably either way — what is deduplicated is
+the *task*, not the *evidence*.
+
+`form_item_id` rather than `wo_category` is the key: two different failures
+that both happen to be `wo_category = 'general'` are genuinely two jobs.
+
 ---
 
 ## 7. Scheduling
@@ -224,9 +314,24 @@ Reuse `maintenance_schedules` with a discriminator:
 
 ```
 creates               'work_order' | 'inspection'    (default 'work_order')
-inspection_template_id (nullable)
+inspection_form_id     (nullable)
 assigned_to_user_id    (nullable)
+anchor_months          smallint[]  (nullable)        -- 1-12, see below
 ```
+
+`schedule_frequency` already carries `quarterly | semi_annual | annual`, which
+covers all three forms exactly — no new enum.
+
+`anchor_months` is the month picking. One value for annual, two for
+semi-annual, and for quarterly the **single starting month** from which the
+other three derive (+3, +6, +9) — a PM who says "quarterly starting in March"
+has said everything, and storing all four would let the set drift out of step
+with itself. Array rather than four columns because the validation is then one
+CHECK on length against frequency instead of four nullability rules that can
+disagree.
+
+Set during onboarding and editable afterwards in the Inspections tab. Both
+write the same row; there is no separate onboarding-only shape.
 
 The *timing rule* — when is this due, does it fall inside the seasonal window,
 how does `next_due_date` advance — must not exist twice. The output differs;
@@ -242,11 +347,170 @@ it.
 
 ## 8. Offline, and the trap to avoid
 
-**The dashboard PWA has no service worker today.** `app/(dashboard)/layout.tsx`
-links `dashboard-manifest.json` so it is installable, but only
-`app/crew/crew-shell.tsx` and the work-order token page call
-`register('/sw.js')`. "Inspections only" is true right now by default. The job
-is to preserve it.
+### The 24-hour rule and offline are in tension — resolve it deliberately
+
+A draft dies 24 hours after it starts. A tablet in a basement with no signal
+also cannot sync. Put those together and there is a way to lose a completed
+inspection: filled offline, carried home, synced at hour 25, rejected.
+
+Three things settle it, and none of them is "hope it syncs":
+
+1. **`started_at` is server time**, stamped when the inspection row is created —
+   at assignment or first open, both of which are online. A device clock is
+   both skewable and, for an artifact whose entire value is being believed,
+   the wrong thing to trust.
+2. **Expiry is evaluated at submit**, not by a sweeper. A background job that
+   deletes at hour 24 races the sync that would have arrived at hour 24.5.
+3. **An expired draft is preserved and marked, never deleted.** The rule is
+   that an expired inspection cannot be *submitted as valid* — it is not that
+   two hours of a PM's work should be destroyed. They see it, and re-key from
+   it into a fresh inspection.
+
+The 24-hour window is there so the evidence is tight: an inspection that took
+thirty hours is worth less to an insurer than one that took four. That argument
+supports blocking the submission. It does not support throwing the data away.
+
+
+### Widened from inspections to Maintenance — 2026-08-20
+
+The original scope was inspections alone. It is now the Maintenance page,
+because the two are the same trip: a PM standing at a property with no signal
+who notices a broken handrail wants to raise a work order, and telling them
+"the inspection works offline but the work order does not" is an arbitrary
+line drawn by our architecture rather than by their job.
+
+This makes one thing simpler and one thing bigger, and both are worth being
+explicit about.
+
+**Simpler:** the bespoke inspection draft store below stops being justified. If
+there is an outbox for offline work orders anyway, inspections should use the
+same one. Two offline mechanisms in one page is how they drift.
+
+**Bigger:** it is a second sync layer. `lib/dexie/*` is scoped to the crew PWA
+and every guardrail around it is crew-shaped — `CREW_SYNCED_TABLES`,
+`crew-sync-coverage`, and `crew-dead-letter-coverage`, which enforces that every
+member of the `MutationTable` union has a retry affordance in
+`app/crew/_components/failed-sync-banner.tsx`. A dashboard outbox built
+alongside would be **unguarded by all of them**, which is precisely the "a
+mutation that dead-letters where nobody can see it is work silently thrown
+away" failure that guardrail exists to prevent.
+
+So: **generalize `lib/dexie` to serve both surfaces, do not fork it.** The
+hard-won rules in CLAUDE.md — write and outbox row in ONE transaction, `failed`
+as `0 | 1` not boolean, `'x' in payload` presence checks, cursor invalidation on
+discard, bounded caches — were each paid for with a production bug. Writing a
+second outbox means paying for them twice.
+
+### Offline WRITES are CREATE ONLY
+
+The line that keeps this affordable, and it is not a limitation of effort:
+
+- **Create a work order offline** — safe. It is a new row nobody else can be
+  touching, so there is no conflict to resolve. Queue it, push it on reconnect.
+- **Edit or complete an existing work order offline** — NOT in scope. The
+  maintenance board is shared: a PM, a second PM and a vendor portal can all
+  touch one work order. Last-write-wins across a six-hour offline gap silently
+  reverts whatever happened while the tablet was in a basement, and neither
+  party ever learns. The crew PWA avoids this because a crew member effectively
+  owns their turnover; nobody owns a work order.
+
+Everything else on the page is **readable** offline and visibly read-only. A
+disabled control with "needs a connection" is a fine answer; a control that
+appears to work and silently loses the change is not.
+
+### Work-order numbers cannot be assigned offline
+
+`wo_number_counters` is a per-org server-side sequence. A device cannot draw
+from it while offline, and pre-allocating blocks per device buys gaps and
+complexity for nothing.
+
+The number is assigned **at sync**. Until then the local record shows no
+number — not a provisional one. A number that changes after the fact is worse
+than no number: it is the identifier a PM reads down the phone to a vendor.
+
+### IndexedDB outlives the session
+
+Caching dashboard data client-side is new, and the dashboard holds more than
+the crew PWA does — costs, vendor contacts, owner-adjacent detail. IndexedDB
+survives sign-out unless something explicitly clears it, so a PM removed from an
+org keeps a readable copy of that org's maintenance board on their tablet
+indefinitely.
+
+The cache is therefore keyed per user AND per org, cleared on sign-out, and
+cleared on org switch. This needs to be built in phase 1 rather than
+retrofitted, because the version that "works" without it looks identical.
+
+### Service worker scope
+
+### CORRECTION — the dashboard already has a service worker, at root scope
+
+An earlier draft of this section said "the dashboard PWA has no service worker
+today" and warned against registering one dashboard-wide. **Both halves were
+wrong, and the thing they warned about is already live.**
+
+`components/dashboard-shell.tsx` wraps the entire dashboard and calls
+`useDashboardPushNotifications()`. That hook calls
+`navigator.serviceWorker.register('/sw.js')` **on mount, unconditionally** —
+before any permission prompt, before any opt-in, for every PM who loads any
+page. There is no `scope` option, so the scope defaults to the script's
+location: **`/`**. The whole origin.
+
+And `/sw.js`'s navigate handler has no path allowlist:
+
+```js
+if (request.mode === 'navigate') {
+  fetch(request).then((response) => {
+    if (response.ok && !response.redirected) cache.put(request, copy)   // every page
+  }).catch(() => caches.match(request, { ignoreVary: true }))           // served when offline
+}
+```
+
+So every dashboard page a PM has ever loaded is cached and is served back to
+them when the network fails. `Cache-Control: private, no-cache, no-store` does
+not prevent it — the Cache API is not the HTTP cache and `cache.put()` ignores
+those headers.
+
+**The consequence is exactly the failure this section was written to prevent:**
+a PM at a property with no signal opens `/ops` and gets yesterday's board
+rendered as if it were current, with nothing saying otherwise. Not
+hypothetical, not a risk of the inspections work — today's behaviour, arriving
+as a side effect of push notifications.
+
+### What that changes about the plan
+
+The job is **not** to add a service worker to the dashboard. It is to replace an
+accidental, unscoped one with a deliberate one — which is a smaller and more
+honest piece of work, and it comes with a bug fix attached.
+
+**One worker, with an explicit path allowlist.** Not two registrations:
+
+- Two workers cannot both control a page, and a registration is keyed by
+  **scope**. Registering a second script at scope `/` would not sit alongside
+  `/sw.js` — it would REPLACE it. On a device with both the crew PWA and the
+  dashboard installed (a PM who also cleans), the two would overwrite each
+  other's registration on alternate loads.
+- The push subscription lives on a registration. Churning the registration
+  churns the subscription.
+
+So `/sw.js` stays the single origin-wide worker and gains a rule it should
+always have had: **offline-capable only under an explicit allowlist —
+`/crew` and `/maintenance` — and network-only everywhere else, with no cache
+fallback.** Everything outside the allowlist then fails visibly offline instead
+of silently serving yesterday.
+
+That single change both enables the feature and closes the staleness bug.
+
+A bad service worker remains the worst kind of bug in a PWA — sticky, surviving
+a redeploy, able to make the app unloadable for a user who cannot be reached.
+The allowlist is what bounds the blast radius now that scope cannot.
+
+**This weakens an argument I made earlier.** §9a justified a real
+`/maintenance/inspections` route partly because a service worker cannot be
+scoped to a query parameter. With the whole of `/maintenance` scoped, a
+`?tab=` would in fact be covered. The route is still the right call — back and
+forward, bookmarks, and a URL the overdue email can link to — but that is a
+weaker set of reasons than the one I gave, and the earlier framing should not
+be read as still load-bearing.
 
 **Do not register the existing `/sw.js` on the dashboard.** Its navigate
 handler caches every page returning 200, with no path scoping:
@@ -260,31 +524,50 @@ a PM at a property with no signal opens `/ops` and gets yesterday's turnover
 board rendered as current. Silent staleness, arriving as a side effect of a
 feature that never asked for it.
 
-**Instead:** a separate `/inspections-sw.js` registered with
-`{ scope: '/inspections/' }`. Narrower than its own location, so permitted, and
-the most-specific registration wins if crew's root-scoped worker is also on the
-device. Everything outside that path stays uncontrolled and fails visibly
-offline.
+**Rejected alternative:** a separate `/maintenance-sw.js` scoped to
+`/maintenance/`. It reads cleanly — narrower than its own location, so
+permitted, and most-specific scope wins — but it leaves `/sw.js` still
+root-scoped and still caching every other dashboard page, so the staleness bug
+survives the fix. Two workers to solve a problem one worker caused is the wrong
+shape.
 
-### Draft store
+### Local store — one mechanism, not two
 
-Self-contained, outside `lib/dexie/*`. No outbox, no cursors, no
-reconciliation — an inspection commits atomically, so none of that machinery
-applies.
+**SUPERSEDED.** This section originally specified a self-contained draft store
+outside `lib/dexie/*`, on the reasoning that an inspection commits atomically
+and therefore needs no outbox, cursors or reconciliation. That was correct for
+inspections alone. It is not correct now: offline work-order creation needs a
+real outbox, and running a bespoke draft store beside it would mean two
+offline mechanisms on one page, two dead-letter surfaces, and two places to
+get the same transaction rule wrong.
 
-- Answers and photo blobs held locally, keyed by inspection id.
-- Survives reload and app restart.
-- Submitted as **one** atomic completion.
-- Photos upload opportunistically when online; otherwise held locally and
-  flushed at submit.
+Inspections use the same outbox. What was going to be a special case becomes
+one more mutation type:
+
+- Cached for reading: properties, vendors, assets, maintenance schedules, open
+  work orders. All bounded by the org's plan-capped property count — at 50
+  properties that is roughly 1,050 assets and 900 schedules, which is
+  comfortable for IndexedDB, and both figures come from the live per-property
+  ratios measured during the `-org-scoped` semgrep audit rather than a guess.
+- Queued for writing: a new work order, and an inspection submission.
+- Photo blobs go through the `pending_photo_uploads` pattern the crew PWA
+  already has, for both.
+- An inspection still submits as **one** atomic completion. That property is
+  about the inspection's own semantics and survives the change of mechanism.
 
 ### iOS risk, stated rather than buried
 
 Safari can evict storage from installed PWAs under pressure. The UI must show
 clearly and continuously when work is **held on this device** versus
-**submitted**, and the draft must be genuinely durable. This is the single
-biggest technical risk in the feature and the thing most likely to force a
-rethink after real-hardware testing.
+**submitted**, and the local store must be genuinely durable. This is the
+single biggest technical risk in the feature and the thing most likely to force
+a rethink after real-hardware testing.
+
+Widening the scope to work orders raises the stakes rather than changing them.
+An evicted inspection draft is a wasted visit; an evicted work order is a
+repair nobody knows was requested. Both need the same treatment — visible
+held-on-device state, and a dead-letter surface a PM can actually reach — which
+is the argument for one outbox with one banner rather than two.
 
 ### The blank PDF still exists
 
@@ -305,9 +588,64 @@ server-verified identity or timestamp.
   `addDays(today, 29)`. Overdue stays visible and is styled as overdue.
 - **Owner portal** — posts on completion, failures included, each with its
   linked WO/PO and that record's current status.
-- **Templates Hub** — the three forms live at `/templates`, following the
-  seeded-then-editable pattern already used by `inventory_catalog` →
-  `org_inventory_catalog`.
+- **Maintenance** — where inspections are started, filled and reviewed. See
+  §9a; this is a real nested route rendered as a tab, not a query parameter.
+
+### 9a. Where it lives, and why the URL is not a detail
+
+Under **Maintenance**. Not Templates — nothing here is a template — and not a
+top-level nav item.
+
+**A real nested route, `/maintenance/inspections`, rendered as a tab.** The
+choice between "a tab" and "a submenu item" looks cosmetic and is not, for one
+reason: this is the only offline surface in the dashboard PWA, and **service
+worker scope is path-based**. A service worker can be registered for
+`/maintenance/inspections` and control exactly that subtree. It cannot be
+scoped to `/maintenance?tab=inspections`, because a query string is not part of
+the scope — so a tab implemented as a parameter would either take the whole
+Maintenance page offline or nothing at all. §8's scoped-service-worker
+decision was what forced a path here — see the note at the end of §8: once the
+whole of `/maintenance` is scoped, that argument no longer holds and the route
+survives on its weaker reasons.
+
+So: a real route, presented in a `Tabs` bar on the Maintenance page. Visually a
+tab, structurally a path. It also gets back/forward, bookmarking, and a link the
+overdue email can point at, none of which a parameter tab gives for free.
+
+`components/ui/Tabs.tsx` exists and already carries `role="tablist"`,
+`aria-selected` and a focus ring — Maintenance has no tab bar today, so this
+adds the first one and must use that primitive rather than hand-rolling
+(CLAUDE.md, and `check:ui-classes` will not catch a hand-rolled equivalent).
+
+**No nav change.** `NavItem` in `lib/navigation.ts` is a flat list with no
+children, so a genuine sidebar submenu would mean adding nesting to the sidebar
+renderer for a single entry. A tab needs nothing.
+
+### Where the form definition lives
+
+The three forms are platform-owned data with no org copy. Two candidate homes,
+and this repo has already answered the question twice.
+
+`inventory_catalog` and `asset_type_standards` are global seed tables — rows in
+Postgres, no `org_id`, written by migration. That is the precedent for shape.
+But wording changes to an inspection item are frequent early and a migration
+per typo is a bad trade.
+
+`scripts/seed-support-kb.ts` is the precedent for *process*: the content lives
+in the repo, a script projects it into the database, and
+`.github/workflows/seed-support-kb.yml` re-runs it when the source file
+changes. Reviewable in a pull request, versioned in git, and still real rows
+with real foreign keys at the other end.
+
+**Both.** Definition in the repo as the source of truth; a seed script projects
+it into `inspection_forms` / `_sections` / `_items`; CI re-seeds on change. That
+keeps the `form_item_id` foreign key that the repeat-visit dedup (§6) and any
+"this item has failed three quarters running" report depend on, without a
+migration to change a comma.
+
+The seed is **upsert by `key`**, never delete-and-recreate: `inspection_items`
+reference these rows, and re-creating them with new ids would orphan every
+answer ever recorded. `key` is the stable identity; the row id is not.
 
 ### Overdue email — wording is the owner's call
 
@@ -328,8 +666,10 @@ motivating force, no exposure. **This copy must be written or approved by
 | # | Phase | Contents |
 |---|---|---|
 | 1 | Schema + immutability | Tables, completion lock, retention exclusion + guardrail, `assigned_to_user_id` |
-| 2 | The three forms | Platform-seeded, org-editable, in the Templates Hub |
-| 3 | Fill + complete | Tablet UI, scoped SW, draft store, photos |
+| 2 | The three forms | Definition in the repo, seed script + CI re-seed, upsert by `key`. Includes the seed test: every item phrased so No is the failure, every item has a WO/PO/— decision, no two forms ask the same thing |
+| 0 | SW allowlist | Give `/sw.js` an explicit offline allowlist (`/crew`, `/maintenance`), network-only elsewhere. **Standalone bug fix — ships before and independently of everything below**, because the unscoped worker is live today |
+| 2a | Offline foundation | Generalize `lib/dexie` beyond the crew PWA; per-user+org cache with sign-out and org-switch clearing; extend the dead-letter and sync-coverage guardrails to the new surface |
+| 3 | Fill + complete | Tablet UI at `/maintenance/inspections`, offline WO create, photos |
 | 4 | Remediation | fail → WO/PO with partial-unique idempotency |
 | 5 | Scheduling | `maintenance_schedules` discriminator |
 | 6 | Surfacing | 30-day dashboard section, overdue email, owner portal |
@@ -341,54 +681,152 @@ motivating force, no exposure. **This copy must be written or approved by
 
 ## 11. Open questions
 
-1. **Frequency defaults** per form — safety quarterly? whole-home annually?
-   outdoor twice yearly on a season window?
-2. **Photo policy** — required on every fail, or only where the template says so?
-   Required-on-fail is stronger evidence but slower to complete.
-3. **Partial completion** — can an inspection be saved and resumed across days,
-   or must it complete in one visit? Affects how long a draft must survive.
-4. **N/A handling** — does an N-A item need a reason? For insurance credibility
-   "N/A — no pool at this property" is stronger than a bare skip.
-5. **Multi-property** — can one scheduled inspection cover several properties,
-   or strictly one each? Spec assumes one each.
+The five original questions are answered and have moved into §2. These are the
+ones those answers raised, and each is a judgment call rather than something a
+reader of the spec can settle.
+
+1. **WO or PO, per item.** "A No creates a work order or a purchase order" needs
+   a side picked for every item. Some are obvious (`missing smoke detector` →
+   PO to buy, WO to fit — arguably both). Some are not: an expired fire
+   extinguisher is a PO at one org and a service WO at another. **Mark each item
+   `WO` / `PO` / `—` when you send the other two forms**, and say what an item
+   that genuinely needs both should do — my suggestion is PO, with the WO
+   created when the part arrives, so nobody is dispatched to install something
+   that is not there yet.
+
+2. **The photo-on-fail escape hatch.** Required-on-fail plus a dead camera, a
+   full tablet, or a photo that will not save offline equals an inspector who
+   cannot submit at all. An unenforceable rule gets worked around; an explicit
+   "photo unavailable" with a mandatory typed reason gets *recorded*, and reads
+   honestly on the report. Worth having, or too easy a door?
+
+3. **Who counts as a "designated team member".** The decision is PM-or-designate
+   and explicitly not crew, but `member_role` has no such role — it is
+   `admin | manager | crew | viewer | owner`. Is a `manager` always eligible, or
+   is eligibility per-person (a flag on `organization_members`)? This decides
+   whether `assigned_to_user_id` needs a companion permission or just a filter.
+
+4. **Inspector title.** The form header asks for "Inspector Name & Title".
+   Everything else in that header — property, address, date, time, management
+   company — we already know and should prefill and lock, because a field the
+   inspector types is a field the inspector can get wrong, and locked
+   provenance is worth more as evidence. Title is the exception: nothing in
+   `profiles` or `organization_members` stores one. Add it to the profile, or
+   ask once per inspection?
+
+5. **What "Indoor" and "Outdoor" must not both contain.** Two of the three
+   forms run on the same cadence over the same property. Anything appearing in
+   both gets inspected twice and, on a No, generates two work orders for one
+   fault — the repeat-visit dedup in §6 keys on `form_item_id`, so the same
+   physical problem asked in two forms is two different keys and it will not
+   catch it.
+
+   Now that the forms are fixed and platform-authored, this stops being a
+   runtime problem and becomes an **authoring** one, which is strictly easier:
+   it is checkable once, by us, before the seed ships. A test asserting no two
+   forms carry the same `asset_type` + prompt shape is a crude proxy; reading
+   the two forms side by side is the real check. Worth doing when the other two
+   land, not after.
+
+6. **Versioning a fixed form.** `inspection_forms.version` is in the model
+   because the forms will change — an item added, a prompt reworded. Two
+   questions that only matter once the first change lands: does an inspection
+   already in draft when a new version seeds keep the old form (it must — the
+   inspector answered those questions), and does the owner-portal history show
+   which version each past inspection used? The `form_snapshot` on the
+   inspection already makes both answerable; what is undecided is whether the
+   report *says so*, and for an insurance artifact I would argue it should.
 
 ---
 
-## 12. Draft forms — FIRST PASS, needs correction
-
-Drafted from the 21 `asset_type` values and standard practice. **Which items
-are worth a PM's time, and whether a failure warrants a work order or a purchase
-order, is operational judgment — please mark these up.**
+## 12. The three forms
 
 `WO` = work order on fail · `PO` = purchase order on fail · `—` = record only
 Asset column links the answer to a `property_assets` row.
 
-### 12.1 Standard Safety Inspection — suggest quarterly
+### 12.1 Property Safety & Risk Mitigation Inspection
 
-| # | Item | Fail | Asset |
-|---|---|---|---|
-| 1 | Smoke detectors present and sounding in every required location | WO | — |
-| 2 | Smoke/CO detector batteries tested and within date | PO | — |
-| 3 | CO detectors present and operational | WO | `CO/CO2 Detectors` |
-| 4 | Fire extinguisher present, gauge in green, tag within date | PO | — |
-| 5 | Exit routes and egress windows unobstructed | WO | — |
-| 6 | Exterior and pathway lighting operational | WO | — |
-| 7 | Handrails secure on all stairs, interior and exterior | WO | — |
-| 8 | Deck/balcony structure sound — no soft, rotted or loose boards | WO | `deck_structure` |
-| 9 | GFCI outlets test and reset — kitchen, baths, exterior | WO | `electrical_panel` |
-| 10 | Electrical panel accessible, labelled, no scorching or corrosion | WO | `electrical_panel` |
-| 11 | Water heater — no leaks, TPR valve clear, strapped if required | WO | `water_heater` |
-| 12 | HVAC filter clean or replaced | PO | `hvac` |
-| 13 | No visible mould or water intrusion | WO | — |
-| 14 | All entry door locks and smart locks function | WO | `smart_lock` |
-| 15 | Window locks function on ground-floor and accessible windows | WO | — |
-| 16 | Pool/hot tub — gate self-latches, signage posted, no exposed wiring | WO | `hot_tub` |
-| 17 | First aid kit present and stocked | PO | — |
-| 18 | Emergency contact and address info posted and current | — | — |
-| 19 | Grill — no gas leak, hoses intact, clear of structure | WO | — |
-| 20 | Dryer vent clear of lint, exterior flap operates | WO | `dryer` |
+Frequency: 1× or 2× a year, month(s) chosen by the PM.
 
-### 12.2 Whole-Home Property Audit — suggest annually
+**Header** — prefilled and locked, not typed: property name/ID, physical
+address, inspection date, start time, inspector (the signed-in user),
+management company (the org). See open question 4 on inspector title.
+
+#### 1. Fire Safety & Life Safety Systems
+
+| # | Item | Type | Fail | Asset |
+|---|---|---|---|---|
+| 1 | Smoke detectors present in all bedrooms and hallways | yes_no | WO | — |
+| 1a | → Which room needs a smoke detector? | text | — | — |
+| 2 | Smoke detectors tested and operational | yes_no | WO | — |
+| 2a | → Which room's detector failed the test? | text | — | — |
+| 3 | CO detectors installed on every level with sleeping areas | yes_no | WO | — |
+| 3a | → Which level needs a CO detector? | text | — | — |
+| 4 | CO detectors operational | yes_no | WO | — |
+| 4a | → Which level's detector failed the test? | text | — | — |
+| 5 | Number of fire extinguishers | count | — | — |
+| 5a | → Location (one row per extinguisher) | text | — | — |
+| 5b | → Fully charged | yes_no | PO | — |
+| 5c | → Expiration date | date | PO | — |
+| 5d | → Tag photo | photo | — | — |
+| 6 | Exit doors and pathways clear and fully operational | yes_no | WO | — |
+| 6a | → Photo of each exit | photo | — | — |
+| 7 | Emergency lighting / flashlights present and functional | yes_no | PO | — |
+| 7a | → Location | text | — | — |
+
+Items 5a–5d repeat once per extinguisher counted in 5 — see
+`repeat_source_item_id` in §5. Item 5d is `photo_required` even on a pass:
+extinguisher tags are photographed every time, which is the one place a
+passing item still produces evidence.
+
+#### 2. Electrical & Utility Safety
+
+| # | Item | Type | Fail | Asset |
+|---|---|---|---|---|
+| 8 | GFCI outlets installed and functional in all wet areas (kitchen, baths, exterior, hot tub) | yes_no | WO | `electrical_panel` |
+| 9 | Electrical panel unobstructed, no exposed wiring, no tripped breakers | yes_no | WO | `electrical_panel` |
+| 10 | Main water shut-off labelled, accessible, valve tool in place | yes_no | WO | `plumbing_system` |
+| 11 | HVAC air filters clean, supply vents unblocked, service log current | yes_no | PO | `hvac` |
+
+#### 3. Structural, Floor & Slip/Trip Hazard Mitigation
+
+| # | Item | Type | Fail | Asset |
+|---|---|---|---|---|
+| 12 | Handrails secure; treads slip-resistant and clear | yes_no | WO | — |
+| 13 | Walkways and driveways level, clear of trip hazards, algae, ice | yes_no | WO | — |
+| 14 | Flooring sound — no torn carpet, loose tile or warped boards | yes_no | WO | — |
+| 15 | Deck and balcony guardrails sound; posts secure; spindle spacing compliant | yes_no | WO | `deck_structure` |
+
+#### 4. Water Leak & Freeze Damage Prevention
+
+| # | Item | Type | Fail | Asset |
+|---|---|---|---|---|
+| 16 | No active leaks under sinks, behind toilets, around the water heater | yes_no | WO | `water_heater` |
+| 17 | Braided stainless washing-machine supply lines fitted (not rubber) | yes_no | PO | `washer` |
+| 18 | Leak sensors installed at water heater, sump pump, washing machine | yes_no | PO | — |
+| 19 | Gutters and downspouts clear, draining away from the foundation | yes_no | WO | — |
+
+#### 5. Exterior, Amenity & Security Risk Controls
+
+| # | Item | Type | Fail | Asset |
+|---|---|---|---|---|
+| 20 | Exterior lighting functional at every entryway | yes_no | WO | — |
+| 21 | Grills and fire pits at safe distance from structures; gas shut-offs marked | yes_no | WO | — |
+| 22 | Pool / hot tub fencing, self-closing gates and safety covers latch securely | yes_no | WO | `hot_tub` |
+| 23 | Exterior deadbolts and smart locks secure; keyless codes tested | yes_no | WO | `smart_lock` |
+
+Item 22 carries `na_asset_type = 'hot_tub'`: a property with no pool or hot tub
+recorded skips it with a reason the asset ledger backs, per §5.
+
+**Still to come:** Outdoor Property Inspection and Indoor Property Inspection,
+in this shape. The two drafts below are the FIRST-PASS guesses and are kept
+only until the real ones arrive.
+
+### 12.2 Indoor Property Inspection — SUPERSEDED FIRST PASS, awaiting the real form
+
+Quarterly or 2× a year, month(s) chosen by the PM. The table below predates
+that decision and predates the form itself; it is kept only so the shape is
+visible, and is replaced wholesale when the real one arrives.
 
 | # | Item | Fail | Asset |
 |---|---|---|---|
@@ -413,7 +851,9 @@ Asset column links the answer to a `property_assets` row.
 | 19 | Cabinet and drawer hardware secure | WO | — |
 | 20 | No odours; general cleanliness meets standard | WO | — |
 
-### 12.3 Outdoor Property Audit — suggest twice yearly, pre-season on a month window
+### 12.3 Outdoor Property Inspection — SUPERSEDED FIRST PASS, awaiting the real form
+
+Quarterly or 2× a year, month(s) chosen by the PM. Same status as 12.2.
 
 | # | Item | Fail | Asset |
 |---|---|---|---|
