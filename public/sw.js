@@ -25,6 +25,40 @@ self.addEventListener('activate', (event) => {
   self.clients.claim()
 })
 
+// Paths whose pages may be cached and served offline.
+//
+// THIS WORKER IS REGISTERED AT ROOT SCOPE, FROM THREE PLACES: app/crew/
+// crew-shell.tsx, app/work-orders/[token]/register-service-worker.tsx, and —
+// on every dashboard page load, before any notification opt-in —
+// lib/hooks/use-dashboard-push-notifications.ts. `register('/sw.js')` with no
+// options scopes to '/', so it controls the entire origin.
+//
+// Until 2026-08-21 the navigate handler below had no path test at all: it
+// cached EVERY successful navigation and served it back whenever the network
+// failed. On the crew PWA and the vendor work-order page that is the intended
+// feature. On the PM dashboard it was an accident of the push registration,
+// and it meant a PM at a property with no signal opened /ops and got
+// yesterday's board rendered as current, with nothing saying otherwise.
+// Cache-Control: no-store does not prevent it — the Cache API is not the HTTP
+// cache and cache.put() ignores those headers.
+//
+// So: an explicit allowlist. A path not on it is never cached, and when the
+// network fails it gets the offline PAGE rather than a stale copy of itself —
+// "you are offline" is honest, "here is Tuesday's data" is not.
+//
+// /maintenance is deliberately ABSENT. It is the next surface to go offline
+// (see docs/INSPECTIONS_SPEC.md §8), but it has no local store behind it yet,
+// so allowlisting it now would ship the exact staleness this change removes,
+// just narrowed to one page. It goes in when the offline foundation lands.
+const OFFLINE_PATHS = [
+  '/crew',          // the crew PWA — offline is its whole point
+  '/work-orders/',  // vendor token pages, cached so a hard reload survives no signal
+]
+
+function isOfflineCapable(pathname) {
+  return OFFLINE_PATHS.some((p) => pathname === p || pathname.startsWith(p.endsWith('/') ? p : p + '/'))
+}
+
 // App-shell caching — this is the piece that makes "open the installed
 // app with no signal" actually work, as opposed to just "the data you'd
 // already loaded is in IndexedDB." Two request classes only; everything
@@ -42,6 +76,17 @@ self.addEventListener('fetch', (event) => {
   // offline; a generic offline page as the last resort for a URL that was
   // never successfully visited on this device.
   if (request.mode === 'navigate') {
+    // Outside the allowlist: never cache, and never serve a cached page. Still
+    // answer an offline navigation with the offline page rather than the
+    // browser's own error — the point is to stop serving STALE CONTENT, not to
+    // stop being a PWA.
+    if (!isOfflineCapable(url.pathname)) {
+      event.respondWith(
+        fetch(request).catch(() => caches.match(OFFLINE_URL))
+      )
+      return
+    }
+
     event.respondWith(
       fetch(request)
         .then((response) => {

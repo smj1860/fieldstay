@@ -102,6 +102,23 @@ export const CREW_OUTBOX_TIMEOUT_MS = 15_000
 export const ROUTE_WARM_TIMEOUT_MS = 8_000
 
 /**
+ * Registering a push subscription with our own API route
+ * (lib/push/subscribe-client.ts).
+ *
+ * Same-origin and browser-side, so an untimed call burns no serverless
+ * invocation — but it does leave the mount handler that awaits it pending
+ * forever, on a device whose connection is the marginal one by definition (a
+ * cleaner in a driveway, a PM at a property). The re-send on the next app open
+ * is what makes giving up cheap: the routes upsert, so a skipped attempt costs
+ * nothing but the next mount.
+ *
+ * 10s rather than warm-routes' 8s because this one has a user-visible
+ * consequence — the crew prompt stays open with a retry — where a warm is
+ * silent and disposable.
+ */
+export const PUSH_SUBSCRIBE_TIMEOUT_MS = 10_000
+
+/**
  * Stripe SDK calls. The SDK's own default is 80s — longer than the function
  * budget, so a slow call inside the webhook handler gets the whole invocation
  * killed by the platform. That skips the `catch` that releases the dedup

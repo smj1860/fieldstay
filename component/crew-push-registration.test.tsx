@@ -23,7 +23,13 @@ import { describe, it, expect, vi, beforeEach } from 'vitest'
 const reportError = vi.fn()
 vi.mock('@/lib/observability/report-error', () => ({ reportError: (...a: unknown[]) => reportError(...a) }))
 
-import { syncSubscriptionToServer } from '@/app/crew/crew-shell'
+// Moved out of crew-shell into the module the PM dashboard now shares
+// (2026-08-21). Same function, same contract — these cases were written
+// against the crew copy and are exactly what the dashboard copy was missing.
+import { syncPushSubscription } from '@/lib/push/subscribe-client'
+
+const syncSubscriptionToServer = (sub: PushSubscription) =>
+  syncPushSubscription('/api/crew/push-subscribe', sub)
 
 /**
  * `keys: null` means "the browser handed back a subscription with no keys".

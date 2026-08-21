@@ -621,6 +621,24 @@ adds the first one and must use that primitive rather than hand-rolling
 children, so a genuine sidebar submenu would mean adding nesting to the sidebar
 renderer for a single entry. A tab needs nothing.
 
+### Phase 0 shipped — two corrections to what it was scoped as
+
+**`/work-orders/` had to be in the allowlist.** `app/work-orders/[token]/
+register-service-worker.tsx` registers `/sw.js` deliberately, and its comment
+says why: a vendor who loses signal and hard-reloads got nothing before,
+because nothing in that route tree registered a worker. It depends on exactly
+the unscoped caching this change removes. A two-path allowlist would have
+broken a feature silently.
+
+**`/maintenance` had to be OUT of it.** Allowlisting it now would cache
+maintenance pages with no local store behind them and no held-on-device state —
+the same staleness being removed everywhere else, narrowed to one page. It goes
+in with phase 2a, when there is something to be stale *against*.
+
+The push half was smaller than expected for a good reason: the crew copy had
+already been hardened against all three defects. The work was deleting the
+dashboard's copy, not inventing a fix.
+
 ### Where the form definition lives
 
 The three forms are platform-owned data with no org copy. Two candidate homes,
@@ -667,7 +685,7 @@ motivating force, no exposure. **This copy must be written or approved by
 |---|---|---|
 | 1 | Schema + immutability | Tables, completion lock, retention exclusion + guardrail, `assigned_to_user_id` |
 | 2 | The three forms | Definition in the repo, seed script + CI re-seed, upsert by `key`. Includes the seed test: every item phrased so No is the failure, every item has a WO/PO/— decision, no two forms ask the same thing |
-| 0 | SW allowlist | Give `/sw.js` an explicit offline allowlist (`/crew`, `/maintenance`), network-only elsewhere. **Standalone bug fix — ships before and independently of everything below**, because the unscoped worker is live today |
+| 0 | SW allowlist + push parity | **DONE.** `/sw.js` gained an explicit offline allowlist — `/crew` and `/work-orders/`, NOT `/maintenance` (see below); everything else gets the offline page rather than a stale cached copy. Push subscription unified into `lib/push/subscribe-client.ts`, fixing the dashboard's `if (existing) return` that had left zero PM rows ever |
 | 2a | Offline foundation | Generalize `lib/dexie` beyond the crew PWA; per-user+org cache with sign-out and org-switch clearing; extend the dead-letter and sync-coverage guardrails to the new surface |
 | 3 | Fill + complete | Tablet UI at `/maintenance/inspections`, offline WO create, photos |
 | 4 | Remediation | fail → WO/PO with partial-unique idempotency |

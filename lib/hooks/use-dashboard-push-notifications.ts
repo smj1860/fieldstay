@@ -3,35 +3,28 @@
 import { useEffect, useState } from 'react'
 
 import { reportError } from '@/lib/observability/report-error'
-function urlBase64ToUint8Array(base64String: string) {
-  const padding = '='.repeat((4 - (base64String.length % 4)) % 4)
-  const base64  = (base64String + padding).replace(/-/g, '+').replace(/_/g, '/')
-  const rawData = globalThis.atob(base64)
-  return Uint8Array.from([...rawData].map((char) => char.charCodeAt(0)))
-}
+import { registerAndSyncPush, subscribeToPush } from '@/lib/push/subscribe-client'
 
-async function subscribeToDashboardPush(reg: ServiceWorkerRegistration) {
-  const sub  = await reg.pushManager.subscribe({
-    userVisibleOnly:      true,
-    applicationServerKey: urlBase64ToUint8Array(process.env.NEXT_PUBLIC_VAPID_PUBLIC_KEY!),
-  })
-  const json = sub.toJSON()
-  if (!json.keys) return
-  await fetch('/api/dashboard/push-subscribe', {
-    method:  'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body:    JSON.stringify({
-      endpoint: json.endpoint,
-      p256dh:   json.keys.p256dh,
-      auth:     json.keys.auth,
-    }),
-  })
-}
+const ENDPOINT = '/api/dashboard/push-subscribe' as const
 
-// Registers the dashboard's service worker for push on mount (no permission
-// prompt yet) and exposes a flag + action for prompting the user to enable
-// notifications when permission hasn't been decided. Extracted from
-// DashboardShell.
+/**
+ * Registers the origin-wide service worker for push on mount (no permission
+ * prompt yet) and exposes a flag + action for prompting the user to enable
+ * notifications when permission hasn't been decided.
+ *
+ * ⚠️ This runs from components/dashboard-shell.tsx, which wraps EVERY dashboard
+ * page — so `/sw.js` is registered at root scope for every PM on every page
+ * load, before any opt-in. That is why public/sw.js carries an explicit
+ * offline-path allowlist: without one, its navigate handler cached every
+ * dashboard page a PM visited and served it back whenever the network failed.
+ *
+ * The subscription flow lives in lib/push/subscribe-client.ts, shared with the
+ * crew PWA. It used to be a second copy here, and the copy missed every fix the
+ * crew one received — most consequentially `if (existing) return`, which meant
+ * a device whose crew PWA had already subscribed never registered its PM row.
+ * push_subscriptions held zero PM rows, ever, with no error anywhere because
+ * the code returned before it could produce one.
+ */
 export function useDashboardPushNotifications() {
   const [swReg, setSwReg]               = useState<ServiceWorkerRegistration | null>(null)
   const [notifVisible, setNotifVisible] = useState(false)
@@ -40,27 +33,18 @@ export function useDashboardPushNotifications() {
     if (typeof globalThis.window === 'undefined') return
     if (!('serviceWorker' in navigator) || !('PushManager' in globalThis)) return
 
-    const register = async () => {
+    const run = async () => {
       try {
-        const reg      = await navigator.serviceWorker.register('/sw.js')
-        setSwReg(reg)
-
-        const existing = await reg.pushManager.getSubscription()
-        if (existing) return
-
-        const permission = Notification.permission
-        if (permission === 'default') {
-          setNotifVisible(true)
-        } else if (permission === 'granted') {
-          await subscribeToDashboardPush(reg)
-        }
+        const { registration, shouldPrompt } = await registerAndSyncPush(ENDPOINT)
+        setSwReg(registration)
+        setNotifVisible(shouldPrompt)
       } catch (err) {
         console.error('[sw] dashboard registration failed:', err)
         reportError(err, { site: 'lib.hooks.use-dashboard-push-notifications.sw' })
       }
     }
 
-    register()
+    run()
   }, [])
 
   async function enableNotifications() {
@@ -69,7 +53,7 @@ export function useDashboardPushNotifications() {
     setNotifVisible(false)
     if (permission !== 'granted') return
     try {
-      await subscribeToDashboardPush(swReg)
+      await subscribeToPush(swReg, ENDPOINT)
     } catch (err) {
       console.error('[push] dashboard subscription failed:', err)
       reportError(err, { site: 'lib.hooks.use-dashboard-push-notifications.push' })
