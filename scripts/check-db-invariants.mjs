@@ -811,6 +811,45 @@ if (shapesRes === null) {
   }
 }
 
+// ── 15. Every public relation must be SELECT-able by service_role ─────────
+//
+//     A GRANT is checked BEFORE RLS is evaluated, and service_role's BYPASSRLS
+//     does nothing about a missing one — bypassing row security is not the same
+//     as being allowed to touch the object.
+//
+//     public.vendor_compliance_status shipped with `authenticated: SELECT` and
+//     no service_role grant at all, which took vendor auto-suggestion down with
+//     42501 ("permission denied for view"). Every other relation in public had
+//     the grant; nothing compared them. Same class as
+//     20260710200000_grant_authenticated_missing_tables, one role over.
+//
+//     No allowlist. service_role is the platform's own client and there is no
+//     object it should be denied — an object it cannot read is a 42501 waiting
+//     for the first Inngest function that touches it.
+{
+  const gaps = await rpc('service_role_grant_gaps')
+
+  if (gaps === null) {
+    failures.push(
+      'service_role_grant_gaps() RPC is missing — has ' +
+        '20260820234500_grant_service_role_vendor_compliance_status.sql been applied ' +
+        'to this project?'
+    )
+  } else if (gaps.length > 0) {
+    const lines = gaps.map(
+      (g) => `${g.kind} ${g.relation}` +
+        (g.has_authenticated_select
+          ? ' (authenticated CAN select it — the grant was written for one role and not the other)'
+          : ' (no role can select it)'),
+    )
+    failures.push(
+      `relations service_role cannot SELECT:\n  ${lines.join('\n  ')}\n` +
+        '  Postgres raises 42501 at RUNTIME for every service-role read of these, ' +
+        'before RLS is even consulted. Add `GRANT SELECT ON public.<rel> TO service_role;`.'
+    )
+  }
+}
+
 // ── Verdict ───────────────────────────────────────────────────────────────
 if (failures.length > 0) {
   console.error(`DB invariant check FAILED (${failures.length} finding${failures.length === 1 ? '' : 's'}):\n`)
@@ -824,5 +863,5 @@ console.log(
     'unique, every member-facing policy backed by its GRANT, no memberless ' +
     'orgs, every storage policy org-scoped, every org_id column FK-backed, ' +
     'no accidental PostgREST junction tables, no blanket-true or unscoped or ' +
-    'WITH CHECK-less policies.'
+    'WITH CHECK-less policies, every relation readable by service_role.'
 )
