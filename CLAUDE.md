@@ -1372,6 +1372,15 @@ following them stops being a memory test. Five layers, checked in CI via
      whoever revives it inherits the old bug. `updateProperty` would have
      deleted a property's door code on a rename. Shrink-only baseline of the
      15 already dead when it was written; never add to it.
+   - `node-types-runtime-parity` — `@types/node`'s major equals
+     `engines.node`'s and every `node-version:` in `.github/workflows/`.
+     Types ahead of the runtime describe APIs that do not exist in
+     production, so code type-checks green and throws when it runs. Exists
+     because `.github/dependabot.yml` now ignores major bumps here (the
+     types are pinned to the runtime by design), and suppressing that PR
+     removed the only thing that surfaced drift — including the direction
+     Dependabot never watched, where the RUNTIME moves and the types are
+     left behind.
 
 3. **`check:ui-classes`** — the raw `btn-*`/`badge-*`/`card` class grep.
 

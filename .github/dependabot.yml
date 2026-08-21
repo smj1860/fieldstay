@@ -7,3 +7,20 @@ updates:
     ignore:
       - dependency-name: "tailwindcss"
         update-types: ["version-update:semver-major"]
+
+      # @types/node describes the runtime; it must not lead it.
+      #
+      # engines is node >=22, every CI job pins node-version: 22, and that is
+      # what Vercel runs. A major bump here does not upgrade anything — it makes
+      # the compiler describe APIs that do not exist in production, so code
+      # type-checks green and fails at runtime. The types are pinned to the
+      # runtime deliberately, not by neglect.
+      #
+      # Dependabot reopened this weekly as PR #364 (22.20.0 -> 26.1.2, four
+      # majors ahead of the runtime) until this entry was added on 2026-08-21.
+      #
+      # MINOR and PATCH still flow, so genuine fixes within 22.x arrive as
+      # normal. Raise the pin only when the Node version in engines and in
+      # .github/workflows/*.yml moves, and in the same change.
+      - dependency-name: "@types/node"
+        update-types: ["version-update:semver-major"]
