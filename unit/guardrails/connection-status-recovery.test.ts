@@ -166,6 +166,46 @@ describe('guardrail: an errored connection stays reachable by what can heal it',
     ].join('\n')).toEqual([])
   })
 
+  it('no inbound webhook route rejects a connection for being in error', () => {
+    // RECOVERY_PATHS above is a list, and a list only covers what someone
+    // thought to put in it. It named outbound paths — crons, token getters,
+    // sweeps — because those were the recovery paths when it was written. The
+    // INBOUND direction was not on it, and on 2026-08-21 the Hostex webhook
+    // route was found carrying `status !== 'active'`: the last instance of this
+    // spelling anywhere in the tree.
+    //
+    // Stated as a list this would go stale again on the next provider, so it is
+    // stated as a property of a place instead. A webhook route is the one file
+    // shape where the judgment is not a judgment: it renders nothing and counts
+    // nothing, so a status gate in it can only mean "process this delivery or
+    // throw it away". 'error' describes our last OUTBOUND sync and says nothing
+    // about whether the provider's push is genuine.
+    //
+    // Hostex is the worst case and the reason for the bound: 3 seconds to
+    // acknowledge and NO redelivery, so a refusal is permanent — during exactly
+    // the window a failing sync had put the connection in 'error'. Meanwhile
+    // the daily reconcile kept running and the integration kept looking fine.
+    const offenders = collectSourceFiles(['app'])
+      .filter((f) => rel(f).startsWith('app/api/webhooks/'))
+      .filter((f) => {
+        const src = read(f)
+        return src.includes("'integration_connections'") && ACTIVE_ONLY.test(stripCommentLines(src))
+      })
+      .map(rel)
+
+    expect(offenders, [
+      'A webhook route rejects deliveries for a connection in error state.',
+      '',
+      "status='error' means our last SYNC failed — an expired token, a 5xx, a",
+      'throttle. It is not a statement about whether an inbound delivery is',
+      'genuine, and it is set precisely when things are going wrong, i.e. when',
+      'the pushes being refused matter most.',
+      '',
+      'Use isSyncableConnectionStatus(connection.status). It still excludes',
+      "'revoked' and 'disconnected', which is the rejection you actually want.",
+    ].join('\n')).toEqual([])
+  })
+
   it('SELF-CHECK: the scan fires on both spellings, and not on the fix', () => {
     // A guardrail at zero because it is BLIND looks exactly like one at zero
     // because the tree is clean — and this file spent a commit in the first

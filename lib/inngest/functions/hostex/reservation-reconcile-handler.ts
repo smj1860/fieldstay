@@ -29,7 +29,9 @@
 
 import { inngest }             from '@/lib/inngest/client'
 import { NonRetriableError }   from 'inngest'
+import { reportError }         from '@/lib/observability/report-error'
 import { getValidHostexToken } from '@/lib/integrations/providers/hostex-token'
+import { ensureHostexWebhookRegistration } from '@/lib/integrations/providers/hostex-webhook'
 import { runProviderReconcile } from '../shared/reconcile-shell'
 import { syncHostexReservations } from './reservation-sync'
 import { syncHostexReviews } from './reviews-sync'
@@ -132,6 +134,44 @@ export const hostexReservationReconcileHandler = inngest.createFunction(
           // is still null picks one up as soon as Hostex has priced a clean
           // for it.
           propertyIdMap,
+        })
+
+        // Re-assert the webhook registration on every pass.
+        //
+        // It was previously attempted EXACTLY ONCE, in initial-sync's
+        // register-webhook step, where a failure is deliberately non-fatal —
+        // logged, reported, and then nothing ever tried again. So a connection
+        // that hit a 5xx, a throttle, or a momentarily-unset NEXT_PUBLIC_APP_URL
+        // during its one attempt degraded permanently to daily-reconcile-only,
+        // with a successful initial sync and a green connection to show for it.
+        // The registration is also the half of the pairing Hostex can lose from
+        // ITS side — deleted in the portal, dropped in a migration — and nothing
+        // here would have noticed.
+        //
+        // Cheap enough to be unconditional: hostexEnsureWebhook is a GET
+        // /webhooks that returns early when the URL is already registered, so
+        // the steady-state cost is one request per connection per day against a
+        // 600/min per-token budget. The URL token is minted once and reused, so
+        // this cannot orphan the registration Hostex already holds.
+        //
+        // Non-fatal for the same reason it is in initial sync: this pass has
+        // already imported reservations, reviews and staff, and failing it over
+        // a registration would throw all of that away and re-do it tomorrow.
+        await step.run('ensure-webhook', async () => {
+          try {
+            const { attempted, created } = await ensureHostexWebhookRegistration(user_id, token)
+            if (created) {
+              // Worth a line: on a reconcile pass this means the registration
+              // was ABSENT, which is a repair rather than a setup.
+              logger.warn(`[Hostex:${user_id}] webhook registration was missing — re-registered`)
+            }
+            // A summary, never the token — Inngest persists step return values.
+            return { attempted, created }
+          } catch (err) {
+            logger.error(`[Hostex:${user_id}] webhook re-registration failed: ${err instanceof Error ? err.message : String(err)}`)
+            reportError(err, { site: 'inngest.hostex-reservation-reconcile.ensure-webhook', orgId: org_id })
+            return { attempted: false, created: false }
+          }
         })
 
         return result

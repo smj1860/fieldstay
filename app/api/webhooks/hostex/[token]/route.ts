@@ -41,6 +41,7 @@ import { createServiceClient } from '@/lib/supabase/server'
 import { inngest }             from '@/lib/inngest/client'
 import { reportError }         from '@/lib/observability/report-error'
 import { unwrap }              from '@/lib/supabase/unwrap'
+import { isSyncableConnectionStatus } from '@/lib/integrations/connection-metadata'
 import type { HostexWebhookPayload } from '@/lib/integrations/providers/hostex.types'
 
 /** Hostex's own header name for the per-webhook-URL secret. */
@@ -107,10 +108,22 @@ export async function POST(
 
   const connection = unwrap(connRes, { site: 'webhook.hostex.resolve-connection' })
 
-  if (connection?.status !== 'active' || !connection.org_id) {
-    // Includes the revoked/disconnected case: Hostex has no way for us to
-    // deregister on their side reliably, so deliveries can outlive a
-    // disconnect. Rejecting is correct; it is not worth reporting.
+  // isSyncableConnectionStatus, NOT `status !== 'active'`. 'error' means the
+  // last SYNC failed — an expired token, a 5xx, a rate-limit — and says nothing
+  // about whether this delivery is genuine or whether the org still wants it.
+  // Rejecting on it is the OwnerRez defect one provider over, and worse here:
+  // Hostex allows 3 seconds to acknowledge and NEVER redelivers, so a webhook
+  // refused during an error window is not delayed, it is gone. The connection
+  // would then sit in 'error' precisely because syncing was failing — i.e. the
+  // rejection is guaranteed to coincide with the period the pushes matter most
+  // — while the daily reconcile kept running and the integration kept looking
+  // healthy. Recovery is real: hostex-token.ts restores 'active' on the next
+  // successful refresh.
+  //
+  // Revoked/disconnected still rejects. Hostex has no way for us to deregister
+  // on their side reliably, so deliveries outlive a disconnect; that is correct
+  // and not worth reporting.
+  if (!connection || !isSyncableConnectionStatus(connection.status) || !connection.org_id) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
   }
 

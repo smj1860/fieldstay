@@ -105,6 +105,23 @@ describe('authentication', () => {
     expect(sendMock).not.toHaveBeenCalled()
   })
 
+  it("ACCEPTS a connection in error state — 'error' is about our sync, not their push", async () => {
+    // The defect this replaced: the route gated on `status !== 'active'`, so a
+    // connection whose last sync failed had every subsequent delivery refused.
+    // Hostex allows 3s to ack and NEVER redelivers, so those are gone for good
+    // — and the rejection window is by construction the window in which a
+    // failing sync had set 'error', i.e. exactly when the pushes were the only
+    // thing still working. Meanwhile the daily reconcile kept succeeding and
+    // the integration looked healthy.
+    //
+    // 'revoked' above still rejects. That is the distinction the widened set
+    // encodes, and the pair of tests is what keeps it a distinction rather than
+    // a blanket accept.
+    stubSupabase({ connection: { ...ACTIVE, status: 'error' } })
+    expect((await POST(req(RESERVATION_EVENT), { params })).status).toBe(200)
+    expect(sendMock).toHaveBeenCalledTimes(1)
+  })
+
   it('rejects a wrong secret', async () => {
     stubSupabase({ connection: ACTIVE })
     expect((await POST(req(RESERVATION_EVENT, 'not-the-secret'), { params })).status).toBe(401)

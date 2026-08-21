@@ -52,6 +52,7 @@ const HOUR_MS = 3_600_000
  *   ownerrez-incremental-sync          0 * * * *      hourly
  *   integration-token-refresh-cron     0 * * * *      hourly
  *   cron-metrics-snapshot              slash-30       every 30 min
+ *   hostex-reservation-reconcile-cron  0 8 * * *      daily
  *   hospitable-teammate-sync-cron      0 9 * * *      daily
  *   hospitable-calendar-sync-cron      30 9 * * *     daily
  *   hospitable-reservation-reconcile   0 10 * * *     daily
@@ -72,6 +73,13 @@ export const WATCHED_JOBS: { id: string; maxSilentHours: number }[] = [
   { id: 'hospitable-calendar-sync-cron',            maxSilentHours: 30 },
   { id: 'hospitable-reservation-reconcile-cron',    maxSilentHours: 30 },
   { id: 'ownerrez-reconciliation-cron',             maxSilentHours: 30 },
+  // Watched more urgently than its two peers above, despite the same daily
+  // schedule. Theirs are backstops behind providers that RETRY a failed webhook
+  // delivery; Hostex allows 3 seconds to acknowledge and never redelivers, so
+  // this sweep is the only thing that recovers a delivery lost to a deploy, a
+  // cold start or a network blip. Silence here is not "the backup didn't run",
+  // it is "nothing is catching what the webhooks drop".
+  { id: 'hostex-reservation-reconcile-cron',        maxSilentHours: 30 },
   { id: 'cron-asset-health',                        maxSilentHours: 30 },
   { id: 'cron-maintenance-schedule-check',          maxSilentHours: 30 },
   { id: 'cron-daily-wrapup',                        maxSilentHours: 30 },
