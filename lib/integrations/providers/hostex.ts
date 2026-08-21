@@ -86,29 +86,29 @@ export const HOSTEX_AUTH_HEADER = 'Hostex-Access-Token'
 /**
  * Which envelope error_code values mean success.
  *
- * The two sources disagree and BOTH cannot be dismissed: Hostex's own
- * error_code field description says "A value of 200 indicates success", while
- * the integration brief this adapter was written from says 0. Picking one and
- * being wrong fails 100% of calls — a success read as an error, on every
- * request — so both are accepted and the observed value is logged once so the
- * loser can be deleted. Same reasoning as the two token-envelope branches
- * below; this is a live-verification question, not a taste question.
+ * RESOLVED 2026-08-21 against api-doc.hostex.io/reference/errors: it is ZERO.
+ * "error_code: 0 means success. Any non-zero value is a failure." The complete
+ * code table there is 0 / 400 / 401 / 403 / 404 / 409 / 420 / 422 / 429 / 500 /
+ * 501 / 502 / 503 / 504 — 200 does not appear in it at all.
  *
- * Not a blanket "any code is fine": a genuine failure code (429, 40001, …)
- * must still be rejected, which is the entire point of branching on the
- * envelope rather than on response.ok.
+ * This adapter previously accepted BOTH, because the OpenAPI schema's own
+ * description for the field claims "A value of 200 indicates success" while
+ * that same schema's `example` is 0. Their docs contradict themselves; the
+ * Errors reference is the authority and the example agrees with it.
+ *
+ * Accepting both was never dangerous — no endpoint emits 200 as an error_code,
+ * so the extra member was unreachable rather than wrong. But leaving it in
+ * means a future Hostex code 200 with some new meaning would read as success,
+ * which is the failure mode this narrowing removes.
+ *
+ * Not a blanket "any code is fine": a genuine failure code must still be
+ * rejected, which is the entire point of branching on the envelope rather than
+ * on response.ok.
  */
-const HOSTEX_SUCCESS_CODES: ReadonlySet<number> = new Set([0, 200])
-
-let loggedSuccessCode = false
+const HOSTEX_SUCCESS_CODE = 0
 
 export function isHostexSuccess(errorCode: number): boolean {
-  const ok = HOSTEX_SUCCESS_CODES.has(errorCode)
-  if (ok && !loggedSuccessCode) {
-    loggedSuccessCode = true
-    console.log(`[Hostex] envelope success error_code observed live: ${errorCode} — delete the other from HOSTEX_SUCCESS_CODES`)
-  }
-  return ok
+  return errorCode === HOSTEX_SUCCESS_CODE
 }
 
 /** Hostex signals throttling in-band: HTTP 200, error_code 429, Retry-After. */
@@ -418,6 +418,22 @@ export const hostexProvider: IntegrationProvider = {
     if (failures.length) {
       throw new Error(`Hostex token revocation failed — ${failures.join('; ')}`)
     }
+  },
+
+  async cleanupBeforeRevoke({ token, userId }) {
+    // Deregister the inbound webhook while the token can still authorize it.
+    // Revoking first would strand the registration permanently: Hostex would
+    // keep pushing to a URL our route answers 401 to, forever, and the
+    // operator's portal would still list a FieldStay webhook for an
+    // integration they believe they removed.
+    //
+    // Dynamically imported because hostex-webhook.ts is `server-only` and this
+    // adapter is reached through lib/integrations/registry.ts, which is pulled
+    // into a much wider graph. A static import would drag the server-only
+    // marker along with it and fail a build for a reason several hops from the
+    // change that caused it.
+    const { removeHostexWebhookRegistration } = await import('./hostex-webhook')
+    await removeHostexWebhookRegistration(userId, token)
   },
 
   getApiHeaders(token: string): Record<string, string> {

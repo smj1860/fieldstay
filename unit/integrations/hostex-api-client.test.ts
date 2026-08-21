@@ -33,6 +33,7 @@ vi.mock('@/lib/rate-limit', () => ({
 }))
 
 import {
+  hostexDeleteWebhook,
   hostexFetch,
   hostexFetchProperties,
   hostexReservationWindow,
@@ -43,7 +44,7 @@ import { checkLimit } from '@/lib/rate-limit'
 
 const USER = 'user_1'
 
-function envelope(data: unknown, errorCode = 200, headers: Record<string, string> = {}) {
+function envelope(data: unknown, errorCode = 0, headers: Record<string, string> = {}) {
   return {
     ok:      true,
     status:  200,
@@ -59,15 +60,26 @@ beforeEach(() => {
 afterEach(() => vi.unstubAllGlobals())
 
 describe('hostexFetch', () => {
-  it('unwraps data on the documented success code (200)', async () => {
+  it('unwraps data on the documented success code (0)', async () => {
     vi.stubGlobal('fetch', vi.fn(async () => envelope({ properties: [], total: 0 })))
     await expect(hostexFetch('/properties', 'tok', USER)).resolves.toEqual({ properties: [], total: 0 })
   })
 
-  it('also accepts error_code 0, since the two Hostex sources disagree', async () => {
-    // Picking one and being wrong fails 100% of calls — see HOSTEX_SUCCESS_CODES.
-    vi.stubGlobal('fetch', vi.fn(async () => envelope({ ok: true }, 0)))
-    await expect(hostexFetch('/properties', 'tok', USER)).resolves.toEqual({ ok: true })
+  it('REJECTS error_code 200 — 0 is success, and 200 is not a Hostex code at all', async () => {
+    // This adapter used to accept BOTH, because Hostex's OpenAPI schema
+    // describes the field as "A value of 200 indicates success" while that same
+    // schema's `example` is 0. Their Errors reference settles it — "error_code:
+    // 0 means success. Any non-zero value is a failure" — and its complete code
+    // table (0, 400, 401, 403, 404, 409, 420, 422, 429, 500, 501, 502, 503,
+    // 504) contains no 200 whatsoever.
+    //
+    // Accepting both was never dangerous, since nothing emits 200. It is pinned
+    // here because the danger is prospective: if Hostex ever gives 200 a
+    // meaning, a permissive set reads that new failure as success on every
+    // request, and the wrongly-widened member would look like a deliberate
+    // compatibility allowance rather than a stale guess.
+    vi.stubGlobal('fetch', vi.fn(async () => envelope({ ok: true }, 200)))
+    await expect(hostexFetch('/properties', 'tok', USER)).rejects.toThrow(/error_code 200/)
   })
 
   it('throws RateLimitError on an IN-BAND 429 carried by a 200 response', async () => {
@@ -214,5 +226,51 @@ describe('hostexReservationWindow', () => {
     const w = hostexReservationWindow(12, 6, new Date('2026-08-16T00:00:00Z'))
     expect(w.startCheckOutDate).toBe('2025-08-16')
     expect(w.endCheckOutDate).toBe('2027-02-16')
+  })
+})
+
+describe('hostexDeleteWebhook', () => {
+  // Called on disconnect, BEFORE the token is revoked — DELETE /webhooks/{id}
+  // needs it. Without this the PM disconnects and Hostex keeps pushing to a URL
+  // our route answers 401 to, indefinitely, while their portal still lists a
+  // FieldStay webhook for an integration the operator believes they removed.
+  const OURS   = { id: 11, url: 'https://app/api/webhooks/hostex/tok', events: [], manageable: true,  created_at: '' }
+  const THEIRS = { id: 22, url: 'https://app/api/webhooks/hostex/tok', events: [], manageable: false, created_at: '' }
+  const OTHER  = { id: 33, url: 'https://elsewhere.example/hook',      events: [], manageable: true,  created_at: '' }
+
+  function stubWebhooks(list: unknown[]) {
+    const calls: Array<{ url: string; method?: string }> = []
+    vi.stubGlobal('fetch', vi.fn(async (url: string, init?: { method?: string }) => {
+      calls.push({ url, method: init?.method })
+      if (init?.method === 'DELETE') return envelope(null)
+      return envelope({ webhooks: list })
+    }))
+    return calls
+  }
+
+  it('deletes only OUR manageable registration at that exact URL', async () => {
+    const calls = stubWebhooks([OURS, OTHER])
+
+    await expect(hostexDeleteWebhook('tok', USER, OURS.url)).resolves.toEqual({ deleted: 1 })
+
+    const deletes = calls.filter((c) => c.method === 'DELETE')
+    expect(deletes).toHaveLength(1)
+    expect(deletes[0].url).toContain('/webhooks/11')
+  })
+
+  it('skips a registration flagged NOT manageable, which Hostex answers 403 for', async () => {
+    // Hostex permits deleting only webhooks your own app created AND that are
+    // manageable. A 403 is terminal here, so attempting it would fail the
+    // disconnect for a reason the PM can do nothing about.
+    const calls = stubWebhooks([THEIRS])
+
+    await expect(hostexDeleteWebhook('tok', USER, THEIRS.url)).resolves.toEqual({ deleted: 0 })
+    expect(calls.filter((c) => c.method === 'DELETE')).toHaveLength(0)
+  })
+
+  it('is a no-op when nothing is registered — a disconnect must not fail on that', async () => {
+    const calls = stubWebhooks([])
+    await expect(hostexDeleteWebhook('tok', USER, OURS.url)).resolves.toEqual({ deleted: 0 })
+    expect(calls.filter((c) => c.method === 'DELETE')).toHaveLength(0)
   })
 })
