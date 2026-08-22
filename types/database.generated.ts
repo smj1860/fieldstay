@@ -1744,6 +1744,7 @@ export type Database = {
           asset_type: Database["public"]["Enums"]["asset_type"] | null
           concern_key: string | null
           created_at: string
+          default_actions: Database["public"]["Enums"]["inspection_action"][]
           id: string
           is_required: boolean
           key: string
@@ -1768,6 +1769,7 @@ export type Database = {
           asset_type?: Database["public"]["Enums"]["asset_type"] | null
           concern_key?: string | null
           created_at?: string
+          default_actions?: Database["public"]["Enums"]["inspection_action"][]
           id?: string
           is_required?: boolean
           key: string
@@ -1792,6 +1794,7 @@ export type Database = {
           asset_type?: Database["public"]["Enums"]["asset_type"] | null
           concern_key?: string | null
           created_at?: string
+          default_actions?: Database["public"]["Enums"]["inspection_action"][]
           id?: string
           is_required?: boolean
           key?: string

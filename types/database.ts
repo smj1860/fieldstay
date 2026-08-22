@@ -2146,8 +2146,21 @@ export interface InspectionFormItem {
    */
   concern_key: string | null
 
-  /** The PRE-SELECTED action, not a constraint — the inspector overrides. */
+  /**
+   * What KIND of record a failure here can produce at all. 'notify' and 'none'
+   * never dispatch anyone — a lapsed permit is not a work order.
+   *
+   * Distinct from `default_actions`, and neither derives from the other: dryer
+   * vent (Service) and exit doors (Repair) are both 'work_order'.
+   */
   remediation:        InspectionRemediation
+  /**
+   * Pre-ticked action chips on a FAIL — our judgment about what the item
+   * usually means, so the common case is one tap. Not a constraint. An ARRAY
+   * because a water heater at end of life defaults to Replace AND Service: the
+   * purchase and the install. Empty for notify/none items (CHECK-enforced).
+   */
+  default_actions:    InspectionAction[]
   wo_category:        WoCategory | null
   wo_priority:        PriorityLevel | null
   po_catalog_item_id: string | null

@@ -1,0 +1,95 @@
+name: Seed inspection forms
+
+# Projects lib/inspections/forms/** into inspection_forms / _sections / _items,
+# so a reworded item is a reviewable diff rather than a migration.
+#
+# WHY A SEPARATE WORKFLOW rather than a job in ci.yml: `on.push.paths` filters
+# the whole workflow, so a path filter on ci.yml would gate lint, tsc, tests and
+# e2e behind a form-copy change too. A second file is the only way to scope the
+# filter to this work alone. Same reasoning as seed-support-kb.yml.
+#
+# WHY PUSH-TO-MAIN and not pull_request: this writes to PRODUCTION. A PR —
+# including one from a fork — must never be able to rewrite the forms live
+# customers are inspecting against.
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'lib/inspections/forms/**'
+      - 'scripts/seed-inspection-forms.ts'
+      - '.github/workflows/seed-inspection-forms.yml'
+  workflow_dispatch:
+
+# One seed at a time, so two runs cannot interleave their upserts and leave the
+# forms holding a mix of two revisions.
+#
+# NOT cancel-in-progress, but for a different reason than seed-support-kb.yml.
+# That workflow deletes before inserting, so a cancellation between the two
+# empties the KB. This one only ever upserts on a real unique constraint, so a
+# cancelled run leaves a PARTIALLY UPDATED form and the next run completes it —
+# recoverable either way. Serialising is still right: interleaved runs are
+# harder to reason about than a queue, and the job takes seconds.
+concurrency:
+  group: seed-inspection-forms
+  cancel-in-progress: false
+
+jobs:
+  seed:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # Reads the repo, writes to Supabase. It never pushes.
+          persist-credentials: false
+      - uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      # --ignore-scripts, matching every other CI job. This job holds a
+      # PRODUCTION service-role key and is the last place that should let every
+      # transitive dependency run arbitrary install scripts. See the long note
+      # in seed-support-kb.yml: tsx works fine without them.
+      - run: pnpm install --frozen-lockfile --ignore-scripts
+
+      # Structure, duplicate keys and every parent/repeat reference, resolved
+      # with no credentials and no writes. A malformed definition fails here
+      # rather than partway through a project.
+      - name: Validate the definitions (dry run)
+        run: pnpm exec tsx scripts/seed-inspection-forms.ts --dry-run
+
+      # PRODUCTION first, under its own secret names. The ambient CI
+      # NEXT_PUBLIC_SUPABASE_URL / SUPABASE_SERVICE_ROLE_KEY point at the E2E
+      # project (check-type-drift.mjs refuses to run if they ever point at
+      # prod), so reusing them here would seed a database no customer reads.
+      - name: Seed production
+        id: prod
+        env:
+          NEXT_PUBLIC_SUPABASE_URL:  ${{ secrets.SUPABASE_PROD_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_PROD_SERVICE_ROLE_KEY }}
+        run: |
+          # Self-disarming, same pattern as ci.yml's e2e and db-invariants jobs:
+          # a repo without these secrets gets a warning, not a permanently red
+          # main branch.
+          if [ -z "$NEXT_PUBLIC_SUPABASE_URL" ] || [ -z "$SUPABASE_SERVICE_ROLE_KEY" ]; then
+            echo "::warning title=Production form seed UNARMED::SUPABASE_PROD_URL / SUPABASE_PROD_SERVICE_ROLE_KEY are not configured, so the inspection forms were NOT updated in production."
+            exit 0
+          fi
+          pnpm exec tsx scripts/seed-inspection-forms.ts
+
+      # AND the E2E project, which production's counterpart does not need.
+      # Unlike the support KB, these rows are not content — they are the thing
+      # the inspection UI renders, so a form missing from E2E fails the e2e
+      # suite as a UI bug and costs an afternoon before anyone looks at the
+      # data. Same lockstep rule CLAUDE.md already states for migrations.
+      - name: Seed E2E
+        if: always() && steps.prod.outcome != 'cancelled'
+        env:
+          NEXT_PUBLIC_SUPABASE_URL:  ${{ secrets.NEXT_PUBLIC_SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+        run: |
+          if [ -z "$NEXT_PUBLIC_SUPABASE_URL" ] || [ -z "$SUPABASE_SERVICE_ROLE_KEY" ]; then
+            echo "::warning title=E2E form seed UNARMED::The E2E Supabase secrets are not configured, so the inspection forms were NOT updated there. The e2e suite will render an empty form."
+            exit 0
+          fi
+          pnpm exec tsx scripts/seed-inspection-forms.ts
