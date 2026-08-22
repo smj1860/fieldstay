@@ -203,7 +203,7 @@ export async function cleanupStaleDashboardDbs(userId: string, orgId: string): P
     const all   = await indexedDB.databases()
     const stale = all.filter((info) => !!info.name && isStaleDashboardDbName(info.name, userId, orgId))
 
-    await reportRejections(
+    reportRejections(
       await Promise.allSettled(stale.map((info) => deleteDbByName(info.name!))),
       'stale cache cleanup',
     )
@@ -233,7 +233,7 @@ export async function purgeDashboardDbsForUser(userId: string): Promise<void> {
       // in isStaleDashboardDbName — opposite questions, opposite tests.
       info.name.slice(DASHBOARD_DB_PREFIX.length).startsWith(`${userId}-`))
 
-    await reportRejections(
+    reportRejections(
       await Promise.allSettled(mine.map((info) => deleteDbByName(info.name!))),
       'sign-out purge',
     )
