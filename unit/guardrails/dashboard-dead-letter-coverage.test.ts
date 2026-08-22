@@ -98,6 +98,54 @@ describe('guardrail: every dashboard mutation kind has a dead-letter surface', (
     expect(BANNER_SRC).toContain('retryAllFailedDashboardMutations')
     expect(BANNER_SRC).toContain('discardFailedDashboardMutation')
   })
+})
+
+// ── The shared presentation, used by BOTH surfaces ──────────────────────────
+//
+// The two banners were 44% duplicated and the presentation was extracted to
+// components/sync/sync-failure-panel.tsx. That is the right call — two copies
+// of "a stalled queue is not a failure and gets no discard button" is two
+// places to lose that rule — but it opens a gap: each banner's own guardrail
+// checks that it REFERENCES a retry function, and the control that calls it now
+// lives elsewhere. Deleting the button would leave both guardrails green.
+//
+// So the panel gets its own assertions, once, covering both surfaces.
+describe('guardrail: the shared sync-failure panel keeps its behavioural rules', () => {
+  const PANEL_SRC = readFileSync(join(ROOT, 'components/sync/sync-failure-panel.tsx'), 'utf8')
+
+  it('renders a retry control wired to onRetryAll', () => {
+    expect(PANEL_SRC, 'the panel takes onRetryAll but never calls it').toMatch(/await onRetryAll\(\)/)
+    expect(PANEL_SRC, 'no retry button').toMatch(/<Button[\s\S]{0,200}?retryAll/)
+  })
+
+  it('a discard always goes through a confirmation', () => {
+    // Discarding is unrecoverable — the write never reached the server and the
+    // row is the only copy. A one-tap bin next to a list is the wrong shape.
+    expect(PANEL_SRC).toContain('setConfirmDiscard')
+    expect(PANEL_SRC, 'discard is not behind a Dialog').toMatch(/<Dialog[\s\S]*?entry\.discard\(\)/)
+  })
+
+  it('the stalled-only path returns BEFORE any discard affordance exists', () => {
+    // The rule that is easiest to lose in a refactor: a stalled queue is intact
+    // and still retrying, so offering a bin invites throwing away work that was
+    // going to arrive. Structural, not a string match — the early return has to
+    // come before the first Trash2 in the tree.
+    const earlyReturn = PANEL_SRC.indexOf('if (entries.length === 0) return')
+    const firstBin    = PANEL_SRC.indexOf('<Trash2')
+    expect(earlyReturn, 'the stalled-only early return is gone').toBeGreaterThan(-1)
+    expect(firstBin,    'the discard affordance is gone entirely').toBeGreaterThan(-1)
+    expect(earlyReturn).toBeLessThan(firstBin)
+  })
+
+  it('both surfaces actually use it, so neither can quietly re-fork', () => {
+    for (const banner of [
+      'app/(dashboard)/_components/dashboard-sync-banner.tsx',
+      'app/crew/_components/failed-sync-banner.tsx',
+    ]) {
+      const src = readFileSync(join(ROOT, banner), 'utf8')
+      expect(src, `${banner} does not render the shared panel`).toContain('<SyncFailurePanel')
+    }
+  })
 
   it('the dead-letter queries are index-backed, not full scans', () => {
     // Live queries on a table the drain writes to. As `.filter()` scans they
