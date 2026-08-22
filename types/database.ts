@@ -2053,6 +2053,11 @@ export interface HandWrittenRowMap {
   demo_activity_log:                   DemoActivityLog
   hospitable_launch_promo:             HospitableLaunchPromo
   promo_hospitable_launch_counter:     PromoHospitableLaunchCounter
+  inspection_forms:                    InspectionForm
+  inspection_form_sections:            InspectionFormSection
+  inspection_form_items:               InspectionFormItem
+  inspections:                         Inspection
+  inspection_items:                    InspectionItem
 }
 
 /** Views modelled by hand, same contract as HandWrittenRowMap. */
