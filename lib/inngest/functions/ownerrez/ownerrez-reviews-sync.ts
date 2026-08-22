@@ -317,7 +317,25 @@ export const ownerRezReviewsSyncConnection = inngest.createFunction(
         // stars (not rating), display_name (not guest_name/guest.name),
         // and date/created_utc (not created_at/submitted_at) are the real
         // fields.
-        const rows = reviews.map(review => ({
+        // A HOST review is the PM reviewing the GUEST. OwnerRez returns both
+        // directions from this endpoint — `reviewer` is a documented
+        // 'host' | 'guest' enum — and nothing here separated them, so a host's
+        // rating of a departing guest would land in the property's review feed
+        // as `guest_name: <the host's display name>` with their stars folded
+        // into the property's average.
+        //
+        // Excludes 'host' rather than requiring 'guest': the field is optional
+        // on our type, and an absent value should be kept and reviewed rather
+        // than silently dropped. Only the one value we know is wrong is
+        // filtered.
+        const guestReviews = reviews.filter((r) => r.reviewer !== 'host')
+
+        const skipped = reviews.length - guestReviews.length
+        if (skipped > 0) {
+          logger.info(`[OwnerRez:${userId}] skipped ${skipped} host-authored review(s) — not property reviews`)
+        }
+
+        const rows = guestReviews.map(review => ({
           external_id:     String(review.id),
           external_source: 'ownerrez',
           external_url:    `https://app.ownerrez.com/reviews/${review.id}`,

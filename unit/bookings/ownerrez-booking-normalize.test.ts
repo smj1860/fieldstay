@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { ownerRezBookingToNormalized } from '@/lib/integrations/providers/ownerrez'
+import { buildOwnerRezBookingRow, ownerRezBookingToNormalized } from '@/lib/integrations/providers/ownerrez'
 import type { OwnerRezBooking } from '@/lib/integrations/types'
 
 function baseBooking(overrides: Partial<OwnerRezBooking> = {}): OwnerRezBooking {
@@ -10,7 +10,7 @@ function baseBooking(overrides: Partial<OwnerRezBooking> = {}): OwnerRezBooking 
     status:       'Confirmed',
     is_block:     false,
     property_id:  7,
-    channel_name: 'Airbnb (API)',
+    listing_site: 'Airbnb (API)',
     guest: { id: 99, first_name: 'Jane', last_name: 'Doe' },
     ...overrides,
   }
@@ -62,15 +62,33 @@ describe('ownerRezBookingToNormalized', () => {
     expect(ownerRezBookingToNormalized(baseBooking({ status: 'hold' })).status).toBe('tentative')
   })
 
-  it('maps channel_name to the FieldStay booking source', () => {
-    expect(ownerRezBookingToNormalized(baseBooking({ channel_name: 'VRBO' })).source).toBe('vrbo')
-    expect(ownerRezBookingToNormalized(baseBooking({ channel_name: 'HomeAway' })).source).toBe('vrbo')
-    expect(ownerRezBookingToNormalized(baseBooking({ channel_name: 'Booking.com' })).source).toBe('booking_com')
-    expect(ownerRezBookingToNormalized(baseBooking({ channel_name: 'Direct' })).source).toBe('direct')
-    expect(ownerRezBookingToNormalized(baseBooking({ channel_name: undefined })).source).toBe('other')
+  it('maps listing_site to the FieldStay booking source', () => {
+    expect(ownerRezBookingToNormalized(baseBooking({ listing_site: 'VRBO' })).source).toBe('vrbo')
+    expect(ownerRezBookingToNormalized(baseBooking({ listing_site: 'HomeAway' })).source).toBe('vrbo')
+    expect(ownerRezBookingToNormalized(baseBooking({ listing_site: 'Booking.com' })).source).toBe('booking_com')
+    expect(ownerRezBookingToNormalized(baseBooking({ listing_site: 'Direct' })).source).toBe('direct')
+    expect(ownerRezBookingToNormalized(baseBooking({ listing_site: undefined })).source).toBe('other')
   })
 
-  it('always returns null checkin_time/checkout_time (OwnerRez has no time-of-day field)', () => {
+  it('carries OwnerRez check_in/check_out through as the times of day', () => {
+    // This test used to assert the opposite — "OwnerRez has no time-of-day
+    // field" — and passed, because the mapper hardcoded both to null. Both
+    // were wrong: the booking schema documents check_in and check_out as
+    // 24-hour "HH:mm" strings in the property's timezone.
+    //
+    // It mattered. lib/turnovers/generator.ts falls back to '11:00'/'15:00'
+    // when a booking has no time and the property has no default, so every
+    // OwnerRez cleaning window was computed from an assumption. Production had
+    // 0 of 30 OwnerRez bookings with times against Hospitable's 11 of 12.
+    const result = ownerRezBookingToNormalized(baseBooking({ check_in: '16:00', check_out: '09:00' }))
+    expect(result.checkin_time).toBe('16:00')
+    expect(result.checkout_time).toBe('09:00')
+  })
+
+  it('normalizes a missing time to null so the row builder can omit the column', () => {
+    // null here is not "write null" — buildOwnerRezBookingRow reads it as the
+    // signal to leave the key OUT of the upsert, so a PM's manual edit
+    // survives. Writing null on every sync is what would clobber it.
     const result = ownerRezBookingToNormalized(baseBooking())
     expect(result.checkin_time).toBeNull()
     expect(result.checkout_time).toBeNull()
@@ -106,5 +124,37 @@ describe('ownerRezBookingToNormalized', () => {
     // is_block) and the bookings UI (which reads status) show the same thing.
     expect(result.is_block).toBe(true)
     expect(result.status).toBe('blocked')
+  })
+})
+
+describe('buildOwnerRezBookingRow — time columns are omitted, never nulled', () => {
+  const MAP = { '7': 'fs-prop-uuid' }
+
+  it('includes the time columns when OwnerRez sent them', () => {
+    const row = buildOwnerRezBookingRow('org-1', baseBooking({ check_in: '16:00', check_out: '09:00' }), MAP)
+    expect(row.checkin_time).toBe('16:00')
+    expect(row.checkout_time).toBe('09:00')
+  })
+
+  it('OMITS the keys entirely when OwnerRez sent nothing — not null', () => {
+    // THE distinction, and the reason the row builder spreads these in rather
+    // than assigning them. This upsert runs on every sync. A literal
+    // `checkin_time: null` would overwrite a PM's manual edit each time, and
+    // it would do it silently because the write succeeds — the same
+    // `?? null`-in-an-upload-payload defect the crew Dexie guardrail exists
+    // for, one provider over.
+    //
+    // `in` rather than a truthiness or undefined check: the failure being
+    // guarded is a key that is PRESENT carrying null, which `=== undefined`
+    // would not distinguish from an absent key.
+    const row = buildOwnerRezBookingRow('org-1', baseBooking(), MAP)
+    expect('checkin_time'  in row).toBe(false)
+    expect('checkout_time' in row).toBe(false)
+  })
+
+  it('omits only the half that is missing', () => {
+    const row = buildOwnerRezBookingRow('org-1', baseBooking({ check_out: '10:00' }), MAP)
+    expect('checkin_time' in row).toBe(false)
+    expect(row.checkout_time).toBe('10:00')
   })
 })

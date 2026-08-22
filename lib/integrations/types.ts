@@ -241,7 +241,27 @@ export interface OwnerRezBooking {
   // (booking/block/quote_hold/linked_availability) predate this addition.
   type?:         'booking' | 'block' | 'quote_hold' | 'linked_availability' | 'owner'
   property_id?:  number
-  channel_name?: string
+  /**
+   * The OTA this booking came from. `listing_site`, NOT `channel_name`.
+   *
+   * There has never been a `channel_name` field on this endpoint — verified
+   * 2026-08-21 against the documented booking schema, which lists
+   * `listing_site` and no channel_name. The mapper read `b.channel_name`, got
+   * `undefined` on every booking, and returned the no-channel default: all 30
+   * OwnerRez bookings in production carry source 'other', while Hospitable in
+   * the same table spreads across direct/airbnb.
+   */
+  listing_site?: string
+  /**
+   * Times of day in the PROPERTY's timezone, 24h "HH:mm" (e.g. "16:00").
+   * Documented on the booking schema; `arrival`/`departure` above are the
+   * dates. A prior comment on buildOwnerRezBookingRow asserted OwnerRez
+   * "never provides a time-of-day" and hardcoded both to null — so every
+   * OwnerRez turnover was scheduled off lib/turnovers/generator.ts's
+   * '11:00'/'15:00' fallback instead of the real times.
+   */
+  check_in?:     string | null
+  check_out?:    string | null
   // ✅ Confirmed live 2026-07-15 against GET /v2/bookings with
   // include_guest=true — the real shape has first_name/last_name, NOT a
   // combined `name` field. This is why guest_name has been null on every
@@ -317,7 +337,15 @@ export interface OwnerRezReview {
   created_utc?:  string   // when the review record was created in OwnerRez
   property_id?:  number
   visible?:      boolean
-  reviewer?:     string   // e.g. "guest"
+  /**
+   * WHO WROTE IT — a documented enum, not free text.
+   *
+   * 'host' is the PM's review OF THE GUEST, not a review of the property.
+   * Importing one into `reviews` puts the host's own words and their rating
+   * of a guest into the property's public-review feed and its rating average.
+   * Verified against the documented ReviewViewModel 2026-08-21.
+   */
+  reviewer?:     'host' | 'guest'
 }
 
 // ── Error classes ─────────────────────────────────────────────────────────────
