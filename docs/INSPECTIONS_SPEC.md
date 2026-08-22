@@ -1003,7 +1003,7 @@ motivating force, no exposure. **This copy must be written or approved by
 | # | Phase | Contents |
 |---|---|---|
 | 1 | Schema + immutability | Tables, completion lock, retention exclusion + guardrail, `assigned_to_user_id` |
-| 2 | The three forms | Definition in the repo, seed script + CI re-seed, upsert by `key`. Includes the seed test: every item phrased so No is the failure, every item has a WO/PO/— decision, no two forms ask the same thing |
+| 2 | The three forms | **DONE.** `lib/inspections/forms/*` (170 items: 40 + 52 + 57 top-level, plus children and repeat groups), `scripts/seed-inspection-forms.ts`, `.github/workflows/seed-inspection-forms.yml`, and `unit/inspections/form-definitions.test.ts`. Upsert-only on three real unique constraints, never delete. See the notes below on what building it changed |
 | 0 | SW allowlist + push parity | **DONE.** `/sw.js` gained an explicit offline allowlist — `/crew` and `/work-orders/`, NOT `/maintenance` (see below); everything else gets the offline page rather than a stale cached copy. Push subscription unified into `lib/push/subscribe-client.ts`, fixing the dashboard's `if (existing) return` that had left zero PM rows ever |
 | 2a | Offline foundation | Generalize `lib/dexie` beyond the crew PWA; per-user+org cache with sign-out and org-switch clearing; extend the dead-letter and sync-coverage guardrails to the new surface |
 | 3 | Fill + complete | Tablet UI at `/maintenance/inspections`, offline WO create, photos |
@@ -1013,6 +1013,45 @@ motivating force, no exposure. **This copy must be written or approved by
 | 7 | Export | History PDF via `pdf-lib`, copying the CPA export |
 
 1–4 are the feature. 5–7 are what make it automatic.
+
+### What phase 2 changed about phase 1 — 2026-08-22
+
+**`inspection_form_items` gained `default_actions`.** Phase 1 hung the "PRE-
+SELECTED action, not a constraint" comment on `remediation`, and writing the
+seed showed the two are different questions with no derivation between them.
+`remediation` says what KIND of record a failure can produce; `default_actions`
+says which chips are pre-ticked. §12.1 item 8 (dryer vent, Service) and item 10
+(exit doors, Repair) are both `work_order`, so `remediation` cannot tell them
+apart — and the reverse fails too, since §5 made actions multi-select precisely
+so a water heater at end of life defaults to Replace AND Service. An array, and
+a CHECK constraint forbidding a pre-tick on a `notify`/`none` item.
+
+**Three authoring rules the seed test now enforces that the spec had not
+stated:**
+
+- *A `repeat_per_asset` item may not carry a `concern_key`.* The key is static
+  and the item's subject is not — one row renders once per ACTIVE asset — so a
+  shared key would merge "the refrigerator is dead" with "the generator is
+  dead" purely because both came from the same template row. Exactly the silent
+  wrong-merge §12.3 calls worse than a duplicate. Per-asset dedup is `asset_id`
+  on the answer.
+- *Identical prompts across forms are fine and expected; identical prompts
+  WITHIN one form are not.* Safety 11 and Indoor 5 are word-for-word identical
+  and share `egress_window` — that is the deliberate cross-cadence overlap, not
+  a copy-paste. The first draft of the check flagged it, which is how the
+  distinction got drawn.
+- *An item with `remediation: 'none'` is exempt from the shared-key rule*,
+  because it produces no record and therefore has nothing to deduplicate. This
+  is what excuses the sign-off attestations, which are identical on Indoor and
+  Outdoor by design. `notify` items are NOT exempt — they do produce a record,
+  and two would double-notify.
+
+**The `Dflt` column is now seeded as `default_actions`, and `wo_category` was
+assigned per work-order item** — the spec never listed one, and a work order
+with no category cannot be routed to a vendor specialty. `wo_priority` was
+deliberately NOT invented for every item: it is set only where the spec's own
+prose argues for urgency (life safety, the VGB requirement, live gas or water),
+because an invented priority is worse than an absent one — it looks deliberate.
 
 ---
 
@@ -1236,6 +1275,22 @@ owner believes they are covered.
 **All three forms are now real** — no first-pass guesses remain. Safety above,
 Indoor in 12.2, Outdoor in 12.3, with the cross-form `concern_key` table at the
 end of 12.3.
+
+⚠️ **OPEN — Safety has no certification or signature item, and the other two
+forms do.** Indoor 51/52 and their Outdoor twins ask the inspector to certify
+that the inspection was performed on-site with exceptions photographed, and to
+sign. §12.1 specifies 40 items across 6 sections with no sign-off section, and
+the seed matches that exactly rather than inventing a seventh.
+
+It is worth a deliberate answer rather than an inherited one, because Safety is
+the form §1 calls insurance evidence — the one an insurer or an adjuster is
+most likely to actually read, and the one where an unsigned, uncertified
+document is worth least. `inspections.inspector_name` is a column rather than a
+form item, so the typed name is captured on all three forms either way; what
+Safety lacks is the ATTESTATION and the signature image.
+
+Adding it is a three-item section and a version bump. Not done unilaterally —
+@smj1860's call.
 
 ### 12.2 Indoor Property & Inventory Inspection
 
@@ -1600,6 +1655,13 @@ Closed question 5 made this an authoring rule. Every `concern_key` above appears
 in at least one other form, and each was chosen because the same physical fault
 is legitimately visible from two inspections on two cadences:
 
+**This table is now MIRRORED, not authoritative.** The authoritative copy is
+`CONCERN_KEY_MAP` in `lib/inspections/forms/index.ts`, which carries a written
+justification per key and is asserted against the definitions in both
+directions by `unit/inspections/form-definitions.test.ts`. Writing that map is
+what surfaced the two corrections below; the table is kept because reading it
+next to the forms is how the overlaps are understood.
+
 | concern_key | Safety | Indoor | Outdoor |
 |---|---|---|---|
 | `gutters_clear` | 29 | — | 2 |
@@ -1613,7 +1675,7 @@ is legitimately visible from two inspections on two cadences:
 | `exterior_lock` | 37 | — | 28 |
 | `pool_barrier` | 33 | — | 33 |
 | `firepit_clearance` | 31 | — | 35 |
-| `grill_safe` | 31 | — | 36 |
+| `grill_safe` | — | — | 36 |
 | `smoke_detector_operational` | 2 | 30 | — |
 | `co_detector_operational` | 5 | 31 | — |
 | `hvac_filter` | 19 | 13 | — |
@@ -1621,15 +1683,49 @@ is legitimately visible from two inspections on two cadences:
 | `washer_supply_lines` | 25 | 41 | — |
 | `electrical_panel_clear` | 15 | 45 | — |
 | `flooring_sound` | 22 | 3 | — |
+| `smoke_detector_present` | 1 | — | — |
 | `smoke_detector_age` | 3 | — | — |
+| `co_detector_present` | 4 | — | — |
 | `co_detector_age` | 6 | — | — |
 | `chimney_swept` | 9 | — | — |
 | `egress_window` | 11 | 5 | — |
 | `gas_appliance_safe` | 17 | — | — |
 | `sump_pump` | 28 | — | — |
 | `pool_drain_vgb` | 34 | — | — |
+| `entry_lock_operational` | — | 1 | — |
+| `furniture_anchored` | — | 10 | — |
+| `fridge_water_filter` | — | 14a | — |
+| `under_sink_leak` | — | 19, 21 | — |
+| `wifi_operational` | — | 35 | — |
+| `battery_sweep` | — | 38 | — |
+| `pest_activity` | — | 48 | — |
 | `home_water_filter` | — | 19a | W7 |
+| `roof_condition` | — | — | 1 |
+| `exterior_pest` | — | — | 16 |
+| `hvac_condenser` | — | — | 24 |
+| `well_pump_operation` | — | — | W2 |
 | `well_short_cycle` | — | — | W3, W4, W5 |
+
+**Two corrections, both found by writing the map rather than by reading the
+table.**
+
+`grill_safe` was listed against Safety 31 — but so was `firepit_clearance`, and
+Safety 31 is ONE prompt ("Grills and fire pits at safe distance from
+structures; gas shut-offs marked") which can carry exactly one key. The
+combined prompt is about clearance, so clearance took the key and `grill_safe`
+is now Outdoor-only. That is the right split on the merits too: cleaning a
+grease tray is not repositioning a fire pit, and merging them would have folded
+two real work orders into one.
+
+Thirteen keys used by §12.1–12.3 were missing from the table entirely — mostly
+single-form ones. The table's own closing note says single-form keys are listed
+deliberately, so their absence was an oversight rather than a policy. They are
+included above, and the seed test now fails if the map and the definitions ever
+disagree in either direction.
+
+**`under_sink_leak` is a second within-form merge**, alongside
+`well_short_cycle`: Indoor 19 (kitchen) and Indoor 21 (bathrooms) are the same
+concern in two rooms, and a plumber walks the property once.
 
 **Two rows in that table are not cross-form at all, and that is deliberate.**
 A key appearing in only one column is a no-op for dedup — `form_item_id` already
