@@ -18,7 +18,13 @@ import { collectSourceFiles, rel, read } from './scan'
 //
 // Both are pure source-text patterns, so neither gets to recur.
 
-const ORG_SCOPED_BUCKETS = ['work-order-photos', 'turnover-photos']
+// `inspection-photos` joins the list with the migration that creates it
+// (20260822194607), NOT with its first writer. Its storage RLS reads the first
+// path segment as the org id exactly like the other two, so the day something
+// writes there the contract is already enforced — rather than the bucket
+// silently denying every upload until someone notices, which is what happened
+// to work-order-photos in 20260730103000.
+const ORG_SCOPED_BUCKETS = ['work-order-photos', 'turnover-photos', 'inspection-photos']
 
 const SOURCE_DIRS = ['app', 'lib', 'components']
 
