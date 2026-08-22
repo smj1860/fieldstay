@@ -203,7 +203,10 @@ export async function cleanupStaleDashboardDbs(userId: string, orgId: string): P
     const all   = await indexedDB.databases()
     const stale = all.filter((info) => !!info.name && isStaleDashboardDbName(info.name, userId, orgId))
 
-    await Promise.allSettled(stale.map((info) => deleteDbByName(info.name!)))
+    await reportRejections(
+      await Promise.allSettled(stale.map((info) => deleteDbByName(info.name!))),
+      'stale cache cleanup',
+    )
   } catch (err) {
     console.warn('[dashboard-dexie] stale cache cleanup failed (non-fatal):', err)
   }
@@ -230,17 +233,42 @@ export async function purgeDashboardDbsForUser(userId: string): Promise<void> {
       // in isStaleDashboardDbName — opposite questions, opposite tests.
       info.name.slice(DASHBOARD_DB_PREFIX.length).startsWith(`${userId}-`))
 
-    await Promise.allSettled(mine.map((info) => deleteDbByName(info.name!)))
+    await reportRejections(
+      await Promise.allSettled(mine.map((info) => deleteDbByName(info.name!))),
+      'sign-out purge',
+    )
   } catch (err) {
     console.warn('[dashboard-dexie] sign-out purge failed (non-fatal):', err)
   }
+}
+
+/**
+ * `allSettled` is right here — one database another tab holds open must not
+ * abort the rest of the sweep — but on its own it DISCARDS every rejection
+ * reason, which made a failed delete completely silent. That matters more than
+ * usual: this sweep is a disclosure control, so "it didn't work and nobody
+ * knows" is the failure mode it exists to prevent.
+ *
+ * Still non-fatal. Visible, not fatal.
+ */
+function reportRejections(results: PromiseSettledResult<void>[], what: string): void {
+  const failures = results.filter((r): r is PromiseRejectedResult => r.status === 'rejected')
+  if (failures.length === 0) return
+
+  console.warn(
+    `[dashboard-dexie] ${what}: ${failures.length} database(s) could not be deleted — ` +
+    failures.map((f) => (f.reason instanceof Error ? f.reason.message : String(f.reason))).join('; '),
+  )
 }
 
 function deleteDbByName(name: string): Promise<void> {
   return new Promise<void>((resolve, reject) => {
     const req = indexedDB.deleteDatabase(name)
     req.onsuccess = () => resolve()
-    req.onerror   = () => reject(req.error)
+    // `req.error` is DOMException | NULL. Rejecting with it directly can hand
+    // the caller `null`, which every `err instanceof Error` branch then reports
+    // as the string "null" — a delete failure with no reason attached.
+    req.onerror   = () => reject(req.error ?? new Error(`deleteDatabase("${name}") failed with no reason`))
     req.onblocked = () => {
       // Another tab holds it open. Skipping is right: blocking here would hang
       // the sign-out or the org switch behind a tab the user may never return

@@ -74,23 +74,22 @@ export function SyncFailurePanel({
   if (entries.length === 0 && stalledCount === 0) return null
 
   const stalledNotice = stalledCount > 0 && (
-    <div
-      className="mx-4 mt-3 rounded-xl p-4"
+    <output
+      className="block mx-4 mt-3 rounded-xl p-4"
       style={{ background: 'var(--accent-amber-dim)', border: '1px solid var(--accent-amber-dim)' }}
-      role="status"
     >
-      <div className="flex items-start gap-3">
+      <span className="flex items-start gap-3">
         <AlertTriangle className="w-5 h-5 shrink-0 mt-0.5" style={{ color: 'var(--accent-amber)' }} />
-        <div className="flex-1 min-w-0">
-          <p className="text-sm font-bold" style={{ color: 'var(--accent-amber)' }}>
+        <span className="flex-1 min-w-0">
+          <span className="block text-sm font-bold" style={{ color: 'var(--accent-amber)' }}>
             {stalledCount} change{stalledCount !== 1 ? 's' : ''} still trying to sync
-          </p>
-          <p className="text-xs mt-0.5" style={{ color: 'var(--text-secondary)' }}>
+          </span>
+          <span className="block text-xs mt-0.5" style={{ color: 'var(--text-secondary)' }}>
             {stalledHint}
-          </p>
-        </div>
-      </div>
-    </div>
+          </span>
+        </span>
+      </span>
+    </output>
   )
 
   // No discard affordance on the stalled path, deliberately — see the header.
@@ -111,17 +110,20 @@ export function SyncFailurePanel({
       <div
         className="mx-4 mt-3 rounded-xl p-4"
         style={{ background: 'var(--accent-red-dim)', border: '1px solid var(--accent-red-dim)' }}
-        role="status"
       >
         <div className="flex items-start gap-3">
           <AlertTriangle className="w-5 h-5 shrink-0 mt-0.5" style={{ color: 'var(--accent-red)' }} />
           <div className="flex-1 min-w-0">
-            <p className="text-sm font-bold" style={{ color: 'var(--accent-red)' }}>
-              {entries.length} item{entries.length !== 1 ? 's' : ''} didn&rsquo;t sync
-            </p>
-            <p className="text-xs mt-0.5" style={{ color: 'var(--text-secondary)' }}>
-              {failedHint}
-            </p>
+            {/* The live region is the MESSAGE, not the panel: the list and the
+                buttons below sit outside it deliberately. */}
+            <output className="block">
+              <span className="block text-sm font-bold" style={{ color: 'var(--accent-red)' }}>
+                {entries.length} item{entries.length !== 1 ? 's' : ''} didn&rsquo;t sync
+              </span>
+              <span className="block text-xs mt-0.5" style={{ color: 'var(--text-secondary)' }}>
+                {failedHint}
+              </span>
+            </output>
 
             <ul className="mt-3 flex flex-col gap-2">
               {entries.map((entry) => (
