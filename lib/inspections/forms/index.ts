@@ -22,14 +22,16 @@ export const INSPECTION_FORMS: FormDefinition[] = [SAFETY_FORM, INDOOR_FORM, OUT
  *   safety   40 inspected items + a 2-item sign-off (declaration + signature)
  *   indoor   52, which already includes its three sign-off items — §12.2
  *            numbers them 50–52
- *   outdoor  45 numbered + 3 unnumbered sign-off + 9 well items, the last
- *            counted here even though that section renders only where the
- *            property actually has a well
+ *   outdoor  43 numbered + 3 unnumbered sign-off + 9 well items. 43 rather
+ *            than §12.3's 45 because the three HOA items became CHILDREN of a
+ *            single "subject to an HOA" question, which is one root; the well
+ *            items are counted here even though that section renders only
+ *            where the property actually has one
  */
 export const EXPECTED_ROOT_ITEM_COUNTS: Record<string, number> = {
   safety:  42,   // 40 inspected items + the 2-item sign-off
   indoor:  52,
-  outdoor: 57,   // 45 numbered + 3 sign-off + 9 well
+  outdoor: 55,   // 43 numbered + 3 sign-off + 9 well
 }
 
 /**

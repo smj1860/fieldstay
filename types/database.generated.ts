@@ -1854,7 +1854,6 @@ export type Database = {
           key: string
           name: string
           shown_when_asset: Database["public"]["Enums"]["asset_type"] | null
-          shown_when_property_field: string | null
           sort_order: number
         }
         Insert: {
@@ -1864,7 +1863,6 @@ export type Database = {
           key: string
           name: string
           shown_when_asset?: Database["public"]["Enums"]["asset_type"] | null
-          shown_when_property_field?: string | null
           sort_order?: number
         }
         Update: {
@@ -1874,7 +1872,6 @@ export type Database = {
           key?: string
           name?: string
           shown_when_asset?: Database["public"]["Enums"]["asset_type"] | null
-          shown_when_property_field?: string | null
           sort_order?: number
         }
         Relationships: [
@@ -4038,7 +4035,6 @@ export type Database = {
           events_allowed: boolean | null
           external_id: string | null
           external_source: string | null
-          hoa_name: string | null
           house_manual: string | null
           id: string
           internal_notes: string | null
@@ -4083,7 +4079,6 @@ export type Database = {
           events_allowed?: boolean | null
           external_id?: string | null
           external_source?: string | null
-          hoa_name?: string | null
           house_manual?: string | null
           id?: string
           internal_notes?: string | null
@@ -4128,7 +4123,6 @@ export type Database = {
           events_allowed?: boolean | null
           external_id?: string | null
           external_source?: string | null
-          hoa_name?: string | null
           house_manual?: string | null
           id?: string
           internal_notes?: string | null

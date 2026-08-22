@@ -12,12 +12,17 @@ import { join } from 'node:path'
 //   no column to land in. Caught only because writing the seed forced the
 //   question.
 //
-//   `shown_when_asset` / `shown_when_property_field` — the two SECTION GATES.
-//   Present on the repo type, absent from the schema, silently dropped by the
-//   seed. Production carried nine outdoor sections with no gating at all, so
-//   every municipal-water property would have been asked nine well questions
-//   and the "ledger-backed, not inspector-asserted" skip §12.3 argues for would
-//   have become precisely the inspector-asserted N/A it was written to prevent.
+//   `shown_when_asset` — the SECTION GATE. Present on the repo type, absent
+//   from the schema, silently dropped by the seed. Production carried nine
+//   outdoor sections with no gating at all, so every municipal-water property
+//   would have been asked nine well questions, and the "ledger-backed, not
+//   inspector-asserted" skip §12.3 argues for would have become precisely the
+//   inspector-asserted N/A it was written to prevent.
+//
+//   (A second gate, `shown_when_property_field`, shipped alongside it and was
+//   dropped hours later with `properties.hoa_name`: FieldStay never held HOA
+//   membership and will not collect it, so gating on that column would have
+//   deleted three real questions rather than conditioning them.)
 //
 // unit/inspections/form-definitions.test.ts asserts the DEFINITIONS — counts,
 // keys, concern coherence — and never looks at the projection. That is its
@@ -90,19 +95,17 @@ describe('guardrail: every form-definition field is projected into the database'
     })
   }
 
-  it('the two section gates specifically are projected, with explicit nulls', () => {
-    // Named rather than left to the generic scan above: these are the fields
-    // that were silently dropped, and an UPSERT makes the null explicit-ness
+  it('the section gate specifically is projected, with an explicit null', () => {
+    // Named rather than left to the generic scan above: this is the field that
+    // was silently dropped, and an UPSERT makes the null explicit-ness
     // load-bearing. Omitting a key leaves the previous seed's value in place,
     // so a section that LOSES its gate would keep gating forever.
-    for (const gate of ['shown_when_asset', 'shown_when_property_field']) {
-      expect(SEED_SRC, `${gate} is not projected`).toContain(`s.${gate}`)
-      expect(
-        new RegExp(`${gate}:\\s*s\\.${gate}\\s*\\?\\?\\s*null`).test(SEED_SRC),
-        `${gate} must be written as an explicit null when absent — on an upsert, ` +
-        'omitting it keeps whatever the previous seed wrote',
-      ).toBe(true)
-    }
+    expect(SEED_SRC, 'shown_when_asset is not projected').toContain('s.shown_when_asset')
+    expect(
+      /shown_when_asset:\s*s\.shown_when_asset\s*\?\?\s*null/.test(SEED_SRC),
+      'shown_when_asset must be written as an explicit null when absent — on an ' +
+      'upsert, omitting it keeps whatever the previous seed wrote',
+    ).toBe(true)
   })
 
   it('STRUCTURAL entries still exist as fields, and each says how it reaches the DB', () => {

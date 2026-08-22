@@ -362,20 +362,45 @@ describe('inspection form conditional sections', () => {
   it('conditional sections declare exactly one gate', () => {
     for (const form of INSPECTION_FORMS) {
       for (const section of form.sections) {
-        const gates = [section.shown_when_asset, section.shown_when_property_field].filter(Boolean)
-        expect(gates.length, `${form.key}.${section.key} declares two gates`).toBeLessThanOrEqual(1)
+        // One gate mechanism remains — the asset ledger. The property-field
+        // gate was dropped with `properties.hoa_name` (20260822230000).
+        if (!section.shown_when_asset) continue
+        expect(typeof section.shown_when_asset,
+          `${form.key}.${section.key} gate must name an asset type`).toBe('string')
       }
     }
   })
 
-  it('the well section is ledger-gated and the HOA section is field-gated', () => {
-    // Named explicitly because the DIFFERENCE is the point: a ledger-backed
-    // skip cannot be asserted by whoever benefits from skipping it.
+  it('the well section is ledger-gated, and the HOA section is not gated at all', () => {
+    // The contrast is the point. A ledger-backed skip cannot be asserted by
+    // whoever benefits from skipping it — which is why the well section is
+    // gated on an actual asset row rather than on a question.
+    //
+    // The HOA section deliberately has NO gate. It used to be gated on
+    // `properties.hoa_name`, but FieldStay does not hold HOA membership and
+    // will not be collecting it, so that gate would have made three real
+    // questions permanently unreachable. A gate on a column nothing populates
+    // is not a conservative default; it is a silent deletion. The fact is now
+    // asked in-form, of the one party who actually has it.
     const outdoor = FORMS_BY_KEY.outdoor!
     const well = outdoor.sections.find((s) => s.key === 'well')
     const hoa  = outdoor.sections.find((s) => s.key === 'hoa')
 
     expect(well?.shown_when_asset).toBe('well_pump')
-    expect(hoa?.shown_when_property_field).toBe('hoa_name')
+
+    expect(hoa?.shown_when_asset).toBeUndefined()
+
+    // …and the three real items hang off the one question that establishes it,
+    // rather than being asked of every property in the portfolio.
+    const applies = hoa?.items.find((i) => i.key === 'outdoor.hoa.applies')
+    expect(applies, 'the HOA section needs its gating question').toBeDefined()
+    expect(applies?.children?.map((c) => c.key)).toEqual([
+      'outdoor.hoa.documents',
+      'outdoor.hoa.compliance',
+      'outdoor.hoa.dues',
+    ])
+    for (const child of applies?.children ?? []) {
+      expect(child.show_when, `${child.key} must be conditional on the HOA answer`).toBe('pass')
+    }
   })
 })

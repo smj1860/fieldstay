@@ -139,11 +139,10 @@ async function seedForm(supabase: SupabaseClient, form: FormDefinition): Promise
         key:        s.key,
         name:       s.name,
         sort_order: i,
-        // Explicit nulls, not omission: this is an UPSERT, so a section that
+        // Explicit null, not omission: this is an UPSERT, so a section that
         // loses its gate must actively clear the column rather than keep the
         // one written by the previous seed.
         shown_when_asset:          s.shown_when_asset          ?? null,
-        shown_when_property_field: s.shown_when_property_field ?? null,
       })),
       { onConflict: 'form_id,key' },
     )

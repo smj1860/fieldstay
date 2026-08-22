@@ -7,10 +7,16 @@
 // cosmetic — they change how many pages there are and how many rows each holds:
 //
 //   1. CONDITIONAL SECTIONS. Outdoor's well section renders only where the
-//      property has an active `well_pump` asset, and its HOA section only where
-//      `properties.hoa_name` is set. A municipal-water property never sees the
-//      well questions, and the skip is ledger-backed rather than something the
-//      inspector asserts (§12.3).
+//      property has an active `well_pump` asset. A municipal-water property
+//      never sees the nine well questions, and the skip is ledger-backed rather
+//      than something the inspector asserts (§12.3) — which matters because the
+//      party who benefits from skipping them is the one who would be asserting.
+//
+//      The HOA section used to be gated the same way, on `properties.hoa_name`.
+//      It is not: FieldStay does not hold HOA membership and will not collect
+//      it, so the column was dropped (20260822230000) and the fact is asked
+//      in-form instead. A gate on a column nothing populates is a silent
+//      deletion, not a conservative default.
 //   2. PER-ASSET ITEMS. `repeat_per_asset` renders one row per ACTIVE
 //      property_assets row, so three HVAC units are asked three times and a
 //      property with no generator is never asked about a generator (§5).
@@ -69,8 +75,6 @@ export interface ResolveInput {
   items:    InspectionFormItem[]
   /** ACTIVE assets only is enforced here, not assumed of the caller. */
   assets:   PropertyAsset[]
-  /** `properties.hoa_name` — the gate for Outdoor's HOA section. */
-  hoaName:  string | null
   /**
    * Counts answered so far, keyed by the COUNT item's id. A missing or zero
    * entry yields no repeat rows, which is the correct state before the
@@ -88,11 +92,8 @@ export interface ResolveInput {
 function sectionIsShown(
   section: InspectionFormSection,
   activeTypes: ReadonlySet<string>,
-  hoaName: string | null,
 ): boolean {
-  if (section.shown_when_asset && !activeTypes.has(section.shown_when_asset)) return false
-  if (section.shown_when_property_field === 'hoa_name' && !hoaName) return false
-  return true
+  return !section.shown_when_asset || activeTypes.has(section.shown_when_asset)
 }
 
 /**
@@ -164,7 +165,7 @@ export function resolveFormPages(input: ResolveInput): ResolvedPage[] {
   const pages: ResolvedPage[] = []
 
   for (const section of [...input.sections].sort(bySortOrder)) {
-    if (!sectionIsShown(section, activeTypes, input.hoaName)) continue
+    if (!sectionIsShown(section, activeTypes)) continue
 
     const roots = (index.bySection.get(section.id) ?? []).slice().sort(bySortOrder)
     const items = roots.flatMap((root) => resolveRoot(root, { index, sweepable, counts }))

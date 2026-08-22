@@ -30,7 +30,7 @@ const uid = () => `id-${++seq}`
 function section(over: Partial<InspectionFormSection> = {}): InspectionFormSection {
   return {
     id: uid(), form_id: 'form-1', key: 'sec', name: 'Section', sort_order: 0,
-    shown_when_asset: null, shown_when_property_field: null,
+    shown_when_asset: null,
     created_at: '2026-01-01T00:00:00Z',
     ...over,
   }
@@ -74,7 +74,6 @@ describe('resolveFormPages — conditional sections', () => {
       sections: [normal, well],
       items: [item({ section_id: normal.id }), item({ section_id: well.id })],
       assets: [asset({ asset_type: 'hvac' })],
-      hoaName: null,
     })
 
     expect(pages.map((p) => p.sectionKey)).toEqual(['grounds'])
@@ -86,7 +85,6 @@ describe('resolveFormPages — conditional sections', () => {
       sections: [well],
       items: [item({ section_id: well.id })],
       assets: [asset({ asset_type: 'well_pump' })],
-      hoaName: null,
     })
     expect(pages.map((p) => p.sectionKey)).toEqual(['well'])
   })
@@ -99,24 +97,26 @@ describe('resolveFormPages — conditional sections', () => {
       sections: [well],
       items: [item({ section_id: well.id })],
       assets: [asset({ asset_type: 'well_pump', is_active: false })],
-      hoaName: null,
     })
     expect(pages).toEqual([])
   })
 
-  it('the HOA section follows properties.hoa_name', () => {
-    const hoa = section({ key: 'hoa', shown_when_property_field: 'hoa_name' })
-    const base = { sections: [hoa], items: [item({ section_id: hoa.id })], assets: [] }
-
-    expect(resolveFormPages({ ...base, hoaName: null }).length).toBe(0)
-    expect(resolveFormPages({ ...base, hoaName: '' }).length).toBe(0)
-    expect(resolveFormPages({ ...base, hoaName: 'Lakeside HOA' }).length).toBe(1)
+  it('there is no property-field gate left to honour', () => {
+    // The HOA section used to be gated on `properties.hoa_name`. That column is
+    // gone (20260822230000): FieldStay never held the fact and will not collect
+    // it, and a gate on a column nothing populates does not fail safe — it
+    // silently deletes three real questions while reading as a condition.
+    const hoa = section({ key: 'hoa' })
+    const pages = resolveFormPages({
+      sections: [hoa], items: [item({ section_id: hoa.id })], assets: [],
+    })
+    expect(pages.map((p) => p.sectionKey)).toEqual(['hoa'])
   })
 
   it('an ungated section always renders', () => {
     const s = section({ key: 'fire' })
     const pages = resolveFormPages({
-      sections: [s], items: [item({ section_id: s.id })], assets: [], hoaName: null,
+      sections: [s], items: [item({ section_id: s.id })], assets: [],
     })
     expect(pages.length).toBe(1)
   })
@@ -128,7 +128,7 @@ describe('resolveFormPages — per-asset items', () => {
     const generic = item({ section_id: s.id, repeat_per_asset: true, key: 'assets.condition' })
 
     const three = resolveFormPages({
-      sections: [s], items: [generic], hoaName: null,
+      sections: [s], items: [generic],
       assets: [
         asset({ asset_type: 'generator' }),
         asset({ asset_type: 'solar_system' }),
@@ -142,7 +142,7 @@ describe('resolveFormPages — per-asset items', () => {
     // No assets → the section resolves to nothing and is not a page at all,
     // rather than an empty page with a Next button and no explanation.
     expect(resolveFormPages({
-      sections: [s], items: [generic], assets: [], hoaName: null,
+      sections: [s], items: [generic], assets: [],
     })).toEqual([])
   })
 
@@ -159,7 +159,7 @@ describe('resolveFormPages — per-asset items', () => {
     ]
 
     const pages = resolveFormPages({
-      sections: [named, sweep], items, hoaName: null,
+      sections: [named, sweep], items,
       assets: [asset({ asset_type: 'hvac' }), asset({ asset_type: 'generator' })],
     })
 
@@ -173,7 +173,6 @@ describe('resolveFormPages — per-asset items', () => {
       sections: [s],
       items: [item({ section_id: s.id, repeat_per_asset: true })],
       assets: [asset({ asset_type: 'generator', is_active: false }), asset({ asset_type: 'roof' })],
-      hoaName: null,
     })
     expect(pages[0]!.items.map((i) => i.asset?.asset_type)).toEqual(['roof'])
   })
@@ -186,7 +185,7 @@ describe('resolveFormPages — repeat groups', () => {
     const loc  = item({ section_id: s.id, key: 'fire.loc',   repeat_source_item_id: source.id, sort_order: 0 })
     const chg  = item({ section_id: s.id, key: 'fire.charged', repeat_source_item_id: source.id, sort_order: 1 })
     return resolveFormPages({
-      sections: [s], items: [source, loc, chg], assets: [], hoaName: null,
+      sections: [s], items: [source, loc, chg], assets: [],
       ...(count !== undefined && { countsByItemId: { [source.id]: count } }),
     })
   }
@@ -224,7 +223,7 @@ describe('resolveFormPages — structure', () => {
         item({ section_id: b.id, key: 'b1', sort_order: 1 }),
         item({ section_id: a.id, key: 'a1', sort_order: 1 }),
       ],
-      assets: [], hoaName: null,
+      assets: [],
     })
     expect(pages.map((p) => p.sectionKey)).toEqual(['first', 'second'])
     expect(pages[0]!.items.map((i) => i.formItem.key)).toEqual(['b1', 'b2'])
@@ -238,7 +237,7 @@ describe('resolveFormPages — structure', () => {
     const child  = item({ section_id: s.id, key: 'fire.smoke_where', parent_item_id: parent.id, show_when: 'fail' })
 
     const page = resolveFormPages({
-      sections: [s], items: [parent, child], assets: [], hoaName: null,
+      sections: [s], items: [parent, child], assets: [],
     })[0]!
 
     expect(page.items).toHaveLength(1)
@@ -252,7 +251,7 @@ describe('resolveFormPages — structure', () => {
     const s = section({ key: 'assets' })
     const generic = item({ section_id: s.id, repeat_per_asset: true })
     const page = resolveFormPages({
-      sections: [s], items: [generic], hoaName: null,
+      sections: [s], items: [generic],
       assets: [asset({ asset_type: 'generator' }), asset({ asset_type: 'roof' })],
     })[0]!
 
@@ -266,7 +265,7 @@ describe('findOutstanding — what the Review page lists', () => {
   const required = item({ section_id: s.id, key: 'fire.a', prompt: 'Detectors present' })
   const photoOnFail = item({ section_id: s.id, key: 'fire.b', prompt: 'Exits clear', photo_required: true, sort_order: 1 })
   const pages = resolveFormPages({
-    sections: [s], items: [required, photoOnFail], assets: [], hoaName: null,
+    sections: [s], items: [required, photoOnFail], assets: [],
   })
 
   const run = (answers: Record<string, AnswerState>) => findOutstanding(pages, answers)
@@ -324,7 +323,7 @@ describe('findOutstanding — what the Review page lists', () => {
     const sec = section({ key: 'x' })
     const parent = item({ section_id: sec.id, key: 'x.p' })
     const child  = item({ section_id: sec.id, key: 'x.c', parent_item_id: parent.id, show_when: 'na' })
-    const p = resolveFormPages({ sections: [sec], items: [parent, child], assets: [], hoaName: null })
+    const p = resolveFormPages({ sections: [sec], items: [parent, child], assets: [] })
 
     const out = findOutstanding(p, { [answerKey(p[0]!.items[0]!)]: { result: 'pass' } })
     expect(out.map((o) => o.itemKey)).toEqual([])

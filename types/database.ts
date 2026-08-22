@@ -217,7 +217,6 @@ export interface Property {
   external_source:         string | null
   // Presence gates Outdoor's HOA section and prints on the report. A name
   // rather than a boolean because it carries information either way.
-  hoa_name:                string | null
   created_at:              string
   updated_at:              string
 }
@@ -2117,13 +2116,6 @@ export interface InspectionFormSection {
    * not something the inspector asserts (§12.3).
    */
   shown_when_asset:          AssetType | null
-  /**
-   * Render only where the named `properties` column is non-null — currently
-   * `hoa_name` alone, CHECK-constrained because an unrecognised gate would fail
-   * OPEN: a renderer cannot evaluate a condition it does not know, so it would
-   * show the section to everyone.
-   */
-  shown_when_property_field: 'hoa_name' | null
 }
 
 export interface InspectionFormItem {
