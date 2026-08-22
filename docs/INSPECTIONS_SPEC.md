@@ -152,8 +152,9 @@ inspection_form_items           ONE question
 
 inspections                     ONE performance of a form, per property
   id, org_id, property_id,
-  form_id, form_snapshot jsonb,           -- snapshot: the form as it was THEN
+  form_id, form_version, form_snapshot jsonb,  -- the form as it was THEN
   assigned_to_user_id,
+  inspector_name text,                    -- who PHYSICALLY did it
   scheduled_for date, started_at, completed_at, completed_by_user_id,
   source_schedule_id (nullable)           -- which schedule generated it
 
@@ -164,6 +165,8 @@ inspection_items                ONE answer
   actions text[]          -- 'repair' | 'service' | 'replace'; chosen on fail
   needs_cleaning boolean  -- independent of actions; feeds the sign-off roll-up
   note, photo_path,       -- note is REQUIRED when actions is non-empty
+  photo_unavailable_reason (nullable) -- free text; the ONLY way past a
+                          -- photo_required item without a photo. See §11 q2.
   asset_id (nullable),
   answered_at
 ```
@@ -603,6 +606,69 @@ as `0 | 1` not boolean, `'x' in payload` presence checks, cursor invalidation on
 discard, bounded caches — were each paid for with a production bug. Writing a
 second outbox means paying for them twice.
 
+### 8a. Photos — what exists, what moves, what is new
+
+Photo-required-on-fail across a 52-item form, held on a tablet until reconnect,
+makes the photo path load-bearing rather than incidental. Three parts.
+
+**Compression already exists and is already correct.**
+`compressPhotoForQueue` (`lib/dexie/photo-queue.ts`) resizes to a 1600px longest
+edge and re-encodes JPEG at q0.75, falling back to the original blob if
+`createImageBitmap` or the 2D context is unavailable. That fallback is the right
+call for crew — a codec quirk must not block a checklist — and it is worth
+noting that it is a WEAKER guarantee here: an inspection holding twenty
+uncompressed 5MB originals in IndexedDB is the case §8's iOS eviction risk is
+about. Same function, higher stakes.
+
+**It has to move.** §4 says inspections stay out of `lib/dexie/*` so the crew
+guardrails keep meaning what they say, and importing a helper across that line
+would erode exactly the boundary that rule protects. But the function is a pure
+browser utility — Blob in, Blob out, nothing about Dexie, outboxes or cursors.
+It is in that directory by accident of who needed it first.
+
+So move it to `lib/images/compress.ts` and have both surfaces import it. That is
+§4's own principle applied to itself: **share the rule, not the table.** Two
+copies of a resize threshold is precisely the drift this codebase keeps paying
+for — and a second copy would be invisible, because both would work.
+
+**The bucket is new.** Six exist today; none fits:
+
+| Bucket | Public | Limit | Why not |
+|---|---|---|---|
+| `crew-uploads` | **yes** | 10MB | public, and crew-scoped |
+| `turnover-photos` | no | 10MB | bound to a turnover |
+| `work-order-photos` | no | 10MB | bound to a work order |
+| `compliance-documents` | no | 10MB | vendor compliance |
+| `guidebook-*` | yes | 5MB | guest-facing |
+
+Add `inspection-photos`: **private**, 10MB, `image/jpeg png webp heic`, mirroring
+`work-order-photos`. Paths go through `orgScopedStoragePath()` like every other
+org-scoped bucket — the `org-scoped-storage-paths` guardrail already enforces
+that and will cover the new bucket for free once it is listed.
+
+HEIC is in the allowed list because iOS sends it, but compression re-encodes to
+JPEG before upload, so a HEIC only reaches the bucket on the fallback path.
+
+**`crew-uploads` was public; closed 2026-08-22 while writing this section.**
+Traced rather than deferred, and the honest finding is narrower than it first
+looked: the bucket held ZERO objects, had NO storage.objects policies, and
+nothing in `app/` or `lib/` uploaded to it — a fact already recorded in
+`20260731100000_db_invariant_report_storage_bucket_ids.sql`. Public with nothing
+in it discloses nothing, and with no policies the client could not write to it
+either. There was no leak.
+
+It was a trap with an inviting name. Crew photos actually go to
+`turnover-photos` and `work-order-photos`, both private and both covered by the
+semgrep chokepoint banning `getPublicUrl()`; `crew-uploads` sat outside that
+rule *because* it was public, so nothing was watching it. It is now private
+(`20260822054254_crew_uploads_private.sql`), leaving only the two guest-facing
+guidebook buckets public, which is correct.
+
+Worth stating for the inspections build specifically: **no photo has ever been
+uploaded in production** — all six buckets are empty. So the pipeline described
+above has never run under real load, and the compression fallback path in
+particular is untested against a real device camera.
+
 ### Offline WRITES are CREATE ONLY
 
 The line that keeps this affordable, and it is not a limitation of effort:
@@ -913,25 +979,31 @@ reader of the spec can settle.
    now expressible rather than arbitrated: Replace + Service on one item is the
    purchase and the install.
 
-2. **The photo-on-fail escape hatch.** Required-on-fail plus a dead camera, a
-   full tablet, or a photo that will not save offline equals an inspector who
-   cannot submit at all. An unenforceable rule gets worked around; an explicit
-   "photo unavailable" with a mandatory typed reason gets *recorded*, and reads
-   honestly on the report. Worth having, or too easy a door?
+2. ~~**The photo-on-fail escape hatch.**~~ **CLOSED 2026-08-22 — have it.**
+   `inspection_items.photo_unavailable_reason`, free text with no preset
+   options so it cannot be tapped through, and printed on the report wherever
+   an image would otherwise sit. An insurer seeing three of those in a year
+   draws the right conclusion; an insurer seeing three photos of a floor does
+   not, and a floor photo is exactly what an unenforceable rule produces.
+   See §8a for the pipeline this depends on.
 
-3. **Who counts as a "designated team member".** The decision is PM-or-designate
-   and explicitly not crew, but `member_role` has no such role — it is
-   `admin | manager | crew | viewer | owner`. Is a `manager` always eligible, or
-   is eligibility per-person (a flag on `organization_members`)? This decides
-   whether `assigned_to_user_id` needs a companion permission or just a filter.
+3. ~~**Who counts as a "designated team member".**~~ **CLOSED 2026-08-22, and
+   simpler than the question assumed.** "Team members" is the FieldStay UI term
+   for the people a PM invites, who hold near-identical access to the PM. Any
+   of them may be assigned an inspection. No `can_inspect` flag, no companion
+   permission — `assigned_to_user_id` is a FILTER over the org's non-crew,
+   non-viewer members and nothing more.
 
-4. **Inspector title.** The form header asks for "Inspector Name & Title".
-   Everything else in that header — property, address, date, time, management
-   company — we already know and should prefill and lock, because a field the
-   inspector types is a field the inspector can get wrong, and locked
-   provenance is worth more as evidence. Title is the exception: nothing in
-   `profiles` or `organization_members` stores one. Add it to the profile, or
-   ask once per inspection?
+   The part that removes the remaining complexity: **whoever the PM physically
+   hands the tablet to is a designated team member, FieldStay account or not.**
+   That is the PM's call and not something the product adjudicates. It does
+   mean the person inspecting is not necessarily the signed-in user, which
+   §5 resolves by recording both.
+
+4. ~~**Inspector title.**~~ **CLOSED 2026-08-22 — dropped entirely.** No title
+   on the form, no column, nothing added to `profiles`. Inspector NAME only.
+   The whole question existed to serve a header field that turned out not to be
+   wanted, which is the cheapest possible resolution.
 
 5. ~~**What "Indoor" and "Outdoor" must not both contain.**~~ **CLOSED
    2026-08-22, and the premise was wrong.** Overlap is DELIBERATE: Safety runs
@@ -943,14 +1015,18 @@ reader of the spec can settle.
    duplicated across forms must carry a shared `concern_key`, checked by the
    seed test in §10.
 
-6. **Versioning a fixed form.** `inspection_forms.version` is in the model
-   because the forms will change — an item added, a prompt reworded. Two
-   questions that only matter once the first change lands: does an inspection
-   already in draft when a new version seeds keep the old form (it must — the
-   inspector answered those questions), and does the owner-portal history show
-   which version each past inspection used? The `form_snapshot` on the
-   inspection already makes both answerable; what is undecided is whether the
-   report *says so*, and for an insurance artifact I would argue it should.
+6. ~~**Versioning a fixed form.**~~ **CLOSED 2026-08-22, both halves.**
+
+   An inspection in progress when a new version seeds **keeps the version it
+   started on**. `form_snapshot` already guarantees the questions; this makes it
+   a stated rule rather than an emergent property, so nobody later "fixes" a
+   draft to match current.
+
+   The version **is shown** — in the owner portal history and on every stored
+   inspection, not only the current one. For an insurance artifact this is the
+   difference between a document and a record: if v2 asked 20 questions and v3
+   asks 24, a three-year history that does not say which was used reads as
+   inconsistent inspecting rather than an improving form.
 
 ---
 
