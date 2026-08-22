@@ -52,8 +52,6 @@ export const CONSECUTIVE_FAILURE_CIRCUIT_BREAK = 3
 // Retry backoff: 5 s base doubling per retry, capped at 5 min, each delay
 // scaled by a uniform 0.5–1.5× jitter factor so a fleet of crew devices
 // coming back from the same outage doesn't retry in lockstep.
-const BASE_RETRY_DELAY_MS = 5_000
-const MAX_RETRY_DELAY_MS  = 300_000
 
 /**
  * Computes the epoch-ms timestamp before which a failed mutation must not be
@@ -61,12 +59,12 @@ const MAX_RETRY_DELAY_MS  = 300_000
  * being handled — the `- 1` keeps the first retry at the 5 s base (growth:
  * 5 s → 10 s → 20 s … capped at 5 min, each scaled 0.5–1.5×).
  */
-export function computeNextAttemptAt(retryCount: number, now: number): number {
-  const baseDelay = Math.min(2 ** (retryCount - 1) * BASE_RETRY_DELAY_MS, MAX_RETRY_DELAY_MS)
-  // eslint-disable-next-line no-restricted-properties -- retry backoff jitter to spread outbox retry storms after an outage, not id/token generation
-  const jitter = Math.random() // NOSONAR -- timing jitter only, not security-sensitive (see eslint-disable justification above)
-  return now + baseDelay * (0.5 + jitter)
-}
+// Moved to ./outbox-primitives so the shared OutboxEngine no longer has to
+// import this module — see the header there. Re-exported under the same name
+// because photo-sync.ts and unit/dexie/sync-outbox-backoff.test.ts import it
+// from here, and a rename would be churn with no reader benefit.
+export { computeNextAttemptAt } from './outbox-primitives'
+import { computeNextAttemptAt } from './outbox-primitives'
 
 // Drains the local `mutations` outbox to Supabase. This is the only path by
 // which a crew-side write reaches the server — see enqueueMutation().

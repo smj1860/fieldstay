@@ -160,7 +160,7 @@ export async function retryFailedVendorWoSubmission(token: string): Promise<void
   const failed = await db.mutations.where('token').equals(token).filter((m) => !!m.failed).toArray()
 
   for (const mutation of failed) {
-    await db.mutations.update(mutation.id!, { failed: false, retryCount: 0, terminalReason: undefined })
+    await db.mutations.update(mutation.id!, { failed: 0, retryCount: 0, terminalReason: undefined })
   }
 
   // Same reasoning as retryVendorWoSubmission: an explicit "Retry Now" tap is

@@ -78,7 +78,7 @@ describe('vendor completion outbox — terminal vs. transport failures', () => {
     await retryVendorWoSubmission(token)
 
     const after = await getVendorWoSubmissionState(token)
-    expect(after?.failed).toBe(true)
+    expect(after?.failed).toBe(1)   // 0/1, never boolean — IndexedDB cannot index a boolean
     expect(after?.terminalReason).toBe('closed')   // drives "Not Submitted" + "already closed"
     expect(fetchMock).toHaveBeenCalledTimes(2)     // the offline attempt, then exactly one more
   })
@@ -101,7 +101,7 @@ describe('vendor completion outbox — terminal vs. transport failures', () => {
     await retryVendorWoSubmission(token)
 
     const after = await getVendorWoSubmissionState(token)
-    expect(after?.failed).toBe(true)
+    expect(after?.failed).toBe(1)   // 0/1, never boolean — IndexedDB cannot index a boolean
     expect(after?.terminalReason).toBe('expired')
   })
 

@@ -2,13 +2,16 @@ import type { Table, UpdateSpec } from 'dexie'
 
 import { reportError } from '@/lib/observability/report-error'
 import { isOnline, withTabLock, classifyUploadFailure } from './net'
-import { computeNextAttemptAt } from './syncService'
+import { computeNextAttemptAt, type DeadLetterFlag } from './outbox-primitives'
 
 export interface BaseMutationRow {
   id?:        number
   createdAt:  string
   retryCount: number
-  failed?:    boolean
+  // 0/1, never a boolean — IndexedDB cannot index a boolean, so a surface
+  // that indexes this field would get a silently empty index. See
+  // DeadLetterFlag. Truthiness checks (`!m.failed`) are unaffected.
+  failed?:    DeadLetterFlag
   // Same backoff/transport-failure accounting as MutationRow in
   // lib/dexie/schema.ts — see SyncEngine.handleFailure for the rationale.
   nextAttemptAt?:     number
@@ -152,7 +155,7 @@ export class OutboxEngine<TMutation extends BaseMutationRow> {
     if (this.config.isTerminal?.(err)) {
       console.error(`[OutboxEngine] mutation ${id} terminal failure:`, err)
       reportError(err, { site: 'lib.dexie.outboxEngine.OutboxEngine' })
-      await this.patch(id, { failed: true })
+      await this.patch(id, { failed: 1 })
       return false  // dead-lettered — it can never succeed, so don't block the rest
     }
 
@@ -171,7 +174,7 @@ export class OutboxEngine<TMutation extends BaseMutationRow> {
     console.error(`[OutboxEngine] mutation ${id} failed (attempt ${newRetryCount}, ${kind}):`, err)
 
     if (kind === 'terminal' || newRetryCount >= maxRetries) {
-      await this.patch(id, { retryCount: newRetryCount, failed: true })
+      await this.patch(id, { retryCount: newRetryCount, failed: 1 })
       return false
     }
 

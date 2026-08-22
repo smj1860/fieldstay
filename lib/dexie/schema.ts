@@ -149,20 +149,11 @@ export interface PendingPhotoUploadRow {
   last_error?:          string
 }
 
-/**
- * Dead-letter marker, stored as 0/1 rather than a boolean.
- *
- * IndexedDB has no boolean key type: a record whose indexed property holds
- * `true` is simply omitted from that index, so `failed` could never be
- * indexed while it was a boolean and every dead-letter query — including the
- * three `useLiveQuery`s FailedSyncBanner keeps live on every crew screen —
- * had to full-scan the outbox on every single write to it.
- *
- * 0/1 preserves every existing truthiness check (`!m.failed`, `!!m.failed`)
- * unchanged; only the literal `true`/`false` writes moved. Version 9's
- * upgrade normalizes rows written before this.
- */
-export type DeadLetterFlag = 0 | 1
+// Defined in ./outbox-primitives, which every outbox surface shares — the
+// IndexedDB no-boolean-key-type rule is not a crew fact. Re-exported here
+// because this module is the established import path for it.
+export type { DeadLetterFlag } from './outbox-primitives'
+import type { DeadLetterFlag } from './outbox-primitives'
 
 // Tracks incremental-sync watermarks (e.g. the last `turnover_assignments.created_at`
 // pulled from Supabase), so initialSync can fetch only what changed since last time
