@@ -542,11 +542,24 @@ const expr = (p) => `${p.qual ?? ''} ${p.with_check ?? ''}`
  * Tables that are GLOBAL by design — no tenant dimension, so a blanket-true
  * read policy is the intent rather than a leak. Shrink-only: never add a table
  * that has an org_id.
+ *
+ * That last sentence used to be prose, which is the weakest possible place for
+ * the one rule whose violation is silent: an entry here does not merely fail to
+ * catch a leak, it AUTHORIZES one, and it does so in a file whose whole purpose
+ * is to be trusted. It is now enforced below against the live schema.
  */
 const GLOBAL_READABLE_TABLES = new Set([
   'inventory_catalog',    // 115-item platform seed catalog
   'support_kb_chunks',    // support knowledge base, same for every tenant
-  'maintenance_catalog_items',
+  // The three inspection FORM-DEFINITION tables (2026-08-22). The forms are
+  // platform-owned and identical for every tenant — fixed Safety/Indoor/Outdoor
+  // definitions seeded by service role, versioned, with deliberately NO write
+  // policy of any kind, so an org can read a form and can never author one.
+  // The tenant dimension lives one level down, on `inspections` /
+  // `inspection_items`, both of which carry org_id and are scoped normally.
+  'inspection_forms',
+  'inspection_form_sections',
+  'inspection_form_items',
 ])
 
 // 11. A PERMISSIVE blanket-true policy reachable by a non-service role.
@@ -567,6 +580,60 @@ if (blanketTrue.length > 0) {
       'table regardless of what the other policies say. Scope it, or — if the ' +
       'table genuinely has no tenant dimension — add it to ' +
       'GLOBAL_READABLE_TABLES in scripts/check-db-invariants.mjs.'
+  )
+}
+
+// 11a. The allowlist itself, checked against the live schema in both directions.
+//
+//      An allowlist that grants an exemption is the one kind whose mistakes do
+//      not surface as a failure — it surfaces as SILENCE, in exactly the check
+//      that was supposed to speak. So it gets its own gate.
+//
+//      Direction 1 — a listed table that DOES have org_id. This is the comment
+//      above turned into a check. `has_org_id` comes from rls_policy_report(),
+//      i.e. the live column list, not from anything a reviewer had to notice.
+const orgScopedGlobals = [
+  ...new Set(
+    policies
+      .filter((p) => p.has_org_id === true && GLOBAL_READABLE_TABLES.has(p.table_name))
+      .map((p) => p.table_name),
+  ),
+]
+if (orgScopedGlobals.length > 0) {
+  failures.push(
+    `GLOBAL_READABLE_TABLES entries that DO carry org_id: ${orgScopedGlobals.join(', ')}\n` +
+      '  This allowlist exempts a table from the blanket-USING(true) gate on the ' +
+      'grounds that it has no tenant dimension. A table with org_id has one, so ' +
+      'the exemption is granting cross-tenant reads. Remove the entry and scope ' +
+      'the policy.'
+  )
+}
+
+//      Direction 2 — a listed table with no blanket-true policy left to exempt.
+//      Shrink-only, same ratchet as SERVICE_ROLE_ONLY_BUCKETS and
+//      ORG_ID_FK_EXCEPTIONS above. A dead entry is not untidiness: it is a
+//      standing pre-authorization for a policy nobody has written yet, and the
+//      day someone does write one this check stays quiet. maintenance_catalog_items
+//      was exactly that on both projects when this was added — its only
+//      blanket-true policy is service-role-only, which the gate already ignores.
+const tablesWithPolicies = new Set(policies.map((p) => p.table_name))
+const staleGlobalReadable = [...GLOBAL_READABLE_TABLES].filter(
+  (t) =>
+    tablesWithPolicies.has(t) &&
+    !policies.some(
+      (p) =>
+        p.table_name === t &&
+        p.permissive === true &&
+        !isServiceRoleOnly(p) &&
+        String(p.qual ?? '').trim() === 'true',
+    ),
+)
+if (staleGlobalReadable.length > 0) {
+  failures.push(
+    `Stale GLOBAL_READABLE_TABLES entries (no blanket-true policy left to exempt): ${staleGlobalReadable.join(', ')}\n` +
+      '  Remove them from scripts/check-db-invariants.mjs — the allowlist only ' +
+      'shrinks. Left in place, the entry silently pre-approves a blanket policy ' +
+      'that has not been written yet.'
   )
 }
 
