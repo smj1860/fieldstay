@@ -497,12 +497,25 @@ almost the whole crew surface):
   drop it without rewinding and the delta filter skips that row forever.
   `forceFullCrewResync()` is the whole-cache version, for a device that has
   already diverged.
-- **`failed` is `0 | 1`, never a boolean** (`DeadLetterFlag`). IndexedDB has no
-  boolean key type, so a boolean `failed` is silently absent from its index and
-  every dead-letter query degrades to a full scan — three of which are
-  `useLiveQuery`s live on every crew screen, over a table written on every
-  checklist tick. Truthiness checks (`!m.failed`) are unaffected; only literal
-  `true`/`false` writes.
+- **`failed` is `0 | 1`, never a boolean** (`DeadLetterFlag`, now in
+  `lib/dexie/outbox-primitives.ts`). IndexedDB has no boolean key type, so a
+  boolean `failed` is silently absent from its index and every dead-letter query
+  degrades to a full scan — three of which are `useLiveQuery`s live on every
+  crew screen, over a table written on every checklist tick. Truthiness checks
+  (`!m.failed`) are unaffected; only literal `true`/`false` writes. Enforced by
+  `unit/guardrails/dead-letter-flag-type.test.ts` — which exists because the
+  rule was stated here, paid for twice in crew schema upgrades 9 and 10, and
+  the SHARED `outboxEngine.ts` had drifted straight back to `failed?: boolean`.
+- **An outbox surface builds on `lib/dexie/outboxEngine.ts`; it does not fork
+  it.** The crew PWA, the vendor work-order portal and (per
+  `docs/INSPECTIONS_SPEC.md` §8) the dashboard all share that drain loop —
+  offline gate, cross-tab lock, strict in-order stop, backoff, transport
+  failures that cost no retry budget, dead-letter rather than delete. Anything
+  it needs goes in `lib/dexie/outbox-primitives.ts`, a LEAF module with no
+  imports; the engine may not import `syncService`/`schema`/`context`, which are
+  crew-surface modules. Both rules are in the same guardrail. The point is that
+  joining stays cheaper than forking: those behaviours were each paid for with a
+  production bug, and a second outbox means paying for them twice.
 
 **Crew Sync v2 coverage convention** (`docs/CREW_SYNC_V2_PHASES.md` section 5e):
 every Supabase-backed table the crew PWA caches in Dexie is covered by the
@@ -1372,6 +1385,16 @@ following them stops being a memory test. Five layers, checked in CI via
      whoever revives it inherits the old bug. `updateProperty` would have
      deleted a property's door code on a rename. Shrink-only baseline of the
      15 already dead when it was written; never add to it.
+   - `dead-letter-flag-type` — no outbox module declares or writes a boolean
+     `failed` (IndexedDB cannot index one, so the flag is silently absent from
+     its index), the shared `outbox-primitives.ts` stays a leaf module with no
+     imports, and `outboxEngine.ts` never imports a crew-surface module. The
+     second and third clauses are what keep joining the shared engine cheaper
+     than forking it, which `INSPECTIONS_SPEC.md` §8 identifies as the thing
+     that decides whether a new surface inherits the hard-won rules or repays
+     for them. Written when the shared engine was found to have drifted back to
+     `failed?: boolean` — not yet a live bug, since the only surface on it does
+     not index the column, but a trap laid directly in the next one's path.
    - `node-types-runtime-parity` — `@types/node`'s major equals
      `engines.node`'s and every `node-version:` in `.github/workflows/`.
      Types ahead of the runtime describe APIs that do not exist in
