@@ -277,20 +277,38 @@ export function findOutstanding(
 ): OutstandingItem[] {
   const out: OutstandingItem[] = []
 
+  const record = (page: ResolvedPage, pageIndex: number, node: ResolvedItem) => {
+    const reason = outstandingReason(node, answers[answerKey(node)])
+    if (!reason) return
+    out.push({
+      pageIndex,
+      sectionName: page.name,
+      itemKey:     node.formItem.key,
+      prompt:      node.formItem.prompt,
+      reason,
+      ...(node.repeatIndex !== undefined && { repeatIndex: node.repeatIndex }),
+      ...(node.asset      !== undefined && { assetId: node.asset.id }),
+    })
+  }
+
   pages.forEach((page, pageIndex) => {
     for (const item of page.items) {
-      for (const node of [item, ...item.children]) {
-        const reason = outstandingReason(node, answers[answerKey(node)])
-        if (!reason) continue
-        out.push({
-          pageIndex,
-          sectionName: page.name,
-          itemKey:     node.formItem.key,
-          prompt:      node.formItem.prompt,
-          reason,
-          ...(node.repeatIndex !== undefined && { repeatIndex: node.repeatIndex }),
-          ...(node.asset      !== undefined && { assetId: node.asset.id }),
-        })
+      record(page, pageIndex, item)
+
+      // A child counts only when its condition is ACTUALLY MET, which needs the
+      // parent's answer — so visibility is decided here, where that answer is,
+      // and not inside outstandingReason.
+      //
+      // The first version of this hardcoded `show_when !== 'fail'` and skipped
+      // everything else, on the assumption that every child was a "→ which room
+      // failed?" follow-up. Outdoor's HOA question broke that: its three items
+      // are `show_when: 'pass'` children of "Property is subject to an HOA", so
+      // on a property that IS in an HOA they would render, be required, and
+      // never be reported — the Review gate would pass with all three blank.
+      const parentResult = answers[answerKey(item)]?.result ?? null
+      for (const child of item.children) {
+        if (child.formItem.show_when && child.formItem.show_when !== parentResult) continue
+        record(page, pageIndex, child)
       }
     }
   })
@@ -304,10 +322,8 @@ function outstandingReason(
 ): OutstandingItem['reason'] | null {
   const def = node.formItem
 
-  // A child is only outstanding once its condition is actually met — otherwise
-  // every unshown follow-up on the form would be listed as missing.
-  if (def.show_when && def.show_when !== 'fail') return null
-
+  // Visibility is the CALLER's decision — it holds the parent's answer. This
+  // function only judges an item it has already been told is on screen.
   if (def.is_required && (answer?.result === undefined || answer?.result === null)) {
     return 'unanswered'
   }

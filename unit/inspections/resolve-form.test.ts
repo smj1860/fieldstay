@@ -319,6 +319,52 @@ describe('findOutstanding — what the Review page lists', () => {
     })).toEqual([])
   })
 
+  describe('a conditional child counts exactly when its condition is met', () => {
+    // The original implementation hardcoded `show_when !== 'fail'` and skipped
+    // everything else, assuming every child was a "→ which room failed?"
+    // follow-up. Outdoor's HOA question broke that assumption: its three items
+    // are `show_when: 'pass'` children of "Property is subject to an HOA", so on
+    // a property that IS in an HOA they rendered, were required, and could never
+    // be reported — the Review gate would pass with all three blank.
+    //
+    // 24 tests did not discriminate on this, because the only conditional-child
+    // case covered was one that should NOT be reported. These four are the
+    // matrix: both polarities, both met and unmet.
+    const build = (showWhen: 'pass' | 'fail') => {
+      const sec = section({ key: 'x' })
+      const parent = item({ section_id: sec.id, key: 'x.parent' })
+      const child  = item({ section_id: sec.id, key: 'x.child', parent_item_id: parent.id, show_when: showWhen })
+      const pages  = resolveFormPages({ sections: [sec], items: [parent, child], assets: [] })
+      return {
+        pages,
+        parentKey: answerKey(pages[0]!.items[0]!),
+        reported:  (answers: Record<string, AnswerState>) =>
+          findOutstanding(pages, answers).map((o) => o.itemKey),
+      }
+    }
+
+    it('show_when pass — reported once the parent passes', () => {
+      const { parentKey, reported } = build('pass')
+      expect(reported({ [parentKey]: { result: 'pass' } })).toContain('x.child')
+    })
+
+    it('show_when pass — NOT reported when the parent fails or is unanswered', () => {
+      const { parentKey, reported } = build('pass')
+      expect(reported({ [parentKey]: { result: 'fail', note: 'x' } })).not.toContain('x.child')
+      expect(reported({})).not.toContain('x.child')
+    })
+
+    it('show_when fail — reported once the parent fails', () => {
+      const { parentKey, reported } = build('fail')
+      expect(reported({ [parentKey]: { result: 'fail', note: 'x' } })).toContain('x.child')
+    })
+
+    it('show_when fail — NOT reported when the parent passes', () => {
+      const { parentKey, reported } = build('fail')
+      expect(reported({ [parentKey]: { result: 'pass' } })).not.toContain('x.child')
+    })
+  })
+
   it('an unshown conditional child is not reported as missing', () => {
     const sec = section({ key: 'x' })
     const parent = item({ section_id: sec.id, key: 'x.p' })
