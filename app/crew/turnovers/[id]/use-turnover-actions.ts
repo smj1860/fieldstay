@@ -3,7 +3,8 @@ import { useState, useRef, useEffect } from 'react'
 import { useLiveQuery } from 'dexie-react-hooks'
 import { useDexieDb, useDexieUserId, useCrewMemberId } from '@/lib/dexie/context'
 import { createClient } from '@/lib/supabase/client'
-import { savePendingPhotoBlob, compressPhotoForQueue } from '@/lib/dexie/photo-queue'
+import { savePendingPhotoBlob } from '@/lib/dexie/photo-queue'
+import { compressPhoto } from '@/lib/images/compress'
 import { processPendingPhotoUploads } from '@/lib/dexie/photo-sync'
 import {
   updateChecklistItem, startTurnover, completeTurnover,
@@ -281,7 +282,7 @@ export function useTurnoverActions(id: string) {
       const sectionItem = items?.find((i) => i.section_name === sectionName)
       if (!sectionItem) return
 
-      const compressed = await compressPhotoForQueue(file)
+      const compressed = await compressPhoto(file)
       await savePendingPhotoBlob(userId, blobKey, compressed)
       await db.pending_photo_uploads.add({
         id:             crypto.randomUUID(),
@@ -322,7 +323,7 @@ export function useTurnoverActions(id: string) {
       const path    = orgScopedStoragePath(orgId, `turnover-${id}`, `${itemId}-${crypto.randomUUID()}.${ext}`)
       const blobKey = `photo-${crypto.randomUUID()}`
 
-      const compressed = await compressPhotoForQueue(file)
+      const compressed = await compressPhoto(file)
       await savePendingPhotoBlob(userId, blobKey, compressed)
       await db.pending_photo_uploads.add({
         id:             crypto.randomUUID(),

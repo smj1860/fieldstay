@@ -11,6 +11,7 @@
  */
 
 /** A Postgres `json`/`jsonb` value. Defined by the generated schema file. */
+import type { Json } from './database.generated'
 export type { Json } from './database.generated'
 
 // ─────────────────────────────────────────────────────────────
@@ -41,7 +42,16 @@ export type ParSmartGroup       = 'bathroom_essential' | 'bedroom_essential' | '
 export type PoStatus            = 'draft' | 'sent' | 'acknowledged' | 'ordered' | 'received' | 'cancelled'
 export type VendorSpecialty     = 'plumbing' | 'electrical' | 'hvac' | 'landscaping' | 'cleaning' | 'pest_control' | 'pool' | 'roofing' | 'general' | 'other'
 export type WoStatus            = 'pending' | 'quote_requested' | 'assigned' | 'in_progress' | 'completed' | 'cancelled'
-export type WoSource            = 'manual' | 'maintenance_schedule' | 'crew_flag' | 'guest_report' | 'vacancy_gap_suggestion'
+export type WoSource            = 'manual' | 'maintenance_schedule' | 'crew_flag' | 'guest_report' | 'vacancy_gap_suggestion' | 'inspection'
+// Inspections (docs/INSPECTIONS_SPEC.md phase 1).
+export type InspectionResult       = 'pass' | 'fail' | 'na'
+export type InspectionResponseType = 'yes_no' | 'count' | 'date' | 'text' | 'photo'
+// 'notify' is neither a work order nor a purchase order: a lapsed permit or
+// unpaid HOA dues is a notification, not a dispatch. See §5 of the spec.
+export type InspectionRemediation  = 'none' | 'work_order' | 'purchase_order' | 'notify'
+// What the inspector picks on a fail — MULTI-SELECT, so 'replace' + 'service'
+// expresses the purchase and the install as one decision.
+export type InspectionAction       = 'repair' | 'service' | 'replace'
 export type WoCategory          =
   | 'hvac' | 'plumbing' | 'electrical' | 'appliance' | 'cleaning'
   | 'landscaping' | 'roofing' | 'flooring' | 'windows_doors'
@@ -205,6 +215,9 @@ export interface Property {
   min_renter_age:          number | null
   external_id:             string | null
   external_source:         string | null
+  // Presence gates Outdoor's HOA section and prints on the report. A name
+  // rather than a boolean because it carries information either way.
+  hoa_name:                string | null
   created_at:              string
   updated_at:              string
 }
@@ -2040,6 +2053,11 @@ export interface HandWrittenRowMap {
   demo_activity_log:                   DemoActivityLog
   hospitable_launch_promo:             HospitableLaunchPromo
   promo_hospitable_launch_counter:     PromoHospitableLaunchCounter
+  inspection_forms:                    InspectionForm
+  inspection_form_sections:            InspectionFormSection
+  inspection_form_items:               InspectionFormItem
+  inspections:                         Inspection
+  inspection_items:                    InspectionItem
 }
 
 /** Views modelled by hand, same contract as HandWrittenRowMap. */
@@ -2069,3 +2087,134 @@ export type { Tables, TablesInsert, TablesUpdate, Enums } from './database.gener
  */
 export { Constants } from './database.generated'
 
+
+// ── Inspections & Audits ────────────────────────────────────────────────────
+// docs/INSPECTIONS_SPEC.md. Phase 1 is schema + immutability; the seed, the
+// tablet UI and remediation are phases 2–4.
+
+/** PLATFORM-owned form definition. No org_id — orgs cannot edit these. */
+export interface InspectionForm {
+  id:          string
+  key:         string          // 'safety' | 'indoor' | 'outdoor'
+  name:        string
+  description: string | null
+  version:     number
+  is_active:   boolean
+  created_at:  string
+  updated_at:  string
+}
+
+export interface InspectionFormSection {
+  id:         string
+  form_id:    string
+  key:        string
+  name:       string
+  sort_order: number
+  created_at: string
+}
+
+export interface InspectionFormItem {
+  id:         string
+  section_id: string
+  /** STABLE across re-seeds ('safety.fire.smoke_present'); the row id is not. */
+  key:        string
+  prompt:     string
+  sort_order: number
+
+  response_type:  InspectionResponseType
+  is_required:    boolean
+  photo_required: boolean
+
+  /** Shown only when the parent answers `show_when`. */
+  parent_item_id: string | null
+  show_when:      InspectionResult | null
+
+  /** Render one row per unit counted at that item (N extinguishers → N groups). */
+  repeat_source_item_id: string | null
+  /** Render one row per ACTIVE property_assets row of `asset_type`. */
+  repeat_per_asset:      boolean
+
+  na_reason_template: string | null
+  /** Verify an N/A claim against the asset ledger rather than taking it on trust. */
+  na_asset_type:      AssetType | null
+  asset_type:         AssetType | null
+
+  /**
+   * Same physical concern ACROSS forms — and, for well short-cycling, across
+   * items within one form. NARROWER than asset_type on purpose: a due HVAC
+   * filter and a fouled condenser are one asset and two jobs.
+   */
+  concern_key: string | null
+
+  /** The PRE-SELECTED action, not a constraint — the inspector overrides. */
+  remediation:        InspectionRemediation
+  wo_category:        WoCategory | null
+  wo_priority:        PriorityLevel | null
+  po_catalog_item_id: string | null
+  po_default_qty:     number | null
+
+  created_at: string
+}
+
+/** ONE performance of a form, against one property. Never batched. */
+export interface Inspection {
+  id:          string
+  org_id:      string
+  property_id: string
+
+  form_id:      string
+  form_version: number
+  /** The form AS IT WAS — a re-seed must not rewrite what a past report asked. */
+  form_snapshot:   Json
+  /** The letterhead AS IT WAS: property, management company, org owner, weather. */
+  header_snapshot: Json | null
+
+  assigned_to_user_id: string | null
+  /**
+   * Who PHYSICALLY walked the property, typed at sign-off. Free text because
+   * whoever the PM hands the tablet to counts, account or not — distinct from
+   * completed_by_user_id, and the two may legitimately disagree.
+   */
+  inspector_name: string | null
+
+  scheduled_for:        string | null
+  started_at:           string
+  completed_at:         string | null
+  completed_by_user_id: string | null
+
+  source_schedule_id:     string | null
+  /** Corrections are a NEW inspection referencing the original, never an edit. */
+  corrects_inspection_id: string | null
+
+  created_at: string
+  updated_at: string
+}
+
+/** ONE answer. Immutable once its inspection is completed — enforced by trigger. */
+export interface InspectionItem {
+  id:            string
+  inspection_id: string
+  org_id:        string
+
+  form_item_id:    string
+  prompt_snapshot: string
+
+  result:  InspectionResult | null
+  /** Empty on a pass; non-empty is what generates the WO/PO. */
+  actions: InspectionAction[]
+  /** Independent of `actions` — rolls up into ONE crew cleaning job at sign-off. */
+  needs_cleaning: boolean
+
+  note:       string | null
+  photo_path: string | null
+  /** The only way past a photo_required item; free text so it cannot be tapped through. */
+  photo_unavailable_reason: string | null
+  na_reason:  string | null
+
+  asset_id:     string | null
+  repeat_index: number | null
+
+  answered_at: string | null
+  created_at:  string
+  updated_at:  string
+}

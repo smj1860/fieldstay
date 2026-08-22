@@ -1739,6 +1739,363 @@ export type Database = {
           },
         ]
       }
+      inspection_form_items: {
+        Row: {
+          asset_type: Database["public"]["Enums"]["asset_type"] | null
+          concern_key: string | null
+          created_at: string
+          id: string
+          is_required: boolean
+          key: string
+          na_asset_type: Database["public"]["Enums"]["asset_type"] | null
+          na_reason_template: string | null
+          parent_item_id: string | null
+          photo_required: boolean
+          po_catalog_item_id: string | null
+          po_default_qty: number | null
+          prompt: string
+          remediation: Database["public"]["Enums"]["inspection_remediation"]
+          repeat_per_asset: boolean
+          repeat_source_item_id: string | null
+          response_type: Database["public"]["Enums"]["inspection_response_type"]
+          section_id: string
+          show_when: Database["public"]["Enums"]["inspection_result"] | null
+          sort_order: number
+          wo_category: Database["public"]["Enums"]["wo_category"] | null
+          wo_priority: Database["public"]["Enums"]["priority_level"] | null
+        }
+        Insert: {
+          asset_type?: Database["public"]["Enums"]["asset_type"] | null
+          concern_key?: string | null
+          created_at?: string
+          id?: string
+          is_required?: boolean
+          key: string
+          na_asset_type?: Database["public"]["Enums"]["asset_type"] | null
+          na_reason_template?: string | null
+          parent_item_id?: string | null
+          photo_required?: boolean
+          po_catalog_item_id?: string | null
+          po_default_qty?: number | null
+          prompt: string
+          remediation?: Database["public"]["Enums"]["inspection_remediation"]
+          repeat_per_asset?: boolean
+          repeat_source_item_id?: string | null
+          response_type?: Database["public"]["Enums"]["inspection_response_type"]
+          section_id: string
+          show_when?: Database["public"]["Enums"]["inspection_result"] | null
+          sort_order?: number
+          wo_category?: Database["public"]["Enums"]["wo_category"] | null
+          wo_priority?: Database["public"]["Enums"]["priority_level"] | null
+        }
+        Update: {
+          asset_type?: Database["public"]["Enums"]["asset_type"] | null
+          concern_key?: string | null
+          created_at?: string
+          id?: string
+          is_required?: boolean
+          key?: string
+          na_asset_type?: Database["public"]["Enums"]["asset_type"] | null
+          na_reason_template?: string | null
+          parent_item_id?: string | null
+          photo_required?: boolean
+          po_catalog_item_id?: string | null
+          po_default_qty?: number | null
+          prompt?: string
+          remediation?: Database["public"]["Enums"]["inspection_remediation"]
+          repeat_per_asset?: boolean
+          repeat_source_item_id?: string | null
+          response_type?: Database["public"]["Enums"]["inspection_response_type"]
+          section_id?: string
+          show_when?: Database["public"]["Enums"]["inspection_result"] | null
+          sort_order?: number
+          wo_category?: Database["public"]["Enums"]["wo_category"] | null
+          wo_priority?: Database["public"]["Enums"]["priority_level"] | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "inspection_form_items_parent_item_id_fkey"
+            columns: ["parent_item_id"]
+            isOneToOne: false
+            referencedRelation: "inspection_form_items"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "inspection_form_items_po_catalog_item_id_fkey"
+            columns: ["po_catalog_item_id"]
+            isOneToOne: false
+            referencedRelation: "inventory_catalog"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "inspection_form_items_repeat_source_item_id_fkey"
+            columns: ["repeat_source_item_id"]
+            isOneToOne: false
+            referencedRelation: "inspection_form_items"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "inspection_form_items_section_id_fkey"
+            columns: ["section_id"]
+            isOneToOne: false
+            referencedRelation: "inspection_form_sections"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      inspection_form_sections: {
+        Row: {
+          created_at: string
+          form_id: string
+          id: string
+          key: string
+          name: string
+          sort_order: number
+        }
+        Insert: {
+          created_at?: string
+          form_id: string
+          id?: string
+          key: string
+          name: string
+          sort_order?: number
+        }
+        Update: {
+          created_at?: string
+          form_id?: string
+          id?: string
+          key?: string
+          name?: string
+          sort_order?: number
+        }
+        Relationships: [
+          {
+            foreignKeyName: "inspection_form_sections_form_id_fkey"
+            columns: ["form_id"]
+            isOneToOne: false
+            referencedRelation: "inspection_forms"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      inspection_forms: {
+        Row: {
+          created_at: string
+          description: string | null
+          id: string
+          is_active: boolean
+          key: string
+          name: string
+          updated_at: string
+          version: number
+        }
+        Insert: {
+          created_at?: string
+          description?: string | null
+          id?: string
+          is_active?: boolean
+          key: string
+          name: string
+          updated_at?: string
+          version?: number
+        }
+        Update: {
+          created_at?: string
+          description?: string | null
+          id?: string
+          is_active?: boolean
+          key?: string
+          name?: string
+          updated_at?: string
+          version?: number
+        }
+        Relationships: []
+      }
+      inspection_items: {
+        Row: {
+          actions: Database["public"]["Enums"]["inspection_action"][]
+          answered_at: string | null
+          asset_id: string | null
+          created_at: string
+          form_item_id: string
+          id: string
+          inspection_id: string
+          na_reason: string | null
+          needs_cleaning: boolean
+          note: string | null
+          org_id: string
+          photo_path: string | null
+          photo_unavailable_reason: string | null
+          prompt_snapshot: string
+          repeat_index: number | null
+          result: Database["public"]["Enums"]["inspection_result"] | null
+          updated_at: string
+        }
+        Insert: {
+          actions?: Database["public"]["Enums"]["inspection_action"][]
+          answered_at?: string | null
+          asset_id?: string | null
+          created_at?: string
+          form_item_id: string
+          id?: string
+          inspection_id: string
+          na_reason?: string | null
+          needs_cleaning?: boolean
+          note?: string | null
+          org_id: string
+          photo_path?: string | null
+          photo_unavailable_reason?: string | null
+          prompt_snapshot: string
+          repeat_index?: number | null
+          result?: Database["public"]["Enums"]["inspection_result"] | null
+          updated_at?: string
+        }
+        Update: {
+          actions?: Database["public"]["Enums"]["inspection_action"][]
+          answered_at?: string | null
+          asset_id?: string | null
+          created_at?: string
+          form_item_id?: string
+          id?: string
+          inspection_id?: string
+          na_reason?: string | null
+          needs_cleaning?: boolean
+          note?: string | null
+          org_id?: string
+          photo_path?: string | null
+          photo_unavailable_reason?: string | null
+          prompt_snapshot?: string
+          repeat_index?: number | null
+          result?: Database["public"]["Enums"]["inspection_result"] | null
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "inspection_items_asset_id_fkey"
+            columns: ["asset_id"]
+            isOneToOne: false
+            referencedRelation: "property_assets"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "inspection_items_form_item_id_fkey"
+            columns: ["form_item_id"]
+            isOneToOne: false
+            referencedRelation: "inspection_form_items"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "inspection_items_inspection_id_fkey"
+            columns: ["inspection_id"]
+            isOneToOne: false
+            referencedRelation: "inspections"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "inspection_items_org_id_fkey"
+            columns: ["org_id"]
+            isOneToOne: false
+            referencedRelation: "organizations"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      inspections: {
+        Row: {
+          assigned_to_user_id: string | null
+          completed_at: string | null
+          completed_by_user_id: string | null
+          corrects_inspection_id: string | null
+          created_at: string
+          form_id: string
+          form_snapshot: Json
+          form_version: number
+          header_snapshot: Json | null
+          id: string
+          inspector_name: string | null
+          org_id: string
+          property_id: string
+          scheduled_for: string | null
+          source_schedule_id: string | null
+          started_at: string
+          updated_at: string
+        }
+        Insert: {
+          assigned_to_user_id?: string | null
+          completed_at?: string | null
+          completed_by_user_id?: string | null
+          corrects_inspection_id?: string | null
+          created_at?: string
+          form_id: string
+          form_snapshot: Json
+          form_version: number
+          header_snapshot?: Json | null
+          id?: string
+          inspector_name?: string | null
+          org_id: string
+          property_id: string
+          scheduled_for?: string | null
+          source_schedule_id?: string | null
+          started_at?: string
+          updated_at?: string
+        }
+        Update: {
+          assigned_to_user_id?: string | null
+          completed_at?: string | null
+          completed_by_user_id?: string | null
+          corrects_inspection_id?: string | null
+          created_at?: string
+          form_id?: string
+          form_snapshot?: Json
+          form_version?: number
+          header_snapshot?: Json | null
+          id?: string
+          inspector_name?: string | null
+          org_id?: string
+          property_id?: string
+          scheduled_for?: string | null
+          source_schedule_id?: string | null
+          started_at?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "inspections_corrects_inspection_id_fkey"
+            columns: ["corrects_inspection_id"]
+            isOneToOne: false
+            referencedRelation: "inspections"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "inspections_form_id_fkey"
+            columns: ["form_id"]
+            isOneToOne: false
+            referencedRelation: "inspection_forms"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "inspections_org_id_fkey"
+            columns: ["org_id"]
+            isOneToOne: false
+            referencedRelation: "organizations"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "inspections_property_id_fkey"
+            columns: ["property_id"]
+            isOneToOne: false
+            referencedRelation: "properties"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "inspections_source_schedule_id_fkey"
+            columns: ["source_schedule_id"]
+            isOneToOne: false
+            referencedRelation: "maintenance_schedules"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       integration_connections: {
         Row: {
           connected_at: string
@@ -3672,6 +4029,7 @@ export type Database = {
           events_allowed: boolean | null
           external_id: string | null
           external_source: string | null
+          hoa_name: string | null
           house_manual: string | null
           id: string
           internal_notes: string | null
@@ -3716,6 +4074,7 @@ export type Database = {
           events_allowed?: boolean | null
           external_id?: string | null
           external_source?: string | null
+          hoa_name?: string | null
           house_manual?: string | null
           id?: string
           internal_notes?: string | null
@@ -3760,6 +4119,7 @@ export type Database = {
           events_allowed?: boolean | null
           external_id?: string | null
           external_source?: string | null
+          hoa_name?: string | null
           house_manual?: string | null
           id?: string
           internal_notes?: string | null
@@ -4320,7 +4680,7 @@ export type Database = {
           conversation_id?: string | null
           created_at?: string
           dedup_key: string
-          external_reservation_id: string | null
+          external_reservation_id?: string | null
           external_source?: string
           id?: string
           message_created_at: string
@@ -6130,11 +6490,26 @@ export type Database = {
         Args: { p_items: Json; p_template_id: string }
         Returns: number
       }
+      retention_protected_table_violations: {
+        Args: never
+        Returns: {
+          function_name: string
+          protected_table: string
+        }[]
+      }
       revoke_integration_token: {
         Args: { p_provider_id: string; p_user_id: string }
         Returns: undefined
       }
       rls_policy_report: { Args: never; Returns: Json }
+      service_role_grant_gaps: {
+        Args: never
+        Returns: {
+          has_authenticated_select: boolean
+          kind: string
+          relation: string
+        }[]
+      }
       set_default_platform_inventory_template: {
         Args: { p_template_id: string }
         Returns: undefined
@@ -6278,6 +6653,14 @@ export type Database = {
       contact_pref: "email" | "sms" | "both"
       crew_role: "cleaning" | "landscaping" | "maintenance" | "general"
       ical_source: "airbnb" | "vrbo" | "booking_com" | "direct" | "other"
+      inspection_action: "repair" | "service" | "replace"
+      inspection_remediation:
+        | "none"
+        | "work_order"
+        | "purchase_order"
+        | "notify"
+      inspection_response_type: "yes_no" | "count" | "date" | "text" | "photo"
+      inspection_result: "pass" | "fail" | "na"
       inventory_category:
         | "paper_goods"
         | "cleaning"
@@ -6403,6 +6786,7 @@ export type Database = {
         | "crew_flag"
         | "guest_report"
         | "vacancy_gap_suggestion"
+        | "inspection"
       wo_status:
         | "pending"
         | "quote_requested"
@@ -6599,6 +6983,15 @@ export const Constants = {
       contact_pref: ["email", "sms", "both"],
       crew_role: ["cleaning", "landscaping", "maintenance", "general"],
       ical_source: ["airbnb", "vrbo", "booking_com", "direct", "other"],
+      inspection_action: ["repair", "service", "replace"],
+      inspection_remediation: [
+        "none",
+        "work_order",
+        "purchase_order",
+        "notify",
+      ],
+      inspection_response_type: ["yes_no", "count", "date", "text", "photo"],
+      inspection_result: ["pass", "fail", "na"],
       inventory_category: [
         "paper_goods",
         "cleaning",
@@ -6732,6 +7125,7 @@ export const Constants = {
         "crew_flag",
         "guest_report",
         "vacancy_gap_suggestion",
+        "inspection",
       ],
       wo_status: [
         "pending",

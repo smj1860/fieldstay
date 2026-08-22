@@ -1,0 +1,37 @@
+-- Make the vestigial `crew-uploads` bucket PRIVATE.
+--
+-- NOT a live exposure, and the migration should say so plainly rather than
+-- overstate itself. As of 2026-08-22 the bucket holds ZERO objects, has NO
+-- storage.objects policies, and nothing in app/ or lib/ uploads to it — a fact
+-- already recorded in 20260731100000_db_invariant_report_storage_bucket_ids.sql,
+-- which had to work around its existence-without-policies for the E2E parity
+-- check. Public with nothing in it discloses nothing, and with no policies the
+-- anon/authenticated roles cannot write to it either.
+--
+-- What it IS, is a trap with an inviting name. Crew photos actually go to
+-- `turnover-photos` and `work-order-photos`, both private. A bucket called
+-- `crew-uploads` sitting there public is the one someone reaches for next time
+-- crew photos need somewhere to live — and property-interior photographs served
+-- with no authentication is not a mistake that announces itself. The cost of
+-- closing it now is one UPDATE against an empty bucket; the cost of closing it
+-- after something writes there is a migration plus signed-URL rewrites plus
+-- whatever was already indexed.
+--
+-- The three genuinely public buckets stay public and are meant to be:
+-- guidebook-property-photos and guidebook-sponsor-photos are guest-facing by
+-- design. The three private ones (turnover-photos, work-order-photos,
+-- compliance-documents) are additionally guarded by the semgrep chokepoint
+-- banning getPublicUrl() against them; `crew-uploads` was outside that rule
+-- precisely because it was public, so nothing was watching it.
+--
+-- Deliberately NOT dropped. Dropping is the more thorough answer and may still
+-- be right — it is dead infrastructure — but the bucket id is referenced by
+-- check-db-invariants.mjs's SERVICE_ROLE_ONLY_BUCKETS staleness logic, whose
+-- prod-vs-E2E asymmetry is the exact thing the July migration above exists to
+-- handle. Flipping the flag removes the hazard without touching that; removing
+-- the bucket is a separate decision that should be made on its own.
+--
+-- No-op on the E2E project, where this bucket was never created.
+UPDATE storage.buckets
+SET    public = false
+WHERE  id = 'crew-uploads';
