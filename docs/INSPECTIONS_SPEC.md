@@ -142,7 +142,9 @@ inspection_form_items           ONE question
   na_reason_template  (nullable)        -- "property does not have a pool"
   na_asset_type       (nullable)        -- verify that claim against property_assets
   asset_type          (nullable) -- links the answer to a property_assets row
-  remediation         'none' | 'work_order' | 'purchase_order'
+  repeat_per_asset    boolean DEFAULT false -- one row per ACTIVE asset of asset_type
+  concern_key         (nullable) -- same physical concern ACROSS forms; dedup key
+  remediation         'none' | 'work_order' | 'purchase_order'  -- now a DEFAULT
   wo_category         (nullable) -- default for a generated WO
   wo_priority         (nullable)
   po_catalog_item_id  (nullable) -- default line item for a generated PO
@@ -159,7 +161,9 @@ inspection_items                ONE answer
   id, inspection_id, org_id,
   form_item_id, prompt_snapshot,
   result 'pass' | 'fail' | 'na',
-  note, photo_path,
+  actions text[]          -- 'repair' | 'service' | 'replace'; chosen on fail
+  needs_cleaning boolean  -- independent of actions; feeds the sign-off roll-up
+  note, photo_path,       -- note is REQUIRED when actions is non-empty
   asset_id (nullable),
   answered_at
 ```
@@ -209,6 +213,170 @@ it, and the N/A can be **rejected** at fill time when the ledger disagrees.
 That is a materially stronger artifact than free text for the cost of one
 nullable column, and it is the whole reason the insurance angle is worth
 anything.
+
+### The inspector picks the action — 2026-08-22
+
+`remediation` was going to be fixed per item: the seed decides that a failed
+extinguisher is a PO and a failed handrail is a WO, and open question 1 was the
+chore of marking `WO`/`PO`/`—` against every one of ~60 items across three
+forms.
+
+That chore is now cancelled, and the reason is that it could not have been done
+correctly anyway. **The real forms bundle several checks into one prompt** —
+*"Refrigeration: fridge and freezer clean, water filter within life, temperature
+holding, ice maker functional, compressor working, no leaks, display working"*
+is seven conditions on one checkbox. A single `remediation` value cannot serve
+it: the filter is a purchase, the compressor is a service call, "clean" is
+neither. Splitting it into seven items would fix the data model and wreck the
+form, because the inspector looks at the fridge ONCE, not seven times.
+
+So on a fail the inspector picks what is needed, and that is what generates the
+record:
+
+| Action | Generates | Notes |
+|---|---|---|
+| **Repair**   | work order | `wo_category` from the item |
+| **Service**  | work order | the vendor-visit flavour of the same thing |
+| **Replace**  | purchase order | joins the inspection's single PO |
+
+Cleaning is a **separate checkbox**, not a fourth action in this list, because
+it produces neither a WO nor a PO — see the next subsection.
+
+**Multi-select, not one choice.** A dishwasher can have a clogged filter AND a
+torn door seal. A water heater at end of life is Replace *and* Service — the
+purchase and the install — which is precisely the "needs both" case open
+question 1 asked about, now answered by letting the inspector say both rather
+than by a rule guessing for them. Each selected action carries the description.
+
+**A description is REQUIRED on fail** and becomes the work order's title. This
+is the one place free text beats structure: *"compressor not holding temp,
+freezer at 18°F"* is a better work order than any enum we could have written.
+
+**`remediation` survives as a DEFAULT, not a fixed value.** The seed still says
+what an item usually means, so the likely action is pre-selected and the
+inspector taps once. Keeping it is what preserves our judgment about each item
+without binding the person standing in front of the thing.
+
+Safety's structured children (`parent_item_id` / `show_when`, *"which room needs
+a smoke detector?"*) stay exactly as they are. Those items are narrow enough
+that a structured answer beats prose. Indoor and Outdoor items are broad, and
+there the description is the structure. That is a gradient, not a contradiction.
+
+### Deliberate overlap between forms, and the key it needs — 2026-08-22
+
+Open question 5 asked what Indoor and Outdoor must not *both* contain, on the
+reasoning that anything asked twice gets two work orders for one fault.
+
+**The premise was wrong, and the decision is to overlap on purpose.** Safety
+runs once or twice a year; Indoor and Outdoor run quarterly. Routing smoke
+detectors to Safety alone means a dead detector can go six months unnoticed
+because the form that asks about it does not run in between. The right answer
+is not to deduplicate the *question* — it is to ask it as often as it needs
+asking, and deduplicate the *task*.
+
+That needs a key the existing one cannot provide. §6's prompt fires on an open
+work order for the same `(property_id, form_item_id)`, and the same physical
+concern asked in two forms is two different item ids. So:
+
+```
+inspection_form_items
+  concern_key  (nullable)   -- 'smoke_detector_operational', 'hvac_filter'
+```
+
+Items sharing a `concern_key` are the same physical concern, whatever form they
+appear in. §6's open-work-order lookup keys on `concern_key` when one is set and
+falls back to `form_item_id` when it is not — so a detector flagged by Safety in
+January and by Indoor in April surfaces the January work order rather than
+opening a second.
+
+`concern_key` is deliberately narrower than `asset_type`: two different failures
+on one HVAC unit (filter due, condenser fouled) are two jobs, and giving them
+the same key would merge them. It names a CONCERN, not a thing.
+
+### The property's own assets become items — 2026-08-22
+
+Indoor and Outdoor both end with *"insert any relevant assets the property
+has"*, and that is not a copy instruction — it is a rendering rule. A property
+with three HVAC units should get three rows; one with no hot tub should not be
+asked about a hot tub at all.
+
+```
+inspection_form_items
+  repeat_per_asset  boolean DEFAULT false   -- with asset_type set
+```
+
+An item marked `repeat_per_asset` with `asset_type = 'hvac'` renders once per
+ACTIVE `property_assets` row of that type, each answer carrying its `asset_id`
+— which `inspection_items.asset_id` already models. Same mechanism as
+`repeat_source_item_id`, sourced from the asset ledger instead of a count
+answer.
+
+This is the third use of that ledger and the three are worth distinguishing:
+`na_asset_type` **verifies an absence** the inspector claims, `repeat_per_asset`
+**enumerates a presence** we already know about, and `asset_type` on a plain
+item **attributes** one answer to one asset. All three exist so the report can
+say something the ledger backs rather than something a person typed.
+
+The payoff beyond the form: a failed asset-scoped item carries `asset_id`, so it
+can move that asset's `health_score` and appear in its history. An inspection
+becomes an input to asset health rather than a document filed beside it.
+
+### Cleaning is separated from WO/PO, and aggregates
+
+Cleaning is not a fourth kind of work order. Two reasons, and the second is the
+one that decides it:
+
+1. It dispatches to **crew**, not to vendors or purchasing.
+2. **Cleaning aggregates and repairs do not.** A plumber comes for one fault. A
+   cleaner does a list. Carpets to shampoo, an oven to degrease and grout to
+   scrub is ONE visit — three cleaning work orders would be three dispatches
+   for one job.
+
+So a `Cleaning` action creates nothing on its own. At sign-off the form asks
+**"Does additional cleaning need to be scheduled?"**, already answered `yes` if
+any item was flagged, with the notes prefilled from those items' descriptions.
+The inspector adds whatever the form did not cover — general standard, an
+odour, a room that simply needs attention.
+
+The per-item flag matters for two reasons that are easy to miss. Without it a
+dirty oven has nowhere to go: the inspector must pick Repair, Replace or
+Service, none of which is true, and you get a bogus work order. And a question
+asked only at sign-off is answered from memory — an inspector who saw the oven
+in section 2 is four sections and twenty minutes away by then, and what they
+write will be thinner than what they saw.
+
+The roll-up produces **one** work order, `wo_category = 'cleaning'`, assigned to
+a crew member rather than a vendor. `work_orders` already carries
+`assigned_crew_member_id` alongside `vendor_id`, so this reuses the board, the
+completion flow and the expense posting rather than inventing a parallel
+cleaning-task concept. It is deliberately NOT a turnover: turnovers are
+booking-driven and an inspection is not, so creating one would mean a turnover
+with no checkout behind it.
+
+#### Suggested cleaner count — a guess that is built to stop being one
+
+The roll-up suggests **1 cleaner for 1–3 flags, 2 for 4 or more**.
+
+**That threshold is a guess and the spec should say so.** Flag count is a weak
+proxy for effort: *"regrout two bathrooms"* is one flag and half a day, while
+*"wipe the fridge, wipe the microwave, dust three fixtures"* is three flags and
+twenty minutes. A crude, visibly overridable suggestion is still worth having —
+what would not be worth having is one that never improves.
+
+So it records the same three things turnover crew suggestion already records:
+what was suggested, the reasoning, and whether the PM accepted or overrode it
+(`suggested_crew_ids` / `suggestion_reasoning` / `suggestion_status`, feeding
+`assignment_outcomes`). Every override is a sample, and the threshold gets
+tuned from real data instead of surviving unexamined because nobody wrote down
+what it got wrong.
+
+The PM is shown the **flagged item list**, not just the number. Six item names
+with their descriptions is what the decision is actually made on.
+
+The obvious refinement is scaling by property size — a 6-bedroom lodge with 4
+flags is not a studio with 4 flags, and `bedrooms` / `square_footage` are both
+known. Deliberately not yet: measure the flat threshold first, the same
+discipline applied to the par engine's smart groups.
 
 ### Immutability
 
@@ -305,6 +473,40 @@ the *task*, not the *evidence*.
 
 `form_item_id` rather than `wo_category` is the key: two different failures
 that both happen to be `wo_category = 'general'` are genuinely two jobs.
+
+#### The action model breaks this key — 2026-08-22
+
+Everything above assumed one item means one fault. Once the inspector picks the
+action (see §5), it does not.
+
+*"Refrigeration"* fails in March because the water filter is due — Replace, a
+PO. It fails in June because the compressor is not holding temperature —
+Service, a work order. Same `form_item_id`, two unrelated problems. The rule
+above finds March's open record, calls June a repeat, and **attaches a failing
+compressor to a water-filter task as a `work_order_updates` row.** A real fault
+disappears into the notes of an unrelated job, and it disappears quietly, which
+is the failure mode this codebase produces most often.
+
+Widening the key to `(property_id, form_item_id, action)` helps and does not
+fix it: two different Repairs on the same broad item are still two jobs.
+
+**So stop deduplicating silently and ask.** When an item fails and an open work
+order from a previous inspection already exists for that
+`(property_id, concern_key ?? form_item_id)` — see §5 on `concern_key`, which is
+what makes this work across forms that deliberately overlap — show the inspector
+what it is:
+
+> Open since 12 Mar — *"replace fridge water filter"*
+> Is this the same issue, or a new one?
+
+Strictly better than any key. It cannot wrongly suppress, because the person
+answering is standing in front of the appliance; and *"same issue, still open in
+June"* is worth recording on its own — it says the March work order has been
+sitting untouched for a quarter, which is exactly what a PM should see.
+
+Silent attachment remains correct for the RETRY case, which is what the partial
+unique index covers. The prompt governs the repeat-VISIT case, where the two
+findings are only related by having been asked the same question.
 
 ---
 
@@ -703,14 +905,13 @@ The five original questions are answered and have moved into §2. These are the
 ones those answers raised, and each is a judgment call rather than something a
 reader of the spec can settle.
 
-1. **WO or PO, per item.** "A No creates a work order or a purchase order" needs
-   a side picked for every item. Some are obvious (`missing smoke detector` →
-   PO to buy, WO to fit — arguably both). Some are not: an expired fire
-   extinguisher is a PO at one org and a service WO at another. **Mark each item
-   `WO` / `PO` / `—` when you send the other two forms**, and say what an item
-   that genuinely needs both should do — my suggestion is PO, with the WO
-   created when the part arrives, so nobody is dispatched to install something
-   that is not there yet.
+1. ~~**WO or PO, per item.**~~ **CLOSED 2026-08-22.** The inspector picks
+   `Repair` / `Service` / `Replace` — multi-select, with a required description
+   — and that generates the record. See §5. This did not just answer the
+   question, it dissolved it: the real forms bundle several checks into one
+   prompt, so no single per-item value could have been correct. "Needs both" is
+   now expressible rather than arbitrated: Replace + Service on one item is the
+   purchase and the install.
 
 2. **The photo-on-fail escape hatch.** Required-on-fail plus a dead camera, a
    full tablet, or a photo that will not save offline equals an inspector who
@@ -732,19 +933,15 @@ reader of the spec can settle.
    `profiles` or `organization_members` stores one. Add it to the profile, or
    ask once per inspection?
 
-5. **What "Indoor" and "Outdoor" must not both contain.** Two of the three
-   forms run on the same cadence over the same property. Anything appearing in
-   both gets inspected twice and, on a No, generates two work orders for one
-   fault — the repeat-visit dedup in §6 keys on `form_item_id`, so the same
-   physical problem asked in two forms is two different keys and it will not
-   catch it.
-
-   Now that the forms are fixed and platform-authored, this stops being a
-   runtime problem and becomes an **authoring** one, which is strictly easier:
-   it is checkable once, by us, before the seed ships. A test asserting no two
-   forms carry the same `asset_type` + prompt shape is a crude proxy; reading
-   the two forms side by side is the real check. Worth doing when the other two
-   land, not after.
+5. ~~**What "Indoor" and "Outdoor" must not both contain.**~~ **CLOSED
+   2026-08-22, and the premise was wrong.** Overlap is DELIBERATE: Safety runs
+   1–2×/year while Indoor and Outdoor run quarterly, so routing detectors and
+   shut-offs to Safety alone lets a dead detector sit for six months. The fix
+   is not to ask the question once — it is to ask it on the faster cadence and
+   deduplicate the TASK, via `concern_key` (§5) driving §6's open-work-order
+   prompt. What remains is an authoring rule rather than a question: every item
+   duplicated across forms must carry a shared `concern_key`, checked by the
+   seed test in §10.
 
 6. **Versioning a fixed form.** `inspection_forms.version` is in the model
    because the forms will change — an item added, a prompt reworded. Two
@@ -840,34 +1037,155 @@ recorded skips it with a reason the asset ledger backs, per §5.
 in this shape. The two drafts below are the FIRST-PASS guesses and are kept
 only until the real ones arrive.
 
-### 12.2 Indoor Property Inspection — SUPERSEDED FIRST PASS, awaiting the real form
+### 12.2 Indoor Property & Inventory Inspection
 
-Quarterly or 2× a year, month(s) chosen by the PM. The table below predates
-that decision and predates the form itself; it is kept only so the shape is
-visible, and is replaced wholesale when the real one arrives.
+Quarterly or 2× a year, month(s) chosen by the PM.
 
-| # | Item | Fail | Asset |
+**Header** — prefilled and locked, exactly as Safety: property name/ID, physical
+address, date, start time, inspector (signed-in user), management company.
+
+**On every failed item:** one or more of `Repair` / `Service` / `Replace`, each
+with a REQUIRED description, plus an independent `Cleaning` checkbox that feeds
+the sign-off roll-up. See §5. The `Dflt` column below is the pre-selected
+action, not a constraint — the inspector overrides it freely.
+
+**Overlaps with Safety are DELIBERATE.** Safety runs 1–2×/year and this runs
+quarterly; routing detectors and shut-offs to Safety alone lets a dead detector
+sit for six months. Every overlapping item carries a `concern_key` shared with
+its Safety twin, so the *question* is asked on the faster cadence while the
+*work order* is deduplicated across both forms (§5, §6).
+
+#### 1. Entryway, Hallways & General Interior
+
+| # | Item | Type | Dflt | Asset | concern_key |
+|---|---|---|---|---|---|
+| 1 | Entry locks and hardware — smart lock responds, latch aligned, deadbolt operates | yes_no | Repair | `smart_lock` | `entry_lock_operational` |
+| 2 | Walls, trim and ceilings — no holes, cracks, water staining or scuffed baseboards | yes_no | Repair | — | — |
+| 2a | → Touch-up paint or patching needed | yes_no | Repair | — | — |
+| 3 | Flooring and rugs — clean, no chips, warping or slip hazards | yes_no | Repair | — | `flooring_sound` |
+| 3a | → Shampoo, reseal or re-coat needed | yes_no | Service | — | — |
+| 4 | Doors and windows — lock, glass intact, screens present, tracks clear, weatherstripping sound | yes_no | Repair | — | — |
+| 5 | Bedroom egress windows open fully from inside without a tool | yes_no | Repair | — | `egress_window` |
+| 6 | Window coverings — blinds and curtains operate, clean, cords secured out of child reach | yes_no | Replace | — | — |
+| 7 | Ceiling fans — balanced, no wobble, both directions and all speeds work | yes_no | Repair | — | — |
+| 8 | Mirrors, wall art and shelving securely mounted | yes_no | Repair | — | — |
+| 9 | Interior stairs and handrails secure; treads sound | yes_no | Repair | — | `handrail_secure` |
+| 10 | Tall furniture and wall-mounted TVs anti-tip anchored | yes_no | Repair | — | `furniture_anchored` |
+| 11 | Attic or ceiling access hatch — closes properly, no staining around it | yes_no | Repair | — | — |
+| 12 | No musty, damp or sewer odour anywhere in the unit | yes_no | Service | — | — |
+| 12a | → Where is the odour strongest? | text | — | — | — |
+| 13 | HVAC — thermostat connected, temperature stable, filter clean, vents clear, coils clean | yes_no | Service | `hvac` | `hvac_filter` |
+
+Item 12 is not cosmetic. Odour is the earliest leak and mildew indicator on the
+form, and the one finding most likely to reach a review before it reaches a PM.
+
+#### 2. Kitchen & Dining
+
+| # | Item | Type | Dflt | Asset | concern_key |
+|---|---|---|---|---|---|
+| 14 | Refrigeration — clean, holding < 40°F / < 0°F, ice maker works, no leaks, display works | yes_no | Service | `refrigerator` | — |
+| 14a | → Water filter within its service life | yes_no | Replace | `refrigerator` | `fridge_water_filter` |
+| 15 | Stove, oven and exhaust — burners and drip pans clean, oven light works, elements heat, hood fan and light operate | yes_no | Service | `oven_range` | — |
+| 16 | Dishwasher — filter clean, spray arms clear, door seal intact, drains fully, no leaks | yes_no | Service | `dishwasher` | — |
+| 17 | Microwave — clean, turntable and door latch work, heats | yes_no | Replace | `microwave` | — |
+| 18 | Small appliances — coffee maker, toaster, kettle, mixer clean, cords undamaged, all operate | yes_no | Replace | — | — |
+| 19 | Plumbing and under-sink — aerator clear, disposal works, supply lines and drain DRY, no slow drains | yes_no | Repair | `plumbing_system` | `under_sink_leak` |
+| 19a | → Whole-home water filter within its service life | yes_no | Replace | — | `home_water_filter` |
+| 20 | Cookware, dinnerware and flatware counted against the property's inventory list | count | — | — | — |
+
+**Item 20 is a link, not a checkbox.** Counts against par already have a whole
+machine behind them — `inventory_items.par_level`, the count flow, auto-PO below
+par, the Kroger cart. Asking it again here would give you two systems answering
+"are we short on flatware", and the inspection's answer would bypass the tested
+restock path. The item records THAT a count was performed and links to it; the
+count itself does the restocking. Same for linens in §4.
+
+#### 3. Bathrooms & Plumbing
+
+| # | Item | Type | Dflt | Asset | concern_key |
+|---|---|---|---|---|---|
+| 21 | Sinks and faucets — pressure adequate, hot water delivers, stoppers work, zero under-sink leaks | yes_no | Repair | `plumbing_system` | `under_sink_leak` |
+| 22 | Toilets — flush cycle tested, fill valve shuts off, base anchored, supply line dry | yes_no | Repair | `plumbing_system` | — |
+| 23 | Shower and tub — grout and caulk intact, drains flow, no mineral buildup, grab bars secure, doors track properly | yes_no | Repair | — | — |
+| 24 | Bathroom exhaust fans — blades clean, pull verified | yes_no | Replace | — | — |
+| 25 | GFCI outlets in every wet area test and reset correctly | yes_no | Repair | `electrical_panel` | `gfci_wet_areas` |
+
+#### 4. Bedrooms & Sleeping Areas
+
+| # | Item | Type | Dflt | Asset | concern_key |
+|---|---|---|---|---|---|
+| 26 | Beds and frames — joints stable, headboard secure, slats undamaged | yes_no | Repair | — | — |
+| 27 | Mattresses — protector present and clean, no wear, sagging or staining | yes_no | Replace | — | — |
+| 28 | Closets and storage — hangers stocked, luggage racks sturdy, safe operational | yes_no | Replace | — | — |
+| 29 | Linens, towels and bedding counted against the property's inventory list | count | — | — | — |
+| 30 | Smoke detector present and operational in every bedroom and hallway | yes_no | Repair | — | `smoke_detector_operational` |
+| 31 | CO detector operational on every level with sleeping areas | yes_no | Repair | — | `co_detector_operational` |
+
+Items 30 and 31 share their `concern_key` with Safety items 1–4. Asked here
+because this form runs quarterly and Safety does not.
+
+#### 5. Living Areas, Furniture & Electronics
+
+| # | Item | Type | Dflt | Asset | concern_key |
+|---|---|---|---|---|---|
+| 32 | Upholstered furniture — firm, clean, no stains, tears or frame wobble | yes_no | Repair | — | — |
+| 33 | Tables and case goods — sturdy, no loose legs, sharp edges or surface damage | yes_no | Repair | — | — |
+| 34 | TVs and entertainment — display and sound work, remotes present, streaming reset to the guest screen | yes_no | Replace | — | — |
+| 35 | Wifi — router and modem operational, speed test meets the advertised rate | yes_no | Service | — | `wifi_operational` |
+| 36 | Posted wifi credentials and guidebook details match reality | yes_no | Repair | — | — |
+| 37 | Lighting and outlets — all bulbs work, no frayed cords, switches operate, wall plates uncracked | yes_no | Replace | — | — |
+| 38 | Battery sweep — detectors, smart locks, thermostats, noise sensors, remotes all above low-battery warning | yes_no | Replace | — | `battery_sweep` |
+| 39 | Noise monitors and cameras — powered, reporting, and sited only in permitted areas | yes_no | Service | — | — |
+
+Item 38 is one line covering a whole class of guest complaint, and it is the
+item most likely to prevent a mid-stay call-out. Item 39's second clause is a
+compliance check, not a functional one: a camera in the wrong room is a listing
+violation on every major channel.
+
+#### 6. Utility, Laundry & Access
+
+| # | Item | Type | Dflt | Asset | concern_key |
+|---|---|---|---|---|---|
+| 40 | Washer — drum clean, drain hose clear, all cycles run, inlet filters clean | yes_no | Service | `washer` | — |
+| 41 | Washer supply lines braided stainless, not rubber; no weeping at either end | yes_no | Replace | `washer` | `washer_supply_lines` |
+| 42 | Dryer — lint trap clear, vent hose connected, exit point free of lint | yes_no | Service | `dryer` | `dryer_vent_clear` |
+| 43 | Water heater — set to ≤ 120°F, TPR valve clear, no corrosion or moisture at the base | yes_no | Service | `water_heater` | `water_heater_condition` |
+| 44 | Main water shut-off labelled, accessible, valve tool present | yes_no | Repair | `plumbing_system` | `main_shutoff` |
+| 45 | Electrical panel unobstructed, labelled, no tripped breakers or exposed wiring | yes_no | Repair | `electrical_panel` | `electrical_panel_clear` |
+| 46 | Access inventory — spare keys, lockbox codes and garage remotes all present and tested | yes_no | Replace | — | — |
+| 47 | Indoor bins present, clean and undamaged | yes_no | Replace | — | — |
+| 48 | Zero signs of pest activity in cabinets, corners and baseboards | yes_no | Service | — | `pest_activity` |
+| 48a | → Pest control contract current and visits on schedule | yes_no | Service | — | — |
+
+Items 41–45 carry `concern_key`s shared with Safety items 9, 10, 16 and 17.
+
+#### 7. Property Assets
+
+Rendered from the ledger, not written here. Every ACTIVE `property_assets` row
+whose `asset_type` is not already covered above produces one row —
+`repeat_per_asset` in §5 — so a property with three HVAC units is asked three
+times and one with no generator is never asked about a generator.
+
+| # | Item | Type | Dflt | Asset |
+|---|---|---|---|---|
+| 49 | *(per asset)* — operational, no visible damage, no unusual noise or smell | yes_no | Service | *(the asset)* |
+| 49a | → Serial/model plate photo | photo | — | *(the asset)* |
+
+#### Sign-off
+
+| # | Item | Type | Notes |
 |---|---|---|---|
-| 1 | Walls and ceilings — no damage, scuffs or needed touch-up | WO | — |
-| 2 | Flooring condition acceptable in every room | WO | — |
-| 3 | All doors open, close and latch properly | WO | — |
-| 4 | Windows open, close and lock; screens intact | WO | — |
-| 5 | No drips under sinks; toilets not running; drains flow freely | WO | `plumbing_system` |
-| 6 | Water pressure adequate at all fixtures | WO | `well_pump` |
-| 7 | Refrigerator operational, seals intact, ice maker working | WO | `refrigerator` |
-| 8 | Range/oven, microwave and dishwasher operational | WO | `oven_range` |
-| 9 | Washer and dryer operational, no leaks | WO | `washer` |
-| 10 | HVAC heats and cools; thermostat reads accurately | WO | `hvac` |
-| 11 | All light fixtures and bulbs working | PO | — |
-| 12 | Furniture sound — nothing wobbling, torn or stained | WO | — |
-| 13 | Mattresses unstained and unsagged; protectors in place | PO | — |
-| 14 | Linen and towel counts meet par and are in good condition | PO | — |
-| 15 | Cookware, dinnerware and flatware counts complete | PO | — |
-| 16 | TVs, remotes and wifi all functioning | WO | — |
-| 17 | Interior paint condition acceptable | WO | — |
-| 18 | Caulk and grout intact in all baths | WO | — |
-| 19 | Cabinet and drawer hardware secure | WO | — |
-| 20 | No odours; general cleanliness meets standard | WO | — |
+| 50 | Does additional cleaning need to be scheduled? | yes_no | Pre-answered `yes` if any item was flagged Cleaning; notes prefilled from those descriptions |
+| 50a | → What needs cleaning | text | Optional; the prefill is usually enough |
+| 51 | Certification — inspection completed on-site; all exceptions recorded with photos | yes_no | `is_required` |
+| 52 | Inspector signature | photo | `is_required` |
+
+Item 50 produces at most ONE work order, `wo_category = 'cleaning'`, crew-
+assigned, with the suggested cleaner count from §5.
+
+**Photo policy:** `photo_required` on fail for every item in §1–§6, plus item
+49a on a pass. See open question 2 on the unavailable-camera escape hatch —
+still open, and this form makes it more pressing rather than less.
 
 ### 12.3 Outdoor Property Inspection — SUPERSEDED FIRST PASS, awaiting the real form
 
