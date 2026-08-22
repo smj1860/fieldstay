@@ -134,7 +134,17 @@ async function seedForm(supabase: SupabaseClient, form: FormDefinition): Promise
   const sectionRows = must('upsert sections', await supabase
     .from('inspection_form_sections')
     .upsert(
-      form.sections.map((s, i) => ({ form_id: formId, key: s.key, name: s.name, sort_order: i })),
+      form.sections.map((s, i) => ({
+        form_id:    formId,
+        key:        s.key,
+        name:       s.name,
+        sort_order: i,
+        // Explicit nulls, not omission: this is an UPSERT, so a section that
+        // loses its gate must actively clear the column rather than keep the
+        // one written by the previous seed.
+        shown_when_asset:          s.shown_when_asset          ?? null,
+        shown_when_property_field: s.shown_when_property_field ?? null,
+      })),
       { onConflict: 'form_id,key' },
     )
     .select('id, key')) as { id: string; key: string }[]

@@ -2111,6 +2111,19 @@ export interface InspectionFormSection {
   name:       string
   sort_order: number
   created_at: string
+  /**
+   * Render this section only where the property has an ACTIVE property_assets
+   * row of this type — Outdoor's well section. Ledger-backed, so the skip is
+   * not something the inspector asserts (§12.3).
+   */
+  shown_when_asset:          AssetType | null
+  /**
+   * Render only where the named `properties` column is non-null — currently
+   * `hoa_name` alone, CHECK-constrained because an unrecognised gate would fail
+   * OPEN: a renderer cannot evaluate a condition it does not know, so it would
+   * show the section to everyone.
+   */
+  shown_when_property_field: 'hoa_name' | null
 }
 
 export interface InspectionFormItem {

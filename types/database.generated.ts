@@ -1853,6 +1853,8 @@ export type Database = {
           id: string
           key: string
           name: string
+          shown_when_asset: Database["public"]["Enums"]["asset_type"] | null
+          shown_when_property_field: string | null
           sort_order: number
         }
         Insert: {
@@ -1861,6 +1863,8 @@ export type Database = {
           id?: string
           key: string
           name: string
+          shown_when_asset?: Database["public"]["Enums"]["asset_type"] | null
+          shown_when_property_field?: string | null
           sort_order?: number
         }
         Update: {
@@ -1869,6 +1873,8 @@ export type Database = {
           id?: string
           key?: string
           name?: string
+          shown_when_asset?: Database["public"]["Enums"]["asset_type"] | null
+          shown_when_property_field?: string | null
           sort_order?: number
         }
         Relationships: [
