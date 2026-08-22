@@ -670,6 +670,58 @@ export function buildOwnerRezBookingRow(
   }
 }
 
+/**
+ * What a batch of OwnerRez bookings says about `cleaning_date`.
+ *
+ * A PROBE, not a feature. Nothing consumes cleaning_date — see the field's
+ * note on OwnerRezBooking for why adopting it is a model change rather than a
+ * mapping — and this exists so that decision is made against data instead of
+ * against a guess about how OwnerRez customers use their housekeeping feature.
+ *
+ * Pure, so it is testable without driving a sync, and so it cannot fail one.
+ *
+ * `derivedFromCheckout` is the question that would make the whole idea moot:
+ * if OwnerRez simply stamps the departure date, the field carries no
+ * information the generator does not already have from checkout_date. Compared
+ * on the DATE part only — a cleaning date of "2026-08-10T10:00:00" against a
+ * departure of "2026-08-10" is the derived case even though the timestamps
+ * differ, and the time-of-day is exactly what would be new if it varied.
+ */
+export interface OwnerRezCleaningDateProbe {
+  /** Bookings examined in this batch. */
+  total:               number
+  /** How many carried a non-empty cleaning_date. */
+  withCleaningDate:    number
+  /** Of those, how many fall on the booking's own departure date. */
+  derivedFromCheckout: number
+  /** Of those, how many carry a time-of-day other than midnight. */
+  withTimeOfDay:       number
+}
+
+export function summarizeOwnerRezCleaningDates(
+  bookings: readonly OwnerRezBooking[],
+): OwnerRezCleaningDateProbe {
+  const probe: OwnerRezCleaningDateProbe = {
+    total: bookings.length, withCleaningDate: 0, derivedFromCheckout: 0, withTimeOfDay: 0,
+  }
+
+  for (const b of bookings) {
+    const raw = b.cleaning_date
+    if (!raw) continue
+    probe.withCleaningDate++
+
+    // Substring rather than Date parsing: the value is documented as being in
+    // the PROPERTY's timezone with no offset, so constructing a Date would
+    // reinterpret it as UTC and shift the date across midnight boundaries —
+    // which would corrupt the very comparison being made.
+    const [datePart, timePart] = raw.split('T')
+    if (datePart && b.departure && datePart === b.departure.slice(0, 10)) probe.derivedFromCheckout++
+    if (timePart && !timePart.startsWith('00:00')) probe.withTimeOfDay++
+  }
+
+  return probe
+}
+
 /** An OwnerRez booking row whose property resolved to a FieldStay property. */
 export type MappedOwnerRezBookingRow = OwnerRezBookingRow & { property_id: string }
 

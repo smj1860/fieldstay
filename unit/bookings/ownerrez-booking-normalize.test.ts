@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { buildOwnerRezBookingRow, ownerRezBookingToNormalized } from '@/lib/integrations/providers/ownerrez'
+import { buildOwnerRezBookingRow, ownerRezBookingToNormalized, summarizeOwnerRezCleaningDates } from '@/lib/integrations/providers/ownerrez'
 import type { OwnerRezBooking } from '@/lib/integrations/types'
 
 function baseBooking(overrides: Partial<OwnerRezBooking> = {}): OwnerRezBooking {
@@ -156,5 +156,76 @@ describe('buildOwnerRezBookingRow — time columns are omitted, never nulled', (
     const row = buildOwnerRezBookingRow('org-1', baseBooking({ check_out: '10:00' }), MAP)
     expect('checkin_time' in row).toBe(false)
     expect(row.checkout_time).toBe('10:00')
+  })
+})
+
+describe('summarizeOwnerRezCleaningDates — the probe, not a feature', () => {
+  // cleaning_date is read for MEASUREMENT only. A FieldStay turnover is a
+  // window (checkout_datetime -> checkin_datetime), not an appointment, so
+  // adopting a scheduled point is a model change. This decides whether that
+  // change is worth making, against production data rather than a guess.
+
+  it('counts nothing when the field is absent, which is the expected steady state', () => {
+    const p = summarizeOwnerRezCleaningDates([baseBooking(), baseBooking()])
+    expect(p).toEqual({ total: 2, withCleaningDate: 0, derivedFromCheckout: 0, withTimeOfDay: 0 })
+  })
+
+  it('flags a cleaning date that is just the departure date as DERIVED', () => {
+    // The finding that would kill the idea outright: if OwnerRez stamps the
+    // checkout date, the field carries nothing the generator does not already
+    // compute from checkout_date.
+    const p = summarizeOwnerRezCleaningDates([
+      baseBooking({ departure: '2026-08-10', cleaning_date: '2026-08-10T00:00:00' }),
+    ])
+    expect(p.withCleaningDate).toBe(1)
+    expect(p.derivedFromCheckout).toBe(1)
+    expect(p.withTimeOfDay).toBe(0)
+  })
+
+  it('separates a real scheduled time from a bare date on the same day', () => {
+    // Same date as departure, but an actual hour — still "derived" by date,
+    // yet the time IS new information. Both counters fire, deliberately.
+    const p = summarizeOwnerRezCleaningDates([
+      baseBooking({ departure: '2026-08-10', cleaning_date: '2026-08-10T14:30:00' }),
+    ])
+    expect(p.derivedFromCheckout).toBe(1)
+    expect(p.withTimeOfDay).toBe(1)
+  })
+
+  it('flags a date that is NOT the departure — the case worth building for', () => {
+    // Checkout Monday, clean scheduled Wednesday. Our window spans the whole
+    // gap and gives the crew no guidance about which day; this is the PM's
+    // stated intent and the only shape that justifies a schema change.
+    const p = summarizeOwnerRezCleaningDates([
+      baseBooking({ departure: '2026-08-10', cleaning_date: '2026-08-12T09:00:00' }),
+    ])
+    expect(p.withCleaningDate).toBe(1)
+    expect(p.derivedFromCheckout).toBe(0)
+    expect(p.withTimeOfDay).toBe(1)
+  })
+
+  it('compares DATE STRINGS, never parsed Dates', () => {
+    // The value is documented as being in the property's timezone with no
+    // offset. new Date('2026-08-10T23:00:00') reinterprets that as UTC, and in
+    // any negative-offset zone the date shifts a day — corrupting the exact
+    // comparison this probe exists to make. A late-evening clean on the
+    // departure date must still read as derived.
+    const p = summarizeOwnerRezCleaningDates([
+      baseBooking({ departure: '2026-08-10', cleaning_date: '2026-08-10T23:00:00' }),
+    ])
+    expect(p.derivedFromCheckout).toBe(1)
+  })
+
+  it('tolerates a departure carrying a time component', () => {
+    const p = summarizeOwnerRezCleaningDates([
+      baseBooking({ departure: '2026-08-10T00:00:00', cleaning_date: '2026-08-10T11:00:00' }),
+    ])
+    expect(p.derivedFromCheckout).toBe(1)
+  })
+
+  it('ignores empty strings rather than counting them as present', () => {
+    const p = summarizeOwnerRezCleaningDates([baseBooking({ cleaning_date: '' })])
+    expect(p.withCleaningDate).toBe(0)
+    expect(p.total).toBe(1)
   })
 })

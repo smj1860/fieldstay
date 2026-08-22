@@ -70,9 +70,11 @@ import { createGuidebookPropertyConfigsForProperties } from '@/lib/guidebook/syn
 import { seedPresentAssetsFromAmenities } from '@/lib/asset-discovery/seed-from-amenities'
 import {
   buildOwnerRezBookingRow,
+  summarizeOwnerRezCleaningDates,
   partitionMappedBookingRows,
   selectOwnerRezBookingsToPostRevenue,
 } from '@/lib/integrations/providers/ownerrez'
+import { recordCleaningDateProbe } from '@/lib/integrations/providers/ownerrez-cleaning-probe'
 import { upsertBookingsReturningIds } from './upsert-bookings'
 import type { MappedOwnerRezBookingRow } from '@/lib/integrations/providers/ownerrez'
 import {
@@ -395,6 +397,14 @@ async function persistBookings(
 
   const builtRows = bookings.map((b) => buildOwnerRezBookingRow(conn.org_id, b, externalToFsId))
   const { mapped: bookingRows, unmappedCount } = partitionMappedBookingRows(builtRows)
+
+  // Measurement only — nothing reads cleaning_date. See OwnerRezBooking's note
+  // on the field: a turnover is a window, not an appointment, so adopting a
+  // scheduled point is a model change and this decides whether it is worth
+  // making. Awaited but self-swallowing, so it cannot fail a booking import.
+  await recordCleaningDateProbe(
+    supabase, conn.org_id, summarizeOwnerRezCleaningDates(bookings), new Date().toISOString(),
+  )
 
   if (unmappedCount) {
     logger.warn(

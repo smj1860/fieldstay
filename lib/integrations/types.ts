@@ -262,6 +262,25 @@ export interface OwnerRezBooking {
    */
   check_in?:     string | null
   check_out?:    string | null
+  /**
+   * "Scheduled cleaning date and time in property time zone" (date-time).
+   *
+   * READ FOR MEASUREMENT ONLY — deliberately not consumed anywhere. A
+   * FieldStay turnover is a WINDOW (checkout_datetime -> checkin_datetime plus
+   * window_minutes), not an appointment, so adopting a scheduled point is a
+   * model change rather than a field mapping, and it would put a second
+   * scheduler behind a record that carries crew assignments.
+   *
+   * Three things are unknown and one probe settles all of them: whether the
+   * field is populated at all outside OwnerRez's own housekeeping feature,
+   * whether it is merely derived from checkout (in which case it duplicates
+   * what the generator already computes), and whether it ever disagrees with
+   * the window we derive — the last being the most useful signal, since a
+   * cleaning date outside our window means one of the two systems is wrong.
+   *
+   * See summarizeOwnerRezCleaningDates. Decide after there is data.
+   */
+  cleaning_date?: string | null
   // ✅ Confirmed live 2026-07-15 against GET /v2/bookings with
   // include_guest=true — the real shape has first_name/last_name, NOT a
   // combined `name` field. This is why guest_name has been null on every
