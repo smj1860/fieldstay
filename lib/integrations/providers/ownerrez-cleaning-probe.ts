@@ -86,14 +86,35 @@ export async function recordCleaningDateProbe(
 
     const merged = foldProbe((existingRes.data?.value ?? null) as Partial<StoredProbe> | null, observed, nowIso)
 
-    await supabase
+    // { error } destructured, NOT discarded — and the try/catch around this
+    // function is not what makes it safe. PostgREST RESOLVES with { error }
+    // rather than throwing, so a bare `await …upsert(…)` inside a try block
+    // reads as protected while the catch can never fire for it.
+    //
+    // That matters more for a probe than for a normal write. A write that
+    // silently never lands leaves the table empty, and an empty table here
+    // does not read as "the instrument is broken" — it reads as "the field is
+    // never populated", which is the conclusion that cancels the feature. A
+    // measurement that fails silently is worse than no measurement, because it
+    // answers the question confidently and wrongly.
+    const { error } = await supabase
       .from('org_milestones')
       .upsert(
         { org_id: orgId, milestone: CLEANING_PROBE_MILESTONE, value: merged },
         { onConflict: 'org_id,milestone' },
       )
-  } catch {
-    // Deliberately silent. A diagnostic that can page someone, or worse fail a
-    // booking import, costs more than the measurement is worth.
+
+    // Warn rather than reportError: this is diagnostics, and a Sentry issue
+    // per sync per org would cost more than the answer is worth. Visible
+    // enough that "the probe never wrote" is discoverable before it is
+    // mistaken for "the field is never set".
+    if (error) {
+      console.warn(`[ownerrez-cleaning-probe] upsert failed for org ${orgId}: ${error.message}`)
+    }
+  } catch (err) {
+    // The genuinely thrown case — a transport failure, not a PostgREST error.
+    // Still non-fatal: this is attached to the path that imports a PM's
+    // bookings and must never be able to fail it.
+    console.warn(`[ownerrez-cleaning-probe] threw for org ${orgId}: ${err instanceof Error ? err.message : String(err)}`)
   }
 }
