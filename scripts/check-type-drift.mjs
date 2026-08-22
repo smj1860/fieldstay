@@ -97,8 +97,9 @@ if (url.includes(PROD_PROJECT_REF)) {
 }
 
 // ── Postgres enum type name -> TS union type name ──────────────────────────
-// Every enum currently in the public schema (34, verified against both
-// live projects on 2026-07-25). Add the pair here the same commit a new
+// Every enum currently in the public schema (38 as of 2026-08-22, when the
+// four inspection_* enums landed with phase 1; 34 before that, verified
+// against both live projects on 2026-07-25). Add the pair here the same commit a new
 // `CREATE TYPE ... AS ENUM` migration ships alongside its TS union.
 const ENUM_MAP = {
   asset_scan_status:    'AssetScanStatus',
@@ -113,6 +114,10 @@ const ENUM_MAP = {
   contact_pref:         'ContactPref',
   crew_role:            'CrewRole',
   ical_source:          'IcalSource',
+  inspection_action:    'InspectionAction',
+  inspection_remediation: 'InspectionRemediation',
+  inspection_response_type: 'InspectionResponseType',
+  inspection_result:    'InspectionResult',
   inventory_category:   'InventoryCategory',
   line_item_type:       'LineItemType',
   macrs_class:          'MacrsClass',
