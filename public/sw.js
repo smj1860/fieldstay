@@ -49,7 +49,21 @@ self.addEventListener('activate', (event) => {
 // /maintenance is deliberately ABSENT. It is the next surface to go offline
 // (see docs/INSPECTIONS_SPEC.md §8), but it has no local store behind it yet,
 // so allowlisting it now would ship the exact staleness this change removes,
-// just narrowed to one page. It goes in when the offline foundation lands.
+// just narrowed to one page.
+//
+// ⚠️ SHARPENED 2026-08-22. This used to say "it goes in when the offline
+// foundation lands", and phase 2a has now landed the foundation — the Dexie
+// cache (lib/dexie/dashboard/schema.ts), its lifecycle and the outbox. It still
+// must NOT go in, because "the foundation exists" was never the real condition.
+//
+// What this worker caches is the SERVER-RENDERED HTML of a page. /maintenance
+// is a Server Component that renders its data on the server, so serving it from
+// cache serves last Tuesday's board no matter how current the IndexedDB copy
+// beside it is. A local store only helps once the page READS from it on the
+// client, which is phase 3's tablet UI.
+//
+// The condition is therefore: /maintenance goes in when it renders from the
+// local cache, not when the local cache exists.
 const OFFLINE_PATHS = [
   '/crew',          // the crew PWA — offline is its whole point
   '/work-orders/',  // vendor token pages, cached so a hard reload survives no signal

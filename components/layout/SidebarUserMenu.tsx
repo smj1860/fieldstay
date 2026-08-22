@@ -3,20 +3,35 @@
 import { useState }     from 'react'
 import { useRouter }    from 'next/navigation'
 import { createClient } from '@/lib/supabase/client'
+import { purgeDashboardDbsForUser } from '@/lib/dexie/dashboard/schema'
 
 interface Props {
   userName:  string
   userEmail: string
   orgName:   string
+  /** Needed to purge this user's dashboard IndexedDB caches on sign-out. */
+  userId:    string
 }
 
-export function SidebarUserMenu({ userName, userEmail, orgName }: Readonly<Props>) {
+export function SidebarUserMenu({ userName, userEmail, orgName, userId }: Readonly<Props>) {
   const router            = useRouter()
   const [loading, setLoading] = useState(false)
   const [open,    setOpen]    = useState(false)
 
   async function handleSignOut() {
     setLoading(true)
+
+    // BEFORE signOut, and deliberately so. IndexedDB survives sign-out unless
+    // something explicitly clears it (INSPECTIONS_SPEC §8), and the dashboard
+    // cache holds more than the crew PWA does — costs, vendor contacts,
+    // owner-adjacent detail. Purging first means a signOut that fails (no
+    // signal, auth host unreachable) still leaves the device clean, which is
+    // the right way round on a shared or lost tablet.
+    //
+    // Deletion needs no session, so nothing here depends on the order for
+    // permission reasons. purgeDashboardDbsForUser swallows its own errors.
+    await purgeDashboardDbsForUser(userId)
+
     const supabase = createClient()
     await supabase.auth.signOut()
     router.push('/login')
@@ -100,7 +115,7 @@ export function SidebarUserMenu({ userName, userEmail, orgName }: Readonly<Props
                 onClick={handleSignOut}
                 disabled={loading}
                 className="w-full flex items-center gap-3 px-4 py-2.5 text-sm transition-colors disabled:opacity-50 focus:outline-none focus:ring-2 focus:ring-inset focus:ring-[var(--accent-gold)]"
-                style={{ color: '#ef4444' }}
+                style={{ color: 'var(--accent-red)' }}
                 onMouseOver={(e) => { e.currentTarget.style.background = 'var(--bg-card)' }}
                 onFocus={(e)     => { e.currentTarget.style.background = 'var(--bg-card)' }}
                 onMouseOut={(e)  => { e.currentTarget.style.background = 'transparent' }}

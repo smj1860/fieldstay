@@ -1005,7 +1005,7 @@ motivating force, no exposure. **This copy must be written or approved by
 | 1 | Schema + immutability | Tables, completion lock, retention exclusion + guardrail, `assigned_to_user_id` |
 | 2 | The three forms | **DONE.** `lib/inspections/forms/*` (170 items: 40 + 52 + 57 top-level, plus children and repeat groups), `scripts/seed-inspection-forms.ts`, `.github/workflows/seed-inspection-forms.yml`, and `unit/inspections/form-definitions.test.ts`. Upsert-only on three real unique constraints, never delete. See the notes below on what building it changed |
 | 0 | SW allowlist + push parity | **DONE.** `/sw.js` gained an explicit offline allowlist — `/crew` and `/work-orders/`, NOT `/maintenance` (see below); everything else gets the offline page rather than a stale cached copy. Push subscription unified into `lib/push/subscribe-client.ts`, fixing the dashboard's `if (existing) return` that had left zero PM rows ever |
-| 2a | Offline foundation | Generalize `lib/dexie` beyond the crew PWA; per-user+org cache with sign-out and org-switch clearing; extend the dead-letter and sync-coverage guardrails to the new surface |
+| 2a | Offline foundation | **DONE.** `lib/dexie/outbox-primitives.ts` (leaf module, so the shared engine no longer imports the crew one); `lib/dexie/dashboard/*` — cache keyed on user AND org, swept at mount, purged at sign-out; the outbox on the SHARED `OutboxEngine`; `DashboardSyncBanner` mounted by the dashboard layout; and three guardrails — `dead-letter-flag-type`, `dexie-db-namespacing`, `dashboard-dead-letter-coverage`. Upload handlers are declared and deliberately unimplemented: their endpoints are phases 3–4, and the `Record<DashboardMutationKind, …>` makes adding a kind without one a compile error |
 | 3 | Fill + complete | Tablet UI at `/maintenance/inspections`, offline WO create, photos |
 | 4 | Remediation | fail → WO/PO with partial-unique idempotency |
 | 5 | Scheduling | `maintenance_schedules` discriminator |
@@ -1013,6 +1013,33 @@ motivating force, no exposure. **This copy must be written or approved by
 | 7 | Export | History PDF via `pdf-lib`, copying the CPA export |
 
 1–4 are the feature. 5–7 are what make it automatic.
+
+### What phase 2a settled — 2026-08-22
+
+**`/maintenance` still does NOT go in the service-worker allowlist**, and the
+condition in `public/sw.js` has been sharpened rather than met. It read "it
+goes in when the offline foundation lands"; the foundation has now landed and
+that was never the real condition. The worker caches SERVER-RENDERED HTML, and
+`/maintenance` is a Server Component, so serving it from cache serves last
+week's board however current the IndexedDB copy beside it is. The real
+condition is that the page RENDERS FROM the local cache — phase 3's tablet UI.
+
+**The dashboard outbox is CREATE-ONLY, and one crew rule therefore does not
+cross over.** `discardFailedDashboardMutation` does not invalidate cursors, and
+that is not an omission. The crew rule exists because a queued mutation is
+replayed over every pull while the cursor advances past the server row it
+masks, so abandoning it without rewinding pins the cache to a value the server
+never accepted, permanently. A create masks no server row — the row it would
+have created does not exist. If an update kind is ever added, the rule arrives
+with it.
+
+**Three principals now share one origin's IndexedDB** — crew, vendor, and
+dashboard — and the near-miss is recorded in
+`unit/guardrails/dexie-db-namespacing.test.ts`. The crew sweep deletes any
+`fieldstay-crew-*` database not ending in the current user id; the dashboard
+suffix is `{userId}-{orgId}`, which never equals `{userId}`, so folding it into
+that prefix list would have deleted the PM's live cache and its queued work
+orders on every crew-context mount.
 
 ### What phase 2 changed about phase 1 — 2026-08-22
 

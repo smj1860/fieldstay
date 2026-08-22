@@ -1395,6 +1395,22 @@ following them stops being a memory test. Five layers, checked in CI via
      for them. Written when the shared engine was found to have drifted back to
      `failed?: boolean` — not yet a live bug, since the only surface on it does
      not index the column, but a trap laid directly in the next one's path.
+   - `dexie-db-namespacing` — three principals share one origin's IndexedDB
+     (crew, vendor work-order portal, PM dashboard) and each cleanup touches
+     only its own prefix. No prefix may be a prefix of another; the dashboard's
+     staleness test compares the whole `{userId}-{orgId}` suffix, since
+     `startsWith(userId)` would spare every other org of the same user — the
+     org-switch case. Exists because the crew sweep keys on a bare user id and
+     the dashboard suffix never equals one, so folding it into that prefix list
+     would delete a live cache and its queued work orders.
+   - `dashboard-dead-letter-coverage` — the crew dead-letter guardrail extended
+     to the second surface: every `DashboardMutationKind` has a banner label and
+     an upload handler, BOTH outboxes have a dead-letter AND a stalled query
+     (a transport failure never sets `failed`, so the stalled surface is its
+     only visible one), `failed` is indexed on both, the banner is mounted by
+     the dashboard layout, the outbox builds on the shared `OutboxEngine`, and
+     the enqueue commits the local write and the outbox row in ONE transaction
+     with the drain kick outside it.
    - `node-types-runtime-parity` — `@types/node`'s major equals
      `engines.node`'s and every `node-version:` in `.github/workflows/`.
      Types ahead of the runtime describe APIs that do not exist in

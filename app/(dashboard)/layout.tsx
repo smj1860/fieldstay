@@ -4,6 +4,8 @@ import { headers } from 'next/headers'
 import { after } from 'next/server'
 import { createServiceClient } from '@/lib/supabase/server'
 import { requireOrgMember } from '@/lib/auth'
+import { DashboardCacheGuard } from '@/lib/dexie/dashboard/cache-guard'
+import { DashboardSyncBanner } from './_components/dashboard-sync-banner'
 import { DashboardShell } from '@/components/dashboard-shell'
 import { DashboardToastProvider } from '@/components/dashboard-toast-provider'
 import { SupportChatWidget } from '@/components/support/support-chat-widget'
@@ -190,11 +192,14 @@ export default async function DashboardLayout({
 
   return (
     <DashboardToastProvider orgId={membership.org_id} userId={user.id}>
+      <DashboardCacheGuard userId={user.id} orgId={membership.org_id} />
+      <DashboardSyncBanner userId={user.id} orgId={membership.org_id} />
       <DashboardShell
         role={membership.role}
         orgName={org.name || 'FieldStay'}
         userName={displayName}
         userEmail={user.email ?? ''}
+        userId={user.id}
         onboardingComplete={onboardingComplete}
         onboardingPct={onboardingPct}
         notifications={notificationFeed.items}
