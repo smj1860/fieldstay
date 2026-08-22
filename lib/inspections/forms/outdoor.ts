@@ -21,6 +21,7 @@
 // That is the general authoring rule worth carrying forward: ask for the
 // SYMPTOM a non-expert can see, not the DIAGNOSIS only a trade can make.
 
+import { assetsSection, signoffSection } from './shared-sections'
 import type { FormDefinition } from './types'
 
 export const OUTDOOR_FORM: FormDefinition = {
@@ -465,57 +466,7 @@ export const OUTDOOR_FORM: FormDefinition = {
       ],
     },
 
-    // ── 7 ────────────────────────────────────────────────────────────────────
-    {
-      key:  'assets',
-      name: 'Property Assets',
-      items: [
-        {
-          key:    'outdoor.assets.condition',
-          prompt: 'Operational, no visible damage, no unusual noise or smell',
-          repeat_per_asset: true,
-          remediation: 'work_order', default_actions: ['service'],
-          wo_category: 'general',
-          children: [{
-            key:    'outdoor.assets.plate_photo',
-            prompt: 'Serial/model plate photo',
-            response_type: 'photo', photo_required: true,
-            remediation: 'none', default_actions: [],
-          }],
-        },
-      ],
-    },
-
-    // ── Sign-off ─────────────────────────────────────────────────────────────
-    {
-      key:  'signoff',
-      name: 'Sign-off',
-      items: [
-        {
-          // Pressure-washing, gutter clearing and grounds cleanup all land here.
-          key:    'outdoor.signoff.additional_cleaning',
-          prompt: 'Does additional cleaning need to be scheduled?',
-          remediation: 'none', default_actions: [],
-          children: [{
-            // No `show_when`, for the reason spelled out on Indoor's twin.
-            key:    'outdoor.signoff.cleaning_detail',
-            prompt: 'What needs cleaning',
-            response_type: 'text', is_required: false,
-            remediation: 'none', default_actions: [],
-          }],
-        },
-        {
-          key:    'outdoor.signoff.certification',
-          prompt: 'Certification — inspection completed on-site; all exceptions recorded with photos',
-          remediation: 'none', default_actions: [],
-        },
-        {
-          key:    'outdoor.signoff.signature',
-          prompt: 'Inspector signature',
-          response_type: 'photo', photo_required: true,
-          remediation: 'none', default_actions: [],
-        },
-      ],
-    },
+    assetsSection('outdoor'),
+    signoffSection('outdoor'),
   ],
 }

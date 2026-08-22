@@ -16,6 +16,7 @@
 // two systems answering "are we short on flatware", and the inspection's answer
 // would bypass the tested restock path. These record THAT a count happened.
 
+import { assetsSection, signoffSection } from './shared-sections'
 import type { FormDefinition } from './types'
 
 export const INDOOR_FORM: FormDefinition = {
@@ -431,71 +432,7 @@ export const INDOOR_FORM: FormDefinition = {
       ],
     },
 
-    // ── 7 ────────────────────────────────────────────────────────────────────
-    {
-      // Rendered from the ledger, not written here. Three HVAC units produce
-      // three rows; no generator produces no generator question.
-      key:  'assets',
-      name: 'Property Assets',
-      items: [
-        {
-          key:    'indoor.assets.condition',
-          prompt: 'Operational, no visible damage, no unusual noise or smell',
-          repeat_per_asset: true,
-          remediation: 'work_order', default_actions: ['service'],
-          wo_category: 'general',
-          children: [{
-            key:    'indoor.assets.plate_photo',
-            prompt: 'Serial/model plate photo',
-            response_type: 'photo', photo_required: true,
-            remediation: 'none', default_actions: [],
-          }],
-        },
-      ],
-    },
-
-    // ── Sign-off ─────────────────────────────────────────────────────────────
-    {
-      key:  'signoff',
-      name: 'Sign-off',
-      items: [
-        {
-          // Produces at most ONE work order, wo_category 'cleaning', crew-
-          // assigned, with the suggested cleaner count. Pre-answered `yes` if
-          // any item was flagged Cleaning; notes prefilled from those
-          // descriptions. `remediation: 'none'` because the cleaning roll-up is
-          // its own path — it is not one of the per-item Repair/Service/Replace
-          // records, and routing it through them would produce N dispatches for
-          // one visit.
-          key:    'indoor.signoff.additional_cleaning',
-          prompt: 'Does additional cleaning need to be scheduled?',
-          remediation: 'none', default_actions: [],
-          children: [{
-            // DELIBERATELY NOT `show_when`. The three values are pass/fail/na,
-            // and this parent is one of the two items on any form where "yes"
-            // is not "everything is fine" — yes means more work is needed. So
-            // `show_when: 'pass'` would be mechanically correct and read to
-            // every future human as its exact opposite. It is optional anyway
-            // ("the prefill is usually enough"), so the render condition
-            // belongs in the UI, where the inversion is visible.
-            key:    'indoor.signoff.cleaning_detail',
-            prompt: 'What needs cleaning',
-            response_type: 'text', is_required: false,
-            remediation: 'none', default_actions: [],
-          }],
-        },
-        {
-          key:    'indoor.signoff.certification',
-          prompt: 'Certification — inspection completed on-site; all exceptions recorded with photos',
-          remediation: 'none', default_actions: [],
-        },
-        {
-          key:    'indoor.signoff.signature',
-          prompt: 'Inspector signature',
-          response_type: 'photo', photo_required: true,
-          remediation: 'none', default_actions: [],
-        },
-      ],
-    },
+    assetsSection('indoor'),
+    signoffSection('indoor'),
   ],
 }
