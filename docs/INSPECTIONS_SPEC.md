@@ -153,8 +153,9 @@ inspection_form_items           ONE question
 inspections                     ONE performance of a form, per property
   id, org_id, property_id,
   form_id, form_version, form_snapshot jsonb,  -- the form as it was THEN
+  header_snapshot jsonb,                  -- the letterhead as it was THEN
   assigned_to_user_id,
-  inspector_name text,                    -- who PHYSICALLY did it
+  inspector_name text,                    -- typed at SIGN-OFF; see below
   scheduled_for date, started_at, completed_at, completed_by_user_id,
   source_schedule_id (nullable)           -- which schedule generated it
 
@@ -323,6 +324,45 @@ say something the ledger backs rather than something a person typed.
 The payoff beyond the form: a failed asset-scoped item carries `asset_id`, so it
 can move that asset's `health_score` and appear in its history. An inspection
 becomes an input to asset health rather than a document filed beside it.
+
+### The letterhead and the signature are different things — 2026-08-22
+
+Question 4 asked where an inspector's title should live and the answer turned
+out to be neither place, because the header was doing two jobs at once.
+
+**The header is the LETTERHEAD.** Property name and address, date and start
+time, management company, and the org owner — all prefilled and locked, none
+typed. It says who is accountable for this inspection existing. A field the
+inspector types is a field the inspector can get wrong, and for an insurance
+artifact locked provenance is worth more than convenience.
+
+**The sign-off is the SIGNATURE.** At the bottom, the person who actually
+walked the property types their own name. That is `inspector_name`, and it is
+the one identity field on the form that SHOULD be free text — because per
+question 3 the person holding the tablet may not be a FieldStay user at all,
+and a locked field would then be confidently wrong rather than usefully blank.
+
+That mirrors how a real inspection report works: a firm's letterhead at the top,
+an individual's signature at the bottom, and nobody confuses the two. It also
+means three identities are recorded rather than one, which is the honest count:
+
+| Field | Who | How |
+|---|---|---|
+| `header_snapshot.org_owner` | the accountable party | prefilled, locked |
+| `completed_by_user_id` | whose session submitted it | automatic, immutable |
+| `inspector_name` | who walked the property | typed at sign-off |
+
+**`header_snapshot` exists for the same reason `form_snapshot` does.** The
+letterhead is derived from live rows — the org's owner, the property's name and
+address — and every one of them can change. Without a snapshot, transferring
+ownership or renaming a property silently rewrites the letterhead on three years
+of past reports, and a document that changes what it asserted is not evidence.
+Freeze it at completion alongside the form.
+
+The three ARE allowed to disagree, and a report that shows all three is
+stronger for it: "completed by the PM's session, walked by a contractor they
+sent" is a true and unremarkable sentence, and hiding it behind one name field
+would be the only dishonest option available.
 
 ### Cleaning is separated from WO/PO, and aggregates
 

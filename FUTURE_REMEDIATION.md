@@ -1541,3 +1541,47 @@ the guest-night denominator from the `max_guests x avg_stay_length` proxy to
 booking actuals, and changing the denominator changes the distribution whose
 variance item 1 would be measuring. Landing them in the wrong order means
 computing sigma over a proxy and then invalidating it.
+
+---
+
+## 33. Drop the `crew-uploads` storage bucket — dead infrastructure
+
+**Where:** `storage.buckets` (production only — never created in E2E)
+
+Made PRIVATE on 2026-08-22 by
+`supabase/migrations/20260822054254_crew_uploads_private.sql`. That closed the
+hazard. **This entry is about removing it entirely, which is a separate call.**
+
+It is dead by every available measure, checked rather than assumed:
+
+- **zero objects**, zero bytes
+- **no `storage.objects` policies** at all
+- **nothing in `app/` or `lib/` uploads to it** — the only two references in the
+  tree are a comment in `vendors/[id]/compliance-section.tsx` and the note in
+  `20260731100000_db_invariant_report_storage_bucket_ids.sql`
+- crew photos actually go to `turnover-photos` and `work-order-photos`, both
+  private, both covered by the semgrep chokepoint banning `getPublicUrl()`
+
+It was public until 2026-08-22, which was never a live exposure — public with
+no objects discloses nothing, and with no policies the client could not write
+there either. It was a trap: a bucket with an inviting name, sitting outside the
+`getPublicUrl` chokepoint *because* it was public, so nothing was watching it.
+Private removes the trap; dropping removes the bucket.
+
+**Why it was not dropped in the same change.** Its id is referenced by
+`scripts/check-db-invariants.mjs`'s `SERVICE_ROLE_ONLY_BUCKETS` staleness logic,
+and the prod-vs-E2E asymmetry there is the exact thing the July 2026 migration
+above exists to handle: the bucket exists in production with no policies and was
+never created in E2E, which used to fail the `db-invariants` job for an entry
+that was correctly listed. Dropping it means removing the allowlist entry in the
+same change and confirming the staleness check still distinguishes
+"bucket gained policies" from "bucket does not exist here". That is a small
+piece of work, but it is *that* piece of work rather than a one-line `DROP`.
+
+**When to do it:** alongside the inspections photo work, since that adds
+`inspection-photos` and will be touching the bucket list and the allowlist
+anyway. Doing both in one pass means reasoning about the invariant script once.
+
+**Do not** simply `DROP` it without the allowlist change — the shrink-only
+ratchet will fail CI, and the failure will look like an unrelated invariant
+regression.

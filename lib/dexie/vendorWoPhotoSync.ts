@@ -7,7 +7,7 @@ import {
   getVendorPendingPhotoBlob,
   deleteVendorPendingPhotoBlob,
 } from './vendorPhotoQueue'
-import { compressPhotoForQueue } from './photo-queue'
+import { compressPhoto } from '@/lib/images/compress'
 
 import { reportError } from '@/lib/observability/report-error'
 const MAX_RETRIES = 5
@@ -106,7 +106,7 @@ export async function processPendingVendorPhotoUploads(token: string): Promise<v
  * succeeds, fails transiently, or the device has no connection at all.
  */
 export async function queueVendorPhotoUpload(token: string, file: File, uploadedBy: string): Promise<number> {
-  const compressed = await compressPhotoForQueue(file)
+  const compressed = await compressPhoto(file)
   const blobKey = crypto.randomUUID()
   await saveVendorPendingPhotoBlob(token, blobKey, compressed)
 

@@ -6,7 +6,8 @@ import { useDexieDb } from '@/lib/dexie/context'
 import { createClient } from '@/lib/supabase/client'
 import { orgScopedStoragePath } from '@/lib/storage/object-path'
 import { enqueueMutation } from '@/lib/dexie/syncService'
-import { savePendingPhotoBlob, compressPhotoForQueue } from '@/lib/dexie/photo-queue'
+import { savePendingPhotoBlob } from '@/lib/dexie/photo-queue'
+import { compressPhoto } from '@/lib/images/compress'
 import { processPendingPhotoUploads } from '@/lib/dexie/photo-sync'
 import { assetTypeDisplayName } from '@/lib/asset-discovery/config'
 import { Dialog } from '@/components/ui/Dialog'
@@ -138,7 +139,7 @@ export function DiscoveryCaptureModal({
         // returns, or after the device comes back online.
         photoPath = path
 
-        const compressed = await compressPhotoForQueue(photoFile)
+        const compressed = await compressPhoto(photoFile)
         await savePendingPhotoBlob(userId, blobKey, compressed)
         await db.pending_photo_uploads.add({
           id:             crypto.randomUUID(),
