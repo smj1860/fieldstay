@@ -1092,73 +1092,146 @@ Frequency: 1× or 2× a year, month(s) chosen by the PM.
 
 **Header** — prefilled and locked, not typed: property name/ID, physical
 address, inspection date, start time, inspector (the signed-in user),
-management company (the org). See open question 4 on inspector title.
+management company (the org). The inspector's own name is typed at SIGN-OFF,
+not here — see §5 on the letterhead/signature split.
+
+40 top-level items across 6 sections — still the shortest of the three, which is
+right for a form that runs once or twice a year.
 
 #### 1. Fire Safety & Life Safety Systems
 
-| # | Item | Type | Fail | Asset |
-|---|---|---|---|---|
-| 1 | Smoke detectors present in all bedrooms and hallways | yes_no | WO | — |
-| 1a | → Which room needs a smoke detector? | text | — | — |
-| 2 | Smoke detectors tested and operational | yes_no | WO | — |
-| 2a | → Which room's detector failed the test? | text | — | — |
-| 3 | CO detectors installed on every level with sleeping areas | yes_no | WO | — |
-| 3a | → Which level needs a CO detector? | text | — | — |
-| 4 | CO detectors operational | yes_no | WO | — |
-| 4a | → Which level's detector failed the test? | text | — | — |
-| 5 | Number of fire extinguishers | count | — | — |
-| 5a | → Location (one row per extinguisher) | text | — | — |
-| 5b | → Fully charged | yes_no | PO | — |
-| 5c | → Expiration date | date | PO | — |
-| 5d | → Tag photo | photo | — | — |
-| 6 | Exit doors and pathways clear and fully operational | yes_no | WO | — |
-| 6a | → Photo of each exit | photo | — | — |
-| 7 | Emergency lighting / flashlights present and functional | yes_no | PO | — |
-| 7a | → Location | text | — | — |
+| # | Item | Type | Dflt | Asset | concern_key |
+|---|---|---|---|---|---|
+| 1 | Smoke detectors present in all bedrooms and hallways | yes_no | Repair | — | `smoke_detector_present` |
+| 1a | → Which room needs a smoke detector? | text | — | — | — |
+| 2 | Smoke detectors tested and operational | yes_no | Repair | — | `smoke_detector_operational` |
+| 2a | → Which room's detector failed the test? | text | — | — | — |
+| 3 | Smoke detectors within their 10-year service life (date is on the back) | yes_no | Replace | — | `smoke_detector_age` |
+| 3a | → Which detectors are expired, and their manufacture dates | text | — | — | — |
+| 4 | CO detectors installed on every level with sleeping areas | yes_no | Repair | — | `co_detector_present` |
+| 4a | → Which level needs a CO detector? | text | — | — | — |
+| 5 | CO detectors operational | yes_no | Repair | — | `co_detector_operational` |
+| 5a | → Which level's detector failed the test? | text | — | — | — |
+| 6 | CO detectors within their service life (7–10 yr, per manufacturer) | yes_no | Replace | — | `co_detector_age` |
+| 7 | Number of fire extinguishers | count | — | — | — |
+| 7a | → Location (one row per extinguisher) | text | — | — | — |
+| 7b | → Fully charged | yes_no | Replace | — | — |
+| 7c | → Expiration date | date | Replace | — | — |
+| 7d | → Tag photo | photo | — | — | — |
+| 8 | Dryer lint trap and vent run clear to the exterior | yes_no | Service | `dryer` | `dryer_vent_clear` |
+| 9 | Chimney/flue swept within the last 12 months; firebox and damper sound | yes_no | Service | — | `chimney_swept` |
+| 10 | Exit doors and pathways clear and fully operational | yes_no | Repair | — | — |
+| 10a | → Photo of each exit | photo | — | — | — |
+| 11 | Bedroom egress windows open fully from inside without a tool | yes_no | Repair | — | `egress_window` |
+| 12 | Emergency lighting / flashlights present and functional | yes_no | Replace | — | — |
+| 12a | → Location | text | — | — | — |
+| 13 | Evacuation plan and emergency contacts posted where guests will see them | yes_no | Replace | — | — |
 
-Items 5a–5d repeat once per extinguisher counted in 5 — see
-`repeat_source_item_id` in §5. Item 5d is `photo_required` even on a pass:
-extinguisher tags are photographed every time, which is the one place a
-passing item still produces evidence.
+Items 7a–7d repeat once per extinguisher counted in 7 — see
+`repeat_source_item_id` in §5. Item 7d is `photo_required` even on a pass:
+extinguisher tags are photographed every time, the one place a passing item
+still produces evidence.
 
-#### 2. Electrical & Utility Safety
+**Items 3 and 6 are the gap this form had for longest.** Items 2 and 5 test that
+a detector RESPONDS. A smoke detector is end-of-life at 10 years and a CO
+detector at 7–10, and an expired unit beeps perfectly well when the button is
+pressed — it has simply stopped sensing reliably. "Tested and operational"
+therefore passes a 15-year-old detector that a fire marshal would fail on sight.
+The form already knew how to ask this: item 7c asks an extinguisher's expiry.
+It just never asked it of the detectors.
 
-| # | Item | Type | Fail | Asset |
-|---|---|---|---|---|
-| 8 | GFCI outlets installed and functional in all wet areas (kitchen, baths, exterior, hot tub) | yes_no | WO | `electrical_panel` |
-| 9 | Electrical panel unobstructed, no exposed wiring, no tripped breakers | yes_no | WO | `electrical_panel` |
-| 10 | Main water shut-off labelled, accessible, valve tool in place | yes_no | WO | `plumbing_system` |
-| 11 | HVAC air filters clean, supply vents unblocked, service log current | yes_no | PO | `hvac` |
+Item 8 shares `dryer_vent_clear` with Indoor 42 and Outdoor 8 — the same vent
+from three vantage points, and now one work order. Dryer fires are a top-5
+residential cause; its absence from the FIRE safety form was the oversight.
+
+#### 2. Electrical, Gas & Utility Safety
+
+| # | Item | Type | Dflt | Asset | concern_key |
+|---|---|---|---|---|---|
+| 14 | GFCI outlets installed and functional in all wet areas | yes_no | Repair | `electrical_panel` | `gfci_wet_areas` |
+| 15 | Electrical panel unobstructed, no exposed wiring, no tripped breakers | yes_no | Repair | `electrical_panel` | `electrical_panel_clear` |
+| 16 | No daisy-chained power strips, no extension cords in permanent use | yes_no | Replace | — | — |
+| 17 | Gas appliances — furnace, water heater, range — leak-checked, vented, no odour | yes_no | Service | — | `gas_appliance_safe` |
+| 18 | Main water shut-off labelled, accessible, valve tool in place | yes_no | Repair | `plumbing_system` | `main_shutoff` |
+| 19 | HVAC air filters clean, supply vents unblocked, service log current | yes_no | Replace | `hvac` | `hvac_filter` |
+
+Item 17 is the other half of section 1's CO detectors: the detectors exist
+because of these appliances, and nothing was checking the source.
 
 #### 3. Structural, Floor & Slip/Trip Hazard Mitigation
 
-| # | Item | Type | Fail | Asset |
-|---|---|---|---|---|
-| 12 | Handrails secure; treads slip-resistant and clear | yes_no | WO | — |
-| 13 | Walkways and driveways level, clear of trip hazards, algae, ice | yes_no | WO | — |
-| 14 | Flooring sound — no torn carpet, loose tile or warped boards | yes_no | WO | — |
-| 15 | Deck and balcony guardrails sound; posts secure; spindle spacing compliant | yes_no | WO | `deck_structure` |
+| # | Item | Type | Dflt | Asset | concern_key |
+|---|---|---|---|---|---|
+| 20 | Handrails secure; treads slip-resistant and clear | yes_no | Repair | — | `handrail_secure` |
+| 21 | Walkways and driveways level, clear of trip hazards, algae, ice | yes_no | Repair | — | `walkway_trip_hazard` |
+| 22 | Flooring sound — no torn carpet, loose tile or warped boards | yes_no | Repair | — | `flooring_sound` |
+| 23 | Deck and balcony guardrails sound; posts secure; spindle spacing compliant | yes_no | Repair | `deck_structure` | `deck_guardrail` |
 
 #### 4. Water Leak & Freeze Damage Prevention
 
-| # | Item | Type | Fail | Asset |
-|---|---|---|---|---|
-| 16 | No active leaks under sinks, behind toilets, around the water heater | yes_no | WO | `water_heater` |
-| 17 | Braided stainless washing-machine supply lines fitted (not rubber) | yes_no | PO | `washer` |
-| 18 | Leak sensors installed at water heater, sump pump, washing machine | yes_no | PO | — |
-| 19 | Gutters and downspouts clear, draining away from the foundation | yes_no | WO | — |
+| # | Item | Type | Dflt | Asset | concern_key |
+|---|---|---|---|---|---|
+| 24 | No active leaks under sinks, behind toilets, around the water heater | yes_no | Repair | `water_heater` | `water_heater_condition` |
+| 25 | Braided stainless washing-machine supply lines fitted (not rubber) | yes_no | Replace | `washer` | `washer_supply_lines` |
+| 26 | Leak sensors installed at water heater, sump pump, washing machine | yes_no | Replace | — | — |
+| 27 | Automatic water shut-off device fitted and in service | yes_no | Replace | — | — |
+| 28 | Sump pump runs when tested; discharge clear; backup power present | yes_no | Service | — | `sump_pump` |
+| 29 | Gutters and downspouts clear, draining away from the foundation | yes_no | Service | — | `gutters_clear` |
+
+**Item 27 is on this form because of what the form is FOR.** §1 says the record
+is evidence for an insurance discount, and an automatic shut-off is a device
+insurers actively discount for. Item 26 already asks whether a sensor would
+NOTICE a leak; 27 asks whether anything ACTS on it. Asking the first without
+the second was leaving the discount on the table while documenting the case
+for it.
 
 #### 5. Exterior, Amenity & Security Risk Controls
 
-| # | Item | Type | Fail | Asset |
-|---|---|---|---|---|
-| 20 | Exterior lighting functional at every entryway | yes_no | WO | — |
-| 21 | Grills and fire pits at safe distance from structures; gas shut-offs marked | yes_no | WO | — |
-| 22 | Pool / hot tub fencing, self-closing gates and safety covers latch securely | yes_no | WO | `hot_tub` |
-| 23 | Exterior deadbolts and smart locks secure; keyless codes tested | yes_no | WO | `smart_lock` |
+| # | Item | Type | Dflt | Asset | concern_key |
+|---|---|---|---|---|---|
+| 30 | Exterior lighting functional at every entryway | yes_no | Replace | — | `exterior_lighting` |
+| 31 | Grills and fire pits at safe distance from structures; gas shut-offs marked | yes_no | Service | — | `firepit_clearance` |
+| 32 | No grill or open flame in use on a deck, balcony or under an overhang | yes_no | Repair | — | — |
+| 33 | Pool / hot tub fencing, self-closing gates and safety covers latch securely | yes_no | Repair | `hot_tub` | `pool_barrier` |
+| 34 | Pool/spa drain covers VGB-compliant and undamaged; anti-entrapment in place | yes_no | Replace | `pool_pump` | `pool_drain_vgb` |
+| 35 | Hot tub thermostat limited to 104°F or below | yes_no | Service | `hot_tub` | — |
+| 36 | Trampoline, playground or diving board present at this property | yes_no | — | — | — |
+| 37 | Exterior deadbolts and smart locks secure; keyless codes tested | yes_no | Service | `smart_lock` | `exterior_lock` |
 
-Item 22 carries `na_asset_type = 'hot_tub'`: a property with no pool or hot tub
-recorded skips it with a reason the asset ledger backs, per §5.
+Item 33 carries `na_asset_type = 'hot_tub'`: a property with no pool or hot tub
+recorded skips it with a reason the asset ledger backs, per §5. Item 34 does the
+same against `pool_pump`.
+
+**Item 34 is a legal requirement, not a best practice.** The Virginia Graeme
+Baker Act has mandated compliant anti-entrapment drain covers since 2008, the
+failure mode is a fatality, and it is a named exclusion in many policies. The
+form checked the fence and the gate and never looked at the drain.
+
+**Item 36 is the one item on any form whose FAILING answer is `yes`, and it is
+deliberately not phrased around a failure at all.** It exists because a
+trampoline is frequently a policy EXCLUSION rather than a hazard rating — the
+answer changes coverage regardless of the equipment's condition, so what matters
+is that the record states it plainly. Outdoor 39 separately asks whether it is
+sound. `remediation: 'none'`; this one informs rather than dispatches.
+
+#### 6. Permits, Documents & Standing
+
+| # | Item | Type | Dflt | Remediation |
+|---|---|---|---|---|
+| 38 | Short-term rental permit or licence current for this jurisdiction | yes_no | — | notify |
+| 39 | Liability insurance certificate current and covering short-term rental use | yes_no | — | notify |
+| 40 | Occupancy limit posted, and consistent with the listing | yes_no | — | notify |
+
+Same reasoning as Outdoor's HOA section, and the same mechanism: a lapsed permit
+is not a work order and not a purchase order, so these use
+`remediation: 'notify'` (§5) and raise a `notifications` row rather than
+dispatching anyone. Before that value existed these items were unexpressible on
+this form, which is why an insurance-evidence artifact had nothing to say about
+whether the property was legally permitted to operate.
+
+Item 39's second clause matters more than the first: a standard homeowner's
+policy that excludes short-term rental use is worse than no policy, because the
+owner believes they are covered.
 
 **All three forms are now real** — no first-pass guesses remain. Safety above,
 Indoor in 12.2, Outdoor in 12.3, with the cross-form `concern_key` table at the
@@ -1408,7 +1481,7 @@ report.
 | 28 | Exterior deadbolts, smart locks and keypads secure; codes tested | yes_no | Service | `smart_lock` | `exterior_lock` |
 | 29 | Exterior cameras and doorbell — powered, reporting, sited only outdoors | yes_no | Service | — | — |
 | 30 | Freeze protection in place seasonally — bibbs covered, lines drained | yes_no | Service | — | — |
-| 31 | Septic or well access clear, marked, no surfacing or odour | yes_no | Service | `septic_system` | — |
+| 31 | Septic access clear, marked, no surfacing or odour | yes_no | Service | `septic_system` | — |
 | 32 | Snow and ice equipment staged and serviceable (seasonal) | yes_no | Replace | — | — |
 
 Item 24's `concern_key` is `hvac_condenser`, NOT the `hvac_filter` Indoor 13 and
@@ -1416,6 +1489,47 @@ Safety 11 share. Same asset, genuinely different jobs — a fouled condenser and
 due filter are two visits — and this is the case §5 warns about when it says
 `concern_key` names a CONCERN rather than a thing. Getting this one wrong would
 merge two real work orders into one.
+
+#### 4a. Well & Water System
+
+Shown only where the property has a `well_pump` asset — `na_asset_type`, so the
+N/A is ledger-backed rather than asserted. Municipal-water properties never see
+this section.
+
+| # | Item | Type | Dflt | Asset | concern_key |
+|---|---|---|---|---|---|
+| W1 | Wellhead cap sealed, casing above grade, no surface water pooling at the head | yes_no | Repair | `well_pump` | — |
+| W2 | Pump runs and reaches cut-out pressure; no grinding or overheating | yes_no | Service | `well_pump` | `well_pump_operation` |
+| W3 | Pump does NOT short-cycle when a tap is run | yes_no | Service | `well_pump` | `well_short_cycle` |
+| W4 | Pressure tank holds its air charge; bladder not waterlogged | yes_no | Replace | `well_pump` | `well_short_cycle` |
+| W5 | Check valve holding — system keeps pressure with the pump off | yes_no | Replace | `well_pump` | `well_short_cycle` |
+| W6 | Pressure switch cutting in and out at its rated range (e.g. 40/60 psi) | yes_no | Service | `well_pump` | — |
+| W7 | Sediment/whole-house filter within its service life | yes_no | Replace | — | `home_water_filter` |
+| W8 | Water potability test current (coliform, within 12 months) | yes_no | — | — | notify |
+| W9 | No sediment, discolouration, odour or air spitting at the taps | yes_no | Service | `well_pump` | — |
+
+**Why Outdoor and not Safety.** A well is a maintenance system, not a life-safety
+one, and its failure mode is "no water" rather than "someone is hurt". The one
+element with a genuine safety character is W8 — guests drink this water — and it
+is here rather than on Safety only because splitting one system across two forms
+on two cadences is how a system stops being understood as a system. Flag it if
+you would rather potability sat with the detectors; it is a defensible call
+either way, and the `concern_key` machinery would make either placement work.
+
+**W3, W4 and W5 deliberately share `well_short_cycle`.** This is the most
+useful thing on the section and the least obvious. A waterlogged bladder and a
+failed check valve produce THE SAME OBSERVABLE SYMPTOM — the pump starting
+repeatedly while a tap runs — and a PM standing at a wellhead can reliably see
+short-cycling but cannot reliably diagnose which component caused it. Asking all
+three and keying them together means the observation gets recorded however the
+inspector attributes it, and one work order goes out for one fault rather than
+three for a guess. The plumber diagnoses; the inspector observes.
+
+That is the general principle worth carrying into any future section: **ask for
+the symptom a non-expert can see, not the diagnosis only a trade can make.**
+
+W8 is `notify` for the same reason the permit items are — an out-of-date water
+test is a lab appointment, not a dispatch.
 
 #### 5. High-Risk Amenities
 
@@ -1488,27 +1602,50 @@ is legitimately visible from two inspections on two cadences:
 
 | concern_key | Safety | Indoor | Outdoor |
 |---|---|---|---|
-| `gutters_clear` | 19 | — | 2 |
-| `dryer_vent_clear` | — | 42 | 8 |
-| `walkway_trip_hazard` | 13 | — | 9, 10 |
-| `deck_guardrail` | 15 | — | 20 |
-| `handrail_secure` | 12 | 9 | — |
-| `exterior_lighting` | 20 | — | 23 |
-| `gfci_wet_areas` | 8 | 25 | 26 |
-| `main_shutoff` | 10 | 44 | 25 |
-| `exterior_lock` | 23 | — | 28 |
-| `pool_barrier` | 22 | — | 33 |
-| `firepit_clearance` | 21 | — | 35 |
-| `grill_safe` | 21 | — | 36 |
-| `smoke_detector_operational` | 1, 2 | 30 | — |
-| `co_detector_operational` | 3, 4 | 31 | — |
-| `hvac_filter` | 11 | 13 | — |
-| `water_heater_condition` | 16 | 43 | — |
-| `washer_supply_lines` | 17 | 41 | — |
-| `electrical_panel_clear` | 9 | 45 | — |
-| `flooring_sound` | 14 | 3 | — |
+| `gutters_clear` | 29 | — | 2 |
+| `dryer_vent_clear` | 8 | 42 | 8 |
+| `walkway_trip_hazard` | 21 | — | 9, 10 |
+| `deck_guardrail` | 23 | — | 20 |
+| `handrail_secure` | 20 | 9 | — |
+| `exterior_lighting` | 30 | — | 23 |
+| `gfci_wet_areas` | 14 | 25 | 26 |
+| `main_shutoff` | 18 | 44 | 25 |
+| `exterior_lock` | 37 | — | 28 |
+| `pool_barrier` | 33 | — | 33 |
+| `firepit_clearance` | 31 | — | 35 |
+| `grill_safe` | 31 | — | 36 |
+| `smoke_detector_operational` | 2 | 30 | — |
+| `co_detector_operational` | 5 | 31 | — |
+| `hvac_filter` | 19 | 13 | — |
+| `water_heater_condition` | 24 | 43 | — |
+| `washer_supply_lines` | 25 | 41 | — |
+| `electrical_panel_clear` | 15 | 45 | — |
+| `flooring_sound` | 22 | 3 | — |
+| `smoke_detector_age` | 3 | — | — |
+| `co_detector_age` | 6 | — | — |
+| `chimney_swept` | 9 | — | — |
+| `egress_window` | 11 | 5 | — |
+| `gas_appliance_safe` | 17 | — | — |
+| `sump_pump` | 28 | — | — |
+| `pool_drain_vgb` | 34 | — | — |
+| `home_water_filter` | — | 19a | W7 |
+| `well_short_cycle` | — | — | W3, W4, W5 |
 
-**The near-misses matter as much as the matches.** `hvac_filter` (Safety 11,
+**Two rows in that table are not cross-form at all, and that is deliberate.**
+A key appearing in only one column is a no-op for dedup — `form_item_id` already
+covers repeat visits within a form — and is listed so that a later form adding
+the same concern shares the key rather than inventing a second one. They cost
+nothing and they document intent.
+
+`well_short_cycle` is the exception that earns its place: three items in ONE
+form sharing a key. That is `concern_key` doing a second job — merging items
+that share a SYMPTOM — and it is the more interesting of the two uses. A
+waterlogged bladder and a failed check valve look identical from the tap, so all
+three questions get asked and one work order goes out however the inspector
+attributes it. Ask for the symptom a non-expert can observe; let the trade
+diagnose.
+
+**The near-misses matter as much as the matches.** `hvac_filter` (Safety 19,
 Indoor 13) and `hvac_condenser` (Outdoor 24) are the same ASSET and deliberately
 different keys, because a due filter and a fouled condenser are two visits.
 Indoor 47 (indoor bins) and Outdoor 27 (the enclosure) are likewise separate.
