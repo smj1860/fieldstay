@@ -50,6 +50,8 @@ interface Props {
   orgName:                    string
   userName:                   string
   userEmail:                  string
+  /** For the sign-out purge of this user's dashboard caches. */
+  userId:                     string
   onboardingComplete?:        boolean
   onboardingPct?:             number
   notifications?:             NotificationItem[]
@@ -92,6 +94,7 @@ interface DashboardSidebarProps {
   orgName:             string
   userName:            string
   userEmail:           string
+  userId:              string
 }
 
 // Hoisted to a top-level component rather than defined inline inside
@@ -115,6 +118,7 @@ function DashboardSidebar({
   orgName,
   userName,
   userEmail,
+  userId,
 }: Readonly<DashboardSidebarProps>) {
   const { isClusterExpanded, toggleCluster } = useNavClusters(mgmtNav, pathname)
 
@@ -330,6 +334,7 @@ function DashboardSidebar({
             userName={userName}
             userEmail={userEmail}
             orgName={orgName}
+            userId={userId}
           />
         </div>
       )}
@@ -337,7 +342,7 @@ function DashboardSidebar({
   )
 }
 
-export function DashboardShell({ role, orgName, userName, userEmail, onboardingComplete = true, onboardingPct = 0, notifications = [], notificationsFailed = false, unreadMessages = 0, isStaff = false, children }: Readonly<Props>) {
+export function DashboardShell({ role, orgName, userName, userEmail, userId, onboardingComplete = true, onboardingPct = 0, notifications = [], notificationsFailed = false, unreadMessages = 0, isStaff = false, children }: Readonly<Props>) {
   const pathname   = usePathname()
   const [collapsed,  setCollapsed]  = useState(false)
   const [mobileOpen, setMobileOpen] = useState(false)
@@ -393,6 +398,7 @@ export function DashboardShell({ role, orgName, userName, userEmail, onboardingC
           orgName={orgName}
           userName={userName}
           userEmail={userEmail}
+          userId={userId}
         />
       </div>
 
@@ -424,6 +430,7 @@ export function DashboardShell({ role, orgName, userName, userEmail, onboardingC
               orgName={orgName}
               userName={userName}
               userEmail={userEmail}
+              userId={userId}
             />
           </div>
         </div>
