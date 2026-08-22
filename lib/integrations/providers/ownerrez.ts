@@ -376,9 +376,27 @@ export function mapOwnerRezBookingStatus(status: string): Enums<'booking_status'
   return unmappedBookingStatus('ownerrez', status)
 }
 
-export function mapOwnerRezChannelToSource(channel?: string): Enums<'booking_source'> {
-  if (!channel) return 'other'
-  const c = channel.toLowerCase()
+/**
+ * OwnerRez `listing_site` -> our booking_source enum.
+ *
+ * READS `listing_site`. The caller previously passed `b.channel_name`, which
+ * is not a field on OwnerRez's booking schema and never has been — so this
+ * received `undefined` for every booking and returned the no-channel default.
+ * All 30 OwnerRez bookings in production carry source 'other'; Hospitable, in
+ * the same table, spreads across direct/airbnb. Same defect class as the
+ * status mapper above: a field name the provider never sends, and a fallback
+ * plausible enough that the result looks like data rather than a miss.
+ *
+ * Substring matching rather than equality because `listing_site` is
+ * undocumented as an enum — OwnerRez publishes the field with no value list,
+ * so matching loosely on the recognisable brand is the honest read. Anything
+ * unrecognised stays 'other', which for a SOURCE label is a fair outcome
+ * rather than a silent degradation: unlike status, no downstream automation
+ * branches on it.
+ */
+export function mapOwnerRezChannelToSource(listingSite?: string): Enums<'booking_source'> {
+  if (!listingSite) return 'other'
+  const c = listingSite.toLowerCase()
   if (c.includes('airbnb')) return 'airbnb'
   if (c.includes('vrbo') || c.includes('homeaway')) return 'vrbo'
   if (c.includes('booking')) return 'booking_com'
@@ -519,10 +537,19 @@ function extractOwnerRezActualTotal(b: OwnerRezBooking): number | null {
  * here as the single source of truth, mirroring
  * hospitableReservationToNormalized.
  *
- * OwnerRez's booking endpoint doesn't return a time-of-day for arrival/
- * departure (unlike Hospitable's check_in/check_out) — checkin_time and
- * checkout_time are left null, matching existing behavior; the bookings
- * table already treats both columns as nullable for this reason.
+ * IT DOES RETURN TIMES OF DAY. This comment used to claim the opposite —
+ * "OwnerRez's booking endpoint doesn't return a time-of-day for
+ * arrival/departure (unlike Hospitable's check_in/check_out)" — and hardcoded
+ * both to null on that basis. OwnerRez's booking schema documents `check_in`
+ * and `check_out` as 24-hour "HH:mm" strings in the PROPERTY's timezone,
+ * alongside the `arrival`/`departure` dates. Verified 2026-08-21.
+ *
+ * The cost was every OwnerRez turnover. lib/turnovers/generator.ts falls back
+ * to '11:00'/'15:00' when a booking carries no time and the property has no
+ * default, so cleaning windows were computed from an assumption rather than
+ * the real checkout — and on a same-day flip that assumption is the whole
+ * schedule. Production: 0 of 30 OwnerRez bookings had either time; Hospitable
+ * had 11 of 12.
  */
 export function ownerRezBookingToNormalized(b: OwnerRezBooking): NormalizedBooking {
   // block/quote_hold/linked_availability are all "time marked unavailable,
@@ -546,15 +573,17 @@ export function ownerRezBookingToNormalized(b: OwnerRezBooking): NormalizedBooki
       : null,
     checkin_date:  b.arrival,
     checkout_date: b.departure,
-    checkin_time:  null,
-    checkout_time: null,
+    // Normalized to null when OwnerRez omits them, so the row builder can tell
+    // "no value" from "a value" and omit the column rather than clobber.
+    checkin_time:  b.check_in  ?? null,
+    checkout_time: b.check_out ?? null,
     status:      isBlock ? 'blocked' : mapOwnerRezBookingStatus(b.status),
     // ✅ Confirmed live 2026-07-15 — OwnerRez's guest object has
     // first_name/last_name, not a combined name field (see OwnerRezBooking.guest
     // doc comment). No email field was ever present on this endpoint.
     guest_name:  [b.guest?.first_name, b.guest?.last_name].filter(Boolean).join(' ') || null,
     guest_email: null,
-    source:      mapOwnerRezChannelToSource(b.channel_name),
+    source:      mapOwnerRezChannelToSource(b.listing_site),
     is_block:    isBlock,
     // Effective 2026-07-07, OwnerRez's type field can be 'owner' — the
     // property owner's own personal-use stay. It's a full booking (not a
@@ -572,6 +601,13 @@ export interface OwnerRezBookingRow {
   external_id:         string
   checkin_date:        string
   checkout_date:       string
+  /**
+   * OPTIONAL on purpose — see buildOwnerRezBookingRow. Present only when
+   * OwnerRez sent a time; absent (not null) otherwise, so the upsert leaves a
+   * PM's manual edit alone instead of overwriting it every sync.
+   */
+  checkin_time?:       string
+  checkout_time?:      string
   status:              Enums<'booking_status'>
   guest_name:          string | null
   guest_email:         string | null
@@ -588,11 +624,18 @@ export interface OwnerRezBookingRow {
  * duplicated verbatim in ownerrez/initial-sync.ts and
  * ownerrez/incremental-sync.ts.
  *
- * checkin_time/checkout_time are intentionally omitted — OwnerRez never
- * provides a time-of-day, so writing null on every sync would silently
- * clobber a PM's manual edit to those fields (see
- * app/(dashboard)/bookings/actions.ts). Omitting the keys leaves them
- * untouched on conflict.
+ * checkin_time/checkout_time are set WHEN OWNERREZ SENDS THEM and omitted
+ * entirely when it does not. Both halves matter:
+ *
+ *   - Sent. OwnerRez does provide times (`check_in`/`check_out`, "HH:mm" in
+ *     the property's timezone); the previous claim that it "never provides a
+ *     time-of-day" was wrong, and it cost every OwnerRez turnover its real
+ *     cleaning window — see ownerRezBookingToNormalized above.
+ *   - Absent. The keys are OMITTED, not written as null. That part of the old
+ *     reasoning was right and is preserved: a null on every sync would clobber
+ *     a PM's manual edit (see app/(dashboard)/bookings/actions.ts), and an
+ *     omitted key is left untouched on conflict. `undefined` would also work —
+ *     JSON drops it — but omitting is explicit about the intent.
  */
 export function buildOwnerRezBookingRow(
   orgId:          string,
@@ -612,6 +655,11 @@ export function buildOwnerRezBookingRow(
     // where the normalized fields can be null.
     checkin_date:        b.arrival,
     checkout_date:       b.departure,
+    // Spread-in rather than assigned, so an absent time contributes NO KEY at
+    // all. `checkin_time: normalized.checkin_time` would write null and undo
+    // a PM's manual edit on every sync.
+    ...(normalized.checkin_time  !== null && { checkin_time:  normalized.checkin_time  }),
+    ...(normalized.checkout_time !== null && { checkout_time: normalized.checkout_time }),
     status:              normalized.status,
     guest_name:          normalized.guest_name,
     guest_email:         normalized.guest_email,

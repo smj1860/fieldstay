@@ -126,7 +126,7 @@ const BOOKING: OwnerRezBooking = {
   status:        'confirmed',
   type:          'booking',
   property_id:   777,
-  channel_name:  'Airbnb',
+  listing_site:  'Airbnb',
   guest:         { first_name: 'Jane', last_name: 'Doe' },
   total_amount:  500,
   charges:       [{ type: 'rent', amount: 500, owner_amount: 450 }],

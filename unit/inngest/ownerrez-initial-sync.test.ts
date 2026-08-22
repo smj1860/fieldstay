@@ -132,7 +132,7 @@ const BOOKING: OwnerRezBooking = {
   status:        'confirmed',
   type:          'booking',
   property_id:   42,
-  channel_name:  'Direct',
+  listing_site:  'Direct',
   guest:         { first_name: 'Sam', last_name: 'Guest' },
   total_amount:  700,
   charges:       [{ type: 'rent', amount: 700, owner_amount: 700 }],
