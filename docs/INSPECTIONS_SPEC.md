@@ -168,6 +168,17 @@ inspection_items                ONE answer
   note, photo_path,       -- note is REQUIRED when actions is non-empty
   photo_unavailable_reason (nullable) -- free text; the ONLY way past a
                           -- photo_required item without a photo. See §11 q2.
+
+TWO COLUMNS OUTSIDE THESE TABLES, both introduced by the Outdoor form (§12.3):
+
+  properties.hoa_name  text NULL   -- presence gates the HOA section; the name
+                                   -- prints on the report. Nothing in the
+                                   -- schema knew about HOAs before this.
+  inspection_form_items.remediation gains 'notify' alongside
+    'none' | 'work_order' | 'purchase_order' — for the HOA items, where a
+    failure is a payment or a document rather than a dispatch. Raises a
+    `notifications` row (it already has severity + dedupe_key, so a quarterly
+    re-flag of the same unresolved item does not stack).
   asset_id (nullable),
   answered_at
 ```
@@ -1149,9 +1160,9 @@ passing item still produces evidence.
 Item 22 carries `na_asset_type = 'hot_tub'`: a property with no pool or hot tub
 recorded skips it with a reason the asset ledger backs, per §5.
 
-**Still to come:** Outdoor Property Inspection and Indoor Property Inspection,
-in this shape. The two drafts below are the FIRST-PASS guesses and are kept
-only until the real ones arrive.
+**All three forms are now real** — no first-pass guesses remain. Safety above,
+Indoor in 12.2, Outdoor in 12.3, with the cross-form `concern_key` table at the
+end of 12.3.
 
 ### 12.2 Indoor Property & Inventory Inspection
 
@@ -1303,33 +1314,211 @@ assigned, with the suggested cleaner count from §5.
 49a on a pass. See open question 2 on the unavailable-camera escape hatch —
 still open, and this form makes it more pressing rather than less.
 
-### 12.3 Outdoor Property Inspection — SUPERSEDED FIRST PASS, awaiting the real form
+### 12.3 Outdoor Property & Grounds Inspection
 
-Quarterly or 2× a year, month(s) chosen by the PM. Same status as 12.2.
+Quarterly or 2× a year, month(s) chosen by the PM.
 
-| # | Item | Fail | Asset |
+**Header** — the Safety/Indoor letterhead (property, address, date, start time,
+management company, org owner; prefilled and locked) plus one field the other
+two forms do not have.
+
+**Weather and exterior conditions at time of inspection.** This is not
+decoration: a roof assessed under six inches of snow, or a driveway assessed in
+the rain, was not really assessed, and a report that does not say so overstates
+itself. For an artifact whose value is evidentiary that matters more here than
+anywhere else on the form.
+
+It should be **captured, not typed**. `getWeatherForLocation(lat, lng)`
+(`lib/weather/tomorrow.ts`) already returns temperature, a human label, and
+`isRainy` / `isSnowy` for any property with coordinates, which every property
+has. Stamp it into `header_snapshot` at inspection START — machine-recorded
+conditions are worth more than self-reported ones, and it costs the inspector
+nothing.
+
+Two honest caveats the implementation has to carry rather than paper over.
+The lookup is Redis-cached and single-flighted, and **offline it will not
+resolve at all** — which is precisely when an outdoor inspection is most likely
+to be happening. So the field falls back to inspector-typed, and the report must
+distinguish the two: *"Conditions: 41°F, light rain (recorded)"* is a different
+claim from *"Conditions: overcast (reported)"*, and printing them identically
+would quietly launder one into the other.
+
+#### 1. Roof, Gutters & Drainage
+
+| # | Item | Type | Dflt | Asset | concern_key |
+|---|---|---|---|---|---|
+| 1 | Roofing — shingles/tiles intact, no sagging, loose flashing or storm damage | yes_no | Service | `roof` | `roof_condition` |
+| 2 | Gutters and downspouts clear, secured, discharging away from the foundation | yes_no | Service | — | `gutters_clear` |
+| 3 | No branches overhanging the roofline, chimney or utility wires | yes_no | Service | — | — |
+| 4 | Chimney and flue — cap present, masonry intact, no cracks | yes_no | Service | — | — |
+| 5 | Siding, trim and exterior paint sound — no rot, gaps or peeling | yes_no | Repair | — | — |
+| 6 | Foundation — no new cracks, settling or water pooling against it | yes_no | Service | — | — |
+| 7 | Exterior windows and doors — seals intact, screens present, no storm damage | yes_no | Repair | — | — |
+| 8 | Dryer vent exit point clear of lint and unobstructed | yes_no | Service | `dryer` | `dryer_vent_clear` |
+
+Item 2 shares `gutters_clear` with Safety 19. Item 8 shares `dryer_vent_clear`
+with Indoor 42 — the same vent, inspected from the other end, which is exactly
+the case `concern_key` exists for: two legitimate questions, one fault, one work
+order.
+
+#### 2. Grounds, Walkways & Trip Hazards
+
+| # | Item | Type | Dflt | Asset | concern_key |
+|---|---|---|---|---|---|
+| 9  | Driveway and parking — level, no major cracks, potholes or oil slicks | yes_no | Repair | — | `walkway_trip_hazard` |
+| 10 | Walkways and steps — pavers stable and level, path lighting installed | yes_no | Repair | — | `walkway_trip_hazard` |
+| 11 | Retaining walls and borders sound; drainage holes clear | yes_no | Service | — | — |
+| 12 | Lawn and landscaping mowed and trimmed; no burrows, roots or holes | yes_no | Service | — | — |
+| 13 | Outdoor stair treads secure and slip-resistant | yes_no | Repair | — | — |
+| 14 | Perimeter fencing and gates sound, latching, no missing sections | yes_no | Repair | — | — |
+| 15 | House numbers visible from the road, day and night | yes_no | Replace | — | — |
+| 16 | No wasp, hornet or bee nests at entries, eaves or amenity areas | yes_no | Service | — | `exterior_pest` |
+| 17 | Irrigation runs without leaks, broken heads or overspray onto walkways | yes_no | Service | — | — |
+| 18 | Mailbox and delivery area intact and accessible | yes_no | Repair | — | — |
+
+Items 9 and 10 share one `concern_key` deliberately — they are the same
+trip-hazard concern asked about two surfaces, and one uneven approach is one
+job. Item 15 looks trivial and is not: it is what emergency services and a
+guest arriving after dark both depend on.
+
+#### 3. Decks, Balconies, Porches & Railings
+
+| # | Item | Type | Dflt | Asset | concern_key |
+|---|---|---|---|---|---|
+| 19 | Decking — boards secure, no rot, loose fasteners, splinters or cupping | yes_no | Repair | `deck_structure` | — |
+| 20 | Guardrails and handrails anchored, take weight, spindles < 4in apart | yes_no | Repair | `deck_structure` | `deck_guardrail` |
+| 21 | Under-deck area clear of combustibles, refuse and unmaintained storage | yes_no | Service | — | — |
+| 22 | Dock, waterfront structure and moorings sound | yes_no | Service | — | — |
+
+Item 20 shares `deck_guardrail` with Safety 15. Item 22 carries an
+`na_reason_template` — most properties have no waterfront, and unlike the pool
+it has no `asset_type` to verify the claim against, so the N/A here is
+inspector-asserted rather than ledger-backed. Worth knowing when reading a
+report.
+
+#### 4. Exterior Utilities, Lighting & Perimeter
+
+| # | Item | Type | Dflt | Asset | concern_key |
+|---|---|---|---|---|---|
+| 23 | Exterior lighting — motion, dusk-to-dawn and entry lights all functional | yes_no | Replace | — | `exterior_lighting` |
+| 24 | HVAC / heat-pump condenser clear of vegetation, level, guard intact | yes_no | Service | `hvac` | `hvac_condenser` |
+| 25 | Hose bibbs and exterior shut-offs accessible, marked, no drips | yes_no | Repair | `plumbing_system` | `main_shutoff` |
+| 26 | Exterior outlets have weatherproof covers and GFCI protection | yes_no | Repair | `electrical_panel` | `gfci_wet_areas` |
+| 27 | Trash and recycling enclosures secure and animal-proof | yes_no | Replace | — | — |
+| 28 | Exterior deadbolts, smart locks and keypads secure; codes tested | yes_no | Service | `smart_lock` | `exterior_lock` |
+| 29 | Exterior cameras and doorbell — powered, reporting, sited only outdoors | yes_no | Service | — | — |
+| 30 | Freeze protection in place seasonally — bibbs covered, lines drained | yes_no | Service | — | — |
+| 31 | Septic or well access clear, marked, no surfacing or odour | yes_no | Service | `septic_system` | — |
+| 32 | Snow and ice equipment staged and serviceable (seasonal) | yes_no | Replace | — | — |
+
+Item 24's `concern_key` is `hvac_condenser`, NOT the `hvac_filter` Indoor 13 and
+Safety 11 share. Same asset, genuinely different jobs — a fouled condenser and a
+due filter are two visits — and this is the case §5 warns about when it says
+`concern_key` names a CONCERN rather than a thing. Getting this one wrong would
+merge two real work orders into one.
+
+#### 5. High-Risk Amenities
+
+| # | Item | Type | Dflt | Asset | concern_key |
+|---|---|---|---|---|---|
+| 33 | Pool/spa barrier meets code height; gates self-close and self-latch | yes_no | Repair | `hot_tub` | `pool_barrier` |
+| 34 | Pool/spa cover secure; water clear; pump and filter operating | yes_no | Service | `pool_pump` | — |
+| 35 | Fire pit and outdoor heating 10+ ft from structures; media level | yes_no | Service | — | `firepit_clearance` |
+| 36 | Grill — grease tray clean, gas line leak-tested, igniter works, tank secured | yes_no | Service | — | `grill_safe` |
+| 37 | Propane tank level adequate, or a full spare on site | yes_no | Replace | — | — |
+| 38 | Outdoor furniture sound — no rust-through or sharp edges, cushions clean | yes_no | Replace | — | — |
+| 39 | Playground, swing set or trampoline sound and anchored | yes_no | Repair | — | — |
+| 40 | Generator — starts, fuel adequate, exhaust clear of the structure | yes_no | Service | `generator` | — |
+| 41 | Solar array — panels unshaded and intact, inverter reporting | yes_no | Service | `solar_system` | — |
+
+Items 33/35/36 share keys with Safety 22/21. Items 33, 34, 39, 40 and 41 all
+carry `na_asset_type`, so their N/A is checked against the asset ledger rather
+than taken on trust — the whole point of that column, and this section is where
+skipping is most tempting and least acceptable.
+
+#### 6. HOA Rules & Standing
+
+Shown only where `properties.hoa_name` is set — **a new nullable column**, since
+nothing in the schema currently knows whether a property has an HOA. A name
+rather than a boolean: it carries information, and it prints on the report.
+
+| # | Item | Type | Dflt | Remediation |
+|---|---|---|---|---|
+| 42 | Current copies of the bylaws, policies and rules on file | yes_no | — | notify |
+| 43 | Property in compliance with all HOA rules and regulations | yes_no | — | notify + actions |
+| 44 | HOA dues and assessments current | yes_no | — | notify |
+
+**This section is the one place the "a No creates a WO or PO" rule does not
+hold, and it should be stated rather than bent.** Unpaid dues are not a work
+order and not a purchase order; they are a payment. Missing bylaws are a
+document to obtain. Forcing either through the maintenance board would put a
+finance task on a vendor's queue.
+
+So these default to `remediation: 'none'` and raise a PM **notification**
+instead — `notifications` already carries `severity` and a `dedupe_key`, so a
+quarterly re-flag of the same unresolved item does not stack. Item 43 keeps the
+Repair/Service/Replace actions available, because a compliance failure usually
+DOES have a physical remedy (the lawn, the fence, a trailer parked where it
+should not be) — the inspector picks, exactly as everywhere else.
+
+Item 44 is deliberately notify-only. There is no version of "dispatch someone"
+that is the right answer to unpaid dues.
+
+#### 7. Property Assets
+
+Same as Indoor §7: every ACTIVE `property_assets` row whose type is not already
+covered above renders one row via `repeat_per_asset`, carrying its `asset_id`.
+
+| # | Item | Type | Dflt | Asset |
+|---|---|---|---|---|
+| 45 | *(per asset)* — operational, no visible damage, no unusual noise or smell | yes_no | Service | *(the asset)* |
+| 45a | → Serial/model plate photo | photo | — | *(the asset)* |
+
+#### Sign-off
+
+Identical to Indoor: cleaning roll-up (pressure-washing, gutter clearing and
+grounds cleanup all land here), certification, and the inspector's own typed
+name — the SIGNATURE, distinct from the letterhead above. See §5.
+
+#### The cross-form overlap check
+
+Closed question 5 made this an authoring rule. Every `concern_key` above appears
+in at least one other form, and each was chosen because the same physical fault
+is legitimately visible from two inspections on two cadences:
+
+| concern_key | Safety | Indoor | Outdoor |
 |---|---|---|---|
-| 1 | Roof — no visible damage, missing shingles or debris | WO | `roof` |
-| 2 | Gutters clear and secure; downspouts directed away from foundation | WO | — |
-| 3 | Siding, trim and exterior paint condition | WO | — |
-| 4 | Foundation — no visible cracks or settling | WO | — |
-| 5 | Walkways and driveway free of trip hazards | WO | — |
-| 6 | Deck/patio surface and railings sound | WO | `deck_structure` |
-| 7 | Outdoor furniture condition and count | PO | — |
-| 8 | Grill clean and operational; propane level adequate | PO | — |
-| 9 | Fire pit area safe and clear; tools present | WO | — |
-| 10 | Landscaping trimmed; nothing overhanging roof or utility lines | WO | — |
-| 11 | Irrigation functioning with no leaks | WO | — |
-| 12 | Exterior outlets have weatherproof covers; GFCI tested | WO | — |
-| 13 | Pool equipment operational; chemistry in range | WO | `pool_pump` |
-| 14 | Hot tub operational; cover in good condition | WO | `hot_tub` |
-| 15 | Dock and waterfront structure sound (if applicable) | WO | — |
-| 16 | Fencing and gates secure and self-latching | WO | — |
-| 17 | Exterior and path lighting operational | PO | — |
-| 18 | Hose bibs no leaks; freeze protection in place seasonally | WO | — |
-| 19 | Trash and recycling area tidy; bins in good condition | PO | — |
-| 20 | Septic or well access clear and marked (if applicable) | WO | `septic_system` |
-| 21 | Snow and ice equipment staged (seasonal) | PO | — |
+| `gutters_clear` | 19 | — | 2 |
+| `dryer_vent_clear` | — | 42 | 8 |
+| `walkway_trip_hazard` | 13 | — | 9, 10 |
+| `deck_guardrail` | 15 | — | 20 |
+| `handrail_secure` | 12 | 9 | — |
+| `exterior_lighting` | 20 | — | 23 |
+| `gfci_wet_areas` | 8 | 25 | 26 |
+| `main_shutoff` | 10 | 44 | 25 |
+| `exterior_lock` | 23 | — | 28 |
+| `pool_barrier` | 22 | — | 33 |
+| `firepit_clearance` | 21 | — | 35 |
+| `grill_safe` | 21 | — | 36 |
+| `smoke_detector_operational` | 1, 2 | 30 | — |
+| `co_detector_operational` | 3, 4 | 31 | — |
+| `hvac_filter` | 11 | 13 | — |
+| `water_heater_condition` | 16 | 43 | — |
+| `washer_supply_lines` | 17 | 41 | — |
+| `electrical_panel_clear` | 9 | 45 | — |
+| `flooring_sound` | 14 | 3 | — |
+
+**The near-misses matter as much as the matches.** `hvac_filter` (Safety 11,
+Indoor 13) and `hvac_condenser` (Outdoor 24) are the same ASSET and deliberately
+different keys, because a due filter and a fouled condenser are two visits.
+Indoor 47 (indoor bins) and Outdoor 27 (the enclosure) are likewise separate.
+`exterior_pest` (Outdoor 16) is not `pest_activity` (Indoor 48) — a wasp nest
+over a doorway and roaches in a cabinet are not one job.
+
+The §10 seed test asserts the table above: an item whose prompt matches another
+form's without a shared key is a review failure, and so is a shared key across
+two prompts that are not the same concern. The first produces duplicate work
+orders; the second silently merges two real ones, which is worse.
 
 ---
 
