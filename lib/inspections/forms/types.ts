@@ -110,11 +110,6 @@ export interface SectionDefinition {
    * skip is ledger-backed rather than inspector-asserted.
    */
   shown_when_asset?: AssetType
-  /**
-   * Rendered only when this property column is non-null. Outdoor's HOA section
-   * is the only user — `properties.hoa_name`.
-   */
-  shown_when_property_field?: 'hoa_name'
 }
 
 export interface FormDefinition {

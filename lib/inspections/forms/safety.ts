@@ -1,7 +1,7 @@
 // lib/inspections/forms/safety.ts
 //
 // Property Safety & Risk Mitigation Inspection — docs/INSPECTIONS_SPEC.md §12.1.
-// 40 top-level items across 6 sections. Runs 1× or 2× a year.
+// 42 top-level items across 7 sections. Runs 1× or 2× a year.
 //
 // This is the form §1 calls insurance evidence, and the one whose findings an
 // insurer is most likely to read. Two consequences visible in the data below:
@@ -10,11 +10,14 @@
 // about VGB drain-cover compliance, which is federal law since 2008 and a named
 // exclusion in many policies.
 //
-// NOTE ON WHAT THIS FORM DOES NOT HAVE: no cleaning checkbox and no sign-off
-// certification/signature items, both of which Indoor and Outdoor carry. That
-// is what §12.1 specifies and it is seeded as specified — but see the note in
-// ./index.ts, because the certification gap is worth a deliberate answer rather
-// than an inherited one.
+// NOTE ON WHAT THIS FORM DOES NOT HAVE: no cleaning checkbox. Safety is about
+// hazards, not cleanliness, and it runs once or twice a year — so there is no
+// per-item Cleaning flag and therefore no cleaning roll-up at sign-off.
+//
+// It DOES now have a sign-off. The gap was flagged during phase 2 and closed
+// on 2026-08-22 with the declaration @smj1860 supplied — it had been intended
+// for this form all along and was missing from §12.1's tables rather than from
+// the product's intent.
 
 import type { FormDefinition } from './types'
 
@@ -422,6 +425,47 @@ export const SAFETY_FORM: FormDefinition = {
           key:    'safety.permits.occupancy_limit',
           prompt: 'Occupancy limit posted, and consistent with the listing',
           remediation: 'notify', default_actions: [],
+        },
+      ],
+    },
+
+    // ── Sign-off ─────────────────────────────────────────────────────────────
+    // DELIBERATELY NOT the shared signoffSection() the other two forms use.
+    // Safety has no cleaning checkbox anywhere on it, so it has no cleaning
+    // roll-up to sign off — and its declaration is a specific, stronger
+    // attestation than Indoor/Outdoor's generic certification line, because
+    // this is the form §1 calls insurance evidence and the one an adjuster is
+    // most likely to actually read.
+    //
+    // Two items, not four. The paper form's sign-off block also carries a DATE
+    // and an "Attached Documentation: Photo Log appended to report" line;
+    // neither is a question, and both are recorded in §12.1 as RENDERING
+    // requirements of the report instead:
+    //
+    //   - the date is `inspections.started_at`, stamped SERVER-SIDE when the
+    //     inspection is created (§8). A typed date could disagree with it, and
+    //     on an evidentiary document a contradictable date is worse than one
+    //     the inspector cannot touch;
+    //   - the photo log is assembled from the answers' photos at render time.
+    //     Asking the inspector to assert it were true would be asking them to
+    //     vouch for something the report does on its own.
+    {
+      key:  'signoff',
+      name: 'Inspector Sign-Off & Verification',
+      items: [
+        {
+          key:    'safety.signoff.declaration',
+          prompt:
+            'I hereby certify that the property listed above has undergone a comprehensive ' +
+            'safety inspection on the date indicated, and all verified items meet standard ' +
+            'operational safety guidelines.',
+          remediation: 'none', default_actions: [],
+        },
+        {
+          key:    'safety.signoff.signature',
+          prompt: 'Inspector signature',
+          response_type: 'photo', photo_required: true,
+          remediation: 'none', default_actions: [],
         },
       ],
     },

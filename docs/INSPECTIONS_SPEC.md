@@ -171,8 +171,8 @@ inspection_items                ONE answer
 
 TWO COLUMNS OUTSIDE THESE TABLES, both introduced by the Outdoor form (§12.3):
 
-  properties.hoa_name  text NULL   -- presence gates the HOA section; the name
-                                   -- prints on the report. Nothing in the
+  (properties.hoa_name was added here and DROPPED 2026-08-22 —
+   see §12.3: FieldStay never held HOA membership and will not collect it)
                                    -- schema knew about HOAs before this.
   inspection_form_items.remediation gains 'notify' alongside
     'none' | 'work_order' | 'purchase_order' — for the HOA items, where a
@@ -1010,7 +1010,7 @@ motivating force, no exposure. **This copy must be written or approved by
 | 4 | Remediation | fail → WO/PO with partial-unique idempotency |
 | 5 | Scheduling | `maintenance_schedules` discriminator |
 | 6 | Surfacing | 30-day dashboard section, overdue email, owner portal |
-| 7 | Export | History PDF via `pdf-lib`, copying the CPA export |
+| 7 | Export | History PDF via `pdf-lib`, copying the CPA export. MUST render, in Safety's sign-off block: the inspection date from `started_at` (server-stamped, never typed) and the appended photo log — see §12.1, where both are recorded as rendering requirements rather than form items |
 
 1–4 are the feature. 5–7 are what make it automatic.
 
@@ -1161,8 +1161,9 @@ address, inspection date, start time, inspector (the signed-in user),
 management company (the org). The inspector's own name is typed at SIGN-OFF,
 not here — see §5 on the letterhead/signature split.
 
-40 top-level items across 6 sections — still the shortest of the three, which is
-right for a form that runs once or twice a year.
+42 top-level items across 7 sections — 40 inspected items plus a two-item
+sign-off. Still the shortest of the three, which is right for a form that runs
+once or twice a year.
 
 #### 1. Fire Safety & Life Safety Systems
 
@@ -1303,21 +1304,38 @@ owner believes they are covered.
 Indoor in 12.2, Outdoor in 12.3, with the cross-form `concern_key` table at the
 end of 12.3.
 
-⚠️ **OPEN — Safety has no certification or signature item, and the other two
-forms do.** Indoor 51/52 and their Outdoor twins ask the inspector to certify
-that the inspection was performed on-site with exceptions photographed, and to
-sign. §12.1 specifies 40 items across 6 sections with no sign-off section, and
-the seed matches that exactly rather than inventing a seventh.
+**Safety's sign-off — added 2026-08-22, and it was always meant to be here.**
+Phase 2 flagged that Indoor and Outdoor had certification and signature items
+and Safety did not, on the form §1 calls insurance evidence. The gap was in
+§12.1's tables, not in the intent: @smj1860 supplied the declaration below as
+what the form had been specified to carry all along.
 
-It is worth a deliberate answer rather than an inherited one, because Safety is
-the form §1 calls insurance evidence — the one an insurer or an adjuster is
-most likely to actually read, and the one where an unsigned, uncertified
-document is worth least. `inspections.inspector_name` is a column rather than a
-form item, so the typed name is captured on all three forms either way; what
-Safety lacks is the ATTESTATION and the signature image.
+#### Sign-off — Inspector Sign-Off & Verification
 
-Adding it is a three-item section and a version bump. Not done unilaterally —
-@smj1860's call.
+| # | Item | Type | Notes |
+|---|---|---|---|
+| 41 | I hereby certify that the property listed above has undergone a comprehensive safety inspection on the date indicated, and all verified items meet standard operational safety guidelines. | yes_no | `is_required` |
+| 42 | Inspector signature | photo | `is_required`, `photo_required` |
+
+Deliberately NOT the shared `signoffSection()` Indoor and Outdoor use. Safety
+has no cleaning checkbox anywhere on it, so it has no cleaning roll-up to sign
+off, and this declaration is a stronger and more specific attestation than
+their generic certification line.
+
+**Two lines of the paper sign-off block are RENDERING requirements of the
+report, not questions**, and are recorded here so they are not mistaken for
+omissions:
+
+- **Date** — `inspections.started_at`, stamped SERVER-SIDE at creation (§8).
+  The report prints it in the sign-off block. A typed date could disagree with
+  it, and on an evidentiary document a date the inspector can contradict is
+  worse than one they cannot touch.
+- **"Attached Documentation: Photo Log appended to report"** — the report
+  assembles the photo log from the answers' photos. Asking the inspector to
+  assert that it happened would be asking them to vouch for something the
+  renderer does on its own.
+
+Both belong to phase 7 (Export), and are listed in its row.
 
 ### 12.2 Indoor Property & Inventory Inspection
 
@@ -1634,16 +1652,39 @@ skipping is most tempting and least acceptable.
 
 #### 6. HOA Rules & Standing
 
-Shown only where `properties.hoa_name` is set — **a new nullable column**, since
-nothing in the schema currently knows whether a property has an HOA. A name
-rather than a boolean: it carries information, and it prints on the report.
+⚠️ **NO LONGER GATED ON `properties.hoa_name` — changed 2026-08-22.**
+
+This section was originally gated on a new `properties.hoa_name` column, on the
+reasoning that a ledger-backed skip beats an inspector-asserted one. That
+reasoning is right in general and wrong here, because there is no ledger:
+@smj1860 confirmed FieldStay does not hold HOA membership for any property and
+will not be collecting it. A gate on a column nothing ever populates is not a
+conservative default — it is a silent deletion, rendering three real questions
+permanently unreachable while looking, in review, like a considered condition.
+
+So the fact is asked of the one party who has it: the person standing at the
+property. One root question with the three real items as CHILDREN —
+
+| # | Item | Type | Remediation |
+|---|---|---|---|
+| 42 | Property is subject to an HOA | yes_no | none |
+| 42a | → Current copies of the bylaws, policies and rules on file | yes_no | notify |
+| 42b | → Property in compliance with all HOA rules and regulations | yes_no | notify + actions |
+| 42c | → HOA dues and assessments current | yes_no | notify |
+
+A property with no HOA answers once and moves on. The alternative — three N/A
+taps on every quarterly inspection of every property in the portfolio — is
+friction paid forever for a fact one tap settles.
+
+**Two pieces of schema are now unused by this**, and are listed rather than
+quietly left: `properties.hoa_name` (added in phase 1, will never be populated)
+and `inspection_form_sections.shown_when_property_field` (added 2026-08-22, now
+has no user — `shown_when_asset` still gates the well section). Neither is
+harmful; both are dead surface, and dropping them is a decision for @smj1860
+rather than a tidy-up to make unilaterally.
 
 | # | Item | Type | Dflt | Remediation |
 |---|---|---|---|---|
-| 42 | Current copies of the bylaws, policies and rules on file | yes_no | — | notify |
-| 43 | Property in compliance with all HOA rules and regulations | yes_no | — | notify + actions |
-| 44 | HOA dues and assessments current | yes_no | — | notify |
-
 **This section is the one place the "a No creates a WO or PO" rule does not
 hold, and it should be stated rather than bent.** Unpaid dues are not a work
 order and not a purchase order; they are a payment. Missing bylaws are a

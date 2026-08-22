@@ -4,11 +4,16 @@
 // 45 top-level items plus a 9-item well section that only appears where the
 // property has one. Quarterly or 2× a year.
 //
-// TWO SECTIONS HERE ARE CONDITIONAL, and the difference between them is the
-// point of `na_asset_type`. The well section is gated on a `well_pump` asset —
-// ledger-backed, so a municipal-water property never sees it and cannot be
-// claimed to have skipped it. The HOA section is gated on `properties.hoa_name`
-// being set. Neither is an inspector-asserted N/A.
+// ONE SECTION HERE IS CONDITIONAL: the well system, gated on an active
+// `well_pump` asset. Ledger-backed, so a municipal-water property never sees it
+// and cannot be recorded as having skipped it — the skip is a fact about the
+// asset register rather than an assertion by the person who benefits from
+// skipping nine questions.
+//
+// The HOA section USED to be gated the same way, on `properties.hoa_name`. It
+// is not any more: FieldStay does not hold HOA membership and will not be
+// collecting it, so that gate would have kept three real questions permanently
+// unreachable. It is now an in-form question — see the section itself.
 //
 // THE MOST USEFUL THING ON THIS FORM IS ALSO THE LEAST OBVIOUS: W3, W4 and W5
 // share one `concern_key`. A waterlogged bladder and a failed check valve
@@ -439,29 +444,62 @@ export const OUTDOOR_FORM: FormDefinition = {
       // put a finance task on a vendor's queue.
       key:  'hoa',
       name: 'HOA Rules & Standing',
-      shown_when_property_field: 'hoa_name',
       items: [
         {
-          key:    'outdoor.hoa.documents',
-          prompt: 'Current copies of the bylaws, policies and rules on file',
-          remediation: 'notify', default_actions: [],
-        },
-        {
-          // Notify, but the Repair/Service/Replace chips stay AVAILABLE: a
-          // compliance failure usually does have a physical remedy — the lawn,
-          // the fence, a trailer parked where it should not be. Nothing is
-          // pre-ticked because which one applies is entirely situational, and
-          // the DB CHECK forbids a pre-tick on a notify item anyway.
-          key:    'outdoor.hoa.compliance',
-          prompt: 'Property in compliance with all HOA rules and regulations',
-          remediation: 'notify', default_actions: [],
-        },
-        {
-          // Deliberately notify-only. There is no version of "dispatch someone"
-          // that is the right answer to unpaid dues.
-          key:    'outdoor.hoa.dues',
-          prompt: 'HOA dues and assessments current',
-          remediation: 'notify', default_actions: [],
+          // ASKED, not looked up — changed 2026-08-22.
+          //
+          // This section used to be gated on `properties.hoa_name`, on the
+          // reasoning that a ledger-backed skip beats an inspector-asserted
+          // one. That reasoning is sound and it does not apply here, because
+          // there is no ledger: @smj1860 confirmed FieldStay does not hold HOA
+          // membership for any property and will not be collecting it. A gate
+          // on a column that is never populated is not a conservative default —
+          // it renders three real questions permanently unreachable.
+          //
+          // So the fact comes from the one source that actually has it: the
+          // person standing at the property. One question, asked once per
+          // inspection, with the three real items as children. A property with
+          // no HOA answers once and moves on; the friction of three N/A taps on
+          // every quarterly inspection of every property is not worth paying for
+          // a fact a single tap establishes.
+          //
+          // `remediation: 'none'` — this is a statement of fact with no failure
+          // mode, like Safety's trampoline item. Neither answer is bad.
+          key:    'outdoor.hoa.applies',
+          prompt: 'Property is subject to an HOA',
+          remediation: 'none', default_actions: [],
+          children: [
+            {
+              // show_when 'pass' = the parent was answered YES. Unambiguous
+              // here in a way it would not be elsewhere: "subject to an HOA" is
+              // a neutral fact, so yes plainly means yes — unlike the cleaning
+              // roll-up, where yes means "more work is needed" and `pass` would
+              // read as its own opposite.
+              key:    'outdoor.hoa.documents',
+              prompt: 'Current copies of the bylaws, policies and rules on file',
+              show_when: 'pass',
+              remediation: 'notify', default_actions: [],
+            },
+            {
+              // Notify, but the Repair/Service/Replace chips stay AVAILABLE: a
+              // compliance failure usually does have a physical remedy — the
+              // lawn, the fence, a trailer parked where it should not be.
+              // Nothing is pre-ticked because which one applies is entirely
+              // situational, and the DB CHECK forbids a pre-tick on notify.
+              key:    'outdoor.hoa.compliance',
+              prompt: 'Property in compliance with all HOA rules and regulations',
+              show_when: 'pass',
+              remediation: 'notify', default_actions: [],
+            },
+            {
+              // Deliberately notify-only. There is no version of "dispatch
+              // someone" that is the right answer to unpaid dues.
+              key:    'outdoor.hoa.dues',
+              prompt: 'HOA dues and assessments current',
+              show_when: 'pass',
+              remediation: 'notify', default_actions: [],
+            },
+          ],
         },
       ],
     },

@@ -217,7 +217,6 @@ export interface Property {
   external_source:         string | null
   // Presence gates Outdoor's HOA section and prints on the report. A name
   // rather than a boolean because it carries information either way.
-  hoa_name:                string | null
   created_at:              string
   updated_at:              string
 }
@@ -2111,6 +2110,12 @@ export interface InspectionFormSection {
   name:       string
   sort_order: number
   created_at: string
+  /**
+   * Render this section only where the property has an ACTIVE property_assets
+   * row of this type — Outdoor's well section. Ledger-backed, so the skip is
+   * not something the inspector asserts (§12.3).
+   */
+  shown_when_asset:          AssetType | null
 }
 
 export interface InspectionFormItem {
