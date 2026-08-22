@@ -172,7 +172,7 @@ rules:
       - pattern: $S.storage.from($B).getPublicUrl(...)
       - metavariable-regex:
           metavariable: $B
-          regex: ^['"](work-order-photos|turnover-photos|compliance-documents)['"]$
+          regex: ^['"](work-order-photos|turnover-photos|compliance-documents|inspection-photos)['"]$
 
   # ── PROMOTED from ratchet.yml 2026-08-01, at 0 findings ──────────────────
   # An unbounded .select() with NO equality filter anywhere in the chain: the
