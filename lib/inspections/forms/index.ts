@@ -17,14 +17,17 @@ export const INSPECTION_FORMS: FormDefinition[] = [SAFETY_FORM, INDOOR_FORM, OUT
  * Item counts the spec commits to, asserted by the seed test.
  *
  * TOP-LEVEL items only — children and repeat-group members are not counted,
- * matching how §12 numbers them. Safety's 40 excludes a sign-off section it
- * does not have; Indoor's 52 includes its three sign-off items because §12.2
- * numbers them 50–52; Outdoor's 48 is the 45 numbered items plus three
- * unnumbered sign-off items, with its 9 well items counted separately because
- * that section only renders where the property has a well.
+ * matching how §12 numbers them.
+ *
+ *   safety   40 inspected items + a 2-item sign-off (declaration + signature)
+ *   indoor   52, which already includes its three sign-off items — §12.2
+ *            numbers them 50–52
+ *   outdoor  45 numbered + 3 unnumbered sign-off + 9 well items, the last
+ *            counted here even though that section renders only where the
+ *            property actually has a well
  */
 export const EXPECTED_ROOT_ITEM_COUNTS: Record<string, number> = {
-  safety:  40,
+  safety:  42,   // 40 inspected items + the 2-item sign-off
   indoor:  52,
   outdoor: 57,   // 45 numbered + 3 sign-off + 9 well
 }
