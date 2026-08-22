@@ -19,9 +19,11 @@ import type { OwnerRezProperty, OwnerRezBooking, OwnerRezListing } from '@/lib/i
 import {
   buildOwnerRezDetailPatch,
   buildOwnerRezBookingRow,
+  summarizeOwnerRezCleaningDates,
   partitionMappedBookingRows,
   selectOwnerRezBookingsToPostRevenue,
 } from '@/lib/integrations/providers/ownerrez'
+import { recordCleaningDateProbe } from '@/lib/integrations/providers/ownerrez-cleaning-probe'
 import { upsertBookingsReturningIds } from './upsert-bookings'
 import { initialHistoryFrom, revenuePostingFloor } from '@/lib/integrations/providers/ownerrez-backfill'
 import { logAuditEvent }        from '@/lib/audit'
@@ -181,6 +183,14 @@ async function persistInitialBookings(params: {
 
   const builtRows = bookings.map((b) => buildOwnerRezBookingRow(orgId, b, externalToFsId))
   const { mapped: bookingRows, unmappedCount } = partitionMappedBookingRows(builtRows)
+
+  // Measurement only — see the matching call in incremental-sync.ts. This is
+  // the higher-value sample of the two: initial sync sees a bounded window of
+  // real history rather than the handful of bookings that changed in the last
+  // hour, so one connect answers the question faster than a week of ticks.
+  await recordCleaningDateProbe(
+    supabase, orgId, summarizeOwnerRezCleaningDates(bookings), new Date().toISOString(),
+  )
 
   if (unmappedCount) {
     logger.warn(
