@@ -26,6 +26,7 @@ const inspection = (id: string, over: Partial<Inspection> = {}): Inspection => (
   form_id: 'f1', form_version: 1, form_snapshot: {}, header_snapshot: null,
   assigned_to_user_id: USER, inspector_name: null,
   scheduled_for: null, started_at: '2026-08-22T10:00:00Z',
+  started_at_source: 'server', device_started_at: null, device_clock_offset_seconds: null,
   completed_at: null, completed_by_user_id: null,
   source_schedule_id: null, corrects_inspection_id: null,
   created_at: '2026-08-22T10:00:00Z', updated_at: '2026-08-22T10:00:00Z',
@@ -41,6 +42,10 @@ const propertyAsset = (id: string, over: Partial<PropertyAsset> = {}) => ({
 
 let inspectionRows: { data: unknown; error: unknown } = { data: [], error: null }
 let assetRows:      { data: unknown; error: unknown } = { data: [], error: null }
+let formRows:       { data: unknown; error: unknown } = { data: [], error: null }
+let sectionRows:    { data: unknown; error: unknown } = { data: [], error: null }
+let itemRows:       { data: unknown; error: unknown } = { data: [], error: null }
+let propertyRows:   { data: unknown; error: unknown } = { data: [], error: null }
 
 /**
  * A minimal PostgREST builder. Every filter returns `this`, so the chain under
@@ -49,7 +54,15 @@ let assetRows:      { data: unknown; error: unknown } = { data: [], error: null 
 function fakeSupabase() {
   return {
     from(table: string) {
-      const result = table === 'inspections' ? () => inspectionRows : () => assetRows
+      const byTable: Record<string, () => { data: unknown; error: unknown }> = {
+        inspections:              () => inspectionRows,
+        property_assets:          () => assetRows,
+        inspection_forms:         () => formRows,
+        inspection_form_sections: () => sectionRows,
+        inspection_form_items:    () => itemRows,
+        properties:               () => propertyRows,
+      }
+      const result = byTable[table] ?? (() => ({ data: [], error: null }))
       const builder: Record<string, unknown> = {}
       for (const m of ['select', 'eq', 'is', 'in', 'order', 'limit']) {
         builder[m] = () => builder
@@ -72,6 +85,12 @@ const { SHELL_CACHE } = await import('@/lib/pwa/cache-names')
 beforeEach(async () => {
   inspectionRows = { data: [], error: null }
   assetRows      = { data: [], error: null }
+  // A library that caches by default, since almost every test needs one and
+  // only the library-specific tests care about its contents.
+  formRows     = { data: [{ id: 'f1', key: 'safety', version: 1, is_active: true, name: 'Safety' }], error: null }
+  sectionRows  = { data: [{ id: 's1', form_id: 'f1' }], error: null }
+  itemRows     = { data: [{ id: 'i1', section_id: 's1' }], error: null }
+  propertyRows = { data: [{ id: 'prop-1', org_id: ORG, name: 'Lake House' }], error: null }
   cachePut.mockReset()
   fetchMock.mockReset().mockResolvedValue({ ok: true, redirected: false, clone: () => ({}) })
 
@@ -82,7 +101,11 @@ beforeEach(async () => {
   closeDashboardDb()
   const db = getDashboardDb(USER, ORG)
   await db.open()
-  await Promise.all([db.inspections.clear(), db.property_assets.clear(), db.sync_meta.clear()])
+  await Promise.all([
+    db.inspections.clear(), db.property_assets.clear(), db.sync_meta.clear(),
+    db.inspection_forms.clear(), db.inspection_form_sections.clear(),
+    db.inspection_form_items.clear(), db.properties.clear(),
+  ])
 })
 
 afterEach(() => { vi.unstubAllGlobals() })
@@ -94,7 +117,9 @@ describe('warmInspectionsForOffline', () => {
 
     const result = await warmInspectionsForOffline(USER, ORG)
 
-    expect(result).toMatchObject({ inspections: 1, routes: 1 })
+    // Two routes: the list (so a walk can be STARTED offline) and this
+    // inspection's own page.
+    expect(result).toMatchObject({ inspections: 1, routes: 2 })
     // The data half.
     expect(await getDashboardDb(USER, ORG).inspections.get('insp-1')).toBeTruthy()
     expect(await getDashboardDb(USER, ORG).property_assets.get('asset-1')).toBeTruthy()
@@ -123,7 +148,8 @@ describe('warmInspectionsForOffline', () => {
     // to clear it.
     inspectionRows = { data: [inspection('insp-1'), inspection('insp-2')], error: null }
     fetchMock
-      .mockResolvedValueOnce({ ok: true, redirected: true, clone: () => ({}) })
+      .mockResolvedValueOnce({ ok: true,  redirected: true,  clone: () => ({}) })
+      .mockResolvedValueOnce({ ok: false, redirected: false, clone: () => ({}) })
       .mockResolvedValueOnce({ ok: false, redirected: false, clone: () => ({}) })
 
     const result = await warmInspectionsForOffline(USER, ORG)
@@ -137,7 +163,7 @@ describe('warmInspectionsForOffline', () => {
       .mockRejectedValueOnce(new TypeError('Failed to fetch'))
       .mockResolvedValueOnce({ ok: true, redirected: false, clone: () => ({}) })
 
-    expect((await warmInspectionsForOffline(USER, ORG)).routes).toBe(1)
+    expect((await warmInspectionsForOffline(USER, ORG)).routes).toBe(2)
   })
 
   it('caches the inspections even when the ASSET query fails', async () => {
@@ -215,7 +241,7 @@ describe('warmInspectionsForOffline — when it declines to run', () => {
     await warmInspectionsForOffline(USER, ORG)
     fetchMock.mockClear()
 
-    expect((await warmInspectionsForOffline(USER, ORG, { force: true })).routes).toBe(1)
+    expect((await warmInspectionsForOffline(USER, ORG, { force: true })).routes).toBe(2)
   })
 
   it('stamps the watermark even with nothing to warm', async () => {

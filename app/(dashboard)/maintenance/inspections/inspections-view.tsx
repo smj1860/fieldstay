@@ -1,38 +1,41 @@
 'use client'
 
-// The inspections list, and the one control that starts a new one.
+// The inspections list, and the control that starts a new one.
 //
-// Starting is a Server Action call rather than a link, because
-// docs/INSPECTIONS_SPEC.md §8 requires the row — and its SERVER-CLOCK
-// `started_at` — to exist before any filling happens. A page that let you begin
-// answering and created the row later would be trusting a device clock for the
-// one timestamp whose value is being believed.
+// ─────────────────────────────────────────────────────────────────────────────
+// RENDERED FROM DEXIE, NOT FROM THE SERVER
+//
+// This page used to be a Server Component, and the reasoning at the time was
+// sound: starting an inspection had to be online anyway, so there was nothing
+// to gain from a cache. That stopped being true on 2026-08-23, when a walk
+// became startable offline (20260823053931).
+//
+// The consequence is not optional. If you can start an inspection with no
+// signal, you have to be able to SEE it — otherwise a PM starts a walk at a
+// property, backgrounds the app, and finds an empty list with no way back to
+// the inspection they are halfway through. And per public/sw.js the route can
+// only join the offline allowlist once it renders from the local cache, since
+// a cached server-rendered document is a roster from last Tuesday.
+//
+// So the properties and the inspections both come from the local cache, kept
+// current by warmInspectionsForOffline.
 
-import { useState, useTransition } from 'react'
+import { useEffect, useMemo, useState, useTransition } from 'react'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
-import { ClipboardCheck, Plus } from 'lucide-react'
+import { useLiveQuery } from 'dexie-react-hooks'
+import { ClipboardCheck, Plus, WifiOff } from 'lucide-react'
 
 import { Badge } from '@/components/ui/Badge'
 import { Button } from '@/components/ui/Button'
 import { Card } from '@/components/ui/Card'
 import { Dialog } from '@/components/ui/Dialog'
+import { getDashboardDb } from '@/lib/dexie/dashboard/schema'
+import { startInspectionLocally } from '@/lib/dexie/dashboard/start-inspection-local'
+import { warmInspectionsForOffline } from '@/lib/dexie/dashboard/warm-inspections'
+import { parseFormSnapshot } from '@/lib/inspections/snapshots'
 
 import { MaintenanceTabs } from '../maintenance-tabs'
-
-import { startInspection } from './actions'
-
-interface PropertyOption { id: string; name: string }
-
-interface InspectionRow {
-  id:            string
-  propertyId:    string
-  startedAt:     string
-  completedAt:   string | null
-  inspectorName: string | null
-  formKey:       string
-  formVersion:   number
-}
 
 const FORM_LABELS: Record<string, string> = {
   safety:  'Safety & Risk Mitigation',
@@ -40,37 +43,54 @@ const FORM_LABELS: Record<string, string> = {
   outdoor: 'Outdoor Property & Grounds',
 }
 
-const FORM_KEYS = ['safety', 'indoor', 'outdoor'] as const
-
 interface Props {
-  properties:  PropertyOption[]
-  inspections: InspectionRow[]
-  /** True when a query ERRORED, which is not the same as having no inspections. */
-  loadFailed:  boolean
+  userId: string
+  orgId:  string
 }
 
-export function InspectionsView({ properties, inspections, loadFailed }: Readonly<Props>) {
+export function InspectionsView({ userId, orgId }: Readonly<Props>) {
   const router = useRouter()
-  const [starting, startTransition] = useTransition()
-  const [dialogOpen, setDialogOpen]   = useState(false)
-  const [propertyId, setPropertyId]   = useState('')
-  const [formKey, setFormKey]         = useState<(typeof FORM_KEYS)[number]>('safety')
-  const [error, setError]             = useState<string | null>(null)
+  const db = useMemo(() => getDashboardDb(userId, orgId), [userId, orgId])
 
-  const propertyName = (id: string) => properties.find((p) => p.id === id)?.name ?? 'Unknown property'
+  const [starting, startTransition] = useTransition()
+  const [dialogOpen, setDialogOpen] = useState(false)
+  const [propertyId, setPropertyId] = useState('')
+  const [formKey, setFormKey]       = useState('safety')
+  const [error, setError]           = useState<string | null>(null)
+
+  // A warm on mount, forced past the throttle. This is the page a PM opens
+  // before leaving, so it is the one place worth paying for a guaranteed
+  // refresh of the form library rather than accepting a 15-minute-old copy.
+  useEffect(() => { void warmInspectionsForOffline(userId, orgId, { force: true }) }, [userId, orgId])
+
+  const properties  = useLiveQuery(() => db.properties.orderBy('name').toArray(), [db], [])
+  const inspections = useLiveQuery(
+    () => db.inspections.toArray().then((rows) =>
+      rows.sort((a, b) => b.started_at.localeCompare(a.started_at))),
+    [db],
+    [],
+  )
+  const forms = useLiveQuery(
+    () => db.inspection_forms.filter((f) => f.is_active).toArray(),
+    [db],
+    [],
+  )
+
+  const propertyName = (id: string) =>
+    (properties ?? []).find((p) => p.id === id)?.name ?? 'Unknown property'
+
+  // The library is what makes a start possible with no signal. Its absence is
+  // reported as its own state rather than as an empty property list, because
+  // "you have no properties" and "this device has never synced" are different
+  // problems with different fixes.
+  const libraryReady = (forms?.length ?? 0) > 0 && (properties?.length ?? 0) > 0
 
   const begin = () => {
     setError(null)
     startTransition(async () => {
-      const result = await startInspection({ propertyId, formKey })
-      if (!result.ok || !result.inspectionId) {
-        setError(result.error ?? 'Could not start the inspection.')
-        return
-      }
+      const result = await startInspectionLocally(userId, orgId, { propertyId, formKey })
+      if (!result.ok) { setError(result.error); return }
       setDialogOpen(false)
-      // Straight into the walk. Starting is the one step that must be online
-      // (§8: started_at is a server clock), so the moment it succeeds is the
-      // right moment to hand over to the offline-capable fill screen.
       router.push(`/maintenance/inspections/${result.inspectionId}`)
     })
   }
@@ -86,7 +106,7 @@ export function InspectionsView({ properties, inspections, loadFailed }: Readonl
           <Button
             variant="cta"
             onClick={() => setDialogOpen(true)}
-            disabled={properties.length === 0}
+            disabled={!libraryReady}
             className="flex items-center gap-2"
           >
             <Plus className="w-4 h-4" />
@@ -94,21 +114,24 @@ export function InspectionsView({ properties, inspections, loadFailed }: Readonl
           </Button>
         </div>
 
-        {loadFailed && (
+        {!libraryReady && (
           <Card>
-            <p className="text-sm" style={{ color: 'var(--accent-red)' }}>
-              Some of this page didn&rsquo;t load. What you see below may be incomplete —
-              reload before relying on it.
+            <p className="flex items-start gap-2 text-sm" style={{ color: 'var(--text-secondary)' }}>
+              <WifiOff className="w-4 h-4 mt-0.5 shrink-0" style={{ color: 'var(--text-muted)' }} />
+              <span>
+                This device hasn’t downloaded the inspection forms yet. Open this page
+                once with a connection and they’ll stay available offline afterwards.
+              </span>
             </p>
           </Card>
         )}
 
-        {inspections.length === 0 && !loadFailed && (
+        {libraryReady && (inspections?.length ?? 0) === 0 && (
           <Card>
             <div className="flex flex-col items-center gap-2 py-8 text-center">
               <ClipboardCheck className="w-8 h-8" style={{ color: 'var(--text-muted)' }} />
               <p className="text-sm font-semibold" style={{ color: 'var(--text-primary)' }}>
-                No inspections yet
+                No inspections in progress
               </p>
               <p className="text-xs max-w-sm" style={{ color: 'var(--text-muted)' }}>
                 An inspection records the condition of a property at a point in time, and
@@ -118,9 +141,9 @@ export function InspectionsView({ properties, inspections, loadFailed }: Readonl
           </Card>
         )}
 
-        {inspections.length > 0 && (
+        {(inspections?.length ?? 0) > 0 && (
           <ul className="flex flex-col gap-2">
-            {inspections.map((row) => (
+            {(inspections ?? []).map((row) => (
               <li key={row.id}>
                 <Card>
                   <Link
@@ -130,17 +153,17 @@ export function InspectionsView({ properties, inspections, loadFailed }: Readonl
                     <span className="min-w-0">
                       <span className="block text-sm font-semibold truncate"
                             style={{ color: 'var(--text-primary)' }}>
-                        {propertyName(row.propertyId)}
+                        {propertyName(row.property_id)}
                       </span>
                       <span className="block text-xs mt-0.5" style={{ color: 'var(--text-muted)' }}>
-                        {FORM_LABELS[row.formKey] ?? row.formKey} &middot; v{row.formVersion}
+                        {formLabel(row.form_snapshot)} &middot; v{row.form_version}
                         {' · '}
-                        {new Date(row.startedAt).toLocaleDateString()}
-                        {row.inspectorName ? ` · ${row.inspectorName}` : ''}
+                        {new Date(row.started_at).toLocaleDateString()}
+                        {row.inspector_name ? ` · ${row.inspector_name}` : ''}
                       </span>
                     </span>
-                    <Badge tone={row.completedAt ? 'green' : 'amber'}>
-                      {row.completedAt ? 'Complete' : 'In progress'}
+                    <Badge tone={row.completed_at ? 'green' : 'amber'}>
+                      {row.completed_at ? 'Complete' : 'In progress'}
                     </Badge>
                   </Link>
                 </Card>
@@ -186,7 +209,7 @@ export function InspectionsView({ properties, inspections, loadFailed }: Readonl
                   style={{ background: 'var(--bg-card)', border: '1px solid var(--border)', color: 'var(--text-primary)' }}
                 >
                   <option value="">Select a property…</option>
-                  {properties.map((p) => (
+                  {(properties ?? []).map((p) => (
                     <option key={p.id} value={p.id}>{p.name}</option>
                   ))}
                 </select>
@@ -200,19 +223,22 @@ export function InspectionsView({ properties, inspections, loadFailed }: Readonl
                 <select
                   id="inspection-form"
                   value={formKey}
-                  onChange={(e) => setFormKey(e.target.value as (typeof FORM_KEYS)[number])}
+                  onChange={(e) => setFormKey(e.target.value)}
                   className="w-full rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-[var(--accent-gold)]"
                   style={{ background: 'var(--bg-card)', border: '1px solid var(--border)', color: 'var(--text-primary)' }}
                 >
-                  {FORM_KEYS.map((key) => (
-                    <option key={key} value={key}>{FORM_LABELS[key]}</option>
+                  {/* From the CACHED forms, not a hardcoded list — the options
+                      have to be the forms this device can actually walk. */}
+                  {(forms ?? []).map((f) => (
+                    <option key={f.id} value={f.key}>{FORM_LABELS[f.key] ?? f.name}</option>
                   ))}
                 </select>
               </div>
 
               <p className="text-xs" style={{ color: 'var(--text-muted)' }}>
-                The start time is recorded now, from the server. Once started, the
-                inspection can be filled in without a connection.
+                Works with no connection. The start time is taken from this device and
+                corrected against the server clock when it syncs, and the report records
+                that it was device-timed.
               </p>
 
               {error && (
@@ -226,4 +252,15 @@ export function InspectionsView({ properties, inspections, loadFailed }: Readonl
       </div>
     </div>
   )
+}
+
+/**
+ * The form's identity from the SNAPSHOT, not from a join to the live form.
+ * §5 freezes it precisely so a later re-seed cannot restate which form a
+ * finished inspection was.
+ */
+function formLabel(snapshot: unknown): string {
+  const parsed = parseFormSnapshot(snapshot)
+  if (!parsed) return 'Unknown form'
+  return FORM_LABELS[parsed.form_key] ?? parsed.form_key
 }

@@ -44,6 +44,7 @@ const inspection = (over: Partial<Inspection> = {}): Inspection => ({
   form_id: 'f1', form_version: 1, form_snapshot: {}, header_snapshot: null,
   assigned_to_user_id: USER, inspector_name: null,
   scheduled_for: null, started_at: '2026-08-22T10:00:00Z',
+  started_at_source: 'server', device_started_at: null, device_clock_offset_seconds: null,
   completed_at: null, completed_by_user_id: null,
   source_schedule_id: null, corrects_inspection_id: null,
   created_at: '2026-08-22T10:00:00Z', updated_at: '2026-08-22T10:00:00Z',

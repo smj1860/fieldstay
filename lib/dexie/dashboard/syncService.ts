@@ -56,6 +56,27 @@ export const DASHBOARD_UPLOAD_HANDLERS: Record<DashboardMutationKind, UploadHand
   // paths that create a work order is exactly the drift this repo pays for.
   'work_order.create': (m) => Promise.reject(new HandlerNotImplementedError(m.kind)),
 
+  // Starting a walk. The outbox drains in insertion order and STOPS on the
+  // first error, which is what guarantees a create lands before the submit that
+  // depends on it — no explicit dependency tracking needed.
+  //
+  // `device_now` is stamped HERE rather than at enqueue: the server subtracts it
+  // from its own clock to measure skew, and that is only meaningful when both
+  // are read at the same instant. At enqueue it could be hours stale, which
+  // would corrupt the correction it exists to enable.
+  'inspection.create': async (m) => {
+    const res = await fetch('/api/inspections', {
+      method:  'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body:    JSON.stringify({ ...m.payload, device_now: new Date().toISOString() }),
+    })
+    if (res.ok) return
+    if (res.status >= 400 && res.status < 500) {
+      throw new SubmitRejectedError(await readError(res))
+    }
+    throw new Error(`Inspection create failed with ${res.status}`)
+  },
+
   // One atomic completion. The endpoint is a Route Handler rather than a
   // Server Action for the reason above, and everything hard about it — one
   // transaction, items before completion, an idempotent replay — lives in the

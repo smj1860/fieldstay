@@ -71,16 +71,23 @@ self.addEventListener('activate', (event) => {
 // page comes from Dexie via useLiveQuery. The HTML cached here is therefore a
 // frame with no facts in it, which is the only kind that cannot go stale.
 //
-// ⚠️ THE TRAILING SLASH IS LOAD-BEARING, and the rest of /maintenance is still
-// out. `/maintenance/inspections/` matches `/maintenance/inspections/<id>` and
-// NOT `/maintenance/inspections`, which is the list — a Server Component that
-// renders its rows on the server and would cache exactly the staleness this
-// allowlist exists to prevent. Widening this to `/maintenance/inspections`, let
-// alone `/maintenance`, silently re-opens it.
+// ✅ THE LIST JOINED IT 2026-08-23, when starting a walk became possible with
+// no signal (20260823053931). It had been excluded on the grounds that it was a
+// Server Component rendering its rows on the server — true then, and the reason
+// it was rewritten: if you can START an inspection offline you must be able to
+// SEE it, or a PM begins a walk, backgrounds the app, and finds an empty list
+// with no route back to the inspection they are halfway through. Both pages now
+// render from Dexie and hold no server-rendered data.
+//
+// ⚠️ THE REST OF /maintenance IS STILL OUT, and the entry without a trailing
+// slash covers the list page EXACTLY — `pathname === p` — while the one WITH it
+// covers the per-inspection routes. Neither matches /maintenance itself, whose
+// board is still server-rendered. Do not collapse these to '/maintenance'.
 const OFFLINE_PATHS = [
   '/crew',          // the crew PWA — offline is its whole point
   '/work-orders/',  // vendor token pages, cached so a hard reload survives no signal
-  '/maintenance/inspections/', // the fill screen ONLY — see above; NOT the list
+  '/maintenance/inspections',  // the list — renders from Dexie, so a walk can be STARTED offline
+  '/maintenance/inspections/', // the fill screen — renders from Dexie
 ]
 
 function isOfflineCapable(pathname) {

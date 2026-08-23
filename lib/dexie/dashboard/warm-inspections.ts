@@ -28,18 +28,32 @@
 // never let a warm failure break the thing it was helping.
 //
 // ─────────────────────────────────────────────────────────────────────────────
-// WHAT THIS CANNOT DO, AND IT IS NOT AN OVERSIGHT
+// IT ALSO WARMS THE FORM LIBRARY, SO A WALK CAN BEGIN OFFLINE
 //
-// It cannot make an inspection STARTABLE offline. §8 settles that: `started_at`
-// is a server clock because "a device clock is both skewable and, for an
-// artifact whose entire value is being believed, the wrong thing to trust." An
-// inspection has to exist before this can warm it.
+// Warming only the OPEN inspections left one hole: an inspection had to already
+// exist to be warmed, so offline inspection worked exactly when somebody had
+// remembered to create the row before leaving. §8's original reasoning — that
+// `started_at` must be a server clock — was revised on 2026-08-23 (see
+// 20260823053931) once it was clear the duration claim survives a device clock
+// corrected by the skew measured at sync.
+//
+// So the whole form library and the property list come too. Measured against
+// production that is 3 forms, 24 sections, 173 items at 38 kB, plus 29
+// properties and 174 assets — cheaper than the single inspection this used to
+// warm, and platform-owned data that changes only when we re-seed.
 
 import { createClient } from '@/lib/supabase/client'
 import { reportError } from '@/lib/observability/report-error'
 import { ROUTE_WARM_TIMEOUT_MS } from '@/lib/http/timeout'
 import { SHELL_CACHE } from '@/lib/pwa/cache-names'
-import type { Inspection, PropertyAsset } from '@/types/database'
+import type {
+  Inspection,
+  InspectionForm,
+  InspectionFormItem,
+  InspectionFormSection,
+  Property,
+  PropertyAsset,
+} from '@/types/database'
 
 import { getDashboardDb } from './schema'
 
@@ -68,6 +82,9 @@ function canWarm(): boolean {
 export interface WarmResult {
   inspections: number
   routes:      number
+  /** Form ITEMS cached — the number that tells you a walk can start offline. */
+  formItems:   number
+  properties:  number
   skipped?:    'offline' | 'throttled'
 }
 
@@ -83,32 +100,120 @@ export async function warmInspectionsForOffline(
   orgId:  string,
   opts:   { force?: boolean } = {},
 ): Promise<WarmResult> {
-  if (!canWarm()) return { inspections: 0, routes: 0, skipped: 'offline' }
+  if (!canWarm()) return { ...EMPTY, skipped: 'offline' }
 
   const db = getDashboardDb(userId, orgId)
 
   try {
     if (!opts.force && !(await isDue(db, WARM_INTERVAL_MS))) {
-      return { inspections: 0, routes: 0, skipped: 'throttled' }
+      return { ...EMPTY, skipped: 'throttled' }
     }
 
-    const inspections = await fetchOpenInspections(orgId)
-    if (inspections === null) return { inspections: 0, routes: 0 }
+    // The library first, and independently of the rest: it is what makes a walk
+    // STARTABLE offline, so it must land even for an org with no open
+    // inspections at all — which is precisely the org about to start its first.
+    const library = await cacheFormLibrary(db, orgId)
 
-    // Stamped even when there is nothing to warm. An org with no open
-    // inspections would otherwise re-run the query on every dashboard mount
-    // forever, which is the case where the throttle matters most.
+    const inspections = await fetchOpenInspections(orgId)
+    if (inspections === null) return { ...EMPTY, ...library }
+
+    // Stamped even when there is nothing further to warm. An org with no open
+    // inspections would otherwise re-run every query on every dashboard mount,
+    // which is the case where the throttle matters most.
     await db.sync_meta.put({ key: WARM_WATERMARK, value: new Date().toISOString() })
-    if (inspections.length === 0) return { inspections: 0, routes: 0 }
+    if (inspections.length === 0) return { ...EMPTY, ...library }
 
     await cacheInspectionsAndAssets(db, orgId, inspections)
-    const routes = await warmRoutes(inspections.map((i) => `/maintenance/inspections/${i.id}`))
+    const routes = await warmRoutes([
+      // The START screen, so "new inspection" is reachable with no signal. It
+      // is the one route here that is not per-inspection, and warming it is the
+      // difference between a PM being able to begin a walk and being told they
+      // are offline.
+      '/maintenance/inspections',
+      ...inspections.map((i) => `/maintenance/inspections/${i.id}`),
+    ])
 
-    return { inspections: inspections.length, routes }
+    return { ...EMPTY, ...library, inspections: inspections.length, routes }
   } catch (err) {
     console.warn('[warmInspections] warm failed (non-fatal):', err)
-    return { inspections: 0, routes: 0 }
+    return EMPTY
   }
+}
+
+const EMPTY: WarmResult = { inspections: 0, routes: 0, formItems: 0, properties: 0 }
+
+/**
+ * The platform form library and the org's properties.
+ *
+ * Both are needed BEFORE an inspection exists: the start screen has to offer a
+ * property and a form, and the fill screen builds its own `form_snapshot` from
+ * these rows when the walk begins with no signal.
+ *
+ * Never partially applied. Each table is reconciled only when its own fetch
+ * succeeded, because a half-cached form — sections without their items — would
+ * resolve to a SHORTER form rather than an obviously broken one.
+ */
+async function cacheFormLibrary(
+  db:    ReturnType<typeof getDashboardDb>,
+  orgId: string,
+): Promise<{ formItems: number; properties: number }> {
+  const supabase = createClient()
+
+  const [forms, sections, items, properties] = await Promise.all([
+    supabase.from('inspection_forms').select('*').eq('is_active', true).limit(50),
+    supabase.from('inspection_form_sections').select('*').limit(500),
+    // Bounded well above the live 173. A truncated item list is the dangerous
+    // failure here: it renders as a form that is simply missing questions.
+    supabase.from('inspection_form_items').select('*').limit(5000),
+    supabase.from('properties').select('*').eq('org_id', orgId).order('name').limit(500),
+  ])
+
+  const failed = [forms, sections, items, properties].find((r) => r.error)
+  if (failed?.error) {
+    reportError(failed.error, { site: 'dexie.dashboard.warmInspections.library' })
+    return { formItems: 0, properties: 0 }
+  }
+
+  const formRows     = (forms.data      ?? []) as unknown as InspectionForm[]
+  const sectionRows  = (sections.data   ?? []) as unknown as InspectionFormSection[]
+  const itemRows     = (items.data      ?? []) as unknown as InspectionFormItem[]
+  const propertyRows = (properties.data ?? []) as unknown as Property[]
+
+  // An empty form library means the seed has not run, NOT that the forms were
+  // deleted. Replacing a good cache with nothing would take a device that could
+  // start a walk and make it unable to — the empty-set trap, in the one table
+  // where empty is never a legitimate steady state.
+  if (formRows.length === 0 || itemRows.length === 0) {
+    console.warn('[warmInspections] form library came back empty — keeping the cached copy')
+    return { formItems: 0, properties: 0 }
+  }
+
+  await db.transaction('rw',
+    db.inspection_forms, db.inspection_form_sections, db.inspection_form_items, db.properties,
+    async () => {
+      // Replaced wholesale rather than reconciled by absence. These are small,
+      // platform-owned, and fetched complete every time — so a clear-and-put is
+      // both simpler and stricter than diffing, and a retired form stops being
+      // offerable immediately.
+      await db.inspection_forms.clear()
+      await db.inspection_form_sections.clear()
+      await db.inspection_form_items.clear()
+      await db.inspection_forms.bulkPut(formRows)
+      await db.inspection_form_sections.bulkPut(sectionRows)
+      await db.inspection_form_items.bulkPut(itemRows)
+
+      // Properties are org data and can legitimately be empty, so they are
+      // reconciled rather than gated: a property removed from the org must stop
+      // being offered as somewhere to inspect.
+      const keep = new Set(propertyRows.map((p) => p.id))
+      const stale = (await db.properties.toArray())
+        .filter((p) => !keep.has(p.id))
+        .map((p) => p.id)
+      await db.properties.bulkDelete(stale)
+      await db.properties.bulkPut(propertyRows)
+    })
+
+  return { formItems: itemRows.length, properties: propertyRows.length }
 }
 
 async function isDue(

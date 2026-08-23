@@ -82,9 +82,13 @@ const RECONCILERS: Record<string, Reconciler> = {
     protection: 'fetch-fails-loud',
     why: "Reconciles ONE property's cached assets after pulling an inspection. The Supabase read returns { data, error } and the function returns early on error, so the bulkDelete is only ever reached with a genuinely complete list — and empty is a legitimate steady state here, because most properties have not catalogued their assets at all (8 of 29 in production). An empty-set guard would be WRONG: it would make the last asset impossible to retire, and a stale asset keeps opening §12.3's well section on a property with no well.",
   },
-  'lib/dexie/dashboard/warm-inspections.ts:197': {
+  'lib/dexie/dashboard/warm-inspections.ts:302': {
     protection: 'fetch-fails-loud',
     why: "The same reconciliation, batched across the properties with open inspections. Identical protection: the asset query's error branch returns before this block, having still cached the inspections themselves. The delete is scoped to the property_ids the fetch actually covered, so even a wrong empty result could not reach another property's cached assets.",
+  },
+  'lib/dexie/dashboard/warm-inspections.ts:210': {
+    protection: 'fetch-fails-loud',
+    why: "Drops cached PROPERTIES the org no longer has, so a removed property stops being offered as somewhere to start an inspection. cacheFormLibrary returns early on any of its four query errors, so this block only runs with a genuinely complete list. Empty is a legitimate steady state — a new org has no properties — and an empty-set guard would make the LAST property impossible to remove from a device. Note the sibling FORM tables in the same function are guarded the opposite way, and deliberately: an empty form library is never a real state, only a failed seed.",
   },
 }
 

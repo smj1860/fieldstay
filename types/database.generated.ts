@@ -2030,6 +2030,8 @@ export type Database = {
           completed_by_user_id: string | null
           corrects_inspection_id: string | null
           created_at: string
+          device_clock_offset_seconds: number | null
+          device_started_at: string | null
           form_id: string
           form_snapshot: Json
           form_version: number
@@ -2041,6 +2043,7 @@ export type Database = {
           scheduled_for: string | null
           source_schedule_id: string | null
           started_at: string
+          started_at_source: string
           updated_at: string
         }
         Insert: {
@@ -2049,6 +2052,8 @@ export type Database = {
           completed_by_user_id?: string | null
           corrects_inspection_id?: string | null
           created_at?: string
+          device_clock_offset_seconds?: number | null
+          device_started_at?: string | null
           form_id: string
           form_snapshot: Json
           form_version: number
@@ -2060,6 +2065,7 @@ export type Database = {
           scheduled_for?: string | null
           source_schedule_id?: string | null
           started_at?: string
+          started_at_source?: string
           updated_at?: string
         }
         Update: {
@@ -2068,6 +2074,8 @@ export type Database = {
           completed_by_user_id?: string | null
           corrects_inspection_id?: string | null
           created_at?: string
+          device_clock_offset_seconds?: number | null
+          device_started_at?: string | null
           form_id?: string
           form_snapshot?: Json
           form_version?: number
@@ -2079,6 +2087,7 @@ export type Database = {
           scheduled_for?: string | null
           source_schedule_id?: string | null
           started_at?: string
+          started_at_source?: string
           updated_at?: string
         }
         Relationships: [

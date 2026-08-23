@@ -44,6 +44,9 @@ import type { DeadLetterFlag } from '../outbox-primitives'
 import type {
   Inspection,
   InspectionAction,
+  InspectionForm,
+  InspectionFormItem,
+  InspectionFormSection,
   InspectionResult,
   MaintenanceSchedule,
   Property,
@@ -63,7 +66,11 @@ import type {
  * The crew PWA escapes this because a crew member effectively owns their
  * turnover; nobody owns a work order.
  */
-export type DashboardMutationKind = 'work_order.create' | 'inspection.submit'
+export type DashboardMutationKind =
+  | 'work_order.create'
+  /** Starting a walk. Ordered BEFORE its submit by the outbox's in-order drain. */
+  | 'inspection.create'
+  | 'inspection.submit'
 
 export interface DashboardMutationRow {
   id?:        number
@@ -175,6 +182,14 @@ export class FieldStayDashboardDexie extends Dexie {
   /** Only the ones this PM has open — see pruneFinishedInspections(). */
   inspections!:           Table<Inspection, string>
 
+  // The FORM LIBRARY, cached so an inspection can be STARTED with no signal.
+  // Platform-owned and tiny — 3 forms, 24 sections, 173 items, 38 kB measured
+  // against production — so this is cheaper to hold than the single inspection
+  // that used to be warmed.
+  inspection_forms!:          Table<InspectionForm, string>
+  inspection_form_sections!:  Table<InspectionFormSection, string>
+  inspection_form_items!:     Table<InspectionFormItem, string>
+
   /** LOCAL-ONLY working draft. No server row exists until sign-off. */
   inspection_answers!:    Table<InspectionAnswerRow, string>
 
@@ -212,6 +227,18 @@ export class FieldStayDashboardDexie extends Dexie {
     this.version(2).stores({
       inspections:         'id, org_id, property_id, completed_at',
       inspection_answers:  'id, inspectionId, [inspectionId+answerKey]',
+    })
+
+    // v3 — starting an inspection offline (INSPECTIONS_SPEC §8, revised
+    // 2026-08-23). Additive, so an upgrade never costs a PM their queued work.
+    //
+    // `properties` was declared in v1 and never written to; it is populated
+    // from here on, because the start screen has to offer a property to inspect
+    // and cannot ask the server which ones exist.
+    this.version(3).stores({
+      inspection_forms:         'id, key, is_active',
+      inspection_form_sections: 'id, form_id',
+      inspection_form_items:    'id, section_id',
     })
   }
 }

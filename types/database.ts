@@ -2211,6 +2211,21 @@ export interface Inspection {
 
   scheduled_for:        string | null
   started_at:           string
+  /**
+   * Whether `started_at` is a server clock or a device clock corrected by the
+   * skew measured at sync (20260823053931).
+   *
+   * An inspection can be STARTED offline, so the start time is not always the
+   * server's. Recorded rather than hidden, the same way ConditionsSnapshot
+   * carries `source: 'recorded' | 'reported'` — a duration that was
+   * device-timed is a different claim from one that was not, and printing them
+   * identically launders the weaker one.
+   */
+  started_at_source:    'server' | 'device'
+  /** The raw device claim, uncorrected. NOT NULL whenever source is 'device'. */
+  device_started_at:    string | null
+  /** server_now − device_now, measured in the request that carried the start. */
+  device_clock_offset_seconds: number | null
   completed_at:         string | null
   completed_by_user_id: string | null
 

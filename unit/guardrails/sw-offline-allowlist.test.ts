@@ -54,11 +54,11 @@ describe('guardrail: service worker offline allowlist', () => {
 
     const paths = [...list![1].matchAll(/'([^']+)'/g)].map((m) => m[1]).sort()
 
-    // `/maintenance/inspections/` was added 2026-08-23, and ONLY with its
-    // trailing slash — see the next test. The fill screen's Server Component
-    // renders three ids and nothing else, so the HTML cached for it is a frame
-    // with no facts in it. Nothing else under /maintenance qualifies: every
-    // other page there renders its data on the server.
+    // Both inspection routes were added 2026-08-23. Each is a SHELL: its
+    // Server Component resolves ids and nothing else, and every value comes
+    // from Dexie — so the cached HTML is a frame with no facts in it, which is
+    // the only kind that cannot go stale. Nothing else under /maintenance
+    // qualifies; the board still renders its data on the server.
     expect(paths, [
       'The offline allowlist changed.',
       '',
@@ -70,40 +70,57 @@ describe('guardrail: service worker offline allowlist', () => {
       'with no signal.',
       '',
       'If this is intentional, update this list AND say why in sw.js.',
-    ].join('\n')).toEqual(['/crew', '/maintenance/inspections/', '/work-orders/'])
+    ].join('\n')).toEqual([
+      '/crew', '/maintenance/inspections', '/maintenance/inspections/', '/work-orders/',
+    ])
   })
 
-  it('the inspections entry keeps its trailing slash, so the LIST stays out', () => {
-    // The sharp edge of the 2026-08-23 addition, checked structurally because
-    // dropping one character is a plausible tidy-up with no visible symptom.
+  it('/maintenance is never allowlisted wholesale', () => {
+    // The rule that survived the 2026-08-23 change, and the one that matters.
     //
-    // isOfflineCapable tests `pathname === p || pathname.startsWith(p + '/')`,
-    // so '/maintenance/inspections/' matches '/maintenance/inspections/<id>'
-    // and NOT '/maintenance/inspections'. That exclusion is the whole design:
-    // the fill screen is a shell whose values all come from Dexie, while the
-    // LIST is an ordinary Server Component that renders its rows on the server.
-    // Caching the list would serve a PM an inspection roster from last Tuesday
-    // — including, at its worst, hiding the inspection they just started.
+    // This test used to assert the opposite of what it does now: it required
+    // the inspections entry to keep a trailing slash SPECIFICALLY so the list
+    // page stayed out, on the grounds that the list was a Server Component
+    // rendering its rows on the server. That was true when it was written. The
+    // list was then rewritten to render from Dexie — it had to be, because a
+    // walk can now be STARTED offline and an inspection you cannot see is an
+    // inspection you cannot get back to — so the premise is gone and the rule
+    // with it. Recorded rather than quietly deleted: a guardrail that stops
+    // being true is worth a paragraph explaining why.
+    //
+    // What is still true is that /maintenance itself must stay out. Its board
+    // renders server-side, so caching it serves last Tuesday's work orders as
+    // current. `isOfflineCapable` matches `pathname === p` OR the path plus a
+    // slash, so a bare '/maintenance' entry would swallow the entire subtree.
     const list  = /const OFFLINE_PATHS = \[([\s\S]*?)\]/.exec(code)
     const paths = [...list![1].matchAll(/'([^']+)'/g)].map((m) => m[1]!)
 
-    const entry = paths.find((p) => p.includes('/maintenance/'))
-    expect(entry, 'the inspections entry is gone').toBeDefined()
-    expect(entry, [
-      'The /maintenance allowlist entry lost its trailing slash.',
-      '',
-      'Without it the entry also matches /maintenance/inspections itself — the',
-      'LIST page, a Server Component that renders its rows on the server. Its',
-      'cached HTML would then be served offline as current, which can hide an',
-      'inspection the PM started minutes ago.',
-    ].join('\n')).toBe('/maintenance/inspections/')
+    expect(paths, [
+      '/maintenance is allowlisted wholesale. Every page under it — the work-order',
+      'board, the work-order detail — would then be cached and served offline as',
+      'current, which is the staleness this allowlist exists to prevent. Only',
+      'routes that render from Dexie may be listed, and they must be listed',
+      'individually.',
+    ].join('\n')).not.toContain('/maintenance')
 
-    // And the parent must not be listed alongside it, which would achieve the
-    // same thing by a different route.
-    expect(paths, '/maintenance is allowlisted wholesale').not.toContain('/maintenance')
-    expect(paths, 'the inspections LIST is allowlisted').not.toContain('/maintenance/inspections')
+    // Every /maintenance entry must be a real subpath, not the parent.
+    for (const p of paths.filter((x) => x.startsWith('/maintenance'))) {
+      expect(p.startsWith('/maintenance/inspections'),
+        `${p} allowlists more of /maintenance than the inspection routes`).toBe(true)
+    }
   })
 
+  it('the per-inspection routes keep their trailing slash', () => {
+    // Without it, '/maintenance/inspections' alone would still match the fill
+    // screen via the `p + '/'` branch — so this is not about coverage, it is
+    // about the two entries meaning different things. The slashed one is what
+    // documents that the SUBTREE is offline-capable, and dropping it would make
+    // the list entry silently responsible for both.
+    const list  = /const OFFLINE_PATHS = \[([\s\S]*?)\]/.exec(code)
+    const paths = [...list![1].matchAll(/'([^']+)'/g)].map((m) => m[1]!)
+    expect(paths, 'the per-inspection subtree entry is gone')
+      .toContain('/maintenance/inspections/')
+  })
   it('serves the offline PAGE outside the allowlist, not a cached copy', () => {
     // The distinction that matters: stop serving stale CONTENT, without
     // stopping being a PWA. A non-allowlisted navigation that fails should get
