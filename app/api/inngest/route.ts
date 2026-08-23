@@ -187,10 +187,12 @@ import { metricsSnapshot } from '@/lib/inngest/functions/cron/metrics-snapshot'
 import { tagHospitableTrialSignup }   from '@/lib/inngest/functions/promo-hospitable-tag-trial'
 import { awardHospitablePriceLock }   from '@/lib/inngest/functions/promo-hospitable-award-lock'
 import { expireHospitablePriceLocks } from '@/lib/inngest/functions/promo-hospitable-expire-locks'
+import { inspectionCompleted } from '@/lib/inngest/functions/inspection-completed'
 
 export const { GET, POST, PUT } = serve({
   client: inngest,
   functions: [
+    inspectionCompleted,
     // iCal sync pipeline
     syncAllIcalFeeds,
     syncOrgIcalFeeds,

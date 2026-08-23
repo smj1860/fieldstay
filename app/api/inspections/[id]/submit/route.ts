@@ -17,6 +17,7 @@
 import { NextResponse } from 'next/server'
 
 import { requireOrgRole } from '@/lib/auth'
+import { inngest } from '@/lib/inngest/client'
 import { logAuditEvent } from '@/lib/audit'
 import { reportError } from '@/lib/observability/report-error'
 import { parseSubmitPayload } from '@/lib/inspections/submit-payload'
@@ -82,13 +83,21 @@ export async function POST(
       })
     }
 
-    // Remediation (INSPECTIONS_SPEC §6, phase 4) hangs off this point: fails
-    // become work orders and purchase orders ON COMPLETION, not on the tick.
-    // Written as a note rather than a TODO because nothing here is unfinished —
-    // this route does its whole job — and the one thing worth carrying forward
-    // is a constraint, not a task: a per_unit answer must dedup on
-    // (concern_key, asset_id) and never concern_key alone, since two dryers
-    // with blocked vents are two jobs.
+    // Remediation (§6). Emitted only for a completion that actually happened —
+    // a replay reports `already_completed` and must not re-fire, because the
+    // handler's own idempotency is a backstop, not a licence to send twice.
+    //
+    // AFTER the transaction, never on the tick: §6's inspector ticks No on a
+    // loose handrail, tightens it while standing there and changes the answer
+    // to Yes, and fire-on-tick has already left a work order for someone to
+    // close as not-a-thing.
+    if (!result.already_completed) {
+      await inngest.send({
+        name: 'inspection/completed',
+        data: { org_id: membership.org_id, inspection_id: inspectionId },
+      })
+    }
+
     return NextResponse.json({ ok: true, alreadyCompleted: !!result.already_completed })
   } catch (err) {
     console.error('[inspections.submit]', err)

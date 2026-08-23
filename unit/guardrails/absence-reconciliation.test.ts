@@ -66,7 +66,7 @@ const RECONCILERS: Record<string, Reconciler> = {
     protection: 'empty-set-guard',
     why: 'Deactivates crew members absent from Hostex /staffs. Same shape as the Hospitable teammate site above, and guarded the same way for the same reason: an account holding a Hostex connection and zero staff has nothing to reconcile anyway, so an empty fetch is far likelier to be a failure than a real state. Deactivating wrongly takes a whole roster out of auto-assign, which selects on is_active.',
   },
-  'lib/inngest/functions/hospitable/calendar-sync-handler.ts:122': {
+  'lib/inngest/functions/hospitable/calendar-sync-handler.ts:147': {
     protection: 'fetch-fails-loud',
     why: 'Cancels blocks absent from the Hospitable calendar. hospFetchCalendar THROWS on any non-ok, so [] can only mean the window genuinely holds no blocks — which is the normal state for most properties. An empty-set guard here would be a bug: the LAST lifted block could never be cleared.',
   },
@@ -102,7 +102,7 @@ const FAIL_SOFT_EMPTY_RETURNS: Record<string, string> = {
   // hospFetchReservationMessages' 404-returns-[] entry was here until
   // 2026-08-20. The function is gone: the message webhook carries the whole
   // message, so nothing fetches a thread any more.
-  'lib/integrations/providers/hospitable.ts:811':
+  'lib/integrations/providers/hospitable.ts:822':
     'hospFetchTeammates: 403 is the one expected non-ok — a connection predating the teammate:read scope. Nothing about it is retriable. Every OTHER status now throws, and the sole absence-based consumer carries an empty-set guard.',
 }
 

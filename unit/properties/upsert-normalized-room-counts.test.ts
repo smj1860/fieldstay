@@ -123,3 +123,25 @@ describe('upsertNormalizedProperties — room counts', () => {
     expect(upsertedCounts()).toEqual({ bedrooms: 1, bathrooms: 1, max_guests: 2 })
   })
 })
+
+// ============================================================================
+// THE PAUSE SELF-HEALS.
+//
+// A property paused by a 404 (20260823170441) is excluded from the calendar
+// cron until something clears the marker. Clearing it HERE — on the ordinary
+// upsert every sync already performs — is what makes a provider outage, or a
+// listing that comes back, need no intervention and no cron of its own.
+//
+// Without it the pause is permanent: a property would go quiet after one bad
+// morning and stay quiet, which is a worse failure than the daily 404 it
+// replaced, because nothing would be reporting it any more.
+// ============================================================================
+describe('external_missing_since', () => {
+  it('is cleared by the upsert, because the provider just listed the property', async () => {
+    await upsertNormalizedProperties('org-1', 'hospitable', [normalized()])
+
+    const call = upsertSpy.mock.calls.find((c) => c[0] === 'properties')
+    const row  = (call?.[1] as Record<string, unknown>[])[0]
+    expect(row).toHaveProperty('external_missing_since', null)
+  })
+})

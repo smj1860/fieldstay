@@ -158,6 +158,13 @@ export async function upsertNormalizedProperties(
     avg_turnovers_per_month: 0,
     setup_steps_completed:   {} as Record<string, boolean>,
     is_active:               true,
+    // The provider just listed this property, so whatever 404'd before is
+    // resolved. Clearing it here rather than in a dedicated pass is what makes
+    // the pause self-healing: a provider outage, or a listing that comes back,
+    // needs no intervention and no cron of its own. Safe to write
+    // unconditionally — unlike lat/lng above, this is not a value an earlier
+    // sync or the PM could have set to something worth keeping.
+    external_missing_since:  null,
   })
 
   const withCoords    = normalized.filter(hasCoords)

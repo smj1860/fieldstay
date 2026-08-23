@@ -215,8 +215,13 @@ export interface Property {
   min_renter_age:          number | null
   external_id:             string | null
   external_source:         string | null
-  // Presence gates Outdoor's HOA section and prints on the report. A name
-  // rather than a boolean because it carries information either way.
+  /**
+   * When the PMS first 404'd this `external_id`. Pauses per-property provider
+   * polling; cleared automatically the next time a sync lists the property.
+   * Deliberately NOT the same thing as `is_active = false` — see
+   * 20260823170441.
+   */
+  external_missing_since:  string | null
   created_at:              string
   updated_at:              string
 }
@@ -758,6 +763,8 @@ export interface PurchaseOrder {
   property_id:          string
   org_id:               string
   status:               PoStatus
+  /** The inspection whose failed purchasable items became this PO. One per inspection. */
+  source_inspection_id: string | null
   source_count_id:      string | null
   generated_at:         string
   sent_at:              string | null
@@ -834,6 +841,12 @@ export interface WorkOrder {
   status:                      WoStatus
   source:                      WoSource
   source_schedule_id:          string | null
+  /**
+   * The failed inspection answer this work order came from (20260823150044).
+   * Partial-unique, which is what makes the remediation retry idempotent —
+   * and what does NOT stop a repeat visit creating a second one. See §6.
+   */
+  source_inspection_item_id: string | null
   source_turnover_id:          string | null
   asset_id:                    string | null
   scheduled_date:              string | null

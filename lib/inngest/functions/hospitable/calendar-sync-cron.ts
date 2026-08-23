@@ -77,6 +77,13 @@ export const hospCalendarSyncCron = inngest.createFunction(
           .eq('external_source', 'hospitable')
           .eq('is_active', true)
           .not('external_id', 'is', null)
+          // Listings Hospitable has stopped recognising. Without this the cron
+          // re-dispatches a guaranteed 404 every morning forever — which it did
+          // for one org from 2026-08-22 (SENTRY-CRAZY-CUSHION-F), exhausting
+          // retries into Sentry each time with nothing able to resolve it. The
+          // marker is cleared automatically the moment a sync lists the
+          // property again, so this pause self-heals.
+          .is('external_missing_since', null)
           .in('org_id', activeOrgIds)
           .order('id')
           .range(from, to),

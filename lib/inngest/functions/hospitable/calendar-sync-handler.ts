@@ -20,7 +20,9 @@
 
 import { inngest }                 from '@/lib/inngest/client'
 import { createServiceClient }     from '@/lib/supabase/server'
+import { createPmNotification }    from '@/lib/inngest/helpers'
 import { getValidHospitableToken } from '@/lib/integrations/providers/hospitable-token'
+import { ProviderEntityGoneError } from '@/lib/integrations/types'
 import { hospFetchCalendar, consolidateHospitableBlocks } from '@/lib/integrations/providers/hospitable'
 import type { BookingSource } from '@/types/database'
 
@@ -58,9 +60,32 @@ export const hospCalendarSyncHandler = inngest.createFunction(
       }
     })
 
-    const days = await step.run('fetch-calendar', async () => {
-      return hospFetchCalendar(token, hospitable_property_id, startDate, endDate)
+    // A 404 is answered by PAUSING this property rather than by retrying. The
+    // step returns a DECISION and the pause happens at the function's top
+    // level, because step tooling inside a step.run callback re-runs the whole
+    // callback on the next pass (CLAUDE.md, enforced by
+    // unit/guardrails/inngest-nested-steps.test.ts).
+    const fetched = await step.run('fetch-calendar', async () => {
+      try {
+        return { gone: false as const, days: await hospFetchCalendar(token, hospitable_property_id, startDate, endDate) }
+      } catch (err) {
+        if (err instanceof ProviderEntityGoneError) return { gone: true as const, days: [] }
+        throw err
+      }
     })
+
+    if (fetched.gone) {
+      await step.run('mark-property-missing', () =>
+        markPropertyMissing(org_id, property_id))
+
+      logger.warn(
+        `[Hospitable calendar-sync] property ${property_id}: Hospitable no longer recognises ` +
+        `its listing — calendar sync paused until the provider lists it again`
+      )
+      return { activeCount: 0, cancelledCount: 0, paused: true }
+    }
+
+    const days = fetched.days
 
     const result = await step.run('reconcile-blocks', async () => {
       const supabase = createServiceClient({ system: 'inngest:calendar-sync-handler' })
@@ -141,3 +166,54 @@ export const hospCalendarSyncHandler = inngest.createFunction(
     return result
   }
 )
+
+/**
+ * Records that Hospitable no longer recognises this listing, and tells the PM.
+ *
+ * PAUSES, never deactivates. A 404 says the id is gone; it does not say whether
+ * the customer delisted the property or relisted it under a new one, and only
+ * they know which. Switching off a property row would take its bookings,
+ * turnovers and every downstream cron with it on the strength of one status
+ * code — see the column's own migration comment (20260823170441) for why that
+ * asymmetry decides this.
+ *
+ * `.is('external_missing_since', null)` makes the timestamp mean FIRST seen
+ * missing rather than most recently confirmed missing. That matters because it
+ * is the only evidence of how long a listing has been gone, and the cron would
+ * otherwise rewrite it to today's date every morning.
+ */
+async function markPropertyMissing(
+  orgId:      string,
+  propertyId: string,
+): Promise<void> {
+  const supabase = createServiceClient({ system: 'inngest:calendar-sync-handler' })
+
+  const { data: property, error } = await supabase
+    .from('properties')
+    .update({ external_missing_since: new Date().toISOString() })
+    .eq('org_id', orgId)
+    .eq('id', propertyId)
+    .is('external_missing_since', null)
+    .select('name')
+    .maybeSingle()
+
+  if (error) throw new Error(`Marking property ${propertyId} missing failed: ${error.message}`)
+
+  // No row updated means it was already marked on an earlier run. The
+  // notification is deduped on the property anyway, but returning here keeps a
+  // daily cron from re-entering the notify path at all.
+  if (!property) return
+
+  await createPmNotification(supabase, {
+    orgId,
+    type:  'integration.property_missing',
+    title: `Hospitable no longer lists "${property.name}"`,
+    // The external id is deliberately absent: a PM cannot act on a uuid, and
+    // the property name plus the link is what lets them decide whether this was
+    // a delisting or a relist under a new id.
+    subtitle: 'Calendar sync for this property is paused until it reappears. If you relisted it, reconnect Hospitable to pick up the new listing.',
+    href:     `/properties/${propertyId}`,
+    severity: 'amber',
+    dedupeKey: `property-missing:${propertyId}`,
+  })
+}

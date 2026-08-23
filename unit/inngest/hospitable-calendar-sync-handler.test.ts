@@ -10,11 +10,14 @@ vi.mock('@/lib/integrations/providers/hospitable', () => ({
   hospFetchCalendar:          vi.fn(),
   consolidateHospitableBlocks: vi.fn(),
 }))
+vi.mock('@/lib/inngest/helpers', () => ({ createPmNotification: vi.fn() }))
 
 import { hospCalendarSyncHandler } from '@/lib/inngest/functions/hospitable/calendar-sync-handler'
 import { createServiceClient } from '@/lib/supabase/server'
 import { getValidHospitableToken } from '@/lib/integrations/providers/hospitable-token'
 import { hospFetchCalendar, consolidateHospitableBlocks } from '@/lib/integrations/providers/hospitable'
+import { createPmNotification } from '@/lib/inngest/helpers'
+import { ProviderEntityGoneError } from '@/lib/integrations/types'
 import { invokeHandler } from './test-helpers'
 
 function runAllStep() {
@@ -22,7 +25,7 @@ function runAllStep() {
 }
 
 function makeLogger() {
-  return { info: vi.fn(), error: vi.fn() }
+  return { info: vi.fn(), error: vi.fn(), warn: vi.fn() }
 }
 
 interface QueuedByTable { [table: string]: { data?: unknown; error?: unknown }[] }
@@ -47,6 +50,7 @@ function makeSupabase(queued: QueuedByTable) {
     chain.lte    = (...a: unknown[]) => record('lte', a)
     chain.gte    = (...a: unknown[]) => record('gte', a)
     chain.limit  = (...a: unknown[]) => record('limit', a)
+    chain.is     = (...a: unknown[]) => record('is', a)
 
     const resolveNext = () => {
       const idx = counters[table] ?? 0
@@ -54,6 +58,7 @@ function makeSupabase(queued: QueuedByTable) {
       return Promise.resolve(queued[table]?.[idx] ?? { data: null, error: null })
     }
 
+    chain.maybeSingle = () => resolveNext()
     chain.then = (resolve: (v: unknown) => unknown, reject?: (e: unknown) => unknown) =>
       resolveNext().then(resolve, reject)
     return chain
@@ -163,6 +168,132 @@ describe('hospCalendarSyncHandler', () => {
     expect(result).toEqual({ activeCount: 0, cancelledCount: 0 })
     // rows.length === 0 short-circuits the upsert entirely
     expect(supabase.calls.some((c) => c.table === 'bookings' && c.method === 'upsert')).toBe(false)
+  })
+
+  // ==========================================================================
+  // A LISTING HOSPITABLE NO LONGER RECOGNISES.
+  //
+  // From 2026-08-22 this cron dispatched a sync every morning for a property
+  // uuid the provider had stopped returning, got 404, exhausted its retries and
+  // raised SENTRY-CRAZY-CUSHION-F. Nothing in the system could resolve it,
+  // because nothing recorded that the listing was gone.
+  //
+  // The 404 is acted on — where absence from a LIST would not be — because it
+  // is positive, per-entity evidence about one id we asked about directly. It
+  // cannot be manufactured by a truncated page. Acting on it still means
+  // PAUSING and telling the PM, never deactivating: a 404 does not distinguish
+  // "delisted" from "relisted under a new id".
+  // ==========================================================================
+  describe('when Hospitable no longer recognises the listing', () => {
+    const gone = () => new ProviderEntityGoneError(
+      'Hospitable', '/properties/{uuid}/calendar', 'hosp_1', 'No result found.',
+    )
+
+    it('pauses the property instead of throwing, so retries are not burned', async () => {
+      ;(hospFetchCalendar as ReturnType<typeof vi.fn>).mockRejectedValue(gone())
+      const supabase = makeSupabase({
+        properties: [{ data: { name: 'Tarrytown Loft' }, error: null }],
+      })
+      ;(createServiceClient as ReturnType<typeof vi.fn>).mockReturnValue(supabase)
+
+      const result = await invokeHandler(hospCalendarSyncHandler, {
+        event: { data: EVENT_DATA },
+        step:  runAllStep(),
+        logger: makeLogger(),
+      })
+
+      expect(result).toEqual({ activeCount: 0, cancelledCount: 0, paused: true })
+      const update = supabase.calls.find((c) => c.table === 'properties' && c.method === 'update')
+      expect(update?.args[0]).toMatchObject({ external_missing_since: expect.any(String) })
+    })
+
+    it('does NOT deactivate the property', async () => {
+      // The whole asymmetry. A property carries bookings, turnovers and every
+      // downstream cron; switching it off on one status code is the mistake
+      // that deactivated an org's entire crew roster on 2026-07-18.
+      ;(hospFetchCalendar as ReturnType<typeof vi.fn>).mockRejectedValue(gone())
+      const supabase = makeSupabase({
+        properties: [{ data: { name: 'Tarrytown Loft' }, error: null }],
+      })
+      ;(createServiceClient as ReturnType<typeof vi.fn>).mockReturnValue(supabase)
+
+      await invokeHandler(hospCalendarSyncHandler, {
+        event: { data: EVENT_DATA }, step: runAllStep(), logger: makeLogger(),
+      })
+
+      const update = supabase.calls.find((c) => c.table === 'properties' && c.method === 'update')
+      expect(update?.args[0]).not.toHaveProperty('is_active')
+    })
+
+    it('stamps the FIRST 404, not the most recent one', async () => {
+      // The timestamp is the only evidence of how long a listing has been gone.
+      // A daily cron without this guard rewrites it to today every morning, so
+      // it would always read "missing since today".
+      ;(hospFetchCalendar as ReturnType<typeof vi.fn>).mockRejectedValue(gone())
+      const supabase = makeSupabase({
+        properties: [{ data: { name: 'Tarrytown Loft' }, error: null }],
+      })
+      ;(createServiceClient as ReturnType<typeof vi.fn>).mockReturnValue(supabase)
+
+      await invokeHandler(hospCalendarSyncHandler, {
+        event: { data: EVENT_DATA }, step: runAllStep(), logger: makeLogger(),
+      })
+
+      const isNull = supabase.calls.find((c) => c.table === 'properties' && c.method === 'is')
+      expect(isNull?.args).toEqual(['external_missing_since', null])
+    })
+
+    it('tells the PM once, deduped on the property', async () => {
+      // A property that silently stops syncing is the bad outcome here. The
+      // notification is what turns a pause into something the customer can act
+      // on — and the dedupe key is what stops a daily cron stacking one a day.
+      ;(hospFetchCalendar as ReturnType<typeof vi.fn>).mockRejectedValue(gone())
+      const supabase = makeSupabase({
+        properties: [{ data: { name: 'Tarrytown Loft' }, error: null }],
+      })
+      ;(createServiceClient as ReturnType<typeof vi.fn>).mockReturnValue(supabase)
+
+      await invokeHandler(hospCalendarSyncHandler, {
+        event: { data: EVENT_DATA }, step: runAllStep(), logger: makeLogger(),
+      })
+
+      expect(createPmNotification).toHaveBeenCalledTimes(1)
+      const input = vi.mocked(createPmNotification).mock.calls[0]![1]
+      expect(input).toMatchObject({
+        orgId: 'org_1', severity: 'amber', dedupeKey: 'property-missing:prop_1',
+      })
+      expect(input.title).toContain('Tarrytown Loft')
+      // A PM cannot act on a provider uuid, and it does not belong in the bell.
+      expect(`${input.title} ${input.subtitle}`).not.toContain('hosp_1')
+    })
+
+    it('does not re-notify once the property is already marked', async () => {
+      // maybeSingle returns no row because the `.is(..., null)` filter matched
+      // nothing — it was marked on an earlier run.
+      ;(hospFetchCalendar as ReturnType<typeof vi.fn>).mockRejectedValue(gone())
+      const supabase = makeSupabase({ properties: [{ data: null, error: null }] })
+      ;(createServiceClient as ReturnType<typeof vi.fn>).mockReturnValue(supabase)
+
+      const result = await invokeHandler(hospCalendarSyncHandler, {
+        event: { data: EVENT_DATA }, step: runAllStep(), logger: makeLogger(),
+      })
+
+      expect(result).toMatchObject({ paused: true })
+      expect(createPmNotification).not.toHaveBeenCalled()
+    })
+
+    it('still throws on any OTHER provider failure', async () => {
+      // Only 404 is terminal. A 500 or a timeout must keep its retries — the
+      // listing is probably fine and pausing it would be the wrong answer.
+      ;(hospFetchCalendar as ReturnType<typeof vi.fn>)
+        .mockRejectedValue(new Error('Hospitable /properties/hosp_1/calendar failed (503): '))
+      ;(createServiceClient as ReturnType<typeof vi.fn>).mockReturnValue(makeSupabase({}))
+
+      await expect(invokeHandler(hospCalendarSyncHandler, {
+        event: { data: EVENT_DATA }, step: runAllStep(), logger: makeLogger(),
+      })).rejects.toThrow('503')
+      expect(createPmNotification).not.toHaveBeenCalled()
+    })
   })
 
   it('throws when the active-block upsert fails, instead of silently proceeding to reconciliation', async () => {

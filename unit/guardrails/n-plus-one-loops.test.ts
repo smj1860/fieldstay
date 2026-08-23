@@ -137,13 +137,13 @@ const EXCEPTIONS: Record<string, string> = {
     'Per-property conditional field patch (bedrooms/bathrooms/max_guests/square_footage) — each property\'s patch object contains different values, so it is not a uniform batched update. Pre-fetch of existing rows just above IS already batched via .in(\'external_id\', ids).',
   'lib/guidebook/sync.ts:168':
     'Per-property conditional guidebook-config patch — same shape as ownerrez/initial-sync.ts:368 (differing patch per row); the read side just above is already batched via .in(\'property_id\', ids).',
-  'lib/properties/upsert-normalized.ts:330':
+  'lib/properties/upsert-normalized.ts:337':
     'Per-property conditional cleaning_cost backfill — same differing-patch-per-row shape as the two entries above.',
   'lib/inngest/functions/turnover-events.ts:354':
     'Milestone-flag upserts — the milestones array has at most 3 possible entries (first_turnover_complete/_10/_50) and is almost always exactly 1; negligible enough that batching would add more complexity than it saves.',
   'lib/push/send-push.ts:61':
     'Per-subscription webpush.sendNotification call (+ conditional delete on a 410) — each subscription is a distinct external Web Push endpoint; inherently one call per endpoint, like the Vault-secret case above.',
-  'lib/properties/upsert-normalized.ts:303':
+  'lib/properties/upsert-normalized.ts:310':
     'Per-unique-coordinate-group update on PMS import — the same optimized end state as geocoding-backfill.ts:96, and grouped the same way: one UPDATE per distinct resolved lat/lng, not per property. A portfolio in one market is typically one or two groups.',
   'lib/inngest/functions/geocoding-backfill.ts:96':
     'Per-unique-coordinate-group update — already the optimized end state (grouped from one geocode call per property down to one per distinct resolved lat/lng); a single UPDATE cannot set different coordinate values across differently-grouped id sets without a CASE expression, which is a bigger and less readable change for the same 3-4 typical groups per run.',
