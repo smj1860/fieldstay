@@ -257,11 +257,6 @@ const FREQUENCIES: { value: ScheduleFrequency; label: string }[] = [
   { value: 'annual',     label: 'Annual'       },
 ]
 
-const MONTHS = [
-  'January','February','March','April','May','June',
-  'July','August','September','October','November','December',
-]
-
 const STATUS_TABS = [
   { key: 'all',             label: 'All'           },
   { key: 'pending',         label: 'Pending'       },

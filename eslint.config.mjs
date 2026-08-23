@@ -78,8 +78,19 @@ const eslintConfig = [
     // binding as intentionally discarded (e.g. stripping id/created_at/
     // updated_at before re-inserting a row) — recognize that convention
     // instead of flagging it.
+    //
+    // ERROR, not warn, since 2026-08-23. As a warning it was fungible against
+    // the `--max-warnings` ceiling, which is the same hole CLAUDE.md already
+    // documents for cognitive-complexity: a refactor that removes two warnings
+    // and adds two others nets to zero and lint stays green. That is exactly
+    // how two imports left dangling by moving validateWorkOrderCreate out of
+    // maintenance/actions.ts reached SonarCloud instead of the local run.
+    //
+    // Safe to promote because the repo is at ZERO of these — an unused binding
+    // is always either a real leftover or an underscore away from being
+    // declared intentional, so there is no legitimate case to grandfather.
     rules: {
-      '@typescript-eslint/no-unused-vars': ['warn', {
+      '@typescript-eslint/no-unused-vars': ['error', {
         argsIgnorePattern: '^_',
         varsIgnorePattern: '^_',
         caughtErrorsIgnorePattern: '^_',

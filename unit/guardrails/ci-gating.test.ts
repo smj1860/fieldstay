@@ -67,8 +67,11 @@ describe('guardrail: lint warning ratchet', () => {
     // lowered to 202 on 2026-07-31 when the four SonarCloud cognitive-complexity
     // violations (crew inventory-count route, work-order-ops cron, vendor-connect
     // onboard route, notifications bell) were refactored out.
+    // Lowered to 160 on 2026-08-23: @typescript-eslint/no-unused-vars was
+    // promoted from warn to ERROR, which removes that whole class from the
+    // budget rather than letting it trade against other warnings.
     // LOWER this when warnings are cleared; never raise it.
-    const CEILING = 202
+    const CEILING = 160
     const budget = Number(/--max-warnings\s+(\d+)/.exec(pkg.scripts.lint ?? '')?.[1])
     expect(budget).toBeLessThanOrEqual(CEILING)
   })

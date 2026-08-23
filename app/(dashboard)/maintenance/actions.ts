@@ -15,10 +15,8 @@ import { PriorityLevelSchema, WoStatusSchema, WoCategorySchema } from '@/lib/sch
 import type { SupabaseClient } from '@supabase/supabase-js'
 import {
   buildWorkOrderInsert,
-  resolveWorkOrderStatus,
   validateWorkOrderCreate,
   type WorkOrderFormInput,
-  checkCrewMemberAssignable,
   checkQuoteVendorsAssignable,
   checkCrewTimeOffWarning,
   dispatchWorkOrderEvents,
