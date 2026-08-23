@@ -43,7 +43,7 @@ function item(over: Partial<InspectionFormItem> & { section_id: string }): Inspe
     id: uid(), key: `k-${seq}`, prompt: `Prompt ${seq}`, sort_order: 0,
     response_type: 'yes_no', is_required: true, photo_required: false,
     parent_item_id: null, show_when: null,
-    repeat_source_item_id: null, repeat_per_asset: false,
+    repeat_source_item_id: null, repeat_per_asset: false, per_unit: false,
     na_reason_template: null, na_asset_type: null, asset_type: null,
     concern_key: null, remediation: 'work_order', default_actions: ['repair'],
     wo_category: null, wo_priority: null,

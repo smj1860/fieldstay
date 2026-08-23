@@ -1756,6 +1756,7 @@ export type Database = {
           na_asset_type: Database["public"]["Enums"]["asset_type"] | null
           na_reason_template: string | null
           parent_item_id: string | null
+          per_unit: boolean
           photo_required: boolean
           po_catalog_item_id: string | null
           po_default_qty: number | null
@@ -1781,6 +1782,7 @@ export type Database = {
           na_asset_type?: Database["public"]["Enums"]["asset_type"] | null
           na_reason_template?: string | null
           parent_item_id?: string | null
+          per_unit?: boolean
           photo_required?: boolean
           po_catalog_item_id?: string | null
           po_default_qty?: number | null
@@ -1806,6 +1808,7 @@ export type Database = {
           na_asset_type?: Database["public"]["Enums"]["asset_type"] | null
           na_reason_template?: string | null
           parent_item_id?: string | null
+          per_unit?: boolean
           photo_required?: boolean
           po_catalog_item_id?: string | null
           po_default_qty?: number | null

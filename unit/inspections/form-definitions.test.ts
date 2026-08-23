@@ -212,8 +212,29 @@ describe('inspection form definitions', () => {
         if (!item.repeat_per_asset) continue
         // Pinning an asset_type would defeat the point: the row exists once per
         // ACTIVE ledger row of whatever type, not once for a type we chose.
+        // A question ABOUT one type is `per_unit`, checked below.
         expect(item.asset_type, `${item.key} repeats per asset and must not pin an asset_type`)
           .toBeUndefined()
+      }
+    }
+  })
+
+  it('per_unit items name the type they repeat over, and never both modes', () => {
+    // The two rules are exclusive: repeat_per_asset sweeps every asset NO named
+    // item claims; per_unit repeats ONE named question across the units of its
+    // own type. Both set is a contradiction, and per_unit without a type gives
+    // the resolver nothing to filter the ledger by — it would silently collapse
+    // to a single row, which is the exact bug per_unit exists to fix.
+    //
+    // Mirrored by two DB CHECKs (20260823021731), so a row written outside the
+    // seed cannot hold either shape either.
+    for (const form of INSPECTION_FORMS) {
+      for (const item of allItems(form)) {
+        if (!item.per_unit) continue
+        expect(item.asset_type, `${item.key} is per_unit but names no asset_type`)
+          .toBeDefined()
+        expect(item.repeat_per_asset, `${item.key} sets BOTH repeat modes`)
+          .toBeFalsy()
       }
     }
   })
@@ -320,6 +341,15 @@ describe('inspection form definitions', () => {
     // work order purely because both were asked by the same template row.
     // That is precisely the silent wrong-merge §12.3 says is worse than a
     // duplicate. Per-asset dedup is already handled, by asset_id on the answer.
+    //
+    // `per_unit` is DELIBERATELY not covered by this rule. Its subject is
+    // bounded to one asset_type, so `dryer_vent_clear` on a per-dryer item is
+    // the same physical concern across Indoor, Outdoor and Safety and SHOULD
+    // merge — which is the whole purpose of a concern_key. What that requires
+    // instead is that remediation dedups on (concern_key, asset_id): two dryers
+    // with blocked vents are two jobs, and keying on the concern alone would
+    // silently drop one. There is no phase-4 code to assert that against yet;
+    // it is stated on the `per_unit` field in forms/types.ts and types/database.
     for (const form of INSPECTION_FORMS) {
       for (const item of allItems(form)) {
         if (!item.repeat_per_asset) continue

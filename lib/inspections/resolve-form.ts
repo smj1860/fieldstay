@@ -139,14 +139,37 @@ function assetsForGenericSweep(
   return assets.filter((a) => !coveredTypes.has(a.asset_type))
 }
 
+/**
+ * A parent instance's identity, which its children MUST inherit.
+ *
+ * `answerKey` is `(formItemId, repeatIndex, assetId)`. A child built without
+ * its parent's asset or repeat index therefore keys on the form item alone, so
+ * EVERY instance of that child shares ONE answer.
+ *
+ * That was live: the generic per-asset sweep carries a `plate_photo` child, so
+ * on a property with five uncovered assets all five rows shared a single photo
+ * — photograph the generator's plate and the septic row shows a photo attached.
+ * The same shape would merge extinguisher #1's follow-up with #2's.
+ */
+interface ParentInstance {
+  asset?:       PropertyAsset
+  repeatIndex?: number
+}
+
 function buildChildren(
   parent: InspectionFormItem,
   byParent: ReadonlyMap<string, InspectionFormItem[]>,
+  inherit: ParentInstance = {},
 ): ResolvedItem[] {
   return (byParent.get(parent.id) ?? [])
     .slice()
     .sort((a, b) => a.sort_order - b.sort_order)
-    .map((child) => ({ formItem: child, children: [] }))
+    .map((child) => ({
+      formItem: child,
+      ...(inherit.asset       !== undefined && { asset: inherit.asset }),
+      ...(inherit.repeatIndex !== undefined && { repeatIndex: inherit.repeatIndex }),
+      children: [],
+    }))
 }
 
 /**
@@ -172,7 +195,11 @@ function buildRepeatGroup(
   // every location followed by every charge.
   for (let i = 1; i <= count; i++) {
     for (const member of members) {
-      out.push({ formItem: member, repeatIndex: i, children: buildChildren(member, byParent) })
+      out.push({
+        formItem: member,
+        repeatIndex: i,
+        children: buildChildren(member, byParent, { repeatIndex: i }),
+      })
     }
   }
   return out
@@ -203,7 +230,8 @@ export function resolveFormPages(input: ResolveInput): ResolvedPage[] {
     if (!sectionIsShown(section, activeTypes)) continue
 
     const roots = (index.bySection.get(section.id) ?? []).slice().sort(bySortOrder)
-    const items = roots.flatMap((root) => resolveRoot(root, { index, sweepable, counts }))
+    const items = roots.flatMap((root) =>
+      resolveRoot(root, { index, activeAssets, sweepable, counts }))
 
     // A section that resolves to nothing is not a page. The assets section on a
     // property with no uncovered assets is the real case: rendering it would be
@@ -242,28 +270,33 @@ function indexItems(items: InspectionFormItem[]): ItemIndex {
   return index
 }
 
-/** Every asset type a NAMED item already asks about, anywhere on the form. */
+/**
+ * Every asset type a NAMED item already asks about, anywhere on the form.
+ *
+ * No longer excludes `repeat_per_asset` items, because a named question can now
+ * BE one (see resolveRoot). What makes a type "covered" is that some item names
+ * it, not how that item renders — and with the old guard, flagging the fridge
+ * question per-unit would have dropped refrigerators out of this set and let
+ * the generic sweep ask about them a second time.
+ */
 function coveredAssetTypes(items: InspectionFormItem[]): ReadonlySet<string> {
   return new Set(
-    items.filter((i) => !i.repeat_per_asset && i.asset_type).map((i) => i.asset_type as string),
+    items.filter((i) => i.asset_type).map((i) => i.asset_type as string),
   )
 }
 
 interface ResolveCtx {
-  index:     ItemIndex
-  sweepable: PropertyAsset[]
-  counts:    Readonly<Record<string, number>>
+  index:        ItemIndex
+  /** Every active asset, for a NAMED per-unit question. */
+  activeAssets: PropertyAsset[]
+  /** Only those no named question covers, for the GENERIC sweep. */
+  sweepable:    PropertyAsset[]
+  counts:       Readonly<Record<string, number>>
 }
 
 /** One root item becomes one row, N per-asset rows, or a row plus its repeat group. */
 function resolveRoot(root: InspectionFormItem, ctx: ResolveCtx): ResolvedItem[] {
-  if (root.repeat_per_asset) {
-    return ctx.sweepable.map((asset) => ({
-      formItem: root,
-      asset,
-      children: buildChildren(root, ctx.index.byParent),
-    }))
-  }
+  if (root.per_unit || root.repeat_per_asset) return resolvePerAsset(root, ctx)
 
   const self: ResolvedItem = { formItem: root, children: buildChildren(root, ctx.index.byParent) }
   const members = ctx.index.byRepeatSource.get(root.id)
@@ -271,6 +304,54 @@ function resolveRoot(root: InspectionFormItem, ctx: ResolveCtx): ResolvedItem[] 
 
   const count = Math.min(MAX_REPEAT_INSTANCES, Math.max(0, Math.floor(ctx.counts[root.id] ?? 0)))
   return [self, ...buildRepeatGroup(members, count, ctx.index.byParent)]
+}
+
+/**
+ * The two per-asset modes. Different rules, not degrees of one.
+ *
+ * `per_unit` is a NAMED question about a kind of thing, rendered once per
+ * active asset of that kind. "Refrigeration — clean, holding < 40°F" applies
+ * to both refrigerators, and asking it once was asking about one of them and
+ * silently not the other, with nothing on screen to say which.
+ *
+ * `repeat_per_asset` is the GENERIC sweep, covering every active asset no named
+ * question already claims (§12.2 §7).
+ *
+ * ─────────────────────────────────────────────────────────────────────────────
+ * THE ZERO CASE IS DIFFERENT FOR THE TWO, AND DELIBERATELY SO.
+ *
+ * The generic sweep with nothing to sweep is no rows — there is no question to
+ * ask, and the section collapses.
+ *
+ * A NAMED question with no matching asset still renders, ONCE, unattributed.
+ * Most properties have not catalogued their appliances at all — 8 of 29 in
+ * production have no assets on file — so gating these on the ledger would
+ * silently delete most of the Indoor form from most properties. That is the
+ * same failure the HOA gate taught: a gate on data nobody has populated does
+ * not fail safe, it fails empty. The inspector answers it as they do today, and
+ * marks it N/A where the property genuinely lacks the thing.
+ */
+function resolvePerAsset(root: InspectionFormItem, ctx: ResolveCtx): ResolvedItem[] {
+  // `per_unit` is the named form and carries an asset_type by DB CHECK
+  // (inspection_form_items_per_unit_needs_type). Reading the type rather than
+  // the flag would silently turn a mis-seeded per_unit row into a full sweep.
+  const named = !!root.per_unit && !!root.asset_type
+
+  const targets = named
+    ? ctx.activeAssets.filter((a) => a.asset_type === root.asset_type)
+    : ctx.sweepable
+
+  if (targets.length === 0) {
+    return named ? [{ formItem: root, children: buildChildren(root, ctx.index.byParent) }] : []
+  }
+
+  return targets.map((asset) => ({
+    formItem: root,
+    asset,
+    // The asset is inherited, so "→ which room?" under fridge #2 is its own
+    // answer rather than one shared with fridge #1.
+    children: buildChildren(root, ctx.index.byParent, { asset }),
+  }))
 }
 
 

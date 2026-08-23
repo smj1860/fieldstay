@@ -2136,8 +2136,22 @@ export interface InspectionFormItem {
 
   /** Render one row per unit counted at that item (N extinguishers → N groups). */
   repeat_source_item_id: string | null
-  /** Render one row per ACTIVE property_assets row of `asset_type`. */
+  /**
+   * THE GENERIC SWEEP: one row per ACTIVE property_assets row of any type no
+   * named item claims. Carries no `asset_type` and no `concern_key` — the
+   * subject is whatever the ledger holds, so a static key would merge a dead
+   * refrigerator with a dead generator.
+   */
   repeat_per_asset:      boolean
+  /**
+   * One row per ACTIVE property_assets row matching THIS item's `asset_type`
+   * (20260823021731). A DB CHECK requires `asset_type`, and another forbids
+   * setting this and `repeat_per_asset` together — they are different rules.
+   *
+   * ⚠️ Remediation must dedup a per_unit answer on (concern_key, asset_id),
+   * never concern_key alone: two dryers with blocked vents are two jobs.
+   */
+  per_unit:              boolean
 
   na_reason_template: string | null
   /** Verify an N/A claim against the asset ledger rather than taking it on trust. */

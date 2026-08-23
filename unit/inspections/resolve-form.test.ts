@@ -44,7 +44,7 @@ function item(over: Partial<InspectionFormItem> & { section_id: string }): Inspe
     id: uid(), key: `k-${seq}`, prompt: `Prompt ${seq}`, sort_order: 0,
     response_type: 'yes_no', is_required: true, photo_required: false,
     parent_item_id: null, show_when: null,
-    repeat_source_item_id: null, repeat_per_asset: false,
+    repeat_source_item_id: null, repeat_per_asset: false, per_unit: false,
     na_reason_template: null, na_asset_type: null, asset_type: null,
     concern_key: null, remediation: 'work_order', default_actions: ['repair'],
     wo_category: null, wo_priority: null,
@@ -552,5 +552,165 @@ describe('visibleNodes — the renderer and the gate share ONE definition', () =
       const complained = new Set(findOutstanding(pages, answers).map((o) => o.itemKey))
       for (const key of complained) expect(visible.has(key), `${key} reported but not shown`).toBe(true)
     }
+  })
+})
+
+// ============================================================================
+// TWO OF A THING IS TWO INSPECTIONS.
+//
+// "Refrigeration — clean, holding < 40°F" rendered ONCE on a property with two
+// refrigerators. One fridge was inspected, the other was not, and nothing on
+// screen said which. Only the GENERIC sweep was ever per-unit, and it skips
+// every asset type a named question covers — so the moment refrigerators got a
+// named question, their units stopped being enumerated at all.
+//
+// `per_unit` is a separate flag from `repeat_per_asset` because they are
+// different rules, and overloading one flag made two existing guardrails
+// unstateable — which is how this was caught rather than shipped.
+// ============================================================================
+
+describe('per_unit — a named question repeats across the units of its type', () => {
+  const build = (assets: PropertyAsset[], over: Partial<InspectionFormItem> = {}) => {
+    const s = section({ key: 'kitchen', name: 'Kitchen' })
+    const fridge = item({
+      section_id: s.id, key: 'kitchen.fridge', prompt: 'Refrigeration',
+      per_unit: true, asset_type: 'refrigerator', ...over,
+    })
+    return resolveFormPages({ sections: [s], items: [fridge], assets })
+  }
+
+  it('two refrigerators get two rows, each attached to its own asset', () => {
+    const a = asset({ asset_type: 'refrigerator', name: 'Kitchen fridge' })
+    const b = asset({ asset_type: 'refrigerator', name: 'Garage fridge' })
+    const page = build([a, b])[0]!
+
+    expect(page.items).toHaveLength(2)
+    expect(page.items.map((i) => i.asset?.name)).toEqual(['Kitchen fridge', 'Garage fridge'])
+    // Distinct answer keys, or the second fridge would overwrite the first.
+    expect(answerKey(page.items[0]!)).not.toBe(answerKey(page.items[1]!))
+  })
+
+  it('only assets of ITS type, never the whole ledger', () => {
+    const page = build([
+      asset({ asset_type: 'refrigerator', name: 'Fridge' }),
+      asset({ asset_type: 'generator',    name: 'Generator' }),
+    ])[0]!
+    expect(page.items.map((i) => i.asset?.name)).toEqual(['Fridge'])
+  })
+
+  it('an INACTIVE unit gets no row', () => {
+    const page = build([
+      asset({ asset_type: 'refrigerator', name: 'Live',    is_active: true }),
+      asset({ asset_type: 'refrigerator', name: 'Replaced', is_active: false }),
+    ])[0]!
+    expect(page.items.map((i) => i.asset?.name)).toEqual(['Live'])
+  })
+
+  it('NO matching asset still renders ONE unattributed row', () => {
+    // The asymmetry with the generic sweep, and it is deliberate. Most
+    // properties have not catalogued their appliances — 8 of 29 in production
+    // have no assets on file at all — so gating these on the ledger would
+    // silently delete most of the Indoor form from most properties. That is the
+    // HOA gate's lesson: a gate on data nobody populates fails empty, not safe.
+    // The inspector answers it, and marks N/A where the thing truly is absent.
+    const page = build([])[0]!
+    expect(page.items).toHaveLength(1)
+    expect(page.items[0]!.asset).toBeUndefined()
+  })
+
+  it('the GENERIC sweep still yields nothing when there is nothing to sweep', () => {
+    // Same input shape, opposite correct answer — which is why these are two
+    // flags rather than one.
+    const s = section({ key: 'assets' })
+    const sweep = item({ section_id: s.id, repeat_per_asset: true, key: 'assets.condition' })
+    expect(resolveFormPages({ sections: [s], items: [sweep], assets: [] })).toEqual([])
+  })
+
+  it('a per_unit type is EXCLUDED from the generic sweep, not asked twice', () => {
+    // coveredAssetTypes no longer skips repeat-mode items. With the old guard,
+    // flagging the fridge question per-unit would have dropped refrigerators
+    // out of the covered set and let the sweep ask about them a second time.
+    const named = section({ key: 'kitchen', sort_order: 0 })
+    const sweep = section({ key: 'assets',  sort_order: 1 })
+    const pages = resolveFormPages({
+      sections: [named, sweep],
+      items: [
+        item({ section_id: named.id, key: 'kitchen.fridge', per_unit: true, asset_type: 'refrigerator' }),
+        item({ section_id: sweep.id, key: 'assets.condition', repeat_per_asset: true }),
+      ],
+      assets: [asset({ asset_type: 'refrigerator' }), asset({ asset_type: 'generator' })],
+    })
+
+    expect(pages.find((p) => p.sectionKey === 'kitchen')!.items).toHaveLength(1)
+    expect(pages.find((p) => p.sectionKey === 'assets')!.items
+      .map((i) => i.asset?.asset_type)).toEqual(['generator'])
+  })
+})
+
+describe('a child inherits the instance it hangs from', () => {
+  // THIS WAS LIVE. answerKey is (formItemId, repeatIndex, assetId), and
+  // buildChildren produced children with neither — so every instance of a child
+  // shared ONE answer. The generic sweep carries a `plate_photo` child, so on a
+  // property with five uncovered assets all five rows shared a single photo:
+  // photograph the generator's plate and the septic row shows a photo attached.
+
+  it('per-asset children key on their own asset', () => {
+    const s = section({ key: 'assets' })
+    const parent = item({ section_id: s.id, key: 'assets.condition', repeat_per_asset: true })
+    const child  = item({ section_id: s.id, key: 'assets.plate_photo', parent_item_id: parent.id })
+
+    const page = resolveFormPages({
+      sections: [s], items: [parent, child],
+      assets: [asset({ asset_type: 'generator' }), asset({ asset_type: 'roof' })],
+    })[0]!
+
+    const [first, second] = page.items
+    expect(first!.children[0]!.asset?.asset_type).toBe('generator')
+    expect(second!.children[0]!.asset?.asset_type).toBe('roof')
+    expect(answerKey(first!.children[0]!)).not.toBe(answerKey(second!.children[0]!))
+  })
+
+  it('per_unit children key on their own unit', () => {
+    const s = section({ key: 'kitchen' })
+    const parent = item({ section_id: s.id, key: 'k.fridge', per_unit: true, asset_type: 'refrigerator' })
+    const child  = item({ section_id: s.id, key: 'k.filter', parent_item_id: parent.id, show_when: 'fail' })
+
+    const page = resolveFormPages({
+      sections: [s], items: [parent, child],
+      assets: [
+        asset({ asset_type: 'refrigerator', name: 'A' }),
+        asset({ asset_type: 'refrigerator', name: 'B' }),
+      ],
+    })[0]!
+
+    expect(page.items.map((i) => i.children[0]!.asset?.name)).toEqual(['A', 'B'])
+    expect(answerKey(page.items[0]!.children[0]!))
+      .not.toBe(answerKey(page.items[1]!.children[0]!))
+  })
+
+  it('repeat-group children key on their own instance', () => {
+    const s = section({ key: 'fire' })
+    const counter = item({ section_id: s.id, key: 'fire.count', response_type: 'count' })
+    const member  = item({ section_id: s.id, key: 'fire.charged', repeat_source_item_id: counter.id })
+    const child   = item({ section_id: s.id, key: 'fire.why', parent_item_id: member.id, show_when: 'fail' })
+
+    const page = resolveFormPages({
+      sections: [s], items: [counter, member, child], assets: [],
+      countsByItemId: { [counter.id]: 2 },
+    })[0]!
+
+    const members = page.items.filter((i) => i.repeatIndex !== undefined)
+    expect(members.map((m) => m.children[0]!.repeatIndex)).toEqual([1, 2])
+    expect(answerKey(members[0]!.children[0]!)).not.toBe(answerKey(members[1]!.children[0]!))
+  })
+
+  it('a child of a plain root inherits nothing, and still keys uniquely', () => {
+    const s = section({ key: 'fire' })
+    const parent = item({ section_id: s.id, key: 'fire.smoke' })
+    const child  = item({ section_id: s.id, key: 'fire.where', parent_item_id: parent.id, show_when: 'fail' })
+    const page = resolveFormPages({ sections: [s], items: [parent, child], assets: [] })[0]!
+
+    expect(page.items[0]!.children[0]!.asset).toBeUndefined()
+    expect(page.items[0]!.children[0]!.repeatIndex).toBeUndefined()
   })
 })

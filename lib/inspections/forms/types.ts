@@ -89,8 +89,37 @@ export interface ItemDefinition {
   /** Shared across forms — see the CONCERN_KEY_MAP table in ./index.ts. */
   concern_key?: string
 
-  /** One row per ACTIVE `property_assets` row; `asset_type` resolved at render. */
+  /**
+   * The GENERIC SWEEP: one row per ACTIVE `property_assets` row of ANY type no
+   * named item already claims. Carries no `asset_type` — the subject is
+   * whatever the ledger holds — and therefore no `concern_key` either, since a
+   * static key would merge a dead refrigerator with a dead generator.
+   */
   repeat_per_asset?: boolean
+
+  /**
+   * ONE ROW PER UNIT of this item's `asset_type`. Requires `asset_type`.
+   *
+   * Distinct from `repeat_per_asset` above, and the distinction is not
+   * cosmetic — the two differ in subject, in their zero case, and in whether a
+   * `concern_key` is safe:
+   *
+   *   repeat_per_asset  every uncovered asset, any type, no concern_key,
+   *                     and NO rows at all when there is nothing to sweep.
+   *   per_unit          every asset of ONE named type, concern_key allowed
+   *                     because the subject is bounded, and ONE unattributed
+   *                     row when the property has none catalogued.
+   *
+   * Without this, "Refrigeration — clean, holding < 40°F" rendered ONCE on a
+   * property with two refrigerators: one of them was inspected, the other was
+   * not, and nothing on screen said which. Only the generic sweep was ever
+   * per-unit, and it deliberately skips every type a named question covers.
+   *
+   * ⚠️ Remediation (§6, phase 4) must dedup a per_unit answer on
+   * (concern_key, asset_id), NOT concern_key alone — two dryers with blocked
+   * vents are two jobs, and keying on the concern would silently drop one.
+   */
+  per_unit?: boolean
 
   /** Shown only when the PARENT answers this. Set on children, never on a root. */
   show_when?: InspectionResult
