@@ -29,17 +29,27 @@ interface QueuedByTable { [table: string]: { data?: unknown; error?: unknown }[]
 
 function makeSupabase(queued: QueuedByTable) {
   const counters: Record<string, number> = {}
+  // A filter is a contract with Postgres that an in-memory double cannot
+  // simulate — only observe. Without recording it, a test claiming "paused
+  // properties are excluded" passes on a fixture that simply omits them, and
+  // keeps passing with the filter deleted.
+  const filters: { table: string; method: string; args: unknown[] }[] = []
 
   const from = vi.fn((table: string) => {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const chain: any = {}
+    const record = (method: string) => (...args: unknown[]) => {
+      filters.push({ table, method, args })
+      return chain
+    }
     chain.select = () => chain
     // These reads paginate via fetchAllRows(), which drains .order().range().
     chain.order  = vi.fn(() => chain)
     chain.range  = vi.fn(() => chain)
-    chain.eq     = () => chain
-    chain.in     = () => chain
-    chain.not    = () => chain
+    chain.eq     = record('eq')
+    chain.in     = record('in')
+    chain.not    = record('not')
+    chain.is     = record('is')
 
     const resolveNext = () => {
       const idx = counters[table] ?? 0
@@ -52,7 +62,7 @@ function makeSupabase(queued: QueuedByTable) {
     return chain
   })
 
-  return { from }
+  return { from, filters }
 }
 
 describe('hospCalendarSyncCron', () => {
@@ -222,5 +232,30 @@ describe('hospCalendarSyncCron', () => {
     expect(result).toEqual({ dispatched: 1 })
     const sentEvents = (step.sendEvent as ReturnType<typeof vi.fn>).mock.calls[0]?.[1] as unknown[]
     expect(sentEvents).toHaveLength(1)
+  })
+
+  it('never dispatches a property whose listing Hospitable has stopped recognising', async () => {
+    // From 2026-08-22 this cron re-dispatched a guaranteed 404 every morning
+    // for one org, exhausting the handler's retries into Sentry each time
+    // (SENTRY-CRAZY-CUSHION-F). The property row is left ACTIVE — the pause is
+    // what stops the storm, and the PM decides whether the listing is really
+    // gone.
+    const supabase = makeSupabase({
+      integration_connections: [{ data: [{ org_id: 'org_1' }], error: null }],
+      properties: [{ data: [{ id: 'prop_1', org_id: 'org_1', external_id: 'hosp_1' }], error: null }],
+    })
+    ;(createServiceClient as ReturnType<typeof vi.fn>).mockReturnValue(supabase)
+    ;(getPmMembersByOrgIds as ReturnType<typeof vi.fn>).mockResolvedValue(
+      new Map([['org_1', [{ userId: 'admin_a', email: 'a@x.com', role: 'admin' }]]]),
+    )
+
+    await invokeHandler(hospCalendarSyncCron, { event: {}, step: runAllStep(), logger: makeLogger() })
+
+    // Asserted on the QUERY, not on the fixture: a double cannot apply a
+    // filter, so a fixture that simply omits paused rows would pass with the
+    // filter deleted.
+    expect(supabase.filters).toContainEqual({
+      table: 'properties', method: 'is', args: ['external_missing_since', null],
+    })
   })
 })

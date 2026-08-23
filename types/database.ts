@@ -215,8 +215,13 @@ export interface Property {
   min_renter_age:          number | null
   external_id:             string | null
   external_source:         string | null
-  // Presence gates Outdoor's HOA section and prints on the report. A name
-  // rather than a boolean because it carries information either way.
+  /**
+   * When the PMS first 404'd this `external_id`. Pauses per-property provider
+   * polling; cleared automatically the next time a sync lists the property.
+   * Deliberately NOT the same thing as `is_active = false` — see
+   * 20260823170441.
+   */
+  external_missing_since:  string | null
   created_at:              string
   updated_at:              string
 }

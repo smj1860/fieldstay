@@ -17,7 +17,7 @@
 // keeps working unchanged.
 // ============================================================
 
-import { RateLimitError, IntegrationMisconfiguredError, type IntegrationProvider, type TokenResponse } from '@/lib/integrations/types'
+import { RateLimitError, IntegrationMisconfiguredError, ProviderEntityGoneError, type IntegrationProvider, type TokenResponse } from '@/lib/integrations/types'
 import { storeHospitableWebhookMessage, type HospitableWebhookMessage } from '@/lib/integrations/providers/hospitable-message-store'
 import { hospitableApiLimiter, checkLimit, outboundBackoffSeconds } from '@/lib/rate-limit'
 import { ok, fail, timingSafeEqual, extractClientIp, isIpInCidr } from '@/lib/integrations/webhook-verification'
@@ -767,6 +767,17 @@ export async function hospFetchCalendar(
 
   if (!res.ok) {
     const text = await res.text().catch(() => '')
+
+    // 404 here means this property uuid is gone from Hospitable, and it is the
+    // one status on this endpoint that a retry can never improve. Typed rather
+    // than folded into the generic Error below so the handler can pause the
+    // property instead of re-dispatching it every morning forever — which is
+    // what it did from 2026-08-22 (SENTRY-CRAZY-CUSHION-F).
+    if (res.status === 404) {
+      throw new ProviderEntityGoneError(
+        'Hospitable', `/properties/{uuid}/calendar`, propertyId, text.slice(0, 200),
+      )
+    }
     throw new Error(`Hospitable /properties/${propertyId}/calendar failed (${res.status}): ${text.slice(0, 200)}`)
   }
 

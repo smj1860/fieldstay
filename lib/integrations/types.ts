@@ -493,6 +493,49 @@ export class ProviderRequestError extends Error {
 }
 
 /**
+ * A provider answered 404 for a SPECIFIC entity we named in the path: the
+ * credential is fine, the request is well-formed, and the thing simply is not
+ * there any more. TERMINAL, for the same reason as its two siblings above.
+ *
+ * The third member of a family that keeps being rediscovered one status code at
+ * a time. On 2026-08-23 the daily Hospitable calendar cron had been dispatching
+ * a sync for a property uuid the provider had stopped recognising, every
+ * morning since 2026-08-22, exhausting its retries into Sentry each time
+ * (SENTRY-CRAZY-CUSHION-F). Nothing could ever resolve it, because a plain
+ * Error carries no way to tell "gone" from "try again later".
+ *
+ * WHY THE CALLER MAY ACT ON THIS AND NOT ON ABSENCE FROM A LIST
+ *
+ * This is positive, per-entity evidence about one id the provider was asked
+ * about directly. It cannot be manufactured by a truncated page or a filtered
+ * response, and it says nothing about any other entity — which is exactly what
+ * an empty or short LIST cannot promise. That difference is what separates a
+ * safe reaction here from the reconcile-by-absence pass that deactivated an
+ * org's whole crew roster on 2026-07-18 (see the `absence-reconciliation`
+ * guardrail).
+ *
+ * Acting on it still means PAUSING and TELLING SOMEONE, never deleting: a 404
+ * distinguishes "delisted" from "relisted under a new id" not at all, and only
+ * the customer knows which happened.
+ */
+export class ProviderEntityGoneError extends Error {
+  constructor(
+    public readonly providerLabel: string,
+    public readonly endpoint:      string,
+    /** The id the provider did not recognise — never a whole payload. */
+    public readonly entityId:      string,
+    detail:                        string = '',
+  ) {
+    super(
+      `${providerLabel} no longer recognises ${entityId} at ${endpoint} (404)` +
+      (detail ? `: ${detail}` : '') +
+      ' — the entity is gone; retrying asks for the same missing thing'
+    )
+    this.name = 'ProviderEntityGoneError'
+  }
+}
+
+/**
  * Thrown when a provider adapter can't even attempt a call because our own
  * server-side credentials (CLIENT_ID/CLIENT_SECRET env vars) are missing —
  * an operational misconfiguration, never something the end user caused or

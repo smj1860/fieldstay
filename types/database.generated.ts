@@ -4060,6 +4060,7 @@ export type Database = {
           door_code_secret_id: string | null
           events_allowed: boolean | null
           external_id: string | null
+          external_missing_since: string | null
           external_source: string | null
           house_manual: string | null
           id: string
@@ -4104,6 +4105,7 @@ export type Database = {
           door_code_secret_id?: string | null
           events_allowed?: boolean | null
           external_id?: string | null
+          external_missing_since?: string | null
           external_source?: string | null
           house_manual?: string | null
           id?: string
@@ -4148,6 +4150,7 @@ export type Database = {
           door_code_secret_id?: string | null
           events_allowed?: boolean | null
           external_id?: string | null
+          external_missing_since?: string | null
           external_source?: string | null
           house_manual?: string | null
           id?: string
