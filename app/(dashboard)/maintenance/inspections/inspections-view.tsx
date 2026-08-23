@@ -9,6 +9,7 @@
 // one timestamp whose value is being believed.
 
 import { useState, useTransition } from 'react'
+import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { ClipboardCheck, Plus } from 'lucide-react'
 
@@ -65,11 +66,10 @@ export function InspectionsView({ properties, inspections, loadFailed }: Readonl
         return
       }
       setDialogOpen(false)
-      // refresh(), NOT a push to /maintenance/inspections/[id] — that route does
-      // not exist yet, and navigating to it would 404 a PM who has just
-      // successfully created an inspection. The row is real and appears in the
-      // list below as In progress; the fill screen replaces this line.
-      router.refresh()
+      // Straight into the walk. Starting is the one step that must be online
+      // (§8: started_at is a server clock), so the moment it succeeds is the
+      // right moment to hand over to the offline-capable fill screen.
+      router.push(`/maintenance/inspections/${result.inspectionId}`)
     })
   }
 
@@ -119,7 +119,7 @@ export function InspectionsView({ properties, inspections, loadFailed }: Readonl
           {inspections.map((row) => (
             <li key={row.id}>
               <Card>
-                <a
+                <Link
                   href={`/maintenance/inspections/${row.id}`}
                   className="flex items-center justify-between gap-3 focus:outline-none focus:ring-2 focus:ring-[var(--accent-gold)] rounded-lg"
                 >
@@ -138,7 +138,7 @@ export function InspectionsView({ properties, inspections, loadFailed }: Readonl
                   <Badge tone={row.completedAt ? 'green' : 'amber'}>
                     {row.completedAt ? 'Complete' : 'In progress'}
                   </Badge>
-                </a>
+                </Link>
               </Card>
             </li>
           ))}

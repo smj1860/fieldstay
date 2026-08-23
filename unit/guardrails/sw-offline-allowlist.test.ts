@@ -54,9 +54,11 @@ describe('guardrail: service worker offline allowlist', () => {
 
     const paths = [...list![1].matchAll(/'([^']+)'/g)].map((m) => m[1]).sort()
 
-    // /maintenance is deliberately ABSENT until the offline foundation lands
-    // (docs/INSPECTIONS_SPEC.md phase 2a). Allowlisting a page with no local
-    // store behind it ships the exact staleness this check exists to prevent.
+    // `/maintenance/inspections/` was added 2026-08-23, and ONLY with its
+    // trailing slash — see the next test. The fill screen's Server Component
+    // renders three ids and nothing else, so the HTML cached for it is a frame
+    // with no facts in it. Nothing else under /maintenance qualifies: every
+    // other page there renders its data on the server.
     expect(paths, [
       'The offline allowlist changed.',
       '',
@@ -68,7 +70,38 @@ describe('guardrail: service worker offline allowlist', () => {
       'with no signal.',
       '',
       'If this is intentional, update this list AND say why in sw.js.',
-    ].join('\n')).toEqual(['/crew', '/work-orders/'])
+    ].join('\n')).toEqual(['/crew', '/maintenance/inspections/', '/work-orders/'])
+  })
+
+  it('the inspections entry keeps its trailing slash, so the LIST stays out', () => {
+    // The sharp edge of the 2026-08-23 addition, checked structurally because
+    // dropping one character is a plausible tidy-up with no visible symptom.
+    //
+    // isOfflineCapable tests `pathname === p || pathname.startsWith(p + '/')`,
+    // so '/maintenance/inspections/' matches '/maintenance/inspections/<id>'
+    // and NOT '/maintenance/inspections'. That exclusion is the whole design:
+    // the fill screen is a shell whose values all come from Dexie, while the
+    // LIST is an ordinary Server Component that renders its rows on the server.
+    // Caching the list would serve a PM an inspection roster from last Tuesday
+    // — including, at its worst, hiding the inspection they just started.
+    const list  = /const OFFLINE_PATHS = \[([\s\S]*?)\]/.exec(code)
+    const paths = [...list![1].matchAll(/'([^']+)'/g)].map((m) => m[1]!)
+
+    const entry = paths.find((p) => p.includes('/maintenance/'))
+    expect(entry, 'the inspections entry is gone').toBeDefined()
+    expect(entry, [
+      'The /maintenance allowlist entry lost its trailing slash.',
+      '',
+      'Without it the entry also matches /maintenance/inspections itself — the',
+      'LIST page, a Server Component that renders its rows on the server. Its',
+      'cached HTML would then be served offline as current, which can hide an',
+      'inspection the PM started minutes ago.',
+    ].join('\n')).toBe('/maintenance/inspections/')
+
+    // And the parent must not be listed alongside it, which would achieve the
+    // same thing by a different route.
+    expect(paths, '/maintenance is allowlisted wholesale').not.toContain('/maintenance')
+    expect(paths, 'the inspections LIST is allowlisted').not.toContain('/maintenance/inspections')
   })
 
   it('serves the offline PAGE outside the allowlist, not a cached copy', () => {

@@ -1,7 +1,7 @@
 // Cache version — bump both on any change to what gets cached, so
 // `activate` cleans up the old entries instead of leaving them orphaned.
-const SHELL_CACHE     = 'fieldstay-shell-v2'
-const ASSET_CACHE     = 'fieldstay-assets-v2'
+const SHELL_CACHE     = 'fieldstay-shell-v3'
+const ASSET_CACHE     = 'fieldstay-assets-v3'
 const OFFLINE_URL     = '/offline.html'
 const CURRENT_CACHES  = [SHELL_CACHE, ASSET_CACHE]
 
@@ -64,9 +64,23 @@ self.addEventListener('activate', (event) => {
 //
 // The condition is therefore: /maintenance goes in when it renders from the
 // local cache, not when the local cache exists.
+//
+// ✅ MET 2026-08-23, FOR EXACTLY ONE ROUTE. The inspection fill screen
+// (app/(dashboard)/maintenance/inspections/[id]/) is a shell: its Server
+// Component resolves three ids and renders nothing else, and every value on the
+// page comes from Dexie via useLiveQuery. The HTML cached here is therefore a
+// frame with no facts in it, which is the only kind that cannot go stale.
+//
+// ⚠️ THE TRAILING SLASH IS LOAD-BEARING, and the rest of /maintenance is still
+// out. `/maintenance/inspections/` matches `/maintenance/inspections/<id>` and
+// NOT `/maintenance/inspections`, which is the list — a Server Component that
+// renders its rows on the server and would cache exactly the staleness this
+// allowlist exists to prevent. Widening this to `/maintenance/inspections`, let
+// alone `/maintenance`, silently re-opens it.
 const OFFLINE_PATHS = [
   '/crew',          // the crew PWA — offline is its whole point
   '/work-orders/',  // vendor token pages, cached so a hard reload survives no signal
+  '/maintenance/inspections/', // the fill screen ONLY — see above; NOT the list
 ]
 
 function isOfflineCapable(pathname) {
