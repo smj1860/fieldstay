@@ -25,6 +25,7 @@
 import { AlertTriangle, Camera, Sparkles } from 'lucide-react'
 
 import { Badge } from '@/components/ui/Badge'
+import { buttonVariantClass } from '@/components/ui/Button'
 import { Checkbox } from '@/components/ui/Checkbox'
 import { Input } from '@/components/ui/Input'
 import { MAX_REPEAT_INSTANCES, type ResolvedItem } from '@/lib/inspections/resolve-form'
@@ -49,6 +50,9 @@ interface ControlProps {
   node:    ResolvedItem
   answer:  InspectionAnswerRow | undefined
   onChange: (patch: AnswerPatch) => void
+  /** Compresses and queues a captured image. Never blocks on the network. */
+  onCapture: (file: Blob) => void
+  onDiscard: () => void
 }
 
 interface Props extends Omit<ControlProps, 'id'> {
@@ -56,7 +60,7 @@ interface Props extends Omit<ControlProps, 'id'> {
   depth: number
 }
 
-export function ItemRow({ node, depth, answer, onChange }: Readonly<Props>) {
+export function ItemRow({ node, depth, answer, onChange, onCapture, onDiscard }: Readonly<Props>) {
   const def = node.formItem
   const id  = `item-${def.id}-${node.repeatIndex ?? ''}-${node.asset?.id ?? ''}`
 
@@ -85,10 +89,16 @@ export function ItemRow({ node, depth, answer, onChange }: Readonly<Props>) {
         )}
       </div>
 
-      <AnswerControl id={id} node={node} answer={answer} onChange={onChange} />
+      <AnswerControl
+        id={id} node={node} answer={answer} onChange={onChange}
+        onCapture={onCapture} onDiscard={onDiscard}
+      />
 
       {answer?.result === 'fail' && (
-        <FailDetail id={id} node={node} answer={answer} onChange={onChange} />
+        <FailDetail
+          id={id} node={node} answer={answer} onChange={onChange}
+          onCapture={onCapture} onDiscard={onDiscard}
+        />
       )}
 
       {answer?.result === 'na' && def.na_reason_template && (
@@ -101,7 +111,7 @@ export function ItemRow({ node, depth, answer, onChange }: Readonly<Props>) {
 }
 
 /** The control the response type actually calls for. */
-function AnswerControl({ id, node, answer, onChange }: Readonly<ControlProps>) {
+function AnswerControl({ id, node, answer, onChange, onCapture, onDiscard }: Readonly<ControlProps>) {
   const def = node.formItem
 
   if (def.response_type === 'count') {
@@ -145,7 +155,12 @@ function AnswerControl({ id, node, answer, onChange }: Readonly<ControlProps>) {
   }
 
   if (def.response_type === 'photo') {
-    return <PhotoControl id={id} answer={answer} onChange={onChange} />
+    return (
+      <PhotoControl
+        id={id} answer={answer} onChange={onChange}
+        onCapture={onCapture} onDiscard={onDiscard}
+      />
+    )
   }
 
   // A real <fieldset>, not a div with role="group". The pass/fail/N-A buttons
@@ -181,28 +196,71 @@ function AnswerControl({ id, node, answer, onChange }: Readonly<ControlProps>) {
 }
 
 /**
- * Photo capture is phase 3's remaining half — the bucket exists
- * (20260822194607) and `compressPhotoForQueue` is being moved to
- * lib/images/compress.ts per §8a. Until the queue is wired, the honest reason
- * is offered on its own rather than a camera button that does nothing: a
- * control that appears to work and silently loses the change is the one thing
- * §8 says never to ship.
+ * Take a picture, or say honestly why there isn't one.
+ *
+ * The capture writes to IndexedDB and returns; the upload happens on its own
+ * schedule. That separation is the point — the object key is decided at
+ * capture, so the answer carries it whether or not the bytes have reached the
+ * bucket, and an inspector at a property with no signal is never blocked by an
+ * upload they cannot complete.
+ *
+ * The escape hatch stays a REASON rather than a skip. §12.1 is blunt about it:
+ * an unenforceable rule produces a photograph of the floor, which is worse
+ * evidence than an honest "camera failed".
  */
-function PhotoControl({ id, answer, onChange }: Readonly<{
+function PhotoControl({ id, answer, onChange, onCapture, onDiscard }: Readonly<{
   id: string
   answer: InspectionAnswerRow | undefined
   onChange: (patch: AnswerPatch) => void
+  onCapture: (file: Blob) => void
+  onDiscard: () => void
 }>) {
   if (answer?.photoPath) {
     return (
-      <p className="text-xs flex items-center gap-1.5" style={{ color: 'var(--accent-green)' }}>
-        <Camera className="w-3.5 h-3.5" /> Photo attached
-      </p>
+      <div className="flex items-center justify-between gap-3">
+        <p className="text-xs flex items-center gap-1.5" style={{ color: 'var(--accent-green)' }}>
+          <Camera className="w-3.5 h-3.5" /> Photo attached
+        </p>
+        <button
+          type="button"
+          onClick={onDiscard}
+          className="text-xs underline focus:outline-none focus:ring-2 focus:ring-[var(--accent-gold)] rounded"
+          style={{ color: 'var(--text-muted)' }}
+        >
+          Retake
+        </button>
+      </div>
     )
   }
 
   return (
-    <div className="flex flex-col gap-1.5">
+    <div className="flex flex-col gap-2">
+      {/* `capture="environment"` asks a phone or tablet for the REAR camera
+          directly rather than a file picker. It is a hint, not a guarantee —
+          a desktop browser falls back to choosing a file, which is the right
+          behaviour there. */}
+      <label
+        htmlFor={`${id}-camera`}
+        className={`${buttonVariantClass('secondary')} flex items-center justify-center gap-2 cursor-pointer`}
+      >
+        <Camera className="w-4 h-4" />
+        Take photo
+      </label>
+      <input
+        id={`${id}-camera`}
+        type="file"
+        accept="image/*"
+        capture="environment"
+        className="sr-only"
+        onChange={(e) => {
+          const file = e.target.files?.[0]
+          // Reset first: picking the SAME file twice fires no change event
+          // otherwise, so a retake after a failed capture would do nothing.
+          e.target.value = ''
+          if (file) onCapture(file)
+        }}
+      />
+
       <label htmlFor={`${id}-nophoto`} className="text-xs" style={{ color: 'var(--text-muted)' }}>
         No photo? Say why — an unenforceable rule produces a photograph of the floor.
       </label>

@@ -41,9 +41,51 @@ const UPLOAD_PATH_EXCEPTIONS: Record<string, string> = {
   'app/api/work-orders/[token]/photos/route.ts': 'service-role; org id read from the work order, prefix asserted below',
 }
 
+/**
+ * Every way this file might name an org-scoped bucket at a `.from(...)` call:
+ * the literal itself, plus any same-file const bound to it.
+ *
+ * The const form was a blind spot until 2026-08-23. The detector matched only
+ * `.from('inspection-photos')`, so `const BUCKET = 'inspection-photos'` …
+ * `.from(BUCKET)` — an ordinary way to write it, and the way the inspection
+ * photo drain was written — sailed straight past. Verified by hand-building a
+ * path in that file and watching this test still pass.
+ */
+function bucketTokens(src: string): string[] {
+  const tokens: string[] = []
+  for (const bucket of ORG_SCOPED_BUCKETS) {
+    tokens.push(`['"\`]${bucket}['"\`]`)
+    for (const m of src.matchAll(
+      new RegExp(`const\\s+(\\w+)\\s*=\\s*['"\`]${bucket}['"\`]`, 'g'),
+    )) {
+      tokens.push(m[1]!)
+    }
+  }
+  return tokens
+}
+
+/**
+ * Whether the file actually CALLS the helper, rather than merely mentioning it.
+ *
+ * This was `src.includes('orgScopedStoragePath')`, which a COMMENT satisfies —
+ * so any file whose docs explain the org-prefix rule was permanently exempt
+ * from it. A perverse property: the more carefully a file documented why the
+ * prefix matters, the less likely this test was to check that it applied it.
+ * Found on 2026-08-23 by deleting the call from a well-commented file and
+ * watching the test pass.
+ */
+function callsOrgScopedStoragePath(src: string): boolean {
+  const code = src
+    .replace(/\/\*[\s\S]*?\*\//g, '')
+    .split('\n')
+    .filter((l) => !l.trim().startsWith('//'))
+    .join('\n')
+  return /orgScopedStoragePath\s*\(/.test(code)
+}
+
 function uploadsToOrgScopedBucket(src: string): boolean {
-  return ORG_SCOPED_BUCKETS.some((bucket) => {
-    const re = new RegExp(`\\.from\\(\\s*['"\`]${bucket}['"\`]\\s*\\)[\\s\\S]{0,400}?\\.upload\\(`)
+  return bucketTokens(src).some((token) => {
+    const re = new RegExp(`\\.from\\(\\s*${token}\\s*\\)[\\s\\S]{0,400}?\\.upload\\(`)
     return re.test(src)
   })
 }
@@ -54,7 +96,7 @@ describe('guardrail: org-scoped storage buckets', () => {
       .filter((f) => uploadsToOrgScopedBucket(read(f)))
       .map(rel)
       .filter((p) => !(p in UPLOAD_PATH_EXCEPTIONS))
-      .filter((p) => !read(`${process.cwd()}/${p}`).includes('orgScopedStoragePath'))
+      .filter((p) => !callsOrgScopedStoragePath(read(`${process.cwd()}/${p}`)))
 
     expect(
       offenders,

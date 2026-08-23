@@ -105,6 +105,20 @@ export interface DashboardPendingPhotoRow {
   createdAt:  string
 }
 
+/**
+ * The image bytes for one queued photo.
+ *
+ * `key` is the object key the photo will occupy in the `inspection-photos`
+ * bucket — the SAME string as the queue row's `blobKey` and the answer's
+ * `photoPath`. One identifier for the local blob, the upload target and the
+ * reference stored on the answer, so none of the three can drift from the
+ * others.
+ */
+export interface DashboardPhotoBlobRow {
+  key:  string
+  blob: Blob
+}
+
 /** Incremental-pull watermarks, same role as the crew cache's sync_meta. */
 export interface DashboardSyncMetaRow {
   key:   string
@@ -192,6 +206,8 @@ export class FieldStayDashboardDexie extends Dexie {
 
   /** LOCAL-ONLY working draft. No server row exists until sign-off. */
   inspection_answers!:    Table<InspectionAnswerRow, string>
+  /** Photo BYTES, in the same database as their queue row — see version(4). */
+  photo_blobs!:           Table<DashboardPhotoBlobRow, string>
 
   // Write path.
   mutations!:             Table<DashboardMutationRow, number>
@@ -239,6 +255,23 @@ export class FieldStayDashboardDexie extends Dexie {
       inspection_forms:         'id, key, is_active',
       inspection_form_sections: 'id, form_id',
       inspection_form_items:    'id, section_id',
+    })
+
+    // v4 — inspection photo capture. The BYTES live in the same database as
+    // the tracking row, which is the one place this deliberately departs from
+    // the crew design.
+    //
+    // lib/dexie/photo-queue.ts keeps crew blobs in a SEPARATE raw IndexedDB
+    // database, and its own comment records the cost: "a blob and its row can
+    // never be written atomically: if the row write throws (quota) or the PWA
+    // is reclaimed between the two, the blob is stranded with nothing pointing
+    // at it. Nothing collected those, and at multiple MB each they push the
+    // origin toward eviction of the entire offline cache — including the
+    // mutation outbox." A Dexie table holds Blobs perfectly well, and one
+    // transaction covering the blob, its queue row and the answer that
+    // references it closes that gap rather than inheriting it.
+    this.version(4).stores({
+      photo_blobs: 'key',
     })
   }
 }
