@@ -52,7 +52,21 @@ export type StartLocalOutcome =
 export async function startInspectionLocally(
   userId:  string,
   orgId:   string,
-  input:   { propertyId: string; formKey: string },
+  input:   {
+    propertyId: string
+    formKey:    string
+    /**
+     * The §7 schedule this walk satisfies, when it was started from one.
+     *
+     * Carried through to the server so COMPLETION can advance the schedule —
+     * an inspection schedule notifies once per occurrence and never rolls
+     * forward on its own, so without this link the notification fires once and
+     * the schedule then goes silent forever.
+     */
+    sourceScheduleId?: string | null
+    /** The date the schedule said it was due, for the record. */
+    scheduledFor?:     string | null
+  },
 ): Promise<StartLocalOutcome> {
   const db = getDashboardDb(userId, orgId)
 
@@ -88,7 +102,7 @@ export async function startInspectionLocally(
     header_snapshot: null,
     assigned_to_user_id: userId,
     inspector_name:      null,
-    scheduled_for:       null,
+    scheduled_for:       input.scheduledFor ?? null,
     // Provisional, and labelled as such. The create route replaces it with the
     // skew-corrected value; until then this is what the UI shows, which is the
     // device's own belief and therefore right for the device's own display.
@@ -98,7 +112,7 @@ export async function startInspectionLocally(
     device_clock_offset_seconds: null,
     completed_at:         null,
     completed_by_user_id: null,
-    source_schedule_id:     null,
+    source_schedule_id:     input.sourceScheduleId ?? null,
     corrects_inspection_id: null,
     created_at: deviceStarted,
     updated_at: deviceStarted,
@@ -119,6 +133,9 @@ export async function startInspectionLocally(
         // meaningful when both clocks are read at the same instant, so the
         // upload handler stamps it at POST time — which may be hours later.
         device_started_at: deviceStarted,
+        // §7's link. Null for an ad-hoc walk, which is most of them.
+        source_schedule_id: input.sourceScheduleId ?? null,
+        scheduled_for:      input.scheduledFor ?? null,
       },
     },
     // Same transaction as the outbox row. CLAUDE.md's rule, bought with a real

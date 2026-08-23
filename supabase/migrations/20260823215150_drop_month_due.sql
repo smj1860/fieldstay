@@ -1,0 +1,56 @@
+-- Drop maintenance_schedules.month_due, and with it the seasonal-month path.
+--
+-- WHAT month_due WAS
+--
+-- The month a `schedule_type = 'seasonal'` schedule recurs in. Alongside it,
+-- `nextSeasonalDueDate(monthDue, from)` derived the next occurrence: this year
+-- if the month is still ahead, otherwise next year.
+--
+-- WHY IT GOES
+--
+-- It is a second way to say something `next_due_date` already says. A seasonal
+-- schedule due every April is a routine ANNUAL schedule whose next_due_date is
+-- 1 April: `calcNextDueDate` steps +12 months and the April anchor is preserved
+-- by construction, exactly as +3 preserves a quarterly anchor. The create form
+-- already carries a "Next Due Date" input, unconditional and honoured ahead of
+-- any derivation (`resolveFirstDueDate`: `if (provided) return provided`), so a
+-- PM could already express the whole thing without ever picking Seasonal.
+--
+-- This is the same argument that kept `anchor_months` out of §7
+-- (20260823211930), applied to the column that was already here. Two places
+-- that encode when a schedule recurs, and only one of them read by the advance,
+-- means the other drifts.
+--
+-- NOTHING IS BEING MIGRATED, BECAUSE THERE IS NOTHING TO MIGRATE
+--
+-- Production: 145 schedules, ALL `routine`, ZERO seasonal, and month_due set on
+-- none of them. The feature has been selectable in the UI since it shipped and
+-- has never once been used.
+--
+-- AND THE PATH WAS BROKEN ANYWAY
+--
+-- The daily cron's advance is gated on `schedule_type === 'routine'`
+-- (cron/maintenance-schedules.ts), so a seasonal schedule with
+-- auto_create_wo = true would create its work order and never roll forward.
+-- The next day it looks due again, the unique index on
+-- (source_schedule_id, scheduled_date) rejects the duplicate, and the cron
+-- swallows that as the expected race — so the schedule silently stops producing
+-- work orders for that occurrence and every future one. Only the COMPLETION
+-- path advanced a seasonal schedule, and only if someone completed the work
+-- order. That has never fired because no seasonal schedule exists.
+--
+-- WHAT REMAINS
+--
+-- The `seasonal` label stays in the `schedule_type` enum: dropping an enum
+-- value means recreating the type and every dependency, which is not worth it
+-- for a label nothing writes and no row holds. Nothing offers it any more, and
+-- a hypothetical row carrying it now behaves as an unscheduled schedule — the
+-- same dormant state `resolveFirstDueDate` already produced for a seasonal
+-- schedule with no month.
+--
+-- `active_from_month` / `active_to_month` are UNTOUCHED and unrelated: they are
+-- the window in which a schedule may fire at all (do not open a pool in
+-- January), not when it fires. 14 live rows use them, all routine.
+
+ALTER TABLE maintenance_schedules
+  DROP COLUMN IF EXISTS month_due;

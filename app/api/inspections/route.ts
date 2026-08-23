@@ -102,6 +102,11 @@ export async function POST(req: Request) {
           conditions:   await captureConditions(property, clock.startedAt),
           capturedAt:   new Date().toISOString(),
         }),
+        // §7. Validated below rather than trusted: a schedule id from a device
+        // decides which schedule COMPLETION will advance, so an id belonging to
+        // another org — or to a work-order schedule — must not be written.
+        source_schedule_id:          await resolveSourceSchedule(supabase, membership.org_id, parsed.sourceScheduleId),
+        scheduled_for:               parsed.scheduledFor,
         started_at:                  clock.startedAt,
         started_at_source:           'device',
         device_started_at:           parsed.deviceStartedAt,
@@ -138,6 +143,37 @@ export async function POST(req: Request) {
     reportError(err, { site: 'route.inspections.create' })
     return NextResponse.json({ ok: false, error: 'Could not start.' }, { status: 500 })
   }
+}
+
+/**
+ * The §7 schedule this walk satisfies, or null.
+ *
+ * Returns null rather than throwing for an id that does not resolve. The walk
+ * is real and its answers are on a tablet; refusing the whole create because a
+ * schedule link is stale would dead-letter it. The cost of null is that the
+ * schedule does not advance and notifies again next occurrence, which is
+ * visible and recoverable — the opposite is not.
+ */
+async function resolveSourceSchedule(
+  supabase: SupabaseClient,
+  orgId:    string,
+  id:       string | null,
+): Promise<string | null> {
+  if (!id) return null
+
+  const { data, error } = await supabase
+    .from('maintenance_schedules')
+    .select('id')
+    .eq('org_id', orgId)
+    .eq('id', id)
+    .eq('creates', 'inspection')
+    .maybeSingle()
+
+  if (error) {
+    reportError(error, { site: 'route.inspections.create.sourceSchedule' })
+    return null
+  }
+  return data?.id ?? null
 }
 
 // ── Reads ───────────────────────────────────────────────────────────────────
@@ -222,6 +258,9 @@ interface ParsedCreate {
   formSnapshot:    ReturnType<typeof parseFormSnapshot>
   deviceStartedAt: string
   deviceNow:       string
+  /** §7's link, unvalidated here — resolveSourceSchedule checks it belongs. */
+  sourceScheduleId: string | null
+  scheduledFor:     string | null
 }
 
 function parseBody(body: unknown): ParsedCreate | { error: string } {
@@ -260,7 +299,12 @@ function parseBody(body: unknown): ParsedCreate | { error: string } {
     return { error: 'That device’s clock is too far out to record a start time.' }
   }
 
-  return { id, propertyId, formId, formVersion: r.form_version, formSnapshot, deviceStartedAt, deviceNow }
+  return {
+    id, propertyId, formId, formVersion: r.form_version, formSnapshot,
+    deviceStartedAt, deviceNow,
+    sourceScheduleId: str(r.source_schedule_id),
+    scheduledFor:     str(r.scheduled_for),
+  }
 }
 
 function str(v: unknown): string | null {

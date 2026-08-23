@@ -57,6 +57,8 @@ export type InspectionAction       = 'repair' | 'service' | 'replace'
 // "Refrigeration" failing for a water filter and later for a compressor is the
 // same form_item_id and two unrelated problems.
 export type InspectionRepeatAnswer = 'same' | 'new'
+// §7: what a maintenance_schedules row produces when it comes due.
+export type ScheduleCreates        = 'work_order' | 'inspection'
 export type WoCategory          =
   | 'hvac' | 'plumbing' | 'electrical' | 'appliance' | 'cleaning'
   | 'landscaping' | 'roofing' | 'flooring' | 'windows_doors'
@@ -1001,7 +1003,6 @@ export interface MaintenanceSchedule {
   description:               string | null
   schedule_type:             ScheduleType
   frequency:                 ScheduleFrequency | null
-  month_due:                 number | null
   day_of_month_due:          number | null
   estimated_cost:            number | null
   instructions:              string | null
@@ -1014,6 +1015,23 @@ export interface MaintenanceSchedule {
   is_from_standard_template: boolean
   source_template_item_id:   string | null
   source_catalog_item_id:    string | null
+
+  /**
+   * §7's discriminator (20260823211930). A `work_order` schedule creates one
+   * when it comes due; an `inspection` schedule NOTIFIES, and the row is
+   * created when the walk begins — `inspections.started_at` has to be a real
+   * start time, not the moment a cron ran.
+   *
+   * There is deliberately no `anchor_months`: the recurrence anchor is
+   * emergent from (next_due_date, frequency), which is what calcNextDueDate
+   * already steps forward.
+   */
+  creates:                   ScheduleCreates
+  /** Required when `creates = 'inspection'` — enforced by a CHECK. */
+  inspection_form_id:        string | null
+  /** An ORG MEMBER, unlike assigned_crew_member_id elsewhere. */
+  assigned_to_user_id:       string | null
+
   is_active:                 boolean
   created_at:                string
   updated_at:                string

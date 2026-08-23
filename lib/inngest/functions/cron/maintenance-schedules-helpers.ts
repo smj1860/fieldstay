@@ -5,6 +5,7 @@ import { logAuditEvent, logAuditEvents } from '@/lib/audit'
 import { fetchAllRows } from '@/lib/inngest/paginate'
 import { parseLocalDate } from '@/lib/utils/date-validation'
 import { reportError } from '@/lib/observability/report-error'
+import { createPmNotification } from '@/lib/inngest/helpers'
 import type { Enums } from '@/types/database'
 
 /**
@@ -38,6 +39,54 @@ export type VendorPortalEvent = {
   org_id:        string
   vendor_id:     string
   portal_enabled: true
+}
+
+/** A due inspection schedule, as the notify path needs it. */
+export interface DueInspectionScheduleRow extends DueSoonScheduleRow {
+  inspection_form_id:  string | null
+  assigned_to_user_id: string | null
+}
+
+/**
+ * A scheduled inspection has come due: tell someone, and create nothing.
+ *
+ * §7's asymmetry with the work-order path, and it is forced by
+ * `inspections.started_at`, which is NOT NULL DEFAULT now(). A row minted here
+ * would claim the walk began at 08:00 UTC on the cron's schedule, and §12.3's
+ * report presents that duration as evidence of how the property was assessed.
+ * It would also push a walk nobody has started onto every tablet, because the
+ * warm pass caches inspections that are OPEN and a row is open from the moment
+ * it exists.
+ *
+ * So the row is created when someone actually begins — the path that already
+ * exists and already stamps a real start time — and this only surfaces that it
+ * is time. The schedule advances on COMPLETION rather than here, which is the
+ * same rule `auto_create_wo = false` reminder schedules already follow: nothing
+ * has acted on it yet, so rolling it forward would hide it.
+ *
+ * DEDUPED PER OCCURRENCE, not per day. This cron looks 7 days ahead and runs
+ * daily, so an undeduped notification would ring the bell seven times for one
+ * quarterly walk. The key carries the due date, so the NEXT occurrence rings
+ * again.
+ */
+export async function notifyInspectionDue(
+  supabase:     SupabaseClient,
+  schedule:     DueInspectionScheduleRow,
+  daysUntilDue: number,
+): Promise<void> {
+  const when = daysUntilDue <= 0
+    ? 'is due today'
+    : `is due in ${pluralDays(daysUntilDue)}`
+
+  await createPmNotification(supabase, {
+    orgId:    schedule.org_id,
+    type:     'inspection.scheduled_due',
+    title:    `${schedule.name} ${when}`,
+    subtitle: 'Open the property to start the walk.',
+    href:     `/maintenance/inspections?property=${schedule.property_id}`,
+    severity: daysUntilDue <= 0 ? 'amber' : 'blue',
+    dedupeKey: `inspection-due:${schedule.id}:${schedule.next_due_date}`,
+  })
 }
 
 /**

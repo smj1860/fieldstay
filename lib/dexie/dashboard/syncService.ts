@@ -14,9 +14,10 @@
 // than the crew equivalent, which greps `UPLOAD_HANDLERS` for each member of
 // its union.
 //
-// `inspection.submit` is live. `work_order.create` still throws a terminal,
-// clearly-labelled error: its endpoint has not shipped, nothing enqueues it,
-// and a loud throw beats a silent no-op if anything ever does reach it.
+// All three kinds are live. Each posts to a Route Handler rather than calling a
+// Server Action, for the reason recorded on `work_order.create` below: a queued
+// row can outlive the release that wrote it, and Server Action ids are not
+// stable across builds.
 
 import { OutboxEngine } from '../outboxEngine'
 import {
@@ -29,6 +30,11 @@ import {
  * Thrown by a handler whose server endpoint has not shipped yet. Terminal on
  * purpose — retrying cannot conjure a route, and burning the retry budget to
  * discover that five times would only delay the visible failure.
+ *
+ * Currently unused: every kind has a real handler. Kept, and kept in
+ * `isTerminal`, because the next kind added will need it before its endpoint
+ * exists, and a loud labelled throw beats whatever a half-written handler does
+ * by accident.
  */
 export class HandlerNotImplementedError extends Error {
   constructor(kind: DashboardMutationKind) {
@@ -48,13 +54,33 @@ type UploadHandler = (mutation: DashboardMutationRow) => Promise<void>
  * replay as the same write rather than a second one.
  */
 export const DASHBOARD_UPLOAD_HANDLERS: Record<DashboardMutationKind, UploadHandler> = {
-  // Phase 3. Will POST to a Route Handler rather than call the existing
-  // `createWorkOrder` Server Action: a queued row can outlive the release that
-  // wrote it (a tablet offline across a deploy), and Server Action ids are not
-  // stable across builds, so a replay would 404. The Route Handler must reuse
-  // the helpers that action already uses rather than reimplement them — two
-  // paths that create a work order is exactly the drift this repo pays for.
-  'work_order.create': (m) => Promise.reject(new HandlerNotImplementedError(m.kind)),
+  // A Route Handler rather than the existing `createWorkOrder` Server Action: a
+  // queued row can outlive the release that wrote it (a tablet offline across a
+  // deploy), and Server Action ids are not stable across builds, so a replay
+  // would 404 and dead-letter a work order that exists nowhere else. The route
+  // reuses the helpers that action already uses rather than reimplementing
+  // them — two paths that create a work order is exactly the drift this repo
+  // pays for, and one of those helpers is a tenant-isolation check.
+  //
+  // The payload already carries the device-minted `id`, which is what the route
+  // upserts on, so a replay collides instead of raising a second work order.
+  'work_order.create': async (m) => {
+    const res = await fetch('/api/work-orders', {
+      method:  'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body:    JSON.stringify(m.payload),
+    })
+    if (res.ok) return
+
+    // 4xx is the caller's fault and will stay the caller's fault: a
+    // hard-blocked vendor, a property that is not this org's, a title that
+    // never made it. Retrying reaches the same answer more slowly, so it
+    // dead-letters immediately and the banner surfaces the reason.
+    if (res.status >= 400 && res.status < 500) {
+      throw new SubmitRejectedError(await readError(res))
+    }
+    throw new Error(`Work order create failed with ${res.status}`)
+  },
 
   // Starting a walk. The outbox drains in insertion order and STOPS on the
   // first error, which is what guarantees a create lands before the submit that
