@@ -2884,14 +2884,17 @@ export type Database = {
           active_from_month: number | null
           active_to_month: number | null
           asset_category: string | null
+          assigned_to_user_id: string | null
           assigned_vendor_id: string | null
           auto_create_wo: boolean
           created_at: string
+          creates: Database["public"]["Enums"]["schedule_creates"]
           day_of_month_due: number | null
           description: string | null
           estimated_cost: number | null
           frequency: Database["public"]["Enums"]["schedule_frequency"] | null
           id: string
+          inspection_form_id: string | null
           instructions: string | null
           is_active: boolean
           is_from_standard_template: boolean
@@ -2913,14 +2916,17 @@ export type Database = {
           active_from_month?: number | null
           active_to_month?: number | null
           asset_category?: string | null
+          assigned_to_user_id?: string | null
           assigned_vendor_id?: string | null
           auto_create_wo?: boolean
           created_at?: string
+          creates?: Database["public"]["Enums"]["schedule_creates"]
           day_of_month_due?: number | null
           description?: string | null
           estimated_cost?: number | null
           frequency?: Database["public"]["Enums"]["schedule_frequency"] | null
           id?: string
+          inspection_form_id?: string | null
           instructions?: string | null
           is_active?: boolean
           is_from_standard_template?: boolean
@@ -2942,14 +2948,17 @@ export type Database = {
           active_from_month?: number | null
           active_to_month?: number | null
           asset_category?: string | null
+          assigned_to_user_id?: string | null
           assigned_vendor_id?: string | null
           auto_create_wo?: boolean
           created_at?: string
+          creates?: Database["public"]["Enums"]["schedule_creates"]
           day_of_month_due?: number | null
           description?: string | null
           estimated_cost?: number | null
           frequency?: Database["public"]["Enums"]["schedule_frequency"] | null
           id?: string
+          inspection_form_id?: string | null
           instructions?: string | null
           is_active?: boolean
           is_from_standard_template?: boolean
@@ -2980,6 +2989,13 @@ export type Database = {
             columns: ["assigned_vendor_id"]
             isOneToOne: false
             referencedRelation: "vendors"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "maintenance_schedules_inspection_form_id_fkey"
+            columns: ["inspection_form_id"]
+            isOneToOne: false
+            referencedRelation: "inspection_forms"
             referencedColumns: ["id"]
           },
           {
@@ -6806,6 +6822,7 @@ export type Database = {
         | "approved"
         | "declined"
         | "expired"
+      schedule_creates: "work_order" | "inspection"
       schedule_frequency:
         | "weekly"
         | "biweekly"
@@ -7141,6 +7158,7 @@ export const Constants = {
         "declined",
         "expired",
       ],
+      schedule_creates: ["work_order", "inspection"],
       schedule_frequency: [
         "weekly",
         "biweekly",

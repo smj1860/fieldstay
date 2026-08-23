@@ -64,6 +64,7 @@ import { inngest } from '../client'
 import { createServiceClient } from '@/lib/supabase/server'
 import { createPmNotification } from '../helpers'
 import { parseFormSnapshot } from '@/lib/inspections/snapshots'
+import { calcNextDueDate } from '@/lib/turnovers/generator'
 import type { InspectionFormItem, PriorityLevel, WoCategory } from '@/types/database'
 
 /** One answer, joined to the routing its form item carried at capture. */
@@ -102,7 +103,7 @@ export const inspectionCompleted = inngest.createFunction(
 
       const { data: inspection, error } = await supabase
         .from('inspections')
-        .select('id, org_id, property_id, form_snapshot, completed_at')
+        .select('id, org_id, property_id, form_snapshot, completed_at, source_schedule_id')
         .eq('org_id', org_id)
         .eq('id', inspection_id)
         .maybeSingle()
@@ -146,7 +147,11 @@ export const inspectionCompleted = inngest.createFunction(
         failed.push({ ...item, def } as FailedItem)
       }
 
-      return { propertyId: inspection.property_id, failed }
+      return {
+        propertyId: inspection.property_id,
+        sourceScheduleId: inspection.source_schedule_id,
+        failed,
+      }
     })
 
     if (!failures) {
@@ -154,8 +159,22 @@ export const inspectionCompleted = inngest.createFunction(
       return { skipped: 'not_found' }
     }
 
-    const { propertyId, failed } = failures
-    if (failed.length === 0) return { workOrders: 0, purchaseOrders: 0, notifications: 0 }
+    const { propertyId, sourceScheduleId, failed } = failures
+
+    // §7. A scheduled walk advances its schedule on COMPLETION, not when it
+    // came due — the due pass only notified, so nothing had acted on it yet.
+    // Before this step existed the notification fired once per occurrence and,
+    // with next_due_date never moving, the schedule then went silent forever.
+    //
+    // Runs BEFORE the remediation steps and independently of them: a walk with
+    // zero failures is the most common outcome and still has to roll its
+    // schedule forward.
+    const scheduleAdvanced = await step.run('advance-source-schedule', () =>
+      advanceSourceSchedule(org_id, sourceScheduleId))
+
+    if (failed.length === 0) {
+      return { workOrders: 0, purchaseOrders: 0, notifications: 0, scheduleAdvanced }
+    }
 
     const workOrders = await step.run('create-work-orders', () =>
       createWorkOrders(org_id, propertyId, inspection_id, failed))
@@ -167,6 +186,7 @@ export const inspectionCompleted = inngest.createFunction(
       notifyNonDispatchFailures(org_id, inspection_id, failed))
 
     return {
+      scheduleAdvanced,
       workOrders:    workOrders.created,
       // Recurrences noted on a job that was already open rather than opened
       // again — the number §6 exists to make non-zero.
@@ -176,6 +196,61 @@ export const inspectionCompleted = inngest.createFunction(
     }
   },
 )
+
+/**
+ * Rolls a scheduled inspection's schedule forward.
+ *
+ * Uses `calcNextDueDate` — the SAME helper the work-order path uses, which is
+ * §7's whole point: "the timing rule must not exist twice. The output differs;
+ * the timing logic does not." Anchored on `next_due_date` rather than on today,
+ * so a walk done three days late still lands the next one on the calendar month
+ * the recurrence has always used.
+ *
+ * NON-FATAL, and deliberately the opposite bias to the remediation steps below.
+ * A failure here costs one late notification on the next occurrence, which is
+ * visible and self-correcting. Throwing would retry the whole function and
+ * risk re-running remediation for work orders that already exist.
+ */
+async function advanceSourceSchedule(orgId: string, scheduleId: string | null): Promise<boolean> {
+  if (!scheduleId) return false
+
+  const supabase = createServiceClient({ system: 'inngest:inspection-completed' })
+
+  const { data: schedule, error } = await supabase
+    .from('maintenance_schedules')
+    .select('id, frequency, next_due_date')
+    .eq('org_id', orgId)
+    .eq('id', scheduleId)
+    .maybeSingle()
+
+  if (error || !schedule?.frequency || !schedule.next_due_date) {
+    if (error) console.warn('[inspection-completed] schedule lookup failed:', error.message)
+    return false
+  }
+
+  const nextDue = calcNextDueDate(schedule.frequency, new Date(`${schedule.next_due_date}T00:00:00`))
+
+  // Optimistic lock on the date we read, matching every other advance in this
+  // codebase: two completions of the same occurrence must not double-step it.
+  const { data: advanced, error: advanceError } = await supabase
+    .from('maintenance_schedules')
+    .update({
+      next_due_date:       nextDue.toISOString().split('T')[0],
+      last_completed_date: new Date().toISOString().split('T')[0],
+    })
+    .eq('id', scheduleId)
+    .eq('org_id', orgId)
+    .eq('next_due_date', schedule.next_due_date)
+    .select('id')
+
+  if (advanceError) {
+    console.warn('[inspection-completed] schedule advance failed:', advanceError.message)
+    return false
+  }
+  // Zero rows means another pass advanced it first — the designed outcome of
+  // the lock, not an error.
+  return (advanced?.length ?? 0) > 0
+}
 
 // ── Work orders ─────────────────────────────────────────────────────────────
 

@@ -72,6 +72,10 @@ function makeClient(opts: {
   openPredecessorError?: { message: string }
   /** Recurrence notes already on those work orders, for the replay case. */
   existingUpdates?: { work_order_id: string; notes: string }[]
+  /** The §7 schedule this walk satisfies, if any. */
+  sourceSchedule?: { id: string; frequency: string | null; next_due_date: string | null } | null
+  /** Simulates the optimistic lock losing — another pass advanced it first. */
+  scheduleAdvanceLostRace?: boolean
 }) {
   const writes: { table: string; rows: unknown[] }[] = []
   // Ordering is a contract with Postgres that an in-memory double cannot
@@ -100,12 +104,21 @@ function makeClient(opts: {
         return builder
       }
 
-      builder.maybeSingle = () => Promise.resolve({
-        data: opts.inspection === undefined ? {} : opts.inspection, error: null,
-      })
+      builder.maybeSingle = () => {
+        if (table === 'maintenance_schedules') {
+          return Promise.resolve({ data: opts.sourceSchedule ?? null, error: null })
+        }
+        return Promise.resolve({
+          data: opts.inspection === undefined ? {} : opts.inspection, error: null,
+        })
+      }
       builder.single = () => Promise.resolve(
         opts.poError ? { data: null, error: opts.poError } : { data: { id: 'po-1' }, error: null },
       )
+      builder.update = (patch: unknown) => {
+        writes.push({ table, rows: [patch] })
+        return builder
+      }
       builder.insert = (rows: unknown) => {
         const arr = Array.isArray(rows) ? rows : [rows]
         writes.push({ table, rows: arr })
@@ -144,6 +157,12 @@ function makeClient(opts: {
         if (table === 'inspection_form_items') {
           return Promise.resolve({ data: opts.concernKeys ?? [], error: null }).then(resolve)
         }
+        if (table === 'maintenance_schedules') {
+          // The UPDATE's .select('id') — empty when the lock lost.
+          return Promise.resolve({
+            data: opts.scheduleAdvanceLostRace ? [] : [{ id: 'sched-1' }], error: null,
+          }).then(resolve)
+        }
         return Promise.resolve({ data: [], error: null }).then(resolve)
       }
       return builder
@@ -166,9 +185,11 @@ const failedItem = (over: Partial<Record<string, unknown>> = {}) => ({
   ...over,
 })
 
-const inspectionRow = (defs: Def[]) => ({
+const inspectionRow = (defs: Def[], over: Record<string, unknown> = {}) => ({
   id: INSP, org_id: ORG, property_id: PROP,
   form_snapshot: snapshot(defs), completed_at: '2026-08-23T12:00:00Z',
+  source_schedule_id: null,
+  ...over,
 })
 
 beforeEach(() => { vi.clearAllMocks() })
@@ -654,5 +675,86 @@ describe('inspectionCompleted — the repeat answer', () => {
     vi.mocked(createServiceClient).mockReturnValue(client as never)
 
     await expect(invokeHandler(inspectionCompleted, ctx())).rejects.toThrow(/connection reset/)
+  })
+})
+
+// ============================================================================
+// §7: A SCHEDULED WALK ROLLS ITS SCHEDULE FORWARD.
+//
+// An inspection schedule NOTIFIES when it comes due and creates nothing — an
+// inspections row minted by the cron would claim the walk started at 08:00
+// UTC, and the report presents that duration as evidence. So nothing has acted
+// on the schedule at due time, and the advance has to happen on COMPLETION.
+//
+// Which makes this step load-bearing rather than cosmetic: the due
+// notification is deduped per (schedule, due date), so with next_due_date never
+// moving it fires once and the schedule goes silent forever.
+// ============================================================================
+describe('inspectionCompleted — the source schedule', () => {
+  const scheduled = (over: Record<string, unknown> = {}) => makeClient({
+    inspection: inspectionRow([], { source_schedule_id: 'sched-1' }),
+    failedItems: [],
+    sourceSchedule: { id: 'sched-1', frequency: 'quarterly', next_due_date: '2026-08-01' },
+    ...over,
+  })
+
+  it('advances a quarterly schedule by three months from its DUE date', async () => {
+    // Anchored on next_due_date, not on today: a walk done three days late
+    // still lands the next one on the month the recurrence has always used.
+    const { client, writes } = scheduled()
+    vi.mocked(createServiceClient).mockReturnValue(client as never)
+
+    const result = await invokeHandler(inspectionCompleted, ctx())
+
+    expect(result).toMatchObject({ scheduleAdvanced: true })
+    const patch = writes.find((w) => w.table === 'maintenance_schedules')!.rows[0] as Record<string, unknown>
+    expect(patch.next_due_date).toBe('2026-11-01')
+    expect(patch.last_completed_date).toBeTruthy()
+  })
+
+  it('advances even when the walk found nothing wrong', async () => {
+    // The most common outcome by far, and the one a naive implementation
+    // skips by hanging the advance off the remediation path.
+    const { client, writes } = scheduled()
+    vi.mocked(createServiceClient).mockReturnValue(client as never)
+
+    const result = await invokeHandler(inspectionCompleted, ctx())
+    expect(result).toMatchObject({ workOrders: 0, scheduleAdvanced: true })
+    expect(writes.some((w) => w.table === 'maintenance_schedules')).toBe(true)
+  })
+
+  it('does nothing for an ad-hoc walk', async () => {
+    const { client, writes } = makeClient({
+      inspection: inspectionRow([]), failedItems: [],
+    })
+    vi.mocked(createServiceClient).mockReturnValue(client as never)
+
+    const result = await invokeHandler(inspectionCompleted, ctx())
+    expect(result).toMatchObject({ scheduleAdvanced: false })
+    expect(writes.some((w) => w.table === 'maintenance_schedules')).toBe(false)
+  })
+
+  it('reports NOT advanced when the optimistic lock loses', async () => {
+    // Two completions of one occurrence must not double-step the calendar.
+    const { client } = scheduled({ scheduleAdvanceLostRace: true })
+    vi.mocked(createServiceClient).mockReturnValue(client as never)
+
+    expect(await invokeHandler(inspectionCompleted, ctx())).toMatchObject({ scheduleAdvanced: false })
+  })
+
+  it('a vanished schedule costs a notification, never the remediation', async () => {
+    // Deliberately the opposite bias to the remediation steps: throwing here
+    // would retry the whole function and re-run remediation for work orders
+    // that already exist.
+    const { client, writes } = makeClient({
+      inspection: inspectionRow([{ id: 'def-1', remediation: 'work_order' }], { source_schedule_id: 'sched-gone' }),
+      failedItems: [failedItem()],
+      sourceSchedule: null,
+    })
+    vi.mocked(createServiceClient).mockReturnValue(client as never)
+
+    const result = await invokeHandler(inspectionCompleted, ctx())
+    expect(result).toMatchObject({ scheduleAdvanced: false, workOrders: 1 })
+    expect(writes.some((w) => w.table === 'work_orders')).toBe(true)
   })
 })

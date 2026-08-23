@@ -11,6 +11,9 @@ vi.mock('@/lib/audit', () => ({
 vi.mock('@/lib/observability/report-error', () => ({
   reportError: vi.fn(),
 }))
+vi.mock('@/lib/inngest/helpers', () => ({
+  createPmNotification: vi.fn(async () => undefined),
+}))
 
 import {
   dailyMaintenanceScheduleCheck,
@@ -19,6 +22,7 @@ import {
 import { createServiceClient } from '@/lib/supabase/server'
 import { logAuditEvent, logAuditEvents } from '@/lib/audit'
 import { reportError } from '@/lib/observability/report-error'
+import { createPmNotification } from '@/lib/inngest/helpers'
 import { invokeHandler } from './test-helpers'
 import { createSupabaseDouble, type TableSpec } from '../stubs/supabase-query-double'
 
@@ -269,6 +273,65 @@ describe('maintenanceSchedulesOrg (per-org handler)', () => {
         data: expect.objectContaining({ work_order_id: 'wo_new', vendor_id: 'vendor_1', portal_enabled: true }),
       }),
     )
+  })
+
+  // ==========================================================================
+  // §7: AN INSPECTION SCHEDULE NOTIFIES AND CREATES NOTHING.
+  //
+  // Forced by `inspections.started_at`, which is NOT NULL DEFAULT now(). A row
+  // minted by this 08:00 cron would claim the walk began at 08:00, and §12.3's
+  // report presents that duration as evidence of how the property was assessed.
+  // It would also push a walk nobody has started onto every tablet, since the
+  // warm pass caches inspections that are OPEN.
+  //
+  // The schedule also must NOT advance here: nothing has acted on it yet. The
+  // advance happens on completion, which is the same rule auto_create_wo=false
+  // reminder schedules already follow.
+  // ==========================================================================
+  it('notifies for a due INSPECTION schedule instead of creating a work order', async () => {
+    const supabase = makeSupabase({
+      maintenance_schedules: [
+        {
+          data: [{
+            id: 'sched_insp', name: 'Quarterly safety walk', schedule_type: 'routine',
+            frequency: 'quarterly', estimated_cost: null, instructions: null,
+            auto_create_wo: true, next_due_date: '2026-07-27',
+            active_from_month: null, active_to_month: null,
+            creates: 'inspection', inspection_form_id: 'form_1', assigned_to_user_id: 'user_1',
+            assigned_vendor_id: null, property_id: 'prop_1', org_id: 'org_1',
+            properties: { name: 'Lakeview Cabin', city: 'Austin', state: 'TX' },
+            vendors: null,
+          }],
+          error: null,
+        }, // find-due-schedules
+        { data: [], error: null }, // find-overdue-schedules
+      ],
+      ...baseTables(),
+    })
+    ;(createServiceClient as ReturnType<typeof vi.fn>).mockReturnValue(supabase)
+
+    const step = makeStep()
+    await invokeHandler(maintenanceSchedulesOrg, {
+      event:  orgEvent(),
+      step,
+      logger: { info: vi.fn(), error: vi.fn() },
+    })
+
+    // No work order, and no vendor dispatch.
+    expect(supabase.calls.some((c) => c.table === 'work_orders' && c.method === 'insert')).toBe(false)
+
+    // And next_due_date is NOT advanced — nothing acted on it yet, so rolling
+    // it forward here would hide the walk from the next day's pass.
+    expect(supabase.calls.some((c) => c.table === 'maintenance_schedules' && c.method === 'update')).toBe(false)
+
+    // A notification, deduped per OCCURRENCE. This cron looks 7 days ahead and
+    // runs daily, so an undeduped one rings the bell seven times per walk.
+    expect(createPmNotification).toHaveBeenCalledTimes(1)
+    const input = vi.mocked(createPmNotification).mock.calls[0]![1]
+    expect(input).toMatchObject({
+      orgId: 'org_1', dedupeKey: 'inspection-due:sched_insp:2026-07-27',
+    })
+    expect(input.title).toContain('Quarterly safety walk')
   })
 
   it('escalates an overdue schedule\'s existing open WO to urgent instead of creating a duplicate', async () => {

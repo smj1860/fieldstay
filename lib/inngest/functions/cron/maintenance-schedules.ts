@@ -7,6 +7,7 @@ import { unwrap } from '@/lib/supabase/unwrap'
 import { fetchAllRows, fetchDistinctOrgIds } from '@/lib/inngest/paginate'
 import {
   createMaintenanceWorkOrder,
+  notifyInspectionDue,
   computeVacancyGaps,
   chunkOverdueSchedules,
   processOverdueBatch,
@@ -32,6 +33,10 @@ interface DueScheduleRow extends DueSoonScheduleRow {
   active_from_month: number | null
   active_to_month:   number | null
   vendors:           DueSoonVendor | DueSoonVendor[] | null
+  /** §7's discriminator. 'work_order' for every row that predates it. */
+  creates:             string | null
+  inspection_form_id:  string | null
+  assigned_to_user_id: string | null
 }
 
 /**
@@ -177,6 +182,7 @@ export const maintenanceSchedulesOrg = inngest.createFunction(
             id, name, schedule_type, frequency, estimated_cost,
             instructions, auto_create_wo, next_due_date,
             active_from_month, active_to_month,
+            creates, inspection_form_id, assigned_to_user_id,
             assigned_vendor_id, property_id, org_id,
             properties ( name, city, state ),
             vendors ( id, name, email, portal_enabled )
@@ -229,6 +235,17 @@ export const maintenanceSchedulesOrg = inngest.createFunction(
         const supabase = createServiceClient({ system: 'inngest:maintenance-schedules' })
         const vendor   = unwrapJoin(schedule.vendors)
         const dueDate  = parseLocalDate(schedule.next_due_date, 'next_due_date')
+
+        // §7. An inspection schedule NOTIFIES and creates nothing: an
+        // inspection row minted here would carry started_at = this cron run,
+        // and §12.3's report presents that as how long the walk took. The row
+        // is created when someone actually begins, carrying
+        // source_schedule_id — and completion is what advances the schedule,
+        // exactly as auto_create_wo = false reminder schedules already behave.
+        if (schedule.creates === 'inspection') {
+          await notifyInspectionDue(supabase, schedule, daysUntilDue)
+          return { vendorPortalEvent: null }
+        }
 
         // schedule.auto_create_wo === false never reaches here — that path's
         // PM-facing surface is cron-daily-wrapup's maintenance digest section.

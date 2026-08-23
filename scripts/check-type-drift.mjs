@@ -131,6 +131,7 @@ const ENUM_MAP = {
   priority_level:       'PriorityLevel',
   property_type:        'PropertyType',
   quote_request_status: 'QuoteRequestStatus',
+  schedule_creates:     'ScheduleCreates',
   schedule_frequency:   'ScheduleFrequency',
   schedule_type:        'ScheduleType',
   support_category:     'SupportCategory',
