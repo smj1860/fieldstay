@@ -42,6 +42,12 @@ import Dexie, { type Table } from 'dexie'
 
 import type { DeadLetterFlag } from '../outbox-primitives'
 import type {
+  Inspection,
+  InspectionAction,
+  InspectionForm,
+  InspectionFormItem,
+  InspectionFormSection,
+  InspectionResult,
   MaintenanceSchedule,
   Property,
   PropertyAsset,
@@ -60,7 +66,11 @@ import type {
  * The crew PWA escapes this because a crew member effectively owns their
  * turnover; nobody owns a work order.
  */
-export type DashboardMutationKind = 'work_order.create' | 'inspection.submit'
+export type DashboardMutationKind =
+  | 'work_order.create'
+  /** Starting a walk. Ordered BEFORE its submit by the outbox's in-order drain. */
+  | 'inspection.create'
+  | 'inspection.submit'
 
 export interface DashboardMutationRow {
   id?:        number
@@ -101,6 +111,64 @@ export interface DashboardSyncMetaRow {
   value: string
 }
 
+/**
+ * ONE answer, held locally while the inspection is being walked.
+ *
+ * LOCAL-ONLY. There is no server row behind this until sign-off, which is what
+ * `inspection.submit` means: the whole set posts as one atomic completion. Two
+ * consequences worth being explicit about rather than discovering later.
+ *
+ * The good one: a tablet that loses signal in a basement, or a tab that is
+ * reclaimed, loses nothing. Every tap commits to IndexedDB immediately, so the
+ * draft survives a reload and a crash — which is the actual failure mode of a
+ * ninety-minute walk, not a network blip.
+ *
+ * The honest one: an in-progress inspection is INVISIBLE to anyone else until
+ * it is submitted. A second PM opening the same inspection sees an empty form.
+ * That is acceptable because an inspection has one walker by construction — the
+ * person holding the tablet — and it is the same reasoning that lets a crew
+ * member own their turnover offline while nobody owns a work order (§8). It
+ * would NOT be acceptable for a shared surface, and if inspections ever become
+ * one this design has to change with them.
+ *
+ * Field names are camelCase, unlike the cached tables above, which mirror their
+ * Supabase rows exactly. Deliberate: these are not a cached row. Nothing here
+ * came from the server and nothing reconciles against it, and matching the
+ * column names would invite a `bulkPut` of server rows straight into a table
+ * that means something else.
+ */
+export interface InspectionAnswerRow {
+  /** `${inspectionId}|${answerKey}` — see answerKey() in lib/inspections/resolve-form. */
+  id:             string
+  inspectionId:   string
+  answerKey:      string
+  formItemId:     string
+  /** Frozen with the answer, so a re-render cannot restate the question. */
+  promptSnapshot: string
+
+  result:         InspectionResult | null
+  actions:        InspectionAction[]
+  needsCleaning:  boolean
+
+  /** The FAILURE DESCRIPTION — becomes the work order title. Not a text answer. */
+  note:           string | null
+  photoPath:      string | null
+  photoUnavailableReason: string | null
+  naReason:       string | null
+
+  /** count / text / date answers. See inspection_items.value_* (20260823001839). */
+  valueNumber:    number | null
+  valueText:      string | null
+  valueDate:      string | null
+
+  assetId:        string | null
+  repeatIndex:    number | null
+
+  /** Null until the item is genuinely answered — drives the progress counts. */
+  answeredAt:     string | null
+  updatedAt:      string
+}
+
 export class FieldStayDashboardDexie extends Dexie {
   // Read cache. Every one of these is bounded by the org's plan-capped property
   // count — at 50 properties roughly 1,050 assets and 900 schedules, both from
@@ -111,6 +179,19 @@ export class FieldStayDashboardDexie extends Dexie {
   property_assets!:       Table<PropertyAsset, string>
   maintenance_schedules!: Table<MaintenanceSchedule, string>
   work_orders!:           Table<WorkOrder, string>
+  /** Only the ones this PM has open — see pruneFinishedInspections(). */
+  inspections!:           Table<Inspection, string>
+
+  // The FORM LIBRARY, cached so an inspection can be STARTED with no signal.
+  // Platform-owned and tiny — 3 forms, 24 sections, 173 items, 38 kB measured
+  // against production — so this is cheaper to hold than the single inspection
+  // that used to be warmed.
+  inspection_forms!:          Table<InspectionForm, string>
+  inspection_form_sections!:  Table<InspectionFormSection, string>
+  inspection_form_items!:     Table<InspectionFormItem, string>
+
+  /** LOCAL-ONLY working draft. No server row exists until sign-off. */
+  inspection_answers!:    Table<InspectionAnswerRow, string>
 
   // Write path.
   mutations!:             Table<DashboardMutationRow, number>
@@ -134,6 +215,30 @@ export class FieldStayDashboardDexie extends Dexie {
       mutations:             '++id, kind, targetId, failed, [kind+targetId]',
       pending_photo_uploads: 'id, targetId, failed',
       sync_meta:             'key',
+    })
+
+    // v2 — the fill screen's local store (INSPECTIONS_SPEC §10 phase 3).
+    //
+    // Additive only: Dexie carries every v1 store forward untouched, so an
+    // upgrade never costs a PM their queued work orders. `inspection_answers`
+    // is indexed on `inspectionId` because every read on the fill screen is
+    // "this inspection's answers" and it is re-read on every tap; an unindexed
+    // filter would scan every draft on the device on each keystroke.
+    this.version(2).stores({
+      inspections:         'id, org_id, property_id, completed_at',
+      inspection_answers:  'id, inspectionId, [inspectionId+answerKey]',
+    })
+
+    // v3 — starting an inspection offline (INSPECTIONS_SPEC §8, revised
+    // 2026-08-23). Additive, so an upgrade never costs a PM their queued work.
+    //
+    // `properties` was declared in v1 and never written to; it is populated
+    // from here on, because the start screen has to offer a property to inspect
+    // and cannot ask the server which ones exist.
+    this.version(3).stores({
+      inspection_forms:         'id, key, is_active',
+      inspection_form_sections: 'id, form_id',
+      inspection_form_items:    'id, section_id',
     })
   }
 }

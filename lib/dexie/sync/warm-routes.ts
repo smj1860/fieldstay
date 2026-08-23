@@ -28,9 +28,7 @@
 
 import { getDexieDb } from '../schema'
 import { ROUTE_WARM_TIMEOUT_MS } from '@/lib/http/timeout'
-
-/** Must match SHELL_CACHE in public/sw.js. Bump both together. */
-const SHELL_CACHE = 'fieldstay-shell-v2'
+import { SHELL_CACHE } from '@/lib/pwa/cache-names'
 
 /**
  * Ceiling on how many documents one warm pass fetches.

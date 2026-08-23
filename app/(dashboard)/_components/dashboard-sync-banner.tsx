@@ -34,6 +34,7 @@ import {
  */
 const MUTATION_LABELS: Record<DashboardMutationKind, string> = {
   'work_order.create': 'New work order',
+  'inspection.create': 'Started inspection',
   'inspection.submit': 'Completed inspection',
 }
 

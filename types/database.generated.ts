@@ -9,6 +9,11 @@
  * project), in the SAME COMMIT as the migration that changed the schema —
  * the rule CLAUDE.md already states for types/database.ts.
  *
+ * The MCP tool returns the file WITHOUT this header (and wrapped in a JSON
+ * envelope under a `types` key). Re-add it after regenerating: it is the only
+ * place the regeneration command is written down, so losing it is how the file
+ * silently becomes hand-editable.
+ *
  * WHY THIS FILE EXISTS
  * types/database.ts was hand-written, and its interfaces do not satisfy
  * postgrest-js's GenericSchema constraint (they lack the index signatures and
@@ -1751,6 +1756,7 @@ export type Database = {
           na_asset_type: Database["public"]["Enums"]["asset_type"] | null
           na_reason_template: string | null
           parent_item_id: string | null
+          per_unit: boolean
           photo_required: boolean
           po_catalog_item_id: string | null
           po_default_qty: number | null
@@ -1776,6 +1782,7 @@ export type Database = {
           na_asset_type?: Database["public"]["Enums"]["asset_type"] | null
           na_reason_template?: string | null
           parent_item_id?: string | null
+          per_unit?: boolean
           photo_required?: boolean
           po_catalog_item_id?: string | null
           po_default_qty?: number | null
@@ -1801,6 +1808,7 @@ export type Database = {
           na_asset_type?: Database["public"]["Enums"]["asset_type"] | null
           na_reason_template?: string | null
           parent_item_id?: string | null
+          per_unit?: boolean
           photo_required?: boolean
           po_catalog_item_id?: string | null
           po_default_qty?: number | null
@@ -1936,6 +1944,9 @@ export type Database = {
           repeat_index: number | null
           result: Database["public"]["Enums"]["inspection_result"] | null
           updated_at: string
+          value_date: string | null
+          value_number: number | null
+          value_text: string | null
         }
         Insert: {
           actions?: Database["public"]["Enums"]["inspection_action"][]
@@ -1955,6 +1966,9 @@ export type Database = {
           repeat_index?: number | null
           result?: Database["public"]["Enums"]["inspection_result"] | null
           updated_at?: string
+          value_date?: string | null
+          value_number?: number | null
+          value_text?: string | null
         }
         Update: {
           actions?: Database["public"]["Enums"]["inspection_action"][]
@@ -1974,6 +1988,9 @@ export type Database = {
           repeat_index?: number | null
           result?: Database["public"]["Enums"]["inspection_result"] | null
           updated_at?: string
+          value_date?: string | null
+          value_number?: number | null
+          value_text?: string | null
         }
         Relationships: [
           {
@@ -2013,6 +2030,8 @@ export type Database = {
           completed_by_user_id: string | null
           corrects_inspection_id: string | null
           created_at: string
+          device_clock_offset_seconds: number | null
+          device_started_at: string | null
           form_id: string
           form_snapshot: Json
           form_version: number
@@ -2024,6 +2043,7 @@ export type Database = {
           scheduled_for: string | null
           source_schedule_id: string | null
           started_at: string
+          started_at_source: string
           updated_at: string
         }
         Insert: {
@@ -2032,6 +2052,8 @@ export type Database = {
           completed_by_user_id?: string | null
           corrects_inspection_id?: string | null
           created_at?: string
+          device_clock_offset_seconds?: number | null
+          device_started_at?: string | null
           form_id: string
           form_snapshot: Json
           form_version: number
@@ -2043,6 +2065,7 @@ export type Database = {
           scheduled_for?: string | null
           source_schedule_id?: string | null
           started_at?: string
+          started_at_source?: string
           updated_at?: string
         }
         Update: {
@@ -2051,6 +2074,8 @@ export type Database = {
           completed_by_user_id?: string | null
           corrects_inspection_id?: string | null
           created_at?: string
+          device_clock_offset_seconds?: number | null
+          device_started_at?: string | null
           form_id?: string
           form_snapshot?: Json
           form_version?: number
@@ -2062,6 +2087,7 @@ export type Database = {
           scheduled_for?: string | null
           source_schedule_id?: string | null
           started_at?: string
+          started_at_source?: string
           updated_at?: string
         }
         Relationships: [
@@ -6541,6 +6567,14 @@ export type Database = {
       store_property_door_code: {
         Args: { p_door_code: string; p_org_id: string; p_property_id: string }
         Returns: string
+      }
+      submit_inspection: {
+        Args: {
+          p_inspection_id: string
+          p_inspector_name: string
+          p_items: Json
+        }
+        Returns: Json
       }
       submit_quote_via_token: {
         Args: {

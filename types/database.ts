@@ -2136,8 +2136,22 @@ export interface InspectionFormItem {
 
   /** Render one row per unit counted at that item (N extinguishers → N groups). */
   repeat_source_item_id: string | null
-  /** Render one row per ACTIVE property_assets row of `asset_type`. */
+  /**
+   * THE GENERIC SWEEP: one row per ACTIVE property_assets row of any type no
+   * named item claims. Carries no `asset_type` and no `concern_key` — the
+   * subject is whatever the ledger holds, so a static key would merge a dead
+   * refrigerator with a dead generator.
+   */
   repeat_per_asset:      boolean
+  /**
+   * One row per ACTIVE property_assets row matching THIS item's `asset_type`
+   * (20260823021731). A DB CHECK requires `asset_type`, and another forbids
+   * setting this and `repeat_per_asset` together — they are different rules.
+   *
+   * ⚠️ Remediation must dedup a per_unit answer on (concern_key, asset_id),
+   * never concern_key alone: two dryers with blocked vents are two jobs.
+   */
+  per_unit:              boolean
 
   na_reason_template: string | null
   /** Verify an N/A claim against the asset ledger rather than taking it on trust. */
@@ -2197,6 +2211,21 @@ export interface Inspection {
 
   scheduled_for:        string | null
   started_at:           string
+  /**
+   * Whether `started_at` is a server clock or a device clock corrected by the
+   * skew measured at sync (20260823053931).
+   *
+   * An inspection can be STARTED offline, so the start time is not always the
+   * server's. Recorded rather than hidden, the same way ConditionsSnapshot
+   * carries `source: 'recorded' | 'reported'` — a duration that was
+   * device-timed is a different claim from one that was not, and printing them
+   * identically launders the weaker one.
+   */
+  started_at_source:    'server' | 'device'
+  /** The raw device claim, uncorrected. NOT NULL whenever source is 'device'. */
+  device_started_at:    string | null
+  /** server_now − device_now, measured in the request that carried the start. */
+  device_clock_offset_seconds: number | null
   completed_at:         string | null
   completed_by_user_id: string | null
 
@@ -2217,7 +2246,24 @@ export interface InspectionItem {
   form_item_id:    string
   prompt_snapshot: string
 
+  /** The answer for a `yes_no` item. NULL for the four other response types. */
   result:  InspectionResult | null
+
+  /**
+   * The answer for a count / text / date item (20260823001839).
+   *
+   * Three columns rather than one reused `note`, because `note` is the FAILURE
+   * DESCRIPTION and becomes the work order's title — a location answer stored
+   * there would generate work orders called "Kitchen, under sink". And
+   * `value_number` is structural, not decorative: it sizes the repeat group
+   * hanging off a count item, so parsing it back out of prose would make the
+   * number of questions asked depend on text parsing.
+   */
+  value_number: number | null
+  value_text:   string | null
+  /** ISO `YYYY-MM-DD` — a real `date` column, not a timestamp. */
+  value_date:   string | null
+
   /** Empty on a pass; non-empty is what generates the WO/PO. */
   actions: InspectionAction[]
   /** Independent of `actions` — rolls up into ONE crew cleaning job at sign-off. */

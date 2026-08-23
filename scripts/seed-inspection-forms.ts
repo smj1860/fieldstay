@@ -92,6 +92,7 @@ function itemColumns(flat: FlatItem, sectionId: string) {
     photo_required: d.photo_required ?? false,
     show_when:          d.show_when          ?? null,
     repeat_per_asset:   d.repeat_per_asset   ?? false,
+    per_unit:           d.per_unit           ?? false,
     na_reason_template: d.na_reason_template ?? null,
     na_asset_type:      d.na_asset_type      ?? null,
     asset_type:         d.asset_type         ?? null,

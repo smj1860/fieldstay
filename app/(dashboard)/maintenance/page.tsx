@@ -1,6 +1,7 @@
 import { requireOrgMember } from '@/lib/auth'
 import { SUPABASE_MAX_ROWS } from '@/lib/inngest/paginate'
 import { MaintenanceBoard } from './maintenance-board'
+import { MaintenanceTabs } from './maintenance-tabs'
 import type { VendorComplianceRow } from './maintenance-board'
 import type { Metadata } from 'next'
 
@@ -145,16 +146,19 @@ export default async function MaintenancePage() {
   )
 
   return (
-    <MaintenanceBoard
-      workOrders={workOrdersResult.data ?? []}
-      properties={propertiesResult.data ?? []}
-      vendors={vendorsResult.data ?? []}
-      schedules={schedulesResult.data ?? []}
-      crewMembers={crewMembersResult.data ?? []}
-      propertyAssets={propertyAssetsResult.data ?? []}
-      vendorCompliance={vendorCompliance}
-      orgId={membership.org_id}
-      role={membership.role}
-    />
+    <>
+      <MaintenanceTabs />
+      <MaintenanceBoard
+        workOrders={workOrdersResult.data ?? []}
+        properties={propertiesResult.data ?? []}
+        vendors={vendorsResult.data ?? []}
+        schedules={schedulesResult.data ?? []}
+        crewMembers={crewMembersResult.data ?? []}
+        propertyAssets={propertyAssetsResult.data ?? []}
+        vendorCompliance={vendorCompliance}
+        orgId={membership.org_id}
+        role={membership.role}
+      />
+    </>
   )
 }

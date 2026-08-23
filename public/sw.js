@@ -1,7 +1,7 @@
 // Cache version — bump both on any change to what gets cached, so
 // `activate` cleans up the old entries instead of leaving them orphaned.
-const SHELL_CACHE     = 'fieldstay-shell-v2'
-const ASSET_CACHE     = 'fieldstay-assets-v2'
+const SHELL_CACHE     = 'fieldstay-shell-v3'
+const ASSET_CACHE     = 'fieldstay-assets-v3'
 const OFFLINE_URL     = '/offline.html'
 const CURRENT_CACHES  = [SHELL_CACHE, ASSET_CACHE]
 
@@ -64,9 +64,30 @@ self.addEventListener('activate', (event) => {
 //
 // The condition is therefore: /maintenance goes in when it renders from the
 // local cache, not when the local cache exists.
+//
+// ✅ MET 2026-08-23, FOR EXACTLY ONE ROUTE. The inspection fill screen
+// (app/(dashboard)/maintenance/inspections/[id]/) is a shell: its Server
+// Component resolves three ids and renders nothing else, and every value on the
+// page comes from Dexie via useLiveQuery. The HTML cached here is therefore a
+// frame with no facts in it, which is the only kind that cannot go stale.
+//
+// ✅ THE LIST JOINED IT 2026-08-23, when starting a walk became possible with
+// no signal (20260823053931). It had been excluded on the grounds that it was a
+// Server Component rendering its rows on the server — true then, and the reason
+// it was rewritten: if you can START an inspection offline you must be able to
+// SEE it, or a PM begins a walk, backgrounds the app, and finds an empty list
+// with no route back to the inspection they are halfway through. Both pages now
+// render from Dexie and hold no server-rendered data.
+//
+// ⚠️ THE REST OF /maintenance IS STILL OUT, and the entry without a trailing
+// slash covers the list page EXACTLY — `pathname === p` — while the one WITH it
+// covers the per-inspection routes. Neither matches /maintenance itself, whose
+// board is still server-rendered. Do not collapse these to '/maintenance'.
 const OFFLINE_PATHS = [
   '/crew',          // the crew PWA — offline is its whole point
   '/work-orders/',  // vendor token pages, cached so a hard reload survives no signal
+  '/maintenance/inspections',  // the list — renders from Dexie, so a walk can be STARTED offline
+  '/maintenance/inspections/', // the fill screen — renders from Dexie
 ]
 
 function isOfflineCapable(pathname) {

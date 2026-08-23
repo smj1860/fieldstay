@@ -3,7 +3,10 @@ import { describe, expect, it } from 'vitest'
 import {
   answerKey,
   findOutstanding,
+  MAX_REPEAT_INSTANCES,
+  pageProgress,
   resolveFormPages,
+  visibleNodes,
   type AnswerState,
 } from '@/lib/inspections/resolve-form'
 import type {
@@ -41,7 +44,7 @@ function item(over: Partial<InspectionFormItem> & { section_id: string }): Inspe
     id: uid(), key: `k-${seq}`, prompt: `Prompt ${seq}`, sort_order: 0,
     response_type: 'yes_no', is_required: true, photo_required: false,
     parent_item_id: null, show_when: null,
-    repeat_source_item_id: null, repeat_per_asset: false,
+    repeat_source_item_id: null, repeat_per_asset: false, per_unit: false,
     na_reason_template: null, na_asset_type: null, asset_type: null,
     concern_key: null, remediation: 'work_order', default_actions: ['repair'],
     wo_category: null, wo_priority: null,
@@ -285,17 +288,53 @@ describe('findOutstanding — what the Review page lists', () => {
   it('a fail with no description is outstanding — the description IS the work order title', () => {
     const out = run({
       [keyFor('fire.a')]: { result: 'fail' },
-      [keyFor('fire.b')]: { result: 'pass' },
+      [keyFor('fire.b')]: { result: 'pass', photoPath: 'o/i/b.jpg' },
     })
     expect(out).toHaveLength(1)
     expect(out[0]!.reason).toBe('fail_needs_description')
+  })
+
+  it('a fail missing BOTH reports the description first — it has to be typed, not tapped', () => {
+    const out = run({
+      [keyFor('fire.a')]: { result: 'pass' },
+      [keyFor('fire.b')]: { result: 'fail' },
+    })
+    expect(out.map((o) => o.reason)).toEqual(['fail_needs_description'])
+  })
+
+  it('a PASSING photo_required item still owes its photo', () => {
+    // The bug this covers: the photo check used to sit behind
+    // `if (result !== 'fail') return null`, so it never ran on a pass. Every
+    // photo_required item in all three forms is one §12.1 wants photographed
+    // EVERY time — the extinguisher tag above all, where "the tag IS the record
+    // and a claim about it is worth less than the picture". The rule was
+    // unreachable in production and no test noticed, because the only fixture
+    // that exercised it answered `fail`.
+    expect(run({
+      [keyFor('fire.a')]: { result: 'pass' },
+      [keyFor('fire.b')]: { result: 'pass' },
+    }).map((o) => [o.itemKey, o.reason])).toEqual([['fire.b', 'needs_photo']])
+
+    expect(run({
+      [keyFor('fire.a')]: { result: 'pass' },
+      [keyFor('fire.b')]: { result: 'pass', photoPath: 'o/i/b.jpg' },
+    })).toEqual([])
+  })
+
+  it('N/A is exempt from the photo requirement', () => {
+    // An item that does not apply has nothing to photograph. Demanding a
+    // picture of an absent pool gate is a gate nobody can pass.
+    expect(run({
+      [keyFor('fire.a')]: { result: 'pass' },
+      [keyFor('fire.b')]: { result: 'na' },
+    })).toEqual([])
   })
 
   it('a fail on a photo_required item needs a photo OR an honest reason', () => {
     const base = { [keyFor('fire.a')]: { result: 'pass' as const } }
 
     expect(run({ ...base, [keyFor('fire.b')]: { result: 'fail', note: 'back door jammed' } })
-      .map((o) => o.reason)).toEqual(['fail_needs_photo'])
+      .map((o) => o.reason)).toEqual(['needs_photo'])
 
     expect(run({ ...base, [keyFor('fire.b')]: { result: 'fail', note: 'back door jammed', photoPath: 'o/i/x.jpg' } }))
       .toEqual([])
@@ -307,7 +346,7 @@ describe('findOutstanding — what the Review page lists', () => {
       .toEqual([])
     // …and whitespace is not a reason.
     expect(run({ ...base, [keyFor('fire.b')]: { result: 'fail', note: 'jammed', photoUnavailableReason: '   ' } })
-      .map((o) => o.reason)).toEqual(['fail_needs_photo'])
+      .map((o) => o.reason)).toEqual(['needs_photo'])
   })
 
   it('a complete form is empty — the gate can actually be passed', () => {
@@ -373,5 +412,305 @@ describe('findOutstanding — what the Review page lists', () => {
 
     const out = findOutstanding(p, { [answerKey(p[0]!.items[0]!)]: { result: 'pass' } })
     expect(out.map((o) => o.itemKey)).toEqual([])
+  })
+})
+
+// ============================================================================
+// FOUR OF THE FIVE RESPONSE TYPES DO NOT ANSWER WITH A PASS/FAIL.
+//
+// §5 gives inspection_form_items five response types and gives the answer row
+// one `result pass|fail|na`. The gate used to treat a missing `result` as
+// unanswered for ALL of them, which made it demand a verdict on "Number of fire
+// extinguishers" — a question with no verdict to give, and therefore a Review
+// page no inspector could ever clear. Three seeded items are `count`, one is
+// `date`, nine are `text`, and every one of them is required.
+// ============================================================================
+
+describe('findOutstanding — an answer is whatever the response type actually asks for', () => {
+  const s = section({ key: 'fire', name: 'Fire Safety' })
+
+  const oneItem = (over: Partial<InspectionFormItem>) => {
+    const it = item({ section_id: s.id, key: 'x', ...over })
+    const pages = resolveFormPages({ sections: [s], items: [it], assets: [] })
+    return {
+      key: answerKey(pages[0]!.items[0]!),
+      run: (answers: Record<string, AnswerState>) => findOutstanding(pages, answers),
+    }
+  }
+
+  it('a count is answered by a NUMBER, and zero is a real answer', () => {
+    const { key, run } = oneItem({ response_type: 'count' })
+    expect(run({}).map((o) => o.reason)).toEqual(['unanswered'])
+    // Zero extinguishers is a finding, not a blank. `?? ` and truthiness both
+    // get this wrong, which is why the check is an explicit null/undefined one.
+    expect(run({ [key]: { valueNumber: 0 } })).toEqual([])
+    expect(run({ [key]: { valueNumber: 3 } })).toEqual([])
+    // …and a pass/fail is NOT an answer to "how many".
+    expect(run({ [key]: { result: 'pass' } }).map((o) => o.reason)).toEqual(['unanswered'])
+  })
+
+  it('a text item is answered by text, not by the failure description', () => {
+    const { key, run } = oneItem({ response_type: 'text' })
+    expect(run({ [key]: { valueText: 'Kitchen, under sink' } })).toEqual([])
+    // `note` is the WO title on a fail; it is not this item's answer.
+    expect(run({ [key]: { note: 'Kitchen, under sink' } }).map((o) => o.reason)).toEqual(['unanswered'])
+    expect(run({ [key]: { valueText: '   ' } }).map((o) => o.reason)).toEqual(['unanswered'])
+  })
+
+  it('a date item is answered by a date', () => {
+    const { key, run } = oneItem({ response_type: 'date' })
+    expect(run({ [key]: { valueDate: '2028-04-01' } })).toEqual([])
+    expect(run({}).map((o) => o.reason)).toEqual(['unanswered'])
+  })
+
+  it('a photo item is answered by the photo, and reports as needing one', () => {
+    const { key, run } = oneItem({ response_type: 'photo', photo_required: true })
+    // Not 'unanswered' — "Tag photo: not answered" tells the inspector less
+    // than "Tag photo: no photo", and they are one tap apart on screen.
+    expect(run({}).map((o) => o.reason)).toEqual(['needs_photo'])
+    expect(run({ [key]: { photoPath: 'o/i/tag.jpg' } })).toEqual([])
+    expect(run({ [key]: { photoUnavailableReason: 'tag illegible' } })).toEqual([])
+  })
+
+  it('an OPTIONAL item of any type is never outstanding for being blank', () => {
+    const { run } = oneItem({ response_type: 'text', is_required: false })
+    expect(run({})).toEqual([])
+  })
+})
+
+describe('a count sizes its repeat group, so it is clamped', () => {
+  const build = (count: number) => {
+    const s = section({ key: 'fire' })
+    const counter = item({ section_id: s.id, key: 'fire.count', response_type: 'count' })
+    const member  = item({ section_id: s.id, key: 'fire.loc', repeat_source_item_id: counter.id })
+    const pages = resolveFormPages({
+      sections: [s], items: [counter, member], assets: [],
+      countsByItemId: { [counter.id]: count },
+    })
+    return pages[0]!.items.filter((i) => i.repeatIndex !== undefined).length
+  }
+
+  it('renders one group per unit counted', () => {
+    expect(build(3)).toBe(3)
+    expect(build(0)).toBe(0)
+  })
+
+  it('a fat-fingered count cannot render an unbounded page', () => {
+    // The failure this prevents is not cosmetic: a mistyped 100000 renders that
+    // many rows and freezes the tablet in the middle of an inspection, which is
+    // the one moment there is no way to recover. Matched by the
+    // inspection_items_value_number_range CHECK for writes that skip this path.
+    expect(build(100_000)).toBe(MAX_REPEAT_INSTANCES)
+  })
+
+  it('a negative or fractional count is not a row count', () => {
+    expect(build(-5)).toBe(0)
+    expect(build(2.7)).toBe(2)
+  })
+})
+
+describe('visibleNodes — the renderer and the gate share ONE definition', () => {
+  const s = section({ key: 'hoa', name: 'HOA' })
+  const parent = item({ section_id: s.id, key: 'hoa.subject' })
+  const onPass = item({ section_id: s.id, key: 'hoa.dues', parent_item_id: parent.id, show_when: 'pass' })
+  const onFail = item({ section_id: s.id, key: 'hoa.why',  parent_item_id: parent.id, show_when: 'fail', sort_order: 1 })
+  const pages = resolveFormPages({ sections: [s], items: [parent, onPass, onFail], assets: [] })
+  const pKey = answerKey(pages[0]!.items[0]!)
+
+  const keysWhen = (answers: Record<string, AnswerState>) =>
+    visibleNodes(pages[0]!, answers).map((n) => n.item.formItem.key)
+
+  it('shows only the branch the parent actually took', () => {
+    expect(keysWhen({})).toEqual(['hoa.subject'])
+    expect(keysWhen({ [pKey]: { result: 'pass' } })).toEqual(['hoa.subject', 'hoa.dues'])
+    expect(keysWhen({ [pKey]: { result: 'fail' } })).toEqual(['hoa.subject', 'hoa.why'])
+  })
+
+  it('marks a follow-up as nested so the renderer can indent it', () => {
+    expect(visibleNodes(pages[0]!, { [pKey]: { result: 'pass' } }).map((n) => n.depth))
+      .toEqual([0, 1])
+  })
+
+  it('progress counts what is ON SCREEN, never a hidden branch', () => {
+    // Counting hidden children would leave a page permanently short of
+    // complete, which reads as "you missed something" for a question the
+    // inspector was never shown.
+    expect(pageProgress(pages[0]!, {})).toEqual({ answered: 0, total: 1 })
+    expect(pageProgress(pages[0]!, { [pKey]: { result: 'pass' } })).toEqual({ answered: 1, total: 2 })
+    expect(pageProgress(pages[0]!, {
+      [pKey]: { result: 'pass' },
+      [answerKey(pages[0]!.items[0]!.children.find((c) => c.formItem.key === 'hoa.dues')!)]: { result: 'pass' },
+    })).toEqual({ answered: 2, total: 2 })
+  })
+
+  it('the gate sees exactly what visibleNodes shows — not a second rule', () => {
+    // These two agreeing is the whole point. They disagreed once: the gate
+    // hardcoded `show_when !== 'fail'`, so the `show_when: 'pass'` HOA items
+    // rendered, were required, and could never be reported.
+    for (const answers of [{}, { [pKey]: { result: 'pass' as const } }, { [pKey]: { result: 'fail' as const } }]) {
+      const visible    = new Set(keysWhen(answers))
+      const complained = new Set(findOutstanding(pages, answers).map((o) => o.itemKey))
+      for (const key of complained) expect(visible.has(key), `${key} reported but not shown`).toBe(true)
+    }
+  })
+})
+
+// ============================================================================
+// TWO OF A THING IS TWO INSPECTIONS.
+//
+// "Refrigeration — clean, holding < 40°F" rendered ONCE on a property with two
+// refrigerators. One fridge was inspected, the other was not, and nothing on
+// screen said which. Only the GENERIC sweep was ever per-unit, and it skips
+// every asset type a named question covers — so the moment refrigerators got a
+// named question, their units stopped being enumerated at all.
+//
+// `per_unit` is a separate flag from `repeat_per_asset` because they are
+// different rules, and overloading one flag made two existing guardrails
+// unstateable — which is how this was caught rather than shipped.
+// ============================================================================
+
+describe('per_unit — a named question repeats across the units of its type', () => {
+  const build = (assets: PropertyAsset[], over: Partial<InspectionFormItem> = {}) => {
+    const s = section({ key: 'kitchen', name: 'Kitchen' })
+    const fridge = item({
+      section_id: s.id, key: 'kitchen.fridge', prompt: 'Refrigeration',
+      per_unit: true, asset_type: 'refrigerator', ...over,
+    })
+    return resolveFormPages({ sections: [s], items: [fridge], assets })
+  }
+
+  it('two refrigerators get two rows, each attached to its own asset', () => {
+    const a = asset({ asset_type: 'refrigerator', name: 'Kitchen fridge' })
+    const b = asset({ asset_type: 'refrigerator', name: 'Garage fridge' })
+    const page = build([a, b])[0]!
+
+    expect(page.items).toHaveLength(2)
+    expect(page.items.map((i) => i.asset?.name)).toEqual(['Kitchen fridge', 'Garage fridge'])
+    // Distinct answer keys, or the second fridge would overwrite the first.
+    expect(answerKey(page.items[0]!)).not.toBe(answerKey(page.items[1]!))
+  })
+
+  it('only assets of ITS type, never the whole ledger', () => {
+    const page = build([
+      asset({ asset_type: 'refrigerator', name: 'Fridge' }),
+      asset({ asset_type: 'generator',    name: 'Generator' }),
+    ])[0]!
+    expect(page.items.map((i) => i.asset?.name)).toEqual(['Fridge'])
+  })
+
+  it('an INACTIVE unit gets no row', () => {
+    const page = build([
+      asset({ asset_type: 'refrigerator', name: 'Live',    is_active: true }),
+      asset({ asset_type: 'refrigerator', name: 'Replaced', is_active: false }),
+    ])[0]!
+    expect(page.items.map((i) => i.asset?.name)).toEqual(['Live'])
+  })
+
+  it('NO matching asset still renders ONE unattributed row', () => {
+    // The asymmetry with the generic sweep, and it is deliberate. Most
+    // properties have not catalogued their appliances — 8 of 29 in production
+    // have no assets on file at all — so gating these on the ledger would
+    // silently delete most of the Indoor form from most properties. That is the
+    // HOA gate's lesson: a gate on data nobody populates fails empty, not safe.
+    // The inspector answers it, and marks N/A where the thing truly is absent.
+    const page = build([])[0]!
+    expect(page.items).toHaveLength(1)
+    expect(page.items[0]!.asset).toBeUndefined()
+  })
+
+  it('the GENERIC sweep still yields nothing when there is nothing to sweep', () => {
+    // Same input shape, opposite correct answer — which is why these are two
+    // flags rather than one.
+    const s = section({ key: 'assets' })
+    const sweep = item({ section_id: s.id, repeat_per_asset: true, key: 'assets.condition' })
+    expect(resolveFormPages({ sections: [s], items: [sweep], assets: [] })).toEqual([])
+  })
+
+  it('a per_unit type is EXCLUDED from the generic sweep, not asked twice', () => {
+    // coveredAssetTypes no longer skips repeat-mode items. With the old guard,
+    // flagging the fridge question per-unit would have dropped refrigerators
+    // out of the covered set and let the sweep ask about them a second time.
+    const named = section({ key: 'kitchen', sort_order: 0 })
+    const sweep = section({ key: 'assets',  sort_order: 1 })
+    const pages = resolveFormPages({
+      sections: [named, sweep],
+      items: [
+        item({ section_id: named.id, key: 'kitchen.fridge', per_unit: true, asset_type: 'refrigerator' }),
+        item({ section_id: sweep.id, key: 'assets.condition', repeat_per_asset: true }),
+      ],
+      assets: [asset({ asset_type: 'refrigerator' }), asset({ asset_type: 'generator' })],
+    })
+
+    expect(pages.find((p) => p.sectionKey === 'kitchen')!.items).toHaveLength(1)
+    expect(pages.find((p) => p.sectionKey === 'assets')!.items
+      .map((i) => i.asset?.asset_type)).toEqual(['generator'])
+  })
+})
+
+describe('a child inherits the instance it hangs from', () => {
+  // THIS WAS LIVE. answerKey is (formItemId, repeatIndex, assetId), and
+  // buildChildren produced children with neither — so every instance of a child
+  // shared ONE answer. The generic sweep carries a `plate_photo` child, so on a
+  // property with five uncovered assets all five rows shared a single photo:
+  // photograph the generator's plate and the septic row shows a photo attached.
+
+  it('per-asset children key on their own asset', () => {
+    const s = section({ key: 'assets' })
+    const parent = item({ section_id: s.id, key: 'assets.condition', repeat_per_asset: true })
+    const child  = item({ section_id: s.id, key: 'assets.plate_photo', parent_item_id: parent.id })
+
+    const page = resolveFormPages({
+      sections: [s], items: [parent, child],
+      assets: [asset({ asset_type: 'generator' }), asset({ asset_type: 'roof' })],
+    })[0]!
+
+    const [first, second] = page.items
+    expect(first!.children[0]!.asset?.asset_type).toBe('generator')
+    expect(second!.children[0]!.asset?.asset_type).toBe('roof')
+    expect(answerKey(first!.children[0]!)).not.toBe(answerKey(second!.children[0]!))
+  })
+
+  it('per_unit children key on their own unit', () => {
+    const s = section({ key: 'kitchen' })
+    const parent = item({ section_id: s.id, key: 'k.fridge', per_unit: true, asset_type: 'refrigerator' })
+    const child  = item({ section_id: s.id, key: 'k.filter', parent_item_id: parent.id, show_when: 'fail' })
+
+    const page = resolveFormPages({
+      sections: [s], items: [parent, child],
+      assets: [
+        asset({ asset_type: 'refrigerator', name: 'A' }),
+        asset({ asset_type: 'refrigerator', name: 'B' }),
+      ],
+    })[0]!
+
+    expect(page.items.map((i) => i.children[0]!.asset?.name)).toEqual(['A', 'B'])
+    expect(answerKey(page.items[0]!.children[0]!))
+      .not.toBe(answerKey(page.items[1]!.children[0]!))
+  })
+
+  it('repeat-group children key on their own instance', () => {
+    const s = section({ key: 'fire' })
+    const counter = item({ section_id: s.id, key: 'fire.count', response_type: 'count' })
+    const member  = item({ section_id: s.id, key: 'fire.charged', repeat_source_item_id: counter.id })
+    const child   = item({ section_id: s.id, key: 'fire.why', parent_item_id: member.id, show_when: 'fail' })
+
+    const page = resolveFormPages({
+      sections: [s], items: [counter, member, child], assets: [],
+      countsByItemId: { [counter.id]: 2 },
+    })[0]!
+
+    const members = page.items.filter((i) => i.repeatIndex !== undefined)
+    expect(members.map((m) => m.children[0]!.repeatIndex)).toEqual([1, 2])
+    expect(answerKey(members[0]!.children[0]!)).not.toBe(answerKey(members[1]!.children[0]!))
+  })
+
+  it('a child of a plain root inherits nothing, and still keys uniquely', () => {
+    const s = section({ key: 'fire' })
+    const parent = item({ section_id: s.id, key: 'fire.smoke' })
+    const child  = item({ section_id: s.id, key: 'fire.where', parent_item_id: parent.id, show_when: 'fail' })
+    const page = resolveFormPages({ sections: [s], items: [parent, child], assets: [] })[0]!
+
+    expect(page.items[0]!.children[0]!.asset).toBeUndefined()
+    expect(page.items[0]!.children[0]!.repeatIndex).toBeUndefined()
   })
 })

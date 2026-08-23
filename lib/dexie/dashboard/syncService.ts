@@ -7,23 +7,16 @@
 // that cost no retry budget, and dead-lettering rather than deleting.
 //
 // ─────────────────────────────────────────────────────────────────────────────
-// THE HANDLERS ARE NOT WIRED YET, AND THAT IS DELIBERATE.
+// EVERY KIND HAS A HANDLER, AND THE COMPILER IS WHAT SAYS SO.
 //
-// §10 puts "offline WO create" in phase 3 and remediation in phase 4, so
-// neither server endpoint exists. What phase 2a owes is the MECHANISM and its
-// safety net, so that phase 3 cannot add a queued write without also being
-// forced to give it an upload handler, a banner label and a retry affordance.
-//
-// `DASHBOARD_UPLOAD_HANDLERS` is a `Record<DashboardMutationKind, …>`, so that
-// pairing is enforced by the COMPILER rather than by a string-scanning test:
+// `DASHBOARD_UPLOAD_HANDLERS` is a `Record<DashboardMutationKind, …>`, so
 // adding a kind without a handler will not build. That is strictly stronger
 // than the crew equivalent, which greps `UPLOAD_HANDLERS` for each member of
 // its union.
 //
-// Until an endpoint exists, each handler throws a terminal, clearly-labelled
-// error. Nothing enqueues today, so nothing dead-letters today; the shape is
-// what matters, and a loud throw beats a silent no-op if anything ever does
-// reach it before phase 3 lands.
+// `inspection.submit` is live. `work_order.create` still throws a terminal,
+// clearly-labelled error: its endpoint has not shipped, nothing enqueues it,
+// and a loud throw beats a silent no-op if anything ever does reach it.
 
 import { OutboxEngine } from '../outboxEngine'
 import {
@@ -63,9 +56,71 @@ export const DASHBOARD_UPLOAD_HANDLERS: Record<DashboardMutationKind, UploadHand
   // paths that create a work order is exactly the drift this repo pays for.
   'work_order.create': (m) => Promise.reject(new HandlerNotImplementedError(m.kind)),
 
-  // Phase 4. One atomic completion, per §8: the inspection's own semantics
-  // survive the change of mechanism.
-  'inspection.submit': (m) => Promise.reject(new HandlerNotImplementedError(m.kind)),
+  // Starting a walk. The outbox drains in insertion order and STOPS on the
+  // first error, which is what guarantees a create lands before the submit that
+  // depends on it — no explicit dependency tracking needed.
+  //
+  // `device_now` is stamped HERE rather than at enqueue: the server subtracts it
+  // from its own clock to measure skew, and that is only meaningful when both
+  // are read at the same instant. At enqueue it could be hours stale, which
+  // would corrupt the correction it exists to enable.
+  'inspection.create': async (m) => {
+    const res = await fetch('/api/inspections', {
+      method:  'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body:    JSON.stringify({ ...m.payload, device_now: new Date().toISOString() }),
+    })
+    if (res.ok) return
+    if (res.status >= 400 && res.status < 500) {
+      throw new SubmitRejectedError(await readError(res))
+    }
+    throw new Error(`Inspection create failed with ${res.status}`)
+  },
+
+  // One atomic completion. The endpoint is a Route Handler rather than a
+  // Server Action for the reason above, and everything hard about it — one
+  // transaction, items before completion, an idempotent replay — lives in the
+  // `submit_inspection` RPC (20260823022856).
+  'inspection.submit': async (m) => {
+    const res = await fetch(`/api/inspections/${m.targetId}/submit`, {
+      method:  'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body:    JSON.stringify(m.payload),
+    })
+    if (res.ok) return
+
+    // 4xx is the caller's fault and will be the caller's fault forever — a
+    // malformed payload or a deleted inspection. Retrying burns the budget to
+    // arrive at the same answer more slowly, so it dead-letters immediately and
+    // the banner surfaces it. 5xx and a thrown fetch stay retryable.
+    if (res.status >= 400 && res.status < 500) {
+      throw new SubmitRejectedError(await readError(res))
+    }
+    throw new Error(`Submit failed with ${res.status}`)
+  },
+}
+
+/**
+ * A submit the server will never accept. Terminal, so it dead-letters rather
+ * than retrying — and it carries a message a PM can act on, because the answers
+ * still exist only on this device.
+ */
+export class SubmitRejectedError extends Error {
+  constructor(message: string) {
+    super(message)
+    this.name = 'SubmitRejectedError'
+  }
+}
+
+/** The server's reason where there is one, never the raw body. */
+async function readError(res: Response): Promise<string> {
+  try {
+    const body = await res.json() as { error?: unknown }
+    if (typeof body.error === 'string' && body.error) return body.error
+  } catch {
+    // A non-JSON error body is not itself worth reporting.
+  }
+  return `The server rejected this submission (${res.status}).`
 }
 
 const engines = new Map<string, OutboxEngine<DashboardMutationRow>>()
@@ -82,7 +137,8 @@ export function getDashboardSyncEngine(userId: string, orgId: string): OutboxEng
     // different endpoints and have no ordering relationship.
     lockName:   `fieldstay-dashboard-outbox-${key}`,
     uploadOne:  (m) => DASHBOARD_UPLOAD_HANDLERS[m.kind](m),
-    isTerminal: (err) => err instanceof HandlerNotImplementedError,
+    isTerminal: (err) =>
+      err instanceof HandlerNotImplementedError || err instanceof SubmitRejectedError,
   })
   engines.set(key, engine)
   return engine
@@ -115,7 +171,12 @@ export async function enqueueDashboardMutation(
 ): Promise<void> {
   const db = getDashboardDb(userId, orgId)
 
-  await db.transaction('rw', db.mutations, db.work_orders, async () => {
+  // Every table a caller's `localWrite` might touch has to be in scope — Dexie
+  // throws on a write to a table the transaction did not declare, at runtime
+  // rather than at compile time.
+  await db.transaction('rw',
+    db.mutations, db.work_orders, db.inspections, db.inspection_answers,
+    async () => {
     if (localWrite) await localWrite()
     await db.mutations.add({
       ...mutation,

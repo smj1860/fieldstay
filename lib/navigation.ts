@@ -34,7 +34,14 @@ export const ALL_NAV_ITEMS: NavItem[] = [
   { id: 'ops',         href: '/ops',         label: 'Ops Snapshot', icon: LayoutDashboard, roles: ['admin', 'manager', 'viewer'], tier: 'ops', category: 'Ops' },
   { id: 'bookings',    href: '/bookings',    label: 'Bookings',     icon: CalendarCheck,   roles: ['admin', 'manager', 'viewer'], tier: 'ops', category: 'Ops' },
   { id: 'turnovers',   href: '/turnovers',   label: 'Turnovers',    icon: CalendarCheck,   roles: ['admin', 'manager', 'viewer'], tier: 'ops', category: 'Ops', keywords: ['cleaning', 'housekeeping'] },
-  { id: 'maintenance', href: '/maintenance', label: 'Maintenance',  icon: Wrench,          roles: ['admin', 'manager'],           tier: 'ops', category: 'Ops', keywords: ['repair'] },
+  // Label deliberately still 'Maintenance', not §9's 'Maintenance & Inspections'.
+  // That section carries its own ⚠️ to check the longer label does not wrap in
+  // components/bottom-nav.tsx first, and it would: the bottom bar is five equal
+  // flex slots at text-xs, so on a 375px phone each has about 75px and the
+  // current single word already fills it. Inspections are reached from the tab
+  // bar on the Maintenance page itself (§9a), which is the discoverability the
+  // rename was for — so the keyword is added here and the label is not.
+  { id: 'maintenance', href: '/maintenance', label: 'Maintenance',  icon: Wrench,          roles: ['admin', 'manager'],           tier: 'ops', category: 'Ops', keywords: ['repair', 'inspection', 'inspections'] },
   { id: 'inventory',   href: '/inventory',   label: 'Inventory',    icon: Package,         roles: ['admin', 'manager'],           tier: 'ops', category: 'Ops', keywords: ['stock', 'supplies'] },
 
   // ── Management tier — matches today's exact order ────────────
