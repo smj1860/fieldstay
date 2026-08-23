@@ -2217,7 +2217,24 @@ export interface InspectionItem {
   form_item_id:    string
   prompt_snapshot: string
 
+  /** The answer for a `yes_no` item. NULL for the four other response types. */
   result:  InspectionResult | null
+
+  /**
+   * The answer for a count / text / date item (20260823001839).
+   *
+   * Three columns rather than one reused `note`, because `note` is the FAILURE
+   * DESCRIPTION and becomes the work order's title — a location answer stored
+   * there would generate work orders called "Kitchen, under sink". And
+   * `value_number` is structural, not decorative: it sizes the repeat group
+   * hanging off a count item, so parsing it back out of prose would make the
+   * number of questions asked depend on text parsing.
+   */
+  value_number: number | null
+  value_text:   string | null
+  /** ISO `YYYY-MM-DD` — a real `date` column, not a timestamp. */
+  value_date:   string | null
+
   /** Empty on a pass; non-empty is what generates the WO/PO. */
   actions: InspectionAction[]
   /** Independent of `actions` — rolls up into ONE crew cleaning job at sign-off. */

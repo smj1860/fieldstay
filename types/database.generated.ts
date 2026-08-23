@@ -9,6 +9,11 @@
  * project), in the SAME COMMIT as the migration that changed the schema —
  * the rule CLAUDE.md already states for types/database.ts.
  *
+ * The MCP tool returns the file WITHOUT this header (and wrapped in a JSON
+ * envelope under a `types` key). Re-add it after regenerating: it is the only
+ * place the regeneration command is written down, so losing it is how the file
+ * silently becomes hand-editable.
+ *
  * WHY THIS FILE EXISTS
  * types/database.ts was hand-written, and its interfaces do not satisfy
  * postgrest-js's GenericSchema constraint (they lack the index signatures and
@@ -1936,6 +1941,9 @@ export type Database = {
           repeat_index: number | null
           result: Database["public"]["Enums"]["inspection_result"] | null
           updated_at: string
+          value_date: string | null
+          value_number: number | null
+          value_text: string | null
         }
         Insert: {
           actions?: Database["public"]["Enums"]["inspection_action"][]
@@ -1955,6 +1963,9 @@ export type Database = {
           repeat_index?: number | null
           result?: Database["public"]["Enums"]["inspection_result"] | null
           updated_at?: string
+          value_date?: string | null
+          value_number?: number | null
+          value_text?: string | null
         }
         Update: {
           actions?: Database["public"]["Enums"]["inspection_action"][]
@@ -1974,6 +1985,9 @@ export type Database = {
           repeat_index?: number | null
           result?: Database["public"]["Enums"]["inspection_result"] | null
           updated_at?: string
+          value_date?: string | null
+          value_number?: number | null
+          value_text?: string | null
         }
         Relationships: [
           {

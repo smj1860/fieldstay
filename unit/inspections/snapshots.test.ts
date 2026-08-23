@@ -3,9 +3,12 @@ import { describe, expect, it } from 'vitest'
 import {
   buildFormSnapshot,
   buildHeaderSnapshot,
+  formFromSnapshot,
+  parseFormSnapshot,
   recordedConditions,
   reportedConditions,
 } from '@/lib/inspections/snapshots'
+import { resolveFormPages } from '@/lib/inspections/resolve-form'
 import type {
   InspectionFormItem,
   InspectionFormSection,
@@ -172,5 +175,84 @@ describe('conditions — recorded and reported are never the same claim', () => 
     expect(rep?.source).toBe('reported')
     // …and a reported reading carries NO measurements to mistake for real ones.
     expect(rep && 'temperature_f' in rep).toBe(false)
+  })
+})
+
+// ============================================================================
+// READING THE SNAPSHOT BACK.
+//
+// This is the fill screen's ONLY source for the form — not a join to
+// inspection_form_items. Three things follow, and all three are the point: it
+// works with no connection, a re-seed mid-walk cannot change the questions
+// under the inspector, and a historical report re-renders through the exact
+// same code path as a live one.
+//
+// It reads out of jsonb, so nothing about the shape can be assumed. The failure
+// worth guarding is not a throw — it is a MALFORMED snapshot resolving to a
+// SHORTER form, which renders as a perfectly normal inspection with questions
+// missing.
+// ============================================================================
+
+describe('parseFormSnapshot', () => {
+  const s = section({ key: 'fire', name: 'Fire', sort_order: 1 })
+  const good = buildFormSnapshot('safety', 2, [s], [item({ section_id: s.id, key: 'fire.a' })], NOW)
+
+  it('round-trips what buildFormSnapshot wrote, through JSON', () => {
+    // Through JSON deliberately: the value really does go to Postgres as jsonb
+    // and come back parsed, so a type that only survives in-process proves
+    // nothing.
+    expect(parseFormSnapshot(JSON.parse(JSON.stringify(good)))).toEqual(good)
+  })
+
+  it('rejects anything that is not a snapshot, rather than half-reading it', () => {
+    for (const bad of [null, undefined, 'safety', 42, [], {}, { form_key: 'safety' }]) {
+      expect(parseFormSnapshot(bad), JSON.stringify(bad) ?? 'undefined').toBeNull()
+    }
+  })
+
+  it('rejects a snapshot whose sections are malformed — it does NOT drop them', () => {
+    // The dangerous outcome. Skipping a bad section would produce a shorter
+    // form that looks complete: the inspector answers every question shown,
+    // the gate passes, and the report is silently missing a whole section.
+    expect(parseFormSnapshot({ ...good, sections: [{ id: 'x', key: 'k' }] })).toBeNull()
+    expect(parseFormSnapshot({ ...good, sections: [{ ...good.sections[0], items: 'nope' }] })).toBeNull()
+    expect(parseFormSnapshot({ ...good, sections: 'nope' })).toBeNull()
+  })
+
+  it('a missing gate reads as ungated, never as a truthy string', () => {
+    const noGate = parseFormSnapshot({
+      ...good,
+      sections: [{ ...good.sections[0], shown_when_asset: undefined }],
+    })
+    expect(noGate!.sections[0]!.shown_when_asset).toBeNull()
+  })
+})
+
+describe('formFromSnapshot', () => {
+  it('flattens back into what the resolver takes, and resolves identically', () => {
+    // The contract that matters: a form resolved from the LIVE rows and the
+    // same form resolved from its snapshot must produce the same pages, or a
+    // historical report is not a re-render of what was asked.
+    const a = section({ key: 'one', sort_order: 1 })
+    const b = section({ key: 'two', sort_order: 2, shown_when_asset: 'well_pump' })
+    const items = [
+      item({ section_id: a.id, key: 'a1', sort_order: 1 }),
+      item({ section_id: b.id, key: 'b1', sort_order: 1 }),
+    ]
+
+    const live = resolveFormPages({ sections: [a, b], items, assets: [] })
+    const snap = formFromSnapshot(buildFormSnapshot('safety', 1, [a, b], items, NOW))
+    const fromSnapshot = resolveFormPages({ ...snap, assets: [] })
+
+    expect(fromSnapshot.map((p) => p.sectionKey)).toEqual(live.map((p) => p.sectionKey))
+    expect(fromSnapshot).toEqual(live)
+  })
+
+  it('carries the gate through, so a re-render still skips what was skipped', () => {
+    const well = section({ key: 'well', shown_when_asset: 'well_pump' })
+    const snap = formFromSnapshot(
+      buildFormSnapshot('outdoor', 1, [well], [item({ section_id: well.id })], NOW),
+    )
+    expect(resolveFormPages({ ...snap, assets: [] })).toEqual([])
   })
 })

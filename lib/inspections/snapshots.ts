@@ -11,6 +11,7 @@ import type {
   InspectionFormSection,
   Property,
 } from '@/types/database'
+import type { ResolvableSection } from './resolve-form'
 
 // ── The form, as it was asked ───────────────────────────────────────────────
 
@@ -87,6 +88,75 @@ export function buildFormSnapshot(
         // re-render depend on jsonb key order.
         items: (bySection.get(s.id) ?? []).slice().sort((a, b) => a.sort_order - b.sort_order),
       })),
+  }
+}
+
+/**
+ * Read a stored `form_snapshot` back, defensively.
+ *
+ * This is the fill screen's ONLY source for the form — not a join to
+ * `inspection_form_items`. Three things follow from that and all three are the
+ * point: it works with no connection, a re-seed mid-walk cannot change the
+ * questions under the inspector, and a historical report re-renders through the
+ * exact same code path as a live one.
+ *
+ * `Json` in, so nothing about the shape can be assumed. A malformed snapshot
+ * returns null and the caller says so, rather than throwing halfway through a
+ * render or — far worse — silently resolving to a shorter form.
+ */
+export function parseFormSnapshot(value: unknown): FormSnapshot | null {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null
+  const raw = value as Record<string, unknown>
+
+  if (typeof raw.form_key !== 'string' || typeof raw.form_version !== 'number') return null
+  if (!Array.isArray(raw.sections)) return null
+
+  const sections: FormSnapshot['sections'] = []
+  for (const entry of raw.sections) {
+    if (!entry || typeof entry !== 'object') return null
+    const s = entry as Record<string, unknown>
+    if (typeof s.id !== 'string' || typeof s.key !== 'string' || typeof s.name !== 'string') return null
+    if (typeof s.sort_order !== 'number' || !Array.isArray(s.items)) return null
+
+    sections.push({
+      id:               s.id,
+      key:              s.key,
+      name:             s.name,
+      sort_order:       s.sort_order,
+      shown_when_asset: typeof s.shown_when_asset === 'string' ? s.shown_when_asset : null,
+      items:            s.items as SnapshotItem[],
+    })
+  }
+
+  return {
+    form_key:     raw.form_key,
+    form_version: raw.form_version,
+    captured_at:  typeof raw.captured_at === 'string' ? raw.captured_at : '',
+    sections,
+  }
+}
+
+/**
+ * The snapshot, flattened into what `resolveFormPages` takes.
+ *
+ * The items come back as ONE flat list because that is the shape the resolver
+ * indexes — it re-derives parents, repeat groups and per-asset rows itself, so
+ * handing it a pre-nested tree would mean two implementations of the same
+ * bucketing and one of them going stale.
+ */
+export function formFromSnapshot(snapshot: FormSnapshot): {
+  sections: ResolvableSection[]
+  items:    InspectionFormItem[]
+} {
+  return {
+    sections: snapshot.sections.map((s) => ({
+      id:               s.id,
+      key:              s.key,
+      name:             s.name,
+      sort_order:       s.sort_order,
+      shown_when_asset: s.shown_when_asset,
+    })),
+    items: snapshot.sections.flatMap((s) => s.items),
   }
 }
 
