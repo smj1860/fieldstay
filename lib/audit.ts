@@ -171,6 +171,7 @@ export type AuditAction =
   | 'demo.session.minted'
   | 'demo.org.reset'
   | 'billing.hospitable_price_lock.awarded'
+  | 'inspection.started'
 
 interface AuditParams {
   orgId?:         string
