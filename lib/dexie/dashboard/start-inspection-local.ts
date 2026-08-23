@@ -31,10 +31,7 @@
 // began; the create route measures the clock skew in the same request and
 // corrects. See 20260823053931 for why that is enough.
 
-import {
-  buildFormSnapshot,
-  type FormSnapshot,
-} from '@/lib/inspections/snapshots'
+import { buildFormSnapshot } from '@/lib/inspections/snapshots'
 import type { Inspection } from '@/types/database'
 
 import { getDashboardDb } from './schema'
@@ -67,7 +64,9 @@ export async function startInspectionLocally(
   }
 
   const property = await db.properties.get(input.propertyId)
-  if (!property || property.org_id !== orgId) {
+  // Covers both "not cached" and "cached but another org's" — undefined is not
+  // equal to orgId either, and the remedy the message offers is the same.
+  if (property?.org_id !== orgId) {
     return { ok: false, error: 'That property isn’t on this device yet. Reconnect once, then try again.' }
   }
 
@@ -168,6 +167,3 @@ async function loadCachedForm(
 
   return { id: form.id, key: form.key, version: form.version, sections, items }
 }
-
-/** Re-exported for the fill screen, which reads the snapshot straight back. */
-export type { FormSnapshot }

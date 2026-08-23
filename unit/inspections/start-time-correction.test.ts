@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 
-import { resolveStartTime } from '@/app/api/inspections/route'
+import { resolveStartTime } from '@/lib/inspections/start-time'
 
 // ============================================================================
 // A DEVICE CLOCK, MADE TRUSTWORTHY ENOUGH.

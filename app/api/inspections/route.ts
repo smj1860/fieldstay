@@ -34,6 +34,7 @@ import {
   reportedConditions,
   type ConditionsSnapshot,
 } from '@/lib/inspections/snapshots'
+import { resolveStartTime } from '@/lib/inspections/start-time'
 import { createServiceClient } from '@/lib/supabase/server'
 import type { OrgMembership } from '@/lib/auth'
 import type { SupabaseClient } from '@supabase/supabase-js'
@@ -136,36 +137,6 @@ export async function POST(req: Request) {
     console.error('[inspections.create]', err)
     reportError(err, { site: 'route.inspections.create' })
     return NextResponse.json({ ok: false, error: 'Could not start.' }, { status: 500 })
-  }
-}
-
-// ── The clock ───────────────────────────────────────────────────────────────
-
-/**
- * The device's start time, translated into server time.
- *
- * `offset = server_now − device_now`, both read at the same instant, so it
- * measures the device's skew rather than the elapsed time since the walk began.
- * Adding it to the device's start gives what the server's clock would have read
- * at that moment.
- *
- * CLAMPED to the present. A corrected start in the future means the device's
- * two readings disagree with each other — the clock changed mid-walk — and an
- * inspection that started after now is nonsense. The raw claim is still stored,
- * so the correction remains visible rather than being quietly rewritten.
- */
-export function resolveStartTime(
-  deviceStartedAt: string,
-  deviceNow:       string,
-  serverNowMs:     number = Date.now(),
-): { startedAt: string; offsetSeconds: number } {
-  const offsetMs      = serverNowMs - Date.parse(deviceNow)
-  const offsetSeconds = Math.round(offsetMs / 1000)
-  const corrected     = Date.parse(deviceStartedAt) + offsetMs
-
-  return {
-    startedAt:     new Date(Math.min(corrected, serverNowMs)).toISOString(),
-    offsetSeconds,
   }
 }
 

@@ -148,8 +148,15 @@ function AnswerControl({ id, node, answer, onChange }: Readonly<ControlProps>) {
     return <PhotoControl id={id} answer={answer} onChange={onChange} />
   }
 
+  // A real <fieldset>, not a div with role="group". The pass/fail/N-A buttons
+  // are a set of mutually exclusive choices about one question, which is what
+  // a fieldset means — and assistive tech support for the native element is
+  // better than for the ARIA role, which matters more here than usual because
+  // this is the control an inspector uses several hundred times in a walk.
+  // `min-w-0` because a fieldset's UA min-inline-size is min-content, which
+  // would stop the flex children shrinking.
   return (
-    <div className="flex gap-2" role="group" aria-labelledby={`${id}-label`}>
+    <fieldset className="flex gap-2 min-w-0" aria-labelledby={`${id}-label`}>
       {RESULTS.map((r) => {
         const active = answer?.result === r.value
         return (
@@ -169,7 +176,7 @@ function AnswerControl({ id, node, answer, onChange }: Readonly<ControlProps>) {
           </button>
         )
       })}
-    </div>
+    </fieldset>
   )
 }
 
