@@ -144,7 +144,6 @@ interface ScheduleRow {
   description: string | null
   schedule_type: ScheduleType
   frequency: ScheduleFrequency | null
-  month_due: number | null
   next_due_date: string | null
   last_completed_date: string | null
   estimated_cost: number | null
@@ -473,9 +472,14 @@ function ScheduleFormFields({
           value={schedType}
           onChange={(e) => setSchedType(e.target.value as ScheduleType)}
         >
+          {/* `routine` is the only value `schedule_type` accepts. "Seasonal
+              (specific month)" went with month_due (20260823215150) — an
+              annually-recurring schedule is Routine + Annual + a due date on
+              the month it recurs in, which is strictly better because the
+              daily cron advances it and the seasonal path never did. And
+              "One-time" was never a valid value at all: the enum holds only
+              routine|seasonal, so picking it failed the insert with 22P02. */}
           <option value="routine">Routine (recurring)</option>
-          <option value="seasonal">Seasonal (specific month)</option>
-          <option value="one_time">One-time</option>
         </select>
       </div>
 
@@ -484,16 +488,6 @@ function ScheduleFormFields({
           <label htmlFor="maintenance-board-frequency" className="label">Frequency</label>
           <select id="maintenance-board-frequency" name="frequency" className="input" defaultValue={defaults?.frequency ?? 'quarterly'}>
             {FREQUENCIES.map((f) => <option key={f.value} value={f.value}>{f.label}</option>)}
-          </select>
-        </div>
-      )}
-
-      {schedType === 'seasonal' && (
-        <div>
-          <label htmlFor="maintenance-board-month-due" className="label">Month Due</label>
-          <select id="maintenance-board-month-due" name="month_due" className="input" defaultValue={defaults?.month_due ?? ''}>
-            <option value="">Select month…</option>
-            {MONTHS.map((m, i) => <option key={i + 1} value={i + 1}>{m}</option>)}
           </select>
         </div>
       )}
@@ -560,7 +554,6 @@ function AddScheduleModal({
       description:        (fd.get('description') as string) || null,
       schedule_type:      (fd.get('schedule_type') as ScheduleType) || 'routine',
       frequency:          (fd.get('frequency') as ScheduleFrequency) || null,
-      month_due:          fd.get('month_due') ? Number(fd.get('month_due')) : null,
       next_due_date:      (fd.get('next_due_date') as string) || null,
       estimated_cost:     fd.get('estimated_cost') ? parseFloat(fd.get('estimated_cost') as string) : null,
       assigned_vendor_id: (fd.get('assigned_vendor_id') as string) || null,
@@ -618,7 +611,6 @@ function EditScheduleModal({
       description:        (fd.get('description') as string) || null,
       schedule_type:      (fd.get('schedule_type') as ScheduleType) || 'routine',
       frequency:          (fd.get('frequency') as ScheduleFrequency) || null,
-      month_due:          fd.get('month_due') ? Number(fd.get('month_due')) : null,
       next_due_date:      (fd.get('next_due_date') as string) || null,
       estimated_cost:     fd.get('estimated_cost') ? parseFloat(fd.get('estimated_cost') as string) : null,
       assigned_vendor_id: (fd.get('assigned_vendor_id') as string) || null,
@@ -773,9 +765,7 @@ function SchedulesSection({
                       </td>
                       <td className="px-4 py-3 text-secondary-themed">{property?.name ?? '—'}</td>
                       <td className="px-4 py-3 text-secondary-themed">
-                        {s.schedule_type === 'seasonal' && s.month_due
-                          ? MONTHS[(s.month_due - 1) % 12]
-                          : s.frequency ? FREQUENCY_LABELS[s.frequency] ?? s.frequency : '—'}
+                        {s.frequency ? FREQUENCY_LABELS[s.frequency] ?? s.frequency : '—'}
                       </td>
                       <td className="px-4 py-3">
                         {s.next_due_date ? (

@@ -6,7 +6,6 @@ import { verifyPropertyInOrg } from '@/lib/tenancy/verify'
 import { requireOrgMember, requireOrgRole } from '@/lib/auth'
 import { inngest } from '@/lib/inngest/client'
 import { calcNextDueDate } from '@/lib/turnovers/generator'
-import { nextSeasonalDueDate } from '@/lib/utils/maintenance'
 import { fetchAllRows, SUPABASE_MAX_ROWS } from '@/lib/inngest/paginate'
 import { logAuditEvent } from '@/lib/audit'
 import { reportError } from '@/lib/observability/report-error'
@@ -1621,7 +1620,6 @@ export async function bulkUpdateWorkOrderStatus(
 function resolveFirstDueDate(
   scheduleType: ScheduleType,
   frequency:    ScheduleFrequency | null,
-  monthDue:     number | null,
   provided:     string | null,
 ): string | null {
   if (provided) return provided
@@ -1634,15 +1632,12 @@ function resolveFirstDueDate(
     return calcNextDueDate(frequency ?? 'monthly', today).toISOString().split('T')[0]!
   }
 
-  // The next occurrence of that month: this year if it has not passed,
-  // otherwise next year. Shared with the completion path
-  // (advanceSchedulesAfterCompletion), which needs the identical derivation to
-  // roll a completed seasonal schedule to next year's occurrence.
-  if (scheduleType === 'seasonal' && monthDue) return nextSeasonalDueDate(monthDue, today)
-
-  // Seasonal with no month is genuinely underspecified — there is nothing to
-  // derive from. The row stays dormant, and the UI flags it as unscheduled
-  // rather than pretending a date we invented is what the PM meant.
+  // Anything not routine is underspecified without an explicit date — there is
+  // nothing to derive a first occurrence from. The row stays dormant and the UI
+  // flags it as unscheduled, rather than pretending a date we invented is what
+  // the PM meant. Since `month_due` went (20260823215150) nothing produces such
+  // a row through the form: an annually-recurring schedule is routine +
+  // frequency = 'annual' + a next_due_date on the month it recurs in.
   return null
 }
 
@@ -1653,7 +1648,6 @@ export async function createMaintenanceSchedule(
     description:       string | null
     schedule_type:     ScheduleType
     frequency:         ScheduleFrequency | null
-    month_due:         number | null
     next_due_date:     string | null
     estimated_cost:    number | null
     assigned_vendor_id: string | null
@@ -1674,9 +1668,8 @@ export async function createMaintenanceSchedule(
       description:        data.description || null,
       schedule_type:      data.schedule_type,
       frequency:          data.frequency || null,
-      month_due:          data.month_due || null,
       next_due_date:      resolveFirstDueDate(
-        data.schedule_type, data.frequency || null, data.month_due || null, data.next_due_date || null,
+        data.schedule_type, data.frequency || null, data.next_due_date || null,
       ),
       estimated_cost:     data.estimated_cost || null,
       assigned_vendor_id: data.assigned_vendor_id || null,
@@ -1707,7 +1700,6 @@ export async function updateMaintenanceSchedule(
     description:       string | null
     schedule_type:     ScheduleType
     frequency:         ScheduleFrequency | null
-    month_due:         number | null
     next_due_date:     string | null
     estimated_cost:    number | null
     assigned_vendor_id: string | null
@@ -1725,14 +1717,13 @@ export async function updateMaintenanceSchedule(
         description:        data.description || null,
         schedule_type:      data.schedule_type,
         frequency:          data.frequency || null,
-        month_due:          data.month_due || null,
-        // Same derivation as create. An edit that clears the date would
+          // Same derivation as create. An edit that clears the date would
         // otherwise re-open exactly the hole create just closed — and the
         // inline row editor sends the whole row on every Save, so clearing
         // the date box is a single keystroke away. Pausing a schedule is
         // is_active = false; a blank date has never meant "paused".
         next_due_date:      resolveFirstDueDate(
-          data.schedule_type, data.frequency || null, data.month_due || null, data.next_due_date || null,
+          data.schedule_type, data.frequency || null, data.next_due_date || null,
         ),
         estimated_cost:     data.estimated_cost || null,
         assigned_vendor_id: data.assigned_vendor_id || null,

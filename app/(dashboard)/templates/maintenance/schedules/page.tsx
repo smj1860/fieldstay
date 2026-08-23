@@ -25,7 +25,7 @@ export default async function MaintenanceSchedulesPage() {
     supabase
       .from('maintenance_schedules')
       .select(`
-        id, property_id, name, description, schedule_type, frequency, month_due,
+        id, property_id, name, description, schedule_type, frequency,
         next_due_date, estimated_cost, auto_create_wo, assigned_vendor_id, instructions,
         source_template_item_id,
         maintenance_schedule_template_items ( template_id )
@@ -71,7 +71,6 @@ export default async function MaintenanceSchedulesPage() {
     description:        s.description,
     schedule_type:      s.schedule_type,
     frequency:          s.frequency,
-    month_due:          s.month_due,
     next_due_date:      s.next_due_date,
     estimated_cost:     s.estimated_cost,
     auto_create_wo:     s.auto_create_wo,

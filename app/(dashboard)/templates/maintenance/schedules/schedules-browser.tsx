@@ -35,7 +35,6 @@ interface ScheduleRow {
   description:        string | null
   schedule_type:      ScheduleType
   frequency:          ScheduleFrequency | null
-  month_due:          number | null
   next_due_date:      string | null
   estimated_cost:     number | null
   auto_create_wo:     boolean
@@ -167,7 +166,6 @@ function PropertySchedulesEditor({
         description:        row.description,
         schedule_type:      row.schedule_type,
         frequency:          row.frequency,
-        month_due:          row.month_due,
         next_due_date:      row.next_due_date,
         estimated_cost:     row.estimated_cost,
         assigned_vendor_id: row.assigned_vendor_id,
@@ -205,7 +203,6 @@ function PropertySchedulesEditor({
         description:        null,
         schedule_type:      'routine',
         frequency:          newFrequency,
-        month_due:          null,
         next_due_date:      null,
         estimated_cost:     null,
         assigned_vendor_id: null,

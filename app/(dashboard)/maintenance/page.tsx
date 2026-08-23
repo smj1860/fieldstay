@@ -75,7 +75,7 @@ export default async function MaintenancePage() {
       .from('maintenance_schedules')
       .select(`
         id, property_id, org_id, name, description,
-        schedule_type, frequency, month_due, next_due_date,
+        schedule_type, frequency, next_due_date,
         last_completed_date, estimated_cost, auto_create_wo, is_active,
         assigned_vendor_id, instructions,
         properties ( name ),

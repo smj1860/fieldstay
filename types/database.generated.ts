@@ -2899,7 +2899,6 @@ export type Database = {
           is_active: boolean
           is_from_standard_template: boolean
           last_completed_date: string | null
-          month_due: number | null
           name: string
           next_due_date: string | null
           org_id: string
@@ -2931,7 +2930,6 @@ export type Database = {
           is_active?: boolean
           is_from_standard_template?: boolean
           last_completed_date?: string | null
-          month_due?: number | null
           name: string
           next_due_date?: string | null
           org_id: string
@@ -2963,7 +2961,6 @@ export type Database = {
           is_active?: boolean
           is_from_standard_template?: boolean
           last_completed_date?: string | null
-          month_due?: number | null
           name?: string
           next_due_date?: string | null
           org_id?: string

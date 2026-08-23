@@ -1331,7 +1331,7 @@ describe('maintenance/actions', () => {
   describe('createMaintenanceSchedule', () => {
     const scheduleInput = {
       property_id: 'prop_1', name: 'HVAC filter change', description: null,
-      schedule_type: 'routine' as const, frequency: 'quarterly' as const, month_due: null,
+      schedule_type: 'routine' as const, frequency: 'quarterly' as const,
       next_due_date: '2026-08-01', estimated_cost: null, assigned_vendor_id: null,
       auto_create_wo: true, instructions: null,
     }
@@ -1427,7 +1427,12 @@ describe('maintenance/actions', () => {
       expect(insertedRow(supabase).next_due_date).toMatch(/^\d{4}-\d{2}-\d{2}$/)
     })
 
-    it('derives the next occurrence of the month for a seasonal schedule', async () => {
+    // What the seasonal+month_due path used to express, said the way that
+    // survives: an annually-recurring April schedule is routine + annual with a
+    // next_due_date in April. calcNextDueDate then preserves the April anchor
+    // forever, and — unlike the removed seasonal path — the DAILY CRON advances
+    // it, not only the completion path.
+    it('honours an explicit annual start date, which is what seasonal used to be', async () => {
       const supabase = makeSupabase({
         properties:            [{ data: { id: 'prop_1' } }],
         maintenance_schedules: [{ error: null }],
@@ -1436,19 +1441,19 @@ describe('maintenance/actions', () => {
 
       await createMaintenanceSchedule({
         ...scheduleInput,
-        schedule_type: 'seasonal',
-        frequency:     null,
-        month_due:     3,
-        next_due_date: null,
+        schedule_type: 'routine',
+        frequency:     'annual',
+        next_due_date: '2027-03-01',
       })
 
-      expect(insertedRow(supabase).next_due_date).toMatch(/^\d{4}-03-01$/)
+      expect(insertedRow(supabase).next_due_date).toBe('2027-03-01')
     })
 
-    // The one case nothing can be derived from — there is no month and no
-    // frequency to project forward. Storing an invented date would be worse
-    // than storing NULL; the schedules browser flags it as "Not scheduled".
-    it('leaves the date NULL for a seasonal schedule with no month', async () => {
+    // Nothing to derive from, and nothing that produces this through the form
+    // any more — but the column is nullable and the broadcast path can still
+    // reach it. Storing an invented date would be worse than NULL; the
+    // schedules browser flags it as "Not scheduled".
+    it('leaves the date NULL when nothing can be derived', async () => {
       const supabase = makeSupabase({
         properties:            [{ data: { id: 'prop_1' } }],
         maintenance_schedules: [{ error: null }],
@@ -1456,7 +1461,7 @@ describe('maintenance/actions', () => {
       vi.mocked(requireOrgRole).mockResolvedValue({ supabase, membership } as never)
 
       await createMaintenanceSchedule({
-        ...scheduleInput, schedule_type: 'seasonal', frequency: null, month_due: null, next_due_date: null,
+        ...scheduleInput, schedule_type: 'seasonal', frequency: null, next_due_date: null,
       })
 
       expect(insertedRow(supabase).next_due_date).toBeNull()
@@ -1478,7 +1483,7 @@ describe('maintenance/actions', () => {
   describe('updateMaintenanceSchedule / deleteMaintenanceSchedule', () => {
     const updateInput = {
       name: 'HVAC filter change', description: null, schedule_type: 'routine' as const,
-      frequency: 'quarterly' as const, month_due: null, next_due_date: '2026-08-01',
+      frequency: 'quarterly' as const, next_due_date: '2026-08-01',
       estimated_cost: null, assigned_vendor_id: null, auto_create_wo: true, instructions: null,
     }
 

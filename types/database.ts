@@ -1003,7 +1003,6 @@ export interface MaintenanceSchedule {
   description:               string | null
   schedule_type:             ScheduleType
   frequency:                 ScheduleFrequency | null
-  month_due:                 number | null
   day_of_month_due:          number | null
   estimated_cost:            number | null
   instructions:              string | null

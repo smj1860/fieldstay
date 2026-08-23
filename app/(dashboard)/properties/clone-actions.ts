@@ -157,7 +157,7 @@ export async function clonePropertySetup(
     // ── 3. Clone maintenance_schedules ───────────────────────────────────────
     const sourceSchedRes = await supabase
       .from('maintenance_schedules')
-      .select('name, description, schedule_type, frequency, month_due, day_of_month_due, estimated_cost, instructions, auto_create_wo, assigned_vendor_id')
+      .select('name, description, schedule_type, frequency, day_of_month_due, estimated_cost, instructions, auto_create_wo, assigned_vendor_id')
       .eq('property_id', sourcePropertyId)
       .eq('is_active', true)
       .limit(500)
@@ -179,7 +179,6 @@ export async function clonePropertySetup(
           description:        s.description,
           schedule_type:      s.schedule_type,
           frequency:          s.frequency,
-          month_due:          s.month_due,
           day_of_month_due:   s.day_of_month_due,
           estimated_cost:     s.estimated_cost,
           instructions:       s.instructions,
