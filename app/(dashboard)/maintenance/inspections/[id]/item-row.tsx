@@ -22,16 +22,16 @@
 // and trapping them on a page fights the job. The Review page is what makes the
 // omission impossible to walk past.
 
-import { AlertTriangle, Camera, Sparkles } from 'lucide-react'
+import { AlertTriangle, Camera, History, Sparkles } from 'lucide-react'
 
 import { Badge } from '@/components/ui/Badge'
 import { buttonVariantClass } from '@/components/ui/Button'
 import { Checkbox } from '@/components/ui/Checkbox'
 import { Input } from '@/components/ui/Input'
 import { MAX_REPEAT_INSTANCES, type ResolvedItem } from '@/lib/inspections/resolve-form'
-import type { InspectionAnswerRow } from '@/lib/dexie/dashboard/schema'
+import type { InspectionAnswerRow, OpenConcernRow } from '@/lib/dexie/dashboard/schema'
 import type { AnswerPatch } from '@/lib/dexie/dashboard/inspection-draft'
-import type { InspectionAction, InspectionResult } from '@/types/database'
+import type { InspectionAction, InspectionRepeatAnswer, InspectionResult } from '@/types/database'
 
 const RESULTS: { value: InspectionResult; label: string; tone: string }[] = [
   { value: 'pass', label: 'Pass', tone: 'var(--accent-green)' },
@@ -53,6 +53,12 @@ interface ControlProps {
   /** Compresses and queues a captured image. Never blocks on the network. */
   onCapture: (file: Blob) => void
   onDiscard: () => void
+  /**
+   * An open work order already raised for this item's concern, if the device
+   * cached one. Undefined means there is nothing to ask about — which is the
+   * common case, and also what an unwarmed device looks like.
+   */
+  openConcern?: OpenConcernRow
 }
 
 interface Props extends Omit<ControlProps, 'id'> {
@@ -60,7 +66,7 @@ interface Props extends Omit<ControlProps, 'id'> {
   depth: number
 }
 
-export function ItemRow({ node, depth, answer, onChange, onCapture, onDiscard }: Readonly<Props>) {
+export function ItemRow({ node, depth, answer, onChange, onCapture, onDiscard, openConcern }: Readonly<Props>) {
   const def = node.formItem
   const id  = `item-${def.id}-${node.repeatIndex ?? ''}-${node.asset?.id ?? ''}`
 
@@ -97,7 +103,7 @@ export function ItemRow({ node, depth, answer, onChange, onCapture, onDiscard }:
       {answer?.result === 'fail' && (
         <FailDetail
           id={id} node={node} answer={answer} onChange={onChange}
-          onCapture={onCapture} onDiscard={onDiscard}
+          onCapture={onCapture} onDiscard={onDiscard} openConcern={openConcern}
         />
       )}
 
@@ -275,7 +281,7 @@ function PhotoControl({ id, answer, onChange, onCapture, onDiscard }: Readonly<{
 }
 
 /** What a fail owes: a description, the actions to take, and cleaning. */
-function FailDetail({ id, node, answer, onChange }: Readonly<ControlProps>) {
+function FailDetail({ id, node, answer, onChange, openConcern }: Readonly<ControlProps>) {
   const def = node.formItem
   const selected = answer?.actions ?? []
 
@@ -349,8 +355,115 @@ function FailDetail({ id, node, answer, onChange }: Readonly<ControlProps>) {
         <Sparkles className="w-3.5 h-3.5" style={{ color: 'var(--accent-gold)' }} />
         Needs cleaning
       </label>
+
+      {openConcern && (
+        <RepeatPrompt id={id} concern={openConcern} answer={answer} onChange={onChange} />
+      )}
     </div>
   )
+}
+
+/**
+ * "There is already an open job for this. Same issue, or a new one?"
+ *
+ * §6 arrived at ASKING after a key-based rule was shown to be unfixable. Once
+ * the inspector picks the action, one form item no longer means one fault:
+ * "Refrigeration" fails in March for a water filter (Replace, a purchase order)
+ * and in June for a compressor (Service, a work order) — same form_item_id, two
+ * unrelated problems. Any key that deduplicates them files a failing compressor
+ * as a note on a water-filter task, and it does it quietly.
+ *
+ * The person holding the tablet is standing in front of the appliance, so they
+ * are the only party who can actually tell. That is the whole argument.
+ *
+ * DELIBERATELY NOT PRE-SELECTED. A default here is a guess wearing the
+ * inspector's authority — and "same" defaulted-in suppresses a real fault while
+ * "new" defaulted-in recreates the duplicate board this exists to prevent.
+ * Leaving it unanswered is honest: remediation then behaves exactly as it did
+ * before the prompt existed.
+ */
+function RepeatPrompt({ id, concern, answer, onChange }: Readonly<{
+  id:      string
+  concern: OpenConcernRow
+  answer:  InspectionAnswerRow | undefined
+  onChange: (patch: AnswerPatch) => void
+}>) {
+  const chosen = answer?.repeatAnswer ?? null
+
+  const choose = (value: InspectionRepeatAnswer) => {
+    onChange({
+      repeatAnswer: value,
+      // Recorded for BOTH answers. On "new" it is the record of what this
+      // finding was distinguished FROM, which is what lets whoever picks the
+      // job up tell the two apart on the board.
+      repeatOfWorkOrderId: concern.id,
+    })
+  }
+
+  return (
+    <fieldset
+      className="flex flex-col gap-2 rounded-lg p-3 min-w-0"
+      style={{ background: 'var(--bg-card)', border: '1px solid var(--accent-gold)' }}
+      aria-labelledby={`${id}-repeat-label`}
+    >
+      {/* Named by the sentence below rather than by a <legend>, matching the
+          pass/fail fieldset above. A legend is the more obvious choice and the
+          wrong one here: it is not a flex item in any engine, so inside this
+          flex-column fieldset it would be pulled out of the flow and painted
+          across the gold border rather than sitting above the buttons. The
+          accessible name is what actually matters, and aria-labelledby gives
+          it — an inspector cannot answer "same or new?" without being told
+          what it would be the same AS. */}
+      <p className="text-xs font-semibold flex items-start gap-1.5"
+         style={{ color: 'var(--text-secondary)' }} id={`${id}-repeat-label`}>
+        <History className="w-3.5 h-3.5 shrink-0 mt-0.5" style={{ color: 'var(--accent-gold)' }} />
+        <span>
+          Already open since {formatOpenSince(concern.createdAt)}
+          {concern.woNumber ? ` · ${concern.woNumber}` : ''} — “{concern.title}”
+        </span>
+      </p>
+      <div className="flex gap-2 min-w-0">
+        {REPEAT_CHOICES.map((c) => {
+          const active = chosen === c.value
+          return (
+            <button
+              key={c.value}
+              type="button"
+              aria-pressed={active}
+              onClick={() => choose(c.value)}
+              className="rounded-full px-3 py-1 text-xs font-semibold focus:outline-none focus:ring-2 focus:ring-[var(--accent-gold)]"
+              style={{
+                background: active ? 'var(--accent-gold)' : 'transparent',
+                color:      active ? 'var(--bg-base)' : 'var(--text-secondary)',
+                border:     '1px solid var(--border)',
+              }}
+            >
+              {c.label}
+            </button>
+          )
+        })}
+      </div>
+    </fieldset>
+  )
+}
+
+const REPEAT_CHOICES: { value: InspectionRepeatAnswer; label: string }[] = [
+  { value: 'same', label: 'Same issue' },
+  { value: 'new',  label: 'New issue' },
+]
+
+/**
+ * "12 Mar" — a date an inspector can judge staleness against at a glance.
+ *
+ * Deliberately no year and no time: the question being answered is "has this
+ * been sitting a while", not "when exactly". An unparseable timestamp renders
+ * as nothing rather than "Invalid Date", because the surrounding sentence still
+ * reads correctly without it.
+ */
+function formatOpenSince(iso: string): string {
+  const at = new Date(iso)
+  if (Number.isNaN(at.getTime())) return 'an earlier inspection'
+  return at.toLocaleDateString(undefined, { day: 'numeric', month: 'short' })
 }
 
 /**

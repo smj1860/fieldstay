@@ -163,3 +163,59 @@ describe('parseSubmitPayload — the request itself', () => {
     expect(err(body({ items: [item(), item({ result: 'maybe' })] }))).toMatch(/Malformed/)
   })
 })
+
+// ============================================================================
+// §6's REPEAT ANSWER — and the one rule that could not stay in the database.
+//
+// The pairing "an answer must name the work order it is an answer about"
+// started as a CHECK constraint and had to be dropped (20260823180811): the
+// column is ON DELETE SET NULL, so deleting the referenced work order produced
+// exactly the forbidden state and the DELETE failed — which, by cascade, made
+// deleting an ORGANIZATION fail. A CHECK cannot say "at INSERT time only".
+//
+// So the rule lives here now, and these are what keep it honest. The asymmetry
+// above still applies: absent is fine, wrong shape is not.
+// ============================================================================
+const WO = '22222222-2222-2222-2222-222222222222'
+
+describe('parseSubmitPayload — the repeat answer', () => {
+  it('accepts both answers with their work order', () => {
+    for (const answer of ['same', 'new']) {
+      const r = ok(body({ items: [item({ repeat_answer: answer, repeat_of_work_order_id: WO })] }))
+      expect(r.items[0]).toMatchObject({ repeat_answer: answer, repeat_of_work_order_id: WO })
+    }
+  })
+
+  it('treats an absent answer as "never asked" rather than corrupt', () => {
+    // The common case by far: no open predecessor existed, or the device had no
+    // cached work orders. Rejecting would dead-letter an ordinary walk.
+    const r = ok(body({ items: [item()] }))
+    expect(r.items[0]).toMatchObject({ repeat_answer: null, repeat_of_work_order_id: null })
+  })
+
+  it('keeps the reference on "new" — what the finding was distinguished FROM', () => {
+    const r = ok(body({ items: [item({ repeat_answer: 'new', repeat_of_work_order_id: WO })] }))
+    expect(r.items[0]!.repeat_of_work_order_id).toBe(WO)
+  })
+
+  it('rejects an answer with nothing to be an answer about', () => {
+    // The rule the dropped CHECK used to hold. Rejected rather than silently
+    // nulled: it is a client bug, and dropping it would make the inspector's
+    // tap vanish with no sign it happened.
+    expect(err(body({ items: [item({ repeat_answer: 'same' })] }))).toBeTruthy()
+  })
+
+  it('rejects a label the enum does not have', () => {
+    // Reaches the RPC as a raw enum cast, where it is a 500 rather than a
+    // message anyone can act on.
+    expect(err(body({ items: [item({ repeat_answer: 'maybe', repeat_of_work_order_id: WO })] }))).toBeTruthy()
+    expect(err(body({ items: [item({ repeat_answer: 7, repeat_of_work_order_id: WO })] }))).toBeTruthy()
+  })
+
+  it('ignores a work order id with no answer beside it', () => {
+    // Harmless on its own — remediation only reads the reference when there is
+    // an answer — so this is tolerated rather than rejected.
+    expect(ok(body({ items: [item({ repeat_of_work_order_id: WO })] })).items[0])
+      .toMatchObject({ repeat_answer: null })
+  })
+})

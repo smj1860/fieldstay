@@ -1941,7 +1941,11 @@ export type Database = {
           photo_path: string | null
           photo_unavailable_reason: string | null
           prompt_snapshot: string
+          repeat_answer:
+            | Database["public"]["Enums"]["inspection_repeat_answer"]
+            | null
           repeat_index: number | null
+          repeat_of_work_order_id: string | null
           result: Database["public"]["Enums"]["inspection_result"] | null
           updated_at: string
           value_date: string | null
@@ -1963,7 +1967,11 @@ export type Database = {
           photo_path?: string | null
           photo_unavailable_reason?: string | null
           prompt_snapshot: string
+          repeat_answer?:
+            | Database["public"]["Enums"]["inspection_repeat_answer"]
+            | null
           repeat_index?: number | null
+          repeat_of_work_order_id?: string | null
           result?: Database["public"]["Enums"]["inspection_result"] | null
           updated_at?: string
           value_date?: string | null
@@ -1985,7 +1993,11 @@ export type Database = {
           photo_path?: string | null
           photo_unavailable_reason?: string | null
           prompt_snapshot?: string
+          repeat_answer?:
+            | Database["public"]["Enums"]["inspection_repeat_answer"]
+            | null
           repeat_index?: number | null
+          repeat_of_work_order_id?: string | null
           result?: Database["public"]["Enums"]["inspection_result"] | null
           updated_at?: string
           value_date?: string | null
@@ -2019,6 +2031,13 @@ export type Database = {
             columns: ["org_id"]
             isOneToOne: false
             referencedRelation: "organizations"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "inspection_items_repeat_of_work_order_id_fkey"
+            columns: ["repeat_of_work_order_id"]
+            isOneToOne: false
+            referencedRelation: "work_orders"
             referencedColumns: ["id"]
           },
         ]
@@ -6719,6 +6738,7 @@ export type Database = {
         | "work_order"
         | "purchase_order"
         | "notify"
+      inspection_repeat_answer: "same" | "new"
       inspection_response_type: "yes_no" | "count" | "date" | "text" | "photo"
       inspection_result: "pass" | "fail" | "na"
       inventory_category:
@@ -7050,6 +7070,7 @@ export const Constants = {
         "purchase_order",
         "notify",
       ],
+      inspection_repeat_answer: ["same", "new"],
       inspection_response_type: ["yes_no", "count", "date", "text", "photo"],
       inspection_result: ["pass", "fail", "na"],
       inventory_category: [

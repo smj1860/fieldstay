@@ -40,11 +40,25 @@
 // problems, and silent attachment would file a failing compressor as a note on
 // a water-filter task.
 //
-// That prompt is not built yet. Until it is, this NOTES the relationship
-// instead of acting on it: a new work order that has an open predecessor on the
-// same concern says so in its description. That can never wrongly suppress a
-// fault or wrongly merge two, which is the property that matters — and it makes
-// the duplicate legible as a repeat rather than mysterious.
+// ─────────────────────────────────────────────────────────────────────────────
+// THE ANSWER DECIDES, AND ONLY THE ANSWER
+//
+// That prompt now exists (20260823180719). A failing item whose inspector said
+// SAME ISSUE gets a line on the open job's timeline instead of a second work
+// order; everything else — "new issue", or never asked — creates as before.
+// Nothing here consults a key to reach that decision, because §6's finding is
+// that no key can be right.
+//
+// Two fallbacks keep a finding from ever falling through the gap, and both
+// create rather than suppress: an answer of 'same' whose predecessor was
+// DELETED (the reference is ON DELETE SET NULL), and one whose predecessor has
+// since been COMPLETED — a fault recurring after a repair is a new job, not a
+// note on a finished one.
+//
+// An item that was never asked still gets the older, weaker treatment: a work
+// order that NOTES an open predecessor on the same concern in its description.
+// That is what an unwarmed device produces, and it can never wrongly suppress a
+// fault or wrongly merge two.
 
 import { inngest } from '../client'
 import { createServiceClient } from '@/lib/supabase/server'
@@ -61,6 +75,10 @@ interface FailedItem {
   photo_path:      string | null
   asset_id:        string | null
   actions:         string[]
+  /** §6's repeat answer. Null means the inspector was never asked. */
+  repeat_answer:   'same' | 'new' | null
+  /** The predecessor they were shown. Null if it has since been deleted. */
+  repeat_of_work_order_id: string | null
   def:             InspectionFormItem
 }
 
@@ -106,7 +124,7 @@ export const inspectionCompleted = inngest.createFunction(
 
       const { data: items, error: itemsError } = await supabase
         .from('inspection_items')
-        .select('id, form_item_id, prompt_snapshot, note, photo_path, asset_id, actions')
+        .select('id, form_item_id, prompt_snapshot, note, photo_path, asset_id, actions, repeat_answer, repeat_of_work_order_id')
         .eq('org_id', org_id)
         .eq('inspection_id', inspection_id)
         .eq('result', 'fail')
@@ -148,7 +166,14 @@ export const inspectionCompleted = inngest.createFunction(
     const notifications = await step.run('notify', () =>
       notifyNonDispatchFailures(org_id, inspection_id, failed))
 
-    return { workOrders, purchaseOrders, notifications }
+    return {
+      workOrders:    workOrders.created,
+      // Recurrences noted on a job that was already open rather than opened
+      // again — the number §6 exists to make non-zero.
+      attachedToOpen: workOrders.attached,
+      purchaseOrders,
+      notifications,
+    }
   },
 )
 
@@ -159,11 +184,29 @@ async function createWorkOrders(
   propertyId:   string,
   inspectionId: string,
   failed:       FailedItem[],
-): Promise<number> {
-  const items = failed.filter((f) => f.def.remediation === 'work_order')
-  if (items.length === 0) return 0
+): Promise<{ created: number; attached: number }> {
+  const all = failed.filter((f) => f.def.remediation === 'work_order')
+  if (all.length === 0) return { created: 0, attached: 0 }
 
   const supabase = createServiceClient({ system: 'inngest:inspection-completed' })
+
+  // §6's answer, honoured. "Same issue" attaches the finding to the job that is
+  // already open instead of opening a second one; anything else — "new issue",
+  // or never asked — creates as before.
+  //
+  // The split is on the INSPECTOR'S answer and nothing else. No key is
+  // consulted, because §6's whole finding is that no key can be right once the
+  // action model exists.
+  // Returns the ids it actually attached — NOT merely the ones that asked to
+  // be. Filtering creation on `isSameIssue` instead lost every finding whose
+  // predecessor had since been completed: not attached, not created, gone. The
+  // set is the only honest handoff between the two halves.
+  const attachedIds = await attachToOpenPredecessors(
+    supabase, orgId, inspectionId, all.filter(isSameIssue),
+  )
+  const items = all.filter((f) => !attachedIds.has(f.id))
+  if (items.length === 0) return { created: 0, attached: attachedIds.size }
+
   const openPriors = await loadOpenPriorWorkOrders(orgId, propertyId, inspectionId)
 
   // Which of these already have a work order, from an earlier pass of this
@@ -199,7 +242,7 @@ async function createWorkOrders(
       asset_id:    item.asset_id,
     }))
 
-  if (rows.length === 0) return 0
+  if (rows.length === 0) return { created: 0, attached: attachedIds.size }
 
   const { error } = await supabase.from('work_orders').insert(rows)
 
@@ -211,7 +254,115 @@ async function createWorkOrders(
     throw new Error(`work order insert failed for inspection ${inspectionId}: ${error.message}`)
   }
 
-  return rows.length
+  return { created: rows.length, attached: attachedIds.size }
+}
+
+/** A finding the inspector said was the same fault as an already-open job. */
+function isSameIssue(item: FailedItem): boolean {
+  // Both halves required. `repeat_of_work_order_id` is ON DELETE SET NULL, so
+  // an answer of 'same' can outlive the job it referred to — and a 'same' with
+  // nothing to attach to must fall through to CREATING a work order rather than
+  // vanishing. That is the whole reason the database CHECK enforcing the pair
+  // had to be dropped (20260823180811).
+  return item.repeat_answer === 'same' && !!item.repeat_of_work_order_id
+}
+
+/**
+ * Records a recurrence against the work order that is already open.
+ *
+ * §6: "what is deduplicated is the TASK, not the evidence." The finding itself
+ * is already recorded immutably as an `inspection_items` row carrying
+ * `repeat_of_work_order_id` — that link is written at sign-off and is
+ * idempotent by construction. This adds the human-facing half: a line on the
+ * work order's timeline saying it failed again, so whoever eventually picks the
+ * job up knows it has been outstanding across two inspections.
+ *
+ * "Same issue, still open in June" is worth recording on its own — it says the
+ * March work order has been sitting untouched for a quarter, which is exactly
+ * what a PM should see.
+ *
+ * A PREDECESSOR THAT IS GONE OR CLOSED FALLS BACK TO CREATING. The inspector
+ * answered against what their device had cached, which may be hours or days
+ * old: the job may have been completed in the meantime, in which case the fault
+ * recurring after a repair is a NEW job and not a note on a finished one.
+ */
+async function attachToOpenPredecessors(
+  supabase:     ReturnType<typeof createServiceClient>,
+  orgId:        string,
+  inspectionId: string,
+  items:        FailedItem[],
+): Promise<Set<string>> {
+  const attached = new Set<string>()
+  if (items.length === 0) return attached
+
+  const targetIds = [...new Set(items.map((i) => i.repeat_of_work_order_id!))]
+
+  // Still open? One query for all of them — a per-item lookup is the N+1 a
+  // guardrail here exists to catch.
+  const { data: open, error } = await supabase
+    .from('work_orders')
+    .select('id')
+    .eq('org_id', orgId)
+    .in('id', targetIds)
+    .in('status', OPEN_WO_STATUSES)
+    .limit(targetIds.length)
+
+  if (error) throw new Error(`predecessor lookup failed: ${error.message}`)
+  const stillOpen = new Set((open ?? []).map((r) => r.id))
+
+  const attachable = items.filter((i) => stillOpen.has(i.repeat_of_work_order_id!))
+  if (attachable.length === 0) return attached
+
+  // Idempotency without a dedupe column: the note text is deterministic, so a
+  // replay produces the identical string and is skipped. `work_order_updates`
+  // has no unique key to collide against and adding a marker id to the text
+  // would put a uuid in front of a PM for the sake of a retry.
+  const { data: existingNotes, error: notesError } = await supabase
+    .from('work_order_updates')
+    .select('work_order_id, notes')
+    .eq('org_id', orgId)
+    .in('work_order_id', [...stillOpen])
+    .limit(MAX_REMEDIATIONS)
+
+  if (notesError) throw new Error(`existing update lookup failed: ${notesError.message}`)
+  const seen = new Set((existingNotes ?? []).map((r) => `${r.work_order_id}|${r.notes ?? ''}`))
+
+  // Every attachable item counts as ATTACHED, including one whose note is
+  // already present from an earlier pass — the recurrence is recorded either
+  // way, and re-creating a work order for it on the replay would be the
+  // duplicate this whole path exists to avoid.
+  for (const item of attachable) attached.add(item.id)
+
+  const rows = attachable
+    .map((item) => ({
+      work_order_id: item.repeat_of_work_order_id!,
+      org_id:        orgId,
+      // No status transition: the job's state is unchanged, only its history.
+      status_from:   null,
+      status_to:     null,
+      notes:         recurrenceNote(item),
+    }))
+    .filter((row) => !seen.has(`${row.work_order_id}|${row.notes}`))
+
+  if (rows.length === 0) return attached
+
+  const { error: insertError } = await supabase.from('work_order_updates').insert(rows)
+  if (insertError) {
+    throw new Error(`recurrence note insert failed for inspection ${inspectionId}: ${insertError.message}`)
+  }
+  return attached
+}
+
+const OPEN_WO_STATUSES = ['pending', 'quote_requested', 'assigned', 'in_progress'] as const
+
+/** Deterministic, so a replay of this step recognises its own earlier write. */
+function recurrenceNote(item: FailedItem): string {
+  const lines = [
+    `Failed again on a later inspection: ${item.prompt_snapshot}`,
+    'The inspector confirmed this is the same issue, not a new one.',
+  ]
+  if (item.note?.trim()) lines.push('', item.note.trim())
+  return lines.join('\n')
 }
 
 interface PriorWorkOrder {

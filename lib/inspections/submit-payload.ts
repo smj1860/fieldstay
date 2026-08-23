@@ -14,7 +14,7 @@
 // whose answers exist nowhere else — so anything that can be read as "the
 // inspector did not fill this in" must not be read as "the payload is corrupt".
 
-import type { InspectionAction, InspectionResult } from '@/types/database'
+import type { InspectionAction, InspectionRepeatAnswer, InspectionResult } from '@/types/database'
 
 /**
  * One answer, as the device queued it.
@@ -42,10 +42,13 @@ export type SubmittedItem = {
   asset_id:        string | null
   repeat_index:    number | null
   answered_at:     string | null
+  repeat_answer:           InspectionRepeatAnswer | null
+  repeat_of_work_order_id: string | null
 }
 
 const RESULTS = new Set<string>(['pass', 'fail', 'na'])
 const ACTIONS = new Set<string>(['repair', 'service', 'replace'])
+const REPEAT_ANSWERS = new Set<string>(['same', 'new'])
 
 /**
  * The most answers one inspection may carry.
@@ -103,26 +106,11 @@ function parseItem(entry: unknown): SubmittedItem | null {
   if (typeof r.form_item_id !== 'string') return null
   if (typeof r.prompt_snapshot !== 'string' || r.prompt_snapshot.length > MAX_TEXT) return null
 
-  // Typed, not stringified. `String(someObject)` is "[object Object]", which
-  // happens to fail the membership check and so reaches the right answer by
-  // accident — but only for as long as no enum value is ever named that. The
-  // narrowing says what is meant: an answer is a string or it is absent.
-  const result = r.result
-  if (result !== null && result !== undefined
-      && (typeof result !== 'string' || !RESULTS.has(result))) return null
+  const result = parseResult(r.result)
+  if (result === false) return null
 
-  // Same reasoning one line down. `.map(String)` would coerce a nested object
-  // into a string that merely fails the check rather than being rejected as
-  // the wrong shape.
-  //
-  // NULLISH stays lenient, deliberately. The old code turned any non-array into
-  // `[]`, and tightening that all the way would make `actions: null` — which a
-  // serializer can plausibly emit for an empty list — dead-letter an entire
-  // signed-off walk. Absent means no actions; a wrong SHAPE is still rejected.
-  const rawActions = r.actions
-  if (rawActions !== null && rawActions !== undefined && !Array.isArray(rawActions)) return null
-  const actions = (rawActions ?? []) as unknown[]
-  if (actions.some((a) => typeof a !== 'string' || !ACTIONS.has(a))) return null
+  const actions = parseActions(r.actions)
+  if (actions === false) return null
 
   const valueNumber = optionalInt(r.value_number)
   if (valueNumber === false) return null
@@ -133,29 +121,107 @@ function parseItem(entry: unknown): SubmittedItem | null {
   const repeatIndex = optionalInt(r.repeat_index)
   if (repeatIndex === false) return null
 
-  const text = (key: string) => optionalText(r[key])
-  const note = text('note'), photoPath = text('photo_path')
-  const photoReason = text('photo_unavailable_reason'), naReason = text('na_reason')
-  const valueText = text('value_text'), valueDate = text('value_date')
-  if ([note, photoPath, photoReason, naReason, valueText, valueDate].includes(false as never)) return null
+  const repeat = parseRepeatAnswer(r)
+  if (repeat === false) return null
+
+  const text = parseTextFields(r)
+  if (text === false) return null
 
   return {
     form_item_id:    r.form_item_id,
     prompt_snapshot: r.prompt_snapshot,
-    result:          (result ?? null) as InspectionResult | null,
-    actions:         actions as InspectionAction[],
+    result,
+    actions,
     needs_cleaning:  r.needs_cleaning === true,
-    note:            note as string | null,
-    photo_path:      photoPath as string | null,
-    photo_unavailable_reason: photoReason as string | null,
-    na_reason:       naReason as string | null,
+    ...text,
     value_number:    valueNumber,
-    value_text:      valueText as string | null,
-    value_date:      valueDate as string | null,
     asset_id:        typeof r.asset_id === 'string' ? r.asset_id : null,
     repeat_index:    repeatIndex,
     answered_at:     typeof r.answered_at === 'string' ? r.answered_at : null,
+    ...repeat,
   }
+}
+
+/**
+ * Typed, not stringified. `String(someObject)` is "[object Object]", which
+ * happens to fail the membership check and so reaches the right answer by
+ * accident — but only for as long as no enum value is ever named that. The
+ * narrowing says what is meant: an answer is a string or it is absent.
+ */
+function parseResult(value: unknown): InspectionResult | null | false {
+  if (value === null || value === undefined) return null
+  if (typeof value !== 'string' || !RESULTS.has(value)) return false
+  return value as InspectionResult
+}
+
+/**
+ * Same reasoning as parseResult: `.map(String)` would coerce a nested object
+ * into a string that merely fails the check rather than being rejected as the
+ * wrong shape.
+ *
+ * NULLISH stays lenient, deliberately. The old code turned any non-array into
+ * `[]`, and tightening that all the way would make `actions: null` — which a
+ * serializer can plausibly emit for an empty list — dead-letter an entire
+ * signed-off walk. Absent means no actions; a wrong SHAPE is still rejected.
+ */
+function parseActions(value: unknown): InspectionAction[] | false {
+  if (value !== null && value !== undefined && !Array.isArray(value)) return false
+  const actions = (value ?? []) as unknown[]
+  if (actions.some((a) => typeof a !== 'string' || !ACTIONS.has(a))) return false
+  return actions as InspectionAction[]
+}
+
+/** The six free-text columns, all bounded the same way. `false` = one was invalid. */
+function parseTextFields(r: Record<string, unknown>):
+  | Pick<SubmittedItem, 'note' | 'photo_path' | 'photo_unavailable_reason' | 'na_reason' | 'value_text' | 'value_date'>
+  | false {
+  const keys = [
+    'note', 'photo_path', 'photo_unavailable_reason', 'na_reason', 'value_text', 'value_date',
+  ] as const
+
+  const out = {} as Record<(typeof keys)[number], string | null>
+  for (const key of keys) {
+    const parsed = optionalText(r[key])
+    if (parsed === false) return false
+    out[key] = parsed
+  }
+  return out
+}
+
+/**
+ * §6's repeat answer, and the ONE pairing rule that used to be a database CHECK.
+ *
+ * It could not stay one: `repeat_of_work_order_id` is ON DELETE SET NULL, so
+ * deleting the referenced work order produces exactly the state the constraint
+ * forbade, and the DELETE failed — by cascade, that made deleting an
+ * ORGANIZATION fail (20260823180811). A CHECK cannot say "at INSERT time only",
+ * so the rule lives here, at the boundary where the payload is already vetted.
+ *
+ * The pair is REJECTED rather than silently dropped: an answer with nothing to
+ * be an answer about is a client bug, and quietly discarding it would make the
+ * inspector's tap disappear with no sign it ever happened.
+ *
+ * `false` means present-but-invalid, the same convention as the helpers below.
+ */
+function parseRepeatAnswer(r: Record<string, unknown>):
+  | { repeat_answer: InspectionRepeatAnswer | null; repeat_of_work_order_id: string | null }
+  | false {
+  const answer = r.repeat_answer
+  const workOrderId = typeof r.repeat_of_work_order_id === 'string'
+    ? r.repeat_of_work_order_id
+    : null
+
+  if (answer === null || answer === undefined) {
+    // A reference with no answer is harmless — remediation only reads it when
+    // there IS an answer — so it is tolerated rather than rejected.
+    return { repeat_answer: null, repeat_of_work_order_id: workOrderId }
+  }
+  if (typeof answer !== 'string' || !REPEAT_ANSWERS.has(answer)) return false
+  if (!workOrderId) return false
+
+  // Kept for BOTH answers. On 'new' it is the record of what this finding was
+  // distinguished FROM.
+  return { repeat_answer: answer as InspectionRepeatAnswer, repeat_of_work_order_id: workOrderId }
 }
 
 /** `false` means present-but-invalid, which is different from absent. */
