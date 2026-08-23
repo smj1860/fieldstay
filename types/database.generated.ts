@@ -4443,6 +4443,7 @@ export type Database = {
           property_id: string
           sent_at: string | null
           source_count_id: string | null
+          source_inspection_id: string | null
           status: Database["public"]["Enums"]["po_status"]
           total_estimated_cost: number | null
           updated_at: string
@@ -4459,6 +4460,7 @@ export type Database = {
           property_id: string
           sent_at?: string | null
           source_count_id?: string | null
+          source_inspection_id?: string | null
           status?: Database["public"]["Enums"]["po_status"]
           total_estimated_cost?: number | null
           updated_at?: string
@@ -4475,6 +4477,7 @@ export type Database = {
           property_id?: string
           sent_at?: string | null
           source_count_id?: string | null
+          source_inspection_id?: string | null
           status?: Database["public"]["Enums"]["po_status"]
           total_estimated_cost?: number | null
           updated_at?: string
@@ -4499,6 +4502,13 @@ export type Database = {
             columns: ["source_count_id"]
             isOneToOne: false
             referencedRelation: "inventory_counts"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "purchase_orders_source_inspection_id_fkey"
+            columns: ["source_inspection_id"]
+            isOneToOne: false
+            referencedRelation: "inspections"
             referencedColumns: ["id"]
           },
         ]
@@ -6006,6 +6016,7 @@ export type Database = {
           scheduled_time: string | null
           sign_off_notes: string | null
           source: Database["public"]["Enums"]["wo_source"]
+          source_inspection_item_id: string | null
           source_schedule_id: string | null
           source_turnover_id: string | null
           status: Database["public"]["Enums"]["wo_status"]
@@ -6058,6 +6069,7 @@ export type Database = {
           scheduled_time?: string | null
           sign_off_notes?: string | null
           source?: Database["public"]["Enums"]["wo_source"]
+          source_inspection_item_id?: string | null
           source_schedule_id?: string | null
           source_turnover_id?: string | null
           status?: Database["public"]["Enums"]["wo_status"]
@@ -6110,6 +6122,7 @@ export type Database = {
           scheduled_time?: string | null
           sign_off_notes?: string | null
           source?: Database["public"]["Enums"]["wo_source"]
+          source_inspection_item_id?: string | null
           source_schedule_id?: string | null
           source_turnover_id?: string | null
           status?: Database["public"]["Enums"]["wo_status"]
@@ -6167,6 +6180,13 @@ export type Database = {
             columns: ["reported_by_crew_member_id"]
             isOneToOne: false
             referencedRelation: "crew_members"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "work_orders_source_inspection_item_id_fkey"
+            columns: ["source_inspection_item_id"]
+            isOneToOne: false
+            referencedRelation: "inspection_items"
             referencedColumns: ["id"]
           },
           {

@@ -1197,4 +1197,21 @@ export type FieldStayEvents = {
     }
   }
 
+  /**
+   * An inspection was signed off and its answers are in the database.
+   *
+   * Emitted by the submit Route Handler AFTER the completion transaction, never
+   * on the tick — INSPECTIONS_SPEC §6: an inspector who ticks No on a loose
+   * handrail, tightens it while standing there and changes the answer to Yes
+   * would otherwise leave a work order for someone to close as not-a-thing.
+   * Across sixty items and a 24-hour draft window that is Tuesday, not an edge
+   * case.
+   */
+  'inspection/completed': {
+    data: {
+      org_id:        string
+      inspection_id: string
+    }
+  }
+
 }
