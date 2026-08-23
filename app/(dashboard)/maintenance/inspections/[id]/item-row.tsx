@@ -401,10 +401,19 @@ function RepeatPrompt({ id, concern, answer, onChange }: Readonly<{
   }
 
   return (
-    <div
-      className="flex flex-col gap-2 rounded-lg p-3"
+    <fieldset
+      className="flex flex-col gap-2 rounded-lg p-3 min-w-0"
       style={{ background: 'var(--bg-card)', border: '1px solid var(--accent-gold)' }}
+      aria-labelledby={`${id}-repeat-label`}
     >
+      {/* Named by the sentence below rather than by a <legend>, matching the
+          pass/fail fieldset above. A legend is the more obvious choice and the
+          wrong one here: it is not a flex item in any engine, so inside this
+          flex-column fieldset it would be pulled out of the flow and painted
+          across the gold border rather than sitting above the buttons. The
+          accessible name is what actually matters, and aria-labelledby gives
+          it — an inspector cannot answer "same or new?" without being told
+          what it would be the same AS. */}
       <p className="text-xs font-semibold flex items-start gap-1.5"
          style={{ color: 'var(--text-secondary)' }} id={`${id}-repeat-label`}>
         <History className="w-3.5 h-3.5 shrink-0 mt-0.5" style={{ color: 'var(--accent-gold)' }} />
@@ -413,7 +422,7 @@ function RepeatPrompt({ id, concern, answer, onChange }: Readonly<{
           {concern.woNumber ? ` · ${concern.woNumber}` : ''} — “{concern.title}”
         </span>
       </p>
-      <div className="flex gap-2" role="group" aria-labelledby={`${id}-repeat-label`}>
+      <div className="flex gap-2 min-w-0">
         {REPEAT_CHOICES.map((c) => {
           const active = chosen === c.value
           return (
@@ -434,7 +443,7 @@ function RepeatPrompt({ id, concern, answer, onChange }: Readonly<{
           )
         })}
       </div>
-    </div>
+    </fieldset>
   )
 }
 

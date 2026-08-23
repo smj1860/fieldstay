@@ -90,7 +90,7 @@ const RECONCILERS: Record<string, Reconciler> = {
     protection: 'fetch-fails-loud',
     why: "Drops cached PROPERTIES the org no longer has, so a removed property stops being offered as somewhere to start an inspection. cacheFormLibrary returns early on any of its four query errors, so this block only runs with a genuinely complete list. Empty is a legitimate steady state — a new org has no properties — and an empty-set guard would make the LAST property impossible to remove from a device. Note the sibling FORM tables in the same function are guarded the opposite way, and deliberately: an empty form library is never a real state, only a failed seed.",
   },
-  'lib/dexie/dashboard/warm-inspections.ts:398': {
+  'lib/dexie/dashboard/warm-inspections.ts:404': {
     protection: 'fetch-fails-loud',
     why: "Drops cached OPEN CONCERNS — the open work orders §6's repeat prompt asks about — once they are no longer open. The Supabase read's error branch returns before this block and deliberately leaves the cache alone, so the delete only runs on a genuinely complete list, and the scope is the property_ids the fetch covered. Empty is emphatically a legitimate steady state: most properties have no open inspection-sourced work order at all. An empty-set guard would be the bug here — a COMPLETED work order could never stop being offered as a predecessor, and the prompt would keep asking an inspector whether a finding matches a job that was finished months ago.",
   },

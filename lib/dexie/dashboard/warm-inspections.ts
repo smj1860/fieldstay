@@ -353,7 +353,13 @@ async function cacheOpenConcerns(
       return
     }
 
-    const concernByFormItem = new Map(
+    // Generic stated rather than inferred. TypeScript gets this right on its
+    // own, but the value flows straight into a template literal below and an
+    // analyser that cannot follow the inference reads it as an object — which
+    // would render `[object Object]` into the dedupe key if it were ever true.
+    // Saying it costs nothing and matches the sibling map in
+    // lib/inngest/functions/inspection-completed.ts.
+    const concernByFormItem = new Map<string, string | null>(
       (await db.inspection_form_items.toArray()).map((i) => [i.id, i.concern_key]),
     )
 
@@ -366,7 +372,7 @@ async function cacheOpenConcerns(
       // fill screen computes for an item with no concern key — so a form
       // library that has not landed yet degrades to narrower matching rather
       // than to nothing.
-      const concernKey = concernByFormItem.get(formItemId) ?? formItemId
+      const concernKey: string = concernByFormItem.get(formItemId) ?? formItemId
 
       // One per (property, concern): the oldest, by the ORDER BY above.
       const dedupe = `${wo.property_id}|${concernKey}`
