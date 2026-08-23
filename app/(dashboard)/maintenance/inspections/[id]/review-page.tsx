@@ -17,10 +17,12 @@
 // operational safety guidelines" over a form with eleven blank items is not an
 // incomplete record — it is a false one.
 
-import { AlertTriangle, CheckCircle2 } from 'lucide-react'
+import { useState } from 'react'
+import { AlertTriangle, CheckCircle2, Lock } from 'lucide-react'
 
 import { Button } from '@/components/ui/Button'
 import { Card } from '@/components/ui/Card'
+import { Dialog } from '@/components/ui/Dialog'
 import { Input } from '@/components/ui/Input'
 import type { OutstandingItem } from '@/lib/inspections/resolve-form'
 
@@ -43,6 +45,7 @@ interface Props {
 export function ReviewPage({
   outstanding, inspectorName, onInspectorNameChange, onGoToPage, onSignOff, submitting, error,
 }: Readonly<Props>) {
+  const [confirmSignOff, setConfirmSignOff] = useState(false)
   const clear = outstanding.length === 0
 
   return (
@@ -130,9 +133,9 @@ export function ReviewPage({
           variant="cta"
           className="w-full mt-4"
           disabled={!clear || !inspectorName.trim() || submitting}
-          onClick={onSignOff}
+          onClick={() => setConfirmSignOff(true)}
         >
-          {submitting ? 'Signing off…' : 'Sign off and complete'}
+          {submitting ? 'Submitting…' : 'Sign off and submit'}
         </Button>
 
         {!clear && (
@@ -141,6 +144,55 @@ export function ReviewPage({
           </p>
         )}
       </Card>
+
+      {/* The one irreversible step in the whole flow, so it asks first.
+          Completed inspections are immutable by DB trigger — a correction is a
+          NEW inspection referencing the original, never an edit — so "are you
+          sure" here is not a courtesy, it is the last moment anything can
+          change. Cancel returns to the form with every answer intact. */}
+      {confirmSignOff && (
+        <Dialog
+          open
+          onClose={() => setConfirmSignOff(false)}
+          title="Submit this inspection?"
+          mobileSheet
+          maxWidthClassName="max-w-md"
+          footer={
+            <div className="flex gap-2 w-full">
+              <Button
+                variant="secondary"
+                className="flex-1"
+                onClick={() => setConfirmSignOff(false)}
+                disabled={submitting}
+              >
+                Cancel
+              </Button>
+              <Button
+                variant="cta"
+                className="flex-1"
+                disabled={submitting}
+                onClick={() => { setConfirmSignOff(false); onSignOff() }}
+              >
+                {submitting ? 'Submitting…' : 'OK, submit'}
+              </Button>
+            </div>
+          }
+        >
+          <div className="flex flex-col gap-3">
+            <p className="text-sm flex items-start gap-2" style={{ color: 'var(--text-primary)' }}>
+              <Lock className="w-4 h-4 mt-0.5 shrink-0" style={{ color: 'var(--accent-gold)' }} />
+              <span>
+                Signing off finalises this inspection and submits it into the record.
+                It cannot be edited afterwards — a correction is a new inspection.
+              </span>
+            </p>
+            <p className="text-xs" style={{ color: 'var(--text-muted)' }}>
+              Signing as <strong style={{ color: 'var(--text-secondary)' }}>{inspectorName.trim()}</strong>.
+              If you are not ready, cancel and go back to the form — nothing is lost.
+            </p>
+          </div>
+        </Dialog>
+      )}
     </div>
   )
 }

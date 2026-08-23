@@ -6559,6 +6559,14 @@ export type Database = {
         Args: { p_door_code: string; p_org_id: string; p_property_id: string }
         Returns: string
       }
+      submit_inspection: {
+        Args: {
+          p_inspection_id: string
+          p_inspector_name: string
+          p_items: Json
+        }
+        Returns: Json
+      }
       submit_quote_via_token: {
         Args: {
           p_line_items: Json

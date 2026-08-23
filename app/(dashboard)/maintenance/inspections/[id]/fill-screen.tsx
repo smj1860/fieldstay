@@ -30,9 +30,9 @@
 // when it can and the cache when it cannot has two code paths, and the offline
 // one is the one nobody exercises. This has one.
 
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useLiveQuery } from 'dexie-react-hooks'
-import { ChevronLeft, ChevronRight, List, WifiOff } from 'lucide-react'
+import { ChevronLeft, ChevronRight, Clock, List, WifiOff } from 'lucide-react'
 
 import { Button } from '@/components/ui/Button'
 import { Card } from '@/components/ui/Card'
@@ -53,6 +53,8 @@ import {
   type AnswerPatch,
 } from '@/lib/dexie/dashboard/inspection-draft'
 import { pullInspection } from '@/lib/dexie/dashboard/inspection-sync'
+import type { InspectionAnswerRow } from '@/lib/dexie/dashboard/schema'
+import { enqueueDashboardMutation } from '@/lib/dexie/dashboard/syncService'
 import type { PropertyAsset } from '@/types/database'
 
 import { ItemRow } from './item-row'
@@ -71,6 +73,7 @@ export function FillScreen({ inspectionId, userId, orgId }: Readonly<Props>) {
   const [inspectorName, setInspectorName] = useState('')
   const [pullFailed, setPullFailed]   = useState(false)
   const [submitError, setSubmitError] = useState<string | null>(null)
+  const [submitting, setSubmitting]   = useState(false)
 
   // Pull on mount, then render from the cache regardless of how it went. A
   // failed pull is the expected state at a property and changes nothing about
@@ -93,6 +96,15 @@ export function FillScreen({ inspectionId, userId, orgId }: Readonly<Props>) {
     [db, inspectionId],
     [],
   )
+  // Whether a sign-off is already queued. Derived from the outbox rather than
+  // held as a local flag: the flag and the queue could disagree, and the queue
+  // is the one that decides whether the work actually gets sent.
+  const queuedSubmit = useLiveQuery(
+    () => db.mutations.where('[kind+targetId]')
+      .equals(['inspection.submit', inspectionId]).first(),
+    [db, inspectionId],
+  )
+
   const assets = useLiveQuery(
     // `async` so both branches produce the same Promise type. A bare ternary
     // yields `PromiseExtended<PropertyAsset[]> | Promise<never[]>`, and the
@@ -134,6 +146,45 @@ export function FillScreen({ inspectionId, userId, orgId }: Readonly<Props>) {
       promptSnapshot: prompt, assetId, repeatIndex,
     }, patch)
   }, [userId, orgId, inspectionId])
+
+  // When the queued submit DISAPPEARS, the drain accepted it — the outbox
+  // deletes a row only after its handler resolves. The server now has
+  // completed_at and the cached row does not, so without this the screen would
+  // flip straight back to an editable form over answers that are already filed.
+  const hadQueuedSubmit = useRef(false)
+  useEffect(() => {
+    if (queuedSubmit) { hadQueuedSubmit.current = true; return }
+    if (!hadQueuedSubmit.current) return
+    hadQueuedSubmit.current = false
+    void pullInspection(userId, orgId, inspectionId)
+  }, [queuedSubmit, userId, orgId, inspectionId])
+
+  const signOff = useCallback(async () => {
+    setSubmitError(null)
+    setSubmitting(true)
+    try {
+      const rows = await db.inspection_answers.where('inspectionId').equals(inspectionId).toArray()
+      if (rows.length === 0) {
+        setSubmitError('There are no answers to submit.')
+        return
+      }
+
+      // QUEUED, not POSTed directly. Sign-off has to work in the basement where
+      // the walk happened, and the outbox already carries the offline gate,
+      // backoff and dead-lettering the crew surface paid for.
+      await enqueueDashboardMutation(userId, orgId, {
+        kind:     'inspection.submit',
+        targetId: inspectionId,
+        payload:  { inspectorName: inspectorName.trim(), items: rows.map(toSubmittedItem) },
+      })
+    } catch (err) {
+      console.error('[inspection.signOff]', err)
+      setSubmitError('Could not queue the submission. Please try again.')
+    } finally {
+      setSubmitting(false)
+    }
+  }, [db, userId, orgId, inspectionId, inspectorName])
+
 
   // ── Loading and failure states, kept apart ────────────────────────────────
   //
@@ -188,6 +239,22 @@ export function FillScreen({ inspectionId, userId, orgId }: Readonly<Props>) {
     )
   }
 
+  // A queued submit makes the form read-only, and that is not cosmetic: the
+  // payload was SNAPSHOTTED at enqueue, so an edit made now would look saved on
+  // screen and never be sent.
+  if (queuedSubmit) {
+    return (
+      <Shell>
+        <QueuedSubmitPanel
+          failed={!!queuedSubmit.failed}
+          lastError={queuedSubmit.lastError}
+          signedBy={inspection.inspector_name ?? inspectorName.trim()}
+        />
+      </Shell>
+    )
+  }
+
+
   const onReview = stop >= pages.length
   const page     = onReview ? null : pages[stop]
 
@@ -216,11 +283,8 @@ export function FillScreen({ inspectionId, userId, orgId }: Readonly<Props>) {
           inspectorName={inspectorName}
           onInspectorNameChange={setInspectorName}
           onGoToPage={setStop}
-          onSignOff={() => setSubmitError(
-            'Sign-off is not wired up yet — the submit endpoint lands with remediation. ' +
-            'Your answers are saved on this device.',
-          )}
-          submitting={false}
+          onSignOff={() => { void signOff() }}
+          submitting={submitting}
           error={submitError}
         />
       ) : (
@@ -278,6 +342,75 @@ export function FillScreen({ inspectionId, userId, orgId }: Readonly<Props>) {
         onClose={() => setIndexOpen(false)}
       />
     </Shell>
+  )
+}
+
+/**
+ * A draft row as the submit endpoint expects it.
+ *
+ * snake_case here, camelCase in Dexie — the boundary is deliberate. The local
+ * draft is not a cached server row and must not look like one, or a bulkPut of
+ * server rows into that table would type-check.
+ */
+function toSubmittedItem(r: InspectionAnswerRow) {
+  return {
+    form_item_id:    r.formItemId,
+    prompt_snapshot: r.promptSnapshot,
+    result:          r.result,
+    actions:         r.actions,
+    needs_cleaning:  r.needsCleaning,
+    note:            r.note,
+    photo_path:      r.photoPath,
+    photo_unavailable_reason: r.photoUnavailableReason,
+    na_reason:       r.naReason,
+    value_number:    r.valueNumber,
+    value_text:      r.valueText,
+    value_date:      r.valueDate,
+    asset_id:        r.assetId,
+    repeat_index:    r.repeatIndex,
+    answered_at:     r.answeredAt,
+  }
+}
+
+/** What the screen shows once sign-off is queued — see the guard that renders it. */
+function QueuedSubmitPanel({ failed, lastError, signedBy }: Readonly<{
+  failed:    boolean
+  lastError: string | undefined
+  signedBy:  string
+}>) {
+  if (failed) {
+    return (
+      <Card>
+        <div className="flex flex-col gap-2">
+          <p className="text-sm font-semibold" style={{ color: 'var(--accent-red)' }}>
+            This submission could not be sent.
+          </p>
+          <p className="text-xs" style={{ color: 'var(--text-secondary)' }}>
+            {lastError ?? 'The server rejected it.'}
+          </p>
+          <p className="text-xs" style={{ color: 'var(--text-muted)' }}>
+            Every answer is still held on this device. Use the sync banner to retry —
+            nothing has been lost.
+          </p>
+        </div>
+      </Card>
+    )
+  }
+
+  return (
+    <Card>
+      <div className="flex flex-col gap-2">
+        <p className="text-sm font-semibold flex items-center gap-2"
+           style={{ color: 'var(--text-primary)' }}>
+          <Clock className="w-4 h-4" style={{ color: 'var(--accent-gold)' }} />
+          Signed off — waiting to send
+        </p>
+        <p className="text-xs" style={{ color: 'var(--text-muted)' }}>
+          Signed by {signedBy || 'the inspector'}. This is queued on the device and
+          will be filed the moment there is a connection. You can close the app.
+        </p>
+      </div>
+    </Card>
   )
 }
 

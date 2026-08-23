@@ -94,6 +94,33 @@ describe('guardrail: every dashboard mutation kind has a dead-letter surface', (
     }
   })
 
+  it('every terminal error type the handlers throw is classified as terminal', () => {
+    // The handlers decide what is permanent; `isTerminal` decides what the
+    // ENGINE does about it. Those are two places, and they can disagree
+    // silently: drop SubmitRejectedError from isTerminal and a 4xx retries
+    // against a wall forever, with the PM believing their walk is still
+    // sending. The handler tests cannot see this — they only observe the throw.
+    const src = readFileSync(join(ROOT, 'lib/dexie/dashboard/syncService.ts'), 'utf8')
+
+    const thrown = [...src.matchAll(/throw new (\w*(?:NotImplemented|Rejected)\w*Error)\(/g)]
+      .map((m) => m[1]!)
+    const declared = [...src.matchAll(/reject\(new (\w+Error)\(/g)].map((m) => m[1]!)
+    const terminalTypes = [...new Set([...thrown, ...declared])]
+
+    expect(terminalTypes.length, 'no terminal error types found — has the shape changed?')
+      .toBeGreaterThan(0)
+
+    const isTerminal = src.slice(src.indexOf('isTerminal:'))
+    const block = isTerminal.slice(0, isTerminal.indexOf('\n  })'))
+    const missing = terminalTypes.filter((t) => !block.includes(t))
+
+    expect(missing, [
+      'These error types are thrown as permanent failures but are not listed in',
+      'isTerminal, so the outbox will RETRY them instead of dead-lettering:',
+      ...missing,
+    ].join('\n')).toEqual([])
+  })
+
   it('the banner offers a retry, not just a notice', () => {
     expect(BANNER_SRC).toContain('retryAllFailedDashboardMutations')
     expect(BANNER_SRC).toContain('discardFailedDashboardMutation')
