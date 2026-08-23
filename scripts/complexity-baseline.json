@@ -8,9 +8,6 @@
   "app/(dashboard)/maintenance/actions.ts": [
     21
   ],
-  "app/(dashboard)/maintenance/CreateWorkOrderModal.tsx": [
-    19
-  ],
   "app/(dashboard)/messages/messages-client.tsx": [
     16
   ],

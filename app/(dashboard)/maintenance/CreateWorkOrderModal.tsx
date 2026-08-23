@@ -4,6 +4,8 @@ import { useActionState, useEffect, useRef, useState } from 'react'
 import { AlertTriangle, Camera, Info, ShieldOff, X } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { createWorkOrder } from './actions'
+import { createWorkOrderLocal } from '@/lib/dexie/dashboard/create-work-order-local'
+import { useIsOffline } from '@/lib/dexie/dashboard/use-is-offline'
 import { distanceMiles } from '@/lib/geocoding'
 import { isBlockingComplianceStatus } from '@/lib/vendors/compliance-status'
 import { createClient } from '@/lib/supabase/client'
@@ -17,6 +19,32 @@ import type {
   CrewMemberOption, AssetOption, VendorComplianceRow,
   PropertyOptionWithCoords, VendorOptionWithCoords,
 } from './maintenance-board'
+import type { PriorityLevel, WoCategory } from '@/types/database'
+
+/**
+ * What the submit button says.
+ *
+ * Extracted rather than nested in the JSX: with the offline branch this is four
+ * cases, and a chained ternary is exactly what `sonarjs/no-nested-conditional`
+ * exists to stop. The offline wording is deliberately not "Create" — the PM is
+ * queueing, and a button that claims to have created something that has not
+ * left the tablet is the kind of small lie that costs trust in the sync.
+ */
+function submitLabel({ offline, pending, queueing, assignMode, quoteCount }: {
+  offline:    boolean
+  pending:    boolean
+  queueing:   boolean
+  assignMode: 'vendor' | 'crew' | 'quotes'
+  quoteCount: number
+}): string {
+  if (queueing) return 'Saving…'
+  if (pending)  return 'Creating…'
+  if (offline)  return 'Save for when you are back online'
+  if (assignMode === 'quotes' && quoteCount > 0) {
+    return `Create & Request ${quoteCount} Quote${quoteCount !== 1 ? 's' : ''}`
+  }
+  return 'Create Work Order'
+}
 
 /**
  * The "New Work Order" creation form — extracted out of
@@ -30,6 +58,7 @@ export function CreateWorkOrderModal({
   propertyAssets = [],
   vendorCompliance = [],
   orgId = '',
+  userId = '',
   onClose,
   onSuccess,
   onWarning,
@@ -40,11 +69,16 @@ export function CreateWorkOrderModal({
   propertyAssets?:  AssetOption[]
   vendorCompliance?: VendorComplianceRow[]
   orgId?:           string
+  /** The dashboard cache is keyed on (user, org) — both are needed offline. */
+  userId?:          string
   onClose:          () => void
   onSuccess?:       () => void
   onWarning?:       (msg: string) => void
 }>) {
   const [state, action, pending]          = useActionState(createWorkOrder, null)
+  const offline = useIsOffline()
+  const [queueing, setQueueing] = useState(false)
+  const [queueError, setQueueError] = useState<string | null>(null)
   const [assignMode,         setAssignMode]         = useState<'vendor' | 'crew' | 'quotes'>('vendor')
   const [selectedVendor,     setSelectedVendor]     = useState('')
   const [selectedPropertyId, setSelectedPropertyId] = useState('')
@@ -81,6 +115,46 @@ export function CreateWorkOrderModal({
   // the disabled option and the server gate can never disagree about a status
   // neither of them recognizes.
   const selectedBlocked = isBlockingComplianceStatus(selectedCompliance, inOnboardingGrace)
+
+  /**
+   * Queue the work order on this device.
+   *
+   * Reads the same form the Server Action would have posted, so the two paths
+   * cannot ask for different things. What it drops is deliberate and matches
+   * the route: no quote requests, no portal link, no photos — each of those is
+   * outbound dispatch that needs a network at the moment of choosing, and doing
+   * them against a cache that may be hours old is worse than doing them when
+   * the PM is back in signal.
+   */
+  const queueOffline = async (e: React.FormEvent<HTMLFormElement>) => {
+    e.preventDefault()
+    setQueueError(null)
+    setQueueing(true)
+
+    const fd = new FormData(e.currentTarget)
+    const text = (k: string) => {
+      const v = fd.get(k)
+      return typeof v === 'string' && v.trim() !== '' ? v.trim() : null
+    }
+    const result = await createWorkOrderLocal(userId, orgId, {
+      propertyId:           text('property_id') ?? '',
+      title:                text('title') ?? '',
+      description:          text('description'),
+      priority:             (text('priority') ?? 'medium') as PriorityLevel,
+      category:             text('category') as WoCategory | null,
+      assetId:              text('asset_id'),
+      assignedCrewMemberId: assignMode === 'crew' ? text('assigned_crew_member_id') : null,
+      vendorId:             assignMode === 'vendor' ? text('vendor_id') : null,
+      scheduledDate:        text('scheduled_date'),
+    })
+    setQueueing(false)
+    if (!result.ok) {
+      setQueueError(result.error ?? 'Could not save that work order.')
+      return
+    }
+    onWarning?.('Saved on this device. It will be raised as soon as you are back online.')
+    onClose()
+  }
 
   const handlePhotoSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = Array.from(e.target.files ?? [])
@@ -176,25 +250,44 @@ export function CreateWorkOrderModal({
           <Button
             type="submit"
             form="create-work-order-form"
-            disabled={pending || selectedBlocked}
+            disabled={pending || queueing || selectedBlocked}
             className="flex-1"
           >
-            {pending
-              ? 'Creating…'
-              : assignMode === 'quotes' && selectedQuoteVendors.length > 0
-              ? `Create & Request ${selectedQuoteVendors.length} Quote${selectedQuoteVendors.length !== 1 ? 's' : ''}`
-              : 'Create Work Order'}
+            {submitLabel({ offline, pending, queueing, assignMode, quoteCount: selectedQuoteVendors.length })}
           </Button>
           <Button variant="ghost" type="button" onClick={onClose}>Cancel</Button>
         </>
       }
     >
-        <form id="create-work-order-form" action={action} className="space-y-4">
+        <form
+          id="create-work-order-form"
+          // Two submit paths, one form. Online it is the Server Action exactly
+          // as before; offline the action would post into a void, so the values
+          // are queued to the dashboard outbox instead and sent on reconnect.
+          // Switching on `action` rather than forking the whole modal is what
+          // keeps the fields, the validation and the layout from drifting into
+          // two versions.
+          {...(offline
+            ? { onSubmit: (e: React.FormEvent<HTMLFormElement>) => { void queueOffline(e) } }
+            : { action })}
+          className="space-y-4"
+        >
           {/* Hidden fields for mode */}
           <input type="hidden" name="request_quotes" value={assignMode === 'quotes' ? 'true' : 'false'} />
           {assignMode === 'quotes' && selectedQuoteVendors.map((id) => (
             <input key={id} type="hidden" name="quote_vendor_ids" value={id} />
           ))}
+
+          {offline && (
+            <InlineAlert tone="info">
+              You are offline. This work order will be saved on this device and
+              raised automatically when you are back in signal. Quote requests,
+              a vendor portal link and photos need a connection, so add those
+              afterwards.
+            </InlineAlert>
+          )}
+
+          {queueError && <InlineAlert tone="error">{queueError}</InlineAlert>}
 
           {state?.error && (
             <InlineAlert tone="error">

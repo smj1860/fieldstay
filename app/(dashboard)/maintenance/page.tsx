@@ -8,7 +8,7 @@ import type { Metadata } from 'next'
 export const metadata: Metadata = { title: 'Maintenance' }
 
 export default async function MaintenancePage() {
-  const { supabase, membership } = await requireOrgMember()
+  const { supabase, membership, user } = await requireOrgMember()
 
   const [
     workOrdersResult,
@@ -157,6 +157,7 @@ export default async function MaintenancePage() {
         propertyAssets={propertyAssetsResult.data ?? []}
         vendorCompliance={vendorCompliance}
         orgId={membership.org_id}
+        userId={user.id}
         role={membership.role}
       />
     </>

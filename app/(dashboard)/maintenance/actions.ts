@@ -15,7 +15,10 @@ import type { WoStatus, WoCategory, ScheduleFrequency, ScheduleType, Enums } fro
 import { PriorityLevelSchema, WoStatusSchema, WoCategorySchema } from '@/lib/schemas/work-order'
 import type { SupabaseClient } from '@supabase/supabase-js'
 import {
+  buildWorkOrderInsert,
   resolveWorkOrderStatus,
+  validateWorkOrderCreate,
+  type WorkOrderFormInput,
   checkCrewMemberAssignable,
   checkQuoteVendorsAssignable,
   checkCrewTimeOffWarning,
@@ -144,23 +147,6 @@ async function trackVendorAssignmentAgainstSuggestions(
  * part with no decisions in it. Pulling them out leaves the action's own
  * branching — the guards and the two dispatch modes — legible on its own.
  */
-interface WorkOrderFormInput {
-  title:                   string
-  property_id:             string
-  description:             string | null
-  priority:                ReturnType<typeof PriorityLevelSchema.safeParse>['data'] & string
-  category:                WoCategory | null
-  vendor_id:               string | null
-  assigned_crew_member_id: string | null
-  scheduled_date:          string | null
-  scheduled_time:          string | null
-  estimated_cost:          number | null
-  nte_amount:              number | null
-  asset_id:                string | null
-  portal_enabled:          boolean
-  request_quotes:          boolean
-  quote_vendor_ids:        string[]
-}
 
 /** `''` and a missing key both mean "not provided" for every optional field. */
 function formText(formData: FormData, key: string): string | null {
@@ -198,82 +184,6 @@ function parseWorkOrderForm(formData: FormData): WorkOrderFormInput {
     portal_enabled:          portalRaw === 'on' || portalRaw === 'true',
     request_quotes:          formData.get('request_quotes') === 'true',
     quote_vendor_ids:        formData.getAll('quote_vendor_ids') as string[],
-  }
-}
-
-/**
- * Every reason to refuse before the work order exists, in the order the DB
- * reads have to happen. Returns the state to hand back, or null to proceed.
- *
- * These must ALL run ahead of the insert. A hard-blocked vendor or a foreign
- * crew id caught afterwards would leave an orphan work order with no way to
- * explain itself — which is exactly why the quote-vendor check stays here even
- * though sendQuoteRequests repeats it later.
- */
-async function validateWorkOrderCreate(
-  supabase: SupabaseClient,
-  orgId:    string,
-  input:    WorkOrderFormInput,
-): Promise<MaintenanceActionState | null> {
-  if (!input.title)       return { error: 'Title is required' }
-  if (!input.property_id) return { error: 'Property is required' }
-  if (input.request_quotes && !input.quote_vendor_ids.length) {
-    return { error: 'Select at least one vendor to request quotes from' }
-  }
-
-  const owned = await verifyPropertyInOrg(
-    supabase, orgId, input.property_id, 'serverAction.maintenance.createWorkOrder.property',
-  )
-  if (!owned.ok) return { error: owned.error }
-
-  const directVendor = input.vendor_id && !input.request_quotes
-  if (directVendor && await isVendorHardBlocked(supabase, input.vendor_id!, orgId)) {
-    return { error: VENDOR_HARD_BLOCKED_ERROR }
-  }
-
-  // Quote mode dispatches to `quote_vendor_ids` instead of `vendor_id`, and
-  // used to skip both the in-org check and the compliance gate entirely.
-  if (input.request_quotes) {
-    const quoteVendorProblem = await checkQuoteVendorsAssignable(supabase, orgId, input.quote_vendor_ids)
-    if (quoteVendorProblem) return quoteVendorProblem
-  }
-
-  // TENANT ISOLATION: assigned_crew_member_id arrives from the client and was
-  // written unverified. work_orders_select grants read on an OR'd branch keyed
-  // by that column, so a foreign org's crew id here handed the other tenant's
-  // crew user read access to this work order.
-  return checkCrewMemberAssignable(supabase, orgId, input.assigned_crew_member_id)
-}
-
-/** The insert payload plus the one derived flag the caller still needs. */
-function buildWorkOrderInsert(input: WorkOrderFormInput, orgId: string) {
-  // In quote-request mode the WO starts as quote_requested with no vendor
-  // assigned yet, and no portal link — there is nobody to give one to.
-  const usePortal = input.portal_enabled && !input.request_quotes
-  const tokenExpiry = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString()
-
-  return {
-    usePortal,
-    payload: {
-      property_id:             input.property_id,
-      org_id:                  orgId,
-      vendor_id:               input.request_quotes ? null : input.vendor_id,
-      assigned_crew_member_id: input.assigned_crew_member_id,
-      asset_id:                input.asset_id,
-      title:                   input.title,
-      description:             input.description,
-      category:                input.category,
-      priority:                input.priority,
-      status:                  resolveWorkOrderStatus(input.request_quotes, input.vendor_id),
-      source:                  'manual' as const,
-      scheduled_date:          input.scheduled_date,
-      scheduled_time:          input.scheduled_time,
-      estimated_cost:          input.estimated_cost,
-      nte_amount:              input.nte_amount,
-      portal_enabled:          usePortal,
-      completion_token:            usePortal ? crypto.randomUUID() : null,
-      completion_token_expires_at: usePortal ? tokenExpiry : null,
-    },
   }
 }
 
@@ -340,9 +250,9 @@ export async function createWorkOrder(
   try {
     const { supabase, membership, user } = await requireOrgRole(['admin', 'manager'])
 
-    const input   = parseWorkOrderForm(formData)
-    const invalid = await validateWorkOrderCreate(supabase, membership.org_id, input)
-    if (invalid) return invalid
+    const input = parseWorkOrderForm(formData)
+    const valid = await validateWorkOrderCreate(supabase, membership.org_id, input)
+    if (!valid.ok) return { error: valid.error }
 
     const { payload, usePortal } = buildWorkOrderInsert(input, membership.org_id)
 

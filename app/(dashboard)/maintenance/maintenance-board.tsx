@@ -870,6 +870,7 @@ export function MaintenanceBoard({
   propertyAssets = [],
   vendorCompliance = [],
   orgId = '',
+  userId = '',
   role,
 }: {
   workOrders:       WorkOrderRow[]
@@ -880,6 +881,8 @@ export function MaintenanceBoard({
   propertyAssets?:  AssetOption[]
   vendorCompliance?: VendorComplianceRow[]
   orgId?:           string
+  /** Needed by the offline create path — the dashboard cache is keyed on (user, org). */
+  userId?:          string
   role:             string
 }) {
   const router        = useRouter()
@@ -1267,6 +1270,7 @@ export function MaintenanceBoard({
           propertyAssets={propertyAssets}
           vendorCompliance={vendorCompliance}
           orgId={orgId}
+          userId={userId}
           onClose={() => setShowCreate(false)}
           onSuccess={() => router.refresh()}
           onWarning={setWarning}
