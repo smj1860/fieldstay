@@ -1,0 +1,45 @@
+-- Drop inspection_items_repeat_answer_needs_reference.
+--
+-- Added two migrations ago (20260824090000) to stop an uninterpretable row:
+-- `repeat_answer = 'same'` with nothing to be the same AS. The intent was
+-- right and a CHECK is the wrong instrument for it, which the FK cleanup made
+-- obvious the moment both were in place at once.
+--
+-- THE INTERLOCK
+--
+-- `repeat_of_work_order_id` is ON DELETE SET NULL. Deleting the referenced work
+-- order therefore produces exactly the state the CHECK forbids — answer kept,
+-- reference gone — and the constraint aborted the DELETE:
+--
+--   ERROR: new row for relation "inspection_items" violates check constraint
+--          "inspection_items_repeat_answer_needs_reference"
+--   CONTEXT: SQL statement "UPDATE ONLY inspection_items
+--            SET repeat_of_work_order_id = NULL WHERE ..."
+--            SQL statement "DELETE FROM work_orders WHERE id = ..."
+--
+-- 20260824090200 had just widened the immutability trigger to let that same
+-- cleanup through. Two guards written in the same sitting, each correct alone,
+-- blocking each other — and the visible symptom is a work order (or, by
+-- cascade, an organization) that cannot be deleted.
+--
+-- WHY NOT REPAIR THE CHECK
+--
+-- The invariant is "you may not RECORD an answer without naming the work
+-- order". That is an INSERT-time rule. A CHECK is evaluated on every write, so
+-- it cannot distinguish the moment of recording from a later referential
+-- cleanup, and the post-cleanup state is genuinely legitimate: it means "the
+-- inspector said same, and the job they meant has since been deleted".
+--
+-- WHERE THE RULE LIVES NOW
+--
+-- lib/inspections/submit-payload.ts rejects the pairing at the boundary, which
+-- is where malformed client payloads are already caught. That is weaker than a
+-- database constraint by the usual argument — it does not catch a row written
+-- by another path — and the exposure is small enough to accept: remediation
+-- already treats `same` with a missing reference as "the predecessor is gone"
+-- and creates a work order, so the degenerate row produces the SAFE fallback
+-- rather than a lost finding. A guard whose failure mode is "does the right
+-- thing anyway" does not justify breaking deletes.
+
+ALTER TABLE inspection_items
+  DROP CONSTRAINT IF EXISTS inspection_items_repeat_answer_needs_reference;

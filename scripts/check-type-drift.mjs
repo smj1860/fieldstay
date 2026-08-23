@@ -116,6 +116,7 @@ const ENUM_MAP = {
   ical_source:          'IcalSource',
   inspection_action:    'InspectionAction',
   inspection_remediation: 'InspectionRemediation',
+  inspection_repeat_answer: 'InspectionRepeatAnswer',
   inspection_response_type: 'InspectionResponseType',
   inspection_result:    'InspectionResult',
   inventory_category:   'InventoryCategory',

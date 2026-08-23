@@ -73,6 +73,8 @@ const EMPTY: Omit<InspectionAnswerRow, keyof AnswerIdentity | 'id' | 'updatedAt'
   valueNumber:   null,
   valueText:     null,
   valueDate:     null,
+  repeatAnswer:        null,
+  repeatOfWorkOrderId: null,
 }
 
 /**

@@ -47,6 +47,7 @@ import type {
   InspectionForm,
   InspectionFormItem,
   InspectionFormSection,
+  InspectionRepeatAnswer,
   InspectionResult,
   MaintenanceSchedule,
   Property,
@@ -178,9 +179,41 @@ export interface InspectionAnswerRow {
   assetId:        string | null
   repeatIndex:    number | null
 
+  /**
+   * §6's repeat visit. Set only when the inspector was shown an open work order
+   * for this concern and answered; null means never asked, which is the common
+   * case and the one remediation falls back on.
+   */
+  repeatAnswer:          InspectionRepeatAnswer | null
+  repeatOfWorkOrderId:   string | null
+
   /** Null until the item is genuinely answered — drives the progress counts. */
   answeredAt:     string | null
   updatedAt:      string
+}
+
+/**
+ * An open work order a failing item might be a repeat of (§6).
+ *
+ * A PROJECTION, not a cached row — which is why it is camelCase like
+ * `InspectionAnswerRow` and unlike every mirrored table. `concernKey` exists on
+ * no work order: it is `concern_key ?? form_item_id`, resolved from the form
+ * library the device already holds, and it is the key because §5 lets several
+ * forms ask about one concern — `handrail_secure` on the safety form and on the
+ * seasonal one are the same fault.
+ *
+ * Held on the device because the prompt has to fire where the inspector is
+ * standing, which is the property, which is where there is no signal.
+ */
+export interface OpenConcernRow {
+  /** The work order's id — what the answer records as `repeat_of_work_order_id`. */
+  id:         string
+  propertyId: string
+  concernKey: string
+  woNumber:   string | null
+  title:      string
+  /** ISO. Rendered as "Open since 12 Mar", so the inspector can judge staleness. */
+  createdAt:  string
 }
 
 export class FieldStayDashboardDexie extends Dexie {
@@ -206,6 +239,8 @@ export class FieldStayDashboardDexie extends Dexie {
 
   /** LOCAL-ONLY working draft. No server row exists until sign-off. */
   inspection_answers!:    Table<InspectionAnswerRow, string>
+  /** Open work orders a failing item might be a repeat of — see §6. */
+  open_wo_concerns!:      Table<OpenConcernRow, string>
   /** Photo BYTES, in the same database as their queue row — see version(4). */
   photo_blobs!:           Table<DashboardPhotoBlobRow, string>
 
@@ -272,6 +307,26 @@ export class FieldStayDashboardDexie extends Dexie {
     // references it closes that gap rather than inheriting it.
     this.version(4).stores({
       photo_blobs: 'key',
+    })
+
+    // v5 — §6's repeat-visit prompt, plus a dead index.
+    //
+    // THE DEAD INDEX. v1 declared `work_orders: 'id, org_id, property_id,
+    // wo_status'`, and `wo_status` is the ENUM's name — the column is `status`.
+    // Dexie indexes a property that does not exist as absent, so the index was
+    // empty and any query on it would have degraded to a full scan, silently.
+    // No live bug, because nothing has ever written to this table; it is
+    // corrected here because the offline work-order create is about to.
+    //
+    // OPEN CONCERNS. The prompt has to fire at the property, offline, so the
+    // open work orders it asks about have to be on the device before the walk
+    // starts. Kept in their own table rather than stuffed into `work_orders`:
+    // this is a PROJECTION carrying a concern key that exists on no work order
+    // row, and the cached tables above are deliberately faithful mirrors of
+    // their Supabase shape.
+    this.version(5).stores({
+      work_orders:       'id, org_id, property_id, status',
+      open_wo_concerns:  'id, propertyId, [propertyId+concernKey]',
     })
   }
 }

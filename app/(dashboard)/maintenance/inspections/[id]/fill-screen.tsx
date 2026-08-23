@@ -59,7 +59,7 @@ import {
   discardInspectionPhoto,
   drainInspectionPhotos,
 } from '@/lib/dexie/dashboard/inspection-photos'
-import type { InspectionAnswerRow } from '@/lib/dexie/dashboard/schema'
+import type { InspectionAnswerRow, OpenConcernRow } from '@/lib/dexie/dashboard/schema'
 import { enqueueDashboardMutation } from '@/lib/dexie/dashboard/syncService'
 import type { PropertyAsset } from '@/types/database'
 
@@ -126,6 +126,28 @@ export function FillScreen({ inspectionId, userId, orgId }: Readonly<Props>) {
       : []),
     [db, inspection?.property_id],
     [] as PropertyAsset[],
+  )
+
+  /**
+   * Open work orders at this property, keyed by concern (§6).
+   *
+   * Read from the local cache, never fetched here: the prompt has to fire in
+   * front of the appliance, which is where there is no signal. An unwarmed
+   * device simply gets an empty map and no prompt — the pre-§6 behaviour —
+   * rather than a spinner or an error.
+   */
+  const openConcerns = useLiveQuery(
+    // `async` for the same reason `assets` is: a bare ternary infers a
+    // never[] arm that poisons the result type.
+    async (): Promise<OpenConcernRow[]> => (inspection
+      ? db.open_wo_concerns.where('propertyId').equals(inspection.property_id).toArray()
+      : []),
+    [db, inspection?.property_id],
+    [] as OpenConcernRow[],
+  )
+  const concernByKey = useMemo(
+    () => new Map((openConcerns ?? []).map((c) => [c.concernKey, c])),
+    [openConcerns],
   )
 
   const snapshot = useMemo(
@@ -345,6 +367,13 @@ export function FillScreen({ inspectionId, userId, orgId }: Readonly<Props>) {
                   )}
                   onCapture={(file) => { void onCapture(key, file) }}
                   onDiscard={() => { void onDiscard(key) }}
+                  // §5: several forms deliberately ask about one concern, so
+                  // the lookup key is the concern where the item names one and
+                  // the item id otherwise — the same fallback the warm applies
+                  // when it builds these rows.
+                  openConcern={concernByKey.get(
+                    item.formItem.concern_key ?? item.formItem.id,
+                  )}
                 />
               )
             })}
@@ -412,6 +441,8 @@ function toSubmittedItem(r: InspectionAnswerRow) {
     asset_id:        r.assetId,
     repeat_index:    r.repeatIndex,
     answered_at:     r.answeredAt,
+    repeat_answer:   r.repeatAnswer,
+    repeat_of_work_order_id: r.repeatOfWorkOrderId,
   }
 }
 

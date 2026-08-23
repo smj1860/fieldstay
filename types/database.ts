@@ -52,6 +52,11 @@ export type InspectionRemediation  = 'none' | 'work_order' | 'purchase_order' | 
 // What the inspector picks on a fail — MULTI-SELECT, so 'replace' + 'service'
 // expresses the purchase and the install as one decision.
 export type InspectionAction       = 'repair' | 'service' | 'replace'
+// §6's repeat visit. The inspector is ASKED rather than a key deciding, because
+// once the action model exists one form item no longer means one fault:
+// "Refrigeration" failing for a water filter and later for a compressor is the
+// same form_item_id and two unrelated problems.
+export type InspectionRepeatAnswer = 'same' | 'new'
 export type WoCategory          =
   | 'hvac' | 'plumbing' | 'electrical' | 'appliance' | 'cleaning'
   | 'landscaping' | 'roofing' | 'flooring' | 'windows_doors'
@@ -2290,6 +2295,22 @@ export interface InspectionItem {
 
   asset_id:     string | null
   repeat_index: number | null
+
+  /**
+   * The repeat visit (§6, 20260823180719).
+   *
+   * When this finding failed and an open work order already existed for the
+   * same concern, the inspector was shown it and asked. NULL means they were
+   * never asked — no open predecessor, or the device had no cached work orders
+   * — and remediation falls back to creating a work order.
+   *
+   * `repeat_of_work_order_id` is retained for BOTH answers: "new" records what
+   * this finding was distinguished FROM. It can be NULL alongside a non-null
+   * `repeat_answer` if that work order was later deleted (ON DELETE SET NULL),
+   * which remediation treats as "the predecessor is gone".
+   */
+  repeat_answer:           InspectionRepeatAnswer | null
+  repeat_of_work_order_id: string | null
 
   answered_at: string | null
   created_at:  string

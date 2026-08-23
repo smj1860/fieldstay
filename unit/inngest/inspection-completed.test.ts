@@ -67,6 +67,11 @@ function makeClient(opts: {
   concernKeys?: { id: string; concern_key: string | null }[]
   poError?: { code?: string; message: string } | null
   woError?: { code?: string; message: string } | null
+  /** Which named predecessors are still in an open status. */
+  stillOpenWorkOrderIds?: string[]
+  openPredecessorError?: { message: string }
+  /** Recurrence notes already on those work orders, for the replay case. */
+  existingUpdates?: { work_order_id: string; notes: string }[]
 }) {
   const writes: { table: string; rows: unknown[] }[] = []
   // Ordering is a contract with Postgres that an in-memory double cannot
@@ -74,15 +79,22 @@ function makeClient(opts: {
   // oldest predecessor wins" passes on whatever order the fixture array
   // happened to be written in, including with the ORDER BY deleted.
   const orderBys: { table: string; column: string; ascending?: boolean }[] = []
-  // createWorkOrders reads work_orders twice: the prior-annotation lookup
-  // first, then the already-created pre-check.
-  let workOrderReads = 0
 
   const client = {
     from(table: string) {
       const builder: Record<string, unknown> = {}
+      // `work_orders` is now read THREE times with three different column
+      // lists — the still-open check, the prior-annotation lookup, and the
+      // already-created pre-check. Dispatching on call ORDER broke the moment
+      // a same-issue item made the first read conditional, so the double keys
+      // on what each read actually asks for.
+      let selected = ''
       const chain = () => builder
-      for (const m of ['select', 'eq', 'in', 'limit']) builder[m] = chain
+      for (const m of ['eq', 'in', 'limit']) builder[m] = chain
+      builder.select = (cols?: unknown) => {
+        if (typeof cols === 'string') selected = cols
+        return builder
+      }
       builder.order = (column: string, o?: { ascending?: boolean }) => {
         orderBys.push({ table, column, ascending: o?.ascending })
         return builder
@@ -112,15 +124,22 @@ function makeClient(opts: {
           return Promise.resolve({ data: opts.failedItems ?? [], error: null }).then(resolve)
         }
         if (table === 'work_orders') {
-          workOrderReads += 1
-          if (workOrderReads === 1) {
+          if (selected.includes('inspection_items')) {
             return Promise.resolve(opts.priorError
               ? { data: null, error: opts.priorError }
               : { data: opts.priorWorkOrders ?? [], error: null }).then(resolve)
           }
-          return Promise.resolve({
-            data: opts.existingWorkOrders ?? [], error: null,
-          }).then(resolve)
+          if (selected.includes('source_inspection_item_id')) {
+            return Promise.resolve({ data: opts.existingWorkOrders ?? [], error: null }).then(resolve)
+          }
+          // The still-open check on a named predecessor.
+          return Promise.resolve(opts.openPredecessorError
+            ? { data: null, error: opts.openPredecessorError }
+            : { data: (opts.stillOpenWorkOrderIds ?? []).map((id) => ({ id })), error: null }
+          ).then(resolve)
+        }
+        if (table === 'work_order_updates') {
+          return Promise.resolve({ data: opts.existingUpdates ?? [], error: null }).then(resolve)
         }
         if (table === 'inspection_form_items') {
           return Promise.resolve({ data: opts.concernKeys ?? [], error: null }).then(resolve)
@@ -143,6 +162,7 @@ function ctx() {
 const failedItem = (over: Partial<Record<string, unknown>> = {}) => ({
   id: 'item-1', form_item_id: 'def-1', prompt_snapshot: 'Handrail secure',
   note: 'wobbles badly', photo_path: null, asset_id: null, actions: ['repair'],
+  repeat_answer: null, repeat_of_work_order_id: null,
   ...over,
 })
 
@@ -486,5 +506,153 @@ describe('inspectionCompleted — what it refuses to act on', () => {
     expect(result).toMatchObject({ workOrders: 0 })
     expect(writes).toEqual([])
     expect(c.logger.warn).toHaveBeenCalled()
+  })
+})
+
+// ============================================================================
+// §6's ANSWER, HONOURED.
+//
+// The prompt exists so the INSPECTOR decides whether a recurrence is the same
+// fault, because no key can. "Refrigeration" fails in March for a water filter
+// (Replace, a PO) and in June for a compressor (Service, a work order): same
+// form_item_id, two unrelated problems, and any key-based rule files the
+// failing compressor as a note on the water-filter task — quietly.
+//
+// What matters most here is not that "same" attaches. It is that every way the
+// attach can go wrong FALLS BACK TO CREATING, because a suppressed finding is
+// invisible and a duplicate one is merely annoying.
+// ============================================================================
+const OPEN_WO = 'wo-march'
+
+describe('inspectionCompleted — the repeat answer', () => {
+  const sameIssue = (over: Record<string, unknown> = {}) => failedItem({
+    repeat_answer: 'same', repeat_of_work_order_id: OPEN_WO, ...over,
+  })
+
+  it('attaches to the open job instead of opening a second one', async () => {
+    const { client, writes } = makeClient({
+      inspection: inspectionRow([{ id: 'def-1', remediation: 'work_order' }]),
+      failedItems: [sameIssue()],
+      stillOpenWorkOrderIds: [OPEN_WO],
+    })
+    vi.mocked(createServiceClient).mockReturnValue(client as never)
+
+    const result = await invokeHandler(inspectionCompleted, ctx())
+
+    expect(result).toMatchObject({ workOrders: 0, attachedToOpen: 1 })
+    expect(writes.filter((w) => w.table === 'work_orders')).toHaveLength(0)
+    const note = writes.find((w) => w.table === 'work_order_updates')!.rows[0] as Record<string, unknown>
+    expect(note).toMatchObject({ work_order_id: OPEN_WO, org_id: ORG })
+    expect(String(note.notes)).toContain('Failed again')
+    // The job's STATE is unchanged — only its history gains a line.
+    expect(note.status_from).toBeNull()
+    expect(note.status_to).toBeNull()
+  })
+
+  it('"new issue" creates a work order, exactly as before', async () => {
+    const { client, writes } = makeClient({
+      inspection: inspectionRow([{ id: 'def-1', remediation: 'work_order' }]),
+      failedItems: [failedItem({ repeat_answer: 'new', repeat_of_work_order_id: OPEN_WO })],
+      stillOpenWorkOrderIds: [OPEN_WO],
+    })
+    vi.mocked(createServiceClient).mockReturnValue(client as never)
+
+    const result = await invokeHandler(inspectionCompleted, ctx())
+    expect(result).toMatchObject({ workOrders: 1, attachedToOpen: 0 })
+    expect(writes.filter((w) => w.table === 'work_order_updates')).toHaveLength(0)
+  })
+
+  it('creates when the predecessor has since been COMPLETED', async () => {
+    // The inspector answered against what their device had cached, possibly
+    // days old. A fault recurring AFTER a repair is a new job, not a note on a
+    // finished one.
+    const { client, writes } = makeClient({
+      inspection: inspectionRow([{ id: 'def-1', remediation: 'work_order' }]),
+      failedItems: [sameIssue()],
+      stillOpenWorkOrderIds: [],   // no longer open
+    })
+    vi.mocked(createServiceClient).mockReturnValue(client as never)
+
+    const result = await invokeHandler(inspectionCompleted, ctx())
+    expect(result).toMatchObject({ workOrders: 1, attachedToOpen: 0 })
+    expect(writes.filter((w) => w.table === 'work_order_updates')).toHaveLength(0)
+  })
+
+  it('creates when the predecessor was DELETED out from under the answer', async () => {
+    // repeat_of_work_order_id is ON DELETE SET NULL, so 'same' can outlive the
+    // job it named. This is the case the dropped database CHECK would have
+    // forbidden outright — and suppressing the finding here would lose it.
+    const { client } = makeClient({
+      inspection: inspectionRow([{ id: 'def-1', remediation: 'work_order' }]),
+      failedItems: [failedItem({ repeat_answer: 'same', repeat_of_work_order_id: null })],
+    })
+    vi.mocked(createServiceClient).mockReturnValue(client as never)
+
+    const result = await invokeHandler(inspectionCompleted, ctx())
+    expect(result).toMatchObject({ workOrders: 1, attachedToOpen: 0 })
+  })
+
+  it('does not post the same recurrence note twice on a replay', async () => {
+    // work_order_updates has no dedupe column to collide against, so the note
+    // text is deterministic and a replay recognises its own earlier write.
+    const first = makeClient({
+      inspection: inspectionRow([{ id: 'def-1', remediation: 'work_order' }]),
+      failedItems: [sameIssue()],
+      stillOpenWorkOrderIds: [OPEN_WO],
+    })
+    vi.mocked(createServiceClient).mockReturnValue(first.client as never)
+    await invokeHandler(inspectionCompleted, ctx())
+    const posted = first.writes.find((w) => w.table === 'work_order_updates')!.rows[0] as { notes: string }
+
+    const replay = makeClient({
+      inspection: inspectionRow([{ id: 'def-1', remediation: 'work_order' }]),
+      failedItems: [sameIssue()],
+      stillOpenWorkOrderIds: [OPEN_WO],
+      existingUpdates: [{ work_order_id: OPEN_WO, notes: posted.notes }],
+    })
+    vi.mocked(createServiceClient).mockReturnValue(replay.client as never)
+
+    const result = await invokeHandler(inspectionCompleted, ctx())
+    // Still reported as attached: the counter describes the INSPECTION'S
+    // outcome, not this run's writes, so an idempotent replay tells the same
+    // story as the first pass. What must be zero is the writes.
+    expect(result).toMatchObject({ attachedToOpen: 1, workOrders: 0 })
+    expect(replay.writes.filter((w) => w.table === 'work_order_updates')).toHaveLength(0)
+    // And critically: it must not decide the finding is unattached and open a
+    // work order for it on the second pass.
+    expect(replay.writes.filter((w) => w.table === 'work_orders')).toHaveLength(0)
+  })
+
+  it('mixes both answers in one inspection without either losing a finding', async () => {
+    const { client, writes } = makeClient({
+      inspection: inspectionRow([
+        { id: 'def-1', remediation: 'work_order' }, { id: 'def-2', remediation: 'work_order' },
+      ]),
+      failedItems: [
+        sameIssue({ id: 'i1', form_item_id: 'def-1' }),
+        failedItem({ id: 'i2', form_item_id: 'def-2' }),
+      ],
+      stillOpenWorkOrderIds: [OPEN_WO],
+    })
+    vi.mocked(createServiceClient).mockReturnValue(client as never)
+
+    const result = await invokeHandler(inspectionCompleted, ctx())
+    expect(result).toMatchObject({ workOrders: 1, attachedToOpen: 1 })
+    const created = writes.find((w) => w.table === 'work_orders')!.rows
+    expect((created[0] as Record<string, unknown>).source_inspection_item_id).toBe('i2')
+  })
+
+  it('a failed predecessor lookup THROWS rather than silently creating a duplicate', async () => {
+    // The opposite bias from the annotation lookup, and deliberately so: that
+    // one only decorates a description, this one decides whether a second job
+    // is opened. Guessing here produces the duplicate board §6 exists to stop.
+    const { client } = makeClient({
+      inspection: inspectionRow([{ id: 'def-1', remediation: 'work_order' }]),
+      failedItems: [sameIssue()],
+      openPredecessorError: { message: 'connection reset' },
+    })
+    vi.mocked(createServiceClient).mockReturnValue(client as never)
+
+    await expect(invokeHandler(inspectionCompleted, ctx())).rejects.toThrow(/connection reset/)
   })
 })
