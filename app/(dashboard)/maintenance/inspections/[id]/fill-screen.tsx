@@ -46,6 +46,7 @@ import {
 import { formFromSnapshot, parseFormSnapshot } from '@/lib/inspections/snapshots'
 import { getDashboardDb } from '@/lib/dexie/dashboard/schema'
 import {
+  draftRowId,
   pruneFinishedInspections,
   saveAnswer,
   toAnswerStates,
@@ -53,6 +54,11 @@ import {
   type AnswerPatch,
 } from '@/lib/dexie/dashboard/inspection-draft'
 import { pullInspection } from '@/lib/dexie/dashboard/inspection-sync'
+import {
+  captureInspectionPhoto,
+  discardInspectionPhoto,
+  drainInspectionPhotos,
+} from '@/lib/dexie/dashboard/inspection-photos'
 import type { InspectionAnswerRow } from '@/lib/dexie/dashboard/schema'
 import { enqueueDashboardMutation } from '@/lib/dexie/dashboard/syncService'
 import type { PropertyAsset } from '@/types/database'
@@ -85,7 +91,13 @@ export function FillScreen({ inspectionId, userId, orgId }: Readonly<Props>) {
       if (!cancelled) setPullFailed(!outcome.ok)
     })
     void pruneFinishedInspections(userId, orgId)
-    return () => { cancelled = true }
+    // Any photo left queued from a previous visit — the drain is idempotent and
+    // gates itself on being online.
+    void drainInspectionPhotos(userId, orgId)
+
+    const onOnline = () => { void drainInspectionPhotos(userId, orgId) }
+    globalThis.addEventListener?.('online', onOnline)
+    return () => { cancelled = true; globalThis.removeEventListener?.('online', onOnline) }
   }, [userId, orgId, inspectionId])
 
   const db = useMemo(() => getDashboardDb(userId, orgId), [userId, orgId])
@@ -185,6 +197,35 @@ export function FillScreen({ inspectionId, userId, orgId }: Readonly<Props>) {
     }
   }, [db, userId, orgId, inspectionId, inspectorName])
 
+
+  /**
+   * A captured image. The answer row must EXIST before the photo can attach to
+   * it, so an untouched item gets one created first — the same merge-on-write
+   * saveAnswer does for every other control.
+   */
+  const onCapture = useCallback(async (key: string, file: Blob) => {
+    const node = pages.flatMap((p) => visibleNodes(p, answers)).find((n) => answerKey(n.item) === key)
+    if (!node) return
+
+    await saveAnswer(userId, orgId, {
+      inspectionId, answerKey: key, formItemId: node.item.formItem.id,
+      promptSnapshot: node.item.formItem.prompt,
+      assetId: node.item.asset?.id ?? null, repeatIndex: node.item.repeatIndex ?? null,
+    }, {})
+
+    const result = await captureInspectionPhoto(userId, orgId, {
+      inspectionId, answerRowId: draftRowId(inspectionId, key), file,
+    })
+    if (!result.ok) setSubmitError(result.error ?? 'Could not save that photo.')
+  }, [userId, orgId, inspectionId, pages, answers])
+
+  const onDiscard = useCallback(async (key: string) => {
+    const row = answersById.get(key)
+    if (!row?.photoPath) return
+    await discardInspectionPhoto(userId, orgId, {
+      answerRowId: draftRowId(inspectionId, key), path: row.photoPath,
+    })
+  }, [userId, orgId, inspectionId, answersById])
 
   // ── Loading and failure states, kept apart ────────────────────────────────
   //
@@ -302,6 +343,8 @@ export function FillScreen({ inspectionId, userId, orgId }: Readonly<Props>) {
                     key, item.formItem.id, item.formItem.prompt,
                     item.asset?.id ?? null, item.repeatIndex ?? null, patch,
                   )}
+                  onCapture={(file) => { void onCapture(key, file) }}
+                  onDiscard={() => { void onDiscard(key) }}
                 />
               )
             })}

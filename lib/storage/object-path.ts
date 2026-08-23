@@ -1,7 +1,7 @@
 // lib/storage/object-path.ts
 //
-// One place that knows the shape of an object key in the two ORG-SCOPED photo
-// buckets (`work-order-photos`, `turnover-photos`).
+// One place that knows the shape of an object key in the ORG-SCOPED photo
+// buckets (`work-order-photos`, `turnover-photos`, `inspection-photos`).
 //
 // Both buckets are PRIVATE and carry org-scoped storage.objects RLS policies
 // (supabase/migrations/20260730103000_*) that key off the FIRST path segment
@@ -22,7 +22,16 @@
 
 import { UUID_RE } from '@/lib/validation/uuid'
 
-export const ORG_SCOPED_PHOTO_BUCKETS = ['work-order-photos', 'turnover-photos'] as const
+export const ORG_SCOPED_PHOTO_BUCKETS = [
+  'work-order-photos',
+  'turnover-photos',
+  // Added 2026-08-23 with inspection photo capture. Its policies
+  // (20260822194607) key off storage_org_prefix(name) exactly like the other
+  // two, so listing it here is what brings it under the
+  // `org-scoped-storage-paths` guardrail — INSPECTIONS_SPEC §8a anticipated
+  // precisely this: the bucket gets the rule "for free once it is listed".
+  'inspection-photos',
+] as const
 
 export type OrgScopedPhotoBucket = (typeof ORG_SCOPED_PHOTO_BUCKETS)[number]
 
