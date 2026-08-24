@@ -46,6 +46,7 @@ let formRows:       { data: unknown; error: unknown } = { data: [], error: null 
 let sectionRows:    { data: unknown; error: unknown } = { data: [], error: null }
 let itemRows:       { data: unknown; error: unknown } = { data: [], error: null }
 let propertyRows:   { data: unknown; error: unknown } = { data: [], error: null }
+let scheduleRows:   { data: unknown; error: unknown } = { data: [], error: null }
 
 /**
  * A minimal PostgREST builder. Every filter returns `this`, so the chain under
@@ -61,6 +62,7 @@ function fakeSupabase() {
         inspection_form_sections: () => sectionRows,
         inspection_form_items:    () => itemRows,
         properties:               () => propertyRows,
+        maintenance_schedules:    () => scheduleRows,
       }
       const result = byTable[table] ?? (() => ({ data: [], error: null }))
       const builder: Record<string, unknown> = {}
@@ -91,6 +93,7 @@ beforeEach(async () => {
   sectionRows  = { data: [{ id: 's1', form_id: 'f1' }], error: null }
   itemRows     = { data: [{ id: 'i1', section_id: 's1' }], error: null }
   propertyRows = { data: [{ id: 'prop-1', org_id: ORG, name: 'Lake House' }], error: null }
+  scheduleRows = { data: [], error: null }
   cachePut.mockReset()
   fetchMock.mockReset().mockResolvedValue({ ok: true, redirected: false, clone: () => ({}) })
 
@@ -105,6 +108,7 @@ beforeEach(async () => {
     db.inspections.clear(), db.property_assets.clear(), db.sync_meta.clear(),
     db.inspection_forms.clear(), db.inspection_form_sections.clear(),
     db.inspection_form_items.clear(), db.properties.clear(),
+    db.maintenance_schedules.clear(),
   ])
 })
 
@@ -220,6 +224,67 @@ describe('warmInspectionsForOffline', () => {
 })
 
 describe('warmInspectionsForOffline — when it declines to run', () => {
+  // ── §7's due list ────────────────────────────────────────────────────────
+  //
+  // An inspection schedule NOTIFIES and creates nothing, so the only thing that
+  // turns a due schedule into a walk is a PM tapping Start — at the property,
+  // where the list has to already be on the device.
+
+  const schedule = (id: string, over: Record<string, unknown> = {}) => ({
+    id, org_id: ORG, property_id: 'prop-1', name: 'Quarterly safety walk',
+    creates: 'inspection', is_active: true,
+    next_due_date: '2026-09-01', inspection_form_id: 'f1', ...over,
+  })
+
+  it('caches the org\u2019s inspection schedules', async () => {
+    scheduleRows = { data: [schedule('sched-1')], error: null }
+
+    const result = await warmInspectionsForOffline(USER, ORG)
+
+    expect(result).toMatchObject({ schedules: 1 })
+    expect(await getDashboardDb(USER, ORG).maintenance_schedules.get('sched-1')).toBeTruthy()
+  })
+
+  it('lands them for an org with NO open inspections', async () => {
+    // The case that matters most, and the one an implementation hung off the
+    // inspection loop would miss: an org with nothing open is precisely the one
+    // whose next act is starting the walk a schedule is asking for.
+    inspectionRows = { data: [], error: null }
+    scheduleRows   = { data: [schedule('sched-1')], error: null }
+
+    const result = await warmInspectionsForOffline(USER, ORG)
+
+    expect(result).toMatchObject({ inspections: 0, schedules: 1 })
+    expect(await getDashboardDb(USER, ORG).maintenance_schedules.get('sched-1')).toBeTruthy()
+    // And the start screen is still reachable with no signal.
+    expect(cachePut).toHaveBeenCalledWith('/maintenance/inspections', expect.anything())
+  })
+
+  it('a FAILED schedule query keeps the cached copy', async () => {
+    // A failed fetch is not evidence that nothing is scheduled. Clearing here
+    // would hide every due walk from a device that had a perfectly good list.
+    await getDashboardDb(USER, ORG).maintenance_schedules.put(schedule('sched-old') as never)
+    scheduleRows = { data: null, error: { message: 'connection reset' } }
+
+    const result = await warmInspectionsForOffline(USER, ORG)
+
+    expect(result).toMatchObject({ schedules: 0 })
+    expect(await getDashboardDb(USER, ORG).maintenance_schedules.get('sched-old')).toBeTruthy()
+  })
+
+  it('an EMPTY result does clear \u2014 a deleted schedule stops being due', async () => {
+    // The other half of the empty-set question, and the opposite answer to the
+    // form library's: empty is a legitimate steady state for org data, so a
+    // schedule the PM deleted must stop asking to be walked. Safe only because
+    // the error branch above returns first.
+    await getDashboardDb(USER, ORG).maintenance_schedules.put(schedule('sched-gone') as never)
+    scheduleRows = { data: [], error: null }
+
+    await warmInspectionsForOffline(USER, ORG)
+
+    expect(await getDashboardDb(USER, ORG).maintenance_schedules.get('sched-gone')).toBeUndefined()
+  })
+
   it('does nothing offline, and says so', async () => {
     vi.stubGlobal('navigator', { onLine: false })
     expect(await warmInspectionsForOffline(USER, ORG))

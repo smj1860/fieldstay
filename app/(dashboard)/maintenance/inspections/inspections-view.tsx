@@ -24,7 +24,7 @@ import { useEffect, useMemo, useState, useTransition } from 'react'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { useLiveQuery } from 'dexie-react-hooks'
-import { ClipboardCheck, Plus, WifiOff } from 'lucide-react'
+import { CalendarClock, ClipboardCheck, Plus, WifiOff } from 'lucide-react'
 
 import { Badge } from '@/components/ui/Badge'
 import { Button } from '@/components/ui/Button'
@@ -33,6 +33,7 @@ import { Dialog } from '@/components/ui/Dialog'
 import { getDashboardDb } from '@/lib/dexie/dashboard/schema'
 import { startInspectionLocally } from '@/lib/dexie/dashboard/start-inspection-local'
 import { warmInspectionsForOffline } from '@/lib/dexie/dashboard/warm-inspections'
+import { dueLabel, selectDueSchedules, todayISO } from '@/lib/inspections/due-schedules'
 import { parseFormSnapshot } from '@/lib/inspections/snapshots'
 
 import { MaintenanceTabs } from '../maintenance-tabs'
@@ -57,6 +58,12 @@ export function InspectionsView({ userId, orgId }: Readonly<Props>) {
   const [propertyId, setPropertyId] = useState('')
   const [formKey, setFormKey]       = useState('safety')
   const [error, setError]           = useState<string | null>(null)
+  /** Which due schedule is mid-start, so only its own button shows a spinner. */
+  const [startingScheduleId, setStartingScheduleId] = useState<string | null>(null)
+  // Its OWN error, not the dialog's. Sharing one made a failed dialog start
+  // render its message twice — once in the dialog and once under a Due list it
+  // had nothing to do with.
+  const [scheduleError, setScheduleError] = useState<string | null>(null)
 
   // A warm on mount, forced past the throttle. This is the page a PM opens
   // before leaving, so it is the one place worth paying for a guaranteed
@@ -75,9 +82,19 @@ export function InspectionsView({ userId, orgId }: Readonly<Props>) {
     [db],
     [],
   )
+  const schedules = useLiveQuery(() => db.maintenance_schedules.toArray(), [db], [])
 
   const propertyName = (id: string) =>
     (properties ?? []).find((p) => p.id === id)?.name ?? 'Unknown property'
+
+  // Computed here rather than filtered at fetch time: a horizon baked into the
+  // query goes stale the moment the device loses signal, and a tablet that has
+  // been offline for a week should still be able to tell that last Tuesday's
+  // walk is now overdue.
+  const dueSchedules = useMemo(
+    () => selectDueSchedules(schedules ?? [], inspections ?? [], todayISO()),
+    [schedules, inspections],
+  )
 
   // The library is what makes a start possible with no signal. Its absence is
   // reported as its own state rather than as an empty property list, because
@@ -92,6 +109,45 @@ export function InspectionsView({ userId, orgId }: Readonly<Props>) {
       if (!result.ok) { setError(result.error); return }
       setDialogOpen(false)
       router.push(`/maintenance/inspections/${result.inspectionId}`)
+    })
+  }
+
+  /**
+   * Starting the walk a schedule is asking for.
+   *
+   * The whole point of the link it carries: `source_schedule_id` is what lets
+   * COMPLETION advance the schedule. Without it the due notification fires once
+   * per occurrence, `next_due_date` never moves, and the schedule goes silent
+   * forever — so a walk started here and one started from the dialog are not
+   * interchangeable, even at the same property with the same form.
+   *
+   * `scheduledFor` records the date the schedule SAID it was due, which is not
+   * the date the walk happened and is the one a report should cite.
+   */
+  const beginFromSchedule = (schedule: { id: string; property_id: string; inspection_form_id: string | null; next_due_date: string }) => {
+    setScheduleError(null)
+    setStartingScheduleId(schedule.id)
+    startTransition(async () => {
+      try {
+        const key = (forms ?? []).find((f) => f.id === schedule.inspection_form_id)?.key
+        if (!key) {
+          // The schedule names a form this device does not hold — a re-seed
+          // since the last warm, or a never-synced tablet. Named as its own
+          // problem rather than surfacing as a generic start failure.
+          setScheduleError('That schedule’s form isn’t on this device yet. Reconnect once, then try again.')
+          return
+        }
+        const result = await startInspectionLocally(userId, orgId, {
+          propertyId:       schedule.property_id,
+          formKey:          key,
+          sourceScheduleId: schedule.id,
+          scheduledFor:     schedule.next_due_date,
+        })
+        if (!result.ok) { setScheduleError(result.error); return }
+        router.push(`/maintenance/inspections/${result.inspectionId}`)
+      } finally {
+        setStartingScheduleId(null)
+      }
     })
   }
 
@@ -126,6 +182,55 @@ export function InspectionsView({ userId, orgId }: Readonly<Props>) {
           </Card>
         )}
 
+        {/* DUE FIRST. A schedule that came due is the reason a PM opened this
+            page; an inspection already under way is something they can find by
+            looking. Absent entirely when nothing is due — an empty "Due" card
+            is a row of furniture on a page that has to work on a phone. */}
+        {libraryReady && dueSchedules.length > 0 && (
+          <section className="flex flex-col gap-2">
+            <h2 className="text-xs font-semibold uppercase tracking-wide"
+                style={{ color: 'var(--text-muted)' }}>
+              Due now
+            </h2>
+            <ul className="flex flex-col gap-2">
+              {dueSchedules.map((s) => (
+                <li key={s.id}>
+                  <Card>
+                    <div className="flex items-center justify-between gap-3">
+                      <span className="min-w-0">
+                        <span className="block text-sm font-semibold truncate"
+                              style={{ color: 'var(--text-primary)' }}>
+                          {propertyName(s.property_id)}
+                        </span>
+                        <span className="flex items-center gap-1.5 text-xs mt-0.5"
+                              style={{ color: 'var(--text-muted)' }}>
+                          <CalendarClock className="w-3.5 h-3.5 shrink-0" />
+                          <span className="truncate">{s.name}</span>
+                        </span>
+                      </span>
+                      <span className="flex items-center gap-2 shrink-0">
+                        <Badge tone={s.overdue ? 'red' : 'amber'}>{dueLabel(s)}</Badge>
+                        <Button
+                          variant="cta"
+                          onClick={() => beginFromSchedule(s)}
+                          disabled={starting}
+                        >
+                          {startingScheduleId === s.id ? 'Starting…' : 'Start'}
+                        </Button>
+                      </span>
+                    </div>
+                  </Card>
+                </li>
+              ))}
+            </ul>
+            {scheduleError && (
+              <p className="text-xs" style={{ color: 'var(--accent-red)' }} role="alert">
+                {scheduleError}
+              </p>
+            )}
+          </section>
+        )}
+
         {libraryReady && (inspections?.length ?? 0) === 0 && (
           <Card>
             <div className="flex flex-col items-center gap-2 py-8 text-center">
@@ -142,34 +247,45 @@ export function InspectionsView({ userId, orgId }: Readonly<Props>) {
         )}
 
         {(inspections?.length ?? 0) > 0 && (
-          <ul className="flex flex-col gap-2">
-            {(inspections ?? []).map((row) => (
-              <li key={row.id}>
-                <Card>
-                  <Link
-                    href={`/maintenance/inspections/${row.id}`}
-                    className="flex items-center justify-between gap-3 focus:outline-none focus:ring-2 focus:ring-[var(--accent-gold)] rounded-lg"
-                  >
-                    <span className="min-w-0">
-                      <span className="block text-sm font-semibold truncate"
-                            style={{ color: 'var(--text-primary)' }}>
-                        {propertyName(row.property_id)}
+          <section className="flex flex-col gap-2">
+            {/* Labelled only when there is a "Due now" section above it. On its
+                own the h1 already names the list, and a lone subheading over
+                the page's only content is noise. */}
+            {dueSchedules.length > 0 && (
+              <h2 className="text-xs font-semibold uppercase tracking-wide"
+                  style={{ color: 'var(--text-muted)' }}>
+                Walks
+              </h2>
+            )}
+            <ul className="flex flex-col gap-2">
+              {(inspections ?? []).map((row) => (
+                <li key={row.id}>
+                  <Card>
+                    <Link
+                      href={`/maintenance/inspections/${row.id}`}
+                      className="flex items-center justify-between gap-3 focus:outline-none focus:ring-2 focus:ring-[var(--accent-gold)] rounded-lg"
+                    >
+                      <span className="min-w-0">
+                        <span className="block text-sm font-semibold truncate"
+                              style={{ color: 'var(--text-primary)' }}>
+                          {propertyName(row.property_id)}
+                        </span>
+                        <span className="block text-xs mt-0.5" style={{ color: 'var(--text-muted)' }}>
+                          {formLabel(row.form_snapshot)} &middot; v{row.form_version}
+                          {' · '}
+                          {new Date(row.started_at).toLocaleDateString()}
+                          {row.inspector_name ? ` · ${row.inspector_name}` : ''}
+                        </span>
                       </span>
-                      <span className="block text-xs mt-0.5" style={{ color: 'var(--text-muted)' }}>
-                        {formLabel(row.form_snapshot)} &middot; v{row.form_version}
-                        {' · '}
-                        {new Date(row.started_at).toLocaleDateString()}
-                        {row.inspector_name ? ` · ${row.inspector_name}` : ''}
-                      </span>
-                    </span>
-                    <Badge tone={row.completed_at ? 'green' : 'amber'}>
-                      {row.completed_at ? 'Complete' : 'In progress'}
-                    </Badge>
-                  </Link>
-                </Card>
-              </li>
-            ))}
-          </ul>
+                      <Badge tone={row.completed_at ? 'green' : 'amber'}>
+                        {row.completed_at ? 'Complete' : 'In progress'}
+                      </Badge>
+                    </Link>
+                  </Card>
+                </li>
+              ))}
+            </ul>
+          </section>
         )}
 
         {dialogOpen && (

@@ -82,17 +82,49 @@ const RECONCILERS: Record<string, Reconciler> = {
     protection: 'fetch-fails-loud',
     why: "Reconciles ONE property's cached assets after pulling an inspection. The Supabase read returns { data, error } and the function returns early on error, so the bulkDelete is only ever reached with a genuinely complete list — and empty is a legitimate steady state here, because most properties have not catalogued their assets at all (8 of 29 in production). An empty-set guard would be WRONG: it would make the last asset impossible to retire, and a stale asset keeps opening §12.3's well section on a property with no well.",
   },
-  'lib/dexie/dashboard/warm-inspections.ts:303': {
+  'lib/dexie/dashboard/warm-inspections.ts:387': {
     protection: 'fetch-fails-loud',
     why: "The same reconciliation, batched across the properties with open inspections. Identical protection: the asset query's error branch returns before this block, having still cached the inspections themselves. The delete is scoped to the property_ids the fetch actually covered, so even a wrong empty result could not reach another property's cached assets.",
   },
-  'lib/dexie/dashboard/warm-inspections.ts:211': {
+  'lib/dexie/dashboard/warm-inspections.ts:295': {
     protection: 'fetch-fails-loud',
     why: "Drops cached PROPERTIES the org no longer has, so a removed property stops being offered as somewhere to start an inspection. cacheFormLibrary returns early on any of its four query errors, so this block only runs with a genuinely complete list. Empty is a legitimate steady state — a new org has no properties — and an empty-set guard would make the LAST property impossible to remove from a device. Note the sibling FORM tables in the same function are guarded the opposite way, and deliberately: an empty form library is never a real state, only a failed seed.",
   },
-  'lib/dexie/dashboard/warm-inspections.ts:404': {
+  'lib/dexie/dashboard/warm-inspections.ts:488': {
     protection: 'fetch-fails-loud',
     why: "Drops cached OPEN CONCERNS — the open work orders §6's repeat prompt asks about — once they are no longer open. The Supabase read's error branch returns before this block and deliberately leaves the cache alone, so the delete only runs on a genuinely complete list, and the scope is the property_ids the fetch covered. Empty is emphatically a legitimate steady state: most properties have no open inspection-sourced work order at all. An empty-set guard would be the bug here — a COMPLETED work order could never stop being offered as a predecessor, and the prompt would keep asking an inspector whether a finding matches a job that was finished months ago.",
+  },
+}
+
+/**
+ * CLEAR-AND-REPLACE — the shape the scan above cannot see, and the harsher one.
+ *
+ * `findReconcilerSites` keys entirely on an absence check (`!keep.has(id)`),
+ * which is what a DIFF looks like. A wholesale `table.clear()` followed by a
+ * `bulkPut` has no absence check at all — every local row is deleted
+ * unconditionally — so it sailed past a guardrail written to catch the milder
+ * form. Found on 2026-08-24 while registering a new reconciler, when the entry
+ * for a `clear()` came back STALE: the scanner had never seen it.
+ *
+ * The empty-fetch question is identical and the stakes are higher, so these are
+ * registered with the same two protections.
+ */
+const CLEAR_AND_REPLACE: Record<string, Reconciler> = {
+  'lib/dexie/dashboard/warm-inspections.ts:212': {
+    protection: 'fetch-fails-loud',
+    why: "Replaces the cached §7 INSPECTION SCHEDULES wholesale. The Supabase read's error branch returns before this block and deliberately leaves the cache alone, so the clear only ever runs on a list the server genuinely produced. Empty is a legitimate steady state and an empty-set guard would be the BUG here: an org that deletes its last inspection schedule would keep being told a walk is due, forever, on every device that had cached it. The whole set is refetched on every warm, so a clear costs nothing a diff would have saved.",
+  },
+  'lib/dexie/dashboard/warm-inspections.ts:283': {
+    protection: 'empty-set-guard',
+    why: "The platform FORM LIBRARY, and guarded the opposite way to everything else in this file on purpose. An empty form library is never a real state — it means the seed has not run — so cacheFormLibrary refuses to act on one (`formRows.length === 0 || itemRows.length === 0` returns early, keeping the cached copy). Replacing a good library with nothing would take a device that could start a walk offline and make it unable to, which is the single capability the whole warm exists for.",
+  },
+  'lib/dexie/dashboard/warm-inspections.ts:284': {
+    protection: 'empty-set-guard',
+    why: "Sections, behind the same guard as the forms above and inseparable from them. A half-applied library is worse than a stale one: sections without their items resolve to a SHORTER form, so every question the inspector is shown gets answered, the Review gate passes, and a whole section is silently absent from the record.",
+  },
+  'lib/dexie/dashboard/warm-inspections.ts:285': {
+    protection: 'empty-set-guard',
+    why: "Items, behind the same guard. This is the table the guard is really about — `itemRows.length === 0` is checked explicitly alongside the forms precisely because an empty item list is the one that produces a form that looks complete and asks nothing.",
   },
 }
 
@@ -181,6 +213,34 @@ function findReconcilerSites(): { site: string; setName: string }[] {
 
 const findReconcilers = (): string[] => findReconcilerSites().map((r) => r.site)
 
+/**
+ * Every `<table>.clear()` whose table is repopulated by a `bulkPut`/`bulkAdd`
+ * shortly after — a wholesale replace from a fetched list.
+ *
+ * The table name has to match on both halves. Without that this would flag
+ * `csv.clear()` in a form builder and `cache.clear()` in the demo-org helper,
+ * neither of which is reconciling anything against a server.
+ */
+function findClearAndReplaceSites(): string[] {
+  const files = execSync('grep -rl "\\.clear()" --include=*.ts --include=*.tsx lib app', { encoding: 'utf8' })
+    .trim().split('\n')
+    .filter((f) => f && !/\.test\.|\/stubs\//.test(f))
+
+  const found: string[] = []
+  for (const file of files) {
+    const lines = readFileSync(file, 'utf8').split('\n')
+    lines.forEach((line, i) => {
+      const m = line.match(/\.(\w+)\.clear\(\)/)
+      if (!m) return
+      const table = m[1]!
+      const after = lines.slice(i + 1, i + 25).join('\n')
+      if (!new RegExp(`\\.${table}\\.(bulkPut|bulkAdd)\\(`).test(after)) return
+      found.push(`${file}:${i + 1}`)
+    })
+  }
+  return found
+}
+
 function findFailSoftEmptyReturns(): string[] {
   const found: string[] = []
   const files = execSync('ls lib/integrations/providers/*.ts', { encoding: 'utf8' })
@@ -261,8 +321,30 @@ describe('guardrail: reconciling by absence must survive an empty fetch', () => 
     ).toEqual('')
   })
 
+  it('every clear-and-replace is registered too', () => {
+    const unlisted = findClearAndReplaceSites().filter((site) => !(site in CLEAR_AND_REPLACE))
+
+    expect(
+      [
+        unlisted.length === 0 ? '' :
+          'A cached table is CLEARED and repopulated from a fetched list. That is the same\n' +
+          'empty-fetch question as the reconcilers above and a harsher answer to it — there\n' +
+          'is no absence check at all, so an empty fetch deletes every local row\n' +
+          'unconditionally. Register it in CLEAR_AND_REPLACE with its protection.\n\n' +
+          'Unregistered sites:',
+        ...unlisted,
+      ].filter(Boolean).join('\n'),
+    ).toEqual('')
+  })
+
+  it('every CLEAR_AND_REPLACE entry still exists at that file:line', () => {
+    const live = new Set(findClearAndReplaceSites())
+    const stale = Object.keys(CLEAR_AND_REPLACE).filter((site) => !live.has(site))
+    expect(stale, 'Line numbers drift — re-point, or delete if the code is gone').toEqual([])
+  })
+
   it('every registration carries a real justification', () => {
-    for (const [site, r] of Object.entries(RECONCILERS)) {
+    for (const [site, r] of Object.entries({ ...RECONCILERS, ...CLEAR_AND_REPLACE })) {
       expect(r.why.length, `${site} needs a real reason`).toBeGreaterThan(60)
     }
   })
@@ -290,6 +372,16 @@ describe('guardrail: reconciling by absence must survive an empty fetch', () => 
     expect(known).toContain('lib/inngest/functions/hospitable/teammate-sync-handler.ts:112')
     expect(known).toContain('lib/dexie/sync/work-orders.ts:177')   // accumulator shape
     expect(known.length).toBeGreaterThanOrEqual(5)
+
+    // The clear-and-replace scan needs its own, for the same reason: it was
+    // added because a shape nobody had scanned for turned out to be live in
+    // four places, and a typo'd regex would put it straight back to zero.
+    const cleared = findClearAndReplaceSites()
+    expect(cleared).toContain('lib/dexie/dashboard/warm-inspections.ts:212')
+    expect(cleared.length).toBeGreaterThanOrEqual(4)
+    // And it must NOT fire on an unrelated .clear() — the table names have to
+    // match on both halves or this becomes noise nobody reads.
+    expect(cleared.some((s) => s.includes('create-template-builder'))).toBe(false)
   })
 })
 
