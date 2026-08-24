@@ -178,6 +178,8 @@ interface InspectionRow {
 interface ItemRow {
   id:            string
   inspection_id: string
+  /** Joins the answer back to its definition, which is where `remediation` lives. */
+  form_item_id:  string
   prompt_snapshot: string
   note:          string | null
   result:        string | null
@@ -188,14 +190,36 @@ function buildInspection(
   items:       ItemRow[],
   remediation: RemediationIndex,
 ): OwnerInspection {
-  const mine   = items.filter((i) => i.inspection_id === row.id)
+  const snapshot   = parseFormSnapshot(row.form_snapshot)
+  const recordOnly = recordOnlyItemIds(snapshot)
+
+  // RECORD-ONLY ITEMS ARE NOT CHECKS, so they leave both numbers below.
+  //
+  // A few items exist to state a fact rather than to judge a condition:
+  // "Trampoline, playground or diving board present at this property",
+  // "Monitored alarm or security system present". They answer through the same
+  // Pass/Fail control as everything else, so "no alarm" records as a `fail` —
+  // and most short-term rentals have no alarm. Left in, the portal would show
+  // an owner a finding reading "no repair or purchase raised" against a
+  // question whose honest answer was simply no.
+  //
+  // They leave the PASS COUNT as well, and that half is easy to miss. Filtering
+  // only the findings would mean a property WITH an alarm scored +1 while one
+  // without scored nothing — a silent bias in a number owners read as "how did
+  // my property do". A count captioned "checks passed" should count checks.
+  //
+  // Keyed on `remediation === 'none'` from the SNAPSHOT, so a re-worded or
+  // re-classified item cannot retroactively change what a completed walk shows.
+  // 'notify' is deliberately NOT included: a lapsed STR permit raises no work
+  // order and is still something an owner should see.
+  const mine   = items.filter((i) => i.inspection_id === row.id && !recordOnly.has(i.form_item_id))
   const failed = mine.filter((i) => i.result === 'fail')
 
   return {
     id:          row.id,
     propertyId:  row.property_id,
     completedAt: row.completed_at,
-    formLabel:   formLabelOf(row.form_snapshot),
+    formLabel:   formLabelOf(snapshot),
     formVersion: row.form_version,
     inspectorName: row.inspector_name,
     // PASSES, not "total minus failures": an item answered N/A is neither, and
@@ -219,10 +243,30 @@ function buildInspection(
  * versions does not read as inconsistent inspecting. Reading the label off the
  * current form would undo that on the very next re-seed.
  */
-function formLabelOf(snapshot: unknown): string {
-  const parsed = parseFormSnapshot(snapshot)
+function formLabelOf(parsed: ReturnType<typeof parseFormSnapshot>): string {
   if (!parsed) return 'Inspection'
   return FORM_LABELS[parsed.form_key] ?? parsed.form_key
+}
+
+/**
+ * Form item ids the snapshot marks `remediation: 'none'` — the record-only ones.
+ *
+ * An UNPARSEABLE snapshot yields an empty set, so every answer is treated as a
+ * check. That is the safe direction: the failure mode is showing an owner one
+ * extra line, not silently hiding a finding, and hiding is the one this
+ * function must never do by accident. An item absent from the snapshot behaves
+ * the same way, for the same reason.
+ */
+function recordOnlyItemIds(parsed: ReturnType<typeof parseFormSnapshot>): Set<string> {
+  const ids = new Set<string>()
+  if (!parsed) return ids
+
+  for (const section of parsed.sections) {
+    for (const item of section.items) {
+      if (item.remediation === 'none') ids.add(item.id)
+    }
+  }
+  return ids
 }
 
 /**
@@ -246,7 +290,7 @@ async function loadItems(
     return await fetchAllRows<ItemRow>(
       (from, to) => supabase
         .from('inspection_items')
-        .select('id, inspection_id, prompt_snapshot, note, result')
+        .select('id, inspection_id, form_item_id, prompt_snapshot, note, result')
         .eq('org_id', orgId)
         .in('inspection_id', inspectionIds)
         .order('id', { ascending: true })

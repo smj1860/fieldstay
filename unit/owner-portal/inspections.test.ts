@@ -59,9 +59,20 @@ const inspection = (over: Record<string, unknown> = {}) => ({
 })
 
 const item = (over: Record<string, unknown> = {}) => ({
-  id: 'item-1', inspection_id: 'insp-1', prompt_snapshot: 'Handrail secure',
+  id: 'item-1', inspection_id: 'insp-1', form_item_id: 'fi-check',
+  prompt_snapshot: 'Handrail secure',
   note: 'wobbles badly', result: 'fail',
   ...over,
+})
+
+/**
+ * A snapshot that classifies form items, which is what the record-only filter
+ * reads. The default SNAPSHOT above carries no sections, so every answer counts
+ * as a check — that is what the pre-existing tests exercise, deliberately.
+ */
+const snapshotWith = (items: { id: string; remediation: string }[]) => ({
+  form_key: 'safety', form_version: 1, captured_at: '2026-03-01T10:00:00Z',
+  sections: [{ id: 's1', key: 'sec', name: 'Section', sort_order: 0, items }],
 })
 
 describe('loadOwnerInspections — tenant scope', () => {
@@ -362,5 +373,82 @@ describe('loadOwnerInspections — failure modes', () => {
     const [row] = (await loadOwnerInspections(client, ORG, PROPS)).inspections
     expect(row!.findings).toHaveLength(1)
     expect(row!.findings[0]!.remediation).toEqual({ kind: 'none' })
+  })
+})
+
+// ============================================================================
+// RECORD-ONLY ITEMS ARE NOT CHECKS.
+//
+// "Trampoline present at this property" and "Monitored alarm present" state a
+// fact rather than judging a condition, but they answer through the same
+// Pass/Fail control as everything else — so "no alarm" records as a `fail`, and
+// most short-term rentals have no alarm.
+//
+// Two things have to drop, not one. Filtering only the findings would leave a
+// property WITH an alarm scoring +1 pass and one without scoring nothing: a
+// silent bias in the number an owner reads as "how did my property do".
+// ============================================================================
+
+describe('loadOwnerInspections — record-only items', () => {
+  const withSnapshot = (items: { id: string; remediation: string }[], rows: unknown[]) =>
+    makeClient({
+      inspections:      { data: [inspection({ form_snapshot: snapshotWith(items) })] },
+      inspection_items: { data: rows },
+    })
+
+  it('keeps a record-only FAIL out of the findings list', async () => {
+    const { client } = withSnapshot(
+      [{ id: 'fi-fact', remediation: 'none' }],
+      [item({ id: 'a', form_item_id: 'fi-fact', prompt_snapshot: 'Alarm present', note: null })],
+    )
+    const [row] = (await loadOwnerInspections(client, ORG, PROPS)).inspections
+    expect(row!.findings).toEqual([])
+  })
+
+  it('keeps a record-only PASS out of the pass count', async () => {
+    // The asymmetry test. Without this, "has an alarm" scores and "has none"
+    // does not, purely because of how the fact happens to be phrased.
+    const { client } = withSnapshot(
+      [{ id: 'fi-fact', remediation: 'none' }, { id: 'fi-check', remediation: 'work_order' }],
+      [
+        item({ id: 'a', form_item_id: 'fi-fact',  result: 'pass' }),
+        item({ id: 'b', form_item_id: 'fi-check', result: 'pass' }),
+      ],
+    )
+    const [row] = (await loadOwnerInspections(client, ORG, PROPS)).inspections
+    expect(row!.passCount).toBe(1)
+  })
+
+  it('KEEPS a notify item — a lapsed permit raises nothing and still matters', async () => {
+    // The boundary of the rule. 'notify' dispatches no work order and no
+    // purchase order, which is exactly the shape that tempts an over-broad
+    // filter, but an owner should absolutely see that the STR permit lapsed.
+    const { client } = withSnapshot(
+      [{ id: 'fi-permit', remediation: 'notify' }],
+      [item({ id: 'a', form_item_id: 'fi-permit', prompt_snapshot: 'STR permit current' })],
+    )
+    const [row] = (await loadOwnerInspections(client, ORG, PROPS)).inspections
+    expect(row!.findings.map((f) => f.prompt)).toEqual(['STR permit current'])
+  })
+
+  it('treats an item the snapshot does not describe as a check', async () => {
+    const { client } = withSnapshot(
+      [{ id: 'fi-other', remediation: 'none' }],
+      [item({ id: 'a', form_item_id: 'fi-unknown' })],
+    )
+    const [row] = (await loadOwnerInspections(client, ORG, PROPS)).inspections
+    expect(row!.findings).toHaveLength(1)
+  })
+
+  it('treats every item as a check when the snapshot will not parse', async () => {
+    // Fails OPEN, and that direction is deliberate: showing one extra line is
+    // recoverable, silently hiding a finding from the person the record is for
+    // is not.
+    const { client } = makeClient({
+      inspections:      { data: [inspection({ form_snapshot: null })] },
+      inspection_items: { data: [item({ id: 'a', form_item_id: 'fi-fact' })] },
+    })
+    const [row] = (await loadOwnerInspections(client, ORG, PROPS)).inspections
+    expect(row!.findings).toHaveLength(1)
   })
 })
