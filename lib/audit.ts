@@ -55,6 +55,7 @@ export type AuditAction =
   | 'property.maintenance.cloned'
   | 'gdpr.data_erasure.completed'
   | 'org.auto_assign_mode.updated'
+  | 'org.inspection_template.updated'
   | 'org.vendor_auto_assign_mode.updated'
   | 'auth.account.created'
   | 'inventory.restock_cart.sent'

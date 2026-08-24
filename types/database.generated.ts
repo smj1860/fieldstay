@@ -3486,6 +3486,8 @@ export type Database = {
         Row: {
           auto_assign_enabled: boolean
           auto_assign_mode: string
+          inspection_safety_frequency: Database["public"]["Enums"]["schedule_frequency"] | null
+          inspection_safety_start_month: number | null
           bathroom_room_template_id: string | null
           bedroom_room_template_id: string | null
           billing_email: string | null
@@ -3516,6 +3518,8 @@ export type Database = {
         Insert: {
           auto_assign_enabled?: boolean
           auto_assign_mode?: string
+          inspection_safety_frequency?: Database["public"]["Enums"]["schedule_frequency"] | null
+          inspection_safety_start_month?: number | null
           bathroom_room_template_id?: string | null
           bedroom_room_template_id?: string | null
           billing_email?: string | null
@@ -3546,6 +3550,8 @@ export type Database = {
         Update: {
           auto_assign_enabled?: boolean
           auto_assign_mode?: string
+          inspection_safety_frequency?: Database["public"]["Enums"]["schedule_frequency"] | null
+          inspection_safety_start_month?: number | null
           bathroom_room_template_id?: string | null
           bedroom_room_template_id?: string | null
           billing_email?: string | null

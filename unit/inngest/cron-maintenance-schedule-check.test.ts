@@ -190,9 +190,68 @@ describe('maintenanceSchedulesOrg (per-org handler)', () => {
       logger: { info: vi.fn(), error: vi.fn() },
     })
 
-    expect(result).toEqual({ org_id: 'org_1', checked: 0, escalated: 0, gapSuggestions: 0 })
+    expect(result).toEqual({ org_id: 'org_1', checked: 0, escalated: 0, gapSuggestions: 0, safetyApplied: 0 })
     expect(step.sendEvent).not.toHaveBeenCalled()
     expect(logAuditEvent).not.toHaveBeenCalled()
+  })
+
+  it('applies the org safety template — new properties get their walk without a hook', async () => {
+    // The wiring test. applySafetyTemplate is covered on its own in
+    // unit/inspections/; what this proves is that the CRON reaches it with the
+    // event's org, which is the half that would otherwise be silently absent —
+    // a pass that never runs and a pass that finds nothing both return 0.
+    //
+    // This is the mechanism that catches every property added AFTER onboarding.
+    // Hooking property creation would mean five call sites (the manual form
+    // plus four PMS importers) and six as soon as there is another importer.
+    const supabase = makeSupabase({
+      ...baseTables(),
+      organizations: [{
+        data: { inspection_safety_frequency: 'annual', inspection_safety_start_month: 9 },
+        error: null,
+      }],
+      inspection_forms: [{ data: [{ id: 'form-safety', version: 1 }], error: null }],
+      // The applier's own property read, then the vacancy pass's.
+      properties: [
+        { data: [{ id: 'prop_new' }], error: null },
+        { data: [], error: null },
+      ],
+      maintenance_schedules: [
+        { data: [{ id: 'sched_created' }], error: null },  // the fan-out upsert
+        { data: [], error: null },                          // due-soon pass
+        { data: [], error: null },                          // overdue pass
+      ],
+    })
+    ;(createServiceClient as ReturnType<typeof vi.fn>).mockReturnValue(supabase)
+
+    const result = await invokeHandler(maintenanceSchedulesOrg, {
+      event:  orgEvent(),
+      step:   makeStep(),
+      logger: { info: vi.fn(), error: vi.fn() },
+    })
+
+    expect(result).toMatchObject({ org_id: 'org_1', safetyApplied: 1 })
+  })
+
+  it('a failing safety pass never takes the due-notification pass with it', async () => {
+    // Deliberately the opposite bias to the passes below it. A property that
+    // misses today's fan-out gets its schedule tomorrow; a throw here would
+    // cost the notifications and escalations that actually have a deadline.
+    const supabase = makeSupabase({
+      ...baseTables(),
+      organizations:    [{ data: null, error: { message: 'connection reset' } }],
+      inspection_forms: [{ data: [{ id: 'form-safety', version: 1 }], error: null }],
+    })
+    ;(createServiceClient as ReturnType<typeof vi.fn>).mockReturnValue(supabase)
+
+    const result = await invokeHandler(maintenanceSchedulesOrg, {
+      event:  orgEvent(),
+      step:   makeStep(),
+      logger: { info: vi.fn(), error: vi.fn() },
+    })
+
+    expect(result).toMatchObject({ safetyApplied: 0, checked: 0, escalated: 0 })
+    expect(reportError).toHaveBeenCalled()
   })
 
   it('scopes every pass to the event org_id', async () => {
@@ -248,7 +307,7 @@ describe('maintenanceSchedulesOrg (per-org handler)', () => {
       logger: { info: vi.fn(), error: vi.fn() },
     })
 
-    expect(result).toEqual({ org_id: 'org_1', checked: 1, escalated: 0, gapSuggestions: 0 })
+    expect(result).toEqual({ org_id: 'org_1', checked: 1, escalated: 0, gapSuggestions: 0, safetyApplied: 0 })
 
     const insertCall = supabase.calls.find((c) => c.table === 'work_orders' && c.method === 'insert')
     expect(insertCall?.args[0]).toMatchObject({
@@ -362,7 +421,7 @@ describe('maintenanceSchedulesOrg (per-org handler)', () => {
       logger: { info: vi.fn(), error: vi.fn() },
     })
 
-    expect(result).toEqual({ org_id: 'org_1', checked: 0, escalated: 1, gapSuggestions: 0 })
+    expect(result).toEqual({ org_id: 'org_1', checked: 0, escalated: 1, gapSuggestions: 0, safetyApplied: 0 })
 
     const updateCall = supabase.calls.find((c) => c.table === 'work_orders' && c.method === 'update')
     expect(updateCall?.args[0]).toEqual({ priority: 'urgent' })
@@ -679,7 +738,7 @@ describe('maintenanceSchedulesOrg (per-org handler)', () => {
       logger: { info: vi.fn(), error: vi.fn() },
     })
 
-    expect(result).toEqual({ org_id: 'org_1', checked: 1, escalated: 0, gapSuggestions: 0 })
+    expect(result).toEqual({ org_id: 'org_1', checked: 1, escalated: 0, gapSuggestions: 0, safetyApplied: 0 })
     expect(reportError).toHaveBeenCalledWith(
       expect.any(Error),
       expect.objectContaining({ site: 'inngest.maintenance-cron.invalid_due_date', orgId: 'org_1' }),

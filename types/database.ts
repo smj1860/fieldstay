@@ -149,6 +149,18 @@ export interface Organization {
   kroger_location_name:         string | null
   auto_assign_enabled:          boolean
   auto_assign_mode:             AutoAssignMode
+  /**
+   * The org-wide SAFETY inspection template (20260824091200). Both null until
+   * the onboarding step is answered, and both-or-neither is a CHECK — a
+   * half-answered template would fan out schedules with no due date.
+   *
+   * A month rather than a date because a template has no due date: it is the
+   * rule that produces `next_due_date` for each property's schedule. Not the
+   * dropped `maintenance_schedules.month_due`, which sat on the schedule
+   * ALONGSIDE next_due_date and could disagree with it.
+   */
+  inspection_safety_frequency:   ScheduleFrequency | null
+  inspection_safety_start_month: number | null
   vendor_auto_assign_mode:      VendorAutoAssignMode
   comms_log_retention_days:     number
   guest_pii_retention_days:     number
