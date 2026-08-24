@@ -952,7 +952,13 @@ if (narrowed === null) {
       'supabase/migrations/20260824011348_db_narrowed_update_grants_report.sql.'
   )
 } else {
-  const actual = new Map(narrowed.map((e) => [e.table, [...e.columns].sort()]))
+  // Sorted only so the error message reads in a stable order — the comparison
+  // below is by membership, not by position. The explicit comparator is
+  // required: Array#sort's default coerces to string and sorts by UTF-16 code
+  // unit, which is right for these but only by accident of them being strings.
+  const actual = new Map(
+    narrowed.map((e) => [e.table, [...e.columns].sort((a, b) => a.localeCompare(b))]),
+  )
   for (const [table, expected] of Object.entries(NARROWED_UPDATE_GRANTS)) {
     const got = actual.get(table)
     if (!got) {

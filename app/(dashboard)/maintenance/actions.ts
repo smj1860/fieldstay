@@ -1265,77 +1265,154 @@ function terminalVendorSuggestionError(status: string): string {
   return 'This work order is already complete — accepting the suggestion would reopen it.'
 }
 
+/**
+ * The read half of accepting a suggestion, shared by the vendor and crew paths.
+ *
+ * Everything here was learned the hard way on the vendor path and has to hold
+ * identically on the crew one — which is the argument for it being one function
+ * rather than two that look alike. `bulkAssignVendor` (the OTHER way a PM
+ * assigns a vendor) already split the assignee write from the status advance so
+ * the status only moves FORWARD; the accept path did not, so accepting on a
+ * completed work order REOPENED it and accepting on an in_progress one dragged
+ * it back to `assigned`. Terminal states are refused outright here, and
+ * `writeAcceptedSuggestion` repeats the allowlist as the atomic filter.
+ */
+async function loadSuggestionToAccept(
+  supabase:    SupabaseClient,
+  orgId:       string,
+  workOrderId: string,
+  idsColumn:   'suggested_vendor_ids' | 'suggested_crew_member_ids',
+  site:        string,
+): Promise<{ error: string } | { suggestedId: string }> {
+  const woRes = await supabase
+    .from('work_orders')
+    .select(`id, status, ${idsColumn}`)
+    .eq('id', workOrderId)
+    .eq('org_id', orgId)
+    .maybeSingle()
+
+  if (reportQueryError(woRes.error, { site, orgId })) {
+    return { error: 'Could not load the work order. Please try again.' }
+  }
+  const wo = woRes.data as { status: string; [k: string]: unknown } | null
+  if (!wo) return { error: 'Work order not found' }
+
+  if (!(VENDOR_SUGGESTION_ACCEPTABLE_STATUSES as readonly string[]).includes(wo.status)) {
+    return { error: terminalVendorSuggestionError(wo.status) }
+  }
+
+  const suggestedId = (wo[idsColumn] as string[] | null)?.[0]
+  if (!suggestedId) return { error: 'No suggestion to accept' }
+
+  return { suggestedId }
+}
+
+/**
+ * The write half: mark the suggestion accepted, then advance the status.
+ *
+ * TWO STATEMENTS, NOT ONE. The status allowlist repeats
+ * `loadSuggestionToAccept`'s check as the ATOMIC one, so a completion landing
+ * between the read and this write cannot be overwritten, and the advance is its
+ * own forward-only statement so an in_progress work order is not dragged back.
+ *
+ * The row count is read back for the same reason it is everywhere else in this
+ * file: a refused UPDATE returns 0 rows and NO error.
+ *
+ * A failed status advance is REPORTED, not returned — the assignee is written
+ * and, on the vendor path, about to be notified.
+ */
+async function writeAcceptedSuggestion(
+  supabase:    SupabaseClient,
+  orgId:       string,
+  workOrderId: string,
+  assignee:    Record<string, string>,
+  site:        string,
+): Promise<{ error: string } | { ok: true }> {
+  const { data: accepted, error } = await supabase
+    .from('work_orders')
+    .update({ ...assignee, suggestion_status: 'accepted' })
+    .eq('id', workOrderId)
+    .eq('org_id', orgId)
+    .in('status', VENDOR_SUGGESTION_ACCEPTABLE_STATUSES)
+    .select('id')
+    .maybeSingle()
+
+  if (error) {
+    console.error(`[${site}]`, error)
+    reportError(error, { site, orgId })
+    return { error: 'Failed to accept suggestion. Please try again.' }
+  }
+  if (!accepted) {
+    return { error: 'You do not have permission to make this change, or the work order no longer exists.' }
+  }
+
+  const { error: statusError } = await supabase
+    .from('work_orders')
+    .update({ status: 'assigned' })
+    .eq('id', workOrderId)
+    .eq('org_id', orgId)
+    .in('status', ['pending', 'quote_requested'])
+
+  if (statusError) {
+    console.error(`[${site}] status advance failed`, statusError)
+    reportError(statusError, { site: `${site}.status`, orgId })
+  }
+
+  return { ok: true }
+}
+
+/**
+ * Marks a suggestion dismissed, shared by both dismiss paths.
+ *
+ * The row-count read-back is the whole point and is why this is not two lines
+ * inlined twice: a refused UPDATE returns 0 rows and NO error, so without it a
+ * dismissal RLS declined still went on to write the negative training signal
+ * and an audit row asserting a change that never happened. The turnovers-side
+ * `dismissSuggestion` carries the same fix.
+ */
+async function writeDismissedSuggestion(
+  supabase:    SupabaseClient,
+  orgId:       string,
+  workOrderId: string,
+  site:        string,
+): Promise<{ error: string } | { ok: true }> {
+  const { data: dismissed, error } = await supabase
+    .from('work_orders')
+    .update({ suggestion_status: 'dismissed' })
+    .eq('id', workOrderId)
+    .eq('org_id', orgId)
+    .select('id')
+    .maybeSingle()
+
+  if (error) {
+    console.error(`[${site}]`, error)
+    reportError(error, { site, orgId })
+    return { error: 'Operation failed. Please try again.' }
+  }
+  if (!dismissed) return { error: NOTHING_UPDATED }
+
+  return { ok: true }
+}
+
 export async function acceptVendorSuggestion(workOrderId: string): Promise<{ error?: string }> {
+  const site = 'serverAction.maintenance.acceptVendorSuggestion'
   try {
     const { supabase, membership, user } = await requireOrgRole(['admin', 'manager'])
 
-    const woRes = await supabase
-      .from('work_orders')
-      .select('id, status, suggested_vendor_ids')
-      .eq('id', workOrderId)
-      .eq('org_id', membership.org_id)
-      .maybeSingle()
-
-    if (reportQueryError(woRes.error, { site: 'serverAction.maintenance.acceptVendorSuggestion', orgId: membership.org_id })) {
-      return { error: 'Could not load the work order. Please try again.' }
-    }
-    const wo = woRes.data
-
-    if (!wo) return { error: 'Work order not found' }
-
-    // bulkAssignVendor — the OTHER way a PM assigns a vendor — already splits
-    // the vendor write from the status advance so the status only moves
-    // FORWARD. This path still folded `status: 'assigned'` into one
-    // unconditional update, so accepting a suggestion on a completed work order
-    // reopened it, and accepting on an in_progress one dragged it back to
-    // `assigned`. Terminal states are refused outright; the rest advance only
-    // from the two pre-vendor statuses, exactly as bulkAssignVendor does.
-    if (!(VENDOR_SUGGESTION_ACCEPTABLE_STATUSES as readonly string[]).includes(wo.status)) {
-      return { error: terminalVendorSuggestionError(wo.status) }
-    }
-
-    const vendorId = (wo.suggested_vendor_ids as string[] | null)?.[0]
-    if (!vendorId) return { error: 'No suggestion to accept' }
+    const loaded = await loadSuggestionToAccept(
+      supabase, membership.org_id, workOrderId, 'suggested_vendor_ids', site,
+    )
+    if ('error' in loaded) return loaded
+    const vendorId = loaded.suggestedId
 
     if (await isVendorHardBlocked(supabase, vendorId, membership.org_id)) {
       return { error: VENDOR_HARD_BLOCKED_ERROR }
     }
 
-    // The status allowlist repeats the check above as the ATOMIC one, so a
-    // completion landing between the read and this write cannot be overwritten.
-    // The row count is read back for the same reason it is everywhere else in
-    // this file: a refused UPDATE returns 0 rows and NO error.
-    const { data: accepted, error } = await supabase
-      .from('work_orders')
-      .update({ vendor_id: vendorId, suggestion_status: 'accepted' })
-      .eq('id', workOrderId)
-      .eq('org_id', membership.org_id)
-      .in('status', VENDOR_SUGGESTION_ACCEPTABLE_STATUSES)
-      .select('id')
-      .maybeSingle()
-
-    if (error) {
-      console.error('[acceptVendorSuggestion]', error)
-      reportError(error, { site: 'serverAction.maintenance.acceptVendorSuggestion', orgId: membership.org_id })
-      return { error: 'Failed to accept suggestion. Please try again.' }
-    }
-    if (!accepted) {
-      return { error: 'You do not have permission to make this change, or the work order no longer exists.' }
-    }
-
-    // Forward-only, in its own filtered statement — see bulkAssignVendor.
-    const { error: statusError } = await supabase
-      .from('work_orders')
-      .update({ status: 'assigned' })
-      .eq('id', workOrderId)
-      .eq('org_id', membership.org_id)
-      .in('status', ['pending', 'quote_requested'])
-
-    // Reported, not returned: the vendor IS assigned and about to be notified.
-    if (statusError) {
-      console.error('[acceptVendorSuggestion] status advance failed', statusError)
-      reportError(statusError, { site: 'serverAction.maintenance.acceptVendorSuggestion.status', orgId: membership.org_id })
-    }
+    const written = await writeAcceptedSuggestion(
+      supabase, membership.org_id, workOrderId, { vendor_id: vendorId }, site,
+    )
+    if ('error' in written) return written
 
     try {
       const { createServiceClient } = await import('@/lib/supabase/server')
@@ -1409,23 +1486,13 @@ export async function dismissVendorSuggestion(workOrderId: string): Promise<{ er
     }
     const wo = woRes.data
 
-    const { data: dismissed, error } = await supabase
-      .from('work_orders')
-      .update({ suggestion_status: 'dismissed' })
-      .eq('id', workOrderId)
-      .eq('org_id', membership.org_id)
-      .select('id')
-      .maybeSingle()
-
-    if (error) {
-      console.error('[dismissVendorSuggestion]', error)
-      reportError(error, { site: 'serverAction.maintenance.dismissVendorSuggestion', orgId: membership.org_id })
-      return { error: 'Operation failed. Please try again.' }
-    }
-    // The row count is what stops a refused dismissal from still writing the
-    // negative training signal below — the same fix the turnovers-side
-    // dismissSuggestion already carries.
-    if (!dismissed) return { error: NOTHING_UPDATED }
+    const dismissResult = await writeDismissedSuggestion(
+      supabase, membership.org_id, workOrderId, 'serverAction.maintenance.dismissVendorSuggestion',
+    )
+    // The row count inside that helper is what stops a refused dismissal from
+    // still writing the negative training signal below — the same fix the
+    // turnovers-side dismissSuggestion already carries.
+    if ('error' in dismissResult) return dismissResult
 
     const vendorId = (wo?.suggested_vendor_ids as string[] | null)?.[0]
     if (vendorId) {
@@ -1479,35 +1546,23 @@ export async function dismissVendorSuggestion(workOrderId: string): Promise<{ er
  * acceptance would train. `assignment_outcomes` is also turnover-keyed and this
  * is a work order.
  *
- * Everything the vendor path learned the hard way still applies and is carried
- * over verbatim: terminal statuses are refused rather than silently reopened,
- * the status allowlist is repeated as the ATOMIC filter on the write, the row
- * count is read back because a refused UPDATE returns zero rows and NO error,
- * and the status advance is a separate forward-only statement.
+ * Everything the vendor path learned the hard way still applies, and applies by
+ * SHARING the code rather than by resembling it — `loadSuggestionToAccept` and
+ * `writeAcceptedSuggestion` carry the terminal-status refusal, the allowlist
+ * repeated as the atomic filter, the row-count read-back and the forward-only
+ * advance. Two look-alike copies would mean the next fix to one silently misses
+ * the other.
  */
 export async function acceptCrewSuggestion(workOrderId: string): Promise<{ error?: string }> {
+  const site = 'serverAction.maintenance.acceptCrewSuggestion'
   try {
     const { supabase, membership, user } = await requireOrgRole(['admin', 'manager'])
 
-    const woRes = await supabase
-      .from('work_orders')
-      .select('id, status, suggested_crew_member_ids')
-      .eq('id', workOrderId)
-      .eq('org_id', membership.org_id)
-      .maybeSingle()
-
-    if (reportQueryError(woRes.error, { site: 'serverAction.maintenance.acceptCrewSuggestion', orgId: membership.org_id })) {
-      return { error: 'Could not load the work order. Please try again.' }
-    }
-    const wo = woRes.data
-    if (!wo) return { error: 'Work order not found' }
-
-    if (!(VENDOR_SUGGESTION_ACCEPTABLE_STATUSES as readonly string[]).includes(wo.status)) {
-      return { error: terminalVendorSuggestionError(wo.status) }
-    }
-
-    const crewMemberId = (wo.suggested_crew_member_ids as string[] | null)?.[0]
-    if (!crewMemberId) return { error: 'No suggestion to accept' }
+    const loaded = await loadSuggestionToAccept(
+      supabase, membership.org_id, workOrderId, 'suggested_crew_member_ids', site,
+    )
+    if ('error' in loaded) return loaded
+    const crewMemberId = loaded.suggestedId
 
     // Defense in depth. The suggestion was written by an org-scoped service-role
     // step, so an out-of-org id should be impossible — but this is the column
@@ -1516,37 +1571,10 @@ export async function acceptCrewSuggestion(workOrderId: string): Promise<{ error
     const crewProblem = await checkCrewMemberAssignable(supabase, membership.org_id, crewMemberId)
     if (crewProblem) return crewProblem
 
-    const { data: accepted, error } = await supabase
-      .from('work_orders')
-      .update({ assigned_crew_member_id: crewMemberId, suggestion_status: 'accepted' })
-      .eq('id', workOrderId)
-      .eq('org_id', membership.org_id)
-      .in('status', VENDOR_SUGGESTION_ACCEPTABLE_STATUSES)
-      .select('id')
-      .maybeSingle()
-
-    if (error) {
-      console.error('[acceptCrewSuggestion]', error)
-      reportError(error, { site: 'serverAction.maintenance.acceptCrewSuggestion', orgId: membership.org_id })
-      return { error: 'Failed to accept suggestion. Please try again.' }
-    }
-    if (!accepted) {
-      return { error: 'You do not have permission to make this change, or the work order no longer exists.' }
-    }
-
-    // Forward-only, in its own filtered statement — see acceptVendorSuggestion.
-    const { error: statusError } = await supabase
-      .from('work_orders')
-      .update({ status: 'assigned' })
-      .eq('id', workOrderId)
-      .eq('org_id', membership.org_id)
-      .in('status', ['pending', 'quote_requested'])
-
-    // Reported, not returned: the crew member IS assigned.
-    if (statusError) {
-      console.error('[acceptCrewSuggestion] status advance failed', statusError)
-      reportError(statusError, { site: 'serverAction.maintenance.acceptCrewSuggestion.status', orgId: membership.org_id })
-    }
+    const written = await writeAcceptedSuggestion(
+      supabase, membership.org_id, workOrderId, { assigned_crew_member_id: crewMemberId }, site,
+    )
+    if ('error' in written) return written
 
     await logAuditEvent({
       orgId:      membership.org_id,
@@ -1570,22 +1598,12 @@ export async function dismissCrewSuggestion(workOrderId: string): Promise<{ erro
   try {
     const { supabase, membership, user } = await requireOrgRole(['admin', 'manager'])
 
-    const { data: dismissed, error } = await supabase
-      .from('work_orders')
-      .update({ suggestion_status: 'dismissed' })
-      .eq('id', workOrderId)
-      .eq('org_id', membership.org_id)
-      .select('id')
-      .maybeSingle()
-
-    if (error) {
-      console.error('[dismissCrewSuggestion]', error)
-      reportError(error, { site: 'serverAction.maintenance.dismissCrewSuggestion', orgId: membership.org_id })
-      return { error: 'Operation failed. Please try again.' }
-    }
-    // Zero rows is a refused update, not a successful no-op — see
-    // dismissVendorSuggestion.
-    if (!dismissed) return { error: NOTHING_UPDATED }
+    // No prior read, unlike the vendor twin: there is no outcome row to key on
+    // a dismissed crew id, so nothing here needs to know who was suggested.
+    const dismissResult = await writeDismissedSuggestion(
+      supabase, membership.org_id, workOrderId, 'serverAction.maintenance.dismissCrewSuggestion',
+    )
+    if ('error' in dismissResult) return dismissResult
 
     await logAuditEvent({
       orgId:      membership.org_id,

@@ -314,21 +314,35 @@ function resolveSuggestion(
   vendors: VendorOptionWithCoords[],
   crew:    CrewMemberOption[],
 ): { name: string; accept: (id: string) => Promise<{ error?: string }>; dismiss: (id: string) => Promise<{ error?: string }> } | null {
-  const crewName = (wo.suggested_crew_member_ids ?? [])
-    .map((id) => crew.find((c) => c.id === id)?.name)
-    .filter(Boolean)[0] as string | undefined
+  const crewName = firstResolvableName(wo.suggested_crew_member_ids, crew)
   if (crewName) {
     return { name: crewName, accept: acceptCrewSuggestion, dismiss: dismissCrewSuggestion }
   }
 
-  const vendorName = (wo.suggested_vendor_ids ?? [])
-    .map((id) => vendors.find((v) => v.id === id)?.name)
-    .filter(Boolean)[0] as string | undefined
+  const vendorName = firstResolvableName(wo.suggested_vendor_ids, vendors)
   if (vendorName) {
     return { name: vendorName, accept: acceptVendorSuggestion, dismiss: dismissVendorSuggestion }
   }
 
   return null
+}
+
+/**
+ * The first suggested id that resolves to somebody in the loaded pool.
+ *
+ * Skips past an id the pool does not contain rather than giving up on it — a
+ * crew member deactivated since the suggestion was written is absent from the
+ * board's active-only list, and the next id is still a name the PM can act on.
+ */
+function firstResolvableName(
+  ids:  string[] | null,
+  pool: ReadonlyArray<{ id: string; name: string }>,
+): string | undefined {
+  for (const id of ids ?? []) {
+    const name = pool.find((p) => p.id === id)?.name
+    if (name) return name
+  }
+  return undefined
 }
 
 function WorkOrderCard({
