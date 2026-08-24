@@ -35,6 +35,7 @@ import {
   VENDOR_COMPLIANCE_UNVERIFIABLE_ERROR,
 } from '@/lib/vendors/compliance'
 import { toStorageObjectPath } from '@/lib/storage/object-path'
+import { nudgeDueDateIntoVacancy } from '@/lib/maintenance/vacant-due-date'
 
 // A refused UPDATE returns 0 rows and NO error, so `if (error)` alone reports
 // success for a change that never happened. Every write below whose WHERE
@@ -1874,6 +1875,19 @@ export async function createMaintenanceSchedule(
     const routing = await resolveScheduleRouting(supabase, membership.org_id, data)
     if ('error' in routing) return routing
 
+    const firstDue = resolveFirstDueDate(
+      data.schedule_type, data.frequency || null, data.next_due_date || null,
+    )
+
+    // Only a DERIVED date is nudged onto a vacant day, and only for a walk-
+    // through. A date the PM typed is their decision — silently moving it would
+    // be the system overruling an explicit choice, and they can already see the
+    // calendar. Every LATER occurrence gets the same treatment on advance
+    // (advanceSourceSchedule), so the series is consistent from the first.
+    const nextDueDate = (!data.next_due_date && firstDue && (data.creates ?? 'work_order') === 'inspection')
+      ? await nudgeDueDateIntoVacancy(supabase, membership.org_id, data.property_id, firstDue)
+      : firstDue
+
     const { error } = await supabase.from('maintenance_schedules').insert({
       property_id:        data.property_id,
       org_id:             membership.org_id,
@@ -1881,9 +1895,7 @@ export async function createMaintenanceSchedule(
       description:        data.description || null,
       schedule_type:      data.schedule_type,
       frequency:          data.frequency || null,
-      next_due_date:      resolveFirstDueDate(
-        data.schedule_type, data.frequency || null, data.next_due_date || null,
-      ),
+      next_due_date:      nextDueDate,
       estimated_cost:     data.estimated_cost || null,
       assigned_vendor_id: data.assigned_vendor_id || null,
       auto_create_wo:     data.auto_create_wo,

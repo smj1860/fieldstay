@@ -72,6 +72,8 @@ function makeClient(opts: {
   openPredecessorError?: { message: string }
   /** Recurrence notes already on those work orders, for the replay case. */
   existingUpdates?: { work_order_id: string; notes: string }[]
+  /** Occupying bookings in the next occurrence's month — the vacancy nudge. */
+  bookings?: { checkin_date: string; checkout_date: string }[]
   /** Completed turnovers at this property, newest first — the last-cleaner walk. */
   lastTurnovers?: { id: string; completed_at: string }[]
   turnoverAssignments?: { turnover_id: string; crew_member_id: string | null }[]
@@ -80,7 +82,7 @@ function makeClient(opts: {
   /** Distinct from woError: only the cleaning roll-up's insert fails. */
   cleaningWoError?: { code?: string; message: string } | null
   /** The §7 schedule this walk satisfies, if any. */
-  sourceSchedule?: { id: string; frequency: string | null; next_due_date: string | null } | null
+  sourceSchedule?: { id: string; property_id?: string; frequency: string | null; next_due_date: string | null } | null
   /** Simulates the optimistic lock losing — another pass advanced it first. */
   scheduleAdvanceLostRace?: boolean
 }) {
@@ -101,7 +103,7 @@ function makeClient(opts: {
       // on what each read actually asks for.
       let selected = ''
       const chain = () => builder
-      for (const m of ['eq', 'in', 'limit', 'not']) builder[m] = chain
+      for (const m of ['eq', 'in', 'limit', 'not', 'lte', 'gte']) builder[m] = chain
       builder.select = (cols?: unknown) => {
         if (typeof cols === 'string') selected = cols
         return builder
@@ -167,6 +169,9 @@ function makeClient(opts: {
         }
         if (table === 'work_order_updates') {
           return Promise.resolve({ data: opts.existingUpdates ?? [], error: null }).then(resolve)
+        }
+        if (table === 'bookings') {
+          return Promise.resolve({ data: opts.bookings ?? [], error: null }).then(resolve)
         }
         if (table === 'turnovers') {
           return Promise.resolve(opts.turnoverError
@@ -720,7 +725,7 @@ describe('inspectionCompleted — the source schedule', () => {
   const scheduled = (over: Record<string, unknown> = {}) => makeClient({
     inspection: inspectionRow([], { source_schedule_id: 'sched-1' }),
     failedItems: [],
-    sourceSchedule: { id: 'sched-1', frequency: 'quarterly', next_due_date: '2026-08-01' },
+    sourceSchedule: { id: 'sched-1', property_id: PROP, frequency: 'quarterly', next_due_date: '2026-08-01' },
     ...over,
   })
 
@@ -736,6 +741,35 @@ describe('inspectionCompleted — the source schedule', () => {
     const patch = writes.find((w) => w.table === 'maintenance_schedules')!.rows[0] as Record<string, unknown>
     expect(patch.next_due_date).toBe('2026-11-01')
     expect(patch.last_completed_date).toBeTruthy()
+  })
+
+  it('moves the next occurrence onto a vacant day INSIDE the due month', async () => {
+    // An inspection is a walk-through — somebody is inside for an hour with a
+    // camera. Landing an occurrence mid-stay produces a notification the PM can
+    // only reschedule, and the recurrence puts it right back next quarter.
+    const { client, writes } = scheduled({
+      // Booked over the 1st; free from the 9th.
+      bookings: [{ checkin_date: '2026-10-28', checkout_date: '2026-11-09' }],
+    })
+    vi.mocked(createServiceClient).mockReturnValue(client as never)
+
+    await invokeHandler(inspectionCompleted, ctx())
+    const patch = writes.find((w) => w.table === 'maintenance_schedules')!.rows[0] as Record<string, unknown>
+    expect(patch.next_due_date).toBe('2026-11-09')
+  })
+
+  it('keeps the date rather than leaving the month when November is booked solid', async () => {
+    // The month IS the recurrence anchor — calcNextDueDate steps whole months
+    // from the due date, and there is no anchor column. Sliding to December
+    // would re-anchor this series to December and the next one to March.
+    const { client, writes } = scheduled({
+      bookings: [{ checkin_date: '2026-10-20', checkout_date: '2026-12-05' }],
+    })
+    vi.mocked(createServiceClient).mockReturnValue(client as never)
+
+    await invokeHandler(inspectionCompleted, ctx())
+    const patch = writes.find((w) => w.table === 'maintenance_schedules')!.rows[0] as Record<string, unknown>
+    expect(patch.next_due_date).toBe('2026-11-01')
   })
 
   it('advances even when the walk found nothing wrong', async () => {

@@ -65,6 +65,7 @@ import { createServiceClient } from '@/lib/supabase/server'
 import { createPmNotification } from '../helpers'
 import { parseFormSnapshot } from '@/lib/inspections/snapshots'
 import { calcNextDueDate } from '@/lib/turnovers/generator'
+import { nudgeDueDateIntoVacancy } from '@/lib/maintenance/vacant-due-date'
 import type { InspectionFormItem, PriorityLevel, WoCategory } from '@/types/database'
 
 /** One answer, joined to the routing its form item carried at capture. */
@@ -234,7 +235,7 @@ async function advanceSourceSchedule(orgId: string, scheduleId: string | null): 
 
   const { data: schedule, error } = await supabase
     .from('maintenance_schedules')
-    .select('id, frequency, next_due_date')
+    .select('id, property_id, frequency, next_due_date')
     .eq('org_id', orgId)
     .eq('id', scheduleId)
     .maybeSingle()
@@ -246,12 +247,20 @@ async function advanceSourceSchedule(orgId: string, scheduleId: string | null): 
 
   const nextDue = calcNextDueDate(schedule.frequency, new Date(`${schedule.next_due_date}T00:00:00`))
 
+  // An inspection is a walk-through — somebody is inside for an hour with a
+  // camera — so the occurrence is moved onto a day the property is empty.
+  // WITHIN the month `calcNextDueDate` chose and never outside it: that month
+  // is the recurrence anchor, so leaving it would re-anchor the whole series.
+  const nextDueDate = await nudgeDueDateIntoVacancy(
+    supabase, orgId, schedule.property_id, nextDue.toISOString().split('T')[0]!,
+  )
+
   // Optimistic lock on the date we read, matching every other advance in this
   // codebase: two completions of the same occurrence must not double-step it.
   const { data: advanced, error: advanceError } = await supabase
     .from('maintenance_schedules')
     .update({
-      next_due_date:       nextDue.toISOString().split('T')[0],
+      next_due_date:       nextDueDate,
       last_completed_date: new Date().toISOString().split('T')[0],
     })
     .eq('id', scheduleId)
