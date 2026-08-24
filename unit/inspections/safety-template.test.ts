@@ -3,6 +3,7 @@ import {
   describeSafetyTemplate,
   firstSafetyDueDate,
   readSafetyTemplate,
+  rebasedSafetyDueDate,
   templateMonths,
   type SafetyTemplate,
 } from '@/lib/inspections/safety-template'
@@ -82,6 +83,37 @@ describe('firstSafetyDueDate', () => {
     // next_due_date is compared as a STRING throughout (selectDueSchedules,
     // the PostgREST filters). '2026-3-01' would sort after '2026-12-01'.
     expect(firstSafetyDueDate(t('annual', 3), on('2026-01-01'))).toBe('2026-03-01')
+  })
+})
+
+describe('rebasedSafetyDueDate', () => {
+  it('never lands in the past, which is the whole reason it is not firstSafetyDueDate', () => {
+    // firstSafetyDueDate counts from today's MONTH inclusive, so on March 20th
+    // with a March template it returns March 1st — correct for a property being
+    // scheduled for the first time, and wrong for re-basing an existing one:
+    // the schedule would come back already overdue for a walk nobody was told
+    // about.
+    expect(firstSafetyDueDate(t('annual', 3),   on('2026-03-20'))).toBe('2026-03-01')
+    expect(rebasedSafetyDueDate(t('annual', 3), on('2026-03-20'))).toBe('2027-03-01')
+  })
+
+  it('keeps the 1st when today IS the 1st', () => {
+    // >= today, not > today. Re-basing on the morning of the 1st should land on
+    // that day, not skip a whole cycle.
+    expect(rebasedSafetyDueDate(t('annual', 3), on('2026-03-01'))).toBe('2026-03-01')
+  })
+
+  it('picks the nearer of a semi-annual pair', () => {
+    const march = t('semi_annual', 3)   // March and September
+    expect(rebasedSafetyDueDate(march, on('2026-04-10'))).toBe('2026-09-01')
+    expect(rebasedSafetyDueDate(march, on('2026-09-02'))).toBe('2027-03-01')
+  })
+
+  it('crosses the year end when nothing is left in this one', () => {
+    // The case the two-year candidate list exists for: a December template
+    // re-based on December 2nd has no remaining date this year.
+    expect(rebasedSafetyDueDate(t('annual', 12), on('2026-12-02'))).toBe('2027-12-01')
+    expect(rebasedSafetyDueDate(t('semi_annual', 12), on('2026-12-02'))).toBe('2027-06-01')
   })
 })
 

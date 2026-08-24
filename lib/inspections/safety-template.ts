@@ -79,6 +79,32 @@ export function firstSafetyDueDate(template: SafetyTemplate, today: Date): strin
   return isoFirstOfMonth(year + 1, months[0]!)
 }
 
+/**
+ * Where an EXISTING schedule's due date moves to when the template changes.
+ *
+ * Different question to `firstSafetyDueDate`, and the difference is one that
+ * matters. That one counts from today's MONTH inclusive, which is right for a
+ * property being scheduled for the first time — a PM answering "March" in March
+ * means this March. Re-basing an existing schedule that way can land the date
+ * in the PAST: today is the 20th, the template says March, and the schedule
+ * would come back already overdue for a walk nobody was told about.
+ *
+ * So this counts from today's DATE, and returns the first run-month 1st that
+ * has not already gone by.
+ */
+export function rebasedSafetyDueDate(template: SafetyTemplate, today: Date): string {
+  const todayIso = today.toISOString().slice(0, 10)
+  const year     = today.getUTCFullYear()
+
+  // Two years of candidates: a December template re-based on December 2nd has
+  // no remaining date this year, and its next is January.
+  const candidates = [year, year + 1]
+    .flatMap((y) => templateMonths(template).map((m) => isoFirstOfMonth(y, m)))
+    .sort((a, b) => a.localeCompare(b))
+
+  return candidates.find((d) => d >= todayIso) ?? candidates[candidates.length - 1]!
+}
+
 function isoFirstOfMonth(year: number, month: number): string {
   return `${year}-${String(month).padStart(2, '0')}-01`
 }

@@ -2,7 +2,12 @@ import 'server-only'
 
 import type { SupabaseClient } from '@supabase/supabase-js'
 
-import { firstSafetyDueDate, readSafetyTemplate, type SafetyTemplate } from './safety-template'
+import {
+  firstSafetyDueDate,
+  rebasedSafetyDueDate,
+  readSafetyTemplate,
+  type SafetyTemplate,
+} from './safety-template'
 
 // Turning the org's safety template into one schedule per property.
 //
@@ -156,4 +161,68 @@ async function loadSafetyFormId(supabase: SupabaseClient): Promise<string | null
 
   if (error) throw new Error(`safety form lookup failed: ${error.message}`)
   return data?.[0]?.id ?? null
+}
+
+/**
+ * Re-applies a CHANGED template to the safety schedules that already exist.
+ *
+ * A PM who switches from once a year to twice expects the properties they
+ * already have to change — a template whose edit only affected future
+ * properties would read as the setting not working.
+ *
+ * TWO STATEMENTS, BECAUSE THE TWO FIELDS ARE NOT THE SAME DECISION.
+ *
+ * `frequency` moves everywhere. That IS the cadence change, and there is no
+ * schedule it should not reach.
+ *
+ * `next_due_date` moves only where it is still in the FUTURE, and that clause
+ * is the one doing real work. A date that is today or past means the walk is
+ * due or overdue — somebody may be driving to it. Re-basing that would either
+ * cancel a walk that was about to happen or, worse, re-open one that was just
+ * completed: a property walked on the 5th, re-based to the 1st of the same
+ * month, is instantly due again and gets a duplicate inspection against one
+ * occurrence. A future date has not been acted on by anyone, so moving it costs
+ * nothing.
+ *
+ * The remaining drift is deliberate and small: an overdue schedule keeps its
+ * old date until it is walked, then advances on the NEW frequency.
+ *
+ * Bounded by its WHERE clause rather than by a row limit — this is an UPDATE
+ * over one org's safety schedules, not a scan.
+ */
+export async function rebaseSafetySchedules(
+  supabase: SupabaseClient,
+  orgId:    string,
+  template: SafetyTemplate,
+  today:    Date = new Date(),
+): Promise<{ retimed: number }> {
+  const formId = await loadSafetyFormId(supabase)
+  if (!formId) return { retimed: 0 }
+
+  const { error: freqError } = await supabase
+    .from('maintenance_schedules')
+    .update({ frequency: template.frequency })
+    .eq('org_id', orgId)
+    .eq('creates', 'inspection')
+    .eq('inspection_form_id', formId)
+
+  if (freqError) {
+    throw new Error(`safety cadence update failed for org ${orgId}: ${freqError.message}`)
+  }
+
+  const todayIso = today.toISOString().slice(0, 10)
+  const { data: retimed, error: dateError } = await supabase
+    .from('maintenance_schedules')
+    .update({ next_due_date: rebasedSafetyDueDate(template, today) })
+    .eq('org_id', orgId)
+    .eq('creates', 'inspection')
+    .eq('inspection_form_id', formId)
+    .gt('next_due_date', todayIso)
+    .select('id')
+
+  if (dateError) {
+    throw new Error(`safety due-date rebase failed for org ${orgId}: ${dateError.message}`)
+  }
+
+  return { retimed: retimed?.length ?? 0 }
 }

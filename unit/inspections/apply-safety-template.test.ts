@@ -1,7 +1,11 @@
 import { describe, it, expect } from 'vitest'
 import type { SupabaseClient } from '@supabase/supabase-js'
 
-import { applySafetyTemplate, SAFETY_SCHEDULE_NAME } from '@/lib/inspections/apply-safety-template'
+import {
+  applySafetyTemplate,
+  rebaseSafetySchedules,
+  SAFETY_SCHEDULE_NAME,
+} from '@/lib/inspections/apply-safety-template'
 
 // ============================================================================
 // APPLYING THE TEMPLATE — the one function onboarding and the cron share.
@@ -213,5 +217,89 @@ describe('applySafetyTemplate', () => {
     expect(result.created).toBe(2)
     const rows = writes[0]!.rows as Record<string, unknown>[]
     expect(rows[0]).toMatchObject({ frequency: 'annual', next_due_date: '2026-06-01' })
+  })
+})
+
+describe('rebaseSafetySchedules', () => {
+  /** The double records `update` payloads and the filters each one carried. */
+  function makeUpdateClient(tables: Record<string, Table>) {
+    const updates: { patch: unknown; filters: [string, unknown][] }[] = []
+    const client = {
+      from(table: string) {
+        const filters: [string, unknown][] = []
+        const builder: Record<string, unknown> = {}
+        for (const m of ['select', 'order', 'limit']) builder[m] = () => builder
+        for (const m of ['eq', 'gt']) {
+          builder[m] = (col: string, val: unknown) => { filters.push([`${m}:${col}`, val]); return builder }
+        }
+        builder.update = (patch: unknown) => { updates.push({ patch, filters }); return builder }
+        builder.then = (resolve: (v: unknown) => unknown) => Promise.resolve({
+          data: tables[table]?.data ?? [], error: tables[table]?.error ?? null,
+        }).then(resolve)
+        return builder
+      },
+    } as unknown as SupabaseClient
+    return { client, updates }
+  }
+
+  const FORM_ONLY = { inspection_forms: FORMS }
+
+  it('moves the cadence on EVERY safety schedule', async () => {
+    const { client, updates } = makeUpdateClient(FORM_ONLY)
+    await rebaseSafetySchedules(client, ORG, TEMPLATE, TODAY)
+
+    const freqUpdate = updates.find((u) => 'frequency' in (u.patch as object))!
+    expect(freqUpdate.patch).toEqual({ frequency: 'semi_annual' })
+    // Scoped to this org's SAFETY inspection schedules and nothing else — a
+    // missing form filter would retime the indoor and outdoor walks too.
+    expect(freqUpdate.filters).toContainEqual(['eq:org_id', ORG])
+    expect(freqUpdate.filters).toContainEqual(['eq:creates', 'inspection'])
+    expect(freqUpdate.filters).toContainEqual(['eq:inspection_form_id', 'form-safety'])
+    // And NO date filter: the cadence reaches overdue schedules too.
+    expect(freqUpdate.filters.some(([k]) => k.startsWith('gt:'))).toBe(false)
+  })
+
+  it('moves the DUE DATE only where it is still in the future', async () => {
+    // The clause carrying the weight. A date that is today or past means the
+    // walk is due or overdue and somebody may be driving to it — re-basing it
+    // would either cancel that or re-open a walk completed days ago, producing
+    // a duplicate inspection against one occurrence.
+    const { client, updates } = makeUpdateClient(FORM_ONLY)
+    await rebaseSafetySchedules(client, ORG, TEMPLATE, TODAY)
+
+    const dateUpdate = updates.find((u) => 'next_due_date' in (u.patch as object))!
+    expect(dateUpdate.filters).toContainEqual(['gt:next_due_date', '2026-01-15'])
+    // 2026-01-15 with a March/September template — the next date that has not
+    // gone by.
+    expect(dateUpdate.patch).toEqual({ next_due_date: '2026-03-01' })
+  })
+
+  it('re-bases FORWARD when today is inside a run month', async () => {
+    // The case that separates rebasedSafetyDueDate from firstSafetyDueDate, and
+    // the only one where they disagree. On March 20th with a March/September
+    // template, the onboarding rule returns March 1st — two weeks in the past —
+    // so every future-dated schedule would come back instantly overdue for a
+    // walk nobody was told about. Without this case the two are
+    // interchangeable and swapping them breaks nothing.
+    const { client, updates } = makeUpdateClient(FORM_ONLY)
+    await rebaseSafetySchedules(client, ORG, TEMPLATE, new Date('2026-03-20T12:00:00Z'))
+
+    const dateUpdate = updates.find((u) => 'next_due_date' in (u.patch as object))!
+    expect(dateUpdate.patch).toEqual({ next_due_date: '2026-09-01' })
+  })
+
+  it('does nothing when the form library has not been seeded', async () => {
+    const { client, updates } = makeUpdateClient({ inspection_forms: { data: [] } })
+    expect(await rebaseSafetySchedules(client, ORG, TEMPLATE, TODAY)).toEqual({ retimed: 0 })
+    expect(updates).toHaveLength(0)
+  })
+
+  it('THROWS when the cadence update errors', async () => {
+    const { client } = makeUpdateClient({
+      ...FORM_ONLY,
+      maintenance_schedules: { error: { message: 'deadlock detected' } },
+    })
+    await expect(rebaseSafetySchedules(client, ORG, TEMPLATE, TODAY))
+      .rejects.toThrow(/cadence update failed/)
   })
 })
