@@ -12,6 +12,36 @@
 //   the same refresh token will still succeed in that 60-min window.
 //
 // SECURITY: Never log token values. Server-side only.
+//
+// ─────────────────────────────────────────────────────────────────────────────
+// CREDENTIALS ARE NOT STEP STATE
+//
+// Call this from INSIDE the Inngest step that spends the token, never from a
+// step of its own:
+//
+//   BAD   const token = await step.run('get-token', () => getValidHospitableToken(u))
+//         await step.run('fetch', () => hospFetchX(token))
+//
+//   GOOD  await step.run('fetch', async () => hospFetchX(await getValidHospitableToken(u)))
+//
+// `step.run` MEMOIZES its return value. On a retry Inngest replays the earlier
+// step from saved state rather than re-executing it, so the retry spends the
+// SAME token the first attempt had. If that token was invalidated in the
+// meantime, every retry gets the same 401 and the function exhausts its budget
+// against a credential that a single re-read would have fixed.
+//
+// That is not hypothetical. On 2026-08-24 the hourly refresh cron rotated this
+// provider's token at 09:00:07 (connection row: status active, expires_at
+// 21:00:07) and hospitable-teammate-sync-handler — which had already memoized
+// the previous token — 401'd until it exhausted all retries at 09:01:45,
+// 98 seconds after a perfectly good token was sitting in Vault.
+//
+// Acquiring inside the step is cheap: the common path is one connection read
+// plus one Vault read, and it only performs an exchange when the token is
+// actually near expiry. It also keeps the access token out of Inngest's
+// persisted step output, which is somewhere a credential has no reason to be.
+//
+// Enforced by unit/guardrails/token-not-in-step-state.test.ts.
 // ============================================================
 
 import { unwrap } from '@/lib/supabase/unwrap'
@@ -96,7 +126,7 @@ export async function getValidHospitableToken(userId: string): Promise<string> {
  * the exchange itself, and only refreshes unlocked if the wait ceiling is
  * hit (the lock holder likely died mid-refresh).
  */
-async function refreshHospitableTokenLocked(
+export async function refreshHospitableTokenLocked(
   userId:         string,
   externalUserId: string,
 ): Promise<string> {
@@ -150,11 +180,20 @@ async function refreshHospitableTokenLocked(
 /**
  * Force-refresh the Hospitable access + refresh token pair for `userId`.
  * Called by the weekly cron regardless of current expiry state — deliberately
- * NOT routed through refreshHospitableTokenLocked(): the cron force-refreshes
- * on its own schedule regardless of what any concurrent sync call is doing,
- * and taking a lock the cron itself would immediately contend with every
- * other caller is a separate concern from the interleaved-exchange race this
- * lock exists to prevent.
+ * THE UNLOCKED ENTRY POINT. Callers outside this module should reach for
+ * refreshHospitableTokenLocked() instead — including the refresh cron, which
+ * used to call this directly.
+ *
+ * The old rationale for the cron skipping the lock was that "taking a lock the
+ * cron itself would immediately contend with every other caller is a separate
+ * concern from the interleaved-exchange race this lock exists to prevent."
+ * Contending IS what the lock is for. The cron is simply another concurrent
+ * exchange, and exempting it defeats the lock precisely when two exchanges are
+ * most likely — the hourly refresh at :00 overlapping a :00 sync cron.
+ *
+ * The handler's `concurrency: { key: user_id + provider_id }` does not close
+ * this: it serializes the cron against ITSELF, not against the sync functions,
+ * which are different Inngest functions taking the Redis lock.
  *
  * @param userId          FieldStay user UUID
  * @param externalUserId  Hospitable account UUID — must be passed to avoid

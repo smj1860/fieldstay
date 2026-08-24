@@ -75,18 +75,24 @@ export const hostexInitialSync = inngest.createFunction(
 
     try {
       // ── 1. Token ──────────────────────────────────────────────────────────
-      // getValidHostexToken, not readIntegrationToken: Hostex access tokens
-      // live 7 days, and a connect that sat in a retry queue — or a resync of
-      // an older connection — must not spend an expired one.
-      const token = await step.run('read-token', async () => {
+      // A GETTER, resolved inside each step that spends it, never a value
+      // hoisted into its own step.run — see the "credentials are not step
+      // state" note in lib/integrations/providers/hospitable-token.ts. A
+      // hoisted token is memoized by Inngest and replayed on every retry, so a
+      // token invalidated mid-import can never be recovered from.
+      //
+      // getValid*Token, not readIntegrationToken: access tokens expire, and a
+      // connect that sat in a retry queue — or a resync of an older connection
+      // — must not spend an expired one.
+      const getToken = async () => {
         const t = await getValidHostexToken(user_id)
         if (!t) throw new NonRetriableError('No Hostex token found — reconnect required')
         return t
-      })
+      }
 
       // ── 2. Properties ─────────────────────────────────────────────────────
       const propertyIdMap = await step.run('fetch-and-upsert-properties', async () => {
-        const properties = await hostexFetchProperties(token, user_id)
+        const properties = await hostexFetchProperties(await getToken(), user_id)
         logger.info(`[Hostex:${user_id}] Fetched ${properties.length} properties`)
 
         if (!properties.length) return {}
@@ -105,7 +111,7 @@ export const hostexInitialSync = inngest.createFunction(
       const { reservationCount } = await syncHostexReservations({
         step,
         logger,
-        token,
+        getToken,
         orgId:           org_id,
         userId:          user_id,
         propertyIdMap: propertyIdMap as Record<string, string>,
@@ -125,7 +131,7 @@ export const hostexInitialSync = inngest.createFunction(
       const { reviewCount } = await syncHostexReviews({
         step,
         logger,
-        token,
+        getToken,
         orgId:         org_id,
         userId:        user_id,
         propertyIdMap: propertyIdMap as Record<string, string>,
@@ -141,7 +147,7 @@ export const hostexInitialSync = inngest.createFunction(
       let crewCount = 0
       try {
         ;({ crewCount } = await syncHostexStaff({
-          step, logger, token,
+          step, logger, getToken,
           orgId:         org_id,
           userId:        user_id,
           system:        SYSTEM,
@@ -168,7 +174,7 @@ export const hostexInitialSync = inngest.createFunction(
       // imported.
       await step.run('register-webhook', async () => {
         try {
-          const { attempted, created } = await ensureHostexWebhookRegistration(user_id, token)
+          const { attempted, created } = await ensureHostexWebhookRegistration(user_id, await getToken())
 
           if (!attempted) {
             logger.warn(`[Hostex:${user_id}] NEXT_PUBLIC_APP_URL unset — skipping webhook registration`)

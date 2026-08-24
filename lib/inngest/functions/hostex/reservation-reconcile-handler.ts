@@ -89,11 +89,11 @@ export const hostexReservationReconcileHandler = inngest.createFunction(
         if (!t) throw new NonRetriableError('No Hostex token found — reconnect required')
         return t
       },
-      sync: async (token, propertyIdMap) => {
+      sync: async (getToken, propertyIdMap) => {
         const result = await syncHostexReservations({
           step,
           logger,
-          token,
+          getToken,
           orgId:         org_id,
           userId:        user_id,
           propertyIdMap,
@@ -113,7 +113,7 @@ export const hostexReservationReconcileHandler = inngest.createFunction(
         await syncHostexReviews({
           step,
           logger,
-          token,
+          getToken,
           orgId:         org_id,
           userId:        user_id,
           propertyIdMap,
@@ -125,7 +125,7 @@ export const hostexReservationReconcileHandler = inngest.createFunction(
         // Staff rides the same daily pass. Hostex has no staff webhook, so
         // this is the ONLY way a hire or a departure ever reaches FieldStay.
         await syncHostexStaff({
-          step, logger, token,
+          step, logger, getToken,
           orgId:         org_id,
           userId:        user_id,
           system:        SYSTEM,
@@ -159,7 +159,7 @@ export const hostexReservationReconcileHandler = inngest.createFunction(
         // a registration would throw all of that away and re-do it tomorrow.
         await step.run('ensure-webhook', async () => {
           try {
-            const { attempted, created } = await ensureHostexWebhookRegistration(user_id, token)
+            const { attempted, created } = await ensureHostexWebhookRegistration(user_id, await getToken())
             if (created) {
               // Worth a line: on a reconcile pass this means the registration
               // was ABSENT, which is a repair rather than a setup.

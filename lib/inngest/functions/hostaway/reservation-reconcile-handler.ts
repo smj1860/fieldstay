@@ -101,11 +101,11 @@ export const hostawayReservationReconcileHandler = inngest.createFunction(
         if (!t) throw new NonRetriableError('No Hostaway token found — reconnect required')
         return t
       },
-      sync: async (token, propertyIdMap) => {
+      sync: async (getToken, propertyIdMap) => {
         const result = await syncHostawayReservations({
           step,
           logger,
-          token,
+          getToken,
           orgId:         org_id,
           userId:        user_id,
           propertyIdMap,
@@ -122,7 +122,7 @@ export const hostawayReservationReconcileHandler = inngest.createFunction(
         await syncHostawayReviews({
           step,
           logger,
-          token,
+          getToken,
           orgId:         org_id,
           userId:        user_id,
           propertyIdMap,

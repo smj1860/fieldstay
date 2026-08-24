@@ -290,7 +290,7 @@ const EXCEPTIONS: Record<string, string> = {
   // carrying a copy. Same loop, same justification, new home. Moved again on
   // 2026-08-16 when the provider-agnostic half went to
   // shared/reservation-pipeline.ts and only the per-window fetch stayed here.
-  'lib/inngest/functions/hospitable/reservation-sync.ts:101':
+  'lib/inngest/functions/hospitable/reservation-sync.ts:107':
     'Bounded by the caller\'s lookaheadMonths — `windows` is a fixed-length list of reservation date windows computed from a constant (3 months at 7-day steps for both callers), not a query result. One step per window is the intended per-window retry boundary.',
   // The two REAL GAP entries that used to sit here (capex-projections.ts and
   // depreciation-ledger.ts, both one step.run per org over a platform-wide

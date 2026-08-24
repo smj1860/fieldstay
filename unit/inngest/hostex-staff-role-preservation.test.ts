@@ -77,7 +77,7 @@ async function run(existingRoles: Array<{ external_id: string; role: string }>) 
   await syncHostexStaff({
     step:       step as never,
     logger,
-    token:      'tok',
+    getToken:   async () => 'tok',
     orgId:      'org_1',
     userId:     'user_1',
     system:     'inngest:test',

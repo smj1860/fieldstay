@@ -105,14 +105,23 @@ export const hospReservationReconcileHandler = inngest.createFunction(
         // equivalent handler already used its own getValidHostexToken; only
         // Hospitable was reading raw. (Hostaway legitimately reads raw — its
         // API key cannot be refreshed at all.)
+        //
+        // AND IT RECURRED ANYWAY, on 2026-08-24 at 09:01. Making the getter
+        // refresh-aware only fixes a token that is ALREADY stale when it is
+        // read. It cannot help one that dies AFTER the read — and it was read
+        // exactly once, because runProviderReconcile used to resolve it via
+        // `step.run('read-token', readToken)`, which Inngest memoizes and
+        // replays on every retry. So the second fix is structural: this stays a
+        // GETTER all the way down and is invoked inside each step that spends
+        // it, which is what finally makes a retry able to recover.
         const t = await getValidHospitableToken(user_id)
         if (!t) throw new NonRetriableError('No Hospitable token found — reconnect required')
         return t
       },
-      sync: (token, propertyIdMap) => syncHospitableReservations({
+      sync: (getToken, propertyIdMap) => syncHospitableReservations({
         step,
         logger,
-        token,
+        getToken,
         orgId:           org_id,
         userId:          user_id,
         propertyIdMap,

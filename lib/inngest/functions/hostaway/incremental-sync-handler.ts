@@ -77,7 +77,7 @@ export const hostawayIncrementalSyncHandler = inngest.createFunction(
   async ({ event, step, logger }) => {
     const { user_id, org_id } = event.data
 
-    const prepared = await step.run('read-token-cursor-and-properties', async () => {
+    const prepared = await step.run('read-cursor-and-properties', async () => {
       const token = await readIntegrationToken(user_id, PROVIDER)
       // Retrying cannot conjure a token — only reconnecting can — and Hostaway's
       // API key cannot be refreshed at all, so "gone" here means gone until a
@@ -121,7 +121,12 @@ export const hostawayIncrementalSyncHandler = inngest.createFunction(
         propertyIdMap[p.external_id] = p.id
       }
 
-      return { token, cursor, propertyIdMap }
+      // The token is deliberately NOT returned. A step's return value is
+      // persisted by Inngest and replayed on every retry — so returning it both
+      // parks a credential in third-party storage and guarantees that a retry
+      // spends the same one the first attempt had. See the "credentials are not
+      // step state" note in lib/integrations/providers/hospitable-token.ts.
+      return { cursor, propertyIdMap }
     })
 
     if (!Object.keys(prepared.propertyIdMap).length) {
@@ -132,7 +137,11 @@ export const hostawayIncrementalSyncHandler = inngest.createFunction(
     const result = await syncHostawayReservations({
       step,
       logger,
-      token:         prepared.token,
+      getToken:      async () => {
+        const t = await readIntegrationToken(user_id, PROVIDER)
+        if (!t) throw new NonRetriableError('No Hostaway token found — reconnect required')
+        return t
+      },
       orgId:         org_id,
       userId:        user_id,
       propertyIdMap: prepared.propertyIdMap,

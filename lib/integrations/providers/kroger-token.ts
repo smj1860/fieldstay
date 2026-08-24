@@ -68,7 +68,7 @@ export async function getValidKrogerToken(userId: string): Promise<string> {
 const LOCK_WAIT_MS   = 400
 const LOCK_MAX_WAITS = 5
 
-async function refreshKrogerTokenSingleFlight(userId: string): Promise<string> {
+export async function refreshKrogerTokenSingleFlight(userId: string): Promise<string> {
   const acquired = await acquireRefreshLock('kroger', userId)
 
   if (acquired) {
@@ -92,6 +92,11 @@ async function refreshKrogerTokenSingleFlight(userId: string): Promise<string> {
  * Refreshes the Kroger access token using the stored refresh token.
  * Throws NonRetriableError when the refresh token itself is invalid or
  * revoked — Inngest must not retry a refresh that can never succeed.
+ *
+ * THE UNLOCKED ENTRY POINT. Callers outside this module should use
+ * refreshKrogerTokenSingleFlight(), including the proactive refresh cron —
+ * the cron is just another concurrent exchange, and a lock only works if
+ * every contender takes it.
  */
 export async function refreshKrogerToken(userId: string): Promise<string> {
   const supabase = createServiceClient({ system: 'lib/integrations/providers/kroger-token' })

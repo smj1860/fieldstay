@@ -71,21 +71,26 @@ export const hospInitialSync = inngest.createFunction(
     const { user_id, org_id, external_user_id } = event.data
 
     try {
-      // ── 1. Read token from Vault ─────────────────────────────────────────
-      const token = await step.run('read-token', async () => {
-        // Refresh-aware, for the same reason as the reconcile handler — see its
-        // readToken comment. Less likely to matter here (the token was minted
-        // moments ago by the OAuth callback) but not impossible: an Inngest
-        // retry hours later, or a manual resync, both re-enter this step, and
-        // reading a raw expired token then fails the whole first import.
+      // ── 1. Token ─────────────────────────────────────────────────────────
+      // A GETTER, invoked inside each step that spends it — see the
+      // "credentials are not step state" note in hospitable-token.ts. This was
+      // `await step.run('read-token', ...)`, which Inngest memoizes: an import
+      // that spans a token rotation replayed the dead one on every retry.
+      //
+      // Refresh-aware, for the same reason as the reconcile handler. Less
+      // likely to matter here (the token was minted moments ago by the OAuth
+      // callback) but not impossible: an Inngest retry hours later, or a manual
+      // resync, both re-enter this function, and reading a raw expired token
+      // then fails the whole first import.
+      const getToken = async () => {
         const t = await getValidHospitableToken(user_id)
         if (!t) throw new NonRetriableError('No Hospitable token found — reconnect required')
         return t
-      })
+      }
 
       // ── 2. Fetch properties and upsert ───────────────────────────────────
       const propertyIdMap = await step.run('fetch-and-upsert-properties', async () => {
-        const properties = await hospFetchProperties(token)
+        const properties = await hospFetchProperties(await getToken())
         logger.info(`[Hospitable:${user_id}] Fetched ${properties.length} properties`)
 
         if (!properties.length) return {}
@@ -146,7 +151,7 @@ export const hospInitialSync = inngest.createFunction(
       // hospTeammateSyncCron's daily resync — Hospitable has no teammate
       // webhook to react to incrementally.
       const teammateCount = await step.run('fetch-and-upsert-teammates', async () => {
-        const teammates = await hospFetchTeammates(token)
+        const teammates = await hospFetchTeammates(await getToken())
         logger.info(`[Hospitable:${user_id}] Fetched ${teammates.length} teammates`)
 
         const rows = hospitableTeammatesToCrewRows(org_id, teammates)
@@ -182,7 +187,7 @@ export const hospInitialSync = inngest.createFunction(
       const { reservationCount } = await syncHospitableReservations({
         step,
         logger,
-        token,
+        getToken,
         orgId:           org_id,
         userId:          user_id,
         propertyIdMap,
