@@ -30,6 +30,8 @@ export interface DueSchedule extends DueScheduleInput {
   overdue:       boolean
   /** Whole days late; 0 when it is due exactly today. */
   daysLate:      number
+  /** Whole days until due; 0 when due today or overdue. Dashboard horizon only. */
+  daysUntil:     number
 }
 
 const DAY_MS = 86_400_000
@@ -68,21 +70,53 @@ export function selectDueSchedules(
   inspections: readonly StartedInspectionInput[],
   today:       string,
 ): DueSchedule[] {
+  return selectUpcomingSchedules(schedules, inspections, today, 0)
+}
+
+/**
+ * The same selection, widened to a horizon — what the dashboard's Upcoming
+ * Inspections section shows (§9: "hidden until an inspection is within 30 days.
+ * Overdue stays visible and is styled as overdue").
+ *
+ * `selectDueSchedules` DELEGATES to this rather than the two being written
+ * separately, and that is deliberate. Both surfaces answer "what is due", and
+ * the suppression rule below is subtle enough that a second implementation
+ * would drift — at which point the dashboard would nag about a walk the
+ * Maintenance page had already stopped listing, or the reverse. One rule, two
+ * horizons.
+ *
+ * `horizonDays` is INCLUSIVE of the last day, so 29 matches the ops page's
+ * existing `addDays(today, 29)` — a 30-day window counting today.
+ */
+export function selectUpcomingSchedules(
+  schedules:   readonly DueScheduleInput[],
+  inspections: readonly StartedInspectionInput[],
+  today:       string,
+  horizonDays: number,
+): DueSchedule[] {
   const walkInProgress = new Set(
     inspections
       .filter((i) => !i.completed_at && i.source_schedule_id)
       .map((i) => i.source_schedule_id as string),
   )
 
+  const horizon = addDaysISO(today, horizonDays)
+
   return schedules
-    .filter((s) => !!s.next_due_date && s.next_due_date <= today && !walkInProgress.has(s.id))
+    .filter((s) => !!s.next_due_date && s.next_due_date <= horizon && !walkInProgress.has(s.id))
     .map((s) => ({
       ...s,
       next_due_date: s.next_due_date as string,
       overdue:       (s.next_due_date as string) < today,
       daysLate:      daysBetween(s.next_due_date as string, today),
+      daysUntil:     daysBetween(today, s.next_due_date as string),
     }))
     .sort((a, b) => a.next_due_date.localeCompare(b.next_due_date))
+}
+
+/** `YYYY-MM-DD` plus whole days, via UTC so no DST seam can shift the answer. */
+function addDaysISO(date: string, days: number): string {
+  return new Date(dayMs(date) + days * DAY_MS).toISOString().slice(0, 10)
 }
 
 /** Whole days from `from` to `to`, both `YYYY-MM-DD`. Never negative here. */
@@ -90,7 +124,15 @@ function daysBetween(from: string, to: string): number {
   return Math.max(0, Math.round((dayMs(to) - dayMs(from)) / DAY_MS))
 }
 
-/** Midnight UTC for a `YYYY-MM-DD`, so the subtraction never crosses a DST seam. */
+/**
+ * Midnight UTC for a `YYYY-MM-DD`, so the subtraction never crosses a DST seam.
+ *
+ * Belt-and-braces rather than load-bearing: `Math.round` in daysBetween already
+ * absorbs a DST offset (a 29-day span reads as 29.0417 in local time and rounds
+ * back to 29), and an offset would have to exceed 12 hours to survive that.
+ * Stated because the DST test in due-schedules.test.ts cannot distinguish the
+ * two, and an earlier version of it claimed otherwise.
+ */
 function dayMs(date: string): number {
   return Date.UTC(
     Number(date.slice(0, 4)),
@@ -103,4 +145,18 @@ function dayMs(date: string): number {
 export function dueLabel(schedule: Pick<DueSchedule, 'overdue' | 'daysLate'>): string {
   if (!schedule.overdue) return 'Due today'
   return schedule.daysLate === 1 ? '1 day overdue' : `${schedule.daysLate} days overdue`
+}
+
+/**
+ * The same label widened for the dashboard, where most rows are not yet due.
+ *
+ * Separate from `dueLabel` rather than replacing it: the Maintenance page's list
+ * is only ever things due NOW, and "Due today" is the right words there. Widening
+ * that function would have made every caller carry a horizon it does not have.
+ */
+export function upcomingLabel(schedule: Pick<DueSchedule, 'overdue' | 'daysLate' | 'daysUntil'>): string {
+  if (schedule.overdue)          return dueLabel(schedule)
+  if (schedule.daysUntil === 0)  return 'Due today'
+  if (schedule.daysUntil === 1)  return 'Due tomorrow'
+  return `Due in ${schedule.daysUntil} days`
 }

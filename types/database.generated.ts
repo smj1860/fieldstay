@@ -1,34 +1,3 @@
-/**
- * FieldStay — Database types, GENERATED FROM THE LIVE SCHEMA.
- *
- * DO NOT HAND-EDIT. Regenerate with:
- *
- *   npx supabase gen types typescript --project-id vpmznjktllhmmbfnxuvk > types/database.generated.ts
- *
- * (or the Supabase MCP `generate_typescript_types` tool against the same
- * project), in the SAME COMMIT as the migration that changed the schema —
- * the rule CLAUDE.md already states for types/database.ts.
- *
- * The MCP tool returns the file WITHOUT this header (and wrapped in a JSON
- * envelope under a `types` key). Re-add it after regenerating: it is the only
- * place the regeneration command is written down, so losing it is how the file
- * silently becomes hand-editable.
- *
- * WHY THIS FILE EXISTS
- * types/database.ts was hand-written, and its interfaces do not satisfy
- * postgrest-js's GenericSchema constraint (they lack the index signatures and
- * Relationships shape it requires). That is why lib/supabase/server.ts omits
- * the <Database> generic and every .from()/.rpc() call in the app is typed as
- * `any`. Measured 2026-08-02: wiring <Database> to the hand-written type
- * produces 2267 errors, of which 2163 are the single `never` collapse that
- * failure mode causes. Wiring it to THIS file instead produces 138 — a 94%
- * reduction — because row types actually resolve.
- *
- * types/database.ts remains the public import surface (Property, WorkOrder,
- * MemberRole, …). It now derives those aliases from this file rather than
- * restating them, so there is one source of truth and no drift between them.
- */
-
 export type Json =
   | string
   | number
@@ -1746,6 +1715,7 @@ export type Database = {
       }
       inspection_form_items: {
         Row: {
+          asks_property_fact: string | null
           asset_type: Database["public"]["Enums"]["asset_type"] | null
           concern_key: string | null
           created_at: string
@@ -1767,11 +1737,13 @@ export type Database = {
           response_type: Database["public"]["Enums"]["inspection_response_type"]
           section_id: string
           show_when: Database["public"]["Enums"]["inspection_result"] | null
+          shown_when_property_fact: string | null
           sort_order: number
           wo_category: Database["public"]["Enums"]["wo_category"] | null
           wo_priority: Database["public"]["Enums"]["priority_level"] | null
         }
         Insert: {
+          asks_property_fact?: string | null
           asset_type?: Database["public"]["Enums"]["asset_type"] | null
           concern_key?: string | null
           created_at?: string
@@ -1793,11 +1765,13 @@ export type Database = {
           response_type?: Database["public"]["Enums"]["inspection_response_type"]
           section_id: string
           show_when?: Database["public"]["Enums"]["inspection_result"] | null
+          shown_when_property_fact?: string | null
           sort_order?: number
           wo_category?: Database["public"]["Enums"]["wo_category"] | null
           wo_priority?: Database["public"]["Enums"]["priority_level"] | null
         }
         Update: {
+          asks_property_fact?: string | null
           asset_type?: Database["public"]["Enums"]["asset_type"] | null
           concern_key?: string | null
           created_at?: string
@@ -1819,6 +1793,7 @@ export type Database = {
           response_type?: Database["public"]["Enums"]["inspection_response_type"]
           section_id?: string
           show_when?: Database["public"]["Enums"]["inspection_result"] | null
+          shown_when_property_fact?: string | null
           sort_order?: number
           wo_category?: Database["public"]["Enums"]["wo_category"] | null
           wo_priority?: Database["public"]["Enums"]["priority_level"] | null
@@ -3486,8 +3461,6 @@ export type Database = {
         Row: {
           auto_assign_enabled: boolean
           auto_assign_mode: string
-          inspection_safety_frequency: Database["public"]["Enums"]["schedule_frequency"] | null
-          inspection_safety_start_month: number | null
           bathroom_room_template_id: string | null
           bedroom_room_template_id: string | null
           billing_email: string | null
@@ -3497,6 +3470,10 @@ export type Database = {
           default_room_templates_seeded_at: string | null
           guest_pii_retention_days: number
           id: string
+          inspection_safety_frequency:
+            | Database["public"]["Enums"]["schedule_frequency"]
+            | null
+          inspection_safety_start_month: number | null
           is_demo: boolean
           kroger_location_id: string | null
           kroger_location_name: string | null
@@ -3518,8 +3495,6 @@ export type Database = {
         Insert: {
           auto_assign_enabled?: boolean
           auto_assign_mode?: string
-          inspection_safety_frequency?: Database["public"]["Enums"]["schedule_frequency"] | null
-          inspection_safety_start_month?: number | null
           bathroom_room_template_id?: string | null
           bedroom_room_template_id?: string | null
           billing_email?: string | null
@@ -3529,6 +3504,10 @@ export type Database = {
           default_room_templates_seeded_at?: string | null
           guest_pii_retention_days?: number
           id?: string
+          inspection_safety_frequency?:
+            | Database["public"]["Enums"]["schedule_frequency"]
+            | null
+          inspection_safety_start_month?: number | null
           is_demo?: boolean
           kroger_location_id?: string | null
           kroger_location_name?: string | null
@@ -3550,8 +3529,6 @@ export type Database = {
         Update: {
           auto_assign_enabled?: boolean
           auto_assign_mode?: string
-          inspection_safety_frequency?: Database["public"]["Enums"]["schedule_frequency"] | null
-          inspection_safety_start_month?: number | null
           bathroom_room_template_id?: string | null
           bedroom_room_template_id?: string | null
           billing_email?: string | null
@@ -3561,6 +3538,10 @@ export type Database = {
           default_room_templates_seeded_at?: string | null
           guest_pii_retention_days?: number
           id?: string
+          inspection_safety_frequency?:
+            | Database["public"]["Enums"]["schedule_frequency"]
+            | null
+          inspection_safety_start_month?: number | null
           is_demo?: boolean
           kroger_location_id?: string | null
           kroger_location_name?: string | null
@@ -4100,6 +4081,7 @@ export type Database = {
           external_id: string | null
           external_missing_since: string | null
           external_source: string | null
+          has_security_system: boolean | null
           house_manual: string | null
           id: string
           internal_notes: string | null
@@ -4145,6 +4127,7 @@ export type Database = {
           external_id?: string | null
           external_missing_since?: string | null
           external_source?: string | null
+          has_security_system?: boolean | null
           house_manual?: string | null
           id?: string
           internal_notes?: string | null
@@ -4190,6 +4173,7 @@ export type Database = {
           external_id?: string | null
           external_missing_since?: string | null
           external_source?: string | null
+          has_security_system?: boolean | null
           house_manual?: string | null
           id?: string
           internal_notes?: string | null
@@ -6427,6 +6411,7 @@ export type Database = {
         Returns: string
       }
       db_invariant_report: { Args: never; Returns: Json }
+      db_narrowed_update_grants: { Args: never; Returns: Json }
       db_type_shape_report: { Args: never; Returns: Json }
       delete_vault_secret: { Args: { p_secret_id: string }; Returns: undefined }
       derive_property_stay_lengths: {

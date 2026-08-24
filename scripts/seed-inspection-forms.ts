@@ -97,6 +97,8 @@ function itemColumns(flat: FlatItem, sectionId: string) {
     na_asset_type:      d.na_asset_type      ?? null,
     asset_type:         d.asset_type         ?? null,
     concern_key:        d.concern_key        ?? null,
+    asks_property_fact:       d.asks_property_fact       ?? null,
+    shown_when_property_fact: d.shown_when_property_fact ?? null,
     remediation:        d.remediation,
     default_actions:    d.default_actions,
     wo_category:        d.wo_category ?? null,

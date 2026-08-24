@@ -2,7 +2,9 @@ import { describe, it, expect } from 'vitest'
 import {
   dueLabel,
   selectDueSchedules,
+  selectUpcomingSchedules,
   todayISO,
+  upcomingLabel,
   type DueScheduleInput,
   type StartedInspectionInput,
 } from '@/lib/inspections/due-schedules'
@@ -147,5 +149,105 @@ describe('dueLabel', () => {
     expect(dueLabel({ overdue: false, daysLate: 0 })).toBe('Due today')
     expect(dueLabel({ overdue: true,  daysLate: 1 })).toBe('1 day overdue')
     expect(dueLabel({ overdue: true,  daysLate: 4 })).toBe('4 days overdue')
+  })
+})
+
+// ============================================================================
+// THE DASHBOARD HORIZON — §9's "within 30 days, overdue stays visible".
+//
+// selectDueSchedules is this function at horizon 0, and that delegation is the
+// point: two surfaces asking "what is due" must not be able to disagree,
+// especially about the in-progress suppression, which is the subtle half. The
+// first test below is what would break if someone re-implemented either one.
+// ============================================================================
+
+describe('selectUpcomingSchedules', () => {
+  it('is the SAME rule as selectDueSchedules at horizon 0', () => {
+    // Not a tautology test: it is the anchor that stops the two from drifting.
+    // If the delegation is ever unpicked into a second implementation, this is
+    // the test that notices — including for the suppression case below.
+    const schedules = [
+      schedule({ id: 'a', next_due_date: '2026-09-10' }),
+      schedule({ id: 'b', next_due_date: TODAY }),
+      schedule({ id: 'c', next_due_date: '2026-09-20' }),
+      schedule({ id: 'd', next_due_date: null }),
+    ]
+    const walks = [inspection({ source_schedule_id: 'a' })]
+
+    expect(selectUpcomingSchedules(schedules, walks, TODAY, 0))
+      .toEqual(selectDueSchedules(schedules, walks, TODAY))
+  })
+
+  it('reaches forward to the horizon inclusively, and no further', () => {
+    const schedules = [
+      schedule({ id: 'inside', next_due_date: '2026-10-14' }),   // today + 29
+      schedule({ id: 'beyond', next_due_date: '2026-10-15' }),   // today + 30
+    ]
+
+    const ids = selectUpcomingSchedules(schedules, [], TODAY, 29).map((s) => s.id)
+    expect(ids).toEqual(['inside'])
+  })
+
+  it('keeps overdue schedules visible — they never fall out of the window', () => {
+    // §9 says so explicitly. A horizon that only looked FORWARD would drop the
+    // most urgent rows off the dashboard, which is the opposite of the point.
+    const schedules = [
+      schedule({ id: 'late',     next_due_date: '2026-06-01' }),
+      schedule({ id: 'upcoming', next_due_date: '2026-09-30' }),
+    ]
+
+    const rows = selectUpcomingSchedules(schedules, [], TODAY, 29)
+    expect(rows.map((r) => r.id)).toEqual(['late', 'upcoming'])
+    expect(rows[0]).toMatchObject({ overdue: true, daysUntil: 0 })
+    expect(rows[1]).toMatchObject({ overdue: false, daysLate: 0, daysUntil: 15 })
+  })
+
+  it('still suppresses a schedule whose walk is already under way', () => {
+    // The reason selectDueSchedules exists in this shape, carried to the wider
+    // horizon: a PM shown a due row for a walk they are halfway through taps
+    // Start and creates a SECOND inspection against one occurrence.
+    const schedules = [schedule({ id: 'sched-1', next_due_date: '2026-09-20' })]
+    const walks     = [inspection({ source_schedule_id: 'sched-1' })]
+
+    expect(selectUpcomingSchedules(schedules, walks, TODAY, 29)).toEqual([])
+  })
+
+  it('a COMPLETED walk does not suppress — that is a new occurrence', () => {
+    const schedules = [schedule({ id: 'sched-1', next_due_date: '2026-09-20' })]
+    const walks     = [inspection({ source_schedule_id: 'sched-1', completed_at: '2025-09-20T10:00:00Z' })]
+
+    expect(selectUpcomingSchedules(schedules, walks, TODAY, 29).map((s) => s.id))
+      .toEqual(['sched-1'])
+  })
+
+  it('counts days across a DST boundary without drifting', () => {
+    // US DST ends 2026-11-01, so this span is 29 days by the calendar but
+    // 29 days and one hour by local wall clock.
+    //
+    // HONEST SCOPE OF THIS TEST: it asserts the OBSERVABLE property (the count
+    // is 29 either way), not the mechanism. An earlier version of this comment
+    // claimed dayMs()'s Date.UTC was what saved it — that is wrong, and
+    // checking proved it: local-time arithmetic gives 29.0417, which
+    // Math.round already returns as 29. Swapping Date.UTC for local time under
+    // TZ=America/Chicago leaves this suite entirely green.
+    //
+    // So Date.UTC here is belt-and-braces over Math.round, and no test can
+    // distinguish the two — a DST offset would have to exceed 12 hours to
+    // survive the rounding, and none does. Kept because the property is worth
+    // locking; labelled because a test that cannot fail for the reason it
+    // names is worse than no test.
+    const rows = selectUpcomingSchedules(
+      [schedule({ next_due_date: '2026-11-14' })], [], '2026-10-16', 29,
+    )
+    expect(rows[0]).toMatchObject({ daysUntil: 29, overdue: false })
+  })
+})
+
+describe('upcomingLabel', () => {
+  it('distinguishes late, today, tomorrow and later', () => {
+    expect(upcomingLabel({ overdue: true,  daysLate: 3, daysUntil: 0 })).toBe('3 days overdue')
+    expect(upcomingLabel({ overdue: false, daysLate: 0, daysUntil: 0 })).toBe('Due today')
+    expect(upcomingLabel({ overdue: false, daysLate: 0, daysUntil: 1 })).toBe('Due tomorrow')
+    expect(upcomingLabel({ overdue: false, daysLate: 0, daysUntil: 12 })).toBe('Due in 12 days')
   })
 })

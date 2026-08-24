@@ -136,6 +136,24 @@ export function FillScreen({ inspectionId, userId, orgId }: Readonly<Props>) {
    * device simply gets an empty map and no prompt — the pre-§6 behaviour —
    * rather than a spinner or an error.
    */
+  /**
+   * Property-level facts the two item gates read (20260824194339).
+   *
+   * `undefined` while the query is in flight and `null` when the property row
+   * is not cached, and both are correct as "unknown" — the capture question
+   * renders, which is the safe direction. Silently treating an uncached
+   * property as `false` would suppress the very question that exists to
+   * establish the answer.
+   */
+  const propertyFacts = useLiveQuery(
+    async (): Promise<{ has_security_system: boolean | null }> => {
+      const property = inspection ? await db.properties.get(inspection.property_id) : undefined
+      return { has_security_system: property?.has_security_system ?? null }
+    },
+    [db, inspection?.property_id],
+    { has_security_system: null },
+  )
+
   const openConcerns = useLiveQuery(
     // `async` for the same reason `assets` is: a bare ternary infers a
     // never[] arm that poisons the result type.
@@ -167,8 +185,9 @@ export function FillScreen({ inspectionId, userId, orgId }: Readonly<Props>) {
       ...formFromSnapshot(snapshot),
       assets:         assets ?? [],
       countsByItemId: toCountsByItemId(answerRows ?? []),
+      propertyFacts,
     })
-  }, [snapshot, assets, answerRows])
+  }, [snapshot, assets, answerRows, propertyFacts])
 
   const outstanding = useMemo(() => findOutstanding(pages, answers), [pages, answers])
 

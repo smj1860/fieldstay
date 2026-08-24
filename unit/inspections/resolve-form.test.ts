@@ -46,6 +46,7 @@ function item(over: Partial<InspectionFormItem> & { section_id: string }): Inspe
     parent_item_id: null, show_when: null,
     repeat_source_item_id: null, repeat_per_asset: false, per_unit: false,
     na_reason_template: null, na_asset_type: null, asset_type: null,
+    asks_property_fact: null, shown_when_property_fact: null,
     concern_key: null, remediation: 'work_order', default_actions: ['repair'],
     wo_category: null, wo_priority: null,
     po_catalog_item_id: null, po_default_qty: null,
@@ -712,5 +713,93 @@ describe('a child inherits the instance it hangs from', () => {
 
     expect(page.items[0]!.children[0]!.asset).toBeUndefined()
     expect(page.items[0]!.children[0]!.repeatIndex).toBeUndefined()
+  })
+})
+
+// ============================================================================
+// PROPERTY-FACT GATES (20260824194339).
+//
+// "Ask every property whether it has a monitored alarm on the first walk, and
+// once answered stop asking." Two gates, and the asymmetry between them is the
+// design rather than an inconsistency:
+//
+//   asks_property_fact       shown only while the fact is UNKNOWN — the capture
+//                            question, which drops off once answered.
+//   shown_when_property_fact shown only where the fact is TRUE — the condition
+//                            question, which never drops off, because a
+//                            monitoring contract lapses far more often than a
+//                            panel is removed.
+//
+// The critical case is the third test: answering NO must silence the capture
+// question WITHOUT turning on the condition question. `false` and `null` are
+// different answers, and a gate that treated them alike would either ask
+// forever or start asking a property with no alarm whether its alarm works.
+// ============================================================================
+
+describe('resolveFormPages — property-fact gates', () => {
+  const capture   = (sectionId: string) =>
+    item({ section_id: sectionId, key: 'cap', asks_property_fact: 'has_security_system' })
+  const condition = (sectionId: string) =>
+    item({ section_id: sectionId, key: 'cond', shown_when_property_fact: 'has_security_system' })
+
+  const keysFor = (facts?: Record<string, boolean | null>) => {
+    const sec = section({ key: 'security' })
+    const pages = resolveFormPages({
+      sections: [sec],
+      items:    [capture(sec.id), condition(sec.id)],
+      assets:   [],
+      ...(facts ? { propertyFacts: facts } : {}),
+    })
+    return pages.flatMap((p) => p.items.map((i) => i.formItem.key))
+  }
+
+  it('asks the capture question, and only that, when the fact is unknown', () => {
+    expect(keysFor({ has_security_system: null })).toEqual(['cap'])
+  })
+
+  it('treats an OMITTED fact as unknown rather than as false', () => {
+    // The safe direction: asking once more costs a tap, and silently dropping
+    // the question is how the fact never gets captured at all.
+    expect(keysFor()).toEqual(['cap'])
+    expect(keysFor({})).toEqual(['cap'])
+  })
+
+  it('answering NO silences the capture question and does NOT turn on the condition', () => {
+    // Both halves matter. Still asking would make "ask once" a lie; asking a
+    // property with no alarm whether its alarm arms would be worse.
+    expect(keysFor({ has_security_system: false })).toEqual([])
+  })
+
+  it('answering YES swaps the capture question for the recurring condition one', () => {
+    expect(keysFor({ has_security_system: true })).toEqual(['cond'])
+  })
+
+  it('renders nothing for an UNRECOGNISED fact key', () => {
+    // Reachable only through a snapshot — a live write is rejected by
+    // inspection_form_items_known_property_facts. Matches how an unrecognised
+    // shown_when_asset behaves: a corrupt snapshot degrades to a missing
+    // question, never a crash.
+    const sec = section({ key: 'security' })
+    const pages = resolveFormPages({
+      sections: [sec],
+      items: [
+        item({ section_id: sec.id, key: 'a', asks_property_fact: 'has_pony' as never }),
+        item({ section_id: sec.id, key: 'b', shown_when_property_fact: 'has_pony' as never }),
+      ],
+      assets: [],
+      propertyFacts: {},
+    })
+    expect(pages).toEqual([])
+  })
+
+  it('leaves ungated items alone', () => {
+    const sec = section({ key: 'mixed' })
+    const pages = resolveFormPages({
+      sections: [sec],
+      items:    [item({ section_id: sec.id, key: 'plain' }), capture(sec.id)],
+      assets:   [],
+      propertyFacts: { has_security_system: true },
+    })
+    expect(pages.flatMap((p) => p.items.map((i) => i.formItem.key))).toEqual(['plain'])
   })
 })

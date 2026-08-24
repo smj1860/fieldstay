@@ -33,6 +33,7 @@ import type {
   InspectionAction,
   InspectionRemediation,
   InspectionResponseType,
+  PropertyFactKey,
   InspectionResult,
   PriorityLevel,
   WoCategory,
@@ -88,6 +89,29 @@ export interface ItemDefinition {
 
   /** Shared across forms — see the CONCERN_KEY_MAP table in ./index.ts. */
   concern_key?: string
+
+  /**
+   * ASK-ONCE CAPTURE. Rendered only while this property fact is still NULL, and
+   * its answer is what sets the fact — so the question is asked on the first
+   * walk at a property and never again.
+   *
+   * Mutually exclusive with `shown_when_property_fact` (enforced by a DB CHECK):
+   * an item shown only when a fact is UNKNOWN and only when it is TRUE can
+   * never render at all, which would be a question that silently disappears
+   * rather than a write that fails.
+   */
+  asks_property_fact?: PropertyFactKey
+  /**
+   * RECURRING CONDITION. Rendered only where the fact is TRUE.
+   *
+   * Deliberately does NOT drop off, and that asymmetry is the whole design: a
+   * monitoring contract lapses far more often than a panel is torn off a wall,
+   * so presence is a fact worth capturing once while condition has to be
+   * re-asked. A form that stopped asking both would leave every year after the
+   * first silent about the alarm — and §1's argument is that the multi-year
+   * record IS the artifact.
+   */
+  shown_when_property_fact?: PropertyFactKey
 
   /**
    * The GENERIC SWEEP: one row per ACTIVE `property_assets` row of ANY type no

@@ -12,6 +12,8 @@ import { distanceMiles } from '@/lib/geocoding'
 import { unwrapJoinArray } from '@/lib/utils/supabase-joins'
 import { StatusDot } from '@/components/ui/StatusDot'
 import { buttonVariantClass } from '@/components/ui/Button'
+import { UpcomingInspections } from './upcoming-inspections'
+import type { UpcomingInspection } from '@/lib/inspections/upcoming-for-dashboard'
 
 const AVG_DRIVE_SPEED_MPH = 30
 
@@ -450,6 +452,7 @@ export function OpsSnapshot({
   kpis,
   todayDate,
   metrics,
+  upcomingInspections,
   showPmsRevenueNudge = false,
 }: Readonly<{
   turnovers:      OpsTurnover[]
@@ -459,6 +462,8 @@ export function OpsSnapshot({
   kpis:           KPIs
   todayDate:      string
   metrics?:       Metrics
+  /** §9. Renders nothing when empty, so no flag is needed to hide the section. */
+  upcomingInspections: UpcomingInspection[]
   showPmsRevenueNudge?: boolean
 }>) {
   const [windowDays, setWindowDays] = useState<7 | 14 | 30>(7)
@@ -643,6 +648,11 @@ export function OpsSnapshot({
           </div>
         </div>
       )}
+
+      {/* §9's Upcoming Inspections. Above the turnover accordion because it is
+          a smaller, slower-moving list that is easy to scroll past, and an
+          overdue safety walk should not sit below a month of turnovers. */}
+      <UpcomingInspections inspections={upcomingInspections} />
 
       {/* Accordion list */}
       <div className="space-y-2">

@@ -48,6 +48,7 @@ import type {
   InspectionFormItem,
   InspectionFormSection,
   PropertyAsset,
+  PropertyFactKey,
 } from '@/types/database'
 
 /** One rendered instance of a form item. */
@@ -104,6 +105,16 @@ export interface ResolveInput {
    * inspector has counted anything.
    */
   countsByItemId?: Readonly<Record<string, number>>
+  /**
+   * Property-level facts the two item gates read (20260824194339).
+   *
+   * `null` means NEVER ASKED, which is what makes the capture item render, and
+   * it is distinct from `false` ("asked, and there is no alarm"). An OMITTED
+   * key is treated as null for the same reason `assets` defaults to empty: the
+   * safe direction is asking a question one extra time, never silently dropping
+   * one.
+   */
+  propertyFacts?: Readonly<Partial<Record<PropertyFactKey, boolean | null>>>
 }
 
 /**
@@ -229,7 +240,9 @@ export function resolveFormPages(input: ResolveInput): ResolvedPage[] {
   for (const section of [...input.sections].sort(bySortOrder)) {
     if (!sectionIsShown(section, activeTypes)) continue
 
-    const roots = (index.bySection.get(section.id) ?? []).slice().sort(bySortOrder)
+    const roots = (index.bySection.get(section.id) ?? [])
+      .filter((item) => itemPassesFactGate(item, input.propertyFacts ?? {}))
+      .slice().sort(bySortOrder)
     const items = roots.flatMap((root) =>
       resolveRoot(root, { index, activeAssets, sweepable, counts }))
 
@@ -242,6 +255,43 @@ export function resolveFormPages(input: ResolveInput): ResolvedPage[] {
   }
 
   return pages
+}
+
+/**
+ * The two property-fact gates (20260824194339).
+ *
+ * `asks_property_fact`       — the CAPTURE question. Shown only while the fact
+ *                              is unknown; answering it is what sets the fact,
+ *                              so it appears on a property's first walk and
+ *                              never again.
+ * `shown_when_property_fact` — the CONDITION question. Shown only where the
+ *                              fact is TRUE, on every walk. It deliberately
+ *                              does not drop off: a monitoring contract lapses
+ *                              far more often than a panel is removed.
+ *
+ * An UNRECOGNISED key renders NOTHING, matching how `sectionIsShown` treats an
+ * unrecognised `shown_when_asset` — a corrupt snapshot should degrade to a
+ * missing question, not a crash. Reached only via a snapshot, since a live
+ * write is rejected by inspection_form_items_known_property_facts.
+ */
+function itemPassesFactGate(
+  item:  InspectionFormItem,
+  facts: Readonly<Partial<Record<PropertyFactKey, boolean | null>>>,
+): boolean {
+  if (item.asks_property_fact) {
+    return isKnownFact(item.asks_property_fact)
+      && (facts[item.asks_property_fact] ?? null) === null
+  }
+  if (item.shown_when_property_fact) {
+    return isKnownFact(item.shown_when_property_fact)
+      && facts[item.shown_when_property_fact] === true
+  }
+  return true
+}
+
+/** Guards the snapshot path, where the column's CHECK constraint does not reach. */
+function isKnownFact(key: string): key is PropertyFactKey {
+  return key === 'has_security_system'
 }
 
 const bySortOrder = (a: { sort_order: number }, b: { sort_order: number }) => a.sort_order - b.sort_order
