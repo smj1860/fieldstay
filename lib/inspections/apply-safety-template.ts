@@ -24,12 +24,22 @@ import {
 // walk that runs once or twice a year.
 //
 // IDEMPOTENT BY CONSTRUCTION, not by being careful:
-// `uq_maintenance_schedules_property_inspection_form` (20260824091200) is a
-// partial unique index on (property_id, inspection_form_id) WHERE
-// creates = 'inspection', so the insert can collide instead of the caller
-// having to check first. That matters because "read what exists, then write
-// what doesn't" is the exact load-then-decide-then-write shape that races when
-// onboarding and the cron overlap.
+// `uq_maintenance_schedules_property_inspection_form` is a unique index on
+// (property_id, inspection_form_id), so the insert can collide instead of the
+// caller having to check first. That matters because "read what exists, then
+// write what doesn't" is the exact load-then-decide-then-write shape that races
+// when onboarding and the cron overlap.
+//
+// THAT INDEX MUST STAY PLAIN. 20260824091200 first created it PARTIAL (WHERE
+// creates = 'inspection'), which made the upsert below raise 42P10 on EVERY
+// execution — Postgres resolves the ON CONFLICT arbiter at plan time, so even
+// the first insert into an empty table failed, and supabase-js's string
+// `onConflict` cannot repeat a partial index's predicate. 20260824142516
+// replaced it with a plain index plus a biconditional CHECK on
+// (creates, inspection_form_id) that makes the two forms equivalent. The
+// `db-invariants` CI gate re-checks arbiter resolvability against the LIVE
+// schema, which is the only place the answer exists — a test double resolves
+// no arbiters, so this shape passes its unit tests either way.
 
 /** Bound on one org's fan-out. Well above the 50-property plan ceiling. */
 const MAX_PROPERTIES = 500
