@@ -1,6 +1,7 @@
 import { unwrap } from '@/lib/supabase/unwrap'
 import type { SupabaseClient } from '@supabase/supabase-js'
 import { isMaintenanceItemActiveThisMonth } from '@/lib/utils/maintenance'
+import { deriveVacancyGaps } from '@/lib/maintenance/gaps'
 import { logAuditEvent, logAuditEvents } from '@/lib/audit'
 import { fetchAllRows } from '@/lib/inngest/paginate'
 import { parseLocalDate } from '@/lib/utils/date-validation'
@@ -604,6 +605,13 @@ export interface GapSuggestion {
  * Pure in-memory computation of vacancy-gap maintenance suggestions —
  * every property's bookings and schedules are already batch-fetched by the
  * caller, so this does zero DB round trips.
+ *
+ * The gap derivation itself moved to `lib/maintenance/gaps.ts` when the
+ * inspection scheduler needed the inverse question answered (given a month,
+ * find a free day in it). Two derivations would be two definitions of "free",
+ * and only one of them could be right. `horizonStart` is deliberately not
+ * passed: these suggestions are about a window that opens when a guest leaves,
+ * so the period before the FIRST booking is not one of them.
  */
 export function computeVacancyGaps(
   properties:          GapProperty[],
@@ -617,22 +625,14 @@ export function computeVacancyGaps(
     if (!bookings.length) continue
     const schedules = schedulesByProperty.get(property.id) ?? []
 
-    for (let i = 0; i < bookings.length; i++) {
-      const checkoutDate = bookings[i]!.checkout_date
-      const nextCheckin  = bookings[i + 1]?.checkin_date ?? null
-
-      const gapDays = nextCheckin
-        ? Math.round((new Date(nextCheckin).getTime() - new Date(checkoutDate).getTime()) / 86_400_000)
-        : LOOKAHEAD_DAYS
-
-      if (gapDays < LIGHT_GAP_DAYS) continue
+    for (const gap of deriveVacancyGaps(bookings, LOOKAHEAD_DAYS)) {
+      if (gap.days < LIGHT_GAP_DAYS) continue
 
       // next_due_date <= min(windowEnd, windowStart + LOOKAHEAD_DAYS), and
       // only schedules whose seasonal window is active this month.
-      const startMs        = new Date(checkoutDate).getTime()
-      const capMs          = startMs + LOOKAHEAD_DAYS * 86_400_000
-      const effectiveEndMs = nextCheckin
-        ? Math.min(new Date(nextCheckin).getTime(), capMs)
+      const capMs          = new Date(gap.start).getTime() + LOOKAHEAD_DAYS * 86_400_000
+      const effectiveEndMs = gap.end
+        ? Math.min(new Date(gap.end).getTime(), capMs)
         : capMs
       const effectiveEnd   = new Date(effectiveEndMs).toISOString().split('T')[0]!
 
@@ -656,10 +656,10 @@ export function computeVacancyGaps(
         property_id:   property.id,
         org_id:        property.org_id,
         property_name: property.name,
-        gap_start:     checkoutDate,
-        gap_end:       nextCheckin,
-        gap_days:      gapDays,
-        tier:          gapDays >= STRONG_GAP_DAYS ? 'strong' : 'light',
+        gap_start:     gap.start,
+        gap_end:       gap.end,
+        gap_days:      gap.days,
+        tier:          gap.days >= STRONG_GAP_DAYS ? 'strong' : 'light',
         candidates:    eligible,
       })
     }

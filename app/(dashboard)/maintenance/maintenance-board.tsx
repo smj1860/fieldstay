@@ -15,8 +15,9 @@ import {
   createMaintenanceSchedule, updateMaintenanceSchedule, deleteMaintenanceSchedule,
   bulkAssignVendor, bulkUpdateWorkOrderStatus, fetchArchivedWorkOrders,
   acceptVendorSuggestion, dismissVendorSuggestion,
+  acceptCrewSuggestion, dismissCrewSuggestion,
 } from './actions'
-import type { WoStatus, PriorityLevel, VendorSpecialty, ScheduleType, ScheduleFrequency } from '@/types/database'
+import type { WoStatus, PriorityLevel, VendorSpecialty, ScheduleCreates, ScheduleType, ScheduleFrequency } from '@/types/database'
 import { WorkOrderDetail, type WorkOrderDetailData } from '@/components/work-orders/work-order-detail'
 import { MaintenanceCalendar } from './maintenance-calendar'
 import { CreateWorkOrderModal } from './CreateWorkOrderModal'
@@ -58,6 +59,10 @@ interface WorkOrderRow {
   completion_verified_by: string | null
   vendor_dispatch_email: string | null
   suggested_vendor_ids: string[] | null
+  // Mutually exclusive with the vendor array at the DB level
+  // (work_orders_one_suggestion_kind) — one suggestion_status cannot describe
+  // two live suggestions. Set by the inspection cleaning roll-up.
+  suggested_crew_member_ids: string[] | null
   suggestion_reasoning: string | null
   // turnovers/work_orders store this as plain TEXT, not an enum — the union
   // was an app-side convention the column never enforced. The `=== 'pending'`
@@ -109,6 +114,19 @@ export interface AssetOption {
   property_id: string
 }
 
+/** An inspection form a schedule can be pointed at. */
+export interface InspectionFormOption {
+  id:      string
+  name:    string
+  version: number
+}
+
+/** An org member who can be named as the person expected to walk it. */
+export interface OrgMemberOption {
+  user_id: string
+  name:    string
+}
+
 export interface VendorComplianceRow {
   vendor_id: string
   // Deliberately `string`, not the ComplianceStatus union: this is a computed
@@ -150,6 +168,10 @@ interface ScheduleRow {
   auto_create_wo: boolean
   assigned_vendor_id: string | null
   instructions: string | null
+  /** §7. Every pre-existing row reads 'work_order' by DB default. */
+  creates: ScheduleCreates
+  inspection_form_id: string | null
+  assigned_to_user_id: string | null
   properties: { name: string } | { name: string }[] | null
   vendors: { id: string; name: string } | { id: string; name: string }[] | null
 }
@@ -274,15 +296,66 @@ const VIEW_MODE_TABS = [
 
 // ── Work Order Card ───────────────────────────────────────────────────────────
 
+/**
+ * The suggestion on a work order, whichever kind it is.
+ *
+ * A work order carries a VENDOR suggestion or a CREW one, never both — the DB
+ * enforces it (`work_orders_one_suggestion_kind`) because the two share a single
+ * `suggestion_status` column, and one status cannot describe two live
+ * suggestions. So the banner is one banner, and this resolves which pair of
+ * actions it drives. Crew is checked first only because it is the narrower case;
+ * the exclusion means the order cannot matter.
+ *
+ * Returns null when nothing is suggested, or when the suggested id resolves to
+ * nobody the PM can see — a banner naming an unknown party is worse than none.
+ */
+function resolveSuggestion(
+  wo:      WorkOrderRow,
+  vendors: VendorOptionWithCoords[],
+  crew:    CrewMemberOption[],
+): { name: string; accept: (id: string) => Promise<{ error?: string }>; dismiss: (id: string) => Promise<{ error?: string }> } | null {
+  const crewName = firstResolvableName(wo.suggested_crew_member_ids, crew)
+  if (crewName) {
+    return { name: crewName, accept: acceptCrewSuggestion, dismiss: dismissCrewSuggestion }
+  }
+
+  const vendorName = firstResolvableName(wo.suggested_vendor_ids, vendors)
+  if (vendorName) {
+    return { name: vendorName, accept: acceptVendorSuggestion, dismiss: dismissVendorSuggestion }
+  }
+
+  return null
+}
+
+/**
+ * The first suggested id that resolves to somebody in the loaded pool.
+ *
+ * Skips past an id the pool does not contain rather than giving up on it — a
+ * crew member deactivated since the suggestion was written is absent from the
+ * board's active-only list, and the next id is still a name the PM can act on.
+ */
+function firstResolvableName(
+  ids:  string[] | null,
+  pool: ReadonlyArray<{ id: string; name: string }>,
+): string | undefined {
+  for (const id of ids ?? []) {
+    const name = pool.find((p) => p.id === id)?.name
+    if (name) return name
+  }
+  return undefined
+}
+
 function WorkOrderCard({
   wo,
   vendors,
+  crewMembers,
   onClick,
   isSelected,
   onToggle,
 }: {
   wo: WorkOrderRow
   vendors: VendorOptionWithCoords[]
+  crewMembers: CrewMemberOption[]
   onClick: () => void
   isSelected: boolean
   onToggle: () => void
@@ -293,18 +366,18 @@ function WorkOrderCard({
   const [accepting,  startAccept]  = useTransition()
   const [dismissing, startDismiss] = useTransition()
 
-  const suggestedVendorName = (wo.suggested_vendor_ids ?? [])
-    .map((id) => vendors.find((v) => v.id === id)?.name)
-    .filter(Boolean)[0] as string | undefined
+  const suggestion = resolveSuggestion(wo, vendors, crewMembers)
 
   const handleAcceptSuggestion = (e: React.MouseEvent) => {
     e.stopPropagation()
-    startAccept(async () => { await acceptVendorSuggestion(wo.id) })
+    if (!suggestion) return
+    startAccept(async () => { await suggestion.accept(wo.id) })
   }
 
   const handleDismissSuggestion = (e: React.MouseEvent) => {
     e.stopPropagation()
-    startDismiss(async () => { await dismissVendorSuggestion(wo.id) })
+    if (!suggestion) return
+    startDismiss(async () => { await suggestion.dismiss(wo.id) })
   }
 
   return (
@@ -380,7 +453,7 @@ function WorkOrderCard({
           </div>
 
           {/* Auto-suggestion banner */}
-          {wo.suggestion_status === 'pending' && suggestedVendorName && (
+          {wo.suggestion_status === 'pending' && suggestion && (
             <div
               className="mt-2 flex items-center gap-2 flex-wrap px-3 py-2 rounded-lg"
               style={{ background: 'var(--accent-blue-dim)', border: '1px solid var(--accent-blue)' }}
@@ -394,7 +467,7 @@ function WorkOrderCard({
             >
               <span className="text-xs inline-flex items-center gap-1" style={{ color: 'var(--text-secondary)' }}>
                 <Sparkles className="w-3.5 h-3.5 flex-shrink-0" />
-                Suggested: <strong style={{ color: 'var(--text-primary)' }}>{suggestedVendorName}</strong>
+                Suggested: <strong style={{ color: 'var(--text-primary)' }}>{suggestion.name}</strong>
               </span>
               {wo.suggestion_reasoning && (
                 <span className="text-xs hidden sm:inline" style={{ color: 'var(--text-muted)' }}>
@@ -434,13 +507,18 @@ function WorkOrderCard({
 function ScheduleFormFields({
   properties,
   vendors,
+  inspectionForms = [],
+  orgMembers = [],
   defaults,
 }: {
   properties: PropertyOption[]
   vendors: VendorOption[]
+  inspectionForms?: InspectionFormOption[]
+  orgMembers?: OrgMemberOption[]
   defaults?: Partial<ScheduleRow>
 }) {
   const [schedType, setSchedType] = useState<ScheduleType>(defaults?.schedule_type ?? 'routine')
+  const [creates, setCreates] = useState<ScheduleCreates>(defaults?.creates ?? 'work_order')
 
   return (
     <>
@@ -477,6 +555,72 @@ function ScheduleFormFields({
           <option value="routine">Routine (recurring)</option>
         </select>
       </div>
+
+      {/* §7. A schedule produces a work order or an inspection; the timing is
+          identical either way, which is why this is a discriminator on the same
+          row rather than a second scheduler. */}
+      <div>
+        <label htmlFor="maintenance-board-creates" className="label">Creates</label>
+        <select
+          id="maintenance-board-creates"
+          name="creates"
+          className="input"
+          value={creates}
+          onChange={(e) => setCreates(e.target.value as ScheduleCreates)}
+        >
+          <option value="work_order">Work order</option>
+          <option value="inspection">Inspection</option>
+        </select>
+      </div>
+
+      {creates === 'inspection' && (
+        <>
+          <div>
+            <label htmlFor="maintenance-board-inspection-form" className="label">
+              Inspection form <RequiredMark />
+            </label>
+            <select
+              id="maintenance-board-inspection-form"
+              name="inspection_form_id"
+              className="input"
+              required
+              defaultValue={defaults?.inspection_form_id ?? ''}
+            >
+              <option value="">Select a form…</option>
+              {inspectionForms.map((f) => (
+                <option key={f.id} value={f.id}>{f.name}</option>
+              ))}
+            </select>
+          </div>
+
+          <div>
+            <label htmlFor="maintenance-board-assigned-user" className="label">Who walks it</label>
+            <select
+              id="maintenance-board-assigned-user"
+              name="assigned_to_user_id"
+              className="input"
+              defaultValue={defaults?.assigned_to_user_id ?? ''}
+            >
+              {/* Optional: a schedule with nobody named still notifies the org,
+                  which is better than refusing to save one. */}
+              <option value="">Anyone on the team</option>
+              {orgMembers.map((m) => (
+                <option key={m.user_id} value={m.user_id}>{m.name}</option>
+              ))}
+            </select>
+          </div>
+
+          {/* Said plainly, because the difference is not guessable from the
+              form: a due inspection does not create a row. It cannot — the
+              start time has to be when someone actually arrives, not when the
+              cron ran. */}
+          <InlineAlert tone="info">
+            When this comes due you will be notified to walk it. The inspection
+            itself is created when you press Start at the property, so its
+            recorded start time is the real one.
+          </InlineAlert>
+        </>
+      )}
 
       {schedType === 'routine' && (
         <div>
@@ -529,10 +673,14 @@ function ScheduleFormFields({
 function AddScheduleModal({
   properties,
   vendors,
+  inspectionForms,
+  orgMembers,
   onClose,
 }: {
   properties: PropertyOption[]
   vendors: VendorOption[]
+  inspectionForms: InspectionFormOption[]
+  orgMembers: OrgMemberOption[]
   onClose: () => void
 }) {
   const [saving, setSaving] = useState(false)
@@ -554,6 +702,9 @@ function AddScheduleModal({
       assigned_vendor_id: (fd.get('assigned_vendor_id') as string) || null,
       auto_create_wo:     fd.get('auto_create_wo') === 'on',
       instructions:       (fd.get('instructions') as string) || null,
+      creates:             (fd.get('creates') as ScheduleCreates) || 'work_order',
+      inspection_form_id:  (fd.get('inspection_form_id') as string) || null,
+      assigned_to_user_id: (fd.get('assigned_to_user_id') as string) || null,
     })
     setSaving(false)
     if (result.error) { setError(result.error); return }
@@ -576,7 +727,10 @@ function AddScheduleModal({
           {error && (
             <InlineAlert tone="error">{error}</InlineAlert>
           )}
-          <ScheduleFormFields properties={properties} vendors={vendors} />
+          <ScheduleFormFields
+            properties={properties} vendors={vendors}
+            inspectionForms={inspectionForms} orgMembers={orgMembers}
+          />
         </form>
     </Dialog>
   )
@@ -587,10 +741,14 @@ function AddScheduleModal({
 function EditScheduleModal({
   schedule,
   vendors,
+  inspectionForms,
+  orgMembers,
   onClose,
 }: {
   schedule: ScheduleRow
   vendors: VendorOption[]
+  inspectionForms: InspectionFormOption[]
+  orgMembers: OrgMemberOption[]
   onClose: () => void
 }) {
   const [saving, setSaving] = useState(false)
@@ -611,6 +769,9 @@ function EditScheduleModal({
       assigned_vendor_id: (fd.get('assigned_vendor_id') as string) || null,
       auto_create_wo:     fd.get('auto_create_wo') === 'on',
       instructions:       (fd.get('instructions') as string) || null,
+      creates:             (fd.get('creates') as ScheduleCreates) || 'work_order',
+      inspection_form_id:  (fd.get('inspection_form_id') as string) || null,
+      assigned_to_user_id: (fd.get('assigned_to_user_id') as string) || null,
     })
     setSaving(false)
     if (result.error) { setError(result.error); return }
@@ -633,7 +794,11 @@ function EditScheduleModal({
           {error && (
             <InlineAlert tone="error">{error}</InlineAlert>
           )}
-          <ScheduleFormFields properties={[]} vendors={vendors} defaults={schedule} />
+          <ScheduleFormFields
+            properties={[]} vendors={vendors}
+            inspectionForms={inspectionForms} orgMembers={orgMembers}
+            defaults={schedule}
+          />
         </form>
     </Dialog>
   )
@@ -645,10 +810,14 @@ function SchedulesSection({
   schedules,
   properties,
   vendors,
+  inspectionForms,
+  orgMembers,
 }: {
   schedules: ScheduleRow[]
   properties: PropertyOption[]
   vendors: VendorOption[]
+  inspectionForms: InspectionFormOption[]
+  orgMembers: OrgMemberOption[]
 }) {
   const [open, setOpen]             = useState(false)
   const [showAdd, setShowAdd]       = useState(false)
@@ -828,6 +997,8 @@ function SchedulesSection({
         <AddScheduleModal
           properties={properties}
           vendors={vendors}
+          inspectionForms={inspectionForms}
+          orgMembers={orgMembers}
           onClose={() => setShowAdd(false)}
         />
       )}
@@ -836,6 +1007,8 @@ function SchedulesSection({
         <EditScheduleModal
           schedule={editingSchedule}
           vendors={vendors}
+          inspectionForms={inspectionForms}
+          orgMembers={orgMembers}
           onClose={() => setEditingId(null)}
         />
       )}
@@ -854,6 +1027,8 @@ export function MaintenanceBoard({
   crewMembers = [],
   propertyAssets = [],
   vendorCompliance = [],
+  inspectionForms = [],
+  orgMembers = [],
   orgId = '',
   userId = '',
   role,
@@ -865,6 +1040,9 @@ export function MaintenanceBoard({
   crewMembers?:     CrewMemberOption[]
   propertyAssets?:  AssetOption[]
   vendorCompliance?: VendorComplianceRow[]
+  /** §7's pickers, only reached from the schedule form. */
+  inspectionForms?: InspectionFormOption[]
+  orgMembers?:      OrgMemberOption[]
   orgId?:           string
   /** Needed by the offline create path — the dashboard cache is keyed on (user, org). */
   userId?:          string
@@ -1149,6 +1327,7 @@ export function MaintenanceBoard({
                 key={wo.id}
                 wo={wo}
                 vendors={vendors}
+                crewMembers={crewMembers}
                 onClick={() => setSelectedWO(toWorkOrderDetailData(wo))}
                 isSelected={selectedIds.has(wo.id)}
                 onToggle={() => toggleSelect(wo.id)}
@@ -1244,7 +1423,10 @@ export function MaintenanceBoard({
       )}
 
       {/* Maintenance Schedules */}
-      <SchedulesSection schedules={schedules} properties={properties} vendors={vendors} />
+      <SchedulesSection
+        schedules={schedules} properties={properties} vendors={vendors}
+        inspectionForms={inspectionForms} orgMembers={orgMembers}
+      />
 
       {/* Create Modal */}
       {showCreate && (

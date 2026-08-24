@@ -72,8 +72,17 @@ function makeClient(opts: {
   openPredecessorError?: { message: string }
   /** Recurrence notes already on those work orders, for the replay case. */
   existingUpdates?: { work_order_id: string; notes: string }[]
+  /** Occupying bookings in the next occurrence's month — the vacancy nudge. */
+  bookings?: { checkin_date: string; checkout_date: string }[]
+  /** Completed turnovers at this property, newest first — the last-cleaner walk. */
+  lastTurnovers?: { id: string; completed_at: string }[]
+  turnoverAssignments?: { turnover_id: string; crew_member_id: string | null }[]
+  crewMembers?: { id: string; name: string; is_active: boolean }[]
+  turnoverError?: { message: string }
+  /** Distinct from woError: only the cleaning roll-up's insert fails. */
+  cleaningWoError?: { code?: string; message: string } | null
   /** The §7 schedule this walk satisfies, if any. */
-  sourceSchedule?: { id: string; frequency: string | null; next_due_date: string | null } | null
+  sourceSchedule?: { id: string; property_id?: string; frequency: string | null; next_due_date: string | null } | null
   /** Simulates the optimistic lock losing — another pass advanced it first. */
   scheduleAdvanceLostRace?: boolean
 }) {
@@ -94,7 +103,7 @@ function makeClient(opts: {
       // on what each read actually asks for.
       let selected = ''
       const chain = () => builder
-      for (const m of ['eq', 'in', 'limit']) builder[m] = chain
+      for (const m of ['eq', 'in', 'limit', 'not', 'lte', 'gte']) builder[m] = chain
       builder.select = (cols?: unknown) => {
         if (typeof cols === 'string') selected = cols
         return builder
@@ -122,7 +131,14 @@ function makeClient(opts: {
       builder.insert = (rows: unknown) => {
         const arr = Array.isArray(rows) ? rows : [rows]
         writes.push({ table, rows: arr })
-        const err = table === 'work_orders' ? opts.woError : null
+        // The cleaning roll-up and the per-finding inserts both write
+        // work_orders. They are told apart by source_inspection_id, which ONLY
+        // the roll-up sets — the same discriminator the partial unique index
+        // uses — so a test can fail one without failing the other.
+        const isCleaning = table === 'work_orders'
+          && !!(arr[0] as Record<string, unknown> | undefined)?.source_inspection_id
+        let err: { code?: string; message: string } | null | undefined = null
+        if (table === 'work_orders') err = isCleaning ? opts.cleaningWoError : opts.woError
         const result = { data: table === 'purchase_orders' ? { id: 'po-1' } : null, error: err ?? null }
         return {
           select: () => ({ single: () => Promise.resolve(
@@ -154,6 +170,20 @@ function makeClient(opts: {
         if (table === 'work_order_updates') {
           return Promise.resolve({ data: opts.existingUpdates ?? [], error: null }).then(resolve)
         }
+        if (table === 'bookings') {
+          return Promise.resolve({ data: opts.bookings ?? [], error: null }).then(resolve)
+        }
+        if (table === 'turnovers') {
+          return Promise.resolve(opts.turnoverError
+            ? { data: null, error: opts.turnoverError }
+            : { data: opts.lastTurnovers ?? [], error: null }).then(resolve)
+        }
+        if (table === 'turnover_assignments') {
+          return Promise.resolve({ data: opts.turnoverAssignments ?? [], error: null }).then(resolve)
+        }
+        if (table === 'crew_members') {
+          return Promise.resolve({ data: opts.crewMembers ?? [], error: null }).then(resolve)
+        }
         if (table === 'inspection_form_items') {
           return Promise.resolve({ data: opts.concernKeys ?? [], error: null }).then(resolve)
         }
@@ -181,6 +211,7 @@ function ctx() {
 const failedItem = (over: Partial<Record<string, unknown>> = {}) => ({
   id: 'item-1', form_item_id: 'def-1', prompt_snapshot: 'Handrail secure',
   note: 'wobbles badly', photo_path: null, asset_id: null, actions: ['repair'],
+  needs_cleaning: false,
   repeat_answer: null, repeat_of_work_order_id: null,
   ...over,
 })
@@ -694,7 +725,7 @@ describe('inspectionCompleted — the source schedule', () => {
   const scheduled = (over: Record<string, unknown> = {}) => makeClient({
     inspection: inspectionRow([], { source_schedule_id: 'sched-1' }),
     failedItems: [],
-    sourceSchedule: { id: 'sched-1', frequency: 'quarterly', next_due_date: '2026-08-01' },
+    sourceSchedule: { id: 'sched-1', property_id: PROP, frequency: 'quarterly', next_due_date: '2026-08-01' },
     ...over,
   })
 
@@ -710,6 +741,35 @@ describe('inspectionCompleted — the source schedule', () => {
     const patch = writes.find((w) => w.table === 'maintenance_schedules')!.rows[0] as Record<string, unknown>
     expect(patch.next_due_date).toBe('2026-11-01')
     expect(patch.last_completed_date).toBeTruthy()
+  })
+
+  it('moves the next occurrence onto a vacant day INSIDE the due month', async () => {
+    // An inspection is a walk-through — somebody is inside for an hour with a
+    // camera. Landing an occurrence mid-stay produces a notification the PM can
+    // only reschedule, and the recurrence puts it right back next quarter.
+    const { client, writes } = scheduled({
+      // Booked over the 1st; free from the 9th.
+      bookings: [{ checkin_date: '2026-10-28', checkout_date: '2026-11-09' }],
+    })
+    vi.mocked(createServiceClient).mockReturnValue(client as never)
+
+    await invokeHandler(inspectionCompleted, ctx())
+    const patch = writes.find((w) => w.table === 'maintenance_schedules')!.rows[0] as Record<string, unknown>
+    expect(patch.next_due_date).toBe('2026-11-09')
+  })
+
+  it('keeps the date rather than leaving the month when November is booked solid', async () => {
+    // The month IS the recurrence anchor — calcNextDueDate steps whole months
+    // from the due date, and there is no anchor column. Sliding to December
+    // would re-anchor this series to December and the next one to March.
+    const { client, writes } = scheduled({
+      bookings: [{ checkin_date: '2026-10-20', checkout_date: '2026-12-05' }],
+    })
+    vi.mocked(createServiceClient).mockReturnValue(client as never)
+
+    await invokeHandler(inspectionCompleted, ctx())
+    const patch = writes.find((w) => w.table === 'maintenance_schedules')!.rows[0] as Record<string, unknown>
+    expect(patch.next_due_date).toBe('2026-11-01')
   })
 
   it('advances even when the walk found nothing wrong', async () => {
@@ -756,5 +816,225 @@ describe('inspectionCompleted — the source schedule', () => {
     const result = await invokeHandler(inspectionCompleted, ctx())
     expect(result).toMatchObject({ scheduleAdvanced: false, workOrders: 1 })
     expect(writes.some((w) => w.table === 'work_orders')).toBe(true)
+  })
+})
+
+// ============================================================================
+// THE CLEANING ROLL-UP
+//
+// §5 keeps cleaning OUT of the remediation enum on purpose, and the reason is
+// dispatch economics: a stained rug, a dirty oven and cobwebs found on one walk
+// are ONE visit. So `needs_cleaning` is an independent boolean and the roll-up
+// happens here — one work order for the whole inspection, keyed on
+// source_inspection_id rather than on any one finding's id.
+//
+// The suggested cleaner is not a scorer's output. It is whoever last cleaned
+// this property: if an inspection found it still needs cleaning, the job was
+// left incomplete, and the person to send back is the one who was already there.
+// ============================================================================
+
+const cleaningInsert = (writes: { table: string; rows: unknown[] }[]) =>
+  writes
+    .filter((w) => w.table === 'work_orders')
+    .map((w) => w.rows[0] as Record<string, unknown>)
+    .find((r) => !!r.source_inspection_id)
+
+describe('inspectionCompleted — the cleaning roll-up', () => {
+  const cleaningItem = (over: Record<string, unknown> = {}) =>
+    failedItem({ needs_cleaning: true, ...over })
+
+  it('rolls MANY flagged findings into ONE cleaning work order', async () => {
+    const { client, writes } = makeClient({
+      inspection: inspectionRow([
+        { id: 'def-1', remediation: 'none' },
+        { id: 'def-2', remediation: 'none' },
+        { id: 'def-3', remediation: 'none' },
+      ]),
+      failedItems: [
+        cleaningItem({ id: 'i-1', form_item_id: 'def-1', prompt_snapshot: 'Rug clean',  note: 'stained' }),
+        cleaningItem({ id: 'i-2', form_item_id: 'def-2', prompt_snapshot: 'Oven clean', note: null }),
+        cleaningItem({ id: 'i-3', form_item_id: 'def-3', prompt_snapshot: 'No cobwebs', note: null }),
+      ],
+    })
+    vi.mocked(createServiceClient).mockReturnValue(client as never)
+
+    const result = await invokeHandler(inspectionCompleted, ctx())
+
+    expect(result).toMatchObject({ cleaningWorkOrders: 1 })
+    const woWrites = writes.filter((w) => w.table === 'work_orders')
+    expect(woWrites).toHaveLength(1)
+
+    const wo = cleaningInsert(writes)!
+    expect(wo).toMatchObject({
+      org_id: ORG, property_id: PROP,
+      category: 'cleaning', status: 'pending', source: 'inspection',
+      source_inspection_id: INSP,
+      title: 'Cleaning — 3 items from an inspection',
+    })
+    // Every finding is named, so the cleaner knows what the walk actually found.
+    expect(String(wo.description)).toContain('Rug clean — stained')
+    expect(String(wo.description)).toContain('Oven clean')
+    expect(String(wo.description)).toContain('No cobwebs')
+  })
+
+  it('does NOT squat on source_inspection_item_id — a repair on the SAME finding still dispatches', async () => {
+    // The trap this column exists to avoid. A stained rug whose fitting also
+    // needs repairing is needs_cleaning AND remediation = 'work_order'.
+    // createWorkOrders pre-checks source_inspection_item_id to decide what is
+    // already handled, so a cleaning roll-up wearing that item's id would make
+    // the item look done and SUPPRESS its own repair.
+    const { client, writes } = makeClient({
+      inspection: inspectionRow([{ id: 'def-1', remediation: 'work_order', wo_category: 'general' }]),
+      failedItems: [cleaningItem({ id: 'item-1' })],
+    })
+    vi.mocked(createServiceClient).mockReturnValue(client as never)
+
+    const result = await invokeHandler(inspectionCompleted, ctx())
+    expect(result).toMatchObject({ workOrders: 1, cleaningWorkOrders: 1 })
+
+    const rows = writes.filter((w) => w.table === 'work_orders').flatMap((w) => w.rows) as Record<string, unknown>[]
+    const repair   = rows.find((r) => r.source_inspection_item_id === 'item-1')!
+    const cleaning = rows.find((r) => !!r.source_inspection_id)!
+    expect(repair.category).toBe('general')
+    // Each key belongs to exactly one of them. That is the whole invariant.
+    expect(repair.source_inspection_id).toBeUndefined()
+    expect(cleaning.source_inspection_item_id).toBeUndefined()
+  })
+
+  it('nothing flagged means no cleaning work order at all', async () => {
+    const { client, writes } = makeClient({
+      inspection: inspectionRow([{ id: 'def-1', remediation: 'work_order' }]),
+      failedItems: [failedItem()],
+    })
+    vi.mocked(createServiceClient).mockReturnValue(client as never)
+
+    expect(await invokeHandler(inspectionCompleted, ctx())).toMatchObject({ cleaningWorkOrders: 0 })
+    expect(cleaningInsert(writes)).toBeUndefined()
+  })
+
+  it('suggests the crew who last cleaned the property, and does not assign them', async () => {
+    const { client, writes } = makeClient({
+      inspection: inspectionRow([{ id: 'def-1', remediation: 'none' }]),
+      failedItems: [cleaningItem()],
+      lastTurnovers: [{ id: 't-2', completed_at: '2026-08-20T18:00:00Z' }],
+      turnoverAssignments: [{ turnover_id: 't-2', crew_member_id: 'crew-a' }],
+      crewMembers: [{ id: 'crew-a', name: 'Maya Torres', is_active: true }],
+    })
+    vi.mocked(createServiceClient).mockReturnValue(client as never)
+
+    const result = await invokeHandler(inspectionCompleted, ctx())
+    expect(result).toMatchObject({ cleaningWorkOrders: 1, cleaningCrewSuggested: 1 })
+
+    const wo = cleaningInsert(writes)!
+    expect(wo.suggested_crew_member_ids).toEqual(['crew-a'])
+    expect(wo.suggestion_status).toBe('pending')
+    expect(String(wo.suggestion_reasoning)).toContain('Maya Torres')
+    expect(String(wo.suggestion_reasoning)).toContain('2026-08-20')
+    // SUGGESTED, not assigned — a PM accepts it on the board.
+    expect(wo.assigned_crew_member_id).toBeUndefined()
+    // And never a vendor suggestion: the DB forbids both
+    // (work_orders_one_suggestion_kind), so a write carrying both would 23514.
+    expect(wo.suggested_vendor_ids).toBeUndefined()
+  })
+
+  it('walks BACK past a completed turnover that had nobody assigned', async () => {
+    // The most recent completion may have no assignment at all — completed by a
+    // PM, imported from a channel, crew removed afterwards. Stopping at the
+    // first row would produce no suggestion with a good answer one row down.
+    const { client, writes } = makeClient({
+      inspection: inspectionRow([{ id: 'def-1', remediation: 'none' }]),
+      failedItems: [cleaningItem()],
+      lastTurnovers: [
+        { id: 't-3', completed_at: '2026-08-22T18:00:00Z' },
+        { id: 't-2', completed_at: '2026-08-15T18:00:00Z' },
+      ],
+      turnoverAssignments: [{ turnover_id: 't-2', crew_member_id: 'crew-b' }],
+      crewMembers: [{ id: 'crew-b', name: 'Dee Okafor', is_active: true }],
+    })
+    vi.mocked(createServiceClient).mockReturnValue(client as never)
+    await invokeHandler(inspectionCompleted, ctx())
+
+    const wo = cleaningInsert(writes)!
+    expect(wo.suggested_crew_member_ids).toEqual(['crew-b'])
+    // The date names the turnover they actually cleaned, not the empty newer one.
+    expect(String(wo.suggestion_reasoning)).toContain('2026-08-15')
+  })
+
+  it('an inactive last cleaner suggests NOBODY rather than the wrong person', async () => {
+    // Their turnover is where the walk stops. Falling through to the turnover
+    // before it would name someone who did not leave the job incomplete.
+    const { client, writes } = makeClient({
+      inspection: inspectionRow([{ id: 'def-1', remediation: 'none' }]),
+      failedItems: [cleaningItem()],
+      lastTurnovers: [
+        { id: 't-3', completed_at: '2026-08-22T18:00:00Z' },
+        { id: 't-2', completed_at: '2026-08-15T18:00:00Z' },
+      ],
+      turnoverAssignments: [
+        { turnover_id: 't-3', crew_member_id: 'crew-gone' },
+        { turnover_id: 't-2', crew_member_id: 'crew-b' },
+      ],
+      crewMembers: [{ id: 'crew-gone', name: 'Departed', is_active: false }],
+    })
+    vi.mocked(createServiceClient).mockReturnValue(client as never)
+
+    const result = await invokeHandler(inspectionCompleted, ctx())
+    expect(result).toMatchObject({ cleaningWorkOrders: 1, cleaningCrewSuggested: 0 })
+
+    const wo = cleaningInsert(writes)!
+    expect(wo.suggested_crew_member_ids).toBeNull()
+    expect(wo.suggestion_status).toBeNull()
+  })
+
+  it('a property with no completed turnovers still gets the work order', async () => {
+    // The job is the deliverable; the suggestion is a convenience. A new
+    // property has nobody to name and must not lose the cleaning because of it.
+    const { client, writes } = makeClient({
+      inspection: inspectionRow([{ id: 'def-1', remediation: 'none' }]),
+      failedItems: [cleaningItem()],
+      lastTurnovers: [],
+    })
+    vi.mocked(createServiceClient).mockReturnValue(client as never)
+
+    const result = await invokeHandler(inspectionCompleted, ctx())
+    expect(result).toMatchObject({ cleaningWorkOrders: 1, cleaningCrewSuggested: 0 })
+    expect(cleaningInsert(writes)!.suggestion_status).toBeNull()
+  })
+
+  it('a failed turnover lookup costs the suggestion, never the work order', async () => {
+    const { client, writes } = makeClient({
+      inspection: inspectionRow([{ id: 'def-1', remediation: 'none' }]),
+      failedItems: [cleaningItem()],
+      turnoverError: { message: 'connection reset' },
+    })
+    vi.mocked(createServiceClient).mockReturnValue(client as never)
+
+    const result = await invokeHandler(inspectionCompleted, ctx())
+    expect(result).toMatchObject({ cleaningWorkOrders: 1, cleaningCrewSuggested: 0 })
+    expect(cleaningInsert(writes)).toBeDefined()
+  })
+
+  it('a replay collides on the unique index instead of booking a second visit', async () => {
+    // 23505 = uq_work_orders_source_inspection. An earlier pass already created
+    // it; the findings have not changed, so leave it alone.
+    const { client } = makeClient({
+      inspection: inspectionRow([{ id: 'def-1', remediation: 'none' }]),
+      failedItems: [cleaningItem()],
+      cleaningWoError: { code: '23505', message: 'duplicate key' },
+    })
+    vi.mocked(createServiceClient).mockReturnValue(client as never)
+
+    expect(await invokeHandler(inspectionCompleted, ctx())).toMatchObject({ cleaningWorkOrders: 0 })
+  })
+
+  it('THROWS on any other insert failure — a silently lost cleaning job is the bug', async () => {
+    const { client } = makeClient({
+      inspection: inspectionRow([{ id: 'def-1', remediation: 'none' }]),
+      failedItems: [cleaningItem()],
+      cleaningWoError: { code: '23502', message: 'null value in column' },
+    })
+    vi.mocked(createServiceClient).mockReturnValue(client as never)
+
+    await expect(invokeHandler(inspectionCompleted, ctx())).rejects.toThrow(/cleaning work order insert failed/)
   })
 })

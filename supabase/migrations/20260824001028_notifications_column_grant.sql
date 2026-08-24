@@ -1,0 +1,32 @@
+-- Narrow the notifications UPDATE grant to the one column members may write.
+--
+-- CLAUDE.md records this as a known gap: "org members can SELECT and can
+-- UPDATE only read_at via RLS (no column-level lock-down yet)". The RLS half
+-- is true and the parenthetical is the problem — the policy scopes the row,
+-- not the columns:
+--
+--   GRANT  : SELECT, UPDATE on the whole table to `authenticated`
+--   POLICY : USING (org_id IN (SELECT get_user_org_ids()))
+--            WITH CHECK (same)
+--
+-- So an org member could rewrite the title, subtitle, href, severity or
+-- dedupe_key of any notification in their own org. Not a cross-tenant hole —
+-- the org scope holds — but the bell is meant to be a system-written record of
+-- what happened, and a record anyone can edit is not one. A vendor-compliance
+-- or hard-block notification is exactly the kind a motivated user would prefer
+-- said something else.
+--
+-- Postgres checks the GRANT before RLS ever evaluates, which is what makes a
+-- column grant the right instrument: it is the layer that can express "this
+-- column and no other", and RLS cannot.
+--
+-- SAFE BECAUSE THE APP ONLY EVER WRITES read_at. The single authenticated-
+-- context write in the codebase is notifications-actions.ts's
+-- `.update({ read_at })`; every other write — the inserts from
+-- lib/inngest/helpers.ts, the digest, the retention sweep — runs as
+-- service_role, which bypasses both the grant and RLS.
+--
+-- SELECT stays table-wide: members are meant to read the whole notification.
+
+REVOKE UPDATE ON notifications FROM authenticated;
+GRANT  UPDATE (read_at) ON notifications TO authenticated;

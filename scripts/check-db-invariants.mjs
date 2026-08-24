@@ -917,6 +917,75 @@ if (shapesRes === null) {
   }
 }
 
+// ── 16. Column-narrowed UPDATE grants must stay narrowed ──────────────────
+//
+//     Four tables grant `authenticated` UPDATE on named columns rather than the
+//     whole row, because the write PATH only ever touches those columns while a
+//     table-wide grant permitted every one — on tables holding a RECORD rather
+//     than data a user maintains. See 20260824001028 (notifications) and
+//     20260824011027 (owner_transactions, reviews).
+//
+//     A later `GRANT UPDATE ON reviews TO authenticated` would undo any of it
+//     INVISIBLY: no error, no behaviour change, no test goes red. The only
+//     symptom is a capability nobody meant to hand out — an admin able to edit
+//     a guest's review text, or clear the idempotency key on an owner ledger row
+//     so the same work-order completion posts a second expense.
+//
+//     db_narrowed_update_grants() lists every table where the grant covers SOME
+//     but not ALL columns, so a widened table simply DROPS OFF that list. The
+//     registry below is therefore a must-be-present assertion, not a parser.
+//
+//     GROW-ONLY, unlike the allowlists above: an entry here is a protection, and
+//     removing one is removing the protection. Widening a grant back on purpose
+//     is a deliberate act that should also delete the entry, in the same commit,
+//     with the reason in the message.
+const NARROWED_UPDATE_GRANTS = {
+  notifications:      ['read_at'],
+  owner_transactions: ['visible_to_owner'],
+  reviews:            ['response_status', 'updated_at'],
+}
+
+const narrowed = await rpc('db_narrowed_update_grants')
+if (narrowed === null) {
+  failures.push(
+    'db_narrowed_update_grants() is not deployed on this project. Apply ' +
+      'supabase/migrations/20260824011348_db_narrowed_update_grants_report.sql.'
+  )
+} else {
+  // Sorted only so the error message reads in a stable order — the comparison
+  // below is by membership, not by position. The explicit comparator is
+  // required: Array#sort's default coerces to string and sorts by UTF-16 code
+  // unit, which is right for these but only by accident of them being strings.
+  const actual = new Map(
+    narrowed.map((e) => [e.table, [...e.columns].sort((a, b) => a.localeCompare(b))]),
+  )
+  for (const [table, expected] of Object.entries(NARROWED_UPDATE_GRANTS)) {
+    const got = actual.get(table)
+    if (!got) {
+      failures.push(
+        `${table} no longer has a column-narrowed UPDATE grant for authenticated.\n` +
+          `  It should be writable only on: ${expected.join(', ')}. Either the grant ` +
+          'was widened back to the whole table (the regression this check exists ' +
+          'for — re-narrow it), or the narrowing was removed on purpose, in which ' +
+          'case delete the entry from NARROWED_UPDATE_GRANTS in this file and say ' +
+          'why in the commit message.'
+      )
+      continue
+    }
+    const extra   = got.filter((c) => !expected.includes(c))
+    const missing = expected.filter((c) => !got.includes(c))
+    if (extra.length > 0 || missing.length > 0) {
+      failures.push(
+        `${table}'s narrowed UPDATE grant does not match the registry.\n` +
+          `  expected: ${expected.join(', ')}\n  actual:   ${got.join(', ')}\n` +
+          (extra.length   ? `  newly writable: ${extra.join(', ')}\n`   : '') +
+          (missing.length ? `  no longer writable: ${missing.join(', ')} — the app writes this column, so this breaks it at runtime\n` : '') +
+          '  Update NARROWED_UPDATE_GRANTS in this file if the change was intended.'
+      )
+    }
+  }
+}
+
 // ── Verdict ───────────────────────────────────────────────────────────────
 if (failures.length > 0) {
   console.error(`DB invariant check FAILED (${failures.length} finding${failures.length === 1 ? '' : 's'}):\n`)
@@ -930,5 +999,6 @@ console.log(
     'unique, every member-facing policy backed by its GRANT, no memberless ' +
     'orgs, every storage policy org-scoped, every org_id column FK-backed, ' +
     'no accidental PostgREST junction tables, no blanket-true or unscoped or ' +
-    'WITH CHECK-less policies, every relation readable by service_role.'
+    'WITH CHECK-less policies, every relation readable by service_role, ' +
+    'every column-narrowed UPDATE grant still narrowed.'
 )

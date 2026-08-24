@@ -10,7 +10,7 @@ import { fetchAllRows, SUPABASE_MAX_ROWS } from '@/lib/inngest/paginate'
 import { logAuditEvent } from '@/lib/audit'
 import { reportError } from '@/lib/observability/report-error'
 import { reportQueryError } from '@/lib/supabase/unwrap'
-import type { WoStatus, WoCategory, ScheduleFrequency, ScheduleType, Enums } from '@/types/database'
+import type { WoStatus, WoCategory, ScheduleCreates, ScheduleFrequency, ScheduleType, Enums } from '@/types/database'
 import { PriorityLevelSchema, WoStatusSchema, WoCategorySchema } from '@/lib/schemas/work-order'
 import type { SupabaseClient } from '@supabase/supabase-js'
 import {
@@ -18,6 +18,7 @@ import {
   validateWorkOrderCreate,
   type WorkOrderFormInput,
   checkQuoteVendorsAssignable,
+  checkCrewMemberAssignable,
   checkCrewTimeOffWarning,
   dispatchWorkOrderEvents,
 } from './create-work-order-helpers'
@@ -34,6 +35,7 @@ import {
   VENDOR_COMPLIANCE_UNVERIFIABLE_ERROR,
 } from '@/lib/vendors/compliance'
 import { toStorageObjectPath } from '@/lib/storage/object-path'
+import { nudgeDueDateIntoVacancy } from '@/lib/maintenance/vacant-due-date'
 
 // A refused UPDATE returns 0 rows and NO error, so `if (error)` alone reports
 // success for a change that never happened. Every write below whose WHERE
@@ -1263,77 +1265,154 @@ function terminalVendorSuggestionError(status: string): string {
   return 'This work order is already complete — accepting the suggestion would reopen it.'
 }
 
+/**
+ * The read half of accepting a suggestion, shared by the vendor and crew paths.
+ *
+ * Everything here was learned the hard way on the vendor path and has to hold
+ * identically on the crew one — which is the argument for it being one function
+ * rather than two that look alike. `bulkAssignVendor` (the OTHER way a PM
+ * assigns a vendor) already split the assignee write from the status advance so
+ * the status only moves FORWARD; the accept path did not, so accepting on a
+ * completed work order REOPENED it and accepting on an in_progress one dragged
+ * it back to `assigned`. Terminal states are refused outright here, and
+ * `writeAcceptedSuggestion` repeats the allowlist as the atomic filter.
+ */
+async function loadSuggestionToAccept(
+  supabase:    SupabaseClient,
+  orgId:       string,
+  workOrderId: string,
+  idsColumn:   'suggested_vendor_ids' | 'suggested_crew_member_ids',
+  site:        string,
+): Promise<{ error: string } | { suggestedId: string }> {
+  const woRes = await supabase
+    .from('work_orders')
+    .select(`id, status, ${idsColumn}`)
+    .eq('id', workOrderId)
+    .eq('org_id', orgId)
+    .maybeSingle()
+
+  if (reportQueryError(woRes.error, { site, orgId })) {
+    return { error: 'Could not load the work order. Please try again.' }
+  }
+  const wo = woRes.data as { status: string; [k: string]: unknown } | null
+  if (!wo) return { error: 'Work order not found' }
+
+  if (!(VENDOR_SUGGESTION_ACCEPTABLE_STATUSES as readonly string[]).includes(wo.status)) {
+    return { error: terminalVendorSuggestionError(wo.status) }
+  }
+
+  const suggestedId = (wo[idsColumn] as string[] | null)?.[0]
+  if (!suggestedId) return { error: 'No suggestion to accept' }
+
+  return { suggestedId }
+}
+
+/**
+ * The write half: mark the suggestion accepted, then advance the status.
+ *
+ * TWO STATEMENTS, NOT ONE. The status allowlist repeats
+ * `loadSuggestionToAccept`'s check as the ATOMIC one, so a completion landing
+ * between the read and this write cannot be overwritten, and the advance is its
+ * own forward-only statement so an in_progress work order is not dragged back.
+ *
+ * The row count is read back for the same reason it is everywhere else in this
+ * file: a refused UPDATE returns 0 rows and NO error.
+ *
+ * A failed status advance is REPORTED, not returned — the assignee is written
+ * and, on the vendor path, about to be notified.
+ */
+async function writeAcceptedSuggestion(
+  supabase:    SupabaseClient,
+  orgId:       string,
+  workOrderId: string,
+  assignee:    Record<string, string>,
+  site:        string,
+): Promise<{ error: string } | { ok: true }> {
+  const { data: accepted, error } = await supabase
+    .from('work_orders')
+    .update({ ...assignee, suggestion_status: 'accepted' })
+    .eq('id', workOrderId)
+    .eq('org_id', orgId)
+    .in('status', VENDOR_SUGGESTION_ACCEPTABLE_STATUSES)
+    .select('id')
+    .maybeSingle()
+
+  if (error) {
+    console.error(`[${site}]`, error)
+    reportError(error, { site, orgId })
+    return { error: 'Failed to accept suggestion. Please try again.' }
+  }
+  if (!accepted) {
+    return { error: 'You do not have permission to make this change, or the work order no longer exists.' }
+  }
+
+  const { error: statusError } = await supabase
+    .from('work_orders')
+    .update({ status: 'assigned' })
+    .eq('id', workOrderId)
+    .eq('org_id', orgId)
+    .in('status', ['pending', 'quote_requested'])
+
+  if (statusError) {
+    console.error(`[${site}] status advance failed`, statusError)
+    reportError(statusError, { site: `${site}.status`, orgId })
+  }
+
+  return { ok: true }
+}
+
+/**
+ * Marks a suggestion dismissed, shared by both dismiss paths.
+ *
+ * The row-count read-back is the whole point and is why this is not two lines
+ * inlined twice: a refused UPDATE returns 0 rows and NO error, so without it a
+ * dismissal RLS declined still went on to write the negative training signal
+ * and an audit row asserting a change that never happened. The turnovers-side
+ * `dismissSuggestion` carries the same fix.
+ */
+async function writeDismissedSuggestion(
+  supabase:    SupabaseClient,
+  orgId:       string,
+  workOrderId: string,
+  site:        string,
+): Promise<{ error: string } | { ok: true }> {
+  const { data: dismissed, error } = await supabase
+    .from('work_orders')
+    .update({ suggestion_status: 'dismissed' })
+    .eq('id', workOrderId)
+    .eq('org_id', orgId)
+    .select('id')
+    .maybeSingle()
+
+  if (error) {
+    console.error(`[${site}]`, error)
+    reportError(error, { site, orgId })
+    return { error: 'Operation failed. Please try again.' }
+  }
+  if (!dismissed) return { error: NOTHING_UPDATED }
+
+  return { ok: true }
+}
+
 export async function acceptVendorSuggestion(workOrderId: string): Promise<{ error?: string }> {
+  const site = 'serverAction.maintenance.acceptVendorSuggestion'
   try {
     const { supabase, membership, user } = await requireOrgRole(['admin', 'manager'])
 
-    const woRes = await supabase
-      .from('work_orders')
-      .select('id, status, suggested_vendor_ids')
-      .eq('id', workOrderId)
-      .eq('org_id', membership.org_id)
-      .maybeSingle()
-
-    if (reportQueryError(woRes.error, { site: 'serverAction.maintenance.acceptVendorSuggestion', orgId: membership.org_id })) {
-      return { error: 'Could not load the work order. Please try again.' }
-    }
-    const wo = woRes.data
-
-    if (!wo) return { error: 'Work order not found' }
-
-    // bulkAssignVendor — the OTHER way a PM assigns a vendor — already splits
-    // the vendor write from the status advance so the status only moves
-    // FORWARD. This path still folded `status: 'assigned'` into one
-    // unconditional update, so accepting a suggestion on a completed work order
-    // reopened it, and accepting on an in_progress one dragged it back to
-    // `assigned`. Terminal states are refused outright; the rest advance only
-    // from the two pre-vendor statuses, exactly as bulkAssignVendor does.
-    if (!(VENDOR_SUGGESTION_ACCEPTABLE_STATUSES as readonly string[]).includes(wo.status)) {
-      return { error: terminalVendorSuggestionError(wo.status) }
-    }
-
-    const vendorId = (wo.suggested_vendor_ids as string[] | null)?.[0]
-    if (!vendorId) return { error: 'No suggestion to accept' }
+    const loaded = await loadSuggestionToAccept(
+      supabase, membership.org_id, workOrderId, 'suggested_vendor_ids', site,
+    )
+    if ('error' in loaded) return loaded
+    const vendorId = loaded.suggestedId
 
     if (await isVendorHardBlocked(supabase, vendorId, membership.org_id)) {
       return { error: VENDOR_HARD_BLOCKED_ERROR }
     }
 
-    // The status allowlist repeats the check above as the ATOMIC one, so a
-    // completion landing between the read and this write cannot be overwritten.
-    // The row count is read back for the same reason it is everywhere else in
-    // this file: a refused UPDATE returns 0 rows and NO error.
-    const { data: accepted, error } = await supabase
-      .from('work_orders')
-      .update({ vendor_id: vendorId, suggestion_status: 'accepted' })
-      .eq('id', workOrderId)
-      .eq('org_id', membership.org_id)
-      .in('status', VENDOR_SUGGESTION_ACCEPTABLE_STATUSES)
-      .select('id')
-      .maybeSingle()
-
-    if (error) {
-      console.error('[acceptVendorSuggestion]', error)
-      reportError(error, { site: 'serverAction.maintenance.acceptVendorSuggestion', orgId: membership.org_id })
-      return { error: 'Failed to accept suggestion. Please try again.' }
-    }
-    if (!accepted) {
-      return { error: 'You do not have permission to make this change, or the work order no longer exists.' }
-    }
-
-    // Forward-only, in its own filtered statement — see bulkAssignVendor.
-    const { error: statusError } = await supabase
-      .from('work_orders')
-      .update({ status: 'assigned' })
-      .eq('id', workOrderId)
-      .eq('org_id', membership.org_id)
-      .in('status', ['pending', 'quote_requested'])
-
-    // Reported, not returned: the vendor IS assigned and about to be notified.
-    if (statusError) {
-      console.error('[acceptVendorSuggestion] status advance failed', statusError)
-      reportError(statusError, { site: 'serverAction.maintenance.acceptVendorSuggestion.status', orgId: membership.org_id })
-    }
+    const written = await writeAcceptedSuggestion(
+      supabase, membership.org_id, workOrderId, { vendor_id: vendorId }, site,
+    )
+    if ('error' in written) return written
 
     try {
       const { createServiceClient } = await import('@/lib/supabase/server')
@@ -1407,23 +1486,13 @@ export async function dismissVendorSuggestion(workOrderId: string): Promise<{ er
     }
     const wo = woRes.data
 
-    const { data: dismissed, error } = await supabase
-      .from('work_orders')
-      .update({ suggestion_status: 'dismissed' })
-      .eq('id', workOrderId)
-      .eq('org_id', membership.org_id)
-      .select('id')
-      .maybeSingle()
-
-    if (error) {
-      console.error('[dismissVendorSuggestion]', error)
-      reportError(error, { site: 'serverAction.maintenance.dismissVendorSuggestion', orgId: membership.org_id })
-      return { error: 'Operation failed. Please try again.' }
-    }
-    // The row count is what stops a refused dismissal from still writing the
-    // negative training signal below — the same fix the turnovers-side
-    // dismissSuggestion already carries.
-    if (!dismissed) return { error: NOTHING_UPDATED }
+    const dismissResult = await writeDismissedSuggestion(
+      supabase, membership.org_id, workOrderId, 'serverAction.maintenance.dismissVendorSuggestion',
+    )
+    // The row count inside that helper is what stops a refused dismissal from
+    // still writing the negative training signal below — the same fix the
+    // turnovers-side dismissSuggestion already carries.
+    if ('error' in dismissResult) return dismissResult
 
     const vendorId = (wo?.suggested_vendor_ids as string[] | null)?.[0]
     if (vendorId) {
@@ -1461,6 +1530,95 @@ export async function dismissVendorSuggestion(workOrderId: string): Promise<{ er
   } catch (err) {
     console.error('[dismissVendorSuggestion]', err)
     reportError(err, { site: 'serverAction.maintenance.dismissVendorSuggestion' })
+    return { error: 'Operation failed. Please try again.' }
+  }
+}
+
+// ── Crew suggestion (inspection cleaning roll-up) ────────────────────────────
+
+/**
+ * Accept the crew member suggested for a cleaning work order.
+ *
+ * The crew-side twin of `acceptVendorSuggestion`, and deliberately narrower.
+ * There is no learning loop to feed: the suggestion is not a scorer's output
+ * (see `findLastCleanersAtProperty` — it names whoever last cleaned the
+ * property, which is a fact rather than a ranking), so there is nothing an
+ * acceptance would train. `assignment_outcomes` is also turnover-keyed and this
+ * is a work order.
+ *
+ * Everything the vendor path learned the hard way still applies, and applies by
+ * SHARING the code rather than by resembling it — `loadSuggestionToAccept` and
+ * `writeAcceptedSuggestion` carry the terminal-status refusal, the allowlist
+ * repeated as the atomic filter, the row-count read-back and the forward-only
+ * advance. Two look-alike copies would mean the next fix to one silently misses
+ * the other.
+ */
+export async function acceptCrewSuggestion(workOrderId: string): Promise<{ error?: string }> {
+  const site = 'serverAction.maintenance.acceptCrewSuggestion'
+  try {
+    const { supabase, membership, user } = await requireOrgRole(['admin', 'manager'])
+
+    const loaded = await loadSuggestionToAccept(
+      supabase, membership.org_id, workOrderId, 'suggested_crew_member_ids', site,
+    )
+    if ('error' in loaded) return loaded
+    const crewMemberId = loaded.suggestedId
+
+    // Defense in depth. The suggestion was written by an org-scoped service-role
+    // step, so an out-of-org id should be impossible — but this is the column
+    // whose unscoped RLS branch once made a work order readable by another
+    // tenant's crew, and the check that closes that write path costs one query.
+    const crewProblem = await checkCrewMemberAssignable(supabase, membership.org_id, crewMemberId)
+    if (crewProblem) return crewProblem
+
+    const written = await writeAcceptedSuggestion(
+      supabase, membership.org_id, workOrderId, { assigned_crew_member_id: crewMemberId }, site,
+    )
+    if ('error' in written) return written
+
+    await logAuditEvent({
+      orgId:      membership.org_id,
+      actorId:    user.id,
+      action:     'work_order.suggestion.accepted',
+      targetType: 'work_order',
+      targetId:   workOrderId,
+      metadata:   { assigned_crew_member_id: crewMemberId },
+    })
+
+    revalidatePath('/maintenance')
+    return {}
+  } catch (err) {
+    console.error('[acceptCrewSuggestion]', err)
+    reportError(err, { site: 'serverAction.maintenance.acceptCrewSuggestion' })
+    return { error: 'Operation failed. Please try again.' }
+  }
+}
+
+export async function dismissCrewSuggestion(workOrderId: string): Promise<{ error?: string }> {
+  try {
+    const { supabase, membership, user } = await requireOrgRole(['admin', 'manager'])
+
+    // No prior read, unlike the vendor twin: there is no outcome row to key on
+    // a dismissed crew id, so nothing here needs to know who was suggested.
+    const dismissResult = await writeDismissedSuggestion(
+      supabase, membership.org_id, workOrderId, 'serverAction.maintenance.dismissCrewSuggestion',
+    )
+    if ('error' in dismissResult) return dismissResult
+
+    await logAuditEvent({
+      orgId:      membership.org_id,
+      actorId:    user.id,
+      action:     'work_order.suggestion.dismissed',
+      targetType: 'work_order',
+      targetId:   workOrderId,
+      metadata:   { kind: 'crew' },
+    })
+
+    revalidatePath('/maintenance')
+    return {}
+  } catch (err) {
+    console.error('[dismissCrewSuggestion]', err)
+    reportError(err, { site: 'serverAction.maintenance.dismissCrewSuggestion' })
     return { error: 'Operation failed. Please try again.' }
   }
 }
@@ -1639,6 +1797,75 @@ function resolveFirstDueDate(
   return null
 }
 
+/**
+ * The §7 routing fields, validated before they reach the insert.
+ *
+ * Mirrors `maintenance_schedules_inspection_needs_form` (20260823211930) so a
+ * PM gets a sentence instead of a 23514, and adds what the CHECK cannot see:
+ * that the form is a real active one. An id from a form control is still an id
+ * from a client.
+ *
+ * A work-order schedule clears both columns rather than leaving whatever was
+ * there — switching a schedule from inspection back to work order must not
+ * leave it pointing at a form nothing reads.
+ */
+async function resolveScheduleRouting(
+  supabase: SupabaseClient,
+  orgId:    string,
+  data: {
+    creates?:             ScheduleCreates
+    inspection_form_id?:  string | null
+    assigned_to_user_id?: string | null
+  },
+): Promise<{ fields: Record<string, unknown> } | { error: string }> {
+  const creates = data.creates ?? 'work_order'
+
+  if (creates !== 'inspection') {
+    return { fields: { creates, inspection_form_id: null, assigned_to_user_id: null } }
+  }
+
+  if (!data.inspection_form_id) return { error: 'Choose which inspection form to walk.' }
+
+  const { data: form, error } = await supabase
+    .from('inspection_forms')
+    .select('id')
+    .eq('id', data.inspection_form_id)
+    .eq('is_active', true)
+    .maybeSingle()
+
+  if (error) {
+    reportError(error, { site: 'serverAction.maintenance.resolveScheduleRouting', orgId })
+    return { error: 'Could not verify that inspection form. Please try again.' }
+  }
+  if (!form) return { error: 'That inspection form is no longer available.' }
+
+  // The assignee is an ORG MEMBER, so it has to be one of THIS org's — an
+  // unchecked id here would name a stranger as the person expected to walk it.
+  if (data.assigned_to_user_id) {
+    const member = await supabase
+      .from('organization_members')
+      .select('user_id')
+      .eq('org_id', orgId)
+      .eq('user_id', data.assigned_to_user_id)
+      .not('invite_accepted_at', 'is', null)
+      .maybeSingle()
+
+    if (member.error) {
+      reportError(member.error, { site: 'serverAction.maintenance.resolveScheduleRouting.member', orgId })
+      return { error: 'Could not verify that assignee. Please try again.' }
+    }
+    if (!member.data) return { error: 'That person is not a member of this organization.' }
+  }
+
+  return {
+    fields: {
+      creates,
+      inspection_form_id:  data.inspection_form_id,
+      assigned_to_user_id: data.assigned_to_user_id || null,
+    },
+  }
+}
+
 export async function createMaintenanceSchedule(
   data: {
     property_id:       string
@@ -1651,6 +1878,10 @@ export async function createMaintenanceSchedule(
     assigned_vendor_id: string | null
     auto_create_wo:    boolean
     instructions:      string | null
+    /** §7. Omitted means a work-order schedule, which is what every row was. */
+    creates?:            ScheduleCreates
+    inspection_form_id?: string | null
+    assigned_to_user_id?: string | null
   }
 ): Promise<MaintenanceActionState> {
   try {
@@ -1659,6 +1890,22 @@ export async function createMaintenanceSchedule(
     const owned = await verifyPropertyInOrg(supabase, membership.org_id, data.property_id, 'serverAction.maintenance.createMaintenanceSchedule')
     if (!owned.ok) return { error: owned.error }
 
+    const routing = await resolveScheduleRouting(supabase, membership.org_id, data)
+    if ('error' in routing) return routing
+
+    const firstDue = resolveFirstDueDate(
+      data.schedule_type, data.frequency || null, data.next_due_date || null,
+    )
+
+    // Only a DERIVED date is nudged onto a vacant day, and only for a walk-
+    // through. A date the PM typed is their decision — silently moving it would
+    // be the system overruling an explicit choice, and they can already see the
+    // calendar. Every LATER occurrence gets the same treatment on advance
+    // (advanceSourceSchedule), so the series is consistent from the first.
+    const nextDueDate = (!data.next_due_date && firstDue && (data.creates ?? 'work_order') === 'inspection')
+      ? await nudgeDueDateIntoVacancy(supabase, membership.org_id, data.property_id, firstDue)
+      : firstDue
+
     const { error } = await supabase.from('maintenance_schedules').insert({
       property_id:        data.property_id,
       org_id:             membership.org_id,
@@ -1666,13 +1913,12 @@ export async function createMaintenanceSchedule(
       description:        data.description || null,
       schedule_type:      data.schedule_type,
       frequency:          data.frequency || null,
-      next_due_date:      resolveFirstDueDate(
-        data.schedule_type, data.frequency || null, data.next_due_date || null,
-      ),
+      next_due_date:      nextDueDate,
       estimated_cost:     data.estimated_cost || null,
       assigned_vendor_id: data.assigned_vendor_id || null,
       auto_create_wo:     data.auto_create_wo,
       instructions:       data.instructions || null,
+      ...routing.fields,
       is_active:          true,
     })
 
@@ -1694,6 +1940,9 @@ export async function createMaintenanceSchedule(
 export async function updateMaintenanceSchedule(
   scheduleId: string,
   data: {
+    creates?:            ScheduleCreates
+    inspection_form_id?: string | null
+    assigned_to_user_id?: string | null
     name:              string
     description:       string | null
     schedule_type:     ScheduleType
@@ -1707,6 +1956,9 @@ export async function updateMaintenanceSchedule(
 ): Promise<MaintenanceActionState> {
   try {
     const { supabase, membership } = await requireOrgRole(['admin', 'manager'])
+
+    const routing = await resolveScheduleRouting(supabase, membership.org_id, data)
+    if ('error' in routing) return routing
 
     const { data: updated, error } = await supabase
       .from('maintenance_schedules')
@@ -1727,6 +1979,7 @@ export async function updateMaintenanceSchedule(
         assigned_vendor_id: data.assigned_vendor_id || null,
         auto_create_wo:     data.auto_create_wo,
         instructions:       data.instructions || null,
+        ...routing.fields,
       })
       .eq('id', scheduleId)
       .eq('org_id', membership.org_id)

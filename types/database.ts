@@ -854,6 +854,14 @@ export interface WorkOrder {
    * and what does NOT stop a repeat visit creating a second one. See §6.
    */
   source_inspection_item_id: string | null
+  /**
+   * The inspection whose `needs_cleaning` findings rolled up into this ONE
+   * cleaning work order (20260824003238). Partial-unique. Deliberately NOT
+   * `source_inspection_item_id`: the roll-up covers many findings, and squatting
+   * on one of their ids would make `createWorkOrders` treat that finding as
+   * already handled and suppress its own repair work order.
+   */
+  source_inspection_id:        string | null
   source_turnover_id:          string | null
   asset_id:                    string | null
   scheduled_date:              string | null
@@ -887,6 +895,13 @@ export interface WorkOrder {
   vendor_rating:               number | null
   vendor_rating_notes:         string | null
   suggested_vendor_ids:        string[] | null
+  /**
+   * The crew-side twin of `suggested_vendor_ids` (20260824003238), sharing
+   * `suggestion_reasoning` and `suggestion_status`. MUTUALLY EXCLUSIVE with the
+   * vendor array — enforced by `work_orders_one_suggestion_kind`, because one
+   * `suggestion_status` cannot describe two live suggestions.
+   */
+  suggested_crew_member_ids:   string[] | null
   suggestion_reasoning:        string | null
   suggestion_status:           SuggestionStatus | null
   client_report_id:            string | null

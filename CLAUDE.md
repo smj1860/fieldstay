@@ -308,9 +308,10 @@ notifications                — in-app notification bell event log (added 2026-
                               (red|amber|green|blue), dedupe_key (unique when
                               NOT NULL — cron/retry idempotency), read_at.
                               System-inserted only (service role from Inngest);
-                              org members can SELECT and can UPDATE only
-                              read_at via RLS (no column-level lock-down yet).
-                              Superseded 7 PM email categories — see
+                              org members can SELECT, and UPDATE only read_at —
+                              a COLUMN grant (20260824001028), not merely RLS,
+                              since RLS scopes rows and has nothing to say about
+                              columns. Superseded 7 PM email categories — see
                               lib/notifications.ts.
 notification_digest_state    — per-org/category snapshot for the daily 6pm PM
                               wrap-up digest (added 2026-07-16). PK
@@ -1444,6 +1445,22 @@ following them stops being a memory test. Five layers, checked in CI via
    `source_reference_id`-named column backed by a real UNIQUE or
    partial-unique index. Self-disarms with a warning when the E2E secrets
    are absent, same as the e2e job.
+
+   Check 16 is the GROW-ONLY one, and the only registry in this file that
+   grows rather than shrinks: `NARROWED_UPDATE_GRANTS` names the tables whose
+   `authenticated` UPDATE grant covers named COLUMNS instead of the whole row
+   — `notifications` (read_at), `owner_transactions` (visible_to_owner),
+   `reviews` (response_status, updated_at). Each was narrowed because the
+   write PATH only ever touched those columns on a table holding a RECORD
+   rather than data a user maintains: a table-wide grant let an admin clear
+   `owner_transactions.source_reference_id`, the idempotency key those
+   service-role upserts collide against, or rewrite a guest's review text from
+   devtools. A later `GRANT UPDATE ON reviews TO authenticated` undoes it
+   invisibly — no error, no behaviour change, nothing red — so
+   `public.db_narrowed_update_grants()` lists every table whose grant covers
+   SOME but not ALL columns and a widened table simply drops off it. An entry
+   here is a protection, so removing one removes the protection; that is the
+   deliberate act, and it belongs in the same commit as the widening.
 
    **Type drift gate** (`scripts/check-type-drift.mjs`, same
    `db-invariants` CI job, run as its own step after
