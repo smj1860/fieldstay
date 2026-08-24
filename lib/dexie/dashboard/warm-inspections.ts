@@ -51,6 +51,7 @@ import type {
   InspectionForm,
   InspectionFormItem,
   InspectionFormSection,
+  MaintenanceSchedule,
   Property,
   PropertyAsset,
 } from '@/types/database'
@@ -85,6 +86,8 @@ export interface WarmResult {
   /** Form ITEMS cached — the number that tells you a walk can start offline. */
   formItems:   number
   properties:  number
+  /** §7 inspection schedules cached, so "what's due" survives losing signal. */
+  schedules:   number
   skipped?:    'offline' | 'throttled'
 }
 
@@ -114,14 +117,24 @@ export async function warmInspectionsForOffline(
     // inspections at all — which is precisely the org about to start its first.
     const library = await cacheFormLibrary(db, orgId)
 
+    // Same reasoning, same independence: what is DUE is most useful to an org
+    // with nothing open, and a schedule the PM cannot see is a walk they will
+    // not do.
+    const schedules = await cacheInspectionSchedules(db, orgId)
+
     const inspections = await fetchOpenInspections(orgId)
-    if (inspections === null) return { ...EMPTY, ...library }
+    if (inspections === null) return { ...EMPTY, ...library, schedules }
 
     // Stamped even when there is nothing further to warm. An org with no open
     // inspections would otherwise re-run every query on every dashboard mount,
     // which is the case where the throttle matters most.
     await db.sync_meta.put({ key: WARM_WATERMARK, value: new Date().toISOString() })
-    if (inspections.length === 0) return { ...EMPTY, ...library }
+    if (inspections.length === 0) {
+      // Still warm the START route — an org with nothing open is exactly the
+      // one whose next act is beginning a walk, possibly at the property.
+      const routes = await warmRoutes(['/maintenance/inspections'])
+      return { ...EMPTY, ...library, schedules, routes }
+    }
 
     await cacheInspectionsAndAssets(db, orgId, inspections)
     await cacheOpenConcerns(db, orgId, [...new Set(inspections.map((i) => i.property_id))])
@@ -134,14 +147,85 @@ export async function warmInspectionsForOffline(
       ...inspections.map((i) => `/maintenance/inspections/${i.id}`),
     ])
 
-    return { ...EMPTY, ...library, inspections: inspections.length, routes }
+    return { ...EMPTY, ...library, schedules, inspections: inspections.length, routes }
   } catch (err) {
     console.warn('[warmInspections] warm failed (non-fatal):', err)
     return EMPTY
   }
 }
 
-const EMPTY: WarmResult = { inspections: 0, routes: 0, formItems: 0, properties: 0 }
+const EMPTY: WarmResult = { inspections: 0, routes: 0, formItems: 0, properties: 0, schedules: 0 }
+
+/**
+ * The org's active INSPECTION schedules — §7's "what is due".
+ *
+ * WHY THE DEVICE HOLDS THESE. An inspection schedule NOTIFIES when it comes due
+ * and creates nothing (§7: a row minted by a cron would claim the walk started
+ * at 08:00 UTC, and the report presents that duration as evidence). So the only
+ * thing that turns a due schedule into a walk is a PM tapping Start — and the
+ * tap that matters most happens at the property, where the list has to already
+ * be on the device.
+ *
+ * ONLY `creates = 'inspection'`, WHICH THIS TABLE'S NAME DOES NOT SAY.
+ * `maintenance_schedules` was declared in v1 of the dashboard schema and never
+ * written to; from here it holds a SUBSET — work-order schedules are absent
+ * because nothing offline needs them, the maintenance board being a server read.
+ * Anything that later wants the full set has to widen this fetch rather than
+ * assume the cache is complete.
+ *
+ * NOT filtered by due date. A 30-day horizon at fetch time would go stale the
+ * moment the device loses signal, and "due" is a comparison the UI can make for
+ * itself against a date it already has. The whole active set is small — inspection
+ * schedules run one to three per property, so a 50-property portfolio holds
+ * roughly 150 rows.
+ */
+async function cacheInspectionSchedules(
+  db:    ReturnType<typeof getDashboardDb>,
+  orgId: string,
+): Promise<number> {
+  try {
+    const supabase = createClient()
+    const { data, error } = await supabase
+      .from('maintenance_schedules')
+      .select('*')
+      .eq('org_id', orgId)
+      .eq('creates', 'inspection')
+      .eq('is_active', true)
+      .order('next_due_date', { ascending: true, nullsFirst: false })
+      .limit(SCHEDULE_LIMIT)
+
+    if (error) {
+      reportError(error, { site: 'dexie.dashboard.warmInspections.schedules' })
+      // Left alone rather than cleared, same as the open concerns: a failed
+      // fetch is not evidence that nothing is scheduled, and wiping here would
+      // hide every due walk from a device that had a perfectly good copy.
+      return 0
+    }
+
+    const rows = (data ?? []) as unknown as MaintenanceSchedule[]
+
+    await db.transaction('rw', db.maintenance_schedules, async () => {
+      // Reconciled by absence, and empty IS a legitimate steady state here — an
+      // org may genuinely have no inspection schedules, and one that deletes its
+      // last must not keep being told a walk is due. Safe because the error
+      // branch returned above, so an empty array means the server said empty.
+      await db.maintenance_schedules.clear()
+      await db.maintenance_schedules.bulkPut(rows)
+    })
+
+    return rows.length
+  } catch (err) {
+    console.warn('[warmInspections] schedule warm failed (non-fatal):', err)
+    return 0
+  }
+}
+
+/**
+ * Ceiling on cached schedules. Explicit because `max_rows` would otherwise
+ * truncate silently at 1000 — and a truncated list here reads as "nothing else
+ * is due", which is the one wrong answer this list can give.
+ */
+const SCHEDULE_LIMIT = 500
 
 /**
  * The platform form library and the org's properties.
