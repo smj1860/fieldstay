@@ -37,6 +37,7 @@ import { dueLabel, selectDueSchedules, todayISO } from '@/lib/inspections/due-sc
 import { parseFormSnapshot } from '@/lib/inspections/snapshots'
 
 import { MaintenanceTabs } from '../maintenance-tabs'
+import { SafetyCadenceCard } from './safety-cadence-card'
 
 const FORM_LABELS: Record<string, string> = {
   safety:  'Safety & Risk Mitigation',
@@ -169,6 +170,11 @@ export function InspectionsView({ userId, orgId }: Readonly<Props>) {
             Start inspection
           </Button>
         </div>
+
+        {/* ONLINE ONLY, and it renders itself away when there is no signal —
+            see safety-cadence-card.tsx. A setting shown from a week-old cache
+            is worse than a setting that is simply not there. */}
+        <SafetyCadenceCard />
 
         {!libraryReady && (
           <Card>

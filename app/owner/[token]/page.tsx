@@ -3,6 +3,7 @@ import type { Metadata } from 'next'
 import type { TxnType } from '@/types/database'
 import type { CapExProjectionItem } from '@/lib/inngest/functions/capex-projections'
 import { loadOwnerPortalData, type OwnerPortalTxn } from './load-owner-portal-data'
+import { InspectionHistory } from './inspection-history'
 
 export const metadata: Metadata = { title: 'Owner Portal — FieldStay' }
 
@@ -158,6 +159,7 @@ export default async function OwnerPortalPage({ params, searchParams }: Props) {
     ownerName, revenueSharePct, isMulti, portfolioProperties, selectedProperty, viewProperty,
     addressDisplay, availableMonths, selectedMonth, filteredTxns, txnsByProperty,
     totalRevenue, totalExpenses, netIncome, occupancy, lastYearMonthLabel, capexPayload,
+    inspections,
   } = pageState.data
 
   function portalHref(overrides: { month?: string; property?: string }): string {
@@ -450,6 +452,15 @@ export default async function OwnerPortalPage({ params, searchParams }: Props) {
             </div>
           </div>
         )}
+
+        {/* §2: posts the day it is completed, failures included, each with the
+            work order or purchase order it produced and where that stands. */}
+        <InspectionHistory
+          inspections={inspections.inspections}
+          totalCompleted={inspections.totalCompleted}
+          propertyNames={new Map(portfolioProperties.map((p) => [p.id, p.name]))}
+          showPropertyName={isMulti && selectedProperty === 'all'}
+        />
 
         <div className="flex flex-col items-center gap-2 mt-8">
           <p className="text-center text-xs text-muted-themed">

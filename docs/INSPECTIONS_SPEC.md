@@ -572,22 +572,43 @@ Reuse `maintenance_schedules` with a discriminator:
 creates               'work_order' | 'inspection'    (default 'work_order')
 inspection_form_id     (nullable)
 assigned_to_user_id    (nullable)
-anchor_months          smallint[]  (nullable)        -- 1-12, see below
 ```
 
 `schedule_frequency` already carries `quarterly | semi_annual | annual`, which
 covers all three forms exactly — no new enum.
 
-`anchor_months` is the month picking. One value for annual, two for
-semi-annual, and for quarterly the **single starting month** from which the
-other three derive (+3, +6, +9) — a PM who says "quarterly starting in March"
-has said everything, and storing all four would let the set drift out of step
-with itself. Array rather than four columns because the validation is then one
-CHECK on length against frequency instead of four nullability rules that can
-disagree.
+**There is no `anchor_months`, and this section specified one until 2026-08-24.**
+The recurrence anchor is EMERGENT from `(next_due_date, frequency)`:
+`calcNextDueDate` steps whole months from the due date, so the calendar month
+the series runs in is already recorded, once, by the date itself. A second
+column naming it could disagree with it — which is exactly what happened to
+`maintenance_schedules.month_due`, dropped by `20260823215150` for that reason.
+The array was designed to make month-picking explicit and would have
+reintroduced the same duplication with more validation attached to it.
 
-Set during onboarding and editable afterwards in the Inspections tab. Both
-write the same row; there is no separate onboarding-only shape.
+**Onboarding is a TEMPLATE, not a schedule** (`20260824091200`). The spec below
+treated frequency as one org-level answer, but a `maintenance_schedules` row is
+per PROPERTY — three forms across 29 properties is 87 rows, and a step that
+asked 87 times would be worse than no step. So:
+
+- **Safety only** is set in onboarding, on `organizations`
+  (`inspection_safety_frequency`, `inspection_safety_start_month`), and fanned
+  out to every property. It is the one form that runs everywhere.
+- **Indoor and Outdoor** are per-property, set up as ordinary recurring
+  maintenance with `creates = 'inspection'`. A studio condo and a lakefront
+  house with a dock do not want the same walk, and the outdoor form is heavily
+  gated on assets a condo does not have.
+- A MONTH on the template is not `month_due` returning. The template has no due
+  date; it is the rule that PRODUCES one, and the schedule it generates still
+  carries a single `next_due_date`.
+- Properties added later are caught by a pass inside the maintenance-schedules
+  cron rather than a hook on property creation — properties are created from
+  five places and the next importer makes six.
+
+Editable afterwards on the Inspections tab, and deliberately ONLINE-ONLY there:
+that page renders from the Dexie cache so a walk can be started with no signal,
+and a setting shown from a week-old cache is worse than one that is simply
+absent.
 
 The *timing rule* — when is this due, does it fall inside the seasonal window,
 how does `next_due_date` advance — must not exist twice. The output differs;

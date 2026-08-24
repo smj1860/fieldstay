@@ -50,9 +50,6 @@
   "app/api/work-orders/[token]/quote/route.ts": [
     25
   ],
-  "app/crew/turnovers/[id]/ChecklistView.tsx": [
-    45
-  ],
   "app/work-orders/[token]/vendor-portal.tsx": [
     16
   ],

@@ -2,6 +2,7 @@ import * as crypto from 'crypto'
 import { createClient } from '@supabase/supabase-js'
 import { test, expect } from '../fixtures'
 import { getServiceClient } from '../helpers/teardown'
+import { ONBOARDING_STEPS } from '../../lib/onboarding-wizard'
 
 // ── Why this spec exists ────────────────────────────────────────────────────
 // Tenant isolation is the single security property this product cannot ship
@@ -239,8 +240,12 @@ interface BravoOrg {
  * The org must clear both gates in app/(dashboard)/layout.tsx or its owner
  * never reaches /ops and every assertion in this file would fail for an
  * unrelated reason:
- *   - onboarding_steps_completed must have all 8 ONBOARDING_STEPS keys true
- *     (lib/onboarding-wizard.ts), or the layout redirects to /setup
+ *   - onboarding_steps_completed must have EVERY ONBOARDING_STEPS key true
+ *     (lib/onboarding-wizard.ts), or the layout can redirect to /setup.
+ *     DERIVED from that array rather than listed here: the list was eight
+ *     literals, and adding a ninth step left this fixture describing an org
+ *     that had not finished onboarding — a precondition failing for a reason
+ *     that has nothing to do with tenant isolation is the worst kind of red.
  *   - plan_status must be 'active', or the layout redirects to /billing-wall
  */
 async function createBravoOrg(): Promise<BravoOrg> {
@@ -267,16 +272,9 @@ async function createBravoOrg(): Promise<BravoOrg> {
         slug: `e2e-org-bravo-${suffix}`,
         plan:        'growth',
         plan_status: 'active',
-        onboarding_steps_completed: {
-          pms:                  true,
-          crew:                 true,
-          auto_assign:          true,
-          vendors:              true,
-          inventory_template:   true,
-          checklist_template:   true,
-          maintenance_template: true,
-          power_ups:            true,
-        },
+        onboarding_steps_completed: Object.fromEntries(
+          ONBOARDING_STEPS.map((step) => [step.key, true]),
+        ),
       })
       .select('id')
       .single()

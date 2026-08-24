@@ -5,6 +5,8 @@ import { parseLocalDate } from '@/lib/utils/date-validation'
 import { unwrapJoin } from '@/lib/utils/supabase-joins'
 import { unwrap } from '@/lib/supabase/unwrap'
 import { fetchAllRows, fetchDistinctOrgIds } from '@/lib/inngest/paginate'
+import { reportError } from '@/lib/observability/report-error'
+import { applySafetyTemplate } from '@/lib/inspections/apply-safety-template'
 import {
   createMaintenanceWorkOrder,
   notifyInspectionDue,
@@ -171,6 +173,38 @@ export const maintenanceSchedulesOrg = inngest.createFunction(
 
     const alertDate = new Date(today)
     alertDate.setDate(alertDate.getDate() + ALERT_WINDOW_DAYS)
+
+    // ── Pass 0: apply the org's safety-inspection template ─────────────────
+    //
+    // §2 puts safety frequency in onboarding, and onboarding fans it out to
+    // the properties that exist AT THAT MOMENT. This is what catches the ones
+    // added since — which is every property from a PMS import, a second
+    // portfolio, or simply a purchase made after setup.
+    //
+    // Here rather than hooked onto property creation because properties are
+    // created from five places (the manual form plus four PMS importers) and
+    // the next importer would make six. One pass catches every path, including
+    // paths that do not exist yet, and costs at most a day's delay on a walk
+    // that runs once or twice a year.
+    //
+    // NON-FATAL, and first so it cannot be skipped by a later failure. A
+    // property that misses today's pass gets its schedule tomorrow; a throw
+    // here would take the due-notification and overdue-escalation passes with
+    // it, which are the ones with a deadline.
+    const safetyApplied = await step.run('apply-safety-template', async () => {
+      const supabase = createServiceClient({ system: 'inngest:maintenance-schedules' })
+      try {
+        const result = await applySafetyTemplate(supabase, orgId, { today })
+        if (result.created > 0) {
+          logger.info(`org ${orgId}: created ${result.created} safety inspection schedule(s)`)
+        }
+        return result.created
+      } catch (err) {
+        logger.error(`org ${orgId}: safety template pass failed`, err)
+        reportError(err, { site: 'inngest.maintenance-schedules.safety-template', orgId })
+        return 0
+      }
+    })
 
     // ── Pass 1: Due-soon schedules ─────────────────────────────────────────
     const dueSchedules = await step.run('find-due-schedules', async () => {
@@ -385,6 +419,7 @@ export const maintenanceSchedulesOrg = inngest.createFunction(
       checked:        dueSchedules.length,
       escalated:      overdueSchedules.length,
       gapSuggestions: gapSuggestions.length,
+      safetyApplied,
     }
   }
 )

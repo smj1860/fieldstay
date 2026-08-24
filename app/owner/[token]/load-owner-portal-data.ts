@@ -3,6 +3,7 @@ import { createServiceClient } from '@/lib/supabase/server'
 import { fetchAllRows } from '@/lib/inngest/paginate'
 import { logAuditEvent } from '@/lib/audit'
 import { computeOccupancy } from '@/lib/owner-portal/occupancy'
+import { loadOwnerInspections, type OwnerInspectionHistory } from '@/lib/owner-portal/inspections'
 import type { TxnType } from '@/types/database'
 import type { CapExProjectionPayload } from '@/lib/inngest/functions/capex-projections'
 import { unwrapJoin } from '@/lib/utils/supabase-joins'
@@ -67,6 +68,13 @@ export interface OwnerPortalData {
   occupancy:            ReturnType<typeof computeOccupancy>
   lastYearMonthLabel:   string
   capexPayload:         CapExProjectionPayload | null
+  /**
+   * §9: completed inspections, failures included, each with its linked WO/PO
+   * and that record's current status. Scoped to `txnPropertyIds` like every
+   * other read here, and deliberately NOT month-filtered — see
+   * lib/owner-portal/inspections.ts.
+   */
+  inspections:          OwnerInspectionHistory
 }
 
 function formatMonthLabel(monthParam: string): string {
@@ -514,6 +522,13 @@ export async function loadOwnerPortalData(
 
   const { totalRevenue, totalExpenses, netIncome } = summarize(filteredTxns)
 
+  // Scoped to the SAME token-derived property ids as everything above. This is
+  // the tenant boundary for the route, and passing it explicitly is what keeps
+  // the boundary visible at the call site rather than re-derived inside.
+  const inspections: OwnerInspectionHistory = ownerRaw.org_id
+    ? await loadOwnerInspections(supabase, ownerRaw.org_id, txnPropertyIds)
+    : { inspections: [], totalCompleted: 0 }
+
   return {
     status: 'ok',
     data: {
@@ -536,6 +551,7 @@ export async function loadOwnerPortalData(
       occupancy,
       lastYearMonthLabel,
       capexPayload,
+      inspections,
     },
   }
 }

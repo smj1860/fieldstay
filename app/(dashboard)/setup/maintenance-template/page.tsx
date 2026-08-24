@@ -5,7 +5,7 @@ import { Button } from '@/components/ui/Button'
 export default async function OnboardingMaintenanceTemplatePage() {
   async function continueAction() {
     'use server'
-    await markStepComplete('maintenance_template', '/setup/power-ups')
+    await markStepComplete('maintenance_template', '/setup/inspections')
   }
 
   return (

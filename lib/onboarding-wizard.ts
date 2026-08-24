@@ -49,6 +49,12 @@ export const ONBOARDING_STEPS: OnboardingStep[] = [
     description: 'Set up recurring maintenance tasks',
   },
   {
+    key:         'inspections',
+    label:       'Inspections',
+    href:        'inspections',
+    description: 'How often every property gets its safety walk',
+  },
+  {
     key:         'power_ups',
     label:       'Power-Ups',
     href:        'power-ups',
