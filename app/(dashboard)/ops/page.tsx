@@ -5,6 +5,7 @@ import { unwrapList, type PostgrestResult } from '@/lib/supabase/unwrap'
 import { OpsSnapshot, type OpsTurnover } from './ops-snapshot'
 import { fetchAllRows } from '@/lib/inngest/paginate'
 import { addDays, subDays, startOfDay, endOfDay } from 'date-fns'
+import { loadUpcomingInspections } from '@/lib/inspections/upcoming-for-dashboard'
 import type { Metadata } from 'next'
 
 export const metadata: Metadata = { title: 'Ops Snapshot' }
@@ -144,6 +145,15 @@ export default async function OpsSnapshotPage() {
 
   const showPmsRevenueNudge = pmsConnections.length === 0
 
+  // Sequential rather than folded into the Promise.all above, because the open-
+  // walk lookup is scoped to the ids the schedule read returns — the second
+  // query cannot be written until the first has answered. Two round trips on a
+  // list that is empty for most orgs, against the alternative of reading every
+  // open inspection in the org to filter in JS.
+  const upcomingInspections = await loadUpcomingInspections(
+    supabase, membership.org_id, todayIso,
+  )
+
   const todayTurnovers  = allTurnovers.filter(t => t.checkout_datetime.startsWith(todayIso))
   const todayAssigned   = todayTurnovers.filter(t => t.status !== 'pending_assignment').length
   const todayUnassigned = todayTurnovers.filter(t => t.status === 'pending_assignment').length
@@ -184,6 +194,7 @@ export default async function OpsSnapshotPage() {
         belowPar:         lowStockItems.length,
       }}
       metrics={{ occupancyRate, confirmedBookings, turnoversCompleted }}
+      upcomingInspections={upcomingInspections}
       showPmsRevenueNudge={showPmsRevenueNudge}
     />
   )
