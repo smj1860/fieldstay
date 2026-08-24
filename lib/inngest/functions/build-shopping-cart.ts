@@ -200,14 +200,25 @@ export const buildShoppingCart = inngest.createFunction(
       return { status: 'no_store_configured', action_required: 'connect_kroger_store' }
     }
 
-    // ── Step 2: Read customer token from Vault, refreshing if near expiry ──
+    // ── Step 2: Establish that a usable Kroger customer token EXISTS ──────
     // Delegates to the same getValidKrogerToken/refreshKrogerToken used by
     // the proactive token-refresh cron — this used to be a second,
     // uncoordinated reimplementation of the refresh logic here, which could
     // race the cron's refresh for the same connection.
-    const customerToken = await step.run('get-customer-token', async () => {
+    //
+    // Returns a BOOLEAN, never the token. Kroger access tokens live 30 minutes
+    // and the cart write is several steps and one Claude round-trip later, so a
+    // token captured here is likely to be dead by the time it would be spent —
+    // and because `step.run` memoizes, every retry would replay the dead one.
+    // See the "credentials are not step state" note in
+    // lib/integrations/providers/hospitable-token.ts. The cart step re-acquires.
+    //
+    // The flag still carries everything the later branches need: whether this
+    // run can reach Kroger at all, which is what separates 'partial' from
+    // 'list_only'.
+    const krogerTokenAvailable = await step.run('check-kroger-token', async () => {
       try {
-        return await getValidKrogerToken(connection.user_id)
+        return !!(await getValidKrogerToken(connection.user_id))
       } catch (err) {
         if (err instanceof RateLimitError) {
           // Kroger's own API quota (or our proactive guard in front of it,
@@ -246,7 +257,7 @@ export const buildShoppingCart = inngest.createFunction(
         }
         console.error('Kroger token refresh failed — falling back to list-only:', err instanceof Error ? err.message : err)
         reportError(err, { site: 'inngest.build-shopping-cart.kroger_token_refresh', orgId: org_id })
-        return null
+        return false
       }
     })
 
@@ -437,7 +448,7 @@ ${JSON.stringify(itemsForNormalization, null, 2)}`,
     // retry of this step itself can't add the items to the cart twice.
     const cartAdded = await step.run('add-items-to-kroger-cart', async () => {
       const supabase = createServiceClient({ system: 'inngest:build-shopping-cart' })
-      if (!customerToken || matchResult.cartItems.length === 0) return false
+      if (!krogerTokenAvailable || matchResult.cartItems.length === 0) return false
 
       // Idempotency key = org + day + exact cart contents. The old key was
       // `kroger_cart_added:${runId}`: runId is stable across STEP retries but
@@ -490,7 +501,8 @@ ${JSON.stringify(itemsForNormalization, null, 2)}`,
       // (CLAUDE.md): a skipped cart is recoverable, a double-ordered one is
       // the PM's money. The Inngest step still fails loudly, and the PM can
       // rebuild once par levels or contents change (different fingerprint).
-      return await addItemsToKrogerCart(matchResult.cartItems, customerToken)
+      // Re-acquired here rather than carried from step 2 — 30-minute token.
+      return await addItemsToKrogerCart(matchResult.cartItems, await getValidKrogerToken(connection.user_id))
     })
 
     if (cartAdded) {
@@ -502,7 +514,7 @@ ${JSON.stringify(itemsForNormalization, null, 2)}`,
     )
 
     const cartResult: CartBuildResult = {
-      status:          cartAdded ? 'cart_added' : customerToken ? 'partial' : 'list_only',
+      status:          cartAdded ? 'cart_added' : krogerTokenAvailable ? 'partial' : 'list_only',
       matched_items:   matchResult.matchedItems,
       unmatched_items: matchResult.unmatchedItems,
       cart_url:        cartAdded ? 'https://www.kroger.com/cart' : undefined,

@@ -46,7 +46,13 @@ export type HostexReviewFetchMode =
 export interface HostexReviewSyncParams {
   step:   SyncStep
   logger: SyncLogger
-  token:  string
+  /**
+   * Acquires a CURRENT token. A getter, not a token — see the "credentials are
+   * not step state" note in lib/integrations/providers/hospitable-token.ts.
+   * Resolving it once would let Inngest memoize it into step state and replay
+   * it on every retry, so a token invalidated mid-run could never be recovered.
+   */
+  getToken: () => Promise<string>
   orgId:  string
   userId: string
   /** Hostex property id (as a string) → FieldStay properties.id. */
@@ -60,14 +66,14 @@ export interface HostexReviewSyncParams {
 export async function syncHostexReviews(
   params: HostexReviewSyncParams,
 ): Promise<{ reviewCount: number }> {
-  const { step, logger, token, orgId, userId, propertyIdMap, fetchMode, system, stepPrefix } = params
+  const { step, logger, getToken, orgId, userId, propertyIdMap, fetchMode, system, stepPrefix } = params
 
   if (!Object.keys(propertyIdMap).length) return { reviewCount: 0 }
 
   // ── 1. Fetch ─────────────────────────────────────────────────────────────
   const reviews = await step.run(`${stepPrefix}-fetch-reviews`, async (): Promise<HostexReview[]> => {
     if (fetchMode.kind === 'reservation') {
-      const one = await hostexFetchReviewByReservation(token, userId, fetchMode.reservationCode)
+      const one = await hostexFetchReviewByReservation(await getToken(), userId, fetchMode.reservationCode)
       return one ? [one] : []
     }
 
@@ -75,7 +81,7 @@ export async function syncHostexReviews(
     // per-connection Hostex budget, and a backfill is not latency-sensitive.
     const collected: HostexReview[] = []
     for (const window of hostexReviewWindows(fetchMode.historyMonths)) {
-      collected.push(...await hostexFetchReviews(token, userId, window))
+      collected.push(...await hostexFetchReviews(await getToken(), userId, window))
     }
     return collected
   })

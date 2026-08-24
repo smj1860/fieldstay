@@ -48,7 +48,13 @@ export type HostexFetchMode =
 export interface HostexReservationSyncParams {
   step:   SyncStep
   logger: SyncLogger
-  token:  string
+  /**
+   * Acquires a CURRENT token. A getter, not a token — see the "credentials are
+   * not step state" note in lib/integrations/providers/hospitable-token.ts.
+   * Resolving it once would let Inngest memoize it into step state and replay
+   * it on every retry, so a token invalidated mid-run could never be recovered.
+   */
+  getToken: () => Promise<string>
   orgId:  string
   userId: string
   /** Hostex property id (as a string) → FieldStay properties.id. */
@@ -61,7 +67,7 @@ export interface HostexReservationSyncParams {
 export async function syncHostexReservations(
   params: HostexReservationSyncParams,
 ): Promise<ReservationPipelineResult> {
-  const { step, logger, token, orgId, userId, propertyIdMap, fetchMode, system, revenueMode } = params
+  const { step, logger, getToken, orgId, userId, propertyIdMap, fetchMode, system, revenueMode } = params
 
   // ── Fetch — the only genuinely Hostex-specific part ──────────────────────
   // One step, one request range. Hospitable fans out per-window because its 54
@@ -77,6 +83,10 @@ export async function syncHostexReservations(
       // reservation changed" — so current state is read back by code. A code
       // resolving to nothing (hard-deleted between delivery and read) drops
       // out rather than failing the run.
+      // One acquisition for the whole fan-out rather than one per code: this
+      // is inside the step, so a retry re-reads it, and re-resolving per code
+      // would issue N connection+Vault reads for a single logical fetch.
+      const token   = await getToken()
       const fetched = await Promise.all(
         fetchMode.reservationCodes.map((code) => hostexFetchReservationByCode(token, userId, code)),
       )
@@ -84,7 +94,7 @@ export async function syncHostexReservations(
     }
 
     const window = hostexReservationWindow(fetchMode.historyMonths, fetchMode.lookaheadMonths)
-    return hostexFetchReservations(token, userId, window)
+    return hostexFetchReservations(await getToken(), userId, window)
   })
 
   logger.info(`[Hostex:${userId}] Fetched ${reservations.length} reservations`)

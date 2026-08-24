@@ -65,7 +65,13 @@ type SyncStep = GetStepTools<typeof inngest>
 export interface HostexStaffSyncParams {
   step:   SyncStep
   logger: SyncLogger
-  token:  string
+  /**
+   * Acquires a CURRENT token. A getter, not a token — see the "credentials are
+   * not step state" note in lib/integrations/providers/hospitable-token.ts.
+   * Resolving it once would let Inngest memoize it into step state and replay
+   * it on every retry, so a token invalidated mid-run could never be recovered.
+   */
+  getToken: () => Promise<string>
   orgId:  string
   userId: string
   system: string
@@ -133,18 +139,18 @@ async function preserveManualCrewRoles(
 export async function syncHostexStaff(
   params: HostexStaffSyncParams,
 ): Promise<{ crewCount: number; deactivated: number; pricedProperties: number }> {
-  const { step, logger, token, orgId, userId, system, stepPrefix, propertyIdMap } = params
+  const { step, logger, getToken, orgId, userId, system, stepPrefix, propertyIdMap } = params
 
   const wantsFees = Boolean(propertyIdMap && Object.keys(propertyIdMap).length)
 
   // ── 1. Fetch staff + tasks, return only what they imply ──────────────────
   const { staffs, roles, cleaningFees } = await step.run(`${stepPrefix}-fetch-staff`, async () => {
-    const fetchedStaffs = await hostexFetchStaffs(token, userId)
+    const fetchedStaffs = await hostexFetchStaffs(await getToken(), userId)
 
     // Skipped only when there is nothing either derivation could use.
     const needTasks = fetchedStaffs.length > 0 || wantsFees
     const tasks = needTasks
-      ? await hostexFetchTasks(token, userId, hostexTaskWindow(TASK_WINDOW_DAYS))
+      ? await hostexFetchTasks(await getToken(), userId, hostexTaskWindow(TASK_WINDOW_DAYS))
       : []
 
     return {

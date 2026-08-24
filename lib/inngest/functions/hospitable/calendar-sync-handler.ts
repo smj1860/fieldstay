@@ -47,10 +47,6 @@ export const hospCalendarSyncHandler = inngest.createFunction(
   async ({ event, step, logger }) => {
     const { property_id, org_id, user_id, hospitable_property_id } = event.data
 
-    const token = await step.run('get-valid-token', async () => {
-      return getValidHospitableToken(user_id)
-    })
-
     const { startDate, endDate } = await step.run('compute-window', async () => {
       const start = new Date()
       const end   = new Date(start.getTime() + CALENDAR_WINDOW_DAYS * 86_400_000)
@@ -67,6 +63,11 @@ export const hospCalendarSyncHandler = inngest.createFunction(
     // unit/guardrails/inngest-nested-steps.test.ts).
     const fetched = await step.run('fetch-calendar', async () => {
       try {
+        // Token acquired INSIDE the step that spends it — see the
+        // "credentials are not step state" note in hospitable-token.ts. A
+        // hoisted token is memoized and replayed on every retry, so an
+        // invalidated one can never be recovered from.
+        const token = await getValidHospitableToken(user_id)
         return { gone: false as const, days: await hospFetchCalendar(token, hospitable_property_id, startDate, endDate) }
       } catch (err) {
         if (err instanceof ProviderEntityGoneError) return { gone: true as const, days: [] }

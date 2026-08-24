@@ -63,8 +63,6 @@ export const hospReviewsBackfill = inngest.createFunction(
         return { reviews: 0 }
       }
 
-      const token = await step.run('read-token', async () => getValidHospitableToken(user_id))
-
       // Reviews are fetched per-property (GET /properties/{uuid}/reviews —
       // there is no flat account-wide collection, see hospFetchReviews' doc
       // comment), so each property gets its own fetch step. The FieldStay
@@ -91,14 +89,21 @@ export const hospReviewsBackfill = inngest.createFunction(
 
         let propertyReviews
         try {
+          // Token acquired INSIDE each fetch step — see the "credentials are
+          // not step state" note in hospitable-token.ts. This loop is the
+          // sharpest case for it: one backfill walks every property as its own
+          // step and can sleep out a rate limit in between, so a single hoisted
+          // token would be memoized across a span long enough to outlive the
+          // 12-hour token AND any rotation the refresh cron performs — and the
+          // retry below would replay the dead one rather than re-read.
           propertyReviews = await step.run(`fetch-reviews-${propertyId}`, async () =>
-            hospFetchReviews(token, propertyExternalId)
+            hospFetchReviews(await getValidHospitableToken(user_id), propertyExternalId)
           )
         } catch (err) {
           if (!(err instanceof RateLimitError)) throw err
           await step.sleep(`rate-limit-sleep-${propertyId}`, `${err.retryAfter}s`)
           propertyReviews = await step.run(`fetch-reviews-retry-${propertyId}`, async () =>
-            hospFetchReviews(token, propertyExternalId)
+            hospFetchReviews(await getValidHospitableToken(user_id), propertyExternalId)
           )
         }
 

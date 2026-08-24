@@ -222,7 +222,19 @@ describe('hospReservationReconcileHandler', () => {
     // had already read the stale one. GET /reservations answered
     // {"message":"Unauthenticated."} and all three retries burned on a token
     // that was dead before the first attempt.
-    ;(createServiceClient as ReturnType<typeof vi.fn>).mockReturnValue(makeSupabase({}))
+    //
+    // AND THE 2026-08-24 RECURRENCE, which is why the fixture now has a
+    // property. The getter is acquired INSIDE each fetch step rather than in a
+    // `step.run('read-token')` of its own — a hoisted token is memoized by
+    // Inngest and replayed on every retry, so making the getter refresh-aware
+    // only ever fixed a token that was already stale when read. It could not
+    // help one that died AFTER the read.
+    //
+    // A consequence worth stating: with nothing to sync the token is never
+    // acquired at all, so this asserts against an org that HAS a property.
+    ;(createServiceClient as ReturnType<typeof vi.fn>).mockReturnValue(makeSupabase({
+      properties: [{ data: [{ id: 'prop_1', external_id: 'hosp_1' }], error: null }],
+    }))
 
     await invokeHandler(hospReservationReconcileHandler, {
       event: EVENT, step: runAllStep(), logger: makeLogger(),
@@ -232,8 +244,17 @@ describe('hospReservationReconcileHandler', () => {
   })
 
   it('is non-retriable when the token is gone — a dead credential needs a reconnect, not 3 retries a day', async () => {
+    // Also needs a property: the token is acquired lazily now, so an org with
+    // nothing to reconcile skips before ever reaching the credential. That is
+    // the right trade — a connection that has synced always has properties, so
+    // a revoked one still surfaces here, and a connection revoked before its
+    // first sync has genuinely nothing to do. The reconnect notification is
+    // integration-token-refresh-handler's job either way, per this file's own
+    // header.
     ;(getValidHospitableToken as ReturnType<typeof vi.fn>).mockResolvedValue(null)
-    ;(createServiceClient as ReturnType<typeof vi.fn>).mockReturnValue(makeSupabase({}))
+    ;(createServiceClient as ReturnType<typeof vi.fn>).mockReturnValue(makeSupabase({
+      properties: [{ data: [{ id: 'prop_1', external_id: 'hosp_1' }], error: null }],
+    }))
 
     await expect(
       invokeHandler(hospReservationReconcileHandler, {

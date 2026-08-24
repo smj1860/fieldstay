@@ -15,9 +15,9 @@ import { NonRetriableError }            from 'inngest'
 import { resend, FROM }                 from '@/lib/resend/client'
 import { renderIntegrationErrorEmail }  from '@/lib/resend/emails/integration-error'
 import { getPmEmails }                  from '@/lib/inngest/helpers'
-import { refreshHospitableToken }       from '@/lib/integrations/providers/hospitable-token'
-import { refreshKrogerToken }           from '@/lib/integrations/providers/kroger-token'
-import { refreshHostexToken }           from '@/lib/integrations/providers/hostex-token'
+import { refreshHospitableTokenLocked } from '@/lib/integrations/providers/hospitable-token'
+import { refreshKrogerTokenSingleFlight } from '@/lib/integrations/providers/kroger-token'
+import { refreshHostexTokenLocked }     from '@/lib/integrations/providers/hostex-token'
 
 const PROVIDER_LABELS: Record<string, string> = {
   hospitable: 'Hospitable',
@@ -48,21 +48,37 @@ export const integrationTokenRefreshHandler = inngest.createFunction(
 
     try {
       await step.run('refresh-token', async () => {
+        // THE LOCKED WRAPPERS, not the bare refresh*Token() functions.
+        //
+        // This cron used to call the unlocked entry points, on the reasoning
+        // that its own `concurrency: { key: user_id + ':' + provider_id }`
+        // already serialized it. That key serializes this handler against
+        // ITSELF. It says nothing about the sync functions — separate Inngest
+        // functions, which DO take the Redis lock — so the one caller exempt
+        // from the lock was the one most likely to collide with them: an
+        // hourly :00 refresh against sync crons that also fire at :00.
+        //
+        // Every provider here rotates its refresh token on exchange, so two
+        // unserialized exchanges leave the loser's superseded token in Vault
+        // and the connection dies at the next refresh. Losing the lock is the
+        // correct outcome for a PROACTIVE refresh: somebody else just renewed
+        // the token, which is exactly what this run wanted.
         if (provider_id === 'hospitable') {
-          await refreshHospitableToken(user_id, external_user_id ?? '')
+          await refreshHospitableTokenLocked(user_id, external_user_id ?? '')
           return
         }
 
         if (provider_id === 'kroger') {
-          await refreshKrogerToken(user_id)
+          await refreshKrogerTokenSingleFlight(user_id)
           return
         }
 
         // 7-day access tokens, refresh token rotated on every use.
         // refreshHostexToken throws NonRetriableError itself when Hostex
-        // rejects the grant, which the catch below reads as terminal.
+        // rejects the grant, which the catch below reads as terminal; the
+        // locked wrapper propagates it unchanged.
         if (provider_id === 'hostex') {
-          await refreshHostexToken(user_id, external_user_id ?? '')
+          await refreshHostexTokenLocked(user_id, external_user_id ?? '')
           return
         }
 

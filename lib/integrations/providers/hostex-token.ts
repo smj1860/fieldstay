@@ -100,7 +100,7 @@ export async function getValidHostexToken(userId: string): Promise<string> {
   return refreshHostexTokenLocked(userId, externalUserId)
 }
 
-async function refreshHostexTokenLocked(userId: string, externalUserId: string): Promise<string> {
+export async function refreshHostexTokenLocked(userId: string, externalUserId: string): Promise<string> {
   const acquired = await acquireRefreshLock('hostex', userId)
 
   if (acquired) {
@@ -145,11 +145,15 @@ async function refreshHostexTokenLocked(userId: string, externalUserId: string):
 /**
  * Force-refresh the Hostex access + refresh token pair for `userId`.
  *
- * Called by integrationTokenRefreshHandler directly (unlocked, matching
- * hospitable-token.ts's cron path — the handler already serializes on
- * (user_id, provider_id) via its concurrency key) and by
- * getValidHostexToken() through refreshHostexTokenLocked(), which DOES take
- * the lock because several sync steps can race for one connection.
+ * THE UNLOCKED ENTRY POINT. Callers outside this module should use
+ * refreshHostexTokenLocked().
+ *
+ * integrationTokenRefreshHandler used to call this directly, on the grounds
+ * that "the handler already serializes on (user_id, provider_id) via its
+ * concurrency key". That key serializes the cron against ITSELF; it says
+ * nothing about the sync functions, which are separate Inngest functions and
+ * take the Redis lock. Hostex rotates its refresh token on every use, so two
+ * unserialized exchanges leave the loser's superseded token in Vault.
  *
  * @param userId          FieldStay user UUID
  * @param externalUserId  the stored Hostex identity proxy. Passed through

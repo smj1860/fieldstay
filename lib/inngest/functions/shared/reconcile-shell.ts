@@ -37,10 +37,21 @@ export interface ProviderReconcileParams {
   orgId:    string
   /** Names the RLS bypass for createServiceClient — see ServiceRoleContext. */
   system:   string
-  /** Throws NonRetriableError when the connection needs reconnecting. */
+  /**
+   * Acquires a CURRENT token. Throws NonRetriableError when the connection
+   * needs reconnecting.
+   *
+   * Deliberately NOT resolved into a value here — see the "credentials are not
+   * step state" note in lib/integrations/providers/hospitable-token.ts. This
+   * used to be `await step.run('read-token', readToken)`, which memoized the
+   * result: every retry of every downstream fetch step replayed the token the
+   * first attempt happened to get, so a token invalidated mid-reconcile could
+   * never be recovered from and the run burned its whole retry budget against
+   * a credential one re-read would have fixed.
+   */
   readToken: () => Promise<string>
   /** Runs the provider's own reservation sync against the resolved map. */
-  sync: (token: string, propertyIdMap: Record<string, string>) => Promise<ReservationPipelineResult>
+  sync: (getToken: () => Promise<string>, propertyIdMap: Record<string, string>) => Promise<ReservationPipelineResult>
 }
 
 export type ProviderReconcileResult =
@@ -53,8 +64,6 @@ export async function runProviderReconcile(
   const { step, logger, provider, label, userId, orgId, system, readToken, sync } = params
 
   try {
-    const token = await step.run('read-token', readToken)
-
     const propertyIdMap = await step.run('fetch-property-map', () =>
       fetchProviderPropertyIdMap(orgId, provider, system))
 
@@ -68,7 +77,7 @@ export async function runProviderReconcile(
       return { skipped: true, reason: 'no_properties' }
     }
 
-    const { reservationCount, newTurnoverIds } = await sync(token, propertyIdMap)
+    const { reservationCount, newTurnoverIds } = await sync(readToken, propertyIdMap)
 
     logger.info(
       `[${label}:${userId}] Reservation reconcile complete — ` +

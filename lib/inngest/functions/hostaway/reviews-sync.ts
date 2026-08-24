@@ -33,7 +33,13 @@ type SyncStep = GetStepTools<typeof inngest>
 export interface HostawayReviewSyncParams {
   step:   SyncStep
   logger: SyncLogger
-  token:  string
+  /**
+   * Acquires a CURRENT token. A getter, not a token — see the "credentials are
+   * not step state" note in lib/integrations/providers/hospitable-token.ts.
+   * Resolving it once would let Inngest memoize it into step state and replay
+   * it on every retry, so a token invalidated mid-run could never be recovered.
+   */
+  getToken: () => Promise<string>
   orgId:  string
   userId: string
   /** Hostaway listing id (as a string) → FieldStay properties.id. */
@@ -49,12 +55,12 @@ export interface HostawayReviewSyncParams {
 export async function syncHostawayReviews(
   params: HostawayReviewSyncParams,
 ): Promise<{ reviewCount: number }> {
-  const { step, logger, token, orgId, userId, propertyIdMap, historyMonths, system, stepPrefix } = params
+  const { step, logger, getToken, orgId, userId, propertyIdMap, historyMonths, system, stepPrefix } = params
 
   const reviewCount = await step.run(`${stepPrefix}-sync-reviews`, async () => {
     if (!Object.keys(propertyIdMap).length) return 0
 
-    const raw = await hostawayFetchReviews(token, hostawayHistoryCutoff(historyMonths))
+    const raw = await hostawayFetchReviews(await getToken(), hostawayHistoryCutoff(historyMonths))
     logger.info(`[Hostaway:${userId}] Fetched ${raw.length} reviews`)
 
     // Most of what comes back is dropped here, and that is the normal case:

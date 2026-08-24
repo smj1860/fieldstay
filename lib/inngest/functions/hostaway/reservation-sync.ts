@@ -54,8 +54,13 @@ export type HostawayFetchMode =
 export interface HostawayReservationSyncParams {
   step:   SyncStep
   logger: SyncLogger
-  /** Hostaway Bearer token for this connection. */
-  token:  string
+  /**
+   * Acquires a CURRENT token. A getter, not a token — see the "credentials are
+   * not step state" note in lib/integrations/providers/hospitable-token.ts.
+   * Resolving it once would let Inngest memoize it into step state and replay
+   * it on every retry, so a token invalidated mid-run could never be recovered.
+   */
+  getToken: () => Promise<string>
   orgId:  string
   /** Only labels log lines, matching the existing `[Hostaway:<id>]` prefix. */
   userId: string
@@ -95,7 +100,7 @@ export function hostawayHistoryCutoff(historyMonths: number): string {
 export async function syncHostawayReservations(
   params: HostawayReservationSyncParams,
 ): Promise<ReservationPipelineResult> {
-  const { step, logger, token, orgId, userId, propertyIdMap, fetchMode, system, revenueMode } = params
+  const { step, logger, getToken, orgId, userId, propertyIdMap, fetchMode, system, revenueMode } = params
 
   // ── Fetch — the only genuinely Hostaway-specific part ────────────────────
   // One step, one paginated range. hostawayFetchReservations THROWS rather
@@ -114,19 +119,19 @@ export async function syncHostawayReservations(
       // has no id-list parameter; the window is already bounded to recent
       // history, which is where a webhook's subject always lives.
       const wanted = new Set(fetchMode.reservationIds)
-      const recent = await hostawayFetchReservations(token, {
+      const recent = await hostawayFetchReservations(await getToken(), {
         kind: 'arrivalFrom', date: hostawayHistoryCutoff(1),
       })
       return recent.filter((r) => wanted.has(String(r.id)))
     }
 
     if (fetchMode.kind === 'activitySince') {
-      return hostawayFetchReservations(token, {
+      return hostawayFetchReservations(await getToken(), {
         kind: 'activitySince', date: fetchMode.since,
       })
     }
 
-    return hostawayFetchReservations(token, {
+    return hostawayFetchReservations(await getToken(), {
       kind: 'arrivalFrom', date: hostawayHistoryCutoff(fetchMode.historyMonths),
     })
   })

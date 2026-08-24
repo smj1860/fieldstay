@@ -98,15 +98,22 @@ export const hostawayInitialSync = inngest.createFunction(
       //
       // NonRetriableError on absence: a missing token cannot be fixed by
       // retrying, only by reconnecting.
-      const token = await step.run('read-token', async () => {
+      // A GETTER, invoked inside each step that spends it — see the
+      // "credentials are not step state" note in
+      // lib/integrations/providers/hospitable-token.ts. Hostaway's key cannot
+      // be refreshed, so it does not rotate under a run the way Hospitable's
+      // does; it follows the same shape anyway because a reconnect DOES replace
+      // it, and because a credential has no business sitting in Inngest's
+      // persisted step output.
+      const getToken = async () => {
         const t = await readIntegrationToken(user_id, PROVIDER)
         if (!t) throw new NonRetriableError('No Hostaway token found — reconnect required')
         return t
-      })
+      }
 
       // ── 2. Properties ───────────────────────────────────────────────────────
       const propertyIdMap = await step.run('fetch-and-upsert-properties', async () => {
-        const listings = await hostawayFetchListings(token)
+        const listings = await hostawayFetchListings(await getToken())
         logger.info(`[Hostaway:${user_id}] Fetched ${listings.length} listings`)
 
         if (!listings.length) return {}
@@ -127,7 +134,7 @@ export const hostawayInitialSync = inngest.createFunction(
       const { reservationCount } = await syncHostawayReservations({
         step,
         logger,
-        token,
+        getToken,
         orgId:         org_id,
         userId:        user_id,
         propertyIdMap: propertyIdMap as Record<string, string>,
@@ -150,7 +157,7 @@ export const hostawayInitialSync = inngest.createFunction(
         ;({ reviewCount } = await syncHostawayReviews({
           step,
           logger,
-          token,
+          getToken,
           orgId:         org_id,
           userId:        user_id,
           propertyIdMap: propertyIdMap as Record<string, string>,

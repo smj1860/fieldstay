@@ -64,11 +64,16 @@ export const hostexWebhookHandler = inngest.createFunction(
     const { user_id, org_id, event: hostexEvent, reservation_code, property_id } = event.data
 
     try {
-      const token = await step.run('read-token', async () => {
+      // A GETTER, invoked inside each step that spends it — see the
+      // "credentials are not step state" note in
+      // lib/integrations/providers/hospitable-token.ts. Hostex rotates its
+      // refresh token on every use, so a memoized access token is exactly the
+      // credential a concurrent renewal can invalidate underneath this run.
+      const getToken = async () => {
         const t = await getValidHostexToken(user_id)
         if (!t) throw new NonRetriableError('No Hostex token found — reconnect required')
         return t
-      })
+      }
 
       const propertyIdMap = await step.run('fetch-property-map', () =>
         fetchProviderPropertyIdMap(org_id, PROVIDER, SYSTEM))
@@ -100,7 +105,7 @@ export const hostexWebhookHandler = inngest.createFunction(
         const { reviewCount } = await syncHostexReviews({
           step,
           logger,
-          token,
+          getToken,
           orgId:         org_id,
           userId:        user_id,
           propertyIdMap: scopedMap,
@@ -116,7 +121,7 @@ export const hostexWebhookHandler = inngest.createFunction(
       const { reservationCount, newTurnoverIds } = await syncHostexReservations({
         step,
         logger,
-        token,
+        getToken,
         orgId:         org_id,
         userId:        user_id,
         propertyIdMap: scopedMap,

@@ -43,12 +43,14 @@ export const hospTeammateSyncHandler = inngest.createFunction(
   async ({ event, step, logger }) => {
     const { user_id, org_id } = event.data
 
-    const token = await step.run('get-valid-token', async () => {
-      return getValidHospitableToken(user_id)
-    })
-
+    // The token is acquired INSIDE the step that spends it. See the
+    // "credentials are not step state" note in lib/integrations/providers/
+    // hospitable-token.ts — a token hoisted into its own step.run is memoized
+    // by Inngest and replayed unchanged on every retry, so a token invalidated
+    // mid-run can never be recovered from. That is this exact function's
+    // 2026-08-24 09:01 incident.
     const teammates = await step.run('fetch-teammates', async () => {
-      return hospFetchTeammates(token)
+      return hospFetchTeammates(await getValidHospitableToken(user_id))
     })
 
     const upsertCount = await step.run('upsert-teammates', async () => {

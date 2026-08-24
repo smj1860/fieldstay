@@ -5,10 +5,10 @@ vi.mock('@/lib/supabase/server', () => ({
   createServiceClient: vi.fn(),
 }))
 vi.mock('@/lib/integrations/providers/hospitable-token', () => ({
-  refreshHospitableToken: vi.fn(),
+  refreshHospitableTokenLocked: vi.fn(),
 }))
 vi.mock('@/lib/integrations/providers/kroger-token', () => ({
-  refreshKrogerToken: vi.fn(),
+  refreshKrogerTokenSingleFlight: vi.fn(),
 }))
 vi.mock('@/lib/resend/client', () => ({
   resend: { emails: { send: vi.fn(async () => ({ data: { id: 'email_1' }, error: null })) } },
@@ -23,8 +23,8 @@ vi.mock('@/lib/inngest/helpers', () => ({
 
 import { integrationTokenRefreshHandler } from '@/lib/inngest/functions/cron/integration-token-refresh-handler'
 import { createServiceClient } from '@/lib/supabase/server'
-import { refreshHospitableToken } from '@/lib/integrations/providers/hospitable-token'
-import { refreshKrogerToken } from '@/lib/integrations/providers/kroger-token'
+import { refreshHospitableTokenLocked } from '@/lib/integrations/providers/hospitable-token'
+import { refreshKrogerTokenSingleFlight } from '@/lib/integrations/providers/kroger-token'
 import { resend } from '@/lib/resend/client'
 import { renderIntegrationErrorEmail } from '@/lib/resend/emails/integration-error'
 import { getPmEmails } from '@/lib/inngest/helpers'
@@ -103,7 +103,7 @@ describe('integrationTokenRefreshHandler', () => {
   })
 
   it('refreshes a Hospitable connection successfully and makes no DB writes', async () => {
-    ;(refreshHospitableToken as ReturnType<typeof vi.fn>).mockResolvedValue('new_access_token')
+    ;(refreshHospitableTokenLocked as ReturnType<typeof vi.fn>).mockResolvedValue('new_access_token')
     const supabase = makeSupabase({})
     ;(createServiceClient as ReturnType<typeof vi.fn>).mockReturnValue(supabase)
 
@@ -113,14 +113,14 @@ describe('integrationTokenRefreshHandler', () => {
       logger: makeLogger(),
     })
 
-    expect(refreshHospitableToken).toHaveBeenCalledWith('user_1', 'ext_1')
-    expect(refreshKrogerToken).not.toHaveBeenCalled()
+    expect(refreshHospitableTokenLocked).toHaveBeenCalledWith('user_1', 'ext_1')
+    expect(refreshKrogerTokenSingleFlight).not.toHaveBeenCalled()
     expect(result).toEqual({ user_id: 'user_1', provider_id: 'hospitable', refreshed: true })
     expect(supabase.calls).toHaveLength(0)
   })
 
   it('refreshes a Kroger connection successfully', async () => {
-    ;(refreshKrogerToken as ReturnType<typeof vi.fn>).mockResolvedValue('new_kroger_token')
+    ;(refreshKrogerTokenSingleFlight as ReturnType<typeof vi.fn>).mockResolvedValue('new_kroger_token')
     const supabase = makeSupabase({})
     ;(createServiceClient as ReturnType<typeof vi.fn>).mockReturnValue(supabase)
 
@@ -130,12 +130,12 @@ describe('integrationTokenRefreshHandler', () => {
       logger: makeLogger(),
     })
 
-    expect(refreshKrogerToken).toHaveBeenCalledWith('user_1')
+    expect(refreshKrogerTokenSingleFlight).toHaveBeenCalledWith('user_1')
     expect(result).toEqual({ user_id: 'user_1', provider_id: 'kroger', refreshed: true })
   })
 
   it('re-throws a non-terminal (network/5xx) failure for Inngest to retry, without touching the DB', async () => {
-    ;(refreshHospitableToken as ReturnType<typeof vi.fn>).mockRejectedValue(new Error('network timeout'))
+    ;(refreshHospitableTokenLocked as ReturnType<typeof vi.fn>).mockRejectedValue(new Error('network timeout'))
     const supabase = makeSupabase({})
     ;(createServiceClient as ReturnType<typeof vi.fn>).mockReturnValue(supabase)
 
@@ -151,7 +151,7 @@ describe('integrationTokenRefreshHandler', () => {
   })
 
   it('marks the connection revoked and sends one reconnect email on a terminal (401) failure', async () => {
-    ;(refreshKrogerToken as ReturnType<typeof vi.fn>).mockRejectedValue(new Error('Kroger 401 unauthorized'))
+    ;(refreshKrogerTokenSingleFlight as ReturnType<typeof vi.fn>).mockRejectedValue(new Error('Kroger 401 unauthorized'))
     const supabase = makeSupabase({
       integration_connections: [
         { data: { id: 'conn_1' }, error: null },  // claim won
@@ -190,7 +190,7 @@ describe('integrationTokenRefreshHandler', () => {
   })
 
   it('does not re-send the reconnect email when one was already sent for this connection (dedup)', async () => {
-    ;(refreshHospitableToken as ReturnType<typeof vi.fn>).mockRejectedValue(new NonRetriableError('bad refresh token'))
+    ;(refreshHospitableTokenLocked as ReturnType<typeof vi.fn>).mockRejectedValue(new NonRetriableError('bad refresh token'))
     // The claim matches no row, because reconnect_email_sent_at is already
     // set. This is the case that used to repeat DAILY: the cron re-fires for
     // this connection every day, the refresh fails every day, and the old code
@@ -218,7 +218,7 @@ describe('integrationTokenRefreshHandler', () => {
   })
 
   it('skips the email (but still marks the connection revoked) when there is no org_id to resolve a PM from', async () => {
-    ;(refreshKrogerToken as ReturnType<typeof vi.fn>).mockRejectedValue(new Error('400 bad request'))
+    ;(refreshKrogerTokenSingleFlight as ReturnType<typeof vi.fn>).mockRejectedValue(new Error('400 bad request'))
     const supabase = makeSupabase({
       integration_connections: [
         { data: { id: 'conn_1' }, error: null },  // claim won
@@ -241,7 +241,7 @@ describe('integrationTokenRefreshHandler', () => {
   })
 
   it('skips the email when no PM email can be resolved for the org', async () => {
-    ;(refreshHospitableToken as ReturnType<typeof vi.fn>).mockRejectedValue(new Error('401 invalid_grant'))
+    ;(refreshHospitableTokenLocked as ReturnType<typeof vi.fn>).mockRejectedValue(new Error('401 invalid_grant'))
     ;(getPmEmails as ReturnType<typeof vi.fn>).mockResolvedValueOnce([])
     const supabase = makeSupabase({
       integration_connections: [
@@ -275,7 +275,7 @@ describe('integrationTokenRefreshHandler', () => {
     // dead-letter handler. Note the error is a plain Error, NOT the
     // NonRetriableError the terminal path ends with — that distinction is the
     // retry.
-    ;(refreshHospitableToken as ReturnType<typeof vi.fn>).mockRejectedValue(new Error('401 invalid_grant'))
+    ;(refreshHospitableTokenLocked as ReturnType<typeof vi.fn>).mockRejectedValue(new Error('401 invalid_grant'))
     ;(resend.emails.send as ReturnType<typeof vi.fn>).mockResolvedValueOnce({ data: null, error: { message: 'send failed' } })
     const supabase = makeSupabase({
       integration_connections: [
@@ -311,8 +311,8 @@ describe('integrationTokenRefreshHandler', () => {
       }),
     ).rejects.toThrow(NonRetriableError)
 
-    expect(refreshHospitableToken).not.toHaveBeenCalled()
-    expect(refreshKrogerToken).not.toHaveBeenCalled()
+    expect(refreshHospitableTokenLocked).not.toHaveBeenCalled()
+    expect(refreshKrogerTokenSingleFlight).not.toHaveBeenCalled()
     const updates = supabase.calls.filter((c) => c.table === 'integration_connections' && c.method === 'update')
     expect(updates[0].args[0]).toMatchObject({ status: 'revoked' })
   })

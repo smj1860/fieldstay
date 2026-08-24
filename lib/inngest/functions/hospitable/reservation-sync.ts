@@ -56,8 +56,14 @@ type SyncStep = GetStepTools<typeof inngest>
 export interface ReservationSyncParams {
   step:   SyncStep
   logger: SyncLogger
-  /** Hospitable API token for this connection. */
-  token:  string
+  /**
+   * Acquires a CURRENT Hospitable token. A getter, not a token — see the
+   * "credentials are not step state" note in hospitable-token.ts. This
+   * pipeline fetches one Inngest step per date window, so a single token
+   * value would be memoized across the whole sweep and every retry of a late
+   * window would replay a credential minted before the sweep began.
+   */
+  getToken: () => Promise<string>
   orgId:  string
   /** Only used to label log lines, matching the existing `[Hospitable:<id>]` prefix. */
   userId: string
@@ -83,7 +89,7 @@ export async function syncHospitableReservations(
   params: ReservationSyncParams,
 ): Promise<ReservationSyncResult> {
   const {
-    step, logger, token, orgId, userId,
+    step, logger, getToken, orgId, userId,
     propertyIdMap, lookaheadMonths, system, revenueMode,
   } = params
 
@@ -101,7 +107,7 @@ export async function syncHospitableReservations(
   for (const startDate of windows) {
     const windowReservations = await step.run(
       `fetch-reservations-window-${startDate}`,
-      () => fetchReservationsWindow(token, startDate, hospPropertyIds),
+      async () => fetchReservationsWindow(await getToken(), startDate, hospPropertyIds),
     )
     for (const r of windowReservations) reservationsById.set(r.id, r)
   }
