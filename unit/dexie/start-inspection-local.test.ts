@@ -41,6 +41,7 @@ const item = (over: Partial<InspectionFormItem> = {}): InspectionFormItem => ({
   parent_item_id: null, show_when: null, repeat_source_item_id: null,
   repeat_per_asset: false, per_unit: false,
   na_reason_template: null, na_asset_type: null, asset_type: null,
+    asks_property_fact: null, shown_when_property_fact: null,
   concern_key: null, remediation: 'work_order', default_actions: ['repair'],
   wo_category: null, wo_priority: null, po_catalog_item_id: null, po_default_qty: null,
   created_at: '2026-01-01T00:00:00Z',

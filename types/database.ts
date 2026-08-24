@@ -232,6 +232,14 @@ export interface Property {
   max_pets:                number | null
   events_allowed:          boolean | null
   min_renter_age:          number | null
+  /**
+   * Monitored alarm / security system. NULL = NEVER ASKED, which is the state
+   * the Safety form's capture item renders on — a NOT NULL DEFAULT false would
+   * have answered the question for every existing property and the item would
+   * never have appeared. Editable by the PM, which is what lets an alarm
+   * installed after the first walk re-enable the annual condition check.
+   */
+  has_security_system:     boolean | null
   external_id:             string | null
   external_source:         string | null
   /**
@@ -2181,6 +2189,15 @@ export interface InspectionFormSection {
   shown_when_asset:          AssetType | null
 }
 
+/**
+ * A property-level fact an inspection item can be gated on.
+ *
+ * A closed union rather than a free string, matching the DB CHECK: there is one
+ * fact today, and a gate that can name anything is a gate nobody can audit on a
+ * form whose entire value is being auditable.
+ */
+export type PropertyFactKey = 'has_security_system'
+
 export interface InspectionFormItem {
   id:         string
   section_id: string
@@ -2227,6 +2244,21 @@ export interface InspectionFormItem {
    * filter and a fouled condenser are one asset and two jobs.
    */
   concern_key: string | null
+
+  /**
+   * ASK-ONCE CAPTURE: renders only while this property fact is NULL, and its
+   * answer sets the fact. Mutually exclusive with the gate below (DB CHECK) —
+   * an item shown only when a fact is unknown AND only when it is true can
+   * never render at all.
+   */
+  asks_property_fact:       PropertyFactKey | null
+  /**
+   * RECURRING CONDITION: renders only where the fact is TRUE. Deliberately does
+   * not drop off — a monitoring contract lapses far more often than a panel is
+   * removed, so the condition has to be re-asked even though the presence
+   * question does not.
+   */
+  shown_when_property_fact: PropertyFactKey | null
 
   /**
    * What KIND of record a failure here can produce at all. 'notify' and 'none'

@@ -29,7 +29,8 @@ export const INSPECTION_FORMS: FormDefinition[] = [SAFETY_FORM, INDOOR_FORM, OUT
  *            where the property actually has one
  */
 export const EXPECTED_ROOT_ITEM_COUNTS: Record<string, number> = {
-  safety:  42,   // 40 inspected items + the 2-item sign-off
+  safety:  44,   // 42 inspected items + the 2-item sign-off
+                 // (40 + the security-system capture/condition pair)
   indoor:  52,
   outdoor: 55,   // 43 numbered + 3 sign-off + 9 well
 }
@@ -203,6 +204,10 @@ export const CONCERN_KEY_MAP: Record<string, ConcernEntry> = {
   grill_safe: {
     items: ['outdoor.amenities.grill'],
     why:   'The grill itself — grease, gas line, igniter, tank. NOT merged with firepit_clearance: Safety asks one combined clearance question about grills and fire pits, and an item can only carry one key, so clearance took it. Cleaning a grease tray is not repositioning a fire pit.',
+  },
+  security_system: {
+    items: ['safety.exterior_amenity.security_system_service'],
+    why:   'The monitored alarm — arming, sensors, and whether the monitoring contract is actually still being paid for. One item today because only Safety asks it; keyed anyway so §6 can answer "has this lapsed three years running", which is the question an insurer cares about. Distinct from exterior_lock: a deadbolt and a monitoring contract are not one job, and the same locksmith does not fix both.',
   },
   entry_lock_operational: {
     items: ['indoor.entry_interior.entry_locks'],

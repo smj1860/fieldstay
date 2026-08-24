@@ -1,7 +1,7 @@
 // lib/inspections/forms/safety.ts
 //
 // Property Safety & Risk Mitigation Inspection — docs/INSPECTIONS_SPEC.md §12.1.
-// 42 top-level items across 7 sections. Runs 1× or 2× a year.
+// 44 top-level items across 7 sections. Runs 1× or 2× a year.
 //
 // This is the form §1 calls insurance evidence, and the one whose findings an
 // insurer is most likely to read. Two consequences visible in the data below:
@@ -402,6 +402,49 @@ export const SAFETY_FORM: FormDefinition = {
           wo_category: 'general', wo_priority: 'high',
           asset_type: 'smart_lock',
           per_unit: true, concern_key: 'exterior_lock',
+        },
+        {
+          // ASKED ONCE, THEN IT DROPS OFF. `asks_property_fact` renders this
+          // only while properties.has_security_system is NULL, and completion
+          // writes the answer — so every property is asked on its first Safety
+          // walk and none is asked twice.
+          //
+          // Record-only, like high_risk_equipment_present: "No" is not a
+          // failure. Most short-term rentals have no alarm, and an item that
+          // treated their absence as a fault would fill the owner portal with
+          // findings nobody intends to act on and make the pass count a lie.
+          //
+          // NOT registered in INVERTED_POLARITY_ITEMS, and that is not an
+          // oversight: that set exempts prompts the PROMPT-WORDING regex
+          // catches (an is/does/any lead plus a problem word), and this prompt
+          // does not trip it. Registering it there would imply the check had
+          // something to say about it. The polarity concern here is about the
+          // ANSWER — Pass means present — and is handled where answers are
+          // read, not where prompts are worded.
+          key:    'safety.exterior_amenity.security_system_present',
+          prompt: 'Monitored alarm or security system present at this property',
+          remediation: 'none', default_actions: [],
+          asks_property_fact: 'has_security_system',
+        },
+        {
+          // AND THIS ONE DOES NOT DROP OFF, which is the half worth arguing.
+          //
+          // Presence is a fact about the building and changes rarely. A
+          // monitoring CONTRACT lapses constantly — an unpaid renewal leaves
+          // the panel on the wall, the keypad lighting up, and nobody being
+          // called. That is the failure this item exists to catch, and catching
+          // it needs asking every year at the properties that have one.
+          //
+          // So the capture question is annual-once and the condition question
+          // is annual-always. A form that dropped both would leave every year
+          // after the first silent about the alarm, and §1's argument is that
+          // the multi-year record IS the artifact.
+          key:    'safety.exterior_amenity.security_system_service',
+          prompt: 'Alarm arms and disarms, sensors respond, monitoring contract current',
+          remediation: 'work_order', default_actions: ['service'],
+          wo_category: 'general',
+          shown_when_property_fact: 'has_security_system',
+          concern_key: 'security_system',
         },
       ],
     },
