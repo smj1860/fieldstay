@@ -76,6 +76,17 @@ interface FailedItem {
   photo_path:      string | null
   asset_id:        string | null
   actions:         string[]
+  /**
+   * §5's independent cleaning flag — NOT a fourth remediation type. Rolls up
+   * into ONE cleaning work order for the whole walk (`createCleaningWorkOrder`)
+   * rather than dispatching per finding.
+   *
+   * Read from the `result = 'fail'` set below, which is complete because the
+   * checkbox lives inside `FailDetail` in item-row.tsx and so cannot be ticked
+   * on a passing item. If cleaning ever becomes answerable on a pass, this
+   * loader is the second place that has to change.
+   */
+  needs_cleaning:  boolean
   /** §6's repeat answer. Null means the inspector was never asked. */
   repeat_answer:   'same' | 'new' | null
   /** The predecessor they were shown. Null if it has since been deleted. */
@@ -125,7 +136,7 @@ export const inspectionCompleted = inngest.createFunction(
 
       const { data: items, error: itemsError } = await supabase
         .from('inspection_items')
-        .select('id, form_item_id, prompt_snapshot, note, photo_path, asset_id, actions, repeat_answer, repeat_of_work_order_id')
+        .select('id, form_item_id, prompt_snapshot, note, photo_path, asset_id, actions, needs_cleaning, repeat_answer, repeat_of_work_order_id')
         .eq('org_id', org_id)
         .eq('inspection_id', inspection_id)
         .eq('result', 'fail')
@@ -179,6 +190,9 @@ export const inspectionCompleted = inngest.createFunction(
     const workOrders = await step.run('create-work-orders', () =>
       createWorkOrders(org_id, propertyId, inspection_id, failed))
 
+    const cleaning = await step.run('create-cleaning-work-order', () =>
+      createCleaningWorkOrder(org_id, propertyId, inspection_id, failed))
+
     const purchaseOrders = await step.run('create-purchase-order', () =>
       createPurchaseOrder(org_id, propertyId, inspection_id, failed))
 
@@ -191,6 +205,8 @@ export const inspectionCompleted = inngest.createFunction(
       // Recurrences noted on a job that was already open rather than opened
       // again — the number §6 exists to make non-zero.
       attachedToOpen: workOrders.attached,
+      cleaningWorkOrders: cleaning.created,
+      cleaningCrewSuggested: cleaning.suggested,
       purchaseOrders,
       notifications,
     }
@@ -578,6 +594,209 @@ function buildDescription(
     const ref = prior.wo_number ? `${prior.wo_number} — ` : ''
     lines.push('', `⚠️ A work order for this item is already open since ${since}: ${ref}${prior.title}`)
   }
+
+  return lines.join('\n')
+}
+
+// ── Cleaning ────────────────────────────────────────────────────────────────
+
+/** How many recent turnovers to walk back through looking for a cleaner. */
+const RECENT_TURNOVER_LOOKBACK = 10
+
+/** How many findings the work order's description enumerates before eliding. */
+const MAX_LISTED_CLEANING_ITEMS = 25
+
+/**
+ * ONE cleaning work order for the whole inspection.
+ *
+ * §5: cleaning is deliberately NOT a fourth remediation type. A stained rug, a
+ * dirty oven and cobwebs found on one walk are ONE visit, so three work orders
+ * would be three dispatches for a job somebody does in a single trip. The flag
+ * is independent of `remediation`, and the roll-up happens here.
+ *
+ * WHY A WORK ORDER AND NOT A TURNOVER
+ *
+ * A turnover is generated from a BOOKING — it exists because a guest checked
+ * out. Cleaning found on an inspection has no booking behind it, so routing it
+ * through the turnover generator would mean inventing a turnover with no
+ * checkout to hang it on, and the inspection that caused it would appear
+ * nowhere in the record. A work order carries `source_inspection_id`, which is
+ * the paper trail: from this walk, this job.
+ *
+ * CREW, NOT VENDOR. Nothing here sends
+ * `work-order/vendor-suggestion.requested`, so `auto-assign-vendor` never sees
+ * this row — which is what keeps the mutually-exclusive suggestion columns
+ * (`work_orders_one_suggestion_kind`) satisfiable.
+ */
+async function createCleaningWorkOrder(
+  orgId:        string,
+  propertyId:   string,
+  inspectionId: string,
+  failed:       FailedItem[],
+): Promise<{ created: number; suggested: number }> {
+  const items = failed.filter((f) => f.needs_cleaning)
+  if (items.length === 0) return { created: 0, suggested: 0 }
+
+  const supabase = createServiceClient({ system: 'inngest:inspection-completed' })
+
+  const cleaners = await findLastCleanersAtProperty(supabase, orgId, propertyId)
+
+  const { error } = await supabase.from('work_orders').insert({
+    org_id:      orgId,
+    property_id: propertyId,
+    title:       `Cleaning — ${items.length} ${items.length === 1 ? 'item' : 'items'} from an inspection`,
+    description: buildCleaningDescription(items),
+    category:    'cleaning' as const,
+    priority:    'medium' as const,
+    status:      'pending' as const,
+    source:      'inspection' as const,
+    source_inspection_id: inspectionId,
+    // Suggested, never assigned. A PM accepts or overrides on the maintenance
+    // board — the same posture as every vendor suggestion in this codebase,
+    // and the right one while this is the first inspection-driven dispatch.
+    suggested_crew_member_ids: cleaners.length ? cleaners.map((c) => c.id) : null,
+    suggestion_reasoning:      cleaners.length ? cleanerReasoning(cleaners) : null,
+    suggestion_status:         cleaners.length ? 'pending' : null,
+  })
+
+  // 23505 = uq_work_orders_source_inspection. An earlier pass of this step
+  // already created it. Leave it alone rather than trying to reconcile: the
+  // findings it covers have not changed, and a second cleaning visit is exactly
+  // what the unique index exists to prevent.
+  if (error?.code === '23505') return { created: 0, suggested: 0 }
+  if (error) {
+    throw new Error(`cleaning work order insert failed for inspection ${inspectionId}: ${error.message}`)
+  }
+
+  // No `assignment_outcomes` row. That table is turnover-keyed (its PK pairs a
+  // turnover with a crew member) and this suggestion is not a scoring output —
+  // there is no scorer to train. See findLastCleanersAtProperty.
+  return { created: 1, suggested: cleaners.length }
+}
+
+interface Cleaner {
+  id:   string
+  name: string
+  /** ISO date of the turnover they cleaned. */
+  when: string
+}
+
+/**
+ * The crew who last cleaned this property.
+ *
+ * NOT A SCORER, AND DELIBERATELY SO.
+ *
+ * `auto-assign-turnover` ranks crew on proximity, reliability, workload and
+ * availability, because it is choosing who SHOULD clean a property next. This
+ * is a different question with a causal answer: the property was cleaned, an
+ * inspection then found it still needs cleaning, so the person to send is the
+ * one who was already there. Ranking a fresh candidate pool would suggest
+ * somebody else finish a job the last cleaner left incomplete — and would hide
+ * the fact that it was left incomplete at all.
+ *
+ * It also means no availability check. Suggesting a crew member who is off that
+ * week is a suggestion a PM overrides in one click; suppressing the suggestion
+ * would lose the only signal this carries.
+ *
+ * WALKS BACK, because the most recent completed turnover may have no assignment
+ * at all (completed by a PM, imported from a channel, crew removed afterwards).
+ * Stopping at the first turnover would silently produce no suggestion in a case
+ * where a perfectly good answer sits one row further down.
+ *
+ * INACTIVE CREW ARE EXCLUDED — a suggestion the PM cannot act on is worse than
+ * none — but an inactive last cleaner does NOT fall through to the turnover
+ * before: that would name the wrong person. Their turnover is where the walk
+ * stops.
+ *
+ * Three bounded queries, never one per row. Failures are reported and swallowed
+ * throughout: the cleaning work order is the deliverable and a missing
+ * suggestion is a degraded one, not a lost one.
+ */
+async function findLastCleanersAtProperty(
+  supabase:   ReturnType<typeof createServiceClient>,
+  orgId:      string,
+  propertyId: string,
+): Promise<Cleaner[]> {
+  const { data: turnovers, error } = await supabase
+    .from('turnovers')
+    .select('id, completed_at')
+    .eq('org_id', orgId)
+    .eq('property_id', propertyId)
+    .eq('status', 'completed')
+    .not('completed_at', 'is', null)
+    .order('completed_at', { ascending: false })
+    .limit(RECENT_TURNOVER_LOOKBACK)
+
+  if (error) {
+    console.warn('[inspection-completed] last-cleaner turnover lookup failed:', error.message)
+    return []
+  }
+  if (!turnovers?.length) return []
+
+  const { data: assignments, error: assignError } = await supabase
+    .from('turnover_assignments')
+    .select('turnover_id, crew_member_id')
+    .eq('org_id', orgId)
+    .in('turnover_id', turnovers.map((t) => t.id))
+    // One row per (turnover, crew member); the lookback bounds the turnovers
+    // and a turnover never carries an unbounded crew.
+    .limit(RECENT_TURNOVER_LOOKBACK * 20)
+
+  if (assignError) {
+    console.warn('[inspection-completed] last-cleaner assignment lookup failed:', assignError.message)
+    return []
+  }
+
+  const crewByTurnover = new Map<string, string[]>()
+  for (const a of assignments ?? []) {
+    if (!a.crew_member_id) continue
+    const list = crewByTurnover.get(a.turnover_id) ?? []
+    list.push(a.crew_member_id)
+    crewByTurnover.set(a.turnover_id, list)
+  }
+
+  // Newest first — the order the query already returned them in.
+  const mostRecent = turnovers.find((t) => (crewByTurnover.get(t.id)?.length ?? 0) > 0)
+  if (!mostRecent) return []
+
+  const crewIds = [...new Set(crewByTurnover.get(mostRecent.id)!)]
+
+  const { data: crew, error: crewError } = await supabase
+    .from('crew_members')
+    .select('id, name, is_active')
+    .eq('org_id', orgId)
+    .in('id', crewIds)
+    .limit(crewIds.length)
+
+  if (crewError) {
+    console.warn('[inspection-completed] last-cleaner crew lookup failed:', crewError.message)
+    return []
+  }
+
+  const when = (mostRecent.completed_at ?? '').slice(0, 10)
+  return (crew ?? [])
+    .filter((c) => c.is_active)
+    .map((c) => ({ id: c.id, name: c.name, when }))
+}
+
+function cleanerReasoning(cleaners: Cleaner[]): string {
+  const names = cleaners.map((c) => c.name).join(' & ')
+  const when  = cleaners[0]!.when
+  return when
+    ? `${names} — last cleaned this property on ${when}`
+    : `${names} — last cleaned this property`
+}
+
+function buildCleaningDescription(items: FailedItem[]): string {
+  const lines = ['Flagged as needing cleaning on an inspection:', '']
+
+  for (const item of items.slice(0, MAX_LISTED_CLEANING_ITEMS)) {
+    const detail = item.note?.trim()
+    lines.push(detail ? `• ${item.prompt_snapshot} — ${detail}` : `• ${item.prompt_snapshot}`)
+  }
+
+  const elided = items.length - MAX_LISTED_CLEANING_ITEMS
+  if (elided > 0) lines.push(`• …and ${elided} more`)
 
   return lines.join('\n')
 }

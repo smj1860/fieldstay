@@ -15,6 +15,7 @@ import {
   createMaintenanceSchedule, updateMaintenanceSchedule, deleteMaintenanceSchedule,
   bulkAssignVendor, bulkUpdateWorkOrderStatus, fetchArchivedWorkOrders,
   acceptVendorSuggestion, dismissVendorSuggestion,
+  acceptCrewSuggestion, dismissCrewSuggestion,
 } from './actions'
 import type { WoStatus, PriorityLevel, VendorSpecialty, ScheduleCreates, ScheduleType, ScheduleFrequency } from '@/types/database'
 import { WorkOrderDetail, type WorkOrderDetailData } from '@/components/work-orders/work-order-detail'
@@ -58,6 +59,10 @@ interface WorkOrderRow {
   completion_verified_by: string | null
   vendor_dispatch_email: string | null
   suggested_vendor_ids: string[] | null
+  // Mutually exclusive with the vendor array at the DB level
+  // (work_orders_one_suggestion_kind) — one suggestion_status cannot describe
+  // two live suggestions. Set by the inspection cleaning roll-up.
+  suggested_crew_member_ids: string[] | null
   suggestion_reasoning: string | null
   // turnovers/work_orders store this as plain TEXT, not an enum — the union
   // was an app-side convention the column never enforced. The `=== 'pending'`
@@ -291,15 +296,52 @@ const VIEW_MODE_TABS = [
 
 // ── Work Order Card ───────────────────────────────────────────────────────────
 
+/**
+ * The suggestion on a work order, whichever kind it is.
+ *
+ * A work order carries a VENDOR suggestion or a CREW one, never both — the DB
+ * enforces it (`work_orders_one_suggestion_kind`) because the two share a single
+ * `suggestion_status` column, and one status cannot describe two live
+ * suggestions. So the banner is one banner, and this resolves which pair of
+ * actions it drives. Crew is checked first only because it is the narrower case;
+ * the exclusion means the order cannot matter.
+ *
+ * Returns null when nothing is suggested, or when the suggested id resolves to
+ * nobody the PM can see — a banner naming an unknown party is worse than none.
+ */
+function resolveSuggestion(
+  wo:      WorkOrderRow,
+  vendors: VendorOptionWithCoords[],
+  crew:    CrewMemberOption[],
+): { name: string; accept: (id: string) => Promise<{ error?: string }>; dismiss: (id: string) => Promise<{ error?: string }> } | null {
+  const crewName = (wo.suggested_crew_member_ids ?? [])
+    .map((id) => crew.find((c) => c.id === id)?.name)
+    .filter(Boolean)[0] as string | undefined
+  if (crewName) {
+    return { name: crewName, accept: acceptCrewSuggestion, dismiss: dismissCrewSuggestion }
+  }
+
+  const vendorName = (wo.suggested_vendor_ids ?? [])
+    .map((id) => vendors.find((v) => v.id === id)?.name)
+    .filter(Boolean)[0] as string | undefined
+  if (vendorName) {
+    return { name: vendorName, accept: acceptVendorSuggestion, dismiss: dismissVendorSuggestion }
+  }
+
+  return null
+}
+
 function WorkOrderCard({
   wo,
   vendors,
+  crewMembers,
   onClick,
   isSelected,
   onToggle,
 }: {
   wo: WorkOrderRow
   vendors: VendorOptionWithCoords[]
+  crewMembers: CrewMemberOption[]
   onClick: () => void
   isSelected: boolean
   onToggle: () => void
@@ -310,18 +352,18 @@ function WorkOrderCard({
   const [accepting,  startAccept]  = useTransition()
   const [dismissing, startDismiss] = useTransition()
 
-  const suggestedVendorName = (wo.suggested_vendor_ids ?? [])
-    .map((id) => vendors.find((v) => v.id === id)?.name)
-    .filter(Boolean)[0] as string | undefined
+  const suggestion = resolveSuggestion(wo, vendors, crewMembers)
 
   const handleAcceptSuggestion = (e: React.MouseEvent) => {
     e.stopPropagation()
-    startAccept(async () => { await acceptVendorSuggestion(wo.id) })
+    if (!suggestion) return
+    startAccept(async () => { await suggestion.accept(wo.id) })
   }
 
   const handleDismissSuggestion = (e: React.MouseEvent) => {
     e.stopPropagation()
-    startDismiss(async () => { await dismissVendorSuggestion(wo.id) })
+    if (!suggestion) return
+    startDismiss(async () => { await suggestion.dismiss(wo.id) })
   }
 
   return (
@@ -397,7 +439,7 @@ function WorkOrderCard({
           </div>
 
           {/* Auto-suggestion banner */}
-          {wo.suggestion_status === 'pending' && suggestedVendorName && (
+          {wo.suggestion_status === 'pending' && suggestion && (
             <div
               className="mt-2 flex items-center gap-2 flex-wrap px-3 py-2 rounded-lg"
               style={{ background: 'var(--accent-blue-dim)', border: '1px solid var(--accent-blue)' }}
@@ -411,7 +453,7 @@ function WorkOrderCard({
             >
               <span className="text-xs inline-flex items-center gap-1" style={{ color: 'var(--text-secondary)' }}>
                 <Sparkles className="w-3.5 h-3.5 flex-shrink-0" />
-                Suggested: <strong style={{ color: 'var(--text-primary)' }}>{suggestedVendorName}</strong>
+                Suggested: <strong style={{ color: 'var(--text-primary)' }}>{suggestion.name}</strong>
               </span>
               {wo.suggestion_reasoning && (
                 <span className="text-xs hidden sm:inline" style={{ color: 'var(--text-muted)' }}>
@@ -1271,6 +1313,7 @@ export function MaintenanceBoard({
                 key={wo.id}
                 wo={wo}
                 vendors={vendors}
+                crewMembers={crewMembers}
                 onClick={() => setSelectedWO(toWorkOrderDetailData(wo))}
                 isSelected={selectedIds.has(wo.id)}
                 onToggle={() => toggleSelect(wo.id)}

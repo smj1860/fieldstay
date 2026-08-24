@@ -18,6 +18,7 @@ import {
   validateWorkOrderCreate,
   type WorkOrderFormInput,
   checkQuoteVendorsAssignable,
+  checkCrewMemberAssignable,
   checkCrewTimeOffWarning,
   dispatchWorkOrderEvents,
 } from './create-work-order-helpers'
@@ -1461,6 +1462,144 @@ export async function dismissVendorSuggestion(workOrderId: string): Promise<{ er
   } catch (err) {
     console.error('[dismissVendorSuggestion]', err)
     reportError(err, { site: 'serverAction.maintenance.dismissVendorSuggestion' })
+    return { error: 'Operation failed. Please try again.' }
+  }
+}
+
+// ── Crew suggestion (inspection cleaning roll-up) ────────────────────────────
+
+/**
+ * Accept the crew member suggested for a cleaning work order.
+ *
+ * The crew-side twin of `acceptVendorSuggestion`, and deliberately narrower.
+ * There is no learning loop to feed: the suggestion is not a scorer's output
+ * (see `findLastCleanersAtProperty` — it names whoever last cleaned the
+ * property, which is a fact rather than a ranking), so there is nothing an
+ * acceptance would train. `assignment_outcomes` is also turnover-keyed and this
+ * is a work order.
+ *
+ * Everything the vendor path learned the hard way still applies and is carried
+ * over verbatim: terminal statuses are refused rather than silently reopened,
+ * the status allowlist is repeated as the ATOMIC filter on the write, the row
+ * count is read back because a refused UPDATE returns zero rows and NO error,
+ * and the status advance is a separate forward-only statement.
+ */
+export async function acceptCrewSuggestion(workOrderId: string): Promise<{ error?: string }> {
+  try {
+    const { supabase, membership, user } = await requireOrgRole(['admin', 'manager'])
+
+    const woRes = await supabase
+      .from('work_orders')
+      .select('id, status, suggested_crew_member_ids')
+      .eq('id', workOrderId)
+      .eq('org_id', membership.org_id)
+      .maybeSingle()
+
+    if (reportQueryError(woRes.error, { site: 'serverAction.maintenance.acceptCrewSuggestion', orgId: membership.org_id })) {
+      return { error: 'Could not load the work order. Please try again.' }
+    }
+    const wo = woRes.data
+    if (!wo) return { error: 'Work order not found' }
+
+    if (!(VENDOR_SUGGESTION_ACCEPTABLE_STATUSES as readonly string[]).includes(wo.status)) {
+      return { error: terminalVendorSuggestionError(wo.status) }
+    }
+
+    const crewMemberId = (wo.suggested_crew_member_ids as string[] | null)?.[0]
+    if (!crewMemberId) return { error: 'No suggestion to accept' }
+
+    // Defense in depth. The suggestion was written by an org-scoped service-role
+    // step, so an out-of-org id should be impossible — but this is the column
+    // whose unscoped RLS branch once made a work order readable by another
+    // tenant's crew, and the check that closes that write path costs one query.
+    const crewProblem = await checkCrewMemberAssignable(supabase, membership.org_id, crewMemberId)
+    if (crewProblem) return crewProblem
+
+    const { data: accepted, error } = await supabase
+      .from('work_orders')
+      .update({ assigned_crew_member_id: crewMemberId, suggestion_status: 'accepted' })
+      .eq('id', workOrderId)
+      .eq('org_id', membership.org_id)
+      .in('status', VENDOR_SUGGESTION_ACCEPTABLE_STATUSES)
+      .select('id')
+      .maybeSingle()
+
+    if (error) {
+      console.error('[acceptCrewSuggestion]', error)
+      reportError(error, { site: 'serverAction.maintenance.acceptCrewSuggestion', orgId: membership.org_id })
+      return { error: 'Failed to accept suggestion. Please try again.' }
+    }
+    if (!accepted) {
+      return { error: 'You do not have permission to make this change, or the work order no longer exists.' }
+    }
+
+    // Forward-only, in its own filtered statement — see acceptVendorSuggestion.
+    const { error: statusError } = await supabase
+      .from('work_orders')
+      .update({ status: 'assigned' })
+      .eq('id', workOrderId)
+      .eq('org_id', membership.org_id)
+      .in('status', ['pending', 'quote_requested'])
+
+    // Reported, not returned: the crew member IS assigned.
+    if (statusError) {
+      console.error('[acceptCrewSuggestion] status advance failed', statusError)
+      reportError(statusError, { site: 'serverAction.maintenance.acceptCrewSuggestion.status', orgId: membership.org_id })
+    }
+
+    await logAuditEvent({
+      orgId:      membership.org_id,
+      actorId:    user.id,
+      action:     'work_order.suggestion.accepted',
+      targetType: 'work_order',
+      targetId:   workOrderId,
+      metadata:   { assigned_crew_member_id: crewMemberId },
+    })
+
+    revalidatePath('/maintenance')
+    return {}
+  } catch (err) {
+    console.error('[acceptCrewSuggestion]', err)
+    reportError(err, { site: 'serverAction.maintenance.acceptCrewSuggestion' })
+    return { error: 'Operation failed. Please try again.' }
+  }
+}
+
+export async function dismissCrewSuggestion(workOrderId: string): Promise<{ error?: string }> {
+  try {
+    const { supabase, membership, user } = await requireOrgRole(['admin', 'manager'])
+
+    const { data: dismissed, error } = await supabase
+      .from('work_orders')
+      .update({ suggestion_status: 'dismissed' })
+      .eq('id', workOrderId)
+      .eq('org_id', membership.org_id)
+      .select('id')
+      .maybeSingle()
+
+    if (error) {
+      console.error('[dismissCrewSuggestion]', error)
+      reportError(error, { site: 'serverAction.maintenance.dismissCrewSuggestion', orgId: membership.org_id })
+      return { error: 'Operation failed. Please try again.' }
+    }
+    // Zero rows is a refused update, not a successful no-op — see
+    // dismissVendorSuggestion.
+    if (!dismissed) return { error: NOTHING_UPDATED }
+
+    await logAuditEvent({
+      orgId:      membership.org_id,
+      actorId:    user.id,
+      action:     'work_order.suggestion.dismissed',
+      targetType: 'work_order',
+      targetId:   workOrderId,
+      metadata:   { kind: 'crew' },
+    })
+
+    revalidatePath('/maintenance')
+    return {}
+  } catch (err) {
+    console.error('[dismissCrewSuggestion]', err)
+    reportError(err, { site: 'serverAction.maintenance.dismissCrewSuggestion' })
     return { error: 'Operation failed. Please try again.' }
   }
 }

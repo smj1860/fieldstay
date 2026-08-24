@@ -6051,10 +6051,12 @@ export type Database = {
           scheduled_time: string | null
           sign_off_notes: string | null
           source: Database["public"]["Enums"]["wo_source"]
+          source_inspection_id: string | null
           source_inspection_item_id: string | null
           source_schedule_id: string | null
           source_turnover_id: string | null
           status: Database["public"]["Enums"]["wo_status"]
+          suggested_crew_member_ids: string[] | null
           suggested_vendor_ids: string[] | null
           suggestion_reasoning: string | null
           suggestion_status: string | null
@@ -6104,10 +6106,12 @@ export type Database = {
           scheduled_time?: string | null
           sign_off_notes?: string | null
           source?: Database["public"]["Enums"]["wo_source"]
+          source_inspection_id?: string | null
           source_inspection_item_id?: string | null
           source_schedule_id?: string | null
           source_turnover_id?: string | null
           status?: Database["public"]["Enums"]["wo_status"]
+          suggested_crew_member_ids?: string[] | null
           suggested_vendor_ids?: string[] | null
           suggestion_reasoning?: string | null
           suggestion_status?: string | null
@@ -6157,10 +6161,12 @@ export type Database = {
           scheduled_time?: string | null
           sign_off_notes?: string | null
           source?: Database["public"]["Enums"]["wo_source"]
+          source_inspection_id?: string | null
           source_inspection_item_id?: string | null
           source_schedule_id?: string | null
           source_turnover_id?: string | null
           status?: Database["public"]["Enums"]["wo_status"]
+          suggested_crew_member_ids?: string[] | null
           suggested_vendor_ids?: string[] | null
           suggestion_reasoning?: string | null
           suggestion_status?: string | null
@@ -6215,6 +6221,13 @@ export type Database = {
             columns: ["reported_by_crew_member_id"]
             isOneToOne: false
             referencedRelation: "crew_members"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "work_orders_source_inspection_id_fkey"
+            columns: ["source_inspection_id"]
+            isOneToOne: false
+            referencedRelation: "inspections"
             referencedColumns: ["id"]
           },
           {
