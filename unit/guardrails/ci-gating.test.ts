@@ -70,8 +70,10 @@ describe('guardrail: lint warning ratchet', () => {
     // Lowered to 160 on 2026-08-23: @typescript-eslint/no-unused-vars was
     // promoted from warn to ERROR, which removes that whole class from the
     // budget rather than letting it trade against other warnings.
+    // Lowered to 158 on 2026-08-24: ChecklistView.tsx was split into components,
+    // clearing its cognitive-complexity (45) and no-nested-functions warnings.
     // LOWER this when warnings are cleared; never raise it.
-    const CEILING = 160
+    const CEILING = 158
     const budget = Number(/--max-warnings\s+(\d+)/.exec(pkg.scripts.lint ?? '')?.[1])
     expect(budget).toBeLessThanOrEqual(CEILING)
   })
@@ -96,8 +98,8 @@ describe('guardrail: the cognitive-complexity ratchet stays armed', () => {
     // Seeded 2026-08-15: 36 violations across 31 files, worst at 45
     // (app/crew/turnovers/[id]/ChecklistView.tsx).
     // LOWER these when violations are cleared; never raise them.
-    const FILE_CEILING  = 31
-    const TOTAL_CEILING = 36
+    const FILE_CEILING  = 28
+    const TOTAL_CEILING = 33
 
     const total = Object.values(baseline).reduce((n, scores) => n + scores.length, 0)
     expect(Object.keys(baseline).length).toBeLessThanOrEqual(FILE_CEILING)

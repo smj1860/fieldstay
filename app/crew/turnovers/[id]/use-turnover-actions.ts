@@ -63,6 +63,24 @@ export function useTurnoverActions(id: string) {
   const fileInputRefs      = useRef<Record<string, HTMLInputElement | null>>({})
   const sectionPhotoRefs   = useRef<Record<string, HTMLInputElement | null>>({})
 
+  // The hidden <input type="file"> elements are registered and opened through
+  // these rather than by handing the refs themselves to the view.
+  //
+  // react-hooks/immutability refuses a component writing into a ref it received
+  // as a prop, and it is right to: a child mutating a parent's ref is invisible
+  // at the call site, and it only passed before because the whole checklist was
+  // one component. Splitting that component surfaced it. The hook OWNS these,
+  // so the writes belong here.
+  const registerItemInput = (itemId: string, el: HTMLInputElement | null) => {
+    fileInputRefs.current[itemId] = el
+  }
+  const openItemPicker = (itemId: string) => { fileInputRefs.current[itemId]?.click() }
+
+  const registerSectionInput = (sectionName: string, el: HTMLInputElement | null) => {
+    sectionPhotoRefs.current[sectionName] = el
+  }
+  const openSectionPicker = (sectionName: string) => { sectionPhotoRefs.current[sectionName]?.click() }
+
   // Note entry — one item open at a time; saves on blur
   const [openNoteItemId, setOpenNoteItemId] = useState<string | null>(null)
   const [noteText,       setNoteText]       = useState('')
@@ -584,6 +602,7 @@ export function useTurnoverActions(id: string) {
     openNoteItemId, setOpenNoteItemId, noteText, setNoteText,
     pendingConfirm, setPendingConfirm,
     fileInputRefs, sectionPhotoRefs,
+    registerItemInput, openItemPicker, registerSectionInput, openSectionPicker,
     capturingAsset, setCapturingAsset, startAssetCapture, completeCapturedItem,
     toggleItem, saveNote, openNote, handleSectionPhoto, handlePhotoCapture,
     handleCountChange, toggleChecklistConfirm, toggleInventoryConfirm,
