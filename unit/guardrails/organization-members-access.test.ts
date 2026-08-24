@@ -63,6 +63,23 @@ const ALLOWED: Record<string, string> = {
     "Resolves the caller's own org before generating review drafts for it.",
 
   // ── Account/team administration: the membership rows ARE the subject.
+  'app/(dashboard)/maintenance/page.tsx':
+    'Populates the §7 "who walks it" picker on the schedule form with the ' +
+    "org's accepted members. NOT recipient selection — it renders a dropdown, " +
+    'and nothing is notified from here. getPmMembersByOrgIds is the wrong ' +
+    'tool despite the surface similarity: it takes a SERVICE client and ' +
+    'resolves mailboxes through the GoTrue Admin API, so using it would push ' +
+    'a service-role client into a Server Component to fill a <select> — ' +
+    'exactly the RLS-bypass CLAUDE.md says to avoid unless the page needs it.',
+
+  'app/(dashboard)/maintenance/actions.ts':
+    "resolveScheduleRouting verifies that a §7 inspection schedule's " +
+    'assigned_to_user_id is a member of the caller\'s org. A TENANT-ISOLATION ' +
+    'check on a client-supplied id, the org-member sibling of ' +
+    'checkCrewMemberAssignable — not recipient selection, so getPmMembers is ' +
+    'the wrong shape: it filters by role and returns a map, where this needs ' +
+    '"is this one id in this one org, with the invite accepted".',
+
   'app/(dashboard)/settings/team/actions.ts':
     'Team management — invites, role changes, and member removal operate on membership rows directly by definition.',
   'app/(dashboard)/settings/team/page.tsx':

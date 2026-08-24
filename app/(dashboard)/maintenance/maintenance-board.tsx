@@ -16,7 +16,7 @@ import {
   bulkAssignVendor, bulkUpdateWorkOrderStatus, fetchArchivedWorkOrders,
   acceptVendorSuggestion, dismissVendorSuggestion,
 } from './actions'
-import type { WoStatus, PriorityLevel, VendorSpecialty, ScheduleType, ScheduleFrequency } from '@/types/database'
+import type { WoStatus, PriorityLevel, VendorSpecialty, ScheduleCreates, ScheduleType, ScheduleFrequency } from '@/types/database'
 import { WorkOrderDetail, type WorkOrderDetailData } from '@/components/work-orders/work-order-detail'
 import { MaintenanceCalendar } from './maintenance-calendar'
 import { CreateWorkOrderModal } from './CreateWorkOrderModal'
@@ -109,6 +109,19 @@ export interface AssetOption {
   property_id: string
 }
 
+/** An inspection form a schedule can be pointed at. */
+export interface InspectionFormOption {
+  id:      string
+  name:    string
+  version: number
+}
+
+/** An org member who can be named as the person expected to walk it. */
+export interface OrgMemberOption {
+  user_id: string
+  name:    string
+}
+
 export interface VendorComplianceRow {
   vendor_id: string
   // Deliberately `string`, not the ComplianceStatus union: this is a computed
@@ -150,6 +163,10 @@ interface ScheduleRow {
   auto_create_wo: boolean
   assigned_vendor_id: string | null
   instructions: string | null
+  /** §7. Every pre-existing row reads 'work_order' by DB default. */
+  creates: ScheduleCreates
+  inspection_form_id: string | null
+  assigned_to_user_id: string | null
   properties: { name: string } | { name: string }[] | null
   vendors: { id: string; name: string } | { id: string; name: string }[] | null
 }
@@ -434,13 +451,18 @@ function WorkOrderCard({
 function ScheduleFormFields({
   properties,
   vendors,
+  inspectionForms = [],
+  orgMembers = [],
   defaults,
 }: {
   properties: PropertyOption[]
   vendors: VendorOption[]
+  inspectionForms?: InspectionFormOption[]
+  orgMembers?: OrgMemberOption[]
   defaults?: Partial<ScheduleRow>
 }) {
   const [schedType, setSchedType] = useState<ScheduleType>(defaults?.schedule_type ?? 'routine')
+  const [creates, setCreates] = useState<ScheduleCreates>(defaults?.creates ?? 'work_order')
 
   return (
     <>
@@ -477,6 +499,72 @@ function ScheduleFormFields({
           <option value="routine">Routine (recurring)</option>
         </select>
       </div>
+
+      {/* §7. A schedule produces a work order or an inspection; the timing is
+          identical either way, which is why this is a discriminator on the same
+          row rather than a second scheduler. */}
+      <div>
+        <label htmlFor="maintenance-board-creates" className="label">Creates</label>
+        <select
+          id="maintenance-board-creates"
+          name="creates"
+          className="input"
+          value={creates}
+          onChange={(e) => setCreates(e.target.value as ScheduleCreates)}
+        >
+          <option value="work_order">Work order</option>
+          <option value="inspection">Inspection</option>
+        </select>
+      </div>
+
+      {creates === 'inspection' && (
+        <>
+          <div>
+            <label htmlFor="maintenance-board-inspection-form" className="label">
+              Inspection form <RequiredMark />
+            </label>
+            <select
+              id="maintenance-board-inspection-form"
+              name="inspection_form_id"
+              className="input"
+              required
+              defaultValue={defaults?.inspection_form_id ?? ''}
+            >
+              <option value="">Select a form…</option>
+              {inspectionForms.map((f) => (
+                <option key={f.id} value={f.id}>{f.name}</option>
+              ))}
+            </select>
+          </div>
+
+          <div>
+            <label htmlFor="maintenance-board-assigned-user" className="label">Who walks it</label>
+            <select
+              id="maintenance-board-assigned-user"
+              name="assigned_to_user_id"
+              className="input"
+              defaultValue={defaults?.assigned_to_user_id ?? ''}
+            >
+              {/* Optional: a schedule with nobody named still notifies the org,
+                  which is better than refusing to save one. */}
+              <option value="">Anyone on the team</option>
+              {orgMembers.map((m) => (
+                <option key={m.user_id} value={m.user_id}>{m.name}</option>
+              ))}
+            </select>
+          </div>
+
+          {/* Said plainly, because the difference is not guessable from the
+              form: a due inspection does not create a row. It cannot — the
+              start time has to be when someone actually arrives, not when the
+              cron ran. */}
+          <InlineAlert tone="info">
+            When this comes due you will be notified to walk it. The inspection
+            itself is created when you press Start at the property, so its
+            recorded start time is the real one.
+          </InlineAlert>
+        </>
+      )}
 
       {schedType === 'routine' && (
         <div>
@@ -529,10 +617,14 @@ function ScheduleFormFields({
 function AddScheduleModal({
   properties,
   vendors,
+  inspectionForms,
+  orgMembers,
   onClose,
 }: {
   properties: PropertyOption[]
   vendors: VendorOption[]
+  inspectionForms: InspectionFormOption[]
+  orgMembers: OrgMemberOption[]
   onClose: () => void
 }) {
   const [saving, setSaving] = useState(false)
@@ -554,6 +646,9 @@ function AddScheduleModal({
       assigned_vendor_id: (fd.get('assigned_vendor_id') as string) || null,
       auto_create_wo:     fd.get('auto_create_wo') === 'on',
       instructions:       (fd.get('instructions') as string) || null,
+      creates:             (fd.get('creates') as ScheduleCreates) || 'work_order',
+      inspection_form_id:  (fd.get('inspection_form_id') as string) || null,
+      assigned_to_user_id: (fd.get('assigned_to_user_id') as string) || null,
     })
     setSaving(false)
     if (result.error) { setError(result.error); return }
@@ -576,7 +671,10 @@ function AddScheduleModal({
           {error && (
             <InlineAlert tone="error">{error}</InlineAlert>
           )}
-          <ScheduleFormFields properties={properties} vendors={vendors} />
+          <ScheduleFormFields
+            properties={properties} vendors={vendors}
+            inspectionForms={inspectionForms} orgMembers={orgMembers}
+          />
         </form>
     </Dialog>
   )
@@ -587,10 +685,14 @@ function AddScheduleModal({
 function EditScheduleModal({
   schedule,
   vendors,
+  inspectionForms,
+  orgMembers,
   onClose,
 }: {
   schedule: ScheduleRow
   vendors: VendorOption[]
+  inspectionForms: InspectionFormOption[]
+  orgMembers: OrgMemberOption[]
   onClose: () => void
 }) {
   const [saving, setSaving] = useState(false)
@@ -611,6 +713,9 @@ function EditScheduleModal({
       assigned_vendor_id: (fd.get('assigned_vendor_id') as string) || null,
       auto_create_wo:     fd.get('auto_create_wo') === 'on',
       instructions:       (fd.get('instructions') as string) || null,
+      creates:             (fd.get('creates') as ScheduleCreates) || 'work_order',
+      inspection_form_id:  (fd.get('inspection_form_id') as string) || null,
+      assigned_to_user_id: (fd.get('assigned_to_user_id') as string) || null,
     })
     setSaving(false)
     if (result.error) { setError(result.error); return }
@@ -633,7 +738,11 @@ function EditScheduleModal({
           {error && (
             <InlineAlert tone="error">{error}</InlineAlert>
           )}
-          <ScheduleFormFields properties={[]} vendors={vendors} defaults={schedule} />
+          <ScheduleFormFields
+            properties={[]} vendors={vendors}
+            inspectionForms={inspectionForms} orgMembers={orgMembers}
+            defaults={schedule}
+          />
         </form>
     </Dialog>
   )
@@ -645,10 +754,14 @@ function SchedulesSection({
   schedules,
   properties,
   vendors,
+  inspectionForms,
+  orgMembers,
 }: {
   schedules: ScheduleRow[]
   properties: PropertyOption[]
   vendors: VendorOption[]
+  inspectionForms: InspectionFormOption[]
+  orgMembers: OrgMemberOption[]
 }) {
   const [open, setOpen]             = useState(false)
   const [showAdd, setShowAdd]       = useState(false)
@@ -828,6 +941,8 @@ function SchedulesSection({
         <AddScheduleModal
           properties={properties}
           vendors={vendors}
+          inspectionForms={inspectionForms}
+          orgMembers={orgMembers}
           onClose={() => setShowAdd(false)}
         />
       )}
@@ -836,6 +951,8 @@ function SchedulesSection({
         <EditScheduleModal
           schedule={editingSchedule}
           vendors={vendors}
+          inspectionForms={inspectionForms}
+          orgMembers={orgMembers}
           onClose={() => setEditingId(null)}
         />
       )}
@@ -854,6 +971,8 @@ export function MaintenanceBoard({
   crewMembers = [],
   propertyAssets = [],
   vendorCompliance = [],
+  inspectionForms = [],
+  orgMembers = [],
   orgId = '',
   userId = '',
   role,
@@ -865,6 +984,9 @@ export function MaintenanceBoard({
   crewMembers?:     CrewMemberOption[]
   propertyAssets?:  AssetOption[]
   vendorCompliance?: VendorComplianceRow[]
+  /** §7's pickers, only reached from the schedule form. */
+  inspectionForms?: InspectionFormOption[]
+  orgMembers?:      OrgMemberOption[]
   orgId?:           string
   /** Needed by the offline create path — the dashboard cache is keyed on (user, org). */
   userId?:          string
@@ -1244,7 +1366,10 @@ export function MaintenanceBoard({
       )}
 
       {/* Maintenance Schedules */}
-      <SchedulesSection schedules={schedules} properties={properties} vendors={vendors} />
+      <SchedulesSection
+        schedules={schedules} properties={properties} vendors={vendors}
+        inspectionForms={inspectionForms} orgMembers={orgMembers}
+      />
 
       {/* Create Modal */}
       {showCreate && (

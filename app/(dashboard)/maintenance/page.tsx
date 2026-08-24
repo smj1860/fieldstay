@@ -2,7 +2,10 @@ import { requireOrgMember } from '@/lib/auth'
 import { SUPABASE_MAX_ROWS } from '@/lib/inngest/paginate'
 import { MaintenanceBoard } from './maintenance-board'
 import { MaintenanceTabs } from './maintenance-tabs'
-import type { VendorComplianceRow } from './maintenance-board'
+import { unwrapJoin } from '@/lib/utils/supabase-joins'
+import type {
+  InspectionFormOption, OrgMemberOption, VendorComplianceRow,
+} from './maintenance-board'
 import type { Metadata } from 'next'
 
 export const metadata: Metadata = { title: 'Maintenance' }
@@ -18,6 +21,8 @@ export default async function MaintenancePage() {
     crewMembersResult,
     propertyAssetsResult,
     vendorComplianceResult,
+    inspectionFormsResult,
+    orgMembersResult,
   ] = await Promise.all([
     supabase
       .from('work_orders')
@@ -78,6 +83,7 @@ export default async function MaintenancePage() {
         schedule_type, frequency, next_due_date,
         last_completed_date, estimated_cost, auto_create_wo, is_active,
         assigned_vendor_id, instructions,
+        creates, inspection_form_id, assigned_to_user_id,
         properties ( name ),
         vendors ( id, name )
       `)
@@ -122,6 +128,26 @@ export default async function MaintenancePage() {
       .select('vendor_id, compliance_status, org_onboarding_grace')
       .eq('org_id', membership.org_id)
       .limit(SUPABASE_MAX_ROWS),
+
+    // §7's two pickers. Platform-owned and tiny — three forms today — but
+    // bounded anyway, because an unbounded read that happens to be small is
+    // still an unbounded read.
+    supabase
+      .from('inspection_forms')
+      .select('id, name, version')
+      .eq('is_active', true)
+      .order('name')
+      .limit(50),
+
+    // Who can be named as the person expected to walk it. `invite_accepted_at`
+    // is the PM-side membership rule: a pending invite is not yet someone you
+    // can assign work to.
+    supabase
+      .from('organization_members')
+      .select('user_id, profiles ( full_name, email )')
+      .eq('org_id', membership.org_id)
+      .not('invite_accepted_at', 'is', null)
+      .limit(500),
   ])
 
   // A query erroring (bad filter value, RLS misconfiguration, etc.) and a
@@ -132,6 +158,7 @@ export default async function MaintenancePage() {
     ['work_orders', workOrdersResult], ['properties', propertiesResult], ['vendors', vendorsResult],
     ['maintenance_schedules', schedulesResult], ['crew_members', crewMembersResult],
     ['property_assets', propertyAssetsResult], ['vendor_compliance_status', vendorComplianceResult],
+    ['inspection_forms', inspectionFormsResult], ['organization_members', orgMembersResult],
   ] as const
   for (const [name, result] of results) {
     if (result.error) console.error(`[MaintenancePage] ${name} query failed:`, result.error)
@@ -145,6 +172,14 @@ export default async function MaintenancePage() {
     (r): r is VendorComplianceRow => r.vendor_id !== null && r.compliance_status !== null
   )
 
+  // A member with neither a name nor an email cannot be shown in a picker, so
+  // it is dropped rather than rendered as a blank option somebody might select.
+  const orgMembers: OrgMemberOption[] = (orgMembersResult.data ?? []).flatMap((m) => {
+    const profile = unwrapJoin(m.profiles as unknown as { full_name: string | null; email: string | null } | null)
+    const name = profile?.full_name?.trim() || profile?.email?.trim()
+    return name && m.user_id ? [{ user_id: m.user_id, name }] : []
+  })
+
   return (
     <>
       <MaintenanceTabs />
@@ -156,6 +191,8 @@ export default async function MaintenancePage() {
         crewMembers={crewMembersResult.data ?? []}
         propertyAssets={propertyAssetsResult.data ?? []}
         vendorCompliance={vendorCompliance}
+        inspectionForms={(inspectionFormsResult.data ?? []) as InspectionFormOption[]}
+        orgMembers={orgMembers}
         orgId={membership.org_id}
         userId={user.id}
         role={membership.role}

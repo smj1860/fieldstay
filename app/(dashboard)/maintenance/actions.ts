@@ -10,7 +10,7 @@ import { fetchAllRows, SUPABASE_MAX_ROWS } from '@/lib/inngest/paginate'
 import { logAuditEvent } from '@/lib/audit'
 import { reportError } from '@/lib/observability/report-error'
 import { reportQueryError } from '@/lib/supabase/unwrap'
-import type { WoStatus, WoCategory, ScheduleFrequency, ScheduleType, Enums } from '@/types/database'
+import type { WoStatus, WoCategory, ScheduleCreates, ScheduleFrequency, ScheduleType, Enums } from '@/types/database'
 import { PriorityLevelSchema, WoStatusSchema, WoCategorySchema } from '@/lib/schemas/work-order'
 import type { SupabaseClient } from '@supabase/supabase-js'
 import {
@@ -1639,6 +1639,75 @@ function resolveFirstDueDate(
   return null
 }
 
+/**
+ * The §7 routing fields, validated before they reach the insert.
+ *
+ * Mirrors `maintenance_schedules_inspection_needs_form` (20260823211930) so a
+ * PM gets a sentence instead of a 23514, and adds what the CHECK cannot see:
+ * that the form is a real active one. An id from a form control is still an id
+ * from a client.
+ *
+ * A work-order schedule clears both columns rather than leaving whatever was
+ * there — switching a schedule from inspection back to work order must not
+ * leave it pointing at a form nothing reads.
+ */
+async function resolveScheduleRouting(
+  supabase: SupabaseClient,
+  orgId:    string,
+  data: {
+    creates?:             ScheduleCreates
+    inspection_form_id?:  string | null
+    assigned_to_user_id?: string | null
+  },
+): Promise<{ fields: Record<string, unknown> } | { error: string }> {
+  const creates = data.creates ?? 'work_order'
+
+  if (creates !== 'inspection') {
+    return { fields: { creates, inspection_form_id: null, assigned_to_user_id: null } }
+  }
+
+  if (!data.inspection_form_id) return { error: 'Choose which inspection form to walk.' }
+
+  const { data: form, error } = await supabase
+    .from('inspection_forms')
+    .select('id')
+    .eq('id', data.inspection_form_id)
+    .eq('is_active', true)
+    .maybeSingle()
+
+  if (error) {
+    reportError(error, { site: 'serverAction.maintenance.resolveScheduleRouting', orgId })
+    return { error: 'Could not verify that inspection form. Please try again.' }
+  }
+  if (!form) return { error: 'That inspection form is no longer available.' }
+
+  // The assignee is an ORG MEMBER, so it has to be one of THIS org's — an
+  // unchecked id here would name a stranger as the person expected to walk it.
+  if (data.assigned_to_user_id) {
+    const member = await supabase
+      .from('organization_members')
+      .select('user_id')
+      .eq('org_id', orgId)
+      .eq('user_id', data.assigned_to_user_id)
+      .not('invite_accepted_at', 'is', null)
+      .maybeSingle()
+
+    if (member.error) {
+      reportError(member.error, { site: 'serverAction.maintenance.resolveScheduleRouting.member', orgId })
+      return { error: 'Could not verify that assignee. Please try again.' }
+    }
+    if (!member.data) return { error: 'That person is not a member of this organization.' }
+  }
+
+  return {
+    fields: {
+      creates,
+      inspection_form_id:  data.inspection_form_id,
+      assigned_to_user_id: data.assigned_to_user_id || null,
+    },
+  }
+}
+
 export async function createMaintenanceSchedule(
   data: {
     property_id:       string
@@ -1651,6 +1720,10 @@ export async function createMaintenanceSchedule(
     assigned_vendor_id: string | null
     auto_create_wo:    boolean
     instructions:      string | null
+    /** §7. Omitted means a work-order schedule, which is what every row was. */
+    creates?:            ScheduleCreates
+    inspection_form_id?: string | null
+    assigned_to_user_id?: string | null
   }
 ): Promise<MaintenanceActionState> {
   try {
@@ -1658,6 +1731,9 @@ export async function createMaintenanceSchedule(
 
     const owned = await verifyPropertyInOrg(supabase, membership.org_id, data.property_id, 'serverAction.maintenance.createMaintenanceSchedule')
     if (!owned.ok) return { error: owned.error }
+
+    const routing = await resolveScheduleRouting(supabase, membership.org_id, data)
+    if ('error' in routing) return routing
 
     const { error } = await supabase.from('maintenance_schedules').insert({
       property_id:        data.property_id,
@@ -1673,6 +1749,7 @@ export async function createMaintenanceSchedule(
       assigned_vendor_id: data.assigned_vendor_id || null,
       auto_create_wo:     data.auto_create_wo,
       instructions:       data.instructions || null,
+      ...routing.fields,
       is_active:          true,
     })
 
@@ -1694,6 +1771,9 @@ export async function createMaintenanceSchedule(
 export async function updateMaintenanceSchedule(
   scheduleId: string,
   data: {
+    creates?:            ScheduleCreates
+    inspection_form_id?: string | null
+    assigned_to_user_id?: string | null
     name:              string
     description:       string | null
     schedule_type:     ScheduleType
@@ -1707,6 +1787,9 @@ export async function updateMaintenanceSchedule(
 ): Promise<MaintenanceActionState> {
   try {
     const { supabase, membership } = await requireOrgRole(['admin', 'manager'])
+
+    const routing = await resolveScheduleRouting(supabase, membership.org_id, data)
+    if ('error' in routing) return routing
 
     const { data: updated, error } = await supabase
       .from('maintenance_schedules')
@@ -1727,6 +1810,7 @@ export async function updateMaintenanceSchedule(
         assigned_vendor_id: data.assigned_vendor_id || null,
         auto_create_wo:     data.auto_create_wo,
         instructions:       data.instructions || null,
+        ...routing.fields,
       })
       .eq('id', scheduleId)
       .eq('org_id', membership.org_id)
