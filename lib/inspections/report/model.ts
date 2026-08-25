@@ -113,6 +113,16 @@ export interface ReportInspection {
   completedAt:     string
   inspectorName:   string | null
   sections:  ReportSection[]
+  /**
+   * Photographs this walk HAS, counted from `photo_path` — never from bytes.
+   *
+   * Load-time and render-time must not share a count here. The owner's copy
+   * fetches no bytes at all by design, so a byte-derived count is 0 for it, and
+   * the sign-off block would print "no photographs were recorded" for a walk
+   * that photographed everything. That is a worse falsehood than the omission
+   * it is describing, and it is precisely the line §12.1 requires be truthful.
+   */
+  photosOnFile: number
   /** Answered checks that passed. Record-only items are excluded (see above). */
   passCount: number
   /** Answered checks that failed. Record-only items are excluded. */
@@ -430,6 +440,9 @@ function buildInspection(input: {
   }
 
   const counted = sections.flatMap((s) => s.answers).filter((a) => !a.isRecordOnly)
+  // From the ROWS, not from `sections` — an item whose definition vanished from
+  // the snapshot is still a photograph that exists in the bucket.
+  const photosOnFile = answers.filter((a) => a.photo_path).length
 
   return {
     id:          row.id,
@@ -443,6 +456,7 @@ function buildInspection(input: {
     completedAt:     row.completed_at,
     inspectorName:   row.inspector_name,
     sections,
+    photosOnFile,
     // PASSES AND FAILS, not "total minus the other". An item answered N/A is
     // neither, and counting it either way misstates the walk.
     passCount: counted.filter((a) => a.result === 'pass').length,
