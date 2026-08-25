@@ -1042,6 +1042,41 @@ and gated crew counts behind a PM approval that product never wanted.
   aggregate that ships no rows at all. Enforced for `lib/inngest/**` by
   `unit/guardrails/unbounded-select.test.ts`.
 
+### Inspection export caps — stated, not silent
+
+The inspection report (phase 7) renders synchronously on the request path:
+several passes over the answers, then pdf-lib draw calls per row, then one
+`save()` that serialises the whole document, with no yield point in the chain
+and no `maxDuration` entry in `vercel.json`. So it carries explicit ceilings.
+They are recorded here because **a cap nobody remembers is a cap somebody
+raises**, and this document's entire claim is completeness — a history that
+silently stops partway through 2024 reads as the PM having given up.
+
+| Cap | Value | Where | What it bounds |
+|---|---|---|---|
+| `MAX_HISTORY_INSPECTIONS` | **60** | `lib/inspections/report/model.ts` | Walks in one whole-property history export. ~20 years at three a year |
+| `MAX_REPORT_PHOTOS` | **150** | `lib/inspections/report/model.ts` | Photographs embedded in one report. The bucket caps an object at 10MB, so this is a BYTES bound wearing a row count |
+| `MAX_ANSWER_ROWS` | **12,000** | `lib/inspections/report/model.ts` | The `fetchAllRows` drain over `inspection_items`. A 60-walk history is ~4,000 rows — already past `max_rows` |
+| `MAX_INSPECTIONS` | **24** | `lib/owner-portal/inspections.ts` | Walks rendered in the owner portal's history section |
+| `MAX_ITEM_ROWS` | **6,000** | `lib/owner-portal/inspections.ts` | That section's item drain |
+
+Two rules go with them:
+
+- **A cap that applies must SAY SO in the output.** `loadInspectionReport`
+  returns `omittedCount` from a `count: 'exact'` and the cover page renders
+  `historyCapNote()`; the owner portal does the same through
+  `historySubtitle()`. Without the total there is no way to distinguish "this
+  is the whole record" from "this is the first page of it", and the document
+  would assert the second as the first.
+- **Raising one is a capacity decision, not a number edit.** Past a few
+  hundred walks the fix is not a bigger constant — it is moving generation off
+  the request path onto an Inngest job that writes to Storage and hands back a
+  signed URL, the same shape `org_milestones` polling already uses. The CPA
+  export's comment says this too, and for the same reason.
+
+Enforced by `unit/guardrails/report-export-caps.test.ts`, which fails if a
+constant moves without this table moving with it — in either direction.
+
 ---
 
 ## Code Quality Standards
@@ -1751,6 +1786,30 @@ meta-rule, prose is for judgment calls only.
 
 ### Code Quality
 
+- **A guardrail must scan CODE, not prose.** Most guardrails in
+  `unit/guardrails/` are text scanners over the real source tree, and a scanner
+  that greps raw source is reading the comments too. That breaks it three ways,
+  all three found live on 2026-08-25:
+  a REQUIRED pattern satisfied by a comment (`commercial-email-optout` asserted
+  the phrase "FAILS CLOSED"; flipping the CAN-SPAM helper to fail-OPEN left all
+  nine of its tests green, because the phrase is in the JSDoc);
+  an EXEMPTING pattern satisfied by a comment (`inngest-insert-idempotency`
+  treats a nearby `onConflict` as proof of a dedup guard, and was waving through
+  an unguarded insert because the word appeared in a comment 85 lines above —
+  so any file that MENTIONS the word granted its inserts immunity);
+  and a BUDGET consumed by a comment (`sensitive-data-logging` matches a
+  300-character window after `logAuditEvent(`, and a 52-character comment inside
+  one call pushed it to 323, hiding a call that wrote a money figure into audit
+  metadata — the exact class that guardrail exists for).
+  Use `readCode()` from `unit/guardrails/scan.ts`, which strips comments and
+  keeps line numbers so `file:line` allowlist keys stay stable. Where the
+  comment genuinely IS the artifact — `inngest-history-secrets`' annotation,
+  `redemption-dedup-pairing`'s index name — keep `read()` and say why.
+  `pnpm run check:comment-blind-guardrails` finds these: it strips every comment
+  in `app`/`lib`/`components`, re-runs the suite, and reports any guardrail that
+  passes on the real tree and fails without prose. Manual, not a CI gate — it
+  rewrites the working tree and restores it with git, and takes two full
+  guardrail runs. Run it when adding a scanner-style guardrail.
 - **Silent failures — logged with real context.** `sensitive-data-logging`
   checks that existing log calls don't leak banned fields, but not the
   inverse: that a caught error actually gets logged with enough context to

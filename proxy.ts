@@ -172,6 +172,17 @@ const TOKEN_ROUTES = [
   // /login, which is exactly how /api/guidebook was silently dead.
   '/unsubscribe/',
   '/api/email/unsubscribe',
+
+  // Owner-facing inspection report download
+  // (app/api/owner/[token]/inspections/[id]/report). The owner has no session
+  // by definition, so the portal token is the only credential.
+  //
+  // Listed SEPARATELY from '/owner/', which covers the pages and not the API —
+  // exactly the gap that made every /api/guidebook POST a 307 to /login while
+  // the /g/ pages calling them worked. TOKEN_ROUTES rather than BYPASS_ROUTES,
+  // so the per-IP throttle still applies: this endpoint is id-keyed and
+  // unauthenticated, which is the shape that most needs one.
+  '/api/owner',
 ]
 
 // ── Bypass routes ──────────────────────────────────────────────────────────
@@ -303,6 +314,7 @@ function rateLimiterForPathname(pathname: string) {
   if (pathname.startsWith('/vendor-connect/'))    return vendorConnectRatelimit
   if (pathname.startsWith('/api/vendor-connect')) return vendorConnectRatelimit
   if (pathname.startsWith('/owner/'))             return ownerPortalRatelimit
+  if (pathname.startsWith('/api/owner'))          return ownerPortalRatelimit
   if (pathname.startsWith('/g/'))                 return guidebookRatelimit
   if (pathname.startsWith('/api/guidebook'))      return guidebookRatelimit
   if (pathname.startsWith('/demo/'))              return demoRatelimit

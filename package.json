@@ -18,6 +18,7 @@
     "check:stripe-prices": "node scripts/check-stripe-price-drift.mjs",
     "check:migration-ledger": "node scripts/check-migration-ledger.mjs",
     "check:migration-ledger:prod": "DB_INVARIANTS_ALLOW_PROD=1 node scripts/check-migration-ledger.mjs",
+    "check:comment-blind-guardrails": "tsx scripts/sweep-comment-blind-guardrails.ts",
     "check:rls-isolation": "bash scripts/run-rls-probe.sh",
     "check:rls-isolation:prod": "DB_INVARIANTS_ALLOW_PROD=1 bash scripts/run-rls-probe.sh",
     "inngest:dev": "npx inngest-cli@latest dev",

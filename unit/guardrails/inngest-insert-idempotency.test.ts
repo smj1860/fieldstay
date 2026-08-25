@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { collectSourceFiles, rel, read } from './scan'
+import { collectSourceFiles, rel, readCode } from './scan'
 
 // ============================================================================
 // Idempotency guardrail: an Inngest step can retry (network blip, function
@@ -74,7 +74,13 @@ interface InsertSite {
 function scanInsertSites(): InsertSite[] {
   const sites: InsertSite[] = []
   for (const file of collectSourceFiles(['lib/inngest/functions'])) {
-    const src = read(file)
+    // readCode, NOT read. NEARBY_PROTECTION below treats a nearby `onConflict`
+    // / `23505` / `dedupe_key` as proof an insert is guarded, and comments were
+    // in scope — so checklist-broadcast.ts's unguarded insert was waved through
+    // by the word `onConflict` appearing in a comment 85 lines above it. Any
+    // file that merely MENTIONS one of those words granted its inserts
+    // immunity. Found 2026-08-25 by stripping every comment and re-running.
+    const src = readCode(file)
     INSERT_CALL.lastIndex = 0
     let m: RegExpExecArray | null
     while ((m = INSERT_CALL.exec(src))) {
@@ -113,6 +119,18 @@ const EXCEPTIONS: Record<string, string> = {
   // short-circuits only on a PO that actually has line items, that a header
   // with zero items is repaired rather than declared done, and that both
   // writes throw instead of being discarded.
+  'lib/inngest/functions/checklist-broadcast.ts:165':
+    "SAFE, and newly visible rather than newly broken. This insert was passing "
+    + 'only because the word `onConflict` appears in a COMMENT 85 lines above it, '
+    + 'which NEARBY_PROTECTION matched before this scan started stripping comments '
+    + '(2026-08-25). The real protection is cross-table and this scan only '
+    + 'recognizes same-table guards: the step does a full REPLACE — it deletes '
+    + 'every checklist_template_sections row for the template, then rebuilds '
+    + 'sections and their items — so the items cascade away with their parent and '
+    + 'a retry starts from an empty set. It also early-returns when the source and '
+    + 'target signatures already match, so the common retry does not even reach '
+    + 'the rebuild.',
+
   'lib/inngest/functions/cron/work-order-ops.ts:329':
     'FIXED, kept as an exception because the guard is cross-table and this scan only recognizes same-table guards: the work_order_updates note batch is written only for the rows the preceding optimistic-locked bulk UPDATE actually changed (`.update({priority:\'urgent\'}).in(\'id\', ids).neq(\'priority\', \'urgent\').select(\'id\')`). A step retry matches zero rows there (they are already urgent), so zero notes are inserted. Its twin in cron/maintenance-schedules.ts now uses the same guard (it was the last open entry in this list and was closed 2026-08-08 by copying this pattern rather than re-litigating what makes two escalation events \'the same\'); that twin moved into cron/maintenance-schedules-helpers.ts when the overdue pass was batched, which is why it no longer appears here at all — this scan only sees inserts written INSIDE a step.run body, so extracting one into a helper removes it from the scan\'s reach.',
 }

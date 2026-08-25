@@ -24,10 +24,12 @@ import { useEffect, useMemo, useState, useTransition } from 'react'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { useLiveQuery } from 'dexie-react-hooks'
-import { CalendarClock, ClipboardCheck, Plus, WifiOff } from 'lucide-react'
+import { CalendarClock, ClipboardCheck, Download, Plus, WifiOff } from 'lucide-react'
 
 import { Badge } from '@/components/ui/Badge'
-import { Button } from '@/components/ui/Button'
+import { Button, buttonVariantClass } from '@/components/ui/Button'
+import { Checkbox } from '@/components/ui/Checkbox'
+import { cn } from '@/lib/utils'
 import { Card } from '@/components/ui/Card'
 import { Dialog } from '@/components/ui/Dialog'
 import { getDashboardDb } from '@/lib/dexie/dashboard/schema'
@@ -38,6 +40,19 @@ import { parseFormSnapshot } from '@/lib/inspections/snapshots'
 
 import { MaintenanceTabs } from '../maintenance-tabs'
 import { SafetyCadenceCard } from './safety-cadence-card'
+
+/**
+ * The history export's URL, or undefined until a property is chosen.
+ *
+ * `?photos=0` can only NARROW — there is no parameter that turns photographs
+ * on, because the owner route passes the literal `false` and never reads one.
+ * Unticking the box here produces the same document an owner receives.
+ */
+function historyDownloadHref(propertyId: string, withPhotos: boolean): string | undefined {
+  if (!propertyId) return undefined
+  const query = withPhotos ? '' : '?photos=0'
+  return `/api/properties/${propertyId}/inspections/report${query}`
+}
 
 const FORM_LABELS: Record<string, string> = {
   safety:  'Safety & Risk Mitigation',
@@ -65,6 +80,13 @@ export function InspectionsView({ userId, orgId }: Readonly<Props>) {
   // render its message twice — once in the dialog and once under a Due list it
   // had nothing to do with.
   const [scheduleError, setScheduleError] = useState<string | null>(null)
+  // The whole-property history export (§1's artifact: "three years of
+  // consistent quarterly safety inspections"). Its own dialog and its own
+  // property selection, deliberately separate from the start dialog's — reusing
+  // `propertyId` would mean opening one dialog silently changed the other.
+  const [historyOpen, setHistoryOpen]             = useState(false)
+  const [historyPropertyId, setHistoryPropertyId] = useState('')
+  const [historyPhotos, setHistoryPhotos]         = useState(true)
 
   // A warm on mount, forced past the throttle. This is the page a PM opens
   // before leaving, so it is the one place worth paying for a guaranteed
@@ -84,6 +106,11 @@ export function InspectionsView({ userId, orgId }: Readonly<Props>) {
     [],
   )
   const schedules = useLiveQuery(() => db.maintenance_schedules.toArray(), [db], [])
+
+  // Named rather than inlined into the href: the codebase bans nested
+  // ternaries, and the disabled case is a real state (no property chosen yet)
+  // rather than a formatting branch.
+  const historyHref = historyDownloadHref(historyPropertyId, historyPhotos)
 
   const propertyName = (id: string) =>
     (properties ?? []).find((p) => p.id === id)?.name ?? 'Unknown property'
@@ -160,15 +187,29 @@ export function InspectionsView({ userId, orgId }: Readonly<Props>) {
           <h1 className="text-xl font-bold" style={{ color: 'var(--text-primary)' }}>
             Inspections
           </h1>
-          <Button
-            variant="cta"
-            onClick={() => setDialogOpen(true)}
-            disabled={!libraryReady}
-            className="flex items-center gap-2"
-          >
-            <Plus className="w-4 h-4" />
-            Start inspection
-          </Button>
+          <div className="flex items-center gap-2">
+            {/* ONLINE ONLY, and it says so rather than failing on tap. The export
+                is a server render of rows this device may not have — unlike
+                starting a walk, which is the one thing on this page built to
+                work with no signal. */}
+            <Button
+              variant="secondary"
+              onClick={() => setHistoryOpen(true)}
+              className="flex items-center gap-2"
+            >
+              <Download className="w-4 h-4" />
+              <span className="hidden sm:inline">Export history</span>
+            </Button>
+            <Button
+              variant="cta"
+              onClick={() => setDialogOpen(true)}
+              disabled={!libraryReady}
+              className="flex items-center gap-2"
+            >
+              <Plus className="w-4 h-4" />
+              Start inspection
+            </Button>
+          </div>
         </div>
 
         {/* ONLINE ONLY, and it renders itself away when there is no signal —
@@ -267,11 +308,15 @@ export function InspectionsView({ userId, orgId }: Readonly<Props>) {
               {(inspections ?? []).map((row) => (
                 <li key={row.id}>
                   <Card>
-                    <Link
-                      href={`/maintenance/inspections/${row.id}`}
-                      className="flex items-center justify-between gap-3 focus:outline-none focus:ring-2 focus:ring-[var(--accent-gold)] rounded-lg"
-                    >
-                      <span className="min-w-0">
+                    {/* The download is a SIBLING of the row link, not a child.
+                        An <a> inside an <a> is invalid HTML and browsers
+                        recover from it by closing the outer one early, which
+                        silently breaks the row's own navigation. */}
+                    <div className="flex items-center justify-between gap-3">
+                      <Link
+                        href={`/maintenance/inspections/${row.id}`}
+                        className="flex-1 min-w-0 focus:outline-none focus:ring-2 focus:ring-[var(--accent-gold)] rounded-lg"
+                      >
                         <span className="block text-sm font-semibold truncate"
                               style={{ color: 'var(--text-primary)' }}>
                           {propertyName(row.property_id)}
@@ -282,11 +327,29 @@ export function InspectionsView({ userId, orgId }: Readonly<Props>) {
                           {new Date(row.started_at).toLocaleDateString()}
                           {row.inspector_name ? ` · ${row.inspector_name}` : ''}
                         </span>
+                      </Link>
+                      <span className="flex items-center gap-2 shrink-0">
+                        <Badge tone={row.completed_at ? 'green' : 'amber'}>
+                          {row.completed_at ? 'Complete' : 'In progress'}
+                        </Badge>
+                        {/* COMPLETED ONLY. There is no report of a walk that is
+                            still under way — the route 404s it — and offering a
+                            download that cannot succeed is worse than not
+                            offering one. */}
+                        {row.completed_at && (
+                          <a
+                            href={`/api/inspections/${row.id}/report`}
+                            download
+                            aria-label={`Download the report for ${propertyName(row.property_id)}`}
+                            title="Download PDF (includes photos)"
+                            className="p-1.5 rounded-lg focus:outline-none focus:ring-2 focus:ring-[var(--accent-gold)]"
+                            style={{ color: 'var(--text-muted)' }}
+                          >
+                            <Download className="w-4 h-4" />
+                          </a>
+                        )}
                       </span>
-                      <Badge tone={row.completed_at ? 'green' : 'amber'}>
-                        {row.completed_at ? 'Complete' : 'In progress'}
-                      </Badge>
-                    </Link>
+                    </div>
                   </Card>
                 </li>
               ))}
@@ -368,6 +431,88 @@ export function InspectionsView({ userId, orgId }: Readonly<Props>) {
                   {error}
                 </p>
               )}
+            </div>
+          </Dialog>
+        )}
+
+        {historyOpen && (
+          <Dialog
+            open
+            onClose={() => setHistoryOpen(false)}
+            title="Export inspection history"
+            mobileSheet
+            maxWidthClassName="max-w-md"
+            footer={
+              <div className="flex gap-2 w-full">
+                <Button variant="secondary" onClick={() => setHistoryOpen(false)} className="flex-1">
+                  Cancel
+                </Button>
+                {/* An <a>, not a Button with an onClick. The route responds with
+                    Content-Disposition: attachment, so the browser saves the
+                    file without navigating — no fetch, no blob, no revoke, and
+                    nothing to leave in a broken state if the request fails. It
+                    is styled as a button through buttonVariantClass rather than
+                    a hand-written "btn-cta" string. */}
+                <a
+                  href={historyHref}
+                  download
+                  aria-disabled={!historyPropertyId}
+                  onClick={(e) => {
+                    if (!historyPropertyId) { e.preventDefault(); return }
+                    setHistoryOpen(false)
+                  }}
+                  className={cn(
+                    buttonVariantClass('cta'), 'flex-1 text-center',
+                    !historyPropertyId && 'opacity-50 pointer-events-none',
+                  )}
+                >
+                  Download
+                </a>
+              </div>
+            }
+          >
+            <div className="flex flex-col gap-4">
+              <div className="flex flex-col gap-1.5">
+                <label htmlFor="history-property" className="text-xs font-semibold"
+                       style={{ color: 'var(--text-secondary)' }}>
+                  Property
+                </label>
+                <select
+                  id="history-property"
+                  value={historyPropertyId}
+                  onChange={(e) => setHistoryPropertyId(e.target.value)}
+                  className="w-full rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-[var(--accent-gold)]"
+                  style={{ background: 'var(--bg-card)', border: '1px solid var(--border)', color: 'var(--text-primary)' }}
+                >
+                  <option value="">Select a property…</option>
+                  {(properties ?? []).map((p) => (
+                    <option key={p.id} value={p.id}>{p.name}</option>
+                  ))}
+                </select>
+              </div>
+
+              <label className="flex items-start gap-2 text-xs" style={{ color: 'var(--text-secondary)' }}>
+                <Checkbox
+                  checked={historyPhotos}
+                  onChange={(e) => setHistoryPhotos(e.target.checked)}
+                />
+                <span>
+                  Include photographs.
+                  {/* Named plainly, because this checkbox is what decides whether
+                      the file is safe to forward. Owners never receive photos
+                      through FieldStay; unticking this produces the same
+                      document the owner portal hands them. */}
+                  <span className="block mt-0.5" style={{ color: 'var(--text-muted)' }}>
+                    Untick to produce the copy an owner receives — the same report
+                    without the photo log.
+                  </span>
+                </span>
+              </label>
+
+              <p className="text-xs" style={{ color: 'var(--text-muted)' }}>
+                Every completed inspection for this property, most recent first, with a
+                cover page. Needs a connection.
+              </p>
             </div>
           </Dialog>
         )}

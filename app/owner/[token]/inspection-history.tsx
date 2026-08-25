@@ -79,14 +79,45 @@ function Finding({ finding }: Readonly<{ finding: OwnerInspectionFinding }>) {
   )
 }
 
+/**
+ * The download, as a plain link rather than a button.
+ *
+ * The route responds with `Content-Disposition: attachment`, so the browser
+ * saves the file and never navigates away from the portal — no client
+ * component, no fetch, no blob, nothing to break on a phone in a car park,
+ * which is the same reasoning that keeps the rest of this section a Server
+ * Component with no interactivity.
+ *
+ * WHAT THE OWNER GETS IS THE REPORT WITHOUT THE PHOTO LOG. @smj1860,
+ * 2026-08-25: "both owner and pm can download the report itself. the photos
+ * only the pm and he/she can share with the owner if wanted." The route
+ * enforces that with a literal, not a parameter — appending ?photos=1 here
+ * would do nothing.
+ */
+function DownloadLink({ token, inspectionId }: Readonly<{ token: string; inspectionId: string }>) {
+  return (
+    <a
+      href={`/api/owner/${encodeURIComponent(token)}/inspections/${encodeURIComponent(inspectionId)}/report`}
+      // `download` is a hint the attachment header already guarantees; it is
+      // here so the link reads as a download on hover rather than as navigation.
+      download
+      className="text-xs underline underline-offset-2 focus:outline-none focus:ring-2 focus:ring-[var(--accent-gold)] rounded"
+      style={{ color: 'var(--text-muted)' }}
+    >
+      Download PDF
+    </a>
+  )
+}
+
 function InspectionCard({
-  inspection, propertyName,
-}: Readonly<{ inspection: OwnerInspection; propertyName: string | null }>) {
+  inspection, propertyName, token,
+}: Readonly<{ inspection: OwnerInspection; propertyName: string | null; token: string }>) {
   const { findings, passCount } = inspection
 
   return (
     <div className="bg-card-themed rounded-xl border border-themed overflow-hidden">
-      <div className="px-5 py-3 bg-raised-themed border-b border-themed">
+      <div className="px-5 py-3 bg-raised-themed border-b border-themed flex items-start justify-between gap-3">
+        <div>
         <h3 className="font-semibold text-secondary-themed text-sm">
           {inspection.formLabel}
           {propertyName && <span className="text-muted-themed font-normal"> · {propertyName}</span>}
@@ -98,6 +129,8 @@ function InspectionCard({
               form versions does not read as inconsistent inspecting. */}
           {` · v${inspection.formVersion}`}
         </p>
+        </div>
+        <DownloadLink token={token} inspectionId={inspection.id} />
       </div>
 
       <div className="px-5 py-3">
@@ -140,13 +173,15 @@ function historySubtitle(shown: number, total: number): string {
 }
 
 export function InspectionHistory({
-  inspections, totalCompleted, propertyNames, showPropertyName,
+  inspections, totalCompleted, propertyNames, showPropertyName, token,
 }: Readonly<{
   inspections:      OwnerInspection[]
   totalCompleted:   number
   propertyNames:    Map<string, string>
   /** Only in a multi-property portfolio — otherwise the name is the page title. */
   showPropertyName: boolean
+  /** The portal token, for the per-inspection download link. */
+  token:            string
 }>) {
   // Absent rather than empty. An owner whose PM has not started inspecting
   // should not be shown a hole where a feature will be; the section appears
@@ -167,6 +202,7 @@ export function InspectionHistory({
           key={inspection.id}
           inspection={inspection}
           propertyName={showPropertyName ? (propertyNames.get(inspection.propertyId) ?? null) : null}
+          token={token}
         />
       ))}
     </section>

@@ -72,7 +72,7 @@ export async function finalizeVendorCompletion(
   // Audit only for an invoice this request actually minted — a replay that
   // reused an existing invoice must not log a second "created" event.
   if (invoiceInserted && invoiceId && invoiceNumber) {
-    await logVendorInvoiceCreated(claimed, invoiceId, invoiceNumber, subtotal)
+    await logVendorInvoiceCreated(claimed, invoiceId, invoiceNumber)
   }
 
   await dispatchCompletionEvents(supabase, claimed, invoiceId, token, notes, subtotal)
@@ -82,20 +82,30 @@ export async function finalizeVendorCompletion(
  * Audit trail for an invoice that actually stuck. Gated on invoice_inserted
  * from the RPC, so a replay that reused an existing invoice does not log a
  * second "created" event for the same row.
+ *
+ * NO AMOUNT IN THE METADATA. It used to carry `amount: subtotal`, which is the
+ * same defect the 2026-07-26 pass fixed in four other places and this one
+ * survived — `sensitive-data-logging` measures a 300-character window from
+ * `logAuditEvent(` and the comment that used to sit inside this call pushed it
+ * to 323, so the scan never saw the call at all. Found 2026-08-25 by stripping
+ * every comment in the tree and re-running the guardrails.
+ *
+ * Nothing is lost by dropping it: `targetId` is the invoice row, which holds
+ * the figure. CLAUDE.md's rule is that an audit row is for staff investigating
+ * an incident, not a second home for data that should not be logged.
  */
 export async function logVendorInvoiceCreated(
   claimed:       ClaimedWorkOrder,
   invoiceId:     string,
   invoiceNumber: string,
-  subtotal:      number,
 ): Promise<void> {
+  // No actorId — unauthenticated vendor-token route.
   await logAuditEvent({
     orgId:      claimed.org_id,
     action:     'work_order.invoice.created',
     targetType: 'work_order_invoice',
     targetId:   invoiceId,
-    metadata:   { work_order_id: claimed.id, vendor_id: claimed.vendor_id, invoice_number: invoiceNumber, amount: subtotal },
-    // No actorId — unauthenticated vendor-token route
+    metadata:   { work_order_id: claimed.id, vendor_id: claimed.vendor_id, invoice_number: invoiceNumber },
   })
 }
 

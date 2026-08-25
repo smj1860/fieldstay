@@ -88,6 +88,11 @@ export type AuditAction =
   | 'asset.capex_inflation_rate.updated'
   | 'owner.capital_plan.sharing_toggled'
   | 'owner_portal.capital_plan.accessed'
+  // An owner downloading an inspection report. Logged because the report is a
+  // document that leaves FieldStay and can be forwarded to an insurer or a
+  // buyer — "which record did they take, and when" is the question an incident
+  // starts from. Token id and inspection id only; no owner name or email.
+  | 'owner_portal.inspection_report.downloaded'
   | 'vendor.stripe_connect.onboarded'
   | 'vendor.stripe_connect.charges_disabled'
   | 'work_order.invoice.created'

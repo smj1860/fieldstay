@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { collectSourceFiles, rel, read } from './scan'
+import { collectSourceFiles, rel, readCode } from './scan'
 
 // ============================================================================
 // Ratchet for CLAUDE.md's color rule: CSS variables only — Tailwind's own
@@ -69,8 +69,6 @@ const BASELINE = new Set<string>([
   'components/landing/homepage-content.tsx',
   'components/property/PropertyMaintenanceManager.tsx',
   'components/review-prompt.tsx',
-  'components/ui/InlineAlert.tsx',
-  'components/ui/RequiredMark.tsx',
   'components/work-orders/VendorDispatchDialog.tsx',
   'components/work-orders/VendorRatingPanel.tsx',
   'components/work-orders/line-items-editor.tsx',
@@ -79,7 +77,13 @@ const BASELINE = new Set<string>([
 
 describe('guardrail: Tailwind color-utility ratchet', () => {
   const files = collectSourceFiles(['app', 'components', 'lib'], ['.tsx'])
-  const violating = new Set(files.filter((f) => COLOR_UTILITY.test(read(f))).map(rel))
+  // readCode, NOT read. Two components/ui files were baselined purely because
+  // their comments QUOTE the hardcoded classes they exist to replace
+  // ("replaces the inconsistently-shaded bg-red-50 … banners"). A file
+  // baselined for a comment can never leave the baseline, and — worse — a real
+  // hardcoded color added to it would land inside an entry that already says
+  // "known violation", so the ratchet would not fire.
+  const violating = new Set(files.filter((f) => COLOR_UTILITY.test(readCode(f))).map(rel))
 
   it('no file outside the baseline uses Tailwind color utilities', () => {
     const newOffenders = [...violating].filter((p) => !BASELINE.has(p)).sort()

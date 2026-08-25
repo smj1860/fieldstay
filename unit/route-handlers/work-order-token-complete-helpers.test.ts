@@ -206,11 +206,26 @@ describe('logVendorInvoiceCreated', () => {
   beforeEach(() => vi.clearAllMocks())
 
   it('records the invoice against the org with no actor (unauthenticated vendor route)', async () => {
-    await logVendorInvoiceCreated(CLAIMED, 'inv_1', 'INV-2026-00001', 150)
+    await logVendorInvoiceCreated(CLAIMED, 'inv_1', 'INV-2026-00001')
 
     const arg = vi.mocked(logAuditEvent).mock.calls[0]![0] as unknown as Record<string, unknown>
     expect(arg.orgId).toBe('org_1')
     expect(arg.targetType).toBe('work_order_invoice')
     expect(arg).not.toHaveProperty('actorId')
+  })
+
+  it('puts NO money figure in the audit metadata', async () => {
+    // It used to pass `amount: subtotal`, and sensitive-data-logging never saw
+    // it: that scan reads a 300-character window from `logAuditEvent(`, and the
+    // comment sitting inside the call pushed it to 323. The invoice row holds
+    // the figure and targetId points at it; an audit row is for staff
+    // investigating an incident, not a second copy of the financials.
+    await logVendorInvoiceCreated(CLAIMED, 'inv_1', 'INV-2026-00001')
+
+    const arg = vi.mocked(logAuditEvent).mock.calls[0]![0] as unknown as {
+      metadata: Record<string, unknown>
+    }
+    expect(arg.metadata).not.toHaveProperty('amount')
+    expect(JSON.stringify(arg.metadata)).not.toContain('150')
   })
 })

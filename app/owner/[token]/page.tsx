@@ -460,6 +460,7 @@ export default async function OwnerPortalPage({ params, searchParams }: Props) {
           totalCompleted={inspections.totalCompleted}
           propertyNames={new Map(portfolioProperties.map((p) => [p.id, p.name]))}
           showPropertyName={isMulti && selectedProperty === 'all'}
+          token={token}
         />
 
         <div className="flex flex-col items-center gap-2 mt-8">
