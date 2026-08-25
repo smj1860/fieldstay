@@ -66,6 +66,21 @@ const RED        = rgb(0.72, 0.18, 0.18)
 const GREEN      = rgb(0.13, 0.45, 0.28)
 const ROW_BG     = rgb(0.96, 0.97, 0.99)
 
+/** Where content stops, leaving room for the footer rule and its two lines. */
+const FOOTER_LIMIT = M + 24
+
+/** Content height available on a page with nothing else on it. */
+const PAGE_CONTENT_HEIGHT = (H - M) - FOOTER_LIMIT
+
+/**
+ * Vertical room the sign-off block occupies.
+ *
+ * One constant, read by both the block itself and the keep-together check
+ * above. Two numbers would drift, and the symptom of drift is the block
+ * splitting again on some inputs and not others.
+ */
+const SIGNOFF_BLOCK_HEIGHT = 96
+
 /** Room a photo may take, before its caption. Page-height bound, not a guess. */
 const PHOTO_MAX_W = CW
 const PHOTO_MAX_H = 380
@@ -173,10 +188,45 @@ function drawInspection(cur: Cursor, report: InspectionReport, ins: ReportInspec
   cur.y -= 10
   drawTally(cur, ins)
 
-  for (const section of ins.sections) drawSection(cur, section)
+  // THE SIGN-OFF IS KEPT WHOLE, and it is the one part of this document where
+  // that is worth engineering for. It is the attestation: the certification
+  // text, the signature item, the date, who signed, and what is attached. Split
+  // across a page break — the heading orphaned at the foot of one page, the
+  // declaration and the date on the next — it reads as two fragments rather
+  // than as one signed statement, which is exactly the impression an
+  // evidentiary document cannot afford to give.
+  //
+  // All three forms name that section `signoff`; it is the LAST section on each.
+  const body    = ins.sections.filter((s) => s.key !== SIGNOFF_KEY)
+  const signoff = ins.sections.find((s) => s.key === SIGNOFF_KEY) ?? null
 
+  for (const section of body) drawSection(cur, section)
+
+  keepSignOffTogether(cur, signoff)
+  if (signoff) drawSection(cur, signoff)
   drawSignOff(cur, ins, report)
+
   if (report.photosIncluded) drawPhotoLog(cur, ins)
+}
+
+const SIGNOFF_KEY = 'signoff'
+
+/**
+ * Breaks to a new page if the sign-off would not fit whole on this one.
+ *
+ * NOT an unconditional page break: on a walk whose last section ends high up,
+ * forcing a break would leave a mostly-blank page and put the attestation alone
+ * on the next, which looks like something is missing rather than deliberate.
+ *
+ * And it only breaks when breaking HELPS. A sign-off taller than an entire
+ * empty page cannot be kept whole by any amount of moving, so pushing it would
+ * spend a blank page and split it anyway. That case wants the normal flow —
+ * `drawSection` and `drawSignOff` each break as they go.
+ */
+function keepSignOffTogether(cur: Cursor, signoff: ReportSection | null): void {
+  const needed = (signoff ? sectionHeight(cur, signoff) : 0) + SIGNOFF_BLOCK_HEIGHT
+  if (needed > PAGE_CONTENT_HEIGHT) return
+  if (cur.y - needed < FOOTER_LIMIT) newPage(cur)
 }
 
 function drawMeta(cur: Cursor, ins: ReportInspection): void {
@@ -217,60 +267,98 @@ function drawTally(cur: Cursor, ins: ReportInspection): void {
   cur.y -= 44
 }
 
+/** Height of a whole section — heading, every answer, trailing gap. */
+function sectionHeight(cur: Cursor, section: ReportSection): number {
+  return SECTION_HEADING_HEIGHT
+    + section.answers.reduce((sum, a) => sum + answerHeight(layoutAnswer(cur, a)), 0)
+    + SECTION_GAP
+}
+
+const SECTION_HEADING_HEIGHT = 26
+const SECTION_GAP            = 6
+
 function drawSection(cur: Cursor, section: ReportSection): void {
   // Keeps a heading with at least one answer under it. A section title stranded
   // alone at a page foot reads as a section with nothing in it.
   ensure(cur, 54)
   cur.page.drawRectangle({ x: M, y: cur.y - 16, width: CW, height: 18, color: GRAY_DARK })
   text(cur, toWinAnsi(section.name), M + 6, cur.y - 12, 9, cur.bold, WHITE)
-  cur.y -= 26
+  cur.y -= SECTION_HEADING_HEIGHT
 
   for (const answer of section.answers) drawAnswer(cur, answer)
-  cur.y -= 6
+  cur.y -= SECTION_GAP
 }
 
-function drawAnswer(cur: Cursor, answer: ReportAnswer): void {
-  const promptLines = wrapText(answer.prompt, cur.font, 9, CW - 90)
-  ensure(cur, promptLines.length * 12 + 16)
+/**
+ * Every line an answer will occupy, resolved once.
+ *
+ * MEASURING AND DRAWING READ THE SAME LAYOUT. The keep-together rule below has
+ * to know how tall the sign-off will be BEFORE drawing it, and a second
+ * height-estimating function would agree with the renderer exactly until the
+ * day someone adds a line to one and not the other — at which point the block
+ * silently starts splitting again, which is the defect this exists to fix and
+ * is invisible in a PDF nobody re-reads.
+ */
+interface AnswerLayout {
+  prompt:  string[]
+  details: { line: string; color: RGB }[]
+}
 
-  const status = statusLabel(answer)
-  const top = cur.y
+const PROMPT_LEADING = 12
+const DETAIL_LEADING = 10
+/** Trailing gap after each answer. */
+const ANSWER_GAP     = 4
 
-  for (const l of promptLines) {
-    text(cur, l, M + 8, cur.y, 9, cur.font, GRAY_DARK)
-    cur.y -= 12
+function layoutAnswer(cur: Cursor, answer: ReportAnswer): AnswerLayout {
+  const details: AnswerLayout['details'] = []
+  const add = (body: string, color: RGB) => {
+    for (const line of wrapText(body, cur.font, 8, CW - 40)) details.push({ line, color })
   }
-  textRight(cur, status.label, W - M - 6, top, 9, cur.bold, inkFor(status.tone))
 
-  drawAnswerDetail(cur, answer)
-  cur.y -= 4
-}
-
-function drawAnswerDetail(cur: Cursor, answer: ReportAnswer): void {
-  if (answer.note)     detail(cur, answer.note, GRAY_DARK)
-  if (answer.naReason) detail(cur, `Not applicable: ${answer.naReason}`, GRAY_MED)
+  if (answer.note)     add(answer.note, GRAY_DARK)
+  if (answer.naReason) add(`Not applicable: ${answer.naReason}`, GRAY_MED)
 
   const actions = actionsLine(answer)
-  if (actions) detail(cur, actions, GRAY_MED)
+  if (actions) add(actions, GRAY_MED)
 
   const remediation = remediationLine(answer)
-  if (remediation) detail(cur, remediation, GRAY_MED)
+  if (remediation) add(remediation, GRAY_MED)
 
   // A REQUIRED PHOTO THAT DOES NOT EXIST is recorded, not omitted. The reason
   // is free text specifically so it cannot be tapped through, and dropping it
   // from the report would turn a documented gap back into an undocumented one.
   if (answer.photoUnavailableReason) {
-    detail(cur, `Photo not available: ${answer.photoUnavailableReason}`, GRAY_MED)
+    add(`Photo not available: ${answer.photoUnavailableReason}`, GRAY_MED)
   }
+
+  return { prompt: wrapText(answer.prompt, cur.font, 9, CW - 90), details }
 }
 
+function answerHeight(layout: AnswerLayout): number {
+  return layout.prompt.length * PROMPT_LEADING
+    + layout.details.length * DETAIL_LEADING
+    + ANSWER_GAP
+}
 
-function detail(cur: Cursor, body: string, color: RGB): void {
-  for (const l of wrapText(body, cur.font, 8, CW - 40)) {
-    ensure(cur, 11)
-    text(cur, l, M + 22, cur.y, 8, cur.font, color)
-    cur.y -= 10
+function drawAnswer(cur: Cursor, answer: ReportAnswer): void {
+  const layout = layoutAnswer(cur, answer)
+  ensure(cur, layout.prompt.length * PROMPT_LEADING + 16)
+
+  const status = statusLabel(answer)
+  const top    = cur.y
+
+  for (const l of layout.prompt) {
+    text(cur, l, M + 8, cur.y, 9, cur.font, GRAY_DARK)
+    cur.y -= PROMPT_LEADING
   }
+  textRight(cur, status.label, W - M - 6, top, 9, cur.bold, inkFor(status.tone))
+
+  for (const { line, color } of layout.details) {
+    ensure(cur, 11)
+    text(cur, line, M + 22, cur.y, 8, cur.font, color)
+    cur.y -= DETAIL_LEADING
+  }
+  cur.y -= ANSWER_GAP
 }
 
 // ── Sign-off ─────────────────────────────────────────────────────────────────
@@ -294,7 +382,7 @@ function drawSignOff(cur: Cursor, ins: ReportInspection, report: InspectionRepor
   // They differ for the owner's copy (no bytes fetched) and for a photograph
   // that would not download or parse.
   const embedded = photosOf(ins).filter((e) => cur.images.has(e.answer.id)).length
-  ensure(cur, 96)
+  ensure(cur, SIGNOFF_BLOCK_HEIGHT)
 
   cur.page.drawRectangle({ x: M, y: cur.y - 18, width: CW, height: 20, color: GRAY_DARK })
   text(cur, 'INSPECTOR SIGN-OFF & VERIFICATION', M + 6, cur.y - 13, 9, cur.bold, GOLD)
@@ -408,7 +496,7 @@ function newPage(cur: Cursor): void {
 
 /** Breaks to a new page when `need` points would run into the footer. */
 function ensure(cur: Cursor, need: number): void {
-  if (cur.y - need < M + 24) newPage(cur)
+  if (cur.y - need < FOOTER_LIMIT) newPage(cur)
 }
 
 function band(cur: Cursor, title: string): void {
