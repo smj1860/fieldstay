@@ -77,13 +77,77 @@ describe('commercial email — CAN-SPAM opt-out', () => {
     }
   })
 
-  it('the audience helper fails CLOSED', () => {
-    const src = read('lib/email/unsubscribe.ts')
-    // A consent control that disappears during an outage is the defect;
-    // the asymmetry is that an unsent marketing email costs nothing and an
-    // unsuppressed one is mail to someone who asked us to stop.
-    expect(src).toMatch(/suppressed:\s*true/)
-    expect(src).toContain('FAILS CLOSED')
+  /**
+   * FAIL-CLOSED IS ASSERTED BY CALLING THE FUNCTION, not by grepping for it.
+   *
+   * This used to read the source and check for `/suppressed:\s*true/` plus the
+   * literal phrase `FAILS CLOSED`. On 2026-08-25 that was canaried by flipping
+   * the helper's own `suppressedResult` to `{ suppressed: false }` — a real
+   * fail-OPEN regression on a consent control — and all nine tests in this file
+   * stayed green. The phrase lives in the JSDoc, and the regex matched a
+   * different, unrelated occurrence further down the file.
+   *
+   * That is precisely what this file's own header warns against: "these assert
+   * the full loop is connected end to end, not that a particular string appears
+   * somewhere." Every branch below is a way the read can fail to produce a
+   * sendable audience, and every one of them must suppress.
+   */
+  describe('the audience helper fails CLOSED', () => {
+    const stub = (result: { data?: unknown; error?: { message: string } | null }) => ({
+      from: () => ({
+        select: () => ({
+          eq: () => ({
+            maybeSingle: () => Promise.resolve({
+              data:  result.data ?? null,
+              error: result.error ?? null,
+            }),
+          }),
+        }),
+      }),
+    })
+
+    const audience = async (result: Parameters<typeof stub>[0]) => {
+      const { resolveEmailAudience } = await import('@/lib/email/unsubscribe')
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      return resolveEmailAudience(stub(result) as any, 'user-1')
+    }
+
+    it('suppresses when the profile read ERRORS', async () => {
+      // The asymmetry: an unsent marketing email is a delay, an unsuppressed
+      // one is mail to someone who asked us to stop. A consent control that
+      // evaporates during an outage is the defect.
+      expect((await audience({ error: { message: 'connection reset' } })).suppressed).toBe(true)
+    })
+
+    it('suppresses when the profile row is MISSING', async () => {
+      expect((await audience({ data: null })).suppressed).toBe(true)
+    })
+
+    it('suppresses a user who has opted out', async () => {
+      expect((await audience({
+        data: { email_unsubscribed_at: '2026-08-01T00:00:00Z', unsubscribe_token: 'tok' },
+      })).suppressed).toBe(true)
+    })
+
+    it('suppresses when there is no unsubscribe token to link to', async () => {
+      // A row predating the backfill. The message cannot carry a working
+      // opt-out, so it must not be sent rather than sent without one.
+      expect((await audience({
+        data: { email_unsubscribed_at: null, unsubscribe_token: '' },
+      })).suppressed).toBe(true)
+    })
+
+    it('permits a subscribed user with a token — the check is not simply always-true', async () => {
+      // Without this the four assertions above would all pass against a helper
+      // hardcoded to suppress, which would be a different bug wearing the same
+      // green tick.
+      const ok = await audience({
+        data: { email_unsubscribed_at: null, unsubscribe_token: 'tok-123' },
+      })
+      expect(ok.suppressed).toBe(false)
+      expect(ok.unsubscribeUrl).toContain('tok-123')
+      expect(Object.keys(ok.headers).length).toBeGreaterThan(0)
+    })
   })
 
   it('the shared email layout can render an unsubscribe link and postal address', () => {

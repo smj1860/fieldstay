@@ -1786,6 +1786,30 @@ meta-rule, prose is for judgment calls only.
 
 ### Code Quality
 
+- **A guardrail must scan CODE, not prose.** Most guardrails in
+  `unit/guardrails/` are text scanners over the real source tree, and a scanner
+  that greps raw source is reading the comments too. That breaks it three ways,
+  all three found live on 2026-08-25:
+  a REQUIRED pattern satisfied by a comment (`commercial-email-optout` asserted
+  the phrase "FAILS CLOSED"; flipping the CAN-SPAM helper to fail-OPEN left all
+  nine of its tests green, because the phrase is in the JSDoc);
+  an EXEMPTING pattern satisfied by a comment (`inngest-insert-idempotency`
+  treats a nearby `onConflict` as proof of a dedup guard, and was waving through
+  an unguarded insert because the word appeared in a comment 85 lines above —
+  so any file that MENTIONS the word granted its inserts immunity);
+  and a BUDGET consumed by a comment (`sensitive-data-logging` matches a
+  300-character window after `logAuditEvent(`, and a 52-character comment inside
+  one call pushed it to 323, hiding a call that wrote a money figure into audit
+  metadata — the exact class that guardrail exists for).
+  Use `readCode()` from `unit/guardrails/scan.ts`, which strips comments and
+  keeps line numbers so `file:line` allowlist keys stay stable. Where the
+  comment genuinely IS the artifact — `inngest-history-secrets`' annotation,
+  `redemption-dedup-pairing`'s index name — keep `read()` and say why.
+  `pnpm run check:comment-blind-guardrails` finds these: it strips every comment
+  in `app`/`lib`/`components`, re-runs the suite, and reports any guardrail that
+  passes on the real tree and fails without prose. Manual, not a CI gate — it
+  rewrites the working tree and restores it with git, and takes two full
+  guardrail runs. Run it when adding a scanner-style guardrail.
 - **Silent failures — logged with real context.** `sensitive-data-logging`
   checks that existing log calls don't leak banned fields, but not the
   inverse: that a caught error actually gets logged with enough context to

@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { collectSourceFiles, rel, read } from './scan'
+import { collectSourceFiles, rel, readCode } from './scan'
 
 // ============================================================================
 // Sensitive-data logging guardrail: CLAUDE.md states, in two places, that
@@ -59,7 +59,12 @@ const MASKED = /\*\*\*|\.slice\(-|redact/i
 function findOffenders(): string[] {
   const offenders: string[] = []
   for (const file of collectSourceFiles(['app', 'lib'])) {
-    const src = read(file)
+    // readCode, NOT read. The window below is 300 characters and comments were
+    // counting toward it: a 52-character comment inside one logAuditEvent call
+    // pushed it to 323 and hid the entire call — which was writing a money
+    // figure into audit metadata, the exact class this guardrail exists for.
+    // See app/api/work-orders/[token]/complete/helpers.ts, fixed 2026-08-25.
+    const src = readCode(file)
     LOG_CALL.lastIndex = 0
     let m: RegExpExecArray | null
     while ((m = LOG_CALL.exec(src))) {
@@ -77,7 +82,16 @@ function findOffenders(): string[] {
 // this guardrail is a ratchet keeping the baseline clean, same model as
 // tailwind-color-ratchet. Add an entry ONLY with a reason the value is
 // already masked/safe in a way this heuristic can't detect on its own.
-const EXCEPTIONS: Record<string, string> = {}
+const EXCEPTIONS: Record<string, string> = {
+  'app/crew-invite/[token]/actions.ts:178':
+    'The `.email` alternation fires on `crew.email ? …`, where the address is '
+    + 'READ AS A BOOLEAN and never logged — the metadata records only '
+    + "`email_source: 'on_file' | 'entered_at_activation'`, which is the "
+    + 'derived, non-identifying form this guardrail\'s header describes as safe '
+    + 'by construction. Newly visible on 2026-08-25 rather than newly written: '
+    + 'the 300-character window used to be consumed by the comment above the '
+    + 'call, so the scan never reached the ternary.',
+}
 
 describe('guardrail: no sensitive fields (actual_cost, guest phone, SMS body, Stripe/secret tokens) in log calls', () => {
   const offenders = findOffenders()
