@@ -59,7 +59,7 @@ data leaks that could expose tenant data.
   with `.eq('org_id', ...)` (or the token's equivalent). Service role in a
   Server Component removes RLS as a defense-in-depth backstop for that
   page, so a missing `.eq('org_id', ...)` filter there fails open with no
-  safety net — prefer `createServerClient()` (RLS-enforced) unless the page
+  safety net — prefer `createClient()` (RLS-enforced) unless the page
   genuinely needs the bypass (e.g. cross-org aggregation re-filtered to the
   caller's authorized scope, as in the owner-portal pages).
 - Never pass it to client components, never return it in API responses,
@@ -67,7 +67,14 @@ data leaks that could expose tenant data.
 - Use `createServiceClient(context)` from `lib/supabase/server.ts` for
   service role — the `ServiceRoleContext` argument is required and names why
   the RLS bypass is justified (see the Supabase Clients pattern section).
-- Use `createServerClient()` from `lib/supabase/server.ts` for normal auth.
+- Use `await createClient()` from `lib/supabase/server.ts` for normal auth —
+  it is ASYNC (it awaits `cookies()`), so a missing `await` hands you a
+  Promise that every `.from()` call then fails on. In a Server Action you
+  usually do not call it at all: `requireOrgMember()` already returns a
+  session-scoped client.
+  NOT `createServerClient()` — that name belongs to `@supabase/ssr`, which
+  `lib/supabase/server.ts` imports and wraps. It is not an export of ours,
+  and this file claimed it was until 2026-08-25.
 - Use `adminFetch()` from `lib/supabase/server.ts` for raw calls to the
   Supabase Admin REST API (e.g. `/auth/v1/admin/users?email=`) that aren't
   covered by the JS client's gotrue/postgrest wrapper — never build a
@@ -419,9 +426,15 @@ export async function myServerAction(data: MyInput) {
 
 ### Supabase Clients
 ```typescript
-// In server actions and route handlers — RLS enforced via auth cookie
-import { createServerClient } from '@/lib/supabase/server'
-const supabase = createServerClient()
+// In server actions and route handlers — RLS enforced via auth cookie.
+// ASYNC: it awaits next/headers' cookies(). And note the name — the wrapper
+// we export is createClient(); `createServerClient` is @supabase/ssr's, which
+// this module imports internally.
+import { createClient } from '@/lib/supabase/server'
+const supabase = await createClient()
+
+// Usually unnecessary in a Server Action: requireOrgMember() hands back a
+// client already scoped to the caller's session.
 
 // In Inngest steps and admin operations — bypasses RLS intentionally.
 // The context argument is REQUIRED (compile-time only, runtime ignores it):
