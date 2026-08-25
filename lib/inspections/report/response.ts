@@ -36,14 +36,44 @@ export function reportResponse(pdf: Uint8Array, filename: string): Response {
   })
 }
 
-/** Conservative by design: letters, digits, hyphen, underscore and dot only. */
+/** Longest name the sanitizer will consider, before any of the work below. */
+const MAX_FILENAME = 120
+
+/**
+ * Conservative by design: letters, digits, hyphen, underscore and dot only.
+ *
+ * TRUNCATED FIRST, and every step after it is linear in the length that
+ * survives. The original did the opposite — three regex passes over the whole
+ * input, then `.slice(0, 120)` at the end — so a pathological property name
+ * paid full price before anything bounded it. One of those passes was
+ * `^[-.]+|[-.]+$`, which SonarQube flags as super-linear through backtracking:
+ * V8 happens to run it in linear time on the obvious inputs (measured), but a
+ * sanitizer whose cost depends on the engine's optimizer is not a property
+ * worth relying on when the alternative is this cheap.
+ *
+ * The edge trim is an explicit loop rather than that regex — unambiguously
+ * linear, and it reads as what it is.
+ */
 export function safeFilename(input: string): string {
   const collapsed = toWinAnsi(input)
+    .slice(0, MAX_FILENAME)
     .replace(/[^A-Za-z0-9._-]+/g, '-')
     .replace(/-{2,}/g, '-')
-    .replace(/^[-.]+|[-.]+$/g, '')
+
   // A name that sanitized away entirely still needs to be a filename.
-  return (collapsed || 'inspection-report').slice(0, 120)
+  return trimSeparators(collapsed) || 'inspection-report'
+}
+
+const SEPARATORS = new Set(['-', '.'])
+
+/** Drops leading and trailing `-` and `.` — a leading dot would make the file
+ *  hidden on unix, and a trailing one is just untidy. */
+function trimSeparators(value: string): string {
+  let start = 0
+  let end   = value.length
+  while (start < end && SEPARATORS.has(value[start]!))   start++
+  while (end > start && SEPARATORS.has(value[end - 1]!)) end--
+  return value.slice(start, end)
 }
 
 /**

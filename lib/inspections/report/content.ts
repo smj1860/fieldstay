@@ -149,6 +149,28 @@ export function actionsLine(answer: ReportAnswer): string | null {
 }
 
 /**
+ * The span a history covers, as [earliest, latest].
+ *
+ * Min and max in one pass each rather than sorting and reading the ends: ISO
+ * 8601 UTC stamps compare chronologically under plain `<`, so this is both
+ * cheaper and free of the question SonarQube raises about sorting strings with
+ * no comparator. Lives here rather than inline in the renderer because it is a
+ * CLAIM the cover page makes — "this record runs from X to Y" — and a reversed
+ * range would be invisible in a PDF whose text is not greppable.
+ *
+ * Returns null for an empty set; the caller only draws a cover for a multi-walk
+ * history, so that is a defensive floor rather than an expected case.
+ */
+export function historyRange(report: InspectionReport): [string, string] | null {
+  const stamps = report.inspections.map((i) => i.completedAt)
+  if (stamps.length === 0) return null
+  return [
+    stamps.reduce((a, b) => (a < b ? a : b)),
+    stamps.reduce((a, b) => (a > b ? a : b)),
+  ]
+}
+
+/**
  * The cap, stated on the cover page or not at all.
  *
  * A cap that is not stated turns "the most recent 60" into an assertion of

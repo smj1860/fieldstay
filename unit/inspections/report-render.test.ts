@@ -7,6 +7,7 @@ import {
   actionsLine,
   conditionsLine,
   historyCapNote,
+  historyRange,
   metaRows,
   remediationLine,
   statusLabel,
@@ -254,6 +255,40 @@ describe('historyCapNote', () => {
   })
   it('adds no caveat to a complete history', () => {
     expect(historyCapNote(report())).toBeNull()
+  })
+})
+
+describe('historyRange', () => {
+  const at = (iso: string) => inspection({ completedAt: iso })
+  const of = (...isos: string[]): InspectionReport => ({
+    orgId: 'o', propertyName: 'x', generatedAt: '2026-08-25T12:00:00.000Z',
+    inspections: isos.map(at), photosIncluded: false, omittedCount: 0,
+  })
+
+  it('returns [earliest, latest] whatever order the walks arrive in', () => {
+    // Replaced a `.sort()` with min/max on 2026-08-25 (SonarQube: sorting
+    // strings with no comparator). Getting the two reduces the wrong way round
+    // prints the span backwards, and PDF text is not greppable — nothing else
+    // in the suite would have caught it.
+    expect(historyRange(of(
+      '2026-05-02T00:00:00.000Z',
+      '2024-01-15T00:00:00.000Z',
+      '2025-09-30T00:00:00.000Z',
+    ))).toEqual(['2024-01-15T00:00:00.000Z', '2026-05-02T00:00:00.000Z'])
+  })
+
+  it('is already ordered when the input is', () => {
+    expect(historyRange(of('2024-01-01T00:00:00.000Z', '2026-01-01T00:00:00.000Z')))
+      .toEqual(['2024-01-01T00:00:00.000Z', '2026-01-01T00:00:00.000Z'])
+  })
+
+  it('collapses to a single point for one walk', () => {
+    expect(historyRange(of('2025-03-03T00:00:00.000Z')))
+      .toEqual(['2025-03-03T00:00:00.000Z', '2025-03-03T00:00:00.000Z'])
+  })
+
+  it('returns null rather than throwing on an empty set', () => {
+    expect(historyRange(of())).toBeNull()
   })
 })
 

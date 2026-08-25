@@ -51,6 +51,26 @@ describe('safeFilename', () => {
   it('bounds the length', () => {
     expect(safeFilename('a'.repeat(500)).length).toBeLessThanOrEqual(120)
   })
+
+  it('truncates BEFORE sanitizing, so the work is bounded and not just the result', () => {
+    // The original ran three regex passes over the whole input and sliced at
+    // the end, so a pathological name paid full price before anything bounded
+    // it — one pass being the `^[-.]+|[-.]+$` SonarQube flags as super-linear.
+    //
+    // THE INPUT HERE IS CHOSEN SO THE TWO ORDERINGS DISAGREE. A first attempt
+    // used 500 'a's and checked the result was 120 long, which both orderings
+    // satisfy — a blind assertion written while fixing blind assertions, caught
+    // by canarying the fix. Sanitizing COLLAPSES runs, so a long run of
+    // separators is where order becomes visible:
+    //   truncate first  → 'x' + 119 spaces          → 'x-'  → trimmed → 'x'
+    //   sanitize first  → 'x' + 200 spaces + 'y'    → 'x-y' → trimmed → 'x-y'
+    expect(safeFilename(`x${' '.repeat(200)}y`)).toBe('x')
+  })
+
+  it('trims separators from both ends', () => {
+    expect(safeFilename('--lake--house--')).toBe('lake-house')
+    expect(safeFilename('.hidden')).toBe('hidden')
+  })
 })
 
 const inspection = (over: Partial<ReportInspection> = {}): ReportInspection => ({

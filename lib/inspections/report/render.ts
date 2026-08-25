@@ -10,6 +10,7 @@ import {
   actionsLine,
   attachmentLine,
   historyCapNote,
+  historyRange,
   metaRows,
   remediationLine,
   statusLabel,
@@ -125,9 +126,10 @@ function drawHistoryCover(cur: Cursor, report: InspectionReport): void {
   if (org) line(cur, org, 10, GRAY_MED)
 
   cur.y -= 10
-  const dates = report.inspections.map((i) => i.completedAt).sort()
   line(cur, `${report.inspections.length} completed inspections`, 11, GRAY_DARK)
-  line(cur, `${formatStamp(dates[0]!)} — ${formatStamp(dates[dates.length - 1]!)}`, 10, GRAY_MED)
+
+  const range = historyRange(report)
+  if (range) line(cur, `${formatStamp(range[0])} — ${formatStamp(range[1])}`, 10, GRAY_MED)
 
   // A CAP THAT IS NOT STATED is an assertion of completeness. This document's
   // entire claim is that it is the whole record, so the one case where it is

@@ -109,7 +109,7 @@ export function wrapText(
     } else {
       const pieces = breakLongWord(word, font, size, maxWidth)
       lines.push(...pieces.slice(0, -1))
-      line = pieces[pieces.length - 1] ?? ''
+      line = pieces.at(-1) ?? ''
     }
   }
   if (line) lines.push(line)
