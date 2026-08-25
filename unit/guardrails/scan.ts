@@ -140,44 +140,72 @@ export function readCode(file: string): string {
 export function stripComments(src: string): string {
   const out: string[] = []
   let i = 0
-  const n = src.length
 
-  while (i < n) {
-    const c = src[i]!
+  while (i < src.length) {
+    // Each consumer returns the index just past what it handled, or null when
+    // this position is not its business. Split out of one long branch chain
+    // because that scored 29 on cognitive complexity against this repo's own
+    // limit of 15 — a limit that happens not to be ENFORCED here, since
+    // eslint.config.mjs scopes the sonarjs rules to app/lib/components. The
+    // rule applies to the enforcement layer too.
+    const next = consumeComment(src, i, out)
+      ?? consumeQuoted(src, i, out)
+      ?? consumeRegexLiteral(src, i, out)
 
-    if (c === '/' && src[i + 1] === '/') {
-      while (i < n && src[i] !== '\n') i++          // leaves the newline
+    if (next !== null) {
+      i = next
       continue
     }
 
-    if (c === '/' && src[i + 1] === '*') {
-      const end = src.indexOf('*/', i + 2)
-      const stop = end === -1 ? n : end + 2
-      // Newlines ONLY. Keeping the blanks too would preserve positions but
-      // leave a windowed scanner's budget just as consumed as before.
-      for (let k = i; k < stop; k++) if (src[k] === '\n') out.push('\n')
-      i = stop
-      continue
-    }
-
-    if (c === '"' || c === "'" || c === '`') {
-      i = copyQuoted(src, i, c, out)
-      continue
-    }
-
-    if (c === '/' && regexAllowed(out)) {
-      const end = regexEnd(src, i)
-      if (end !== -1) {
-        out.push(src.slice(i, end))
-        i = end
-        continue
-      }
-    }
-
-    out.push(c)
+    out.push(src[i]!)
     i++
   }
   return out.join('')
+}
+
+/**
+ * A line or block comment, dropped. Returns null if this is not a comment.
+ *
+ * A line comment leaves its terminating newline behind for the main loop; a
+ * block comment emits ONLY the newlines it spanned. Keeping its blanks too
+ * would preserve column positions but leave a windowed scanner's character
+ * budget just as consumed as before — which is half the point of this module.
+ */
+function consumeComment(src: string, i: number, out: string[]): number | null {
+  if (src[i] !== '/') return null
+
+  if (src[i + 1] === '/') {
+    let j = i
+    while (j < src.length && src[j] !== '\n') j++
+    return j
+  }
+
+  if (src[i + 1] === '*') {
+    const end  = src.indexOf('*/', i + 2)
+    const stop = end === -1 ? src.length : end + 2
+    for (let k = i; k < stop; k++) if (src[k] === '\n') out.push('\n')
+    return stop
+  }
+
+  return null
+}
+
+/** A string or template literal, copied verbatim. Null if not a quote. */
+function consumeQuoted(src: string, i: number, out: string[]): number | null {
+  const c = src[i]
+  if (c !== '"' && c !== "'" && c !== '`') return null
+  return copyQuoted(src, i, c, out)
+}
+
+/** A regex literal, copied verbatim. Null if this `/` is division. */
+function consumeRegexLiteral(src: string, i: number, out: string[]): number | null {
+  if (src[i] !== '/' || !regexAllowed(out)) return null
+
+  const end = regexEnd(src, i)
+  if (end === -1) return null
+
+  out.push(src.slice(i, end))
+  return end
 }
 
 /** Copies a string or template literal verbatim, returning the next index. */

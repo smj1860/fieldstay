@@ -128,7 +128,14 @@ function runGuardrails(): Set<string> {
     output = `${e.stdout ?? ''}${e.stderr ?? ''}`
   }
 
-  const summary = /Test Files\s+.*?\((\d+)\)/.exec(output)
+  // Found on the LINE first, then parsed. `/Test Files\s+.*?\((\d+)\)/` over the
+  // whole buffer is ambiguous — `\s+` and `.*?` both match whitespace — so an
+  // output containing "Test Files" with no following `(` backtracks
+  // quadratically. That buffer is capped at 64MB, which is more than enough for
+  // the pathological case to hang the tool rather than merely slow it.
+  const summaryLine = output.split('\n').find((l) => l.includes('Test Files'))
+  const summary     = summaryLine ? /\((\d+)\)/.exec(summaryLine) : null
+
   if (!summary || Number(summary[1]) === 0) {
     throw new Error(
       'vitest did not report a test-file count, so no tests actually ran. Refusing to\n'

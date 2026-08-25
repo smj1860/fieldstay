@@ -30,7 +30,7 @@ describe('stripComments — removes comments', () => {
     const src = '/**\n * note\n */\nconst a = 1'
     const out = stripComments(src)
     expect(out).not.toContain('note')
-    expect(out.split('\n').length).toBe(src.split('\n').length)
+    expect(out.split('\n')).toHaveLength(src.split('\n').length)
   })
 
   it('does not leave comment text able to satisfy a scanner', () => {
@@ -51,42 +51,29 @@ describe('stripComments — removes comments', () => {
 })
 
 describe('stripComments — never damages real code', () => {
-  it('leaves a URL in a string alone', () => {
-    // `replace(/\/\/.*$/gm, '')` deletes the rest of this line.
-    const src = "const u = 'https://api.mapbox.com/geocoding/v5'"
-    expect(stripComments(src)).toBe(src)
-  })
-
-  it('leaves a comment opener inside a string alone', () => {
-    expect(stripComments('const s = "/* not a comment */"')).toBe('const s = "/* not a comment */"')
-    expect(stripComments("const s = '// not a comment'")).toBe("const s = '// not a comment'")
-  })
-
-  it('leaves a regex literal containing slashes alone', () => {
-    const src = 'const re = /\\/\\*|\\/\\//g'
-    expect(stripComments(src)).toBe(src)
-  })
-
-  it('handles a template literal with an interpolation', () => {
-    const src = 'const s = `a ${b ? "x" : "y"} c`'
-    expect(stripComments(src)).toBe(src)
-  })
-
-  it('handles a template literal containing a URL and braces', () => {
-    const src = 'const s = `https://x/${id}/report`'
+  // Every row here is a construct that CONTAINS something a naive stripper
+  // reads as a comment opener, and must survive untouched. Tabled rather than
+  // written out: the assertion is identical in each and the hazard is the only
+  // thing that varies, so the label carries the reasoning.
+  it.each([
+    // A line-comment regex over raw source deletes the rest of this line.
+    ['a URL inside a string',            "const u = 'https://api.mapbox.com/geocoding/v5'"],
+    ['a block-comment opener in a string', 'const s = "/* not a comment */"'],
+    ['a line-comment opener in a string',  "const s = '// not a comment'"],
+    // Escaped slashes and stars — the shape this module's own docs describe.
+    ['a regex literal full of slashes',  'const re = /\\/\\*|\\/\\//g'],
+    ['a template literal interpolation', 'const s = `a ${b ? "x" : "y"} c`'],
+    ['a template literal with a URL and braces', 'const s = `https://x/${id}/report`'],
+    // `<` is excluded from the regex-predecessor set precisely for this: with
+    // it in, `</div>` opens a "regex" that swallows to the next slash.
+    ['a JSX closing tag',                '<div>{a}</div><span>{b}</span>'],
+  ])('leaves %s untouched', (_hazard, src) => {
     expect(stripComments(src)).toBe(src)
   })
 
   it('treats division as division, not as a regex opener', () => {
     const src = 'const r = width / 5\nconst q = total / count // done'
     expect(stripComments(src)).toBe('const r = width / 5\nconst q = total / count ')
-  })
-
-  it('does not mis-scan a JSX closing tag as a regex', () => {
-    // `<` is deliberately excluded from the regex-predecessor set: with it in,
-    // `</div>` opens a "regex" that swallows to the next slash.
-    const src = '<div>{a}</div><span>{b}</span>'
-    expect(stripComments(src)).toBe(src)
   })
 
   it('keeps an escaped quote from ending a string early', () => {
@@ -111,7 +98,7 @@ describe('stripComments — line numbers survive', () => {
 
     const out   = stripComments(src)
     const lines = out.split('\n')
-    expect(lines.length).toBe(9)
+    expect(lines).toHaveLength(9)
     expect(lines[0]).toContain('const a = 1')
     expect(lines[4]).toContain('const b = 2')
     expect(lines[8]).toContain('const c = 3')
