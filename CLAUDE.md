@@ -1042,6 +1042,41 @@ and gated crew counts behind a PM approval that product never wanted.
   aggregate that ships no rows at all. Enforced for `lib/inngest/**` by
   `unit/guardrails/unbounded-select.test.ts`.
 
+### Inspection export caps — stated, not silent
+
+The inspection report (phase 7) renders synchronously on the request path:
+several passes over the answers, then pdf-lib draw calls per row, then one
+`save()` that serialises the whole document, with no yield point in the chain
+and no `maxDuration` entry in `vercel.json`. So it carries explicit ceilings.
+They are recorded here because **a cap nobody remembers is a cap somebody
+raises**, and this document's entire claim is completeness — a history that
+silently stops partway through 2024 reads as the PM having given up.
+
+| Cap | Value | Where | What it bounds |
+|---|---|---|---|
+| `MAX_HISTORY_INSPECTIONS` | **60** | `lib/inspections/report/model.ts` | Walks in one whole-property history export. ~20 years at three a year |
+| `MAX_REPORT_PHOTOS` | **150** | `lib/inspections/report/model.ts` | Photographs embedded in one report. The bucket caps an object at 10MB, so this is a BYTES bound wearing a row count |
+| `MAX_ANSWER_ROWS` | **12,000** | `lib/inspections/report/model.ts` | The `fetchAllRows` drain over `inspection_items`. A 60-walk history is ~4,000 rows — already past `max_rows` |
+| `MAX_INSPECTIONS` | **24** | `lib/owner-portal/inspections.ts` | Walks rendered in the owner portal's history section |
+| `MAX_ITEM_ROWS` | **6,000** | `lib/owner-portal/inspections.ts` | That section's item drain |
+
+Two rules go with them:
+
+- **A cap that applies must SAY SO in the output.** `loadInspectionReport`
+  returns `omittedCount` from a `count: 'exact'` and the cover page renders
+  `historyCapNote()`; the owner portal does the same through
+  `historySubtitle()`. Without the total there is no way to distinguish "this
+  is the whole record" from "this is the first page of it", and the document
+  would assert the second as the first.
+- **Raising one is a capacity decision, not a number edit.** Past a few
+  hundred walks the fix is not a bigger constant — it is moving generation off
+  the request path onto an Inngest job that writes to Storage and hands back a
+  signed URL, the same shape `org_milestones` polling already uses. The CPA
+  export's comment says this too, and for the same reason.
+
+Enforced by `unit/guardrails/report-export-caps.test.ts`, which fails if a
+constant moves without this table moving with it — in either direction.
+
 ---
 
 ## Code Quality Standards
