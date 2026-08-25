@@ -42,16 +42,31 @@
  *
  * ── Why this is a script and not a CI gate ──────────────────────────────────
  *
- * It rewrites the working tree and restores it with git, which is fine to do
- * deliberately and wrong to do on every push. It also takes two full guardrail
- * runs. Run it when adding a scanner-style guardrail, or when auditing.
+ * It rewrites the working tree, which is fine to do deliberately and wrong to
+ * do on every push. It also takes two full guardrail runs. Run it when adding a
+ * scanner-style guardrail, or when auditing.
  *
- * Refuses to run on a dirty tree — the restore is `git checkout --`, and on a
- * dirty tree that would destroy uncommitted work.
+ * ── Restore is from MEMORY, not from git ────────────────────────────────────
+ *
+ * Originals are held in a Map and written back in a `finally`, with SIGINT and
+ * SIGTERM handled so Ctrl-C restores too. The earlier version restored with
+ * `git checkout -- app lib components`, which forced it to refuse to run on a
+ * dirty tree: that command discards uncommitted work, so it could not be
+ * allowed anywhere near one. Restoring exactly what was read back is both safer
+ * and unrestricted — a dirty tree is now fine.
+ *
+ * It also removes the only reason this script shelled out to `git`. Nothing
+ * here resolves a binary through PATH any more: the guardrail run is spawned as
+ * `process.execPath` against vitest's resolved entry point, so neither the node
+ * binary nor the test runner can be shadowed by a PATH entry.
+ *
+ * Residual risk, stated rather than hidden: a hard kill (SIGKILL, power loss)
+ * between stripping and restoring leaves the tree stripped. Recover with
+ * `git checkout -- app lib components`.
  */
 import { execFileSync } from 'node:child_process'
 import { readFileSync, writeFileSync, readdirSync, statSync } from 'node:fs'
-import { join } from 'node:path'
+import { dirname, join } from 'node:path'
 
 // The SAME stripper the guardrails use. If the sweep had its own, the two could
 // disagree and the sweep would be testing something the suite never sees.
@@ -61,6 +76,13 @@ const ROOT = join(__dirname, '..')
 const DIRS = ['app', 'lib', 'components']
 const SKIP = new Set(['node_modules', '.next', '.git', 'out', 'build'])
 
+/**
+ * Vitest's own entry, resolved through node's module resolution rather than
+ * found on PATH. Paired with `process.execPath` below this pins BOTH halves of
+ * the spawn: the interpreter and the script it runs.
+ */
+const VITEST_ENTRY = join(dirname(require.resolve('vitest/package.json')), 'vitest.mjs')
+
 /** Guardrails that read comments deliberately — see the header. */
 const EXPECTED: Record<string, string> = {
   'unit/guardrails/inngest-history-secrets.test.ts':
@@ -69,10 +91,6 @@ const EXPECTED: Record<string, string> = {
   'unit/guardrails/redemption-dedup-pairing.test.ts':
     'Requires the route to NAME the unique index it depends on in a comment, so '
     + 'that grepping for the index finds its consumer. The comment is the artifact.',
-}
-
-function git(...args: string[]): string {
-  return execFileSync('git', args, { cwd: ROOT, encoding: 'utf8' })
 }
 
 function sourceFiles(): string[] {
@@ -102,7 +120,7 @@ function sourceFiles(): string[] {
 function runGuardrails(): Set<string> {
   let output: string
   try {
-    output = execFileSync('npx', ['vitest', 'run', 'unit/guardrails/'],
+    output = execFileSync(process.execPath, [VITEST_ENTRY, 'run', 'unit/guardrails/'],
       { cwd: ROOT, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], maxBuffer: 64 * 1024 * 1024 })
   } catch (err) {
     // A non-zero exit is the NORMAL case here — failures are the signal.
@@ -127,13 +145,28 @@ function runGuardrails(): Set<string> {
   return failed
 }
 
+/** Originals of every file this run rewrote, keyed by absolute path. */
+const originals = new Map<string, string>()
+
+function restore(): void {
+  for (const [file, src] of originals) writeFileSync(file, src, 'utf8')
+  originals.clear()
+}
+
+/**
+ * Ctrl-C must put the tree back. Without this the `finally` never runs on a
+ * signal and the developer is left with a comment-stripped checkout and no
+ * indication why.
+ */
+function onSignal(signal: NodeJS.Signals): void {
+  console.log(`\n[sweep] ${signal} — restoring before exit…`)
+  restore()
+  process.exit(130)
+}
+
 function main(): number {
-  if (git('status', '--porcelain').trim()) {
-    console.error('[sweep] Working tree is dirty. This script rewrites every source file and\n'
-      + '        restores with `git checkout --`, which would destroy uncommitted work.\n'
-      + '        Commit or stash first.')
-    return 2
-  }
+  process.on('SIGINT', onSignal)
+  process.on('SIGTERM', onSignal)
 
   console.log('[sweep] baseline: running guardrails against the real tree…')
   const baselineFailures = runGuardrails()
@@ -146,19 +179,24 @@ function main(): number {
 
   const files = sourceFiles()
   console.log(`[sweep] stripping comments from ${files.length} files…`)
-  for (const f of files) {
-    const src = readFileSync(f, 'utf8')
-    const out = stripComments(src)
-    if (out !== src) writeFileSync(f, out, 'utf8')
-  }
 
   let failures: Set<string>
   try {
+    for (const f of files) {
+      const src = readFileSync(f, 'utf8')
+      const out = stripComments(src)
+      if (out === src) continue
+      // Recorded BEFORE the write, so a throw mid-loop still restores every
+      // file already rewritten.
+      originals.set(f, src)
+      writeFileSync(f, out, 'utf8')
+    }
+
     console.log('[sweep] re-running guardrails against the stripped tree…')
     failures = runGuardrails()
   } finally {
     console.log('[sweep] restoring…')
-    git('checkout', '--', ...DIRS)
+    restore()
   }
 
   const findings = [...failures].filter((f) => !(f in EXPECTED))

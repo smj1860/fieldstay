@@ -162,12 +162,22 @@ export function actionsLine(answer: ReportAnswer): string | null {
  * history, so that is a defensive floor rather than an expected case.
  */
 export function historyRange(report: InspectionReport): [string, string] | null {
-  const stamps = report.inspections.map((i) => i.completedAt)
-  if (stamps.length === 0) return null
-  return [
-    stamps.reduce((a, b) => (a < b ? a : b)),
-    stamps.reduce((a, b) => (a > b ? a : b)),
-  ]
+  const [first, ...rest] = report.inspections
+  if (!first) return null
+
+  // An explicit loop rather than two `reduce()` calls without an initial value.
+  // Those throw `TypeError: Reduce of empty array` on an empty input, and the
+  // length guard above is the only thing that stopped it — a shape where
+  // deleting a guard turns into a runtime crash rather than a type error.
+  // Seeded from the first element, this cannot be reached with nothing to seed
+  // from, and it makes one pass instead of two.
+  let earliest = first.completedAt
+  let latest   = first.completedAt
+  for (const { completedAt } of rest) {
+    if (completedAt < earliest) earliest = completedAt
+    if (completedAt > latest)   latest   = completedAt
+  }
+  return [earliest, latest]
 }
 
 /**
