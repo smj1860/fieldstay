@@ -8,6 +8,10 @@ import type { TxnType } from '@/types/database'
 import type { CapExProjectionPayload } from '@/lib/inngest/functions/capex-projections'
 import { unwrapJoin } from '@/lib/utils/supabase-joins'
 import { unwrap, unwrapList, reportQueryError, type PostgrestResult } from '@/lib/supabase/unwrap'
+import {
+  validatePortalToken,
+  type PortalTokenRow,
+} from '@/lib/owner-portal/token'
 
 /**
  * Data loading for the owner portal page — extracted out of
@@ -95,72 +99,7 @@ function getLastSixMonths(): string[] {
 
 // ── Token validation ─────────────────────────────────────────────────────────
 
-type PortalTokenRow = {
-  id:               string
-  expires_at:       string | null
-  revoked_at:       string | null
-  last_accessed_at: string | null
-  is_multi:         boolean | null
-  property_ids:     string[] | null
-  // Supabase returns nested joins as object-or-array; unwrapJoin normalizes.
-  property_owners:  unknown
-}
-
-const PORTAL_TOKEN_SELECT = `
-  id,
-  expires_at,
-  revoked_at,
-  last_accessed_at,
-  is_multi,
-  property_ids,
-  property_owners (
-    id,
-    org_id,
-    name,
-    revenue_share_pct,
-    share_capital_plan,
-    property_id,
-    properties (
-      id,
-      name,
-      address,
-      city,
-      state,
-      zip
-    )
-  )
-`
-
 type SupabaseLike = ReturnType<typeof createServiceClient>
-
-/**
- * Resolves the opaque portal token. Returns a terminal page state for a
- * revoked/expired/unknown token, or the validated row for the caller to scope
- * every subsequent query against. This IS the only auth this route has.
- */
-async function validatePortalToken(
-  supabase: SupabaseLike,
-  token:    string,
-): Promise<{ terminal: OwnerPortalPageState | null; row: PortalTokenRow | null }> {
-  const res = await supabase
-    .from('owner_portal_tokens')
-    .select(PORTAL_TOKEN_SELECT)
-    .eq('token', token)
-    .maybeSingle()
-
-  // A failed read must not be mistaken for "no such token" — a 404 for a
-  // paying owner during an outage is indistinguishable from a revoked link.
-  const portalToken = unwrap(res as PostgrestResult<PortalTokenRow>, {
-    site: 'owner-portal.validatePortalToken',
-  })
-
-  if (!portalToken) return { terminal: null, row: null }
-  if (portalToken.revoked_at) return { terminal: { status: 'revoked' }, row: null }
-  if (portalToken.expires_at && new Date(portalToken.expires_at) < new Date()) {
-    return { terminal: { status: 'expired' }, row: null }
-  }
-  return { terminal: null, row: portalToken }
-}
 
 // ── Portfolio scoping (the tenant-isolation boundary) ────────────────────────
 
@@ -409,9 +348,15 @@ export async function loadOwnerPortalData(
 ): Promise<OwnerPortalPageState | null> {
   const supabase = createServiceClient({ publicSurface: 'owner--token--load-owner-portal-data' })
 
-  const { terminal, row: portalToken } = await validatePortalToken(supabase, token)
-  if (terminal) return terminal
-  if (!portalToken) return null
+  // lib/owner-portal/token.ts — SHARED with the report download route, so a
+  // revoked link dies on both surfaces rather than on whichever one remembered
+  // to check `revoked_at`.
+  const validated = await validatePortalToken(supabase, token)
+  if (!validated.ok) {
+    if (validated.reason === 'not_found') return null
+    return { status: validated.reason }
+  }
+  const portalToken: PortalTokenRow = validated.token
 
   const ownerRaw = unwrapJoin(portalToken.property_owners) as {
     org_id: string | null
