@@ -31,7 +31,24 @@ const PROOF_PATTERNS: RegExp[] = [
   /auth\.getUser\(\)/,                    // session-authenticated, self-scoped routes (account delete, GDPR export, OAuth start)
   /constructEvent/,                       // Stripe webhook signature verification
   /verify[A-Za-z]*Signature/,             // provider webhook HMAC/Ed25519 verification (e.g. Telnyx)
-  /\.eq\(\s*['"][a-z_]*token['"]/,        // opaque-token lookup (owner portal, quote, guidebook, invite, completion)
+  /\.eq\(\s*['"][a-z_]*token['"]/,        // opaque-token lookup (quote, guidebook, invite, completion)
+
+  // The owner portal's canonical token gate — lib/owner-portal/token.ts.
+  //
+  // Added 2026-08-25, when extracting that gate out of
+  // app/owner/[token]/load-owner-portal-data.ts so the report download route
+  // could share it broke BOTH files here at once. That is this guardrail
+  // working, not failing: its matchers are lexical and per-file, so hoisting an
+  // authorization step into a helper genuinely does remove the evidence it can
+  // see, and the two files really were indistinguishable from unauthorized ones
+  // by the time it ran.
+  //
+  // The fix is a recognizer rather than two EXCEPTIONS entries, because an
+  // exception is a permanent hole and this is a rename. It is also STRICTER
+  // than what it replaces for these files: `.eq('token', …)` matched any read
+  // of a column named token, while this names the function that actually checks
+  // revoked_at and expires_at.
+  /validatePortalToken/,
   /platform_staff/,                       // staff-gated admin surfaces
   /demoSecretMatches/,                    // /demo/* shared-secret gate (constant-time, fails closed when unset)
 ]
