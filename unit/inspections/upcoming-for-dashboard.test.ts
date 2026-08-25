@@ -83,6 +83,28 @@ describe('loadUpcomingInspections — scope and bounds', () => {
     expect(UPCOMING_HORIZON_DAYS).toBe(29)
   })
 
+  it('excludes a schedule whose PROPERTY is archived', async () => {
+    // archiveProperty sets properties.is_active = false and deliberately leaves
+    // maintenance_schedules alone — the schedule is still the right record if
+    // the property is un-archived. So filtering only on the schedule's own
+    // is_active leaves an archived house showing permanently overdue work
+    // nobody intends to do, on the dashboard and in the monthly email both.
+    //
+    // Asserted at the QUERY, because the filter is server-side: an embedded
+    // `.eq('property.is_active', true)` over a `properties!inner(...)` join.
+    const { client, calls } = makeClient({
+      maintenance_schedules: { data: [scheduleRow()] },
+    })
+    await loadUpcomingInspections(client, ORG, TODAY)
+
+    const args = calls.filter((c) => c.table === 'maintenance_schedules').map((c) => c.args)
+    expect(args).toContainEqual(['property.is_active', true])
+    expect(
+      calls.some((c) => c.method === 'select' && String(c.args[0]).includes('properties!inner')),
+      'the embed must be an INNER join, or the filter cannot exclude anything',
+    ).toBe(true)
+  })
+
   it('bounds every read — max_rows truncates silently', async () => {
     const { client, calls } = makeClient({
       maintenance_schedules: { data: [scheduleRow()] },

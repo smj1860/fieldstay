@@ -68,11 +68,21 @@ const MAX_SCHEDULES_PER_ORG = 500
 
 interface ScheduleRow extends OverdueCandidate {
   name:     string
-  property: { name: string }[] | { name: string } | null
+  property: { name: string; is_active: boolean }[] | { name: string; is_active: boolean } | null
 }
 
+/**
+ * `properties!inner(...)` — an INNER join, so a schedule whose property is gone
+ * drops out rather than arriving with a null embed.
+ *
+ * The active filter is on the PROPERTY, not just the schedule. archiveProperty
+ * sets properties.is_active = false and deliberately leaves maintenance_schedules
+ * alone (the schedule is still the right record if the property is un-archived),
+ * so filtering only on the schedule would keep emailing a PM every month about
+ * a house they stopped managing — forever, since nobody is ever going to walk it.
+ */
 const SELECT =
-  'id, org_id, property_id, name, next_due_date, overdue_notified_month, property:properties(name)'
+  'id, org_id, property_id, name, next_due_date, overdue_notified_month, property:properties!inner(name, is_active)'
 
 // ── Dispatcher ───────────────────────────────────────────────────────────────
 
@@ -110,6 +120,7 @@ export const inspectionOverdueEmailCron = inngest.createFunction(
           .select(SELECT)
           .eq('creates', 'inspection')
           .eq('is_active', true)
+          .eq('property.is_active', true)
           .not('next_due_date', 'is', null)
           .lt('next_due_date', firstOfMonth(today))
           .order('id')
@@ -163,6 +174,7 @@ export const inspectionOverdueEmailHandler = inngest.createFunction(
         .eq('org_id', org_id)
         .eq('creates', 'inspection')
         .eq('is_active', true)
+        .eq('property.is_active', true)
         .not('next_due_date', 'is', null)
         .lt('next_due_date', firstOfMonth(today))
         .order('next_due_date', { ascending: true })
