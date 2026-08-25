@@ -1044,6 +1044,13 @@ export interface MaintenanceSchedule {
   auto_create_wo:            boolean
   last_completed_date:       string | null
   next_due_date:             string | null
+  /**
+   * The `next_due_date` this schedule has already produced an overdue email
+   * for. NULL = never. Compared with IS DISTINCT FROM rather than `<`, because
+   * the vacancy nudge can move a due date EARLIER as well as later and a `<`
+   * test would read that as already-notified.
+   */
+  overdue_notified_for:      string | null
   active_from_month:         number | null
   active_to_month:           number | null
   asset_category:            string | null
