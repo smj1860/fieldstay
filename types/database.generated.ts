@@ -2877,7 +2877,7 @@ export type Database = {
           name: string
           next_due_date: string | null
           org_id: string
-          overdue_notified_for: string | null
+          overdue_notified_month: string | null
           property_id: string
           schedule_type: Database["public"]["Enums"]["schedule_type"]
           source_catalog_item_id: string | null
@@ -2909,7 +2909,7 @@ export type Database = {
           name: string
           next_due_date?: string | null
           org_id: string
-          overdue_notified_for?: string | null
+          overdue_notified_month?: string | null
           property_id: string
           schedule_type?: Database["public"]["Enums"]["schedule_type"]
           source_catalog_item_id?: string | null
@@ -2941,7 +2941,7 @@ export type Database = {
           name?: string
           next_due_date?: string | null
           org_id?: string
-          overdue_notified_for?: string | null
+          overdue_notified_month?: string | null
           property_id?: string
           schedule_type?: Database["public"]["Enums"]["schedule_type"]
           source_catalog_item_id?: string | null

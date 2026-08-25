@@ -1,7 +1,15 @@
 // lib/inngest/functions/cron/inspection-overdue-email.ts
 //
-// §9's overdue-inspection email. One per ORG, three days after a scheduled walk
-// was due.
+// §9's overdue-inspection email. A MONTHLY DIGEST, one per ORG, sent on the 1st
+// and covering every inspection due in a prior month that has not been walked.
+//
+// Monthly rather than per-due-date because inspection dates cluster by MONTH:
+// applySafetyTemplate seeds every property with the 1st of the template's
+// month, and from the second occurrence onward nudgeDueDateIntoVacancy moves
+// each to a different day inside roughly that month, chosen from that
+// property's own booking gaps. A "three days after due" rule therefore
+// trickles emails across the month — 29 on one morning for a portfolio's first
+// occurrence, then a scatter of ones and twos forever after.
 //
 // WHO IT GOES TO. §2 said "Email the assignee. No escalation path — they are
 // the responsible party." Amended 2026-08-24: it goes to the PM / org owner.
@@ -33,7 +41,8 @@ import { renderPmAlert }        from '@/lib/resend/emails/pm-alert'
 import { reportError }          from '@/lib/observability/report-error'
 import { todayISO }             from '@/lib/inspections/due-schedules'
 import {
-  selectOverdueForEmail,
+  firstOfMonth,
+  selectOverdueForDigest,
   type OverdueCandidate,
 } from '@/lib/inspections/overdue-email'
 import {
@@ -63,7 +72,7 @@ interface ScheduleRow extends OverdueCandidate {
 }
 
 const SELECT =
-  'id, org_id, property_id, name, next_due_date, overdue_notified_for, property:properties(name)'
+  'id, org_id, property_id, name, next_due_date, overdue_notified_month, property:properties(name)'
 
 // ── Dispatcher ───────────────────────────────────────────────────────────────
 
@@ -74,14 +83,21 @@ export const inspectionOverdueEmailCron = inngest.createFunction(
     retries: 2,
     concurrency: { limit: 1, key: '"inspection-overdue-email-cron"' },
   },
-  // 13:30 UTC — mid-morning US, and deliberately NOT on the hour. The :00 slot
-  // already carries the hourly token refresh plus several daily crons, and a
-  // 2026-08-24 incident traced to two of them colliding there.
-  { cron: '30 13 * * *' },
+  // The 1st of each month at 13:30 UTC — mid-morning US, and deliberately NOT
+  // on the hour. The :00 slot already carries the hourly token refresh plus
+  // several daily crons, and a 2026-08-24 incident traced to two of them
+  // colliding there.
+  //
+  // Monthly rather than daily because the digest covers a month: a daily run
+  // would find the same outstanding set every morning and be suppressed by the
+  // month key on 30 of 31 days, which is a scan doing nothing.
+  { cron: '30 13 1 * *' },
   async ({ step, logger }) => {
     const today = todayISO()
 
     const orgIds = await step.run('find-orgs-with-overdue', async () => {
+      // Everything due before this month started — the month just ended, plus
+      // anything still outstanding from before it.
       const supabase = createServiceClient({ system: SYSTEM })
 
       // Paginated: a platform-wide scan, and `max_rows = 1000` truncates with a
@@ -95,13 +111,13 @@ export const inspectionOverdueEmailCron = inngest.createFunction(
           .eq('creates', 'inspection')
           .eq('is_active', true)
           .not('next_due_date', 'is', null)
-          .lte('next_due_date', today)
+          .lt('next_due_date', firstOfMonth(today))
           .order('id')
           .range(from, to),
         { label: 'maintenance_schedules(overdue-inspection-dispatch)' },
       )
 
-      return [...new Set(selectOverdueForEmail(rows, today).map((r) => r.org_id))]
+      return [...new Set(selectOverdueForDigest(rows, today).map((r) => r.org_id))]
     })
 
     if (orgIds.length === 0) {
@@ -148,12 +164,12 @@ export const inspectionOverdueEmailHandler = inngest.createFunction(
         .eq('creates', 'inspection')
         .eq('is_active', true)
         .not('next_due_date', 'is', null)
-        .lte('next_due_date', today)
+        .lt('next_due_date', firstOfMonth(today))
         .order('next_due_date', { ascending: true })
         .limit(MAX_SCHEDULES_PER_ORG)
 
       if (error) throw new Error(`[InspectionOverdue] load failed for org ${org_id}: ${error.message}`)
-      return selectOverdueForEmail((data ?? []) as unknown as ScheduleRow[], today)
+      return selectOverdueForDigest((data ?? []) as unknown as ScheduleRow[], today)
     })
 
     if (rows.length === 0) {
@@ -187,7 +203,7 @@ export const inspectionOverdueEmailHandler = inngest.createFunction(
     await step.run('send-email', () => sendOverdueEmail(org_id, copy, lines, recipient.email))
 
     // A separate step so a failed mark retries without re-sending.
-    await step.run('mark-notified', () => markNotified(org_id, rows))
+    await step.run('mark-notified', () => markNotified(org_id, rows, today))
 
     logger.info(`[InspectionOverdue] org ${org_id}: ${rows.length} overdue, 1 email`)
     return { sent: true, schedules: rows.length }
@@ -245,11 +261,11 @@ async function sendOverdueEmail(
     subject: copy.subject,
     html,
   }, {
-    // Keyed on the org and the run's date, so the step's own retries cannot
-    // turn one occurrence into several emails. Resend's window is 24h, which
-    // covers the retries and deliberately not tomorrow's run — the
-    // overdue_notified_for flag is what makes this once-per-occurrence.
-    idempotencyKey: `inspection-overdue-${orgId}-${todayISO()}`,
+    // Keyed on the org and the digest month, so the step's own retries cannot
+    // turn one digest into several emails. Resend's window is 24h, which covers
+    // the retries and deliberately not next month's run — the
+    // overdue_notified_month flag is what makes this once per month.
+    idempotencyKey: `inspection-overdue-${orgId}-${firstOfMonth(todayISO())}`,
   })
 
   if (error) {
@@ -271,30 +287,27 @@ async function sendOverdueEmail(
  * portfolio one shared first due date.
  */
 async function markNotified(
-  orgId: string,
-  rows:  { id: string; next_due_date: string }[],
+  orgId:   string,
+  rows:    { id: string }[],
+  runDate: string,
 ): Promise<void> {
   const supabase = createServiceClient({ system: SYSTEM })
 
-  const byDate = new Map<string, string[]>()
-  for (const row of rows) {
-    const ids = byDate.get(row.next_due_date)
-    if (ids) ids.push(row.id)
-    else byDate.set(row.next_due_date, [row.id])
-  }
+  // ONE statement, and one value: the digest's month. This used to group by
+  // each schedule's own due date, which was right when the key WAS the
+  // occurrence — a bulk email spans schedules due on different days, and
+  // stamping them all with the first row's date would have re-sent for the rest
+  // forever. Keyed on the month, they all share the same value by definition.
+  const { error } = await supabase
+    .from('maintenance_schedules')
+    .update({ overdue_notified_month: firstOfMonth(runDate) })
+    .eq('org_id', orgId)
+    .in('id', rows.map((r) => r.id))
 
-  for (const [dueDate, ids] of byDate) {
-    const { error } = await supabase
-      .from('maintenance_schedules')
-      .update({ overdue_notified_for: dueDate })
-      .eq('org_id', orgId)
-      .in('id', ids)
-
-    // The email HAS gone by now. Reported rather than thrown so the run is not
-    // re-driven into a second send; tomorrow's pass mails once more and then
-    // marks, which is the bounded, self-correcting failure.
-    if (error) reportError(error, { site: `${SYSTEM}.mark`, orgId })
-  }
+  // The email HAS gone by now. Reported rather than thrown so the run is not
+  // re-driven into a second send; next month's digest reports these again,
+  // which is the bounded, self-correcting failure.
+  if (error) reportError(error, { site: `${SYSTEM}.mark`, orgId })
 }
 
 function toLine(row: {

@@ -91,11 +91,14 @@ export function singleOverdueCopy(recipientName: string, line: OverdueLine): Ove
  * claims. Same argument paragraph, same call to action, same support line; only
  * the count sentence differs, and the properties move into a table.
  *
- * This variant exists because it is unavoidable rather than because it is nicer.
- * applySafetyTemplate writes one shared first due date across every property in
- * the org, so an entire portfolio crosses the three-day line on the same
- * morning. Sending the singular email per property would deliver one message
- * per property in a single batch.
+ * This is the ordinary case, not the exception. The email is a monthly digest,
+ * so it reports everything still outstanding rather than naming one property:
+ * inspection due dates cluster by month, and a portfolio's first occurrence
+ * shares a single date outright.
+ *
+ * The SINGULAR variant survives for the case where exactly one thing is
+ * outstanding, because naming the property is clearer than a one-row table —
+ * and it is the approved wording verbatim.
  */
 export function bulkOverdueCopy(recipientName: string, lines: readonly OverdueLine[]): OverdueCopy {
   return {
