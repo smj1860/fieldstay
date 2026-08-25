@@ -1044,6 +1044,16 @@ export interface MaintenanceSchedule {
   auto_create_wo:            boolean
   last_completed_date:       string | null
   next_due_date:             string | null
+  /**
+   * First-of-month of the digest that last reported this schedule as overdue.
+   * NULL = never reported.
+   *
+   * A MONTH, not the occurrence's due date, and that is what makes a schedule
+   * still outstanding reappear in next month's digest — the month changes, so
+   * the comparison stops matching. Renamed from `overdue_notified_for` when the
+   * cadence moved from per-occurrence to monthly (20260825030000).
+   */
+  overdue_notified_month:    string | null
   active_from_month:         number | null
   active_to_month:           number | null
   asset_category:            string | null

@@ -188,11 +188,14 @@ import { tagHospitableTrialSignup }   from '@/lib/inngest/functions/promo-hospit
 import { awardHospitablePriceLock }   from '@/lib/inngest/functions/promo-hospitable-award-lock'
 import { expireHospitablePriceLocks } from '@/lib/inngest/functions/promo-hospitable-expire-locks'
 import { inspectionCompleted } from '@/lib/inngest/functions/inspection-completed'
+import { inspectionOverdueEmailCron, inspectionOverdueEmailHandler } from '@/lib/inngest/functions/cron/inspection-overdue-email'
 
 export const { GET, POST, PUT } = serve({
   client: inngest,
   functions: [
     inspectionCompleted,
+    inspectionOverdueEmailCron,
+    inspectionOverdueEmailHandler,
     // iCal sync pipeline
     syncAllIcalFeeds,
     syncOrgIcalFeeds,

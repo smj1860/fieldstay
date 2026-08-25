@@ -105,3 +105,50 @@ The compliance gate is the system that checks a vendor's insurance and licensing
 ## Dexie / Local-First
 
 The crew mobile app stores data locally on the device using Dexie.js (a local IndexedDB database). This is what makes the crew app work offline — checklists, inventory counts, and photos all function without internet access. Changes sync to FieldStay's servers automatically when connectivity is restored. PMs do not interact with Dexie directly — it is an internal implementation detail of the crew app.
+
+---
+
+## Inspection
+
+A structured walk-through of a property recorded against a fixed form. FieldStay has three: **Safety & Risk Mitigation**, **Indoor Property & Inventory**, and **Outdoor Property & Grounds**.
+
+Distinct from a turnover checklist, and the difference is what each is for. A checklist is an operational to-do list for one guest changeover, and it is disposable. An inspection is evidence — it is retained permanently, cannot be edited once completed, posts to the owner portal, and is meant to be shown to an insurer or a permitting authority as a multi-year record.
+
+---
+
+## Inspection template (safety cadence)
+
+The org-level answer to "how often should safety inspections run, and starting which month". Set during onboarding and editable in Settings.
+
+It is a template rather than a setting because one answer produces a schedule on every property — including properties added months later, which are picked up automatically. Twice a year means the chosen month and the month six after it.
+
+---
+
+## Inspection schedule
+
+The per-property recurring record produced by the template, holding the next due date and the form to walk. It lives alongside scheduled maintenance and behaves like it, with one difference: when it comes due it **notifies** rather than creating anything, because the inspection record is only created when somebody actually starts the walk.
+
+---
+
+## Vacancy nudge
+
+The rule that moves an inspection's due date onto a day the property is empty. After a property's first completed inspection, FieldStay picks a due date inside a gap between bookings in the target month rather than a fixed day.
+
+This is why two properties on the same cadence come due on different days of the same month, and why a due date can move earlier as well as later. If there is no vacant day that month, the date stands and the inspection shows as due anyway.
+
+---
+
+## Remediation
+
+What a failed inspection item turns into on completion — a work order, a purchase order, a notification, or a recorded fact with no action. The item's definition decides which, so the same failure always produces the same kind of record.
+
+Cleaning failures are rolled up into one cleaning work order per walk, and everything purchasable goes onto one purchase order per walk, rather than one record per failed item.
+
+---
+
+## Repeat visit prompt
+
+The question the form asks when an item fails and a work order from a previous failure of that same item is still open: is this **the same problem**, or a **new one**?
+
+FieldStay asks rather than deciding because both answers are wrong some of the time. Quarterly inspections make repeat failures normal, and one item can cover unrelated faults — "Refrigeration" failing for a water filter in one quarter and a compressor the next is one item and two jobs.
+

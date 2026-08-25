@@ -1214,4 +1214,20 @@ export type FieldStayEvents = {
     }
   }
 
+
+  /**
+   * One org has inspection schedules overdue past the email delay. Fanned out
+   * by inspection-overdue-email-cron so the per-org send is its own retry
+   * boundary — one PM's bounced address must not re-drive every other org's
+   * email.
+   *
+   * Carries only the org: the handler re-runs the selection for that tenant, so
+   * the event cannot go stale between dispatch and delivery and stays small
+   * whether the org has one overdue walk or fifty.
+   */
+  'inspection/overdue.email.requested': {
+    data: {
+      org_id: string
+    }
+  },
 }

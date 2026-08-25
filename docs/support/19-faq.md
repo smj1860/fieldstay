@@ -139,3 +139,42 @@ Hostex is the one exception worth knowing about: it sends each webhook once and 
 Property data (WiFi, amenities, instructions) syncs during the initial connection and can be manually refreshed anytime by clicking **Sync** on the Turnovers dashboard.
 
 Reviews sync automatically every 6 hours and immediately after the initial connection.
+
+## How often do inspections happen, and who decides?
+
+You set it once during onboarding: how often the Safety inspection runs (once or twice a year) and which month it starts in. That answer is a template — FieldStay applies it to every property, including ones you add later. Indoor and Outdoor inspections are scheduled the way any other recurring maintenance is.
+
+Choose twice a year and the second one falls six months after the first: March pairs with September, October with April.
+
+See *Inspection Schedules* for the full detail.
+
+## Why is the same inspection due on different dates at different properties?
+
+Because FieldStay puts the walk on a day the property is empty. After a property's first completed inspection, the due date lands inside a gap between bookings in the target month — and every property has a different calendar, so the days differ even though the month is the same. It's also why a date can move earlier as well as later.
+
+The first time a property is scheduled it's the 1st of the month, before there are any completed walks to schedule around.
+
+## When does FieldStay email me about an overdue inspection?
+
+On the 1st of each month, in a single email listing everything that was due in a previous month and hasn't been walked. It goes to the account's Owner/Admin, covers every property at once rather than sending one email per house, and repeats each month until the inspections are done.
+
+Inspection due dates cluster by month, so emailing three days after each due date would mean a trickle of separate messages all month. The dashboard shows an inspection as overdue from the first day, so the email is the escalation rather than the first you hear of it.
+
+## Can I edit an inspection after I've completed it?
+
+No. A completed inspection is locked at the database level, not just hidden behind a disabled button. The value of the record is that it wasn't adjusted afterward — a history that can be edited later proves very little to an insurer or an owner.
+
+If something needs correcting, run a new inspection of the same form at that property. Both stay in the history in date order.
+
+## Do inspections work without cell service?
+
+Yes, as long as the device has loaded the Inspections page at least once while online. After that the forms and property list are held on the device, and you can start a walk, answer everything, take photos and complete it with no connection. It uploads when you're back in range, and a banner with a retry appears if anything fails to send.
+
+## What happens to an inspection item that fails?
+
+It becomes a work order, a purchase order, a notification, or just a recorded fact — decided by the item itself. A loose handrail raises a work order; an expired detector goes on a purchase order; a lapsed permit notifies you without creating a job.
+
+Cleaning items are rolled into one cleaning work order per walk rather than one each, and everything purchasable goes on one purchase order. A failed item needs a description, because that description becomes the work order's title.
+
+See *Running an Inspection* for the full detail.
+

@@ -62,10 +62,16 @@ export async function loadUpcomingInspections(
 ): Promise<UpcomingInspection[]> {
   const schedulesRes = await supabase
     .from('maintenance_schedules')
-    .select('id, property_id, name, next_due_date, inspection_form_id, property:properties(name)')
+    // `properties!inner(...)`, and the active filter is on the PROPERTY as well
+    // as the schedule. archiveProperty sets properties.is_active = false and
+    // leaves maintenance_schedules alone on purpose, so filtering only on the
+    // schedule would keep an archived house's inspection on the dashboard as
+    // permanently overdue work nobody intends to do.
+    .select('id, property_id, name, next_due_date, inspection_form_id, property:properties!inner(name, is_active)')
     .eq('org_id', orgId)
     .eq('creates', 'inspection')
     .eq('is_active', true)
+    .eq('property.is_active', true)
     // Bounded at the DATABASE as well as by the selector. The selector has to
     // apply the horizon anyway (it also decides overdue vs. upcoming), but
     // filtering here is what keeps an org with years of dormant annual
@@ -112,7 +118,7 @@ interface ScheduleRow {
   next_due_date:      string | null
   inspection_form_id: string | null
   /** A PostgREST embed. Nested joins come back as arrays, never a bare object. */
-  property:           { name: string }[] | { name: string } | null
+  property:           { name: string; is_active: boolean }[] | { name: string; is_active: boolean } | null
 }
 
 /** Unwraps the embed both ways — PostgREST's shape depends on the relationship. */
