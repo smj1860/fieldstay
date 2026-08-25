@@ -636,6 +636,60 @@ export const FAQ_CATEGORIES: FaqCategory[] = [
       },
     ],
   },
+  {
+    id:    'inspections',
+    label: 'Inspections',
+    items: [
+      {
+        id:       'inspections-what-are',
+        question: 'What are inspections, and how are they different from a turnover checklist?',
+        answer:
+          'Inspections are structured walk-throughs recorded against a fixed form — Safety & Risk Mitigation, Indoor Property & Inventory, and Outdoor Property & Grounds. A turnover checklist is an operational to-do list for one guest changeover and is disposable. An inspection is evidence: it is retained permanently, cannot be edited once completed, posts to the owner portal, and is meant to be shown to an insurer or a permitting authority as a multi-year record.',
+      },
+      {
+        id:       'inspections-schedule',
+        question: 'How do I set how often inspections happen?',
+        answer:
+          'You answer it once during onboarding — how often the Safety inspection runs (once or twice a year) and which month it starts in — and FieldStay applies that to every property, including ones you add later. Twice a year means the month you chose and the month six after it: March pairs with September, October with April. Indoor and Outdoor inspections are scheduled the way any other recurring maintenance is. You can change the cadence any time in Maintenance → Inspections.',
+      },
+      {
+        id:       'inspections-different-dates',
+        question: 'Why is the same inspection due on different dates at different properties?',
+        answer:
+          'Because FieldStay puts the walk on a day the property is empty. After a property\u2019s first completed inspection, the due date lands inside a gap between bookings in the target month — and every property has a different calendar, so the days differ even though the month is the same. It is also why a due date can move earlier as well as later. The first time a property is scheduled it is the 1st of the month, because there are no completed walks to schedule around yet.',
+      },
+      {
+        id:       'inspections-overdue-email',
+        question: 'When does FieldStay email me about an overdue inspection?',
+        answer:
+          'On the 1st of each month, in a single email listing everything that was due in a previous month and has not been walked. It goes to the account Owner/Admin, covers every property at once rather than one email per house, and repeats each month until the inspections are done. Inspection due dates cluster by month, so emailing a few days after each due date would mean a trickle of separate messages all month. The dashboard shows an inspection as overdue from the first day, so the email is the escalation rather than the first you hear of it.',
+      },
+      {
+        id:       'inspections-offline',
+        question: 'Do inspections work without cell service?',
+        answer:
+          'Yes, as long as the device has loaded the Inspections page at least once while online. After that the forms and your property list are held on the device, and you can start a walk, answer every item, take photos and complete it with no connection at all. It uploads when you are back in range, and a banner with a retry appears if anything fails to send.',
+      },
+      {
+        id:       'inspections-failed-item',
+        question: 'What happens when an inspection item fails?',
+        answer:
+          'It becomes a work order, a purchase order, a notification, or a recorded fact — decided by the item itself. A loose handrail raises a work order; an expired detector goes on a purchase order; a lapsed permit notifies you without creating a job for anyone. Cleaning failures roll into one cleaning work order per walk rather than one each, and everything purchasable goes onto a single purchase order. A failed item needs a description, because that description becomes the work order\u2019s title.',
+      },
+      {
+        id:       'inspections-edit',
+        question: 'Can I edit an inspection after completing it?',
+        answer:
+          'No. A completed inspection is locked in the database, not just behind a disabled button. The value of the record is that it was not adjusted afterward — a history that can be edited later proves very little to an insurer or an owner. If something needs correcting, run a new inspection of the same form at that property; both stay in the history in date order, the later one superseding the earlier.',
+      },
+      {
+        id:       'inspections-owner-visibility',
+        question: 'What do owners see about inspections?',
+        answer:
+          'Completed inspections post to the owner portal on the day they are finished, including failed items and the work order or purchase order each one produced, with that record\u2019s current status. Scheduled and in-progress inspections are not shown — an unfinished form is not a record. Purely factual items, like noting that a property has no alarm system, are recorded but are not listed as findings, because they are not problems.',
+      },
+    ],
+  },
 ]
 
 // Flat list used for cross-category search in the accordion component
