@@ -40,7 +40,7 @@ and it is what gives the overdue nudge its force.
 | Scope | **Per property.** Individual items may reference an asset. |
 | Blocking on safety failure? | **No** — not our call to make, at least for now. |
 | Owner portal | Posts **the day it is completed**, failures included, with the WO/PO shown alongside. |
-| Overdue | Email the assignee. No escalation path — they are the responsible party. |
+| Overdue | Email the PM / org owner, once per occurrence, three days after the due date. No escalation path beyond that. **Amended 2026-08-24** — this said "email the assignee", and there is usually no assignee: `applySafetyTemplate` leaves `assigned_to_user_id` NULL deliberately, because guessing one at onboarding would notify somebody who never agreed to walk 29 properties. The three-day delay is because a walk due today is not late today, and the dashboard already styles it overdue from day one. |
 | Device | **Tablet/iPad first.** |
 | Offline | **In-app**, on the PM dashboard PWA. Not the crew PWA. |
 | Offline scope | **Maintenance.** Inspections plus creating a work order — a PM at a property with no signal is doing both on the same visit. Read-only for everything else on the page; see §8. Nothing outside `/maintenance` goes offline. |
