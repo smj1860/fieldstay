@@ -160,6 +160,40 @@ export function formFromSnapshot(snapshot: FormSnapshot): {
   }
 }
 
+/**
+ * Form item ids the snapshot marks `remediation: 'none'` — the record-only ones.
+ *
+ * A few items exist to STATE A FACT rather than to judge a condition:
+ * "Trampoline, playground or diving board present at this property",
+ * "Monitored alarm or security system present". They answer through the same
+ * Pass/Fail control as everything else, so "no alarm" records as a `fail` — and
+ * most short-term rentals have no alarm. Treated as findings, a report would
+ * show "no repair or purchase raised" against a question whose honest answer
+ * was simply no.
+ *
+ * Read from the SNAPSHOT, so a re-worded or re-classified item cannot
+ * retroactively change what a completed walk shows. `'notify'` is deliberately
+ * NOT included: a lapsed STR permit raises no work order and is still something
+ * a reader should see.
+ *
+ * An UNPARSEABLE snapshot yields an empty set, so every answer is treated as a
+ * check. That is the safe direction — the failure mode is one extra line, not a
+ * silently hidden finding, and hiding is the one this must never do by
+ * accident. An item absent from the snapshot behaves the same way, for the same
+ * reason.
+ */
+export function recordOnlyItemIds(parsed: FormSnapshot | null): Set<string> {
+  const ids = new Set<string>()
+  if (!parsed) return ids
+
+  for (const section of parsed.sections) {
+    for (const item of section.items) {
+      if (item.remediation === 'none') ids.add(item.id)
+    }
+  }
+  return ids
+}
+
 // ── The letterhead, as it was ───────────────────────────────────────────────
 
 /**

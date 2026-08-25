@@ -5,7 +5,15 @@ import type { SupabaseClient } from '@supabase/supabase-js'
 import { reportQueryError } from '@/lib/supabase/unwrap'
 import { reportError } from '@/lib/observability/report-error'
 import { fetchAllRows } from '@/lib/inngest/paginate'
-import { parseFormSnapshot } from '@/lib/inspections/snapshots'
+import { parseFormSnapshot, recordOnlyItemIds } from '@/lib/inspections/snapshots'
+import {
+  loadRemediationIndex,
+  remediationFor,
+  type RemediationIndex,
+  type RemediationStatus,
+} from '@/lib/inspections/remediation'
+
+export type { RemediationStatus }
 
 // The inspection history an owner sees.
 //
@@ -69,11 +77,6 @@ const MAX_INSPECTIONS = 24
  * walk.
  */
 const MAX_ITEM_ROWS = 6_000
-
-export type RemediationStatus =
-  | { kind: 'work_order';    reference: string | null; status: string }
-  | { kind: 'purchase_order'; reference: string | null; status: string }
-  | { kind: 'none' }
 
 export interface OwnerInspectionFinding {
   id:       string
@@ -148,10 +151,11 @@ export async function loadOwnerInspections(
   if (rows.length === 0) return EMPTY_HISTORY
 
   const items = await loadItems(supabase, orgId, rows.map((r) => r.id))
-  const remediation = await loadRemediation(
+  const remediation = await loadRemediationIndex(
     supabase, orgId,
     items.filter((i) => i.result === 'fail').map((i) => i.id),
     rows.map((r) => r.id),
+    'owner-portal.inspections',
   )
 
   return {
@@ -193,25 +197,19 @@ function buildInspection(
   const snapshot   = parseFormSnapshot(row.form_snapshot)
   const recordOnly = recordOnlyItemIds(snapshot)
 
-  // RECORD-ONLY ITEMS ARE NOT CHECKS, so they leave both numbers below.
+  // RECORD-ONLY ITEMS ARE NOT CHECKS, so they leave both numbers below. See
+  // recordOnlyItemIds in lib/inspections/snapshots.ts for what they are.
   //
-  // A few items exist to state a fact rather than to judge a condition:
-  // "Trampoline, playground or diving board present at this property",
-  // "Monitored alarm or security system present". They answer through the same
-  // Pass/Fail control as everything else, so "no alarm" records as a `fail` —
-  // and most short-term rentals have no alarm. Left in, the portal would show
-  // an owner a finding reading "no repair or purchase raised" against a
-  // question whose honest answer was simply no.
+  // The PORTAL DROPS THEM ENTIRELY, and this is the one place it deliberately
+  // differs from the exported report, which prints them under their own
+  // "Recorded facts" heading. A PDF is the evidentiary artifact and "no alarm
+  // system present" belongs on it; the portal is a summary an owner reads on a
+  // phone, where the same line reads as a complaint.
   //
   // They leave the PASS COUNT as well, and that half is easy to miss. Filtering
   // only the findings would mean a property WITH an alarm scored +1 while one
   // without scored nothing — a silent bias in a number owners read as "how did
   // my property do". A count captioned "checks passed" should count checks.
-  //
-  // Keyed on `remediation === 'none'` from the SNAPSHOT, so a re-worded or
-  // re-classified item cannot retroactively change what a completed walk shows.
-  // 'notify' is deliberately NOT included: a lapsed STR permit raises no work
-  // order and is still something an owner should see.
   const mine   = items.filter((i) => i.inspection_id === row.id && !recordOnly.has(i.form_item_id))
   const failed = mine.filter((i) => i.result === 'fail')
 
@@ -229,9 +227,7 @@ function buildInspection(
       id:     item.id,
       prompt: item.prompt_snapshot,
       note:   item.note,
-      remediation: remediation.byItem.get(item.id)
-        ?? remediation.byInspection.get(row.id)
-        ?? { kind: 'none' as const },
+      remediation: remediationFor(remediation, item.id, row.id),
     })),
   }
 }
@@ -246,27 +242,6 @@ function buildInspection(
 function formLabelOf(parsed: ReturnType<typeof parseFormSnapshot>): string {
   if (!parsed) return 'Inspection'
   return FORM_LABELS[parsed.form_key] ?? parsed.form_key
-}
-
-/**
- * Form item ids the snapshot marks `remediation: 'none'` — the record-only ones.
- *
- * An UNPARSEABLE snapshot yields an empty set, so every answer is treated as a
- * check. That is the safe direction: the failure mode is showing an owner one
- * extra line, not silently hiding a finding, and hiding is the one this
- * function must never do by accident. An item absent from the snapshot behaves
- * the same way, for the same reason.
- */
-function recordOnlyItemIds(parsed: ReturnType<typeof parseFormSnapshot>): Set<string> {
-  const ids = new Set<string>()
-  if (!parsed) return ids
-
-  for (const section of parsed.sections) {
-    for (const item of section.items) {
-      if (item.remediation === 'none') ids.add(item.id)
-    }
-  }
-  return ids
 }
 
 /**
@@ -303,123 +278,4 @@ async function loadItems(
     reportError(err, { site: 'owner-portal.inspectionItems', orgId })
     return []
   }
-}
-
-interface RemediationIndex {
-  /** Per-finding work orders, keyed on the item they came from. */
-  byItem:       Map<string, RemediationStatus>
-  /** The ONE cleaning work order / purchase order per inspection. */
-  byInspection: Map<string, RemediationStatus>
-}
-
-/**
- * What each failure turned into, and where that record stands now.
- *
- * THREE KEYS, BECAUSE REMEDIATION HAS THREE SHAPES (§6): a work order per
- * failure keyed on `source_inspection_item_id`; ONE cleaning work order for the
- * whole walk keyed on `source_inspection_id`; and ONE purchase order for the
- * whole walk, also keyed on `source_inspection_id`. A per-item lookup would
- * miss the two roll-ups entirely and show "no action taken" against a finding
- * that is on somebody's list.
- *
- * Three bounded queries, not one per finding.
- */
-async function loadRemediation(
-  supabase:      SupabaseClient,
-  orgId:         string,
-  failedItemIds: string[],
-  inspectionIds: string[],
-): Promise<RemediationIndex> {
-  const index: RemediationIndex = { byItem: new Map(), byInspection: new Map() }
-
-  // THREE QUERIES RATHER THAN AN `.or()`, and the reason is not style.
-  // PostgREST encodes `.in()` values into the query string, so a combined
-  // `or=(a.in.(...),b.in.(...))` puts every failed-item id AND every inspection
-  // id in one URL — and an oversized or malformed `.or()` fails the WHOLE read,
-  // taking the two roll-ups down with the per-finding lookup. Split, each is
-  // independently bounded and independently survivable: the worst case is one
-  // section of the remediation index missing, not all three.
-  //
-  // The per-item list is the only one that scales with data rather than with
-  // MAX_INSPECTIONS, and it is bounded by failures across 24 walks — the ~100
-  // uuids that would take is well inside every gateway limit.
-  const [byItemRes, byInspectionRes, poRes] = await Promise.all([
-    failedItemIds.length === 0 ? EMPTY_RESULT : supabase
-      .from('work_orders')
-      .select('wo_number, status, source_inspection_item_id, source_inspection_id')
-      .eq('org_id', orgId)
-      .in('source_inspection_item_id', failedItemIds)
-      .limit(failedItemIds.length),
-    supabase
-      .from('work_orders')
-      .select('wo_number, status, source_inspection_item_id, source_inspection_id')
-      .eq('org_id', orgId)
-      .in('source_inspection_id', inspectionIds)
-      .limit(inspectionIds.length),
-    supabase
-      .from('purchase_orders')
-      .select('id, status, source_inspection_id')
-      .eq('org_id', orgId)
-      .in('source_inspection_id', inspectionIds)
-      .limit(inspectionIds.length),
-  ])
-
-  if (!reportQueryError(byItemRes.error, { site: 'owner-portal.inspectionWorkOrders', orgId })) {
-    indexWorkOrders(index, (byItemRes.data ?? []) as WoRow[])
-  }
-  if (!reportQueryError(byInspectionRes.error, { site: 'owner-portal.inspectionRollups', orgId })) {
-    indexWorkOrders(index, (byInspectionRes.data ?? []) as WoRow[])
-  }
-  if (!reportQueryError(poRes.error, { site: 'owner-portal.inspectionPurchaseOrders', orgId })) {
-    indexPurchaseOrders(index, (poRes.data ?? []) as PoRow[])
-  }
-
-  return index
-}
-
-/** A walk with zero failures needs no per-item lookup — and `in.()` with an
- *  empty list is a PostgREST syntax error rather than a match-nothing. */
-const EMPTY_RESULT = Promise.resolve({ data: [] as WoRow[], error: null })
-
-/**
- * A work order lands under its ITEM when it came from one finding, and under
- * its INSPECTION when it is the cleaning roll-up covering many (§5). The two
- * keys are mutually exclusive by construction — only the roll-up sets
- * `source_inspection_id`, which is why its unique index can be a plain partial
- * one — so the `else` is a statement about the schema, not a preference.
- */
-function indexWorkOrders(index: RemediationIndex, rows: WoRow[]): void {
-  for (const wo of rows) {
-    const entry = { kind: 'work_order' as const, reference: wo.wo_number, status: wo.status }
-    if (wo.source_inspection_item_id) index.byItem.set(wo.source_inspection_item_id, entry)
-    else if (wo.source_inspection_id) index.byInspection.set(wo.source_inspection_id, entry)
-  }
-}
-
-/**
- * Purchase orders fill in only where no work order already claimed the
- * inspection. A cleaning roll-up is the more specific answer for a finding, and
- * an owner reading two conflicting statuses against one line learns nothing.
- */
-function indexPurchaseOrders(index: RemediationIndex, rows: PoRow[]): void {
-  for (const po of rows) {
-    if (!po.source_inspection_id) continue
-    if (index.byInspection.has(po.source_inspection_id)) continue
-    index.byInspection.set(po.source_inspection_id, {
-      kind: 'purchase_order', reference: null, status: po.status,
-    })
-  }
-}
-
-interface WoRow {
-  wo_number: string | null
-  status:    string
-  source_inspection_item_id: string | null
-  source_inspection_id:      string | null
-}
-
-interface PoRow {
-  id:     string
-  status: string
-  source_inspection_id: string | null
 }
