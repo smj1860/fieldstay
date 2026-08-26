@@ -8,6 +8,7 @@ import {
   concernKeysInUse,
   rootItems,
   walkItems,
+  type FormDefinition,
   type ItemDefinition,
 } from '@/lib/inspections/forms'
 
@@ -50,6 +51,46 @@ const INVERTED_POLARITY_ITEMS = new Set(['safety.exterior_amenity.high_risk_equi
  * attestations. None of the three is an observation that can fail.
  */
 const SIGNOFF_SECTION_KEY = 'signoff'
+
+/**
+ * The yes/no observation items whose polarity the rule below governs: sign-off
+ * attestations are out of scope, and registered exemptions are removed.
+ */
+function polarityScopedItems(form: FormDefinition): ItemDefinition[] {
+  return form.sections
+    .filter((section) => section.key !== SIGNOFF_SECTION_KEY)
+    .flatMap((section) => walkItems(section.items))
+    .filter((item) => !INVERTED_POLARITY_ITEMS.has(item.key))
+    .filter((item) => !item.response_type || item.response_type === 'yes_no')
+}
+
+/**
+ * Whether an item can produce a duplicate work order, and so needs a shared
+ * concern_key when another form asks the same question.
+ *
+ * repeat_per_asset rows are excluded here and forbidden a concern_key outright
+ * elsewhere — see that test for why. An item that produces NO record has
+ * nothing to deduplicate, so an identical prompt on two forms cannot become two
+ * work orders; that is what exempts the sign-off attestations, which are
+ * word-for-word identical on Indoor and Outdoor by design. `notify` items stay
+ * in scope: they do produce a record, and two of them would double-notify.
+ */
+function isDedupeCandidate(item: ItemDefinition): boolean {
+  if (item.response_type && item.response_type !== 'yes_no') return false
+  if (item.repeat_per_asset) return false
+  return item.remediation !== 'none'
+}
+
+/** Every dedupe-candidate item across all forms, grouped by normalised prompt. */
+function itemsByNormalisedPrompt(): Map<string, ItemDefinition[]> {
+  const byPrompt = new Map<string, ItemDefinition[]>()
+
+  for (const item of INSPECTION_FORMS.flatMap(allItems).filter(isDedupeCandidate)) {
+    const norm = item.prompt.toLowerCase().replace(/\s+/g, ' ').trim()
+    byPrompt.set(norm, [...(byPrompt.get(norm) ?? []), item])
+  }
+  return byPrompt
+}
 
 describe('inspection form definitions', () => {
   it('every form is present with the item count the spec commits to', () => {
@@ -143,12 +184,7 @@ describe('inspection form definitions', () => {
     const PROBLEM_LEAD = /^(is|are|does|do|any|has|have)\b.*\b(damage|leak|crack|hazard|problem|issue|missing|broken|expired|pest|mold|mould)\b/i
 
     for (const form of INSPECTION_FORMS) {
-      for (const section of form.sections) {
-        if (section.key === SIGNOFF_SECTION_KEY) continue
-        for (const item of walkItems(section.items)) {
-          if (INVERTED_POLARITY_ITEMS.has(item.key)) continue
-          if (item.response_type && item.response_type !== 'yes_no') continue
-
+      for (const item of polarityScopedItems(form)) {
           expect(PROBLEM_LEAD.test(item.prompt), [
             `${item.key} reads as a question whose YES is the failure:`,
             `  "${item.prompt}"`,
@@ -156,7 +192,6 @@ describe('inspection form definitions', () => {
             'Rephrase it as the condition that SHOULD hold ("No active leaks under',
             'sinks"), or register it in INVERTED_POLARITY_ITEMS with a reason.',
           ].join('\n')).toBe(false)
-        }
       }
     }
   })
@@ -302,23 +337,8 @@ describe('inspection form definitions', () => {
   it('items with an IDENTICAL prompt across forms share a concern_key', () => {
     // The other half of §12.3's rule. Same words on two forms and no shared key
     // is the missed-merge case: two work orders for one fault.
-    const byPrompt = new Map<string, ItemDefinition[]>()
-    for (const form of INSPECTION_FORMS) {
-      for (const item of allItems(form)) {
-        if (item.response_type && item.response_type !== 'yes_no') continue
-        // repeat_per_asset rows are excluded here and forbidden a concern_key
-        // outright below — see that test for why.
-        if (item.repeat_per_asset) continue
-        // An item that produces NO record has nothing to deduplicate, so an
-        // identical prompt on two forms cannot become two work orders. This is
-        // what exempts the sign-off attestations, which are word-for-word
-        // identical on Indoor and Outdoor by design. `notify` items stay in
-        // scope: they do produce a record, and two of them would double-notify.
-        if (item.remediation === 'none') continue
-        const norm = item.prompt.toLowerCase().replace(/\s+/g, ' ').trim()
-        byPrompt.set(norm, [...(byPrompt.get(norm) ?? []), item])
-      }
-    }
+    const byPrompt = itemsByNormalisedPrompt()
+
     for (const [prompt, items] of byPrompt) {
       if (items.length < 2) continue
       const keys = new Set(items.map((i) => i.concern_key ?? '(none)'))

@@ -1101,12 +1101,21 @@ and refactors. Violations will appear as SonarQube findings on the next scan.
 - **Cognitive complexity ≤ 15** per function — extract named helper functions,
   custom hooks, or named predicates to reduce branching. ESLint-enforced
   (`sonarjs/cognitive-complexity`, `eslint.config.mjs`) at `warn` while the
-  pre-existing violations get cleared (236 at rollout, 36 as of 2026-08-15),
+  pre-existing violations get cleared (236 at rollout, 33 as of 2026-08-26),
   and ratcheted per-file by `npm run check:complexity` — new code at over 15
   fails CI outright, and an already-complex function may not get worse. The
   `--max-warnings` total does NOT cover this: it is fungible, and
   `no-nested-conditional` alone is 92 of the 165 warnings, so there is ample
-  currency to pay for a complexity regression with
+  currency to pay for a complexity regression with.
+  **`unit/`, `scripts/` and `e2e/` are in scope for this rule too** (a second,
+  separate config block), at ZERO with nothing baselined. They were exempt
+  until 2026-08-26, which meant 17 violations nobody was ever told about —
+  including a 42 that turned out to be a hand-rolled lexer with a live
+  coverage hole in it. They were cleared rather than grandfathered, so a new
+  violation in a test file fails CI the same as one in `lib/`. The block is
+  deliberately separate from the structural-enforcement one above, whose
+  `no-restricted-syntax` bans are the very strings a guardrail has to write
+  down in order to check for them
 - **Nesting depth ≤ 4** — use guard clauses and early returns to flatten nested
   `if`/`for`/`while`/`switch`/`try` blocks rather than indenting further, and
   extract named sibling functions rather than nesting closures more than 4

@@ -218,9 +218,11 @@ function scanSource(src: string, mode: ScanMode): string {
     // Each consumer returns the index just past what it handled, or null when
     // this position is not its business. Split out of one long branch chain
     // because that scored 29 on cognitive complexity against this repo's own
-    // limit of 15 — a limit that happens not to be ENFORCED here, since
-    // eslint.config.mjs scopes the sonarjs rules to app/lib/components. The
-    // rule applies to the enforcement layer too.
+    // limit of 15. That limit did not reach this file when the split was made
+    // — eslint.config.mjs scoped the sonarjs rules to app/lib/components — and
+    // the split was done anyway on the principle that the rule applies to the
+    // enforcement layer too. As of 2026-08-26 it is no longer a principle:
+    // unit/, scripts/ and e2e/ are in scope, at zero.
     const next = consumeComment(src, i, out, mode)
       ?? consumeQuoted(src, i, out, mode)
       ?? consumeRegexLiteral(src, i, out, mode)

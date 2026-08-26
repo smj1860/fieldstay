@@ -170,6 +170,35 @@ const eslintConfig = [
       ],
     },
   },
+  {
+    // ── Complexity limits for the ENFORCEMENT layer itself ──────────────────
+    //
+    // A DELIBERATELY separate block from the one above, and it must stay
+    // separate: that block's no-restricted-syntax bans (`.from('memberships')`,
+    // `assigned_crew_id`, the service-role key) are exactly the strings a
+    // guardrail test has to write down in order to check for them, so widening
+    // it to unit/ would make the suite unable to state its own rules.
+    //
+    // Only the two rules that are at ZERO here. Nothing is grandfathered and
+    // there is no baseline entry for any file in these directories — which is
+    // the point: 17 violations were cleared rather than frozen, and clearing
+    // them turned up a live coverage hole in inngest-history-secrets where six
+    // step.run bodies were going unscanned.
+    //
+    // The other three sonarjs rules stay off here on purpose rather than for
+    // effort: no-nested-functions (14) fires on the ordinary
+    // describe > it > callback > helper shape that every test file has, and
+    // judging that against a 4-deep limit written for production code would
+    // manufacture 14 findings with no defect behind them. no-nested-conditional
+    // (3) and no-nested-template-literals (1) are a real, small burn-down still
+    // to do.
+    files: ['unit/**/*.{ts,tsx}', 'scripts/**/*.{ts,mjs}', 'e2e/**/*.ts'],
+    plugins: { sonarjs },
+    rules: {
+      'sonarjs/cognitive-complexity': ['warn', 15],
+      'sonarjs/nested-control-flow': ['warn', { maximumNestingLevel: 4 }],
+    },
+  },
 ]
 
 export default eslintConfig
