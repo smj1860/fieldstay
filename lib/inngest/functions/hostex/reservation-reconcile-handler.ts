@@ -36,6 +36,9 @@ import { runProviderReconcile } from '../shared/reconcile-shell'
 import { syncHostexReservations } from './reservation-sync'
 import { syncHostexReviews } from './reviews-sync'
 import { syncHostexStaff } from './staff-sync'
+import { isHostexAccountActionError } from '@/lib/integrations/providers/hostex-api'
+import { isProviderAuthFailure } from '@/lib/integrations/connection-revoked'
+import { revokeAndNotify } from '@/lib/inngest/functions/shared/revoke-and-notify'
 
 const PROVIDER = 'hostex' as const
 const SYSTEM   = 'inngest:hostex-reservation-reconcile'
@@ -76,7 +79,8 @@ export const hostexReservationReconcileHandler = inngest.createFunction(
   async ({ event, step, logger }) => {
     const { user_id, org_id } = event.data
 
-    return runProviderReconcile({
+    try {
+      return await runProviderReconcile({
       step,
       logger,
       provider: PROVIDER,
@@ -176,6 +180,28 @@ export const hostexReservationReconcileHandler = inngest.createFunction(
 
         return result
       },
-    })
+      })
+    } catch (err) {
+      // Hostex raises a TYPED HostexApiError, so its own classifier runs first:
+      // it is more precise than a message match, and it is the only thing that
+      // recognises error_code 420 — "subscription expired / account suspended",
+      // which its adapter documents as something only the host can fix in the
+      // portal. isHostexAccountActionError also unwraps `cause`, because both
+      // its codes are terminal and therefore always arrive wrapped in a
+      // NonRetriableError. It had ZERO callers before this.
+      if (!isHostexAccountActionError(err) && !isProviderAuthFailure(err)) throw err
+
+      // Decision in a step, send at the top level — see
+      // lib/integrations/connection-revoked.ts. Caught OUTSIDE the runner's
+      // steps so Inngest exhausts its retries first: a transient 401 must not
+      // revoke a working connection.
+      await revokeAndNotify({
+        step, logger, userId: user_id, orgId: org_id, err,
+        providerId: PROVIDER, providerLabel: 'Hostex',
+        system: SYSTEM, fnId: 'hostex-reservation-reconcile-handler',
+      })
+
+      return { revoked: true }
+    }
   }
 )

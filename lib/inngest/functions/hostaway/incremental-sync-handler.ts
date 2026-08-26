@@ -37,6 +37,8 @@ import { createServiceClient }  from '@/lib/supabase/server'
 import { unwrap }               from '@/lib/supabase/unwrap'
 import { mergeIntegrationConnectionMetadata } from '@/lib/integrations/connection-metadata'
 import { syncHostawayReservations } from './reservation-sync'
+import { isProviderAuthFailure } from '@/lib/integrations/connection-revoked'
+import { revokeAndNotify } from '@/lib/inngest/functions/shared/revoke-and-notify'
 
 const PROVIDER = 'hostaway' as const
 const SYSTEM   = 'inngest:hostaway-incremental-sync'
@@ -77,6 +79,12 @@ export const hostawayIncrementalSyncHandler = inngest.createFunction(
   async ({ event, step, logger }) => {
     const { user_id, org_id } = event.data
 
+    // The whole sweep is wrapped, not just the first fetch: Hostaway's API key
+    // cannot be refreshed, so once it stops being accepted every step below
+    // fails the same way, and this runs HOURLY. Catching outside the steps lets
+    // Inngest exhaust its retries first, so a transient 401 cannot revoke a
+    // working connection.
+    try {
     const prepared = await step.run('read-cursor-and-properties', async () => {
       const token = await readIntegrationToken(user_id, PROVIDER)
       // Retrying cannot conjure a token — only reconnecting can — and Hostaway's
@@ -172,6 +180,19 @@ export const hostawayIncrementalSyncHandler = inngest.createFunction(
       reservations:   result.reservationCount,
       newTurnoverIds: result.newTurnoverIds.length,
       since:          prepared.cursor,
+    }
+    } catch (err) {
+      if (!isProviderAuthFailure(err)) throw err
+
+      // Decision in a step, send at the top level — see
+      // lib/integrations/connection-revoked.ts.
+      await revokeAndNotify({
+        step, logger, userId: user_id, orgId: org_id, err,
+        providerId: PROVIDER, providerLabel: 'Hostaway',
+        system: SYSTEM, fnId: 'hostaway-incremental-sync-handler',
+      })
+
+      return { reservations: 0, newTurnoverIds: 0, since: null, revoked: true }
     }
   }
 )

@@ -5,11 +5,20 @@ vi.mock('@/lib/supabase/server', () => ({
 }))
 vi.mock('@/lib/inngest/helpers', () => ({
   createPmNotification: vi.fn(async () => undefined),
+  getPmMembers:         vi.fn(async () => [{ userId: 'u1', email: 'pm@example.test' }]),
+}))
+vi.mock('@/lib/resend/client', () => ({
+  FROM:   'FieldStay <test@example.test>',
+  resend: { emails: { send: vi.fn(async () => ({ data: { id: 'e1' }, error: null })) } },
+}))
+vi.mock('@/lib/resend/emails/pm-alert', () => ({
+  renderPmAlert: vi.fn(async () => '<html>alert</html>'),
 }))
 
 import { notifyIntegrationError } from '@/lib/inngest/functions/notify-integration-error'
 import { createServiceClient } from '@/lib/supabase/server'
-import { createPmNotification } from '@/lib/inngest/helpers'
+import { createPmNotification, getPmMembers } from '@/lib/inngest/helpers'
+import { resend } from '@/lib/resend/client'
 import { invokeHandler } from './test-helpers'
 
 function makeStep() {
@@ -41,7 +50,7 @@ describe('notifyIntegrationError', () => {
       step:  makeStep(),
     })
 
-    expect(result).toEqual({ notified: true, org_id: 'org_1', provider_id: 'kroger' })
+    expect(result).toEqual({ notified: true, emailed: 1, org_id: 'org_1', provider_id: 'kroger' })
     expect(createPmNotification).toHaveBeenCalledWith(supabase, {
       orgId:     'org_1',
       type:      'integration_connection_error',
@@ -62,7 +71,7 @@ describe('notifyIntegrationError', () => {
       step:  makeStep(),
     })
 
-    expect(result).toEqual({ notified: true, org_id: 'org_1', provider_id: 'some_new_provider' })
+    expect(result).toEqual({ notified: true, emailed: 1, org_id: 'org_1', provider_id: 'some_new_provider' })
     expect(createPmNotification).toHaveBeenCalledWith(
       supabase,
       expect.objectContaining({ title: 'some_new_provider connection needs attention' }),
@@ -120,4 +129,69 @@ describe('notifyIntegrationError', () => {
       )
     })
   })
+
+  it('emails every PM recipient, not just the bell', async () => {
+    // The bell alone is what let one org's Hospitable connection sit dead for
+    // four days: a red badge only reaches a PM who opens FieldStay, and a PM
+    // whose syncs have stopped has fewer reasons to open it, not more.
+    const send = vi.mocked(resend.emails.send)
+    vi.mocked(getPmMembers).mockResolvedValueOnce([
+      { userId: 'u1', email: 'a@example.test' },
+      { userId: 'u2', email: 'b@example.test' },
+    ] as never)
+
+    await invokeHandler(notifyIntegrationError, {
+      event: connectionErrorEvent({ provider_id: 'hospitable' }),
+      step:  makeStep(),
+    })
+
+    expect(send).toHaveBeenCalledTimes(2)
+    const [payload] = send.mock.calls[0]!
+    expect(payload.to).toBe('a@example.test')
+    expect(payload.subject).toContain('Hospitable')
+    expect(payload.subject).toContain('Action required')
+  })
+
+  it('passes an idempotencyKey on every send', async () => {
+    // An Inngest step is replayed on ANY failure, including one AFTER the send
+    // succeeded — without a key the PM is mailed twice about one dead
+    // connection. unit/guardrails/inngest-email-idempotency.ts enforces the
+    // presence of the argument; this pins that the key is actually distinct
+    // per recipient rather than one key shared across the fan-out, which would
+    // suppress every email after the first.
+    const send = vi.mocked(resend.emails.send)
+    vi.mocked(getPmMembers).mockResolvedValueOnce([
+      { userId: 'u1', email: 'a@example.test' },
+      { userId: 'u2', email: 'b@example.test' },
+    ] as never)
+
+    await invokeHandler(notifyIntegrationError, {
+      event: connectionErrorEvent({ provider_id: 'hospitable' }),
+      step:  makeStep(),
+    })
+
+    const keys = send.mock.calls.map((c) => (c[1] as { idempotencyKey: string }).idempotencyKey)
+    expect(keys).toHaveLength(2)
+    expect(new Set(keys).size, 'both recipients share one key — the second send is suppressed').toBe(2)
+    for (const k of keys) expect(k).toContain('hospitable')
+  })
+
+  it('caps the fan-out even if the recipient query returns more', async () => {
+    // The slice is not redundant with the query limit: that limit is an
+    // argument to getPmMembers, so a change to that helper would silently widen
+    // an Inngest run's step count. This asserts the local ceiling holds on its
+    // own.
+    const send = vi.mocked(resend.emails.send)
+    vi.mocked(getPmMembers).mockResolvedValueOnce(
+      Array.from({ length: 25 }, (_, i) => ({ userId: `u${i}`, email: `p${i}@example.test` })) as never,
+    )
+
+    await invokeHandler(notifyIntegrationError, {
+      event: connectionErrorEvent({ provider_id: 'hospitable' }),
+      step:  makeStep(),
+    })
+
+    expect(send).toHaveBeenCalledTimes(10)
+  })
+
 })

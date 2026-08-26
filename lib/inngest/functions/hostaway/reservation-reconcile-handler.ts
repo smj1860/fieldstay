@@ -50,6 +50,8 @@ import { readIntegrationToken } from '@/lib/integrations/vault'
 import { runProviderReconcile } from '../shared/reconcile-shell'
 import { syncHostawayReservations } from './reservation-sync'
 import { syncHostawayReviews } from './reviews-sync'
+import { isProviderAuthFailure } from '@/lib/integrations/connection-revoked'
+import { revokeAndNotify } from '@/lib/inngest/functions/shared/revoke-and-notify'
 
 const PROVIDER = 'hostaway' as const
 const SYSTEM   = 'inngest:hostaway-reservation-reconcile'
@@ -88,7 +90,8 @@ export const hostawayReservationReconcileHandler = inngest.createFunction(
   async ({ event, step, logger }) => {
     const { user_id, org_id } = event.data
 
-    return runProviderReconcile({
+    try {
+      return await runProviderReconcile({
       step,
       logger,
       provider: PROVIDER,
@@ -133,6 +136,21 @@ export const hostawayReservationReconcileHandler = inngest.createFunction(
 
         return result
       },
-    })
+      })
+    } catch (err) {
+      if (!isProviderAuthFailure(err)) throw err
+
+      // Decision in a step, send at the top level — see
+      // lib/integrations/connection-revoked.ts. Caught OUTSIDE the steps so
+      // Inngest exhausts its retries first: a transient 401 must not revoke a
+      // working connection.
+      await revokeAndNotify({
+        step, logger, userId: user_id, orgId: org_id, err,
+        providerId: PROVIDER, providerLabel: 'Hostaway',
+        system: SYSTEM, fnId: 'hostaway-reservation-reconcile-handler',
+      })
+
+      return { revoked: true }
+    }
   }
 )

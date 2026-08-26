@@ -24,7 +24,10 @@ import { createPmNotification }    from '@/lib/inngest/helpers'
 import { getValidHospitableToken } from '@/lib/integrations/providers/hospitable-token'
 import { ProviderEntityGoneError } from '@/lib/integrations/types'
 import { hospFetchCalendar, consolidateHospitableBlocks } from '@/lib/integrations/providers/hospitable'
+import type { HospitableCalendarDay } from '@/lib/integrations/providers/hospitable.types'
 import type { BookingSource } from '@/types/database'
+import { isProviderAuthFailure } from '@/lib/integrations/connection-revoked'
+import { revokeAndNotify } from '@/lib/inngest/functions/shared/revoke-and-notify'
 
 const PROVIDER            = 'hospitable'
 const CALENDAR_WINDOW_DAYS = 90
@@ -61,19 +64,52 @@ export const hospCalendarSyncHandler = inngest.createFunction(
     // level, because step tooling inside a step.run callback re-runs the whole
     // callback on the next pass (CLAUDE.md, enforced by
     // unit/guardrails/inngest-nested-steps.test.ts).
-    const fetched = await step.run('fetch-calendar', async () => {
-      try {
-        // Token acquired INSIDE the step that spends it — see the
-        // "credentials are not step state" note in hospitable-token.ts. A
-        // hoisted token is memoized and replayed on every retry, so an
-        // invalidated one can never be recovered from.
-        const token = await getValidHospitableToken(user_id)
-        return { gone: false as const, days: await hospFetchCalendar(token, hospitable_property_id, startDate, endDate) }
-      } catch (err) {
-        if (err instanceof ProviderEntityGoneError) return { gone: true as const, days: [] }
-        throw err
-      }
-    })
+    // Two different failures, two different scopes, and the split matters.
+    // ProviderEntityGoneError is ONE property disappearing — the connection is
+    // fine, and the inner catch turns it into a decision. An auth failure is the
+    // CONNECTION dying, so it propagates OUT of the step to the function level,
+    // where it is handled once instead of once per property. Treating a 404 as a
+    // revocation would disconnect a healthy integration over a stale listing id.
+    //
+    // Deliberately caught OUTSIDE the step rather than decided inside it: a
+    // throw lets Inngest exhaust this function's retries first, so a transient
+    // 401 cannot revoke a working connection. Deciding inside the step would
+    // revoke on the first one. Two extra API calls is a cheaper mistake than
+    // making a customer re-authorise for nothing.
+    let fetched: { gone: boolean; days: HospitableCalendarDay[] }
+    try {
+      fetched = await step.run('fetch-calendar', async () => {
+        try {
+          // Token acquired INSIDE the step that spends it — see the
+          // "credentials are not step state" note in hospitable-token.ts. A
+          // hoisted token is memoized and replayed on every retry, so an
+          // invalidated one can never be recovered from.
+          const token = await getValidHospitableToken(user_id)
+          return {
+            gone: false as const,
+            days: await hospFetchCalendar(token, hospitable_property_id, startDate, endDate),
+          }
+        } catch (err) {
+          if (err instanceof ProviderEntityGoneError) {
+            // Typed rather than a bare []: an untyped empty array infers as
+            // never[], which Inngest's Jsonify then widens to null[] and the
+            // union stops matching the annotation above.
+            return { gone: true as const, days: [] as HospitableCalendarDay[] }
+          }
+          throw err
+        }
+      })
+    } catch (err) {
+      if (!isProviderAuthFailure(err)) throw err
+
+      await revokeAndNotify({
+        step, logger, userId: user_id, orgId: org_id, err,
+        providerId: 'hospitable', providerLabel: 'Hospitable',
+        system: 'inngest:calendar-sync-handler', fnId: 'hospitable-calendar-sync-handler',
+      })
+
+      return { activeCount: 0, cancelledCount: 0, paused: true, revoked: true }
+    }
 
     if (fetched.gone) {
       await step.run('mark-property-missing', () =>

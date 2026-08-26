@@ -22,6 +22,8 @@ import { getValidHospitableToken } from '@/lib/integrations/providers/hospitable
 import { hospFetchTeammates, hospitableTeammatesToCrewRows } from '@/lib/integrations/providers/hospitable'
 import { logAuditEvents } from '@/lib/audit'
 import { reportError }    from '@/lib/observability/report-error'
+import { isProviderAuthFailure } from '@/lib/integrations/connection-revoked'
+import { revokeAndNotify } from '@/lib/inngest/functions/shared/revoke-and-notify'
 
 const PROVIDER = 'hospitable'
 
@@ -49,9 +51,25 @@ export const hospTeammateSyncHandler = inngest.createFunction(
     // by Inngest and replayed unchanged on every retry, so a token invalidated
     // mid-run can never be recovered from. That is this exact function's
     // 2026-08-24 09:01 incident.
-    const teammates = await step.run('fetch-teammates', async () => {
-      return hospFetchTeammates(await getValidHospitableToken(user_id))
-    })
+    let teammates: Awaited<ReturnType<typeof hospFetchTeammates>>
+    try {
+      teammates = await step.run('fetch-teammates', async () => {
+        return hospFetchTeammates(await getValidHospitableToken(user_id))
+      })
+    } catch (err) {
+      if (!isProviderAuthFailure(err)) throw err
+
+      // Decide only — the send is at the top level below. See
+      // lib/integrations/connection-revoked.ts for why that split is
+      // load-bearing rather than stylistic.
+      await revokeAndNotify({
+        step, logger, userId: user_id, orgId: org_id, err,
+        providerId: 'hospitable', providerLabel: 'Hospitable',
+        system: 'inngest:teammate-sync-handler', fnId: 'hospitable-teammate-sync-handler',
+      })
+
+      return { upserted: 0, deactivated: 0, revoked: true }
+    }
 
     const upsertCount = await step.run('upsert-teammates', async () => {
       const rows = hospitableTeammatesToCrewRows(org_id, teammates)

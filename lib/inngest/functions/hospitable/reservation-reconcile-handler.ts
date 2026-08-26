@@ -43,6 +43,8 @@ import { NonRetriableError }    from 'inngest'
 import { getValidHospitableToken } from '@/lib/integrations/providers/hospitable-token'
 import { runProviderReconcile } from '../shared/reconcile-shell'
 import { syncHospitableReservations } from './reservation-sync'
+import { isProviderAuthFailure } from '@/lib/integrations/connection-revoked'
+import { revokeAndNotify } from '@/lib/inngest/functions/shared/revoke-and-notify'
 
 const PROVIDER = 'hospitable'
 const SYSTEM   = 'inngest:hospitable-reservation-reconcile'
@@ -79,7 +81,16 @@ export const hospReservationReconcileHandler = inngest.createFunction(
   async ({ event, step, logger }) => {
     const { user_id, org_id } = event.data
 
-    return runProviderReconcile({
+    // Wrapped rather than pushed into runProviderReconcile: that runner is
+    // shared with the other providers' reconcile handlers, and giving it a
+    // revoke-and-notify path would change their behaviour too. Hospitable is
+    // the one with the demonstrated gap; widening it is a separate decision.
+    //
+    // Caught outside the runner's steps so Inngest exhausts its retries first —
+    // a transient 401 must not revoke a working connection. See
+    // lib/integrations/connection-revoked.ts.
+    try {
+      return await runProviderReconcile({
       step,
       logger,
       provider: PROVIDER,
@@ -129,6 +140,17 @@ export const hospReservationReconcileHandler = inngest.createFunction(
         system:          SYSTEM,
         revenueMode:     'new-only',
       }),
-    })
+      })
+    } catch (err) {
+      if (!isProviderAuthFailure(err)) throw err
+
+      await revokeAndNotify({
+        step, logger, userId: user_id, orgId: org_id, err,
+        providerId: 'hospitable', providerLabel: 'Hospitable',
+        system: SYSTEM, fnId: 'hospitable-reservation-reconcile-handler',
+      })
+
+      return { revoked: true }
+    }
   }
 )
