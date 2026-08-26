@@ -1,7 +1,21 @@
 import type { Metadata } from 'next'
 import Link from 'next/link'
 
-export const metadata: Metadata = { title: 'Privacy Policy — FieldStay' }
+import { marketingUrl } from '@/lib/marketing'
+
+// Suffix omitted deliberately: app/layout.tsx applies
+// `template: '%s — FieldStay'`, so naming it here rendered the live title as
+// "Privacy Policy — FieldStay — FieldStay".
+//
+// The canonical is absolute and apex-hosted. This page previously had none,
+// while serving 200 on both fieldstay.app and app.fieldstay.app. metadataBase
+// resolves relative URLs against the APP origin, so a relative canonical would
+// have pointed at the wrong host — marketingUrl() is the apex, as in /strops.
+export const metadata: Metadata = {
+  title:       'Privacy Policy',
+  description: 'How FieldStay collects, uses and protects personal data for property managers, their crews, owners and guests.',
+  alternates:  { canonical: marketingUrl('/privacy') },
+}
 
 const EFFECTIVE_DATE  = 'June 9, 2026'
 const CONTROLLER_NAME = 'FieldStay, Inc.'
