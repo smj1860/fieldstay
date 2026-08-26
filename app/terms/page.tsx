@@ -1,7 +1,23 @@
 import type { Metadata } from 'next'
 import Link from 'next/link'
 
-export const metadata: Metadata = { title: 'Terms of Service — FieldStay' }
+import { marketingUrl } from '@/lib/marketing'
+
+// The title carries NO "— FieldStay" suffix: app/layout.tsx already applies
+// `template: '%s — FieldStay'`, and spelling it out here produced the live
+// SERP title "Terms of Service — FieldStay — FieldStay".
+//
+// The canonical is absolute and points at the APEX. Without it this page had
+// none at all, while existing at 200 on both fieldstay.app and
+// app.fieldstay.app — two identical URLs with nothing telling Google which is
+// the real one. metadataBase resolves relative URLs against
+// NEXT_PUBLIC_APP_URL (the app origin), so a relative canonical here would
+// have named the wrong host; marketingUrl() is the apex, as in /strops.
+export const metadata: Metadata = {
+  title:       'Terms of Service',
+  description: 'The terms governing use of FieldStay, the short-term rental operations platform for property managers.',
+  alternates:  { canonical: marketingUrl('/terms') },
+}
 
 const EFFECTIVE_DATE = 'June 1, 2026'
 

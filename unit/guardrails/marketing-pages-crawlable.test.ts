@@ -1,7 +1,8 @@
 import { describe, it, expect } from 'vitest'
-import { readFileSync, existsSync } from 'node:fs'
+import { existsSync } from 'node:fs'
 import { join } from 'node:path'
 import { classifyRoute, isPrerenderedRoute } from '@/proxy'
+import { readCode } from './scan'
 
 // ============================================================================
 // EVERY PUBLIC MARKETING AND LEGAL PAGE MUST BE ANONYMOUSLY REACHABLE, AND
@@ -60,27 +61,14 @@ const PUBLIC_MARKETING_PAGES = [
 const pageFile = (route: string) =>
   join(process.cwd(), 'app', route === '/' ? '' : route.slice(1), 'page.tsx')
 
-/**
- * Source with its comments removed, so a scan cannot read an explanation as a
- * live call site.
- *
- * Block comments are stripped FIRST and as a whole, not line-by-line on a `*`
- * prefix. A line-prefix filter misses the interior of a `{/* ... *\/}` JSX
- * comment, whose lines begin with ordinary prose — which is precisely how the
- * first version of the layout check below failed: app/layout.tsx explains, in
- * a JSX comment, that the removed `nonce` prop "cost a headers() call", and
- * the scan matched its own documentation.
- *
- * `//` is only honoured at the start of a trimmed line, so a URL keeps its
- * scheme.
- */
-function stripComments(src: string): string {
-  return src
-    .replace(/\/\*[\s\S]*?\*\//g, '')
-    .split('\n')
-    .filter((l) => !l.trim().startsWith('//'))
-    .join('\n')
-}
+// Comments are stripped by ./scan's shared lexer. This file used to carry its
+// own regex version, and documented its own bug with it: block comments had to
+// be stripped as a whole rather than line-by-line on a `*` prefix, because a
+// line-prefix filter misses the interior of a JSX comment whose lines begin
+// with ordinary prose — which is exactly how the first version of the layout
+// check below matched app/layout.tsx's own explanation of the call it had
+// removed. That is the seventh hand-rolled lexer this suite has retired; the
+// shared one also handles strings and regex literals, which the regex did not.
 
 describe('guardrail: public marketing and legal pages are crawlable', () => {
   it('every one has a page file — the list cannot rot into naming pages that do not exist', () => {
@@ -118,7 +106,7 @@ describe('guardrail: public marketing and legal pages are crawlable', () => {
       // naive scan reads that prose as a live call site — the trap that has
       // already made two guardrails in this directory fail on the very change
       // that fixed them, and that this file's own layout check hit again.
-      const code = stripComments(readFileSync(pageFile(route), 'utf8'))
+      const code = readCode(pageFile(route))
       return /auth\.getUser\s*\(/.test(code) || /\bcookies\s*\(\s*\)/.test(code)
     })
 
@@ -158,8 +146,8 @@ describe('guardrail: public marketing and legal pages are crawlable', () => {
 
   it('the root layout stays static — the thing that makes prerendering possible', () => {
     // Comments stripped: this file DOCUMENTS both removed calls at length,
-    // including inside a JSX comment. See stripComments.
-    const code = stripComments(readFileSync(join(process.cwd(), 'app', 'layout.tsx'), 'utf8'))
+    // including inside a JSX comment. See readCode.
+    const code = readCode(join(process.cwd(), 'app', 'layout.tsx'))
 
     expect(code, [
       'app/layout.tsx sets `dynamic` again.',
@@ -182,6 +170,99 @@ describe('guardrail: public marketing and legal pages are crawlable', () => {
       'getScriptNonceFromHeader() in next/dist/server/app-render/app-render.js',
       '-- and stamps its own inline scripts without any help from this file.',
     ].join('\n')).not.toMatch(/\b(headers|cookies|draftMode)\s*\(\s*\)/)
+  })
+
+  // ── 4. Reachable is not the same as indexable ─────────────────────────────
+  //
+  // Everything above proves a crawler can FETCH these pages. None of it says
+  // anything about what the crawler then reads, and on 2026-08-26 Google was
+  // reporting three of them as "Crawled - currently not indexed" — fetched,
+  // considered, declined.
+  //
+  // /privacy, /terms and /dpa each set `title` and nothing else, which cost
+  // them three things at once:
+  //
+  //   - NO CANONICAL. Every marketing page serves 200 on BOTH fieldstay.app
+  //     and app.fieldstay.app (same deployment, two aliases), so each of these
+  //     existed at two identical URLs with nothing naming the real one. The
+  //     www duplicate was closed with a 308 in next.config.ts; app. cannot be,
+  //     because it is the session origin — the canonical tag IS the mechanism
+  //     there, and these three did not have one.
+  //   - A DOUBLED SUFFIX. app/layout.tsx applies `template: '%s — FieldStay'`,
+  //     and the titles spelled the suffix out too, so the live SERP title read
+  //     "Terms of Service — FieldStay — FieldStay".
+  //   - THE FALLBACK DESCRIPTION. With none set, all three inherited the root
+  //     layout's "STR operations platform for property managers." — three
+  //     pages telling Google they are the same page.
+  //
+  // A relative canonical would not have been enough either: metadataBase is
+  // NEXT_PUBLIC_APP_URL, the APP origin, so `canonical: '/terms'` resolves to
+  // app.fieldstay.app and names the duplicate as the original. Hence the
+  // absolute marketingUrl() check rather than merely "a canonical exists".
+
+  const ROOT_DESCRIPTION = 'STR operations platform for property managers.'
+
+  /**
+   * Whether the page's canonical resolves to the APEX.
+   *
+   * One level of indirection is followed on purpose: /strops and /hosts both
+   * write `const CANONICAL = marketingUrl(PATH)` and then reference it, which a
+   * check demanding a literal `canonical: marketingUrl(` call reports as
+   * missing. It did, on the first run of this test — a false positive against
+   * two pages whose canonical is live and correct. marketingUrl() is the apex
+   * helper; appUrl() and a bare relative string both resolve against the app
+   * origin, and neither satisfies this.
+   */
+  function canonicalIsApexAbsolute(code: string): boolean {
+    const m = /alternates\s*:\s*\{[^}]*canonical\s*:\s*([A-Za-z_$][\w$]*)/.exec(code)
+    if (!m) return false
+
+    const expr = m[1]!
+    if (expr === 'marketingUrl') return true
+    return new RegExp(`\\b(?:const|let)\\s+${expr}\\s*=\\s*marketingUrl\\s*\\(`).test(code)
+  }
+
+  it('every page sets an absolute, apex-hosted canonical', () => {
+    const bad = PUBLIC_MARKETING_PAGES.filter((r) => !canonicalIsApexAbsolute(readCode(pageFile(r))))
+
+    expect(bad, [
+      'A public page has no canonical, or one that is not apex-absolute.',
+      '',
+      'Each of these serves 200 on BOTH fieldstay.app and app.fieldstay.app.',
+      'Without `alternates: { canonical: marketingUrl(<path>) }` the two URLs are',
+      'indistinguishable to Google, which then picks one itself — and a relative',
+      'canonical is worse than none, because metadataBase points at the APP origin,',
+      'so it names the duplicate as the original.',
+    ].join('\n')).toEqual([])
+  })
+
+  it('no title repeats the brand suffix the root template already appends', () => {
+    const doubled = PUBLIC_MARKETING_PAGES.filter((route) => {
+      const code = readCode(pageFile(route))
+      const m = /title\s*:\s*'([^']*)'/.exec(code)
+      return !!m && /—\s*FieldStay\s*$/.test(m[1]!)
+    })
+
+    expect(doubled, [
+      "app/layout.tsx sets `template: '%s — FieldStay'`, so a page title ending in",
+      '"— FieldStay" renders twice: "Terms of Service — FieldStay — FieldStay".',
+      'Drop the suffix from the page and let the template add it.',
+    ].join('\n')).toEqual([])
+  })
+
+  it('every page sets its own description, not the root fallback', () => {
+    const generic = PUBLIC_MARKETING_PAGES.filter((route) => {
+      const code = readCode(pageFile(route))
+      return !/description\s*:/.test(code) || code.includes(ROOT_DESCRIPTION)
+    })
+
+    expect(generic, [
+      'A public page has no description, so it inherits the root layout\'s',
+      `"${ROOT_DESCRIPTION}" — which every other page inherits too. Three pages`,
+      'carrying one description tell Google they are the same page, and that is',
+      'part of what put /privacy, /terms and /dpa in "Crawled - currently not',
+      'indexed". Write one that describes THIS page.',
+    ].join('\n')).toEqual([])
   })
 
   it('every page that prerenders is in proxy.ts PRERENDERED_ROUTES', () => {
