@@ -22,9 +22,15 @@ import { inngest }                 from '@/lib/inngest/client'
 import { createServiceClient }     from '@/lib/supabase/server'
 import { createPmNotification }    from '@/lib/inngest/helpers'
 import { getValidHospitableToken } from '@/lib/integrations/providers/hospitable-token'
+import { recordConnectionErrorNotified } from '@/lib/integrations/connection-error-notify'
+import {
+  isHospitableAuthFailure, markHospitableConnectionRevoked,
+} from '@/lib/integrations/hospitable-connection-error'
 import { ProviderEntityGoneError } from '@/lib/integrations/types'
 import { hospFetchCalendar, consolidateHospitableBlocks } from '@/lib/integrations/providers/hospitable'
+import type { HospitableCalendarDay } from '@/lib/integrations/providers/hospitable.types'
 import type { BookingSource } from '@/types/database'
+import { reportError } from '@/lib/observability/report-error'
 
 const PROVIDER            = 'hospitable'
 const CALENDAR_WINDOW_DAYS = 90
@@ -61,19 +67,84 @@ export const hospCalendarSyncHandler = inngest.createFunction(
     // level, because step tooling inside a step.run callback re-runs the whole
     // callback on the next pass (CLAUDE.md, enforced by
     // unit/guardrails/inngest-nested-steps.test.ts).
-    const fetched = await step.run('fetch-calendar', async () => {
-      try {
-        // Token acquired INSIDE the step that spends it — see the
-        // "credentials are not step state" note in hospitable-token.ts. A
-        // hoisted token is memoized and replayed on every retry, so an
-        // invalidated one can never be recovered from.
-        const token = await getValidHospitableToken(user_id)
-        return { gone: false as const, days: await hospFetchCalendar(token, hospitable_property_id, startDate, endDate) }
-      } catch (err) {
-        if (err instanceof ProviderEntityGoneError) return { gone: true as const, days: [] }
-        throw err
+    // Two different failures, two different scopes, and the split matters.
+    // ProviderEntityGoneError is ONE property disappearing — the connection is
+    // fine, and the inner catch turns it into a decision. An auth failure is the
+    // CONNECTION dying, so it propagates OUT of the step to the function level,
+    // where it is handled once instead of once per property. Treating a 404 as a
+    // revocation would disconnect a healthy integration over a stale listing id.
+    //
+    // Deliberately caught OUTSIDE the step rather than decided inside it: a
+    // throw lets Inngest exhaust this function's retries first, so a transient
+    // 401 cannot revoke a working connection. Deciding inside the step would
+    // revoke on the first one. Two extra API calls is a cheaper mistake than
+    // making a customer re-authorise for nothing.
+    let fetched: { gone: boolean; days: HospitableCalendarDay[] }
+    try {
+      fetched = await step.run('fetch-calendar', async () => {
+        try {
+          // Token acquired INSIDE the step that spends it — see the
+          // "credentials are not step state" note in hospitable-token.ts. A
+          // hoisted token is memoized and replayed on every retry, so an
+          // invalidated one can never be recovered from.
+          const token = await getValidHospitableToken(user_id)
+          return {
+            gone: false as const,
+            days: await hospFetchCalendar(token, hospitable_property_id, startDate, endDate),
+          }
+        } catch (err) {
+          if (err instanceof ProviderEntityGoneError) {
+            // Typed rather than a bare []: an untyped empty array infers as
+            // never[], which Inngest's Jsonify then widens to null[] and the
+            // union stops matching the annotation above.
+            return { gone: true as const, days: [] as HospitableCalendarDay[] }
+          }
+          throw err
+        }
+      })
+    } catch (err) {
+      if (!isHospitableAuthFailure(err)) throw err
+
+      const decision = await step.run('mark-revoked', async () => {
+        const admin = createServiceClient({ system: 'inngest:calendar-sync-handler' })
+        return markHospitableConnectionRevoked(admin, {
+          userId: user_id, orgId: org_id, err,
+          site:   'inngest.hospitable-calendar-sync-handler.notify-revoked.throttle',
+        })
+      })
+
+      if (decision) {
+        // Top level, never inside a step.run — see
+        // lib/integrations/hospitable-connection-error.ts.
+        await step.sendEvent('notify-revoked', {
+          name: 'integration/connection.error',
+          data: { user_id, org_id, provider_id: PROVIDER, reason: decision.humanError },
+        })
+        await step.run('record-revoked-notified', async () => {
+          const admin = createServiceClient({ system: 'inngest:calendar-sync-handler' })
+          await recordConnectionErrorNotified(admin, {
+            orgId:        org_id,
+            connectionId: decision.connectionId,
+            site:         'inngest.hospitable-calendar-sync-handler.notify-revoked.record',
+          })
+        })
       }
-    })
+
+      // Reported once, not swallowed. Revoking removes this connection from
+      // SYNCABLE_CONNECTION_STATUSES, so the cron stops fanning to it and this
+      // fires exactly once per revocation — the opposite of the every-hour
+      // repeat that made the original Sentry cluster unreadable.
+      reportError(err instanceof Error ? err : new Error(String(err)), {
+        site:  'inngest.hospitable-calendar-sync-handler.connection-revoked',
+        orgId: org_id,
+      })
+
+      logger.warn(
+        `[Hospitable calendar-sync] org ${org_id}: connection revoked by the provider — ` +
+        `calendar sync paused until the PM reconnects`
+      )
+      return { activeCount: 0, cancelledCount: 0, paused: true, revoked: true }
+    }
 
     if (fetched.gone) {
       await step.run('mark-property-missing', () =>

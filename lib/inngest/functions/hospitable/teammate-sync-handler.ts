@@ -22,6 +22,10 @@ import { getValidHospitableToken } from '@/lib/integrations/providers/hospitable
 import { hospFetchTeammates, hospitableTeammatesToCrewRows } from '@/lib/integrations/providers/hospitable'
 import { logAuditEvents } from '@/lib/audit'
 import { reportError }    from '@/lib/observability/report-error'
+import { recordConnectionErrorNotified } from '@/lib/integrations/connection-error-notify'
+import {
+  isHospitableAuthFailure, markHospitableConnectionRevoked,
+} from '@/lib/integrations/hospitable-connection-error'
 
 const PROVIDER = 'hospitable'
 
@@ -49,9 +53,59 @@ export const hospTeammateSyncHandler = inngest.createFunction(
     // by Inngest and replayed unchanged on every retry, so a token invalidated
     // mid-run can never be recovered from. That is this exact function's
     // 2026-08-24 09:01 incident.
-    const teammates = await step.run('fetch-teammates', async () => {
-      return hospFetchTeammates(await getValidHospitableToken(user_id))
-    })
+    let teammates: Awaited<ReturnType<typeof hospFetchTeammates>>
+    try {
+      teammates = await step.run('fetch-teammates', async () => {
+        return hospFetchTeammates(await getValidHospitableToken(user_id))
+      })
+    } catch (err) {
+      if (!isHospitableAuthFailure(err)) throw err
+
+      // Decide only — the send is at the top level below. See
+      // lib/integrations/hospitable-connection-error.ts for why that split is
+      // load-bearing rather than stylistic.
+      const decision = await step.run('mark-revoked', async () => {
+        const admin = createServiceClient({ system: 'inngest:teammate-sync-handler' })
+        return markHospitableConnectionRevoked(admin, {
+          userId: user_id, orgId: org_id, err,
+          site:   'inngest.hospitable-teammate-sync-handler.notify-revoked.throttle',
+        })
+      })
+
+      if (decision) {
+        await step.sendEvent('notify-revoked', {
+          name: 'integration/connection.error',
+          data: { user_id, org_id, provider_id: PROVIDER, reason: decision.humanError },
+        })
+
+        // Its own step: a failure here retries just this write, with the send
+        // already memoized, so it can neither duplicate the notification nor
+        // replay the audit event written above.
+        await step.run('record-revoked-notified', async () => {
+          const admin = createServiceClient({ system: 'inngest:teammate-sync-handler' })
+          await recordConnectionErrorNotified(admin, {
+            orgId:        org_id,
+            connectionId: decision.connectionId,
+            site:         'inngest.hospitable-teammate-sync-handler.notify-revoked.record',
+          })
+        })
+      }
+
+      // Reported once, not swallowed. Revoking removes this connection from
+      // SYNCABLE_CONNECTION_STATUSES, so the cron stops fanning to it and this
+      // fires exactly once per revocation — the opposite of the every-hour
+      // repeat that made the original Sentry cluster unreadable.
+      reportError(err instanceof Error ? err : new Error(String(err)), {
+        site:  'inngest.hospitable-teammate-sync-handler.connection-revoked',
+        orgId: org_id,
+      })
+
+      // Returned, not re-thrown. The connection is now revoked and the PM has
+      // been told; re-throwing would burn this function's remaining retries
+      // against a token that cannot recover, and put a second copy of the same
+      // dead-connection error into Sentry every hour.
+      return { upserted: 0, deactivated: 0, revoked: true }
+    }
 
     const upsertCount = await step.run('upsert-teammates', async () => {
       const rows = hospitableTeammatesToCrewRows(org_id, teammates)

@@ -41,6 +41,12 @@
 import { inngest }              from '@/lib/inngest/client'
 import { NonRetriableError }    from 'inngest'
 import { getValidHospitableToken } from '@/lib/integrations/providers/hospitable-token'
+import { createServiceClient } from '@/lib/supabase/server'
+import { reportError } from '@/lib/observability/report-error'
+import { recordConnectionErrorNotified } from '@/lib/integrations/connection-error-notify'
+import {
+  isHospitableAuthFailure, markHospitableConnectionRevoked,
+} from '@/lib/integrations/hospitable-connection-error'
 import { runProviderReconcile } from '../shared/reconcile-shell'
 import { syncHospitableReservations } from './reservation-sync'
 
@@ -79,7 +85,16 @@ export const hospReservationReconcileHandler = inngest.createFunction(
   async ({ event, step, logger }) => {
     const { user_id, org_id } = event.data
 
-    return runProviderReconcile({
+    // Wrapped rather than pushed into runProviderReconcile: that runner is
+    // shared with the other providers' reconcile handlers, and giving it a
+    // revoke-and-notify path would change their behaviour too. Hospitable is
+    // the one with the demonstrated gap; widening it is a separate decision.
+    //
+    // Caught outside the runner's steps so Inngest exhausts its retries first —
+    // a transient 401 must not revoke a working connection. See
+    // lib/integrations/hospitable-connection-error.ts.
+    try {
+      return await runProviderReconcile({
       step,
       logger,
       provider: PROVIDER,
@@ -129,6 +144,47 @@ export const hospReservationReconcileHandler = inngest.createFunction(
         system:          SYSTEM,
         revenueMode:     'new-only',
       }),
-    })
+      })
+    } catch (err) {
+      if (!isHospitableAuthFailure(err)) throw err
+
+      const decision = await step.run('mark-revoked', async () => {
+        const admin = createServiceClient({ system: SYSTEM })
+        return markHospitableConnectionRevoked(admin, {
+          userId: user_id, orgId: org_id, err,
+          site:   'inngest.hospitable-reservation-reconcile-handler.notify-revoked.throttle',
+        })
+      })
+
+      if (decision) {
+        await step.sendEvent('notify-revoked', {
+          name: 'integration/connection.error',
+          data: { user_id, org_id, provider_id: PROVIDER, reason: decision.humanError },
+        })
+        await step.run('record-revoked-notified', async () => {
+          const admin = createServiceClient({ system: SYSTEM })
+          await recordConnectionErrorNotified(admin, {
+            orgId:        org_id,
+            connectionId: decision.connectionId,
+            site:         'inngest.hospitable-reservation-reconcile-handler.notify-revoked.record',
+          })
+        })
+      }
+
+      // Reported once, not swallowed. Revoking removes this connection from
+      // SYNCABLE_CONNECTION_STATUSES, so the cron stops fanning to it and this
+      // fires exactly once per revocation — the opposite of the every-hour
+      // repeat that made the original Sentry cluster unreadable.
+      reportError(err instanceof Error ? err : new Error(String(err)), {
+        site:  'inngest.hospitable-reservation-reconcile-handler.connection-revoked',
+        orgId: org_id,
+      })
+
+      logger.warn(
+        `[Hospitable reservation-reconcile] org ${org_id}: connection revoked by the provider — ` +
+        `reconcile paused until the PM reconnects`
+      )
+      return { revoked: true }
+    }
   }
 )
