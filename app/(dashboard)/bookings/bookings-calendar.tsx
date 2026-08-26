@@ -383,10 +383,18 @@ export function BookingsCalendar({
       resizeEdge?: 'left' | 'right' | null
     ): number => {
       const booking = bookings.find((b) => b.id === item.id)
-      const originalBoundary =
-        action === 'move'
-          ? item.start_time
-          : resizeEdge === 'left' ? item.start_time : item.end_time
+
+      // A move drags both edges; a left-resize drags only the start. Either
+      // way the START is the edge the gesture is anchored to, which is why
+      // originalBoundary and proposedStart below ask the same question.
+      //
+      // It was previously spelled out twice as a nested ternary whose two
+      // arms returned the same value — `action === 'move' ? x : resizeEdge
+      // === 'left' ? x : y` — so neither the duplication nor the rule behind
+      // it was visible. Naming it once flattens both and says what it means.
+      const movesStartEdge = action === 'move' || resizeEdge === 'left'
+
+      const originalBoundary = movesStartEdge ? item.start_time : item.end_time
 
       // canMove/canResize already gate interaction for non-manual bookings,
       // but this is the correctness backstop — never let a synced booking's
@@ -400,8 +408,11 @@ export function BookingsCalendar({
       // visual snap, so the rejected drag never reaches the server
       if (snapped < dayjs().startOf('day').valueOf()) return originalBoundary
 
-      const proposedStart =
-        action === 'move' ? snapped : resizeEdge === 'left' ? snapped : item.start_time
+      const proposedStart = movesStartEdge ? snapped : item.start_time
+
+      // Deliberately NOT folded into movesStartEdge: a move shifts the end by
+      // the stay's duration, while a right-resize sets it outright. The three
+      // arms genuinely differ, so this chain stays.
       const proposedEnd =
         action === 'move'
           ? snapped + (item.end_time - item.start_time)

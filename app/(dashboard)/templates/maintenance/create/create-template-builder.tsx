@@ -1,67 +1,25 @@
 'use client'
 
-import { useMemo, useState } from 'react'
-import { ChevronDown, Plus, Trash2, AlertTriangle, CheckCircle2, Clock, Send } from 'lucide-react'
-import { cn } from '@/lib/utils'
+import { useState } from 'react'
+import { Plus } from 'lucide-react'
 import { Button } from '@/components/ui/Button'
-import { Badge } from '@/components/ui/Badge'
-import { Checkbox } from '@/components/ui/Checkbox'
-import { Dialog } from '@/components/ui/Dialog'
 import { Input } from '@/components/ui/Input'
 import { InlineAlert } from '@/components/ui/InlineAlert'
 import { RequiredMark } from '@/components/ui/RequiredMark'
 import { createMaintenanceScheduleTemplate, broadcastMaintenanceTemplate, type BroadcastResult } from '@/app/(dashboard)/maintenance/maintenance-template-actions'
-import type { ScheduleFrequency, VendorSpecialty } from '@/types/database'
+import type { VendorSpecialty } from '@/types/database'
+import { CatalogPicker } from './catalog-picker'
+import { TemplateItemRow } from './template-item-row'
+import { ApplyTemplateDialog } from './apply-template-dialog'
+import {
+  EMPTY_TEMPLATE_ITEM,
+  catalogItemToTemplateItem,
+  type CatalogItem,
+  type Property,
+  type NewTemplateItem,
+} from './template-builder-shared'
 
-const SPECIALTY_LABELS: Record<string, string> = {
-  plumbing: 'Plumbing', electrical: 'Electrical', hvac: 'HVAC',
-  landscaping: 'Landscaping', cleaning: 'Cleaning', pest_control: 'Pest Control',
-  pool: 'Pool', roofing: 'Roofing', general: 'General', other: 'Other',
-}
-
-const FREQUENCY_LABELS: Partial<Record<ScheduleFrequency, string>> = {
-  weekly:      'Weekly',
-  biweekly:    'Bi-weekly',
-  monthly:     'Monthly',
-  quarterly:   'Quarterly',
-  semi_annual: 'Semi-annual',
-  annual:      'Annual',
-}
-
-const FREQUENCIES: { value: ScheduleFrequency; label: string }[] = [
-  { value: 'weekly',      label: 'Weekly'      },
-  { value: 'biweekly',    label: 'Bi-weekly'   },
-  { value: 'monthly',     label: 'Monthly'     },
-  { value: 'quarterly',   label: 'Quarterly'   },
-  { value: 'semi_annual', label: 'Semi-annual' },
-  { value: 'annual',      label: 'Annual'      },
-]
-
-interface CatalogItem {
-  id:                    string
-  name:                  string
-  description:           string | null
-  schedule_frequency:    ScheduleFrequency
-  vendor_specialty_hint: VendorSpecialty | null
-  estimated_cost:        number | null
-  is_optional_flag:      string | null
-  sort_order:            number
-}
-
-interface Property { id: string; name: string }
-
-interface NewTemplateItem {
-  name:                  string
-  description:           string
-  schedule_frequency:    ScheduleFrequency
-  vendor_specialty_hint: VendorSpecialty | ''
-  estimated_cost:        string
-  catalogId?:            string
-}
-
-const EMPTY_TEMPLATE_ITEM: NewTemplateItem = {
-  name: '', description: '', schedule_frequency: 'quarterly', vendor_specialty_hint: '', estimated_cost: '',
-}
+export type { CatalogItem, Property, NewTemplateItem }
 
 export function CreateTemplateBuilder({
   catalogItems,
@@ -89,15 +47,7 @@ export function CreateTemplateBuilder({
     setItems((prev) => prev.map((item, idx) => (idx === i ? { ...item, [field]: value } : item)))
 
   const isCatalogSelected = (catalogId: string) => items.some((it) => it.catalogId === catalogId)
-
-  const catalogItemToTemplateItem = (ci: CatalogItem): NewTemplateItem => ({
-    name:                  ci.name,
-    description:           ci.description ?? '',
-    schedule_frequency:    ci.schedule_frequency,
-    vendor_specialty_hint: (ci.vendor_specialty_hint ?? '') as VendorSpecialty | '',
-    estimated_cost:        ci.estimated_cost !== null && ci.estimated_cost !== undefined ? String(ci.estimated_cost) : '',
-    catalogId:             ci.id,
-  })
+  const allCatalogSelected = catalogItems.length > 0 && catalogItems.every((ci) => isCatalogSelected(ci.id))
 
   const toggleCatalogItem = (ci: CatalogItem) => {
     setItems((prev) => {
@@ -109,24 +59,6 @@ export function CreateTemplateBuilder({
       return [...withoutEmpty, catalogItemToTemplateItem(ci)]
     })
   }
-
-  const catalogGroups = useMemo(() => {
-    const groups: Record<string, CatalogItem[]> = {}
-    for (const ci of catalogItems) {
-      const key = ci.vendor_specialty_hint ?? 'general'
-      if (!groups[key]) groups[key] = []
-      groups[key].push(ci)
-    }
-    return groups
-  }, [catalogItems])
-
-  const catalogGroupKeys = useMemo(() => Object.keys(catalogGroups).sort((a, b) => {
-    if (a === 'general') return 1
-    if (b === 'general') return -1
-    return (SPECIALTY_LABELS[a] ?? a).localeCompare(SPECIALTY_LABELS[b] ?? b)
-  }), [catalogGroups])
-
-  const allCatalogSelected = catalogItems.length > 0 && catalogItems.every((ci) => isCatalogSelected(ci.id))
 
   const toggleAllCatalog = () => {
     if (allCatalogSelected) {
@@ -218,58 +150,15 @@ export function CreateTemplateBuilder({
         </div>
 
         {catalogItems.length > 0 && (
-          <div className="border border-themed rounded-xl bg-canvas-themed">
-            <button
-              type="button"
-              onClick={() => setShowCatalog((s) => !s)}
-              className="flex items-center justify-between w-full text-left p-3"
-            >
-              <span className="text-sm font-medium text-secondary-themed">
-                Add from FieldStay Standard <span className="text-muted-themed font-normal">({catalogItems.length} items)</span>
-              </span>
-              <ChevronDown className={cn('w-4 h-4 text-muted-themed transition-transform flex-shrink-0', showCatalog && 'rotate-180')} />
-            </button>
-            {showCatalog && (
-              <div className="px-3 pb-3 space-y-3">
-                <div className="flex items-center justify-between">
-                  <p className="text-xs text-muted-themed">Select items to include in this template</p>
-                  <button type="button" onClick={toggleAllCatalog} className="text-xs font-medium" style={{ color: 'var(--accent-gold)' }}>
-                    {allCatalogSelected ? 'Deselect all' : 'Select all'}
-                  </button>
-                </div>
-                <div className="max-h-64 overflow-y-auto pr-1 space-y-3">
-                  {catalogGroupKeys.map((key) => (
-                    <div key={key}>
-                      <p className="text-xs font-semibold text-muted-themed uppercase tracking-wide mb-1">
-                        {SPECIALTY_LABELS[key] ?? key}
-                      </p>
-                      <div className="space-y-1">
-                        {catalogGroups[key].map((ci) => (
-                          <label key={ci.id} className="flex items-center gap-2.5 text-sm bg-card-themed rounded-lg px-3 py-1.5 cursor-pointer border border-themed">
-                            <Checkbox
-                              checked={isCatalogSelected(ci.id)}
-                              onChange={() => toggleCatalogItem(ci)}
-                              className="flex-shrink-0"
-                            />
-                            <span className="text-secondary-themed flex-1 truncate">{ci.name}</span>
-                            {ci.is_optional_flag && (
-                              <Badge tone="amber" className="text-xs flex-shrink-0 flex items-center gap-1">
-                                <AlertTriangle className="w-3 h-3" />
-                                {ci.is_optional_flag}
-                              </Badge>
-                            )}
-                            <Badge tone="slate" className="text-xs flex-shrink-0">
-                              {FREQUENCY_LABELS[ci.schedule_frequency] ?? ci.schedule_frequency}
-                            </Badge>
-                          </label>
-                        ))}
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            )}
-          </div>
+          <CatalogPicker
+            catalogItems={catalogItems}
+            show={showCatalog}
+            onToggleShow={() => setShowCatalog((s) => !s)}
+            isSelected={isCatalogSelected}
+            allSelected={allCatalogSelected}
+            onToggleItem={toggleCatalogItem}
+            onToggleAll={toggleAllCatalog}
+          />
         )}
 
         <div>
@@ -281,46 +170,14 @@ export function CreateTemplateBuilder({
           </div>
           <div className="space-y-2">
             {items.map((item, i) => (
-              <div key={i} className="border border-themed rounded-xl p-3 space-y-2 bg-canvas-themed">
-                <div className="flex items-start gap-2">
-                  <div className="flex-1 grid grid-cols-1 sm:grid-cols-2 gap-2">
-                    <div>
-                      <label htmlFor={`mtx-item-name-${i}`} className="label text-xs">Item Name <RequiredMark /></label>
-                      <Input id={`mtx-item-name-${i}`} value={item.name} onChange={(e) => updateItem(i, 'name', e.target.value)}
-                             className="text-sm" placeholder="e.g. HVAC Filter Replacement" />
-                    </div>
-                    <div>
-                      <label htmlFor={`mtx-item-frequency-${i}`} className="label text-xs">Frequency</label>
-                      <select id={`mtx-item-frequency-${i}`} value={item.schedule_frequency}
-                              onChange={(e) => updateItem(i, 'schedule_frequency', e.target.value)}
-                              className="input text-sm">
-                        {FREQUENCIES.map((f) => <option key={f.value} value={f.value}>{f.label}</option>)}
-                      </select>
-                    </div>
-                    <div>
-                      <label htmlFor={`mtx-item-specialty-${i}`} className="label text-xs">Vendor Specialty</label>
-                      <select id={`mtx-item-specialty-${i}`} value={item.vendor_specialty_hint}
-                              onChange={(e) => updateItem(i, 'vendor_specialty_hint', e.target.value)}
-                              className="input text-sm">
-                        <option value="">None</option>
-                        {Object.entries(SPECIALTY_LABELS).map(([v, l]) => <option key={v} value={v}>{l}</option>)}
-                      </select>
-                    </div>
-                    <div>
-                      <label htmlFor={`mtx-item-cost-${i}`} className="label text-xs">Est. Cost ($)</label>
-                      <Input id={`mtx-item-cost-${i}`} type="number" min="0" step="0.01" value={item.estimated_cost}
-                             onChange={(e) => updateItem(i, 'estimated_cost', e.target.value)}
-                             className="text-sm" placeholder="0.00" />
-                    </div>
-                  </div>
-                  {items.length > 1 && (
-                    <Button variant="ghost" type="button" onClick={() => removeItem(i)}
-                            className="p-1.5 text-[var(--accent-red)] hover:opacity-80 mt-5 flex-shrink-0">
-                      <Trash2 className="w-4 h-4" />
-                    </Button>
-                  )}
-                </div>
-              </div>
+              <TemplateItemRow
+                key={i}
+                index={i}
+                item={item}
+                canRemove={items.length > 1}
+                onUpdate={updateItem}
+                onRemove={removeItem}
+              />
             ))}
           </div>
         </div>
@@ -332,98 +189,22 @@ export function CreateTemplateBuilder({
         </div>
       </form>
 
-      <Dialog
+      <ApplyTemplateDialog
         open={createdTemplateId !== null}
+        templateName={createdTemplateName}
+        properties={properties}
+        applyMode={applyMode}
+        onApplyModeChange={setApplyMode}
+        selectedPropertyIds={selectedPropertyIds}
+        onToggleProperty={toggleProperty}
+        allPropertiesSelected={allPropertiesSelected}
+        onToggleAllProperties={toggleAllProperties}
+        applying={applying}
+        applyError={applyError}
+        applyResult={applyResult}
+        onApply={handleApply}
         onClose={resetAfterCreate}
-        title="Apply Template"
-        maxWidthClassName="max-w-md"
-        footer={
-          applyResult || properties.length === 0 ? (
-            <Button onClick={resetAfterCreate} className="w-full">Done</Button>
-          ) : (
-            <>
-              <Button variant="ghost" type="button" onClick={resetAfterCreate}>Skip</Button>
-              <Button
-                onClick={handleApply}
-                disabled={applying || (applyMode === 'select' && selectedPropertyIds.length === 0)}
-                className="flex-1 flex items-center justify-center gap-2"
-              >
-                {applying ? <Clock className="w-3.5 h-3.5 animate-spin" /> : <Send className="w-3.5 h-3.5" />}
-                {applying ? 'Applying…' : 'Apply Template'}
-              </Button>
-            </>
-          )
-        }
-      >
-        <p className="text-xs text-muted-themed -mt-3 mb-4">&quot;{createdTemplateName}&quot; was created</p>
-
-        {applyError && <InlineAlert tone="error" className="mb-4">{applyError}</InlineAlert>}
-
-        {applyResult ? (
-          <InlineAlert tone="success" className="flex items-start gap-2">
-            <CheckCircle2 className="w-4 h-4 flex-shrink-0 mt-0.5" />
-            <div>
-              <p className="font-medium">Template applied</p>
-              <p className="mt-1">
-                Created {applyResult.created} schedule{applyResult.created !== 1 ? 's' : ''}
-                {(applyResult.skipped ?? 0) > 0 && <> · {applyResult.skipped} skipped (already existed)</>}
-              </p>
-            </div>
-          </InlineAlert>
-        ) : properties.length === 0 ? (
-          <p className="text-sm text-muted-themed">No properties found to apply this template to. You can broadcast it later from Saved Templates.</p>
-        ) : (
-          <div className="space-y-4">
-            <p className="text-sm text-secondary-themed">Apply this template&apos;s schedules now?</p>
-            <div className="flex gap-2">
-              <button
-                type="button"
-                onClick={() => setApplyMode('all')}
-                className={cn(
-                  'flex-1 text-sm rounded-lg px-3 py-2 border text-center',
-                  applyMode === 'all' ? 'font-medium' : 'border-themed text-secondary-themed'
-                )}
-                style={applyMode === 'all' ? { background: 'var(--accent-gold-dim)', borderColor: 'var(--accent-gold)', color: 'var(--accent-gold)' } : undefined}
-              >
-                All properties ({properties.length})
-              </button>
-              <button
-                type="button"
-                onClick={() => setApplyMode('select')}
-                className={cn(
-                  'flex-1 text-sm rounded-lg px-3 py-2 border text-center',
-                  applyMode === 'select' ? 'font-medium' : 'border-themed text-secondary-themed'
-                )}
-                style={applyMode === 'select' ? { borderColor: 'var(--accent-gold)', color: 'var(--accent-gold)' } : undefined}
-              >
-                Select properties
-              </button>
-            </div>
-
-            {applyMode === 'select' && (
-              <div>
-                <div className="flex items-center justify-between mb-2">
-                  <p className="text-sm font-medium text-secondary-themed">Properties</p>
-                  <button type="button" onClick={toggleAllProperties} className="text-xs font-medium" style={{ color: 'var(--accent-gold)' }}>
-                    {allPropertiesSelected ? 'Deselect all' : 'Select all'}
-                  </button>
-                </div>
-                <div className="space-y-1.5 max-h-56 overflow-y-auto pr-1">
-                  {properties.map((p) => (
-                    <label key={p.id} className="flex items-center gap-2.5 text-sm bg-canvas-themed rounded-lg px-3 py-2 cursor-pointer">
-                      <Checkbox
-                        checked={selectedPropertyIds.includes(p.id)}
-                        onChange={() => toggleProperty(p.id)}
-                      />
-                      <span className="text-secondary-themed">{p.name}</span>
-                    </label>
-                  ))}
-                </div>
-              </div>
-            )}
-          </div>
-        )}
-      </Dialog>
+      />
     </>
   )
 }
