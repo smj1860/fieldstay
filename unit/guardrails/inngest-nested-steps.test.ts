@@ -1,6 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { readFileSync } from 'node:fs'
-import { collectSourceFiles, rel } from './scan'
+import { blankNonCode, collectSourceFiles, read, readBlanked, rel } from './scan'
 
 // ============================================================================
 // Inngest step tooling may not be nested inside another step's callback.
@@ -35,46 +34,19 @@ import { collectSourceFiles, rel } from './scan'
 const STEP_TOOLS = 'run|sendEvent|sleep|sleepUntil|waitForEvent|invoke'
 const STEP_CALL  = new RegExp(String.raw`\bstep\.(${STEP_TOOLS})\s*\(`, 'g')
 
-/**
- * Blank out comments AND string/template bodies, preserving offsets and
- * newlines so reported line numbers stay true.
- *
- * String stripping is not optional here: an early version of this scan
- * (written by hand while fixing the two real sites) flagged ical-sync.ts,
- * whose only offence was a COMMENT reading "Inngest serializes step.run()
- * results as JSON". Guarding a rule with a checker that flags the prose
- * explaining the rule is a mistake this repo has now made four times.
- */
-function blankNonCode(src: string): string {
-  const out = src.split('')
-  let i = 0
-  while (i < src.length) {
-    const c = src[i]
-    if (c === '/' && src[i + 1] === '/') {
-      let j = src.indexOf('\n', i)
-      if (j < 0) j = src.length
-      for (let k = i; k < j; k++) out[k] = ' '
-      i = j
-    } else if (c === '/' && src[i + 1] === '*') {
-      let j = src.indexOf('*/', i + 2)
-      j = j < 0 ? src.length : j + 2
-      for (let k = i; k < j; k++) if (out[k] !== '\n') out[k] = ' '
-      i = j
-    } else if (c === '"' || c === "'" || c === '`') {
-      let j = i + 1
-      while (j < src.length) {
-        if (src[j] === '\\') { j += 2; continue }
-        if (src[j] === c) break
-        j++
-      }
-      for (let k = i + 1; k < Math.min(j, src.length); k++) if (out[k] !== '\n') out[k] = ' '
-      i = Math.min(j + 1, src.length)
-    } else {
-      i++
-    }
-  }
-  return out.join('')
-}
+// Blanking comments AND literal bodies is not optional here. An early version
+// of this scan (written by hand while fixing the two real sites) flagged
+// ical-sync.ts, whose only offence was a COMMENT reading "Inngest serializes
+// step.run() results as JSON". Guarding a rule with a checker that flags the
+// prose explaining the rule is a mistake this repo has now made four times.
+//
+// `blankNonCode` used to be a local copy, and the copy did not know what a
+// regex literal was: a character class containing a quote opened a "string"
+// that ran to the next matching quote — which in lib/utils/html.ts meant the
+// scanner stopped seeing the file at `/[&<>"']/` and treated the remaining
+// two thirds as string body. A step-nesting violation living after any such
+// regex was simply invisible. It now shares the lexer in ./scan, which
+// tracks regex literals; see scan-strip-comments.test.ts for the fixture.
 
 /** Index of the bracket matching the one at `open` (must be ( or {). */
 function matchBracket(src: string, open: number): number {
@@ -124,8 +96,10 @@ function findViolations(): string[] {
   const out: string[] = []
 
   for (const file of files) {
-    const src  = readFileSync(file, 'utf8')
-    const code = blankNonCode(src)
+    // Blanking preserves offsets, so an index into `code` names the same
+    // character — and therefore the same line — in `src`.
+    const src  = read(file)
+    const code = readBlanked(file)
     const calls = stepCalls(code)
     const runs = calls.filter((c) => c.tool === 'run')
 
@@ -179,7 +153,7 @@ describe('guardrail: Inngest step tooling is never nested', () => {
     // with the send left to the caller.
     const offenders = collectSourceFiles(['lib'], ['.ts'])
       .filter((f) => !rel(f).startsWith('lib/inngest/'))
-      .filter((f) => new RegExp(String.raw`\bstep\.(${STEP_TOOLS})\s*\(`).test(blankNonCode(readFileSync(f, 'utf8'))))
+      .filter((f) => new RegExp(String.raw`\bstep\.(${STEP_TOOLS})\s*\(`).test(readBlanked(f)))
       .map(rel)
       .sort()
 

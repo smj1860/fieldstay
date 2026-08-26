@@ -1818,6 +1818,16 @@ meta-rule, prose is for judgment calls only.
   keeps line numbers so `file:line` allowlist keys stay stable. Where the
   comment genuinely IS the artifact — `inngest-history-secrets`' annotation,
   `redemption-dedup-pairing`'s index name — keep `read()` and say why.
+  A scanner that walks the source by INDEX — balancing brackets, slicing a
+  method chain — cannot use `readCode()`, which shifts every offset left. That
+  module exports two offset-preserving modes for those: `blankComments()` when
+  the scan must still READ a literal (the table name in `.from('bookings')`),
+  and `blankNonCode()`/`readBlanked()` when a literal's CONTENT could pose as
+  the construct being hunted. All three share one lexer on purpose — the two
+  guardrails that grew their own each grew a bug with it (a regex character
+  class containing a quote swallowed the rest of the file; a block comment
+  mid-chain truncated the chain, under-reporting in one arrangement and
+  over-reporting in the other). Do not hand-roll a third.
   `pnpm run check:comment-blind-guardrails` finds these: it strips every comment
   in `app`/`lib`/`components`, re-runs the suite, and reports any guardrail that
   passes on the real tree and fails without prose. Manual, not a CI gate — it
