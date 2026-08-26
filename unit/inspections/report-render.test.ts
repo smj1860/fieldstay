@@ -543,6 +543,71 @@ describe('the sign-off is never split across a page break', () => {
       .toEqual([])
   })
 
+  it('never splits ANY section across a page break, at every offset', async () => {
+    // Generalised from the sign-off rule after @smj1860 reviewed the real form:
+    // Electrical ran heading-plus-two-items at the foot of page 1 and finished
+    // at the top of page 2, where those four items appeared under NO heading —
+    // "Gas appliances — PASS" with nothing saying what it belonged to.
+    //
+    // SWEPT, for the same reason the sign-off test is. A fixed fixture of
+    // equal-sized sections lands them cleanly N-per-page and never straddles a
+    // boundary at all: the first version of this passed with the rule deleted.
+    // Varying a leading section by one item walks every following section
+    // across every offset, so some arrangement must straddle if nothing stops it.
+    const straddled: string[] = []
+
+    for (let lead = 0; lead <= 20; lead++) {
+      const sections = [
+        { key: 'lead', name: 'Leading Section',
+          answers: Array.from({ length: lead }, (_, i) =>
+            answer({ id: `l-${i}`, prompt: `Leading item ${i}` })) },
+        ...Array.from({ length: 4 }, (_, sIdx) => ({
+          key: `sec-${sIdx}`, name: `Section ${sIdx} Heading`,
+          answers: Array.from({ length: 7 }, (_, i) =>
+            answer({ id: `s${sIdx}-i${i}`, prompt: `Item ${i} of section ${sIdx}` })),
+        })),
+      ].filter((sec) => sec.answers.length > 0)
+
+      const pages = await stringsByPage(reportWith({
+        inspections: [inspection({ sections })],
+      }))
+
+      for (const section of sections) {
+        const seen = new Set([
+          pageWith(pages, section.name),
+          ...section.answers.map((a) => pageWith(pages, a.prompt)),
+        ])
+        if (seen.size !== 1) {
+          straddled.push(`lead=${lead} ${section.name}: spans p${[...seen].sort().join('/p')}`)
+        }
+      }
+    }
+
+    expect(straddled, `sections split across page breaks:\n  ${straddled.join('\n  ')}`)
+      .toEqual([])
+  })
+
+  it('a section too tall for any page starts immediately, without a wasted blank page', async () => {
+    // The escape hatch, asserted on the thing that distinguishes it. Keeping
+    // this section whole is impossible, so the rule must stand aside — without
+    // the guard it breaks to a fresh page, finds it still does not fit, and
+    // splits anyway, having spent a page carrying nothing but the letterhead.
+    const pages = await stringsByPage(reportWith({
+      inspections: [inspection({ sections: [{
+        key: 'huge', name: 'Oversized Section',
+        answers: Array.from({ length: 70 }, (_, i) =>
+          answer({ id: `h${i}`, prompt: `Oversized item ${i}` })),
+      }] })],
+    }))
+
+    expect(pages.length).toBeGreaterThan(1)
+    expect(
+      pageWith(pages, 'Oversized item 0'),
+      'the oversized section must begin on the letterhead page, not after a blank one',
+    ).toBe(0)
+    expect(pageWith(pages, 'Oversized item 69')).toBeGreaterThan(0)
+  })
+
   it('does not spend a blank page when the sign-off already fits', async () => {
     // A short walk must not push the attestation onto a page of its own —
     // that reads as something missing rather than deliberate.

@@ -200,9 +200,18 @@ function drawInspection(cur: Cursor, report: InspectionReport, ins: ReportInspec
   const body    = ins.sections.filter((s) => s.key !== SIGNOFF_KEY)
   const signoff = ins.sections.find((s) => s.key === SIGNOFF_KEY) ?? null
 
-  for (const section of body) drawSection(cur, section)
+  // NO SECTION IS SPLIT, not just the sign-off. @smj1860, reviewing the real
+  // form: Electrical ran heading-plus-two-items at the foot of page 1 and
+  // finished at the top of page 2 — where those four items appeared under NO
+  // heading at all, so a reader arriving on page 2 met "Gas appliances — PASS"
+  // with nothing saying which section it belonged to. The sign-off rule below
+  // is now just this rule applied to a section plus its block.
+  for (const section of body) {
+    keepTogether(cur, sectionHeight(cur, section))
+    drawSection(cur, section)
+  }
 
-  keepSignOffTogether(cur, signoff)
+  keepTogether(cur, (signoff ? sectionHeight(cur, signoff) : 0) + SIGNOFF_BLOCK_HEIGHT)
   if (signoff) drawSection(cur, signoff)
   drawSignOff(cur, ins, report)
 
@@ -212,19 +221,22 @@ function drawInspection(cur: Cursor, report: InspectionReport, ins: ReportInspec
 const SIGNOFF_KEY = 'signoff'
 
 /**
- * Breaks to a new page if the sign-off would not fit whole on this one.
+ * Breaks to a new page if `needed` points will not fit on this one.
  *
- * NOT an unconditional page break: on a walk whose last section ends high up,
- * forcing a break would leave a mostly-blank page and put the attestation alone
- * on the next, which looks like something is missing rather than deliberate.
+ * NOT an unconditional break: content that already fits stays where it is, so
+ * a short walk does not scatter one section per page.
  *
- * And it only breaks when breaking HELPS. A sign-off taller than an entire
- * empty page cannot be kept whole by any amount of moving, so pushing it would
- * spend a blank page and split it anyway. That case wants the normal flow —
- * `drawSection` and `drawSignOff` each break as they go.
+ * And it only breaks when breaking HELPS. Something taller than an entire empty
+ * page cannot be kept whole by any amount of moving, so pushing it would spend
+ * a blank page and split it anyway. That case falls through to normal flow,
+ * where `drawAnswer` and `drawSignOff` break as they go.
+ *
+ * The cost is white space at the foot of a page, and on this document that is
+ * the right trade: a section continuing across a break loses its heading, and
+ * an evidentiary record where a reader cannot tell which section a line belongs
+ * to is worse than one with a gap in it.
  */
-function keepSignOffTogether(cur: Cursor, signoff: ReportSection | null): void {
-  const needed = (signoff ? sectionHeight(cur, signoff) : 0) + SIGNOFF_BLOCK_HEIGHT
+function keepTogether(cur: Cursor, needed: number): void {
   if (needed > PAGE_CONTENT_HEIGHT) return
   if (cur.y - needed < FOOTER_LIMIT) newPage(cur)
 }
@@ -342,7 +354,14 @@ function answerHeight(layout: AnswerLayout): number {
 
 function drawAnswer(cur: Cursor, answer: ReportAnswer): void {
   const layout = layoutAnswer(cur, answer)
-  ensure(cur, layout.prompt.length * PROMPT_LEADING + 16)
+
+  // THE SAME NUMBER answerHeight() reports, and it has to be. This used to
+  // demand `prompt * PROMPT_LEADING + 16`, which is MORE than the answer
+  // actually contributes to sectionHeight() once it has no detail lines — so a
+  // section could measure as fitting and then break on its own last answer,
+  // 6pt short. The sweep in report-render.test.ts caught it; a fixed fixture
+  // did not, because the shortfall only shows at particular offsets.
+  ensure(cur, answerHeight(layout))
 
   const status = statusLabel(answer)
   const top    = cur.y
