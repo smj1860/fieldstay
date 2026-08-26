@@ -21,9 +21,6 @@
     22,
     18
   ],
-  "app/(dashboard)/templates/maintenance/create/create-template-builder.tsx": [
-    31
-  ],
   "app/(dashboard)/templates/maintenance/saved/saved-templates-browser.tsx": [
     21
   ],
