@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest'
 import { readFileSync, existsSync } from 'node:fs'
 import { join } from 'node:path'
+import { collectSourceFiles, rel, readCode } from './scan'
 
 /**
  * CAN-SPAM opt-out coverage.
@@ -31,6 +32,50 @@ const COMMERCIAL_SENDERS = [
   'lib/inngest/functions/onboarding-drip.tsx',
   'lib/inngest/functions/email-trial-lifecycle.tsx',
 ]
+
+/**
+ * ── Why the list above was not enough ────────────────────────────────────────
+ *
+ * COMMERCIAL_SENDERS is hand-maintained, and nothing made a NEW sender join it.
+ * On 2026-08-26 `scripts/send-guidebook-launch-email.ts` was found doing exactly
+ * what this file's header says had already been fixed: a mass send of the
+ * Guidebook feature announcement to every org owner/admin with no
+ * resolveEmailAudience() call, and no unsubscribeUrl/postalAddress passed to the
+ * template — whose footer is guarded on both, so the mail carried no opt-out
+ * link and no physical address at all. The SAME template sent from
+ * onboarding-drip.tsx was fully compliant. One template, two callers, one of
+ * them a violation, and every test here green, because the scan only ever
+ * looked at two files under lib/inngest/.
+ *
+ * The script bypassed the gate by bypassing the shared client: its own
+ * `new Resend(...)` and a `batch.send()`. So the three checks below are
+ * discovery rather than registration — they find senders instead of trusting a
+ * list to stay current.
+ *
+ * All three read through readCode(). Comment-blindness is not theoretical here:
+ * lib/resend/client.ts's own JSDoc quotes "resend.emails.send(...)" and
+ * lib/utils/html.ts uses it as a worked example, so a raw-source scan would
+ * flag a module that sends nothing.
+ */
+
+/** Directories that can plausibly contain an email send. */
+const SEND_SCAN_DIRS = ['lib', 'app', 'scripts', 'emails']
+
+/** Script extensions too — a mailing script need not be TypeScript. */
+const SCRIPT_EXTS = ['.ts', '.tsx', '.mjs', '.js']
+
+const SENDS_EMAIL = /\b(?:emails|batch)\.send\s*\(/
+const BULK_SEND   = /\bbatch\.send\s*\(/
+const NEW_RESEND  = /\bnew\s+Resend\s*\(/
+
+/**
+ * Scripts permitted to send email without the commercial gate, each with a
+ * reason. EMPTY BY DESIGN — the one member was deleted rather than excused,
+ * because a runnable mass-mailer with no opt-out is not a thing to keep behind
+ * an allowlist entry. Adding an entry here is a decision to be argued in a
+ * review, which is the point.
+ */
+const TRANSACTIONAL_SCRIPTS = new Set<string>()
 
 describe('commercial email — CAN-SPAM opt-out', () => {
   it('the opt-out flag is actually WRITTEN somewhere, not just read', () => {
@@ -148,6 +193,50 @@ describe('commercial email — CAN-SPAM opt-out', () => {
       expect(ok.unsubscribeUrl).toContain('tok-123')
       expect(Object.keys(ok.headers).length).toBeGreaterThan(0)
     })
+  })
+
+  it('the Resend client has exactly one owner', () => {
+    // The shared client in lib/resend/client.ts is where FROM, the timeout
+    // budget and the demo-org suppression live. A second `new Resend(...)`
+    // is a private mail channel that inherits none of it — which is precisely
+    // how the launch script came to have no timeout, no opt-out and no
+    // idempotency key while looking like ordinary code.
+    const owners = collectSourceFiles(SEND_SCAN_DIRS, SCRIPT_EXTS)
+      .filter((f) => NEW_RESEND.test(readCode(f)))
+      .map(rel)
+      .sort()
+
+    expect(owners).toEqual(['lib/resend/client.ts'])
+  })
+
+  it('a bulk send only happens where the audience is resolved', () => {
+    // batch.send() is mass mail by definition. There is no per-recipient
+    // transactional trigger behind it, so the opt-out state of every address
+    // in the batch has to have been resolved before the batch was built.
+    const offenders = collectSourceFiles(SEND_SCAN_DIRS, SCRIPT_EXTS)
+      .filter((f) => BULK_SEND.test(readCode(f)))
+      .filter((f) => !readCode(f).includes('resolveEmailAudience'))
+      .map(rel)
+
+    expect(offenders, 'bulk send without an opt-out gate').toEqual([])
+  })
+
+  it('every script that sends email gates on the commercial opt-out', () => {
+    // scripts/ was invisible to this file until 2026-08-26. A script is the
+    // easiest place for this defect to reappear: it runs by hand, off the
+    // request path, reviewed once, and nothing downstream checks it.
+    const offenders = collectSourceFiles(['scripts'], SCRIPT_EXTS)
+      .filter((f) => SENDS_EMAIL.test(readCode(f)))
+      .map((f) => ({ path: rel(f), code: readCode(f) }))
+      .filter(({ path }) => !TRANSACTIONAL_SCRIPTS.has(path))
+      .filter(({ code }) => !code.includes('resolveEmailAudience'))
+      .map(({ path }) => path)
+
+    expect(
+      offenders,
+      'a script sends email without resolveEmailAudience — gate it, or add it ' +
+      'to TRANSACTIONAL_SCRIPTS with a reason it is CAN-SPAM exempt',
+    ).toEqual([])
   })
 
   it('the shared email layout can render an unsubscribe link and postal address', () => {
