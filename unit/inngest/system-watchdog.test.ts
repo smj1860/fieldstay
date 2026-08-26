@@ -382,7 +382,8 @@ describe('systemWatchdog — slow jobs', () => {
     // The actionable case: steady for hours, then one run takes minutes. That
     // is the shape of a job about to start timing out or overlapping its own
     // next tick.
-    const res = await run(runsWithDurations([4_000, 4_200, 3_900, 4_100, 4_050, 400_000]))
+    // TWO slow runs, not one — see the single-spike test below for why.
+    const res = await run(runsWithDurations([4_000, 4_200, 3_900, 4_100, 400_000, 400_000]))
 
     expect(res.slowJobs).toBe(1)
     expect(reportError).toHaveBeenCalledWith(
@@ -391,12 +392,24 @@ describe('systemWatchdog — slow jobs', () => {
     )
   })
 
+  it('does NOT report a single spike — one slow run is not a slow job', async () => {
+    // This exact fixture used to fire, and that was the 2026-08-26 false alarm
+    // in miniature: ownerrez-incremental-sync reported at "97s vs 9s median"
+    // while every run that week succeeded, one booking row had changed in
+    // fourteen hours, and two to four UNRELATED jobs were slow in the same
+    // hours — cron-metrics-snapshot among them, which calls no external API.
+    // Against a small median the 60s floor turns ordinary platform jitter into
+    // a page, so a breach has to repeat before it counts.
+    const res = await run(runsWithDurations([4_000, 4_200, 3_900, 4_100, 4_050, 400_000]))
+    expect(res.slowJobs).toBe(0)
+  })
+
   it('reports on the MULTIPLE, not just the absolute floor', async () => {
     // The step-change case above is caught by the 60s floor alone. This one is
     // above the floor throughout, so only the 3x-median rule can catch it —
     // which is what makes the rule self-calibrating rather than a disguised
     // fixed threshold.
-    const res = await run(runsWithDurations([100_000, 100_000, 100_000, 100_000, 100_000, 400_000]))
+    const res = await run(runsWithDurations([100_000, 100_000, 100_000, 100_000, 400_000, 400_000]))
     expect(res.slowJobs).toBe(1)
   })
 
@@ -444,6 +457,53 @@ describe('systemWatchdog — slow jobs', () => {
     expect(res.slowJobs).toBe(0)
   })
 
+  it('does not count time a run spent QUEUED as time it spent working', async () => {
+    // system_job_runs.started_at is when Inngest CREATED the run, not when it
+    // began executing — job-run-recorder decodes it from the run id's ULID
+    // because `inngest/function.finished` carries no timestamps. So for a
+    // function declaring `concurrency: { limit: 1 }`, a run that waited for the
+    // previous one books that entire wait as its own duration.
+    //
+    // No production alarm has been traced to this yet — the 2026-08-26
+    // ownerrez-incremental-sync window was checked and had ZERO overlapping
+    // runs, so its 97s was 97s of real execution. This covers the construction
+    // defect rather than an observed incident: the moment a watched job does
+    // overlap itself, duration_ms starts counting time it was not running.
+    //
+    // Timeline below: five 5s runs, then one genuinely slow 200s run, then a
+    // run ENQUEUED 100s into that one — so it waits 100s and executes for 5s.
+    // Raw duration 105s. Judged raw, the last three runs contain two breaches
+    // of the 60s floor and this alarms. Judged on execution, only one does.
+    const base = Date.now() - 6 * 3_600_000
+    const at   = (ms: number) => new Date(base + ms).toISOString()
+
+    const timeline = [
+      { start: 0,         duration: 5_000   },
+      { start: 600_000,   duration: 5_000   },
+      { start: 1_200_000, duration: 5_000   },
+      { start: 1_800_000, duration: 5_000   },
+      { start: 2_400_000, duration: 5_000   },
+      { start: 3_000_000, duration: 200_000 },   // genuinely slow: one breach
+      // Enqueued mid-flight, so it cannot have started before 3_200_000.
+      // Raw 105s; execution 5s.
+      { start: 3_100_000, duration: 105_000 },
+    ]
+
+    const target = timeline.map((t) => ({
+      function_id: TARGET,
+      started_at:  at(t.start),
+      finished_at: at(t.start + t.duration),
+      duration_ms: t.duration,
+    }))
+
+    const others = WATCHED_JOBS
+      .filter((j) => j.id !== TARGET)
+      .map((j) => ({ function_id: j.id, started_at: hoursAgo(1), duration_ms: 1_000 }))
+
+    const res = await run([...others, ...target])
+    expect(res.slowJobs).toBe(0)
+  })
+
   it('is a WARNING path — a slow job is still a running job', async () => {
     // Distinct from silence: slow means degraded, silent means stopped. They
     // are reported under different sites so one cannot be mistaken for the
@@ -452,7 +512,7 @@ describe('systemWatchdog — slow jobs', () => {
     ;(createServiceClient as ReturnType<typeof vi.fn>).mockReturnValue(
       makeSupabase(
         {
-          system_job_runs: [{ data: runsWithDurations([4_000, 4_200, 3_900, 4_100, 4_050, 400_000]), error: null }],
+          system_job_runs: [{ data: runsWithDurations([4_000, 4_200, 3_900, 4_100, 400_000, 400_000]), error: null }],
           integration_connections: [{ data: [], error: null }],
         },
         [], RECORDING_MATURE,
