@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { collectSourceFiles, rel, read } from './scan'
+import { balancedEnd, blankNonCode, collectSourceFiles, rel, read } from './scan'
 
 // ============================================================================
 // Guardrail: every email sent from inside an Inngest step carries an
@@ -38,52 +38,21 @@ import { collectSourceFiles, rel, read } from './scan'
 
 const SEND_CALL = /\b(?:resend\.emails\.send|resend\.batch\.send)\s*\(/g
 
-/**
- * Blank out comments, preserving byte offsets so reported line numbers stay
- * correct. Same treatment unbounded-fanout-loops.test.ts applies, for a
- * sharper reason: the balanced walk below tracks string literals, and an
- * apostrophe in ordinary prose opens one that never closes.
- *
- * That is not hypothetical. ical-sync.ts documents its key with "retries of
- * the *same* step won't double-send" — the apostrophe in "won't" swallowed
- * everything up to the next quote, including the `idempotencyKey` sitting two
- * lines below it, and the one file whose comment explains the rule was
- * reported as breaking it. A check defeated by prose punctuation teaches
- * people to write worse comments.
- */
-function stripComments(src: string): string {
-  let out = ''
-  let i = 0
-  let inString: string | null = null
-
-  while (i < src.length) {
-    const ch   = src[i] as string
-    const next = src[i + 1]
-
-    if (inString) {
-      if (ch === '\\') { out += src.slice(i, i + 2); i += 2; continue }
-      if (ch === inString) inString = null
-      out += ch; i++; continue
-    }
-    if (ch === "'" || ch === '"' || ch === '`') { inString = ch; out += ch; i++; continue }
-
-    if (ch === '/' && next === '/') {
-      while (i < src.length && src[i] !== '\n') { out += ' '; i++ }
-      continue
-    }
-    if (ch === '/' && next === '*') {
-      out += '  '; i += 2
-      while (i < src.length && !(src[i] === '*' && src[i + 1] === '/')) {
-        out += src[i] === '\n' ? '\n' : ' '
-        i++
-      }
-      out += '  '; i += 2
-      continue
-    }
-    out += ch; i++
-  }
-  return out
-}
+// Comments AND literal bodies are blanked, byte offsets preserved, by the
+// shared lexer in ./scan. This file used to carry its own copy, and the reason
+// it needed one is worth keeping: the balanced walk below tracks string
+// literals, and an apostrophe in ordinary prose opens one that never closes.
+//
+// That is not hypothetical. ical-sync.ts documents its key with "retries of
+// the *same* step won't double-send" — the apostrophe in "won't" swallowed
+// everything up to the next quote, including the `idempotencyKey` sitting two
+// lines below it, and the one file whose comment explains the rule was
+// reported as breaking it. A check defeated by prose punctuation teaches
+// people to write worse comments.
+//
+// blankNonCode rather than blankComments: with literal bodies blanked too, a
+// bracket inside a template can no longer unbalance the walk, and the string
+// "idempotencyKey" cannot pose as the real option.
 
 /**
  * Does the argument list of the call starting at `openIdx` include an
@@ -95,24 +64,7 @@ function stripComments(src: string): string {
  * either miss it or run into the next statement.
  */
 function callHasIdempotencyKey(src: string, openIdx: number): boolean {
-  let depth = 0
-  let inString: string | null = null
-
-  for (let i = openIdx; i < src.length; i++) {
-    const ch = src[i] as string
-    if (inString) {
-      if (ch === '\\') { i++; continue }
-      if (ch === inString) inString = null
-      continue
-    }
-    if (ch === "'" || ch === '"' || ch === '`') { inString = ch; continue }
-    if (ch === '(' || ch === '[' || ch === '{') depth++
-    else if (ch === ')' || ch === ']' || ch === '}') {
-      depth--
-      if (depth === 0) return src.slice(openIdx, i + 1).includes('idempotencyKey')
-    }
-  }
-  return false
+  return src.slice(openIdx, balancedEnd(src, openIdx)).includes('idempotencyKey')
 }
 
 /**
@@ -131,7 +83,7 @@ function findOffenders(): string[] {
     const key = rel(file)
     if (key in EXCEPTIONS) continue
 
-    const src = stripComments(read(file))
+    const src = blankNonCode(read(file))
     for (const m of src.matchAll(SEND_CALL)) {
       const openIdx = src.indexOf('(', m.index as number)
       if (openIdx === -1) continue
@@ -168,7 +120,7 @@ describe('guardrail: emails sent from an Inngest step carry an idempotency key',
     // construct it is meant to police.
     let seen = 0
     for (const file of collectSourceFiles(['lib/inngest'])) {
-      seen += Array.from(stripComments(read(file)).matchAll(SEND_CALL)).length
+      seen += Array.from(blankNonCode(read(file)).matchAll(SEND_CALL)).length
     }
     expect(seen).toBeGreaterThan(15)
   })
@@ -203,10 +155,27 @@ describe('guardrail: emails sent from an Inngest step carry an idempotency key',
       "  // retries of the *same* step won't double-send",
       '  { idempotencyKey: `k-1` }',
       ')',
+      // Trailing statement on purpose. Without it the call runs to the last
+      // character of the fixture, so "stopped at the closing paren" and "ran
+      // off the end of the file" are the same index and the assertion below
+      // cannot tell the two apart — which is exactly the confusion that made
+      // the first version of this check pass for the wrong reason.
+      'const after = 1',
     ].join('\n')
 
-    const stripped = stripComments(sample)
+    const stripped = blankNonCode(sample)
     expect(callHasIdempotencyKey(stripped, stripped.indexOf('('))).toBe(true)
+
+    // The walk must genuinely NEED the blanking, and asserting the boolean
+    // cannot show that: on raw source the apostrophe opens a string that never
+    // closes, the bracket walk runs off the end of the file, and a slice to EOF
+    // contains the key anyway — the right answer for the wrong reason, which
+    // would keep this test green through a regression. The end INDEX is what
+    // separates them. Note the direction of the failure: a runaway walk reports
+    // a key that is not in the call, so this defect makes the guardrail miss
+    // violations rather than invent them.
+    expect(balancedEnd(sample, sample.indexOf('('))).toBe(sample.length)
+    expect(balancedEnd(stripped, stripped.indexOf('('))).toBeLessThan(sample.length)
   })
 
   it('every EXCEPTIONS entry still sends an email (prune when code moves)', () => {

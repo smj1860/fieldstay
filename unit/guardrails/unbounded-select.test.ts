@@ -1,7 +1,9 @@
 import { describe, it, expect } from 'vitest'
 import { existsSync } from 'fs'
 import { join } from 'path'
-import { blankComments, collectSourceFiles, quotedEnd, rel, read, ROOT } from './scan'
+import {
+  blankComments, collectSourceFiles, isCloseBracket, isOpenBracket, quotedEnd, read, rel, ROOT,
+} from './scan'
 
 // ============================================================================
 // Unbounded-`.select()` guardrail for lib/inngest/**.
@@ -163,9 +165,6 @@ function inngestReachableFiles(): string[] {
   return [...seen].sort()
 }
 
-const OPEN  = new Set(['(', '[', '{'])
-const CLOSE = new Set([')', ']', '}'])
-
 /** Index of the next character that is not whitespace. */
 function skipSpace(src: string, from: number): number {
   let i = from
@@ -205,8 +204,8 @@ function extractChain(src: string, fromIdx: number): string {
     const ch = src[i]!
 
     if (ch === "'" || ch === '"' || ch === '`') { i = quotedEnd(src, i, ch); continue }
-    if (OPEN.has(ch))   { depth++; i++; continue }
-    if (!CLOSE.has(ch)) { i++; continue }
+    if (isOpenBracket(ch))   { depth++; i++; continue }
+    if (!isCloseBracket(ch)) { i++; continue }
 
     depth--
     i++

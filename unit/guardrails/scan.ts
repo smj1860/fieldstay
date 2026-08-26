@@ -377,6 +377,47 @@ function regexAllowed(out: string[]): boolean {
   return REGEX_PREV_WORDS.has(out.slice(j + 1, i + 1).join(''))
 }
 
+const OPEN_BRACKETS  = new Set(['(', '[', '{'])
+const CLOSE_BRACKETS = new Set([')', ']', '}'])
+
+// Predicates rather than the Sets themselves: an exported Set is shared mutable
+// state, and one stray `.add()` in a test file would change how every other
+// guardrail reads source.
+export const isOpenBracket  = (ch: string): boolean => OPEN_BRACKETS.has(ch)
+export const isCloseBracket = (ch: string): boolean => CLOSE_BRACKETS.has(ch)
+
+/**
+ * Index just past the bracket matching the one at `openIdx`, or `src.length`
+ * if it is never closed.
+ *
+ * String and template literals are skipped, so a bracket inside one cannot
+ * unbalance the walk. REGEX literals are not — a pattern containing an
+ * unbalanced bracket would still throw the count off, so pass `blankNonCode`d
+ * source when the file being walked might contain one.
+ *
+ * Four guardrails had each written this loop, every one of them with its own
+ * `inString` flag. Different bugs each time; the shape is the same every time.
+ */
+export function balancedEnd(src: string, openIdx: number): number {
+  let depth = 0
+  let i = openIdx
+
+  while (i < src.length) {
+    const ch = src[i]!
+    if (ch === "'" || ch === '"' || ch === '`') {
+      i = quotedEnd(src, i, ch)
+      continue
+    }
+    if (OPEN_BRACKETS.has(ch)) depth++
+    else if (CLOSE_BRACKETS.has(ch)) {
+      depth--
+      if (depth === 0) return i + 1
+    }
+    i++
+  }
+  return src.length
+}
+
 /** Index just past a regex literal's closing delimiter and flags, or -1. */
 function regexEnd(src: string, start: number): number {
   let i = start + 1

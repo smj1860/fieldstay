@@ -1,5 +1,7 @@
 import { describe, it, expect } from 'vitest'
-import { collectSourceFiles, rel, read } from './scan'
+import {
+  blankComments, collectSourceFiles, isCloseBracket, isOpenBracket, quotedEnd, read, rel,
+} from './scan'
 
 // ============================================================================
 // Unbounded fan-out loop guardrail.
@@ -180,96 +182,75 @@ function rootIdentifier(expr: string): string | null {
   return bare ? bare[1]! : null
 }
 
+/**
+ * At depth 0 a newline ends the statement — unless the next non-blank line
+ * opens with `.` or `?.`, which continues the method chain.
+ */
+function continuesChain(src: string, newlineIdx: number): boolean {
+  return /^\s*[.?]/.test(src.slice(newlineIdx + 1))
+}
+
 /** The defining expression for `const name = <expr>` / `let name = <expr>`, balanced to statement end. */
 function findDefinition(src: string, name: string): string | null {
   const decl = new RegExp(`\\b(?:const|let|var)\\s+${name}\\b[^=]*=`, 'g')
   const m = decl.exec(src)
   if (!m) return null
 
-  let i = decl.lastIndex
   let depth = 0
-  let inString: string | null = null
+  let i = decl.lastIndex
   for (; i < src.length; i++) {
     const ch = src[i]!
-    if (inString) {
-      if (ch === inString && src[i - 1] !== '\\') inString = null
+    // Literals skipped by the shared lexer. The local `inString` flag ended a
+    // string at any quote whose predecessor was not a backslash — wrong exactly
+    // when that backslash is itself escaped.
+    if (ch === "'" || ch === '"' || ch === '`') { i = quotedEnd(src, i, ch) - 1; continue }
+    if (isOpenBracket(ch)) { depth++; continue }
+    if (isCloseBracket(ch)) {
+      depth--
+      if (depth < 0) break
       continue
     }
-    if (ch === "'" || ch === '"' || ch === '`') { inString = ch; continue }
-    if (ch === '(' || ch === '[' || ch === '{') depth++
-    else if (ch === ')' || ch === ']' || ch === '}') depth--
-    else if (depth === 0 && ch === '\n') {
-      // Statement ends at a newline only when the expression is complete and
-      // the next non-blank line starts a new statement rather than a chained
-      // `.method(` continuation.
-      const rest = src.slice(i + 1)
-      if (!/^\s*[.?]/.test(rest)) break
-    }
-    if (depth < 0) break
+    if (depth === 0 && ch === '\n' && !continuesChain(src, i)) break
   }
   return src.slice(m.index, i)
 }
 
-/**
- * Blank out comments, preserving byte offsets so reported line numbers stay
- * correct.
- *
- * The scan reads raw source, so it matched loop syntax written inside a
- * COMMENT — the fan-out fix for platform-inventory-template-broadcast.ts
- * documents the old `for (const orgId of orgIds) { await step.run(...) }` in
- * prose explaining why it is gone, and that prose was reported as the
- * offender. A guardrail that flags the documentation of the very defect it
- * guards teaches people to delete the explanation.
- */
-function stripComments(src: string): string {
-  let out = ''
-  let i = 0
-  let inString: string | null = null
+// Comments are blanked (offsets preserved) by ./scan before the scan runs.
+//
+// The scan used to read raw source, so it matched loop syntax written inside a
+// COMMENT — the fan-out fix for platform-inventory-template-broadcast.ts
+// documents the old `for (const orgId of orgIds) { await step.run(...) }` in
+// prose explaining why it is gone, and that prose was reported as the offender.
+// A guardrail that flags the documentation of the very defect it guards teaches
+// people to delete the explanation.
+//
+// blankComments, not blankNonCode: isBounded and findDefinition read literal
+// CONTENT out of the defining expression.
 
-  while (i < src.length) {
-    const ch = src[i]!
-    const next = src[i + 1]
+/** Whether the loop matched at `bodyStart` fans out over an unbounded list. */
+function isUnboundedFanout(src: string, iterated: string, bodyStart: number): boolean {
+  const body = findBodyAfter(src, bodyStart)
+  if (!body || !FANOUT.test(body)) return false
 
-    if (inString) {
-      if (ch === '\\') { out += src.slice(i, i + 2); i += 2; continue }
-      if (ch === inString) inString = null
-      out += ch; i++; continue
-    }
-    if (ch === "'" || ch === '"' || ch === '`') { inString = ch; out += ch; i++; continue }
+  const name = rootIdentifier(iterated)
+  if (!name) return false
+  if (!findDefinition(src, name)) return false
 
-    if (ch === '/' && next === '/') {
-      while (i < src.length && src[i] !== '\n') { out += ' '; i++ }
-      continue
-    }
-    if (ch === '/' && next === '*') {
-      while (i < src.length && !(src[i] === '*' && src[i + 1] === '/')) {
-        out += src[i] === '\n' ? '\n' : ' '
-        i++
-      }
-      out += '  '; i += 2; continue
-    }
-    out += ch; i++
-  }
-  return out
+  return !isBounded(src, name)
 }
 
 function findOffenders(): string[] {
   const offenders: string[] = []
+
   for (const file of collectSourceFiles(['lib/inngest'])) {
-    const src = stripComments(read(file))
+    const src = blankComments(read(file))
     LOOP_OPEN.lastIndex = 0
+
     let m: RegExpExecArray | null
     while ((m = LOOP_OPEN.exec(src))) {
       const iterated = m[1] ?? m[2]
       if (!iterated) continue
-      const body = findBodyAfter(src, LOOP_OPEN.lastIndex)
-      if (!body || !FANOUT.test(body)) continue
-
-      const name = rootIdentifier(iterated)
-      if (!name) continue
-      if (!findDefinition(src, name)) continue
-      if (isBounded(src, name)) continue
-
+      if (!isUnboundedFanout(src, iterated, LOOP_OPEN.lastIndex)) continue
       offenders.push(`${rel(file)}:${src.slice(0, m.index).split('\n').length}`)
     }
   }
