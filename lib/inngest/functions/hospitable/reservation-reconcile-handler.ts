@@ -41,14 +41,10 @@
 import { inngest }              from '@/lib/inngest/client'
 import { NonRetriableError }    from 'inngest'
 import { getValidHospitableToken } from '@/lib/integrations/providers/hospitable-token'
-import { createServiceClient } from '@/lib/supabase/server'
-import { reportError } from '@/lib/observability/report-error'
-import { recordConnectionErrorNotified } from '@/lib/integrations/connection-error-notify'
-import {
-  isProviderAuthFailure, markProviderConnectionRevoked,
-} from '@/lib/integrations/connection-revoked'
 import { runProviderReconcile } from '../shared/reconcile-shell'
 import { syncHospitableReservations } from './reservation-sync'
+import { isProviderAuthFailure } from '@/lib/integrations/connection-revoked'
+import { revokeAndNotify } from '@/lib/inngest/functions/shared/revoke-and-notify'
 
 const PROVIDER = 'hospitable'
 const SYSTEM   = 'inngest:hospitable-reservation-reconcile'
@@ -148,43 +144,12 @@ export const hospReservationReconcileHandler = inngest.createFunction(
     } catch (err) {
       if (!isProviderAuthFailure(err)) throw err
 
-      const decision = await step.run('mark-revoked', async () => {
-        const admin = createServiceClient({ system: SYSTEM })
-        return markProviderConnectionRevoked(admin, {
-          userId: user_id, orgId: org_id, err,
-          providerId: 'hospitable', providerLabel: 'Hospitable',
-          site:   'inngest.hospitable-reservation-reconcile-handler.notify-revoked.throttle',
-        })
+      await revokeAndNotify({
+        step, logger, userId: user_id, orgId: org_id, err,
+        providerId: 'hospitable', providerLabel: 'Hospitable',
+        system: SYSTEM, fnId: 'hospitable-reservation-reconcile-handler',
       })
 
-      if (decision) {
-        await step.sendEvent('notify-revoked', {
-          name: 'integration/connection.error',
-          data: { user_id, org_id, provider_id: PROVIDER, reason: decision.humanError },
-        })
-        await step.run('record-revoked-notified', async () => {
-          const admin = createServiceClient({ system: SYSTEM })
-          await recordConnectionErrorNotified(admin, {
-            orgId:        org_id,
-            connectionId: decision.connectionId,
-            site:         'inngest.hospitable-reservation-reconcile-handler.notify-revoked.record',
-          })
-        })
-      }
-
-      // Reported once, not swallowed. Revoking removes this connection from
-      // SYNCABLE_CONNECTION_STATUSES, so the cron stops fanning to it and this
-      // fires exactly once per revocation — the opposite of the every-hour
-      // repeat that made the original Sentry cluster unreadable.
-      reportError(err instanceof Error ? err : new Error(String(err)), {
-        site:  'inngest.hospitable-reservation-reconcile-handler.connection-revoked',
-        orgId: org_id,
-      })
-
-      logger.warn(
-        `[Hospitable reservation-reconcile] org ${org_id}: connection revoked by the provider — ` +
-        `reconcile paused until the PM reconnects`
-      )
       return { revoked: true }
     }
   }

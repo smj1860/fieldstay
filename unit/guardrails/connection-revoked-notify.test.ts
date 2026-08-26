@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest'
 import { join } from 'node:path'
 
-import { ROOT, readCode } from './scan'
+import { ROOT, balancedEnd, readBlanked, readCode } from './scan'
 
 // ============================================================================
 // A DEAD PROVIDER CONNECTION MUST REACH THE CUSTOMER.
@@ -84,49 +84,76 @@ describe('guardrail: a revoked Hospitable connection notifies the PM', () => {
     ).toContain('isProviderAuthFailure')
   })
 
-  it.each(MUST_NOTIFY)('%s marks the connection revoked', (relPath) => {
+  it.each(MUST_NOTIFY)('%s runs the revoke-and-notify sequence', (relPath) => {
     expect(
       codeOf(relPath),
-      `${relPath} does not call markProviderConnectionRevoked. Detecting the `
-      + 'failure without recording it leaves the row `active`, which is exactly '
-      + 'the state production was found in.',
-    ).toContain('markProviderConnectionRevoked')
+      `${relPath} detects the auth failure but never calls revokeAndNotify, so the `
+      + 'connection stays marked active and the customer is never told to reconnect '
+      + '— exactly the state production was found in.',
+    ).toMatch(/revokeAndNotify\s*\(/)
   })
 
-  it.each(MUST_NOTIFY)('%s sends the PM notification', (relPath) => {
-    const code = codeOf(relPath)
+  it.each(MUST_NOTIFY)('%s calls it at the TOP LEVEL, not inside a step.run', (relPath) => {
+    // The invariant that replaced "the helper never mentions step". Sharing the
+    // sequence is fine — six copies of it scored 25.5% duplicated lines on new
+    // code, with one file at 88.5%. What is NOT fine is calling it from inside a
+    // step.run callback: that registers a new step op mid-callback, unwinds the
+    // request, and re-runs the callback from the top on the next pass, replaying
+    // every side effect written before it. That is the ownerrez-reviews-sync bug
+    // exactly, and it is invisible to a lexical scan for `step.` in the handler.
+    const code = readBlanked(join(ROOT, relPath))
 
-    expect(
-      code,
-      `${relPath} revokes the connection but never emits `
-      + 'integration/connection.error, so the customer is never told to reconnect '
-      + '— the silence this guardrail exists to prevent.',
-    ).toContain("name: 'integration/connection.error'")
-
-    expect(
-      code,
-      `${relPath} sends the notification but never records it, so the 4-hour `
-      + 'throttle in connection-error-notify.ts can never engage and every cron '
-      + 'tick re-notifies.',
-    ).toContain('recordConnectionErrorNotified')
+    for (const m of code.matchAll(/\bstep\.run\s*\(/g)) {
+      const open = code.indexOf('(', m.index)
+      const body = code.slice(open, balancedEnd(code, open))
+      expect(
+        /revokeAndNotify\s*\(/.test(body),
+        `${relPath} calls revokeAndNotify inside a step.run callback (the one opened `
+        + `at line ${code.slice(0, m.index).split('\n').length}). It performs step `
+        + 'tooling; nesting it re-runs the enclosing callback and replays its side '
+        + 'effects. Move the call to the function\'s top level.',
+      ).toBe(false)
+    }
   })
 
-  it.each(MUST_NOTIFY)('%s keeps the send OUT of a step.run callback', (relPath) => {
-    // The nesting ban has its own guardrail (inngest-nested-steps), but this
-    // asserts the positive shape those handlers must keep: the step returns a
-    // DECISION and the send happens after it. Hiding the send in a helper is
-    // how ownerrez-reviews-sync nested step tooling invisibly and wrote two
-    // audit rows per revocation.
-    const code = codeOf(relPath)
-    const sendIdx   = code.indexOf("name: 'integration/connection.error'")
-    const decideIdx = code.indexOf('markProviderConnectionRevoked')
+  it('the shared sequence does all three things, in the right order', () => {
+    // One place now, so this is checked once rather than six times — but it has
+    // to be checked, because collapsing six copies into one helper means one
+    // silent edit can now break every provider at once.
+    const helper = codeOf('lib/inngest/functions/shared/revoke-and-notify.ts')
 
-    expect(sendIdx, `${relPath}: no send found`).toBeGreaterThan(-1)
-    expect(
-      sendIdx,
-      `${relPath} emits integration/connection.error BEFORE it decides. The `
-      + 'decision belongs in a step.run and the send at the top level after it.',
-    ).toBeGreaterThan(decideIdx)
+    // Matched as CALLS. Searching for the bare name finds the `import` line
+    // first, which sits above everything and makes any ordering assertion
+    // meaningless — this test failed that way on its first run, reporting the
+    // throttle as recorded before the send because it had found the import at
+    // character 262. The same trap took two other checks in this file.
+    const markIdx   = helper.search(/markProviderConnectionRevoked\s*\(/)
+    const sendIdx   = helper.indexOf("name: 'integration/connection.error'")
+    const recordIdx = helper.search(/recordConnectionErrorNotified\s*\(/)
+
+    expect(markIdx,   'the helper no longer marks the connection revoked').toBeGreaterThan(-1)
+    expect(sendIdx,   'the helper no longer emits integration/connection.error').toBeGreaterThan(-1)
+    expect(recordIdx, 'the helper no longer records the throttle').toBeGreaterThan(-1)
+
+    expect(sendIdx, 'the helper sends BEFORE it decides').toBeGreaterThan(markIdx)
+    expect(recordIdx, 'the helper records the throttle BEFORE it sends, so a repeat is suppressed')
+      .toBeGreaterThan(sendIdx)
+  })
+
+  it('the shared sequence keeps the send OUT of a step.run callback', () => {
+    // Same check as the call sites, applied to the helper itself: the decision
+    // comes out of a step.run and the send happens between two steps.
+    const code = readBlanked(join(ROOT, 'lib/inngest/functions/shared/revoke-and-notify.ts'))
+
+    for (const m of code.matchAll(/\bstep\.run\s*\(/g)) {
+      const open = code.indexOf('(', m.index)
+      const body = code.slice(open, balancedEnd(code, open))
+      expect(
+        /step\.sendEvent\s*\(/.test(body),
+        'revoke-and-notify.ts nests sendEvent inside a step.run — the exact shape '
+        + 'that made every OwnerRez revocation write two audit rows.',
+      ).toBe(false)
+    }
   })
 
   it('every excluded handler still exists, and none is silently in both lists', () => {
@@ -167,13 +194,16 @@ describe('guardrail: a revoked Hospitable connection notifies the PM', () => {
     ).toMatch(/isHostexAccountActionError\s*\(/)
   })
 
-  it('the shared helper takes no `step` — the send cannot migrate into it', () => {
-    // The one way this wiring could regress without any of the checks above
-    // failing: someone tidies the three copies into the helper, which would
-    // take the step tooling with it and put the nesting straight back.
-    const helper = codeOf('lib/integrations/connection-revoked.ts')
-
-    expect(helper, 'connection-revoked.ts references Inngest step tooling')
-      .not.toMatch(/\bstep\s*[.:]/)
+  it('the CLASSIFIER module stays free of step tooling', () => {
+    // connection-revoked.ts is the decision half — plain database work, safe to
+    // call inside a step.run. The step tooling lives one layer up in
+    // functions/shared/revoke-and-notify.ts, which is called at the top level.
+    // Collapsing those two layers back together would put step tooling in a
+    // module that callers legitimately invoke from inside a step.
+    expect(
+      codeOf('lib/integrations/connection-revoked.ts'),
+      'connection-revoked.ts references Inngest step tooling. It is called from '
+      + 'inside step.run callbacks, so step tooling here IS nesting.',
+    ).not.toMatch(/\bstep\s*[.:]/)
   })
 })

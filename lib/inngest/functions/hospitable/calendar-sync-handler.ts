@@ -22,15 +22,12 @@ import { inngest }                 from '@/lib/inngest/client'
 import { createServiceClient }     from '@/lib/supabase/server'
 import { createPmNotification }    from '@/lib/inngest/helpers'
 import { getValidHospitableToken } from '@/lib/integrations/providers/hospitable-token'
-import { recordConnectionErrorNotified } from '@/lib/integrations/connection-error-notify'
-import {
-  isProviderAuthFailure, markProviderConnectionRevoked,
-} from '@/lib/integrations/connection-revoked'
 import { ProviderEntityGoneError } from '@/lib/integrations/types'
 import { hospFetchCalendar, consolidateHospitableBlocks } from '@/lib/integrations/providers/hospitable'
 import type { HospitableCalendarDay } from '@/lib/integrations/providers/hospitable.types'
 import type { BookingSource } from '@/types/database'
-import { reportError } from '@/lib/observability/report-error'
+import { isProviderAuthFailure } from '@/lib/integrations/connection-revoked'
+import { revokeAndNotify } from '@/lib/inngest/functions/shared/revoke-and-notify'
 
 const PROVIDER            = 'hospitable'
 const CALENDAR_WINDOW_DAYS = 90
@@ -105,45 +102,12 @@ export const hospCalendarSyncHandler = inngest.createFunction(
     } catch (err) {
       if (!isProviderAuthFailure(err)) throw err
 
-      const decision = await step.run('mark-revoked', async () => {
-        const admin = createServiceClient({ system: 'inngest:calendar-sync-handler' })
-        return markProviderConnectionRevoked(admin, {
-          userId: user_id, orgId: org_id, err,
-          providerId: 'hospitable', providerLabel: 'Hospitable',
-          site:   'inngest.hospitable-calendar-sync-handler.notify-revoked.throttle',
-        })
+      await revokeAndNotify({
+        step, logger, userId: user_id, orgId: org_id, err,
+        providerId: 'hospitable', providerLabel: 'Hospitable',
+        system: 'inngest:calendar-sync-handler', fnId: 'hospitable-calendar-sync-handler',
       })
 
-      if (decision) {
-        // Top level, never inside a step.run — see
-        // lib/integrations/connection-revoked.ts.
-        await step.sendEvent('notify-revoked', {
-          name: 'integration/connection.error',
-          data: { user_id, org_id, provider_id: PROVIDER, reason: decision.humanError },
-        })
-        await step.run('record-revoked-notified', async () => {
-          const admin = createServiceClient({ system: 'inngest:calendar-sync-handler' })
-          await recordConnectionErrorNotified(admin, {
-            orgId:        org_id,
-            connectionId: decision.connectionId,
-            site:         'inngest.hospitable-calendar-sync-handler.notify-revoked.record',
-          })
-        })
-      }
-
-      // Reported once, not swallowed. Revoking removes this connection from
-      // SYNCABLE_CONNECTION_STATUSES, so the cron stops fanning to it and this
-      // fires exactly once per revocation — the opposite of the every-hour
-      // repeat that made the original Sentry cluster unreadable.
-      reportError(err instanceof Error ? err : new Error(String(err)), {
-        site:  'inngest.hospitable-calendar-sync-handler.connection-revoked',
-        orgId: org_id,
-      })
-
-      logger.warn(
-        `[Hospitable calendar-sync] org ${org_id}: connection revoked by the provider — ` +
-        `calendar sync paused until the PM reconnects`
-      )
       return { activeCount: 0, cancelledCount: 0, paused: true, revoked: true }
     }
 

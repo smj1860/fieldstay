@@ -37,11 +37,8 @@ import { createServiceClient }  from '@/lib/supabase/server'
 import { unwrap }               from '@/lib/supabase/unwrap'
 import { mergeIntegrationConnectionMetadata } from '@/lib/integrations/connection-metadata'
 import { syncHostawayReservations } from './reservation-sync'
-import { reportError } from '@/lib/observability/report-error'
-import { recordConnectionErrorNotified } from '@/lib/integrations/connection-error-notify'
-import {
-  isProviderAuthFailure, markProviderConnectionRevoked,
-} from '@/lib/integrations/connection-revoked'
+import { isProviderAuthFailure } from '@/lib/integrations/connection-revoked'
+import { revokeAndNotify } from '@/lib/inngest/functions/shared/revoke-and-notify'
 
 const PROVIDER = 'hostaway' as const
 const SYSTEM   = 'inngest:hostaway-incremental-sync'
@@ -189,41 +186,12 @@ export const hostawayIncrementalSyncHandler = inngest.createFunction(
 
       // Decision in a step, send at the top level — see
       // lib/integrations/connection-revoked.ts.
-      const decision = await step.run('mark-revoked', async () => {
-        const admin = createServiceClient({ system: SYSTEM })
-        return markProviderConnectionRevoked(admin, {
-          userId: user_id, orgId: org_id, err,
-          providerId: PROVIDER, providerLabel: 'Hostaway',
-          site:   'inngest.hostaway-incremental-sync-handler.notify-revoked.throttle',
-        })
+      await revokeAndNotify({
+        step, logger, userId: user_id, orgId: org_id, err,
+        providerId: PROVIDER, providerLabel: 'Hostaway',
+        system: SYSTEM, fnId: 'hostaway-incremental-sync-handler',
       })
 
-      if (decision) {
-        await step.sendEvent('notify-revoked', {
-          name: 'integration/connection.error',
-          data: { user_id, org_id, provider_id: PROVIDER, reason: decision.humanError },
-        })
-        await step.run('record-revoked-notified', async () => {
-          const admin = createServiceClient({ system: SYSTEM })
-          await recordConnectionErrorNotified(admin, {
-            orgId:        org_id,
-            connectionId: decision.connectionId,
-            site:         'inngest.hostaway-incremental-sync-handler.notify-revoked.record',
-          })
-        })
-      }
-
-      // Reported once, not hourly: revoking removes this connection from
-      // SYNCABLE_CONNECTION_STATUSES, so the cron stops fanning to it.
-      reportError(err instanceof Error ? err : new Error(String(err)), {
-        site:  'inngest.hostaway-incremental-sync-handler.connection-revoked',
-        orgId: org_id,
-      })
-
-      logger.warn(
-        `[Hostaway] org ${org_id}: connection revoked by the provider — ` +
-        `incremental sync paused until the PM reconnects`
-      )
       return { reservations: 0, newTurnoverIds: 0, since: null, revoked: true }
     }
   }
