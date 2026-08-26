@@ -37,6 +37,11 @@ import { createServiceClient }  from '@/lib/supabase/server'
 import { unwrap }               from '@/lib/supabase/unwrap'
 import { mergeIntegrationConnectionMetadata } from '@/lib/integrations/connection-metadata'
 import { syncHostawayReservations } from './reservation-sync'
+import { reportError } from '@/lib/observability/report-error'
+import { recordConnectionErrorNotified } from '@/lib/integrations/connection-error-notify'
+import {
+  isProviderAuthFailure, markProviderConnectionRevoked,
+} from '@/lib/integrations/connection-revoked'
 
 const PROVIDER = 'hostaway' as const
 const SYSTEM   = 'inngest:hostaway-incremental-sync'
@@ -77,6 +82,12 @@ export const hostawayIncrementalSyncHandler = inngest.createFunction(
   async ({ event, step, logger }) => {
     const { user_id, org_id } = event.data
 
+    // The whole sweep is wrapped, not just the first fetch: Hostaway's API key
+    // cannot be refreshed, so once it stops being accepted every step below
+    // fails the same way, and this runs HOURLY. Catching outside the steps lets
+    // Inngest exhaust its retries first, so a transient 401 cannot revoke a
+    // working connection.
+    try {
     const prepared = await step.run('read-cursor-and-properties', async () => {
       const token = await readIntegrationToken(user_id, PROVIDER)
       // Retrying cannot conjure a token — only reconnecting can — and Hostaway's
@@ -172,6 +183,48 @@ export const hostawayIncrementalSyncHandler = inngest.createFunction(
       reservations:   result.reservationCount,
       newTurnoverIds: result.newTurnoverIds.length,
       since:          prepared.cursor,
+    }
+    } catch (err) {
+      if (!isProviderAuthFailure(err)) throw err
+
+      // Decision in a step, send at the top level — see
+      // lib/integrations/connection-revoked.ts.
+      const decision = await step.run('mark-revoked', async () => {
+        const admin = createServiceClient({ system: SYSTEM })
+        return markProviderConnectionRevoked(admin, {
+          userId: user_id, orgId: org_id, err,
+          providerId: PROVIDER, providerLabel: 'Hostaway',
+          site:   'inngest.hostaway-incremental-sync-handler.notify-revoked.throttle',
+        })
+      })
+
+      if (decision) {
+        await step.sendEvent('notify-revoked', {
+          name: 'integration/connection.error',
+          data: { user_id, org_id, provider_id: PROVIDER, reason: decision.humanError },
+        })
+        await step.run('record-revoked-notified', async () => {
+          const admin = createServiceClient({ system: SYSTEM })
+          await recordConnectionErrorNotified(admin, {
+            orgId:        org_id,
+            connectionId: decision.connectionId,
+            site:         'inngest.hostaway-incremental-sync-handler.notify-revoked.record',
+          })
+        })
+      }
+
+      // Reported once, not hourly: revoking removes this connection from
+      // SYNCABLE_CONNECTION_STATUSES, so the cron stops fanning to it.
+      reportError(err instanceof Error ? err : new Error(String(err)), {
+        site:  'inngest.hostaway-incremental-sync-handler.connection-revoked',
+        orgId: org_id,
+      })
+
+      logger.warn(
+        `[Hostaway] org ${org_id}: connection revoked by the provider — ` +
+        `incremental sync paused until the PM reconnects`
+      )
+      return { reservations: 0, newTurnoverIds: 0, since: null, revoked: true }
     }
   }
 )

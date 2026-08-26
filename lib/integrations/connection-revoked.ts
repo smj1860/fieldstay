@@ -1,6 +1,14 @@
-// lib/integrations/hospitable-connection-error.ts
+// lib/integrations/connection-revoked.ts
 // ============================================================================
 // What happens when Hospitable stops accepting a connection's token.
+//
+// Written for Hospitable and generalised the same week, because the identical
+// gap was open for Hostex and Hostaway: a grep for `status: 'revoked'` returned
+// OwnerRez x3, Kroger x1 and the token-refresh cron x1, and NOTHING for the
+// other three providers. Hostex is the sharpest version — it already had
+// isHostexAccountActionError(), documented as the errors that "must not be
+// buried in a step-failure log", with ZERO callers. The classifier was built
+// and the wiring was never done.
 //
 // ── The gap this closes ─────────────────────────────────────────────────────
 //
@@ -44,38 +52,42 @@ import { translateSyncError, syncErrorDetail } from '@/lib/integrations/types'
 
 type ServiceClient = ReturnType<typeof createServiceClient>
 
-const PROVIDER = 'hospitable'
-
 /**
  * Is this the provider refusing the credential, rather than a transient fault?
  *
- * Hospitable's adapters throw plain Errors carrying the status code and a
- * truncated body — `[Hospitable] GET /teammates failed (401): {"message":
- * "Unauthenticated."}` — rather than the TokenRevokedError that the OwnerRez
- * client raises, so this matches on the message. Widening the adapters to throw
- * a typed error would be the better fix and is a larger change; this reads the
- * shape that actually reaches the handlers today.
+ * Message-based, because Hospitable and Hostaway both throw plain Errors
+ * carrying the status — `[Hospitable] GET /teammates failed (401): ...` and
+ * `Hostaway listings fetch failed (401): ...`. Hostex is the exception: it
+ * raises a typed HostexApiError with an `errorCode`, so its call sites pair
+ * this with isHostexAccountActionError(), which is both more precise and the
+ * only way to catch its 420 (subscription expired / account suspended) — a
+ * code no message pattern would recognise as needing the host's attention.
+ *
+ * That pairing is deliberate rather than lazy: importing a provider adapter
+ * into this module would make a shared helper depend on one provider's error
+ * class, and the next provider would add another import.
  *
  * 402 is included and is the case that prompted this. A lapsed Hospitable
  * subscription answers `{"status_code":402,"reason_phrase":"Subscription not
  * active"}`, which is NOT an expired token — but the remediation the PM needs
- * is identical (go to Hospitable, fix the account, reconnect), and leaving it
- * out would have left the exact production incident uncovered.
+ * is identical (fix the account, reconnect), and leaving it out would have left
+ * the exact production incident uncovered.
  *
- * 404 is deliberately NOT here. A single missing property calendar means that
- * property is gone, not that the connection is broken, and treating it as a
- * revocation would disconnect a healthy integration over one stale id.
+ * 404 is deliberately NOT here. A single missing property means that property
+ * is gone, not that the connection is broken, and treating it as a revocation
+ * would disconnect a healthy integration over one stale id.
  */
-export function isHospitableAuthFailure(err: unknown): boolean {
+export function isProviderAuthFailure(err: unknown): boolean {
   const msg = (err instanceof Error ? err.message : String(err)).toLowerCase()
 
   // Matched by POSITION, not as a bare substring. `msg.includes('401')` also
   // fires on `GET /reservations/1401234/messages failed (404)` — a reservation
   // id that happens to contain the digits — which would revoke a healthy
-  // connection over a missing record. The two shapes the adapters actually
-  // emit are a parenthesised status and a JSON status_code field.
+  // connection over a missing record. The shapes the adapters actually emit are
+  // a parenthesised status, a JSON status_code, and Hostex's error_code.
   if (/\((?:401|402|403)\)/.test(msg)) return true
   if (/"status_code"\s*:\s*(?:401|402|403)\b/.test(msg)) return true
+  if (/\berror_code\s+(?:401|403|420)\b/.test(msg)) return true
 
   return /\b(?:unauthenticated|unauthorized|forbidden)\b/.test(msg)
     || msg.includes('subscription not active')
@@ -100,26 +112,35 @@ export interface RevokedDecision {
  * `active` is the whole defect this module exists to fix and failing quietly
  * would reproduce it.
  */
-export async function markHospitableConnectionRevoked(
+export async function markProviderConnectionRevoked(
   admin:  ServiceClient,
-  params: { userId: string; orgId: string; err: unknown; site: string },
+  params: {
+    userId: string
+    orgId:  string
+    /** The integration_connections.provider_id value, e.g. 'hospitable'. */
+    providerId: string
+    /** How the provider is named to the PM, e.g. 'Hostex'. */
+    providerLabel: string
+    err:  unknown
+    site: string
+  },
 ): Promise<RevokedDecision | null> {
-  const humanError = translateSyncError(params.err, 'Hospitable')
+  const humanError = translateSyncError(params.err, params.providerLabel)
 
   const { data: existing, error: lookupErr } = await admin
     .from('integration_connections')
     .select('id')
     .eq('user_id',     params.userId)
-    .eq('provider_id', PROVIDER)
+    .eq('provider_id', params.providerId)
     .maybeSingle()
 
   if (lookupErr) {
-    throw new Error(`[Hospitable:${params.userId}] Connection lookup failed: ${lookupErr.message}`)
+    throw new Error(`[${params.providerLabel}:${params.userId}] Connection lookup failed: ${lookupErr.message}`)
   }
 
   await mergeIntegrationConnectionMetadata({
     userId:     params.userId,
-    providerId: PROVIDER,
+    providerId: params.providerId,
     patch: {
       last_sync_status: 'error',
       last_sync_error:  humanError,
@@ -133,10 +154,10 @@ export async function markHospitableConnectionRevoked(
     actorId:    params.userId,
     action:     'integration.sync_failed',
     targetType: 'integration_connection',
-    targetId:   PROVIDER,
+    targetId:   params.providerId,
     // syncErrorDetail truncates and never interpolates a credential. Keep it
     // that way: this lands in audit metadata, which staff read.
-    metadata:   { provider_id: PROVIDER, reason: 'token_revoked', detail: syncErrorDetail(params.err) },
+    metadata:   { provider_id: params.providerId, reason: 'token_revoked', detail: syncErrorDetail(params.err) },
   })
 
   if (!existing?.id) return null

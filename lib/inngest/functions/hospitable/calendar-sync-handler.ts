@@ -24,8 +24,8 @@ import { createPmNotification }    from '@/lib/inngest/helpers'
 import { getValidHospitableToken } from '@/lib/integrations/providers/hospitable-token'
 import { recordConnectionErrorNotified } from '@/lib/integrations/connection-error-notify'
 import {
-  isHospitableAuthFailure, markHospitableConnectionRevoked,
-} from '@/lib/integrations/hospitable-connection-error'
+  isProviderAuthFailure, markProviderConnectionRevoked,
+} from '@/lib/integrations/connection-revoked'
 import { ProviderEntityGoneError } from '@/lib/integrations/types'
 import { hospFetchCalendar, consolidateHospitableBlocks } from '@/lib/integrations/providers/hospitable'
 import type { HospitableCalendarDay } from '@/lib/integrations/providers/hospitable.types'
@@ -103,19 +103,20 @@ export const hospCalendarSyncHandler = inngest.createFunction(
         }
       })
     } catch (err) {
-      if (!isHospitableAuthFailure(err)) throw err
+      if (!isProviderAuthFailure(err)) throw err
 
       const decision = await step.run('mark-revoked', async () => {
         const admin = createServiceClient({ system: 'inngest:calendar-sync-handler' })
-        return markHospitableConnectionRevoked(admin, {
+        return markProviderConnectionRevoked(admin, {
           userId: user_id, orgId: org_id, err,
+          providerId: 'hospitable', providerLabel: 'Hospitable',
           site:   'inngest.hospitable-calendar-sync-handler.notify-revoked.throttle',
         })
       })
 
       if (decision) {
         // Top level, never inside a step.run — see
-        // lib/integrations/hospitable-connection-error.ts.
+        // lib/integrations/connection-revoked.ts.
         await step.sendEvent('notify-revoked', {
           name: 'integration/connection.error',
           data: { user_id, org_id, provider_id: PROVIDER, reason: decision.humanError },

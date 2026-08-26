@@ -24,8 +24,8 @@ import { logAuditEvents } from '@/lib/audit'
 import { reportError }    from '@/lib/observability/report-error'
 import { recordConnectionErrorNotified } from '@/lib/integrations/connection-error-notify'
 import {
-  isHospitableAuthFailure, markHospitableConnectionRevoked,
-} from '@/lib/integrations/hospitable-connection-error'
+  isProviderAuthFailure, markProviderConnectionRevoked,
+} from '@/lib/integrations/connection-revoked'
 
 const PROVIDER = 'hospitable'
 
@@ -59,15 +59,16 @@ export const hospTeammateSyncHandler = inngest.createFunction(
         return hospFetchTeammates(await getValidHospitableToken(user_id))
       })
     } catch (err) {
-      if (!isHospitableAuthFailure(err)) throw err
+      if (!isProviderAuthFailure(err)) throw err
 
       // Decide only — the send is at the top level below. See
-      // lib/integrations/hospitable-connection-error.ts for why that split is
+      // lib/integrations/connection-revoked.ts for why that split is
       // load-bearing rather than stylistic.
       const decision = await step.run('mark-revoked', async () => {
         const admin = createServiceClient({ system: 'inngest:teammate-sync-handler' })
-        return markHospitableConnectionRevoked(admin, {
+        return markProviderConnectionRevoked(admin, {
           userId: user_id, orgId: org_id, err,
+          providerId: 'hospitable', providerLabel: 'Hospitable',
           site:   'inngest.hospitable-teammate-sync-handler.notify-revoked.throttle',
         })
       })

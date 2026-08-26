@@ -45,8 +45,8 @@ import { createServiceClient } from '@/lib/supabase/server'
 import { reportError } from '@/lib/observability/report-error'
 import { recordConnectionErrorNotified } from '@/lib/integrations/connection-error-notify'
 import {
-  isHospitableAuthFailure, markHospitableConnectionRevoked,
-} from '@/lib/integrations/hospitable-connection-error'
+  isProviderAuthFailure, markProviderConnectionRevoked,
+} from '@/lib/integrations/connection-revoked'
 import { runProviderReconcile } from '../shared/reconcile-shell'
 import { syncHospitableReservations } from './reservation-sync'
 
@@ -92,7 +92,7 @@ export const hospReservationReconcileHandler = inngest.createFunction(
     //
     // Caught outside the runner's steps so Inngest exhausts its retries first —
     // a transient 401 must not revoke a working connection. See
-    // lib/integrations/hospitable-connection-error.ts.
+    // lib/integrations/connection-revoked.ts.
     try {
       return await runProviderReconcile({
       step,
@@ -146,12 +146,13 @@ export const hospReservationReconcileHandler = inngest.createFunction(
       }),
       })
     } catch (err) {
-      if (!isHospitableAuthFailure(err)) throw err
+      if (!isProviderAuthFailure(err)) throw err
 
       const decision = await step.run('mark-revoked', async () => {
         const admin = createServiceClient({ system: SYSTEM })
-        return markHospitableConnectionRevoked(admin, {
+        return markProviderConnectionRevoked(admin, {
           userId: user_id, orgId: org_id, err,
+          providerId: 'hospitable', providerLabel: 'Hospitable',
           site:   'inngest.hospitable-reservation-reconcile-handler.notify-revoked.throttle',
         })
       })
