@@ -9,18 +9,28 @@ test.describe('Properties', () => {
 
   test('can open property detail', async ({ page }) => {
     await page.goto('/properties')
-    await page.getByText('[E2E] The Lakehouse').click()
 
-    // Asserts something the LIST does not already render. The previous version
-    // re-asserted the property NAME, which was on screen before the click — so
-    // it passed whether or not the click opened anything, and its own comment
-    // said as much ("this still passes since the name appears on the detail
-    // page too").
+    // The card's NAME is a plain <h3>, not a link (properties-grid.tsx) —
+    // clicking it navigates nowhere. The card's only route to the detail page
+    // is its "View" link, so scope to the card carrying this property's name
+    // and click that.
     //
-    // The address is not usable either: properties-grid renders it on every
-    // card, so it is visible pre-click for the same reason. "Property Details"
-    // is a heading on app/(dashboard)/properties/[id]/page.tsx and appears
-    // nowhere in the list, which is what makes the click the thing under test.
+    // The original test clicked the name and then re-asserted the name, which
+    // was already on screen before the click — so it passed with the click
+    // doing nothing at all. Asserting something only the detail page renders
+    // is what surfaced the inert click target.
+    const card = page.locator('.card').filter({ hasText: '[E2E] The Lakehouse' })
+    await card.getByRole('link', { name: 'View' }).click()
+
+    // Primary signal: we actually left the list for a property detail route.
+    await page.waitForURL(
+      (url) => /^\/properties\/[0-9a-f-]{36}$/.test(url.pathname),
+      { timeout: 15_000 },
+    )
+
+    // And the detail page rendered. "Property Details" is a heading on
+    // app/(dashboard)/properties/[id]/page.tsx and appears nowhere in the
+    // list, so it cannot be satisfied by anything that was already on screen.
     await expect(
       page.getByText('Property Details').first()
     ).toBeVisible({ timeout: 8_000 })
