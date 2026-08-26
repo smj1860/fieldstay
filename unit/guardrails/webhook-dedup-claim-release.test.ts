@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { collectSourceFiles, rel, read } from './scan'
+import { blankComments, collectSourceFiles, read, rel } from './scan'
 
 // ============================================================================
 // Webhook dedup claim/release guardrail.
@@ -57,8 +57,8 @@ function blockRange(src: string, openIndex: number): [number, number] {
 }
 
 /** Character ranges of every `catch (...) { ... }` body in the file. */
-function catchRanges(src: string): Array<[number, number]> {
-  const ranges: Array<[number, number]> = []
+function catchRanges(src: string): CatchRange[] {
+  const ranges: CatchRange[] = []
   const re = /\bcatch\s*(?:\([^)]*\))?\s*\{/g
   let m: RegExpExecArray | null
   while ((m = re.exec(src)) !== null) {
@@ -133,76 +133,96 @@ export interface DedupViolation {
   reason: string
 }
 
-/** Exported so the test below can also run it against a mutated source string. */
+type CatchRange = [number, number]
+
+/**
+ * Offsets that count as "releasing the claim on a failure path": the delete
+ * itself when it sits in a catch, plus any call to a helper function that
+ * wraps the delete.
+ */
+function releaseSites(src: string, deletes: number[], inCatch: (o: number) => boolean): number[] {
+  const sites = deletes.filter(inCatch)
+
+  for (const d of deletes) {
+    if (inCatch(d)) continue
+    const helper = enclosingFunctionName(src, d)
+    if (helper) sites.push(...callOffsets(src, helper).filter(inCatch))
+  }
+  return sites
+}
+
+/**
+ * The half of the invariant this file used to state in prose without checking:
+ * a release is only meaningful if the SAME catch also asks the provider to
+ * redeliver. app/api/webhooks/[provider] released the claim and then returned
+ * 200, so the provider recorded the delivery as successful and no retry ever
+ * arrived to use the window the release had just opened — the event was lost
+ * AND the dedup protection was dropped. A release paired with a 2xx is strictly
+ * worse than no release at all.
+ */
+function pairingViolations(
+  src: string, path: string, table: string, catches: CatchRange[], sites: number[],
+): DedupViolation[] {
+  const out: DedupViolation[] = []
+
+  for (const [start, end] of catches) {
+    if (!sites.some((r) => r > start && r < end)) continue
+    const body = src.slice(start, end)
+
+    if (!RETRYABLE_STATUS.test(body)) {
+      out.push({ file: path, table,
+        reason: `releases the ${table} claim in a catch that never returns 4xx/5xx — the provider treats the delivery as succeeded and never redelivers, so the release is dead code and the event is lost` })
+    } else if (SUCCESS_STATUS.test(body)) {
+      out.push({ file: path, table,
+        reason: `releases the ${table} claim in a catch that can still return 2xx — a success response on the path that just dropped the claim loses the event` })
+    }
+  }
+  return out
+}
+
+/** Every violation for one claim table in one file. */
+function tableViolations(
+  src: string, path: string, table: string, catches: CatchRange[],
+): DedupViolation[] {
+  if (chainOffsets(src, table, 'insert').length === 0) return []   // reader, not claimer
+
+  const deletes = chainOffsets(src, table, 'delete')
+  if (deletes.length === 0) {
+    return [{ file: path, table,
+      reason: `claims a dedup row in ${table} but never deletes it — a handler throw strands the claim and the provider's retry is discarded as a duplicate` }]
+  }
+
+  const inCatch = (offset: number) => catches.some(([s, e]) => offset > s && offset < e)
+  const sites   = releaseSites(src, deletes, inCatch)
+  if (sites.length === 0) {
+    return [{ file: path, table,
+      reason: `deletes from ${table} but never on a failure path — a release only counts inside a catch (directly, or via a helper called from one)` }]
+  }
+
+  return pairingViolations(src, path, table, catches, sites)
+}
+
+/**
+ * Exported so the test below can also run it against a mutated source string.
+ *
+ * Comments are blanked before anything is measured. Nothing in app/api/webhooks
+ * currently depends on that — verified file by file — but every measurement here
+ * is of the kind CLAUDE.md names as comment-defeatable: chainOffsets scores a
+ * 300-CHARACTER WINDOW after `.from(`, which a comment inside the chain would
+ * consume, and RETRYABLE_STATUS is an EXEMPTING match, so a `status: 500`
+ * written in prose inside a catch would wave the block through.
+ */
 export function findViolations(files: Array<{ path: string; src: string }>): DedupViolation[] {
   const violations: DedupViolation[] = []
 
-  for (const { path, src } of files) {
+  for (const { path, src: raw } of files) {
+    const src     = blankComments(raw)
     const catches = catchRanges(src)
 
     for (const table of claimTablesIn(src)) {
-      if (chainOffsets(src, table, 'insert').length === 0) continue // reader, not claimer
-
-      const deletes = chainOffsets(src, table, 'delete')
-      if (deletes.length === 0) {
-        violations.push({
-          file:   path,
-          table,
-          reason: `claims a dedup row in ${table} but never deletes it — a handler throw strands the claim and the provider's retry is discarded as a duplicate`,
-        })
-        continue
-      }
-
-      const isInCatch = (offset: number) => catches.some(([s, e]) => offset > s && offset < e)
-
-      // Every offset that constitutes "releasing the claim on a failure path":
-      // the delete itself when it sits in a catch, plus any call to a helper
-      // function that wraps the delete.
-      const releaseSites = deletes.filter(isInCatch)
-      for (const d of deletes) {
-        if (isInCatch(d)) continue
-        const helper = enclosingFunctionName(src, d)
-        if (helper) releaseSites.push(...callOffsets(src, helper).filter(isInCatch))
-      }
-
-      if (releaseSites.length === 0) {
-        violations.push({
-          file:   path,
-          table,
-          reason: `deletes from ${table} but never on a failure path — a release only counts inside a catch (directly, or via a helper called from one)`,
-        })
-        continue
-      }
-
-      // The other half of the invariant, and the one this file used to state
-      // in prose without checking: a release is only meaningful if the SAME
-      // catch also asks the provider to redeliver. app/api/webhooks/[provider]
-      // released the claim and then returned 200, so the provider recorded the
-      // delivery as successful and no retry ever arrived to use the window the
-      // release had just opened — the event was lost AND the dedup protection
-      // was dropped. A release paired with a 2xx is strictly worse than no
-      // release at all.
-      for (const [start, end] of catches) {
-        if (!releaseSites.some((r) => r > start && r < end)) continue
-        const body = src.slice(start, end)
-
-        if (!RETRYABLE_STATUS.test(body)) {
-          violations.push({
-            file:   path,
-            table,
-            reason: `releases the ${table} claim in a catch that never returns 4xx/5xx — the provider treats the delivery as succeeded and never redelivers, so the release is dead code and the event is lost`,
-          })
-        } else if (SUCCESS_STATUS.test(body)) {
-          violations.push({
-            file:   path,
-            table,
-            reason: `releases the ${table} claim in a catch that can still return 2xx — a success response on the path that just dropped the claim loses the event`,
-          })
-        }
-      }
+      violations.push(...tableViolations(src, path, table, catches))
     }
   }
-
   return violations
 }
 

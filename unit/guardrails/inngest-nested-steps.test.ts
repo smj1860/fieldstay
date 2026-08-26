@@ -91,44 +91,56 @@ function stepUsingHelpers(code: string): string[] {
   return names
 }
 
-function findViolations(): string[] {
-  const files = collectSourceFiles(['lib/inngest'], ['.ts'])
+/** (1) DIRECT: another step call lexically inside a step.run's argument list. */
+function directNesting(file: string, src: string, calls: StepCall[], runs: StepCall[]): string[] {
   const out: string[] = []
 
-  for (const file of files) {
+  for (const run of runs) {
+    for (const inner of calls.filter((c) => c.start > run.open && c.start < run.end)) {
+      out.push(
+        `${rel(file)}:${lineAt(src, inner.start)} — step.${inner.tool}() nested inside `
+        + `step.run() opened at line ${lineAt(src, run.start)}`,
+      )
+    }
+  }
+  return out
+}
+
+/**
+ * (2) INDIRECT: a step-using helper called from inside a step.run body.
+ *
+ * The shape a lexical scan misses, and the one ownerrez-reviews-sync.ts used.
+ */
+function helperNesting(file: string, src: string, code: string, runs: StepCall[]): string[] {
+  const helpers = stepUsingHelpers(code)
+  const out: string[] = []
+
+  for (const run of runs) {
+    const body = code.slice(run.open, run.end)
+    for (const name of helpers) {
+      const m = new RegExp(String.raw`\b${name}\s*\(`).exec(body)
+      if (!m) continue
+      out.push(
+        `${rel(file)}:${lineAt(src, run.open + m.index)} — ${name}() uses step.* tooling and is `
+        + `called inside step.run() opened at line ${lineAt(src, run.start)}`,
+      )
+    }
+  }
+  return out
+}
+
+function findViolations(): string[] {
+  const out: string[] = []
+
+  for (const file of collectSourceFiles(['lib/inngest'], ['.ts'])) {
     // Blanking preserves offsets, so an index into `code` names the same
     // character — and therefore the same line — in `src`.
-    const src  = read(file)
-    const code = readBlanked(file)
+    const src   = read(file)
+    const code  = readBlanked(file)
     const calls = stepCalls(code)
-    const runs = calls.filter((c) => c.tool === 'run')
+    const runs  = calls.filter((c) => c.tool === 'run')
 
-    // (1) DIRECT: another step call lexically inside a step.run's argument list.
-    for (const run of runs) {
-      for (const inner of calls) {
-        if (inner.start > run.open && inner.start < run.end) {
-          out.push(
-            `${rel(file)}:${lineAt(src, inner.start)} — step.${inner.tool}() nested inside ` +
-            `step.run() opened at line ${lineAt(src, run.start)}`,
-          )
-        }
-      }
-    }
-
-    // (2) INDIRECT: a step-using helper called from inside a step.run body.
-    const helpers = stepUsingHelpers(code)
-    for (const run of runs) {
-      const body = code.slice(run.open, run.end)
-      for (const name of helpers) {
-        const m = new RegExp(String.raw`\b${name}\s*\(`).exec(body)
-        if (m) {
-          out.push(
-            `${rel(file)}:${lineAt(src, run.open + m.index)} — ${name}() uses step.* tooling and is ` +
-            `called inside step.run() opened at line ${lineAt(src, run.start)}`,
-          )
-        }
-      }
-    }
+    out.push(...directNesting(file, src, calls, runs), ...helperNesting(file, src, code, runs))
   }
   return out.sort()
 }

@@ -1,6 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { readFileSync, readdirSync, statSync } from 'node:fs'
-import { join } from 'node:path'
+import { collectSourceFiles, readCode, rel } from './scan'
 
 // ============================================================================
 // A CREDENTIAL MAY NOT BE THE RETURN VALUE OF AN INNGEST STEP.
@@ -36,20 +35,12 @@ import { join } from 'node:path'
 // third-party storage.
 // ============================================================================
 
-const ROOT = join(process.cwd(), 'lib', 'inngest')
-
-function walk(dir: string): string[] {
-  return readdirSync(dir).flatMap((entry) => {
-    const full = join(dir, entry)
-    if (statSync(full).isDirectory()) return walk(full)
-    return full.endsWith('.ts') ? [full] : []
-  })
-}
-
-/** Strips line and block comments so prose about the bug never trips the scan. */
-function stripComments(src: string): string {
-  return src.replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/[^\n]*/g, '')
-}
+// The file walk and the comment stripping both come from ./scan. The local
+// versions were a private `walk()` duplicating collectSourceFiles, and a
+// two-regex stripper that DELETED comment text outright — so a `https://` in a
+// string read as a line comment and took the rest of that line with it. This
+// scan reports no line numbers, so the offset shift was harmless here; the
+// deleted code was not.
 
 /**
  * The functions that produce a ROTATABLE integration credential.
@@ -99,69 +90,82 @@ function stepRunBodies(src: string): string[] {
  * mere presence of an acquisition call proves nothing. What makes it a defect is
  * the value crossing the step boundary as a return, where Inngest memoizes it.
  */
+const ACQ_HEAD = /^(?:getValid\w*Token|readIntegrationToken|readIntegrationRefreshToken|getClientToken)\s*\(/
+
+/**
+ * Is `expr` the acquisition call ITSELF, rather than merely containing one?
+ *
+ * The call must span the WHOLE expression. `hospFetchTeammates(await
+ * getValidHospitableToken(u))` also contains an acquisition, but what it RETURNS
+ * is a teammate list — that is the correct pattern, and an earlier draft of this
+ * rule flagged it, which would have made the guardrail fire on its own fix.
+ */
+function isAcquisitionValue(raw: string): boolean {
+  // Trailing `}` matters: a one-line `=> { return await getValidX(u) }` puts a
+  // brace after the call, and without stripping it the span test below reads the
+  // call as not reaching the end of the expression.
+  const expr = raw.trim().replace(/[\s;,}]+$/, '').replace(/^await\s+/, '')
+  if (!ACQ_HEAD.test(expr)) return false
+
+  let depth = 0
+  for (let i = expr.indexOf('('); i < expr.length; i++) {
+    if (expr[i] === '(') depth++
+    else if (expr[i] === ')') {
+      depth--
+      if (depth === 0) return i === expr.length - 1
+    }
+  }
+  return false
+}
+
+/** Was `name` bound to an acquisition earlier in this same step body? */
+function boundToAcquisition(body: string, name: string): boolean {
+  return new RegExp(
+    `\\b(?:const|let|var)\\s+${name}\\s*=\\s*(?:await\\s+)?`
+    + `(?:getValid\\w*Token|readIntegrationToken|readIntegrationRefreshToken|getClientToken)\\s*\\(`,
+  ).test(body)
+}
+
+/**
+ * `return { token, cursor, propertyIdMap }` — smuggled out as a property.
+ *
+ * Only counts when that key really was bound to an acquisition here, so a row's
+ * `guidebook_token` share link does not qualify.
+ */
+function returnsCredentialKey(body: string, expr: string): boolean {
+  if (!expr.startsWith('{')) return false
+
+  // Drop every parenthesised sub-expression first. Without this,
+  // `{ days: await hospFetchCalendar(token, a, b) }` reads `token` as a KEY — it
+  // is an argument, and that shape is the CORRECT one.
+  const topLevel = expr.replace(/\([^()]*\)/g, '()')
+  for (const key of topLevel.matchAll(/[{,]\s*([A-Za-z_$][\w$]*)\s*[,}:]/g)) {
+    if (CREDENTIAL_NAME.test(key[1]!) && boundToAcquisition(body, key[1]!)) return true
+  }
+  return false
+}
+
+/** Does an explicit `return` in this body hand the credential out? */
+function returnEscapes(body: string): boolean {
+  for (const ret of body.matchAll(/\breturn\s+([^\n;]+)/g)) {
+    const expr = ret[1]!.trim()
+    if (isAcquisitionValue(expr)) return true
+
+    const bare = expr.replace(/[;,]+$/, '')
+    if (/^[A-Za-z_$][\w$]*$/.test(bare) && boundToAcquisition(body, bare)) return true
+    if (returnsCredentialKey(body, expr)) return true
+  }
+  return false
+}
+
 function credentialEscapes(body: string): boolean {
   if (!ACQUIRES_CREDENTIAL.test(body)) return false
-
-  const ACQ_HEAD = /^(?:getValid\w*Token|readIntegrationToken|readIntegrationRefreshToken|getClientToken)\s*\(/
-
-  /** Is `expr` the acquisition call ITSELF, rather than merely containing one? */
-  const isAcquisitionValue = (raw: string): boolean => {
-    // Trailing `}` matters: a one-line `=> { return await getValidX(u) }` puts a
-    // brace after the call, and without stripping it the span test below reads
-    // the call as not reaching the end of the expression.
-    const expr = raw.trim().replace(/[\s;,}]+$/, '').replace(/^await\s+/, '')
-    if (!ACQ_HEAD.test(expr)) return false
-    // The call must span the WHOLE expression. `hospFetchTeammates(await
-    // getValidHospitableToken(u))` also contains an acquisition, but what it
-    // RETURNS is a teammate list — that is the correct pattern, and an earlier
-    // draft of this rule flagged it, which would have made the guardrail fire
-    // on its own fix.
-    let depth = 0
-    for (let i = expr.indexOf('('); i < expr.length; i++) {
-      if (expr[i] === '(') depth++
-      else if (expr[i] === ')') {
-        depth--
-        if (depth === 0) return i === expr.length - 1
-      }
-    }
-    return false
-  }
-
-  /** Was `name` bound to an acquisition earlier in this same step body? */
-  const boundToAcquisition = (name: string): boolean =>
-    new RegExp(
-      `\\b(?:const|let|var)\\s+${name}\\s*=\\s*(?:await\\s+)?` +
-      `(?:getValid\\w*Token|readIntegrationToken|readIntegrationRefreshToken|getClientToken)\\s*\\(`,
-    ).test(body)
 
   // `async () => getValidXToken(u)` — a concise arrow body IS the return.
   const concise = /=>\s*([^\n{][^\n]*)/.exec(body)
   if (concise && isAcquisitionValue(concise[1]!)) return true
 
-  for (const ret of body.matchAll(/\breturn\s+([^\n;]+)/g)) {
-    const expr = ret[1]!.trim()
-
-    if (isAcquisitionValue(expr)) return true
-
-    const bare = expr.replace(/[;,]+$/, '')
-    if (/^[A-Za-z_$][\w$]*$/.test(bare) && boundToAcquisition(bare)) return true
-
-    // `return { token, cursor, propertyIdMap }` — smuggled out as a property.
-    // Only counts when that key really was bound to an acquisition here, so a
-    // row's `guidebook_token` share link does not qualify.
-    if (expr.startsWith('{')) {
-      // Drop every parenthesised sub-expression first. Without this,
-      // `{ days: await hospFetchCalendar(token, a, b) }` reads `token` as a KEY
-      // — it is an argument, and that shape is the CORRECT one.
-      const topLevel = expr.replace(/\([^()]*\)/g, '()')
-      for (const key of topLevel.matchAll(/[{,]\s*([A-Za-z_$][\w$]*)\s*[,}:]/g)) {
-        const name = key[1]!
-        if (CREDENTIAL_NAME.test(name) && boundToAcquisition(name)) return true
-      }
-    }
-  }
-
-  return false
+  return returnEscapes(body)
 }
 
 interface Finding { file: string; detail: string }
@@ -169,14 +173,14 @@ interface Finding { file: string; detail: string }
 function scan(): Finding[] {
   const findings: Finding[] = []
 
-  for (const file of walk(ROOT)) {
-    const src = stripComments(readFileSync(file, 'utf8'))
-    const rel = file.slice(process.cwd().length + 1)
+  for (const file of collectSourceFiles(['lib/inngest'], ['.ts'])) {
+    const src = readCode(file)
+    const relPath = rel(file)
 
     for (const body of stepRunBodies(src)) {
       if (credentialEscapes(body)) {
         const id = /^\s*[`'"]([^`'"]*)/.exec(body)?.[1] ?? '(unnamed step)'
-        findings.push({ file: rel, detail: `step.run('${id}') returns a credential` })
+        findings.push({ file: relPath, detail: `step.run('${id}') returns a credential` })
       }
     }
   }
