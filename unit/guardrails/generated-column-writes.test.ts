@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { collectSourceFiles, rel, read } from './scan'
+import { balancedEnd, blankComments, collectSourceFiles, rel, read } from './scan'
 
 // ============================================================================
 // Never name a GENERATED ALWAYS column in a write payload.
@@ -43,53 +43,52 @@ const GENERATED_COLUMNS: Record<string, string[]> = {
 const WRITE_CALL = /\.(insert|upsert|update)\s*\(/g
 
 /**
- * Find the balanced argument text of a call starting at `openParenIdx`, so the
- * scan looks at the payload only rather than the rest of the file.
+ * The balanced argument text of a call starting at `openParenIdx`, so the scan
+ * looks at the payload only rather than the rest of the file.
+ *
+ * The bracket walk is ./scan's. The local one carried the usual hand-rolled
+ * `inString` flag, including the usual escaped-backslash slip: it ended a
+ * string on a quote whose preceding character was not a backslash, which is
+ * wrong precisely when that backslash is itself escaped.
  */
 function argsOf(src: string, openParenIdx: number): string {
-  let depth = 0
-  let inString: string | null = null
-  for (let i = openParenIdx; i < src.length; i++) {
-    const ch = src[i]!
-    if (inString) {
-      if (ch === inString && src[i - 1] !== '\\') inString = null
-      continue
-    }
-    if (ch === "'" || ch === '"' || ch === '`') { inString = ch; continue }
-    if (ch === '(') depth++
-    else if (ch === ')') {
-      depth--
-      if (depth === 0) return src.slice(openParenIdx + 1, i)
+  const end = balancedEnd(src, openParenIdx)
+  return src[end - 1] === ')' ? src.slice(openParenIdx + 1, end - 1) : ''
+}
+
+/** `col:` used as an object key somewhere in a payload. */
+function payloadNames(args: string, col: string): boolean {
+  return new RegExp(`(^|[{,\\s])${col}\\s*:`).test(args)
+}
+
+/** Every generated column of `table` named by a write payload in this file. */
+function offendersForTable(src: string, path: string, table: string, columns: string[]): string[] {
+  // Only inspect files that actually touch this table.
+  if (!src.includes(`.from('${table}')`)) return []
+
+  const out: string[] = []
+  WRITE_CALL.lastIndex = 0
+
+  let m: RegExpExecArray | null
+  while ((m = WRITE_CALL.exec(src))) {
+    const args = argsOf(src, m.index + m[0].length - 1)
+    const line = src.slice(0, m.index).split('\n').length
+    for (const col of columns.filter((c) => payloadNames(args, c))) {
+      out.push(`${path}:${line} writes ${table}.${col} (GENERATED ALWAYS)`)
     }
   }
-  return ''
+  return out
 }
 
 function findOffenders(): string[] {
   const offenders: string[] = []
 
   for (const file of collectSourceFiles(['app', 'lib', 'components'])) {
-    const src = read(file)
+    const src = blankComments(read(file))
     if (!/\.(insert|upsert|update)\s*\(/.test(src)) continue
 
     for (const [table, columns] of Object.entries(GENERATED_COLUMNS)) {
-      // Only inspect files that actually touch this table.
-      const fromIdx = src.indexOf(`.from('${table}')`)
-      if (fromIdx === -1) continue
-
-      WRITE_CALL.lastIndex = 0
-      let m: RegExpExecArray | null
-      while ((m = WRITE_CALL.exec(src))) {
-        const openParen = m.index + m[0].length - 1
-        const args = argsOf(src, openParen)
-        for (const col of columns) {
-          // `col:` as an object key in the payload.
-          if (new RegExp(`(^|[{,\\s])${col}\\s*:`).test(args)) {
-            const line = src.slice(0, m.index).split('\n').length
-            offenders.push(`${rel(file)}:${line} writes ${table}.${col} (GENERATED ALWAYS)`)
-          }
-        }
-      }
+      offenders.push(...offendersForTable(src, rel(file), table, columns))
     }
   }
   return offenders

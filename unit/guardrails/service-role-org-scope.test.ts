@@ -84,51 +84,72 @@ function statementAround(src: string, writeIndex: number): string {
 
 interface Finding { file: string; line: number; snippet: string }
 
+/** Local identifiers in this file that hold a service-role client. */
+function serviceClientVars(src: string): string[] {
+  const vars = new Set<string>()
+  for (const m of src.matchAll(/(?:const|let)\s+([A-Za-z0-9_$]+)\s*=\s*createServiceClient\s*\(/g)) {
+    vars.add(m[1]!)
+  }
+  return [...vars]
+}
+
+/** An explicit org filter on the statement itself. */
+function hasOrgFilter(stmt: string): boolean {
+  return /\.eq\(\s*['"]org_id['"]/.test(stmt) || /\.match\(\s*\{[^}]*org_id/.test(stmt)
+}
+
+/**
+ * An insert/upsert whose PAYLOAD carries org_id is scoped by the row, not by a
+ * filter — update and delete get no such exemption, since their payload says
+ * nothing about which rows they reach.
+ */
+function payloadCarriesOrgId(src: string, stmt: string, verb: string, call: string): boolean {
+  if (verb === 'update' || verb === 'delete') return false
+
+  const payload = matchingCall(stmt, stmt.indexOf('(', stmt.indexOf(call)) + 1)
+  if (/\borg_id\b/.test(payload)) return true
+
+  // Rows built elsewhere and passed by name: accept when the variable's
+  // construction in this file includes org_id.
+  const varName = payload.trim().split(/[,\s)]/)[0]
+  return !!varName && new RegExp(`${varName}[\\s\\S]{0,600}?org_id`).test(src)
+}
+
+function findingsIn(src: string, path: string): Finding[] {
+  const vars = serviceClientVars(src)
+  if (vars.length === 0) return []
+
+  const out: Finding[] = []
+  const pattern = new RegExp(`\\b(${vars.join('|')})\\s*\\n?\\s*\\.from\\(`, 'g')
+
+  for (const m of src.matchAll(pattern)) {
+    const stmt  = statementAround(src, m.index + m[0].length)
+    const write = stmt.match(new RegExp(`\\.(${WRITE_METHODS.join('|')})\\s*\\(`))
+
+    if (!write) continue
+    if (hasOrgFilter(stmt)) continue
+    if (payloadCarriesOrgId(src, stmt, write[1]!, write[0])) continue
+
+    out.push({
+      file: path,
+      line: src.slice(0, m.index).split('\n').length,
+      snippet: stmt.slice(0, 120).replace(/\s+/g, ' '),
+    })
+  }
+  return out
+}
+
 function unscopedServiceWrites(): Finding[] {
   const out: Finding[] = []
+
   for (const file of collectSourceFiles(['app/(dashboard)'])) {
     const src = read(file)
     if (!src.includes('createServiceClient')) continue
+
     const path = rel(file)
     if (EXCEPTIONS.has(path)) continue
 
-    // Which local identifiers hold a service-role client in this file.
-    const serviceVars = new Set<string>()
-    for (const m of src.matchAll(/(?:const|let)\s+([A-Za-z0-9_$]+)\s*=\s*createServiceClient\s*\(/g)) {
-      serviceVars.add(m[1]!)
-    }
-    if (serviceVars.size === 0) continue
-
-    const pattern = new RegExp(
-      `\\b(${[...serviceVars].join('|')})\\s*\\n?\\s*\\.from\\(`,
-      'g',
-    )
-    for (const m of src.matchAll(pattern)) {
-      const stmt = statementAround(src, m.index + m[0].length)
-      const writeMatch = stmt.match(new RegExp(`\\.(${WRITE_METHODS.join('|')})\\s*\\(`))
-      if (!writeMatch) continue
-
-      const scoped =
-        /\.eq\(\s*['"]org_id['"]/.test(stmt) ||
-        /\.match\(\s*\{[^}]*org_id/.test(stmt)
-      if (scoped) continue
-
-      // insert/upsert payloads that carry org_id on the row itself are scoped.
-      if (writeMatch[1] !== 'update' && writeMatch[1] !== 'delete') {
-        const payload = matchingCall(stmt, stmt.indexOf('(', stmt.indexOf(writeMatch[0])) + 1)
-        if (/\borg_id\b/.test(payload)) continue
-        // Rows built elsewhere and passed by name: accept when the variable's
-        // construction in this file includes org_id.
-        const varName = payload.trim().split(/[,\s)]/)[0]
-        if (varName && new RegExp(`${varName}[\\s\\S]{0,600}?org_id`).test(src)) continue
-      }
-
-      out.push({
-        file: path,
-        line: src.slice(0, m.index).split('\n').length,
-        snippet: stmt.slice(0, 120).replace(/\s+/g, ' '),
-      })
-    }
+    out.push(...findingsIn(src, path))
   }
   return out
 }

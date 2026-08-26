@@ -5,7 +5,9 @@
 //
 // WHY THIS EXISTS ON TOP OF `--max-warnings`
 //
-// `eslint . --max-warnings 165` already stops the TOTAL warning count growing.
+// `eslint . --max-warnings <n>` already stops the TOTAL warning count growing.
+// (Deliberately unnumbered here — the budget in package.json moves as warnings
+// are burned down, and a number repeated in prose only goes stale.)
 // But that budget is FUNGIBLE: a new function at complexity 40 passes CI as
 // long as the same PR deleted a nested ternary somewhere else. One number
 // cannot tell "we cleared a no-nested-conditional" apart from "we added an

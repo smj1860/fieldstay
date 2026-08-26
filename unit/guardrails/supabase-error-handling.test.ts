@@ -59,32 +59,49 @@ function looksLikeSupabase(expr: string, file: string, index: number, src: strin
   return /=\s*await[\s\S]{0,120}?\.(from|rpc)\s*\(/.test(tail)
 }
 
+/**
+ * A destructuring pattern that takes `data` and drops `error`.
+ *
+ * `error` bound — possibly renamed, `error: fooError` — means it is handled
+ * here. Binding no `data` at all means `{ count }` alone, which is covered
+ * separately.
+ */
+function bindsDataWithoutError(bindings: string): boolean {
+  return !/\berror\b/.test(bindings) && /\bdata\b/.test(bindings)
+}
+
+/** `const { data } = await supabase…` — the single-result form. */
+function countDestructured(src: string, file: string): number {
+  let n = 0
+  for (const m of src.matchAll(DESTRUCTURE)) {
+    if (!bindsDataWithoutError(m[1]!)) continue
+    if (!looksLikeSupabase(m[2]!, file, m.index, src)) continue
+    n++
+  }
+  return n
+}
+
+/** `const [{ data: a }, { data: b }] = await Promise.all([…])` — the fan-in form. */
+function countPromiseAll(src: string): number {
+  let n = 0
+  for (const m of src.matchAll(PROMISE_ALL)) {
+    // Only count when the awaited array actually holds Supabase queries.
+    if (!/\.(from|rpc)\s*\(/.test(src.slice(m.index, m.index + 4000))) continue
+    for (const el of m[1]!.matchAll(/\{([^}]*)\}/g)) {
+      if (bindsDataWithoutError(el[1]!)) n++
+    }
+  }
+  return n
+}
+
 function unhandledCounts(): Map<string, number> {
   const counts = new Map<string, number>()
+
   for (const file of collectSourceFiles(DIRS)) {
     const src = read(file)
     if (!src.includes('await')) continue
-    let n = 0
-    for (const m of src.matchAll(DESTRUCTURE)) {
-      const bindings = m[1]!
-      // `error` bound (possibly renamed: `error: fooError`) ⇒ handled here.
-      if (/\berror\b/.test(bindings)) continue
-      // Must actually bind `data` — `{ count }` alone is covered separately.
-      if (!/\bdata\b/.test(bindings)) continue
-      if (!looksLikeSupabase(m[2]!, file, m.index, src)) continue
-      n++
-    }
-    for (const m of src.matchAll(PROMISE_ALL)) {
-      // Only count when the awaited array actually holds Supabase queries.
-      const body = src.slice(m.index, m.index + 4000)
-      if (!/\.(from|rpc)\s*\(/.test(body)) continue
-      for (const el of m[1]!.matchAll(/\{([^}]*)\}/g)) {
-        const bindings = el[1]!
-        if (/\berror\b/.test(bindings)) continue
-        if (!/\bdata\b/.test(bindings)) continue
-        n++
-      }
-    }
+
+    const n = countDestructured(src, file) + countPromiseAll(src)
     if (n > 0) counts.set(rel(file), n)
   }
   return counts

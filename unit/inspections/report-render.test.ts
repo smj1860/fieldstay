@@ -1,5 +1,7 @@
 import { describe, it, expect, vi } from 'vitest'
-import { PDFDocument, StandardFonts } from 'pdf-lib'
+import {
+  PDFDocument, StandardFonts, PDFName, PDFArray, PDFRawStream, decodePDFRawStream,
+} from 'pdf-lib'
 
 import { toWinAnsi, wrapText, formatStamp } from '@/lib/inspections/report/text'
 import {
@@ -393,6 +395,246 @@ describe('renderInspectionReport', () => {
     const empty = reportWith({ inspections: [inspection({ sections: [] })] })
     expect((await PDFDocument.load(await renderInspectionReport(empty))).getPageCount())
       .toBeGreaterThanOrEqual(1)
+  })
+})
+
+describe('the sign-off is never split across a page break', () => {
+  // @smj1860, 2026-08-25: "put the entirety of the signoff on the last page."
+  //
+  // ASSERTED ON PAGE GEOMETRY, not on page counts. A count comparison was the
+  // first attempt and it was a bad proxy twice over: it passed for the wrong
+  // reason whenever the body happened to end near a boundary, and it could not
+  // distinguish "moved whole" from "split and happened to add a page anyway".
+  //
+  // pdf-lib writes one content stream per page, so decoding each page's own
+  // stream says exactly which page a given string was drawn on — which is the
+  // literal question being asked. Note this reads the CONTENT STREAM rather
+  // than the saved file: drawn text is not greppable in the file itself, which
+  // is why the claims live in content.ts.
+
+  // EVERY THIRD ANSWER CARRIES DETAIL LINES, and that is not decoration. The
+  // height measurement adds prompt lines AND detail lines; with a filler of
+  // bare passes the detail term is always zero, so dropping it from
+  // answerHeight() left all of these green — caught by canarying the fix.
+  // A failure with a note and a work order is also the realistic shape.
+  const filler = (n: number) => ({
+    key: 'body', name: 'Checked Items',
+    answers: Array.from({ length: n }, (_, i) => (i % 3 === 0
+      ? answer({
+          id: `f-${i}`,
+          prompt: `Checked item number ${i}`,
+          result: 'fail',
+          note: `Finding ${i}: the detail line that makes this answer taller than one row, `
+            + 'long enough to wrap across more than a single line of the report',
+          actions: ['repair'],
+          remediation: { kind: 'work_order', reference: `WO-${i}`, status: 'open' },
+        })
+      : answer({ id: `f-${i}`, prompt: `Checked item number ${i}` }))),
+  })
+
+  // THE SIGNATURE ITEM CARRIES A DETAIL LINE, and that is what makes the
+  // measurement honest. answerHeight() sums prompt lines AND detail lines, but
+  // it is only ever called on the SIGN-OFF section — so with a sign-off of two
+  // bare answers the detail term is dead weight, and deleting it from
+  // answerHeight() left every test here green. Twice: the first attempt put
+  // details on the FILLER, which changes where the body ends but is never
+  // measured. It has to be inside the section being measured.
+  //
+  // photo_unavailable_reason on the signature is also the realistic case — an
+  // inspector whose camera failed records why, and §12.1 makes that the only
+  // way past a photo_required item.
+  const signoffSection = {
+    key: 'signoff', name: 'Inspector Sign-Off & Verification',
+    answers: [
+      answer({ id: 'cert', prompt: 'I hereby certify that the property listed above has undergone a '
+        + 'comprehensive safety inspection on the date indicated, and all verified items meet '
+        + 'standard operational safety guidelines.' }),
+      answer({
+        id: 'sig', prompt: 'Inspector signature', result: null,
+        // LONG ENOUGH TO WRAP TO SEVERAL LINES, and that is a measurement
+        // requirement rather than flavour. The filler steps the body in ~16pt
+        // increments, so a defect window narrower than that falls BETWEEN two
+        // sample points and the sweep walks straight past it. A one-line reason
+        // gave a 10pt window and the drift canary stayed green through three
+        // attempts; at ~4 lines the window is wider than the step, so some n
+        // must land inside it.
+        photoUnavailableReason: 'Camera would not focus in the low light of the crawl space and '
+          + 'the tablet reported insufficient storage on the third attempt. The inspector signed '
+          + 'the paper copy instead, which was countersigned by the property manager on arrival '
+          + 'and is retained at the management office with the rest of the walk paperwork.',
+      }),
+    ],
+  }
+
+  /** Every string drawn, grouped by the page it was drawn on. */
+  async function stringsByPage(report: InspectionReport): Promise<string[][]> {
+    const doc = await PDFDocument.load(await renderInspectionReport(report))
+    const dec = new TextDecoder('windows-1252')
+
+    return doc.getPages().map((page) => {
+      const contents = page.node.context.lookup(page.node.get(PDFName.of('Contents')))
+      const refs = contents instanceof PDFArray ? contents.asArray() : []
+      const out: string[] = []
+
+      for (const ref of refs) {
+        const stream = page.node.context.lookup(ref)
+        if (!(stream instanceof PDFRawStream)) continue
+        const body = Buffer.from(decodePDFRawStream(stream).decode()).toString('latin1')
+        for (const m of body.matchAll(/<([0-9A-Fa-f]+)>\s*Tj/g)) {
+          out.push(dec.decode(Buffer.from(m[1]!, 'hex')))
+        }
+      }
+      return out
+    })
+  }
+
+  /** Index of the single page carrying `needle`, or -1 / -2 if absent / split. */
+  function pageWith(pages: string[][], needle: string): number {
+    const hits = pages
+      .map((strings, i) => (strings.some((t) => t.includes(needle)) ? i : -1))
+      .filter((i) => i >= 0)
+    if (hits.length === 0) return -1
+    return hits.length === 1 ? hits[0]! : -2
+  }
+
+  /** Every part of the attestation, section heading through attachment line. */
+  const PARTS = [
+    'Inspector Sign-Off & Verification',   // the form section's heading
+    'I hereby certify',                    // its declaration item
+    'Inspector signature',                 // its signature item
+    'INSPECTOR SIGN-OFF & VERIFICATION',   // the rendered block
+    'Date of inspection',
+    'Signed by',
+    'Attached documentation',
+  ]
+
+  it('lands whole on one page at EVERY body length that crosses a boundary', async () => {
+    // Swept at step 1 rather than sampled. The defect is boundary-dependent —
+    // it only shows when the body ends within the sign-off's own height of the
+    // page foot — so a handful of sample points can miss it entirely, which is
+    // how it reached the sample @smj1860 reviewed.
+    //
+    // It also has to be this dense to keep the test honest. A 13-point sample
+    // could not detect a measurement that was ~20pt short: that window is 3% of
+    // a page, so the sample walked straight past it and the canary for
+    // measurement drift stayed green through two attempts to provoke it.
+    const straddled: string[] = []
+
+    for (let n = 0; n <= 48; n++) {
+      const pages = await stringsByPage(reportWith({
+        inspections: [inspection({ sections: [filler(n), signoffSection] })],
+      }))
+
+      const located = PARTS.map((part) => [part, pageWith(pages, part)] as const)
+      const missing = located.filter(([, page]) => page < 0)
+      if (missing.length > 0) {
+        straddled.push(`n=${n}: not drawn exactly once — ${missing.map(([p]) => p).join(', ')}`)
+        continue
+      }
+
+      const distinct = new Set(located.map(([, page]) => page))
+      if (distinct.size !== 1) {
+        straddled.push(`n=${n}: split across pages ${[...distinct].sort().join(' and ')} — `
+          + located.map(([part, page]) => `${part.slice(0, 24)}=p${page}`).join(', '))
+      }
+    }
+
+    expect(straddled, `the sign-off straddled a page break:\n  ${straddled.join('\n  ')}`)
+      .toEqual([])
+  })
+
+  it('never splits ANY section across a page break, at every offset', async () => {
+    // Generalised from the sign-off rule after @smj1860 reviewed the real form:
+    // Electrical ran heading-plus-two-items at the foot of page 1 and finished
+    // at the top of page 2, where those four items appeared under NO heading —
+    // "Gas appliances — PASS" with nothing saying what it belonged to.
+    //
+    // SWEPT, for the same reason the sign-off test is. A fixed fixture of
+    // equal-sized sections lands them cleanly N-per-page and never straddles a
+    // boundary at all: the first version of this passed with the rule deleted.
+    // Varying a leading section by one item walks every following section
+    // across every offset, so some arrangement must straddle if nothing stops it.
+    const straddled: string[] = []
+
+    for (let lead = 0; lead <= 20; lead++) {
+      const sections = [
+        { key: 'lead', name: 'Leading Section',
+          answers: Array.from({ length: lead }, (_, i) =>
+            answer({ id: `l-${i}`, prompt: `Leading item ${i}` })) },
+        ...Array.from({ length: 4 }, (_, sIdx) => ({
+          key: `sec-${sIdx}`, name: `Section ${sIdx} Heading`,
+          answers: Array.from({ length: 7 }, (_, i) =>
+            answer({ id: `s${sIdx}-i${i}`, prompt: `Item ${i} of section ${sIdx}` })),
+        })),
+      ].filter((sec) => sec.answers.length > 0)
+
+      const pages = await stringsByPage(reportWith({
+        inspections: [inspection({ sections })],
+      }))
+
+      for (const section of sections) {
+        const seen = new Set([
+          pageWith(pages, section.name),
+          ...section.answers.map((a) => pageWith(pages, a.prompt)),
+        ])
+        if (seen.size !== 1) {
+          straddled.push(`lead=${lead} ${section.name}: spans p${[...seen].sort().join('/p')}`)
+        }
+      }
+    }
+
+    expect(straddled, `sections split across page breaks:\n  ${straddled.join('\n  ')}`)
+      .toEqual([])
+  })
+
+  it('a section too tall for any page starts immediately, without a wasted blank page', async () => {
+    // The escape hatch, asserted on the thing that distinguishes it. Keeping
+    // this section whole is impossible, so the rule must stand aside — without
+    // the guard it breaks to a fresh page, finds it still does not fit, and
+    // splits anyway, having spent a page carrying nothing but the letterhead.
+    const pages = await stringsByPage(reportWith({
+      inspections: [inspection({ sections: [{
+        key: 'huge', name: 'Oversized Section',
+        answers: Array.from({ length: 70 }, (_, i) =>
+          answer({ id: `h${i}`, prompt: `Oversized item ${i}` })),
+      }] })],
+    }))
+
+    expect(pages.length).toBeGreaterThan(1)
+    expect(
+      pageWith(pages, 'Oversized item 0'),
+      'the oversized section must begin on the letterhead page, not after a blank one',
+    ).toBe(0)
+    expect(pageWith(pages, 'Oversized item 69')).toBeGreaterThan(0)
+  })
+
+  it('does not spend a blank page when the sign-off already fits', async () => {
+    // A short walk must not push the attestation onto a page of its own —
+    // that reads as something missing rather than deliberate.
+    const pages = await stringsByPage(reportWith({
+      inspections: [inspection({ sections: [filler(2), signoffSection] })],
+    }))
+    expect(pages).toHaveLength(1)
+  })
+
+  it('still renders when the sign-off is taller than an entire page', async () => {
+    // No amount of moving keeps this whole, so the rule must step aside rather
+    // than spend a blank page and split it anyway.
+    const doc = await PDFDocument.load(await renderInspectionReport(reportWith({
+      inspections: [inspection({ sections: [{
+        key: 'signoff', name: 'Inspector Sign-Off & Verification',
+        answers: Array.from({ length: 60 }, (_, i) =>
+          answer({ id: `s${i}`, prompt: `Attestation clause ${i}`, note: 'x'.repeat(200) })),
+      }] })],
+    })))
+    expect(doc.getPageCount()).toBeGreaterThan(1)
+  })
+
+  it('renders a form with no sign-off section at all', async () => {
+    const pages = await stringsByPage(reportWith({
+      inspections: [inspection({ sections: [filler(3)] })],
+    }))
+    expect(pageWith(pages, 'INSPECTOR SIGN-OFF & VERIFICATION')).toBeGreaterThanOrEqual(0)
   })
 })
 

@@ -56,7 +56,7 @@ function snapshot(defs: Def[]) {
  * Enough to assert WHAT is written and HOW MANY times, which is the whole
  * question here.
  */
-function makeClient(opts: {
+interface ClientOpts {
   inspection?: Record<string, unknown> | null
   failedItems?: Record<string, unknown>[]
   existingWorkOrders?: { source_inspection_item_id: string }[]
@@ -85,7 +85,51 @@ function makeClient(opts: {
   sourceSchedule?: { id: string; property_id?: string; frequency: string | null; next_due_date: string | null } | null
   /** Simulates the optimistic lock losing — another pass advanced it first. */
   scheduleAdvanceLostRace?: boolean
-}) {
+}
+
+type QueryResult = { data: unknown; error: unknown }
+
+const ok  = (data: unknown): QueryResult => ({ data, error: null })
+const bad = (error: unknown): QueryResult => ({ data: null, error })
+
+/**
+ * `work_orders` is read THREE times with three different column lists — the
+ * still-open check, the prior-annotation lookup, and the already-created
+ * pre-check. Dispatching on call ORDER broke the moment a same-issue item made
+ * the first read conditional, so this keys on what each read actually asks for.
+ */
+function workOrdersRead(selected: string, opts: ClientOpts): QueryResult {
+  if (selected.includes('inspection_items')) {
+    return opts.priorError ? bad(opts.priorError) : ok(opts.priorWorkOrders ?? [])
+  }
+  if (selected.includes('source_inspection_item_id')) return ok(opts.existingWorkOrders ?? [])
+
+  // The still-open check on a named predecessor.
+  return opts.openPredecessorError
+    ? bad(opts.openPredecessorError)
+    : ok((opts.stillOpenWorkOrderIds ?? []).map((id) => ({ id })))
+}
+
+/** What an awaited (non-single) query on `table` resolves to. */
+function listRead(table: string, selected: string, opts: ClientOpts): QueryResult {
+  switch (table) {
+    case 'inspection_items':      return ok(opts.failedItems ?? [])
+    case 'work_orders':           return workOrdersRead(selected, opts)
+    case 'work_order_updates':    return ok(opts.existingUpdates ?? [])
+    case 'bookings':              return ok(opts.bookings ?? [])
+    case 'turnover_assignments':  return ok(opts.turnoverAssignments ?? [])
+    case 'crew_members':          return ok(opts.crewMembers ?? [])
+    case 'inspection_form_items': return ok(opts.concernKeys ?? [])
+    case 'turnovers':
+      return opts.turnoverError ? bad(opts.turnoverError) : ok(opts.lastTurnovers ?? [])
+    // The UPDATE's .select('id') — empty when the lock lost.
+    case 'maintenance_schedules':
+      return ok(opts.scheduleAdvanceLostRace ? [] : [{ id: 'sched-1' }])
+    default: return ok([])
+  }
+}
+
+function makeClient(opts: ClientOpts) {
   const writes: { table: string; rows: unknown[] }[] = []
   // Ordering is a contract with Postgres that an in-memory double cannot
   // simulate — it can only be observed. Without this, a test asserting "the
@@ -148,53 +192,9 @@ function makeClient(opts: {
         }
       }
 
-      builder.then = (resolve: (v: unknown) => unknown) => {
-        if (table === 'inspection_items') {
-          return Promise.resolve({ data: opts.failedItems ?? [], error: null }).then(resolve)
-        }
-        if (table === 'work_orders') {
-          if (selected.includes('inspection_items')) {
-            return Promise.resolve(opts.priorError
-              ? { data: null, error: opts.priorError }
-              : { data: opts.priorWorkOrders ?? [], error: null }).then(resolve)
-          }
-          if (selected.includes('source_inspection_item_id')) {
-            return Promise.resolve({ data: opts.existingWorkOrders ?? [], error: null }).then(resolve)
-          }
-          // The still-open check on a named predecessor.
-          return Promise.resolve(opts.openPredecessorError
-            ? { data: null, error: opts.openPredecessorError }
-            : { data: (opts.stillOpenWorkOrderIds ?? []).map((id) => ({ id })), error: null }
-          ).then(resolve)
-        }
-        if (table === 'work_order_updates') {
-          return Promise.resolve({ data: opts.existingUpdates ?? [], error: null }).then(resolve)
-        }
-        if (table === 'bookings') {
-          return Promise.resolve({ data: opts.bookings ?? [], error: null }).then(resolve)
-        }
-        if (table === 'turnovers') {
-          return Promise.resolve(opts.turnoverError
-            ? { data: null, error: opts.turnoverError }
-            : { data: opts.lastTurnovers ?? [], error: null }).then(resolve)
-        }
-        if (table === 'turnover_assignments') {
-          return Promise.resolve({ data: opts.turnoverAssignments ?? [], error: null }).then(resolve)
-        }
-        if (table === 'crew_members') {
-          return Promise.resolve({ data: opts.crewMembers ?? [], error: null }).then(resolve)
-        }
-        if (table === 'inspection_form_items') {
-          return Promise.resolve({ data: opts.concernKeys ?? [], error: null }).then(resolve)
-        }
-        if (table === 'maintenance_schedules') {
-          // The UPDATE's .select('id') — empty when the lock lost.
-          return Promise.resolve({
-            data: opts.scheduleAdvanceLostRace ? [] : [{ id: 'sched-1' }], error: null,
-          }).then(resolve)
-        }
-        return Promise.resolve({ data: [], error: null }).then(resolve)
-      }
+      builder.then = (resolve: (v: unknown) => unknown) =>
+        Promise.resolve(listRead(table, selected, opts)).then(resolve)
+
       return builder
     },
   }

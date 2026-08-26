@@ -1,6 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { readFileSync } from 'node:fs'
-import { collectSourceFiles, rel } from './scan'
+import { blankNonCode, collectSourceFiles, read, readBlanked, rel } from './scan'
 
 // ============================================================================
 // Inngest step tooling may not be nested inside another step's callback.
@@ -35,46 +34,19 @@ import { collectSourceFiles, rel } from './scan'
 const STEP_TOOLS = 'run|sendEvent|sleep|sleepUntil|waitForEvent|invoke'
 const STEP_CALL  = new RegExp(String.raw`\bstep\.(${STEP_TOOLS})\s*\(`, 'g')
 
-/**
- * Blank out comments AND string/template bodies, preserving offsets and
- * newlines so reported line numbers stay true.
- *
- * String stripping is not optional here: an early version of this scan
- * (written by hand while fixing the two real sites) flagged ical-sync.ts,
- * whose only offence was a COMMENT reading "Inngest serializes step.run()
- * results as JSON". Guarding a rule with a checker that flags the prose
- * explaining the rule is a mistake this repo has now made four times.
- */
-function blankNonCode(src: string): string {
-  const out = src.split('')
-  let i = 0
-  while (i < src.length) {
-    const c = src[i]
-    if (c === '/' && src[i + 1] === '/') {
-      let j = src.indexOf('\n', i)
-      if (j < 0) j = src.length
-      for (let k = i; k < j; k++) out[k] = ' '
-      i = j
-    } else if (c === '/' && src[i + 1] === '*') {
-      let j = src.indexOf('*/', i + 2)
-      j = j < 0 ? src.length : j + 2
-      for (let k = i; k < j; k++) if (out[k] !== '\n') out[k] = ' '
-      i = j
-    } else if (c === '"' || c === "'" || c === '`') {
-      let j = i + 1
-      while (j < src.length) {
-        if (src[j] === '\\') { j += 2; continue }
-        if (src[j] === c) break
-        j++
-      }
-      for (let k = i + 1; k < Math.min(j, src.length); k++) if (out[k] !== '\n') out[k] = ' '
-      i = Math.min(j + 1, src.length)
-    } else {
-      i++
-    }
-  }
-  return out.join('')
-}
+// Blanking comments AND literal bodies is not optional here. An early version
+// of this scan (written by hand while fixing the two real sites) flagged
+// ical-sync.ts, whose only offence was a COMMENT reading "Inngest serializes
+// step.run() results as JSON". Guarding a rule with a checker that flags the
+// prose explaining the rule is a mistake this repo has now made four times.
+//
+// `blankNonCode` used to be a local copy, and the copy did not know what a
+// regex literal was: a character class containing a quote opened a "string"
+// that ran to the next matching quote — which in lib/utils/html.ts meant the
+// scanner stopped seeing the file at `/[&<>"']/` and treated the remaining
+// two thirds as string body. A step-nesting violation living after any such
+// regex was simply invisible. It now shares the lexer in ./scan, which
+// tracks regex literals; see scan-strip-comments.test.ts for the fixture.
 
 /** Index of the bracket matching the one at `open` (must be ( or {). */
 function matchBracket(src: string, open: number): number {
@@ -119,42 +91,56 @@ function stepUsingHelpers(code: string): string[] {
   return names
 }
 
-function findViolations(): string[] {
-  const files = collectSourceFiles(['lib/inngest'], ['.ts'])
+/** (1) DIRECT: another step call lexically inside a step.run's argument list. */
+function directNesting(file: string, src: string, calls: StepCall[], runs: StepCall[]): string[] {
   const out: string[] = []
 
-  for (const file of files) {
-    const src  = readFileSync(file, 'utf8')
-    const code = blankNonCode(src)
+  for (const run of runs) {
+    for (const inner of calls.filter((c) => c.start > run.open && c.start < run.end)) {
+      out.push(
+        `${rel(file)}:${lineAt(src, inner.start)} — step.${inner.tool}() nested inside `
+        + `step.run() opened at line ${lineAt(src, run.start)}`,
+      )
+    }
+  }
+  return out
+}
+
+/**
+ * (2) INDIRECT: a step-using helper called from inside a step.run body.
+ *
+ * The shape a lexical scan misses, and the one ownerrez-reviews-sync.ts used.
+ */
+function helperNesting(file: string, src: string, code: string, runs: StepCall[]): string[] {
+  const helpers = stepUsingHelpers(code)
+  const out: string[] = []
+
+  for (const run of runs) {
+    const body = code.slice(run.open, run.end)
+    for (const name of helpers) {
+      const m = new RegExp(String.raw`\b${name}\s*\(`).exec(body)
+      if (!m) continue
+      out.push(
+        `${rel(file)}:${lineAt(src, run.open + m.index)} — ${name}() uses step.* tooling and is `
+        + `called inside step.run() opened at line ${lineAt(src, run.start)}`,
+      )
+    }
+  }
+  return out
+}
+
+function findViolations(): string[] {
+  const out: string[] = []
+
+  for (const file of collectSourceFiles(['lib/inngest'], ['.ts'])) {
+    // Blanking preserves offsets, so an index into `code` names the same
+    // character — and therefore the same line — in `src`.
+    const src   = read(file)
+    const code  = readBlanked(file)
     const calls = stepCalls(code)
-    const runs = calls.filter((c) => c.tool === 'run')
+    const runs  = calls.filter((c) => c.tool === 'run')
 
-    // (1) DIRECT: another step call lexically inside a step.run's argument list.
-    for (const run of runs) {
-      for (const inner of calls) {
-        if (inner.start > run.open && inner.start < run.end) {
-          out.push(
-            `${rel(file)}:${lineAt(src, inner.start)} — step.${inner.tool}() nested inside ` +
-            `step.run() opened at line ${lineAt(src, run.start)}`,
-          )
-        }
-      }
-    }
-
-    // (2) INDIRECT: a step-using helper called from inside a step.run body.
-    const helpers = stepUsingHelpers(code)
-    for (const run of runs) {
-      const body = code.slice(run.open, run.end)
-      for (const name of helpers) {
-        const m = new RegExp(String.raw`\b${name}\s*\(`).exec(body)
-        if (m) {
-          out.push(
-            `${rel(file)}:${lineAt(src, run.open + m.index)} — ${name}() uses step.* tooling and is ` +
-            `called inside step.run() opened at line ${lineAt(src, run.start)}`,
-          )
-        }
-      }
-    }
+    out.push(...directNesting(file, src, calls, runs), ...helperNesting(file, src, code, runs))
   }
   return out.sort()
 }
@@ -179,7 +165,7 @@ describe('guardrail: Inngest step tooling is never nested', () => {
     // with the send left to the caller.
     const offenders = collectSourceFiles(['lib'], ['.ts'])
       .filter((f) => !rel(f).startsWith('lib/inngest/'))
-      .filter((f) => new RegExp(String.raw`\bstep\.(${STEP_TOOLS})\s*\(`).test(blankNonCode(readFileSync(f, 'utf8'))))
+      .filter((f) => new RegExp(String.raw`\bstep\.(${STEP_TOOLS})\s*\(`).test(readBlanked(f)))
       .map(rel)
       .sort()
 

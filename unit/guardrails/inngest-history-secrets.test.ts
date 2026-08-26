@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { collectSourceFiles, rel, read } from './scan'
+import { balancedEnd, blankComments, collectSourceFiles, rel, read } from './scan'
 
 // ============================================================================
 // Guardrail: a bearer token must not end up in an Inngest step's return value.
@@ -66,35 +66,30 @@ const BASELINE = new Set([
  */
 const NOT_A_BEARER_TOKEN = new Set(['door_code_secret_id'])
 
-function stripComments(src: string): string {
-  return src
-    .replace(/\/\*[\s\S]*?\*\//g, (m) => m.replace(/[^\n]/g, ' '))
-    .replace(/\/\/[^\n]*/g, (m) => ' '.repeat(m.length))
-}
-
-/** The balanced `step.run( … )` call text starting at `from`, plus its span. */
+/**
+ * The balanced `step.run( … )` call text starting at `from`, plus its span.
+ *
+ * Both the blanking and the bracket walk come from ./scan. The local versions
+ * were a regex comment-stripper and a hand-rolled `inString` loop, and together
+ * they had a live hole: the stripper treated the `//` in a `'https://…'` string
+ * as a line comment and blanked the REST OF THAT LINE, including any bracket on
+ * it. Twelve lib/inngest files hit that, and in six of them the destroyed
+ * bracket left this walk unbalanced — so it ran to EOF, returned null, and
+ * findOffenders skipped the whole step. Six step bodies were invisible to a
+ * guardrail whose job is catching tokens returned into Inngest step history,
+ * three of them in files this file's own BASELINE already flags as leaking.
+ *
+ * Returns null only when the call is genuinely unbalanced, which after the fix
+ * should not happen for real source.
+ */
 function stepRunCall(src: string, from: number): { text: string; end: number } | null {
   const open = src.indexOf('(', from)
   if (open === -1) return null
 
-  let depth = 0
-  let inString: string | null = null
+  const end = balancedEnd(src, open)
+  if (!')]}'.includes(src[end - 1] ?? '')) return null
 
-  for (let i = open; i < src.length; i++) {
-    const ch = src[i] as string
-    if (inString) {
-      if (ch === '\\') { i++; continue }
-      if (ch === inString) inString = null
-      continue
-    }
-    if (ch === "'" || ch === '"' || ch === '`') { inString = ch; continue }
-    if (ch === '(' || ch === '[' || ch === '{') depth++
-    else if (ch === ')' || ch === ']' || ch === '}') {
-      depth--
-      if (depth === 0) return { text: src.slice(open, i + 1), end: i + 1 }
-    }
-  }
-  return null
+  return { text: src.slice(open, end), end }
 }
 
 function secretColumnsIn(body: string): string[] {
@@ -116,7 +111,7 @@ function findOffenders(): Finding[] {
 
   for (const file of collectSourceFiles(['lib/inngest'])) {
     const raw      = read(file)
-    const stripped = stripComments(raw)
+    const stripped = blankComments(raw)
 
     const re = /\bstep\.run\s*\(/g
     let m: RegExpExecArray | null
@@ -183,6 +178,40 @@ describe('guardrail: bearer tokens must not enter an Inngest step return value',
     expect(findOffenders().length).toBeGreaterThanOrEqual(BASELINE.size)
   })
 
+  it('no step.run body is silently skipped', () => {
+    // The hole this file shipped with, and the one thing that would have shown
+    // it. findOffenders does `if (!call) continue`, so a step whose body cannot
+    // be delimited is not reported as a problem — it is not examined at all,
+    // and the scan stays green while covering less of the tree every time
+    // someone writes a URL inside a step. Six bodies were in that state: the
+    // regex comment-stripper blanked the rest of the line after `https://`,
+    // taking a bracket with it, and the walk never rebalanced.
+    //
+    // Counting offenders cannot detect this; only counting the steps the scan
+    // FAILED to delimit can.
+    const skipped: string[] = []
+    let seen = 0
+
+    for (const file of collectSourceFiles(['lib/inngest'])) {
+      const stripped = blankComments(read(file))
+      for (const m of stripped.matchAll(/\bstep\.run\s*\(/g)) {
+        seen++
+        if (stepRunCall(stripped, m.index) === null) {
+          skipped.push(`${rel(file)}:${stripped.slice(0, m.index).split('\n').length}`)
+        }
+      }
+    }
+
+    expect(seen, 'no step.run calls found at all — the scan is not reading the tree')
+      .toBeGreaterThan(50)
+    expect(
+      skipped,
+      'These step.run bodies could not be delimited, so the secret-leak scan skipped '
+      + 'them entirely rather than reporting anything. A token returned from one of '
+      + 'these would not be caught:\n' + skipped.join('\n'),
+    ).toEqual([])
+  })
+
   it('recognises the marker, and only within the marked step', () => {
     const marked = [
       "await step.run('x', async () => {",
@@ -194,7 +223,7 @@ describe('guardrail: bearer tokens must not enter an Inngest step return value',
     const unmarked = marked.replace('  // inngest-history-safe: returns a boolean only\n', '')
 
     // Exercised through the same helpers the scan uses, not a reimplementation.
-    const body = stepRunCall(stripComments(marked), marked.indexOf('step.run'))
+    const body = stepRunCall(blankComments(marked), marked.indexOf('step.run'))
     expect(body).not.toBeNull()
     expect(secretColumnsIn((body as { text: string }).text)).toEqual(['completion_token'])
     expect(marked.includes(MARKER)).toBe(true)

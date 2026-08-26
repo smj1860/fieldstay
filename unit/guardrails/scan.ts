@@ -105,11 +105,42 @@ export function read(file: string): string {
 // so `src.slice(0, i).split('\n').length` still gives the real line number and
 // every offender key stays stable — but comment characters no longer count
 // toward a window or satisfy a match.
+//
+// ── THREE OUTPUT MODES, ONE PARSER ──────────────────────────────────────────
+//
+// Deleting comment text is right for a scanner that only ever matches patterns,
+// but wrong for one that walks the source by INDEX: `readCode` shifts every
+// offset left, so an index taken from stripped text no longer addresses the
+// same character in the original. Scanners that balance brackets or slice a
+// method chain need the offsets to line up, which means blanking rather than
+// deleting.
+//
+//   stripComments  — comments deleted, newlines kept.    Offsets NOT preserved.
+//   blankComments  — comments blanked, literals verbatim. Offsets preserved.
+//   blankNonCode   — comments AND literal interiors blanked (delimiters kept).
+//                                                         Offsets preserved.
+//
+// They share one lexer on purpose. Two guardrails had grown their own — and
+// `blankNonCode` was one of them, a 42-cognitive-complexity copy that knew
+// nothing about regex literals, so a pattern like a character class containing
+// a quote would open a "string" that swallowed the rest of the file. The other
+// copy (`extractChain` in unbounded-select) knew nothing about BLOCK comments,
+// which cost it a finding in one direction and invented one in the other. A
+// hand-rolled lexer per guardrail is a hand-rolled bug per guardrail.
 // ─────────────────────────────────────────────────────────────────────────────
 
-const codeCache = new Map<string, string>()
+/**
+ * How a non-code span is rendered.
+ *
+ * `strip` is the only mode that changes offsets; the other two exist for
+ * index-walking scanners, which is why they blank in place.
+ */
+type ScanMode = 'strip' | 'comments' | 'blank'
 
-/** Source with comments removed and line numbers preserved. */
+const codeCache  = new Map<string, string>()
+const blankCache = new Map<string, string>()
+
+/** Source with comments removed and line numbers preserved. Offsets shift. */
 export function readCode(file: string): string {
   const cached = codeCache.get(file)
   if (cached !== undefined) return cached
@@ -117,6 +148,44 @@ export function readCode(file: string): string {
   const stripped = stripComments(read(file))
   codeCache.set(file, stripped)
   return stripped
+}
+
+/**
+ * Source with comments and literal interiors blanked, offsets preserved.
+ *
+ * For scanners that read the source positionally — an index into the result
+ * addresses the same character in the original file, so a line number computed
+ * from either is the same number.
+ */
+export function readBlanked(file: string): string {
+  const cached = blankCache.get(file)
+  if (cached !== undefined) return cached
+
+  const blanked = blankNonCode(read(file))
+  blankCache.set(file, blanked)
+  return blanked
+}
+
+/**
+ * Comments and the INSIDE of every string, template and regex literal replaced
+ * by spaces; delimiters and newlines survive, so offsets and line numbers are
+ * unchanged.
+ *
+ * Use when a literal's CONTENT could be mistaken for the construct being
+ * hunted — an error message quoting the very call the rule forbids.
+ */
+export function blankNonCode(src: string): string {
+  return scanSource(src, 'blank')
+}
+
+/**
+ * Comments replaced by spaces; literals left verbatim, offsets unchanged.
+ *
+ * Use when the scanner needs to READ a literal's content — a table name in
+ * `.from('bookings')` — while still not tripping over prose.
+ */
+export function blankComments(src: string): string {
+  return scanSource(src, 'comments')
 }
 
 /**
@@ -138,6 +207,10 @@ export function readCode(file: string): string {
  * confirming `tsc --noEmit` still passes.
  */
 export function stripComments(src: string): string {
+  return scanSource(src, 'strip')
+}
+
+function scanSource(src: string, mode: ScanMode): string {
   const out: string[] = []
   let i = 0
 
@@ -145,12 +218,14 @@ export function stripComments(src: string): string {
     // Each consumer returns the index just past what it handled, or null when
     // this position is not its business. Split out of one long branch chain
     // because that scored 29 on cognitive complexity against this repo's own
-    // limit of 15 — a limit that happens not to be ENFORCED here, since
-    // eslint.config.mjs scopes the sonarjs rules to app/lib/components. The
-    // rule applies to the enforcement layer too.
-    const next = consumeComment(src, i, out)
-      ?? consumeQuoted(src, i, out)
-      ?? consumeRegexLiteral(src, i, out)
+    // limit of 15. That limit did not reach this file when the split was made
+    // — eslint.config.mjs scoped the sonarjs rules to app/lib/components — and
+    // the split was done anyway on the principle that the rule applies to the
+    // enforcement layer too. As of 2026-08-26 it is no longer a principle:
+    // unit/, scripts/ and e2e/ are in scope, at zero.
+    const next = consumeComment(src, i, out, mode)
+      ?? consumeQuoted(src, i, out, mode)
+      ?? consumeRegexLiteral(src, i, out, mode)
 
     if (next !== null) {
       i = next
@@ -163,6 +238,37 @@ export function stripComments(src: string): string {
   return out.join('')
 }
 
+/** Every character in [from, to), verbatim. */
+function pushVerbatim(src: string, from: number, to: number, out: string[]): void {
+  for (let k = from; k < to; k++) out.push(src[k]!)
+}
+
+/** [from, to) as spaces, with newlines left intact so line numbers hold. */
+function pushBlanked(src: string, from: number, to: number, out: string[]): void {
+  for (let k = from; k < to; k++) out.push(src[k] === '\n' ? '\n' : ' ')
+}
+
+/** Only the newlines in [from, to) — the span's other characters disappear. */
+function pushNewlines(src: string, from: number, to: number, out: string[]): void {
+  for (let k = from; k < to; k++) if (src[k] === '\n') out.push('\n')
+}
+
+/**
+ * A literal span. Verbatim everywhere except `blank`, which keeps the opening
+ * and closing delimiters and blanks what sits between them — enough for a
+ * bracket-balancing scan to stay in step while the contents can no longer
+ * masquerade as code.
+ */
+function emitLiteral(src: string, from: number, to: number, out: string[], mode: ScanMode): void {
+  if (mode !== 'blank') {
+    pushVerbatim(src, from, to, out)
+    return
+  }
+  out.push(src[from]!)
+  pushBlanked(src, from + 1, Math.max(from + 1, to - 1), out)
+  if (to - 1 > from) out.push(src[to - 1]!)
+}
+
 /**
  * A line or block comment, dropped. Returns null if this is not a comment.
  *
@@ -171,55 +277,63 @@ export function stripComments(src: string): string {
  * would preserve column positions but leave a windowed scanner's character
  * budget just as consumed as before — which is half the point of this module.
  */
-function consumeComment(src: string, i: number, out: string[]): number | null {
+function consumeComment(src: string, i: number, out: string[], mode: ScanMode): number | null {
   if (src[i] !== '/') return null
 
   if (src[i + 1] === '/') {
     let j = i
     while (j < src.length && src[j] !== '\n') j++
+    // `strip` emits nothing and lets the main loop copy the newline; the
+    // offset-preserving modes have to fill the span they are leaving behind.
+    if (mode !== 'strip') pushBlanked(src, i, j, out)
     return j
   }
 
   if (src[i + 1] === '*') {
     const end  = src.indexOf('*/', i + 2)
     const stop = end === -1 ? src.length : end + 2
-    for (let k = i; k < stop; k++) if (src[k] === '\n') out.push('\n')
+    if (mode === 'strip') pushNewlines(src, i, stop, out)
+    else pushBlanked(src, i, stop, out)
     return stop
   }
 
   return null
 }
 
-/** A string or template literal, copied verbatim. Null if not a quote. */
-function consumeQuoted(src: string, i: number, out: string[]): number | null {
+/** A string or template literal. Null if not a quote. */
+function consumeQuoted(src: string, i: number, out: string[], mode: ScanMode): number | null {
   const c = src[i]
   if (c !== '"' && c !== "'" && c !== '`') return null
-  return copyQuoted(src, i, c, out)
+
+  const end = quotedEnd(src, i, c)
+  emitLiteral(src, i, end, out, mode)
+  return end
 }
 
-/** A regex literal, copied verbatim. Null if this `/` is division. */
-function consumeRegexLiteral(src: string, i: number, out: string[]): number | null {
+/** A regex literal. Null if this `/` is division. */
+function consumeRegexLiteral(src: string, i: number, out: string[], mode: ScanMode): number | null {
   if (src[i] !== '/' || !regexAllowed(out)) return null
 
   const end = regexEnd(src, i)
   if (end === -1) return null
 
-  out.push(src.slice(i, end))
+  emitLiteral(src, i, end, out, mode)
   return end
 }
 
-/** Copies a string or template literal verbatim, returning the next index. */
-function copyQuoted(src: string, start: number, quote: string, out: string[]): number {
-  let i = start
+/**
+ * Index just past a string or template literal's closing delimiter.
+ *
+ * Scanning is separated from emitting so the three modes can render the same
+ * span differently without three copies of the escape and interpolation rules.
+ */
+export function quotedEnd(src: string, start: number, quote: string): number {
+  let i = start + 1
   let depth = 0
-  out.push(src[i]!)
-  i++
 
   while (i < src.length) {
     const ch = src[i]!
     if (ch === '\\') {
-      out.push(ch)
-      if (i + 1 < src.length) out.push(src[i + 1]!)
       i += 2
       continue
     }
@@ -227,17 +341,14 @@ function copyQuoted(src: string, start: number, quote: string, out: string[]): n
     // depth counter keeps the closing backtick from being found early.
     if (quote === '`' && ch === '$' && src[i + 1] === '{') {
       depth++
-      out.push('$', '{')
       i += 2
       continue
     }
     if (quote === '`' && depth > 0 && ch === '}') {
       depth--
-      out.push(ch)
       i++
       continue
     }
-    out.push(ch)
     i++
     if (ch === quote && depth === 0) break
   }
@@ -266,6 +377,47 @@ function regexAllowed(out: string[]): boolean {
   let j = i
   while (j >= 0 && /[\w$]/.test(out[j]!)) j--
   return REGEX_PREV_WORDS.has(out.slice(j + 1, i + 1).join(''))
+}
+
+const OPEN_BRACKETS  = new Set(['(', '[', '{'])
+const CLOSE_BRACKETS = new Set([')', ']', '}'])
+
+// Predicates rather than the Sets themselves: an exported Set is shared mutable
+// state, and one stray `.add()` in a test file would change how every other
+// guardrail reads source.
+export const isOpenBracket  = (ch: string): boolean => OPEN_BRACKETS.has(ch)
+export const isCloseBracket = (ch: string): boolean => CLOSE_BRACKETS.has(ch)
+
+/**
+ * Index just past the bracket matching the one at `openIdx`, or `src.length`
+ * if it is never closed.
+ *
+ * String and template literals are skipped, so a bracket inside one cannot
+ * unbalance the walk. REGEX literals are not — a pattern containing an
+ * unbalanced bracket would still throw the count off, so pass `blankNonCode`d
+ * source when the file being walked might contain one.
+ *
+ * Four guardrails had each written this loop, every one of them with its own
+ * `inString` flag. Different bugs each time; the shape is the same every time.
+ */
+export function balancedEnd(src: string, openIdx: number): number {
+  let depth = 0
+  let i = openIdx
+
+  while (i < src.length) {
+    const ch = src[i]!
+    if (ch === "'" || ch === '"' || ch === '`') {
+      i = quotedEnd(src, i, ch)
+      continue
+    }
+    if (OPEN_BRACKETS.has(ch)) depth++
+    else if (CLOSE_BRACKETS.has(ch)) {
+      depth--
+      if (depth === 0) return i + 1
+    }
+    i++
+  }
+  return src.length
 }
 
 /** Index just past a regex literal's closing delimiter and flags, or -1. */

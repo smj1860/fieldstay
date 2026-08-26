@@ -1,7 +1,9 @@
 import { describe, it, expect } from 'vitest'
 import { existsSync } from 'fs'
 import { join } from 'path'
-import { collectSourceFiles, rel, read, ROOT } from './scan'
+import {
+  blankComments, collectSourceFiles, isCloseBracket, isOpenBracket, quotedEnd, read, rel, ROOT,
+} from './scan'
 
 // ============================================================================
 // Unbounded-`.select()` guardrail for lib/inngest/**.
@@ -163,52 +165,65 @@ function inngestReachableFiles(): string[] {
   return [...seen].sort()
 }
 
+/** Index of the next character that is not whitespace. */
+function skipSpace(src: string, from: number): number {
+  let i = from
+  while (i < src.length && /\s/.test(src[i]!)) i++
+  return i
+}
+
 /**
  * Extract the full method-chain text starting at a `.from(` call: walk forward
- * balancing brackets and string literals, and stop at the first top-level `)`
- * that is not followed by another `.method(`.
+ * balancing brackets, and stop at the first top-level `)` that is not followed
+ * by another `.method(`.
+ *
+ * Runs on COMMENT-BLANKED source (see offendersInSource), which is what lets
+ * this be a whitespace skip rather than a second lexer. The hand-rolled version
+ * knew about line comments and nothing else, so a BLOCK comment anywhere in a
+ * chain truncated it there — and that cost a finding in one direction while
+ * inventing one in the other. Put a block comment between `.from(...)` and
+ * `.select(...)` and the select is never seen, so an unbounded read goes
+ * unreported; put one between `.select(...)` and `.limit(...)` and the bound is
+ * never seen, so a correctly bounded read is reported as an offender. The
+ * second is the worse of the two on a shrink-only ratchet: it pressures
+ * somebody into adding a BASELINE entry for code that was already right.
+ *
+ * (Described rather than shown, because a block comment cannot contain the
+ * sequence that ends one — the same parsing problem one level up, which is
+ * noted in ./scan for the same reason.)
+ *
+ * String literals are skipped via the shared lexer rather than a local
+ * `inString` flag — literals stay VERBATIM here, because the `.from('table')`
+ * matcher has to read the table name out of one.
  */
 function extractChain(src: string, fromIdx: number): string {
   let i = fromIdx
   let depth = 0
-  let inString: string | null = null
 
   while (i < src.length) {
     const ch = src[i]!
-    const prev = src[i - 1]
 
-    if (inString) {
-      if (ch === inString && prev !== '\\') inString = null
-      i++
-      continue
-    }
-    if (ch === "'" || ch === '"' || ch === '`') { inString = ch; i++; continue }
-    if (ch === '(' || ch === '[' || ch === '{') { depth++; i++; continue }
-    if (ch === ')' || ch === ']' || ch === '}') {
-      depth--
-      i++
-      if (depth === 0) {
-        // Chain continues only if the next non-whitespace/comment char is '.'
-        let k = i
-        while (k < src.length) {
-          const c = src[k]!
-          if (c === ' ' || c === '\n' || c === '\r' || c === '\t') { k++; continue }
-          if (c === '/' && src[k + 1] === '/') { k = src.indexOf('\n', k) + 1 || src.length; continue }
-          break
-        }
-        if (src[k] === '.') { i = k; continue }
-        return src.slice(fromIdx, i)
-      }
-      continue
-    }
+    if (ch === "'" || ch === '"' || ch === '`') { i = quotedEnd(src, i, ch); continue }
+    if (isOpenBracket(ch))   { depth++; i++; continue }
+    if (!isCloseBracket(ch)) { i++; continue }
+
+    depth--
     i++
+    if (depth > 0) continue
+
+    const next = skipSpace(src, i)
+    if (src[next] !== '.') return src.slice(fromIdx, i)
+    i = next
   }
   return src.slice(fromIdx)
 }
 
 /** The scan itself, over one source string — extracted so it can be run
  *  against a synthetic fixture as a POSITIVE CONTROL. See the sanity test. */
-function offendersInSource(src: string, relPath: string): string[] {
+function offendersInSource(rawSrc: string, relPath: string): string[] {
+  // Comments blanked in place: offsets and line numbers are unchanged, so the
+  // reported line still points at the real `.from(`.
+  const src = blankComments(rawSrc)
   const offenders: string[] = []
   const FROM = /\.from\(\s*['"][a-z_]+['"]\s*\)/g
   let m: RegExpExecArray | null
@@ -259,6 +274,28 @@ describe('guardrail: no unbounded .select() in lib/inngest/**', () => {
   it('FIRES on a synthetic unbounded select (the scan is not silently broken)', () => {
     const bad = `const r = await supabase.from('bookings').select('id').eq('org_id', orgId)`
     expect(offendersInSource(bad, 'synthetic.ts')).toHaveLength(1)
+  })
+
+  // A block comment mid-chain used to truncate the chain walk, and the two
+  // arrangements below fail in OPPOSITE directions — which is why both are
+  // asserted. Neither shape exists in lib/ today, so nothing on the real tree
+  // would notice if this regressed: these fixtures are the only thing holding
+  // it. (Written as template literals so the comment openers stay data.)
+  it('reads through a block comment in the middle of a chain', () => {
+    const hiddenSelect = `await supabase.from('bookings')/* note */.select('id').eq('org_id', o)`
+    const hiddenLimit  = `await supabase.from('bookings').select('id')/* note */.limit(10)`
+
+    expect(
+      offendersInSource(hiddenSelect, 'synthetic.ts'),
+      'A comment between .from() and .select() hid an unbounded read from the scan.',
+    ).toHaveLength(1)
+
+    expect(
+      offendersInSource(hiddenLimit, 'synthetic.ts'),
+      'A comment between .select() and .limit() hid the BOUND, reporting a correct '
+      + 'read as an offender — which on a shrink-only baseline pushes someone to '
+      + 'grandfather a file that never needed it.',
+    ).toEqual([])
   })
 
   it('does NOT fire on bounded, paginated, or write-returning selects', () => {

@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest'
 import { readdirSync, statSync } from 'fs'
 import { join } from 'path'
-import { collectSourceFiles, rel, read, ROOT } from './scan'
+import { balancedEnd, collectSourceFiles, rel, read, ROOT } from './scan'
 
 // ============================================================================
 // Guardrail: a Next.js `export const config` must be statically parsable.
@@ -31,30 +31,19 @@ import { collectSourceFiles, rel, read, ROOT } from './scan'
 // without moving it out of the literal.
 // ============================================================================
 
-/** `export const config = { … }`, captured through the balanced braces. */
+/**
+ * `export const config = { … }`, captured through the balanced braces.
+ *
+ * Bracket walk shared with the rest of the guardrail suite (./scan). Two
+ * copies of it lived in this file alone, each with its own `inString` flag.
+ */
 function configObject(src: string): string | null {
   const m = /export\s+const\s+config\s*(?::[^=]+)?=\s*\{/.exec(src)
   if (!m) return null
 
   const open = src.indexOf('{', m.index)
-  let depth = 0
-  let inString: string | null = null
-
-  for (let i = open; i < src.length; i++) {
-    const ch = src[i] as string
-    if (inString) {
-      if (ch === '\\') { i++; continue }
-      if (ch === inString) inString = null
-      continue
-    }
-    if (ch === "'" || ch === '"' || ch === '`') { inString = ch; continue }
-    if (ch === '{' || ch === '[' || ch === '(') depth++
-    else if (ch === '}' || ch === ']' || ch === ')') {
-      depth--
-      if (depth === 0) return src.slice(open, i + 1)
-    }
-  }
-  return null
+  const end  = balancedEnd(src, open)
+  return src[end - 1] === '}' ? src.slice(open, end) : null
 }
 
 /** The raw text of `matcher: [ … ]` inside a config object, if present. */
@@ -63,24 +52,8 @@ function matcherArray(configSrc: string): string | null {
   if (!m) return null
 
   const open = configSrc.indexOf('[', m.index)
-  let depth = 0
-  let inString: string | null = null
-
-  for (let i = open; i < configSrc.length; i++) {
-    const ch = configSrc[i] as string
-    if (inString) {
-      if (ch === '\\') { i++; continue }
-      if (ch === inString) inString = null
-      continue
-    }
-    if (ch === "'" || ch === '"' || ch === '`') { inString = ch; continue }
-    if (ch === '[') depth++
-    else if (ch === ']') {
-      depth--
-      if (depth === 0) return configSrc.slice(open + 1, i)
-    }
-  }
-  return null
+  const end  = balancedEnd(configSrc, open)
+  return configSrc[end - 1] === ']' ? configSrc.slice(open + 1, end - 1) : null
 }
 
 /**

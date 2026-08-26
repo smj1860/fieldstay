@@ -59,7 +59,7 @@ data leaks that could expose tenant data.
   with `.eq('org_id', ...)` (or the token's equivalent). Service role in a
   Server Component removes RLS as a defense-in-depth backstop for that
   page, so a missing `.eq('org_id', ...)` filter there fails open with no
-  safety net — prefer `createServerClient()` (RLS-enforced) unless the page
+  safety net — prefer `createClient()` (RLS-enforced) unless the page
   genuinely needs the bypass (e.g. cross-org aggregation re-filtered to the
   caller's authorized scope, as in the owner-portal pages).
 - Never pass it to client components, never return it in API responses,
@@ -67,7 +67,14 @@ data leaks that could expose tenant data.
 - Use `createServiceClient(context)` from `lib/supabase/server.ts` for
   service role — the `ServiceRoleContext` argument is required and names why
   the RLS bypass is justified (see the Supabase Clients pattern section).
-- Use `createServerClient()` from `lib/supabase/server.ts` for normal auth.
+- Use `await createClient()` from `lib/supabase/server.ts` for normal auth —
+  it is ASYNC (it awaits `cookies()`), so a missing `await` hands you a
+  Promise that every `.from()` call then fails on. In a Server Action you
+  usually do not call it at all: `requireOrgMember()` already returns a
+  session-scoped client.
+  NOT `createServerClient()` — that name belongs to `@supabase/ssr`, which
+  `lib/supabase/server.ts` imports and wraps. It is not an export of ours,
+  and this file claimed it was until 2026-08-25.
 - Use `adminFetch()` from `lib/supabase/server.ts` for raw calls to the
   Supabase Admin REST API (e.g. `/auth/v1/admin/users?email=`) that aren't
   covered by the JS client's gotrue/postgrest wrapper — never build a
@@ -419,9 +426,15 @@ export async function myServerAction(data: MyInput) {
 
 ### Supabase Clients
 ```typescript
-// In server actions and route handlers — RLS enforced via auth cookie
-import { createServerClient } from '@/lib/supabase/server'
-const supabase = createServerClient()
+// In server actions and route handlers — RLS enforced via auth cookie.
+// ASYNC: it awaits next/headers' cookies(). And note the name — the wrapper
+// we export is createClient(); `createServerClient` is @supabase/ssr's, which
+// this module imports internally.
+import { createClient } from '@/lib/supabase/server'
+const supabase = await createClient()
+
+// Usually unnecessary in a Server Action: requireOrgMember() hands back a
+// client already scoped to the caller's session.
 
 // In Inngest steps and admin operations — bypasses RLS intentionally.
 // The context argument is REQUIRED (compile-time only, runtime ignores it):
@@ -1088,12 +1101,21 @@ and refactors. Violations will appear as SonarQube findings on the next scan.
 - **Cognitive complexity ≤ 15** per function — extract named helper functions,
   custom hooks, or named predicates to reduce branching. ESLint-enforced
   (`sonarjs/cognitive-complexity`, `eslint.config.mjs`) at `warn` while the
-  pre-existing violations get cleared (236 at rollout, 36 as of 2026-08-15),
+  pre-existing violations get cleared (236 at rollout, 33 as of 2026-08-26),
   and ratcheted per-file by `npm run check:complexity` — new code at over 15
   fails CI outright, and an already-complex function may not get worse. The
   `--max-warnings` total does NOT cover this: it is fungible, and
   `no-nested-conditional` alone is 92 of the 165 warnings, so there is ample
-  currency to pay for a complexity regression with
+  currency to pay for a complexity regression with.
+  **`unit/`, `scripts/` and `e2e/` are in scope for this rule too** (a second,
+  separate config block), at ZERO with nothing baselined. They were exempt
+  until 2026-08-26, which meant 17 violations nobody was ever told about —
+  including a 42 that turned out to be a hand-rolled lexer with a live
+  coverage hole in it. They were cleared rather than grandfathered, so a new
+  violation in a test file fails CI the same as one in `lib/`. The block is
+  deliberately separate from the structural-enforcement one above, whose
+  `no-restricted-syntax` bans are the very strings a guardrail has to write
+  down in order to check for them
 - **Nesting depth ≤ 4** — use guard clauses and early returns to flatten nested
   `if`/`for`/`while`/`switch`/`try` blocks rather than indenting further, and
   extract named sibling functions rather than nesting closures more than 4
@@ -1805,6 +1827,16 @@ meta-rule, prose is for judgment calls only.
   keeps line numbers so `file:line` allowlist keys stay stable. Where the
   comment genuinely IS the artifact — `inngest-history-secrets`' annotation,
   `redemption-dedup-pairing`'s index name — keep `read()` and say why.
+  A scanner that walks the source by INDEX — balancing brackets, slicing a
+  method chain — cannot use `readCode()`, which shifts every offset left. That
+  module exports two offset-preserving modes for those: `blankComments()` when
+  the scan must still READ a literal (the table name in `.from('bookings')`),
+  and `blankNonCode()`/`readBlanked()` when a literal's CONTENT could pose as
+  the construct being hunted. All three share one lexer on purpose — the two
+  guardrails that grew their own each grew a bug with it (a regex character
+  class containing a quote swallowed the rest of the file; a block comment
+  mid-chain truncated the chain, under-reporting in one arrangement and
+  over-reporting in the other). Do not hand-roll a third.
   `pnpm run check:comment-blind-guardrails` finds these: it strips every comment
   in `app`/`lib`/`components`, re-runs the suite, and reports any guardrail that
   passes on the real tree and fails without prose. Manual, not a CI gate — it
