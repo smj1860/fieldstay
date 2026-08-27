@@ -107,9 +107,18 @@ const NEW_CONNECTION_GRACE_HOURS = 50
 
 interface JobRunRow  {
   function_id: string
+  /**
+   * NOT when the function began executing — when Inngest CREATED the run, i.e.
+   * when the cron fired. job-run-recorder decodes it from the run id's ULID
+   * prefix because `inngest/function.finished` carries no timestamps at all.
+   * A run that waited for a concurrency slot was enqueued here and executed
+   * later, and every second of that wait is inside duration_ms.
+   */
   started_at:  string
   /** null for runs recorded before the recorder learned to compute it. */
   duration_ms: number | null
+  /** null for the same reason as duration_ms — pre-dates the recorder. */
+  finished_at: string | null
   /** ULID. Its first 10 characters are the creation millisecond — see run-id.ts. */
   run_id:      string
 }
@@ -130,11 +139,36 @@ interface SilentJob {
   silentForHours: number | null
 }
 
-/** A watched job whose most recent run took far longer than its own norm. */
+/** A watched job whose recent runs took far longer than its own norm. */
 interface SlowJob {
   id: string
+  /**
+   * Latest run's WALL-CLOCK with queue-behind-the-previous-run removed.
+   *
+   * Not "time our code spent working", and the distinction is not pedantic. An
+   * Inngest trace for the 2026-08-26 ownerrez-incremental-sync runs showed its
+   * fetch-connections step at 32.5s split as 29.5s Inngest / 3.0s our server —
+   * so the overwhelming majority of a "slow" run was orchestration latency
+   * between step boundaries, which is invisible here and outside our control.
+   * `inngest/function.finished` carries no timings, so there is nothing to
+   * subtract it with. Wall-clock is the honest name for what this holds.
+   */
   latestMs: number
+  /** Latest run's raw queue-inclusive duration, as system_job_runs recorded it. */
+  latestRawMs: number
   medianMs: number
+  /** How many of the last SLOW_RECENT_WINDOW runs breached the threshold. */
+  breaches: number
+}
+
+/** One run, oldest-first, with queue time separated out. */
+interface AdjustedRun {
+  /** Enqueue time — see JobRunRow.started_at. */
+  at:    number
+  /** Queue-excluded WALL-CLOCK — see SlowJob.latestMs. Every threshold uses this. */
+  ms:    number
+  /** Queue-inclusive duration, straight from the recorder. */
+  rawMs: number
 }
 
 /** A cron whose single scheduler tick is being executed more than once. */
@@ -174,6 +208,85 @@ const SLOW_FLOOR_MS      = 60_000
 const SLOW_MULTIPLE      = 3
 const SLOW_MIN_SAMPLES   = 5
 
+/**
+ * ONE slow run is not a slow job.
+ *
+ * On 2026-08-26 this fired on ownerrez-incremental-sync at "97s vs 9s median".
+ * Nothing was wrong: all 200 runs that week succeeded, one booking row had been
+ * touched in fourteen hours, and no OwnerRez code had changed in four days.
+ * Pivoting the same table by hour showed why — at 10:00, 13:00 and 18:00 UTC
+ * two to four UNRELATED jobs went slow together, cron-metrics-snapshot among
+ * them, and that one makes no external API call at all. That is shared
+ * infrastructure jitter, and against a 9s median the 60s floor turns any of it
+ * into a page.
+ *
+ * So a breach must REPEAT before it is reported. Two of the last three is still
+ * a step change on the third run — an hour of extra latency on an hourly job —
+ * while a lone spike stays quiet. This is not the same as raising the floor,
+ * which would hide a genuine regression of exactly the size the floor names.
+ */
+const SLOW_RECENT_WINDOW = 3
+const SLOW_MIN_BREACHES  = 2
+
+/**
+ * Separate queue time from execution time.
+ *
+ * `started_at` is when the run was CREATED, not when it began — so for a
+ * function declaring `concurrency: { limit: 1 }` (ownerrez-incremental-sync
+ * does, at incremental-sync.ts) a run that waited for the previous one to
+ * finish books that entire wait as its own duration. That is self-reinforcing:
+ * one slow run delays the next, whose inflated duration then delays the one
+ * after.
+ *
+ * LATENT, NOT THE CAUSE OF ANY ALARM SO FAR. This was written while chasing the
+ * 2026-08-26 ownerrez-incremental-sync alarm and the hypothesis did not survive
+ * checking: replaying the real rows for that window showed ZERO overlap — every
+ * run finished minutes before the next was enqueued, so queue time was 0 and
+ * the reported 97s was 97s of genuine execution. What suppresses that alarm is
+ * the repeat-breach rule above, not this. This ships because the metric is
+ * wrong BY CONSTRUCTION — the moment a watched job does overlap itself, its
+ * duration silently starts including time it was not running, and the alert
+ * would assert a figure it never measured.
+ *
+ * A run cannot have started before the previous run of the same function
+ * finished, so `max(enqueued, previous finish)` is a lower bound on its real
+ * start, and the remainder is a lower bound on queue time.
+ *
+ * ⚠️ For a function that legitimately runs CONCURRENTLY with itself this
+ * under-states duration, because two genuinely parallel runs look like one
+ * queued behind the other. That direction is deliberate: the defect being
+ * fixed is false alarms, slowness here is a warning rather than an error, and
+ * silence detection — the watchdog's actual job — does not use this at all.
+ */
+function queueAdjustedRuns(rows: JobRunRow[]): AdjustedRun[] {
+  const ordered = [...rows].sort(
+    (a, b) => Date.parse(a.started_at) - Date.parse(b.started_at),
+  )
+
+  const out: AdjustedRun[] = []
+  let previousEnd = Number.NEGATIVE_INFINITY
+
+  for (const row of ordered) {
+    const enqueued = Date.parse(row.started_at)
+    const rawMs    = row.duration_ms ?? 0
+
+    // finished_at is authoritative when present; derive it otherwise so a
+    // pre-recorder row still contributes a sample rather than being dropped.
+    const parsedEnd = row.finished_at ? Date.parse(row.finished_at) : Number.NaN
+    const ended     = Number.isNaN(parsedEnd) ? enqueued + rawMs : parsedEnd
+
+    // Never longer than the raw duration, never negative — clock skew between
+    // a decoded ULID and an Inngest event timestamp is not something to let
+    // through into a threshold comparison.
+    const executed = Math.min(rawMs, Math.max(0, ended - Math.max(enqueued, previousEnd)))
+
+    out.push({ at: enqueued, ms: executed, rawMs })
+    previousEnd = Math.max(previousEnd, ended)
+  }
+
+  return out
+}
+
 /** Median of a non-empty numeric list. */
 function median(values: number[]): number {
   const sorted = [...values].sort((a, b) => a - b)
@@ -192,37 +305,44 @@ function median(values: number[]): number {
  * silence the watchdog already covers.
  */
 function findSlowJobs(rows: JobRunRow[], watched: readonly string[]): SlowJob[] {
-  const byFunction = new Map<string, { at: number; ms: number }[]>()
+  const byFunction = new Map<string, JobRunRow[]>()
 
   for (const row of rows) {
     if (row.duration_ms === null || row.duration_ms === undefined) continue
-    const at = Date.parse(row.started_at)
-    if (Number.isNaN(at)) continue
+    if (Number.isNaN(Date.parse(row.started_at))) continue
     const list = byFunction.get(row.function_id) ?? []
-    list.push({ at, ms: row.duration_ms })
+    list.push(row)
     byFunction.set(row.function_id, list)
   }
 
   return watched.flatMap<SlowJob>((id) => {
-    const runs = byFunction.get(id)
-    if (!runs || runs.length < SLOW_MIN_SAMPLES) return []
+    const raw = byFunction.get(id)
+    if (!raw || raw.length < SLOW_MIN_SAMPLES) return []
 
-    // An explicit scan rather than reduce(). A no-initial-value reduce throws
-    // TypeError on an empty array, and while the length guard above makes that
-    // unreachable TODAY, the guard is three lines away and someone relaxing
-    // SLOW_MIN_SAMPLES to 0 would turn the watchdog itself into the thing that
-    // crashes — which is the one function that must not. Seeding the reduce
-    // with runs[0] would satisfy the linter while still reading as if the empty
-    // case were handled; this cannot be misread.
-    let latest = runs[0]!
-    for (const run of runs) {
-      if (run.at > latest.at) latest = run
-    }
-    const baseline = median(runs.map((r) => r.ms))
+    // Oldest-first, queue time removed. Every comparison below is on `.ms`,
+    // which is execution; `.rawMs` survives only to be reported.
+    const runs = queueAdjustedRuns(raw)
+
+    const baseline  = median(runs.map((r) => r.ms))
     const threshold = Math.max(SLOW_FLOOR_MS, baseline * SLOW_MULTIPLE)
 
-    if (latest.ms < threshold) return []
-    return [{ id, latestMs: latest.ms, medianMs: Math.round(baseline) }]
+    // slice(-N) on a list already known to hold at least SLOW_MIN_SAMPLES,
+    // which is deliberately larger than SLOW_RECENT_WINDOW — so this is never
+    // empty and the index access below is never undefined. Stated because
+    // relaxing SLOW_MIN_SAMPLES is what would break it, and that constant is
+    // far enough away to be changed without seeing this.
+    const recent   = runs.slice(-SLOW_RECENT_WINDOW)
+    const breaches = recent.filter((r) => r.ms >= threshold).length
+    if (breaches < SLOW_MIN_BREACHES) return []
+
+    const latest = runs[runs.length - 1]!
+    return [{
+      id,
+      latestMs:    latest.ms,
+      latestRawMs: latest.rawMs,
+      medianMs:    Math.round(baseline),
+      breaches,
+    }]
   })
 }
 
@@ -374,7 +494,7 @@ export const systemWatchdog = inngest.createFunction(
       const rows = await fetchAllRows<JobRunRow>(
         (from, to) => supabase
           .from('system_job_runs')
-          .select('function_id, started_at, duration_ms, run_id')
+          .select('function_id, started_at, finished_at, duration_ms, run_id')
           .gte('started_at', since)
           .order('started_at', { ascending: false })
           .range(from, to),
@@ -516,8 +636,22 @@ export const systemWatchdog = inngest.createFunction(
       // a materially different situation from one that has stopped. Reported
       // so a step change is visible before it becomes a timeout or an overlap
       // with the job's own next tick.
+      // Says execution, breach count and queue time separately, because the
+      // old message — "97s vs 9s median" — asserted a duration it had not
+      // measured: that figure included time the run spent waiting for a
+      // concurrency slot, which reads as work the job did.
       const summary = slow
-        .map((j) => `${j.id} (${Math.round(j.latestMs / 1000)}s vs ${Math.round(j.medianMs / 1000)}s median)`)
+        .map((j) => {
+          const queuedMs = j.latestRawMs - j.latestMs
+          const queued   = queuedMs >= 1_000 ? `, +${Math.round(queuedMs / 1000)}s queued` : ''
+          // "wall", not "exec". Inngest's own trace for a 43s run of this
+          // function reported 3s on our server and 29s in its orchestration —
+          // so calling this execution would repeat the exact mistake the
+          // previous message made, one layer down.
+          return `${j.id} (${Math.round(j.latestMs / 1000)}s wall vs ` +
+                 `${Math.round(j.medianMs / 1000)}s median, ` +
+                 `${j.breaches}/${SLOW_RECENT_WINDOW} recent runs${queued})`
+        })
         .join('; ')
       logger.warn(`[watchdog] ${slow.length} job(s) slower than their norm: ${summary}`)
       reportError(new Error(`Watchdog: ${slow.length} scheduled job(s) slow — ${summary}`), {

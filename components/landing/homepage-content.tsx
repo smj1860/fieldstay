@@ -26,6 +26,39 @@ import {
 // fix is not the corrected number, it is that there is no longer a second copy
 // to correct -- unit/stripe/plan-table-consistency.test.ts already holds
 // plan-tiers.ts against lib/stripe/client.ts's PLANS.
+// Every public page, linked from the highest-authority page on the site.
+//
+// This is not decoration. Google Search Console reported all six marketing and
+// legal pages as "Discovered - currently not indexed", and inspecting any of
+// them returned "URL is unknown to Google" with "Referring page: None
+// detected". The cause was here: the whole 49KB homepage carried exactly two
+// internal links, /login and /signup. app/sitemap.ts listed the pages and
+// app/robots.ts advertised the sitemap, so the machine-readable half was
+// correct -- but a sitemap entry is a hint, and a page with zero inbound links
+// is one a crawler is entitled to keep ignoring. /strops had been live and
+// unlinked since 2026-08-08.
+//
+// Legal links carry a second reason: a public privacy policy and terms are
+// what a payment processor, an app store review and an ads account all look
+// for, and none of them read sitemap.xml.
+//
+// Relative hrefs on purpose. These are same-host marketing pages, so they
+// resolve on whichever of the two aliases the visitor is on and inherit that
+// page's own apex canonical -- unlike a CTA into an authenticated flow, which
+// lib/marketing.ts requires to be absolute against APP_ORIGIN so the session
+// cookie lands on the right host.
+const FOOTER_LINKS: ReadonlyArray<{ label: string; href: string }> = [
+  { label: 'Turnover App',  href: '/strops'      },
+  { label: 'For Hosts',     href: '/hosts'       },
+  { label: 'OwnerRez',      href: '/ownerrez'    },
+  { label: 'Hospitable',    href: '/hospitable'  },
+  { label: 'Privacy',       href: '/privacy'     },
+  { label: 'Terms',         href: '/terms'       },
+  { label: 'DPA',           href: '/dpa'         },
+  { label: 'Log In',        href: '/login'       },
+  { label: 'Sign Up',       href: '/signup'      },
+]
+
 const HOMEPAGE_ENTRY_FEATURES = [
   'iCal sync (Airbnb, VRBO)',
   'Turnover board + crew app',
@@ -543,21 +576,26 @@ export function HomepageContent() {
       </section>
 
       {/* ── Footer ───────────────────────────────────────────────────────── */}
-      <footer className="flex items-center justify-between px-8 py-7 bg-brand-900">
-        <span className="font-display font-black text-base text-white">
-          Field<span className="text-gold-300">Stay</span>
-        </span>
-        <div className="flex items-center gap-6">
-          {[
-            { label: 'hello@fieldstay.app', href: 'mailto:hello@fieldstay.app' },
-            { label: 'Log In', href: '/login' },
-            { label: 'Sign Up', href: '/signup' },
-          ].map((l) => (
-            <Link key={l.label} href={l.href}
-                  className="text-sm transition-colors text-white/40">
-              {l.label}
-            </Link>
-          ))}
+      <footer className="px-8 py-7 bg-brand-900">
+        {/* Column on narrow screens: nine links plus the wordmark do not sit on
+            one row on a phone, and the previous justify-between row would have
+            crushed them rather than wrapped. */}
+        <div className="flex flex-col gap-5 sm:flex-row sm:items-center sm:justify-between">
+          <span className="font-display font-black text-base text-white">
+            Field<span className="text-gold-300">Stay</span>
+          </span>
+          <div className="flex flex-wrap items-center gap-x-6 gap-y-3">
+            {FOOTER_LINKS.map((l) => (
+              <Link key={l.label} href={l.href}
+                    className="text-sm transition-colors text-white/40 hover:text-white/70">
+                {l.label}
+              </Link>
+            ))}
+            <a href="mailto:hello@fieldstay.app"
+               className="text-sm transition-colors text-white/40 hover:text-white/70">
+              hello@fieldstay.app
+            </a>
+          </div>
         </div>
       </footer>
 
