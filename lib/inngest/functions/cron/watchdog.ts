@@ -142,7 +142,17 @@ interface SilentJob {
 /** A watched job whose recent runs took far longer than its own norm. */
 interface SlowJob {
   id: string
-  /** Latest run's duration with queue time removed — what the job actually did. */
+  /**
+   * Latest run's WALL-CLOCK with queue-behind-the-previous-run removed.
+   *
+   * Not "time our code spent working", and the distinction is not pedantic. An
+   * Inngest trace for the 2026-08-26 ownerrez-incremental-sync runs showed its
+   * fetch-connections step at 32.5s split as 29.5s Inngest / 3.0s our server —
+   * so the overwhelming majority of a "slow" run was orchestration latency
+   * between step boundaries, which is invisible here and outside our control.
+   * `inngest/function.finished` carries no timings, so there is nothing to
+   * subtract it with. Wall-clock is the honest name for what this holds.
+   */
   latestMs: number
   /** Latest run's raw queue-inclusive duration, as system_job_runs recorded it. */
   latestRawMs: number
@@ -155,7 +165,7 @@ interface SlowJob {
 interface AdjustedRun {
   /** Enqueue time — see JobRunRow.started_at. */
   at:    number
-  /** Queue-excluded duration. The figure every threshold below is measured on. */
+  /** Queue-excluded WALL-CLOCK — see SlowJob.latestMs. Every threshold uses this. */
   ms:    number
   /** Queue-inclusive duration, straight from the recorder. */
   rawMs: number
@@ -634,7 +644,11 @@ export const systemWatchdog = inngest.createFunction(
         .map((j) => {
           const queuedMs = j.latestRawMs - j.latestMs
           const queued   = queuedMs >= 1_000 ? `, +${Math.round(queuedMs / 1000)}s queued` : ''
-          return `${j.id} (${Math.round(j.latestMs / 1000)}s exec vs ` +
+          // "wall", not "exec". Inngest's own trace for a 43s run of this
+          // function reported 3s on our server and 29s in its orchestration —
+          // so calling this execution would repeat the exact mistake the
+          // previous message made, one layer down.
+          return `${j.id} (${Math.round(j.latestMs / 1000)}s wall vs ` +
                  `${Math.round(j.medianMs / 1000)}s median, ` +
                  `${j.breaches}/${SLOW_RECENT_WINDOW} recent runs${queued})`
         })
