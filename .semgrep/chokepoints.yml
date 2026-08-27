@@ -631,3 +631,78 @@ rules:
   # Kept counted, at INFO, so the class stays visible and cannot grow, but
   # deliberately at a severity that does not compete with tiers 1–3 for
   # attention. Do NOT promote a fix here over a tier-1 finding.
+
+  # ══ A DATE WINDOW BOUNDS THE DAYS, NOT THE ROWS ══════════════════════════
+  #
+  # The unbounded-select ladder above asks what SCOPES a read — one org, one
+  # parent, the whole table. This asks something different and orthogonal:
+  # whether the thing a reader would point at as "the bound" actually bounds
+  # the row count. A `.gte(date, …)/.lte(date, …)` pair looks like a limit and
+  # is not one: the ceiling is entities x period, so widening the portfolio
+  # raises the row count without touching the window.
+  #
+  # WHY THIS EXISTS AS ITS OWN RULE, at zero, rather than as ladder hygiene.
+  # Every site it has ever matched was ALSO counted in tier 4 (-org-scoped),
+  # where 50-odd permitted single-tenant page reads sit at INFO and, by
+  # design, do not compete for attention. That is right for the tier and wrong
+  # for this shape: tier 4's population is bounded by plan-capped org size,
+  # while these are bounded by nothing, and burying the second kind in the
+  # first is what let all three known instances ship.
+  #
+  # On 2026-08-27 the ops page was found already carrying a written-out
+  # version of this exact argument on its turnovers read — "the ceiling is
+  # properties x turnovers-per-property-per-month, and at the 50-property
+  # target a busy calendar clears max_rows inside one window" — while the
+  # bookings read THREE LINES BELOW IT had the same defect and no such
+  # comment. The reasoning was present, correct, and did not generalise. That
+  # is the case for a rule rather than a paragraph.
+  #
+  # Verified against history rather than asserted: run over the pre-fix
+  # versions of the four pages touched that day, this catches exactly the
+  # three date-windowed reads (bookings, ops bookings, crew_availability) and
+  # correctly ignores the properties-page ops badges, which are status
+  # filtered and carry no window at all. Those grow with time too, but for a
+  # different reason and with no false bound to mistake for one — they belong
+  # to the ladder, not here.
+  #
+  # SCOPE, deliberately narrow: a date-ish comparison column. Extending this
+  # to `.eq('status', …)` was considered and rejected — a status filter makes
+  # no claim to bound anything, so it creates none of the false confidence
+  # this rule is about, and every list page in the tree would match.
+  - id: fieldstay-windowed-select-unbounded
+    languages: [typescript]
+    severity: ERROR
+    message: >-
+      This .select() is filtered by a DATE RANGE but nothing bounds its row
+      count. The window caps how many days are covered, not how many rows come
+      back — the ceiling is entities x period, so it grows with the portfolio
+      while the window stays the same. PostgREST's max_rows = 1000 then
+      truncates with a 200 and no signal, and the surviving rows are an
+      arbitrary prefix: a calendar silently omits stays, an occupancy or
+      utilisation figure is computed over part of its own range and rendered
+      as fact. Drain it with fetchAllRows(), or add an explicit .limit() sized
+      by what truncation would corrupt.
+    patterns:
+      - pattern: $S.from($T).select(...)
+      # POSITIVE: a range comparison against a date-ish column. Dotted form
+      # included for embedded-resource filters, same as the ladder's org-scope
+      # matcher — `.gte('turnovers.checkout_datetime', …)` is still a window.
+      - pattern-inside:
+          patterns:
+            - pattern: $Y.$CMP($DCOL, ...)
+            - metavariable-regex:
+                metavariable: $CMP
+                regex: ^(gte|lte|gt|lt)$
+            - metavariable-regex:
+                metavariable: $DCOL
+                regex: ^["'](?:[A-Za-z_]+\.)?[A-Za-z_]*(?:date|_at|datetime|_time)["']$
+      # Bounding negatives, identical in form and reasoning to the ladder's —
+      # see the long note on the paginating-callback shape there for why it is
+      # matched structurally rather than by callee name.
+      - pattern-not-inside: $X.limit(...)
+      - pattern-not-inside: $X.range(...)
+      - pattern-not-inside: |
+          $PAGINATE(($FROM, $TO) => { ... return $Q.range($FROM, $TO) }, { ..., label: $LABEL, ... })
+      - pattern-not-inside: $X.single(...)
+      - pattern-not-inside: $X.maybeSingle(...)
+      - pattern-not: "$S.from($T).select($SEL, {..., head: true, ...})"

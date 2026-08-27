@@ -44,6 +44,13 @@ export default async function TeamPage() {
     .is('accepted_at', null)
     .gt('expires_at', new Date().toISOString())
     .order('created_at', { ascending: false })
+    // Bounded. The window on expires_at caps how OLD an invite can be, not how
+    // many there are — an org that repeatedly re-invites a stale address
+    // accumulates unaccepted rows inside it. This is far from max_rows in
+    // practice, and the limit is here so the shape stays checkable rather than
+    // because 1,000 pending invites is expected: a page listing every one of
+    // them is already a support conversation, not a rendering problem.
+    .limit(500)
 
 
   // Logs + reports, then throws so the segment's error.tsx renders a real

@@ -1597,9 +1597,14 @@ following them stops being a memory test. Five layers, checked in CI via
      a role-filtered `organization_members` read outside the auth helpers /
      `getPmMembersByOrgIds`, an outbound `fetch()` to a literal `https://` URL
      with no `AbortSignal`, `void` on a lazy PostgREST builder (the request is
-     never sent), `getPublicUrl()` on the three private buckets, and the
+     never sent), `getPublicUrl()` on the three private buckets, the
      `memberships`/`work_order_notes`/`assigned_crew_id` names that do not
-     exist, and — PROMOTED 2026-08-11 — the whole Supabase error-handling
+     exist, a `.select()` filtered by a DATE RANGE with nothing bounding its
+     row count (`-windowed-select-unbounded`, added 2026-08-27 — a window caps
+     the days, not the rows, so the ceiling is entities x period; orthogonal to
+     the ladder below, which asks what SCOPES a read rather than whether its
+     apparent bound is real), and — PROMOTED 2026-08-11 — the whole Supabase
+     error-handling
      family: a discarded write result, `data` destructured without `error`,
      and the same in a `Promise.all` fan-in. Promotion is the ratchet's
      purpose, and it requires deleting the rule's `baseline-counts.json` key
