@@ -4,16 +4,25 @@ import { Card } from '@/components/ui/Card'
 import { unwrapJoin } from '@/lib/utils/supabase-joins'
 import type { Metadata } from 'next'
 import { throwIfAnyQueryFailed } from '@/lib/supabase/unwrap'
+import { fetchAllRows } from '@/lib/inngest/paginate'
 
 export const metadata: Metadata = { title: 'Turnover Checklist' }
 interface Props { params: Promise<{ id: string }> }
+
+/** One sibling property's checklist template, with just enough to count its sections. */
+interface SiblingTemplateRow {
+  property_id:                 string | null
+  properties:                  { name: string } | { name: string }[] | null
+  checklist_template_sections: { id: string }[] | null
+}
+
 
 export default async function ChecklistPage({ params }: Props) {
   const { id } = await params
   const { property, supabase } = await requireProperty(id)
   const { membership } = await requireOrgMember()
 
-  const [{ data: template, error: templateError }, { data: otherProperties, error: otherPropertiesError }, { data: siblingChecklistSections, error: siblingChecklistSectionsError }, { data: roomTemplates, error: roomTemplatesError }] = await Promise.all([
+  const [{ data: template, error: templateError }, { data: otherProperties, error: otherPropertiesError }, siblingTemplates, { data: roomTemplates, error: roomTemplatesError }] = await Promise.all([
     supabase
       .from('checklist_templates')
       .select(`id, name, checklist_template_sections ( id, name, sort_order, room_template_id, checklist_template_items ( id, task, requires_photo, notes, sort_order ) )`)
@@ -27,11 +36,35 @@ export default async function ChecklistPage({ params }: Props) {
       .eq('is_active', true)
       .neq('id', property.id)
       .order('name'),
-    supabase
-      .from('checklist_template_sections')
-      .select('template_id, checklist_templates!inner(property_id, properties!inner(name))')
-      .eq('checklist_templates.org_id', membership.org_id)
-      .neq('checklist_templates.property_id', property.id),
+    // Counted per TEMPLATE, not per section — this used to read
+    // checklist_template_sections directly, one row per section across every
+    // other property in the org, purely to compute a per-property COUNT in the
+    // loop below. That is a GROUP BY done in JavaScript by fetching the raw
+    // rows: at the audited ~7.3 sections per property a 100-property portfolio
+    // pulled ~730 rows to produce ~99, and would have silently truncated at
+    // PostgREST's max_rows = 1000 — dropping properties out of the "copy from
+    // another property" picker with no indication they existed.
+    //
+    // Reading templates and embedding their sections inverts it: the top-level
+    // row count is now one per TEMPLATE (~one per property, plan-capped), and
+    // max_rows applies to top-level rows only, so the nested sections come
+    // along whole. Paginated anyway, per the assets-page precedent — at this
+    // size it is exactly one request, and it can never quietly truncate again.
+    //
+    // A PostgREST embedded aggregate — checklist_template_sections(count) —
+    // would be smaller still, but nothing in this codebase uses one and
+    // aggregate support could not be confirmed against the live instance from
+    // here. Fetching the ids and taking .length needs no such guarantee.
+    fetchAllRows<SiblingTemplateRow>(
+      (rangeFrom, rangeTo) => supabase
+        .from('checklist_templates')
+        .select('property_id, properties!inner(name), checklist_template_sections(id)')
+        .eq('org_id', membership.org_id)
+        .neq('property_id', property.id)
+        .order('property_id')
+        .range(rangeFrom, rangeTo),
+      { label: 'page.checklist-setup.siblingTemplates' },
+    ),
     supabase
       .from('room_templates')
       .select(`id, name, auto_include, room_template_items ( id, task, requires_photo, notes, sort_order )`)
@@ -41,16 +74,23 @@ export default async function ChecklistPage({ params }: Props) {
 
   // Logs + reports every failure, then throws so the segment's error.tsx
   // renders a real error state — an outage must not look like empty data.
-  throwIfAnyQueryFailed({ site: 'page.properties.id.setup.checklist', orgId: membership.org_id }, templateError, otherPropertiesError, siblingChecklistSectionsError, roomTemplatesError)
+  throwIfAnyQueryFailed({ site: 'page.properties.id.setup.checklist', orgId: membership.org_id }, templateError, otherPropertiesError, roomTemplatesError)
 
   const sectionCountByProperty: Record<string, number> = {}
   const propNameByProperty: Record<string, string> = {}
-  for (const row of siblingChecklistSections ?? []) {
-    const tmpl = unwrapJoin(row.checklist_templates)
-    if (!tmpl?.property_id) continue
-    sectionCountByProperty[tmpl.property_id] = (sectionCountByProperty[tmpl.property_id] ?? 0) + 1
-    const p = unwrapJoin(tmpl.properties)
-    if (p?.name) propNameByProperty[tmpl.property_id] = p.name
+  for (const row of siblingTemplates) {
+    if (!row.property_id) continue
+    // SUMMED across a property's templates, not assigned — a property may hold
+    // more than one template and the previous per-section count added them all
+    // up. Templates with zero sections contribute nothing and so never enter
+    // the map, which is also what the old shape did: a template with no
+    // sections produced no rows at all. That matters — a property you cannot
+    // actually copy anything from must not appear in the picker.
+    const sectionCount = row.checklist_template_sections?.length ?? 0
+    if (!sectionCount) continue
+    sectionCountByProperty[row.property_id] = (sectionCountByProperty[row.property_id] ?? 0) + sectionCount
+    const p = unwrapJoin(row.properties)
+    if (p?.name) propNameByProperty[row.property_id] = p.name
   }
   const sourceProperties = Object.entries(sectionCountByProperty)
     .map(([sid, sectionCount]) => ({ id: sid, name: propNameByProperty[sid] ?? sid, sectionCount }))
