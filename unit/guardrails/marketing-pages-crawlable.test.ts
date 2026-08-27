@@ -70,6 +70,19 @@ const pageFile = (route: string) =>
 // removed. That is the seventh hand-rolled lexer this suite has retired; the
 // shared one also handles strings and regex literals, which the regex did not.
 
+/**
+ * Does the homepage link this route?
+ *
+ * Both spellings count: a JSX attribute (`href="/strops"`) and an object
+ * property in a link list (`href: '/strops'`). Only the first was checked
+ * initially and the assertion failed against a homepage that DID link every
+ * page — the links live in a FOOTER_LINKS array, not inline in the markup.
+ * The trailing quote is required so /host cannot be satisfied by /hosts.
+ */
+function linkedFromHomepage(homepage: string, route: string): boolean {
+  return new RegExp(`href\\s*[:=]\\s*\\{?\\s*['"]${route}['"]`).test(homepage)
+}
+
 describe('guardrail: public marketing and legal pages are crawlable', () => {
   it('every one has a page file — the list cannot rot into naming pages that do not exist', () => {
     const missing = PUBLIC_MARKETING_PAGES.filter((r) => !existsSync(pageFile(r)))
@@ -276,6 +289,48 @@ describe('guardrail: public marketing and legal pages are crawlable', () => {
       'inline RSC scripts. Every one is blocked: the page renders, looks fine to',
       'a crawler, and never hydrates. Nothing in CI sees this.',
     ].join('\n')).toEqual([])
+  })
+
+  it('every one is linked from the homepage — a sitemap entry is not discovery', () => {
+    // The FOURTH instance of this same GSC symptom, 2026-08-27. All six pages
+    // sat at "Discovered - currently not indexed", and inspecting any returned
+    // "URL is unknown to Google" / "Referring page: None detected".
+    //
+    // Everything machine-readable was already right: app/sitemap.ts listed the
+    // apex URLs, app/robots.ts advertised the sitemap, each page served 200
+    // with a correct absolute apex canonical on BOTH aliases. What was missing
+    // is the thing crawlers actually weight — links. The entire homepage
+    // carried two internal hrefs, /login and /signup, so every page here was an
+    // orphan. /strops had been live and unlinked since 2026-08-08.
+    //
+    // Checked against the homepage specifically, not "anywhere in the tree":
+    // being linked only from a sibling page nothing else points at leaves the
+    // whole cluster orphaned together, which is the state this found.
+    const homepage = readCode(
+      join(process.cwd(), 'components', 'landing', 'homepage-content.tsx'),
+    )
+
+    const unlinked = PUBLIC_MARKETING_PAGES
+      .filter((r) => r !== '/')
+      .filter((r) => !linkedFromHomepage(homepage, r))
+
+    expect(
+      unlinked,
+      'public pages with no link from the homepage — add them to FOOTER_LINKS ' +
+      'in components/landing/homepage-content.tsx',
+    ).toEqual([])
+  })
+
+  it('SELF-CHECK: the homepage link scan can actually fail', () => {
+    // A route that is deliberately NOT in the footer. If this matches, the
+    // regex above is loose enough to pass on anything and the check above is
+    // decorative. Paired with the real assertion for the same reason as the
+    // classification self-check below: a scan that cannot fail and a tree that
+    // is clean produce identical output.
+    const homepage = readCode(
+      join(process.cwd(), 'components', 'landing', 'homepage-content.tsx'),
+    )
+    expect(linkedFromHomepage(homepage, '/no-such-marketing-page')).toBe(false)
   })
 
   it('SELF-CHECK: the classification scan can actually fail', () => {
