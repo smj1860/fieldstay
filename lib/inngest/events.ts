@@ -376,6 +376,13 @@ export type FieldStayEvents = {
       turnover_date: string
       crew_needed:   number
       crew_found:    number
+      /**
+       * Why the pool was empty, when the org HAS active crew. Optional: the
+       * original path (scoring produced nobody) sends no reason, and adding a
+       * required field would have been a breaking change to an event already
+       * in flight.
+       */
+      reason?:       'none_eligible' | 'all_unavailable'
     }
   }
 

@@ -14,6 +14,15 @@ import { throwIfAnyQueryFailed, isRealQueryError, unwrapList } from '@/lib/supab
  */
 const FAMILIARITY_WINDOW_DAYS = 90
 
+/**
+ * Why the candidate pool came back empty, when the org DOES have active crew.
+ *
+ * Carried through to the crew/assignment-gap notification so the PM is told
+ * which lever to pull. "No crew available" on an org with five cleaners reads
+ * as a bug; "all five are excluded from auto-assignment" is actionable.
+ */
+type GapReason = 'none_eligible' | 'all_unavailable'
+
 export const autoAssignTurnover = inngest.createFunction(
   {
     id: 'auto-assign-turnover', name: 'Auto-Assign Crew to Turnover', retries: 2,
@@ -74,10 +83,11 @@ export const autoAssignTurnover = inngest.createFunction(
         fetchAllRows<{
           id: string; name: string; home_lat: number | null; home_lng: number | null
           reliability_score: number; capacity_score: number
+          auto_assign_eligible: boolean
         }>(
           (from, to) => supabase
             .from('crew_members')
-            .select('id, name, home_lat, home_lng, reliability_score, capacity_score')
+            .select('id, name, home_lat, home_lng, reliability_score, capacity_score, auto_assign_eligible')
             .eq('org_id', org_id)
             .eq('is_active', true)
             .order('id')
@@ -93,7 +103,42 @@ export const autoAssignTurnover = inngest.createFunction(
       )
 
       const mode = (org?.auto_assign_mode ?? 'disabled') as string
+
+      // NULL means "there is nothing to say" — autopilot is off, the turnover
+      // vanished, or the org has no active crew at all. Those need no alert:
+      // an org with an empty roster already knows.
+      //
+      // Everything BELOW this line is different. Crew exist, and the pool was
+      // emptied by a filter — which is a state the PM can act on and cannot
+      // otherwise see, so it returns an empty candidate list and lets the
+      // existing `crew/assignment-gap` notification fire, carrying the reason.
       if (mode === 'disabled' || !turnover || !crew?.length) return null
+
+      const gap = (reason: GapReason) => ({
+        mode,
+        isSameDay:       turnover.is_same_day_turnover ?? false,
+        property:        { lat: property?.lat ?? null, lng: property?.lng ?? null, bedrooms: property?.bedrooms ?? null },
+        crew:            [] as typeof crew,
+        familiarCrewIds: [] as string[],
+        workloadMap:     {} as Record<string, number>,
+        gapReason:       reason,
+      })
+
+      // The per-crew opt-out (crew_members.auto_assign_eligible, DEFAULT true).
+      // Filtered in JS rather than added to the query above ON PURPOSE: the
+      // COUNT of ineligible crew is what distinguishes "you have no crew" from
+      // "you have crew and have excluded all of them", and a WHERE clause
+      // throws that away. One read either way.
+      //
+      // `!== false`, not truthiness. The column is NOT NULL DEFAULT true, so a
+      // real row always carries a boolean — but that makes `undefined` mean
+      // "this value did not come from the column", and the safe reading of that
+      // is the column's own default. Truthiness would instead exclude EVERY
+      // crew member the moment the field went missing from the select string,
+      // turning a typo into a silent org-wide assignment outage. Same
+      // convention as the crew-manage UI's `=== false` checks.
+      const eligibleCrew = crew.filter((c) => c.auto_assign_eligible !== false)
+      if (!eligibleCrew.length) return gap('none_eligible')
 
       // Exclude crew who've marked themselves unavailable for the turnover's
       // date — there's no human in the loop here to override a bad auto-pick,
@@ -105,16 +150,19 @@ export const autoAssignTurnover = inngest.createFunction(
         .eq('org_id', org_id)
         .eq('available_date', checkoutDate)
         .eq('is_available', false)
-        .in('crew_member_id', crew.map((c) => c.id))
+        .in('crew_member_id', eligibleCrew.map((c) => c.id))
         // Bounded: at most one row per crew member per date.
-        .limit(crew.length)
+        .limit(eligibleCrew.length)
 
       const timeOff = unwrapList(timeOffRes, { site: 'inngest.auto-assign-turnover.load-context', orgId: org_id })
 
       const unavailableIds = new Set(timeOff.map((t) => t.crew_member_id))
-      const availableCrew  = crew.filter((c) => !unavailableIds.has(c.id))
+      const availableCrew  = eligibleCrew.filter((c) => !unavailableIds.has(c.id))
 
-      if (!availableCrew.length) return null
+      // Previously `return null`, i.e. silence. An org whose whole eligible
+      // roster booked the same day off got no assignment and no alert — the
+      // turnover simply sat unassigned until someone noticed.
+      if (!availableCrew.length) return gap('all_unavailable')
 
       // Familiarity: which crew have worked this property RECENTLY.
       //
@@ -189,6 +237,7 @@ export const autoAssignTurnover = inngest.createFunction(
         crew:            availableCrew,
         familiarCrewIds,
         workloadMap,
+        gapReason:       null as GapReason | null,
       }
     })
 
@@ -255,6 +304,10 @@ export const autoAssignTurnover = inngest.createFunction(
           turnover_date: checkout_datetime,
           crew_needed:   1,
           crew_found:    0,
+          // Optional, and absent on the original path where scoring simply
+          // produced nobody. Present when a filter emptied a non-empty roster,
+          // which is the case the PM can actually fix.
+          ...(context.gapReason ? { reason: context.gapReason } : {}),
         },
       })
       return { gap: true }

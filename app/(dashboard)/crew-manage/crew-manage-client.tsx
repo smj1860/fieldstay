@@ -11,6 +11,7 @@ import { Button } from '@/components/ui/Button'
 import { Input } from '@/components/ui/Input'
 import { Badge } from '@/components/ui/Badge'
 import { RequiredMark } from '@/components/ui/RequiredMark'
+import { Checkbox } from '@/components/ui/Checkbox'
 import {
   addCrewMember,
   updateCrewMember,
@@ -345,6 +346,15 @@ function CrewCardModal({
             </div>
           )}
           <div className="flex justify-between">
+            <span className="text-muted-themed">Auto-assign</span>
+            <span className="text-secondary-themed">
+              {/* Shown for BOTH states here, unlike the list row. This card is
+                  opened to answer questions about one person, so the value
+                  being absent would read as "unknown" rather than "yes". */}
+              {member.auto_assign_eligible === false ? 'Excluded' : 'Included'}
+            </span>
+          </div>
+          <div className="flex justify-between">
             <span className="text-muted-themed">App Access</span>
             <span className="text-secondary-themed">
               {member.user_id ? 'Active' : member.invite_sent_at ? 'Invited' : 'Not invited'}
@@ -553,6 +563,30 @@ function AddCrewForm({ onSuccess }: { onSuccess: () => void }) {
             <option value="both">Both</option>
           </select>
         </div>
+
+        {/* The hidden 'false' is load-bearing, not boilerplate. An unchecked
+            checkbox submits nothing at all, which addCrewMember cannot tell
+            apart from a form that has no such field — and the onboarding form
+            genuinely has none. Submitting a value either way is what lets the
+            action distinguish "the PM unticked this" from "this form does not
+            ask", and leave the column's DEFAULT true alone in the second case. */}
+        <input type="hidden" name="auto_assign_eligible" value="false" />
+        <label htmlFor="crew-auto-assign" className="flex items-start gap-2.5 cursor-pointer">
+          <Checkbox
+            id="crew-auto-assign"
+            name="auto_assign_eligible"
+            value="true"
+            defaultChecked
+            className="mt-0.5"
+          />
+          <span>
+            <span className="text-sm text-secondary-themed">Include in turnover auto-assignment</span>
+            <span className="block text-xs text-muted-themed mt-0.5">
+              Uncheck for crew who don&apos;t do turnovers — a landscaper or a
+              maintenance tech. You can still assign them to a turnover by hand.
+            </span>
+          </span>
+        </label>
 
         <div className="flex gap-2 pt-1">
           <Button type="submit" disabled={pending} className="text-sm">
@@ -774,6 +808,9 @@ function CrewRow({ member, onSelect }: { member: CrewMember; onSelect: (m: CrewM
   const [editing, setEditing]         = useState(false)
   const [name, setName]               = useState(member.name)
   const [roleVal, setRoleVal]         = useState<CrewRole>(member.role ?? 'general')
+  // `!== false` rather than truthiness: a row read before the column
+  // existed comes back undefined, and undefined means eligible.
+  const [autoAssign, setAutoAssign]   = useState(member.auto_assign_eligible !== false)
   const [specialty, setSpecialty]     = useState(member.specialty)
   const [email, setEmail]             = useState(member.email ?? '')
   const [phone, setPhone]             = useState(member.phone ?? '')
@@ -801,6 +838,7 @@ function CrewRow({ member, onSelect }: { member: CrewMember; onSelect: (m: CrewM
       const result = await updateCrewMember(member.id, {
         name, email: email || undefined, phone: phone || undefined, specialty,
         preferred_contact: pref, role: roleVal, home_zip: homeZip || undefined,
+        auto_assign_eligible: autoAssign,
       })
       if (result.error) setRowError(result.error)
       else              setEditing(false)
@@ -819,12 +857,25 @@ function CrewRow({ member, onSelect }: { member: CrewMember; onSelect: (m: CrewM
           {rowError && <p className="text-xs text-red-400 mt-1">{rowError}</p>}
         </td>
         <td className="py-2 pr-4">
-          <select value={roleVal} onChange={(e) => setRoleVal(e.target.value as CrewRole)} className="input py-1 text-sm">
-            <option value="cleaning">Cleaning</option>
-            <option value="landscaping">Landscaping</option>
-            <option value="maintenance">Maintenance</option>
-            <option value="general">General</option>
-          </select>
+          <div className="space-y-1.5">
+            <select value={roleVal} onChange={(e) => setRoleVal(e.target.value as CrewRole)} className="input py-1 text-sm">
+              <option value="cleaning">Cleaning</option>
+              <option value="landscaping">Landscaping</option>
+              <option value="maintenance">Maintenance</option>
+              <option value="general">General</option>
+            </select>
+            {/* Sits with Role deliberately: eligibility is the question role
+                used to be a proxy for, and putting them together is what makes
+                the difference legible. */}
+            <label htmlFor={`crew-auto-assign-${member.id}`} className="flex items-center gap-2 cursor-pointer">
+              <Checkbox
+                id={`crew-auto-assign-${member.id}`}
+                checked={autoAssign}
+                onChange={(e: React.ChangeEvent<HTMLInputElement>) => setAutoAssign(e.target.checked)}
+              />
+              <span className="text-xs text-secondary-themed">Auto-assign</span>
+            </label>
+          </div>
         </td>
         <td className="py-2 pr-4">
           <div className="space-y-1">
@@ -873,6 +924,12 @@ function CrewRow({ member, onSelect }: { member: CrewMember; onSelect: (m: CrewM
         <Badge tone={(ROLE_BADGE[member.role ?? 'general'] ?? ROLE_BADGE['general']).tone}>
           {(ROLE_BADGE[member.role ?? 'general'] ?? ROLE_BADGE['general']).label}
         </Badge>
+        {/* Rendered only for the EXCEPTION. Most crew are eligible, so a badge
+            on every eligible row would be noise on the common case and easy to
+            stop seeing — which is the opposite of what an exclusion needs. */}
+        {member.auto_assign_eligible === false && (
+          <span className="block text-xs text-muted-themed mt-1">Not auto-assigned</span>
+        )}
       </td>
       <td className="py-2.5 pr-4 text-secondary-themed">{member.specialty || '—'}</td>
       <td className="py-2.5 pr-4 text-secondary-themed">
