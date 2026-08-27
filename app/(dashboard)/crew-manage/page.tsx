@@ -15,6 +15,16 @@ export default async function CrewManagePage() {
     .eq('org_id', membership.org_id)
     .eq('is_active', true)
     .order('name')
+    // Bounded rather than left to PostgREST's silent max_rows = 1000, which
+    // would drop crew off the roster with a 200 and no signal — a PM would read
+    // that as someone having been deleted.
+    //
+    // Sized against the growth axis, per CLAUDE.md's -org-scoped tier note.
+    // This filters is_active, so it grows with ORG SIZE, not with time:
+    // deactivated crew accumulate but are excluded here. At the audited ~1.2
+    // crew per property and a 100-property plan cap that is ~120 rows, so 500
+    // is roughly 4x headroom and still a real ceiling.
+    .limit(500)
 
 
   // Logs + reports, then throws so the segment's error.tsx renders a real
