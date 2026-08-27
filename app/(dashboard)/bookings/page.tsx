@@ -82,6 +82,19 @@ export function computeVacancyGaps(
   return gaps
 }
 
+/**
+ * The subset of the bookings select this PAGE reads directly. The full row
+ * (embeds included) is handed to BookingsClient, which types it itself — this
+ * exists so computeVacancyGaps gets a real shape instead of a bare Record,
+ * which is what a loose generic on the paginated read silently produced.
+ */
+interface BookingRow {
+  property_id:   string
+  checkin_date:  string
+  checkout_date: string
+  status:        string
+}
+
 export default async function BookingsPage() {
   const { supabase, membership } = await requireOrgMember()
 
@@ -92,11 +105,27 @@ export default async function BookingsPage() {
   to.setDate(to.getDate() + 180)
 
   const [
-    { data: bookings, error: bookingsError },
+    bookings,
     { data: properties, error: propertiesError },
     { data: connections, error: connectionsError },
   ] = await Promise.all([
-    supabase
+    // PAGINATED. The date window bounds the DAYS, not the row count: this is a
+    // cross product of properties x bookings-in-window. A 240-day window (60
+    // back, 180 forward) over a 100-property portfolio at ~7-night stays is
+    // roughly 3,400 rows, comfortably past PostgREST's max_rows = 1000 — and
+    // the survivors would be an arbitrary prefix, so the calendar would simply
+    // omit stays with no indication anything was missing.
+    //
+    // Also replaces a silent failure: the previous `if (bookingsError)` branch
+    // only console.error'd and rendered an empty calendar, which is exactly the
+    // "an outage must not look like empty data" case the comment below it
+    // warns about. fetchAllRows throws, landing in the segment's error.tsx.
+    //
+    // Callback params are named rangeFrom/rangeTo deliberately — `from` and
+    // `to` above are the DATE bounds used inside this same callback, and the
+    // conventional (from, to) would shadow them.
+    fetchAllRows<BookingRow>(
+      (rangeFrom, rangeTo) => supabase
       .from('bookings')
       .select(`
         id, property_id, guest_name, guest_email,
@@ -109,7 +138,10 @@ export default async function BookingsPage() {
       .eq('org_id', membership.org_id)
       .gte('checkout_date', from.toISOString().split('T')[0])
       .lte('checkin_date',  to.toISOString().split('T')[0])
-      .order('checkin_date', { ascending: true }),
+      .order('checkin_date', { ascending: true })
+      .range(rangeFrom, rangeTo),
+      { label: 'page.bookings.bookings' },
+    ),
 
     supabase
       .from('properties')
@@ -127,10 +159,6 @@ export default async function BookingsPage() {
   // Logs + reports every failure, then throws so the segment's error.tsx
   // renders a real error state — an outage must not look like empty data.
   throwIfAnyQueryFailed({ site: 'page.bookings', orgId: membership.org_id }, propertiesError, connectionsError)
-
-  if (bookingsError) {
-    console.error('[BookingsPage] Failed to fetch bookings:', bookingsError.message)
-  }
 
   const propertyIds = (properties ?? []).map((p) => p.id)
 
@@ -158,11 +186,11 @@ export default async function BookingsPage() {
     schedulesByProperty.set(schedule.property_id, existing)
   }
 
-  const vacancyGaps = computeVacancyGaps(bookings ?? [], properties ?? [], schedulesByProperty)
+  const vacancyGaps = computeVacancyGaps(bookings, properties ?? [], schedulesByProperty)
 
   return (
     <BookingsClient
-      bookings={(bookings ?? []) as never}
+      bookings={bookings as never}
       properties={properties ?? []}
       connections={connections ?? []}
       vacancyGaps={vacancyGaps}

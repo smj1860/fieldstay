@@ -141,6 +141,6 @@
   ],
   "measured_at": "2026-08-27",
   "counts": {
-    "fieldstay-supabase-unbounded-select-org-scoped": 57
+    "fieldstay-supabase-unbounded-select-org-scoped": 55
   }
 }

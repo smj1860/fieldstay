@@ -3,6 +3,7 @@ import { requireOrgMember } from '@/lib/auth'
 import { CrewManageClient } from './crew-manage-client'
 import type { CrewMember, CrewAvailabilityEntry } from '@/types/database'
 import { throwIfAnyQueryFailed } from '@/lib/supabase/unwrap'
+import { fetchAllRows } from '@/lib/inngest/paginate'
 
 export const metadata: Metadata = { title: 'Crew' }
 
@@ -37,21 +38,39 @@ export default async function CrewManagePage() {
   const rangeStart = calStart.toISOString().split('T')[0]!
   const rangeEnd   = calEnd.toISOString().split('T')[0]!
 
-  const { data: availabilityRows, error: availabilityRowsError } = await supabase
-    .from('crew_availability')
-    .select('crew_member_id, available_date, is_available, notes')
-    .eq('org_id', membership.org_id)
-    .gte('available_date', rangeStart)
-    .lte('available_date', rangeEnd)
-    .order('available_date', { ascending: true })
+  // PAGINATED, not bounded by the date window alone.
+  //
+  // This is the one read on this page whose row count is a CROSS PRODUCT:
+  // crew x days, not crew. The two-month window caps the days, not the total —
+  // 120 active crew (a 100-property portfolio at the audited ~1.2 crew per
+  // property) marking a two-month window is up to ~7,200 rows against
+  // PostgREST's max_rows = 1000. Even a single week marked off each puts a
+  // large org near the cap.
+  //
+  // Truncating here is worse than a short list: the rows that survive are an
+  // arbitrary prefix, so the availability calendar would show SOME crew as
+  // free on days they had booked off. Time off is also one of the two things
+  // that empties the auto-assign pool, so a silently missing row is a crew
+  // member the engine believes is available.
+  //
+  // fetchAllRows throws on error, landing in the same error.tsx that
+  // throwIfAnyQueryFailed routes this page's other failure to.
+  const availabilityRows = await fetchAllRows<CrewAvailabilityEntry & { crew_member_id: string }>(
+    (from, to) => supabase
+      .from('crew_availability')
+      .select('crew_member_id, available_date, is_available, notes')
+      .eq('org_id', membership.org_id)
+      .gte('available_date', rangeStart)
+      .lte('available_date', rangeEnd)
+      .order('available_date', { ascending: true })
+      .range(from, to),
+    { label: 'page.crew-manage.availability' },
+  )
 
 
-  // Logs + reports, then throws so the segment's error.tsx renders a real
-  // error state — a failed read must not render as an empty page.
-  throwIfAnyQueryFailed({ site: 'page.crew-manage', orgId: membership.org_id }, availabilityRowsError)
   // Build a lookup map: crew_member_id → sorted list of availability entries
   const availabilityMap: Record<string, CrewAvailabilityEntry[]> = {}
-  for (const row of availabilityRows ?? []) {
+  for (const row of availabilityRows) {
     const key = row.crew_member_id as string
     if (!availabilityMap[key]) availabilityMap[key] = []
     availabilityMap[key]!.push({
