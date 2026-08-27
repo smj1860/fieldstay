@@ -338,6 +338,13 @@ export interface CrewMember {
   specialty:          string
   role:               CrewRole
   is_active:          boolean
+  /**
+   * May turnover auto-assignment/suggestion pick this person?
+   * NOT NULL DEFAULT true (20260827034958) — opt-out, so existing and
+   * provider-synced crew stay eligible without anyone touching them.
+   * Governs only what the engine PROPOSES; manual assignment is unaffected.
+   */
+  auto_assign_eligible: boolean
   notes:              string | null
   home_zip:           string | null
   home_lat:           number | null

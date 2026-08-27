@@ -1127,6 +1127,7 @@ export type Database = {
       }
       crew_members: {
         Row: {
+          auto_assign_eligible: boolean
           capacity_score: number
           created_at: string
           email: string | null
@@ -1153,6 +1154,7 @@ export type Database = {
           user_id: string | null
         }
         Insert: {
+          auto_assign_eligible?: boolean
           capacity_score?: number
           created_at?: string
           email?: string | null
@@ -1179,6 +1181,7 @@ export type Database = {
           user_id?: string | null
         }
         Update: {
+          auto_assign_eligible?: boolean
           capacity_score?: number
           created_at?: string
           email?: string | null
