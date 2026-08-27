@@ -8,18 +8,38 @@ import { Card } from '@/components/ui/Card'
 import { buttonVariantClass } from '@/components/ui/Button'
 import type { Metadata } from 'next'
 import { throwIfAnyQueryFailed } from '@/lib/supabase/unwrap'
+import { fetchAllRows } from '@/lib/inngest/paginate'
+
+/** All three ops-badge reads select only this, and are counted per property. */
+interface PropertyIdRow { property_id: string }
 
 export const metadata: Metadata = { title: 'Properties' }
 
 export default async function PropertiesPage() {
   const { supabase, membership } = await requireOrgMember()
 
+  // The three ops-badge reads below are PAGINATED, and the reason is worth
+  // stating once for all of them: each fetches one row per matching record and
+  // counts them per property in the `bump()` loop underneath. That is a
+  // GROUP BY done in JavaScript, so the row count is the org's whole open
+  // backlog, not its property count.
+  //
+  // unassignedTurnovers is the one that actually gets there. It is the only
+  // read on this page that grows with TIME rather than with org size: at ~2
+  // turnovers per property per week, a 100-property portfolio generates ~200 a
+  // week, so roughly five weeks of un-actioned queue crosses PostgREST's
+  // max_rows = 1000. Nothing self-corrects — the badge just starts
+  // undercounting, and it undercounts on exactly the properties the PM has
+  // been neglecting, which is when the number matters most.
+  //
+  // All three are done together because they are the same three lines with
+  // different tables, and fixing one would leave the identical defect twice.
   const [
     { data: properties, error: propertiesError },
     { count: ownerPortalTokenCount },
-    { data: openWOs, error: openWOsError },
-    { data: unassignedTOs, error: unassignedTOsError },
-    { data: erroredFeeds, error: erroredFeedsError },
+    openWOs,
+    unassignedTOs,
+    erroredFeeds,
   ] = await Promise.all([
     supabase
       .from('properties')
@@ -33,23 +53,38 @@ export default async function PropertiesPage() {
       .select('id, property_owners!inner(org_id)', { count: 'exact', head: true })
       .eq('property_owners.org_id', membership.org_id),
 
-    supabase
-      .from('work_orders')
-      .select('property_id')
-      .eq('org_id', membership.org_id)
-      .not('status', 'in', '("completed","cancelled")'),
+    fetchAllRows<PropertyIdRow>(
+      (rangeFrom, rangeTo) => supabase
+        .from('work_orders')
+        .select('property_id')
+        .eq('org_id', membership.org_id)
+        .not('status', 'in', '("completed","cancelled")')
+        .order('property_id')
+        .range(rangeFrom, rangeTo),
+      { label: 'page.properties.openWorkOrders' },
+    ),
 
-    supabase
-      .from('turnovers')
-      .select('property_id')
-      .eq('org_id', membership.org_id)
-      .eq('status', 'pending_assignment'),
+    fetchAllRows<PropertyIdRow>(
+      (rangeFrom, rangeTo) => supabase
+        .from('turnovers')
+        .select('property_id')
+        .eq('org_id', membership.org_id)
+        .eq('status', 'pending_assignment')
+        .order('property_id')
+        .range(rangeFrom, rangeTo),
+      { label: 'page.properties.unassignedTurnovers' },
+    ),
 
-    supabase
-      .from('ical_feeds')
-      .select('property_id')
-      .eq('org_id', membership.org_id)
-      .eq('last_sync_status', 'error'),
+    fetchAllRows<PropertyIdRow>(
+      (rangeFrom, rangeTo) => supabase
+        .from('ical_feeds')
+        .select('property_id')
+        .eq('org_id', membership.org_id)
+        .eq('last_sync_status', 'error')
+        .order('property_id')
+        .range(rangeFrom, rangeTo),
+      { label: 'page.properties.erroredFeeds' },
+    ),
   ])
 
   // Logs + reports every failure, then throws so the segment's error.tsx
@@ -57,9 +92,14 @@ export default async function PropertiesPage() {
   // erroredFeeds is in here for the same reason as the other three: it drives
   // the per-property sync-error badge, so a failed read renders a confident
   // "0 sync errors" on properties whose calendars are actually broken.
+  // The three ops-badge reads are no longer threaded through here: fetchAllRows
+  // THROWS on error, which reaches the same error.tsx this call routes to. The
+  // reason they were listed — a failed read rendering a confident "0" on
+  // properties whose work orders or calendars are actually broken — is
+  // unchanged and still satisfied.
   throwIfAnyQueryFailed(
     { site: 'page.properties', orgId: membership.org_id },
-    propertiesError, openWOsError, unassignedTOsError, erroredFeedsError,
+    propertiesError,
   )
 
   const opsCountsByProperty: Record<string, { openWorkOrders: number; unassignedTurnovers: number; syncErrors: number }> = {}
@@ -67,9 +107,9 @@ export default async function PropertiesPage() {
     opsCountsByProperty[propertyId] ??= { openWorkOrders: 0, unassignedTurnovers: 0, syncErrors: 0 }
     opsCountsByProperty[propertyId][key]++
   }
-  for (const wo of openWOs ?? [])       bump(wo.property_id, 'openWorkOrders')
-  for (const to of unassignedTOs ?? []) bump(to.property_id, 'unassignedTurnovers')
-  for (const f of erroredFeeds ?? [])   bump(f.property_id, 'syncErrors')
+  for (const wo of openWOs)       bump(wo.property_id, 'openWorkOrders')
+  for (const to of unassignedTOs) bump(to.property_id, 'unassignedTurnovers')
+  for (const f of erroredFeeds)   bump(f.property_id, 'syncErrors')
 
   const atLimit            = (properties?.length ?? 0) >= membership.org.max_properties
   const showOwnerPortalNudge = (ownerPortalTokenCount ?? 0) === 0
