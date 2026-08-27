@@ -37,6 +37,8 @@ import {
 
 import { reportError } from '@/lib/observability/report-error'
 import { mergeIntegrationConnectionMetadata } from '@/lib/integrations/connection-metadata'
+import { preserveManualCrewRoles } from '@/lib/inngest/functions/shared/preserve-crew-roles'
+
 const PROVIDER = 'hospitable'
 
 // Initial sync backfills 3 months forward, not the 6 that
@@ -159,9 +161,19 @@ export const hospInitialSync = inngest.createFunction(
 
         const supabase = createServiceClient({ system: 'inngest:initial-sync' })
 
+        // "Initial" does not mean "first ever". This runs on every CONNECT, and
+        // a reconnect after a revoked token is an ordinary event — so an org
+        // that reconnects would have every PM-corrected crew role reset to the
+        // label-inferred one, on a code path nobody associates with editing
+        // crew. Same preservation as the daily resync, for the same reason.
+        const preserved = await preserveManualCrewRoles(
+          supabase, org_id, 'hospitable', rows,
+          'inngest.hospitable-initial-sync.existing-roles',
+        )
+
         const { error } = await supabase
           .from('crew_members')
-          .upsert(rows, {
+          .upsert(preserved, {
             onConflict:       'org_id,external_id,external_source',
             ignoreDuplicates: false,
           })

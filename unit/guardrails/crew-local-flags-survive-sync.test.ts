@@ -23,13 +23,16 @@ import { collectSourceFiles, rel, readCode } from './scan'
 // alone. So the current state is CORRECT; this exists so it stays that way,
 // because "correct by omission" is one autocompleted line from being wrong.
 //
-// The risk is not hypothetical on this exact code path. lib/inngest/functions/
-// hostex/staff-sync.ts carries `preserveManualCrewRoles()` because `role` WAS
-// in the payload and a PM's role edit was reverted by the next night's sync
-// (fixed 2026-08-17). The Hospitable teammate sync still has no equivalent, so
-// the same defect is live there for `role` today — see that handler. A flag
-// added to a payload here fails silently and invisibly: the write succeeds, the
-// UI shows the PM's choice until the cron runs, and by morning it is gone.
+// The risk is not hypothetical on this exact code path — it has already
+// happened twice for `role`, which IS in every payload. Hostex reverted a PM's
+// role edit nightly until 2026-08-17; Hospitable did the same until 2026-08-27,
+// on all three of its crew-writing paths, because the Hostex fix lived inside
+// that provider's file where nothing else could reach it. It is now
+// shared/preserve-crew-roles.ts and both providers call it, which the second
+// assertion below enforces.
+//
+// A flag added to a payload fails silently and invisibly: the write succeeds,
+// the UI shows the PM's choice until the cron runs, and by morning it is gone.
 // ============================================================================
 
 /**
@@ -45,9 +48,10 @@ import { collectSourceFiles, rel, readCode } from './scan'
  * Those are designed behaviours, not oversights, and banning the column here
  * would break both syncs.
  *
- * NOT `role` either, for a less comfortable reason: it IS in both payloads, and
- * on the Hospitable side that is the unfixed bug described above. Adding it
- * here would fail immediately and say nothing new. It belongs in the fix.
+ * NOT `role` either, and for a different reason from is_active: it genuinely
+ * must be in the payload, because a synced crew member has to get SOME role on
+ * first insert. Omission cannot protect it, so it is protected by an explicit
+ * read-back instead — the second assertion below, not this list.
  */
 const LOCAL_ONLY_CREW_COLUMNS = ['auto_assign_eligible'] as const
 
@@ -88,6 +92,56 @@ describe('guardrail: PM-owned crew flags survive a provider sync', () => {
         'preserveManualCrewRoles() does for role in hostex/staff-sync.ts.',
       ).toEqual([])
     }
+  })
+
+  it('every provider sync that upserts crew_members preserves the stored role', () => {
+    // `role` IS in both payloads and cannot simply be dropped — it has to be
+    // written on first insert, or a synced crew member would have no role at
+    // all. So unlike the columns above, this one is protected by an explicit
+    // read-back rather than by omission: preserveManualCrewRoles() replaces the
+    // inferred role with the stored one for anybody FieldStay already knows.
+    //
+    // Hostex added that on 2026-08-17 and Hospitable did not get it until
+    // 2026-08-27 — ten days of a customer's role edits being silently reverted
+    // every night — for no better reason than the fix living inside one
+    // provider's file. This asserts the next provider cannot repeat it.
+    const offenders = collectSourceFiles(PROVIDER_SYNC_DIRS)
+      .map((file) => ({ path: rel(file), code: readCode(file) }))
+      .filter(({ code }) => /\.from\(\s*['"]crew_members['"]\s*\)/.test(code))
+      .filter(({ code }) => /\.upsert\s*\(/.test(code))
+      .filter(({ code }) => !/preserveManualCrewRoles\s*\(/.test(code))
+      .map(({ path }) => path)
+
+    expect(
+      offenders,
+      'a provider sync upserts crew_members without preserving the stored role — ' +
+      'the payload names `role`, so the next nightly run will overwrite whatever ' +
+      'the PM chose. Call preserveManualCrewRoles() from ' +
+      'lib/inngest/functions/shared/preserve-crew-roles.ts before the upsert.',
+    ).toEqual([])
+  })
+
+  it('SELF-CHECK: both provider syncs are actually reachable by that scan', () => {
+    // Without this, a scan that matched NOTHING — wrong directory list, a
+    // renamed helper, readCode returning empty — would report an empty
+    // offenders array and read as a pass. Names the two files that must be
+    // found, so deleting or moving one is a deliberate edit here rather than a
+    // silent loss of coverage.
+    const upserters = collectSourceFiles(PROVIDER_SYNC_DIRS)
+      .map((file) => ({ path: rel(file), code: readCode(file) }))
+      .filter(({ code }) => /\.from\(\s*['"]crew_members['"]\s*\)/.test(code))
+      .filter(({ code }) => /\.upsert\s*\(/.test(code))
+      .map(({ path }) => path)
+      .sort()
+
+    expect(upserters).toEqual([
+      // initial-sync was NOT on this list when it was first written, and the
+      // assertion above found it — a third clobbering upsert on a path nobody
+      // associates with editing crew (a reconnect after a revoked token).
+      'lib/inngest/functions/hospitable/initial-sync.ts',
+      'lib/inngest/functions/hospitable/teammate-sync-handler.ts',
+      'lib/inngest/functions/hostex/staff-sync.ts',
+    ])
   })
 
   it('SELF-CHECK: the scan can actually fail', () => {

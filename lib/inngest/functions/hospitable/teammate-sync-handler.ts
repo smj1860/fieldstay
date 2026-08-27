@@ -24,6 +24,7 @@ import { logAuditEvents } from '@/lib/audit'
 import { reportError }    from '@/lib/observability/report-error'
 import { isProviderAuthFailure } from '@/lib/integrations/connection-revoked'
 import { revokeAndNotify } from '@/lib/inngest/functions/shared/revoke-and-notify'
+import { preserveManualCrewRoles } from '@/lib/inngest/functions/shared/preserve-crew-roles'
 
 const PROVIDER = 'hospitable'
 
@@ -76,9 +77,26 @@ export const hospTeammateSyncHandler = inngest.createFunction(
       if (!rows.length) return 0
 
       const supabase = createServiceClient({ system: 'inngest:teammate-sync-handler' })
+
+      // ROLE IS OURS, NOT HOSPITABLE'S. Every other column in this payload is
+      // something Hospitable reports and should be overwritten nightly; `role`
+      // is INFERRED by mapHospitableTeammateRole() from the teammate's service
+      // labels, and this upsert names it — so a PM who corrected someone in
+      // crew-manage had that correction reverted by the next daily run. The
+      // write succeeded, the UI showed the new role, and it was gone by
+      // morning.
+      //
+      // Hostex hit this exact defect and fixed it on 2026-08-17. Hospitable has
+      // the identical payload shape and never got the fix, so it stayed live
+      // here until 2026-08-27 against an org with six synced crew. Both now
+      // share one implementation rather than one having a copy.
+      const preserved = await preserveManualCrewRoles(
+        supabase, org_id, PROVIDER, rows, 'inngest.hospitable-teammate-sync.existing-roles',
+      )
+
       const { error } = await supabase
         .from('crew_members')
-        .upsert(rows, { onConflict: 'org_id,external_id,external_source', ignoreDuplicates: false })
+        .upsert(preserved, { onConflict: 'org_id,external_id,external_source', ignoreDuplicates: false })
 
       if (error) throw new Error(`Teammates upsert failed: ${error.message}`)
       return rows.length
