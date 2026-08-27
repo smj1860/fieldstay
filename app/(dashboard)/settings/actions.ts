@@ -296,6 +296,22 @@ export async function addCrewMember(
     const role              = ((formData.get('role') as CrewRole) || 'general') as CrewRole
     const home_zip          = (formData.get('home_zip') as string)?.trim() || null
 
+    // Checkbox semantics, made safe for the forms that do NOT offer the control.
+    //
+    // An unchecked checkbox submits NOTHING, which is indistinguishable from a
+    // form that has no such field — and one of this action's two callers,
+    // setup-crew-client.tsx, is the onboarding form and has none. Reading a bare
+    // checkbox would therefore have made every crew member added during
+    // onboarding INELIGIBLE, silently inverting the column's DEFAULT true for
+    // the population least likely to notice.
+    //
+    // So the UI pairs a hidden 'false' with the checkbox's 'true': ANY value
+    // present means the form offered the control, and `undefined` means it did
+    // not — in which case the column is left out of the insert entirely and the
+    // database default stands.
+    const eligibility        = formData.getAll('auto_assign_eligible')
+    const autoAssignEligible = eligibility.length ? eligibility.includes('true') : undefined
+
     if (!name) return { error: 'Name is required' }
     if (!email && !phone) return { error: 'Email or phone is required' }
 
@@ -309,6 +325,7 @@ export async function addCrewMember(
       role,
       home_zip,
       is_active: true,
+      ...(autoAssignEligible === undefined ? {} : { auto_assign_eligible: autoAssignEligible }),
     }).select('id').single()
 
     if (error) {
@@ -377,6 +394,12 @@ export async function updateCrewMember(
     notes: string
     role: CrewRole
     home_zip: string
+    /**
+     * Per-crew opt-out from turnover auto-assignment and suggestion. Partial,
+     * so omitting it leaves the stored value alone — the edit form only sends
+     * it when the PM actually toggled the box.
+     */
+    auto_assign_eligible: boolean
   }>
 ): Promise<SettingsActionState> {
   try {

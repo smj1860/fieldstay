@@ -51,6 +51,7 @@ function makeSupabase(queued: QueuedByTable) {
     chain.upsert = (...a: unknown[]) => record('upsert', a)
     chain.eq     = (...a: unknown[]) => record('eq', a)
     chain.in     = (...a: unknown[]) => record('in', a)
+    chain.limit  = (...a: unknown[]) => record('limit', a)
 
     const resolveNext = () => {
       const idx = counters[table] ?? 0
@@ -83,6 +84,7 @@ describe('hospTeammateSyncHandler', () => {
     ])
     const supabase = makeSupabase({
       crew_members: [
+        { data: [], error: null }, // preserveManualCrewRoles read — no stored roles
         { error: null }, // upsert-teammates
         {                // existing active crew_members for this org/source
           data: [
@@ -112,7 +114,13 @@ describe('hospTeammateSyncHandler', () => {
 
     const deactivate = supabase.calls.find((c) => c.table === 'crew_members' && c.method === 'update')
     expect(deactivate?.args[0]).toEqual({ is_active: false })
-    const deactivateIn = supabase.calls.find((c) => c.table === 'crew_members' && c.method === 'in')
+    // Keyed on the COLUMN, not on being the first `.in` seen. The role-
+    // preservation read added by preserveManualCrewRoles also calls
+    // .in('external_id', ...), and it runs first — so a positional find here
+    // silently started asserting against the wrong query.
+    const deactivateIn = supabase.calls.find(
+      (c) => c.table === 'crew_members' && c.method === 'in' && c.args[0] === 'id',
+    )
     expect(deactivateIn?.args).toEqual(['id', ['crew_gone']])
 
     expect(logAuditEvents).toHaveBeenCalledWith([
@@ -128,6 +136,7 @@ describe('hospTeammateSyncHandler', () => {
     ;(hospitableTeammatesToCrewRows as ReturnType<typeof vi.fn>).mockReturnValue([])
     const supabase = makeSupabase({
       crew_members: [
+        { data: [], error: null }, // preserveManualCrewRoles read — no stored roles
         { data: [], error: null }, // no existing active crew
       ],
     })
@@ -152,6 +161,7 @@ describe('hospTeammateSyncHandler', () => {
     ])
     const supabase = makeSupabase({
       crew_members: [
+        { data: [], error: null }, // preserveManualCrewRoles read — no stored roles
         { error: null },                                                          // upsert
         { data: [{ id: 'crew_active', external_id: 'tm_1' }], error: null },       // still present in fresh fetch
       ],
@@ -175,7 +185,10 @@ describe('hospTeammateSyncHandler', () => {
       { org_id: 'org_1', name: 'Jane Cleaner', external_id: 'tm_1', external_source: 'hospitable' },
     ])
     const supabase = makeSupabase({
-      crew_members: [{ error: { message: 'db unavailable' } }],
+      crew_members: [
+        { data: [], error: null }, // preserveManualCrewRoles read — no stored roles
+        { error: { message: 'db unavailable' } }, // upsert
+      ],
     })
     ;(createServiceClient as ReturnType<typeof vi.fn>).mockReturnValue(supabase)
 
@@ -215,6 +228,7 @@ describe('hospTeammateSyncHandler — empty-result guard', () => {
 
     const supabase = makeSupabase({
       crew_members: [
+        { data: [], error: null }, // preserveManualCrewRoles read — no stored roles
         // The read that would have supplied the whole roster as "removed".
         { data: [
             { id: 'crew_1', external_id: 'tm_1' },
@@ -268,6 +282,7 @@ describe('hospTeammateSyncHandler — empty-result guard', () => {
     ])
     const supabase = makeSupabase({
       crew_members: [
+        { data: [], error: null }, // preserveManualCrewRoles read — no stored roles
         { error: null },
         { data: [{ id: 'crew_gone', external_id: 'tm_old' }], error: null },
         { error: null },

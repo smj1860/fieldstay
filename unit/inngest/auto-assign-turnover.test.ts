@@ -151,6 +151,142 @@ describe('autoAssignTurnover', () => {
     expect(insertCall?.args[0]).toMatchObject({ crew_member_id: 'c2' })
   })
 
+  it('never picks a crew member the PM excluded from auto-assignment', async () => {
+    // crew_members.auto_assign_eligible (20260827034958). c1 dominates every
+    // score component, exactly like the time-off test above, so a result of c2
+    // can only come from the exclusion being honoured.
+    const supabase = makeSupabase({
+      organizations: [{ data: { auto_assign_mode: 'autopilot' }, error: null }],
+      turnovers: [
+        { data: { id: TURNOVER_ID, status: 'pending_assignment', is_same_day_turnover: false }, error: null },
+        { data: [], error: null },
+        { error: null },
+      ],
+      properties: [{ data: { id: PROPERTY_ID, lat: 30.0, lng: -90.0, bedrooms: 2 }, error: null }],
+      crew_members: [{
+        data: [
+          { id: 'c1', name: 'Excluded Nearby Crew', home_lat: 30.0, home_lng: -90.0, reliability_score: 1.0, capacity_score: 1.0, auto_assign_eligible: false },
+          { id: 'c2', name: 'Eligible Farther Crew', home_lat: 31.0, home_lng: -91.0, reliability_score: 0.5, capacity_score: 0.5, auto_assign_eligible: true },
+        ],
+        error: null,
+      }],
+      crew_availability: [{ data: [], error: null }],
+      turnover_assignments: [
+        { data: [], error: null },
+        { data: [], error: null },
+        { error: null },
+      ],
+      assignment_outcomes: [{ error: null }],
+    })
+    ;(createServiceClient as ReturnType<typeof vi.fn>).mockReturnValue(supabase)
+
+    const result = await invokeHandler(autoAssignTurnover, { event: baseEvent(), step: makeStep() })
+
+    expect(result).toEqual({ action: 'autopilot_assigned', top_crew: 'Eligible Farther Crew' })
+    const insertCall = supabase.calls.find((c) => c.table === 'turnover_assignments' && c.method === 'insert')
+    expect(insertCall?.args[0]).toMatchObject({ crew_member_id: 'c2' })
+  })
+
+  it('treats a MISSING eligibility value as eligible, not as excluded', async () => {
+    // The column is NOT NULL, so this cannot happen from a real row — which is
+    // the point. If the field ever vanishes from the select string, the failure
+    // must be "the opt-out stops working", not "every org stops getting
+    // assignments". Truthiness would give the second.
+    const supabase = makeSupabase({
+      organizations: [{ data: { auto_assign_mode: 'autopilot' }, error: null }],
+      turnovers: [
+        { data: { id: TURNOVER_ID, status: 'pending_assignment', is_same_day_turnover: false }, error: null },
+        { data: [], error: null },
+        { error: null },
+      ],
+      properties: [{ data: { id: PROPERTY_ID, lat: 30.0, lng: -90.0, bedrooms: 2 }, error: null }],
+      crew_members: [{
+        data: [{ id: 'c1', name: 'No Flag Crew', home_lat: 30.0, home_lng: -90.0, reliability_score: 1.0, capacity_score: 1.0 }],
+        error: null,
+      }],
+      crew_availability: [{ data: [], error: null }],
+      turnover_assignments: [
+        { data: [], error: null },
+        { data: [], error: null },
+        { error: null },
+      ],
+      assignment_outcomes: [{ error: null }],
+    })
+    ;(createServiceClient as ReturnType<typeof vi.fn>).mockReturnValue(supabase)
+
+    const result = await invokeHandler(autoAssignTurnover, { event: baseEvent(), step: makeStep() })
+    expect(result).toEqual({ action: 'autopilot_assigned', top_crew: 'No Flag Crew' })
+  })
+
+  it('alerts the PM, with a reason, when every active crew member is excluded', async () => {
+    // Previously this path returned null and said NOTHING — the turnover simply
+    // sat unassigned. An org that has crew and has excluded all of them is
+    // exactly the case a PM can fix and cannot otherwise see.
+    const step = makeStep()
+    const supabase = makeSupabase({
+      organizations: [{ data: { auto_assign_mode: 'autopilot' }, error: null }],
+      turnovers: [{ data: { id: TURNOVER_ID, status: 'pending_assignment', is_same_day_turnover: false }, error: null }],
+      properties: [{ data: { id: PROPERTY_ID, lat: 30.0, lng: -90.0, bedrooms: 2 }, error: null }],
+      crew_members: [{
+        data: [{ id: 'c1', name: 'Only Crew', home_lat: 30.0, home_lng: -90.0, reliability_score: 1.0, capacity_score: 1.0, auto_assign_eligible: false }],
+        error: null,
+      }],
+    })
+    ;(createServiceClient as ReturnType<typeof vi.fn>).mockReturnValue(supabase)
+
+    const result = await invokeHandler(autoAssignTurnover, { event: baseEvent(), step })
+
+    expect(result).toEqual({ gap: true })
+    expect(step.sendEvent).toHaveBeenCalledWith('notify-assignment-gap', expect.objectContaining({
+      name: 'crew/assignment-gap',
+      data: expect.objectContaining({ crew_found: 0, reason: 'none_eligible' }),
+    }))
+  })
+
+  it('alerts with all_unavailable when the eligible pool is emptied by time off', async () => {
+    // The same silence existed here: an org whose whole eligible roster booked
+    // the day off got no assignment and no alert. Distinguished from the case
+    // above so the email can name the right lever.
+    const step = makeStep()
+    const supabase = makeSupabase({
+      organizations: [{ data: { auto_assign_mode: 'autopilot' }, error: null }],
+      turnovers: [{ data: { id: TURNOVER_ID, status: 'pending_assignment', is_same_day_turnover: false }, error: null }],
+      properties: [{ data: { id: PROPERTY_ID, lat: 30.0, lng: -90.0, bedrooms: 2 }, error: null }],
+      crew_members: [{
+        data: [{ id: 'c1', name: 'Only Crew', home_lat: 30.0, home_lng: -90.0, reliability_score: 1.0, capacity_score: 1.0, auto_assign_eligible: true }],
+        error: null,
+      }],
+      crew_availability: [{ data: [{ crew_member_id: 'c1' }], error: null }],
+    })
+    ;(createServiceClient as ReturnType<typeof vi.fn>).mockReturnValue(supabase)
+
+    const result = await invokeHandler(autoAssignTurnover, { event: baseEvent(), step })
+
+    expect(result).toEqual({ gap: true })
+    expect(step.sendEvent).toHaveBeenCalledWith('notify-assignment-gap', expect.objectContaining({
+      data: expect.objectContaining({ reason: 'all_unavailable' }),
+    }))
+  })
+
+  it('sends NO reason when the org simply has no active crew — nothing to act on', async () => {
+    // The control for the two above. An empty roster is not a filter problem
+    // and needs no alert; without this, "always send a gap" would pass them
+    // both while spamming orgs that have not hired anyone yet.
+    const step = makeStep()
+    const supabase = makeSupabase({
+      organizations: [{ data: { auto_assign_mode: 'autopilot' }, error: null }],
+      turnovers: [{ data: { id: TURNOVER_ID, status: 'pending_assignment', is_same_day_turnover: false }, error: null }],
+      properties: [{ data: { id: PROPERTY_ID, lat: 30.0, lng: -90.0, bedrooms: 2 }, error: null }],
+      crew_members: [{ data: [], error: null }],
+    })
+    ;(createServiceClient as ReturnType<typeof vi.fn>).mockReturnValue(supabase)
+
+    const result = await invokeHandler(autoAssignTurnover, { event: baseEvent(), step })
+
+    expect(result).toEqual({ skipped: true, reason: 'disabled or no candidates' })
+    expect(step.sendEvent).not.toHaveBeenCalled()
+  })
+
   it('idempotency: a duplicate autopilot assignment (23505) is reported as already_assigned without a second audit log entry', async () => {
     const supabase = makeSupabase({
       organizations: [{ data: { auto_assign_mode: 'autopilot' }, error: null }],

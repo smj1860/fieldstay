@@ -139,8 +139,8 @@
     "",
     "PROMOTED 2026-08-11: the three Supabase error-handling rules (-discarded-result, -read-without-error, -read-without-error-fan-in) all sat at 0 and moved to chokepoints.yml, where they gate at --error across the whole tree rather than only on findings new vs. the PR base. Their keys are deleted here in the same change, per the promotion rule in .semgrep/README.md. No site was fixed in this change -- the burn-downs that got them to 0 are the 2026-08-07 and 2026-08-08 entries above; this is only the gate upgrade those burn-downs earned and never collected. Fire-checked before promoting, same protocol as -cross-tenant and -global-table: a scratch fixture with one deliberate violation per rule plus a correct control for each produced exactly 3 findings (the violations) and 0 on the controls, then was reverted. What remains in this file is the unbounded-select ladder alone: -in-list 11, -org-scoped 65, -single-parent 16."
   ],
-  "measured_at": "2026-08-14",
+  "measured_at": "2026-08-27",
   "counts": {
-    "fieldstay-supabase-unbounded-select-org-scoped": 58
+    "fieldstay-supabase-unbounded-select-org-scoped": 57
   }
 }

@@ -5,11 +5,36 @@ import { renderPmAlert }       from '@/lib/resend/emails/pm-alert'
 import { getPmMembers, type PmMember } from '@/lib/inngest/helpers'
 import { throwIfAnyQueryFailed, isRealQueryError, unwrapList } from '@/lib/supabase/unwrap'
 
+/**
+ * What to tell the PM when a filter — not the scorer — emptied the pool.
+ *
+ * Keyed by the event's optional `reason`. Each string names the lever the PM
+ * can actually pull, because the counts alone ("found 0") describe a symptom
+ * that looks identical whether they have no crew or have excluded all of them.
+ */
+const GAP_REASON_COPY: Record<'none_eligible' | 'all_unavailable', string> = {
+  none_eligible:
+    'Every active crew member is currently switched OFF for turnover ' +
+    'auto-assignment — turn someone back on from Manage Crew, or assign this ' +
+    'turnover by hand.',
+  all_unavailable:
+    'Every crew member eligible for auto-assignment has marked this date as ' +
+    'time off.',
+}
+
 export const notifyAssignmentGap = inngest.createFunction(
   { id: 'notify-assignment-gap', name: 'Notify PM: Crew Coverage Gap', retries: 2 },
   { event: 'crew/assignment-gap' as const },
   async ({ event, step }) => {
-    const { turnover_id, property_id, org_id, turnover_date, crew_needed, crew_found } = event.data
+    const { turnover_id, property_id, org_id, turnover_date, crew_needed, crew_found, reason } = event.data
+
+    // "No crew available" on an org with five cleaners reads as a bug in
+    // FieldStay, and a PM who reads it that way does nothing. Naming the filter
+    // that emptied the pool turns the same alert into an instruction.
+    //
+    // Absent for a gap the scorer produced on its own, which is the original
+    // path and needs no explanation beyond the counts already in the body.
+    const reasonLine = reason ? `${GAP_REASON_COPY[reason]} ` : ''
 
     const context = await step.run('load-context', async () => {
       const supabase = createServiceClient({ system: 'inngest:notify-assignment-gap' })
@@ -52,7 +77,7 @@ export const notifyAssignmentGap = inngest.createFunction(
             subject: `Action required — No crew available for ${context.propertyName} on ${dateStr}`,
             html: await renderPmAlert({
               heading:  'Crew coverage gap',
-              body:     `${context.propertyName} has a turnover scheduled for ${dateStr} with no available crew member to auto-assign (needed ${crew_needed}, found ${crew_found}). This turnover is unassigned and waiting on manual assignment.`,
+              body:     `${context.propertyName} has a turnover scheduled for ${dateStr} with no available crew member to auto-assign (needed ${crew_needed}, found ${crew_found}).${reasonLine} This turnover is unassigned and waiting on manual assignment.`,
               ctaLabel: 'View Turnover →',
               ctaUrl:   `${appUrl}/turnovers/${turnover_id}`,
             }),

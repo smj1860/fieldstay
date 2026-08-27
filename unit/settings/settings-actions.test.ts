@@ -299,6 +299,64 @@ describe('settings/actions', () => {
     })
   })
 
+  describe('addCrewMember — auto-assign eligibility', () => {
+    // An unchecked checkbox submits NOTHING, which is indistinguishable from a
+    // form that has no such field. Both of this action's callers matter here:
+    // crew-manage offers the control, and the onboarding form does not. The UI
+    // therefore pairs a hidden 'false' with the checkbox's 'true' so presence
+    // of ANY value means "this form asked".
+    const eligibilityIn = (insertCall?: { args: unknown[] }) =>
+      (insertCall?.args[0] as Record<string, unknown> | undefined)
+
+    it('omits the column entirely when the form does not offer the control', async () => {
+      // THE ONBOARDING CASE, and the one worth getting right: reading a bare
+      // checkbox here would have made every crew member added during setup
+      // ineligible, silently inverting the column's DEFAULT true for the
+      // people least likely to notice.
+      const supabase = makeSupabase({ crew_members: [{ data: { id: 'crew_1' }, error: null }] })
+      mockAuthed(supabase)
+
+      await addCrewMember(null, formData({ name: 'Jamie', email: 'jamie@example.com' }))
+
+      const insert = supabase.calls.find((c) => c.table === 'crew_members' && c.method === 'insert')
+      expect(eligibilityIn(insert)).not.toHaveProperty('auto_assign_eligible')
+    })
+
+    it('stores false when the box was present and unticked', async () => {
+      const supabase = makeSupabase({ crew_members: [{ data: { id: 'crew_1' }, error: null }] })
+      mockAuthed(supabase)
+
+      // Hidden field only — exactly what the browser sends for an unticked box.
+      const fd = new FormData()
+      fd.set('name', 'Jamie')
+      fd.set('email', 'jamie@example.com')
+      fd.append('auto_assign_eligible', 'false')
+
+      await addCrewMember(null, fd)
+
+      const insert = supabase.calls.find((c) => c.table === 'crew_members' && c.method === 'insert')
+      expect(eligibilityIn(insert)).toMatchObject({ auto_assign_eligible: false })
+    })
+
+    it('stores true when the box was ticked, despite the hidden false also being sent', async () => {
+      // Both values arrive, in DOM order. Reading .get() would return the
+      // hidden 'false' and store the opposite of what the PM chose.
+      const supabase = makeSupabase({ crew_members: [{ data: { id: 'crew_1' }, error: null }] })
+      mockAuthed(supabase)
+
+      const fd = new FormData()
+      fd.set('name', 'Jamie')
+      fd.set('email', 'jamie@example.com')
+      fd.append('auto_assign_eligible', 'false')
+      fd.append('auto_assign_eligible', 'true')
+
+      await addCrewMember(null, fd)
+
+      const insert = supabase.calls.find((c) => c.table === 'crew_members' && c.method === 'insert')
+      expect(eligibilityIn(insert)).toMatchObject({ auto_assign_eligible: true })
+    })
+  })
+
   describe('deactivateCrewMember', () => {
     it('scopes the deactivation update to the caller org_id', async () => {
       const supabase = makeSupabase({ crew_members: [{ data: null, error: null }] })
