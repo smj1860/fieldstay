@@ -23,6 +23,19 @@ interface BelowParRow {
   first_count_recorded_at: string | null
 }
 
+/**
+ * The confirmed-booking fields this page reads. Named rather than inlined so
+ * the paginated read has a real shape — the occupancy KPI sums nights across
+ * every row, so these two dates are load-bearing, not incidental.
+ */
+interface OpsBooking {
+  id:            string
+  property_id:   string
+  checkin_date:  string
+  checkout_date: string
+  status:        string
+}
+
 export default async function OpsSnapshotPage() {
   const { supabase, membership } = await requireOrgMember()
 
@@ -55,7 +68,7 @@ export default async function OpsSnapshotPage() {
     propertiesRes,
     openWOsRes,
     belowParRes,
-    monthBookingsRes,
+    monthBookings,
     pmsConnectionsRes,
   ] = await Promise.all([
     // DRAINED, not a single .select(), matching turnovers/page.tsx.
@@ -113,13 +126,28 @@ export default async function OpsSnapshotPage() {
     // SQL. SECURITY INVOKER: RLS still applies (migration 20260730610000).
     supabase.rpc('inventory_below_par_for_org', { p_org_id: membership.org_id }),
 
-    supabase
-      .from('bookings')
-      .select('id, property_id, checkin_date, checkout_date, status')
-      .eq('org_id', membership.org_id)
-      .eq('status', 'confirmed')
-      .gte('checkout_date', monthStartIso)
-      .lte('checkin_date',  monthEndIso),
+    // DRAINED, for the identical reason as the turnovers read above — which
+    // this sibling did not inherit when that one was fixed. The 31-day window
+    // bounds the DAYS, not the rows: the ceiling is properties x
+    // bookings-in-window, and the occupancy KPI below sums nights across every
+    // row, so a truncated read does not render a short list. It renders a
+    // confident, wrong occupancy percentage with a 200 and no signal.
+    //
+    // .order('id') for the same load-bearing reason: .range() is OFFSET
+    // pagination, so the sort must be TOTAL or consecutive pages answer
+    // different questions. checkin_date is not unique across a portfolio.
+    fetchAllRows<OpsBooking>(
+      (rangeFrom, rangeTo) => supabase
+        .from('bookings')
+        .select('id, property_id, checkin_date, checkout_date, status')
+        .eq('org_id', membership.org_id)
+        .eq('status', 'confirmed')
+        .gte('checkout_date', monthStartIso)
+        .lte('checkin_date',  monthEndIso)
+        .order('id')
+        .range(rangeFrom, rangeTo),
+      { label: 'page.ops.monthBookings' },
+    ),
 
     admin
       .from('integration_connections')
@@ -140,7 +168,6 @@ export default async function OpsSnapshotPage() {
   const properties     = unwrapList(propertiesRes,     { ...ctx, extra: { query: 'properties' } })
   const openWorkOrders = unwrapList(openWOsRes,        { ...ctx, extra: { query: 'work_orders' } })
   const lowStockItems  = unwrapList(belowParRes as PostgrestResult<BelowParRow[]>, { ...ctx, extra: { query: 'below_par' } })
-  const monthBookings  = unwrapList(monthBookingsRes,  { ...ctx, extra: { query: 'bookings' } })
   const pmsConnections = unwrapList(pmsConnectionsRes, { ...ctx, extra: { query: 'integration_connections' } })
 
   const showPmsRevenueNudge = pmsConnections.length === 0
