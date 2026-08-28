@@ -236,8 +236,10 @@ export const ENV_SPEC: Readonly<Record<string, VarSpec>> = {
   SENTRY_AUTH_TOKEN: { tier: 'optional', schema: nonEmpty, buildTimeOnly: true, why: 'source-map upload; absent just skips the step' },
 
   // ── SMS (Telnyx) ──────────────────────────────────────────────────────────
-  // SMS_ENABLED is the master kill switch and must stay 'false' until 10DLC
-  // clears (CLAUDE.md, Critical Security Rule #5). Requiring it to PARSE — and
+  // SMS_ENABLED is the master kill switch. It is 'true' in production as of
+  // 2026-08-28 (10DLC cleared); it stays 'false' everywhere else, which is what
+  // keeps a preview deploy or a local run from texting real guests. See
+  // CLAUDE.md, Critical Security Rule #5. Requiring it to PARSE — and
   // to be exactly 'true' or 'false' — matters: lib/sms/telnyx.ts gates on
   // `!== 'true'`, so a typo'd 'TRUE' silently disables every send instead.
   SMS_ENABLED: {

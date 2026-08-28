@@ -18,7 +18,7 @@ status (checked against the live codebase, not assumed):
 | 2. OwnerRez/Hospitable shared-IP budget fair-share | 1 | ✅ Done |
 | 3. Crew PWA Realtime footprint | 1 | 🔶 In progress — redesigned as Crew Sync v2; Phases 0–4 live (Phase 4 merged via PR #508, 2026-07-26), only Phase 5 (rollout) remains (see `CREW_SYNC_V2_PHASES.md`) |
 | 4. Drop redundant per-row `is_org_member()` from SELECT policies | 1 | ✅ Done — migration applied |
-| 5. SMS spend/throughput guard before `SMS_ENABLED=true` | 1 | ✅ Done (flag itself stays false until 10DLC clears) |
+| 5. SMS spend/throughput guard before `SMS_ENABLED=true` | 1 | ✅ Done — guard shipped first; flag went `true` in production 2026-08-28 when 10DLC cleared |
 | 6. Memoize `requireOrgMember()` + fix layout waterfall | 2 | ✅ Done — `lib/auth.ts` wraps auth context in React `cache()` |
 | 7. Dexie delta sync + outbox backoff | 2 | ✅ Done — delta sync shipped as Crew Sync v2 Phase 1; outbox backoff shipped as Phase 4 (PR #508, 2026-07-26) |
 | 8. Bound the unbounded queries | 2 | ✅ Done — `checklist-signals` has a 180-day rolling window, reviews/owners pages are `.limit()`-bounded |
