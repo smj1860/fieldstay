@@ -5779,6 +5779,7 @@ export type Database = {
       }
       work_order_invoices: {
         Row: {
+          amount_refunded: number
           created_at: string
           id: string
           invoice_number: string
@@ -5786,6 +5787,7 @@ export type Database = {
           paid_at: string | null
           platform_fee_amount: number
           property_id: string
+          refunded_at: string | null
           status: string
           stripe_checkout_session_id: string | null
           stripe_payment_intent_id: string | null
@@ -5796,6 +5798,7 @@ export type Database = {
           work_order_id: string
         }
         Insert: {
+          amount_refunded?: number
           created_at?: string
           id?: string
           invoice_number: string
@@ -5803,6 +5806,7 @@ export type Database = {
           paid_at?: string | null
           platform_fee_amount?: number
           property_id: string
+          refunded_at?: string | null
           status?: string
           stripe_checkout_session_id?: string | null
           stripe_payment_intent_id?: string | null
@@ -5813,6 +5817,7 @@ export type Database = {
           work_order_id: string
         }
         Update: {
+          amount_refunded?: number
           created_at?: string
           id?: string
           invoice_number?: string
@@ -5820,6 +5825,7 @@ export type Database = {
           paid_at?: string | null
           platform_fee_amount?: number
           property_id?: string
+          refunded_at?: string | null
           status?: string
           stripe_checkout_session_id?: string | null
           stripe_payment_intent_id?: string | null

@@ -25,6 +25,11 @@ type WoCategory      = 'hvac' | 'plumbing' | 'electrical' | 'appliance' | 'clean
 type VendorSpecialty = 'plumbing' | 'electrical' | 'hvac' | 'landscaping' | 'cleaning' |
                        'pest_control' | 'pool' | 'roofing' | 'general' | 'other'
 type MemberRole      = 'admin' | 'manager' | 'crew' | 'viewer'
+// Mirrors InvoiceStatus (types/database.ts) — hand-declared like every other
+// local union in this file, so it must be kept in step by hand too. Last
+// diffed against the DB 2026-08-28 when 'refunded'/'partially_refunded' were
+// added there.
+type InvoiceStatusLocal = 'pending_payment' | 'paid' | 'cancelled' | 'partially_refunded' | 'refunded'
 
 export interface WorkOrderDetailData {
   id:                      string
@@ -46,7 +51,7 @@ export interface WorkOrderDetailData {
   completion_notes:        string | null
   completed_by_name:       string | null
   invoice_reference:       string | null
-  invoiceStatus?:          'pending_payment' | 'paid' | 'cancelled' | null
+  invoiceStatus?:          InvoiceStatusLocal | null
   invoiceId?:              string | null
   vendor_acknowledged_at:  string | null
   completion_verified_at:  string | null
@@ -103,10 +108,12 @@ const STATUS_STYLES: Record<WoStatus, { dot: string; label: string }> = {
   cancelled:       { dot: 'bg-red-400',     label: 'Cancelled'       },
 }
 
-const INVOICE_STATUS_STYLES: Record<'pending_payment' | 'paid' | 'cancelled', { badge: string; label: React.ReactNode }> = {
-  paid:            { badge: 'bg-emerald-500/15 text-emerald-400 border border-emerald-500/30', label: <span className="inline-flex items-center gap-1"><Check className="w-3 h-3" /> Paid</span> },
-  pending_payment: { badge: 'bg-[var(--accent-amber-dim)] text-[var(--accent-amber)] border border-[var(--accent-amber)]', label: 'Pending Payment →' },
-  cancelled:       { badge: 'bg-slate-500/15 text-slate-400 border border-slate-500/30 line-through', label: 'Cancelled' },
+const INVOICE_STATUS_STYLES: Record<InvoiceStatusLocal, { badge: string; label: React.ReactNode }> = {
+  paid:                { badge: 'bg-emerald-500/15 text-emerald-400 border border-emerald-500/30', label: <span className="inline-flex items-center gap-1"><Check className="w-3 h-3" /> Paid</span> },
+  pending_payment:     { badge: 'bg-[var(--accent-amber-dim)] text-[var(--accent-amber)] border border-[var(--accent-amber)]', label: 'Pending Payment →' },
+  cancelled:           { badge: 'bg-slate-500/15 text-slate-400 border border-slate-500/30 line-through', label: 'Cancelled' },
+  refunded:            { badge: 'bg-amber-500/15 text-amber-400 border border-amber-500/30', label: 'Refunded' },
+  partially_refunded:  { badge: 'bg-amber-500/15 text-amber-400 border border-amber-500/30', label: 'Partially Refunded' },
 }
 
 const CATEGORY_LABELS: Record<WoCategory, string> = {

@@ -34,7 +34,7 @@ created from a maintenance schedule, the right vendor is selected and notified.
 | Payments | Stripe | Webhook signature verification required |
 | Retailer API | Kroger API | Cart automation for below-par inventory |
 | Geocoding | Mapbox | Properties and vendors — one call on save |
-| SMS | Telnyx | Guest opt-in, door code delivery, morning/evening nudges. `SMS_ENABLED=false` env var gates all sends — do not flip to true until 10DLC is verified |
+| SMS | Telnyx | Guest opt-in, door code delivery, morning/evening nudges. `SMS_ENABLED` env var gates all sends; `true` in production since 2026-08-28 (10DLC verified). The gate stays — it is what keeps previews and local runs from texting real guests |
 | Weather | Tomorrow.io | Contextual SMS — rain/temperature signals for guest recommendations |
 | Observability | Axiom, Sentry | Axiom: native Vercel integration, all Inngest logger calls route here (independent of OpenTelemetry — a Vercel log capture, not a trace exporter). Sentry (`@sentry/nextjs`, added 2026-07-15): errors + performance traces for the Next.js app. Owns the OTEL tracer-provider registration in `instrumentation.ts`/`instrumentation-client.ts` — do not add a second one (e.g. `@vercel/otel`, removed when Sentry was added) |
 
@@ -132,9 +132,18 @@ if (process.env.SMS_ENABLED !== 'true') {
 }
 ```
 
-This flag is `false` until 10DLC campaign verification clears. Never send
-to guests without this gate in place. The flag lives in `lib/sms/telnyx.ts` —
-check that any new SMS-sending code respects it.
+**As of 2026-08-28 this flag is `true` in production** — 10DLC cleared and
+sends are live. The gate itself does not go away: it is what keeps a preview
+deploy, a local run or a future suspension from texting real guests, so every
+new SMS-sending path still has to check it. The flag lives in
+`lib/sms/telnyx.ts` — check that any new SMS-sending code respects it.
+
+This paragraph said `false` for some time after the flag went live, and that
+is not a harmless staleness: it is read as CURRENT STATE when deciding what a
+user will actually receive. It caused a customer email to be drafted twice
+saying crew invites arrive by email only, when `inviteCrewMember` also texts
+anyone with a phone on file. If the flag's value changes again, change it
+here in the same sitting.
 
 The daily nudge budget check in `lib/sms/telnyx.ts` (`claimNudgeBudgetSlot`)
 fails CLOSED on a Redis error — the nudge is skipped, not sent — unlike the

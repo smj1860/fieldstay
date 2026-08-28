@@ -2,6 +2,7 @@ import { notFound }            from 'next/navigation'
 import { requireOrgMember }    from '@/lib/auth'
 import type { Metadata }       from 'next'
 import { PayInvoiceButton }    from './pay-button'
+import { processingSurchargeCents } from '@/lib/stripe/platform-fee'
 import { Check } from 'lucide-react'
 import { unwrapJoin }          from '@/lib/utils/supabase-joins'
 import { throwIfAnyQueryFailed } from '@/lib/supabase/unwrap'
@@ -19,6 +20,23 @@ const LINE_TYPE_LABELS: Record<string, string> = {
 
 const fmt = (n: number) =>
   n.toLocaleString('en-US', { style: 'currency', currency: 'USD' })
+
+/**
+ * The header pill's text/icon for the four states an invoice can be in.
+ * Extracted rather than a chained ternary in JSX — a fifth state (refunded)
+ * pushed that chain into sonarjs's nested-ternary flag.
+ */
+function statusBadgeContent(
+  status: string,
+  isPaid: boolean,
+  isCancelled: boolean,
+  isRefunded: boolean,
+): React.ReactNode {
+  if (isRefunded) return status === 'refunded' ? 'REFUNDED' : 'PARTIALLY REFUNDED'
+  if (isPaid) return <><Check size={12} /> PAID</>
+  if (isCancelled) return 'CANCELLED'
+  return 'PENDING PAYMENT'
+}
 
 export default async function InvoicePage({
   params,
@@ -42,6 +60,8 @@ export default async function InvoicePage({
       total,
       platform_fee_amount,
       paid_at,
+      amount_refunded,
+      refunded_at,
       submitted_at,
       work_order_id,
       vendor_id,
@@ -98,8 +118,24 @@ export default async function InvoicePage({
   const vendor   = unwrapJoin(invoice.vendors)
   const property = unwrapJoin(invoice.properties)
 
+  // Shown, and added to Total Due, because the PM is the one who pays it —
+  // see lib/stripe/platform-fee.ts. Computed from the SAME helper the checkout
+  // route uses rather than re-derived here: a page that quotes one total and a
+  // Stripe page that charges another is the single most disputable thing a
+  // billing screen can do, and two copies of this arithmetic would drift the
+  // first time the rate changed.
+  const surcharge = processingSurchargeCents(Math.round(invoice.total * 100)) / 100
+  const totalDue  = invoice.total + surcharge
+
   const isPaid      = invoice.status === 'paid'   || paid === 'true'
   const isCancelled = invoice.status === 'cancelled' || cancelled === 'true'
+  // A refunded invoice was 'paid' — isPaid alone would leave the Pay button
+  // hidden by luck rather than by a check that actually names this state, and
+  // isRefunded is what the summary line below reads to say so honestly rather
+  // than showing a stale "Paid" badge. The checkout route has its own,
+  // independent refusal for the same state — this is the display half, not
+  // the enforcement.
+  const isRefunded  = invoice.status === 'refunded' || invoice.status === 'partially_refunded'
 
   const addressParts = [property?.address, property?.city, property?.state].filter(Boolean)
   const address      = addressParts.join(', ')
@@ -128,7 +164,7 @@ export default async function InvoicePage({
         <div style={{ textAlign: 'right' }}>
           <p style={{ color: '#ffffff', fontSize: 13, fontWeight: 700, margin: 0 }}>{invoice.invoice_number}</p>
           <p style={{ color: '#94a3b8', fontSize: 11, margin: '2px 0 0', display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: 4 }}>
-            {isPaid ? <><Check size={12} /> PAID</> : isCancelled ? 'CANCELLED' : 'PENDING PAYMENT'}
+            {statusBadgeContent(invoice.status, isPaid, isCancelled, isRefunded)}
           </p>
         </div>
       </div>
@@ -136,7 +172,7 @@ export default async function InvoicePage({
       <div style={{ maxWidth: 640, margin: '0 auto', padding: '24px 16px' }}>
 
         {/* Status banner */}
-        {isPaid && (
+        {isPaid && !isRefunded && (
           <div style={{ backgroundColor: '#dcfce7', border: '1px solid #86efac', borderRadius: 10, padding: '12px 16px', marginBottom: 20, display: 'flex', alignItems: 'center', gap: 10 }}>
             <Check size={20} color="#166534" />
             <div>
@@ -144,6 +180,21 @@ export default async function InvoicePage({
               {invoice.paid_at && (
                 <p style={{ fontSize: 12, color: '#16a34a', margin: '2px 0 0' }}>
                   Paid {new Date(invoice.paid_at).toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' })}
+                </p>
+              )}
+            </div>
+          </div>
+        )}
+
+        {isRefunded && (
+          <div style={{ backgroundColor: '#fef3c7', border: '1px solid #fcd34d', borderRadius: 10, padding: '12px 16px', marginBottom: 20, display: 'flex', alignItems: 'center', gap: 10 }}>
+            <div>
+              <p style={{ fontSize: 14, fontWeight: 700, color: '#92400e', margin: 0 }}>
+                {invoice.status === 'refunded' ? 'Invoice Refunded' : 'Invoice Partially Refunded'}
+              </p>
+              {invoice.refunded_at && (
+                <p style={{ fontSize: 12, color: '#b45309', margin: '2px 0 0' }}>
+                  {fmt(invoice.amount_refunded)} refunded {new Date(invoice.refunded_at).toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' })}
                 </p>
               )}
             </div>
@@ -210,17 +261,23 @@ export default async function InvoicePage({
                 <span style={{ fontSize: 13, color: '#64748b' }}>Subtotal</span>
                 <span style={{ fontSize: 13, color: '#374151' }}>{fmt(invoice.subtotal)}</span>
               </div>
+              {surcharge > 0 && (
+                <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 8 }}>
+                  <span style={{ fontSize: 13, color: '#64748b' }}>Card processing fee</span>
+                  <span style={{ fontSize: 13, color: '#374151' }}>{fmt(surcharge)}</span>
+                </div>
+              )}
               <div style={{ display: 'flex', justifyContent: 'space-between', paddingTop: 10, borderTop: '2px solid #0f172a' }}>
                 <span style={{ fontSize: 16, fontWeight: 800, color: '#0f172a' }}>Total Due</span>
-                <span style={{ fontSize: 20, fontWeight: 800, color: '#0f172a' }}>{fmt(invoice.total)}</span>
+                <span style={{ fontSize: 20, fontWeight: 800, color: '#0f172a' }}>{fmt(totalDue)}</span>
               </div>
             </div>
           </div>
         </div>
 
         {/* Pay button */}
-        {!isPaid && !isCancelled && (
-          <PayInvoiceButton invoiceId={invoiceId} total={invoice.total} />
+        {!isPaid && !isCancelled && !isRefunded && (
+          <PayInvoiceButton invoiceId={invoiceId} total={totalDue} />
         )}
 
         <p style={{ fontSize: 11, color: '#94a3b8', textAlign: 'center', marginTop: 16 }}>

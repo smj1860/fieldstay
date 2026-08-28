@@ -98,6 +98,7 @@ export type AuditAction =
   | 'work_order.invoice.created'
   | 'work_order.invoice.paid'
   | 'work_order.invoice.cancelled'
+  | 'work_order.invoice.refunded'
   | 'guidebook.sponsor.activated'
   | 'guidebook.sponsor.cancelled'
   | 'guidebook.sponsor.payment_failed'

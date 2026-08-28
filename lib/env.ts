@@ -86,6 +86,12 @@ const boolString = z.enum(['true', 'false'])
 const rate01     = z.coerce.number().min(0).max(1)
 const percent    = z.coerce.number().min(0).max(100)
 const posInt     = z.coerce.number().int().positive()
+// Non-negative whole cents. Distinct from posInt (0 is a legitimate "no fixed
+// fee") and from percent (whose max of 100 is meaningless for a cash amount).
+// The 10_000 ceiling matches the runtime bound in lib/stripe/platform-fee.ts —
+// the two must agree, or a value passes boot validation and is then rejected
+// at use, falling back to the default with only a Sentry report to show for it.
+const centsAmt   = z.coerce.number().int().min(0).max(10_000)
 
 const smsOn = (env: EnvRecord) => env.SMS_ENABLED === 'true'
 const demoOn = (env: EnvRecord) => Boolean(env.DEMO_ENTRY_SECRET)
@@ -168,6 +174,21 @@ export const ENV_SPEC: Readonly<Record<string, VarSpec>> = {
     tier: 'optional', schema: percent,
     why: 'platform fee on vendor invoices; parseFloat defaults to 0 when unset',
   },
+
+  // Card processing surcharge passed on to the PM paying a vendor invoice.
+  // Both optional: unset means the US card default (2.9% + 30c), which is what
+  // Stripe actually charges, so an unset variable produces CORRECT behaviour
+  // rather than a silent 0. Setting the pct to 0 is the deliberate off switch
+  // and restores the old arrangement where the platform absorbed processing —
+  // which was lossmaking below a $300 invoice. See lib/stripe/platform-fee.ts.
+  STRIPE_PROCESSING_FEE_PCT: {
+    tier: 'optional', schema: percent,
+    why: "Stripe's card rate, passed to the payer; unset = 2.9%. 0 makes the platform absorb it",
+  },
+  STRIPE_PROCESSING_FEE_FIXED_CENTS: {
+    tier: 'optional', schema: centsAmt,
+    why: "Stripe's per-charge fixed fee in CENTS, passed to the payer; unset = 30",
+  },
   NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY: {
     tier: 'optional', schema: prefixed('pk_'), clientInlinedOnly: true,
     why: 'currently unread — checkout is a server-side redirect to a Stripe-hosted page',
@@ -236,8 +257,10 @@ export const ENV_SPEC: Readonly<Record<string, VarSpec>> = {
   SENTRY_AUTH_TOKEN: { tier: 'optional', schema: nonEmpty, buildTimeOnly: true, why: 'source-map upload; absent just skips the step' },
 
   // ── SMS (Telnyx) ──────────────────────────────────────────────────────────
-  // SMS_ENABLED is the master kill switch and must stay 'false' until 10DLC
-  // clears (CLAUDE.md, Critical Security Rule #5). Requiring it to PARSE — and
+  // SMS_ENABLED is the master kill switch. It is 'true' in production as of
+  // 2026-08-28 (10DLC cleared); it stays 'false' everywhere else, which is what
+  // keeps a preview deploy or a local run from texting real guests. See
+  // CLAUDE.md, Critical Security Rule #5. Requiring it to PARSE — and
   // to be exactly 'true' or 'false' — matters: lib/sms/telnyx.ts gates on
   // `!== 'true'`, so a typo'd 'TRUE' silently disables every send instead.
   SMS_ENABLED: {
