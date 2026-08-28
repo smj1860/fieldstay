@@ -18,12 +18,14 @@ import type { CheckoutPlanKey } from '@/lib/stripe/client'
  * them. So a key with no time component does not merely deduplicate a
  * double-click; it PINS a failure.
  *
- * On 2026-08-28 a checkout failed because the price's product was archived in
- * Stripe. Un-archiving the product fixes Stripe — and that button would have
- * gone on returning the identical error for the rest of the day, replayed from
- * cache and never re-evaluated, with a fresh Sentry report each time that read
- * as "the fix did not work". A billing path that cannot be re-tested for 24
- * hours after a config fix is worse than one with no idempotency key at all.
+ * On 2026-08-28 a checkout failed because STRIPE_PRICE_GROWTH_MONTHLY held a
+ * stale id — a price under an older, since-archived Growth product, while a
+ * perfectly healthy Growth product sat alongside it in the catalogue.
+ * Repointing the variable fixes it, and that button would still have gone on
+ * returning the identical error for the rest of the day, replayed from cache
+ * and never re-evaluated, with a fresh Sentry report each time that read as
+ * "the fix did not work". A billing path that cannot be re-tested for 24 hours
+ * after a config fix is worse than one with no idempotency key at all.
  *
  * Ten minutes: a double-click is seconds apart, and even an impatient
  * back-and-re-click after a slow redirect lands inside one bucket. Two clicks

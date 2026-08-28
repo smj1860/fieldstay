@@ -1583,6 +1583,21 @@ export async function createCheckoutSession(
       customer:             org?.stripe_customer_id ?? undefined,
       customer_email:       !org?.stripe_customer_id ? (org?.billing_email ?? undefined) : undefined,
       line_items:           [{ price: priceId, quantity: 1 }],
+      // Stripe Checkout hides the promotion-code field unless asked, and the
+      // omission is silent: the page renders correctly, takes a card, and
+      // charges full price, so a customer holding a code has no way to apply
+      // it and no indication anything is missing. Found when the first real
+      // checkout reached Stripe and there was nowhere to type one.
+      //
+      // This accepts PROMOTION CODES — the customer-facing strings attached to
+      // a coupon — not raw coupon ids. A coupon with no promotion code created
+      // against it cannot be redeemed here at all.
+      //
+      // Mutually exclusive with `discounts`. If a discount ever needs to be
+      // applied server-side (an automatic launch promo rather than a typed
+      // code), that replaces this line rather than joining it — Stripe rejects
+      // a session that sets both.
+      allow_promotion_codes: true,
       success_url:          `${process.env.NEXT_PUBLIC_APP_URL}/settings?checkout=success`,
       cancel_url:           `${process.env.NEXT_PUBLIC_APP_URL}/settings`,
       metadata:             { org_id: membership.org_id, plan: planKey },
@@ -1607,13 +1622,15 @@ export async function createCheckoutSession(
       // request with that key — errors included. So a key that is stable for
       // 24 hours does not just deduplicate a double-click; it PINS a failure.
       //
-      // On 2026-08-28 a checkout failed because the price's product was
-      // archived in Stripe. Un-archiving the product fixes Stripe, and the
-      // button would still have returned the identical error for the rest of
-      // the day — replayed from cache, never re-evaluated — with a Sentry
-      // report each time that looked like the fix had not worked. A billing
-      // path that cannot be re-tested for 24 hours after a config fix is
-      // worse than one with no idempotency key at all.
+      // On 2026-08-28 a checkout failed because STRIPE_PRICE_GROWTH_MONTHLY
+      // held a stale id: a price under an older, since-archived Growth
+      // product, while a healthy Growth product sat alongside it in the
+      // catalogue. Repointing the variable fixes it — and the button would
+      // still have returned the identical error for the rest of the day,
+      // replayed from cache and never re-evaluated, with a Sentry report each
+      // time that looked like the fix had not worked. A billing path that
+      // cannot be re-tested for 24 hours after a config fix is worse than one
+      // with no idempotency key at all.
       //
       // Ten minutes is sized to the problem the key actually solves. A
       // double-click is seconds apart; even an impatient back-and-re-click
