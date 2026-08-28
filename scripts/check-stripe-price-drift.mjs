@@ -51,8 +51,16 @@ if (!key) {
  * Read from the environment rather than by importing lib/stripe/client.ts —
  * that module is TypeScript and pulls in the Stripe SDK, which would make this
  * script need a build step and a dependency install. The env var NAMES are the
- * contract either way; unit/guardrails/env-schema-coverage.test.ts is what
- * keeps this list and ENV_SPEC from drifting apart.
+ * contract either way.
+ *
+ * This comment used to claim env-schema-coverage.test.ts kept these two lists
+ * and ENV_SPEC in sync. It did not — that test reads lib/env.ts and has never
+ * looked at this file — and the Hosts tier proved it: STRIPE_PRICE_HOSTS_*
+ * was added to ENV_SPEC, PLANS and the billing UI, and never here, so for the
+ * whole life of the $89 tier its prices were checked by nothing and an active
+ * Hosts price in Stripe would have been reported as drift. The claim is now
+ * true because unit/guardrails/stripe-price-env-coverage.test.ts makes it
+ * true.
  */
 /**
  * Split into required and optional, because this script cannot otherwise tell
@@ -69,6 +77,7 @@ if (!key) {
  * than dressing up as a finding.
  */
 const REQUIRED_PRICE_ENV = [
+  'STRIPE_PRICE_HOSTS_MONTHLY',
   'STRIPE_PRICE_STARTER_MONTHLY',
   'STRIPE_PRICE_GROWTH_MONTHLY',
   'STRIPE_PRICE_PORTFOLIO_MONTHLY',
@@ -86,6 +95,7 @@ const REQUIRED_PRICE_ENV = [
  * dangling check below catches it pointing at a price that is not live.
  */
 const OPTIONAL_PRICE_ENV = [
+  'STRIPE_PRICE_HOSTS_ANNUAL',
   'STRIPE_PRICE_STARTER_ANNUAL',
   'STRIPE_PRICE_GROWTH_ANNUAL',
   'STRIPE_PRICE_PORTFOLIO_ANNUAL',
@@ -132,13 +142,20 @@ async function stripeGet(path) {
   return res.json()
 }
 
-/** All active recurring prices, following Stripe's cursor pagination. */
+/**
+ * All active recurring prices, following Stripe's cursor pagination.
+ *
+ * `expand[]=data.product` is load-bearing, not a convenience — see the
+ * product-active check at the bottom of this file. Without it `p.product` is a
+ * bare id string and there is nothing to test.
+ */
 async function listActiveRecurringPrices() {
   const out = []
   let startingAfter = null
 
   for (;;) {
     const qs = new URLSearchParams({ active: 'true', type: 'recurring', limit: '100' })
+    qs.append('expand[]', 'data.product')
     if (startingAfter) qs.set('starting_after', startingAfter)
 
     const page = await stripeGet(`prices?${qs}`)
@@ -199,4 +216,60 @@ if (dangling.length > 0) {
   process.exit(1)
 }
 
-console.log('Stripe prices and PLANS agree in both directions.')
+// A price can be ACTIVE and still be unpurchasable, because purchasability is
+// a property of the PRODUCT it hangs off. Archiving a product in the Stripe
+// dashboard sets product.active = false and leaves price.active = true, so
+// such a price is returned by `GET /v1/prices?active=true`, lands in liveIds,
+// and sails through the dangling check above. Everything here was green.
+//
+// This is not hypothetical. On 2026-08-28 a checkout in production failed with
+//   Price `price_…` is not available to be purchased because its product is
+//   not active
+// — a message that only exists for this exact state, and that proves the price
+// itself resolved fine. This check is the half that was missing.
+//
+// Reported separately from `dangling` rather than folded into it, because the
+// remedy is different: a dangling id is fixed by repointing the env var, an
+// inactive product is fixed in the Stripe dashboard with the env var already
+// correct. Telling someone to change a value that is right sends them looking
+// in the wrong place.
+const inactiveProduct = prices
+  .filter((p) => known.has(p.id))
+  .map((p) => ({ price: p, product: typeof p.product === 'object' ? p.product : null }))
+  .filter(({ product }) => product !== null && product.active === false)
+
+if (inactiveProduct.length > 0) {
+  console.error(
+    '\nConfigured price ids whose Stripe PRODUCT is archived (the price itself ' +
+      'is active, which is why this reads as fine everywhere else):\n' +
+      inactiveProduct
+        .map(({ price, product }) =>
+          `  • ${known.get(price.id)} = ${price.id}  →  product ${product.id} ` +
+          `(${product.name ?? 'unnamed'}) is not active`)
+        .join('\n') +
+      '\n\nCheckout against one of these fails at ' +
+      'stripe.checkout.sessions.create — the customer gets a generic error at ' +
+      'the moment they try to pay, and no session is ever created.\n\n' +
+      'Fix in the Stripe dashboard: un-archive the product (Product catalogue → ' +
+      'the product → Unarchive). The price id does not change, so nothing in ' +
+      'Vercel needs editing.'
+  )
+  process.exit(1)
+}
+
+// An id we could not expand is not a pass. Silence here would mean the check
+// above compared nothing — the failure mode this whole file exists to avoid.
+const unexpandable = prices.filter((p) => known.has(p.id) && typeof p.product !== 'object')
+if (unexpandable.length > 0) {
+  console.error(
+    `\n${unexpandable.length} configured price(s) came back without an expanded ` +
+      'product, so their product status was NOT checked. Stripe may have ' +
+      'changed how `expand[]=data.product` behaves on list endpoints.'
+  )
+  process.exit(1)
+}
+
+console.log(
+  `Stripe prices and PLANS agree in both directions; ${known.size} configured ` +
+    'price(s) are active and hang off an active product.'
+)

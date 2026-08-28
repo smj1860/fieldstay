@@ -1354,6 +1354,83 @@ const LIVE_SUBSCRIPTION_STATUSES = new Set<string>([
   'active', 'trialing', 'past_due', 'unpaid', 'paused',
 ])
 
+/**
+ * Is this checkout failure a CONFIGURATION fault rather than a transient one?
+ *
+ * The distinction is the difference between correct advice and advice that can
+ * never work. Stripe's `StripeInvalidRequestError` is a 400: the request we
+ * sent is wrong and the identical request will be wrong forever. Telling a
+ * customer to "try again" at that moment sends them into a loop they cannot
+ * win, at the exact instant they were trying to hand us money — and the retry
+ * generates a fresh Sentry event each time, so the signal that something is
+ * misconfigured is buried under the noise of the customer obeying us.
+ *
+ * This is not hypothetical. On 2026-08-28 a production checkout failed with
+ * "Price `price_…` is not available to be purchased because its product is not
+ * active" — an archived product in the Stripe dashboard — and the customer was
+ * shown "Operation failed. Please try again."
+ *
+ * Narrow on purpose: a network blip, a Stripe outage, a timeout and a
+ * rate-limit are all genuinely worth retrying and must keep the retry message.
+ */
+function isStripeConfigFault(err: unknown): boolean {
+  if (typeof err !== 'object' || err === null) return false
+  const type = (err as { type?: unknown }).type
+  return type === 'StripeInvalidRequestError'
+}
+
+/**
+ * Sentry `extra` for a failed checkout: WHICH plan and WHICH interval.
+ *
+ * The report previously carried neither, so triaging the 2026-08-28
+ * archived-product failure meant working backwards from the org's active
+ * property count to rule out the one tier whose cap the property-count guard
+ * would have rejected — and even then it only narrowed eight candidate prices
+ * to six. Both values are enum-shaped and carry no PII.
+ *
+ * The price id is included deliberately: it is a public identifier (it appears
+ * in the Stripe dashboard and in checkout), and it is the single thing that
+ * makes this report actionable, because it names the env var to repoint or the
+ * product to un-archive. Read back from PLANS rather than passed in, so it is
+ * still present when the throw happened before the caller resolved it.
+ */
+function checkoutFailureContext(
+  planKey: CheckoutPlanKey,
+  interval: 'monthly' | 'annual',
+): Record<string, string> {
+  const plan = PLANS[planKey]
+  return {
+    plan:     planKey,
+    interval,
+    price_id: (interval === 'annual' ? plan?.annualPriceId : plan?.monthlyPriceId) ?? '(unset)',
+  }
+}
+
+/**
+ * The message the customer sees for a failed checkout.
+ *
+ * Separate from the reportError call rather than wrapping it, so the report
+ * stays visibly inside the catch block — error-reporting-coverage.test.ts is a
+ * text scanner and cannot follow a delegating call, so a catch whose only
+ * alerting happens one function away reads to it as log-only. Splitting the
+ * two keeps createCheckoutSession under the complexity ratchet without
+ * blinding that guardrail.
+ */
+function checkoutFailureMessage(err: unknown): SettingsActionState {
+  // No "try again": see isStripeConfigFault. The customer cannot fix this and
+  // repeating the click cannot either, so the only honest next step is the one
+  // that reaches someone who can.
+  if (isStripeConfigFault(err)) {
+    return {
+      error:
+        'This plan cannot be purchased right now — it is a problem on our side, not with your card. ' +
+        'Email support@fieldstay.app and we will sort it out and get you set up.',
+    }
+  }
+
+  return { error: 'Operation failed. Please try again.' }
+}
+
 export async function createCheckoutSession(
   planKey: CheckoutPlanKey,
   interval: 'monthly' | 'annual'
@@ -1534,8 +1611,11 @@ export async function createCheckoutSession(
     return { redirectUrl: session.url }
   } catch (err) {
     console.error('[createCheckoutSession]', err)
-    reportError(err, { site: 'serverAction.settings.createCheckoutSession' })
-    return { error: 'Operation failed. Please try again.' }
+    reportError(err, {
+      site:  'serverAction.settings.createCheckoutSession',
+      extra: checkoutFailureContext(planKey, interval),
+    })
+    return checkoutFailureMessage(err)
   }
 }
 
