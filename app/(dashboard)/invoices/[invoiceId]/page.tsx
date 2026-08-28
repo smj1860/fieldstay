@@ -2,6 +2,7 @@ import { notFound }            from 'next/navigation'
 import { requireOrgMember }    from '@/lib/auth'
 import type { Metadata }       from 'next'
 import { PayInvoiceButton }    from './pay-button'
+import { processingSurchargeCents } from '@/lib/stripe/platform-fee'
 import { Check } from 'lucide-react'
 import { unwrapJoin }          from '@/lib/utils/supabase-joins'
 import { throwIfAnyQueryFailed } from '@/lib/supabase/unwrap'
@@ -97,6 +98,15 @@ export default async function InvoicePage({
   const wo       = unwrapJoin(invoice.work_orders)
   const vendor   = unwrapJoin(invoice.vendors)
   const property = unwrapJoin(invoice.properties)
+
+  // Shown, and added to Total Due, because the PM is the one who pays it —
+  // see lib/stripe/platform-fee.ts. Computed from the SAME helper the checkout
+  // route uses rather than re-derived here: a page that quotes one total and a
+  // Stripe page that charges another is the single most disputable thing a
+  // billing screen can do, and two copies of this arithmetic would drift the
+  // first time the rate changed.
+  const surcharge = processingSurchargeCents(Math.round(invoice.total * 100)) / 100
+  const totalDue  = invoice.total + surcharge
 
   const isPaid      = invoice.status === 'paid'   || paid === 'true'
   const isCancelled = invoice.status === 'cancelled' || cancelled === 'true'
@@ -210,9 +220,15 @@ export default async function InvoicePage({
                 <span style={{ fontSize: 13, color: '#64748b' }}>Subtotal</span>
                 <span style={{ fontSize: 13, color: '#374151' }}>{fmt(invoice.subtotal)}</span>
               </div>
+              {surcharge > 0 && (
+                <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 8 }}>
+                  <span style={{ fontSize: 13, color: '#64748b' }}>Card processing fee</span>
+                  <span style={{ fontSize: 13, color: '#374151' }}>{fmt(surcharge)}</span>
+                </div>
+              )}
               <div style={{ display: 'flex', justifyContent: 'space-between', paddingTop: 10, borderTop: '2px solid #0f172a' }}>
                 <span style={{ fontSize: 16, fontWeight: 800, color: '#0f172a' }}>Total Due</span>
-                <span style={{ fontSize: 20, fontWeight: 800, color: '#0f172a' }}>{fmt(invoice.total)}</span>
+                <span style={{ fontSize: 20, fontWeight: 800, color: '#0f172a' }}>{fmt(totalDue)}</span>
               </div>
             </div>
           </div>
@@ -220,7 +236,7 @@ export default async function InvoicePage({
 
         {/* Pay button */}
         {!isPaid && !isCancelled && (
-          <PayInvoiceButton invoiceId={invoiceId} total={invoice.total} />
+          <PayInvoiceButton invoiceId={invoiceId} total={totalDue} />
         )}
 
         <p style={{ fontSize: 11, color: '#94a3b8', textAlign: 'center', marginTop: 16 }}>

@@ -2,7 +2,7 @@ import { unwrap } from '@/lib/supabase/unwrap'
 import { NextRequest, NextResponse }  from 'next/server'
 import { requireOrgMember }           from '@/lib/auth'
 import { stripe }                     from '@/lib/stripe/client'
-import { platformFeePct }             from '@/lib/stripe/platform-fee'
+import { platformFeePct, processingSurchargeCents } from '@/lib/stripe/platform-fee'
 import { createServiceClient }        from '@/lib/supabase/server'
 import { logAuditEvent }              from '@/lib/audit'
 import { unwrapJoin }                 from '@/lib/utils/supabase-joins'
@@ -103,6 +103,28 @@ export async function POST(
   const currentFeeCents = Math.round(amountCents * feePct)
   const finalFeeCents   = currentFeeCents > 0 ? currentFeeCents : feeCents
 
+  // Card processing, passed to the payer.
+  //
+  // This is a DESTINATION charge, so Stripe's cut comes out of the platform
+  // balance. Before this, the platform's net was `application_fee − stripe's
+  // cut`, which at a 3% platform fee is negative below a $300 invoice — most
+  // vendor invoices. See lib/stripe/platform-fee.ts for the arithmetic.
+  //
+  // Three numbers have to move together or the money goes to the wrong party:
+  //
+  //   charged to PM  = amount + surcharge      (a SEPARATE line item, below)
+  //   application fee = platform fee + surcharge
+  //   vendor receives = charged − application fee = amount − platform fee
+  //
+  // i.e. the vendor's payout is byte-for-byte what it was; the surcharge is
+  // routed to the platform to cancel out what Stripe takes from it. Raising
+  // the line item WITHOUT raising the application fee would silently hand the
+  // surcharge to the vendor — the PM pays more and the platform still nets
+  // nothing, which is the failure this whole change exists to remove.
+  // unit/stripe/processing-surcharge.test.ts pins all three.
+  const surchargeCents         = processingSurchargeCents(amountCents)
+  const feeWithProcessingCents = finalFeeCents + surchargeCents
+
   const session = await stripe.checkout.sessions.create({
     mode:               'payment',
     success_url:        `${baseUrl}/invoices/${invoiceId}?paid=true`,
@@ -111,7 +133,7 @@ export async function POST(
       transfer_data: {
         destination: vendor.stripe_connect_account_id,
       },
-      ...(finalFeeCents > 0 ? { application_fee_amount: finalFeeCents } : {}),
+      ...(feeWithProcessingCents > 0 ? { application_fee_amount: feeWithProcessingCents } : {}),
       metadata: {
         invoice_id:     invoiceId,
         work_order_id:  invoice.work_order_id,
@@ -136,6 +158,21 @@ export async function POST(
         },
         quantity: 1,
       },
+      // Its own line, not folded into the amount above. A surcharge a payer
+      // cannot see is a surcharge they dispute, and the invoice page shows the
+      // same two numbers — a Checkout total that disagrees with the page the
+      // customer clicked Pay on is its own support ticket.
+      ...(surchargeCents > 0 ? [{
+        price_data: {
+          currency:     'usd',
+          unit_amount:  surchargeCents,
+          product_data: {
+            name:        'Card processing fee',
+            description: 'Charged by our payment processor and passed through at cost',
+          },
+        },
+        quantity: 1,
+      }] : []),
     ],
   })
 

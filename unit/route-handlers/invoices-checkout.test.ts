@@ -21,6 +21,7 @@ import { requireOrgMember } from '@/lib/auth'
 import { createServiceClient } from '@/lib/supabase/server'
 import { stripe } from '@/lib/stripe/client'
 import { logAuditEvent } from '@/lib/audit'
+import { processingSurchargeCents } from '@/lib/stripe/platform-fee'
 
 const ORG_ID = 'org_1'
 const USER_ID = 'user_1'
@@ -234,9 +235,54 @@ describe('POST /api/invoices/[invoiceId]/checkout', () => {
 
     await call('inv_1')
 
-    // 5% of $1000 = $50 = 5000 cents, not the stale 999-cent stored value
+    // 5% of $1000 = $50 = 5000 cents, not the stale 999-cent stored value.
+    //
+    // The application fee now also carries the card-processing surcharge, so
+    // that Stripe's cut lands on the payer rather than on the platform (see
+    // lib/stripe/platform-fee.ts). Asserted as `platform fee + surcharge`
+    // rather than as a recomputed literal: the platform-fee half is the thing
+    // this test is actually about, and hard-coding the sum would make it fail
+    // for the unrelated reason of a negotiated rate change.
+    const surcharge = processingSurchargeCents(100_000)
     expect(stripe.checkout.sessions.create).toHaveBeenCalledWith(expect.objectContaining({
-      payment_intent_data: expect.objectContaining({ application_fee_amount: 5000 }),
+      payment_intent_data: expect.objectContaining({
+        application_fee_amount: 5000 + surcharge,
+      }),
     }))
+  })
+
+  // ── The surcharge reaches the payer, not the vendor ────────────────────
+  // The failure this guards against is silent and one-sided: raise the line
+  // item without raising the application fee and the PM pays more while the
+  // extra is transferred to the VENDOR, leaving the platform exactly as short
+  // as before. Both halves are checked in one place because only their
+  // relationship is correct or incorrect — either alone looks fine.
+  it('bills the surcharge as its own line item and routes it to the platform', async () => {
+    const supabase = makeSupabase({ work_order_invoices: [{ data: baseInvoice({ total: 200, platform_fee_amount: 10 }), error: null }] })
+    mockAuthed(supabase)
+    vi.mocked(stripe.checkout.sessions.create).mockResolvedValue({ id: 'cs_new', url: 'https://checkout.stripe.com/pay/cs_new' } as never)
+
+    await call('inv_1')
+
+    const [params] = vi.mocked(stripe.checkout.sessions.create).mock.calls[0]! as [
+      { line_items: { price_data: { unit_amount: number; product_data: { name: string } } }[]
+        payment_intent_data: { application_fee_amount?: number } },
+    ]
+
+    const surcharge   = processingSurchargeCents(20_000)
+    const platformFee = 5000 * 0.2   // 5% of $200.00, in cents
+
+    // A visible, separately-named line — not folded into the invoice amount.
+    expect(params.line_items).toHaveLength(2)
+    expect(params.line_items[0]!.price_data.unit_amount).toBe(20_000)
+    expect(params.line_items[1]!.price_data.unit_amount).toBe(surcharge)
+    expect(params.line_items[1]!.price_data.product_data.name).toMatch(/processing/i)
+
+    // ...and the same amount added to the application fee, so the vendor's
+    // payout (charged − application fee) is unchanged by the surcharge.
+    const charged = 20_000 + surcharge
+    const appFee  = params.payment_intent_data.application_fee_amount!
+    expect(appFee).toBe(platformFee + surcharge)
+    expect(charged - appFee).toBe(20_000 - platformFee)
   })
 })
