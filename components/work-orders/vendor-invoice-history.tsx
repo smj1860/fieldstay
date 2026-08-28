@@ -22,15 +22,19 @@ export interface InvoiceHistoryRow {
 }
 
 const STATUS_TONE: Record<InvoiceStatus, 'green' | 'amber' | 'slate'> = {
-  paid:            'green',
-  pending_payment: 'amber',
-  cancelled:       'slate',
+  paid:                'green',
+  pending_payment:     'amber',
+  cancelled:           'slate',
+  refunded:            'amber',
+  partially_refunded:  'amber',
 }
 
 const STATUS_LABEL: Record<InvoiceStatus, string> = {
-  paid:            'Paid',
-  pending_payment: 'Pending',
-  cancelled:       'Cancelled',
+  paid:                'Paid',
+  pending_payment:     'Pending',
+  cancelled:           'Cancelled',
+  refunded:            'Refunded',
+  partially_refunded:  'Partially Refunded',
 }
 
 export function VendorInvoiceHistory({

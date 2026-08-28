@@ -17,7 +17,7 @@ import {
   acceptVendorSuggestion, dismissVendorSuggestion,
   acceptCrewSuggestion, dismissCrewSuggestion,
 } from './actions'
-import type { WoStatus, PriorityLevel, VendorSpecialty, ScheduleCreates, ScheduleType, ScheduleFrequency } from '@/types/database'
+import type { WoStatus, PriorityLevel, VendorSpecialty, ScheduleCreates, ScheduleType, ScheduleFrequency, InvoiceStatus } from '@/types/database'
 import { WorkOrderDetail, type WorkOrderDetailData } from '@/components/work-orders/work-order-detail'
 import { MaintenanceCalendar } from './maintenance-calendar'
 import { CreateWorkOrderModal } from './CreateWorkOrderModal'
@@ -80,8 +80,13 @@ interface WorkOrderRow {
     quantity: number; unit: string | null; unit_cost: number; line_total: number | null
     sort_order: number; created_at: string
   }>
-  work_order_invoices?: { id: string; status: 'pending_payment' | 'paid' | 'cancelled' }
-    | { id: string; status: 'pending_payment' | 'paid' | 'cancelled' }[] | null
+  // InvoiceStatus, not a hand-duplicated literal union. This was a
+  // hand-copied 'pending_payment' | 'paid' | 'cancelled' until the refund
+  // migration added 'refunded'/'partially_refunded' to InvoiceStatus — a copy
+  // here would have silently stayed the narrower, stale set, since nothing
+  // forces two independent literal unions to agree.
+  work_order_invoices?: { id: string; status: InvoiceStatus }
+    | { id: string; status: InvoiceStatus }[] | null
 }
 
 interface PropertyOption {
@@ -203,7 +208,7 @@ function toWorkOrderDetailData(wo: WorkOrderRow): WorkOrderDetailData {
     completion_notes:       wo.completion_notes,
     completed_by_name:      wo.completed_by_name,
     invoice_reference:      wo.invoice_reference,
-    invoiceStatus:          invoice?.status ?? null,
+    invoiceStatus:          (invoice?.status ?? null) as WorkOrderDetailData['invoiceStatus'],
     invoiceId:              invoice?.id ?? null,
     vendor_acknowledged_at: wo.vendor_acknowledged_at,
     completion_verified_at: wo.completion_verified_at,

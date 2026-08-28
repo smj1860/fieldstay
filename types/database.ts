@@ -840,7 +840,12 @@ export interface WorkOrderLineItem {
   vendor_submitted: boolean
 }
 
-export type InvoiceStatus = 'pending_payment' | 'paid' | 'cancelled'
+export type InvoiceStatus =
+  | 'pending_payment'
+  | 'paid'
+  | 'cancelled'
+  | 'partially_refunded'
+  | 'refunded'
 
 export interface WorkOrderInvoice {
   id:                         string
@@ -856,6 +861,11 @@ export interface WorkOrderInvoice {
   stripe_checkout_session_id: string | null
   stripe_payment_intent_id:   string | null
   paid_at:                    string | null
+  // Running total Stripe has refunded on this invoice's payment intent, in
+  // dollars — cumulative, not incremental. See the webhook handler for why:
+  // charge.refunded reports the running total on every delivery.
+  amount_refunded:            number
+  refunded_at:                string | null
   submitted_at:               string
   created_at:                 string
 }

@@ -8,6 +8,25 @@ import { logAuditEvent }              from '@/lib/audit'
 import { unwrapJoin }                 from '@/lib/utils/supabase-joins'
 import { reportError }                from '@/lib/observability/report-error'
 
+/**
+ * The error message for an invoice already past the point of a NEW Checkout
+ * session, or null if it's still payable. Extracted so POST reads as one
+ * guard rather than three sequential `if`s — each pushed cognitive
+ * complexity up on its own, and 'refunded'/'partially_refunded' were the
+ * addition that crossed the ratchet's limit.
+ *
+ * All three settled states return the same 409: a refunded invoice was
+ * 'paid' a moment ago and would otherwise fall through into a brand-new
+ * Checkout session — paid a second time by anyone who still has the link, or
+ * by a stale Pay button the invoice page hadn't re-rendered yet.
+ */
+function invoiceSettledError(status: string): string | null {
+  if (status === 'paid') return 'Invoice already paid'
+  if (status === 'cancelled') return 'Invoice is cancelled'
+  if (status === 'refunded' || status === 'partially_refunded') return 'Invoice has been refunded'
+  return null
+}
+
 export async function POST(
   _request: NextRequest,
   { params }: { params: Promise<{ invoiceId: string }> }
@@ -53,12 +72,9 @@ export async function POST(
     return NextResponse.json({ error: 'Invoice not found' }, { status: 404 })
   }
 
-  if (invoice.status === 'paid') {
-    return NextResponse.json({ error: 'Invoice already paid' }, { status: 409 })
-  }
-
-  if (invoice.status === 'cancelled') {
-    return NextResponse.json({ error: 'Invoice is cancelled' }, { status: 409 })
+  const settledError = invoiceSettledError(invoice.status)
+  if (settledError) {
+    return NextResponse.json({ error: settledError }, { status: 409 })
   }
 
   const vendor = unwrapJoin(invoice.vendors)

@@ -4,6 +4,7 @@ import { stripe, STRIPE_API_VERSION } from '@/lib/stripe/client'
 import { createServiceClient } from '@/lib/supabase/server'
 import { reportError } from '@/lib/observability/report-error'
 import { handleWorkOrderInvoicePaid } from './handlers/work-order-invoice'
+import { handleWorkOrderInvoiceRefunded } from './handlers/work-order-invoice-refund'
 import {
   handleSponsorCheckoutCompleted,
   handleSponsorSubscriptionCancelled,
@@ -112,6 +113,10 @@ async function routeStripeEvent(supabase: ServiceClient, event: StripeEvent): Pr
 
     case 'invoice.payment_succeeded':
       await onInvoicePaymentSucceeded(event.data.object)
+      return
+
+    case 'charge.refunded':
+      await handleWorkOrderInvoiceRefunded(supabase, event.data.object)
       return
 
     default:
