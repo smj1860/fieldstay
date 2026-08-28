@@ -7,6 +7,7 @@ import { cookies } from 'next/headers'
 import { requireOrgMember, requireOrgRole } from '@/lib/auth'
 import { createClient, createReauthClient } from '@/lib/supabase/server'
 import { stripe, PLANS, type CheckoutPlanKey } from '@/lib/stripe/client'
+import { checkoutIdempotencyKey } from './checkout-idempotency'
 import { inngest } from '@/lib/inngest/client'
 import { geocodeZip } from '@/lib/geocoding'
 import { logAuditEvent, logAuditEvents } from '@/lib/audit'
@@ -1354,6 +1355,83 @@ const LIVE_SUBSCRIPTION_STATUSES = new Set<string>([
   'active', 'trialing', 'past_due', 'unpaid', 'paused',
 ])
 
+/**
+ * Is this checkout failure a CONFIGURATION fault rather than a transient one?
+ *
+ * The distinction is the difference between correct advice and advice that can
+ * never work. Stripe's `StripeInvalidRequestError` is a 400: the request we
+ * sent is wrong and the identical request will be wrong forever. Telling a
+ * customer to "try again" at that moment sends them into a loop they cannot
+ * win, at the exact instant they were trying to hand us money — and the retry
+ * generates a fresh Sentry event each time, so the signal that something is
+ * misconfigured is buried under the noise of the customer obeying us.
+ *
+ * This is not hypothetical. On 2026-08-28 a production checkout failed with
+ * "Price `price_…` is not available to be purchased because its product is not
+ * active" — an archived product in the Stripe dashboard — and the customer was
+ * shown "Operation failed. Please try again."
+ *
+ * Narrow on purpose: a network blip, a Stripe outage, a timeout and a
+ * rate-limit are all genuinely worth retrying and must keep the retry message.
+ */
+function isStripeConfigFault(err: unknown): boolean {
+  if (typeof err !== 'object' || err === null) return false
+  const type = (err as { type?: unknown }).type
+  return type === 'StripeInvalidRequestError'
+}
+
+/**
+ * Sentry `extra` for a failed checkout: WHICH plan and WHICH interval.
+ *
+ * The report previously carried neither, so triaging the 2026-08-28
+ * archived-product failure meant working backwards from the org's active
+ * property count to rule out the one tier whose cap the property-count guard
+ * would have rejected — and even then it only narrowed eight candidate prices
+ * to six. Both values are enum-shaped and carry no PII.
+ *
+ * The price id is included deliberately: it is a public identifier (it appears
+ * in the Stripe dashboard and in checkout), and it is the single thing that
+ * makes this report actionable, because it names the env var to repoint or the
+ * product to un-archive. Read back from PLANS rather than passed in, so it is
+ * still present when the throw happened before the caller resolved it.
+ */
+function checkoutFailureContext(
+  planKey: CheckoutPlanKey,
+  interval: 'monthly' | 'annual',
+): Record<string, string> {
+  const plan = PLANS[planKey]
+  return {
+    plan:     planKey,
+    interval,
+    price_id: (interval === 'annual' ? plan?.annualPriceId : plan?.monthlyPriceId) ?? '(unset)',
+  }
+}
+
+/**
+ * The message the customer sees for a failed checkout.
+ *
+ * Separate from the reportError call rather than wrapping it, so the report
+ * stays visibly inside the catch block — error-reporting-coverage.test.ts is a
+ * text scanner and cannot follow a delegating call, so a catch whose only
+ * alerting happens one function away reads to it as log-only. Splitting the
+ * two keeps createCheckoutSession under the complexity ratchet without
+ * blinding that guardrail.
+ */
+function checkoutFailureMessage(err: unknown): SettingsActionState {
+  // No "try again": see isStripeConfigFault. The customer cannot fix this and
+  // repeating the click cannot either, so the only honest next step is the one
+  // that reaches someone who can.
+  if (isStripeConfigFault(err)) {
+    return {
+      error:
+        'This plan cannot be purchased right now — it is a problem on our side, not with your card. ' +
+        'Email support@fieldstay.app and we will sort it out and get you set up.',
+    }
+  }
+
+  return { error: 'Operation failed. Please try again.' }
+}
+
 export async function createCheckoutSession(
   planKey: CheckoutPlanKey,
   interval: 'monthly' | 'annual'
@@ -1521,11 +1599,30 @@ export async function createCheckoutSession(
       // Collapses the double-click the guard above cannot see: two clicks a
       // second apart both pass the live-subscription check (neither has
       // completed yet), and without this each would mint its own session, so
-      // completing both would create two subscriptions. Keyed on what the
-      // request actually is, so the same org asking for the same plan gets
-      // the same session back. Stripe expires idempotency keys after 24h,
-      // which is the right window — beyond that a fresh session is correct.
-      idempotencyKey: `checkout:${membership.org_id}:${planKey}:${interval}`,
+      // completing both would create two subscriptions.
+      //
+      // The bucket is load-bearing, and the reason is the opposite of what
+      // the original 24h-wide key assumed. Stripe saves the status code and
+      // body of the FIRST request under a key and replays it for every later
+      // request with that key — errors included. So a key that is stable for
+      // 24 hours does not just deduplicate a double-click; it PINS a failure.
+      //
+      // On 2026-08-28 a checkout failed because the price's product was
+      // archived in Stripe. Un-archiving the product fixes Stripe, and the
+      // button would still have returned the identical error for the rest of
+      // the day — replayed from cache, never re-evaluated — with a Sentry
+      // report each time that looked like the fix had not worked. A billing
+      // path that cannot be re-tested for 24 hours after a config fix is
+      // worse than one with no idempotency key at all.
+      //
+      // Ten minutes is sized to the problem the key actually solves. A
+      // double-click is seconds apart; even an impatient back-and-re-click
+      // after a slow redirect is inside one bucket. Two clicks straddling a
+      // boundary get separate sessions, which is the pre-existing behaviour
+      // for any two clicks more than 24h apart and is caught downstream: once
+      // either checkout completes, stripe_customer_id is set and the
+      // live-subscription guard above refuses the second.
+      idempotencyKey: checkoutIdempotencyKey(membership.org_id, planKey, interval),
     })
 
     if (!session.url) return { error: 'Could not create checkout session' }
@@ -1534,8 +1631,11 @@ export async function createCheckoutSession(
     return { redirectUrl: session.url }
   } catch (err) {
     console.error('[createCheckoutSession]', err)
-    reportError(err, { site: 'serverAction.settings.createCheckoutSession' })
-    return { error: 'Operation failed. Please try again.' }
+    reportError(err, {
+      site:  'serverAction.settings.createCheckoutSession',
+      extra: checkoutFailureContext(planKey, interval),
+    })
+    return checkoutFailureMessage(err)
   }
 }
 

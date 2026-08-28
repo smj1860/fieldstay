@@ -111,8 +111,42 @@ describe('onboarding/actions — createOrganization', () => {
           name: 'organization/created',
           data: { org_id: 'org_new_1', user_id: 'user_1' },
         }),
+        // Leg 3: the trial-expiry email sequence.
+        //
+        // THIS IS THE DEFECT THIS TEST EXISTS FOR. Until 2026-08-28 the only
+        // sender of billing/trial-lifecycle-start was the Stripe webhook,
+        // gated on `customer.subscription.created && planStatus === 'trialing'
+        // && subscription.trial_end` — a trial STRIPE knows about. FieldStay's
+        // trial is local: a timestamp written by the RPC above, with no Stripe
+        // customer and no subscription until the user subscribes at the END of
+        // it. That condition could never be true, so the event was never sent
+        // and handleTrialLifecycle never ran for a single org in the product's
+        // history. Nobody was ever told their trial was ending.
+        //
+        // Verified against production before fixing, not inferred: zero
+        // system_job_runs rows for the function across every org, including
+        // three whose trials had ended weeks earlier.
+        expect.objectContaining({
+          name: 'billing/trial-lifecycle-start',
+          data: expect.objectContaining({
+            org_id:     'org_new_1',
+            user_id:    'user_1',
+            user_email: 'pm@example.com',
+            org_name:   'Lake Martin Delivery',
+          }),
+        }),
       ])
     )
+
+    // The sequence sleeps until `trial_ends_at - 3 days`, so a missing or
+    // malformed date does not fail loudly — it schedules a sleep against
+    // Invalid Date and the emails silently never arrive, which is the same
+    // symptom as the bug being fixed. Assert it is a real, future timestamp.
+    const sent = vi.mocked(inngest.send).mock.calls[0]![0] as { name: string; data: Record<string, unknown> }[]
+    const trialLeg = sent.find((e) => e.name === 'billing/trial-lifecycle-start')!
+    const trialEndsAt = new Date(trialLeg.data.trial_ends_at as string)
+    expect(Number.isNaN(trialEndsAt.getTime())).toBe(false)
+    expect(trialEndsAt.getTime()).toBeGreaterThan(Date.now())
   })
 
   it('redirects to /ops without firing the drip again when the org already existed (idempotent double-submit)', async () => {

@@ -1,6 +1,8 @@
 import type { Metadata } from 'next'
 import { redirect } from 'next/navigation'
 import { headers } from 'next/headers'
+import { trialState } from '@/lib/billing/trial'
+import { TrialCountdownBanner } from '@/components/billing/trial-countdown-banner'
 import { after } from 'next/server'
 import { createServiceClient } from '@/lib/supabase/server'
 import { requireOrgMember } from '@/lib/auth'
@@ -84,9 +86,13 @@ export default async function DashboardLayout({
   const planStatus  = org.plan_status
   const trialEndsAt = org.trial_ends_at
 
-  const trialExpired = planStatus === 'trialing'
-    && trialEndsAt !== null
-    && new Date(trialEndsAt) < new Date()
+  // Shared with the countdown banner below and with lib/billing/trial.ts's
+  // TRIAL_WARNING_DAYS, so the wall and the warning cannot disagree about when
+  // a trial ends. The comparison itself is unchanged: still the live date, not
+  // plan_status, because four production orgs are still marked 'trialing' with
+  // dates weeks past and nothing transitions that column.
+  const trial        = trialState(planStatus, trialEndsAt)
+  const trialExpired = trial.expired
 
   const isBlocked = trialExpired
     || planStatus === 'cancelled'
@@ -250,6 +256,11 @@ export default async function DashboardLayout({
             />
           )
         })}
+        {/* Rendered above every dashboard page, not on one screen: the whole
+            point is that a PM cannot miss it, and there is no telling which
+            page they land on. Only inside the warning window — outside it this
+            is noise on an account with nothing to decide. */}
+        {trial.showWarning && <TrialCountdownBanner daysLeft={trial.daysLeft} />}
         {children}
       </DashboardShell>
 

@@ -82,6 +82,10 @@ import {
   saveOrgSmsTemplate,
   updateSlackWebhook,
 } from '@/app/(dashboard)/settings/actions'
+import {
+  checkoutIdempotencyKey,
+  CHECKOUT_IDEMPOTENCY_WINDOW_MS,
+} from '@/app/(dashboard)/settings/checkout-idempotency'
 import { requireOrgMember, requireOrgRole } from '@/lib/auth'
 import { stripe } from '@/lib/stripe/client'
 import { revalidatePath } from 'next/cache'
@@ -640,8 +644,43 @@ describe('settings/actions', () => {
 
       expect(stripe.checkout.sessions.create).toHaveBeenCalledWith(
         expect.anything(),
-        expect.objectContaining({ idempotencyKey: `checkout:${ORG_ID}:growth:annual` }),
+        expect.objectContaining({ idempotencyKey: checkoutIdempotencyKey(ORG_ID, 'growth', 'annual') }),
       )
+    })
+
+    // ── The key must EXPIRE ─────────────────────────────────────────────
+    // Stripe saves the status and body of the first request under a key and
+    // replays it for every later request with that key — errors included. A
+    // key with no time component therefore pins a FAILURE for the 24h Stripe
+    // holds it: the 2026-08-28 archived-product error would have kept coming
+    // back, from cache, for the rest of the day after the product was
+    // un-archived, with a fresh Sentry report each time that read as "the fix
+    // did not work".
+    //
+    // Asserted as behaviour over two instants rather than by matching the key
+    // string, so this still fails if someone reverts to a constant key while
+    // leaving the helper's name in place.
+    it('rotates the idempotency key so a fixed config can be retried', () => {
+      const t0    = 1_800_000_000_000
+      const key   = (at: number) => checkoutIdempotencyKey(ORG_ID, 'growth', 'annual', at)
+
+      // Inside one window a double-click collapses — the thing the key is for.
+      expect(key(t0)).toBe(key(t0 + 5_000))
+
+      // Past the window it does not, so a retry actually reaches Stripe.
+      expect(key(t0)).not.toBe(key(t0 + CHECKOUT_IDEMPOTENCY_WINDOW_MS + 1))
+
+      // And the window is short enough to be useful: well under the 24h
+      // Stripe caches a response for. A key that rotated daily would satisfy
+      // the assertion above and still leave the billing path untestable for a
+      // day after a fix.
+      expect(CHECKOUT_IDEMPOTENCY_WINDOW_MS).toBeLessThanOrEqual(30 * 60 * 1000)
+
+      // Distinct plans and orgs stay distinct — the bucket must not have
+      // flattened the key into something two callers share.
+      expect(key(t0)).not.toBe(checkoutIdempotencyKey(ORG_ID, 'starter', 'annual', t0))
+      expect(key(t0)).not.toBe(checkoutIdempotencyKey(ORG_ID, 'growth', 'monthly', t0))
+      expect(key(t0)).not.toBe(checkoutIdempotencyKey('other-org', 'growth', 'annual', t0))
     })
 
     // ── Property-cap guard ──────────────────────────────────────────────
