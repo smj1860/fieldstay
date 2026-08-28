@@ -1381,7 +1381,7 @@ function isStripeConfigFault(err: unknown): boolean {
 }
 
 /**
- * Sentry `extra` for a failed checkout: WHICH plan and WHICH interval.
+ * Sentry TAGS for a failed checkout: WHICH plan and WHICH interval.
  *
  * The report previously carried neither, so triaging the 2026-08-28
  * archived-product failure meant working backwards from the org's active
@@ -1632,8 +1632,14 @@ export async function createCheckoutSession(
   } catch (err) {
     console.error('[createCheckoutSession]', err)
     reportError(err, {
-      site:  'serverAction.settings.createCheckoutSession',
-      extra: checkoutFailureContext(planKey, interval),
+      site: 'serverAction.settings.createCheckoutSession',
+      // TAGS, not extra. All three are low-cardinality enums (four plans, two
+      // intervals, nine configured price ids), and the whole point of
+      // capturing them is to ask "which plans are failing" — which needs them
+      // indexed. In `extra` they are attached to the event but invisible to
+      // Discover, and a query naming them returns blank columns that read as
+      // though nothing was captured at all.
+      tags: checkoutFailureContext(planKey, interval),
     })
     return checkoutFailureMessage(err)
   }
