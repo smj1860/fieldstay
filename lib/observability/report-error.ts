@@ -10,6 +10,25 @@ interface ReportErrorContext {
   // never actual_cost, email, phone, or Stripe tokens. See CLAUDE.md
   // "Sensitive-data logging".
   extra?: Record<string, string | number | boolean | null>
+  /**
+   * Extra Sentry TAGS. Same sensitive-data rule as `extra` — plus a
+   * cardinality one, because the difference between the two fields is not
+   * cosmetic and picking wrong is a silent loss.
+   *
+   * `extra` is attached to the event and readable on its page, but it is NOT
+   * indexed: it cannot be searched, filtered or aggregated in Discover, and a
+   * query naming an `extra` key returns the events with the column blank —
+   * which reads as "the value was not set" rather than "this field is not
+   * queryable". The checkout plan/interval/price_id landed in `extra` first
+   * and looked missing for exactly that reason.
+   *
+   * Tags ARE indexed, so use them for the low-cardinality dimensions you will
+   * want to group by — an enum, a plan key, a provider name. Never for
+   * something unbounded like a row id: Sentry caps distinct tag values, and a
+   * high-cardinality tag degrades search for the whole project. Those belong
+   * in `extra`.
+   */
+  tags?: Record<string, string>
 }
 
 /**
@@ -71,6 +90,9 @@ export function reportError(err: unknown, context: ReportErrorContext): void {
 
   Sentry.captureException(error, {
     tags: {
+      // Caller tags first, so `site`/`org_id` cannot be overwritten by one —
+      // those two are what every triage query filters on.
+      ...(context.tags ?? {}),
       site: context.site,
       ...(context.orgId ? { org_id: context.orgId } : {}),
     },

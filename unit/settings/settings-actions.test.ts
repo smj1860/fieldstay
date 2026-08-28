@@ -632,6 +632,28 @@ describe('settings/actions', () => {
       expect(stripe.billingPortal.sessions.create).not.toHaveBeenCalled()
     })
 
+    // Stripe Checkout hides the promotion-code field unless the session asks
+    // for it, and the omission is SILENT: the page renders, takes a card and
+    // charges full price. A customer holding a code has nowhere to type it and
+    // nothing tells them so. Found the first time a checkout page was reached
+    // for real — there was no field on it.
+    it('lets the customer enter a promotion code', async () => {
+      const supabase = makeSupabase({
+        organizations: [{ data: { stripe_customer_id: null, billing_email: 'pm@example.com' }, error: null }],
+        integration_connections: [{ data: null, error: null }],
+      })
+      mockRoleAuthed(supabase)
+      vi.mocked(stripe.checkout.sessions.create).mockResolvedValue({ url: 'https://checkout' } as never)
+
+      await createCheckoutSession('growth', 'monthly')
+
+      const [params] = vi.mocked(stripe.checkout.sessions.create).mock.calls[0]!
+      expect(params).toMatchObject({ allow_promotion_codes: true })
+      // Stripe rejects a session that sets both, so this is not merely
+      // redundant — it is the difference between a working session and a 400.
+      expect(params).not.toHaveProperty('discounts')
+    })
+
     it('passes an idempotency key so a double-click cannot mint two sessions', async () => {
       const supabase = makeSupabase({
         organizations: [{ data: { stripe_customer_id: null, billing_email: 'pm@example.com' }, error: null }],
