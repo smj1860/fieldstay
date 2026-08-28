@@ -7,6 +7,7 @@ import { cookies } from 'next/headers'
 import { requireOrgMember, requireOrgRole } from '@/lib/auth'
 import { createClient, createReauthClient } from '@/lib/supabase/server'
 import { stripe, PLANS, type CheckoutPlanKey } from '@/lib/stripe/client'
+import { checkoutIdempotencyKey } from './checkout-idempotency'
 import { inngest } from '@/lib/inngest/client'
 import { geocodeZip } from '@/lib/geocoding'
 import { logAuditEvent, logAuditEvents } from '@/lib/audit'
@@ -1598,11 +1599,30 @@ export async function createCheckoutSession(
       // Collapses the double-click the guard above cannot see: two clicks a
       // second apart both pass the live-subscription check (neither has
       // completed yet), and without this each would mint its own session, so
-      // completing both would create two subscriptions. Keyed on what the
-      // request actually is, so the same org asking for the same plan gets
-      // the same session back. Stripe expires idempotency keys after 24h,
-      // which is the right window — beyond that a fresh session is correct.
-      idempotencyKey: `checkout:${membership.org_id}:${planKey}:${interval}`,
+      // completing both would create two subscriptions.
+      //
+      // The bucket is load-bearing, and the reason is the opposite of what
+      // the original 24h-wide key assumed. Stripe saves the status code and
+      // body of the FIRST request under a key and replays it for every later
+      // request with that key — errors included. So a key that is stable for
+      // 24 hours does not just deduplicate a double-click; it PINS a failure.
+      //
+      // On 2026-08-28 a checkout failed because the price's product was
+      // archived in Stripe. Un-archiving the product fixes Stripe, and the
+      // button would still have returned the identical error for the rest of
+      // the day — replayed from cache, never re-evaluated — with a Sentry
+      // report each time that looked like the fix had not worked. A billing
+      // path that cannot be re-tested for 24 hours after a config fix is
+      // worse than one with no idempotency key at all.
+      //
+      // Ten minutes is sized to the problem the key actually solves. A
+      // double-click is seconds apart; even an impatient back-and-re-click
+      // after a slow redirect is inside one bucket. Two clicks straddling a
+      // boundary get separate sessions, which is the pre-existing behaviour
+      // for any two clicks more than 24h apart and is caught downstream: once
+      // either checkout completes, stripe_customer_id is set and the
+      // live-subscription guard above refuses the second.
+      idempotencyKey: checkoutIdempotencyKey(membership.org_id, planKey, interval),
     })
 
     if (!session.url) return { error: 'Could not create checkout session' }
