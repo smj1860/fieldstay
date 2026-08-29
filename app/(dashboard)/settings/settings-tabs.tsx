@@ -1351,8 +1351,10 @@ function BillingTab({
   const hasNoProperties = quantity < 1
   const overCeiling     = quantity > MAX_SELF_SERVE_PROPERTIES
   const canPrice         = !hasNoProperties && !overCeiling
-  const totalCents       = canPrice ? (interval === 'annual' ? annualCostCents(quantity) : monthlyCostCents(quantity)) : null
+  const costForInterval  = interval === 'annual' ? annualCostCents(quantity) : monthlyCostCents(quantity)
+  const totalCents       = canPrice ? costForInterval : null
   const breakdown         = canPrice ? bracketBreakdown(quantity, interval) : []
+  const checkoutButtonLabel = isSubscribed ? 'Manage Subscription' : 'Subscribe'
 
   return (
     <div className="max-w-2xl space-y-6">
@@ -1499,7 +1501,7 @@ function BillingTab({
             >
               {checkoutPending
                 ? <><Loader2 className="w-4 h-4 animate-spin" /> Redirecting…</>
-                : isSubscribed ? 'Manage Subscription' : 'Subscribe'
+                : checkoutButtonLabel
               }
             </Button>
           </Card>

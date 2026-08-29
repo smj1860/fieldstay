@@ -188,7 +188,7 @@ describe('Stripe price env coverage', () => {
       let m: RegExpExecArray | null
       while ((m = entryPattern.exec(arrayMatch![1]!)) !== null) {
         const upTo = Number(m[1])
-        const amountCents = Number(m[3]!.replace(/_/g, ''))
+        const amountCents = Number(m[3]!.replaceAll('_', ''))
         brackets.push(m[2] === 'flatAmountCents' ? { upTo, flatAmountCents: amountCents } : { upTo, unitAmountCents: amountCents })
       }
 

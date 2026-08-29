@@ -73,7 +73,7 @@ export const BRACKETS: readonly Bracket[] = [
 ] as const
 
 /** The highest property count this schedule prices. Above this is Enterprise. */
-export const MAX_SELF_SERVE_PROPERTIES = BRACKETS[BRACKETS.length - 1]!.upTo
+export const MAX_SELF_SERVE_PROPERTIES = BRACKETS.at(-1)!.upTo
 
 /**
  * Total monthly cost in cents for `quantity` properties, computed the same
@@ -98,9 +98,7 @@ export function monthlyCostCents(quantity: number): number | null {
     const unitsInBracket = Math.min(bracket.upTo, quantity) - coveredThrough
     if (unitsInBracket <= 0) continue
 
-    total += bracket.flatAmountCents !== undefined
-      ? bracket.flatAmountCents
-      : bracket.unitAmountCents * unitsInBracket
+    total += bracket.flatAmountCents ?? bracket.unitAmountCents * unitsInBracket
 
     coveredThrough = bracket.upTo
   }
