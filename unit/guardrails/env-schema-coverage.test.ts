@@ -139,15 +139,9 @@ function fullEnv(): EnvRecord {
     STRIPE_SECRET_KEY:             'sk_test_123',
     STRIPE_WEBHOOK_SECRET:         'whsec_123',
     STRIPE_CONNECT_WEBHOOK_SECRET: 'whsec_456',
-    STRIPE_PRICE_HOSTS_MONTHLY:     'price_h1',
-    STRIPE_PRICE_HOSTS_ANNUAL:      'price_h2',
-    STRIPE_PRICE_STARTER_MONTHLY:   'price_1',
-    STRIPE_PRICE_STARTER_ANNUAL:    'price_2',
-    STRIPE_PRICE_GROWTH_MONTHLY:    'price_3',
-    STRIPE_PRICE_GROWTH_ANNUAL:     'price_4',
-    STRIPE_PRICE_PORTFOLIO_MONTHLY: 'price_5',
-    STRIPE_PRICE_PORTFOLIO_ANNUAL:  'price_6',
-    STRIPE_PRICE_SPONSOR_MONTHLY:   'price_7',
+    STRIPE_PRICE_PLATFORM_MONTHLY: 'price_1',
+    STRIPE_PRICE_PLATFORM_ANNUAL:   'price_2',
+    STRIPE_PRICE_SPONSOR_MONTHLY:   'price_3',
     RESEND_API_KEY:                 're_123',
     RESEND_FROM_EMAIL:              'noreply@fieldstay.app',
     RESEND_FROM_NAME:               'FieldStay',
@@ -174,11 +168,11 @@ describe('guardrail: env validation behaviour', () => {
 
   it('DETECTS the original bug: a missing Stripe price id fails a production boot', () => {
     const env = fullEnv()
-    delete env.STRIPE_PRICE_GROWTH_MONTHLY
+    delete env.STRIPE_PRICE_PLATFORM_MONTHLY
 
     const result = validateServerEnv(env, 'production')
     expect(result.ok).toBe(false)
-    expect(result.errors.map((e) => e.name)).toContain('STRIPE_PRICE_GROWTH_MONTHLY')
+    expect(result.errors.map((e) => e.name)).toContain('STRIPE_PRICE_PLATFORM_MONTHLY')
   })
 
   it('DETECTS the original bug: a missing STRIPE_WEBHOOK_SECRET fails a production boot', () => {
@@ -192,10 +186,10 @@ describe('guardrail: env validation behaviour', () => {
 
   it('a present-but-malformed value is an error even in development', () => {
     const env = fullEnv()
-    env.STRIPE_PRICE_GROWTH_MONTHLY = 'sk_live_oops' // a key pasted into a price slot
+    env.STRIPE_PRICE_PLATFORM_MONTHLY = 'sk_live_oops' // a key pasted into a price slot
 
     const result = validateServerEnv(env, 'development')
-    expect(result.errors.map((e) => e.name)).toContain('STRIPE_PRICE_GROWTH_MONTHLY')
+    expect(result.errors.map((e) => e.name)).toContain('STRIPE_PRICE_PLATFORM_MONTHLY')
   })
 
   it("SMS_ENABLED='TRUE' is rejected — the gate compares against exactly 'true'", () => {
@@ -265,14 +259,14 @@ describe('guardrail: env validation behaviour', () => {
 // duplicated price id passes all of them — both values are present and both
 // match the `price_` prefix. It is only visible by comparison, and it is a
 // money bug: the annual id pasted into the monthly slot charges a customer who
-// clicked "$89/mo" the full $890, with a valid Stripe receipt and no error
-// anywhere. Fourteen of these ids are now set by hand, per environment, in
-// _MONTHLY/_ANNUAL pairs whose names differ by one word.
+// expected the $49/mo anchor the full $490, with a valid Stripe receipt and no
+// error anywhere. These ids are set by hand, per environment, in a
+// _MONTHLY/_ANNUAL pair whose names differ by one word.
 // ============================================================================
 describe('guardrail: no two Stripe price ids may be the same', () => {
   it('rejects the classic paste error — the annual id in the monthly slot', () => {
     const env = fullEnv()
-    env.STRIPE_PRICE_HOSTS_MONTHLY = env.STRIPE_PRICE_HOSTS_ANNUAL
+    env.STRIPE_PRICE_PLATFORM_MONTHLY = env.STRIPE_PRICE_PLATFORM_ANNUAL
 
     const result = validateServerEnv(env, 'production')
 
@@ -284,13 +278,13 @@ describe('guardrail: no two Stripe price ids may be the same', () => {
     const conflict = result.errors.find((e) => e.kind === 'conflict')
     expect(conflict).toBeDefined()
     expect(conflict!.severity).toBe('error')
-    expect(`${conflict!.name} ${conflict!.detail}`).toContain('STRIPE_PRICE_HOSTS_MONTHLY')
-    expect(`${conflict!.name} ${conflict!.detail}`).toContain('STRIPE_PRICE_HOSTS_ANNUAL')
+    expect(`${conflict!.name} ${conflict!.detail}`).toContain('STRIPE_PRICE_PLATFORM_MONTHLY')
+    expect(`${conflict!.name} ${conflict!.detail}`).toContain('STRIPE_PRICE_PLATFORM_ANNUAL')
   })
 
-  it('catches a collision ACROSS plans, not just within a pair', () => {
+  it('catches a collision ACROSS purposes, not just within the monthly/annual pair', () => {
     const env = fullEnv()
-    env.STRIPE_PRICE_GROWTH_MONTHLY = env.STRIPE_PRICE_STARTER_MONTHLY
+    env.STRIPE_PRICE_PLATFORM_MONTHLY = env.STRIPE_PRICE_SPONSOR_MONTHLY
 
     const result = validateServerEnv(env, 'production')
 
@@ -301,7 +295,7 @@ describe('guardrail: no two Stripe price ids may be the same', () => {
   it('is an error in every environment — there is none where the wrong charge is acceptable', () => {
     for (const target of ['production', 'preview', 'development'] as const) {
       const env = fullEnv()
-      env.STRIPE_PRICE_HOSTS_ANNUAL = env.STRIPE_PRICE_HOSTS_MONTHLY
+      env.STRIPE_PRICE_PLATFORM_ANNUAL = env.STRIPE_PRICE_PLATFORM_MONTHLY
 
       const result = validateServerEnv(env, target)
 
@@ -311,14 +305,14 @@ describe('guardrail: no two Stripe price ids may be the same', () => {
 
   it('does not fire on absent or blank vars — that is the missing-var check\'s job', () => {
     const env = fullEnv()
-    env.STRIPE_PRICE_HOSTS_MONTHLY = ''
-    env.STRIPE_PRICE_HOSTS_ANNUAL  = ''
+    env.STRIPE_PRICE_PLATFORM_MONTHLY = ''
+    env.STRIPE_PRICE_PLATFORM_ANNUAL  = ''
 
     const result = validateServerEnv(env, 'production')
 
     expect(result.errors.some((e) => e.kind === 'conflict')).toBe(false)
     // Still reported as missing, so the blank is not silently tolerated.
-    expect(result.errors.some((e) => e.name === 'STRIPE_PRICE_HOSTS_MONTHLY' && e.kind === 'missing')).toBe(true)
+    expect(result.errors.some((e) => e.name === 'STRIPE_PRICE_PLATFORM_MONTHLY' && e.kind === 'missing')).toBe(true)
   })
 
   it('a fully-configured environment with all-distinct ids has no conflict', () => {

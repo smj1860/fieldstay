@@ -56,9 +56,6 @@
   "components/dashboard-shell.tsx": [
     19
   ],
-  "components/pricing/PricingSection.tsx": [
-    16
-  ],
   "components/work-orders/VendorDispatchDialog.tsx": [
     24
   ],

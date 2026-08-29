@@ -58,9 +58,10 @@ export default function PricingSection({ provider, entryFeatures }: Readonly<Pri
           Simple, transparent pricing. 14-day free trial, no credit card required.
         </p>
         <p className="text-[var(--mkt-muted-strong)] text-sm mx-auto mb-6" style={{ maxWidth: 480 }}>
-          Most STR software makes you pay per property and gates parts of
-          the software behind higher tiers. It doesn&apos;t have to be that
-          way. Flat tier pricing. All the features, no gates.
+          Most STR software gates parts of the software behind higher tiers,
+          or hits you with a steep jump the moment you add one more property.
+          FieldStay doesn&apos;t. All the features, every tier. Add a
+          property and the price moves a few dollars, never a cliff.
         </p>
 
         {/* Monthly / Annual toggle */}
@@ -95,14 +96,22 @@ export default function PricingSection({ provider, entryFeatures }: Readonly<Pri
 
       {/* Plan cards — 5 tiers: 5-col at 2xl, 3-col at lg, 2-col tablet, 1-col mobile */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-5 gap-6 mb-8">
-        {tiers.map((plan) => (
+        {tiers.map((plan) => {
+          // Computed once per card instead of re-branching on plan.highlight
+          // at every single className — six identical ternary pairs used to
+          // be spelled out inline, each one counted separately toward this
+          // map callback's cognitive complexity.
+          const cardClass    = plan.highlight ? "bg-brand-800 border-[var(--mkt-gold)]" : "bg-[var(--mkt-surface)] border-[var(--mkt-border)]"
+          const primaryText  = plan.highlight ? "text-white" : "text-[var(--mkt-ink)]"
+          const mutedText    = plan.highlight ? "text-[var(--mkt-on-dark-soft)]" : "text-[var(--mkt-muted)]"
+          const featureText  = plan.highlight ? "text-[var(--mkt-on-dark-softer)]" : "text-[var(--mkt-muted)]"
+          const propsBadge   = plan.highlight ? "bg-brand-panel text-[var(--mkt-on-dark-softer)]" : "bg-white border border-[var(--mkt-border)] text-[var(--mkt-ink)]"
+          const ctaClass     = plan.highlight ? "bg-[var(--mkt-gold)] text-[var(--mkt-ink)] hover:bg-[var(--mkt-gold-hover)]" : "bg-brand-800 text-white hover:bg-[var(--mkt-ink-hover)]"
+
+          return (
           <div
             key={plan.name}
-            className={`rounded-2xl p-6 border relative flex flex-col ${
-              plan.highlight
-                ? "bg-brand-800 border-[var(--mkt-gold)]"
-                : "bg-[var(--mkt-surface)] border-[var(--mkt-border)]"
-            }`}
+            className={`rounded-2xl p-6 border relative flex flex-col ${cardClass}`}
           >
             {plan.highlight && (
               <div className="absolute -top-3 left-1/2 -translate-x-1/2 bg-[var(--mkt-gold)] text-[var(--mkt-ink)] text-xs font-bold px-3 py-1 rounded-full whitespace-nowrap">
@@ -112,29 +121,20 @@ export default function PricingSection({ provider, entryFeatures }: Readonly<Pri
 
             {/* Plan name + price */}
             <div className="mb-5">
-              <div
-                className={`font-bold text-lg mb-1 ${
-                  plan.highlight ? "text-white" : "text-[var(--mkt-ink)]"
-                }`}
-              >
+              <div className={`font-bold text-lg mb-1 ${primaryText}`}>
                 {plan.name}
               </div>
 
               <div className="flex items-end gap-1 mb-1 min-h-[48px]">
                 {plan.monthly !== null ? (
                   <>
-                    <span
-                      className={`text-3xl font-bold ${
-                        plan.highlight ? "text-white" : "text-[var(--mkt-ink)]"
-                      }`}
-                    >
+                    <span className={`text-xs font-semibold mb-2 ${mutedText}`}>
+                      from{' '}
+                    </span>
+                    <span className={`text-3xl font-bold ${primaryText}`}>
                       ${annual ? plan.annual!.toLocaleString() : plan.monthly}
                     </span>
-                    <span
-                      className={`mb-1 text-sm ${
-                        plan.highlight ? "text-[var(--mkt-on-dark-soft)]" : "text-[var(--mkt-muted)]"
-                      }`}
-                    >
+                    <span className={`mb-1 text-sm ${mutedText}`}>
                       {annual ? '/yr' : '/mo'}
                     </span>
                   </>
@@ -145,21 +145,11 @@ export default function PricingSection({ provider, entryFeatures }: Readonly<Pri
                 )}
               </div>
 
-              <p
-                className={`text-sm ${
-                  plan.highlight ? "text-[var(--mkt-on-dark-soft)]" : "text-[var(--mkt-muted)]"
-                }`}
-              >
+              <p className={`text-sm ${mutedText}`}>
                 {plan.description}
               </p>
 
-              <div
-                className={`text-xs font-semibold mt-2 rounded-lg px-3 py-1.5 inline-block ${
-                  plan.highlight
-                    ? "bg-brand-panel text-[var(--mkt-on-dark-softer)]"
-                    : "bg-white border border-[var(--mkt-border)] text-[var(--mkt-ink)]"
-                }`}
-              >
+              <div className={`text-xs font-semibold mt-2 rounded-lg px-3 py-1.5 inline-block ${propsBadge}`}>
                 {plan.properties}
               </div>
             </div>
@@ -167,12 +157,7 @@ export default function PricingSection({ provider, entryFeatures }: Readonly<Pri
             {/* Feature list */}
             <ul className="space-y-2.5 mb-6 flex-1">
               {plan.features.map((f) => (
-                <li
-                  key={f}
-                  className={`flex items-center gap-2 text-sm ${
-                    plan.highlight ? "text-[var(--mkt-on-dark-softer)]" : "text-[var(--mkt-muted)]"
-                  }`}
-                >
+                <li key={f} className={`flex items-center gap-2 text-sm ${featureText}`}>
                   <svg
                     width="12"
                     height="10"
@@ -197,11 +182,7 @@ export default function PricingSection({ provider, entryFeatures }: Readonly<Pri
             {plan.monthly !== null ? (
               <Link
                 href={ctaHref}
-                className={`block text-center py-3 rounded-xl text-sm font-bold transition-colors ${
-                  plan.highlight
-                    ? "bg-[var(--mkt-gold)] text-[var(--mkt-ink)] hover:bg-[var(--mkt-gold-hover)]"
-                    : "bg-brand-800 text-white hover:bg-[var(--mkt-ink-hover)]"
-                }`}
+                className={`block text-center py-3 rounded-xl text-sm font-bold transition-colors ${ctaClass}`}
               >
                 Start Free Trial
               </Link>
@@ -214,7 +195,8 @@ export default function PricingSection({ provider, entryFeatures }: Readonly<Pri
               </a>
             )}
           </div>
-        ))}
+          )
+        })}
       </div>
     </div>
   );

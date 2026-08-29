@@ -201,11 +201,10 @@ export default function OwnerRezPage() {
 
       {/* ══════════════════════════════════════════
           SECTION 2 — WHITE
-          Pricing
-          NOTE: Update PricingSection component separately with new
-          price IDs: Starter $199, Growth $479, Portfolio $799.
-          RepuGuard should appear as a checkmark in ALL tier feature
-          lists — not as an add-on line item.
+          Pricing — numbers come from components/pricing/plan-tiers.ts,
+          which computes them from the live graduated schedule
+          (lib/stripe/brackets.ts). RepuGuard appears as a checkmark in
+          ALL tier feature lists — not as an add-on line item.
       ══════════════════════════════════════════ */}
       <div className="bg-white">
         <div className="max-w-6xl mx-auto px-6 py-20">

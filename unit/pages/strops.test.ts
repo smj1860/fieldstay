@@ -149,18 +149,18 @@ describe('structured data cannot drift from the visible page', () => {
     expect(questions.some((q) => q.includes('rural'))).toBe(true)
   })
 
-  it('the advertised entry price matches PLANS', async () => {
+  it('the advertised entry price matches the real graduated schedule\'s anchor', async () => {
     // The SoftwareApplication offer names a price to Google. A landing page
     // quoting a stale number is the same defect class as the hardcoded
     // reviewCount: 3 in the day-7 onboarding email.
-    const { PLANS } = await import('@/lib/stripe/client')
+    const { monthlyCostCents } = await import('@/lib/stripe/brackets')
     const { buildJsonLd } = await import('@/app/strops/json-ld')
     const graph = buildJsonLd('https://app.fieldstay.app')['@graph']
     const app = graph.find((n) => n['@type'] === 'SoftwareApplication') as {
       offers: { price: string }
     }
 
-    expect(app.offers.price).toBe(String(PLANS.hosts.monthlyPrice))
+    expect(app.offers.price).toBe(String(monthlyCostCents(1)! / 100))
   })
 
   it('the advertised entry price also appears on the visible page, not just in structured data', async () => {
@@ -168,11 +168,12 @@ describe('structured data cannot drift from the visible page', () => {
     // was added, the JSON-LD named $89 to Google and the rendered page never
     // said it anywhere -- exactly the "schema that describes copy not on the
     // page" violation the FAQ test's comment already warns about. Checked
-    // against PLANS directly, not the string '89', so this stays correct if
-    // the Hosts price ever changes and someone forgets to update the hero.
-    const { PLANS } = await import('@/lib/stripe/client')
+    // against the real bracket schedule directly, not the string '49', so
+    // this stays correct if the anchor price ever changes and someone
+    // forgets to update the hero.
+    const { monthlyCostCents } = await import('@/lib/stripe/brackets')
     const page = read('app/strops/page.tsx')
-    expect(page).toContain(`$${PLANS.hosts.monthlyPrice}`)
+    expect(page).toContain(`$${monthlyCostCents(1)! / 100}`)
   })
 })
 

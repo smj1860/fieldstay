@@ -72,6 +72,20 @@ export default async function SettingsPage() {
 
   const hospitablePromo = await getHospitablePromoStatus(membership.org_id)
 
+  // The billing tab bills by property count under the graduated pricing
+  // model (lib/stripe/brackets.ts) — it needs this to render the org's
+  // current computed cost and itemized breakdown, not just a plan label.
+  // is_active: true matches createCheckoutSession's own count, so the
+  // billing tab and the checkout guard never disagree about what a
+  // property is.
+  const { count: activeProperties, error: propertyCountError } = await supabase
+    .from('properties')
+    .select('id', { count: 'exact', head: true })
+    .eq('org_id', membership.org_id)
+    .eq('is_active', true)
+
+  throwIfAnyQueryFailed({ site: 'page.settings', orgId: membership.org_id }, propertyCountError)
+
   return (
     <div>
       <div className="page-header">
@@ -87,6 +101,7 @@ export default async function SettingsPage() {
           hospitablePromo={hospitablePromo}
           slackWebhookConfigured={(slackConfiguredCount ?? 0) > 0}
           canEditOrgSettings={membership.role === 'owner' || membership.role === 'admin'}
+          activePropertyCount={activeProperties ?? 0}
         />
       </Suspense>
     </div>

@@ -1,29 +1,44 @@
+import { monthlyCostCents, annualCostCents } from '@/lib/stripe/brackets'
+
 // ============================================================================
 // The marketing-facing plan table, in one place.
 //
 // components/ownerrez/PricingSection.tsx and components/hospitable/
 // PricingSection.tsx were 274 and 281 lines that differed in TEN — the header
 // comment, three feature bullets on the entry tier, and the provider slug in
-// two href strings. The hospitable file said so itself: "Mirrors
-// components/ownerrez/PricingSection.tsx by design ... Kept as a separate
-// per-integration component to ... avoid touching the live OwnerRez page while
-// this ships." That was a reasonable ship-it call whose reason has expired,
-// and adding the Hosts tier meant writing the same 24 new lines into both,
-// which is what SonarCloud flagged at 100% duplication on new code.
+// two href strings. Collapsed here (see git history for the original
+// duplication finding); this module is what both — and app/hosts/page.tsx's
+// 2-card layout — actually pull their numbers from.
 //
-// ── Why this is a separate module from lib/stripe/client.ts's PLANS ─────────
+// ── Graduated pricing, not flat tiers (2026-08-29 rebuild) ──────────────────
 //
-// PLANS is the billing source of truth, but it lives next to `import Stripe
-// from 'stripe'`. These are 'use client' landing pages, so importing it would
-// pull the Stripe SDK into the browser bundle.
+// FieldStay billing moved from 4 flat-rate Stripe Products to ONE graduated
+// (marginal) price per interval: $49 for the first property, then $13/$10/$8/
+// $6 per property for brackets 2-4/5-15/16-50/51-100 (lib/stripe/brackets.ts
+// is the actual billing source of truth this page's numbers are computed
+// from). There is no longer a single flat number that is "the price" for a
+// 1-4 or 5-15 property operation — cost is continuous within every band.
 //
-// So the numbers exist in two places by necessity, and
-// unit/stripe/plan-table-consistency.test.ts is the bridge that will not let
-// them disagree — it checks every price, property cap and advertised saving
-// here against PLANS. Collapsing both onto one pure data module is the right
-// end state; it means restructuring PLANS itself (carefully, since
-// `PlanKey = keyof typeof PLANS` depends on it staying an object literal), and
-// is deliberately not bundled into a duplication fix.
+// These cards keep the old property-range framing (still a useful way to
+// segment the pitch by operation size) but each one now shows its STARTING
+// price — the true cost of the FIRST property in that band, computed via
+// monthlyCostCents(). That number is always literally achievable and never
+// overstates what a visitor in that band would pay; it is not a flat
+// guarantee the way the old numbers were. Every landing page that uses these
+// numbers should say "starting at", not imply a fixed rate — the "FieldStay
+// plan is flat" pitch from the old model is gone along with the flat prices.
+//
+// A real redesign — a calculator or an explicit "$49 first property, then
+// $13/$10/$8/$6 as you grow" formula display — would represent the pricing
+// model more honestly than four bounded cards ever can, since the underlying
+// curve is continuous. That is a genuine design task or a follow-up, not a
+// number substitution; this module's job for now is to make sure nothing on
+// the marketing site quotes a number disconnected from what Stripe will
+// actually charge.
+//
+// Annual is monthly x 10 (two months free) and annualSavings is monthly x 2
+// throughout, computed via annualCostCents() from the same bracket schedule —
+// the toggle's "Save 2 months" badge is only true because of it.
 // ============================================================================
 
 export interface PricingTier {
@@ -37,21 +52,21 @@ export interface PricingTier {
   features:      string[]
 }
 
+/** The lowest property count in each band — what "starting at" is computed from. */
+const BAND_FLOOR = { starter: 5, growth: 16, portfolio: 51 } as const
+
 /**
  * The tiers above the entry plan. Identical on every landing page: they are
  * "Everything in <the tier below>" plus a property count, which is the whole
- * pitch — flat tier pricing, all features, no gates.
- *
- * Annual is monthly x 10 (two months free) and annualSavings is monthly x 2
- * throughout; the toggle's "Save 2 months" badge is only true because of it.
+ * pitch — one graduated price, all features, no gates.
  */
 const TIERS_ABOVE_ENTRY: readonly PricingTier[] = [
   {
     name: 'Starter',
     description: 'For independent managers with a focused portfolio.',
-    monthly: 199,
-    annual: 1990,
-    annualSavings: 398,
+    monthly: monthlyCostCents(BAND_FLOOR.starter)! / 100,
+    annual:  annualCostCents(BAND_FLOOR.starter)! / 100,
+    annualSavings: (monthlyCostCents(BAND_FLOOR.starter)! / 100) * 2,
     properties: '5–15 properties',
     highlight: false,
     features: [
@@ -62,9 +77,9 @@ const TIERS_ABOVE_ENTRY: readonly PricingTier[] = [
   {
     name: 'Growth',
     description: 'For expanding operations that need more scale.',
-    monthly: 479,
-    annual: 4790,
-    annualSavings: 958,
+    monthly: monthlyCostCents(BAND_FLOOR.growth)! / 100,
+    annual:  annualCostCents(BAND_FLOOR.growth)! / 100,
+    annualSavings: (monthlyCostCents(BAND_FLOOR.growth)! / 100) * 2,
     properties: '16–50 properties',
     highlight: true,
     features: [
@@ -76,9 +91,9 @@ const TIERS_ABOVE_ENTRY: readonly PricingTier[] = [
   {
     name: 'Portfolio',
     description: 'For professional managers running a full operation.',
-    monthly: 799,
-    annual: 7990,
-    annualSavings: 1598,
+    monthly: monthlyCostCents(BAND_FLOOR.portfolio)! / 100,
+    annual:  annualCostCents(BAND_FLOOR.portfolio)! / 100,
+    annualSavings: (monthlyCostCents(BAND_FLOOR.portfolio)! / 100) * 2,
     properties: '51–100 properties',
     highlight: false,
     features: [
@@ -118,9 +133,12 @@ export function pricingTiers(entryFeatures: readonly string[]): PricingTier[] {
     {
       name: 'Hosts',
       description: 'For hosts running a handful of listings.',
-      monthly: 89,
-      annual: 890,
-      annualSavings: 178,
+      // The site-wide anchor — property 1's flat $49, the true minimum price
+      // of any FieldStay subscription. Unlike the bands above, this IS the
+      // literal starting point of the whole schedule, not just this band's.
+      monthly: monthlyCostCents(1)! / 100,
+      annual:  annualCostCents(1)! / 100,
+      annualSavings: (monthlyCostCents(1)! / 100) * 2,
       properties: '1–4 properties',
       highlight: false,
       features: [...entryFeatures],

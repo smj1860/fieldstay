@@ -58,10 +58,10 @@ export function HospitablePriceLockEmail({
           {lockYears} {lockYears === 1 ? 'year' : 'years'}.
         </Text>
         <Text style={highlightText}>
-          No matter what our list price does during that time, you&apos;ll keep
-          paying {lockedPriceDisplay} on this tier. (If you grow into a bigger
-          tier along the way, you&apos;d pay that tier&apos;s current price — just
-          wanted to be upfront about that.)
+          No matter what our list price does during that time, your per-property
+          rates stay exactly where they are today. (Your bill can still change if
+          you add or remove properties — this locks the RATE you pay, not a flat
+          dollar amount, since FieldStay bills per property.)
         </Text>
       </Section>
 

@@ -17,6 +17,12 @@ import type { HospitablePromoStatus } from '@/lib/queries/hospitable-promo'
 import { reportError } from '@/lib/observability/report-error'
 import { PriceLockBadge } from '@/components/settings/price-lock-badge'
 import {
+  MAX_SELF_SERVE_PROPERTIES,
+  monthlyCostCents,
+  annualCostCents,
+  bracketBreakdown,
+} from '@/lib/stripe/brackets'
+import {
   updateOrgSettings,
   changePassword,
   updateNotificationPrefs,
@@ -35,12 +41,19 @@ import { getOrgSmsTemplates, saveOrgSmsTemplate, resetOrgSmsTemplate } from './a
 const TABS = ['Organization', 'Billing', 'Security', 'Notifications', 'Team', 'Audit Log', 'Account', 'Legal'] as const
 type Tab = typeof TABS[number]
 
+// Historical labels — an org keeps whichever of these it was last written
+// with by the Stripe webhook until its NEXT subscription event, so these stay
+// here for existing rows even though nothing writes them going forward. Every
+// self-serve org lands on 'platform' since the 2026-08-29 graduated-pricing
+// rebuild (lib/stripe/brackets.ts) — one price, billed by property count, no
+// discrete tiers left to assign.
 const PLAN_INFO = {
   hosts:      { name: 'Hosts',     maxProperties: 4,   description: '1–4 properties',        badge: 'blue'  },
   starter:    { name: 'Starter',   maxProperties: 15,  description: '5–15 properties',       badge: 'blue'  },
   growth:     { name: 'Growth',    maxProperties: 50,  description: '16–50 properties',      badge: 'green' },
   portfolio:  { name: 'Portfolio', maxProperties: 100, description: '51–100 properties',     badge: 'gold'  },
   enterprise: { name: 'Enterprise',maxProperties: 999, description: '100+ properties',       badge: 'amber' },
+  platform:   { name: 'FieldStay', maxProperties: MAX_SELF_SERVE_PROPERTIES, description: 'Billed per property — no tiers', badge: 'gold' },
   // Legacy alias — orgs created before the 'pro' tier was renamed to 'starter'
   pro:        { name: 'Starter',   maxProperties: 15,  description: '5–15 properties',       badge: 'blue'  },
 } as const
@@ -80,6 +93,8 @@ interface Props {
    * stops the UI from offering a control whose write the database will drop.
    */
   canEditOrgSettings?: boolean
+  /** Active property count — the graduated price's billing quantity (lib/stripe/brackets.ts). */
+  activePropertyCount?: number
 }
 
 export function SettingsTabs({
@@ -89,6 +104,7 @@ export function SettingsTabs({
   hospitablePromo = null,
   slackWebhookConfigured = false,
   canEditOrgSettings = false,
+  activePropertyCount = 0,
 }: Readonly<Props>) {
   const searchParams = useSearchParams()
   const requestedTab = searchParams.get('tab') as Tab | null
@@ -136,7 +152,7 @@ export function SettingsTabs({
 
       {/* Tab panels */}
       {activeTab === 'Organization'  && <OrgTab org={org} connections={connections} krogerNeedsStore={krogerNeedsStore} canEdit={canEditOrgSettings} />}
-      {activeTab === 'Billing'       && <BillingTab org={org} hospitablePromo={hospitablePromo} />}
+      {activeTab === 'Billing'       && <BillingTab org={org} hospitablePromo={hospitablePromo} activePropertyCount={activePropertyCount} />}
       {activeTab === 'Security'      && <SecurityTab />}
       {activeTab === 'Notifications' && <NotificationsTab slackWebhookConfigured={slackWebhookConfigured} canEdit={canEditOrgSettings} />}
       {activeTab === 'Team'          && <TeamTabRedirect />}
@@ -152,7 +168,7 @@ export function SettingsTabs({
 function OrgTab({ org, connections, krogerNeedsStore, canEdit }: Readonly<{ org: Organization; connections: Record<string, ConnectionInfo>; krogerNeedsStore?: boolean; canEdit: boolean }>) {
   const [state, formAction, pending] = useActionState(updateOrgSettings, null)
 
-  const plan        = PLAN_INFO[org.plan as keyof typeof PLAN_INFO] ?? PLAN_INFO.starter
+  const plan        = PLAN_INFO[org.plan as keyof typeof PLAN_INFO] ?? PLAN_INFO.platform
   const statusBadge = PLAN_STATUS_BADGES[org.plan_status] ?? 'slate'
 
   return (
@@ -1286,59 +1302,28 @@ function LegalTab() {
 }
 
 // ── Billing tab ───────────────────────────────────────────────────────────────
+//
+// Rebuilt 2026-08-29 for graduated pricing (lib/stripe/brackets.ts): there is
+// no longer a fixed set of plan cards to pick from — one price per interval,
+// billed by property count, with cost computed from the SAME bracket schedule
+// on both the marketing site and here. No "Current" card to highlight either;
+// there is only one thing to subscribe to, so the question a PM actually has
+// is "what does it cost me specifically", answered by the itemized breakdown
+// below rather than a card grid.
 
-const DISPLAY_PLANS = [
-  {
-    key:     'hosts' as const,
-    name:    'Hosts',
-    props:   '1–4 properties',
-    monthly: 89,
-    annual:  890,
-    savings: '$178',
-  },
-  {
-    key:     'starter' as const,
-    name:    'Starter',
-    props:   '5–15 properties',
-    monthly: 199,
-    annual:  1990,
-    savings: '$398',
-  },
-  {
-    key:     'growth' as const,
-    name:    'Growth',
-    props:   '16–50 properties',
-    monthly: 479,
-    annual:  4790,
-    savings: '$958',
-  },
-  {
-    key:     'portfolio' as const,
-    name:    'Portfolio',
-    props:   '51–100 properties',
-    monthly: 799,
-    annual:  7990,
-    savings: '$1,598',
-  },
-]
+function formatCents(cents: number): string {
+  return (cents / 100).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+}
 
-/**
- * Derived from the cards actually rendered above, NOT imported from
- * lib/stripe/client — this is a 'use client' component and that module
- * constructs the Stripe SDK. Deriving here means the button's key and the
- * handler's parameter cannot drift, and adding a card is still one edit.
- * createCheckoutSession takes the server-side CheckoutPlanKey, so a card key
- * that is not a real plan fails to type-check at the call site.
- */
-type CheckoutPlanKey = (typeof DISPLAY_PLANS)[number]['key']
-
-function BillingTab({ org, hospitablePromo }: Readonly<{ org: Organization; hospitablePromo: HospitablePromoStatus | null }>) {
-  const currentPlan = PLAN_INFO[org.plan as keyof typeof PLAN_INFO] ?? PLAN_INFO.starter
+function BillingTab({
+  org, hospitablePromo, activePropertyCount,
+}: Readonly<{ org: Organization; hospitablePromo: HospitablePromoStatus | null; activePropertyCount: number }>) {
+  const currentPlan = PLAN_INFO[org.plan as keyof typeof PLAN_INFO] ?? PLAN_INFO.platform
   const statusBadge = PLAN_STATUS_BADGES[org.plan_status] ?? 'slate'
   const isTrialing  = org.plan_status === 'trialing'
+  const isSubscribed = org.stripe_customer_id !== null
 
   const [interval, setInterval]           = useState<'monthly' | 'annual'>('monthly')
-  const [checkoutPlan, setCheckoutPlan]   = useState<string | null>(null)
   const [checkoutError, setCheckoutError] = useState<string | null>(null)
   const [checkoutPending, startCheckoutT] = useTransition()
   const [portalPending, startPortal]      = useTransition()
@@ -1347,19 +1332,27 @@ function BillingTab({ org, hospitablePromo }: Readonly<{ org: Organization; hosp
     startPortal(async () => { await openBillingPortal() })
   }
 
-  function handleCheckout(planKey: CheckoutPlanKey) {
-    setCheckoutPlan(planKey)
+  function handleCheckout() {
     setCheckoutError(null)
     startCheckoutT(async () => {
-      const result = await createCheckoutSession(planKey, interval)
+      // createCheckoutSession redirects an org that already has a live
+      // subscription to the billing portal instead — safe to call
+      // unconditionally, the server decides which one this click means.
+      const result = await createCheckoutSession(interval)
       if (result?.redirectUrl) {
         globalThis.location.href = result.redirectUrl
       } else if (result?.error) {
         setCheckoutError(result.error)
-        setCheckoutPlan(null)
       }
     })
   }
+
+  const quantity        = activePropertyCount
+  const hasNoProperties = quantity < 1
+  const overCeiling     = quantity > MAX_SELF_SERVE_PROPERTIES
+  const canPrice         = !hasNoProperties && !overCeiling
+  const totalCents       = canPrice ? (interval === 'annual' ? annualCostCents(quantity) : monthlyCostCents(quantity)) : null
+  const breakdown         = canPrice ? bracketBreakdown(quantity, interval) : []
 
   return (
     <div className="max-w-2xl space-y-6">
@@ -1374,7 +1367,9 @@ function BillingTab({ org, hospitablePromo }: Readonly<{ org: Organization; hosp
           <Badge tone={statusBadge}>
             {org.plan_status.replace('_', ' ')}
           </Badge>
-          <span className="text-sm text-secondary-themed">{currentPlan.description}</span>
+          <span className="text-sm text-secondary-themed">
+            {quantity} {quantity === 1 ? 'property' : 'properties'}
+          </span>
           <PriceLockBadge promo={hospitablePromo} />
         </div>
 
@@ -1402,14 +1397,18 @@ function BillingTab({ org, hospitablePromo }: Readonly<{ org: Organization; hosp
                 : 'Manage Billing'
               }
             </Button>
+            <p className="mt-2 text-xs text-muted-themed">
+              The billing portal has your exact invoice history and billing interval.
+              The breakdown below is a live estimate from your current property count.
+            </p>
           </div>
         )}
       </Card>
 
-      {/* Plan upgrade cards */}
+      {/* Pricing: itemized bracket breakdown */}
       <div>
         <div className="flex items-center justify-between mb-4">
-          <h3 className="section-header mb-0">Available Plans</h3>
+          <h3 className="section-header mb-0">Your Pricing</h3>
           {/* Monthly / Annual toggle */}
           <div className="flex items-center gap-1 bg-raised-themed rounded-lg p-1 text-sm">
             {(['monthly', 'annual'] as const).map((iv) => (
@@ -1438,69 +1437,73 @@ function BillingTab({ org, hospitablePromo }: Readonly<{ org: Organization; hosp
           </div>
         )}
 
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-          {DISPLAY_PLANS.map((plan) => {
-            const isCurrent = org.plan === plan.key && org.plan_status === 'active'
-            const isPending = checkoutPlan === plan.key && checkoutPending
-
-            return (
-              <Card
-                key={plan.key}
-                className="flex flex-col gap-3"
-                style={isCurrent ? { outline: '2px solid var(--accent-gold)', outlineOffset: '2px' } : undefined}
-              >
-                <div className="flex items-center justify-between">
-                  <span className="font-semibold text-primary-themed">{plan.name}</span>
-                  {isCurrent && <Badge tone="green" className="text-xs">Current</Badge>}
-                </div>
-                <p className="text-sm text-muted-themed">{plan.props}</p>
-                <div>
-                  {interval === 'monthly' ? (
-                    <p className="text-2xl font-bold" style={{ color: 'var(--text-primary)' }}>
-                      <span style={{ color: 'var(--accent-gold)' }}>${plan.monthly}</span>
-                      <span className="text-sm font-normal text-muted-themed">/mo</span>
-                    </p>
-                  ) : (
-                    <>
-                      <p className="text-2xl font-bold" style={{ color: 'var(--text-primary)' }}>
-                        <span style={{ color: 'var(--accent-gold)' }}>${plan.annual}</span>
-                        <span className="text-sm font-normal text-muted-themed">/yr</span>
-                      </p>
-                      <p className="text-xs" style={{ color: 'var(--accent-green)' }}>
-                        Save {plan.savings} vs monthly
-                      </p>
-                    </>
-                  )}
-                </div>
-                {!isCurrent && (
-                  <Button
-                    onClick={() => handleCheckout(plan.key)}
-                    disabled={checkoutPending}
-                    className="text-sm mt-auto"
-                  >
-                    {isPending
-                      ? <><Loader2 className="w-4 h-4 animate-spin" /> Redirecting…</>
-                      : `Upgrade to ${plan.name}`
-                    }
-                  </Button>
-                )}
-              </Card>
-            )
-          })}
-
-          {/* Enterprise */}
-          <Card className="flex flex-col gap-3 sm:col-span-3">
-            <div className="flex items-start justify-between flex-wrap gap-3">
-              <div>
-                <span className="font-semibold text-primary-themed">Enterprise</span>
-                <p className="text-sm text-muted-themed mt-0.5">100+ properties — custom pricing</p>
-              </div>
-              <a href="mailto:hello@fieldstay.app" className={buttonVariantClass('secondary') + ' text-sm'}>
-                Contact Us →
-              </a>
-            </div>
+        {hasNoProperties && (
+          <Card>
+            <p className="text-sm text-secondary-themed">
+              Add a property before subscribing — FieldStay bills per property, starting at
+              $49/mo for your first one.
+            </p>
           </Card>
-        </div>
+        )}
+
+        {overCeiling && (
+          <Card className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+            <div>
+              <span className="font-semibold text-primary-themed">Enterprise</span>
+              <p className="text-sm text-muted-themed mt-0.5">
+                Self-serve billing covers up to {MAX_SELF_SERVE_PROPERTIES} properties. You have
+                {' '}{quantity} — let&apos;s talk about a plan that fits.
+              </p>
+            </div>
+            <a href="mailto:hello@fieldstay.app" className={buttonVariantClass('secondary') + ' text-sm whitespace-nowrap'}>
+              Contact Us →
+            </a>
+          </Card>
+        )}
+
+        {canPrice && (
+          <Card className="flex flex-col gap-4">
+            <div>
+              <p className="text-3xl font-bold" style={{ color: 'var(--text-primary)' }}>
+                <span style={{ color: 'var(--accent-gold)' }}>${formatCents(totalCents!)}</span>
+                <span className="text-sm font-normal text-muted-themed">
+                  /{interval === 'annual' ? 'yr' : 'mo'} for {quantity} {quantity === 1 ? 'property' : 'properties'}
+                </span>
+              </p>
+              <p className="text-xs text-muted-themed mt-1">
+                One property costs $49{interval === 'annual' ? ' ($490/yr)' : '/mo'}. Every property after that is
+                $13, $10, $8, then $6 as you grow — adding one more never jumps your bill, it just adds that
+                property&apos;s own rate.
+              </p>
+            </div>
+
+            {/* Itemized breakdown */}
+            <div className="rounded-lg border border-themed divide-y divide-themed">
+              {breakdown.map((line) => (
+                <div key={line.label} className="flex items-center justify-between px-3 py-2 text-sm">
+                  <span className="text-secondary-themed">
+                    {line.label}
+                    {line.units > 1 && (
+                      <span className="text-muted-themed"> ({line.units} × ${formatCents(line.amountCents)})</span>
+                    )}
+                  </span>
+                  <span className="font-medium text-primary-themed">${formatCents(line.lineTotalCents)}</span>
+                </div>
+              ))}
+            </div>
+
+            <Button
+              onClick={handleCheckout}
+              disabled={checkoutPending}
+              className="text-sm"
+            >
+              {checkoutPending
+                ? <><Loader2 className="w-4 h-4 animate-spin" /> Redirecting…</>
+                : isSubscribed ? 'Manage Subscription' : 'Subscribe'
+              }
+            </Button>
+          </Card>
+        )}
       </div>
 
     </div>

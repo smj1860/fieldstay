@@ -326,17 +326,16 @@ export type FieldStayEvents = {
   // Billing / Stripe
   // ----------------------------------------------------------
 
-  'billing/subscription-updated': {
+  // billing/subscription-updated was retired 2026-08-29 with the graduated-
+  // pricing rebuild: every self-serve org is 'platform' both before and
+  // after any core-billing update (there is no other discrete tier left to
+  // transition from), so its only consumer — notifyPlanChanged's tier-change
+  // notification — could never fire again. Both were removed together
+  // rather than kept as permanently-dead code.
+
+  'billing/reconcile-property-count.requested': {
     data: {
       org_id: string
-      stripe_subscription_id: string
-      plan: string
-      plan_status: string
-      // Non-null only when this is a genuine plan-tier change on an
-      // existing subscription (never on initial signup) — see
-      // handleCoreSubscriptionUpdate in core-billing.ts. Consumed by
-      // notifyPlanChanged to decide whether to notify the org admin.
-      previous_plan: string | null
     }
   }
 

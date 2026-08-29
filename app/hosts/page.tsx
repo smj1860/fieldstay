@@ -1,7 +1,7 @@
 // app/hosts/page.tsx
 //
 // The one segment on the pricing ladder with zero top-of-funnel page. The
-// Hosts tier ($89/mo, 1-4 properties — see lib/stripe/client.ts PLANS.hosts)
+// Hosts tier (starting at $49/mo, 1-4 properties — see lib/stripe/brackets.ts)
 // is real and billable, but today only surfaces on /ownerrez and /hospitable,
 // which a solo host only reaches via a branded PMS-specific search. This page
 // gives that persona a landing page whose ICP framing actually matches the
@@ -28,7 +28,7 @@
 //
 // Pricing renders only 2 cards (Hosts + Starter), not the full 5-tier grid --
 // deliberate, not a missing feature. A 2-property visitor doesn't need
-// Portfolio ($799, 100 units) in their face. Reuses pricingTiers() for the
+// Portfolio (100 units) in their face. Reuses pricingTiers() for the
 // underlying numbers (single source of truth, same file /ownerrez and
 // /hospitable pull from) but writes its own compact card markup rather than
 // SharedPricingSection, which is built for a 5-card grid with Growth
@@ -85,7 +85,7 @@ const [hostsTier, starterTier] = pricingTiers(HOSTS_FEATURES)
 
 // Module scope, so the SEO title and social descriptions below quote the same
 // number the page renders. A price hardcoded in metadata is the same defect
-// as /strops's JSON-LD naming $89 while the page showed nothing — it just
+// as /strops's JSON-LD naming a price while the page showed nothing — it just
 // drifts somewhere a human never looks instead of somewhere they do.
 const HOSTS_PRICE = `$${hostsTier.monthly}`
 
@@ -205,14 +205,15 @@ export default function HostsPage() {
           </nav>
 
           {/* Price badge, in the slot /ownerrez and /hospitable use for their
-              partner lockup -- there's no partner here, and an $89/mo price
+              partner lockup -- there's no partner here, and a starting-price
               anchor above the fold does more for a price-sensitive visitor
               than a generic eyebrow would. Reads the tier rather than
-              hardcoding "89", so it cannot drift from PLANS. */}
+              hardcoding a number, so it cannot drift from the real bracket
+              schedule (lib/stripe/brackets.ts). */}
           <div className="flex justify-center mt-6 mb-10">
             <div className="flex items-center gap-2 bg-brand-panel border border-brand-panelBorder rounded-full px-4 py-2">
               <span className="text-[var(--mkt-ink)] text-xs font-bold px-2 py-0.5 rounded bg-[var(--mkt-gold)]">
-                ${hostsTier.monthly}/mo
+                From ${hostsTier.monthly}/mo
               </span>
               <span className="text-xs font-semibold tracking-widest text-white/58 uppercase">
                 For Hosts Running {hostsTier.properties}
@@ -226,10 +227,10 @@ export default function HostsPage() {
               <span className="text-[var(--mkt-gold)]">One app for all three.</span>
             </h1>
             <p className="text-white/52 text-lg leading-relaxed mb-8 mx-auto" style={{ maxWidth: 560 }}>
-              FieldStay&apos;s Hosts plan gives 1–4 property owners the same offline turnover
-              checklists, no-login vendor invoicing, and owner-grade CapEx forecasting used by
-              professional management companies — for ${hostsTier.monthly}/month. The guest
-              guidebook can pay some of that back.
+              FieldStay gives 1–4 property owners the same offline turnover checklists,
+              no-login vendor invoicing, and owner-grade CapEx forecasting used by
+              professional management companies — starting at ${hostsTier.monthly}/month.
+              The guest guidebook can pay some of that back.
             </p>
 
             <Link
@@ -287,7 +288,8 @@ export default function HostsPage() {
             </h2>
             <p className="text-[var(--mkt-muted-strong)] text-sm max-w-md mx-auto">
               Most STR software prices per property or per user — brutal at this scale.
-              FieldStay&apos;s Hosts plan is flat.
+              FieldStay starts at ${hostsTier.monthly}/mo for your first property, and stays
+              gentle from there — never a steep jump for adding one more.
             </p>
           </div>
 
@@ -319,6 +321,9 @@ export default function HostsPage() {
                   {tier.properties}
                 </p>
                 <div className="mb-5">
+                  <span className={`text-xs font-semibold ${badge ? 'text-white/50' : 'text-[var(--mkt-muted)]'}`}>
+                    from{' '}
+                  </span>
                   <span className={`font-black tracking-tight ${badge ? 'text-[var(--mkt-gold)]' : 'text-brand-800'}`}
                         style={{ fontSize: 40, letterSpacing: '-1.5px' }}>
                     ${tier.monthly}

@@ -7,16 +7,13 @@ vi.mock('@/lib/audit', () => ({
   logAuditEvent: vi.fn(),
 }))
 vi.mock('@/lib/stripe/client', () => ({
-  PLANS: {
-    starter:  { name: 'Starter',  maxProperties: 15 },
-    growth:   { name: 'Growth',   maxProperties: 50 },
-  },
-  getPlanByPriceId: (priceId: string) =>
-    priceId === 'price_growth' ? 'growth' : priceId === 'price_starter' ? 'starter' : null,
+  MAX_SELF_SERVE_PROPERTIES: 100,
+  isPlatformPriceId: (priceId: string) => priceId === 'price_platform_monthly',
 }))
 
 import { handleCoreSubscriptionUpdate } from '@/app/api/webhooks/stripe/handlers/core-billing'
 import { inngest } from '@/lib/inngest/client'
+import { logAuditEvent } from '@/lib/audit'
 
 function makeSubscription(overrides: Partial<{
   id: string
@@ -25,7 +22,7 @@ function makeSubscription(overrides: Partial<{
   priceId: string
   trialEnd: number | null
 }> = {}) {
-  const opts = { id: 'sub_1', customer: 'cus_1', status: 'active', priceId: 'price_growth', trialEnd: null, ...overrides }
+  const opts = { id: 'sub_1', customer: 'cus_1', status: 'active', priceId: 'price_platform_monthly', trialEnd: null, ...overrides }
   return {
     id:       opts.id,
     customer: opts.customer,
@@ -42,15 +39,17 @@ function makeSubscription(overrides: Partial<{
 //      stripe_customer_id second) so a first-time subscriber whose customer
 //      link is not written yet still gets entitled.
 //   2. update_organization_subscription_from_stripe() does the lookup, row
-//      lock, read-old-plan and write in one transaction, closing the TOCTOU
-//      race on previous_plan.
+//      lock, read-old-plan and write in one transaction.
 //
 // rpcResult is the DB function's RETURNS TABLE row — { org_id, org_name,
-// previous_plan } — or null/error for "no matching org" / an RPC failure.
-// orgRow is what the `organizations` read resolves to.
+// previous_plan, applied } — or null/error for "no matching org" / an RPC
+// failure. previous_plan is still returned by the RPC (it's a generic
+// pre-update snapshot) but the handler no longer reads it — every self-serve
+// org is 'platform' before and after, so there is no tier transition left to
+// report. orgRow is what the `organizations` read resolves to.
 function makeSupabase(
   rpcResult: { data: unknown; error?: unknown } = {
-    data: { org_id: 'org_1', org_name: 'Lake Martin Delivery', previous_plan: 'starter', applied: true },
+    data: { org_id: 'org_1', org_name: 'Lake Martin Delivery', previous_plan: 'platform', applied: true },
     error: null,
   },
   orgRow: { data: unknown; error?: unknown } = {
@@ -68,8 +67,7 @@ function makeSupabase(
       // .order('org_id').range(from, to) — it is paginated through
       // fetchAllRows(), so the chain has to run all the way to .range().
       // No PM members needed for these tests — notifyOrgAdmin's trial-start/
-      // first-payment emails are a no-op path here, only previous_plan
-      // enrichment via the RPC result is under test.
+      // first-payment emails are a no-op path here.
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const chain: any = {}
       chain.select = vi.fn(() => chain)
@@ -101,17 +99,17 @@ function makeSupabase(
 // guard — an event older than the last one applied to the org is rejected.
 const EVENT_CREATED = Math.floor(Date.parse('2026-08-04T12:00:00Z') / 1000)
 
-describe('handleCoreSubscriptionUpdate — previous_plan enrichment', () => {
+describe('handleCoreSubscriptionUpdate — graduated platform pricing', () => {
   beforeEach(() => {
     vi.clearAllMocks()
   })
 
-  it('calls the atomic RPC with the mapped plan/status/max_properties/trial_ends_at', async () => {
+  it('calls the atomic RPC with plan "platform" and the self-serve ceiling as max_properties', async () => {
     const supabase = makeSupabase()
 
     await handleCoreSubscriptionUpdate(
       supabase,
-      makeSubscription({ status: 'active', priceId: 'price_growth', trialEnd: null }),
+      makeSubscription({ status: 'active', priceId: 'price_platform_monthly', trialEnd: null }),
       'customer.subscription.updated',
       'active',
       EVENT_CREATED
@@ -122,94 +120,58 @@ describe('handleCoreSubscriptionUpdate — previous_plan enrichment', () => {
       {
         p_customer_id:            'cus_1',
         p_stripe_subscription_id: 'sub_1',
-        p_plan:                   'growth',
+        p_plan:                   'platform',
         p_plan_status:            'active',
-        p_max_properties:         50,
+        p_max_properties:         100,
         p_trial_ends_at:          null,
         p_event_at:               new Date(EVENT_CREATED * 1000).toISOString(),
       },
     )
   })
 
-  it('includes the org\'s pre-update plan as previous_plan on a genuine tier change (update event)', async () => {
-    const supabase = makeSupabase({
-      data: { org_id: 'org_1', org_name: 'Lake Martin Delivery', previous_plan: 'starter', applied: true },
-      error: null,
-    })
+  it('logs the audit event with plan "platform" on a successful update', async () => {
+    const supabase = makeSupabase()
 
     await handleCoreSubscriptionUpdate(
       supabase,
-      makeSubscription({ status: 'active', priceId: 'price_growth' }),
+      makeSubscription({ status: 'active', priceId: 'price_platform_monthly' }),
       'customer.subscription.updated',
       'active',
       EVENT_CREATED
     )
 
-    expect(inngest.send).toHaveBeenCalledWith({
-      name: 'billing/subscription-updated',
-      data: {
-        org_id:                 'org_1',
-        stripe_subscription_id: 'sub_1',
-        plan:                   'growth',
-        plan_status:            'active',
-        previous_plan:          'starter',
-      },
-    })
-  })
-
-  it('always sends previous_plan: null on the initial subscription.created event, regardless of the org\'s stored plan', async () => {
-    // Simulates an org whose DB default happens to differ from the tier
-    // they signed up for — this must NOT be reported as a "plan change".
-    const supabase = makeSupabase({
-      data: { org_id: 'org_1', org_name: 'Lake Martin Delivery', previous_plan: 'starter', applied: true },
-      error: null,
-    })
-
-    await handleCoreSubscriptionUpdate(
-      supabase,
-      makeSubscription({ status: 'trialing', priceId: 'price_growth', trialEnd: 1234567890 }),
-      'customer.subscription.created',
-      undefined,
-      EVENT_CREATED
-    )
-
-    expect(inngest.send).toHaveBeenCalledWith(
+    expect(logAuditEvent).toHaveBeenCalledWith(
       expect.objectContaining({
-        name: 'billing/subscription-updated',
-        data: expect.objectContaining({ previous_plan: null }),
+        orgId:  'org_1',
+        action: 'billing.subscription.updated',
+        metadata: expect.objectContaining({ plan: 'platform', planStatus: 'active' }),
       }),
     )
   })
 
-  it('reports previous_plan equal to the new plan when nothing actually changed tier (e.g. a status-only update)', async () => {
-    const supabase = makeSupabase({
-      data: { org_id: 'org_1', org_name: 'Lake Martin Delivery', previous_plan: 'growth', applied: true },
-      error: null,
-    })
+  it('no longer sends a billing/subscription-updated event — retired with notify-plan-changed', async () => {
+    const supabase = makeSupabase()
 
     await handleCoreSubscriptionUpdate(
       supabase,
-      makeSubscription({ status: 'active', priceId: 'price_growth' }),
+      makeSubscription({ status: 'active', priceId: 'price_platform_monthly' }),
       'customer.subscription.updated',
       'active',
       EVENT_CREATED
     )
 
-    expect(inngest.send).toHaveBeenCalledWith(
-      expect.objectContaining({
-        data: expect.objectContaining({ plan: 'growth', previous_plan: 'growth' }),
-      }),
+    expect(inngest.send).not.toHaveBeenCalledWith(
+      expect.objectContaining({ name: 'billing/subscription-updated' }),
     )
   })
 
-  it('still entitles the org when the RPC misses but the org WAS resolved', async () => {
+  it('still entitles the org at plan "platform" / max_properties 100 when the RPC misses but the org WAS resolved', async () => {
     // The RPC keys on stripe_customer_id; resolveSubscriptionOrg can reach an
     // org by metadata that the RPC's lookup does not find (an org already
     // carrying a different customer id, where the backfill deliberately
     // no-ops). Returning on that miss would re-open the silent entitlement
     // drop the metadata resolution exists to fix, so it falls back to a
-    // direct scoped write — and previous_plan is null, because no pre-update
-    // plan was ever read under a lock.
+    // direct scoped write.
     const supabase = makeSupabase({ data: null, error: null })
 
     await handleCoreSubscriptionUpdate(
@@ -221,16 +183,10 @@ describe('handleCoreSubscriptionUpdate — previous_plan enrichment', () => {
     )
 
     expect((supabase as unknown as { orgUpdate: ReturnType<typeof vi.fn> }).orgUpdate)
-      .toHaveBeenCalledWith(expect.objectContaining({ plan: 'growth', max_properties: 50 }))
-    expect(inngest.send).toHaveBeenCalledWith(
-      expect.objectContaining({
-        name: 'billing/subscription-updated',
-        data: expect.objectContaining({ org_id: 'org_1', previous_plan: null }),
-      }),
-    )
+      .toHaveBeenCalledWith(expect.objectContaining({ plan: 'platform', max_properties: 100 }))
   })
 
-  it('is a no-op (no event, no write) for a subscription that is not core billing at all', async () => {
+  it('is a no-op (no write, no audit log) for a subscription that is not core billing at all', async () => {
     // Guidebook sponsor subscriptions land on this same webhook and their
     // customer is a sponsor, not an org. Those must not retry forever — the
     // price id is what tells them apart.
@@ -247,8 +203,32 @@ describe('handleCoreSubscriptionUpdate — previous_plan enrichment', () => {
       EVENT_CREATED
     )
 
-    expect(inngest.send).not.toHaveBeenCalled()
+    expect(logAuditEvent).not.toHaveBeenCalled()
     expect((supabase as unknown as { orgUpdate: ReturnType<typeof vi.fn> }).orgUpdate).not.toHaveBeenCalled()
+  })
+
+  it('syncs only plan_status (never plan/max_properties) for a recognized-but-not-platform price, e.g. Enterprise', async () => {
+    // isCoreBillingSubscription already filtered to core billing, but the
+    // price is not our graduated self-serve price — an Enterprise contract
+    // price, a promo, or a grandfathered one. Writing MAX_SELF_SERVE_PROPERTIES
+    // over an Enterprise org's real (larger) cap would be a regression.
+    const supabase = makeSupabase(
+      undefined,
+      { data: { id: 'org_1', name: 'Big Portfolio Co' }, error: null },
+    )
+
+    await handleCoreSubscriptionUpdate(
+      supabase,
+      makeSubscription({ priceId: 'price_enterprise_custom', status: 'active' }),
+      'customer.subscription.updated',
+      'active',
+      EVENT_CREATED
+    )
+
+    const orgUpdate = (supabase as unknown as { orgUpdate: ReturnType<typeof vi.fn> }).orgUpdate
+    expect(orgUpdate).toHaveBeenCalledWith({ plan_status: 'active' })
+    expect(orgUpdate).not.toHaveBeenCalledWith(expect.objectContaining({ plan: expect.anything() }))
+    expect(orgUpdate).not.toHaveBeenCalledWith(expect.objectContaining({ max_properties: expect.anything() }))
   })
 
   it('throws when the RPC itself errors, instead of silently proceeding with no org', async () => {
@@ -258,7 +238,7 @@ describe('handleCoreSubscriptionUpdate — previous_plan enrichment', () => {
       handleCoreSubscriptionUpdate(supabase, makeSubscription(), 'customer.subscription.updated', 'active', EVENT_CREATED),
     ).rejects.toThrow('row lock timeout')
 
-    expect(inngest.send).not.toHaveBeenCalled()
+    expect(logAuditEvent).not.toHaveBeenCalled()
   })
 })
 
@@ -272,15 +252,15 @@ describe('handleCoreSubscriptionUpdate — previous_plan enrichment', () => {
 describe('handleCoreSubscriptionUpdate — stale delivery', () => {
   beforeEach(() => vi.clearAllMocks())
 
-  it('fires no event, audit row or email when the RPC reports the delivery was stale', async () => {
+  it('fires no audit row or email when the RPC reports the delivery was stale', async () => {
     const supabase = makeSupabase({
-      data: { org_id: 'org_1', org_name: 'Lake Martin Delivery', previous_plan: 'growth', applied: false },
+      data: { org_id: 'org_1', org_name: 'Lake Martin Delivery', previous_plan: 'platform', applied: false },
       error: null,
     })
 
     await handleCoreSubscriptionUpdate(
       supabase,
-      makeSubscription({ status: 'trialing', priceId: 'price_growth', trialEnd: 1234567890 }),
+      makeSubscription({ status: 'trialing', priceId: 'price_platform_monthly', trialEnd: 1234567890 }),
       'customer.subscription.created',
       undefined,
       EVENT_CREATED,
@@ -288,7 +268,7 @@ describe('handleCoreSubscriptionUpdate — stale delivery', () => {
 
     // Nothing was written, so nothing downstream may describe a transition:
     // announcing a trial start again is worse than the silent skip.
-    expect(inngest.send).not.toHaveBeenCalled()
+    expect(logAuditEvent).not.toHaveBeenCalled()
   })
 
   it('passes the event timestamp through so the RPC can make that decision', async () => {
@@ -296,7 +276,7 @@ describe('handleCoreSubscriptionUpdate — stale delivery', () => {
 
     await handleCoreSubscriptionUpdate(
       supabase,
-      makeSubscription({ status: 'active', priceId: 'price_growth' }),
+      makeSubscription({ status: 'active', priceId: 'price_platform_monthly' }),
       'customer.subscription.updated',
       'active',
       EVENT_CREATED,
