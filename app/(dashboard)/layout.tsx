@@ -8,6 +8,7 @@ import { createServiceClient } from '@/lib/supabase/server'
 import { requireOrgMember } from '@/lib/auth'
 import { DashboardCacheGuard } from '@/lib/dexie/dashboard/cache-guard'
 import { InspectionWarmer } from '@/lib/dexie/dashboard/inspection-warmer'
+import { MaintenanceBoardWarmer } from '@/lib/dexie/dashboard/maintenance-board-warmer'
 import { DashboardSyncBanner } from './_components/dashboard-sync-banner'
 import { DashboardShell } from '@/components/dashboard-shell'
 import { DashboardToastProvider } from '@/components/dashboard-toast-provider'
@@ -201,6 +202,7 @@ export default async function DashboardLayout({
     <DashboardToastProvider orgId={membership.org_id} userId={user.id}>
       <DashboardCacheGuard userId={user.id} orgId={membership.org_id} />
       <InspectionWarmer userId={user.id} orgId={membership.org_id} />
+      <MaintenanceBoardWarmer userId={user.id} orgId={membership.org_id} />
       <DashboardSyncBanner userId={user.id} orgId={membership.org_id} />
       <DashboardShell
         role={membership.role}

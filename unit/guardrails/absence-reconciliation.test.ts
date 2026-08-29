@@ -70,6 +70,10 @@ const RECONCILERS: Record<string, Reconciler> = {
     protection: 'fetch-fails-loud',
     why: 'Cancels blocks absent from the Hospitable calendar. hospFetchCalendar THROWS on any non-ok, so [] can only mean the window genuinely holds no blocks — which is the normal state for most properties. An empty-set guard here would be a bug: the LAST lifted block could never be cleared.',
   },
+  'lib/dexie/dashboard/warm-maintenance-board.ts:153': {
+    protection: 'fetch-fails-loud',
+    why: "Deletes cached open work orders absent from the fetch. The Supabase read's error branch stamps the watermark and returns BEFORE this block, so the delete only ever runs on a list the server genuinely produced — an org with zero open work orders is a legitimate, even common, steady state. The stale set additionally excludes every id with a pending work_order.create mutation, so a row this device is still trying to send survives regardless of what the fetch returned; see the file's own header comment for why that exclusion is the point of this warm existing at all.",
+  },
   'lib/dexie/sync/turnovers.ts:109': {
     protection: 'fetch-fails-loud',
     why: 'Drops cached turnovers no longer assigned to this crew member. fetchAssignedTurnoverIds returns NULL on failure and syncAssignedTurnovers returns early on null, so [] means the crew member genuinely has no assignments — a normal state, and unassignment-to-zero must still clear the device.',
@@ -110,6 +114,10 @@ const RECONCILERS: Record<string, Reconciler> = {
  * registered with the same two protections.
  */
 const CLEAR_AND_REPLACE: Record<string, Reconciler> = {
+  'lib/dexie/dashboard/warm-maintenance-board.ts:193': {
+    protection: 'fetch-fails-loud',
+    why: "Replaces the cached VENDORS table wholesale. The Supabase read's error branch returns 0 before this block, leaving the cache alone, so the clear only ever runs on a list the server genuinely produced. Empty is a real possibility for a brand-new org with no vendors yet, and clearing correctly is right there too: a vendor deactivated since the last warm must stop being the name shown on a cached work-order card. The whole set is small (one org's active vendors) and refetched on every warm, so a clear costs nothing a diff would have saved.",
+  },
   'lib/dexie/dashboard/warm-inspections.ts:212': {
     protection: 'fetch-fails-loud',
     why: "Replaces the cached §7 INSPECTION SCHEDULES wholesale. The Supabase read's error branch returns before this block and deliberately leaves the cache alone, so the clear only ever runs on a list the server genuinely produced. Empty is a legitimate steady state and an empty-set guard would be the BUG here: an org that deletes its last inspection schedule would keep being told a walk is due, forever, on every device that had cached it. The whole set is refetched on every warm, so a clear costs nothing a diff would have saved.",

@@ -141,3 +141,71 @@ describe('guardrail: service worker offline allowlist', () => {
     expect(code).toContain("addEventListener('fetch'")
   })
 })
+
+// ============================================================================
+// /maintenance ITSELF — EXACT MATCH ONLY, EVER.
+//
+// The board (maintenance-board.tsx) started rendering from Dexie on
+// 2026-08-28, so it now qualifies for the allowlist by the same rule the
+// inspection routes did. But OFFLINE_PATHS' own matching turns a bare entry
+// into a PREFIX — exactly right for '/maintenance/inspections', exactly wrong
+// here, because '/maintenance/[id]' (one work order's detail page) starts
+// with '/maintenance/' and is STILL server-rendered. Prefix-matching the
+// board would silently start caching and replaying a stale copy of that page
+// — precisely the bug class this whole file exists to catch, reintroduced by
+// the fix for a different page.
+//
+// So the board lives in a SEPARATE array, OFFLINE_EXACT_PATHS, checked by
+// strict equality only. These tests exercise the REAL matching function
+// rather than re-deriving its logic in regex, by extracting it from the
+// actual file and executing it — a structural check on the array contents
+// cannot catch a mistake in how the two arrays are actually combined.
+// ============================================================================
+
+/**
+ * Extracts and executes the real `isOfflineCapable` from the live file, with
+ * its two supporting consts. `new Function` rather than `eval` so nothing
+ * leaks into this test file's own scope, and no `self`/`caches`/`fetch`
+ * shimming is needed — the function under test touches none of them.
+ */
+function realIsOfflineCapable(): (pathname: string) => boolean {
+  const pathsMatch    = /const OFFLINE_PATHS = \[[\s\S]*?\]/.exec(sw)?.[0]
+  const exactMatch    = /const OFFLINE_EXACT_PATHS = new Set\(\[[\s\S]*?\]\)/.exec(sw)?.[0]
+  const functionMatch = /function isOfflineCapable[\s\S]*?\n\}/.exec(sw)?.[0]
+
+  if (!pathsMatch || !exactMatch || !functionMatch) {
+    throw new Error('Could not extract isOfflineCapable and its arrays from public/sw.js — have they been renamed?')
+  }
+
+  // Extracting and running the REAL matcher is the point; see the block
+  // comment above.
+  return new Function(`${pathsMatch}\n${exactMatch}\n${functionMatch}\nreturn isOfflineCapable`)()
+}
+
+describe('guardrail: /maintenance offline caching is exact-match only', () => {
+  it('the board itself is offline-capable', () => {
+    expect(realIsOfflineCapable()('/maintenance')).toBe(true)
+  })
+
+  it('a work order detail page is NOT swept in by the board entry', () => {
+    // The failure this whole block exists to catch: adding '/maintenance' to
+    // the WRONG list would make this true, and every single-work-order page
+    // would then be cached and replayed as current forever.
+    expect(realIsOfflineCapable()('/maintenance/some-work-order-id')).toBe(false)
+  })
+
+  it('the inspection routes are unaffected by the new list', () => {
+    expect(realIsOfflineCapable()('/maintenance/inspections')).toBe(true)
+    expect(realIsOfflineCapable()('/maintenance/inspections/insp-1')).toBe(true)
+  })
+
+  it('OFFLINE_EXACT_PATHS holds only /maintenance today', () => {
+    // Not a permanent restriction — a future exact-match route is fine to add
+    // — but a change here is exactly the kind of thing a reviewer should see
+    // named in a failing test rather than discover by reading a diff.
+    const list  = /const OFFLINE_EXACT_PATHS = new Set\(\[([\s\S]*?)\]\)/.exec(code)
+    expect(list, 'OFFLINE_EXACT_PATHS not found — has it been renamed?').not.toBeNull()
+    const paths = [...list![1].matchAll(/'([^']+)'/g)].map((m) => m[1])
+    expect(paths).toEqual(['/maintenance'])
+  })
+})

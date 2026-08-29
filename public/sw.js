@@ -1,7 +1,7 @@
 // Cache version — bump both on any change to what gets cached, so
 // `activate` cleans up the old entries instead of leaving them orphaned.
-const SHELL_CACHE     = 'fieldstay-shell-v3'
-const ASSET_CACHE     = 'fieldstay-assets-v3'
+const SHELL_CACHE     = 'fieldstay-shell-v4'
+const ASSET_CACHE     = 'fieldstay-assets-v4'
 const OFFLINE_URL     = '/offline.html'
 const CURRENT_CACHES  = [SHELL_CACHE, ASSET_CACHE]
 
@@ -79,10 +79,24 @@ self.addEventListener('activate', (event) => {
 // with no route back to the inspection they are halfway through. Both pages now
 // render from Dexie and hold no server-rendered data.
 //
-// ⚠️ THE REST OF /maintenance IS STILL OUT, and the entry without a trailing
-// slash covers the list page EXACTLY — `pathname === p` — while the one WITH it
-// covers the per-inspection routes. Neither matches /maintenance itself, whose
-// board is still server-rendered. Do not collapse these to '/maintenance'.
+// ✅ THE BOARD ITSELF MET THE CONDITION, 2026-08-28. maintenance-board.tsx now
+// reads work_orders through useLiveQuery (merge-offline-work-orders.ts),
+// overlaid onto the Server Component's props — see warm-maintenance-board.ts.
+// So /maintenance now qualifies by the same rule the inspection routes did:
+// the HTML it serves offline carries no server-rendered rows of its own,
+// only a shell the client repopulates from Dexie.
+//
+// It is added to OFFLINE_EXACT_PATHS, a SEPARATE list from OFFLINE_PATHS
+// below, and that separation is load-bearing, not stylistic. OFFLINE_PATHS'
+// matching turns a bare entry into a PREFIX (`p + '/'`), which is exactly
+// right for '/maintenance/inspections' — the fill screen lives under it and
+// must be covered too — and exactly wrong for the board: '/maintenance/[id]'
+// (a single work order's detail page) starts with '/maintenance/' and is
+// STILL server-rendered, so prefix-matching '/maintenance' would silently
+// start caching and replaying a stale copy of it — the precise staleness bug
+// this file's history (see above) already shipped and fixed once for the
+// board itself. Exact-only closes that off structurally rather than by
+// remembering not to add a trailing-slash variant.
 const OFFLINE_PATHS = [
   '/crew',          // the crew PWA — offline is its whole point
   '/work-orders/',  // vendor token pages, cached so a hard reload survives no signal
@@ -90,7 +104,14 @@ const OFFLINE_PATHS = [
   '/maintenance/inspections/', // the fill screen — renders from Dexie
 ]
 
+/** Checked by EXACT match only — see the comment above on why. A Set, so the
+ *  membership check below is .has() rather than an O(n) Array.includes(). */
+const OFFLINE_EXACT_PATHS = new Set([
+  '/maintenance',  // the board — renders from Dexie now; a single work order's detail page must NOT be swept in
+])
+
 function isOfflineCapable(pathname) {
+  if (OFFLINE_EXACT_PATHS.has(pathname)) return true
   return OFFLINE_PATHS.some((p) => pathname === p || pathname.startsWith(p.endsWith('/') ? p : p + '/'))
 }
 

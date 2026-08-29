@@ -1,7 +1,11 @@
 'use client'
 
-import { useState, useTransition, useEffect } from 'react'
+import { useState, useTransition, useEffect, useMemo } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
+import { useLiveQuery } from 'dexie-react-hooks'
+import { getDashboardDb } from '@/lib/dexie/dashboard/schema'
+import { useIsOffline } from '@/lib/dexie/dashboard/use-is-offline'
+import { mergeOfflineWorkOrders, type NameLookup, type VendorLookup } from './merge-offline-work-orders'
 import {
   Plus, ChevronDown, X, Wrench, Calendar, DollarSign,
   User, ChevronRight, AlertTriangle, CheckCircle2, Clock,
@@ -17,7 +21,7 @@ import {
   acceptVendorSuggestion, dismissVendorSuggestion,
   acceptCrewSuggestion, dismissCrewSuggestion,
 } from './actions'
-import type { WoStatus, PriorityLevel, VendorSpecialty, ScheduleCreates, ScheduleType, ScheduleFrequency, InvoiceStatus } from '@/types/database'
+import type { WoStatus, PriorityLevel, VendorSpecialty, ScheduleCreates, ScheduleType, ScheduleFrequency, InvoiceStatus, WorkOrder, Vendor } from '@/types/database'
 import { WorkOrderDetail, type WorkOrderDetailData } from '@/components/work-orders/work-order-detail'
 import { MaintenanceCalendar } from './maintenance-calendar'
 import { CreateWorkOrderModal } from './CreateWorkOrderModal'
@@ -87,6 +91,61 @@ interface WorkOrderRow {
   // forces two independent literal unions to agree.
   work_order_invoices?: { id: string; status: InvoiceStatus }
     | { id: string; status: InvoiceStatus }[] | null
+}
+
+/**
+ * A raw cached `work_orders` row (a faithful mirror of the server shape — see
+ * schema.ts) into the embedded-join shape the board renders.
+ *
+ * Every field below is defaulted rather than trusted present: an OFFLINE-
+ * CREATED row (createWorkOrderLocal's optimisticRow()) only ever sets the
+ * fields a PM could actually decide with no signal — completion/verification/
+ * invoice/dispatch fields simply don't exist on it, and a bare `cached.x`
+ * would read as `undefined` rather than the `null` every other code path in
+ * this file expects. `work_order_line_items` and `work_order_invoices` are
+ * genuinely omitted, not defaulted to empty — this is a scope decision (see
+ * warm-maintenance-board.ts's header comment): line-item/invoice detail isn't
+ * cached, so a cached card shows the same fields it always did minus that
+ * detail, not a card claiming to have zero of either.
+ */
+function cachedWorkOrderToRow(
+  cached: WorkOrder, property: NameLookup | null, vendor: VendorLookup | null,
+): WorkOrderRow {
+  return {
+    id:                        cached.id,
+    property_id:               cached.property_id,
+    vendor_id:                 cached.vendor_id,
+    wo_number:                 cached.wo_number ?? null,
+    title:                     cached.title,
+    description:               cached.description ?? null,
+    category:                  cached.category ?? null,
+    priority:                  cached.priority,
+    status:                    cached.status,
+    scheduled_date:            cached.scheduled_date ?? null,
+    completed_date:            cached.completed_date ?? null,
+    estimated_cost:            cached.estimated_cost ?? null,
+    nte_amount:                cached.nte_amount ?? null,
+    actual_cost:               cached.actual_cost ?? null,
+    access_notes:              cached.access_notes ?? null,
+    portal_enabled:            cached.portal_enabled ?? false,
+    completion_token:          cached.completion_token ?? null,
+    completion_notes:          cached.completion_notes ?? null,
+    completed_by_name:         cached.completed_by_name ?? null,
+    invoice_reference:         cached.invoice_reference ?? null,
+    vendor_acknowledged_at:    cached.vendor_acknowledged_at ?? null,
+    vendor_acknowledged_by:    cached.vendor_acknowledged_by ?? null,
+    completion_verified_at:    cached.completion_verified_at ?? null,
+    completion_verified_by:    cached.completion_verified_by ?? null,
+    vendor_dispatch_email:     cached.vendor_dispatch_email ?? null,
+    suggested_vendor_ids:      cached.suggested_vendor_ids ?? null,
+    suggested_crew_member_ids: cached.suggested_crew_member_ids ?? null,
+    suggestion_reasoning:      cached.suggestion_reasoning ?? null,
+    suggestion_status:         cached.suggestion_status ?? null,
+    created_at:                cached.created_at,
+    updated_at:                cached.updated_at,
+    properties: property ? { name: property.name, address: null, city: property.city ?? null, state: property.state ?? null, access_instructions: null } : null,
+    vendors:    vendor   ? { id: vendor.id, name: vendor.name, specialty: vendor.specialty, phone: null } : null,
+  }
 }
 
 interface PropertyOption {
@@ -1077,6 +1136,58 @@ export function MaintenanceBoard({
   const [archivedLoaded,  setArchivedLoaded]  = useState(false)
   const [loadingArchived, startLoadArchived]  = useTransition()
 
+  // ── Offline read cache ──────────────────────────────────────────────────
+  //
+  // The board was write-only offline: createWorkOrderLocal (the "New Work
+  // Order" modal's offline path) has always written a full optimistic row
+  // into db.work_orders, but nothing here ever read that table, so the work
+  // order vanished from the list the moment the modal closed — it existed
+  // only until a sync and a refresh both landed. This closes that gap, and
+  // the same mechanism makes the whole open board visible with no signal at
+  // all, via warmMaintenanceBoardForOffline (mounted in the dashboard
+  // layout). See merge-offline-work-orders.ts for the ONLINE/OFFLINE rules.
+  const isOffline = useIsOffline()
+  const db = useMemo(() => getDashboardDb(userId, orgId), [userId, orgId])
+  const cachedWorkOrders = useLiveQuery<WorkOrder[], WorkOrder[]>(
+    () => (userId && orgId
+      ? db.work_orders.where('status').anyOf(['pending', 'quote_requested', 'assigned', 'in_progress']).toArray()
+      : Promise.resolve([])),
+    [db, userId, orgId], [],
+  )
+  const cachedVendors = useLiveQuery<Vendor[], Vendor[]>(
+    () => (userId && orgId ? db.vendors.toArray() : Promise.resolve([])),
+    [db, userId, orgId], [],
+  )
+
+  // Prop first, cache second — the prop reflects THIS render and is never
+  // staler than the cache; the cache only fills in ids the prop doesn't have,
+  // which matters for a row this device warmed or created but that predates
+  // the page's own fetch (a stale service-worker-replayed snapshot, chiefly).
+  const propertyLookup = useMemo(() => {
+    const m = new Map<string, NameLookup>()
+    for (const p of properties) m.set(p.id, { name: p.name, city: p.city, state: p.state })
+    return m
+  }, [properties])
+
+  const vendorLookup = useMemo(() => {
+    const m = new Map<string, VendorLookup>()
+    for (const v of cachedVendors ?? []) m.set(v.id, { id: v.id, name: v.name, specialty: v.specialty })
+    for (const v of vendors) m.set(v.id, { id: v.id, name: v.name, specialty: v.specialty })
+    return m
+  }, [cachedVendors, vendors])
+
+  const effectiveWorkOrders = useMemo(
+    () => mergeOfflineWorkOrders<WorkOrderRow>(
+      workOrders,
+      cachedWorkOrders ?? [],
+      isOffline,
+      propertyLookup,
+      vendorLookup,
+      (cached, { property, vendor }) => cachedWorkOrderToRow(cached, property, vendor),
+    ),
+    [workOrders, cachedWorkOrders, isOffline, propertyLookup, vendorLookup],
+  )
+
   const toggleShowCompleted = () => {
     const next = !showCompleted
     setShowCompleted(next)
@@ -1089,7 +1200,7 @@ export function MaintenanceBoard({
     }
   }
 
-  const allWorkOrders = showCompleted ? [...workOrders, ...archivedWOs] : workOrders
+  const allWorkOrders = showCompleted ? [...effectiveWorkOrders, ...archivedWOs] : effectiveWorkOrders
 
   const toggleSelect = (id: string) =>
     setSelectedIds(prev => {
@@ -1114,9 +1225,9 @@ export function MaintenanceBoard({
   })
 
   // Stats
-  const openCount    = workOrders.filter((w) => w.status !== 'completed' && w.status !== 'cancelled').length
-  const urgentCount  = workOrders.filter((w) => w.priority === 'urgent' && w.status !== 'completed' && w.status !== 'cancelled').length
-  const pendingCount = workOrders.filter((w) => w.status === 'pending').length
+  const openCount    = effectiveWorkOrders.filter((w) => w.status !== 'completed' && w.status !== 'cancelled').length
+  const urgentCount  = effectiveWorkOrders.filter((w) => w.priority === 'urgent' && w.status !== 'completed' && w.status !== 'cancelled').length
+  const pendingCount = effectiveWorkOrders.filter((w) => w.status === 'pending').length
 
   return (
     <>
