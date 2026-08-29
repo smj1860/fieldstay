@@ -23,7 +23,7 @@
 // sw.js. Bumping the worker without bumping this now fails CI.
 
 /** Page documents. Must equal SHELL_CACHE in public/sw.js. */
-export const SHELL_CACHE = 'fieldstay-shell-v3'
+export const SHELL_CACHE = 'fieldstay-shell-v4'
 
 /** Hashed build output. Must equal ASSET_CACHE in public/sw.js. */
-export const ASSET_CACHE = 'fieldstay-assets-v3'
+export const ASSET_CACHE = 'fieldstay-assets-v4'
