@@ -170,7 +170,7 @@ describe('guardrail: service worker offline allowlist', () => {
  */
 function realIsOfflineCapable(): (pathname: string) => boolean {
   const pathsMatch    = /const OFFLINE_PATHS = \[[\s\S]*?\]/.exec(sw)?.[0]
-  const exactMatch    = /const OFFLINE_EXACT_PATHS = \[[\s\S]*?\]/.exec(sw)?.[0]
+  const exactMatch    = /const OFFLINE_EXACT_PATHS = new Set\(\[[\s\S]*?\]\)/.exec(sw)?.[0]
   const functionMatch = /function isOfflineCapable[\s\S]*?\n\}/.exec(sw)?.[0]
 
   if (!pathsMatch || !exactMatch || !functionMatch) {
@@ -203,7 +203,7 @@ describe('guardrail: /maintenance offline caching is exact-match only', () => {
     // Not a permanent restriction — a future exact-match route is fine to add
     // — but a change here is exactly the kind of thing a reviewer should see
     // named in a failing test rather than discover by reading a diff.
-    const list  = /const OFFLINE_EXACT_PATHS = \[([\s\S]*?)\]/.exec(code)
+    const list  = /const OFFLINE_EXACT_PATHS = new Set\(\[([\s\S]*?)\]\)/.exec(code)
     expect(list, 'OFFLINE_EXACT_PATHS not found — has it been renamed?').not.toBeNull()
     const paths = [...list![1].matchAll(/'([^']+)'/g)].map((m) => m[1])
     expect(paths).toEqual(['/maintenance'])

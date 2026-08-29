@@ -104,13 +104,14 @@ const OFFLINE_PATHS = [
   '/maintenance/inspections/', // the fill screen — renders from Dexie
 ]
 
-/** Checked by EXACT match only — see the comment above on why. */
-const OFFLINE_EXACT_PATHS = [
+/** Checked by EXACT match only — see the comment above on why. A Set, so the
+ *  membership check below is .has() rather than an O(n) Array.includes(). */
+const OFFLINE_EXACT_PATHS = new Set([
   '/maintenance',  // the board — renders from Dexie now; a single work order's detail page must NOT be swept in
-]
+])
 
 function isOfflineCapable(pathname) {
-  if (OFFLINE_EXACT_PATHS.includes(pathname)) return true
+  if (OFFLINE_EXACT_PATHS.has(pathname)) return true
   return OFFLINE_PATHS.some((p) => pathname === p || pathname.startsWith(p.endsWith('/') ? p : p + '/'))
 }
 
