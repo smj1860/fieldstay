@@ -29,8 +29,8 @@ export const INSPECTION_FORMS: FormDefinition[] = [SAFETY_FORM, INDOOR_FORM, OUT
  *            where the property actually has one
  */
 export const EXPECTED_ROOT_ITEM_COUNTS: Record<string, number> = {
-  safety:  44,   // 42 inspected items + the 2-item sign-off
-                 // (40 + the security-system capture/condition pair)
+  safety:  45,   // 43 inspected items + the 2-item sign-off
+                 // (40 + the security-system capture/condition pair + 17a gas line integrity)
   indoor:  52,
   outdoor: 55,   // 43 numbered + 3 sign-off + 9 well
 }
@@ -192,6 +192,10 @@ export const CONCERN_KEY_MAP: Record<string, ConcernEntry> = {
   gas_appliance_safe: {
     items: ['safety.electrical_gas.gas_appliances'],
     why:   'Leak-check and venting across every gas appliance. Reserved; nothing else asks it today.',
+  },
+  gas_line_integrity: {
+    items: ['safety.electrical_gas.gas_line_integrity'],
+    why:   'The supply line/meter/shut-off itself, distinct from gas_appliance_safe which is the appliances hanging off it — a corroded line and a leaking range are different repairs. Reserved; nothing else asks it today.',
   },
   sump_pump: {
     items: ['safety.water.sump_pump'],

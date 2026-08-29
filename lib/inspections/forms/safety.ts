@@ -1,7 +1,13 @@
 // lib/inspections/forms/safety.ts
 //
 // Property Safety & Risk Mitigation Inspection — docs/INSPECTIONS_SPEC.md §12.1.
-// 44 top-level items across 7 sections. Runs 1× or 2× a year.
+// 45 top-level items across 7 sections. Runs 1× or 2× a year.
+//
+// Item 17a (gas line integrity) was added 2026-08-30, out of the spec's
+// original sequence — same convention as 14a/19a on Indoor: a lettered
+// suffix rather than renumbering everything after it. See CONCERN_KEY_MAP
+// in ./index.ts and EXPECTED_ROOT_ITEM_COUNTS for the other two places this
+// addition had to be reflected.
 //
 // This is the form §1 calls insurance evidence, and the one whose findings an
 // insurer is most likely to read. Two consequences visible in the data below:
@@ -28,7 +34,7 @@ export const SAFETY_FORM: FormDefinition = {
     'Life-safety systems, utilities, structure, water and amenity risk controls. ' +
     'Performed once or twice a year and retained as the evidentiary record of the ' +
     "property's safety posture.",
-  version: 1,
+  version: 2,
   sections: [
     // ── 1 ────────────────────────────────────────────────────────────────────
     {
@@ -227,6 +233,18 @@ export const SAFETY_FORM: FormDefinition = {
           remediation: 'work_order', default_actions: ['service'],
           wo_category: 'general', wo_priority: 'urgent',
           concern_key: 'gas_appliance_safe',
+        },
+        {
+          // Item 17a — the line itself, not the appliances hanging off it.
+          // 17 catches a leaking appliance; this catches the corroded or
+          // damaged run feeding it (and the meter/shut-off) before it ever
+          // reaches one. Same urgency class as 17 for the same reason: a gas
+          // risk is life-safety, not maintenance.
+          key:    'safety.electrical_gas.gas_line_integrity',
+          prompt: 'Gas supply line intact — no corrosion, damage, or exposed fittings; shut-off valve accessible and labelled',
+          remediation: 'work_order', default_actions: ['service'],
+          wo_category: 'general', wo_priority: 'urgent',
+          concern_key: 'gas_line_integrity',
         },
         {
           key:    'safety.electrical_gas.main_shutoff',
