@@ -911,6 +911,93 @@ export async function openBillingPortal(): Promise<void> {
   }
 }
 
+type SupabaseServerClient = Awaited<ReturnType<typeof createClient>>
+
+/**
+ * The email half of `inviteCrewMember`, including the claim release.
+ *
+ * On a send failure the 10s send-claim written by the caller has to be rolled
+ * back to whatever `invite_sent_at` held before it, or the PM's retry is
+ * silently swallowed by the dedupe window rather than re-sending.
+ *
+ * Returns a user-facing error string on failure, or null when the invite went
+ * out.
+ */
+async function deliverCrewInviteEmail(args: {
+  supabase:  SupabaseServerClient
+  orgId:     string
+  crew:      { id: string; name: string; email: string; invite_sent_at: string | null }
+  orgName:   string | null
+  inviteUrl: string
+}): Promise<string | null> {
+  const { supabase, orgId, crew, orgName, inviteUrl } = args
+  const displayOrg = orgName ?? 'Your property manager'
+
+  const { resend, FROM } = await import('@/lib/resend/client')
+  const html = await renderCrewInviteEmail({
+    crewName: crew.name,
+    orgName:  displayOrg,
+    inviteUrl,
+  })
+  const { error: emailError } = await resend.emails.send({
+    from:    FROM,
+    to:      crew.email,
+    replyTo: 'help@fieldstay.app',
+    subject: `You've been invited to join ${orgName ?? 'FieldStay'} — crew app access`,
+    html,
+  })
+
+  if (!emailError) return null
+
+  console.error('[inviteCrewMember] email send failed')
+  reportError(emailError, { site: 'serverAction.settings.inviteCrewMember', orgId })
+
+  // Release the claim so a retry isn't blocked by the window above
+  const { error: releaseError } = await supabase
+    .from('crew_members')
+    .update({ invite_sent_at: crew.invite_sent_at })
+    .eq('id', crew.id)
+
+  if (releaseError) {
+    console.error('[inviteCrewMember] failed to release invite claim', releaseError.message)
+    reportError(releaseError, { site: 'serverAction.settings.inviteCrewMember.releaseClaim', orgId })
+  }
+
+  return 'Failed to send invite email. Please try again.'
+}
+
+/**
+ * The SMS half of `inviteCrewMember`. Non-fatal by design — a crew member with
+ * an email on file is already invited by the time this runs, and one without
+ * still has the emailless path's success return.
+ */
+async function deliverCrewInviteSms(args: {
+  orgId:     string
+  crew:      { name: string; phone: string }
+  orgName:   string | null
+  inviteUrl: string
+}): Promise<void> {
+  const { orgId, crew, orgName, inviteUrl } = args
+
+  const { normalizePhoneToE164, sendSMS } = await import('@/lib/sms/telnyx')
+
+  const e164 = normalizePhoneToE164(crew.phone)
+  if (!e164) return
+
+  const smsBody = await renderSmsBody(orgId, 'crew_invite', {
+    crew_name:  crew.name,
+    org_name:   orgName ?? 'Your property manager',
+    invite_url: inviteUrl,
+  })
+
+  try {
+    await sendSMS(e164, smsBody, { orgId })
+  } catch (smsErr) {
+    console.error('[inviteCrewMember] SMS failed (non-fatal):', smsErr)
+    reportError(smsErr, { site: 'serverAction.settings.inviteCrewMember.inner', orgId })
+  }
+}
+
 export async function inviteCrewMember(
   crewMemberId: string
 ): Promise<{ error?: string; success?: boolean }> {
@@ -973,57 +1060,25 @@ export async function inviteCrewMember(
     const inviteUrl = `${process.env.NEXT_PUBLIC_APP_URL}/crew-invite/${crew.invite_token}`
 
     if (crew.email) {
-      const { resend, FROM } = await import('@/lib/resend/client')
-      const html = await renderCrewInviteEmail({
-        crewName:  crew.name,
-        orgName:   org?.name ?? 'Your property manager',
+      const emailFailed = await deliverCrewInviteEmail({
+        supabase,
+        orgId:   membership.org_id,
+        crew:    { ...crew, email: crew.email },
+        orgName: org?.name ?? null,
         inviteUrl,
       })
-      const { error: emailError } = await resend.emails.send({
-        from:     FROM,
-        to:       crew.email,
-        replyTo:  'help@fieldstay.app',
-        subject:  `You've been invited to join ${org?.name ?? 'FieldStay'} — crew app access`,
-        html,
-      })
-
-      if (emailError) {
-        console.error('[inviteCrewMember] email send failed')
-        reportError(emailError, { site: 'serverAction.settings.inviteCrewMember', orgId: membership.org_id })
-        // Release the claim so a retry isn't blocked by the window above
-        const { error: releaseError } = await supabase
-          .from('crew_members')
-          .update({ invite_sent_at: crew.invite_sent_at })
-          .eq('id', crewMemberId)
-
-        if (releaseError) {
-          console.error('[inviteCrewMember] failed to release invite claim', releaseError.message)
-          reportError(releaseError, { site: 'serverAction.settings.inviteCrewMember.releaseClaim', orgId: membership.org_id })
-        }
-        return { error: 'Failed to send invite email. Please try again.' }
-      }
+      if (emailFailed) return { error: emailFailed }
     }
 
     // SMS — crew with a phone number receive an invite via SMS in addition to
     // (or instead of) email. Non-fatal on failure.
     if (crew.phone) {
-      const { normalizePhoneToE164, sendSMS } =
-        await import('@/lib/sms/telnyx')
-
-      const e164 = normalizePhoneToE164(crew.phone)
-      if (e164) {
-        const smsBody = await renderSmsBody(membership.org_id, 'crew_invite', {
-          crew_name:  crew.name,
-          org_name:   org?.name ?? 'Your property manager',
-          invite_url: inviteUrl,
-        })
-        try {
-          await sendSMS(e164, smsBody, { orgId: membership.org_id })
-        } catch (smsErr) {
-          console.error('[inviteCrewMember] SMS failed (non-fatal):', smsErr)
-          reportError(smsErr, { site: 'serverAction.settings.inviteCrewMember.inner', orgId: membership.org_id })
-        }
-      }
+      await deliverCrewInviteSms({
+        orgId:   membership.org_id,
+        crew:    { name: crew.name, phone: crew.phone },
+        orgName: org?.name ?? null,
+        inviteUrl,
+      })
     }
 
     await logAuditEvent({
@@ -1041,6 +1096,88 @@ export async function inviteCrewMember(
     console.error('[inviteCrewMember]', err)
     reportError(err, { site: 'serverAction.settings.inviteCrewMember' })
     return { error: 'Operation failed. Please try again.' }
+  }
+}
+
+/**
+ * Email + SMS delivery for ONE crew member in the bulk invite fan-out.
+ *
+ * Returns true if either channel actually delivered. A false return is what
+ * tells the caller to release its send claim, so "nothing went out" must never
+ * be reported as a success — an SMS that `sendSMS` skipped (SMS_ENABLED off,
+ * nudge budget) returns `sent: false` and counts as undelivered here.
+ *
+ * Never throws: `Promise.all` over a batch must not let one crew member's
+ * failure take down the rest.
+ */
+async function deliverBulkCrewInvite(args: {
+  orgId:        string
+  crew:         { name: string; email: string | null; phone: string | null }
+  orgName:      string | null
+  inviteUrl:    string
+  resendClient: (typeof import('@/lib/resend/client'))['resend']
+  from:         string
+}): Promise<boolean> {
+  const { orgId, crew, orgName, inviteUrl, resendClient, from } = args
+  const displayOrg = orgName ?? 'Your property manager'
+  let delivered = false
+
+  if (crew.email) {
+    const html = await renderCrewInviteEmail({
+      crewName: crew.name,
+      orgName:  displayOrg,
+      inviteUrl,
+    })
+    const { error: emailError } = await resendClient.emails.send({
+      from:    from,
+      to:      crew.email,
+      replyTo: 'help@fieldstay.app',
+      subject: `You've been invited to join ${orgName ?? 'FieldStay'} — crew app access`,
+      html,
+    })
+    if (!emailError) delivered = true
+  }
+
+  // No email on file but a phone number exists — send via SMS instead.
+  // Non-fatal on failure, mirroring inviteCrewMember()'s single-invite path.
+  if (crew.phone) {
+    const smsDelivered = await deliverBulkCrewInviteSms({
+      orgId,
+      crew: { name: crew.name, phone: crew.phone },
+      orgName,
+      inviteUrl,
+    })
+    if (smsDelivered) delivered = true
+  }
+
+  return delivered
+}
+
+async function deliverBulkCrewInviteSms(args: {
+  orgId:     string
+  crew:      { name: string; phone: string }
+  orgName:   string | null
+  inviteUrl: string
+}): Promise<boolean> {
+  const { orgId, crew, orgName, inviteUrl } = args
+
+  const { normalizePhoneToE164, sendSMS } = await import('@/lib/sms/telnyx')
+  const e164 = normalizePhoneToE164(crew.phone)
+  if (!e164) return false
+
+  const smsBody = await renderSmsBody(orgId, 'crew_invite', {
+    crew_name:  crew.name,
+    org_name:   orgName ?? 'Your property manager',
+    invite_url: inviteUrl,
+  })
+
+  try {
+    const result = await sendSMS(e164, smsBody, { orgId })
+    return result.sent
+  } catch (smsErr) {
+    console.error('[inviteAllUninvitedCrew] SMS failed (non-fatal):', smsErr)
+    reportError(smsErr, { site: 'serverAction.settings.inviteAllUninvitedCrew.inner', orgId })
+    return false
   }
 }
 
@@ -1145,44 +1282,15 @@ export async function inviteAllUninvitedCrew(): Promise<{ sent: number; error?: 
       if (!claimed) return null
 
       const inviteUrl = `${process.env.NEXT_PUBLIC_APP_URL}/crew-invite/${crew.invite_token}`
-      let delivered = false
 
-      if (crew.email) {
-        const html = await renderCrewInviteEmail({
-          crewName:  crew.name,
-          orgName:   org?.name ?? 'Your property manager',
-          inviteUrl,
-        })
-        const { error: emailError } = await resendClient.emails.send({
-          from:    from,
-          to:      crew.email,
-          replyTo: 'help@fieldstay.app',
-          subject: `You've been invited to join ${org?.name ?? 'FieldStay'} — crew app access`,
-          html,
-        })
-        if (!emailError) delivered = true
-      }
-
-      // No email on file but a phone number exists — send via SMS instead.
-      // Non-fatal on failure, mirroring inviteCrewMember()'s single-invite path.
-      if (crew.phone) {
-        const { normalizePhoneToE164, sendSMS } = await import('@/lib/sms/telnyx')
-        const e164 = normalizePhoneToE164(crew.phone)
-        if (e164) {
-          const smsBody = await renderSmsBody(membership.org_id, 'crew_invite', {
-            crew_name:  crew.name,
-            org_name:   org?.name ?? 'Your property manager',
-            invite_url: inviteUrl,
-          })
-          try {
-            const result = await sendSMS(e164, smsBody, { orgId: membership.org_id })
-            if (result.sent) delivered = true
-          } catch (smsErr) {
-            console.error('[inviteAllUninvitedCrew] SMS failed (non-fatal):', smsErr)
-            reportError(smsErr, { site: 'serverAction.settings.inviteAllUninvitedCrew.inner', orgId: membership.org_id })
-          }
-        }
-      }
+      const delivered = await deliverBulkCrewInvite({
+        orgId:   membership.org_id,
+        crew:    { name: crew.name, email: crew.email, phone: crew.phone },
+        orgName: org?.name ?? null,
+        inviteUrl,
+        resendClient,
+        from,
+      })
 
       if (delivered) return crew.id
 

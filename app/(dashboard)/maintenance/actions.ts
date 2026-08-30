@@ -1673,6 +1673,25 @@ async function splitVendorAssignedWorkOrders(
   }
 }
 
+/**
+ * Prose for the vendor-assigned work orders a bulk completion cannot touch.
+ *
+ * Split out of `bulkUpdateWorkOrderStatus` purely so the pluralisation
+ * ternaries stop nesting inside that function's own branching — the wording is
+ * the same as it always was.
+ */
+function vendorAssignedBlockedMessage(count: number): string {
+  const subject = count !== 1 ? 'work orders are' : 'work order is'
+  const object  = count !== 1 ? 'them' : 'it'
+  return `${count} ${subject} assigned to a vendor — complete ${object} through the vendor portal instead.`
+}
+
+function vendorAssignedSkippedMessage(count: number): string {
+  const subject = count !== 1 ? 'work orders were' : 'work order was'
+  const object  = count !== 1 ? 'them' : 'it'
+  return `${count} vendor-assigned ${subject} skipped — complete ${object} through the vendor portal instead.`
+}
+
 export async function bulkUpdateWorkOrderStatus(
   workOrderIds: string[],
   status: WoStatus
@@ -1688,7 +1707,7 @@ export async function bulkUpdateWorkOrderStatus(
 
     if (targetIds.length === 0) {
       return skippedCount > 0
-        ? { error: `${skippedCount} work order${skippedCount !== 1 ? 's are' : ' is'} assigned to a vendor — complete ${skippedCount !== 1 ? 'them' : 'it'} through the vendor portal instead.` }
+        ? { error: vendorAssignedBlockedMessage(skippedCount) }
         : {}
     }
 
@@ -1737,7 +1756,7 @@ export async function bulkUpdateWorkOrderStatus(
 
     revalidatePath('/maintenance')
     return skippedCount > 0
-      ? { warning: `${skippedCount} vendor-assigned work order${skippedCount !== 1 ? 's were' : ' was'} skipped — complete ${skippedCount !== 1 ? 'them' : 'it'} through the vendor portal instead.` }
+      ? { warning: vendorAssignedSkippedMessage(skippedCount) }
       : {}
   } catch (err) {
     console.error('[bulkUpdateWorkOrderStatus]', err)

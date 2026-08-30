@@ -60,6 +60,98 @@ import { reportError } from '@/lib/observability/report-error'
 // the key names and throws a fixed message instead.
 const SAFE_DETAIL_PROVIDERS = new Set(['hospitable', 'ownerrez', 'hostex'])
 
+const DEFAULT_RETURN_PATH = '/settings?tab=integrations'
+
+/**
+ * Which redirect a failed token exchange should produce, and whether the
+ * provider's own message is safe to show the user.
+ *
+ * Split out of GET() so the reasoning below stays readable next to the three
+ * outcomes it decides between, rather than nested inside the handler's own
+ * branching.
+ */
+function classifyTokenExchangeError(
+  providerId: string,
+  err:        unknown,
+): { reason: string; detail?: string } {
+  // This runs outside any Inngest step — there's no retry mechanism to
+  // lean on here, so a rate limit gets its own clear reason instead of
+  // the generic failure message, telling the PM it's transient and to
+  // just try again shortly rather than suggesting something is broken.
+  if (err instanceof RateLimitError) {
+    console.warn(`[OAuth:${providerId}] Token exchange rate limited (retry after ${err.retryAfter}s)`)
+    return { reason: 'rate_limited' }
+  }
+
+  console.error(`[OAuth:${providerId}] Token exchange failed:`, err)
+  reportError(err, { site: 'route.integrations.callback.errorRedirect' })
+
+  if (err instanceof IntegrationMisconfiguredError) {
+    // Our own server-side credentials (CLIENT_ID/SECRET env vars) are
+    // missing — an operational bug, not something the provider reported
+    // or the user caused. Never surface this as `detail`: it's an
+    // internal config detail, not an actionable reason, and showing it
+    // to an unauthenticated visitor is pure information disclosure with
+    // no upside (they can't fix a missing env var by retrying).
+    console.error(`[OAuth:${providerId}] MISCONFIGURED — check ${providerId.toUpperCase()}_CLIENT_ID/SECRET env vars`)
+    return { reason: 'token_exchange_failed' }
+  }
+
+  // Thread the actual provider-reported reason through — e.g. a plan
+  // restriction (Hospitable Essentials tier lacks API access) — so the
+  // PM sees something actionable instead of a generic "try again" that
+  // sends them into a reconnect loop that can never succeed.
+  //
+  // Only for providers whose exchangeCodeForToken message is confirmed to
+  // extract a specific error_description/error field from the provider's
+  // response (hospitable.ts, ownerrez.ts) rather than embedding raw
+  // response text — kroger.ts's exchangeCodeForCustomerToken
+  // (lib/kroger/client.ts) throws with the unparsed response body
+  // verbatim, which hasn't been verified to never contain anything
+  // beyond a plain error reason, so it's excluded here rather than
+  // assumed safe.
+  const safeDetail = SAFE_DETAIL_PROVIDERS.has(providerId) && err instanceof Error
+  return { reason: 'token_exchange_failed', detail: safeDetail ? err.message : undefined }
+}
+
+/**
+ * Which FieldStay user this connection binds to.
+ *
+ * Same browser → the live session wins (a mid-flow account switch binds to who
+ * the user actually is now). Otherwise the owner /connect recorded wins,
+ * falling back to the session only when /connect had nobody to record — the
+ * marketplace arrival. See the `sameBrowser` commentary in GET() for why the
+ * cookie, and not the state row, is what decides this.
+ */
+function resolveAppUserId(args: {
+  sameBrowser:   boolean
+  sessionUserId: string | null
+  stateUserId:   string | null
+}): string | null {
+  const { sameBrowser, sessionUserId, stateUserId } = args
+  const preferred = sameBrowser ? sessionUserId : stateUserId
+  const fallback  = sameBrowser ? stateUserId : sessionUserId
+  return preferred ?? fallback ?? null
+}
+
+/**
+ * The post-connect destination, guarded against open redirects.
+ *
+ * `startsWith('/')` ALONE is not sufficient and was the bug:
+ * '//evil.com'.startsWith('/') is true, and
+ * new URL('//evil.com/x', 'https://app.fieldstay.com') resolves to
+ * https://evil.com/x — a protocol-relative URL is absolute. `return_to` is
+ * taken verbatim from /connect's query string, so this sent the victim off-site
+ * carrying a FieldStay-looking ?connected= param. A backslash is rejected for
+ * the same reason: browsers normalise '/\' to '//'.
+ */
+function safeReturnPath(returnTo: string | null): string {
+  const candidate = returnTo ?? DEFAULT_RETURN_PATH
+  const isRelative =
+    candidate.startsWith('/') && !candidate.startsWith('//') && !candidate.startsWith('/\\')
+  return isRelative ? candidate : DEFAULT_RETURN_PATH
+}
+
 export async function GET(
   request: NextRequest,
   { params }: { params: Promise<{ provider: string }> }
@@ -267,13 +359,12 @@ export async function GET(
     return errorRedirect('invalid_state')
   }
 
-  //    Same browser → the live session wins (a mid-flow account switch binds
-  //    to who the user actually is now). Otherwise the recorded owner wins,
-  //    falling back to the session only when /connect had nobody to record —
-  //    the marketplace arrival.
-  const appUserId: string | null = sameBrowser
-    ? (sessionUser?.id ?? stateRecord.user_id ?? null)
-    : (stateRecord.user_id ?? sessionUser?.id ?? null)
+  //    Which of the two identities wins — see resolveAppUserId above.
+  const appUserId: string | null = resolveAppUserId({
+    sameBrowser,
+    sessionUserId: sessionUser?.id ?? null,
+    stateUserId:   stateRecord.user_id ?? null,
+  })
 
   //    OwnerRez: code expires after 10 minutes and is single-use.
   //    We pass redirectUri because we included it in step 1 — it must match exactly,
@@ -313,43 +404,8 @@ export async function GET(
   try {
     tokenData = await providerAdapter.exchangeCodeForToken({ code, redirectUri })
   } catch (err) {
-    // This runs outside any Inngest step — there's no retry mechanism to
-    // lean on here, so a rate limit gets its own clear reason instead of
-    // the generic failure message, telling the PM it's transient and to
-    // just try again shortly rather than suggesting something is broken.
-    if (err instanceof RateLimitError) {
-      console.warn(`[OAuth:${providerId}] Token exchange rate limited (retry after ${err.retryAfter}s)`)
-      return errorRedirect('rate_limited')
-    }
-    console.error(`[OAuth:${providerId}] Token exchange failed:`, err)
-    reportError(err, { site: 'route.integrations.callback.errorRedirect' })
-    if (err instanceof IntegrationMisconfiguredError) {
-      // Our own server-side credentials (CLIENT_ID/SECRET env vars) are
-      // missing — an operational bug, not something the provider reported
-      // or the user caused. Never surface this as `detail`: it's an
-      // internal config detail, not an actionable reason, and showing it
-      // to an unauthenticated visitor is pure information disclosure with
-      // no upside (they can't fix a missing env var by retrying).
-      console.error(`[OAuth:${providerId}] MISCONFIGURED — check ${providerId.toUpperCase()}_CLIENT_ID/SECRET env vars`)
-      return errorRedirect('token_exchange_failed')
-    }
-    // Thread the actual provider-reported reason through — e.g. a plan
-    // restriction (Hospitable Essentials tier lacks API access) — so the
-    // PM sees something actionable instead of a generic "try again" that
-    // sends them into a reconnect loop that can never succeed.
-    //
-    // Only for providers whose exchangeCodeForToken message is confirmed to
-    // extract a specific error_description/error field from the provider's
-    // response (hospitable.ts, ownerrez.ts) rather than embedding raw
-    // response text — kroger.ts's exchangeCodeForCustomerToken
-    // (lib/kroger/client.ts) throws with the unparsed response body
-    // verbatim, which hasn't been verified to never contain anything
-    // beyond a plain error reason, so it's excluded here rather than
-    // assumed safe.
-    const detail = SAFE_DETAIL_PROVIDERS.has(providerId) && err instanceof Error
-      ? err.message
-      : undefined
-    return errorRedirect('token_exchange_failed', detail)
+    const { reason, detail } = classifyTokenExchangeError(providerId, err)
+    return errorRedirect(reason, detail)
   }
 
   // ── 6. Store the token, link the org, kick off initial sync ──
@@ -373,19 +429,7 @@ export async function GET(
   revalidatePath('/inventory')
 
   // ── 7. Success — redirect to dashboard ────────────────────
-  const returnTo = stateRecord.return_to ?? '/settings?tab=integrations'
-  // Guard against open redirects. `startsWith('/')` ALONE is not sufficient
-  // and was the bug: '//evil.com'.startsWith('/') is true, and
-  // new URL('//evil.com/x', 'https://app.fieldstay.com') resolves to
-  // https://evil.com/x — a protocol-relative URL is absolute. `return_to` is
-  // taken verbatim from /connect's query string, so this sent the victim
-  // off-site carrying a FieldStay-looking ?connected= param. A backslash is
-  // rejected for the same reason: browsers normalise '/\' to '//'.
-  const safePath =
-    returnTo.startsWith('/') && !returnTo.startsWith('//') && !returnTo.startsWith('/\\')
-      ? returnTo
-      : '/settings?tab=integrations'
-  const returnUrl = new URL(safePath, appUrl)
+  const returnUrl = new URL(safeReturnPath(stateRecord.return_to), appUrl)
 
   // Pass a success flag so the UI can show a "Connected!" toast
   returnUrl.searchParams.set('connected', providerId)
