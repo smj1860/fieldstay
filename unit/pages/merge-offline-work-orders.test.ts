@@ -18,26 +18,44 @@ const toRow = (c: WorkOrder): Row => ({ id: c.id, source: 'cached' })
 const propertyLookup = new Map<string, NameLookup>()
 const vendorLookup   = new Map<string, VendorLookup>()
 
+const noPending = new Set<string>()
+
 describe('mergeOfflineWorkOrders — online', () => {
   it('is the server rows, unchanged, when the cache has nothing new', () => {
     const server: Row[] = [{ id: 'a', source: 'server' }]
-    const result = mergeOfflineWorkOrders(server, [], false, propertyLookup, vendorLookup, toRow)
+    const result = mergeOfflineWorkOrders(server, [], false, noPending, propertyLookup, vendorLookup, toRow)
     expect(result).toEqual(server)
   })
 
-  it('appends a cached row the server does not know about yet', () => {
-    // The concrete bug: a work order created offline, still in the outbox.
+  it('appends a cached row still queued as a pending local create', () => {
+    // The concrete bug this preserves: a work order created offline, still in the outbox.
     const server: Row[] = [{ id: 'a', source: 'server' }]
-    const result = mergeOfflineWorkOrders(server, [cached('local-1')], false, propertyLookup, vendorLookup, toRow)
+    const result = mergeOfflineWorkOrders(
+      server, [cached('local-1')], false, new Set(['local-1']), propertyLookup, vendorLookup, toRow,
+    )
 
     expect(result.map((r) => r.id)).toEqual(['a', 'local-1'])
+  })
+
+  it('drops a cached row the server no longer lists when it is not a pending create', () => {
+    // The concrete bug this fixes: a work order completed via a plain Server
+    // Action (bulk or single) never touches the local cache. The server's
+    // open-status query correctly stops returning it, and the stale cached
+    // copy — still sitting in Dexie with its old open status — must not be
+    // resurrected onto the board as if the completion never happened.
+    const server: Row[] = [{ id: 'a', source: 'server' }]
+    const result = mergeOfflineWorkOrders(
+      server, [cached('completed-elsewhere')], false, noPending, propertyLookup, vendorLookup, toRow,
+    )
+
+    expect(result.map((r) => r.id)).toEqual(['a'])
   })
 
   it('never lets a cached row override or duplicate a server row with the same id', () => {
     // The server is strictly fresher — a stale cached copy of a row the
     // server already returned must not shadow or duplicate it.
     const server: Row[] = [{ id: 'a', source: 'server' }]
-    const result = mergeOfflineWorkOrders(server, [cached('a')], false, propertyLookup, vendorLookup, toRow)
+    const result = mergeOfflineWorkOrders(server, [cached('a')], false, noPending, propertyLookup, vendorLookup, toRow)
 
     expect(result).toHaveLength(1)
     expect(result[0]).toEqual({ id: 'a', source: 'server' })
@@ -47,7 +65,7 @@ describe('mergeOfflineWorkOrders — online', () => {
 describe('mergeOfflineWorkOrders — offline', () => {
   it('renders from the cache instead of the (frozen, unreachable) server props', () => {
     const server: Row[] = [{ id: 'stale-server-only', source: 'server' }]
-    const result = mergeOfflineWorkOrders(server, [cached('a'), cached('b')], true, propertyLookup, vendorLookup, toRow)
+    const result = mergeOfflineWorkOrders(server, [cached('a'), cached('b')], true, noPending, propertyLookup, vendorLookup, toRow)
 
     expect(result.map((r) => r.id).sort()).toEqual(['a', 'b', 'stale-server-only'])
   })
@@ -56,14 +74,14 @@ describe('mergeOfflineWorkOrders — offline', () => {
     // Going offline must never make the board WORSE than having no cache at
     // all — an empty cache falls back to whatever props already exist.
     const server: Row[] = [{ id: 'a', source: 'server' }]
-    const result = mergeOfflineWorkOrders(server, [], true, propertyLookup, vendorLookup, toRow)
+    const result = mergeOfflineWorkOrders(server, [], true, noPending, propertyLookup, vendorLookup, toRow)
 
     expect(result).toEqual(server)
   })
 
   it('a row present in both is taken from the cache, not duplicated', () => {
     const server: Row[] = [{ id: 'a', source: 'server' }]
-    const result = mergeOfflineWorkOrders(server, [cached('a')], true, propertyLookup, vendorLookup, toRow)
+    const result = mergeOfflineWorkOrders(server, [cached('a')], true, noPending, propertyLookup, vendorLookup, toRow)
 
     expect(result).toHaveLength(1)
     expect(result[0]).toEqual({ id: 'a', source: 'cached' })
@@ -79,7 +97,7 @@ describe('mergeOfflineWorkOrders — lookups reach the row builder', () => {
     let seenProperty: NameLookup | null = null
     let seenVendor:   VendorLookup | null = null
 
-    mergeOfflineWorkOrders([], [wo], false, properties, vendors, (_c, lookups) => {
+    mergeOfflineWorkOrders([], [wo], false, noPending, properties, vendors, (_c, lookups) => {
       seenProperty = lookups.property
       seenVendor   = lookups.vendor
       return { id: 'a', source: 'cached' as const }
@@ -93,7 +111,7 @@ describe('mergeOfflineWorkOrders — lookups reach the row builder', () => {
     const wo = { id: 'a', property_id: 'p1', vendor_id: null } as WorkOrder
     let seenVendor: VendorLookup | null | undefined
 
-    mergeOfflineWorkOrders([], [wo], false, propertyLookup, vendorLookup, (_c, lookups) => {
+    mergeOfflineWorkOrders([], [wo], false, noPending, propertyLookup, vendorLookup, (_c, lookups) => {
       seenVendor = lookups.vendor
       return { id: 'a', source: 'cached' as const }
     })
