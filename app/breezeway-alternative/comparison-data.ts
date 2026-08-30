@@ -72,6 +72,19 @@ export const COMPARISON_ROWS: readonly ComparisonRow[] = [
     breezewaySource: 'breezeway.io/property-maintenance-software ("Monitor appliance performance and maintenance history with asset reporting"), checked 2026-08-30',
   },
   {
+    category: 'Guest guidebook',
+    fieldstay:
+      'Included on every plan at no extra cost, and can pay for itself: sign 5 local business sponsors into ' +
+      'your guidebook and FieldStay applies a real $10 credit against your monthly bill automatically; 6 or ' +
+      'more sponsors earns $25.',
+    breezeway:
+      'The digital welcome book ("Guide") sits in the higher "Operations + Guest Experience" tier above the ' +
+      'base Operations plan, and Breezeway\'s own pricing page lists it among the add-ons priced a la carte — ' +
+      'an added monthly cost, with no revenue-sharing or bill-credit mechanism advertised.',
+    fieldstaySource: 'lib/guidebook/helpers.ts, lib/inngest/functions/guidebook-billing-credit-handler.ts',
+    breezewaySource: 'breezeway.io/breezeway-pricing ("Get everything in Operations Pro plus: ... Guide, digital welcome books ... All add-ons are priced a la carte."), checked 2026-08-30',
+  },
+  {
     category: 'Guest review responses',
     fieldstay:
       'RepuGuard drafts AI-generated responses to guest reviews synced from your PMS, included in every ' +

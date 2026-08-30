@@ -327,6 +327,16 @@ export const BREEZEWAY_FAQ: readonly FaqItem[] = [
       'trial alongside their current setup before moving the rest of the portfolio over.',
   },
   {
+    id:       'breezeway-alternative-guidebook',
+    question: 'Does FieldStay charge extra for a guest guidebook, the way Breezeway does?',
+    answer:
+      'No — FieldStay\'s guest guidebook is included on every plan at no extra cost, and it can actually pay ' +
+      'for itself: sign 5 local business sponsors into your guidebook and FieldStay applies a real $10 credit ' +
+      'against your monthly bill automatically, or $25 at 6 or more sponsors. Breezeway\'s digital welcome ' +
+      'book ("Guide") sits in a higher "Operations + Guest Experience" tier, and Breezeway\'s own pricing page ' +
+      'lists it among the add-ons priced a la carte — an added monthly cost with no revenue-sharing back to you.',
+  },
+  {
     id:       'breezeway-alternative-guarantee',
     question: 'Does FieldStay offer any kind of guarantee?',
     answer:
