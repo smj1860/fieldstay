@@ -1,4 +1,4 @@
-import { monthlyCostCents, annualCostCents } from '@/lib/stripe/brackets'
+import { monthlyCostCents, annualCostCents, MAX_SELF_SERVE_PROPERTIES } from '@/lib/stripe/brackets'
 
 // ============================================================================
 // The marketing-facing plan table, in one place.
@@ -28,13 +28,16 @@ import { monthlyCostCents, annualCostCents } from '@/lib/stripe/brackets'
 // numbers should say "starting at", not imply a fixed rate — the "FieldStay
 // plan is flat" pitch from the old model is gone along with the flat prices.
 //
-// A real redesign — a calculator or an explicit "$49 first property, then
-// $13/$10/$8/$6 as you grow" formula display — would represent the pricing
-// model more honestly than four bounded cards ever can, since the underlying
-// curve is continuous. That is a genuine design task or a follow-up, not a
-// number substitution; this module's job for now is to make sure nothing on
-// the marketing site quotes a number disconnected from what Stripe will
-// actually charge.
+// A real redesign — a calculator that computes the exact price for the
+// visitor's own count, shown alongside these cards rather than instead of
+// them — represents the pricing model more honestly than four bounded cards
+// ever can on their own, since the underlying curve is continuous. That
+// calculator now exists (PricingCards.tsx renders it above the grid); this
+// module's job is still to make sure nothing on the marketing site quotes a
+// number disconnected from what Stripe will actually charge — TIER_UPPER_BOUNDS
+// below is what lets the calculator highlight which of these cards its
+// answer falls into, computed from the same numbers the cards themselves use
+// rather than a second set of hardcoded boundaries.
 //
 // Annual is monthly x 10 (two months free) and annualSavings is monthly x 2
 // throughout, computed via annualCostCents() from the same bracket schedule —
@@ -54,6 +57,25 @@ export interface PricingTier {
 
 /** The lowest property count in each band — what "starting at" is computed from. */
 const BAND_FLOOR = { starter: 5, growth: 16, portfolio: 51 } as const
+
+/**
+ * The highest property count each of the four PRICED tiers covers, in the
+ * same order `pricingTiers()` returns them (Hosts, Starter, Growth,
+ * Portfolio) — Enterprise has no upper bound so it is not represented here.
+ * `qty <= TIER_UPPER_BOUNDS[i]` is "this quantity's card is tier i", used by
+ * PricingCards.tsx's calculator to highlight the matching card rather than
+ * leaving the two side by side with no visible connection.
+ *
+ * Derived from BAND_FLOOR and MAX_SELF_SERVE_PROPERTIES rather than typed out
+ * again — a second hardcoded [4, 15, 50, 100] here is exactly the kind of
+ * disconnected number this file exists to prevent.
+ */
+export const TIER_UPPER_BOUNDS: readonly number[] = [
+  BAND_FLOOR.starter - 1,
+  BAND_FLOOR.growth - 1,
+  BAND_FLOOR.portfolio - 1,
+  MAX_SELF_SERVE_PROPERTIES,
+]
 
 /**
  * The tiers above the entry plan. Identical on every landing page: they are
