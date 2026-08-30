@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 
 vi.mock('@/lib/stripe/client', () => ({
-  MAX_SELF_SERVE_PROPERTIES: 100,
+  MAX_SELF_SERVE_PROPERTIES: 150,
   // Only 'price_platform_monthly' is our graduated self-serve price. Anything
   // else — a guidebook sponsor price, an Enterprise contract price — is not,
   // which is what lets the handler tell "core billing subscription we cannot
@@ -131,7 +131,7 @@ describe('handleCoreSubscriptionUpdate — org resolution', () => {
         p_stripe_subscription_id: 'sub_1',
         p_plan:                   'platform',
         p_plan_status:            'trialing',
-        p_max_properties:         100,
+        p_max_properties:         150,
       }),
     )
   })

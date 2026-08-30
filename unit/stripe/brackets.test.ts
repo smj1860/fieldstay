@@ -16,11 +16,14 @@ import {
 // client.ts) specifically to remove the $110-$320 cliff a customer hit the
 // moment their property count crossed a tier boundary. The locked numbers
 // below (anchor $49, then $13/$10/$8/$6 per unit for brackets 2-4/5-15/16-50/
-// 51-100) were chosen to be revenue-neutral, within a dollar, at every OLD
+// 51-150) were chosen to be revenue-neutral, within a dollar, at every OLD
 // tier's ceiling (4/15/50/100 properties) and strictly cheaper everywhere
 // else — never re-derive or "improve" these numbers without going back to
 // that design decision; they are a deliberate margin-for-adoption trade, not
-// a default that happened to fall out of the math.
+// a default that happened to fall out of the math. The one exception is the
+// last bracket's `upTo`, widened from 100 to 150 on 2026-08-30 as pure
+// capacity headroom at the SAME $6/property rate — not a re-tuned number, so
+// it isn't covered by the "never re-derive" rule above.
 // ============================================================================
 
 describe('graduated pricing bracket schedule', () => {
@@ -30,13 +33,13 @@ describe('graduated pricing bracket schedule', () => {
       { upTo: 4,   unitAmountCents: 1_300 },
       { upTo: 15,  unitAmountCents: 1_000 },
       { upTo: 50,  unitAmountCents: 800 },
-      { upTo: 100, unitAmountCents: 600 },
+      { upTo: 150, unitAmountCents: 600 },
     ])
   })
 
-  it('caps self-serve pricing at 100 properties — above that is Enterprise/contact-sales', () => {
-    expect(MAX_SELF_SERVE_PROPERTIES).toBe(100)
-    expect(monthlyCostCents(101)).toBeNull()
+  it('caps self-serve pricing at 150 properties — above that is Enterprise/contact-sales', () => {
+    expect(MAX_SELF_SERVE_PROPERTIES).toBe(150)
+    expect(monthlyCostCents(151)).toBeNull()
   })
 
   it('rejects zero and non-integer quantities', () => {
@@ -77,14 +80,14 @@ describe('graduated pricing bracket schedule', () => {
 
   it('annual is exactly monthly x10 at every quantity — the same "2 months free" convention as the old PLANS table', () => {
     expect(ANNUAL_MULTIPLIER).toBe(10)
-    for (const q of [1, 4, 15, 50, 100]) {
+    for (const q of [1, 4, 15, 50, 100, 150]) {
       expect(annualCostCents(q)).toBe(monthlyCostCents(q)! * 10)
     }
   })
 
   it('annual returns null for the same out-of-range quantities as monthly', () => {
     expect(annualCostCents(0)).toBeNull()
-    expect(annualCostCents(101)).toBeNull()
+    expect(annualCostCents(151)).toBeNull()
   })
 
   it('marginalRateCentsFor reports the anchor for quantity 1 and each bracket rate above it', () => {
@@ -94,13 +97,14 @@ describe('graduated pricing bracket schedule', () => {
     expect(marginalRateCentsFor(5)).toBe(1_000)
     expect(marginalRateCentsFor(16)).toBe(800)
     expect(marginalRateCentsFor(51)).toBe(600)
-    expect(marginalRateCentsFor(101)).toBeNull()
+    expect(marginalRateCentsFor(150)).toBe(600)
+    expect(marginalRateCentsFor(151)).toBeNull()
   })
 
   describe('bracketBreakdown', () => {
     it('returns [] for out-of-range quantities', () => {
       expect(bracketBreakdown(0)).toEqual([])
-      expect(bracketBreakdown(101)).toEqual([])
+      expect(bracketBreakdown(151)).toEqual([])
     })
 
     it('is just the anchor at quantity 1', () => {
@@ -123,7 +127,7 @@ describe('graduated pricing bracket schedule', () => {
     })
 
     it('every line sums to monthlyCostCents at the same quantity', () => {
-      for (const q of [1, 4, 5, 15, 16, 50, 51, 100]) {
+      for (const q of [1, 4, 5, 15, 16, 50, 51, 100, 101, 150]) {
         const lines = bracketBreakdown(q)
         const sum = lines.reduce((acc, l) => acc + l.lineTotalCents, 0)
         expect(sum, `quantity ${q}`).toBe(monthlyCostCents(q))

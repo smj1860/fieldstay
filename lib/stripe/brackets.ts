@@ -36,8 +36,8 @@ export const ANNUAL_MULTIPLIER = 10
  * covers (inclusive), matching Stripe's tier `up_to` semantics exactly —
  * `null` for the last bracket means "no explicit ceiling in the tiers array
  * itself," but this schedule intentionally has none: property counts above
- * 100 are Enterprise (contact sales, no self-serve Stripe price), same as the
- * old PLANS.enterprise entry.
+ * MAX_SELF_SERVE_PROPERTIES are Enterprise (contact sales, no self-serve
+ * Stripe price), same as the old PLANS.enterprise entry.
  *
  * `flatAmountCents` on a bracket applies ONCE, regardless of how many units
  * fall in it — used only for bracket 1 (the anchor). `unitAmountCents`
@@ -56,20 +56,31 @@ export type Bracket =
  *   - Properties 2-4:  $13/property
  *   - Properties 5-15: $10/property
  *   - Properties 16-50: $8/property
- *   - Properties 51-100: $6/property
+ *   - Properties 51-150: $6/property
  *
- * Chosen to be revenue-neutral at every OLD flat-tier ceiling (4, 15, 50, 100
- * properties) and a real reduction everywhere else — a deliberate
- * margin-for-adoption tradeoff, not a mechanical translation of the old
- * prices. See the pricing-model discussion this schedule came out of; do not
- * re-derive these numbers from the old PLANS table.
+ * The first four brackets (through property 50) were chosen to be
+ * revenue-neutral at every OLD flat-tier ceiling (4, 15, 50 properties) and a
+ * real reduction everywhere else — a deliberate margin-for-adoption tradeoff,
+ * not a mechanical translation of the old prices. See the pricing-model
+ * discussion this schedule came out of; do not re-derive these four from the
+ * old PLANS table.
+ *
+ * The last bracket's ceiling was widened from 100 to 150 on 2026-08-30 —
+ * capacity headroom, not a re-tuned rate: the $6/property marginal rate is
+ * unchanged, so this only extends who can self-serve rather than revisiting
+ * the revenue-neutral design point above (there was never an "old flat tier"
+ * for 101-150 to be neutral against in the first place — Portfolio's old
+ * ceiling was 100, full stop). Widening it is a pure `upTo` bump: every
+ * function below is generic over the last bracket's boundary, and
+ * MAX_SELF_SERVE_PROPERTIES is derived from it rather than duplicated, so
+ * nothing else in this file needed to change.
  */
 export const BRACKETS: readonly Bracket[] = [
   { upTo: 1,   flatAmountCents: 4_900 },
   { upTo: 4,   unitAmountCents: 1_300 },
   { upTo: 15,  unitAmountCents: 1_000 },
   { upTo: 50,  unitAmountCents: 800 },
-  { upTo: 100, unitAmountCents: 600 },
+  { upTo: 150, unitAmountCents: 600 },
 ] as const
 
 /** The highest property count this schedule prices. Above this is Enterprise. */
@@ -124,13 +135,17 @@ export function annualCostCents(quantity: number): number | null {
  * rejects a `tiers` array whose last element isn't the `'inf'` catch-all with
  * `"The tiers array must include a catch all tier with up_to set to 'inf' as
  * last item"`, and returns it back as `up_to: null` on every subsequent read.
- * `BRACKETS.at(-1)!.upTo` (100, via MAX_SELF_SERVE_PROPERTIES) is still the
- * real self-serve ceiling — nothing application-level ever sends Stripe a
- * quantity above it — this only changes what the wire format for the LAST
- * tier's boundary looks like, which is Stripe's requirement, not a schedule
- * change. This was wrong until 2026-08-30, when creating the live Price for
- * the first time surfaced it — nothing had ever round-tripped this function's
- * output through the real API before that.
+ * `BRACKETS.at(-1)!.upTo` (via MAX_SELF_SERVE_PROPERTIES) is still the real
+ * self-serve ceiling — nothing application-level ever sends Stripe a quantity
+ * above it — this only changes what the wire format for the LAST tier's
+ * boundary looks like, which is Stripe's requirement, not a schedule change.
+ * This was wrong until 2026-08-30, when creating the live Price for the first
+ * time surfaced it — nothing had ever round-tripped this function's output
+ * through the real API before that. It's also why widening the ceiling later
+ * that same day (100 -> 150) required no new Stripe Price at all: the last
+ * tier was already unbounded ('inf') on the live Price, so it was already
+ * correctly billing $6/property past 100 — only the application-level ceiling
+ * needed to move.
  */
 export function toStripeTiers(interval: 'monthly' | 'annual'): Array<{
   up_to: number | 'inf'

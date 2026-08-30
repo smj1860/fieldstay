@@ -108,6 +108,7 @@ const PRERENDERED_ROUTES = new Set([
   '/strops',
   '/ownerrez',
   '/hospitable',
+  '/breezeway-alternative',
   '/privacy',
   '/terms',
 ])
@@ -240,6 +241,13 @@ const BYPASS_ROUTES = [
   // index. Branches its own CTAs via its own auth check, like the three above.
   // No collision with '/hospitable' — these diverge at the 5th character.
   '/hosts',
+
+  // Breezeway comparison/alternative landing page. Same reasoning and same
+  // failure mode as /strops and /hosts above: it exists to rank for
+  // "breezeway alternative" searches, so a 307 -> /login?next=%2Fbreezeway-alternative
+  // for an anonymous crawler would defeat the entire point. No auth-branched
+  // CTA, like the pages above it.
+  '/breezeway-alternative',
 
   // Data Processing Agreement. BYPASS rather than PUBLIC on purpose, and the
   // distinction matters for legal documents specifically: a public route

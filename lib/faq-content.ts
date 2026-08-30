@@ -265,6 +265,89 @@ export const STROPS_FAQ: readonly FaqItem[] = [
   },
 ] as const
 
+/**
+ * /breezeway-alternative — comparison-page FAQ, written for both AEO
+ * (each answer stands alone and is directly quotable by an answer engine —
+ * no "as mentioned above", no pronoun that needs the question above it) and
+ * for a prospect who has already used Breezeway and wants the specific
+ * differences, not a generic pitch. See app/breezeway-alternative/
+ * comparison-data.ts for the source of every factual claim repeated here —
+ * this file and that one must not drift, and
+ * unit/pages/breezeway-alternative.test.ts checks the numbers this file
+ * quotes against the real bracket schedule.
+ */
+export const BREEZEWAY_FAQ: readonly FaqItem[] = [
+  {
+    id:       'breezeway-vs-fieldstay-difference',
+    question: 'What is the difference between FieldStay and Breezeway?',
+    answer:
+      'The biggest practical differences are pricing transparency and how vendors are onboarded. FieldStay ' +
+      'publishes one graduated rate schedule that prices any property count from 1 to 150 with no sales ' +
+      'call required. Breezeway publishes a flat $19.99/property rate only for portfolios of 4 properties ' +
+      'or fewer; 5 or more requires a demo and a custom quote. On vendors: a FieldStay work order reaches a ' +
+      'vendor as a link they open on their phone, with no account and nothing to install. Breezeway invites ' +
+      'vendors and cleaners to a Breezeway account and its dedicated mobile app.',
+  },
+  {
+    id:       'breezeway-alternative-pricing',
+    question: 'Is FieldStay cheaper than Breezeway?',
+    answer:
+      'It depends on your property count, and for most real portfolios the honest answer is "we don\'t ' +
+      'know, because Breezeway won\'t say." For 10 properties, FieldStay is $148/month, publicly calculable ' +
+      'from the rate schedule before you ever talk to anyone. Breezeway\'s published $19.99/property rate ' +
+      'only covers portfolios of 4 or fewer — at 10 properties you\'re already past that and into a custom ' +
+      'quote, so there is no public number to compare against.',
+  },
+  {
+    id:       'breezeway-alternative-vendor-app',
+    question: 'Do vendors need to download an app to work with FieldStay, the way they do with Breezeway?',
+    answer:
+      'No. A FieldStay work order is dispatched as a link — the vendor opens it on their phone, sees the ' +
+      'job details, submits a quote or completion photos, and is done. No account, no password, no app to ' +
+      'install. Breezeway\'s vendor and cleaner workflow runs through dedicated Android and iOS apps with ' +
+      'account login, per Breezeway\'s own help documentation.',
+  },
+  {
+    id:       'breezeway-alternative-offline',
+    question: 'Does FieldStay work offline the way Breezeway does?',
+    answer:
+      'Both platforms support offline field work, so this isn\'t a capability gap — the real difference is ' +
+      'HOW. FieldStay\'s crew app is a progressive web app: no App Store or Play Store install, added ' +
+      'straight to the home screen, and it works with zero signal because it reads from the phone\'s local ' +
+      'storage as its normal mode, not a special "offline mode." Breezeway ships native iOS and Android ' +
+      'apps with their own offline sync.',
+  },
+  {
+    id:       'breezeway-alternative-switching',
+    question: 'How do I switch from Breezeway to FieldStay?',
+    answer:
+      'There\'s no data migration to run, because FieldStay doesn\'t import FROM Breezeway — it connects TO ' +
+      'your booking platform (OwnerRez, Hospitable, or Hostex) and builds your turnover schedule from your ' +
+      'existing bookings automatically. Most teams run FieldStay on a handful of properties during a free ' +
+      'trial alongside their current setup before moving the rest of the portfolio over.',
+  },
+  {
+    id:       'breezeway-alternative-guidebook',
+    question: 'Does FieldStay charge extra for a guest guidebook, the way Breezeway does?',
+    answer:
+      'No — FieldStay\'s guest guidebook is included on every plan at no extra cost, and it can actually pay ' +
+      'for itself: sign 5 local business sponsors into your guidebook and FieldStay applies a real $10 credit ' +
+      'against your monthly bill automatically, or $25 at 6 or more sponsors. Breezeway\'s digital welcome ' +
+      'book ("Guide") sits in a higher "Operations + Guest Experience" tier, and Breezeway\'s own pricing page ' +
+      'lists it among the add-ons priced a la carte — an added monthly cost with no revenue-sharing back to you.',
+  },
+  {
+    id:       'breezeway-alternative-guarantee',
+    question: 'Does FieldStay offer any kind of guarantee?',
+    answer:
+      'Yes — the Glass Box Operations Guarantee. Run it on your 3-5 hardest properties for 14 days, ' +
+      'cancel with one click if it doesn\'t help. If you ever think something was missed or mishandled, ' +
+      'FieldStay doesn\'t ask you to take its word for it — every checklist step, photo, and work order ' +
+      'status change is timestamped and logged, and that record is what settles the question. It is not a ' +
+      'money-back guarantee; it is a transparency guarantee backed by an actual audit trail.',
+  },
+] as const
+
 export const FAQ_CATEGORIES: FaqCategory[] = [
   {
     id:    'pms-sync',
@@ -372,7 +455,7 @@ export const FAQ_CATEGORIES: FaqCategory[] = [
         id:       'billing-property-count',
         question: 'What counts as a property for billing, and how is the price calculated?',
         answer:
-          'Each unique property unit synced from your connected PMS (OwnerRez, Hospitable, or Hostex) counts as one property. A multi-unit building with 4 apartment units counts as 4. Archived or removed properties do not count toward your billing total. Pricing is graduated: your first property is $49/mo, then $13/property for properties 2-4, $10/property for 5-15, $8/property for 16-50, and $6/property for 51-100 — so adding one more property never causes a big jump, it just adds that property\'s own rate. See Settings → Billing for an itemized breakdown at your current property count.',
+          'Each unique property unit synced from your connected PMS (OwnerRez, Hospitable, or Hostex) counts as one property. A multi-unit building with 4 apartment units counts as 4. Archived or removed properties do not count toward your billing total. Pricing is graduated: your first property is $49/mo, then $13/property for properties 2-4, $10/property for 5-15, $8/property for 16-50, and $6/property for 51-150 — so adding one more property never causes a big jump, it just adds that property\'s own rate. See Settings → Billing for an itemized breakdown at your current property count.',
       },
       {
         id:       'billing-crew-seats',

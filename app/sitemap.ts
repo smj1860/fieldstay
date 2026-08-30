@@ -30,6 +30,7 @@ const PAGES: ReadonlyArray<{
   { path: '/ownerrez',              priority: 0.8, changeFreq: 'monthly' },
   { path: '/hospitable',            priority: 0.8, changeFreq: 'monthly' },
   { path: '/hosts',                 priority: 0.8, changeFreq: 'monthly' },
+  { path: '/breezeway-alternative', priority: 0.8, changeFreq: 'monthly' },
   { path: '/privacy',               priority: 0.3, changeFreq: 'yearly'  },
   { path: '/terms',                 priority: 0.3, changeFreq: 'yearly'  },
   { path: '/dpa',                   priority: 0.3, changeFreq: 'yearly'  },

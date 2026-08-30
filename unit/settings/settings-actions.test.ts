@@ -41,7 +41,7 @@ vi.mock('@/lib/stripe/client', () => ({
     checkout:      { sessions: { create: vi.fn() } },
     subscriptions: { list: vi.fn(async () => ({ data: [] })) },
   },
-  MAX_SELF_SERVE_PROPERTIES: 100,
+  MAX_SELF_SERVE_PROPERTIES: 150,
   platformPriceId: (interval: 'monthly' | 'annual') =>
     interval === 'annual' ? 'price_platform_annual' : 'price_platform_monthly',
 }))
@@ -728,7 +728,7 @@ describe('settings/actions', () => {
     // ── The two edges a graduated price does not cover ──────────────────
     // There is no per-tier cap any more (that whole failure mode — an
     // under-sized plan leaving an org permanently over cap with no signal —
-    // is gone by construction with one price and no ceiling below 100). What
+    // is gone by construction with one price and no ceiling below 150). What
     // remains: zero properties (the $49 anchor prices "property 1", so there
     // is nothing to bill) and above the self-serve ceiling (Enterprise
     // territory, off Stripe entirely).
@@ -745,21 +745,21 @@ describe('settings/actions', () => {
       expect(stripe.subscriptions.list).not.toHaveBeenCalled()
     })
 
-    it('refuses checkout above the self-serve ceiling of 100 properties', async () => {
-      const supabase = makeSupabase(withPropertyCount(101))
+    it('refuses checkout above the self-serve ceiling of 150 properties', async () => {
+      const supabase = makeSupabase(withPropertyCount(151))
       mockRoleAuthed(supabase)
 
       const result = await createCheckoutSession('monthly')
 
       expect(result).toEqual({
-        error: 'Self-serve billing covers up to 100 properties, but you have ' +
-               '101 active properties. Email hello@fieldstay.app for Enterprise pricing.',
+        error: 'Self-serve billing covers up to 150 properties, but you have ' +
+               '151 active properties. Email hello@fieldstay.app for Enterprise pricing.',
       })
       expect(stripe.checkout.sessions.create).not.toHaveBeenCalled()
     })
 
     it('allows checkout at exactly the self-serve ceiling', async () => {
-      const supabase = makeSupabase(withPropertyCount(100, {
+      const supabase = makeSupabase(withPropertyCount(150, {
         organizations: [{ data: { stripe_customer_id: null, billing_email: 'pm@example.com' }, error: null }],
         integration_connections: [{ data: null, error: null }],
       }))

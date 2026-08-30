@@ -14,7 +14,7 @@ import { monthlyCostCents, annualCostCents, MAX_SELF_SERVE_PROPERTIES } from '@/
 //
 // FieldStay billing moved from 4 flat-rate Stripe Products to ONE graduated
 // (marginal) price per interval: $49 for the first property, then $13/$10/$8/
-// $6 per property for brackets 2-4/5-15/16-50/51-100 (lib/stripe/brackets.ts
+// $6 per property for brackets 2-4/5-15/16-50/51-150 (lib/stripe/brackets.ts
 // is the actual billing source of truth this page's numbers are computed
 // from). There is no longer a single flat number that is "the price" for a
 // 1-4 or 5-15 property operation — cost is continuous within every band.
@@ -67,7 +67,7 @@ const BAND_FLOOR = { starter: 5, growth: 16, portfolio: 51 } as const
  * leaving the two side by side with no visible connection.
  *
  * Derived from BAND_FLOOR and MAX_SELF_SERVE_PROPERTIES rather than typed out
- * again — a second hardcoded [4, 15, 50, 100] here is exactly the kind of
+ * again — a second hardcoded [4, 15, 50, 150] here is exactly the kind of
  * disconnected number this file exists to prevent.
  */
 export const TIER_UPPER_BOUNDS: readonly number[] = [
@@ -116,11 +116,13 @@ const TIERS_ABOVE_ENTRY: readonly PricingTier[] = [
     monthly: monthlyCostCents(BAND_FLOOR.portfolio)! / 100,
     annual:  annualCostCents(BAND_FLOOR.portfolio)! / 100,
     annualSavings: (monthlyCostCents(BAND_FLOOR.portfolio)! / 100) * 2,
-    properties: '51–100 properties',
+    // Derived rather than typed out — a hand-typed "51–100" is exactly the
+    // kind of second copy that went stale when the ceiling widened to 150.
+    properties: `${BAND_FLOOR.portfolio}–${MAX_SELF_SERVE_PROPERTIES} properties`,
     highlight: false,
     features: [
       'Everything in Growth',
-      'Up to 100 properties',
+      `Up to ${MAX_SELF_SERVE_PROPERTIES} properties`,
       'Custom onboarding',
       'Dedicated account support',
     ],
@@ -131,7 +133,7 @@ const TIERS_ABOVE_ENTRY: readonly PricingTier[] = [
     monthly: null,
     annual: null,
     annualSavings: null,
-    properties: '100+ properties',
+    properties: `${MAX_SELF_SERVE_PROPERTIES + 1}+ properties`,
     highlight: false,
     features: [
       'Everything in Portfolio',

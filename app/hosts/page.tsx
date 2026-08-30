@@ -28,7 +28,7 @@
 //
 // Pricing renders only 2 cards (Hosts + Starter), not the full 5-tier grid --
 // deliberate, not a missing feature. A 2-property visitor doesn't need
-// Portfolio (100 units) in their face. Reuses pricingTiers() for the
+// Portfolio (150 units) in their face. Reuses pricingTiers() for the
 // underlying numbers (single source of truth, same file /ownerrez and
 // /hospitable pull from) but writes its own compact card markup rather than
 // SharedPricingSection, which is built for a 5-card grid with Growth
