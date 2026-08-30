@@ -118,7 +118,7 @@ describe('structured data cannot drift from the visible page', () => {
     const faqNode = graph.find((n) => n['@type'] === 'FAQPage') as { mainEntity: { name: string }[] }
 
     expect(faqNode.mainEntity.map((q) => q.name)).toEqual(FAQS.map((f) => f.question))
-    expect(read('app/breezeway-alternative/page.tsx')).toMatch(/\{FAQS\.map/)
+    expect(read('app/breezeway-alternative/page.tsx')).toMatch(/<FaqDetailsSection\s+items=\{FAQS\}/)
   })
 
   it('every FAQ has a real question and answer, each standalone enough for an answer engine to quote', () => {

@@ -129,10 +129,10 @@ describe('structured data cannot drift from the visible page', () => {
 
     expect(faqNode.mainEntity.map((q) => q.name)).toEqual(FAQS.map((f) => f.question))
 
-    // The rendered half: the page maps the same array, so a question added to
-    // FAQS appears in both or neither. Google treats schema that describes
-    // copy not on the page as a structured-data violation.
-    expect(read('app/strops/page.tsx')).toMatch(/\{FAQS\.map/)
+    // The rendered half: the page passes the same array to FaqDetailsSection,
+    // so a question added to FAQS appears in both or neither. Google treats
+    // schema that describes copy not on the page as a structured-data violation.
+    expect(read('app/strops/page.tsx')).toMatch(/<FaqDetailsSection\s+items=\{FAQS\}/)
   })
 
   it('every FAQ has a real question and answer', () => {

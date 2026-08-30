@@ -21,6 +21,7 @@ import { buildJsonLd, serializeJsonLd, BREEZEWAY_PATH } from './json-ld'
 import { BREEZEWAY_FAQ as FAQS } from '@/lib/faq-content'
 import { monthlyCostCents } from '@/lib/stripe/brackets'
 import { marketingUrl, marketingOrigin, appUrl } from '@/lib/marketing'
+import FaqDetailsSection from '@/components/faq/FaqDetailsSection'
 
 const PATH = BREEZEWAY_PATH
 const CANONICAL = marketingUrl(PATH)
@@ -224,34 +225,7 @@ export default function BreezewayAlternativePage() {
       </section>
 
       {/* ── FAQ ────────────────────────────────────────────────────────── */}
-      <section className="bg-[var(--mkt-surface)] border-t border-[var(--mkt-border)]">
-        <div className="max-w-3xl mx-auto px-6 py-16">
-          <h2 className="text-3xl font-bold text-[var(--mkt-ink)] mb-10 font-display text-center">
-            Questions people actually ask
-          </h2>
-          <div className="space-y-4">
-            {FAQS.map((f) => (
-              <details
-                key={f.question}
-                className="group rounded-xl border border-[var(--mkt-border)] bg-white p-5"
-              >
-                <summary className="font-semibold text-[var(--mkt-ink)] cursor-pointer list-none flex justify-between items-center gap-4">
-                  {f.question}
-                  <span
-                    aria-hidden="true"
-                    className="text-[var(--mkt-gold)] text-xl leading-none group-open:rotate-45 transition-transform"
-                  >
-                    +
-                  </span>
-                </summary>
-                <p className="text-sm text-[var(--mkt-muted-strong)] leading-relaxed mt-3">
-                  {f.answer}
-                </p>
-              </details>
-            ))}
-          </div>
-        </div>
-      </section>
+      <FaqDetailsSection items={FAQS} />
 
       {/* ── CTA ────────────────────────────────────────────────────────── */}
       <section className="bg-[var(--mkt-ink)] text-white">
