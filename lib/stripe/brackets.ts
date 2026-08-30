@@ -119,15 +119,27 @@ export function annualCostCents(quantity: number): number | null {
  * or annual (every amount x ANNUAL_MULTIPLIER) — the one place both price
  * objects are derived from the same BRACKETS array, so they cannot drift
  * relative to each other.
+ *
+ * The LAST tier's `up_to` is the literal string `'inf'`, not `100` — Stripe
+ * rejects a `tiers` array whose last element isn't the `'inf'` catch-all with
+ * `"The tiers array must include a catch all tier with up_to set to 'inf' as
+ * last item"`, and returns it back as `up_to: null` on every subsequent read.
+ * `BRACKETS.at(-1)!.upTo` (100, via MAX_SELF_SERVE_PROPERTIES) is still the
+ * real self-serve ceiling — nothing application-level ever sends Stripe a
+ * quantity above it — this only changes what the wire format for the LAST
+ * tier's boundary looks like, which is Stripe's requirement, not a schedule
+ * change. This was wrong until 2026-08-30, when creating the live Price for
+ * the first time surfaced it — nothing had ever round-tripped this function's
+ * output through the real API before that.
  */
 export function toStripeTiers(interval: 'monthly' | 'annual'): Array<{
-  up_to: number
+  up_to: number | 'inf'
   flat_amount?: number
   unit_amount?: number
 }> {
   const multiplier = interval === 'annual' ? ANNUAL_MULTIPLIER : 1
-  return BRACKETS.map((bracket) => ({
-    up_to: bracket.upTo,
+  return BRACKETS.map((bracket, i) => ({
+    up_to: i === BRACKETS.length - 1 ? 'inf' : bracket.upTo,
     ...(bracket.flatAmountCents !== undefined
       ? { flat_amount: bracket.flatAmountCents * multiplier }
       : { unit_amount: bracket.unitAmountCents * multiplier }),
