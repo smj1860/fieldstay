@@ -169,11 +169,12 @@ export default function OfflineTurnoverAppPage() {
               Start free 14-day trial
             </Link>
             {/* The JSON-LD SoftwareApplication.offers block below already
-                cites $89 as this product's price -- that claim needs to be
-                visible on the page itself, not only in markup a crawler
-                reads. See json-ld.ts and unit/pages/strops.test.ts for the
-                two places that depend on "$89" appearing here verbatim. */}
-            <span className="text-sm text-[var(--mkt-on-dark-soft)]">No credit card required · Starting at $89/month</span>
+                cites $49 as this product's starting price -- that claim
+                needs to be visible on the page itself, not only in markup a
+                crawler reads. See json-ld.ts and unit/pages/strops.test.ts
+                for the two places that depend on "$49" appearing here
+                verbatim. */}
+            <span className="text-sm text-[var(--mkt-on-dark-soft)]">No credit card required · Starting at $49/month</span>
           </div>
         </div>
       </section>

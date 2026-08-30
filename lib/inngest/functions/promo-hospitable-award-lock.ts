@@ -3,7 +3,8 @@ import { reportError } from '@/lib/observability/report-error'
 import { NonRetriableError } from 'inngest'
 import { inngest } from '@/lib/inngest/client'
 import { createServiceClient } from '@/lib/supabase/server'
-import { stripe, PLANS, type PlanKey } from '@/lib/stripe/client'
+import { stripe } from '@/lib/stripe/client'
+import { monthlyCostCents } from '@/lib/stripe/brackets'
 import { sendHospitablePriceLockEmail } from '@/lib/resend/client'
 import { logAuditEvent } from '@/lib/audit'
 
@@ -106,11 +107,24 @@ export const awardHospitablePriceLock = inngest.createFunction(
 
     const priceCents = await step.run('resolve-current-price', async () => {
       const subscription = await stripe.subscriptions.retrieve(orgBilling.stripe_subscription_id!)
-      const unitAmount = subscription.items.data[0]?.price?.unit_amount
-      if (unitAmount == null) {
-        throw new Error(`Could not resolve unit_amount for subscription ${orgBilling.stripe_subscription_id}`)
+      // The graduated platform price is billing_scheme: 'tiered', which never
+      // sets a flat `unit_amount` on the Price object — the total is a
+      // function of the subscription item's `quantity` run through the same
+      // bracket schedule the Price's own tiers were built from
+      // (lib/stripe/brackets.ts). This snapshot IS the org's current computed
+      // monthly total, not a per-unit rate.
+      const quantity = subscription.items.data[0]?.quantity
+      if (quantity == null) {
+        throw new Error(`Could not resolve quantity for subscription ${orgBilling.stripe_subscription_id}`)
       }
-      return unitAmount
+      const cents = monthlyCostCents(quantity)
+      if (cents == null) {
+        throw new Error(
+          `Quantity ${quantity} for subscription ${orgBilling.stripe_subscription_id} ` +
+          `is outside the self-serve pricing range — cannot compute a price-lock snapshot`,
+        )
+      }
+      return cents
     })
 
     const result = await step.run('claim-promo-slot', async () => {
@@ -194,7 +208,10 @@ export const awardHospitablePriceLock = inngest.createFunction(
         organizationName: orgBilling.name,
         sequenceNumber:   result.sequence_number,
         lockYears:        result.lock_years!,
-        lockedTierName:   PLANS[orgBilling.plan as PlanKey]?.name ?? orgBilling.plan,
+        // There is no discrete tier name any more (org.plan is 'platform' for
+        // every self-serve org) — the email now names the RATES rather than a
+        // tier, so this is a fixed label rather than a lookup.
+        lockedTierName:   'FieldStay',
         lockedPriceCents: priceCents,
       })
 

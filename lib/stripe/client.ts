@@ -51,9 +51,7 @@ export const stripe = new Proxy({} as Stripe, {
  *
  * These now read honestly as `string | null`. The real prevention is
  * lib/env.ts, which fails the boot on a production deploy missing any of them;
- * this just stops the type system from claiming a guarantee it never had. The
- * one consumer (createCheckoutSession in app/(dashboard)/settings/actions.ts)
- * already branches on a falsy price id, so nothing downstream changes.
+ * this just stops the type system from claiming a guarantee it never had.
  *
  * Deliberately still evaluated at module load, NOT behind the lazy Proxy
  * above: reading process.env is free and cannot throw, unlike constructing a
@@ -64,77 +62,35 @@ function priceId(name: string): string | null {
   return value && value.trim().length > 0 ? value : null
 }
 
-export const PLANS = {
-  hosts: {
-    name:           'Hosts',
-    monthlyPriceId: priceId('STRIPE_PRICE_HOSTS_MONTHLY'),
-    annualPriceId:  priceId('STRIPE_PRICE_HOSTS_ANNUAL'),
-    maxProperties:  4,
-    monthlyPrice:   89,
-    annualPrice:    890,
-    description:    '1\u20134 properties',
-  },
-  starter: {
-    name:           'Starter',
-    monthlyPriceId: priceId('STRIPE_PRICE_STARTER_MONTHLY'),
-    annualPriceId:  priceId('STRIPE_PRICE_STARTER_ANNUAL'),
-    maxProperties:  15,
-    // Cap unchanged at 15 — only the FLOOR moved when 'hosts' was added
-    // below it, so no existing org's max_properties changes.
-    monthlyPrice:   199,
-    annualPrice:    1990,
-    description:    '5\u201315 properties',
-  },
-  growth: {
-    name:           'Growth',
-    monthlyPriceId: priceId('STRIPE_PRICE_GROWTH_MONTHLY'),
-    annualPriceId:  priceId('STRIPE_PRICE_GROWTH_ANNUAL'),
-    maxProperties:  50,
-    monthlyPrice:   479,
-    annualPrice:    4790,
-    description:    '16–50 properties',
-  },
-  portfolio: {
-    name:           'Portfolio',
-    monthlyPriceId: priceId('STRIPE_PRICE_PORTFOLIO_MONTHLY'),
-    annualPriceId:  priceId('STRIPE_PRICE_PORTFOLIO_ANNUAL'),
-    maxProperties:  100,
-    monthlyPrice:   799,
-    annualPrice:    7990,
-    description:    '51–100 properties',
-  },
-  enterprise: {
-    name:           'Enterprise',
-    monthlyPriceId: null,
-    annualPriceId:  null,
-    maxProperties:  999,
-    monthlyPrice:   null,
-    annualPrice:    null,
-    description:    '100+ properties — contact for pricing',
-  },
+/**
+ * The single graduated self-serve price, one per billing interval —
+ * replaced the old 4-tier PLANS map (Hosts/Starter/Growth/Portfolio, 8 price
+ * ids) on 2026-08-29. Every self-serve org from 1 to
+ * MAX_SELF_SERVE_PROPERTIES properties is on ONE of these two Stripe Price
+ * objects (billing_scheme: 'tiered', tiers_mode: 'graduated'); what they pay
+ * is a function of property-count QUANTITY, not which price they bought. See
+ * lib/stripe/brackets.ts for the bracket schedule and the reasoning — that
+ * module is what removed the cliff a customer used to hit crossing an old
+ * flat-tier boundary.
+ *
+ * Enterprise stays entirely outside this: contact-sales, a manually
+ * negotiated contract, no Stripe price id here — unchanged from before.
+ */
+export const PLATFORM_PRICE = {
+  monthlyPriceId: priceId('STRIPE_PRICE_PLATFORM_MONTHLY'),
+  annualPriceId:  priceId('STRIPE_PRICE_PLATFORM_ANNUAL'),
 } as const
 
-export type PlanKey = keyof typeof PLANS
+export type BillingInterval = 'monthly' | 'annual'
 
-/**
- * The plans a customer can self-serve check out. Enterprise is excluded — it
- * is contact-for-pricing and carries no price ids.
- *
- * Derived rather than hand-written: this union was spelled out literally in
- * createCheckoutSession's signature AND in settings-tabs' handleCheckout, so
- * adding 'hosts' to PLANS produced two type errors in unrelated files that a
- * reader had to fix by hand. Now adding a plan to PLANS is one edit.
- */
-export type CheckoutPlanKey = Exclude<PlanKey, 'enterprise'>
-
-export function getPlanByPriceId(priceId: string): PlanKey | null {
-  for (const [key, plan] of Object.entries(PLANS)) {
-    if (
-      ('monthlyPriceId' in plan && plan.monthlyPriceId === priceId) ||
-      ('annualPriceId'  in plan && plan.annualPriceId  === priceId)
-    ) {
-      return key as PlanKey
-    }
-  }
-  return null
+export function platformPriceId(interval: BillingInterval): string | null {
+  return interval === 'annual' ? PLATFORM_PRICE.annualPriceId : PLATFORM_PRICE.monthlyPriceId
 }
+
+/** Is this Stripe price id our graduated self-serve platform price, either interval? */
+export function isPlatformPriceId(id: string): boolean {
+  return (PLATFORM_PRICE.monthlyPriceId !== null && id === PLATFORM_PRICE.monthlyPriceId)
+      || (PLATFORM_PRICE.annualPriceId  !== null && id === PLATFORM_PRICE.annualPriceId)
+}
+
+export { MAX_SELF_SERVE_PROPERTIES } from './brackets'

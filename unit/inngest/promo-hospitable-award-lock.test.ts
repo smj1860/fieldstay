@@ -5,7 +5,6 @@ vi.mock('@/lib/supabase/server', () => ({
 }))
 vi.mock('@/lib/stripe/client', () => ({
   stripe: { subscriptions: { retrieve: vi.fn() } },
-  PLANS:  { growth: { name: 'Growth' }, starter: { name: 'Starter' } },
 }))
 vi.mock('@/lib/resend/client', () => ({
   sendHospitablePriceLockEmail: vi.fn().mockResolvedValue(undefined),
@@ -69,8 +68,13 @@ function makeStep() {
 
 const orgBillingRow = {
   id: 'org_1', name: 'Lake House Rentals', billing_email: 'billing@lakehouse.test',
-  plan: 'growth', stripe_subscription_id: 'sub_1',
+  plan: 'platform', stripe_subscription_id: 'sub_1',
 }
+
+// quantity 4 -> $88.00 (8800 cents) via the real graduated bracket schedule
+// (lib/stripe/brackets.ts, not mocked here — it's pure math with no reason
+// to fake): the $49 anchor plus 3 properties at $13/each.
+const LOCKED_PRICE_CENTS = 8_800
 
 const BASE_EVENT = { data: { org_id: 'org_1' } }
 
@@ -78,7 +82,7 @@ describe('awardHospitablePriceLock', () => {
   beforeEach(() => {
     vi.clearAllMocks()
     ;(stripe.subscriptions.retrieve as ReturnType<typeof vi.fn>).mockResolvedValue({
-      items: { data: [{ price: { unit_amount: 47900 } }] },
+      items: { data: [{ quantity: 4 }] },
     })
   })
 
@@ -104,17 +108,17 @@ describe('awardHospitablePriceLock', () => {
     expect(result).toEqual({ org_id: 'org_1', status: 'awarded', sequenceNumber: 7, lockYears: 2 })
 
     expect(supabase.rpc).toHaveBeenCalledWith('claim_hospitable_promo_slot', {
-      p_org_id: 'org_1', p_tier: 'growth', p_price_cents: 47900,
+      p_org_id: 'org_1', p_tier: 'platform', p_price_cents: LOCKED_PRICE_CENTS,
     })
     expect(logAuditEvent).toHaveBeenCalledWith(
       expect.objectContaining({
         orgId: 'org_1', action: 'billing.hospitable_price_lock.awarded',
-        metadata: expect.objectContaining({ sequenceNumber: 7, lockYears: 2, tier: 'growth' }),
+        metadata: expect.objectContaining({ sequenceNumber: 7, lockYears: 2, tier: 'platform' }),
       }),
     )
     expect(sendHospitablePriceLockEmail).toHaveBeenCalledWith({
       toEmail: 'billing@lakehouse.test', organizationName: 'Lake House Rentals',
-      sequenceNumber: 7, lockYears: 2, lockedTierName: 'Growth', lockedPriceCents: 47900,
+      sequenceNumber: 7, lockYears: 2, lockedTierName: 'FieldStay', lockedPriceCents: LOCKED_PRICE_CENTS,
     })
 
     const update = supabase.calls.find((c) => c.table === 'hospitable_launch_promo' && c.method === 'update')

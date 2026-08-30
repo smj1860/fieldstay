@@ -41,12 +41,9 @@ vi.mock('@/lib/stripe/client', () => ({
     checkout:      { sessions: { create: vi.fn() } },
     subscriptions: { list: vi.fn(async () => ({ data: [] })) },
   },
-  PLANS: {
-    hosts:     { name: 'Hosts',     maxProperties: 4,   monthlyPriceId: 'price_hosts_m',     annualPriceId: 'price_hosts_a' },
-    starter:   { name: 'Starter',   maxProperties: 15,  monthlyPriceId: 'price_starter_m',   annualPriceId: 'price_starter_a' },
-    growth:    { name: 'Growth',    maxProperties: 50,  monthlyPriceId: 'price_growth_m',    annualPriceId: 'price_growth_a' },
-    portfolio: { name: 'Portfolio', maxProperties: 100, monthlyPriceId: 'price_portfolio_m', annualPriceId: 'price_portfolio_a' },
-  },
+  MAX_SELF_SERVE_PROPERTIES: 100,
+  platformPriceId: (interval: 'monthly' | 'annual') =>
+    interval === 'annual' ? 'price_platform_annual' : 'price_platform_monthly',
 }))
 vi.mock('@/emails/crew-invite', () => ({
   renderCrewInviteEmail: vi.fn(async () => '<html>invite</html>'),
@@ -571,9 +568,10 @@ describe('settings/actions', () => {
   describe('createCheckoutSession', () => {
     // An org that already has a live subscription must never be handed a
     // second Checkout: mode:'subscription' creates a NEW subscription every
-    // time it completes, so an existing subscriber clicking a plan card ended
-    // up billed twice, with the older subscription invisible in the app (the
-    // webhook handler overwrites the single stripe_subscription_id column).
+    // time it completes, so an existing subscriber clicking the subscribe
+    // button ended up billed twice, with the older subscription invisible in
+    // the app (the webhook handler overwrites the single
+    // stripe_subscription_id column).
     function mockRoleAuthed(supabase: ReturnType<typeof makeSupabase>) {
       vi.mocked(requireOrgRole).mockResolvedValue({
         user:       { id: USER_ID } as never,
@@ -582,15 +580,20 @@ describe('settings/actions', () => {
       })
     }
 
+    /** Every checkout path reads the org's active property count FIRST — it is now the checkout quantity, not just a cap check. */
+    function withPropertyCount(count: number, rest: QueuedByTable = {}): QueuedByTable {
+      return { properties: [{ data: null, error: null, count } as never], ...rest }
+    }
+
     it('sends an org with an active subscription to the billing portal instead of a second checkout', async () => {
-      const supabase = makeSupabase({
+      const supabase = makeSupabase(withPropertyCount(3, {
         organizations: [{ data: { stripe_customer_id: 'cus_1', billing_email: 'pm@example.com' }, error: null }],
-      })
+      }))
       mockRoleAuthed(supabase)
       vi.mocked(stripe.subscriptions.list).mockResolvedValue({ data: [{ status: 'active' }] } as never)
       vi.mocked(stripe.billingPortal.sessions.create).mockResolvedValue({ url: 'https://portal' } as never)
 
-      const result = await createCheckoutSession('growth', 'monthly')
+      const result = await createCheckoutSession('monthly')
 
       expect(result).toEqual({ redirectUrl: 'https://portal' })
       expect(stripe.checkout.sessions.create).not.toHaveBeenCalled()
@@ -599,14 +602,14 @@ describe('settings/actions', () => {
     it('treats trialing and past_due as live too', async () => {
       for (const status of ['trialing', 'past_due', 'unpaid', 'paused']) {
         vi.clearAllMocks()
-        const supabase = makeSupabase({
+        const supabase = makeSupabase(withPropertyCount(3, {
           organizations: [{ data: { stripe_customer_id: 'cus_1', billing_email: null }, error: null }],
-        })
+        }))
         mockRoleAuthed(supabase)
         vi.mocked(stripe.subscriptions.list).mockResolvedValue({ data: [{ status }] } as never)
         vi.mocked(stripe.billingPortal.sessions.create).mockResolvedValue({ url: 'https://portal' } as never)
 
-        const result = await createCheckoutSession('growth', 'monthly')
+        const result = await createCheckoutSession('monthly')
 
         expect(result, status).toEqual({ redirectUrl: 'https://portal' })
         expect(stripe.checkout.sessions.create, status).not.toHaveBeenCalled()
@@ -616,17 +619,17 @@ describe('settings/actions', () => {
     it('still allows checkout after a failed first payment (incomplete is not live)', async () => {
       // Stripe leaves a failed first charge as 'incomplete' for ~23h. Blocking
       // on it would lock the customer out of retrying entirely.
-      const supabase = makeSupabase({
+      const supabase = makeSupabase(withPropertyCount(3, {
         organizations: [{ data: { stripe_customer_id: 'cus_1', billing_email: null }, error: null }],
         integration_connections: [{ data: null, error: null }],
-      })
+      }))
       mockRoleAuthed(supabase)
       vi.mocked(stripe.subscriptions.list).mockResolvedValue({
         data: [{ status: 'incomplete' }, { status: 'incomplete_expired' }, { status: 'canceled' }],
       } as never)
       vi.mocked(stripe.checkout.sessions.create).mockResolvedValue({ url: 'https://checkout' } as never)
 
-      const result = await createCheckoutSession('growth', 'monthly')
+      const result = await createCheckoutSession('monthly')
 
       expect(result).toEqual({ redirectUrl: 'https://checkout' })
       expect(stripe.billingPortal.sessions.create).not.toHaveBeenCalled()
@@ -638,14 +641,14 @@ describe('settings/actions', () => {
     // nothing tells them so. Found the first time a checkout page was reached
     // for real — there was no field on it.
     it('lets the customer enter a promotion code', async () => {
-      const supabase = makeSupabase({
+      const supabase = makeSupabase(withPropertyCount(3, {
         organizations: [{ data: { stripe_customer_id: null, billing_email: 'pm@example.com' }, error: null }],
         integration_connections: [{ data: null, error: null }],
-      })
+      }))
       mockRoleAuthed(supabase)
       vi.mocked(stripe.checkout.sessions.create).mockResolvedValue({ url: 'https://checkout' } as never)
 
-      await createCheckoutSession('growth', 'monthly')
+      await createCheckoutSession('monthly')
 
       const [params] = vi.mocked(stripe.checkout.sessions.create).mock.calls[0]!
       expect(params).toMatchObject({ allow_promotion_codes: true })
@@ -654,19 +657,37 @@ describe('settings/actions', () => {
       expect(params).not.toHaveProperty('discounts')
     })
 
-    it('passes an idempotency key so a double-click cannot mint two sessions', async () => {
-      const supabase = makeSupabase({
+    // The graduated price bills by quantity, so the checkout line item must
+    // carry the org's real property count — not a fixed 1 like the old
+    // one-property-per-checkout flat-tier model. Getting this wrong means the
+    // very first invoice under-bills or over-bills the customer.
+    it('checks out at quantity = the org\'s current active property count', async () => {
+      const supabase = makeSupabase(withPropertyCount(7, {
         organizations: [{ data: { stripe_customer_id: null, billing_email: 'pm@example.com' }, error: null }],
         integration_connections: [{ data: null, error: null }],
-      })
+      }))
       mockRoleAuthed(supabase)
       vi.mocked(stripe.checkout.sessions.create).mockResolvedValue({ url: 'https://checkout' } as never)
 
-      await createCheckoutSession('growth', 'annual')
+      await createCheckoutSession('monthly')
+
+      const [params] = vi.mocked(stripe.checkout.sessions.create).mock.calls[0]!
+      expect(params).toMatchObject({ line_items: [{ price: 'price_platform_monthly', quantity: 7 }] })
+    })
+
+    it('passes an idempotency key so a double-click cannot mint two sessions', async () => {
+      const supabase = makeSupabase(withPropertyCount(3, {
+        organizations: [{ data: { stripe_customer_id: null, billing_email: 'pm@example.com' }, error: null }],
+        integration_connections: [{ data: null, error: null }],
+      }))
+      mockRoleAuthed(supabase)
+      vi.mocked(stripe.checkout.sessions.create).mockResolvedValue({ url: 'https://checkout' } as never)
+
+      await createCheckoutSession('annual')
 
       expect(stripe.checkout.sessions.create).toHaveBeenCalledWith(
         expect.anything(),
-        expect.objectContaining({ idempotencyKey: checkoutIdempotencyKey(ORG_ID, 'growth', 'annual') }),
+        expect.objectContaining({ idempotencyKey: checkoutIdempotencyKey(ORG_ID, 'annual') }),
       )
     })
 
@@ -684,7 +705,7 @@ describe('settings/actions', () => {
     // leaving the helper's name in place.
     it('rotates the idempotency key so a fixed config can be retried', () => {
       const t0    = 1_800_000_000_000
-      const key   = (at: number) => checkoutIdempotencyKey(ORG_ID, 'growth', 'annual', at)
+      const key   = (at: number) => checkoutIdempotencyKey(ORG_ID, 'annual', at)
 
       // Inside one window a double-click collapses — the thing the key is for.
       expect(key(t0)).toBe(key(t0 + 5_000))
@@ -698,79 +719,95 @@ describe('settings/actions', () => {
       // day after a fix.
       expect(CHECKOUT_IDEMPOTENCY_WINDOW_MS).toBeLessThanOrEqual(30 * 60 * 1000)
 
-      // Distinct plans and orgs stay distinct — the bucket must not have
+      // Distinct intervals and orgs stay distinct — the bucket must not have
       // flattened the key into something two callers share.
-      expect(key(t0)).not.toBe(checkoutIdempotencyKey(ORG_ID, 'starter', 'annual', t0))
-      expect(key(t0)).not.toBe(checkoutIdempotencyKey(ORG_ID, 'growth', 'monthly', t0))
-      expect(key(t0)).not.toBe(checkoutIdempotencyKey('other-org', 'growth', 'annual', t0))
+      expect(key(t0)).not.toBe(checkoutIdempotencyKey(ORG_ID, 'monthly', t0))
+      expect(key(t0)).not.toBe(checkoutIdempotencyKey('other-org', 'annual', t0))
     })
 
-    // ── Property-cap guard ──────────────────────────────────────────────
-    // max_properties is written straight from PLANS[plan].maxProperties by
-    // the Stripe webhook, with no reference to what the org actually has. So
-    // buying an under-sized plan left an org permanently over cap: existing
-    // properties keep working (the cap is only checked when ADDING one), so
-    // nothing breaks loudly — they just pay for less than they use, forever,
-    // with no signal. Adding the $89 Hosts tier made it one click away for a
-    // trialing org sitting at the 15-property trial cap.
-    it('refuses a plan that covers fewer properties than the org already has', async () => {
-      const supabase = makeSupabase({
-        properties: [{ data: null, error: null, count: 10 } as never],
-      })
+    // ── The two edges a graduated price does not cover ──────────────────
+    // There is no per-tier cap any more (that whole failure mode — an
+    // under-sized plan leaving an org permanently over cap with no signal —
+    // is gone by construction with one price and no ceiling below 100). What
+    // remains: zero properties (the $49 anchor prices "property 1", so there
+    // is nothing to bill) and above the self-serve ceiling (Enterprise
+    // territory, off Stripe entirely).
+    it('refuses checkout for an org with zero active properties', async () => {
+      const supabase = makeSupabase(withPropertyCount(0))
       mockRoleAuthed(supabase)
 
-      const result = await createCheckoutSession('hosts', 'monthly')
+      const result = await createCheckoutSession('monthly')
 
       expect(result).toEqual({
-        error: 'Hosts covers up to 4 properties, but you have 10 active properties. ' +
-               'Choose a plan that fits, or archive the extras first.',
+        error: 'Add a property before subscribing — FieldStay bills per property.',
       })
-      // Refused BEFORE any Stripe call — no session to abandon, no customer
-      // record touched.
       expect(stripe.checkout.sessions.create).not.toHaveBeenCalled()
       expect(stripe.subscriptions.list).not.toHaveBeenCalled()
     })
 
-    it('allows a plan the org fits exactly at', async () => {
-      // Boundary: 4 properties on a 4-property plan is COVERED, not over. The
-      // add-property gate uses >= because it asks "can I fit one MORE"; this
-      // asks "does this plan cover what I have" — a different question.
-      const supabase = makeSupabase({
-        properties: [{ data: null, error: null, count: 4 } as never],
+    it('refuses checkout above the self-serve ceiling of 100 properties', async () => {
+      const supabase = makeSupabase(withPropertyCount(101))
+      mockRoleAuthed(supabase)
+
+      const result = await createCheckoutSession('monthly')
+
+      expect(result).toEqual({
+        error: 'Self-serve billing covers up to 100 properties, but you have ' +
+               '101 active properties. Email hello@fieldstay.app for Enterprise pricing.',
+      })
+      expect(stripe.checkout.sessions.create).not.toHaveBeenCalled()
+    })
+
+    it('allows checkout at exactly the self-serve ceiling', async () => {
+      const supabase = makeSupabase(withPropertyCount(100, {
         organizations: [{ data: { stripe_customer_id: null, billing_email: 'pm@example.com' }, error: null }],
         integration_connections: [{ data: null, error: null }],
-      })
+      }))
       mockRoleAuthed(supabase)
       vi.mocked(stripe.checkout.sessions.create).mockResolvedValue({ url: 'https://checkout' } as never)
 
-      const result = await createCheckoutSession('hosts', 'monthly')
+      const result = await createCheckoutSession('monthly')
 
       expect(result).toEqual({ redirectUrl: 'https://checkout' })
     })
 
-    it('fails CLOSED when the property count read errors — never bills a plan it could not verify', async () => {
-      // Guessing "probably fits" here charges a customer for a plan that may
-      // not cover them, which is the exact outcome the guard exists to stop.
+    it('allows checkout at exactly 1 property — the $49 anchor', async () => {
+      const supabase = makeSupabase(withPropertyCount(1, {
+        organizations: [{ data: { stripe_customer_id: null, billing_email: 'pm@example.com' }, error: null }],
+        integration_connections: [{ data: null, error: null }],
+      }))
+      mockRoleAuthed(supabase)
+      vi.mocked(stripe.checkout.sessions.create).mockResolvedValue({ url: 'https://checkout' } as never)
+
+      const result = await createCheckoutSession('monthly')
+
+      expect(result).toEqual({ redirectUrl: 'https://checkout' })
+    })
+
+    it('fails CLOSED when the property count read errors — never bills a quantity it could not verify', async () => {
+      // Guessing "probably fine" here charges a customer for a quantity that
+      // may not match what they actually have, which is the exact outcome
+      // the guard exists to stop.
       const supabase = makeSupabase({
         properties: [{ data: null, error: { message: 'statement timeout', code: '57014' } } as never],
       })
       mockRoleAuthed(supabase)
 
-      const result = await createCheckoutSession('hosts', 'monthly')
+      const result = await createCheckoutSession('monthly')
 
       expect(result).toEqual({ error: 'We could not verify your property count. Please try again.' })
       expect(stripe.checkout.sessions.create).not.toHaveBeenCalled()
     })
 
     it('does not query Stripe at all for an org with no customer yet', async () => {
-      const supabase = makeSupabase({
+      const supabase = makeSupabase(withPropertyCount(3, {
         organizations: [{ data: { stripe_customer_id: null, billing_email: 'pm@example.com' }, error: null }],
         integration_connections: [{ data: null, error: null }],
-      })
+      }))
       mockRoleAuthed(supabase)
       vi.mocked(stripe.checkout.sessions.create).mockResolvedValue({ url: 'https://checkout' } as never)
 
-      const result = await createCheckoutSession('starter', 'monthly')
+      const result = await createCheckoutSession('monthly')
 
       expect(result).toEqual({ redirectUrl: 'https://checkout' })
       expect(stripe.subscriptions.list).not.toHaveBeenCalled()

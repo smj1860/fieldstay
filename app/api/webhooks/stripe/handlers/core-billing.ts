@@ -1,12 +1,12 @@
 import type Stripe from 'stripe'
 import { inngest } from '@/lib/inngest/client'
-import { PLANS, getPlanByPriceId, type PlanKey } from '@/lib/stripe/client'
+import { isPlatformPriceId, MAX_SELF_SERVE_PROPERTIES } from '@/lib/stripe/client'
 import { logAuditEvent } from '@/lib/audit'
 import { getPmMembers, createPmNotification } from '@/lib/inngest/helpers'
 import { tryUnwrap } from '@/lib/supabase/unwrap'
 import { nullableArg } from '@/lib/supabase/rpc-args'
 import { reportError } from '@/lib/observability/report-error'
-import type { OrgPlanStatus } from '@/types/database'
+import type { OrgPlan, OrgPlanStatus } from '@/types/database'
 import type { StripeSupabaseClient } from './types'
 
 /** Core billing checkout completed — links the Stripe customer id to the org. */
@@ -168,8 +168,9 @@ async function resolveSubscriptionOrg(
   // Not every subscription on this account is core billing — guidebook sponsor
   // subscriptions land here too, and their customer is a sponsor, not an org.
   // Those legitimately have no org and must NOT retry forever. The price id is
-  // what tells the two apart: getPlanByPriceId only recognises our own plans.
-  if (!getPlanByPriceId(priceId)) return null
+  // what tells the two apart: isPlatformPriceId only recognises our own
+  // graduated self-serve price.
+  if (!isPlatformPriceId(priceId)) return null
 
   // It IS one of our plans, so an org must exist and we simply cannot see it
   // yet. Throw so Stripe retries with backoff and picks up the link written by
@@ -183,7 +184,15 @@ async function resolveSubscriptionOrg(
 
 interface SubscriptionFields {
   subscriptionId: string
-  plan:           PlanKey
+  /**
+   * Always the literal 'platform' on this path — resolveSubscriptionOrg/
+   * isPlatformPriceId already filtered to the one graduated self-serve
+   * price, so there is no other value a core-billing update can produce. Kept
+   * as the full OrgPlan type (not a 'platform' literal) because it flows
+   * straight into an RPC parameter and a plain `.update()` payload typed
+   * against the enum column.
+   */
+  plan:           OrgPlan
   planStatus:     OrgPlanStatus
   trialEndsAt:    string | null
   /** Stripe `event.created`, ISO. Drives the RPC's stale-delivery guard. */
@@ -192,7 +201,7 @@ interface SubscriptionFields {
 
 /** What the RPC did — `applied: false` means the delivery was stale. */
 interface SubscriptionWriteResult {
-  previousPlan: PlanKey | null
+  previousPlan: OrgPlan | null
   applied:      boolean
 }
 
@@ -217,7 +226,16 @@ async function applySubscriptionUpdate(
       p_stripe_subscription_id: fields.subscriptionId,
       p_plan:                   fields.plan,
       p_plan_status:            fields.planStatus,
-      p_max_properties:         PLANS[fields.plan].maxProperties,
+      // Every self-serve org gets the same structural ceiling — the highest
+      // property count the graduated schedule prices at all (100). This is
+      // NOT what the org is currently billed for; that is the Stripe
+      // subscription item's own `quantity`, synced separately by the
+      // reconciliation cron. Conflating the two would turn max_properties
+      // back into a hard wall at "whatever you last paid for", defeating the
+      // entire point of graduated pricing — a PM must be able to add
+      // property 5 immediately and have it show up on the NEXT invoice, not
+      // be blocked from adding it until a sync catches up.
+      p_max_properties:         MAX_SELF_SERVE_PROPERTIES,
       // The parameter is a plain nullable timestamptz — a subscription with no
       // trial passes NULL — but pg_proc records no argument nullability, so
       // the generated Args type says `string`. See lib/supabase/rpc-args.ts.
@@ -241,7 +259,7 @@ async function applySubscriptionUpdate(
   // types/database.ts), so .rpc() infers `{}` rather than the real shape —
   // cast to the RETURNS TABLE columns from the migration.
   const updated = rpcResult as
-    { org_id: string; org_name: string | null; previous_plan: PlanKey; applied: boolean } | null
+    { org_id: string; org_name: string | null; previous_plan: OrgPlan; applied: boolean } | null
   if (updated) return { previousPlan: updated.previous_plan, applied: updated.applied }
 
   // The RPC keys on stripe_customer_id, which is normally in agreement with
@@ -262,7 +280,7 @@ async function applySubscriptionUpdate(
       stripe_subscription_id: fields.subscriptionId,
       plan:            fields.plan,
       plan_status:     fields.planStatus,
-      max_properties:  PLANS[fields.plan].maxProperties,
+      max_properties:  MAX_SELF_SERVE_PROPERTIES,
       trial_ends_at:   fields.trialEndsAt,
     })
     .eq('id', org.id)
@@ -284,19 +302,25 @@ async function applySubscriptionUpdate(
 }
 
 /**
- * Syncs only plan_status for a subscription whose price we cannot map to a plan.
+ * Syncs only plan_status for a subscription whose price is not our graduated
+ * self-serve platform price.
  *
- * An unrecognized price is NOT Starter. This replaced
- * `getPlanByPriceId(priceId) ?? 'starter'`, which wrote max_properties: 15 over
- * whatever plan the org actually held. PLANS.enterprise has
- * monthlyPriceId/annualPriceId of null (it is "contact for pricing"), so
- * getPlanByPriceId can NEVER return 'enterprise' — every enterprise org was
- * rewritten to Starter/15 on any subscription event. Promo prices,
- * grandfathered prices and dashboard-created subscriptions are the same case.
+ * This is the enterprise/promo/grandfathered/dashboard-created case: a
+ * subscription that is genuinely core billing (isCoreBillingSubscription
+ * already filtered out sponsor subscriptions) but not on PLATFORM_PRICE.
+ * Historically (pre-graduated-pricing) this branch existed because
+ * `getPlanByPriceId(priceId) ?? 'starter'` wrote max_properties: 15 over
+ * whatever plan the org actually held — an unrecognized price silently
+ * downgraded every Enterprise org on every subscription event, since
+ * Enterprise carried no self-serve price id to match at all. The same
+ * failure mode applies identically now with one price instead of four:
+ * writing MAX_SELF_SERVE_PROPERTIES over an Enterprise org's actual
+ * (larger, contract-negotiated) cap would be a real regression, not a
+ * no-op.
  *
  * Status still syncs, because past_due/cancelled must take effect regardless of
- * whether we can name the tier. Only the entitlement columns are left alone
- * rather than guessed downward.
+ * whether we recognize the price. Only the entitlement columns are left alone
+ * rather than guessed at.
  */
 async function syncStatusForUnmappedPrice(
   supabase: StripeSupabaseClient,
@@ -333,12 +357,12 @@ export async function handleCoreSubscriptionUpdate(
   eventCreated: number,
 ): Promise<void> {
   const customerId = subscription.customer as string
-  // The plan-bearing item, not blindly items.data[0] — an add-on line could
-  // sit in position 0 and mask the real plan price.
-  const priceId    = subscription.items.data.find((i) => getPlanByPriceId(i.price.id))?.price.id
+  // The platform-price item, not blindly items.data[0] — an add-on line could
+  // sit in position 0 and mask the real platform price.
+  const priceId    = subscription.items.data.find((i) => isPlatformPriceId(i.price.id))?.price.id
                      ?? subscription.items.data[0]?.price.id
                      ?? ''
-  const planKey    = getPlanByPriceId(priceId)
+  const isPlatform = isPlatformPriceId(priceId)
 
   const planStatus = subscription.status === 'active'   ? 'active'
                     : subscription.status === 'trialing' ? 'trialing'
@@ -363,26 +387,25 @@ export async function handleCoreSubscriptionUpdate(
   const org = await resolveSubscriptionOrg(supabase, subscription, customerId, priceId)
   if (!org) return
 
-  // An unrecognized price is NOT Starter.
-  //
-  // This used to be `getPlanByPriceId(priceId) ?? 'starter'`, which wrote
-  // max_properties: 15 over any plan whose price we cannot map. PLANS.enterprise
-  // has monthlyPriceId/annualPriceId of null (it is "contact for pricing"), so
-  // getPlanByPriceId can NEVER return 'enterprise' — every enterprise org was
-  // rewritten to Starter/15 on any subscription event. Promo prices,
-  // grandfathered prices and dashboard-created subscriptions are the same case.
-  //
-  // Status still syncs, because past_due/cancelled must take effect regardless
-  // of whether we can name the tier. Only the entitlement columns are left
-  // alone rather than guessed downward.
-  if (!planKey) {
+  // An unrecognized price is not our graduated self-serve platform price —
+  // see syncStatusForUnmappedPrice's doc comment for what that covers
+  // (Enterprise, promo/grandfathered prices, dashboard-created subscriptions)
+  // and the entitlement-downgrade bug this branch exists to prevent.
+  if (!isPlatform) {
     await syncStatusForUnmappedPrice(supabase, org, { subscription, priceId, planStatus })
     return
   }
 
-  const plan = planKey
+  const plan: OrgPlan = 'platform'
 
-  const { previousPlan, applied } = await applySubscriptionUpdate(supabase, org, customerId, {
+  // previousPlan is deliberately not read: every self-serve subscription on
+  // this path is 'platform' both before and after (there is no other
+  // discrete tier left to have transitioned from), so the old
+  // billing/subscription-updated event → notifyPlanChanged tier-change
+  // notification could never fire again post-migration. Both were retired
+  // 2026-08-29 rather than kept as dead code — see the graduated-pricing
+  // rebuild notes.
+  const { applied } = await applySubscriptionUpdate(supabase, org, customerId, {
     subscriptionId: subscription.id,
     plan,
     planStatus,
@@ -393,28 +416,10 @@ export async function handleCoreSubscriptionUpdate(
   })
 
   // A stale delivery wrote nothing, so nothing downstream may fire either: the
-  // billing/subscription-updated event, the audit row and the lifecycle emails
-  // would all describe a transition that did not happen. Returning here is the
-  // difference between "we ignored an out-of-order retry" and "we told the PM
-  // their trial started again".
+  // audit row and the lifecycle emails would describe a transition that did
+  // not happen. Returning here is the difference between "we ignored an
+  // out-of-order retry" and "we told the PM their trial started again".
   if (!applied) return
-
-  // previous_plan is only meaningful on an update to an existing
-  // subscription — never on creation, where the org's pre-signup default
-  // plan isn't a real "previous" tier the PM ever knowingly held.
-  const genuinePreviousPlan =
-    eventType === 'customer.subscription.updated' ? previousPlan : null
-
-  await inngest.send({
-    name: 'billing/subscription-updated',
-    data: {
-      org_id:                 org.id,
-      stripe_subscription_id: subscription.id,
-      plan,
-      plan_status:            planStatus,
-      previous_plan:          genuinePreviousPlan,
-    },
-  })
 
   await logAuditEvent({
     orgId:    org.id,

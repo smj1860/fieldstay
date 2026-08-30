@@ -26,6 +26,7 @@ import { staleFeedAlert }               from '@/lib/inngest/functions/cron/stale
 import { turnoverPriorityDecay }        from '@/lib/inngest/functions/cron/turnover-priority-decay'
 import { notificationDigest }           from '@/lib/inngest/functions/cron/notification-digest'
 import { dailyWrapUp, dailyWrapUpOrg }  from '@/lib/inngest/functions/cron/daily-wrapup'
+import { billingPropertyReconciliation, reconcilePropertyCountForOrg } from '@/lib/inngest/functions/cron/billing-property-reconciliation'
 import { webhookDedupCleanup }          from '@/lib/inngest/functions/cron/webhook-dedup-cleanup'
 
 // Inventory
@@ -123,7 +124,6 @@ import { recordInventoryConsumption } from '@/lib/inngest/functions/record-inven
 // Integration error notifications
 import { notifyIntegrationError }  from '@/lib/inngest/functions/notify-integration-error'
 import { notifyCrewFeedback }      from '@/lib/inngest/functions/notify-crew-feedback'
-import { notifyPlanChanged }       from '@/lib/inngest/functions/notify-plan-changed'
 import { notifyAssignmentGap }     from '@/lib/inngest/functions/notify-assignment-gap'
 
 // Vendor compliance expiry warnings
@@ -231,6 +231,8 @@ export const { GET, POST, PUT } = serve({
     notificationDigest,
     dailyWrapUp,
     dailyWrapUpOrg,
+    billingPropertyReconciliation,
+    reconcilePropertyCountForOrg,
     computeChecklistSignals,
     webhookDedupCleanup,
 
@@ -338,9 +340,6 @@ export const { GET, POST, PUT } = serve({
 
     // Crew feedback staff notification
     notifyCrewFeedback,
-
-    // Plan change notification
-    notifyPlanChanged,
 
     // Vendor compliance expiry warnings
     vendorComplianceExpiryCheck,

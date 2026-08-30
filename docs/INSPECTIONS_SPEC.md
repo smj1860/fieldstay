@@ -1182,7 +1182,7 @@ address, inspection date, start time, inspector (the signed-in user),
 management company (the org). The inspector's own name is typed at SIGN-OFF,
 not here — see §5 on the letterhead/signature split.
 
-42 top-level items across 7 sections — 40 inspected items plus a two-item
+45 top-level items across 7 sections — 43 inspected items plus a two-item
 sign-off. Still the shortest of the three, which is right for a form that runs
 once or twice a year.
 
@@ -1240,11 +1240,16 @@ residential cause; its absence from the FIRE safety form was the oversight.
 | 15 | Electrical panel unobstructed, no exposed wiring, no tripped breakers | yes_no | Repair | `electrical_panel` | `electrical_panel_clear` |
 | 16 | No daisy-chained power strips, no extension cords in permanent use | yes_no | Replace | — | — |
 | 17 | Gas appliances — furnace, water heater, range — leak-checked, vented, no odour | yes_no | Service | — | `gas_appliance_safe` |
+| 17a | Gas supply line intact — no corrosion, damage, or exposed fittings; shut-off valve accessible and labelled | yes_no | Service | — | `gas_line_integrity` |
 | 18 | Main water shut-off labelled, accessible, valve tool in place | yes_no | Repair | `plumbing_system` | `main_shutoff` |
 | 19 | HVAC air filters clean, supply vents unblocked, service log current | yes_no | Replace | `hvac` | `hvac_filter` |
 
 Item 17 is the other half of section 1's CO detectors: the detectors exist
-because of these appliances, and nothing was checking the source.
+because of these appliances, and nothing was checking the source. Item 17a
+(added 2026-08-30, lettered rather than renumbering 18 onward — same
+convention as Indoor's 14a/19a) is the line feeding those appliances rather
+than the appliances themselves: a corroded or damaged run is caught before
+it ever reaches a leaking appliance, not after.
 
 #### 3. Structural, Floor & Slip/Trip Hazard Mitigation
 
@@ -1779,6 +1784,7 @@ next to the forms is how the overlaps are understood.
 | `chimney_swept` | 9 | — | — |
 | `egress_window` | 11 | 5 | — |
 | `gas_appliance_safe` | 17 | — | — |
+| `gas_line_integrity` | 17a | — | — |
 | `sump_pump` | 28 | — | — |
 | `pool_drain_vgb` | 34 | — | — |
 | `entry_lock_operational` | — | 1 | — |

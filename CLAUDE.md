@@ -152,6 +152,176 @@ fail open; a spend ceiling must not disappear during an outage.
 
 ---
 
+## Billing — Graduated Pricing (2026-08-29 rebuild)
+
+FieldStay replaced its 4-tier flat pricing (Hosts/Starter/Growth/Portfolio —
+each a separate Stripe Product, each with its own monthly/annual Price) with
+ONE graduated (marginal) Stripe price per interval. The old model charged a
+flat rate for a property-count RANGE, so crossing a tier boundary by one
+property jumped the whole bill by $110–$320 — a real adoption blocker. The
+graduated model re-rates only the property that crossed the boundary; every
+property before it keeps costing what it always cost.
+
+**The schedule is locked and lives in exactly one place: `lib/stripe/brackets.ts`.**
+Never hand-derive these numbers elsewhere — every consumer (checkout, the
+webhook, the reconciliation cron, the billing UI, the marketing pricing
+pages) imports from this module, which has zero dependencies (safe for
+`'use client'` components — it does not touch the Stripe SDK).
+
+```
+Property 1:        $49/mo flat (the anchor)
+Properties 2–4:     $13/mo each
+Properties 5–15:    $10/mo each
+Properties 16–50:   $8/mo each
+Properties 51–100:  $6/mo each
+Annual:             every figure above x10 (ANNUAL_MULTIPLIER) — 2 months free
+```
+
+100 properties is the self-serve ceiling (`MAX_SELF_SERVE_PROPERTIES`).
+Above that is Enterprise: a manually negotiated contract, entirely outside
+Stripe self-serve, same as before this rebuild.
+
+### Key exports (`lib/stripe/brackets.ts`)
+
+| Export | Use for |
+|---|---|
+| `monthlyCostCents(qty)` / `annualCostCents(qty)` | The total bill at a given property count. `null` outside 1–100 |
+| `bracketBreakdown(qty, interval)` | Itemized line items (label, units, per-unit cents, line total) — what the billing UI's breakdown renders |
+| `toStripeTiers(interval)` | The literal `tiers` array for `stripe.prices.create({ billing_scheme: 'tiered', tiers_mode: 'graduated', tiers: [...] })` |
+| `marginalRateCentsFor(qty)` | The rate the NEXT property would cost — display only |
+
+### `lib/stripe/client.ts` — what replaced `PLANS`
+
+`PLANS`, `PlanKey`, `CheckoutPlanKey`, and `getPlanByPriceId` are gone. In
+their place:
+
+```typescript
+PLATFORM_PRICE.monthlyPriceId   // from STRIPE_PRICE_PLATFORM_MONTHLY
+PLATFORM_PRICE.annualPriceId    // from STRIPE_PRICE_PLATFORM_ANNUAL
+platformPriceId(interval)       // resolves one of the above
+isPlatformPriceId(id)           // true for either — replaces getPlanByPriceId
+MAX_SELF_SERVE_PROPERTIES       // re-exported from brackets.ts
+```
+
+Only 2 price env vars now (`STRIPE_PRICE_PLATFORM_MONTHLY` / `_ANNUAL`), down
+from 8. `STRIPE_PRICE_SPONSOR_MONTHLY` (guidebook sponsors) is unrelated and
+unchanged.
+
+### `organizations.plan` — 'platform' is the new value, not a discrete tier
+
+`org_plan` gained a `'platform'` value
+(`20260829180000_add_platform_plan.sql`). Every self-serve org's Stripe
+webhook write now sets `plan: 'platform'` — there is no other tier to assign,
+since one price serves every property count. The four old values
+(`hosts`/`starter`/`growth`/`portfolio`) stay in the enum for historical rows
+(ADD VALUE never removes anything) and in `PLAN_INFO` in `settings-tabs.tsx`
+purely for DISPLAY of pre-existing rows; nothing writes them going forward.
+`plan` was already established as display-only, never a feature gate or RLS
+condition (see `20260808120000_add_hosts_plan.sql`'s "nothing orders by
+plan" note) — that is exactly what made this collapse safe.
+
+**`max_properties` changed meaning.** It used to be the tier's cap (a real
+wall — you could not add a property past it without upgrading). Now every
+self-serve org gets `max_properties = MAX_SELF_SERVE_PROPERTIES` (100) —
+a structural ceiling, not a billing cap. What you're actually BILLED for is
+the live Stripe subscription item's `quantity`, reconciled separately (see
+below). Conflating the two would turn graduated pricing back into a hard
+wall at "whatever you last paid for," defeating the entire point: a PM must
+be able to add property 5 immediately and see it on the next invoice, not be
+blocked from adding it until a sync catches up.
+
+### Checkout (`createCheckoutSession` in `app/(dashboard)/settings/actions.ts`)
+
+Signature is now `createCheckoutSession(interval)` — no `planKey`, since
+there is only one price per interval. The line item's `quantity` is the
+org's live active property count at checkout time (not a fixed `1`), so the
+first invoice bills correctly from day one. The old "does this plan cover
+what I already have" cap check is gone (no cap below 100); what remains is
+just the two edges the schedule doesn't cover: 0 properties (nothing to
+bill — "add a property before subscribing") and >100 (Enterprise).
+`checkoutIdempotencyKey(orgId, interval, now?)` dropped its `planKey`
+parameter to match.
+
+### Webhook (`app/api/webhooks/stripe/handlers/core-billing.ts`)
+
+`getPlanByPriceId` → `isPlatformPriceId`. A price that isn't the platform
+price (Enterprise, promo, grandfathered, dashboard-created) still only syncs
+`plan_status`, never `plan`/`max_properties` — same anti-downgrade principle
+as before, just against one price instead of four.
+
+`billing/subscription-updated` (and its only consumer, `notifyPlanChanged`)
+were **retired**, not left as dead code: every self-serve org is `'platform'`
+both before and after any update now, so the tier-change notification could
+never fire again.
+
+### The property-count reconciliation cron (`lib/inngest/functions/cron/billing-property-reconciliation.ts`)
+
+Daily dispatcher (`billingPropertyReconciliation`) + per-org handler
+(`reconcilePropertyCountForOrg`, one Inngest event per org — same fan-out
+shape as `daily-wrapup.ts`, required by `unbounded-fanout-loops.test.ts` for
+any platform-wide scan that fans out per-tenant work). This is what keeps a
+paying org's Stripe subscription `quantity` matching their live active
+property count, since checkout only sets it once.
+
+**Proration rules, locked and non-negotiable without a design re-review:**
+
+- **Monthly**: any change, either direction, is applied immediately with
+  `proration_behavior: 'none'` — takes effect on the next natural invoice,
+  no charge or credit now. Simple because renewals are frequent.
+- **Annual, a decrease**: applied immediately too, also `'none'` — no rush
+  to credit, but the stored quantity must be corrected now so the NEXT
+  renewal bills the right number.
+- **Annual, an increase**: HELD rather than applied per property. Stripe's
+  own subscription item `quantity` IS the held baseline — comparing it
+  against the live count gives exactly how many properties have been added
+  since the last flush or renewal, with **no separate DB column needed**.
+  Once that pending delta reaches `ANNUAL_PRORATION_ADDITION_THRESHOLD` (5),
+  the ENTIRE delta is flushed in ONE `create_prorations` call — the 5th
+  addition and all 4 before it prorated together, starting TODAY (Stripe's
+  default `proration_date` — never backdated to when each property was
+  actually added).
+
+This design is naturally idempotent: a retried step re-fetches the
+subscription fresh from Stripe rather than trusting a local flag, so if an
+earlier attempt's `update` actually landed, the re-fetch already shows the
+new quantity and the retry is a clean no-op.
+
+### Billing UI (`app/(dashboard)/settings/settings-tabs.tsx` `BillingTab`)
+
+No more 4-card plan picker. There is one thing to subscribe to, so the UI
+shows: current property count + status, an itemized bracket breakdown
+(`bracketBreakdown()`) at a Monthly/Annual toggle, a computed total, and a
+single Subscribe button — `createCheckoutSession` itself decides whether
+that click means "start a subscription" or "you already have one, go to the
+portal" (safe to call unconditionally). Imports `lib/stripe/brackets.ts`
+directly — a `'use client'` component can do this because that module never
+touches the Stripe SDK, unlike `lib/stripe/client.ts`.
+
+### Marketing pricing pages
+
+`components/pricing/plan-tiers.ts` computes its card numbers from
+`monthlyCostCents()`/`annualCostCents()` at each band's floor (the true
+minimum for that many properties) rather than hand-typed flat numbers — so
+every landing page derives from the one real schedule instead of duplicating
+it. Every "starting at $X" claim across `/strops`, `/hosts`, `/ownerrez`,
+`/hospitable`, and the homepage must stay "starting at" framing, never
+"flat" — the graduated model has no flat rate for a range, only a true
+minimum.
+
+### Known follow-up, not done in this rebuild
+
+The Hospitable launch promo's price-lock (`lib/inngest/functions/promo-
+hospitable-award-lock.ts`) was patched to not CRASH under the new pricing
+(a tiered Stripe Price has no `unit_amount` to read; it now computes a
+dollar snapshot via `monthlyCostCents(quantity)` instead) and its email copy
+was corrected (no more "if you grow into a bigger tier"). What it was NOT
+given is real graduated-pricing semantics: the lock is still a dollar-total
+snapshot, not a locked RATE SCHEDULE, so a price-locked org's bill still
+moves if their property count changes later. Redesigning that promo properly
+is separate scoped work.
+
+---
+
 ## The Table That Breaks Everything If Wrong
 
 ```

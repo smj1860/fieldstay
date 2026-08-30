@@ -370,9 +370,9 @@ export const FAQ_CATEGORIES: FaqCategory[] = [
     items: [
       {
         id:       'billing-property-count',
-        question: 'What counts as a property for billing?',
+        question: 'What counts as a property for billing, and how is the price calculated?',
         answer:
-          'Each unique property unit synced from your connected PMS (OwnerRez, Hospitable, or Hostex) counts as one property. A multi-unit building with 4 apartment units counts as 4. Archived or removed properties do not count toward your billing total.',
+          'Each unique property unit synced from your connected PMS (OwnerRez, Hospitable, or Hostex) counts as one property. A multi-unit building with 4 apartment units counts as 4. Archived or removed properties do not count toward your billing total. Pricing is graduated: your first property is $49/mo, then $13/property for properties 2-4, $10/property for 5-15, $8/property for 16-50, and $6/property for 51-100 — so adding one more property never causes a big jump, it just adds that property\'s own rate. See Settings → Billing for an itemized breakdown at your current property count.',
       },
       {
         id:       'billing-crew-seats',
@@ -388,9 +388,9 @@ export const FAQ_CATEGORIES: FaqCategory[] = [
       },
       {
         id:       'billing-plan-change',
-        question: 'Can I switch plans if my property count changes?',
+        question: 'What happens to my bill when I add or remove a property?',
         answer:
-          'Yes. Go to Settings → Billing → Manage Subscription. Upgrades take effect immediately with prorated billing. Downgrades apply at the start of your next billing period.',
+          'There\'s no plan to switch — your bill simply reflects your current property count, computed the same way every time (see the property-count question above). What changes is WHEN it takes effect, and it depends on your billing interval. On monthly billing, an added or removed property is reflected starting your next invoice — nothing changes mid-cycle. On annual billing, added properties are held and only billed once you\'ve added a 5th property since your last renewal, at which point all 5 are prorated together for the remainder of your billing year; removed properties are credited at your next renewal. Either way, you never see a mid-cycle surprise charge.',
       },
       {
         id:       'billing-cancel',

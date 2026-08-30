@@ -1,4 +1,4 @@
-import type { CheckoutPlanKey } from '@/lib/stripe/client'
+import type { BillingInterval } from '@/lib/stripe/client'
 
 /**
  * The Stripe Checkout idempotency key, in a plain module.
@@ -39,16 +39,23 @@ export const CHECKOUT_IDEMPOTENCY_WINDOW_MS = 10 * 60 * 1000
 /**
  * Idempotency key for a Checkout session, stable within one window.
  *
+ * No plan component any more — there is only one graduated price per
+ * interval (lib/stripe/client.ts PLATFORM_PRICE), so orgId + interval fully
+ * identifies which session a double-click would otherwise duplicate. The
+ * quantity (property count) at checkout time deliberately does NOT go in the
+ * key: two clicks a few seconds apart should collapse to one session even if
+ * a property was added in between, and Stripe records whatever quantity the
+ * FIRST request actually sent regardless of what a later click would compute.
+ *
  * `now` is injectable so a test can assert the rotation over two instants
  * rather than by matching the key string — a test that recomputes the key from
  * the same expression it is checking passes whatever that expression is.
  */
 export function checkoutIdempotencyKey(
   orgId: string,
-  planKey: CheckoutPlanKey,
-  interval: 'monthly' | 'annual',
+  interval: BillingInterval,
   now: number = Date.now(),
 ): string {
   const bucket = Math.floor(now / CHECKOUT_IDEMPOTENCY_WINDOW_MS)
-  return `checkout:${orgId}:${planKey}:${interval}:${bucket}`
+  return `checkout:${orgId}:${interval}:${bucket}`
 }

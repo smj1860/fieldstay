@@ -6803,6 +6803,7 @@ export type Database = {
         | "enterprise"
         | "portfolio"
         | "hosts"
+        | "platform"
       org_plan_status:
         | "trialing"
         | "active"
@@ -7133,6 +7134,7 @@ export const Constants = {
         "enterprise",
         "portfolio",
         "hosts",
+        "platform",
       ],
       org_plan_status: [
         "trialing",

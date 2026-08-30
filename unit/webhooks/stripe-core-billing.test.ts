@@ -1,16 +1,12 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 
 vi.mock('@/lib/stripe/client', () => ({
-  PLANS: {
-    starter: { name: 'Starter', maxProperties: 15 },
-    growth:  { name: 'Growth',  maxProperties: 40 },
-  },
-  // Only 'price_growth_monthly' is one of OUR plan prices. Anything else —
-  // a guidebook sponsor price, say — resolves to null, which is what lets the
-  // handler tell "core billing subscription we cannot resolve yet" apart from
-  // "not a core billing subscription at all".
-  getPlanByPriceId: vi.fn((priceId: string) =>
-    priceId === 'price_growth_monthly' ? 'growth' : null),
+  MAX_SELF_SERVE_PROPERTIES: 100,
+  // Only 'price_platform_monthly' is our graduated self-serve price. Anything
+  // else — a guidebook sponsor price, an Enterprise contract price — is not,
+  // which is what lets the handler tell "core billing subscription we cannot
+  // resolve yet" apart from "not a core billing subscription at all".
+  isPlatformPriceId: vi.fn((priceId: string) => priceId === 'price_platform_monthly'),
 }))
 vi.mock('@/lib/inngest/client', () => ({ inngest: { send: vi.fn(async () => undefined) } }))
 vi.mock('@/lib/audit',            () => ({ logAuditEvent: vi.fn(async () => undefined) }))
@@ -43,7 +39,7 @@ import type Stripe from 'stripe'
 function makeSupabase(
   queued: Record<string, { data?: unknown; error?: unknown }[]>,
   rpcResult: { data: unknown; error?: unknown } = {
-    data: { org_id: 'org_1', org_name: 'Lake Martin', previous_plan: 'starter', applied: true },
+    data: { org_id: 'org_1', org_name: 'Lake Martin', previous_plan: 'platform', applied: true },
     error: null,
   },
 ) {
@@ -82,7 +78,7 @@ const subscription = (overrides: Record<string, unknown> = {}) => ({
   status:     'trialing',
   trial_end:  null,
   metadata:   {},
-  items:      { data: [{ price: { id: 'price_growth_monthly' } }] },
+  items:      { data: [{ price: { id: 'price_platform_monthly' } }] },
   ...overrides,
 }) as unknown as Stripe.Subscription
 
@@ -133,9 +129,9 @@ describe('handleCoreSubscriptionUpdate — org resolution', () => {
       'update_organization_subscription_from_stripe',
       expect.objectContaining({
         p_stripe_subscription_id: 'sub_1',
-        p_plan:                   'growth',
+        p_plan:                   'platform',
         p_plan_status:            'trialing',
-        p_max_properties:         40,
+        p_max_properties:         100,
       }),
     )
   })
@@ -227,13 +223,15 @@ describe('handleCoreSubscriptionUpdate — org resolution', () => {
 
 // ── Unmapped price ids ──────────────────────────────────────────────────────
 //
-// `getPlanByPriceId(priceId) ?? 'starter'` treated "I cannot map this price"
-// as "this customer is on the cheapest tier", writing max_properties: 15 over
-// whatever they actually held. PLANS.enterprise has monthlyPriceId/annualPriceId
-// of null (it is "contact for pricing"), so getPlanByPriceId can NEVER return
-// 'enterprise' — every enterprise org was rewritten to Starter/15 on any
-// subscription event. Promo prices, grandfathered prices and dashboard-created
-// subscriptions are the same case.
+// Historically (pre-graduated-pricing), `getPlanByPriceId(priceId) ?? 'starter'`
+// treated "I cannot map this price" as "this customer is on the cheapest
+// tier", writing max_properties: 15 over whatever they actually held —
+// Enterprise carried no self-serve price id to match at all, so every
+// Enterprise org was silently rewritten to Starter/15 on any subscription
+// event. The same failure mode applies identically to isPlatformPriceId now:
+// writing MAX_SELF_SERVE_PROPERTIES over a price that isn't our graduated
+// platform price (Enterprise, promo, grandfathered, dashboard-created) would
+// be the same regression with one price instead of four.
 describe('handleCoreSubscriptionUpdate — unmapped price ids', () => {
   beforeEach(() => vi.clearAllMocks())
 
@@ -308,13 +306,13 @@ describe('handleCoreSubscriptionUpdate — unmapped price ids', () => {
       metadata: { org_id: 'org_1' },
       items: { data: [
         { price: { id: 'price_addon_seat' } },
-        { price: { id: 'price_growth_monthly' } },
+        { price: { id: 'price_platform_monthly' } },
       ] },
     }))
 
     expect(supabase.rpc).toHaveBeenCalledWith(
       'update_organization_subscription_from_stripe',
-      expect.objectContaining({ p_plan: 'growth' }),
+      expect.objectContaining({ p_plan: 'platform' }),
     )
   })
 })

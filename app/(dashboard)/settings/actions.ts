@@ -6,7 +6,7 @@ import { redirect } from 'next/navigation'
 import { cookies } from 'next/headers'
 import { requireOrgMember, requireOrgRole } from '@/lib/auth'
 import { createClient, createReauthClient } from '@/lib/supabase/server'
-import { stripe, PLANS, type CheckoutPlanKey } from '@/lib/stripe/client'
+import { stripe, platformPriceId, MAX_SELF_SERVE_PROPERTIES, type BillingInterval } from '@/lib/stripe/client'
 import { checkoutIdempotencyKey } from './checkout-idempotency'
 import { inngest } from '@/lib/inngest/client'
 import { geocodeZip } from '@/lib/geocoding'
@@ -1381,29 +1381,22 @@ function isStripeConfigFault(err: unknown): boolean {
 }
 
 /**
- * Sentry TAGS for a failed checkout: WHICH plan and WHICH interval.
+ * Sentry TAGS for a failed checkout: WHICH interval and WHICH price id.
  *
- * The report previously carried neither, so triaging the 2026-08-28
- * archived-product failure meant working backwards from the org's active
- * property count to rule out the one tier whose cap the property-count guard
- * would have rejected — and even then it only narrowed eight candidate prices
- * to six. Both values are enum-shaped and carry no PII.
- *
- * The price id is included deliberately: it is a public identifier (it appears
- * in the Stripe dashboard and in checkout), and it is the single thing that
- * makes this report actionable, because it names the env var to repoint or the
- * product to un-archive. Read back from PLANS rather than passed in, so it is
- * still present when the throw happened before the caller resolved it.
+ * There is only one graduated price per interval now (lib/stripe/client.ts
+ * PLATFORM_PRICE), so this no longer needs to name a plan — just the interval
+ * and the resolved price id, which is a public identifier (it appears in the
+ * Stripe dashboard and in checkout) and is the single thing that makes a
+ * "price not available" report actionable: it names the env var to repoint
+ * or the product to un-archive. See the 2026-08-28 archived-product incident
+ * this pattern was built for (STRIPE_PRICE_GROWTH_MONTHLY pointing at a
+ * stale, archived product) — the four-tier version of the same failure mode
+ * still applies with one price per interval instead of eight.
  */
-function checkoutFailureContext(
-  planKey: CheckoutPlanKey,
-  interval: 'monthly' | 'annual',
-): Record<string, string> {
-  const plan = PLANS[planKey]
+function checkoutFailureContext(interval: BillingInterval): Record<string, string> {
   return {
-    plan:     planKey,
     interval,
-    price_id: (interval === 'annual' ? plan?.annualPriceId : plan?.monthlyPriceId) ?? '(unset)',
+    price_id: platformPriceId(interval) ?? '(unset)',
   }
 }
 
@@ -1433,37 +1426,25 @@ function checkoutFailureMessage(err: unknown): SettingsActionState {
 }
 
 export async function createCheckoutSession(
-  planKey: CheckoutPlanKey,
-  interval: 'monthly' | 'annual'
+  interval: BillingInterval
 ): Promise<SettingsActionState> {
   try {
     // Admin/owner only — starting a checkout commits the org to a charge.
     const { supabase, membership } = await requireOrgRole(['admin'])
 
-    const planDef = PLANS[planKey]
-    if (!planDef) return { error: 'Invalid plan' }
+    const priceId = platformPriceId(interval)
+    if (!priceId) return { error: 'Checkout is not available right now' }
 
-    const priceId = interval === 'annual'
-      ? planDef.annualPriceId
-      : planDef.monthlyPriceId
-
-    if (!priceId) return { error: 'Plan not available' }
-
-    // A plan whose cap is BELOW what the org already runs must not be
-    // purchasable. max_properties is written straight from
-    // PLANS[plan].maxProperties by the Stripe webhook with no reference to
-    // what the org actually has, so buying an under-sized plan left them
-    // permanently over cap: the existing properties keep working (the cap is
-    // only checked when ADDING one), so nothing breaks loudly — they simply
-    // pay for less than they use, indefinitely, with no signal.
-    //
-    // Adding the $89 Hosts tier is what made this easy to hit: a trialing org
-    // builds up to the 15-property trial cap and the cheapest card is now one
-    // click away. The same hole existed before for any downgrade.
-    //
-    // `>` not `>=`: the add-property gate asks "can I fit one MORE", so it
-    // uses >=. This asks "does this plan cover what I already have", and an
-    // org with exactly 4 properties is covered by a 4-property plan.
+    // The graduated price bills by QUANTITY, so the org's current property
+    // count IS the checkout quantity — there is no separate "does this plan
+    // cover what I have" gate any more (the old flat-tier version of this
+    // check existed because buying an under-sized plan left an org
+    // permanently over its own cap with no signal; a graduated price has no
+    // cap below MAX_SELF_SERVE_PROPERTIES, so that failure mode is gone by
+    // construction). What remains is the two edges the schedule doesn't
+    // cover at all: zero properties (the $49 anchor prices "property 1", so
+    // there is nothing to bill yet) and more than the self-serve ceiling
+    // (Enterprise territory, off Stripe entirely).
     //
     // is_active: true matches createProperty's own count — the two gates must
     // agree on what a property is or they contradict each other.
@@ -1474,9 +1455,9 @@ export async function createCheckoutSession(
       .eq('is_active', true)
 
     if (propertyCountError) {
-      // Fail CLOSED. Guessing "probably fits" here bills a customer for a
-      // plan that may not cover them, which is the exact outcome this guard
-      // exists to prevent.
+      // Fail CLOSED. Guessing "probably fine" here bills a customer at a
+      // quantity that may not match what they actually have, which is the
+      // exact outcome this guard exists to prevent.
       console.error('[createCheckoutSession] property count failed', propertyCountError.message)
       reportError(propertyCountError, {
         site: 'serverAction.settings.createCheckoutSession.propertyCount',
@@ -1486,14 +1467,14 @@ export async function createCheckoutSession(
     }
 
     const propertyCount = activeProperties ?? 0
-    if (propertyCount > planDef.maxProperties) {
-      // Always plural: reaching here needs propertyCount > maxProperties, and
-      // the smallest plan's cap is 4, so the count is at least 5. A
-      // singular/plural ternary would be an unreachable branch.
+    if (propertyCount < 1) {
+      return { error: 'Add a property before subscribing — FieldStay bills per property.' }
+    }
+    if (propertyCount > MAX_SELF_SERVE_PROPERTIES) {
       return {
         error:
-          `${planDef.name} covers up to ${planDef.maxProperties} properties, but you have ` +
-          `${propertyCount} active properties. Choose a plan that fits, or archive the extras first.`,
+          `Self-serve billing covers up to ${MAX_SELF_SERVE_PROPERTIES} properties, but you have ` +
+          `${propertyCount} active properties. Email hello@fieldstay.app for Enterprise pricing.`,
       }
     }
 
@@ -1582,7 +1563,13 @@ export async function createCheckoutSession(
       payment_method_types: ['card'],
       customer:             org?.stripe_customer_id ?? undefined,
       customer_email:       !org?.stripe_customer_id ? (org?.billing_email ?? undefined) : undefined,
-      line_items:           [{ price: priceId, quantity: 1 }],
+      // quantity is the org's CURRENT property count, not a fixed 1 — the
+      // graduated price computes the correct total for it via its own tiers
+      // (see lib/stripe/brackets.ts). Getting this right at checkout matters
+      // even though the reconciliation cron (task: property-count sync)
+      // keeps it correct afterward, because the FIRST invoice is generated
+      // immediately from whatever quantity this call sends.
+      line_items:           [{ price: priceId, quantity: propertyCount }],
       // Stripe Checkout hides the promotion-code field unless asked, and the
       // omission is silent: the page renders correctly, takes a card, and
       // charges full price, so a customer holding a code has no way to apply
@@ -1600,7 +1587,7 @@ export async function createCheckoutSession(
       allow_promotion_codes: true,
       success_url:          `${process.env.NEXT_PUBLIC_APP_URL}/settings?checkout=success`,
       cancel_url:           `${process.env.NEXT_PUBLIC_APP_URL}/settings`,
-      metadata:             { org_id: membership.org_id, plan: planKey },
+      metadata:             { org_id: membership.org_id },
       // Stamped on the SUBSCRIPTION as well as the session. Session metadata
       // only reaches checkout.session.completed; without this, a
       // customer.subscription.* event carries no org reference at all and the
@@ -1609,7 +1596,10 @@ export async function createCheckoutSession(
       // checkout.session.completed lands. Stripe does not guarantee ordering
       // between the two, so a subscription.created delivered first found no
       // org and silently dropped the entitlement write.
-      subscription_data:    { metadata: { org_id: membership.org_id, plan: planKey } },
+      //
+      // No `plan` key any more — there is only one price per interval, so
+      // org_id is the only thing the webhook needs from here.
+      subscription_data:    { metadata: { org_id: membership.org_id } },
     }, {
       // Collapses the double-click the guard above cannot see: two clicks a
       // second apart both pass the live-subscription check (neither has
@@ -1639,7 +1629,7 @@ export async function createCheckoutSession(
       // for any two clicks more than 24h apart and is caught downstream: once
       // either checkout completes, stripe_customer_id is set and the
       // live-subscription guard above refuses the second.
-      idempotencyKey: checkoutIdempotencyKey(membership.org_id, planKey, interval),
+      idempotencyKey: checkoutIdempotencyKey(membership.org_id, interval),
     })
 
     if (!session.url) return { error: 'Could not create checkout session' }
@@ -1650,13 +1640,13 @@ export async function createCheckoutSession(
     console.error('[createCheckoutSession]', err)
     reportError(err, {
       site: 'serverAction.settings.createCheckoutSession',
-      // TAGS, not extra. All three are low-cardinality enums (four plans, two
-      // intervals, nine configured price ids), and the whole point of
-      // capturing them is to ask "which plans are failing" — which needs them
-      // indexed. In `extra` they are attached to the event but invisible to
-      // Discover, and a query naming them returns blank columns that read as
-      // though nothing was captured at all.
-      tags: checkoutFailureContext(planKey, interval),
+      // TAGS, not extra. Both are low-cardinality enums (two intervals, two
+      // configured price ids), and the whole point of capturing them is to
+      // ask "which price is failing" — which needs them indexed. In `extra`
+      // they are attached to the event but invisible to Discover, and a
+      // query naming them returns blank columns that read as though nothing
+      // was captured at all.
+      tags: checkoutFailureContext(interval),
     })
     return checkoutFailureMessage(err)
   }
