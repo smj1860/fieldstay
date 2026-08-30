@@ -149,10 +149,16 @@ function readBracketSchedule() {
   return { annualMultiplier, brackets }
 }
 
-/** Mirrors lib/stripe/brackets.ts's toStripeTiers() exactly. */
+/**
+ * Mirrors lib/stripe/brackets.ts's toStripeTiers() exactly — including the
+ * last tier's `up_to` being the literal string 'inf', not a number. Stripe
+ * rejects a graduated `tiers` array whose last element isn't the 'inf'
+ * catch-all, and returns it back as `up_to: null` on every read — see that
+ * function's header comment for how this was actually discovered.
+ */
 function toStripeTiers(brackets, multiplier) {
-  return brackets.map((b) => ({
-    up_to: b.upTo,
+  return brackets.map((b, i) => ({
+    up_to: i === brackets.length - 1 ? 'inf' : b.upTo,
     ...(b.flatAmountCents !== undefined
       ? { flat_amount: b.flatAmountCents * multiplier }
       : { unit_amount: b.unitAmountCents * multiplier }),
@@ -319,8 +325,11 @@ for (const [envName, interval] of PLATFORM_PRICE_ENV) {
   }
 
   const expected = toStripeTiers(brackets, interval === 'annual' ? annualMultiplier : 1)
+  // Stripe's own read API returns the catch-all tier's up_to as `null`, not
+  // the 'inf' it was created with — normalize so the comparison below isn't
+  // comparing 'inf' against null on every single price, forever.
   const actual = (price.tiers ?? []).map((t) => ({
-    up_to: t.up_to,
+    up_to: t.up_to ?? 'inf',
     flat_amount: t.flat_amount ?? undefined,
     unit_amount: t.unit_amount ?? undefined,
   }))

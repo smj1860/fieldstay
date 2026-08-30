@@ -49,7 +49,10 @@ describe('homepage pricing grid', () => {
   it('shows the Hosts entry price the /strops JSON-LD advertises', () => {
     render(<HomepageContent />)
     const [hosts] = pricingTiers(['x'])
-    expect(screen.getAllByText(`$${hosts.monthly}`).length).toBe(1)
+    // Two, not one: the Hosts card's own price, plus the pricing calculator's
+    // collapsed "see the math" breakdown, whose first line is always Property
+    // 1's flat $49 regardless of the quantity entered — see PricingCards.tsx.
+    expect(screen.getAllByText(`$${hosts.monthly}`).length).toBe(2)
   })
 
   it('the entry card carries the homepage feature list, RepuGuard included', () => {

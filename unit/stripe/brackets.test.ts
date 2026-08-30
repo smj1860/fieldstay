@@ -143,12 +143,18 @@ describe('graduated pricing bracket schedule', () => {
 
   describe('toStripeTiers', () => {
     it('produces a monthly tiers array Stripe accepts for a graduated price', () => {
+      // The last tier's up_to is the literal string 'inf', not 100 — Stripe
+      // rejects a graduated tiers array whose last element isn't the 'inf'
+      // catch-all ("The tiers array must include a catch all tier with
+      // up_to set to `inf` as last item"), discovered by actually creating
+      // the live Price. 100 (MAX_SELF_SERVE_PROPERTIES) is still the real
+      // self-serve ceiling enforced everywhere else in the app.
       expect(toStripeTiers('monthly')).toEqual([
         { up_to: 1,   flat_amount: 4_900 },
         { up_to: 4,   unit_amount: 1_300 },
         { up_to: 15,  unit_amount: 1_000 },
         { up_to: 50,  unit_amount: 800 },
-        { up_to: 100, unit_amount: 600 },
+        { up_to: 'inf', unit_amount: 600 },
       ])
     })
 
@@ -158,7 +164,7 @@ describe('graduated pricing bracket schedule', () => {
         { up_to: 4,   unit_amount: 13_000 },
         { up_to: 15,  unit_amount: 10_000 },
         { up_to: 50,  unit_amount: 8_000 },
-        { up_to: 100, unit_amount: 6_000 },
+        { up_to: 'inf', unit_amount: 6_000 },
       ])
     })
 

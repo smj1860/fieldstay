@@ -207,9 +207,12 @@ describe('Stripe price env coverage', () => {
 
     it('produces the same monthly and annual tiers as toStripeTiers()', () => {
       const { annualMultiplier, brackets } = readBracketScheduleFromSource()
+      const typedBrackets = brackets as { upTo: number; flatAmountCents?: number; unitAmountCents?: number }[]
+      // The last tier's up_to is 'inf', not a number — Stripe rejects a
+      // graduated tiers array whose last element isn't the 'inf' catch-all.
       const toTiers = (multiplier: number) =>
-        (brackets as { upTo: number; flatAmountCents?: number; unitAmountCents?: number }[]).map((b) => ({
-          up_to: b.upTo,
+        typedBrackets.map((b, i) => ({
+          up_to: i === typedBrackets.length - 1 ? 'inf' : b.upTo,
           ...(b.flatAmountCents !== undefined
             ? { flat_amount: b.flatAmountCents * multiplier }
             : { unit_amount: b.unitAmountCents! * multiplier }),
