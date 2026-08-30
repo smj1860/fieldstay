@@ -265,6 +265,69 @@ export const STROPS_FAQ: readonly FaqItem[] = [
   },
 ] as const
 
+/**
+ * /breezeway-alternative — comparison-page FAQ, written for both AEO
+ * (each answer stands alone and is directly quotable by an answer engine —
+ * no "as mentioned above", no pronoun that needs the question above it) and
+ * for a prospect who has already used Breezeway and wants the specific
+ * differences, not a generic pitch. See app/breezeway-alternative/
+ * comparison-data.ts for the source of every factual claim repeated here —
+ * this file and that one must not drift, and
+ * unit/pages/breezeway-alternative.test.ts checks the numbers this file
+ * quotes against the real bracket schedule.
+ */
+export const BREEZEWAY_FAQ: readonly FaqItem[] = [
+  {
+    id:       'breezeway-vs-fieldstay-difference',
+    question: 'What is the difference between FieldStay and Breezeway?',
+    answer:
+      'The biggest practical differences are pricing transparency and how vendors are onboarded. FieldStay ' +
+      'publishes one graduated rate schedule that prices any property count from 1 to 150 with no sales ' +
+      'call required. Breezeway publishes a flat $19.99/property rate only for portfolios of 4 properties ' +
+      'or fewer; 5 or more requires a demo and a custom quote. On vendors: a FieldStay work order reaches a ' +
+      'vendor as a link they open on their phone, with no account and nothing to install. Breezeway invites ' +
+      'vendors and cleaners to a Breezeway account and its dedicated mobile app.',
+  },
+  {
+    id:       'breezeway-alternative-pricing',
+    question: 'Is FieldStay cheaper than Breezeway?',
+    answer:
+      'It depends on your property count, and for most real portfolios the honest answer is "we don\'t ' +
+      'know, because Breezeway won\'t say." For 10 properties, FieldStay is $148/month, publicly calculable ' +
+      'from the rate schedule before you ever talk to anyone. Breezeway\'s published $19.99/property rate ' +
+      'only covers portfolios of 4 or fewer — at 10 properties you\'re already past that and into a custom ' +
+      'quote, so there is no public number to compare against.',
+  },
+  {
+    id:       'breezeway-alternative-vendor-app',
+    question: 'Do vendors need to download an app to work with FieldStay, the way they do with Breezeway?',
+    answer:
+      'No. A FieldStay work order is dispatched as a link — the vendor opens it on their phone, sees the ' +
+      'job details, submits a quote or completion photos, and is done. No account, no password, no app to ' +
+      'install. Breezeway\'s vendor and cleaner workflow runs through dedicated Android and iOS apps with ' +
+      'account login, per Breezeway\'s own help documentation.',
+  },
+  {
+    id:       'breezeway-alternative-offline',
+    question: 'Does FieldStay work offline the way Breezeway does?',
+    answer:
+      'Both platforms support offline field work, so this isn\'t a capability gap — the real difference is ' +
+      'HOW. FieldStay\'s crew app is a progressive web app: no App Store or Play Store install, added ' +
+      'straight to the home screen, and it works with zero signal because it reads from the phone\'s local ' +
+      'storage as its normal mode, not a special "offline mode." Breezeway ships native iOS and Android ' +
+      'apps with their own offline sync.',
+  },
+  {
+    id:       'breezeway-alternative-switching',
+    question: 'How do I switch from Breezeway to FieldStay?',
+    answer:
+      'There\'s no data migration to run, because FieldStay doesn\'t import FROM Breezeway — it connects TO ' +
+      'your booking platform (OwnerRez, Hospitable, or Hostex) and builds your turnover schedule from your ' +
+      'existing bookings automatically. Most teams run FieldStay on a handful of properties during a free ' +
+      'trial alongside their current setup before moving the rest of the portfolio over.',
+  },
+] as const
+
 export const FAQ_CATEGORIES: FaqCategory[] = [
   {
     id:    'pms-sync',

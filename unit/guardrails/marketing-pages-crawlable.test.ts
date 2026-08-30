@@ -53,6 +53,7 @@ const PUBLIC_MARKETING_PAGES = [
   '/strops',
   '/ownerrez',
   '/hospitable',
+  '/breezeway-alternative',
   '/privacy',
   '/terms',
   '/dpa',
