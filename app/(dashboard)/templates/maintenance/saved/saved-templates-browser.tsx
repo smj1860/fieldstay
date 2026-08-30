@@ -90,6 +90,147 @@ export function SavedTemplatesBrowser({
   )
 }
 
+/** One row of a template's item list. */
+function TemplateItemLine({
+  item,
+  editable,
+  saving,
+  onFrequencyChange,
+  onRemove,
+}: Readonly<{
+  item:              TemplateItemRow
+  editable:          boolean
+  saving:            boolean
+  onFrequencyChange: (itemId: string, frequency: ScheduleFrequency) => void
+  onRemove:          (itemId: string) => void
+}>) {
+  return (
+    <div className="flex items-center gap-2 px-3 py-2">
+      <span className="text-sm text-primary-themed flex-1 truncate">{item.name}</span>
+      {item.is_optional_flag && (
+        <Badge tone="amber" className="text-xs flex items-center gap-1">
+          <AlertTriangle className="w-3 h-3" />{item.is_optional_flag}
+        </Badge>
+      )}
+      {editable ? (
+        <select
+          value={item.schedule_frequency}
+          onChange={(e) => onFrequencyChange(item.id, e.target.value as ScheduleFrequency)}
+          aria-label={`Frequency for ${item.name}`}
+          className="text-xs border border-themed rounded px-1.5 py-1 bg-transparent text-secondary-themed focus:outline-none focus:ring-1 focus:ring-[var(--accent-gold)]"
+        >
+          {(Object.entries(FREQUENCY_LABELS) as [ScheduleFrequency, string][]).map(([v, l]) => (
+            <option key={v} value={v}>{l}</option>
+          ))}
+        </select>
+      ) : (
+        <Badge tone="slate" className="text-xs">{FREQUENCY_LABELS[item.schedule_frequency] ?? item.schedule_frequency}</Badge>
+      )}
+      {editable && (
+        <button
+          type="button"
+          onClick={() => onRemove(item.id)}
+          disabled={saving}
+          aria-label={`Remove ${item.name}`}
+          className="text-muted-themed hover:text-[var(--accent-red)] transition-colors p-1"
+        >
+          <Trash2 className="w-3.5 h-3.5" />
+        </button>
+      )}
+    </div>
+  )
+}
+
+/**
+ * The "apply this template to properties" dialog.
+ *
+ * Owns its own selection/result state rather than sharing TemplateDetail's:
+ * the state is meaningless while the dialog is closed, and keeping it here is
+ * what lets `close()` reset it in one place.
+ */
+function ApplyTemplateDialog({
+  templateId,
+  open,
+  onClose,
+  allProperties,
+}: Readonly<{
+  templateId:    string
+  open:          boolean
+  onClose:       () => void
+  allProperties: Property[]
+}>) {
+  const [applyPropertyIds, setApplyPropertyIds] = useState<string[]>([])
+  const [applying, startApply] = useTransition()
+  const [applyError, setApplyError] = useState<string | null>(null)
+  const [applyResult, setApplyResult] = useState<{ created?: number; skipped?: number } | null>(null)
+
+  const toggleApplyProperty = (id: string) =>
+    setApplyPropertyIds((prev) => (prev.includes(id) ? prev.filter((p) => p !== id) : [...prev, id]))
+
+  const handleApply = () => {
+    if (applyPropertyIds.length === 0) return
+    startApply(async () => {
+      setApplyError(null)
+      const result = await broadcastMaintenanceTemplate(templateId, applyPropertyIds)
+      if (result.error) { setApplyError(result.error); return }
+      setApplyResult(result)
+    })
+  }
+
+  const close = () => {
+    setApplyPropertyIds([])
+    setApplyError(null)
+    setApplyResult(null)
+    onClose()
+  }
+
+  return (
+    <Dialog
+      open={open}
+      onClose={close}
+      title="Apply Template"
+      maxWidthClassName="max-w-sm"
+      footer={
+        applyResult || allProperties.length === 0 ? (
+          <Button onClick={close} className="w-full">Done</Button>
+        ) : (
+          <>
+            <Button onClick={handleApply} disabled={applying || applyPropertyIds.length === 0} className="flex-1">
+              {applying ? 'Applying…' : `Apply to ${applyPropertyIds.length || ''} propert${applyPropertyIds.length === 1 ? 'y' : 'ies'}`}
+            </Button>
+            <Button variant="ghost" onClick={close}>Cancel</Button>
+          </>
+        )
+      }
+    >
+      {applyError && <InlineAlert tone="error" className="mb-3">{applyError}</InlineAlert>}
+      {applyResult ? (
+        <InlineAlert tone="success" className="flex items-start gap-2">
+          <CheckCircle2 className="w-4 h-4 flex-shrink-0 mt-0.5" />
+          <span>
+            Created {applyResult.created ?? 0} schedule{(applyResult.created ?? 0) !== 1 ? 's' : ''}
+            {(applyResult.skipped ?? 0) > 0 && <> · {applyResult.skipped} skipped (already existed)</>}
+          </span>
+        </InlineAlert>
+      ) : allProperties.length === 0 ? (
+        <p className="text-sm text-muted-themed">No active properties to apply this template to.</p>
+      ) : (
+        <div className="max-h-56 overflow-y-auto border border-themed rounded-lg divide-y divide-themed">
+          {allProperties.map((property) => (
+            <label key={property.id} className="flex items-center gap-2 px-3 py-2 cursor-pointer hover:bg-raised-themed transition-colors">
+              <Checkbox
+                checked={applyPropertyIds.includes(property.id)}
+                onChange={() => toggleApplyProperty(property.id)}
+              />
+              <span className="text-sm text-primary-themed">{property.name}</span>
+            </label>
+          ))}
+        </div>
+      )}
+    </Dialog>
+  )
+}
+
 function TemplateDetail({
   template,
   allProperties,
@@ -110,10 +251,6 @@ function TemplateDetail({
   const [newItem, setNewItem] = useState({ name: '', schedule_frequency: 'quarterly' as ScheduleFrequency })
 
   const [showApplyDialog, setShowApplyDialog] = useState(false)
-  const [applyPropertyIds, setApplyPropertyIds] = useState<string[]>([])
-  const [applying, startApply] = useTransition()
-  const [applyError, setApplyError] = useState<string | null>(null)
-  const [applyResult, setApplyResult] = useState<{ created?: number; skipped?: number } | null>(null)
 
   const handleSaveDetails = () => {
     if (!editable) return
@@ -169,26 +306,6 @@ function TemplateDetail({
     })
   }
 
-  const toggleApplyProperty = (id: string) =>
-    setApplyPropertyIds((prev) => (prev.includes(id) ? prev.filter((p) => p !== id) : [...prev, id]))
-
-  const handleApply = () => {
-    if (applyPropertyIds.length === 0) return
-    startApply(async () => {
-      setApplyError(null)
-      const result = await broadcastMaintenanceTemplate(template.id, applyPropertyIds)
-      if (result.error) { setApplyError(result.error); return }
-      setApplyResult(result)
-    })
-  }
-
-  const closeApplyDialog = () => {
-    setShowApplyDialog(false)
-    setApplyPropertyIds([])
-    setApplyError(null)
-    setApplyResult(null)
-  }
-
   return (
     <Card className="space-y-4">
       {error && <InlineAlert tone="error">{error}</InlineAlert>}
@@ -238,37 +355,14 @@ function TemplateDetail({
 
       <div className="border border-themed rounded-lg divide-y divide-themed">
         {items.map((item) => (
-          <div key={item.id} className="flex items-center gap-2 px-3 py-2">
-            <span className="text-sm text-primary-themed flex-1 truncate">{item.name}</span>
-            {item.is_optional_flag && (
-              <Badge tone="amber" className="text-xs flex items-center gap-1">
-                <AlertTriangle className="w-3 h-3" />{item.is_optional_flag}
-              </Badge>
-            )}
-            {editable ? (
-              <select
-                value={item.schedule_frequency}
-                onChange={(e) => handleFrequencyChange(item.id, e.target.value as ScheduleFrequency)}
-                className="text-xs border border-themed rounded px-1.5 py-1 bg-transparent text-secondary-themed focus:outline-none focus:ring-1 focus:ring-[var(--accent-gold)]"
-              >
-                {(Object.entries(FREQUENCY_LABELS) as [ScheduleFrequency, string][]).map(([v, l]) => (
-                  <option key={v} value={v}>{l}</option>
-                ))}
-              </select>
-            ) : (
-              <Badge tone="slate" className="text-xs">{FREQUENCY_LABELS[item.schedule_frequency] ?? item.schedule_frequency}</Badge>
-            )}
-            {editable && (
-              <button
-                type="button"
-                onClick={() => handleRemoveItem(item.id)}
-                disabled={saving}
-                className="text-muted-themed hover:text-[var(--accent-red)] transition-colors p-1"
-              >
-                <Trash2 className="w-3.5 h-3.5" />
-              </button>
-            )}
-          </div>
+          <TemplateItemLine
+            key={item.id}
+            item={item}
+            editable={editable}
+            saving={saving}
+            onFrequencyChange={handleFrequencyChange}
+            onRemove={handleRemoveItem}
+          />
         ))}
         {items.length === 0 && (
           <p className="text-sm text-muted-themed px-3 py-3">No items in this template.</p>
@@ -307,49 +401,12 @@ function TemplateDetail({
         )
       )}
 
-      <Dialog
+      <ApplyTemplateDialog
+        templateId={template.id}
         open={showApplyDialog}
-        onClose={closeApplyDialog}
-        title="Apply Template"
-        maxWidthClassName="max-w-sm"
-        footer={
-          applyResult || allProperties.length === 0 ? (
-            <Button onClick={closeApplyDialog} className="w-full">Done</Button>
-          ) : (
-            <>
-              <Button onClick={handleApply} disabled={applying || applyPropertyIds.length === 0} className="flex-1">
-                {applying ? 'Applying…' : `Apply to ${applyPropertyIds.length || ''} propert${applyPropertyIds.length === 1 ? 'y' : 'ies'}`}
-              </Button>
-              <Button variant="ghost" onClick={closeApplyDialog}>Cancel</Button>
-            </>
-          )
-        }
-      >
-        {applyError && <InlineAlert tone="error" className="mb-3">{applyError}</InlineAlert>}
-        {applyResult ? (
-          <InlineAlert tone="success" className="flex items-start gap-2">
-            <CheckCircle2 className="w-4 h-4 flex-shrink-0 mt-0.5" />
-            <span>
-              Created {applyResult.created ?? 0} schedule{(applyResult.created ?? 0) !== 1 ? 's' : ''}
-              {(applyResult.skipped ?? 0) > 0 && <> · {applyResult.skipped} skipped (already existed)</>}
-            </span>
-          </InlineAlert>
-        ) : allProperties.length === 0 ? (
-          <p className="text-sm text-muted-themed">No active properties to apply this template to.</p>
-        ) : (
-          <div className="max-h-56 overflow-y-auto border border-themed rounded-lg divide-y divide-themed">
-            {allProperties.map((property) => (
-              <label key={property.id} className="flex items-center gap-2 px-3 py-2 cursor-pointer hover:bg-raised-themed transition-colors">
-                <Checkbox
-                  checked={applyPropertyIds.includes(property.id)}
-                  onChange={() => toggleApplyProperty(property.id)}
-                />
-                <span className="text-sm text-primary-themed">{property.name}</span>
-              </label>
-            ))}
-          </div>
-        )}
-      </Dialog>
+        onClose={() => setShowApplyDialog(false)}
+        allProperties={allProperties}
+      />
     </Card>
   )
 }

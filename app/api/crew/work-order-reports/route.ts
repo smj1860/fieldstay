@@ -91,18 +91,120 @@ async function notifyPmOfCrewFlag(
   }
 }
 
+type CrewSupabase = Extract<Awaited<ReturnType<typeof requireCrewMember>>, { ok: true }>['supabase']
+
+interface CrewReportInput {
+  report_id:    string
+  property_id:  string
+  asset_id:     string | null
+  title:        string
+  is_emergency: boolean
+}
+
+/** A lookup that either produced a value or already has the response to send. */
+type LookupResult<T> = { ok: true; value: T } | { ok: false; response: NextResponse }
+
+/** Validates the crew client's POST body. Fields are all client-supplied. */
+function parseCrewReportBody(body: unknown): LookupResult<CrewReportInput> {
+  const raw = (body ?? {}) as Record<string, unknown>
+
+  const report_id   = typeof raw.report_id === 'string' ? raw.report_id : ''
+  const property_id = typeof raw.property_id === 'string' ? raw.property_id : ''
+  const title       = typeof raw.title === 'string' ? raw.title.trim() : ''
+
+  if (!report_id)   return missingField('report_id')
+  if (!property_id) return missingField('property_id')
+  if (!title)       return missingField('title')
+
+  return {
+    ok:    true,
+    value: {
+      report_id,
+      property_id,
+      asset_id:     typeof raw.asset_id === 'string' ? raw.asset_id : null,
+      title,
+      is_emergency: raw.is_emergency === true,
+    },
+  }
+}
+
+function missingField(field: string): LookupResult<never> {
+  return { ok: false, response: NextResponse.json({ error: `Missing ${field}` }, { status: 400 }) }
+}
+
+/**
+ * The property the report is against, scoped to the crew member's org.
+ *
+ * PGRST116 is .single()'s "no rows" — a genuine 404, and the IDOR case (a
+ * property outside the crew member's org) lands here too. Anything else is the
+ * query itself failing, which must not be reported to an offline crew member as
+ * "Property not found": that reads as permanent, so the Dexie outbox drops the
+ * report instead of retrying a transient outage.
+ */
+async function loadReportProperty(
+  supabase:   CrewSupabase,
+  orgId:      string,
+  propertyId: string,
+): Promise<LookupResult<{ id: string; org_id: string; name: string | null }>> {
+  const { data: property, error } = await supabase
+    .from('properties')
+    .select('id, org_id, name')
+    .eq('id', propertyId)
+    .eq('org_id', orgId)
+    .single()
+
+  if (error && error.code !== 'PGRST116') {
+    console.error('[CrewWorkOrderReport] property lookup', error)
+    reportError(error, { site: 'api.crew.work-order-reports.propertyLookup', orgId })
+    return { ok: false, response: NextResponse.json({ error: 'Something went wrong' }, { status: 503 }) }
+  }
+
+  if (!property) {
+    return { ok: false, response: NextResponse.json({ error: 'Property not found' }, { status: 404 }) }
+  }
+
+  return { ok: true, value: property }
+}
+
+/**
+ * The asset type behind the reported issue, or null when crew picked "Other".
+ *
+ * Crew never picks a category themselves — it's derived from the asset they
+ * select. Same PGRST116 reasoning as the property lookup above.
+ */
+async function resolveReportAssetType(
+  supabase:   CrewSupabase,
+  orgId:      string,
+  propertyId: string,
+  assetId:    string | null,
+): Promise<LookupResult<AssetType | null>> {
+  if (!assetId) return { ok: true, value: null }
+
+  const { data: asset, error } = await supabase
+    .from('property_assets')
+    .select('id, asset_type')
+    .eq('id', assetId)
+    .eq('property_id', propertyId)
+    .eq('org_id', orgId)
+    .single()
+
+  if (error && error.code !== 'PGRST116') {
+    console.error('[CrewWorkOrderReport] asset lookup', error)
+    reportError(error, { site: 'api.crew.work-order-reports.assetLookup', orgId })
+    return { ok: false, response: NextResponse.json({ error: 'Something went wrong' }, { status: 503 }) }
+  }
+
+  if (!asset) {
+    return { ok: false, response: NextResponse.json({ error: 'Asset not found' }, { status: 404 }) }
+  }
+
+  return { ok: true, value: asset.asset_type as AssetType }
+}
+
 export async function POST(request: NextRequest) {
-  const body = await request.json().catch(() => null)
-
-  const report_id    = typeof body?.report_id === 'string' ? body.report_id : null
-  const property_id  = typeof body?.property_id === 'string' ? body.property_id : null
-  const asset_id     = typeof body?.asset_id === 'string' ? body.asset_id : null
-  const title        = typeof body?.title === 'string' ? body.title.trim() : ''
-  const is_emergency = body?.is_emergency === true
-
-  if (!report_id)   return NextResponse.json({ error: 'Missing report_id' }, { status: 400 })
-  if (!property_id) return NextResponse.json({ error: 'Missing property_id' }, { status: 400 })
-  if (!title)       return NextResponse.json({ error: 'Missing title' }, { status: 400 })
+  const parsed = parseCrewReportBody(await request.json().catch(() => null))
+  if (!parsed.ok) return parsed.response
+  const { report_id, property_id, asset_id, title, is_emergency } = parsed.value
 
   // Canonical crew gate (lib/crew-auth.ts) — a previous inline copy here
   // added an invite_accepted_at filter that locked out the ~third of live
@@ -111,57 +213,14 @@ export async function POST(request: NextRequest) {
   if (!auth.ok) return auth.response
   const { supabase, crew, user } = auth
 
-  const { data: property, error: propertyError } = await supabase
-    .from('properties')
-    .select('id, org_id, name')
-    .eq('id', property_id)
-    .eq('org_id', crew.org_id)
-    .single()
+  const propertyResult = await loadReportProperty(supabase, crew.org_id, property_id)
+  if (!propertyResult.ok) return propertyResult.response
+  const property = propertyResult.value
 
-  // PGRST116 is .single()'s "no rows" — a genuine 404, and the IDOR case
-  // (a property outside the crew member's org) lands here too. Anything else
-  // is the query itself failing, which must not be reported to an offline crew
-  // member as "Property not found": that reads as permanent, so the Dexie
-  // outbox drops the report instead of retrying a transient outage.
-  if (propertyError && propertyError.code !== 'PGRST116') {
-    console.error('[CrewWorkOrderReport] property lookup', propertyError)
-    reportError(propertyError, {
-      site:  'api.crew.work-order-reports.propertyLookup',
-      orgId: crew.org_id,
-    })
-    return NextResponse.json({ error: 'Something went wrong' }, { status: 503 })
-  }
+  const assetResult = await resolveReportAssetType(supabase, crew.org_id, property_id, asset_id)
+  if (!assetResult.ok) return assetResult.response
 
-  if (!property) return NextResponse.json({ error: 'Property not found' }, { status: 404 })
-
-  // Crew never picks a category themselves — it's derived from the asset
-  // they select (falls back to 'general' for "Other" / no asset).
-  let assetType: AssetType | null = null
-  if (asset_id) {
-    const { data: asset, error: assetError } = await supabase
-      .from('property_assets')
-      .select('id, asset_type')
-      .eq('id', asset_id)
-      .eq('property_id', property_id)
-      .eq('org_id', crew.org_id)
-      .single()
-
-    // Same reasoning as the property lookup above: PGRST116 is a genuine
-    // 404, anything else is the query itself failing.
-    if (assetError && assetError.code !== 'PGRST116') {
-      console.error('[CrewWorkOrderReport] asset lookup', assetError)
-      reportError(assetError, {
-        site:  'api.crew.work-order-reports.assetLookup',
-        orgId: crew.org_id,
-      })
-      return NextResponse.json({ error: 'Something went wrong' }, { status: 503 })
-    }
-
-    if (!asset) return NextResponse.json({ error: 'Asset not found' }, { status: 404 })
-    assetType = asset.asset_type as AssetType
-  }
-
-  const category = categoryForAssetType(assetType)
+  const category = categoryForAssetType(assetResult.value)
   const priority: PriorityLevel = is_emergency ? 'urgent' : 'medium'
 
   const { data: created, error } = await supabase.from('work_orders').insert({
