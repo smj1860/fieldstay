@@ -7,7 +7,7 @@ vi.mock('@/lib/audit', () => ({
   logAuditEvent: vi.fn(),
 }))
 vi.mock('@/lib/stripe/client', () => ({
-  MAX_SELF_SERVE_PROPERTIES: 100,
+  MAX_SELF_SERVE_PROPERTIES: 150,
   isPlatformPriceId: (priceId: string) => priceId === 'price_platform_monthly',
 }))
 
@@ -122,7 +122,7 @@ describe('handleCoreSubscriptionUpdate — graduated platform pricing', () => {
         p_stripe_subscription_id: 'sub_1',
         p_plan:                   'platform',
         p_plan_status:            'active',
-        p_max_properties:         100,
+        p_max_properties:         150,
         p_trial_ends_at:          null,
         p_event_at:               new Date(EVENT_CREATED * 1000).toISOString(),
       },
@@ -165,7 +165,7 @@ describe('handleCoreSubscriptionUpdate — graduated platform pricing', () => {
     )
   })
 
-  it('still entitles the org at plan "platform" / max_properties 100 when the RPC misses but the org WAS resolved', async () => {
+  it('still entitles the org at plan "platform" / max_properties 150 when the RPC misses but the org WAS resolved', async () => {
     // The RPC keys on stripe_customer_id; resolveSubscriptionOrg can reach an
     // org by metadata that the RPC's lookup does not find (an org already
     // carrying a different customer id, where the backfill deliberately
@@ -183,7 +183,7 @@ describe('handleCoreSubscriptionUpdate — graduated platform pricing', () => {
     )
 
     expect((supabase as unknown as { orgUpdate: ReturnType<typeof vi.fn> }).orgUpdate)
-      .toHaveBeenCalledWith(expect.objectContaining({ plan: 'platform', max_properties: 100 }))
+      .toHaveBeenCalledWith(expect.objectContaining({ plan: 'platform', max_properties: 150 }))
   })
 
   it('is a no-op (no write, no audit log) for a subscription that is not core billing at all', async () => {

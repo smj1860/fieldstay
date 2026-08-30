@@ -173,19 +173,24 @@ Property 1:        $49/mo flat (the anchor)
 Properties 2–4:     $13/mo each
 Properties 5–15:    $10/mo each
 Properties 16–50:   $8/mo each
-Properties 51–100:  $6/mo each
+Properties 51–150:  $6/mo each
 Annual:             every figure above x10 (ANNUAL_MULTIPLIER) — 2 months free
 ```
 
-100 properties is the self-serve ceiling (`MAX_SELF_SERVE_PROPERTIES`).
-Above that is Enterprise: a manually negotiated contract, entirely outside
-Stripe self-serve, same as before this rebuild.
+150 properties is the self-serve ceiling (`MAX_SELF_SERVE_PROPERTIES`, widened
+from 100 on 2026-08-30 — capacity headroom, not a re-tuned rate: the
+$6/property marginal rate for the last bracket is unchanged, only its `upTo`
+moved). Above that is Enterprise: a manually negotiated contract, entirely
+outside Stripe self-serve, same as before this rebuild. Widening this needed
+no new Stripe Price — the live Price's last tier is Stripe's required `'inf'`
+catch-all (see `toStripeTiers()`'s header comment), so it was already billing
+$6/property correctly past 100; only the application-level ceiling moved.
 
 ### Key exports (`lib/stripe/brackets.ts`)
 
 | Export | Use for |
 |---|---|
-| `monthlyCostCents(qty)` / `annualCostCents(qty)` | The total bill at a given property count. `null` outside 1–100 |
+| `monthlyCostCents(qty)` / `annualCostCents(qty)` | The total bill at a given property count. `null` outside 1–150 |
 | `bracketBreakdown(qty, interval)` | Itemized line items (label, units, per-unit cents, line total) — what the billing UI's breakdown renders |
 | `toStripeTiers(interval)` | The literal `tiers` array for `stripe.prices.create({ billing_scheme: 'tiered', tiers_mode: 'graduated', tiers: [...] })` |
 | `marginalRateCentsFor(qty)` | The rate the NEXT property would cost — display only |
@@ -222,10 +227,20 @@ plan" note) — that is exactly what made this collapse safe.
 
 **`max_properties` changed meaning.** It used to be the tier's cap (a real
 wall — you could not add a property past it without upgrading). Now every
-self-serve org gets `max_properties = MAX_SELF_SERVE_PROPERTIES` (100) —
-a structural ceiling, not a billing cap. What you're actually BILLED for is
-the live Stripe subscription item's `quantity`, reconciled separately (see
-below). Conflating the two would turn graduated pricing back into a hard
+self-serve org gets `max_properties = MAX_SELF_SERVE_PROPERTIES` (150) —
+a structural ceiling, not a billing cap. This is written only when a Stripe
+subscription webhook actually fires for that org (checkout, renewal, a
+billing-portal change) — it is NOT backfilled retroactively when the constant
+itself changes, so an org whose row was written before 2026-08-30 keeps
+`max_properties = 100` in the database until its next real subscription
+event. Zero organizations were on `plan = 'platform'` yet when the ceiling
+widened, so this had no live impact at the time — but it means a future
+ceiling change needs a deliberate backfill (`UPDATE organizations SET
+max_properties = ... WHERE plan = 'platform' AND max_properties = <old>`) if
+existing platform-plan orgs need the new ceiling before their next webhook
+event, rather than assuming the code change alone raises it for everyone.
+What you're actually BILLED for is the live Stripe subscription item's
+`quantity`, reconciled separately (see below). Conflating the two would turn graduated pricing back into a hard
 wall at "whatever you last paid for," defeating the entire point: a PM must
 be able to add property 5 immediately and see it on the next invoice, not be
 blocked from adding it until a sync catches up.

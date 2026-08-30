@@ -14,7 +14,7 @@ Your bill is computed property-by-property, not by which "tier" you're in:
 | 2nd–4th property | $13/mo each |
 | 5th–15th property | $10/mo each |
 | 16th–50th property | $8/mo each |
-| 51st–100th property | $6/mo each |
+| 51st–150th property | $6/mo each |
 
 This is graduated pricing: crossing from, say, 4 properties to 5 only changes what the 5th property itself costs ($10) — it never re-rates the properties you already had. There is no "plan boundary" where your whole bill jumps.
 
@@ -28,10 +28,11 @@ Some worked examples (monthly):
 | 15 | $198 |
 | 50 | $478 |
 | 100 | $778 |
+| 150 | $1,078 |
 
 Settings → Billing shows this same math for your account, itemized line by line, at your current property count.
 
-Properties beyond 100 are Enterprise territory — email hello@fieldstay.app for custom pricing. There is no self-serve checkout above 100 properties.
+Properties beyond 150 are Enterprise territory — email hello@fieldstay.app for custom pricing. There is no self-serve checkout above 150 properties.
 
 ---
 
@@ -83,7 +84,7 @@ There's no plan cap to hit and no "upgrade" button — add a property and your b
 - **Monthly billing**: an added or removed property is reflected starting your NEXT invoice. Nothing changes mid-cycle, and there's nothing to click.
 - **Annual billing**: added properties are held rather than billed individually as you add them. Once you've added a 5th property since your last renewal, all 5 are prorated together for the remainder of your billing year in one adjustment — not backdated, starting from that day forward. Removed properties are credited at your next renewal.
 
-Self-serve billing covers up to 100 properties. Beyond that, contact hello@fieldstay.app.
+Self-serve billing covers up to 150 properties. Beyond that, contact hello@fieldstay.app.
 
 ---
 
