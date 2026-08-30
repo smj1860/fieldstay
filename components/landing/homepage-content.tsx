@@ -3,8 +3,9 @@
 import { useState } from 'react'
 import Link from 'next/link'
 import { cn } from '@/lib/utils'
-import { MessageSquare, Package, Wrench, BarChart3, Check } from 'lucide-react'
+import { MessageSquare, Package, Wrench, BarChart3 } from 'lucide-react'
 import { pricingTiers } from '@/components/pricing/plan-tiers'
+import PricingCards from '@/components/pricing/PricingCards'
 import FaqSection from '@/components/faq/FaqSection'
 import RepuGuardWrapper from '@/components/repuguard/RepuGuardWrapper'
 import {
@@ -26,6 +27,16 @@ import {
 // fix is not the corrected number, it is that there is no longer a second copy
 // to correct -- unit/stripe/plan-table-consistency.test.ts already holds
 // plan-tiers.ts against lib/stripe/client.ts's PLANS.
+//
+// The card grid ITSELF (not just the tier data) was still a second copy,
+// though -- this page hand-rolled the same five-card layout
+// components/pricing/PricingSection.tsx already rendered for /ownerrez and
+// /hospitable, just with different classNames. That is exactly how it ended
+// up stale: the graduated-pricing rebuild's "say 'from $X', not a bare '$X'"
+// fix and the "no more flat tier pricing" copy fix both landed on the other
+// two pages and not here. Now this page imports the same
+// components/pricing/PricingCards.tsx those pages use, so a future pricing
+// display fix only has to happen once.
 // Every public page, linked from the highest-authority page on the site.
 //
 // This is not decoration. Google Search Console reported all six marketing and
@@ -472,88 +483,10 @@ export function HomepageContent() {
             </span>
           </div>
 
-          {/* Plan cards — 5 tiers, driven by pricingTiers(). Grid widened to
-              xl:grid-cols-5 to fit the Hosts card without wrapping. The badge
-              and CTA text/href are computed from highlight/monthly rather than
-              carried per-tier: PricingTier has no cta/badge fields, and the
-              expressions below evaluate to exactly what the removed per-item
-              fields held for every tier (Growth is the only highlight: true,
-              Enterprise the only monthly: null). */}
-          <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-5 gap-4">
-            {tiers.map((plan) => (
-              <div key={plan.name}
-                   className={cn(
-                     'rounded-2xl p-6 flex flex-col bg-white',
-                     plan.highlight
-                       ? 'border-2 border-brand-800 ring-4 ring-brand-800/7'
-                       : 'border-[1.5px] border-gray-200'
-                   )}>
-                {plan.highlight && (
-                  <span className="self-start rounded-full px-3 py-1 text-xs font-black uppercase tracking-wider mb-4 bg-gold-300 text-brand-800">
-                    Most Popular
-                  </span>
-                )}
-                <p className="font-black mb-1 text-gray-900" style={{ fontSize: 18 }}>
-                  {plan.name}
-                </p>
-                <p className="text-xs mb-1 text-gray-500">{plan.description}</p>
-                <p className="text-sm mb-5 text-gray-400">{plan.properties}</p>
-
-                {/* Price */}
-                <div className="mb-5">
-                  {plan.monthly !== null ? (
-                    <>
-                      <span className="text-xs font-semibold text-gray-400">
-                        from{' '}
-                      </span>
-                      <span className="font-black tracking-tight text-brand-800"
-                            style={{ fontSize: 38, letterSpacing: '-2px', lineHeight: 1 }}>
-                        {annual ? `$${plan.annual!.toLocaleString()}` : `$${plan.monthly}`}
-                      </span>
-                      <span className="text-sm ml-1 text-gray-400">
-                        {annual ? '/yr' : '/mo'}
-                      </span>
-                      {!annual && (
-                        <p className="text-xs mt-1 text-gray-400">
-                          or ${plan.annual!.toLocaleString()}/yr — save ${plan.annualSavings}
-                        </p>
-                      )}
-                    </>
-                  ) : (
-                    <span className="font-black text-brand-800" style={{ fontSize: 32, letterSpacing: '-1px' }}>
-                      Custom
-                    </span>
-                  )}
-                </div>
-
-                <div className="mb-5 bg-gray-100" style={{ height: 1 }} />
-
-                <div className="flex flex-col gap-2.5 flex-1 mb-6">
-                  {plan.features.map((f) => (
-                    <div key={f} className="flex items-start gap-2 text-sm text-gray-700">
-                      <span className="flex-shrink-0 flex items-center justify-center rounded-full mt-0.5 bg-brand-800 text-gold-300"
-                            style={{ width: 18, height: 18, minWidth: 18 }}>
-                        <Check className="w-3 h-3" strokeWidth={3} />
-                      </span>
-                      {f}
-                    </div>
-                  ))}
-                </div>
-
-                <Link href={plan.monthly === null ? 'mailto:hello@fieldstay.app' : '/signup'}
-                      className={cn(
-                        'block text-center rounded-lg font-bold text-sm py-3 transition-opacity',
-                        plan.highlight
-                          ? 'bg-gold-300 text-brand-800'
-                          : plan.monthly === null
-                          ? 'bg-transparent text-brand-800 border-[1.5px] border-gray-200'
-                          : 'bg-brand-800 text-white'
-                      )}>
-                  {plan.monthly === null ? 'Contact Us' : 'Start Free Trial'}
-                </Link>
-              </div>
-            ))}
-          </div>
+          {/* Plan cards — see components/pricing/PricingCards.tsx, shared
+              with /ownerrez and /hospitable. No provider param here: the
+              homepage doesn't sell against a specific PMS. */}
+          <PricingCards tiers={tiers} annual={annual} signupHref="/signup" />
 
           <p className="text-center text-xs mt-6 text-gray-400">
             All plans include a 14-day free trial. No credit card required. Annual billing saves approximately 2 months.
