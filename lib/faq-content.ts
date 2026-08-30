@@ -326,6 +326,16 @@ export const BREEZEWAY_FAQ: readonly FaqItem[] = [
       'existing bookings automatically. Most teams run FieldStay on a handful of properties during a free ' +
       'trial alongside their current setup before moving the rest of the portfolio over.',
   },
+  {
+    id:       'breezeway-alternative-guarantee',
+    question: 'Does FieldStay offer any kind of guarantee?',
+    answer:
+      'Yes — the Glass Box Operations Guarantee. Run it on your 3-5 hardest properties for 14 days, ' +
+      'cancel with one click if it doesn\'t help. If you ever think something was missed or mishandled, ' +
+      'FieldStay doesn\'t ask you to take its word for it — every checklist step, photo, and work order ' +
+      'status change is timestamped and logged, and that record is what settles the question. It is not a ' +
+      'money-back guarantee; it is a transparency guarantee backed by an actual audit trail.',
+  },
 ] as const
 
 export const FAQ_CATEGORIES: FaqCategory[] = [

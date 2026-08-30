@@ -3,7 +3,7 @@ import { readFileSync, existsSync } from 'node:fs'
 import { join } from 'node:path'
 
 import { BREEZEWAY_FAQ as FAQS } from '@/lib/faq-content'
-import { COMPARISON_ROWS, FIELDSTAY_HIGHLIGHTS } from '@/app/breezeway-alternative/comparison-data'
+import { COMPARISON_ROWS, FIELDSTAY_HIGHLIGHTS, GUARANTEE_PILLARS } from '@/app/breezeway-alternative/comparison-data'
 
 const root = process.cwd()
 const read = (p: string) => readFileSync(join(root, p), 'utf8')
@@ -61,6 +61,37 @@ describe('breezeway-alternative claims are backed by code that still exists', ()
       expect(row.breezewaySource.length, `"${row.category}" has no Breezeway source`).toBeGreaterThan(10)
       expect(row.breezewaySource).not.toBe(row.fieldstaySource)
     }
+  })
+
+  it('every Glass Box Guarantee pillar cites a source file that exists', () => {
+    for (const p of GUARANTEE_PILLARS) {
+      const paths = p.source.split(',').map((s) => s.trim())
+      for (const path of paths) {
+        // A citation naming a specific exported type ("types/database.ts
+        // (WorkOrderUpdate, AuditEvent)") is checked on the file path alone —
+        // the parenthesised part documents WHAT in that file, not a second
+        // path to resolve.
+        const filePath = path.replace(/\s*\(.*\)$/, '').replace(/\*\*$/, '').replace(/\/$/, '')
+        expect(
+          existsSync(join(root, filePath)),
+          `"${p.title}" cites ${path}, which no longer exists`,
+        ).toBe(true)
+      }
+    }
+  })
+
+  it("the guarantee's trial length matches the real trial live everywhere else on the site", () => {
+    // The drafted guarantee copy originally said 30 days; every other
+    // marketing page (and /signup itself) says 14. Pinned here as a real
+    // regression check, not a style nit — this exact mismatch was caught by
+    // hand once already before this file existed to catch it automatically.
+    const signup = read('app/(auth)/signup/page.tsx')
+    expect(signup).toMatch(/14-day/)
+
+    for (const p of GUARANTEE_PILLARS) {
+      expect(p.body).not.toMatch(/30[\s-]day/i)
+    }
+    expect(GUARANTEE_PILLARS[0]!.body).toMatch(/14 days/)
   })
 })
 

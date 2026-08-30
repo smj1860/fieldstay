@@ -60,6 +60,18 @@ export const COMPARISON_ROWS: readonly ComparisonRow[] = [
     breezewaySource: 'breezeway.io/checklists-mobile-app + Google Play / App Store listings, checked 2026-08-30',
   },
   {
+    category: 'Asset planning & CapEx forecasting',
+    fieldstay:
+      'Every major appliance and system gets a health score that updates daily from its age and expected ' +
+      'lifespan, rolled into a 10-year capital expenditure forecast automatically — feeding the capital ' +
+      'planning page, the owner portal, and a CPA-ready CSV export.',
+    breezeway:
+      'Asset tracking logs appliance performance and maintenance history for reference. No health scoring or ' +
+      'forward-looking capital expenditure forecast is published.',
+    fieldstaySource: 'lib/inngest/functions/cron/asset-health.ts, lib/inngest/functions/capex-projection-core.ts, app/(dashboard)/capital-planning/**',
+    breezewaySource: 'breezeway.io/property-maintenance-software ("Monitor appliance performance and maintenance history with asset reporting"), checked 2026-08-30',
+  },
+  {
     category: 'Guest review responses',
     fieldstay:
       'RepuGuard drafts AI-generated responses to guest reviews synced from your PMS, included in every ' +
@@ -69,6 +81,48 @@ export const COMPARISON_ROWS: readonly ComparisonRow[] = [
       'drafts responses to posted reviews specifically was not independently confirmed, so no comparison is made here.',
     fieldstaySource: 'lib/inngest/functions/repuguard-batch-generate.ts, components/repuguard/',
     breezewaySource: 'breezeway.io/property-maintenance-software, checked 2026-08-30 — not confirmed either way',
+  },
+] as const
+
+/**
+ * The Glass Box Operations Guarantee — FieldStay's own policy, not a
+ * Breezeway-comparison claim, so it needs only a FieldStay-side citation.
+ * Adapted from the drafted copy to match the trial length actually live
+ * everywhere else on the site: every other marketing page (hosts, strops,
+ * ownerrez, hospitable, /signup) says 14 days, and the draft this was built
+ * from said 30 — publishing that mismatch would have been exactly the kind
+ * of live inconsistency this page's own citation discipline exists to catch.
+ */
+export interface GuaranteePillar {
+  title: string
+  body:  string
+  source: string
+}
+
+export const GUARANTEE_PILLARS: readonly GuaranteePillar[] = [
+  {
+    title: 'Try it on your hardest properties, risk-free.',
+    body:
+      'Run FieldStay on 3–5 of your most demanding properties for 14 days — the ones with spotty signal, ' +
+      'tricky access, or vendors who barely answer texts. If it doesn\'t make your week easier, cancel with ' +
+      'one click. No contract, no penalty.',
+    source: 'app/(auth)/signup/page.tsx',
+  },
+  {
+    title: 'If something goes wrong, we show you the record.',
+    body:
+      'Every checklist step, synced photo, and work order status change in FieldStay is timestamped and ' +
+      'logged. If you ever think something was missed or mishandled, we don\'t ask you to trust us — we ' +
+      'pull the actual record and show you exactly what happened, and when.',
+    source: 'lib/audit.ts, types/database.ts (WorkOrderUpdate / AuditEvent)',
+  },
+  {
+    title: 'Built for the people who actually have to use it.',
+    body:
+      'Your crew doesn\'t need training — the app works offline and walks them through the checklist step ' +
+      'by step. Your vendors don\'t need to download anything or remember a password — every work order ' +
+      'arrives as a link they open, quote, and complete from their phone.',
+    source: 'lib/dexie/schema.ts, app/work-orders/[token]/vendor-portal.tsx',
   },
 ] as const
 
@@ -83,11 +137,6 @@ export const FIELDSTAY_HIGHLIGHTS: ReadonlyArray<{ title: string; body: string; 
     title: 'Owner P&L portal',
     body: 'A secure, tokenized link for property owners — no account, no login — showing revenue, expenses, and net income by period.',
     source: 'app/owner/[token]/**',
-  },
-  {
-    title: 'Asset health scores + CapEx forecasting',
-    body: 'Every major appliance gets a health score that updates daily from its age and expected lifespan, rolled into a 10-year capital plan automatically.',
-    source: 'lib/inngest/functions/cron/asset-health.ts',
   },
   {
     title: 'Inventory with auto-restock',
