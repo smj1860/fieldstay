@@ -1,7 +1,7 @@
 'use client'
 
 import { useState, useTransition, useEffect, useMemo } from 'react'
-import { useRouter, useSearchParams } from 'next/navigation'
+import { useRouter, usePathname, useSearchParams } from 'next/navigation'
 import { useLiveQuery } from 'dexie-react-hooks'
 import { getDashboardDb } from '@/lib/dexie/dashboard/schema'
 import { useIsOffline } from '@/lib/dexie/dashboard/use-is-offline'
@@ -1113,15 +1113,32 @@ export function MaintenanceBoard({
   role:             string
 }) {
   const router        = useRouter()
+  const pathname      = usePathname()
   const searchParams  = useSearchParams()
   const urlFilter     = searchParams.get('filter')
 
   const [showCreate,     setShowCreate]     = useState(false)
   const [activeTab,      setActiveTab]      = useState<string>('all')
   const [filterProperty, setFilterProperty] = useState<string>('all')
+  // ops-snapshot.tsx links here with ?filter=urgent to seed the priority
+  // filter with the "urgent" bucket it just showed a count for — 'urgent' is
+  // itself a real value in the dropdown below, so this maps 1:1 rather than
+  // to 'high' (which used to hide every urgent work order on arrival, since
+  // 'high' and 'urgent' are disjoint priority values).
   const [filterPriority, setFilterPriority] = useState<string>(
-    urlFilter === 'urgent' ? 'high' : 'all'
+    urlFilter === 'urgent' ? 'urgent' : 'all'
   )
+
+  // The query param is a one-time deep-link seed for the initial state above,
+  // not a persisted filter — so it is stripped from the URL right after being
+  // read. Without this, the param survives in the address bar and a refresh
+  // (or the initializer re-running on remount) re-applies it even after the
+  // PM explicitly cleared the filter, which is exactly the "clearing doesn't
+  // stick across a refresh" bug this closes.
+  useEffect(() => {
+    if (urlFilter) router.replace(pathname, { scroll: false })
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
   const [viewMode,       setViewMode]       = useState<'list' | 'calendar' | 'kanban'>('list')
 
   const [selectedWO, setSelectedWO] = useState<WorkOrderDetailData | null>(null)
@@ -1158,6 +1175,18 @@ export function MaintenanceBoard({
     () => (userId && orgId ? db.vendors.toArray() : Promise.resolve([])),
     [db, userId, orgId], [],
   )
+  // Gates which cached-but-server-absent rows the ONLINE merge path below
+  // trusts — see merge-offline-work-orders.ts. Only a work order still
+  // queued in the outbox is legitimately unknown to the server; anything
+  // else missing from the server response completed/cancelled elsewhere and
+  // must not be resurrected from a stale cache entry.
+  const pendingCreateIds = useLiveQuery<Set<string>, Set<string>>(
+    () => (userId && orgId
+      ? db.mutations.where('kind').equals('work_order.create').toArray()
+          .then((rows) => new Set(rows.map((r) => r.targetId)))
+      : Promise.resolve(new Set<string>())),
+    [db, userId, orgId], new Set<string>(),
+  )
 
   // Prop first, cache second — the prop reflects THIS render and is never
   // staler than the cache; the cache only fills in ids the prop doesn't have,
@@ -1181,11 +1210,12 @@ export function MaintenanceBoard({
       workOrders,
       cachedWorkOrders ?? [],
       isOffline,
+      pendingCreateIds ?? new Set<string>(),
       propertyLookup,
       vendorLookup,
       (cached, { property, vendor }) => cachedWorkOrderToRow(cached, property, vendor),
     ),
-    [workOrders, cachedWorkOrders, isOffline, propertyLookup, vendorLookup],
+    [workOrders, cachedWorkOrders, isOffline, pendingCreateIds, propertyLookup, vendorLookup],
   )
 
   const toggleShowCompleted = () => {

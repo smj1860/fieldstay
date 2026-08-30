@@ -35,10 +35,19 @@ export interface VendorLookup {
  * comment in warm-maintenance-board.ts for why this exists.
  *
  * ONLINE: server rows are authoritative — they are this render's actual
- * truth. Cached rows the server doesn't know about yet (a local create still
- * in the outbox, or a warm-pulled row from before the page's own fetch) are
- * APPENDED, never used to replace or reorder what the server said. A row
- * present in both is taken from the SERVER — it is strictly fresher.
+ * truth. A cached row absent from the server response is APPENDED only when
+ * it is a work order still queued in the outbox (`pendingCreateIds` — a
+ * local create the server has never heard of yet); anything else missing
+ * from the server response is missing because it is no longer open (the
+ * page's own query filters to open statuses, so a completed/cancelled WO
+ * server-side simply stops being returned) and must NOT be resurrected from
+ * a Dexie cache that has not been told about that transition. Getting this
+ * wrong is exactly the bug this file used to have: completing a work order
+ * (bulk or single) via a plain Server Action never touches the local cache,
+ * so the stale cached "still open" copy would get appended right back onto
+ * the board and read as "my status change did nothing" until the next
+ * periodic warm reconciled it away, up to 15 minutes later. A row present in
+ * both is taken from the SERVER — it is strictly fresher.
  *
  * OFFLINE: the server props are a frozen snapshot from whenever this page was
  * last actually rendered (by React SPA navigation or a service-worker replay
@@ -52,6 +61,7 @@ export function mergeOfflineWorkOrders<T extends { id: string }>(
   serverRows: T[],
   cachedRows: WorkOrder[],
   isOffline:  boolean,
+  pendingCreateIds: Set<string>,
   propertyLookup: Map<string, NameLookup>,
   vendorLookup:   Map<string, VendorLookup>,
   toRow: (cached: WorkOrder, lookups: { property: NameLookup | null; vendor: VendorLookup | null }) => T,
@@ -71,5 +81,8 @@ export function mergeOfflineWorkOrders<T extends { id: string }>(
   }
 
   const serverIds = new Set(serverRows.map((r) => r.id))
-  return [...serverRows, ...cachedAsRows.filter((r) => !serverIds.has(r.id))]
+  return [
+    ...serverRows,
+    ...cachedAsRows.filter((r) => !serverIds.has(r.id) && pendingCreateIds.has(r.id)),
+  ]
 }
