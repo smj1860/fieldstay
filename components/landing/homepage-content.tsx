@@ -435,9 +435,11 @@ export function HomepageContent() {
               Simple, transparent pricing.
             </p>
             <p className="text-sm text-gray-600 mx-auto" style={{ maxWidth: 480 }}>
-              Most STR software makes you pay per property and gates parts of
-              the software behind higher tiers. It doesn&apos;t have to be
-              that way. Flat tier pricing. All the features, no gates.
+              Most STR software gates parts of the software behind higher
+              tiers, or hits you with a steep jump the moment you add one
+              more property. FieldStay doesn&apos;t. All the features, every
+              tier. Add a property and the price moves a few dollars, never
+              a cliff.
             </p>
           </div>
 
@@ -501,6 +503,9 @@ export function HomepageContent() {
                 <div className="mb-5">
                   {plan.monthly !== null ? (
                     <>
+                      <span className="text-xs font-semibold text-gray-400">
+                        from{' '}
+                      </span>
                       <span className="font-black tracking-tight text-brand-800"
                             style={{ fontSize: 38, letterSpacing: '-2px', lineHeight: 1 }}>
                         {annual ? `$${plan.annual!.toLocaleString()}` : `$${plan.monthly}`}
