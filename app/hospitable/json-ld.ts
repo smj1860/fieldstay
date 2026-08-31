@@ -1,4 +1,4 @@
-import { CREW_VISIBILITY_FAQ, TEAM_ACCESS_FAQ, MARKETING_OFFLINE_FAQ, MARKETING_TRIAL_FAQ } from '@/lib/faq-content'
+import { SHARED_LANDING_FAQ_TAIL } from '@/lib/faq-content'
 import { buildFaqSoftwareJsonLd } from '@/app/strops/json-ld'
 
 // ============================================================================
@@ -35,25 +35,9 @@ export const MARKETING_FAQ = [
     q: 'How do my crew members access the app?',
     a: 'Teammates synced from Hospitable are added as FieldStay crew members automatically, mapped to the right role — Cleaning, Maintenance, Concierge, Manager, and so on. They get an email invite, create a free account, and install the app to their phone home screen. No App Store required, and they only ever see their own assigned turnovers.',
   },
-  {
-    // Shared verbatim with the OwnerRez landing page — see lib/faq-content.ts.
-    q: MARKETING_OFFLINE_FAQ.question,
-    a: MARKETING_OFFLINE_FAQ.answer,
-  },
-  {
-    q: MARKETING_TRIAL_FAQ.question,
-    a: MARKETING_TRIAL_FAQ.answer,
-  },
-  {
-    // Shared verbatim with the other landing page and the in-app help page —
-    // see lib/faq-content.ts for the claim-by-claim RLS backing.
-    q: CREW_VISIBILITY_FAQ.question,
-    a: CREW_VISIBILITY_FAQ.answer,
-  },
-  {
-    q: TEAM_ACCESS_FAQ.question,
-    a: TEAM_ACCESS_FAQ.answer,
-  },
+  // Shared verbatim with /ownerrez and the homepage — see
+  // lib/faq-content.ts's SHARED_LANDING_FAQ_TAIL header comment.
+  ...SHARED_LANDING_FAQ_TAIL,
 ] as const
 
 export function buildJsonLd(marketingUrl: string) {

@@ -1,4 +1,4 @@
-import { MARKETING_OFFLINE_FAQ, MARKETING_TRIAL_FAQ, CREW_VISIBILITY_FAQ, TEAM_ACCESS_FAQ } from '@/lib/faq-content'
+import { SHARED_LANDING_FAQ_TAIL } from '@/lib/faq-content'
 import { buildFaqSoftwareJsonLd } from '@/app/strops/json-ld'
 
 // ============================================================================
@@ -24,12 +24,12 @@ import { buildFaqSoftwareJsonLd } from '@/app/strops/json-ld'
 
 export const HOMEPAGE_PATH = '/'
 
-export const HOMEPAGE_FAQ_ITEMS = [
-  { q: MARKETING_OFFLINE_FAQ.question, a: MARKETING_OFFLINE_FAQ.answer },
-  { q: MARKETING_TRIAL_FAQ.question, a: MARKETING_TRIAL_FAQ.answer },
-  { q: CREW_VISIBILITY_FAQ.question, a: CREW_VISIBILITY_FAQ.answer },
-  { q: TEAM_ACCESS_FAQ.question, a: TEAM_ACCESS_FAQ.answer },
-] as const
+// The homepage's FAQ is exactly the tail every integration page appends
+// after its own persona-specific entries — the homepage has no persona-
+// specific entries of its own, so this IS its whole FAQ array. Kept under
+// the HOMEPAGE_FAQ_ITEMS name since components/landing/homepage-content.tsx
+// already imports it by that name.
+export const HOMEPAGE_FAQ_ITEMS = SHARED_LANDING_FAQ_TAIL
 
 export function buildJsonLd(marketingUrl: string) {
   return buildFaqSoftwareJsonLd(marketingUrl, {

@@ -115,6 +115,28 @@ export const MARKETING_TRIAL_FAQ = {
 } as const
 
 /**
+ * The four FAQ items /ownerrez, /hospitable, and the homepage all share
+ * verbatim — offline capability, trial length, crew visibility, team access
+ * — already converted to the `{ q, a }` shape every FaqSection/json-ld.ts
+ * consumer on those pages uses. Appended after each page's own persona-
+ * specific entries (or, for the homepage, used as the entire FAQ array — see
+ * app/json-ld.ts).
+ *
+ * Extracted 2026-08-31: app/ownerrez/json-ld.ts and app/hospitable/json-ld.ts
+ * carried a byte-identical copy of these four `{ q: X.question, a: X.answer }`
+ * object literals, which is what SonarCloud kept flagging even after the
+ * @graph-scaffolding duplication between those two files was extracted into
+ * buildFaqSoftwareJsonLd() — the FAQ *content*, not just the JSON-LD shape
+ * around it, was genuinely duplicated.
+ */
+export const SHARED_LANDING_FAQ_TAIL: ReadonlyArray<{ q: string; a: string }> = [
+  { q: MARKETING_OFFLINE_FAQ.question, a: MARKETING_OFFLINE_FAQ.answer },
+  { q: MARKETING_TRIAL_FAQ.question, a: MARKETING_TRIAL_FAQ.answer },
+  { q: CREW_VISIBILITY_FAQ.question, a: CREW_VISIBILITY_FAQ.answer },
+  { q: TEAM_ACCESS_FAQ.question, a: TEAM_ACCESS_FAQ.answer },
+]
+
+/**
  * /hosts — the solo-host landing page's two persona-specific FAQ items.
  *
  * Distinct from CREW_VISIBILITY_FAQ / TEAM_ACCESS_FAQ (which assume the
