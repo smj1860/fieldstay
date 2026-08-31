@@ -436,7 +436,7 @@ export function HomepageContent() {
       <FaqSection items={HOMEPAGE_FAQ_ITEMS} />
 
       {/* ── Pricing ──────────────────────────────────────────────────────── */}
-      <section className="px-8 py-20" style={{ background: '#F8F9FA' }}>
+      <section id="pricing" className="px-8 py-20" style={{ background: '#F8F9FA' }}>
         <div className="mx-auto" style={{ maxWidth: 1100 }}>
           <div className="text-center mb-10">
             <h2 className="font-display font-bold leading-[1.2] mb-2 tracking-tight text-brand-800"

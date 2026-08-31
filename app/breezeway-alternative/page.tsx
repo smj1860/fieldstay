@@ -32,11 +32,10 @@ const EXAMPLE_QTY = 10
 const examplePriceDollars = monthlyCostCents(EXAMPLE_QTY)! / 100
 
 export const metadata: Metadata = {
-  title: 'FieldStay vs Breezeway',
+  title: 'Breezeway Alternative: FieldStay vs Breezeway',
   description:
-    'Comparing FieldStay and Breezeway for short-term rental operations: published graduated pricing vs. ' +
-    'a custom quote past 4 properties, and a no-login vendor portal vs. a required mobile app. Looking for ' +
-    'a Breezeway alternative? Start here.',
+    'Looking for a Breezeway alternative? FieldStay publishes real pricing to 150 properties ' +
+    '(no sales call) and a no-login vendor portal. Free 14-day trial.',
   keywords: [
     'breezeway alternative',
     'fieldstay vs breezeway',
@@ -141,8 +140,16 @@ export default function BreezewayAlternativePage() {
         <p className="text-xs text-[var(--mkt-muted)] mt-4">
           FieldStay claims are verifiable against this product directly. Breezeway information reflects
           Breezeway&apos;s public website and help documentation as checked on {RESEARCHED_ON} — a
-          competitor&apos;s pricing and features can change at any time, so verify current details at
-          breezeway.io before deciding.
+          competitor&apos;s pricing and features can change at any time, so verify current details at{' '}
+          <a
+            href="https://www.breezeway.io/pricing"
+            rel="nofollow noopener"
+            target="_blank"
+            className="underline hover:text-[var(--mkt-ink)]"
+          >
+            breezeway.io
+          </a>{' '}
+          before deciding.
         </p>
       </section>
 
@@ -164,7 +171,10 @@ export default function BreezewayAlternativePage() {
               </div>
               <p className="text-sm text-[var(--mkt-muted-strong)]">
                 For {EXAMPLE_QTY} properties, computed from the published graduated rate schedule — see it for
-                your own count with the calculator on the pricing page.
+                your own count with{' '}
+                <Link href="/#pricing" className="underline hover:text-[var(--mkt-gold-hover)]">
+                  the calculator on the pricing page
+                </Link>.
               </p>
             </div>
             <div className="rounded-2xl border border-[var(--mkt-border)] bg-white p-8">
