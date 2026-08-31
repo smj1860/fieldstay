@@ -16,10 +16,17 @@
 //
 // Entry-tier features below are generic on purpose — this page has no PMS
 // to sell against, unlike /ownerrez or /hospitable's entry bullets.
+//
+// Hero and closing CTA band use components/marketing/MarketingHero.tsx and
+// MarketingCtaBand.tsx, shared with /enterprise — the two pages' hero/CTA
+// markup started as independent copies of the same shape and SonarCloud
+// flagged 43%/17% duplication between them (2026-08-31).
 
 import type { Metadata } from 'next'
 import Link from 'next/link'
 import GenericPricingSection from '@/components/pricing/GenericPricingSection'
+import MarketingHero from '@/components/marketing/MarketingHero'
+import MarketingCtaBand from '@/components/marketing/MarketingCtaBand'
 import { marketingUrl, appUrl } from '@/lib/marketing'
 
 const PATH = '/pricing'
@@ -74,31 +81,25 @@ export default function PricingPage() {
 
   return (
     <div className="min-h-screen bg-white">
-      {/* ── Hero ───────────────────────────────────────────────────────── */}
-      <section className="bg-[var(--mkt-ink)] text-white">
-        <div className="max-w-3xl mx-auto px-6 py-20 text-center">
-          <p className="text-xs font-bold tracking-[0.16em] uppercase text-[var(--mkt-gold)] mb-4">
-            Pricing
-          </p>
-          <h1 className="text-4xl sm:text-5xl font-bold mb-5 font-display leading-tight">
-            One published rate. No sales call.
-          </h1>
-          <p className="text-lg text-[var(--mkt-on-dark-softer)] max-w-2xl mx-auto mb-9">
+      <MarketingHero
+        eyebrow="Pricing"
+        title="One published rate. No sales call."
+        subtitle={
+          <>
             $49/month for your first property, graduated down to $6/property as your portfolio grows —
             up to 150 properties, self-serve, no quote required. Use the calculator below to see your
             exact number.
-          </p>
-          <div className="flex flex-col sm:flex-row gap-3 justify-center items-center">
-            <Link
-              href={ctaHref}
-              className="px-7 py-3.5 rounded-xl font-bold bg-[var(--mkt-gold)] text-[var(--mkt-ink)] hover:bg-[var(--mkt-gold-hover)] transition-colors"
-            >
-              Start free 14-day trial
-            </Link>
-            <span className="text-sm text-[var(--mkt-on-dark-soft)]">No credit card required</span>
-          </div>
-        </div>
-      </section>
+          </>
+        }
+      >
+        <Link
+          href={ctaHref}
+          className="px-7 py-3.5 rounded-xl font-bold bg-[var(--mkt-gold)] text-[var(--mkt-ink)] hover:bg-[var(--mkt-gold-hover)] transition-colors"
+        >
+          Start free 14-day trial
+        </Link>
+        <span className="text-sm text-[var(--mkt-on-dark-soft)]">No credit card required</span>
+      </MarketingHero>
 
       {/* ── Pricing calculator + cards ─────────────────────────────────── */}
       <section className="max-w-5xl mx-auto px-6 py-16">
@@ -116,32 +117,27 @@ export default function PricingPage() {
         </p>
       </section>
 
-      {/* ── CTA ────────────────────────────────────────────────────────── */}
-      <section className="bg-[var(--mkt-ink)] text-white">
-        <div className="max-w-3xl mx-auto px-6 py-16 text-center">
-          <h2 className="text-3xl font-bold mb-4 font-display">
-            See your own number, not a sales call.
-          </h2>
-          <p className="text-[var(--mkt-on-dark-softer)] mb-8">
-            Connect your PMS and FieldStay builds your turnover schedule from your existing bookings.
-            Fourteen days free, no credit card.
-          </p>
-          <Link
-            href={ctaHref}
-            className="inline-block px-8 py-4 rounded-xl font-bold bg-[var(--mkt-gold)] text-[var(--mkt-ink)] hover:bg-[var(--mkt-gold-hover)] transition-colors"
-          >
-            Start free trial
-          </Link>
-          <p className="text-sm text-[var(--mkt-on-dark-soft)] mt-8">
+      <MarketingCtaBand
+        title="See your own number, not a sales call."
+        subtitle="Connect your PMS and FieldStay builds your turnover schedule from your existing bookings. Fourteen days free, no credit card."
+        footer={
+          <>
             Already using OwnerRez or Hospitable?{' '}
             <Link href="/ownerrez" className="underline hover:text-[var(--mkt-gold)]">OwnerRez</Link>
             {' · '}
             <Link href="/hospitable" className="underline hover:text-[var(--mkt-gold)]">Hospitable</Link>
             {' · '}
             <Link href="/strops" className="underline hover:text-[var(--mkt-gold)]">Works with no signal</Link>
-          </p>
-        </div>
-      </section>
+          </>
+        }
+      >
+        <Link
+          href={ctaHref}
+          className="inline-block px-8 py-4 rounded-xl font-bold bg-[var(--mkt-gold)] text-[var(--mkt-ink)] hover:bg-[var(--mkt-gold-hover)] transition-colors"
+        >
+          Start free trial
+        </Link>
+      </MarketingCtaBand>
     </div>
   )
 }

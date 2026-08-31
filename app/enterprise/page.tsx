@@ -21,11 +21,18 @@
 // Every claim in the "multi-location," "reporting," and "migration"
 // sections below is checked against what's actually built, not aspirational
 // — see the inline comments citing the real feature each one describes.
+//
+// Hero and closing CTA band use components/marketing/MarketingHero.tsx and
+// MarketingCtaBand.tsx, shared with /pricing — the two pages' hero/CTA
+// markup started as independent copies of the same shape and SonarCloud
+// flagged 43%/17% duplication between them (2026-08-31).
 
 import type { Metadata } from 'next'
 import Link from 'next/link'
 import GenericPricingSection from '@/components/pricing/GenericPricingSection'
 import FaqSection from '@/components/faq/FaqSection'
+import MarketingHero from '@/components/marketing/MarketingHero'
+import MarketingCtaBand from '@/components/marketing/MarketingCtaBand'
 import { buildJsonLd, serializeJsonLd, FAQ_ITEMS as FAQS, ENTERPRISE_PATH } from './json-ld'
 import { marketingUrl, marketingOrigin, appUrl } from '@/lib/marketing'
 
@@ -85,37 +92,35 @@ export default function EnterprisePage() {
     <div className="min-h-screen bg-white">
       <script type="application/ld+json">{serializeJsonLd(buildJsonLd(marketingOrigin()))}</script>
 
-      {/* ── Hero ───────────────────────────────────────────────────────── */}
-      <section className="bg-[var(--mkt-ink)] text-white">
-        <div className="max-w-3xl mx-auto px-6 py-20 text-center">
-          <p className="text-xs font-bold tracking-[0.16em] uppercase text-[var(--mkt-gold)] mb-4">
-            Enterprise
-          </p>
-          <h1 className="text-4xl sm:text-5xl font-bold mb-5 font-display leading-tight">
+      <MarketingHero
+        eyebrow="Enterprise"
+        title={
+          <>
             Running 50, 100, or 300 properties shouldn&apos;t mean 50, 100, or 300
             versions of the same spreadsheet.
-          </h1>
-          <p className="text-lg text-[var(--mkt-on-dark-softer)] max-w-2xl mx-auto mb-9">
+          </>
+        }
+        subtitle={
+          <>
             FieldStay scales the same operations engine every property manager uses — turnovers, crew,
             inventory, maintenance, and reporting — up to a full portfolio, with unlimited properties and
             volume pricing once you outgrow the self-serve schedule.
-          </p>
-          <div className="flex flex-col sm:flex-row gap-3 justify-center items-center">
-            <Link
-              href={ctaHref}
-              className="px-7 py-3.5 rounded-xl font-bold bg-[var(--mkt-gold)] text-[var(--mkt-ink)] hover:bg-[var(--mkt-gold-hover)] transition-colors"
-            >
-              Start free 14-day trial
-            </Link>
-            <a
-              href="mailto:hello@fieldstay.app"
-              className="px-7 py-3.5 rounded-xl font-bold border border-white/25 text-white hover:bg-white/10 transition-colors"
-            >
-              Talk to us
-            </a>
-          </div>
-        </div>
-      </section>
+          </>
+        }
+      >
+        <Link
+          href={ctaHref}
+          className="px-7 py-3.5 rounded-xl font-bold bg-[var(--mkt-gold)] text-[var(--mkt-ink)] hover:bg-[var(--mkt-gold-hover)] transition-colors"
+        >
+          Start free 14-day trial
+        </Link>
+        <a
+          href="mailto:hello@fieldstay.app"
+          className="px-7 py-3.5 rounded-xl font-bold border border-white/25 text-white hover:bg-white/10 transition-colors"
+        >
+          Talk to us
+        </a>
+      </MarketingHero>
 
       {/* ── Multi-location / multi-team ──────────────────────────────────── */}
       <section className="max-w-5xl mx-auto px-6 py-16">
@@ -178,36 +183,29 @@ export default function EnterprisePage() {
       {/* ── FAQ ────────────────────────────────────────────────────────── */}
       <FaqSection items={FAQS} />
 
-      {/* ── CTA ────────────────────────────────────────────────────────── */}
-      <section className="bg-[var(--mkt-ink)] text-white">
-        <div className="max-w-3xl mx-auto px-6 py-16 text-center">
-          <h2 className="text-3xl font-bold mb-4 font-display">
-            Talk to us about your portfolio.
-          </h2>
-          <p className="text-[var(--mkt-on-dark-softer)] mb-8">
-            Whether you&apos;re at 60 properties or 600, we can walk through what FieldStay looks like
-            at your scale.
-          </p>
-          <div className="flex flex-col sm:flex-row gap-3 justify-center items-center">
-            <a
-              href="mailto:hello@fieldstay.app"
-              className="inline-block px-8 py-4 rounded-xl font-bold bg-[var(--mkt-gold)] text-[var(--mkt-ink)] hover:bg-[var(--mkt-gold-hover)] transition-colors"
-            >
-              Talk to us
-            </a>
-            <Link
-              href={ctaHref}
-              className="inline-block px-8 py-4 rounded-xl font-bold border border-white/25 text-white hover:bg-white/10 transition-colors"
-            >
-              Start free trial instead
-            </Link>
-          </div>
-          <p className="text-sm text-[var(--mkt-on-dark-soft)] mt-8">
+      <MarketingCtaBand
+        title="Talk to us about your portfolio."
+        subtitle="Whether you're at 60 properties or 600, we can walk through what FieldStay looks like at your scale."
+        footer={
+          <>
             Not sure which fits?{' '}
             <Link href="/pricing" className="underline hover:text-[var(--mkt-gold)]">See published pricing</Link>
-          </p>
-        </div>
-      </section>
+          </>
+        }
+      >
+        <a
+          href="mailto:hello@fieldstay.app"
+          className="inline-block px-8 py-4 rounded-xl font-bold bg-[var(--mkt-gold)] text-[var(--mkt-ink)] hover:bg-[var(--mkt-gold-hover)] transition-colors"
+        >
+          Talk to us
+        </a>
+        <Link
+          href={ctaHref}
+          className="inline-block px-8 py-4 rounded-xl font-bold border border-white/25 text-white hover:bg-white/10 transition-colors"
+        >
+          Start free trial instead
+        </Link>
+      </MarketingCtaBand>
     </div>
   )
 }

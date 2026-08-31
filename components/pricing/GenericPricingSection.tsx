@@ -1,17 +1,19 @@
 // ============================================================================
-// The pricing header/toggle + full PricingCards grid for a page with NO PMS
-// context — /pricing and /enterprise. PricingSection.tsx (the OwnerRez/
-// Hospitable component) is typed to `provider: "ownerrez" | "hospitable"`
-// and builds its CTA as `/signup?provider=${provider}&next=/onboarding`,
-// which has no correct value for a page that isn't selling against a PMS.
+// The pricing header/toggle + full PricingCards grid — the ONE real
+// implementation. PricingSection.tsx (OwnerRez/Hospitable, which resolves a
+// provider-tagged signup href) and this component's own two direct
+// consumers (/pricing and /enterprise, which have no PMS context and no
+// signup-href resolution to do) all render through here.
 //
-// This is a NEW component rather than widening PricingSection's provider
-// union to include a null/generic case, specifically to avoid recreating the
-// exact defect PricingSection.tsx's own header comment describes: two pages
-// each hand-rolling a near-identical copy of this header/toggle markup would
-// be the same class of duplication SonarCloud already flagged twice on this
-// pricing surface (PricingSection itself, then the FAQ/JSON-LD builders).
-// /pricing and /enterprise both import this ONE component instead.
+// PricingSection.tsx used to carry its own byte-for-byte copy of this same
+// markup — a naive copy when /pricing and /enterprise were added is exactly
+// how it got there, and SonarCloud caught it at 52%/43% duplication between
+// the two files (2026-08-31) before PricingSection.tsx was collapsed into a
+// thin wrapper over this one. See that file's header comment for the fuller
+// history: this is the THIRD time this exact markup duplicated across files
+// on this pricing surface (OwnerRez/Hospitable's own PricingSection.tsx
+// pair, then PricingSection.tsx vs. this file), which is why the fix this
+// time is a component every consumer shares rather than another copy.
 // ============================================================================
 
 'use client'
