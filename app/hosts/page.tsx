@@ -53,13 +53,8 @@ import type { Metadata } from 'next'
 import RepuGuardWrapper from '@/components/repuguard/RepuGuardWrapper'
 import FaqSection from '@/components/faq/FaqSection'
 import { pricingTiers } from '@/components/pricing/plan-tiers'
-import {
-  MARKETING_TRIAL_FAQ,
-  MARKETING_OFFLINE_FAQ,
-  HOSTS_CREW_REQUIRED_FAQ,
-  HOSTS_REPLACES_PMS_FAQ,
-} from '@/lib/faq-content'
-import { marketingUrl, appUrl } from '@/lib/marketing'
+import { marketingUrl, marketingOrigin, appUrl } from '@/lib/marketing'
+import { buildJsonLd, serializeJsonLd, FAQ_ITEMS } from './json-ld'
 
 const PATH = '/hosts'
 const CANONICAL = marketingUrl(PATH)
@@ -95,7 +90,12 @@ export const metadata: Metadata = {
   // relative value would resolve against metadataBase (NEXT_PUBLIC_APP_URL)
   // to the wrong host.
   alternates: { canonical: CANONICAL },
-  title: `FieldStay for Solo Hosts — 1–4 Properties, ${HOSTS_PRICE}/mo`,
+  // Not "FieldStay for Solo Hosts" — the root layout's title template
+  // already appends " — FieldStay". The original title also assumed the old
+  // flat-tier $89/mo price; HOSTS_PRICE is $49 under the graduated schedule,
+  // which is what makes the shorter phrasing below fit under ~60 chars
+  // rendered — re-check this if HOSTS_PRICE ever changes materially.
+  title: `Property Management App for Solo Hosts, ${HOSTS_PRICE}/mo`,
   description:
     'FieldStay’s Hosts plan gives 1–4 property owners offline turnover checklists, a no-login vendor ' +
     `portal, and CapEx forecasting for ${HOSTS_PRICE}/month. 14-day free trial, no credit card, no crew required.`,
@@ -121,13 +121,6 @@ export const metadata: Metadata = {
     images: ['/logo.png'],
   },
 }
-
-const FAQ_ITEMS = [
-  { q: HOSTS_CREW_REQUIRED_FAQ.question, a: HOSTS_CREW_REQUIRED_FAQ.answer },
-  { q: HOSTS_REPLACES_PMS_FAQ.question, a: HOSTS_REPLACES_PMS_FAQ.answer },
-  { q: MARKETING_OFFLINE_FAQ.question, a: MARKETING_OFFLINE_FAQ.answer },
-  { q: MARKETING_TRIAL_FAQ.question, a: MARKETING_TRIAL_FAQ.answer },
-] as const
 
 function CheckDot() {
   return (
@@ -180,6 +173,7 @@ export default function HostsPage() {
 
   return (
     <div className="min-h-screen">
+      <script type="application/ld+json">{serializeJsonLd(buildJsonLd(marketingOrigin()))}</script>
 
       {/* ══════════════════════════════════════════
           SECTION 1 — DARK NAVY: Nav · Price badge · Hero

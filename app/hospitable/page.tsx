@@ -12,9 +12,14 @@
 //      with my Hospitable data," under-sells the sync mechanics that are
 //      this integration's actual first objection.
 //   2. The feature grid leads with the no-login vendor portal / work order
-//      → invoice flow and asset health + CapEx forecasting — two shipped
-//      FieldStay features that are not yet represented on the homepage or
-//      the OwnerRez page. Recommend backporting both once copy is approved.
+//      → invoice flow and asset health + CapEx forecasting. These are NOT
+//      exclusive to this page — the homepage and /ownerrez both carry the
+//      same two features in their own grids (checked 2026-08-31, when a
+//      site-wide SEO patch's Step 3 assumed otherwise and would have
+//      duplicated them) — this page just leads with them, reordered ahead
+//      of "Automated Turnover Management," because a Hospitable switcher's
+//      first objection is usually "what do I do about vendors," not
+//      scheduling.
 
 import Link from 'next/link'
 import Image from 'next/image'
@@ -22,7 +27,8 @@ import type { Metadata } from 'next'
 import RepuGuardWrapper from '@/components/repuguard/RepuGuardWrapper'
 import PricingSection from '@/components/hospitable/PricingSection'
 import FaqSection from '@/components/hospitable/faq-section'
-import { marketingUrl } from '@/lib/marketing'
+import { marketingUrl, marketingOrigin } from '@/lib/marketing'
+import { buildJsonLd, serializeJsonLd } from './json-ld'
 
 export const metadata: Metadata = {
   // Absolute apex canonical. fieldstay.app and app.fieldstay.app are
@@ -30,8 +36,21 @@ export const metadata: Metadata = {
   // this Google picks a winner itself, and a relative value would resolve
   // against metadataBase (NEXT_PUBLIC_APP_URL) to the wrong one.
   alternates: { canonical: marketingUrl('/hospitable') },
-  title: 'FieldStay for Hospitable',
-  description: 'Connect your Hospitable account for automated turnovers, crew sync, asset health tracking, and a no-login vendor portal — free 14-day trial, no credit card required.',
+  // Not "FieldStay for Hospitable" — the root layout's title template already
+  // appends " — FieldStay" to every page's own title, so a leading brand
+  // name duplicated it with no search-intent keywords to show for the space.
+  title: 'Hospitable Operations & Crew Software',
+  // Trimmed from 238 to 149 chars — Google truncates around 155-160.
+  description: 'Connect your Hospitable account for automated turnovers, crew sync, asset health tracking, and a no-login vendor portal. Free 14-day trial.',
+  keywords: [
+    'hospitable integration software',
+    'hospitable turnover management',
+    'hospitable crew scheduling',
+    'property management software for hospitable',
+    'hospitable vendor work orders',
+    'short term rental operations software',
+    'hospitable add-on for cleaning and maintenance',
+  ],
   openGraph: {
     title: 'FieldStay for Hospitable',
     description: 'Hospitable runs your guest experience. FieldStay runs everything after they hit Book.',
@@ -68,6 +87,7 @@ export const metadata: Metadata = {
 export default function HospitablePage() {
   return (
     <div className="min-h-screen">
+      <script type="application/ld+json">{serializeJsonLd(buildJsonLd(marketingOrigin()))}</script>
 
       {/* ══════════════════════════════════════════
           PROMO BANNER — First 100 Hospitable price lock

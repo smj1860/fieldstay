@@ -140,6 +140,11 @@ describe('/hosts links cross into the app correctly', () => {
 describe('/hosts FAQ content is shared, not re-typed', () => {
   it('pulls all four answers from lib/faq-content.ts', async () => {
     const faq = await import('@/lib/faq-content')
+    // FAQ_ITEMS is assembled in json-ld.ts, not page.tsx — it has to live
+    // there so page.tsx can import it FROM json-ld.ts (structured data and
+    // the rendered FAQ section read the exact same array) without the two
+    // files importing each other.
+    const jsonLdSource = read('app/hosts/json-ld.ts')
     for (const name of [
       'HOSTS_CREW_REQUIRED_FAQ',
       'HOSTS_REPLACES_PMS_FAQ',
@@ -147,8 +152,9 @@ describe('/hosts FAQ content is shared, not re-typed', () => {
       'MARKETING_TRIAL_FAQ',
     ] as const) {
       expect(faq[name], `${name} is gone from lib/faq-content.ts`).toBeTruthy()
-      expect(page).toContain(name)
+      expect(jsonLdSource).toContain(name)
     }
+    expect(page).toContain('FAQ_ITEMS')
   })
 
   it('the crew answer stays true to addCrewMember, which is stricter than the schema', async () => {

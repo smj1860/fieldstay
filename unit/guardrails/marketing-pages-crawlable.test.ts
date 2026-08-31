@@ -250,8 +250,12 @@ describe('guardrail: public marketing and legal pages are crawlable', () => {
     ].join('\n')).toEqual([])
   })
 
-  it('no title repeats the brand suffix the root template already appends', () => {
-    const doubled = PUBLIC_MARKETING_PAGES.filter((route) => {
+  it('no child-segment title repeats the brand suffix the root template already appends', () => {
+    // The homepage ('/') is deliberately excluded here, and gets the OPPOSITE
+    // check right below — see that test for why. Every other page in this
+    // list lives one segment BELOW app/layout.tsx (app/hosts/page.tsx,
+    // app/ownerrez/page.tsx, ...), which is what makes the template apply.
+    const doubled = PUBLIC_MARKETING_PAGES.filter((route) => route !== '/').filter((route) => {
       const code = readCode(pageFile(route))
       const m = /title\s*:\s*'([^']*)'/.exec(code)
       return !!m && /—\s*FieldStay\s*$/.test(m[1]!)
@@ -262,6 +266,31 @@ describe('guardrail: public marketing and legal pages are crawlable', () => {
       '"— FieldStay" renders twice: "Terms of Service — FieldStay — FieldStay".',
       'Drop the suffix from the page and let the template add it.',
     ].join('\n')).toEqual([])
+  })
+
+  it('the homepage title spells out the brand suffix itself — the template never reaches it', () => {
+    // Next.js's `title.template` (app/layout.tsx: '%s — FieldStay') applies to
+    // titles from CHILD route segments only. app/page.tsx lives in the SAME
+    // segment as app/layout.tsx — not a child of it — so the template never
+    // applies to the homepage's own title at all, unlike every other page in
+    // PUBLIC_MARKETING_PAGES (each one segment below layout.tsx).
+    //
+    // Verified against the real prerendered output, not just Next.js's docs:
+    // a bare 'Property Ops for ...' title here (matching the OTHER pages'
+    // "let the template add the suffix" convention) rendered in
+    // .next/server/app/index.html as <title>Property Ops for Short-Term
+    // Rental Managers</title> — no "— FieldStay" anywhere, and the earlier
+    // version of this file didn't catch it because this test didn't exist yet.
+    const code = readCode(pageFile('/'))
+    const m = /title\s*:\s*'([^']*)'/.exec(code)
+
+    expect(m, 'app/page.tsx should set a literal title: \'...\' string').not.toBeNull()
+    expect(m![1], [
+      'The homepage title must end in "— FieldStay" written out explicitly —',
+      'the root template does not apply to app/page.tsx (see this test\'s header',
+      'comment). Omitting it, the way every other marketing page correctly does,',
+      'ships a homepage <title> with no brand name in it at all.',
+    ].join('\n')).toMatch(/—\s*FieldStay\s*$/)
   })
 
   it('every page sets its own description, not the root fallback', () => {
