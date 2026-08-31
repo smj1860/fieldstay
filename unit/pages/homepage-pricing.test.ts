@@ -24,9 +24,17 @@ const code = readCode(HOMEPAGE)  // for structural assertions — see note below
 // 'starting at', not imply a fixed rate."
 //
 // Fixed by folding the card grid into components/pricing/PricingCards.tsx,
-// shared with PricingSection.tsx (/ownerrez, /hospitable) — so this file now
-// asserts homepage-content.tsx actually USES that component rather than
-// re-checking price framing that no longer lives here.
+// shared with PricingSection.tsx (/ownerrez, /hospitable) — this file
+// asserted homepage-content.tsx actually USED that component, rather than
+// re-checking price framing that no longer lived here.
+//
+// That import is gone now, on purpose: once /pricing shipped with the same
+// PricingCards grid and calculator, indexing the whole thing at two URLs was
+// duplicate content for no benefit — see homepage-content.tsx's own
+// "Pricing teaser" section comment. What replaced it is a one-card
+// "Starting at $X" teaser linking to /pricing, so the two tests that used to
+// assert the PricingCards import now assert its ABSENCE and the /pricing
+// link instead.
 //
 // The "no flat tier pricing" check runs against `code` (comments stripped),
 // not `page` — this file's own header comment above talks about the retired
@@ -50,19 +58,15 @@ describe('homepage pricing section reflects graduated pricing, not the retired f
     expect(page).toContain('a cliff')
   })
 
-  it('renders the shared PricingCards component instead of its own card grid', () => {
-    // The concrete bug: this page used to hand-roll a second copy of the same
-    // five-card grid PricingSection.tsx already rendered elsewhere, so the
-    // "from $X" framing fix landed on /ownerrez and /hospitable but not here.
-    // Importing the shared component makes that a fix-it-once problem.
-    expect(code).toContain("import PricingCards from '@/components/pricing/PricingCards'")
-    expect(code).toMatch(/<PricingCards\s/)
+  it('no longer imports or renders PricingCards directly', () => {
+    // Superseded by the /pricing page, which is the one place PricingCards'
+    // full grid + calculator should be indexed now.
+    expect(code).not.toContain("from '@/components/pricing/PricingCards'")
+    expect(code).not.toMatch(/<PricingCards\s/)
   })
 
-  it('passes the homepage-specific signup href, not a provider-scoped one', () => {
-    // The homepage doesn't sell against a specific PMS, unlike /ownerrez and
-    // /hospitable — it must not carry a `provider=` query param.
-    expect(code).toMatch(/signupHref=["']\/signup["']/)
+  it('links to /pricing for the full calculator and all plans', () => {
+    expect(page).toMatch(/href="\/pricing"/)
   })
 })
 

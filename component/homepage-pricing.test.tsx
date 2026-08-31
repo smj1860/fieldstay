@@ -12,54 +12,35 @@ import { pricingTiers } from '@/components/pricing/plan-tiers'
 // lib/stripe/client.ts's PLANS, but it never looked at this page, so nothing
 // caught it.
 //
-// Reading from pricingTiers() makes the NUMBERS structurally undriftable. What
-// that alone does not cover is the presentation this page derives rather than
-// carries: PricingTier has no cta/badge fields, so "Most Popular" and
-// "Custom"/"Contact Us" are now computed from `highlight` and `monthly ===
-// null`. Those expressions have to keep evaluating to what the removed
-// per-item fields held, and that is what this file pins — plus the two other
-// sections added in the same pass, which have no other coverage at all.
+// That full grid is GONE now, on purpose — once /pricing shipped with the
+// same PricingCards grid and calculator, indexing the whole thing at two
+// URLs was duplicate content for no benefit (see homepage-content.tsx's own
+// "Pricing teaser" section comment). What remains is a one-card "Starting
+// at $X" teaser linking to /pricing, and what follows tests THAT, not the
+// grid this describe block used to render — plus the two other sections
+// added in the same original pass, which have no other coverage at all.
 // ============================================================================
 
-describe('homepage pricing grid', () => {
-  it('renders every tier pricingTiers() returns, in order', () => {
-    render(<HomepageContent />)
-
-    // Driven off the source rather than a hardcoded list of five, so adding a
-    // tier to plan-tiers.ts does not silently leave this asserting the old set.
-    for (const tier of pricingTiers(['x'])) {
-      expect(screen.getAllByText(tier.name).length, `${tier.name} card missing`).toBeGreaterThan(0)
-      expect(
-        screen.getAllByText(tier.properties).length,
-        `${tier.name}'s property range is not on the page`,
-      ).toBeGreaterThan(0)
-    }
-  })
-
-  it('badges and CTA text still derive correctly from highlight / monthly', () => {
-    render(<HomepageContent />)
-
-    // Exactly one of each: Growth is the only highlight: true, Enterprise the
-    // only monthly: null. A second "Most Popular" means the derivation broke.
-    expect(screen.getAllByText('Most Popular')).toHaveLength(1)
-    expect(screen.getAllByText('Custom')).toHaveLength(1)
-    expect(screen.getAllByText('Contact Us')).toHaveLength(1)
-  })
-
-  it('shows the Hosts entry price the /strops JSON-LD advertises', () => {
+describe('homepage pricing teaser', () => {
+  it('shows the real Hosts-tier starting price, not a hardcoded number', () => {
     render(<HomepageContent />)
     const [hosts] = pricingTiers(['x'])
-    // Two, not one: the Hosts card's own price, plus the pricing calculator's
-    // collapsed "see the math" breakdown, whose first line is always Property
-    // 1's flat $49 regardless of the quantity entered — see PricingCards.tsx.
-    expect(screen.getAllByText(`$${hosts.monthly}`).length).toBe(2)
+    expect(screen.getAllByText(`$${hosts.monthly}`, { exact: false }).length).toBeGreaterThan(0)
   })
 
-  it('the entry card carries the homepage feature list, RepuGuard included', () => {
-    // The one thing that legitimately varies from /ownerrez and /hospitable's
-    // entry cards. If this bullet goes, the page is selling a shorter product.
+  it('links to /pricing for the full calculator and all plans', () => {
     render(<HomepageContent />)
-    expect(screen.getAllByText('RepuGuard reputation management').length).toBe(1)
+    const link = screen.getByRole('link', { name: /See the full calculator/i })
+    expect(link).toHaveAttribute('href', '/pricing')
+  })
+
+  it('no longer renders the full five-tier grid', () => {
+    render(<HomepageContent />)
+    // PricingCards.tsx's own badge text for the Growth tier specifically —
+    // its absence is what confirms the grid itself, not just some of its
+    // copy, is gone. ("Enterprise" alone isn't a safe check here: it's also
+    // a real footer link now.)
+    expect(screen.queryByText('Most Popular')).not.toBeInTheDocument()
   })
 })
 

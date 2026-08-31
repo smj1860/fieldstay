@@ -1,11 +1,8 @@
 'use client'
 
-import { useState } from 'react'
 import Link from 'next/link'
-import { cn } from '@/lib/utils'
 import { MessageSquare, Package, Wrench, BarChart3 } from 'lucide-react'
 import { pricingTiers } from '@/components/pricing/plan-tiers'
-import PricingCards from '@/components/pricing/PricingCards'
 import FaqSection from '@/components/faq/FaqSection'
 import RepuGuardWrapper from '@/components/repuguard/RepuGuardWrapper'
 import { HOMEPAGE_FAQ_ITEMS } from '@/app/json-ld'
@@ -23,15 +20,11 @@ import { HOMEPAGE_FAQ_ITEMS } from '@/app/json-ld'
 // to correct -- unit/stripe/plan-table-consistency.test.ts already holds
 // plan-tiers.ts against lib/stripe/client.ts's PLANS.
 //
-// The card grid ITSELF (not just the tier data) was still a second copy,
-// though -- this page hand-rolled the same five-card layout
-// components/pricing/PricingSection.tsx already rendered for /ownerrez and
-// /hospitable, just with different classNames. That is exactly how it ended
-// up stale: the graduated-pricing rebuild's "say 'from $X', not a bare '$X'"
-// fix and the "no more flat tier pricing" copy fix both landed on the other
-// two pages and not here. Now this page imports the same
-// components/pricing/PricingCards.tsx those pages use, so a future pricing
-// display fix only has to happen once.
+// The homepage's pricing section is now a ONE-CARD teaser ("Starting at
+// $49/mo") linking to /pricing for the full calculator and all five tiers —
+// see that section's own comment for why. `pricingTiers()` is still called
+// here (below) purely to read tiers[0].monthly, the same real computed
+// number /pricing, /ownerrez and /hospitable all show, not a second literal.
 // Every public page, linked from the highest-authority page on the site.
 //
 // This is not decoration. Google Search Console reported all six marketing and
@@ -54,8 +47,11 @@ import { HOMEPAGE_FAQ_ITEMS } from '@/app/json-ld'
 // lib/marketing.ts requires to be absolute against APP_ORIGIN so the session
 // cookie lands on the right host.
 const FOOTER_LINKS: ReadonlyArray<{ label: string; href: string }> = [
+  { label: 'Pricing',       href: '/pricing'     },
   { label: 'Turnover App',  href: '/strops'      },
   { label: 'For Hosts',     href: '/hosts'       },
+  { label: 'Enterprise',    href: '/enterprise'  },
+  { label: 'For Vendors',   href: '/for-vendors' },
   { label: 'OwnerRez',      href: '/ownerrez'    },
   { label: 'Hospitable',    href: '/hospitable'  },
   { label: 'vs Breezeway',  href: '/breezeway-alternative' },
@@ -78,7 +74,6 @@ const HOMEPAGE_ENTRY_FEATURES = [
 ] as const
 
 export function HomepageContent() {
-  const [annual, setAnnual] = useState(false)
   const tiers = pricingTiers(HOMEPAGE_ENTRY_FEATURES)
 
   return (
@@ -421,62 +416,40 @@ export function HomepageContent() {
 
       <FaqSection items={HOMEPAGE_FAQ_ITEMS} />
 
-      {/* ── Pricing ──────────────────────────────────────────────────────── */}
+      {/* ── Pricing teaser ───────────────────────────────────────────────── */}
+      {/* Trimmed from the full PricingCards grid + calculator once /pricing
+          shipped — indexing the entire calculator at two URLs was duplicate
+          content for no benefit. id="pricing" kept for any link (including
+          this page's own hero copy) that wants to jump straight here. */}
       <section id="pricing" className="px-8 py-20" style={{ background: '#F8F9FA' }}>
-        <div className="mx-auto" style={{ maxWidth: 1100 }}>
-          <div className="text-center mb-10">
-            <h2 className="font-display font-bold leading-[1.2] mb-2 tracking-tight text-brand-800"
-                style={{ fontSize: 'clamp(28px, 4vw, 38px)', letterSpacing: '-1px' }}>
-              We do business differently.
-            </h2>
-            <p className="text-sm text-gray-500 mb-4">
-              Simple, transparent pricing.
-            </p>
-            <p className="text-sm text-gray-600 mx-auto" style={{ maxWidth: 480 }}>
-              Most STR software gates parts of the software behind higher
-              tiers, or hits you with a steep jump the moment you add one
-              more property. FieldStay doesn&apos;t. All the features, every
-              tier. Add a property and the price moves a few dollars, never
-              a cliff.
+        <div className="mx-auto text-center" style={{ maxWidth: 560 }}>
+          <h2 className="font-display font-bold leading-[1.2] mb-2 tracking-tight text-brand-800"
+              style={{ fontSize: 'clamp(28px, 4vw, 38px)', letterSpacing: '-1px' }}>
+            We do business differently.
+          </h2>
+          <p className="text-sm text-gray-500 mb-9">
+            One published rate, no sales call. Add a property and the price moves a few dollars, never a cliff.
+          </p>
+
+          <div className="rounded-2xl border-2 border-gold-300 bg-white p-8 mb-6">
+            <div className="text-xs font-bold uppercase tracking-wide text-brand-800 mb-2">Starting at</div>
+            <div className="font-black text-brand-800 leading-none" style={{ fontSize: 48, letterSpacing: '-0.02em' }}>
+              ${tiers[0]!.monthly}<span className="text-lg font-semibold text-gray-500">/mo</span>
+            </div>
+            <p className="text-sm text-gray-500 mt-3">
+              For your first property. Graduated down to $6/property as you grow — up to 150 properties,
+              self-serve, no sales call.
             </p>
           </div>
 
-          {/* Billing toggle */}
-          <div className="flex items-center justify-center gap-3 mb-9">
-            <span className={cn('text-sm font-bold', annual ? 'text-gray-400' : 'text-brand-800')}>
-              Monthly
-            </span>
-            <button
-              onClick={() => setAnnual(!annual)}
-              aria-pressed={annual}
-              aria-label={annual ? 'Switch to monthly billing' : 'Switch to annual billing'}
-              className="relative rounded-full transition-colors bg-brand-800 border-none cursor-pointer"
-              style={{ width: 48, height: 26 }}
-            >
-              <span className="absolute top-[3px] rounded-full transition-transform bg-gold-300"
-                    style={{
-                      width: 20, height: 20,
-                      left: 3,
-                      transform: annual ? 'translateX(22px)' : 'translateX(0)',
-                      display: 'block',
-                      transition: 'transform 0.2s',
-                    }} />
-            </button>
-            <span className={cn('text-sm font-bold flex items-center gap-2', annual ? 'text-brand-800' : 'text-gray-400')}>
-              Annual
-              <span className="rounded-full px-2 py-0.5 text-xs font-black bg-gold-300 text-brand-800">
-                Save 2 months
-              </span>
-            </span>
-          </div>
-
-          {/* Plan cards — see components/pricing/PricingCards.tsx, shared
-              with /ownerrez and /hospitable. No provider param here: the
-              homepage doesn't sell against a specific PMS. */}
-          <PricingCards tiers={tiers} annual={annual} signupHref="/signup" />
-
-          <p className="text-center text-xs mt-6 text-gray-400">
-            All plans include a 14-day free trial. No credit card required. Annual billing saves approximately 2 months.
+          <Link
+            href="/pricing"
+            className="inline-block px-6 py-3 rounded-xl font-bold bg-brand-800 text-white hover:bg-brand-900 transition-colors"
+          >
+            See the full calculator &amp; all plans →
+          </Link>
+          <p className="text-xs mt-4 text-gray-400">
+            All plans include a 14-day free trial. No credit card required.
           </p>
         </div>
       </section>

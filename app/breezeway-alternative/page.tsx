@@ -172,7 +172,7 @@ export default function BreezewayAlternativePage() {
               <p className="text-sm text-[var(--mkt-muted-strong)]">
                 For {EXAMPLE_QTY} properties, computed from the published graduated rate schedule — see it for
                 your own count with{' '}
-                <Link href="/#pricing" className="underline hover:text-[var(--mkt-gold-hover)]">
+                <Link href="/pricing" className="underline hover:text-[var(--mkt-gold-hover)]">
                   the calculator on the pricing page
                 </Link>.
               </p>

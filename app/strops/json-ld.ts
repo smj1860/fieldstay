@@ -87,8 +87,15 @@ export interface FaqSoftwareJsonLdOptions {
   faqItems: readonly QaFaqItem[]
   description: string
   featureList: readonly string[]
-  /** Defaults to the $49 site-wide anchor — pass this to override, e.g. /hosts's tier-specific price. */
-  offer?: FaqSoftwareOffer
+  /**
+   * Defaults to the $49 site-wide anchor — pass an object to override (e.g.
+   * /hosts's tier-specific price), or `null` to omit the `offers` node
+   * entirely. `null` is for a page whose whole audience is above the
+   * self-serve ceiling (/enterprise) — quoting the $49 floor there as "the
+   * price" would be technically true but misleading in a rich-result
+   * snippet, and there is no single number to put in its place.
+   */
+  offer?: FaqSoftwareOffer | null
 }
 
 /**
@@ -107,10 +114,14 @@ export interface FaqSoftwareJsonLdOptions {
  * each page's buildJsonLd() supplied.
  */
 export function buildFaqSoftwareJsonLd(marketingUrl: string, opts: FaqSoftwareJsonLdOptions) {
-  const price = opts.offer?.price ?? '49'
-  const offerDescription =
-    opts.offer?.description ??
-    `Starting at $${price}/month for your first property. 14-day free trial, no credit card required.`
+  const offer = opts.offer === null
+    ? null
+    : {
+        price: opts.offer?.price ?? '49',
+        description:
+          opts.offer?.description ??
+          `Starting at $${opts.offer?.price ?? '49'}/month for your first property. 14-day free trial, no credit card required.`,
+      }
 
   return {
     '@context': 'https://schema.org',
@@ -136,15 +147,19 @@ export function buildFaqSoftwareJsonLd(marketingUrl: string, opts: FaqSoftwareJs
         operatingSystem: 'Web, iOS, Android',
         description: opts.description,
         featureList: opts.featureList,
-        // Same rule as this file's own buildJsonLd(): this price must also be
-        // visible on the rendered page, not just in the schema — Google
-        // suppresses structured data describing content a visitor can't see.
-        offers: {
-          '@type': 'Offer',
-          price,
-          priceCurrency: 'USD',
-          description: offerDescription,
-        },
+        // Same rule as this file's own buildJsonLd(): a price included here
+        // must also be visible on the rendered page, not just in the schema
+        // — Google suppresses structured data describing content a visitor
+        // can't see. `offer: null` (see FaqSoftwareJsonLdOptions) omits this
+        // node entirely rather than quoting a number that would mislead.
+        ...(offer && {
+          offers: {
+            '@type': 'Offer',
+            price: offer.price,
+            priceCurrency: 'USD',
+            description: offer.description,
+          },
+        }),
       },
     ],
   }
