@@ -72,6 +72,84 @@ export function buildJsonLd(marketingUrl: string) {
   }
 }
 
+export interface QaFaqItem {
+  q: string
+  a: string
+}
+
+export interface FaqSoftwareOffer {
+  price: string
+  description: string
+}
+
+export interface FaqSoftwareJsonLdOptions {
+  faqPath: string
+  faqItems: readonly QaFaqItem[]
+  description: string
+  featureList: readonly string[]
+  /** Defaults to the $49 site-wide anchor — pass this to override, e.g. /hosts's tier-specific price. */
+  offer?: FaqSoftwareOffer
+}
+
+/**
+ * Shared FAQPage + SoftwareApplication builder for every landing page EXCEPT
+ * this one and /breezeway-alternative, which predate this extraction and use
+ * FaqItem's `{ question, answer }` shape (lib/faq-content.ts) rather than the
+ * `{ q, a }` shape every other page's FAQ arrays use — see the header comment
+ * on this file's own buildJsonLd() below for that shape, unchanged by this
+ * addition.
+ *
+ * Extracted 2026-08-31 after SonarCloud flagged 70-80% duplication between
+ * app/ownerrez/json-ld.ts and app/hospitable/json-ld.ts: with the FAQ shape
+ * and the "site's price must also be visible on the page" rule already
+ * documented per-file, what was left duplicated was the entire @graph
+ * scaffolding itself — identical apart from the FAQ content and feature copy
+ * each page's buildJsonLd() supplied.
+ */
+export function buildFaqSoftwareJsonLd(marketingUrl: string, opts: FaqSoftwareJsonLdOptions) {
+  const price = opts.offer?.price ?? '49'
+  const offerDescription =
+    opts.offer?.description ??
+    `Starting at $${price}/month for your first property. 14-day free trial, no credit card required.`
+
+  return {
+    '@context': 'https://schema.org',
+    '@graph': [
+      {
+        '@type': 'FAQPage',
+        '@id': `${marketingUrl}${opts.faqPath}#faq`,
+        mainEntity: opts.faqItems.map((f) => ({
+          '@type': 'Question',
+          name: f.q,
+          acceptedAnswer: { '@type': 'Answer', text: f.a },
+        })),
+      },
+      {
+        '@type': 'SoftwareApplication',
+        // Deliberately the SAME literal on every page — see
+        // app/ownerrez/json-ld.ts's header comment (pre-extraction) for why:
+        // one "FieldStay the software" entity referenced consistently across
+        // the site, not a fragmented per-page id.
+        '@id': `${marketingUrl}#software`,
+        name: 'FieldStay',
+        applicationCategory: 'BusinessApplication',
+        operatingSystem: 'Web, iOS, Android',
+        description: opts.description,
+        featureList: opts.featureList,
+        // Same rule as this file's own buildJsonLd(): this price must also be
+        // visible on the rendered page, not just in the schema — Google
+        // suppresses structured data describing content a visitor can't see.
+        offers: {
+          '@type': 'Offer',
+          price,
+          priceCurrency: 'USD',
+          description: offerDescription,
+        },
+      },
+    ],
+  }
+}
+
 /**
  * Serialize for emission as a `<script>` TEXT CHILD, not via
  * dangerouslySetInnerHTML.

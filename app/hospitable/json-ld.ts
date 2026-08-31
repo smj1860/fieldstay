@@ -1,9 +1,12 @@
 import { CREW_VISIBILITY_FAQ, TEAM_ACCESS_FAQ, MARKETING_OFFLINE_FAQ, MARKETING_TRIAL_FAQ } from '@/lib/faq-content'
+import { buildFaqSoftwareJsonLd } from '@/app/strops/json-ld'
 
 // ============================================================================
-// Structured data for /hospitable. Same pattern as app/strops/json-ld.ts and
-// app/breezeway-alternative/json-ld.ts (FAQPage + SoftwareApplication) —
-// serializeJsonLd is imported from strops rather than reimplemented.
+// Structured data for /hospitable. The @graph scaffolding (FAQPage +
+// SoftwareApplication, including why the SoftwareApplication @id is the same
+// shared literal on every page) lives in buildFaqSoftwareJsonLd()
+// (app/strops/json-ld.ts) — this file supplies only what's actually specific
+// to /hospitable: the FAQ content and the feature/description copy.
 //
 // MARKETING_FAQ lives HERE, not in components/hospitable/faq-section.tsx
 // (which re-exports it) — see app/ownerrez/json-ld.ts's header comment for
@@ -11,10 +14,6 @@ import { CREW_VISIBILITY_FAQ, TEAM_ACCESS_FAQ, MARKETING_OFFLINE_FAQ, MARKETING_
 // exported from a 'use client' module is not safe to import into server
 // code — it throws "MARKETING_FAQ.map is not a function" during `next
 // build`'s static generation pass, even though it works fine in dev.
-//
-// See app/ownerrez/json-ld.ts's header comment for why the
-// SoftwareApplication @id is the same shared literal on every page, not a
-// per-page value — deliberate, not a bug.
 // ============================================================================
 
 export const HOSPITABLE_PATH = '/hospitable'
@@ -58,47 +57,22 @@ export const MARKETING_FAQ = [
 ] as const
 
 export function buildJsonLd(marketingUrl: string) {
-  return {
-    '@context': 'https://schema.org',
-    '@graph': [
-      {
-        '@type': 'FAQPage',
-        '@id': `${marketingUrl}${HOSPITABLE_PATH}#faq`,
-        mainEntity: MARKETING_FAQ.map((f) => ({
-          '@type': 'Question',
-          name: f.q,
-          acceptedAnswer: { '@type': 'Answer', text: f.a },
-        })),
-      },
-      {
-        '@type': 'SoftwareApplication',
-        '@id': `${marketingUrl}#software`,
-        name: 'FieldStay',
-        applicationCategory: 'BusinessApplication',
-        operatingSystem: 'Web, iOS, Android',
-        description:
-          'Field operations layer for Hospitable property managers: automated turnovers, crew sync, asset ' +
-          'health tracking, capital planning, and a no-login vendor portal.',
-        featureList: [
-          'No-login vendor work order portal with invoicing',
-          'Asset health scoring and CapEx forecasting',
-          'Automated turnover scheduling from Hospitable bookings',
-          'Teammates sync in automatically as FieldStay crew',
-          'Inventory par levels and restocking',
-          'Owner P&L reporting',
-          'RepuGuard AI review response drafting',
-        ],
-        // Same rule as strops/breezeway-alternative: this price must also be
-        // visible on the rendered page, not just in the schema.
-        offers: {
-          '@type': 'Offer',
-          price: '49',
-          priceCurrency: 'USD',
-          description: 'Starting at $49/month for your first property. 14-day free trial, no credit card required.',
-        },
-      },
+  return buildFaqSoftwareJsonLd(marketingUrl, {
+    faqPath: HOSPITABLE_PATH,
+    faqItems: MARKETING_FAQ,
+    description:
+      'Field operations layer for Hospitable property managers: automated turnovers, crew sync, asset ' +
+      'health tracking, capital planning, and a no-login vendor portal.',
+    featureList: [
+      'No-login vendor work order portal with invoicing',
+      'Asset health scoring and CapEx forecasting',
+      'Automated turnover scheduling from Hospitable bookings',
+      'Teammates sync in automatically as FieldStay crew',
+      'Inventory par levels and restocking',
+      'Owner P&L reporting',
+      'RepuGuard AI review response drafting',
     ],
-  }
+  })
 }
 
 export { serializeJsonLd } from '@/app/strops/json-ld'

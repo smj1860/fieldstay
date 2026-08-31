@@ -1,9 +1,12 @@
 import { CREW_VISIBILITY_FAQ, TEAM_ACCESS_FAQ, MARKETING_OFFLINE_FAQ, MARKETING_TRIAL_FAQ } from '@/lib/faq-content'
+import { buildFaqSoftwareJsonLd } from '@/app/strops/json-ld'
 
 // ============================================================================
-// Structured data for /ownerrez. Same pattern as app/strops/json-ld.ts and
-// app/breezeway-alternative/json-ld.ts (FAQPage + SoftwareApplication) —
-// serializeJsonLd is imported from strops rather than reimplemented.
+// Structured data for /ownerrez. The @graph scaffolding (FAQPage +
+// SoftwareApplication, including why the SoftwareApplication @id is the same
+// shared literal on every page) lives in buildFaqSoftwareJsonLd()
+// (app/strops/json-ld.ts) — this file supplies only what's actually specific
+// to /ownerrez: the FAQ content and the feature/description copy.
 //
 // MARKETING_FAQ lives HERE, not in components/ownerrez/faq-section.tsx (which
 // re-exports it) — that component has 'use client' at the top, and a plain
@@ -15,15 +18,6 @@ import { CREW_VISIBILITY_FAQ, TEAM_ACCESS_FAQ, MARKETING_OFFLINE_FAQ, MARKETING_
 // directive, so both the Server Component (page.tsx, via buildJsonLd) and the
 // Client Component (faq-section.tsx) can safely import the same array from
 // here — same shape as app/hosts/json-ld.ts already uses for FAQ_ITEMS.
-//
-// The SoftwareApplication node's @id is the SAME literal
-// `${marketingUrl}#software` every other page's json-ld.ts uses (marketingUrl
-// here is the bare origin from marketingOrigin(), not this page's own
-// canonical) — deliberately, not a bug to fix. It is one entity, "FieldStay
-// the software," referenced consistently across every page; giving each page
-// its own @id would fragment that entity in the eyes of anything reading the
-// graph instead of reinforcing it. Only the FAQPage @id is page-specific
-// (${OWNERREZ_PATH}#faq), because each page's FAQ content really is distinct.
 // ============================================================================
 
 export const OWNERREZ_PATH = '/ownerrez'
@@ -67,48 +61,22 @@ export const MARKETING_FAQ = [
 ] as const
 
 export function buildJsonLd(marketingUrl: string) {
-  return {
-    '@context': 'https://schema.org',
-    '@graph': [
-      {
-        '@type': 'FAQPage',
-        '@id': `${marketingUrl}${OWNERREZ_PATH}#faq`,
-        mainEntity: MARKETING_FAQ.map((f) => ({
-          '@type': 'Question',
-          name: f.q,
-          acceptedAnswer: { '@type': 'Answer', text: f.a },
-        })),
-      },
-      {
-        '@type': 'SoftwareApplication',
-        '@id': `${marketingUrl}#software`,
-        name: 'FieldStay',
-        applicationCategory: 'BusinessApplication',
-        operatingSystem: 'Web, iOS, Android',
-        description:
-          'Field operations layer for OwnerRez property managers: automated turnovers, crew management, ' +
-          'inventory, maintenance work orders, and a no-login vendor portal.',
-        featureList: [
-          'Automated turnover scheduling from OwnerRez bookings',
-          'Crew checklists and assignment',
-          'No-login vendor work order portal with invoicing',
-          'Asset health scoring and CapEx forecasting',
-          'Inventory par levels and restocking',
-          'Owner P&L reporting',
-          'RepuGuard AI review response drafting',
-        ],
-        // Same rule as strops/breezeway-alternative: this price must also be
-        // visible on the rendered page, not just in the schema — Google
-        // suppresses structured data describing content a visitor can't see.
-        offers: {
-          '@type': 'Offer',
-          price: '49',
-          priceCurrency: 'USD',
-          description: 'Starting at $49/month for your first property. 14-day free trial, no credit card required.',
-        },
-      },
+  return buildFaqSoftwareJsonLd(marketingUrl, {
+    faqPath: OWNERREZ_PATH,
+    faqItems: MARKETING_FAQ,
+    description:
+      'Field operations layer for OwnerRez property managers: automated turnovers, crew management, ' +
+      'inventory, maintenance work orders, and a no-login vendor portal.',
+    featureList: [
+      'Automated turnover scheduling from OwnerRez bookings',
+      'Crew checklists and assignment',
+      'No-login vendor work order portal with invoicing',
+      'Asset health scoring and CapEx forecasting',
+      'Inventory par levels and restocking',
+      'Owner P&L reporting',
+      'RepuGuard AI review response drafting',
     ],
-  }
+  })
 }
 
 export { serializeJsonLd } from '@/app/strops/json-ld'
