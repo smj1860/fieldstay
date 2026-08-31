@@ -49,11 +49,14 @@ import { readCode } from './scan'
  */
 const PUBLIC_MARKETING_PAGES = [
   '/',
+  '/pricing',
   '/hosts',
   '/strops',
   '/ownerrez',
   '/hospitable',
   '/breezeway-alternative',
+  '/enterprise',
+  '/for-vendors',
   '/privacy',
   '/terms',
   '/dpa',

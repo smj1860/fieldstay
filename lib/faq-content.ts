@@ -190,6 +190,101 @@ export const HOSTS_REPLACES_PMS_FAQ = {
 } as const
 
 /**
+ * /enterprise — the large-portfolio segment landing page's FAQ content.
+ *
+ * Kept honest about two real limits rather than glossing over them:
+ * ENTERPRISE_SLA_FAQ names no specific uptime percentage or credit terms
+ * because none are published anywhere in this codebase (checked — only the
+ * feature-bullet phrase "SLA-backed uptime" in plan-tiers.ts, no actual
+ * number), and ENTERPRISE_TEAM_ACCESS_FAQ says plainly that every invited
+ * team member gets full org-wide Admin access today — there is no region-
+ * or property-scoped permission tier yet, which TEAM_ACCESS_FAQ's own
+ * wording already confirms ("Anyone you invite... joins as an Admin with
+ * full access"). An enterprise buyer will ask this exact question; answering
+ * it honestly here is worth more than a page that goes quiet on it.
+ */
+export const ENTERPRISE_SLA_FAQ = {
+  question: 'What SLA do you offer for Enterprise accounts?',
+  answer:
+    'Enterprise accounts get an uptime SLA and dedicated support commitments — the specific terms are set ' +
+    'per contract based on your deployment, so we don\'t publish a single number here. Talk to us and we\'ll ' +
+    'work out what\'s right for your operation.',
+} as const
+
+export const ENTERPRISE_SECURITY_FAQ = {
+  question: 'What security and compliance measures does FieldStay have in place?',
+  answer:
+    'All data is encrypted in transit (TLS 1.2+) and sensitive credentials and tokens are encrypted at rest ' +
+    '(AES-256, via Supabase Vault). Every security-relevant action — logins, permission changes, data exports ' +
+    '— is written to an append-only audit log retained for 3 years, consistent with SOC 2 Type II audit ' +
+    'requirements. A signed Data Processing Agreement (GDPR Article 28) is available for any account — see ' +
+    '/dpa. We don\'t hold a SOC 2 or ISO 27001 certification today; if that\'s a hard requirement for your ' +
+    'organization, tell us and we can talk through where things stand.',
+} as const
+
+export const ENTERPRISE_TEAM_ACCESS_FAQ = {
+  question: 'Can different teams or regions have different levels of access?',
+  answer:
+    'Not yet, and we\'d rather say that plainly than let you find out after signing up. Today, every person ' +
+    'you invite to your organization joins with full Admin access to the whole account — every property, ' +
+    'every region. Crew members are separate and already scoped to only their own assigned turnovers, but ' +
+    'there is no region- or property-scoped permission tier for office staff. If granular, per-region access ' +
+    'control is a requirement for your team, talk to us before you commit.',
+} as const
+
+export const ENTERPRISE_MIGRATION_FAQ = {
+  question: 'What happens to our existing data when we switch to FieldStay?',
+  answer:
+    'If you\'re on OwnerRez, Hospitable, or Hostex, connecting your account pulls in your full booking ' +
+    'history — not just upcoming stays — on the first sync, so nothing before today is lost. There isn\'t a ' +
+    'separate white-glove migration product beyond that connection: it\'s the same sync every FieldStay ' +
+    'account uses, just at your scale. Portfolio and Enterprise accounts get custom onboarding and dedicated ' +
+    'account support to walk through the cutover with you.',
+} as const
+
+/**
+ * /for-vendors — the vendor/contractor-facing landing page's FAQ content.
+ *
+ * Every answer here is checked against the live token-portal flow
+ * (app/work-orders/[token]/vendor-portal.tsx, lib/stripe/vendor-connect-invite.ts,
+ * lib/inngest/functions/work-order-dispatch.ts and work-order-invoice.ts) —
+ * not the older docs/support/26-work-order-vendor-dispatch.md article, which
+ * describes a sign-off-only flow that predates the current itemized-invoice
+ * + Stripe Connect payout system and is stale relative to what's actually
+ * live. VENDOR_PAYOUT_TIMING_FAQ deliberately doesn't promise a specific
+ * number of days: no payout SLA is published anywhere in this codebase, and
+ * the real timing depends on when the property manager approves the invoice
+ * plus Stripe's own transfer schedule, neither of which FieldStay controls.
+ */
+export const VENDOR_NO_ACCOUNT_FAQ = {
+  question: 'Do I need to create an account to use FieldStay?',
+  answer:
+    'No. A work order arrives as a link by email — you open it, see the property details and the ' +
+    'authorized spending limit, and can submit a quote or mark the job complete with photos, all with no ' +
+    'account and nothing to install. The one exception: before you can submit an invoice for payment, ' +
+    'you\'ll be asked to set up a Stripe Connect payout account (a one-time step, so payment can reach your ' +
+    'bank) — that\'s a Stripe account, not a FieldStay login.',
+} as const
+
+export const VENDOR_PAYOUT_TIMING_FAQ = {
+  question: 'How fast do I get paid?',
+  answer:
+    'Once the property manager reviews and approves your invoice, payment is sent via Stripe Connect ' +
+    'directly to your bank account. We don\'t control — and won\'t promise a specific number of days for — ' +
+    'how quickly a given property manager reviews an invoice, and Stripe\'s own transfer timing applies ' +
+    'once payment is released.',
+} as const
+
+export const VENDOR_MULTIPLE_PMS_FAQ = {
+  question: 'What if I work with multiple property managers who don\'t all use FieldStay?',
+  answer:
+    'Nothing changes on your end. Each work order link is independent and tied to that one job — there\'s ' +
+    'no FieldStay account for you to maintain across property managers, so a job from a manager who uses ' +
+    'FieldStay works exactly like any other, and the property managers who don\'t use it just reach you the ' +
+    'way they always have.',
+} as const
+
+/**
  * /strops — the offline SEO landing page.
  *
  * Lives here rather than in app/strops/ because this file is where FAQ content

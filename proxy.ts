@@ -109,6 +109,9 @@ const PRERENDERED_ROUTES = new Set([
   '/ownerrez',
   '/hospitable',
   '/breezeway-alternative',
+  '/pricing',
+  '/enterprise',
+  '/for-vendors',
   '/privacy',
   '/terms',
 ])
@@ -248,6 +251,15 @@ const BYPASS_ROUTES = [
   // for an anonymous crawler would defeat the entire point. No auth-branched
   // CTA, like the pages above it.
   '/breezeway-alternative',
+
+  // Pricing, Enterprise, and Vendor-facing marketing pages — same reasoning
+  // and same failure mode as every page above: exist to be found by search
+  // and by direct links from other marketing pages (breezeway-alternative,
+  // hosts), so a 307 -> /login for an anonymous crawler or referred visitor
+  // would defeat the point. No auth-branched CTA on any of the three.
+  '/pricing',
+  '/enterprise',
+  '/for-vendors',
 
   // Data Processing Agreement. BYPASS rather than PUBLIC on purpose, and the
   // distinction matters for legal documents specifically: a public route

@@ -26,11 +26,14 @@ const PAGES: ReadonlyArray<{
   changeFreq: MetadataRoute.Sitemap[number]['changeFrequency']
 }> = [
   { path: '/',                      priority: 1.0, changeFreq: 'weekly'  },
+  { path: '/pricing',               priority: 0.9, changeFreq: 'monthly' },
   { path: '/strops',                priority: 0.9, changeFreq: 'monthly' },
   { path: '/ownerrez',              priority: 0.8, changeFreq: 'monthly' },
   { path: '/hospitable',            priority: 0.8, changeFreq: 'monthly' },
   { path: '/hosts',                 priority: 0.8, changeFreq: 'monthly' },
   { path: '/breezeway-alternative', priority: 0.8, changeFreq: 'monthly' },
+  { path: '/enterprise',            priority: 0.7, changeFreq: 'monthly' },
+  { path: '/for-vendors',           priority: 0.6, changeFreq: 'monthly' },
   { path: '/privacy',               priority: 0.3, changeFreq: 'yearly'  },
   { path: '/terms',                 priority: 0.3, changeFreq: 'yearly'  },
   { path: '/dpa',                   priority: 0.3, changeFreq: 'yearly'  },
