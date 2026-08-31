@@ -5,7 +5,8 @@ import type { Metadata } from 'next'
 import RepuGuardWrapper from '@/components/repuguard/RepuGuardWrapper'
 import PricingSection from '@/components/ownerrez/PricingSection'
 import FaqSection from '@/components/ownerrez/faq-section'
-import { marketingUrl } from '@/lib/marketing'
+import { marketingUrl, marketingOrigin } from '@/lib/marketing'
+import { buildJsonLd, serializeJsonLd } from './json-ld'
 
 export const metadata: Metadata = {
   // Absolute apex canonical. fieldstay.app and app.fieldstay.app are
@@ -13,8 +14,20 @@ export const metadata: Metadata = {
   // this Google picks a winner itself, and a relative value would resolve
   // against metadataBase (NEXT_PUBLIC_APP_URL) to the wrong one.
   alternates: { canonical: marketingUrl('/ownerrez') },
-  title: 'FieldStay for OwnerRez',
+  // Not "FieldStay for OwnerRez" — the root layout's title template already
+  // appends " — FieldStay" to every page's own title, so a leading brand
+  // name duplicated it with no search-intent keywords to show for the space.
+  title: 'OwnerRez Turnover & Crew Management Software',
   description: 'Connect your OwnerRez account for automated turnovers, crew management, inventory, and maintenance — free 14-day trial, no credit card required.',
+  keywords: [
+    'ownerrez integration software',
+    'ownerrez turnover management',
+    'ownerrez crew scheduling',
+    'property management software for ownerrez',
+    'ownerrez vendor work orders',
+    'short term rental operations software',
+    'ownerrez add-on for cleaning and maintenance',
+  ],
   openGraph: {
     title: 'FieldStay for OwnerRez',
     description: 'The operations layer your OwnerRez account is missing.',
@@ -51,6 +64,7 @@ export const metadata: Metadata = {
 export default function OwnerRezPage() {
   return (
     <div className="min-h-screen">
+      <script type="application/ld+json">{serializeJsonLd(buildJsonLd(marketingOrigin()))}</script>
 
       {/* ══════════════════════════════════════════
           SECTION 1 — DARK NAVY

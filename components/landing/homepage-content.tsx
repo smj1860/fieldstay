@@ -8,12 +8,7 @@ import { pricingTiers } from '@/components/pricing/plan-tiers'
 import PricingCards from '@/components/pricing/PricingCards'
 import FaqSection from '@/components/faq/FaqSection'
 import RepuGuardWrapper from '@/components/repuguard/RepuGuardWrapper'
-import {
-  MARKETING_OFFLINE_FAQ,
-  MARKETING_TRIAL_FAQ,
-  CREW_VISIBILITY_FAQ,
-  TEAM_ACCESS_FAQ,
-} from '@/lib/faq-content'
+import { HOMEPAGE_FAQ_ITEMS } from '@/app/json-ld'
 
 // The homepage's own entry-tier bullets -- the only thing that legitimately
 // varies from /ownerrez and /hospitable's entry cards (their first bullet
@@ -80,15 +75,6 @@ const HOMEPAGE_ENTRY_FEATURES = [
   'Owner P&L portal',
   'Crew email invites',
   'RepuGuard reputation management',
-] as const
-
-// Reused verbatim from lib/faq-content.ts -- the homepage was the only public
-// landing page shipping without a FAQ, and the answers already existed.
-const HOMEPAGE_FAQ_ITEMS = [
-  { q: MARKETING_OFFLINE_FAQ.question, a: MARKETING_OFFLINE_FAQ.answer },
-  { q: MARKETING_TRIAL_FAQ.question, a: MARKETING_TRIAL_FAQ.answer },
-  { q: CREW_VISIBILITY_FAQ.question, a: CREW_VISIBILITY_FAQ.answer },
-  { q: TEAM_ACCESS_FAQ.question, a: TEAM_ACCESS_FAQ.answer },
 ] as const
 
 export function HomepageContent() {
