@@ -26,10 +26,17 @@
 // MarketingCtaBand.tsx, shared with /pricing — the two pages' hero/CTA
 // markup started as independent copies of the same shape and SonarCloud
 // flagged 43%/17% duplication between them (2026-08-31).
+//
+// Entry-tier features come from plan-tiers.ts's GENERIC_ENTRY_FEATURES,
+// shared with /pricing rather than a local copy — the two arrays were
+// byte-identical (an Enterprise visitor under the self-serve ceiling sees
+// the same Hosts-tier card as everyone else at the bottom of the
+// calculator), which SonarCloud also flagged as duplication on new code.
 
 import type { Metadata } from 'next'
 import Link from 'next/link'
 import GenericPricingSection from '@/components/pricing/GenericPricingSection'
+import { GENERIC_ENTRY_FEATURES } from '@/components/pricing/plan-tiers'
 import FaqSection from '@/components/faq/FaqSection'
 import MarketingHero from '@/components/marketing/MarketingHero'
 import MarketingCtaBand from '@/components/marketing/MarketingCtaBand'
@@ -38,19 +45,6 @@ import { marketingUrl, marketingOrigin, appUrl } from '@/lib/marketing'
 
 const PATH = ENTERPRISE_PATH
 const CANONICAL = marketingUrl(PATH)
-
-// Same intersection-of-every-page entry features /pricing uses — an
-// Enterprise visitor under the self-serve ceiling sees the same Hosts-tier
-// card as everyone else at the bottom of the calculator.
-const ENTRY_FEATURES = [
-  'iCal sync (Airbnb, VRBO) — or connect OwnerRez/Hospitable',
-  'Offline-ready crew app with photo capture',
-  'No-login vendor work order portal',
-  'Inventory with auto-restock',
-  'Maintenance scheduling',
-  'Owner P&L portal',
-  'RepuGuard reputation management',
-] as const
 
 export const metadata: Metadata = {
   alternates: { canonical: CANONICAL },
@@ -176,7 +170,7 @@ export default function EnterprisePage() {
             The calculator covers self-serve pricing up to 150 properties. Above that, or if your
             operation needs a custom deployment, the Enterprise tier is volume-priced per contract.
           </p>
-          <GenericPricingSection entryFeatures={ENTRY_FEATURES} signupHref={ctaHref} />
+          <GenericPricingSection entryFeatures={GENERIC_ENTRY_FEATURES} signupHref={ctaHref} />
         </div>
       </section>
 

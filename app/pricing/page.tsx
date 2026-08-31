@@ -6,44 +6,34 @@
 // Almost entirely composition: GenericPricingSection (which wraps
 // PricingCards + plan-tiers.ts, the same numbers every other landing page
 // reads from) does the real work. This page supplies only what's genuinely
-// page-specific — the hero, metadata, and a generic (non-PMS-specific)
-// entry-tier feature list.
+// page-specific — the hero and metadata.
 //
 // Not a PricingSection (components/pricing/PricingSection.tsx) consumer —
 // that component is typed to provider: "ownerrez" | "hospitable" and builds
 // its CTA from that provider slug, which has no correct value here. See
 // components/pricing/GenericPricingSection.tsx's header comment.
 //
-// Entry-tier features below are generic on purpose — this page has no PMS
-// to sell against, unlike /ownerrez or /hospitable's entry bullets.
+// Entry-tier features come from plan-tiers.ts's GENERIC_ENTRY_FEATURES, not
+// a local array — this page and /enterprise both have no PMS to sell
+// against, unlike /ownerrez or /hospitable's entry bullets, and a local copy
+// in each was byte-identical: SonarCloud flagged it as duplication on new
+// code (2026-08-31).
 //
 // Hero and closing CTA band use components/marketing/MarketingHero.tsx and
 // MarketingCtaBand.tsx, shared with /enterprise — the two pages' hero/CTA
 // markup started as independent copies of the same shape and SonarCloud
-// flagged 43%/17% duplication between them (2026-08-31).
+// flagged 43%/17% duplication between them the same day.
 
 import type { Metadata } from 'next'
 import Link from 'next/link'
 import GenericPricingSection from '@/components/pricing/GenericPricingSection'
+import { GENERIC_ENTRY_FEATURES } from '@/components/pricing/plan-tiers'
 import MarketingHero from '@/components/marketing/MarketingHero'
 import MarketingCtaBand from '@/components/marketing/MarketingCtaBand'
 import { marketingUrl, appUrl } from '@/lib/marketing'
 
 const PATH = '/pricing'
 const CANONICAL = marketingUrl(PATH)
-
-// The intersection of what every integration landing page promises — no
-// wording naming a specific PMS as the sales hook, since this page has no
-// PMS context of its own.
-const GENERIC_ENTRY_FEATURES = [
-  'iCal sync (Airbnb, VRBO) — or connect OwnerRez/Hospitable',
-  'Offline-ready crew app with photo capture',
-  'No-login vendor work order portal',
-  'Inventory with auto-restock',
-  'Maintenance scheduling',
-  'Owner P&L portal',
-  'RepuGuard reputation management',
-] as const
 
 export const metadata: Metadata = {
   alternates: { canonical: CANONICAL },

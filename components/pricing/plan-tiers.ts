@@ -170,3 +170,23 @@ export function pricingTiers(entryFeatures: readonly string[]): PricingTier[] {
     ...TIERS_ABOVE_ENTRY,
   ]
 }
+
+/**
+ * The intersection of what every integration landing page promises, with no
+ * wording naming a specific PMS as the sales hook. Shared by /pricing and
+ * /enterprise — both GenericPricingSection consumers with no PMS context of
+ * their own — which is why this lives here rather than duplicated in each
+ * page: the two copies were byte-identical and SonarCloud flagged it as
+ * duplication on new code (2026-08-31). OwnerRez/Hospitable's own
+ * PricingSection.tsx pages pass PMS-specific bullets instead, naming the
+ * competitor being sold against in the first line.
+ */
+export const GENERIC_ENTRY_FEATURES = [
+  'iCal sync (Airbnb, VRBO) — or connect OwnerRez/Hospitable',
+  'Offline-ready crew app with photo capture',
+  'No-login vendor work order portal',
+  'Inventory with auto-restock',
+  'Maintenance scheduling',
+  'Owner P&L portal',
+  'RepuGuard reputation management',
+] as const
