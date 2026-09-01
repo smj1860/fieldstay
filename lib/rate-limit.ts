@@ -365,6 +365,22 @@ export const ownerPortalRatelimit = new Ratelimit({
   prefix:    'rl:owner-portal',
 })
 
+// app/api/crew/sync-incidents — authenticated (requireCrewMember), so NOT a
+// proxy.ts TOKEN_ROUTES entry (that mechanism is for guessable-token PUBLIC
+// routes; see rateLimiterForPathname's header comment). Keyed by crew.id
+// rather than IP: this endpoint accepts client-asserted incident data
+// (RECORD_GUARANTEE_IMPLEMENTATION.md section 1.3), so the limiter checked
+// here bounds an authenticated identity spamming batches, not an anonymous
+// scan. 20/minute comfortably covers a device flushing its whole unreported
+// queue on every reconnect (batches of up to 50) without opening a spend/DoS
+// vector.
+export const syncIncidentReportRatelimit = new Ratelimit({
+  redis,
+  limiter:   Ratelimit.slidingWindow(20, '1 m'),
+  analytics: false,
+  prefix:    'rl:sync-incidents',
+})
+
 /**
  * AGGREGATE ceiling for one token-route resource, across every source IP.
  *

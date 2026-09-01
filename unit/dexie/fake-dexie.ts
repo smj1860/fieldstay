@@ -118,6 +118,7 @@ export function makeFakeDexieDb() {
     pending_photo_uploads:    fakeTable('id'),
     sync_meta:                fakeTable('key'),
     mutations:                fakeTable('id'),
+    sync_incidents:           fakeTable('id'),
   }
 }
 
