@@ -13,6 +13,8 @@
 // fields being present on every row.
 // ============================================================================
 
+import { GUARANTEE_NAME } from '@/lib/guarantee'
+
 export const RESEARCHED_ON = '2026-08-30'
 
 export interface ComparisonRow {
@@ -98,13 +100,39 @@ export const COMPARISON_ROWS: readonly ComparisonRow[] = [
 ] as const
 
 /**
- * The Glass Box Operations Guarantee — FieldStay's own policy, not a
- * Breezeway-comparison claim, so it needs only a FieldStay-side citation.
- * Adapted from the drafted copy to match the trial length actually live
+ * The 14-day trial offer — split out from the guarantee pillars below
+ * (RECORD_GUARANTEE_IMPLEMENTATION.md Workstream 2.2). It used to be pillar
+ * one of a three-pillar "Glass Box Operations Guarantee" box, but a trial
+ * offer is not a guarantee — it carries no remedy, it is just terms of the
+ * free trial — and lumping it in next to a real, credit-bearing commitment
+ * blurred the difference between the two. Matches the trial length live
  * everywhere else on the site: every other marketing page (hosts, strops,
- * ownerrez, hospitable, /signup) says 14 days, and the draft this was built
- * from said 30 — publishing that mismatch would have been exactly the kind
- * of live inconsistency this page's own citation discipline exists to catch.
+ * ownerrez, hospitable, /signup) says 14 days.
+ */
+export interface TrialOffer {
+  title: string
+  body:  string
+  source: string
+}
+
+export const TRIAL_OFFER: TrialOffer = {
+  title: 'Try it on your hardest properties, risk-free.',
+  body:
+    'Run FieldStay on 3–5 of your most demanding properties for 14 days — the ones with spotty signal, ' +
+    'tricky access, or vendors who barely answer texts. If it doesn\'t make your week easier, cancel with ' +
+    'one click. No contract, no penalty.',
+  source: 'app/(auth)/signup/page.tsx',
+}
+
+/**
+ * The FieldStay Record Guarantee — FieldStay's own policy, not a
+ * Breezeway-comparison claim, so it needs only a FieldStay-side citation.
+ * Collapsed from three pillars to one (RECORD_GUARANTEE_IMPLEMENTATION.md
+ * Workstream 2.2): the trial offer above was never a guarantee, and "built
+ * for the people who actually have to use it" is product description, not a
+ * promise with a remedy — both moved out. What remains is the one thing that
+ * actually is a guarantee: FieldStay logs the record, and credits you if it
+ * cannot produce one.
  */
 export interface GuaranteePillar {
   title: string
@@ -114,28 +142,13 @@ export interface GuaranteePillar {
 
 export const GUARANTEE_PILLARS: readonly GuaranteePillar[] = [
   {
-    title: 'Try it on your hardest properties, risk-free.',
-    body:
-      'Run FieldStay on 3–5 of your most demanding properties for 14 days — the ones with spotty signal, ' +
-      'tricky access, or vendors who barely answer texts. If it doesn\'t make your week easier, cancel with ' +
-      'one click. No contract, no penalty.',
-    source: 'app/(auth)/signup/page.tsx',
-  },
-  {
-    title: 'If something goes wrong, we show you the record.',
+    title: 'If something goes wrong, we show you the record — or credit you.',
     body:
       'Every checklist step, synced photo, and work order status change in FieldStay is timestamped and ' +
-      'logged. If you ever think something was missed or mishandled, we don\'t ask you to trust us — we ' +
-      'pull the actual record and show you exactly what happened, and when.',
-    source: 'lib/audit.ts, types/database.ts (WorkOrderUpdate / AuditEvent)',
-  },
-  {
-    title: 'Built for the people who actually have to use it.',
-    body:
-      'Your crew doesn\'t need training — the app works offline and walks them through the checklist step ' +
-      'by step. Your vendors don\'t need to download anything or remember a password — every work order ' +
-      'arrives as a link they open, quote, and complete from their phone.',
-    source: 'lib/dexie/schema.ts, app/work-orders/[token]/vendor-portal.tsx',
+      'logged. If you ask what happened on a job and FieldStay cannot produce that record, the billing ' +
+      `period is credited under ${GUARANTEE_NAME}.`,
+    source: 'lib/audit.ts, types/database.ts (WorkOrderUpdate / AuditEvent), lib/guarantee.ts, ' +
+      'supabase/migrations/20260901120748_add_crew_sync_incidents.sql',
   },
 ] as const
 
@@ -155,5 +168,18 @@ export const FIELDSTAY_HIGHLIGHTS: ReadonlyArray<{ title: string; body: string; 
     title: 'Inventory with auto-restock',
     body: 'Par levels per property; a low-stock item is added to a purchase order automatically, with a one-click Kroger cart build.',
     source: 'lib/inngest/functions/inventory-events.ts, lib/inngest/functions/build-shopping-cart.ts',
+  },
+  {
+    // Moved from GUARANTEE_PILLARS (RECORD_GUARANTEE_IMPLEMENTATION.md
+    // Workstream 2.2/2.4) — this is product description, not a promise, and
+    // the absolute "doesn't need training" claim is softened: crew adoption
+    // is the acknowledged rollout risk, and the first struggling cleaner
+    // disproves an absolute the way this version can't.
+    title: 'Built for the people who actually have to use it.',
+    body:
+      'The app walks your crew through the checklist step by step, and works with no signal. Your vendors ' +
+      'don\'t need to download anything or remember a password — every work order arrives as a link they ' +
+      'open, quote, and complete from their phone.',
+    source: 'lib/dexie/schema.ts, app/work-orders/[token]/vendor-portal.tsx',
   },
 ] as const

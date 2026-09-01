@@ -112,6 +112,7 @@ const PRERENDERED_ROUTES = new Set([
   '/pricing',
   '/enterprise',
   '/for-vendors',
+  '/guarantee',
   '/privacy',
   '/terms',
 ])
@@ -274,6 +275,13 @@ const BYPASS_ROUTES = [
   // prospect had to create an account to read the agreement they were being
   // asked to sign. Google reported it as "Discovered - currently not indexed".
   '/dpa',
+
+  // The FieldStay Record Guarantee policy — same BYPASS reasoning as /dpa
+  // immediately above: an existing customer checking the guarantee's terms
+  // while signed in, and a prospect reading it before signup, both need to
+  // reach the same page rather than one of them bouncing to /login or the
+  // dashboard.
+  '/guarantee',
 
   // Next.js internals and static assets
   '/_next',

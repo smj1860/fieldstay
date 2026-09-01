@@ -13,6 +13,7 @@ import { Card } from '@/components/ui/Card'
 import { Badge } from '@/components/ui/Badge'
 import Link from 'next/link'
 import { throwIfAnyQueryFailed } from '@/lib/supabase/unwrap'
+import { GUARANTEE_NAME } from '@/lib/guarantee'
 import type { CrewSyncIncident, CrewMember } from '@/types/database'
 
 const PAGE_SIZE = 50
@@ -68,8 +69,8 @@ export default async function SyncIncidentsPage({
         </div>
       </div>
       <p className="text-xs mb-6" style={{ color: 'var(--text-muted)' }}>
-        Backs the{' '}
-        <Link href="/guarantee" className="underline">FieldStay Record Guarantee</Link>
+        Backs{' '}
+        <Link href="/guarantee" className="underline">{GUARANTEE_NAME}</Link>
         &apos;s adjudication — every row here is a device-reported dead-letter or
         stalled sync, never something a person entered by hand.
       </p>

@@ -1,3 +1,5 @@
+import { GUARANTEE_NAME } from './guarantee'
+
 export interface FaqItem {
   id:       string
   question: string
@@ -457,11 +459,11 @@ export const BREEZEWAY_FAQ: readonly FaqItem[] = [
     id:       'breezeway-alternative-guarantee',
     question: 'Does FieldStay offer any kind of guarantee?',
     answer:
-      'Yes — the Glass Box Operations Guarantee. Run it on your 3-5 hardest properties for 14 days, ' +
-      'cancel with one click if it doesn\'t help. If you ever think something was missed or mishandled, ' +
-      'FieldStay doesn\'t ask you to take its word for it — every checklist step, photo, and work order ' +
-      'status change is timestamped and logged, and that record is what settles the question. It is not a ' +
-      'money-back guarantee; it is a transparency guarantee backed by an actual audit trail.',
+      `Yes — ${GUARANTEE_NAME}. Every checklist step, photo, and work order status change is ` +
+      'timestamped and logged, so if you ever ask what happened on a job, FieldStay doesn\'t ask you to ' +
+      'take its word for it. If FieldStay cannot produce that record, the billing period is credited. ' +
+      'Separately, the 14-day free trial lets you run FieldStay on your 3-5 hardest properties and cancel ' +
+      'with one click if it doesn\'t help — see the full guarantee terms at /guarantee.',
   },
 ] as const
 

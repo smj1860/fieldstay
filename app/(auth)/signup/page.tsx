@@ -2,6 +2,7 @@ import type { Metadata } from 'next'
 import Link              from 'next/link'
 import { Suspense }      from 'react'
 import { SignupForm }    from './signup-form'
+import { GUARANTEE_NAME } from '@/lib/guarantee'
 
 export const metadata: Metadata = { title: 'Sign Up — FieldStay' }
 
@@ -9,7 +10,12 @@ export default function SignupPage() {
   return (
     <>
       <h2 className="text-xl font-bold mb-1" style={{ color: 'var(--text-primary)' }}>Create your account</h2>
-      <p className="text-sm mb-6" style={{ color: 'var(--text-muted)' }}>Start your 14-day free trial. No credit card required.</p>
+      <p className="text-sm mb-6" style={{ color: 'var(--text-muted)' }}>
+        Start your 14-day free trial. No credit card required. Backed by{' '}
+        <Link href="/guarantee" className="text-brand-700 font-medium hover:underline">
+          {GUARANTEE_NAME}
+        </Link>.
+      </p>
       <Suspense fallback={null}>
         <SignupForm />
       </Suspense>

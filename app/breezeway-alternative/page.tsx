@@ -16,7 +16,8 @@
 import type { Metadata } from 'next'
 import Link from 'next/link'
 
-import { COMPARISON_ROWS, FIELDSTAY_HIGHLIGHTS, GUARANTEE_PILLARS, RESEARCHED_ON } from './comparison-data'
+import { COMPARISON_ROWS, FIELDSTAY_HIGHLIGHTS, GUARANTEE_PILLARS, TRIAL_OFFER, RESEARCHED_ON } from './comparison-data'
+import { GUARANTEE_NAME, GUARANTEE_SCOPE_LINE } from '@/lib/guarantee'
 import { buildJsonLd, serializeJsonLd, BREEZEWAY_PATH } from './json-ld'
 import { BREEZEWAY_FAQ as FAQS } from '@/lib/faq-content'
 import { monthlyCostCents } from '@/lib/stripe/brackets'
@@ -191,26 +192,41 @@ export default function BreezewayAlternativePage() {
         </div>
       </section>
 
-      {/* ── The Glass Box Operations Guarantee ──────────────────────────── */}
+      {/* ── Trial offer + The FieldStay Record Guarantee ────────────────── */}
       <section className="bg-[var(--mkt-ink)] text-white">
-        <div className="max-w-5xl mx-auto px-6 py-16">
-          <p className="text-xs font-bold tracking-[0.16em] uppercase text-[var(--mkt-gold)] mb-3 text-center">
-            The Glass Box Operations Guarantee
-          </p>
-          <h2 className="text-3xl font-bold mb-3 font-display text-center">
-            Most software asks you to trust it. We&apos;d rather show you.
-          </h2>
-          <p className="text-[var(--mkt-on-dark-softer)] max-w-2xl mx-auto mb-12 text-center">
-            Every action your crew, your vendors, and the software itself take is visible, timestamped, and
-            yours to see. That&apos;s not a slogan — it&apos;s a guarantee.
-          </p>
-          <div className="grid md:grid-cols-3 gap-8">
-            {GUARANTEE_PILLARS.map((p) => (
-              <div key={p.title}>
-                <div className="font-semibold mb-2">{p.title}</div>
-                <p className="text-sm text-[var(--mkt-on-dark-soft)] leading-relaxed">{p.body}</p>
-              </div>
-            ))}
+        <div className="max-w-3xl mx-auto px-6 py-16">
+          <div className="text-center mb-12">
+            <p className="text-xs font-bold tracking-[0.16em] uppercase text-[var(--mkt-gold)] mb-3">
+              Try it risk-free
+            </p>
+            <h2 className="text-2xl font-bold mb-3 font-display">{TRIAL_OFFER.title}</h2>
+            <p className="text-[var(--mkt-on-dark-softer)]">{TRIAL_OFFER.body}</p>
+          </div>
+
+          <div className="border-t border-white/10 pt-12 text-center">
+            <p className="text-xs font-bold tracking-[0.16em] uppercase text-[var(--mkt-gold)] mb-3">
+              {GUARANTEE_NAME}
+            </p>
+            <h2 className="text-2xl font-bold mb-3 font-display">
+              Most software asks you to trust it. We&apos;d rather show you — or credit you.
+            </h2>
+            <p className="text-[var(--mkt-on-dark-softer)] max-w-2xl mx-auto mb-8">
+              {GUARANTEE_SCOPE_LINE}
+            </p>
+            <div className="max-w-xl mx-auto text-left">
+              {GUARANTEE_PILLARS.map((p) => (
+                <div key={p.title}>
+                  <div className="font-semibold mb-2">{p.title}</div>
+                  <p className="text-sm text-[var(--mkt-on-dark-soft)] leading-relaxed">{p.body}</p>
+                </div>
+              ))}
+            </div>
+            <Link
+              href="/guarantee"
+              className="inline-block mt-6 text-sm underline text-[var(--mkt-on-dark-soft)] hover:text-white"
+            >
+              Read the full guarantee terms →
+            </Link>
           </div>
         </div>
       </section>

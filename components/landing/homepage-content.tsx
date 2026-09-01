@@ -55,6 +55,7 @@ const FOOTER_LINKS: ReadonlyArray<{ label: string; href: string }> = [
   { label: 'OwnerRez',      href: '/ownerrez'    },
   { label: 'Hospitable',    href: '/hospitable'  },
   { label: 'vs Breezeway',  href: '/breezeway-alternative' },
+  { label: 'Guarantee',     href: '/guarantee'   },
   { label: 'Privacy',       href: '/privacy'     },
   { label: 'Terms',         href: '/terms'       },
   { label: 'DPA',           href: '/dpa'         },

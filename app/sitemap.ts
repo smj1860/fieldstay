@@ -34,6 +34,7 @@ const PAGES: ReadonlyArray<{
   { path: '/breezeway-alternative', priority: 0.8, changeFreq: 'monthly' },
   { path: '/enterprise',            priority: 0.7, changeFreq: 'monthly' },
   { path: '/for-vendors',           priority: 0.6, changeFreq: 'monthly' },
+  { path: '/guarantee',             priority: 0.5, changeFreq: 'monthly' },
   { path: '/privacy',               priority: 0.3, changeFreq: 'yearly'  },
   { path: '/terms',                 priority: 0.3, changeFreq: 'yearly'  },
   { path: '/dpa',                   priority: 0.3, changeFreq: 'yearly'  },
