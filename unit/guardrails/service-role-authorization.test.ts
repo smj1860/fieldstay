@@ -6,8 +6,8 @@ import { collectSourceFiles, rel, read } from './scan'
 //
 // createServiceClient() bypasses Row Level Security. The convention is:
 // prove who's asking FIRST (requireOrgMember/requireOrgRole/requireAuth/
-// requireCrewMember/requirePlatformAdmin, a webhook signature, or an
-// opaque-token lookup), THEN
+// requireCrewMember/requirePlatformAdmin/requireProperty, a webhook signature,
+// or an opaque-token lookup), THEN
 // escalate to the service client, THEN scope every query manually. All
 // existing call sites follow this because their authors read CLAUDE.md —
 // this test is what stops the next call site from being the one that
@@ -27,7 +27,7 @@ import { collectSourceFiles, rel, read } from './scan'
 // an auth gate but calls it after the query would not survive review, while
 // a file with no gate at all historically has.
 const PROOF_PATTERNS: RegExp[] = [
-  /requireOrgMember|requireOrgRole|requireAuth|requireCrewMember|requirePlatformAdmin/,
+  /requireOrgMember|requireOrgRole|requireAuth|requireCrewMember|requirePlatformAdmin|requireProperty/,
   /auth\.getUser\(\)/,                    // session-authenticated, self-scoped routes (account delete, GDPR export, OAuth start)
   /constructEvent/,                       // Stripe webhook signature verification
   /verify[A-Za-z]*Signature/,             // provider webhook HMAC/Ed25519 verification (e.g. Telnyx)

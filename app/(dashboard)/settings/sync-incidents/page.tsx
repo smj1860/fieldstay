@@ -1,9 +1,11 @@
 // app/(dashboard)/settings/sync-incidents/page.tsx
 //
-// The admin lookup RECORD_GUARANTEE_IMPLEMENTATION.md section 1.5 calls "the
-// actual deliverable" — crew_sync_incidents alone doesn't adjudicate a
-// Record Guarantee claim, this page answering "what failed for this org
-// between date A and B" does. Modeled directly on ../audit/page.tsx (same
+// The admin lookup "Show me what happened" — Implementation Instructions
+// section 3.5 calls "the actual deliverable" — crew_sync_incidents alone
+// answers nothing on its own; this page answering "what failed for this org
+// between date A and B" does. This is a monitoring/support signal for sync
+// reliability, not part of any customer-facing promise — FieldStay does not
+// publish a guarantee. Modeled directly on ../audit/page.tsx (same
 // requireOrgRole gate, same offset pagination via one extra row).
 
 import { requireOrgRole } from '@/lib/auth'
@@ -13,7 +15,6 @@ import { Card } from '@/components/ui/Card'
 import { Badge } from '@/components/ui/Badge'
 import Link from 'next/link'
 import { throwIfAnyQueryFailed } from '@/lib/supabase/unwrap'
-import { GUARANTEE_NAME } from '@/lib/guarantee'
 import type { CrewSyncIncident, CrewMember } from '@/types/database'
 
 const PAGE_SIZE = 50
@@ -69,10 +70,9 @@ export default async function SyncIncidentsPage({
         </div>
       </div>
       <p className="text-xs mb-6" style={{ color: 'var(--text-muted)' }}>
-        Backs{' '}
-        <Link href="/guarantee" className="underline">{GUARANTEE_NAME}</Link>
-        &apos;s adjudication — every row here is a device-reported dead-letter or
-        stalled sync, never something a person entered by hand.
+        Every row here is a device-reported dead-letter or stalled sync, never
+        something a person entered by hand — a monitoring signal for crew sync
+        reliability, not a customer-facing claim.
       </p>
 
       {rows.length === 0 ? (

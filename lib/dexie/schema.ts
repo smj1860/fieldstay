@@ -164,11 +164,12 @@ export interface SyncMetaRow {
 }
 
 /**
- * Local staging for a Record Guarantee sync incident (RECORD_GUARANTEE_
- * IMPLEMENTATION.md Workstream 1) — recorded the moment a mutation
- * dead-letters or a queue crosses the stalled threshold, in the SAME Dexie
- * transaction as the write that flags it (see markDeadLetterWithIncident()
- * in lib/dexie/outbox-primitives.ts). Reported to
+ * Local staging for a sync incident ("Show me what happened" —
+ * Implementation Instructions, Workstream 3 — a monitoring/support signal
+ * for crew sync reliability, not part of any customer-facing promise) —
+ * recorded the moment a mutation dead-letters or a queue crosses the stalled
+ * threshold, in the SAME Dexie transaction as the write that flags it (see
+ * recordSyncIncidentAndPatch() in lib/dexie/syncService.ts). Reported to
  * app/api/crew/sync-incidents on reconnect; `reported` flips to 1 once the
  * server has ack'd it.
  *
@@ -194,7 +195,7 @@ export interface SyncIncidentRow {
  * Bounded, enum-like — never a free-text error message. A free-text reason
  * can carry a fragment of the mutation payload, and no log-scanning
  * guardrail inspects database inserts the way it inspects console/logger
- * calls. See RECORD_GUARANTEE_IMPLEMENTATION.md section 1.4.
+ * calls. See the implementation doc's section 3.4.
  */
 export type SyncIncidentReason =
   | 'http_4xx'
@@ -483,10 +484,10 @@ export class FieldStayDexie extends Dexie {
       ]).then(() => undefined),
     )
 
-    // Record Guarantee sync incidents (RECORD_GUARANTEE_IMPLEMENTATION.md
-    // Workstream 1). Local-only staging table — `reported` indexed so the
-    // reconnect drain can select unreported rows without a full scan, same
-    // reasoning as `mutations.failed`.
+    // Sync incidents ("Show me what happened" — Implementation
+    // Instructions, Workstream 3). Local-only staging table — `reported`
+    // indexed so the reconnect drain can select unreported rows without a
+    // full scan, same reasoning as `mutations.failed`.
     this.version(13).stores({
       sync_incidents: '++id, reported',
     })

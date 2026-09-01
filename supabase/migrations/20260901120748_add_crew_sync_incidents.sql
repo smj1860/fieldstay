@@ -1,13 +1,14 @@
 -- TABLE: crew_sync_incidents
 --
--- Backs the FieldStay Record Guarantee's adjudication path (Workstream 1 of
--- RECORD_GUARANTEE_IMPLEMENTATION.md): when work is Captured on a crew device
--- but dead-letters or stalls before reaching the server, the server must
--- learn that it happened — with enough metadata to answer "what failed for
--- org X between date A and B" and nothing more. Before this table, dead-letter
+-- Sync incident reporting ("Show me what happened" — Implementation
+-- Instructions, Workstream 3): when work is captured on a crew device but
+-- dead-letters or stalls before reaching the server, the server must learn
+-- that it happened — with enough metadata to answer "what failed for org X
+-- between date A and B" and nothing more. Before this table, dead-letter
 -- state lived entirely on the device (lib/dexie/outbox-primitives.ts's
--- DeadLetterFlag), so the guarantee's "Captured by FieldStay" commitment was
--- un-adjudicable: a device could dead-letter and never tell us.
+-- DeadLetterFlag), so a device could dead-letter and no one would ever know.
+-- This is a monitoring/support signal for sync reliability, not part of any
+-- customer-facing promise — FieldStay does not publish a guarantee.
 CREATE TABLE IF NOT EXISTS crew_sync_incidents (
   id                  uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   org_id              uuid NOT NULL REFERENCES organizations(id) ON DELETE CASCADE,
@@ -24,7 +25,7 @@ CREATE TABLE IF NOT EXISTS crew_sync_incidents (
   entity_id           text,                 -- local/remote id of the affected row
   -- Bounded enum-like string, never a free-text error message — a free-text
   -- reason can carry a payload fragment, and no log-scanning guardrail scans
-  -- database inserts. See RECORD_GUARANTEE_IMPLEMENTATION.md section 1.4.
+  -- database inserts. See the implementation doc's section 3.4.
   reason              text CHECK (
     reason IS NULL OR reason IN (
       'http_4xx', 'http_5xx', 'constraint_violation', 'max_retries', 'stalled_threshold'

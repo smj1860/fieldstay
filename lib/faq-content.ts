@@ -1,5 +1,3 @@
-import { GUARANTEE_NAME } from './guarantee'
-
 export interface FaqItem {
   id:       string
   question: string
@@ -456,14 +454,20 @@ export const BREEZEWAY_FAQ: readonly FaqItem[] = [
       'lists it among the add-ons priced a la carte — an added monthly cost with no revenue-sharing back to you.',
   },
   {
-    id:       'breezeway-alternative-guarantee',
-    question: 'Does FieldStay offer any kind of guarantee?',
+    // Renamed from breezeway-alternative-guarantee — FieldStay does not
+    // publish a guarantee ("Show me what happened" — Implementation
+    // Instructions supersedes the earlier Record Guarantee draft). This is a
+    // description of a real, present-tense capability, not a promise about
+    // future behavior — see that doc's section 2.1 for why the wording is
+    // deliberately unchanged from the approved copy rather than embellished.
+    id:       'breezeway-alternative-record-history',
+    question: 'How do I know what actually happened during a turnover?',
     answer:
-      `Yes — ${GUARANTEE_NAME}. Every checklist step, photo, and work order status change is ` +
-      'timestamped and logged, so if you ever ask what happened on a job, FieldStay doesn\'t ask you to ' +
-      'take its word for it. If FieldStay cannot produce that record, the billing period is credited. ' +
-      'Separately, the 14-day free trial lets you run FieldStay on your 3-5 hardest properties and cancel ' +
-      'with one click if it doesn\'t help — see the full guarantee terms at /guarantee.',
+      'You\'ll never have to take anyone\'s word for it. Every checklist step, every photo, and every work ' +
+      'order status change is timestamped and logged as it happens — including the ones your crew records ' +
+      'with no signal at all. When an owner asks whether the house was ready, or a guest says something was ' +
+      'missed, you don\'t go looking for someone to ask. You open the property, pick the date, and read ' +
+      'what happened.',
   },
 ] as const
 

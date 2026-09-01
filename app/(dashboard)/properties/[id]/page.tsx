@@ -3,7 +3,7 @@ import { requireProperty } from '@/lib/auth'
 import { calcSetupProgress, WIZARD_STEPS } from '@/lib/wizard'
 import Link from 'next/link'
 import { formatDate } from '@/lib/utils'
-import { Settings, CalendarCheck, Package, Wrench, CheckCircle2, AlertCircle, Clock, AlertTriangle } from 'lucide-react'
+import { Settings, CalendarCheck, Package, Wrench, CheckCircle2, AlertCircle, Clock, AlertTriangle, History } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { PropertyMaintenanceManager } from '@/components/property/PropertyMaintenanceManager'
 import { VendorInvoiceHistory } from '@/components/work-orders/vendor-invoice-history'
@@ -207,9 +207,14 @@ export default async function PropertyDetailPage({ params }: Props) {
             </p>
           )}
         </div>
-        <Link href={`/properties/${property.id}/setup/details`} className={buttonVariantClass('secondary')}>
-          <Settings className="w-4 h-4" /> Setup
-        </Link>
+        <div className="flex items-center gap-2">
+          <Link href={`/properties/${property.id}/history`} className={buttonVariantClass('secondary')}>
+            <History className="w-4 h-4" /> History
+          </Link>
+          <Link href={`/properties/${property.id}/setup/details`} className={buttonVariantClass('secondary')}>
+            <Settings className="w-4 h-4" /> Setup
+          </Link>
+        </div>
       </div>
 
       {/* Setup progress banner */}

@@ -385,11 +385,12 @@ export interface CrewFeedback {
 }
 
 /**
- * Backs the Record Guarantee's adjudication path: a device-reported incident
- * proving work was Captured but dead-lettered or stalled before reaching the
- * server. Service-role insert only (app/api/crew/sync-incidents) — org
- * members may SELECT but never write, since a client must not be able to
- * manufacture evidence that triggers a credit.
+ * Sync incident reporting: a device-reported incident proving work was
+ * captured but dead-lettered or stalled before reaching the server — a
+ * monitoring/support signal for crew sync reliability, not part of any
+ * customer-facing promise. Service-role insert only
+ * (app/api/crew/sync-incidents) — org members may SELECT but never write,
+ * since a client must not be able to manufacture evidence.
  */
 export interface CrewSyncIncident {
   id:                 string

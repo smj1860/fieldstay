@@ -68,11 +68,13 @@ export async function pruneLocalCache(userId: string): Promise<void> {
 }
 
 /**
- * How long a REPORTED Record Guarantee sync incident stays on the device
- * before it's collected. Deliberately longer than DEAD_LETTER_RETENTION_DAYS
- * — the guarantee's claim window is 30 days (RECORD_GUARANTEE_IMPLEMENTATION.md
- * section 2.1), so this needs comfortable margin past that plus a season, not
- * just past the point a crew member could still retry the underlying write.
+ * How long a REPORTED sync incident stays on the device before it's
+ * collected. Deliberately longer than DEAD_LETTER_RETENTION_DAYS — this is a
+ * support/monitoring signal a PM or engineer may need to look back on well
+ * after the underlying write was retried or abandoned, not just past the
+ * point a crew member could still retry it themselves. 400 days ("Show me
+ * what happened" — Implementation Instructions, section 3.2) is comfortably
+ * past a full year plus a season.
  */
 export const SYNC_INCIDENT_RETENTION_DAYS = 400
 
@@ -80,9 +82,9 @@ export const SYNC_INCIDENT_RETENTION_DAYS = 400
  * Collects only incidents the server has ack'd (`reported = 1`) and past
  * retention. An UNREPORTED incident is never collected here regardless of
  * age — it is the only evidence a dead-letter or stall ever happened, and
- * this table is what the Record Guarantee's adjudication path reads. See
- * discardFailedMutation()/pruneExpiredDeadLetters() above for the same rule
- * applied to the mutation/photo outboxes.
+ * this table is what the sync-reliability monitoring/support signal reads.
+ * See discardFailedMutation()/pruneExpiredDeadLetters() above for the same
+ * rule applied to the mutation/photo outboxes.
  */
 export async function pruneReportedSyncIncidents(userId: string): Promise<void> {
   const db = getDexieDb(userId)

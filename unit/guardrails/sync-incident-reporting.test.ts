@@ -4,10 +4,11 @@ import { readCode, rel, ROOT } from './scan'
 import { readFileSync } from 'fs'
 
 // ============================================================================
-// Structural backstop for RECORD_GUARANTEE_IMPLEMENTATION.md Workstream 1 —
-// the Record Guarantee cannot be adjudicated unless a dead-letter or stalled
-// mutation reliably produces a crew_sync_incidents row, with only the
-// bounded fields section 1.4 allows.
+// Structural backstop for sync incident reporting ("Show me what happened" —
+// Implementation Instructions, Workstream 3) — a monitoring/support signal
+// for crew sync reliability, not part of any customer-facing promise. A
+// dead-letter or stalled mutation must reliably produce a crew_sync_incidents
+// row, with only the bounded fields section 3.4 allows.
 //
 // Uses readCode(), not read()/raw text — this very file's prose (and the
 // implementation doc it's checking against) names every forbidden field, so
@@ -22,7 +23,7 @@ const HELPERS       = join(ROOT, 'lib', 'dexie', 'helpers.ts')
 const SCHEMA        = join(ROOT, 'lib', 'dexie', 'schema.ts')
 const ROUTE         = join(ROOT, 'app', 'api', 'crew', 'sync-incidents', 'route.ts')
 
-describe('guardrail: Record Guarantee sync-incident recording', () => {
+describe('guardrail: sync incident recording', () => {
   it('the dead-letter write goes through recordSyncIncidentAndPatch, never a bare db.mutations.update', () => {
     const src = readCode(SYNC_SERVICE)
 
@@ -32,8 +33,8 @@ describe('guardrail: Record Guarantee sync-incident recording', () => {
       /db\.mutations\.update\(id,\s*\{[^}]*failed:\s*1/.test(src),
       `${rel(SYNC_SERVICE)} sets \`failed: 1\` on a bare db.mutations.update(...) ` +
       'call — this must go through recordSyncIncidentAndPatch() so the incident ' +
-      'row commits in the SAME transaction as the flag, per ' +
-      'RECORD_GUARANTEE_IMPLEMENTATION.md section 1.2.',
+      'row commits in the SAME transaction as the flag, per the implementation ' +
+      'doc\'s section 3.2.',
     ).toBe(false)
 
     expect(
@@ -130,7 +131,7 @@ describe('guardrail: Record Guarantee sync-incident recording', () => {
     expect(upsertStart, 'the .upsert(...) call into crew_sync_incidents was not found').toBeGreaterThan(-1)
     const upsertCall = src.slice(upsertStart, src.indexOf(')', src.indexOf('onConflict')))
 
-    // RECORD_GUARANTEE_IMPLEMENTATION.md section 1.4's forbidden list: the
+    // the implementation doc's section 3.4 forbidden list: the
     // mutation payload, any guest PII field, financial figures, secrets/
     // tokens/door codes, and anything fingerprint-shaped.
     const forbidden = [

@@ -1,9 +1,11 @@
 // app/api/crew/sync-incidents/route.ts
 //
-// Transport for the Record Guarantee's adjudication path
-// (RECORD_GUARANTEE_IMPLEMENTATION.md Workstream 1): the crew PWA reports
+// Transport for sync incident reporting ("Show me what happened" —
+// Implementation Instructions, Workstream 3): the crew PWA reports
 // dead-lettered/stalled outbox mutations here so the server can answer "what
-// failed for org X between date A and B" instead of guessing. See
+// failed for org X between date A and B" instead of guessing. A monitoring/
+// support signal for sync reliability, not part of any customer-facing
+// promise — FieldStay does not publish a guarantee. See
 // lib/dexie/syncService.ts's recordSyncIncidentAndPatch() for where these are
 // recorded locally, and lib/dexie/syncIncidentReport.ts for the client that
 // posts here.

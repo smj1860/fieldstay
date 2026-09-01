@@ -33,6 +33,7 @@ const CAPS: { name: string; file: string }[] = [
   { name: 'MAX_ANSWER_ROWS',         file: 'lib/inspections/report/model.ts' },
   { name: 'MAX_INSPECTIONS',         file: 'lib/owner-portal/inspections.ts' },
   { name: 'MAX_ITEM_ROWS',           file: 'lib/owner-portal/inspections.ts' },
+  { name: 'MAX_HISTORY_EVENTS_PER_SOURCE', file: 'lib/history/loadPropertyHistory.ts' },
 ]
 
 /**
@@ -66,14 +67,14 @@ function documentedValue(name: string): number | null {
   return null
 }
 
-describe('guardrail: inspection export caps match CLAUDE.md', () => {
+describe('guardrail: report and export caps match CLAUDE.md', () => {
   it.each(CAPS)('$name is documented with its real value', ({ name, file }) => {
     const actual     = declaredValue(name, file)
     const documented = documentedValue(name)
 
     expect(
       documented,
-      `${name} is declared in ${file} but has no row in the "Inspection export caps" `
+      `${name} is declared in ${file} but has no row in the "Report and export caps" `
       + 'table in CLAUDE.md. A cap nobody remembers is a cap somebody raises.',
     ).not.toBeNull()
 

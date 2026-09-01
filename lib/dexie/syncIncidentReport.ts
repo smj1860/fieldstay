@@ -1,11 +1,13 @@
 // lib/dexie/syncIncidentReport.ts
 //
-// Flushes Record Guarantee sync incidents (RECORD_GUARANTEE_IMPLEMENTATION.md
-// Workstream 1) recorded locally by lib/dexie/syncService.ts's SyncEngine to
-// app/api/crew/sync-incidents. Deliberately its own small module rather than
-// folded into syncService.ts or helpers.ts — it has nothing to do with
-// draining the mutation outbox itself, only with reporting the durable trace
-// that outbox leaves behind when something dead-letters or stalls.
+// Flushes sync incidents ("Show me what happened" — Implementation
+// Instructions, Workstream 3 — a monitoring/support signal for crew sync
+// reliability, not part of any customer-facing promise) recorded locally by
+// lib/dexie/syncService.ts's SyncEngine to app/api/crew/sync-incidents.
+// Deliberately its own small module rather than folded into syncService.ts
+// or helpers.ts — it has nothing to do with draining the mutation outbox
+// itself, only with reporting the durable trace that outbox leaves behind
+// when something dead-letters or stalls.
 //
 // Called from app/crew/crew-shell.tsx's existing outbox-drain tick (mount +
 // `online` + 30s interval) — not a standalone timer of its own, so it shares
@@ -16,8 +18,8 @@ import { getDexieDb } from './schema'
 import { isOnline } from './net'
 import { reportError } from '@/lib/observability/report-error'
 
-// Matches the route's hard cap (RECORD_GUARANTEE_IMPLEMENTATION.md section
-// 1.3) — bounded, not truncated silently.
+// Matches the route's hard cap (the implementation doc's section 3.3) —
+// bounded, not truncated silently.
 const BATCH_SIZE = 50
 
 /**

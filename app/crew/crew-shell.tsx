@@ -258,9 +258,9 @@ export function CrewShell({
       if (!isOnline() || signedOut) return
       await getSyncEngine(userId).processOutbox()
       await processPendingPhotoUploads(supabase, userId)
-      // Record Guarantee sync-incident reporting rides the same reconnect/
-      // mount/30s tick as the outbox drain it reports on — never its own
-      // timer (RECORD_GUARANTEE_IMPLEMENTATION.md section 1.3).
+      // Sync incident reporting rides the same reconnect/mount/30s tick as
+      // the outbox drain it reports on — never its own timer (the
+      // implementation doc's section 3.3).
       await reportSyncIncidents(userId)
     }
 

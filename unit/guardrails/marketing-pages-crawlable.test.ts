@@ -57,7 +57,6 @@ const PUBLIC_MARKETING_PAGES = [
   '/breezeway-alternative',
   '/enterprise',
   '/for-vendors',
-  '/guarantee',
   '/privacy',
   '/terms',
   '/dpa',

@@ -74,21 +74,22 @@ import { computeNextAttemptAt } from './outbox-primitives'
 // Drains the local `mutations` outbox to Supabase. This is the only path by
 // which a crew-side write reaches the server — see enqueueMutation().
 //
-// Record Guarantee sync-incident recording (RECORD_GUARANTEE_IMPLEMENTATION.md
-// Workstream 1) lives HERE, in this engine's own handleFailure(), not in the
-// shared lib/dexie/outboxEngine.ts the vendor portal and (per
-// docs/INSPECTIONS_SPEC.md §8) the dashboard build on. Two reasons, both
-// verified against the live code rather than assumed from the spec doc:
-// this crew engine predates that extraction and was never migrated onto it
-// (it has its own per-record circuit-breaker logic outboxEngine.ts doesn't),
-// so "hook the shared engine" would silently miss crew — the one surface the
-// guarantee's own terms actually cover ("Crew signed in, worked in the app
-// offline..."). And the only transport this workstream ships
-// (app/api/crew/sync-incidents, gated by requireCrewMember()) has nowhere to
-// send a vendor- or dashboard-surface incident yet — recording one there
-// with no way to report it would be exactly the "half-finished
-// implementation" this codebase's conventions rule out. Extending this to
-// outboxEngine.ts is real future work, not a gap papered over here.
+// Sync incident recording ("Show me what happened" — Implementation
+// Instructions, Workstream 3 — a monitoring/support signal for crew sync
+// reliability, not part of any customer-facing promise) lives HERE, in this
+// engine's own handleFailure(), not in the shared lib/dexie/outboxEngine.ts
+// the vendor portal and (per docs/INSPECTIONS_SPEC.md §8) the dashboard
+// build on. Two reasons, both verified against the live code rather than
+// assumed from the spec doc: this crew engine predates that extraction and
+// was never migrated onto it (it has its own per-record circuit-breaker
+// logic outboxEngine.ts doesn't), so "hook the shared engine" would silently
+// miss crew — the surface this workstream actually targets. And the only
+// transport this workstream ships (app/api/crew/sync-incidents, gated by
+// requireCrewMember()) has nowhere to send a vendor- or dashboard-surface
+// incident yet — recording one there with no way to report it would be
+// exactly the "half-finished implementation" this codebase's conventions
+// rule out. Extending this to outboxEngine.ts is real future work, not a
+// gap papered over here.
 export class SyncEngine {
   private supabase = createClient()
   private userId: string
@@ -407,10 +408,10 @@ export class SyncEngine {
         `server (transport attempt ${level}) — retrying, retry budget untouched`
       )
       const patch = { networkRetryCount: level, nextAttemptAt }
-      // Record a Record Guarantee incident exactly ONCE, at the moment this
-      // record's queue first crosses the stalled threshold — not on every
-      // retry after it (that would be "recording on ordinary retry", which
-      // RECORD_GUARANTEE_IMPLEMENTATION.md section 1.2 explicitly forbids).
+      // Record a sync incident exactly ONCE, at the moment this record's
+      // queue first crosses the stalled threshold — not on every retry
+      // after it (that would be "recording on ordinary retry", which the
+      // implementation doc's section 3.2 explicitly forbids).
       if (level === STALLED_NETWORK_ATTEMPTS) {
         await this.recordSyncIncidentAndPatch(db, mutation, id, patch, 'stalled', 'stalled_threshold')
       } else {
@@ -479,12 +480,13 @@ export class SyncEngine {
   }
 
   /**
-   * Records a Record Guarantee sync incident (RECORD_GUARANTEE_IMPLEMENTATION.md
-   * Workstream 1) and applies `mutationPatch` to the mutation row, in ONE
-   * Dexie transaction — the same reasoning as writeAndQueue() in
+   * Records a sync incident ("Show me what happened" — Implementation
+   * Instructions, Workstream 3) and applies `mutationPatch` to the mutation
+   * row, in ONE Dexie transaction — the same reasoning as writeAndQueue() in
    * lib/dexie/helpers.ts: a PWA reclaimed between the two writes must not be
    * able to set `failed`/bump `networkRetryCount` without the incident that
-   * explains why, or the guarantee's adjudication path has nothing to read.
+   * explains why, or the sync-reliability monitoring signal has nothing to
+   * read.
    *
    * Only ever called from the two places that count as an incident — a
    * terminal dead-letter and a stalled-threshold crossing — never on an
@@ -518,8 +520,8 @@ export class SyncEngine {
 
 /**
  * Maps a dead-lettering failure to the bounded reason enum the server
- * accepts (RECORD_GUARANTEE_IMPLEMENTATION.md section 1.4 — never a
- * free-text error message, which could carry a fragment of the payload).
+ * accepts (the implementation doc's section 3.4 — never a free-text error
+ * message, which could carry a fragment of the payload).
  *
  * classifyUploadFailure() only ever returns 'terminal' for an UploadHttpError
  * when its status is a non-retryable 4xx (see classifyHttpStatus in

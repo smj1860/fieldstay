@@ -55,9 +55,9 @@ function stripComments(src: string): string {
 }
 
 // `failed: true` / `failed = false` / `failed?: boolean`, in a write or a type.
-// `reported` is the same flag shape on crew_sync_incidents (Record Guarantee
-// sync-incident reporting, RECORD_GUARANTEE_IMPLEMENTATION.md section 1.2) —
-// same IndexedDB no-boolean-key-type rule, so the same regex covers both.
+// `reported` is the same flag shape on crew_sync_incidents (sync incident
+// reporting, "Show me what happened" — Implementation Instructions, section
+// 3.2) — same IndexedDB no-boolean-key-type rule, so the same regex covers both.
 const BOOLEAN_FLAG = /\b(failed|reported)\s*[?]?\s*[:=]\s*(true|false|boolean)\b/
 
 describe('guardrail: the dead-letter flag is 0 | 1, never a boolean', () => {

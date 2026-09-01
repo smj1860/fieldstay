@@ -1249,7 +1249,7 @@ and gated crew counts behind a PM approval that product never wanted.
   aggregate that ships no rows at all. Enforced for `lib/inngest/**` by
   `unit/guardrails/unbounded-select.test.ts`.
 
-### Inspection export caps — stated, not silent
+### Report and export caps — stated, not silent
 
 The inspection report (phase 7) renders synchronously on the request path:
 several passes over the answers, then pdf-lib draw calls per row, then one
@@ -1266,6 +1266,7 @@ silently stops partway through 2024 reads as the PM having given up.
 | `MAX_ANSWER_ROWS` | **12,000** | `lib/inspections/report/model.ts` | The `fetchAllRows` drain over `inspection_items`. A 60-walk history is ~4,000 rows — already past `max_rows` |
 | `MAX_INSPECTIONS` | **24** | `lib/owner-portal/inspections.ts` | Walks rendered in the owner portal's history section |
 | `MAX_ITEM_ROWS` | **6,000** | `lib/owner-portal/inspections.ts` | That section's item drain |
+| `MAX_HISTORY_EVENTS_PER_SOURCE` | **200** | `lib/history/loadPropertyHistory.ts` | Per-source cap ("Show me what happened" — checklist steps, WO updates, WO photos, crew assignments, inspections, inventory counts) on the property history view. A date window caps the days, not the rows — the ceiling is entities × period |
 
 Two rules go with them:
 
