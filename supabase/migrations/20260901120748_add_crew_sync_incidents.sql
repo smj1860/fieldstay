@@ -57,10 +57,10 @@ ALTER TABLE crew_sync_incidents ENABLE ROW LEVEL SECURITY;
 
 DROP POLICY IF EXISTS "crew_sync_incidents_select" ON crew_sync_incidents;
 
--- Org members may read their own incidents. This is evidence they are
--- entitled to. Deliberately NO insert/update/delete policy for authenticated
--- or anon — writes are service-role only (app/api/crew/sync-incidents), since
--- a client must not be able to manufacture evidence that triggers a credit.
+-- Org members may read their own incidents. Deliberately NO insert/update/
+-- delete policy for authenticated or anon — writes are service-role only
+-- (app/api/crew/sync-incidents), since a client must not be able to
+-- manufacture this monitoring signal.
 CREATE POLICY "crew_sync_incidents_select"
   ON crew_sync_incidents FOR SELECT
   USING (org_id IN (SELECT get_user_org_ids()));

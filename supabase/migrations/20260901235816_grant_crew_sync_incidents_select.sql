@@ -1,0 +1,14 @@
+-- crew_sync_incidents was created with RLS enabled and a correct SELECT
+-- policy (20260901120748_add_crew_sync_incidents.sql), but no GRANT to
+-- authenticated — the same gap 20260710200000_grant_authenticated_missing_
+-- tables.sql closed for four other tables. Postgres checks the GRANT
+-- before RLS is ever evaluated, so every authenticated-role read of this
+-- table failed with "permission denied for table crew_sync_incidents"
+-- (caught by db-invariants check 11, "policies facing authenticated/PUBLIC
+-- whose table lacks the matching GRANT," before it ever reached
+-- production). No anon grant: this table is read only by org members via
+-- get_user_org_ids(), which is meaningless for an unauthenticated request,
+-- matching the platform-wide "zero anon table grants" invariant. No
+-- INSERT/UPDATE/DELETE grant either — writes to this table are
+-- service-role only (app/api/crew/sync-incidents), by design.
+GRANT SELECT ON crew_sync_incidents TO authenticated;

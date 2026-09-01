@@ -164,6 +164,12 @@ type CountRow = {
   crew_members: { name: string } | { name: string }[] | null
 }
 
+/** A PostgREST to-one embed returns either an object or a one-element array, depending on the relationship's inferred cardinality. */
+function one<T>(value: T | T[] | null): T | null {
+  if (Array.isArray(value)) return value[0] ?? null
+  return value
+}
+
 function historySources(propertyId: string): {
   checklist: HistorySourceSpec
   woUpdates: HistorySourceSpec
@@ -271,12 +277,6 @@ export async function loadPropertyHistory(params: LoadParams): Promise<PropertyH
   const assignmentsCount  = unwrapCount(assignmentsCountRes, { site, orgId })
   const inspectionsCount  = unwrapCount(inspectionsCountRes, { site, orgId })
   const countsCount       = unwrapCount(countsCountRes, { site, orgId })
-
-  /** A PostgREST to-one embed returns either an object or a one-element array, depending on the relationship's inferred cardinality. */
-  function one<T>(value: T | T[] | null): T | null {
-    if (Array.isArray(value)) return value[0] ?? null
-    return value
-  }
 
   const events: PropertyHistoryEvent[] = [
     ...checklistRows.map((row): PropertyHistoryEvent => ({

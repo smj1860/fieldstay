@@ -26,9 +26,9 @@ type IncidentRow = Pick<
 
 export default async function SyncIncidentsPage({
   searchParams,
-}: {
+}: Readonly<{
   searchParams: Promise<{ page?: string }>
-}) {
+}>) {
   // requireOrgRole, not requireOrgMember — same reasoning as ../audit: this
   // bypasses crew_sync_incidents' org-scoped RLS with the service client so
   // admin/managers get a stable, joined view, so the role gate has to happen

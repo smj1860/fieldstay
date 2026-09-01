@@ -81,7 +81,7 @@ interface Props {
   searchParams: Promise<{ from?: string; to?: string }>
 }
 
-export default async function PropertyHistoryPage({ params, searchParams }: Props) {
+export default async function PropertyHistoryPage({ params, searchParams }: Readonly<Props>) {
   const { id } = await params
   const { property, supabase, membership } = await requireProperty(id)
 
