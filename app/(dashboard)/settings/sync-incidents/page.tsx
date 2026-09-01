@@ -13,7 +13,7 @@ import { createServiceClient } from '@/lib/supabase/server'
 import { AlertTriangle } from 'lucide-react'
 import { Card } from '@/components/ui/Card'
 import { Badge } from '@/components/ui/Badge'
-import Link from 'next/link'
+import { Pagination } from '@/components/ui/Pagination'
 import { throwIfAnyQueryFailed } from '@/lib/supabase/unwrap'
 import type { CrewSyncIncident, CrewMember } from '@/types/database'
 
@@ -136,24 +136,7 @@ export default async function SyncIncidentsPage({
             </table>
           </div>
 
-          {(page > 1 || hasMore) && (
-            <div
-              className="flex items-center justify-between px-4 py-3"
-              style={{ borderTop: '1px solid var(--border)' }}
-            >
-              {page > 1 ? (
-                <Link href={`/settings/sync-incidents?page=${page - 1}`} className="text-xs font-medium" style={{ color: 'var(--accent-gold)' }}>
-                  ← Previous
-                </Link>
-              ) : <span />}
-              <span className="text-xs" style={{ color: 'var(--text-muted)' }}>Page {page}</span>
-              {hasMore ? (
-                <Link href={`/settings/sync-incidents?page=${page + 1}`} className="text-xs font-medium" style={{ color: 'var(--accent-gold)' }}>
-                  Next →
-                </Link>
-              ) : <span />}
-            </div>
-          )}
+          <Pagination page={page} hasMore={hasMore} hrefFor={(p) => `/settings/sync-incidents?page=${p}`} />
         </Card>
       )}
     </div>
