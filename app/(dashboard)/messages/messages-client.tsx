@@ -49,6 +49,21 @@ interface GroupThread {
 type AnyThread = DirectThread | GroupThread
 
 
+/** Stamps read_at on every unread inbound message from one conversation. */
+function withConversationRead(messages: Message[], otherUserId: string, currentUserId: string): Message[] {
+  const readAt = new Date().toISOString()
+  return messages.map((m) =>
+    m.sender_id === otherUserId && m.recipient_id === currentUserId && !m.read_at
+      ? { ...m, read_at: readAt }
+      : m
+  )
+}
+
+/** Appends a just-sent message unless the realtime feed already delivered it. */
+function withMessageAppended(messages: Message[], sent: Message): Message[] {
+  return messages.some((m) => m.id === sent.id) ? messages : [...messages, sent]
+}
+
 const byNewestMessage = (a: { lastMessage: Message | null }, b: { lastMessage: Message | null }) => {
   const aTime = a.lastMessage ? new Date(a.lastMessage.created_at).getTime() : 0
   const bTime = b.lastMessage ? new Date(b.lastMessage.created_at).getTime() : 0
@@ -233,15 +248,9 @@ export function MessagesClient({ currentUserId, orgId, crew, initialMessages, ha
       ? selectedThread.crew.user_id
       : null
     if (!otherUserId) return
-    markConversationRead(otherUserId).then(() => {
-      setMessages((prev) =>
-        prev.map((m) =>
-          m.sender_id === otherUserId && m.recipient_id === currentUserId && !m.read_at
-            ? { ...m, read_at: new Date().toISOString() }
-            : m
-        )
-      )
-    }).catch((err) => console.error('[messages] markConversationRead failed:', err))
+    markConversationRead(otherUserId)
+      .then(() => setMessages((prev) => withConversationRead(prev, otherUserId, currentUserId)))
+      .catch((err) => console.error('[messages] markConversationRead failed:', err))
   }, [selectedThread, currentUserId])
 
   function handleSend() {
@@ -254,10 +263,7 @@ export function MessagesClient({ currentUserId, orgId, crew, initialMessages, ha
         const result = await sendMessageToCrew(selectedThread.crew.id, content)
         if (result.success) {
           setDraft('')
-          if (result.message) {
-            const sent = result.message
-            setMessages((prev) => (prev.some((m) => m.id === sent.id) ? prev : [...prev, sent]))
-          }
+          if (result.message) setMessages((prev) => withMessageAppended(prev, result.message!))
         } else {
           setSendError(result.error ?? 'Failed to send message')
         }

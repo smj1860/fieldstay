@@ -2,7 +2,7 @@
 
 import { useState, useTransition } from 'react'
 import { Plus, Trash2 } from 'lucide-react'
-import { INVENTORY_CATEGORY_LABELS } from '@/lib/utils'
+import { INVENTORY_CATEGORY_LABELS, omitById } from '@/lib/utils'
 import { Button } from '@/components/ui/Button'
 import { InlineAlert } from '@/components/ui/InlineAlert'
 import { createCatalogItem, updateCatalogItem, deleteCatalogItem } from '../actions'
@@ -60,7 +60,7 @@ export function MasterListEditor({
     startSave(async () => {
       const result = await deleteCatalogItem(id)
       if (result.error) { setError(result.error); return }
-      setItems((prev) => prev.filter((item) => item.id !== id))
+      setItems(omitById(id))
     })
   }
 

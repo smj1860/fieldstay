@@ -62,6 +62,39 @@ function trialStatus(trialEndsAt: string | null): { inTrial: boolean; daysLeft: 
 }
 
 
+/** The per-property guest-facing content edited by the property panel below. */
+interface PropertyGuidebookConfig {
+  slug:                 string
+  checkInInstructions:  string
+  checkOutInstructions: string
+  wifiNetwork:          string
+  wifiPassword:         string
+  houseRules:           string
+  isPublished:          boolean
+  heroPhotoStoragePath: string | null
+  featuredAmenities:    string[]
+  featuredAmenityNotes: string
+}
+
+/**
+ * Adds or removes one featured amenity, capped at MAX_FEATURED_AMENITIES.
+ * Module-level so the state updater is not a fifth-level closure inside the
+ * amenity checkbox's onChange.
+ */
+function toggleFeaturedAmenity(
+  config:    PropertyGuidebookConfig | null,
+  key:       string,
+  isChecked: boolean,
+): PropertyGuidebookConfig | null {
+  if (!config) return config
+
+  const featuredAmenities = isChecked
+    ? config.featuredAmenities.filter((k) => k !== key)
+    : [...config.featuredAmenities, key].slice(0, MAX_FEATURED_AMENITIES)
+
+  return { ...config, featuredAmenities }
+}
+
 /** Applies one realtime sponsor row change to the local list. */
 function applySponsorChange(
   prev:    GuidebookSponsor[],
@@ -257,20 +290,28 @@ export function GuidebookClient({
   )
 
   useEffect(() => {
+    // Named rather than inlined into the setSponsors call: the counting step
+    // has to run inside the updater (it needs `prev`), and written inline the
+    // updater sat five closures deep.
+    const applyAndCount = (
+      prev:    GuidebookSponsor[],
+      payload: RealtimePostgresChangesPayload<GuidebookSponsor>,
+    ): GuidebookSponsor[] => {
+      const next       = applySponsorChange(prev, payload)
+      const newActive  = next.filter((s) => s.status === 'active').length
+      const prevActive = prevCountRef.current
+      prevCountRef.current = newActive
+      checkCelebration(newActive, prevActive)
+      return next
+    }
+
     const channel = supabase
       .channel(`guidebook-sponsors-${orgId}`)
       .on(
         'postgres_changes',
         { event: '*', schema: 'public', table: 'guidebook_sponsors', filter: `org_id=eq.${orgId}` },
         (payload: RealtimePostgresChangesPayload<GuidebookSponsor>) => {
-          setSponsors((prev) => {
-            const next       = applySponsorChange(prev, payload)
-            const newActive  = next.filter((s) => s.status === 'active').length
-            const prevActive = prevCountRef.current
-            prevCountRef.current = newActive
-            checkCelebration(newActive, prevActive)
-            return next
-          })
+          setSponsors((prev) => applyAndCount(prev, payload))
         }
       )
       .on(
@@ -632,18 +673,7 @@ function PropertyGuidebookForm({
   publishLockReason: string | null
 }) {
   const supabase = createClient()
-  const [config, setConfig] = useState<{
-    slug: string
-    checkInInstructions: string
-    checkOutInstructions: string
-    wifiNetwork: string
-    wifiPassword: string
-    houseRules: string
-    isPublished: boolean
-    heroPhotoStoragePath: string | null
-    featuredAmenities: string[]
-    featuredAmenityNotes: string
-  } | null>(null)
+  const [config, setConfig] = useState<PropertyGuidebookConfig | null>(null)
   const [heroPhotoUploading, setHeroPhotoUploading] = useState(false)
   const [heroPhotoError, setHeroPhotoError]         = useState<string | null>(null)
   const [saving, setSaving] = useState(false)
@@ -945,13 +975,7 @@ function PropertyGuidebookForm({
                         type="checkbox"
                         checked={checked}
                         disabled={atMax}
-                        onChange={() => setConfig((c) => {
-                          if (!c) return c
-                          const next = checked
-                            ? c.featuredAmenities.filter((k) => k !== key)
-                            : [...c.featuredAmenities, key].slice(0, MAX_FEATURED_AMENITIES)
-                          return { ...c, featuredAmenities: next }
-                        })}
+                        onChange={() => setConfig((c) => toggleFeaturedAmenity(c, key, checked))}
                         style={{ width: 14, height: 14 }}
                       />
                       <span style={{ fontSize: '14px', color: 'var(--text-primary)' }}>{prettifyAmenityKey(key)}</span>

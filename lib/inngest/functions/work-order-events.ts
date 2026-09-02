@@ -630,11 +630,13 @@ export const handleWorkOrderQuoteSubmitted = inngest.createFunction(
       const vendor   = unwrapJoin(wo.vendors)
       const property = unwrapJoin(wo.properties)
 
+      const quoteNotesSuffix = quote_notes ? ` — ${quote_notes}` : ''
+
       await createPmNotification(supabase, {
         orgId:     org_id,
         type:      'work_order_quote_received',
         title:     `💬 Quote received — ${wo.title} at ${property?.name}`,
-        subtitle:  `${vendor?.name ?? 'Your vendor'} quoted $${quoted_amount.toFixed(2)}${quote_notes ? ` — ${quote_notes}` : ''}`,
+        subtitle:  `${vendor?.name ?? 'Your vendor'} quoted $${quoted_amount.toFixed(2)}${quoteNotesSuffix}`,
         href:      `/maintenance/${work_order_id}`,
         severity:  'amber',
         dedupeKey: `wo-quote-submitted-${quote_request_id}`,

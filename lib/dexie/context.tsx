@@ -79,6 +79,23 @@ interface DexieContextValue {
 const DexieContext = createContext<DexieContextValue>({ db: null, userId: null, crewMemberId: null })
 
 /**
+ * Records a failed background sync where the crew member can actually see it.
+ *
+ * Persisted, not just logged: a console line is gone the moment the PWA is
+ * backgrounded, and this row is the only record a crew member's device keeps
+ * of why its screen is empty. The swallow on the write itself is deliberate —
+ * failing to record a failure must not replace it with a second one.
+ */
+async function persistSyncFailure(userId: string, label: string, err: unknown): Promise<void> {
+  console.error(`[DexieProvider] ${label} failed:`, err)
+  try {
+    await recordSyncFailure(userId, err)
+  } catch {
+    // nothing further to do — the original failure is already logged above
+  }
+}
+
+/**
  * Resolves the active user's session — returning null rather than throwing
  * when there is no session yet, since the provider mounts before auth has
  * necessarily settled — then hands the per-user Dexie instance down through
@@ -361,20 +378,16 @@ export function DexieProvider({ userId: userIdProp, children }: { userId?: strin
         resyncQueued = true
         return
       }
+      const onSettled = () => {
+        resyncInFlight = null
+        if (cancelled || !resyncQueued) return
+        resyncQueued = false
+        runCoalesced(run, label)
+      }
+
       resyncInFlight = run()
-        .catch(async (err) => {
-          console.error(`[DexieProvider] ${label} failed:`, err)
-          // Persisted, not just logged: a console line is gone the moment the
-          // PWA is backgrounded, and this is the only record a crew member's
-          // device keeps of why its screen is empty.
-          await recordSyncFailure(userId!, err).catch(() => {})
-        })
-        .finally(() => {
-          resyncInFlight = null
-          if (cancelled || !resyncQueued) return
-          resyncQueued = false
-          runCoalesced(run, label)
-        })
+        .catch((err) => persistSyncFailure(userId!, label, err))
+        .finally(onSettled)
     }
 
     function resyncSafe(crewMemberId: string, reconcile = true): void {
@@ -671,6 +684,12 @@ export function DexieProvider({ userId: userIdProp, children }: { userId?: strin
       await resync(resolvedCrewId)
       if (cancelled) return
 
+      // Named rather than inlined into the .then(): written inline the arrow
+      // sat a level past the nesting limit, and a guard this easy to drop is
+      // worth a name — without it a sync completing after unmount would
+      // resubscribe assets on a torn-down provider.
+      const refreshAssetsIfLive = () => (cancelled ? undefined : refreshAssetsSubscription())
+
       channel = supabase
         .channel(`turnover-assignments-${resolvedCrewId}`)
         .on(
@@ -685,11 +704,7 @@ export function DexieProvider({ userId: userIdProp, children }: { userId?: strin
         .on(
           'postgres_changes',
           { event: '*', schema: 'public', table: 'work_orders', filter: `assigned_crew_member_id=eq.${resolvedCrewId}` },
-          () => {
-            void syncWorkOrders(supabase, userId!, resolvedCrewId).then(() => {
-              if (!cancelled) return refreshAssetsSubscription()
-            })
-          }
+          () => { void syncWorkOrders(supabase, userId!, resolvedCrewId).then(refreshAssetsIfLive) }
         )
         .subscribe()
 

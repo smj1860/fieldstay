@@ -2,6 +2,7 @@
 
 import { createContext, useContext, useState, useCallback, useEffect } from 'react'
 import { createBrowserClient } from '@supabase/ssr'
+import { omitById } from '@/lib/utils'
 
 interface ToastItem {
   id:       string
@@ -33,7 +34,7 @@ export function DashboardToastProvider({
   const push = useCallback((t: Omit<ToastItem, 'id'>) => {
     const id = crypto.randomUUID()
     setToasts((prev) => [...prev, { ...t, id }])
-    setTimeout(() => setToasts((prev) => prev.filter((x) => x.id !== id)), 8000)
+    setTimeout(() => setToasts(omitById(id)), 8000)
   }, [])
 
   useEffect(() => {

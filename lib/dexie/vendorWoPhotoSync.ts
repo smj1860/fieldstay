@@ -50,6 +50,45 @@ async function uploadOnePhoto(token: string, row: VendorPendingPhotoRow): Promis
 
 const processingTokens = new Set<string>()
 
+/** What the drain should do after one photo failed. */
+type DrainDecision = 'next' | 'stop'
+
+/**
+ * Records one photo's failure and decides whether the drain continues.
+ *
+ * Extracted from the loop's catch block rather than left inline: the branching
+ * sat five levels deep (try > for > try/catch > if > if), and the decision it
+ * produces is the only thing the loop actually needs back.
+ */
+async function recordPhotoFailure(
+  db:  ReturnType<typeof getVendorWoDb>,
+  row: VendorPendingPhotoRow,
+  err: unknown,
+): Promise<DrainDecision> {
+  const id = row.id as number
+
+  if (err instanceof TerminalPhotoError) {
+    console.error(`[vendorWoPhotoSync] photo ${id} terminal failure:`, err.message)
+    reportError(err, { site: 'lib.dexie.vendorWoPhotoSync.vendorWoPhotoSync' })
+    await db.pendingPhotos.update(id, { status: 'failed' })
+    return 'next'
+  }
+
+  const newRetryCount = row.retryCount + 1
+  console.error(`[vendorWoPhotoSync] photo ${id} failed (attempt ${newRetryCount}):`, err)
+
+  if (newRetryCount >= MAX_RETRIES) {
+    await db.pendingPhotos.update(id, { retryCount: newRetryCount, status: 'failed' })
+    return 'next'
+  }
+
+  await db.pendingPhotos.update(id, { retryCount: newRetryCount })
+  // Early attempts stop the drain so a transient failure does not burn the
+  // retry budget of every photo behind it; from attempt 3 the backoff is long
+  // enough that carrying on is the better trade.
+  return newRetryCount >= 3 ? 'next' : 'stop'
+}
+
 /**
  * Drains pending photo uploads for one vendor token. Bespoke rather than
  * OutboxEngine (lib/dexie/outboxEngine.ts) — a synced photo row must be
@@ -76,22 +115,7 @@ export async function processPendingVendorPhotoUploads(token: string): Promise<v
         await db.pendingPhotos.update(id, { status: 'uploaded', serverId })
         await deleteVendorPendingPhotoBlob(token, row.blobKey)
       } catch (err) {
-        if (err instanceof TerminalPhotoError) {
-          console.error(`[vendorWoPhotoSync] photo ${id} terminal failure:`, err.message)
-          reportError(err, { site: 'lib.dexie.vendorWoPhotoSync.vendorWoPhotoSync' })
-          await db.pendingPhotos.update(id, { status: 'failed' })
-          continue
-        }
-
-        const newRetryCount = row.retryCount + 1
-        console.error(`[vendorWoPhotoSync] photo ${id} failed (attempt ${newRetryCount}):`, err)
-        if (newRetryCount >= MAX_RETRIES) {
-          await db.pendingPhotos.update(id, { retryCount: newRetryCount, status: 'failed' })
-        } else {
-          await db.pendingPhotos.update(id, { retryCount: newRetryCount })
-          if (newRetryCount >= 3) continue
-          break
-        }
+        if (await recordPhotoFailure(db, row, err) === 'stop') break
       }
     }
   } finally {

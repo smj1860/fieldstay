@@ -85,8 +85,13 @@ describe('guardrail: lint warning ratchet', () => {
     // another, maintenance-calendar's duplicated colour ladders, the
     // core-billing and ical-sync enum maps, capital-planning and health-score
     // threshold ladders, crew home and reviews).
+    // Lowered to 42 on 2026-09-02: nested-control-flow (1),
+    // no-nested-template-literals (10) and no-nested-functions (22) were
+    // burned down to zero and PROMOTED to 'error', which removes all three
+    // classes from the warning budget rather than letting them trade against
+    // it. Everything left is no-nested-conditional.
     // LOWER this when warnings are cleared; never raise it.
-    const CEILING = 75
+    const CEILING = 42
     const budget = Number(/--max-warnings\s+(\d+)/.exec(pkg.scripts.lint ?? '')?.[1])
     expect(budget).toBeLessThanOrEqual(CEILING)
   })

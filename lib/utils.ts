@@ -7,9 +7,36 @@ export function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs))
 }
 
+/**
+ * `setRows(omitById(id))` — a state updater that drops the row with this id.
+ *
+ * Returned from a module-level factory rather than written inline as
+ * `setRows(prev => prev.filter(r => r.id !== id))`: inside a handler that is
+ * itself inside a transition callback, that inline predicate is four closures
+ * deep, which is both what sonarjs/no-nested-functions flags and genuinely
+ * harder to read than the name.
+ */
+export function omitById<T extends { id: string }>(id: string) {
+  return (rows: T[]): T[] => rows.filter((r) => r.id !== id)
+}
+
+/** `setRows(patchById(id, { dirty: false }))` — merges a patch into one row. */
+export function patchById<T extends { id: string }>(id: string, patch: Partial<T>) {
+  return (rows: T[]): T[] => rows.map((r) => (r.id === id ? { ...r, ...patch } : r))
+}
+
 /** Format a date for display */
 export function formatDate(date: string | Date, pattern = 'MMM d, yyyy') {
   return format(new Date(date), pattern)
+}
+
+/**
+ * A booking date with its time appended when one is recorded. Shared by the
+ * bookings list and calendar, which both showed check-in/check-out this way.
+ */
+export function formatDateWithOptionalTime(date: string | Date, time: string | null | undefined) {
+  const suffix = time ? ` at ${time}` : ''
+  return `${formatDate(date)}${suffix}`
 }
 
 /** Format a datetime for display */

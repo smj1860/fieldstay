@@ -127,11 +127,13 @@ const eslintConfig = [
       //
       // cognitive-complexity RATCHETED TO 'error' 2026-09-02, which is what
       // that sentence was promising. Its burn-down finished: 64 -> 0 across
-      // the whole tree, and scripts/complexity-baseline.json is `{}`. The
-      // other four are still mid-burn-down and stay at 'warn' (68
-      // no-nested-conditional, 22 no-nested-functions, 10
-      // no-nested-template-literals, 1 nested-control-flow) — promote each
-      // one the same way, when and only when it reaches zero.
+      // the whole tree, and scripts/complexity-baseline.json is `{}`.
+      //
+      // nested-control-flow, no-nested-functions and no-nested-template-literals
+      // followed the same day, each after reaching zero (1, 22 and 10
+      // respectively). Only no-nested-conditional is still mid-burn-down at 42,
+      // and it stays at 'warn' until it too reaches zero — promote it the same
+      // way, and only then.
       //
       // Severity, not the ratchet script, is now the primary gate for this
       // rule: --max-warnings is a fungible TOTAL, so at 'warn' a new
@@ -140,10 +142,10 @@ const eslintConfig = [
       // as a second, per-file gate — it costs one CI step and it is what
       // catches a future re-baselining attempt.
       'sonarjs/cognitive-complexity': ['error', 15],
-      'sonarjs/no-nested-functions': ['warn', { threshold: 4 }],
-      'sonarjs/nested-control-flow': ['warn', { maximumNestingLevel: 4 }],
+      'sonarjs/no-nested-functions': ['error', { threshold: 4 }],
+      'sonarjs/nested-control-flow': ['error', { maximumNestingLevel: 4 }],
       'sonarjs/no-nested-conditional': 'warn',
-      'sonarjs/no-nested-template-literals': 'warn',
+      'sonarjs/no-nested-template-literals': 'error',
       'no-restricted-syntax': ['error',
         {
           selector: "CallExpression[callee.property.name='from'] > Literal[value='memberships']",
@@ -206,7 +208,9 @@ const eslintConfig = [
     // judging that against a 4-deep limit written for production code would
     // manufacture 14 findings with no defect behind them. no-nested-conditional
     // (3) and no-nested-template-literals (1) are a real, small burn-down still
-    // to do.
+    // to do. Note that no-nested-functions being 'error' in the block above
+    // does NOT argue for enabling it here — the reason it is off is the test
+    // shape itself, not the severity.
     files: ['unit/**/*.{ts,tsx}', 'scripts/**/*.{ts,mjs}', 'e2e/**/*.ts'],
     plugins: { sonarjs },
     rules: {
@@ -215,7 +219,7 @@ const eslintConfig = [
       // they went in at zero with nothing baselined, so nothing had to be
       // burned down first.
       'sonarjs/cognitive-complexity': ['error', 15],
-      'sonarjs/nested-control-flow': ['warn', { maximumNestingLevel: 4 }],
+      'sonarjs/nested-control-flow': ['error', { maximumNestingLevel: 4 }],
     },
   },
 ]

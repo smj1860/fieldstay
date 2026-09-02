@@ -14,6 +14,7 @@ import {
 } from '../actions'
 import { updateMaintenanceTemplate, broadcastMaintenanceTemplate } from '@/app/(dashboard)/maintenance/maintenance-template-actions'
 import type { ScheduleFrequency, VendorSpecialty } from '@/types/database'
+import { omitById, patchById } from '@/lib/utils'
 
 const FREQUENCY_LABELS: Partial<Record<ScheduleFrequency, string>> = {
   weekly: 'Weekly', biweekly: 'Bi-weekly', monthly: 'Monthly',
@@ -271,7 +272,7 @@ function TemplateDetail({
       const result = await updateMaintenanceTemplateItem(itemId, { schedule_frequency: frequency })
       if (result.error) {
         setError(result.error)
-        if (previous) setItems((prev) => prev.map((i) => (i.id === itemId ? { ...i, schedule_frequency: previous } : i)))
+        if (previous) setItems(patchById<TemplateItemRow>(itemId, { schedule_frequency: previous }))
       }
     })
   }
@@ -280,7 +281,7 @@ function TemplateDetail({
     startSave(async () => {
       const result = await removeMaintenanceTemplateItem(itemId)
       if (result.error) { setError(result.error); return }
-      setItems((prev) => prev.filter((i) => i.id !== itemId))
+      setItems(omitById(itemId))
     })
   }
 
