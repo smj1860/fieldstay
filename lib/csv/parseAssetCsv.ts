@@ -105,20 +105,21 @@ export function parseCsvLine(line: string): string[] {
   let current  = ''
   let inQuotes = false
 
+  // One flat branch per state, most specific first — the same state machine
+  // as the nested form, without the nesting.
   for (let i = 0; i < line.length; i++) {
     const char = line[i]
-    if (inQuotes) {
-      if (char === '"') {
-        if (line[i + 1] === '"') { current += '"'; i++ }
-        else inQuotes = false
-      } else {
-        current += char
-      }
-    } else {
-      if (char === '"') inQuotes = true
-      else if (char === ',') { cells.push(current); current = '' }
-      else current += char
-    }
+
+    // Escaped quote inside a quoted field: "" is a literal ".
+    if (inQuotes && char === '"' && line[i + 1] === '"') { current += '"'; i++; continue }
+    // Lone quote inside a quoted field closes it.
+    if (inQuotes && char === '"') { inQuotes = false; continue }
+    // Any other character inside quotes is literal — commas included.
+    if (inQuotes) { current += char; continue }
+
+    if (char === '"') { inQuotes = true; continue }
+    if (char === ',') { cells.push(current); current = ''; continue }
+    current += char
   }
   cells.push(current)
   return cells.map((c) => c.trim())

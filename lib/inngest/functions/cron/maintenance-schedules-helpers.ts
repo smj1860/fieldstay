@@ -90,6 +90,55 @@ export async function notifyInspectionDue(
   })
 }
 
+
+/** Urgency of an auto-created maintenance WO, by how soon it is due. */
+function maintenanceWorkOrderPriority(daysUntilDue: number): 'urgent' | 'high' | 'medium' {
+  if (daysUntilDue <= 1) return 'urgent'
+  if (daysUntilDue <= 3) return 'high'
+  return 'medium'
+}
+
+/**
+ * Inserts the work order for one due schedule, or returns null when the
+ * insert lost the race described below.
+ */
+async function insertMaintenanceWorkOrder(
+  supabase:     SupabaseClient,
+  schedule:     DueSoonScheduleRow,
+  vendor:       DueSoonVendor | null,
+  daysUntilDue: number,
+): Promise<{ id: string } | null> {
+  const { data: inserted, error } = await supabase
+    .from('work_orders')
+    .insert({
+      property_id:        schedule.property_id,
+      org_id:             schedule.org_id,
+      vendor_id:          schedule.assigned_vendor_id ?? null,
+      title:              schedule.name,
+      description:        schedule.instructions,
+      priority:           maintenanceWorkOrderPriority(daysUntilDue),
+      status:             'pending',
+      source:             'maintenance_schedule',
+      source_schedule_id: schedule.id,
+      scheduled_date:     schedule.next_due_date,
+      estimated_cost:     schedule.estimated_cost,
+      portal_enabled:     vendor?.portal_enabled ?? false,
+    })
+    .select('id')
+    .single()
+
+  if (!error) return inserted
+
+  // 23505 = unique_violation on wo_maintenance_schedule_date_unique
+  // (source_schedule_id, scheduled_date) WHERE source='maintenance_schedule' —
+  // dailyWorkOrderOps's own auto-WO pass (7.4) races this same schedule+date
+  // at the same 8am CT cron time. The DB constraint is the real guard against
+  // a duplicate WO; losing this race is expected, not an error — any other
+  // error code is real and should retry the step.
+  if (error.code !== '23505') throw new Error(`Failed to insert maintenance WO: ${error.message}`)
+  return null
+}
+
 /**
  * schedule.auto_create_wo === true path: create the WO (idempotent on
  * schedule + due date), audit log, and return the vendor portal-dispatch
@@ -120,40 +169,7 @@ export async function createMaintenanceWorkOrder(
     orgId: schedule.org_id,
   })
 
-  let wo = existingWO
-  if (!existingWO) {
-    const { data: inserted, error } = await supabase
-      .from('work_orders')
-      .insert({
-        property_id:        schedule.property_id,
-        org_id:             schedule.org_id,
-        vendor_id:          schedule.assigned_vendor_id ?? null,
-        title:              schedule.name,
-        description:        schedule.instructions,
-        priority:           daysUntilDue <= 1 ? 'urgent' : daysUntilDue <= 3 ? 'high' : 'medium',
-        status:             'pending',
-        source:             'maintenance_schedule',
-        source_schedule_id: schedule.id,
-        scheduled_date:     schedule.next_due_date,
-        estimated_cost:     schedule.estimated_cost,
-        portal_enabled:     vendor?.portal_enabled ?? false,
-      })
-      .select('id')
-      .single()
-
-    if (error) {
-      // 23505 = unique_violation on wo_maintenance_schedule_date_unique
-      // (source_schedule_id, scheduled_date) WHERE source='maintenance_schedule' —
-      // dailyWorkOrderOps's own auto-WO pass (7.4) races this same schedule+date
-      // at the same 8am CT cron time. The DB constraint is the real guard against
-      // a duplicate WO; losing this race is expected, not an error — any other
-      // error code is real and should retry the step.
-      if (error.code !== '23505') throw new Error(`Failed to insert maintenance WO: ${error.message}`)
-      wo = null
-    } else {
-      wo = inserted
-    }
-  }
+  const wo = existingWO ?? await insertMaintenanceWorkOrder(supabase, schedule, vendor, daysUntilDue)
 
   if (wo && !existingWO) {
     await logAuditEvent({
@@ -601,6 +617,52 @@ export interface GapSuggestion {
   }>
 }
 
+
+/**
+ * One vacancy gap's suggestion, or null when the gap is too short or nothing
+ * is due inside it.
+ */
+function gapSuggestionFor(
+  property:  GapProperty,
+  gap:       { start: string; end: string | null; days: number },
+  schedules: GapScheduleRow[],
+): GapSuggestion | null {
+  if (gap.days < LIGHT_GAP_DAYS) return null
+
+  // next_due_date <= min(windowEnd, windowStart + LOOKAHEAD_DAYS), and
+  // only schedules whose seasonal window is active this month.
+  const capMs          = new Date(gap.start).getTime() + LOOKAHEAD_DAYS * 86_400_000
+  const effectiveEndMs = gap.end ? Math.min(new Date(gap.end).getTime(), capMs) : capMs
+  const effectiveEnd   = new Date(effectiveEndMs).toISOString().split('T')[0]!
+
+  const eligible = schedules
+    .filter((s) =>
+      s.next_due_date !== null &&
+      s.next_due_date <= effectiveEnd &&
+      isMaintenanceItemActiveThisMonth(s.active_from_month ?? null, s.active_to_month ?? null)
+    )
+    .map((s) => ({
+      id:                 s.id,
+      name:               s.name,
+      next_due_date:      s.next_due_date!,
+      estimated_cost:     s.estimated_cost,
+      assigned_vendor_id: s.assigned_vendor_id,
+    }))
+
+  if (!eligible.length) return null
+
+  return {
+    property_id:   property.id,
+    org_id:        property.org_id,
+    property_name: property.name,
+    gap_start:     gap.start,
+    gap_end:       gap.end,
+    gap_days:      gap.days,
+    tier:          gap.days >= STRONG_GAP_DAYS ? 'strong' : 'light',
+    candidates:    eligible,
+  }
+}
+
 /**
  * Pure in-memory computation of vacancy-gap maintenance suggestions —
  * every property's bookings and schedules are already batch-fetched by the
@@ -621,47 +683,13 @@ export function computeVacancyGaps(
   const results: GapSuggestion[] = []
 
   for (const property of properties) {
-    const bookings  = bookingsByProperty.get(property.id) ?? []
+    const bookings = bookingsByProperty.get(property.id) ?? []
     if (!bookings.length) continue
     const schedules = schedulesByProperty.get(property.id) ?? []
 
     for (const gap of deriveVacancyGaps(bookings, LOOKAHEAD_DAYS)) {
-      if (gap.days < LIGHT_GAP_DAYS) continue
-
-      // next_due_date <= min(windowEnd, windowStart + LOOKAHEAD_DAYS), and
-      // only schedules whose seasonal window is active this month.
-      const capMs          = new Date(gap.start).getTime() + LOOKAHEAD_DAYS * 86_400_000
-      const effectiveEndMs = gap.end
-        ? Math.min(new Date(gap.end).getTime(), capMs)
-        : capMs
-      const effectiveEnd   = new Date(effectiveEndMs).toISOString().split('T')[0]!
-
-      const eligible = schedules
-        .filter((s) =>
-          s.next_due_date !== null &&
-          s.next_due_date <= effectiveEnd &&
-          isMaintenanceItemActiveThisMonth(s.active_from_month ?? null, s.active_to_month ?? null)
-        )
-        .map((s) => ({
-          id:                 s.id,
-          name:               s.name,
-          next_due_date:      s.next_due_date!,
-          estimated_cost:     s.estimated_cost,
-          assigned_vendor_id: s.assigned_vendor_id,
-        }))
-
-      if (!eligible.length) continue
-
-      results.push({
-        property_id:   property.id,
-        org_id:        property.org_id,
-        property_name: property.name,
-        gap_start:     gap.start,
-        gap_end:       gap.end,
-        gap_days:      gap.days,
-        tier:          gap.days >= STRONG_GAP_DAYS ? 'strong' : 'light',
-        candidates:    eligible,
-      })
+      const suggestion = gapSuggestionFor(property, gap, schedules)
+      if (suggestion) results.push(suggestion)
     }
   }
 

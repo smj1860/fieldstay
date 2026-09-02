@@ -72,8 +72,13 @@ describe('guardrail: lint warning ratchet', () => {
     // budget rather than letting it trade against other warnings.
     // Lowered to 158 on 2026-08-24: ChecklistView.tsx was split into components,
     // clearing its cognitive-complexity (45) and no-nested-functions warnings.
+    // Lowered to 129 on 2026-09-02: the twelve remaining SonarCloud
+    // cognitive-complexity findings (quote route, vendor portal, dashboard
+    // shell, vendor dispatch dialog, work-order detail, asset CSV parser,
+    // asset scan, daily wrap-up, maintenance-schedule helpers x2, geocoding
+    // backfill x2) were refactored out.
     // LOWER this when warnings are cleared; never raise it.
-    const CEILING = 158
+    const CEILING = 129
     const budget = Number(/--max-warnings\s+(\d+)/.exec(pkg.scripts.lint ?? '')?.[1])
     expect(budget).toBeLessThanOrEqual(CEILING)
   })
@@ -97,9 +102,11 @@ describe('guardrail: the cognitive-complexity ratchet stays armed', () => {
   it('the baseline is a ratchet that only moves down', () => {
     // Seeded 2026-08-15: 36 violations across 31 files, worst at 45
     // (app/crew/turnovers/[id]/ChecklistView.tsx).
+    // Lowered to 11/13 on 2026-09-02 with the twelve SonarCloud
+    // cognitive-complexity findings cleared.
     // LOWER these when violations are cleared; never raise them.
-    const FILE_CEILING  = 28
-    const TOTAL_CEILING = 33
+    const FILE_CEILING  = 11
+    const TOTAL_CEILING = 13
 
     const total = Object.values(baseline).reduce((n, scores) => n + scores.length, 0)
     expect(Object.keys(baseline).length).toBeLessThanOrEqual(FILE_CEILING)

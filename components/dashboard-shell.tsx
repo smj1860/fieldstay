@@ -97,39 +97,31 @@ interface DashboardSidebarProps {
   userId:              string
 }
 
-// Hoisted to a top-level component rather than defined inline inside
-// DashboardShell's render body — an inline component gets a brand-new
-// component type on every render of the parent, which forces React to
-// unmount and remount the entire sidebar (losing any internal state,
-// re-running effects) instead of just updating it. DashboardShell renders
-// on every route change, so this ran on every single navigation.
-function DashboardSidebar({
-  mobile = false,
-  role,
+
+// A single sidebar nav link. Top-level rather than a closure inside
+// DashboardSidebar for the same reason DashboardSidebar itself is top-level:
+// an inline component type is new on every render and forces a remount.
+function SidebarNavLink({
+  item,
   pathname,
   collapsed,
+  mobile,
   onCloseMobile,
   unreadMessages,
-  onboardingComplete,
-  onboardingPct,
-  opsNav,
-  mgmtNav,
-  isStaff,
-  orgName,
-  userName,
-  userEmail,
-  userId,
-}: Readonly<DashboardSidebarProps>) {
-  const { isClusterExpanded, toggleCluster } = useNavClusters(mgmtNav, pathname)
-
-  const renderNavLink = (item: NavItem) => {
+}: Readonly<{
+  item:           NavItem
+  pathname:       string
+  collapsed:      boolean
+  mobile:         boolean
+  onCloseMobile:  () => void
+  unreadMessages: number
+}>) {
     const Icon   = item.icon
     const active = pathname === item.href ||
                    pathname.startsWith(item.href + '/')
 
     return (
       <Link
-        key={item.href}
         href={item.href}
         onClick={onCloseMobile}
         title={collapsed && !mobile ? item.label : undefined}
@@ -161,19 +153,120 @@ function DashboardSidebar({
         )}
       </Link>
     )
-  }
+}
 
+
+/** One collapsible Management cluster (its heading plus its links). */
+function ManagementCluster({
+  category,
+  clusterItems,
+  mobile,
+  expanded,
+  toggleCluster,
+  renderNavLink,
+}: Readonly<{
+  category:      string
+  clusterItems:  NavItem[]
+  mobile:        boolean
+  expanded:      boolean
+  toggleCluster: (category: string) => void
+  renderNavLink: (item: NavItem) => React.ReactNode
+}>) {
   return (
-    <aside
-      className={cn(
-        'flex flex-col h-full transition-all duration-300',
-        mobile ? 'w-[min(256px,85vw)]' : collapsed ? 'w-[68px]' : 'w-60'
+    <div className="mb-0.5">
+      {mobile ? (
+        <span
+          className="block px-3 pt-2 pb-1 text-[10px] font-semibold uppercase tracking-wide"
+          style={{ color: 'var(--chrome-text-muted)', opacity: 0.6 }}
+        >
+          {category}
+        </span>
+      ) : (
+        <button
+          type="button"
+          onClick={() => toggleCluster(category)}
+          aria-expanded={expanded}
+          className="w-full flex items-center gap-1.5 px-3 pt-2 pb-1 text-[10px]
+                     font-semibold uppercase tracking-wide transition-colors
+                     hover:text-[var(--chrome-text)]
+                     focus:outline-none focus:ring-2 focus:ring-inset
+                     focus:ring-[var(--accent-gold)] rounded"
+          style={{ color: 'var(--chrome-text-muted)', opacity: 0.6 }}
+        >
+          {expanded
+            ? <ChevronDown className="w-3 h-3 flex-shrink-0" />
+            : <ChevronRight className="w-3 h-3 flex-shrink-0" />}
+          {category}
+        </button>
       )}
-      style={{
-        background:  'var(--chrome-bg)',
-        borderRight: '1px solid var(--chrome-border)',
-      }}
-    >
+      {expanded && clusterItems.map(renderNavLink)}
+    </div>
+  )
+}
+
+/** The Management section of the sidebar: heading, then either a flat list
+ *  (rail-collapsed) or the collapsible clusters. */
+function ManagementNav({
+  mgmtNav,
+  collapsed,
+  mobile,
+  isClusterExpanded,
+  toggleCluster,
+  renderNavLink,
+}: Readonly<{
+  mgmtNav:           NavItem[]
+  collapsed:         boolean
+  mobile:            boolean
+  isClusterExpanded: (category: string) => boolean
+  toggleCluster:     (category: string) => void
+  renderNavLink:     (item: NavItem) => React.ReactNode
+}>) {
+  return (
+    <>
+      <div className="mt-3 mb-1 pt-2" style={{ borderTop: '1px solid var(--chrome-border)' }}>
+        {(!collapsed || mobile) && (
+          <span
+            className="block px-3 pb-1 text-[10px] font-semibold uppercase tracking-wide"
+            style={{ color: 'var(--chrome-text-muted)', opacity: 0.7 }}
+          >
+            Management
+          </span>
+        )}
+      </div>
+      {collapsed && !mobile ? (
+        mgmtNav.map(renderNavLink)
+      ) : (
+        <>
+          {CLUSTER_ORDER.map((category) => {
+            const clusterItems = mgmtNav.filter((item) => item.category === category)
+            if (clusterItems.length === 0) return null
+
+            return (
+              <ManagementCluster
+                key={category}
+                category={category}
+                clusterItems={clusterItems}
+                mobile={mobile}
+                expanded={mobile || isClusterExpanded(category)}
+                toggleCluster={toggleCluster}
+                renderNavLink={renderNavLink}
+              />
+            )
+          })}
+          {mgmtNav.filter((item) => item.category === 'Settings').map(renderNavLink)}
+        </>
+      )}
+    </>
+  )
+}
+
+
+/** Sidebar logo row — carries the mobile drawer's close button. */
+function SidebarLogo({
+  collapsed, mobile, orgName, onCloseMobile,
+}: Readonly<{ collapsed: boolean; mobile: boolean; orgName: string; onCloseMobile: () => void }>) {
+  return (
+    <>
       {/* Logo row — close button lives here on mobile */}
       <div
         className="flex items-center gap-3 px-4 py-5 flex-shrink-0"
@@ -208,86 +301,23 @@ function DashboardSidebar({
           </button>
         )}
       </div>
+    </>
+  )
+}
 
-      {/* Nav links */}
-      <nav className="flex-1 px-2 py-4 space-y-0.5 overflow-y-auto">
-        {!onboardingComplete && canFinishSetup(role) && (!collapsed || mobile) && (
-          <Link
-            href="/setup"
-            onClick={onCloseMobile}
-            className="flex items-center gap-2 px-3 py-2.5 rounded-lg text-sm font-semibold transition-all mb-2"
-            style={{
-              background: 'var(--chrome-gold-dim)',
-              color:      'var(--chrome-gold)',
-              border:     '1px solid rgba(252,209,22,0.2)',
-            }}
-          >
-            <Zap className="w-4 h-4" />
-            <span>Complete Setup</span>
-            <span className="ml-auto text-xs opacity-70">{onboardingPct}%</span>
-          </Link>
-        )}
-        {opsNav.map(renderNavLink)}
-
-        {mgmtNav.length > 0 && (
-          <>
-            <div className="mt-3 mb-1 pt-2" style={{ borderTop: '1px solid var(--chrome-border)' }}>
-              {(!collapsed || mobile) && (
-                <span
-                  className="block px-3 pb-1 text-[10px] font-semibold uppercase tracking-wide"
-                  style={{ color: 'var(--chrome-text-muted)', opacity: 0.7 }}
-                >
-                  Management
-                </span>
-              )}
-            </div>
-            {collapsed && !mobile ? (
-              mgmtNav.map(renderNavLink)
-            ) : (
-              <>
-                {CLUSTER_ORDER.map((category) => {
-                  const clusterItems = mgmtNav.filter((item) => item.category === category)
-                  if (clusterItems.length === 0) return null
-                  const expanded = mobile ? true : isClusterExpanded(category)
-
-                  return (
-                    <div key={category} className="mb-0.5">
-                      {mobile ? (
-                        <span
-                          className="block px-3 pt-2 pb-1 text-[10px] font-semibold uppercase tracking-wide"
-                          style={{ color: 'var(--chrome-text-muted)', opacity: 0.6 }}
-                        >
-                          {category}
-                        </span>
-                      ) : (
-                        <button
-                          type="button"
-                          onClick={() => toggleCluster(category)}
-                          aria-expanded={expanded}
-                          className="w-full flex items-center gap-1.5 px-3 pt-2 pb-1 text-[10px]
-                                     font-semibold uppercase tracking-wide transition-colors
-                                     hover:text-[var(--chrome-text)]
-                                     focus:outline-none focus:ring-2 focus:ring-inset
-                                     focus:ring-[var(--accent-gold)] rounded"
-                          style={{ color: 'var(--chrome-text-muted)', opacity: 0.6 }}
-                        >
-                          {expanded
-                            ? <ChevronDown className="w-3 h-3 flex-shrink-0" />
-                            : <ChevronRight className="w-3 h-3 flex-shrink-0" />}
-                          {category}
-                        </button>
-                      )}
-                      {expanded && clusterItems.map(renderNavLink)}
-                    </div>
-                  )
-                })}
-                {mgmtNav.filter((item) => item.category === 'Settings').map(renderNavLink)}
-              </>
-            )}
-          </>
-        )}
-      </nav>
-
+/** The two fixed links pinned above the user row: the staff-only support
+ *  inbox, and Help & Support. */
+function SidebarSupportLinks({
+  isStaff, collapsed, mobile, pathname, onCloseMobile,
+}: Readonly<{
+  isStaff:       boolean
+  collapsed:     boolean
+  mobile:        boolean
+  pathname:      string
+  onCloseMobile: () => void
+}>) {
+  return (
+    <>
       {/* ── Staff-only: Support Inbox ──────────────────── */}
       {isStaff && (
         <div className="px-2 pt-1 pb-0 flex-shrink-0" style={{ borderTop: '1px solid var(--chrome-border)' }}>
@@ -326,6 +356,93 @@ function DashboardSidebar({
           )}
         </Link>
       </div>
+    </>
+  )
+}
+
+// Hoisted to a top-level component rather than defined inline inside
+// DashboardShell's render body — an inline component gets a brand-new
+// component type on every render of the parent, which forces React to
+// unmount and remount the entire sidebar (losing any internal state,
+// re-running effects) instead of just updating it. DashboardShell renders
+// on every route change, so this ran on every single navigation.
+function DashboardSidebar({
+  mobile = false,
+  role,
+  pathname,
+  collapsed,
+  onCloseMobile,
+  unreadMessages,
+  onboardingComplete,
+  onboardingPct,
+  opsNav,
+  mgmtNav,
+  isStaff,
+  orgName,
+  userName,
+  userEmail,
+  userId,
+}: Readonly<DashboardSidebarProps>) {
+  const { isClusterExpanded, toggleCluster } = useNavClusters(mgmtNav, pathname)
+
+  const renderNavLink = (item: NavItem) => (
+    <SidebarNavLink
+      key={item.href}
+      item={item}
+      pathname={pathname}
+      collapsed={collapsed}
+      mobile={mobile}
+      onCloseMobile={onCloseMobile}
+      unreadMessages={unreadMessages}
+    />
+  )
+
+  return (
+    <aside
+      className={cn(
+        'flex flex-col h-full transition-all duration-300',
+        mobile ? 'w-[min(256px,85vw)]' : collapsed ? 'w-[68px]' : 'w-60'
+      )}
+      style={{
+        background:  'var(--chrome-bg)',
+        borderRight: '1px solid var(--chrome-border)',
+      }}
+    >
+      <SidebarLogo collapsed={collapsed} mobile={mobile} orgName={orgName} onCloseMobile={onCloseMobile} />
+
+      {/* Nav links */}
+      <nav className="flex-1 px-2 py-4 space-y-0.5 overflow-y-auto">
+        {!onboardingComplete && canFinishSetup(role) && (!collapsed || mobile) && (
+          <Link
+            href="/setup"
+            onClick={onCloseMobile}
+            className="flex items-center gap-2 px-3 py-2.5 rounded-lg text-sm font-semibold transition-all mb-2"
+            style={{
+              background: 'var(--chrome-gold-dim)',
+              color:      'var(--chrome-gold)',
+              border:     '1px solid rgba(252,209,22,0.2)',
+            }}
+          >
+            <Zap className="w-4 h-4" />
+            <span>Complete Setup</span>
+            <span className="ml-auto text-xs opacity-70">{onboardingPct}%</span>
+          </Link>
+        )}
+        {opsNav.map(renderNavLink)}
+
+        {mgmtNav.length > 0 && (
+          <ManagementNav
+            mgmtNav={mgmtNav}
+            collapsed={collapsed}
+            mobile={mobile}
+            isClusterExpanded={isClusterExpanded}
+            toggleCluster={toggleCluster}
+            renderNavLink={renderNavLink}
+          />
+        )}
+      </nav>
+
+      <SidebarSupportLinks isStaff={isStaff} collapsed={collapsed} mobile={mobile} pathname={pathname} onCloseMobile={onCloseMobile} />
 
       {/* Bottom user row */}
       {(!collapsed || mobile) && (

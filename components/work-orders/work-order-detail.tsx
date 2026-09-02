@@ -231,37 +231,20 @@ function WorkOrderPhotos({
   )
 }
 
-export function WorkOrderDetail({ workOrder: wo, userRole, vendors = [] }: Readonly<Props>) {
-  const actions = useWorkOrderActions(wo)
-  const {
-    isPending, actionError,
-    nteOverrideConfirmed, setNteOverrideConfirmed,
-    showCancelConfirm, setShowCancelConfirm,
-    showDispatch, setShowDispatch, setDispatchedUrl, setDispatchError,
-    handleAcknowledge, handleVerify, handleCancel,
-  } = actions
 
-  const canEdit  = userRole === 'admin' || userRole === 'manager'
-  const priority = PRIORITY_STYLES[wo.priority]
-  const status   = STATUS_STYLES[wo.status]
-  const canCancel = canEdit && wo.status !== 'completed' && wo.status !== 'cancelled'
+// ── Document header ───────────────────────────────────────────
 
-  const lineItems      = wo.work_order_line_items ?? []
-  const hasAccess      = !!(wo.properties.access_instructions || wo.access_notes)
-  const lineItemsTotal = lineItems.reduce((s, i) => s + i.line_total, 0)
-
-  const nteSet      = wo.nte_amount != null && wo.nte_amount > 0
-  const nteExceeded = nteSet && lineItemsTotal > wo.nte_amount!
-  const nteOverage  = nteExceeded ? lineItemsTotal - wo.nte_amount! : 0
-
-  // ── Render ───────────────────────────────────────────────────
-
+function DocumentHeader({
+  wo, canEdit, canCancel, isPending, setShowDispatch, setShowCancelConfirm,
+}: Readonly<{
+  wo:                  WorkOrderDetailData
+  canEdit:             boolean
+  canCancel:           boolean
+  isPending:           boolean
+  setShowDispatch:     (v: boolean) => void
+  setShowCancelConfirm:(v: boolean) => void
+}>) {
   return (
-    <div
-      className="flex flex-col h-full overflow-y-auto print:overflow-visible"
-      style={{ background: 'var(--bg-base)' }}
-    >
-      {/* ── Document Header ───────────────────────────────────── */}
       <div
         className="flex-shrink-0 flex items-start justify-between px-6 pt-6 pb-5 print:pt-0"
         style={{ borderBottom: '1px solid var(--border)' }}
@@ -339,10 +322,13 @@ export function WorkOrderDetail({ workOrder: wo, userRole, vendors = [] }: Reado
           </button>
         </div>
       </div>
+  )
+}
 
-      <div className="flex-1 px-6 py-5 space-y-6 print:space-y-4">
+// ── Property / vendor / schedule grid ─────────────────────────
 
-        {/* ── Info Grid: Property + Vendor ──────────────────────── */}
+function InfoGrid({ wo }: Readonly<{ wo: WorkOrderDetailData }>) {
+  return (
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
 
           {/* Property */}
@@ -418,8 +404,19 @@ export function WorkOrderDetail({ workOrder: wo, userRole, vendors = [] }: Reado
             </div>
           </div>
         </div>
+  )
+}
 
-        {/* ── Status Strip ──────────────────────────────────────── */}
+// ── Priority / status / category / invoice strip ──────────────
+
+function StatusStrip({
+  wo, priority, status,
+}: Readonly<{
+  wo:       WorkOrderDetailData
+  priority: { badge: string; label: string }
+  status:   { dot: string; label: string }
+}>) {
+  return (
         <div
           className="flex flex-wrap items-center gap-2 py-3 px-4 rounded-lg"
           style={{ background: 'var(--bg-raised)', border: '1px solid var(--border)' }}
@@ -465,6 +462,156 @@ export function WorkOrderDetail({ workOrder: wo, userRole, vendors = [] }: Reado
             </span>
           )}
         </div>
+  )
+}
+
+// ── Completion & sign-off ─────────────────────────────────────
+
+function CompletionSection({
+  wo, canEdit, isPending, actionError, nteExceeded, nteOverage,
+  nteOverrideConfirmed, setNteOverrideConfirmed, handleAcknowledge, handleVerify,
+}: Readonly<{
+  wo:                      WorkOrderDetailData
+  canEdit:                 boolean
+  isPending:               boolean
+  actionError:             string | null
+  nteExceeded:             boolean
+  nteOverage:              number
+  nteOverrideConfirmed:    boolean
+  setNteOverrideConfirmed: (v: boolean) => void
+  handleAcknowledge:       () => void
+  handleVerify:            () => void
+}>) {
+  return (
+        <Section
+          icon={<CheckCircle2 className="w-4 h-4" />}
+          title="Completion & Sign-Off"
+        >
+          <div className="space-y-3">
+
+            {/* Vendor acknowledged */}
+            <SignOffRow
+              label="Vendor Acknowledged"
+              timestamp={wo.vendor_acknowledged_at}
+              canAction={canEdit && !wo.vendor_acknowledged_at && wo.status !== 'cancelled'}
+              isPending={isPending}
+              onAction={handleAcknowledge}
+              actionLabel="Mark Acknowledged"
+            />
+
+            {/* NTE override checkbox */}
+            {nteExceeded && canEdit && !wo.completion_verified_at && (
+              <label
+                className="flex items-start gap-2 text-sm cursor-pointer p-3 rounded-lg"
+                style={{
+                  background: 'rgba(220,38,38,0.07)',
+                  border:     '1px solid rgba(220,38,38,0.25)',
+                }}
+              >
+                <input
+                  type="checkbox"
+                  checked={nteOverrideConfirmed}
+                  onChange={e => setNteOverrideConfirmed(e.target.checked)}
+                  className="mt-0.5 w-4 h-4 rounded text-[var(--accent-red)] focus:outline-none focus:ring-2 focus:ring-[var(--accent-gold)]"
+                />
+                <span style={{ color: 'var(--accent-red)', fontWeight: 500 }}>
+                  I authorize this work order to exceed the NTE amount and confirm the additional cost of{' '}
+                  {new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(nteOverage)}.
+                </span>
+              </label>
+            )}
+
+            {/* PM verified — vendor-assigned work orders are completed through
+                the vendor's own portal (line items → invoice → Stripe payout),
+                not verified here, so this action is unavailable once a vendor
+                is assigned. */}
+            <SignOffRow
+              label="Work Verified Complete"
+              timestamp={wo.completion_verified_at}
+              canAction={canEdit && !wo.vendors && !wo.completion_verified_at && !!wo.vendor_acknowledged_at && (!nteExceeded || nteOverrideConfirmed)}
+              isPending={isPending}
+              onAction={handleVerify}
+              actionLabel="Mark Verified"
+            />
+            {!!wo.vendors && !wo.completion_verified_at && (
+              <p className="text-xs italic" style={{ color: 'var(--text-muted)' }}>
+                Assigned to a vendor — completed through their portal, which generates the invoice and Stripe payout automatically.
+              </p>
+            )}
+
+            {/* Completed by (vendor portal technician name) */}
+            {wo.completed_by_name && (
+              <p className="text-sm mt-1 pt-3 leading-relaxed"
+                 style={{
+                   color:       'var(--text-muted)',
+                   borderTop:   '1px solid var(--border)',
+                 }}>
+                <span className="font-medium" style={{ color: 'var(--text-primary)' }}>
+                  Completed by:{' '}
+                </span>
+                {wo.completed_by_name}
+              </p>
+            )}
+
+            {/* Completion notes */}
+            {wo.completion_notes && (
+              <p className="text-sm mt-1 pt-3 leading-relaxed"
+                 style={{
+                   color:       'var(--text-muted)',
+                   borderTop:   wo.completed_by_name ? 'none' : '1px solid var(--border)',
+                 }}>
+                <span className="font-medium" style={{ color: 'var(--text-primary)' }}>
+                  Notes:{' '}
+                </span>
+                {wo.completion_notes}
+              </p>
+            )}
+
+            {actionError && (
+              <p className="text-xs" style={{ color: 'var(--accent-red)' }}>{actionError}</p>
+            )}
+          </div>
+        </Section>
+  )
+}
+
+export function WorkOrderDetail({ workOrder: wo, userRole, vendors = [] }: Readonly<Props>) {
+  const actions = useWorkOrderActions(wo)
+  const {
+    isPending, actionError,
+    nteOverrideConfirmed, setNteOverrideConfirmed,
+    showCancelConfirm, setShowCancelConfirm,
+    showDispatch, setShowDispatch, setDispatchedUrl, setDispatchError,
+    handleAcknowledge, handleVerify, handleCancel,
+  } = actions
+
+  const canEdit  = userRole === 'admin' || userRole === 'manager'
+  const priority = PRIORITY_STYLES[wo.priority]
+  const status   = STATUS_STYLES[wo.status]
+  const canCancel = canEdit && wo.status !== 'completed' && wo.status !== 'cancelled'
+
+  const lineItems      = wo.work_order_line_items ?? []
+  const hasAccess      = !!(wo.properties.access_instructions || wo.access_notes)
+  const lineItemsTotal = lineItems.reduce((s, i) => s + i.line_total, 0)
+
+  const nteSet      = wo.nte_amount != null && wo.nte_amount > 0
+  const nteExceeded = nteSet && lineItemsTotal > wo.nte_amount!
+  const nteOverage  = nteExceeded ? lineItemsTotal - wo.nte_amount! : 0
+
+  // ── Render ───────────────────────────────────────────────────
+
+  return (
+    <div
+      className="flex flex-col h-full overflow-y-auto print:overflow-visible"
+      style={{ background: 'var(--bg-base)' }}
+    >
+      <DocumentHeader wo={wo} canEdit={canEdit} canCancel={canCancel} isPending={isPending} setShowDispatch={setShowDispatch} setShowCancelConfirm={setShowCancelConfirm} />
+
+      <div className="flex-1 px-6 py-5 space-y-6 print:space-y-4">
+
+        <InfoGrid wo={wo} />
+
+        <StatusStrip wo={wo} priority={priority} status={status} />
 
         {/* ── NTE Banner ────────────────────────────────────────── */}
         {wo.nte_amount != null && (
@@ -584,96 +731,7 @@ export function WorkOrderDetail({ workOrder: wo, userRole, vendors = [] }: Reado
           )}
         </Section>
 
-        {/* ── Completion & Sign-Off ─────────────────────────────── */}
-        <Section
-          icon={<CheckCircle2 className="w-4 h-4" />}
-          title="Completion & Sign-Off"
-        >
-          <div className="space-y-3">
-
-            {/* Vendor acknowledged */}
-            <SignOffRow
-              label="Vendor Acknowledged"
-              timestamp={wo.vendor_acknowledged_at}
-              canAction={canEdit && !wo.vendor_acknowledged_at && wo.status !== 'cancelled'}
-              isPending={isPending}
-              onAction={handleAcknowledge}
-              actionLabel="Mark Acknowledged"
-            />
-
-            {/* NTE override checkbox */}
-            {nteExceeded && canEdit && !wo.completion_verified_at && (
-              <label
-                className="flex items-start gap-2 text-sm cursor-pointer p-3 rounded-lg"
-                style={{
-                  background: 'rgba(220,38,38,0.07)',
-                  border:     '1px solid rgba(220,38,38,0.25)',
-                }}
-              >
-                <input
-                  type="checkbox"
-                  checked={nteOverrideConfirmed}
-                  onChange={e => setNteOverrideConfirmed(e.target.checked)}
-                  className="mt-0.5 w-4 h-4 rounded text-[var(--accent-red)] focus:outline-none focus:ring-2 focus:ring-[var(--accent-gold)]"
-                />
-                <span style={{ color: 'var(--accent-red)', fontWeight: 500 }}>
-                  I authorize this work order to exceed the NTE amount and confirm the additional cost of{' '}
-                  {new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(nteOverage)}.
-                </span>
-              </label>
-            )}
-
-            {/* PM verified — vendor-assigned work orders are completed through
-                the vendor's own portal (line items → invoice → Stripe payout),
-                not verified here, so this action is unavailable once a vendor
-                is assigned. */}
-            <SignOffRow
-              label="Work Verified Complete"
-              timestamp={wo.completion_verified_at}
-              canAction={canEdit && !wo.vendors && !wo.completion_verified_at && !!wo.vendor_acknowledged_at && (!nteExceeded || nteOverrideConfirmed)}
-              isPending={isPending}
-              onAction={handleVerify}
-              actionLabel="Mark Verified"
-            />
-            {!!wo.vendors && !wo.completion_verified_at && (
-              <p className="text-xs italic" style={{ color: 'var(--text-muted)' }}>
-                Assigned to a vendor — completed through their portal, which generates the invoice and Stripe payout automatically.
-              </p>
-            )}
-
-            {/* Completed by (vendor portal technician name) */}
-            {wo.completed_by_name && (
-              <p className="text-sm mt-1 pt-3 leading-relaxed"
-                 style={{
-                   color:       'var(--text-muted)',
-                   borderTop:   '1px solid var(--border)',
-                 }}>
-                <span className="font-medium" style={{ color: 'var(--text-primary)' }}>
-                  Completed by:{' '}
-                </span>
-                {wo.completed_by_name}
-              </p>
-            )}
-
-            {/* Completion notes */}
-            {wo.completion_notes && (
-              <p className="text-sm mt-1 pt-3 leading-relaxed"
-                 style={{
-                   color:       'var(--text-muted)',
-                   borderTop:   wo.completed_by_name ? 'none' : '1px solid var(--border)',
-                 }}>
-                <span className="font-medium" style={{ color: 'var(--text-primary)' }}>
-                  Notes:{' '}
-                </span>
-                {wo.completion_notes}
-              </p>
-            )}
-
-            {actionError && (
-              <p className="text-xs" style={{ color: 'var(--accent-red)' }}>{actionError}</p>
-            )}
-          </div>
-        </Section>
+        <CompletionSection wo={wo} canEdit={canEdit} isPending={isPending} actionError={actionError} nteExceeded={nteExceeded} nteOverage={nteOverage} nteOverrideConfirmed={nteOverrideConfirmed} setNteOverrideConfirmed={setNteOverrideConfirmed} handleAcknowledge={handleAcknowledge} handleVerify={handleVerify} />
 
         {/* ── Photos ────────────────────────────────────────────── */}
         {(wo.work_order_photos ?? []).length > 0 && (

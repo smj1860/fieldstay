@@ -28,42 +28,10 @@
   "app/api/work-orders/[token]/complete/route.ts": [
     28
   ],
-  "app/api/work-orders/[token]/quote/route.ts": [
-    25
-  ],
-  "app/work-orders/[token]/vendor-portal.tsx": [
-    16
-  ],
   "components/crew/availability-overview-calendar.tsx": [
-    17
-  ],
-  "components/dashboard-shell.tsx": [
-    19
-  ],
-  "components/work-orders/VendorDispatchDialog.tsx": [
-    24
-  ],
-  "components/work-orders/work-order-detail.tsx": [
-    20
-  ],
-  "lib/csv/parseAssetCsv.ts": [
-    18
-  ],
-  "lib/inngest/functions/asset-scan.ts": [
     17
   ],
   "lib/inngest/functions/cron/checklist-signals.ts": [
     21
-  ],
-  "lib/inngest/functions/cron/daily-wrapup.ts": [
-    24
-  ],
-  "lib/inngest/functions/cron/maintenance-schedules-helpers.ts": [
-    17,
-    16
-  ],
-  "lib/inngest/functions/geocoding-backfill.ts": [
-    16,
-    16
   ]
 }

@@ -1,7 +1,7 @@
 import { inngest } from '@/lib/inngest/client'
 import { createServiceClient } from '@/lib/supabase/server'
 import { geocodeZip } from '@/lib/geocoding'
-import { unwrapList } from '@/lib/supabase/unwrap'
+import { fetchAllRows } from '@/lib/inngest/paginate'
 
 function chunk<T>(arr: T[], size: number): T[][] {
   const out: T[][] = []
@@ -11,6 +11,51 @@ function chunk<T>(arr: T[], size: number): T[][] {
 
 async function sleep(ms: number) {
   return new Promise((r) => setTimeout(r, ms))
+}
+
+
+type UngeocodedRow = { id: string; zip: string }
+
+/**
+ * LOW-4: rows sharing a zip code resolve to the same coordinates — geocode
+ * each unique zip once instead of once per row, paced so a large backfill
+ * doesn't burst Mapbox.
+ */
+async function resolveZipCoords(zips: string[]): Promise<Map<string, { lat: number; lng: number } | null>> {
+  const zipCoords = new Map<string, { lat: number; lng: number } | null>()
+
+  for (const batch of chunk(zips, 10)) {
+    for (const zip of batch) {
+      zipCoords.set(zip, await geocodeZip(zip))
+      await sleep(200)
+    }
+  }
+
+  return zipCoords
+}
+
+/**
+ * Groups rows by their resolved coordinates so rows sharing a zip write in one
+ * batched update instead of one update per row. `skipped` counts rows whose
+ * zip did not resolve.
+ */
+function groupIdsByCoords(
+  rows:      UngeocodedRow[],
+  zipCoords: Map<string, { lat: number; lng: number } | null>,
+): { groups: Array<{ lat: number; lng: number; ids: string[] }>; skipped: number } {
+  const byCoordsKey = new Map<string, { lat: number; lng: number; ids: string[] }>()
+  let skipped = 0
+
+  for (const row of rows) {
+    const coords = zipCoords.get(row.zip)
+    if (!coords) { skipped++; continue }
+    const key   = `${coords.lat},${coords.lng}`
+    const group = byCoordsKey.get(key)
+    if (group) group.ids.push(row.id)
+    else byCoordsKey.set(key, { lat: coords.lat, lng: coords.lng, ids: [row.id] })
+  }
+
+  return { groups: [...byCoordsKey.values()], skipped }
 }
 
 // ⚠️ Cross-tenant by design: scans and updates lat/lng for every org's properties
@@ -47,53 +92,29 @@ export const geocodingBackfill = inngest.createFunction(
   ],
   async ({ step }) => {
 
-    const propertiesResult = await step.run('geocode-properties', async (): Promise<{ geocoded: number; skipped: number }> => {
+    const propertiesResult = await step.run('geocode-properties', async () => {
       const supabase = createServiceClient({ system: 'inngest:geocoding-backfill' })
-      const pageSize = 1000
-      const properties: { id: string; zip: string | null }[] = []
-      for (let from = 0; ; from += pageSize) {
-        const pageRes = await supabase
+
+      // Paginated: this is a platform-wide scan, and an unbounded read would
+      // truncate at max_rows and leave the rest unfixed forever.
+      const properties = await fetchAllRows<{ id: string; zip: string | null }>(
+        (from, to) => supabase
           .from('properties')
           .select('id, zip')
           .is('lat', null)
           .not('zip', 'is', null)
-          .range(from, from + pageSize - 1)
-        const data = unwrapList(pageRes, { site: 'inngest.geocoding-backfill.geocode-properties' })
-        if (!data.length) break
-        properties.push(...data)
-        if (data.length < pageSize) break
-      }
-
+          .order('id', { ascending: true })
+          .range(from, to),
+        { label: 'properties(geocoding-backfill)' },
+      )
       if (!properties.length) return { geocoded: 0, skipped: 0 }
 
-      // LOW-4: properties sharing a zip code resolve to the same coordinates —
-      // geocode each unique zip once instead of once per property.
-      const uniqueZips = [...new Set(properties.map((p) => p.zip!))]
-      const zipCoords  = new Map<string, { lat: number; lng: number } | null>()
-
-      for (const batch of chunk(uniqueZips, 10)) {
-        for (const zip of batch) {
-          zipCoords.set(zip, await geocodeZip(zip))
-          await sleep(200)
-        }
-      }
+      const rows: UngeocodedRow[] = properties.map((p) => ({ id: p.id, zip: p.zip! }))
+      const zipCoords           = await resolveZipCoords([...new Set(rows.map((r) => r.zip))])
+      const { groups, skipped } = groupIdsByCoords(rows, zipCoords)
 
       let geocoded = 0
-      let skipped  = 0
-
-      // Group by resolved coordinates so properties sharing a zip write in
-      // one batched update instead of one sequential update per property.
-      const idsByCoordsKey = new Map<string, { lat: number; lng: number; ids: string[] }>()
-      for (const prop of properties) {
-        const coords = zipCoords.get(prop.zip!)
-        if (!coords) { skipped++; continue }
-        const key = `${coords.lat},${coords.lng}`
-        const group = idsByCoordsKey.get(key)
-        if (group) group.ids.push(prop.id)
-        else idsByCoordsKey.set(key, { lat: coords.lat, lng: coords.lng, ids: [prop.id] })
-      }
-
-      for (const { lat, lng, ids } of idsByCoordsKey.values()) {
+      for (const { lat, lng, ids } of groups) {
         await supabase.from('properties').update({ lat, lng }).in('id', ids)
         geocoded += ids.length
       }
@@ -101,53 +122,27 @@ export const geocodingBackfill = inngest.createFunction(
       return { geocoded, skipped }
     })
 
-    const vendorsResult = await step.run('geocode-vendors', async (): Promise<{ geocoded: number; skipped: number }> => {
+    const vendorsResult = await step.run('geocode-vendors', async () => {
       const supabase = createServiceClient({ system: 'inngest:geocoding-backfill' })
-      const pageSize = 1000
-      const vendors: { id: string; service_zip: string | null }[] = []
-      for (let from = 0; ; from += pageSize) {
-        const pageRes = await supabase
+
+      const vendors = await fetchAllRows<{ id: string; service_zip: string | null }>(
+        (from, to) => supabase
           .from('vendors')
           .select('id, service_zip')
           .is('lat', null)
           .not('service_zip', 'is', null)
-          .range(from, from + pageSize - 1)
-        const data = unwrapList(pageRes, { site: 'inngest.geocoding-backfill.geocode-vendors' })
-        if (!data.length) break
-        vendors.push(...data)
-        if (data.length < pageSize) break
-      }
-
+          .order('id', { ascending: true })
+          .range(from, to),
+        { label: 'vendors(geocoding-backfill)' },
+      )
       if (!vendors.length) return { geocoded: 0, skipped: 0 }
 
-      // LOW-4: vendors sharing a service zip resolve to the same coordinates —
-      // geocode each unique zip once instead of once per vendor.
-      const uniqueZips = [...new Set(vendors.map((v) => v.service_zip!))]
-      const zipCoords  = new Map<string, { lat: number; lng: number } | null>()
-
-      for (const batch of chunk(uniqueZips, 10)) {
-        for (const zip of batch) {
-          zipCoords.set(zip, await geocodeZip(zip))
-          await sleep(200)
-        }
-      }
+      const rows: UngeocodedRow[] = vendors.map((v) => ({ id: v.id, zip: v.service_zip! }))
+      const zipCoords           = await resolveZipCoords([...new Set(rows.map((r) => r.zip))])
+      const { groups, skipped } = groupIdsByCoords(rows, zipCoords)
 
       let geocoded = 0
-      let skipped  = 0
-
-      // Group by resolved coordinates so vendors sharing a zip write in one
-      // batched update instead of one sequential update per vendor.
-      const idsByCoordsKey = new Map<string, { lat: number; lng: number; ids: string[] }>()
-      for (const vendor of vendors) {
-        const coords = zipCoords.get(vendor.service_zip!)
-        if (!coords) { skipped++; continue }
-        const key = `${coords.lat},${coords.lng}`
-        const group = idsByCoordsKey.get(key)
-        if (group) group.ids.push(vendor.id)
-        else idsByCoordsKey.set(key, { lat: coords.lat, lng: coords.lng, ids: [vendor.id] })
-      }
-
-      for (const { lat, lng, ids } of idsByCoordsKey.values()) {
+      for (const { lat, lng, ids } of groups) {
         await supabase.from('vendors').update({ lat, lng }).in('id', ids)
         geocoded += ids.length
       }
