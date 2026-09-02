@@ -79,13 +79,13 @@ function buildDirectThreads({
 
   return crew
     .map((c) => {
-      const list = (byOther.get(c.user_id) ?? []).sort(byOldestFirst)
+      const list = [...(byOther.get(c.user_id) ?? [])].sort(byOldestFirst)
       return {
         type:        'direct' as const,
         key:         c.id,
         crew:        c,
         messages:    list,
-        lastMessage: list.length > 0 ? list[list.length - 1] : null,
+        lastMessage: list.at(-1) ?? null,
         unreadCount: list.filter((m) => m.recipient_id === currentUserId && !m.read_at).length,
       }
     })
@@ -112,7 +112,7 @@ function buildGroupThreads({
   const groups: GroupThread[] = []
 
   for (const [gid, msgs] of byGroupId) {
-    const sorted = msgs.sort(byOldestFirst)
+    const sorted = [...msgs].sort(byOldestFirst)
 
     const participantUserIds = [...new Set(
       msgs.map((m) => (m.sender_id === currentUserId ? m.recipient_id : m.sender_id))
@@ -135,7 +135,7 @@ function buildGroupThreads({
       groupLabel:  label,
       participants,
       messages:    sorted,
-      lastMessage: sorted[sorted.length - 1] ?? null,
+      lastMessage: sorted.at(-1) ?? null,
       unreadCount: sorted.filter((m) => m.recipient_id === currentUserId && !m.read_at).length,
     })
   }

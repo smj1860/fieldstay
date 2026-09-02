@@ -217,14 +217,30 @@ export function AvailabilityOverviewCalendar({ crew, availabilityMap }: Readonly
 
   const todayStr = new Date().toISOString().split('T')[0]!
 
-  // Calendar grid cells: null = empty leading cell
-  const cells: (number | null)[] = [
-    ...Array<null>(firstDow).fill(null),
-    ...Array.from({ length: daysInMonth }, (_, i) => i + 1),
-  ]
-
   const isoDate = (dayNum: number): string =>
     `${year}-${String(month + 1).padStart(2, '0')}-${String(dayNum).padStart(2, '0')}`
+
+  // Any day offset from the 1st of the displayed month, as a local ISO date.
+  // Offsets <= 0 land in the previous month, which is what the leading blanks
+  // actually are.
+  const isoDateAtOffset = (offsetFromFirst: number): string => {
+    const d = new Date(year, month, offsetFromFirst)
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+  }
+
+  // Calendar grid cells: dayNum null = empty leading cell. Each carries its own
+  // key rather than being keyed by array index — a blank is the trailing day of
+  // the previous month, so that real date is both stable and unique.
+  const cells: { key: string; dayNum: number | null }[] = [
+    ...Array.from({ length: firstDow }, (_, i) => ({
+      key:    isoDateAtOffset(i - firstDow + 1),
+      dayNum: null,
+    })),
+    ...Array.from({ length: daysInMonth }, (_, i) => ({
+      key:    isoDate(i + 1),
+      dayNum: i + 1,
+    })),
+  ]
 
   const monthLabel = viewDate.toLocaleDateString('en-US', {
     month: 'long',
@@ -286,11 +302,11 @@ export function AvailabilityOverviewCalendar({ crew, availabilityMap }: Readonly
         className="grid grid-cols-7 rounded-xl overflow-hidden"
         style={{ border: '1px solid var(--border)' }}
       >
-        {cells.map((dayNum, idx) => dayNum === null
-          ? <EmptyCell key={`empty-${idx}`} />
+        {cells.map(({ key, dayNum }) => dayNum === null
+          ? <EmptyCell key={key} />
           : (
             <DayCell
-              key={isoDate(dayNum)}
+              key={key}
               dayNum={dayNum}
               dateStr={isoDate(dayNum)}
               todayStr={todayStr}

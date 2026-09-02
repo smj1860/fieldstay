@@ -182,16 +182,27 @@ async function persistReadyResponse(
   const supabase  = createClient()
   const wordCount = editedResponse.trim().split(/\s+/).filter(Boolean).length
 
+  // The stored row is spread FIRST so the fields this function computes win.
+  // It used to come LAST, which meant a review that already had a response row
+  // overwrote the PM's freshly typed text and its word count with the stored
+  // values — `edited_response` is a column on that row, so the edit silently
+  // never reached the database and reappeared as the generated text on reopen.
+  //
+  // The spread itself is still load-bearing and must not simply be dropped: it
+  // carries tone_used, flag_reason, generated_at and regeneration_count, which
+  // this upsert would otherwise reset to their defaults on conflict.
+  const existing = review.review_responses ?? undefined
+
   const { data: updated, error: respErr } = await supabase
     .from('review_responses')
     .upsert({
-      review_id:       review.id,
-      org_id:          review.org_id,
-      edited_response: editedResponse,
-      word_count:      wordCount,
-      ...(review.review_responses ?? {}),
-      generated_response: review.review_responses?.generated_response,
-      flags:           review.review_responses?.flags ?? [],
+      ...existing,
+      review_id:          review.id,
+      org_id:             review.org_id,
+      generated_response: existing?.generated_response,
+      flags:              existing?.flags ?? [],
+      edited_response:    editedResponse,
+      word_count:         wordCount,
     }, { onConflict: 'review_id' })
     .select()
     .single()
