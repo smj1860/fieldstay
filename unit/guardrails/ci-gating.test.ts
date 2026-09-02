@@ -77,8 +77,11 @@ describe('guardrail: lint warning ratchet', () => {
     // shell, vendor dispatch dialog, work-order detail, asset CSV parser,
     // asset scan, daily wrap-up, maintenance-schedule helpers x2, geocoding
     // backfill x2) were refactored out.
+    // Lowered to 101 the same day with the remaining 13 cleared — the tree is
+    // now at ZERO cognitive-complexity violations. See the baseline ceilings
+    // below, which are 0/0 for the same reason.
     // LOWER this when warnings are cleared; never raise it.
-    const CEILING = 129
+    const CEILING = 101
     const budget = Number(/--max-warnings\s+(\d+)/.exec(pkg.scripts.lint ?? '')?.[1])
     expect(budget).toBeLessThanOrEqual(CEILING)
   })
@@ -102,11 +105,14 @@ describe('guardrail: the cognitive-complexity ratchet stays armed', () => {
   it('the baseline is a ratchet that only moves down', () => {
     // Seeded 2026-08-15: 36 violations across 31 files, worst at 45
     // (app/crew/turnovers/[id]/ChecklistView.tsx).
-    // Lowered to 11/13 on 2026-09-02 with the twelve SonarCloud
-    // cognitive-complexity findings cleared.
+    // Burned down to ZERO on 2026-09-02: every cognitive-complexity violation
+    // in the tree was refactored out, so the baseline is `{}` and both
+    // ceilings are 0. At 0 the ratchet is at its strongest — an unbaselined
+    // file may have NO violation, so any new one fails `check:complexity`
+    // outright rather than trading against the fungible warning total.
     // LOWER these when violations are cleared; never raise them.
-    const FILE_CEILING  = 11
-    const TOTAL_CEILING = 13
+    const FILE_CEILING  = 0
+    const TOTAL_CEILING = 0
 
     const total = Object.values(baseline).reduce((n, scores) => n + scores.length, 0)
     expect(Object.keys(baseline).length).toBeLessThanOrEqual(FILE_CEILING)

@@ -148,321 +148,102 @@ function StatusBadge({ status }: { status: string }) {
   )
 }
 
-export function ReviewsClient({ reviews: initialReviews, manualUsedThisWeek }: Props) {
-  const [reviews, setReviews]           = useState<ReviewRow[]>(initialReviews)
-  const [selected, setSelected]         = useState<ReviewRow | null>(null)
-  const [editedResponse, setEditedResponse]     = useState('')
-  const [generating, setGenerating]     = useState(false)
-  const [savingStatus, setSavingStatus] = useState<string | null>(null)
-  const [postConfirm, setPostConfirm]   = useState(false)
-  const [batchRequesting, setBatchRequesting] = useState(false)
-  const [batchMessage, setBatchMessage]       = useState<string | null>(null)
 
-  // Manual review paste
-  const [showManualModal, setShowManualModal] = useState(false)
-  const [manualForm, setManualForm] = useState({
-    reviewText: '',
-    starRating: 5,
-    guestName:  '',
-    propertyId: null as string | null,
-    platform:   'airbnb',
+
+type Failure = { ok: false; message: string }
+
+/** Asks RepuGuard for a draft response to one review. */
+async function requestGeneratedResponse(
+  reviewId: string,
+): Promise<{ ok: true; response: ReviewResponseRow } | Failure> {
+  const res = await fetch('/api/repuguard/generate', {
+    method:  'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body:    JSON.stringify({ review_id: reviewId }),
   })
-  const [manualSubmitting, setManualSubmitting] = useState(false)
-  const [manualError, setManualError]           = useState<string | null>(null)
-  const [manualUsed, setManualUsed]             = useState(manualUsedThisWeek)
 
-  const MANUAL_LIMIT = 2
-  const manualLeft   = MANUAL_LIMIT - manualUsed
-
-  const pendingCount = reviews.filter(r => r.response_status === 'pending').length
-
-  useEffect(() => {
-    if (!batchMessage) return
-    const t = setTimeout(() => setBatchMessage(null), 4000)
-    return () => clearTimeout(t)
-  }, [batchMessage])
-
-  const openPanel = (review: ReviewRow) => {
-    setSelected(review)
-    setEditedResponse(review.review_responses?.edited_response ?? review.review_responses?.generated_response ?? '')
-    setPostConfirm(false)
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ error: 'Unknown error' })) as { error?: string }
+    return { ok: false, message: err.error ?? res.statusText }
   }
 
-  const closePanel = () => {
-    setSelected(null)
-    setPostConfirm(false)
-  }
+  const { response } = await res.json() as { response: ReviewResponseRow }
+  return { ok: true, response }
+}
 
-  const updateReviewInList = (updated: ReviewRow) => {
-    setReviews(prev => prev.map(r => r.id === updated.id ? updated : r))
-    setSelected(updated)
-  }
-
-  const generate = async () => {
-    if (!selected) return
-    setGenerating(true)
-    try {
-      const res  = await fetch('/api/repuguard/generate', {
-        method:  'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body:    JSON.stringify({ review_id: selected.id }),
-      })
-      if (!res.ok) {
-        const err = await res.json().catch(() => ({ error: 'Unknown error' })) as { error?: string }
-        alert(`Failed to generate: ${err.error ?? res.statusText}`)
-        return
-      }
-      const { response } = await res.json() as { response: ReviewResponseRow }
-      const updatedReview: ReviewRow = {
-        ...selected,
-        response_status:  response.flags?.length > 0 ? 'draft' : 'ready',
-        review_responses: response,
-      }
-      setEditedResponse(response.generated_response ?? '')
-      updateReviewInList(updatedReview)
-    } finally {
-      setGenerating(false)
-    }
-  }
-
-  const markReady = async () => {
-    if (!selected) return
-    setSavingStatus('saving')
-    const supabase = createClient()
-
-    const wordCount = editedResponse.trim().split(/\s+/).filter(Boolean).length
-
-    // Upsert response
-    const { data: updated, error: respErr } = await supabase
-      .from('review_responses')
-      .upsert({
-        review_id:       selected.id,
-        org_id:          selected.org_id,
-        edited_response: editedResponse,
-        word_count:      wordCount,
-        ...(selected.review_responses ?? {}),
-        generated_response: selected.review_responses?.generated_response,
-        flags:           selected.review_responses?.flags ?? [],
-      }, { onConflict: 'review_id' })
-      .select()
-      .single()
-
-    if (respErr) {
-      alert('Failed to save: ' + respErr.message)
-      setSavingStatus(null)
-      return
-    }
-
-    // Update review status
-    const { error: statusErr } = await supabase
-      .from('reviews')
-      .update({ response_status: 'ready', updated_at: new Date().toISOString() })
-      .eq('id', selected.id)
-
-    if (statusErr) {
-      console.error('[reviews] Failed to update review status:', statusErr)
-      reportError(statusErr, { site: 'client.reviews.markReady', orgId: selected.org_id })
-      alert('Failed to save: ' + statusErr.message)
-      setSavingStatus(null)
-      return
-    }
-
-    const updatedReview: ReviewRow = {
-      ...selected,
-      response_status:  'ready',
-      review_responses: updated as ReviewResponseRow,
-    }
-    updateReviewInList(updatedReview)
-    setSavingStatus('saved')
-    setTimeout(() => setSavingStatus(null), 2000)
-  }
-
-  const confirmPosted = async () => {
-    if (!selected) return
-    const supabase = createClient()
-    const { error } = await supabase
-      .from('reviews')
-      .update({ response_status: 'posted', updated_at: new Date().toISOString() })
-      .eq('id', selected.id)
-
-    if (error) {
-      console.error('[reviews] Failed to mark as posted:', error)
-      alert('Failed to mark as posted. Please try again.')
-      return
-    }
-
-    const updatedReview: ReviewRow = { ...selected, response_status: 'posted' }
-    updateReviewInList(updatedReview)
-    setPostConfirm(false)
-  }
-
+/**
+ * Saves the edited response and flips the review to `ready` — two writes, so a
+ * failure in either is surfaced rather than leaving the pair disagreeing.
+ */
+async function persistReadyResponse(
+  review:         ReviewRow,
+  editedResponse: string,
+): Promise<{ ok: true; response: ReviewResponseRow } | Failure> {
+  const supabase  = createClient()
   const wordCount = editedResponse.trim().split(/\s+/).filter(Boolean).length
 
-  // Regeneration limit state for the selected review
-  const regenCount = selected?.review_responses?.regeneration_count ?? 0
-  const isManual   = selected?.external_source === 'manual'
-  const MAX_REGENS = 2
-  const regenLeft  = MAX_REGENS - regenCount
-  const canRegen   = !isManual && regenLeft > 0
+  const { data: updated, error: respErr } = await supabase
+    .from('review_responses')
+    .upsert({
+      review_id:       review.id,
+      org_id:          review.org_id,
+      edited_response: editedResponse,
+      word_count:      wordCount,
+      ...(review.review_responses ?? {}),
+      generated_response: review.review_responses?.generated_response,
+      flags:           review.review_responses?.flags ?? [],
+    }, { onConflict: 'review_id' })
+    .select()
+    .single()
 
-  // Post-to-PMS state for the selected review
-  const postUrl     = selected ? getReviewPostUrl(selected) : null
-  const sourceLabel = reviewSourceLabel(selected?.external_source)
+  if (respErr) return { ok: false, message: respErr.message }
 
+  const { error: statusErr } = await supabase
+    .from('reviews')
+    .update({ response_status: 'ready', updated_at: new Date().toISOString() })
+    .eq('id', review.id)
+
+  if (statusErr) {
+    console.error('[reviews] Failed to update review status:', statusErr)
+    reportError(statusErr, { site: 'client.reviews.markReady', orgId: review.org_id })
+    return { ok: false, message: statusErr.message }
+  }
+
+  return { ok: true, response: updated as ReviewResponseRow }
+}
+
+
+/** The per-review side panel: the guest's review, the drafted response, and
+ *  the ready / post-to-PMS actions. */
+function ReviewPanel({
+  selected, onClose,
+  editedResponse, setEditedResponse, wordCount,
+  generating, generate, canRegen, regenLeft, isManual,
+  savingStatus, markReady,
+  postUrl, sourceLabel, postConfirm, setPostConfirm, confirmPosted,
+}: Readonly<{
+  selected:          ReviewRow
+  onClose:           () => void
+  editedResponse:    string
+  setEditedResponse: (v: string) => void
+  wordCount:         number
+  generating:        boolean
+  generate:          () => Promise<void>
+  canRegen:          boolean
+  regenLeft:         number
+  isManual:          boolean
+  savingStatus:      string | null
+  markReady:         () => Promise<void>
+  postUrl:           string | null
+  sourceLabel:       string | null
+  postConfirm:       boolean
+  setPostConfirm:    (v: boolean) => void
+  confirmPosted:     () => Promise<void>
+}>) {
   return (
-    <div className="relative">
-      {/* Header */}
-      <div className="flex items-center justify-between mb-6 gap-4 flex-wrap">
-        <div>
-          <h1
-            className="font-black text-2xl tracking-tight"
-            style={{ color: 'var(--text-primary)', letterSpacing: '-0.75px' }}
-          >
-            Reviews
-          </h1>
-        </div>
-        <div className="flex items-center gap-3 flex-wrap">
-          <button
-            onClick={() => setShowManualModal(true)}
-            disabled={manualLeft <= 0}
-            className="flex items-center gap-1.5 text-sm font-semibold px-4 py-2 rounded-lg transition-colors disabled:opacity-50"
-            style={{
-              background: manualLeft > 0 ? 'var(--accent-gold)' : 'var(--bg-raised)',
-              color:      manualLeft > 0 ? 'var(--text-inverse)' : 'var(--text-muted)',
-            }}
-          >
-            + Add Review
-            <span
-              className="text-xs px-1.5 py-0.5 rounded-full ml-1"
-              style={{
-                background: 'rgba(0,0,0,0.15)',
-                color:      manualLeft > 0 ? 'var(--text-inverse)' : 'var(--text-muted)',
-              }}
-            >
-              {manualLeft}/{MANUAL_LIMIT} this week
-            </span>
-          </button>
-          {pendingCount > 0 && (
-            <Button
-              variant="secondary"
-              onClick={async () => {
-                setBatchRequesting(true)
-                const result = await requestBatchGeneration()
-                setBatchMessage(
-                  result.error ?? `Drafting ${Math.min(pendingCount, 25)} review${pendingCount !== 1 ? 's' : ''} — we'll email you when it's done.`
-                )
-                setBatchRequesting(false)
-              }}
-              disabled={batchRequesting}
-              className="text-sm"
-            >
-              {batchRequesting ? 'Starting…' : `Generate All Drafts (${pendingCount})`}
-            </Button>
-          )}
-          <span
-            className="text-xs font-semibold px-3 py-1 rounded-full"
-            style={{ background: 'var(--accent-gold-dim)', color: 'var(--accent-gold-text)' }}
-          >
-            Powered by RepuGuard
-          </span>
-        </div>
-      </div>
-
-      {batchMessage && (
-        <div
-          className="mb-4 text-sm rounded-xl px-4 py-3 border"
-          style={{ color: 'var(--text-muted)', background: 'var(--bg-canvas)', borderColor: 'var(--border)' }}
-        >
-          {batchMessage}
-        </div>
-      )}
-
-      {/* Reviews list */}
-      {reviews.length === 0 ? (
-        <div className="max-w-lg mx-auto py-16 text-center">
-          <div
-            className="inline-flex items-center justify-center w-14 h-14 rounded-2xl mb-5"
-            style={{ background: 'var(--accent-gold-dim)' }}
-          >
-            <Star className="w-6 h-6" fill="var(--accent-gold)" style={{ color: 'var(--accent-gold)' }} />
-          </div>
-          <h2 className="font-black text-xl mb-2 tracking-tight" style={{ color: 'var(--text-primary)' }}>
-            No reviews yet
-          </h2>
-          <p className="text-sm leading-relaxed" style={{ color: 'var(--text-muted)' }}>
-            Reviews sync automatically from your connected PMS every 6 hours. They&apos;ll appear
-            here once your first review lands — or use <strong>+ Add Review</strong> above
-            to paste one from another platform.
-          </p>
-        </div>
-      ) : (
-        <div className="space-y-3">
-          {reviews.map(review => {
-            const flagged = (review.review_responses?.flags?.length ?? 0) > 0
-            const truncated = review.review_text.length > 120
-              ? review.review_text.slice(0, 120) + '…'
-              : review.review_text
-
-            return (
-              <button
-                key={review.id}
-                onClick={() => openPanel(review)}
-                className="w-full text-left rounded-2xl p-5 transition-all"
-                style={{
-                  background:  selected?.id === review.id ? 'var(--bg-raised)' : 'var(--bg-base)',
-                  border:      `1px solid ${selected?.id === review.id ? 'var(--accent-gold)' : 'var(--border)'}`,
-                  cursor:      'pointer',
-                }}
-              >
-                <div className="flex items-start justify-between gap-4">
-                  <div className="flex-1 min-w-0">
-                    <div className="flex items-center gap-3 mb-1.5 flex-wrap">
-                      <span className="font-semibold text-sm" style={{ color: 'var(--text-primary)' }}>
-                        {review.guest_name ?? 'Guest'}
-                      </span>
-                      <StarRating rating={review.rating} />
-                      {review.properties?.name && (
-                        <span className="text-xs" style={{ color: 'var(--text-muted)' }}>
-                          {review.properties.name}
-                        </span>
-                      )}
-                      {review.review_date && (
-                        <span className="text-xs" style={{ color: 'var(--text-muted)' }}>
-                          {new Date(review.review_date).toLocaleDateString()}
-                        </span>
-                      )}
-                    </div>
-                    <p className="text-sm leading-relaxed" style={{ color: 'var(--text-muted)' }}>
-                      {truncated}
-                    </p>
-                  </div>
-                  <div className="flex items-center gap-2 flex-shrink-0">
-                    {flagged && (
-                      <span
-                        className="text-xs font-semibold px-2 py-0.5 rounded-full inline-flex items-center gap-1"
-                        style={{ background: 'var(--accent-red-dim)', color: 'var(--accent-red)' }}
-                      >
-                        <Flag className="w-3 h-3" /> Flagged
-                      </span>
-                    )}
-                    <DeadlineBadge
-                      daysRemaining={review.days_remaining}
-                      status={review.response_status}
-                    />
-                    <StatusBadge status={review.response_status} />
-                  </div>
-                </div>
-              </button>
-            )
-          })}
-        </div>
-      )}
-
-      {/* Side panel */}
-      {selected && (
         <Dialog
           open
-          onClose={closePanel}
+          onClose={onClose}
           title={selected.guest_name ?? 'Guest'}
           maxWidthClassName="max-w-lg"
           mobileSheet
@@ -660,6 +441,346 @@ export function ReviewsClient({ reviews: initialReviews, manualUsedThisWeek }: P
               )}
             </div>
         </Dialog>
+  )
+}
+
+/** Page header: the manual-paste button with its weekly allowance, the
+ *  batch-generate action, and the transient batch status message. */
+function ReviewsHeader({
+  manualLeft, manualLimit, onAddReview,
+  pendingCount, batchRequesting, setBatchRequesting,
+  batchMessage, setBatchMessage,
+}: Readonly<{
+  manualLeft:         number
+  manualLimit:        number
+  onAddReview:        () => void
+  pendingCount:       number
+  batchRequesting:    boolean
+  setBatchRequesting: (v: boolean) => void
+  batchMessage:       string | null
+  setBatchMessage:    (v: string | null) => void
+}>) {
+  return (
+    <>
+      <div className="flex items-center justify-between mb-6 gap-4 flex-wrap">
+        <div>
+          <h1
+            className="font-black text-2xl tracking-tight"
+            style={{ color: 'var(--text-primary)', letterSpacing: '-0.75px' }}
+          >
+            Reviews
+          </h1>
+        </div>
+        <div className="flex items-center gap-3 flex-wrap">
+          <button
+            onClick={() => onAddReview()}
+            disabled={manualLeft <= 0}
+            className="flex items-center gap-1.5 text-sm font-semibold px-4 py-2 rounded-lg transition-colors disabled:opacity-50"
+            style={{
+              background: manualLeft > 0 ? 'var(--accent-gold)' : 'var(--bg-raised)',
+              color:      manualLeft > 0 ? 'var(--text-inverse)' : 'var(--text-muted)',
+            }}
+          >
+            + Add Review
+            <span
+              className="text-xs px-1.5 py-0.5 rounded-full ml-1"
+              style={{
+                background: 'rgba(0,0,0,0.15)',
+                color:      manualLeft > 0 ? 'var(--text-inverse)' : 'var(--text-muted)',
+              }}
+            >
+              {manualLeft}/{manualLimit} this week
+            </span>
+          </button>
+          {pendingCount > 0 && (
+            <Button
+              variant="secondary"
+              onClick={async () => {
+                setBatchRequesting(true)
+                const result = await requestBatchGeneration()
+                setBatchMessage(
+                  result.error ?? `Drafting ${Math.min(pendingCount, 25)} review${pendingCount !== 1 ? 's' : ''} — we'll email you when it's done.`
+                )
+                setBatchRequesting(false)
+              }}
+              disabled={batchRequesting}
+              className="text-sm"
+            >
+              {batchRequesting ? 'Starting…' : `Generate All Drafts (${pendingCount})`}
+            </Button>
+          )}
+          <span
+            className="text-xs font-semibold px-3 py-1 rounded-full"
+            style={{ background: 'var(--accent-gold-dim)', color: 'var(--accent-gold-text)' }}
+          >
+            Powered by RepuGuard
+          </span>
+        </div>
+      </div>
+
+      {batchMessage && (
+        <div
+          className="mb-4 text-sm rounded-xl px-4 py-3 border"
+          style={{ color: 'var(--text-muted)', background: 'var(--bg-canvas)', borderColor: 'var(--border)' }}
+        >
+          {batchMessage}
+        </div>
+      )}
+    </>
+  )
+}
+
+/** The review list, or the first-run empty state when there is nothing yet. */
+function ReviewsList({
+  reviews, selectedId, onOpen,
+}: Readonly<{
+  reviews:    ReviewRow[]
+  selectedId: string | null
+  onOpen:     (review: ReviewRow) => void
+}>) {
+  return (
+    <>
+      {reviews.length === 0 ? (
+        <div className="max-w-lg mx-auto py-16 text-center">
+          <div
+            className="inline-flex items-center justify-center w-14 h-14 rounded-2xl mb-5"
+            style={{ background: 'var(--accent-gold-dim)' }}
+          >
+            <Star className="w-6 h-6" fill="var(--accent-gold)" style={{ color: 'var(--accent-gold)' }} />
+          </div>
+          <h2 className="font-black text-xl mb-2 tracking-tight" style={{ color: 'var(--text-primary)' }}>
+            No reviews yet
+          </h2>
+          <p className="text-sm leading-relaxed" style={{ color: 'var(--text-muted)' }}>
+            Reviews sync automatically from your connected PMS every 6 hours. They&apos;ll appear
+            here once your first review lands — or use <strong>+ Add Review</strong> above
+            to paste one from another platform.
+          </p>
+        </div>
+      ) : (
+        <div className="space-y-3">
+          {reviews.map(review => {
+            const flagged = (review.review_responses?.flags?.length ?? 0) > 0
+            const truncated = review.review_text.length > 120
+              ? review.review_text.slice(0, 120) + '…'
+              : review.review_text
+
+            return (
+              <button
+                key={review.id}
+                onClick={() => onOpen(review)}
+                className="w-full text-left rounded-2xl p-5 transition-all"
+                style={{
+                  background:  selectedId === review.id ? 'var(--bg-raised)' : 'var(--bg-base)',
+                  border:      `1px solid ${selectedId === review.id ? 'var(--accent-gold)' : 'var(--border)'}`,
+                  cursor:      'pointer',
+                }}
+              >
+                <div className="flex items-start justify-between gap-4">
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-3 mb-1.5 flex-wrap">
+                      <span className="font-semibold text-sm" style={{ color: 'var(--text-primary)' }}>
+                        {review.guest_name ?? 'Guest'}
+                      </span>
+                      <StarRating rating={review.rating} />
+                      {review.properties?.name && (
+                        <span className="text-xs" style={{ color: 'var(--text-muted)' }}>
+                          {review.properties.name}
+                        </span>
+                      )}
+                      {review.review_date && (
+                        <span className="text-xs" style={{ color: 'var(--text-muted)' }}>
+                          {new Date(review.review_date).toLocaleDateString()}
+                        </span>
+                      )}
+                    </div>
+                    <p className="text-sm leading-relaxed" style={{ color: 'var(--text-muted)' }}>
+                      {truncated}
+                    </p>
+                  </div>
+                  <div className="flex items-center gap-2 flex-shrink-0">
+                    {flagged && (
+                      <span
+                        className="text-xs font-semibold px-2 py-0.5 rounded-full inline-flex items-center gap-1"
+                        style={{ background: 'var(--accent-red-dim)', color: 'var(--accent-red)' }}
+                      >
+                        <Flag className="w-3 h-3" /> Flagged
+                      </span>
+                    )}
+                    <DeadlineBadge
+                      daysRemaining={review.days_remaining}
+                      status={review.response_status}
+                    />
+                    <StatusBadge status={review.response_status} />
+                  </div>
+                </div>
+              </button>
+            )
+          })}
+        </div>
+      )}
+    </>
+  )
+}
+
+export function ReviewsClient({ reviews: initialReviews, manualUsedThisWeek }: Props) {
+  const [reviews, setReviews]           = useState<ReviewRow[]>(initialReviews)
+  const [selected, setSelected]         = useState<ReviewRow | null>(null)
+  const [editedResponse, setEditedResponse]     = useState('')
+  const [generating, setGenerating]     = useState(false)
+  const [savingStatus, setSavingStatus] = useState<string | null>(null)
+  const [postConfirm, setPostConfirm]   = useState(false)
+  const [batchRequesting, setBatchRequesting] = useState(false)
+  const [batchMessage, setBatchMessage]       = useState<string | null>(null)
+
+  // Manual review paste
+  const [showManualModal, setShowManualModal] = useState(false)
+  const [manualForm, setManualForm] = useState({
+    reviewText: '',
+    starRating: 5,
+    guestName:  '',
+    propertyId: null as string | null,
+    platform:   'airbnb',
+  })
+  const [manualSubmitting, setManualSubmitting] = useState(false)
+  const [manualError, setManualError]           = useState<string | null>(null)
+  const [manualUsed, setManualUsed]             = useState(manualUsedThisWeek)
+
+  const MANUAL_LIMIT = 2
+  const manualLeft   = MANUAL_LIMIT - manualUsed
+
+  const pendingCount = reviews.filter(r => r.response_status === 'pending').length
+
+  useEffect(() => {
+    if (!batchMessage) return
+    const t = setTimeout(() => setBatchMessage(null), 4000)
+    return () => clearTimeout(t)
+  }, [batchMessage])
+
+  const openPanel = (review: ReviewRow) => {
+    setSelected(review)
+    setEditedResponse(review.review_responses?.edited_response ?? review.review_responses?.generated_response ?? '')
+    setPostConfirm(false)
+  }
+
+  const closePanel = () => {
+    setSelected(null)
+    setPostConfirm(false)
+  }
+
+  const updateReviewInList = (updated: ReviewRow) => {
+    setReviews(prev => prev.map(r => r.id === updated.id ? updated : r))
+    setSelected(updated)
+  }
+
+  const generate = async () => {
+    if (!selected) return
+    setGenerating(true)
+    try {
+      const result = await requestGeneratedResponse(selected.id)
+      if (!result.ok) {
+        alert(`Failed to generate: ${result.message}`)
+        return
+      }
+      const { response } = result
+      setEditedResponse(response.generated_response ?? '')
+      updateReviewInList({
+        ...selected,
+        response_status:  response.flags?.length > 0 ? 'draft' : 'ready',
+        review_responses: response,
+      })
+    } finally {
+      setGenerating(false)
+    }
+  }
+
+  const markReady = async () => {
+    if (!selected) return
+    setSavingStatus('saving')
+
+    const result = await persistReadyResponse(selected, editedResponse)
+    if (!result.ok) {
+      alert('Failed to save: ' + result.message)
+      setSavingStatus(null)
+      return
+    }
+
+    updateReviewInList({
+      ...selected,
+      response_status:  'ready',
+      review_responses: result.response,
+    })
+    setSavingStatus('saved')
+    setTimeout(() => setSavingStatus(null), 2000)
+  }
+
+  const confirmPosted = async () => {
+    if (!selected) return
+    const supabase = createClient()
+    const { error } = await supabase
+      .from('reviews')
+      .update({ response_status: 'posted', updated_at: new Date().toISOString() })
+      .eq('id', selected.id)
+
+    if (error) {
+      console.error('[reviews] Failed to mark as posted:', error)
+      alert('Failed to mark as posted. Please try again.')
+      return
+    }
+
+    const updatedReview: ReviewRow = { ...selected, response_status: 'posted' }
+    updateReviewInList(updatedReview)
+    setPostConfirm(false)
+  }
+
+  const wordCount = editedResponse.trim().split(/\s+/).filter(Boolean).length
+
+  // Regeneration limit state for the selected review
+  const regenCount = selected?.review_responses?.regeneration_count ?? 0
+  const isManual   = selected?.external_source === 'manual'
+  const MAX_REGENS = 2
+  const regenLeft  = MAX_REGENS - regenCount
+  const canRegen   = !isManual && regenLeft > 0
+
+  // Post-to-PMS state for the selected review
+  const postUrl     = selected ? getReviewPostUrl(selected) : null
+  const sourceLabel = reviewSourceLabel(selected?.external_source)
+
+  return (
+    <div className="relative">
+      <ReviewsHeader
+        manualLeft={manualLeft}
+        manualLimit={MANUAL_LIMIT}
+        onAddReview={() => setShowManualModal(true)}
+        pendingCount={pendingCount}
+        batchRequesting={batchRequesting}
+        setBatchRequesting={setBatchRequesting}
+        batchMessage={batchMessage}
+        setBatchMessage={setBatchMessage}
+      />
+
+      <ReviewsList reviews={reviews} selectedId={selected?.id ?? null} onOpen={openPanel} />
+
+      {selected && (
+        <ReviewPanel
+          selected={selected}
+          onClose={closePanel}
+          editedResponse={editedResponse}
+          setEditedResponse={setEditedResponse}
+          wordCount={wordCount}
+          generating={generating}
+          generate={generate}
+          canRegen={canRegen}
+          regenLeft={regenLeft}
+          isManual={isManual}
+          savingStatus={savingStatus}
+          markReady={markReady}
+          postUrl={postUrl}
+          sourceLabel={sourceLabel}
+          postConfirm={postConfirm}
+          setPostConfirm={setPostConfirm}
+          confirmPosted={confirmPosted}
+        />
       )}
 
       {/* Manual review paste modal */}

@@ -6,6 +6,206 @@ import { revalidatePath }   from 'next/cache'
 
 import { reportError } from '@/lib/observability/report-error'
 import { unwrap, unwrapList } from '@/lib/supabase/unwrap'
+
+/**
+ * Everything the three clone steps share. `supabase` is the caller's
+ * session-scoped client from requireOrgMember(), so RLS still applies.
+ */
+interface CloneContext {
+  supabase:          Awaited<ReturnType<typeof requireOrgMember>>['supabase']
+  orgId:             string
+  userId:            string
+  sourcePropertyId:  string
+  targetPropertyId:  string
+}
+
+async function cloneInventoryItems(
+  { supabase, orgId, userId, sourcePropertyId, targetPropertyId }: CloneContext,
+): Promise<void> {
+  // ── 1. Clone inventory_items ─────────────────────────────────────────────
+  const sourceItemsRes = await supabase
+    .from('inventory_items')
+    .select('name, category, unit, par_level, preferred_brand, catalog_item_id, notes')
+    .eq('property_id', sourcePropertyId)
+    .eq('is_active', true)
+    .limit(500)
+  const sourceItems = unwrapList(sourceItemsRes, { site: 'serverAction.properties.clonePropertySetup.inventoryRead', orgId })
+
+  if (sourceItems && sourceItems.length > 0) {
+    // Deactivate existing items on target
+    const deactivateRes = await supabase
+      .from('inventory_items')
+      .update({ is_active: false })
+      .eq('property_id', targetPropertyId)
+    unwrap(deactivateRes, { site: 'serverAction.properties.clonePropertySetup.inventoryDeactivate', orgId })
+
+    const insertRes = await supabase.from('inventory_items').insert(
+      sourceItems.map((item) => ({
+        org_id:         orgId,
+        property_id:    targetPropertyId,
+        name:           item.name,
+        category:       item.category,
+        unit:           item.unit,
+        par_level:      item.par_level,
+        preferred_brand: item.preferred_brand,
+        catalog_item_id: item.catalog_item_id,
+        notes:          item.notes,
+        current_quantity: 0,
+        is_active:      true,
+      }))
+    )
+    unwrap(insertRes, { site: 'serverAction.properties.clonePropertySetup.inventoryInsert', orgId })
+
+    await logAuditEvent({
+      orgId:      orgId,
+      actorId:    userId,
+      action:     'property.inventory.cloned',
+      targetType: 'property',
+      targetId:   targetPropertyId,
+      metadata:   { source_property_id: sourcePropertyId, items_cloned: sourceItems.length },
+    })
+  }
+}
+
+/** Returns an error message when the target template could not be created. */
+async function cloneChecklistTemplate(
+  { supabase, orgId, userId, sourcePropertyId, targetPropertyId }: CloneContext,
+): Promise<string | null> {
+  // ── 2. Clone checklist template ──────────────────────────────────────────
+  const sourceTemplateRes = await supabase
+    .from('checklist_templates')
+    .select('id, name, checklist_template_sections(id, name, sort_order, checklist_template_items(task, requires_photo, notes, sort_order))')
+    .eq('property_id', sourcePropertyId)
+    .limit(1)
+    .maybeSingle()
+  const sourceTemplate = unwrap(sourceTemplateRes, { site: 'serverAction.properties.clonePropertySetup.checklistTemplateRead', orgId })
+
+  if (sourceTemplate) {
+    // Find or create target template
+    const existingTargetRes = await supabase
+      .from('checklist_templates')
+      .select('id')
+      .eq('property_id', targetPropertyId)
+      .limit(1)
+      .maybeSingle()
+    const existingTarget = unwrap(existingTargetRes, { site: 'serverAction.properties.clonePropertySetup.checklistTargetRead', orgId })
+
+    let targetTemplateId: string
+
+    if (existingTarget) {
+      targetTemplateId = existingTarget.id
+      // Delete existing sections (cascade deletes items)
+      const deleteSectionsRes = await supabase
+        .from('checklist_template_sections')
+        .delete()
+        .eq('template_id', targetTemplateId)
+      unwrap(deleteSectionsRes, { site: 'serverAction.properties.clonePropertySetup.checklistSectionsDelete', orgId })
+    } else {
+      const { data: newTemplate, error: tmplErr } = await supabase
+        .from('checklist_templates')
+        .insert({ org_id: orgId, property_id: targetPropertyId, name: sourceTemplate.name })
+        .select('id')
+        .single()
+      if (tmplErr || !newTemplate) return tmplErr?.message ?? 'Could not create checklist template'
+      targetTemplateId = newTemplate.id
+    }
+
+    // Re-create sections and items
+    const sourceSections = (sourceTemplate as unknown as {
+      checklist_template_sections: Array<{
+        id: string; name: string; sort_order: number
+        checklist_template_items: Array<{ task: string; requires_photo: boolean; notes: string | null; sort_order: number }>
+      }>
+    }).checklist_template_sections ?? []
+
+    const totalItems = sourceSections.reduce((sum, s) => sum + (s.checklist_template_items?.length ?? 0), 0)
+
+    for (const section of sourceSections) {
+      const { data: newSection, error: sErr } = await supabase
+        .from('checklist_template_sections')
+        .insert({ template_id: targetTemplateId, name: section.name, sort_order: section.sort_order })
+        .select('id')
+        .single()
+      if (sErr || !newSection) continue
+
+      const items = section.checklist_template_items ?? []
+      if (items.length > 0) {
+        const itemsInsertRes = await supabase.from('checklist_template_items').insert(
+          items.map((item) => ({
+            template_id:    targetTemplateId,
+            section_id:     newSection.id,
+            task:           item.task,
+            requires_photo: item.requires_photo,
+            notes:          item.notes,
+            sort_order:     item.sort_order,
+          }))
+        )
+        unwrap(itemsInsertRes, { site: 'serverAction.properties.clonePropertySetup.checklistItemsInsert', orgId })
+      }
+    }
+
+    await logAuditEvent({
+      orgId:      orgId,
+      actorId:    userId,
+      action:     'property.checklist.cloned',
+      targetType: 'property',
+      targetId:   targetPropertyId,
+      metadata:   { source_property_id: sourcePropertyId, sections_cloned: sourceSections.length, items_cloned: totalItems },
+    })
+  }
+
+  return null
+}
+
+async function cloneMaintenanceSchedules(
+  { supabase, orgId, userId, sourcePropertyId, targetPropertyId }: CloneContext,
+): Promise<void> {
+  // ── 3. Clone maintenance_schedules ───────────────────────────────────────
+  const sourceSchedRes = await supabase
+    .from('maintenance_schedules')
+    .select('name, description, schedule_type, frequency, day_of_month_due, estimated_cost, instructions, auto_create_wo, assigned_vendor_id')
+    .eq('property_id', sourcePropertyId)
+    .eq('is_active', true)
+    .limit(500)
+  const sourceSched = unwrapList(sourceSchedRes, { site: 'serverAction.properties.clonePropertySetup.scheduleRead', orgId })
+
+  if (sourceSched && sourceSched.length > 0) {
+    // Deactivate existing schedules on target
+    const deactivateSchedRes = await supabase
+      .from('maintenance_schedules')
+      .update({ is_active: false })
+      .eq('property_id', targetPropertyId)
+    unwrap(deactivateSchedRes, { site: 'serverAction.properties.clonePropertySetup.scheduleDeactivate', orgId })
+
+    const schedInsertRes = await supabase.from('maintenance_schedules').insert(
+      sourceSched.map((s) => ({
+        org_id:             orgId,
+        property_id:        targetPropertyId,
+        name:               s.name,
+        description:        s.description,
+        schedule_type:      s.schedule_type,
+        frequency:          s.frequency,
+        day_of_month_due:   s.day_of_month_due,
+        estimated_cost:     s.estimated_cost,
+        instructions:       s.instructions,
+        auto_create_wo:     s.auto_create_wo,
+        assigned_vendor_id: s.assigned_vendor_id,
+        is_active:          true,
+      }))
+    )
+    unwrap(schedInsertRes, { site: 'serverAction.properties.clonePropertySetup.scheduleInsert', orgId })
+
+    await logAuditEvent({
+      orgId:      orgId,
+      actorId:    userId,
+      action:     'property.maintenance.cloned',
+      targetType: 'property',
+      targetId:   targetPropertyId,
+      metadata:   { source_property_id: sourcePropertyId, schedules_cloned: sourceSched.length },
+    })
+  }
+}
+
 export async function clonePropertySetup(
   sourcePropertyId: string,
   targetPropertyId: string
@@ -27,177 +227,14 @@ export async function clonePropertySetup(
       return { success: false, error: 'One or both properties not found in your org.' }
     }
 
-    // ── 1. Clone inventory_items ─────────────────────────────────────────────
-    const sourceItemsRes = await supabase
-      .from('inventory_items')
-      .select('name, category, unit, par_level, preferred_brand, catalog_item_id, notes')
-      .eq('property_id', sourcePropertyId)
-      .eq('is_active', true)
-      .limit(500)
-    const sourceItems = unwrapList(sourceItemsRes, { site: 'serverAction.properties.clonePropertySetup.inventoryRead', orgId })
+    const ctx = { supabase, orgId, userId: user.id, sourcePropertyId, targetPropertyId }
 
-    if (sourceItems && sourceItems.length > 0) {
-      // Deactivate existing items on target
-      const deactivateRes = await supabase
-        .from('inventory_items')
-        .update({ is_active: false })
-        .eq('property_id', targetPropertyId)
-      unwrap(deactivateRes, { site: 'serverAction.properties.clonePropertySetup.inventoryDeactivate', orgId })
+    await cloneInventoryItems(ctx)
 
-      const insertRes = await supabase.from('inventory_items').insert(
-        sourceItems.map((item) => ({
-          org_id:         orgId,
-          property_id:    targetPropertyId,
-          name:           item.name,
-          category:       item.category,
-          unit:           item.unit,
-          par_level:      item.par_level,
-          preferred_brand: item.preferred_brand,
-          catalog_item_id: item.catalog_item_id,
-          notes:          item.notes,
-          current_quantity: 0,
-          is_active:      true,
-        }))
-      )
-      unwrap(insertRes, { site: 'serverAction.properties.clonePropertySetup.inventoryInsert', orgId })
+    const checklistError = await cloneChecklistTemplate(ctx)
+    if (checklistError) return { success: false, error: checklistError }
 
-      await logAuditEvent({
-        orgId:      orgId,
-        actorId:    user.id,
-        action:     'property.inventory.cloned',
-        targetType: 'property',
-        targetId:   targetPropertyId,
-        metadata:   { source_property_id: sourcePropertyId, items_cloned: sourceItems.length },
-      })
-    }
-
-    // ── 2. Clone checklist template ──────────────────────────────────────────
-    const sourceTemplateRes = await supabase
-      .from('checklist_templates')
-      .select('id, name, checklist_template_sections(id, name, sort_order, checklist_template_items(task, requires_photo, notes, sort_order))')
-      .eq('property_id', sourcePropertyId)
-      .limit(1)
-      .maybeSingle()
-    const sourceTemplate = unwrap(sourceTemplateRes, { site: 'serverAction.properties.clonePropertySetup.checklistTemplateRead', orgId })
-
-    if (sourceTemplate) {
-      // Find or create target template
-      const existingTargetRes = await supabase
-        .from('checklist_templates')
-        .select('id')
-        .eq('property_id', targetPropertyId)
-        .limit(1)
-        .maybeSingle()
-      const existingTarget = unwrap(existingTargetRes, { site: 'serverAction.properties.clonePropertySetup.checklistTargetRead', orgId })
-
-      let targetTemplateId: string
-
-      if (existingTarget) {
-        targetTemplateId = existingTarget.id
-        // Delete existing sections (cascade deletes items)
-        const deleteSectionsRes = await supabase
-          .from('checklist_template_sections')
-          .delete()
-          .eq('template_id', targetTemplateId)
-        unwrap(deleteSectionsRes, { site: 'serverAction.properties.clonePropertySetup.checklistSectionsDelete', orgId })
-      } else {
-        const { data: newTemplate, error: tmplErr } = await supabase
-          .from('checklist_templates')
-          .insert({ org_id: orgId, property_id: targetPropertyId, name: sourceTemplate.name })
-          .select('id')
-          .single()
-        if (tmplErr || !newTemplate) return { success: false, error: tmplErr?.message ?? 'Could not create checklist template' }
-        targetTemplateId = newTemplate.id
-      }
-
-      // Re-create sections and items
-      const sourceSections = (sourceTemplate as unknown as {
-        checklist_template_sections: Array<{
-          id: string; name: string; sort_order: number
-          checklist_template_items: Array<{ task: string; requires_photo: boolean; notes: string | null; sort_order: number }>
-        }>
-      }).checklist_template_sections ?? []
-
-      const totalItems = sourceSections.reduce((sum, s) => sum + (s.checklist_template_items?.length ?? 0), 0)
-
-      for (const section of sourceSections) {
-        const { data: newSection, error: sErr } = await supabase
-          .from('checklist_template_sections')
-          .insert({ template_id: targetTemplateId, name: section.name, sort_order: section.sort_order })
-          .select('id')
-          .single()
-        if (sErr || !newSection) continue
-
-        const items = section.checklist_template_items ?? []
-        if (items.length > 0) {
-          const itemsInsertRes = await supabase.from('checklist_template_items').insert(
-            items.map((item) => ({
-              template_id:    targetTemplateId,
-              section_id:     newSection.id,
-              task:           item.task,
-              requires_photo: item.requires_photo,
-              notes:          item.notes,
-              sort_order:     item.sort_order,
-            }))
-          )
-          unwrap(itemsInsertRes, { site: 'serverAction.properties.clonePropertySetup.checklistItemsInsert', orgId })
-        }
-      }
-
-      await logAuditEvent({
-        orgId:      orgId,
-        actorId:    user.id,
-        action:     'property.checklist.cloned',
-        targetType: 'property',
-        targetId:   targetPropertyId,
-        metadata:   { source_property_id: sourcePropertyId, sections_cloned: sourceSections.length, items_cloned: totalItems },
-      })
-    }
-
-    // ── 3. Clone maintenance_schedules ───────────────────────────────────────
-    const sourceSchedRes = await supabase
-      .from('maintenance_schedules')
-      .select('name, description, schedule_type, frequency, day_of_month_due, estimated_cost, instructions, auto_create_wo, assigned_vendor_id')
-      .eq('property_id', sourcePropertyId)
-      .eq('is_active', true)
-      .limit(500)
-    const sourceSched = unwrapList(sourceSchedRes, { site: 'serverAction.properties.clonePropertySetup.scheduleRead', orgId })
-
-    if (sourceSched && sourceSched.length > 0) {
-      // Deactivate existing schedules on target
-      const deactivateSchedRes = await supabase
-        .from('maintenance_schedules')
-        .update({ is_active: false })
-        .eq('property_id', targetPropertyId)
-      unwrap(deactivateSchedRes, { site: 'serverAction.properties.clonePropertySetup.scheduleDeactivate', orgId })
-
-      const schedInsertRes = await supabase.from('maintenance_schedules').insert(
-        sourceSched.map((s) => ({
-          org_id:             orgId,
-          property_id:        targetPropertyId,
-          name:               s.name,
-          description:        s.description,
-          schedule_type:      s.schedule_type,
-          frequency:          s.frequency,
-          day_of_month_due:   s.day_of_month_due,
-          estimated_cost:     s.estimated_cost,
-          instructions:       s.instructions,
-          auto_create_wo:     s.auto_create_wo,
-          assigned_vendor_id: s.assigned_vendor_id,
-          is_active:          true,
-        }))
-      )
-      unwrap(schedInsertRes, { site: 'serverAction.properties.clonePropertySetup.scheduleInsert', orgId })
-
-      await logAuditEvent({
-        orgId:      orgId,
-        actorId:    user.id,
-        action:     'property.maintenance.cloned',
-        targetType: 'property',
-        targetId:   targetPropertyId,
-        metadata:   { source_property_id: sourcePropertyId, schedules_cloned: sourceSched.length },
-      })
-    }
+    await cloneMaintenanceSchedules(ctx)
 
     revalidatePath(`/properties/${targetPropertyId}/setup`)
     return { success: true }

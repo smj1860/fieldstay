@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useTransition, useActionState, useRef, useEffect, useMemo, useContext, createContext } from 'react'
+import { useState, useTransition, useActionState, useRef, useEffect, useMemo, useContext, createContext, type Dispatch, type SetStateAction } from 'react'
 import { useSearchParams } from 'next/navigation'
 import Link from 'next/link'
 import {
@@ -122,8 +122,36 @@ function getAllAssignedCrew(t: Turnover): AssignedCrewMember[] {
   return t.turnover_assignments.flatMap(a => a.crew_member ? [a.crew_member] : [])
 }
 
+type TurnoverGroupKey = 'urgent' | 'today' | 'tomorrow' | 'week' | 'upcoming' | 'recent'
+
+/**
+ * Which board column a turnover belongs in.
+ *
+ * The elevated-priority branch deliberately skips `today`: a high/urgent
+ * turnover only takes this path when it is NOT today, so it lands in
+ * `tomorrow` or `week` (including far-future ones, which is why it is checked
+ * before the day-count fallback below). The original had an `isToday` test
+ * nested inside that same `!isToday` branch — dead by construction; it is
+ * dropped here rather than carried forward, which changes nothing.
+ */
+function turnoverGroupFor(t: Turnover): TurnoverGroupKey {
+  if (t.status === 'completed') return 'recent'
+
+  const checkout = new Date(t.checkout_datetime)
+  if (isPast(checkout) && t.status !== 'in_progress') return 'urgent'
+
+  const elevated = (t.priority === 'urgent' || t.priority === 'high') && !isToday(checkout)
+  if (elevated) return isTomorrow(checkout) ? 'tomorrow' : 'week'
+
+  if (isToday(checkout))    return 'today'
+  if (isTomorrow(checkout)) return 'tomorrow'
+
+  const daysOut = Math.ceil((checkout.getTime() - Date.now()) / 86_400_000)
+  return daysOut <= 7 ? 'week' : 'upcoming'
+}
+
 function groupTurnovers(turnovers: Turnover[]) {
-  const groups: Record<string, Turnover[]> = {
+  const groups: Record<TurnoverGroupKey, Turnover[]> = {
     urgent:   [],
     today:    [],
     tomorrow: [],
@@ -133,31 +161,7 @@ function groupTurnovers(turnovers: Turnover[]) {
   }
 
   for (const t of turnovers) {
-    const checkout = new Date(t.checkout_datetime)
-
-    if (t.status === 'completed') {
-      groups.recent.push(t)
-      continue
-    }
-
-    if (isPast(checkout) && t.status !== 'in_progress') {
-      groups.urgent.push(t)
-    } else if (
-      (t.priority === 'urgent' || t.priority === 'high') &&
-      !isToday(checkout)
-    ) {
-      if (isToday(checkout)) groups.today.push(t)
-      else if (isTomorrow(checkout)) groups.tomorrow.push(t)
-      else groups.week.push(t)
-    } else if (isToday(checkout)) {
-      groups.today.push(t)
-    } else if (isTomorrow(checkout)) {
-      groups.tomorrow.push(t)
-    } else {
-      const daysOut = Math.ceil((checkout.getTime() - Date.now()) / 86_400_000)
-      if (daysOut <= 7) groups.week.push(t)
-      else groups.upcoming.push(t)
-    }
+    groups[turnoverGroupFor(t)].push(t)
   }
 
   return groups
@@ -935,189 +939,66 @@ function SplitAssignModal({
   )
 }
 
-// ── Main Board ───────────────────────────────────────────────────────────────
 
-export function TurnoverBoard({
-  turnovers,
-  propertyMap,
-  crewMembers,
-  properties,
-  orgId,
-  bookings = [],
-  crewAvailability = [],
-  showAutoAssignNudge = false,
+interface TurnoverFilters {
+  showArchived: boolean
+  filterProp:   string
+  filterStatus: string
+  filterCrew:   string
+}
+
+/** Whether the board's current filter set admits this turnover. */
+function matchesTurnoverFilters(t: Turnover, f: TurnoverFilters): boolean {
+  // Archived turnovers are hidden from the default board and only shown
+  // when the "Show Archived" toggle is active (which shows ONLY archived).
+  if (f.showArchived ? !t.is_archived : t.is_archived) return false
+
+  if (f.filterProp !== 'all' && t.property_id !== f.filterProp) return false
+
+  // In archived view every row is already completed, so the active/completed
+  // status tabs don't apply — skip them to avoid filtering archived rows out.
+  if (!f.showArchived && !matchesStatusTab(t, f.filterStatus)) return false
+
+  return matchesCrewFilter(t, f.filterCrew)
+}
+
+function matchesStatusTab(t: Turnover, filterStatus: string): boolean {
+  if (filterStatus === 'active')    return t.status !== 'completed' && t.status !== 'cancelled'
+  if (filterStatus === 'completed') return t.status === 'completed'
+  return true
+}
+
+function matchesCrewFilter(t: Turnover, filterCrew: string): boolean {
+  if (filterCrew === 'all')        return true
+  if (filterCrew === 'unassigned') return t.status === 'pending_assignment'
+  return t.turnover_assignments.some((a) => a.crew_member_id === filterCrew)
+}
+
+
+/** The board's filter row: status tabs, property/crew selects, the archived
+ *  toggle and the list/Gantt switch. */
+function BoardFilterBar({
+  properties, crewMembers,
+  filterStatus, setFilterStatus,
+  filterProp, setFilterProp,
+  filterCrew, setFilterCrew,
+  showArchived, setShowArchived,
+  viewMode, setViewMode,
 }: Readonly<{
-  turnovers: Turnover[]
-  propertyMap: Record<string, Property>
-  crewMembers: CrewMember[]
-  properties: Property[]
-  // Only consumers today are the quick-flag photo paths, which must be
-  // `${org_id}/…` for the private turnover-photos bucket's RLS policies.
-  orgId: string
-  bookings?: BookingRow[]
-  crewAvailability?: CrewAvailabilityRow[]
-  showAutoAssignNudge?: boolean
+  properties:      Property[]
+  crewMembers:     CrewMember[]
+  filterStatus:    string
+  setFilterStatus: (v: string) => void
+  filterProp:      string
+  setFilterProp:   (v: string) => void
+  filterCrew:      string
+  setFilterCrew:   (v: string) => void
+  showArchived:    boolean
+  setShowArchived: Dispatch<SetStateAction<boolean>>
+  viewMode:        'list' | 'gantt'
+  setViewMode:     (v: 'list' | 'gantt') => void
 }>) {
-  const searchParams = useSearchParams()
-  const urlStatus    = searchParams.get('status')
-
-  const [showAdd,           setShowAdd]           = useState(false)
-  const [splitAssignOpen,   setSplitAssignOpen]   = useState(false)
-  const [syncing,           startSync]            = useTransition()
-  const [filterProp,        setFilterProp]        = useState<string>('all')
-  const [filterStatus,      setFilterStatus]      = useState<string>(
-    urlStatus === 'pending_assignment' ? 'pending_assignment' : 'active'
-  )
-  const [filterCrew,        setFilterCrew]        = useState<string>('all')
-  const [showArchived,      setShowArchived]      = useState(false)
-  const [selectedIds,       setSelectedIds]       = useState<Set<string>>(new Set())
-  const [bulkAssigning,     startBulkAssign]      = useTransition()
-  const [viewMode,          setViewMode]          = useState<'list' | 'gantt'>('list')
-  const [assignmentWarning, setAssignmentWarning] = useState<string | null>(null)
-
-  useEffect(() => {
-    if (!assignmentWarning) return
-    const t = setTimeout(() => setAssignmentWarning(null), 5000)
-    return () => clearTimeout(t)
-  }, [assignmentWarning])
-
-  const toggleSelect = (id: string) =>
-    setSelectedIds(prev => {
-      const next = new Set(prev)
-      if (next.has(id)) { next.delete(id) } else { next.add(id) }
-      return next
-    })
-
-  const clearSelection = () => setSelectedIds(new Set())
-
-  const availabilityMap = useMemo(() => {
-    const map: Record<string, boolean> = {}
-    for (const row of crewAvailability) {
-      map[`${row.crew_member_id}::${row.available_date}`] = row.is_available
-    }
-    return map
-  }, [crewAvailability])
-
-  // Filter
-  const filtered = turnovers.filter((t) => {
-    // Archived turnovers are hidden from the default board and only shown
-    // when the "Show Archived" toggle is active (which shows ONLY archived).
-    if (showArchived ? !t.is_archived : t.is_archived) return false
-
-    if (filterProp !== 'all' && t.property_id !== filterProp) return false
-
-    // In archived view every row is already completed, so the active/completed
-    // status tabs don't apply — skip them to avoid filtering archived rows out.
-    if (!showArchived) {
-      if (filterStatus === 'active'    && (t.status === 'completed' || t.status === 'cancelled')) return false
-      if (filterStatus === 'completed' &&  t.status !== 'completed') return false
-    }
-
-    if (filterCrew !== 'all') {
-      const crewIds = t.turnover_assignments.map(a => a.crew_member_id)
-
-      if (filterCrew === 'unassigned') {
-        if (t.status !== 'pending_assignment') return false
-      } else {
-        if (!crewIds.includes(filterCrew)) return false
-      }
-    }
-
-    return true
-  })
-
-  const allVisibleSelected =
-    filtered.length > 0 && filtered.every(t => selectedIds.has(t.id))
-
-  const toggleSelectAll = () =>
-    allVisibleSelected
-      ? clearSelection()
-      : setSelectedIds(new Set(filtered.map(t => t.id)))
-
-  const groups = groupTurnovers(filtered)
-
-  const hasUrgentVisibleContent =
-    groups.urgent.length > 0 || groups.today.length > 0 ||
-    groups.tomorrow.length > 0 || groups.week.length > 0
-
-  // If nothing in the "always open" sections has content, force Upcoming
-  // open even though its own default might otherwise be false — a PM
-  // should never load this page and see nothing.
-  const upcomingForceOpen = !hasUrgentVisibleContent && groups.upcoming.length > 0
-
-  const totalActive = turnovers.filter((t) =>
-    t.status !== 'completed' && t.status !== 'cancelled'
-  ).length
-
-  const needsCrew = turnovers.filter((t) =>
-    t.status === 'pending_assignment'
-  ).length
-
   return (
-    <CrewAvailabilityContext.Provider value={availabilityMap}>
-      <TurnoverOrgProvider orgId={orgId}>
-      {/* Conflict warning toast */}
-      {assignmentWarning && (
-        <div
-          className="fixed top-4 left-1/2 -translate-x-1/2 z-50 px-4 py-3 rounded-xl shadow-lg flex items-center gap-2 text-sm"
-          style={{
-            background: 'var(--accent-amber-dim)',
-            border:     '1px solid var(--accent-amber)',
-            color:      'var(--accent-amber)',
-          }}
-        >
-          <AlertTriangle className="w-4 h-4 flex-shrink-0" />
-          {assignmentWarning}
-          <button onClick={() => setAssignmentWarning(null)} className="ml-2">
-            <X className="w-3.5 h-3.5" />
-          </button>
-        </div>
-      )}
-
-      {showAutoAssignNudge && (
-        <NudgeBanner
-          id="auto-assign-intro"
-          message="FieldStay can assign crews automatically based on availability and distance."
-          href="/settings?tab=automation"
-          linkText="Enable auto-assignment"
-        />
-      )}
-
-      {/* Page header */}
-      <div className="page-header flex items-start justify-between">
-        <div>
-          <h1 className="page-title">Turnovers</h1>
-          <div className="flex items-center gap-3 mt-1">
-            <p className="page-subtitle">{totalActive} active</p>
-            {needsCrew > 0 && (
-              <Badge tone="amber">
-                <AlertTriangle className="w-3 h-3" />
-                {needsCrew} need crew
-              </Badge>
-            )}
-          </div>
-        </div>
-        <div className="flex items-center gap-2">
-          <Button
-            onClick={() => startSync(async () => {
-              const result = await triggerManualSync()
-              if (!result.success) setAssignmentWarning(result.error ?? 'Could not start the calendar sync.')
-            })}
-            disabled={syncing}
-            variant="secondary"
-            title="Sync calendars now"
-          >
-            <RefreshCw className={cn('w-4 h-4', syncing && 'animate-spin')} />
-            {syncing ? 'Syncing…' : 'Sync'}
-          </Button>
-          <Button onClick={() => setShowAdd(true)}>
-            <Plus className="w-4 h-4" />
-            Add Turnover
-          </Button>
-        </div>
-      </div>
-
-      {/* Filters + view toggle */}
       <div className="flex items-center gap-3 mb-4 flex-wrap">
         <div className="flex items-center gap-1.5 bg-card-themed border border-themed rounded-lg px-1 py-1">
           {(['active', 'completed', 'all'] as const).map((s) => (
@@ -1213,111 +1094,23 @@ export function TurnoverBoard({
           </button>
         </div>
       </div>
+  )
+}
 
-      {/* Select-all row */}
-      {filtered.length > 1 && (
-        <div className="flex items-center gap-3 mb-2">
-          <label className="flex items-center gap-2 text-xs cursor-pointer"
-                 style={{ color: 'var(--text-muted)' }}>
-            <Checkbox checked={allVisibleSelected} onChange={toggleSelectAll} />
-            {allVisibleSelected
-              ? `Deselect all (${filtered.length})`
-              : `Select all visible (${filtered.length})`}
-          </label>
-        </div>
-      )}
 
-      {/* Board */}
-      {viewMode === 'gantt' ? (
-        <TurnoverGantt
-          turnovers={filtered}
-          properties={properties}
-          bookings={bookings}
-        />
-      ) : (
-        /* existing full list-view render block unchanged */
-        <div>
-          {filtered.length === 0 ? (
-            <Card className="text-center py-16 max-w-md mx-auto mt-4">
-              <CalendarCheck className="w-10 h-10 text-muted-themed mx-auto mb-3" />
-              <h3 className="font-semibold text-secondary-themed mb-1">No turnovers found</h3>
-              <p className="text-sm text-muted-themed">
-                {turnovers.length === 0
-                  ? 'Add a property and connect your calendar to start seeing turnovers here.'
-                  : 'No turnovers match the current filter.'
-                }
-              </p>
-            </Card>
-          ) : (
-            <>
-              <BoardSection
-                label={<span className="inline-flex items-center gap-1"><AlertTriangle className="w-3.5 h-3.5" /> Needs Attention</span>}
-                turnovers={groups.urgent}
-                propertyMap={propertyMap}
-                crewMembers={crewMembers}
-                variant="urgent"
-                selectedIds={selectedIds}
-                onToggle={toggleSelect}
-                onWarning={setAssignmentWarning}
-              />
-              <BoardSection
-                label="Today"
-                turnovers={groups.today}
-                propertyMap={propertyMap}
-                crewMembers={crewMembers}
-                selectedIds={selectedIds}
-                onToggle={toggleSelect}
-                onWarning={setAssignmentWarning}
-              />
-              <BoardSection
-                label="Tomorrow"
-                turnovers={groups.tomorrow}
-                propertyMap={propertyMap}
-                crewMembers={crewMembers}
-                selectedIds={selectedIds}
-                onToggle={toggleSelect}
-                onWarning={setAssignmentWarning}
-              />
-              <BoardSection
-                label="This Week"
-                turnovers={groups.week}
-                propertyMap={propertyMap}
-                crewMembers={crewMembers}
-                selectedIds={selectedIds}
-                onToggle={toggleSelect}
-                onWarning={setAssignmentWarning}
-              />
-              <BoardSection
-                label="Upcoming"
-                turnovers={groups.upcoming}
-                propertyMap={propertyMap}
-                crewMembers={crewMembers}
-                defaultOpen={true}
-                forceOpen={upcomingForceOpen}
-                selectedIds={selectedIds}
-                onToggle={toggleSelect}
-                onWarning={setAssignmentWarning}
-              />
-              {(filterStatus !== 'active' || showArchived) && (
-                <BoardSection
-                  label={showArchived ? 'Archived' : 'Recently Completed'}
-                  turnovers={groups.recent}
-                  propertyMap={propertyMap}
-                  crewMembers={crewMembers}
-                  defaultOpen={showArchived}
-                  variant="muted"
-                  selectedIds={selectedIds}
-                  onToggle={toggleSelect}
-                  onWarning={setAssignmentWarning}
-                />
-              )}
-            </>
-          )}
-        </div>
-      )}
-
-      {/* Sticky bulk assignment bar */}
-      {selectedIds.size > 0 && (
+/** The sticky bar that appears once rows are selected: bulk assign, bulk
+ *  complete, split assign and clear. */
+function BulkActionBar({
+  crewMembers, selectedIds, bulkAssigning, startBulkAssign, clearSelection, onSplitAssign,
+}: Readonly<{
+  crewMembers:     CrewMember[]
+  selectedIds:     Set<string>
+  bulkAssigning:   boolean
+  startBulkAssign: (fn: () => Promise<void>) => void
+  clearSelection:  () => void
+  onSplitAssign:   () => void
+}>) {
+  return (
         <div
           className="fixed bottom-20 md:bottom-6 left-4 right-4 md:left-1/2 md:-translate-x-1/2 md:w-auto z-30 flex items-center justify-between gap-3 px-4 py-3 rounded-2xl shadow-xl"
           style={{
@@ -1373,7 +1166,7 @@ export function TurnoverBoard({
 
           {selectedIds.size > 1 && (
             <Button
-              onClick={() => setSplitAssignOpen(true)}
+              onClick={onSplitAssign}
               variant="ghost"
               className="text-xs flex-shrink-0"
               style={{ color: 'var(--accent-gold)' }}
@@ -1392,6 +1185,336 @@ export function TurnoverBoard({
             Clear
           </Button>
         </div>
+  )
+}
+
+
+/** The board itself: the Gantt view, or the grouped list-view sections. */
+function BoardBody({
+  viewMode, filtered, totalCount, groups, properties, bookings, propertyMap,
+  crewMembers, selectedIds, onToggle, onWarning, filterStatus, showArchived,
+  upcomingForceOpen,
+}: Readonly<{
+  viewMode:          'list' | 'gantt'
+  filtered:          Turnover[]
+  totalCount:        number
+  groups:            Record<TurnoverGroupKey, Turnover[]>
+  properties:        Property[]
+  bookings:          BookingRow[]
+  propertyMap:       Record<string, Property>
+  crewMembers:       CrewMember[]
+  selectedIds:       Set<string>
+  onToggle:          (id: string) => void
+  onWarning:         (msg: string) => void
+  filterStatus:      string
+  showArchived:      boolean
+  upcomingForceOpen: boolean
+}>) {
+  return (
+    <>
+      {viewMode === 'gantt' ? (
+        <TurnoverGantt
+          turnovers={filtered}
+          properties={properties}
+          bookings={bookings}
+        />
+      ) : (
+        /* existing full list-view render block unchanged */
+        <div>
+          {filtered.length === 0 ? (
+            <Card className="text-center py-16 max-w-md mx-auto mt-4">
+              <CalendarCheck className="w-10 h-10 text-muted-themed mx-auto mb-3" />
+              <h3 className="font-semibold text-secondary-themed mb-1">No turnovers found</h3>
+              <p className="text-sm text-muted-themed">
+                {totalCount === 0
+                  ? 'Add a property and connect your calendar to start seeing turnovers here.'
+                  : 'No turnovers match the current filter.'
+                }
+              </p>
+            </Card>
+          ) : (
+            <>
+              <BoardSection
+                label={<span className="inline-flex items-center gap-1"><AlertTriangle className="w-3.5 h-3.5" /> Needs Attention</span>}
+                turnovers={groups.urgent}
+                propertyMap={propertyMap}
+                crewMembers={crewMembers}
+                variant="urgent"
+                selectedIds={selectedIds}
+                onToggle={onToggle}
+                onWarning={onWarning}
+              />
+              <BoardSection
+                label="Today"
+                turnovers={groups.today}
+                propertyMap={propertyMap}
+                crewMembers={crewMembers}
+                selectedIds={selectedIds}
+                onToggle={onToggle}
+                onWarning={onWarning}
+              />
+              <BoardSection
+                label="Tomorrow"
+                turnovers={groups.tomorrow}
+                propertyMap={propertyMap}
+                crewMembers={crewMembers}
+                selectedIds={selectedIds}
+                onToggle={onToggle}
+                onWarning={onWarning}
+              />
+              <BoardSection
+                label="This Week"
+                turnovers={groups.week}
+                propertyMap={propertyMap}
+                crewMembers={crewMembers}
+                selectedIds={selectedIds}
+                onToggle={onToggle}
+                onWarning={onWarning}
+              />
+              <BoardSection
+                label="Upcoming"
+                turnovers={groups.upcoming}
+                propertyMap={propertyMap}
+                crewMembers={crewMembers}
+                defaultOpen={true}
+                forceOpen={upcomingForceOpen}
+                selectedIds={selectedIds}
+                onToggle={onToggle}
+                onWarning={onWarning}
+              />
+              {(filterStatus !== 'active' || showArchived) && (
+                <BoardSection
+                  label={showArchived ? 'Archived' : 'Recently Completed'}
+                  turnovers={groups.recent}
+                  propertyMap={propertyMap}
+                  crewMembers={crewMembers}
+                  defaultOpen={showArchived}
+                  variant="muted"
+                  selectedIds={selectedIds}
+                  onToggle={onToggle}
+                  onWarning={onWarning}
+                />
+              )}
+            </>
+          )}
+        </div>
+      )}
+    </>
+  )
+}
+
+// ── Main Board ───────────────────────────────────────────────────────────────
+
+export function TurnoverBoard({
+  turnovers,
+  propertyMap,
+  crewMembers,
+  properties,
+  orgId,
+  bookings = [],
+  crewAvailability = [],
+  showAutoAssignNudge = false,
+}: Readonly<{
+  turnovers: Turnover[]
+  propertyMap: Record<string, Property>
+  crewMembers: CrewMember[]
+  properties: Property[]
+  // Only consumers today are the quick-flag photo paths, which must be
+  // `${org_id}/…` for the private turnover-photos bucket's RLS policies.
+  orgId: string
+  bookings?: BookingRow[]
+  crewAvailability?: CrewAvailabilityRow[]
+  showAutoAssignNudge?: boolean
+}>) {
+  const searchParams = useSearchParams()
+  const urlStatus    = searchParams.get('status')
+
+  const [showAdd,           setShowAdd]           = useState(false)
+  const [splitAssignOpen,   setSplitAssignOpen]   = useState(false)
+  const [syncing,           startSync]            = useTransition()
+  const [filterProp,        setFilterProp]        = useState<string>('all')
+  const [filterStatus,      setFilterStatus]      = useState<string>(
+    urlStatus === 'pending_assignment' ? 'pending_assignment' : 'active'
+  )
+  const [filterCrew,        setFilterCrew]        = useState<string>('all')
+  const [showArchived,      setShowArchived]      = useState(false)
+  const [selectedIds,       setSelectedIds]       = useState<Set<string>>(new Set())
+  const [bulkAssigning,     startBulkAssign]      = useTransition()
+  const [viewMode,          setViewMode]          = useState<'list' | 'gantt'>('list')
+  const [assignmentWarning, setAssignmentWarning] = useState<string | null>(null)
+
+  useEffect(() => {
+    if (!assignmentWarning) return
+    const t = setTimeout(() => setAssignmentWarning(null), 5000)
+    return () => clearTimeout(t)
+  }, [assignmentWarning])
+
+  const toggleSelect = (id: string) =>
+    setSelectedIds(prev => {
+      const next = new Set(prev)
+      if (next.has(id)) { next.delete(id) } else { next.add(id) }
+      return next
+    })
+
+  const clearSelection = () => setSelectedIds(new Set())
+
+  const availabilityMap = useMemo(() => {
+    const map: Record<string, boolean> = {}
+    for (const row of crewAvailability) {
+      map[`${row.crew_member_id}::${row.available_date}`] = row.is_available
+    }
+    return map
+  }, [crewAvailability])
+
+  const filtered = turnovers.filter((t) =>
+    matchesTurnoverFilters(t, { showArchived, filterProp, filterStatus, filterCrew }),
+  )
+
+  const allVisibleSelected =
+    filtered.length > 0 && filtered.every(t => selectedIds.has(t.id))
+
+  const toggleSelectAll = () =>
+    allVisibleSelected
+      ? clearSelection()
+      : setSelectedIds(new Set(filtered.map(t => t.id)))
+
+  const groups = groupTurnovers(filtered)
+
+  const hasUrgentVisibleContent =
+    groups.urgent.length > 0 || groups.today.length > 0 ||
+    groups.tomorrow.length > 0 || groups.week.length > 0
+
+  // If nothing in the "always open" sections has content, force Upcoming
+  // open even though its own default might otherwise be false — a PM
+  // should never load this page and see nothing.
+  const upcomingForceOpen = !hasUrgentVisibleContent && groups.upcoming.length > 0
+
+  const totalActive = turnovers.filter((t) =>
+    t.status !== 'completed' && t.status !== 'cancelled'
+  ).length
+
+  const needsCrew = turnovers.filter((t) =>
+    t.status === 'pending_assignment'
+  ).length
+
+  return (
+    <CrewAvailabilityContext.Provider value={availabilityMap}>
+      <TurnoverOrgProvider orgId={orgId}>
+      {/* Conflict warning toast */}
+      {assignmentWarning && (
+        <div
+          className="fixed top-4 left-1/2 -translate-x-1/2 z-50 px-4 py-3 rounded-xl shadow-lg flex items-center gap-2 text-sm"
+          style={{
+            background: 'var(--accent-amber-dim)',
+            border:     '1px solid var(--accent-amber)',
+            color:      'var(--accent-amber)',
+          }}
+        >
+          <AlertTriangle className="w-4 h-4 flex-shrink-0" />
+          {assignmentWarning}
+          <button onClick={() => setAssignmentWarning(null)} className="ml-2">
+            <X className="w-3.5 h-3.5" />
+          </button>
+        </div>
+      )}
+
+      {showAutoAssignNudge && (
+        <NudgeBanner
+          id="auto-assign-intro"
+          message="FieldStay can assign crews automatically based on availability and distance."
+          href="/settings?tab=automation"
+          linkText="Enable auto-assignment"
+        />
+      )}
+
+      {/* Page header */}
+      <div className="page-header flex items-start justify-between">
+        <div>
+          <h1 className="page-title">Turnovers</h1>
+          <div className="flex items-center gap-3 mt-1">
+            <p className="page-subtitle">{totalActive} active</p>
+            {needsCrew > 0 && (
+              <Badge tone="amber">
+                <AlertTriangle className="w-3 h-3" />
+                {needsCrew} need crew
+              </Badge>
+            )}
+          </div>
+        </div>
+        <div className="flex items-center gap-2">
+          <Button
+            onClick={() => startSync(async () => {
+              const result = await triggerManualSync()
+              if (!result.success) setAssignmentWarning(result.error ?? 'Could not start the calendar sync.')
+            })}
+            disabled={syncing}
+            variant="secondary"
+            title="Sync calendars now"
+          >
+            <RefreshCw className={cn('w-4 h-4', syncing && 'animate-spin')} />
+            {syncing ? 'Syncing…' : 'Sync'}
+          </Button>
+          <Button onClick={() => setShowAdd(true)}>
+            <Plus className="w-4 h-4" />
+            Add Turnover
+          </Button>
+        </div>
+      </div>
+
+      <BoardFilterBar
+        properties={properties}
+        crewMembers={crewMembers}
+        filterStatus={filterStatus}
+        setFilterStatus={setFilterStatus}
+        filterProp={filterProp}
+        setFilterProp={setFilterProp}
+        filterCrew={filterCrew}
+        setFilterCrew={setFilterCrew}
+        showArchived={showArchived}
+        setShowArchived={setShowArchived}
+        viewMode={viewMode}
+        setViewMode={setViewMode}
+      />
+
+      {/* Select-all row */}
+      {filtered.length > 1 && (
+        <div className="flex items-center gap-3 mb-2">
+          <label className="flex items-center gap-2 text-xs cursor-pointer"
+                 style={{ color: 'var(--text-muted)' }}>
+            <Checkbox checked={allVisibleSelected} onChange={toggleSelectAll} />
+            {allVisibleSelected
+              ? `Deselect all (${filtered.length})`
+              : `Select all visible (${filtered.length})`}
+          </label>
+        </div>
+      )}
+
+      <BoardBody
+        viewMode={viewMode}
+        filtered={filtered}
+        totalCount={turnovers.length}
+        groups={groups}
+        properties={properties}
+        bookings={bookings}
+        propertyMap={propertyMap}
+        crewMembers={crewMembers}
+        selectedIds={selectedIds}
+        onToggle={toggleSelect}
+        onWarning={setAssignmentWarning}
+        filterStatus={filterStatus}
+        showArchived={showArchived}
+        upcomingForceOpen={upcomingForceOpen}
+      />
+
+      {selectedIds.size > 0 && (
+        <BulkActionBar
+          crewMembers={crewMembers}
+          selectedIds={selectedIds}
+          bulkAssigning={bulkAssigning}
+          startBulkAssign={startBulkAssign}
+          clearSelection={clearSelection}
+          onSplitAssign={() => setSplitAssignOpen(true)}
+        />
       )}
 
       {/* Add turnover modal */}

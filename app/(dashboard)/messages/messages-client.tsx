@@ -48,6 +48,101 @@ interface GroupThread {
 
 type AnyThread = DirectThread | GroupThread
 
+
+const byNewestMessage = (a: { lastMessage: Message | null }, b: { lastMessage: Message | null }) => {
+  const aTime = a.lastMessage ? new Date(a.lastMessage.created_at).getTime() : 0
+  const bTime = b.lastMessage ? new Date(b.lastMessage.created_at).getTime() : 0
+  return bTime - aTime
+}
+
+const byOldestFirst = (a: Message, b: Message) =>
+  new Date(a.created_at).getTime() - new Date(b.created_at).getTime()
+
+/** One thread per crew member, including those with no messages yet. */
+function buildDirectThreads({
+  crew, directMsgs, byUserId, currentUserId, searchLower,
+}: {
+  crew:          CrewOption[]
+  directMsgs:    Message[]
+  byUserId:      Map<string, CrewOption>
+  currentUserId: string
+  searchLower:   string
+}): DirectThread[] {
+  const byOther = new Map<string, Message[]>()
+  for (const m of directMsgs) {
+    const otherUserId = m.sender_id === currentUserId ? m.recipient_id : m.sender_id
+    if (!byUserId.has(otherUserId)) continue
+    const list = byOther.get(otherUserId) ?? []
+    list.push(m)
+    byOther.set(otherUserId, list)
+  }
+
+  return crew
+    .map((c) => {
+      const list = (byOther.get(c.user_id) ?? []).sort(byOldestFirst)
+      return {
+        type:        'direct' as const,
+        key:         c.id,
+        crew:        c,
+        messages:    list,
+        lastMessage: list.length > 0 ? list[list.length - 1] : null,
+        unreadCount: list.filter((m) => m.recipient_id === currentUserId && !m.read_at).length,
+      }
+    })
+    .filter((t) => !searchLower || t.crew.name.toLowerCase().includes(searchLower))
+    .sort(byNewestMessage)
+}
+
+/** One thread per group_id, labelled by its stored label or its participants. */
+function buildGroupThreads({
+  groupMsgs, byUserId, currentUserId, searchLower,
+}: {
+  groupMsgs:     Message[]
+  byUserId:      Map<string, CrewOption>
+  currentUserId: string
+  searchLower:   string
+}): GroupThread[] {
+  const byGroupId = new Map<string, Message[]>()
+  for (const m of groupMsgs) {
+    const list = byGroupId.get(m.group_id!) ?? []
+    list.push(m)
+    byGroupId.set(m.group_id!, list)
+  }
+
+  const groups: GroupThread[] = []
+
+  for (const [gid, msgs] of byGroupId) {
+    const sorted = msgs.sort(byOldestFirst)
+
+    const participantUserIds = [...new Set(
+      msgs.map((m) => (m.sender_id === currentUserId ? m.recipient_id : m.sender_id))
+          .filter((id) => id !== currentUserId)
+    )]
+    const participants = participantUserIds
+      .map((uid) => byUserId.get(uid))
+      .filter((c): c is CrewOption => !!c)
+
+    const participantList = participants.map((p) => p.name).slice(0, 3).join(', ')
+      + (participants.length > 3 ? '…' : '')
+    const label = (sorted[0].group_label ?? participantList) || 'Group message'
+
+    if (searchLower && !label.toLowerCase().includes(searchLower)) continue
+
+    groups.push({
+      type:        'group',
+      key:         gid,
+      groupId:     gid,
+      groupLabel:  label,
+      participants,
+      messages:    sorted,
+      lastMessage: sorted[sorted.length - 1] ?? null,
+      unreadCount: sorted.filter((m) => m.recipient_id === currentUserId && !m.read_at).length,
+    })
+  }
+
+  return groups.sort(byNewestMessage)
+}
+
 export function MessagesClient({ currentUserId, orgId, crew, initialMessages, hasMore, oldestTimestamp }: Props) {
   const [messages, setMessages]         = useState<Message[]>(initialMessages)
   const [selectedKey, setSelectedKey]   = useState<string | null>(null)
@@ -105,9 +200,9 @@ export function MessagesClient({ currentUserId, orgId, crew, initialMessages, ha
   }, [orgId, handleMessageInsert, handleMessageUpdate])
 
   const { directThreads, groupThreads } = useMemo(() => {
-    const byUserId  = new Map(crew.map((c) => [c.user_id, c]))
+    const byUserId    = new Map(crew.map((c) => [c.user_id, c]))
+    const searchLower = search.trim().toLowerCase()
 
-    // Split messages into 1:1 and group
     const directMsgs: Message[] = []
     const groupMsgs:  Message[] = []
     for (const m of messages) {
@@ -115,80 +210,10 @@ export function MessagesClient({ currentUserId, orgId, crew, initialMessages, ha
       else directMsgs.push(m)
     }
 
-    // ── Direct threads (one per crew member, even if no messages) ──────────
-    const directGrouped = new Map<string, Message[]>()
-    for (const m of directMsgs) {
-      const otherUserId = m.sender_id === currentUserId ? m.recipient_id : m.sender_id
-      if (!byUserId.has(otherUserId)) continue
-      const list = directGrouped.get(otherUserId) ?? []
-      list.push(m)
-      directGrouped.set(otherUserId, list)
+    return {
+      directThreads: buildDirectThreads({ crew, directMsgs, byUserId, currentUserId, searchLower }),
+      groupThreads:  buildGroupThreads({ groupMsgs, byUserId, currentUserId, searchLower }),
     }
-
-    const searchLower = search.trim().toLowerCase()
-
-    const directs: DirectThread[] = crew
-      .map((c) => {
-        const list = (directGrouped.get(c.user_id) ?? []).sort(
-          (a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime()
-        )
-        const lastMessage  = list.length > 0 ? list[list.length - 1] : null
-        const unreadCount  = list.filter((m) => m.recipient_id === currentUserId && !m.read_at).length
-        return { type: 'direct' as const, key: c.id, crew: c, messages: list, lastMessage, unreadCount }
-      })
-      .filter((t) => !searchLower || t.crew.name.toLowerCase().includes(searchLower))
-      .sort((a, b) => {
-        const aTime = a.lastMessage ? new Date(a.lastMessage.created_at).getTime() : 0
-        const bTime = b.lastMessage ? new Date(b.lastMessage.created_at).getTime() : 0
-        return bTime - aTime
-      })
-
-    // ── Group threads (one per unique group_id) ────────────────────────────
-    const groupedById = new Map<string, Message[]>()
-    for (const m of groupMsgs) {
-      const list = groupedById.get(m.group_id!) ?? []
-      list.push(m)
-      groupedById.set(m.group_id!, list)
-    }
-
-    const groups: GroupThread[] = []
-    for (const [gid, msgs] of groupedById) {
-      const sorted = msgs.sort((a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime())
-
-      const participantUserIds = [...new Set(
-        msgs.map(m => (m.sender_id === currentUserId ? m.recipient_id : m.sender_id))
-            .filter(id => id !== currentUserId)
-      )]
-      const participants = participantUserIds
-        .map(uid => byUserId.get(uid))
-        .filter((c): c is CrewOption => !!c)
-
-      const participantList = participants.map(p => p.name).slice(0, 3).join(', ')
-        + (participants.length > 3 ? '…' : '')
-      const label = (sorted[0].group_label ?? participantList) || 'Group message'
-
-      if (searchLower && !label.toLowerCase().includes(searchLower)) continue
-
-      const unreadCount = sorted.filter(m => m.recipient_id === currentUserId && !m.read_at).length
-      groups.push({
-        type: 'group',
-        key:          gid,
-        groupId:      gid,
-        groupLabel:   label,
-        participants,
-        messages:     sorted,
-        lastMessage:  sorted[sorted.length - 1] ?? null,
-        unreadCount,
-      })
-    }
-
-    groups.sort((a, b) => {
-      const aTime = a.lastMessage ? new Date(a.lastMessage.created_at).getTime() : 0
-      const bTime = b.lastMessage ? new Date(b.lastMessage.created_at).getTime() : 0
-      return bTime - aTime
-    })
-
-    return { directThreads: directs, groupThreads: groups }
   }, [crew, messages, currentUserId, search])
 
   const allThreads = useMemo<AnyThread[]>(

@@ -61,6 +61,156 @@ function trialStatus(trialEndsAt: string | null): { inTrial: boolean; daysLeft: 
   return { inTrial, daysLeft: inTrial ? Math.ceil((endsAtMs - now) / 86400000) : 0 }
 }
 
+
+/** Applies one realtime sponsor row change to the local list. */
+function applySponsorChange(
+  prev:    GuidebookSponsor[],
+  payload: RealtimePostgresChangesPayload<GuidebookSponsor>,
+): GuidebookSponsor[] {
+  if (payload.eventType === 'INSERT') return [...prev, payload.new as GuidebookSponsor]
+
+  if (payload.eventType === 'UPDATE') {
+    const updated = payload.new as GuidebookSponsor
+    return prev.map((s) => (s.id === updated.id ? updated : s))
+  }
+
+  if (payload.eventType === 'DELETE') {
+    const removedId = (payload.old as GuidebookSponsor).id
+    return prev.filter((s) => s.id !== removedId)
+  }
+
+  return prev
+}
+
+const plural = (n: number) => (n !== 1 ? 's' : '')
+
+/** The status strip's bold line. */
+function statusHeadline(isGuidebookActive: boolean, activeSponsorCount: number): string {
+  return isGuidebookActive
+    ? `Guidebook is live · ${activeSponsorCount} active sponsor${plural(activeSponsorCount)}`
+    : `${activeSponsorCount} of 3 sponsors · Guidebook locked`
+}
+
+/** The status strip's explanatory line under the headline. */
+function statusDetail({
+  isGuidebookActive,
+  activeSponsorCount,
+  gracePeriodEndsAt,
+  sponsorsNeeded,
+}: {
+  isGuidebookActive:  boolean
+  activeSponsorCount: number
+  gracePeriodEndsAt:  string | null
+  sponsorsNeeded:     number
+}): string {
+  if (isGuidebookActive) {
+    if (activeSponsorCount >= 6) return '$25/month credit applied to your plan'
+    if (activeSponsorCount >= 5) return '$10/month credit applied to your plan'
+    return 'Add sponsors to earn a plan credit (5 = $10/mo, 6 = $25/mo)'
+  }
+
+  if (gracePeriodEndsAt) {
+    const deadline = new Date(gracePeriodEndsAt).toLocaleDateString()
+    return `Grace period — fill the slot before ${deadline} to avoid losing your guidebook`
+  }
+
+  return `Add ${sponsorsNeeded} more sponsor${plural(sponsorsNeeded)} to unlock`
+}
+
+/** Countdown shown while the 30-day trial is still running. */
+function TrialBanner({
+  trialDaysLeft,
+  activeSponsorCount,
+}: Readonly<{ trialDaysLeft: number; activeSponsorCount: number }>) {
+  return (
+        <div
+          style={{
+            borderRadius: 'var(--radius-lg)',
+            padding:      '12px 16px',
+            marginBottom: '16px',
+            display:      'flex',
+            alignItems:   'center',
+            justifyContent: 'space-between',
+            background:   trialDaysLeft <= 7 ? 'rgba(245,158,11,0.12)' : 'rgba(47,217,140,0.10)',
+            border:       `1px solid ${trialDaysLeft <= 7 ? 'var(--accent-amber)' : 'var(--accent-green)'}`,
+          }}
+        >
+          <div>
+            <p style={{ fontWeight: '600', fontSize: '13px', color: 'var(--text-primary)', margin: '0 0 2px' }}>
+              {trialDaysLeft > 0
+                ? `${trialDaysLeft} day${trialDaysLeft !== 1 ? 's' : ''} left in your free trial`
+                : 'Your trial ends today'}
+            </p>
+            <p style={{ fontSize: '12px', color: 'var(--text-muted)', margin: 0 }}>
+              Add 3 sponsors to unlock the Guidebook permanently and earn plan credits.
+            </p>
+          </div>
+          <div style={{ display: 'flex', gap: '5px', marginLeft: '16px', flexShrink: 0 }}>
+            {[0, 1, 2].map((i) => (
+              <div
+                key={i}
+                style={{
+                  width: '12px', height: '12px', borderRadius: '50%',
+                  backgroundColor: i < activeSponsorCount ? 'var(--accent-gold)' : 'var(--border-strong)',
+                }}
+              />
+            ))}
+          </div>
+        </div>
+  )
+}
+
+/** Shown once the trial has ended and the guidebook is still locked. */
+function LockedBanner({
+  sponsorsNeeded,
+  activeSponsorCount,
+}: Readonly<{ sponsorsNeeded: number; activeSponsorCount: number }>) {
+  return (
+        <div
+          style={{
+            borderRadius: 'var(--radius-lg)',
+            padding:      '20px',
+            marginBottom: '16px',
+            textAlign:    'center',
+            background:   'var(--bg-card)',
+            border:       '1px solid var(--border)',
+          }}
+        >
+          <p style={{ fontWeight: '700', fontSize: '15px', color: 'var(--text-primary)', margin: '0 0 4px' }}>
+            Add {sponsorsNeeded} more sponsor{sponsorsNeeded !== 1 ? 's' : ''} to unlock the Guidebook
+          </p>
+          <p style={{ fontSize: '13px', color: 'var(--text-muted)', margin: '0 0 16px' }}>
+            Your 30-day trial has ended. 3 active sponsors unlock the Guidebook
+            permanently — keep adding to earn plan credits.
+          </p>
+          <div style={{ display: 'flex', justifyContent: 'center', gap: '8px', marginBottom: '16px' }}>
+            {[0, 1, 2].map((i) => (
+              <div
+                key={i}
+                style={{
+                  width: '16px', height: '16px', borderRadius: '50%',
+                  backgroundColor: i < activeSponsorCount ? 'var(--accent-gold)' : 'var(--border-strong)',
+                }}
+              />
+            ))}
+          </div>
+          <button
+            onClick={() => {
+              document.querySelector<HTMLElement>('[data-sponsor-slots]')?.scrollIntoView({ behavior: 'smooth' })
+            }}
+            style={{
+              fontSize: '13px', fontWeight: '600',
+              padding: '8px 16px', borderRadius: 'var(--radius)',
+              backgroundColor: 'var(--accent-gold)', color: 'var(--text-inverse)',
+              border: 'none', cursor: 'pointer',
+            }}
+          >
+            Add a Sponsor →
+          </button>
+        </div>
+  )
+}
+
 export function GuidebookClient({
   orgId,
   initialSponsors,
@@ -114,18 +264,7 @@ export function GuidebookClient({
         { event: '*', schema: 'public', table: 'guidebook_sponsors', filter: `org_id=eq.${orgId}` },
         (payload: RealtimePostgresChangesPayload<GuidebookSponsor>) => {
           setSponsors((prev) => {
-            let next: GuidebookSponsor[]
-            if (payload.eventType === 'INSERT') {
-              next = [...prev, payload.new as GuidebookSponsor]
-            } else if (payload.eventType === 'UPDATE') {
-              next = prev.map((s) =>
-                s.id === (payload.new as GuidebookSponsor).id ? (payload.new as GuidebookSponsor) : s
-              )
-            } else if (payload.eventType === 'DELETE') {
-              next = prev.filter((s) => s.id !== (payload.old as GuidebookSponsor).id)
-            } else {
-              next = prev
-            }
+            const next       = applySponsorChange(prev, payload)
             const newActive  = next.filter((s) => s.status === 'active').length
             const prevActive = prevCountRef.current
             prevCountRef.current = newActive
@@ -163,88 +302,12 @@ export function GuidebookClient({
         </p>
       </div>
 
-      {/* ── Trial countdown banner ──────────────────────────────────────────── */}
       {inTrial && (
-        <div
-          style={{
-            borderRadius: 'var(--radius-lg)',
-            padding:      '12px 16px',
-            marginBottom: '16px',
-            display:      'flex',
-            alignItems:   'center',
-            justifyContent: 'space-between',
-            background:   trialDaysLeft <= 7 ? 'rgba(245,158,11,0.12)' : 'rgba(47,217,140,0.10)',
-            border:       `1px solid ${trialDaysLeft <= 7 ? 'var(--accent-amber)' : 'var(--accent-green)'}`,
-          }}
-        >
-          <div>
-            <p style={{ fontWeight: '600', fontSize: '13px', color: 'var(--text-primary)', margin: '0 0 2px' }}>
-              {trialDaysLeft > 0
-                ? `${trialDaysLeft} day${trialDaysLeft !== 1 ? 's' : ''} left in your free trial`
-                : 'Your trial ends today'}
-            </p>
-            <p style={{ fontSize: '12px', color: 'var(--text-muted)', margin: 0 }}>
-              Add 3 sponsors to unlock the Guidebook permanently and earn plan credits.
-            </p>
-          </div>
-          <div style={{ display: 'flex', gap: '5px', marginLeft: '16px', flexShrink: 0 }}>
-            {[0, 1, 2].map((i) => (
-              <div
-                key={i}
-                style={{
-                  width: '12px', height: '12px', borderRadius: '50%',
-                  backgroundColor: i < activeSponsorCount ? 'var(--accent-gold)' : 'var(--border-strong)',
-                }}
-              />
-            ))}
-          </div>
-        </div>
+        <TrialBanner trialDaysLeft={trialDaysLeft} activeSponsorCount={activeSponsorCount} />
       )}
 
-      {/* ── Post-trial locked state banner ─────────────────────────────────── */}
       {!inTrial && !hasAccess && (
-        <div
-          style={{
-            borderRadius: 'var(--radius-lg)',
-            padding:      '20px',
-            marginBottom: '16px',
-            textAlign:    'center',
-            background:   'var(--bg-card)',
-            border:       '1px solid var(--border)',
-          }}
-        >
-          <p style={{ fontWeight: '700', fontSize: '15px', color: 'var(--text-primary)', margin: '0 0 4px' }}>
-            Add {sponsorsNeeded} more sponsor{sponsorsNeeded !== 1 ? 's' : ''} to unlock the Guidebook
-          </p>
-          <p style={{ fontSize: '13px', color: 'var(--text-muted)', margin: '0 0 16px' }}>
-            Your 30-day trial has ended. 3 active sponsors unlock the Guidebook
-            permanently — keep adding to earn plan credits.
-          </p>
-          <div style={{ display: 'flex', justifyContent: 'center', gap: '8px', marginBottom: '16px' }}>
-            {[0, 1, 2].map((i) => (
-              <div
-                key={i}
-                style={{
-                  width: '16px', height: '16px', borderRadius: '50%',
-                  backgroundColor: i < activeSponsorCount ? 'var(--accent-gold)' : 'var(--border-strong)',
-                }}
-              />
-            ))}
-          </div>
-          <button
-            onClick={() => {
-              document.querySelector<HTMLElement>('[data-sponsor-slots]')?.scrollIntoView({ behavior: 'smooth' })
-            }}
-            style={{
-              fontSize: '13px', fontWeight: '600',
-              padding: '8px 16px', borderRadius: 'var(--radius)',
-              backgroundColor: 'var(--accent-gold)', color: 'var(--text-inverse)',
-              border: 'none', cursor: 'pointer',
-            }}
-          >
-            Add a Sponsor →
-          </button>
-        </div>
+        <LockedBanner sponsorsNeeded={sponsorsNeeded} activeSponsorCount={activeSponsorCount} />
       )}
 
       <div
@@ -271,20 +334,15 @@ export function GuidebookClient({
           />
           <div>
             <div style={{ fontWeight: '600', color: 'var(--text-primary)', fontSize: '14px' }}>
-              {isGuidebookActive
-                ? `Guidebook is live · ${activeSponsorCount} active sponsor${activeSponsorCount !== 1 ? 's' : ''}`
-                : `${activeSponsorCount} of 3 sponsors · Guidebook locked`}
+              {statusHeadline(isGuidebookActive, activeSponsorCount)}
             </div>
             <div style={{ color: 'var(--text-muted)', fontSize: '13px', marginTop: '2px' }}>
-              {isGuidebookActive
-                ? activeSponsorCount >= 6
-                  ? '$25/month credit applied to your plan'
-                  : activeSponsorCount >= 5
-                  ? '$10/month credit applied to your plan'
-                  : 'Add sponsors to earn a plan credit (5 = $10/mo, 6 = $25/mo)'
-                : config?.grace_period_ends_at
-                ? `Grace period — fill the slot before ${new Date(config.grace_period_ends_at).toLocaleDateString()} to avoid losing your guidebook`
-                : `Add ${sponsorsNeeded} more sponsor${sponsorsNeeded !== 1 ? 's' : ''} to unlock`}
+              {statusDetail({
+                isGuidebookActive,
+                activeSponsorCount,
+                gracePeriodEndsAt: config?.grace_period_ends_at ?? null,
+                sponsorsNeeded,
+              })}
             </div>
           </div>
         </div>

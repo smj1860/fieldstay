@@ -158,6 +158,177 @@ function drawTableHeader(page: ReturnType<PDFDocument['addPage']>, y: number, bo
   return y - 18
 }
 
+
+/** One depreciation row as it arrives from the ledger query. */
+interface LedgerEntry {
+  macrs_class:                   string
+  cost_basis:                    number
+  prior_cumulative_depreciation: number
+  current_year_depreciation:     number
+  ending_adjusted_basis:         number
+  property_assets:               unknown
+}
+
+interface PropertyGroup {
+  propertyName: string
+  rows:         LedgerEntry[]
+}
+
+/** Groups the ledger by property name, preserving the query's asset ordering. */
+function groupEntriesByProperty(entries: LedgerEntry[]): PropertyGroup[] {
+  const byProperty = new Map<string, PropertyGroup>()
+
+  for (const entry of entries) {
+    const asset    = unwrapJoin(entry.property_assets) as { properties?: unknown } | null
+    const propName = (unwrapJoin(asset?.properties) as { name?: string } | null)?.name ?? 'Unknown Property'
+
+    const group = byProperty.get(propName)
+    if (group) group.rows.push(entry)
+    else byProperty.set(propName, { propertyName: propName, rows: [entry] })
+  }
+
+  return [...byProperty.values()]
+}
+
+/** Cover page: title block, disclaimer, and the four summary stat tiles. */
+function drawCoverPage(
+  doc: PDFDocument,
+  { font, boldFont, orgName, taxYear, entries }: {
+    font:     PDFFont
+    boldFont: PDFFont
+    orgName:  string
+    taxYear:  number
+    entries:  LedgerEntry[]
+  },
+): void {
+  const cover = doc.addPage([W, H])
+
+  cover.drawRectangle({ x: 0, y: H - 120, width: W, height: 120, color: GRAY_DARK })
+  cover.drawText('DEPRECIATION SCHEDULE', { x: ML, y: H - 55, size: 22, font: boldFont, color: GOLD })
+  cover.drawText(`Tax Year ${taxYear}`, { x: ML, y: H - 80, size: 14, font, color: WHITE })
+  cover.drawText(orgName, { x: ML, y: H - 100, size: 11, font, color: GRAY_LIGHT })
+
+  cover.drawText('Prepared for use with IRS Publication 946', { x: ML, y: H - 150, size: 10, font, color: GRAY_MED })
+  const generated = new Date().toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' })
+  cover.drawText(`Generated: ${generated}`, { x: ML, y: H - 168, size: 9, font, color: GRAY_MED })
+
+  const disclaimer = [
+    'DISCLAIMER: This report is for informational purposes only. Review all depreciation',
+    'calculations with your CPA before filing. FieldStay does not provide tax advice.',
+    'All figures use IRS Publication 946 MACRS rates with the half-year convention.',
+  ]
+  let dy = H - 220
+  for (const line of disclaimer) {
+    cover.drawText(line, { x: ML, y: dy, size: 9, font, color: GRAY_MED })
+    dy -= 14
+  }
+
+  const totalCurrentDepr = entries.reduce((sum, e) => sum + e.current_year_depreciation, 0)
+  const totalBasis       = entries.reduce((sum, e) => sum + e.cost_basis, 0)
+  const totalEndingBasis = entries.reduce((sum, e) => sum + e.ending_adjusted_basis, 0)
+
+  const stats = [
+    { label: 'Total Assets',            value: String(entries.length) },
+    { label: 'Total Cost Basis',        value: fmt$(totalBasis) },
+    { label: `${taxYear} Depreciation`, value: fmt$(totalCurrentDepr) },
+    { label: 'Total Ending Basis',      value: fmt$(totalEndingBasis) },
+  ]
+
+  let sx = ML
+  for (const { label, value } of stats) {
+    cover.drawRectangle({ x: sx, y: dy - 50, width: 160, height: 56, color: ROW_BG, borderColor: rgb(0.88, 0.90, 0.94), borderWidth: 1 })
+    cover.drawText(value, { x: sx + 8, y: dy - 22, size: 14, font: boldFont, color: GRAY_DARK })
+    cover.drawText(label, { x: sx + 8, y: dy - 36, size: 8,  font,           color: GRAY_MED })
+    sx += 170
+  }
+}
+
+/** One data row's seven cells, clipped to their column widths. */
+function drawEntryRow(
+  page:  ReturnType<PDFDocument['addPage']>,
+  y:     number,
+  entry: LedgerEntry,
+  { font, boldFont, striped }: { font: PDFFont; boldFont: PDFFont; striped: boolean },
+): void {
+  page.drawRectangle({ x: ML, y: y - 18, width: CW, height: 18, color: striped ? ROW_BG : WHITE })
+
+  const asset = unwrapJoin(entry.property_assets) as (JoinedLedgerAsset & { name?: string }) | null
+
+  const cells = [
+    { text: asset?.name ?? '—',                                     w: COLS.name,    bold: false },
+    { text: serviceDateText(asset),                                 w: COLS.placed,  bold: false },
+    { text: MACRS_LABELS[entry.macrs_class as MacrsClass] ?? String(entry.macrs_class), w: COLS.macrs, bold: false },
+    { text: fmt$(entry.cost_basis),                                 w: COLS.basis,   bold: false },
+    { text: fmt$(entry.prior_cumulative_depreciation),              w: COLS.prior,   bold: false },
+    { text: fmt$(entry.current_year_depreciation),                  w: COLS.current, bold: true  },
+    { text: fmt$(entry.ending_adjusted_basis),                      w: COLS.ending,  bold: false },
+  ]
+
+  let cx = ML + 6
+  for (const cell of cells) {
+    const maxChars = Math.floor(cell.w / 5)
+    const text     = cell.text.length > maxChars ? cell.text.slice(0, maxChars - 1) + '…' : cell.text
+    page.drawText(text, { x: cx, y: y - 14, size: 7.5, font: cell.bold ? boldFont : font, color: GRAY_DARK })
+    cx += cell.w
+  }
+}
+
+/** One property's table, spilling onto continuation pages. Returns its total. */
+function drawPropertySection(
+  doc: PDFDocument,
+  { propertyName, rows }: PropertyGroup,
+  { font, boldFont }: { font: PDFFont; boldFont: PDFFont },
+): number {
+  let page = doc.addPage([W, H])
+  let y    = H - MT
+
+  page.drawRectangle({ x: ML, y: y - 24, width: CW, height: 24, color: GRAY_DARK })
+  page.drawText(propertyName, { x: ML + 8, y: y - 16, size: 11, font: boldFont, color: WHITE })
+  y -= 24
+  y = drawTableHeader(page, y, boldFont, doc)
+
+  let rowIndex  = 0
+  let propTotal = 0
+
+  for (const entry of rows) {
+    // Page break check — need ~20pts per row + ~40 footer
+    if (y - 20 < MB + 40) {
+      page = doc.addPage([W, H])
+      y    = H - MT
+      page.drawText(`${propertyName} (cont.)`, { x: ML, y: y - 14, size: 9, font, color: GRAY_MED })
+      y -= 20
+      y = drawTableHeader(page, y, boldFont, doc)
+    }
+
+    drawEntryRow(page, y, entry, { font, boldFont, striped: rowIndex % 2 === 1 })
+
+    propTotal += entry.current_year_depreciation
+    y         -= 18
+    rowIndex++
+  }
+
+  page.drawRectangle({ x: ML, y: y - 18, width: CW, height: 18, color: GRAY_DARK })
+  page.drawText(`${propertyName} Total`, { x: ML + 6, y: y - 13, size: 8, font: boldFont, color: WHITE })
+  page.drawText(fmt$(propTotal), {
+    x: ML + COLS.name + COLS.placed + COLS.macrs + COLS.basis + COLS.prior + 6,
+    y: y - 13, size: 8, font: boldFont, color: GOLD,
+  })
+
+  return propTotal
+}
+
+/** Every property's data pages. Returns the grand total across all of them. */
+function drawPropertyPages(
+  doc: PDFDocument,
+  { font, boldFont, byProperty }: { font: PDFFont; boldFont: PDFFont; byProperty: PropertyGroup[] },
+): number {
+  let grandTotal = 0
+  for (const group of byProperty) {
+    grandTotal += drawPropertySection(doc, group, { font, boldFont })
+  }
+  return grandTotal
+}
+
 export async function GET(req: Request) {
   // Auth
   const { user, membership } = await requireOrgMember()
@@ -266,20 +437,7 @@ export async function GET(req: Request) {
     )
   }
 
-  // Group by property
-  const byProperty: Record<string, {
-    propertyName: string
-    rows: typeof entries
-  }> = {}
-
-  for (const e of entries) {
-    const asset = unwrapJoin(e.property_assets)
-    const propName = unwrapJoin(asset?.properties)?.name ?? 'Unknown Property'
-    const propKey  = propName
-
-    if (!byProperty[propKey]) byProperty[propKey] = { propertyName: propName, rows: [] }
-    byProperty[propKey].rows.push(e)
-  }
+  const byProperty = groupEntriesByProperty(entries)
 
   // ── Build PDF ───────────────────────────────────────────────────────────────
 
@@ -287,132 +445,9 @@ export async function GET(req: Request) {
   const font     = await pdfDoc.embedFont(StandardFonts.Helvetica)
   const boldFont = await pdfDoc.embedFont(StandardFonts.HelveticaBold)
 
-  // ── Cover Page ──────────────────────────────────────────────────────────────
+  drawCoverPage(pdfDoc, { font, boldFont, orgName: org?.name ?? 'FieldStay', taxYear, entries })
 
-  const cover = pdfDoc.addPage([W, H])
-
-  cover.drawRectangle({ x: 0, y: H - 120, width: W, height: 120, color: GRAY_DARK })
-  cover.drawText('DEPRECIATION SCHEDULE', { x: ML, y: H - 55, size: 22, font: boldFont, color: GOLD })
-  cover.drawText(`Tax Year ${taxYear}`, { x: ML, y: H - 80, size: 14, font, color: WHITE })
-  cover.drawText(org?.name ?? 'FieldStay', { x: ML, y: H - 100, size: 11, font, color: GRAY_LIGHT })
-
-  cover.drawText('Prepared for use with IRS Publication 946', { x: ML, y: H - 150, size: 10, font, color: GRAY_MED })
-  cover.drawText(`Generated: ${new Date().toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' })}`, {
-    x: ML, y: H - 168, size: 9, font, color: GRAY_MED,
-  })
-
-  const disclaimer = [
-    'DISCLAIMER: This report is for informational purposes only. Review all depreciation',
-    'calculations with your CPA before filing. FieldStay does not provide tax advice.',
-    'All figures use IRS Publication 946 MACRS rates with the half-year convention.',
-  ]
-  let dy = H - 220
-  for (const line of disclaimer) {
-    cover.drawText(line, { x: ML, y: dy, size: 9, font, color: GRAY_MED })
-    dy -= 14
-  }
-
-  // Summary stats
-  const totalCurrentDepr = entries.reduce((s: number, e) => s + (e.current_year_depreciation as number), 0)
-  const totalBasis       = entries.reduce((s: number, e) => s + (e.cost_basis as number), 0)
-  const totalEndingBasis = entries.reduce((s: number, e) => s + (e.ending_adjusted_basis as number), 0)
-
-  const stats = [
-    { label: 'Total Assets',             value: String(entries.length) },
-    { label: 'Total Cost Basis',          value: fmt$(totalBasis) },
-    { label: `${taxYear} Depreciation`,   value: fmt$(totalCurrentDepr) },
-    { label: 'Total Ending Basis',        value: fmt$(totalEndingBasis) },
-  ]
-
-  let sx = ML
-  for (const { label, value } of stats) {
-    cover.drawRectangle({ x: sx, y: dy - 50, width: 160, height: 56, color: ROW_BG, borderColor: rgb(0.88, 0.90, 0.94), borderWidth: 1 })
-    cover.drawText(value, { x: sx + 8, y: dy - 22, size: 14, font: boldFont, color: GRAY_DARK })
-    cover.drawText(label, { x: sx + 8, y: dy - 36, size: 8,  font,           color: GRAY_MED })
-    sx += 170
-  }
-
-  // ── Data Pages (by property) ─────────────────────────────────────────────────
-
-  let grandTotal = 0
-
-  for (const { propertyName, rows } of Object.values(byProperty)) {
-    let page = pdfDoc.addPage([W, H])
-    let y    = H - MT
-
-    // Property header
-    page.drawRectangle({ x: ML, y: y - 24, width: CW, height: 24, color: GRAY_DARK })
-    page.drawText(propertyName, { x: ML + 8, y: y - 16, size: 11, font: boldFont, color: WHITE })
-    y -= 24
-
-    // Table header
-    y = drawTableHeader(page, y, boldFont as never, pdfDoc)
-
-    // Rows
-    let rowIndex    = 0
-    let propTotal   = 0
-
-    for (const entry of rows) {
-      // Page break check — need ~20pts per row + ~40 footer
-      if (y - 20 < MB + 40) {
-        page = pdfDoc.addPage([W, H])
-        y    = H - MT
-        page.drawText(`${propertyName} (cont.)`, { x: ML, y: y - 14, size: 9, font, color: GRAY_MED })
-        y -= 20
-        y = drawTableHeader(page, y, boldFont as never, pdfDoc)
-      }
-
-      const rowY  = y - 14
-      const rowBg = rowIndex % 2 === 1 ? ROW_BG : WHITE
-      page.drawRectangle({ x: ML, y: y - 18, width: CW, height: 18, color: rowBg })
-
-      const asset = unwrapJoin(entry.property_assets)
-      const assetName   = asset?.name ?? '—'
-      const placedDate  = serviceDateText(asset)
-      const macrsLabel  = MACRS_LABELS[entry.macrs_class as MacrsClass] ?? String(entry.macrs_class)
-
-      const cells = [
-        { text: assetName,                   w: COLS.name,    bold: false },
-        { text: placedDate,                  w: COLS.placed,  bold: false },
-        { text: macrsLabel,                  w: COLS.macrs,   bold: false },
-        { text: fmt$(entry.cost_basis as number),                    w: COLS.basis,   bold: false },
-        { text: fmt$(entry.prior_cumulative_depreciation as number), w: COLS.prior,   bold: false },
-        { text: fmt$(entry.current_year_depreciation as number),     w: COLS.current, bold: true  },
-        { text: fmt$(entry.ending_adjusted_basis as number),         w: COLS.ending,  bold: false },
-      ]
-
-      let cx = ML + 6
-      for (const cell of cells) {
-        // Clip long text
-        let text = cell.text
-        const maxChars = Math.floor(cell.w / 5)
-        if (text.length > maxChars) text = text.slice(0, maxChars - 1) + '…'
-
-        page.drawText(text, {
-          x: cx, y: rowY,
-          size: 7.5,
-          font: cell.bold ? boldFont : font,
-          color: GRAY_DARK,
-        })
-        cx += cell.w
-      }
-
-      propTotal += entry.current_year_depreciation as number
-      y         -= 18
-      rowIndex++
-    }
-
-    // Property total row
-    page.drawRectangle({ x: ML, y: y - 18, width: CW, height: 18, color: GRAY_DARK })
-    page.drawText(`${propertyName} Total`, { x: ML + 6, y: y - 13, size: 8, font: boldFont, color: WHITE })
-    page.drawText(fmt$(propTotal), {
-      x: ML + COLS.name + COLS.placed + COLS.macrs + COLS.basis + COLS.prior + 6,
-      y: y - 13, size: 8, font: boldFont, color: GOLD,
-    })
-    y -= 18
-
-    grandTotal += propTotal
-  }
+  const grandTotal = drawPropertyPages(pdfDoc, { font, boldFont, byProperty })
 
   // Grand total on last page — append to last page
   const pages    = pdfDoc.getPages()
