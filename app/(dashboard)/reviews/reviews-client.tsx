@@ -114,11 +114,7 @@ function DeadlineBadge({
 }) {
   if (status === 'posted' || daysRemaining === null) return null
 
-  const [bg, color, text]: [string, string, string] =
-    daysRemaining < 0  ? ['var(--accent-red-dim)',   'var(--accent-red)',   'Overdue']                  :
-    daysRemaining <= 3 ? ['var(--accent-red-dim)',   'var(--accent-red)',    `${daysRemaining}d left`]   :
-    daysRemaining <= 7 ? ['var(--accent-amber-dim)', 'var(--accent-amber)', `${daysRemaining}d left`]   :
-                         ['var(--accent-green-dim)', 'var(--accent-green)', `${daysRemaining}d left`]
+  const { bg, color, text } = deadlineTone(daysRemaining)
 
   return (
     <span
@@ -149,6 +145,26 @@ function StatusBadge({ status }: { status: string }) {
 }
 
 
+
+interface DeadlineTone { bg: string; color: string; text: string }
+
+/** Colour band and label for the response-deadline pill. */
+function deadlineTone(daysRemaining: number): DeadlineTone {
+  if (daysRemaining < 0) {
+    return { bg: 'var(--accent-red-dim)', color: 'var(--accent-red)', text: 'Overdue' }
+  }
+  const text = `${daysRemaining}d left`
+  if (daysRemaining <= 3) return { bg: 'var(--accent-red-dim)',   color: 'var(--accent-red)',   text }
+  if (daysRemaining <= 7) return { bg: 'var(--accent-amber-dim)', color: 'var(--accent-amber)', text }
+  return { bg: 'var(--accent-green-dim)', color: 'var(--accent-green)', text }
+}
+
+/** The Mark-as-Ready button's contents, which double as its save state. */
+function markReadyLabel(savingStatus: string | null): React.ReactNode {
+  if (savingStatus === 'saving') return 'Saving…'
+  if (savingStatus === 'saved')  return <><Check className="w-4 h-4" /> Saved</>
+  return 'Mark as Ready'
+}
 
 type Failure = { ok: false; message: string }
 
@@ -349,11 +365,7 @@ function ReviewPanel({
                       className="flex-1 rounded-xl font-bold text-sm py-3 transition-opacity hover:opacity-90"
                       style={{ background: 'var(--accent-green)', color: 'var(--text-inverse)', border: 'none', cursor: 'pointer', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: '4px' }}
                     >
-                      {savingStatus === 'saving'
-                        ? 'Saving…'
-                        : savingStatus === 'saved'
-                        ? <><Check className="w-4 h-4" /> Saved</>
-                        : 'Mark as Ready'}
+                      {markReadyLabel(savingStatus)}
                     </button>
 
                     {canRegen && (
@@ -388,31 +400,7 @@ function ReviewPanel({
                   {/* Post to PMS */}
                   {selected.response_status !== 'posted' && (
                     <div className="mt-4">
-                      {!postConfirm ? (
-                        postUrl ? (
-                          <a
-                            href={postUrl}
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            onClick={() => setTimeout(() => setPostConfirm(true), 500)}
-                            className="block w-full text-center rounded-xl font-semibold text-sm py-3 transition-opacity hover:opacity-80"
-                            style={{ background: 'var(--bg-raised)', color: 'var(--text-primary)', border: '1px solid var(--border)' }}
-                          >
-                            Post to {sourceLabel ?? 'your PMS'} →
-                          </a>
-                        ) : (
-                          // Manual entries, or a source with no confirmed reply URL — no
-                          // link to give, just let them confirm once they've replied
-                          // wherever the review actually lives.
-                          <button
-                            onClick={() => setPostConfirm(true)}
-                            className="block w-full text-center rounded-xl font-semibold text-sm py-3 transition-opacity hover:opacity-80"
-                            style={{ background: 'var(--bg-raised)', color: 'var(--text-primary)', border: '1px solid var(--border)', cursor: 'pointer' }}
-                          >
-                            Mark as Posted
-                          </button>
-                        )
-                      ) : (
+                      {postConfirm && (
                         <div
                           className="rounded-xl p-4 text-center"
                           style={{ background: 'var(--bg-raised)', border: '1px solid var(--border)' }}
@@ -439,6 +427,32 @@ function ReviewPanel({
                             </button>
                           </div>
                         </div>
+                      )}
+
+                      {!postConfirm && (
+                        postUrl ? (
+                          <a
+                            href={postUrl}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            onClick={() => setTimeout(() => setPostConfirm(true), 500)}
+                            className="block w-full text-center rounded-xl font-semibold text-sm py-3 transition-opacity hover:opacity-80"
+                            style={{ background: 'var(--bg-raised)', color: 'var(--text-primary)', border: '1px solid var(--border)' }}
+                          >
+                            Post to {sourceLabel ?? 'your PMS'} →
+                          </a>
+                        ) : (
+                          // Manual entries, or a source with no confirmed reply URL — no
+                          // link to give, just let them confirm once they've replied
+                          // wherever the review actually lives.
+                          <button
+                            onClick={() => setPostConfirm(true)}
+                            className="block w-full text-center rounded-xl font-semibold text-sm py-3 transition-opacity hover:opacity-80"
+                            style={{ background: 'var(--bg-raised)', color: 'var(--text-primary)', border: '1px solid var(--border)', cursor: 'pointer' }}
+                          >
+                            Mark as Posted
+                          </button>
+                        )
                       )}
                     </div>
                   )}

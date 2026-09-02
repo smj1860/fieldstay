@@ -44,6 +44,14 @@ const STATUS_COLORS: Record<string, string> = {
   deferred:  'var(--text-muted)',
 }
 
+/** Colour band for a year's projected capital spend. */
+function projectionBarColor(high: number): string {
+  if (high === 0)     return 'var(--bg-raised)'
+  if (high > 15_000)  return 'var(--accent-red)'
+  if (high > 5_000)   return 'var(--accent-amber)'
+  return 'var(--accent-green)'
+}
+
 export default async function CapitalPlanningPage({
   searchParams,
 }: {
@@ -390,10 +398,7 @@ export default async function CapitalPlanningPage({
                 const proj      = filteredProjections[year]
                 const high      = proj?.total_high ?? 0
                 const heightPct = (high / maxHigh) * 100
-                const barColor  = high === 0 ? 'var(--bg-raised)'
-                  : high > 15000 ? 'var(--accent-red)'
-                  : high > 5000  ? 'var(--accent-amber)'
-                  : 'var(--accent-green)'
+                const barColor  = projectionBarColor(high)
                 return (
                   <div key={year} className="flex-1 flex flex-col items-center gap-1">
                     <div className="w-full flex flex-col justify-end" style={{ height: '120px' }}>

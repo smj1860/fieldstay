@@ -124,7 +124,22 @@ const eslintConfig = [
       // no-nested-template-literals, 11 nested-control-flow) — same
       // rollout shape as the jsx-a11y block above. Ratchet to 'error' once
       // those are cleared; new code should not add to this count.
-      'sonarjs/cognitive-complexity': ['warn', 15],
+      //
+      // cognitive-complexity RATCHETED TO 'error' 2026-09-02, which is what
+      // that sentence was promising. Its burn-down finished: 64 -> 0 across
+      // the whole tree, and scripts/complexity-baseline.json is `{}`. The
+      // other four are still mid-burn-down and stay at 'warn' (68
+      // no-nested-conditional, 22 no-nested-functions, 10
+      // no-nested-template-literals, 1 nested-control-flow) — promote each
+      // one the same way, when and only when it reaches zero.
+      //
+      // Severity, not the ratchet script, is now the primary gate for this
+      // rule: --max-warnings is a fungible TOTAL, so at 'warn' a new
+      // complexity-40 function could be paid for by clearing a nested ternary
+      // elsewhere. At 'error' it cannot. check:complexity stays wired anyway
+      // as a second, per-file gate — it costs one CI step and it is what
+      // catches a future re-baselining attempt.
+      'sonarjs/cognitive-complexity': ['error', 15],
       'sonarjs/no-nested-functions': ['warn', { threshold: 4 }],
       'sonarjs/nested-control-flow': ['warn', { maximumNestingLevel: 4 }],
       'sonarjs/no-nested-conditional': 'warn',
@@ -195,7 +210,11 @@ const eslintConfig = [
     files: ['unit/**/*.{ts,tsx}', 'scripts/**/*.{ts,mjs}', 'e2e/**/*.ts'],
     plugins: { sonarjs },
     rules: {
-      'sonarjs/cognitive-complexity': ['warn', 15],
+      // cognitive-complexity is 'error' here for the same reason as the block
+      // above, and these directories were the easier half of that promotion:
+      // they went in at zero with nothing baselined, so nothing had to be
+      // burned down first.
+      'sonarjs/cognitive-complexity': ['error', 15],
       'sonarjs/nested-control-flow': ['warn', { maximumNestingLevel: 4 }],
     },
   },

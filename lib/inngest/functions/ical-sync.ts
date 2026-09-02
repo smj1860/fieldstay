@@ -6,7 +6,7 @@ import { detectAndFlagOverlaps } from '@/lib/ical/conflict-detection'
 import { getPmEmails } from '@/lib/inngest/helpers'
 import { resend, FROM } from '@/lib/resend/client'
 import { renderPmAlert } from '@/lib/resend/emails/pm-alert'
-import type { BookingSource, TablesInsert, Enums } from '@/types/database'
+import type { BookingSource, BookingStatus, TablesInsert, Enums } from '@/types/database'
 
 import { reportError } from '@/lib/observability/report-error'
 import { fetchAllRows, fetchDistinctOrgIds } from '@/lib/inngest/paginate'
@@ -111,6 +111,25 @@ function bookingsAbsentFromFeed(params: {
  * feeds) only the first 1,000 ever fanned out and every other feed silently
  * stopped receiving booking updates. That breaks at roughly 17 tenants.
  */
+/**
+ * iCal event status -> booking_status.
+ *
+ * A lookup with a default rather than an exhaustive switch: the value comes
+ * from a third-party feed, so an unrecognised string must land somewhere
+ * defined. 'confirmed' is that default — the same fallback the chained ternary
+ * this replaced ended on, and the right one, since an event present in a
+ * calendar feed means the dates are taken.
+ */
+const BOOKING_STATUS_BY_EVENT_STATUS: Record<string, BookingStatus> = {
+  cancelled: 'cancelled',
+  blocked:   'blocked',
+  tentative: 'tentative',
+}
+
+function bookingStatusFor(eventStatus: string | null | undefined): BookingStatus {
+  return (eventStatus && BOOKING_STATUS_BY_EVENT_STATUS[eventStatus]) || 'confirmed'
+}
+
 export const syncAllIcalFeeds = inngest.createFunction(
   {
     id:          'ical-sync-all',
@@ -364,9 +383,7 @@ export const syncIcalFeed = inngest.createFunction(
           checkin_time:  isAllDay(event.start) ? null : toTimeString(event.start),
           checkout_time: isAllDay(event.end)   ? null : toTimeString(event.end),
           source:        (feedSource ?? 'other') as BookingSource,
-          status:        (event.status === 'cancelled' ? 'cancelled' :
-                          event.status === 'blocked'   ? 'blocked'   :
-                          event.status === 'tentative' ? 'tentative' : 'confirmed'),
+          status:        bookingStatusFor(event.status),
           // Reconciles is_block (checked by turnover generation, guidebook
           // emails, owner portal) with status: 'blocked' (what the bookings
           // UI actually renders "Blocked / Unavailable" from) — previously

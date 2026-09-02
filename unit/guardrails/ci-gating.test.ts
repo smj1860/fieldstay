@@ -80,8 +80,13 @@ describe('guardrail: lint warning ratchet', () => {
     // Lowered to 101 the same day with the remaining 13 cleared — the tree is
     // now at ZERO cognitive-complexity violations. See the baseline ceilings
     // below, which are 0/0 for the same reason.
+    // Lowered to 75 on 2026-09-02: 26 nested-ternary warnings cleared in the
+    // worst offenders (guidebook guest view's 5-branch chain nested inside
+    // another, maintenance-calendar's duplicated colour ladders, the
+    // core-billing and ical-sync enum maps, capital-planning and health-score
+    // threshold ladders, crew home and reviews).
     // LOWER this when warnings are cleared; never raise it.
-    const CEILING = 101
+    const CEILING = 75
     const budget = Number(/--max-warnings\s+(\d+)/.exec(pkg.scripts.lint ?? '')?.[1])
     expect(budget).toBeLessThanOrEqual(CEILING)
   })

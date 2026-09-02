@@ -43,6 +43,32 @@ type PropertyRow = {
   lng:     number | null
 }
 
+/**
+ * The crew home screen shows turnovers and work orders side by side, and both
+ * wear the same status pill. Two lookups rather than two chained ternaries
+ * each — and note they are separate on purpose: the class is an internal
+ * styling key, the label is display text, so a copy change touches only the
+ * second (CLAUDE.md, "Internal lookup/status keys are not display strings").
+ */
+const CREW_STATUS_PILL_CLASS: Record<string, string> = {
+  assigned:    'bg-blue-50 text-blue-700',
+  in_progress: 'bg-purple-50 text-purple-700',
+}
+
+function crewStatusPillClass(status: string): string {
+  return CREW_STATUS_PILL_CLASS[status] ?? 'bg-raised-themed text-secondary-themed'
+}
+
+const CREW_STATUS_LABEL: Record<string, string> = {
+  assigned:    'Assigned',
+  in_progress: 'In Progress',
+}
+
+/** Falls back to the raw status so an unmapped one is visible, not blank. */
+function crewStatusLabel(status: string): string {
+  return CREW_STATUS_LABEL[status] ?? status
+}
+
 function calcTravelSummary(turnovers: TurnoverRow[], propertyMap: Record<string, PropertyRow>) {
   const stops = turnovers.map((t) => propertyMap[t.property_id]).filter(Boolean) as PropertyRow[]
   if (stops.length < 2) return { miles: 0, minutes: 0, available: stops.length > 0 }
@@ -93,12 +119,9 @@ function TurnoverCard({ t, property }: { t: TurnoverRow; property?: PropertyRow 
       <div className="flex items-center gap-1.5 flex-wrap">
         <span className={cn(
           'text-xs font-semibold px-2 py-0.5 rounded-full',
-          t.status === 'assigned'    ? 'bg-blue-50 text-blue-700' :
-          t.status === 'in_progress' ? 'bg-purple-50 text-purple-700' :
-          'bg-raised-themed text-secondary-themed'
+          crewStatusPillClass(t.status),
         )}>
-          {t.status === 'assigned' ? 'Assigned' :
-           t.status === 'in_progress' ? 'In Progress' : t.status}
+          {crewStatusLabel(t.status)}
         </span>
         <span className="text-xs text-secondary-themed">
           {checkout.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })}
@@ -150,12 +173,9 @@ function WorkOrderCard({ wo, property }: { wo: CrewWorkOrderRow; property?: Prop
       <div className="flex items-center gap-1.5">
         <span className={cn(
           'text-xs font-semibold px-2 py-0.5 rounded-full',
-          wo.status === 'assigned'    ? 'bg-blue-50 text-blue-700' :
-          wo.status === 'in_progress' ? 'bg-purple-50 text-purple-700' :
-          'bg-raised-themed text-secondary-themed'
+          crewStatusPillClass(wo.status),
         )}>
-          {wo.status === 'assigned' ? 'Assigned' :
-           wo.status === 'in_progress' ? 'In Progress' : wo.status}
+          {crewStatusLabel(wo.status)}
         </span>
         {wo.scheduled_date && (
           <span className="text-xs text-muted-themed">
