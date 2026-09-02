@@ -8,33 +8,33 @@ import { reportError } from '@/lib/observability/report-error'
 import { platformFeePct } from '@/lib/stripe/platform-fee'
 import { tryUnwrap } from '@/lib/supabase/unwrap'
 
+
+/** A phase either yields its data or the response that ends the request. */
+type Rejection = { ok: false; response: NextResponse }
+
+function reject(...args: Parameters<typeof NextResponse.json>): Rejection {
+  return { ok: false, response: NextResponse.json(...args) }
+}
+
+type CompletionTarget = {
+  id:                          string
+  org_id:                      string
+  property_id:                 string
+  vendor_id:                   string | null
+  status:                      string
+  portal_enabled:              boolean | null
+  completion_token_expires_at: string | null
+}
+
 /**
- * POST /api/work-orders/[token]/complete
- *
- * Public endpoint — no auth required.
- * Vendor submits completion via their tokenized portal link.
- *
- * Body: JSON (line items + invoice — new flow) or FormData (legacy, notes only)
+ * Resolves the token to a work order that may still be completed: it exists,
+ * its portal is enabled, it is not already closed, its link has not expired,
+ * and its assigned vendor belongs to the same org.
  */
-export async function POST(
-  request: NextRequest,
-  { params }: { params: Promise<{ token: string }> }
-) {
-  const { token } = await params
-
-  // Public, unauthenticated route — rate limit by IP before touching the DB.
-  // Abuse/enumeration limiter → fails OPEN: a degraded limiter must never
-  // block a legitimate contractor's submission.
-  const rl = await checkLimit(workOrderRatelimit, `wo-complete:${extractClientIp(request) ?? 'unknown'}`, {
-    onError: 'allow',
-    site:    'route.work-orders.complete.POST',
-  })
-  if (!rl.allowed) {
-    return NextResponse.json({ error: 'Too many requests. Please try again in a minute.' }, { status: 429 })
-  }
-
-  const supabase = createServiceClient({ publicSurface: 'api-work-orders--token--complete' })
-
+async function resolveCompletionTarget(
+  supabase: ReturnType<typeof createServiceClient>,
+  token:    string,
+): Promise<{ ok: true; workOrder: CompletionTarget } | Rejection> {
   // Validate token.
   //
   // tryUnwrap, not `const { data } = await …`: destructuring data alone
@@ -53,7 +53,7 @@ export async function POST(
 
   const lookup = tryUnwrap(workOrderRes, { site: 'route.work-orders.complete.token' })
   if (!lookup.ok) {
-    return NextResponse.json(
+    return reject(
       { error: 'Service temporarily unavailable. Please try again.' },
       { status: 503 },
     )
@@ -61,22 +61,22 @@ export async function POST(
 
   const workOrder = lookup.data
   if (!workOrder) {
-    return NextResponse.json({ error: 'Invalid or expired link' }, { status: 404 })
+    return reject({ error: 'Invalid or expired link' }, { status: 404 })
   }
 
   if (!workOrder.portal_enabled) {
-    return NextResponse.json({ error: 'Vendor portal not enabled for this work order' }, { status: 403 })
+    return reject({ error: 'Vendor portal not enabled for this work order' }, { status: 403 })
   }
 
   if (workOrder.status === 'completed' || workOrder.status === 'cancelled') {
-    return NextResponse.json({ error: 'Work order already closed' }, { status: 409 })
+    return reject({ error: 'Work order already closed' }, { status: 409 })
   }
 
   if (
     workOrder.completion_token_expires_at &&
     new Date(workOrder.completion_token_expires_at) < new Date()
   ) {
-    return NextResponse.json({ error: 'Link has expired' }, { status: 410 })
+    return reject({ error: 'Link has expired' }, { status: 410 })
   }
 
   // Verify the assigned vendor's org matches the work order's org before any
@@ -94,17 +94,38 @@ export async function POST(
     // actually an outage — and logged nothing either way.
     const vendorLookup = tryUnwrap(vendorRes, { site: 'route.work-orders.complete.vendor' })
     if (!vendorLookup.ok) {
-      return NextResponse.json(
+      return reject(
         { error: 'Service temporarily unavailable. Please try again.' },
         { status: 503 },
       )
     }
 
     if (!vendorLookup.data || vendorLookup.data.org_id !== workOrder.org_id) {
-      return NextResponse.json({ error: 'Vendor not authorized for this work order' }, { status: 403 })
+      return reject({ error: 'Vendor not authorized for this work order' }, { status: 403 })
     }
   }
 
+  return { ok: true, workOrder: workOrder as CompletionTarget }
+}
+
+type CompletionLineItem = {
+  line_type:   string
+  description: string
+  quantity:    number
+  unit_cost:   number
+  line_total?: number
+}
+
+/**
+ * Reads the submission off the wire. Supports both JSON (the line-items flow)
+ * and FormData (legacy, notes only).
+ */
+async function parseCompletionBody(
+  request: NextRequest,
+): Promise<
+  | { ok: true; notes: string | null; completedByName: string; lineItemsPayload: CompletionLineItem[] }
+  | Rejection
+> {
   // Parse body — supports both JSON (new line items flow) and FormData (legacy)
   const contentType = request.headers.get('content-type') ?? ''
   let notes:           string | null      = null
@@ -137,9 +158,19 @@ export async function POST(
   }
 
   if (!completedByName) {
-    return NextResponse.json({ error: 'Technician name is required' }, { status: 400 })
+    return reject({ error: 'Technician name is required' }, { status: 400 })
   }
 
+  return { ok: true, notes, completedByName, lineItemsPayload }
+}
+
+/**
+ * Validates the line items and DERIVES the invoice total from them.
+ */
+function priceCompletion(
+  lineItemsPayload: CompletionLineItem[],
+  workOrderId:      string,
+): { ok: true; safeLineItems: CompletionLineItem[]; effectiveSubtotal: number } | Rejection {
   // Validate line items if provided
   const VALID_LINE_TYPES = new Set(['labor', 'material', 'equipment', 'subcontractor', 'other'])
   const safeLineItems = lineItemsPayload.filter((item) =>
@@ -198,7 +229,7 @@ export async function POST(
   // hand-crafted payload rather than anything the real client produces —
   // and it is the exact shape that used to reach the `subtotal` fallback.
   if (lineItemsPayload.length > 0 && safeLineItems.length === 0) {
-    return NextResponse.json(
+    return reject(
       { error: 'No valid line items. Each needs a type, description, quantity > 0 and unit cost > 0.' },
       { status: 400 },
     )
@@ -216,7 +247,7 @@ export async function POST(
       {
         site:  'route.work-orders.complete.line_items_dropped',
         extra: {
-          work_order_id: workOrder.id,
+          work_order_id: workOrderId,
           submitted:     lineItemsPayload.length,
           accepted:      safeLineItems.length,
         },
@@ -225,15 +256,57 @@ export async function POST(
   }
 
   if (!Number.isFinite(effectiveSubtotal) || effectiveSubtotal < 0) {
-    return NextResponse.json({ error: 'Invoice total is not a valid amount.' }, { status: 400 })
+    return reject({ error: 'Invoice total is not a valid amount.' }, { status: 400 })
   }
 
   // Sanity bound — catches a typo (an extra zero) or a malicious payload
   // before it becomes actual_cost/an invoice amount. Applied to the DERIVED
   // value so a pile of line items cannot exceed it either.
   if (effectiveSubtotal > 1_000_000) {
-    return NextResponse.json({ error: 'Invoice total must be under $1,000,000. Please check your entries.' }, { status: 400 })
+    return reject({ error: 'Invoice total must be under $1,000,000. Please check your entries.' }, { status: 400 })
   }
+
+  return { ok: true, safeLineItems, effectiveSubtotal }
+}
+
+/**
+ * POST /api/work-orders/[token]/complete
+ *
+ * Public endpoint — no auth required.
+ * Vendor submits completion via their tokenized portal link.
+ *
+ * Body: JSON (line items + invoice — new flow) or FormData (legacy, notes only)
+ */
+export async function POST(
+  request: NextRequest,
+  { params }: { params: Promise<{ token: string }> }
+) {
+  const { token } = await params
+
+  // Public, unauthenticated route — rate limit by IP before touching the DB.
+  // Abuse/enumeration limiter → fails OPEN: a degraded limiter must never
+  // block a legitimate contractor's submission.
+  const rl = await checkLimit(workOrderRatelimit, `wo-complete:${extractClientIp(request) ?? 'unknown'}`, {
+    onError: 'allow',
+    site:    'route.work-orders.complete.POST',
+  })
+  if (!rl.allowed) {
+    return NextResponse.json({ error: 'Too many requests. Please try again in a minute.' }, { status: 429 })
+  }
+
+  const supabase = createServiceClient({ publicSurface: 'api-work-orders--token--complete' })
+
+  const target = await resolveCompletionTarget(supabase, token)
+  if (!target.ok) return target.response
+  const { workOrder } = target
+
+  const parsed = await parseCompletionBody(request)
+  if (!parsed.ok) return parsed.response
+  const { notes, completedByName, lineItemsPayload } = parsed
+
+  const priced = priceCompletion(lineItemsPayload, workOrder.id)
+  if (!priced.ok) return priced.response
+  const { safeLineItems, effectiveSubtotal } = priced
 
   // ONE TRANSACTION. Every database write for this completion — the claim, the
   // invoice, the line items, the status-change row — happens inside

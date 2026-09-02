@@ -802,35 +802,24 @@ function BulkCrewUpload({ onSuccess }: { onSuccess: () => void }) {
   )
 }
 
-// ── Crew row ──────────────────────────────────────────────────────────────────
 
-function CrewRow({ member, onSelect }: { member: CrewMember; onSelect: (m: CrewMember) => void }) {
-  const [editing, setEditing]         = useState(false)
-  const [name, setName]               = useState(member.name)
-  const [roleVal, setRoleVal]         = useState<CrewRole>(member.role ?? 'general')
+/**
+ * The inline edit form for one crew row. Owns the draft fields itself so a
+ * cancelled edit simply unmounts them — CrewRow keeps only whether it is open.
+ */
+function CrewRowEditor({ member, onDone }: Readonly<{ member: CrewMember; onDone: () => void }>) {
+  const [name, setName]             = useState(member.name)
+  const [roleVal, setRoleVal]       = useState<CrewRole>(member.role ?? 'general')
   // `!== false` rather than truthiness: a row read before the column
   // existed comes back undefined, and undefined means eligible.
-  const [autoAssign, setAutoAssign]   = useState(member.auto_assign_eligible !== false)
-  const [specialty, setSpecialty]     = useState(member.specialty)
-  const [email, setEmail]             = useState(member.email ?? '')
-  const [phone, setPhone]             = useState(member.phone ?? '')
-  const [homeZip, setHomeZip]         = useState(member.home_zip ?? '')
-  const [pref, setPref]               = useState(member.preferred_contact)
-  const [rowError, setRowError]       = useState<string | null>(null)
-  const [saving, startSave]           = useTransition()
-  const [deactivating, startDeact]    = useTransition()
-  const [inviting, setInviting]       = useState(false)
-  const [inviteSent, setInviteSent]   = useState(false)
-  const [inviteError, setInviteError] = useState<string | null>(null)
-
-  async function handleInvite() {
-    setInviting(true)
-    setInviteError(null)
-    const result = await inviteCrewMember(member.id)
-    setInviting(false)
-    if (result.error) setInviteError(result.error)
-    else              setInviteSent(true)
-  }
+  const [autoAssign, setAutoAssign] = useState(member.auto_assign_eligible !== false)
+  const [specialty, setSpecialty]   = useState(member.specialty)
+  const [email, setEmail]           = useState(member.email ?? '')
+  const [phone, setPhone]           = useState(member.phone ?? '')
+  const [homeZip, setHomeZip]       = useState(member.home_zip ?? '')
+  const [pref, setPref]             = useState(member.preferred_contact)
+  const [rowError, setRowError]     = useState<string | null>(null)
+  const [saving, startSave]         = useTransition()
 
   function handleSave() {
     setRowError(null)
@@ -841,16 +830,11 @@ function CrewRow({ member, onSelect }: { member: CrewMember; onSelect: (m: CrewM
         auto_assign_eligible: autoAssign,
       })
       if (result.error) setRowError(result.error)
-      else              setEditing(false)
+      else              onDone()
     })
   }
 
-  function handleDeactivate() {
-    startDeact(async () => { await deactivateCrewMember(member.id) })
-  }
-
-  if (editing) {
-    return (
+  return (
       <tr style={{ background: 'var(--bg-raised)' }}>
         <td className="py-2 pr-4">
           <Input value={name} onChange={(e) => setName(e.target.value)} className="py-1 text-sm" />
@@ -902,13 +886,93 @@ function CrewRow({ member, onSelect }: { member: CrewMember; onSelect: (m: CrewM
             <Button onClick={handleSave} disabled={saving} className="py-1 px-2 text-xs" title="Save" aria-label={`Save ${member.name}`}>
               {saving ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Check className="w-3.5 h-3.5" />}
             </Button>
-            <Button variant="ghost" onClick={() => setEditing(false)} className="py-1 px-2 text-xs" title="Cancel" aria-label={`Cancel editing ${member.name}`}>
+            <Button variant="ghost" onClick={onDone} className="py-1 px-2 text-xs" title="Cancel" aria-label={`Cancel editing ${member.name}`}>
               <X className="w-3.5 h-3.5" />
             </Button>
           </div>
         </td>
       </tr>
+  )
+}
+
+
+/**
+ * The invite column for one crew row: already active, invite just sent, a
+ * resend for one previously sent, or the first invite.
+ */
+function CrewInviteCell({
+  member, inviting, inviteSent, inviteError, onInvite,
+}: Readonly<{
+  member:      CrewMember
+  inviting:    boolean
+  inviteSent:  boolean
+  inviteError: string | null
+  onInvite:    () => void
+}>) {
+  const sending = inviting ? 'Sending…' : null
+
+  if (member.user_id) {
+    return (
+      <span className="text-xs font-medium flex items-center gap-1" style={{ color: 'var(--accent-green)' }}>
+        <span className="w-1.5 h-1.5 rounded-full inline-block" style={{ background: 'var(--accent-green)' }} />
+        Active
+      </span>
     )
+  }
+
+  if (inviteSent) {
+    return (
+      <span className="text-xs font-medium inline-flex items-center gap-1" style={{ color: 'var(--accent-gold)' }}>
+        <Check className="w-3.5 h-3.5" /> Invite sent
+      </span>
+    )
+  }
+
+  const action = member.invite_sent_at ? (
+    <button onClick={(e) => { e.stopPropagation(); onInvite() }} disabled={inviting}
+            className="text-xs underline underline-offset-2 disabled:opacity-50"
+            style={{ color: 'var(--text-muted)' }}>
+      {sending ?? 'Resend invite'}
+    </button>
+  ) : (
+    <Button variant="secondary" onClick={(e) => { e.stopPropagation(); onInvite() }} disabled={inviting}
+            className="text-xs px-2.5 py-1 disabled:opacity-50">
+      {sending ?? 'Invite to app'}
+    </Button>
+  )
+
+  return (
+    <>
+      {action}
+      {inviteError && <p className="text-xs mt-0.5" style={{ color: 'var(--accent-red)' }}>{inviteError}</p>}
+    </>
+  )
+}
+
+// ── Crew row ──────────────────────────────────────────────────────────────────
+
+function CrewRow({ member, onSelect }: { member: CrewMember; onSelect: (m: CrewMember) => void }) {
+  const [editing, setEditing]         = useState(false)
+  const [deactivating, startDeact]    = useTransition()
+  const [inviting, setInviting]       = useState(false)
+  const [inviteSent, setInviteSent]   = useState(false)
+  const [inviteError, setInviteError] = useState<string | null>(null)
+
+  async function handleInvite() {
+    setInviting(true)
+    setInviteError(null)
+    const result = await inviteCrewMember(member.id)
+    setInviting(false)
+    if (result.error) setInviteError(result.error)
+    else              setInviteSent(true)
+  }
+
+  function handleDeactivate() {
+    startDeact(async () => { await deactivateCrewMember(member.id) })
+  }
+
+  if (editing) {
+    return <CrewRowEditor member={member} onDone={() => setEditing(false)} />
   }
 
   return (
@@ -943,26 +1007,13 @@ function CrewRow({ member, onSelect }: { member: CrewMember; onSelect: (m: CrewM
         <Badge tone="slate" className="capitalize">{member.preferred_contact}</Badge>
       </td>
       <td className="py-2.5 pr-4">
-        {member.user_id ? (
-          <span className="text-xs font-medium flex items-center gap-1" style={{ color: 'var(--accent-green)' }}>
-            <span className="w-1.5 h-1.5 rounded-full inline-block" style={{ background: 'var(--accent-green)' }} />
-            Active
-          </span>
-        ) : inviteSent ? (
-          <span className="text-xs font-medium inline-flex items-center gap-1" style={{ color: 'var(--accent-gold)' }}><Check className="w-3.5 h-3.5" /> Invite sent</span>
-        ) : member.invite_sent_at ? (
-          <button onClick={(e) => { e.stopPropagation(); handleInvite() }} disabled={inviting}
-                  className="text-xs underline underline-offset-2 disabled:opacity-50"
-                  style={{ color: 'var(--text-muted)' }}>
-            {inviting ? 'Sending…' : 'Resend invite'}
-          </button>
-        ) : (
-          <Button variant="secondary" onClick={(e) => { e.stopPropagation(); handleInvite() }} disabled={inviting}
-                  className="text-xs px-2.5 py-1 disabled:opacity-50">
-            {inviting ? 'Sending…' : 'Invite to app'}
-          </Button>
-        )}
-        {inviteError && <p className="text-xs mt-0.5" style={{ color: 'var(--accent-red)' }}>{inviteError}</p>}
+        <CrewInviteCell
+          member={member}
+          inviting={inviting}
+          inviteSent={inviteSent}
+          inviteError={inviteError}
+          onInvite={handleInvite}
+        />
       </td>
       <td className="py-2.5 text-right">
         <div className="flex items-center justify-end gap-1">

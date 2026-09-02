@@ -20,6 +20,115 @@ const PHOTO_THRESHOLD = 0.20  // flag probability >= 20% → require photo
 const OBSERVATION_WINDOW_DAYS = 180
 const FETCH_PAGE_SIZE = 1000
 
+
+/** One completed checklist row, as the windowed read returns it. */
+interface CompletionRow {
+  section_name:        string
+  task:                string
+  crew_notes:          string | null
+  photo_storage_path:  string | null
+  requires_photo:      boolean
+  checklist_instances: unknown
+}
+
+/**
+ * A completion counts as flagged when the crew left a note on it, or when it
+ * required a photo and none was attached.
+ */
+function isFlagged(item: CompletionRow): boolean {
+  return Boolean(item.crew_notes?.trim()) || (item.requires_photo && !item.photo_storage_path)
+}
+
+/** Groups completions by property + section + task + org. */
+function groupCompletions(items: CompletionRow[]): Map<string, CompletionRow[]> {
+  const groups = new Map<string, CompletionRow[]>()
+
+  for (const item of items) {
+    const inst = unwrapJoin(item.checklist_instances) as { turnovers?: unknown } | null
+    if (!inst) continue
+
+    const tvo = unwrapJoin(inst.turnovers) as { org_id?: string; property_id?: string } | null
+    if (!tvo?.org_id || !tvo.property_id) continue
+
+    const key   = `${tvo.property_id}|${item.section_name}|${item.task}|${tvo.org_id}`
+    const group = groups.get(key)
+    if (group) group.push(item)
+    else groups.set(key, [item])
+  }
+
+  return groups
+}
+
+/** Flags from the most recent completion backwards — for the reason string. */
+function consecutiveFlags(completions: CompletionRow[]): number {
+  let consecutive = 0
+  for (const c of completions) {
+    if (!isFlagged(c)) break
+    consecutive++
+  }
+  return consecutive
+}
+
+/**
+ * The human-readable reason shown to crew and PM, or null when the item is
+ * below the photo threshold and needs no explanation.
+ */
+function signalReason(
+  { flagProb, completions }: { flagProb: number; completions: CompletionRow[] },
+): string | null {
+  if (flagProb < PHOTO_THRESHOLD) return null
+
+  const consecutive = consecutiveFlags(completions)
+  if (consecutive >= 3) return `Flagged on ${consecutive} consecutive turnovers`
+
+  const total = completions.length
+  const flags = completions.filter(isFlagged).length
+  if (total < 5) return `Flagged ${flags} of ${total} completions (limited history)`
+
+  return `Flagged in ~${Math.round(flagProb * 100)}% of completions`
+}
+
+/**
+ * The Bayesian posterior for every property+section+task group.
+ *
+ * `dynamic_photo_required` and `flag_probability` are GENERATED columns and
+ * are deliberately absent from the payload — Postgres computes them, and
+ * naming one here would make Postgres reject the whole statement.
+ */
+function computeSignalUpserts(
+  items: CompletionRow[],
+): { upserts: TablesInsert<'checklist_item_signals'>[]; required: number } {
+  const upserts: TablesInsert<'checklist_item_signals'>[] = []
+  let required = 0
+
+  for (const [key, completions] of groupCompletions(items)) {
+    const [property_id, section_name, task, org_id] = key.split('|') as [string, string, string, string]
+
+    const total_completions = completions.length
+    const total_flags       = completions.filter(isFlagged).length
+
+    // Bayesian update: posterior = prior + observations
+    const alpha = ALPHA_PRIOR + (total_completions - total_flags)
+    const beta  = BETA_PRIOR  + total_flags
+
+    // flag_probability = beta / (alpha + beta) — same formula as the
+    // GENERATED column in Postgres, computed here only for the reason string
+    const flagProb = beta / (alpha + beta)
+    if (flagProb >= PHOTO_THRESHOLD) required++
+
+    upserts.push({
+      org_id, property_id, section_name, task,
+      alpha, beta,
+      reason: signalReason({ flagProb, completions }),
+      total_completions,
+      total_flags,
+      computed_at: new Date().toISOString(),
+    })
+  }
+
+  return { upserts, required }
+}
+
 export const computeChecklistSignals = inngest.createFunction(
   {
     id:      'cron-checklist-signals',
@@ -73,74 +182,7 @@ export const computeChecklistSignals = inngest.createFunction(
 
     logger.info(`[checklistSignals] Processing ${items.length} completed items`)
 
-    // Group by property + section + task
-    type ItemRow = (typeof items)[number]
-    const groups = new Map<string, ItemRow[]>()
-
-    for (const item of items) {
-      const inst = unwrapJoin(item.checklist_instances)
-      if (!inst) continue
-
-      const tvo = unwrapJoin(inst.turnovers)
-      if (!tvo?.org_id || !tvo.property_id) continue
-
-      const key = `${tvo.property_id}|${item.section_name}|${item.task}|${tvo.org_id}`
-      if (!groups.has(key)) groups.set(key, [])
-      groups.get(key)!.push(item)
-    }
-
-    const upserts: TablesInsert<'checklist_item_signals'>[] = []
-    let required = 0
-
-    for (const [key, completions] of groups) {
-      const [property_id, section_name, task, org_id] = key.split('|') as [string, string, string, string]
-
-      const isFlagged = (item: ItemRow): boolean =>
-        Boolean(item.crew_notes?.trim()) ||
-        (item.requires_photo && !item.photo_storage_path)
-
-      const total_completions = completions.length
-      const total_flags       = completions.filter(isFlagged).length
-
-      // Bayesian update: posterior = prior + observations
-      const alpha = ALPHA_PRIOR + (total_completions - total_flags)
-      const beta  = BETA_PRIOR  + total_flags
-
-      // flag_probability = beta / (alpha + beta) — same formula as the
-      // GENERATED column in Postgres, computed here only for the reason string
-      const flagProb = beta / (alpha + beta)
-
-      // Consecutive flags from most-recent: for the reason string only
-      let consecutive = 0
-      for (const c of completions) {
-        if (isFlagged(c)) consecutive++
-        else break
-      }
-
-      // Human-readable reason — shown to crew + PM so they understand why
-      let reason: string | null = null
-      if (flagProb >= PHOTO_THRESHOLD) {
-        required++
-        if (consecutive >= 3) {
-          reason = `Flagged on ${consecutive} consecutive turnovers`
-        } else if (total_completions < 5) {
-          reason = `Flagged ${total_flags} of ${total_completions} completions (limited history)`
-        } else {
-          reason = `Flagged in ~${Math.round(flagProb * 100)}% of completions`
-        }
-      }
-
-      upserts.push({
-        org_id, property_id, section_name, task,
-        alpha, beta,
-        // dynamic_photo_required and flag_probability are GENERATED columns —
-        // do NOT include them in the upsert payload, Postgres computes them
-        reason,
-        total_completions,
-        total_flags,
-        computed_at: new Date().toISOString(),
-      })
-    }
+    const { upserts, required } = computeSignalUpserts(items)
 
     // Upsert in chunks of 200 to stay well under Supabase's payload limits.
     // Wrapped in a single step so it's memoized — a mid-loop failure won't

@@ -22,6 +22,171 @@ interface Props {
   availabilityMap: Record<string, CrewAvailabilityEntry[]>
 }
 
+
+/**
+ * Inverts the per-crew availability map into two per-date maps: who is
+ * unavailable (drives the grid badges) and every record for that date
+ * (drives the day-detail modal).
+ */
+function invertAvailability(
+  availabilityMap: Record<string, CrewAvailabilityEntry[]>,
+  crewById:        Map<string, CrewMember>,
+): {
+  dateToUnavailable: Map<string, CrewMember[]>
+  dateToRecords:     Map<string, { member: CrewMember; entry: CrewAvailabilityEntry }[]>
+} {
+  const dateToUnavailable = new Map<string, CrewMember[]>()
+  const dateToRecords     = new Map<string, { member: CrewMember; entry: CrewAvailabilityEntry }[]>()
+
+  const push = <T,>(map: Map<string, T[]>, key: string, value: T) => {
+    const list = map.get(key)
+    if (list) list.push(value)
+    else map.set(key, [value])
+  }
+
+  for (const [crewId, entries] of Object.entries(availabilityMap)) {
+    const member = crewById.get(crewId)
+    if (!member) continue
+
+    for (const entry of entries) {
+      if (!entry.is_available) push(dateToUnavailable, entry.available_date, member)
+      push(dateToRecords, entry.available_date, { member, entry })
+    }
+  }
+
+  return { dateToUnavailable, dateToRecords }
+}
+
+/** A leading blank cell before the first of the month. */
+function EmptyCell() {
+  return (
+    <div
+      className="min-h-[80px]"
+      style={{
+        background:  'var(--bg-raised)',
+        borderRight: '1px solid var(--border)',
+        borderBottom:'1px solid var(--border)',
+      }}
+    />
+  )
+}
+
+/** Background and day-number colour depend on the same past/today/future
+ *  classification, so it is decided once. */
+function dayTone(isToday: boolean, isPast: boolean): { background: string; numberColor: string } {
+  if (isToday) return { background: 'rgba(252,209,22,0.07)', numberColor: 'var(--accent-gold)' }
+  if (isPast)  return { background: 'var(--bg-raised)',      numberColor: 'var(--text-muted)' }
+  return { background: 'var(--bg-card)', numberColor: 'var(--text-secondary)' }
+}
+
+/** Show at most this many crew badges in a cell before collapsing to "+N more". */
+const SHOW_MAX = 3
+
+/** One day in the grid: its number and who is unavailable on it. */
+function DayCell({
+  dayNum, dateStr, todayStr, unavailable, crewColor, onSelect,
+}: Readonly<{
+  dayNum:      number
+  dateStr:     string
+  todayStr:    string
+  unavailable: CrewMember[]
+  crewColor:   Map<string, string>
+  onSelect:    (dateStr: string) => void
+}>) {
+  const isToday = dateStr === todayStr
+  const isPast  = dateStr < todayStr
+  const tone    = dayTone(isToday, isPast)
+
+  const visible  = unavailable.slice(0, SHOW_MAX)
+  const overflow = unavailable.length - SHOW_MAX
+
+  return (
+    <button
+      type="button"
+      onClick={() => onSelect(dateStr)}
+      className="min-h-[80px] p-1.5 flex flex-col text-left cursor-pointer transition-colors"
+      style={{
+        background:    tone.background,
+        borderRight:   '1px solid var(--border)',
+        borderBottom:  '1px solid var(--border)',
+        outline:       isToday ? '2px solid var(--accent-gold)' : 'none',
+        outlineOffset: '-2px',
+      }}
+    >
+      <span className="text-xs font-semibold mb-1" style={{ color: tone.numberColor }}>
+        {dayNum}
+      </span>
+
+      <div className="flex flex-col gap-0.5">
+        {visible.map((member) => (
+          <div
+            key={member.id}
+            className="flex items-center gap-1 px-1 py-0.5 rounded text-xs truncate"
+            style={{
+              background: `${crewColor.get(member.id)}20`,
+              color:       crewColor.get(member.id),
+            }}
+            title={`${member.name} — unavailable`}
+          >
+            <span
+              className="w-3.5 h-3.5 rounded-full flex-shrink-0 flex items-center
+                         justify-center text-[9px] font-bold"
+              style={{ background: crewColor.get(member.id), color: '#fff' }}
+            >
+              {member.name[0]?.toUpperCase()}
+            </span>
+            <span className="truncate font-medium">{member.name.split(' ')[0]}</span>
+          </div>
+        ))}
+        {overflow > 0 && (
+          <span className="text-[10px] px-1" style={{ color: 'var(--text-muted)' }}>
+            +{overflow} more
+          </span>
+        )}
+      </div>
+    </button>
+  )
+}
+
+/**
+ * Colour key for the crew who have joined. Rendered only when there is at
+ * least one, so the empty-state paragraph the previous version nested inside
+ * that same guard was unreachable and is not carried forward.
+ */
+function CrewLegend({
+  sortedCrew, crewColor,
+}: Readonly<{ sortedCrew: CrewMember[]; crewColor: Map<string, string> }>) {
+  return (
+    <div className="mt-5">
+      <p className="text-xs font-medium mb-2" style={{ color: 'var(--text-muted)' }}>
+        CREW LEGEND
+      </p>
+      <div className="flex flex-wrap gap-2">
+        {sortedCrew.filter((c) => c.user_id).map((member) => (
+          <div
+            key={member.id}
+            className="flex items-center gap-1.5 px-2 py-1 rounded-lg text-xs"
+            style={{
+              background: `${crewColor.get(member.id)}15`,
+              color:       crewColor.get(member.id),
+              border:      `1px solid ${crewColor.get(member.id)}30`,
+            }}
+          >
+            <span
+              className="w-4 h-4 rounded-full flex items-center justify-center
+                         text-[9px] font-bold flex-shrink-0"
+              style={{ background: crewColor.get(member.id), color: '#fff' }}
+            >
+              {member.name[0]?.toUpperCase()}
+            </span>
+            {member.name}
+          </div>
+        ))}
+      </div>
+    </div>
+  )
+}
+
 export function AvailabilityOverviewCalendar({ crew, availabilityMap }: Readonly<Props>) {
   const now   = new Date()
   const thisMonth = new Date(now.getFullYear(), now.getMonth(), 1)
@@ -48,38 +213,34 @@ export function AvailabilityOverviewCalendar({ crew, availabilityMap }: Readonly
   const crewColor  = new Map(sortedCrew.map((c, i) => [c.id, CREW_COLORS[i % CREW_COLORS.length]!]))
   const crewById   = new Map(crew.map((c) => [c.id, c]))
 
-  // Invert availabilityMap: date → array of unavailable CrewMember
-  const dateToUnavailable = new Map<string, CrewMember[]>()
-  // Invert availabilityMap: date → every availability record for that date
-  // (both available and unavailable), used by the day-detail modal.
-  const dateToRecords = new Map<string, { member: CrewMember; entry: CrewAvailabilityEntry }[]>()
-  for (const [crewId, entries] of Object.entries(availabilityMap)) {
-    const member = crewById.get(crewId)
-    if (!member) continue
-    for (const entry of entries) {
-      if (!entry.is_available) {
-        if (!dateToUnavailable.has(entry.available_date)) {
-          dateToUnavailable.set(entry.available_date, [])
-        }
-        dateToUnavailable.get(entry.available_date)!.push(member)
-      }
-      if (!dateToRecords.has(entry.available_date)) {
-        dateToRecords.set(entry.available_date, [])
-      }
-      dateToRecords.get(entry.available_date)!.push({ member, entry })
-    }
-  }
+  const { dateToUnavailable, dateToRecords } = invertAvailability(availabilityMap, crewById)
 
   const todayStr = new Date().toISOString().split('T')[0]!
 
-  // Calendar grid cells: null = empty leading cell
-  const cells: (number | null)[] = [
-    ...Array<null>(firstDow).fill(null),
-    ...Array.from({ length: daysInMonth }, (_, i) => i + 1),
-  ]
-
   const isoDate = (dayNum: number): string =>
     `${year}-${String(month + 1).padStart(2, '0')}-${String(dayNum).padStart(2, '0')}`
+
+  // Any day offset from the 1st of the displayed month, as a local ISO date.
+  // Offsets <= 0 land in the previous month, which is what the leading blanks
+  // actually are.
+  const isoDateAtOffset = (offsetFromFirst: number): string => {
+    const d = new Date(year, month, offsetFromFirst)
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+  }
+
+  // Calendar grid cells: dayNum null = empty leading cell. Each carries its own
+  // key rather than being keyed by array index — a blank is the trailing day of
+  // the previous month, so that real date is both stable and unique.
+  const cells: { key: string; dayNum: number | null }[] = [
+    ...Array.from({ length: firstDow }, (_, i) => ({
+      key:    isoDateAtOffset(i - firstDow + 1),
+      dayNum: null,
+    })),
+    ...Array.from({ length: daysInMonth }, (_, i) => ({
+      key:    isoDate(i + 1),
+      dayNum: i + 1,
+    })),
+  ]
 
   const monthLabel = viewDate.toLocaleDateString('en-US', {
     month: 'long',
@@ -141,133 +302,23 @@ export function AvailabilityOverviewCalendar({ crew, availabilityMap }: Readonly
         className="grid grid-cols-7 rounded-xl overflow-hidden"
         style={{ border: '1px solid var(--border)' }}
       >
-        {cells.map((dayNum, idx) => {
-          if (dayNum === null) {
-            return (
-              <div
-                key={`empty-${idx}`}
-                className="min-h-[80px]"
-                style={{
-                  background:  'var(--bg-raised)',
-                  borderRight: '1px solid var(--border)',
-                  borderBottom:'1px solid var(--border)',
-                }}
-              />
-            )
-          }
-
-          const dateStr     = isoDate(dayNum)
-          const unavailable = dateToUnavailable.get(dateStr) ?? []
-          const isToday     = dateStr === todayStr
-          const isPast      = dateStr < todayStr
-
-          // Show up to 3 badges, then "+N more"
-          const SHOW_MAX = 3
-          const visible  = unavailable.slice(0, SHOW_MAX)
-          const overflow = unavailable.length - SHOW_MAX
-
-          return (
-            <button
-              key={dateStr}
-              type="button"
-              onClick={() => setSelectedDate(dateStr)}
-              className="min-h-[80px] p-1.5 flex flex-col text-left cursor-pointer transition-colors"
-              style={{
-                background:   isToday
-                  ? 'rgba(252,209,22,0.07)'
-                  : isPast
-                  ? 'var(--bg-raised)'
-                  : 'var(--bg-card)',
-                borderRight:  '1px solid var(--border)',
-                borderBottom: '1px solid var(--border)',
-                outline:      isToday ? '2px solid var(--accent-gold)' : 'none',
-                outlineOffset: '-2px',
-              }}
-            >
-              {/* Day number */}
-              <span
-                className="text-xs font-semibold mb-1"
-                style={{
-                  color: isToday
-                    ? 'var(--accent-gold)'
-                    : isPast
-                    ? 'var(--text-muted)'
-                    : 'var(--text-secondary)',
-                }}
-              >
-                {dayNum}
-              </span>
-
-              {/* Unavailable badges */}
-              <div className="flex flex-col gap-0.5">
-                {visible.map((member) => (
-                  <div
-                    key={member.id}
-                    className="flex items-center gap-1 px-1 py-0.5 rounded text-xs truncate"
-                    style={{
-                      background: `${crewColor.get(member.id)}20`,
-                      color:       crewColor.get(member.id),
-                    }}
-                    title={`${member.name} — unavailable`}
-                  >
-                    <span
-                      className="w-3.5 h-3.5 rounded-full flex-shrink-0 flex items-center
-                                 justify-center text-[9px] font-bold"
-                      style={{ background: crewColor.get(member.id), color: '#fff' }}
-                    >
-                      {member.name[0]?.toUpperCase()}
-                    </span>
-                    <span className="truncate font-medium">{member.name.split(' ')[0]}</span>
-                  </div>
-                ))}
-                {overflow > 0 && (
-                  <span
-                    className="text-[10px] px-1"
-                    style={{ color: 'var(--text-muted)' }}
-                  >
-                    +{overflow} more
-                  </span>
-                )}
-              </div>
-            </button>
-          )
-        })}
+        {cells.map(({ key, dayNum }) => dayNum === null
+          ? <EmptyCell key={key} />
+          : (
+            <DayCell
+              key={key}
+              dayNum={dayNum}
+              dateStr={isoDate(dayNum)}
+              todayStr={todayStr}
+              unavailable={dateToUnavailable.get(isoDate(dayNum)) ?? []}
+              crewColor={crewColor}
+              onSelect={setSelectedDate}
+            />
+          ))}
       </div>
 
-      {/* Legend */}
       {activeCrew.length > 0 && (
-        <div className="mt-5">
-          <p className="text-xs font-medium mb-2" style={{ color: 'var(--text-muted)' }}>
-            CREW LEGEND
-          </p>
-          <div className="flex flex-wrap gap-2">
-            {sortedCrew.filter((c) => c.user_id).map((member) => (
-              <div
-                key={member.id}
-                className="flex items-center gap-1.5 px-2 py-1 rounded-lg text-xs"
-                style={{
-                  background: `${crewColor.get(member.id)}15`,
-                  color:       crewColor.get(member.id),
-                  border:      `1px solid ${crewColor.get(member.id)}30`,
-                }}
-              >
-                <span
-                  className="w-4 h-4 rounded-full flex items-center justify-center
-                             text-[9px] font-bold flex-shrink-0"
-                  style={{ background: crewColor.get(member.id), color: '#fff' }}
-                >
-                  {member.name[0]?.toUpperCase()}
-                </span>
-                {member.name}
-              </div>
-            ))}
-          </div>
-          {activeCrew.length === 0 && (
-            <p className="text-xs" style={{ color: 'var(--text-muted)' }}>
-              No crew members have joined yet. Invite crew to track availability.
-            </p>
-          )}
-        </div>
+        <CrewLegend sortedCrew={sortedCrew} crewColor={crewColor} />
       )}
 
       {selectedDate && (

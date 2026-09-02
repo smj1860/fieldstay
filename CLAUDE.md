@@ -1296,7 +1296,7 @@ and refactors. Violations will appear as SonarQube findings on the next scan.
 - **Cognitive complexity ≤ 15** per function — extract named helper functions,
   custom hooks, or named predicates to reduce branching. ESLint-enforced
   (`sonarjs/cognitive-complexity`, `eslint.config.mjs`) at `warn` while the
-  pre-existing violations get cleared (236 at rollout, 33 as of 2026-08-26),
+  pre-existing violations get cleared (236 at rollout, 0 as of 2026-09-02 — the burn-down is complete, and `scripts/complexity-baseline.json` is now empty, so ANY new violation fails CI),
   and ratcheted per-file by `npm run check:complexity` — new code at over 15
   fails CI outright, and an already-complex function may not get worse. The
   `--max-warnings` total does NOT cover this: it is fungible, and

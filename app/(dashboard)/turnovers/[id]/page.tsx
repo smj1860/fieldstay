@@ -14,6 +14,124 @@ export const metadata: Metadata = { title: 'Turnover Detail' }
 
 interface Props { params: Promise<{ id: string }> }
 
+
+interface ChecklistItemRow {
+  id:                 string
+  section_name:       string
+  task:               string
+  is_completed:       boolean
+  requires_photo:     boolean
+  photo_storage_path: string | null
+  crew_notes:         string | null
+  photo_reason:       string | null
+}
+
+/** The checklist rows off the joined instance, or none when it has no items. */
+function checklistItemsOf(instance: unknown): ChecklistItemRow[] {
+  const items = (instance as { checklist_instance_items?: unknown } | null)?.checklist_instance_items
+  return Array.isArray(items) ? items as ChecklistItemRow[] : []
+}
+
+const STATUS_BADGE_CLASS: Record<string, string> = {
+  completed:   'badge-green',
+  flagged:     'badge-red',
+  in_progress: 'badge-purple',
+  assigned:    'badge-blue',
+}
+
+function statusBadgeClass(status: string): string {
+  return STATUS_BADGE_CLASS[status] ?? 'badge-amber'
+}
+
+/** The completion checklist, grouped by section, with its progress bar. */
+function ChecklistCard({
+  bySection,
+  completedCount,
+  totalCount,
+  pct,
+}: Readonly<{
+  bySection:      Record<string, ChecklistItemRow[]>
+  completedCount: number
+  totalCount:     number
+  pct:            number
+}>) {
+  return (
+        <Card>
+          <div className="flex items-center justify-between mb-4">
+            <h3 className="font-semibold text-primary-themed">Turnover Checklist</h3>
+            <div className="flex items-center gap-3">
+              <span className="text-sm text-muted-themed">{completedCount}/{totalCount}</span>
+              <div className="w-24 h-1.5 bg-raised-themed rounded-full overflow-hidden">
+                <div
+                  className="h-full rounded-full"
+                  style={{ width: `${pct}%`, background: pct === 100 ? 'var(--accent-green)' : 'var(--accent-gold)' }}
+                />
+              </div>
+              <span className="text-sm font-medium text-secondary-themed">{pct}%</span>
+            </div>
+          </div>
+
+          <div className="space-y-4">
+            {Object.entries(bySection).map(([section, items]) => {
+              const sectionDone = items.filter((i) => i.is_completed).length
+              return (
+                <div key={section}>
+                  <div className="flex items-center gap-2 mb-2">
+                    <p className="text-xs font-semibold text-muted-themed uppercase tracking-wide">{section}</p>
+                    <span className="text-xs text-muted-themed">{sectionDone}/{items.length}</span>
+                  </div>
+                  <div className="space-y-1.5">
+                    {items.map((item) => (
+                      <div
+                        key={item.id}
+                        className="flex items-start gap-2.5 px-3 py-2 rounded-lg text-sm"
+                        style={{ background: 'var(--bg-raised)' }}
+                      >
+                        <div
+                          className="w-4 h-4 rounded-full border-2 flex-shrink-0 mt-0.5 flex items-center justify-center"
+                          style={item.is_completed
+                            ? { borderColor: 'var(--accent-green)', background: 'var(--accent-green)' }
+                            : { borderColor: 'var(--border)' }}
+                        >
+                          {item.is_completed && <CheckCircle2 className="w-3 h-3 text-white" />}
+                        </div>
+                        <div className="flex-1 min-w-0">
+                          <p
+                            className="text-sm"
+                            style={item.is_completed
+                              ? { color: 'var(--accent-green)', textDecoration: 'line-through' }
+                              : { color: 'var(--text-secondary)' }}
+                          >
+                            {item.task}
+                          </p>
+                          {item.crew_notes && (
+                            <p className="text-xs text-muted-themed mt-0.5">{item.crew_notes}</p>
+                          )}
+                          {item.requires_photo && item.photo_reason && (
+                            <p className="text-xs mt-0.5 flex items-center gap-1" style={{ color: 'var(--accent-amber)' }}>
+                              <Camera className="w-3.5 h-3.5 flex-shrink-0" /> {item.photo_reason}
+                            </p>
+                          )}
+                        </div>
+                        <div className="flex items-center gap-1.5 flex-shrink-0">
+                          {item.requires_photo && (
+                            <Camera
+                              className="w-3.5 h-3.5"
+                              style={{ color: item.photo_storage_path ? 'var(--accent-green)' : 'var(--text-muted)' }}
+                            />
+                          )}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )
+            })}
+          </div>
+        </Card>
+  )
+}
+
 export default async function TurnoverDetailPage({ params }: Props) {
   const { id } = await params
   const { supabase, membership } = await requireOrgMember()
@@ -73,11 +191,7 @@ export default async function TurnoverDetailPage({ params }: Props) {
 
   const checklistInstance = unwrapJoin(turnover.checklist_instances)
 
-  const checklistItems = checklistInstance
-    ? Array.isArray((checklistInstance as { checklist_instance_items: unknown }).checklist_instance_items)
-      ? (checklistInstance as { checklist_instance_items: Array<{ id: string; section_name: string; task: string; is_completed: boolean; requires_photo: boolean; photo_storage_path: string | null; crew_notes: string | null; photo_reason: string | null }> }).checklist_instance_items
-      : []
-    : []
+  const checklistItems = checklistItemsOf(checklistInstance)
 
   // Group checklist items by section
   const checklistBySection = checklistItems.reduce<Record<string, typeof checklistItems>>((acc, item) => {
@@ -114,12 +228,7 @@ export default async function TurnoverDetailPage({ params }: Props) {
           <span className={cn('badge text-sm px-3 py-1', PRIORITY_COLORS[turnover.priority as keyof typeof PRIORITY_COLORS])}>
             {turnover.priority} priority
           </span>
-          <span className={cn('badge text-sm px-3 py-1',
-            turnover.status === 'completed'          ? 'badge-green' :
-            turnover.status === 'flagged'            ? 'badge-red' :
-            turnover.status === 'in_progress'        ? 'badge-purple' :
-            turnover.status === 'assigned'           ? 'badge-blue' : 'badge-amber'
-          )}>
+          <span className={cn('badge text-sm px-3 py-1', statusBadgeClass(turnover.status))}>
             {TURNOVER_STATUS_LABELS[turnover.status as keyof typeof TURNOVER_STATUS_LABELS] ?? turnover.status}
           </span>
         </div>
@@ -216,81 +325,13 @@ export default async function TurnoverDetailPage({ params }: Props) {
         </Card>
       )}
 
-      {/* Checklist */}
       {totalCount > 0 && (
-        <Card>
-          <div className="flex items-center justify-between mb-4">
-            <h3 className="font-semibold text-primary-themed">Turnover Checklist</h3>
-            <div className="flex items-center gap-3">
-              <span className="text-sm text-muted-themed">{completedCount}/{totalCount}</span>
-              <div className="w-24 h-1.5 bg-raised-themed rounded-full overflow-hidden">
-                <div
-                  className="h-full rounded-full"
-                  style={{ width: `${checklistPct}%`, background: checklistPct === 100 ? 'var(--accent-green)' : 'var(--accent-gold)' }}
-                />
-              </div>
-              <span className="text-sm font-medium text-secondary-themed">{checklistPct}%</span>
-            </div>
-          </div>
-
-          <div className="space-y-4">
-            {Object.entries(checklistBySection).map(([section, items]) => {
-              const sectionDone = items.filter((i) => i.is_completed).length
-              return (
-                <div key={section}>
-                  <div className="flex items-center gap-2 mb-2">
-                    <p className="text-xs font-semibold text-muted-themed uppercase tracking-wide">{section}</p>
-                    <span className="text-xs text-muted-themed">{sectionDone}/{items.length}</span>
-                  </div>
-                  <div className="space-y-1.5">
-                    {items.map((item) => (
-                      <div
-                        key={item.id}
-                        className="flex items-start gap-2.5 px-3 py-2 rounded-lg text-sm"
-                        style={{ background: 'var(--bg-raised)' }}
-                      >
-                        <div
-                          className="w-4 h-4 rounded-full border-2 flex-shrink-0 mt-0.5 flex items-center justify-center"
-                          style={item.is_completed
-                            ? { borderColor: 'var(--accent-green)', background: 'var(--accent-green)' }
-                            : { borderColor: 'var(--border)' }}
-                        >
-                          {item.is_completed && <CheckCircle2 className="w-3 h-3 text-white" />}
-                        </div>
-                        <div className="flex-1 min-w-0">
-                          <p
-                            className="text-sm"
-                            style={item.is_completed
-                              ? { color: 'var(--accent-green)', textDecoration: 'line-through' }
-                              : { color: 'var(--text-secondary)' }}
-                          >
-                            {item.task}
-                          </p>
-                          {item.crew_notes && (
-                            <p className="text-xs text-muted-themed mt-0.5">{item.crew_notes}</p>
-                          )}
-                          {item.requires_photo && item.photo_reason && (
-                            <p className="text-xs mt-0.5 flex items-center gap-1" style={{ color: 'var(--accent-amber)' }}>
-                              <Camera className="w-3.5 h-3.5 flex-shrink-0" /> {item.photo_reason}
-                            </p>
-                          )}
-                        </div>
-                        <div className="flex items-center gap-1.5 flex-shrink-0">
-                          {item.requires_photo && (
-                            <Camera
-                              className="w-3.5 h-3.5"
-                              style={{ color: item.photo_storage_path ? 'var(--accent-green)' : 'var(--text-muted)' }}
-                            />
-                          )}
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              )
-            })}
-          </div>
-        </Card>
+        <ChecklistCard
+          bySection={checklistBySection}
+          completedCount={completedCount}
+          totalCount={totalCount}
+          pct={checklistPct}
+        />
       )}
 
       {totalCount === 0 && (
