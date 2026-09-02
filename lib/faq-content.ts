@@ -439,9 +439,9 @@ export const BREEZEWAY_FAQ: readonly FaqItem[] = [
     question: 'How do I switch from Breezeway to FieldStay?',
     answer:
       'There\'s no data migration to run, because FieldStay doesn\'t import FROM Breezeway — it connects TO ' +
-      'your booking platform (OwnerRez, Hospitable, or Hostex) and builds your turnover schedule from your ' +
-      'existing bookings automatically. Most teams run FieldStay on a handful of properties during a free ' +
-      'trial alongside their current setup before moving the rest of the portfolio over.',
+      'your booking platform (OwnerRez, Hospitable, Hostex, or Hostaway) and builds your turnover schedule ' +
+      'from your existing bookings automatically. Most teams run FieldStay on a handful of properties during ' +
+      'a free trial alongside their current setup before moving the rest of the portfolio over.',
   },
   {
     id:       'breezeway-alternative-guidebook',
