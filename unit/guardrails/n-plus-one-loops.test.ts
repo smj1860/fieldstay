@@ -144,11 +144,11 @@ const EXCEPTIONS: Record<string, string> = {
   'lib/push/send-push.ts:61':
     'Per-subscription webpush.sendNotification call (+ conditional delete on a 410) — each subscription is a distinct external Web Push endpoint; inherently one call per endpoint, like the Vault-secret case above.',
   'lib/properties/upsert-normalized.ts:310':
-    'Per-unique-coordinate-group update on PMS import — the same optimized end state as geocoding-backfill.ts:96, and grouped the same way: one UPDATE per distinct resolved lat/lng, not per property. A portfolio in one market is typically one or two groups.',
-  'lib/inngest/functions/geocoding-backfill.ts:96':
+    'Per-unique-coordinate-group update on PMS import — the same optimized end state as geocoding-backfill.ts:117, and grouped the same way: one UPDATE per distinct resolved lat/lng, not per property. A portfolio in one market is typically one or two groups.',
+  'lib/inngest/functions/geocoding-backfill.ts:117':
     'Per-unique-coordinate-group update — already the optimized end state (grouped from one geocode call per property down to one per distinct resolved lat/lng); a single UPDATE cannot set different coordinate values across differently-grouped id sets without a CASE expression, which is a bigger and less readable change for the same 3-4 typical groups per run.',
-  'lib/inngest/functions/geocoding-backfill.ts:150':
-    'Vendor twin of geocoding-backfill.ts:96 — same reasoning.',
+  'lib/inngest/functions/geocoding-backfill.ts:145':
+    'Vendor twin of geocoding-backfill.ts:117 — same reasoning.',
 }
 
 describe('guardrail: no query-per-loop-iteration (N+1) outside named exceptions', () => {

@@ -213,6 +213,202 @@ function WOInfo({ workOrder, property }: { workOrder: WorkOrderInfo; property: P
   )
 }
 
+
+/** Why this file can't be attached, or null if it can. */
+function photoRejectionReason(file: File): string | null {
+  if (file.size > MAX_PHOTO_BYTES) return 'Each photo must be under 10 MB.'
+  if (!ALLOWED_MIME.has(file.type)) return 'Only JPEG, PNG, WebP, or HEIC photos are accepted.'
+  return null
+}
+
+/**
+ * Why this completion can't be submitted, or null if it can. The NTE check is
+ * a 5% tolerance, matching the server-side gate — a vendor over it has to talk
+ * to the PM rather than submit and have it rejected after the fact.
+ */
+function completionRejectionReason({
+  technicianName,
+  validItemCount,
+  subtotal,
+  nteAmount,
+}: {
+  technicianName: string
+  validItemCount: number
+  subtotal:       number
+  nteAmount:      number | null
+}): string | null {
+  if (!technicianName.trim()) {
+    return 'Enter the name of the technician who completed this work.'
+  }
+  if (validItemCount === 0) {
+    return 'Add at least one line item with a description and cost.'
+  }
+  if (subtotal <= 0) {
+    return 'Invoice total must be greater than $0.'
+  }
+  if (subtotal > MAX_SUBTOTAL) {
+    return `Invoice total must be under $${MAX_SUBTOTAL.toLocaleString()}. Please check your entries.`
+  }
+  if (nteAmount && subtotal > nteAmount * 1.05) {
+    return `Total of $${subtotal.toFixed(2)} exceeds the Not-to-Exceed amount of $${nteAmount.toFixed(2)}. Please contact the property manager before submitting.`
+  }
+  return null
+}
+
+
+/** The TradeSuite-branded card every vendor-portal screen renders inside. */
+function TradeSuiteShell({
+  woNumber,
+  children,
+}: Readonly<{ woNumber: string | null; children: React.ReactNode }>) {
+  return (
+    <div style={{
+      minHeight:       '100vh',
+      backgroundColor: '#1A1A1A',
+      backgroundImage: 'repeating-linear-gradient(45deg,transparent,transparent 4px,rgba(255,255,255,0.015) 4px,rgba(255,255,255,0.015) 8px)',
+      display:         'flex',
+      alignItems:      'center',
+      justifyContent:  'center',
+      padding:         '16px',
+      fontFamily:      '-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif',
+    }}>
+      <div style={{
+        backgroundColor: '#ffffff',
+        borderRadius:    16,
+        width:           '100%',
+        maxWidth:        480,
+        overflow:        'hidden',
+        boxShadow:       '0 24px 64px rgba(0,0,0,0.5)',
+      }}>
+        {/* Header */}
+        <div style={{
+          backgroundColor: '#1A1A1A',
+          borderBottom:    '3px solid #FF6B00',
+          padding:         '20px 24px',
+          display:         'flex',
+          alignItems:      'center',
+          justifyContent:  'space-between',
+        }}>
+          <div>
+            <p style={{ color: '#FF6B00', fontSize: 16, fontWeight: 800, letterSpacing: '-0.3px', margin: 0 }}>
+              TradeSuite
+            </p>
+            <p style={{ color: '#C0C0C0', fontSize: 10, margin: '2px 0 0', letterSpacing: '0.1em' }}>
+              POWERED BY FIELDSTAY
+            </p>
+          </div>
+          {woNumber && (
+            <span style={{ color: '#C0C0C0', fontSize: 11, fontWeight: 600, letterSpacing: '0.1em' }}>
+              {woNumber}
+            </span>
+          )}
+        </div>
+
+        <div style={{ padding: '24px' }}>
+          {children}
+        </div>
+      </div>
+    </div>
+  )
+}
+
+
+/**
+ * The terminal screens — stuck submission, success, expired link, already
+ * closed. Returns the screen's body, or null when the form should render.
+ */
+function vendorPortalStatusScreen({
+  deadLetterReason,
+  success,
+  queued,
+  expired,
+  alreadyDone,
+  workOrderStatus,
+  onRetry,
+}: {
+  deadLetterReason: VendorWoMutationRow['terminalReason'] | 'generic' | null
+  success:          boolean
+  queued:           boolean
+  expired:          boolean
+  alreadyDone:      boolean
+  workOrderStatus:  string | undefined
+  onRetry:          () => void
+}): React.ReactNode | null {
+  // ── State: submission stuck (dead-lettered) ──────────────────────────────
+  if (deadLetterReason) {
+    const message = getDeadLetterMessage(deadLetterReason)
+    return (
+      <div style={{ textAlign: 'center', padding: '8px 0' }}>
+        <div style={{ display: 'flex', justifyContent: 'center', marginBottom: 12 }}>
+          <AlertTriangle style={{ width: 48, height: 48, color: '#b45309' }} />
+        </div>
+        <h2 style={{ fontSize: 18, fontWeight: 700, color: '#0f172a', margin: '0 0 8px' }}>
+          {deadLetterReason === 'generic' ? "Didn't Sync" : 'Not Submitted'}
+        </h2>
+        <p style={{ fontSize: 14, color: '#64748b', lineHeight: 1.6, margin: '0 0 16px' }}>
+          {message}
+        </p>
+        {deadLetterReason === 'generic' && (
+          <button
+            type="button"
+            onClick={onRetry}
+            style={{ backgroundColor: '#FF6B00', color: '#ffffff', border: 'none', borderRadius: 10, padding: '12px 20px', fontSize: 14, fontWeight: 700, cursor: 'pointer' }}
+          >
+            Retry Now
+          </button>
+        )}
+      </div>
+    )
+  }
+
+  // ── State: already done ──────────────────────────────────────────────────
+  if (success) {
+    return (
+      <div style={{ textAlign: 'center', padding: '8px 0' }}>
+        <div style={{ display: 'flex', justifyContent: 'center', marginBottom: 12 }}>
+          <CheckCircle2 style={{ width: 48, height: 48, color: '#16a34a' }} />
+        </div>
+        <h2 style={{ fontSize: 18, fontWeight: 700, color: '#0f172a', margin: '0 0 8px' }}>
+          {queued ? 'Saved' : 'Invoice Submitted!'}
+        </h2>
+        <p style={{ fontSize: 14, color: '#64748b', lineHeight: 1.6, margin: 0 }}>
+          {queued
+            ? "This will finish submitting the moment you're back in range — no need to do anything else."
+            : 'Your invoice has been sent to the property manager. Payment will be deposited to your Stripe payout account once approved.'}
+        </p>
+      </div>
+    )
+  }
+
+  if (expired) {
+    return (
+      <div style={{ textAlign: 'center' }}>
+        <div style={{ display: 'flex', justifyContent: 'center', marginBottom: 12 }}>
+          <Clock style={{ width: 36, height: 36, color: '#64748b' }} />
+        </div>
+        <h2 style={{ fontSize: 18, fontWeight: 700, color: '#0f172a', margin: '0 0 8px' }}>Link Expired</h2>
+        <p style={{ fontSize: 14, color: '#64748b' }}>Contact the property manager for a new link.</p>
+      </div>
+    )
+  }
+
+  if (alreadyDone) {
+    return (
+      <div style={{ textAlign: 'center' }}>
+        <div style={{ display: 'flex', justifyContent: 'center', marginBottom: 12 }}>
+          <Check style={{ width: 36, height: 36, color: '#16a34a' }} />
+        </div>
+        <h2 style={{ fontSize: 18, fontWeight: 700, color: '#0f172a', margin: '0 0 8px' }}>
+          Already {workOrderStatus === 'completed' ? 'Completed' : 'Closed'}
+        </h2>
+        <p style={{ fontSize: 14, color: '#64748b' }}>This work order has already been closed.</p>
+      </div>
+    )
+  }
+
+  return null
+}
+
 // ── Completion portal (TradeSuite-branded) ────────────────────────────────────
 
 export function VendorPortal({
@@ -400,12 +596,9 @@ export function VendorPortal({
     }
 
     for (const file of files.slice(0, room)) {
-      if (file.size > MAX_PHOTO_BYTES) {
-        setError('Each photo must be under 10 MB.')
-        continue
-      }
-      if (!ALLOWED_MIME.has(file.type)) {
-        setError('Only JPEG, PNG, WebP, or HEIC photos are accepted.')
+      const rejection = photoRejectionReason(file)
+      if (rejection) {
+        setError(rejection)
         continue
       }
       const previewUrl = URL.createObjectURL(file)
@@ -444,28 +637,14 @@ export function VendorPortal({
       (item) => item.description.trim() && (parseFloat(item.unitCost) || 0) > 0
     )
 
-    if (!technicianName.trim()) {
-      setError('Enter the name of the technician who completed this work.')
-      return
-    }
-
-    if (validItems.length === 0) {
-      setError('Add at least one line item with a description and cost.')
-      return
-    }
-
-    if (subtotal <= 0) {
-      setError('Invoice total must be greater than $0.')
-      return
-    }
-
-    if (subtotal > MAX_SUBTOTAL) {
-      setError(`Invoice total must be under $${MAX_SUBTOTAL.toLocaleString()}. Please check your entries.`)
-      return
-    }
-
-    if (workOrder.nte_amount && subtotal > workOrder.nte_amount * 1.05) {
-      setError(`Total of $${subtotal.toFixed(2)} exceeds the Not-to-Exceed amount of $${workOrder.nte_amount.toFixed(2)}. Please contact the property manager before submitting.`)
+    const rejection = completionRejectionReason({
+      technicianName,
+      validItemCount: validItems.length,
+      subtotal,
+      nteAmount: workOrder.nte_amount,
+    })
+    if (rejection) {
+      setError(rejection)
       return
     }
 
@@ -497,128 +676,16 @@ export function VendorPortal({
     }
   }
 
-  // ── TradeSuite shell ─────────────────────────────────────────────────────
   const shell = (children: React.ReactNode) => (
-    <div style={{
-      minHeight:       '100vh',
-      backgroundColor: '#1A1A1A',
-      backgroundImage: 'repeating-linear-gradient(45deg,transparent,transparent 4px,rgba(255,255,255,0.015) 4px,rgba(255,255,255,0.015) 8px)',
-      display:         'flex',
-      alignItems:      'center',
-      justifyContent:  'center',
-      padding:         '16px',
-      fontFamily:      '-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif',
-    }}>
-      <div style={{
-        backgroundColor: '#ffffff',
-        borderRadius:    16,
-        width:           '100%',
-        maxWidth:        480,
-        overflow:        'hidden',
-        boxShadow:       '0 24px 64px rgba(0,0,0,0.5)',
-      }}>
-        {/* Header */}
-        <div style={{
-          backgroundColor: '#1A1A1A',
-          borderBottom:    '3px solid #FF6B00',
-          padding:         '20px 24px',
-          display:         'flex',
-          alignItems:      'center',
-          justifyContent:  'space-between',
-        }}>
-          <div>
-            <p style={{ color: '#FF6B00', fontSize: 16, fontWeight: 800, letterSpacing: '-0.3px', margin: 0 }}>
-              TradeSuite
-            </p>
-            <p style={{ color: '#C0C0C0', fontSize: 10, margin: '2px 0 0', letterSpacing: '0.1em' }}>
-              POWERED BY FIELDSTAY
-            </p>
-          </div>
-          {workOrder.wo_number && (
-            <span style={{ color: '#C0C0C0', fontSize: 11, fontWeight: 600, letterSpacing: '0.1em' }}>
-              {workOrder.wo_number}
-            </span>
-          )}
-        </div>
-
-        <div style={{ padding: '24px' }}>
-          {children}
-        </div>
-      </div>
-    </div>
+    <TradeSuiteShell woNumber={workOrder.wo_number}>{children}</TradeSuiteShell>
   )
 
-  // ── State: submission stuck (dead-lettered) ──────────────────────────────
-  if (deadLetterReason) {
-    const message = getDeadLetterMessage(deadLetterReason)
-    return shell(
-      <div style={{ textAlign: 'center', padding: '8px 0' }}>
-        <div style={{ display: 'flex', justifyContent: 'center', marginBottom: 12 }}>
-          <AlertTriangle style={{ width: 48, height: 48, color: '#b45309' }} />
-        </div>
-        <h2 style={{ fontSize: 18, fontWeight: 700, color: '#0f172a', margin: '0 0 8px' }}>
-          {deadLetterReason === 'generic' ? "Didn't Sync" : 'Not Submitted'}
-        </h2>
-        <p style={{ fontSize: 14, color: '#64748b', lineHeight: 1.6, margin: '0 0 16px' }}>
-          {message}
-        </p>
-        {deadLetterReason === 'generic' && (
-          <button
-            type="button"
-            onClick={handleManualRetry}
-            style={{ backgroundColor: '#FF6B00', color: '#ffffff', border: 'none', borderRadius: 10, padding: '12px 20px', fontSize: 14, fontWeight: 700, cursor: 'pointer' }}
-          >
-            Retry Now
-          </button>
-        )}
-      </div>
-    )
-  }
-
-  // ── State: already done ──────────────────────────────────────────────────
-  if (success) {
-    return shell(
-      <div style={{ textAlign: 'center', padding: '8px 0' }}>
-        <div style={{ display: 'flex', justifyContent: 'center', marginBottom: 12 }}>
-          <CheckCircle2 style={{ width: 48, height: 48, color: '#16a34a' }} />
-        </div>
-        <h2 style={{ fontSize: 18, fontWeight: 700, color: '#0f172a', margin: '0 0 8px' }}>
-          {queued ? 'Saved' : 'Invoice Submitted!'}
-        </h2>
-        <p style={{ fontSize: 14, color: '#64748b', lineHeight: 1.6, margin: 0 }}>
-          {queued
-            ? "This will finish submitting the moment you're back in range — no need to do anything else."
-            : 'Your invoice has been sent to the property manager. Payment will be deposited to your Stripe payout account once approved.'}
-        </p>
-      </div>
-    )
-  }
-
-  if (expired) {
-    return shell(
-      <div style={{ textAlign: 'center' }}>
-        <div style={{ display: 'flex', justifyContent: 'center', marginBottom: 12 }}>
-          <Clock style={{ width: 36, height: 36, color: '#64748b' }} />
-        </div>
-        <h2 style={{ fontSize: 18, fontWeight: 700, color: '#0f172a', margin: '0 0 8px' }}>Link Expired</h2>
-        <p style={{ fontSize: 14, color: '#64748b' }}>Contact the property manager for a new link.</p>
-      </div>
-    )
-  }
-
-  if (alreadyDone) {
-    return shell(
-      <div style={{ textAlign: 'center' }}>
-        <div style={{ display: 'flex', justifyContent: 'center', marginBottom: 12 }}>
-          <Check style={{ width: 36, height: 36, color: '#16a34a' }} />
-        </div>
-        <h2 style={{ fontSize: 18, fontWeight: 700, color: '#0f172a', margin: '0 0 8px' }}>
-          Already {workOrder.status === 'completed' ? 'Completed' : 'Closed'}
-        </h2>
-        <p style={{ fontSize: 14, color: '#64748b' }}>This work order has already been closed.</p>
-      </div>
-    )
-  }
+  const statusScreen = vendorPortalStatusScreen({
+    deadLetterReason, success, queued, expired, alreadyDone,
+    workOrderStatus: workOrder.status,
+    onRetry: handleManualRetry,
+  })
+  if (statusScreen) return shell(statusScreen)
 
   // ── State: Connect gate ──────────────────────────────────────────────────
   if (!vendorChargesEnabled) {

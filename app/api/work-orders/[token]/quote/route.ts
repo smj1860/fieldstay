@@ -51,6 +51,41 @@ interface QuoteLineItemInput {
   unit_cost:   number
 }
 
+function parseQuoteLineItem(item: unknown, label: string): { value: QuoteLineItemInput } | { error: string } {
+  if (typeof item !== 'object' || item === null) {
+    return { error: `${label} is not a valid line item.` }
+  }
+  const row = item as Record<string, unknown>
+
+  const description = typeof row.description === 'string' ? row.description.trim() : ''
+  if (!description) return { error: `${label} needs a description.` }
+  if (description.length > MAX_DESCRIPTION) {
+    return { error: `${label}'s description must be under ${MAX_DESCRIPTION} characters.` }
+  }
+
+  // Number.isFinite rejects NaN and Infinity, which `> 0` alone does not:
+  // NaN fails every comparison silently and JSON.stringify turns it back
+  // into null on the way to the database.
+  const quantity = typeof row.quantity === 'number' ? row.quantity : Number.NaN
+  if (!Number.isFinite(quantity) || quantity <= 0) {
+    return { error: `${label} needs a quantity greater than zero.` }
+  }
+
+  const unitCost = typeof row.unit_cost === 'number' ? row.unit_cost : Number.NaN
+  if (!Number.isFinite(unitCost) || unitCost <= 0) {
+    return { error: `${label} needs a unit cost greater than zero.` }
+  }
+
+  const lineType = typeof row.line_type === 'string' ? row.line_type : ''
+  if (!VALID_LINE_TYPES.has(lineType)) {
+    return { error: `${label} has an unrecognized type.` }
+  }
+
+  const unit = typeof row.unit === 'string' ? row.unit.trim().slice(0, 20) || null : null
+
+  return { value: { line_type: lineType, description, quantity, unit, unit_cost: unitCost } }
+}
+
 /**
  * Validates the vendor's line items at the boundary.
  *
@@ -75,39 +110,9 @@ function parseQuoteLineItems(raw: unknown): { value: QuoteLineItemInput[] } | { 
   const value: QuoteLineItemInput[] = []
 
   for (const [i, item] of raw.entries()) {
-    const label = `Line ${i + 1}`
-    if (typeof item !== 'object' || item === null) {
-      return { error: `${label} is not a valid line item.` }
-    }
-    const row = item as Record<string, unknown>
-
-    const description = typeof row.description === 'string' ? row.description.trim() : ''
-    if (!description) return { error: `${label} needs a description.` }
-    if (description.length > MAX_DESCRIPTION) {
-      return { error: `${label}'s description must be under ${MAX_DESCRIPTION} characters.` }
-    }
-
-    // Number.isFinite rejects NaN and Infinity, which `> 0` alone does not:
-    // NaN fails every comparison silently and JSON.stringify turns it back
-    // into null on the way to the database.
-    const quantity = typeof row.quantity === 'number' ? row.quantity : Number.NaN
-    if (!Number.isFinite(quantity) || quantity <= 0) {
-      return { error: `${label} needs a quantity greater than zero.` }
-    }
-
-    const unitCost = typeof row.unit_cost === 'number' ? row.unit_cost : Number.NaN
-    if (!Number.isFinite(unitCost) || unitCost <= 0) {
-      return { error: `${label} needs a unit cost greater than zero.` }
-    }
-
-    const lineType = typeof row.line_type === 'string' ? row.line_type : ''
-    if (!VALID_LINE_TYPES.has(lineType)) {
-      return { error: `${label} has an unrecognized type.` }
-    }
-
-    const unit = typeof row.unit === 'string' ? row.unit.trim().slice(0, 20) || null : null
-
-    value.push({ line_type: lineType, description, quantity, unit, unit_cost: unitCost })
+    const parsed = parseQuoteLineItem(item, `Line ${i + 1}`)
+    if ('error' in parsed) return { error: parsed.error }
+    value.push(parsed.value)
   }
 
   return { value }

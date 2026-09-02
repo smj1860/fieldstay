@@ -22,9 +22,9 @@
 import { unwrap } from '@/lib/supabase/unwrap'
 import { inngest } from '@/lib/inngest/client'
 import { createServiceClient } from '@/lib/supabase/server'
-import { scanDataPlateImage, isValidScanMediaType } from '@/lib/assets/scan-data-plate'
+import { scanDataPlateImage, isValidScanMediaType, type ScanResult } from '@/lib/assets/scan-data-plate'
 import { toStorageObjectPath } from '@/lib/storage/object-path'
-import type { TablesUpdate } from '@/types/database'
+import type { Tables, TablesUpdate } from '@/types/database'
 
 // PRIVATE bucket — downloads here go through the service-role client, which
 // bypasses both the bucket's public flag and its RLS policies, so this works
@@ -34,6 +34,43 @@ import type { TablesUpdate } from '@/types/database'
 // `/object/public/turnover-photos/<key>` URL. toStorageObjectPath() accepts
 // both, so nothing here depends on a public-URL marker that no longer exists.
 const PHOTO_BUCKET = 'turnover-photos'
+
+
+/** The subset of property_assets this step reads before deciding what to write. */
+type ScannedAsset = Pick<
+  Tables<'property_assets'>,
+  'make' | 'model' | 'serial_number' | 'manufacture_date' | 'notes' | 'scan_status'
+>
+
+/**
+ * The update payload for one scan result. Only fills in fields the asset
+ * doesn't already have — a crew member's manual entry or a PM's later edit is
+ * never overwritten — and never downgrades an already-completed scan, since a
+ * duplicate or retried run disagreeing on `found` (LLM output isn't perfectly
+ * deterministic) shouldn't flip a good result back to 'failed'.
+ */
+function scanUpdatesForAsset(asset: ScannedAsset, result: ScanResult): TablesUpdate<'property_assets'> {
+  const updates: TablesUpdate<'property_assets'> = {}
+
+  if (asset.scan_status !== 'completed') {
+    updates.scan_status = (result.make || result.model || result.serial_number) ? 'completed' : 'failed'
+  }
+
+  if (!asset.make && result.make)                   updates.make = result.make
+  if (!asset.model && result.model)                 updates.model = result.model
+  if (!asset.serial_number && result.serial_number) updates.serial_number = result.serial_number
+  if (!asset.manufacture_date && result.manufacture_year) {
+    updates.manufacture_date = `${result.manufacture_year}-01-01`
+  }
+
+  // Guard against appending the same capacity line twice on a retried
+  // or duplicate run.
+  if (result.capacity && !asset.notes?.includes(`Capacity: ${result.capacity}`)) {
+    updates.notes = asset.notes ? `${asset.notes}\nCapacity: ${result.capacity}` : `Capacity: ${result.capacity}`
+  }
+
+  return updates
+}
 
 export const assetDataPlateScan = inngest.createFunction(
   {
@@ -90,29 +127,7 @@ export const assetDataPlateScan = inngest.createFunction(
 
       if (!asset) return
 
-      const found = Boolean(result.make || result.model || result.serial_number)
-      const updates: TablesUpdate<'property_assets'> = {}
-
-      // Never downgrade an already-completed scan — a duplicate/retried run
-      // disagreeing on `found` (LLM output isn't perfectly deterministic)
-      // shouldn't flip a good result back to 'failed'.
-      if (asset.scan_status !== 'completed') {
-        updates.scan_status = found ? 'completed' : 'failed'
-      }
-
-      // Only fill in fields the asset doesn't already have — never
-      // overwrite a crew member's manual entry or a PM's later edit.
-      if (!asset.make && result.make)                    updates.make = result.make
-      if (!asset.model && result.model)                  updates.model = result.model
-      if (!asset.serial_number && result.serial_number)   updates.serial_number = result.serial_number
-      if (!asset.manufacture_date && result.manufacture_year) {
-        updates.manufacture_date = `${result.manufacture_year}-01-01`
-      }
-      // Guard against appending the same capacity line twice on a retried
-      // or duplicate run.
-      if (result.capacity && !asset.notes?.includes(`Capacity: ${result.capacity}`)) {
-        updates.notes = asset.notes ? `${asset.notes}\nCapacity: ${result.capacity}` : `Capacity: ${result.capacity}`
-      }
+      const updates = scanUpdatesForAsset(asset, result)
 
       const { error } = await supabase.from('property_assets').update(updates).eq('id', asset_id).eq('org_id', org_id)
       if (error) throw new Error(`property_assets update failed: ${error.message}`)

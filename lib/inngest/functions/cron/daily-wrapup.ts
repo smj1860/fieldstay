@@ -97,6 +97,108 @@ function isIdempotencyConflict(error: unknown): boolean {
   return e.statusCode === 409 && e.name === 'invalid_idempotent_request'
 }
 
+
+type DiscoveryAsset = {
+  asset_type: string
+  make:       string | null
+  model:      string | null
+  photo_url:  string | null
+  is_na:      boolean | null
+}
+
+/**
+ * Section 2: per-property count of asset-discovery checklist items still open.
+ * Pure — the batched `property_assets` read happens at the call site, so this
+ * never issues a query per property.
+ */
+function buildChecklistByProperty(
+  activeProperties: Array<{ id: string; name: string }>,
+  assetsByProperty: Map<string, DiscoveryAsset[]>,
+): Array<{ propertyId: string; propertyName: string; openCount: number }> {
+  const rows: Array<{ propertyId: string; propertyName: string; openCount: number }> = []
+
+  for (const prop of activeProperties) {
+    const assets = assetsByProperty.get(prop.id) ?? []
+
+    const discoveredTypes = new Set(
+      assets
+        .filter((a) => a.is_na === true || a.make !== null || a.model !== null || a.photo_url !== null)
+        .map((a) => a.asset_type as AssetType)
+    )
+    const missing = missingAssetTypesFromDiscoveredSet(discoveredTypes)
+    if (missing.length) {
+      rows.push({ propertyId: prop.id, propertyName: prop.name, openCount: missing.length })
+    }
+  }
+
+  return rows
+}
+
+type BookingGapRow = {
+  property_id:   string
+  checkout_date: string
+  checkin_date:  string
+  properties:    { name: string } | { name: string }[] | null
+}
+
+const MIN_VACANCY_GAP_DAYS = 3
+
+/** Section 7: gaps of 3+ nights between consecutive bookings on one property. */
+function vacancyGapsForProperty(
+  propBookings: BookingGapRow[],
+): Array<{ propertyName: string; gapDays: number; gapStart: string }> {
+  const gaps: Array<{ propertyName: string; gapDays: number; gapStart: string }> = []
+
+  for (let i = 0; i < propBookings.length - 1; i++) {
+    const current = propBookings[i]!
+    const next    = propBookings[i + 1]!
+    const gapDays = Math.round(
+      (new Date(next.checkin_date).getTime() - new Date(current.checkout_date).getTime()) / MS_PER_DAY
+    )
+    if (gapDays >= MIN_VACANCY_GAP_DAYS) {
+      const property = unwrapJoin(current.properties)
+      gaps.push({ propertyName: property?.name ?? 'Property', gapDays, gapStart: current.checkout_date })
+    }
+  }
+
+  return gaps
+}
+
+function vacancyGapsFromBookings(
+  bookings: BookingGapRow[],
+): Array<{ propertyName: string; gapDays: number; gapStart: string }> {
+  const byProperty = new Map<string, BookingGapRow[]>()
+  for (const b of bookings) {
+    const list = byProperty.get(b.property_id) ?? []
+    list.push(b)
+    byProperty.set(b.property_id, list)
+  }
+
+  return [...byProperty.values()].flatMap(vacancyGapsForProperty)
+}
+
+const REPEAT_ISSUE_THRESHOLD = 3
+
+/** Section 8: property+category pairs with 3+ work orders in the last 90 days. */
+function repeatIssueGroups(
+  recentWOs: Array<{ property_id: string; category: string | null; properties: { name: string } | { name: string }[] | null }>,
+): Array<{ propertyName: string; category: string; count: number }> {
+  const groups = new Map<string, { propertyName: string; category: string; count: number }>()
+
+  for (const wo of recentWOs) {
+    const key      = `${wo.property_id}:${wo.category}`
+    const existing = groups.get(key)
+    if (existing) {
+      existing.count++
+      continue
+    }
+    const property = unwrapJoin(wo.properties)
+    groups.set(key, { propertyName: property?.name ?? 'Property', category: wo.category as string, count: 1 })
+  }
+
+  return [...groups.values()].filter((g) => g.count >= REPEAT_ISSUE_THRESHOLD)
+}
+
 export const dailyWrapUpOrg = inngest.createFunction(
   {
     id:   'daily-wrapup-org',
@@ -236,20 +338,7 @@ export const dailyWrapUpOrg = inngest.createFunction(
         }
       }
 
-      const checklistByProperty: Array<{ propertyId: string; propertyName: string; openCount: number }> = []
-      for (const prop of activeProperties ?? []) {
-        const assets = assetsByProperty.get(prop.id) ?? []
-
-        const discoveredTypes = new Set(
-          assets
-            .filter((a) => a.is_na === true || a.make !== null || a.model !== null || a.photo_url !== null)
-            .map((a) => a.asset_type as AssetType)
-        )
-        const missing = missingAssetTypesFromDiscoveredSet(discoveredTypes)
-        if (missing.length) {
-          checklistByProperty.push({ propertyId: prop.id, propertyName: prop.name, openCount: missing.length })
-        }
-      }
+      const checklistByProperty = buildChecklistByProperty(activeProperties ?? [], assetsByProperty)
 
       const checklistDiff = await diffDigestSnapshot(
         supabase, orgId, 'checklist_open',
@@ -408,36 +497,7 @@ export const dailyWrapUpOrg = inngest.createFunction(
         )
 
 
-        type BookingGapRow = {
-          property_id:   string
-          checkout_date: string
-          checkin_date:  string
-          properties:    { name: string } | { name: string }[] | null
-        }
-
-        const byProperty = new Map<string, BookingGapRow[]>()
-        for (const b of (bookings ?? []) as BookingGapRow[]) {
-          const list = byProperty.get(b.property_id) ?? []
-          list.push(b)
-          byProperty.set(b.property_id, list)
-        }
-        for (const [, propBookings] of byProperty) {
-          for (let i = 0; i < propBookings.length - 1; i++) {
-            const current = propBookings[i]!
-            const next    = propBookings[i + 1]!
-            const gapDays = Math.round(
-              (new Date(next.checkin_date).getTime() - new Date(current.checkout_date).getTime()) / MS_PER_DAY
-            )
-            if (gapDays >= 3) {
-              const property = unwrapJoin(current.properties)
-              vacancySection.push({
-                propertyName: property?.name ?? 'Property',
-                gapDays,
-                gapStart: current.checkout_date,
-              })
-            }
-          }
-        }
+        vacancySection.push(...vacancyGapsFromBookings(bookings ?? []))
       }
 
       // ── 8. Repeat issue alert — only if one exists ──────────────────────
@@ -456,16 +516,7 @@ export const dailyWrapUpOrg = inngest.createFunction(
       )
 
 
-      const repeatGroups: Record<string, { propertyName: string; category: string; count: number }> = {}
-      for (const wo of recentWOs ?? []) {
-        const property = unwrapJoin(wo.properties)
-        const key = `${wo.property_id}:${wo.category}`
-        if (!repeatGroups[key]) {
-          repeatGroups[key] = { propertyName: property?.name ?? 'Property', category: wo.category as string, count: 0 }
-        }
-        repeatGroups[key]!.count++
-      }
-      const repeatSection = Object.values(repeatGroups).filter((g) => g.count >= 3)
+      const repeatSection = repeatIssueGroups(recentWOs ?? [])
 
       // ── 9. Turnover created, still unassigned ───────────────────────────
       const unassignedTurnovers = await fetchAllRows<{ id: string; checkout_datetime: string; status: string; properties: { name: string }; turnover_assignments: { id: string }[] }>(
