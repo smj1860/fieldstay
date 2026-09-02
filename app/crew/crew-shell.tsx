@@ -8,6 +8,7 @@ import { CrewContext }              from '@/lib/crew/crew-context'
 import { closeDexieDb, listenForRemoteShutdown, markDexieShutdown, resumeDexieDb } from '@/lib/dexie/schema'
 import { getSyncEngine, disposeSyncEngine } from '@/lib/dexie/syncService'
 import { processPendingPhotoUploads } from '@/lib/dexie/photo-sync'
+import { reportSyncIncidents }       from '@/lib/dexie/syncIncidentReport'
 import { countPendingSyncWork }      from '@/lib/dexie/prune'
 import { isOnline }                  from '@/lib/dexie/net'
 import { FailedSyncBanner }          from './_components/failed-sync-banner'
@@ -257,6 +258,10 @@ export function CrewShell({
       if (!isOnline() || signedOut) return
       await getSyncEngine(userId).processOutbox()
       await processPendingPhotoUploads(supabase, userId)
+      // Sync incident reporting rides the same reconnect/mount/30s tick as
+      // the outbox drain it reports on — never its own timer (the
+      // implementation doc's section 3.3).
+      await reportSyncIncidents(userId)
     }
 
     run()  // attempt once on mount, in case items were queued in a prior session

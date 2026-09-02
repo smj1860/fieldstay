@@ -3,7 +3,7 @@ import { readFileSync, existsSync } from 'node:fs'
 import { join } from 'node:path'
 
 import { BREEZEWAY_FAQ as FAQS } from '@/lib/faq-content'
-import { COMPARISON_ROWS, FIELDSTAY_HIGHLIGHTS, GUARANTEE_PILLARS } from '@/app/breezeway-alternative/comparison-data'
+import { COMPARISON_ROWS, FIELDSTAY_HIGHLIGHTS, TRIAL_OFFER } from '@/app/breezeway-alternative/comparison-data'
 
 const root = process.cwd()
 const read = (p: string) => readFileSync(join(root, p), 'utf8')
@@ -63,35 +63,40 @@ describe('breezeway-alternative claims are backed by code that still exists', ()
     }
   })
 
-  it('every Glass Box Guarantee pillar cites a source file that exists', () => {
-    for (const p of GUARANTEE_PILLARS) {
-      const paths = p.source.split(',').map((s) => s.trim())
-      for (const path of paths) {
-        // A citation naming a specific exported type ("types/database.ts
-        // (WorkOrderUpdate, AuditEvent)") is checked on the file path alone —
-        // the parenthesised part documents WHAT in that file, not a second
-        // path to resolve.
-        const filePath = path.replace(/\s*\(.*\)$/, '').replace(/\*\*$/, '').replace(/\/$/, '')
-        expect(
-          existsSync(join(root, filePath)),
-          `"${p.title}" cites ${path}, which no longer exists`,
-        ).toBe(true)
-      }
-    }
+  it('the trial offer cites a source file that exists', () => {
+    expect(existsSync(join(root, TRIAL_OFFER.source)), `TRIAL_OFFER cites ${TRIAL_OFFER.source}, which no longer exists`).toBe(true)
   })
 
-  it("the guarantee's trial length matches the real trial live everywhere else on the site", () => {
+  it("the trial offer's length matches the real trial live everywhere else on the site", () => {
     // The drafted guarantee copy originally said 30 days; every other
     // marketing page (and /signup itself) says 14. Pinned here as a real
     // regression check, not a style nit — this exact mismatch was caught by
     // hand once already before this file existed to catch it automatically.
     const signup = read('app/(auth)/signup/page.tsx')
     expect(signup).toMatch(/14-day/)
+    expect(TRIAL_OFFER.body).not.toMatch(/30[\s-]day/i)
+    expect(TRIAL_OFFER.body).toMatch(/14 days/)
+  })
 
-    for (const p of GUARANTEE_PILLARS) {
-      expect(p.body).not.toMatch(/30[\s-]day/i)
+  it('no highlight or trial copy uses "money back" or "satisfaction guarantee" framing', () => {
+    // FieldStay does not publish a guarantee ("Show me what happened" —
+    // Implementation Instructions). FTC guidance on advertising guarantees
+    // treats those phrases as carrying a full-refund expectation, so neither
+    // may appear anywhere on this page regardless.
+    for (const h of FIELDSTAY_HIGHLIGHTS) {
+      expect(h.body.toLowerCase()).not.toMatch(/money[\s-]back|satisfaction guarantee/)
     }
-    expect(GUARANTEE_PILLARS[0]!.body).toMatch(/14 days/)
+    expect(TRIAL_OFFER.body.toLowerCase()).not.toMatch(/money[\s-]back|satisfaction guarantee/)
+  })
+
+  it('no highlight or trial copy promises future behavior — only present-tense capability', () => {
+    // The approved copy (implementation doc section 2.1) is deliberately a
+    // statement about what the software does today, not a promise about the
+    // future. "Never lost"/"always"/"guarantee(d)" language would overstate
+    // what sync incident reporting (Workstream 3) can currently back up.
+    for (const h of FIELDSTAY_HIGHLIGHTS) {
+      expect(h.body.toLowerCase()).not.toMatch(/\bnever (?:be )?lost\b|\bguarantee[ds]?\b/)
+    }
   })
 })
 

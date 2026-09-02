@@ -181,6 +181,7 @@ export type AuditAction =
   | 'billing.hospitable_price_lock.awarded'
   | 'inspection.started'
   | 'inspection.completed'
+  | 'sync.incident.recorded'
 
 interface AuditParams {
   orgId?:         string

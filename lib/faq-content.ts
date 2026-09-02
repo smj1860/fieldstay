@@ -454,14 +454,20 @@ export const BREEZEWAY_FAQ: readonly FaqItem[] = [
       'lists it among the add-ons priced a la carte — an added monthly cost with no revenue-sharing back to you.',
   },
   {
-    id:       'breezeway-alternative-guarantee',
-    question: 'Does FieldStay offer any kind of guarantee?',
+    // Renamed from breezeway-alternative-guarantee — FieldStay does not
+    // publish a guarantee ("Show me what happened" — Implementation
+    // Instructions supersedes the earlier Record Guarantee draft). This is a
+    // description of a real, present-tense capability, not a promise about
+    // future behavior — see that doc's section 2.1 for why the wording is
+    // deliberately unchanged from the approved copy rather than embellished.
+    id:       'breezeway-alternative-record-history',
+    question: 'How do I know what actually happened during a turnover?',
     answer:
-      'Yes — the Glass Box Operations Guarantee. Run it on your 3-5 hardest properties for 14 days, ' +
-      'cancel with one click if it doesn\'t help. If you ever think something was missed or mishandled, ' +
-      'FieldStay doesn\'t ask you to take its word for it — every checklist step, photo, and work order ' +
-      'status change is timestamped and logged, and that record is what settles the question. It is not a ' +
-      'money-back guarantee; it is a transparency guarantee backed by an actual audit trail.',
+      'You\'ll never have to take anyone\'s word for it. Every checklist step, every photo, and every work ' +
+      'order status change is timestamped and logged as it happens — including the ones your crew records ' +
+      'with no signal at all. When an owner asks whether the house was ready, or a guest says something was ' +
+      'missed, you don\'t go looking for someone to ask. You open the property, pick the date, and read ' +
+      'what happened.',
   },
 ] as const
 

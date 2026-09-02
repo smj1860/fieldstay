@@ -98,54 +98,51 @@ export const COMPARISON_ROWS: readonly ComparisonRow[] = [
 ] as const
 
 /**
- * The Glass Box Operations Guarantee — FieldStay's own policy, not a
- * Breezeway-comparison claim, so it needs only a FieldStay-side citation.
- * Adapted from the drafted copy to match the trial length actually live
- * everywhere else on the site: every other marketing page (hosts, strops,
- * ownerrez, hospitable, /signup) says 14 days, and the draft this was built
- * from said 30 — publishing that mismatch would have been exactly the kind
- * of live inconsistency this page's own citation discipline exists to catch.
+ * The 14-day trial offer — its own export, separate from FIELDSTAY_HIGHLIGHTS
+ * below ("Show me what happened" — Implementation Instructions, Workstream
+ * 2). A trial offer is not a capability claim — it carries no remedy, it is
+ * just terms of the free trial. Matches the trial length live everywhere
+ * else on the site: every other marketing page (hosts, strops, ownerrez,
+ * hospitable, /signup) says 14 days.
  */
-export interface GuaranteePillar {
+export interface TrialOffer {
   title: string
   body:  string
   source: string
 }
 
-export const GUARANTEE_PILLARS: readonly GuaranteePillar[] = [
-  {
-    title: 'Try it on your hardest properties, risk-free.',
-    body:
-      'Run FieldStay on 3–5 of your most demanding properties for 14 days — the ones with spotty signal, ' +
-      'tricky access, or vendors who barely answer texts. If it doesn\'t make your week easier, cancel with ' +
-      'one click. No contract, no penalty.',
-    source: 'app/(auth)/signup/page.tsx',
-  },
-  {
-    title: 'If something goes wrong, we show you the record.',
-    body:
-      'Every checklist step, synced photo, and work order status change in FieldStay is timestamped and ' +
-      'logged. If you ever think something was missed or mishandled, we don\'t ask you to trust us — we ' +
-      'pull the actual record and show you exactly what happened, and when.',
-    source: 'lib/audit.ts, types/database.ts (WorkOrderUpdate / AuditEvent)',
-  },
-  {
-    title: 'Built for the people who actually have to use it.',
-    body:
-      'Your crew doesn\'t need training — the app works offline and walks them through the checklist step ' +
-      'by step. Your vendors don\'t need to download anything or remember a password — every work order ' +
-      'arrives as a link they open, quote, and complete from their phone.',
-    source: 'lib/dexie/schema.ts, app/work-orders/[token]/vendor-portal.tsx',
-  },
-] as const
+export const TRIAL_OFFER: TrialOffer = {
+  title: 'Try it on your hardest properties, risk-free.',
+  body:
+    'Run FieldStay on 3–5 of your most demanding properties for 14 days — the ones with spotty signal, ' +
+    'tricky access, or vendors who barely answer texts. If it doesn\'t make your week easier, cancel with ' +
+    'one click. No contract, no penalty.',
+  source: 'app/(auth)/signup/page.tsx',
+}
 
 /**
  * Capabilities called out on their own — not because Breezeway definitely
  * lacks them (unconfirmed either way, so no comparison claim is made), but
  * because they're real, shipped FieldStay features worth naming on a page
  * a prospect deep in evaluation will actually read closely.
+ *
+ * FieldStay does not publish a guarantee. There used to be a GUARANTEE_PILLARS
+ * export here making a credit-bearing promise about record availability
+ * ("Show me what happened" — Implementation Instructions supersedes that
+ * draft entirely) — deleted, not softened, because the capability itself
+ * needs no promise to be worth stating: it is true today and verifiable
+ * during the trial. That capability is the first entry below.
  */
 export const FIELDSTAY_HIGHLIGHTS: ReadonlyArray<{ title: string; body: string; source: string }> = [
+  {
+    title: 'You\'ll never have to take anyone\'s word for it.',
+    body:
+      'Every checklist step, every photo, and every work order status change is timestamped and logged as ' +
+      'it happens — including the ones your crew records with no signal at all. When an owner asks whether ' +
+      'the house was ready, or a guest says something was missed, you open the property, pick the date, ' +
+      'and read what happened.',
+    source: 'lib/audit.ts, types/database.ts, app/(dashboard)/properties/[id]/history/page.tsx',
+  },
   {
     title: 'Owner P&L portal',
     body: 'A secure, tokenized link for property owners — no account, no login — showing revenue, expenses, and net income by period.',
@@ -155,5 +152,16 @@ export const FIELDSTAY_HIGHLIGHTS: ReadonlyArray<{ title: string; body: string; 
     title: 'Inventory with auto-restock',
     body: 'Par levels per property; a low-stock item is added to a purchase order automatically, with a one-click Kroger cart build.',
     source: 'lib/inngest/functions/inventory-events.ts, lib/inngest/functions/build-shopping-cart.ts',
+  },
+  {
+    // The absolute "doesn't need training" claim is softened: crew adoption
+    // is the acknowledged rollout risk, and the first struggling cleaner
+    // disproves an absolute the way this version can't.
+    title: 'Built for the people who actually have to use it.',
+    body:
+      'The app walks your crew through the checklist step by step, and works with no signal. Your vendors ' +
+      'don\'t need to download anything or remember a password — every work order arrives as a link they ' +
+      'open, quote, and complete from their phone.',
+    source: 'lib/dexie/schema.ts, app/work-orders/[token]/vendor-portal.tsx',
   },
 ] as const

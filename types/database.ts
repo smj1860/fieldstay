@@ -384,6 +384,32 @@ export interface CrewFeedback {
   submitted_at:   string
 }
 
+/**
+ * Sync incident reporting: a device-reported incident proving work was
+ * captured but dead-lettered or stalled before reaching the server — a
+ * monitoring/support signal for crew sync reliability, not part of any
+ * customer-facing promise. Service-role insert only
+ * (app/api/crew/sync-incidents) — org members may SELECT but never write,
+ * since a client must not be able to manufacture evidence.
+ */
+export interface CrewSyncIncident {
+  id:                 string
+  org_id:             string
+  crew_member_id:     string | null
+  user_id:            string | null
+  client_incident_id: string
+  device_label:       string | null
+  surface:            'crew' | 'vendor' | 'dashboard'
+  kind:               'dead_letter' | 'stalled'
+  table_name:         string
+  entity_id:          string | null
+  reason:             'http_4xx' | 'http_5xx' | 'constraint_violation' | 'max_retries' | 'stalled_threshold' | null
+  occurred_at:        string
+  mutation_queued_at: string | null
+  reported_at:        string
+  created_at:         string
+}
+
 export interface CrewAvailabilityEntry {
   available_date: string
   is_available:   boolean
@@ -2111,6 +2137,7 @@ export interface HandWrittenRowMap {
   assignment_outcomes:                 AssignmentOutcome
   vendor_assignment_outcomes:          VendorAssignmentOutcome
   crew_feedback:                       CrewFeedback
+  crew_sync_incidents:                 CrewSyncIncident
   checklist_item_signals:              ChecklistItemSignal
   inventory_templates:                 InventoryTemplate
   inventory_template_items:            InventoryTemplateItem

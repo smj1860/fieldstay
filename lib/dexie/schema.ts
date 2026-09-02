@@ -163,6 +163,47 @@ export interface SyncMetaRow {
   value: string
 }
 
+/**
+ * Local staging for a sync incident ("Show me what happened" —
+ * Implementation Instructions, Workstream 3 — a monitoring/support signal
+ * for crew sync reliability, not part of any customer-facing promise) —
+ * recorded the moment a mutation dead-letters or a queue crosses the stalled
+ * threshold, in the SAME Dexie transaction as the write that flags it (see
+ * recordSyncIncidentAndPatch() in lib/dexie/syncService.ts). Reported to
+ * app/api/crew/sync-incidents on reconnect; `reported` flips to 1 once the
+ * server has ack'd it.
+ *
+ * Local-only: this table is never pulled from Supabase (it flows the other
+ * direction — device to server), so it belongs in LOCAL_ONLY_TABLES below,
+ * not CREW_SYNCED_TABLES.
+ */
+export interface SyncIncidentRow {
+  id?:                 number
+  clientIncidentId:    string
+  surface:             'crew'
+  kind:                'dead_letter' | 'stalled'
+  table:               MutationTable
+  entityId:            string | null
+  reason:              SyncIncidentReason
+  occurredAt:          string
+  mutationQueuedAt:    string | null
+  /** 0/1, never a boolean — see DeadLetterFlag; the same IndexedDB rule applies. */
+  reported:            DeadLetterFlag
+}
+
+/**
+ * Bounded, enum-like — never a free-text error message. A free-text reason
+ * can carry a fragment of the mutation payload, and no log-scanning
+ * guardrail inspects database inserts the way it inspects console/logger
+ * calls. See the implementation doc's section 3.4.
+ */
+export type SyncIncidentReason =
+  | 'http_4xx'
+  | 'http_5xx'
+  | 'constraint_violation'
+  | 'max_retries'
+  | 'stalled_threshold'
+
 export interface CrewWorkOrderRow {
   id:                      string
   org_id:                  string
@@ -241,6 +282,7 @@ export class FieldStayDexie extends Dexie {
   sync_meta!:                Table<SyncMetaRow, string>
   crew_work_orders!:         Table<CrewWorkOrderRow, string>
   property_assets!:          Table<PropertyAssetRow, string>
+  sync_incidents!:           Table<SyncIncidentRow, number>
 
   constructor(userId: string) {
     super(`fieldstay-crew-${userId}`)
@@ -441,6 +483,14 @@ export class FieldStayDexie extends Dexie {
           .modify((p: PendingPhotoUploadRow) => { p.failed = p.failed ? 1 : 0 }),
       ]).then(() => undefined),
     )
+
+    // Sync incidents ("Show me what happened" — Implementation
+    // Instructions, Workstream 3). Local-only staging table — `reported`
+    // indexed so the reconnect drain can select unreported rows without a
+    // full scan, same reasoning as `mutations.failed`.
+    this.version(13).stores({
+      sync_incidents: '++id, reported',
+    })
   }
 }
 
@@ -465,7 +515,7 @@ export const CREW_SYNCED_TABLES: Readonly<Record<string, string>> = {
 // Dexie tables with no Supabase counterpart — pure local state (the
 // mutation outbox, sync cursors/watermarks, the local photo-upload queue).
 // Never subject to the crew-sync trigger/safety-poll coverage check above.
-export const LOCAL_ONLY_TABLES = ['pending_photo_uploads', 'mutations', 'sync_meta'] as const
+export const LOCAL_ONLY_TABLES = ['pending_photo_uploads', 'mutations', 'sync_meta', 'sync_incidents'] as const
 
 let db: FieldStayDexie | null = null
 let dbUserId: string | null = null

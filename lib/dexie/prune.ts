@@ -64,6 +64,37 @@ export async function pruneLocalCache(userId: string): Promise<void> {
 
   await pruneExpiredDeadLetters(userId)
   await pruneOrphanPhotoBlobs(userId)
+  await pruneReportedSyncIncidents(userId)
+}
+
+/**
+ * How long a REPORTED sync incident stays on the device before it's
+ * collected. Deliberately longer than DEAD_LETTER_RETENTION_DAYS — this is a
+ * support/monitoring signal a PM or engineer may need to look back on well
+ * after the underlying write was retried or abandoned, not just past the
+ * point a crew member could still retry it themselves. 400 days ("Show me
+ * what happened" — Implementation Instructions, section 3.2) is comfortably
+ * past a full year plus a season.
+ */
+export const SYNC_INCIDENT_RETENTION_DAYS = 400
+
+/**
+ * Collects only incidents the server has ack'd (`reported = 1`) and past
+ * retention. An UNREPORTED incident is never collected here regardless of
+ * age — it is the only evidence a dead-letter or stall ever happened, and
+ * this table is what the sync-reliability monitoring/support signal reads.
+ * See discardFailedMutation()/pruneExpiredDeadLetters() above for the same
+ * rule applied to the mutation/photo outboxes.
+ */
+export async function pruneReportedSyncIncidents(userId: string): Promise<void> {
+  const db = getDexieDb(userId)
+  const horizon = daysAgoIso(SYNC_INCIDENT_RETENTION_DAYS)
+
+  const stale = (await db.sync_incidents.where('reported').equals(1).toArray())
+    .filter((incident) => incident.occurredAt < horizon)
+  for (const incident of stale) {
+    await db.sync_incidents.delete(incident.id as number)
+  }
 }
 
 /** sync_meta key holding last sweep's unreferenced-but-not-yet-collected blob keys. */

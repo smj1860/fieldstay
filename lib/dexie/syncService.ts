@@ -1,11 +1,16 @@
 import { createClient } from '@/lib/supabase/client'
-import { getDexieDb, isDexieShutdown, isDatabaseClosedError, type FieldStayDexie, type MutationRow } from './schema'
+import {
+  getDexieDb, isDexieShutdown, isDatabaseClosedError,
+  type FieldStayDexie, type MutationRow, type SyncIncidentReason,
+} from './schema'
 import {
   isOnline,
   withTabLock,
   classifyUploadFailure,
   UploadDataError,
   UploadHttpError,
+  STALLED_NETWORK_ATTEMPTS,
+  type UploadFailureKind,
 } from './net'
 
 import { reportError } from '@/lib/observability/report-error'
@@ -68,6 +73,23 @@ import { computeNextAttemptAt } from './outbox-primitives'
 
 // Drains the local `mutations` outbox to Supabase. This is the only path by
 // which a crew-side write reaches the server — see enqueueMutation().
+//
+// Sync incident recording ("Show me what happened" — Implementation
+// Instructions, Workstream 3 — a monitoring/support signal for crew sync
+// reliability, not part of any customer-facing promise) lives HERE, in this
+// engine's own handleFailure(), not in the shared lib/dexie/outboxEngine.ts
+// the vendor portal and (per docs/INSPECTIONS_SPEC.md §8) the dashboard
+// build on. Two reasons, both verified against the live code rather than
+// assumed from the spec doc: this crew engine predates that extraction and
+// was never migrated onto it (it has its own per-record circuit-breaker
+// logic outboxEngine.ts doesn't), so "hook the shared engine" would silently
+// miss crew — the surface this workstream actually targets. And the only
+// transport this workstream ships (app/api/crew/sync-incidents, gated by
+// requireCrewMember()) has nowhere to send a vendor- or dashboard-surface
+// incident yet — recording one there with no way to report it would be
+// exactly the "half-finished implementation" this codebase's conventions
+// rule out. Extending this to outboxEngine.ts is real future work, not a
+// gap papered over here.
 export class SyncEngine {
   private supabase = createClient()
   private userId: string
@@ -385,7 +407,16 @@ export class SyncEngine {
         `[SyncEngine] mutation ${id} (${mutation.table}) could not reach the ` +
         `server (transport attempt ${level}) — retrying, retry budget untouched`
       )
-      await db.mutations.update(id, { networkRetryCount: level, nextAttemptAt })
+      const patch = { networkRetryCount: level, nextAttemptAt }
+      // Record a sync incident exactly ONCE, at the moment this record's
+      // queue first crosses the stalled threshold — not on every retry
+      // after it (that would be "recording on ordinary retry", which the
+      // implementation doc's section 3.2 explicitly forbids).
+      if (level === STALLED_NETWORK_ATTEMPTS) {
+        await this.recordSyncIncidentAndPatch(db, mutation, id, patch, 'stalled', 'stalled_threshold')
+      } else {
+        await db.mutations.update(id, patch)
+      }
       this.scheduleRetry(nextAttemptAt)
       return true
     }
@@ -410,11 +441,12 @@ export class SyncEngine {
         ` — marking failed. Payload:`,
         JSON.stringify({ table: mutation.table, op: mutation.op, targetId: mutation.targetId })
       )
-      await db.mutations.update(id, {
-        retryCount: newRetryCount,
-        failed: 1,
-        lastError: describeFailure(err),
-      })
+      await this.recordSyncIncidentAndPatch(
+        db, mutation, id,
+        { retryCount: newRetryCount, failed: 1, lastError: describeFailure(err) },
+        'dead_letter',
+        reasonForDeadLetter(kind, err),
+      )
 
       // Dead-lettering breaks this record's mutation ORDER, and nothing used
       // to put it back. The drain continues past the dead letter (correctly —
@@ -446,6 +478,61 @@ export class SyncEngine {
     this.scheduleRetry(nextAttemptAt)
     return true
   }
+
+  /**
+   * Records a sync incident ("Show me what happened" — Implementation
+   * Instructions, Workstream 3) and applies `mutationPatch` to the mutation
+   * row, in ONE Dexie transaction — the same reasoning as writeAndQueue() in
+   * lib/dexie/helpers.ts: a PWA reclaimed between the two writes must not be
+   * able to set `failed`/bump `networkRetryCount` without the incident that
+   * explains why, or the sync-reliability monitoring signal has nothing to
+   * read.
+   *
+   * Only ever called from the two places that count as an incident — a
+   * terminal dead-letter and a stalled-threshold crossing — never on an
+   * ordinary retry.
+   */
+  private async recordSyncIncidentAndPatch(
+    db: FieldStayDexie,
+    mutation: MutationRow,
+    id: number,
+    mutationPatch: Partial<MutationRow>,
+    kind: 'dead_letter' | 'stalled',
+    reason: SyncIncidentReason,
+  ): Promise<void> {
+    const occurredAt = new Date().toISOString()
+    await db.transaction('rw', [db.mutations, db.sync_incidents], async () => {
+      await db.mutations.update(id, mutationPatch)
+      await db.sync_incidents.add({
+        clientIncidentId: crypto.randomUUID(),
+        surface:          'crew',
+        kind,
+        table:            mutation.table,
+        entityId:         mutation.targetId,
+        reason,
+        occurredAt,
+        mutationQueuedAt: mutation.createdAt,
+        reported:         0,
+      })
+    })
+  }
+}
+
+/**
+ * Maps a dead-lettering failure to the bounded reason enum the server
+ * accepts (the implementation doc's section 3.4 — never a free-text error
+ * message, which could carry a fragment of the payload).
+ *
+ * classifyUploadFailure() only ever returns 'terminal' for an UploadHttpError
+ * when its status is a non-retryable 4xx (see classifyHttpStatus in
+ * lib/dexie/net.ts — every 5xx and the explicitly-retryable statuses are
+ * 'transient'), so a 'terminal' HTTP error is always genuinely a 4xx. A
+ * 5xx-classified reason only reaches this function via exhausted retries.
+ */
+function reasonForDeadLetter(kind: UploadFailureKind, err: unknown): SyncIncidentReason {
+  if (err instanceof UploadHttpError) return kind === 'terminal' ? 'http_4xx' : 'http_5xx'
+  if (err instanceof UploadDataError) return 'constraint_violation'
+  return 'max_retries'
 }
 
 /**

@@ -1,8 +1,8 @@
-import Link from 'next/link'
 import { requireOrgRole } from '@/lib/auth'
 import { createServiceClient } from '@/lib/supabase/server'
 import { Shield, Download } from 'lucide-react'
 import { Card } from '@/components/ui/Card'
+import { Pagination } from '@/components/ui/Pagination'
 import { buttonVariantClass } from '@/components/ui/Button'
 import type { AuditEvent } from '@/types/database'
 import { throwIfAnyQueryFailed } from '@/lib/supabase/unwrap'
@@ -147,24 +147,7 @@ export default async function AuditLogPage({
             </table>
           </div>
 
-          {(page > 1 || hasMore) && (
-            <div
-              className="flex items-center justify-between px-4 py-3"
-              style={{ borderTop: '1px solid var(--border)' }}
-            >
-              {page > 1 ? (
-                <Link href={`/settings/audit?page=${page - 1}`} className="text-xs font-medium" style={{ color: 'var(--accent-gold)' }}>
-                  ← Previous
-                </Link>
-              ) : <span />}
-              <span className="text-xs" style={{ color: 'var(--text-muted)' }}>Page {page}</span>
-              {hasMore ? (
-                <Link href={`/settings/audit?page=${page + 1}`} className="text-xs font-medium" style={{ color: 'var(--accent-gold)' }}>
-                  Next →
-                </Link>
-              ) : <span />}
-            </div>
-          )}
+          <Pagination page={page} hasMore={hasMore} hrefFor={(p) => `/settings/audit?page=${p}`} />
         </Card>
       )}
     </div>

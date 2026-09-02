@@ -1217,6 +1217,75 @@ export type Database = {
           },
         ]
       }
+      crew_sync_incidents: {
+        Row: {
+          client_incident_id: string
+          created_at: string
+          crew_member_id: string | null
+          device_label: string | null
+          entity_id: string | null
+          id: string
+          kind: string
+          mutation_queued_at: string | null
+          occurred_at: string
+          org_id: string
+          reason: string | null
+          reported_at: string
+          surface: string
+          table_name: string
+          user_id: string | null
+        }
+        Insert: {
+          client_incident_id: string
+          created_at?: string
+          crew_member_id?: string | null
+          device_label?: string | null
+          entity_id?: string | null
+          id?: string
+          kind: string
+          mutation_queued_at?: string | null
+          occurred_at: string
+          org_id: string
+          reason?: string | null
+          reported_at?: string
+          surface: string
+          table_name: string
+          user_id?: string | null
+        }
+        Update: {
+          client_incident_id?: string
+          created_at?: string
+          crew_member_id?: string | null
+          device_label?: string | null
+          entity_id?: string | null
+          id?: string
+          kind?: string
+          mutation_queued_at?: string | null
+          occurred_at?: string
+          org_id?: string
+          reason?: string | null
+          reported_at?: string
+          surface?: string
+          table_name?: string
+          user_id?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "crew_sync_incidents_crew_member_id_fkey"
+            columns: ["crew_member_id"]
+            isOneToOne: false
+            referencedRelation: "crew_members"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "crew_sync_incidents_org_id_fkey"
+            columns: ["org_id"]
+            isOneToOne: false
+            referencedRelation: "organizations"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       demo_activity_log: {
         Row: {
           id: string
