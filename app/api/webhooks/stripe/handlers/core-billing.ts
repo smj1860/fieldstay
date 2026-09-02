@@ -322,6 +322,25 @@ async function applySubscriptionUpdate(
  * whether we recognize the price. Only the entitlement columns are left alone
  * rather than guessed at.
  */
+/**
+ * Stripe subscription status -> organizations.plan_status.
+ *
+ * Deliberately a lookup with a default rather than an exhaustive switch:
+ * Stripe can add a status, and the safe reading of an unknown one is
+ * "not entitled". Everything absent here — canceled, unpaid, incomplete,
+ * incomplete_expired, paused — collapses to 'cancelled', which is exactly what
+ * the chained ternary this replaced did with its final `: 'cancelled'`.
+ */
+const PLAN_STATUS_BY_STRIPE_STATUS: Partial<Record<Stripe.Subscription.Status, OrgPlanStatus>> = {
+  active:   'active',
+  trialing: 'trialing',
+  past_due: 'past_due',
+}
+
+function planStatusFor(status: Stripe.Subscription.Status): OrgPlanStatus {
+  return PLAN_STATUS_BY_STRIPE_STATUS[status] ?? 'cancelled'
+}
+
 async function syncStatusForUnmappedPrice(
   supabase: StripeSupabaseClient,
   org:      ResolvedOrg,
@@ -364,10 +383,7 @@ export async function handleCoreSubscriptionUpdate(
                      ?? ''
   const isPlatform = isPlatformPriceId(priceId)
 
-  const planStatus = subscription.status === 'active'   ? 'active'
-                    : subscription.status === 'trialing' ? 'trialing'
-                    : subscription.status === 'past_due' ? 'past_due'
-                    : 'cancelled'
+  const planStatus = planStatusFor(subscription.status)
 
   // Two independent fixes meet on this block and BOTH are load-bearing, so
   // neither side of the merge wins outright:

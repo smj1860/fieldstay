@@ -268,7 +268,7 @@ export function GuestGuidebookView({
   const activeSlots = weather ? getActiveSlotTypes(hourOfDay, weather) : new Set(['general', 'other'])
   const visibleSponsors = sponsors.filter((s) => activeSlots.has(s.slot_type))
 
-  const effectivePhase: EffectivePhase = stay ? stay.phase : hourOfDay < 12 ? 'arrival' : 'mid'
+  const effectivePhase: EffectivePhase = stay?.phase ?? (hourOfDay < 12 ? 'arrival' : 'mid')
   const skyState = getSkyState(hourOfDay, effectivePhase)
   const checkOutTime = formatTime12h(property.checkout_time)
 
@@ -380,6 +380,19 @@ export function GuestGuidebookView({
   )
 }
 
+/**
+ * The one-word weather badge. Ordered by how much the condition should change
+ * what a guest does: precipitation first, then temperature, then the "nothing
+ * notable" default.
+ */
+function weatherLabelFor(weather: WeatherContext): string {
+  if (weather.isSnowy) return 'Snowy'
+  if (weather.isRainy) return 'Rainy'
+  if (weather.isCold)  return 'Cold'
+  if (weather.isHot)   return 'Hot'
+  return 'Mild weather'
+}
+
 function SkyMoment({
   skyState, weather, momentLine,
 }: Readonly<{
@@ -387,9 +400,7 @@ function SkyMoment({
   weather:    WeatherContext | null
   momentLine: string
 }>) {
-  const weatherLabel = weather
-    ? weather.isSnowy ? 'Snowy' : weather.isRainy ? 'Rainy' : weather.isCold ? 'Cold' : weather.isHot ? 'Hot' : 'Mild weather'
-    : ''
+  const weatherLabel = weather ? weatherLabelFor(weather) : ''
 
   return (
     <div className={styles.moment}>
@@ -427,9 +438,18 @@ function PropertyTicket({
   )
 }
 
+type StayDotState = 'done' | 'now' | 'todo'
+
+/** Which class one night's progress dot wears. */
+function dotClassName(state: StayDotState): string {
+  if (state === 'done') return `${styles.dot} ${styles.dotDone}`
+  if (state === 'now')  return `${styles.dot} ${styles.dotNow}`
+  return styles.dot
+}
+
 function StayStrip({ stay }: Readonly<{ stay: StayInfo }>) {
   const label = stay.phase === 'checkout' ? 'Last morning' : `Night ${stay.nightIndex + 1} of ${stay.totalNights}`
-  const dots = Array.from({ length: stay.totalNights }, (_, i) => {
+  const dots: StayDotState[] = Array.from({ length: stay.totalNights }, (_, i) => {
     if (i < stay.nightIndex) return 'done'
     if (i === stay.nightIndex) return 'now'
     return 'todo'
@@ -442,11 +462,7 @@ function StayStrip({ stay }: Readonly<{ stay: StayInfo }>) {
         {dots.map((state, i) => (
           <span
             key={`dot-${i}`}
-            className={
-              state === 'done' ? `${styles.dot} ${styles.dotDone}`
-                : state === 'now' ? `${styles.dot} ${styles.dotNow}`
-                  : styles.dot
-            }
+            className={dotClassName(state)}
           />
         ))}
       </div>

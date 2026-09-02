@@ -1295,13 +1295,17 @@ and refactors. Violations will appear as SonarQube findings on the next scan.
 ### Complexity & Structure
 - **Cognitive complexity ≤ 15** per function — extract named helper functions,
   custom hooks, or named predicates to reduce branching. ESLint-enforced
-  (`sonarjs/cognitive-complexity`, `eslint.config.mjs`) at `warn` while the
-  pre-existing violations get cleared (236 at rollout, 0 as of 2026-09-02 — the burn-down is complete, and `scripts/complexity-baseline.json` is now empty, so ANY new violation fails CI),
-  and ratcheted per-file by `npm run check:complexity` — new code at over 15
-  fails CI outright, and an already-complex function may not get worse. The
-  `--max-warnings` total does NOT cover this: it is fungible, and
-  `no-nested-conditional` alone is 92 of the 165 warnings, so there is ample
-  currency to pay for a complexity regression with.
+  (`sonarjs/cognitive-complexity`, `eslint.config.mjs`) at **`error`** since
+  2026-09-02 — the burn-down finished (64 at rollout, then 236 across all five
+  sonarjs rules; this one is now 0 tree-wide) and the rule was promoted, which
+  is what the `warn` was always pending. `scripts/complexity-baseline.json` is
+  `{}`. A new violation anywhere fails `npm run lint` outright.
+  It is ALSO still ratcheted per-file by `npm run check:complexity`, kept as a
+  second gate rather than retired: severity catches the violation, the ratchet
+  catches an attempt to re-baseline one. Neither is the `--max-warnings` total,
+  which does NOT cover this and never did — that total is fungible, and
+  `no-nested-conditional` alone is 68 of the 101 warnings, so at `warn` there
+  was ample currency to pay for a complexity regression with.
   **`unit/`, `scripts/` and `e2e/` are in scope for this rule too** (a second,
   separate config block), at ZERO with nothing baselined. They were exempt
   until 2026-08-26, which meant 17 violations nobody was ever told about —
@@ -1542,8 +1546,16 @@ following them stops being a memory test. Five layers, checked in CI via
    block also runs `eslint-plugin-sonarjs` for the Code Quality Standards
    thresholds above (cognitive complexity, nesting depth, nested
    ternaries/template literals) — previously SonarCloud-only (caught on the
-   PR, not locally); currently `warn` pending a cleanup pass on the 236
-   pre-existing violations the rollout surfaced, then ratchets to `error`.
+   PR, not locally). `cognitive-complexity` reached zero and was PROMOTED to
+   `error` on 2026-09-02, in both the `app`/`lib`/`components` block and the
+   `unit`/`scripts`/`e2e` one; promotion was fire-checked first (a deliberate
+   complexity-40 function in each scope must fail, a simple control must not),
+   the same protocol the semgrep chokepoint promotions use and for the same
+   reason — a rule at zero because it is BROKEN looks identical to one at zero
+   because the tree is clean. The other four stay at `warn` pending their own
+   burn-downs (68 `no-nested-conditional`, 22 `no-nested-functions`, 10
+   `no-nested-template-literals`, 1 `nested-control-flow`); promote each the
+   same way, when and only when it reaches zero.
 
 2. **Guardrail tests** (`unit/guardrails/`) — cross-file invariants no
    per-file rule can express:

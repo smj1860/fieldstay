@@ -67,6 +67,17 @@ export interface HealthScoreBreakdown {
  * half, and so the repair-vs-replace engine can read the condition
  * component on its own.
  */
+/**
+ * Credit for a recent service visit. Scoring input, not display: an asset
+ * serviced inside 6 months gets the full bonus, inside a year a partial one,
+ * and anything older none.
+ */
+function serviceRecencyBonus(monthsSinceService: number): number {
+  if (monthsSinceService < 6)  return 5
+  if (monthsSinceService < 12) return 2
+  return 0
+}
+
 export function calculateHealthScoreBreakdown(
   asset:         Pick<PropertyAsset, 'installation_date' | 'manufacture_date' | 'expected_lifespan_years' | 'estimated_replacement_cost'>,
   standards:     Pick<AssetTypeStandard, 'lifespan_min_years' | 'lifespan_max_years' | 'avg_replacement_cost_high'>
@@ -122,7 +133,7 @@ export function calculateHealthScoreBreakdown(
         / (1000 * 60 * 60 * 24 * 30)
       )
     : 999
-  const recencyBonus = monthsSinceService < 6 ? 5 : monthsSinceService < 12 ? 2 : 0
+  const recencyBonus = serviceRecencyBonus(monthsSinceService)
 
   const conditionScore = Math.max(0, weights.condition - repairFreqPenalty - repairCostPenalty + recencyBonus)
   const total = Math.max(0, Math.min(100, ageScore + conditionScore))

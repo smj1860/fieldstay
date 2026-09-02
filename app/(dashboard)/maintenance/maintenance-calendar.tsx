@@ -22,6 +22,24 @@ interface CalendarSchedule {
   properties: { name: string } | { name: string }[] | null
 }
 
+/**
+ * A work-order chip's colours. One definition for the month and week views —
+ * the two carried the same three-branch ladder twice each (background and
+ * colour), so a tone change had to be made in four places to stay consistent.
+ */
+function woChipTone(isOverdue: boolean, isUrgent: boolean): { background: string; color: string } {
+  if (isOverdue) return { background: 'var(--accent-red-dim)',   color: 'var(--accent-red)' }
+  if (isUrgent)  return { background: 'var(--accent-amber-dim)', color: 'var(--accent-amber)' }
+  return { background: 'var(--accent-blue-dim)', color: 'var(--accent-blue)' }
+}
+
+/** The date number's colour in the month grid. */
+function dayNumberColor(isToday: boolean, isPast: boolean): string {
+  if (isToday) return 'var(--accent-gold)'
+  if (isPast)  return 'var(--text-muted)'
+  return 'var(--text-primary)'
+}
+
 export function MaintenanceCalendar({
   workOrders,
   schedules,
@@ -181,11 +199,7 @@ export function MaintenanceCalendar({
                   }}
                 >
                   <div className="text-xs font-semibold mb-1">
-                    <span style={{
-                      color: isToday ? 'var(--accent-gold)'
-                           : isPast  ? 'var(--text-muted)'
-                                     : 'var(--text-primary)',
-                    }}>
+                    <span style={{ color: dayNumberColor(isToday, isPast) }}>
                       {day.getDate()}
                     </span>
                   </div>
@@ -198,14 +212,9 @@ export function MaintenanceCalendar({
                         key={wo.id}
                         className="text-xs px-1 py-0.5 rounded mb-0.5 truncate"
                         style={{
-                          background: isOverdue ? 'var(--accent-red-dim)'
-                                    : isUrgent  ? 'var(--accent-amber-dim)'
-                                                : 'var(--accent-blue-dim)',
-                          color:      isOverdue ? 'var(--accent-red)'
-                                    : isUrgent  ? 'var(--accent-amber)'
-                                                : 'var(--accent-blue)',
-                          border:     isOverdue ? '1px solid var(--accent-red)' : undefined,
-                          fontSize:   10,
+                          ...woChipTone(isOverdue, isUrgent),
+                          border:   isOverdue ? '1px solid var(--accent-red)' : undefined,
+                          fontSize: 10,
                         }}
                         title={wo.title}
                       >
@@ -285,14 +294,7 @@ export function MaintenanceCalendar({
                       <div
                         key={wo.id}
                         className="text-xs px-1.5 py-1 rounded mb-1 truncate"
-                        style={{
-                          background: isOverdue ? 'var(--accent-red-dim)'
-                                    : isUrgent  ? 'var(--accent-amber-dim)'
-                                                : 'var(--accent-blue-dim)',
-                          color:      isOverdue ? 'var(--accent-red)'
-                                    : isUrgent  ? 'var(--accent-amber)'
-                                                : 'var(--accent-blue)',
-                        }}
+                        style={woChipTone(isOverdue, isUrgent)}
                         title={wo.title}
                       >
                         {wo.title}
