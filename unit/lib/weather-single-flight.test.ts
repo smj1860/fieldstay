@@ -11,7 +11,7 @@ vi.mock('@/lib/redis', () => {
 })
 
 import * as redisModule from '@/lib/redis'
-import { getWeatherForLocation } from '@/lib/weather/tomorrow'
+import { getWeatherForLocation, getTomorrowForecastForLocation } from '@/lib/weather/tomorrow'
 
 const redis = (redisModule as unknown as {
   __client: Record<'get' | 'set' | 'del' | 'setex', ReturnType<typeof vi.fn>>
@@ -121,5 +121,102 @@ describe('getWeatherForLocation is single-flighted', () => {
 
     await expect(getWeatherForLocation(30.27, -97.74)).rejects.toThrow(/rate limit/)
     expect(redis.setex).not.toHaveBeenCalled()
+  })
+})
+
+// ============================================================================
+// getTomorrowForecastForLocation — the next-day sibling.
+//
+// Deliberately a separate function and a separate cache key rather than extra
+// optional fields on WeatherContext, which two PUBLIC guest pages read.
+// ============================================================================
+
+const FORECAST_BODY = {
+  timelines: {
+    daily: [
+      { time: '2026-07-22T11:00:00Z', values: { precipitationProbabilityMax: 90, temperatureMax: 66, weatherCodeMax: 4001 } },
+      { time: '2026-07-23T11:00:00Z', values: { precipitationProbabilityMax: 10, temperatureMax: 84, weatherCodeMax: 1000 } },
+    ],
+  },
+}
+
+describe('getTomorrowForecastForLocation', () => {
+  beforeEach(() => {
+    fetchMock = vi.fn(async () => ({ ok: true, status: 200, json: async () => FORECAST_BODY }))
+    vi.stubGlobal('fetch', fetchMock)
+    redis.get.mockResolvedValue(null)
+    redis.set.mockResolvedValue('OK')
+  })
+
+  it('returns the entry for the requested date, not simply the second one', async () => {
+    const forecast = await getTomorrowForecastForLocation(30.27, -97.74, '2026-07-23')
+
+    expect(forecast).toMatchObject({
+      precipitationProbability: 10,
+      temperatureMax:           84,
+      weatherCode:              1000,
+      weatherLabel:             'Clear',
+      isClear:                  true,
+    })
+  })
+
+  it('keys the cache on the DATE as well as the rounded coordinates', async () => {
+    // Without the date, a forecast fetched at 6pm on the 22nd is served — still
+    // inside its hour TTL, but a whole day wrong — to the 6pm run on the 23rd,
+    // which is the only moment this is ever read.
+    await getTomorrowForecastForLocation(30.2711, -97.7437, '2026-07-23')
+
+    expect(redis.setex).toHaveBeenCalledWith(
+      'weather:tomorrow:forecast:30.27:-97.74:2026-07-23', 3600, expect.any(String),
+    )
+    expect(redis.set).toHaveBeenCalledWith(
+      'weather:tomorrow:forecast:30.27:-97.74:2026-07-23:lock', '1',
+      { nx: true, ex: expect.any(Number) },
+    )
+  })
+
+  it('does not report a rainy day as clear', async () => {
+    const forecast = await getTomorrowForecastForLocation(30.27, -97.74, '2026-07-22')
+
+    expect(forecast.precipitationProbability).toBe(90)
+    expect(forecast.isClear).toBe(false)
+  })
+
+  it('treats the band between the clear and rainy thresholds as neither', async () => {
+    fetchMock.mockResolvedValue({
+      ok: true, status: 200,
+      json: async () => ({ timelines: { daily: [
+        { time: '2026-07-23T11:00:00Z', values: { precipitationProbabilityMax: 30, temperatureMax: 75, weatherCodeMax: 1101 } },
+      ] } }),
+    })
+
+    const forecast = await getTomorrowForecastForLocation(30.27, -97.74, '2026-07-23')
+
+    // 30% is under the 40% rain threshold and over the 25% clear one: no rain
+    // alert, and no promise of a good day to be outdoors either.
+    expect(forecast.isClear).toBe(false)
+  })
+
+  it('throws rather than silently serving the wrong day when the date is absent', async () => {
+    await expect(getTomorrowForecastForLocation(30.27, -97.74, '2026-08-01'))
+      .rejects.toThrow(/no daily entry for 2026-08-01/)
+    expect(redis.setex).not.toHaveBeenCalled()
+  })
+
+  it('serves a warm cache without calling Tomorrow.io', async () => {
+    redis.get.mockResolvedValue({ precipitationProbability: 5, isClear: true, temperatureMax: 80 })
+
+    const forecast = await getTomorrowForecastForLocation(30.27, -97.74, '2026-07-23')
+
+    expect(forecast).toMatchObject({ isClear: true })
+    expect(fetchMock).not.toHaveBeenCalled()
+  })
+
+  it('releases the lock when the provider fails', async () => {
+    fetchMock.mockResolvedValue({ ok: false, status: 500, statusText: 'Server Error', json: async () => ({}) })
+
+    await expect(getTomorrowForecastForLocation(30.27, -97.74, '2026-07-23'))
+      .rejects.toThrow(/Tomorrow\.io forecast API error/)
+    expect(redis.del).toHaveBeenCalledWith('weather:tomorrow:forecast:30.27:-97.74:2026-07-23:lock')
   })
 })

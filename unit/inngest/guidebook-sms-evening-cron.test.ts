@@ -4,7 +4,8 @@ vi.mock('@/lib/supabase/server', () => ({
   createServiceClient: vi.fn(),
 }))
 vi.mock('@/lib/weather/tomorrow', () => ({
-  getWeatherForLocation: vi.fn(),
+  getWeatherForLocation:           vi.fn(),
+  getTomorrowForecastForLocation:  vi.fn(),
 }))
 vi.mock('@/lib/sms/telnyx', () => ({
   sendSMS:          vi.fn(async () => ({ sent: true })),
@@ -50,9 +51,15 @@ vi.mock('@/lib/sms/optin-claim', () => {
   }
 })
 
-import { guidebookSmsEveningCron, guidebookSmsEveningSend } from '@/lib/inngest/functions/guidebook-sms-evening-cron'
+import {
+  guidebookSmsEveningCron,
+  guidebookSmsEveningSend,
+  nextCalendarDate,
+  pickEveningSlot,
+  pickEveningTemplateKey,
+} from '@/lib/inngest/functions/guidebook-sms-evening-cron'
 import { createServiceClient } from '@/lib/supabase/server'
-import { getWeatherForLocation } from '@/lib/weather/tomorrow'
+import { getWeatherForLocation, getTomorrowForecastForLocation } from '@/lib/weather/tomorrow'
 import { sendSMS } from '@/lib/sms/telnyx'
 import { renderSmsBody } from '@/lib/sms/templates'
 import { claimDailySmsSlot, releaseDailySmsSlot } from '@/lib/sms/optin-claim'
@@ -128,6 +135,11 @@ const sponsorRow = (overrides: Record<string, unknown> = {}) => ({
 
 const clearWeather = { temperature: 78, temperatureApparent: 78, precipitationProbability: 5, weatherCode: 1000, weatherLabel: 'Clear', isRainy: false, isSnowy: false, isHot: false, isCold: false, fetchedAt: '2026-07-22T22:00:00.000Z' }
 const rainyWeather  = { ...clearWeather, precipitationProbability: 85, isRainy: true, weatherCode: 4001, weatherLabel: 'Rain' }
+
+const clearForecast  = { precipitationProbability: 5,  temperatureMax: 81, weatherCode: 1000, weatherLabel: 'Clear',      isClear: true,  fetchedAt: '2026-07-22T22:00:00.000Z' }
+const wetForecast    = { precipitationProbability: 70, temperatureMax: 66, weatherCode: 4001, weatherLabel: 'Rain',       isClear: false, fetchedAt: '2026-07-22T22:00:00.000Z' }
+
+const outdoorSponsor = sponsorRow({ id: 'sp_out', business_name: 'Ridge Kayak Co.', slot_type: 'outdoor_adventure' })
 
 const sendEvent = { data: { optin_id: 'optin_1', org_id: 'org_1', property_id: 'prop_1', today_date: '2026-07-22', checkin_date: '2026-07-20' } }
 
@@ -205,6 +217,7 @@ describe('guidebookSmsEveningCron (dispatcher)', () => {
 describe('guidebookSmsEveningSend (per-guest handler)', () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    ;(getTomorrowForecastForLocation as ReturnType<typeof vi.fn>).mockResolvedValue(wetForecast)
   })
 
   it('sends the evening nudge SMS under the nudge budget category and claims the daily slot', async () => {
@@ -349,5 +362,265 @@ describe('guidebookSmsEveningSend (per-guest handler)', () => {
 
     expect(result).toEqual({ optinId: 'optin_1', sent: false })
     expect(releaseDailySmsSlot).toHaveBeenCalledWith(supabase, 'optin_1', 'last_evening_sms_date')
+  })
+})
+
+// ============================================================================
+// outdoor_adventure — the slot the media kit sells and neither cron ever
+// selected. It fires from the EVENING cron on TOMORROW's forecast: the morning
+// message is claimed once per day via last_morning_sms_date, so adding it
+// there would cost the coffee shop its placement on exactly the clear mornings
+// it most wants one.
+// ============================================================================
+
+describe('nextCalendarDate', () => {
+  it('advances one day', () => {
+    expect(nextCalendarDate('2026-07-22')).toBe('2026-07-23')
+  })
+
+  it('rolls over a month boundary', () => {
+    expect(nextCalendarDate('2026-07-31')).toBe('2026-08-01')
+  })
+
+  it('rolls over a year boundary', () => {
+    expect(nextCalendarDate('2026-12-31')).toBe('2027-01-01')
+  })
+
+  it('handles a leap day', () => {
+    expect(nextCalendarDate('2028-02-28')).toBe('2028-02-29')
+  })
+})
+
+describe('pickEveningSlot', () => {
+  it('picks outdoor_adventure when tomorrow is clear and the org has that sponsor', () => {
+    expect(pickEveningSlot(false, true, true)).toBe('outdoor_adventure')
+  })
+
+  it('picks dinner_pints when tomorrow is clear but no outdoor sponsor exists', () => {
+    expect(pickEveningSlot(false, true, false)).toBe('dinner_pints')
+  })
+
+  it('lets tonight\'s rain win over a clear forecast for tomorrow', () => {
+    expect(pickEveningSlot(true, true, true)).toBe('rainy_day')
+  })
+
+  it('picks dinner_pints when it is neither raining nor clear tomorrow', () => {
+    expect(pickEveningSlot(false, false, true)).toBe('dinner_pints')
+  })
+})
+
+describe('pickEveningTemplateKey', () => {
+  it('maps each slot to its template when the primary pool has a sponsor', () => {
+    expect(pickEveningTemplateKey('rainy_day', true)).toBe('rain_alert')
+    expect(pickEveningTemplateKey('outdoor_adventure', true)).toBe('tomorrow_outdoor')
+    expect(pickEveningTemplateKey('dinner_pints', true)).toBe('evening_nudge')
+  })
+
+  it('falls back to the neutral evening nudge when the primary pool is empty', () => {
+    // The pool falls back to `general`, and a general sponsor under "tomorrow
+    // looks clear" reads as a claim that sponsor never made.
+    expect(pickEveningTemplateKey('outdoor_adventure', false)).toBe('evening_nudge')
+    expect(pickEveningTemplateKey('rainy_day', false)).toBe('evening_nudge')
+  })
+})
+
+describe('guidebookSmsEveningSend — outdoor_adventure', () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+  })
+
+  it('picks the outdoor sponsor and the tomorrow_outdoor template when tomorrow is clear', async () => {
+    const supabase = makeSupabase({
+      guidebook_guest_sms_optins: [{ data: optinDetailRow(), error: null }],
+      properties:                 [{ data: propertyRow, error: null }],
+      guidebook_sponsors:         [{ data: [sponsorRow(), outdoorSponsor], error: null }],
+    })
+    ;(createServiceClient as ReturnType<typeof vi.fn>).mockReturnValue(supabase)
+    ;(getWeatherForLocation as ReturnType<typeof vi.fn>).mockResolvedValue(clearWeather)
+    ;(getTomorrowForecastForLocation as ReturnType<typeof vi.fn>).mockResolvedValue(clearForecast)
+
+    const result = await invokeHandler(guidebookSmsEveningSend, { event: sendEvent, step: makeStep() })
+
+    expect(result).toEqual({ optinId: 'optin_1', sent: true })
+    expect(renderSmsBody).toHaveBeenCalledWith('org_1', 'tomorrow_outdoor', expect.objectContaining({
+      property_name: 'Lake House',
+    }))
+  })
+
+  it('asks for TOMORROW\'s forecast, not today\'s', async () => {
+    const supabase = makeSupabase({
+      guidebook_guest_sms_optins: [{ data: optinDetailRow(), error: null }],
+      properties:                 [{ data: propertyRow, error: null }],
+      guidebook_sponsors:         [{ data: [outdoorSponsor], error: null }],
+    })
+    ;(createServiceClient as ReturnType<typeof vi.fn>).mockReturnValue(supabase)
+    ;(getWeatherForLocation as ReturnType<typeof vi.fn>).mockResolvedValue(clearWeather)
+    ;(getTomorrowForecastForLocation as ReturnType<typeof vi.fn>).mockResolvedValue(clearForecast)
+
+    await invokeHandler(guidebookSmsEveningSend, { event: sendEvent, step: makeStep() })
+
+    // sendEvent's today_date is 2026-07-22.
+    expect(getTomorrowForecastForLocation).toHaveBeenCalledWith(32.5, -85.9, '2026-07-23')
+  })
+
+  it('falls through to dinner_pints when tomorrow is clear but no outdoor sponsor exists', async () => {
+    const supabase = makeSupabase({
+      guidebook_guest_sms_optins: [{ data: optinDetailRow(), error: null }],
+      properties:                 [{ data: propertyRow, error: null }],
+      guidebook_sponsors:         [{ data: [sponsorRow()], error: null }],
+    })
+    ;(createServiceClient as ReturnType<typeof vi.fn>).mockReturnValue(supabase)
+    ;(getWeatherForLocation as ReturnType<typeof vi.fn>).mockResolvedValue(clearWeather)
+    ;(getTomorrowForecastForLocation as ReturnType<typeof vi.fn>).mockResolvedValue(clearForecast)
+
+    const result = await invokeHandler(guidebookSmsEveningSend, { event: sendEvent, step: makeStep() })
+
+    expect(result).toEqual({ optinId: 'optin_1', sent: true })
+    expect(renderSmsBody).toHaveBeenCalledWith('org_1', 'evening_nudge', expect.objectContaining({
+      property_name: 'Lake House',
+    }))
+  })
+
+  it('falls through to the general pool when tomorrow is clear and the only sponsor is general', async () => {
+    const generalSponsor = sponsorRow({ id: 'sp_gen', business_name: 'Main St. Mercantile', slot_type: 'general' })
+    const supabase = makeSupabase({
+      guidebook_guest_sms_optins: [{ data: optinDetailRow(), error: null }],
+      properties:                 [{ data: propertyRow, error: null }],
+      guidebook_sponsors:         [{ data: [generalSponsor], error: null }],
+    })
+    ;(createServiceClient as ReturnType<typeof vi.fn>).mockReturnValue(supabase)
+    ;(getWeatherForLocation as ReturnType<typeof vi.fn>).mockResolvedValue(clearWeather)
+    ;(getTomorrowForecastForLocation as ReturnType<typeof vi.fn>).mockResolvedValue(clearForecast)
+
+    const result = await invokeHandler(guidebookSmsEveningSend, { event: sendEvent, step: makeStep() })
+
+    expect(result).toEqual({ optinId: 'optin_1', sent: true })
+    expect(renderSmsBody).toHaveBeenCalledWith('org_1', 'evening_nudge', expect.objectContaining({
+      property_name: 'Lake House',
+    }))
+  })
+
+  it('sends the rain alert when it is storming tonight even though tomorrow is clear', async () => {
+    const rainySponsor = sponsorRow({ id: 'sp_rain', business_name: 'The Cozy Cafe', slot_type: 'rainy_day' })
+    const supabase = makeSupabase({
+      guidebook_guest_sms_optins: [{ data: optinDetailRow(), error: null }],
+      properties:                 [{ data: propertyRow, error: null }],
+      guidebook_sponsors:         [{ data: [rainySponsor, outdoorSponsor], error: null }],
+    })
+    ;(createServiceClient as ReturnType<typeof vi.fn>).mockReturnValue(supabase)
+    ;(getWeatherForLocation as ReturnType<typeof vi.fn>).mockResolvedValue(rainyWeather)
+    ;(getTomorrowForecastForLocation as ReturnType<typeof vi.fn>).mockResolvedValue(clearForecast)
+
+    const result = await invokeHandler(guidebookSmsEveningSend, { event: sendEvent, step: makeStep() })
+
+    expect(result).toEqual({ optinId: 'optin_1', sent: true })
+    expect(renderSmsBody).toHaveBeenCalledWith('org_1', 'rain_alert', expect.objectContaining({
+      property_name: 'Lake House',
+    }))
+  })
+
+  it('degrades to the dinner recommendation — never to no SMS — when the forecast call throws', async () => {
+    const supabase = makeSupabase({
+      guidebook_guest_sms_optins: [{ data: optinDetailRow(), error: null }],
+      properties:                 [{ data: propertyRow, error: null }],
+      guidebook_sponsors:         [{ data: [sponsorRow(), outdoorSponsor], error: null }],
+    })
+    ;(createServiceClient as ReturnType<typeof vi.fn>).mockReturnValue(supabase)
+    ;(getWeatherForLocation as ReturnType<typeof vi.fn>).mockResolvedValue(clearWeather)
+    ;(getTomorrowForecastForLocation as ReturnType<typeof vi.fn>)
+      .mockRejectedValue(new Error('Tomorrow.io forecast request timed out after 8000ms'))
+
+    const result = await invokeHandler(guidebookSmsEveningSend, { event: sendEvent, step: makeStep() })
+
+    expect(result).toEqual({ optinId: 'optin_1', sent: true })
+    expect(renderSmsBody).toHaveBeenCalledWith('org_1', 'evening_nudge', expect.objectContaining({
+      property_name: 'Lake House',
+    }))
+    expect(sendSMS).toHaveBeenCalledTimes(1)
+  })
+
+  it('still claims the daily slot exactly once on the outdoor path — no double-send', async () => {
+    const supabase = makeSupabase({
+      guidebook_guest_sms_optins: [{ data: optinDetailRow(), error: null }],
+      properties:                 [{ data: propertyRow, error: null }],
+      guidebook_sponsors:         [{ data: [outdoorSponsor], error: null }],
+    })
+    ;(createServiceClient as ReturnType<typeof vi.fn>).mockReturnValue(supabase)
+    ;(getWeatherForLocation as ReturnType<typeof vi.fn>).mockResolvedValue(clearWeather)
+    ;(getTomorrowForecastForLocation as ReturnType<typeof vi.fn>).mockResolvedValue(clearForecast)
+
+    await invokeHandler(guidebookSmsEveningSend, { event: sendEvent, step: makeStep() })
+
+    expect(claimDailySmsSlot).toHaveBeenCalledTimes(1)
+    expect(claimDailySmsSlot).toHaveBeenCalledWith(supabase, 'optin_1', 'last_evening_sms_date', '2026-07-22')
+    expect(sendSMS).toHaveBeenCalledTimes(1)
+    expect(releaseDailySmsSlot).not.toHaveBeenCalled()
+  })
+
+  it('sends nothing extra when the slot is already claimed on the outdoor path', async () => {
+    const supabase = makeSupabase({
+      guidebook_guest_sms_optins: [{ data: optinDetailRow(), error: null }],
+      properties:                 [{ data: propertyRow, error: null }],
+      guidebook_sponsors:         [{ data: [outdoorSponsor], error: null }],
+    })
+    ;(createServiceClient as ReturnType<typeof vi.fn>).mockReturnValue(supabase)
+    ;(getWeatherForLocation as ReturnType<typeof vi.fn>).mockResolvedValue(clearWeather)
+    ;(getTomorrowForecastForLocation as ReturnType<typeof vi.fn>).mockResolvedValue(clearForecast)
+    ;(claimDailySmsSlot as ReturnType<typeof vi.fn>).mockResolvedValueOnce(false)
+
+    const result = await invokeHandler(guidebookSmsEveningSend, { event: sendEvent, step: makeStep() })
+
+    expect(result).toEqual({ optinId: 'optin_1', sent: false })
+    expect(sendSMS).not.toHaveBeenCalled()
+  })
+
+  it('does not spend a Tomorrow.io call when the org has no outdoor sponsor', async () => {
+    const supabase = makeSupabase({
+      guidebook_guest_sms_optins: [{ data: optinDetailRow(), error: null }],
+      properties:                 [{ data: propertyRow, error: null }],
+      guidebook_sponsors:         [{ data: [sponsorRow()], error: null }],
+    })
+    ;(createServiceClient as ReturnType<typeof vi.fn>).mockReturnValue(supabase)
+    ;(getWeatherForLocation as ReturnType<typeof vi.fn>).mockResolvedValue(clearWeather)
+    ;(getTomorrowForecastForLocation as ReturnType<typeof vi.fn>).mockResolvedValue(clearForecast)
+
+    await invokeHandler(guidebookSmsEveningSend, { event: sendEvent, step: makeStep() })
+
+    // The forecast cannot change the message for an org that never sold the
+    // slot, and this runs once per guest per night.
+    expect(getTomorrowForecastForLocation).not.toHaveBeenCalled()
+  })
+
+  it('does not spend a Tomorrow.io call when it is already raining tonight', async () => {
+    const rainySponsor = sponsorRow({ id: 'sp_rain', business_name: 'The Cozy Cafe', slot_type: 'rainy_day' })
+    const supabase = makeSupabase({
+      guidebook_guest_sms_optins: [{ data: optinDetailRow(), error: null }],
+      properties:                 [{ data: propertyRow, error: null }],
+      guidebook_sponsors:         [{ data: [rainySponsor, outdoorSponsor], error: null }],
+    })
+    ;(createServiceClient as ReturnType<typeof vi.fn>).mockReturnValue(supabase)
+    ;(getWeatherForLocation as ReturnType<typeof vi.fn>).mockResolvedValue(rainyWeather)
+    ;(getTomorrowForecastForLocation as ReturnType<typeof vi.fn>).mockResolvedValue(clearForecast)
+
+    await invokeHandler(guidebookSmsEveningSend, { event: sendEvent, step: makeStep() })
+
+    // Rain already won — the forecast cannot displace it.
+    expect(getTomorrowForecastForLocation).not.toHaveBeenCalled()
+  })
+
+  it('queries the outdoor_adventure slot type — without this the sponsor is never in the pool', async () => {
+    const supabase = makeSupabase({
+      guidebook_guest_sms_optins: [{ data: optinDetailRow(), error: null }],
+      properties:                 [{ data: propertyRow, error: null }],
+      guidebook_sponsors:         [{ data: [outdoorSponsor], error: null }],
+    })
+    ;(createServiceClient as ReturnType<typeof vi.fn>).mockReturnValue(supabase)
+    ;(getWeatherForLocation as ReturnType<typeof vi.fn>).mockResolvedValue(clearWeather)
+    ;(getTomorrowForecastForLocation as ReturnType<typeof vi.fn>).mockResolvedValue(clearForecast)
+
+    await invokeHandler(guidebookSmsEveningSend, { event: sendEvent, step: makeStep() })
+
+    const inCall = supabase.calls.find((c) => c.table === 'guidebook_sponsors' && c.method === 'in')
+    expect(inCall?.args[1]).toContain('outdoor_adventure')
   })
 })

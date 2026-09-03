@@ -16,6 +16,7 @@ export type SmsTemplateKey =
   | 'arrival_reminder'
   | 'evening_nudge'
   | 'rain_alert'
+  | 'tomorrow_outdoor'
   | 'stay_extension'
   | 'vendor_work_order'
   | 'crew_invite'
@@ -168,6 +169,17 @@ export const SMS_TEMPLATE_REGISTRY: SmsTemplateConfig[] = [
       { token: '{{offer_line}}',    description: 'Sponsor line — always names the active rainy-day sponsor; includes their offer or custom message plus distance when available', example: 'Cozy Books Café has 15% off — just show this screen (0.3 mi away)' },
     ],
     defaultBody: 'Heads up — rain expected near {{property_name}} today. {{offer_line}} Reply STOP to opt out.',
+  },
+  {
+    key:         'tomorrow_outdoor',
+    label:       'Tomorrow Outdoors — Guest Stay',
+    description: 'Replaces the evening nudge when tomorrow\'s forecast is clear and an Outdoor Adventure sponsor is configured. Sent the night before, because that is when guests decide what to do tomorrow.',
+    audience:    'guest',
+    variables: [
+      { token: '{{property_name}}', description: 'Property name', example: 'Lakeside Lodge' },
+      { token: '{{offer_line}}',    description: 'Sponsor line — always names the active outdoor-adventure sponsor; includes their offer or custom message plus distance when available', example: 'Ridge Kayak Co. has 10% off rentals — just show this screen (1.2 mi away)' },
+    ],
+    defaultBody: 'Tomorrow looks clear near {{property_name}} — a good day to get outside. {{offer_line}} Reply STOP to opt out.',
   },
   {
     key:         'stay_extension',

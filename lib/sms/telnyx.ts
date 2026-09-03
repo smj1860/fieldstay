@@ -378,6 +378,15 @@ export function buildRainAlertSMS(propertyName: string, sponsorLine: string | nu
     : `${base} Check your guidebook for rainy-day recommendations. Reply STOP to opt out.`
 }
 
+export function buildTomorrowOutdoorSMS(propertyName: string, offerLine: string | null): string {
+  // Sent the EVENING BEFORE, about tomorrow — the tense is the whole point of
+  // the message and the reason this is not a variant of the evening nudge.
+  const base = `Tomorrow looks clear near ${propertyName} — a good day to get outside.`
+  return offerLine
+    ? `${base} ${offerLine} Reply STOP to opt out.`
+    : `${base} Check your guidebook for local ideas. Reply STOP to opt out.`
+}
+
 export function buildVendorWorkOrderSMS(params: {
   vendorName:   string
   woNumber:     string

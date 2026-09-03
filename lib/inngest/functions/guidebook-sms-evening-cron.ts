@@ -3,7 +3,7 @@ import { inngest } from '@/lib/inngest/client'
 import { fetchAllRows } from '@/lib/inngest/paginate'
 import { createServiceClient } from '@/lib/supabase/server'
 import { unwrap } from '@/lib/supabase/unwrap'
-import { getWeatherForLocation } from '@/lib/weather/tomorrow'
+import { getWeatherForLocation, getTomorrowForecastForLocation } from '@/lib/weather/tomorrow'
 import { sendSMS, buildSponsorLine } from '@/lib/sms/telnyx'
 import { renderSmsBody } from '@/lib/sms/templates'
 import { sendClaimedDailySms } from '@/lib/sms/optin-claim'
@@ -88,6 +88,61 @@ export const guidebookSmsEveningCron = inngest.createFunction(
   }
 )
 
+/** The evening slot this message is about. */
+type EveningSlot = 'rainy_day' | 'outdoor_adventure' | 'dinner_pints'
+
+/** YYYY-MM-DD, one day on. Date-only arithmetic — no timezone is involved. */
+export function nextCalendarDate(date: string): string {
+  const next = new Date(`${date}T00:00:00Z`)
+  next.setUTCDate(next.getUTCDate() + 1)
+  return next.toISOString().slice(0, 10)
+}
+
+/**
+ * Which slot the evening message is about.
+ *
+ * Rain is checked FIRST and stays authoritative. `isRainy` reflects tonight's
+ * ACTUAL conditions; the outdoor branch reflects a forecast for a day that has
+ * not happened. Texting someone hiking plans while it is storming outside
+ * because tomorrow's number looks good is worse than sending nothing, so a
+ * clear forecast never displaces a rain alert.
+ *
+ * outdoor_adventure is only reachable when the org actually has a sponsor in
+ * that slot — until this branch existed, neither cron ever selected the slot at
+ * all, so an Outdoor Adventure sponsor was paying $15/mo for a placement that
+ * could not be sent. Selecting the slot with an empty pool would just fall
+ * through to `general` while suppressing the dinner recommendation, which is a
+ * strictly worse message.
+ */
+export function pickEveningSlot(
+  isRainy:               boolean,
+  tomorrowIsClear:       boolean,
+  hasOutdoorSponsor:     boolean,
+): EveningSlot {
+  if (isRainy)                              return 'rainy_day'
+  if (tomorrowIsClear && hasOutdoorSponsor) return 'outdoor_adventure'
+  return 'dinner_pints'
+}
+
+/**
+ * The template for a chosen slot. A named function rather than a chained
+ * ternary — `sonarjs/no-nested-conditional` is the last rule still at `warn`
+ * and the lint budget is exact.
+ *
+ * `hasPrimarySponsor` matters because a slot whose pool is empty falls back to
+ * a `general` sponsor, and a general sponsor under "rain expected today" or
+ * "tomorrow looks clear" reads as a claim the sponsor never made.
+ */
+export function pickEveningTemplateKey(
+  slot:              EveningSlot,
+  hasPrimarySponsor: boolean,
+): 'rain_alert' | 'tomorrow_outdoor' | 'evening_nudge' {
+  if (!hasPrimarySponsor)               return 'evening_nudge'
+  if (slot === 'rainy_day')             return 'rain_alert'
+  if (slot === 'outdoor_adventure')     return 'tomorrow_outdoor'
+  return 'evening_nudge'
+}
+
 /**
  * Per-guest evening nudge send — throttled and budget-capped the same way
  * as guidebookSmsMorningSend.
@@ -169,14 +224,32 @@ export const guidebookSmsEveningSend = inngest.createFunction(
           .select(SPONSOR_POOL_COLUMNS)
           .eq('org_id', orgId)
           .eq('status', 'active')
-          .in('slot_type', ['dinner_pints', 'rainy_day', 'general'])
+          .in('slot_type', ['dinner_pints', 'rainy_day', 'outdoor_adventure', 'general'])
           .order('id')
           .range(from, to),
         { label: 'guidebook-sms-evening-send.sponsors' },
       )
 
-      // Rain → dinner → general fallback
-      const primarySlot  = isRainy ? 'rainy_day' : 'dinner_pints'
+      // Tomorrow's forecast, for the outdoor_adventure branch — fetched only
+      // when the org actually has a sponsor in that slot AND it isn't already
+      // raining, the two conditions under which the answer could change the
+      // message. Tomorrow.io bills per call and this runs once per guest per
+      // night; asking for a forecast nothing can act on spends that quota on
+      // every org that never sold the slot.
+      //
+      // Swallowed the same way as the current conditions above: a forecast
+      // outage must degrade to a dinner recommendation, never to no SMS at
+      // all. A null forecast means tomorrowIsClear is false, which is exactly
+      // today's behaviour.
+      const hasOutdoorSponsor = orgSponsors.some((s) => s.slot_type === 'outdoor_adventure')
+      const forecast = (hasOutdoorSponsor && !isRainy)
+        ? await getTomorrowForecastForLocation(
+            property.lat, property.lng, nextCalendarDate(todayDate),
+          ).catch(() => null)
+        : null
+
+      // Rain → tomorrow's outdoors → dinner, each falling back to general.
+      const primarySlot  = pickEveningSlot(isRainy, Boolean(forecast?.isClear), hasOutdoorSponsor)
       const primaryPool  = orgSponsors.filter((s) => s.slot_type === primarySlot)
       const generalPool  = orgSponsors.filter((s) => s.slot_type === 'general')
       const pool         = primaryPool.length > 0 ? primaryPool : generalPool
@@ -207,7 +280,7 @@ export const guidebookSmsEveningSend = inngest.createFunction(
       return await sendClaimedDailySms(
         supabase, optinId, 'last_evening_sms_date', todayDate,
         async () => {
-          const templateKey = isRainy && primaryPool.length > 0 ? 'rain_alert' as const : 'evening_nudge' as const
+          const templateKey = pickEveningTemplateKey(primarySlot, primaryPool.length > 0)
           const eveningBody = await renderSmsBody(orgId, templateKey, {
             property_name: property.name,
             offer_line:    offerLine,
