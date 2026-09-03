@@ -1,13 +1,17 @@
 'use client'
 
-const TIER_COPY: Record<3 | 5 | 6, { title: string; body: string }> = {
+/**
+ * The 5-sponsor milestone was DELETED rather than reworded: it existed to mark
+ * the first credit tier, and per-sponsor credit has no tiers, so five sponsors
+ * no longer marks anything a host would recognise as an event.
+ *
+ * 3 (guidebook unlock) and 6 (every slot filled) both still mark something
+ * real and are unchanged.
+ */
+const TIER_COPY: Record<3 | 6, { title: string; body: string }> = {
   3: {
     title: 'Guidebook Unlocked! 🎉',
     body:  'You\'ve filled 3 sponsor slots — your guest guidebook is now live and self-funding.',
-  },
-  5: {
-    title: 'Almost There! 🌟',
-    body:  '5 sponsors onboard. One more slot and your guidebook is fully sponsored.',
   },
   6: {
     title: 'Fully Sponsored! 🏆',
@@ -16,7 +20,7 @@ const TIER_COPY: Record<3 | 5 | 6, { title: string; body: string }> = {
 }
 
 interface CelebrationModalProps {
-  tier:    3 | 5 | 6
+  tier:    3 | 6
   onClose: () => void
 }
 

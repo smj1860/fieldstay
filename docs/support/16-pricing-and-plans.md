@@ -69,9 +69,8 @@ To switch to annual billing, go to Settings → Billing or contact support@field
 
 The Guest Guidebook includes a sponsor model where local businesses pay $15/month to be featured:
 
-- 3 active sponsors → the Guidebook feature itself is permanently unlocked (free) — this is separate from your FieldStay subscription
-- 5 active sponsors → $10/month credit applied to your next bill
-- 6 active sponsors → $25/month credit applied to your next bill (doesn't stack with the 5-sponsor credit)
+- **Every active sponsor → $5/month credit** applied to your next bill, from the first one. $5 times your active sponsor count, so six sponsors is $30/month off.
+- 3 active sponsors → the Guidebook feature itself is permanently unlocked (free) — an access milestone separate from both the credit and your FieldStay subscription
 
 Credits apply automatically each billing cycle based on your active sponsor count.
 

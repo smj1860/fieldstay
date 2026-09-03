@@ -360,11 +360,11 @@ export function HomepageContent() {
               credentials, check-in instructions, and contextual recommendations driven by
               your property&apos;s amenities and live weather. Guests opt in to receive their door
               code by text — the moment they submit their number, your opt-in rate is nearly
-              complete. Local business sponsors pay $15/month for featured placement. At 5
-              active sponsors, you earn a $10/month plan credit. At 6, it&apos;s $25/month.
+              complete. Local business sponsors pay $15/month for featured placement, and
+              every active sponsor takes $5/month off your FieldStay bill.
             </p>
             <p className="text-xs text-white/30">
-              *Plan credits applied monthly based on active sponsor count. Subject to plan tier.
+              *Plan credits applied monthly based on active sponsor count.
             </p>
           </div>
         </div>

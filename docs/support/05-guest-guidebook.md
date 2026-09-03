@@ -22,10 +22,9 @@ check-in instructions. Review at Guidebook → [Property Name] and toggle Publis
 when ready. Guests cannot see it until it is published.
 
 ## The Sponsor Model
-Local businesses pay $15/month per featured slot.
-- 3 active sponsors: the Guidebook feature itself is permanently unlocked (free)
-- 5 active sponsors: $10/month plan credit
-- 6 active sponsors: $25/month plan credit
+Local businesses pay $15/month per featured slot, and $5 of that comes back to you.
+- Every active sponsor: $5/month plan credit, from the first one — no thresholds
+- 3 active sponsors: the Guidebook feature itself is permanently unlocked (free). Separate from the credit.
 
 Go to Guidebook → Sponsors → Add Sponsor to add a business. A media kit link is
 auto-generated to share with potential sponsors.

@@ -19,18 +19,16 @@ export const guidebookBillingCreditHandler = inngest.createFunction(
     const planCreditCents = resolvePlanCredit(activeSponsorCount)
 
     if (planCreditCents === 0) {
-      return { skipped: true, reason: 'below_credit_threshold', activeSponsorCount }
+      return { skipped: true, reason: 'no_active_sponsors', activeSponsorCount }
     }
 
     const posted = await step.run('post-plan-credit', async () => {
-      const reason =
-        activeSponsorCount >= 6
-          ? '6_sponsor_reward'
-          : '5_sponsor_reward'
+      // No tiers left to branch on — the credit is the sponsor count times a
+      // flat rate, so the label states the count and the amount it earned.
+      const reason      = 'per_sponsor_credit'
       const creditLabel =
-        activeSponsorCount >= 6
-          ? '6-Sponsor Reward — $25 off your FieldStay plan'
-          : '5-Sponsor Reward — $10 off your FieldStay plan'
+        `${activeSponsorCount} Sponsor${activeSponsorCount === 1 ? '' : 's'} — ` +
+        `$${(planCreditCents / 100).toFixed(0)} off your FieldStay plan`
 
       // Idempotency key is stable across retries: org + billing cycle period end.
       //
@@ -40,16 +38,23 @@ export const guidebookBillingCreditHandler = inngest.createFunction(
       // evaluated on two consecutive days. Same key, same amount → Stripe
       // returns the original invoice item and nothing is double-credited.
       //
-      // But the sponsor count can CHANGE between those two days. Crossing the
-      // 5 → 6 threshold sends the same key with a different amount, and Stripe
-      // rejects that outright rather than ignoring it — so what should be good
-      // news (the org earned a bigger reward) surfaced as a hard function
-      // failure, with the smaller credit already posted and the run alerting.
+      // But the sponsor count can CHANGE between those two days, and the same
+      // key with a different amount is something Stripe rejects outright
+      // rather than ignoring.
+      //
+      // UNDER PER-SPONSOR CREDIT THIS PATH IS ROUTINE, NOT EXCEPTIONAL. It used
+      // to need the org to cross 5 → 6 inside a 48-hour window, which is rare.
+      // Now ANY sponsor added or cancelled in that window changes the amount,
+      // so expect this collision in normal operation — it is not a symptom of
+      // anything wrong.
       //
       // The first evaluation in the renewal window wins, deliberately: the
       // credit is already on the upcoming invoice, and the alternative — a
-      // key that varies with the amount — would post a SECOND invoice item
-      // and double-credit the org. Treat the collision as the no-op it is.
+      // key that varies with the amount — would post a SECOND invoice item and
+      // double-credit the org. Do NOT "fix" this by putting the amount in the
+      // key. The new count applies from the next period; the worst case is a
+      // host earning $5 one cycle later than they expected, which is not worth
+      // a table of per-period dispatch state to avoid.
       try {
         await stripe.invoiceItems.create(
           {
@@ -69,9 +74,13 @@ export const guidebookBillingCreditHandler = inngest.createFunction(
 
         if (!isIdempotencyReplay) throw err
 
-        console.warn(
-          `[guidebook-credit] org ${orgId} re-evaluated at a different sponsor tier ` +
-          `for period ${currentPeriodEnd} — keeping the credit already posted`
+        // info, not warn: see the note above — this is now a normal operating
+        // condition rather than an anomaly, and warning on it would train
+        // whoever reads these logs to ignore them.
+        console.info(
+          `[guidebook-credit] org ${orgId} sponsor count changed inside the renewal ` +
+          `window for period ${currentPeriodEnd} — the first evaluation's amount ` +
+          `stands for this period; the new count applies next period`
         )
         return false
       }
@@ -83,7 +92,9 @@ export const guidebookBillingCreditHandler = inngest.createFunction(
         orgId,
         action:     'billing.plan_credit.applied',
         targetType: 'organization',
-        metadata:   { reason },
+        // Records what the credit was actually computed FROM, not just that
+        // one happened — with a flat rate the count is the whole story.
+        metadata:   { reason, activeSponsorCount, planCreditCents },
       })
 
       return true

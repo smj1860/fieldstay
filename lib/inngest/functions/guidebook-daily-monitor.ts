@@ -174,9 +174,13 @@ export const guidebookDailyMonitorOrg = inngest.createFunction(
         const periodEnd = new Date(subscription.current_period_end * 1000)
         if (periodEnd > now48hrs) return null
 
-        // Only dispatch if org has >= 5 sponsors (credit threshold)
+        // Every sponsor now earns credit ($5 each), so the old ">= 5" gate
+        // would suppress the credit it exists to deliver. Kept as ">= 1"
+        // rather than removed: a zero-sponsor org would dispatch an event
+        // whose handler immediately no-ops, which is a daily Inngest run per
+        // org for nothing.
         const activeSponsorCount = await getActiveSponsorCount(orgId)
-        if (activeSponsorCount < 5) return null
+        if (activeSponsorCount < 1) return null
 
         // current_period_end rides along so the handler has the idempotency
         // key without a second Stripe call.

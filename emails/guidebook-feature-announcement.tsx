@@ -226,35 +226,24 @@ export function GuidebookFeatureAnnouncementEmail({
               No monthly fee. No trial. No catch.
             </Text>
 
-            {/* ── Credit tiers callout ───────────────────────────── */}
+            {/* ── Plan credit callout ────────────────────────────── */}
             <Section style={styles.creditBox}>
               <Text style={styles.creditBoxHeading}>
-                Fill all six slots and FieldStay pays you back.
+                Every sponsor pays you back.
               </Text>
-              <Row>
-                <Column style={styles.creditTier}>
-                  <Text style={styles.creditTierNumber}>5</Text>
-                  <Text style={styles.creditTierLabel}>sponsors</Text>
-                  <Text style={styles.creditTierReward}>$10 off</Text>
-                  <Text style={styles.creditTierSub}>your FieldStay plan/mo</Text>
-                </Column>
-                <Column style={styles.creditTierDivider} />
-                <Column style={styles.creditTier}>
-                  <Text style={styles.creditTierNumber}>6</Text>
-                  <Text style={styles.creditTierLabel}>sponsors</Text>
-                  <Text style={styles.creditTierReward}>$25 off</Text>
-                  <Text style={styles.creditTierSub}>your FieldStay plan/mo</Text>
-                </Column>
-              </Row>
+              <Text style={styles.creditTierReward}>$5/month off</Text>
+              <Text style={styles.creditTierSub}>
+                your FieldStay plan, for every active sponsor
+              </Text>
               <Text style={styles.creditBoxFooter}>
                 Credits apply automatically to your next invoice. No codes, no requests.
               </Text>
             </Section>
 
             <Text style={styles.body1}>
-              At six sponsors you&apos;re getting $25 back off your FieldStay
-              plan, and delivering a guest experience that no PDF or Google
-              Doc can come close to.
+              At six sponsors that&apos;s $30 back off your FieldStay plan every
+              month — and a guest experience that no PDF or Google Doc can come
+              close to.
             </Text>
 
             <Hr style={styles.divider} />
@@ -494,36 +483,18 @@ const styles = {
     margin:     '0 0 24px',
     textAlign:  'center' as const,
   },
-  creditTier: {
-    textAlign: 'center' as const,
-    padding:   '0 20px',
-  },
-  creditTierDivider: {
-    borderLeft: '1px solid #1e293b',
-    width:      '1px',
-  },
-  creditTierNumber: {
-    color:      '#ffffff',
-    fontSize:   '48px',
-    fontWeight: '800',
-    margin:     '0',
-    lineHeight: '1',
-  },
-  creditTierLabel: {
-    color:    '#64748b',
-    fontSize: '13px',
-    margin:   '4px 0 16px',
-  },
   creditTierReward: {
     color:      '#FCD116',
-    fontSize:   '24px',
+    fontSize:   '32px',
     fontWeight: '800',
     margin:     '0 0 4px',
+    textAlign:  'center' as const,
   },
   creditTierSub: {
-    color:    '#64748b',
-    fontSize: '12px',
-    margin:   '0',
+    color:     '#64748b',
+    fontSize:  '13px',
+    margin:    '0',
+    textAlign: 'center' as const,
   },
   creditBoxFooter: {
     color:     '#475569',

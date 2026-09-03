@@ -25,13 +25,18 @@ Your guidebook has space for up to **six sponsored slots** for local businesses.
 
 Here's how the economics work:
 
-| Sponsors | What Happens |
+**Every active sponsor takes $5/month off your FieldStay bill**, starting with the first one. There are no thresholds and no tiers — the credit is simply $5 times your active sponsor count.
+
+| Sponsors | Monthly credit |
 |---|---|
-| 0–2 | Guidebook is free during your trial; after the trial it needs 3+ sponsors to stay unlocked |
-| 3 | Guidebook is permanently unlocked, independent of your subscription |
-| 4 | Still unlocked, no credit yet |
-| 5 | You also receive a **$10 monthly credit** applied to your FieldStay subscription |
-| 6 | The credit becomes **$25/month** instead — it replaces the $10 tier rather than adding to it |
+| 1 | $5 |
+| 2 | $10 |
+| 3 | $15 |
+| 4 | $20 |
+| 5 | $25 |
+| 6 | $30 |
+
+Separately from the credit, reaching **3 active sponsors** permanently unlocks the guidebook itself, independent of your subscription. That is a one-time access milestone, not a payment threshold — the two are unrelated.
 
 Credits apply automatically each billing cycle based on your active sponsor count — no action required on your end once the sponsors are set up.
 
@@ -41,7 +46,7 @@ Credits apply automatically each billing cycle based on your active sponsor coun
 
 Each sponsor pays **$15 per month** for a featured slot in your guidebook. Their listing appears as a recommendation card with their business information, and they can include a guest offer (discount, free item, etc.) if they choose.
 
-Sponsors are billed automatically via Stripe each month. You sign them up — they pay FieldStay directly, and your subscription credit kicks in once you hit 5 active sponsors ($10/month), stepping up to $25/month at 6.
+Sponsors are billed automatically via Stripe each month. You sign them up — they pay FieldStay directly, and $5 of each sponsor's $15 comes back to you as a credit on your own subscription. That is a flat one-third share, the same on every sponsor.
 
 ### Who Makes a Good Sponsor?
 
@@ -71,20 +76,29 @@ Once a sponsor is active, they appear in your guidebook immediately.
 
 Go to **Guidebook → Sponsors** to see all active and pending sponsors, their billing status, and when their current period renews. If a sponsor's payment fails, their listing is paused automatically until the payment resolves.
 
-You can remove a sponsor at any time. Dropping below 6 steps your credit back down to $10/month (or removes it entirely below 5). Dropping below 3 re-locks the guidebook itself after a short grace period, independent of any credit.
+You can remove a sponsor at any time. Your credit simply drops by $5 for that sponsor from the next billing cycle. Dropping below 3 active sponsors re-locks the guidebook itself after a short grace period — that is the access rule, independent of any credit.
 
 ---
 
 ## Frequently Asked Questions
 
 **Do I collect the $15/month from sponsors myself?**
-No. Sponsors pay FieldStay directly via Stripe. You don't handle any money collection. Your credit appears automatically once you hit 5 active sponsors, and increases at 6.
+No. Sponsors pay FieldStay directly via Stripe. You don't handle any money collection. Your credit appears automatically from your first active sponsor and grows by $5 with each one you add.
+
+**I added a sponsor and my credit didn't change on this invoice. Why?**
+Your credit is calculated shortly before each renewal. If you add or cancel a sponsor within about two days of your renewal date, the amount already worked out for that period stands, and the new count applies from the following period instead. Nothing is lost — a sponsor added just before renewal is credited on the next invoice rather than the current one. This is the only case where your credit and your live sponsor count can briefly disagree.
+
+**When does the credit actually appear?**
+As a line item on your next FieldStay invoice, applied automatically. There is no code to enter and nothing to request. If your sponsor count changed since your last invoice, the new amount shows up on the following one.
+
+**What happens if a sponsor's payment fails?**
+Their listing is paused and they stop counting as active, so your credit drops by $5 for that sponsor. If their payment recovers, they become active again and the credit returns.
 
 **Can I have more than six sponsors?**
 No. Six is the maximum — three per page in the guidebook layout to keep it readable and useful for guests. Quality over quantity is the goal here.
 
 **What if a sponsor cancels?**
-Their slot opens back up and you can fill it with another business. Your credit steps down (or pauses, below 5) if you drop below the 5 or 6 threshold, and resumes once you're back at that count.
+Their slot opens back up and you can fill it with another business. Your credit drops by $5 from the next billing cycle and goes back up when you fill the slot again.
 
 **Can I set up the guidebook without any sponsors?**
 Yes. The guidebook is fully functional with zero sponsors. The sponsor program is optional — it just helps offset your plan cost.
