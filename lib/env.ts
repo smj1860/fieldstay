@@ -307,6 +307,26 @@ export const ENV_SPEC: Readonly<Record<string, VarSpec>> = {
   REPUGUARD_MODEL:           { tier: 'optional', schema: nonEmpty, why: 'RepuGuard model id; falls back to a hardcoded default' },
   OPENAI_API_KEY:            { tier: 'optional', schema: nonEmpty, why: 'support-bot knowledge base embeddings' },
 
+  // Thumbtack Request Flow Widget scaffolding — see lib/integrations/thumbtack.ts.
+  // Optional/feature-gated like the rest of this block: isThumbtackConfigured()
+  // hides every "Find a Pro" entry point until these are set, rather than
+  // shipping a broken CTA. THUMBTACK_ENVIRONMENT is the widget host
+  // ({{environment}} in Thumbtack's docs — staging-partner.thumbtack.com or
+  // thumbtack.com), not a secret, but lives here anyway so the three vars are
+  // configured (or not) together.
+  THUMBTACK_ENVIRONMENT: {
+    tier: 'optional', schema: httpUrl,
+    why: 'the {{environment}} host for Request Flow Widget URLs and the postMessage origin check',
+  },
+  THUMBTACK_API_KEY: {
+    tier: 'optional', schema: nonEmpty,
+    why: 'partner API auth for /businesses/search — NOT YET IMPLEMENTED, see searchThumbtackPros()',
+  },
+  THUMBTACK_UTM_SOURCE: {
+    tier: 'optional', schema: prefixed('cma-'),
+    why: 'utm_source on every Request Flow URL; Thumbtack requires the cma- prefix on partner accounts',
+  },
+
   // ── Demo surface (all-or-nothing) ─────────────────────────────────────────
   DEMO_ENTRY_SECRET: {
     tier: 'optional', schema: z.string().min(32),

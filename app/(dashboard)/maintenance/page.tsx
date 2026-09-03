@@ -7,8 +7,24 @@ import type {
   InspectionFormOption, OrgMemberOption, VendorComplianceRow,
 } from './maintenance-board'
 import type { Metadata } from 'next'
+import { isThumbtackConfigured } from '@/lib/integrations/thumbtack'
+import { CategoryPickerFindProSection } from '@/components/thumbtack/CategoryPickerFindProSection'
 
 export const metadata: Metadata = { title: 'Maintenance' }
+
+const WO_CATEGORY_OPTIONS = [
+  { value: 'hvac' as const,          label: 'HVAC' },
+  { value: 'plumbing' as const,      label: 'Plumbing' },
+  { value: 'electrical' as const,    label: 'Electrical' },
+  { value: 'appliance' as const,     label: 'Appliance' },
+  { value: 'roofing' as const,       label: 'Roofing' },
+  { value: 'flooring' as const,      label: 'Flooring' },
+  { value: 'windows_doors' as const, label: 'Windows & Doors' },
+  { value: 'pest_control' as const,  label: 'Pest Control' },
+  { value: 'pool' as const,          label: 'Pool' },
+  { value: 'structural' as const,    label: 'Structural' },
+  { value: 'general' as const,       label: 'General' },
+]
 
 export default async function MaintenancePage() {
   const { supabase, membership, user } = await requireOrgMember()
@@ -183,6 +199,15 @@ export default async function MaintenancePage() {
   return (
     <>
       <MaintenanceTabs />
+      {isThumbtackConfigured() && (
+        <div className="mb-6">
+          <CategoryPickerFindProSection
+            heading="Have an open job with no vendor assigned? Find one on Thumbtack"
+            categoryFieldLabel="Category"
+            categoryOptions={WO_CATEGORY_OPTIONS}
+          />
+        </div>
+      )}
       <MaintenanceBoard
         workOrders={workOrdersResult.data ?? []}
         properties={propertiesResult.data ?? []}
