@@ -59,7 +59,7 @@ interface GuidebookClientProps {
   appUrl:                    string
 }
 
-type CelebrationTier = 3 | 5 | 6 | null
+type CelebrationTier = 3 | 6 | null
 
 // Plain helper, not a component — keeps the Date.now() call out of the
 // component's own body (react-hooks/purity flags impure calls anywhere
@@ -148,9 +148,11 @@ function statusDetail({
   sponsorsNeeded:     number
 }): string {
   if (isGuidebookActive) {
-    if (activeSponsorCount >= 6) return '$25/month credit applied to your plan'
-    if (activeSponsorCount >= 5) return '$10/month credit applied to your plan'
-    return 'Add sponsors to earn a plan credit (5 = $10/mo, 6 = $25/mo)'
+    // Computed, never a ternary on the count. Any branching here would
+    // reintroduce the tiers in the UI after they were removed from billing —
+    // the whole point of the change is that there is nothing to tabulate.
+    if (activeSponsorCount === 0) return 'Every active sponsor takes $5/month off your FieldStay bill'
+    return `$${activeSponsorCount * 5}/month credit applied to your plan`
   }
 
   if (gracePeriodEndsAt) {
@@ -295,7 +297,7 @@ export function GuidebookClient({
       const storageKey = 'guidebook_celebration_shown'
       const shown      = JSON.parse(localStorage.getItem(storageKey) ?? '[]') as number[]
 
-      for (const tier of [3, 5, 6] as const) {
+      for (const tier of [3, 6] as const) {
         if (newCount >= tier && prevCount < tier && !shown.includes(tier)) {
           setCelebration(tier)
           localStorage.setItem(storageKey, JSON.stringify([...shown, tier]))

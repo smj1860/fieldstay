@@ -230,14 +230,17 @@ describe('guidebookDailyMonitorOrg (per-org handler)', () => {
     expect(step.sendEvent).not.toHaveBeenCalled()
   })
 
-  it('does not send a billing credit for an org with fewer than 5 active sponsors even when renewal is imminent', async () => {
+  it('does not send a billing credit for an org with ZERO active sponsors, even when renewal is imminent', async () => {
+    // The gate is `< 1`, not removed: a zero-sponsor org would dispatch an
+    // event whose handler immediately no-ops — a daily Inngest run per org for
+    // nothing. Zero is now the only count that earns nothing.
     const supabase = makeSupabase({
       guidebook_configurations: [{ data: configRow({ is_active: true }), error: null }],
     })
     ;(createServiceClient as ReturnType<typeof vi.fn>).mockReturnValue(supabase)
     const periodEndUnix = Math.floor(new Date('2026-07-23T00:00:00.000Z').getTime() / 1000)
     ;(stripe.subscriptions.retrieve as ReturnType<typeof vi.fn>).mockResolvedValue({ current_period_end: periodEndUnix })
-    ;(getActiveSponsorCount as ReturnType<typeof vi.fn>).mockResolvedValue(4)
+    ;(getActiveSponsorCount as ReturnType<typeof vi.fn>).mockResolvedValue(0)
 
     const step = makeStep()
     await invokeHandler(guidebookDailyMonitorOrg, {
@@ -245,6 +248,28 @@ describe('guidebookDailyMonitorOrg (per-org handler)', () => {
     })
 
     expect(step.sendEvent).not.toHaveBeenCalled()
+  })
+
+  it('DOES send a billing credit for a single active sponsor — the count the old gate suppressed', async () => {
+    // Under the previous `< 5` gate this org earned $5 and was never
+    // dispatched, so the credit it had earned was silently never applied.
+    const supabase = makeSupabase({
+      guidebook_configurations: [{ data: configRow({ is_active: true }), error: null }],
+    })
+    ;(createServiceClient as ReturnType<typeof vi.fn>).mockReturnValue(supabase)
+    const periodEndUnix = Math.floor(new Date('2026-07-23T00:00:00.000Z').getTime() / 1000)
+    ;(stripe.subscriptions.retrieve as ReturnType<typeof vi.fn>).mockResolvedValue({ current_period_end: periodEndUnix })
+    ;(getActiveSponsorCount as ReturnType<typeof vi.fn>).mockResolvedValue(1)
+
+    const step = makeStep()
+    await invokeHandler(guidebookDailyMonitorOrg, {
+      event: orgEvent(), step, logger: { info: vi.fn(), error: vi.fn() },
+    })
+
+    expect(step.sendEvent).toHaveBeenCalledWith(
+      'send-credit-evaluate',
+      expect.objectContaining({ name: 'guidebook/billing.credit.evaluate' }),
+    )
   })
 
   it('skips the Stripe lookup entirely for an org missing a subscription or customer id', async () => {

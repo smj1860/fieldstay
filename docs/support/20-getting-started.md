@@ -56,7 +56,7 @@ See: **Inventory Templates and the Kroger Cart**
 
 ## Step 6 — Add Sponsors to Your Guidebook (Optional)
 
-Once your guidebook is live, consider reaching out to a local business or two about a sponsor slot. At 3 active sponsors the Guidebook feature unlocks permanently; 5 and 6 sponsors add plan credit toward your FieldStay subscription.
+Once your guidebook is live, consider reaching out to a local business or two about a sponsor slot. Every active sponsor takes $5/month off your FieldStay bill, starting with the first one, and at 3 active sponsors the Guidebook feature unlocks permanently.
 
 See: **Setting Up Sponsors for Your Guidebook**
 

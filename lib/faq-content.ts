@@ -448,8 +448,8 @@ export const BREEZEWAY_FAQ: readonly FaqItem[] = [
     question: 'Does FieldStay charge extra for a guest guidebook, the way Breezeway does?',
     answer:
       'No — FieldStay\'s guest guidebook is included on every plan at no extra cost, and it can actually pay ' +
-      'for itself: sign 5 local business sponsors into your guidebook and FieldStay applies a real $10 credit ' +
-      'against your monthly bill automatically, or $25 at 6 or more sponsors. Breezeway\'s digital welcome ' +
+      'for itself: every local business sponsor you sign into your guidebook applies a real $5/month credit ' +
+      'against your bill automatically, from the first one. Breezeway\'s digital welcome ' +
       'book ("Guide") sits in a higher "Operations + Guest Experience" tier, and Breezeway\'s own pricing page ' +
       'lists it among the add-ons priced a la carte — an added monthly cost with no revenue-sharing back to you.',
   },
@@ -748,7 +748,13 @@ export const FAQ_CATEGORIES: FaqCategory[] = [
         id:       'gb-sponsors',
         question: 'How do guidebook sponsors work?',
         answer:
-          'Local businesses pay $15/month to be featured in your guidebook and in SMS recommendation messages. At 3 active sponsors the Guidebook itself unlocks permanently (it\'s otherwise free only during your trial); 5 sponsors add a $10/month plan credit, 6 sponsors bumps that to $25/month. Add one at Guidebook → Sponsors → Add Sponsor.',
+          'Local businesses pay $15/month to be featured in your guidebook and in SMS recommendation messages, and every active sponsor takes $5/month off your FieldStay bill — from the first one, with no thresholds. At 3 active sponsors the Guidebook itself unlocks permanently (it\'s otherwise free only during your trial), which is a separate, non-monetary milestone from the credit. Add one at Guidebook → Sponsors → Add Sponsor.',
+      },
+      {
+        id:       'gb-sponsor-credit-timing',
+        question: 'When does my sponsor credit show up, and why didn\'t it change this month?',
+        answer:
+          'The credit is a line item on your next FieldStay invoice, applied automatically — no code to enter, nothing to request. It is calculated shortly before each renewal, so if you add or cancel a sponsor within about two days of your renewal date, the amount already worked out for that period stands and your new count applies from the following period. Nothing is lost: a sponsor signed just before renewal is credited on the next invoice instead. That short window is the only time your credit and your live sponsor count can disagree.',
       },
     ],
   },

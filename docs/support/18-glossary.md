@@ -86,7 +86,7 @@ If you type your own number for an item, that number is used as-is and the item 
 
 ## Sponsor
 
-A sponsor is a local business featured in your guest guidebook. Sponsors pay $15/month per featured slot and can appear in the guidebook and in contextual SMS recommendation messages sent to opted-in guests during their stay. Sponsors generate plan credits that reduce or eliminate your FieldStay subscription cost.
+A sponsor is a local business featured in your guest guidebook. Sponsors pay $15/month per featured slot and can appear in the guidebook and in contextual SMS recommendation messages sent to opted-in guests during their stay. Each active sponsor earns you a $5/month credit against your FieldStay subscription — a flat one-third share, from the first sponsor, with no thresholds.
 
 ---
 
