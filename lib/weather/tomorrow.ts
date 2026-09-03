@@ -82,11 +82,17 @@ const CACHE_TTL_SECONDS = 3600 // 1 hour
 
 const SNOWY_CODES = new Set([5000, 5001, 5100, 5101, 6000, 6001, 6200, 6201, 7000, 7101, 7102])
 
+/**
+ * Rounds to 2 decimal places — collapses nearby coordinates onto the same cache
+ * entry, which is what makes the single-flight lock actually collapse a burst
+ * of guests at one property rather than merely narrow it.
+ */
+function roundedCoords(lat: number, lng: number): string {
+  return `${Math.round(lat * 100) / 100}:${Math.round(lng * 100) / 100}`
+}
+
 function getCacheKey(lat: number, lng: number): string {
-  // Round to 2 decimal places — collapses nearby coordinates to the same cache entry
-  const roundedLat = Math.round(lat * 100) / 100
-  const roundedLng = Math.round(lng * 100) / 100
-  return `weather:tomorrow:${roundedLat}:${roundedLng}`
+  return `weather:tomorrow:${roundedCoords(lat, lng)}`
 }
 
 /**
@@ -123,32 +129,43 @@ export async function getWeatherForLocation(
 }
 
 /**
- * The uncached fetch. Separate from getWeatherForLocation so the single-flight
- * wrapper has something to call, and so the "produce" half is readable on its
- * own.
+ * One outbound call to Tomorrow.io.
+ *
+ * The API-key check, the required Accept-Encoding header, the timeout budget,
+ * the retry policy and the 429/!ok branches are identical for every endpoint we
+ * read, so they live here once. Only the path, the endpoint-specific query
+ * params and the response shape differ, and those are the arguments.
+ *
+ * `kind` exists solely to keep the two operational failures distinguishable in
+ * logs and alerts: "the realtime call is slow" and "the forecast call is slow"
+ * are different problems even though the handling is the same.
  */
-async function fetchAndCacheWeather(
-  lat:      number,
-  lng:      number,
-  cacheKey: string,
-): Promise<WeatherContext> {
-  const redis  = getRedisIfConfigured()
+async function fetchTomorrowIo<T>(
+  kind:        'realtime' | 'forecast',
+  lat:         number,
+  lng:         number,
+  extraParams: string,
+): Promise<T> {
   const apiKey = process.env.TOMORROW_IO_API_KEY
   if (!apiKey) throw new Error('TOMORROW_IO_API_KEY is not configured')
 
-  // Fields param is NOT in the realtime spec — omit it and parse what we need
-  // from the full response. units=imperial gives Fahrenheit for temperature fields.
+  // No fields param — it is not in the realtime spec, so both calls omit it and
+  // parse what they need from the full response. units=imperial gives
+  // Fahrenheit for every temperature field.
   const url =
-    `https://api.tomorrow.io/v4/weather/realtime` +
+    `https://api.tomorrow.io/v4/weather/${kind}` +
     `?location=${lat},${lng}` +
+    extraParams +
     `&units=imperial` +
     `&apikey=${apiKey}`
 
-  // This call sits inside the per-guest nudge SMS send, so an unbounded
-  // fetch would hold that send (and its Inngest step) open indefinitely.
-  // The timeout is surfaced as its own error message rather than folded
-  // into the generic API-error branch — "Tomorrow.io is slow" and
-  // "Tomorrow.io said no" are different operational problems.
+  // These calls sit inside the per-guest nudge SMS send, so an unbounded fetch
+  // would hold that send (and its Inngest step) open indefinitely. The timeout
+  // is surfaced as its own error message rather than folded into the generic
+  // API-error branch — "Tomorrow.io is slow" and "Tomorrow.io said no" are
+  // different operational problems.
+  const label = kind === 'realtime' ? 'Tomorrow.io request' : 'Tomorrow.io forecast request'
+
   let response: Response
   try {
     // Retried: a read-only GET, and it already sits behind a single-flight
@@ -163,11 +180,11 @@ async function fetchAndCacheWeather(
       next: { revalidate: 0 }, // never Next.js cache — Redis handles it
     }, {
       timeoutMs: WEATHER_TIMEOUT_MS,
-      label:     'tomorrow-io-realtime',
+      label:     `tomorrow-io-${kind}`,
     })
   } catch (err) {
     if (isTimeoutError(err)) {
-      throw new Error(`Tomorrow.io request timed out after ${WEATHER_TIMEOUT_MS}ms`)
+      throw new Error(`${label} timed out after ${WEATHER_TIMEOUT_MS}ms`)
     }
     throw err
   }
@@ -177,12 +194,28 @@ async function fetchAndCacheWeather(
   }
 
   if (!response.ok) {
+    const what = kind === 'realtime' ? 'API' : 'forecast API'
     throw new Error(
-      `Tomorrow.io API error: ${response.status} ${response.statusText}`
+      `Tomorrow.io ${what} error: ${response.status} ${response.statusText}`
     )
   }
 
-  const json = await response.json() as {
+  return await response.json() as T
+}
+
+/**
+ * The uncached fetch. Separate from getWeatherForLocation so the single-flight
+ * wrapper has something to call, and so the "produce" half is readable on its
+ * own.
+ */
+async function fetchAndCacheWeather(
+  lat:      number,
+  lng:      number,
+  cacheKey: string,
+): Promise<WeatherContext> {
+  const redis = getRedisIfConfigured()
+
+  const json = await fetchTomorrowIo<{
     data: {
       values: {
         precipitationProbability: number
@@ -192,7 +225,7 @@ async function fetchAndCacheWeather(
         snowIntensity:            number
       }
     }
-  }
+  }>('realtime', lat, lng, '')
 
   const {
     precipitationProbability,
@@ -238,13 +271,11 @@ export interface DayForecast {
 }
 
 function getForecastCacheKey(lat: number, lng: number, targetDate: string): string {
-  // Same 2dp rounding as the realtime key, plus the DATE. Without the date, a
+  // Same rounding as the realtime key, plus the DATE. Without the date, a
   // forecast fetched at 6pm on the 3rd is served — inside its hour TTL, but a
   // whole day wrong — to the 6pm run on the 4th, which is the one moment this
   // cron actually reads it.
-  const roundedLat = Math.round(lat * 100) / 100
-  const roundedLng = Math.round(lng * 100) / 100
-  return `weather:tomorrow:forecast:${roundedLat}:${roundedLng}:${targetDate}`
+  return `weather:tomorrow:forecast:${roundedCoords(lat, lng)}:${targetDate}`
 }
 
 /**
@@ -256,8 +287,8 @@ function getForecastCacheKey(lat: number, lng: number, targetDate: string): stri
  * knows whose day it is.)
  *
  * Deliberately a sibling of getWeatherForLocation rather than an option on it:
- * separate cache key, same singleFlight wrapper, same WEATHER_TIMEOUT_MS bound,
- * same 2dp coordinate rounding. The two are meant to read side by side.
+ * separate cache key, shared singleFlight wrapper, shared transport
+ * (fetchTomorrowIo), shared coordinate rounding.
  *
  * @param targetDate YYYY-MM-DD, in whatever timezone the caller cares about.
  */
@@ -290,9 +321,9 @@ interface DailyTimelineEntry {
 }
 
 /**
- * The uncached forecast fetch. Shaped like fetchAndCacheWeather on purpose —
- * same retry, same timeout handling, same 429 branch — so the two are readable
- * as a pair.
+ * The uncached forecast fetch. The transport is fetchTomorrowIo; what is left
+ * here is only what differs from the realtime read — the daily timeline shape
+ * and how a day is classified.
  */
 async function fetchAndCacheForecast(
   lat:        number,
@@ -300,59 +331,18 @@ async function fetchAndCacheForecast(
   targetDate: string,
   cacheKey:   string,
 ): Promise<DayForecast> {
-  const redis  = getRedisIfConfigured()
-  const apiKey = process.env.TOMORROW_IO_API_KEY
-  if (!apiKey) throw new Error('TOMORROW_IO_API_KEY is not configured')
+  const redis = getRedisIfConfigured()
 
-  // timesteps=1d gives one entry per calendar day; units=imperial gives
-  // Fahrenheit. No fields param, same as the realtime call — parse what we
-  // need out of the full response.
-  const url =
-    `https://api.tomorrow.io/v4/weather/forecast` +
-    `?location=${lat},${lng}` +
-    `&timesteps=1d` +
-    `&units=imperial` +
-    `&apikey=${apiKey}`
-
-  let response: Response
-  try {
-    response = await fetchWithRetry(url, {
-      headers: {
-        // Required per Tomorrow.io OpenAPI spec (accept-encoding: required: true)
-        'Accept-Encoding': 'deflate, gzip, br',
-      },
-      next: { revalidate: 0 }, // never Next.js cache — Redis handles it
-    }, {
-      timeoutMs: WEATHER_TIMEOUT_MS,
-      label:     'tomorrow-io-forecast',
-    })
-  } catch (err) {
-    if (isTimeoutError(err)) {
-      throw new Error(`Tomorrow.io forecast request timed out after ${WEATHER_TIMEOUT_MS}ms`)
-    }
-    throw err
-  }
-
-  if (response.status === 429) {
-    throw new Error('Tomorrow.io rate limit exceeded. Check daily/hourly limits.')
-  }
-
-  if (!response.ok) {
-    throw new Error(
-      `Tomorrow.io forecast API error: ${response.status} ${response.statusText}`
-    )
-  }
-
-  const json = await response.json() as {
+  // timesteps=1d gives one entry per calendar day.
+  const json = await fetchTomorrowIo<{
     timelines?: { daily?: DailyTimelineEntry[] }
-  }
-
-  const daily = json.timelines?.daily ?? []
+  }>('forecast', lat, lng, '&timesteps=1d')
 
   // Match the requested date rather than indexing [1]: the provider's day
   // boundaries are its own, and silently returning the wrong day is worse than
   // throwing. The caller already treats a throw as "no forecast" and degrades.
-  const entry = daily.find((d) => typeof d.time === 'string' && d.time.startsWith(targetDate))
+  const entry = (json.timelines?.daily ?? [])
+    .find((d) => typeof d.time === 'string' && d.time.startsWith(targetDate))
   if (!entry) {
     throw new Error(`Tomorrow.io forecast has no daily entry for ${targetDate}`)
   }

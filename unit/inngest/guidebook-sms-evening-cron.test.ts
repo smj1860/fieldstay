@@ -141,6 +141,29 @@ const wetForecast    = { precipitationProbability: 70, temperatureMax: 66, weath
 
 const outdoorSponsor = sponsorRow({ id: 'sp_out', business_name: 'Ridge Kayak Co.', slot_type: 'outdoor_adventure' })
 
+/**
+ * The per-guest handler's arrangement: an opt-in row, a property, a sponsor
+ * pool, tonight's conditions and tomorrow's forecast. Every case below varies
+ * two or three of those and holds the rest fixed, so spelling the whole thing
+ * out per test buried the one line that mattered.
+ */
+function arrangeSend(opts: {
+  sponsors?: Record<string, unknown>[]
+  weather?:  unknown
+  forecast?: unknown
+  optin?:    Record<string, unknown>
+}) {
+  const supabase = makeSupabase({
+    guidebook_guest_sms_optins: [{ data: opts.optin ?? optinDetailRow(), error: null }],
+    properties:                 [{ data: propertyRow, error: null }],
+    guidebook_sponsors:         [{ data: opts.sponsors ?? [], error: null }],
+  })
+  ;(createServiceClient as ReturnType<typeof vi.fn>).mockReturnValue(supabase)
+  ;(getWeatherForLocation as ReturnType<typeof vi.fn>).mockResolvedValue(opts.weather ?? clearWeather)
+  ;(getTomorrowForecastForLocation as ReturnType<typeof vi.fn>).mockResolvedValue(opts.forecast ?? wetForecast)
+  return supabase
+}
+
 const sendEvent = { data: { optin_id: 'optin_1', org_id: 'org_1', property_id: 'prop_1', today_date: '2026-07-22', checkin_date: '2026-07-20' } }
 
 describe('guidebookSmsEveningCron (dispatcher)', () => {
@@ -429,127 +452,75 @@ describe('guidebookSmsEveningSend — outdoor_adventure', () => {
     vi.clearAllMocks()
   })
 
-  it('picks the outdoor sponsor and the tomorrow_outdoor template when tomorrow is clear', async () => {
-    const supabase = makeSupabase({
-      guidebook_guest_sms_optins: [{ data: optinDetailRow(), error: null }],
-      properties:                 [{ data: propertyRow, error: null }],
-      guidebook_sponsors:         [{ data: [sponsorRow(), outdoorSponsor], error: null }],
-    })
-    ;(createServiceClient as ReturnType<typeof vi.fn>).mockReturnValue(supabase)
-    ;(getWeatherForLocation as ReturnType<typeof vi.fn>).mockResolvedValue(clearWeather)
-    ;(getTomorrowForecastForLocation as ReturnType<typeof vi.fn>).mockResolvedValue(clearForecast)
+  const rainySponsor   = sponsorRow({ id: 'sp_rain', business_name: 'The Cozy Cafe',      slot_type: 'rainy_day' })
+  const generalSponsor = sponsorRow({ id: 'sp_gen',  business_name: 'Main St. Mercantile', slot_type: 'general' })
 
-    const result = await invokeHandler(guidebookSmsEveningSend, { event: sendEvent, step: makeStep() })
+  const run = () => invokeHandler(guidebookSmsEveningSend, { event: sendEvent, step: makeStep() })
 
-    expect(result).toEqual({ optinId: 'optin_1', sent: true })
-    expect(renderSmsBody).toHaveBeenCalledWith('org_1', 'tomorrow_outdoor', expect.objectContaining({
+  const expectTemplate = (key: string) =>
+    expect(renderSmsBody).toHaveBeenCalledWith('org_1', key, expect.objectContaining({
       property_name: 'Lake House',
     }))
+
+  it('picks the outdoor sponsor and the tomorrow_outdoor template when tomorrow is clear', async () => {
+    arrangeSend({ sponsors: [sponsorRow(), outdoorSponsor], forecast: clearForecast })
+
+    const result = await run()
+
+    expect(result).toEqual({ optinId: 'optin_1', sent: true })
+    expectTemplate('tomorrow_outdoor')
   })
 
   it('asks for TOMORROW\'s forecast, not today\'s', async () => {
-    const supabase = makeSupabase({
-      guidebook_guest_sms_optins: [{ data: optinDetailRow(), error: null }],
-      properties:                 [{ data: propertyRow, error: null }],
-      guidebook_sponsors:         [{ data: [outdoorSponsor], error: null }],
-    })
-    ;(createServiceClient as ReturnType<typeof vi.fn>).mockReturnValue(supabase)
-    ;(getWeatherForLocation as ReturnType<typeof vi.fn>).mockResolvedValue(clearWeather)
-    ;(getTomorrowForecastForLocation as ReturnType<typeof vi.fn>).mockResolvedValue(clearForecast)
-
-    await invokeHandler(guidebookSmsEveningSend, { event: sendEvent, step: makeStep() })
+    arrangeSend({ sponsors: [outdoorSponsor], forecast: clearForecast })
+    await run()
 
     // sendEvent's today_date is 2026-07-22.
     expect(getTomorrowForecastForLocation).toHaveBeenCalledWith(32.5, -85.9, '2026-07-23')
   })
 
   it('falls through to dinner_pints when tomorrow is clear but no outdoor sponsor exists', async () => {
-    const supabase = makeSupabase({
-      guidebook_guest_sms_optins: [{ data: optinDetailRow(), error: null }],
-      properties:                 [{ data: propertyRow, error: null }],
-      guidebook_sponsors:         [{ data: [sponsorRow()], error: null }],
-    })
-    ;(createServiceClient as ReturnType<typeof vi.fn>).mockReturnValue(supabase)
-    ;(getWeatherForLocation as ReturnType<typeof vi.fn>).mockResolvedValue(clearWeather)
-    ;(getTomorrowForecastForLocation as ReturnType<typeof vi.fn>).mockResolvedValue(clearForecast)
+    arrangeSend({ sponsors: [sponsorRow()], forecast: clearForecast })
 
-    const result = await invokeHandler(guidebookSmsEveningSend, { event: sendEvent, step: makeStep() })
+    const result = await run()
 
     expect(result).toEqual({ optinId: 'optin_1', sent: true })
-    expect(renderSmsBody).toHaveBeenCalledWith('org_1', 'evening_nudge', expect.objectContaining({
-      property_name: 'Lake House',
-    }))
+    expectTemplate('evening_nudge')
   })
 
   it('falls through to the general pool when tomorrow is clear and the only sponsor is general', async () => {
-    const generalSponsor = sponsorRow({ id: 'sp_gen', business_name: 'Main St. Mercantile', slot_type: 'general' })
-    const supabase = makeSupabase({
-      guidebook_guest_sms_optins: [{ data: optinDetailRow(), error: null }],
-      properties:                 [{ data: propertyRow, error: null }],
-      guidebook_sponsors:         [{ data: [generalSponsor], error: null }],
-    })
-    ;(createServiceClient as ReturnType<typeof vi.fn>).mockReturnValue(supabase)
-    ;(getWeatherForLocation as ReturnType<typeof vi.fn>).mockResolvedValue(clearWeather)
-    ;(getTomorrowForecastForLocation as ReturnType<typeof vi.fn>).mockResolvedValue(clearForecast)
+    arrangeSend({ sponsors: [generalSponsor], forecast: clearForecast })
 
-    const result = await invokeHandler(guidebookSmsEveningSend, { event: sendEvent, step: makeStep() })
+    const result = await run()
 
     expect(result).toEqual({ optinId: 'optin_1', sent: true })
-    expect(renderSmsBody).toHaveBeenCalledWith('org_1', 'evening_nudge', expect.objectContaining({
-      property_name: 'Lake House',
-    }))
+    expectTemplate('evening_nudge')
   })
 
   it('sends the rain alert when it is storming tonight even though tomorrow is clear', async () => {
-    const rainySponsor = sponsorRow({ id: 'sp_rain', business_name: 'The Cozy Cafe', slot_type: 'rainy_day' })
-    const supabase = makeSupabase({
-      guidebook_guest_sms_optins: [{ data: optinDetailRow(), error: null }],
-      properties:                 [{ data: propertyRow, error: null }],
-      guidebook_sponsors:         [{ data: [rainySponsor, outdoorSponsor], error: null }],
-    })
-    ;(createServiceClient as ReturnType<typeof vi.fn>).mockReturnValue(supabase)
-    ;(getWeatherForLocation as ReturnType<typeof vi.fn>).mockResolvedValue(rainyWeather)
-    ;(getTomorrowForecastForLocation as ReturnType<typeof vi.fn>).mockResolvedValue(clearForecast)
+    arrangeSend({ sponsors: [rainySponsor, outdoorSponsor], weather: rainyWeather, forecast: clearForecast })
 
-    const result = await invokeHandler(guidebookSmsEveningSend, { event: sendEvent, step: makeStep() })
+    const result = await run()
 
     expect(result).toEqual({ optinId: 'optin_1', sent: true })
-    expect(renderSmsBody).toHaveBeenCalledWith('org_1', 'rain_alert', expect.objectContaining({
-      property_name: 'Lake House',
-    }))
+    expectTemplate('rain_alert')
   })
 
   it('degrades to the dinner recommendation — never to no SMS — when the forecast call throws', async () => {
-    const supabase = makeSupabase({
-      guidebook_guest_sms_optins: [{ data: optinDetailRow(), error: null }],
-      properties:                 [{ data: propertyRow, error: null }],
-      guidebook_sponsors:         [{ data: [sponsorRow(), outdoorSponsor], error: null }],
-    })
-    ;(createServiceClient as ReturnType<typeof vi.fn>).mockReturnValue(supabase)
-    ;(getWeatherForLocation as ReturnType<typeof vi.fn>).mockResolvedValue(clearWeather)
+    arrangeSend({ sponsors: [sponsorRow(), outdoorSponsor] })
     ;(getTomorrowForecastForLocation as ReturnType<typeof vi.fn>)
       .mockRejectedValue(new Error('Tomorrow.io forecast request timed out after 8000ms'))
 
-    const result = await invokeHandler(guidebookSmsEveningSend, { event: sendEvent, step: makeStep() })
+    const result = await run()
 
     expect(result).toEqual({ optinId: 'optin_1', sent: true })
-    expect(renderSmsBody).toHaveBeenCalledWith('org_1', 'evening_nudge', expect.objectContaining({
-      property_name: 'Lake House',
-    }))
+    expectTemplate('evening_nudge')
     expect(sendSMS).toHaveBeenCalledTimes(1)
   })
 
   it('still claims the daily slot exactly once on the outdoor path — no double-send', async () => {
-    const supabase = makeSupabase({
-      guidebook_guest_sms_optins: [{ data: optinDetailRow(), error: null }],
-      properties:                 [{ data: propertyRow, error: null }],
-      guidebook_sponsors:         [{ data: [outdoorSponsor], error: null }],
-    })
-    ;(createServiceClient as ReturnType<typeof vi.fn>).mockReturnValue(supabase)
-    ;(getWeatherForLocation as ReturnType<typeof vi.fn>).mockResolvedValue(clearWeather)
-    ;(getTomorrowForecastForLocation as ReturnType<typeof vi.fn>).mockResolvedValue(clearForecast)
-
-    await invokeHandler(guidebookSmsEveningSend, { event: sendEvent, step: makeStep() })
+    const supabase = arrangeSend({ sponsors: [outdoorSponsor], forecast: clearForecast })
+    await run()
 
     expect(claimDailySmsSlot).toHaveBeenCalledTimes(1)
     expect(claimDailySmsSlot).toHaveBeenCalledWith(supabase, 'optin_1', 'last_evening_sms_date', '2026-07-22')
@@ -558,33 +529,18 @@ describe('guidebookSmsEveningSend — outdoor_adventure', () => {
   })
 
   it('sends nothing extra when the slot is already claimed on the outdoor path', async () => {
-    const supabase = makeSupabase({
-      guidebook_guest_sms_optins: [{ data: optinDetailRow(), error: null }],
-      properties:                 [{ data: propertyRow, error: null }],
-      guidebook_sponsors:         [{ data: [outdoorSponsor], error: null }],
-    })
-    ;(createServiceClient as ReturnType<typeof vi.fn>).mockReturnValue(supabase)
-    ;(getWeatherForLocation as ReturnType<typeof vi.fn>).mockResolvedValue(clearWeather)
-    ;(getTomorrowForecastForLocation as ReturnType<typeof vi.fn>).mockResolvedValue(clearForecast)
+    arrangeSend({ sponsors: [outdoorSponsor], forecast: clearForecast })
     ;(claimDailySmsSlot as ReturnType<typeof vi.fn>).mockResolvedValueOnce(false)
 
-    const result = await invokeHandler(guidebookSmsEveningSend, { event: sendEvent, step: makeStep() })
+    const result = await run()
 
     expect(result).toEqual({ optinId: 'optin_1', sent: false })
     expect(sendSMS).not.toHaveBeenCalled()
   })
 
   it('does not spend a Tomorrow.io call when the org has no outdoor sponsor', async () => {
-    const supabase = makeSupabase({
-      guidebook_guest_sms_optins: [{ data: optinDetailRow(), error: null }],
-      properties:                 [{ data: propertyRow, error: null }],
-      guidebook_sponsors:         [{ data: [sponsorRow()], error: null }],
-    })
-    ;(createServiceClient as ReturnType<typeof vi.fn>).mockReturnValue(supabase)
-    ;(getWeatherForLocation as ReturnType<typeof vi.fn>).mockResolvedValue(clearWeather)
-    ;(getTomorrowForecastForLocation as ReturnType<typeof vi.fn>).mockResolvedValue(clearForecast)
-
-    await invokeHandler(guidebookSmsEveningSend, { event: sendEvent, step: makeStep() })
+    arrangeSend({ sponsors: [sponsorRow()], forecast: clearForecast })
+    await run()
 
     // The forecast cannot change the message for an org that never sold the
     // slot, and this runs once per guest per night.
@@ -592,33 +548,16 @@ describe('guidebookSmsEveningSend — outdoor_adventure', () => {
   })
 
   it('does not spend a Tomorrow.io call when it is already raining tonight', async () => {
-    const rainySponsor = sponsorRow({ id: 'sp_rain', business_name: 'The Cozy Cafe', slot_type: 'rainy_day' })
-    const supabase = makeSupabase({
-      guidebook_guest_sms_optins: [{ data: optinDetailRow(), error: null }],
-      properties:                 [{ data: propertyRow, error: null }],
-      guidebook_sponsors:         [{ data: [rainySponsor, outdoorSponsor], error: null }],
-    })
-    ;(createServiceClient as ReturnType<typeof vi.fn>).mockReturnValue(supabase)
-    ;(getWeatherForLocation as ReturnType<typeof vi.fn>).mockResolvedValue(rainyWeather)
-    ;(getTomorrowForecastForLocation as ReturnType<typeof vi.fn>).mockResolvedValue(clearForecast)
-
-    await invokeHandler(guidebookSmsEveningSend, { event: sendEvent, step: makeStep() })
+    arrangeSend({ sponsors: [rainySponsor, outdoorSponsor], weather: rainyWeather, forecast: clearForecast })
+    await run()
 
     // Rain already won — the forecast cannot displace it.
     expect(getTomorrowForecastForLocation).not.toHaveBeenCalled()
   })
 
   it('queries the outdoor_adventure slot type — without this the sponsor is never in the pool', async () => {
-    const supabase = makeSupabase({
-      guidebook_guest_sms_optins: [{ data: optinDetailRow(), error: null }],
-      properties:                 [{ data: propertyRow, error: null }],
-      guidebook_sponsors:         [{ data: [outdoorSponsor], error: null }],
-    })
-    ;(createServiceClient as ReturnType<typeof vi.fn>).mockReturnValue(supabase)
-    ;(getWeatherForLocation as ReturnType<typeof vi.fn>).mockResolvedValue(clearWeather)
-    ;(getTomorrowForecastForLocation as ReturnType<typeof vi.fn>).mockResolvedValue(clearForecast)
-
-    await invokeHandler(guidebookSmsEveningSend, { event: sendEvent, step: makeStep() })
+    const supabase = arrangeSend({ sponsors: [outdoorSponsor], forecast: clearForecast })
+    await run()
 
     const inCall = supabase.calls.find((c) => c.table === 'guidebook_sponsors' && c.method === 'in')
     expect(inCall?.args[1]).toContain('outdoor_adventure')

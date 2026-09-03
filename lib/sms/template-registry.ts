@@ -103,6 +103,30 @@ export function withOptOutNotice(body: string): string {
 
 // ── Registry ──────────────────────────────────────────────────────────────────
 
+/**
+ * Variable descriptors shared by the guest-stay nudges.
+ *
+ * morning_nudge, evening_nudge, rain_alert and tomorrow_outdoor are four
+ * renderings of the same message — a property name and one sponsor line — so
+ * their variable lists were four copies of the same two objects. Named once
+ * here instead: a change to how the sponsor line is described reaches every
+ * template that carries one, and adding a fifth nudge cannot fork the wording.
+ */
+const PROPERTY_NAME_VAR: SmsTemplateVariable = {
+  token:       '{{property_name}}',
+  description: 'Property name',
+  example:     'Lakeside Lodge',
+}
+
+/** The offer line differs only in its example, which is per-slot on purpose. */
+function offerLineVar(example: string): SmsTemplateVariable {
+  return {
+    token:       '{{offer_line}}',
+    description: 'Sponsor line — always names the active sponsor; includes their offer or custom message plus distance when available',
+    example,
+  }
+}
+
 export const SMS_TEMPLATE_REGISTRY: SmsTemplateConfig[] = [
   {
     key:         'door_code',
@@ -131,9 +155,9 @@ export const SMS_TEMPLATE_REGISTRY: SmsTemplateConfig[] = [
     description: 'Sent each morning guests are in their stay (7–11 AM). Includes today\'s temperature and an optional sponsor offer.',
     audience:    'guest',
     variables: [
-      { token: '{{property_name}}', description: 'Property name',           example: 'Lakeside Lodge' },
-      { token: '{{temperature}}',   description: 'Current temp in °F',      example: '72' },
-      { token: '{{offer_line}}',    description: 'Sponsor line — always names the active sponsor; includes their offer or custom message plus distance when available', example: 'Sunrise Coffee has 20% off — just show this screen (0.4 mi away)' },
+      PROPERTY_NAME_VAR,
+      { token: '{{temperature}}', description: 'Current temp in °F', example: '72' },
+      offerLineVar('Sunrise Coffee has 20% off — just show this screen (0.4 mi away)'),
     ],
     defaultBody: 'Good morning! It\'s {{temperature}}°F at {{property_name}} today. {{offer_line}} Reply STOP to opt out.',
   },
@@ -143,7 +167,7 @@ export const SMS_TEMPLATE_REGISTRY: SmsTemplateConfig[] = [
     description: 'Replaces the morning nudge on a guest\'s CHECK-IN day. The morning cron runs 7-11 AM but check-in is typically mid-afternoon, so a guest arriving today would otherwise get "it\'s 72°F at your rental, here\'s a coffee spot" hours before they have keys.',
     audience:    'guest',
     variables: [
-      { token: '{{property_name}}', description: 'Property name', example: 'Lakeside Lodge' },
+      PROPERTY_NAME_VAR,
       { token: '{{checkin_line}}',  description: 'Check-in time sentence — empty when the property has no check-in time set, so the message still reads correctly', example: 'Just a reminder that check-in is at 4:00 PM.' },
     ],
     defaultBody: 'Looking forward to hosting you at {{property_name}} today! {{checkin_line}} Reply STOP to opt out.',
@@ -154,8 +178,8 @@ export const SMS_TEMPLATE_REGISTRY: SmsTemplateConfig[] = [
     description: 'Sent each evening guests are in their stay (5–9 PM). Includes an optional sponsor offer.',
     audience:    'guest',
     variables: [
-      { token: '{{property_name}}', description: 'Property name',                example: 'Lakeside Lodge' },
-      { token: '{{offer_line}}',    description: 'Sponsor line — always names the active sponsor; includes their offer or custom message plus distance when available', example: 'River Bistro has free dessert — just show this screen (0.8 mi away)' },
+      PROPERTY_NAME_VAR,
+      offerLineVar('River Bistro has free dessert — just show this screen (0.8 mi away)'),
     ],
     defaultBody: 'Hope you\'re enjoying your stay at {{property_name}}! {{offer_line}} Reply STOP to opt out.',
   },
@@ -165,8 +189,8 @@ export const SMS_TEMPLATE_REGISTRY: SmsTemplateConfig[] = [
     description: 'Replaces the morning or evening nudge when precipitation probability is ≥60% and a rainy-day sponsor is configured.',
     audience:    'guest',
     variables: [
-      { token: '{{property_name}}', description: 'Property name', example: 'Lakeside Lodge' },
-      { token: '{{offer_line}}',    description: 'Sponsor line — always names the active rainy-day sponsor; includes their offer or custom message plus distance when available', example: 'Cozy Books Café has 15% off — just show this screen (0.3 mi away)' },
+      PROPERTY_NAME_VAR,
+      offerLineVar('Cozy Books Café has 15% off — just show this screen (0.3 mi away)'),
     ],
     defaultBody: 'Heads up — rain expected near {{property_name}} today. {{offer_line}} Reply STOP to opt out.',
   },
@@ -176,8 +200,8 @@ export const SMS_TEMPLATE_REGISTRY: SmsTemplateConfig[] = [
     description: 'Replaces the evening nudge when tomorrow\'s forecast is clear and an Outdoor Adventure sponsor is configured. Sent the night before, because that is when guests decide what to do tomorrow.',
     audience:    'guest',
     variables: [
-      { token: '{{property_name}}', description: 'Property name', example: 'Lakeside Lodge' },
-      { token: '{{offer_line}}',    description: 'Sponsor line — always names the active outdoor-adventure sponsor; includes their offer or custom message plus distance when available', example: 'Ridge Kayak Co. has 10% off rentals — just show this screen (1.2 mi away)' },
+      PROPERTY_NAME_VAR,
+      offerLineVar('Ridge Kayak Co. has 10% off rentals — just show this screen (1.2 mi away)'),
     ],
     defaultBody: 'Tomorrow looks clear near {{property_name}} — a good day to get outside. {{offer_line}} Reply STOP to opt out.',
   },
