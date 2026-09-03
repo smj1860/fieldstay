@@ -4,17 +4,19 @@ import type { SupabaseClient } from '@supabase/supabase-js'
 import { unwrap, unwrapList } from '@/lib/supabase/unwrap'
 import { asSponsorAssignmentMode } from '@/lib/properties/defaults'
 import { asSlotType } from '@/lib/guidebook/offer'
-import {
-  MAX_SPONSORS_PER_PROPERTY,
-  ASSIGNMENT_MIN_PROPERTIES,
-} from '@/lib/guidebook/assignment-constants'
+// Only MAX_SPONSORS_PER_PROPERTY is read inside this module; the re-export
+// below is what gives ASSIGNMENT_MIN_PROPERTIES its server-side home.
+import { MAX_SPONSORS_PER_PROPERTY } from '@/lib/guidebook/assignment-constants'
+import { pickNearestSponsor, SPONSOR_POOL_COLUMNS, type SponsorPoolRow } from '@/lib/sms/pick-nearest-sponsor'
+import type { GuidebookSlotType, SponsorAssignmentMode } from '@/types/database'
 
 // Re-exported so server-side callers have one import, while the 'use client'
 // assignment UI reads them from the leaf module directly — importing THIS
 // module from a client component would fail the build on `server-only`.
-export { MAX_SPONSORS_PER_PROPERTY, ASSIGNMENT_MIN_PROPERTIES }
-import { pickNearestSponsor, SPONSOR_POOL_COLUMNS, type SponsorPoolRow } from '@/lib/sms/pick-nearest-sponsor'
-import type { GuidebookSlotType, SponsorAssignmentMode } from '@/types/database'
+export {
+  MAX_SPONSORS_PER_PROPERTY,
+  ASSIGNMENT_MIN_PROPERTIES,
+} from '@/lib/guidebook/assignment-constants'
 
 /**
  * ONE resolver, used by every read of "which sponsors belong on this
