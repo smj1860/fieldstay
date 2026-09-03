@@ -13,7 +13,7 @@
 // stored. Verified against information_schema.columns.column_default.
 // ============================================================
 
-import type { Enums, Json } from '@/types/database'
+import type { Enums, Json, SponsorAssignmentMode } from '@/types/database'
 import { asBooleanMap } from '@/lib/json'
 
 /** The subset of `properties` columns this module resolves. */
@@ -30,6 +30,9 @@ type PropertyDefaultable = {
   // jsonb flag maps — `Json` at the column, a boolean map to every consumer.
   setup_steps_completed:   Json
   amenities:               Json
+  // `text` at the column (a CHECK constraint, not an enum), a two-value union
+  // to every consumer.
+  sponsor_assignment_mode: string
 }
 
 type Defaulted<T extends PropertyDefaultable> = Omit<T, keyof PropertyDefaultable> & {
@@ -44,6 +47,7 @@ type Defaulted<T extends PropertyDefaultable> = Omit<T, keyof PropertyDefaultabl
   same_day_premium_pct:    number
   setup_steps_completed:   Record<string, boolean>
   amenities:               Record<string, boolean>
+  sponsor_assignment_mode: SponsorAssignmentMode
 }
 
 /**
@@ -69,5 +73,20 @@ export function withPropertyDefaults<T extends PropertyDefaultable>(row: T): Def
     same_day_premium_pct:    row.same_day_premium_pct    ?? 25.0,
     setup_steps_completed:   asBooleanMap(row.setup_steps_completed),
     amenities:               asBooleanMap(row.amenities),
+    sponsor_assignment_mode: asSponsorAssignmentMode(row.sponsor_assignment_mode),
   }
+}
+
+/**
+ * Narrows the `text` column to its two real values.
+ *
+ * Only the exact string 'manual' counts as manual; anything else is 'auto'.
+ * The DB CHECK makes a third value unrepresentable, so this is a narrowing
+ * rather than a validation — but it decides which way an impossible value
+ * falls, and 'auto' is the right side to land on: an unrecognised mode meaning
+ * "automatic" shows the property its nearest sponsors, while defaulting the
+ * other way would show a property nothing at all and look like data loss.
+ */
+export function asSponsorAssignmentMode(value: string | null): SponsorAssignmentMode {
+  return value === 'manual' ? 'manual' : 'auto'
 }

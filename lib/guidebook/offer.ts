@@ -1,4 +1,4 @@
-import type { GuidebookOfferType } from '@/types/database'
+import type { GuidebookOfferType, GuidebookSlotType } from '@/types/database'
 
 /**
  * Every member of GuidebookOfferType, as a Record so TypeScript enforces
@@ -81,4 +81,39 @@ export function formatOffer(
     default:
       return null
   }
+}
+
+/**
+ * Every member of GuidebookSlotType, as a Record for the same reason
+ * OFFER_TYPES is one: adding a value to the union must stop this compiling
+ * until it is listed, rather than silently falling through to the catch-all.
+ *
+ * That failure would be quiet and expensive here — a new named slot missing
+ * from this list would be narrowed to 'other', which the resolver treats as
+ * unnamed filler, so the slot would never be selected as its own category and
+ * its sponsors would compete for leftover space. That is the same class of bug
+ * as outdoor_adventure never firing.
+ */
+const SLOT_TYPES: Record<GuidebookSlotType, true> = {
+  morning_brew:      true,
+  dinner_pints:      true,
+  rainy_day:         true,
+  outdoor_adventure: true,
+  general:           true,
+  other:             true,
+}
+
+const SLOT_TYPE_KEYS = new Set<string>(Object.keys(SLOT_TYPES))
+
+/**
+ * Narrows guidebook_sponsors.slot_type — TEXT with a CHECK constraint, so
+ * PostgREST hands it back as a bare `string` — to the union the resolver and
+ * both nudge crons branch on.
+ *
+ * Unrecognised input falls back to 'other': a sponsor still appears, as
+ * unnamed filler, rather than vanishing from the guidebook entirely. The DB
+ * CHECK makes that unreachable in practice.
+ */
+export function asSlotType(value: string | null | undefined): GuidebookSlotType {
+  return SLOT_TYPE_KEYS.has(value ?? '') ? (value as GuidebookSlotType) : 'other'
 }

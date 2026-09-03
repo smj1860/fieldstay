@@ -8,6 +8,13 @@ import type { RealtimePostgresChangesPayload } from '@supabase/supabase-js'
 import { QRCodeSVG } from 'qrcode.react'
 import { Sun, Wine, CloudRain, Tent, MapPin, Pencil, Check, type LucideIcon } from 'lucide-react'
 import { SponsorFormModal } from './sponsor-form-modal'
+import { MAX_SPONSORS_PER_PROPERTY } from '@/lib/guidebook/assignment-constants'
+import {
+  SponsorPropertiesDialog,
+  PropertySponsorsDialog,
+  PropertyAssignmentSummary,
+  type AssignmentProperty,
+} from './sponsor-assignment'
 import { CelebrationModal } from './celebration-modal'
 import { upsertPropertyGuidebookConfig, updateStayExtensionSettings } from '@/app/actions/guidebook'
 import { MAX_FEATURED_AMENITIES, prettifyAmenityKey } from '@/lib/guidebook/featured-amenities'
@@ -45,6 +52,10 @@ interface GuidebookClientProps {
   initialConfig:             GuidebookConfiguration | null
   initialActiveSponsorCount: number
   properties:                Property[]
+  /** 5+ properties — below that this whole surface is hidden. */
+  assignmentEnabled:         boolean
+  /** Empty when assignmentEnabled is false; the page does not resolve it. */
+  assignmentProperties:      AssignmentProperty[]
   appUrl:                    string
 }
 
@@ -250,11 +261,17 @@ export function GuidebookClient({
   initialConfig,
   initialActiveSponsorCount,
   properties,
+  assignmentEnabled,
+  assignmentProperties,
   appUrl,
 }: Readonly<GuidebookClientProps>) {
   const [sponsors, setSponsors]       = useState<GuidebookSponsor[]>(initialSponsors)
   const [config, setConfig]           = useState<GuidebookConfiguration | null>(initialConfig)
   const [editingSlot, setEditingSlot] = useState<number | null>(null)
+  // Which sponsor's property list is open (bulk path), and which property's
+  // sponsor list is open (override path). Never both.
+  const [assigningSponsorId, setAssigningSponsorId]   = useState<string | null>(null)
+  const [assigningPropertyId, setAssigningPropertyId] = useState<string | null>(null)
   const [celebration, setCelebration] = useState<CelebrationTier>(null)
   const prevCountRef                  = useRef(initialActiveSponsorCount)
   const supabase                      = createClient()
@@ -330,6 +347,22 @@ export function GuidebookClient({
   }, {})
 
   const editingSponsor = editingSlot !== null ? (sponsorsBySlot[editingSlot] ?? null) : null
+
+  const assigningSponsor  = sponsors.find((s) => s.id === assigningSponsorId) ?? null
+  const assigningProperty = assignmentProperties.find((p) => p.id === assigningPropertyId) ?? null
+
+  /**
+   * The label for a sponsor's "where does this appear" button.
+   *
+   * Counts the RESOLVED set, so an automatic property that happens to show
+   * this sponsor is included — that is what the manager sees on the page, and
+   * therefore what the button should say.
+   */
+  const assignmentButtonLabel = (sponsorId: string): string => {
+    const n = assignmentProperties.filter((p) => p.sponsors.some((s) => s.id === sponsorId)).length
+    if (n === 0) return 'Appears on'
+    return n === 1 ? 'On 1 property' : `On ${n} properties`
+  }
 
   return (
     <div style={{ maxWidth: '900px', margin: '0 auto', padding: '32px 24px' }}>
@@ -504,6 +537,19 @@ export function GuidebookClient({
                       Media Kit
                     </a>
                     <SponsorOnePagerButton sponsor={sponsor} appUrl={appUrl} />
+                    {assignmentEnabled && sponsor.status === 'active' && (
+                      <button
+                        type="button"
+                        onClick={() => setAssigningSponsorId(sponsor.id)}
+                        style={{
+                          fontSize: '13px', fontWeight: '500', color: 'var(--text-primary)',
+                          border: '1px solid var(--border)', borderRadius: 'var(--radius)',
+                          padding: '6px 12px', backgroundColor: 'var(--bg-card)', cursor: 'pointer',
+                        }}
+                      >
+                        {assignmentButtonLabel(sponsor.id)}
+                      </button>
+                    )}
                   </>
                 )}
                 <button
@@ -521,6 +567,28 @@ export function GuidebookClient({
           )
         })}
       </div>
+
+      {assignmentEnabled && (
+        <div style={{ backgroundColor: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: 'var(--radius-lg)', overflow: 'hidden', marginBottom: '32px' }}>
+          <div style={{ padding: '16px 20px', borderBottom: '1px solid var(--border)' }}>
+            <h2 style={{ fontSize: '15px', fontWeight: '600', color: 'var(--text-primary)', margin: '0 0 4px' }}>
+              Sponsors by Property
+            </h2>
+            <p style={{ fontSize: '13px', color: 'var(--text-muted)', margin: 0 }}>
+              Each property shows up to {MAX_SPONSORS_PER_PROPERTY} sponsors. Properties are assigned
+              automatically by proximity until you change one — after that your
+              choice stays put.
+            </p>
+          </div>
+          {assignmentProperties.map((p) => (
+            <PropertyAssignmentSummary
+              key={p.id}
+              property={p}
+              onEdit={() => setAssigningPropertyId(p.id)}
+            />
+          ))}
+        </div>
+      )}
 
       <GapNightMessagingSection config={config} />
 
@@ -554,6 +622,22 @@ export function GuidebookClient({
           appUrl={appUrl}
           onClose={() => setEditingSlot(null)}
           onSaved={() => setEditingSlot(null)}
+        />
+      )}
+
+      {assigningSponsor && (
+        <SponsorPropertiesDialog
+          sponsor={assigningSponsor}
+          properties={assignmentProperties}
+          onClose={() => setAssigningSponsorId(null)}
+        />
+      )}
+
+      {assigningProperty && (
+        <PropertySponsorsDialog
+          property={assigningProperty}
+          sponsors={sponsors.filter((s) => s.status === 'active')}
+          onClose={() => setAssigningPropertyId(null)}
         />
       )}
 
