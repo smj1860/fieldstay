@@ -11,6 +11,7 @@ const EXPECTED_KEYS: SmsTemplateKey[] = [
   'arrival_reminder',
   'evening_nudge',
   'rain_alert',
+  'tomorrow_outdoor',
   'stay_extension',
   'vendor_work_order',
   'crew_invite',
@@ -58,7 +59,7 @@ describe('renderTemplate', () => {
 })
 
 describe('SMS_TEMPLATE_REGISTRY', () => {
-  it('registers exactly the ten known template keys, each exactly once', () => {
+  it('registers exactly the known template keys, each exactly once', () => {
     const keys = SMS_TEMPLATE_REGISTRY.map((t) => t.key)
     expect(keys.sort()).toEqual([...EXPECTED_KEYS].sort())
     expect(new Set(keys).size).toBe(keys.length)

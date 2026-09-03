@@ -18,6 +18,7 @@ import {
   buildMorningNudgeSMS,
   buildEveningNudgeSMS,
   buildRainAlertSMS,
+  buildTomorrowOutdoorSMS,
   buildVendorWorkOrderSMS,
   buildCrewInviteSMS,
   buildCrewTurnoverAssignedSMS,
@@ -81,7 +82,7 @@ export async function renderSmsBody(
   // Custom template found — render and return.
   //
   // withOptOutNotice is the backstop, not decoration. An org override REPLACES
-  // the default body wholesale, and every one of the ten built-in defaults ends
+  // the default body wholesale, and every one of the built-in defaults ends
   // with "Reply STOP to opt out." — so before this, saving a custom template
   // that omitted it silently stripped the opt-out instruction from every SMS
   // that org sent, guest and crew alike, for as long as the override existed.
@@ -136,6 +137,12 @@ function renderDefault(
 
     case 'rain_alert':
       return buildRainAlertSMS(
+        String(vars.property_name ?? ''),
+        vars.offer_line ? String(vars.offer_line) : null
+      )
+
+    case 'tomorrow_outdoor':
+      return buildTomorrowOutdoorSMS(
         String(vars.property_name ?? ''),
         vars.offer_line ? String(vars.offer_line) : null
       )
