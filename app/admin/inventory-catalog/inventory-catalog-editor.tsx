@@ -5,7 +5,7 @@ import { Plus, Trash2, Check, Upload, FileText } from 'lucide-react'
 import { Button } from '@/components/ui/Button'
 import { Checkbox } from '@/components/ui/Checkbox'
 import { InlineAlert } from '@/components/ui/InlineAlert'
-import { INVENTORY_CATEGORY_LABELS } from '@/lib/utils'
+import { INVENTORY_CATEGORY_LABELS, omitById, patchById } from '@/lib/utils'
 import {
   createCatalogItem, updateCatalogItem, deleteCatalogItem, bulkImportCatalogItems,
   type CatalogItemInput,
@@ -145,7 +145,7 @@ export function InventoryCatalogEditor({
         is_active:         row.is_active,
       })
       if (result.error) { setError(result.error); return }
-      setRows((prev) => prev.map((r) => (r.id === row.id ? { ...r, dirty: false } : r)))
+      setRows(patchById<RowState>(row.id, { dirty: false }))
       setSavedRowId(row.id)
       setTimeout(() => setSavedRowId(null), 2000)
     })
@@ -156,7 +156,7 @@ export function InventoryCatalogEditor({
       setError(null)
       const result = await deleteCatalogItem(id)
       if (result.error) { setError(result.error); return }
-      setRows((prev) => prev.filter((r) => r.id !== id))
+      setRows(omitById(id))
     })
   }
 

@@ -2,7 +2,7 @@
 
 import { useState, useTransition } from 'react'
 import { Plus, Trash2 } from 'lucide-react'
-import { INVENTORY_CATEGORY_LABELS } from '@/lib/utils'
+import { INVENTORY_CATEGORY_LABELS, omitById } from '@/lib/utils'
 import { Button } from '@/components/ui/Button'
 import { Checkbox } from '@/components/ui/Checkbox'
 import { Dialog } from '@/components/ui/Dialog'
@@ -108,7 +108,7 @@ function TemplateDetail({
     startSave(async () => {
       const result = await removeTemplateItem(itemId)
       if (result.error) { setError(result.error); return }
-      setItems((prev) => prev.filter((i) => i.id !== itemId))
+      setItems(omitById(itemId))
     })
   }
 

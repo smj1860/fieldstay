@@ -54,8 +54,9 @@ export function SignupForm() {
     const callbackParams = new URLSearchParams()
     if (inviteToken) callbackParams.set('invite_token', inviteToken)
     if (next)        callbackParams.set('next', next)
-    const query     = callbackParams.toString()
-    const nextParam = `/auth/callback${query ? `?${query}` : ''}`
+    const query       = callbackParams.toString()
+    const queryString = query ? `?${query}` : ''
+    const nextParam   = `/auth/callback${queryString}`
 
     const { error, data } = await supabase.auth.signUp({
       email,

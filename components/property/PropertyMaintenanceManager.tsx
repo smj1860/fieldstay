@@ -26,6 +26,7 @@ import { Badge } from '@/components/ui/Badge'
 import { Button } from '@/components/ui/Button'
 import { Input } from '@/components/ui/Input'
 import { Checkbox } from '@/components/ui/Checkbox'
+import { omitById } from '@/lib/utils'
 
 // ── Due date badge ────────────────────────────────────────────────────────────
 
@@ -547,7 +548,7 @@ export function PropertyMaintenanceManager({
     setRemovingId(item.id)
     startRemove(async () => {
       await removeMaintenanceScheduleItem(item.id, propertyId)
-      setSchedules((prev) => prev.filter((s) => s.id !== item.id))
+      setSchedules(omitById(item.id))
       setRemovingId(null)
     })
   }

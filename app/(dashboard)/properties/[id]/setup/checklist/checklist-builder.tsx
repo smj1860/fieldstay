@@ -23,6 +23,79 @@ function makeId() {
   return crypto.randomUUID()
 }
 
+// ── Pure section transforms ───────────────────────────────────────────────────
+//
+// These were inline `setSections(prev => prev.map(s => ... s.items.map(i => ...)))`
+// chains, which put the item callback five closures deep inside the component.
+// As module-level functions they are one level deep, and they are the whole
+// editing model in one place rather than scattered through the handlers.
+
+function mapSection(sections: Section[], sectionTempId: string, fn: (s: Section) => Section): Section[] {
+  return sections.map((s) => (s.tempId === sectionTempId ? fn(s) : s))
+}
+
+function withAllPhotos(sections: Section[], requiresPhoto: boolean): Section[] {
+  return sections.map((s) => ({
+    ...s,
+    items: s.items.map((item) => ({ ...item, requires_photo: requiresPhoto })),
+  }))
+}
+
+function withSectionPhotosToggled(sections: Section[], sectionTempId: string): Section[] {
+  return mapSection(sections, sectionTempId, (s) => {
+    const requiresPhoto = !s.items.every((i) => i.requires_photo)
+    return { ...s, items: s.items.map((item) => ({ ...item, requires_photo: requiresPhoto })) }
+  })
+}
+
+function withItemRemoved(sections: Section[], sectionTempId: string, itemTempId: string): Section[] {
+  return mapSection(sections, sectionTempId, (s) => ({
+    ...s,
+    items: s.items.filter((i) => i.tempId !== itemTempId),
+  }))
+}
+
+function withItemUpdated(
+  sections: Section[], sectionTempId: string, itemTempId: string, field: keyof Item, value: unknown,
+): Section[] {
+  return mapSection(sections, sectionTempId, (s) => ({
+    ...s,
+    items: s.items.map((i) => (i.tempId === itemTempId ? { ...i, [field]: value } : i)),
+  }))
+}
+
+/** Swaps an item one slot up or down. A move past either end is a no-op. */
+function withItemMoved(
+  sections: Section[], sectionTempId: string, itemTempId: string, dir: -1 | 1,
+): Section[] {
+  return mapSection(sections, sectionTempId, (s) => {
+    const idx  = s.items.findIndex((i) => i.tempId === itemTempId)
+    const swap = idx + dir
+    if (swap < 0 || swap >= s.items.length) return s
+
+    const next = [...s.items];
+    [next[idx], next[swap]] = [next[swap], next[idx]]
+    return { ...s, items: next }
+  })
+}
+
+/** The save/complete wire payload: sort_order comes from array position. */
+function toSavePayload(sections: Section[]) {
+  return sections.map((s, si) => ({
+    id:   s.id,
+    name: s.name,
+    sort_order: si,
+    room_template_id: s.roomTemplateId ?? null,
+    items: s.items.map((item, ii) => ({
+      id:             item.id,
+      task:           item.task,
+      requires_photo: item.requires_photo,
+      notes:          item.notes,
+      sort_order:     ii,
+    })),
+  }))
+}
+
 const DEFAULT_SECTIONS: Section[] = [
   {
     tempId: makeId(), name: 'Kitchen', items: [
@@ -248,18 +321,11 @@ export function ChecklistBuilder({
     const totalItems = sections.reduce((n, s) => n + s.items.length, 0)
     const photoItems = sections.reduce((n, s) => n + s.items.filter((i) => i.requires_photo).length, 0)
     const newValue   = !(totalItems > 0 && photoItems === totalItems)
-    setSections((prev) => prev.map((s) => ({
-      ...s,
-      items: s.items.map((item) => ({ ...item, requires_photo: newValue })),
-    })))
+    setSections((prev) => withAllPhotos(prev, newValue))
   }
 
   const toggleSectionPhotos = (sectionTempId: string) => {
-    setSections((prev) => prev.map((s) => {
-      if (s.tempId !== sectionTempId) return s
-      const newValue = !s.items.every((i) => i.requires_photo)
-      return { ...s, items: s.items.map((item) => ({ ...item, requires_photo: newValue })) }
-    }))
+    setSections((prev) => withSectionPhotosToggled(prev, sectionTempId))
   }
 
   const addSection = () => {
@@ -338,29 +404,15 @@ export function ChecklistBuilder({
   }
 
   const removeItem = (sectionTempId: string, itemTempId: string) => {
-    setSections((p) => p.map((s) => s.tempId === sectionTempId
-      ? { ...s, items: s.items.filter((i) => i.tempId !== itemTempId) }
-      : s
-    ))
+    setSections((p) => withItemRemoved(p, sectionTempId, itemTempId))
   }
 
   const updateItem = (sectionTempId: string, itemTempId: string, field: keyof Item, value: unknown) => {
-    setSections((p) => p.map((s) => s.tempId === sectionTempId
-      ? { ...s, items: s.items.map((i) => i.tempId === itemTempId ? { ...i, [field]: value } : i) }
-      : s
-    ))
+    setSections((p) => withItemUpdated(p, sectionTempId, itemTempId, field, value))
   }
 
   const moveItem = (sectionTempId: string, itemTempId: string, dir: -1 | 1) => {
-    setSections((p) => p.map((s) => {
-      if (s.tempId !== sectionTempId) return s
-      const idx  = s.items.findIndex((i) => i.tempId === itemTempId)
-      const next = [...s.items]
-      const swap = idx + dir
-      if (swap < 0 || swap >= next.length) return s;
-      [next[idx], next[swap]] = [next[swap], next[idx]]
-      return { ...s, items: next }
-    }))
+    setSections((p) => withItemMoved(p, sectionTempId, itemTempId, dir))
   }
 
   const handleBroadcast = () => {
@@ -390,19 +442,7 @@ export function ChecklistBuilder({
 
   const save = () => {
     startSave(async () => {
-      const payload = sections.map((s, si) => ({
-        id:   s.id,
-        name: s.name,
-        sort_order: si,
-        room_template_id: s.roomTemplateId ?? null,
-        items: s.items.map((item, ii) => ({
-          id:             item.id,
-          task:           item.task,
-          requires_photo: item.requires_photo,
-          notes:          item.notes,
-          sort_order:     ii,
-        })),
-      }))
+      const payload = toSavePayload(sections)
       const result = await saveChecklistTemplate(propertyId, template?.id ?? null, payload)
       if (result.error) { setError(result.error); return }
       setSaved(true)
@@ -658,19 +698,7 @@ export function ChecklistBuilder({
           disabled={completing}
           onClick={() =>
             startComplete(async () => {
-              const payload = sections.map((s, si) => ({
-                id:         s.id,
-                name:       s.name,
-                sort_order: si,
-                room_template_id: s.roomTemplateId ?? null,
-                items:      s.items.map((item, ii) => ({
-                  id:             item.id,
-                  task:           item.task,
-                  requires_photo: item.requires_photo,
-                  notes:          item.notes,
-                  sort_order:     ii,
-                })),
-              }))
+              const payload = toSavePayload(sections)
               const saveResult = await saveChecklistTemplate(
                 propertyId,
                 template?.id ?? null,

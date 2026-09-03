@@ -270,6 +270,11 @@ export function GuestGuidebookView({
 
   const effectivePhase: EffectivePhase = stay?.phase ?? (hourOfDay < 12 ? 'arrival' : 'mid')
   const skyState = getSkyState(hourOfDay, effectivePhase)
+  // Hoisted out of the className template — a CSS-module lookup keyed by a
+  // template literal nested inside another one is the exact shape the
+  // no-nested-template-literals rule flags.
+  const skyStateClass = styles[`sky_${skyState}`]
+  const sunStateClass = styles[`sun_${skyState}`]
   const checkOutTime = formatTime12h(property.checkout_time)
 
   const heroSponsor = effectivePhase === 'checkout'
@@ -302,8 +307,8 @@ export function GuestGuidebookView({
         } as React.CSSProperties),
       }}
     >
-      <div className={`${styles.sky} ${styles[`sky_${skyState}`]}`}>
-        <div className={`${styles.sun} ${styles[`sun_${skyState}`]}`} />
+      <div className={`${styles.sky} ${skyStateClass}`}>
+        <div className={`${styles.sun} ${sunStateClass}`} />
         <SkyMoment skyState={skyState} weather={weather} momentLine={momentLine} />
         <PropertyTicket property={property} heroPhotoUrl={heroPhotoUrl} stay={stay} />
       </div>

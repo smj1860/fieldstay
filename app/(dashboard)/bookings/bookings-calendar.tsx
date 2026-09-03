@@ -6,7 +6,7 @@ import Timeline, { TimelineMarkers, TodayMarker } from 'react-calendar-timeline'
 import type { Id, TimelineItemBase } from 'react-calendar-timeline'
 import dayjs from 'dayjs'
 import { ExternalLink } from 'lucide-react'
-import { formatDate } from '@/lib/utils'
+import { formatDateWithOptionalTime } from '@/lib/utils'
 import { unwrapJoin } from '@/lib/utils/supabase-joins'
 import { useToast } from '@/components/dashboard-toast-provider'
 import { Dialog } from '@/components/ui/Dialog'
@@ -179,11 +179,11 @@ function BookingDetailPanel({
         <DetailRow label="Property"  value={booking.properties?.name ?? '—'} />
         <DetailRow
           label="Check-in"
-          value={`${formatDate(booking.checkin_date)}${booking.checkin_time ? ` at ${booking.checkin_time}` : ''}`}
+          value={formatDateWithOptionalTime(booking.checkin_date, booking.checkin_time)}
         />
         <DetailRow
           label="Check-out"
-          value={`${formatDate(booking.checkout_date)}${booking.checkout_time ? ` at ${booking.checkout_time}` : ''}`}
+          value={formatDateWithOptionalTime(booking.checkout_date, booking.checkout_time)}
         />
         <DetailRow label="Nights" value={`${nights} night${nights !== 1 ? 's' : ''}`} />
       </div>

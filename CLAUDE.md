@@ -1319,12 +1319,14 @@ and refactors. Violations will appear as SonarQube findings on the next scan.
   `if`/`for`/`while`/`switch`/`try` blocks rather than indenting further, and
   extract named sibling functions rather than nesting closures more than 4
   levels deep. ESLint-enforced (`sonarjs/nested-control-flow` for blocks,
-  `sonarjs/no-nested-functions` for closures) — `warn` for the same rollout
-  reason as above
+  `sonarjs/no-nested-functions` for closures) at **`error`** since 2026-09-02 —
+  both reached zero and were promoted. `no-nested-functions` stays OFF in
+  `unit/`/`scripts/`/`e2e/`, and that is a scope decision rather than a
+  severity one: `describe > it > callback > helper` is the ordinary test shape
 - **No nested template literals** — extract inner expressions to named variables
   first, or use `cn()` for className construction if already imported in the file.
-  ESLint-enforced (`sonarjs/no-nested-template-literals`) — `warn` for the same
-  rollout reason as above
+  ESLint-enforced (`sonarjs/no-nested-template-literals`) at **`error`** since
+  2026-09-02, having reached zero
 - **No invariant conditionals** — a ternary where both branches return the same
   value is always a bug; review intent before fixing
 
@@ -1369,8 +1371,9 @@ and refactors. Violations will appear as SonarQube findings on the next scan.
   surface them if ESLint is not configured to catch them
 - No chained ternary expressions — break them into `if/else` blocks or a
   named classification function. ESLint-enforced (`sonarjs/no-nested-conditional`,
-  `eslint.config.mjs`) — `warn` while pre-existing violations get cleared,
-  same rollout pattern as the jsx-a11y block
+  `eslint.config.mjs`) — the LAST sonarjs rule still at `warn`, at 42 as of
+  2026-09-02 (down from 122 at rollout). The other four are all `error` now;
+  promote this one the same way once it reaches zero
 
 ### Accessibility Checklist (apply to all new UI)
 - Non-native click targets → `role`, `tabIndex`, `onKeyDown` or convert to `<button>`
@@ -1552,10 +1555,11 @@ following them stops being a memory test. Five layers, checked in CI via
    complexity-40 function in each scope must fail, a simple control must not),
    the same protocol the semgrep chokepoint promotions use and for the same
    reason — a rule at zero because it is BROKEN looks identical to one at zero
-   because the tree is clean. The other four stay at `warn` pending their own
-   burn-downs (68 `no-nested-conditional`, 22 `no-nested-functions`, 10
-   `no-nested-template-literals`, 1 `nested-control-flow`); promote each the
-   same way, when and only when it reaches zero.
+   because the tree is clean. `nested-control-flow`, `no-nested-functions` and
+   `no-nested-template-literals` were promoted the same day and the same way,
+   each after reaching zero (1, 22 and 10 respectively), fire-checked together.
+   `no-nested-conditional` is the last one left at `warn`, at 42; promote it
+   the same way, when and only when it reaches zero.
 
 2. **Guardrail tests** (`unit/guardrails/`) — cross-file invariants no
    per-file rule can express:

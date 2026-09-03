@@ -10,7 +10,7 @@ import {
   CheckCircle2, Ban, HelpCircle, ExternalLink,
   Search, Download, LayoutList,
 } from 'lucide-react'
-import { cn, formatDate } from '@/lib/utils'
+import { cn, formatDate, formatDateWithOptionalTime } from '@/lib/utils'
 import { unwrapJoin } from '@/lib/utils/supabase-joins'
 import { createBooking, cancelBooking, triggerSync } from './actions'
 import { BookingsCalendar } from './bookings-calendar'
@@ -317,8 +317,8 @@ function BookingCard({
       {expanded && (
         <div className="border-t px-4 pb-4 pt-3 space-y-3" style={{ borderColor: 'var(--border)' }}>
           <div className="grid grid-cols-2 sm:grid-cols-3 gap-3 text-sm">
-            <Detail label="Check-in"  value={`${formatDate(booking.checkin_date)}${booking.checkin_time ? ` at ${booking.checkin_time}` : ''}`} />
-            <Detail label="Check-out" value={`${formatDate(booking.checkout_date)}${booking.checkout_time ? ` at ${booking.checkout_time}` : ''}`} />
+            <Detail label="Check-in"  value={formatDateWithOptionalTime(booking.checkin_date, booking.checkin_time)} />
+            <Detail label="Check-out" value={formatDateWithOptionalTime(booking.checkout_date, booking.checkout_time)} />
             <Detail label="Nights"    value={`${nights} night${nights !== 1 ? 's' : ''}`} />
             {property && (
               <Detail
