@@ -40,7 +40,13 @@ export default async function GuidebookPage() {
       .select('id, name, address, lat, lng, amenities, sponsor_assignment_mode')
       .eq('org_id', membership.org_id)
       .eq('is_active', true)
-      .order('name'),
+      .order('name')
+      // Bounded to match the dashboard layout's and properties/actions.ts's
+      // read of the same list. 500 is well clear of the 150-property
+      // self-serve ceiling, leaving headroom for a negotiated Enterprise org;
+      // past it the page shows a short list, which is visible, rather than
+      // PostgREST's silent max_rows truncation at 1000.
+      .limit(500),
   ])
 
   const sponsors   = sponsorsResult.data   ?? []

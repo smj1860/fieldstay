@@ -2204,6 +2204,7 @@ export interface HandWrittenRowMap {
   support_messages:                    SupportMessage
   guidebook_configurations:            GuidebookConfiguration
   guidebook_sponsors:                  GuidebookSponsor
+  guidebook_sponsor_assignments:       GuidebookSponsorAssignment
   guidebook_property_configs:          GuidebookPropertyConfig
   guidebook_guest_sms_optins:          GuidebookGuestSmsOptin
   guidebook_offer_redemptions:         GuidebookOfferRedemption
