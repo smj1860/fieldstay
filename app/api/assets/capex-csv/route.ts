@@ -23,7 +23,7 @@ export async function GET(req: Request) {
   }
 
   const url  = new URL(req.url)
-  const year = parseInt(url.searchParams.get('year') ?? String(new Date().getFullYear()), 10)
+  const year = Number.parseInt(url.searchParams.get('year') ?? String(new Date().getFullYear()), 10)
 
   // A failed read used to export an empty CSV, which looks like "no capex
   // planned" rather than an error.

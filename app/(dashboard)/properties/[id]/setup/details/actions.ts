@@ -94,9 +94,9 @@ export async function saveDetails(
     const state         = (formData.get('state') as string)?.trim() || null
     const zip           = (formData.get('zip') as string)?.trim() || null
     const property_type = toDbEnum('property_type', formData.get('property_type') as string | null, 'house')
-    const bedrooms      = parseInt(formData.get('bedrooms') as string) || 1
-    const bathrooms     = formData.get('bathrooms') ? parseFloat(formData.get('bathrooms') as string) : null
-    const max_guests    = parseInt(formData.get('max_guests') as string) || 2
+    const bedrooms      = Number.parseInt(formData.get('bedrooms') as string) || 1
+    const bathrooms     = formData.get('bathrooms') ? Number.parseFloat(formData.get('bathrooms') as string) : null
+    const max_guests    = Number.parseInt(formData.get('max_guests') as string) || 2
     const checkin_time  = formData.get('checkin_time') as string || '15:00'
     const checkout_time = formData.get('checkout_time') as string || '11:00'
     const wifi_name     = (formData.get('wifi_name') as string)?.trim() || null
@@ -111,16 +111,16 @@ export async function saveDetails(
     const door_code_unchanged = formData.get('door_code_unchanged') === '1'
     const internal_notes    = (formData.get('internal_notes') as string)?.trim() || null
     const avg_nightly_rate   = formData.get('avg_nightly_rate')
-      ? parseFloat(formData.get('avg_nightly_rate') as string)
+      ? Number.parseFloat(formData.get('avg_nightly_rate') as string)
       : null
     const cleaning_cost      = formData.get('cleaning_cost')
-      ? parseFloat(formData.get('cleaning_cost') as string)
+      ? Number.parseFloat(formData.get('cleaning_cost') as string)
       : null
     const same_day_premium_pct = formData.get('same_day_premium_pct')
-      ? parseFloat(formData.get('same_day_premium_pct') as string)
+      ? Number.parseFloat(formData.get('same_day_premium_pct') as string)
       : null
     const square_footage     = formData.get('square_footage')
-      ? parseInt(formData.get('square_footage') as string)
+      ? Number.parseInt(formData.get('square_footage') as string)
       : null
     const cleaning_cost_visible_to_owner = formData.get('cleaning_cost_visible_to_owner') === 'on'
 

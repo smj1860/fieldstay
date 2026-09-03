@@ -18,7 +18,7 @@ function checkRecentlyDismissed(): boolean {
   try {
     const raw = localStorage.getItem(DISMISS_KEY)
     if (!raw) return false
-    return Date.now() - parseInt(raw, 10) < DISMISS_TTL_MS
+    return Date.now() - Number.parseInt(raw, 10) < DISMISS_TTL_MS
   } catch {
     return false
   }

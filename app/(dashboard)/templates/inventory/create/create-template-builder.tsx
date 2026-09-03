@@ -86,7 +86,7 @@ function parseInventoryCSV(text: string): ParsedCSVRow[] {
       const categoryRaw = catIdx >= 0 ? (cols[catIdx] ?? '') : ''
       const { category, invalid } = normalizeCategory(categoryRaw || 'other')
       const parRaw = parIdx >= 0 ? cols[parIdx] : undefined
-      const parParsed = parRaw ? parseFloat(parRaw) : NaN
+      const parParsed = parRaw ? Number.parseFloat(parRaw) : NaN
       return {
         name,
         categoryRaw:     categoryRaw || 'other',
