@@ -198,7 +198,7 @@ export async function addInventoryItems(
     const { supabase, membership } = await requireOrgMember()
 
     const property_id = formData.get('property_id') as string
-    const itemCount   = parseInt(formData.get('item_count') as string, 10) || 0
+    const itemCount   = Number.parseInt(formData.get('item_count') as string, 10) || 0
 
     if (!property_id) return { error: 'Property is required' }
     if (itemCount === 0) return { error: 'Select at least one item' }
@@ -225,7 +225,7 @@ export async function addInventoryItems(
       const name     = (formData.get(`item_${i}_name`) as string)?.trim()
       const category = (formData.get(`item_${i}_category`) as InventoryCategory) || 'other'
       const unit     = (formData.get(`item_${i}_unit`) as string)?.trim()
-      const par_level = parseFloat(formData.get(`item_${i}_par_level`) as string) || 1
+      const par_level = Number.parseFloat(formData.get(`item_${i}_par_level`) as string) || 1
       const notes    = (formData.get(`item_${i}_notes`) as string)?.trim() || null
 
       if (!name || !unit) continue

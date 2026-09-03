@@ -73,11 +73,11 @@ export function parseIPv4Loose(host: string): number | null {
     if (part.length === 0) return null
     let value: number
     if (/^0[xX][0-9a-fA-F]+$/.test(part)) {
-      value = parseInt(part.slice(2), 16)
+      value = Number.parseInt(part.slice(2), 16)
     } else if (/^0[0-7]+$/.test(part)) {
-      value = parseInt(part.slice(1), 8)
+      value = Number.parseInt(part.slice(1), 8)
     } else if (/^(0|[1-9][0-9]*)$/.test(part)) {
-      value = parseInt(part, 10)
+      value = Number.parseInt(part, 10)
     } else {
       return null
     }
@@ -144,7 +144,7 @@ export function expandIPv6(host: string): number[] | null {
         if (v4 === null) return null
         groups.push((v4 >>> 16) & 0xffff, v4 & 0xffff)
       } else {
-        groups.push(parseInt(seg, 16))
+        groups.push(Number.parseInt(seg, 16))
       }
     }
     return groups

@@ -268,7 +268,7 @@ export function LineItemsEditor({ workOrderId, items, canEdit }: Readonly<Props>
                 step="0.01"
                 placeholder="Qty"
                 value={form.quantity}
-                onChange={(e) => setForm(f => ({ ...f, quantity: parseFloat(e.target.value) || 1 }))}
+                onChange={(e) => setForm(f => ({ ...f, quantity: Number.parseFloat(e.target.value) || 1 }))}
                 className="w-20"
               />
               <select
@@ -291,7 +291,7 @@ export function LineItemsEditor({ workOrderId, items, canEdit }: Readonly<Props>
                 step="0.01"
                 placeholder="Unit cost"
                 value={form.unit_cost || ''}
-                onChange={(e) => setForm(f => ({ ...f, unit_cost: parseFloat(e.target.value) || 0 }))}
+                onChange={(e) => setForm(f => ({ ...f, unit_cost: Number.parseFloat(e.target.value) || 0 }))}
                 className="flex-1"
               />
             </div>

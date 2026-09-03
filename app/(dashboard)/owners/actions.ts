@@ -25,7 +25,7 @@ export async function addPropertyOwner(
     const name              = (formData.get('name') as string)?.trim()
     const email             = (formData.get('email') as string)?.trim() || null
     const phone             = (formData.get('phone') as string)?.trim() || null
-    const revenue_share_pct = parseFloat(formData.get('revenue_share_pct') as string) || null
+    const revenue_share_pct = Number.parseFloat(formData.get('revenue_share_pct') as string) || null
     const notes             = (formData.get('notes') as string)?.trim() || null
 
     if (!property_id) return { error: 'Property is required' }
@@ -266,7 +266,7 @@ export async function addOwnerTransaction(
     const property_id      = formData.get('property_id') as string
     const transaction_type = formData.get('transaction_type') as 'revenue' | 'expense'
     const category         = formData.get('category') as string
-    const amount           = parseFloat(formData.get('amount') as string)
+    const amount           = Number.parseFloat(formData.get('amount') as string)
     const description      = (formData.get('description') as string)?.trim()
     const transaction_date = formData.get('transaction_date') as string
     const notes            = (formData.get('notes') as string)?.trim() || null

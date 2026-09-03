@@ -558,7 +558,7 @@ export function VendorPortal({
   }
 
   const subtotal = lineItems.reduce((sum, item) => {
-    const cost = parseFloat(item.unitCost) || 0
+    const cost = Number.parseFloat(item.unitCost) || 0
     return sum + (cost * item.quantity)
   }, 0)
 
@@ -634,7 +634,7 @@ export function VendorPortal({
     e.preventDefault()
 
     const validItems = lineItems.filter(
-      (item) => item.description.trim() && (parseFloat(item.unitCost) || 0) > 0
+      (item) => item.description.trim() && (Number.parseFloat(item.unitCost) || 0) > 0
     )
 
     const rejection = completionRejectionReason({
@@ -660,8 +660,8 @@ export function VendorPortal({
           line_type:   item.type,
           description: item.description.trim(),
           quantity:    item.quantity,
-          unit_cost:   parseFloat(item.unitCost),
-          line_total:  parseFloat(item.unitCost) * item.quantity,
+          unit_cost:   Number.parseFloat(item.unitCost),
+          line_total:  Number.parseFloat(item.unitCost) * item.quantity,
         })),
         subtotal,
       )
@@ -1001,7 +1001,7 @@ function LineItemEditor({
               type="number"
               min="1"
               value={item.quantity}
-              onChange={(e) => updateLineItem(idx, 'quantity', parseInt(e.target.value) || 1)}
+              onChange={(e) => updateLineItem(idx, 'quantity', Number.parseInt(e.target.value) || 1)}
               style={{
                 flex: '0 0 50px', fontSize: 13, padding: '6px 4px',
                 border: '1px solid #d1d5db', borderRadius: 6, textAlign: 'right', color: '#374151',
@@ -1113,7 +1113,7 @@ export function VendorQuotePortal({
   // in submit_quote_via_token from the GENERATED ALWAYS line_total column, so
   // nothing typed here can become the quote's total by itself.
   const subtotal = lineItems.reduce((sum, item) => {
-    const cost = parseFloat(item.unitCost) || 0
+    const cost = Number.parseFloat(item.unitCost) || 0
     return sum + cost * item.quantity
   }, 0)
 
@@ -1137,13 +1137,13 @@ export function VendorQuotePortal({
     // (there is always one, that is the affordance) would otherwise fail the
     // whole submission with "Line 4 needs a description."
     const items = lineItems
-      .filter((item) => item.description.trim() && (parseFloat(item.unitCost) || 0) > 0)
+      .filter((item) => item.description.trim() && (Number.parseFloat(item.unitCost) || 0) > 0)
       .map((item) => ({
         line_type:   item.type,
         description: item.description.trim(),
         quantity:    item.quantity,
         unit:        null,
-        unit_cost:   parseFloat(item.unitCost),
+        unit_cost:   Number.parseFloat(item.unitCost),
       }))
 
     if (items.length === 0) {

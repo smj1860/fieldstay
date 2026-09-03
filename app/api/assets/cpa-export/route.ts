@@ -350,7 +350,7 @@ export async function GET(req: Request) {
   const supabase = createServiceClient({ authorizedBy: membership })
 
   const url     = new URL(req.url)
-  const taxYear = parseInt(url.searchParams.get('tax_year') ?? String(new Date().getFullYear() - 1), 10)
+  const taxYear = Number.parseInt(url.searchParams.get('tax_year') ?? String(new Date().getFullYear() - 1), 10)
 
   // Load org name
   const orgRes = await supabase

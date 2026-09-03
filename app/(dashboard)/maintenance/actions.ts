@@ -156,7 +156,7 @@ function formText(formData: FormData, key: string): string | null {
 function formNumber(formData: FormData, key: string): number | null {
   const raw = formText(formData, key)
   if (raw === null) return null
-  const parsed = parseFloat(raw)
+  const parsed = Number.parseFloat(raw)
   // NaN is neither null nor undefined, so `??` never catches it, and every
   // comparison against it is false — Number.isFinite is the only guard that
   // stops a garbage cost field reaching the insert as `null` via JSON.

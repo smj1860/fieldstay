@@ -171,7 +171,7 @@ function ParLevelEditor({ item }: { item: InventoryItem }) {
   }, [justSaved])
 
   const handleSave = async () => {
-    const n = parseFloat(value)
+    const n = Number.parseFloat(value)
     if (isNaN(n) || n < 0) { setError('Invalid number'); return }
     setError(null)
     setSaving(true)

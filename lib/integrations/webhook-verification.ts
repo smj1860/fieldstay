@@ -117,7 +117,7 @@ function ipv4ToInt(ip: string): number | null {
  */
 export function isIpInCidr(ip: string, cidr: string): boolean {
   const [range, bitsStr] = cidr.split('/')
-  const bits    = parseInt(bitsStr ?? '', 10)
+  const bits    = Number.parseInt(bitsStr ?? '', 10)
   const ipInt    = ipv4ToInt(ip)
   const rangeInt = range ? ipv4ToInt(range) : null
 

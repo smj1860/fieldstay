@@ -884,7 +884,7 @@ export function ChecklistBuilder({
                       type="number"
                       min={0}
                       value={qty}
-                      onChange={(e) => setRoomQuantity(room.id, parseInt(e.target.value, 10) || 0)}
+                      onChange={(e) => setRoomQuantity(room.id, Number.parseInt(e.target.value, 10) || 0)}
                       aria-label={`Quantity for ${room.name}`}
                       className="w-12 text-center text-sm font-semibold text-primary-themed bg-transparent border border-themed rounded focus:outline-none focus:border-[var(--accent-gold)]"
                     />

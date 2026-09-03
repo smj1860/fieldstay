@@ -184,6 +184,26 @@ const eslintConfig = [
           name: 'window',
           message: 'Use globalThis — window throws a ReferenceError during SSR.',
         },
+        // Namespaced aliases, not different functions: per ES2015
+        // `Number.parseInt === parseInt` and `Number.parseFloat === parseFloat`
+        // are the SAME function objects, so this is a naming convention with
+        // no behavioural component — which is exactly why it is worth pinning
+        // rather than re-arguing. SonarCloud reports the global form (S7773)
+        // and it was reaching ~74 findings; enforcing here catches it in
+        // `npm run lint` instead of on the next scan.
+        //
+        // Deliberately NOT extended to isNaN/isFinite. Those are NOT aliases:
+        // the globals coerce first (`isNaN('foo')` is true) while
+        // `Number.isNaN('foo')` is false, so a blind rename there changes
+        // behaviour. Any such swap is a case-by-case reading, not a codemod.
+        {
+          name: 'parseInt',
+          message: 'Use Number.parseInt — same function, namespaced (SonarCloud S7773).',
+        },
+        {
+          name: 'parseFloat',
+          message: 'Use Number.parseFloat — same function, namespaced (SonarCloud S7773).',
+        },
       ],
     },
   },
@@ -220,6 +240,11 @@ const eslintConfig = [
       // burned down first.
       'sonarjs/cognitive-complexity': ['error', 15],
       'sonarjs/nested-control-flow': ['error', { maximumNestingLevel: 4 }],
+      // Same convention as the block above — SonarCloud scans these paths too.
+      'no-restricted-globals': ['error',
+        { name: 'parseInt',   message: 'Use Number.parseInt — same function, namespaced (SonarCloud S7773).' },
+        { name: 'parseFloat', message: 'Use Number.parseFloat — same function, namespaced (SonarCloud S7773).' },
+      ],
     },
   },
 ]

@@ -80,7 +80,7 @@ export const handleBookingConfirmed = inngest.createFunction(
       if (hasPositiveAmount(actual_total_amount)) {
         amount = actual_total_amount
       } else if (property?.avg_nightly_rate) {
-        amount = parseFloat((nights * property.avg_nightly_rate).toFixed(2))
+        amount = Number.parseFloat((nights * property.avg_nightly_rate).toFixed(2))
       } else {
         return { skipped: true, reason: 'no_rate' }
       }
@@ -194,7 +194,7 @@ export const handleBookingDetected = inngest.createFunction(
 
         const nights = Math.round((checkout.getTime() - checkin.getTime()) / 86_400_000)
         if (nights <= 0) return { skipped: 'zero_nights' }
-        const amount     = parseFloat((nights * prop.avg_nightly_rate).toFixed(2))
+        const amount     = Number.parseFloat((nights * prop.avg_nightly_rate).toFixed(2))
         const guestLabel = booking.guest_name ? ` — ${booking.guest_name}` : ''
         // Atomic upsert — concurrent workers handled at DB layer
         const { error } = await supabase.from('owner_transactions').upsert(

@@ -750,8 +750,8 @@ function OwnerCard({
       setRevError('This owner is not linked to a property yet.')
       return
     }
-    if (!monthlyRevenue || isNaN(parseFloat(monthlyRevenue))) return
-    const amount = parseFloat(monthlyRevenue)
+    if (!monthlyRevenue || isNaN(Number.parseFloat(monthlyRevenue))) return
+    const amount = Number.parseFloat(monthlyRevenue)
     if (amount <= 0) return
     const [year, month] = monthlyMonth.split('-')
     const txnDate  = `${year}-${month}-01`
@@ -835,7 +835,7 @@ function OwnerCard({
             className="text-sm py-1.5 flex-1 min-w-[120px]"
             placeholder="e.g. 4200.00"
           />
-          {monthlyRevenue && parseFloat(monthlyRevenue) > 0 && (
+          {monthlyRevenue && Number.parseFloat(monthlyRevenue) > 0 && (
             <Button variant="secondary" onClick={handleSaveMonthlyRevenue} className="text-xs px-3">
               Save
             </Button>

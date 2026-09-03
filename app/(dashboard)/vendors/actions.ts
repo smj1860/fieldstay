@@ -40,7 +40,7 @@ export async function createComplianceDocument(
     const effective_date   = (formData.get('effective_date') as string) || null
     const expiry_date      = (formData.get('expiry_date')    as string) || null
     const coverage_amount  = formData.get('coverage_amount')
-      ? parseFloat(formData.get('coverage_amount') as string) : null
+      ? Number.parseFloat(formData.get('coverage_amount') as string) : null
     const document_url     = (formData.get('document_url')   as string)?.trim() || null
 
     if (!document_type)  return { error: 'Document type is required' }

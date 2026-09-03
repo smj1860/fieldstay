@@ -91,7 +91,7 @@ export function CreateTemplateBuilder({
         description:           it.description.trim() || null,
         schedule_frequency:    it.schedule_frequency,
         vendor_specialty_hint: (it.vendor_specialty_hint as VendorSpecialty | null) || null,
-        estimated_cost:        it.estimated_cost ? parseFloat(it.estimated_cost) : null,
+        estimated_cost:        it.estimated_cost ? Number.parseFloat(it.estimated_cost) : null,
         sort_order:            i,
       })),
     })

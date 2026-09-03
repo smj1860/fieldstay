@@ -305,7 +305,7 @@ function PropertyParLevelEditor({
                     <span className="text-xs text-muted-themed">Par:</span>
                     <input
                       type="number" min="0" step="0.5" value={row.par_level}
-                      onChange={(e) => updateRow(row.id, { par_level: Math.max(0, parseFloat(e.target.value) || 0) })}
+                      onChange={(e) => updateRow(row.id, { par_level: Math.max(0, Number.parseFloat(e.target.value) || 0) })}
                       aria-label={`Par level for ${row.name}`}
                       className="w-14 text-center text-sm border border-themed rounded px-1 py-0.5 bg-transparent text-primary-themed focus:outline-none focus:ring-1 focus:ring-[var(--accent-gold)]"
                     />

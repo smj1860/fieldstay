@@ -14,7 +14,7 @@ export default async function CommsLogPage({
 }) {
   const { supabase, membership } = await requireOrgMember()
 
-  const page   = Math.max(1, parseInt(searchParams.page ?? '1', 10) || 1)
+  const page   = Math.max(1, Number.parseInt(searchParams.page ?? '1', 10) || 1)
   const offset = (page - 1) * PAGE_SIZE
 
   const [

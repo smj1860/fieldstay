@@ -389,7 +389,7 @@ export const handleTurnoverCompleted = inngest.createFunction(
       const premium = (turnover?.is_same_day_turnover && property.same_day_premium_pct)
         ? base * (property.same_day_premium_pct / 100)
         : 0
-      const amount  = parseFloat((base + premium).toFixed(2))
+      const amount  = Number.parseFloat((base + premium).toFixed(2))
 
       // Atomic upsert — ON CONFLICT (source_reference_id, source) DO NOTHING
       const { data: txn, error } = await supabase.from('owner_transactions').upsert(

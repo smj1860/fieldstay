@@ -401,20 +401,41 @@ export async function fetchLatestBookValues(
  * under the CLAUDE.md ceiling. Fetches book values itself, scoped to only the
  * assets that need one (see fetchLatestBookValues).
  */
-export async function buildRecommendationRows(
-  supabase:                     SupabaseClient,
-  orgId:                        string,
-  activeAssets:                 AssetRow[],
-  standardsByType:              Map<string, AssetStandardRow>,
-  repairWindows:                Record<string, RepairCostWindows>,
-  newScoreByAsset:              Map<string, number>,
-  // Raw ingredients for the downtime-loss estimate (see repair-vs-replace.ts's
-  // header comment) — multiplied together per-asset below rather than
-  // pre-computed by the caller, since both are keyed differently (one per
-  // asset, one per property) and neither means anything alone.
-  avgRepairDurationDaysByAsset: Record<string, number>,
-  avgNightlyRateByProperty:    Record<string, number>,
-): Promise<CapexRecommendationRow[]> {
+export interface BuildRecommendationRowsInput {
+  supabase:        SupabaseClient
+  orgId:           string
+  activeAssets:    AssetRow[]
+  standardsByType: Map<string, AssetStandardRow>
+  repairWindows:   Record<string, RepairCostWindows>
+  newScoreByAsset: Map<string, number>
+  /**
+   * Raw ingredients for the downtime-loss estimate (see repair-vs-replace.ts's
+   * header comment) — multiplied together per-asset below rather than
+   * pre-computed by the caller, since the two are keyed DIFFERENTLY (one by
+   * asset, one by property) and neither means anything alone.
+   *
+   * They are named fields rather than the last two positional parameters for
+   * exactly that reason: as positionals they were adjacent, identically typed
+   * `Record<string, number>`, and therefore silently swappable. A swap type-
+   * checks, every lookup then misses, estimatedDowntimeLossFor returns null for
+   * every asset, and buildCapexRecommendation's `?? 0` quietly drops downtime
+   * loss out of the repair-vs-replace ratio — a wrong capital recommendation
+   * with no error anywhere.
+   */
+  avgRepairDurationDaysByAsset: Record<string, number>
+  avgNightlyRateByProperty:     Record<string, number>
+}
+
+export async function buildRecommendationRows({
+  supabase,
+  orgId,
+  activeAssets,
+  standardsByType,
+  repairWindows,
+  newScoreByAsset,
+  avgRepairDurationDaysByAsset,
+  avgNightlyRateByProperty,
+}: BuildRecommendationRowsInput): Promise<CapexRecommendationRow[]> {
   const nowIso = new Date().toISOString()
 
   const estimatedDowntimeLossFor = (asset: AssetRow): number | null => {
@@ -461,11 +482,15 @@ export async function buildRecommendationRows(
     if (row.recommendation !== 'replace' || bookValue === undefined) continue
 
     const asset   = assetById.get(row.asset_id)
-    const std     = asset ? standardsByType.get(asset.asset_type) : undefined
     const windows = repairWindows[row.asset_id] ?? { trailing12mo: 0, prior12mo: 0 }
+    // No `?? std?.avg_replacement_cost_high` fallback here, unlike the first
+    // pass: replacement_cost_estimate is a non-null number by then, and this
+    // branch only runs for rows already scored 'replace', which requires it to
+    // be > 0. The fallback could never fire, and the standards lookup existed
+    // solely to feed it.
     const result  = buildCapexRecommendation({
       repairCosts:              windows,
-      replacementCostEstimate:  row.replacement_cost_estimate ?? std?.avg_replacement_cost_high ?? null,
+      replacementCostEstimate:  row.replacement_cost_estimate,
       healthScore:              newScoreByAsset.get(row.asset_id) ?? asset?.health_score ?? null,
       remainingBookValue:       bookValue,
       estimatedDowntimeLoss:    asset ? estimatedDowntimeLossFor(asset) : null,
