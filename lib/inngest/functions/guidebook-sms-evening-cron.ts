@@ -7,7 +7,9 @@ import { getWeatherForLocation, getTomorrowForecastForLocation } from '@/lib/wea
 import { sendSMS, buildSponsorLine } from '@/lib/sms/telnyx'
 import { renderSmsBody } from '@/lib/sms/templates'
 import { sendClaimedDailySms } from '@/lib/sms/optin-claim'
-import { pickNearestSponsor, SPONSOR_POOL_COLUMNS, type SponsorPoolRow } from '@/lib/sms/pick-nearest-sponsor'
+import { pickNearestSponsor } from '@/lib/sms/pick-nearest-sponsor'
+import { resolveSponsorsForProperty } from '@/lib/guidebook/resolve-property-sponsors'
+import { asSponsorAssignmentMode } from '@/lib/properties/defaults'
 import { unwrapJoin } from '@/lib/utils/supabase-joins'
 import { getFeaturedAmenityLine } from '@/lib/guidebook/featured-amenities'
 import { asOfferType } from '@/lib/guidebook/offer'
@@ -185,7 +187,7 @@ export const guidebookSmsEveningSend = inngest.createFunction(
 
       const propertyRes = await supabase
         .from('properties')
-        .select('id, name, lat, lng, amenities')
+        .select('id, name, lat, lng, amenities, sponsor_assignment_mode')
         .eq('id', propertyId)
         .eq('org_id', orgId)
         .maybeSingle()
@@ -209,39 +211,46 @@ export const guidebookSmsEveningSend = inngest.createFunction(
         rotationOffset: 1,
       })
 
-      // Bound and error-handled for the same reasons as the morning send's
-      // pool: discarding the error made a failed lookup indistinguishable
-      // from an org with no sponsors, and both end at "no offer" -> no SMS.
-      // fetchAllRows, not a bare select. guidebook_sponsors is capped at SIX
-      // rows per org by the schema itself (slot_number CHECK 1..6 plus
-      // UNIQUE(org_id, slot_number)), so this drains in exactly one request —
-      // the pagination costs nothing at current scale and stops the read from
-      // resting on that cap. If the slot ceiling is ever raised, a .limit()
-      // would have started truncating silently; this throws instead.
-      const orgSponsors = await fetchAllRows<SponsorPoolRow>(
-        (from, to) => supabase
-          .from('guidebook_sponsors')
-          .select(SPONSOR_POOL_COLUMNS)
-          .eq('org_id', orgId)
-          .eq('status', 'active')
-          .in('slot_type', ['dinner_pints', 'rainy_day', 'outdoor_adventure', 'general'])
-          .order('id')
-          .range(from, to),
-        { label: 'guidebook-sms-evening-send.sponsors' },
+      // THIS PROPERTY's sponsors, not the org's.
+      //
+      // Until per-property assignment existed this read was `.eq('org_id',
+      // orgId)` and every sponsor reached every property's guests. With the
+      // assignment table in place that would be worse than no feature: a
+      // manager could remove a sponsor from a cabin in the dashboard and that
+      // sponsor's offer would still go out by SMS to that cabin's guests,
+      // with the UI now asserting something false.
+      //
+      // The resolver returns the manager's choice for a manual property and
+      // the nearest-per-category pick for an automatic one, so an org that has
+      // never touched the feature gets exactly today's behaviour.
+      //
+      // Errors are NOT swallowed here, for the reason the previous
+      // fetchAllRows comment gave: a failed sponsor lookup that produced an
+      // empty list would be indistinguishable from an org with no sponsors,
+      // and both end at "no offer" -> no SMS. The resolver throws.
+      const { sponsors: propertySponsors } = await resolveSponsorsForProperty(
+        supabase, orgId,
+        {
+          id:  property.id,
+          lat: property.lat,
+          lng: property.lng,
+          sponsor_assignment_mode: asSponsorAssignmentMode(property.sponsor_assignment_mode),
+        },
+        'inngest.guidebook-sms-evening-send.sponsors',
       )
 
       // Tomorrow's forecast, for the outdoor_adventure branch — fetched only
-      // when the org actually has a sponsor in that slot AND it isn't already
-      // raining, the two conditions under which the answer could change the
-      // message. Tomorrow.io bills per call and this runs once per guest per
-      // night; asking for a forecast nothing can act on spends that quota on
-      // every org that never sold the slot.
+      // when THIS PROPERTY actually carries a sponsor in that slot AND it
+      // isn't already raining, the two conditions under which the answer could
+      // change the message. Tomorrow.io bills per call and this runs once per
+      // guest per night; asking for a forecast nothing can act on spends that
+      // quota on every property that never got an outdoor sponsor.
       //
       // Swallowed the same way as the current conditions above: a forecast
       // outage must degrade to a dinner recommendation, never to no SMS at
       // all. A null forecast means tomorrowIsClear is false, which is exactly
-      // today's behaviour.
-      const hasOutdoorSponsor = orgSponsors.some((s) => s.slot_type === 'outdoor_adventure')
+      // the pre-forecast behaviour.
+      const hasOutdoorSponsor = propertySponsors.some((s) => s.slot_type === 'outdoor_adventure')
       const forecast = (hasOutdoorSponsor && !isRainy)
         ? await getTomorrowForecastForLocation(
             property.lat, property.lng, nextCalendarDate(todayDate),
@@ -250,8 +259,8 @@ export const guidebookSmsEveningSend = inngest.createFunction(
 
       // Rain → tomorrow's outdoors → dinner, each falling back to general.
       const primarySlot  = pickEveningSlot(isRainy, Boolean(forecast?.isClear), hasOutdoorSponsor)
-      const primaryPool  = orgSponsors.filter((s) => s.slot_type === primarySlot)
-      const generalPool  = orgSponsors.filter((s) => s.slot_type === 'general')
+      const primaryPool  = propertySponsors.filter((s) => s.slot_type === primarySlot)
+      const generalPool  = propertySponsors.filter((s) => s.slot_type === 'general')
       const pool         = primaryPool.length > 0 ? primaryPool : generalPool
       const picked       = pickNearestSponsor(pool, property.lat, property.lng)
 

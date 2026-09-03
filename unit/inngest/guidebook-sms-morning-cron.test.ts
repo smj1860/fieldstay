@@ -81,6 +81,9 @@ function makeSupabase(queued: Record<string, { data?: unknown; error?: unknown }
     chain.eq     = (...a: unknown[]) => record('eq', a)
     chain.in     = (...a: unknown[]) => record('in', a)
     chain.or     = (...a: unknown[]) => record('or', a)
+    // Terminal, unlike the others: the sponsor resolver ends its reads on
+    // .limit(), so this has to resolve the queued row rather than chain.
+    chain.limit  = (...a: unknown[]) => { record('limit', a); return resolveNext() }
 
     const resolveNext = () => {
       const idx = counters[table] ?? 0

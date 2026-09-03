@@ -85,6 +85,9 @@ function makeSupabase(queued: Record<string, { data?: unknown; error?: unknown }
     chain.eq     = (...a: unknown[]) => record('eq', a)
     chain.in     = (...a: unknown[]) => record('in', a)
     chain.or     = (...a: unknown[]) => record('or', a)
+    // Terminal, unlike the others: the sponsor resolver ends its reads on
+    // .limit(), so this has to resolve the queued row rather than chain.
+    chain.limit  = (...a: unknown[]) => { record('limit', a); return resolveNext() }
 
     const resolveNext = () => {
       const idx = counters[table] ?? 0
@@ -152,11 +155,19 @@ function arrangeSend(opts: {
   weather?:  unknown
   forecast?: unknown
   optin?:    Record<string, unknown>
+  /** 'manual' routes the resolver through guidebook_sponsor_assignments. */
+  mode?:     'auto' | 'manual'
+  /** The rows that table returns, joined to their sponsor. */
+  assignments?: Record<string, unknown>[]
 }) {
   const supabase = makeSupabase({
     guidebook_guest_sms_optins: [{ data: opts.optin ?? optinDetailRow(), error: null }],
-    properties:                 [{ data: propertyRow, error: null }],
-    guidebook_sponsors:         [{ data: opts.sponsors ?? [], error: null }],
+    properties: [{
+      data: { ...propertyRow, sponsor_assignment_mode: opts.mode ?? 'auto' },
+      error: null,
+    }],
+    guidebook_sponsors:              [{ data: opts.sponsors ?? [], error: null }],
+    guidebook_sponsor_assignments:   [{ data: opts.assignments ?? [], error: null }],
   })
   ;(createServiceClient as ReturnType<typeof vi.fn>).mockReturnValue(supabase)
   ;(getWeatherForLocation as ReturnType<typeof vi.fn>).mockResolvedValue(opts.weather ?? clearWeather)
@@ -165,6 +176,15 @@ function arrangeSend(opts: {
 }
 
 const sendEvent = { data: { optin_id: 'optin_1', org_id: 'org_1', property_id: 'prop_1', today_date: '2026-07-22', checkin_date: '2026-07-20' } }
+
+/** Invokes the per-guest handler with the standard event. */
+const run = () => invokeHandler(guidebookSmsEveningSend, { event: sendEvent, step: makeStep() })
+
+/** Asserts which template the handler rendered for the standard property. */
+const expectTemplate = (key: string) =>
+  expect(renderSmsBody).toHaveBeenCalledWith('org_1', key, expect.objectContaining({
+    property_name: 'Lake House',
+  }))
 
 describe('guidebookSmsEveningCron (dispatcher)', () => {
   beforeEach(() => {
@@ -455,13 +475,6 @@ describe('guidebookSmsEveningSend — outdoor_adventure', () => {
   const rainySponsor   = sponsorRow({ id: 'sp_rain', business_name: 'The Cozy Cafe',      slot_type: 'rainy_day' })
   const generalSponsor = sponsorRow({ id: 'sp_gen',  business_name: 'Main St. Mercantile', slot_type: 'general' })
 
-  const run = () => invokeHandler(guidebookSmsEveningSend, { event: sendEvent, step: makeStep() })
-
-  const expectTemplate = (key: string) =>
-    expect(renderSmsBody).toHaveBeenCalledWith('org_1', key, expect.objectContaining({
-      property_name: 'Lake House',
-    }))
-
   it('picks the outdoor sponsor and the tomorrow_outdoor template when tomorrow is clear', async () => {
     arrangeSend({ sponsors: [sponsorRow(), outdoorSponsor], forecast: clearForecast })
 
@@ -555,11 +568,100 @@ describe('guidebookSmsEveningSend — outdoor_adventure', () => {
     expect(getTomorrowForecastForLocation).not.toHaveBeenCalled()
   })
 
-  it('queries the outdoor_adventure slot type — without this the sponsor is never in the pool', async () => {
+  it('reads sponsors WITHOUT a slot_type filter, so no slot can be excluded by the query', async () => {
+    // This replaced an assertion that the cron passed 'outdoor_adventure' to
+    // `.in('slot_type', [...])`. That query is gone: the resolver fetches the
+    // property's active sponsors and the cron filters in memory, which is what
+    // lets one read serve every branch. The invariant worth pinning is the same
+    // one — a slot must not be silently unreachable because the QUERY omitted
+    // it, which is exactly how outdoor_adventure never fired for months.
     const supabase = arrangeSend({ sponsors: [outdoorSponsor], forecast: clearForecast })
     await run()
 
-    const inCall = supabase.calls.find((c) => c.table === 'guidebook_sponsors' && c.method === 'in')
-    expect(inCall?.args[1]).toContain('outdoor_adventure')
+    const slotFilter = supabase.calls.find(
+      (c) => c.table === 'guidebook_sponsors' && c.method === 'in' && c.args[0] === 'slot_type',
+    )
+    expect(slotFilter).toBeUndefined()
+  })
+
+  it('picks an outdoor sponsor the org holds in a NON-outdoor-looking pool', async () => {
+    // The end-to-end version of the same guarantee: the sponsor is in the
+    // resolved set and the outdoor template is chosen.
+    arrangeSend({ sponsors: [outdoorSponsor], forecast: clearForecast })
+    const result = await run()
+
+    expect(result).toEqual({ optinId: 'optin_1', sent: true })
+    expectTemplate('tomorrow_outdoor')
+  })
+})
+
+// ============================================================================
+// Workstream 4 — the crons must respect per-property assignment.
+//
+// Shipping the table, the resolver and the UI WITHOUT this is worse than
+// shipping no feature: a manager removes a sponsor from a property in the
+// dashboard, and that sponsor's offer still goes out by SMS to that property's
+// guests. The UI would then be asserting something false.
+// ============================================================================
+
+describe('guidebookSmsEveningSend — per-property assignment', () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+  })
+
+  const dinnerSponsor = sponsorRow({ id: 'sp_dinner', business_name: 'The Grill House', slot_type: 'dinner_pints' })
+
+  it('sends the sponsor the manager assigned to THIS property', async () => {
+    arrangeSend({
+      mode:        'manual',
+      assignments: [{ sponsor_id: 'sp_dinner', guidebook_sponsors: dinnerSponsor }],
+    })
+
+    const result = await run()
+
+    expect(result).toEqual({ optinId: 'optin_1', sent: true })
+    expectTemplate('evening_nudge')
+  })
+
+  it('does NOT send a sponsor the manager removed from this property', async () => {
+    // The org still has an active dinner sponsor — it is simply not assigned
+    // here. Before the crons resolved per property, this guest got its offer.
+    arrangeSend({
+      mode:        'manual',
+      assignments: [],          // cleared deliberately
+      sponsors:    [dinnerSponsor],
+    })
+
+    const result = await run()
+
+    expect(result).toEqual({ optinId: 'optin_1', sent: false })
+    expect(sendSMS).not.toHaveBeenCalled()
+    expect(claimDailySmsSlot).not.toHaveBeenCalled()
+  })
+
+  it('never reads the assignment table for an automatic property', async () => {
+    // The free pass for every org that has not touched the feature: an
+    // automatic property resolves from the org's active sponsors exactly as
+    // it did before this existed.
+    const supabase = arrangeSend({ sponsors: [dinnerSponsor] })
+    const result = await run()
+
+    expect(result).toEqual({ optinId: 'optin_1', sent: true })
+    expect(supabase.calls.some((c) => c.table === 'guidebook_sponsor_assignments')).toBe(false)
+  })
+
+  it('scopes the assignment read to the property AND the org', async () => {
+    const supabase = arrangeSend({
+      mode:        'manual',
+      assignments: [{ sponsor_id: 'sp_dinner', guidebook_sponsors: dinnerSponsor }],
+    })
+    await run()
+
+    const eqs = supabase.calls
+      .filter((c) => c.table === 'guidebook_sponsor_assignments' && c.method === 'eq')
+      .map((c) => c.args[0])
+
+    expect(eqs).toContain('org_id')
+    expect(eqs).toContain('property_id')
   })
 })

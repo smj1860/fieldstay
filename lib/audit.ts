@@ -129,6 +129,7 @@ export type AuditAction =
   | 'asset.weibull_shape.fitted'
   | 'guidebook.configuration.updated'
   | 'guidebook.sponsor.updated'
+  | 'guidebook.sponsor_assignments.updated'
   | 'guidebook.stay_extension_settings.updated'
   | 'guidebook.sponsor.checkout_started'
   | 'maintenance_schedule.created'

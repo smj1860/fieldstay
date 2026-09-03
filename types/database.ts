@@ -193,6 +193,9 @@ export interface OrganizationMember {
   created_at:         string
 }
 
+/** properties.sponsor_assignment_mode — see the field's note on Property. */
+export type SponsorAssignmentMode = 'auto' | 'manual'
+
 export interface Property {
   id:                      string
   org_id:                  string
@@ -217,6 +220,19 @@ export interface Property {
   internal_notes:          string | null
   setup_steps_completed:   Record<string, boolean>
   is_active:               boolean
+  /**
+   * Whether this property's guidebook sponsors are chosen automatically (by
+   * proximity) or were picked by a manager.
+   *
+   * 'auto' is the default and covers every pre-existing row — the migration
+   * backfills nothing. It flips to 'manual' the first time a manager edits
+   * this property's assignments, INCLUDING when they clear them all, which is
+   * the case zero assignment rows cannot express on its own: without this
+   * column, a deliberately emptied property is indistinguishable from an
+   * unconfigured one and the automatic resolver reinstates everything the
+   * manager just removed.
+   */
+  sponsor_assignment_mode: SponsorAssignmentMode
   avg_nightly_rate:        number | null
   cleaning_cost:           number | null
   same_day_premium_pct:    number | null
@@ -1679,6 +1695,26 @@ export interface GuidebookSponsor {
   updated_at:             string
 }
 
+/**
+ * Which PROPERTIES an org-level sponsor appears on.
+ *
+ * `org_id` and `slot_type` are denormalised and DERIVED BY A DATABASE TRIGGER
+ * from the sponsor row — never supplied by the caller, and a value written here
+ * is overwritten. org_id is what RLS filters on (joining through
+ * guidebook_sponsors in a policy would be a correlated subquery on every guest
+ * page load); slot_type is what the partial unique index on
+ * (property_id, slot_type) needs in order to enforce one sponsor per named
+ * category per property.
+ */
+export interface GuidebookSponsorAssignment {
+  id:          string
+  org_id:      string
+  sponsor_id:  string
+  property_id: string
+  slot_type:   GuidebookSlotType
+  created_at:  string
+}
+
 export interface GuidebookPropertyConfig {
   id:                        string
   org_id:                    string
@@ -2168,6 +2204,7 @@ export interface HandWrittenRowMap {
   support_messages:                    SupportMessage
   guidebook_configurations:            GuidebookConfiguration
   guidebook_sponsors:                  GuidebookSponsor
+  guidebook_sponsor_assignments:       GuidebookSponsorAssignment
   guidebook_property_configs:          GuidebookPropertyConfig
   guidebook_guest_sms_optins:          GuidebookGuestSmsOptin
   guidebook_offer_redemptions:         GuidebookOfferRedemption

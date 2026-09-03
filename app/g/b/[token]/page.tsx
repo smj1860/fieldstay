@@ -2,12 +2,15 @@ import { cache } from 'react'
 import { notFound } from 'next/navigation'
 import type { Metadata } from 'next'
 import { createServiceClient } from '@/lib/supabase/server'
-import { unwrap, unwrapList } from '@/lib/supabase/unwrap'
+import { unwrap } from '@/lib/supabase/unwrap'
+import { resolveSponsorsForProperty } from '@/lib/guidebook/resolve-property-sponsors'
+import { asSponsorAssignmentMode } from '@/lib/properties/defaults'
+import { asOfferType } from '@/lib/guidebook/offer'
 import { getWeatherForLocation } from '@/lib/weather/tomorrow'
 import { GuestGuidebookView, asExtensionContactMethod } from '@/components/guidebook/guest-guidebook-view'
 import { GuidebookUnavailable } from '@/components/guidebook/guidebook-unavailable'
 import type { GuidebookSponsorView } from '@/components/guidebook/guest-guidebook-view'
-import type { GuidebookSponsor, GuidebookPropertyConfig, Property } from '@/types/database'
+import type { GuidebookPropertyConfig, Property } from '@/types/database'
 
 /**
  * Used only when a property somehow has no timezone. It is NOT the default:
@@ -55,7 +58,7 @@ export function computeStay(checkinDate: string, checkoutDate: string, timeZone:
 const CONFIG_FIELDS = `
   id, slug, wifi_network, wifi_password, check_in_instructions,
   check_out_instructions, house_rules, is_published, org_id,
-  properties(id, name, address, lat, lng, timezone, checkin_time, checkout_time)
+  properties(id, name, address, lat, lng, timezone, checkin_time, checkout_time, sponsor_assignment_mode)
 `
 
 const getGuidebookData = cache(async (token: string) => {
@@ -149,13 +152,29 @@ export default async function GuestBookingGuidebookPage({
     .maybeSingle()
   const extensionRequest = unwrap(extensionRequestRes, { site: 'page.g.b.token', orgId: booking.org_id })
 
-  const sponsorsRes = await supabase
-    .from('guidebook_sponsors')
-    .select('id, status, slot_type, business_name, business_description, custom_offer_text, address, offer_type, offer_value, offer_item, featured_item, business_phone, business_website, lat, lng, photo_storage_path')
-    .eq('org_id', booking.org_id)
-    .eq('status', 'active')
-    .limit(100)
-  const sponsors = unwrapList(sponsorsRes, { site: 'page.g.b.token', orgId: booking.org_id })
+  // THIS PROPERTY's sponsors, not the org's.
+  //
+  // This read used to be `.eq('org_id', ...)`, so every sponsor appeared in
+  // every property's guidebook. Once a manager can assign sponsors per
+  // property, that is the difference between the page telling the truth and
+  // the page contradicting the dashboard.
+  //
+  // An org that has never touched assignment gets the automatic resolution,
+  // which is the nearest sponsor per named category — for a 1-4 property org
+  // with at most six sponsors that is the same set it saw before, so nothing
+  // changes for them.
+  const resolution = await resolveSponsorsForProperty(
+    supabase,
+    booking.org_id,
+    {
+      id:  property.id,
+      lat: property.lat,
+      lng: property.lng,
+      sponsor_assignment_mode: asSponsorAssignmentMode(property.sponsor_assignment_mode),
+    },
+    'page.g.b.token',
+  )
+  const sponsors = resolution.sponsors
 
   const timeZone = property.timezone || FALLBACK_TIMEZONE
 
@@ -168,13 +187,13 @@ export default async function GuestBookingGuidebookPage({
     ? await getWeatherForLocation(property.lat, property.lng).catch(() => null)
     : null
 
-  const sponsorViews: GuidebookSponsorView[] = ((sponsors ?? []) as GuidebookSponsor[]).map((s) => ({
+  const sponsorViews: GuidebookSponsorView[] = sponsors.map((s) => ({
     id:                   s.id,
     slot_type:            s.slot_type,
     business_name:        s.business_name,
     business_description: s.business_description,
     custom_offer_text:    s.custom_offer_text,
-    offer_type:           s.offer_type,
+    offer_type:           asOfferType(s.offer_type),
     offer_value:          s.offer_value,
     offer_item:           s.offer_item,
     featured_item:        s.featured_item,

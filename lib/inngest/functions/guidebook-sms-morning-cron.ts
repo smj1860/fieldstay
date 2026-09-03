@@ -8,7 +8,9 @@ import { sendSMS, buildSponsorLine } from '@/lib/sms/telnyx'
 import { renderSmsBody } from '@/lib/sms/templates'
 import { sendClaimedDailySms } from '@/lib/sms/optin-claim'
 import { formatTime12h } from '@/lib/utils/time-of-day'
-import { pickNearestSponsor, SPONSOR_POOL_COLUMNS, type SponsorPoolRow } from '@/lib/sms/pick-nearest-sponsor'
+import { pickNearestSponsor } from '@/lib/sms/pick-nearest-sponsor'
+import { resolveSponsorsForProperty } from '@/lib/guidebook/resolve-property-sponsors'
+import { asSponsorAssignmentMode } from '@/lib/properties/defaults'
 import { unwrapJoin } from '@/lib/utils/supabase-joins'
 import { getFeaturedAmenityLine } from '@/lib/guidebook/featured-amenities'
 import { asOfferType } from '@/lib/guidebook/offer'
@@ -153,7 +155,7 @@ export const guidebookSmsMorningSend = inngest.createFunction(
 
       const propertyRes = await supabase
         .from('properties')
-        .select('id, name, lat, lng, amenities, checkin_time')
+        .select('id, name, lat, lng, amenities, checkin_time, sponsor_assignment_mode')
         .eq('id', propertyId)
         .eq('org_id', orgId)
         .maybeSingle()
@@ -204,6 +206,35 @@ export const guidebookSmsMorningSend = inngest.createFunction(
 
       if (!property.lat || !property.lng) return false
 
+      // THIS PROPERTY's sponsors, not the org's — resolved ONCE for both the
+      // rain-alert branch and the morning-brew branch below.
+      //
+      // Until per-property assignment existed these were two separate
+      // `.eq('org_id', orgId)` reads and every sponsor reached every
+      // property's guests. Leaving them that way while the dashboard let a
+      // manager remove a sponsor from a property would be worse than shipping
+      // no feature at all: the offer would still go out by SMS and the UI
+      // would be asserting something false.
+      //
+      // One call rather than one per branch, and the whole resolved set rather
+      // than a slot-filtered query: the branches below take different slots
+      // from it, and re-resolving per branch would double the work on the path
+      // that runs once per guest per morning.
+      //
+      // The resolver throws on a failed read rather than returning an empty
+      // list — see the note this replaces: an empty pool is indistinguishable
+      // from "org has no sponsors", and both end at no SMS.
+      const { sponsors: propertySponsors } = await resolveSponsorsForProperty(
+        supabase, orgId,
+        {
+          id:  property.id,
+          lat: property.lat,
+          lng: property.lng,
+          sponsor_assignment_mode: asSponsorAssignmentMode(property.sponsor_assignment_mode),
+        },
+        'inngest.guidebook-sms-morning-send.sponsors',
+      )
+
       // Featured-amenity content is independent of sponsors — a property
       // with no active sponsors can still get a message if it has featured
       // amenities. See lib/guidebook/featured-amenities.ts.
@@ -218,27 +249,7 @@ export const guidebookSmsMorningSend = inngest.createFunction(
 
       // Rain alert takes priority if precip >= 60% and rainy_day sponsor exists
       if (weather.precipitationProbability >= 60) {
-        // A failed sponsor lookup used to produce an empty pool, which falls
-        // through to "no offer" and ends at `return false` — a silently
-        // skipped nudge indistinguishable from an org with no rainy-day
-        // sponsor. fetchAllRows throws instead.
-        // fetchAllRows, not a bare select. guidebook_sponsors is capped at SIX
-        // rows per org by the schema itself (slot_number CHECK 1..6 plus
-        // UNIQUE(org_id, slot_number)), so this drains in exactly one request —
-        // the pagination costs nothing at current scale and stops the read from
-        // resting on that cap. If the slot ceiling is ever raised, a .limit()
-        // would have started truncating silently; this throws instead.
-        const rainySponsors = await fetchAllRows<SponsorPoolRow>(
-          (from, to) => supabase
-            .from('guidebook_sponsors')
-            .select(SPONSOR_POOL_COLUMNS)
-            .eq('org_id', orgId)
-            .eq('status', 'active')
-            .eq('slot_type', 'rainy_day')
-            .order('id')
-            .range(from, to),
-          { label: 'guidebook-sms-morning-send.rainy-sponsors' },
-        )
+        const rainySponsors = propertySponsors.filter((sp) => sp.slot_type === 'rainy_day')
 
         const pickedRainy = pickNearestSponsor(rainySponsors, property.lat, property.lng)
 
@@ -273,27 +284,11 @@ export const guidebookSmsMorningSend = inngest.createFunction(
         }
       }
 
-      // Morning brew → general fallback
-      // Same reasoning as the rainy-day pool above.
-      // fetchAllRows, not a bare select. guidebook_sponsors is capped at SIX
-      // rows per org by the schema itself (slot_number CHECK 1..6 plus
-      // UNIQUE(org_id, slot_number)), so this drains in exactly one request —
-      // the pagination costs nothing at current scale and stops the read from
-      // resting on that cap. If the slot ceiling is ever raised, a .limit()
-      // would have started truncating silently; this throws instead.
-      const orgSponsors = await fetchAllRows<SponsorPoolRow>(
-        (from, to) => supabase
-          .from('guidebook_sponsors')
-          .select(SPONSOR_POOL_COLUMNS)
-          .eq('org_id', orgId)
-          .eq('status', 'active')
-          .in('slot_type', ['morning_brew', 'general'])
-          .order('id')
-          .range(from, to),
-        { label: 'guidebook-sms-morning-send.sponsors' },
-      )
-      const morningBrews = orgSponsors.filter((s) => s.slot_type === 'morning_brew')
-      const pool         = morningBrews.length > 0 ? morningBrews : orgSponsors.filter((s) => s.slot_type === 'general')
+      // Morning brew → general fallback, from the resolved set.
+      const morningBrews = propertySponsors.filter((sp) => sp.slot_type === 'morning_brew')
+      const pool         = morningBrews.length > 0
+        ? morningBrews
+        : propertySponsors.filter((sp) => sp.slot_type === 'general')
       const picked       = pickNearestSponsor(pool, property.lat, property.lng)
 
       const sponsorLine = picked

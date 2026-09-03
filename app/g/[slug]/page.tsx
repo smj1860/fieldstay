@@ -6,15 +6,17 @@ import { getWeatherForLocation } from '@/lib/weather/tomorrow'
 import { GuestGuidebookView } from '@/components/guidebook/guest-guidebook-view'
 import { GuidebookUnavailable } from '@/components/guidebook/guidebook-unavailable'
 import type { GuidebookSponsorView } from '@/components/guidebook/guest-guidebook-view'
-import type { GuidebookSponsor, GuidebookPropertyConfig, Property } from '@/types/database'
-import { unwrap, unwrapList } from '@/lib/supabase/unwrap'
+import type { GuidebookPropertyConfig, Property } from '@/types/database'
+import { unwrap } from '@/lib/supabase/unwrap'
+import { resolveSponsorsForProperty } from '@/lib/guidebook/resolve-property-sponsors'
+import { asSponsorAssignmentMode } from '@/lib/properties/defaults'
+import { asOfferType } from '@/lib/guidebook/offer'
 
 /** Only for a property with no timezone — see the note in app/g/b/[token]/page.tsx. */
 const FALLBACK_TIMEZONE = 'America/New_York'
 
 // A guidebook's active sponsor slots are a small, curated set per org; the
 // explicit bound documents that and keeps it out of the unbounded-select class.
-const ACTIVE_SPONSORS_LIMIT = 100
 
 const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL
 
@@ -31,7 +33,7 @@ function heroPhotoUrl(path: string | null | undefined): string | null {
 const CONFIG_FIELDS = `
   id, slug, wifi_network, wifi_password, check_in_instructions,
   check_out_instructions, house_rules, is_published, org_id,
-  properties(id, name, address, lat, lng, timezone, checkin_time, checkout_time)
+  properties(id, name, address, lat, lng, timezone, checkin_time, checkout_time, sponsor_assignment_mode)
 `
 
 const getGuidebookConfig = cache(async (slug: string) => {
@@ -105,14 +107,29 @@ export default async function GuestGuidebookPage({
   const isActive = Boolean(config.is_published) && Boolean(orgConfig?.is_active)
   if (!isActive) return <GuidebookUnavailable />
 
-  const sponsorsRes = await supabase
-    .from('guidebook_sponsors')
-    .select('id, status, slot_type, business_name, business_description, custom_offer_text, address, offer_type, offer_value, offer_item, featured_item, business_phone, business_website, lat, lng, photo_storage_path')
-    .eq('org_id', config.org_id)
-    .eq('status', 'active')
-    .limit(ACTIVE_SPONSORS_LIMIT)
-
-  const sponsors = unwrapList(sponsorsRes, { site: 'page.g.slug', orgId: config.org_id })
+  // THIS PROPERTY's sponsors, not the org's.
+  //
+  // This read used to be `.eq('org_id', ...)`, so every sponsor appeared in
+  // every property's guidebook. Once a manager can assign sponsors per
+  // property, that is the difference between the page telling the truth and
+  // the page contradicting the dashboard.
+  //
+  // An org that has never touched assignment gets the automatic resolution,
+  // which is the nearest sponsor per named category — for a 1-4 property org
+  // with at most six sponsors that is the same set it saw before, so nothing
+  // changes for them.
+  const resolution = await resolveSponsorsForProperty(
+    supabase,
+    config.org_id,
+    {
+      id:  property.id,
+      lat: property.lat,
+      lng: property.lng,
+      sponsor_assignment_mode: asSponsorAssignmentMode(property.sponsor_assignment_mode),
+    },
+    'page.g.slug',
+  )
+  const sponsors = resolution.sponsors
 
   const hourOfDay = Number(
     new Intl.DateTimeFormat('en-US', {
@@ -124,13 +141,13 @@ export default async function GuestGuidebookPage({
     ? await getWeatherForLocation(property.lat, property.lng).catch(() => null)
     : null
 
-  const sponsorViews: GuidebookSponsorView[] = ((sponsors ?? []) as GuidebookSponsor[]).map((s) => ({
+  const sponsorViews: GuidebookSponsorView[] = sponsors.map((s) => ({
     id:                   s.id,
     slot_type:            s.slot_type,
     business_name:        s.business_name,
     business_description: s.business_description,
     custom_offer_text:    s.custom_offer_text,
-    offer_type:           s.offer_type,
+    offer_type:           asOfferType(s.offer_type),
     offer_value:          s.offer_value,
     offer_item:           s.offer_item,
     featured_item:        s.featured_item,
