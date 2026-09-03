@@ -410,10 +410,16 @@ export const assetHealthOrg = inngest.createFunction(
       const repairWindows   = bucketRepairCostWindows(repairWOs, new Date())
       const repairDurations = averageRepairDurationDays(repairWOs)
 
-      const recommendationRows = await buildRecommendationRows(
-        supabase, orgId, activeAssets, standardsByType, repairWindows, newScoreByAsset,
-        repairDurations, avgNightlyRateByProperty,
-      )
+      const recommendationRows = await buildRecommendationRows({
+        supabase,
+        orgId,
+        activeAssets,
+        standardsByType,
+        repairWindows,
+        newScoreByAsset,
+        avgRepairDurationDaysByAsset: repairDurations,
+        avgNightlyRateByProperty,
+      })
       const newAlerts   = await persistCapexRecommendations(supabase, orgId, recommendationRows)
       const capexAlerts = newAlerts.map((alert) => ({
         asset_id:   alert.asset_id,
