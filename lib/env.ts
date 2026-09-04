@@ -332,6 +332,15 @@ export const ENV_SPEC: Readonly<Record<string, VarSpec>> = {
     tier: 'optional', schema: nonEmpty,
     why: 'OAuth2 client_credentials grant, paired with THUMBTACK_CLIENT_ID',
   },
+  // Genuinely optional, unlike the two above: their Troubleshooting doc's
+  // proxy_oauth_failed entry implies an `audience` param is expected by at
+  // least some partner configurations, but names no default value and no
+  // account-specific value — omitted from the token request entirely unless
+  // set, since guessing one risks causing that exact error.
+  THUMBTACK_AUDIENCE: {
+    tier: 'optional', schema: nonEmpty,
+    why: 'OAuth2 token request audience param — only send if a Thumbtack rep confirms this account needs one',
+  },
   THUMBTACK_UTM_SOURCE: {
     tier: 'optional', schema: prefixed('cma-'),
     why: 'utm_source on every Request Flow URL; Thumbtack requires the cma- prefix on partner accounts',

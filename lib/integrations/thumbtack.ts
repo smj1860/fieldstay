@@ -231,11 +231,53 @@ interface ThumbtackTokenResponse {
 const cachedTokensByAuthBase = new Map<string, { accessToken: string; expiresAtMs: number }>()
 
 /**
+ * Extracts a human-readable message from a Thumbtack error response body.
+ * Their Troubleshooting doc documents three different shapes across
+ * different failure modes — `{ error, error_description }` (invalid_client),
+ * `{ type, title, status, detail }` (token is not active), and
+ * `{ error, detail }` (proxy_oauth_failed) — so this checks all of the
+ * fields any of them use rather than assuming one shape.
+ */
+async function readThumbtackErrorDetail(res: Response): Promise<string> {
+  try {
+    const body = await res.json() as Record<string, unknown>
+    const detail = body.error_description ?? body.detail ?? body.title ?? body.error
+    return typeof detail === 'string' ? detail : JSON.stringify(body)
+  } catch {
+    return res.statusText || 'no error body'
+  }
+}
+
+/**
+ * Forces the next getThumbtackAccessToken() call for this authBase to fetch
+ * a fresh token instead of serving a cached one. For the retry-once-on-401
+ * pattern Thumbtack's Troubleshooting doc calls for ("token is not active" —
+ * their access tokens expire and a client must handle refreshing): the
+ * eventual /businesses/search implementation should call this on a 401, then
+ * retry the request once with a freshly fetched token, rather than trusting
+ * this module's own expiry estimate never drifts from Thumbtack's actual
+ * clock. Exported now, ahead of that implementation, the same way
+ * buildRequestFlowUrl() and this file's other pieces are — not yet called
+ * from within this module, but real infrastructure the next piece needs.
+ */
+export function invalidateThumbtackToken(authBase: string): void {
+  cachedTokensByAuthBase.delete(authBase)
+}
+
+/**
  * OAuth2 client_credentials token exchange — confirmed shape from
  * Thumbtack's Environments doc (Authorization Server, Token URL,
  * per-environment clientID/clientSecret). Cached in memory and refreshed
  * 30s before actual expiry, so a normal request never pays for a token
  * fetch on top of the search call it's making the token for.
+ *
+ * THUMBTACK_AUDIENCE is optional and omitted from the request unless set —
+ * their Troubleshooting doc's proxy_oauth_failed entry ("Requested audience
+ * '<your audience>' has not been whitelisted") implies an `audience` param
+ * is expected by at least some Thumbtack partner configurations, but names
+ * no default value. Guessing one (e.g. the API base URL) risks causing
+ * exactly that error rather than avoiding it, so this stays opt-in until a
+ * Thumbtack rep confirms the right value for this account.
  *
  * Not exported — searchThumbtackPros() is the only caller. Exported (rather
  * than module-private) would invite a second call site to acquire its own
@@ -255,17 +297,20 @@ async function getThumbtackAccessToken(): Promise<string> {
     throw new Error('THUMBTACK_CLIENT_ID/THUMBTACK_CLIENT_SECRET are not set — see lib/env.ts.')
   }
 
+  const params = new URLSearchParams({
+    grant_type:    'client_credentials',
+    client_id:     clientId,
+    client_secret: clientSecret,
+  })
+  if (process.env.THUMBTACK_AUDIENCE) params.set('audience', process.env.THUMBTACK_AUDIENCE)
+
   let res: Response
   try {
     res = await fetch(`${authBase}/oauth2/token`, {
       method:  'POST',
       headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-      body: new URLSearchParams({
-        grant_type:    'client_credentials',
-        client_id:     clientId,
-        client_secret: clientSecret,
-      }),
-      signal: AbortSignal.timeout(THUMBTACK_TIMEOUT_MS),
+      body:    params,
+      signal:  AbortSignal.timeout(THUMBTACK_TIMEOUT_MS),
     })
   } catch (err) {
     if (isTimeoutError(err)) {
@@ -276,7 +321,8 @@ async function getThumbtackAccessToken(): Promise<string> {
   }
 
   if (!res.ok) {
-    throw new Error(`Thumbtack OAuth token request failed with ${res.status}`)
+    const detail = await readThumbtackErrorDetail(res)
+    throw new Error(`Thumbtack OAuth token request failed with ${res.status}: ${detail}`)
   }
 
   const data = await res.json() as ThumbtackTokenResponse
