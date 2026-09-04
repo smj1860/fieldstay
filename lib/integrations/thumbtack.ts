@@ -43,26 +43,12 @@ export type ThumbtackEnvironment = 'https://staging-partner.thumbtack.com' | 'ht
  *
  * Thumbtack's taxonomy (476 leaf categories, confirmed 2026-09 from their
  * category_pk export) is far more granular than WoCategory/CrewRole, so this
- * is a many-to-one collapse, not a lookup. FOUR entries below are a real
- * judgment call, not a confirmed mapping — Thumbtack splits what FieldStay
- * treats as one category, and this map can only point at one leaf:
- *
- *   - hvac: Thumbtack has no combined "HVAC" category — separate "Heating &
- *     Cooling" leaves for heating vs. air conditioning. Picked AC repair
- *     (Central Air Conditioning Repair or Maintenance) since STR portfolios
- *     skew toward AC-failure climates; heating-heavy portfolios should
- *     probably point this at Heating System Repair or Maintenance
- *     (166573479455678887) instead.
- *   - windows_doors: split into separate "Windows" and "Doors" categories.
- *     Picked Door Repair arbitrarily — no data backing this over Window
- *     Repair (166571307103969699).
- *   - pool: picked Swimming Pool Repair over Swimming Pool Cleaning,
- *     Maintenance, and Inspection (151786726772498727) — most FieldStay
- *     pool work orders are probably routine service, not a repair, so the
- *     cleaning/maintenance category may be the better default.
- *   - structural: picked Foundation Repair (an actual repair job) over
- *     Structural Engineering Services (283063822742405530), which is a
- *     consulting/assessment service, not a repair dispatch.
+ * is a many-to-one collapse, not a lookup — a few entries (hvac, windows_doors,
+ * pool, structural) each pick one Thumbtack leaf out of several plausible
+ * ones. Precision here only affects which pros surface in that one search;
+ * it's never persisted, and a PM saving a pro as a FieldStay vendor picks
+ * `vendor_specialty` independently in that form, so it doesn't need to be
+ * exact.
  *
  * `other` has no Thumbtack equivalent and stays unmapped by design —
  * searchThumbtackProsAction() already handles a null mapping by returning
@@ -71,7 +57,7 @@ export type ThumbtackEnvironment = 'https://staging-partner.thumbtack.com' | 'ht
 export type ThumbtackCategoryKey = WoCategory | CrewRole
 
 export const THUMBTACK_CATEGORY_MAP: Readonly<Record<ThumbtackCategoryKey, string | null>> = {
-  hvac:          '166577475042034098', // Central Air Conditioning Repair or Maintenance — see note above
+  hvac:          '166577475042034098', // Central Air Conditioning Repair or Maintenance
   plumbing:      '283300384734896599', // Emergency Plumbing
   electrical:    '122769389996753250', // Electrical and Wiring Repair
   appliance:     '166573972257055145', // Appliance Repair or Maintenance
@@ -79,10 +65,10 @@ export const THUMBTACK_CATEGORY_MAP: Readonly<Record<ThumbtackCategoryKey, strin
   landscaping:   '240123621172183344', // Full Service Lawn Care
   roofing:       '174455213291954651', // Roof Repair or Maintenance
   flooring:      '206934703503376680', // Floor Repair
-  windows_doors: '168387209743442385', // Door Repair — see note above (Thumbtack splits Windows vs. Doors)
+  windows_doors: '168387209743442385', // Door Repair
   pest_control:  '133665232699441654', // Pest Control Services
-  pool:          '194910465719878122', // Swimming Pool Repair — see note above
-  structural:    '152394038374179185', // Foundation Repair — see note above
+  pool:          '194910465719878122', // Swimming Pool Repair
+  structural:    '152394038374179185', // Foundation Repair
   general:       '109125193401647362', // Handyman
   other:         null,                 // no Thumbtack equivalent — deliberate
   maintenance:   '109125193401647362', // Handyman — crew_role's general fix-it category, same as `general`
