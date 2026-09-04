@@ -74,16 +74,57 @@ export const THUMBTACK_CATEGORY_MAP: Readonly<Record<ThumbtackCategoryKey, strin
   maintenance:   '109125193401647362', // Handyman — crew_role's general fix-it category, same as `general`
 }
 
-/** A pro returned by /businesses/search — see the module header re: this shape being unconfirmed. */
+/**
+ * Hiring signals Thumbtack surfaces per pro — confirmed from their Discovery
+ * Lite design-guidelines deck. Exactly these four values, no others.
+ */
+export type ThumbtackProPill = 'popular' | 'remote' | 'licensed' | 'low_price'
+
+/**
+ * A pro returned by a Thumbtack search. Confirmed 2026-09 against Discovery
+ * Lite's own sample API response (their design-guidelines deck, "API
+ * Response" slide) for every field except `requestFlowUrl` — Discovery
+ * Lite's response has NO request-flow URL or any other link field at all,
+ * only `service_id`. That's consistent with the original Request Flow
+ * Widget doc's `/businesses/search` (a DIFFERENT, richer endpoint) already
+ * returning a ready-made `widgets.requestFlowURL` per pro — the working
+ * theory is Discovery Lite is read-only display data, and a CTA click needs
+ * buildRequestFlowUrl() to construct the URL from `servicePk` (their
+ * `service_id`) plus the category_pk this search already used. Until the
+ * real endpoint is confirmed, `requestFlowUrl` stays nullable so a caller
+ * can't assume it's always pre-built.
+ *
+ * Two more open questions this schema does NOT answer, so don't build
+ * against them without checking first:
+ *   - No avatar/photo URL field exists anywhere in the confirmed response.
+ *     The design mock shows one ("Pro avatar: Profile image URL field"),
+ *     so it likely exists on the real payload — just not in this
+ *     abbreviated example.
+ *   - `quote.starting_cost` has no confirmed unit. Treated here as CENTS
+ *     (this codebase's convention everywhere else money is stored), but the
+ *     design mock renders it as "$59/hr" — a raw 15000 read as cents is
+ *     $150.00, which is a much more plausible "starting cost" for a repair
+ *     job than $15,000 read as dollars, but this is inference, not
+ *     confirmation.
+ */
 export interface ThumbtackPro {
-  businessPk:     string
-  businessName:   string
-  /** Thumbtack API field name unconfirmed — a per-business search identifier used to build that pro's request-flow URL. */
-  servicePk:      string
-  /** Already fully formed by Thumbtack's API per the docs — prefer this over calling buildRequestFlowUrl() yourself when it's present. */
-  requestFlowUrl: string
-  rating?:        number
-  numReviews?:    number
+  /** Their `service_id` — the one identifier Discovery Lite's response actually has; doubles as `service_pk` for buildRequestFlowUrl(). */
+  servicePk:          string
+  businessName:       string
+  /** Null until the real search implementation confirms whether this comes pre-built or needs buildRequestFlowUrl(). */
+  requestFlowUrl:     string | null
+  rating?:            number
+  numReviews?:        number
+  yearsInBusiness?:   number
+  numHires?:          number
+  similarJobsDone?:   number
+  numEmployees?:      number
+  licenseVerified?:   boolean
+  hasBackgroundCheck?: boolean
+  location?:          string
+  pills?:             ThumbtackProPill[]
+  /** See the interface note above re: unit — treated as cents. */
+  startingCostCents?: number
 }
 
 interface RequestFlowUrlParams {
@@ -134,6 +175,12 @@ export function isThumbtackConfigured(): boolean {
  * call site fails loudly (and visibly, in the Server Action's catch block)
  * rather than silently returning an empty list that reads as "no pros
  * nearby" instead of "this isn't built yet."
+ *
+ * When implementing: if the real response has no ready-made request-flow
+ * URL (Discovery Lite's confirmed shape doesn't), build one per pro with
+ * buildRequestFlowUrl() using this function's own resolved category_pk and
+ * that pro's service_id as servicePk, rather than leaving requestFlowUrl
+ * null and pushing that work onto every caller.
  */
 export async function searchThumbtackPros(_params: {
   categoryKey: ThumbtackCategoryKey

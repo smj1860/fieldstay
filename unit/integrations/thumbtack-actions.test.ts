@@ -58,7 +58,7 @@ describe('searchThumbtackProsAction', () => {
   })
 
   it('returns the pros on success', async () => {
-    const pros = [{ businessPk: 'b_1', businessName: 'Acme Plumbing', servicePk: 's_1', requestFlowUrl: 'https://thumbtack.com/embed/request-flow' }]
+    const pros = [{ businessName: 'Acme Plumbing', servicePk: 's_1', requestFlowUrl: 'https://thumbtack.com/embed/request-flow' }]
     vi.mocked(searchThumbtackPros).mockResolvedValueOnce(pros)
 
     const result = await searchThumbtackProsAction('plumbing', '90210')

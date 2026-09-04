@@ -1,11 +1,12 @@
 'use client'
 
 import { useState } from 'react'
-import { Search, ExternalLink, CheckCircle2 } from 'lucide-react'
+import { Search, CheckCircle2 } from 'lucide-react'
 import { Card } from '@/components/ui/Card'
 import { Button } from '@/components/ui/Button'
 import { RequestFlowModal } from '@/components/thumbtack/RequestFlowModal'
 import { ThumbtackAttribution } from '@/components/thumbtack/ThumbtackAttribution'
+import { ThumbtackProCard } from '@/components/thumbtack/ThumbtackProCard'
 import { searchThumbtackProsAction, recordThumbtackRequestCreatedAction } from '@/lib/integrations/thumbtack-actions'
 import type { ThumbtackCategoryKey, ThumbtackPro } from '@/lib/integrations/thumbtack'
 import type { ThumbtackRfEvent } from '@/lib/integrations/thumbtack-events'
@@ -103,23 +104,7 @@ export function FindProOnThumbtackSection({ categoryKey, zipCode, categoryLabel,
             <p className="text-xs" style={{ color: 'var(--text-muted)' }}>No pros found for this area yet.</p>
           ) : (
             pros.map((pro) => (
-              <div
-                key={pro.businessPk}
-                className="flex items-center justify-between gap-3 px-3 py-2 rounded-md"
-                style={{ background: 'var(--bg-raised)', border: '1px solid var(--border)' }}
-              >
-                <div>
-                  <p className="text-sm" style={{ color: 'var(--text-primary)' }}>{pro.businessName}</p>
-                  {pro.rating != null && (
-                    <p className="text-xs" style={{ color: 'var(--text-muted)' }}>
-                      {pro.rating.toFixed(1)}★{pro.numReviews != null ? ` (${pro.numReviews})` : ''}
-                    </p>
-                  )}
-                </div>
-                <Button variant="secondary" className="text-xs flex items-center gap-1" onClick={() => setSelectedPro(pro)}>
-                  Select &amp; Continue <ExternalLink className="w-3 h-3" />
-                </Button>
-              </div>
+              <ThumbtackProCard key={pro.servicePk} pro={pro} onSelect={() => setSelectedPro(pro)} />
             ))
           )}
           <ThumbtackAttribution />
