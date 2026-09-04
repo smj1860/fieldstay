@@ -2,6 +2,7 @@
 
 import { useEffect } from 'react'
 import { Dialog } from '@/components/ui/Dialog'
+import { resolveThumbtackMessage, type ThumbtackRfEvent } from '@/lib/integrations/thumbtack-events'
 
 // ============================================================================
 // Thumbtack Request Flow Widget — the iframe modal step, once a specific
@@ -12,34 +13,13 @@ import { Dialog } from '@/components/ui/Dialog'
 // ({open && <iframe>}, unmounting the flow entirely on close rather than
 // hiding it) all follow Thumbtack's Request Flow Widget doc exactly.
 //
-// The postMessage listener validates event.origin against the ACTUAL
-// requestFlowUrl's origin rather than a separately-configured env var —
-// Thumbtack's own React sample doesn't check origin at all, and doesn't
-// match its own documented event shape ({ type, data }, not a bare string),
-// so neither is copied here.
+// Event parsing/origin validation lives in lib/integrations/thumbtack-events.ts
+// (pure, unit-tested) rather than inline — Thumbtack's own React sample skips
+// origin validation entirely and doesn't match its own documented event shape
+// ({ type, data }, not a bare string), so neither is copied here.
 // ============================================================================
 
-export type ThumbtackRfEvent =
-  | { type: 'THUMBTACK_RF_START'; data: { category_pk: string; zip_code: string; business_pk: string; business_name: string } }
-  | { type: 'THUMBTACK_RF_REQUEST_CREATED'; data: {
-      businesses_contacted: { business_pk: string; business_name: string }[]
-      category_pk: string
-      zip_code: string
-      user_pk: string
-      created_at: number
-      is_existing_user: boolean
-      search_id: string
-      request_pk: string
-    } }
-  | { type: 'THUMBTACK_RF_CLOSE' }
-
-function isThumbtackRfEvent(data: unknown): data is ThumbtackRfEvent {
-  return (
-    typeof data === 'object' && data !== null && 'type' in data &&
-    typeof (data as { type: unknown }).type === 'string' &&
-    (data as { type: string }).type.startsWith('THUMBTACK_RF_')
-  )
-}
+export type { ThumbtackRfEvent }
 
 interface RequestFlowModalProps {
   /** null while no pro is selected — the modal stays closed. */
@@ -62,12 +42,12 @@ export function RequestFlowModal({ requestFlowUrl, open, onClose, onRequestCreat
     }
 
     const handleMessage = (event: MessageEvent): void => {
-      if (event.origin !== expectedOrigin) return
-      if (!isThumbtackRfEvent(event.data)) return
+      const resolved = resolveThumbtackMessage(event, expectedOrigin)
+      if (!resolved) return
 
-      if (event.data.type === 'THUMBTACK_RF_REQUEST_CREATED') {
-        onRequestCreated?.(event.data.data)
-      } else if (event.data.type === 'THUMBTACK_RF_CLOSE') {
+      if (resolved.type === 'THUMBTACK_RF_REQUEST_CREATED') {
+        onRequestCreated?.(resolved.data)
+      } else if (resolved.type === 'THUMBTACK_RF_CLOSE') {
         onClose()
       }
     }

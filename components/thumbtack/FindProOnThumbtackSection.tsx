@@ -1,12 +1,13 @@
 'use client'
 
 import { useState } from 'react'
-import { Search, ExternalLink } from 'lucide-react'
+import { Search, ExternalLink, CheckCircle2 } from 'lucide-react'
 import { Card } from '@/components/ui/Card'
 import { Button } from '@/components/ui/Button'
 import { RequestFlowModal } from '@/components/thumbtack/RequestFlowModal'
-import { searchThumbtackProsAction } from '@/lib/integrations/thumbtack-actions'
+import { searchThumbtackProsAction, recordThumbtackRequestCreatedAction } from '@/lib/integrations/thumbtack-actions'
 import type { ThumbtackCategoryKey, ThumbtackPro } from '@/lib/integrations/thumbtack'
+import type { ThumbtackRfEvent } from '@/lib/integrations/thumbtack-events'
 
 // ============================================================================
 // "Find a Pro on Thumbtack" — a clearly-separated section, never mixed into
@@ -23,13 +24,21 @@ interface FindProOnThumbtackSectionProps {
   zipCode: string | null
   /** e.g. "plumber", "house cleaner" — used only in copy, not sent to Thumbtack. */
   categoryLabel: string
+  /** Set only from Work Order detail — the one surface with a specific WO to attach the record to. */
+  workOrderId?: string | null
 }
 
-export function FindProOnThumbtackSection({ categoryKey, zipCode, categoryLabel }: Readonly<FindProOnThumbtackSectionProps>) {
+type RequestCreatedInfo = Extract<ThumbtackRfEvent, { type: 'THUMBTACK_RF_REQUEST_CREATED' }>['data']
+
+export function FindProOnThumbtackSection({ categoryKey, zipCode, categoryLabel, workOrderId = null }: Readonly<FindProOnThumbtackSectionProps>) {
   const [loading, setLoading] = useState(false)
   const [error, setError]     = useState<string | null>(null)
   const [pros, setPros]       = useState<ThumbtackPro[] | null>(null)
   const [selectedPro, setSelectedPro] = useState<ThumbtackPro | null>(null)
+  // Set only on a real THUMBTACK_RF_REQUEST_CREATED event — a plain close
+  // (via the X or "Got it") leaves this null, so a completed request and an
+  // abandoned one render differently rather than looking identical.
+  const [completed, setCompleted] = useState<RequestCreatedInfo | null>(null)
 
   async function handleSearch() {
     setLoading(true)
@@ -41,6 +50,27 @@ export function FindProOnThumbtackSection({ categoryKey, zipCode, categoryLabel 
       return
     }
     setPros(result.pros)
+  }
+
+  function handleRequestCreated(data: RequestCreatedInfo) {
+    setCompleted(data)
+    void recordThumbtackRequestCreatedAction(workOrderId, data)
+  }
+
+  if (completed) {
+    return (
+      <Card className="p-4">
+        <p className="text-sm font-medium flex items-center gap-1.5" style={{ color: 'var(--text-primary)' }}>
+          <CheckCircle2 className="w-4 h-4" style={{ color: 'var(--accent-green)' }} />
+          Request sent on Thumbtack
+        </p>
+        <p className="text-xs mt-1" style={{ color: 'var(--text-muted)' }}>
+          Contacted {completed.businesses_contacted.length === 1
+            ? completed.businesses_contacted[0]!.business_name
+            : `${completed.businesses_contacted.length} businesses`}. They&apos;ll reach out directly — this doesn&apos;t create anything in FieldStay.
+        </p>
+      </Card>
+    )
   }
 
   return (
@@ -99,6 +129,7 @@ export function FindProOnThumbtackSection({ categoryKey, zipCode, categoryLabel 
         requestFlowUrl={selectedPro?.requestFlowUrl ?? null}
         open={selectedPro !== null}
         onClose={() => setSelectedPro(null)}
+        onRequestCreated={handleRequestCreated}
       />
     </Card>
   )

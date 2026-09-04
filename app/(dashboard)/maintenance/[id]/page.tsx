@@ -237,6 +237,7 @@ export default async function WorkOrderPage({ params }: Props) {
             categoryKey={wo.category}
             zipCode={property?.zip ?? null}
             categoryLabel={`${wo.category.replace('_', ' ')} vendor`}
+            workOrderId={wo.id}
           />
         </div>
       )}
