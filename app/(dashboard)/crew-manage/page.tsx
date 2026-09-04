@@ -4,6 +4,15 @@ import { CrewManageClient } from './crew-manage-client'
 import type { CrewMember, CrewAvailabilityEntry } from '@/types/database'
 import { throwIfAnyQueryFailed } from '@/lib/supabase/unwrap'
 import { fetchAllRows } from '@/lib/inngest/paginate'
+import { isThumbtackConfigured } from '@/lib/integrations/thumbtack'
+import { CategoryPickerFindProSection } from '@/components/thumbtack/CategoryPickerFindProSection'
+
+const CREW_ROLE_OPTIONS = [
+  { value: 'cleaning' as const,    label: 'Cleaning' },
+  { value: 'landscaping' as const, label: 'Landscaping' },
+  { value: 'maintenance' as const, label: 'Maintenance' },
+  { value: 'general' as const,     label: 'General help' },
+]
 
 export const metadata: Metadata = { title: 'Crew' }
 
@@ -86,6 +95,15 @@ export default async function CrewManagePage() {
         <h1 className="page-title">Crew</h1>
         <p className="page-subtitle">Manage your cleaning and maintenance crew members</p>
       </div>
+      {isThumbtackConfigured() && (
+        <div className="mb-6">
+          <CategoryPickerFindProSection
+            heading="Short on crew this week? Find local help on Thumbtack"
+            categoryFieldLabel="Type of help"
+            categoryOptions={CREW_ROLE_OPTIONS}
+          />
+        </div>
+      )}
       <CrewManageClient
         crew={(crew ?? []) as unknown as CrewMember[]}
         availabilityMap={availabilityMap}
