@@ -5,6 +5,7 @@ import { Search, ExternalLink, CheckCircle2 } from 'lucide-react'
 import { Card } from '@/components/ui/Card'
 import { Button } from '@/components/ui/Button'
 import { RequestFlowModal } from '@/components/thumbtack/RequestFlowModal'
+import { ThumbtackAttribution } from '@/components/thumbtack/ThumbtackAttribution'
 import { searchThumbtackProsAction, recordThumbtackRequestCreatedAction } from '@/lib/integrations/thumbtack-actions'
 import type { ThumbtackCategoryKey, ThumbtackPro } from '@/lib/integrations/thumbtack'
 import type { ThumbtackRfEvent } from '@/lib/integrations/thumbtack-events'
@@ -121,7 +122,7 @@ export function FindProOnThumbtackSection({ categoryKey, zipCode, categoryLabel,
               </div>
             ))
           )}
-          <p className="text-[10px]" style={{ color: 'var(--text-muted)' }}>Powered by Thumbtack</p>
+          <ThumbtackAttribution />
         </div>
       )}
 
