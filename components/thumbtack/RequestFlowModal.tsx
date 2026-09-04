@@ -42,6 +42,11 @@ export function RequestFlowModal({ requestFlowUrl, open, onClose, onRequestCreat
     }
 
     const handleMessage = (event: MessageEvent): void => {
+      // Origin check inline (not just inside resolveThumbtackMessage) so it's
+      // visible directly in the listener body — SonarCloud's S2819 rule
+      // ("Verify the origin of the received message") pattern-matches for
+      // this at the call site and can't see through the imported helper.
+      if (event.origin !== expectedOrigin) return
       const resolved = resolveThumbtackMessage(event, expectedOrigin)
       if (!resolved) return
 
