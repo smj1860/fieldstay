@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, afterEach } from 'vitest'
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import {
   buildRequestFlowUrl,
   isThumbtackConfigured,
@@ -7,6 +7,15 @@ import {
   type ThumbtackCategoryKey,
 } from '@/lib/integrations/thumbtack'
 import type { WoCategory, CrewRole } from '@/types/database'
+
+const THUMBTACK_ENV_KEYS = [
+  'THUMBTACK_ENVIRONMENT', 'THUMBTACK_CLIENT_ID', 'THUMBTACK_CLIENT_SECRET', 'THUMBTACK_UTM_SOURCE',
+] as const
+
+function withThumbtackEnv(overrides: Partial<Record<typeof THUMBTACK_ENV_KEYS[number], string>>) {
+  for (const key of THUMBTACK_ENV_KEYS) delete process.env[key]
+  for (const [key, value] of Object.entries(overrides)) process.env[key] = value
+}
 
 const ALL_WO_CATEGORIES: WoCategory[] = [
   'hvac', 'plumbing', 'electrical', 'appliance', 'cleaning', 'landscaping',
@@ -67,34 +76,35 @@ describe('buildRequestFlowUrl', () => {
 })
 
 describe('isThumbtackConfigured', () => {
-  const KEYS = ['THUMBTACK_ENVIRONMENT', 'THUMBTACK_API_KEY', 'THUMBTACK_UTM_SOURCE'] as const
   let saved: Record<string, string | undefined>
 
   beforeEach(() => {
-    saved = Object.fromEntries(KEYS.map((k) => [k, process.env[k]]))
-    for (const k of KEYS) delete process.env[k]
+    saved = Object.fromEntries(THUMBTACK_ENV_KEYS.map((k) => [k, process.env[k]]))
+    for (const k of THUMBTACK_ENV_KEYS) delete process.env[k]
   })
   afterEach(() => {
-    for (const k of KEYS) {
+    for (const k of THUMBTACK_ENV_KEYS) {
       if (saved[k] === undefined) delete process.env[k]
       else process.env[k] = saved[k]
     }
   })
 
-  it('is false when none of the three env vars are set', () => {
+  it('is false when none of the four env vars are set', () => {
     expect(isThumbtackConfigured()).toBe(false)
   })
 
-  it('is false when only some of the three are set', () => {
-    process.env.THUMBTACK_ENVIRONMENT = 'https://thumbtack.com'
-    process.env.THUMBTACK_API_KEY = 'key'
+  it('is false when only some of the four are set', () => {
+    withThumbtackEnv({ THUMBTACK_ENVIRONMENT: 'https://thumbtack.com', THUMBTACK_CLIENT_ID: 'id' })
     expect(isThumbtackConfigured()).toBe(false)
   })
 
-  it('is true once all three are set', () => {
-    process.env.THUMBTACK_ENVIRONMENT = 'https://thumbtack.com'
-    process.env.THUMBTACK_API_KEY = 'key'
-    process.env.THUMBTACK_UTM_SOURCE = 'cma-fieldstay'
+  it('is true once all four are set', () => {
+    withThumbtackEnv({
+      THUMBTACK_ENVIRONMENT:    'https://thumbtack.com',
+      THUMBTACK_CLIENT_ID:      'id',
+      THUMBTACK_CLIENT_SECRET:  'secret',
+      THUMBTACK_UTM_SOURCE:     'cma-fieldstay',
+    })
     expect(isThumbtackConfigured()).toBe(true)
   })
 })
@@ -119,8 +129,63 @@ describe('THUMBTACK_CATEGORY_MAP', () => {
 })
 
 describe('searchThumbtackPros', () => {
-  it('throws — not yet implemented, pending confirmed API details', async () => {
+  let saved: Record<string, string | undefined>
+
+  beforeEach(() => {
+    saved = Object.fromEntries(THUMBTACK_ENV_KEYS.map((k) => [k, process.env[k]]))
+  })
+  afterEach(() => {
+    for (const k of THUMBTACK_ENV_KEYS) {
+      if (saved[k] === undefined) delete process.env[k]
+      else process.env[k] = saved[k]
+    }
+    vi.unstubAllGlobals()
+  })
+
+  it('throws a clear error when THUMBTACK_ENVIRONMENT is unset or unrecognized', async () => {
+    withThumbtackEnv({ THUMBTACK_CLIENT_ID: 'id', THUMBTACK_CLIENT_SECRET: 'secret', THUMBTACK_UTM_SOURCE: 'cma-fieldstay' })
     await expect(searchThumbtackPros({ categoryKey: 'plumbing', zipCode: '90210' }))
-      .rejects.toThrow(/not yet implemented/)
+      .rejects.toThrow(/not set to a recognized Thumbtack environment/)
+  })
+
+  it('throws a clear error when client credentials are missing, even with a valid environment', async () => {
+    withThumbtackEnv({ THUMBTACK_ENVIRONMENT: 'https://thumbtack.com', THUMBTACK_UTM_SOURCE: 'cma-fieldstay' })
+    await expect(searchThumbtackPros({ categoryKey: 'plumbing', zipCode: '90210' }))
+      .rejects.toThrow(/THUMBTACK_CLIENT_ID\/THUMBTACK_CLIENT_SECRET/)
+  })
+
+  it('fetches a real OAuth token via client_credentials against the resolved auth host, then still throws "not yet implemented"', async () => {
+    withThumbtackEnv({
+      THUMBTACK_ENVIRONMENT:   'https://staging-partner.thumbtack.com',
+      THUMBTACK_CLIENT_ID:     'test-client-id',
+      THUMBTACK_CLIENT_SECRET: 'test-client-secret',
+      THUMBTACK_UTM_SOURCE:    'cma-fieldstay',
+    })
+    const fetchMock = vi.fn(async (url: string, init: RequestInit) => {
+      expect(url).toBe('https://staging-auth.thumbtack.com/oauth2/token')
+      const body = new URLSearchParams(init.body as string)
+      expect(body.get('grant_type')).toBe('client_credentials')
+      expect(body.get('client_id')).toBe('test-client-id')
+      expect(body.get('client_secret')).toBe('test-client-secret')
+      return new Response(JSON.stringify({ access_token: 'tok_123', expires_in: 3600 }), { status: 200 })
+    })
+    vi.stubGlobal('fetch', fetchMock)
+
+    await expect(searchThumbtackPros({ categoryKey: 'plumbing', zipCode: '90210' }))
+      .rejects.toThrow(/not yet implemented against https:\/\/staging-api\.thumbtack\.com\/api/)
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+  })
+
+  it('surfaces a clear error when the token endpoint responds with a non-OK status', async () => {
+    withThumbtackEnv({
+      THUMBTACK_ENVIRONMENT:   'https://thumbtack.com',
+      THUMBTACK_CLIENT_ID:     'bad-id',
+      THUMBTACK_CLIENT_SECRET: 'bad-secret',
+      THUMBTACK_UTM_SOURCE:    'cma-fieldstay',
+    })
+    vi.stubGlobal('fetch', vi.fn(async () => new Response('unauthorized', { status: 401 })))
+
+    await expect(searchThumbtackPros({ categoryKey: 'plumbing', zipCode: '90210' }))
+      .rejects.toThrow(/token request failed with 401/)
   })
 })

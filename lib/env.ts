@@ -312,15 +312,25 @@ export const ENV_SPEC: Readonly<Record<string, VarSpec>> = {
   // hides every "Find a Pro" entry point until these are set, rather than
   // shipping a broken CTA. THUMBTACK_ENVIRONMENT is the widget host
   // ({{environment}} in Thumbtack's docs — staging-partner.thumbtack.com or
-  // thumbtack.com), not a secret, but lives here anyway so the three vars are
-  // configured (or not) together.
+  // thumbtack.com), not a secret, but lives here anyway so the four vars are
+  // configured (or not) together — it also selects which API/OAuth hosts
+  // resolveThumbtackEnvironment() resolves to (their Environments doc:
+  // api.thumbtack.com + auth.thumbtack.com for production,
+  // staging-api./staging-auth. for staging).
   THUMBTACK_ENVIRONMENT: {
     tier: 'optional', schema: httpUrl,
-    why: 'the {{environment}} host for Request Flow Widget URLs and the postMessage origin check',
+    why: 'the {{environment}} host for Request Flow Widget URLs, the postMessage origin check, and which API/OAuth hosts to use',
   },
-  THUMBTACK_API_KEY: {
+  // OAuth 2.0 client credentials — confirmed from Thumbtack's Environments
+  // doc (separate clientID/clientSecret per environment; using
+  // production credentials against staging, or vice versa, errors).
+  THUMBTACK_CLIENT_ID: {
     tier: 'optional', schema: nonEmpty,
-    why: 'partner API auth for /businesses/search — NOT YET IMPLEMENTED, see searchThumbtackPros()',
+    why: 'OAuth2 client_credentials grant against THUMBTACK_ENVIRONMENT\'s auth host — see getThumbtackAccessToken()',
+  },
+  THUMBTACK_CLIENT_SECRET: {
+    tier: 'optional', schema: nonEmpty,
+    why: 'OAuth2 client_credentials grant, paired with THUMBTACK_CLIENT_ID',
   },
   THUMBTACK_UTM_SOURCE: {
     tier: 'optional', schema: prefixed('cma-'),

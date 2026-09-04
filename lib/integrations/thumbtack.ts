@@ -1,5 +1,6 @@
 import 'server-only'
 
+import { THUMBTACK_TIMEOUT_MS, isTimeoutError } from '@/lib/http/timeout'
 import type { WoCategory, CrewRole } from '@/types/database'
 
 // ============================================================================
@@ -11,32 +12,70 @@ import type { WoCategory, CrewRole } from '@/types/database'
 // own partner-examples deck) surfacing Thumbtack's marketplace, not a
 // Thumbtack business itself.
 //
-// Two pieces, in very different states of readiness:
+// Three pieces, in different states of readiness:
 //   - buildRequestFlowUrl() — fully implemented. The widget URL's shape is
 //     completely documented (Thumbtack's Widgets → Request Flow Widget doc):
 //     {{environment}}/embed/request-flow?category_pk=...&service_pk=...&
 //     zip_code=...&utm_medium=partnerships&utm_source=...
-//   - searchThumbtackPros() — a stub that throws. Thumbtack's partner
-//     /businesses/search API (which returns up to 30 pros per category+zip,
-//     each with its own service_pk and a ready-made requestFlowUrl) has NEVER
-//     been documented to us beyond its existence: no base API host, no auth
-//     mechanism, no confirmed response field names. Guessing at those and
-//     shipping a fetch() that LOOKS complete would be worse than an honest
-//     stub — it would silently 401/404 in a way that reads as "Thumbtack is
-//     down" rather than "this was never finished." Fill this in once a
-//     Thumbtack rep confirms: (1) the /businesses/search base URL, (2) the
-//     auth header/scheme, (3) the exact response schema (this file's
-//     ThumbtackPro type is a best guess from the Request Flow Widget and
-//     Discovery Lite docs, NOT a confirmed schema).
+//   - getThumbtackAccessToken() — fully implemented. Thumbtack's Environments
+//     doc confirms standard OAuth2: a client_credentials grant against
+//     {authBase}/oauth2/token with a per-environment clientID/clientSecret.
+//     (The doc names the Authorization URL too, for an interactive
+//     authorization_code flow — not used here, since this is a server-to-
+//     server call with no end user to redirect.)
+//   - searchThumbtackPros() — still a stub past the token fetch. Thumbtack's
+//     partner /businesses/search API (which returns up to 30 pros per
+//     category+zip, each with its own service_pk and a ready-made
+//     requestFlowUrl) has a confirmed HOST now (resolveThumbtackEnvironment())
+//     but not a confirmed PATH, query params, or response schema. Guessing at
+//     those and shipping a fetch() that LOOKS complete would be worse than an
+//     honest stub — it would silently 404/malform in a way that reads as
+//     "Thumbtack is down" rather than "this was never finished." Fill this in
+//     once a Thumbtack rep confirms: (1) the exact /businesses/search path
+//     and query params, (2) the exact response schema (this file's
+//     ThumbtackPro type is confirmed against Discovery Lite's schema, NOT
+//     against /businesses/search's — they may not be the same endpoint).
 //
 // isThumbtackConfigured() gates every call site — CLAUDE.md's SMS_ENABLED
 // pattern: fail closed and hide the feature entirely rather than show a
-// broken CTA when unconfigured (see the three THUMBTACK_* entries in
+// broken CTA when unconfigured (see the four THUMBTACK_* entries in
 // lib/env.ts).
 // ============================================================================
 
 /** The {{environment}} values Thumbtack's docs enumerate. */
 export type ThumbtackEnvironment = 'https://staging-partner.thumbtack.com' | 'https://thumbtack.com'
+
+/**
+ * API and OAuth hosts per widget environment — confirmed from Thumbtack's
+ * Environments doc. Keyed off the SAME widget-host value THUMBTACK_ENVIRONMENT
+ * already stores, rather than a second independent env var, since the two can
+ * never legitimately disagree: their own doc states production requests
+ * return thumbtack.com links and staging requests return staging-partner
+ * ones, so using production API credentials with the staging widget host (or
+ * vice versa) is itself a bug, not a valid configuration.
+ */
+const THUMBTACK_ENVIRONMENTS: Readonly<Record<ThumbtackEnvironment, { apiBase: string; authBase: string }>> = {
+  'https://thumbtack.com': {
+    apiBase:  'https://api.thumbtack.com/api',
+    authBase: 'https://auth.thumbtack.com',
+  },
+  'https://staging-partner.thumbtack.com': {
+    apiBase:  'https://staging-api.thumbtack.com/api',
+    authBase: 'https://staging-auth.thumbtack.com',
+  },
+}
+
+function resolveThumbtackEnvironment(): { widgetHost: ThumbtackEnvironment; apiBase: string; authBase: string } {
+  const widgetHost = process.env.THUMBTACK_ENVIRONMENT
+  const config = THUMBTACK_ENVIRONMENTS[widgetHost as ThumbtackEnvironment]
+  if (!config) {
+    throw new Error(
+      `THUMBTACK_ENVIRONMENT is not set to a recognized Thumbtack environment ` +
+      `(got "${widgetHost}", expected one of ${Object.keys(THUMBTACK_ENVIRONMENTS).join(' or ')}).`
+    )
+  }
+  return { widgetHost: widgetHost as ThumbtackEnvironment, ...config }
+}
 
 /**
  * FieldStay's own category enums, mapped to a Thumbtack category_pk.
@@ -161,20 +200,97 @@ export function buildRequestFlowUrl(params: RequestFlowUrlParams): string {
   return url.toString()
 }
 
-/** True once all three THUMBTACK_* env vars are set — see lib/env.ts. */
+/** True once all four THUMBTACK_* env vars are set — see lib/env.ts. */
 export function isThumbtackConfigured(): boolean {
   return Boolean(
     process.env.THUMBTACK_ENVIRONMENT &&
-    process.env.THUMBTACK_API_KEY &&
+    process.env.THUMBTACK_CLIENT_ID &&
+    process.env.THUMBTACK_CLIENT_SECRET &&
     process.env.THUMBTACK_UTM_SOURCE
   )
 }
 
+interface ThumbtackTokenResponse {
+  access_token: string
+  expires_in:   number
+}
+
 /**
- * NOT YET IMPLEMENTED — see the module header. Throws unconditionally so a
- * call site fails loudly (and visibly, in the Server Action's catch block)
- * rather than silently returning an empty list that reads as "no pros
- * nearby" instead of "this isn't built yet."
+ * In-memory only — fine for a single Vercel function instance's lifetime,
+ * and this module already has no other persistent state. A cold start just
+ * means the next call re-fetches, which is cheap and correct; there is no
+ * multi-instance consistency requirement here the way there would be for,
+ * say, a rate limit budget.
+ *
+ * Keyed by `authBase` (not a single bare value) so a cached production token
+ * can never be served for a staging call or vice versa. THUMBTACK_ENVIRONMENT
+ * is a fixed per-deployment value in real use, so this never matters in
+ * production — but it's a real gap otherwise (nothing about a bare cache
+ * variable would stop it), not just a testing convenience.
+ */
+const cachedTokensByAuthBase = new Map<string, { accessToken: string; expiresAtMs: number }>()
+
+/**
+ * OAuth2 client_credentials token exchange — confirmed shape from
+ * Thumbtack's Environments doc (Authorization Server, Token URL,
+ * per-environment clientID/clientSecret). Cached in memory and refreshed
+ * 30s before actual expiry, so a normal request never pays for a token
+ * fetch on top of the search call it's making the token for.
+ *
+ * Not exported — searchThumbtackPros() is the only caller. Exported (rather
+ * than module-private) would invite a second call site to acquire its own
+ * token and its own cache, defeating the point of caching at all.
+ */
+async function getThumbtackAccessToken(): Promise<string> {
+  const { authBase } = resolveThumbtackEnvironment()
+
+  const cached = cachedTokensByAuthBase.get(authBase)
+  if (cached && cached.expiresAtMs > Date.now() + 30_000) {
+    return cached.accessToken
+  }
+
+  const clientId     = process.env.THUMBTACK_CLIENT_ID
+  const clientSecret = process.env.THUMBTACK_CLIENT_SECRET
+  if (!clientId || !clientSecret) {
+    throw new Error('THUMBTACK_CLIENT_ID/THUMBTACK_CLIENT_SECRET are not set — see lib/env.ts.')
+  }
+
+  let res: Response
+  try {
+    res = await fetch(`${authBase}/oauth2/token`, {
+      method:  'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: new URLSearchParams({
+        grant_type:    'client_credentials',
+        client_id:     clientId,
+        client_secret: clientSecret,
+      }),
+      signal: AbortSignal.timeout(THUMBTACK_TIMEOUT_MS),
+    })
+  } catch (err) {
+    if (isTimeoutError(err)) {
+      throw new Error(`Thumbtack OAuth token request to ${authBase} timed out after ${THUMBTACK_TIMEOUT_MS}ms`)
+    }
+    const message = err instanceof Error ? err.message : String(err)
+    throw new Error(`Thumbtack OAuth token request to ${authBase} failed: ${message}`)
+  }
+
+  if (!res.ok) {
+    throw new Error(`Thumbtack OAuth token request failed with ${res.status}`)
+  }
+
+  const data = await res.json() as ThumbtackTokenResponse
+  const token = { accessToken: data.access_token, expiresAtMs: Date.now() + data.expires_in * 1000 }
+  cachedTokensByAuthBase.set(authBase, token)
+  return token.accessToken
+}
+
+/**
+ * PARTIALLY IMPLEMENTED — see the module header. The OAuth token fetch is
+ * real; the actual /businesses/search request past it still throws, because
+ * its path, query params, and response schema aren't confirmed. Failing
+ * loudly here (rather than returning an empty list) means a call site sees
+ * "this isn't built yet" instead of a result that reads as "no pros nearby."
  *
  * When implementing: if the real response has no ready-made request-flow
  * URL (Discovery Lite's confirmed shape doesn't), build one per pro with
@@ -186,9 +302,12 @@ export async function searchThumbtackPros(_params: {
   categoryKey: ThumbtackCategoryKey
   zipCode:     string | null
 }): Promise<ThumbtackPro[]> {
+  const { apiBase } = resolveThumbtackEnvironment()
+  await getThumbtackAccessToken()
+
   throw new Error(
-    'Thumbtack /businesses/search is not yet implemented — the base API URL, auth ' +
-    'mechanism, and response schema need confirming with a Thumbtack rep first. ' +
+    `Thumbtack /businesses/search is not yet implemented against ${apiBase} — the exact ` +
+    'path, query params, and response schema need confirming with a Thumbtack rep first. ' +
     'See lib/integrations/thumbtack.ts.'
   )
 }
